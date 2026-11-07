@@ -242,6 +242,13 @@ pub struct Settings {
     pub show_perf_info: bool,
     /// A notification when a long operation finishes while rustyfiles is not in front.
     pub notify_long_ops: bool,
+    /// Updates (GitHub Releases) are looked for and downloaded in the background.
+    pub auto_update: bool,
+    /// The one-time "star it on GitHub" strip: first start (Unix ms), starts so far, and
+    /// whether it was answered (starred or dismissed).
+    pub first_start_ms: i64,
+    pub starts: u32,
+    pub star_asked: bool,
     pub show_extensions: bool,
     /// Custom shortcuts: keystroke → action, e.g. `"ctrl-k" = "NewFolder"` (names as in the
     /// command palette's actions; `rustyfiles::` prefix optional). Applied at startup.
@@ -344,6 +351,10 @@ impl Default for Settings {
             run_in_background: false,
             show_perf_info: false,
             notify_long_ops: true,
+            auto_update: true,
+            first_start_ms: 0,
+            starts: 0,
+            star_asked: false,
             show_extensions: true,
             keybindings: Default::default(),
             window: None,

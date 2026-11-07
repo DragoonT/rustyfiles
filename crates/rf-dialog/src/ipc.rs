@@ -121,10 +121,11 @@ fn io(pipe: HANDLE, event: HANDLE, buf: &mut [u8], write: bool) -> bool {
 pub fn pick(req: &Request, owner: HWND) -> Option<Response> {
     static N: AtomicU32 = AtomicU32::new(0);
     let name = format!(r"\\.\pipe\rustyfiles-pick-{}-{}", unsafe { GetCurrentProcessId() }, N.fetch_add(1, Ordering::Relaxed));
-    let exe = own_dir()?.join("rustyfiles.exe");
-    if !exe.exists() {
-        return None;
-    }
+    // next to the DLL (a dev build), or where the sidecar file says (the registered copy)
+    let dir = own_dir()?;
+    let exe = Some(dir.join("rustyfiles.exe"))
+        .filter(|p| p.exists())
+        .or_else(|| std::fs::read_to_string(dir.join("rustyfiles-exe.txt")).ok().map(|s| PathBuf::from(s.trim())).filter(|p| p.exists()))?;
     unsafe {
         let pipe = Handle(
             CreateNamedPipeW(&HSTRING::from(name.as_str()), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 64 << 10, 64 << 10, 0, None),

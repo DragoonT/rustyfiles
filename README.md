@@ -82,16 +82,18 @@ in Explorer and on the desktop too. Settings live under Settings › DirectLook.
 
 ## Install
 
-Download the zip from [Releases](https://github.com/gelenmedya/rustyfiles/releases), unpack
-it and run, in PowerShell:
+Download **rustyfiles-win-Setup.exe** from
+[Releases](https://github.com/gelenmedya/rustyfiles/releases) and run it. It installs for your
+user only (no administrator rights), adds rustyfiles to the Start menu and starts it. New
+versions download in the background and apply at the next start; Settings › About shows the
+version and checks on demand.
 
-```powershell
-.\install.ps1              # installs for your user only; no administrator rights needed
-.\install.ps1 -Default     # also opens folders and Win+E in rustyfiles
-.\install.ps1 -Uninstall   # removes it, and gives folders back to Explorer
-```
+To open folders and <kbd>Win</kbd>+<kbd>E</kbd> in rustyfiles, turn on Settings › Advanced ›
+Set as default file manager. Uninstall from Windows Settings › Apps: everything rustyfiles
+changed in Windows goes back to Explorer.
 
-You can switch the default file manager off any time in Settings › Advanced.
+The setup isn't code-signed yet, so Windows SmartScreen may warn on first run: choose
+"More info", then "Run anyway". A portable zip is on the same page.
 
 Requires Windows 11 on x64. Windows 10 is untested.
 
@@ -103,8 +105,9 @@ You need [Rust](https://rustup.rs) 1.95 or newer and the Visual Studio Build Too
 ```powershell
 git clone https://github.com/gelenmedya/rustyfiles
 cd rustyfiles
-cargo build --release -p rf-app
-.\scripts\install.ps1 -NoBuild
+.\scripts\install.ps1            # builds, then installs for your user
+.\scripts\install.ps1 -Default   # also makes it the default file manager
+.\scripts\install.ps1 -Uninstall
 ```
 
 `cargo run --release -p rf-app` starts it without installing.

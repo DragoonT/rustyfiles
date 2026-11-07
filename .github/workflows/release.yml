@@ -1,5 +1,7 @@
 name: Release
 
+# Push a tag like v0.1.0: builds, packs with Velopack (Setup.exe, portable zip, update
+# packages) and publishes the GitHub release that installed copies update from.
 on:
   push:
     tags: ["v*"]
@@ -16,15 +18,23 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --release -p rf-app -p rf-dialog
-      - name: Package
+      - name: Version
+        id: v
         shell: pwsh
         run: |
-          $name = "rustyfiles-${{ github.ref_name }}-x64"
-          New-Item -ItemType Directory $name | Out-Null
-          Copy-Item target/release/rustyfiles.exe, target/release/directlook.exe, target/release/rustyfiles_dialog.dll, scripts/install.ps1, LICENSE, README.md $name
-          Compress-Archive -Path "$name/*" -DestinationPath "$name.zip"
-          "ASSET=$name.zip" | Out-File -Append $env:GITHUB_ENV
+          "version=$('${{ github.ref_name }}'.TrimStart('v'))" | Out-File -Append $env:GITHUB_OUTPUT
+      - name: Collect files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory publish | Out-Null
+          Copy-Item target/release/rustyfiles.exe, target/release/directlook.exe, target/release/rustyfiles_dialog.dll, LICENSE publish
+      - name: Install vpk
+        # same version as the velopack crate in crates/rf-app/Cargo.toml
+        run: dotnet tool install -g vpk --version 1.2.161
+      - name: Previous release (for delta updates)
+        continue-on-error: true
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }}
+      - name: Pack
+        run: vpk pack -u rustyfiles -v ${{ steps.v.outputs.version }} -p publish -e rustyfiles.exe --packTitle rustyfiles --packAuthors "Özer Güzel" -i crates/rf-app/assets/rustyfiles.ico
       - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" "${{ env.ASSET }}" --title "rustyfiles ${{ github.ref_name }}" --generate-notes
+        run: vpk upload github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} --publish --releaseName "rustyfiles ${{ steps.v.outputs.version }}" --tag ${{ github.ref_name }}

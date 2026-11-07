@@ -1360,7 +1360,8 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
     );
     let dfm_on = crate::DEFAULT_FM.load(std::sync::atomic::Ordering::Relaxed);
     let dialogs_on = crate::FILE_DIALOGS.load(std::sync::atomic::Ordering::Relaxed);
-    let has_dll = crate::dialog_dll().is_some();
+    // (only looks: the copy is made when the switch is turned on)
+    let has_dll = std::env::current_exe().is_ok_and(|e| e.with_file_name(rf_win::dialog_reg::DLL_NAME).exists());
     // while rustyfiles is the default file manager: archives can be given to it too (only the
     // user can pick the default app, in Windows' own page)
     let archives = dfm_on.then(|| {
@@ -1508,17 +1509,78 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
     out
 }
 
+fn open_url(url: &'static str) {
+    std::thread::spawn(move || {
+        let _ = rf_win::shell::open(std::path::Path::new(url));
+    });
+}
+
+/// Update status and the button that fits it (Settings → About).
+fn update_card(p: &Palette, s: &Settings) -> AnyElement {
+    use crate::installer::State;
+    let state = crate::installer::state();
+    let text = match &state {
+        State::NotInstalled => t!("Bu kopya kurulum programıyla kurulmadı: güncellemeleri GitHub'dan indirin.").to_string(),
+        State::Idle => t!("Güncellemeler GitHub'dan gelir.").to_string(),
+        State::Checking => t!("Denetleniyor…").to_string(),
+        State::UpToDate => t!("rustyfiles güncel.").to_string(),
+        State::Downloading(v) => format!("{} {v}", t!("İndiriliyor:")),
+        State::Ready(v) => format!("{} {v}. {}", t!("Yeni sürüm hazır:"), t!("Yeniden başlatınca uygulanır.")),
+        State::Failed(e) => format!("{} {e}", t!("Denetlenemedi:")),
+    };
+    let control = match state {
+        State::NotInstalled => button("upd-web", p, t!("Sürümler sayfası"), |_, _| open_url(RELEASES_URL)),
+        State::Ready(_) => button("upd-restart", p, t!("Yeniden başlat ve güncelle"), |_, _| {
+            std::thread::spawn(crate::installer::restart_to_update);
+        }),
+        State::Checking | State::Downloading(_) => div().into_any_element(),
+        _ => button("upd-check", p, t!("Güncellemeleri denetle"), |window, cx| {
+            check_updates_now(cx);
+            window.refresh();
+        }),
+    };
+    let _ = s;
+    card(p, L::RefreshCw, t!("Güncellemeler"), Some(&text), control)
+}
+
+/// "Check for updates": runs off the UI thread, redraws when it's done.
+pub(crate) fn check_updates_now(cx: &mut App) {
+    cx.spawn(async move |cx| {
+        cx.background_executor().spawn(async { crate::installer::check() }).await;
+        cx.update(|cx| cx.refresh_windows());
+    })
+    .detach();
+}
+
+const REPO_URL: &str = "https://github.com/gelenmedya/rustyfiles";
+const ISSUES_URL: &str = "https://github.com/gelenmedya/rustyfiles/issues/new";
+const RELEASES_URL: &str = "https://github.com/gelenmedya/rustyfiles/releases";
+
 fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
-    let version = format!("{} {}", t!("Sürüm:"), env!("CARGO_PKG_VERSION"));
+    let ver = crate::installer::version();
+    let version = format!("{} {ver}", t!("Sürüm:"));
     let pp = *p;
+    let s = cx.global::<Settings>().clone();
     vec![
         card(
             p,
             L::FolderOpen,
             "rustyfiles",
             Some(&version),
-            button("copy-ver", p, t!("Kopyala"), move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(format!("rustyfiles {}", env!("CARGO_PKG_VERSION"))))),
+            button("copy-ver", p, t!("Kopyala"), move |_, cx| cx.write_to_clipboard(ClipboardItem::new_string(format!("rustyfiles {ver}")))),
         ),
+        update_card(p, &s),
+        card(
+            p,
+            L::Download,
+            t!("Güncellemeleri kendiliğinden indir"),
+            Some(t!("Arka planda denetlenir ve indirilir; bir sonraki açılışta uygulanır.")),
+            sw("auto-upd", p, s.auto_update, |s, v| s.auto_update = v),
+        ),
+        section(p, "GitHub"),
+        link_row(p, "gh-star", L::Star, t!("GitHub'da yıldız ver"), Some(t!("rustyfiles işinize yarıyorsa başkalarının da bulmasına yardım eder.")), |_, _| open_url(REPO_URL)),
+        link_row(p, "gh-issue", L::MessageSquare, t!("Hata bildir ya da öneride bulun"), None, |_, _| open_url(ISSUES_URL)),
+        link_row(p, "gh-notes", L::ScrollText, t!("Sürüm notları"), None, |_, _| open_url(RELEASES_URL)),
         div()
             .px_1()
             .text_xs()
@@ -1544,7 +1606,8 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
             move || {
                 [
                     ("GPUI", "Apache-2.0"),
-                    ("gpui-component", "Apache-2.0"),
+                    ("gpui-kit", "Apache-2.0"),
+                    ("Velopack", "MIT"),
                     ("windows-rs", "MIT / Apache-2.0"),
                     ("Lucide icons", "ISC"),
                     ("zip, sevenz-rust, tar, flate2, zstd", "MIT / Apache-2.0"),

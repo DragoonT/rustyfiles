@@ -46,6 +46,13 @@ pub fn is_enabled(classes_root: &str) -> bool {
     CLSIDS.iter().all(|c| registered(classes_root, c).is_some_and(|p| ours(&p)))
 }
 
+/// While enabled: registers `dll` if the registration points anywhere else (a newer build, a
+/// new install). True when it changed something.
+pub fn point_to(dll: &str, classes_root: &str) -> bool {
+    let differs = CLSIDS.iter().any(|c| registered(classes_root, c).is_none_or(|p| !p.eq_ignore_ascii_case(dll)));
+    is_enabled(classes_root) && differs && enable(dll, classes_root).is_ok()
+}
+
 /// While enabled, a DLL that moved (reinstalled elsewhere, rebuilt) would leave every app's
 /// file dialog broken: point the registration at `dll`. True when it changed something.
 pub fn heal(dll: &str, classes_root: &str) -> bool {

@@ -21,6 +21,7 @@ mod keymap_editor;
 mod layouts;
 pub mod look;
 mod image_cache;
+mod installer;
 mod ops;
 mod picker;
 mod places;
@@ -79,10 +80,34 @@ pub static DEFAULT_FM: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 /// rustyfiles answers other apps' Open/Save dialogs (registry state, read off the UI thread).
 pub static FILE_DIALOGS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// rustyfiles_dialog.dll next to this exe.
+/// The Open/Save dialog DLL to register: a copy of the one next to this exe, outside the
+/// install folder (`%LocalAppData%\rustyfiles\dialog\<build>\`). Apps keep the registered DLL
+/// loaded, and an update can't replace an install folder with a loaded DLL in it. Next to the
+/// copy, `rustyfiles-exe.txt` tells the DLL which rustyfiles to start. Older copies go once no
+/// app has them loaded.
 pub(crate) fn dialog_dll() -> Option<String> {
-    let p = std::env::current_exe().ok()?.with_file_name(rf_win::dialog_reg::DLL_NAME);
-    p.exists().then(|| p.display().to_string())
+    let exe = std::env::current_exe().ok()?;
+    let src = exe.with_file_name(rf_win::dialog_reg::DLL_NAME);
+    let meta = std::fs::metadata(&src).ok()?;
+    let stamp = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
+    let root = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("rustyfiles").join("dialog");
+    let dir = root.join(format!("{}-{:x}-{:x}", env!("CARGO_PKG_VERSION"), meta.len(), stamp));
+    let dst = dir.join(rf_win::dialog_reg::DLL_NAME);
+    if !dst.exists() {
+        std::fs::create_dir_all(&dir).ok()?;
+        let part = dir.join("rustyfiles_dialog.dll.part");
+        std::fs::copy(&src, &part).ok()?;
+        std::fs::rename(&part, &dst).ok()?;
+    }
+    let _ = std::fs::write(dir.join("rustyfiles-exe.txt"), exe.display().to_string());
+    if let Ok(rd) = std::fs::read_dir(&root) {
+        for e in rd.flatten() {
+            if e.path() != dir {
+                let _ = std::fs::remove_dir_all(e.path()); // fails while an app has it loaded
+            }
+        }
+    }
+    Some(dst.display().to_string())
 }
 
 /// Opens a rustyfiles window. `start = None` restores the session (first window) or opens Home.
@@ -149,6 +174,8 @@ fn is_dir_bounded(p: PathBuf, limit: std::time::Duration) -> Option<bool> {
 
 /// rustyfiles'ın girişi.
 pub fn main() {
+    // Velopack (installer / updater): first, it may run an install hook and exit
+    installer::startup();
     install_panic_log();
     rf_win::shell::suppress_critical_error_dialogs();
     // before any shell icon/thumbnail work: see keep_gdiplus_alive (loader-lock deadlock)
@@ -251,9 +278,11 @@ pub fn main() {
         }
         // Open/Save dialogs: a registration whose DLL moved is pointed here (not from tests)
         if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_none() {
-            if let Some(dll) = dialog_dll() {
-                if rf_win::dialog_reg::heal(&dll, rf_win::dialog_reg::CLASSES) {
-                    log::warn!("file dialogs re-registered to {dll}");
+            if rf_win::dialog_reg::is_enabled(rf_win::dialog_reg::CLASSES) {
+                if let Some(dll) = dialog_dll() {
+                    if rf_win::dialog_reg::point_to(&dll, rf_win::dialog_reg::CLASSES) {
+                        log::warn!("file dialogs now use {dll}");
+                    }
                 }
             }
         }
@@ -315,8 +344,13 @@ pub fn main() {
         match pick.clone() {
             // started only to answer a dialog: no main window
             Some(pipe) => picker::begin(pipe, cx),
-            None => open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx),
+            None => {
+                installer::count_start(cx);
+                open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx);
+            }
         }
+        // updates from GitHub Releases (installed copies only)
+        installer::spawn_checks(cx, |cx| cx.refresh_windows());
         // DirectLook ayrı süreç: önceden başlatılır ki ilk Boşluk beklemesin (testlerde değil)
         if cx.global::<settings::Settings>().directlook_enabled && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none() {
             look::ipc::send(look::ipc::Msg::Wake, true);
