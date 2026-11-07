@@ -54,6 +54,10 @@ hadris-udf = { version = "3.0.0-rc.3", default-features = false, features = ["st
 hadris-storage = "3.0.0-rc.3"
 lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "xz", "encoder"] }
 windows = { version = "0.62", features = [
+    "Data_Pdf",
+    "Storage",
+    "Storage_Streams",
+    "Foundation",
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_Storage_Xps",

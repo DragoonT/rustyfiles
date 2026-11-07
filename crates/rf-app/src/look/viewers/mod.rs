@@ -4,6 +4,7 @@
 pub mod archive;
 pub mod image;
 pub mod info;
+pub mod pdf;
 pub mod text;
 pub mod video;
 pub mod zoom;
@@ -14,6 +15,7 @@ pub fn all() -> Vec<Box<dyn Viewer>> {
     vec![
         Box::new(image::ImageViewer::default()),
         Box::new(video::VideoViewer::default()),
+        Box::new(pdf::PdfViewer::default()),
         Box::new(archive::ArchiveViewer::default()),
         Box::new(text::TextViewer::default()),
     ]

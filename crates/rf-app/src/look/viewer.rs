@@ -132,6 +132,9 @@ mod tests {
         assert_eq!(pick(&probe("a.unknownext", b"\0\0\x01")).name(), "info");
         assert_eq!(pick(&probe("notlar.unknownext", b"metin")).name(), "text");
         assert_eq!(pick(&probe("klip.mp4", b"\0\0\0\x18ftypmp42")).name(), "video");
+        assert_eq!(pick(&probe("rapor.pdf", b"%PDF-1.7\n")).name(), "pdf");
+        // a PDF with the wrong extension is still a PDF
+        assert_eq!(pick(&probe("rapor.dat", b"%PDF-1.4\n")).name(), "pdf");
     }
 
     /// `.ts` hem TypeScript hem MPEG-TS: içerik karar verir (188 baytlık paketlerde 0x47 eşitleme baytı).

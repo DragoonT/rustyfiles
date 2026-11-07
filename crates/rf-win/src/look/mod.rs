@@ -5,3 +5,4 @@ pub mod target;
 pub mod hook;
 pub mod win;
 pub mod decode;
+pub mod pdf;
