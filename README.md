@@ -164,6 +164,19 @@ test reports will follow in `docs/`.
 
 Bug reports and pull requests are welcome.
 
+## Thanks
+
+rustyfiles stands on other people's work.
+
+[Files](https://github.com/files-community/Files) showed what a modern file manager for
+Windows can be. Its feature set was our checklist, and its approach to replacing Explorer as
+the default file manager guided ours. Thank you to the Files community.
+
+[GPUI](https://gpui.rs), the UI framework of the [Zed](https://github.com/zed-industries/zed)
+editor, draws every pixel of rustyfiles on the GPU and makes a window this fast possible.
+Thank you to the Zed team for building it and sharing it, and to
+[Longbridge](https://github.com/longbridge/gpui-kit) for gpui-kit, the components we build on.
+
 ## License
 
 MIT, see [LICENSE](LICENSE). The GPUI fork keeps Zed's Apache-2.0 license in its own

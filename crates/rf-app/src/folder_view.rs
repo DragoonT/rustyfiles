@@ -1602,15 +1602,18 @@ impl FolderView {
                 };
                 let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
                 let label: AnyElement = match rename_input {
+                    // the text stays where the label was: centered, the label's size
                     Some(inp) => div()
                         .w_full()
                         .h(px(24.))
+                        // the label's line is shorter than the box: center the box on it
+                        .mt(px(-4.))
                         .rounded(px(4.))
                         .bg(p.card_bg)
                         .border_1()
                         .border_color(p.accent)
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small())
+                        .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_1().text_xs().text_center())
                         .into_any_element(),
                     None => div()
                         .w_full()
@@ -1658,15 +1661,18 @@ impl FolderView {
                     // the rename box replaces the name line
                     let inp = self.renaming.as_ref().map(|(_, i)| i.clone()).unwrap();
                     h_flex().px_2().gap_2().items_center().child(div().size(visual_px).flex_shrink_0()).child(
+                        // the box grows to the left (border + padding) so the text keeps its place
                         div()
                             .flex_1()
                             .h(px(24.))
+                            .ml(px(-RENAME_INSET))
+                            .px(px(RENAME_INSET - 1.))
                             .rounded(px(4.))
                             .bg(p.card_bg)
                             .border_1()
                             .border_color(p.accent)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small()),
+                            .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_0()),
                     )
                 } else {
                     base
@@ -2527,16 +2533,18 @@ impl FolderView {
             };
             let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
             let name_el: AnyElement = match rename_input {
+                // the box grows to the left (border + padding) so the text keeps its place
                 Some(inp) => div()
                     .flex_1()
                     .h(px(24.))
-                    .px_1()
+                    .ml(px(-RENAME_INSET))
+                    .px(px(RENAME_INSET - 1.))
                     .rounded(px(4.))
                     .bg(p.card_bg)
                     .border_1()
                     .border_color(p.accent)
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small())
+                    .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_0())
                     .into_any_element(),
                 None => div()
                     .min_w_0()
@@ -3155,6 +3163,10 @@ fn empty_state(p: &Palette, icon: L, title: String, sub: &'static str) -> impl I
         .child(div().text_color(p.text_secondary).child(title))
         .when(!sub.is_empty(), |d| d.child(div().text_xs().text_color(p.text_tertiary).child(sub)))
 }
+
+/// Inline rename: how far the edit box reaches left of the name (its border plus padding), so
+/// the text inside starts exactly where the name was drawn.
+const RENAME_INSET: f32 = 5.;
 
 fn open_in_background(path: PathBuf, cx: &mut App) {
     if !rf_win::ftp::is_ftp(&path) && !path.exists() && crate::archive_view::split(&path).is_some() {
