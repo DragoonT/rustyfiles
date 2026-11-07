@@ -22,6 +22,7 @@ mod layouts;
 pub mod look;
 mod image_cache;
 mod ops;
+mod picker;
 mod places;
 mod settings;
 mod settings_view;
@@ -75,6 +76,14 @@ pub(crate) fn install_panic_log() {
 
 /// Whether rustyfiles is registered as the default file manager (HKCU).
 pub static DEFAULT_FM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// rustyfiles answers other apps' Open/Save dialogs (registry state, read off the UI thread).
+pub static FILE_DIALOGS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// rustyfiles_dialog.dll next to this exe.
+pub(crate) fn dialog_dll() -> Option<String> {
+    let p = std::env::current_exe().ok()?.with_file_name(rf_win::dialog_reg::DLL_NAME);
+    p.exists().then(|| p.display().to_string())
+}
 
 /// Opens a rustyfiles window. `start = None` restores the session (first window) or opens Home.
 pub fn open_main_window(
@@ -156,8 +165,10 @@ pub fn main() {
     // appearing for the whole SMB timeout. Undecided after 2 s = treat as a (slow) folder.
     // `--settings=directlook`: DirectLook'un simge menüsünden "DirectLook ayarları"
     let open_look_settings = std::env::args().nth(1).as_deref() == Some("--settings=directlook");
+    // `--pick <pipe>`: an app's Open/Save dialog (rustyfiles_dialog.dll) asks for a file
+    let pick = (std::env::args().nth(1).as_deref() == Some("--pick")).then(|| std::env::args().nth(2)).flatten();
     let arg = std::env::args().nth(1).map(|a| a.trim().trim_matches('"').to_string()).filter(|a| !a.is_empty());
-    let arg = arg.filter(|_| !open_look_settings);
+    let arg = arg.filter(|_| !open_look_settings && pick.is_none());
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
     let arg = arg.filter(|_| !new_window);
@@ -238,6 +249,15 @@ pub fn main() {
                 }
             }
         }
+        // Open/Save dialogs: a registration whose DLL moved is pointed here (not from tests)
+        if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_none() {
+            if let Some(dll) = dialog_dll() {
+                if rf_win::dialog_reg::heal(&dll, rf_win::dialog_reg::CLASSES) {
+                    log::warn!("file dialogs re-registered to {dll}");
+                }
+            }
+        }
+        FILE_DIALOGS.store(rf_win::dialog_reg::is_enabled(rf_win::dialog_reg::CLASSES), std::sync::atomic::Ordering::Relaxed);
         DEFAULT_FM.store(
             rf_win::default_fm::is_enabled(rf_win::default_fm::CLASSES),
             std::sync::atomic::Ordering::Relaxed,
@@ -247,6 +267,7 @@ pub fn main() {
     // Single instance: a second launch opens its folder as a tab in the running window.
     let message = match &start {
         _ if open_look_settings => look::ipc::ToApp::OpenSettings.encode(),
+        _ if pick.is_some() => format!("{}{}", picker::PICK_PREFIX, pick.as_deref().unwrap_or_default()),
         _ if new_window => rf_win::jumplist::NEW_WINDOW_ARG.to_string(),
         _ if select.is_some() => format!("{}{}", workspace::SELECT_PREFIX, select.as_deref().unwrap_or_default()),
         Some(Location::Path(p)) => p.to_string_lossy().into_owned(),
@@ -291,7 +312,11 @@ pub fn main() {
             settings_view::open_page(settings_view::Page::Look, cx);
         }
         let bounds = restored_bounds(cx);
-        open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx);
+        match pick.clone() {
+            // started only to answer a dialog: no main window
+            Some(pipe) => picker::begin(pipe, cx),
+            None => open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx),
+        }
         // DirectLook ayrı süreç: önceden başlatılır ki ilk Boşluk beklemesin (testlerde değil)
         if cx.global::<settings::Settings>().directlook_enabled && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none() {
             look::ipc::send(look::ipc::Msg::Wake, true);

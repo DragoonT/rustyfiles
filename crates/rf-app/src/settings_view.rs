@@ -1359,6 +1359,8 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         t!("geçiş")
     );
     let dfm_on = crate::DEFAULT_FM.load(std::sync::atomic::Ordering::Relaxed);
+    let dialogs_on = crate::FILE_DIALOGS.load(std::sync::atomic::Ordering::Relaxed);
+    let has_dll = crate::dialog_dll().is_some();
     // while rustyfiles is the default file manager: archives can be given to it too (only the
     // user can pick the default app, in Windows' own page)
     let archives = dfm_on.then(|| {
@@ -1465,6 +1467,35 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         ),
     ];
     out.extend(archives);
+    // other apps' Open / Save / folder dialogs show rustyfiles (needs rustyfiles_dialog.dll)
+    out.push(card(
+        p,
+        L::FolderOpen,
+        t!("Aç / Kaydet pencerelerinde rustyfiles"),
+        Some(if has_dll {
+            t!("Uygulamaların dosya açma, kaydetme ve klasör seçme pencereleri rustyfiles ile açılır. Pencereye kendi seçeneklerini ekleyen uygulamalarda Windows'un penceresi açılır.")
+        } else {
+            t!("rustyfiles_dialog.dll bulunamadı: rustyfiles'ı kurulum betiğiyle kurun.")
+        }),
+        switch("dlg", p, dialogs_on, move |window, _| {
+            if !has_dll && !dialogs_on {
+                return;
+            }
+            std::thread::spawn(move || {
+                let classes = rf_win::dialog_reg::CLASSES;
+                let r = match (dialogs_on, crate::dialog_dll()) {
+                    (true, _) => rf_win::dialog_reg::disable(classes),
+                    (false, Some(dll)) => rf_win::dialog_reg::enable(&dll, classes),
+                    (false, None) => Ok(()),
+                };
+                if let Err(e) = r {
+                    log::warn!("file dialogs: {e:#}");
+                }
+                crate::FILE_DIALOGS.store(rf_win::dialog_reg::is_enabled(classes), std::sync::atomic::Ordering::Relaxed);
+            });
+            window.refresh();
+        }),
+    ));
     out.extend([
         card(
             p,

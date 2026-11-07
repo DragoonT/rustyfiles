@@ -125,6 +125,8 @@ pub enum FolderEvent {
     QuickLook,
     /// Browsing into a protected archive: (archive, the given password was wrong).
     NeedPassword(PathBuf, bool),
+    /// Open/Save dialog: files were opened (double click, Enter): they are the answer.
+    Picked(Vec<PathBuf>),
 }
 
 /// Details columns shown right now (see `FolderView::visible_cols`).
@@ -283,6 +285,8 @@ pub struct FolderView {
     rename_after_load: bool,
     /// Begin inline rename on the next render (needs a Window).
     pending_rename: bool,
+    /// Shown by the Open/Save dialog: opening a file picks it instead.
+    picking: bool,
     /// The mouse went down on an item's name (set by the name label, read by the row).
     name_hit: bool,
     /// Explorer's "click the name of the selected item again": (entry, serial) armed until the
@@ -411,6 +415,7 @@ impl FolderView {
             reselect: None,
             rename_after_load: false,
             pending_rename: false,
+            picking: false,
             name_hit: false,
             slow_click: None,
             slow_click_serial: 0,
@@ -1959,6 +1964,13 @@ impl FolderView {
         v.into_iter().filter_map(|i| self.path_of(i)).collect()
     }
 
+    /// The selection, each with whether it is a folder (no disk access).
+    pub fn selection_with_kind(&self) -> Vec<(PathBuf, bool)> {
+        let mut v: Vec<u32> = self.selected.iter().copied().collect();
+        v.sort_unstable();
+        v.into_iter().filter_map(|i| self.path_of(i).map(|p| (p, self.entries[i as usize].is_dir()))).collect()
+    }
+
     pub fn item_count(&self) -> usize {
         self.visible.len()
     }
@@ -2111,6 +2123,18 @@ impl FolderView {
         self.rename_after_load = false;
     }
 
+    /// Open/Save dialog mode: which files show (patterns like "*.txt;*.md", empty = all; none
+    /// when picking a folder), and opening a file picks it.
+    pub(crate) fn set_picking(&mut self, patterns: String, folders_only: bool, cx: &mut Context<Self>) {
+        self.picking = true;
+        if self.filter.patterns != patterns || self.filter.folders_only != folders_only {
+            self.filter.patterns = patterns;
+            self.filter.folders_only = folders_only;
+            self.rebuild_visible();
+            cx.notify();
+        }
+    }
+
     pub(crate) fn request_rename(&mut self) {
         self.pending_rename = true;
     }
@@ -2150,6 +2174,8 @@ impl FolderView {
             } else {
                 self.navigate(Location::Path(path), cx);
             }
+        } else if self.picking {
+            cx.emit(FolderEvent::Picked(vec![path]));
         } else {
             open_in_background(path, cx);
         }
@@ -2162,6 +2188,11 @@ impl FolderView {
         };
         if sel.len() == 1 {
             self.open_entry(sel[0], cx);
+        } else if self.picking {
+            let files: Vec<PathBuf> = sel.iter().filter(|&&i| !self.entries[i as usize].is_dir()).filter_map(|&i| self.path_of(i)).collect();
+            if !files.is_empty() {
+                cx.emit(FolderEvent::Picked(files));
+            }
         } else {
             let mut in_archive = Vec::new();
             for i in sel {

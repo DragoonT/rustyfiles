@@ -57,7 +57,9 @@ done by [rarchive](https://github.com/gelenmedya/rarchive), our own pure-Rust en
 decodes a 1.3 GB WinRAR archive ten times faster than UnRAR.
 
 **Windows.** Optionally the default file manager: folders, <kbd>Win</kbd>+<kbd>E</kbd>, This PC
-and the Recycle Bin open in rustyfiles. Explorer's `/select,` and `shell:` paths work. Mica,
+and the Recycle Bin open in rustyfiles. Optionally, other apps' Open, Save and Select folder
+dialogs open in rustyfiles too (Settings › Advanced). Explorer's `/select,` and `shell:` paths
+work. Mica,
 dark mode and the system accent colour. When a game or a render saturates the GPU, drawing
 moves to the CPU and back again without a flicker.
 

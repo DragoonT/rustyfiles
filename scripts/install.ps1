@@ -46,6 +46,12 @@ if ($Uninstall) {
     }
     Remove-Item "HKCU:\Software\rustyfiles" -Recurse -Force -ErrorAction SilentlyContinue
     Remove-ItemProperty "HKCU:\Software\RegisteredApplications" -Name "rustyfiles" -ErrorAction SilentlyContinue
+    # Open/Save dialogs: Windows' own come back (only our registrations go)
+    foreach ($c in '{DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7}', '{C0B4E2F3-BA21-4773-8DBA-335EC946EB8B}') {
+        if ((Get-ItemProperty "$classes\CLSID\$c\InprocServer32" -ErrorAction SilentlyContinue).'(default)' -like "*rustyfiles_dialog.dll") {
+            Remove-Item "$classes\CLSID\$c" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
     Remove-Item $startMenu, $desktopLnk -ErrorAction SilentlyContinue
     Remove-Item $dest -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host "rustyfiles was removed. Settings stay in %APPDATA%\rustyfiles; delete that folder to remove them too."
@@ -57,17 +63,19 @@ $zip = (Test-Path (Join-Path $PSScriptRoot "rustyfiles.exe")) -and (Test-Path (J
 if ($zip) {
     $exe = Join-Path $PSScriptRoot "rustyfiles.exe"
     $dlExe = Join-Path $PSScriptRoot "directlook.exe"
+    $dll = Join-Path $PSScriptRoot "rustyfiles_dialog.dll"
 } else {
     if (-not $NoBuild) {
         Push-Location $root
-        cargo build --release -p rf-app
+        cargo build --release -p rf-app -p rf-dialog
         if ($LASTEXITCODE -ne 0) { Pop-Location; throw "The build failed." }
         Pop-Location
     }
     $exe = Join-Path $root "target\release\rustyfiles.exe"
     $dlExe = Join-Path $root "target\release\directlook.exe"
+    $dll = Join-Path $root "target\release\rustyfiles_dialog.dll"
 }
-foreach ($e in @($exe, $dlExe)) { if (-not (Test-Path $e)) { throw "Not found: $e (build with: cargo build --release -p rf-app)" } }
+foreach ($e in @($exe, $dlExe, $dll)) { if (-not (Test-Path $e)) { throw "Not found: $e (build with: cargo build --release -p rf-app -p rf-dialog)" } }
 
 New-Item -ItemType Directory $dest -Force | Out-Null
 $running = @(Get-Process rustyfiles, directlook -ErrorAction SilentlyContinue)
@@ -80,6 +88,15 @@ for ($try = 1; ; $try++) {
         if ($try -ge 10) { throw }
         Start-Sleep -Milliseconds 500
     }
+}
+# The dialog DLL may be loaded in running apps (when Open/Save dialogs are on): a loaded DLL
+# can't be overwritten but can be renamed. Apps keep the old one; new dialogs load the new.
+Get-ChildItem $dest -Filter "rustyfiles_dialog.old-*.dll" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+$dllDest = Join-Path $dest "rustyfiles_dialog.dll"
+try { Copy-Item $dll $dllDest -Force -ErrorAction Stop }
+catch {
+    Rename-Item $dllDest ("rustyfiles_dialog.old-{0}.dll" -f [DateTime]::Now.Ticks) -ErrorAction Stop
+    Copy-Item $dll $dllDest -Force -ErrorAction Stop
 }
 
 # Windows caches an exe's display name; drop ours so a new FileDescription shows up

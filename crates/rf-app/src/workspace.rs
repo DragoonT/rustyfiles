@@ -148,6 +148,8 @@ pub struct Workspace {
     drag_hover_tab: Option<(usize, u64)>,
     /// Files are being dragged over the window: the sidebar shows its "drop here to pin" row.
     sidebar_ext_drag: bool,
+    /// This window answers another app's Open/Save dialog (see `picker`).
+    picker: Option<std::rc::Rc<crate::picker::PickSession>>,
     /// Window width from the last frame (breadcrumb collapsing).
     viewport_w: f32,
     last_session: Vec<String>,
@@ -239,6 +241,10 @@ pub static START_SELECT: std::sync::Mutex<Option<String>> = std::sync::Mutex::ne
 static LOOK_FOLLOWED: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 pub fn route_ipc(msg: String, cx: &mut App) {
+    if let Some(pipe) = msg.strip_prefix(crate::picker::PICK_PREFIX) {
+        crate::picker::begin(pipe.to_string(), cx);
+        return;
+    }
     match crate::look::ipc::ToApp::decode(&msg) {
         Some(crate::look::ipc::ToApp::LookClosed) => {
             crate::folder_view::QUICK_LOOK_OPEN.store(false, std::sync::atomic::Ordering::Relaxed);
@@ -481,6 +487,7 @@ impl Workspace {
             tab_anim_serial: 0,
             drag_hover_tab: None,
             sidebar_ext_drag: false,
+            picker: None,
             viewport_w: 1300.,
             last_session: Vec::new(),
             _bulk_sub: None,
@@ -512,7 +519,51 @@ impl Workspace {
         this
     }
 
+    /// Open/Save dialog window: its answer, filter and session (see `picker`).
+    pub(crate) fn set_picker(&mut self, session: std::rc::Rc<crate::picker::PickSession>, window: &mut Window, cx: &mut Context<Self>) {
+        let (patterns, folders_only) = (session.patterns(), session.folders_only());
+        for t in &self.tabs {
+            for v in std::iter::once(&t.left).chain(t.right.as_ref()) {
+                v.update(cx, |v, cx| v.set_picking(patterns.clone(), folders_only, cx));
+            }
+        }
+        self.picker = Some(session);
+        // closing the window (X, Alt+F4) cancels; it is not the user's session
+        let ws = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |_, cx| {
+            if let Some(ws) = ws.upgrade() {
+                ws.update(cx, |ws, _| crate::picker::answer_cancel(ws));
+            }
+            true
+        });
+        cx.notify();
+    }
+
+    pub(crate) fn picker(&self) -> Option<std::rc::Rc<crate::picker::PickSession>> {
+        self.picker.clone()
+    }
+
+    pub(crate) fn active_view(&self) -> Entity<FolderView> {
+        self.active_tab().clone()
+    }
+
+    /// Open/Save dialog: another file type chosen (1-based).
+    pub(crate) fn set_pick_filter(&mut self, ix: u32, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pk) = self.picker.clone() else { return };
+        pk.filter_ix.set(ix);
+        let patterns = pk.patterns();
+        for t in &self.tabs {
+            for v in std::iter::once(&t.left).chain(t.right.as_ref()) {
+                v.update(cx, |v, cx| v.set_picking(patterns.clone(), pk.folders_only(), cx));
+            }
+        }
+        cx.notify();
+    }
+
     pub fn save_session(&mut self, bounds: Option<WindowBounds>, cx: &mut Context<Self>) {
+        if self.picker.is_some() {
+            return;
+        }
         let placement = bounds.map(|wb| {
             let (b, max) = match wb {
                 WindowBounds::Windowed(b) => (b, 0.),
@@ -554,7 +605,11 @@ impl Workspace {
         let places = self.places.clone();
         let images = self.images.clone();
         let tab = cx.new(|cx| FolderView::new(loc, places, images, cx));
+        if let Some(pk) = self.picker.clone() {
+            tab.update(cx, |v, cx| v.set_picking(pk.patterns(), pk.folders_only(), cx));
+        }
         let sub = cx.subscribe_in(&tab, window, |this, emitter, ev: &FolderEvent, window, cx| match ev {
+            FolderEvent::Picked(paths) => crate::picker::picked(this, paths.clone(), window, cx),
             FolderEvent::ToOtherPane(kind, paths) => {
                 if let Some(other) = this.other_pane(emitter) {
                     let dest = match other.read(cx).location() {
@@ -2822,6 +2877,7 @@ impl Render for Workspace {
         let room_for_preview = self.viewport_w >= self.preview_w + LIST_MIN + if show_sidebar { self.sidebar_w } else { 0. };
         let sidebar = show_sidebar.then(|| self.render_sidebar(&p, cx));
         let status = self.render_statusbar(&p, cx);
+        let picker_footer = self.picker.clone().map(|pk| crate::picker::footer(self, &pk, &p, window, cx));
         // Taskbar title follows the active folder.
         let title = format!("{} — rustyfiles", self.active_tab().read(cx).title(cx));
         if title != self.last_title {
@@ -2837,7 +2893,7 @@ impl Render for Workspace {
                 loc.path().map(|p| rf_core::history::redact_credentials(&p.to_string_lossy())).unwrap_or_default()
             })
             .collect();
-        if session != self.last_session {
+        if session != self.last_session && self.picker.is_none() {
             self.last_session = session.clone();
             let active = self.active;
             cx.defer(move |cx| {
@@ -3126,7 +3182,8 @@ impl Render for Workspace {
                                     .children(shelf)
                                     .children(preview),
                             )
-                            .when(show_statusbar, |d| d.child(status)),
+                            .when(show_statusbar, |d| d.child(status))
+                            .children(picker_footer),
                     ),
             )
             .child(div().h(px(8.)))

@@ -6104,6 +6104,7 @@ dependencies = [
  "raw-window-handle",
  "rf-archive",
  "rf-core",
+ "rf-dialog",
  "rf-player",
  "rf-win",
  "serde",
@@ -6153,6 +6154,16 @@ dependencies = [
  "serde_json",
  "smallvec",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "rf-dialog"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]

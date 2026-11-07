@@ -88,3 +88,25 @@ pub fn set_dark_mode(hwnd: isize, dark: bool) {
         let _ = DwmSetWindowAttribute(HWND(hwnd as *mut _), DWMWA_USE_IMMERSIVE_DARK_MODE, &v as *const _ as _, std::mem::size_of::<i32>() as u32);
     }
 }
+
+/// Makes `owner` (a window of another process, possibly) the owner of `hwnd`: it stays above
+/// it and minimizes with it, like the owner's own dialog.
+pub fn set_owner(hwnd: isize, owner: isize) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GWLP_HWNDPARENT, SetWindowLongPtrW};
+    unsafe {
+        SetWindowLongPtrW(HWND(hwnd as *mut _), GWLP_HWNDPARENT, owner);
+    }
+}
+
+/// Brings `hwnd` to the front and gives it the keyboard (the caller was allowed to by the app
+/// in front, see AllowSetForegroundWindow).
+pub fn bring_to_front(hwnd: isize) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{SW_SHOW, SetForegroundWindow, ShowWindow};
+    unsafe {
+        let h = HWND(hwnd as *mut _);
+        let _ = ShowWindow(h, SW_SHOW);
+        let _ = SetForegroundWindow(h);
+    }
+}

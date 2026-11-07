@@ -15,4 +15,4 @@ jobs:
       - name: Test
         run: cargo test --workspace
       - name: Release build
-        run: cargo build --release -p rf-app
+        run: cargo build --release -p rf-app -p rf-dialog

@@ -96,6 +96,11 @@ pub struct Filter {
     pub dot_hidden: bool,
     /// Case-insensitive substring on the name; empty = no filter.
     pub query: String,
+    /// Open/Save dialog: files are shown only when they match these patterns ("*.txt;*.md");
+    /// empty = all. Folders always show.
+    pub patterns: String,
+    /// Open/Save dialog picking a folder: files are hidden.
+    pub folders_only: bool,
 }
 
 impl Filter {
@@ -106,12 +111,47 @@ impl Filter {
         if !self.show_system && e.is_system() && e.is_hidden() {
             return false;
         }
+        if !e.is_dir() && (self.folders_only || (!self.patterns.is_empty() && !matches_patterns(&self.patterns, &e.name))) {
+            return false;
+        }
         // the shown (localized) name or the real one: "İndir" and "Down" both find Downloads
         if !self.query.is_empty() && !contains_ignore_case(&e.name, &self.query) && !e.label.as_deref().is_some_and(|l| contains_ignore_case(l, &self.query)) {
             return false;
         }
         true
     }
+}
+
+/// Does `name` match one of the patterns of `spec` ("*.txt;*.md", "*.*", "rapor-??.pdf")?
+/// Case-insensitive, like Windows.
+pub fn matches_patterns(spec: &str, name: &str) -> bool {
+    let name: Vec<char> = fold_case(name).chars().collect();
+    spec.split(';').map(|p| fold_case(p.trim())).filter(|p| !p.is_empty()).any(|p| p == "*" || p == "*.*" || glob(&p.chars().collect::<Vec<_>>(), &name))
+}
+
+/// '*' any run, '?' one character.
+fn glob(p: &[char], s: &[char]) -> bool {
+    let (mut pi, mut si, mut star, mut mark) = (0, 0, None, 0);
+    while si < s.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == s[si]) {
+            pi += 1;
+            si += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = si;
+            pi += 1;
+        } else if let Some(st) = star {
+            pi = st + 1;
+            mark += 1;
+            si = mark;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
 }
 
 pub fn contains_ignore_case(haystack: &str, needle: &str) -> bool {
@@ -174,6 +214,8 @@ mod tests {
         let f = Filter::default();
         assert!(!f.accepts(&hidden));
         assert!(f.accepts(&normal));
+        assert!(matches_patterns("*.txt;*.MD", "Notlar.md") && !matches_patterns("*.txt", "a.rs") && matches_patterns("*.*", "README"));
+        assert!(matches_patterns("rapor-??.pdf", "RAPOR-01.pdf") && !matches_patterns("rapor-??.pdf", "rapor-1.pdf"));
         let f = Filter { query: "rap".into(), show_hidden: true, ..Default::default() };
         assert!(f.accepts(&normal));
         assert!(!f.accepts(&hidden));
