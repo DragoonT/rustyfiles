@@ -1,0 +1,90 @@
+//! Small top-level window helpers that GPUI does not expose.
+
+use windows::Win32::Foundation::HWND;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GWL_EXSTYLE, GetWindowLongPtrW, HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+    WS_EX_TOPMOST,
+};
+
+/// Keeps the window above all non-topmost windows ("compact overlay" / always on top).
+pub fn set_topmost(hwnd: isize, on: bool) -> windows::core::Result<()> {
+    let after = if on { HWND_TOPMOST } else { HWND_NOTOPMOST };
+    unsafe { SetWindowPos(HWND(hwnd as *mut _), Some(after), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) }
+}
+
+pub fn is_topmost(hwnd: isize) -> bool {
+    let ex = unsafe { GetWindowLongPtrW(HWND(hwnd as *mut _), GWL_EXSTYLE) };
+    ex as u32 & WS_EX_TOPMOST.0 != 0
+}
+
+/// Whether the foreground window belongs to this process.
+pub fn app_in_front() -> bool {
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.0.is_null() {
+            return false;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        pid == GetCurrentProcessId()
+    }
+}
+
+/// Window rectangle in physical pixels `[left, top, right, bottom]`, and whether it is maximized.
+pub fn rect(hwnd: isize) -> Option<([i32; 4], bool)> {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsZoomed};
+    let h = HWND(hwnd as *mut _);
+    let mut r = RECT::default();
+    unsafe { GetWindowRect(h, &mut r).ok()? };
+    Some(([r.left, r.top, r.right, r.bottom], unsafe { IsZoomed(h).as_bool() }))
+}
+
+/// Restores (un-maximizes) and moves/resizes the window, physical pixels.
+pub fn place(hwnd: isize, r: [i32; 4]) {
+    use windows::Win32::UI::WindowsAndMessaging::{SW_RESTORE, SWP_NOZORDER, ShowWindow};
+    let h = HWND(hwnd as *mut _);
+    unsafe {
+        let _ = ShowWindow(h, SW_RESTORE);
+        let _ = SetWindowPos(h, None, r[0], r[1], r[2] - r[0], r[3] - r[1], SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+}
+
+pub fn maximize(hwnd: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::{SW_MAXIMIZE, ShowWindow};
+    unsafe {
+        let _ = ShowWindow(HWND(hwnd as *mut _), SW_MAXIMIZE);
+    }
+}
+
+/// Overrides the minimum window size (logical pixels) at runtime, `None` = back to the
+/// size given at creation. Read by our GPUI fork on WM_GETMINMAXINFO.
+pub fn set_min_size(hwnd: isize, size: Option<(u16, u16)>) {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::UI::WindowsAndMessaging::{RemovePropW, SetPropW};
+    let h = HWND(hwnd as *mut _);
+    let name = windows::core::w!("rustyfiles.MinSize");
+    unsafe {
+        match size {
+            Some((w, hh)) => {
+                let v = ((w as usize) << 16) | hh as usize;
+                let _ = SetPropW(h, name, Some(HANDLE(v as *mut _)));
+            }
+            None => {
+                let _ = RemovePropW(h, name);
+            }
+        }
+    }
+}
+
+/// Dark or light window frame / system backdrop (Mica follows it), independent of the system
+/// setting — so the app's own Light / Dark choice also tints Mica.
+pub fn set_dark_mode(hwnd: isize, dark: bool) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
+    let v: i32 = dark as i32;
+    unsafe {
+        let _ = DwmSetWindowAttribute(HWND(hwnd as *mut _), DWMWA_USE_IMMERSIVE_DARK_MODE, &v as *const _ as _, std::mem::size_of::<i32>() as u32);
+    }
+}

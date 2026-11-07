@@ -1,0 +1,219 @@
+//! Bilgi kartı: başka görüntüleyicinin açamadığı her şey (klasör, sürücü, bilinmeyen dosya, sanal
+//! öğe, bulunamayan dosya). Kabuk küçük resmi, ad, değiştirme tarihi, boyut; klasörde arka planda
+//! özyinelemeli sayım; sürücüde boş/toplam alan.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use gpui_kit::assets::IconName as L;
+use gpui_kit::component::{Icon, h_flex, v_flex};
+use gpui_kit::*;
+use rf_core::{Entry, EntryKind, format};
+
+use crate::image_cache::ImageCache;
+use crate::look::viewer::{Prepared, Probe, Viewer};
+use crate::t;
+use crate::theme::Palette;
+
+#[derive(Default)]
+pub struct InfoCard {
+    view: Option<Entity<InfoView>>,
+}
+
+impl Viewer for InfoCard {
+    fn name(&self) -> &'static str {
+        "info"
+    }
+    fn priority(&self) -> i32 {
+        i32::MIN
+    }
+    fn can_handle(&self, _f: &Probe) -> bool {
+        true
+    }
+    fn prepare(&mut self, f: &Probe, cx: &mut App) -> Prepared {
+        let images = crate::look::LookManager::images(cx);
+        let path = f.path.clone();
+        let (exists, is_dir) = (f.exists, f.is_dir);
+        self.view = Some(cx.new(|cx| InfoView::new(path, exists, is_dir, images, cx)));
+        let mut p = Prepared::new((520.0, 210.0), super::file_name(&f.path));
+        p.resizable = false;
+        p
+    }
+    fn render(&mut self, _window: &mut Window, _cx: &mut App) -> AnyElement {
+        match &self.view {
+            Some(v) => v.clone().into_any_element(),
+            None => div().into_any_element(),
+        }
+    }
+    fn cleanup(&mut self) {
+        self.view = None;
+    }
+}
+
+pub struct InfoView {
+    path: PathBuf,
+    exists: bool,
+    entry: Option<Entry>,
+    images: Entity<ImageCache>,
+    /// Klasör: (dosya, klasör, bayt, bitti mi).
+    folder: Option<(u64, u64, u64, bool)>,
+    /// Sürücü kökü: (boş, toplam, etiket).
+    drive: Option<(u64, u64, String)>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Drop for InfoView {
+    fn drop(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+    }
+}
+
+fn ms(t: std::io::Result<std::time::SystemTime>) -> i64 {
+    t.ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64)
+}
+
+fn is_drive_root(p: &Path) -> bool {
+    let s = p.to_string_lossy();
+    let b = s.as_bytes();
+    (b.len() == 2 || (b.len() == 3 && (b[2] == b'\\' || b[2] == b'/'))) && b[1] == b':' && b[0].is_ascii_alphabetic()
+}
+
+impl InfoView {
+    fn new(path: PathBuf, exists: bool, is_dir: bool, images: Entity<ImageCache>, cx: &mut Context<Self>) -> Self {
+        cx.observe(&images, |_, _, cx| cx.notify()).detach();
+        let entry = std::fs::metadata(&path).ok().map(|m| {
+            let name = super::file_name(&path);
+            let kind = if m.is_dir() { EntryKind::Dir } else { EntryKind::File };
+            Entry::new(&name, kind, m.len(), ms(m.modified()), ms(m.created()), 0)
+        });
+        let mut v = Self { path, exists, entry, images, folder: None, drive: None, cancel: Default::default() };
+        if is_dir && is_drive_root(&v.path) {
+            let root = v.path.clone();
+            let task = cx.background_spawn(async move { rf_win::volume::volume_info(&root).ok() });
+            cx.spawn(async move |this, cx| {
+                if let Some(i) = task.await {
+                    let _ = this.update(cx, |v, cx| {
+                        v.drive = Some((i.free, i.total, i.label));
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+        } else if is_dir {
+            v.count_folder(cx);
+        }
+        v
+    }
+
+    /// Klasörün içeriğini arka planda sayar; ara sonuçlar da gösterilir.
+    fn count_folder(&mut self, cx: &mut Context<Self>) {
+        self.folder = Some((0, 0, 0, false));
+        let (tx, mut rx) = futures::channel::mpsc::unbounded::<(u64, u64, u64, bool)>();
+        let dir = self.path.clone();
+        let cancel = self.cancel.clone();
+        std::thread::Builder::new()
+            .name("look-foldersize".into())
+            .spawn(move || {
+                let mut last = std::time::Instant::now();
+                let tx2 = tx.clone();
+                let r = crate::preview::size_cache().get_or_compute(&dir, &|| cancel.load(Ordering::Relaxed), &mut |s| {
+                    if last.elapsed().as_millis() > 150 {
+                        last = std::time::Instant::now();
+                        let _ = tx2.unbounded_send((s.files, s.dirs, s.bytes, false));
+                    }
+                });
+                if let Ok(s) = r {
+                    let _ = tx.unbounded_send((s.files, s.dirs, s.bytes, true));
+                }
+            })
+            .ok();
+        cx.spawn(async move |this, cx| {
+            use futures::StreamExt;
+            while let Some(s) = rx.next().await {
+                if this
+                    .update(cx, |v, cx| {
+                        v.folder = Some(s);
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+}
+
+fn line(p: &Palette, k: &'static str, v: String) -> AnyElement {
+    h_flex().gap_2().text_sm().child(div().text_color(p.text_secondary).child(k)).child(div().text_color(p.text).child(v)).into_any_element()
+}
+
+impl Render for InfoView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = Palette::for_window(window);
+        let name = super::file_name(&self.path);
+        let thumb = match (&self.entry, self.path.parent()) {
+            (Some(e), Some(dir)) => {
+                let (e, dir) = (e.clone(), dir.to_path_buf());
+                self.images.update(cx, |c, cx| c.thumbnail(&dir, &e, 128, cx))
+            }
+            _ => None,
+        };
+        let mut lines: Vec<AnyElement> = Vec::new();
+        if !self.exists && !self.path.to_string_lossy().starts_with("::") {
+            lines.push(div().text_sm().text_color(p.danger).child(t!("Dosya bulunamadı")).into_any_element());
+        }
+        if let Some((free, total, label)) = &self.drive {
+            if !label.is_empty() {
+                lines.push(line(&p, t!("Etiket"), label.clone()));
+            }
+            lines.push(line(&p, t!("Boş"), format!("{} / {}", format::size(*free), format::size(*total))));
+        } else if let Some((files, dirs, bytes, done)) = self.folder {
+            let more = if done { String::new() } else { format!(" — {}", t!("hesaplanıyor…")) };
+            lines.push(line(&p, t!("Boyut"), format!("{}{more}", format::size(bytes))));
+            lines.push(line(&p, t!("İçerik"), format!("{files} {}, {dirs} {}", t!("dosya"), t!("klasör"))));
+        } else if let Some(e) = self.entry.as_ref().filter(|e| !e.is_dir()) {
+            lines.push(line(&p, t!("Boyut"), format::size(e.size)));
+        }
+        if let Some(e) = &self.entry {
+            if e.modified_ms > 0 {
+                lines.push(line(&p, t!("Değiştirme"), format::datetime(e.modified_ms)));
+            }
+        }
+        h_flex()
+            .size_full()
+            .p_5()
+            .gap_5()
+            .items_center()
+            .child(
+                div()
+                    .size(px(128.))
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .map(|d| match thumb {
+                        Some(img) => d.child(img_element(img)).into_any_element(),
+                        None => {
+                            let icon = if self.drive.is_some() || is_drive_root(&self.path) { L::HardDrive } else { L::File };
+                            d.child(Icon::new(icon).size(px(72.)).text_color(p.text_secondary)).into_any_element()
+                        }
+                    }),
+            )
+            .child(
+                v_flex()
+                    .min_w_0()
+                    .gap_1p5()
+                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).text_color(p.text).truncate().child(name))
+                    .children(lines),
+            )
+    }
+}
+
+fn img_element(img: Arc<RenderImage>) -> impl IntoElement {
+    gpui_kit::img(img).max_w(px(128.)).max_h(px(128.)).object_fit(ObjectFit::Contain)
+}
+
+use gpui_kit::prelude::FluentBuilder as _;

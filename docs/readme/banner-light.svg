@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" font-family="'Segoe UI Variable Display','Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,'Helvetica Neue',Arial,sans-serif">
+  <title>rustyfiles: a Windows file manager that never freezes</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F7F7F8"/><stop offset="1" stop-color="#EDEDF0"/>
+    </linearGradient>
+    <radialGradient id="ember" cx="120" cy="170" r="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF6A1A" stop-opacity="0.10"/><stop offset="1" stop-color="#FF6A1A" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="win"><rect x="0.5" y="0.5" width="1279" height="359" rx="12"/></clipPath>
+  </defs>
+  <g clip-path="url(#win)">
+    <rect width="1280" height="360" fill="url(#bg)"/>
+    <rect width="1280" height="360" fill="url(#ember)"/>
+    <svg x="56" y="92" width="136" height="136" viewBox="-0.00 -53.09 1027.28 1027.28">
+  <defs>
+    <linearGradient id="backd1200" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="801">
+      <stop offset="0" stop-color="#4a4a4f"/><stop offset="1" stop-color="#1c1c1f"/>
+    </linearGradient>
+    <linearGradient id="frontd1200" gradientUnits="userSpaceOnUse" x1="0" y1="159" x2="0" y2="800">
+      <stop offset="0" stop-color="#2c2c31"/><stop offset="1" stop-color="#050506"/>
+    </linearGradient>
+    <linearGradient id="boltd1200" gradientUnits="userSpaceOnUse" x1="430" y1="222" x2="600" y2="737">
+      <stop offset="0" stop-color="#ffd2a6"/><stop offset="1" stop-color="#ff6a1a"/>
+    </linearGradient>
+    <linearGradient id="rimd1200" gradientUnits="userSpaceOnUse" x1="0" y1="159" x2="0" y2="420">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.16"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="boltlod1200" gradientUnits="userSpaceOnUse" x1="500" y1="420" x2="640" y2="737">
+      <stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#d9480f"/>
+    </linearGradient>
+    <radialGradient id="glowd1200" gradientUnits="userSpaceOnUse" cx="514" cy="539.5" r="330">
+      <stop offset="0" stop-color="#ff6a1a" stop-opacity="0.34"/><stop offset="1" stop-color="#ff6a1a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="boltzd1200" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#ffd2a6"/><stop offset="1" stop-color="#ff6a1a"/>
+    </linearGradient>
+    <clipPath id="fcd1200"><path d="M129.37 159.36l768.54 0c70.55,0 128.09,57.54 128.09,128.09l0 504.27c0,70.55 -57.54,128.09 -128.09,128.09l-768.54 0c-70.55,0 -128.09,-57.54 -128.09,-128.09l0 -504.27c0,-70.55 57.54,-128.09 128.09,-128.09z"/></clipPath>
+  </defs>
+  <path d="M129.37 0l157.46 0c35.27,0 65.63,12.57 90.57,37.52l14.27 14.27c24.94,24.94 55.3,37.52 90.57,37.52l415.66 0c70.55,0 128.09,57.54 128.09,128.09l0 504.27c0,70.55 -57.54,128.09 -128.09,128.09l-768.54 0c-70.55,0 -128.09,-57.54 -128.09,-128.09l0 -593.58c0,-70.55 57.54,-128.09 128.09,-128.09z" fill="url(#backd1200)"/>
+  <path d="M129.37 159.36l768.54 0c70.55,0 128.09,57.54 128.09,128.09l0 504.27c0,70.55 -57.54,128.09 -128.09,128.09l-768.54 0c-70.55,0 -128.09,-57.54 -128.09,-128.09l0 -504.27c0,-70.55 57.54,-128.09 128.09,-128.09z" fill="url(#frontd1200)"/>
+  <rect x="0" y="150" width="1028" height="780" fill="url(#glowd1200)" clip-path="url(#fcd1200)"/>
+  <path d="M129.37 159.36l768.54 0c70.55,0 128.09,57.54 128.09,128.09l0 504.27c0,70.55 -57.54,128.09 -128.09,128.09l-768.54 0c-70.55,0 -128.09,-57.54 -128.09,-128.09l0 -504.27c0,-70.55 57.54,-128.09 128.09,-128.09z" fill="none" stroke="url(#rimd1200)" stroke-width="5"/>
+  <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" transform="translate(201.0 227.5) scale(26)" fill="url(#boltzd1200)"/>
+</svg>
+    <rect x="232" y="70" width="267.0" height="38" rx="8" fill="#FFFFFF" stroke="#E3E3E6"/>
+    <path d="M3 10.18v8.32a1.5 1.5 0 0 0 1.5 1.5h3.5v-6h5v6h3.5a1.5 1.5 0 0 0 1.5-1.5v-8.32M1 11 10 3l9 8" transform="translate(248 80) scale(0.95)" fill="none" stroke="#5C5C61" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M0 0 L4.5 4.5 L0 9" transform="translate(280 85)" fill="none" stroke="#8A8A90" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><text x="298" y="95" font-size="17" fill="#5C5C61">This PC</text><path d="M0 0 L4.5 4.5 L0 9" transform="translate(372.2 85)" fill="none" stroke="#8A8A90" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><text x="390.2" y="95" font-size="17" fill="#5C5C61">Projects</text><path d="M0 0 L4.5 4.5 L0 9" transform="translate(473.0 85)" fill="none" stroke="#8A8A90" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="228" y="196" font-size="84" font-weight="600" letter-spacing="-2.2" fill="#1B1B1B">rustyfiles</text>
+    <text x="232" y="242" font-size="25" fill="#5C5C61">A file manager for Windows that never freezes. Written in Rust.</text>
+    <rect x="0" y="308" width="1280" height="52" fill="#FAFAFA"/>
+    <rect x="0" y="308" width="1280" height="1" fill="#E3E3E6"/>
+    <text x="232" y="341" font-size="19" fill="#5C5C61">100,010 items</text>
+    <text x="1240" y="341" font-size="19" fill="#8A8A90" text-anchor="end">listed in 132 ms</text>
+  </g>
+  <rect x="0.5" y="0.5" width="1279" height="359" rx="12" fill="none" stroke="#E3E3E6"/>
+</svg>

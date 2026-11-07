@@ -1,0 +1,43 @@
+[package]
+name = "rf-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rustyfiles"
+path = "src/main.rs"
+
+[[bin]]
+name = "directlook"
+path = "src/bin/directlook.rs"
+
+[dependencies]
+rf-core.workspace = true
+rf-win.workspace = true
+rf-archive.workspace = true
+rf-player.workspace = true
+gpui-kit.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger = "0.11"
+# Our fork (github.com/gelenmedya/gpui-pre-windows, hybrid GPU/CPU renderer); `gpui_windows::hybrid` is the public API.
+gpui-pre-windows = "0.3.11"
+parking_lot.workspace = true
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+smallvec.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+dirs.workspace = true
+crossbeam-channel.workspace = true
+futures.workspace = true
+image.workspace = true
+raw-window-handle.workspace = true
+windows-registry = "0.6"
+chrono.workspace = true
+windows.workspace = true
+
+[build-dependencies]
+embed-resource = "3"

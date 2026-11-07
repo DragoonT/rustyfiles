@@ -1,0 +1,52 @@
+//! rf-win: Windows platform layer (fast enumeration, Shell COM, icons/thumbnails, file ops, watcher).
+//!
+//! Every function here may block (disk, network, shell extensions). Never call them on the UI thread.
+
+pub mod accent;
+pub mod clipboard;
+pub mod complete;
+pub mod ctxmenu;
+pub mod default_fm;
+pub mod dialogs;
+pub mod dnd;
+pub mod drives;
+pub mod encoding;
+pub mod fastcopy;
+pub mod fastdelete;
+pub mod fileops;
+pub mod foldersize;
+pub mod sysparams;
+pub mod git;
+pub mod hash;
+pub mod known;
+pub mod libraries;
+pub mod ftp;
+pub mod keys;
+pub mod look;
+pub mod listing;
+pub mod localized;
+pub mod network;
+pub mod fileactions;
+pub mod fileinfo;
+pub mod jumplist;
+pub mod wsearch;
+pub mod preview_host;
+pub mod props;
+pub mod recycle;
+pub mod search;
+pub mod shell;
+pub mod shortcut;
+pub mod single_instance;
+pub mod sta;
+pub mod removal;
+pub mod rotate;
+pub mod thumbs;
+pub mod tray;
+pub mod watch;
+pub mod window;
+pub mod volume;
+pub mod wide;
+
+pub use drives::{Drive, DriveKind, list_drives};
+pub use known::{KnownFolder, known_folders};
+pub use listing::{ListError, list_dir};

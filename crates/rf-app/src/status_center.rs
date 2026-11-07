@@ -1,0 +1,897 @@
+//! Status Center: in-app progress for copy/move/delete with cancel (Files' "StatusCenter").
+//! Work runs on its own thread; progress is throttled before it reaches the UI.
+
+use crate::t;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+
+use futures::StreamExt;
+use futures::channel::mpsc;
+use gpui_kit::assets::IconName as L;
+use gpui_kit::component::{Icon, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
+use rf_win::fileops::{self, Tracker, Transfer};
+
+use crate::theme::{self, Palette};
+
+#[derive(Clone, PartialEq)]
+pub enum OpPhase {
+    Running,
+    Done,
+    Cancelled,
+    Failed(String),
+}
+
+pub struct OpState {
+    id: u64,
+    title: String,
+    total: u32,
+    done: u32,
+    current: Option<String>,
+    phase: OpPhase,
+    cancel: Arc<AtomicBool>,
+    started: Instant,
+}
+
+pub struct Ops {
+    ops: Vec<OpState>,
+    next: u64,
+    pub open: bool,
+    /// A failure the user has not looked at yet (the button turns red until opened).
+    unseen_failure: bool,
+    /// The window whose button opened the flyout (it is anchored there).
+    owner: Option<AnyWindowHandle>,
+    /// The Acrylic popup could not be opened: draw the flyout inside the window instead.
+    in_window: bool,
+    /// When the popup closed itself (focus left it): a click on the button right after must
+    /// not reopen it.
+    auto_closed: Option<Instant>,
+}
+
+/// Finished operations kept in the list (Files keeps them until "Clear").
+const HISTORY: usize = 30;
+
+pub struct OpsGlobal(pub Entity<Ops>);
+impl Global for OpsGlobal {}
+
+enum Ev {
+    Progress(u32, u32, Option<String>),
+    Done(Result<bool, String>),
+}
+
+impl Ops {
+    pub fn new(_: &mut Context<Self>) -> Self {
+        Self { ops: Vec::new(), next: 1, open: false, unseen_failure: false, owner: None, in_window: false, auto_closed: None }
+    }
+
+    pub fn toggle(&mut self, owner: AnyWindowHandle, cx: &mut Context<Self>) {
+        if !self.open && self.auto_closed.is_some_and(|t| t.elapsed() < Duration::from_millis(350)) {
+            // this click is what closed it (the popup lost focus to the button)
+            self.auto_closed = None;
+            return;
+        }
+        self.owner = Some(owner);
+        self.open = !self.open;
+        if self.open {
+            self.unseen_failure = false;
+        }
+        cx.notify();
+    }
+
+    pub fn close(&mut self, cx: &mut Context<Self>) {
+        if self.open {
+            self.open = false;
+            cx.notify();
+        }
+    }
+
+    fn clear_finished(&mut self, cx: &mut Context<Self>) {
+        self.ops.retain(|o| o.phase == OpPhase::Running);
+        self.unseen_failure = false;
+        cx.notify();
+    }
+
+    /// Title, outcome and duration of an operation (for the "finished" notification).
+    pub fn summary(&self, id: u64) -> Option<(String, OpPhase, Duration)> {
+        self.ops.iter().find(|o| o.id == id).map(|o| (o.title.clone(), o.phase.clone(), o.started.elapsed()))
+    }
+
+    pub fn running(&self) -> usize {
+        self.ops.iter().filter(|o| o.phase == OpPhase::Running).count()
+    }
+
+    fn overall(&self) -> Option<f32> {
+        let run: Vec<&OpState> = self.ops.iter().filter(|o| o.phase == OpPhase::Running).collect();
+        if run.is_empty() {
+            return None;
+        }
+        let f: f32 = run.iter().map(|o| if o.total > 0 { o.done as f32 / o.total as f32 } else { 0.0 }).sum();
+        Some(f / run.len() as f32)
+    }
+}
+
+/// Starts a tracked operation. `work` runs on a new thread with COM initialized.
+pub fn start(
+    cx: &mut App,
+    title: String,
+    work: impl FnOnce(Arc<Tracker>) -> anyhow::Result<bool> + Send + 'static,
+) {
+    start_with(cx, title, work, None)
+}
+
+/// Called on the UI thread when the operation ends; `true` = it succeeded.
+pub type OnDone = Box<dyn FnOnce(bool, &mut App)>;
+
+/// Like [`start`], with a callback when the work is over (e.g. refresh a view after `git pull`).
+pub fn start_with(
+    cx: &mut App,
+    title: String,
+    work: impl FnOnce(Arc<Tracker>) -> anyhow::Result<bool> + Send + 'static,
+    on_done: Option<OnDone>,
+) {
+    let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return };
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (tx, mut rx) = mpsc::unbounded::<Ev>();
+    let id = entity.update(cx, |ops, cx| {
+        let id = ops.next;
+        ops.next += 1;
+        ops.ops.push(OpState {
+            id,
+            title,
+            total: 0,
+            done: 0,
+            current: None,
+            phase: OpPhase::Running,
+            cancel: cancel.clone(),
+            started: Instant::now(),
+        });
+        cx.notify();
+        id
+    });
+
+    let ptx = tx.clone();
+    let last = std::sync::Mutex::new(Instant::now() - Duration::from_secs(1));
+    let tracker = Arc::new(Tracker::new(
+        Box::new(move |t, d, cur| {
+            // ~20 updates/s max; item names always go through.
+            let mut l = last.lock().unwrap();
+            if cur.is_some() || l.elapsed() >= Duration::from_millis(50) || d >= t {
+                *l = Instant::now();
+                let _ = ptx.unbounded_send(Ev::Progress(t, d, cur));
+            }
+        }),
+        cancel,
+    ));
+    std::thread::Builder::new()
+        .name("rf-op".into())
+        .spawn(move || {
+            rf_win::shell::ensure_com();
+            let r = work(tracker).map_err(|e| format!("{e:#}"));
+            let _ = tx.unbounded_send(Ev::Done(r));
+        })
+        .ok();
+
+    cx.spawn(async move |cx| {
+        let mut ended = false;
+        let mut ok = false;
+        while let Some(first) = rx.next().await {
+            let mut evs = vec![first];
+            while let Ok(e) = rx.try_recv() {
+                evs.push(e);
+            }
+            let mut finished = false;
+            let _ = entity.update(cx, |ops, cx| {
+                if let Some(op) = ops.ops.iter_mut().find(|o| o.id == id) {
+                    for e in evs {
+                        match e {
+                            Ev::Progress(t, d, cur) => {
+                                if t > 0 {
+                                    op.total = t;
+                                    op.done = d;
+                                }
+                                if cur.is_some() {
+                                    op.current = cur;
+                                }
+                            }
+                            Ev::Done(r) => {
+                                finished = true;
+                                ok = matches!(r, Ok(true));
+                                op.phase = match r {
+                                    Ok(true) => OpPhase::Done,
+                                    Ok(false) => OpPhase::Cancelled,
+                                    Err(e) => OpPhase::Failed(e),
+                                };
+                                op.done = op.total;
+                            }
+                        }
+                    }
+                }
+                if finished {
+                    if ops.ops.iter().any(|o| o.id == id && matches!(o.phase, OpPhase::Failed(_))) && !ops.open {
+                        ops.unseen_failure = true;
+                    }
+                    // keep a bounded history of finished operations (oldest finished go first)
+                    while ops.ops.len() > HISTORY {
+                        let Some(ix) = ops.ops.iter().position(|o| o.phase != OpPhase::Running) else { break };
+                        ops.ops.remove(ix);
+                    }
+                }
+                cx.notify();
+            });
+            if finished {
+                ended = true;
+                break;
+            }
+        }
+        if !ended {
+            // worker died without reporting (panic / spawn failure): don't spin forever
+            let _ = entity.update(cx, |ops, cx| {
+                if let Some(op) = ops.ops.iter_mut().find(|o| o.id == id) {
+                    op.phase = OpPhase::Failed(t!("İşlem beklenmedik şekilde sonlandı").into());
+                }
+                ops.unseen_failure |= !ops.open;
+                cx.notify();
+            });
+        }
+        let _ = cx.update(|cx| crate::background::op_finished(&entity, id, cx));
+        if let Some(done) = on_done {
+            let _ = cx.update(|cx| done(ok, cx));
+        }
+    })
+    .detach();
+}
+
+fn short(p: &Path) -> String {
+    rf_core::history::display_name(p)
+}
+
+/// Copy/move with progress in the Status Center.
+pub fn transfer(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf) {
+    transfer_ex(cx, kind, sources, dest, true)
+}
+
+/// `record = false` for undo/redo replays (they must not land on the undo stack again).
+pub fn transfer_ex(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, record: bool) {
+    // into a folder inside an archive: add to the archive (copy semantics; RAR/ISO refuse)
+    if let Some((archive, inner)) = crate::archive_view::split(&dest) {
+        crate::archive_view::add_into(cx, archive, inner, sources);
+        return;
+    }
+    let verb = match kind {
+        Transfer::Copy => t!("Kopyalanıyor"),
+        Transfer::Move => t!("Taşınıyor"),
+    };
+    let title = format!("{verb}: {} → {}", crate::i18n::items(sources.len()), short(&dest));
+    let fast = cx.global::<crate::settings::Settings>().fast_file_ops;
+    start(cx, title, move |t| {
+        // our parallel engine for plain copies; the shell engine for moves, conflicts and the rest
+        let r = if fast {
+            rf_win::fastcopy::transfer(kind, &sources, &dest, t.clone())
+        } else {
+            fileops::transfer_tracked(kind, &sources, &dest, t.clone())
+        };
+        let pairs = t.results.lock().unwrap().clone();
+        if record && !pairs.is_empty() {
+            crate::undo::push(crate::undo::UndoOp::Transferred { kind, pairs });
+        }
+        r
+    });
+}
+
+pub fn archive_progress_pub(t: &Tracker) -> impl FnMut(rf_archive::Progress) + '_ {
+    archive_progress(t)
+}
+
+/// Archive progress (bytes) → tracker units (permille, fits u32).
+fn archive_progress(t: &Tracker) -> impl FnMut(rf_archive::Progress) + '_ {
+    move |p: rf_archive::Progress| {
+        let total = p.total_bytes.max(1);
+        let done = (p.done_bytes.min(total) * 1000 / total) as u32;
+        (t.on_progress)(1000, done, Some(p.current))
+    }
+}
+
+/// `dest = None`: "extract to <name>\\" (unique folder chosen on the worker thread).
+/// A protected archive asks for its password first (probed off the UI thread).
+pub fn extract(cx: &mut App, archive: std::path::PathBuf, dest: Option<std::path::PathBuf>) {
+    let probe = cx.background_spawn({
+        let a = archive.clone();
+        async move { crate::archive_view::needs_password_now(&a) }
+    });
+    cx.spawn(async move |cx| {
+        let need = probe.await;
+        cx.update(|cx| {
+            if need {
+                if let Some(w) = cx.active_window() {
+                    let (a, d) = (archive.clone(), dest.clone());
+                    let asked = w
+                        .update(cx, |_, window, cx| {
+                            crate::archive_view::ask_password(archive.clone(), false, window, cx, move |cx| extract_now(cx, a.clone(), d.clone()))
+                        })
+                        .is_ok();
+                    if asked {
+                        return;
+                    }
+                }
+            }
+            extract_now(cx, archive, dest);
+        });
+    })
+    .detach();
+}
+
+fn extract_now(cx: &mut App, archive: std::path::PathBuf, dest: Option<std::path::PathBuf>) {
+    let title = match &dest {
+        Some(d) => format!("{} {} → {}", t!("Çıkarılıyor:"), short(&archive), short(d)),
+        None => format!("{} {}", t!("Çıkarılıyor:"), short(&archive)),
+    };
+    start(cx, title, move |t| {
+        let dest = dest.unwrap_or_else(|| rf_archive::smart_extract_dir(&archive));
+        let cancel = t.cancel.clone();
+        let mut prog = archive_progress(&t);
+        let opts = crate::archive_view::options(&archive);
+        match rf_archive::extract_with(&archive, &dest, &opts, &mut prog, &|| cancel.load(Ordering::Relaxed)) {
+            Ok(_) => Ok(true),
+            Err(e) if e.downcast_ref::<rf_archive::Cancelled>().is_some() => Ok(false),
+            Err(e) => {
+                if crate::archive_view::password_problem(&e) == Some(true) {
+                    // forget it: the next attempt asks again
+                    crate::archive_view::set_password(&archive, None);
+                }
+                Err(e)
+            }
+        }
+    });
+}
+
+/// Like `compress_level`, encrypted (ZIP: AES-256, 7z: AES-256 incl. names).
+pub fn compress_protected(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, format: rf_archive::Format, level: u32, password: String) {
+    let title = format!("{} {} → {}", t!("Sıkıştırılıyor:"), crate::i18n::items(sources.len()), short(&dest));
+    start(cx, title, move |t| {
+        let cancel = t.cancel.clone();
+        let mut prog = archive_progress(&t);
+        let opts = rf_archive::CompressOptions { password: Some(password) };
+        match rf_archive::compress_with(&sources, &dest, format, level, &opts, &mut prog, &|| cancel.load(Ordering::Relaxed)) {
+            Ok(_) => Ok(true),
+            Err(e) if e.downcast_ref::<rf_archive::Cancelled>().is_some() => Ok(false),
+            Err(e) => Err(e),
+        }
+    });
+}
+
+/// RAR through WinRAR's Rar.exe (`level` 0…9).
+pub fn compress_rar(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, level: u32, password: Option<String>) {
+    let title = format!("{} {} → {}", t!("Sıkıştırılıyor:"), crate::i18n::items(sources.len()), short(&dest));
+    start(cx, title, move |t| {
+        let cancel = t.cancel.clone();
+        let mut prog = archive_progress(&t);
+        match rf_archive::compress_rar(&sources, &dest, level, password.as_deref(), &mut prog, &|| cancel.load(Ordering::Relaxed)) {
+            Ok(_) => Ok(true),
+            Err(e) if e.downcast_ref::<rf_archive::Cancelled>().is_some() => Ok(false),
+            Err(e) => Err(e),
+        }
+    });
+}
+
+pub fn compress(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, format: rf_archive::Format) {
+    compress_level(cx, sources, dest, format, 5)
+}
+
+/// `level`: 0 store … 9 smallest.
+pub fn compress_level(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, format: rf_archive::Format, level: u32) {
+    let title = format!("{} {} → {}", t!("Sıkıştırılıyor:"), crate::i18n::items(sources.len()), short(&dest));
+    start(cx, title, move |t| {
+        let cancel = t.cancel.clone();
+        let mut prog = archive_progress(&t);
+        match rf_archive::compress(&sources, &dest, format, level, &mut prog, &|| cancel.load(Ordering::Relaxed)) {
+            Ok(_) => Ok(true),
+            Err(e) if e.downcast_ref::<rf_archive::Cancelled>().is_some() => Ok(false),
+            Err(e) => Err(e),
+        }
+    });
+}
+
+pub fn delete(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool) {
+    delete_ex(cx, paths, permanent, true)
+}
+
+pub fn delete_ex(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, record: bool) {
+    let title = if permanent {
+        format!("{} {}", t!("Kalıcı olarak siliniyor:"), crate::i18n::items(paths.len()))
+    } else {
+        format!("{} {}", t!("Geri dönüşüm kutusuna taşınıyor:"), crate::i18n::items(paths.len()))
+    };
+    let fast = cx.global::<crate::settings::Settings>().fast_file_ops;
+    start(cx, title, move |t| {
+        // permanent: our parallel delete (the shell takes what it can't); recycle bin: the shell
+        let r = if permanent && fast {
+            rf_win::fastdelete::delete_permanent(&paths, t.clone(), rf_win::fastdelete::threads_for(&paths))
+        } else {
+            fileops::delete_tracked(&paths, permanent, t.clone())
+        };
+        let pairs = t.results.lock().unwrap().clone();
+        if record && !permanent && !pairs.is_empty() {
+            crate::undo::push(crate::undo::UndoOp::Recycled { pairs });
+        }
+        r
+    });
+}
+
+/// Title-bar button (top right, like Files): idle icon, a progress bar under it while work
+/// runs, red when a failure has not been looked at. Click toggles the flyout.
+pub fn render_button(ops: &Entity<Ops>, p: &Palette, cx: &App) -> AnyElement {
+    let o = ops.read(cx);
+    let running = o.running();
+    let overall = o.overall();
+    let (open, unseen) = (o.open, o.unseen_failure);
+    let ops = ops.clone();
+    let color = if unseen { p.danger } else if running > 0 { p.accent } else { p.text };
+    div()
+        .id("status-center")
+        // no tooltip while the flyout is open: it would sit on top of the flyout
+        .when(!open, |d| d.tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Durum Merkezi")).build(w, cx)))
+        .relative()
+        .size(px(32.))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(theme::RADIUS_SM)
+        .text_color(color)
+        .when(open, |d| d.bg(p.pressed))
+        .when(!open, |d| d.hover(|s| s.bg(p.hover)))
+        .active(|s| s.bg(p.pressed))
+        .child(Icon::new(if unseen { L::CircleAlert } else { L::ListChecks }).size(px(16.)))
+        .when_some(overall, |d, f| {
+            d.child(
+                div()
+                    .absolute()
+                    .bottom(px(4.))
+                    .left(px(7.))
+                    .w(px(18.))
+                    .h(px(2.))
+                    .rounded_full()
+                    .bg(p.pressed)
+                    .child(div().h_full().rounded_full().bg(p.accent).w(relative(f.clamp(0.05, 1.0)))),
+            )
+        })
+        .when(running > 1, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .top(px(2.))
+                    .right(px(2.))
+                    .min_w(px(14.))
+                    .h(px(14.))
+                    .px(px(3.))
+                    .rounded_full()
+                    .bg(p.accent)
+                    .text_color(p.accent_text)
+                    .text_size(px(9.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(running.to_string()),
+            )
+        })
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(move |_, window, cx| {
+            let owner = window.window_handle();
+            ops.update(cx, |o, cx| o.toggle(owner, cx))
+        })
+        .into_any_element()
+}
+
+/// The Status Center flyout under the title-bar button, with a click-away layer behind it.
+pub fn render_flyout(ops: &Entity<Ops>, p: &Palette, top: Pixels, cx: &App) -> Option<AnyElement> {
+    let o = ops.read(cx);
+    if !o.open || !o.in_window {
+        return None;
+    }
+    let any_finished = o.ops.iter().any(|x| x.phase != OpPhase::Running);
+    let mut list = v_flex().gap_1();
+    // newest first
+    for op in o.ops.iter().rev() {
+        list = list.child(render_op(ops, op, p));
+    }
+    let (close_e, clear_e) = (ops.clone(), ops.clone());
+    let body: AnyElement = if o.ops.is_empty() {
+        div()
+            .py_6()
+            .flex()
+            .justify_center()
+            .text_sm()
+            .text_color(p.text_secondary)
+            .child(t!("Devam eden dosya işlemleri yok"))
+            .into_any_element()
+    } else {
+        div().id("sc-list").max_h(px(460.)).overflow_y_scroll().child(list).into_any_element()
+    };
+    Some(
+        div()
+            .absolute()
+            .inset_0()
+            // click-away layer
+            .child(
+                div()
+                    .id("sc-away")
+                    .absolute()
+                    .inset_0()
+                    .on_mouse_down(MouseButton::Left, move |_, _, cx| close_e.update(cx, |o, cx| o.close(cx)))
+                    .on_mouse_down(MouseButton::Right, {
+                        let e = ops.clone();
+                        move |_, _, cx| e.update(cx, |o, cx| o.close(cx))
+                    }),
+            )
+            .child(
+                v_flex()
+                    .id("sc-flyout")
+                    .absolute()
+                    .top(top)
+                    .right(px(8.))
+                    .w(px(400.))
+                    .p_1()
+                    .rounded(theme::RADIUS)
+                    .bg(p.card_bg)
+                    .border_1()
+                    .border_color(p.border)
+                    .shadow_lg()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        h_flex()
+                            .px_3()
+                            .pt_2()
+                            .pb_2()
+                            .items_center()
+                            .child(div().flex_1().text_sm().font_weight(FontWeight::SEMIBOLD).child(t!("Durum Merkezi")))
+                            .child(
+                                div()
+                                    .id("sc-clear")
+                                    .px_2()
+                                    .py_1()
+                                    .rounded(theme::RADIUS_SM)
+                                    .text_xs()
+                                    .border_1()
+                                    .border_color(p.border)
+                                    .when(!any_finished, |d| d.text_color(p.text_tertiary))
+                                    .when(any_finished, |d| {
+                                        d.hover(|s| s.bg(p.hover))
+                                            .active(|s| s.bg(p.pressed))
+                                            .on_click(move |_, _, cx| clear_e.update(cx, |o, cx| o.clear_finished(cx)))
+                                    })
+                                    .child(t!("Tamamlananları temizle")),
+                            ),
+                    )
+                    .child(body),
+            )
+            .into_any_element(),
+    )
+}
+
+fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
+    let frac = if op.total > 0 { op.done as f32 / op.total as f32 } else { 0.0 };
+    let cancel = op.cancel.clone();
+    let running = op.phase == OpPhase::Running;
+    let (ops_e, op_id) = (ops.clone(), op.id);
+    let (status, color, icon) = match &op.phase {
+        OpPhase::Running => {
+            let elapsed = op.started.elapsed().as_secs_f32();
+            // ETA from the average rate so far; only once there is enough signal
+            let eta = (frac > 0.03 && frac < 1.0 && elapsed > 1.5).then(|| elapsed * (1.0 - frac) / frac);
+            let text = if op.total == 0 {
+                format!("{} {}", elapsed as u64, t!("sn"))
+            } else {
+                let pct = crate::i18n::pct(frac * 100.0);
+                match eta {
+                    Some(r) => format!("{pct} · {} {}", fmt_duration(r), t!("kaldı")),
+                    None => format!("{pct} · {} {}", elapsed as u64, t!("sn")),
+                }
+            };
+            (text, p.text_secondary, L::LoaderCircle)
+        }
+        OpPhase::Done => (t!("Tamamlandı").to_string(), p.accent, L::CircleCheck),
+        OpPhase::Cancelled => (t!("İptal edildi").to_string(), p.text_secondary, L::CircleSlash),
+        OpPhase::Failed(e) => (format!("{} {}", t!("Hata:"), crate::i18n::td(e)), p.danger, L::CircleAlert),
+    };
+    let icon_color = match &op.phase {
+        OpPhase::Running => p.accent,
+        OpPhase::Done => gpui_kit::rgb(0x30D158).into(),
+        _ => color,
+    };
+    h_flex()
+        .id(("op", op.id as usize))
+        .group("op")
+        .gap_3()
+        .px_3()
+        .py_2()
+        .items_start()
+        .rounded(theme::RADIUS_SM)
+        .hover(|s| s.bg(p.hover))
+        .child(div().pt(px(2.)).child(Icon::new(icon).size(px(16.)).text_color(icon_color)))
+        .child(
+            v_flex()
+                .flex_1()
+                .min_w_0()
+                .gap_1()
+                .child(div().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(op.title.clone()))
+                .when(running, |d| {
+                    d.child(
+                        div()
+                            .h(px(3.))
+                            .w_full()
+                            .rounded_full()
+                            .bg(p.pressed)
+                            // unknown total (git, network): a short accent segment
+                            .child(div().h_full().rounded_full().bg(p.accent).w(relative(if op.total == 0 { 0.15 } else { frac.max(0.02) }))),
+                    )
+                })
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .text_xs()
+                        .text_color(p.text_secondary)
+                        .child(div().flex_shrink_0().text_color(color).child(status))
+                        .children(op.current.clone().filter(|_| running).map(|c| {
+                            div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(c)
+                        })),
+                ),
+        )
+        .child(
+            div()
+                .id(("op-x", op.id as usize))
+                .size(px(24.))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(theme::RADIUS_SM)
+                .text_color(p.text_secondary)
+                .tooltip(move |w, cx| {
+                    gpui_kit::component::tooltip::Tooltip::new(if running { t!("İptal") } else { t!("Kapat") }).build(w, cx)
+                })
+                .hover(|s| s.bg(p.pressed))
+                .child(Icon::new(L::X).size(px(12.)))
+                .on_click(move |_, _, cx| {
+                    if running {
+                        cancel.store(true, Ordering::Relaxed);
+                    } else {
+                        ops_e.update(cx, |o, cx| {
+                            o.ops.retain(|x| x.id != op_id);
+                            cx.notify();
+                        })
+                    }
+                }),
+        )
+        .into_any_element()
+}
+
+/// "~45 sn", "~3 dk", "~1 sa 5 dk" (rounded; it is an estimate).
+fn fmt_duration(secs: f32) -> String {
+    fmt_duration_with(secs, (crate::t!("sn"), crate::t!("dk"), crate::t!("sa")))
+}
+
+/// Unit labels are parameters so the formatting is testable without the global language.
+fn fmt_duration_with(secs: f32, (sec, min, hour): (&str, &str, &str)) -> String {
+    let s = secs.max(1.0).round() as u64;
+    if s < 60 {
+        return format!("~{s} {sec}");
+    }
+    // round to whole minutes first, then roll over (3590 s is "~1 sa", never "~60 dk")
+    let total_min = (s + 30) / 60;
+    if total_min < 60 {
+        format!("~{total_min} {min}")
+    } else {
+        format!("~{} {hour} {} {min}", total_min / 60, total_min % 60)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fmt_duration_with;
+
+    #[test]
+    fn durations() {
+        let u = ("sn", "dk", "sa");
+        assert_eq!(fmt_duration_with(0.2, u), "~1 sn");
+        assert_eq!(fmt_duration_with(45.0, u), "~45 sn");
+        assert_eq!(fmt_duration_with(150.0, u), "~3 dk");
+        assert_eq!(fmt_duration_with(3580.0, u), "~1 sa 0 dk");
+        assert_eq!(fmt_duration_with(3900.0, u), "~1 sa 5 dk");
+    }
+}
+
+// ---------- Acrylic popup (Windows 11 flyout material) ----------
+
+const FLYOUT_W: f32 = 400.;
+
+struct ScPopup(Option<AnyWindowHandle>);
+impl Global for ScPopup {}
+
+/// Keeps the popup window in step with `Ops::open` (call from an observer of the ops entity).
+pub fn sync_popup(ops: &Entity<Ops>, cx: &mut App) {
+    let (open, owner, in_window) = {
+        let o = ops.read(cx);
+        (o.open, o.owner, o.in_window)
+    };
+    let cur = cx.try_global::<ScPopup>().and_then(|g| g.0);
+    match (open, cur) {
+        (true, None) if !in_window => {
+            let Some(owner) = owner else { return };
+            // the app window keeps its active look (Mica, caption) while the flyout has focus
+            gpui_windows::KEEP_ACTIVE_LOOK.store(true, std::sync::atomic::Ordering::Relaxed);
+            let opened = if std::env::var_os("RF_INWINDOW_MENU").is_some() { None } else { open_popup(ops, owner, cx) };
+            match opened {
+                Some(h) => cx.set_global(ScPopup(Some(h))),
+                None => ops.update(cx, |o, cx| {
+                    gpui_windows::KEEP_ACTIVE_LOOK.store(false, std::sync::atomic::Ordering::Relaxed);
+                    o.in_window = true;
+                    cx.notify();
+                }),
+            }
+        }
+        (false, Some(h)) => {
+            gpui_windows::KEEP_ACTIVE_LOOK.store(false, std::sync::atomic::Ordering::Relaxed);
+            cx.set_global(ScPopup(None));
+            let _ = h.update(cx, |_, w, _| w.remove_window());
+        }
+        (false, None) if in_window => ops.update(cx, |o, _| o.in_window = false),
+        _ => {}
+    }
+}
+
+fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option<AnyWindowHandle> {
+    // anchored under the title-bar button: right edge 8 px in from the window's
+    let (origin, width, dark) = owner
+        .update(cx, |_, w, _| (w.bounds().origin, w.viewport_size().width, Palette::for_window(w).dark))
+        .ok()?;
+    let top = theme::TITLEBAR_H + px(44.);
+    let x = origin.x + width - px(8. + FLYOUT_W);
+    let bounds = Bounds::new(point(x, origin.y + top), size(px(FLYOUT_W), px(120.)));
+    let opts = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: None,
+        focus: true,
+        show: true,
+        kind: WindowKind::PopUp,
+        is_movable: false,
+        is_resizable: false,
+        is_minimizable: false,
+        window_background: WindowBackgroundAppearance::Blurred,
+        ..Default::default()
+    };
+    let ops = ops.clone();
+    let r = cx.open_window(opts, move |w, cx| {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        if let Ok(h) = w.window_handle() {
+            if let RawWindowHandle::Win32(h) = h.as_raw() {
+                rf_win::window::set_dark_mode(h.hwnd.get(), dark);
+            }
+        }
+        cx.new(|cx| ScView::new(ops, w, cx))
+    });
+    match r {
+        Ok(h) => Some(h.into()),
+        Err(e) => {
+            log::warn!("status center popup: {e:#}");
+            None
+        }
+    }
+}
+
+/// The Status Center in its own Acrylic window; sizes itself to its content.
+struct ScView {
+    ops: Entity<Ops>,
+    focus: FocusHandle,
+    _subs: Vec<Subscription>,
+}
+
+impl ScView {
+    fn new(ops: Entity<Ops>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let subs = vec![
+            cx.observe(&ops, |_, _, cx| cx.notify()),
+            // clicking anywhere else closes it, like a Windows 11 flyout
+            cx.observe_window_activation(window, |this: &mut Self, window, cx| {
+                if window.is_window_active() {
+                    return;
+                }
+                let ops = this.ops.clone();
+                cx.defer(move |cx| {
+                    ops.update(cx, |o, cx| {
+                        if o.open {
+                            o.open = false;
+                            o.auto_closed = Some(Instant::now());
+                            cx.notify();
+                        }
+                    })
+                });
+            }),
+        ];
+        let focus = cx.focus_handle();
+        window.focus(&focus, cx);
+        Self { ops, focus, _subs: subs }
+    }
+}
+
+impl Render for ScView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = Palette::for_window(window);
+        let ops = self.ops.clone();
+        let panel = panel(&ops, &p, cx);
+        let vh = window.viewport_size().height;
+        v_flex()
+            .size_full()
+            .track_focus(&self.focus)
+            .text_color(p.text)
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                if ev.keystroke.key == "escape" {
+                    this.ops.update(cx, |o, cx| o.close(cx));
+                }
+            }))
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .child(panel)
+                    // measure the content; the window follows its height
+                    .child(
+                        canvas(
+                            move |b, window, _| {
+                                let h = b.size.height.ceil();
+                                if (f32::from(h) - f32::from(vh)).abs() > 1. {
+                                    window.on_next_frame(move |w, _| w.resize(size(px(FLYOUT_W), h)));
+                                }
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .inset_0(),
+                    ),
+            )
+    }
+}
+
+/// Header + list for the popup.
+fn panel(ops: &Entity<Ops>, p: &Palette, cx: &App) -> Div {
+    let o = ops.read(cx);
+    let any_finished = o.ops.iter().any(|x| x.phase != OpPhase::Running);
+    let mut list = v_flex().gap_1();
+    for op in o.ops.iter().rev() {
+        list = list.child(render_op(ops, op, p));
+    }
+    let clear_e = ops.clone();
+    let body: AnyElement = if o.ops.is_empty() {
+        div().py_6().flex().justify_center().text_sm().text_color(p.text_secondary).child(t!("Devam eden dosya işlemleri yok")).into_any_element()
+    } else {
+        div().id("sc-list").max_h(px(460.)).overflow_y_scroll().child(list).into_any_element()
+    };
+    v_flex()
+        .w_full()
+        .p_1()
+        .child(
+            h_flex()
+                .px_3()
+                .pt_2()
+                .pb_2()
+                .items_center()
+                .child(div().flex_1().text_sm().font_weight(FontWeight::SEMIBOLD).child(t!("Durum Merkezi")))
+                .child(
+                    div()
+                        .id("sc-clear")
+                        .px_2()
+                        .py_1()
+                        .rounded(theme::RADIUS_SM)
+                        .text_xs()
+                        .border_1()
+                        .border_color(p.border)
+                        .when(!any_finished, |d| d.text_color(p.text_tertiary))
+                        .when(any_finished, |d| {
+                            d.hover(|s| s.bg(p.hover)).active(|s| s.bg(p.pressed)).on_click(move |_, _, cx| clear_e.update(cx, |o, cx| o.clear_finished(cx)))
+                        })
+                        .child(t!("Tamamlananları temizle")),
+                ),
+        )
+        .child(body)
+}

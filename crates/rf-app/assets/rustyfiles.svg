@@ -1,0 +1,32 @@
+<!-- rustyfiles logo: Kor zap parıltı, folder +120 taller (the user's folder design; bolt: Lucide "zap", ISC). Source of tools/make_icon.py -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-0.00 -53.09 1027.28 1027.28">
+  <defs>
+    <linearGradient id="backd1200" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="801">
+      <stop offset="0" stop-color="#4a4a4f"/><stop offset="1" stop-color="#1c1c1f"/>
+    </linearGradient>
+    <linearGradient id="frontd1200" gradientUnits="userSpaceOnUse" x1="0" y1="159" x2="0" y2="800">
+      <stop offset="0" stop-color="#2c2c31"/><stop offset="1" stop-color="#050506"/>
+    </linearGradient>
+    <linearGradient id="boltd1200" gradientUnits="userSpaceOnUse" x1="430" y1="222" x2="600" y2="737">
+      <stop offset="0" stop-color="#ffd2a6"/><stop offset="1" stop-color="#ff6a1a"/>
+    </linearGradient>
+    <linearGradient id="rimd1200" gradientUnits="userSpaceOnUse" x1="0" y1="159" x2="0" y2="420">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.16"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="boltlod1200" gradientUnits="userSpaceOnUse" x1="500" y1="420" x2="640" y2="737">
+      <stop offset="0" stop-color="#ff8a3d"/><stop offset="1" stop-color="#d9480f"/>
+    </linearGradient>
+    <radialGradient id="glowd1200" gradientUnits="userSpaceOnUse" cx="514" cy="539.5" r="330">
+      <stop offset="0" stop-color="#ff6a1a" stop-opacity="0.34"/><stop offset="1" stop-color="#ff6a1a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="boltzd1200" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#ffd2a6"/><stop offset="1" stop-color="#ff6a1a"/>
+    </linearGradient>
+    <clipPath id="fcd1200"><path d="M129.37 159.36l768.54 0c70.55,0 128.09,57.54 128.09,128.09l0 504.27c0,70.55 -57.54,128.09 -128.09,128.09l-768.54 0c-70.55,0 -128.09,-57.54 -128.09,-128.09l0 -504.27c0,-70.55 57.54,-128.09 128.09,-128.09z"/></clipPath>
+  </defs>
+  <path d="M129.37 0l157.46 0c35.27,0 65.63,12.57 90.57,37.52l14.27 14.27c24.94,24.94 55.3,37.52 90.57,37.52l415.66 0c70.55,0 128.09,57.54 128.09,128.09l0 504.27c0,70.55 -57.54,128.09 -128.09,128.09l-768.54 0c-70.55,0 -128.09,-57.54 -128.09,-128.09l0 -593.58c0,-70.55 57.54,-128.09 128.09,-128.09z" fill="url(#backd1200)"/>
+  <path d="M129.37 159.36l768.54 0c70.55,0 128.09,57.54 128.09,128.09l0 504.27c0,70.55 -57.54,128.09 -128.09,128.09l-768.54 0c-70.55,0 -128.09,-57.54 -128.09,-128.09l0 -504.27c0,-70.55 57.54,-128.09 128.09,-128.09z" fill="url(#frontd1200)"/>
+  <rect x="0" y="150" width="1028" height="780" fill="url(#glowd1200)" clip-path="url(#fcd1200)"/>
+  <path d="M129.37 159.36l768.54 0c70.55,0 128.09,57.54 128.09,128.09l0 504.27c0,70.55 -57.54,128.09 -128.09,128.09l-768.54 0c-70.55,0 -128.09,-57.54 -128.09,-128.09l0 -504.27c0,-70.55 57.54,-128.09 128.09,-128.09z" fill="none" stroke="url(#rimd1200)" stroke-width="5"/>
+  <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z" transform="translate(201.0 227.5) scale(26)" fill="url(#boltzd1200)"/>
+</svg>
