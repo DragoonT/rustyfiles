@@ -5,7 +5,7 @@
 use gpui_kit::*;
 
 use super::config::LookSettings;
-use super::ipc::{APP, Msg, ToApp};
+use super::ipc::{Msg, ToApp, app_name};
 use super::{LookManager, ShowOpts};
 
 /// Açılış argümanları: `--msg <ileti>` (rustyfiles), `--look <yol> [top,pin]` (komut satırı),
@@ -80,14 +80,14 @@ pub fn main() {
 
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let first = parse_args(&raw.iter().map(String::as_str).collect::<Vec<_>>());
-    let _instance = match rf_win::single_instance::acquire_app(APP, &first.encode()) {
+    let _instance = match rf_win::single_instance::acquire_app(&app_name(), &first.encode()) {
         rf_win::single_instance::Role::Forwarded => return,
         rf_win::single_instance::Role::Primary(g) => g,
     };
     let (tx, mut rx) = futures::channel::mpsc::unbounded::<Msg>();
     {
         let tx = tx.clone();
-        rf_win::single_instance::serve_app(APP, move |m| {
+        rf_win::single_instance::serve_app(&app_name(), move |m| {
             if let Some(msg) = Msg::decode(&m) {
                 let _ = tx.unbounded_send(msg);
             }

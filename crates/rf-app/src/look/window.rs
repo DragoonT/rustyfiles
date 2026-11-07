@@ -50,9 +50,12 @@ pub struct LookWindow {
     _hide: Option<Task<()>>,
     _subs: Vec<Subscription>,
     viewer: Box<dyn Viewer>,
-    /// Pencereye en son programın verdiği boyut; kullanıcı değiştirirse `user_size` olur.
+    /// Pencerenin bizim verdiğimiz son boyutu (pencerenin bildirdiği haliyle).
     programmatic: (f32, f32),
+    /// Kullanıcı pencereyi elle boyutladıysa o boyut (bu pencere açık kaldıkça korunur).
     user_size: Option<(f32, f32)>,
+    /// Az önce biz boyutladık: bu süre içindeki boyut değişikliği bizimdir, kullanıcının değil.
+    resizing_until: Option<std::time::Instant>,
 }
 
 /// Dosyanın klasöründe değişiklik oldu: yeniden yüklensin mi? Silinme ya da geri gelme her zaman
@@ -79,7 +82,7 @@ impl LookWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let subs = vec![cx.observe_window_activation(window, |this: &mut Self, window, cx| {
+        let mut subs = vec![cx.observe_window_activation(window, |this: &mut Self, window, cx| {
             if window.is_window_active() {
                 // tıklanınca ya da öne gelince tuşlar (Esc, Boşluk, F11…) bu pencereye gelsin
                 window.focus(&this.focus, cx);
@@ -92,6 +95,23 @@ impl LookWindow {
                 window.remove_window();
             }
         })];
+        // Who changed the size? Right after our own resize it is us (the window may settle on a
+        // size a pixel or a frame off the one asked for); any other change is the user's, and
+        // that size is then kept for the next files.
+        subs.push(cx.observe_window_bounds(window, |this: &mut Self, window, _| {
+            let b = window.bounds();
+            let now = (f32::from(b.size.width), f32::from(b.size.height));
+            let ours = this.resizing_until.is_some_and(|t| std::time::Instant::now() < t);
+            if ours {
+                this.programmatic = now;
+            } else if !window.is_fullscreen()
+                && !window.is_maximized()
+                && ((now.0 - this.programmatic.0).abs() > 2.0 || (now.1 - this.programmatic.1).abs() > 2.0)
+            {
+                this.user_size = Some(now);
+                this.programmatic = now;
+            }
+        }));
         let focus = cx.focus_handle();
         if cx.global::<LookSettings>().look_focus_on_open {
             window.focus(&focus, cx);
@@ -120,6 +140,7 @@ impl LookWindow {
             viewer,
             programmatic: (0.0, 0.0),
             user_size: None,
+            resizing_until: None,
         };
         let b = window.bounds();
         v.programmatic = (f32::from(b.size.width), f32::from(b.size.height));
@@ -138,21 +159,19 @@ impl LookWindow {
     fn apply(&mut self, prepared: Prepared, resize: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.overlay_titlebar = prepared.overlay_titlebar;
         self.drag_by_body = prepared.drag_by_body;
-        if resize && !window.is_fullscreen() {
+        // a size the user chose stays exactly as it is (re-applying it would lose the few pixels
+        // between the window's reported size and its frame)
+        let keep_user_size = self.user_size.is_some() && prepared.resizable;
+        if resize && !window.is_fullscreen() && !keep_user_size {
             let b = window.bounds();
             let cur = (f32::from(b.size.width), f32::from(b.size.height));
-            // kullanıcı pencereyi elle boyutladıysa o boyut korunur (bu pencere açık kaldıkça)
-            if (cur.0 - self.programmatic.0).abs() > 2.0 || (cur.1 - self.programmatic.1).abs() > 2.0 {
-                self.user_size = Some(cur);
-            }
+            // (a size the user dragged to is recorded by the bounds observer, see `new`)
             let w = rf_win::look::win::work_area_of(self.hwnd);
             let work = Rect { x: w[0], y: w[1], w: w[2], h: w[3] };
-            let size = match self.user_size {
-                Some(u) if prepared.resizable => u,
-                _ => geometry::fit(prepared.preferred, work, prepared.fit_ratio),
-            };
+            let size = geometry::fit(prepared.preferred, work, prepared.fit_ratio);
             let old = Rect { x: f32::from(b.origin.x), y: f32::from(b.origin.y), w: cur.0, h: cur.1 };
             let r = geometry::relocate(old, size, work);
+            self.resizing_until = Some(std::time::Instant::now() + Duration::from_millis(400));
             rf_win::look::win::set_rect(self.hwnd, [r.x, r.y, r.w, r.h], window.scale_factor());
             self.programmatic = size;
         }

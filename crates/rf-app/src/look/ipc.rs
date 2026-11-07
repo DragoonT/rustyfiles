@@ -6,6 +6,15 @@ use super::ShowOpts;
 
 /// DirectLook'un tek örnek adı (boru ve kilit).
 pub const APP: &str = "directlook";
+
+/// The single-instance name. `RUSTYFILES_LOOK_INSTANCE=<x>` gives a test copy its own
+/// ("directlook-<x>"), so it never talks to the user's running DirectLook.
+pub fn app_name() -> String {
+    match std::env::var("RUSTYFILES_LOOK_INSTANCE") {
+        Ok(x) if !x.is_empty() => format!("{APP}-{x}"),
+        _ => APP.to_string(),
+    }
+}
 const PREFIX: &str = "\u{1}dl:";
 const TO_APP_PREFIX: &str = "\u{1}directlook:";
 
@@ -107,7 +116,7 @@ pub fn exe() -> Option<PathBuf> {
 pub fn send(msg: Msg, start: bool) {
     std::thread::spawn(move || {
         let text = msg.encode();
-        if rf_win::single_instance::send_to(APP, &text) {
+        if rf_win::single_instance::send_to(&app_name(), &text) {
             return;
         }
         if !start {
