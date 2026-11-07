@@ -417,7 +417,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Düzleştir", "Flatten"),
     ("Düzleştiriliyor:", "Flattening:"),
     ("Aç / Kaydet pencerelerinde rustyfiles", "rustyfiles in Open / Save dialogs"),
-    ("Uygulamaların dosya açma, kaydetme ve klasör seçme pencereleri rustyfiles ile açılır. Pencereye kendi seçeneklerini ekleyen uygulamalarda Windows'un penceresi açılır.", "Apps' open, save and select-folder dialogs open in rustyfiles. Apps that add their own options to the dialog keep Windows' one."),
+    ("Uygulamaların dosya açma, kaydetme ve klasör seçme pencereleri rustyfiles ile açılır. Pencereye kendi seçeneklerini ekleyen uygulamalarda Windows'un penceresi açılır. Açık uygulamalarda, yeniden başlatınca geçerli olur.", "Apps' open, save and select-folder dialogs open in rustyfiles. Apps that add their own options to the dialog keep Windows' one. Apps already running pick it up once restarted."),
     ("rustyfiles_dialog.dll bulunamadı: rustyfiles'ı kurulum betiğiyle kurun.", "rustyfiles_dialog.dll is missing: install rustyfiles with the install script."),
     ("Dosya adı:", "File name:"),
     ("Klasör:", "Folder:"),

@@ -44,13 +44,14 @@ impl PickSession {
         self.req.mode == Mode::Folder
     }
 
+    /// Written right here, before the window closes: when rustyfiles was started only for this
+    /// dialog it quits with its last window, and an answer left to another thread could be lost.
+    /// The app is already waiting to read, so the write doesn't block.
     fn answer(&self, resp: Response) {
         if let Some(mut f) = self.pipe.borrow_mut().take() {
-            std::thread::spawn(move || {
-                if let Err(e) = write_msg(&mut f, &resp) {
-                    log::warn!("picker answer: {e}");
-                }
-            });
+            if let Err(e) = write_msg(&mut f, &resp) {
+                log::warn!("picker answer: {e}");
+            }
         }
     }
 }

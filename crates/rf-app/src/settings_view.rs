@@ -1473,7 +1473,7 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         L::FolderOpen,
         t!("Aç / Kaydet pencerelerinde rustyfiles"),
         Some(if has_dll {
-            t!("Uygulamaların dosya açma, kaydetme ve klasör seçme pencereleri rustyfiles ile açılır. Pencereye kendi seçeneklerini ekleyen uygulamalarda Windows'un penceresi açılır.")
+            t!("Uygulamaların dosya açma, kaydetme ve klasör seçme pencereleri rustyfiles ile açılır. Pencereye kendi seçeneklerini ekleyen uygulamalarda Windows'un penceresi açılır. Açık uygulamalarda, yeniden başlatınca geçerli olur.")
         } else {
             t!("rustyfiles_dialog.dll bulunamadı: rustyfiles'ı kurulum betiğiyle kurun.")
         }),
