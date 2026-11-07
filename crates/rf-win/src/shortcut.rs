@@ -84,9 +84,12 @@ mod tests {
         create(&lnk, &target).unwrap();
         assert!(lnk.exists());
         let info = resolve(&lnk).unwrap();
-        assert_eq!(info.target.to_string_lossy().to_lowercase(), target.to_string_lossy().to_lowercase());
+        // compare real paths: the temp folder may come as a short 8.3 name (C:\Users\RUNNER~1)
+        // while the shortcut resolves to the long one
+        let same = |a: &std::path::Path, b: &std::path::Path| std::fs::canonicalize(a).unwrap() == std::fs::canonicalize(b).unwrap();
+        assert!(same(&info.target, &target), "{:?} vs {:?}", info.target, target);
         assert!(info.args.is_empty());
-        assert_eq!(info.working_dir.to_string_lossy().to_lowercase(), dir.to_string_lossy().to_lowercase());
+        assert!(same(&info.working_dir, &dir), "{:?} vs {:?}", info.working_dir, dir);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
