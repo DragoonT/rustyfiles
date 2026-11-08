@@ -87,6 +87,45 @@ struct Job {
     /// Directories still to list (depth-first: the most recently found first).
     todo: Mutex<Vec<PathBuf>>,
     started: AtomicBool,
+    /// The disk's limit on directories listed at once (`None`: not limited). Looked up by the
+    /// worker that lists the folder itself, never on the caller's thread.
+    lane: OnceLock<Option<Arc<Lane>>>,
+}
+
+/// Spinning disks get this many directories listed at once: with eight readers the head spends
+/// its time seeking between them and the whole walk gets slower, not faster.
+const HDD_LANES: usize = 2;
+
+/// One disk's count of directories being listed, and its limit.
+struct Lane {
+    busy: AtomicUsize,
+    cap: usize,
+}
+
+/// The lane for the disk holding `root`: spinning disks (seek penalty) are limited, SSDs,
+/// network paths and disks that don't say are not. Asked once per drive letter; the answers
+/// are forgotten when a drive comes or goes (a USB disk may take a letter an SSD had).
+fn lane_for(root: &Path) -> Option<Arc<Lane>> {
+    static LANES: OnceLock<Mutex<(u32, HashMap<u8, Option<Arc<Lane>>>)>> = OnceLock::new();
+    let b = root.to_str()?.as_bytes();
+    if b.len() < 2 || b[1] != b':' || !b[0].is_ascii_alphabetic() {
+        return None;
+    }
+    let letter = b[0].to_ascii_uppercase();
+    let mask = crate::drives::drive_mask();
+    let mut lanes = LANES.get_or_init(Default::default).lock();
+    if lanes.0 != mask {
+        *lanes = (mask, HashMap::new());
+    }
+    lanes
+        .1
+        .entry(letter)
+        .or_insert_with(|| {
+            let hdd = crate::drives::seek_penalty(root) == Some(true);
+            log::debug!("foldersize: drive {}: {}", letter as char, if hdd { "spinning, 2 at once" } else { "not limited" });
+            hdd.then(|| Arc::new(Lane { busy: AtomicUsize::new(0), cap: HDD_LANES }))
+        })
+        .clone()
 }
 
 struct Sched {
@@ -113,18 +152,41 @@ fn sched() -> &'static Sched {
     })
 }
 
-/// Next (job, directory), taking the jobs in turn so every folder keeps moving.
-fn take(s: &Sched) -> (Arc<Job>, PathBuf) {
+/// What a worker took: the folder's job, the directory to list, and the lane it holds a place
+/// in (to give back when done).
+type Taken = (Arc<Job>, PathBuf, Option<Arc<Lane>>);
+
+/// Next directory from `jobs`, starting at `start` and taking the jobs in turn so every folder
+/// keeps moving; jobs whose disk already has its lanes full are passed over. The caller holds
+/// the jobs lock.
+fn pick(jobs: &[Arc<Job>], start: usize) -> Option<Taken> {
+    let n = jobs.len();
+    for k in 0..n {
+        let job = &jobs[(start + k) % n];
+        let lane = job.lane.get().cloned().flatten();
+        if let Some(l) = &lane {
+            if l.busy.load(Ordering::Acquire) >= l.cap {
+                continue;
+            }
+        }
+        if let Some(dir) = job.todo.lock().pop() {
+            if let Some(l) = &lane {
+                l.busy.fetch_add(1, Ordering::AcqRel);
+            }
+            return Some((job.clone(), dir, lane));
+        }
+    }
+    None
+}
+
+/// Next directory to list; waits while there is none.
+fn take(s: &Sched) -> Taken {
     let mut jobs = s.jobs.lock();
     loop {
-        let n = jobs.len();
-        if n > 0 {
+        if !jobs.is_empty() {
             let start = s.next.fetch_add(1, Ordering::Relaxed);
-            for k in 0..n {
-                let job = &jobs[(start + k) % n];
-                if let Some(dir) = job.todo.lock().pop() {
-                    return (job.clone(), dir);
-                }
+            if let Some(got) = pick(&jobs, start) {
+                return got;
             }
         }
         s.cv.wait_for(&mut jobs, Duration::from_millis(250));
@@ -133,8 +195,14 @@ fn take(s: &Sched) -> (Arc<Job>, PathBuf) {
 
 fn worker(s: &'static Sched) {
     loop {
-        let (job, dir) = take(s);
+        let (job, dir, lane) = take(s);
         process(s, &job, dir);
+        if let Some(l) = lane {
+            l.busy.fetch_sub(1, Ordering::AcqRel);
+            // a worker may be waiting for this disk's lane
+            drop(s.jobs.lock());
+            s.cv.notify_one();
+        }
     }
 }
 
@@ -172,6 +240,8 @@ fn process(s: &Sched, job: &Job, dir: PathBuf) {
         }
         // mtime before walking: a change during the walk then invalidates the entry
         let _ = slot.mtime.set(dir_mtime(&job.root));
+        // from now on the folder's sub-directories share its disk's lanes
+        job.lane.get_or_init(|| lane_for(&job.root));
         let _ = slot.cluster.set(cluster_size(&job.root));
     }
     let cluster = slot.cluster.get().copied().flatten();
@@ -256,7 +326,7 @@ impl SizeBatch {
         let mut jobs = s.jobs.lock();
         for (i, dir) in dirs.into_iter().enumerate() {
             b.slots[i].pending.store(1, Ordering::Relaxed);
-            jobs.push(Arc::new(Job { batch: b.clone(), i, root: dir.clone(), todo: Mutex::new(vec![dir]), started: AtomicBool::new(false) }));
+            jobs.push(Arc::new(Job { batch: b.clone(), i, root: dir.clone(), todo: Mutex::new(vec![dir]), started: AtomicBool::new(false), lane: OnceLock::new() }));
         }
         drop(jobs);
         s.cv.notify_all();
@@ -426,6 +496,41 @@ mod tests {
     use std::time::Instant;
 
     use super::*;
+
+    /// A full lane passes its disk's work over (other disks keep going); a free place is taken
+    /// and counted, and the lane is handed back with the work.
+    #[test]
+    fn full_lanes_are_passed_over() {
+        let b = Arc::new(SizeBatch { slots: vec![Slot::default(), Slot::default()], stop: AtomicBool::new(false) });
+        let job = |i: usize, dirs: &[&str], lane: Option<Arc<Lane>>| {
+            let j = Job {
+                batch: b.clone(),
+                i,
+                root: PathBuf::from(dirs[0]),
+                todo: Mutex::new(dirs.iter().map(PathBuf::from).collect()),
+                started: AtomicBool::new(true),
+                lane: OnceLock::new(),
+            };
+            let _ = j.lane.set(lane);
+            Arc::new(j)
+        };
+        let hdd = Arc::new(Lane { busy: AtomicUsize::new(0), cap: 2 });
+        let jobs = vec![job(0, &["D:\\a", "D:\\a\\1", "D:\\a\\2"], Some(hdd.clone())), job(1, &["C:\\b", "C:\\b\\1"], None)];
+        // two places on the spinning disk
+        let (_, d1, l1) = pick(&jobs, 0).unwrap();
+        let (_, d2, l2) = pick(&jobs, 0).unwrap();
+        assert!(d1.starts_with("D:\\a") && d2.starts_with("D:\\a"));
+        assert!(l1.is_some() && l2.is_some());
+        assert_eq!(hdd.busy.load(Ordering::Relaxed), 2);
+        // full: the next pick goes to the other disk even though the round starts at the HDD job
+        let (j, d3, l3) = pick(&jobs, 0).unwrap();
+        assert_eq!(j.i, 1);
+        assert!(d3.starts_with("C:\\b") && l3.is_none());
+        // one place handed back: the HDD's last directory can go
+        hdd.busy.fetch_sub(1, Ordering::AcqRel);
+        let (j, _, _) = pick(&jobs, 0).unwrap();
+        assert_eq!(j.i, 0);
+    }
 
     fn tree(tag: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("rf-fsize-{tag}-{}", std::process::id()));
