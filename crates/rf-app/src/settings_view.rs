@@ -12,6 +12,7 @@ use gpui_kit::*;
 use gpui_windows::hybrid;
 
 use crate::fluent_menu::{self, Item, Menu, MenuIcon};
+use crate::select_box::{Choice, select_box};
 use crate::i18n::Lang;
 use crate::settings::{
     self, AnimPref, BackdropPref, ClickPref, DatePref, DefaultView, DeletePref, IdePref, RendererPref, Settings, StartupPref, ThemePref,
@@ -99,38 +100,12 @@ fn sw(id: &'static str, p: &Palette, on: bool, set: fn(&mut Settings, bool)) -> 
 /// A button showing the current value; clicking opens the choices in our menu.
 fn dropdown<T: Copy + PartialEq + 'static>(id: &'static str, p: &Palette, current: T, options: Vec<(T, String)>, set: fn(&mut Settings, T)) -> AnyElement {
     let label = options.iter().find(|(v, _)| *v == current).map(|(_, l)| l.clone()).unwrap_or_default();
-    picker(id, p, label, move |ev, window, cx| {
-        let items = options
-            .iter()
-            .map(|(v, l)| {
-                let v = *v;
-                Item::action(l.clone(), MenuIcon::None, move |_, cx| settings::update(cx, |s| set(s, v))).checked(v == current)
-            })
-            .collect();
-        fluent_menu::show(Menu { quick: Vec::new(), items }, ev, window, cx);
+    select_box(id, p, label, move |_| {
+        options.iter().map(|(v, l)| {
+            let v = *v;
+            Choice::new(l.clone(), v == current, move |_, cx| settings::update(cx, |s| set(s, v)))
+        }).collect()
     })
-}
-
-/// The drop-down button itself (`open` gets the click position).
-fn picker(id: &'static str, p: &Palette, label: String, open: impl Fn(Point<Pixels>, &mut Window, &mut App) + 'static) -> AnyElement {
-    h_flex()
-        .id(id)
-        .h(px(32.))
-        .min_w(px(120.))
-        .px_3()
-        .gap_2()
-        .items_center()
-        .justify_between()
-        .rounded(theme::RADIUS_SM)
-        .bg(p.hover)
-        .border_1()
-        .border_color(p.border)
-        .text_sm()
-        .hover(|s| s.bg(p.pressed))
-        .child(label)
-        .child(Icon::new(L::ChevronDown).size(px(12.)).text_color(p.text_secondary))
-        .on_click(move |ev: &ClickEvent, window, cx| open(ev.position(), window, cx))
-        .into_any_element()
 }
 
 fn button(id: impl Into<ElementId>, p: &Palette, label: impl Into<SharedString>, run: impl Fn(&mut Window, &mut App) + 'static) -> AnyElement {
@@ -324,7 +299,9 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 "lang",
                 p,
                 s.language,
-                vec![(Lang::System, t!("Sistem ayarını kullan").into()), (Lang::Tr, "Türkçe".into()), (Lang::En, "English".into())],
+                std::iter::once((Lang::System, t!("Sistem ayarını kullan").to_string()))
+                    .chain(Lang::all().into_iter().map(|l| (l, l.native_name().to_string())))
+                    .collect(),
                 |s, v| s.language = v,
             ),
         ),
@@ -621,19 +598,17 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         L::Type,
         t!("Yazı tipi"),
         None,
-        picker("font", p, font_opts.iter().find(|(i, _)| *i == cur_ix).map(|x| x.1.clone()).unwrap_or_default(), move |pos, window, cx| {
-            let items = font_opts
+        select_box("font", p, font_opts.iter().find(|(i, _)| *i == cur_ix).map(|x| x.1.clone()).unwrap_or_default(), move |_| {
+            font_opts
                 .iter()
                 .map(|(i, l)| {
                     let name = if *i == 0 { None } else { fonts2.get(i - 1).cloned() };
-                    Item::action(l.clone(), MenuIcon::None, move |_, cx| {
+                    Choice::new(l.clone(), *i == cur_ix, move |_, cx| {
                         let n = name.clone();
                         settings::update(cx, |s| s.font = n)
                     })
-                    .checked(*i == cur_ix)
                 })
-                .collect();
-            fluent_menu::show(Menu { quick: Vec::new(), items }, pos, window, cx);
+                .collect()
         }),
     ));
     v.push(card(p, L::PanelTop, t!("Araç çubuğunu göster"), Some("Ctrl+Shift+B"), sw("toolbar", p, s.show_toolbar, |s, v| s.show_toolbar = v)));
@@ -1220,15 +1195,11 @@ fn look_update(cx: &mut App, f: impl FnOnce(&mut LookSettings)) {
 
 fn ldropdown<T: Copy + PartialEq + 'static>(id: &'static str, p: &Palette, current: T, options: Vec<(T, String)>, set: fn(&mut LookSettings, T)) -> AnyElement {
     let label = options.iter().find(|(v, _)| *v == current).map(|(_, l)| l.clone()).unwrap_or_default();
-    picker(id, p, label, move |ev, window, cx| {
-        let items = options
-            .iter()
-            .map(|(v, l)| {
-                let v = *v;
-                Item::action(l.clone(), MenuIcon::None, move |_, cx| look_update(cx, |s| set(s, v))).checked(v == current)
-            })
-            .collect();
-        fluent_menu::show(Menu { quick: Vec::new(), items }, ev, window, cx);
+    select_box(id, p, label, move |_| {
+        options.iter().map(|(v, l)| {
+            let v = *v;
+            Choice::new(l.clone(), v == current, move |_, cx| look_update(cx, |s| set(s, v)))
+        }).collect()
     })
 }
 

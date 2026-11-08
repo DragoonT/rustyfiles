@@ -21,8 +21,35 @@ fn build_info() {
     }
 }
 
+/// `locales/<code>.json` (UI translations, `{"<id>": "text"}`) embedded as
+/// `LOCALES: &[(code, json)]`, sorted by code. Files starting with "_" are not locales.
+fn locales() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("locales");
+    println!("cargo:rerun-if-changed={}", dir.display());
+    let mut found: Vec<(String, std::path::PathBuf)> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .filter_map(|p| {
+            let code = p.file_stem()?.to_str()?.to_string();
+            (!code.starts_with('_')).then_some((code, p))
+        })
+        .collect();
+    found.sort();
+    let mut out = String::from("pub const LOCALES: &[(&str, &str)] = &[\n");
+    for (code, path) in &found {
+        out += &format!("    ({code:?}, include_str!({:?})),\n", path.display().to_string());
+    }
+    out += "];\n";
+    let dest = std::path::Path::new(&std::env::var("OUT_DIR").unwrap()).join("locales.rs");
+    std::fs::write(dest, out).expect("write locales.rs");
+}
+
 fn main() {
     build_info();
+    locales();
     println!("cargo:rerun-if-changed=rustyfiles.rc");
     println!("cargo:rerun-if-changed=directlook.rc");
     println!("cargo:rerun-if-changed=assets/rustyfiles.ico");

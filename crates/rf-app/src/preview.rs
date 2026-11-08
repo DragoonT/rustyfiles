@@ -934,7 +934,7 @@ impl Render for Preview {
 
 /// 1234567 → "1.234.567"
 fn group(n: u64) -> String {
-    let sep = if crate::i18n::is_en() { ',' } else { '.' };
+    let sep = if crate::i18n::is_tr() { '.' } else { ',' };
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {

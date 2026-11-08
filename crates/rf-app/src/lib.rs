@@ -26,6 +26,7 @@ mod ops;
 mod picker;
 mod places;
 mod settings;
+mod select_box;
 mod settings_view;
 mod shelf_view;
 mod status_center;

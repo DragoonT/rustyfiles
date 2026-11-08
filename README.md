@@ -63,7 +63,10 @@ work. Mica,
 dark mode and the system accent colour. When a game or a render saturates the GPU, drawing
 moves to the CPU and back again without a flicker.
 
-**Languages.** English and Turkish.
+**Languages.** 46 of them, following the Windows display language (or pick one in Settings ›
+General). Translations start from the Files community's wording; Arabic, Hebrew and Persian are
+translated but wait for right-to-left text in GPUI. Corrections are welcome: each language is one
+JSON file in `crates/rf-app/locales/`.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/photos-dark.png">
