@@ -12,6 +12,9 @@ import pathlib
 import re
 import sys
 
+# Windows consoles default to a legacy code page; texts here are in every script
+sys.stdout.reconfigure(encoding="utf-8")
+
 LOC = pathlib.Path(__file__).resolve().parent.parent / "crates" / "rf-app" / "locales"
 PH = re.compile(r"\{[^{}]*\}")
 

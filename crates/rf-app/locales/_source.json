@@ -2466,6 +2466,192 @@
   "en": "Flattening:"
  },
  {
+  "id": "17ee12ed",
+  "key": "Topluluk",
+  "tr": "Topluluk",
+  "en": "Community"
+ },
+ {
+  "id": "560d8138",
+  "key": "Web sitesi",
+  "tr": "Web sitesi",
+  "en": "Website"
+ },
+ {
+  "id": "b439e524",
+  "key": "Discord sunucusu",
+  "tr": "Discord sunucusu",
+  "en": "Discord server"
+ },
+ {
+  "id": "3b26c5cf",
+  "key": "Soru sor, fikir paylaş, yeni sürümlerden haberdar ol.",
+  "tr": "Soru sor, fikir paylaş, yeni sürümlerden haberdar ol.",
+  "en": "Ask questions, share ideas, hear about new versions."
+ },
+ {
+  "id": "1e30f2e2",
+  "key": "İkisini de tut",
+  "tr": "İkisini de tut",
+  "en": "Keep both"
+ },
+ {
+  "id": "8f99ec17",
+  "key": "Atla",
+  "tr": "Atla",
+  "en": "Skip"
+ },
+ {
+  "id": "6c0f5e90",
+  "key": "Gelen",
+  "tr": "Gelen",
+  "en": "Incoming"
+ },
+ {
+  "id": "6bceb92a",
+  "key": "Hedefte",
+  "tr": "Hedefte",
+  "en": "Existing"
+ },
+ {
+  "id": "6822d89c",
+  "key": "daha yeni",
+  "tr": "daha yeni",
+  "en": "newer"
+ },
+ {
+  "id": "2d14f299",
+  "key": "Bu ad hedefte zaten var",
+  "tr": "Bu ad hedefte zaten var",
+  "en": "This name already exists here"
+ },
+ {
+  "id": "42cc5534",
+  "key": "öğe hedefte zaten var",
+  "tr": "öğe hedefte zaten var",
+  "en": "items already exist here"
+ },
+ {
+  "id": "f4f1a5a5",
+  "key": "Hedef:",
+  "tr": "Hedef:",
+  "en": "Destination:"
+ },
+ {
+  "id": "3e25f251",
+  "key": "Hepsini değiştir",
+  "tr": "Hepsini değiştir",
+  "en": "Replace all"
+ },
+ {
+  "id": "2309f953",
+  "key": "Hepsini atla",
+  "tr": "Hepsini atla",
+  "en": "Skip all"
+ },
+ {
+  "id": "678bbc75",
+  "key": "Hepsinde ikisini de tut",
+  "tr": "Hepsinde ikisini de tut",
+  "en": "Keep both for all"
+ },
+ {
+  "id": "41329db7",
+  "key": "Yalnızca daha yenileri değiştir",
+  "tr": "Yalnızca daha yenileri değiştir",
+  "en": "Replace only newer ones"
+ },
+ {
+  "id": "c3971de8",
+  "key": "Ya da her biri için seçin:",
+  "tr": "Ya da her biri için seçin:",
+  "en": "Or choose for each:"
+ },
+ {
+  "id": "91e5c8ec",
+  "key": "diğerlerinde ikisi de tutulur",
+  "tr": "diğerlerinde ikisi de tutulur",
+  "en": "the rest keep both"
+ },
+ {
+  "id": "9a57b728",
+  "key": "Hedefte aynı adlı öğeler var",
+  "tr": "Hedefte aynı adlı öğeler var",
+  "en": "Items with the same name exist at the destination"
+ },
+ {
+  "id": "18e1cd41",
+  "key": "Duraklatıldı",
+  "tr": "Duraklatıldı",
+  "en": "Paused"
+ },
+ {
+  "id": "e2f4eed9",
+  "key": "Duraklat",
+  "tr": "Duraklat",
+  "en": "Pause"
+ },
+ {
+  "id": "b7c20a9b",
+  "key": "Devam et",
+  "tr": "Devam et",
+  "en": "Resume"
+ },
+ {
+  "id": "ed4a7f5d",
+  "key": "Kopyaları doğrula",
+  "tr": "Kopyaları doğrula",
+  "en": "Verify copies"
+ },
+ {
+  "id": "c9fb2fd7",
+  "key": "Kopyalama bitince her dosya kaynağıyla karşılaştırılır. Tam doğrulama kopyayı diskten okur; daha uzun sürer.",
+  "tr": "Kopyalama bitince her dosya kaynağıyla karşılaştırılır. Tam doğrulama kopyayı diskten okur; daha uzun sürer.",
+  "en": "Each file is compared with its source after copying. Full verification reads the copy back from the disk and takes longer."
+ },
+ {
+  "id": "7ca2d3bd",
+  "key": "Hızlı: boyut ve tarih",
+  "tr": "Hızlı: boyut ve tarih",
+  "en": "Quick: size and date"
+ },
+ {
+  "id": "a3f81de3",
+  "key": "Tam: içerik",
+  "tr": "Tam: içerik",
+  "en": "Full: content"
+ },
+ {
+  "id": "aa4c0d79",
+  "key": "Kopyalama hız sınırı",
+  "tr": "Kopyalama hız sınırı",
+  "en": "Copy speed limit"
+ },
+ {
+  "id": "a7f4d116",
+  "key": "Ağa veya USB belleğe kopyalarken bağlantıyı tıkamamak için.",
+  "tr": "Ağa veya USB belleğe kopyalarken bağlantıyı tıkamamak için.",
+  "en": "So copies to a network share or a USB stick don't choke the connection."
+ },
+ {
+  "id": "54d3539c",
+  "key": "Sınırsız",
+  "tr": "Sınırsız",
+  "en": "Unlimited"
+ },
+ {
+  "id": "2d3c851b",
+  "key": "Doğrulanamayan dosyalar",
+  "tr": "Doğrulanamayan dosyalar",
+  "en": "Files that failed verification"
+ },
+ {
+  "id": "c5f676ee",
+  "key": "Doğrulanıyor…",
+  "tr": "Doğrulanıyor…",
+  "en": "Verifying…"
+ },
+ {
   "id": "c75be923",
   "key": "Bu kopya kurulum programıyla kurulmadı: güncellemeleri GitHub'dan indirin.",
   "tr": "Bu kopya kurulum programıyla kurulmadı: güncellemeleri GitHub'dan indirin.",

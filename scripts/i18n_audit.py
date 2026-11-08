@@ -7,6 +7,9 @@ import pathlib
 import re
 import sys
 
+# Windows consoles default to a legacy code page; texts here are in every script
+sys.stdout.reconfigure(encoding="utf-8")
+
 loc = pathlib.Path(sys.argv[1])
 src = json.loads((loc / "_source.json").read_text(encoding="utf-8"))
 # texts that are fine to keep as English everywhere
