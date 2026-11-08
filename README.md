@@ -26,6 +26,8 @@ Free, no account, no ads. Download, double-click, done: see [Install](#install).
 
 ## How fast
 
+### Opening a folder
+
 Time from launching the app to the folder list settling, in a new window, with the folder
 already in the OS file cache. Median of five runs.
 
@@ -41,9 +43,68 @@ already running in the background; Explorer and Files each started a new process
 loads its list incrementally, so its numbers are an upper bound. Starting rustyfiles cold
 takes 350–480 ms.
 
+### New tab in an open window
+
+| Folder | Time to a settled list |
+|---|--:|
+| 1,000 files | ~48 ms |
+| 10,000 files | ~46 ms |
+| 100,000 files | ~129 ms |
+
+Each extra tab costs about 3 MB of memory (1 tab: ~32 MB, 25 tabs: ~103 MB).
+
+### Search by file name
+
+`*.dll` under `C:\Windows`: 342,492 items in 116,851 folders, file cache warm.
+
+| Method | Time |
+|---|--:|
+| rustyfiles | **7.8 s** |
+| `dir /s /b` | 53 s |
+| PowerShell `Get-ChildItem -Recurse` | 105 s |
+
+rustyfiles searches on six background-priority threads, so the rest of the machine stays
+responsive. It doesn't follow junctions, which is why it finds 454 fewer duplicates.
+
+### Preview with Space (DirectLook)
+
+Time from the key press to the content on screen, app already running:
+
+| File | Content ready |
+|---|--:|
+| JPEG, 3840 × 2160 | 24–86 ms |
+| Source code, syntax-highlighted | 23–44 ms |
+| 7z archive (contents listed) | 19–31 ms |
+| MP3 (tags, lyrics) | 27–32 ms |
+| H.264 video, 1080p | first frame in 146–185 ms |
+
+### Archives
+
+Reading RAR with [rarchive](https://github.com/gelenmedya/rarchive), our own engine, against
+the official UnRAR (decode and check every CRC, archives in the file cache):
+
+| Archive | UnRAR | rarchive |
+|---|--:|--:|
+| 1.3 GB, 32 MB dictionary, 195 files | 2.79 s | **0.28 s** (10×) |
+| 400 MB solid | 0.95 s | **0.21 s** (4.5×) |
+| 400 MB, 520 files | 1.03 s | **0.063 s** (16×) |
+
+### Copying
+
 Copying uses its own parallel engine: 16 times faster than Explorer's on 520 files (381 MB),
-about 30 times on 20,000 small files. Name conflicts, the Recycle Bin and links still go through
-Windows' own engine.
+about 30 times on 20,000 small files. The next engine (in the coming release) spreads small
+files across folders, because threads writing into one folder wait on each other:
+
+| 20,000 files of 4 KB in 200 folders, plus 20 files of 50 MB | Time |
+|---|--:|
+| Current engine | 6.8 s |
+| Next engine | **3.6 s** |
+
+It also handles name conflicts itself (replace, skip or keep both, for all or per file),
+pauses and resumes, can verify every copy byte by byte, and can cap its speed.
+
+All numbers: one machine (Ryzen 7 9800X3D, NVMe SSD, Windows 11), November 2026. The test
+scripts are in the repository (`crates/rf-win/examples/copybench.rs` for copying).
 
 ## What it does
 
