@@ -852,5 +852,10 @@
  "7b474d09": "glyphs",
  "a98d238f": "Description",
  "a8affc4f": "Company",
- "bc81e7ed": "Version"
+ "bc81e7ed": "Version",
+ "1f5a06b8": "Issued to",
+ "5f62ca31": "Issued by",
+ "dcf39e11": "Valid",
+ "21167459": "expired",
+ "2c8ae42a": "not yet valid"
 }
