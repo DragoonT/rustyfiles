@@ -13,6 +13,24 @@ pub mod proto;
 #[cfg(windows)]
 mod ipc;
 
+/// One line to `%LOCALAPPDATA%/rustyfiles/dialog.log` (kept under 256 KB): which app asked,
+/// whether rustyfiles answered, and how the app read the result. For diagnosing apps.
+pub(crate) fn log(line: &str) {
+    use std::io::Write;
+    let Some(base) = std::env::var_os("LOCALAPPDATA") else { return };
+    let dir = std::path::PathBuf::from(base).join("rustyfiles");
+    let path = dir.join("dialog.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 256 << 10) {
+        let _ = std::fs::remove_file(&path);
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let app = std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
+        let _ = writeln!(f, "{secs} {app}[{}] {line}", std::process::id());
+    }
+}
+
 #[cfg(windows)]
 pub use com::*;
 
@@ -174,6 +192,7 @@ mod com {
         fn Show(&self, owner: HWND) -> Result<()> {
             let off = std::env::var_os("RUSTYFILES_DIALOG_OFF").is_some();
             if off || self.st.borrow().customized {
+                crate::log(&format!("show: Windows' dialog (customized={})", self.st.borrow().customized));
                 return unsafe { self.real.Show(Some(owner)) };
             }
             let req = self.request(owner);
@@ -192,11 +211,14 @@ mod com {
             }
             let Some(resp) = answer else {
                 // rustyfiles couldn't help: Windows' dialog, set up as the app asked
+                crate::log(&format!("show: no answer from rustyfiles ({:?}), Windows' dialog", req.mode));
                 return unsafe { self.real.Show(Some(owner)) };
             };
             if !resp.ok || resp.paths.is_empty() {
+                crate::log("show: cancelled");
                 return Err(ERROR_CANCELLED.to_hresult().into());
             }
+            crate::log(&format!("show: {:?} picked {} item(s), {} event sink(s)", req.mode, resp.paths.len(), self.st.borrow().sinks.len()));
             {
                 let mut st = self.st.borrow_mut();
                 st.type_index = resp.filter_index.max(1);
@@ -207,7 +229,8 @@ mod com {
             let me: IFileDialog = self.to_interface::<IFileOpenDialog>().cast()?;
             let sinks: Vec<IFileDialogEvents> = self.st.borrow().sinks.iter().map(|(_, s)| s.clone()).collect();
             for s in sinks {
-                if unsafe { s.OnFileOk(&me) }.is_err() {
+                if let Err(e) = unsafe { s.OnFileOk(&me) } {
+                    crate::log(&format!("show: the app refused the choice in OnFileOk ({:?})", e.code()));
                     self.st.borrow_mut().result = None;
                     return Err(ERROR_CANCELLED.to_hresult().into());
                 }
@@ -264,6 +287,7 @@ mod com {
         }
         fn GetFolder(&self) -> Result<IShellItem> {
             if let Some(first) = self.st.borrow().result.as_ref().and_then(|r| r.first().cloned()) {
+                crate::log("GetFolder");
                 if let Some(dir) = std::path::Path::new(&first).parent() {
                     return item_for(&dir.to_string_lossy());
                 }
@@ -282,6 +306,7 @@ mod com {
         }
         fn GetFileName(&self) -> Result<PWSTR> {
             if self.st.borrow().result.is_some() {
+                crate::log("GetFileName");
                 return co_string(&self.st.borrow().file_name);
             }
             unsafe { self.real.GetFileName() }
@@ -299,7 +324,9 @@ mod com {
         }
         fn GetResult(&self) -> Result<IShellItem> {
             if let Some(first) = self.st.borrow().result.as_ref().and_then(|r| r.first().cloned()) {
-                return item_for(&first);
+                let r = item_for(&first);
+                crate::log(&format!("GetResult -> {}", if r.is_ok() { "ok" } else { "FAILED" }));
+                return r;
             }
             unsafe { self.real.GetResult() }
         }
@@ -330,7 +357,9 @@ mod com {
     impl IFileOpenDialog_Impl for Dialog_Impl {
         fn GetResults(&self) -> Result<IShellItemArray> {
             if let Some(r) = self.st.borrow().result.as_ref() {
-                return items_for(r);
+                let a = items_for(r);
+                crate::log(&format!("GetResults -> {}", if a.is_ok() { "ok" } else { "FAILED" }));
+                return a;
             }
             unsafe { self.real.cast::<IFileOpenDialog>()?.GetResults() }
         }

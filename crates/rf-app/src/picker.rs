@@ -384,19 +384,31 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
             .when(!primary, |d| d.border_1().border_color(p.border).bg(p.card_bg).hover(|d| d.bg(p.hover)))
             .child(label)
     };
-    h_flex()
+    // two rows, like Windows' own dialog: the name gets the whole width (long paths fit)
+    gpui_kit::component::v_flex()
         .w_full()
         .px_4()
         .py_3()
-        .gap_3()
-        .items_center()
+        .gap_2()
         .border_t_1()
         .border_color(p.divider)
-        .child(div().text_sm().text_color(p.text_secondary).flex_shrink_0().child(label))
-        .child(div().flex_1().min_w_0().child(Input::new(&s.name)))
-        .children(filter)
-        .child(button("pick-ok", ok_label(&s.req), true).on_click(cx.listener(|ws, _, window, cx| accept(ws, window, cx))))
-        .child(button("pick-cancel", t!("İptal").into(), false).on_click(cx.listener(|ws, _, window, _| cancel(ws, window))))
+        .child(
+            h_flex()
+                .w_full()
+                .gap_3()
+                .items_center()
+                .child(div().w(px(80.)).text_sm().text_color(p.text_secondary).flex_shrink_0().child(label))
+                .child(div().flex_1().min_w_0().child(Input::new(&s.name)))
+                .children(filter),
+        )
+        .child(
+            h_flex()
+                .w_full()
+                .gap_3()
+                .justify_end()
+                .child(button("pick-ok", ok_label(&s.req), true).on_click(cx.listener(|ws, _, window, cx| accept(ws, window, cx))))
+                .child(button("pick-cancel", t!("İptal").into(), false).on_click(cx.listener(|ws, _, window, _| cancel(ws, window)))),
+        )
         .into_any_element()
 }
 

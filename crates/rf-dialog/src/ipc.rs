@@ -136,7 +136,10 @@ pub fn pick(req: &Request, owner: HWND) -> Option<Response> {
         let event = Handle(CreateEventW(None, true, false, None).ok()?);
         // rustyfiles' window has to come to the front over this app
         let _ = AllowSetForegroundWindow(ASFW_ANY);
-        std::process::Command::new(&exe).args(["--pick", &name]).spawn().ok()?;
+        if let Err(e) = std::process::Command::new(&exe).args(["--pick", &name]).spawn() {
+            crate::log(&format!("pick: can't start {}: {e}", exe.display()));
+            return None;
+        }
 
         let mut ov = OVERLAPPED { hEvent: event.0, ..Default::default() };
         match ConnectNamedPipe(pipe.0, Some(&mut ov)) {
@@ -144,6 +147,7 @@ pub fn pick(req: &Request, owner: HWND) -> Option<Response> {
             Err(e) if e.code() == ERROR_PIPE_CONNECTED.to_hresult() => {}
             Err(e) if e.code() == ERROR_IO_PENDING.to_hresult() => {
                 if !pump_until(event.0, Some(CONNECT_TIMEOUT)) {
+                    crate::log("pick: rustyfiles didn't connect");
                     return None;
                 }
             }
@@ -157,9 +161,11 @@ pub fn pick(req: &Request, owner: HWND) -> Option<Response> {
         }
         let mut len = [0u8; 4];
         if !io(pipe.0, event.0, &mut len, false) {
+            crate::log("pick: the answer didn't arrive (pipe closed)");
             return None;
         }
         let mut body = vec![0u8; u32::from_le_bytes(len).min(16 << 20) as usize];
+        crate::log(&format!("pick: answer of {} bytes", body.len()));
         if !io(pipe.0, event.0, &mut body, false) {
             return None;
         }

@@ -37,6 +37,9 @@ fn main() -> windows::core::Result<()> {
         if mode == "folder" {
             opts |= FOS_PICKFOLDERS;
         }
+        if mode == "multi" {
+            opts |= FOS_ALLOWMULTISELECT;
+        }
         if mode == "save" {
             d.SetFileName(w!("notlar"))?;
             d.SetDefaultExtension(w!("txt"))?;
@@ -45,6 +48,15 @@ fn main() -> windows::core::Result<()> {
         let folder: IShellItem = SHCreateItemFromParsingName(&HSTRING::from(start.as_str()), None)?;
         d.SetFolder(&folder)?;
         match d.Show(None) {
+            Ok(()) if mode == "multi" => {
+                // multi-select apps read the array
+                let arr = d.cast::<IFileOpenDialog>()?.GetResults()?;
+                for i in 0..arr.GetCount()? {
+                    let p = arr.GetItemAt(i)?.GetDisplayName(SIGDN_FILESYSPATH)?;
+                    println!("RESULT {}", p.to_string().unwrap_or_default());
+                    CoTaskMemFree(Some(p.0 as *const c_void));
+                }
+            }
             Ok(()) => {
                 let item = d.GetResult()?;
                 let p = item.GetDisplayName(SIGDN_FILESYSPATH)?;
