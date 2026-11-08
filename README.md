@@ -18,7 +18,7 @@ freeze it.
 </p>
 
 <p align="center">
-  <a href="https://www.buymeacoffee.com/ozerguzel"><img alt="Buy me a coffee" src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=&slug=ozerguzel&button_colour=FFDD00&font_colour=000000&font_family=Cookie&outline_colour=000000&coffee_colour=ffffff" height="44"></a>
+  <a href="https://www.buymeacoffee.com/ozerguzel"><img alt="Buy me a coffee" src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="44"></a>
 </p>
 
 <p align="center">
