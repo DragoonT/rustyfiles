@@ -31,6 +31,7 @@ pub mod network;
 pub mod pe;
 pub mod fileactions;
 pub mod fileinfo;
+pub mod journal;
 pub mod jumplist;
 pub mod wsearch;
 pub mod preview_host;

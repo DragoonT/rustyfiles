@@ -41,6 +41,10 @@ fn build(src: &std::path::Path) {
 }
 
 fn main() {
+    // BENCH_JOURNAL=1: journal the jobs (as the app does) to measure what it costs
+    if std::env::var_os("BENCH_JOURNAL").is_some() {
+        rf_win::fastcopy::set_journal_dir(std::env::temp_dir().join("rf-bench-journals"));
+    }
     let mut args = std::env::args().skip(1);
     let work = args.next().map(PathBuf::from).unwrap_or_else(|| std::env::temp_dir().join("rf-copybench"));
     let runs: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(3);
