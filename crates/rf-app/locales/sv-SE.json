@@ -864,5 +864,7 @@
  "83267ed9": "filer klara",
  "6be00554": "Fortsätta där det slutade? Filer som redan är klara kontrolleras på nytt mot sina källor; delvis kopierade filer kopieras om.",
  "276fcd7c": "Kasta",
- "5f2e231e": "Senare"
+ "5f2e231e": "Senare",
+ "2d3f3708": "Visar de första 256 kB",
+ "cdfb9ee8": "Offset"
 }

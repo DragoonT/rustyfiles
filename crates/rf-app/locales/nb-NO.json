@@ -864,5 +864,7 @@
  "83267ed9": "filer ferdige",
  "6be00554": "Fortsette der det stoppet? Filer som allerede er ferdige, sjekkes på nytt mot kildene; delvis kopierte filer kopieres på nytt.",
  "276fcd7c": "Forkast",
- "5f2e231e": "Senere"
+ "5f2e231e": "Senere",
+ "2d3f3708": "Viser de første 256 KB",
+ "cdfb9ee8": "Offset"
 }

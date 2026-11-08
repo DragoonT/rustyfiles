@@ -2466,6 +2466,18 @@
   "en": "Flattening:"
  },
  {
+  "id": "2d3f3708",
+  "key": "İlk 256 KB gösteriliyor",
+  "tr": "İlk 256 KB gösteriliyor",
+  "en": "Showing the first 256 KB"
+ },
+ {
+  "id": "cdfb9ee8",
+  "key": "Ofset",
+  "tr": "Ofset",
+  "en": "Offset"
+ },
+ {
   "id": "707e075d",
   "key": "Yarıda kalan bir kopyalama var",
   "tr": "Yarıda kalan bir kopyalama var",
