@@ -1171,6 +1171,7 @@ impl FolderView {
             self.visible.extend(start..self.entries.len() as u32);
         }
         if done {
+            self.resort_for_sizes();
             self.apply_reselect(cx);
         }
         cx.notify();
@@ -1246,6 +1247,8 @@ impl FolderView {
         if !self.try_install_view(view) {
             self.rebuild_visible();
         }
+        // measured folder sizes go back into the fresh entries (before the cursor is placed)
+        self.resort_for_sizes();
         self.selected = self
             .entries
             .iter()
@@ -2055,6 +2058,35 @@ impl FolderView {
         (self.selected.len(), size, has_dir)
     }
 
+    /// Folders whose size was measured carry it in their entry, so sorting by Size puts them
+    /// among the files by their real size. Returns whether anything changed.
+    fn apply_dir_sizes(&mut self) -> bool {
+        if self.folder_sizes.is_empty() {
+            return false;
+        }
+        let mut changed = false;
+        for i in 0..self.entries.len() {
+            if !self.entries[i].is_dir() {
+                continue;
+            }
+            let Some(p) = self.path_of(i as u32) else { continue };
+            if let Some(DirSize::Done(b)) = self.folder_sizes.get(&p) {
+                if self.entries[i].size != *b {
+                    self.entries[i].size = *b;
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
+    /// Re-sorts when measured folder sizes changed what a Size sort shows.
+    fn resort_for_sizes(&mut self) {
+        if self.apply_dir_sizes() && self.sort.key == SortKey::Size {
+            self.rebuild_visible();
+        }
+    }
+
     /// Narrow panes (dual pane, small windows) drop columns: Type first, then Date.
     /// Size of folder `p` as far as known; asks for it when it was never requested. Requests of
     /// one frame start together as one batch (all folders walk in parallel, each shows up as soon
@@ -2105,6 +2137,7 @@ impl FolderView {
                         }
                         v.size_batches.retain(|(b, _)| !b.finished());
                         if changed {
+                            v.resort_for_sizes();
                             cx.notify();
                         }
                         let more = !v.size_batches.is_empty();
