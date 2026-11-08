@@ -2362,7 +2362,17 @@ impl FolderView {
         let (show_tags, show_git, show_sync) = (vis.tags, vis.git, vis.sync);
         // columns that don't sort: plain label + resize handle
         let plain = |id: &'static str, label: &'static str, width: f32| {
-            h_flex().id(id).h_full().px_2().items_center().w(px(width)).flex_shrink_0().text_color(p.text_secondary).child(label).relative()
+            h_flex()
+                .id(id)
+                .h_full()
+                .px_2()
+                .items_center()
+                .w(px(width))
+                .flex_shrink_0()
+                .overflow_hidden()
+                .text_color(p.text_secondary)
+                .child(div().min_w_0().whitespace_nowrap().overflow_hidden().text_ellipsis().child(label))
+                .relative()
         };
         let col = |id: &'static str, label: &'static str, key: SortKey, w: Option<Pixels>, right: bool, cx: &mut Context<Self>| {
             let active = self.sort.key == key;
@@ -2378,8 +2388,9 @@ impl FolderView {
                 .hover(|s| s.bg(p.hover))
                 .text_color(if active { p.text } else { p.text_secondary })
                 .when(right, |d| d.justify_end())
-                .child(label)
-                .when(active, |d| d.child(Icon::new(arrow).size(px(12.)).text_color(p.text_secondary)))
+                .overflow_hidden()
+                .child(div().min_w_0().whitespace_nowrap().overflow_hidden().text_ellipsis().child(label))
+                .when(active, |d| d.child(Icon::new(arrow).size(px(12.)).flex_shrink_0().text_color(p.text_secondary)))
                 .on_click(cx.listener(move |this, _, _, cx| this.set_sort(key, cx)));
             d = match w {
                 Some(w) => d.w(w).flex_shrink_0(),
@@ -2774,6 +2785,8 @@ impl FolderView {
                         .px_2()
                         .text_color(p.text_secondary)
                         .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
                         .child(format::datetime(e.modified_ms))
                 }))
                 .children(show_created.then(|| {
@@ -2783,6 +2796,8 @@ impl FolderView {
                         .px_2()
                         .text_color(p.text_secondary)
                         .whitespace_nowrap()
+                        .overflow_hidden()
+                        .text_ellipsis()
                         .child(format::datetime(e.created_ms))
                 }))
                 .when(show_type, |row| row.child(
