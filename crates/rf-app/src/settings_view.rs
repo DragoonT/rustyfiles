@@ -1610,7 +1610,7 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
                     ("Velopack", "MIT"),
                     ("windows-rs", "MIT / Apache-2.0"),
                     ("Lucide icons", "ISC"),
-                    ("zip, sevenz-rust, tar, flate2, zstd", "MIT / Apache-2.0"),
+                    ("zip, sevenz-rust2, tar, flate2, zstd", "MIT / Apache-2.0"),
                     ("notify", "CC0 / Artistic-2.0"),
                     ("chrono, serde, toml", "MIT / Apache-2.0"),
                 ]

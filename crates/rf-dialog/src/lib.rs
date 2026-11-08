@@ -197,6 +197,13 @@ mod com {
             }
             let req = self.request(owner);
             let has_owner = !owner.is_invalid();
+            {
+                use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+                let mut pid = 0u32;
+                unsafe { GetWindowThreadProcessId(owner, Some(&mut pid)) };
+                let front = unsafe { GetForegroundWindow() } == owner;
+                crate::log(&format!("show: {:?}, owner {:?} of process {pid}, owner in front: {front}", req.mode, owner.0));
+            }
             if has_owner {
                 unsafe {
                     let _ = EnableWindow(owner, false);
@@ -225,14 +232,20 @@ mod com {
                 st.file_name = std::path::Path::new(&resp.paths[0]).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                 st.result = Some(resp.paths);
             }
-            // the app may still refuse the choice (OnFileOk); that ends the dialog as cancelled
+            // The app may still refuse the choice: only S_FALSE from OnFileOk does that (it ends
+            // our dialog as cancelled). Anything else accepts, as in Windows' dialog: Chrome's
+            // sinks answer E_NOTIMPL, which windows-rs would report as an error.
             let me: IFileDialog = self.to_interface::<IFileOpenDialog>().cast()?;
             let sinks: Vec<IFileDialogEvents> = self.st.borrow().sinks.iter().map(|(_, s)| s.clone()).collect();
             for s in sinks {
-                if let Err(e) = unsafe { s.OnFileOk(&me) } {
-                    crate::log(&format!("show: the app refused the choice in OnFileOk ({:?})", e.code()));
+                let hr = unsafe { (Interface::vtable(&s).OnFileOk)(Interface::as_raw(&s), Interface::as_raw(&me)) };
+                if hr == S_FALSE {
+                    crate::log("show: the app refused the choice in OnFileOk (S_FALSE)");
                     self.st.borrow_mut().result = None;
                     return Err(ERROR_CANCELLED.to_hresult().into());
+                }
+                if hr != S_OK {
+                    crate::log(&format!("show: OnFileOk answered {hr:?}, taken as accepted"));
                 }
             }
             Ok(())

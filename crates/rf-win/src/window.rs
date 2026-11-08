@@ -99,14 +99,46 @@ pub fn set_owner(hwnd: isize, owner: isize) {
     }
 }
 
+/// Gives the foreground back to `owner` (another app's window) while we still hold it: when our
+/// window closes, Windows would otherwise activate whatever window comes next.
+pub fn hand_foreground(owner: isize) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{AllowSetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow};
+    unsafe {
+        let h = HWND(owner as *mut _);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        if pid != 0 {
+            let _ = AllowSetForegroundWindow(pid);
+        }
+        let _ = SetForegroundWindow(h);
+    }
+}
+
 /// Brings `hwnd` to the front and gives it the keyboard (the caller was allowed to by the app
 /// in front, see AllowSetForegroundWindow).
+///
+/// When that permission didn't come (Chrome asks from a background helper process, which
+/// can't grant it), the window would open behind the app: then our thread shares the input
+/// state of the window in front for a moment, which lets the switch through.
 pub fn bring_to_front(hwnd: isize) {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{SW_SHOW, SetForegroundWindow, ShowWindow};
+    use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+    use windows::Win32::UI::WindowsAndMessaging::{BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SW_SHOW, SetForegroundWindow, ShowWindow};
     unsafe {
         let h = HWND(hwnd as *mut _);
         let _ = ShowWindow(h, SW_SHOW);
+        if SetForegroundWindow(h).as_bool() && GetForegroundWindow() == h {
+            return;
+        }
+        let front = GetForegroundWindow();
+        let theirs = GetWindowThreadProcessId(front, None);
+        let mine = GetCurrentThreadId();
+        let attached = theirs != 0 && theirs != mine && AttachThreadInput(mine, theirs, true).as_bool();
+        let _ = BringWindowToTop(h);
         let _ = SetForegroundWindow(h);
+        if attached {
+            let _ = AttachThreadInput(mine, theirs, false);
+        }
     }
 }

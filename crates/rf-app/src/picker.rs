@@ -49,6 +49,9 @@ impl PickSession {
     /// The app is already waiting to read, so the write doesn't block.
     fn answer(&self, resp: Response) {
         if let Some(mut f) = self.pipe.borrow_mut().take() {
+            if self.req.owner != 0 {
+                rf_win::window::hand_foreground(self.req.owner);
+            }
             if let Err(e) = write_msg(&mut f, &resp) {
                 log::warn!("picker answer: {e}");
             }

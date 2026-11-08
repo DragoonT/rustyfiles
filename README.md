@@ -171,16 +171,28 @@ Bug reports and pull requests are welcome.
 
 ## Thanks
 
-rustyfiles stands on other people's work.
+rustyfiles stands on other people's work, and borrowed a lot of ideas along the way.
 
 [Files](https://github.com/files-community/Files) showed what a modern file manager for
-Windows can be. Its feature set was our checklist, and its approach to replacing Explorer as
-the default file manager guided ours. Thank you to the Files community.
+Windows can be. Its feature set was our checklist, its settings and layout shaped ours, and its
+approach to replacing Explorer as the default file manager guided ours. Thank you to the Files
+community.
 
 [GPUI](https://gpui.rs), the UI framework of the [Zed](https://github.com/zed-industries/zed)
 editor, draws every pixel of rustyfiles on the GPU and makes a window this fast possible.
 Thank you to the Zed team for building it and sharing it, and to
 [Longbridge](https://github.com/longbridge/gpui-kit) for gpui-kit, the components we build on.
+
+DirectLook follows the idea of macOS Quick Look, and
+[QuickLook](https://github.com/QL-Win/QuickLook) by Paddy Xu, which brought it to Windows first.
+rarchive learned the RAR format from the UnRAR source by Alexander Roshal.
+
+Built with [windows-rs](https://github.com/microsoft/windows-rs),
+[Velopack](https://velopack.io) (install and updates), [Lucide](https://lucide.dev) icons,
+[zip](https://github.com/zip-rs/zip2), [sevenz-rust2](https://github.com/hasenbanck/sevenz-rust),
+[tar](https://github.com/alexcrichton/tar-rs), [notify](https://github.com/notify-rs/notify)
+and many more crates. The banner uses
+[Bricolage Grotesque](https://github.com/ateliertriay/bricolage) by Atelier Triay.
 
 ## License
 
