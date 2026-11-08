@@ -27,6 +27,7 @@ pub mod look;
 pub mod listing;
 pub mod localized;
 pub mod network;
+pub mod pe;
 pub mod fileactions;
 pub mod fileinfo;
 pub mod jumplist;
