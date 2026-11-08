@@ -145,6 +145,130 @@ pub fn grouped(tasks: Vec<Task>) -> Vec<(String, Vec<Task>)> {
     groups
 }
 
+// ---------- change tracking ----------
+
+use std::cell::RefCell;
+use std::sync::mpsc::{Receiver, Sender};
+use std::time::Duration;
+
+/// What changed among the task windows (coalesced over a frame).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Changes {
+    /// Windows appeared, went away, or were shown / hidden / cloaked: the list changed.
+    pub list: bool,
+    /// A title changed.
+    pub titles: bool,
+    /// Another window came to the front, or one was minimized / restored.
+    pub active: bool,
+}
+
+thread_local! {
+    static EVENTS: RefCell<Option<Sender<u32>>> = const { RefCell::new(None) };
+}
+
+unsafe extern "system" fn on_event(
+    _hook: windows::Win32::UI::Accessibility::HWINEVENTHOOK,
+    event: u32,
+    hwnd: HWND,
+    id_object: i32,
+    id_child: i32,
+    _thread: u32,
+    _time: u32,
+) {
+    // only whole windows, not their parts (carets, scroll bars, list items)
+    if id_object != 0 || id_child != 0 || hwnd.is_invalid() {
+        return;
+    }
+    EVENTS.with(|e| {
+        if let Some(tx) = e.borrow().as_ref() {
+            let _ = tx.send(event);
+        }
+    });
+}
+
+/// Watches the task windows; `on_change` runs on a background thread, at most once a frame
+/// (~16 ms) with what changed. Drop to stop.
+pub struct TaskWatch {
+    thread: u32,
+}
+
+impl Drop for TaskWatch {
+    fn drop(&mut self) {
+        use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+        unsafe {
+            let _ = PostThreadMessageW(self.thread, WM_QUIT, windows::Win32::Foundation::WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+fn classify(event: u32, c: &mut Changes) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EVENT_OBJECT_CLOAKED, EVENT_OBJECT_CREATE, EVENT_OBJECT_DESTROY, EVENT_OBJECT_HIDE, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_OBJECT_UNCLOAKED,
+        EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART,
+    };
+    match event {
+        EVENT_OBJECT_CREATE | EVENT_OBJECT_DESTROY | EVENT_OBJECT_SHOW | EVENT_OBJECT_HIDE | EVENT_OBJECT_CLOAKED | EVENT_OBJECT_UNCLOAKED => c.list = true,
+        EVENT_OBJECT_NAMECHANGE => c.titles = true,
+        EVENT_SYSTEM_FOREGROUND | EVENT_SYSTEM_MINIMIZESTART | EVENT_SYSTEM_MINIMIZEEND => c.active = true,
+        _ => {}
+    }
+}
+
+/// Starts watching. The hooks live on their own thread with a message loop (out-of-context
+/// WinEvents are delivered there); a second thread coalesces them.
+pub fn watch(on_change: impl Fn(Changes) + Send + 'static) -> anyhow::Result<TaskWatch> {
+    use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, EVENT_OBJECT_CLOAKED, EVENT_OBJECT_CREATE, EVENT_OBJECT_HIDE, EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_UNCLOAKED, EVENT_SYSTEM_FOREGROUND,
+        EVENT_SYSTEM_MINIMIZEEND, EVENT_SYSTEM_MINIMIZESTART, GetMessageW, MSG, TranslateMessage, WINEVENT_OUTOFCONTEXT,
+    };
+    let (tx, rx): (Sender<u32>, Receiver<u32>) = std::sync::mpsc::channel();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel::<u32>();
+    std::thread::Builder::new().name("rf-taskwatch".into()).spawn(move || {
+        EVENTS.with(|e| *e.borrow_mut() = Some(tx));
+        let ranges = [
+            (EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND),
+            (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
+            (EVENT_OBJECT_CREATE, EVENT_OBJECT_HIDE),
+            (EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE),
+            (EVENT_OBJECT_CLOAKED, EVENT_OBJECT_UNCLOAKED),
+        ];
+        let hooks: Vec<_> = ranges.iter().map(|&(a, b)| unsafe { SetWinEventHook(a, b, None, Some(on_event), 0, 0, WINEVENT_OUTOFCONTEXT) }).collect();
+        let _ = ready_tx.send(unsafe { windows::Win32::System::Threading::GetCurrentThreadId() });
+        let mut msg = MSG::default();
+        unsafe {
+            while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+            for h in hooks {
+                let _ = UnhookWinEvent(h);
+            }
+        }
+        EVENTS.with(|e| *e.borrow_mut() = None);
+    })?;
+    let thread = ready_rx.recv_timeout(Duration::from_secs(5))?;
+    std::thread::Builder::new().name("rf-taskwatch-coalesce".into()).spawn(move || {
+        while let Ok(first) = rx.recv() {
+            let mut c = Changes::default();
+            classify(first, &mut c);
+            let until = std::time::Instant::now() + Duration::from_millis(16);
+            loop {
+                let left = until.saturating_duration_since(std::time::Instant::now());
+                match rx.recv_timeout(left) {
+                    Ok(e) => classify(e, &mut c),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => break,
+                    Err(_) => return,
+                }
+            }
+            if c != Changes::default() {
+                on_change(c);
+            }
+        }
+    })?;
+    Ok(TaskWatch { thread })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,6 +297,60 @@ mod tests {
         assert_eq!(g.len(), 2);
         assert_eq!(g[0].1.iter().map(|t| t.pid).collect::<Vec<_>>(), vec![1, 3]);
         assert_eq!(g[1].1.iter().map(|t| t.pid).collect::<Vec<_>>(), vec![2, 4]);
+    }
+
+    #[test]
+    fn notices_a_new_window_quickly() {
+        use std::sync::{Arc, Mutex};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            CreateWindowExW, DestroyWindow, SW_SHOWNOACTIVATE, ShowWindow, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW,
+        };
+        let seen: Arc<Mutex<Vec<(std::time::Instant, Changes)>>> = Default::default();
+        let s2 = seen.clone();
+        let _w = watch(move |c| s2.lock().unwrap().push((std::time::Instant::now(), c))).unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        seen.lock().unwrap().clear();
+        // an off-screen, never-activated window, from this thread
+        let class = crate::wide::wide("STATIC");
+        let title = crate::wide::wide("rf tasklist test");
+        let shown_at;
+        let h = unsafe {
+            let h = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                windows::core::PCWSTR(class.as_ptr()),
+                windows::core::PCWSTR(title.as_ptr()),
+                WS_OVERLAPPEDWINDOW,
+                -4000,
+                -4000,
+                200,
+                100,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            shown_at = std::time::Instant::now();
+            let _ = ShowWindow(h, SW_SHOWNOACTIVATE);
+            h
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let mut latency = None;
+        while std::time::Instant::now() < deadline {
+            if let Some((t, _)) = seen.lock().unwrap().iter().find(|(_, c)| c.list) {
+                latency = Some(t.duration_since(shown_at));
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let listed = tasks().iter().any(|t| t.hwnd == h.0 as isize && t.title == "rf tasklist test");
+        unsafe {
+            let _ = DestroyWindow(h);
+        }
+        let latency = latency.expect("the new window was reported");
+        assert!(listed, "and it is a task");
+        assert!(latency < Duration::from_millis(500), "reported after {latency:?}");
+        eprintln!("new window reported after {latency:?}");
     }
 
     #[test]
