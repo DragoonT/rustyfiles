@@ -417,31 +417,40 @@ pub fn look_send(path: PathBuf, size: u64, follow: bool) {
         return;
     }
     std::thread::spawn(move || {
-        let Some((archive, inner)) = split(&path) else { return };
-        let key = (archive.clone(), mtime_ms(&archive), inner);
-        let cached = LOOK_COPIES.lock().unwrap().as_ref().and_then(|m| m.get(&key).cloned()).filter(|p| p.exists());
-        let real = match cached {
-            Some(p) => p,
-            None => match extract_items(std::slice::from_ref(&path), &|| false, &mut |_| {}) {
-                Ok(mut v) => {
-                    let p = v.pop().unwrap_or_default();
-                    let mut g = LOOK_COPIES.lock().unwrap();
-                    let m = g.get_or_insert_with(HashMap::new);
-                    if m.len() > 256 {
-                        m.clear();
-                    }
-                    m.insert(key, p.clone());
-                    p
-                }
-                Err(e) => {
-                    log::warn!("directlook: {path:?}: {e:#}");
-                    return;
-                }
-            },
-        };
-        send(msg(real), !follow);
+        if let Some(real) = real_copy(&path) {
+            send(msg(real), !follow);
+        }
     });
 }
+
+/// A real file for an item inside an archive: extracted once (blocking), then reused while the
+/// archive is unchanged. `None` when it isn't in an archive or can't be extracted.
+pub fn real_copy(path: &Path) -> Option<PathBuf> {
+    let (archive, inner) = split(path)?;
+    let key = (archive.clone(), mtime_ms(&archive), inner);
+    if let Some(p) = LOOK_COPIES.lock().unwrap().as_ref().and_then(|m| m.get(&key).cloned()).filter(|p| p.exists()) {
+        return Some(p);
+    }
+    match extract_items(&[path.to_path_buf()], &|| false, &mut |_| {}) {
+        Ok(mut v) => {
+            let p = v.pop()?;
+            let mut g = LOOK_COPIES.lock().unwrap();
+            let m = g.get_or_insert_with(HashMap::new);
+            if m.len() > 256 {
+                m.clear();
+            }
+            m.insert(key, p.clone());
+            Some(p)
+        }
+        Err(e) => {
+            log::warn!("archive item {path:?}: {e:#}");
+            None
+        }
+    }
+}
+
+/// Members up to this size are extracted for the preview pane as the selection moves.
+pub const PREVIEW_EXTRACT_MAX: u64 = LOOK_FOLLOW_MAX;
 
 /// "a.txt" or "3 öğe" for a title.
 fn names(paths: &[PathBuf]) -> String {

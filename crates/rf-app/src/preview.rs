@@ -52,6 +52,9 @@ pub struct Preview {
     /// The last thumbnail shown, and when the target last changed: while the next file's
     /// thumbnail loads, the previous one stays up briefly instead of flashing the type icon.
     last_thumb: Option<std::sync::Arc<RenderImage>>,
+    /// An item inside an archive and its extracted copy (thumbnails come from the copy).
+    archive_copy: Option<(PathBuf, PathBuf)>,
+    _archive_task: Option<Task<()>>,
     changed_at: std::time::Instant,
     _hold_task: Option<Task<()>>,
 }
@@ -117,6 +120,8 @@ impl Preview {
             _extra_task: None,
             player: None,
             last_thumb: None,
+            archive_copy: None,
+            _archive_task: None,
             changed_at: std::time::Instant::now(),
             _hold_task: None,
         }
@@ -125,6 +130,13 @@ impl Preview {
     /// The thumbnail to draw for `e`: its own once loaded; meanwhile, for a short while, the
     /// previous one (arrow-keying through photos shouldn't flash an icon between them).
     fn thumb_or_hold(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<std::sync::Arc<RenderImage>> {
+        // an item inside an archive: its extracted copy, once there
+        let copy_dir = self
+            .archive_copy
+            .as_ref()
+            .filter(|(p, _)| p.parent() == Some(dir) && p.file_name().is_some_and(|n| n.to_string_lossy() == *e.name))
+            .and_then(|(_, real)| real.parent().map(Path::to_path_buf));
+        let dir = copy_dir.as_deref().unwrap_or(dir);
         let wants = icons::has_thumbnail(e);
         let thumb = if wants { self.images.update(cx, |c, cx| c.thumbnail(dir, e, size, cx)) } else { None };
         match thumb {
@@ -683,10 +695,31 @@ impl Preview {
             }
         }
         if let Some((path, e)) = &self.target {
-            if !e.is_dir() && is_text_like(e) && e.size > 0 && !e.is_cloud_placeholder() {
+            // by the path alone (no disk access on the UI thread): a parent named like an archive
+            let in_archive = path.ancestors().skip(1).any(|a| a.as_os_str().len() > 3 && crate::archive_view::is_browsable(a));
+            if in_archive && e.size <= crate::archive_view::PREVIEW_EXTRACT_MAX && !e.is_dir() && icons::has_thumbnail(e) {
+                // images (and other thumbnailed files) inside an archive: extract, then the
+                // thumbnail is made from the copy
+                let p2 = path.clone();
+                let work = cx.background_spawn(async move { crate::archive_view::real_copy(&p2) });
+                let path2 = path.clone();
+                self._archive_task = Some(cx.spawn(async move |this, cx| {
+                    if let Some(real) = work.await {
+                        let _ = this.update(cx, |v, cx| {
+                            v.archive_copy = Some((path2, real));
+                            cx.notify();
+                        });
+                    }
+                }));
+            }
+            if !e.is_dir() && is_text_like(e) && e.size > 0 && !e.is_cloud_placeholder() && (!in_archive || e.size <= crate::archive_view::PREVIEW_EXTRACT_MAX) {
                 let path = path.clone();
                 let p2 = path.clone();
-                let read = cx.background_spawn(async move { read_text_head(&p2) });
+                let read = cx.background_spawn(async move {
+                    // inside an archive: the extracted copy (small members only)
+                    let real = if p2.exists() { Some(p2) } else { crate::archive_view::real_copy(&p2) };
+                    real.and_then(|r| read_text_head(&r))
+                });
                 self._task = Some(cx.spawn(async move |this, cx| {
                     let text = read.await;
                     let _ = this.update(cx, |v, cx| {
