@@ -2466,6 +2466,54 @@
   "en": "Flattening:"
  },
  {
+  "id": "1f5a06b8",
+  "key": "Verilen",
+  "tr": "Verilen",
+  "en": "Issued to"
+ },
+ {
+  "id": "5f62ca31",
+  "key": "Veren",
+  "tr": "Veren",
+  "en": "Issued by"
+ },
+ {
+  "id": "dcf39e11",
+  "key": "Geçerlilik",
+  "tr": "Geçerlilik",
+  "en": "Valid"
+ },
+ {
+  "id": "21167459",
+  "key": "süresi dolmuş",
+  "tr": "süresi dolmuş",
+  "en": "expired"
+ },
+ {
+  "id": "2c8ae42a",
+  "key": "henüz geçerli değil",
+  "tr": "henüz geçerli değil",
+  "en": "not yet valid"
+ },
+ {
+  "id": "a98d238f",
+  "key": "Açıklama",
+  "tr": "Açıklama",
+  "en": "Description"
+ },
+ {
+  "id": "a8affc4f",
+  "key": "Şirket",
+  "tr": "Şirket",
+  "en": "Company"
+ },
+ {
+  "id": "bc81e7ed",
+  "key": "Sürüm",
+  "tr": "Sürüm",
+  "en": "Version"
+ },
+ {
   "id": "c272ef4d",
   "key": "Yazı tipi okunamadı",
   "tr": "Yazı tipi okunamadı",

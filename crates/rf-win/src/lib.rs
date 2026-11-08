@@ -3,6 +3,7 @@
 //! Every function here may block (disk, network, shell extensions). Never call them on the UI thread.
 
 pub mod accent;
+pub mod cert;
 pub mod clipboard;
 pub mod complete;
 pub mod ctxmenu;

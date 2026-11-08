@@ -849,5 +849,8 @@
  "c531359b": "Separate with semicolons, for example: .iso; .insv; .psd",
  "d69799ce": "more rows",
  "c272ef4d": "Couldn't read the font",
- "7b474d09": "glyphs"
+ "7b474d09": "glyphs",
+ "a98d238f": "Description",
+ "a8affc4f": "Company",
+ "bc81e7ed": "Version"
 }

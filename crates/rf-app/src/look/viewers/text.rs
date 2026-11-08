@@ -53,6 +53,10 @@ impl Viewer for TextViewer {
         if EXTENSIONS.contains(&f.ext.as_str()) {
             return true;
         }
+        // certificates get the info card (subject, issuer, validity), even as PEM text
+        if ["cer", "crt", "der", "pem"].contains(&f.ext.as_str()) {
+            return false;
+        }
         let small = std::fs::metadata(&f.path).map_or(true, |m| m.len() <= SNIFF_MAX);
         small && !f.head.is_empty() && looks_like_text(&f.head)
     }
