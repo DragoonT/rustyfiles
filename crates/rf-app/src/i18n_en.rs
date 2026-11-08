@@ -416,6 +416,7 @@ pub const EN: &[(&str, &str)] = &[
     ("içine taşınır ve boş kalan alt klasörler silinir.", "will be moved into it, and the empty subfolders will be deleted."),
     ("Düzleştir", "Flatten"),
     ("Düzleştiriliyor:", "Flattening:"),
+    ("İndirildi:", "Downloaded:"),
     ("Verilen", "Issued to"),
     ("Veren", "Issued by"),
     ("Geçerlilik", "Valid"),

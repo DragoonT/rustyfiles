@@ -62,7 +62,8 @@ pub enum State {
     Idle,
     Checking,
     UpToDate,
-    Downloading(String),
+    /// Version and percent downloaded.
+    Downloading(String, u8),
     /// Downloaded: applied on restart (or at the next start anyway).
     Ready(String),
     Failed(String),
@@ -77,6 +78,24 @@ pub fn state() -> State {
 
 fn set(s: State) {
     *STATE.lock().unwrap() = Some(s);
+}
+
+/// A check or download is running (the About page redraws while this is true).
+pub fn busy() -> bool {
+    matches!(state(), State::Checking | State::Downloading(..))
+}
+
+/// `RUSTYFILES_FAKE_UPDATE=1` (test copies): check, download 0→100 % and "ready" without a network,
+/// to see the About page's states.
+fn fake_check() {
+    use std::thread::sleep;
+    set(State::Checking);
+    sleep(Duration::from_millis(1500));
+    for pct in (0..=100).step_by(4) {
+        set(State::Downloading("9.9.9".into(), pct));
+        sleep(Duration::from_millis(120));
+    }
+    set(State::Ready("9.9.9".into()));
 }
 
 fn manager() -> Option<UpdateManager> {
@@ -98,6 +117,9 @@ pub fn version() -> String {
 
 /// Looks for an update and downloads it. Blocking: call off the UI thread.
 pub fn check() {
+    if std::env::var_os("RUSTYFILES_FAKE_UPDATE").is_some() {
+        return fake_check();
+    }
     let Some(um) = manager() else {
         set(State::NotInstalled);
         return;
@@ -110,8 +132,18 @@ pub fn check() {
     match um.check_for_updates() {
         Ok(UpdateCheck::UpdateAvailable(info)) => {
             let v = info.TargetFullRelease.Version.clone();
-            set(State::Downloading(v.clone()));
-            match um.download_updates(&info, None) {
+            set(State::Downloading(v.clone(), 0));
+            // Velopack reports 0–100 on a channel; mirror it into the state while it downloads
+            let (tx, rx) = std::sync::mpsc::channel::<i16>();
+            let pv = v.clone();
+            let progress = std::thread::spawn(move || {
+                for pct in rx {
+                    set(State::Downloading(pv.clone(), pct.clamp(0, 100) as u8));
+                }
+            });
+            let result = um.download_updates(&info, Some(tx));
+            let _ = progress.join();
+            match result {
                 Ok(()) => {
                     *PENDING.lock().unwrap() = Some(*info);
                     set(State::Ready(v));
@@ -139,11 +171,23 @@ pub fn spawn_checks(cx: &mut gpui_kit::App, changed: impl Fn(&mut gpui_kit::App)
             if !auto {
                 continue;
             }
-            cx.background_executor().spawn(async { check() }).await;
+            let run = cx.background_executor().spawn(async { check() });
+            redraw_while_busy(cx).await;
+            run.await;
             cx.update(|cx| changed(cx));
         }
     })
     .detach();
+}
+
+/// Redraws the windows a few times a second while a check or download runs (progress on About).
+pub async fn redraw_while_busy(cx: &mut gpui_kit::AsyncApp) {
+    cx.background_executor().timer(Duration::from_millis(50)).await;
+    while busy() {
+        cx.update(|cx| cx.refresh_windows());
+        cx.background_executor().timer(Duration::from_millis(150)).await;
+    }
+    cx.update(|cx| cx.refresh_windows());
 }
 
 /// Restarts into the downloaded update. DirectLook is asked to quit first (its exe is replaced).
