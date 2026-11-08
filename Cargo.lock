@@ -3147,7 +3147,7 @@ checksum = "99b18b06f5026b3d312488eacfdddbe78f82b4bf32bb2d2bc3186e31e552b797"
 
 [[package]]
 name = "gpustress"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "windows 0.62.2",
 ]
@@ -6098,7 +6098,7 @@ dependencies = [
 
 [[package]]
 name = "rf-app"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "chrono",
@@ -6131,7 +6131,7 @@ dependencies = [
 
 [[package]]
 name = "rf-archive"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "bzip2",
@@ -6153,7 +6153,7 @@ dependencies = [
 
 [[package]]
 name = "rf-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "chardetng",
@@ -6171,7 +6171,7 @@ dependencies = [
 
 [[package]]
 name = "rf-dialog"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -6181,7 +6181,7 @@ dependencies = [
 
 [[package]]
 name = "rf-player"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "filmcraft-codecs",
@@ -6195,7 +6195,7 @@ dependencies = [
 
 [[package]]
 name = "rf-win"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "crc32fast",
