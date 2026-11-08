@@ -50,6 +50,11 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
 4. Playback in DirectLook: clock, frame queue, seeking, audio; replaces the Media Foundation
    route, and FilmCraft for video.
 5. MKV / WebM, VP9 and AV1 (the GPU decodes them too), fragmented MP4.
+6. Formats no GPU decodes, on the CPU: ProRes and DNxHR (intra-only, slices decode in
+   parallel), MXF, AIFF. Editing sources must keep previewing.
+7. FilmCraft removed in one step: dependency, `rf-player`'s FilmCraft code, texts and notes.
+   Not before phases 4 and 6 cover what it plays today (decided 2026-11-09: no format may
+   disappear in between).
 
 Fallback: GPUs without a decoder for the stream (old cards, AV1 before 2020) keep the
 Media Foundation route.
