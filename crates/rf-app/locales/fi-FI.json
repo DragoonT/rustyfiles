@@ -838,5 +838,13 @@
  "247fb2c6": "Ei mitään kommitoitavaa",
  "87629b23": "Etävarastoa ei voitu yhdistää",
  "d23202d0": "Muutoksia ei voitu lisätä valmisteluun",
- "f9b38f82": "Kommitointi epäonnistui"
+ "f9b38f82": "Kommitointi epäonnistui",
+ "f5a6fb37": "Tekstin fontti",
+ "b93f9c14": "Tekstin koko",
+ "675e9367": "Esikatseltavat tiedostot",
+ "41c4c6a3": "Kaikki paitsi luetellut",
+ "5935f483": "Vain luetellut",
+ "486cd422": "Esikatseltavat tarkenteet",
+ "6ba24d2e": "Muokkaa…",
+ "c531359b": "Erota puolipisteillä, esimerkiksi: .iso; .insv; .psd"
 }

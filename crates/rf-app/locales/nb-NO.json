@@ -838,5 +838,13 @@
  "247fb2c6": "Ingenting å committe",
  "87629b23": "Kunne ikke koble til det eksterne repositoriet",
  "d23202d0": "Kunne ikke stage endringene",
- "f9b38f82": "Kunne ikke committe"
+ "f9b38f82": "Kunne ikke committe",
+ "f5a6fb37": "Skrift for tekst",
+ "b93f9c14": "Tekststørrelse",
+ "675e9367": "Filer som skal forhåndsvises",
+ "41c4c6a3": "Alle unntatt de som er oppført",
+ "5935f483": "Bare de som er oppført",
+ "486cd422": "Filtyper som skal forhåndsvises",
+ "6ba24d2e": "Rediger…",
+ "c531359b": "Skill med semikolon, for eksempel: .iso; .insv; .psd"
 }

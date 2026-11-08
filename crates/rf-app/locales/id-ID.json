@@ -838,5 +838,13 @@
  "247fb2c6": "Tidak ada yang di-commit",
  "87629b23": "Tidak dapat menghubungkan remote",
  "d23202d0": "Tidak dapat men-stage perubahan",
- "f9b38f82": "Tidak dapat melakukan commit"
+ "f9b38f82": "Tidak dapat melakukan commit",
+ "f5a6fb37": "Font teks",
+ "b93f9c14": "Ukuran teks",
+ "675e9367": "File yang dipratinjau",
+ "41c4c6a3": "Semua kecuali yang tercantum",
+ "5935f483": "Hanya yang tercantum",
+ "486cd422": "Ekstensi yang dipratinjau",
+ "6ba24d2e": "Edit…",
+ "c531359b": "Pisahkan dengan titik koma, misalnya: .iso; .insv; .psd"
 }

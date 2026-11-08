@@ -838,5 +838,13 @@
  "247fb2c6": "Niente di cui fare il commit",
  "87629b23": "Impossibile connettere il remote",
  "d23202d0": "Impossibile aggiungere le modifiche all'area di staging",
- "f9b38f82": "Impossibile eseguire il commit"
+ "f9b38f82": "Impossibile eseguire il commit",
+ "f5a6fb37": "Carattere del testo",
+ "b93f9c14": "Dimensione del testo",
+ "675e9367": "File da visualizzare in anteprima",
+ "41c4c6a3": "Tutti tranne quelli elencati",
+ "5935f483": "Solo quelli elencati",
+ "486cd422": "Estensioni da visualizzare in anteprima",
+ "6ba24d2e": "Modifica…",
+ "c531359b": "Separa con punto e virgola, ad esempio: .iso; .insv; .psd"
 }

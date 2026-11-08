@@ -838,5 +838,13 @@
  "247fb2c6": "Nenhuma alteração para commit",
  "87629b23": "Não foi possível ligar o remoto",
  "d23202d0": "Não foi possível preparar (stage) as alterações",
- "f9b38f82": "Não foi possível fazer commit"
+ "f9b38f82": "Não foi possível fazer commit",
+ "f5a6fb37": "Tipo de letra do texto",
+ "b93f9c14": "Tamanho do texto",
+ "675e9367": "Ficheiros a pré-visualizar",
+ "41c4c6a3": "Todos, exceto os listados",
+ "5935f483": "Apenas os listados",
+ "486cd422": "Extensões a pré-visualizar",
+ "6ba24d2e": "Editar…",
+ "c531359b": "Separe com pontos e vírgulas, por exemplo: .iso; .insv; .psd"
 }

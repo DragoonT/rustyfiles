@@ -838,5 +838,13 @@
  "247fb2c6": "Intet at committe",
  "87629b23": "Kunne ikke forbinde remote",
  "d23202d0": "Kunne ikke stage ændringerne",
- "f9b38f82": "Kunne ikke committe"
+ "f9b38f82": "Kunne ikke committe",
+ "f5a6fb37": "Skrifttype til tekst",
+ "b93f9c14": "Tekststørrelse",
+ "675e9367": "Filer, der skal vises i eksempel",
+ "41c4c6a3": "Alle undtagen dem på listen",
+ "5935f483": "Kun dem på listen",
+ "486cd422": "Filtypenavne, der skal vises i eksempel",
+ "6ba24d2e": "Rediger…",
+ "c531359b": "Adskil med semikolon, f.eks.: .iso; .insv; .psd"
 }

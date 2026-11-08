@@ -838,5 +838,13 @@
  "247fb2c6": "Nothing to commit",
  "87629b23": "Couldn't connect the remote",
  "d23202d0": "Couldn't stage the changes",
- "f9b38f82": "Couldn't commit"
+ "f9b38f82": "Couldn't commit",
+ "f5a6fb37": "Text font",
+ "b93f9c14": "Text size",
+ "675e9367": "Files to preview",
+ "41c4c6a3": "All except those listed",
+ "5935f483": "Only those listed",
+ "486cd422": "Extensions to preview",
+ "6ba24d2e": "Edit…",
+ "c531359b": "Separate with semicolons, for example: .iso; .insv; .psd"
 }

@@ -2466,6 +2466,54 @@
   "en": "Flattening:"
  },
  {
+  "id": "f5a6fb37",
+  "key": "Metin yazı tipi",
+  "tr": "Metin yazı tipi",
+  "en": "Text font"
+ },
+ {
+  "id": "b93f9c14",
+  "key": "Metin boyutu",
+  "tr": "Metin boyutu",
+  "en": "Text size"
+ },
+ {
+  "id": "675e9367",
+  "key": "Önizlenecek dosyalar",
+  "tr": "Önizlenecek dosyalar",
+  "en": "Files to preview"
+ },
+ {
+  "id": "41c4c6a3",
+  "key": "Hepsi, listedekiler hariç",
+  "tr": "Hepsi, listedekiler hariç",
+  "en": "All except those listed"
+ },
+ {
+  "id": "5935f483",
+  "key": "Yalnızca listedekiler",
+  "tr": "Yalnızca listedekiler",
+  "en": "Only those listed"
+ },
+ {
+  "id": "486cd422",
+  "key": "Önizlenecek uzantılar",
+  "tr": "Önizlenecek uzantılar",
+  "en": "Extensions to preview"
+ },
+ {
+  "id": "6ba24d2e",
+  "key": "Düzenle…",
+  "tr": "Düzenle…",
+  "en": "Edit…"
+ },
+ {
+  "id": "c531359b",
+  "key": "Noktalı virgülle ayırın, örneğin: .iso; .insv; .psd",
+  "tr": "Noktalı virgülle ayırın, örneğin: .iso; .insv; .psd",
+  "en": "Separate with semicolons, for example: .iso; .insv; .psd"
+ },
+ {
   "id": "d8b485fc",
   "key": "Değişiklikleri kaydet (commit)…",
   "tr": "Değişiklikleri kaydet (commit)…",

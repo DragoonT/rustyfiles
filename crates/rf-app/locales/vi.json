@@ -838,5 +838,13 @@
  "247fb2c6": "Không có gì để commit",
  "87629b23": "Không thể kết nối kho từ xa",
  "d23202d0": "Không thể đưa các thay đổi vào vùng chờ",
- "f9b38f82": "Không thể commit"
+ "f9b38f82": "Không thể commit",
+ "f5a6fb37": "Phông chữ văn bản",
+ "b93f9c14": "Cỡ văn bản",
+ "675e9367": "Tệp cần xem trước",
+ "41c4c6a3": "Tất cả trừ những mục trong danh sách",
+ "5935f483": "Chỉ những mục trong danh sách",
+ "486cd422": "Phần mở rộng cần xem trước",
+ "6ba24d2e": "Chỉnh sửa…",
+ "c531359b": "Phân tách bằng dấu chấm phẩy, ví dụ: .iso; .insv; .psd"
 }

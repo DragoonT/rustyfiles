@@ -838,5 +838,13 @@
  "247fb2c6": "Nichts zu committen",
  "87629b23": "Remote konnte nicht verbunden werden",
  "d23202d0": "Änderungen konnten nicht gestaged werden",
- "f9b38f82": "Commit fehlgeschlagen"
+ "f9b38f82": "Commit fehlgeschlagen",
+ "f5a6fb37": "Schriftart für Text",
+ "b93f9c14": "Textgröße",
+ "675e9367": "Dateien mit Vorschau",
+ "41c4c6a3": "Alle außer den aufgeführten",
+ "5935f483": "Nur die aufgeführten",
+ "486cd422": "Erweiterungen mit Vorschau",
+ "6ba24d2e": "Bearbeiten…",
+ "c531359b": "Mit Semikolons trennen, zum Beispiel: .iso; .insv; .psd"
 }

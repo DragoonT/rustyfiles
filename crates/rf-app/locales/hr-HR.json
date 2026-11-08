@@ -838,5 +838,13 @@
  "247fb2c6": "Nema ničega za commitati",
  "87629b23": "Udaljeni repozitorij nije moguće povezati",
  "d23202d0": "Promjene nije moguće pripremiti",
- "f9b38f82": "Commit nije uspio"
+ "f9b38f82": "Commit nije uspio",
+ "f5a6fb37": "Font teksta",
+ "b93f9c14": "Veličina teksta",
+ "675e9367": "Datoteke za pretpregled",
+ "41c4c6a3": "Sve osim navedenih",
+ "5935f483": "Samo navedene",
+ "486cd422": "Proširenja za pretpregled",
+ "6ba24d2e": "Uredi…",
+ "c531359b": "Odvojite točkom i zarezom, na primjer: .iso; .insv; .psd"
 }

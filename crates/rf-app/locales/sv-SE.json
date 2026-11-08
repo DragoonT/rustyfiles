@@ -838,5 +838,13 @@
  "247fb2c6": "Inget att committa",
  "87629b23": "Det gick inte att ansluta fjärrdatabasen",
  "d23202d0": "Det gick inte att stage:a ändringarna",
- "f9b38f82": "Det gick inte att committa"
+ "f9b38f82": "Det gick inte att committa",
+ "f5a6fb37": "Teckensnitt för text",
+ "b93f9c14": "Textstorlek",
+ "675e9367": "Filer som ska förhandsgranskas",
+ "41c4c6a3": "Alla utom de som anges",
+ "5935f483": "Endast de som anges",
+ "486cd422": "Filnamnstillägg som ska förhandsgranskas",
+ "6ba24d2e": "Redigera…",
+ "c531359b": "Avgränsa med semikolon, till exempel: .iso; .insv; .psd"
 }

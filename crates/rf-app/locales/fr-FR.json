@@ -838,5 +838,13 @@
  "247fb2c6": "Rien à valider",
  "87629b23": "Impossible de connecter le dépôt distant",
  "d23202d0": "Impossible de préparer les modifications",
- "f9b38f82": "Impossible de valider"
+ "f9b38f82": "Impossible de valider",
+ "f5a6fb37": "Police du texte",
+ "b93f9c14": "Taille du texte",
+ "675e9367": "Fichiers à afficher en aperçu",
+ "41c4c6a3": "Tous sauf ceux de la liste",
+ "5935f483": "Seulement ceux de la liste",
+ "486cd422": "Extensions à afficher en aperçu",
+ "6ba24d2e": "Modifier…",
+ "c531359b": "Séparez par des points-virgules, par exemple : .iso; .insv; .psd"
 }

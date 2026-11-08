@@ -838,5 +838,13 @@
  "247fb2c6": "No hi ha res per confirmar",
  "87629b23": "No s'ha pogut connectar el remot",
  "d23202d0": "No s'han pogut preparar els canvis",
- "f9b38f82": "No s'ha pogut confirmar"
+ "f9b38f82": "No s'ha pogut confirmar",
+ "f5a6fb37": "Tipus de lletra del text",
+ "b93f9c14": "Mida del text",
+ "675e9367": "Fitxers per previsualitzar",
+ "41c4c6a3": "Tots excepte els de la llista",
+ "5935f483": "Només els de la llista",
+ "486cd422": "Extensions per previsualitzar",
+ "6ba24d2e": "Edita…",
+ "c531359b": "Separa-les amb punt i coma, per exemple: .iso; .insv; .psd"
 }

@@ -94,6 +94,11 @@ pub struct TextView {
     list: ListState,
     spans: Arc<RwLock<Option<Spans>>>,
     _tasks: Vec<Task<()>>,
+    /// Horizontal scroll (px) when lines don't wrap.
+    hoff: f32,
+    /// Longest line drawn so far (characters) and the view's width: the horizontal range.
+    cols: std::rc::Rc<std::cell::Cell<usize>>,
+    view_w: std::rc::Rc<std::cell::Cell<f32>>,
 }
 
 fn syntax_highlight(path: &Path, text: &str, dark: bool) -> Option<Spans> {
@@ -133,7 +138,7 @@ fn syntax_highlight(path: &Path, text: &str, dark: bool) -> Option<Spans> {
 impl TextView {
     fn new(path: &Path, cx: &mut Context<Self>) -> Self {
         let list = ListState::new(0, ListAlignment::Top, px(400.));
-        let mut v = Self { file: None, error: None, list, spans: Default::default(), _tasks: Vec::new() };
+        let mut v = Self { file: None, error: None, list, spans: Default::default(), _tasks: Vec::new(), hoff: 0., cols: Default::default(), view_w: Default::default() };
         match TextFile::open(path) {
             Ok(f) => {
                 let f = Arc::new(f);
@@ -256,9 +261,33 @@ impl Render for TextView {
         let gutter = px(font_size * 0.62 * digits.max(3) as f32 + 16.0);
         let spans = self.spans.clone();
         let (text_c, num_c) = (p.text, p.text_tertiary);
+        // horizontal range without wrapping: the longest line seen × a monospace advance
+        let char_w = font_size * 0.6;
+        let total_w = self.cols.get() as f32 * char_w + f32::from(gutter) + 32.0;
+        let view_w = self.view_w.get();
+        let max_off = if wrap { 0.0 } else { (total_w - view_w).max(0.0) };
+        self.hoff = self.hoff.clamp(0.0, max_off);
+        let hoff = self.hoff;
+        let cols = self.cols.clone();
+        let vw = self.view_w.clone();
         div()
             .size_full()
+            .relative()
             .bg(p.content_bg)
+            // Shift+wheel or a sideways swipe scrolls long lines (vertical scrolling is the list's)
+            .on_scroll(cx.listener(move |this, ev: &ScrollEvent, _, cx| {
+                if wrap {
+                    return;
+                }
+                let d = ev.delta.pixel_delta(px(font_size * 1.45));
+                let sideways = if ev.modifiers.shift { f32::from(d.y) } else { f32::from(d.x) };
+                if sideways != 0.0 {
+                    this.hoff = (this.hoff - sideways).clamp(0.0, max_off);
+                    cx.notify();
+                    cx.stop_propagation();
+                }
+            }))
+            .child(canvas(move |b, _, _| vw.set(f32::from(b.size.width)), |_, _, _, _| {}).absolute().top_0().left_0().size_full())
             .font_family(font)
             .text_size(px(font_size))
             .line_height(px(font_size * 1.45))
@@ -280,6 +309,9 @@ impl Render for TextView {
                         .filter(|(r, _)| r.end <= line.len() && line.is_char_boundary(r.start) && line.is_char_boundary(r.end))
                         .map(|(r, c)| (r, HighlightStyle { color: Some(rgb(c).into()), ..Default::default() }))
                         .collect();
+                    if !wrap && line.len() > cols.get() {
+                        cols.set(line.chars().count());
+                    }
                     let text = StyledText::new(line).with_highlights(highlights);
                     h_flex()
                         .w_full()
@@ -293,13 +325,18 @@ impl Render for TextView {
                                 .flex_1()
                                 .min_w_0()
                                 .text_color(text_c)
-                                .map(|d| if wrap { d.whitespace_normal() } else { d.whitespace_nowrap().overflow_hidden() })
-                                .child(text),
+                                .map(|d| if wrap { d.whitespace_normal().child(text) } else { d.overflow_hidden().child(div().whitespace_nowrap().ml(px(-hoff)).child(text)) }),
                         )
                         .into_any_element()
                 })
                 .size_full(),
             )
+            // a thin horizontal bar: where the view is along the longest line
+            .when(!wrap && max_off > 0.0 && view_w > 0.0, |d| {
+                let thumb = (view_w * view_w / total_w).max(24.0);
+                let left = (view_w - thumb) * (hoff / max_off);
+                d.child(div().absolute().bottom(px(2.)).left(px(left)).w(px(thumb)).h(px(4.)).rounded_full().bg(num_c).opacity(0.7))
+            })
             .into_any_element()
     }
 }

@@ -838,5 +838,13 @@
  "247fb2c6": "No hay nada que confirmar",
  "87629b23": "No se pudo conectar el remoto",
  "d23202d0": "No se pudieron preparar los cambios",
- "f9b38f82": "No se pudo confirmar"
+ "f9b38f82": "No se pudo confirmar",
+ "f5a6fb37": "Fuente del texto",
+ "b93f9c14": "Tamaño del texto",
+ "675e9367": "Archivos con vista previa",
+ "41c4c6a3": "Todos excepto los de la lista",
+ "5935f483": "Solo los de la lista",
+ "486cd422": "Extensiones con vista previa",
+ "6ba24d2e": "Editar…",
+ "c531359b": "Separa con punto y coma, por ejemplo: .iso; .insv; .psd"
 }
