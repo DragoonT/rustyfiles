@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/rf-core", "crates/rf-win", "crates/rf-app", "crates/rf-archive", "crates/rf-dialog", "crates/rf-player", "tools/gpustress"]
+members = ["crates/rf-core", "crates/rf-win", "crates/rf-app", "crates/rf-archive", "crates/rf-dialog", "crates/rf-player", "crates/rustdecoder", "tools/gpustress"]
 
 [workspace.package]
 version = "0.3.2"

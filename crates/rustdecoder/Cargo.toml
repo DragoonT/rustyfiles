@@ -1,0 +1,11 @@
+[package]
+name = "rustdecoder"
+description = "rustyfiles' own video engine: container and bitstream parsing in Rust, decoding on the GPU's video engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+log.workspace = true
