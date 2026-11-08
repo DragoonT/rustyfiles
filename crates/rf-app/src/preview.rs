@@ -49,7 +49,15 @@ pub struct Preview {
     /// Our own audio / video player for the current target (Media Foundation, in the host
     /// window): created on the first Play, never by just selecting a file.
     player: Option<PlayerUi>,
+    /// The last thumbnail shown, and when the target last changed: while the next file's
+    /// thumbnail loads, the previous one stays up briefly instead of flashing the type icon.
+    last_thumb: Option<std::sync::Arc<RenderImage>>,
+    changed_at: std::time::Instant,
+    _hold_task: Option<Task<()>>,
 }
+
+/// How long the previous thumbnail may stand in for one that is still loading.
+const HOLD: std::time::Duration = std::time::Duration::from_millis(300);
 
 struct PlayerUi {
     path: PathBuf,
@@ -108,6 +116,24 @@ impl Preview {
             extra: None,
             _extra_task: None,
             player: None,
+            last_thumb: None,
+            changed_at: std::time::Instant::now(),
+            _hold_task: None,
+        }
+    }
+
+    /// The thumbnail to draw for `e`: its own once loaded; meanwhile, for a short while, the
+    /// previous one (arrow-keying through photos shouldn't flash an icon between them).
+    fn thumb_or_hold(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<std::sync::Arc<RenderImage>> {
+        let wants = icons::has_thumbnail(e);
+        let thumb = if wants { self.images.update(cx, |c, cx| c.thumbnail(dir, e, size, cx)) } else { None };
+        match thumb {
+            Some(im) => {
+                self.last_thumb = Some(im.clone());
+                Some(im)
+            }
+            None if wants && self.changed_at.elapsed() < HOLD => self.last_thumb.clone(),
+            None => None,
         }
     }
 
@@ -167,11 +193,7 @@ impl Preview {
                 .into_any_element()
         } else {
             self.hide_host();
-            let thumb = if icons::has_thumbnail(&e) {
-                self.images.update(cx, |c, cx| c.thumbnail(&dir, &e, 1280, cx))
-            } else {
-                None
-            };
+            let thumb = self.thumb_or_hold(&dir, &e, 1280, cx);
             match thumb {
                 Some(im) => {
                     // fit by hand: GPUI sizes images by their aspect ratio from the width, which
@@ -556,6 +578,12 @@ impl Preview {
             return;
         }
         self.target = target;
+        self.changed_at = std::time::Instant::now();
+        // redraw once the hold is over: the icon then shows if the thumbnail still isn't there
+        self._hold_task = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(HOLD).await;
+            let _ = this.update(cx, |_, cx| cx.notify());
+        }));
         self.stop_player();
         self._task = None;
         self.media = None;
@@ -803,7 +831,7 @@ impl Render for Preview {
                 .into_any_element()
         } else {
             self.hide_host();
-            let thumb = self.images.update(cx, |c, cx| c.thumbnail(&dir, &e, PREVIEW_PX, cx));
+            let thumb = self.thumb_or_hold(&dir, &e, PREVIEW_PX, cx);
             let visual: AnyElement = match thumb {
                 Some(im) => img(im).w_full().h(px(220.)).object_fit(ObjectFit::Contain).into_any_element(),
                 None => Icon::new(icons::icon_for(cat))

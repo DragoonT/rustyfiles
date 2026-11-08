@@ -421,7 +421,10 @@ impl Workspace {
 
         cx.observe_global::<crate::settings::Settings>(|this, cx| {
             let s = cx.global::<crate::settings::Settings>();
-            this.preview_open = s.preview_open;
+            // a file dialog keeps its own preview state (shown by default)
+            if this.picker.is_none() {
+                this.preview_open = s.preview_open;
+            }
             this.sidebar_open = s.sidebar_open;
             cx.notify();
         })
@@ -520,6 +523,17 @@ impl Workspace {
     }
 
     /// Open/Save dialog window: its answer, filter and session (see `picker`).
+    /// The preview pane on/off: the saved setting, or only this window when it is a file dialog.
+    fn toggle_preview(&mut self, cx: &mut Context<Self>) {
+        let v = !self.preview_open;
+        if self.picker.is_some() {
+            self.preview_open = v;
+            cx.notify();
+        } else {
+            crate::settings::update(cx, |s| s.preview_open = v);
+        }
+    }
+
     pub(crate) fn set_picker(&mut self, session: std::rc::Rc<crate::picker::PickSession>, window: &mut Window, cx: &mut Context<Self>) {
         let (patterns, folders_only) = (session.patterns(), session.folders_only());
         for t in &self.tabs {
@@ -528,6 +542,8 @@ impl Workspace {
             }
         }
         self.picker = Some(session);
+        // the preview pane helps picking (Windows' dialogs have one too): on by default here
+        self.preview_open = true;
         // closing the window (X, Alt+F4) cancels; it is not the user's session
         let ws = cx.entity().downgrade();
         window.on_window_should_close(cx, move |_, cx| {
@@ -2113,8 +2129,7 @@ impl Workspace {
                     .when(!preview_open, |d| d.hover(|s| s.bg(p.hover)))
                     .child(Icon::new(L::PanelRight).size(px(16.)))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        let v = !this.preview_open;
-                        crate::settings::update(cx, |s| s.preview_open = v);
+                        this.toggle_preview(cx);
                     })),
             )
     }
@@ -3116,8 +3131,7 @@ impl Render for Workspace {
             }))
             .on_action(cx.listener(|this, _: &FocusAddress, window, cx| this.begin_address_edit(window, cx)))
             .on_action(cx.listener(|this, _: &TogglePreview, _, cx| {
-                let v = !this.preview_open;
-                crate::settings::update(cx, |s| s.preview_open = v);
+                this.toggle_preview(cx);
             }))
             .on_action(cx.listener(|this, _: &DuplicateTab, window, cx| {
                 let loc = this.active_tab().read(cx).location().clone();
