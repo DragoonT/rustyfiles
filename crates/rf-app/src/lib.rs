@@ -360,7 +360,7 @@ pub fn main() {
         // updates from GitHub Releases (installed copies only)
         installer::spawn_checks(cx, |cx| cx.refresh_windows());
         // DirectLook ayrı süreç: önceden başlatılır ki ilk Boşluk beklemesin (testlerde değil)
-        if cx.global::<settings::Settings>().directlook_enabled && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none() {
+        if cx.global::<settings::Settings>().directlook_enabled && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none() && !bar_preview {
             look::ipc::send(look::ipc::Msg::Wake, true);
         }
         // "Safely remove" / eject: let go of a drive when Windows asks (see rf_win::removal)

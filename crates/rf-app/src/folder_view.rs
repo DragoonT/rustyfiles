@@ -295,6 +295,8 @@ pub struct FolderView {
     slow_click_serial: u64,
     /// Entries of an in-flight background refresh (swapped in atomically when complete).
     soft_pending: Option<Vec<Entry>>,
+    /// When the current soft reload (watcher) started (for the live trace).
+    soft_started: Instant,
     _watch: Option<rf_win::watch::DirWatch>,
     _watch_task: Option<Task<()>>,
     pub renaming: Option<(u32, Entity<gpui_kit::component::input::InputState>)>,
@@ -420,6 +422,7 @@ impl FolderView {
             slow_click: None,
             slow_click_serial: 0,
             soft_pending: None,
+            soft_started: Instant::now(),
             _watch: None,
             _watch_task: None,
             renaming: None,
@@ -825,6 +828,7 @@ impl FolderView {
         }
         if soft {
             self.soft_pending = Some(Vec::new());
+            self.soft_started = Instant::now();
         } else {
             self.soft_pending = None;
             self.entries.clear();
@@ -1133,6 +1137,9 @@ impl FolderView {
                     self.loading = false;
                     self.apply_adaptive();
                     self.load_ms = Some(self.load_started.elapsed().as_millis());
+                    if trace_live() {
+                        log::info!("live: listed {} entries in {} ms", self.entries.len(), self.load_started.elapsed().as_millis());
+                    }
                     if let Err(e) = r {
                         if let Some(rest) = e.strip_prefix(crate::archive_view::PASSWORD_MARK) {
                             // "<0|1><archive path>": ask the workspace to prompt for it
@@ -1205,6 +1212,7 @@ impl FolderView {
             return;
         }
         let Some(new_entries) = self.soft_pending.take() else { return };
+        let (was_selected, applying) = (self.selected.len(), Instant::now());
         let selected_names: HashSet<Arc<str>> =
             self.selected.iter().map(|&i| self.entries[i as usize].name.clone()).collect();
         let cursor_name = self.cursor.and_then(|c| self.visible.get(c)).map(|&i| self.entries[i as usize].name.clone());
@@ -1220,6 +1228,17 @@ impl FolderView {
             .filter(|(_, e)| selected_names.contains(&e.name))
             .map(|(i, _)| i as u32)
             .collect();
+        if trace_live() {
+            log::info!(
+                "live: update of {} entries, relisted in {} ms, applied in {} ms; selected {} of {}, cursor {:?}",
+                self.entries.len(),
+                self.soft_started.elapsed().as_millis(),
+                applying.elapsed().as_millis(),
+                self.selected.len(),
+                was_selected,
+                self.cursor
+            );
+        }
         // the cursor's file renamed or deleted in the background: keep the place, not lose it
         let old_cursor = self.cursor;
         self.cursor = cursor_name
@@ -3381,3 +3400,9 @@ impl Render for FolderView {
 
 #[allow(dead_code)]
 fn _assert_category_used(_: Category) {}
+
+/// `RUSTYFILES_TRACE_LIVE=1`: log listing and live-update timings (benchmarks).
+fn trace_live() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("RUSTYFILES_TRACE_LIVE").is_some())
+}

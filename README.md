@@ -43,6 +43,23 @@ already running in the background; Explorer and Files each started a new process
 loads its list incrementally, so its numbers are an upper bound. Starting rustyfiles cold
 takes 350–480 ms.
 
+### A 100,000-file folder that keeps changing
+
+The folder open, one file selected, then about 1,000 files renamed per second in the background
+for 5 seconds:
+
+| | |
+|---|--:|
+| Launch to a listed folder (100,001 files) | 315 ms |
+| The list follows the changes | every ~750 ms |
+| Re-reading the folder (background thread) | ~70 ms |
+| Work on the UI thread per update | 7–8 ms |
+| Selection and cursor | stay on the selected file |
+
+The window never waits for the folder: re-reading happens off the UI thread, and the update
+itself costs less than one frame at 120 Hz. Measure it yourself with
+`RUSTYFILES_TRACE_LIVE=1` and `RUST_LOG=warn,rf_app=info`.
+
 ### New tab in an open window
 
 | Folder | Time to a settled list |
