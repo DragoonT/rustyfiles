@@ -117,9 +117,12 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
         ..gpui_kit::component::TitleBar::window_options()
     };
     let pipe = RefCell::new(Some(pipe));
+    let shown_hwnd = Rc::new(Cell::new(0isize));
+    let sh = shown_hwnd.clone();
     let opened = gpui_kit::open_window(options, cx, move |window, cx| {
         window.set_window_title(&title);
         let hwnd = crate::look::window::hwnd_of(window);
+        sh.set(hwnd);
         if owner != 0 {
             // stays above the app that asked, like its own dialog would
             rf_win::window::set_owner(hwnd, owner);
@@ -149,7 +152,22 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
     });
     if let Err(e) = opened {
         log::error!("picker window: {e:#}");
+        return;
     }
+    // Asked from a background process (Chrome's file dialog helper), Windows may refuse the
+    // switch while the window is still being shown: try again once it is on screen.
+    cx.spawn(async move |cx| {
+        for ms in [50u64, 250, 600] {
+            cx.background_executor().timer(std::time::Duration::from_millis(ms)).await;
+            let hwnd = shown_hwnd.get();
+            if hwnd == 0 || rf_win::window::is_foreground(hwnd) {
+                break;
+            }
+            log::info!("picker: not in front after {ms} ms, bringing it forward");
+            rf_win::window::bring_to_front(hwnd);
+        }
+    })
+    .detach();
 }
 
 /// The selected entries of the current folder, with whether each is a folder.

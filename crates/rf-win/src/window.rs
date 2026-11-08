@@ -149,5 +149,17 @@ pub fn bring_to_front(hwnd: isize) {
         if attached {
             let _ = AttachThreadInput(mine, theirs, false);
         }
+        if GetForegroundWindow() != h {
+            // no keyboard focus granted: at least on top of every other window
+            use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetWindowPos};
+            let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
+            let _ = SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, flags);
+            let _ = SetWindowPos(h, Some(HWND_NOTOPMOST), 0, 0, 0, 0, flags);
+        }
     }
+}
+
+/// Whether `hwnd` is the window in front (has the keyboard).
+pub fn is_foreground(hwnd: isize) -> bool {
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize == hwnd }
 }
