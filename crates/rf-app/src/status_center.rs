@@ -285,8 +285,26 @@ pub fn transfer(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf>, 
     transfer_ex(cx, kind, sources, dest, true)
 }
 
+/// Like [`transfer`], then `after` on the UI thread with the items that arrived at the top of
+/// `dest` (new copies, merged folders), e.g. to select them.
+pub fn transfer_then(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, after: impl FnOnce(Vec<std::path::PathBuf>, &mut App) + 'static) {
+    transfer_inner(cx, kind, sources, dest, true, Some(Box::new(after)));
+}
+
 /// `record = false` for undo/redo replays (they must not land on the undo stack again).
 pub fn transfer_ex(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, record: bool) {
+    transfer_inner(cx, kind, sources, dest, record, None);
+}
+
+#[allow(clippy::type_complexity)]
+fn transfer_inner(
+    cx: &mut App,
+    kind: Transfer,
+    sources: Vec<std::path::PathBuf>,
+    dest: std::path::PathBuf,
+    record: bool,
+    after: Option<Box<dyn FnOnce(Vec<std::path::PathBuf>, &mut App)>>,
+) {
     // into a folder inside an archive: add to the archive (copy semantics; RAR/ISO refuse)
     if let Some((archive, inner)) = crate::archive_view::split(&dest) {
         crate::archive_view::add_into(cx, archive, inner, sources);
@@ -299,7 +317,11 @@ pub fn transfer_ex(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf
     let title = format!("{verb}: {} → {}", crate::i18n::items(sources.len()), short(&dest));
     let s = cx.global::<crate::settings::Settings>();
     let (fast, verify, limit) = (s.fast_file_ops, s.copy_verify.engine(), u64::from(s.copy_speed_limit) << 20);
-    start(cx, title, move |t| {
+    let arrived = Arc::new(std::sync::Mutex::new(Vec::<std::path::PathBuf>::new()));
+    let landed = arrived.clone();
+    let top = dest.clone();
+    let on_done: Option<OnDone> = after.map(|f| -> OnDone { Box::new(move |_, cx: &mut App| f(std::mem::take(&mut *arrived.lock().unwrap()), cx)) });
+    start_with(cx, title, move |t| {
         t.set_verify(verify);
         t.limit.store(limit, Ordering::Relaxed);
         // our engine (conflicts asked in one list); Windows' engine when it is turned off
@@ -309,11 +331,22 @@ pub fn transfer_ex(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf
             fileops::transfer_tracked(kind, &sources, &dest, t.clone())
         };
         let pairs = t.results.lock().unwrap().clone();
+        // what now sits directly in the destination: the new item, or the folder a merge went into
+        let mut tops: Vec<std::path::PathBuf> = Vec::new();
+        for (_, dst) in &pairs {
+            if let Some(first) = dst.strip_prefix(&top).ok().and_then(|rel| rel.components().next()) {
+                let p = top.join(first);
+                if !tops.contains(&p) {
+                    tops.push(p);
+                }
+            }
+        }
+        *landed.lock().unwrap() = tops;
         if record && !pairs.is_empty() {
             crate::undo::push(crate::undo::UndoOp::Transferred { kind, pairs });
         }
         r
-    });
+    }, on_done);
 }
 
 /// A copy or move cut off by a crash or a shutdown: asked about once the main window is up

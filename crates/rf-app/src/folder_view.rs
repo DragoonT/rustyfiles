@@ -283,6 +283,9 @@ pub struct FolderView {
     reselect: Option<String>,
     /// Start inline rename on `reselect` once it appears (new folder flow).
     rename_after_load: bool,
+    /// Items that just arrived (a paste): selected as they show up in the list, until all are
+    /// there or the deadline passes (the watcher can lag behind the copy).
+    reselect_many: Option<(Vec<String>, Instant)>,
     /// Begin inline rename on the next render (needs a Window).
     pending_rename: bool,
     /// Shown by the Open/Save dialog: opening a file picks it instead.
@@ -418,6 +421,7 @@ impl FolderView {
             focus: cx.focus_handle(),
             reselect: None,
             rename_after_load: false,
+            reselect_many: None,
             pending_rename: false,
             picking: false,
             name_hit: false,
@@ -1173,6 +1177,24 @@ impl FolderView {
     }
 
     fn apply_reselect(&mut self, cx: &mut Context<Self>) {
+        if let Some((names, until)) = self.reselect_many.take() {
+            let want: HashSet<&str> = names.iter().map(String::as_str).collect();
+            let found: Vec<usize> = self.visible.iter().enumerate().filter(|&(_, &i)| want.contains(&*self.entries[i as usize].name)).map(|(vi, _)| vi).collect();
+            if !found.is_empty() {
+                self.selected.clear();
+                for &vi in &found {
+                    self.selected.insert(self.visible[vi]);
+                }
+                self.cursor = found.first().copied();
+                self.anchor = found.first().copied();
+                self.scroll.scroll_to_item(self.list_row(found[0]), ScrollStrategy::Center);
+                cx.notify();
+            }
+            // keep waiting for the rest while the watcher catches up
+            if found.len() < want.len() && Instant::now() < until {
+                self.reselect_many = Some((names, until));
+            }
+        }
         if let Some(name) = self.reselect.take() {
             if let Some(vi) = self.visible.iter().position(|&i| &*self.entries[i as usize].name == name) {
                 self.select_only(vi);
@@ -2159,6 +2181,16 @@ impl FolderView {
     ) {
         self.renaming = r;
         self._rename_sub = sub;
+    }
+
+    /// Select these names (in the current folder) as soon as they're listed: a paste or a copy
+    /// into this folder shows what arrived, like Explorer does.
+    pub(crate) fn select_when_listed(&mut self, names: Vec<String>, cx: &mut Context<Self>) {
+        if names.is_empty() {
+            return;
+        }
+        self.reselect_many = Some((names, Instant::now() + std::time::Duration::from_secs(6)));
+        self.soft_reload(cx);
     }
 
     pub(crate) fn set_reselect(&mut self, name: String) {

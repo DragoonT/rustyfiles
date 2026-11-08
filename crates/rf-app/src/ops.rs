@@ -323,9 +323,20 @@ impl FolderView {
             .detach();
             return;
         }
-        cx.spawn(async move |_, cx| {
+        cx.spawn(async move |this, cx| {
             if let Ok(Some((paths, kind))) = rx.await {
-                let _ = cx.update(|cx| crate::status_center::transfer(cx, kind, paths, dir));
+                let _ = cx.update(|cx| {
+                    let here = dir.clone();
+                    crate::status_center::transfer_then(cx, kind, paths, dir, move |arrived, cx| {
+                        // select what arrived, if this view still shows that folder
+                        let names: Vec<String> = arrived.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
+                        let _ = this.update(cx, |v, cx| {
+                            if v.current_dir().as_deref() == Some(here.as_path()) {
+                                v.select_when_listed(names, cx);
+                            }
+                        });
+                    });
+                });
             }
         })
         .detach();
