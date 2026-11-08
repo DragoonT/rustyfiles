@@ -2466,6 +2466,24 @@
   "en": "Flattening:"
  },
  {
+  "id": "c272ef4d",
+  "key": "Yazı tipi okunamadı",
+  "tr": "Yazı tipi okunamadı",
+  "en": "Couldn't read the font"
+ },
+ {
+  "id": "7b474d09",
+  "key": "glif",
+  "tr": "glif",
+  "en": "glyphs"
+ },
+ {
+  "id": "d69799ce",
+  "key": "satır daha",
+  "tr": "satır daha",
+  "en": "more rows"
+ },
+ {
   "id": "f5a6fb37",
   "key": "Metin yazı tipi",
   "tr": "Metin yazı tipi",
