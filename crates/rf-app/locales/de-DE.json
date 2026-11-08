@@ -806,5 +806,17 @@
  "a7f4d116": "Damit Kopien auf eine Netzwerkfreigabe oder einen USB-Stick die Verbindung nicht verstopfen.",
  "54d3539c": "Unbegrenzt",
  "2d3c851b": "Dateien, die die Überprüfung nicht bestanden haben",
- "c5f676ee": "Überprüfen…"
+ "c5f676ee": "Überprüfen…",
+ "1bb8533f": "Datei ersetzen",
+ "15a4e193": "Dateien ersetzen",
+ "7fb143b9": "Die eingehende Datei ersetzt die vorhandene",
+ "5bb4f263": "Die eingehenden Dateien ersetzen die vorhandenen",
+ "099259ee": "Diese Datei überspringen",
+ "cdb25262": "Diese Dateien überspringen",
+ "a52581b6": "Die vorhandene bleibt unverändert",
+ "97833301": "Die vorhandenen bleiben unverändert",
+ "9c6c7954": "Die eingehende Datei wird unter einem neuen Namen wie „(2)“ hinzugefügt",
+ "9ba844d7": "Die eingehenden Dateien werden unter neuen Namen wie „(2)“ hinzugefügt",
+ "eff439c0": "Für jede Datei einzeln wählen…",
+ "210ea0af": "Größen und Datumsangaben werden verglichen"
 }

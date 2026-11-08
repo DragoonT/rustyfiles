@@ -806,5 +806,17 @@
  "a7f4d116": "Para que as cópias para uma partilha de rede ou uma pen USB não sobrecarreguem a ligação.",
  "54d3539c": "Ilimitado",
  "2d3c851b": "Ficheiros que falharam na verificação",
- "c5f676ee": "A verificar…"
+ "c5f676ee": "A verificar…",
+ "1bb8533f": "Substituir o ficheiro",
+ "15a4e193": "Substituir os ficheiros",
+ "7fb143b9": "O ficheiro recebido ocupa o lugar do existente",
+ "5bb4f263": "Os ficheiros recebidos ocupam o lugar dos existentes",
+ "099259ee": "Ignorar este ficheiro",
+ "cdb25262": "Ignorar estes ficheiros",
+ "a52581b6": "O existente fica como está",
+ "97833301": "Os existentes ficam como estão",
+ "9c6c7954": "O ficheiro recebido é adicionado com um novo nome como \"(2)\"",
+ "9ba844d7": "Os ficheiros recebidos são adicionados com novos nomes como \"(2)\"",
+ "eff439c0": "Escolher para cada ficheiro…",
+ "210ea0af": "A comparar tamanhos e datas"
 }

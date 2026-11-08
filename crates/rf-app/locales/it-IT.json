@@ -806,5 +806,17 @@
  "a7f4d116": "Perché le copie su una condivisione di rete o su una chiavetta USB non intasino la connessione.",
  "54d3539c": "Illimitata",
  "2d3c851b": "File che non hanno superato la verifica",
- "c5f676ee": "Verifica in corso…"
+ "c5f676ee": "Verifica in corso…",
+ "1bb8533f": "Sostituisci il file",
+ "15a4e193": "Sostituisci i file",
+ "7fb143b9": "Il file in arrivo prende il posto di quello esistente",
+ "5bb4f263": "I file in arrivo prendono il posto di quelli esistenti",
+ "099259ee": "Salta questo file",
+ "cdb25262": "Salta questi file",
+ "a52581b6": "Quello esistente resta com'è",
+ "97833301": "Quelli esistenti restano come sono",
+ "9c6c7954": "Il file in arrivo viene aggiunto con un nuovo nome come \"(2)\"",
+ "9ba844d7": "I file in arrivo vengono aggiunti con nuovi nomi come \"(2)\"",
+ "eff439c0": "Scegli per ogni file…",
+ "210ea0af": "Confronto di dimensioni e date"
 }

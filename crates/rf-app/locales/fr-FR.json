@@ -806,5 +806,17 @@
  "a7f4d116": "Pour que les copies vers un partage réseau ou une clé USB n'étouffent pas la connexion.",
  "54d3539c": "Illimitée",
  "2d3c851b": "Fichiers dont la vérification a échoué",
- "c5f676ee": "Vérification…"
+ "c5f676ee": "Vérification…",
+ "1bb8533f": "Remplacer le fichier",
+ "15a4e193": "Remplacer les fichiers",
+ "7fb143b9": "Le fichier entrant prend la place de l'existant",
+ "5bb4f263": "Les fichiers entrants prennent la place des existants",
+ "099259ee": "Ignorer ce fichier",
+ "cdb25262": "Ignorer ces fichiers",
+ "a52581b6": "L'existant reste tel quel",
+ "97833301": "Les existants restent tels quels",
+ "9c6c7954": "Le fichier entrant est ajouté sous un nouveau nom comme « (2) »",
+ "9ba844d7": "Les fichiers entrants sont ajoutés sous de nouveaux noms comme « (2) »",
+ "eff439c0": "Choisir pour chaque fichier…",
+ "210ea0af": "Comparaison des tailles et des dates"
 }

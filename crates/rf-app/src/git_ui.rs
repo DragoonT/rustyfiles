@@ -30,13 +30,27 @@ pub fn sync_menu(view: View, root: PathBuf, ahead: u32, behind: u32, pos: Point<
         }
         it
     };
-    let items = vec![
-        item(t!("Çek (pull)"), L::ArrowDown, (behind > 0).then(|| format!("↓{behind}")), "Çekiliyor", git::pull),
-        item(t!("Gönder (push)"), L::ArrowUp, (ahead > 0).then(|| format!("↑{ahead}")), "Gönderiliyor", git::push),
-        item(t!("Eşitle"), L::RefreshCw, None, "Eşitleniyor", git::sync),
-        Item::Separator,
-        item(t!("Uzak depodan getir (fetch)"), L::CloudDownload, None, "Getiriliyor", git::fetch),
-    ];
+    let remote = git::remote_url(&root);
+    let mut items = Vec::new();
+    if remote.is_some() {
+        items.extend([
+            item(t!("Çek (pull)"), L::ArrowDown, (behind > 0).then(|| format!("↓{behind}")), "Çekiliyor", git::pull),
+            item(t!("Gönder (push)"), L::ArrowUp, (ahead > 0).then(|| format!("↑{ahead}")), "Gönderiliyor", git::push),
+            item(t!("Eşitle"), L::RefreshCw, None, "Eşitleniyor", git::sync),
+            Item::Separator,
+            item(t!("Uzak depodan getir (fetch)"), L::CloudDownload, None, "Getiriliyor", git::fetch),
+            Item::Separator,
+        ]);
+    }
+    {
+        let (view, root) = (view.clone(), root.clone());
+        items.push(Item::action(t!("Değişiklikleri kaydet (commit)…"), MenuIcon::Lucide(L::GitCommitHorizontal), move |window, cx| commit_dialog(view.clone(), root.clone(), window, cx)));
+    }
+    {
+        let (view, root, current) = (view.clone(), root.clone(), remote.clone());
+        let label = if remote.is_some() { t!("Uzak depo adresini değiştir…") } else { t!("Uzak depoya bağla…") };
+        items.push(Item::action(label, MenuIcon::Lucide(L::Link), move |window, cx| connect_dialog(view.clone(), root.clone(), current.clone(), window, cx)));
+    }
     fluent_menu::show(Menu { quick: Vec::new(), items }, pos, window, cx);
 }
 
@@ -53,6 +67,80 @@ fn run_op(cx: &mut App, title: String, root: PathBuf, op: fn(&Path, &mut dyn FnM
             Ok(true)
         },
         Some(Box::new(move |_, cx| refresh(&view, cx))),
+    );
+}
+
+/// "Commit changes…": a message, then everything is staged and committed.
+fn commit_dialog(view: View, root: PathBuf, window: &mut Window, cx: &mut App) {
+    let go = Button::new(t!("Kaydet"), Kind::Primary, move |msg, _, cx| {
+        let msg = msg.unwrap_or_default().trim().to_string();
+        if msg.is_empty() {
+            return Err(t!("Ne değiştiğini kısaca yazın").into());
+        }
+        let (root, view) = (root.clone(), view.clone());
+        let title = format!("{} {}", t!("Kaydediliyor:"), repo_name(&root));
+        crate::status_center::start_with(
+            cx,
+            title,
+            move |_| {
+                git::commit_all(&root, &msg)?;
+                Ok(true)
+            },
+            Some(Box::new(move |_, cx| refresh(&view, cx))),
+        );
+        Ok(())
+    });
+    prompt::show(
+        t!("Değişiklikleri kaydet"),
+        Some(t!("Bu depodaki bütün değişiklikler (yeni dosyalar dahil) tek bir kayıt olarak saklanır.").to_string()),
+        Some((String::new(), t!("Örneğin: Kapak resmi güncellendi").to_string())),
+        vec![go, Button::cancel()],
+        window,
+        cx,
+    );
+}
+
+/// "Connect to a remote…" / "Change remote address…": sets `origin`; "Connect and push" also
+/// sends the current branch (with upstream) right away.
+fn connect_dialog(view: View, root: PathBuf, current: Option<String>, window: &mut Window, cx: &mut App) {
+    let start = |push: bool, view: View, root: PathBuf| {
+        move |url: Option<String>, _: &mut Window, cx: &mut App| -> Result<(), String> {
+            let url = url.unwrap_or_default().trim().to_string();
+            if url.is_empty() {
+                return Err(t!("Depo adresini girin").into());
+            }
+            let (root, view) = (root.clone(), view.clone());
+            let title = format!("{} {}", t!("Uzak depoya bağlanıyor:"), repo_name(&root));
+            crate::status_center::start_with(
+                cx,
+                title,
+                move |t| {
+                    git::connect_remote(&root, &url)?;
+                    if push {
+                        git::push(&root, &mut |line: &str| (t.on_progress)(0, 0, Some(line.to_string())))?;
+                    }
+                    Ok(true)
+                },
+                Some(Box::new(move |_, cx| refresh(&view, cx))),
+            );
+            Ok(())
+        }
+    };
+    let mut buttons = Vec::new();
+    if current.is_none() {
+        buttons.push(Button::new(t!("Bağla ve gönder"), Kind::Primary, start(true, view.clone(), root.clone())));
+        buttons.push(Button::new(t!("Yalnızca bağla"), Kind::Normal, start(false, view.clone(), root.clone())));
+    } else {
+        buttons.push(Button::new(t!("Değiştir"), Kind::Primary, start(false, view.clone(), root.clone())));
+    }
+    buttons.push(Button::cancel());
+    prompt::show(
+        if current.is_none() { t!("Uzak depoya bağla") } else { t!("Uzak depo adresi") },
+        Some(t!("GitHub, GitLab ya da başka bir sunucudaki boş bir deponun adresi. Önce orada bir depo oluşturun.").to_string()),
+        Some((current.unwrap_or_default(), "https://github.com/kullanici/depo.git".to_string())),
+        buttons,
+        window,
+        cx,
     );
 }
 

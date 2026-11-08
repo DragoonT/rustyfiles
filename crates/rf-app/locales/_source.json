@@ -2466,6 +2466,78 @@
   "en": "Flattening:"
  },
  {
+  "id": "1bb8533f",
+  "key": "Dosyayı değiştir",
+  "tr": "Dosyayı değiştir",
+  "en": "Replace the file"
+ },
+ {
+  "id": "15a4e193",
+  "key": "Dosyaları değiştir",
+  "tr": "Dosyaları değiştir",
+  "en": "Replace the files"
+ },
+ {
+  "id": "7fb143b9",
+  "key": "Gelen dosya, hedeftekinin yerine geçer",
+  "tr": "Gelen dosya, hedeftekinin yerine geçer",
+  "en": "The incoming file takes the place of the existing one"
+ },
+ {
+  "id": "5bb4f263",
+  "key": "Gelenler, hedeftekilerin yerine geçer",
+  "tr": "Gelenler, hedeftekilerin yerine geçer",
+  "en": "The incoming files take the place of the existing ones"
+ },
+ {
+  "id": "099259ee",
+  "key": "Bu dosyayı atla",
+  "tr": "Bu dosyayı atla",
+  "en": "Skip this file"
+ },
+ {
+  "id": "cdb25262",
+  "key": "Bu dosyaları atla",
+  "tr": "Bu dosyaları atla",
+  "en": "Skip these files"
+ },
+ {
+  "id": "a52581b6",
+  "key": "Hedefteki olduğu gibi kalır",
+  "tr": "Hedefteki olduğu gibi kalır",
+  "en": "The existing one stays as it is"
+ },
+ {
+  "id": "97833301",
+  "key": "Hedeftekiler olduğu gibi kalır",
+  "tr": "Hedeftekiler olduğu gibi kalır",
+  "en": "The existing ones stay as they are"
+ },
+ {
+  "id": "9c6c7954",
+  "key": "Gelen dosya \"(2)\" gibi yeni bir adla eklenir",
+  "tr": "Gelen dosya \"(2)\" gibi yeni bir adla eklenir",
+  "en": "The incoming file is added under a new name like \"(2)\""
+ },
+ {
+  "id": "9ba844d7",
+  "key": "Gelenler \"(2)\" gibi yeni adlarla eklenir",
+  "tr": "Gelenler \"(2)\" gibi yeni adlarla eklenir",
+  "en": "The incoming files are added under new names like \"(2)\""
+ },
+ {
+  "id": "eff439c0",
+  "key": "Her dosya için seç…",
+  "tr": "Her dosya için seç…",
+  "en": "Choose for each file…"
+ },
+ {
+  "id": "210ea0af",
+  "key": "Boyutları ve tarihleri karşılaştırarak",
+  "tr": "Boyutları ve tarihleri karşılaştırarak",
+  "en": "Comparing sizes and dates"
+ },
+ {
   "id": "17ee12ed",
   "key": "Topluluk",
   "tr": "Topluluk",

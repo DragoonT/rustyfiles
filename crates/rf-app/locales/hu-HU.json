@@ -806,5 +806,17 @@
  "a7f4d116": "Hogy a hálózati megosztásra vagy USB-meghajtóra másolás ne fojtsa meg a kapcsolatot.",
  "54d3539c": "Korlátlan",
  "2d3c851b": "Az ellenőrzésen elbukott fájlok",
- "c5f676ee": "Ellenőrzés…"
+ "c5f676ee": "Ellenőrzés…",
+ "1bb8533f": "Fájl cseréje",
+ "15a4e193": "Fájlok cseréje",
+ "7fb143b9": "A bejövő fájl a meglévő helyére lép",
+ "5bb4f263": "A bejövő fájlok a meglévők helyére lépnek",
+ "099259ee": "Fájl kihagyása",
+ "cdb25262": "Fájlok kihagyása",
+ "a52581b6": "A meglévő változatlan marad",
+ "97833301": "A meglévők változatlanok maradnak",
+ "9c6c7954": "A bejövő fájl új néven kerül hozzáadásra, például „(2)”",
+ "9ba844d7": "A bejövő fájlok új néven kerülnek hozzáadásra, például „(2)”",
+ "eff439c0": "Választás fájlonként…",
+ "210ea0af": "Méretek és dátumok összehasonlítása"
 }

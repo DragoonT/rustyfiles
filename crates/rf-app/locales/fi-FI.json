@@ -806,5 +806,17 @@
  "a7f4d116": "Jottei verkkojakoon tai USB-tikulle kopiointi tukkisi yhteyttä.",
  "54d3539c": "Rajoittamaton",
  "2d3c851b": "Tiedostot, joiden vahvistus epäonnistui",
- "c5f676ee": "Vahvistetaan…"
+ "c5f676ee": "Vahvistetaan…",
+ "1bb8533f": "Korvaa tiedosto",
+ "15a4e193": "Korvaa tiedostot",
+ "7fb143b9": "Saapuva tiedosto korvaa olemassa olevan",
+ "5bb4f263": "Saapuvat tiedostot korvaavat olemassa olevat",
+ "099259ee": "Ohita tämä tiedosto",
+ "cdb25262": "Ohita nämä tiedostot",
+ "a52581b6": "Olemassa oleva säilyy sellaisenaan",
+ "97833301": "Olemassa olevat säilyvät sellaisinaan",
+ "9c6c7954": "Saapuva tiedosto lisätään uudella nimellä, kuten \"(2)\"",
+ "9ba844d7": "Saapuvat tiedostot lisätään uusilla nimillä, kuten \"(2)\"",
+ "eff439c0": "Valitse jokaiselle tiedostolle…",
+ "210ea0af": "Verrataan kokoja ja päivämääriä"
 }

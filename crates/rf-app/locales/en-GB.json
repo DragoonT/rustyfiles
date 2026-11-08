@@ -806,5 +806,17 @@
  "a7f4d116": "So copies to a network share or a USB stick don't choke the connection.",
  "54d3539c": "Unlimited",
  "2d3c851b": "Files that failed verification",
- "c5f676ee": "Verifying…"
+ "c5f676ee": "Verifying…",
+ "1bb8533f": "Replace the file",
+ "15a4e193": "Replace the files",
+ "7fb143b9": "The incoming file takes the place of the existing one",
+ "5bb4f263": "The incoming files take the place of the existing ones",
+ "099259ee": "Skip this file",
+ "cdb25262": "Skip these files",
+ "a52581b6": "The existing one stays as it is",
+ "97833301": "The existing ones stay as they are",
+ "9c6c7954": "The incoming file is added under a new name like \"(2)\"",
+ "9ba844d7": "The incoming files are added under new names like \"(2)\"",
+ "eff439c0": "Choose for each file…",
+ "210ea0af": "Comparing sizes and dates"
 }

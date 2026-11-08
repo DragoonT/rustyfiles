@@ -806,5 +806,17 @@
  "a7f4d116": "Så att kopiering till en nätverksresurs eller ett USB-minne inte överbelastar anslutningen.",
  "54d3539c": "Obegränsad",
  "2d3c851b": "Filer som inte klarade verifieringen",
- "c5f676ee": "Verifierar…"
+ "c5f676ee": "Verifierar…",
+ "1bb8533f": "Ersätt filen",
+ "15a4e193": "Ersätt filerna",
+ "7fb143b9": "Den inkommande filen tar den befintliga filens plats",
+ "5bb4f263": "De inkommande filerna tar de befintliga filernas plats",
+ "099259ee": "Hoppa över den här filen",
+ "cdb25262": "Hoppa över de här filerna",
+ "a52581b6": "Den befintliga behålls som den är",
+ "97833301": "De befintliga behålls som de är",
+ "9c6c7954": "Den inkommande filen läggs till under ett nytt namn som ”(2)”",
+ "9ba844d7": "De inkommande filerna läggs till under nya namn som ”(2)”",
+ "eff439c0": "Välj för varje fil…",
+ "210ea0af": "Jämför storlekar och datum"
 }

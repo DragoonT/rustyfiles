@@ -806,5 +806,17 @@
  "a7f4d116": "Slik at kopiering til en nettverksressurs eller en USB-stasjon ikke tetter tilkoblingen.",
  "54d3539c": "Ubegrenset",
  "2d3c851b": "Filer som feilet verifisering",
- "c5f676ee": "Verifiserer…"
+ "c5f676ee": "Verifiserer…",
+ "1bb8533f": "Erstatt filen",
+ "15a4e193": "Erstatt filene",
+ "7fb143b9": "Den innkommende filen tar den eksisterende filens plass",
+ "5bb4f263": "De innkommende filene tar de eksisterende filenes plass",
+ "099259ee": "Hopp over denne filen",
+ "cdb25262": "Hopp over disse filene",
+ "a52581b6": "Den eksisterende forblir som den er",
+ "97833301": "De eksisterende forblir som de er",
+ "9c6c7954": "Den innkommende filen legges til med et nytt navn som «(2)»",
+ "9ba844d7": "De innkommende filene legges til med nye navn som «(2)»",
+ "eff439c0": "Velg for hver fil…",
+ "210ea0af": "Sammenligner størrelser og datoer"
 }

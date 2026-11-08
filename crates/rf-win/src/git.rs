@@ -665,6 +665,34 @@ pub fn remote_url(root: &Path) -> Option<String> {
     (out.status.success() && !s.is_empty()).then_some(s)
 }
 
+/// Points `origin` at `url` (adds it, or changes its address).
+pub fn connect_remote(root: &Path, url: &str) -> Result<()> {
+    let url = url.trim();
+    if url.is_empty() {
+        bail!("Depo adresi boş");
+    }
+    let verb = if remotes(root)?.iter().any(|r| r == "origin") { "set-url" } else { "add" };
+    git_text(root, &["remote", verb, "origin", url], "Uzak depo bağlanamadı").map(|_| ())
+}
+
+/// Whether there is anything to commit (changed, added, deleted or untracked files).
+pub fn has_changes(root: &Path) -> bool {
+    git_text(root, &["status", "--porcelain"], "").is_ok_and(|t| !t.trim().is_empty())
+}
+
+/// Stages everything and commits it with `message`.
+pub fn commit_all(root: &Path, message: &str) -> Result<()> {
+    let message = message.trim();
+    if message.is_empty() {
+        bail!("Kayıt açıklaması boş");
+    }
+    if !has_changes(root) {
+        bail!("Kaydedilecek değişiklik yok");
+    }
+    git_text(root, &["add", "-A"], "Değişiklikler eklenemedi")?;
+    git_text(root, &["commit", "-q", "-m", message], "Kaydedilemedi").map(|_| ())
+}
+
 /// `git init` in `dir` (created when missing).
 pub fn init(dir: &Path) -> Result<()> {
     std::fs::create_dir_all(dir).map_err(|e| anyhow::Error::new(e).context("Klasör oluşturulamadı"))?;
@@ -1192,6 +1220,34 @@ u UU N... 100644 100644 100644 100644 a b c conflict.txt\0\
         let err = fetch(&lonely, &mut |_| {}).unwrap_err().to_string();
         assert!(err.starts_with("git fetch başarısız: "), "{err}");
         assert!(err.len() > "git fetch başarısız: ".len());
+    }
+
+    #[test]
+    fn init_commit_connect_push() {
+        let Some(fx) = fixture("connect") else { return };
+        // a new folder with files, never under git: init, commit, connect, push
+        let dir = fx.tmp.join("yeni proje");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("not.txt"), "merhaba\n").unwrap();
+        init(&dir).unwrap();
+        configure(&dir);
+        assert!(has_changes(&dir));
+        assert!(commit_all(&dir, "   ").is_err(), "empty message refused");
+        commit_all(&dir, "İlk kayıt").unwrap();
+        assert!(!has_changes(&dir));
+        assert!(commit_all(&dir, "boş").is_err(), "nothing to commit");
+        assert!(remote_url(&dir).is_none());
+        let bare = fx.tmp.join("yeni.git");
+        assert!(git(&fx.tmp, &["init", "-q", "--bare", "yeni.git"]));
+        connect_remote(&dir, bare.to_str().unwrap()).unwrap();
+        assert_eq!(remote_url(&dir).as_deref(), bare.to_str());
+        push(&dir, &mut |_| {}).unwrap();
+        let branch = git_out(&dir, &["symbolic-ref", "--short", "HEAD"]);
+        assert_eq!(git_out(&bare, &["rev-parse", &branch]), git_out(&dir, &["rev-parse", "HEAD"]));
+        // connecting again changes the address instead of failing
+        connect_remote(&dir, fx.remote.to_str().unwrap()).unwrap();
+        assert_eq!(remote_url(&dir).as_deref(), fx.remote.to_str());
+        assert!(connect_remote(&dir, "  ").is_err());
     }
 
     #[test]

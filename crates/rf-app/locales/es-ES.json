@@ -806,5 +806,17 @@
  "a7f4d116": "Para que copiar a un recurso de red o a una memoria USB no sature la conexión.",
  "54d3539c": "Sin límite",
  "2d3c851b": "Archivos que no han superado la verificación",
- "c5f676ee": "Verificando…"
+ "c5f676ee": "Verificando…",
+ "1bb8533f": "Reemplazar el archivo",
+ "15a4e193": "Reemplazar los archivos",
+ "7fb143b9": "El archivo entrante ocupa el lugar del existente",
+ "5bb4f263": "Los archivos entrantes ocupan el lugar de los existentes",
+ "099259ee": "Omitir este archivo",
+ "cdb25262": "Omitir estos archivos",
+ "a52581b6": "El existente se queda como está",
+ "97833301": "Los existentes se quedan como están",
+ "9c6c7954": "El archivo entrante se añade con un nombre nuevo como \"(2)\"",
+ "9ba844d7": "Los archivos entrantes se añaden con nombres nuevos como \"(2)\"",
+ "eff439c0": "Elegir para cada archivo…",
+ "210ea0af": "Comparando tamaños y fechas"
 }
