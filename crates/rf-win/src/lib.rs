@@ -46,6 +46,7 @@ pub mod tray;
 pub mod watch;
 pub mod window;
 pub mod volume;
+pub mod tasklist;
 pub mod wide;
 
 pub use drives::{Drive, DriveKind, list_drives};
