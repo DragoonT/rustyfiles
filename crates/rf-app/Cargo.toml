@@ -35,6 +35,8 @@ serde.workspace = true
 serde_json.workspace = true
 # font previews (already in the tree through resvg)
 ttf-parser = "0.25"
+# DirectLook: e-mail (.eml) previews
+mail-parser = "1.0"
 toml.workspace = true
 dirs.workspace = true
 crossbeam-channel.workspace = true
