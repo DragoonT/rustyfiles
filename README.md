@@ -73,6 +73,18 @@ The window never waits for the folder: re-reading happens off the UI thread, and
 itself costs less than one frame at 120 Hz. Measure it yourself with
 `RUSTYFILES_TRACE_LIVE=1` and `RUST_LOG=warn,rf_app=info`.
 
+Frame times while it happens: the same folder scrolled down and back up with the mouse wheel for
+7.7 s, the selection (and so the preview pane) moving every half second, while about 680 files a
+second are renamed in the background. 200 Hz display.
+
+| | median | p95 | p99 | worst |
+|---|--:|--:|--:|--:|
+| Frame cost on the UI thread | 2.1 ms | 4.6 ms | 7.9 ms | 16.8 ms |
+| Time between frames | 3.3 ms | 5.3 ms | 9.9 ms | 17.3 ms |
+
+2,182 frames in 7.7 s; one gap longer than a 60 Hz frame (16.7 ms). Log your own with
+`GPUI_FRAME_LOG=frames.tsv` (one line per frame: its start and its cost, in ms).
+
 ### New tab in an open window
 
 | Folder | Time to a settled list |

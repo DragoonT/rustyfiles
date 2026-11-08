@@ -131,4 +131,4 @@ debug = false
 
 [patch.crates-io]
 # our fork of GPUI's Windows layer (GPU/CPU hot-swap renderer), see its FORK.md
-gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "e5333659da401d4fc4b805835bd7b68b32fd7f63" }
+gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "d629bb31f05a21cd9483ee7ddde58ed42085d258" }
