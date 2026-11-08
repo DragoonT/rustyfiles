@@ -858,5 +858,11 @@
  "dcf39e11": "Gyldig",
  "21167459": "udløbet",
  "2c8ae42a": "endnu ikke gyldigt",
- "194f61c8": "Downloadet:"
+ "194f61c8": "Downloadet:",
+ "707e075d": "En kopiering blev afbrudt",
+ "f0d45428": "En flytning blev afbrudt",
+ "83267ed9": "filer færdige",
+ "6be00554": "Fortsæt, hvor det slap? Filer, der allerede er færdige, kontrolleres igen mod deres kilder; delvist kopierede filer kopieres igen.",
+ "276fcd7c": "Kassér",
+ "5f2e231e": "Senere"
 }

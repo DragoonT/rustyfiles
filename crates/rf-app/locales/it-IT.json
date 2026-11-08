@@ -858,5 +858,11 @@
  "dcf39e11": "Valido",
  "21167459": "scaduto",
  "2c8ae42a": "non ancora valido",
- "194f61c8": "Scaricato:"
+ "194f61c8": "Scaricato:",
+ "707e075d": "Una copia è stata interrotta",
+ "f0d45428": "Uno spostamento è stato interrotto",
+ "83267ed9": "file completati",
+ "6be00554": "Riprendere da dove si era interrotto? I file già completati vengono ricontrollati rispetto agli originali; quelli copiati solo in parte vengono copiati di nuovo.",
+ "276fcd7c": "Scarta",
+ "5f2e231e": "Più tardi"
 }

@@ -858,5 +858,11 @@
  "dcf39e11": "Gültig",
  "21167459": "abgelaufen",
  "2c8ae42a": "noch nicht gültig",
- "194f61c8": "Heruntergeladen:"
+ "194f61c8": "Heruntergeladen:",
+ "707e075d": "Ein Kopiervorgang wurde unterbrochen",
+ "f0d45428": "Ein Verschiebevorgang wurde unterbrochen",
+ "83267ed9": "Dateien fertig",
+ "6be00554": "Dort fortfahren, wo es aufgehört hat? Bereits fertige Dateien werden erneut mit ihren Quellen verglichen; teilweise kopierte werden erneut kopiert.",
+ "276fcd7c": "Verwerfen",
+ "5f2e231e": "Später"
 }

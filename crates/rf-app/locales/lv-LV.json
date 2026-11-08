@@ -858,5 +858,11 @@
  "dcf39e11": "Derīgs",
  "21167459": "beidzies derīguma termiņš",
  "2c8ae42a": "vēl nav derīgs",
- "194f61c8": "Lejupielādēts:"
+ "194f61c8": "Lejupielādēts:",
+ "707e075d": "Kopēšana tika pārtraukta",
+ "f0d45428": "Pārvietošana tika pārtraukta",
+ "83267ed9": "faili pabeigti",
+ "6be00554": "Turpināt no vietas, kur apstājās? Jau pabeigtie faili tiek vēlreiz pārbaudīti pret avotiem; daļēji nokopētie tiek kopēti no jauna.",
+ "276fcd7c": "Atmest",
+ "5f2e231e": "Vēlāk"
 }

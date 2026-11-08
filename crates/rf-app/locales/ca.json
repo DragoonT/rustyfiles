@@ -858,5 +858,11 @@
  "dcf39e11": "Vàlid",
  "21167459": "caducat",
  "2c8ae42a": "encara no vàlid",
- "194f61c8": "Baixat:"
+ "194f61c8": "Baixat:",
+ "707e075d": "S’ha interromput una còpia",
+ "f0d45428": "S’ha interromput un moviment",
+ "83267ed9": "fitxers fets",
+ "6be00554": "Voleu continuar des d’on s’ha aturat? Els fitxers ja fets es tornen a comprovar amb els originals; els copiats parcialment es tornen a copiar.",
+ "276fcd7c": "Descarta",
+ "5f2e231e": "Més tard"
 }

@@ -858,5 +858,11 @@
  "dcf39e11": "Valid",
  "21167459": "expired",
  "2c8ae42a": "not yet valid",
- "194f61c8": "Downloaded:"
+ "194f61c8": "Downloaded:",
+ "707e075d": "A copy was cut off",
+ "f0d45428": "A move was cut off",
+ "83267ed9": "files done",
+ "6be00554": "Carry on where it stopped? Files already done are checked against their sources again; partly copied ones are copied again.",
+ "276fcd7c": "Discard",
+ "5f2e231e": "Later"
 }

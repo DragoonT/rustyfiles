@@ -347,6 +347,10 @@ pub fn main() {
         if open_look_settings {
             settings_view::open_page(settings_view::Page::Look, cx);
         }
+        // copies and moves keep a crash-safe journal there (see rf_win::fastcopy)
+        if let Some(d) = settings::app_dir() {
+            rf_win::fastcopy::set_journal_dir(d.join("jobs"));
+        }
         let bounds = restored_bounds(cx);
         match pick.clone() {
             // started only to answer a dialog: no main window
@@ -355,6 +359,8 @@ pub fn main() {
             None => {
                 installer::count_start(cx);
                 open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx);
+                // a copy or move cut off last time: ask to carry it on
+                status_center::offer_resume(cx);
             }
         }
         // updates from GitHub Releases (installed copies only)

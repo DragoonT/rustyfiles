@@ -858,5 +858,11 @@
  "dcf39e11": "Válido",
  "21167459": "caducado",
  "2c8ae42a": "aún no válido",
- "194f61c8": "Descargado:"
+ "194f61c8": "Descargado:",
+ "707e075d": "Se interrumpió una copia",
+ "f0d45428": "Se interrumpió un movimiento",
+ "83267ed9": "archivos hechos",
+ "6be00554": "¿Continuar donde se detuvo? Los archivos ya terminados se comprueban de nuevo con sus orígenes; los copiados parcialmente se copian otra vez.",
+ "276fcd7c": "Descartar",
+ "5f2e231e": "Más tarde"
 }

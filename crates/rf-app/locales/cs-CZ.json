@@ -858,5 +858,11 @@
  "dcf39e11": "Platnost",
  "21167459": "platnost vypršela",
  "2c8ae42a": "zatím neplatný",
- "194f61c8": "Staženo:"
+ "194f61c8": "Staženo:",
+ "707e075d": "Kopírování bylo přerušeno",
+ "f0d45428": "Přesouvání bylo přerušeno",
+ "83267ed9": "souborů hotovo",
+ "6be00554": "Pokračovat tam, kde se skončilo? Již hotové soubory se znovu porovnají se zdroji; částečně zkopírované se zkopírují znovu.",
+ "276fcd7c": "Zahodit",
+ "5f2e231e": "Později"
 }

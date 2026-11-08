@@ -858,5 +858,11 @@
  "dcf39e11": "Érvényes",
  "21167459": "lejárt",
  "2c8ae42a": "még nem érvényes",
- "194f61c8": "Letöltve:"
+ "194f61c8": "Letöltve:",
+ "707e075d": "Egy másolás megszakadt",
+ "f0d45428": "Egy áthelyezés megszakadt",
+ "83267ed9": "fájl kész",
+ "6be00554": "Folytatja ott, ahol abbamaradt? A már kész fájlokat újra ellenőrizzük a forrásukkal szemben; a részlegesen másoltakat újra másoljuk.",
+ "276fcd7c": "Elvetés",
+ "5f2e231e": "Később"
 }

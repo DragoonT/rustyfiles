@@ -2466,6 +2466,42 @@
   "en": "Flattening:"
  },
  {
+  "id": "707e075d",
+  "key": "Yarıda kalan bir kopyalama var",
+  "tr": "Yarıda kalan bir kopyalama var",
+  "en": "A copy was cut off"
+ },
+ {
+  "id": "f0d45428",
+  "key": "Yarıda kalan bir taşıma var",
+  "tr": "Yarıda kalan bir taşıma var",
+  "en": "A move was cut off"
+ },
+ {
+  "id": "83267ed9",
+  "key": "dosya tamamlandı",
+  "tr": "dosya tamamlandı",
+  "en": "files done"
+ },
+ {
+  "id": "6be00554",
+  "key": "Kaldığı yerden devam edilsin mi? Tamamlanan dosyalar kaynaklarıyla yeniden karşılaştırılır, yarım kalanlar baştan kopyalanır.",
+  "tr": "Kaldığı yerden devam edilsin mi? Tamamlanan dosyalar kaynaklarıyla yeniden karşılaştırılır, yarım kalanlar baştan kopyalanır.",
+  "en": "Carry on where it stopped? Files already done are checked against their sources again; partly copied ones are copied again."
+ },
+ {
+  "id": "276fcd7c",
+  "key": "Vazgeç",
+  "tr": "Vazgeç",
+  "en": "Discard"
+ },
+ {
+  "id": "5f2e231e",
+  "key": "Sonra",
+  "tr": "Sonra",
+  "en": "Later"
+ },
+ {
   "id": "194f61c8",
   "key": "İndirildi:",
   "tr": "İndirildi:",

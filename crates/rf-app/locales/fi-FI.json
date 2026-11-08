@@ -858,5 +858,11 @@
  "dcf39e11": "Voimassa",
  "21167459": "vanhentunut",
  "2c8ae42a": "ei vielä voimassa",
- "194f61c8": "Ladattu:"
+ "194f61c8": "Ladattu:",
+ "707e075d": "Kopiointi keskeytyi",
+ "f0d45428": "Siirto keskeytyi",
+ "83267ed9": "tiedostoa valmiina",
+ "6be00554": "Jatketaanko siitä, mihin jäätiin? Jo valmiit tiedostot tarkistetaan uudelleen lähteitään vasten; osittain kopioidut kopioidaan uudelleen.",
+ "276fcd7c": "Hylkää",
+ "5f2e231e": "Myöhemmin"
 }

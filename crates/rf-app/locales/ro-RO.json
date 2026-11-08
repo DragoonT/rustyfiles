@@ -858,5 +858,11 @@
  "dcf39e11": "Valabil",
  "21167459": "expirat",
  "2c8ae42a": "încă nevalid",
- "194f61c8": "Descărcat:"
+ "194f61c8": "Descărcat:",
+ "707e075d": "O copiere a fost întreruptă",
+ "f0d45428": "O mutare a fost întreruptă",
+ "83267ed9": "fișiere terminate",
+ "6be00554": "Continuați de unde s-a oprit? Fișierele deja terminate sunt verificate din nou cu sursele lor; cele copiate parțial sunt copiate din nou.",
+ "276fcd7c": "Renunță",
+ "5f2e231e": "Mai târziu"
 }

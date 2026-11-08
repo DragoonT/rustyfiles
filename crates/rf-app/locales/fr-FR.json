@@ -858,5 +858,11 @@
  "dcf39e11": "Valide",
  "21167459": "expiré",
  "2c8ae42a": "pas encore valide",
- "194f61c8": "Téléchargé :"
+ "194f61c8": "Téléchargé :",
+ "707e075d": "Une copie a été interrompue",
+ "f0d45428": "Un déplacement a été interrompu",
+ "83267ed9": "fichiers terminés",
+ "6be00554": "Reprendre là où cela s’est arrêté ? Les fichiers déjà terminés sont revérifiés par rapport à leurs sources ; ceux copiés en partie sont recopiés.",
+ "276fcd7c": "Abandonner",
+ "5f2e231e": "Plus tard"
 }

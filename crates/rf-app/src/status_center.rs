@@ -316,6 +316,77 @@ pub fn transfer_ex(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf
     });
 }
 
+/// A copy or move cut off by a crash or a shutdown: asked about once the main window is up
+/// (Resume / Discard / Later), one job at a time.
+pub fn offer_resume(cx: &mut App) {
+    let found = cx.background_spawn(async {
+        // let the window settle first; the scan itself is a directory listing
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        rf_win::fastcopy::interrupted()
+    });
+    cx.spawn(async move |cx| {
+        let list = found.await;
+        let Some(job) = list.into_iter().next() else { return };
+        cx.update(|cx| {
+            let Some(w) = cx.active_window().or_else(|| cx.windows().first().copied()) else { return };
+            let _ = w.update(cx, |_, window, cx| ask_resume(job, window, cx));
+        });
+    })
+    .detach();
+}
+
+fn ask_resume(job: rf_win::fastcopy::Interrupted, window: &mut gpui_kit::Window, cx: &mut App) {
+    use crate::prompt::{Button, Kind};
+    let title = match job.kind {
+        Transfer::Copy => t!("Yarıda kalan bir kopyalama var"),
+        Transfer::Move => t!("Yarıda kalan bir taşıma var"),
+    };
+    let what = format!("{} → {}", crate::i18n::items(job.sources.len()), short(&job.dest));
+    let msg = format!(
+        "{what}\n{} / {} {}\n\n{}",
+        job.done.min(job.files),
+        job.files,
+        t!("dosya tamamlandı"),
+        t!("Kaldığı yerden devam edilsin mi? Tamamlanan dosyalar kaynaklarıyla yeniden karşılaştırılır, yarım kalanlar baştan kopyalanır.")
+    );
+    let (j1, j2) = (job.clone(), job.clone());
+    crate::prompt::show(
+        title,
+        Some(msg),
+        None,
+        vec![
+            Button::new(t!("Devam et"), Kind::Primary, move |_, _, cx| {
+                resume_job(cx, j1.clone());
+                offer_resume(cx);
+                Ok(())
+            }),
+            Button::new(t!("Vazgeç"), Kind::Normal, move |_, _, cx| {
+                // what was copied stays where it is
+                rf_win::fastcopy::discard(&j2.journal);
+                offer_resume(cx);
+                Ok(())
+            }),
+            Button::new(t!("Sonra"), Kind::Normal, |_, _, _| Ok(())),
+        ],
+        window,
+        cx,
+    );
+}
+
+/// Carries a cut-off job on in the Status Center, with its original plan.
+pub fn resume_job(cx: &mut App, job: rf_win::fastcopy::Interrupted) {
+    let verb = match job.kind {
+        Transfer::Copy => t!("Kopyalanıyor"),
+        Transfer::Move => t!("Taşınıyor"),
+    };
+    let title = format!("{verb}: {} → {}", crate::i18n::items(job.sources.len()), short(&job.dest));
+    let limit = u64::from(cx.global::<crate::settings::Settings>().copy_speed_limit) << 20;
+    start(cx, title, move |t| {
+        t.limit.store(limit, Ordering::Relaxed);
+        rf_win::fastcopy::resume(&job.journal, t)
+    });
+}
+
 pub fn archive_progress_pub(t: &Tracker) -> impl FnMut(rf_archive::Progress) + '_ {
     archive_progress(t)
 }
