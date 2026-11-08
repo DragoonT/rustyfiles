@@ -11,8 +11,13 @@ The window never waits on the disk. Listing, icons, thumbnails, the context menu
 operation run off the UI thread, so a slow network share or a folder with 100,000 files can't
 freeze it.
 
-Download the latest build from [Releases](https://github.com/gelenmedya/rustyfiles/releases),
-or [build it yourself](#build-from-source).
+<p align="center">
+  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe"><img alt="Download for Windows" src="https://img.shields.io/badge/Download_for_Windows-FF6A1A?style=for-the-badge&logo=windows11&logoColor=white"></a>
+  <a href="https://rustyfiles.com"><img alt="Website" src="https://img.shields.io/badge/rustyfiles.com-232326?style=for-the-badge&logo=googlechrome&logoColor=white"></a>
+  <a href="https://discord.gg/K2banZ36zJ"><img alt="Join the Discord" src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white"></a>
+</p>
+
+Free, no account, no ads. Download, double-click, done: see [Install](#install).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/projects-dark.png">
@@ -85,20 +90,27 @@ in Explorer and on the desktop too. Settings live under Settings › DirectLook.
 
 ## Install
 
-Download **rustyfiles-win-Setup.exe** from
-[Releases](https://github.com/gelenmedya/rustyfiles/releases) and run it. It installs for your
-user only (no administrator rights), adds rustyfiles to the Start menu and starts it. New
-versions download in the background and apply at the next start; Settings › About shows the
-version and checks on demand.
+Installing takes three clicks and no technical knowledge:
 
-To open folders and <kbd>Win</kbd>+<kbd>E</kbd> in rustyfiles, turn on Settings › Advanced ›
-Set as default file manager. Uninstall from Windows Settings › Apps: everything rustyfiles
-changed in Windows goes back to Explorer.
+1. **[Download rustyfiles-win-Setup.exe](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe)** (about 35 MB).
+2. Open it. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**.
+   (The installer isn't code-signed yet; that's the only reason for the warning.)
+3. That's it. rustyfiles opens by itself and is in your Start menu.
 
-The setup isn't code-signed yet, so Windows SmartScreen may warn on first run: choose
-"More info", then "Run anyway". A portable zip is on the same page.
+No administrator password, nothing to configure. Updates download quietly in the background and
+apply the next time you open rustyfiles.
 
-Requires Windows 11 on x64. Windows 10 is untested.
+**Want folders and <kbd>Win</kbd>+<kbd>E</kbd> to open in rustyfiles?** Turn on
+Settings › Advanced › Set as default file manager. You can turn it off any time.
+
+**Uninstall** like any app, from Windows Settings › Apps. Everything rustyfiles changed goes
+back to File Explorer.
+
+Prefer no installer? A portable zip is on the [Releases](https://github.com/gelenmedya/rustyfiles/releases)
+page. Requires Windows 11 on x64 (Windows 10 is untested).
+
+**Questions or ideas?** Come say hi on [Discord](https://discord.gg/K2banZ36zJ), or visit
+[rustyfiles.com](https://rustyfiles.com).
 
 ### Build from source
 
