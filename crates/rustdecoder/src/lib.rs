@@ -2,7 +2,10 @@
 //! compressed pictures go to the graphics card's video engine (D3D11 Video). See
 //! `docs/design/rustdecoder.md`.
 
+pub mod bits;
+pub mod hevc;
 pub mod mp4;
+pub mod nal;
 
 /// Errors from reading a file.
 #[derive(Debug, thiserror::Error)]
