@@ -105,6 +105,18 @@ mod tests {
     }
 }
 
+/// Whether `path` is on a removable drive (USB stick, SD card).
+pub fn is_removable(path: &std::path::Path) -> bool {
+    let s = path.to_string_lossy();
+    let b = s.as_bytes();
+    if b.len() < 2 || b[1] != b':' {
+        return false;
+    }
+    let root = crate::wide::wide(format!("{}:\\", b[0] as char));
+    // 2 = DRIVE_REMOVABLE
+    unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) == 2 }
+}
+
 /// Bitmask of present drive letters (cheap; poll it to notice USB plug/unplug).
 pub fn drive_mask() -> u32 {
     unsafe { GetLogicalDrives() }

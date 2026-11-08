@@ -1,24 +1,36 @@
-//! Our own parallel copy engine: many files at once with `CopyFile2` (attributes, times and
+//! Our own copy / move engine: many files at once with `CopyFile2` (attributes, times and
 //! alternate data streams come along), instead of the shell engine's one-file-at-a-time
-//! pipeline. On this machine the shell engine needs ~200 s for 20 000 small files, a
-//! parallel copy ~10 s.
+//! pipeline. Names that already exist at the destination are ours to handle too (like Files):
+//! folders merge, and every clashing file is put to the user once, in one list (replace, skip
+//! or keep both).
 //!
-//! It only takes the plain cases and hands everything else to the shell engine, so behavior
-//! stays Explorer's where it matters:
-//! * a top-level item whose name already exists at the destination (the shell's conflict
-//!   dialog), or that contains links / junctions, goes to the shell;
-//! * files that fail here (access denied, in use, …) are retried through the shell at the
-//!   end, which can ask for elevation or retry.
+//! * Moves on one volume are renames (instant); onto another volume a copy, after which each
+//!   source file is deleted only once its copy checks out.
+//! * "Replace" copies to a temporary name first and swaps it in at the end, so a failed or
+//!   cancelled copy never costs the file that was there.
+//! * Small files are spread over folders: threads writing into the same folder wait on its
+//!   lock (20 000 files: ~3 400/s in folder order, ~6 500/s spread).
+//! * Pause, a speed limit and byte-accurate progress run in CopyFile2's progress callback.
+//!
+//! Left to the shell engine, so behavior stays Explorer's where it matters: items containing
+//! links / junctions, a folder into itself, paths that aren't plain file system paths, and
+//! files that fail here (access denied, in use, …) — retried through the shell at the end,
+//! which can ask for elevation.
 //!
 //! Blocking: call from a worker thread.
 
+use std::cell::Cell;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering};
+use std::time::{Duration, Instant, SystemTime};
 
 use windows::Win32::Storage::FileSystem::{
-    COPY_FILE_FAIL_IF_EXISTS, COPY_FILE_NO_BUFFERING, COPYFILE2_EXTENDED_PARAMETERS, CopyFile2, FILE_ATTRIBUTE_REPARSE_POINT,
-    FILE_FLAGS_AND_ATTRIBUTES, SetFileAttributesW,
+    COPY_FILE_FAIL_IF_EXISTS, COPY_FILE_NO_BUFFERING, COPYFILE2_CALLBACK_CHUNK_FINISHED, COPYFILE2_EXTENDED_PARAMETERS, COPYFILE2_MESSAGE,
+    COPYFILE2_MESSAGE_ACTION, COPYFILE2_PROGRESS_CANCEL, COPYFILE2_PROGRESS_CONTINUE, CopyFile2, FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT,
+    FILE_FLAGS_AND_ATTRIBUTES, GetFileAttributesW, MOVE_FILE_FLAGS, MOVEFILE_REPLACE_EXISTING, MoveFileExW, SetFileAttributesW,
 };
 use windows::core::PCWSTR;
 
@@ -27,84 +39,88 @@ use crate::wide::long_path;
 
 /// Files above this size are copied unbuffered (no point filling the cache with them).
 const UNBUFFERED: u64 = 256 << 20;
+/// Files above this size are started first (they set the pace; small ones fill the gaps).
+const BIG: u64 = 8 << 20;
+/// A rename counts like this many bytes of progress.
+const RENAME_WEIGHT: u64 = 64 << 10;
 
-/// One file or folder to create at the destination.
+/// How copies are checked after writing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(u8)]
+pub enum Verify {
+    #[default]
+    Off,
+    /// Same size and modification time.
+    Quick,
+    /// Same bytes, read back from the disk (not from the cache).
+    Full,
+}
+
+/// A name that already exists at the destination.
+#[derive(Clone, Debug)]
+pub struct Conflict {
+    pub src: PathBuf,
+    pub dst: PathBuf,
+    pub src_dir: bool,
+    pub dst_dir: bool,
+    pub src_size: u64,
+    pub dst_size: u64,
+    pub src_time: Option<SystemTime>,
+    pub dst_time: Option<SystemTime>,
+}
+
+impl Conflict {
+    /// A file against a folder (or the other way round): it can't replace, only skip or keep both.
+    pub fn mismatched(&self) -> bool {
+        self.src_dir != self.dst_dir
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Resolve {
+    Replace,
+    Skip,
+    KeepBoth,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Op {
+    Copy,
+    Rename,
+}
+
+/// One file to copy, or one item to rename into place.
+#[derive(Clone, Debug)]
 struct Job {
     src: PathBuf,
     dst: PathBuf,
     size: u64,
+    op: Op,
+    /// The destination exists and is to be replaced.
+    replace: bool,
 }
 
-/// What the parallel pass couldn't do, for the shell engine.
+/// What a transfer will do, worked out before anything is written.
 #[derive(Default)]
-pub struct Leftovers {
-    /// Top-level sources (and their destination folder) the shell should copy whole.
-    pub whole: Vec<PathBuf>,
-    /// Single files that failed: (source, destination folder).
-    pub files: Vec<(PathBuf, PathBuf)>,
+struct Plan {
+    /// Folders to create (copies), parents first.
+    dirs: Vec<PathBuf>,
+    jobs: Vec<Job>,
+    conflicts: Vec<(Conflict, Job)>,
+    /// (source, destination) of every item this transfer creates, for undo.
+    undo: Vec<(PathBuf, PathBuf)>,
+    /// (source folder, its new copy): attributes are copied once the contents are in.
+    new_dirs: Vec<(PathBuf, PathBuf)>,
+    /// Source folders whose contents are taken file by file (moves remove them when empty).
+    src_dirs: Vec<PathBuf>,
+    /// Top-level sources for the shell engine.
+    whole: Vec<PathBuf>,
+    /// Destination paths this plan writes (lowercase), so "keep both" picks a free name.
+    taken: HashSet<String>,
 }
 
-/// Plans a copy: which top-level items the fast engine takes, and its folders and files.
-/// `None` when it should all go to the shell (nothing plain to do).
-fn plan(sources: &[PathBuf], dest_dir: &Path, left: &mut Leftovers) -> (Vec<(PathBuf, PathBuf)>, Vec<PathBuf>, Vec<Job>) {
-    let mut tops = Vec::new();
-    let mut dirs = Vec::new();
-    let mut files = Vec::new();
-    'top: for s in sources {
-        let Some(name) = s.file_name() else {
-            left.whole.push(s.clone());
-            continue;
-        };
-        let dst = dest_dir.join(name);
-        // a name already there, or a folder into itself: the shell decides / refuses
-        if std::fs::symlink_metadata(&dst).is_ok() || s.parent().is_some_and(|p| inside(p, dest_dir) && inside(dest_dir, p)) || inside(dest_dir, s) {
-            left.whole.push(s.clone());
-            continue;
-        }
-        let Ok(meta) = std::fs::symlink_metadata(s) else {
-            left.whole.push(s.clone());
-            continue;
-        };
-        if is_reparse(&meta) {
-            left.whole.push(s.clone());
-            continue;
-        }
-        if meta.is_file() {
-            files.push(Job { src: s.clone(), dst: dst.clone(), size: meta.len() });
-            tops.push((s.clone(), dst));
-            continue;
-        }
-        // a folder: walk it; links or junctions inside → the whole item goes to the shell
-        let (mut d, mut f) = (vec![dst.clone()], Vec::new());
-        let mut stack = vec![(s.clone(), dst.clone())];
-        while let Some((from, to)) = stack.pop() {
-            let Ok(rd) = std::fs::read_dir(&from) else {
-                left.whole.push(s.clone());
-                continue 'top;
-            };
-            for e in rd.flatten() {
-                let Ok(m) = e.metadata() else {
-                    left.whole.push(s.clone());
-                    continue 'top;
-                };
-                if is_reparse(&m) {
-                    left.whole.push(s.clone());
-                    continue 'top;
-                }
-                let (a, b) = (e.path(), to.join(e.file_name()));
-                if m.is_dir() {
-                    d.push(b.clone());
-                    stack.push((a, b));
-                } else {
-                    f.push(Job { src: a, dst: b, size: m.len() });
-                }
-            }
-        }
-        dirs.extend(d);
-        files.extend(f);
-        tops.push((s.clone(), dst));
-    }
-    (tops, dirs, files)
+fn key(p: &Path) -> String {
+    p.to_string_lossy().to_lowercase()
 }
 
 fn is_reparse(m: &std::fs::Metadata) -> bool {
@@ -112,153 +128,526 @@ fn is_reparse(m: &std::fs::Metadata) -> bool {
     m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0
 }
 
-/// Copies `sources` into `dest_dir` in parallel. Returns the (source, copy) pairs done here
-/// (for undo) and what is left for the shell engine.
-pub fn copy(sources: &[PathBuf], dest_dir: &Path, tracker: &Tracker, threads: usize) -> (Vec<(PathBuf, PathBuf)>, Leftovers) {
-    let mut left = Leftovers::default();
-    let (tops, dirs, mut files) = plan(sources, dest_dir, &mut left);
-    // folders first (in walk order, parents before children)
-    for d in &dirs {
-        if let Err(e) = std::fs::create_dir(d) {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
-                // can't even make the folder: let the shell try the whole item
-                log::warn!("fastcopy: mkdir {}: {e}", d.display());
+/// A link or junction somewhere in the tree: the shell copes with those.
+struct HasLink;
+
+impl Plan {
+    /// Plans one top-level source; on a link inside it, nothing of it is kept and it goes to
+    /// the shell whole.
+    fn top(&mut self, src: &Path, dest_dir: &Path, rename: bool) {
+        let Some(name) = src.file_name() else {
+            self.whole.push(src.to_path_buf());
+            return;
+        };
+        let dst = dest_dir.join(name);
+        let meta = match std::fs::symlink_metadata(src) {
+            Ok(m) if !is_reparse(&m) => m,
+            _ => {
+                self.whole.push(src.to_path_buf());
+                return;
+            }
+        };
+        // a folder into itself or below itself: the shell refuses it with its own message
+        if meta.is_dir() && inside(dest_dir, src) {
+            self.whole.push(src.to_path_buf());
+            return;
+        }
+        let mut sub = Plan { taken: std::mem::take(&mut self.taken), ..Default::default() };
+        match sub.visit(src, &dst, &meta, rename) {
+            Ok(()) => {
+                self.taken = std::mem::take(&mut sub.taken);
+                self.dirs.extend(sub.dirs);
+                self.jobs.extend(sub.jobs);
+                self.conflicts.extend(sub.conflicts);
+                self.undo.extend(sub.undo);
+                self.new_dirs.extend(sub.new_dirs);
+                self.src_dirs.extend(sub.src_dirs);
+            }
+            Err(HasLink) => {
+                // drop what it reserved
+                let mut taken = std::mem::take(&mut sub.taken);
+                for j in sub.jobs.iter().chain(sub.conflicts.iter().map(|c| &c.1)) {
+                    taken.remove(&key(&j.dst));
+                }
+                for d in &sub.dirs {
+                    taken.remove(&key(d));
+                }
+                self.taken = taken;
+                self.whole.push(src.to_path_buf());
             }
         }
     }
-    // big files first: they set the pace, small ones fill the gaps
-    files.sort_by_key(|j| std::cmp::Reverse(j.size));
-    let total: u64 = files.iter().map(|j| j.size.max(1)).sum::<u64>().max(1);
-    let done = AtomicU64::new(0);
-    let next = AtomicUsize::new(0);
-    let failed = std::sync::Mutex::new(Vec::new());
-    let cancel_flag = std::sync::atomic::AtomicI32::new(0);
-    let report = |name: Option<String>| {
-        let d = done.load(Ordering::Relaxed).min(total);
-        (tracker.on_progress)(1000, (d * 1000 / total) as u32, name);
-    };
-    std::thread::scope(|s| {
-        for _ in 0..threads.clamp(1, files.len().max(1)) {
-            s.spawn(|| {
-                loop {
-                    if tracker.cancel.load(Ordering::Relaxed) {
-                        cancel_flag.store(1, Ordering::Relaxed);
-                        return;
+
+    fn visit(&mut self, src: &Path, dst: &Path, meta: &std::fs::Metadata, rename: bool) -> Result<(), HasLink> {
+        // already planned by another source of this transfer (same name from two folders)
+        if self.taken.contains(&key(dst)) {
+            let free = self.free_name(dst, meta.is_dir());
+            return self.visit(src, &free, meta, rename);
+        }
+        let there = std::fs::symlink_metadata(dst).ok();
+        match there {
+            None if rename => {
+                self.taken.insert(key(dst));
+                self.jobs.push(Job { src: src.into(), dst: dst.into(), size: RENAME_WEIGHT, op: Op::Rename, replace: false });
+                self.undo.push((src.into(), dst.into()));
+            }
+            None if meta.is_dir() => {
+                self.new_tree(src, dst)?;
+                self.undo.push((src.into(), dst.into()));
+            }
+            None => {
+                self.taken.insert(key(dst));
+                self.jobs.push(Job { src: src.into(), dst: dst.into(), size: meta.len(), op: Op::Copy, replace: false });
+                self.undo.push((src.into(), dst.into()));
+            }
+            // folder onto folder: merge, item by item
+            Some(d) if meta.is_dir() && d.is_dir() && !is_reparse(&d) => {
+                self.src_dirs.push(src.into());
+                let rd = std::fs::read_dir(src).map_err(|_| HasLink)?;
+                for e in rd.flatten() {
+                    let m = std::fs::symlink_metadata(e.path()).map_err(|_| HasLink)?;
+                    if is_reparse(&m) {
+                        return Err(HasLink);
                     }
-                    let i = next.fetch_add(1, Ordering::Relaxed);
-                    let Some(j) = files.get(i) else { return };
-                    match copy_one(j, &cancel_flag) {
-                        Ok(()) => {}
-                        Err(e) => {
-                            if !tracker.cancel.load(Ordering::Relaxed) {
-                                log::info!("fastcopy: {} → shell ({e})", j.src.display());
-                                failed.lock().unwrap().push(j.src.clone());
-                            }
-                        }
-                    }
-                    done.fetch_add(j.size.max(1), Ordering::Relaxed);
-                    if i % 64 == 0 || j.size > 1 << 20 {
-                        report(j.src.file_name().map(|n| n.to_string_lossy().into_owned()));
+                    self.visit(&e.path(), &dst.join(e.file_name()), &m, rename)?;
+                }
+            }
+            Some(d) => {
+                use std::os::windows::fs::MetadataExt;
+                let c = Conflict {
+                    src: src.into(),
+                    dst: dst.into(),
+                    src_dir: meta.is_dir(),
+                    dst_dir: d.is_dir(),
+                    src_size: if meta.is_dir() { 0 } else { meta.len() },
+                    dst_size: if d.is_dir() { 0 } else { d.file_size() },
+                    src_time: meta.modified().ok(),
+                    dst_time: d.modified().ok(),
+                };
+                if meta.is_dir() {
+                    // walked now, so a link inside is found before anything is asked
+                    check_tree(src)?;
+                }
+                let size = if rename { RENAME_WEIGHT } else { meta.len() };
+                self.conflicts.push((c, Job { src: src.into(), dst: dst.into(), size, op: if rename { Op::Rename } else { Op::Copy }, replace: false }));
+            }
+        }
+        Ok(())
+    }
+
+    /// A whole new folder: its folders and files (copies).
+    fn new_tree(&mut self, src: &Path, dst: &Path) -> Result<(), HasLink> {
+        self.taken.insert(key(dst));
+        self.dirs.push(dst.into());
+        self.new_dirs.push((src.into(), dst.into()));
+        let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
+        while let Some((from, to)) = stack.pop() {
+            let rd = std::fs::read_dir(&from).map_err(|_| HasLink)?;
+            for e in rd.flatten() {
+                let m = e.metadata().map_err(|_| HasLink)?;
+                if is_reparse(&m) {
+                    return Err(HasLink);
+                }
+                let (a, b) = (e.path(), to.join(e.file_name()));
+                if m.is_dir() {
+                    self.dirs.push(b.clone());
+                    self.new_dirs.push((a.clone(), b.clone()));
+                    stack.push((a, b));
+                } else {
+                    self.jobs.push(Job { src: a, dst: b, size: m.len(), op: Op::Copy, replace: false });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Applies the user's answers to the conflicts.
+    fn resolve(&mut self, answers: &[Resolve]) {
+        let conflicts = std::mem::take(&mut self.conflicts);
+        for ((c, mut job), r) in conflicts.into_iter().zip(answers.iter().copied()) {
+            let r = if r == Resolve::Replace && c.mismatched() { Resolve::KeepBoth } else { r };
+            match r {
+                Resolve::Skip => {}
+                Resolve::Replace => {
+                    job.replace = true;
+                    self.undo.push((job.src.clone(), job.dst.clone()));
+                    self.jobs.push(job);
+                }
+                Resolve::KeepBoth => {
+                    let dst = self.free_name(&c.dst, c.src_dir);
+                    if job.op == Op::Rename || !c.src_dir {
+                        self.taken.insert(key(&dst));
+                        self.undo.push((job.src.clone(), dst.clone()));
+                        self.jobs.push(Job { dst, ..job });
+                    } else if self.new_tree(&c.src, &dst).is_ok() {
+                        self.undo.push((c.src.clone(), dst));
                     }
                 }
-            });
-        }
-    });
-    report(None);
-    // folder attributes (hidden, read-only, …) once their contents are in
-    for (src, dst) in walk_dir_pairs(&tops) {
-        if let Ok(m) = std::fs::metadata(&src) {
-            use std::os::windows::fs::MetadataExt;
-            let w = long_path(&dst);
-            unsafe {
-                let _ = SetFileAttributesW(PCWSTR(w.as_ptr()), FILE_FLAGS_AND_ATTRIBUTES(m.file_attributes()));
             }
         }
     }
-    let failed = failed.into_inner().unwrap();
-    for f in failed {
-        // its destination folder: the same relative place under the top-level copy
-        if let Some((top_src, top_dst)) = tops.iter().find(|(t, _)| f.starts_with(t)) {
-            let rel = f.strip_prefix(top_src).unwrap_or(Path::new(""));
-            let dst = top_dst.join(rel);
-            if let Some(parent) = dst.parent() {
-                left.files.push((f.clone(), parent.to_path_buf()));
-            }
-        }
+
+    /// "name (2).ext", "name (3).ext", … : the first that neither exists nor is planned.
+    fn free_name(&self, dst: &Path, is_dir: bool) -> PathBuf {
+        let dir = dst.parent().unwrap_or(Path::new(""));
+        let name = dst.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let (stem, ext) = match name.rfind('.') {
+            Some(i) if i > 0 && !is_dir => (name[..i].to_string(), name[i..].to_string()),
+            _ => (name.clone(), String::new()),
+        };
+        (2..)
+            .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+            .find(|p| !self.taken.contains(&key(p)) && std::fs::symlink_metadata(p).is_err())
+            .expect("a free name")
     }
-    (tops, left)
 }
 
-/// (source folder, copy) for every folder of the copied top-level items.
-fn walk_dir_pairs(tops: &[(PathBuf, PathBuf)]) -> Vec<(PathBuf, PathBuf)> {
-    let mut out = Vec::new();
-    for (s, d) in tops {
-        if !s.is_dir() {
-            continue;
-        }
-        let mut stack = vec![(s.clone(), d.clone())];
-        while let Some((a, b)) = stack.pop() {
-            if let Ok(rd) = std::fs::read_dir(&a) {
-                for e in rd.flatten() {
-                    if e.file_type().is_ok_and(|t| t.is_dir()) {
-                        stack.push((e.path(), b.join(e.file_name())));
-                    }
-                }
+/// Errors if there is a link or junction anywhere under `dir`.
+fn check_tree(dir: &Path) -> Result<(), HasLink> {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d).map_err(|_| HasLink)?.flatten() {
+            let m = e.metadata().map_err(|_| HasLink)?;
+            if is_reparse(&m) {
+                return Err(HasLink);
             }
-            out.push((a, b));
+            if m.is_dir() {
+                stack.push(e.path());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Plans `sources` into `dest_dir`: what goes where, and what clashes.
+fn plan(sources: &[PathBuf], dest_dir: &Path, rename: bool) -> Plan {
+    let mut p = Plan::default();
+    for s in sources {
+        p.top(s, dest_dir, rename);
+    }
+    p
+}
+
+/// Big files first, then the rest taken from each folder in turn.
+fn order(jobs: Vec<Job>) -> Vec<Job> {
+    let (mut big, small): (Vec<Job>, Vec<Job>) = jobs.into_iter().partition(|j| j.size >= BIG);
+    big.sort_by_key(|j| std::cmp::Reverse(j.size));
+    let mut folders: Vec<std::collections::VecDeque<Job>> = Vec::new();
+    let mut at: std::collections::HashMap<PathBuf, usize> = Default::default();
+    for j in small {
+        let parent = j.dst.parent().map(Path::to_path_buf).unwrap_or_default();
+        let ix = *at.entry(parent).or_insert_with(|| {
+            folders.push(Default::default());
+            folders.len() - 1
+        });
+        folders[ix].push_back(j);
+    }
+    let mut out = big;
+    loop {
+        let before = out.len();
+        for q in folders.iter_mut() {
+            if let Some(j) = q.pop_front() {
+                out.push(j);
+            }
+        }
+        if out.len() == before {
+            break;
         }
     }
     out
 }
 
-fn copy_one(j: &Job, cancel: &std::sync::atomic::AtomicI32) -> windows::core::Result<()> {
-    let (src, dst) = (long_path(&j.src), long_path(&j.dst));
+/// Progress, pause, speed limit and cancel, shared by the copy threads.
+struct Run<'a> {
+    tracker: &'a Tracker,
+    total: u64,
+    done: AtomicU64,
+    /// Turned non-zero to stop CopyFile2 (it removes the partial file).
+    cancel: AtomicI32,
+    /// Speed limit clock: (since, bytes counted since then).
+    clock: Mutex<(Instant, u64)>,
+    last_report: Mutex<Instant>,
+}
+
+impl Run<'_> {
+    fn cancelled(&self) -> bool {
+        if self.tracker.cancel.load(Ordering::Relaxed) {
+            self.cancel.store(1, Ordering::Relaxed);
+        }
+        self.cancel.load(Ordering::Relaxed) != 0
+    }
+
+    /// Blocks while paused; the paused time doesn't count against the speed limit.
+    fn wait_if_paused(&self) {
+        if !self.tracker.paused.load(Ordering::Relaxed) {
+            return;
+        }
+        let from = Instant::now();
+        while self.tracker.paused.load(Ordering::Relaxed) && !self.cancelled() {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let mut c = self.clock.lock().unwrap();
+        c.0 += from.elapsed();
+    }
+
+    fn add(&self, bytes: u64, name: Option<&Path>) {
+        self.done.fetch_add(bytes, Ordering::Relaxed);
+        let limit = self.tracker.limit.load(Ordering::Relaxed);
+        if limit > 0 {
+            let wait = {
+                let mut c = self.clock.lock().unwrap();
+                c.1 += bytes;
+                let due = Duration::from_secs_f64(c.1 as f64 / limit as f64);
+                due.saturating_sub(c.0.elapsed())
+            };
+            if !wait.is_zero() {
+                std::thread::sleep(wait.min(Duration::from_millis(500)));
+            }
+        }
+        let mut last = self.last_report.lock().unwrap();
+        if last.elapsed() >= Duration::from_millis(50) {
+            *last = Instant::now();
+            drop(last);
+            self.report(name);
+        }
+    }
+
+    fn report(&self, name: Option<&Path>) {
+        let d = self.done.load(Ordering::Relaxed).min(self.total);
+        let permille = (d as u128 * 1000 / self.total.max(1) as u128) as u32;
+        (self.tracker.on_progress)(1000, permille, name.and_then(|n| n.file_name()).map(|n| n.to_string_lossy().into_owned()));
+    }
+}
+
+/// CopyFile2's per-file callback context.
+struct FileCtx<'a> {
+    run: &'a Run<'a>,
+    name: &'a Path,
+    sent: Cell<u64>,
+}
+
+unsafe extern "system" fn on_chunk(msg: *const COPYFILE2_MESSAGE, ctx: *const core::ffi::c_void) -> COPYFILE2_MESSAGE_ACTION {
+    // SAFETY: CopyFile2 calls back on the copying thread while `ctx` (a FileCtx on that
+    // thread's stack) is alive.
+    let (msg, ctx) = unsafe { (&*msg, &*(ctx as *const FileCtx)) };
+    if msg.Type == COPYFILE2_CALLBACK_CHUNK_FINISHED {
+        let total = unsafe { msg.Info.ChunkFinished.uliTotalBytesTransferred };
+        let delta = total.saturating_sub(ctx.sent.replace(total));
+        ctx.run.add(delta, Some(ctx.name));
+    }
+    ctx.run.wait_if_paused();
+    if ctx.run.cancelled() { COPYFILE2_PROGRESS_CANCEL } else { COPYFILE2_PROGRESS_CONTINUE }
+}
+
+fn copy_file(src: &Path, dst: &Path, size: u64, run: &Run) -> windows::core::Result<()> {
+    let (s, d) = (long_path(src), long_path(dst));
     let mut flags = COPY_FILE_FAIL_IF_EXISTS.0;
-    if j.size >= UNBUFFERED {
+    if size >= UNBUFFERED {
         flags |= COPY_FILE_NO_BUFFERING.0;
     }
+    let ctx = FileCtx { run, name: src, sent: Cell::new(0) };
     let params = COPYFILE2_EXTENDED_PARAMETERS {
         dwSize: std::mem::size_of::<COPYFILE2_EXTENDED_PARAMETERS>() as u32,
         dwCopyFlags: windows::Win32::Storage::FileSystem::COPYFILE_FLAGS(flags),
-        // CopyFile2 polls this and stops (removing the partial file) when it turns non-zero
-        pfCancel: cancel.as_ptr() as *mut windows_core::BOOL,
-        pProgressRoutine: None,
-        pvCallbackContext: std::ptr::null_mut(),
+        pfCancel: run.cancel.as_ptr() as *mut windows_core::BOOL,
+        pProgressRoutine: Some(on_chunk),
+        pvCallbackContext: &ctx as *const FileCtx as *mut core::ffi::c_void,
     };
-    unsafe { CopyFile2(PCWSTR(src.as_ptr()), PCWSTR(dst.as_ptr()), Some(&params)) }
+    let r = unsafe { CopyFile2(PCWSTR(s.as_ptr()), PCWSTR(d.as_ptr()), Some(&params)) };
+    // whatever the callback didn't count (an empty file reports no chunk)
+    run.add(size.max(1).saturating_sub(ctx.sent.get()), None);
+    r
 }
 
-/// Copy or move with the fast engine where it can, the shell engine for the rest. Returns
-/// like `fileops::transfer_tracked`; undo pairs land in `tracker.results`.
-///
-/// A move within one volume is a rename: the shell does that instantly. A move to another
-/// volume is a parallel copy, then each source item is deleted only once every file left in
-/// it has a same-size counterpart at the destination.
+/// Moves `from` over `to` (replacing it when asked), clearing a read-only flag in the way.
+fn move_into_place(from: &Path, to: &Path, replace: bool) -> windows::core::Result<()> {
+    let (f, t) = (long_path(from), long_path(to));
+    let flags = if replace { MOVEFILE_REPLACE_EXISTING } else { MOVE_FILE_FLAGS(0) };
+    let r = unsafe { MoveFileExW(PCWSTR(f.as_ptr()), PCWSTR(t.as_ptr()), flags) };
+    if r.is_err() && replace {
+        unsafe {
+            let a = GetFileAttributesW(PCWSTR(t.as_ptr()));
+            if a != u32::MAX && a & FILE_ATTRIBUTE_READONLY.0 != 0 {
+                let _ = SetFileAttributesW(PCWSTR(t.as_ptr()), FILE_FLAGS_AND_ATTRIBUTES(a & !FILE_ATTRIBUTE_READONLY.0));
+                return MoveFileExW(PCWSTR(f.as_ptr()), PCWSTR(t.as_ptr()), flags);
+            }
+        }
+    }
+    r
+}
+
+/// A temporary name next to `dst` for a copy that replaces it.
+fn part_name(dst: &Path) -> PathBuf {
+    let name = dst.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    dst.with_file_name(format!(".{name}.{}.rfpart", std::process::id()))
+}
+
+/// One job; `Err` = leave it to the shell.
+fn run_job(j: &Job, run: &Run) -> windows::core::Result<()> {
+    match j.op {
+        Op::Rename => {
+            let r = move_into_place(&j.src, &j.dst, j.replace);
+            run.add(j.size, Some(&j.src));
+            r
+        }
+        Op::Copy if j.replace => {
+            let tmp = part_name(&j.dst);
+            let _ = std::fs::remove_file(&tmp);
+            copy_file(&j.src, &tmp, j.size, run)?;
+            move_into_place(&tmp, &j.dst, true).inspect_err(|_| {
+                let _ = std::fs::remove_file(&tmp);
+            })
+        }
+        Op::Copy => copy_file(&j.src, &j.dst, j.size, run),
+    }
+}
+
+/// What a transfer did here: undo pairs, files copied (source, copy), and what is left for
+/// the shell.
+#[derive(Default)]
+pub struct Outcome {
+    pub undo: Vec<(PathBuf, PathBuf)>,
+    /// Single files that failed here: (source, destination folder).
+    pub failed: Vec<(PathBuf, PathBuf)>,
+    /// Top-level sources the shell should transfer whole.
+    pub whole: Vec<PathBuf>,
+    copied: Vec<(PathBuf, PathBuf)>,
+    src_dirs: Vec<PathBuf>,
+    cancelled: bool,
+}
+
+/// Plans, asks about conflicts, and runs a transfer with our engine (`rename` = a move on one
+/// volume). Everything it can't do is in the returned leftovers.
+fn execute(sources: &[PathBuf], dest_dir: &Path, tracker: &Tracker, threads: usize, rename: bool) -> Outcome {
+    let mut p = plan(sources, dest_dir, rename);
+    if !p.conflicts.is_empty() {
+        let list: Vec<Conflict> = p.conflicts.iter().map(|c| c.0.clone()).collect();
+        let answers = match &tracker.ask {
+            Some(ask) => ask(&list),
+            None => Some(vec![Resolve::KeepBoth; list.len()]),
+        };
+        match answers {
+            Some(a) => p.resolve(&a),
+            None => return Outcome { cancelled: true, ..Default::default() },
+        }
+    }
+    for d in &p.dirs {
+        if let Err(e) = std::fs::create_dir(d) {
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                log::warn!("fastcopy: mkdir {}: {e}", d.display());
+            }
+        }
+    }
+    let jobs = order(std::mem::take(&mut p.jobs));
+    let run = Run {
+        tracker,
+        total: jobs.iter().map(|j| j.size.max(1)).sum::<u64>().max(1),
+        done: AtomicU64::new(0),
+        cancel: AtomicI32::new(0),
+        clock: Mutex::new((Instant::now(), 0)),
+        last_report: Mutex::new(Instant::now() - Duration::from_secs(1)),
+    };
+    let next = AtomicUsize::new(0);
+    let failed = Mutex::new(Vec::new());
+    let done = Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        for _ in 0..threads.clamp(1, jobs.len().max(1)) {
+            s.spawn(|| {
+                loop {
+                    run.wait_if_paused();
+                    if run.cancelled() {
+                        return;
+                    }
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(j) = jobs.get(i) else { return };
+                    match run_job(j, &run) {
+                        Ok(()) => done.lock().unwrap().push(i),
+                        Err(e) => {
+                            if !run.cancelled() {
+                                log::info!("fastcopy: {} → shell ({e})", j.src.display());
+                                failed.lock().unwrap().push(i);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    });
+    run.report(None);
+    let cancelled = run.cancelled();
+    // folder attributes (hidden, read-only, …) once their contents are in
+    for (src, dst) in &p.new_dirs {
+        if let Ok(m) = std::fs::metadata(src) {
+            use std::os::windows::fs::MetadataExt;
+            let w = long_path(dst);
+            unsafe {
+                let _ = SetFileAttributesW(PCWSTR(w.as_ptr()), FILE_FLAGS_AND_ATTRIBUTES(m.file_attributes()));
+            }
+        }
+    }
+    let failed: Vec<(PathBuf, PathBuf)> = failed
+        .into_inner()
+        .unwrap()
+        .into_iter()
+        .filter_map(|i| jobs[i].dst.parent().map(|d| (jobs[i].src.clone(), d.to_path_buf())))
+        .collect();
+    let copied = done.into_inner().unwrap().into_iter().filter(|&i| jobs[i].op == Op::Copy).map(|i| (jobs[i].src.clone(), jobs[i].dst.clone())).collect();
+    Outcome { undo: p.undo, failed, whole: p.whole, copied, src_dirs: p.src_dirs, cancelled }
+}
+
+/// Copies `sources` into `dest_dir` in parallel (conflicts as `tracker.ask` says; without it
+/// both are kept). Returns the undo pairs and the leftovers for the shell.
+pub fn copy(sources: &[PathBuf], dest_dir: &Path, tracker: &Tracker, threads: usize) -> Outcome {
+    execute(sources, dest_dir, tracker, threads, false)
+}
+
+/// Copy or move with our engine where it can, the shell engine for the rest. Returns like
+/// `fileops::transfer_tracked`; undo pairs land in `tracker.results`. A verification failure
+/// is an `Err` (the copies stay).
 pub fn transfer(kind: Transfer, sources: &[PathBuf], dest_dir: &Path, tracker: Arc<Tracker>) -> anyhow::Result<bool> {
-    let renames = kind == Transfer::Move && sources.iter().any(|s| same_volume(s, dest_dir));
-    if renames || !local_fs(dest_dir) || !sources.iter().all(|s| local_fs(s)) {
+    // pasting where the items already are ("x - Copy"), and anything not on a plain file
+    // system path: the shell's way
+    let same_dir = sources.iter().all(|s| s.parent() == Some(dest_dir));
+    if same_dir || !local_fs(dest_dir) || !sources.iter().all(|s| local_fs(s)) {
         return crate::fileops::transfer_tracked(kind, sources, dest_dir, tracker);
     }
-    fast_transfer(kind, sources, dest_dir, tracker)
+    let (here, there): (Vec<PathBuf>, Vec<PathBuf>) = sources.iter().cloned().partition(|s| kind == Transfer::Move && same_volume(s, dest_dir));
+    let mut ok = true;
+    if !here.is_empty() {
+        let out = execute(&here, dest_dir, &tracker, 4, true);
+        ok &= finish(Transfer::Move, &here, dest_dir, &tracker, out)?;
+    }
+    if !there.is_empty() && !tracker.cancel.load(Ordering::Relaxed) {
+        let threads = threads_for(&there, dest_dir);
+        let out = execute(&there, dest_dir, &tracker, threads, false);
+        ok &= finish(kind, &there, dest_dir, &tracker, out)?;
+    }
+    for s in sources {
+        if let Some(p) = s.parent() {
+            crate::shell::notify_updated(p);
+        }
+    }
+    crate::shell::notify_updated(dest_dir);
+    Ok(ok && !tracker.cancel.load(Ordering::Relaxed))
 }
 
-fn fast_transfer(kind: Transfer, sources: &[PathBuf], dest_dir: &Path, tracker: Arc<Tracker>) -> anyhow::Result<bool> {
-    let threads = threads_for(sources, dest_dir);
-    let (pairs, left) = copy(sources, dest_dir, &tracker, threads);
-    tracker.results.lock().unwrap().extend(pairs);
-    if tracker.cancel.load(Ordering::Relaxed) {
+/// After our engine: the shell for the leftovers, verification, and for moves the removal of
+/// what was moved.
+fn finish(kind: Transfer, sources: &[PathBuf], dest_dir: &Path, tracker: &Arc<Tracker>, out: Outcome) -> anyhow::Result<bool> {
+    tracker.results.lock().unwrap().extend(out.undo.iter().cloned());
+    if out.cancelled || tracker.cancel.load(Ordering::Relaxed) {
         return Ok(false);
     }
     let mut ok = true;
-    if !left.whole.is_empty() {
-        ok &= crate::fileops::transfer_tracked(kind, &left.whole, dest_dir, tracker.clone())?;
+    if !out.whole.is_empty() {
+        ok &= crate::fileops::transfer_tracked(kind, &out.whole, dest_dir, tracker.clone())?;
     }
     // failed single files: one shell call per destination folder
     let mut by_dir: Vec<(PathBuf, Vec<PathBuf>)> = Vec::new();
-    for (f, d) in left.files {
-        match by_dir.iter_mut().find(|(x, _)| *x == d) {
-            Some((_, v)) => v.push(f),
-            None => by_dir.push((d, vec![f])),
+    for (f, d) in &out.failed {
+        match by_dir.iter_mut().find(|(x, _)| x == d) {
+            Some((_, v)) => v.push(f.clone()),
+            None => by_dir.push((d.clone(), vec![f.clone()])),
         }
     }
     for (d, fs) in by_dir {
@@ -266,62 +655,151 @@ fn fast_transfer(kind: Transfer, sources: &[PathBuf], dest_dir: &Path, tracker: 
         let t = Arc::new(Tracker::new(Box::new(|_, _, _| {}), tracker.cancel.clone()));
         ok &= crate::fileops::transfer_tracked(kind, &fs, &d, t)?;
     }
-    if kind == Transfer::Move && !tracker.cancel.load(Ordering::Relaxed) {
-        // the shell moved what failed here; whatever is left in a source was copied by us
-        let pairs = tracker.results.lock().unwrap().clone();
-        for (src, dst) in pairs.iter().filter(|(s, _)| sources.contains(s) && !left.whole.contains(s)) {
-            if let Some((files, dirs)) = verified(src, dst) {
-                // only what was checked goes: a file added to the source meanwhile stays
-                ok &= crate::fastdelete::remove_verified(&files, &dirs);
-            } else {
-                log::warn!("fastcopy: {} kept: not everything arrived at {}", src.display(), dst.display());
-                ok = false;
+    // checks: asked for, or a move about to delete its sources
+    let mode = match (tracker.verify_mode(), kind) {
+        (Verify::Off, Transfer::Move) => Verify::Quick,
+        (m, _) => m,
+    };
+    let bad = check(&out.copied, mode, tracker);
+    if tracker.cancel.load(Ordering::Relaxed) {
+        return Ok(false);
+    }
+    if kind == Transfer::Move {
+        // only sources whose copy checked out go; skipped and failed ones stay
+        let bad_set: HashSet<&PathBuf> = bad.iter().collect();
+        let files: Vec<PathBuf> = out.copied.iter().filter(|(s, _)| !bad_set.contains(s)).map(|(s, _)| s.clone()).collect();
+        // folders emptied by the move: merged ones, and whole ones copied across volumes
+        let mut dirs: Vec<PathBuf> = out.src_dirs.clone();
+        for (s, _) in &out.undo {
+            if s.is_dir() && sources.iter().any(|t| s.starts_with(t)) {
+                walk_dirs(s, &mut dirs);
             }
         }
-        for s in sources {
-            if let Some(p) = s.parent() {
-                crate::shell::notify_updated(p);
-            }
+        dirs.sort_by_key(|d| d.components().count());
+        dirs.dedup();
+        if !crate::fastdelete::remove_verified(&files, &dirs) {
+            log::info!("fastcopy: some sources stay (skipped, failed or changed meanwhile)");
         }
     }
-    crate::shell::notify_updated(dest_dir);
+    if !bad.is_empty() {
+        let names: Vec<String> = bad.iter().take(5).filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
+        anyhow::bail!("{}: {} ({})", NOT_VERIFIED, bad.len(), names.join(", "));
+    }
     Ok(ok)
 }
 
-/// Every file under `src` has a counterpart under `dst` with the same size and modification
-/// time (CopyFile2 keeps it; 2 s of slack for FAT/exFAT sticks): the source files and folders
-/// (parents first) that may then be removed. `None` when anything is missing or differs, e.g.
-/// a source file changed after it was copied.
-fn verified(src: &Path, dst: &Path) -> Option<(Vec<PathBuf>, Vec<PathBuf>)> {
-    let same_time = |a: &std::fs::Metadata, b: &std::fs::Metadata| match (a.modified(), b.modified()) {
-        (Ok(x), Ok(y)) => x.duration_since(y).or_else(|_| y.duration_since(x)).is_ok_and(|d| d <= std::time::Duration::from_secs(2)),
-        _ => false,
-    };
-    let (mut files, mut dirs) = (Vec::new(), Vec::new());
-    let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
-    while let Some((a, b)) = stack.pop() {
-        let ma = std::fs::symlink_metadata(&a).ok()?;
-        if is_reparse(&ma) {
-            return None; // links are the shell's business
-        }
-        if !ma.is_dir() {
-            let mb = std::fs::symlink_metadata(&b).ok()?;
-            if mb.is_dir() || mb.len() != ma.len() || !same_time(&ma, &mb) {
-                return None;
+/// Error text for copies that didn't verify (translated by the app).
+pub const NOT_VERIFIED: &str = "Doğrulanamayan dosyalar";
+/// Shown while copies are read back.
+pub const VERIFYING: &str = "Doğrulanıyor…";
+
+/// Every folder under `dir` (and `dir`).
+fn walk_dirs(dir: &Path, out: &mut Vec<PathBuf>) {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        if let Ok(rd) = std::fs::read_dir(&d) {
+            for e in rd.flatten() {
+                if e.file_type().is_ok_and(|t| t.is_dir()) {
+                    stack.push(e.path());
+                }
             }
-            files.push(a);
-            continue;
         }
-        if !std::fs::symlink_metadata(&b).ok()?.is_dir() {
-            return None;
-        }
-        for e in std::fs::read_dir(&a).ok()? {
-            let e = e.ok()?;
-            stack.push((e.path(), b.join(e.file_name())));
-        }
-        dirs.push(a);
+        out.push(d);
     }
-    Some((files, dirs))
+}
+
+/// Sources whose copy doesn't match.
+fn check(pairs: &[(PathBuf, PathBuf)], mode: Verify, tracker: &Tracker) -> Vec<PathBuf> {
+    if mode == Verify::Off || pairs.is_empty() {
+        return Vec::new();
+    }
+    if mode == Verify::Full {
+        (tracker.on_progress)(1000, 0, Some(VERIFYING.to_string()));
+    }
+    let next = AtomicUsize::new(0);
+    let bad = Mutex::new(Vec::new());
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(2, 8);
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(|| {
+                loop {
+                    if tracker.cancel.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some((a, b)) = pairs.get(i) else { return };
+                    let same = match mode {
+                        Verify::Quick => same_meta(a, b),
+                        _ => same_meta(a, b) && same_bytes(a, b).unwrap_or(false),
+                    };
+                    if !same {
+                        log::warn!("fastcopy: {} does not match {}", b.display(), a.display());
+                        bad.lock().unwrap().push(a.clone());
+                    }
+                    if mode == Verify::Full && i % 16 == 0 {
+                        (tracker.on_progress)(1000, (i * 1000 / pairs.len()) as u32, None);
+                    }
+                }
+            });
+        }
+    });
+    bad.into_inner().unwrap()
+}
+
+/// Same size and modification time (CopyFile2 keeps it; 2 s of slack for FAT/exFAT sticks).
+fn same_meta(a: &Path, b: &Path) -> bool {
+    let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) else { return false };
+    if ma.len() != mb.len() {
+        return false;
+    }
+    match (ma.modified(), mb.modified()) {
+        (Ok(x), Ok(y)) => x.duration_since(y).or_else(|_| y.duration_since(x)).is_ok_and(|d| d <= Duration::from_secs(2)),
+        _ => false,
+    }
+}
+
+/// Same bytes; the copy is read past the cache (what the disk holds, not what was just
+/// written to memory).
+fn same_bytes(a: &Path, b: &Path) -> std::io::Result<bool> {
+    use std::io::Read;
+    use std::os::windows::fs::OpenOptionsExt;
+    const CHUNK: usize = 1 << 20;
+    const FILE_FLAG_NO_BUFFERING: u32 = 0x2000_0000;
+    const FILE_FLAG_SEQUENTIAL_SCAN: u32 = 0x0800_0000;
+    struct Aligned(*mut u8, std::alloc::Layout);
+    impl Drop for Aligned {
+        fn drop(&mut self) {
+            unsafe { std::alloc::dealloc(self.0, self.1) }
+        }
+    }
+    let mut fa = std::fs::OpenOptions::new().read(true).custom_flags(FILE_FLAG_SEQUENTIAL_SCAN).open(a)?;
+    let mut fb = std::fs::OpenOptions::new().read(true).custom_flags(FILE_FLAG_NO_BUFFERING).open(b)?;
+    // unbuffered reads need a sector-aligned buffer
+    let layout = std::alloc::Layout::from_size_align(CHUNK, 4096).expect("layout");
+    let buf = Aligned(unsafe { std::alloc::alloc(layout) }, layout);
+    if buf.0.is_null() {
+        return Ok(false);
+    }
+    let bb = unsafe { std::slice::from_raw_parts_mut(buf.0, CHUNK) };
+    let mut ba = vec![0u8; CHUNK];
+    loop {
+        let n = fb.read(bb)?;
+        let mut m = 0;
+        while m < n {
+            let k = fa.read(&mut ba[m..n])?;
+            if k == 0 {
+                return Ok(false);
+            }
+            m += k;
+        }
+        if ba[..n] != bb[..n] {
+            return Ok(false);
+        }
+        if n < CHUNK {
+            // the copy ended: the source must too
+            return Ok(fa.read(&mut ba[..1])? == 0);
+        }
+    }
 }
 
 /// `inner` is `outer` or inside it, comparing like Windows does (case-insensitive, either
@@ -343,19 +821,20 @@ fn same_volume(a: &Path, b: &Path) -> bool {
 }
 
 /// Parallel copies pay off on SSDs; a spinning disk on either side only seeks more with
-/// many at once, and network shares like a moderate number.
+/// many at once, and network shares and USB sticks like a moderate number.
 fn threads_for(sources: &[PathBuf], dest: &Path) -> usize {
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
     let paths = sources.iter().map(PathBuf::as_path).chain(std::iter::once(dest));
-    let mut network = false;
+    let mut slow = false;
     for p in paths {
         match crate::drives::seek_penalty(p) {
             Some(true) => return 2,
             Some(false) => {}
-            None => network = true,
+            None => slow = true,
         }
+        slow |= crate::drives::is_removable(p);
     }
-    if network { cores.clamp(2, 8) } else { cores.clamp(2, 16) }
+    if slow { 4 } else { cores.clamp(4, 16) }
 }
 
 /// Whether `p` is on a local or network file system path we can copy into directly (not a
@@ -372,6 +851,19 @@ mod tests {
 
     fn tracker() -> Tracker {
         Tracker::new(Box::new(|_, _, _| {}), Arc::new(AtomicBool::new(false)))
+    }
+
+    fn answering(r: Resolve) -> Tracker {
+        let mut t = tracker();
+        t.ask = Some(Box::new(move |c| Some(vec![r; c.len()])));
+        t
+    }
+
+    fn base(name: &str) -> PathBuf {
+        let b = std::env::temp_dir().join(format!("rf-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&b);
+        std::fs::create_dir_all(&b).unwrap();
+        b
     }
 
     fn tree(root: &Path) {
@@ -406,90 +898,207 @@ mod tests {
         }
     }
 
+    fn same_bytes_tree(a: &Path, b: &Path) {
+        let mut stack = vec![(a.to_path_buf(), b.to_path_buf())];
+        while let Some((x, y)) = stack.pop() {
+            for e in std::fs::read_dir(&x).unwrap() {
+                let e = e.unwrap();
+                let (p, q) = (e.path(), y.join(e.file_name()));
+                if p.is_dir() {
+                    stack.push((p, q));
+                } else {
+                    assert_eq!(std::fs::read(&p).unwrap(), std::fs::read(&q).unwrap(), "{}", q.display());
+                }
+            }
+        }
+    }
+
     #[test]
     fn copies_a_tree_exactly() {
-        let base = std::env::temp_dir().join(format!("rf-fastcopy-{}", std::process::id()));
-        let src = base.join("kaynak");
-        let dst = base.join("hedef");
+        let base = base("fastcopy");
+        let (src, dst) = (base.join("kaynak"), base.join("hedef"));
         tree(&src);
-        let _ = std::fs::remove_dir_all(&dst);
         std::fs::create_dir_all(&dst).unwrap();
         let t = tracker();
-        let (pairs, left) = copy(&[src.clone(), src.join("kök.txt")], &dst, &t, 8);
-        assert!(left.whole.is_empty() && left.files.is_empty());
-        assert_eq!(pairs.len(), 2);
+        let out = copy(&[src.clone(), src.join("kök.txt")], &dst, &t, 8);
+        assert!(out.whole.is_empty() && out.failed.is_empty());
+        assert_eq!(out.undo.len(), 2);
         same(&src, &dst.join("kaynak"));
         same(&src.join("kök.txt"), &dst.join("kök.txt"));
-        // a second copy into the same place: every name conflicts → all left to the shell
-        let (pairs, left) = copy(&[src.clone()], &dst, &t, 8);
-        assert!(pairs.is_empty());
-        assert_eq!(left.whole, vec![src.clone()]);
+        // again into the same place, nobody asked: the folder merges, every file gets a twin
+        let out = copy(&[src.clone()], &dst, &t, 8);
+        assert!(out.whole.is_empty());
+        assert!(dst.join("kaynak/kök (2).txt").exists());
+        assert!(dst.join("kaynak/a/b/c/f7 (2).txt").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn conflicts_replace_skip_keep_both() {
+        let base = base("conflicts");
+        let (src, dst) = (base.join("kaynak"), base.join("hedef"));
+        std::fs::create_dir_all(src.join("alt")).unwrap();
+        std::fs::create_dir_all(dst.join("kaynak/alt")).unwrap();
+        std::fs::write(src.join("alt/aynı.txt"), b"yeni").unwrap();
+        std::fs::write(src.join("alt/yeni.txt"), b"sadece kaynakta").unwrap();
+        std::fs::write(dst.join("kaynak/alt/aynı.txt"), b"eski").unwrap();
+        std::fs::write(dst.join("kaynak/alt/sadece hedefte.txt"), "kalır".as_bytes()).unwrap();
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        // skip: the old file stays, the new one arrives, the merge keeps the rest
+        let mut t = tracker();
+        let a2 = asked.clone();
+        t.ask = Some(Box::new(move |c| {
+            a2.lock().unwrap().extend(c.iter().map(|c| c.dst.clone()));
+            Some(vec![Resolve::Skip; c.len()])
+        }));
+        transfer(Transfer::Copy, &[src.clone()], &dst, Arc::new(t)).unwrap();
+        assert_eq!(*asked.lock().unwrap(), vec![dst.join("kaynak/alt/aynı.txt")], "only the clashing file is asked");
+        assert_eq!(std::fs::read(dst.join("kaynak/alt/aynı.txt")).unwrap(), b"eski");
+        assert_eq!(std::fs::read(dst.join("kaynak/alt/yeni.txt")).unwrap(), b"sadece kaynakta");
+        assert!(dst.join("kaynak/alt/sadece hedefte.txt").exists());
+        // keep both
+        transfer(Transfer::Copy, &[src.clone()], &dst, Arc::new(answering(Resolve::KeepBoth))).unwrap();
+        assert_eq!(std::fs::read(dst.join("kaynak/alt/aynı (2).txt")).unwrap(), b"yeni");
+        assert_eq!(std::fs::read(dst.join("kaynak/alt/aynı.txt")).unwrap(), b"eski");
+        // replace (a read-only target included), no temporary file left behind
+        let target = dst.join("kaynak/alt/aynı.txt");
+        let mut perm = std::fs::metadata(&target).unwrap().permissions();
+        perm.set_readonly(true);
+        std::fs::set_permissions(&target, perm).unwrap();
+        transfer(Transfer::Copy, &[src.clone()], &dst, Arc::new(answering(Resolve::Replace))).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"yeni");
+        let leftovers = std::fs::read_dir(dst.join("kaynak/alt")).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().ends_with(".rfpart")).count();
+        assert_eq!(leftovers, 0);
+        // cancel at the question: nothing written
+        let mut t = tracker();
+        t.ask = Some(Box::new(|_| None));
+        std::fs::write(src.join("alt/başka.txt"), b"x").unwrap();
+        assert!(!transfer(Transfer::Copy, &[src.clone()], &dst, Arc::new(t)).unwrap());
+        assert!(!dst.join("kaynak/alt/başka.txt").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn keep_both_never_takes_a_planned_name() {
+        let base = base("freename");
+        let (src, dst) = (base.join("kaynak"), base.join("hedef"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        // "a (2).txt" is copied in this same run; the clashing "a.txt" must become "a (3).txt"
+        std::fs::write(src.join("a.txt"), b"yeni a").unwrap();
+        std::fs::write(src.join("a (2).txt"), b"kaynaktaki a (2)").unwrap();
+        std::fs::write(dst.join("a.txt"), b"eski a").unwrap();
+        transfer(Transfer::Copy, &[src.join("a.txt"), src.join("a (2).txt")], &dst, Arc::new(answering(Resolve::KeepBoth))).unwrap();
+        assert_eq!(std::fs::read(dst.join("a.txt")).unwrap(), b"eski a");
+        assert_eq!(std::fs::read(dst.join("a (2).txt")).unwrap(), b"kaynaktaki a (2)");
+        assert_eq!(std::fs::read(dst.join("a (3).txt")).unwrap(), b"yeni a");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn moves_on_one_volume_rename_and_merge() {
+        let base = base("rename");
+        let (src, dst) = (base.join("kaynak"), base.join("hedef"));
+        tree(&src);
+        std::fs::create_dir_all(dst.join("kaynak/a")).unwrap();
+        std::fs::write(dst.join("kaynak/kök.txt"), b"eski").unwrap();
+        std::fs::write(dst.join("kaynak/a/hedefte.txt"), "kalır".as_bytes()).unwrap();
+        let t = Arc::new(answering(Resolve::Skip));
+        assert!(transfer(Transfer::Move, &[src.clone()], &dst, t.clone()).unwrap());
+        // merged: the clash skipped (stays in the source), the rest moved
+        assert_eq!(std::fs::read(dst.join("kaynak/kök.txt")).unwrap(), b"eski");
+        assert_eq!(std::fs::read(src.join("kök.txt")).unwrap(), b"merhaba");
+        assert!(dst.join("kaynak/a/b/c/f299.txt").exists());
+        assert!(dst.join("kaynak/a/hedefte.txt").exists());
+        assert!(!src.join("a").exists(), "emptied folders go");
+        assert!(src.exists(), "the source keeps the skipped file");
+        // undo pairs name what was moved, never the merged folder itself
+        let res = t.results.lock().unwrap().clone();
+        assert!(!res.iter().any(|(_, d)| *d == dst.join("kaynak")), "{res:?}");
+        // a plain rename of a whole folder
+        let lone = base.join("tek");
+        std::fs::create_dir_all(lone.join("iç")).unwrap();
+        assert!(transfer(Transfer::Move, &[lone.clone()], &dst, Arc::new(tracker())).unwrap());
+        assert!(!lone.exists() && dst.join("tek/iç").is_dir());
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
     fn move_deletes_sources_only_after_everything_arrived() {
-        let base = std::env::temp_dir().join(format!("rf-fastmove-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base = base("fastmove");
         let (src, keep, dst) = (base.join("kaynak"), base.join("kopya-referans"), base.join("hedef"));
         tree(&src);
         tree(&keep);
         std::fs::create_dir_all(&dst).unwrap();
         let lone = base.join("tek dosya.txt");
         std::fs::write(&lone, b"tek").unwrap();
-        // the cross-volume path (fast_transfer), exercised on one volume
-        let ok = fast_transfer(Transfer::Move, &[src.clone(), lone.clone()], &dst, Arc::new(tracker())).unwrap();
-        assert!(ok);
+        // the cross-volume path, exercised on one volume
+        let t = Arc::new(tracker());
+        let out = execute(&[src.clone(), lone.clone()], &dst, &t, 8, false);
+        assert!(finish(Transfer::Move, &[src.clone(), lone.clone()], &dst, &t, out).unwrap());
         assert!(!src.exists() && !lone.exists(), "sources removed");
-        // same bytes as an untouched twin (times differ: the twin was written later)
-        let mut stack = vec![(keep.clone(), dst.join("kaynak"))];
-        while let Some((a, b)) = stack.pop() {
-            for e in std::fs::read_dir(&a).unwrap() {
-                let e = e.unwrap();
-                let (x, y) = (e.path(), b.join(e.file_name()));
-                if x.is_dir() {
-                    stack.push((x, y));
-                } else {
-                    assert_eq!(std::fs::read(&x).unwrap(), std::fs::read(&y).unwrap(), "{}", y.display());
-                }
-            }
-        }
+        same_bytes_tree(&keep, &dst.join("kaynak"));
         assert_eq!(std::fs::read(dst.join("tek dosya.txt")).unwrap(), b"tek");
-        // something missing at the destination: the source must stay
-        tree(&src);
-        let half = base.join("yarım");
-        std::fs::create_dir_all(&half).unwrap();
-        assert!(verified(&src, &half.join("kaynak")).is_none());
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
-    fn move_never_loses_late_changes() {
-        let base = std::env::temp_dir().join(format!("rf-fastmove2-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+    fn verify_catches_a_changed_copy() {
+        let base = base("verify");
         let (src, dst) = (base.join("kaynak"), base.join("hedef"));
         tree(&src);
         std::fs::create_dir_all(&dst).unwrap();
         let t = tracker();
-        let (pairs, _) = copy(&[src.clone()], &dst, &t, 4);
-        assert_eq!(pairs.len(), 1);
-        let copy_root = dst.join("kaynak");
-        // verified right after the copy
-        let (files, dirs) = verified(&src, &copy_root).expect("copy matches");
-        assert!(files.len() > 300 && dirs.len() >= 4);
-        // a source file rewritten after copying (same size, later time): not verified
-        let f = src.join("kök.txt");
-        std::fs::write(&f, b"MERHABA").unwrap();
-        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
-        std::fs::File::options().write(true).open(&f).unwrap().set_modified(later).unwrap();
-        assert!(verified(&src, &copy_root).is_none());
-        // a file added after verification: removing the verified list leaves it (and its folder)
-        let added = src.join("a/b/c/sonradan.txt");
-        std::fs::write(&added, b"yeni").unwrap();
-        assert!(!crate::fastdelete::remove_verified(&files, &dirs));
-        assert_eq!(std::fs::read(&added).unwrap(), b"yeni");
-        assert!(!src.join("a/b/c/f1.txt").exists(), "verified files are gone");
+        t.set_verify(Verify::Full);
+        assert!(transfer(Transfer::Copy, &[src.clone()], &dst, Arc::new(t)).unwrap(), "a clean copy verifies");
+        let pairs = vec![(src.join("a/b/büyük.bin"), dst.join("kaynak/a/b/büyük.bin"))];
+        assert!(check(&pairs, Verify::Full, &tracker()).is_empty());
+        // flip one byte in the middle, keep size and time
+        let f = dst.join("kaynak/a/b/büyük.bin");
+        let time = std::fs::metadata(&f).unwrap().modified().unwrap();
+        let mut bytes = std::fs::read(&f).unwrap();
+        bytes[1_500_000] ^= 0xFF;
+        std::fs::write(&f, &bytes).unwrap();
+        std::fs::File::options().write(true).open(&f).unwrap().set_modified(time).unwrap();
+        assert!(check(&pairs, Verify::Quick, &tracker()).is_empty(), "size and time still match");
+        assert_eq!(check(&pairs, Verify::Full, &tracker()), vec![src.join("a/b/büyük.bin")]);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn pause_holds_and_speed_limit_slows() {
+        let base = base("pause");
+        let src = base.join("kaynak");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(base.join("hedef")).unwrap();
+        std::fs::write(src.join("2mb.bin"), vec![1u8; 2 << 20]).unwrap();
+        // 4 MB/s limit: 2 MB take ~0.5 s
+        let t = tracker();
+        t.limit.store(4 << 20, Ordering::Relaxed);
+        let start = Instant::now();
+        copy(&[src.join("2mb.bin")], &base.join("hedef"), &t, 2);
+        assert!(start.elapsed() >= Duration::from_millis(350), "{:?}", start.elapsed());
+        // paused: nothing happens until resumed
+        let t = Arc::new(tracker());
+        t.paused.store(true, Ordering::Relaxed);
+        let t2 = t.clone();
+        let (s2, d2) = (src.clone(), base.join("hedef2"));
+        std::fs::create_dir_all(&d2).unwrap();
+        let h = std::thread::spawn(move || copy(&[s2.join("2mb.bin")], &d2, &t2, 2).undo.len());
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!base.join("hedef2/2mb.bin").exists(), "nothing copied while paused");
+        t.paused.store(false, Ordering::Relaxed);
+        assert_eq!(h.join().unwrap(), 1);
+        assert!(base.join("hedef2/2mb.bin").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn order_spreads_small_files_over_folders() {
+        let j = |d: &str, f: &str, size: u64| Job { src: PathBuf::from(format!("s/{d}/{f}")), dst: PathBuf::from(format!("d/{d}/{f}")), size, op: Op::Copy, replace: false };
+        let jobs = vec![j("a", "1", 10), j("a", "2", 10), j("a", "3", 10), j("b", "1", 10), j("b", "2", 10), j("c", "big", 100 << 20)];
+        let order: Vec<String> = order(jobs).iter().map(|j| j.dst.to_string_lossy().replace('\\', "/")).collect();
+        assert_eq!(order, ["d/c/big", "d/a/1", "d/b/1", "d/a/2", "d/b/2", "d/a/3"]);
     }
 
     #[test]
@@ -506,22 +1115,19 @@ mod tests {
         assert!(same_volume(Path::new(r"\\nas\paylaşım\a"), Path::new(r"\\NAS\paylaşım\b")));
         assert!(!same_volume(Path::new(r"\\nas\a\x"), Path::new(r"\\nas\b\x")));
         // a folder into its own subfolder is left to the shell (which refuses it)
-        let base = std::env::temp_dir().join(format!("rf-fastnest-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base = base("fastnest");
         std::fs::create_dir_all(base.join("a/alt")).unwrap();
         let t = tracker();
-        let (pairs, left) = copy(&[base.join("a")], &base.join("a/alt"), &t, 2);
-        assert!(pairs.is_empty() && left.whole == vec![base.join("a")]);
+        let out = copy(&[base.join("a")], &base.join("a/alt"), &t, 2);
+        assert!(out.undo.is_empty() && out.whole == vec![base.join("a")]);
         let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
     fn cancel_stops_without_partial_files() {
-        let base = std::env::temp_dir().join(format!("rf-fastcopy-c-{}", std::process::id()));
-        let src = base.join("kaynak");
-        let dst = base.join("hedef");
+        let base = base("fastcopy-c");
+        let (src, dst) = (base.join("kaynak"), base.join("hedef"));
         tree(&src);
-        let _ = std::fs::remove_dir_all(&dst);
         std::fs::create_dir_all(&dst).unwrap();
         let t = tracker();
         t.cancel.store(true, Ordering::Relaxed);

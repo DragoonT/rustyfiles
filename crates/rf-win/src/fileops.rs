@@ -134,11 +134,41 @@ pub struct Tracker {
     /// (source, result) for every item the shell finished: the new copy/moved location, or the
     /// item's path inside the Recycle Bin for deletes. Used to build undo records.
     pub results: std::sync::Mutex<Vec<(PathBuf, PathBuf)>>,
+    /// Our engine waits while this is set (the shell engine can't pause).
+    pub paused: Arc<AtomicBool>,
+    /// Copy speed limit in bytes per second; 0 = none (our engine only).
+    pub limit: std::sync::atomic::AtomicU64,
+    /// Check copies after writing them (our engine only); see [`Tracker::set_verify`].
+    pub verify: std::sync::atomic::AtomicU8,
+    /// Asked (on the worker thread, blocking) what to do with names that already exist at the
+    /// destination; `None` cancels the operation. Without it, both are kept.
+    #[allow(clippy::type_complexity)]
+    pub ask: Option<Box<dyn Fn(&[crate::fastcopy::Conflict]) -> Option<Vec<crate::fastcopy::Resolve>> + Send + Sync>>,
 }
 
 impl Tracker {
+    pub fn set_verify(&self, v: crate::fastcopy::Verify) {
+        self.verify.store(v as u8, Ordering::Relaxed);
+    }
+
+    pub fn verify_mode(&self) -> crate::fastcopy::Verify {
+        match self.verify.load(Ordering::Relaxed) {
+            1 => crate::fastcopy::Verify::Quick,
+            2 => crate::fastcopy::Verify::Full,
+            _ => crate::fastcopy::Verify::Off,
+        }
+    }
+
     pub fn new(on_progress: Box<dyn Fn(u32, u32, Option<String>) + Send + Sync>, cancel: Arc<AtomicBool>) -> Self {
-        Self { on_progress, cancel, results: Default::default() }
+        Self {
+            on_progress,
+            cancel,
+            results: Default::default(),
+            paused: Default::default(),
+            limit: Default::default(),
+            verify: Default::default(),
+            ask: None,
+        }
     }
 }
 

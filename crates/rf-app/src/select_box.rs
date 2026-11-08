@@ -48,11 +48,12 @@ struct Host {
 impl Global for Host {}
 
 /// The field. `choices` is asked when it is clicked.
-pub fn select_box(id: &'static str, p: &Palette, label: impl Into<SharedString>, choices: impl Fn(&App) -> Vec<Choice> + 'static) -> AnyElement {
+pub fn select_box(id: impl Into<SharedString>, p: &Palette, label: impl Into<SharedString>, choices: impl Fn(&App) -> Vec<Choice> + 'static) -> AnyElement {
+    let key: SharedString = id.into();
     let bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
     let seen = bounds.clone();
     h_flex()
-        .id(id)
+        .id(ElementId::Name(key.clone()))
         .relative()
         .h(px(32.))
         .min_w(px(180.))
@@ -71,7 +72,7 @@ pub fn select_box(id: &'static str, p: &Palette, label: impl Into<SharedString>,
         .child(Icon::new(L::ChevronsUpDown).size(px(14.)).text_color(p.text_secondary))
         .child(canvas(move |b, _, _| seen.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full())
         .on_click(move |_, window, cx| {
-            let key: SharedString = id.into();
+            let key = key.clone();
             let just_closed = cx
                 .try_global::<Host>()
                 .and_then(|h| h.closed.clone())

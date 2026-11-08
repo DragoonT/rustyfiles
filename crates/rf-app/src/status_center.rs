@@ -33,6 +33,8 @@ pub struct OpState {
     current: Option<String>,
     phase: OpPhase,
     cancel: Arc<AtomicBool>,
+    /// Our copy engine waits while set (the shell engine ignores it).
+    paused: Arc<AtomicBool>,
     started: Instant,
 }
 
@@ -59,6 +61,8 @@ impl Global for OpsGlobal {}
 
 enum Ev {
     Progress(u32, u32, Option<String>),
+    /// The copy thread asks about names that already exist and waits for the reply.
+    Ask(Vec<rf_win::fastcopy::Conflict>, crate::conflict_dialog::Reply),
     Done(Result<bool, String>),
 }
 
@@ -134,6 +138,9 @@ pub fn start_with(
 ) {
     let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return };
     let cancel = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(false));
+    // questions about the operation go to the window it was started from
+    let origin = cx.active_window();
     let (tx, mut rx) = mpsc::unbounded::<Ev>();
     let id = entity.update(cx, |ops, cx| {
         let id = ops.next;
@@ -146,6 +153,7 @@ pub fn start_with(
             current: None,
             phase: OpPhase::Running,
             cancel: cancel.clone(),
+            paused: paused.clone(),
             started: Instant::now(),
         });
         cx.notify();
@@ -154,7 +162,7 @@ pub fn start_with(
 
     let ptx = tx.clone();
     let last = std::sync::Mutex::new(Instant::now() - Duration::from_secs(1));
-    let tracker = Arc::new(Tracker::new(
+    let mut tracker = Tracker::new(
         Box::new(move |t, d, cur| {
             // ~20 updates/s max; item names always go through.
             let mut l = last.lock().unwrap();
@@ -164,7 +172,16 @@ pub fn start_with(
             }
         }),
         cancel,
-    ));
+    );
+    tracker.paused = paused;
+    let atx = tx.clone();
+    tracker.ask = Some(Box::new(move |list| {
+        let (rtx, rrx) = std::sync::mpsc::channel();
+        atx.unbounded_send(Ev::Ask(list.to_vec(), rtx)).ok()?;
+        // no reply (the dialog went away) = cancel
+        rrx.recv().ok().flatten()
+    }));
+    let tracker = Arc::new(tracker);
     std::thread::Builder::new()
         .name("rf-op".into())
         .spawn(move || {
@@ -183,10 +200,15 @@ pub fn start_with(
                 evs.push(e);
             }
             let mut finished = false;
+            let mut asks = Vec::new();
             let _ = entity.update(cx, |ops, cx| {
                 if let Some(op) = ops.ops.iter_mut().find(|o| o.id == id) {
                     for e in evs {
                         match e {
+                            Ev::Ask(list, reply) => {
+                                op.current = Some(t!("Hedefte aynı adlı öğeler var").to_string());
+                                asks.push((list, reply));
+                            }
                             Ev::Progress(t, d, cur) => {
                                 if t > 0 {
                                     op.total = t;
@@ -221,6 +243,9 @@ pub fn start_with(
                 }
                 cx.notify();
             });
+            for (list, reply) in asks {
+                let _ = cx.update(|cx| crate::conflict_dialog::show(list, reply, origin, cx));
+            }
             if finished {
                 ended = true;
                 break;
@@ -265,9 +290,12 @@ pub fn transfer_ex(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf
         Transfer::Move => t!("Taşınıyor"),
     };
     let title = format!("{verb}: {} → {}", crate::i18n::items(sources.len()), short(&dest));
-    let fast = cx.global::<crate::settings::Settings>().fast_file_ops;
+    let s = cx.global::<crate::settings::Settings>();
+    let (fast, verify, limit) = (s.fast_file_ops, s.copy_verify.engine(), u64::from(s.copy_speed_limit) << 20);
     start(cx, title, move |t| {
-        // our parallel engine for plain copies; the shell engine for moves, conflicts and the rest
+        t.set_verify(verify);
+        t.limit.store(limit, Ordering::Relaxed);
+        // our engine (conflicts asked in one list); Windows' engine when it is turned off
         let r = if fast {
             rf_win::fastcopy::transfer(kind, &sources, &dest, t.clone())
         } else {
@@ -574,9 +602,12 @@ pub fn render_flyout(ops: &Entity<Ops>, p: &Palette, top: Pixels, cx: &App) -> O
 fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
     let frac = if op.total > 0 { op.done as f32 / op.total as f32 } else { 0.0 };
     let cancel = op.cancel.clone();
+    let pause = op.paused.clone();
+    let is_paused = op.paused.load(Ordering::Relaxed);
     let running = op.phase == OpPhase::Running;
     let (ops_e, op_id) = (ops.clone(), op.id);
     let (status, color, icon) = match &op.phase {
+        OpPhase::Running if is_paused => (t!("Duraklatıldı").to_string(), p.text_secondary, L::Pause),
         OpPhase::Running => {
             let elapsed = op.started.elapsed().as_secs_f32();
             // ETA from the average rate so far; only once there is enough signal
@@ -639,6 +670,29 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                         })),
                 ),
         )
+        .when(running, |d| {
+            d.child(
+                div()
+                    .id(("op-pause", op.id as usize))
+                    .size(px(24.))
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(theme::RADIUS_SM)
+                    .text_color(p.text_secondary)
+                    .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(if is_paused { t!("Devam et") } else { t!("Duraklat") }).build(w, cx))
+                    .hover(|s| s.bg(p.pressed))
+                    .child(Icon::new(if is_paused { L::Play } else { L::Pause }).size(px(12.)))
+                    .on_click({
+                        let ops_e = ops.clone();
+                        move |_, _, cx| {
+                            pause.store(!is_paused, Ordering::Relaxed);
+                            ops_e.update(cx, |_, cx| cx.notify());
+                        }
+                    }),
+            )
+        })
         .child(
             div()
                 .id(("op-x", op.id as usize))

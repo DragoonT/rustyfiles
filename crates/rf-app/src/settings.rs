@@ -28,6 +28,28 @@ pub enum DefaultView {
     Adaptive,
 }
 
+/// Checking copies after they are written (our engine).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum CopyVerify {
+    #[default]
+    Off,
+    /// Size and modification time.
+    Quick,
+    /// Every byte, read back from the disk.
+    Full,
+}
+
+impl CopyVerify {
+    pub fn engine(self) -> rf_win::fastcopy::Verify {
+        match self {
+            CopyVerify::Off => rf_win::fastcopy::Verify::Off,
+            CopyVerify::Quick => rf_win::fastcopy::Verify::Quick,
+            CopyVerify::Full => rf_win::fastcopy::Verify::Full,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DatePref {
@@ -311,6 +333,10 @@ pub struct Settings {
     /// Our own parallel engine for copies, moves to other drives and permanent deletes
     /// (off: Windows' engine for everything, like Explorer).
     pub fast_file_ops: bool,
+    /// Check copies after writing them.
+    pub copy_verify: CopyVerify,
+    /// Copy speed limit in MB/s (0 = none).
+    pub copy_speed_limit: u32,
     pub show_libraries: bool,
     /// Double-clicking a ZIP/7z/tar opens it like a folder (read-only).
     pub browse_archives: bool,
@@ -395,6 +421,8 @@ impl Default for Settings {
             decimal_sizes: false,
             calculate_folder_sizes: false,
             fast_file_ops: true,
+            copy_verify: CopyVerify::Off,
+            copy_speed_limit: 0,
             show_libraries: false,
             browse_archives: true,
             search_index: true,

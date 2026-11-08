@@ -3000,7 +3000,7 @@ impl Render for Workspace {
         let pane_shown = self.preview_open && self.compact.is_none() && room_for_preview && self.active_tab().read(cx).location().path().is_some();
         // the hosted preview handler is a separate window: hide it whenever something of ours
         // could be under it (pane closed, a dialog or the Status Center open, palette, bulk rename)
-        let overlay_open = crate::prompt::current(window, cx).is_some() || self.ops.read(cx).open || self.palette.is_some() || self.bulk.is_some();
+        let overlay_open = crate::prompt::current(window, cx).is_some() || crate::conflict_dialog::current(window, cx).is_some() || self.ops.read(cx).open || self.palette.is_some() || self.bulk.is_some();
         let covered = !pane_shown || overlay_open || self.quick_look.is_some();
         self.preview.update(cx, |pv, _| pv.set_occluded(covered));
         // Hızlı Bakış penceresi uygulamadan açıldıysa odaktaki öğeyi izler (oklar burada çalışır)
@@ -3247,6 +3247,7 @@ impl Render for Workspace {
             .children(self.palette.clone())
             .children(crate::fluent_menu::current(window, cx))
             .children(crate::prompt::current(window, cx))
+            .children(crate::conflict_dialog::current(window, cx))
             .children(self.bulk.clone().map(|br| {
                 div()
                     .absolute()

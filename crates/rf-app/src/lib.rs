@@ -6,6 +6,7 @@ mod background;
 mod archive_view;
 mod bulk_rename;
 mod command_palette;
+mod conflict_dialog;
 mod ctx_menu;
 mod fluent_menu;
 mod flyout;

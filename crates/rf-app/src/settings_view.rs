@@ -1397,6 +1397,36 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::CircleCheck,
+            t!("Kopyaları doğrula"),
+            Some(t!("Kopyalama bitince her dosya kaynağıyla karşılaştırılır. Tam doğrulama kopyayı diskten okur; daha uzun sürer.")),
+            dropdown(
+                "copy-verify",
+                p,
+                s.copy_verify,
+                vec![
+                    (crate::settings::CopyVerify::Off, t!("Kapalı").into()),
+                    (crate::settings::CopyVerify::Quick, t!("Hızlı: boyut ve tarih").into()),
+                    (crate::settings::CopyVerify::Full, t!("Tam: içerik").into()),
+                ],
+                |s, v| s.copy_verify = v,
+            ),
+        ),
+        card(
+            p,
+            L::Activity,
+            t!("Kopyalama hız sınırı"),
+            Some(t!("Ağa veya USB belleğe kopyalarken bağlantıyı tıkamamak için.")),
+            dropdown(
+                "copy-limit",
+                p,
+                s.copy_speed_limit,
+                std::iter::once((0, t!("Sınırsız").to_string())).chain([5u32, 10, 25, 50, 100, 250].into_iter().map(|m| (m, format!("{m} MB/s")))).collect(),
+                |s, v| s.copy_speed_limit = v,
+            ),
+        ),
+        card(
+            p,
             L::Activity,
             t!("Durum çubuğunda performans bilgisi"),
             Some(t!("Klasörün listelenme süresi ve çizim yöntemi (GPU / CPU)")),
@@ -1405,7 +1435,7 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         shell(p)
             .child(card_body(
                 p,
-                L::Gauge,
+                L::Activity,
                 t!("Çizim yöntemi").into(),
                 Some(t!("Otomatik: GPU doluyken (oyun, render) arayüz CPU ile çizilir, CPU doluyken GPU ile. Geçiş fark edilmez.").into()),
                 Some(dropdown(
