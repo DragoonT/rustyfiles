@@ -133,6 +133,8 @@ pub struct Workspace {
     sidebar_w: f32,
     /// Icons only (RAIL_W wide); file dialogs start this way.
     sidebar_rail: bool,
+    /// The full sidebar shown over the content while the pointer is on the rail (or on it).
+    rail_peek: [bool; 2],
     preview_w: f32,
     /// Debounced settings write after a pane resize.
     _width_save: Option<Task<()>>,
@@ -483,6 +485,7 @@ impl Workspace {
             compact: None,
             sidebar_w: prefs.sidebar_width.clamp(SIDEBAR_MIN, SIDEBAR_MAX),
             sidebar_rail: prefs.sidebar_rail,
+            rail_peek: [false; 2],
             preview_w: prefs.preview_width.clamp(PREVIEW_MIN, PREVIEW_MAX),
             _width_save: None,
             palette: None,
@@ -547,7 +550,7 @@ impl Workspace {
         }
         self.picker = Some(session);
         // the preview pane helps picking (Windows' dialogs have one too): on by default here,
-        // and the sidebar starts as a strip of icons so the list and the preview get the room
+        // and the sidebar starts as a strip of icons (it opens over the list while hovered)
         self.preview_open = true;
         self.sidebar_rail = true;
         // closing the window (X, Alt+F4) cancels; it is not the user's session
@@ -2267,8 +2270,8 @@ impl Workspace {
         let drop_dir = target.path().map(Path::to_path_buf);
         let drop_bg = p.selection;
         let drop_border = p.accent;
+        // on the rail only the icon; hovering the rail opens the full sidebar over the content
         let rail = self.sidebar_rail;
-        let tip: SharedString = label.clone().into();
         h_flex()
             .id(id)
             .min_h(px(if rail { 36. } else { 32. }))
@@ -2292,7 +2295,7 @@ impl Workspace {
                         .children(extra),
                 )
             })
-            .when(rail, move |d| d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx)))
+
             .on_click(cx.listener(move |this, _, window, cx| this.navigate(target.clone(), window, cx)))
             .when_some(target3.path().map(Path::to_path_buf), |d, path| {
                 d.on_mouse_down(
@@ -2942,6 +2945,28 @@ impl Render for Workspace {
         let show_sidebar = self.sidebar_open && self.compact.is_none() && self.viewport_w >= side_w + LIST_MIN;
         let room_for_preview = self.viewport_w >= self.preview_w + LIST_MIN + if show_sidebar { side_w } else { 0. };
         let sidebar = show_sidebar.then(|| self.render_sidebar(&p, cx));
+        let peek = (show_sidebar && self.sidebar_rail && (self.rail_peek[0] || self.rail_peek[1])).then(|| {
+            self.sidebar_rail = false;
+            let full = self.render_sidebar(&p, cx);
+            self.sidebar_rail = true;
+            div()
+                .id("rail-peek")
+                .absolute()
+                .top_0()
+                .left_0()
+                .h_full()
+                .w(px(self.sidebar_w))
+                .bg(Hsla { a: 1., ..p.content_bg })
+                .border_r_1()
+                .border_color(p.border)
+                .rounded_r(theme::RADIUS)
+                .shadow_lg()
+                .on_hover(cx.listener(|this, h: &bool, _, cx| {
+                    this.rail_peek[1] = *h;
+                    cx.notify();
+                }))
+                .child(full)
+        });
         let status = self.render_statusbar(&p, cx);
         let picker_footer = self.picker.clone().map(|pk| crate::picker::footer(self, &pk, &p, window, cx));
         let star_strip = (self.picker.is_none() && crate::installer::star_due(cx.global::<crate::settings::Settings>())).then(|| {
@@ -3247,7 +3272,22 @@ impl Render for Workspace {
                         this.set_pane_width(true, w, cx);
                     }))
                     .children(sidebar.map(|s| {
-                        div().h_full().relative().flex_shrink_0().child(s).child(resize_handle("sidebar-resize", ResizeSidebar, false))
+                        div()
+                            .id("sidebar-slot")
+                            .h_full()
+                            .relative()
+                            .flex_shrink_0()
+                            .child(s)
+                            .child(resize_handle("sidebar-resize", ResizeSidebar, false))
+                            // on the rail, hovering opens the full sidebar over the content
+                            .on_hover(cx.listener(|this, h: &bool, _, cx| {
+                                if this.sidebar_rail && this.rail_peek[0] != *h {
+                                    this.rail_peek[0] = *h;
+                                    cx.notify();
+                                }
+                            }))
+                            // drawn after the list and the preview, so it lies over them
+                            .children(peek.map(|d| deferred(d).with_priority(1)))
                     }))
                     .child(
                         div()
