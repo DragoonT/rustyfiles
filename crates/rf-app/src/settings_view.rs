@@ -1301,15 +1301,107 @@ fn look(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         card(p, L::RotateCw, t!("Videoları döngüde oynat"), None, lsw("look-loop", p, l.look_loop, |s, v| s.look_loop = v)),
         card(p, L::List, t!("Metinde satır numaraları"), Some(t!("Önizlemede Alt+L")), lsw("look-lines", p, l.look_text_line_numbers, |s, v| s.look_text_line_numbers = v)),
         card(p, L::TextAlignJustify, t!("Metinde sözcük kaydırma"), Some(t!("Önizlemede Alt+Z")), lsw("look-wrap", p, l.look_text_wrap, |s, v| s.look_text_wrap = v)),
-        card(
-            p,
-            L::CircleSlash,
-            t!("Önizlenmeyecek uzantılar"),
-            Some(t!("directlook.toml: look_ext_blocklist (ör. \".insv;.iso\")")),
-            div().text_sm().text_color(p.text_secondary).child(if l.look_ext_blocklist.is_empty() { "—".to_string() } else { l.look_ext_blocklist.clone() }).into_any_element(),
-        ),
     ]);
+    // text font and size
+    let font_label = if l.look_text_font.is_empty() { t!("Varsayılan").to_string() } else { l.look_text_font.clone() };
+    let cur_font = l.look_text_font.clone();
+    let fonts = font_choices(cx);
+    v.push(card(
+        p,
+        L::Type,
+        t!("Metin yazı tipi"),
+        None,
+        select_box("look-font", p, font_label, move |_| {
+            std::iter::once(String::new())
+                .chain(fonts.iter().cloned())
+                .map(|f| {
+                    let label = if f.is_empty() { t!("Varsayılan").to_string() } else { f.clone() };
+                    let sel = f == cur_font;
+                    Choice::new(label, sel, move |_, cx| {
+                        let f = f.clone();
+                        look_update(cx, |s| s.look_text_font = f)
+                    })
+                })
+                .collect()
+        }),
+    ));
+    let cur_size = l.look_text_font_size.round() as u32;
+    v.push(card(
+        p,
+        L::ALargeSmall,
+        t!("Metin boyutu"),
+        None,
+        select_box("look-font-size", p, format!("{cur_size} px"), move |_| {
+            [11u32, 12, 13, 14, 15, 16, 18, 20, 24]
+                .into_iter()
+                .map(|n| Choice::new(format!("{n} px"), n == cur_size, move |_, cx| look_update(cx, |s| s.look_text_font_size = n as f32)))
+                .collect()
+        }),
+    ));
+    // which file types DirectLook previews
+    v.push(card(
+        p,
+        L::ListFilter,
+        t!("Önizlenecek dosyalar"),
+        None,
+        ldropdown(
+            "look-ext-mode",
+            p,
+            l.look_ext_allow_mode,
+            vec![(false, t!("Hepsi, listedekiler hariç").to_string()), (true, t!("Yalnızca listedekiler").to_string())],
+            |s, v| s.look_ext_allow_mode = v,
+        ),
+    ));
+    let allow = l.look_ext_allow_mode;
+    let list = if allow { l.look_ext_allowlist.clone() } else { l.look_ext_blocklist.clone() };
+    let shown = if list.trim().is_empty() { "—".to_string() } else { list.clone() };
+    v.push(card(
+        p,
+        L::CircleSlash,
+        if allow { t!("Önizlenecek uzantılar") } else { t!("Önizlenmeyecek uzantılar") },
+        Some(&shown),
+        button("look-ext-edit", p, t!("Düzenle…"), move |window, cx| {
+            let ok = crate::prompt::Button::new(t!("Kaydet"), crate::prompt::Kind::Primary, move |text, _, cx| {
+                let text = normalize_exts(&text.unwrap_or_default());
+                look_update(cx, |s| if allow { s.look_ext_allowlist = text } else { s.look_ext_blocklist = text });
+                Ok(())
+            });
+            crate::prompt::show(
+                if allow { t!("Önizlenecek uzantılar") } else { t!("Önizlenmeyecek uzantılar") },
+                Some(t!("Noktalı virgülle ayırın, örneğin: .iso; .insv; .psd").to_string()),
+                Some((list.clone(), ".iso; .insv".to_string())),
+                vec![ok, crate::prompt::Button::cancel()],
+                window,
+                cx,
+            );
+        }),
+    ));
     v
+}
+
+/// "iso, .PSD ;; insv" → ".iso;.psd;.insv": dots added, lowercase, no duplicates.
+fn normalize_exts(text: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for part in text.split([';', ',', ' ']) {
+        let p = part.trim().trim_start_matches('*').to_lowercase();
+        if p.is_empty() || p == "." {
+            continue;
+        }
+        let e = if p.starts_with('.') { p } else { format!(".{p}") };
+        if !out.contains(&e) {
+            out.push(e);
+        }
+    }
+    out.join(";")
+}
+
+#[cfg(test)]
+mod ext_tests {
+    #[test]
+    fn extension_lists_are_normalized() {
+        assert_eq!(super::normalize_exts("iso, .PSD ;; insv *.Mkv .iso"), ".iso;.psd;.insv;.mkv");
+        assert_eq!(super::normalize_exts("  "), "");
+    }
 }
 
 fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
