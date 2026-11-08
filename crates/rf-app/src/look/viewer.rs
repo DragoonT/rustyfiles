@@ -45,9 +45,26 @@ impl Probe {
     }
 }
 
-/// İlk baytlarda art arda iki NUL yoksa metin sayılır.
+/// Whether the first bytes look like text: no run of two NULs, and at most 5 % control bytes
+/// (tab, line breaks, form feed and escape don't count). UTF-16 (with a BOM, or with every other
+/// byte zero) is text even though half its bytes are NUL.
 pub fn looks_like_text(head: &[u8]) -> bool {
-    !head.windows(2).any(|w| w == [0, 0])
+    if head.windows(2).any(|w| w == [0, 0]) {
+        return false;
+    }
+    if head.starts_with(&[0xFF, 0xFE]) || head.starts_with(&[0xFE, 0xFF]) {
+        return true;
+    }
+    let n = head.len();
+    if n >= 8 {
+        let zeros_at = |start: usize| head.iter().skip(start).step_by(2).filter(|&&b| b == 0).count();
+        let half = n / 2;
+        if zeros_at(1) * 10 >= half * 7 || zeros_at(0) * 10 >= half * 7 {
+            return true; // UTF-16 without a BOM
+        }
+    }
+    let control = head.iter().filter(|&&b| b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r' | 0x0c | 0x1b)).count();
+    control * 20 <= n
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -123,13 +140,20 @@ mod tests {
     fn text_heuristic() {
         assert!(looks_like_text(b"merhaba\ndunya"));
         assert!(!looks_like_text(b"ab\0\0cd"));
+        // binary with single NULs and control bytes; UTF-16 with and without a BOM; tabs and ANSI
+        let bin: Vec<u8> = (0u8..=255).collect();
+        assert!(!looks_like_text(&bin));
+        assert!(looks_like_text(&[0xFF, 0xFE, b'a', 0, b'b', 0]));
+        assert!(looks_like_text(&[b'm', 0, b'e', 0, b'r', 0, b'h', 0, b'a', 0, b'b', 0]));
+        assert!(looks_like_text(b"col1\tcol2\r\nx\ty\r\n\x1b[31mred\x1b[0m"));
     }
 
     #[test]
     fn picks_by_priority() {
         assert_eq!(pick(&probe("a.svg", b"<svg")).name(), "image");
         assert_eq!(pick(&probe("a.zip", b"PK\x03\x04")).name(), "archive");
-        assert_eq!(pick(&probe("a.unknownext", b"\0\0\x01")).name(), "info");
+        assert_eq!(pick(&probe("a.unknownext", b"\0\0\x01")).name(), "hex");
+        assert_eq!(pick(&probe("setup.exe", b"MZ\x90\0\x03\0\0\0")).name(), "info");
         assert_eq!(pick(&probe("notlar.unknownext", b"metin")).name(), "text");
         assert_eq!(pick(&probe("klip.mp4", b"\0\0\0\x18ftypmp42")).name(), "video");
         assert_eq!(pick(&probe("rapor.pdf", b"%PDF-1.7\n")).name(), "pdf");
