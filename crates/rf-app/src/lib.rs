@@ -29,6 +29,7 @@ mod places;
 mod settings;
 mod select_box;
 mod settings_view;
+mod taskbar_preview;
 mod shelf_view;
 mod status_center;
 mod tags;
@@ -198,8 +199,10 @@ pub fn main() {
     let open_look_settings = std::env::args().nth(1).as_deref() == Some("--settings=directlook");
     // `--pick <pipe>`: an app's Open/Save dialog (rustyfiles_dialog.dll) asks for a file
     let pick = (std::env::args().nth(1).as_deref() == Some("--pick")).then(|| std::env::args().nth(2)).flatten();
+    // `--bar-preview`: our taskbar, as an ordinary window (see taskbar_preview)
+    let bar_preview = std::env::args().nth(1).as_deref() == Some("--bar-preview");
     let arg = std::env::args().nth(1).map(|a| a.trim().trim_matches('"').to_string()).filter(|a| !a.is_empty());
-    let arg = arg.filter(|_| !open_look_settings && pick.is_none());
+    let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview);
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
     let arg = arg.filter(|_| !new_window);
@@ -308,7 +311,7 @@ pub fn main() {
         _ => String::new(),
     };
     // RUSTYFILES_MULTI_INSTANCE=1 skips forwarding (automated tests run several copies).
-    let multi = std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some();
+    let multi = std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || bar_preview;
     let _instance = if multi {
         None
     } else {
@@ -348,6 +351,7 @@ pub fn main() {
         match pick.clone() {
             // started only to answer a dialog: no main window
             Some(pipe) => picker::begin(pipe, cx),
+            None if bar_preview => taskbar_preview::open(cx),
             None => {
                 installer::count_start(cx);
                 open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx);
