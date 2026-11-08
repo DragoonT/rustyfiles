@@ -2700,6 +2700,8 @@ impl FolderView {
                                 .into_any_element(),
                         })
                         .child(name_el)
+                        // encrypted: an archive member that needs a password, or an EFS file
+                        .children((e.attrs & rf_core::attrs::ENCRYPTED != 0).then(|| Icon::new(L::Lock).size(px(12.)).flex_shrink_0().text_color(p.text_secondary)))
                         .children(tag_dots)
                         .children(git_badge)
                         .child(div().flex_1())

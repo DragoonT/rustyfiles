@@ -269,7 +269,9 @@ pub fn list_inside(archive: &Path, inner: &Path) -> anyhow::Result<Vec<Entry>> {
             }
             None => {
                 let kind = if e.is_dir { EntryKind::Dir } else { EntryKind::File };
-                out.insert(rest.to_lowercase(), Entry::new(rest, kind, e.size, e.modified_ms, 0, if e.is_dir { 0x10 } else { 0x01 }));
+                // read-only; encrypted members carry the Windows "encrypted" bit (a lock in the list)
+                let attrs = if e.is_dir { 0x10 } else { 0x01 | if e.encrypted { rf_core::attrs::ENCRYPTED } else { 0 } };
+                out.insert(rest.to_lowercase(), Entry::new(rest, kind, e.size, e.modified_ms, 0, attrs));
             }
         }
     }

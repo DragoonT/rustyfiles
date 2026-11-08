@@ -105,6 +105,7 @@ fn entries(nodes: Vec<Node>) -> Vec<ArchiveEntry> {
             packed: 0,
             is_dir: n.is_dir,
             modified_ms: n.mtime.map_or(0, super::mtime_ms),
+            encrypted: false,
         })
         .collect()
 }

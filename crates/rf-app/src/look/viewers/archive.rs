@@ -387,7 +387,7 @@ mod tests {
     }
 
     fn e(path: &str, is_dir: bool, size: u64) -> rf_archive::ArchiveEntry {
-        rf_archive::ArchiveEntry { path: path.into(), size, packed: size / 2, is_dir, modified_ms: 0 }
+        rf_archive::ArchiveEntry { path: path.into(), size, packed: size / 2, is_dir, modified_ms: 0, encrypted: false }
     }
 
     #[test]
