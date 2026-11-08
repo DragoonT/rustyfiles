@@ -170,7 +170,7 @@ pub fn check() {
     }
 }
 
-/// Starts the background checks: soon after start, then every 12 hours (when auto-download is
+/// Starts the background checks: soon after start, then every 2 hours (when auto-download is
 /// on; the Check button works either way). Calls `changed` on the UI thread after each.
 pub fn spawn_checks(cx: &mut gpui_kit::App, changed: impl Fn(&mut gpui_kit::App) + 'static) {
     if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_some() {
@@ -180,7 +180,9 @@ pub fn spawn_checks(cx: &mut gpui_kit::App, changed: impl Fn(&mut gpui_kit::App)
         let mut wait = Duration::from_secs(30);
         loop {
             cx.background_executor().timer(wait).await;
-            wait = Duration::from_secs(12 * 3600);
+            // a file manager stays open for days: a long gap meant releases waited a day to arrive
+            // (GitHub allows 60 unauthenticated calls an hour; this is one call every two hours)
+            wait = Duration::from_secs(2 * 3600);
             let auto = cx.update(|cx| cx.global::<crate::settings::Settings>().auto_update);
             if !auto {
                 continue;
