@@ -1397,7 +1397,7 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         ),
         card(
             p,
-            L::CircleCheck,
+            L::ShieldCheck,
             t!("Kopyaları doğrula"),
             Some(t!("Kopyalama bitince her dosya kaynağıyla karşılaştırılır. Tam doğrulama kopyayı diskten okur; daha uzun sürer.")),
             dropdown(
@@ -1414,7 +1414,7 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         ),
         card(
             p,
-            L::Activity,
+            L::Gauge,
             t!("Kopyalama hız sınırı"),
             Some(t!("Ağa veya USB belleğe kopyalarken bağlantıyı tıkamamak için.")),
             dropdown(
@@ -1554,6 +1554,8 @@ pub(crate) fn check_updates_now(cx: &mut App) {
 }
 
 const REPO_URL: &str = "https://github.com/gelenmedya/rustyfiles";
+const SITE_URL: &str = "https://rustyfiles.com";
+const DISCORD_URL: &str = "https://discord.gg/K2banZ36zJ";
 const ISSUES_URL: &str = "https://github.com/gelenmedya/rustyfiles/issues/new";
 const RELEASES_URL: &str = "https://github.com/gelenmedya/rustyfiles/releases";
 
@@ -1582,6 +1584,9 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
         link_row(p, "gh-star", L::Star, t!("GitHub'da yıldız ver"), Some(t!("rustyfiles işinize yarıyorsa başkalarının da bulmasına yardım eder.")), |_, _| open_url(REPO_URL)),
         link_row(p, "gh-issue", L::MessageSquare, t!("Hata bildir ya da öneride bulun"), None, |_, _| open_url(ISSUES_URL)),
         link_row(p, "gh-notes", L::ScrollText, t!("Sürüm notları"), None, |_, _| open_url(RELEASES_URL)),
+        section(p, t!("Topluluk")),
+        link_row(p, "site", L::Globe, t!("Web sitesi"), Some("rustyfiles.com"), |_, _| open_url(SITE_URL)),
+        link_row(p, "discord", L::Users, t!("Discord sunucusu"), Some(t!("Soru sor, fikir paylaş, yeni sürümlerden haberdar ol.")), |_, _| open_url(DISCORD_URL)),
         div()
             .px_1()
             .text_xs()
