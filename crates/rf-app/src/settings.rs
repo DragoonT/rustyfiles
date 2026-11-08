@@ -243,6 +243,8 @@ pub struct Settings {
     pub show_hidden: bool,
     pub preview_open: bool,
     pub sidebar_open: bool,
+    /// The sidebar as a narrow strip of icons (drag it narrow to get there).
+    pub sidebar_rail: bool,
     /// Pane widths (drag the pane edge to resize).
     pub sidebar_width: f32,
     /// Sidebar sections the user turned off ("drives", "cloud", "libraries", "network", "tags").
@@ -365,6 +367,7 @@ impl Default for Settings {
             show_hidden: false,
             preview_open: true,
             sidebar_open: true,
+            sidebar_rail: false,
             sidebar_width: 232.,
             sidebar_hidden: Vec::new(),
             preview_width: 300.,

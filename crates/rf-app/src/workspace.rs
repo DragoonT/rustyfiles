@@ -131,6 +131,8 @@ pub struct Workspace {
     filter_input: Entity<InputState>,
     sidebar_open: bool,
     sidebar_w: f32,
+    /// Icons only (RAIL_W wide); file dialogs start this way.
+    sidebar_rail: bool,
     preview_w: f32,
     /// Debounced settings write after a pane resize.
     _width_save: Option<Task<()>>,
@@ -424,6 +426,7 @@ impl Workspace {
             // a file dialog keeps its own preview state (shown by default)
             if this.picker.is_none() {
                 this.preview_open = s.preview_open;
+                this.sidebar_rail = s.sidebar_rail;
             }
             this.sidebar_open = s.sidebar_open;
             cx.notify();
@@ -479,6 +482,7 @@ impl Workspace {
             sidebar_open: prefs.sidebar_open,
             compact: None,
             sidebar_w: prefs.sidebar_width.clamp(SIDEBAR_MIN, SIDEBAR_MAX),
+            sidebar_rail: prefs.sidebar_rail,
             preview_w: prefs.preview_width.clamp(PREVIEW_MIN, PREVIEW_MAX),
             _width_save: None,
             palette: None,
@@ -542,8 +546,10 @@ impl Workspace {
             }
         }
         self.picker = Some(session);
-        // the preview pane helps picking (Windows' dialogs have one too): on by default here
+        // the preview pane helps picking (Windows' dialogs have one too): on by default here,
+        // and the sidebar starts as a strip of icons so the list and the preview get the room
         self.preview_open = true;
+        self.sidebar_rail = true;
         // closing the window (X, Alt+F4) cancels; it is not the user's session
         let ws = cx.entity().downgrade();
         window.on_window_should_close(cx, move |_, cx| {
@@ -1612,6 +1618,19 @@ impl Workspace {
 
     /// Live pane resize; the width is kept in settings (written with the next session save).
     fn set_pane_width(&mut self, sidebar: bool, w: f32, cx: &mut Context<Self>) {
+        if sidebar {
+            let rail = if self.sidebar_rail { w < RAIL_SNAP + 30. } else { w < RAIL_SNAP };
+            if rail != self.sidebar_rail {
+                self.sidebar_rail = rail;
+                if self.picker.is_none() {
+                    cx.update_global::<crate::settings::Settings, _>(|s, _| s.sidebar_rail = rail);
+                }
+                cx.notify();
+            }
+            if rail {
+                return;
+            }
+        }
         let w = if sidebar { w.clamp(SIDEBAR_MIN, SIDEBAR_MAX) } else { w.clamp(PREVIEW_MIN, PREVIEW_MAX) };
         let cur = if sidebar { &mut self.sidebar_w } else { &mut self.preview_w };
         if (*cur - w).abs() < 0.5 {
@@ -2248,26 +2267,32 @@ impl Workspace {
         let drop_dir = target.path().map(Path::to_path_buf);
         let drop_bg = p.selection;
         let drop_border = p.accent;
+        let rail = self.sidebar_rail;
+        let tip: SharedString = label.clone().into();
         h_flex()
             .id(id)
-            .min_h(px(32.))
+            .min_h(px(if rail { 36. } else { 32. }))
             .px_2()
             .py_1()
             .gap_2()
             .items_center()
+            .when(rail, |d| d.justify_center())
             .rounded(theme::RADIUS_SM)
             .text_sm()
             .relative()
             .when(active, |d| d.bg(p.selection).child(theme::selection_pill(p)))
             .when(!active, |d| d.hover(|s| s.bg(p.hover)))
-            .child(Icon::new(icon).size(px(16.)).flex_shrink_0().text_color(icon_color))
-            .child(
-                v_flex()
-                    .flex_1()
-                    .overflow_hidden()
-                    .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(label))
-                    .children(extra),
-            )
+            .child(Icon::new(icon).size(px(if rail { 18. } else { 16. })).flex_shrink_0().text_color(icon_color))
+            .when(!rail, |d| {
+                d.child(
+                    v_flex()
+                        .flex_1()
+                        .overflow_hidden()
+                        .child(div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(label))
+                        .children(extra),
+                )
+            })
+            .when(rail, move |d| d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx)))
             .on_click(cx.listener(move |this, _, window, cx| this.navigate(target.clone(), window, cx)))
             .when_some(target3.path().map(Path::to_path_buf), |d, path| {
                 d.on_mouse_down(
@@ -2297,7 +2322,11 @@ impl Workspace {
         let places = self.places.read(cx);
         let pinned = places.pinned.clone();
         let drives = places.drives.clone();
+        let rail = self.sidebar_rail;
         let header = |t: &'static str| {
+            if rail {
+                return div().mx_2().my_2().h(px(1.)).bg(p.divider);
+            }
             div()
                 .px_2()
                 .pt_3()
@@ -2384,7 +2413,7 @@ impl Workspace {
                     .text_sm()
                     .text_color(p.text_tertiary)
                     .child(Icon::new(L::Pin).size(px(16.)).flex_shrink_0())
-                    .child(t!("Sabitlemek için buraya bırakın"))
+                    .when(!rail, |d| d.child(t!("Sabitlemek için buraya bırakın")))
                     .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_color(drop_border))
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.pin_dropped(paths, cx))),
             );
@@ -2493,7 +2522,7 @@ impl Workspace {
         );
         // Files: Settings stays at the bottom of the sidebar, under a divider
         v_flex()
-            .w(px(self.sidebar_w))
+            .w(px(if self.sidebar_rail { RAIL_W } else { self.sidebar_w }))
             .h_full()
             .child(col)
             .child(div().mx_2().h(px(1.)).bg(p.divider))
@@ -2642,6 +2671,9 @@ const DRAG_HOVER_MS: u64 = 500;
 const TAB_MIN_W: f32 = 72.;
 const TAB_MAX_W: f32 = 220.;
 const SIDEBAR_MIN: f32 = 160.;
+/// The icons-only sidebar, and the width below which a drag collapses to it.
+const RAIL_W: f32 = 56.;
+const RAIL_SNAP: f32 = 120.;
 const SIDEBAR_MAX: f32 = 420.;
 const PREVIEW_MIN: f32 = 220.;
 const PREVIEW_MAX: f32 = 720.;
@@ -2906,8 +2938,9 @@ impl Render for Workspace {
         // Adaptive layout (as Files does): a narrow window gives the list its room first by
         // hiding the preview, then the sidebar. The settings themselves are not changed.
         const LIST_MIN: f32 = 380.;
-        let show_sidebar = self.sidebar_open && self.compact.is_none() && self.viewport_w >= self.sidebar_w + LIST_MIN;
-        let room_for_preview = self.viewport_w >= self.preview_w + LIST_MIN + if show_sidebar { self.sidebar_w } else { 0. };
+        let side_w = if self.sidebar_rail { RAIL_W } else { self.sidebar_w };
+        let show_sidebar = self.sidebar_open && self.compact.is_none() && self.viewport_w >= side_w + LIST_MIN;
+        let room_for_preview = self.viewport_w >= self.preview_w + LIST_MIN + if show_sidebar { side_w } else { 0. };
         let sidebar = show_sidebar.then(|| self.render_sidebar(&p, cx));
         let status = self.render_statusbar(&p, cx);
         let picker_footer = self.picker.clone().map(|pk| crate::picker::footer(self, &pk, &p, window, cx));
