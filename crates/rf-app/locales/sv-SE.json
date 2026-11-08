@@ -866,5 +866,10 @@
  "276fcd7c": "Kasta",
  "5f2e231e": "Senare",
  "2d3f3708": "Visar de första 256 kB",
- "cdfb9ee8": "Offset"
+ "cdfb9ee8": "Offset",
+ "c0ac6ae1": "Det gick inte att läsa e-postmeddelandet",
+ "a267ae7c": "(inget ämne)",
+ "0aacc69b": "Från",
+ "4eecd53b": "Till",
+ "b85fd9c5": "Datum"
 }

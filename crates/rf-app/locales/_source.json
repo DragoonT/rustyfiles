@@ -2466,6 +2466,36 @@
   "en": "Flattening:"
  },
  {
+  "id": "c0ac6ae1",
+  "key": "E-posta okunamadı",
+  "tr": "E-posta okunamadı",
+  "en": "Couldn't read the e-mail"
+ },
+ {
+  "id": "a267ae7c",
+  "key": "(konu yok)",
+  "tr": "(konu yok)",
+  "en": "(no subject)"
+ },
+ {
+  "id": "0aacc69b",
+  "key": "Kimden",
+  "tr": "Kimden",
+  "en": "From"
+ },
+ {
+  "id": "4eecd53b",
+  "key": "Kime",
+  "tr": "Kime",
+  "en": "To"
+ },
+ {
+  "id": "b85fd9c5",
+  "key": "Tarih",
+  "tr": "Tarih",
+  "en": "Date"
+ },
+ {
   "id": "2d3f3708",
   "key": "İlk 256 KB gösteriliyor",
   "tr": "İlk 256 KB gösteriliyor",
