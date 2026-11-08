@@ -81,6 +81,15 @@ pub fn set_min_size(hwnd: isize, size: Option<(u16, u16)>) {
 
 /// Dark or light window frame / system backdrop (Mica follows it), independent of the system
 /// setting — so the app's own Light / Dark choice also tints Mica.
+/// The process's AppUserModelID: windows group under, and pins match, the shortcuts carrying
+/// the same id (not the exe path, which changes folder on every update).
+pub fn set_app_id(id: &str) {
+    let w = crate::wide::wide(id);
+    if let Err(e) = unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(windows::core::PCWSTR(w.as_ptr())) } {
+        log::warn!("app id: {e}");
+    }
+}
+
 pub fn set_dark_mode(hwnd: isize, dark: bool) {
     use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
     let v: i32 = dark as i32;

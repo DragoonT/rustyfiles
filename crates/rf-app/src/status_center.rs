@@ -161,6 +161,7 @@ pub fn start_with(
     });
 
     let ptx = tx.clone();
+    let asking_cancel = cancel.clone();
     let last = std::sync::Mutex::new(Instant::now() - Duration::from_secs(1));
     let mut tracker = Tracker::new(
         Box::new(move |t, d, cur| {
@@ -178,8 +179,14 @@ pub fn start_with(
     tracker.ask = Some(Box::new(move |list| {
         let (rtx, rrx) = std::sync::mpsc::channel();
         atx.unbounded_send(Ev::Ask(list.to_vec(), rtx)).ok()?;
-        // no reply (the dialog went away) = cancel
-        rrx.recv().ok().flatten()
+        // no reply (the dialog went away) or the operation cancelled meanwhile = cancel
+        loop {
+            match rrx.recv_timeout(Duration::from_millis(200)) {
+                Ok(answer) => return answer,
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if !asking_cancel.load(Ordering::Relaxed) => {}
+                Err(_) => return None,
+            }
+        }
     }));
     let tracker = Arc::new(tracker);
     std::thread::Builder::new()

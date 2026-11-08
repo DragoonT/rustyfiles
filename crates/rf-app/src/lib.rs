@@ -178,6 +178,8 @@ fn is_dir_bounded(p: PathBuf, limit: std::time::Duration) -> Option<bool> {
 pub fn main() {
     // Velopack (installer / updater): first, it may run an install hook and exit
     installer::startup();
+    // the id Velopack gives the Start menu / taskbar shortcuts: a pin survives updates
+    rf_win::window::set_app_id(installer::APP_ID);
     install_panic_log();
     rf_win::shell::suppress_critical_error_dialogs();
     // before any shell icon/thumbnail work: see keep_gdiplus_alive (loader-lock deadlock)

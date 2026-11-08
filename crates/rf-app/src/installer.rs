@@ -11,6 +11,8 @@ use velopack::sources::GithubSource;
 use velopack::{UpdateCheck, UpdateInfo, UpdateManager, VelopackApp};
 
 pub const REPO: &str = "https://github.com/gelenmedya/rustyfiles";
+/// AppUserModelID of the installed app (Velopack names shortcuts "velopack.<pack id>").
+pub const APP_ID: &str = "velopack.rustyfiles";
 
 /// First thing in `main`: Velopack's install / update / uninstall hooks run here and exit.
 pub fn startup() {
