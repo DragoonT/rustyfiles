@@ -1220,7 +1220,11 @@ impl FolderView {
             .filter(|(_, e)| selected_names.contains(&e.name))
             .map(|(i, _)| i as u32)
             .collect();
-        self.cursor = cursor_name.and_then(|n| self.visible.iter().position(|&i| self.entries[i as usize].name == n));
+        // the cursor's file renamed or deleted in the background: keep the place, not lose it
+        let old_cursor = self.cursor;
+        self.cursor = cursor_name
+            .and_then(|n| self.visible.iter().position(|&i| self.entries[i as usize].name == n))
+            .or_else(|| old_cursor.filter(|_| !self.visible.is_empty()).map(|c| c.min(self.visible.len() - 1)));
         if let Some(n) = renaming_name {
             match self.entries.iter().position(|e| e.name == n) {
                 Some(i) => {

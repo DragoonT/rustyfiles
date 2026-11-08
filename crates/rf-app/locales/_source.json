@@ -2466,6 +2466,126 @@
   "en": "Flattening:"
  },
  {
+  "id": "d8b485fc",
+  "key": "Değişiklikleri kaydet (commit)…",
+  "tr": "Değişiklikleri kaydet (commit)…",
+  "en": "Commit changes…"
+ },
+ {
+  "id": "f5075245",
+  "key": "Uzak depo adresini değiştir…",
+  "tr": "Uzak depo adresini değiştir…",
+  "en": "Change remote address…"
+ },
+ {
+  "id": "687cc38f",
+  "key": "Uzak depoya bağla…",
+  "tr": "Uzak depoya bağla…",
+  "en": "Connect to a remote…"
+ },
+ {
+  "id": "55b01ff8",
+  "key": "Ne değiştiğini kısaca yazın",
+  "tr": "Ne değiştiğini kısaca yazın",
+  "en": "Describe the change in a few words"
+ },
+ {
+  "id": "625340eb",
+  "key": "Kaydediliyor:",
+  "tr": "Kaydediliyor:",
+  "en": "Committing:"
+ },
+ {
+  "id": "397eded4",
+  "key": "Değişiklikleri kaydet",
+  "tr": "Değişiklikleri kaydet",
+  "en": "Commit changes"
+ },
+ {
+  "id": "f06f3df8",
+  "key": "Bu depodaki bütün değişiklikler (yeni dosyalar dahil) tek bir kayıt olarak saklanır.",
+  "tr": "Bu depodaki bütün değişiklikler (yeni dosyalar dahil) tek bir kayıt olarak saklanır.",
+  "en": "Every change in this repository (new files included) is saved as one commit."
+ },
+ {
+  "id": "36051133",
+  "key": "Örneğin: Kapak resmi güncellendi",
+  "tr": "Örneğin: Kapak resmi güncellendi",
+  "en": "For example: Updated the cover image"
+ },
+ {
+  "id": "dde53302",
+  "key": "Uzak depoya bağlanıyor:",
+  "tr": "Uzak depoya bağlanıyor:",
+  "en": "Connecting to remote:"
+ },
+ {
+  "id": "513d4d8e",
+  "key": "Bağla ve gönder",
+  "tr": "Bağla ve gönder",
+  "en": "Connect and push"
+ },
+ {
+  "id": "d25dd367",
+  "key": "Yalnızca bağla",
+  "tr": "Yalnızca bağla",
+  "en": "Connect only"
+ },
+ {
+  "id": "f8b2d759",
+  "key": "Uzak depoya bağla",
+  "tr": "Uzak depoya bağla",
+  "en": "Connect to a remote"
+ },
+ {
+  "id": "7d7f0d84",
+  "key": "Uzak depo adresi",
+  "tr": "Uzak depo adresi",
+  "en": "Remote address"
+ },
+ {
+  "id": "e672d0b0",
+  "key": "GitHub, GitLab ya da başka bir sunucudaki boş bir deponun adresi. Önce orada bir depo oluşturun.",
+  "tr": "GitHub, GitLab ya da başka bir sunucudaki boş bir deponun adresi. Önce orada bir depo oluşturun.",
+  "en": "The address of an empty repository on GitHub, GitLab or another server. Create the repository there first."
+ },
+ {
+  "id": "c3d90f7c",
+  "key": "Depo adresi boş",
+  "tr": "Depo adresi boş",
+  "en": "The repository address is empty"
+ },
+ {
+  "id": "d79e4468",
+  "key": "Kayıt açıklaması boş",
+  "tr": "Kayıt açıklaması boş",
+  "en": "The commit message is empty"
+ },
+ {
+  "id": "247fb2c6",
+  "key": "Kaydedilecek değişiklik yok",
+  "tr": "Kaydedilecek değişiklik yok",
+  "en": "Nothing to commit"
+ },
+ {
+  "id": "87629b23",
+  "key": "Uzak depo bağlanamadı",
+  "tr": "Uzak depo bağlanamadı",
+  "en": "Couldn't connect the remote"
+ },
+ {
+  "id": "d23202d0",
+  "key": "Değişiklikler eklenemedi",
+  "tr": "Değişiklikler eklenemedi",
+  "en": "Couldn't stage the changes"
+ },
+ {
+  "id": "f9b38f82",
+  "key": "Kaydedilemedi",
+  "tr": "Kaydedilemedi",
+  "en": "Couldn't commit"
+ },
+ {
   "id": "1bb8533f",
   "key": "Dosyayı değiştir",
   "tr": "Dosyayı değiştir",
