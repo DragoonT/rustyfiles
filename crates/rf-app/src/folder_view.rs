@@ -295,6 +295,8 @@ pub struct FolderView {
     slow_click_serial: u64,
     /// Entries of an in-flight background refresh (swapped in atomically when complete).
     soft_pending: Option<Vec<Entry>>,
+    /// When Space opened Quick Look (a long press closes it again on release).
+    space_hold: Option<Instant>,
     /// When the current soft reload (watcher) started (for the live trace).
     soft_started: Instant,
     _watch: Option<rf_win::watch::DirWatch>,
@@ -422,6 +424,7 @@ impl FolderView {
             slow_click: None,
             slow_click_serial: 0,
             soft_pending: None,
+            space_hold: None,
             soft_started: Instant::now(),
             _watch: None,
             _watch_task: None,
@@ -1921,6 +1924,21 @@ impl FolderView {
         )
     }
 
+    /// Space held to peek (QuickLook's "hold to preview"): released after a long press, the
+    /// preview it opened closes. A short press keeps toggling as before.
+    fn on_key_up(&mut self, ev: &KeyUpEvent, cx: &mut Context<Self>) {
+        if ev.keystroke.key != "space" {
+            return;
+        }
+        let Some(pressed) = self.space_hold.take() else { return };
+        if pressed.elapsed() >= std::time::Duration::from_millis(400)
+            && QUICK_LOOK_OPEN.load(Ordering::Relaxed)
+            && crate::look::config::LookSettings::load().look_hold_to_close
+        {
+            cx.emit(FolderEvent::QuickLook);
+        }
+    }
+
     /// Explorer-style type-ahead: typing selects the next item whose name starts with the typed text.
     fn on_typeahead(&mut self, ev: &KeyDownEvent, cx: &mut Context<Self>) {
         let m = &ev.keystroke.modifiers;
@@ -1934,7 +1952,13 @@ impl FolderView {
         if ev.keystroke.key == "space" && !m.shift {
             let typing = !self.typeahead.0.is_empty() && now.duration_since(self.typeahead.1) <= std::time::Duration::from_millis(900);
             if !typing {
+                // holding Space repeats the key: one toggle per press
+                if ev.is_held {
+                    cx.stop_propagation();
+                    return;
+                }
                 if self.cursor_entry().is_some() || QUICK_LOOK_OPEN.load(Ordering::Relaxed) {
+                    self.space_hold = (!QUICK_LOOK_OPEN.load(Ordering::Relaxed)).then_some(now);
                     cx.emit(FolderEvent::QuickLook);
                     cx.stop_propagation();
                 }
@@ -3388,6 +3412,7 @@ impl Render for FolderView {
                 this.show_context_menu(bg, window, cx)
             }))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.on_typeahead(ev, cx)))
+            .on_key_up(cx.listener(|this, ev: &KeyUpEvent, _, cx| this.on_key_up(ev, cx)))
             .on_mouse_down(
                 MouseButton::Navigate(NavigationDirection::Back),
                 cx.listener(|this, _: &MouseDownEvent, _, cx| this.back(cx)),
