@@ -148,6 +148,43 @@ pub fn is_playable(path: &Path) -> bool {
     )
 }
 
+/// Whether Windows has a decoder (hardware or software) for `codec` ("hevc", "h264", "av1",
+/// "vp9"; FilmCraft's codec names). HEVC and AV1 come from Store extensions that may be
+/// missing; an unknown codec answers false.
+pub fn mf_decodes(codec: &str) -> bool {
+    use windows::Win32::Media::MediaFoundation::{
+        IMFActivate, MFMediaType_Video, MFT_CATEGORY_VIDEO_DECODER, MFT_ENUM_FLAG_ASYNCMFT, MFT_ENUM_FLAG_HARDWARE,
+        MFT_ENUM_FLAG_SORTANDFILTER, MFT_ENUM_FLAG_SYNCMFT, MFT_REGISTER_TYPE_INFO, MFTEnumEx, MFVideoFormat_AV1,
+        MFVideoFormat_H264, MFVideoFormat_HEVC, MFVideoFormat_VP90,
+    };
+    let c = codec.to_ascii_lowercase();
+    let sub = if c.contains("hevc") || c.contains("265") {
+        MFVideoFormat_HEVC
+    } else if c.contains("h264") || c.contains("avc") || c.contains("264") {
+        MFVideoFormat_H264
+    } else if c.contains("av1") || c.contains("av01") {
+        MFVideoFormat_AV1
+    } else if c.contains("vp9") || c.contains("vp09") {
+        MFVideoFormat_VP90
+    } else {
+        return false;
+    };
+    let input = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: sub };
+    unsafe {
+        let mut list: *mut Option<IMFActivate> = std::ptr::null_mut();
+        let mut n = 0u32;
+        let flags = MFT_ENUM_FLAG_HARDWARE | MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_ASYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER;
+        if MFTEnumEx(MFT_CATEGORY_VIDEO_DECODER, flags, Some(&input), None, &mut list, &mut n).is_err() || list.is_null() {
+            return false;
+        }
+        for i in 0..n as usize {
+            drop(std::ptr::read(list.add(i)));
+        }
+        windows::Win32::System::Com::CoTaskMemFree(Some(list as *const _));
+        n > 0
+    }
+}
+
 type MfpCreate = unsafe extern "system" fn(
     windows::core::PCWSTR,
     windows_core::BOOL,
@@ -513,4 +550,16 @@ pub fn reposition(rect: RECT) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod mf_tests {
+    #[test]
+    fn h264_has_a_decoder_and_unknown_codecs_dont() {
+        // Windows always ships an H.264 decoder
+        assert!(super::mf_decodes("h264"));
+        assert!(!super::mf_decodes("prores"));
+        // HEVC comes from a Store extension: print, don't assert
+        eprintln!("hevc decoder: {}", super::mf_decodes("hevc"));
+    }
 }

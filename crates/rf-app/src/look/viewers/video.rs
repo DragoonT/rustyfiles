@@ -50,6 +50,19 @@ impl Viewer for VideoViewer {
         let opened = rf_player::open(&f.path);
         let (kind, prepared) = match opened {
             Ok(media) => match media.info().video.clone() {
+                // FilmCraft decodes on the CPU: 4K, or anything past 1080p60, doesn't keep up (4K60
+                // HEVC 10-bit: 42 frames/s on a 9800X3D with nothing else running). Windows'
+                // decoder uses the graphics card's video engine instead.
+                Some(v) if too_heavy(v.width, v.height, v.frame_rate.as_f64()) && rf_win::preview_host::is_playable(&f.path) && rf_win::preview_host::mf_decodes(&v.codec) => {
+                    log::info!(
+                        "look: {}x{} {} at {:.2} fps is past software decoding, Media Foundation (hardware)",
+                        v.width,
+                        v.height,
+                        v.codec,
+                        v.frame_rate.as_f64()
+                    );
+                    (Kind::Mf, Prepared::new((960.0, 540.0), name))
+                }
                 Some(v) => {
                     let par = if v.par.1 > 0 { v.par.0 as f32 / v.par.1 as f32 } else { 1.0 };
                     let size = ((v.width as f32 * par).max(160.0), (v.height as f32).max(90.0));
@@ -79,6 +92,28 @@ impl Viewer for VideoViewer {
     }
     fn cleanup(&mut self) {
         self.view = None;
+    }
+}
+
+/// Pixels per second past which the CPU decoder can't be trusted to play in real time
+/// (1080p at 60 fps; 4K at any rate is past it).
+const SOFTWARE_PIXEL_RATE: f64 = 1920.0 * 1080.0 * 60.0 * 1.05;
+
+fn too_heavy(width: u32, height: u32, fps: f64) -> bool {
+    let fps = if fps > 0.0 { fps } else { 30.0 };
+    width as f64 * height as f64 * fps > SOFTWARE_PIXEL_RATE
+}
+
+#[cfg(test)]
+mod heavy_tests {
+    #[test]
+    fn past_1080p60_goes_to_hardware() {
+        assert!(!super::too_heavy(1920, 1080, 60000.0 / 1001.0));
+        assert!(!super::too_heavy(1920, 1080, 60.0));
+        assert!(super::too_heavy(3840, 2160, 24.0));
+        assert!(super::too_heavy(2160, 3840, 60000.0 / 1001.0));
+        assert!(super::too_heavy(2560, 1440, 60.0));
+        assert!(!super::too_heavy(1280, 720, 0.0));
     }
 }
 
