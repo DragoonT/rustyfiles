@@ -33,6 +33,8 @@ syntect = { version = "5", default-features = false, features = ["default-fancy"
 smallvec.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# font previews (already in the tree through resvg)
+ttf-parser = "0.25"
 toml.workspace = true
 dirs.workspace = true
 crossbeam-channel.workspace = true

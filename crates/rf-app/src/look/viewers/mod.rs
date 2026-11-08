@@ -3,6 +3,7 @@
 
 pub mod archive;
 pub mod csv;
+pub mod font;
 pub mod image;
 pub mod info;
 pub mod markdown;
@@ -21,6 +22,7 @@ pub fn all() -> Vec<Box<dyn Viewer>> {
         Box::new(archive::ArchiveViewer::default()),
         Box::new(markdown::MarkdownViewer::default()),
         Box::new(csv::CsvViewer::default()),
+        Box::new(font::FontViewer::default()),
         Box::new(text::TextViewer::default()),
     ]
 }
