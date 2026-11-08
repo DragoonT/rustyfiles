@@ -82,6 +82,13 @@ fn manager() -> Option<UpdateManager> {
 }
 
 /// This build's version (Velopack's when installed, else the crate's). Read once.
+/// "0.1.0 · b241ace · 08.11.2026 02:40": the version, the commit and when it was built.
+pub fn version_full() -> String {
+    let built = env!("RUSTYFILES_BUILT").parse::<i64>().ok().and_then(|s| chrono::DateTime::from_timestamp(s, 0));
+    let when = built.map(|t| t.with_timezone(&chrono::Local).format("%d.%m.%Y %H:%M").to_string()).unwrap_or_default();
+    format!("{} · {} · {when}", version(), env!("RUSTYFILES_COMMIT"))
+}
+
 pub fn version() -> String {
     static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     V.get_or_init(|| manager().map(|m| m.get_current_version_as_string()).unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())).clone()

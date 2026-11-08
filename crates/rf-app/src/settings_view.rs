@@ -1557,7 +1557,7 @@ const ISSUES_URL: &str = "https://github.com/gelenmedya/rustyfiles/issues/new";
 const RELEASES_URL: &str = "https://github.com/gelenmedya/rustyfiles/releases";
 
 fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
-    let ver = crate::installer::version();
+    let ver = crate::installer::version_full();
     let version = format!("{} {ver}", t!("Sürüm:"));
     let pp = *p;
     let s = cx.global::<Settings>().clone();

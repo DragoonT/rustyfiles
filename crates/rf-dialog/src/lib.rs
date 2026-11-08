@@ -27,7 +27,7 @@ pub(crate) fn log(line: &str) {
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
         let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let app = std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default();
-        let _ = writeln!(f, "{secs} {app}[{}] {line}", std::process::id());
+        let _ = writeln!(f, "{secs} {app}[{}] dll {}-{} {line}", std::process::id(), env!("CARGO_PKG_VERSION"), env!("RUSTYFILES_COMMIT"));
     }
 }
 
