@@ -70,6 +70,15 @@ pub enum Codec {
     Opus { config: Vec<u8> },
     /// Vorbis (Matroska / WebM); the three Xiph-laced header packets.
     Vorbis { config: Vec<u8> },
+    /// FLAC; `fLaC` followed by the metadata blocks (Matroska `CodecPrivate`, or `dfLa`'s
+    /// blocks with the marker put in front).
+    Flac { config: Vec<u8> },
+    /// MP3 (MPEG-1 / 2 Layer III).
+    Mp3,
+    /// AC-3; the `dac3` payload in MP4, empty in Matroska.
+    Ac3 { config: Vec<u8> },
+    /// E-AC-3; the `dec3` payload in MP4, empty in Matroska.
+    Eac3 { config: Vec<u8> },
     /// Uncompressed audio.
     Pcm { bits: u16, float: bool, big_endian: bool },
     /// Anything else, by its sample entry's four letters.
@@ -99,6 +108,8 @@ pub struct Track {
     pub default: bool,
     /// Matroska `CodecDelay` in nanoseconds (Opus pre-skip), 0 otherwise.
     pub codec_delay_ns: u64,
+    /// Matroska `DiscardPadding` of the last block, nanoseconds (Opus end trim), 0 otherwise.
+    pub discard_padding_ns: u64,
 }
 
 /// Matroska `Colour` element, values as ISO/IEC 23091-2 code points.
@@ -380,6 +391,7 @@ fn parse_trak(b: &[u8], movie_timescale: u32) -> Result<Track> {
         colour: None,
         default: true,
         codec_delay_ns: 0,
+        discard_padding_ns: 0,
     };
     if let Some(stsd) = child(&stbl, b"stsd") {
         parse_stsd(stsd, &mut t)?;
@@ -469,7 +481,21 @@ fn parse_stsd(b: &[u8], t: &mut Track) -> Result<()> {
             t.sample_rate = rate;
             let kids = children(c.rest()).unwrap_or_default();
             t.codec = match &fourcc {
-                b"mp4a" => esds_config(&kids).map_or(Codec::Other, |config| Codec::Aac { config }),
+                b"mp4a" => match esds(&kids) {
+                    // object type 0x6B: MPEG-1 audio, 0x69: MPEG-2 audio (Layer III in practice)
+                    Some((0x6B | 0x69, _)) => Codec::Mp3,
+                    Some((_, Some(config))) => Codec::Aac { config },
+                    _ => Codec::Other,
+                },
+                b".mp3" => Codec::Mp3,
+                b"Opus" => child(&kids, b"dOps").and_then(|d| opus_head(d, channels, rate)).map_or(Codec::Other, |config| Codec::Opus { config }),
+                b"fLaC" => child(&kids, b"dfLa").filter(|d| d.len() > 4).map_or(Codec::Other, |d| {
+                    let mut config = b"fLaC".to_vec();
+                    config.extend_from_slice(&d[4..]);
+                    Codec::Flac { config }
+                }),
+                b"ac-3" => Codec::Ac3 { config: child(&kids, b"dac3").unwrap_or_default().to_vec() },
+                b"ec-3" => Codec::Eac3 { config: child(&kids, b"dec3").unwrap_or_default().to_vec() },
                 b"twos" => Codec::Pcm { bits: if bits == 8 { 8 } else { 16 }, float: false, big_endian: true },
                 b"sowt" => Codec::Pcm { bits: 16, float: false, big_endian: false },
                 b"in24" => Codec::Pcm { bits: 24, float: false, big_endian: !little_endian(&kids) },
@@ -495,8 +521,27 @@ fn little_endian(kids: &[([u8; 4], &[u8])]) -> bool {
     child(kids, b"wave").and_then(|w| children(w).ok()).and_then(|w| child(&w, b"enda").map(|e| e.get(1) == Some(&1) || e.first() == Some(&1))).unwrap_or(false)
 }
 
-/// The AudioSpecificConfig inside `esds` (directly, or inside QuickTime's `wave`).
-fn esds_config(kids: &[([u8; 4], &[u8])]) -> Option<Vec<u8>> {
+/// An `OpusHead` packet built from `dOps` (the same fields, big endian there, little endian
+/// in the packet).
+fn opus_head(d: &[u8], channels: u16, rate: u32) -> Option<Vec<u8>> {
+    // version, channel count, pre-skip, input rate, output gain, mapping family [, mapping]
+    if d.len() < 11 {
+        return None;
+    }
+    let _ = (channels, rate);
+    let mut h = b"OpusHead".to_vec();
+    h.push(1);
+    h.push(d[1]);
+    h.extend_from_slice(&u16::from_be_bytes([d[2], d[3]]).to_le_bytes());
+    h.extend_from_slice(&u32::from_be_bytes([d[4], d[5], d[6], d[7]]).to_le_bytes());
+    h.extend_from_slice(&i16::from_be_bytes([d[8], d[9]]).to_le_bytes());
+    h.extend_from_slice(&d[10..]);
+    Some(h)
+}
+
+/// What `esds` says: the object type indication and the AudioSpecificConfig, if any (directly,
+/// or inside QuickTime's `wave`).
+fn esds(kids: &[([u8; 4], &[u8])]) -> Option<(u8, Option<Vec<u8>>)> {
     let esds = child(kids, b"esds").or_else(|| {
         let wave = child(kids, b"wave")?;
         let w = children(wave).ok()?;
@@ -537,9 +582,10 @@ fn esds_config(kids: &[([u8; 4], &[u8])]) -> Option<Vec<u8>> {
     if tag != 4 {
         return None;
     }
-    dc.skip(13).ok()?;
-    let (tag, info) = desc(&mut dc)?;
-    (tag == 5).then(|| info.b.to_vec())
+    let oti = dc.u8().ok()?;
+    dc.skip(12).ok()?;
+    let asc = desc(&mut dc).and_then(|(tag, info)| (tag == 5).then(|| info.b.to_vec()));
+    Some((oti, asc))
 }
 
 // ------------------------------------------------------------------ sample tables
