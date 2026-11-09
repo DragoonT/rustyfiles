@@ -3,10 +3,12 @@
 //! * PCM tracks (`lpcm`, `sowt`, `twos`, `in24`, `in32`, `fl32`, `fl64`, `ipcm`, `fpcm`; 8 / 16 /
 //!   24 / 32 bit integer, 32 / 64 bit float, either byte order) are converted here. Integers go
 //!   to `x / 2^(bits-1)`, which is exact in `f32` up to 24 bits.
-//! * AAC goes through Windows' own AAC decoder (`CMSAACDecMFT`, a Media Foundation transform):
-//!   raw AAC frames in, the AudioSpecificConfig from `esds` as `MF_MT_USER_DATA`, float PCM
-//!   out. This is the "OS decoder at first" of the design document; an own AAC decoder can
-//!   replace [`AacMft`] later without touching the rest.
+//! * AAC, Opus, MP3, Vorbis (and AC-3 / E-AC-3 where a Dolby decoder is installed) go through
+//!   Windows' own decoders, Media Foundation transforms found with `MFTEnumEx`: raw packets in
+//!   with the codec's setup data as `MF_MT_USER_DATA`, PCM out ([`AudioMft`], [`MftCodec`]).
+//!   This is the "OS decoder at first" of the design document; an own decoder can replace one
+//!   without touching the rest.
+//! * FLAC is decoded in [`crate::flac`] (the OS transform blocks).
 //!
 //! Times follow the track's edit list the way [`crate::mp4`] applies it (an AAC encoder's delay
 //! is an edit that skips the first 1024 samples, so the first packet starts at a negative
@@ -423,12 +425,12 @@ impl MftCodec {
     /// Said when no decoder for the codec is installed.
     pub fn missing(self) -> &'static str {
         match self {
-            MftCodec::Aac => "AAC audio is not supported: Windows' AAC decoder is not installed",
-            MftCodec::Opus => "Opus audio is not supported: no Opus decoder installed (Windows 10 1809 and later have one)",
-            MftCodec::Mp3 => "MP3 audio is not supported: no MP3 decoder installed",
-            MftCodec::Ac3 => "AC-3 audio is not supported: no Dolby Digital decoder installed (Windows only has a passthrough converter)",
-            MftCodec::Eac3 => "E-AC-3 audio is not supported: no Dolby Digital Plus decoder installed (Windows only has a passthrough converter)",
-            MftCodec::Vorbis => "Vorbis audio is not supported: no Vorbis decoder installed (the Web Media Extensions add one)",
+            MftCodec::Aac => "AAC audio: no decoder installed (the AAC decoder of Windows is missing)",
+            MftCodec::Opus => "Opus audio: no decoder installed (Windows 10 1809 and later have one)",
+            MftCodec::Mp3 => "MP3 audio: no decoder installed",
+            MftCodec::Ac3 => "AC-3 audio: no decoder installed (Windows has only a passthrough converter, no Dolby Digital decoder)",
+            MftCodec::Eac3 => "E-AC-3 audio: no decoder installed (Windows has only a passthrough converter, no Dolby Digital Plus decoder)",
+            MftCodec::Vorbis => "Vorbis audio: no decoder installed (the Web Media Extensions add one)",
         }
     }
 

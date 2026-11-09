@@ -420,35 +420,42 @@ containers! {
     mkv_hevc_pcm: "pb_hevc_pcm.mkv", MKV_HEVC, &["-c:a", "pcm_s16le"];
     mkv_vp9_pcm: "pb_vp9_pcm.mkv", MKV_VP9, &["-c:a", "pcm_s16le"];
     mkv_vp9_aac: "pb_vp9_aac.mkv", MKV_VP9, &["-c:a", "aac", "-b:a", "96k"];
+    webm_vp9_opus: "pb_vp9_opus.webm", MKV_VP9, &["-c:a", "libopus", "-b:a", "64k"];
+    webm_vp9_vorbis: "pb_vp9_vorbis.webm", MKV_VP9, &["-c:a", "libvorbis", "-b:a", "64k"];
+    mkv_h264_flac: "pb_h264_flac.mkv", MKV_H264, &["-c:a", "flac"];
+    mkv_h264_mp3: "pb_h264_mp3.mkv", MKV_H264, &["-c:a", "libmp3lame", "-b:a", "128k"];
 }
 
-/// Opus and Vorbis are not decoded yet: the video plays on the system clock and the note says why.
+/// A codec without a decoder on this machine: the video plays on the system clock and the
+/// note says which codec and why (AC-3: Windows has no Dolby Digital decoder).
 #[test]
-fn webm_with_opus_plays_without_sound_and_says_so() {
-    for (name, audio) in [("pb_vp9_opus.webm", &["-c:a", "libopus", "-b:a", "64k"]), ("pb_vp9_vorbis.webm", &["-c:a", "libvorbis", "-b:a", "64k"])] {
-        let Some(clip) = mkv_clip(name, MKV_VP9, audio) else { return };
-        let time = Arc::new(FakeTime::new());
-        let sink = FakeSink::new(time);
-        let Some(mut pb) = open(&clip, sink) else { return };
-        assert!(!pb.has_audio());
-        println!("{name}: audio note: {}", pb.audio_note());
-        assert!(pb.audio_note().contains("not playable"), "{}", pb.audio_note());
-        pb.play();
-        let t0 = std::time::Instant::now();
-        let mut shown = 0;
-        let mut last = -1.0;
-        while t0.elapsed() < Duration::from_millis(1200) {
-            pb.player.wait_ahead(pb.time(), Duration::from_millis(50));
-            if let Some(f) = pb.frame()
-                && f.pts != last
-            {
-                last = f.pts;
-                shown += 1;
-            }
-            std::thread::sleep(Duration::from_millis(8));
-        }
-        println!("{name}: {shown} pictures in 1.2 s of wall time, clock at {:.3}", pb.time());
-        assert!(shown >= 25, "{shown}");
-        assert!(pb.time() > 1.0 && pb.time() < 1.5);
+fn mkv_without_a_decoder_plays_without_sound_and_says_so() {
+    let name = "pb_vp9_ac3.mkv";
+    let Some(clip) = mkv_clip(name, MKV_VP9, &["-c:a", "ac3", "-b:a", "128k"]) else { return };
+    let time = Arc::new(FakeTime::new());
+    let sink = FakeSink::new(time);
+    let Some(mut pb) = open(&clip, sink) else { return };
+    if pb.has_audio() {
+        println!("{name}: this machine has an AC-3 decoder");
+        return;
     }
+    println!("{name}: audio note: {}", pb.audio_note());
+    assert!(pb.audio_note().contains("not playable") && pb.audio_note().contains("AC-3"), "{}", pb.audio_note());
+    pb.play();
+    let t0 = std::time::Instant::now();
+    let mut shown = 0;
+    let mut last = -1.0;
+    while t0.elapsed() < Duration::from_millis(1200) {
+        pb.player.wait_ahead(pb.time(), Duration::from_millis(50));
+        if let Some(f) = pb.frame()
+            && f.pts != last
+        {
+            last = f.pts;
+            shown += 1;
+        }
+        std::thread::sleep(Duration::from_millis(8));
+    }
+    println!("{name}: {shown} pictures in 1.2 s of wall time, clock at {:.3}", pb.time());
+    assert!(shown >= 25, "{shown}");
+    assert!(pb.time() > 1.0 && pb.time() < 1.5);
 }
