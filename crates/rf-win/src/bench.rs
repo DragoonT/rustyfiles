@@ -363,6 +363,11 @@ pub fn measure_open(app: &App, folder: &Path, timeout: Duration, cancel: &Atomic
     let h = hwnd(win.hwnd);
     unsafe {
         let _ = MoveWindow(h, 80, 80, SIZE.0, SIZE.1, true);
+        // On top of everything, without taking the focus: Windows opens a window started from
+        // the background behind the active one, and some apps draw less (or not at all) while
+        // covered, which would skew the comparison. Every app is measured visible.
+        use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetWindowPos};
+        let _ = SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
     }
     let proc = Proc::open(win.pid);
     let shared = proc.as_ref().and_then(|p| p.times()).is_some_and(|(created, _)| created < launched_at);

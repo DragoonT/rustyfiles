@@ -49,13 +49,18 @@ impl Global for Host {}
 
 /// The field. `choices` is asked when it is clicked.
 pub fn select_box(id: impl Into<SharedString>, p: &Palette, label: impl Into<SharedString>, choices: impl Fn(&App) -> Vec<Choice> + 'static) -> AnyElement {
+    select_box_h(id, p, label, 32., choices)
+}
+
+/// [`select_box`] at a given height (to line up with other controls in a row).
+pub fn select_box_h(id: impl Into<SharedString>, p: &Palette, label: impl Into<SharedString>, height: f32, choices: impl Fn(&App) -> Vec<Choice> + 'static) -> AnyElement {
     let key: SharedString = id.into();
     let bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
     let seen = bounds.clone();
     h_flex()
         .id(ElementId::Name(key.clone()))
         .relative()
-        .h(px(32.))
+        .h(px(height))
         .min_w(px(180.))
         .max_w(px(320.))
         .px_3()

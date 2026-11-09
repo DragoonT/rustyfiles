@@ -2272,6 +2272,12 @@ impl Workspace {
         let drop_border = p.accent;
         // on the rail only the icon; hovering the rail opens the full sidebar over the content
         let rail = self.sidebar_rail;
+        // drives look alike as bare icons: on the rail their letter sits in the icon's corner
+        let letter = target3.path().filter(|_| rail).and_then(|p| {
+            let s = p.to_str()?;
+            let b = s.as_bytes();
+            (b.len() <= 3 && b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic()).then(|| (b[0] as char).to_ascii_uppercase())
+        });
         h_flex()
             .id(id)
             .min_h(px(if rail { 36. } else { 32. }))
@@ -2285,7 +2291,35 @@ impl Workspace {
             .relative()
             .when(active, |d| d.bg(p.selection).child(theme::selection_pill(p)))
             .when(!active, |d| d.hover(|s| s.bg(p.hover)))
-            .child(Icon::new(icon).size(px(if rail { 18. } else { 16. })).flex_shrink_0().text_color(icon_color))
+            .child(
+                div()
+                    .relative()
+                    .flex_shrink_0()
+                    .child(Icon::new(icon).size(px(if rail { 18. } else { 16. })).text_color(icon_color))
+                    .when_some(letter, |d, l| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .right(px(-7.))
+                                .bottom(px(-5.))
+                                .min_w(px(12.))
+                                .h(px(12.))
+                                .px(px(2.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(3.))
+                                .bg(p.sidebar_bg)
+                                .border_1()
+                                .border_color(p.border)
+                                .text_size(px(9.))
+                                .line_height(px(10.))
+                                .font_weight(FontWeight::BOLD)
+                                .text_color(p.text)
+                                .child(l.to_string()),
+                        )
+                    }),
+            )
             .when(!rail, |d| {
                 d.child(
                     v_flex()

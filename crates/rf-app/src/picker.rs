@@ -365,7 +365,8 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
         let me = cx.entity().downgrade();
         let filters = s.req.filters.clone();
         let sel = s.filter_ix.get();
-        div().w(px(240.)).flex_shrink_0().child(crate::select_box::select_box("pick-filter", p, current, move |_| {
+        // 36 px like the name field and the buttons beside it
+        div().w(px(240.)).flex_shrink_0().child(crate::select_box::select_box_h("pick-filter", p, current, 36., move |_| {
             filters
                 .iter()
                 .enumerate()
