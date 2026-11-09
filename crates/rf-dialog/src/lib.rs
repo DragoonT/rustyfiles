@@ -521,6 +521,15 @@ mod com {
             if outer.is_some() {
                 return Err(CLASS_E_NOAGGREGATION.into());
             }
+            // PickerHost.exe shows the dialog for packaged apps' FileSavePicker / FileOpenPicker
+            // (Snipping Tool's Save as). It drives Windows' dialog through a private interface
+            // ({9EA5491C-89C8-4BEF-93D3-7F665FB82A33}) we can't pass on, and fails the pick
+            // without it: it gets Windows' own dialog, untouched.
+            if exe_name().eq_ignore_ascii_case("PickerHost.exe") {
+                crate::log("create: PickerHost, Windows' dialog");
+                let real = real_dialog(if self.save { &FileSaveDialog } else { &FileOpenDialog })?;
+                return unsafe { real.query(iid, object).ok() };
+            }
             let unk: IUnknown = Dialog::new(self.save)?.into();
             unsafe { unk.query(iid, object).ok() }
         }
