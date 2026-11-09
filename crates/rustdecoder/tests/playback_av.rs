@@ -426,6 +426,36 @@ containers! {
     mkv_h264_mp3: "pb_h264_mp3.mkv", MKV_H264, &["-c:a", "libmp3lame", "-b:a", "128k"];
 }
 
+// ------------------------------------------------------------------ fragmented MP4
+
+macro_rules! fragmented {
+    ($($m:ident: $name:expr, $video:expr, $mux:expr;)*) => {
+        $(mod $m {
+            use super::*;
+            fn clip() -> Option<PathBuf> {
+                if !have_ffmpeg() {
+                    eprintln!("skipped: ffmpeg not found");
+                    return None;
+                }
+                Some(common::make_frag($name, $video, $mux))
+            }
+            #[test] fn pictures_follow_the_audio_clock_in_order() { if let Some(c) = clip() { super::pictures_follow_the_audio_clock_in_order(c) } }
+            #[test] fn seeking_lands_both_sides_on_the_target() { if let Some(c) = clip() { super::seeking_lands_both_sides_on_the_target(c) } }
+        })*
+    };
+}
+
+// Only clips with negative composition offsets: with B-frames and plain offsets (no edit list) the
+// first picture is delayed by the reorder depth while the sound starts at 0, and `Playback` starts
+// its clock at the first picture, so the sound would play that much late (left for later).
+
+fragmented! {
+    frag_h264_empty_moov: "frag_h264_dash_neg.mp4", common::FRAG_H264, &["-movflags", "+dash+negative_cts_offsets"];
+    frag_h264_mixed: "frag_h264_mixed_neg.mp4", common::FRAG_H264, &["-movflags", "frag_keyframe+negative_cts_offsets"];
+    frag_hevc_cmaf: "frag_hevc_cmaf.mp4", common::FRAG_HEVC, &["-movflags", "+cmaf"];
+    frag_h264_cmaf: "frag_h264_cmaf.mp4", common::FRAG_H264, &["-movflags", "+cmaf"];
+}
+
 /// A codec without a decoder on this machine: the video plays on the system clock and the
 /// note says which codec and why (AC-3: Windows has no Dolby Digital decoder).
 #[test]
