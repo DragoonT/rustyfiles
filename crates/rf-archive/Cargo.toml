@@ -15,8 +15,8 @@ crc32fast.workspace = true
 zip.workspace = true
 sevenz-rust2.workspace = true
 lzma-rust2.workspace = true
-# our archive engine, github.com/gelenmedya/rarchive
-rarchive = { git = "https://github.com/gelenmedya/rarchive", rev = "e7e0dc43e23e740d5e9902d53f621179bed1f4c4" }
+# our archive engine (crates.io/crates/rarchive, github.com/gelenmedya/rarchive)
+rarchive = "0.1"
 hadris-iso.workspace = true
 hadris-fs.workspace = true
 hadris-io.workspace = true

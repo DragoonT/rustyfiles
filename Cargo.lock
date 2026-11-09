@@ -5869,8 +5869,9 @@ checksum = "a611d15b50743feb4c76b7d03edcb0e64f399c26961e4efe6975bc398be6aa3d"
 
 [[package]]
 name = "rarchive"
-version = "0.0.1"
-source = "git+https://github.com/gelenmedya/rarchive?rev=e7e0dc43e23e740d5e9902d53f621179bed1f4c4#e7e0dc43e23e740d5e9902d53f621179bed1f4c4"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ceccf4fa72e4b051de40af069f91e0532a154717e8bd9de844d105d8d988b16"
 dependencies = [
  "aes 0.8.4",
  "bzip2",
