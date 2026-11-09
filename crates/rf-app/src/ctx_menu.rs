@@ -70,6 +70,10 @@ fn cursor() -> (i32, i32) {
 impl FolderView {
     /// Opens our context menu for the selection (or the folder background) at the mouse.
     pub fn show_context_menu(&mut self, background: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.location(), rf_core::history::Location::Shell { .. }) {
+            self.show_shell_folder_menu(background, cx);
+            return;
+        }
         let shift = unsafe {
             use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_SHIFT};
             GetKeyState(VK_SHIFT.0 as i32) < 0

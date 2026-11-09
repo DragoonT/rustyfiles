@@ -280,7 +280,7 @@ pub struct FolderView {
     /// visible index → row index (grouping only).
     row_of_vi: Vec<usize>,
     pub filter: Filter,
-    selected: HashSet<u32>,
+    pub(crate) selected: HashSet<u32>,
     cursor: Option<usize>,
     anchor: Option<usize>,
     pub loading: bool,
