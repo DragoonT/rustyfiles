@@ -39,9 +39,11 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
   `mp4` (see phase 5); `container::read` picks the reader from the first bytes.
 - `bits` — bit reader with Exp-Golomb and emulation-prevention removal.
 - `h264`, `hevc` — parameter sets and slice headers.
+- `av1`, `dxva_av1`, `av1dec` — AV1 OBUs, sequence and frame headers with per-slot state, `DXVA_PicParams_AV1` + tiles,
+  `Av1Decoder` (phase 5).
 - `vp9`, `dxva_vp9`, `vp9dec` — VP9 superframe split, uncompressed header, `DXVA_PicParams_VP9`,
   `Vp9Decoder` (phase 5).
-- `d3d11` — video device, decoder creation by profile (H.264, HEVC Main, HEVC Main 10, VP9 0 and 2),
+- `d3d11` — video device, decoder creation by profile (H.264, HEVC Main, HEVC Main 10, VP9 0 and 2, AV1 main),
   per-frame submission, output texture array.
 - `present` — NV12 / P010 shaders, rotation, HDR → SDR tone mapping.
 - `audio`, `resample`, `audio_out`, `playback` — PCM and AAC (OS decoder at first, own AAC later), sample-rate conversion, WASAPI output with the audio clock, A/V sync.
@@ -198,7 +200,7 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      edit, AAC tail trim to the edit end, the system mixer's session volume persists per
      executable (muted runs of the test executables leave them muted).
 5. MKV / WebM, VP9 and AV1 (the GPU decodes them too), fragmented MP4.
-   **Phase 5, MKV / WebM and VP9 done (2026-11-09); AV1 and fragmented MP4 left:**
+   **Phase 5, MKV / WebM, VP9 and AV1 done (2026-11-09); fragmented MP4 left:**
    - `mkv` (`mkv::read`, `container::read`): EBML walk of the Segment: Info (`TimestampScale`,
      `Duration`), Tracks (`CodecID` `V_MPEG4/ISO/AVC`, `V_MPEGH/ISO/HEVC`, `V_VP9`, `V_AV1`,
      `A_AAC*`, `A_OPUS`, `A_VORBIS`, `A_PCM/INT/LIT|BIG`, `A_PCM/FLOAT/IEEE`; `CodecPrivate`,
@@ -274,8 +276,59 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      says "audio track not playable: not supported yet: Opus audio is not decoded yet (PCM and AAC
      are)". Matroska times are whole milliseconds, so a 30 fps picture can be 0.7 ms off its true
      time (worst lag 33.7 ms instead of 33.3 ms at 60 Hz).
-   - Left for phase 5: AV1 (`Codec::Av1` is recognised, no decoder: `D3D11_DECODER_PROFILE_AV1_VLD_*`,
-     OBU parsing, film grain), Opus and Vorbis decoding (own, like the rest), fragmented MP4
+   - **AV1 (2026-11-09, `av1`, `dxva_av1`, `av1dec`, `VideoDecoder::Av1`, MP4 `av01` / `av1C` and
+     Matroska `V_AV1`):** `av1` splits temporal units into OBUs (`obu_has_size_field` or the rest
+     of the packet; the operating point 0 layer filter), reads the sequence header (profile, bit
+     depth, colour, order hint bits, all `enable_*`, film grain present, the decoder model fields
+     that shift the bit position) and the whole uncompressed frame header: frame type,
+     `show_existing_frame`, refresh flags, reference indices (also `frame_refs_short_signaling`),
+     frame size with refs, superres, tile info (uniform and explicit), quantization, segmentation,
+     delta q / lf, loop filter, CDEF, loop restoration, tx mode, reference select, skip mode,
+     global motion (sub-exponential codes against the previous parameters), film grain (also
+     `update_grain = 0`). Per slot it keeps what a refreshing frame stores (order hints, sizes,
+     global motion, loop filter deltas, segmentation features, film grain parameters); CDFs and
+     motion vectors stay in the driver's per-surface state. `parse_tile_group` gives each tile's
+     offset and size; the frame is submitted when its last tile group arrives: one bitstream
+     buffer with the tile data of all groups, one `DXVA_Tile_AV1` (16 bytes) per tile, one
+     `DXVA_PicParams_AV1` (912 bytes, layout asserted in a unit test). The GPU applies film
+     grain itself (`film_grain.apply_grain` in the structure). Profile
+     `D3D11_DECODER_PROFILE_AV1_VLD_PROFILE0`, NV12 / P010, `ConfigBitstreamRaw` 1, surfaces 64
+     aligned, 12 surfaces; pictures go out in decode order like VP9 (hidden frames are shown by
+     `show_existing_frame`; a shown key frame refreshes all slots).
+   - Lessons (RTX 5070 Ti, driver as of today): a non-zero `StatusReportFeedbackNumber` crashed
+     the whole process (`STATUS_STACK_BUFFER_OVERRUN` in the driver) exactly on the 25th frame,
+     for any stream, whatever the value; zero is used. `frame_refs[i].width / height` must be the
+     size the reference was *coded* at (before superres upscaling); `PicParams.width` is the
+     upscaled width and `superres_denom` is 8 without superres (value 0 also decoded). With the
+     upscaled size for the references every inter frame of a superres stream differed from
+     dav1d's by a few levels. `frame_restoration_type` is the spec's enum after the
+     `Remap_Lr_Type` step (0 none, 1 Wiener, 2 SGR, 3 switchable), CDEF secondary strengths are
+     the raw 2-bit values, `qm_*` is 0xff without quantizer matrices, the film grain AR
+     coefficients are the "plus 128" bytes.
+   - Bit-exact against libdav1d through ffmpeg (`-f rawvideo`, every sample of every shown
+     frame, `tests/gpu_av1.rs`, clips made by ffmpeg into the shared temp folder), 90 frames each
+     unless noted, no mismatch in any:
+     SVT-AV1 8-bit MP4 and WebM (hidden frames, 43 `show_existing_frame`),
+     SVT-AV1 10-bit MP4 and WebM, SVT-AV1 1280x720 with 4x2 tiles
+     (loop restoration on in 40 frames), SVT-AV1 film grain 8 (`apply_grain` in all 90 frames,
+     43 of them shown by `show_existing_frame`), SVT-AV1 superres (fixed denominator 12, and
+     random per frame), SVT-AV1 random frame sizes (reference scaling, 16 different odd and even
+     sizes, 427x240 ... 640x360), libaom (defaults with lag, 642x362 with 2x2 tiles in WebM,
+     `aq-mode=1` segmentation, quantizer matrices, delta q + delta lf, error resilient, lossless,
+     screen content, 128x128 superblocks with 2 tile groups), rav1e. A seek to a later key
+     frame gives the same pictures as decoding from the start.
+   - Speed: 1080p AV1 (SVT-AV1 6 Mbit, 180 frames), GPU only, no read-back: about 1360 fps on the
+     RTX 5070 Ti (noisy test pattern, so the stream is not typical, but the order is that of VP9).
+   - Not tested or not done for AV1: 4:4:4 / 4:2:2 (profile 1, 2) and monochrome (refused with a
+     message), 12 bit, operating points above 0 (only the layer filter is written), large scale
+     tile, switch frames and `frame_id_numbers_present` streams (parsed per spec, no clip),
+     `frame_refs_short_signaling` (written to the spec, no encoder here uses it), intrabc
+     (libaom screen content may not have used it), multiple video decoders at once with AV1,
+     Opus / Vorbis audio, the player and `Playback` on AV1 files (the `Video` path is shared,
+     but no sync test has run on an AV1 clip), the rf-app side (`rd_video.rs` probe, `DirectLook`
+     route).
+   - Left for phase 5: (AV1 is done, see above),
+     Opus and Vorbis decoding (own, like the rest), fragmented MP4
      (`moof`), `ContentEncodings` header stripping (mkvmerge's default for some codecs), Matroska
      `Projection` rotation and HDR metadata into the tone mapper, VP9 4:4:4 (profile 1 / 3), 12 bit,
      scaled references and `intra_only` tests with a stream that has them, several video tracks

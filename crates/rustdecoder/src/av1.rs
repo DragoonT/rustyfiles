@@ -1482,7 +1482,7 @@ mod tests {
     #[test]
     fn ns_reads_non_symmetric() {
         // n = 5: w = 3, m = 3; values 0..2 take 2 bits, 3 and 4 take 3 bits
-        let d = [0b0110_0000];
+        let d = [0b0111_0000];
         let mut r = BitReader::new(&d);
         assert_eq!(ns(&mut r, 5).unwrap(), 1);
         assert_eq!(ns(&mut r, 5).unwrap(), 3);

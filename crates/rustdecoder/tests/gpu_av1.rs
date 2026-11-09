@@ -258,17 +258,63 @@ fn libaom_128_superblocks_and_tile_groups() {
     aom("av1_aom_sb128.mp4", "sb-size=128:tile-columns=2:num-tile-groups=2", &[]);
 }
 
+/// Decode speed of a 1080p clip, no read-back (printed, not asserted: it depends on the machine).
 #[test]
-fn decode_only_no_read_back() {
-    let c = Clip::svt("av1_svt.mp4", &["-b:v", "1M", "-g", "60"]);
+fn decode_speed_1080p() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let mut c = Clip::svt("av1_svt_1080p.mp4", &["-b:v", "6M", "-g", "120"]);
+    c.size = "1920x1080";
+    c.secs = 6;
     let clip = make_clip(&c);
-    let mut dec = VideoDecoder::open(&clip).unwrap();
+    let mut dec = match VideoDecoder::open(&clip) {
+        Ok(d) => d,
+        Err(rustdecoder::Error::Gpu(m)) => {
+            eprintln!("skipped: {m}");
+            return;
+        }
+        Err(e) => panic!("{e}"),
+    };
+    let t0 = std::time::Instant::now();
     let mut n = 0;
     while dec.next_frame().unwrap().is_some() {
         n += 1;
     }
     dec.wait_idle().unwrap();
-    eprintln!("decoded {n} frames");
+    eprintln!("1080p AV1: {n} frames in {:.2} s = {:.0} fps on {}", t0.elapsed().as_secs_f64(), n as f64 / t0.elapsed().as_secs_f64(), dec.adapter());
+    assert_eq!(n, 180);
+}
+
+/// Seeking to a later key frame gives the same pictures as decoding from the start.
+#[test]
+fn seek_to_a_key_frame() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let clip = make_clip(&Clip::svt("av1_svt_seek.mp4", &["-b:v", "1M", "-g", "30"]));
+    let mut dec = match VideoDecoder::open(&clip) {
+        Ok(d) => d,
+        Err(rustdecoder::Error::Gpu(m)) => {
+            eprintln!("skipped: {m}");
+            return;
+        }
+        Err(e) => panic!("{e}"),
+    };
+    let key = dec.track().samples.iter().enumerate().skip(1).find(|(_, s)| s.key).map(|(i, _)| i).expect("a second key frame");
+    let mut from_start = Vec::new();
+    while let Some(f) = dec.next_frame().unwrap() {
+        if f.pts >= dec.track().samples[key].pts {
+            from_start.push(dec.read_back(&f).unwrap());
+        }
+    }
+    dec.seek_to_sample(key);
+    let mut after_seek = Vec::new();
+    while let Some(f) = dec.next_frame().unwrap() {
+        after_seek.push(dec.read_back(&f).unwrap());
+    }
+    assert_eq!(after_seek.len(), from_start.len());
+    assert!(after_seek == from_start, "pictures after the seek differ");
 }
 
 #[test]
