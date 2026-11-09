@@ -51,12 +51,16 @@ pub struct DiskTree {
     name_off: Vec<u32>,
     name_len: Vec<u16>,
     size: Vec<u64>,
-    alloc: Vec<u64>,
-    /// Files below (a file counts itself).
-    files: Vec<u32>,
-    /// A folder's children are the ids `first..first + count`.
-    first: Vec<u32>,
-    count: Vec<u32>,
+    /// A folder's place in the folder-only arrays below; `NONE` for files. Most entries are
+    /// files, which need neither totals nor a child range: 20 bytes less for each of them.
+    slot: Vec<u32>,
+    /// Per folder (by slot): size on disk, files below, children `first..first + count`.
+    dir_alloc: Vec<u64>,
+    dir_files: Vec<u32>,
+    dir_first: Vec<u32>,
+    dir_count: Vec<u32>,
+    /// A file's size on disk is its size rounded up to whole clusters, worked out when asked.
+    cluster: Option<u64>,
     flags: Vec<u8>,
     names: Vec<u8>,
     /// Folders that could not be listed (access denied and the like).
@@ -152,25 +156,32 @@ impl DiskTree {
         let mut chunks = chunks.into_inner();
         chunks.sort_unstable_by_key(|c| c.base);
         let cluster = crate::foldersize::cluster_size(root);
+        let dirs = 1 + chunks.iter().map(|c| c.flags.iter().filter(|&&f| f & DIR != 0).count()).sum::<usize>();
         let mut t = DiskTree {
             root: root.to_path_buf(),
             parent: vec![NONE; total],
             name_off: vec![0; total],
             name_len: vec![0; total],
             size: vec![0; total],
-            alloc: vec![0; total],
-            files: vec![0; total],
-            first: vec![0; total],
-            count: vec![0; total],
+            slot: vec![NONE; total],
+            dir_alloc: Vec::with_capacity(dirs),
+            dir_files: Vec::with_capacity(dirs),
+            dir_first: Vec::with_capacity(dirs),
+            dir_count: Vec::with_capacity(dirs),
+            cluster,
             flags: vec![0; total],
             names: Vec::with_capacity(chunks.iter().map(|c| c.names.len()).sum()),
             skipped: skipped.load(Ordering::Relaxed),
             cancelled: cancel.load(Ordering::Relaxed),
         };
         t.flags[0] = DIR;
+        t.new_slot(0);
+        // chunks in id order: a folder's own entry (in its parent's listing) is laid out, and
+        // gets its slot, before its listing comes
         for c in chunks {
-            t.count[c.parent as usize] = c.lens.len() as u32;
-            t.first[c.parent as usize] = c.base;
+            let ps = t.slot[c.parent as usize] as usize;
+            t.dir_count[ps] = c.lens.len() as u32;
+            t.dir_first[ps] = c.base;
             let mut off = 0usize;
             for (k, (&len, &f)) in c.lens.iter().zip(&c.flags).enumerate() {
                 let i = c.base as usize + k;
@@ -181,10 +192,9 @@ impl DiskTree {
                 t.names.extend_from_slice(&c.names[off..off + len as usize]);
                 off += len as usize;
                 if f & DIR == 0 {
-                    let s = c.sizes[k];
-                    t.size[i] = s;
-                    t.alloc[i] = cluster.map_or(s, |cl| s.div_ceil(cl) * cl);
-                    t.files[i] = 1;
+                    t.size[i] = c.sizes[k];
+                } else {
+                    t.new_slot(i as u32);
                 }
             }
         }
@@ -193,13 +203,22 @@ impl DiskTree {
         for i in (1..total).rev() {
             let p = t.parent[i];
             if p != NONE {
-                let p = p as usize;
-                t.size[p] += t.size[i];
-                t.alloc[p] += t.alloc[i];
-                t.files[p] = t.files[p].saturating_add(t.files[i]);
+                let ps = t.slot[p as usize] as usize;
+                let (size, alloc, files) = (t.size[i], t.allocated(i as u32), t.files(i as u32));
+                t.size[p as usize] += size;
+                t.dir_alloc[ps] += alloc;
+                t.dir_files[ps] = t.dir_files[ps].saturating_add(files);
             }
         }
         t
+    }
+
+    fn new_slot(&mut self, i: u32) {
+        self.slot[i as usize] = self.dir_alloc.len() as u32;
+        self.dir_alloc.push(0);
+        self.dir_files.push(0);
+        self.dir_first.push(0);
+        self.dir_count.push(0);
     }
 
     pub fn root_path(&self) -> &Path {
@@ -228,7 +247,7 @@ impl DiskTree {
     /// Bytes held (arrays and names).
     pub fn memory(&self) -> usize {
         let n = self.parent.capacity();
-        n * (4 + 4 + 2 + 8 + 8 + 4 + 4 + 4 + 1) + self.names.capacity()
+        n * (4 + 4 + 2 + 8 + 4 + 1) + self.dir_alloc.capacity() * (8 + 4 + 4 + 4) + self.names.capacity()
     }
 
     pub fn name(&self, i: u32) -> &str {
@@ -251,7 +270,13 @@ impl DiskTree {
     }
 
     pub fn allocated(&self, i: u32) -> u64 {
-        self.alloc[i as usize]
+        match self.slot[i as usize] {
+            NONE => {
+                let s = self.size[i as usize];
+                self.cluster.map_or(s, |cl| s.div_ceil(cl) * cl)
+            }
+            d => self.dir_alloc[d as usize],
+        }
     }
 
     pub fn weight(&self, i: u32, m: Metric) -> u64 {
@@ -263,13 +288,22 @@ impl DiskTree {
 
     /// Files below `i` (1 for a file).
     pub fn files(&self, i: u32) -> u32 {
-        self.files[i as usize]
+        match self.slot[i as usize] {
+            // a file counts itself; a reserved id a cancelled walk never filled counts nothing
+            NONE => (self.parent[i as usize] != NONE) as u32,
+            d => self.dir_files[d as usize],
+        }
     }
 
     /// The ids of `i`'s direct children (empty for files and empty folders).
     pub fn children(&self, i: u32) -> std::ops::Range<u32> {
-        let f = self.first[i as usize];
-        f..f + self.count[i as usize]
+        match self.slot[i as usize] {
+            NONE => 0..0,
+            d => {
+                let f = self.dir_first[d as usize];
+                f..f + self.dir_count[d as usize]
+            }
+        }
     }
 
     /// `i`'s children, biggest first (ties by name, plain byte order: this runs on every redraw
