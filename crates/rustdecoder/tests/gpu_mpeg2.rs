@@ -264,3 +264,111 @@ fn mp2_audio_in_a_program_stream() {
     eprintln!("MP2: {rate} Hz, {ch} ch, starts at {start:.4} s, {} frames ours / {} ffmpeg, best shift {} frames, max |diff| {max:.5}, rms {rms:.6}", ours.len() / ch, theirs.len() / ch, best.1);
     assert!(rms < 0.01, "MP2 decode differs: rms {rms}");
 }
+
+#[test]
+fn mpeg2_1080_height_is_cropped_from_1088() {
+    check(Clip { name: "m2_1080.ts", size: "1920x1080", secs: 1, args: &["mpeg2video", "-b:v", "15M", "-g", "12", "-bf", "2", "-flags", "+ilme+ildct"], mux: &["-f", "mpegts"] }, 25, 12);
+}
+
+/// 4:2:2 (XDCAM HD422, D-10 50) has no decoder profile in D3D11: refused with a message.
+#[test]
+fn mpeg2_422_is_refused() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let out = temp_dir().join("m2_422.mpg");
+    if !out.exists() {
+        let status = Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x352:rate=25", "-t", "1", "-pix_fmt", "yuv422p", "-c:v", "mpeg2video", "-b:v", "20M", "-f", "mpeg"])
+            .arg(&out)
+            .status()
+            .expect("ffmpeg");
+        assert!(status.success());
+    }
+    match VideoDecoder::open(&out) {
+        Err(rustdecoder::Error::Unsupported(m)) => eprintln!("4:2:2 refused: {m}"),
+        Err(rustdecoder::Error::Gpu(m)) => eprintln!("skipped: {m}"),
+        other => panic!("4:2:2 should be refused, got {:?}", other.map(|d| d.codec_name())),
+    }
+}
+
+/// Seeking to a key sample: the pictures after it are the ones a full decode gives (pictures
+/// that need the GOP before are dropped).
+#[test]
+fn mpeg2_seek_to_a_key_sample() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let clip = make_clip(&Clip { name: "m2_prog_b.mpg", size: "640x352", secs: 3, args: &["mpeg2video", "-b:v", "4M", "-g", "12", "-bf", "2"], mux: &["-f", "mpeg"] });
+    let mut dec = match VideoDecoder::open(&clip) {
+        Ok(d) => d,
+        Err(rustdecoder::Error::Gpu(m)) => {
+            eprintln!("skipped: {m}");
+            return;
+        }
+        Err(e) => panic!("{e}"),
+    };
+    let mut all = std::collections::HashMap::new();
+    let mut order = Vec::new();
+    while let Some(f) = dec.next_frame().unwrap() {
+        let p = dec.read_back(&f).unwrap();
+        all.insert(f.pts, p.y.iter().fold(0u64, |h, v| h.wrapping_mul(31).wrapping_add(*v as u64)));
+        order.push(f.pts);
+    }
+    let keys: Vec<usize> = dec.track().samples.iter().enumerate().filter(|(_, s)| s.key).map(|(i, _)| i).collect();
+    assert!(keys.len() >= 5, "{} key samples", keys.len());
+    let k = keys[3];
+    let key_pts = dec.track().samples[k].pts;
+    dec.seek_to_sample(k);
+    let mut n = 0;
+    let mut first = None;
+    while let Some(f) = dec.next_frame().unwrap() {
+        let p = dec.read_back(&f).unwrap();
+        let h = p.y.iter().fold(0u64, |h, v| h.wrapping_mul(31).wrapping_add(*v as u64));
+        assert_eq!(all.get(&f.pts), Some(&h), "picture at {} after the seek differs from the full decode", f.pts);
+        first.get_or_insert(f.pts);
+        n += 1;
+    }
+    eprintln!("seek to key sample {k} (pts {key_pts}): {n} pictures, first at {:?}, all equal to the full decode", first);
+    assert_eq!(first, Some(key_pts));
+    assert!(n >= 75 - 36 - 2);
+}
+
+/// Cut and damaged files never panic (the reader and the decoder).
+#[test]
+fn mpeg2_damaged_streams_do_not_panic() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let clip = make_clip(&Clip { name: "m2_prog_b.mpg", size: "640x352", secs: 3, args: &["mpeg2video", "-b:v", "4M", "-g", "12", "-bf", "2"], mux: &["-f", "mpeg"] });
+    let good = std::fs::read(&clip).unwrap();
+    let mut seed = 12345u64;
+    let mut rnd = move || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (seed >> 33) as usize
+    };
+    for round in 0..6 {
+        let mut d = good.clone();
+        if round < 2 {
+            d.truncate(good.len() * (round + 1) / 3);
+        } else {
+            for _ in 0..40 {
+                let i = 2048 + rnd() % (d.len() - 2048);
+                d[i] ^= 1 << (rnd() % 8);
+            }
+        }
+        let p = temp_dir().join(format!("m2_damaged_{round}.mpg"));
+        std::fs::write(&p, &d).unwrap();
+        let Ok(mut dec) = VideoDecoder::open(&p) else { continue };
+        let mut frames = 0;
+        for _ in 0..200 {
+            match dec.next_frame() {
+                Ok(Some(_)) => frames += 1,
+                Ok(None) => break,
+                Err(_) => break,
+            }
+        }
+        eprintln!("damaged {round}: {frames} frames, no panic");
+        let _ = std::fs::remove_file(&p);
+    }
+}
