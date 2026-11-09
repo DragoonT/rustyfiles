@@ -36,6 +36,8 @@ struct Slot {
     state: AtomicU8,
     dirty: Mutex<HashSet<PathBuf>>,
     changed_since_save: AtomicBool,
+    /// Followed through the volume's change journal (NTFS) instead of a recursive watcher.
+    journaled: bool,
 }
 
 struct Service {
@@ -63,6 +65,7 @@ pub fn start(roots: Vec<PathBuf>, dir: PathBuf) {
     let mut slots = Vec::new();
     let mut watchers = Vec::new();
     for root in roots {
+        let journaled = crate::usn::query(&root).is_some();
         let slot = Arc::new(Slot {
             file: file_for(&dir, &root),
             root,
@@ -70,7 +73,14 @@ pub fn start(roots: Vec<PathBuf>, dir: PathBuf) {
             state: AtomicU8::new(State::Building as u8),
             dirty: Mutex::new(HashSet::new()),
             changed_since_save: AtomicBool::new(false),
+            journaled,
         });
+        // NTFS: the change journal says which folders changed, once a second (cheaper than a
+        // watcher on a whole drive, which a build floods with events, and it can't overflow)
+        if slot.journaled {
+            slots.push(slot);
+            continue;
+        }
         // changed folders, collected from the start (a walk running meanwhile misses nothing:
         // the fresh index is refreshed with them once it's swapped in)
         let s2 = slot.clone();
@@ -183,6 +193,9 @@ fn run(slot: Arc<Slot>, cancel: Arc<AtomicBool>) {
 
 /// 3. keeps up with changes until cancelled.
 fn follow(slot: &Slot, cancel: &AtomicBool) {
+    if slot.journaled {
+        return follow_journal(slot, cancel);
+    }
     let mut last_save = Instant::now();
     // The journal position one round ago: by now the watcher has reported every change
     // before it and the folders were listed again, so the saved index is current up to there
@@ -261,4 +274,44 @@ pub fn local_roots() -> Vec<PathBuf> {
 
 pub fn running() -> bool {
     service().lock().is_some()
+}
+
+/// [`follow`] for a volume with a change journal: once a second the folders it names are listed
+/// again ([`Index::catch_up`]). When it can't tell (records dropped while the app was suspended,
+/// a reset journal, a flood of changes), the root is walked again.
+fn follow_journal(slot: &Slot, cancel: &AtomicBool) {
+    let mut last_save = Instant::now();
+    let mut unreadable = 0;
+    while !cancel.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_secs(1));
+        let r = match slot.index.write().as_mut() {
+            Some(ix) => ix.catch_up(cancel),
+            None => Err(crate::usn::Gap::Lost),
+        };
+        match r {
+            Ok(0) => unreadable = 0,
+            Ok(_) => {
+                unreadable = 0;
+                slot.changed_since_save.store(true, Ordering::Relaxed);
+            }
+            Err(crate::usn::Gap::Unreadable) if unreadable < 10 => unreadable += 1,
+            Err(e) => {
+                log::info!("indexer: {}: lost the change journal ({e:?}), walking again", slot.root.display());
+                let fresh = Index::build(&slot.root, cancel);
+                if cancel.load(Ordering::Relaxed) {
+                    return;
+                }
+                *slot.index.write() = Some(fresh);
+                slot.changed_since_save.store(true, Ordering::Relaxed);
+                unreadable = 0;
+            }
+        }
+        if !slot.changed_since_save.load(Ordering::Relaxed) && last_save.elapsed() > Duration::from_secs(60) {
+            save(slot);
+            last_save = Instant::now();
+        } else if last_save.elapsed() > Duration::from_secs(600) {
+            save(slot);
+            last_save = Instant::now();
+        }
+    }
 }
