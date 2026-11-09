@@ -88,7 +88,8 @@ pub fn pic_params(p: &PicInfo) -> PicParams {
     let mut pp: PicParams = unsafe { std::mem::zeroed() };
     pp.frame_width_in_mbs_minus1 = (sps.width_mbs - 1) as u16;
     pp.frame_height_in_mbs_minus1 = (sps.height_mbs - 1) as u16;
-    pp.curr_pic = entry(p.surface, false);
+    // a field picture names its parity in the top bit (AssociatedFlag)
+    pp.curr_pic = entry(p.surface, p.sh.field_pic && p.sh.bottom_field);
     pp.num_ref_frames = sps.max_num_ref_frames;
     pp.bit_fields = b(p.sh.field_pic)
         | b(sps.mbaff && !p.sh.field_pic) << 1
@@ -108,14 +109,20 @@ pub fn pic_params(p: &PicInfo) -> PicParams {
     pp.reserved16_bits = 3;
     pp.status_report_feedback_number = p.feedback;
     pp.ref_frame_list = [0xff; 16];
-    pp.curr_field_order_cnt = [p.started.top_poc, p.started.bottom_poc];
+    pp.curr_field_order_cnt = match (p.sh.field_pic, p.sh.bottom_field) {
+        (false, _) => [p.started.top_poc, p.started.bottom_poc],
+        (true, false) => [p.started.top_poc, 0],
+        (true, true) => [0, p.started.bottom_poc],
+    };
     let mut used = 0u32;
     for (i, r) in p.refs.iter().take(16).enumerate() {
-        let long = r.mark == RefMark::Long;
+        let long = r.mark() == RefMark::Long;
         pp.ref_frame_list[i] = entry(r.surface, long);
-        pp.field_order_cnt_list[i] = [r.top_poc, r.bottom_poc];
+        // order counts and reference flags per field: a field that is not a reference counts as absent
+        let (top, bottom) = (r.marks[0] != RefMark::Unused, r.marks[1] != RefMark::Unused);
+        pp.field_order_cnt_list[i] = [if top { r.top_poc } else { 0 }, if bottom { r.bottom_poc } else { 0 }];
         pp.frame_num_list[i] = if long { r.long_idx as u16 } else { r.frame_num as u16 };
-        used |= 3 << (2 * i);
+        used |= (top as u32 | (bottom as u32) << 1) << (2 * i);
     }
     pp.used_for_reference_flags = used;
     pp.pic_init_qs_minus26 = pps.pic_init_qs_minus26;

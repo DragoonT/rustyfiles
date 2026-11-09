@@ -61,9 +61,6 @@ fn check_supported(sps: &Sps) -> Result<()> {
     if sps.bit_depth_luma != 8 || sps.bit_depth_chroma != 8 {
         return Err(Error::Unsupported("H.264 other than 8-bit"));
     }
-    if sps.mbaff {
-        return Err(Error::Unsupported("interlaced H.264 (MBAFF)"));
-    }
     if sps.transform_bypass {
         return Err(Error::Unsupported("H.264 lossless (qpprime_y_zero_transform_bypass)"));
     }
@@ -265,9 +262,6 @@ impl H264Decoder {
                     if sh.redundant_pic_cnt > 0 {
                         continue;
                     }
-                    if sh.field_pic {
-                        return Err(Error::Unsupported("interlaced H.264 (field pictures)"));
-                    }
                     if let Some(p) = &mut self.building {
                         if !h264::is_new_picture(&p.sh, &sh) {
                             p.intra &= sh.is_intra();
@@ -290,7 +284,11 @@ impl H264Decoder {
 
     fn decode(&mut self, p: Pending) -> Result<()> {
         let Some(started): Option<Started> = self.dpb.start_picture(&p.sh, &p.sps)? else { return Ok(()) };
-        let surface = self.dpb.alloc().ok_or(Error::Invalid("no free surface"))?;
+        // the second field of a frame is decoded into the surface of the first
+        let surface = match started.second_of {
+            Some(s) => s,
+            None => self.dpb.alloc().ok_or(Error::Invalid("no free surface"))?,
+        };
         self.feedback = self.feedback.wrapping_add(1).max(1);
         let refs = self.dpb.ref_pics();
         let pp = dxva_h264::pic_params(&PicInfo { sps: &p.sps, pps: &p.pps, sh: &p.sh, started: &started, intra: p.intra, surface, refs: &refs, feedback: self.feedback });

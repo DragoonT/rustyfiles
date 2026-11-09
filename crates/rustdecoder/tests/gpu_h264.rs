@@ -236,21 +236,101 @@ fn frame_pictures_in_an_interlaced_capable_stream() {
 }
 
 #[test]
-fn interlaced_is_refused_clearly() {
+fn mbaff_top_field_first() {
+    check(Clip::new("h264_mbaff_tff.mp4", "high", "tff=1:bframes=2:keyint=30"), 90);
+}
+
+#[test]
+fn mbaff_bottom_field_first() {
+    check(Clip::new("h264_mbaff_bff.mp4", "high", "bff=1:bframes=2:keyint=30"), 90);
+}
+
+/// Field pictures (PAFF): x264 only writes MBAFF, NVENC with the interlaced flags writes every
+/// picture as two fields. Skipped where there is no NVENC.
+fn paff_clip(name: &'static str, field: &'static str, extra: &[&'static str]) -> Clip<'static> {
+    let mut c = Clip::new(name, "high", "");
+    c.vf = field;
+    let mut enc = vec!["-c:v", "h264_nvenc", "-profile:v", "high", "-flags", "+ildct+ilme"];
+    enc.extend_from_slice(extra);
+    c.encoder = Box::leak(enc.into_boxed_slice());
+    c
+}
+
+#[test]
+fn paff_top_field_first() {
+    check(paff_clip("h264_paff_tff.mp4", "setfield=tff", &["-bf", "0"]), 90);
+}
+
+#[test]
+fn paff_bottom_field_first() {
+    check(paff_clip("h264_paff_bff.mp4", "setfield=bff", &["-bf", "0"]), 90);
+}
+
+#[test]
+fn paff_with_b_fields() {
+    check(paff_clip("h264_paff_b.mp4", "setfield=tff", &["-bf", "3", "-b_ref_mode", "middle", "-refs", "4"]), 90);
+}
+
+/// The clip's stream copied into an MPEG transport stream (`.ts`, or `.m2ts` with the 4 byte
+/// time stamps of AVCHD); `None` when ffmpeg cannot make it.
+fn to_transport_stream(src: &Path, name: &str) -> Option<PathBuf> {
+    if src.as_os_str().is_empty() {
+        return None;
+    }
+    let out = temp_dir().join(name);
+    if !out.exists() {
+        let tmp = out.with_extension("part");
+        let m2ts = name.ends_with(".m2ts");
+        let mut cmd = Command::new("ffmpeg");
+        cmd.args(["-y", "-v", "error", "-i"]).arg(src).args(["-c", "copy", "-f", "mpegts"]);
+        if m2ts {
+            cmd.args(["-mpegts_m2ts_mode", "1"]);
+        }
+        cmd.arg(&tmp);
+        if !cmd.status().is_ok_and(|s| s.success()) {
+            return None;
+        }
+        std::fs::rename(&tmp, &out).unwrap();
+    }
+    Some(out)
+}
+
+fn check_ts(c: Clip, name: &str, frames: usize) {
     if !have_ffmpeg() {
         eprintln!("skipped: ffmpeg not found");
         return;
     }
-    let clip = make_clip(&Clip::new("h264_interlaced.mp4", "high", "tff=1:bframes=2:keyint=30"));
-    match VideoDecoder::open(&clip) {
-        Err(rustdecoder::Error::Unsupported(m)) => eprintln!("interlaced clip refused: {m}"),
-        Err(rustdecoder::Error::Gpu(m)) => eprintln!("skipped: {m}"),
-        Ok(mut d) => match d.next_frame() {
-            Err(rustdecoder::Error::Unsupported(m)) => eprintln!("interlaced clip refused: {m}"),
-            other => panic!("interlaced clip was not refused: {:?}", other.map(|f| f.is_some())),
-        },
-        Err(e) => panic!("{e}"),
-    }
+    let src = make_clip(&c);
+    let Some(ts) = to_transport_stream(&src, name) else {
+        eprintln!("skipped: ffmpeg cannot encode {} here", c.name);
+        return;
+    };
+    let Some(r) = compare(&ts, 100_000) else { return };
+    eprintln!("{name}: {} frames compared with ffmpeg: {:?}", r.frames, r.first_mismatch);
+    assert_eq!(r.frames, frames, "{name}: frame count");
+    assert_eq!(r.first_mismatch, None, "{name}");
+}
+
+#[test]
+fn interlaced_mbaff_in_a_transport_stream() {
+    check_ts(Clip::new("h264_mbaff_tff.mp4", "high", "tff=1:bframes=2:keyint=30"), "h264_mbaff_tff.ts", 90);
+}
+
+#[test]
+fn interlaced_paff_in_a_transport_stream() {
+    check_ts(paff_clip("h264_paff_b.mp4", "setfield=tff", &["-bf", "3", "-b_ref_mode", "middle", "-refs", "4"]), "h264_paff_b.ts", 90);
+}
+
+/// AVCHD style: 1080i (1088 coded rows, cropped), 4 byte time stamped packets.
+#[test]
+fn interlaced_1080i_avchd_style_m2ts() {
+    let mut c = Clip::new("h264_mbaff_1080i.mp4", "high", "tff=1:bframes=2:keyint=30:ref=3");
+    c.size = "1920x1080";
+    c.level = Some("4.1");
+    check_ts(c, "h264_mbaff_1080i.m2ts", 90);
+    let mut c = paff_clip("h264_paff_1080i.mp4", "setfield=tff", &["-bf", "2"]);
+    c.size = "1920x1080";
+    check_ts(c, "h264_paff_1080i.m2ts", 90);
 }
 
 /// Any clip named in RD_CLIP, for debugging (does nothing without it).
