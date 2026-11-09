@@ -1,8 +1,13 @@
-/// "b241ace" (plus "+" when the tree had uncommitted changes) and the UTC build time,
-/// shown next to the version so every copy says which code it is.
+/// "b241ace" (plus "+" when the tree had uncommitted changes) and a time, shown next to the
+/// version so every copy says which code it is. The time is the commit's, so the stamp only
+/// changes with a commit or a checkout; RUSTYFILES_STAMP_BUILD=1 stamps the build time instead.
+///
+/// Git runs with --no-optional-locks: a plain `git status` rewrites .git/index, and anything
+/// watching it (as this script used to) then rebuilt rf-app on every build.
 fn build_info() {
     let git = |args: &[&str]| {
         std::process::Command::new("git")
+            .arg("--no-optional-locks")
             .args(args)
             .output()
             .ok()
@@ -11,13 +16,29 @@ fn build_info() {
     };
     let hash = git(&["rev-parse", "--short=7", "HEAD"]).unwrap_or_else(|| "unknown".into());
     let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let now = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let secs = if std::env::var_os("RUSTYFILES_STAMP_BUILD").is_some() {
+        now()
+    } else {
+        git(&["log", "-1", "--format=%ct"]).and_then(|s| s.parse().ok()).unwrap_or_else(now)
+    };
     println!("cargo:rustc-env=RUSTYFILES_COMMIT={hash}{}", if dirty { "+" } else { "" });
     println!("cargo:rustc-env=RUSTYFILES_BUILT={secs}");
-    // a new commit or a checkout rebuilds the stamp
+    println!("cargo:rerun-if-env-changed=RUSTYFILES_STAMP_BUILD");
+    // a new commit or a checkout rebuilds the stamp: HEAD, the branch it points at, packed refs
+    // (refs live in the common dir when this is a worktree)
     if let Some(dir) = git(&["rev-parse", "--git-dir"]) {
         println!("cargo:rerun-if-changed={dir}/HEAD");
-        println!("cargo:rerun-if-changed={dir}/index");
+    }
+    // only files that exist: Cargo counts a missing one as changed on every build
+    if let Some(common) = git(&["rev-parse", "--git-common-dir"]) {
+        let branch = git(&["symbolic-ref", "-q", "HEAD"]);
+        for f in std::iter::once("packed-refs".to_string()).chain(branch) {
+            let path = format!("{common}/{f}");
+            if std::path::Path::new(&path).exists() {
+                println!("cargo:rerun-if-changed={path}");
+            }
+        }
     }
 }
 
