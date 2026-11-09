@@ -6,6 +6,7 @@ pub mod audio;
 pub mod av1;
 pub mod dxva_av1;
 pub mod bits;
+pub mod flac;
 pub mod dpb;
 pub mod h264;
 pub mod h264_dpb;

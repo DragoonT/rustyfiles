@@ -69,6 +69,7 @@ mod id {
     pub const BLOCK: u32 = 0xA1;
     pub const BLOCK_DURATION: u32 = 0x9B;
     pub const REFERENCE_BLOCK: u32 = 0xFB;
+    pub const DISCARD_PADDING: u32 = 0x75A2;
     /// Elements that may sit inside a Cluster; anything else ends an unknown-size one.
     pub fn in_cluster(id: u32) -> bool {
         matches!(id, CLUSTER_TIMESTAMP | 0xA7 | 0xAB | SIMPLE_BLOCK | BLOCK_GROUP | 0xAF | 0x5854 | 0xEC | 0xBF)
@@ -268,6 +269,10 @@ fn codec_of(t: &RawTrack) -> Codec {
         "V_AV1" => Codec::Av1 { config: cfg },
         "A_OPUS" => Codec::Opus { config: cfg },
         "A_VORBIS" => Codec::Vorbis { config: cfg },
+        "A_FLAC" => Codec::Flac { config: cfg },
+        "A_MPEG/L3" => Codec::Mp3,
+        "A_AC3" => Codec::Ac3 { config: cfg },
+        "A_EAC3" => Codec::Eac3 { config: cfg },
         "A_PCM/INT/LIT" => Codec::Pcm { bits: t.bits, float: false, big_endian: false },
         "A_PCM/INT/BIG" => Codec::Pcm { bits: t.bits, float: false, big_endian: true },
         "A_PCM/FLOAT/IEEE" => Codec::Pcm { bits: t.bits, float: true, big_endian: false },
@@ -284,6 +289,10 @@ fn fourcc_of(c: &str) -> [u8; 4] {
         "V_AV1" => *b"av01",
         "A_OPUS" => *b"Opus",
         "A_VORBIS" => *b"vorb",
+        "A_FLAC" => *b"fLaC",
+        "A_MPEG/L3" => *b".mp3",
+        "A_AC3" => *b"ac-3",
+        "A_EAC3" => *b"ec-3",
         _ if c.starts_with("A_AAC") => *b"mp4a",
         _ if c.starts_with("A_PCM") => *b"lpcm",
         _ => *b"    ",
@@ -304,6 +313,8 @@ struct Raw {
     lace: (u32, u32),
     /// `BlockDuration` of the whole block, scale units.
     duration: Option<i64>,
+    /// `DiscardPadding` (nanoseconds cut from the end of the block's sound).
+    discard: Option<i64>,
 }
 
 /// Where the frames of one (Simple)Block are. Appends to `out`; `false` when it is unusable.
@@ -320,7 +331,7 @@ fn block<R: Read + Seek>(s: &mut Src<R>, pos: u64, size: u64, cluster_ts: i64, s
     let mut at = pos + (tl + 3) as u64;
     let mut left = size - (tl + 3) as u64;
     let ts = cluster_ts + rel;
-    let mk = |offset: u64, size: u32, i: u32, n: u32| Raw { track, ts, offset, size, key: key.unwrap_or(true), lace: (i, n), duration: None };
+    let mk = |offset: u64, size: u32, i: u32, n: u32| Raw { track, ts, offset, size, key: key.unwrap_or(true), lace: (i, n), duration: None, discard: None };
     if lacing == 0 {
         if left > u32::MAX as u64 {
             return Ok(false);
@@ -411,7 +422,7 @@ fn cluster<R: Read + Seek>(s: &mut Src<R>, pos: u64, size: Option<u64>, out: &mu
             }
             id::BLOCK_GROUP => {
                 let first = out.len();
-                let (mut has_ref, mut duration) = (false, None);
+                let (mut has_ref, mut duration, mut discard) = (false, None, None);
                 let mut q = dp;
                 let gend = next.min(end);
                 while q < gend {
@@ -424,6 +435,15 @@ fn cluster<R: Read + Seek>(s: &mut Src<R>, pos: u64, size: Option<u64>, out: &mu
                         }
                         id::BLOCK_DURATION => duration = Some(uint(s.get(gdp, gz.min(8) as usize)?) as i64),
                         id::REFERENCE_BLOCK => has_ref = true,
+                        id::DISCARD_PADDING => {
+                            // signed, big endian, 1 to 8 bytes
+                            let b = s.get(gdp, gz.min(8) as usize)?;
+                            let mut v = if b.first().is_some_and(|x| x & 0x80 != 0) { -1i64 } else { 0 };
+                            for x in b {
+                                v = (v << 8) | *x as i64;
+                            }
+                            discard = Some(v);
+                        }
                         _ => {}
                     }
                     q = gdp.saturating_add(gz);
@@ -431,6 +451,7 @@ fn cluster<R: Read + Seek>(s: &mut Src<R>, pos: u64, size: Option<u64>, out: &mu
                 for r in &mut out[first..] {
                     r.key = !has_ref;
                     r.duration = duration;
+                    r.discard = discard;
                 }
             }
             _ => {}
@@ -564,6 +585,7 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
             colour: t.colour,
             default: t.default,
             codec_delay_ns: t.codec_delay_ns,
+            discard_padding_ns: if kind == Kind::Audio { raws.iter().rev().find(|r| r.track == t.number).and_then(|r| r.discard).unwrap_or(0).max(0) as u64 } else { 0 },
         });
     }
     if out_tracks.iter().all(|t| t.samples.is_empty()) && raws.is_empty() && tracks.is_empty() {

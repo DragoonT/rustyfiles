@@ -3,10 +3,12 @@
 //! * PCM tracks (`lpcm`, `sowt`, `twos`, `in24`, `in32`, `fl32`, `fl64`, `ipcm`, `fpcm`; 8 / 16 /
 //!   24 / 32 bit integer, 32 / 64 bit float, either byte order) are converted here. Integers go
 //!   to `x / 2^(bits-1)`, which is exact in `f32` up to 24 bits.
-//! * AAC goes through Windows' own AAC decoder (`CMSAACDecMFT`, a Media Foundation transform):
-//!   raw AAC frames in, the AudioSpecificConfig from `esds` as `MF_MT_USER_DATA`, float PCM
-//!   out. This is the "OS decoder at first" of the design document; an own AAC decoder can
-//!   replace [`AacMft`] later without touching the rest.
+//! * AAC, Opus, MP3, Vorbis (and AC-3 / E-AC-3 where a Dolby decoder is installed) go through
+//!   Windows' own decoders, Media Foundation transforms found with `MFTEnumEx`: raw packets in
+//!   with the codec's setup data as `MF_MT_USER_DATA`, PCM out ([`AudioMft`], [`MftCodec`]).
+//!   This is the "OS decoder at first" of the design document; an own decoder can replace one
+//!   without touching the rest.
+//! * FLAC is decoded in [`crate::flac`] (the OS transform blocks).
 //!
 //! Times follow the track's edit list the way [`crate::mp4`] applies it (an AAC encoder's delay
 //! is an edit that skips the first 1024 samples, so the first packet starts at a negative
@@ -16,6 +18,7 @@
 use std::fs::File;
 use std::path::Path;
 
+use crate::flac::FlacDecoder;
 use crate::mp4::{Codec, Track};
 use crate::{Error, Result};
 
@@ -41,9 +44,10 @@ pub struct AudioBlock {
 }
 
 enum Kind_ {
+    Flac(Box<FlacDecoder>),
     Pcm { bits: u16, float: bool, big_endian: bool },
     #[cfg(windows)]
-    Aac(Box<AacMft>),
+    Mft(MftCodec, Box<AudioMft>),
 }
 
 /// Reads the first audio track of a file and decodes it.
@@ -60,6 +64,8 @@ pub struct AudioDecoder {
     cursor: i64,
     cursor_set: bool,
     drained: bool,
+    /// Frame index where the sound ends (Opus `DiscardPadding`), if the container says.
+    end_frame: Option<i64>,
     pending: Vec<f32>,
     pending_start: i64,
     pending_off: usize,
@@ -78,6 +84,7 @@ impl AudioDecoder {
     fn from_track(file: File, track: Track) -> Result<Self> {
         let mut sample_rate = track.sample_rate;
         let channels = track.channels.max(1);
+        let mut flac_channels = 0;
         let (kind, codec) = match &track.codec {
             Codec::Pcm { bits, float, big_endian } => {
                 if !matches!((*bits, *float), (8 | 16 | 24 | 32, false) | (32 | 64, true)) {
@@ -86,21 +93,32 @@ impl AudioDecoder {
                 (Kind_::Pcm { bits: *bits, float: *float, big_endian: *big_endian }, "PCM")
             }
             #[cfg(windows)]
-            Codec::Aac { config } => {
-                let mft = AacMft::new(config, sample_rate, channels)?;
-                sample_rate = mft.rate;
-                (Kind_::Aac(Box::new(mft)), "AAC")
+            Codec::Aac { config } => Self::mft(MftCodec::Aac, config, &mut sample_rate, channels)?,
+            #[cfg(windows)]
+            Codec::Opus { config } => Self::mft(MftCodec::Opus, config, &mut sample_rate, channels)?,
+            Codec::Flac { config } => {
+                let si = crate::flac::stream_info(config).ok_or(Error::Invalid("FLAC STREAMINFO"))?;
+                sample_rate = si.sample_rate;
+                flac_channels = si.channels;
+                (Kind_::Flac(Box::new(FlacDecoder::new(si)?)), "FLAC")
             }
-            Codec::Opus { .. } => return Err(Error::Unsupported("Opus audio is not decoded yet (PCM and AAC are)")),
-            Codec::Vorbis { .. } => return Err(Error::Unsupported("Vorbis audio is not decoded yet (PCM and AAC are)")),
-            _ => return Err(Error::Unsupported("audio codec other than PCM and AAC")),
+            #[cfg(windows)]
+            Codec::Mp3 => Self::mft(MftCodec::Mp3, &[], &mut sample_rate, channels)?,
+            #[cfg(windows)]
+            Codec::Ac3 { config } => Self::mft(MftCodec::Ac3, config, &mut sample_rate, channels)?,
+            #[cfg(windows)]
+            Codec::Eac3 { config } => Self::mft(MftCodec::Eac3, config, &mut sample_rate, channels)?,
+            #[cfg(windows)]
+            Codec::Vorbis { config } => Self::mft(MftCodec::Vorbis, config, &mut sample_rate, channels)?,
+            _ => return Err(Error::Unsupported("audio codec other than PCM, AAC, Opus, FLAC, MP3, AC-3, E-AC-3 and Vorbis")),
         };
         if sample_rate == 0 {
             return Err(Error::Invalid("audio sample rate"));
         }
         let channels = match &kind {
+            Kind_::Flac(_) => flac_channels,
             #[cfg(windows)]
-            Kind_::Aac(m) => m.channels,
+            Kind_::Mft(_, m) => m.channels,
             _ => channels,
         };
         let duration = {
@@ -125,13 +143,42 @@ impl AudioDecoder {
             cursor: 0,
             cursor_set: false,
             drained: false,
+            end_frame: None,
             pending: Vec::new(),
             pending_start: 0,
             pending_off: 0,
             buf: Vec::new(),
         };
+        d.end_frame = d.opus_end();
         d.seek(0.0);
         Ok(d)
+    }
+
+    #[cfg(windows)]
+    fn mft(codec: MftCodec, config: &[u8], rate: &mut u32, channels: u16) -> Result<(Kind_, &'static str)> {
+        let m = AudioMft::new(codec, config, *rate, channels)?;
+        *rate = m.rate;
+        Ok((Kind_::Mft(codec, Box::new(m)), codec.name()))
+    }
+
+    /// Opus: where the sound ends once `DiscardPadding` is taken off the last packet. Packets
+    /// are taken to last as long as the first one (the encoders make them so), the last by its
+    /// own table of contents.
+    fn opus_end(&mut self) -> Option<i64> {
+        let Kind_::Mft(MftCodec::Opus, _) = self.kind else { return None };
+        if self.track.discard_padding_ns == 0 || self.track.samples.len() < 2 {
+            return None;
+        }
+        let n = self.track.samples.len();
+        let mut buf = Vec::new();
+        self.track.read_sample(&mut self.file, 0, &mut buf).ok()?;
+        let first = opus_packet_frames(&buf)?;
+        self.track.read_sample(&mut self.file, n - 1, &mut buf).ok()?;
+        let last = opus_packet_frames(&buf)?;
+        let rate = self.info.sample_rate as i128;
+        let delay = (self.track.codec_delay_ns as i128 * rate + 500_000_000) / 1_000_000_000;
+        let pad = (self.track.discard_padding_ns as i128 * rate + 500_000_000) / 1_000_000_000;
+        Some(((n as i128 - 1) * first as i128 + last as i128 - delay - pad) as i64)
     }
 
     pub fn info(&self) -> &AudioInfo {
@@ -159,16 +206,16 @@ impl AudioDecoder {
         // last packet whose time is not after the target
         let idx = self.track.samples.partition_point(|s| s.pts <= target).saturating_sub(1);
         self.next = match self.kind {
-            Kind_::Pcm { .. } => idx,
+            Kind_::Pcm { .. } | Kind_::Flac(_) => idx,
             #[cfg(windows)]
-            Kind_::Aac(_) => idx.saturating_sub(2),
+            Kind_::Mft(c, _) => idx.saturating_sub(c.preroll()),
         };
         self.pending.clear();
         self.pending_off = 0;
         self.cursor_set = false;
         self.drained = false;
         #[cfg(windows)]
-        if let Kind_::Aac(m) = &mut self.kind {
+        if let Kind_::Mft(_, m) = &mut self.kind {
             m.flush();
         }
     }
@@ -185,7 +232,13 @@ impl AudioDecoder {
                 continue;
             }
             let start = self.pending_start + self.pending_off as i64;
-            let n = have.min(BLOCK_FRAMES);
+            let mut n = have.min(BLOCK_FRAMES);
+            if let Some(e) = self.end_frame {
+                if start >= e {
+                    return Ok(None);
+                }
+                n = n.min((e - start) as usize);
+            }
             if start + (n as i64) <= self.skip_frame {
                 self.pending_off += n;
                 continue;
@@ -233,8 +286,20 @@ impl AudioDecoder {
                 self.cursor = self.pending_start + (self.pending.len() / ch) as i64;
                 Ok(true)
             }
+            Kind_::Flac(f) => {
+                let Some(s) = self.track.samples.get(self.next).copied() else { return Ok(false) };
+                self.track.read_sample(&mut self.file, self.next, &mut self.buf)?;
+                self.next += 1;
+                let derived = ((s.pts as i128 * rate + ts / 2).div_euclid(ts)) as i64;
+                let slack = (rate / ts) as i64 + 1;
+                self.pending_start = if self.cursor_set && (derived - self.cursor).abs() <= slack { self.cursor } else { derived };
+                self.cursor_set = true;
+                let n = f.decode(&self.buf, &mut self.pending)?;
+                self.cursor = self.pending_start + n as i64;
+                Ok(true)
+            }
             #[cfg(windows)]
-            Kind_::Aac(m) => loop {
+            Kind_::Mft(_, m) => loop {
                 if let Some(pcm) = m.pull()? {
                     self.pending_start = self.cursor;
                     self.cursor += (pcm.len() / self.info.channels as usize) as i64;
@@ -258,11 +323,37 @@ impl AudioDecoder {
                     }
                     self.cursor_set = true;
                 }
+                // time and duration in 100 ns; the duration is the gap to the next packet
+                let tick = |v: i64| (v as i128 * 10_000_000 / ts) as i64;
+                let at = self.next;
+                let dur = match (self.track.samples.get(at + 1), at.checked_sub(1).and_then(|p| self.track.samples.get(p))) {
+                    (Some(n), _) => n.pts - s.pts,
+                    (None, Some(p)) => s.pts - p.pts,
+                    _ => 0,
+                };
                 self.next += 1;
-                m.push(&self.buf)?;
+                m.push(&self.buf, tick(s.pts), tick(dur.max(0)))?;
             },
         }
     }
+}
+
+/// Samples (48 kHz) in an Opus packet, from its table of contents (RFC 6716, section 3.1).
+fn opus_packet_frames(p: &[u8]) -> Option<usize> {
+    let toc = *p.first()?;
+    let config = toc >> 3;
+    // frame length in units of 2.5 ms
+    let unit = match config {
+        0..=11 => [4, 8, 16, 24][(config % 4) as usize],
+        12..=15 => [4, 8][(config % 2) as usize],
+        _ => [1, 2, 4, 8][(config % 4) as usize],
+    };
+    let count = match toc & 3 {
+        0 => 1,
+        1 | 2 => 2,
+        _ => (*p.get(1)? & 0x3f) as usize,
+    };
+    Some(count * unit * 120)
 }
 
 /// Raw PCM bytes to `f32`, appended to `out`.
@@ -293,12 +384,67 @@ pub fn convert_pcm(b: &[u8], bits: u16, float: bool, big: bool, out: &mut Vec<f3
         _ => {}
     }
 }
-
 // ---------------------------------------------------------------------------------------------
-// AAC through the OS decoder
+// Codecs decoded by the OS (Media Foundation audio decoder transforms)
+
+/// A codec that Windows' own decoders handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MftCodec {
+    Aac,
+    Opus,
+    Mp3,
+    Ac3,
+    Eac3,
+    Vorbis,
+}
+
+impl MftCodec {
+    pub fn name(self) -> &'static str {
+        match self {
+            MftCodec::Aac => "AAC",
+            MftCodec::Opus => "Opus",
+            MftCodec::Mp3 => "MP3",
+            MftCodec::Ac3 => "AC-3",
+            MftCodec::Eac3 => "E-AC-3",
+            MftCodec::Vorbis => "Vorbis",
+        }
+    }
+
+    /// Packets decoded before a seek target so the decoder's overlap / bit reservoir is
+    /// primed; what they output before the target is dropped.
+    fn preroll(self) -> usize {
+        match self {
+            MftCodec::Aac | MftCodec::Ac3 | MftCodec::Eac3 => 2,
+            MftCodec::Mp3 => 4,
+            // 80 ms of 20 ms packets, what RFC 7845 asks for
+            MftCodec::Opus => 4,
+            MftCodec::Vorbis => 2,
+        }
+    }
+
+    /// Said when no decoder for the codec is installed.
+    pub fn missing(self) -> &'static str {
+        match self {
+            MftCodec::Aac => "AAC audio: no decoder installed (the AAC decoder of Windows is missing)",
+            MftCodec::Opus => "Opus audio: no decoder installed (Windows 10 1809 and later have one)",
+            MftCodec::Mp3 => "MP3 audio: no decoder installed",
+            MftCodec::Ac3 => "AC-3 audio: no decoder installed (Windows has only a passthrough converter, no Dolby Digital decoder)",
+            MftCodec::Eac3 => "E-AC-3 audio: no decoder installed (Windows has only a passthrough converter, no Dolby Digital Plus decoder)",
+            MftCodec::Vorbis => "Vorbis audio: no decoder installed (the Web Media Extensions add one)",
+        }
+    }
+
+    const ALL: [MftCodec; 6] = [MftCodec::Aac, MftCodec::Opus, MftCodec::Mp3, MftCodec::Ac3, MftCodec::Eac3, MftCodec::Vorbis];
+}
+
+/// For each codec, the audio decoders this machine offers (their friendly names).
+#[cfg(windows)]
+pub fn installed_decoders() -> Vec<(&'static str, Vec<String>)> {
+    MftCodec::ALL.iter().map(|c| (c.name(), mft::installed(*c))).collect()
+}
 
 #[cfg(windows)]
-pub use mft::AacMft;
+pub use mft::AudioMft;
 
 #[cfg(windows)]
 mod mft {
@@ -308,13 +454,14 @@ mod mft {
     use windows::Win32::System::Com::*;
     use windows::core::GUID;
 
+    use super::MftCodec;
     use crate::{Error, Result};
 
     /// `CLSID_CMSAACDecMFT`
     const CLSID_AAC_DEC: GUID = GUID::from_u128(0x32d186a7_218f_4c75_8876_dd77273a8999);
 
     fn gpu_err(what: &str, e: windows::core::Error) -> Error {
-        Error::Gpu(format!("AAC decoder: {what}: {e}"))
+        Error::Gpu(format!("audio decoder: {what}: {e}"))
     }
 
     static START: Once = Once::new();
@@ -330,75 +477,217 @@ mod mft {
         }
     }
 
-    /// The AAC decoder transform: packets in, interleaved `f32` out.
-    pub struct AacMft {
-        t: IMFTransform,
-        out_sample: IMFSample,
-        out_cap: u32,
-        pub rate: u32,
-        pub channels: u16,
-        pcm16: bool,
+    fn subtype(c: MftCodec) -> GUID {
+        match c {
+            MftCodec::Aac => MFAudioFormat_AAC,
+            MftCodec::Opus => MFAudioFormat_Opus,
+            MftCodec::Mp3 => MFAudioFormat_MP3,
+            MftCodec::Ac3 => MFAudioFormat_Dolby_AC3,
+            MftCodec::Eac3 => MFAudioFormat_Dolby_DDPlus,
+            MftCodec::Vorbis => MFAudioFormat_Vorbis,
+        }
     }
 
-    // SAFETY: the transform is free threaded (both-threaded COM class) and is only ever used
-    // from one thread at a time: the decoder owning it moves between threads, never shares.
-    unsafe impl Send for AacMft {}
+    /// Every decoder transform registered for the codec, best first.
+    fn activates(c: MftCodec) -> Vec<IMFActivate> {
+        startup();
+        let input = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Audio, guidSubtype: subtype(c) };
+        let mut list: *mut Option<IMFActivate> = std::ptr::null_mut();
+        let mut n = 0u32;
+        let flags = MFT_ENUM_FLAG(MFT_ENUM_FLAG_SYNCMFT.0 | MFT_ENUM_FLAG_LOCALMFT.0 | MFT_ENUM_FLAG_SORTANDFILTER.0);
+        let mut out = Vec::new();
+        unsafe {
+            if MFTEnumEx(MFT_CATEGORY_AUDIO_DECODER, flags, Some(&input), None, &mut list, &mut n).is_ok() && !list.is_null() {
+                for i in 0..n as usize {
+                    // take ownership of each element so it is released
+                    if let Some(a) = std::ptr::read(list.add(i)) {
+                        out.push(a);
+                    }
+                }
+                CoTaskMemFree(Some(list as *const _));
+            }
+        }
+        out
+    }
 
-    impl AacMft {
-        /// `config` is the AudioSpecificConfig; `rate` and `channels` come from the sample
-        /// entry.
-        pub fn new(config: &[u8], rate: u32, channels: u16) -> Result<Self> {
-            startup();
-            unsafe {
-                let t: IMFTransform = CoCreateInstance(&CLSID_AAC_DEC, None, CLSCTX_INPROC_SERVER).map_err(|e| gpu_err("create", e))?;
-                let ty = MFCreateMediaType().map_err(|e| gpu_err("media type", e))?;
-                let e = |w: &'static str| move |e| gpu_err(w, e);
-                ty.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(e("major"))?;
-                ty.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_AAC).map_err(e("subtype"))?;
-                ty.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, rate).map_err(e("rate"))?;
-                ty.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, channels as u32).map_err(e("channels"))?;
-                ty.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16).map_err(e("bits"))?;
-                ty.SetUINT32(&MF_MT_AAC_PAYLOAD_TYPE, 0).map_err(e("payload"))?;
-                ty.SetUINT32(&MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29).map_err(e("profile"))?;
+    fn friendly_name(a: &IMFActivate) -> String {
+        unsafe {
+            let mut p = windows::core::PWSTR::null();
+            let mut len = 0u32;
+            if a.GetAllocatedString(&MFT_FRIENDLY_NAME_Attribute, &mut p, &mut len).is_ok() && !p.is_null() {
+                let s = String::from_utf16_lossy(std::slice::from_raw_parts(p.0, len as usize));
+                CoTaskMemFree(Some(p.0 as *const _));
+                s
+            } else {
+                "(unnamed)".into()
+            }
+        }
+    }
+
+    pub fn installed(c: MftCodec) -> Vec<String> {
+        if c == MftCodec::Aac {
+            // found by its class id
+            let t: windows::core::Result<IMFTransform> = unsafe {
+                startup();
+                CoCreateInstance(&CLSID_AAC_DEC, None, CLSCTX_INPROC_SERVER)
+            };
+            return if t.is_ok() { vec!["AAC Decoder MFT".into()] } else { Vec::new() };
+        }
+        activates(c).iter().map(friendly_name).collect()
+    }
+
+    /// The input media types worth trying for a codec, as `MF_MT_USER_DATA` variants.
+    fn user_data_variants(c: MftCodec, config: &[u8]) -> Vec<Vec<u8>> {
+        match c {
+            MftCodec::Aac => {
                 // HEAACWAVEINFO's tail (payload type, profile level, structure type, 2 reserved
                 // words), then the AudioSpecificConfig
                 let mut user = vec![0u8; 12];
                 user[2..4].copy_from_slice(&0x29u16.to_le_bytes());
                 user.extend_from_slice(config);
-                ty.SetBlob(&MF_MT_USER_DATA, &user).map_err(e("user data"))?;
-                t.SetInputType(0, &ty, 0).map_err(e("input type"))?;
-                // output: float if offered, else 16-bit
-                let (mut pick, mut pick16) = (None, None);
-                let mut i = 0;
-                while let Ok(o) = t.GetOutputAvailableType(0, i) {
-                    i += 1;
-                    match o.GetGUID(&MF_MT_SUBTYPE) {
-                        Ok(g) if g == MFAudioFormat_Float => {
-                            pick = Some(o);
-                            break;
-                        }
-                        Ok(g) if g == MFAudioFormat_PCM && pick16.is_none() => pick16 = Some(o),
-                        _ => {}
+                vec![user]
+            }
+            MftCodec::Opus => {
+                // the transform would cut the pre-skip itself; the decoder does that by time
+                // (so a seek can restart anywhere), hence it gets a head with no pre-skip
+                let mut head = config.to_vec();
+                if head.len() >= 12 && head.starts_with(b"OpusHead") {
+                    head[10] = 0;
+                    head[11] = 0;
+                }
+                vec![head, Vec::new()]
+            }
+            MftCodec::Mp3 => {
+                // MPEGLAYER3WAVEFORMAT's tail: wID 1 (MPEGLAYER3_ID_MPEG), flags 2, block size,
+                // frames per block 1, codec delay 0
+                let mut user = Vec::new();
+                user.extend_from_slice(&1u16.to_le_bytes());
+                user.extend_from_slice(&2u32.to_le_bytes());
+                user.extend_from_slice(&0u16.to_le_bytes());
+                user.extend_from_slice(&1u16.to_le_bytes());
+                user.extend_from_slice(&0u16.to_le_bytes());
+                vec![user, Vec::new()]
+            }
+            MftCodec::Ac3 | MftCodec::Eac3 => vec![Vec::new()],
+            MftCodec::Vorbis => vec![config.to_vec(), Vec::new()],
+        }
+    }
+
+    /// The best output type the decoder offers: float, else 16 / 24 / 32-bit integers
+    /// (the widest). Returns the type, its bits per sample and whether it is float.
+    fn pick_output(t: &IMFTransform) -> Option<(IMFMediaType, u32, bool)> {
+        let mut best: Option<(IMFMediaType, u32, bool)> = None;
+        let mut i = 0;
+        while let Ok(o) = unsafe { t.GetOutputAvailableType(0, i) } {
+            i += 1;
+            let bits = unsafe { o.GetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE) }.unwrap_or(16);
+            match unsafe { o.GetGUID(&MF_MT_SUBTYPE) } {
+                Ok(g) if g == MFAudioFormat_Float && bits == 32 => return Some((o, 32, true)),
+                Ok(g) if g == MFAudioFormat_PCM && matches!(bits, 16 | 24 | 32) && best.as_ref().is_none_or(|b| bits > b.1) => best = Some((o, bits, false)),
+                _ => {}
+            }
+        }
+        best
+    }
+
+    /// An audio decoder transform: packets in, interleaved `f32` out.
+    pub struct AudioMft {
+        t: IMFTransform,
+        out_sample: IMFSample,
+        provides: bool,
+        pub rate: u32,
+        pub channels: u16,
+        bits: u32,
+        float: bool,
+        pub name: String,
+    }
+
+    // SAFETY: the transform is free threaded (both-threaded COM class) and is only ever used
+    // from one thread at a time: the decoder owning it moves between threads, never shares.
+    unsafe impl Send for AudioMft {}
+
+    impl AudioMft {
+        /// `config` is the codec's setup data in the form [`crate::mp4::Codec`] keeps it
+        /// (AudioSpecificConfig, OpusHead, ...); `rate` and `channels`
+        /// come from the sample entry.
+        pub fn new(codec: MftCodec, config: &[u8], rate: u32, channels: u16) -> Result<Self> {
+            startup();
+            let mut cands: Vec<(IMFTransform, String)> = Vec::new();
+            if codec == MftCodec::Aac {
+                if let Ok(t) = unsafe { CoCreateInstance::<_, IMFTransform>(&CLSID_AAC_DEC, None, CLSCTX_INPROC_SERVER) } {
+                    cands.push((t, "AAC Decoder MFT".into()));
+                }
+            } else {
+                for a in activates(codec) {
+                    if let Ok(t) = unsafe { a.ActivateObject::<IMFTransform>() } {
+                        cands.push((t, friendly_name(&a)));
                     }
                 }
-                let pcm16 = pick.is_none();
-                let o = pick.or(pick16).ok_or(Error::Unsupported("AAC decoder offers no PCM output"))?;
+            }
+            if cands.is_empty() {
+                return Err(Error::Unsupported(codec.missing()));
+            }
+            let mut last = None;
+            for (t, name) in cands {
+                match Self::start(t, name, codec, config, rate, channels) {
+                    Ok(m) => return Ok(m),
+                    Err(e) => last = Some(e),
+                }
+            }
+            Err(last.unwrap_or(Error::Unsupported(codec.missing())))
+        }
+
+        fn start(t: IMFTransform, name: String, codec: MftCodec, config: &[u8], rate: u32, channels: u16) -> Result<Self> {
+            let bits = 16u32;
+            unsafe {
+                let e = |w: &'static str| move |e| gpu_err(w, e);
+                let mut set = false;
+                let mut last_err = None;
+                for user in user_data_variants(codec, config) {
+                    let ty = MFCreateMediaType().map_err(e("media type"))?;
+                    ty.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(e("major"))?;
+                    ty.SetGUID(&MF_MT_SUBTYPE, &subtype(codec)).map_err(e("subtype"))?;
+                    ty.SetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND, rate).map_err(e("rate"))?;
+                    ty.SetUINT32(&MF_MT_AUDIO_NUM_CHANNELS, channels as u32).map_err(e("channels"))?;
+                    ty.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, bits).map_err(e("bits"))?;
+                    if codec == MftCodec::Aac {
+                        ty.SetUINT32(&MF_MT_AAC_PAYLOAD_TYPE, 0).map_err(e("payload"))?;
+                        ty.SetUINT32(&MF_MT_AAC_AUDIO_PROFILE_LEVEL_INDICATION, 0x29).map_err(e("profile"))?;
+                    } else {
+                        ty.SetUINT32(&MF_MT_AUDIO_BLOCK_ALIGNMENT, 1).map_err(e("alignment"))?;
+                    }
+                    if !user.is_empty() {
+                        ty.SetBlob(&MF_MT_USER_DATA, &user).map_err(e("user data"))?;
+                    }
+                    match t.SetInputType(0, &ty, 0) {
+                        Ok(()) => {
+                            set = true;
+                            break;
+                        }
+                        Err(er) => last_err = Some(er),
+                    }
+                }
+                if !set {
+                    return Err(gpu_err(&format!("{} input type ({name})", codec.name()), last_err.unwrap()));
+                }
+                let (o, obits, float) = pick_output(&t).ok_or(Error::Unsupported(codec.missing()))?;
                 t.SetOutputType(0, &o, 0).map_err(e("output type"))?;
                 let out_rate = o.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap_or(rate);
                 let out_ch = o.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS).unwrap_or(channels as u32);
                 t.ProcessMessage(MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0).map_err(e("begin"))?;
                 t.ProcessMessage(MFT_MESSAGE_NOTIFY_START_OF_STREAM, 0).map_err(e("start"))?;
                 let info = t.GetOutputStreamInfo(0).map_err(e("stream info"))?;
-                let out_cap = info.cbSize.max(out_ch * 4 * 4096);
+                let provides = info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES.0 as u32 != 0;
+                let out_cap = info.cbSize.max(1 << 16);
                 let out_sample = MFCreateSample().map_err(e("sample"))?;
                 let buf = MFCreateMemoryBuffer(out_cap).map_err(e("buffer"))?;
                 out_sample.AddBuffer(&buf).map_err(e("add buffer"))?;
-                Ok(AacMft { t, out_sample, out_cap, rate: out_rate, channels: out_ch as u16, pcm16 })
+                Ok(AudioMft { t, out_sample, provides, rate: out_rate, channels: out_ch as u16, bits: obits, float, name })
             }
         }
 
-        /// Gives the decoder one raw AAC frame.
-        pub fn push(&mut self, packet: &[u8]) -> Result<()> {
+        /// Gives the decoder one packet.
+        pub fn push(&mut self, packet: &[u8], time: i64, duration: i64) -> Result<()> {
             unsafe {
                 let buf = MFCreateMemoryBuffer(packet.len().max(1) as u32).map_err(|e| gpu_err("buffer", e))?;
                 let mut p = std::ptr::null_mut();
@@ -408,6 +697,9 @@ mod mft {
                 buf.SetCurrentLength(packet.len() as u32).map_err(|e| gpu_err("length", e))?;
                 let s = MFCreateSample().map_err(|e| gpu_err("sample", e))?;
                 s.AddBuffer(&buf).map_err(|e| gpu_err("add buffer", e))?;
+                // some transforms refuse a sample that has no duration
+                let _ = s.SetSampleTime(time);
+                let _ = s.SetSampleDuration(duration);
                 self.t.ProcessInput(0, &s, 0).map_err(|e| gpu_err("input", e))
             }
         }
@@ -430,29 +722,29 @@ mod mft {
         pub fn pull(&mut self) -> Result<Option<Vec<f32>>> {
             for _ in 0..4 {
                 unsafe {
-                    if let Ok(b) = self.out_sample.GetBufferByIndex(0) {
-                        let _ = b.SetCurrentLength(0);
+                    if !self.provides {
+                        if let Ok(b) = self.out_sample.GetBufferByIndex(0) {
+                            let _ = b.SetCurrentLength(0);
+                        }
                     }
-                    let mut out = [MFT_OUTPUT_DATA_BUFFER { dwStreamID: 0, pSample: std::mem::ManuallyDrop::new(Some(self.out_sample.clone())), dwStatus: 0, pEvents: std::mem::ManuallyDrop::new(None) }];
+                    let given = if self.provides { None } else { Some(self.out_sample.clone()) };
+                    let mut out = [MFT_OUTPUT_DATA_BUFFER { dwStreamID: 0, pSample: std::mem::ManuallyDrop::new(given), dwStatus: 0, pEvents: std::mem::ManuallyDrop::new(None) }];
                     let mut status = 0u32;
                     let r = self.t.ProcessOutput(0, &mut out, &mut status);
                     // take the references back so they are released
                     let [o] = out;
-                    drop(std::mem::ManuallyDrop::into_inner(o.pSample));
+                    let got = std::mem::ManuallyDrop::into_inner(o.pSample);
                     drop(std::mem::ManuallyDrop::into_inner(o.pEvents));
                     match r {
                         Ok(()) => {
-                            let buf = self.out_sample.ConvertToContiguousBuffer().map_err(|e| gpu_err("output buffer", e))?;
+                            let sample = if self.provides { got.ok_or(Error::Invalid("audio decoder gave no sample"))? } else { self.out_sample.clone() };
+                            let buf = sample.ConvertToContiguousBuffer().map_err(|e| gpu_err("output buffer", e))?;
                             let (mut p, mut len) = (std::ptr::null_mut(), 0u32);
                             buf.Lock(&mut p, None, Some(&mut len)).map_err(|e| gpu_err("lock output", e))?;
                             let bytes = std::slice::from_raw_parts(p, len as usize).to_vec();
                             buf.Unlock().map_err(|e| gpu_err("unlock output", e))?;
                             let mut pcm = Vec::with_capacity(bytes.len() / 4);
-                            if self.pcm16 {
-                                super::convert_pcm(&bytes, 16, false, false, &mut pcm);
-                            } else {
-                                super::convert_pcm(&bytes, 32, true, false, &mut pcm);
-                            }
+                            super::convert_pcm(&bytes, self.bits as u16, self.float, false, &mut pcm);
                             if pcm.is_empty() {
                                 continue;
                             }
@@ -460,28 +752,19 @@ mod mft {
                         }
                         Err(e) if e.code() == MF_E_TRANSFORM_NEED_MORE_INPUT => return Ok(None),
                         Err(e) if e.code() == MF_E_TRANSFORM_STREAM_CHANGE => {
-                            let o = self.t.GetOutputAvailableType(0, 0).map_err(|e| gpu_err("stream change", e))?;
-                            // keep float when it is what we had
-                            let mut i = 0;
-                            let mut chosen = None;
-                            while let Ok(c) = self.t.GetOutputAvailableType(0, i) {
-                                i += 1;
-                                let want = if self.pcm16 { MFAudioFormat_PCM } else { MFAudioFormat_Float };
-                                if c.GetGUID(&MF_MT_SUBTYPE).is_ok_and(|g| g == want) {
-                                    chosen = Some(c);
-                                    break;
-                                }
-                            }
-                            let c = chosen.unwrap_or(o);
+                            let Some((c, bits, float)) = pick_output(&self.t) else {
+                                return Err(Error::Unsupported("audio decoder offers no PCM output"));
+                            };
                             self.t.SetOutputType(0, &c, 0).map_err(|e| gpu_err("output type", e))?;
                             self.rate = c.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap_or(self.rate);
                             self.channels = c.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS).unwrap_or(self.channels as u32) as u16;
+                            self.bits = bits;
+                            self.float = float;
                         }
                         Err(e) => return Err(gpu_err("output", e)),
                     }
                 }
             }
-            let _ = self.out_cap;
             Ok(None)
         }
     }

@@ -192,7 +192,7 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      0 ms (never more than half a frame; trend +0.5 ms per second, no creeping), longest wait
      between two pictures 25 ms.
    - Left for audio: HE-AAC / AAC-PS only written for, not tested (no encoder here), AC-3 / E-AC-3
-     / Opus / FLAC, several audio tracks and track choice, 5.1 AAC channel order checked only
+     (done later for machines with a Dolby decoder, see phase 5), several audio tracks and track choice, 5.1 AAC channel order checked only
      by the downmix maths, `Player` is HEVC only (H.264 plays through `VideoDecoder` but not
      yet through `Player` / `Playback`), device change while playing (default device switched,
      `AUDCLNT_E_DEVICE_INVALIDATED`), exclusive mode / low latency, volume ramp on seek (a click
@@ -271,10 +271,9 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      about 1500 fps (HEVC / H.264 1080p: 500 to 2000 fps, same order).
    - `Playback::open` works on MKV / WebM with H.264, HEVC or VP9: the player and the sync
      tests (pictures in order next to the audio clock, seeks landing both sides on the target
-     within 1/48000 s) pass on mkv with H.264 + AAC, HEVC + PCM, VP9 + PCM and VP9 + AAC. With
-     Opus or Vorbis the video plays on the system clock (36 pictures in 1.2 s) and `audio_note()`
-     says "audio track not playable: not supported yet: Opus audio is not decoded yet (PCM and AAC
-     are)". Matroska times are whole milliseconds, so a 30 fps picture can be 0.7 ms off its true
+     within 1/48000 s) pass on mkv with H.264 + AAC, HEVC + PCM, VP9 + PCM and VP9 + AAC (and,
+     since the audio codecs below, VP9 + Opus and VP9 + Vorbis WebM, H.264 + FLAC and + MP3 MKV).
+     Matroska times are whole milliseconds, so a 30 fps picture can be 0.7 ms off its true
      time (worst lag 33.7 ms instead of 33.3 ms at 60 Hz).
    - **AV1 (2026-11-09, `av1`, `dxva_av1`, `av1dec`, `VideoDecoder::Av1`, MP4 `av01` / `av1C` and
      Matroska `V_AV1`):** `av1` splits temporal units into OBUs (`obu_has_size_field` or the rest
@@ -329,6 +328,59 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      route).
    - Left for phase 5: (AV1 is done, see above),
      Opus and Vorbis decoding (own, like the rest), fragmented MP4
+
+   **Audio codecs beyond AAC, done (2026-11-09):** `audio.rs` generalises the AAC path into
+   `AudioMft` (any Media Foundation audio decoder found with `MFTEnumEx(MFT_CATEGORY_AUDIO_DECODER,
+   input subtype)`, packets with time and duration in, `f32` out, 16/24/32-bit PCM converted),
+   `MftCodec` names the codec, its seek preroll (packets decoded and dropped before a seek
+   target: AAC / AC-3 2, MP3 4, Opus 4 = 80 ms) and the note when no decoder exists
+   (`audio_note()`: "audio track not playable: not supported yet: AC-3 audio: no decoder
+   installed (...)"); playback goes on without sound. `cargo run --example audio_mfts` lists what
+   a machine has, `--example audio_dump <file>` decodes a track and prints blocks. Containers:
+   MP4 `Opus`+`dOps` (turned into an `OpusHead`), `fLaC`+`dfLa`, `.mp3` / mp4a object type 0x6B / 0x69,
+   `ac-3`+`dac3`, `ec-3`+`dec3`; Matroska `A_OPUS`, `A_FLAC`, `A_MPEG/L3`, `A_AC3`, `A_EAC3`,
+   `A_VORBIS`, and `DiscardPadding` (`Track::discard_padding_ns`).
+   - Measured against `ffmpeg -f f32le` of the same track (tests `audio_codecs`, 3 s stereo
+     48 kHz sine clips; "shift" = frames our output is ahead of ffmpeg's after finding the best
+     alignment, 0 = same sample at the same time):
+
+     | codec | decoder | MKV / WebM | MP4 |
+     |---|---|---|---|
+     | FLAC (16 bit stereo 48 k, mono 44.1 k) | own `flac.rs` | bit exact (max diff 0), 144000 / 132300 frames, first sample 0 | bit exact, same |
+     | Opus | Microsoft Opus Audio Decoder MFT | max diff 3.7e-8, rms 7.9e-9, 144000 frames = ffmpeg's, shift 0 | max diff 3.4e-5, rms 7.2e-7, 144648 frames = ffmpeg's, shift 0 |
+     | MP3 (libmp3lame 128k) | MP3 Decoder MFT | max diff 3.0e-5, rms 1.6e-5, shift -528 | same |
+     | Vorbis (libvorbis) | FFmpegAudioDecoder MFT (Web Media Extensions) | content identical (max diff 0), shift -128, 144832 frames against 144000 | not valid in MP4 |
+     | AC-3, E-AC-3 | none on this machine | not decoded, note says why | same |
+
+   - Opus: the transform would cut the pre-skip itself, which breaks seeking, so it gets an
+     `OpusHead` with pre-skip 0 and the decoder trims by time like AAC (Matroska `CodecDelay`
+     exact for the first packet, MP4 `elst` media time). The end is cut by `DiscardPadding` of the
+     last block (packets are taken to be as long as the first, the last by its TOC): 144000
+     frames in MKV / WebM as ffmpeg; ffmpeg does not cut the end in MP4 (144648) and neither do
+     we. Seeks (`playback_av`) land on the target to 1/48000 s with Opus, Vorbis, FLAC and MP3.
+   - FLAC: Windows' FLAC transform (`Microsoft FLAC Audio Decoder MFT`) accepts the type but
+     `ProcessOutput` blocks for good after one or two frames (tried: every `MF_MT_USER_DATA`
+     form, with / without the `fLaC` header as a first sample, sample times and durations, small
+     and large output buffers, with and without the stream messages). Decoded here instead (~330
+     lines, from the format description: all subframe types, stereo decorrelation, wasted bits,
+     8-32 bit); no CRC check. A blocked transform cannot be used with a timeout, so no fallback.
+   - MP3: the transform removes its own decoder delay (528 frames) which ffmpeg leaves in when the
+     container has no LAME / Xing tag: our sound is 528 frames (11 ms) earlier in content, the
+     length 143519 against ffmpeg's 144000 (MKV) / 144047 (MP4). This is more correct
+     (the tone's phase starts at 0), not a bug; gapless playback by the LAME tag is not done.
+   - Vorbis: the transform's first output starts 128 frames (blocksize_0 / 2) into the signal, so the
+     first 2.7 ms of the fade-in are missing and the sound is 128 frames early; the tail is 832
+     frames (17 ms) longer than ffmpeg's (no end trim). Not corrected (rule not verified for other
+     block sizes: ffmpeg's native encoder clip differs again by 256 frames in length).
+   - AC-3 / E-AC-3: only "Dolby AC-3 and E-AC-3 IEC-61937 converter MFT" is registered here (it
+     wraps the stream for S/PDIF, no PCM out). The Dolby Digital (Plus) decoder comes with the
+     Dolby Access store app / some editions, so nothing was decoded or measured for 5.1; the code
+     path (any transform offering float / PCM output) is there and the tests skip with the note.
+     An own AC-3 decoder would be the way to cover every machine.
+   - Left for phase 5: AV1 (`Codec::Av1` is recognised, no decoder: `D3D11_DECODER_PROFILE_AV1_VLD_*`,
+     OBU parsing, film grain), own Opus / Vorbis / MP3 / AC-3 decoders if the OS ones turn out
+     missing on users' machines (Opus MFT is Windows 10 1809+, Vorbis needs the Web Media
+     Extensions, AC-3 has no decoder here), several audio tracks, fragmented MP4
      (`moof`), `ContentEncodings` header stripping (mkvmerge's default for some codecs), Matroska
      `Projection` rotation and HDR metadata into the tone mapper, VP9 4:4:4 (profile 1 / 3), 12 bit,
      scaled references and `intra_only` tests with a stream that has them, several video tracks
