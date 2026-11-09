@@ -279,6 +279,7 @@ the new keys.
 | `crates/rf-core` | The model: locations, history, entries |
 | `crates/rf-archive` | Archive operations: browse, extract, create, edit |
 | `crates/rf-player` | DirectLook's video and audio player |
+| `crates/rustdecoder` | Our own video engine, work in progress: MP4/MOV, H.264 and HEVC decoded on the graphics card through D3D11 Video (bit-exact with ffmpeg in its tests), colour conversion, audio and A/V sync. It will take over DirectLook's video playback ([design](docs/design/rustdecoder.md)) |
 
 The interface is built with [GPUI](https://gpui.rs), the framework behind the Zed editor. Its
 Windows layer is a fork that adds the GPU/CPU switch:
