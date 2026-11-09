@@ -1,8 +1,9 @@
 //! Keeps [`crate::nameindex::Index`]es of chosen roots (drives) ready for searching.
 //!
-//! [`start`] loads each root's saved index (usable at once), then walks the root again in the
-//! background and swaps the fresh index in: changes made while the app wasn't running are picked
-//! up that way (reading the USN journal would need administrator rights). A recursive watcher on
+//! [`start`] loads each root's saved index (usable at once), then catches up with what changed
+//! while the app wasn't running: from the volume's change journal when it can tell (only the
+//! changed folders are listed again, see [`crate::usn`]), else by walking the root again in the
+//! background and swapping the fresh index in. A recursive watcher on
 //! each root collects changed folders; once a second they are listed again
 //! ([`crate::nameindex::Index::refresh_dirs`]). Indexes are saved after a build and at most every
 //! ten minutes while they change. [`stop`] ends it all.
@@ -142,8 +143,20 @@ fn run(slot: Arc<Slot>, cancel: Arc<AtomicBool>) {
         }
         _ => {}
     }
-    // 2. a fresh walk (catches what changed while the app was closed)
+    // 2. what changed while the app was closed: from the change journal, else a fresh walk
     let t = Instant::now();
+    let caught = slot.index.write().as_mut().map(|ix| ix.catch_up(&cancel));
+    match caught {
+        Some(Ok(n)) => {
+            log::info!("indexer: {} caught up from the change journal in {:.2} s, {n} folders listed again", slot.root.display(), t.elapsed().as_secs_f32());
+            slot.changed_since_save.store(true, Ordering::Relaxed);
+            save(&slot);
+            follow(&slot, &cancel);
+            return;
+        }
+        Some(Err(e)) => log::info!("indexer: {}: the change journal can't tell ({e:?}), walking", slot.root.display()),
+        None => {}
+    }
     let fresh = Index::build(&slot.root, &cancel);
     if cancel.load(Ordering::Relaxed) {
         return;
@@ -157,17 +170,32 @@ fn run(slot: Arc<Slot>, cancel: Arc<AtomicBool>) {
         slot.changed_since_save.store(true, Ordering::Relaxed);
         save(&slot);
     }
-    // 3. keep up with changes
+    follow(&slot, &cancel);
+}
+
+/// 3. keeps up with changes until cancelled.
+fn follow(slot: &Slot, cancel: &AtomicBool) {
     let mut last_save = Instant::now();
+    // The journal position one round ago: by now the watcher has reported every change
+    // before it and the folders were listed again, so the saved index is current up to there
+    // (a start reads from it; reading a little twice costs nothing).
+    let mut seen = crate::usn::query(&slot.root).map(|j| j.next);
     while !cancel.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_secs(1));
+        let now = crate::usn::query(&slot.root).map(|j| j.next);
         let dirs: Vec<PathBuf> = slot.dirty.lock().drain().collect();
         if !dirs.is_empty() {
             if let Some(ix) = slot.index.write().as_mut() {
-                ix.refresh_dirs(&dirs, &cancel);
+                ix.refresh_dirs(&dirs, cancel);
             }
             slot.changed_since_save.store(true, Ordering::Relaxed);
         }
+        if let Some(next) = seen {
+            if let Some(ix) = slot.index.write().as_mut() {
+                ix.set_journal_next(next);
+            }
+        }
+        seen = now;
         if last_save.elapsed() > Duration::from_secs(600) {
             save(&slot);
             last_save = Instant::now();

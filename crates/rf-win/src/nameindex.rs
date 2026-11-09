@@ -22,7 +22,10 @@
 //! its indexed entries by name: gone ones are marked removed, new ones appended (new folders
 //! walked), the rest updated. [`Index::compact`] drops removed entries and their contents.
 //!
-//! **Saved** to a file ([`Index::save`] / [`Index::load`]) so a start doesn't walk again.
+//! **Saved** to a file ([`Index::save`] / [`Index::load`]) so a start doesn't walk again. With
+//! it go the folders' file ids and the volume's change journal position: at the next start,
+//! [`Index::catch_up`] lists again only the folders the journal says changed while the app was
+//! closed (see [`crate::usn`]); a whole walk is needed only when the journal can't tell.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -154,6 +157,10 @@ pub struct Index {
     /// Folders by (parent, folded name): finding a folder from a path when it changes.
     dirs: IdTable,
     removed: usize,
+    /// Folders by file id, as the change journal names them.
+    frn: HashMap<u64, u32>,
+    /// The change journal (id, next record) this index is current with.
+    journal: Option<(u64, i64)>,
 }
 
 /// Every different name once: UTF-8 in one pool, name `k` is `pool[off[k]..off[k + 1]]`.
@@ -236,6 +243,8 @@ struct Chunk {
     parent: u32,
     ids: Vec<u32>,
     flags: Vec<u8>,
+    /// (entry within the chunk, file id) of its folders
+    frns: Vec<(u32, u64)>,
 }
 
 fn flags_of(a: u32) -> u8 {
@@ -261,21 +270,77 @@ fn fold_key(name: &str) -> u64 {
     h.finish()
 }
 
-/// Lists `dir` into a chunk: (name, flags) of every entry but `.` and `..`.
-fn list(dir: &Path) -> (Vec<u8>, Vec<u16>, Vec<u8>) {
-    let (mut names, mut lens, mut flags) = (Vec::new(), Vec::new(), Vec::new());
-    let _ = for_each_raw(dir, |d| {
-        let n = &d.cFileName;
-        if n[0] == b'.' as u16 && (n[1] == 0 || (n[1] == b'.' as u16 && n[2] == 0)) {
+/// One folder's listing: names (UTF-8, one pool), their lengths, flags, file ids.
+struct Listing {
+    names: Vec<u8>,
+    lens: Vec<u16>,
+    flags: Vec<u8>,
+    ids: Vec<u64>,
+}
+
+/// Lists `dir`: every entry but `.` and `..`, with its file id (what the change journal knows a
+/// folder by). Read with `GetFileInformationByHandleEx` in 64 KB batches; where that isn't
+/// available (some network or FAT volumes), `FindFirstFileEx` without ids.
+fn list(dir: &Path) -> Listing {
+    let mut out = Listing { names: Vec::new(), lens: Vec::new(), flags: Vec::new(), ids: Vec::new() };
+    let mut push = |name: &[u16], attrs: u32, id: u64| {
+        if name == [b'.' as u16] || name == [b'.' as u16, b'.' as u16] {
             return;
         }
-        let end = n.iter().position(|&c| c == 0).unwrap_or(n.len());
-        let s = String::from_utf16_lossy(&n[..end]);
-        names.extend_from_slice(s.as_bytes());
-        lens.push(s.len().min(u16::MAX as usize) as u16);
-        flags.push(flags_of(d.dwFileAttributes));
-    });
-    (names, lens, flags)
+        let s = String::from_utf16_lossy(name);
+        out.names.extend_from_slice(s.as_bytes());
+        out.lens.push(s.len().min(u16::MAX as usize) as u16);
+        out.flags.push(flags_of(attrs));
+        out.ids.push(id);
+    };
+    if list_with_ids(dir, &mut push).is_none() {
+        let _ = for_each_raw(dir, |d| {
+            let n = &d.cFileName;
+            let end = n.iter().position(|&c| c == 0).unwrap_or(n.len());
+            push(&n[..end], d.dwFileAttributes, 0);
+        });
+    }
+    out
+}
+
+/// `None` when the folder can't be read this way (the caller falls back).
+fn list_with_ids(dir: &Path, push: &mut impl FnMut(&[u16], u32, u64)) -> Option<()> {
+    use windows::Win32::Foundation::{CloseHandle, GENERIC_READ};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_ID_BOTH_DIR_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo,
+        GetFileInformationByHandleEx, OPEN_EXISTING,
+    };
+    let w = crate::wide::long_path(dir);
+    let h = unsafe { CreateFileW(windows::core::PCWSTR(w.as_ptr()), GENERIC_READ.0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, None, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, None) }.ok()?;
+    // u64 elements: the records hold 8-byte fields
+    let mut buf = vec![0u64; 8 * 1024];
+    let bytes = buf.len() * 8;
+    let mut first = true;
+    let ok;
+    loop {
+        let class = if first { FileIdBothDirectoryRestartInfo } else { FileIdBothDirectoryInfo };
+        if unsafe { GetFileInformationByHandleEx(h, class, buf.as_mut_ptr() as *mut _, bytes as u32) }.is_err() {
+            // ERROR_NO_MORE_FILES ends a listing; anything on the first call means "not here"
+            ok = !first;
+            break;
+        }
+        first = false;
+        let base = buf.as_ptr() as *const u8;
+        let mut off = 0usize;
+        loop {
+            let info = unsafe { &*(base.add(off) as *const FILE_ID_BOTH_DIR_INFO) };
+            let name = unsafe { std::slice::from_raw_parts(info.FileName.as_ptr(), info.FileNameLength as usize / 2) };
+            push(name, info.FileAttributes, info.FileId as u64);
+            if info.NextEntryOffset == 0 {
+                break;
+            }
+            off += info.NextEntryOffset as usize;
+        }
+    }
+    unsafe {
+        let _ = CloseHandle(h);
+    }
+    ok.then_some(())
 }
 
 struct Build<'a> {
@@ -330,10 +395,11 @@ fn walk<'s>(sc: &rayon::Scope<'s>, b: &'s Build<'s>, dir: PathBuf, id: u32) {
     if b.cancel.load(Ordering::Relaxed) {
         return;
     }
-    let (names, lens, flags) = list(&dir);
+    let Listing { names, lens, flags, ids: file_ids } = list(&dir);
     if lens.is_empty() {
         return;
     }
+    let frns: Vec<(u32, u64)> = flags.iter().zip(&file_ids).enumerate().filter(|(_, (f, id))| **f & DIR != 0 && **id != 0).map(|(k, (_, id))| (k as u32, *id)).collect();
     let base = b.next.fetch_add(lens.len() as u32, Ordering::Relaxed);
     let ids: Vec<u32> = {
         // one lock per folder
@@ -360,7 +426,7 @@ fn walk<'s>(sc: &rayon::Scope<'s>, b: &'s Build<'s>, dir: PathBuf, id: u32) {
             }
         }
     }
-    b.chunks.lock().unwrap().push(Chunk { base, parent: id, ids, flags });
+    b.chunks.lock().unwrap().push(Chunk { base, parent: id, ids, flags, frns });
 }
 
 fn pool() -> rayon::ThreadPool {
@@ -420,11 +486,13 @@ impl Index {
     fn empty(root: PathBuf) -> Index {
         let mut names = Names::new();
         names.intern(b"");
-        Index { root, parent: vec![NONE], name_id: vec![0], flags: vec![DIR], names, dirs: IdTable::new(), removed: 0 }
+        Index { root, parent: vec![NONE], name_id: vec![0], flags: vec![DIR], names, dirs: IdTable::new(), removed: 0, frn: HashMap::new(), journal: None }
     }
 
     /// Walks `root` (blocking; `cancel` stops it, returning what was found so far).
     pub fn build(root: &Path, cancel: &AtomicBool) -> Index {
+        // the journal position before walking: whatever changes during the walk is read again
+        let journal = crate::usn::query(root).map(|j| (j.id, j.next));
         let next = AtomicU32::new(1);
         let chunks = Mutex::new(Vec::new());
         let mut table = Names::new();
@@ -448,7 +516,14 @@ impl Index {
                 ix.name_id[i] = id;
                 ix.flags[i] = f;
             }
+            for (k, frn) in c.frns {
+                ix.frn.insert(frn, c.base + k);
+            }
         }
+        if let Some(root_id) = crate::usn::file_id(root) {
+            ix.frn.insert(root_id, 0);
+        }
+        ix.journal = journal;
         // ids reserved by a cancelled walk but never filled stay removed
         ix.removed = ix.flags.iter().filter(|&&f| f & REMOVED != 0).count();
         ix.index_dirs();
@@ -645,17 +720,17 @@ impl Index {
         }
         let mut new_dirs = Vec::new();
         for ((node, dir), kids) in nodes.iter().zip(children) {
-            let (names, lens, flags) = list(dir);
-            let mut now: HashMap<String, u8> = HashMap::new();
+            let Listing { names, lens, flags, ids } = list(dir);
+            let mut now: HashMap<String, (u8, u64)> = HashMap::new();
             let mut off = 0usize;
-            for (&len, &f) in lens.iter().zip(&flags) {
-                now.insert(String::from_utf8_lossy(&names[off..off + len as usize]).into_owned(), f);
+            for ((&len, &f), &frn) in lens.iter().zip(&flags).zip(&ids) {
+                now.insert(String::from_utf8_lossy(&names[off..off + len as usize]).into_owned(), (f, frn));
                 off += len as usize;
             }
             for k in kids {
                 let name = self.name(k).to_string();
                 match now.remove(&name) {
-                    Some(f) => self.flags[k as usize] = f,
+                    Some((f, _)) => self.flags[k as usize] = f,
                     None => {
                         self.flags[k as usize] |= REMOVED;
                         self.removed += 1;
@@ -668,8 +743,11 @@ impl Index {
                     }
                 }
             }
-            for (name, f) in now {
+            for (name, (f, frn)) in now {
                 let id = self.push(*node, &name, f);
+                if f & DIR != 0 && frn != 0 {
+                    self.frn.insert(frn, id);
+                }
                 if f & DIR != 0 && f & REPARSE == 0 && !skipped(&dir.join(&name)) {
                     new_dirs.push((dir.join(&name), id));
                 }
@@ -683,6 +761,38 @@ impl Index {
             let sub = Index::build(&path, cancel);
             self.graft(&sub, id);
         }
+    }
+
+    /// Brings a loaded index up to date from the volume's change journal: the folders that
+    /// changed since it was saved are listed again. `Err` when the journal can't tell (another
+    /// journal, records dropped, too much changed, no journal): walk again then.
+    pub fn catch_up(&mut self, cancel: &AtomicBool) -> Result<usize, crate::usn::Gap> {
+        let (id, from) = self.journal.ok_or(crate::usn::Gap::Lost)?;
+        let (frns, next) = crate::usn::changed_folders(&self.root, id, from, 200_000)?;
+        let dirs: Vec<PathBuf> = frns
+            .iter()
+            .filter_map(|f| self.frn.get(f).copied())
+            .filter(|&n| self.valid(n, true, None))
+            .map(|n| self.path(n))
+            .collect();
+        let count = dirs.len();
+        self.refresh_dirs(&dirs, cancel);
+        if !cancel.load(Ordering::Relaxed) {
+            self.journal = Some((id, next));
+        }
+        Ok(count)
+    }
+
+    /// The journal position the index is current with (kept up to date by the indexer while it
+    /// follows changes).
+    pub fn set_journal_next(&mut self, next: i64) {
+        if let Some((_, n)) = self.journal.as_mut() {
+            *n = next;
+        }
+    }
+
+    pub fn journal(&self) -> Option<(u64, i64)> {
+        self.journal
     }
 
     fn push(&mut self, parent: u32, name: &str, f: u8) -> u32 {
@@ -708,6 +818,11 @@ impl Index {
     /// Appends `sub`'s entries (not its root) under node `at`.
     fn graft(&mut self, sub: &Index, at: u32) {
         let base = self.parent.len() as u32 - 1;
+        for (&frn, &n) in &sub.frn {
+            if n != 0 {
+                self.frn.insert(frn, base + n);
+            }
+        }
         for i in 1..sub.parent.len() as u32 {
             let f = sub.flags[i as usize];
             let p = sub.parent[i as usize];
@@ -734,7 +849,7 @@ impl Index {
         map[0] = 0;
         // the name table stays (a name no longer used costs a few bytes)
         let names = std::mem::replace(&mut self.names, Names::new());
-        let mut out = Index { root: self.root.clone(), parent: vec![NONE], name_id: vec![0], flags: vec![DIR], names, dirs: IdTable::new(), removed: 0 };
+        let mut out = Index { root: self.root.clone(), parent: vec![NONE], name_id: vec![0], flags: vec![DIR], names, dirs: IdTable::new(), removed: 0, frn: HashMap::new(), journal: self.journal };
         for i in 1..n {
             let p = self.parent[i];
             if self.flags[i] & REMOVED != 0 || p == NONE || !keep[p as usize] {
@@ -743,6 +858,7 @@ impl Index {
             keep[i] = true;
             map[i] = out.push_id(map[p as usize], self.name_id[i], self.flags[i]);
         }
+        out.frn = self.frn.iter().filter(|(_, n)| map[**n as usize] != NONE).map(|(f, n)| (*f, map[*n as usize])).collect();
         out.shrink();
         *self = out;
     }
@@ -770,6 +886,18 @@ impl Index {
             f.write_all(&self.flags)?;
             f.write_all(as_bytes(&self.names.off))?;
             f.write_all(&self.names.pool)?;
+            // the change journal position and the folders' file ids
+            let (jid, jnext) = self.journal.unwrap_or((0, -1));
+            f.write_all(&jid.to_le_bytes())?;
+            f.write_all(&jnext.to_le_bytes())?;
+            f.write_all(&(self.frn.len() as u64).to_le_bytes())?;
+            let (mut frns, mut nodes): (Vec<u64>, Vec<u32>) = (Vec::with_capacity(self.frn.len()), Vec::with_capacity(self.frn.len()));
+            for (&k, &v) in &self.frn {
+                frns.push(k);
+                nodes.push(v);
+            }
+            f.write_all(as_bytes(&frns))?;
+            f.write_all(as_bytes(&nodes))?;
             f.flush()?;
         }
         std::fs::rename(&tmp, path)
@@ -805,7 +933,7 @@ impl Index {
         let k = read_u64(&mut f)? as usize;
         let pl = read_u64(&mut f)? as usize;
         // sizes from the header must fit the file before anything that big is allocated
-        if n.checked_mul(9).and_then(|x| x.checked_add(k.checked_add(1)?.checked_mul(4)?)).and_then(|x| x.checked_add(pl)).is_none_or(|x| x > size) || n == 0 {
+        if n.checked_mul(9).and_then(|x| x.checked_add(k.checked_add(1)?.checked_mul(4)?)).and_then(|x| x.checked_add(pl)).and_then(|x| x.checked_add(24)).is_none_or(|x| x > size) || n == 0 {
             return Err(bad());
         }
         let parent = read_vec_u32(&mut f, n)?;
@@ -826,10 +954,23 @@ impl Index {
         if (0..n).any(|i| name_id[i] as usize >= k || (parent[i] != NONE && parent[i] as usize >= n)) {
             return Err(bad());
         }
+        let jid = read_u64(&mut f)?;
+        let jnext = read_u64(&mut f)? as i64;
+        let nf = read_u64(&mut f)? as usize;
+        if nf > n {
+            return Err(bad());
+        }
+        let mut frns = vec![0u64; nf];
+        f.read_exact(as_bytes_mut(&mut frns))?;
+        let nodes = read_vec_u32(&mut f, nf)?;
+        if nodes.iter().any(|&v| v as usize >= n) {
+            return Err(bad());
+        }
         let removed = flags.iter().filter(|&&f| f & REMOVED != 0).count();
         let mut names = Names { pool, off, lookup: IdTable::new() };
         names.rebuild_lookup();
-        let mut ix = Index { root, parent, name_id, flags, names, dirs: IdTable::new(), removed };
+        let journal = (jnext >= 0).then_some((jid, jnext));
+        let mut ix = Index { root, parent, name_id, flags, names, dirs: IdTable::new(), removed, frn: frns.into_iter().zip(nodes).collect(), journal };
         ix.index_dirs();
         Ok(ix)
     }
@@ -1047,6 +1188,36 @@ mod tests {
         let bytes = std::fs::read(&file).unwrap();
         std::fs::write(&file, &bytes[..bytes.len() - 3]).unwrap();
         assert!(Index::load(&file).is_err());
+        std::fs::remove_file(&file).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn catches_up_from_the_change_journal() {
+        let root = tree("journal");
+        if crate::usn::query(&root).is_none() {
+            eprintln!("no change journal here, skipped");
+            return;
+        }
+        let ix = Index::build(&root, &AtomicBool::new(false));
+        assert!(ix.journal().is_some());
+        let file = root.with_extension("j.rfidx");
+        ix.save(&file).unwrap();
+        drop(ix);
+        // while "closed": a file deep inside, a new folder with content, a deletion, a rename
+        std::fs::write(root.join("Proje/Çizimler/yeni rapor.png"), b"x").unwrap();
+        std::fs::create_dir_all(root.join("Yeni/İç")).unwrap();
+        std::fs::write(root.join("Yeni/İç/rapor özet.txt"), b"x").unwrap();
+        std::fs::remove_file(root.join("Rapor.pdf")).unwrap();
+        std::fs::rename(root.join("Proje"), root.join("Projeler")).unwrap();
+        let mut back = Index::load(&file).unwrap();
+        let changed = back.catch_up(&AtomicBool::new(false)).unwrap();
+        assert!(changed >= 1);
+        let found = back.search("rapor", None, false, 20).unwrap();
+        assert_eq!(names(&found), ["RAPOR eski.docx", "rapor özet.txt", "yeni rapor.png"]);
+        assert!(found.contains(&root.join("Projeler/Çizimler/yeni rapor.png")), "{found:?}");
+        // caught up: nothing more to read
+        assert_eq!(back.catch_up(&AtomicBool::new(false)).unwrap(), 0);
         std::fs::remove_file(&file).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
     }
