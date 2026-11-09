@@ -29,6 +29,10 @@ pub mod playback;
 #[cfg(windows)]
 pub mod present;
 pub mod dxva_h264;
+pub mod dxva_vp9;
+pub mod vp9;
+#[cfg(windows)]
+pub mod vp9dec;
 #[cfg(windows)]
 pub mod h264dec;
 #[cfg(windows)]
@@ -40,6 +44,8 @@ pub mod window;
 pub use decoder::{Frame, HevcDecoder, StreamInfo};
 #[cfg(windows)]
 pub use h264dec::H264Decoder;
+#[cfg(windows)]
+pub use vp9dec::Vp9Decoder;
 #[cfg(windows)]
 pub use video::VideoDecoder;
 

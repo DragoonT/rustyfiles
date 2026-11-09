@@ -6,12 +6,14 @@ use std::path::Path;
 use crate::d3d11::{Gpu, Planes};
 use crate::decoder::{Frame, HevcDecoder, StreamInfo};
 use crate::h264dec::H264Decoder;
+use crate::vp9dec::Vp9Decoder;
 use crate::mp4::{Codec, Track};
 use crate::{Error, Result};
 
 pub enum VideoDecoder {
     H264(H264Decoder),
     Hevc(HevcDecoder),
+    Vp9(Vp9Decoder),
 }
 
 macro_rules! each {
@@ -19,19 +21,21 @@ macro_rules! each {
         match $s {
             VideoDecoder::H264($d) => $e,
             VideoDecoder::Hevc($d) => $e,
+            VideoDecoder::Vp9($d) => $e,
         }
     };
 }
 
 impl VideoDecoder {
-    /// Opens the first video track of an MP4 / MOV file with the decoder its codec needs.
+    /// Opens the first video track of an MP4 / MOV / Matroska / WebM file with the decoder its codec needs.
     pub fn open(path: &Path) -> Result<Self> {
         let movie = crate::container::read(&mut File::open(path)?)?;
         let track = movie.video().ok_or(Error::Invalid("no video track"))?;
         match track.codec {
             Codec::H264 { .. } => Ok(Self::H264(H264Decoder::open(path)?)),
             Codec::Hevc { .. } => Ok(Self::Hevc(HevcDecoder::open(path)?)),
-            _ => Err(Error::Unsupported("video codec other than H.264 and HEVC")),
+            Codec::Vp9 { .. } => Ok(Self::Vp9(Vp9Decoder::open(path)?)),
+            _ => Err(Error::Unsupported("video codec other than H.264, HEVC and VP9")),
         }
     }
 
@@ -39,6 +43,7 @@ impl VideoDecoder {
         match self {
             Self::H264(_) => "H.264",
             Self::Hevc(_) => "HEVC",
+            Self::Vp9(_) => "VP9",
         }
     }
 

@@ -331,3 +331,13 @@ pub struct Planes {
     pub y: Vec<u16>,
     pub uv: Vec<u16>,
 }
+
+/// The decoder profile and surface format for a VP9 stream of the given bit depth (profile 0
+/// is 8-bit 4:2:0, profile 2 is 10-bit 4:2:0).
+pub fn vp9_profile(bit_depth: u8) -> Result<(GUID, DXGI_FORMAT)> {
+    match bit_depth {
+        8 => Ok((D3D11_DECODER_PROFILE_VP9_VLD_PROFILE0, DXGI_FORMAT_NV12)),
+        10 => Ok((D3D11_DECODER_PROFILE_VP9_VLD_10BIT_PROFILE2, DXGI_FORMAT_P010)),
+        _ => Err(Error::Unsupported("VP9 bit depth other than 8 and 10")),
+    }
+}
