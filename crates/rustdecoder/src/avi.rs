@@ -241,6 +241,11 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
         scan_movi(r, &movis, &mut streams)?;
     }
 
+    // whatever an index claims has to lie inside the file (a cut recording's index may not)
+    for s in &mut streams {
+        s.chunks.retain(|c| c.0 + c.1 as u64 <= len);
+    }
+
     let mut tracks = Vec::new();
     let (mut seen_v, mut seen_a) = (false, false);
     for (n, s) in streams.iter().enumerate() {
