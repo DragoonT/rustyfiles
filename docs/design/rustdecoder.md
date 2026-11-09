@@ -17,7 +17,7 @@ the same, with every step around that call written here:
 
 | Step | Who |
 | --- | --- |
-| Reading the container (MP4 / MOV, MKV / WebM) | rustdecoder |
+| Reading the container (MP4 / MOV, MKV / WebM, MPEG-TS / M2TS, MPEG-PS, AVI) | rustdecoder |
 | Splitting samples into NAL units, parsing VPS / SPS / PPS / slice headers | rustdecoder |
 | Reference picture management (DPB, POC, RPS) | rustdecoder |
 | Filling the DXVA picture parameters, slice controls, scaling lists | rustdecoder |
@@ -37,6 +37,9 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
   presentation time, keyframe. Fragmented MP4 (`moof`) is read into the same table (phase 5).
 - `mkv` — Matroska / WebM reader producing the same `Movie` / `Track` / flat sample table as
   `mp4` (see phase 5); `container::read` picks the reader from the first bytes.
+- `ts`, `ps`, `avi` — MPEG transport stream (188 / 192 byte M2TS), program stream and AVI readers
+  producing the same `Movie` (see "Containers: TS, PS, AVI" below); `container::read` detects
+  them (sync bytes, `00 00 01 BA`, `RIFF....AVI `).
 - `bits` — bit reader with Exp-Golomb and emulation-prevention removal.
 - `h264`, `hevc` — parameter sets and slice headers.
 - `av1`, `dxva_av1`, `av1dec` — AV1 OBUs, sequence and frame headers with per-slot state, `DXVA_PicParams_AV1` + tiles,
@@ -610,9 +613,119 @@ DirectLook route, gaps closed (2026-11-09, branch worktree-agent-a657e1e417248d4
   capture of its strip, mean luma) was gone 4 s after opening, a posted `WM_MOUSEMOVE` on the popup
   brought it back (26.5) and it was gone again 2.5 s later (0).
 
+## Containers: TS, PS, AVI (2026-11-09)
+
+All three give the same `Movie` / `Track` / flat sample table. A sample is no longer always one
+byte range: `Track::storage` says how it is stored, and `Track::read_sample` undoes it, so the
+decoders, `AudioDecoder`, `Player` and `Playback` are unchanged. `Storage::Plain` is MP4 and
+Matroska (and the AVI audio / MJPEG chunks); `Storage::Ts(Layout)` is a transport or program
+stream sample; `Storage::AnnexB` is an AVI chunk of Annex B H.264. `Sample::size` is always the
+number of bytes `read_sample` returns (for converted samples that is not the size in the file;
+`Layout::raw_size` / `AnnexB::raw` give the stored size).
+
+**MPEG-TS / M2TS (`ts.rs`).** Packet size 188, or 192 for AVCHD `.MTS` / Blu-ray `.M2TS` (the 4-byte
+arrival time is ignored); detection = sync byte `0x47` at the starts of the first packets. The
+index is one sequential pass over the file in 3 MB blocks looking at packet headers, PAT / PMT
+(first program with audio or video) and PES headers; picture and frame bytes are scanned only
+for what the table needs. A sample is stored as the file offset of the packet it starts in, the
+elementary stream bytes to skip and to take (`Layout`, 8 bytes per sample); `Layout::read`
+walks the packets of the PID from there, cuts PES headers and converts. Nothing is kept per packet.
+- H.264 / HEVC (0x1B, 0x24): one PES = one access unit. Annex B becomes 4-byte length prefixed
+  NAL units (access unit delimiters and filler data dropped); `avcC` / `hvcC` are made from the
+  first in-band SPS / PPS (/ VPS), and give the picture size. Sync = IDR (also a recovery point
+  SEI) or IRAP. PTS and DTS from the PES (DTS = PTS when only one is given); 33-bit counters are
+  unwrapped per stream.
+- Audio: AAC ADTS (0x0F; header cut, AudioSpecificConfig made from the first header),
+  AC-3 (0x81, or 0x06 with an AC-3 descriptor / registration), E-AC-3 (0x84, 0x87, 0xA1, or 0x06),
+  MPEG audio (0x03 / 0x04: layer III is `Codec::Mp3`, layers I / II are listed with
+  `Codec::Other`), Blu-ray LPCM (0x80: the 4-byte header cut, 16 / 20 / 24 bit as big-endian
+  16 / 24; one sample per PES). Frames are cut by their sync words and sizes across PES
+  boundaries; a frame's time is the PES PTS that covers it, then running by frame length (the
+  PTS only re-anchors when it is more than half a frame off). Audio track timescale = sample rate.
+- MPEG-2 video (0x01, 0x02): listed with its size, one sample per PES (sync = I picture), no decoder.
+- Listed without samples: AAC in LATM (0x11, not supported), DTS, TrueHD, VC-1, subtitles, teletext.
+- Times are shifted so the earliest presentation time of the file is 0 (MP4's convention: DTS of
+  a B-frame stream starts negative).
+
+**MPEG-PS (`ps.rs`).** `.mpg`, `.vob`, MPEG-1 system streams: pack headers and PES packets (MPEG-2
+and MPEG-1 style headers). MPEG audio and AC-3 in private stream 1 (substream 0x80..0x87, the
+4-byte private header cut) are read as frames like in TS; samples are found by walking PES packets
+(`Layout` with packet size 0). MPEG-1 / 2 video is listed with its picture size from the first
+sequence header and **has no samples** (its pictures do not line up with PES packets; a picture
+splitter comes with an MPEG-2 decoder). H.264 / HEVC / LPCM / DTS in program streams: not handled.
+
+**AVI (`avi.rs`).** `hdrl` (`avih`, `strl` with `strh` / `strf` / `indx`), chunks from the OpenDML
+super index and `ix##` chunk indexes (files with `RIFF AVIX` parts, > 1 GB) where every stream has
+one, else `idx1` (offsets relative to `movi` or absolute, probed), else a walk over the `movi` lists
+(`LIST rec ` entered; a cut file keeps its whole chunks). Entries outside the file are dropped.
+- Video time = `n * dwScale` in `dwRate`; zero-sized chunks (dropped frames) take a slot, no sample.
+- H.264 / HEVC (`H264`, `X264`, `avc1`, `davc`, `HEVC`, ...): Annex B chunks, `avcC` / `hvcC` made
+  from the in-band parameter sets, converted on read. Every picture is read once at open to get
+  its converted size (and its sync flag when the file has no index). AVI has no presentation
+  times: for H.264 the display order comes from the POC (type 0) of each picture's first slice
+  header; `pts` is the display slot, `dts` = decode slot minus the largest reordering delay. HEVC
+  gets `pts = dts` (B-frame HEVC in AVI would show out of order), POC types 1 / 2 as well. An `avc1`
+  stream that is length prefixed with an `avcC` in `strf` is read as is (not covered by a test:
+  ffmpeg always writes Annex B).
+- Motion JPEG and other video: listed (`Codec::Other`), every frame a sync sample, not decoded.
+- Audio: PCM (8 / 16 / 24 / 32 bit, float), MP3 (0x55), AAC (0xFF with `AudioSpecificConfig`),
+  AC-3 (0x2000), `WAVE_FORMAT_EXTENSIBLE` unwrapped. PCM chunks count `size / blockAlign`
+  samples, compressed chunks one `dwScale`; the timescale is `dwRate` (ffmpeg's MP3 AVI uses a
+  125 Hz clock: 24 ms ticks). Everything else (ADPCM, WMA, ...) is listed without samples.
+
+**Tests** (`tests/ts.rs`, `tests/avi.rs`, `tests/container_robust.rs`, clips made by ffmpeg into the
+temp folder; times against `ffprobe -show_packets -show_data_hash CRC32`):
+
+| clip | video | audio | compared with ffprobe |
+| --- | --- | --- | --- |
+| `.ts` | H.264 B-frames, 90 pkts, 3 sync | AAC 142 | count, pts, dts, sync; video size + CRC32 of the stream bytes; AAC size (+ 7 byte header) |
+| `.ts` | HEVC, 90 pkts | AAC 142 | same |
+| `.m2ts` (`-mpegts_m2ts_mode 1`) | H.264 | AC-3 94 | same, audio size + CRC32 |
+| `.ts` | H.264 | E-AC-3 94 | same |
+| `.m2ts` | H.264 | `pcm_bluray` 16 bit 600, 24 bit 400 | same, LPCM size (+ 4 byte header) |
+| `.ts` | H.264 | MP3 126 | same |
+| `.ts` | MPEG-2 (8 I pictures of 90) | MP2 125 | same (listing only) |
+| `.vob`, `.mpg` (MPEG-2), `.mpg` (MPEG-1) | listed, no samples | AC-3 94, MP2 125, MP2 125 | audio frames: pts, size, CRC32 |
+| `.avi` | H.264 | PCM 141 | count, sync, size + CRC32 of every chunk, dts (= pts) |
+| `.avi` | H.264 with B-frames | MP3 126 | same minus pts / dts (ffprobe shows none): pts a dense display run, dts <= pts |
+| `.avi` | H.264 | AAC 142, AC-3 94 | same |
+| `.avi` | MJPEG (listed) | PCM | count, sync, size + CRC32 |
+| hand-built | MJPEG / PCM | | OpenDML super index over two RIFF parts + `ix##`; `idx1` relative and absolute; walk without index with `LIST rec `; a cut file |
+| real 1.15 GB OpenDML (not in the suite: `big_opendml`, `--ignored`) | raw video 3300 | PCM 5157 | all packets, last frame at byte 1150958894 (past 1 GB, found through the `ix##` chunks) |
+
+The NAL lengths of every converted H.264 / HEVC sample add up to the sample. Decoded on the GPU
+and compared with ffmpeg's software decoder picture by picture (NV12, all 90 frames, identical):
+H.264 + AAC `.ts`, HEVC + AAC `.ts`, H.264 + AC-3 `.m2ts`, H.264 `.avi` and H.264 B-frame `.avi`
+(display order from POC). `Playback` on H.264 + AAC `.ts` with the fake sink: pictures in order
+and on the audio clock, 75 pictures in 2.5 s, none dropped, audio one unbroken run; seeks land
+audio at the target to 1/48000 s and video on the picture at or before it (same checks as MP4).
+`container_robust`: 161 cut / bit-flipped / zeroed variants of each of `.ts`, `.m2ts`, `.avi`,
+`.vob` read without a panic.
+
+**Speed.** `--example index_time <file>`: a 1.12 GB 1080p 24 Mb/s TS (8 copies of a 45 s clip,
+10800 pictures, 16888 AAC frames) is indexed in 0.35 s (3.2 GB/s, file in the OS cache; a cold
+disk is limited by the disk, the pass is sequential). A sample read is 0.01 to 0.5 ms (a 515 KB
+picture 0.4 ms). The 1.15 GB OpenDML AVI is indexed in a few milliseconds (index chunks only).
+No AVCHD file was available in the camera folder, so no camera stream was tried.
+
+**Left.**
+- A real camera stream: AVCHD with interlaced H.264 (the decoder refuses field pictures and MBAFF),
+  PTS jumps, several programs, 0x06 streams with unusual descriptors.
+- TS: resync after lost sync inside a file (the rest of the file is ignored at the first bad
+  sync byte), PES with several access units or an access unit over several PES (split by AUD),
+  AAC LATM, HE-AAC signalling, DTS / TrueHD / VC-1 / PGS, an `.m2ts` arrival-time clock, several
+  programs (the first with audio or video is used), PTS discontinuities (segments that start
+  over, as concatenated files do).
+- PS: a picture splitter for MPEG-1 / 2 video (then samples and an MPEG-2 decoder), PSM-signalled
+  H.264, DVD LPCM / DTS, a pack-less raw ES `.m2v`.
+- AVI: HEVC / POC types 1 and 2 reordering, `avc1` with an `avcC` (untested), packed B-frame
+  bitstreams (DivX / MPEG-4 part 2 are listed only), `indx` sub-index types other than chunk indexes
+  (field indexes), a cheaper H.264 open (the pictures are read once for their size; 1 GB of
+  H.264 takes about as long as a TS index).
+
 Still to do before the route can be the default: formats the Media Foundation / FilmCraft
-routes play that the container readers do not take (AVI, MPEG-TS / PS, WMV / ASF, FLV, MXF,
-DNxHR in progress elsewhere); several audio tracks and track choice, subtitles; playback keys
+routes play that the container readers do not take (WMV / ASF, FLV, MXF; MPEG-2 video and
+the other codecs listed under "Containers: TS, PS, AVI" are read but not decoded); several audio tracks and track choice, subtitles; playback keys
 (arrows, space, F) go to the viewer window, not checked with the popup in front; cursor hiding
 in fullscreen; HDR metadata in the tone mapper; a mid-stream size change; a real second audio
 device for the rate-change path; a hot-plug test with a physical device.
