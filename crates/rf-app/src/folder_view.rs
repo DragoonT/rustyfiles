@@ -1030,8 +1030,11 @@ impl FolderView {
                     let glob = query.contains(['*', '?']);
                     let mut seen: Option<std::collections::HashSet<String>> = None;
                     let mut found = 0usize;
+                    let t_index = std::time::Instant::now();
                     if let Some(paths) = rf_win::indexer::search(&query, &root, include_hidden, 50_000) {
+                        let looked_up = t_index.elapsed();
                         found = send_index_hits(&paths, &tx, &cancel);
+                        log::info!("search: the index answered \"{query}\" in {} with {} hits ({looked_up:?} to find, {:?} with details)", root.display(), found, t_index.elapsed());
                         seen = Some(paths.iter().map(|p| p.to_string_lossy().to_lowercase()).collect());
                     }
                     // 2. Windows Search (names + contents + AQS) where the folder is indexed: with

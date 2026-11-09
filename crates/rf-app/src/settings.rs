@@ -727,10 +727,17 @@ fn sync_name_index(on: bool, excluded: &[String]) {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(delay));
         // extra instances (tests, the speed test's) leave it to the main one
-        if STATE.load(Ordering::Relaxed) != 2 || std::env::var_os("RUSTYFILES_NO_INDEX").is_some() || std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() {
+        // (RUSTYFILES_INDEX=1 indexes there too, for testing)
+        let extra = std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() && std::env::var_os("RUSTYFILES_INDEX").is_none();
+        if STATE.load(Ordering::Relaxed) != 2 || std::env::var_os("RUSTYFILES_NO_INDEX").is_some() || extra {
             return;
         }
         let dir = std::env::var_os("LOCALAPPDATA").map_or_else(std::env::temp_dir, std::path::PathBuf::from).join("rustyfiles").join("index");
-        rf_win::indexer::start(rf_win::indexer::local_roots(), dir);
+        // RUSTYFILES_INDEX_ROOTS="E:\;F:\" picks the roots (testing)
+        let roots = match std::env::var("RUSTYFILES_INDEX_ROOTS") {
+            Ok(v) => v.split(';').filter(|s| !s.is_empty()).map(std::path::PathBuf::from).collect(),
+            Err(_) => rf_win::indexer::local_roots(),
+        };
+        rf_win::indexer::start(roots, dir);
     });
 }
