@@ -332,7 +332,95 @@ fn versus(runs: usize, scratch: &Path, ours: &dyn Fn(&Path) -> anyhow::Result<()
 }
 
 /// Runs `plan`. `progress` is called from this thread; `cancel` stops between steps.
+// ------------------------------------------------------------------ Files' session
+
+/// Files remembers the tabs open when its last window closed and opens them again on start
+/// ("continue where you left off"). Every window the test opens and closes would become the
+/// user's "last session" (their next Files start showing an rf-bench folder), and each test start
+/// would also restore the previous test's tab. For the test, Files starts without a session;
+/// afterwards the user's two settings are written back as they were (also when the test fails
+/// or is cancelled: on drop), and again a few seconds later in case Files saved late.
+struct FilesSession {
+    path: PathBuf,
+    saved: Vec<(&'static str, Option<serde_json::Value>)>,
+}
+
+const FILES_SESSION_KEYS: [&str; 3] = ["ContinueLastSessionOnStartUp", "LastSessionTabList", "LastSessionSelectedTabIndex"];
+
+impl FilesSession {
+    fn settings_path() -> Option<PathBuf> {
+        let base = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("Packages");
+        // the Store package (Files_1y0xx7n9077q4) or a sideloaded one (FilesStable_…, FilesPreview_…)
+        std::fs::read_dir(&base)
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("Files")))
+            .map(|p| p.join("LocalState").join("settings").join("user_settings.json"))
+            .find(|p| p.is_file())
+    }
+
+    fn read(path: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
+        let text = std::fs::read_to_string(path).ok()?;
+        match serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()? {
+            serde_json::Value::Object(m) => Some(m),
+            _ => None,
+        }
+    }
+
+    /// Files' own layout: two-space indent, CRLF.
+    fn write(path: &Path, m: &serde_json::Map<String, serde_json::Value>) -> std::io::Result<()> {
+        let text = serde_json::to_string_pretty(m).map_err(std::io::Error::other)?.replace('\n', "\r\n");
+        let tmp = path.with_extension("json.rf-bench");
+        std::fs::write(&tmp, text)?;
+        std::fs::rename(&tmp, path)
+    }
+
+    fn begin() -> Option<Self> {
+        let path = Self::settings_path()?;
+        let mut m = Self::read(&path)?;
+        let saved = FILES_SESSION_KEYS.iter().map(|&k| (k, m.get(k).cloned())).collect();
+        m.insert("ContinueLastSessionOnStartUp".into(), serde_json::Value::Bool(false));
+        if let Err(e) = Self::write(&path, &m) {
+            log::warn!("bench: Files settings not changed: {e}");
+            return None;
+        }
+        log::info!("bench: Files starts without its last session during the test");
+        Some(Self { path, saved })
+    }
+
+    fn restore(path: &Path, saved: &[(&'static str, Option<serde_json::Value>)]) -> bool {
+        let Some(mut m) = Self::read(path) else { return false };
+        if saved.iter().all(|(k, v)| m.get(*k) == v.as_ref()) {
+            return true;
+        }
+        for (k, v) in saved {
+            match v {
+                Some(v) => m.insert((*k).into(), v.clone()),
+                None => m.remove(*k),
+            };
+        }
+        Self::write(path, &m).is_ok()
+    }
+}
+
+impl Drop for FilesSession {
+    fn drop(&mut self) {
+        if !Self::restore(&self.path, &self.saved) {
+            log::warn!("bench: Files settings could not be put back");
+        }
+        let (path, saved) = (self.path.clone(), std::mem::take(&mut self.saved));
+        std::thread::spawn(move || {
+            for _ in 0..3 {
+                std::thread::sleep(Duration::from_secs(5));
+                Self::restore(&path, &saved);
+            }
+        });
+    }
+}
+
 pub fn run(plan: &Plan, progress: &dyn Fn(Progress), cancel: &AtomicBool) -> anyhow::Result<Results> {
+    let _files_session = if plan.apps.iter().any(|a| a.kind == AppKind::Files) { FilesSession::begin() } else { None };
     let root = bench_dir();
     std::fs::create_dir_all(&root)?;
     prepare_rustyfiles_settings()?;
@@ -483,11 +571,58 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Files' session settings are put back exactly, other settings Files changed meanwhile kept.
+    #[test]
+    fn files_session_is_put_back() {
+        let dir = std::env::temp_dir().join(format!("rf-files-session-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("user_settings.json");
+        std::fs::write(&path, "{\r\n  \"ShowShelfPane\": false,\r\n  \"ContinueLastSessionOnStartUp\": true,\r\n  \"LastSessionTabList\": [\r\n    \"C:\\\\Users\"\r\n  ]\r\n}").unwrap();
+        let mut m = FilesSession::read(&path).unwrap();
+        let saved: Vec<_> = FILES_SESSION_KEYS.iter().map(|&k| (k, m.get(k).cloned())).collect();
+        // what the test leaves: Files' own writes of the bench tabs, plus an unrelated change
+        m.insert("ContinueLastSessionOnStartUp".into(), false.into());
+        m.insert("LastSessionTabList".into(), serde_json::json!(["C:\\rf-bench 1000"]));
+        m.insert("LastSessionSelectedTabIndex".into(), 0.into());
+        m.insert("ShowShelfPane".into(), true.into());
+        FilesSession::write(&path, &m).unwrap();
+        assert!(FilesSession::restore(&path, &saved));
+        let back = FilesSession::read(&path).unwrap();
+        assert_eq!(back["ContinueLastSessionOnStartUp"], true);
+        assert_eq!(back["LastSessionTabList"], serde_json::json!(["C:\\Users"]));
+        assert!(!back.contains_key("LastSessionSelectedTabIndex"));
+        assert_eq!(back["ShowShelfPane"], true);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("\r\n  \"ShowShelfPane\""));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Results saved by 0.5.0 (no cost fields) still load.
     #[test]
     fn older_results_still_load() {
         let old = r#"{"ours_ms":1.0,"windows_ms":2.0,"bytes":0,"files":0}"#;
         let v: Versus = serde_json::from_str(old).unwrap();
         assert_eq!(v.ours_cpu_ms, None);
+    }
+}
+
+#[cfg(test)]
+mod files_live {
+    /// Opens the 1 000-file folder in Files (when installed) through the real test and checks that
+    /// Files' session settings are the user's again afterwards. Opens windows: run by hand
+    /// (`cargo test -p rf-app --lib files_live -- --ignored`).
+    #[test]
+    #[ignore]
+    fn files_session_survives_a_real_test() {
+        let Some(files) = rf_win::bench::detect().into_iter().find(|a| a.kind == rf_win::bench::AppKind::Files) else { return };
+        let path = super::FilesSession::settings_path().unwrap();
+        let before = super::FilesSession::read(&path).unwrap();
+        let plan = super::Plan { apps: vec![files], open: vec![super::OpenTest::Files1k], copy: false, engines: false };
+        let r = super::run(&plan, &|_| {}, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+        eprintln!("{:?}", r.open[0].apps[0].median().map(|m| (m.settled_ms, m.shared)));
+        std::thread::sleep(std::time::Duration::from_secs(17));
+        let after = super::FilesSession::read(&path).unwrap();
+        for k in super::FILES_SESSION_KEYS {
+            assert_eq!(before.get(k), after.get(k), "{k}");
+        }
     }
 }
