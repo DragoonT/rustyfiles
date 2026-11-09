@@ -163,15 +163,25 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
     // Asked from a background process (Chrome's file dialog helper), Windows may refuse the
     // switch while the window is still being shown: try again once it is on screen.
     cx.spawn(async move |cx| {
-        for ms in [50u64, 250, 600] {
+        let mut waited = 0;
+        let mut retries = 0;
+        for ms in [50u64, 250, 600, 1200] {
             cx.background_executor().timer(std::time::Duration::from_millis(ms)).await;
+            waited += ms;
             let hwnd = shown_hwnd.get();
             if hwnd == 0 || rf_win::window::is_foreground(hwnd) {
                 break;
             }
             log::info!("picker: not in front after {ms} ms, bringing it forward");
+            retries += 1;
             rf_win::window::bring_to_front(hwnd);
         }
+        let hwnd = shown_hwnd.get();
+        // next to the dialog DLL's own lines: a picker that opened behind is visible there
+        dialog_log(&format!(
+            "app picker: owner 0x{owner:x}, in front: {}, {retries} retries in {waited} ms",
+            hwnd != 0 && rf_win::window::is_foreground(hwnd)
+        ));
     })
     .detach();
 }
@@ -459,5 +469,16 @@ mod tests {
         assert_eq!(resolve(Some(Path::new(r"C:\a")), "b.txt"), Some(PathBuf::from(r"C:\a\b.txt")));
         assert_eq!(resolve(None, r"D:\x.txt"), Some(PathBuf::from(r"D:\x.txt")));
         assert_eq!(resolve(None, "x.txt"), None);
+    }
+}
+
+/// Appends a line to `%LOCALAPPDATA%/rustyfiles/dialog.log` (where the dialog DLL logs).
+fn dialog_log(line: &str) {
+    use std::io::Write;
+    let Some(dir) = std::env::var_os("LOCALAPPDATA") else { return };
+    let path = PathBuf::from(dir).join("rustyfiles").join("dialog.log");
+    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(&path) {
+        let _ = writeln!(f, "{secs} rustyfiles[{}] app {} {line}", std::process::id(), env!("CARGO_PKG_VERSION"));
     }
 }

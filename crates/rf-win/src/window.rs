@@ -150,6 +150,16 @@ pub fn bring_to_front(hwnd: isize) {
             let _ = AttachThreadInput(mine, theirs, false);
         }
         if GetForegroundWindow() != h {
+            // Windows lifts the foreground lock while Alt is down (how Alt+Tab works): a tap of
+            // it, then the switch (GPUI's activate does the same)
+            use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU};
+            let key = |flags| INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_MENU, dwFlags: flags, ..Default::default() } } };
+            let inputs = [key(KEYBD_EVENT_FLAGS(0)), key(KEYEVENTF_KEYUP)];
+            SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+            let _ = SetForegroundWindow(h);
+            let _ = BringWindowToTop(h);
+        }
+        if GetForegroundWindow() != h {
             // no keyboard focus granted: at least on top of every other window
             use windows::Win32::UI::WindowsAndMessaging::{HWND_NOTOPMOST, HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SetWindowPos};
             let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW;
