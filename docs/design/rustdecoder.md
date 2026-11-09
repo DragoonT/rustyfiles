@@ -43,6 +43,7 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
   `Av1Decoder` (phase 5).
 - `vp9`, `dxva_vp9`, `vp9dec` — VP9 superframe split, uncompressed header, `DXVA_PicParams_VP9`,
   `Vp9Decoder` (phase 5).
+- `dnx`, `dnxtables`, `dnxdec` — Avid DNxHD / DNxHR (VC-3) on the CPU, `DnxDecoder` and `DnxVideo` (phase 6).
 - `d3d11` — video device, decoder creation by profile (H.264, HEVC Main, HEVC Main 10, VP9 0 and 2, AV1 main),
   per-frame submission, output texture array.
 - `present` — NV12 / P010 shaders, rotation, HDR → SDR tone mapping.
@@ -437,9 +438,68 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      converter); 4444 12 bit exactness is within 1, not exact; a 4:4:4 file flagged 10 bit
      (`ap4h` is always read as 12 bit, like ffmpeg); a clip that changes size inside the
      stream is refused; ProRes RAW is another codec and not read; ProRes in Matroska / AVI
-     is not looked for; the `probe` in rf-app's `rd_video.rs` knows nothing of ProRes yet.
-     DNxHR is next (same shape: `dnx.rs` + a `VideoDecoder` variant over the same R16 planar
-     path, which already handles 4:2:2 and 4:4:4 at 10 and 12 bit).
+     is not looked for.
+   - DNxHD / DNxHR done (`dnx` + `dnxtables` + `dnxdec`, `VideoDecoder::Dnx`, MOV `AVdn` / `AVdh`;
+     ffmpeg writes `AVdh`), the same shape as ProRes. Written from SMPTE ST 2019-1:2016, which
+     SMPTE publishes as a PDF (`pub.smpte.org/pub/st2019-1/st2019-1-2016.pdf`); no ffmpeg
+     source read. `dnxtables.rs` was generated from the standard's own tables (Annex D weights,
+     Annex E codeword tables, extracted from the PDF by a throw-away script; every table is a
+     complete prefix code, which the unit test checks). `dnx`: coding unit header (HS, HVN,
+     picture size, bit depth, scan type, CID, sub-sampling, colour format, macroblock row count
+     and the row index table), field coded interlaced frames (two coding units, first field
+     on the even lines), per macroblock row: 12 bit macroblock header (qsf and ACF), 8 blocks (4:2:2) or 12
+     (4:4:4) per macroblock, DC as a bit count + bits (difference from the previous block of the
+     component, reset at each row), AC as amplitude codeword + sign + optional amplitude index +
+     optional zero run, end of block code; dequantisation with qsf and the CID weights; the
+     ProRes integer IDCT (`prores::idct`, reused); output planar `u16`, 8 / 10 / 12 bit. CIDs:
+     1235 1237 1238 1241 1242 1243 1244 1250 1251 1252 1253 1258 1259 (DNxHD, 1080p / 1080i /
+     720p, 8 and 10 bit; 1238 1243 1244 1252 1258 1259 are from the standard's tables only, ffmpeg's
+     encoder does not write them, so they are untested), 1270 (DNxHR 444), 1271 (HQX), 1272 (HQ), 1273 (SQ), 1274 (LB). Rows
+     are independent, so a rayon pool decodes them in parallel (`DnxDecoder::new(threads)`);
+     result identical for any thread count (tested).
+   - Where ffmpeg (and so, in practice, the files) deviates from the standard's text, the code
+     follows the files. Found with hand made frames (a script writes a coding unit with one
+     coefficient of a known level per block using the tables above, ffmpeg decodes it, a
+     forward DCT of its output gives the coefficient it used): (1) the reconstruction point
+     of level `a` is `(a + 3/4)` steps (`((4a + 3) W qsf + 2p) / 4p`), the standard's eq. 8.1 has `(a + 1/2)`;
+     with `(a + 1/2)` the error against ffmpeg is up to 14 at LB, with 3/4 it is 1; (2) CID 1271
+     takes the weights of Table D.4, not D.1 (the standard's C.2 says D.1; the measured weights
+     of ffmpeg's 1271 are D.4 to within the measurement noise). The same frames showed 12 bit
+     samples come out 4 times larger than the ortho-normal DCT of the same coefficients (the
+     DC of 64 is +8 at 10 bit and +32 at 12 bit): applied as an IDCT scale of 4 at 12 bit. A CID
+     1235 / 1241 / 1250 stream uses p = 8, the rest p = 32 (eq. 8.1), as the standard says;
+     ffmpeg agrees on all of them.
+   - Exactness against ffmpeg's decoder (`-f rawvideo`, every sample): entropy decoding, scans,
+     block order, DC prediction, field weaving are right (no error above the IDCT rounding);
+     the whole decode is within 1 of ffmpeg for 4:2:2 (1.3 to 6.3 % of the samples differ by
+     exactly 1: 1080p 1.3 to 2.0 %, 640x360 2.4 to 3.7 %, small odd sizes up to 6 %), within 2 for
+     4:4:4 10 bit (2.7 to 7.3 % differ), and within 6 / 9 for 12 bit hand-patched frames (4
+     times finer scale; mean error 0.12 to 0.15). A float IDCT instead of ours lowers the 1 off
+     rate (3.7 to 2.0 % at LB 640x360), so most of it is ffmpeg's integer IDCT, not ours; the
+     part left is the 3/4 rule, which is a measured law, not a proven one. Table in the test
+     output (`cargo test -p rustdecoder --release --test dnx -- --nocapture`).
+   - Speed, Ryzen 7 9800X3D, decode only, rows on 1 / 4 / 8 / 16 threads: 1080p DNxHR HQ 8 bit
+     (0.92 MB per frame, 184 Mbit/s at 25 fps) 48 / 180 / 342 / 527 fps; 2160p HQX 10 bit (3.64 MB,
+     728 Mbit/s) 13 / 49 / 92 / 143 fps; 1080p 444 10 bit (1.84 MB, 367 Mbit/s) 31 / 114 / 217 /
+     342 fps. With packing and upload (`VideoDecoder::next_frame`): 1080p HQ 165 fps, 2160p HQX
+     46 fps.
+   - Tests: LB / SQ / HQ at 640x360 and 1080p, HQX 10 bit, 444 10 bit, odd sizes (650x366, 322x178,
+     1001x563, 333x211), DNxHD at fixed bit rates (1080p 8 bit 120M and 36M, 10 bit 185M, 720p
+     8 and 10 bit: CIDs 1237 1253 1235 1251 1250), interlaced 1080 8 and 10 bit (CIDs 1242, 1241,
+     field coded), 12 bit through a header patched frame, damaged frames (400 each on HQ, HQX,
+     444, 1080i: no panic), the GPU picture against ffmpeg's RGB (mean abs error 0.04 / 0.01 /
+     0.01 of 255), the player (order, slow polling, ring, seeks, seek and play on) and `Playback`
+     with PCM (pictures follow the audio clock, seeks land on the target). The GPU upload of 8 bit
+     samples is `v * 257` (exactly v / 255 when read as normalised); 10 / 12 bit go to the top bits.
+   - Left: MXF (DNxHD's usual wrapper) is not read, only MOV (`AVdn` / `AVdh`); the RGB colour
+     format (CLF = 1 with ACF = 0 macroblocks, what ffmpeg writes for `gbrp10`), 4:2:0, alpha
+     (the lossless RLE alpha of CID 1270 and the DCT alpha planes) and CID 1260 (macroblock
+     adaptive field / frame) are refused (`Error::Unsupported`); 12 bit was checked only with a
+     10 bit stream whose header was patched (ffmpeg's encoder writes 10 bit for 12 bit input), not
+     with a real 12 bit file; VBR CIDs (1270 to 1274) have no padding and rows are found by the
+     index table, which works, but no VBR clip was available; a clip that changes size inside
+     the stream is refused; the 3/4 reconstruction rule and the CID 1271 weights deserve a check
+     against a file made by Avid or Resolve (none here).
 7. FilmCraft removed in one step: dependency, `rf-player`'s FilmCraft code, texts and notes.
    Not before phases 4 and 6 cover what it plays today (decided 2026-11-09: no format may
    disappear in between).
