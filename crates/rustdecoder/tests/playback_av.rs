@@ -517,6 +517,32 @@ fn clip_prores() -> Option<PathBuf> {
     Some(out)
 }
 
+/// MPEG transport stream: H.264 + AAC (ADTS) through the same sync and seek checks.
+mod mpegts {
+    use super::*;
+
+    fn clip_ts() -> Option<PathBuf> {
+        if !have_ffmpeg() {
+            eprintln!("skipped: ffmpeg not found");
+            return None;
+        }
+        let v = &["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-x264-params", "log-level=error:keyint=15:min-keyint=15:bframes=3:scenecut=0"];
+        Some(common::make_av("pb_h264_aac.ts", v, AAC, &["-f", "mpegts"]))
+    }
+    #[test]
+    fn pictures_follow_the_audio_clock_in_order() {
+        if let Some(c) = clip_ts() {
+            super::pictures_follow_the_audio_clock_in_order(c)
+        }
+    }
+    #[test]
+    fn seeking_lands_both_sides_on_the_target() {
+        if let Some(c) = clip_ts() {
+            super::seeking_lands_both_sides_on_the_target(c)
+        }
+    }
+}
+
 mod prores {
     use super::*;
     #[test]

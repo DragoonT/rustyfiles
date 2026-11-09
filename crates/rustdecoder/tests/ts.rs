@@ -188,3 +188,35 @@ fn mpeg2_mp2_ts_is_listed() {
     let a = &["-c:a", "mp2", "-b:a", "128k"];
     check_clip("t_mpeg2_mp2.ts", v, a, TS, Expect { video: Some(("mpg2", (640, 360))), audio: Some((is_codec("mp2"), 48000, 1, Bytes::Same, 1)) });
 }
+
+#[cfg(windows)]
+mod decode {
+    use super::*;
+
+    fn decode(name: &str, video: &[&str], audio: &[&str], mux: &[&str]) {
+        if !have_ffmpeg() {
+            eprintln!("skipped: ffmpeg not found");
+            return;
+        }
+        let clip = make_av(name, video, audio, mux);
+        let Some((n, first)) = ffcompare::compare_decode(&clip, 100_000) else { return };
+        eprintln!("{name}: {n} frames decoded on the GPU and compared with ffmpeg: {first:?}");
+        assert_eq!(n, 90, "{name}: frame count");
+        assert_eq!(first, None, "{name}");
+    }
+
+    #[test]
+    fn h264_aac_ts() {
+        decode("t_h264_aac.ts", H264, AAC, TS);
+    }
+
+    #[test]
+    fn h264_ac3_m2ts() {
+        decode("t_h264_ac3.m2ts", H264, &["-c:a", "ac3", "-b:a", "192k"], M2TS);
+    }
+
+    #[test]
+    fn hevc_aac_ts() {
+        decode("t_hevc_aac.ts", HEVC, AAC, TS);
+    }
+}

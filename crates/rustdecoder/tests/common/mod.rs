@@ -3,6 +3,8 @@
 
 pub mod av;
 pub mod contclips;
+#[cfg(windows)]
+pub mod ffcompare;
 pub mod fragclips;
 pub mod mkvclips;
 #[allow(unused_imports)]
