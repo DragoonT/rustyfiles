@@ -2466,6 +2466,366 @@
   "en": "Flattening:"
  },
  {
+  "id": "5a82f544",
+  "key": "aynı hızda",
+  "tr": "aynı hızda",
+  "en": "the same speed"
+ },
+ {
+  "id": "6e91c611",
+  "key": "Hız testi",
+  "tr": "Hız testi",
+  "en": "Speed test"
+ },
+ {
+  "id": "0a94c6ac",
+  "key": "{n} özel bellek",
+  "tr": "{n} özel bellek",
+  "en": "{n} private memory"
+ },
+ {
+  "id": "679a756e",
+  "key": "{test}: klasörün açılması",
+  "tr": "{test}: klasörün açılması",
+  "en": "{test}: opening the folder"
+ },
+ {
+  "id": "bbd838dd",
+  "key": "{x} daha hızlı",
+  "tr": "{x} daha hızlı",
+  "en": "{x} faster"
+ },
+ {
+  "id": "5dd42bca",
+  "key": "{x} daha yavaş",
+  "tr": "{x} daha yavaş",
+  "en": "{x} slower"
+ },
+ {
+  "id": "b6ef6a66",
+  "key": "1.000 dosya",
+  "tr": "1.000 dosya",
+  "en": "1,000 files"
+ },
+ {
+  "id": "b8cdb81e",
+  "key": "10.000 dosya",
+  "tr": "10.000 dosya",
+  "en": "10,000 files"
+ },
+ {
+  "id": "292bc3e6",
+  "key": "100.000 dosya",
+  "tr": "100.000 dosya",
+  "en": "100,000 files"
+ },
+ {
+  "id": "31bfe9db",
+  "key": "2.000 resim",
+  "tr": "2.000 resim",
+  "en": "2,000 pictures"
+ },
+ {
+  "id": "1667210f",
+  "key": "10.000 küçük dosya kopyalama",
+  "tr": "10.000 küçük dosya kopyalama",
+  "en": "Copying 10,000 small files"
+ },
+ {
+  "id": "ad2f3a08",
+  "key": "10.000 küçük dosyayı Windows'tan {x} hızlı kopyalıyor",
+  "tr": "10.000 küçük dosyayı Windows'tan {x} hızlı kopyalıyor",
+  "en": "Copies 10,000 small files {x} faster than Windows"
+ },
+ {
+  "id": "f60a90ca",
+  "key": "Açılış (boş klasör)",
+  "tr": "Açılış (boş klasör)",
+  "en": "Start (empty folder)"
+ },
+ {
+  "id": "9cc9278c",
+  "key": "Alt klasörlerde arama",
+  "tr": "Alt klasörlerde arama",
+  "en": "Search in subfolders"
+ },
+ {
+  "id": "de35b75c",
+  "key": "Arkadaşlarına öner",
+  "tr": "Arkadaşlarına öner",
+  "en": "Recommend to friends"
+ },
+ {
+  "id": "f9f785b8",
+  "key": "Ayrıntılar: süre, işlemci ve bellek",
+  "tr": "Ayrıntılar: süre, işlemci ve bellek",
+  "en": "Details: time, CPU and memory"
+ },
+ {
+  "id": "bf91b281",
+  "key": "Başlıyor…",
+  "tr": "Başlıyor…",
+  "en": "Starting…"
+ },
+ {
+  "id": "9588eee4",
+  "key": "bellek",
+  "tr": "bellek",
+  "en": "memory"
+ },
+ {
+  "id": "8eb0c7e6",
+  "key": "Bilgisayar okunuyor…",
+  "tr": "Bilgisayar okunuyor…",
+  "en": "Reading this PC…"
+ },
+ {
+  "id": "dd69b8f7",
+  "key": "Bilgisayarımdaki hız testi",
+  "tr": "Bilgisayarımdaki hız testi",
+  "en": "Speed test on my PC"
+ },
+ {
+  "id": "7d0f3772",
+  "key": "Bu bilgisayarda hız testi",
+  "tr": "Bu bilgisayarda hız testi",
+  "en": "Speed test on this PC"
+ },
+ {
+  "id": "72ca8b6c",
+  "key": "Dosya Gezgini",
+  "tr": "Dosya Gezgini",
+  "en": "File Explorer"
+ },
+ {
+  "id": "63d7c6ab",
+  "key": "Durdur",
+  "tr": "Durdur",
+  "en": "Stop"
+ },
+ {
+  "id": "ae239d6a",
+  "key": "işlemci",
+  "tr": "işlemci",
+  "en": "CPU"
+ },
+ {
+  "id": "58c73c25",
+  "key": "Kart çizilemedi",
+  "tr": "Kart çizilemedi",
+  "en": "Couldn't draw the card"
+ },
+ {
+  "id": "ba7469af",
+  "key": "Kart İndirilenler klasörüne kaydedildi",
+  "tr": "Kart İndirilenler klasörüne kaydedildi",
+  "en": "Card saved to Downloads"
+ },
+ {
+  "id": "8434c82c",
+  "key": "Kartı kaydet",
+  "tr": "Kartı kaydet",
+  "en": "Save card"
+ },
+ {
+  "id": "82254b3b",
+  "key": "Kartı kopyala",
+  "tr": "Kartı kopyala",
+  "en": "Copy card"
+ },
+ {
+  "id": "a344537c",
+  "key": "Klasörün açılması, gerçek hızda",
+  "tr": "Klasörün açılması, gerçek hızda",
+  "en": "Opening a folder, at real speed"
+ },
+ {
+  "id": "c649535d",
+  "key": "Kopyalama: 1 GB'lık tek dosya",
+  "tr": "Kopyalama: 1 GB'lık tek dosya",
+  "en": "Copying: one 1 GB file"
+ },
+ {
+  "id": "f9537561",
+  "key": "Kopyalama: 10.000 küçük dosya",
+  "tr": "Kopyalama: 10.000 küçük dosya",
+  "en": "Copying: 10,000 small files"
+ },
+ {
+  "id": "e7d40b66",
+  "key": "kurulu değil",
+  "tr": "kurulu değil",
+  "en": "not installed"
+ },
+ {
+  "id": "2cf069d0",
+  "key": "Listeleniyor…",
+  "tr": "Listeleniyor…",
+  "en": "Listing…"
+ },
+ {
+  "id": "d6da89e7",
+  "key": "Metni kopyala",
+  "tr": "Metni kopyala",
+  "en": "Copy text"
+ },
+ {
+  "id": "aa39b260",
+  "key": "öğe",
+  "tr": "öğe",
+  "en": "items"
+ },
+ {
+  "id": "12410f1f",
+  "key": "ölçülemedi",
+  "tr": "ölçülemedi",
+  "en": "couldn't be measured"
+ },
+ {
+  "id": "eb00c16e",
+  "key": "Panoya kopyalanamadı",
+  "tr": "Panoya kopyalanamadı",
+  "en": "Couldn't copy to the clipboard"
+ },
+ {
+  "id": "cf1e0c2e",
+  "key": "rustyfiles bilgisayarımda 100.000 dosyalık klasörü {ours} sürede açtı, Dosya Gezgini {theirs}.",
+  "tr": "rustyfiles bilgisayarımda 100.000 dosyalık klasörü {ours} sürede açtı, Dosya Gezgini {theirs}.",
+  "en": "rustyfiles opened a 100,000-file folder on my PC in {ours}. File Explorer took {theirs}."
+ },
+ {
+  "id": "f8fbf8fa",
+  "key": "rustyfiles bu bilgisayarda büyük klasörü Dosya Gezgini'nden {x} hızlı açtı.",
+  "tr": "rustyfiles bu bilgisayarda büyük klasörü Dosya Gezgini'nden {x} hızlı açtı.",
+  "en": "On this PC, rustyfiles opened the big folder {x} faster than File Explorer."
+ },
+ {
+  "id": "cee01668",
+  "key": "rustyfiles motorları ve Windows",
+  "tr": "rustyfiles motorları ve Windows",
+  "en": "rustyfiles' engines and Windows'"
+ },
+ {
+  "id": "8fcddc58",
+  "key": "rustyfiles: Windows için hızlı, ücretsiz ve açık kaynak dosya yöneticisi.",
+  "tr": "rustyfiles: Windows için hızlı, ücretsiz ve açık kaynak dosya yöneticisi.",
+  "en": "rustyfiles: a fast, free and open-source file manager for Windows."
+ },
+ {
+  "id": "74633f5a",
+  "key": "saniyede {n} öğe",
+  "tr": "saniyede {n} öğe",
+  "en": "{n} items a second"
+ },
+ {
+  "id": "3dc302ff",
+  "key": "Sonuç kartı panoya kopyalandı",
+  "tr": "Sonuç kartı panoya kopyalandı",
+  "en": "Result card copied"
+ },
+ {
+  "id": "00ab5b55",
+  "key": "Sonuç kartını paylaş: bilgisayarının özellikleri ve süreler tek bir görselde.",
+  "tr": "Sonuç kartını paylaş: bilgisayarının özellikleri ve süreler tek bir görselde.",
+  "en": "Share the result card: your PC's specs and the times in one picture."
+ },
+ {
+  "id": "df593bb9",
+  "key": "Sonuçlar panoya kopyalandı",
+  "tr": "Sonuçlar panoya kopyalandı",
+  "en": "Results copied"
+ },
+ {
+  "id": "970cb91f",
+  "key": "Tekrar oynat",
+  "tr": "Tekrar oynat",
+  "en": "Replay"
+ },
+ {
+  "id": "a0be23b5",
+  "key": "Test bitti.",
+  "tr": "Test bitti.",
+  "en": "The test is done."
+ },
+ {
+  "id": "3f68bb41",
+  "key": "Test dosyaları hazırlanıyor:",
+  "tr": "Test dosyaları hazırlanıyor:",
+  "en": "Preparing test files:"
+ },
+ {
+  "id": "dc862c8c",
+  "key": "Test dosyalarını sil",
+  "tr": "Test dosyalarını sil",
+  "en": "Delete test files"
+ },
+ {
+  "id": "c02bb8f6",
+  "key": "Test tamamlanamadı:",
+  "tr": "Test tamamlanamadı:",
+  "en": "The test couldn't finish:"
+ },
+ {
+  "id": "2ffcbe05",
+  "key": "Test",
+  "tr": "Test",
+  "en": "Test"
+ },
+ {
+  "id": "95ce893a",
+  "key": "Testi başlat",
+  "tr": "Testi başlat",
+  "en": "Start the test"
+ },
+ {
+  "id": "e80363df",
+  "key": "Ücretsiz ve açık kaynak · Windows",
+  "tr": "Ücretsiz ve açık kaynak · Windows",
+  "en": "Free and open source · Windows"
+ },
+ {
+  "id": "4bd1437f",
+  "key": "Ücretsiz ve açık kaynak:",
+  "tr": "Ücretsiz ve açık kaynak:",
+  "en": "Free and open source:"
+ },
+ {
+  "id": "f8438044",
+  "key": "Verdim",
+  "tr": "Verdim",
+  "en": "I did"
+ },
+ {
+  "id": "1230b35c",
+  "key": "Yeniden çalıştır",
+  "tr": "Yeniden çalıştır",
+  "en": "Run again"
+ },
+ {
+  "id": "0a4fc336",
+  "key": "ZIP çıkarma: 10.000 dosya",
+  "tr": "ZIP çıkarma: 10.000 dosya",
+  "en": "Extracting a ZIP: 10,000 files"
+ },
+ {
+  "id": "162b2359",
+  "key": "Her uygulama aynı klasörleri sırayla açar; süre, işlemci ve bellek ölçülür. Test sırasında diğer uygulamaların pencereleri açılıp kapanır: fareye ve klavyeye dokunmayın. Yaklaşık 5–10 dakika sürer; test dosyaları ilk seferde hazırlanır (~1,3 GB, yerel uygulama verisinde).",
+  "tr": "Her uygulama aynı klasörleri sırayla açar; süre, işlemci ve bellek ölçülür. Test sırasında diğer uygulamaların pencereleri açılıp kapanır: fareye ve klavyeye dokunmayın. Yaklaşık 5–10 dakika sürer; test dosyaları ilk seferde hazırlanır (~1,3 GB, yerel uygulama verisinde).",
+  "en": "Each app opens the same folders in turn; time, CPU and memory are measured. Other apps' windows open and close during the test: don't touch the mouse or keyboard. It takes about 5–10 minutes; the test files are made the first time (~1.3 GB, in local app data)."
+ },
+ {
+  "id": "f52afac8",
+  "key": "Ortanca değerler (3 çalıştırma, ısınma turu sayılmaz). Süre: uygulama başlatıldığından pencere içeriği 500 ms boyunca değişmeyene dek. * işaretli değerlerde uygulama zaten çalışıyordu: işlemci pencere açıldıktan sonrasını, bellek tüm süreci gösterir.",
+  "tr": "Ortanca değerler (3 çalıştırma, ısınma turu sayılmaz). Süre: uygulama başlatıldığından pencere içeriği 500 ms boyunca değişmeyene dek. * işaretli değerlerde uygulama zaten çalışıyordu: işlemci pencere açıldıktan sonrasını, bellek tüm süreci gösterir.",
+  "en": "Medians of 3 runs (a warm-up run isn't counted). Time: from starting the app until its window stops changing for 500 ms. * The app was already running: CPU counts from when the window appeared, memory is the whole process."
+ },
+ {
+  "id": "252ff602",
+  "key": "rustyfiles ücretsiz ve tek kişinin emeği. Beğendiysen GitHub'da bir yıldız ver: başkalarının da bulmasına yardım eder.",
+  "tr": "rustyfiles ücretsiz ve tek kişinin emeği. Beğendiysen GitHub'da bir yıldız ver: başkalarının da bulmasına yardım eder.",
+  "en": "rustyfiles is free and made by one person. If you like it, star it on GitHub: it helps others find it."
+ },
+ {
   "id": "c0ac6ae1",
   "key": "E-posta okunamadı",
   "tr": "E-posta okunamadı",
