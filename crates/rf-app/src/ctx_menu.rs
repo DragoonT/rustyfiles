@@ -208,6 +208,24 @@ impl FolderView {
             };
             v.push(Item::action(label, icon(L::AtSign), move |w, cx| crate::aliases::edit_dialog(d.clone(), w, cx)));
         }
+        // leave a folder (a build output, a huge cache) out of the search index
+        if single_dir && cx.global::<crate::settings::Settings>().name_index && crate::archive_view::split(&target_dir).is_none() {
+            let key = target_dir.to_string_lossy().trim_end_matches('\\').to_string();
+            let out = cx.global::<crate::settings::Settings>().index_excluded.iter().any(|e| e.eq_ignore_ascii_case(&key));
+            v.push(
+                Item::action(t!("Aramada dizine alma"), icon(L::SearchSlash), move |_, cx| {
+                    let key = key.clone();
+                    crate::settings::update(cx, |s| {
+                        if out {
+                            s.index_excluded.retain(|e| !e.eq_ignore_ascii_case(&key));
+                        } else {
+                            s.index_excluded.push(key);
+                        }
+                    });
+                })
+                .checked(out),
+            );
+        }
         if single_dir && show_flatten {
             let d = target_dir.clone();
             v.push(Item::action(t!("Klasörü düzleştir"), icon(L::FolderTree), act(me, move |v, w, cx| v.flatten_folder(d.clone(), w, cx))));

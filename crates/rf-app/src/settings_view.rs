@@ -882,6 +882,16 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     v.push(card(
         p,
+        L::Zap,
+        t!("Hızlı arama dizini"),
+        Some(&name_index_status()),
+        sw("name-index", p, s.name_index, |s, v| s.name_index = v),
+    ));
+    if s.name_index {
+        v.push(index_exclusions(p, s));
+    }
+    v.push(card(
+        p,
         L::HardDrive,
         t!("Boyut biçimi"),
         None,
@@ -1858,4 +1868,96 @@ fn pick_into(_window: &mut Window, cx: &mut App, title: &str, target: PickTarget
         });
     })
     .detach();
+}
+
+/// "Local drives' file names are kept in an index … · C:\ 2.1 million entries, 84 MB · E:\ indexing…"
+fn name_index_status() -> String {
+    let mut s = t!("Yerel sürücülerdeki dosya adları bir dizinde tutulur: alt klasörlerde arama milisaniyeler sürer. Dizin arka planda hazırlanır ve güncel tutulur.").to_string();
+    let parts: Vec<String> = rf_win::indexer::status()
+        .into_iter()
+        .map(|(root, state, live, mem)| {
+            let r = root.to_string_lossy().trim_end_matches('\\').to_string();
+            match state {
+                rf_win::indexer::State::Building => format!("{r} {}", t!("hazırlanıyor…")),
+                rf_win::indexer::State::Failed => format!("{r} {}", t!("dizinlenemedi")),
+                rf_win::indexer::State::Ready => {
+                    t!("{root} {n} öğe, {mb} MB").replace("{root}", &r).replace("{n}", &crate::bench_view::count(live as u64)).replace("{mb}", &(mem >> 20).to_string())
+                }
+            }
+        })
+        .collect();
+    if !parts.is_empty() {
+        s.push_str(" · ");
+        s.push_str(&parts.join(" · "));
+    }
+    s
+}
+
+/// The folders left out of the search index: the user's (removable) and the built-in ones.
+fn index_exclusions(p: &Palette, s: &Settings) -> AnyElement {
+    let mut list = v_flex().py_1();
+    for (i, dir) in s.index_excluded.iter().enumerate() {
+        let d = dir.clone();
+        list = list.child(
+            h_flex()
+                .min_h(px(40.))
+                .pl(px(56.))
+                .pr_4()
+                .gap_3()
+                .items_center()
+                .child(Icon::new(L::FolderX).size(px(14.)).text_color(p.text_secondary))
+                .child(div().flex_1().min_w_0().text_sm().text_ellipsis().overflow_hidden().whitespace_nowrap().child(dir.clone()))
+                .child(
+                    div()
+                        .id(("idx-excl-rm", i))
+                        .p_1()
+                        .rounded(theme::RADIUS_SM)
+                        .hover(|st| st.bg(p.pressed))
+                        .child(Icon::new(L::X).size(px(14.)).text_color(p.text_secondary))
+                        .on_click(move |_, _, cx| {
+                            let d = d.clone();
+                            settings::update(cx, |s| s.index_excluded.retain(|e| *e != d));
+                        }),
+                ),
+        );
+    }
+    let defaults = rf_win::nameindex::default_excluded_names().join(", ");
+    shell(p)
+        .child(
+            h_flex()
+                .min_h(px(48.))
+                .pl(px(56.))
+                .pr_4()
+                .py_2()
+                .gap_4()
+                .items_center()
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().text_sm().child(t!("Dizine alınmayan klasörler")))
+                        .child(div().text_xs().text_color(p.text_secondary).child(format!(
+                            "{} {defaults}, Windows. {}",
+                            t!("Her zaman:"),
+                            t!("Bu klasörlerin içinde arama diskte yapılır. Bir klasörü sağ tıklayıp \"Aramada dizine alma\" ile de ekleyebilirsiniz.")
+                        ))),
+                )
+                .child(button("idx-excl-add", p, t!("Klasör ekle…"), |window, cx| {
+                    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                    let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
+                        Ok(RawWindowHandle::Win32(h)) => windows::Win32::Foundation::HWND(h.hwnd.get() as *mut _),
+                        _ => windows::Win32::Foundation::HWND::default(),
+                    };
+                    if let Some(dir) = rf_win::dialogs::pick(owner, t!("Dizine alınmayacak klasör"), rf_win::dialogs::Pick::Folder) {
+                        let d = dir.to_string_lossy().trim_end_matches('\\').to_string();
+                        settings::update(cx, |s| {
+                            if !s.index_excluded.iter().any(|e| e.eq_ignore_ascii_case(&d)) {
+                                s.index_excluded.push(d);
+                            }
+                        });
+                    }
+                })),
+        )
+        .when(!s.index_excluded.is_empty(), |d| d.child(div().h(px(1.)).bg(p.divider)).child(list))
+        .into_any_element()
 }

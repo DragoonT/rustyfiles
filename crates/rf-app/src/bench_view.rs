@@ -91,7 +91,7 @@ fn mb(bytes: u64) -> String {
 }
 
 /// 2330750 → "2.330.750" (Turkish) / "2,330,750".
-fn count(n: u64) -> String {
+pub(crate) fn count(n: u64) -> String {
     let sep = if crate::i18n::t("1.000 dosya").starts_with("1.000") { '.' } else { ',' };
     let s = n.to_string();
     let mut out = String::new();
@@ -243,6 +243,106 @@ fn replay(test: OpenTest, cx: &mut App) {
 
 // ---------------------------------------------------------------- sharing
 
+/// base64url without padding.
+fn b64url(data: &[u8]) -> String {
+    const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for k in 0..c.len() + 1 {
+            out.push(A[(n >> (18 - 6 * k) & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+fn app_key(k: AppKind) -> &'static str {
+    match k {
+        AppKind::Rustyfiles => "rf",
+        AppKind::Explorer => "ex",
+        AppKind::Files => "fi",
+        AppKind::FilePilot => "fp",
+    }
+}
+
+/// The results as the site reads them (link format v1, agreed with the site): a small JSON,
+/// base64url, in the path of rustyfiles.com/r/…. Measurements and the PC model only.
+pub(crate) fn share_payload(r: &Results) -> serde_json::Value {
+    use serde_json::{Map, Value, json};
+    let mut open = Vec::new();
+    let mut shared: Vec<&str> = Vec::new();
+    for o in &r.open {
+        let mut row = Map::new();
+        let n = match o.test {
+            OpenTest::Start => 0,
+            OpenTest::Files1k => 1000,
+            OpenTest::Files10k => 10000,
+            OpenTest::Files100k => 100000,
+            OpenTest::Images => {
+                row.insert("img".into(), json!(true));
+                2000
+            }
+        };
+        row.insert("n".into(), json!(n));
+        for a in &o.apps {
+            let m = a.median();
+            row.insert(app_key(a.app).into(), m.map_or(Value::Null, |m| json!(m.settled_ms.round() as i64)));
+            if m.is_some_and(|m| m.shared) && !shared.contains(&app_key(a.app)) {
+                shared.push(app_key(a.app));
+            }
+        }
+        open.push(Value::Object(row));
+    }
+    let mut out = json!({
+        "v": 1,
+        "app": r.version,
+        "t": r.when / 1000,
+        "pc": {"cpu": r.machine.cpu, "ram": r.machine.ram_gb, "disk": r.machine.disk, "os": r.machine.windows, "cores": r.machine.cores},
+        "open": open,
+        "shared": shared,
+    });
+    let o = out.as_object_mut().expect("object");
+    // CPU and memory from the largest folder that was opened
+    let size = |t: OpenTest| match t {
+        OpenTest::Files100k => 100000,
+        OpenTest::Files10k => 10000,
+        OpenTest::Files1k => 1000,
+        _ => 0,
+    };
+    if let Some(l) = r.open.iter().filter(|x| size(x.test) > 0).max_by_key(|x| size(x.test)) {
+        let (mut cpu, mut mem) = (Map::new(), Map::new());
+        for a in &l.apps {
+            let m = a.median();
+            cpu.insert(app_key(a.app).into(), m.map_or(Value::Null, |m| json!(m.cpu_ms.round() as i64)));
+            mem.insert(app_key(a.app).into(), m.map_or(Value::Null, |m| json!(((if m.private > 0 { m.private } else { m.ram }) as f64 / 1_048_576.0).round() as i64)));
+        }
+        o.insert("of".into(), json!(size(l.test)));
+        o.insert("cpu".into(), Value::Object(cpu));
+        o.insert("mem".into(), Value::Object(mem));
+    }
+    let e = &r.engines;
+    let vs = |v: &Option<crate::bench::Versus>| v.as_ref().and_then(|v| Some((v.ours_ms?.round() as i64, v.windows_ms?.round() as i64)));
+    if let Some((a, b)) = vs(&e.copy_small) {
+        o.insert("copy".into(), json!({"n": 10000, "mb": 39, "rf": a, "win": b}));
+    }
+    if let Some((a, b)) = vs(&e.copy_big) {
+        o.insert("big".into(), json!({"mb": 1024, "rf": a, "win": b}));
+    }
+    if let Some((a, b)) = vs(&e.unzip) {
+        o.insert("zip".into(), json!({"n": 10000, "rf": a, "win": b}));
+    }
+    if let Some(ms) = e.search_ms {
+        o.insert("search".into(), json!({"n": e.search_entries, "rf": ms.round() as i64}));
+    }
+    out
+}
+
+/// rustyfiles.com/r/… for these results.
+pub(crate) fn share_link(r: &Results) -> String {
+    let json = serde_json::to_vec(&share_payload(r)).unwrap_or_default();
+    format!("{SITE}/r/{}", b64url(&json))
+}
+
 fn summary_text(r: &Results) -> String {
     let mut lines = vec![format!("rustyfiles · {}", machine_line(&r.machine))];
     for o in &r.open {
@@ -259,6 +359,7 @@ fn summary_text(r: &Results) -> String {
             lines.push(format!("{}: rustyfiles {} · Windows {}", t!("10.000 küçük dosya kopyalama"), ms(a), ms(b)));
         }
     }
+    lines.push(format!("{} {}", t!("Sonuçlar:"), share_link(r)));
     lines.push(format!("{} {SITE}", t!("Ücretsiz ve açık kaynak:")));
     lines.join("\n")
 }
@@ -801,10 +902,16 @@ fn share_card(p: &Palette, note_text: Option<String>) -> AnyElement {
                 .child(button("bench-copy-card", p, L::Image, t!("Kartı kopyala"), true, |w, cx| copy_picture(w, cx)))
                 .child(button("bench-save-card", p, L::Download, t!("Kartı kaydet"), false, |_, cx| save_picture(cx)))
                 .child(button("bench-copy-text", p, L::Copy, t!("Metni kopyala"), false, |w, cx| copy_text(w, cx)))
-                .child(social("bench-x", "X", |r| format!("https://twitter.com/intent/tweet?text={}&url={}", enc(&headline(r)), enc(SITE))))
-                .child(social("bench-wa", "WhatsApp", |r| format!("https://wa.me/?text={}", enc(&format!("{} {SITE}", headline(r))))))
-                .child(social("bench-reddit", "Reddit", |r| format!("https://www.reddit.com/submit?url={}&title={}", enc(SITE), enc(&headline(r)))))
-                .child(social("bench-li", "LinkedIn", |_| format!("https://www.linkedin.com/sharing/share-offsite/?url={}", enc(SITE)))),
+                .child(button("bench-copy-link", p, L::Link, t!("Bağlantıyı kopyala"), false, |_, cx| {
+                    if let Some(r) = state(cx).results.clone() {
+                        cx.write_to_clipboard(ClipboardItem::new_string(share_link(&r)));
+                        note(t!("Bağlantı kopyalandı"), cx);
+                    }
+                }))
+                .child(social("bench-x", "X", |r| format!("https://twitter.com/intent/tweet?text={}&url={}", enc(&headline(r)), enc(&share_link(r)))))
+                .child(social("bench-wa", "WhatsApp", |r| format!("https://wa.me/?text={}", enc(&format!("{} {}", headline(r), share_link(r))))))
+                .child(social("bench-reddit", "Reddit", |r| format!("https://www.reddit.com/submit?url={}&title={}", enc(&share_link(r)), enc(&headline(r)))))
+                .child(social("bench-li", "LinkedIn", |r| format!("https://www.linkedin.com/sharing/share-offsite/?url={}", enc(&share_link(r))))),
         )
         .into_any_element()
 }
@@ -818,6 +925,25 @@ mod tests {
         let pic = rf_win::bench::render_card(&super::card_svg(&r), 1.0).unwrap();
         assert_eq!((pic.width, pic.height), (1200, 675));
         std::fs::write(std::env::temp_dir().join("rf-bench-card.png"), &pic.png).unwrap();
+    }
+
+    #[test]
+    fn base64url_matches_the_standard() {
+        // RFC 4648 test vectors, url alphabet, no padding
+        for (i, o) in [("", ""), ("f", "Zg"), ("fo", "Zm8"), ("foo", "Zm9v"), ("foob", "Zm9vYg"), ("fooba", "Zm9vYmE"), ("foobar", "Zm9vYmFy")] {
+            assert_eq!(super::b64url(i.as_bytes()), o);
+        }
+        assert_eq!(super::b64url(&[0xfb, 0xff]), "-_8");
+    }
+
+    #[test]
+    fn payload_follows_the_site_format() {
+        let Some(r) = crate::bench::last_results() else { return };
+        let v = super::share_payload(&r);
+        assert_eq!(v["v"], 1);
+        assert!(v["pc"]["cpu"].is_string() && v["open"].is_array());
+        let link = super::share_link(&r);
+        assert!(link.starts_with("https://rustyfiles.com/r/") && link.len() < 2900, "{link}");
     }
 
     #[test]

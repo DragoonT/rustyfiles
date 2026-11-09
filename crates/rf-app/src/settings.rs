@@ -347,6 +347,10 @@ pub struct Settings {
     pub browse_archives: bool,
     /// Search through the Windows Search index (contents, AQS) where the folder is indexed.
     pub search_index: bool,
+    /// Our own name index of the local drives: searching in subfolders takes milliseconds.
+    pub name_index: bool,
+    /// Folders left out of the name index (searching inside them walks the disk).
+    pub index_excluded: Vec<String>,
 
     // ---- Developer tools
     pub ide_button: IdePref,
@@ -433,6 +437,8 @@ impl Default for Settings {
             show_libraries: false,
             browse_archives: true,
             search_index: true,
+            name_index: true,
+            index_excluded: Vec::new(),
             ide_button: IdePref::GitRepos,
             ide_path: String::new(),
             show_flatten: false,
@@ -549,6 +555,7 @@ impl Settings {
     }
 
     fn apply_side_effects(&self) {
+        sync_name_index(self.name_index, &self.index_excluded);
         crate::i18n::set(self.language);
         crate::aliases::set(self.folder_aliases.clone());
         crate::background::sync_tray(self.run_in_background);
@@ -688,4 +695,42 @@ yeni_alan = 3").unwrap();
         assert_eq!(s.sidebar_width, Settings::default().sidebar_width);
         assert!(Settings::parse_lenient("[[[bozuk").is_err(), "syntax errors still fail");
     }
+}
+
+/// Starts or stops the name index when the setting changes. The first start waits a few seconds
+/// so it never competes with opening the window.
+fn sync_name_index(on: bool, excluded: &[String]) {
+    use std::sync::atomic::{AtomicU8, Ordering};
+    // 0 = not decided yet, 1 = off, 2 = on
+    static STATE: AtomicU8 = AtomicU8::new(0);
+    static EXCLUDED: parking_lot::Mutex<Option<Vec<String>>> = parking_lot::Mutex::new(None);
+    let list_changed = {
+        let mut e = EXCLUDED.lock();
+        let changed = e.as_deref() != Some(excluded);
+        if changed {
+            *e = Some(excluded.to_vec());
+            rf_win::nameindex::set_excluded(&excluded.iter().map(std::path::PathBuf::from).collect::<Vec<_>>());
+        }
+        changed
+    };
+    let want = if on { 2 } else { 1 };
+    let was = STATE.swap(want, Ordering::Relaxed);
+    // a changed exclusion list rebuilds a running index (the fresh walk leaves the folders out)
+    if was == want && !(on && list_changed && was != 0) {
+        return;
+    }
+    if !on {
+        std::thread::spawn(rf_win::indexer::stop);
+        return;
+    }
+    let delay = if was == 0 { 5 } else { 0 };
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(delay));
+        // extra instances (tests, the speed test's) leave it to the main one
+        if STATE.load(Ordering::Relaxed) != 2 || std::env::var_os("RUSTYFILES_NO_INDEX").is_some() || std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() {
+            return;
+        }
+        let dir = std::env::var_os("LOCALAPPDATA").map_or_else(std::env::temp_dir, std::path::PathBuf::from).join("rustyfiles").join("index");
+        rf_win::indexer::start(rf_win::indexer::local_roots(), dir);
+    });
 }

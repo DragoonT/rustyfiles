@@ -1026,16 +1026,27 @@ impl FolderView {
                         let _ = tx.unbounded_send(Msg::Done(Ok(n)));
                         return;
                     }
-                    // Windows Search index first (names + contents + AQS) where the folder is
-                    // indexed; our own walker otherwise, for wildcards, or if the index fails
+                    // 1. our name index (milliseconds) when it covers this folder
                     let glob = query.contains(['*', '?']);
+                    let mut seen: Option<std::collections::HashSet<String>> = None;
+                    let mut found = 0usize;
+                    if let Some(paths) = rf_win::indexer::search(&query, &root, include_hidden, 50_000) {
+                        found = send_index_hits(&paths, &tx, &cancel);
+                        seen = Some(paths.iter().map(|p| p.to_string_lossy().to_lowercase()).collect());
+                    }
+                    // 2. Windows Search (names + contents + AQS) where the folder is indexed: with
+                    //    our index, only what it adds (matches inside files)
                     if use_index && !glob && rf_win::wsearch::is_indexed(&root) {
                         let tx2 = tx.clone();
+                        let seen2 = seen.as_ref();
                         let r = rf_win::wsearch::search(&root, &query, 50_000, &|| cancel.load(Ordering::Relaxed), &mut |hits| {
                             let mut es = Vec::with_capacity(hits.len());
                             let mut ps = Vec::with_capacity(hits.len());
                             for h in hits {
                                 if !include_hidden && h.entry.is_hidden() {
+                                    continue;
+                                }
+                                if seen2.is_some_and(|s| s.contains(&h.path.to_string_lossy().to_lowercase())) {
                                     continue;
                                 }
                                 let parent: Arc<std::path::Path> = h.path.parent().unwrap_or(&h.path).into();
@@ -1046,12 +1057,18 @@ impl FolderView {
                         });
                         match r {
                             Ok(n) => {
-                                let _ = tx.unbounded_send(Msg::Done(Ok(n)));
+                                let _ = tx.unbounded_send(Msg::Done(Ok(n + found)));
                                 return;
                             }
-                            Err(e) => log::warn!("index search failed, walking instead: {e:#}"),
+                            Err(e) if seen.is_none() => log::warn!("index search failed, walking instead: {e:#}"),
+                            Err(e) => log::warn!("Windows Search failed: {e:#}"),
                         }
                     }
+                    if seen.is_some() {
+                        let _ = tx.unbounded_send(Msg::Done(Ok(found)));
+                        return;
+                    }
+                    // 3. walking the disk
                     let q = rf_win::search::SearchQuery { root, pattern: query, include_hidden, max_results: 50_000 };
                     let tx2 = tx.clone();
                     let r = rf_win::search::search(&q, &|| cancel.load(Ordering::Relaxed), &mut |hits| {
@@ -3580,4 +3597,34 @@ mod known_kind_tests {
         let sibling = std::path::PathBuf::from(format!("{} old", pics.display()));
         assert_eq!(known_kind(&sibling), None);
     }
+}
+
+/// Name-index hits to rows: each path is looked up (size, dates, attributes) on 8 threads, 2 000
+/// at a time, and sent in order; paths gone since they were indexed are left out. Returns how
+/// many were sent.
+fn send_index_hits(paths: &[PathBuf], tx: &mpsc::UnboundedSender<Msg>, cancel: &AtomicBool) -> usize {
+    use std::os::windows::fs::MetadataExt;
+    let ms = |t: std::io::Result<std::time::SystemTime>| t.ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as i64);
+    let row = |p: &PathBuf| -> Option<(Entry, Arc<std::path::Path>)> {
+        let m = std::fs::symlink_metadata(p).ok()?;
+        let kind = if m.is_dir() { rf_core::EntryKind::Dir } else { rf_core::EntryKind::File };
+        let name = p.file_name()?.to_string_lossy().into_owned();
+        let parent: Arc<std::path::Path> = p.parent().unwrap_or(p).into();
+        Some((Entry::new(&name, kind, if m.is_dir() { 0 } else { m.len() }, ms(m.modified()), ms(m.created()), m.file_attributes()), parent))
+    };
+    let mut sent = 0usize;
+    for batch in paths.chunks(2000) {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let per = batch.len().div_ceil(8).max(1);
+        let parts: Vec<Vec<(Entry, Arc<std::path::Path>)>> = std::thread::scope(|s| {
+            let handles: Vec<_> = batch.chunks(per).map(|c| s.spawn(move || c.iter().filter_map(row).collect::<Vec<_>>())).collect();
+            handles.into_iter().map(|h| h.join().unwrap_or_default()).collect()
+        });
+        let (es, ps): (Vec<Entry>, Vec<Arc<std::path::Path>>) = parts.into_iter().flatten().unzip();
+        sent += es.len();
+        let _ = tx.unbounded_send(Msg::Hits(es, ps));
+    }
+    sent
 }

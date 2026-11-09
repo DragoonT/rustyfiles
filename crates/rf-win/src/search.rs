@@ -53,18 +53,20 @@ pub struct SearchStats {
 
 /// Lowercases and drops the combining dot above (U+0307) that `"İ".to_lowercase()` yields, so
 /// "İ" and "i" compare equal.
+/// Case-folded for matching. Dotless ı counts as i (and İ, lowered to i + combining dot, loses
+/// the dot), so "IŞIK", "ışık" and "Işık" find each other, as Windows' own comparison does.
 fn fold(s: &str) -> Vec<char> {
-    s.to_lowercase().chars().filter(|&c| c != '\u{307}').collect()
+    s.to_lowercase().chars().filter(|&c| c != '\u{307}').map(|c| if c == 'ı' { 'i' } else { c }).collect()
 }
 
-enum Matcher {
+pub(crate) enum Matcher {
     All,
     Substr(Vec<char>),
     Glob(Vec<char>),
 }
 
 impl Matcher {
-    fn new(pattern: &str) -> Self {
+    pub(crate) fn new(pattern: &str) -> Self {
         let p = fold(pattern.trim());
         if p.is_empty() {
             Matcher::All
@@ -75,7 +77,7 @@ impl Matcher {
         }
     }
 
-    fn is_match(&self, name: &str) -> bool {
+    pub(crate) fn is_match(&self, name: &str) -> bool {
         match self {
             Matcher::All => true,
             Matcher::Substr(p) => {
