@@ -250,3 +250,60 @@ macro_rules! both {
 }
 
 both!(plays_in_order_without_extra_repeats, slow_polling_drops_and_never_goes_back, decode_ahead_stays_in_the_ring, seek_lands_on_the_right_picture, seek_then_play_on);
+
+/// ProRes 422 (decoded on the CPU, every picture a sync sample): the same checks.
+fn clip_prores() -> Option<std::path::PathBuf> {
+    if !have_ffmpeg() {
+        eprintln!("skipped: ffmpeg not found");
+        return None;
+    }
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let out = temp_dir().join("p_prores_hq.mov");
+    if !out.exists() {
+        let tmp = out.with_file_name("part-p_prores_hq.mov");
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-t", "3", "-vf", "noise=alls=6:allf=t"])
+            .args(["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le", "-f", "mov"])
+            .arg(&tmp)
+            .status()
+            .expect("ffmpeg");
+        assert!(status.success(), "ffmpeg could not make the ProRes clip");
+        std::fs::rename(&tmp, &out).unwrap();
+    }
+    Some(out)
+}
+
+mod prores {
+    use super::*;
+    #[test]
+    fn plays_in_order_without_extra_repeats() {
+        if let Some(c) = clip_prores() {
+            super::plays_in_order_without_extra_repeats(c)
+        }
+    }
+    #[test]
+    fn slow_polling_drops_and_never_goes_back() {
+        if let Some(c) = clip_prores() {
+            super::slow_polling_drops_and_never_goes_back(c)
+        }
+    }
+    #[test]
+    fn decode_ahead_stays_in_the_ring() {
+        if let Some(c) = clip_prores() {
+            super::decode_ahead_stays_in_the_ring(c)
+        }
+    }
+    #[test]
+    fn seek_lands_on_the_right_picture() {
+        if let Some(c) = clip_prores() {
+            super::seek_lands_on_the_right_picture(c)
+        }
+    }
+    #[test]
+    fn seek_then_play_on() {
+        if let Some(c) = clip_prores() {
+            super::seek_then_play_on(c)
+        }
+    }
+}

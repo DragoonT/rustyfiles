@@ -459,3 +459,46 @@ fn mkv_without_a_decoder_plays_without_sound_and_says_so() {
     assert!(shown >= 25, "{shown}");
     assert!(pb.time() > 1.0 && pb.time() < 1.5);
 }
+
+// ------------------------------------------------------------------ ProRes in a MOV with PCM
+
+/// A 3 s MOV: ProRes 422 HQ (decoded on the CPU) and 16-bit PCM, 48 kHz stereo, 30 fps.
+fn clip_prores() -> Option<PathBuf> {
+    if !have_ffmpeg() {
+        eprintln!("skipped: ffmpeg not found");
+        return None;
+    }
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let out = common::temp_dir().join("av_prores_pcm_st48.mov");
+    if out.exists() {
+        return Some(out);
+    }
+    let tmp = out.with_file_name("part-av_prores_pcm_st48.mov");
+    let status = std::process::Command::new("ffmpeg")
+        .args(["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine=f=440:r=48000:d=3", "-f", "lavfi", "-i", "sine=f=660:r=48000:d=3"])
+        .args(["-filter_complex", "[1:a][2:a]amerge=inputs=2[a]", "-map", "0:v", "-map", "[a]", "-t", "3"])
+        .args(["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le", "-c:a", "pcm_s16le", "-f", "mov"])
+        .arg(&tmp)
+        .status()
+        .expect("ffmpeg");
+    assert!(status.success(), "ffmpeg could not make the ProRes clip");
+    std::fs::rename(&tmp, &out).unwrap();
+    Some(out)
+}
+
+mod prores {
+    use super::*;
+    #[test]
+    fn pictures_follow_the_audio_clock_in_order() {
+        if let Some(c) = clip_prores() {
+            super::pictures_follow_the_audio_clock_in_order(c)
+        }
+    }
+    #[test]
+    fn seeking_lands_both_sides_on_the_target() {
+        if let Some(c) = clip_prores() {
+            super::seeking_lands_both_sides_on_the_target(c)
+        }
+    }
+}

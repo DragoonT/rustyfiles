@@ -388,6 +388,58 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      M4V only; route `.mkv` / `.webm` through `container::read` there).
 6. Formats no GPU decodes, on the CPU: ProRes and DNxHR (intra-only, slices decode in
    parallel), MXF, AIFF. Editing sources must keep previewing.
+   - ProRes done (`prores` + `proresdec`, `VideoDecoder::ProRes`), written from the public
+     description of the format (SMPTE RDD 36), no code taken from anywhere. `prores`: frame header
+     (size, 4:2:2 / 4:4:4, interlace mode, alpha type, the two quantisation matrices, colour
+     code points), picture headers (one per field), slice table, slices (a row of 1 / 2 / 4 / 8
+     macroblocks): the DC coefficients of a plane coded as differences, the AC coefficients as
+     (run, level) pairs walked block by block through the slice, both with the adaptive
+     Rice / Exp-Golomb hybrid codes (the codebook follows the last values), dequantisation with
+     the slice's scale and the frame's matrices, an integer 8x8 IDCT, clipping to 4..max-4.
+     Output is planar `u16`: 10 bit for Proxy / LT / Standard / HQ (`apco apcs apcn apch`), 12 bit for
+     4444 / 4444 XQ (`ap4h ap4x`). Interlaced frames: both fields woven into the frame (the
+     scan order of interlaced frames differs). Slices write disjoint macroblocks, so a rayon
+     pool (`ProResDecoder::new(threads)`, 1 = calling thread) decodes them in parallel; the result
+     is identical for any thread count (tested).
+   - On the GPU side: the picture goes up as one R16_UNORM texture per picture (Y on top, then U
+     and V side by side for 4:2:2 / below one another for 4:4:4, samples moved to the top bits
+     like P010) into a 2 slice array; `Converter` got a second pixel shader (`ps_planar`) that
+     reads it, chroma upsampled by the sampler (same siting as the NV12 path), then the shared
+     colour code. The NV12 / P010 path is untouched (same shader function, `shade`). `Player`'s
+     ring takes the texture as it is (a GPU copy into the slot), `Playback` and its sync tests
+     work unchanged. `Gpu::open_any` makes the device without asking for a decoder profile and
+     shares the idle pool. MOV `apch ...` sample entries stay `Codec::Other` with the fourcc in
+     `Track::fourcc`; `VideoDecoder::open` recognises them by it.
+   - Exactness against ffmpeg's decoder (`-f rawvideo`, every sample, clips made by `prores_ks`
+     and `prores_aw`): entropy decoding, scans, block order, dequantisation, clipping are bit
+     exact; the IDCT is an accurate integer one (constants 2^16 sqrt2 cos(k pi / 16), rows >> 17,
+     columns >> 20 at 10 bit / >> 18 at 12 bit, round half up) and differs from ffmpeg's own by 1 in
+     the last bit for some samples: 422 10 bit 0.01 to 0.08 % of the samples (1080p: 0.011 to
+     0.017 %), 4444 12 bit 1.5 to 4 % (the same absolute error on a 4 times finer scale). Never
+     more than 1. Searching constants (14, 16, 18 bit), shifts and roundings (4 families, 300
+     variants) did not reach 0: ffmpeg's integer IDCT has its own rounding noise; RDD 36 allows
+     such a difference. Table in the test output (`cargo test -p rustdecoder --release --test
+     prores -- --nocapture`).
+   - Speed, Ryzen 7 9800X3D, noisy (so heavy) 422 HQ clips, decode only, slices on 1 / 4 / 8 /
+     16 threads: 1080p (0.97 MB per frame, 193 Mbit/s at 25 fps) 50 / 202 / 319 / 409 fps; 2160p
+     (3.83 MB, 766 Mbit/s) 12 / 44 / 84 / 122 fps; 1080p 4444 12 bit (1.44 MB) 31 / 116 / 207 /
+     255 fps. With the packing and the upload to the GPU (`VideoDecoder::next_frame`, the
+     player's pool is 8 threads): 1080p 187 fps, 2160p 43 fps. So 4K25 previews in real time
+     with room to spare, 4K50 with the pool as it is.
+   - Tests: 4 profiles at 640x360 and 1080p, `prores_aw`, odd sizes (650x366, 322x178: partial
+     macroblocks and narrower last slices), 4444 with and without alpha, 4444 XQ, interlaced top
+     and bottom field first (640x360, 1080p), damaged frames (400 cuts / flips / header hits
+     each on 422 and 4444: no panic), the GPU picture against ffmpeg's RGB (mean abs error
+     0.004 of 255), the player (order, slow polling, ring, 31 seeks with pixel checks, seek
+     and play on) and `Playback` with PCM (pictures follow the audio clock, seeks land both
+     sides on the target).
+   - Left: the alpha plane of 4444 is stepped over, not decoded (no alpha path in the
+     converter); 4444 12 bit exactness is within 1, not exact; a 4:4:4 file flagged 10 bit
+     (`ap4h` is always read as 12 bit, like ffmpeg); a clip that changes size inside the
+     stream is refused; ProRes RAW is another codec and not read; ProRes in Matroska / AVI
+     is not looked for; the `probe` in rf-app's `rd_video.rs` knows nothing of ProRes yet.
+     DNxHR is next (same shape: `dnx.rs` + a `VideoDecoder` variant over the same R16 planar
+     path, which already handles 4:2:2 and 4:4:4 at 10 and 12 bit).
 7. FilmCraft removed in one step: dependency, `rf-player`'s FilmCraft code, texts and notes.
    Not before phases 4 and 6 cover what it plays today (decided 2026-11-09: no format may
    disappear in between).
