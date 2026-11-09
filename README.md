@@ -97,6 +97,22 @@ Each extra tab costs about 3 MB of memory (1 tab: ~32 MB, 25 tabs: ~103 MB).
 
 ### Search by file name
 
+rustyfiles keeps a name index of the local drives and answers searches from it. Searching every
+subfolder of a user folder with 3.6 million files and folders for "rapor", timed until the
+results on screen stopped changing:
+
+| | Time |
+|---|--:|
+| rustyfiles 0.4 | **0.38 s** |
+| File Explorer | 1.8 s (its fastest of 4 runs; the others took 11–32 s) |
+
+The index stores each different name once: a drive with 4.8 million entries but 490 thousand
+different names takes 61 MB. A folder watcher keeps it current while rustyfiles runs. Between
+runs, NTFS's change journal (read without administrator rights) says which folders changed, so a
+start lists only those again instead of walking the drives: 0.2 s for C: here, where a walk takes
+30 s. App data, caches, `node_modules` and `.git` folders are left out of the index; a search
+started inside one walks the disk:
+
 `*.dll` under `C:\Windows`: 342,492 items in 116,851 folders, file cache warm.
 
 | Method | Time |
@@ -152,7 +168,10 @@ scripts are in the repository (`crates/rf-win/examples/copybench.rs` for copying
 
 **Browsing.** Tabs you can drag to reorder or pull out into a new window. Dual pane. Details,
 grid and column views, grouping, a preview pane, search, colour tags, the Shelf, libraries,
-network shares and FTP. A Git status column. Folder sizes on demand: click "Calculate size".
+network shares and FTP. A Git status column. Folder sizes on demand: click "Calculate size";
+they are remembered across restarts and can show size on disk. Virtual folders such as Libraries
+and Gallery open in rustyfiles, and devices Windows lists under This PC (phones over USB or Phone
+Link) appear under Devices on the Home page; that part hasn't been tried with a real phone yet.
 
 **Files.** Undo and redo for renames, copies, moves, deleting to the Recycle Bin and folder
 flattening. Bulk rename.
