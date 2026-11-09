@@ -4,6 +4,8 @@
 
 pub mod bits;
 pub mod dpb;
+pub mod h264;
+pub mod h264_dpb;
 pub mod hevc;
 pub mod mp4;
 pub mod nal;
@@ -14,9 +16,18 @@ pub mod d3d11;
 #[cfg(windows)]
 pub mod decoder;
 pub mod dxva;
+pub mod dxva_h264;
+#[cfg(windows)]
+pub mod h264dec;
+#[cfg(windows)]
+pub mod video;
 
 #[cfg(windows)]
 pub use decoder::{Frame, HevcDecoder, StreamInfo};
+#[cfg(windows)]
+pub use h264dec::H264Decoder;
+#[cfg(windows)]
+pub use video::VideoDecoder;
 
 /// Errors from reading a file.
 #[derive(Debug, thiserror::Error)]
