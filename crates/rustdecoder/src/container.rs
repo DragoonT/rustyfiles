@@ -1,9 +1,9 @@
-//! Opens a media file's index whatever the container: MP4 / MOV or Matroska / WebM.
+//! Opens a media file's index whatever the container: MP4 / MOV, Matroska / WebM or MXF.
 
 use std::io::{Read, Seek, SeekFrom};
 
 use crate::mp4::Movie;
-use crate::{Result, mkv, mp4};
+use crate::{Result, mkv, mp4, mxf};
 
 /// Reads the track tables of `r`, picking the reader from the first bytes.
 pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
@@ -11,5 +11,11 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
     r.seek(SeekFrom::Start(0))?;
     let n = r.read(&mut head)?;
     r.seek(SeekFrom::Start(0))?;
-    if mkv::is_ebml(&head[..n]) { mkv::read(r) } else { mp4::read(r) }
+    if mkv::is_ebml(&head[..n]) {
+        mkv::read(r)
+    } else if mxf::sniff(r)? {
+        mxf::read(r)
+    } else {
+        mp4::read(r)
+    }
 }

@@ -83,6 +83,9 @@ pub enum Codec {
     Ac3 { config: Vec<u8> },
     /// E-AC-3; the `dec3` payload in MP4, empty in Matroska.
     Eac3 { config: Vec<u8> },
+    /// PCM in MXF's AES3 element form (4-byte header, 32-bit subframes); [`Track::read_sample`]
+    /// returns it as interleaved little-endian PCM of `bits` per sample.
+    Aes3Pcm { bits: u16 },
     /// Uncompressed audio.
     Pcm { bits: u16, float: bool, big_endian: bool },
     /// Anything else, by its sample entry's four letters.
@@ -156,6 +159,18 @@ impl Track {
         buf.resize(s.size as usize, 0);
         r.seek(SeekFrom::Start(s.offset))?;
         r.read_exact(buf)?;
+        match self.codec {
+            // MXF keeps H.264 and HEVC as Annex B: the decoders read length-prefixed units
+            Codec::H264 { .. } | Codec::Hevc { .. } if crate::annexb::is_annexb(buf) => {
+                let raw = std::mem::take(buf);
+                crate::annexb::to_length_prefixed(&raw, buf);
+            }
+            Codec::Aes3Pcm { bits } => {
+                let raw = std::mem::take(buf);
+                crate::mxf::aes3_to_pcm(&raw, self.channels as usize, bits, buf);
+            }
+            _ => {}
+        }
         Ok(())
     }
 
