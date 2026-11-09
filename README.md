@@ -161,7 +161,7 @@ on tabs and pinned folders.
 
 **Archives.** ZIP, 7z, RAR, the tar family and ISO open like folders, password-protected
 ZIP, 7z and RAR included. Add, delete and rename inside ZIP, 7z and tar. Create ZIP, 7z and tar.zst on every core. Reading is
-done by [rarchive](https://github.com/gelenmedya/rarchive), our own pure-Rust engine: it
+done by [rarchive](https://github.com/gelenmedya/rarchive), our own pure-Rust engine (also [on crates.io](https://crates.io/crates/rarchive) for other Rust projects): it
 decodes a 1.3 GB WinRAR archive ten times faster than UnRAR.
 
 **Windows.** Optionally the default file manager: folders, <kbd>Win</kbd>+<kbd>E</kbd>, This PC
