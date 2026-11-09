@@ -245,6 +245,32 @@ fn mbaff_bottom_field_first() {
     check(Clip::new("h264_mbaff_bff.mp4", "high", "bff=1:bframes=2:keyint=30"), 90);
 }
 
+/// Field pictures (PAFF): x264 only writes MBAFF, NVENC with the interlaced flags writes every
+/// picture as two fields. Skipped where there is no NVENC.
+fn paff_clip(name: &'static str, field: &'static str, extra: &[&'static str]) -> Clip<'static> {
+    let mut c = Clip::new(name, "high", "");
+    c.vf = field;
+    let mut enc = vec!["-c:v", "h264_nvenc", "-profile:v", "high", "-flags", "+ildct+ilme"];
+    enc.extend_from_slice(extra);
+    c.encoder = Box::leak(enc.into_boxed_slice());
+    c
+}
+
+#[test]
+fn paff_top_field_first() {
+    check(paff_clip("h264_paff_tff.mp4", "setfield=tff", &["-bf", "0"]), 90);
+}
+
+#[test]
+fn paff_bottom_field_first() {
+    check(paff_clip("h264_paff_bff.mp4", "setfield=bff", &["-bf", "0"]), 90);
+}
+
+#[test]
+fn paff_with_b_fields() {
+    check(paff_clip("h264_paff_b.mp4", "setfield=tff", &["-bf", "3", "-b_ref_mode", "middle", "-refs", "4"]), 90);
+}
+
 /// Any clip named in RD_CLIP, for debugging (does nothing without it).
 #[test]
 fn clip_from_env() {
