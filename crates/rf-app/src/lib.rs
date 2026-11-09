@@ -10,6 +10,7 @@ mod bulk_rename;
 mod command_palette;
 mod conflict_dialog;
 mod ctx_menu;
+mod disk_usage;
 mod fluent_menu;
 mod flyout;
 mod layout_panel;

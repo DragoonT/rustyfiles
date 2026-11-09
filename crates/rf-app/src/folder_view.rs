@@ -306,6 +306,8 @@ pub struct FolderView {
     _watch_task: Option<Task<()>>,
     pub renaming: Option<(u32, Entity<gpui_kit::component::input::InputState>)>,
     recycle: Option<Entity<crate::recycle_view::RecycleView>>,
+    /// The disk usage page of this tab (kept while the tab stays on that folder).
+    disk_usage: Option<Entity<crate::disk_usage::DiskUsageView>>,
     /// Git status of the repository containing this folder (if any).
     pub git: Option<Arc<rf_win::git::GitStatus>>,
     /// Last commit per child of the current folder (commit columns), keyed by name.
@@ -438,6 +440,7 @@ impl FolderView {
             marquee: None,
             typeahead: (String::new(), Instant::now()),
             recycle: None,
+            disk_usage: None,
             git: None,
             git_commits: None,
             column_cache: Default::default(),
@@ -473,6 +476,9 @@ impl FolderView {
                 return l.to_string();
             }
         }
+        if let Location::DiskUsage(p) = self.location() {
+            return crate::disk_usage::title(p);
+        }
         crate::i18n::td(&self.location().title())
     }
 
@@ -484,6 +490,7 @@ impl FolderView {
             Location::Search { .. } => L::Search,
             Location::Tag(_) => L::Tag,
             Location::Library { .. } => L::Library,
+            Location::DiskUsage(_) => L::ChartPie,
             Location::Path(p) if rf_win::network::server_root(p).is_some() => L::Server,
             // the archive itself or a folder inside it (name check only: no disk access here)
             Location::Path(p) if crate::archive_view::is_browsable_path(p) => L::FileArchive,
@@ -3152,6 +3159,7 @@ impl FolderView {
         let mut drive_grid = div().grid().grid_cols(tile_cols(avail, 240., 340., 12.)).gap_3();
         for (i, d) in drives.into_iter().enumerate() {
             let root = d.root.clone();
+            let usage_root = d.root.clone();
             let frac = d.used_fraction();
             let bar_color = if frac > 0.9 { p.danger } else { p.accent };
             drive_grid = drive_grid.child(
@@ -3179,6 +3187,23 @@ impl FolderView {
                                     } else {
                                         String::new()
                                     })),
+                            )
+                            // where the space goes, as its own tab (the card itself opens the drive)
+                            .child(
+                                div()
+                                    .id(("drive-usage", i))
+                                    .size(px(28.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(theme::RADIUS_SM)
+                                    .hover(|s| s.bg(p.hover))
+                                    .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Disk kullanımını göster")).build(w, cx))
+                                    .on_click(cx.listener(move |_, _, _, cx| {
+                                        cx.stop_propagation();
+                                        cx.emit(FolderEvent::OpenInNewTab(Location::DiskUsage(usage_root.clone())))
+                                    }))
+                                    .child(Icon::new(L::ChartPie).size(px(16.)).text_color(p.text_secondary)),
                             ),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(root.clone()), cx))),
@@ -3421,7 +3446,7 @@ fn empty_state(p: &Palette, icon: L, title: String, sub: &'static str) -> impl I
 /// the text inside starts exactly where the name was drawn.
 const RENAME_INSET: f32 = 5.;
 
-fn open_in_background(path: PathBuf, cx: &mut App) {
+pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
     if !rf_win::ftp::is_ftp(&path) && !path.exists() && crate::archive_view::split(&path).is_some() {
         // an item inside an archive: extract just it (Status Center), open the real file
         crate::archive_view::open_items(cx, vec![path]);
@@ -3464,6 +3489,27 @@ impl Render for FolderView {
         let content = match self.location() {
             Location::Home => self.render_home(&p, cx),
             Location::Settings => crate::settings_view::render(&p, cx),
+            Location::DiskUsage(root) => {
+                let root = root.clone();
+                let dv = match &self.disk_usage {
+                    Some(dv) if dv.read(cx).root() == root => dv.clone(),
+                    _ => {
+                        let dv = cx.new(|cx| crate::disk_usage::DiskUsageView::new(root, cx));
+                        cx.subscribe(&dv, |this, _, ev: &crate::disk_usage::DiskEvent, cx| match ev {
+                            crate::disk_usage::DiskEvent::ShowInFolder(path) => {
+                                if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
+                                    this.set_reselect(name.to_string_lossy().into_owned());
+                                    this.navigate(Location::Path(parent.to_path_buf()), cx);
+                                }
+                            }
+                        })
+                        .detach();
+                        self.disk_usage = Some(dv.clone());
+                        dv
+                    }
+                };
+                div().size_full().child(dv).into_any_element()
+            }
             Location::RecycleBin => {
                 let rv = match &self.recycle {
                     Some(rv) => rv.clone(),
