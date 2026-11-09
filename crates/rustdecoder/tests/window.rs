@@ -153,3 +153,41 @@ fn volume_mute_and_end_of_stream() {
     assert!(win.state().position < 1.5);
     let _ = WindowEvent::Click;
 }
+
+#[test]
+fn mouse_messages_become_events() {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::Controls::WM_MOUSELEAVE;
+    use windows::Win32::UI::WindowsAndMessaging::*;
+    if !have_ffmpeg() {
+        eprintln!("skipped: ffmpeg not found");
+        return;
+    }
+    let clip = make_h264_clip("w_h264_events.mp4", "bframes=2:keyint=30", false);
+    let Some(win) = open(&clip, 320, 180) else { return };
+    let hwnd = HWND(win.hwnd() as *mut _);
+    let post = |m: u32, wp: usize| unsafe {
+        let _ = PostMessageW(Some(hwnd), m, WPARAM(wp), LPARAM((20 << 16) | 30));
+    };
+    post(WM_MOUSEMOVE, 0);
+    post(WM_MOUSEMOVE, 0);
+    post(WM_MOUSEMOVE, 0);
+    post(WM_LBUTTONDOWN, 1);
+    post(WM_LBUTTONDBLCLK, 1);
+    post(WM_MOUSEWHEEL, (120u16 as usize) << 16);
+    post(WM_MOUSELEAVE, 0);
+    let mut got = Vec::new();
+    wait_for("the events", || {
+        got.extend(win.take_events());
+        got.iter().position(|e| *e == WindowEvent::Wheel(120)).is_some_and(|i| got[i..].contains(&WindowEvent::Leave))
+    });
+    // the three moves are one event (queued before anybody takes them; if the reader ran in
+    // between there can be two)
+    let moves = got.iter().filter(|e| **e == WindowEvent::MouseMove).count();
+    assert!((1..=2).contains(&moves), "{got:?}");
+    // (the system itself reports a leave at once: the pointer is not over a hidden window)
+    assert_eq!(got.last(), Some(&WindowEvent::Leave));
+    got.retain(|e| *e != WindowEvent::Leave);
+    got.dedup();
+    assert_eq!(got, [WindowEvent::MouseMove, WindowEvent::Click, WindowEvent::DoubleClick, WindowEvent::Wheel(120)]);
+}

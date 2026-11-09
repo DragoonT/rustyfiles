@@ -87,7 +87,7 @@ impl H264Decoder {
         let (profile, format) = h264_profile();
         let gpu = Gpu::open(&profile, format)?;
         let (w, h) = first.display_size();
-        let info = StreamInfo { width: w, height: h, bit_depth: 8, frame_count: track.samples.len(), frame_rate: track.frame_rate(), timescale: track.timescale, rotation: track.rotation, vui: Default::default() };
+        let info = StreamInfo { width: w, height: h, bit_depth: 8, frame_count: track.samples.len(), frame_rate: track.frame_rate(), timescale: track.timescale, rotation: track.rotation, display: crate::decoder::display_size(w, h, track.par, (first.sar.0 as u32, first.sar.1 as u32)), vui: Default::default() };
         Ok(Self {
             file,
             len_size: cfg.len_size,

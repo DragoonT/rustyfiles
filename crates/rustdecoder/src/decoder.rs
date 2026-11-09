@@ -47,6 +47,22 @@ pub struct StreamInfo {
     pub rotation: u16,
     /// Colour description of the first SPS.
     pub vui: crate::hevc::Vui,
+    /// Size to show the picture at, before the rotation: the coded width scaled by the pixel
+    /// aspect ratio (the container's, else the stream's own), the coded height. Equal to
+    /// `(width, height)` for square pixels.
+    pub display: (u32, u32),
+}
+
+/// [`StreamInfo::display`]: `container` is the pixel aspect ratio the container states (MP4
+/// `pasp`, Matroska display size), `sar` the stream's own (VUI; `(0, 0)` = not stated). The
+/// container wins, as it does in ffmpeg.
+pub fn display_size(width: u32, height: u32, container: Option<(u32, u32)>, sar: (u32, u32)) -> (u32, u32) {
+    let (n, d) = match container {
+        Some((n, d)) if n > 0 && d > 0 => (n, d),
+        _ if sar.0 > 0 && sar.1 > 0 => sar,
+        _ => (1, 1),
+    };
+    (((width as u64 * n as u64 + d as u64 / 2) / d as u64).max(1) as u32, height)
 }
 
 struct Pending {
@@ -97,7 +113,7 @@ impl HevcDecoder {
         let (profile, format) = hevc_profile(first.bit_depth_luma)?;
         let gpu = Gpu::open(&profile, format)?;
         let (w, h) = first.display_size();
-        let info = StreamInfo { width: w, height: h, bit_depth: first.bit_depth_luma, frame_count: track.samples.len(), frame_rate: track.frame_rate(), timescale: track.timescale, rotation: track.rotation, vui: first.vui.clone() };
+        let info = StreamInfo { width: w, height: h, bit_depth: first.bit_depth_luma, frame_count: track.samples.len(), frame_rate: track.frame_rate(), timescale: track.timescale, rotation: track.rotation, display: display_size(w, h, track.par, (first.vui.sar.0 as u32, first.vui.sar.1 as u32)), vui: first.vui.clone() };
         Ok(Self {
             file,
             len_size: cfg.len_size,

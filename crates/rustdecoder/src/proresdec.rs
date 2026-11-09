@@ -76,6 +76,7 @@ impl ProResVideo {
             frame_rate: track.frame_rate(),
             timescale: track.timescale,
             rotation: track.rotation,
+            display: crate::decoder::display_size(hdr.width, hdr.height, track.par, (0, 0)),
             vui,
         };
         Ok(Self { file, track, gpu, dec: ProResDecoder::new(Self::threads()), bits, pic: Picture::default(), packed: Vec::new(), buf, next_sample: 0, layout: None, slot: 0, info })

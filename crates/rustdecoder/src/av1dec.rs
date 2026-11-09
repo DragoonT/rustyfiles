@@ -118,6 +118,7 @@ impl Av1Decoder {
             frame_rate: track.frame_rate(),
             timescale: track.timescale,
             rotation: 0,
+            display: crate::decoder::display_size(seq.max_frame_width, seq.max_frame_height, track.par, (0, 0)),
             vui: vui_of(&track, &seq),
         };
         let mut parser = Parser::new();

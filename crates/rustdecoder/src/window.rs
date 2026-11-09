@@ -45,6 +45,8 @@ use windows::Win32::Graphics::Dxgi::*;
 use windows::Win32::Graphics::Gdi::{BLACK_BRUSH, GetStockObject, HBRUSH};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Threading::WaitForSingleObject;
+use windows::Win32::UI::Controls::WM_MOUSELEAVE;
+use windows::Win32::UI::Input::KeyboardAndMouse::{TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{Interface, w};
 
@@ -116,7 +118,7 @@ pub struct WindowState {
     pub late: u64,
     /// Back buffer size.
     pub size: (u32, u32),
-    /// Size of the picture as shown (after rotation).
+    /// Size of the picture as shown (after the pixel aspect ratio and the rotation).
     pub video_size: (u32, u32),
     pub codec: &'static str,
     pub volume: f32,
@@ -135,6 +137,10 @@ pub enum WindowEvent {
     /// The wheel turned over the picture: `120` per notch away from the user (up), negative
     /// towards.
     Wheel(i32),
+    /// The pointer moved over the picture (several moves in a row are one event).
+    MouseMove,
+    /// The pointer left the window.
+    Leave,
     /// The user closed the window.
     Closed,
 }
@@ -182,6 +188,16 @@ pub fn letterbox(cw: u32, ch: u32, vw: u32, vh: u32) -> (i32, i32, u32, u32) {
     (((cw - w) / 2) as i32, ((ch - h) / 2) as i32, w, h)
 }
 
+/// What a `frame` is shown as, before the rotation: its size, the width scaled by the stream's
+/// pixel aspect ratio (`display` against `coded`, from [`crate::decoder::StreamInfo`]).
+pub fn shown_size(frame: (u32, u32), coded: (u32, u32), display: (u32, u32)) -> (u32, u32) {
+    if frame == coded || coded.0 == 0 || coded.1 == 0 || display.0 == 0 || display.1 == 0 {
+        return if frame == coded && display.0 > 0 && display.1 > 0 { display } else { frame };
+    }
+    let par = (display.0 as f64 * coded.1 as f64) / (display.1 as f64 * coded.0 as f64);
+    (((frame.0 as f64 * par).round() as u32).max(1), frame.1)
+}
+
 enum Cmd {
     Play,
     Pause,
@@ -223,10 +239,24 @@ thread_local! {
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let push = |e: WindowEvent| SHARED.with(|s| {
         if let Some(s) = s.borrow().as_ref() {
-            s.events.lock().unwrap().push_back(e);
+            let mut q = s.events.lock().unwrap();
+            // moves arrive by the hundred: one in the queue says it all
+            if e == WindowEvent::MouseMove && q.back() == Some(&e) {
+                return;
+            }
+            q.push_back(e);
         }
     });
     match msg {
+        WM_MOUSEMOVE => {
+            // ask for WM_MOUSELEAVE (the request ends with every leave)
+            let mut t = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+            unsafe {
+                let _ = TrackMouseEvent(&mut t);
+            }
+            push(WindowEvent::MouseMove);
+        }
+        WM_MOUSELEAVE => push(WindowEvent::Leave),
         WM_ERASEBKGND => return LRESULT(1),
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
         WM_LBUTTONDOWN => push(WindowEvent::Click),
@@ -414,6 +444,9 @@ struct Render {
     context: ID3D11DeviceContext,
     device: ID3D11Device,
     params: Params,
+    /// Coded size and display size of the stream (see [`shown_size`]).
+    coded: (u32, u32),
+    display: (u32, u32),
     background: [f32; 4],
     looping: bool,
     volume: f32,
@@ -498,7 +531,8 @@ impl Render {
         }
         self.conv.clear(&target, self.background);
         if let Some(f) = &self.shown {
-            let (vw, vh) = rotated_size(f.width, f.height, self.params.rotation);
+            let (sw, sh) = shown_size((f.width, f.height), self.coded, self.display);
+            let (vw, vh) = rotated_size(sw, sh, self.params.rotation);
             let r = letterbox(target.width, target.height, vw, vh);
             self.conv.convert_rect(&f.source(), &self.params, &target, r)?;
             self.drawn_serial = f.serial;
@@ -564,7 +598,10 @@ impl Render {
         s.presented = self.presented;
         (s.shown, s.dropped, s.late) = (st.shown, st.dropped, st.late);
         s.size = self.swap.size;
-        s.video_size = self.shown.as_ref().map_or((0, 0), |f| rotated_size(f.width, f.height, self.params.rotation));
+        s.video_size = self.shown.as_ref().map_or((0, 0), |f| {
+            let (w, h) = shown_size((f.width, f.height), self.coded, self.display);
+            rotated_size(w, h, self.params.rotation)
+        });
         s.codec = self.codec;
         s.volume = self.volume;
         s.muted = self.muted;
@@ -712,6 +749,8 @@ impl VideoWindow {
             context,
             device,
             params,
+            coded: (info.width, info.height),
+            display: info.display,
             background: opts.background,
             looping: opts.looping,
             volume: opts.volume,
@@ -869,5 +908,17 @@ mod tests {
         // exact fit, and nothing to fit
         assert_eq!(letterbox(640, 360, 1920, 1080), (0, 0, 640, 360));
         assert_eq!(letterbox(0, 0, 10, 10), (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn display_size_follows_the_pixel_aspect_ratio() {
+        // square pixels, and a stream that does not say anything
+        assert_eq!(shown_size((640, 360), (640, 360), (640, 360)), (640, 360));
+        assert_eq!(shown_size((640, 360), (640, 360), (0, 0)), (640, 360));
+        // 4:3 pixels: 853 x 360 on show, in a 4:3 window the bars are above and below
+        assert_eq!(shown_size((640, 360), (640, 360), (853, 360)), (853, 360));
+        assert_eq!(letterbox(800, 600, 853, 360), (0, 131, 800, 338));
+        // a frame of another size than the stream's first one keeps the pixel shape
+        assert_eq!(shown_size((320, 180), (640, 360), (853, 360)), (427, 180));
     }
 }

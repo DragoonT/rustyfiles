@@ -167,6 +167,8 @@ pub struct Sps {
     pub crop: (u32, u32, u32, u32),
     pub max_num_reorder_frames: Option<u8>,
     pub max_dec_frame_buffering: Option<u8>,
+    /// VUI sample aspect ratio, (0, 0) when the stream does not say.
+    pub sar: (u16, u16),
 }
 
 impl Sps {
@@ -207,6 +209,9 @@ impl Sps {
     }
 }
 
+/// `aspect_ratio_idc` 0..16 (Table E-1): sample aspect ratio, (0, 0) unspecified.
+const SAR: [(u16, u16); 17] = [(0, 0), (1, 1), (12, 11), (10, 11), (16, 11), (40, 33), (24, 11), (20, 11), (32, 11), (80, 33), (18, 11), (15, 11), (64, 33), (160, 99), (4, 3), (3, 2), (2, 1)];
+
 fn hrd(b: &mut BitReader) -> Result<()> {
     let cpb_cnt = b.ue()? + 1;
     b.skip(8)?;
@@ -219,9 +224,14 @@ fn hrd(b: &mut BitReader) -> Result<()> {
 }
 
 /// VUI up to the bitstream restriction: (max_num_reorder_frames, max_dec_frame_buffering).
-fn vui(b: &mut BitReader) -> Result<Option<(u8, u8)>> {
-    if b.flag()? && b.bits(8)? == 255 {
-        b.skip(32)?;
+fn vui(b: &mut BitReader, sar: &mut (u16, u16)) -> Result<Option<(u8, u8)>> {
+    if b.flag()? {
+        let idc = b.bits(8)? as usize;
+        if idc == 255 {
+            *sar = (b.bits(16)? as u16, b.bits(16)? as u16);
+        } else if let Some(&s) = SAR.get(idc) {
+            *sar = s;
+        }
     }
     if b.flag()? {
         b.skip(1)?;
@@ -326,7 +336,7 @@ pub fn sps(b: &mut BitReader) -> Result<Sps> {
     }
     if b.flag()? {
         // a damaged VUI must not lose the stream
-        if let Ok(Some((reorder, dpb))) = vui(b) {
+        if let Ok(Some((reorder, dpb))) = vui(b, &mut s.sar) {
             s.max_num_reorder_frames = Some(reorder);
             s.max_dec_frame_buffering = Some(dpb);
         }
