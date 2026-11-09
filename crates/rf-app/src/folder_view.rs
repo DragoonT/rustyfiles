@@ -2436,6 +2436,27 @@ impl FolderView {
         Cols { modified, created, kind, size, tags, git, sync, commit: [message, author, date, hash] }
     }
 
+    /// Width the visible Details columns leave unused (what [`Self::visible_cols`] still had free).
+    fn spare_width(&self, cx: &App) -> f32 {
+        let vis = self.visible_cols(cx);
+        let w = self.col_widths(cx);
+        let mut used = 0.;
+        for (on, width) in [(vis.modified, w[0]), (vis.created, w[1]), (vis.size, w[3]), (vis.tags, w[4]), (vis.git, w[5]), (vis.sync, w[6])] {
+            if on {
+                used += width;
+            }
+        }
+        if vis.kind {
+            used += f32::from(self.type_col_w(cx));
+        }
+        for (i, on) in vis.commit.iter().enumerate() {
+            if *on {
+                used += w[7 + i];
+            }
+        }
+        (f32::from(self.content_width) - 180. - 24. - used).max(0.)
+    }
+
     fn render_header(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let w = self.col_widths(cx);
         let search = self.is_search();
@@ -2510,7 +2531,10 @@ impl FolderView {
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ColumnResize>, _, cx| {
                 let Some((ix, sx, sw)) = this.col_drag else { return };
                 let mut w = this.col_widths(cx);
-                w[ix] = (sw - (f32::from(e.event.position.x) - sx)).clamp(70., 600.).round();
+                // no wider than the room left: a column that no longer fits is hidden, so
+                // widening one would make it (or its neighbour) vanish under the pointer
+                let most = (w[ix] + this.spare_width(cx)).clamp(w[ix].min(600.), 600.);
+                w[ix] = (sw - (f32::from(e.event.position.x) - sx)).clamp(70., most.max(70.)).round();
                 this.col_live = Some(w);
                 this.schedule_col_save(cx);
                 cx.notify();
