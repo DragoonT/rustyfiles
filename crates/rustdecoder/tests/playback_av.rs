@@ -37,6 +37,8 @@ struct St {
     played: f64,
     since: f64,
     ended: bool,
+    /// The most recent block pushed, and the channel count it came with.
+    last: Vec<f32>,
 }
 
 /// A sink that plays nothing and counts time by a fake clock.
@@ -51,6 +53,10 @@ impl FakeSink {
     }
     fn played(&self, s: &St) -> f64 {
         if s.running { s.played + (self.time.now() - s.since) } else { s.played }
+    }
+    fn last(&self) -> (usize, Vec<f32>) {
+        let s = self.st.lock().unwrap();
+        (s.channels, s.last.clone())
     }
     fn log(&self) -> Vec<Ev> {
         self.st.lock().unwrap().log.clone()
@@ -68,6 +74,7 @@ impl AudioSink for FakeSink {
         let frames = pcm.len() / s.channels;
         s.base.get_or_insert(pts);
         s.pushed += frames as f64 / s.rate as f64;
+        s.last = pcm.to_vec();
         s.log.push(Ev::Push { pts, frames });
     }
     fn end_of_data(&self) {
@@ -671,4 +678,97 @@ fn device_reopen_keeps_the_clock_and_the_sound() {
     let pos = out.position().unwrap();
     assert!(pos > 20.2 && pos < 20.45, "{pos}");
     out.pause();
+}
+
+// ------------------------------------------------------------------ several audio tracks
+
+use common::tracks::*;
+
+/// Runs the clock on until the sink has queued sound again after the last flush; the newest block.
+fn wait_block(pb: &mut Playback, time: &FakeTime, sink: &FakeSink) -> (usize, Vec<f32>) {
+    for _ in 0..100 {
+        step(pb, time);
+        if let Some(Ev::Push { .. }) = sink.log().last() {
+            let (ch, pcm) = sink.last();
+            if pcm.len() >= 1024 * ch {
+                return (ch, pcm);
+            }
+        }
+    }
+    panic!("no sound queued");
+}
+
+#[test]
+fn switching_the_audio_track_while_playing() {
+    if !have_ffmpeg() {
+        return eprintln!("skipped: ffmpeg not found");
+    }
+    let clip = two_languages("mkv", &["-c:a", "pcm_s16le"]);
+    let time = Arc::new(FakeTime::new());
+    let sink = FakeSink::new(time.clone());
+    let Some(mut pb) = open(&clip, sink.clone()) else { return };
+    assert_eq!(pb.audio_tracks().len(), 2);
+    assert_eq!(pb.audio_track(), Some(1), "the default (English, 880 Hz) plays first");
+    pb.play();
+    for _ in 0..20 {
+        step(&mut pb, &time);
+    }
+    let (ch, pcm) = wait_block(&mut pb, &time, &sink);
+    assert!((zero_cross_freq(&pcm, ch, 48000) - 880.0).abs() < 8.0);
+    let t = pb.time();
+    let flushes = sink.log().iter().filter(|e| **e == Ev::Flush).count();
+    let t0 = std::time::Instant::now();
+    pb.set_audio_track(0).unwrap();
+    let took = t0.elapsed();
+    println!("switch took {took:?} at {t:.3} s");
+    assert!(took < Duration::from_millis(250), "switch took {took:?}");
+    assert_eq!(pb.audio_track(), Some(0));
+    assert!(pb.is_playing());
+    let log = sink.log();
+    assert_eq!(log.iter().filter(|e| **e == Ev::Flush).count(), flushes + 1, "one flush for the switch");
+    let flush = log.iter().rposition(|e| *e == Ev::Flush).unwrap();
+    // the new track is queued from the clock time of the switch, no later than it, no sooner
+    // than one sample before
+    let Some(Ev::Push { pts, .. }) = log[flush..].iter().find(|e| matches!(e, Ev::Push { .. })).cloned() else { panic!("no sound after the switch") };
+    assert!((pts - t).abs() < 1.0 / 48000.0 + 1e-9, "new track starts at {pts}, switch at {t}");
+    let (ch, pcm) = wait_block(&mut pb, &time, &sink);
+    assert!((zero_cross_freq(&pcm, ch, 48000) - 440.0).abs() < 8.0);
+    // audio and video clock stay one clock
+    let a = pb.audio_position().unwrap();
+    assert!((a - pb.time()).abs() < 0.05, "audio {a} clock {}", pb.time());
+    // and back, while paused
+    pb.pause();
+    pb.set_audio_track(1).unwrap();
+    assert!(!pb.is_playing());
+    pb.play();
+    let (ch, pcm) = wait_block(&mut pb, &time, &sink);
+    assert!((zero_cross_freq(&pcm, ch, 48000) - 880.0).abs() < 8.0);
+    assert!(pb.set_audio_track(5).is_err());
+}
+
+#[test]
+fn camera_tracks_play_as_front_pair_and_stay_aligned_over_a_seek() {
+    if !have_ffmpeg() {
+        return eprintln!("skipped: ffmpeg not found");
+    }
+    let clip = make("tracks_4mono.mxf", &[440, 550, 660, 770], common::tracks::PCM24, &[]);
+    let time = Arc::new(FakeTime::new());
+    let sink = FakeSink::new(time.clone());
+    let Some(mut pb) = open(&clip, sink.clone()) else { return };
+    assert_eq!(pb.audio_tracks().len(), 1);
+    assert_eq!(pb.audio_tracks()[0].channels, 4);
+    pb.play();
+    let (ch, pcm) = wait_block(&mut pb, &time, &sink);
+    // left and right are tracks 1 and 2
+    assert_eq!(ch, 2);
+    assert!((zero_cross_freq(&pcm, 2, 48000) - 440.0).abs() < 8.0);
+    let right: Vec<f32> = pcm.chunks_exact(2).map(|f| f[1]).collect();
+    assert!((zero_cross_freq(&right, 1, 48000) - 550.0).abs() < 8.0);
+    for target in [1.0f64, 0.3] {
+        pb.seek(target);
+        let (_, pcm) = wait_block(&mut pb, &time, &sink);
+        let right: Vec<f32> = pcm.chunks_exact(2).map(|f| f[1]).collect();
+        assert!((zero_cross_freq(&pcm, 2, 48000) - 440.0).abs() < 8.0);
+        assert!((zero_cross_freq(&right, 1, 48000) - 550.0).abs() < 8.0);
+    }
 }

@@ -7,6 +7,7 @@ pub mod contclips;
 pub mod ffcompare;
 pub mod fragclips;
 pub mod mkvclips;
+pub mod tracks;
 #[allow(unused_imports)]
 pub use fragclips::*;
 pub use contclips::*;

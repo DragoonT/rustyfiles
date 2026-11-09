@@ -813,8 +813,8 @@ Not done / left:
   decoder in display order but with `pts` of the decode order (the sample table has no other
   information). Real recorders write the offsets; for the others the picture order count of the
   slice headers would give the times.
-- Several mono audio tracks (cameras write 2 to 8): each is its own `Track`, `Movie::audio()`
-  returns the first; mixing them into one multichannel track belongs with the track choice work.
+- Several mono audio tracks (cameras write 2 to 8): each is its own `Track`; `Movie::audio_tracks()`
+  offers them as one multichannel entry (see "Several audio tracks" below).
 - OP-Atom clips are not linked (video file and the audio `.mxf`s); essence in more than one
   BodySID (OP2x, OP3x) is read as one stream; encrypted essence, MPEG-2 and JPEG 2000 decoders,
   HEVC and ProRes-by-profile on real camera files (no samples here; the HEVC mapping label is
@@ -831,3 +831,37 @@ DNxHR in progress elsewhere); several audio tracks and track choice, subtitles; 
 (arrows, space, F) go to the viewer window, not checked with the popup in front; cursor hiding
 in fullscreen; HDR metadata in the tone mapper; a mid-stream size change; a real second audio
 device for the rate-change path; a hot-plug test with a physical device.
+
+## Several audio tracks (2026-11-09)
+
+**Listing.** `Movie::audio_tracks()` returns one `AudioTrack` per choice: `members` (indices into
+`Movie::tracks`), `codec` name, `channels`, `sample_rate`, `language`, `name`, `default`. Tracks
+carry `Track::meta` (`TrackMeta { language, name }`): Matroska `LanguageBCP47` ("IETF") over
+`Language`, and `Name`; MP4 / MOV `mdhd` language (ISO packed letters, or QuickTime's old numeric
+codes mapped to ISO 639-2) and the title from `udta/name`, else the `hdlr` name unless it is a
+muxer's stock text ("SoundHandler"). `default`: Matroska `FlagDefault` (true when absent); MP4's
+`tkhd` enabled flag (ffmpeg clears it on the audio tracks that are not the default disposition).
+`Movie::default_audio_track(&list)` is the first marked default, else the first.
+
+**Camera mono tracks.** Two or more mono PCM tracks with the same sample entry, rate, sample count
+and length (within 1 ms) and no two different languages are one entry: `channels` = their number,
+track 1 = channel 1 (left), 2 = right, and so on. The language rule keeps a film's dubbed mono PCM
+tracks (MKV, MOV) from being merged. `AudioDecoder::open_choice(path, &movie, &entry)` opens a
+group as one decoder with a decoder per member underneath; blocks are cut so that frame `n` of
+every channel is the same instant (a member that is shorter is silent past its end), after a seek
+too. The group equals the tracks interleaved bit for bit (tests against ffmpeg's decode of each
+track: MOV and MXF with 4 mono PCM tracks, MXF with 8). `AudioDecoder::open` takes the default
+entry, so a camera file now plays all of its tracks.
+
+**Playback.** `Playback::open*` opens the default entry, or the first that opens when the default
+is not playable (a codec without a decoder). `audio_tracks()`, `audio_track()`, and
+`set_audio_track(i)`: the new decoder is opened on the caller's thread while the old track keeps
+playing, then the feed thread swaps it, seeks it to the clock time, and flushes the sink once
+(playing or paused; the video and the clock are not touched; about 3 ms here). A group of more
+than two channels reaches the sink as its first two (left, right): the sink's 5.1 / 7.1 matrices
+assume surround layouts, which camera tracks are not. The other channels stay in the decoder
+(`AudioDecoder::next_block`).
+
+Not done: a UI to choose (DirectLook); choosing which mono tracks form the pair, or mixing all of
+them; non-PCM mono tracks (AAC and the like) are never grouped; MXF track names / languages (the
+MXF reader fills no `meta`); AVI / TS / PS have no language either.

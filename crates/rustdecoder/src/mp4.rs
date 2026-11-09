@@ -728,9 +728,8 @@ fn parse_trak(b: &[u8], movie_timescale: u32, fragmented: bool) -> Result<(Track
         // version / flags, predefined, type, three reserved words, then the name (a C string,
         // or a length-prefixed one in QuickTime files)
         let b = h.get(24..).unwrap_or(&[]);
-        let s = String::from_utf8_lossy(b).trim_end_matches('\0').to_string();
-        let s = if !b.is_empty() && b[0] as usize == b.len() - 1 { s[1..].to_string() } else { s };
-        s.trim().to_string()
+        let b = if !b.is_empty() && b[0] as usize == b.len() - 1 { &b[1..] } else { b };
+        String::from_utf8_lossy(b).trim_end_matches('\0').trim().to_string()
     });
     let handler = child(&mdia, b"hdlr").map(|h| {
         let mut c = Cur::new(h);
