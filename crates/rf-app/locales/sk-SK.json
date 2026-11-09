@@ -945,5 +945,13 @@
  "f87ce35b": "Názvy súborov na lokálnych diskoch sa uchovávajú v indexe, takže vyhľadávanie v podpriečinkoch trvá milisekundy. Index sa vytvára na pozadí a priebežne aktualizuje.",
  "f13da91b": "indexuje sa…",
  "f1ff0bf0": "nepodarilo sa indexovať",
- "6abadce2": "{root} {n} položiek, {mb} MB"
+ "6abadce2": "{root} {n} položiek, {mb} MB",
+ "ea90d596": "rýchlejší ako Prieskumník súborov",
+ "2f2eee11": "rovnako rýchly ako Prieskumník súborov",
+ "3c9ad0a5": "Čas procesora",
+ "4bb4c9c9": "Výsledok nahlásený používateľom · zadarmo a open source · Windows",
+ "2220b7a5": "Sťahuje sa rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} je pripravený",
+ "099cc52a": "Nainštaluje sa po reštarte",
+ "4dc479c7": "Reštartovať"
 }

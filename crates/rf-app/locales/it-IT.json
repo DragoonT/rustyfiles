@@ -945,5 +945,13 @@
  "f87ce35b": "I nomi dei file delle unità locali vengono conservati in un indice, così la ricerca nelle sottocartelle richiede millisecondi. L'indice viene creato in background e tenuto aggiornato.",
  "f13da91b": "indicizzazione in corso…",
  "f1ff0bf0": "impossibile indicizzare",
- "6abadce2": "{root} {n} elementi, {mb} MB"
+ "6abadce2": "{root} {n} elementi, {mb} MB",
+ "ea90d596": "più veloce di Esplora file",
+ "2f2eee11": "veloce quanto Esplora file",
+ "3c9ad0a5": "Tempo CPU",
+ "4bb4c9c9": "Risultato autodichiarato · gratuito e open source · Windows",
+ "2220b7a5": "Download di rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} è pronto",
+ "099cc52a": "Si installa al riavvio",
+ "4dc479c7": "Riavvia"
 }

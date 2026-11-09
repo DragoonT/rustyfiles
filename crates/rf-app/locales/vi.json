@@ -945,5 +945,13 @@
  "f87ce35b": "Tên tệp trên các ổ đĩa cục bộ được lưu trong một chỉ mục, nên tìm kiếm trong thư mục con chỉ mất vài mili giây. Chỉ mục được xây dựng ở nền và luôn được cập nhật.",
  "f13da91b": "đang lập chỉ mục…",
  "f1ff0bf0": "không thể lập chỉ mục",
- "6abadce2": "{root} {n} mục, {mb} MB"
+ "6abadce2": "{root} {n} mục, {mb} MB",
+ "ea90d596": "nhanh hơn File Explorer",
+ "2f2eee11": "nhanh ngang File Explorer",
+ "3c9ad0a5": "Thời gian CPU",
+ "4bb4c9c9": "Kết quả tự báo cáo · miễn phí và mã nguồn mở · Windows",
+ "2220b7a5": "Đang tải rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} đã sẵn sàng",
+ "099cc52a": "Sẽ cài đặt khi bạn khởi động lại",
+ "4dc479c7": "Khởi động lại"
 }

@@ -2466,6 +2466,54 @@
   "en": "Flattening:"
  },
  {
+  "id": "ea90d596",
+  "key": "Dosya Gezgini'nden hızlı",
+  "tr": "Dosya Gezgini'nden hızlı",
+  "en": "faster than File Explorer"
+ },
+ {
+  "id": "2f2eee11",
+  "key": "Dosya Gezgini kadar hızlı",
+  "tr": "Dosya Gezgini kadar hızlı",
+  "en": "as fast as File Explorer"
+ },
+ {
+  "id": "3c9ad0a5",
+  "key": "işlemci süresi",
+  "tr": "işlemci süresi",
+  "en": "CPU time"
+ },
+ {
+  "id": "4bb4c9c9",
+  "key": "Kendi bildirdiği sonuç · ücretsiz ve açık kaynak · Windows",
+  "tr": "Kendi bildirdiği sonuç · ücretsiz ve açık kaynak · Windows",
+  "en": "Self-reported result · free and open source · Windows"
+ },
+ {
+  "id": "2220b7a5",
+  "key": "rustyfiles {v} indiriliyor",
+  "tr": "rustyfiles {v} indiriliyor",
+  "en": "Downloading rustyfiles {v}"
+ },
+ {
+  "id": "7daa795d",
+  "key": "rustyfiles {v} hazır",
+  "tr": "rustyfiles {v} hazır",
+  "en": "rustyfiles {v} is ready"
+ },
+ {
+  "id": "099cc52a",
+  "key": "Yeniden başlatınca kurulur",
+  "tr": "Yeniden başlatınca kurulur",
+  "en": "Installs when you restart"
+ },
+ {
+  "id": "4dc479c7",
+  "key": "Yeniden başlat",
+  "tr": "Yeniden başlat",
+  "en": "Restart"
+ },
+ {
   "id": "f2a18b26",
   "key": "Aramada dizine alma",
   "tr": "Aramada dizine alma",

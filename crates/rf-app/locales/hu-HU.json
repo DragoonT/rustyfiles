@@ -945,5 +945,13 @@
  "f87ce35b": "A helyi meghajtók fájlnevei egy indexben vannak tárolva, így az almappákban való keresés ezredmásodpercekig tart. Az indexet a háttérben építi fel és naprakészen tartja.",
  "f13da91b": "indexelés…",
  "f1ff0bf0": "nem sikerült indexelni",
- "6abadce2": "{root} {n} elem, {mb} MB"
+ "6abadce2": "{root} {n} elem, {mb} MB",
+ "ea90d596": "gyorsabb, mint a Fájlkezelő",
+ "2f2eee11": "olyan gyors, mint a Fájlkezelő",
+ "3c9ad0a5": "CPU-idő",
+ "4bb4c9c9": "Saját bejelentésű eredmény · ingyenes és nyílt forráskódú · Windows",
+ "2220b7a5": "A rustyfiles {v} letöltése folyamatban",
+ "7daa795d": "A rustyfiles {v} készen áll",
+ "099cc52a": "Újraindításkor települ",
+ "4dc479c7": "Újraindítás"
 }

@@ -945,5 +945,13 @@
  "f87ce35b": "Lokālo disku failu nosaukumi tiek glabāti indeksā, tāpēc meklēšana apakšmapēs aizņem milisekundes. Indekss tiek veidots fonā un uzturēts atjaunināts.",
  "f13da91b": "notiek indeksēšana…",
  "f1ff0bf0": "neizdevās indeksēt",
- "6abadce2": "{root} {n} vienumi, {mb} MB"
+ "6abadce2": "{root} {n} vienumi, {mb} MB",
+ "ea90d596": "ātrāk nekā Failu pārlūks",
+ "2f2eee11": "tikpat ātri kā Failu pārlūks",
+ "3c9ad0a5": "Procesora laiks",
+ "4bb4c9c9": "Paša lietotāja ziņots rezultāts · bezmaksas un atvērtā koda · Windows",
+ "2220b7a5": "Lejupielādē rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} ir gatavs",
+ "099cc52a": "Tiks instalēts pēc restartēšanas",
+ "4dc479c7": "Restartēt"
 }

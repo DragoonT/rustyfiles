@@ -945,5 +945,13 @@
  "f87ce35b": "Nama fail pada pemacu tempatan disimpan dalam indeks, jadi carian subfolder hanya mengambil milisaat. Indeks dibina di latar belakang dan sentiasa dikemas kini.",
  "f13da91b": "sedang mengindeks…",
  "f1ff0bf0": "tidak dapat diindeks",
- "6abadce2": "{root} {n} item, {mb} MB"
+ "6abadce2": "{root} {n} item, {mb} MB",
+ "ea90d596": "lebih pantas daripada File Explorer",
+ "2f2eee11": "sepantas File Explorer",
+ "3c9ad0a5": "Masa CPU",
+ "4bb4c9c9": "Keputusan dilaporkan sendiri · percuma dan sumber terbuka · Windows",
+ "2220b7a5": "Memuat turun rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} sudah sedia",
+ "099cc52a": "Dipasang apabila anda mulakan semula",
+ "4dc479c7": "Mulakan semula"
 }

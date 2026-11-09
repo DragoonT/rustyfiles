@@ -945,5 +945,13 @@
  "f87ce35b": "Nama file di drive lokal disimpan dalam indeks, sehingga pencarian di subfolder hanya butuh milidetik. Indeks dibuat di latar belakang dan selalu diperbarui.",
  "f13da91b": "mengindeks…",
  "f1ff0bf0": "tidak dapat diindeks",
- "6abadce2": "{root} {n} item, {mb} MB"
+ "6abadce2": "{root} {n} item, {mb} MB",
+ "ea90d596": "lebih cepat daripada File Explorer",
+ "2f2eee11": "secepat File Explorer",
+ "3c9ad0a5": "Waktu CPU",
+ "4bb4c9c9": "Hasil yang dilaporkan sendiri · gratis dan sumber terbuka · Windows",
+ "2220b7a5": "Mengunduh rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} siap",
+ "099cc52a": "Dipasang saat Anda memulai ulang",
+ "4dc479c7": "Mulai ulang"
 }

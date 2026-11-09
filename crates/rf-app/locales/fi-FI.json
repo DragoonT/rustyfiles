@@ -945,5 +945,13 @@
  "f87ce35b": "Paikallisten asemien tiedostonimet säilytetään indeksissä, joten alikansioiden haku kestää millisekunteja. Indeksi rakennetaan taustalla ja pidetään ajan tasalla.",
  "f13da91b": "indeksoidaan…",
  "f1ff0bf0": "indeksointi epäonnistui",
- "6abadce2": "{root} {n} kohdetta, {mb} Mt"
+ "6abadce2": "{root} {n} kohdetta, {mb} Mt",
+ "ea90d596": "nopeampi kuin Resurssienhallinta",
+ "2f2eee11": "yhtä nopea kuin Resurssienhallinta",
+ "3c9ad0a5": "Suoritinaika",
+ "4bb4c9c9": "Itse ilmoitettu tulos · ilmainen ja avoimen lähdekoodin · Windows",
+ "2220b7a5": "Ladataan rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} on valmis",
+ "099cc52a": "Asennetaan uudelleenkäynnistyksen yhteydessä",
+ "4dc479c7": "Käynnistä uudelleen"
 }

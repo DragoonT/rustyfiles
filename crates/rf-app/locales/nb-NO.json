@@ -945,5 +945,13 @@
  "f87ce35b": "Filnavn på de lokale stasjonene lagres i en indeks, så søk i undermapper tar millisekunder. Indeksen bygges i bakgrunnen og holdes oppdatert.",
  "f13da91b": "indekserer…",
  "f1ff0bf0": "kunne ikke indekseres",
- "6abadce2": "{root} {n} elementer, {mb} MB"
+ "6abadce2": "{root} {n} elementer, {mb} MB",
+ "ea90d596": "raskere enn Filutforsker",
+ "2f2eee11": "like rask som Filutforsker",
+ "3c9ad0a5": "CPU-tid",
+ "4bb4c9c9": "Selvrapportert resultat · gratis og åpen kildekode · Windows",
+ "2220b7a5": "Laster ned rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} er klar",
+ "099cc52a": "Installeres når du starter på nytt",
+ "4dc479c7": "Start på nytt"
 }

@@ -945,5 +945,13 @@
  "f87ce35b": "Les noms de fichiers des lecteurs locaux sont conservés dans un index, de sorte que la recherche dans les sous-dossiers prend quelques millisecondes. L'index est créé en arrière-plan et tenu à jour.",
  "f13da91b": "indexation…",
  "f1ff0bf0": "n'a pas pu être indexé",
- "6abadce2": "{root} {n} éléments, {mb} Mo"
+ "6abadce2": "{root} {n} éléments, {mb} Mo",
+ "ea90d596": "plus rapide que l'Explorateur de fichiers",
+ "2f2eee11": "aussi rapide que l'Explorateur de fichiers",
+ "3c9ad0a5": "Temps CPU",
+ "4bb4c9c9": "Résultat auto-déclaré · gratuit et open source · Windows",
+ "2220b7a5": "Téléchargement de rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} est prêt",
+ "099cc52a": "S'installe au redémarrage",
+ "4dc479c7": "Redémarrer"
 }

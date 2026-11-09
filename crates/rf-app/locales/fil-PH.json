@@ -945,5 +945,13 @@
  "f87ce35b": "Ang mga pangalan ng file sa mga lokal na drive ay itinatago sa isang index, kaya ilang millisecond lang ang paghahanap sa mga subfolder. Binubuo ang index sa background at pinapanatiling updated.",
  "f13da91b": "nag-i-index…",
  "f1ff0bf0": "hindi ma-index",
- "6abadce2": "{root} {n} item, {mb} MB"
+ "6abadce2": "{root} {n} item, {mb} MB",
+ "ea90d596": "mas mabilis kaysa sa File Explorer",
+ "2f2eee11": "kasing bilis ng File Explorer",
+ "3c9ad0a5": "Oras ng CPU",
+ "4bb4c9c9": "Resulta na iniulat mismo ng user · libre at open source · Windows",
+ "2220b7a5": "Dina-download ang rustyfiles {v}",
+ "7daa795d": "Handa na ang rustyfiles {v}",
+ "099cc52a": "Mag-i-install kapag nag-restart ka",
+ "4dc479c7": "I-restart"
 }

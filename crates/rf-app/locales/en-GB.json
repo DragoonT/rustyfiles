@@ -945,5 +945,13 @@
  "f87ce35b": "File names on the local drives are kept in an index, so searching subfolders takes milliseconds. The index is built in the background and kept up to date.",
  "f13da91b": "indexing…",
  "f1ff0bf0": "couldn't be indexed",
- "6abadce2": "{root} {n} items, {mb} MB"
+ "6abadce2": "{root} {n} items, {mb} MB",
+ "ea90d596": "faster than File Explorer",
+ "2f2eee11": "as fast as File Explorer",
+ "3c9ad0a5": "CPU time",
+ "4bb4c9c9": "Self-reported result · free and open source · Windows",
+ "2220b7a5": "Downloading rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} is ready",
+ "099cc52a": "Installs when you restart",
+ "4dc479c7": "Restart"
 }

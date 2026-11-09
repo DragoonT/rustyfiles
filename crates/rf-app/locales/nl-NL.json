@@ -945,5 +945,13 @@
  "f87ce35b": "Bestandsnamen op de lokale schijven worden in een index bewaard, zodat zoeken in submappen milliseconden duurt. De index wordt op de achtergrond opgebouwd en actueel gehouden.",
  "f13da91b": "indexeren…",
  "f1ff0bf0": "kon niet worden geïndexeerd",
- "6abadce2": "{root} {n} items, {mb} MB"
+ "6abadce2": "{root} {n} items, {mb} MB",
+ "ea90d596": "sneller dan Verkenner",
+ "2f2eee11": "even snel als Verkenner",
+ "3c9ad0a5": "CPU-tijd",
+ "4bb4c9c9": "Zelf gerapporteerd resultaat · gratis en open source · Windows",
+ "2220b7a5": "rustyfiles {v} wordt gedownload",
+ "7daa795d": "rustyfiles {v} is klaar",
+ "099cc52a": "Wordt geïnstalleerd bij herstart",
+ "4dc479c7": "Opnieuw starten"
 }

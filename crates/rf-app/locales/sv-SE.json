@@ -945,5 +945,13 @@
  "f87ce35b": "Filnamn på de lokala enheterna lagras i ett index, så sökning i undermappar tar millisekunder. Indexet byggs i bakgrunden och hålls uppdaterat.",
  "f13da91b": "indexerar…",
  "f1ff0bf0": "kunde inte indexeras",
- "6abadce2": "{root} {n} objekt, {mb} MB"
+ "6abadce2": "{root} {n} objekt, {mb} MB",
+ "ea90d596": "snabbare än Utforskaren",
+ "2f2eee11": "lika snabbt som Utforskaren",
+ "3c9ad0a5": "CPU-tid",
+ "4bb4c9c9": "Självrapporterat resultat · gratis och öppen källkod · Windows",
+ "2220b7a5": "Hämtar rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} är redo",
+ "099cc52a": "Installeras när du startar om",
+ "4dc479c7": "Starta om"
 }

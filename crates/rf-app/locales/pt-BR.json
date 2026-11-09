@@ -945,5 +945,13 @@
  "f87ce35b": "Os nomes de arquivo das unidades locais ficam em um índice, então pesquisar em subpastas leva milissegundos. O índice é criado em segundo plano e mantido atualizado.",
  "f13da91b": "indexando…",
  "f1ff0bf0": "não foi possível indexar",
- "6abadce2": "{root} {n} itens, {mb} MB"
+ "6abadce2": "{root} {n} itens, {mb} MB",
+ "ea90d596": "mais rápido que o Explorador de Arquivos",
+ "2f2eee11": "tão rápido quanto o Explorador de Arquivos",
+ "3c9ad0a5": "Tempo de CPU",
+ "4bb4c9c9": "Resultado autodeclarado · gratuito e de código aberto · Windows",
+ "2220b7a5": "Baixando o rustyfiles {v}",
+ "7daa795d": "O rustyfiles {v} está pronto",
+ "099cc52a": "Instala ao reiniciar",
+ "4dc479c7": "Reiniciar"
 }

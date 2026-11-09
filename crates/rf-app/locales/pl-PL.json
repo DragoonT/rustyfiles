@@ -945,5 +945,13 @@
  "f87ce35b": "Nazwy plików na dyskach lokalnych są przechowywane w indeksie, dzięki czemu wyszukiwanie w podfolderach trwa milisekundy. Indeks jest budowany w tle i na bieżąco aktualizowany.",
  "f13da91b": "indeksowanie…",
  "f1ff0bf0": "nie udało się zindeksować",
- "6abadce2": "{root} {n} elementów, {mb} MB"
+ "6abadce2": "{root} {n} elementów, {mb} MB",
+ "ea90d596": "szybszy niż Eksplorator plików",
+ "2f2eee11": "tak szybki jak Eksplorator plików",
+ "3c9ad0a5": "Czas procesora",
+ "4bb4c9c9": "Wynik zgłoszony przez użytkownika · bezpłatny i open source · Windows",
+ "2220b7a5": "Pobieranie rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} jest gotowy",
+ "099cc52a": "Zainstaluje się po ponownym uruchomieniu",
+ "4dc479c7": "Uruchom ponownie"
 }

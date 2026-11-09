@@ -945,5 +945,13 @@
  "f87ce35b": "Dateinamen der lokalen Laufwerke werden in einem Index gehalten, sodass die Suche in Unterordnern nur Millisekunden dauert. Der Index wird im Hintergrund erstellt und aktuell gehalten.",
  "f13da91b": "Indizierung läuft…",
  "f1ff0bf0": "konnte nicht indiziert werden",
- "6abadce2": "{root} {n} Elemente, {mb} MB"
+ "6abadce2": "{root} {n} Elemente, {mb} MB",
+ "ea90d596": "schneller als der Datei-Explorer",
+ "2f2eee11": "so schnell wie der Datei-Explorer",
+ "3c9ad0a5": "CPU-Zeit",
+ "4bb4c9c9": "Selbst gemeldetes Ergebnis · kostenlos und Open Source · Windows",
+ "2220b7a5": "rustyfiles {v} wird heruntergeladen",
+ "7daa795d": "rustyfiles {v} ist bereit",
+ "099cc52a": "Wird beim Neustart installiert",
+ "4dc479c7": "Neu starten"
 }

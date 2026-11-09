@@ -945,5 +945,13 @@
  "f87ce35b": "Nazivi datoteka na lokalnim diskovima čuvaju se u indeksu pa pretraživanje podmapa traje milisekunde. Indeks se izrađuje u pozadini i održava ažurnim.",
  "f13da91b": "indeksiranje…",
  "f1ff0bf0": "nije bilo moguće indeksirati",
- "6abadce2": "{root} {n} stavki, {mb} MB"
+ "6abadce2": "{root} {n} stavki, {mb} MB",
+ "ea90d596": "brže od File Explorera",
+ "2f2eee11": "jednako brzo kao File Explorer",
+ "3c9ad0a5": "Vrijeme procesora",
+ "4bb4c9c9": "Rezultat koji je prijavio korisnik · besplatno i otvorenog koda · Windows",
+ "2220b7a5": "Preuzimanje rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} je spreman",
+ "099cc52a": "Instalira se pri ponovnom pokretanju",
+ "4dc479c7": "Ponovno pokreni"
 }

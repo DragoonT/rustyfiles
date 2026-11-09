@@ -945,5 +945,13 @@
  "f87ce35b": "Filnavne på de lokale drev gemmes i et indeks, så søgning i undermapper tager millisekunder. Indekset opbygges i baggrunden og holdes opdateret.",
  "f13da91b": "indekserer…",
  "f1ff0bf0": "kunne ikke indekseres",
- "6abadce2": "{root} {n} elementer, {mb} MB"
+ "6abadce2": "{root} {n} elementer, {mb} MB",
+ "ea90d596": "hurtigere end Stifinder",
+ "2f2eee11": "lige så hurtigt som Stifinder",
+ "3c9ad0a5": "CPU-tid",
+ "4bb4c9c9": "Selvrapporteret resultat · gratis og open source · Windows",
+ "2220b7a5": "Henter rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} er klar",
+ "099cc52a": "Installeres, når du genstarter",
+ "4dc479c7": "Genstart"
 }

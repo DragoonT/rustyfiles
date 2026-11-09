@@ -945,5 +945,13 @@
  "f87ce35b": "Emrat e skedarëve në disqet lokale mbahen në një indeks, kështu që kërkimi në nëndosje zgjat milisekonda. Indeksi ndërtohet në sfond dhe mbahet i përditësuar.",
  "f13da91b": "po indeksohet…",
  "f1ff0bf0": "nuk u indeksua dot",
- "6abadce2": "{root} {n} artikuj, {mb} MB"
+ "6abadce2": "{root} {n} artikuj, {mb} MB",
+ "ea90d596": "më shpejt se File Explorer",
+ "2f2eee11": "po aq shpejt sa File Explorer",
+ "3c9ad0a5": "Koha e CPU-së",
+ "4bb4c9c9": "Rezultat i raportuar vetë · falas dhe me kod të hapur · Windows",
+ "2220b7a5": "Po shkarkohet rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} është gati",
+ "099cc52a": "Instalohet kur të rindizni",
+ "4dc479c7": "Rindiz"
 }

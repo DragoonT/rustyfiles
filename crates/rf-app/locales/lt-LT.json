@@ -945,5 +945,13 @@
  "f87ce35b": "Vietinių diskų failų pavadinimai laikomi indekse, todėl paieška poaplankiuose trunka milisekundes. Indeksas kuriamas fone ir nuolat atnaujinamas.",
  "f13da91b": "indeksuojama…",
  "f1ff0bf0": "nepavyko indeksuoti",
- "6abadce2": "{root} {n} elem., {mb} MB"
+ "6abadce2": "{root} {n} elem., {mb} MB",
+ "ea90d596": "greičiau nei Failų naršyklė",
+ "2f2eee11": "taip pat greitai kaip Failų naršyklė",
+ "3c9ad0a5": "Procesoriaus laikas",
+ "4bb4c9c9": "Paties naudotojo pateiktas rezultatas · nemokama ir atvirojo kodo · Windows",
+ "2220b7a5": "Atsisiunčiama rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} paruošta",
+ "099cc52a": "Bus įdiegta paleidus iš naujo",
+ "4dc479c7": "Paleisti iš naujo"
 }

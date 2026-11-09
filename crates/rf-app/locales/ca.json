@@ -945,5 +945,13 @@
  "f87ce35b": "Els noms de fitxer de les unitats locals es guarden en un índex, de manera que la cerca a les subcarpetes triga mil·lisegons. L'índex es crea en segon pla i es manté actualitzat.",
  "f13da91b": "indexant…",
  "f1ff0bf0": "no s'ha pogut indexar",
- "6abadce2": "{root} {n} elements, {mb} MB"
+ "6abadce2": "{root} {n} elements, {mb} MB",
+ "ea90d596": "més ràpid que l'Explorador de fitxers",
+ "2f2eee11": "tan ràpid com l'Explorador de fitxers",
+ "3c9ad0a5": "Temps de CPU",
+ "4bb4c9c9": "Resultat declarat per l'usuari · gratuït i de codi obert · Windows",
+ "2220b7a5": "S'està baixant rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} està a punt",
+ "099cc52a": "S'instal·la en reiniciar",
+ "4dc479c7": "Reinicia"
 }

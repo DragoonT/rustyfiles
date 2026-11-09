@@ -945,5 +945,13 @@
  "f87ce35b": "Numele fișierelor de pe unitățile locale sunt păstrate într-un index, așa că căutarea în subfoldere durează milisecunde. Indexul este creat în fundal și menținut actualizat.",
  "f13da91b": "se indexează…",
  "f1ff0bf0": "nu a putut fi indexat",
- "6abadce2": "{root} {n} elemente, {mb} MB"
+ "6abadce2": "{root} {n} elemente, {mb} MB",
+ "ea90d596": "mai rapid decât Exploratorul de fișiere",
+ "2f2eee11": "la fel de rapid ca Exploratorul de fișiere",
+ "3c9ad0a5": "Timp CPU",
+ "4bb4c9c9": "Rezultat raportat de utilizator · gratuit și open source · Windows",
+ "2220b7a5": "Se descarcă rustyfiles {v}",
+ "7daa795d": "rustyfiles {v} este gata",
+ "099cc52a": "Se instalează la repornire",
+ "4dc479c7": "Repornește"
 }
