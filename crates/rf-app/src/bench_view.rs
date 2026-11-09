@@ -397,56 +397,106 @@ fn esc(s: &str) -> String {
 
 /// The result card as SVG (1200 × 675, the size social sites show whole).
 fn card_svg(r: &Results) -> String {
+    // 1200 × 675, the size social sites show whole; the same look as rustyfiles' posts:
+    // two-tone wordmark, one big multiplier, bars, three figures, a warm glow
     let (w, h) = (1200.0, 675.0);
+    let orange = "#ff6a1a";
+    let test = if r.open.iter().any(|o| o.test == OpenTest::Files100k) { OpenTest::Files100k } else { r.open.iter().map(|o| o.test).find(|t| *t != OpenTest::Start).unwrap_or(OpenTest::Files10k) };
+    let row = r.open.iter().find(|o| o.test == test);
+    let rows: Vec<(AppKind, f64, bool)> = row.map(|o| o.apps.iter().filter_map(|a| a.median().map(|m| (a.app, m.settled_ms, m.shared))).collect()).unwrap_or_default();
+    let ours = rows.iter().find(|x| x.0 == AppKind::Rustyfiles).map(|x| x.1);
+    let explorer = rows.iter().find(|x| x.0 == AppKind::Explorer).map(|x| x.1);
     let mut s = format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
-<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#17181c"/><stop offset="1" stop-color="#0d0e11"/></linearGradient></defs>
-<rect width="{w}" height="{h}" fill="url(#bg)"/>
-<rect x="0" y="0" width="{w}" height="6" fill="#ff6a1a"/>
-<text x="64" y="104" font-size="52" font-weight="700" fill="#ffffff">rustyfiles</text>
-<text x="64" y="146" font-size="24" fill="#a6a8b0">{}</text>
-<text x="64" y="186" font-size="20" fill="#7d7f88">{}</text>
+<defs>
+<radialGradient id="glow" cx="0.82" cy="0.42" r="0.55"><stop offset="0" stop-color="{orange}" stop-opacity="0.16"/><stop offset="1" stop-color="{orange}" stop-opacity="0"/></radialGradient>
+<linearGradient id="hot" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="{orange}"/><stop offset="1" stop-color="#ff8a45"/></linearGradient>
+</defs>
+<rect width="{w}" height="{h}" fill="#0f1013"/>
+<rect width="{w}" height="{h}" fill="url(#glow)"/>
+<text x="64" y="104" font-size="66" font-weight="800" letter-spacing="-2" fill="#f2f2f4">rusty<tspan fill="{orange}">files</tspan></text>
+<text x="66" y="146" font-size="24" fill="#a3a6b0">{}</text>
+<text x="66" y="178" font-size="18" fill="#6e717b">{}</text>
 "##,
         esc(t!("Bilgisayarımdaki hız testi")),
         esc(&machine_line(&r.machine)),
     );
-    // the 100 000-file race as bars
-    let test = if r.open.iter().any(|o| o.test == OpenTest::Files100k) { OpenTest::Files100k } else { r.open.first().map_or(OpenTest::Files10k, |o| o.test) };
-    let rows: Vec<(AppKind, f64)> =
-        r.open.iter().find(|o| o.test == test).map(|o| o.apps.iter().filter_map(|a| a.median().map(|m| (a.app, m.settled_ms))).collect()).unwrap_or_default();
-    let longest = rows.iter().map(|r| r.1).fold(1.0, f64::max);
-    s.push_str(&format!(r##"<text x="64" y="252" font-size="26" font-weight="600" fill="#ffffff">{}</text>"##, esc(&t!("{test}: klasörün açılması").replace("{test}", test_label(test)))));
-    for (i, (app, v)) in rows.iter().enumerate() {
-        let y = 290.0 + i as f64 * 64.0;
-        let bar = (v / longest * 760.0).max(8.0);
-        let color = if *app == AppKind::Rustyfiles { "#ff6a1a" } else { "#4b4e57" };
+    // the headline: how much faster than File Explorer at opening the folder
+    if let (Some(a), Some(b)) = (ours, explorer) {
+        let headline = if b > a * 1.05 { times(b, a) } else { "=".into() };
         s.push_str(&format!(
-            r##"<text x="64" y="{}" font-size="22" fill="#d9dae0">{}</text><rect x="260" y="{}" width="{bar:.0}" height="30" rx="6" fill="{color}"/><text x="{}" y="{}" font-size="22" font-weight="600" fill="#ffffff">{}</text>"##,
-            y + 22.0,
-            esc(app_label(*app)),
-            y,
-            260.0 + bar + 14.0,
-            y + 22.0,
-            esc(&ms(*v)),
+            r##"<text x="62" y="330" font-size="132" font-weight="800" letter-spacing="-5" fill="{orange}">{}</text>
+<text x="66" y="378" font-size="28" fill="#f2f2f4">{}</text>
+<text x="66" y="410" font-size="20" fill="#6e717b">{}</text>
+"##,
+            esc(&headline),
+            esc(if b > a * 1.05 { t!("Dosya Gezgini'nden hızlı") } else { t!("Dosya Gezgini kadar hızlı") }),
+            esc(&t!("{test}: klasörün açılması").replace("{test}", test_label(test))),
         ));
     }
-    // copy and memory lines
-    let mut foot = Vec::new();
+    // bars on the right
+    let longest = rows.iter().map(|x| x.1).fold(1.0, f64::max);
+    let (bx, bw) = (640.0, 420.0);
+    s.push_str(&format!(r##"<text x="{bx}" y="236" font-size="18" fill="#6e717b">{}</text>"##, esc(t!("Klasörün açılması, gerçek hızda"))));
+    for (i, (app, v, shared)) in rows.iter().enumerate() {
+        let y = 262.0 + i as f64 * 62.0;
+        let len = (v / longest * bw).max(10.0);
+        let mine = *app == AppKind::Rustyfiles;
+        s.push_str(&format!(
+            r##"<text x="{bx}" y="{}" font-size="20" fill="{}">{}</text><text x="{}" y="{}" font-size="20" font-weight="600" fill="{}" text-anchor="end">{}{}</text><rect x="{bx}" y="{}" width="{len:.0}" height="16" rx="5" fill="{}"/>"##,
+            y + 18.0,
+            if mine { "#f2f2f4" } else { "#a3a6b0" },
+            esc(app_label(*app)),
+            bx + bw + 76.0,
+            y + 18.0,
+            if mine { "#ff8a45" } else { "#f2f2f4" },
+            esc(&ms(*v)),
+            if *shared { " *" } else { "" },
+            y + 28.0,
+            if mine { "url(#hot)" } else { "#444955" },
+        ));
+    }
+    // three figures
+    let mut cells: Vec<(String, String)> = Vec::new();
     if let Some(v) = &r.engines.copy_small {
         if let (Some(a), Some(b)) = (v.ours_ms, v.windows_ms) {
-            foot.push(t!("10.000 küçük dosyayı Windows'tan {x} hızlı kopyalıyor").replace("{x}", &times(b, a)));
+            cells.push((times(b, a), t!("10.000 küçük dosya kopyalama").to_string()));
         }
     }
-    if let Some(m) = r.open.iter().find(|o| o.test == test).and_then(|o| o.apps.iter().find(|a| a.app == AppKind::Rustyfiles)).and_then(|a| a.median()) {
-        foot.push(t!("{n} özel bellek").replace("{n}", &mb(m.private)));
+    if let Some(v) = &r.engines.unzip {
+        if let (Some(a), Some(b)) = (v.ours_ms, v.windows_ms) {
+            cells.push((times(b, a), t!("ZIP çıkarma: 10.000 dosya").to_string()));
+        }
     }
-    s.push_str(&format!(r##"<text x="64" y="{}" font-size="22" fill="#a6a8b0">{}</text>"##, h - 92.0, esc(&foot.join("  ·  "))));
+    if let Some(m) = row.and_then(|o| o.apps.iter().find(|a| a.app == AppKind::Rustyfiles)).and_then(|a| a.median()) {
+        cells.push((ms(m.cpu_ms), t!("işlemci süresi").to_string()));
+    }
+    let n = cells.len().max(1) as f64;
+    let (cx0, cw, cy) = (64.0, (w - 128.0) / n, 470.0);
+    if !cells.is_empty() {
+        s.push_str(&format!(r##"<rect x="{cx0}" y="{cy}" width="{}" height="104" rx="16" fill="#17191e" stroke="#262932"/>"##, w - 128.0));
+    }
+    for (i, (big, small)) in cells.iter().enumerate() {
+        let x = cx0 + i as f64 * cw;
+        if i > 0 {
+            s.push_str(&format!(r##"<line x1="{x}" y1="{}" x2="{x}" y2="{}" stroke="#262932"/>"##, cy, cy + 104.0));
+        }
+        s.push_str(&format!(
+            r##"<text x="{}" y="{}" font-size="44" font-weight="800" letter-spacing="-1" fill="#f2f2f4">{}</text><text x="{}" y="{}" font-size="18" fill="#a3a6b0">{}</text>"##,
+            x + 28.0,
+            cy + 56.0,
+            esc(big),
+            x + 30.0,
+            cy + 86.0,
+            esc(small)
+        ));
+    }
     s.push_str(&format!(
-        r##"<text x="64" y="{}" font-size="22" fill="#ff8a45">rustyfiles.com</text><text x="{}" y="{}" font-size="20" fill="#7d7f88" text-anchor="end">{}</text></svg>"##,
-        h - 48.0,
+        r##"<text x="64" y="{}" font-size="22" font-weight="600" fill="#ff8a45">rustyfiles.com</text><text x="{}" y="{}" font-size="17" fill="#6e717b" text-anchor="end">{}</text></svg>"##,
+        h - 40.0,
         w - 64.0,
-        h - 48.0,
-        esc(t!("Ücretsiz ve açık kaynak · Windows"))
+        h - 40.0,
+        esc(t!("Kendi bildirdiği sonuç · ücretsiz ve açık kaynak · Windows"))
     ));
     s
 }
