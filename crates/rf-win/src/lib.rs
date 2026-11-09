@@ -43,6 +43,7 @@ pub mod props;
 pub mod recycle;
 pub mod search;
 pub mod shell;
+pub mod shellfolder;
 pub mod shortcut;
 pub mod single_instance;
 pub mod sta;

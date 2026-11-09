@@ -12,6 +12,11 @@ pub enum Location {
     Tag(u32),
     /// A Windows library (`.library-ms`), shown as the merged contents of its folders.
     Library { file: PathBuf, name: String },
+    /// A folder of the shell namespace without a file-system path (an MTP phone under This PC,
+    /// Phone Link's mobile devices, Network…). `parsing` is the desktop-absolute parsing name
+    /// the shell takes back; `name` is what it shows (may be empty: then the last part of
+    /// `parsing` stands in until the shell has been asked).
+    Shell { parsing: String, name: String },
 }
 
 impl Location {
@@ -89,6 +94,7 @@ impl Location {
             Location::RecycleBin | Location::Settings | Location::Tag(_) | Location::Library { .. } => {
                 Some(Location::Home)
             }
+            Location::Shell { parsing, .. } => Some(shell_parent(parsing)),
             Location::Home => None,
         }
     }
@@ -101,9 +107,42 @@ impl Location {
             Location::Tag(_) => "Etiket".into(),
             Location::Search { query, .. } => format!("Arama: {query}"),
             Location::Library { name, .. } => name.clone(),
+            Location::Shell { parsing, name } if name.is_empty() => shell_last_segment(parsing).to_string(),
+            Location::Shell { name, .. } => name.clone(),
             Location::Path(p) => display_name(p),
         }
     }
+}
+
+/// Last part of a shell parsing name (`::{GUID}\Foo` → `Foo`).
+pub fn shell_last_segment(parsing: &str) -> &str {
+    let t = parsing.trim_end_matches('\\');
+    t.rsplit('\\').next().unwrap_or(t)
+}
+
+const THIS_PC_PARSING: &str = "::{20d04fe0-3aea-1069-a2d8-08002b30309d}";
+
+/// The folder above a shell parsing name, by its text: `…\Internal storage\DCIM` →
+/// `…\Internal storage`. A device's own name starts with `\\?\` (`::{This PC}\\?\usb#…`), so a
+/// cut that would land inside that prefix goes to what precedes it. This PC and the roots of
+/// the namespace go to Home.
+pub fn shell_parent(parsing: &str) -> Location {
+    let t = parsing.trim_end_matches('\\');
+    let up = match t.rfind('\\') {
+        None => "",
+        Some(cut) => {
+            let head = &t[..cut];
+            if head.ends_with(r"\\?") || head.ends_with('\\') {
+                head.trim_end_matches(['?', '\\'])
+            } else {
+                head
+            }
+        }
+    };
+    if up.is_empty() || up.eq_ignore_ascii_case(THIS_PC_PARSING) {
+        return Location::Home;
+    }
+    Location::Shell { parsing: up.to_string(), name: String::new() }
 }
 
 fn is_ftp_root(p: &Path) -> bool {
@@ -242,6 +281,33 @@ mod tests {
         // Control Panel etc. stay with Explorer
         assert_eq!(Location::from_shell_name("::{26EE0668-A00A-44D7-9371-BEB064C98683}"), None);
         assert_eq!(Location::from_shell_name(r"C:\Windows"), None);
+    }
+
+    #[test]
+    fn shell_locations_go_up_the_namespace() {
+        let sh = |p: &str| Location::Shell { parsing: p.into(), name: String::new() };
+        let pc = "::{20D04FE0-3AEA-1069-A2D8-08002B30309D}";
+        // a root of the namespace → Home
+        assert_eq!(sh("::{F02C1A0D-BE21-4350-88B0-7367FC96EF3C}").parent(), Some(Location::Home));
+        // a device under This PC → Home (our This PC)
+        let dev = format!(r"{pc}\\?\usb#vid_04e8&pid_6860#abc#{{6ac27878-a6fa-4155-ba85-f98f491d4f33}}");
+        assert_eq!(sh(&dev).parent(), Some(Location::Home));
+        // storage and folders on it go up one level at a time
+        let storage = format!(r"{dev}\SID-{{10001,,128}}");
+        let dcim = format!(r"{storage}\{{0001}}");
+        assert_eq!(sh(&dcim).parent(), Some(sh(&storage)));
+        assert_eq!(sh(&storage).parent(), Some(sh(&dev)));
+        assert_eq!(sh(&format!(r"{storage}\")).parent(), Some(sh(&dev)));
+        assert_eq!(sh(r"::{A}\Docs").parent(), Some(sh("::{A}")));
+    }
+
+    #[test]
+    fn shell_titles() {
+        let l = |name: &str| Location::Shell { parsing: r"::{A}\Foo".into(), name: name.into() };
+        assert_eq!(l("Internal storage").title(), "Internal storage");
+        assert_eq!(l("").title(), "Foo");
+        assert_eq!(l("x").path(), None);
+        assert_eq!(l("x").cleaned(), l("x"));
     }
 
     #[test]

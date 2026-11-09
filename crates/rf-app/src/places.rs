@@ -123,6 +123,9 @@ pub struct Places {
     pub libraries: Vec<rf_win::libraries::Library>,
     /// Network locations ("Add a network location" shortcuts): (name, target).
     pub network: Vec<(String, std::path::PathBuf)>,
+    /// Devices under This PC that are not drives (MTP phones, cameras): browsed as shell
+    /// folders.
+    pub devices: Vec<rf_win::shellfolder::ShellChild>,
     pub loaded: bool,
     _task: Option<Task<()>>,
 }
@@ -130,7 +133,7 @@ pub struct Places {
 impl Places {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let mut this =
-            Self { drives: Vec::new(), cloud: Vec::new(), pinned: Vec::new(), recent: Vec::new(), libraries: Vec::new(), network: Vec::new(), loaded: false, _task: None };
+            Self { drives: Vec::new(), cloud: Vec::new(), pinned: Vec::new(), recent: Vec::new(), libraries: Vec::new(), network: Vec::new(), devices: Vec::new(), loaded: false, _task: None };
         this.refresh(cx);
         // Notice drives appearing/disappearing (USB, network mappings) without any shell hooks.
         cx.spawn(async move |this, cx| {
@@ -145,6 +148,24 @@ impl Places {
                     }
                 }
             }
+        })
+        .detach();
+        // Phones come and go without a drive letter: ask the shell now and then. Cheap, off the
+        // UI thread, and the list is only replaced when it changed.
+        cx.spawn(async move |this, cx| loop {
+            let found = cx.background_spawn(async move { rf_win::shellfolder::devices() }).await;
+            let alive = this
+                .update(cx, |p, cx| {
+                    if p.devices != found {
+                        p.devices = found;
+                        cx.notify();
+                    }
+                })
+                .is_ok();
+            if !alive {
+                break;
+            }
+            cx.background_executor().timer(std::time::Duration::from_secs(5)).await;
         })
         .detach();
         this

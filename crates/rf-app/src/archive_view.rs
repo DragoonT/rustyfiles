@@ -279,7 +279,7 @@ pub fn list_inside(archive: &Path, inner: &Path) -> anyhow::Result<Vec<Entry>> {
 }
 
 /// Where items opened or copied out of archives are extracted.
-fn temp_root() -> PathBuf {
+pub(crate) fn temp_root() -> PathBuf {
     std::env::temp_dir().join("rustyfiles-arsiv")
 }
 

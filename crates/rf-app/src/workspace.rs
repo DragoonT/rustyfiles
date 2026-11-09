@@ -224,8 +224,15 @@ pub fn any_main_window(cx: &App) -> bool {
 pub const SELECT_PREFIX: &str = "\u{1}select:";
 
 /// What a launch message opens: a folder (or Home), and maybe a name to select there.
+/// A second launch on a shell folder (a phone, Network…) reaches the running window as this
+/// prefix plus the folder's parsing name.
+pub const SHELL_PREFIX: &str = "rustyfiles-shell:";
+
 pub fn parse_launch(msg: &str) -> (Location, Option<String>) {
     let m = msg.trim();
+    if let Some(parsing) = m.strip_prefix(SHELL_PREFIX) {
+        return (Location::Shell { parsing: parsing.to_string(), name: String::new() }, None);
+    }
     if let Some(loc) = Location::from_shell_name(m) {
         return (loc, None);
     }
@@ -2161,6 +2168,8 @@ impl Workspace {
         let mut row = h_flex().gap_0p5().items_center().text_sm().overflow_hidden();
         let crumbs: Vec<(String, Location)> = match loc {
             Location::Path(path) | Location::Search { root: path, .. } => breadcrumbs(path),
+            // the shell's own name for the folder (the location may carry none)
+            Location::Shell { .. } => vec![(self.active_tab().read(cx).title(cx), loc.clone())],
             other => vec![(crate::i18n::td(&other.title()), other.clone())],
         };
         // Too long for the address box: hide leading segments after the drive behind "…"
@@ -2971,7 +2980,7 @@ impl Render for Workspace {
         let commandbar = self.render_commandbar(&p, cx);
         let filter_strip = self.render_filter_bar(&p, window, cx);
         // the command bar acts on folder contents: not on Home, Settings, the Recycle Bin…
-        let show_commandbar = matches!(self.active_tab().read(cx).location(), Location::Path(_) | Location::Search { .. } | Location::Library { .. } | Location::Tag(_));
+        let show_commandbar = matches!(self.active_tab().read(cx).location(), Location::Path(_) | Location::Search { .. } | Location::Library { .. } | Location::Tag(_) | Location::Shell { .. });
         // Adaptive layout (as Files does): a narrow window gives the list its room first by
         // hiding the preview, then the sidebar. The settings themselves are not changed.
         const LIST_MIN: f32 = 380.;

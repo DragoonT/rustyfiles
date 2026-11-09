@@ -29,6 +29,7 @@ mod ops;
 mod picker;
 mod places;
 mod settings;
+mod shell_view;
 mod select_box;
 mod settings_view;
 mod taskbar_preview;
@@ -185,6 +186,17 @@ fn is_dir_bounded(p: PathBuf, limit: std::time::Duration) -> Option<bool> {
     rx.recv_timeout(limit).ok()
 }
 
+/// A shell namespace argument resolved to a folder we list ourselves that is not on the file
+/// system (see `rf_win::shellfolder::browsable`), within `limit`.
+fn shell_place_bounded(arg: &str, limit: std::time::Duration) -> Option<rf_win::shellfolder::Place> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let arg = arg.to_string();
+    std::thread::spawn(move || {
+        let _ = tx.send(rf_win::shellfolder::browsable(&arg));
+    });
+    rx.recv_timeout(limit).ok().flatten().filter(|p| p.fs_path.is_none())
+}
+
 /// rustyfiles'ın girişi.
 pub fn main() {
     // Velopack (installer / updater): first, it may run an install hook and exit
@@ -244,39 +256,47 @@ pub fn main() {
         start = Some(loc);
     } else if let Some(arg) = arg {
         let shell_namespace = arg.starts_with("::") || arg.to_ascii_lowercase().starts_with("shell:");
-        // a network server root (\\nas) isn't a "directory" to Rust, but we browse its shares
-        let server = rf_win::network::server_root(std::path::Path::new(&arg)).is_some();
-        let is_dir = if shell_namespace {
-            Some(false)
-        } else if server {
-            Some(true)
+        // a namespace folder we can list ourselves (a phone, Network, a library…) opens here;
+        // Control Panel and other applets (and anything that does not enumerate) stay with Explorer.
+        // Bounded like the folder check: a device that hangs must not keep the window away.
+        let shell_place = if shell_namespace { shell_place_bounded(&arg, std::time::Duration::from_secs(3)) } else { None };
+        if let Some(place) = shell_place {
+            start = Some(Location::Shell { parsing: place.parsing, name: place.name });
         } else {
-            is_dir_bounded(PathBuf::from(&arg), std::time::Duration::from_secs(2))
-        };
-        // a browsable archive (DirectLook's "rustyfiles'ta aç") opens like a folder, here
-        let archive = !shell_namespace && archive_view::is_browsable(std::path::Path::new(&arg));
-        if is_dir == Some(false) && !archive {
-            // Explorer opens folders through the verb we took over: what we just handed it may
-            // come straight back. Never ping-pong; a path is then shown here (with its error).
-            if !rf_win::default_fm::forwarded_recently(&arg) {
-                rf_win::default_fm::note_forward(&arg);
-                let _ = std::process::Command::new("explorer.exe").arg(&arg).spawn();
-                return;
+            // a network server root (\\nas) isn't a "directory" to Rust, but we browse its shares
+            let server = rf_win::network::server_root(std::path::Path::new(&arg)).is_some();
+            let is_dir = if shell_namespace {
+                Some(false)
+            } else if server {
+                Some(true)
+            } else {
+                is_dir_bounded(PathBuf::from(&arg), std::time::Duration::from_secs(2))
+            };
+            // a browsable archive (DirectLook's "rustyfiles'ta aç") opens like a folder, here
+            let archive = !shell_namespace && archive_view::is_browsable(std::path::Path::new(&arg));
+            if is_dir == Some(false) && !archive {
+                // Explorer opens folders through the verb we took over: what we just handed it may
+                // come straight back. Never ping-pong; a path is then shown here (with its error).
+                if !rf_win::default_fm::forwarded_recently(&arg) {
+                    rf_win::default_fm::note_forward(&arg);
+                    let _ = std::process::Command::new("explorer.exe").arg(&arg).spawn();
+                    return;
+                }
+                if shell_namespace {
+                    return;
+                }
+                // a file that came back (an archive type Windows browses but we don't, e.g. .cpio):
+                // its folder, with the file selected
+                let p = PathBuf::from(&arg);
+                if let (Some(dir), Some(name)) = (p.parent().filter(|_| p.is_file()), p.file_name()) {
+                    start = Some(Location::Path(dir.to_path_buf()));
+                    *workspace::START_SELECT.lock().unwrap() = Some(name.to_string_lossy().into_owned());
+                    select = Some(arg.clone());
+                }
             }
-            if shell_namespace {
-                return;
+            if start.is_none() {
+                start = Some(Location::Path(PathBuf::from(arg)));
             }
-            // a file that came back (an archive type Windows browses but we don't, e.g. .cpio):
-            // its folder, with the file selected
-            let p = PathBuf::from(&arg);
-            if let (Some(dir), Some(name)) = (p.parent().filter(|_| p.is_file()), p.file_name()) {
-                start = Some(Location::Path(dir.to_path_buf()));
-                *workspace::START_SELECT.lock().unwrap() = Some(name.to_string_lossy().into_owned());
-                select = Some(arg.clone());
-            }
-        }
-        if start.is_none() {
-            start = Some(Location::Path(PathBuf::from(arg)));
         }
     }
     // Cache the registry state for the settings page (read once, off the hot path).
@@ -320,6 +340,7 @@ pub fn main() {
         _ if select.is_some() => format!("{}{}", workspace::SELECT_PREFIX, select.as_deref().unwrap_or_default()),
         Some(Location::Path(p)) => p.to_string_lossy().into_owned(),
         Some(Location::RecycleBin) => "shell:RecycleBinFolder".to_string(),
+        Some(Location::Shell { parsing, .. }) => format!("{}{parsing}", workspace::SHELL_PREFIX),
         // a search link goes on to the running window as a search link
         Some(Location::Search { root, query }) => {
             let enc = |s: &str| s.replace('%', "%25").replace('&', "%26");
