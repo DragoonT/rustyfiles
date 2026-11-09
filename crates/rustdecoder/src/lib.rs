@@ -14,6 +14,10 @@ pub mod d3d11;
 #[cfg(windows)]
 pub mod decoder;
 pub mod dxva;
+#[cfg(windows)]
+pub mod player;
+#[cfg(windows)]
+pub mod present;
 
 #[cfg(windows)]
 pub use decoder::{Frame, HevcDecoder, StreamInfo};

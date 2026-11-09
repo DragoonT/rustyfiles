@@ -62,6 +62,50 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
    H.264 is not started.
 4. Playback in DirectLook: clock, frame queue, seeking, audio; replaces the Media Foundation
    route, and FilmCraft for video.
+   **Phase 4 groundwork, headless core done (2026-11-09):**
+   - `present` (`Converter`): NV12 / P010 slice → BGRA8 texture of any size on the decoder's
+     device, one pixel shader compiled with `D3DCompile` when the converter is created (no
+     shader tools in the build). Chroma upsampling is the sampler's bilinear filter on the half
+     size chroma plane (centre siting), the matrix comes from the VUI (`Colorimetry::from_vui`:
+     BT.709 / 601 / 2020 / SMPTE 240, unsignalled streams BT.709 when 1280 wide or more or over
+     576 lines, else BT.601; limited or full range; 8 and 10 bit), rotation 0 / 90 / 180 / 270
+     from the `tkhd` matrix, optional mirror, scaling by bilinear sampling of the visible
+     rectangle (clamped half a sample inside it so the padding never bleeds in). HDR → SDR,
+     **first version**: PQ and HLG are tone mapped with the BT.2390 EETF (1000 nit source peak
+     assumed, no mastering display metadata read yet; target peak 203 nits = SDR white, black
+     level 0, per channel), BT.2020 → BT.709 primaries, sRGB encoding. HLG goes through the
+     1000 nit display OOTF (gamma 1.2) first. Per-channel mapping desaturates very bright
+     colours a little, and 203 nit white lands at about 90 % (the curve's knee), by design of
+     the first version. Timestamp queries give the GPU time per conversion.
+   - `player` (`Player`): a worker thread owns the `HevcDecoder` and copies every output picture
+     out of the decoder's array into a ring of 2..n slots (one texture array, same format);
+     the ring bounds the decode-ahead (a slot is taken before decoding and returned when the
+     picture is replaced). `Clock` (start / pause / resume / seek / time) over a `TimeSource`
+     (`SystemTime`, `FakeTime` for tests). `frame_for(now)` shows the latest picture whose time
+     has come and never one from the future; passed-over pictures count as dropped, pictures
+     shown more than a frame late as late. `seek(t)` plans from the sample table
+     (`plan_seek`): the picture with the largest pts not after `t` is the landing picture; decoding
+     restarts at the sync sample before it, one sync sample further back so the RASL pictures
+     of a CRA picture decode, and everything before the landing picture is dropped without a
+     copy. Stats: decoded, skipped by seek, dropped, late, shown, most slots in use.
+     D3D11's multithread protection is switched on for the device because the decoder thread
+     (decode, copy) and the caller (convert) share the immediate context.
+   - `HevcDecoder` got `gpu()`, `track()`, `seek_to_sample()`; `StreamInfo` got `rotation` and
+     `vui`.
+   - Checked: colour against ffmpeg (mean abs error per channel 0.04 to 0.5 of 255, see tests);
+     rotation against ffmpeg's autorotate; PQ / HLG grey ramps against the curve worked out
+     separately; queue order and repeats with a fake clock; ring bound; 31 seeks on an open GOP
+     clip landing on the right picture with the same pixels as a linear decode. Camera clip
+     (4K 59.94 fps Main 10, stored rotated 270): 5 s at real-time speed, decode + convert to
+     1080x1920, 298..300 of 300 frames shown, 0..2 dropped, 0 late, 0.5 ms GPU per conversion
+     (`examples/play_headless.rs`).
+   - Left for phase 4: window / swap chain presentation in DirectLook (flip model swap chain,
+     present the converted target or convert straight into the back buffer, vsync-aligned
+     `frame_for`), audio (decode, output device, the audio clock as the master clock and A/V
+     sync by dropping or repeating pictures against it), pause on a seek target, playback
+     rate, looping, mid-stream size changes (the ring is built from the first picture), mastering
+     display / content light metadata for the tone map, chroma siting other than centre,
+     a better downscale filter than bilinear for large ratios, edit lists.
 5. MKV / WebM, VP9 and AV1 (the GPU decodes them too), fragmented MP4.
 6. Formats no GPU decodes, on the CPU: ProRes and DNxHR (intra-only, slices decode in
    parallel), MXF, AIFF. Editing sources must keep previewing.
