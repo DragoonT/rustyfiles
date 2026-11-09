@@ -197,7 +197,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Etkinleştir", "Enable"),
     ("Performans", "Performance"),
     ("Çizim yöntemi", "Rendering mode"),
-    ("Otomatik: GPU doluyken (oyun, render) arayüz CPU ile çizilir, CPU doluyken GPU ile. Geçiş fark edilmez.", "Automatic: while the GPU is busy (games, rendering) the UI is drawn on the CPU, and on the GPU while the CPU is busy. The switch is seamless."),
+    ("Otomatik: açılışta ekran kartı denetlenir, sorun yoksa arayüz GPU ile çizilir. GPU doluyken (oyun, render) CPU'ya geçer, boşalınca geri döner. Geçiş fark edilmez.", "Automatic: the graphics card is checked at start and, if it works, the interface is drawn on the GPU. While the GPU is busy (games, rendering) it moves to the CPU and back when the GPU is free. You won't notice the switch."),
     ("Otomatik", "Automatic"),
     ("Klavye kısayolları", "Keyboard shortcuts"),
     ("Değiştirmek için settings.toml içine ekleyin:  [keybindings]  \"ctrl-k\" = \"NewFolder\"", "To change them, add this to settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\""),

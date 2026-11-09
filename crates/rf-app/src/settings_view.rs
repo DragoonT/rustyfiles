@@ -1532,7 +1532,7 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
                 p,
                 L::Activity,
                 t!("Çizim yöntemi").into(),
-                Some(t!("Otomatik: GPU doluyken (oyun, render) arayüz CPU ile çizilir, CPU doluyken GPU ile. Geçiş fark edilmez.").into()),
+                Some(t!("Otomatik: açılışta ekran kartı denetlenir, sorun yoksa arayüz GPU ile çizilir. GPU doluyken (oyun, render) CPU'ya geçer, boşalınca geri döner. Geçiş fark edilmez.").into()),
                 Some(dropdown(
                     "renderer",
                     p,
