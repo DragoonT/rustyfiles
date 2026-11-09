@@ -102,6 +102,7 @@ pub(crate) fn dialog_dll() -> Option<String> {
     let dst = dir.join(rf_win::dialog_reg::DLL_NAME);
     if !dst.exists() {
         std::fs::create_dir_all(&dir).ok()?;
+        grant_app_packages(&dir);
         let part = dir.join("rustyfiles_dialog.dll.part");
         std::fs::copy(&src, &part).ok()?;
         std::fs::rename(&part, &dst).ok()?;
@@ -115,6 +116,45 @@ pub(crate) fn dialog_dll() -> Option<String> {
         }
     }
     Some(dst.display().to_string())
+}
+
+/// Packaged apps' file pickers run in PickerHost.exe, which can only load the registered DLL if
+/// app packages may read it; LocalAppData gives them no access, and the failed load makes the
+/// picker fail (Snipping Tool crashed on Save as). Read and execute for ALL APPLICATION PACKAGES
+/// and ALL RESTRICTED APPLICATION PACKAGES, inherited by the files copied in after.
+fn grant_app_packages(dir: &std::path::Path) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let _ = std::process::Command::new("icacls")
+        .arg(dir)
+        .args(["/grant", "*S-1-15-2-1:(OI)(CI)(RX)", "*S-1-15-2-2:(OI)(CI)(RX)"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+}
+
+#[cfg(test)]
+mod grant_tests {
+    #[test]
+    fn app_packages_can_read_the_dialog_folder() {
+        let dir = std::env::temp_dir().join(format!("rf-grant-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        super::grant_app_packages(&dir);
+        let file = dir.join("rustyfiles_dialog.dll");
+        std::fs::write(&file, b"x").unwrap();
+        // the file copied in after inherits the grant; SDDL (SIDs, not localized names):
+        // AC is ALL APPLICATION PACKAGES, S-1-15-2-2 ALL RESTRICTED APPLICATION PACKAGES
+        let saved = std::env::temp_dir().join(format!("rf-grant-{}.acl", std::process::id()));
+        std::process::Command::new("icacls").arg(&file).arg("/save").arg(&saved).output().unwrap();
+        let raw = std::fs::read(&saved).unwrap();
+        let words: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let sddl = String::from_utf16_lossy(&words);
+        let _ = std::fs::remove_file(&saved);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(sddl.contains("(A;ID;0x1200a9;;;AC)"), "{sddl}");
+        assert!(sddl.contains("(A;ID;0x1200a9;;;S-1-15-2-2)"), "{sddl}");
+    }
 }
 
 /// Opens a rustyfiles window. `start = None` restores the session (first window) or opens Home.

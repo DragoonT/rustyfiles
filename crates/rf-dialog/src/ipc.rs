@@ -125,7 +125,11 @@ pub fn pick(req: &Request, owner: HWND) -> Option<Response> {
     let dir = own_dir()?;
     let exe = Some(dir.join("rustyfiles.exe"))
         .filter(|p| p.exists())
-        .or_else(|| std::fs::read_to_string(dir.join("rustyfiles-exe.txt")).ok().map(|s| PathBuf::from(s.trim())).filter(|p| p.exists()))?;
+        .or_else(|| std::fs::read_to_string(dir.join("rustyfiles-exe.txt")).ok().map(|s| PathBuf::from(s.trim())).filter(|p| p.exists()));
+    let Some(exe) = exe else {
+        crate::log(&format!("pick: no rustyfiles.exe found from {}", dir.display()));
+        return None;
+    };
     unsafe {
         let pipe = Handle(
             CreateNamedPipeW(&HSTRING::from(name.as_str()), PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 64 << 10, 64 << 10, 0, None),
