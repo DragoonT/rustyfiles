@@ -270,6 +270,14 @@ fn fold_key(name: &str) -> u64 {
     h.finish()
 }
 
+/// Measuring only (`examples/walk_ids.rs`): list without file ids, as before they were kept.
+static PLAIN_LISTING: AtomicBool = AtomicBool::new(false);
+
+#[doc(hidden)]
+pub fn bench_plain_listing(on: bool) {
+    PLAIN_LISTING.store(on, Ordering::Relaxed);
+}
+
 /// One folder's listing: names (UTF-8, one pool), their lengths, flags, file ids.
 struct Listing {
     names: Vec<u8>,
@@ -293,7 +301,7 @@ fn list(dir: &Path) -> Listing {
         out.flags.push(flags_of(attrs));
         out.ids.push(id);
     };
-    if list_with_ids(dir, &mut push).is_none() {
+    if PLAIN_LISTING.load(Ordering::Relaxed) || list_with_ids(dir, &mut push).is_none() {
         let _ = for_each_raw(dir, |d| {
             let n = &d.cFileName;
             let end = n.iter().position(|&c| c == 0).unwrap_or(n.len());
