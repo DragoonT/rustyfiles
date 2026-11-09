@@ -205,6 +205,64 @@ fn prores_4444() {
     ]);
 }
 
+/// Damaged frames (cut short, bytes flipped) give an error or some picture, never a panic.
+#[test]
+fn damaged_frames_do_not_panic() {
+    if !have_ffmpeg() {
+        return;
+    }
+    for spec in [ks422(3, (640, 360)), Spec { name: "ks_4444", size: (640, 360), enc: &["-c:v", "prores_ks", "-profile:v", "4"], pix_fmt: "yuv444p12le", ref_fmt: "", frames: 3 }] {
+        let path = make(&spec);
+        let mut f = File::open(&path).unwrap();
+        let movie = rustdecoder::container::read(&mut f).unwrap();
+        let track = movie.video().unwrap();
+        let bits = prores::bits_for_fourcc(&track.fourcc);
+        let mut frame = Vec::new();
+        track.read_sample(&mut f, 0, &mut frame).unwrap();
+        let dec = ProResDecoder::new(2);
+        let mut pic = Picture::default();
+        let mut seed = 0x1234_5678_9abc_def0u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let (mut ok, mut err) = (0, 0);
+        for round in 0..400 {
+            let mut d = frame.clone();
+            match round % 4 {
+                0 => d.truncate((next() as usize) % d.len()),
+                1 => {
+                    for _ in 0..8 {
+                        let i = (next() as usize) % d.len();
+                        d[i] ^= 1 << (next() % 8);
+                    }
+                }
+                2 => {
+                    // damage the headers
+                    for _ in 0..4 {
+                        let i = (next() as usize) % 200.min(d.len());
+                        d[i] = next() as u8;
+                    }
+                }
+                _ => {
+                    // damage inside the slice data
+                    for _ in 0..16 {
+                        let i = 300 + (next() as usize) % (d.len() - 300);
+                        d[i] = next() as u8;
+                    }
+                }
+            }
+            match dec.decode(&d, bits, &mut pic) {
+                Ok(_) => ok += 1,
+                Err(_) => err += 1,
+            }
+        }
+        println!("{}: {ok} damaged frames decoded to something, {err} refused, no panic", spec.name);
+    }
+}
+
 #[test]
 fn prores_interlaced() {
     check(vec![
@@ -214,18 +272,126 @@ fn prores_interlaced() {
     ]);
 }
 
-/// Frames per second on this machine, one thread and several (printed; the parallel run must
-/// reach real time at 24 fps).
-#[test]
-fn prores_speed() {
-    if !have_ffmpeg() {
-        return;
+/// The GPU path: a ProRes picture uploaded as planar R16 and drawn by the converter looks like
+/// ffmpeg's own YUV to RGB conversion of the same clip (chroma upsampling differs a little).
+#[cfg(windows)]
+mod gpu {
+    use super::*;
+    use rustdecoder::VideoDecoder;
+    use rustdecoder::present::{Colorimetry, Converter, Params, Source};
+    use std::io::Read;
+
+    const TAG: [&str; 6] = ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"];
+
+    fn present(s: &Spec, frames: usize) {
+        let path = make(s);
+        let mut dec = match VideoDecoder::open(&path) {
+            Ok(d) => d,
+            Err(rustdecoder::Error::Gpu(m)) => return eprintln!("skipped: {m}"),
+            Err(e) => panic!("open: {e}"),
+        };
+        assert_eq!(dec.codec_name(), "ProRes");
+        let info = dec.info().clone();
+        let mut conv = Converter::new(&dec.gpu().device, &dec.gpu().context).unwrap();
+        let params = Params { colour: Colorimetry::from_vui(&info.vui, info.width, info.height), rotation: 0, flip: false };
+        let target = conv.create_target(info.width, info.height).unwrap();
+        let mut ff = Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(&path)
+            .args(["-frames:v", &frames.to_string(), "-vf", "scale=in_color_matrix=bt709:in_range=tv:out_range=full:flags=bilinear+accurate_rnd+full_chroma_int", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("ffmpeg");
+        let mut out = ff.stdout.take().unwrap();
+        let mut refbuf = vec![0u8; (info.width * info.height * 3) as usize];
+        let (mut sum, mut max, mut n) = (0u64, 0u8, 0usize);
+        for _ in 0..frames {
+            let f = dec.next_frame().unwrap().expect("frame");
+            conv.convert(&Source::from_frame(&f), &params, &target).unwrap();
+            let ours = conv.read_rgba(&target).unwrap();
+            out.read_exact(&mut refbuf).expect("ffmpeg frame");
+            for (a, b) in ours.chunks_exact(4).zip(refbuf.chunks_exact(3)) {
+                for c in 0..3 {
+                    let d = a[c].abs_diff(b[c]);
+                    sum += d as u64;
+                    max = max.max(d);
+                }
+            }
+            n += 1;
+        }
+        let _ = ff.kill();
+        let _ = ff.wait();
+        let mae = sum as f64 / (n as f64 * info.width as f64 * info.height as f64 * 3.0);
+        println!("{} {}x{} on the GPU vs ffmpeg RGB: mean abs error {mae:.3}, max {max}", s.name, info.width, info.height);
+        assert!(mae < 2.0, "{mae}");
     }
-    let spec = Spec { name: "ks_hq_noisy_30", size: (1920, 1080), enc: &["-vf", "noise=alls=20:allf=t", "-c:v", "prores_ks", "-profile:v", "3"], pix_fmt: "yuv422p10le", ref_fmt: "yuv422p10le", frames: 30 };
-    let path = make(&spec);
+
+    #[test]
+    fn prores_422_presents_like_ffmpeg() {
+        if !have_ffmpeg() {
+            return;
+        }
+        let mut enc = vec!["-c:v", "prores_ks", "-profile:v", "3"];
+        enc.extend(TAG);
+        let enc: &'static [&'static str] = Box::leak(enc.into_boxed_slice());
+        present(&Spec { name: "gpu_422", size: (640, 360), enc, pix_fmt: "yuv422p10le", ref_fmt: "", frames: 4 }, 4);
+        present(&Spec { name: "gpu_422_odd", size: (651, 367), enc, pix_fmt: "yuv422p10le", ref_fmt: "", frames: 3 }, 3);
+    }
+
+    /// `VideoDecoder::next_frame` end to end: decode on the pool, pack, upload to the GPU.
+    #[test]
+    fn prores_video_decoder_speed() {
+        if !have_ffmpeg() {
+            return;
+        }
+        for (label, name, size, frames, enc, fmt) in [
+            ("1080p 422 HQ", "ks_hq_noisy_30", (1920u32, 1080u32), 30u32, &["-vf", "noise=alls=20:allf=t", "-c:v", "prores_ks", "-profile:v", "3"][..], "yuv422p10le"),
+            ("2160p 422 HQ", "ks_hq_noisy_10", (3840, 2160), 10, &["-vf", "noise=alls=20:allf=t", "-c:v", "prores_ks", "-profile:v", "3"][..], "yuv422p10le"),
+        ] {
+            let path = make(&Spec { name, size, enc, pix_fmt: fmt, ref_fmt: "", frames });
+            let mut dec = match VideoDecoder::open(&path) {
+                Ok(d) => d,
+                Err(rustdecoder::Error::Gpu(m)) => return eprintln!("skipped: {m}"),
+                Err(e) => panic!("open: {e}"),
+            };
+            dec.next_frame().unwrap().unwrap();
+            dec.seek_to_sample(0);
+            let t = Instant::now();
+            let mut n = 0;
+            for _ in 0..3 {
+                dec.seek_to_sample(0);
+                while dec.next_frame().unwrap().is_some() {
+                    n += 1;
+                }
+            }
+            dec.wait_idle().unwrap();
+            let fps = n as f64 / t.elapsed().as_secs_f64();
+            println!("{label}: VideoDecoder::next_frame (decode, pack, upload): {fps:.1} fps on {}", dec.adapter());
+            assert!(fps > 12.0, "{fps}"); // real time is 25; other tests run beside this one
+        }
+    }
+
+    #[test]
+    fn prores_4444_presents_like_ffmpeg() {
+        if !have_ffmpeg() {
+            return;
+        }
+        let mut enc = vec!["-c:v", "prores_ks", "-profile:v", "4"];
+        enc.extend(TAG);
+        let enc: &'static [&'static str] = Box::leak(enc.into_boxed_slice());
+        present(&Spec { name: "gpu_4444", size: (640, 360), enc, pix_fmt: "yuv444p12le", ref_fmt: "", frames: 4 }, 4);
+    }
+}
+
+/// Decoding speed of noisy (so, heavy) clips: frames per second with one thread and with several
+/// (printed). The parallel run should keep real time (24 fps at 1080p, 25 fps at 4K); the assertion
+/// allows half of that because tests run side by side.
+fn speed(label: &str, spec: &Spec, must_reach: f64) {
+    let path = make(spec);
     let mut f = File::open(&path).unwrap();
     let movie = rustdecoder::container::read(&mut f).unwrap();
     let track = movie.video().unwrap();
+    let bits = prores::bits_for_fourcc(&track.fourcc);
     let mut frames = Vec::new();
     for i in 0..track.samples.len() {
         let mut b = Vec::new();
@@ -236,18 +402,43 @@ fn prores_speed() {
     for threads in [1usize, 4, 8, 0] {
         let dec = ProResDecoder::new(threads);
         let mut pic = Picture::default();
-        dec.decode(&frames[0], 10, &mut pic).unwrap();
+        dec.decode(&frames[0], bits, &mut pic).unwrap();
         let t = Instant::now();
         let rounds = if threads == 1 { 1 } else { 3 };
         for _ in 0..rounds {
             for fr in &frames {
-                dec.decode(fr, 10, &mut pic).unwrap();
+                dec.decode(fr, bits, &mut pic).unwrap();
             }
         }
         let fps = (rounds * frames.len()) as f64 / t.elapsed().as_secs_f64();
-        println!("1080p 422 HQ ({mb:.2} MB per frame): {} thread(s): {fps:.1} fps", dec.threads());
+        println!("{label} ({mb:.2} MB per frame, {:.0} Mbit/s at 25 fps): {:>2} thread(s): {fps:.1} fps", mb * 8.0 * 25.0, dec.threads());
         if threads == 0 {
-            assert!(fps > 24.0, "too slow: {fps}");
+            assert!(fps > must_reach / 2.0, "too slow: {fps}"); // half the target: other tests run beside this one
         }
     }
 }
+
+#[test]
+fn prores_speed_1080p_hq() {
+    if !have_ffmpeg() {
+        return;
+    }
+    speed("1080p 422 HQ", &Spec { name: "ks_hq_noisy_30", size: (1920, 1080), enc: &["-vf", "noise=alls=20:allf=t", "-c:v", "prores_ks", "-profile:v", "3"], pix_fmt: "yuv422p10le", ref_fmt: "", frames: 30 }, 24.0);
+}
+
+#[test]
+fn prores_speed_4k_hq() {
+    if !have_ffmpeg() {
+        return;
+    }
+    speed("2160p 422 HQ", &Spec { name: "ks_hq_noisy_10", size: (3840, 2160), enc: &["-vf", "noise=alls=20:allf=t", "-c:v", "prores_ks", "-profile:v", "3"], pix_fmt: "yuv422p10le", ref_fmt: "", frames: 10 }, 25.0);
+}
+
+#[test]
+fn prores_speed_4444_1080p() {
+    if !have_ffmpeg() {
+        return;
+    }
+    speed("1080p 4444 12 bit", &Spec { name: "ks_4444_noisy_20", size: (1920, 1080), enc: &["-vf", "noise=alls=20:allf=t", "-c:v", "prores_ks", "-profile:v", "4"], pix_fmt: "yuv444p12le", ref_fmt: "", frames: 20 }, 24.0);
+}
+

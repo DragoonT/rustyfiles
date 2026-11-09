@@ -154,6 +154,8 @@ cbuffer P : register(b0) {
     float4 coef;   // R from Cr, G from Cb, G from Cr, B from Cb
     float4 misc;   // sample scale, rotation (0..3), flip, transfer (0 SDR, 1 PQ, 2 HLG)
     float4 gamut;  // x: convert BT.2020 primaries to BT.709
+    float4 planar; // planar CPU pictures: chroma halved in x, Y rows, chroma plane width
+    float4 vorg;   // planar CPU pictures: where the V plane starts relative to the U plane
 };
 Texture2DArray<float>  TY : register(t0);
 Texture2DArray<float2> TC : register(t1);
@@ -209,7 +211,8 @@ float3 srgb_oetf(float3 x) {
     return (x <= 0.0031308) ? 12.92 * x : 1.055 * pow(x, 1.0 / 2.4) - 0.055;
 }
 
-float4 ps(VOut i) : SV_Target {
+// where in the picture (luma samples) this output pixel comes from
+float2 srcpos(VOut i) {
     float2 o = i.uv;
     if (misc.z > 0.5) o.x = 1.0 - o.x;
     int rot = (int)(misc.y + 0.5);
@@ -219,11 +222,10 @@ float4 ps(VOut i) : SV_Target {
     else if (rot == 3) s = float2(1.0 - o.y, o.x);
 
     float2 p = crop.xy + s * crop.zw;
-    p = clamp(p, crop.xy + 0.5, crop.xy + crop.zw - 0.5);
-    float3 uv = float3(p / surf.xy, 0);
-    float y = TY.SampleLevel(S, uv, 0) * misc.x;
-    float2 c = TC.SampleLevel(S, uv, 0) * misc.x;
+    return clamp(p, crop.xy + 0.5, crop.xy + crop.zw - 0.5);
+}
 
+float4 shade(float y, float2 c) {
     float Y = (y - yp.x) * yp.y;
     float cb = (c.x - yp.z) * yp.w;
     float cr = (c.y - yp.z) * yp.w;
@@ -248,6 +250,28 @@ float4 ps(VOut i) : SV_Target {
                      -0.0182 * lin.r - 0.1006 * lin.g + 1.1187 * lin.b);
     }
     return float4(srgb_oetf(lin), 1);
+}
+
+float4 ps(VOut i) : SV_Target {
+    float2 p = srcpos(i);
+    float3 uv = float3(p / surf.xy, 0);
+    float y = TY.SampleLevel(S, uv, 0) * misc.x;
+    float2 c = TC.SampleLevel(S, uv, 0) * misc.x;
+    return shade(y, c);
+}
+
+// Planar 4:2:2 / 4:4:4 pictures decoded on the CPU, in one R16 texture: Y on top, then U and V
+// (side by side for 4:2:2, below one another for 4:4:4). planar: chroma halved in x (1 / 0),
+// rows of the Y plane, width of a chroma plane; vorg: where the V plane starts.
+float4 ps_planar(VOut i) : SV_Target {
+    float2 p = srcpos(i);
+    float y = TY.SampleLevel(S, float3(p / surf.xy, 0), 0) * misc.x;
+    float cx = clamp(p.x * (planar.x > 0.5 ? 0.5 : 1.0), 0.5, planar.z - 0.5);
+    float2 up = float2(cx, planar.y + p.y);
+    float2 vp = up + vorg.xy;
+    float u = TY.SampleLevel(S, float3(up / surf.xy, 0), 0) * misc.x;
+    float v = TY.SampleLevel(S, float3(vp / surf.xy, 0), 0) * misc.x;
+    return shade(y, float2(u, v));
 }
 "#;
 
@@ -274,6 +298,8 @@ struct Constants {
     coef: [f32; 4],
     misc: [f32; 4],
     gamut: [f32; 4],
+    planar: [f32; 4],
+    vorg: [f32; 4],
 }
 
 struct TimerSet {
@@ -289,6 +315,7 @@ pub struct Converter {
     context: ID3D11DeviceContext,
     vs: ID3D11VertexShader,
     ps: ID3D11PixelShader,
+    ps_planar: ID3D11PixelShader,
     sampler: ID3D11SamplerState,
     raster: ID3D11RasterizerState,
     cbuf: ID3D11Buffer,
@@ -305,7 +332,10 @@ impl Converter {
     pub fn new(device: &ID3D11Device, context: &ID3D11DeviceContext) -> Result<Self> {
         let vs_code = compile(s!("vs"), s!("vs_5_0"))?;
         let ps_code = compile(s!("ps"), s!("ps_5_0"))?;
+        let ps_planar_code = compile(s!("ps_planar"), s!("ps_5_0"))?;
         unsafe {
+            let mut ps_planar = None;
+            gpu("CreatePixelShader (planar)", device.CreatePixelShader(&ps_planar_code, None, Some(&mut ps_planar)))?;
             let mut vs = None;
             gpu("CreateVertexShader", device.CreateVertexShader(&vs_code, None, Some(&mut vs)))?;
             let mut ps = None;
@@ -339,6 +369,7 @@ impl Converter {
                 context: context.clone(),
                 vs: vs.ok_or_else(none)?,
                 ps: ps.ok_or_else(none)?,
+                ps_planar: ps_planar.ok_or_else(none)?,
                 sampler: sampler.ok_or_else(none)?,
                 raster: raster.ok_or_else(none)?,
                 cbuf: cbuf.ok_or_else(none)?,
@@ -382,7 +413,9 @@ impl Converter {
         let (fy, fc) = match desc.Format {
             DXGI_FORMAT_NV12 => (DXGI_FORMAT_R8_UNORM, DXGI_FORMAT_R8G8_UNORM),
             DXGI_FORMAT_P010 => (DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R16G16_UNORM),
-            _ => return Err(Error::Unsupported("surface format other than NV12 and P010")),
+            // planar Y, U, V in one texture (pictures decoded on the CPU): one view serves all
+            DXGI_FORMAT_R16_UNORM => (DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R16_UNORM),
+            _ => return Err(Error::Unsupported("surface format other than NV12, P010 and planar R16")),
         };
         let key = (tex.as_raw() as usize, slice);
         if let Some((_, y, c)) = self.views.get(&key) {
@@ -430,6 +463,8 @@ impl Converter {
             coef: [(2.0 * (1.0 - kr)) as f32, (2.0 * kb * (1.0 - kb) / kg) as f32, (2.0 * kr * (1.0 - kr) / kg) as f32, (2.0 * (1.0 - kb)) as f32],
             misc: [sample_scale as f32, rot, if p.flip { 1.0 } else { 0.0 }, tf],
             gamut: [if p.colour.bt2020_primaries && p.colour.transfer != Transfer::Sdr { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0],
+            planar: [0.0; 4],
+            vorg: [0.0; 4],
         }
     }
 
@@ -461,11 +496,26 @@ impl Converter {
     /// Like [`Converter::convert`], into the rectangle `(x, y, width, height)` of the target
     /// only (a letterboxed picture); the rest of the target is left as it is.
     pub fn convert_rect(&mut self, src: &Source, params: &Params, dst: &Target, rect: (i32, i32, u32, u32)) -> Result<()> {
-        let (ysrv, csrv, sw, sh, _) = self.planes(&src.texture, src.slice)?;
+        let (ysrv, csrv, sw, sh, format) = self.planes(&src.texture, src.slice)?;
         if src.left + src.width > sw || src.top + src.height > sh {
             return Err(Error::Invalid("visible rectangle outside the surface"));
         }
-        let c = Self::constants(src, params, (sw, sh));
+        let mut c = Self::constants(src, params, (sw, sh));
+        let planar = format == DXGI_FORMAT_R16_UNORM;
+        if planar {
+            // Y plane rows = visible rows; the texture is 2x that (4:2:2) or 3x (4:4:4) high
+            let hy = src.top + src.height;
+            if sh == 2 * hy {
+                let cw = (sw / 2) as f32;
+                c.planar = [1.0, hy as f32, cw, 0.0];
+                c.vorg = [cw, 0.0, 0.0, 0.0];
+            } else if sh == 3 * hy {
+                c.planar = [0.0, hy as f32, sw as f32, 0.0];
+                c.vorg = [0.0, hy as f32, 0.0, 0.0];
+            } else {
+                return Err(Error::Invalid("planar picture: texture height is neither 2 nor 3 times the picture height"));
+            }
+        }
         unsafe {
             let ctx = self.context.clone();
             let mut m = D3D11_MAPPED_SUBRESOURCE::default();
@@ -480,7 +530,7 @@ impl Converter {
             ctx.IASetInputLayout(None);
             ctx.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             ctx.VSSetShader(&self.vs, None);
-            ctx.PSSetShader(&self.ps, None);
+            ctx.PSSetShader(if planar { &self.ps_planar } else { &self.ps }, None);
             ctx.PSSetConstantBuffers(0, Some(&[Some(self.cbuf.clone())]));
             ctx.PSSetSamplers(0, Some(&[Some(self.sampler.clone())]));
             ctx.PSSetShaderResources(0, Some(&[Some(ysrv), Some(csrv)]));

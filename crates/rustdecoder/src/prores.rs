@@ -69,6 +69,9 @@ pub fn parse_header(frame: &[u8]) -> Result<FrameHeader> {
     }
     let width = be16(h, 8)? as u32;
     let height = be16(h, 10)? as u32;
+    if width > 8192 || height > 8192 {
+        return Err(Error::Unsupported("ProRes frame larger than 8192 pixels"));
+    }
     if width == 0 || height == 0 {
         return Err(Error::Invalid("ProRes frame size is zero"));
     }
@@ -196,7 +199,7 @@ impl<'a> Bits<'a> {
             }
             let payload = if n == 0 { 0 } else { ((w << (q + 1)) >> (64 - n)) as u32 };
             self.pos += (q + 1 + n) as usize;
-            Ok(((t + 1) << rice) + (((1u32 << k) - 1) << exp) + payload)
+            Ok(((t + 1) << rice).wrapping_add((((1u64 << k) - 1) << exp) as u32).wrapping_add(payload))
         }
     }
 
@@ -232,7 +235,7 @@ fn read_coefficients(data: &[u8], blocks: usize, scan: &[u8; 64], coef: &mut [i3
         } else {
             sign = 0;
         }
-        prev += ((((code + 1) >> 1) as i32) ^ -sign) + sign;
+        prev = prev.wrapping_add(((((code.wrapping_add(1)) >> 1) as i32) ^ -sign).wrapping_add(sign));
         coef[b * 64] = prev;
     }
     // AC
@@ -244,7 +247,7 @@ fn read_coefficients(data: &[u8], blocks: usize, scan: &[u8; 64], coef: &mut [i3
     let mut level = 2u32;
     while !br.rest_is_zero() {
         run = br.codeword(RUN_CB[run.min(15) as usize])?;
-        level = br.codeword(LEVEL_CB[level.min(9) as usize])? + 1;
+        level = br.codeword(LEVEL_CB[level.min(9) as usize])?.wrapping_add(1);
         pos += run as usize + 1;
         if pos >= total {
             return Err(Error::Invalid("ProRes coefficient position past the block"));
@@ -384,7 +387,7 @@ fn decode_slice(c: &Ctx, j: &Job) -> Result<()> {
                 let mut blk = [0i32; 64];
                 let src = &coef[(mb * bpm + k) * 64..][..64];
                 for i in 0..64 {
-                    blk[i] = src[i] * qm[i] as i32 * qscale;
+                    blk[i] = src[i].wrapping_mul(qm[i] as i32).wrapping_mul(qscale);
                 }
                 idct(&mut blk, c.bits);
                 for r in 0..8 {
@@ -394,7 +397,7 @@ fn decode_slice(c: &Ctx, j: &Job) -> Result<()> {
                     unsafe {
                         let dst = pp.p.add(row * pp.stride + x0 + dx);
                         for x in 0..8 {
-                            *dst.add(x) = (blk[r * 8 + x] + mid).clamp(lo, hi) as u16;
+                            *dst.add(x) = blk[r * 8 + x].wrapping_add(mid).clamp(lo, hi) as u16;
                         }
                     }
                 }

@@ -98,6 +98,77 @@ impl Gpu {
         Ok(leased)
     }
 
+    /// A device on the first hardware adapter, for pictures decoded on the CPU (ProRes): no
+    /// decoder profile is asked for; the device only holds the textures the pictures are
+    /// uploaded to and is the one the converter draws on.
+    pub fn open_any() -> Result<Gpu> {
+        let reused = IDLE.lock().unwrap_or_else(|e| e.into_inner()).0.pop();
+        let core = match reused {
+            Some(g) => g,
+            None => {
+                let g = Self::open_new_any()?;
+                if let Ok(mt) = g.context.cast::<windows::Win32::Graphics::Direct3D11::ID3D11Multithread>() {
+                    unsafe {
+                        let _ = mt.SetMultithreadProtected(true);
+                    }
+                }
+                g
+            }
+        };
+        let mut leased = core.clone();
+        leased.lease = Some(std::sync::Arc::new(Lease(Some(core))));
+        Ok(leased)
+    }
+
+    fn open_new_any() -> Result<Gpu> {
+        unsafe {
+            let factory: IDXGIFactory6 = gpu("CreateDXGIFactory1", CreateDXGIFactory1())?;
+            let mut why = String::from("no adapter");
+            for i in 0.. {
+                let Ok(adapter) = factory.EnumAdapterByGpuPreference::<IDXGIAdapter1>(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE) else { break };
+                let desc = gpu("GetDesc1", adapter.GetDesc1())?;
+                if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 {
+                    continue;
+                }
+                let name = String::from_utf16_lossy(&desc.Description).trim_end_matches('\0').to_string();
+                let mut device = None;
+                let mut context = None;
+                let made = D3D11CreateDevice(
+                    &adapter.cast::<IDXGIAdapter>().map_err(|e| Error::Gpu(e.to_string()))?,
+                    D3D_DRIVER_TYPE_UNKNOWN,
+                    HMODULE::default(),
+                    D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
+                    Some(&[D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0]),
+                    D3D11_SDK_VERSION,
+                    Some(&mut device),
+                    None,
+                    Some(&mut context),
+                );
+                if let Err(e) = made {
+                    why = format!("{name}: {e}");
+                    continue;
+                }
+                let (Some(device), Some(context)) = (device, context) else { continue };
+                let video_device: ID3D11VideoDevice = match device.cast() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        why = format!("{name}: {e}");
+                        continue;
+                    }
+                };
+                let video_context: ID3D11VideoContext = match context.cast() {
+                    Ok(v) => v,
+                    Err(e) => {
+                        why = format!("{name}: {e}");
+                        continue;
+                    }
+                };
+                return Ok(Gpu { lease: None, device, context, video_device, video_context, adapter_name: name });
+            }
+            Err(Error::Gpu(format!("no hardware adapter ({why})")))
+        }
+    }
+
     /// Whether this device's video engine decodes `profile` into `format`.
     fn decodes(&self, profile: &GUID, format: DXGI_FORMAT) -> bool {
         unsafe {
