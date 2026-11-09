@@ -3,7 +3,7 @@
 //!
 //! ```text
 //!   worker thread                                  caller's thread
-//!   HevcDecoder::next_frame ─► copy into ring ─► channel ─► Player::frame_for(now) ─► Shown
+//!   VideoDecoder::next_frame ─► copy into ring ─► channel ─► Player::frame_for(now) ─► Shown
 //!        ▲                         slot                           │
 //!        └───────── free slots ◄──────────────────────────────────┘
 //! ```
@@ -32,7 +32,8 @@ use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Dxgi::Common::DXGI_SAMPLE_DESC;
 use windows::core::{Interface};
 
-use crate::decoder::{HevcDecoder, StreamInfo};
+use crate::decoder::StreamInfo;
+use crate::video::VideoDecoder;
 use crate::present::Source;
 use crate::{Error, Result};
 
@@ -213,7 +214,7 @@ struct SendBox<T>(T);
 // devices are free threaded and the context is multithread protected (see the module comment).
 unsafe impl<T> Send for SendBox<T> {}
 
-fn make_ring(dec: &HevcDecoder, like: &ID3D11Texture2D, slots: usize) -> Result<ID3D11Texture2D> {
+fn make_ring(dec: &VideoDecoder, like: &ID3D11Texture2D, slots: usize) -> Result<ID3D11Texture2D> {
     let mut d = D3D11_TEXTURE2D_DESC::default();
     unsafe { like.GetDesc(&mut d) };
     // NV12 / P010 arrays: some drivers only accept the combinations they can decode into
@@ -242,7 +243,7 @@ fn make_ring(dec: &HevcDecoder, like: &ID3D11Texture2D, slots: usize) -> Result<
 }
 
 struct Worker {
-    dec: HevcDecoder,
+    dec: VideoDecoder,
     slots: usize,
     shared: Arc<Shared>,
     msg_tx: Sender<Msg>,
@@ -440,7 +441,7 @@ impl Player {
     /// Like [`Player::open`], with a given time source for the clock.
     pub fn open_with(path: &Path, ring: usize, time: Arc<dyn TimeSource>) -> Result<Player> {
         let ring = ring.max(2);
-        let dec = HevcDecoder::open(path)?;
+        let dec = VideoDecoder::open(path)?;
         let device = dec.gpu().device.clone();
         let context = dec.gpu().context.clone();
         if let Ok(mt) = context.cast::<ID3D11Multithread>() {

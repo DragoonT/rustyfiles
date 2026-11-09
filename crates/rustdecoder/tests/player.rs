@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::*;
-use rustdecoder::HevcDecoder;
+use rustdecoder::VideoDecoder;
 use rustdecoder::player::{FakeTime, Player};
 use rustdecoder::present::{Colorimetry, Converter, Params};
 
@@ -25,6 +25,15 @@ fn clip() -> Option<std::path::PathBuf> {
         return None;
     }
     Some(make_clip("m10_open.mp4", "yuv420p10le", OPEN_GOP, true))
+}
+
+/// The same checks on H.264: 8-bit, B-frames with a pyramid, an IDR every 24 pictures.
+fn clip_h264() -> Option<std::path::PathBuf> {
+    if !have_ffmpeg() {
+        eprintln!("skipped: ffmpeg not found");
+        return None;
+    }
+    Some(make_h264_clip("p_h264_gop24.mp4", "bframes=3:b-pyramid=normal:keyint=24:min-keyint=24:ref=4:scenecut=0", true))
 }
 
 fn open_player(p: &Path, ring: usize, time: Arc<FakeTime>) -> Option<Player> {
@@ -41,7 +50,7 @@ fn open_player(p: &Path, ring: usize, time: Arc<FakeTime>) -> Option<Player> {
 /// Every picture of the clip in display order with a checksum of its RGBA pixels, by a plain
 /// linear decode.
 fn linear(p: &Path) -> Vec<(i64, u32)> {
-    let mut dec = HevcDecoder::open(p).unwrap();
+    let mut dec = VideoDecoder::open(p).unwrap();
     let info = dec.info().clone();
     let mut conv = Converter::new(&dec.gpu().device, &dec.gpu().context).unwrap();
     let params = Params { colour: Colorimetry::from_vui(&info.vui, info.width, info.height), rotation: 0, flip: false };
@@ -54,9 +63,7 @@ fn linear(p: &Path) -> Vec<(i64, u32)> {
     v
 }
 
-#[test]
-fn plays_in_order_without_extra_repeats() {
-    let Some(clip) = clip() else { return };
+fn plays_in_order_without_extra_repeats(clip: std::path::PathBuf) {
     let time = Arc::new(FakeTime::new());
     let Some(mut pl) = open_player(&clip, 6, time.clone()) else { return };
     let all = linear(&clip);
@@ -107,9 +114,7 @@ fn plays_in_order_without_extra_repeats() {
     assert_eq!(st.shown as usize, want.len());
 }
 
-#[test]
-fn slow_polling_drops_and_never_goes_back() {
-    let Some(clip) = clip() else { return };
+fn slow_polling_drops_and_never_goes_back(clip: std::path::PathBuf) {
     let time = Arc::new(FakeTime::new());
     let Some(mut pl) = open_player(&clip, 6, time.clone()) else { return };
     let (start, end) = pl.range();
@@ -134,9 +139,7 @@ fn slow_polling_drops_and_never_goes_back() {
     assert_eq!(st.late, 0);
 }
 
-#[test]
-fn decode_ahead_stays_in_the_ring() {
-    let Some(clip) = clip() else { return };
+fn decode_ahead_stays_in_the_ring(clip: std::path::PathBuf) {
     for ring in [3usize, 4, 8] {
         let time = Arc::new(FakeTime::new());
         let Some(mut pl) = open_player(&clip, ring, time.clone()) else { return };
@@ -167,9 +170,7 @@ fn decode_ahead_stays_in_the_ring() {
     }
 }
 
-#[test]
-fn seek_lands_on_the_right_picture() {
-    let Some(clip) = clip() else { return };
+fn seek_lands_on_the_right_picture(clip: std::path::PathBuf) {
     let all = linear(&clip);
     let time = Arc::new(FakeTime::new());
     let Some(mut pl) = open_player(&clip, 5, time.clone()) else { return };
@@ -212,9 +213,7 @@ fn seek_lands_on_the_right_picture() {
     assert!(st.max_in_flight <= 5);
 }
 
-#[test]
-fn seek_then_play_on() {
-    let Some(clip) = clip() else { return };
+fn seek_then_play_on(clip: std::path::PathBuf) {
     let all = linear(&clip);
     let time = Arc::new(FakeTime::new());
     let Some(mut pl) = open_player(&clip, 5, time.clone()) else { return };
@@ -236,3 +235,18 @@ fn seek_then_play_on() {
     }
     assert!(seen.len() >= 25);
 }
+
+macro_rules! both {
+    ($($name:ident),*) => {
+        mod hevc {
+            use super::*;
+            $(#[test] fn $name() { if let Some(c) = clip() { super::$name(c) } })*
+        }
+        mod h264 {
+            use super::*;
+            $(#[test] fn $name() { if let Some(c) = clip_h264() { super::$name(c) } })*
+        }
+    };
+}
+
+both!(plays_in_order_without_extra_repeats, slow_polling_drops_and_never_goes_back, decode_ahead_stays_in_the_ring, seek_lands_on_the_right_picture, seek_then_play_on);
