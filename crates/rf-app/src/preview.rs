@@ -922,9 +922,11 @@ impl Render for Preview {
         let mut props = v_flex().w_full().gap_1p5();
         props = props.child(prop_row(&p, t!("Tür"), icons::type_label(&e)));
         if e.is_dir() && !crate::archive_view::is_browsable_path(&path) {
+            let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
             let txt = match &self.folder_size {
                 Some((fp, Some(fs))) if *fp == path => {
-                    format!("{} · {} {}, {} {}", format::size(fs.bytes), group(fs.files), t!("dosya"), group(fs.dirs), t!("klasör"))
+                    let shown = if on_disk { fs.allocated.unwrap_or(fs.bytes) } else { fs.bytes };
+                    format!("{} · {} {}, {} {}", format::size(shown), group(fs.files), t!("dosya"), group(fs.dirs), t!("klasör"))
                 }
                 _ => t!("Hesaplanıyor…").to_string(),
             };
