@@ -71,7 +71,11 @@ impl FolderView {
     /// Opens our context menu for the selection (or the folder background) at the mouse.
     pub fn show_context_menu(&mut self, background: bool, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(self.location(), rf_core::history::Location::Shell { .. }) {
-            self.show_shell_folder_menu(background, cx);
+            if shift_down() {
+                self.show_shell_folder_menu(background, cx);
+            } else {
+                self.show_shell_fluent_menu(background, window, cx);
+            }
             return;
         }
         let shift = unsafe {
@@ -895,12 +899,78 @@ fn invoke_shell(me: &Me, session: u64, id: u32, cx: &mut App) {
     });
     let me = me.clone();
     cx.spawn(async move |cx| {
-        if let Ok(Some(MenuOutcome::Rename)) = rx.await {
-            let _ = me.update(cx, |v, cx| {
-                v.request_rename();
-                cx.notify();
-            });
-        }
+        let outcome = rx.await;
+        let _ = me.update(cx, |v, cx| {
+            let shell_folder = matches!(v.location(), Location::Shell { .. });
+            match outcome {
+                // a phone's folder has no inline rename here
+                Ok(Some(MenuOutcome::Rename)) if !shell_folder => {
+                    v.request_rename();
+                    cx.notify();
+                }
+                // what the shell did on a device (a deletion, a new folder) isn't watched: list again
+                Ok(Some(MenuOutcome::Invoked(_) | MenuOutcome::Rename)) if shell_folder => v.refresh(cx),
+                _ => {}
+            }
+        });
     })
     .detach();
+}
+
+fn shift_down() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_SHIFT};
+    unsafe { GetKeyState(VK_SHIFT.0 as i32) < 0 }
+}
+
+impl FolderView {
+    /// Right-click in a shell folder (a phone, Libraries…): our menu, filled with the shell's
+    /// own commands for the selection or the folder (found by parsing names, as they have no
+    /// path). Shift gives the classic menu instead, like elsewhere.
+    fn show_shell_fluent_menu(&mut self, background: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Location::Shell { parsing, .. } = self.location().clone() else { return };
+        let mut sel: Vec<u32> = self.selected.iter().copied().collect();
+        sel.sort_unstable();
+        let items: Vec<PathBuf> = if background { Vec::new() } else { sel.iter().filter_map(|&i| self.shell_items.get(i as usize)).map(|c| PathBuf::from(&c.parsing)).collect() };
+        let background = items.is_empty();
+        let me = cx.entity().downgrade();
+        let mut menu = Menu::default();
+        if !background {
+            menu.quick.push(Quick::new(L::Copy, t!("Kopyala  (Ctrl+C)"), true, act(&me, |v, w, cx| v.copy_to_clipboard(Transfer::Copy, w, cx))));
+        }
+        menu.items.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } });
+        if background {
+            menu.items.push(Item::Separator);
+            menu.items.push(Item::action(t!("Yenile"), icon(L::RotateCw), act(&me, |v, _, cx| v.refresh(cx))).hint("Ctrl+R"));
+        }
+        let menu_view = fluent_menu::show(menu, window.mouse_position(), window, cx);
+        let target = match items.as_slice() {
+            [] => ShellTarget::Background(PathBuf::from(&parsing)),
+            [one] => ShellTarget::One(one.clone()),
+            _ => ShellTarget::Items(items),
+        };
+        let (tx, rx) = oneshot::channel();
+        rf_win::sta::run(move |owner| {
+            let _ = tx.send(rf_win::ctxmenu::build(owner, &target, false).map_err(|e| format!("{e:#}")));
+        });
+        let menu_weak = menu_view.downgrade();
+        cx.spawn(async move |_, cx| {
+            let result = rx.await.unwrap_or_else(|_| Err("cancelled".into()));
+            let _ = cx.update(|cx| {
+                let more = match result {
+                    Ok((session, shell)) => Pending::Ready(Rc::new(to_items(&me, session, &tidy(shell), cx))),
+                    Err(e) => {
+                        log::info!("shell folder menu: {e}");
+                        Pending::Failed
+                    }
+                };
+                if let Some(m) = menu_weak.upgrade() {
+                    m.update(cx, |m, cx| {
+                        m.set_pending("more", more, cx);
+                        m.inline_pending("more", cx);
+                    });
+                }
+            });
+        })
+        .detach();
+    }
 }

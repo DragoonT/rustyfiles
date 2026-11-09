@@ -141,4 +141,4 @@ incremental = true
 
 [patch.crates-io]
 # our fork of GPUI's Windows layer (GPU/CPU hot-swap renderer), see its FORK.md
-gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "a52f753d12bd7216e26afbfb2f067aa88bab79df" }
+gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "e8170e2d338ef63fd8d85e877f60b7995ba9a713" }
