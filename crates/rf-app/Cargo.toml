@@ -22,6 +22,7 @@ rf-dialog = { path = "../rf-dialog" }
 velopack = "=1.2.161"
 rf-archive.workspace = true
 rf-player.workspace = true
+rustdecoder.workspace = true
 gpui-kit.workspace = true
 anyhow.workspace = true
 log.workspace = true

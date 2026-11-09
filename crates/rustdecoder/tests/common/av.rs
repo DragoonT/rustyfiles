@@ -10,6 +10,17 @@ use super::temp_dir;
 /// frames) with a sine tone track: 440 Hz, and 660 Hz on the right channel when `stereo`.
 /// `acodec` are ffmpeg's audio encoder arguments; `name`'s extension picks the container.
 pub fn make_av_clip(name: &str, rate: u32, stereo: bool, acodec: &[&str]) -> PathBuf {
+    make_av_clip_codec(name, rate, stereo, acodec, false)
+}
+
+/// [`make_av_clip`] with H.264 (x264, an IDR every 15 frames, B-frames) instead of HEVC.
+pub fn make_av_clip_h264(name: &str, rate: u32, stereo: bool, acodec: &[&str]) -> PathBuf {
+    make_av_clip_codec(name, rate, stereo, acodec, true)
+}
+
+fn make_av_clip_codec(name: &str, rate: u32, stereo: bool, acodec: &[&str], h264: bool) -> PathBuf {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let out = temp_dir().join(name);
     if out.exists() {
         return out;
@@ -22,8 +33,14 @@ pub fn make_av_clip(name: &str, rate: u32, stereo: bool, acodec: &[&str]) -> Pat
         c.args(["-f", "lavfi", "-i"]).arg(format!("sine=f=660:r={rate}:d=3"));
         c.args(["-filter_complex", "[1:a][2:a]amerge=inputs=2[a]", "-map", "0:v", "-map", "[a]"]);
     }
+    let video: &[&str] = if h264 {
+        &["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-x264-params", "log-level=error:keyint=15:min-keyint=15:bframes=3:scenecut=0"]
+    } else {
+        &["-c:v", "libx265", "-pix_fmt", "yuv420p", "-preset", "ultrafast", "-x265-params", "log-level=error:keyint=15:min-keyint=15"]
+    };
     let status = c
-        .args(["-t", "3", "-c:v", "libx265", "-pix_fmt", "yuv420p", "-preset", "ultrafast", "-x265-params", "log-level=error:keyint=15:min-keyint=15"])
+        .args(["-t", "3"])
+        .args(video)
         .args(acodec)
         .arg(&tmp)
         .status()

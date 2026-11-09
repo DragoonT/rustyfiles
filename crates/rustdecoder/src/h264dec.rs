@@ -131,6 +131,27 @@ impl H264Decoder {
         &self.info
     }
 
+    /// The device the pictures live on (the player copies and converts on it).
+    pub fn gpu(&self) -> &Gpu {
+        &self.gpu
+    }
+
+    /// The video track with its sample table (presentation times, sync samples).
+    pub fn track(&self) -> &Track {
+        &self.track
+    }
+
+    /// Continues decoding at sample `i`, which must be a sync sample. Everything held for
+    /// output is dropped. The next [`H264Decoder::next_frame`] returns pictures from there on.
+    pub fn seek_to_sample(&mut self, i: usize) {
+        let pool = self.active.as_ref().map_or(0, |a| a.pool);
+        self.dpb = Dpb::new(pool);
+        self.next_sample = i.min(self.track.samples.len());
+        self.building = None;
+        self.queue.clear();
+        self.flushed = false;
+    }
+
     /// The name of the graphics adapter decoding.
     pub fn adapter(&self) -> &str {
         &self.gpu.adapter_name

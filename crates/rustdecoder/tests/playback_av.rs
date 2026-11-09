@@ -117,6 +117,14 @@ fn clip() -> Option<PathBuf> {
     Some(make_av_clip("av_aac_st48.mp4", 48000, true, AAC))
 }
 
+fn clip_h264() -> Option<PathBuf> {
+    if !have_ffmpeg() {
+        eprintln!("skipped: ffmpeg not found");
+        return None;
+    }
+    Some(make_av_clip_h264("av_h264_aac_st48.mp4", 48000, true, AAC))
+}
+
 fn open(p: &std::path::Path, sink: Arc<FakeSink>) -> Option<Playback> {
     match Playback::open_with_sink(p, 6, Some(sink)) {
         Ok(p) => Some(p),
@@ -145,9 +153,7 @@ fn step(pb: &mut Playback, time: &FakeTime) -> Option<rustdecoder::player::Shown
     pb.frame()
 }
 
-#[test]
-fn pictures_follow_the_audio_clock_in_order() {
-    let Some(clip) = clip() else { return };
+fn pictures_follow_the_audio_clock_in_order(clip: PathBuf) {
     let time = Arc::new(FakeTime::new());
     let sink = FakeSink::new(time.clone());
     let Some(mut pb) = open(&clip, sink.clone()) else { return };
@@ -195,9 +201,7 @@ fn pictures_follow_the_audio_clock_in_order() {
     assert!(next >= 2.5, "audio ahead of the clock");
 }
 
-#[test]
-fn seeking_lands_both_sides_on_the_target() {
-    let Some(clip) = clip() else { return };
+fn seeking_lands_both_sides_on_the_target(clip: PathBuf) {
     let time = Arc::new(FakeTime::new());
     let sink = FakeSink::new(time.clone());
     let Some(mut pb) = open(&clip, sink.clone()) else { return };
@@ -368,3 +372,19 @@ fn muted_device_under_run_stops_the_clock() {
     assert!(clock.now() - c1 > 0.3, "{}", clock.now() - c1);
     out.pause();
 }
+
+/// The sync tests on HEVC and on H.264.
+macro_rules! both {
+    ($($name:ident),*) => {
+        mod hevc {
+            use super::*;
+            $(#[test] fn $name() { if let Some(c) = clip() { super::$name(c) } })*
+        }
+        mod h264 {
+            use super::*;
+            $(#[test] fn $name() { if let Some(c) = clip_h264() { super::$name(c) } })*
+        }
+    };
+}
+
+both!(pictures_follow_the_audio_clock_in_order, seeking_lands_both_sides_on_the_target);

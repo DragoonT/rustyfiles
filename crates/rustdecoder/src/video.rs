@@ -3,10 +3,10 @@
 use std::fs::File;
 use std::path::Path;
 
-use crate::d3d11::Planes;
+use crate::d3d11::{Gpu, Planes};
 use crate::decoder::{Frame, HevcDecoder, StreamInfo};
 use crate::h264dec::H264Decoder;
-use crate::mp4::{self, Codec};
+use crate::mp4::{self, Codec, Track};
 use crate::{Error, Result};
 
 pub enum VideoDecoder {
@@ -44,6 +44,21 @@ impl VideoDecoder {
 
     pub fn info(&self) -> &StreamInfo {
         each!(self, d => d.info())
+    }
+
+    /// The device the pictures live on.
+    pub fn gpu(&self) -> &Gpu {
+        each!(self, d => d.gpu())
+    }
+
+    /// The video track with its sample table.
+    pub fn track(&self) -> &Track {
+        each!(self, d => d.track())
+    }
+
+    /// Continues decoding at sync sample `i` (see the codec's `seek_to_sample`).
+    pub fn seek_to_sample(&mut self, i: usize) {
+        each!(self, d => d.seek_to_sample(i))
     }
 
     pub fn adapter(&self) -> &str {

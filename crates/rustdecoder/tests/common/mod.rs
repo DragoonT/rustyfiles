@@ -60,3 +60,23 @@ pub fn make_rotated(clip: &std::path::Path, name: &str, ccw_degrees: i32) -> Pat
     std::fs::rename(&tmp, &out).unwrap();
     out
 }
+
+/// Makes (once) a 3 s clip of 640x360 test pattern at 30 fps with x264 (8-bit 4:2:0).
+pub fn make_h264_clip(name: &str, x264: &str, noise: bool) -> PathBuf {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let out = temp_dir().join(name);
+    if out.exists() {
+        return out;
+    }
+    let tmp = out.with_extension("part.mp4");
+    let mut c = Command::new("ffmpeg");
+    c.args(["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-t", "3"]);
+    if noise {
+        c.args(["-vf", "noise=alls=6:allf=t"]);
+    }
+    let status = c.args(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-x264-params"]).arg(format!("log-level=error:{x264}")).arg(&tmp).status().expect("ffmpeg");
+    assert!(status.success(), "ffmpeg could not make {name}");
+    std::fs::rename(&tmp, &out).unwrap();
+    out
+}
