@@ -37,6 +37,8 @@ pub fn h264_profile() -> (GUID, DXGI_FORMAT) {
 /// A D3D11 device with video support, on an adapter that decodes the profile asked for.
 #[derive(Clone)]
 pub struct Gpu {
+    /// `None` on the idle copy kept in the pool.
+    lease: Option<std::sync::Arc<Lease>>,
     pub device: ID3D11Device,
     pub context: ID3D11DeviceContext,
     pub video_device: ID3D11VideoDevice,
@@ -44,31 +46,56 @@ pub struct Gpu {
     pub adapter_name: String,
 }
 
-/// Devices already made, shared by every video of the process: making a device per video
-/// left two handles behind each time on this driver (and costs tens of milliseconds).
-struct Shared(Vec<Gpu>);
-// SAFETY: the device is created with multithread protection on (see `Gpu::open`) before it is
-// shared, and D3D11 devices themselves are free-threaded.
-unsafe impl Send for Shared {}
-static SHARED: std::sync::Mutex<Shared> = std::sync::Mutex::new(Shared(Vec::new()));
+/// Devices no video uses right now, kept for the next one: making a device per video left two
+/// handles behind each time on this driver (and costs tens of milliseconds). A device is never
+/// shared by two videos at once (their decode work on one immediate context got mixed up).
+struct Idle(Vec<Gpu>);
+// SAFETY: an idle device is touched by no thread; it is handed to one video at a time.
+unsafe impl Send for Idle {}
+static IDLE: std::sync::Mutex<Idle> = std::sync::Mutex::new(Idle(Vec::new()));
+
+/// Goes with every clone of a leased [`Gpu`]; when the last one is gone, the device goes back
+/// to [`IDLE`].
+struct Lease(Option<Gpu>);
+
+impl Drop for Lease {
+    fn drop(&mut self) {
+        if let Some(g) = self.0.take() {
+            // what the video released is freed now (D3D11 destroys on the next flush)
+            unsafe { g.context.Flush() };
+            IDLE.lock().unwrap_or_else(|e| e.into_inner()).0.push(g);
+        }
+    }
+}
+
+// SAFETY: as for `Gpu`, which already crosses threads with the decoder (see `player.rs`).
+unsafe impl Send for Lease {}
+unsafe impl Sync for Lease {}
 
 impl Gpu {
     /// The first hardware adapter (fastest first) whose video engine decodes `profile` into
     /// `format`.
     pub fn open(profile: &GUID, format: DXGI_FORMAT) -> Result<Gpu> {
-        let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(g) = shared.0.iter().find(|g| g.decodes(profile, format)) {
-            return Ok(g.clone());
-        }
-        let g = Self::open_new(profile, format)?;
-        // the decoder thread, the converter and the window share the immediate context
-        if let Ok(mt) = g.context.cast::<windows::Win32::Graphics::Direct3D11::ID3D11Multithread>() {
-            unsafe {
-                let _ = mt.SetMultithreadProtected(true);
+        let reused = {
+            let mut idle = IDLE.lock().unwrap_or_else(|e| e.into_inner());
+            idle.0.iter().position(|g| g.decodes(profile, format)).map(|i| idle.0.swap_remove(i))
+        };
+        let core = match reused {
+            Some(g) => g,
+            None => {
+                let g = Self::open_new(profile, format)?;
+                // the decoder thread, the converter and the window share the immediate context
+                if let Ok(mt) = g.context.cast::<windows::Win32::Graphics::Direct3D11::ID3D11Multithread>() {
+                    unsafe {
+                        let _ = mt.SetMultithreadProtected(true);
+                    }
+                }
+                g
             }
-        }
-        shared.0.push(g.clone());
-        Ok(g)
+        };
+        let mut leased = core.clone();
+        leased.lease = Some(std::sync::Arc::new(Lease(Some(core))));
+        Ok(leased)
     }
 
     /// Whether this device's video engine decodes `profile` into `format`.
@@ -135,7 +162,7 @@ impl Gpu {
         if !gpu("CheckVideoDecoderFormat", unsafe { video_device.CheckVideoDecoderFormat(profile, format) })?.as_bool() {
             return Err(Error::Gpu("output format not supported by the decoder".into()));
         }
-        Ok(Gpu { device, context, video_device, video_context, adapter_name: name })
+        Ok(Gpu { lease: None, device, context, video_device, video_context, adapter_name: name })
     }
 
     /// Blocks until the GPU has finished everything submitted so far.
