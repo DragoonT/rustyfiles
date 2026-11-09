@@ -931,5 +931,19 @@
  "0a4fc336": "Raspakiravanje ZIP-a: 10.000 datoteka",
  "162b2359": "Svaka aplikacija redom otvara iste mape; mjere se vrijeme, CPU i memorija. Tijekom testa prozori drugih aplikacija otvaraju se i zatvaraju: ne diraj miš ni tipkovnicu. Traje oko 5–10 minuta; testne se datoteke izrađuju prvi put (~1,3 GB, u lokalnim podacima aplikacija).",
  "f52afac8": "Medijani 3 pokretanja (zagrijavanje se ne računa). Vrijeme: od pokretanja aplikacije dok se njezin prozor ne prestane mijenjati 500 ms. * Aplikacija je već radila: CPU se računa od pojave prozora, memorija je cijeli proces.",
- "252ff602": "rustyfiles je besplatan, a napravila ga je jedna osoba. Ako ti se sviđa, daj mu zvjezdicu na GitHubu: pomaže drugima da ga pronađu."
+ "252ff602": "rustyfiles je besplatan, a napravila ga je jedna osoba. Ako ti se sviđa, daj mu zvjezdicu na GitHubu: pomaže drugima da ga pronađu.",
+ "f2a18b26": "Izuzmi iz indeksa pretraživanja",
+ "24d2b2fb": "Mape izuzete iz indeksa",
+ "c5e022bb": "Uvijek:",
+ "8b968fdf": "Pretraživanje unutar ovih mapa pregledava disk. Možete i desnom tipkom miša kliknuti mapu i odabrati „Izuzmi iz indeksa pretraživanja“.",
+ "df63b602": "Dodaj mapu…",
+ "991da57f": "Mapa koju treba izuzeti iz indeksa",
+ "290b8263": "Rezultati:",
+ "fab7cbfe": "Kopiraj vezu",
+ "fc3bb67d": "Veza je kopirana",
+ "4bf92434": "Brzi indeks pretraživanja",
+ "f87ce35b": "Nazivi datoteka na lokalnim diskovima čuvaju se u indeksu pa pretraživanje podmapa traje milisekunde. Indeks se izrađuje u pozadini i održava ažurnim.",
+ "f13da91b": "indeksiranje…",
+ "f1ff0bf0": "nije bilo moguće indeksirati",
+ "6abadce2": "{root} {n} stavki, {mb} MB"
 }

@@ -931,5 +931,19 @@
  "0a4fc336": "Mengekstrak ZIP: 10.000 file",
  "162b2359": "Setiap aplikasi membuka folder yang sama secara bergantian; waktu, CPU, dan memori diukur. Jendela aplikasi lain terbuka dan tertutup selama pengujian: jangan sentuh mouse atau keyboard. Prosesnya sekitar 5–10 menit; file uji dibuat pada kali pertama (~1,3 GB, di data aplikasi lokal).",
  "f52afac8": "Median dari 3 kali jalan (putaran pemanasan tidak dihitung). Waktu: dari aplikasi dimulai hingga jendelanya tidak berubah selama 500 ms. * Aplikasi sudah berjalan: CPU dihitung sejak jendela muncul, memori adalah seluruh proses.",
- "252ff602": "rustyfiles gratis dan dibuat oleh satu orang. Jika Anda suka, beri bintang di GitHub: itu membantu orang lain menemukannya."
+ "252ff602": "rustyfiles gratis dan dibuat oleh satu orang. Jika Anda suka, beri bintang di GitHub: itu membantu orang lain menemukannya.",
+ "f2a18b26": "Kecualikan dari indeks pencarian",
+ "24d2b2fb": "Folder yang dikecualikan dari indeks",
+ "c5e022bb": "Selalu:",
+ "8b968fdf": "Pencarian di dalam folder ini menelusuri disk. Anda juga dapat mengklik kanan folder dan memilih \"Kecualikan dari indeks pencarian\".",
+ "df63b602": "Tambahkan folder…",
+ "991da57f": "Folder yang akan dikecualikan dari indeks",
+ "290b8263": "Hasil:",
+ "fab7cbfe": "Salin tautan",
+ "fc3bb67d": "Tautan disalin",
+ "4bf92434": "Indeks pencarian cepat",
+ "f87ce35b": "Nama file di drive lokal disimpan dalam indeks, sehingga pencarian di subfolder hanya butuh milidetik. Indeks dibuat di latar belakang dan selalu diperbarui.",
+ "f13da91b": "mengindeks…",
+ "f1ff0bf0": "tidak dapat diindeks",
+ "6abadce2": "{root} {n} item, {mb} MB"
 }

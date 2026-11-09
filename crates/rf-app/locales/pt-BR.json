@@ -931,5 +931,19 @@
  "0a4fc336": "Extração de um ZIP: 10.000 arquivos",
  "162b2359": "Cada aplicativo abre as mesmas pastas em sequência; tempo, CPU e memória são medidos. Janelas de outros aplicativos abrem e fecham durante o teste: não toque no mouse nem no teclado. Leva cerca de 5–10 minutos; os arquivos de teste são criados na primeira vez (~1,3 GB, nos dados locais de aplicativos).",
  "f52afac8": "Medianas de 3 execuções (uma execução de aquecimento não conta). Tempo: do início do aplicativo até a janela parar de mudar por 500 ms. * O aplicativo já estava em execução: a CPU conta desde que a janela apareceu, a memória é a do processo inteiro.",
- "252ff602": "O rustyfiles é gratuito e feito por uma única pessoa. Se você gostar, dê uma estrela no GitHub: isso ajuda outras pessoas a encontrá-lo."
+ "252ff602": "O rustyfiles é gratuito e feito por uma única pessoa. Se você gostar, dê uma estrela no GitHub: isso ajuda outras pessoas a encontrá-lo.",
+ "f2a18b26": "Excluir do índice de pesquisa",
+ "24d2b2fb": "Pastas excluídas do índice",
+ "c5e022bb": "Sempre:",
+ "8b968fdf": "Pesquisar dentro dessas pastas percorre o disco. Você também pode clicar com o botão direito em uma pasta e escolher \"Excluir do índice de pesquisa\".",
+ "df63b602": "Adicionar pasta…",
+ "991da57f": "Pasta a excluir do índice",
+ "290b8263": "Resultados:",
+ "fab7cbfe": "Copiar link",
+ "fc3bb67d": "Link copiado",
+ "4bf92434": "Índice de pesquisa rápida",
+ "f87ce35b": "Os nomes de arquivo das unidades locais ficam em um índice, então pesquisar em subpastas leva milissegundos. O índice é criado em segundo plano e mantido atualizado.",
+ "f13da91b": "indexando…",
+ "f1ff0bf0": "não foi possível indexar",
+ "6abadce2": "{root} {n} itens, {mb} MB"
 }

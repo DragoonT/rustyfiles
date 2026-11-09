@@ -931,5 +931,19 @@
  "0a4fc336": "Rozpakowywanie ZIP: 10 000 plików",
  "162b2359": "Każda aplikacja po kolei otwiera te same foldery; mierzone są czas, CPU i pamięć. Podczas testu okna innych aplikacji otwierają się i zamykają: nie dotykaj myszy ani klawiatury. Trwa to około 5–10 minut; pliki testowe są tworzone za pierwszym razem (~1,3 GB, w lokalnych danych aplikacji).",
  "f52afac8": "Mediany z 3 uruchomień (uruchomienie rozgrzewkowe nie jest liczone). Czas: od uruchomienia aplikacji do chwili, gdy jej okno przestaje się zmieniać na 500 ms. * Aplikacja już działała: CPU liczone jest od pojawienia się okna, pamięć dotyczy całego procesu.",
- "252ff602": "rustyfiles jest darmowy i stworzony przez jedną osobę. Jeśli ci się podoba, daj mu gwiazdkę na GitHubie: pomaga to innym go znaleźć."
+ "252ff602": "rustyfiles jest darmowy i stworzony przez jedną osobę. Jeśli ci się podoba, daj mu gwiazdkę na GitHubie: pomaga to innym go znaleźć.",
+ "f2a18b26": "Wyklucz z indeksu wyszukiwania",
+ "24d2b2fb": "Foldery wykluczone z indeksu",
+ "c5e022bb": "Zawsze:",
+ "8b968fdf": "Wyszukiwanie w tych folderach przeszukuje dysk. Możesz też kliknąć folder prawym przyciskiem myszy i wybrać „Wyklucz z indeksu wyszukiwania”.",
+ "df63b602": "Dodaj folder…",
+ "991da57f": "Folder do wykluczenia z indeksu",
+ "290b8263": "Wyniki:",
+ "fab7cbfe": "Kopiuj link",
+ "fc3bb67d": "Skopiowano link",
+ "4bf92434": "Szybki indeks wyszukiwania",
+ "f87ce35b": "Nazwy plików na dyskach lokalnych są przechowywane w indeksie, dzięki czemu wyszukiwanie w podfolderach trwa milisekundy. Indeks jest budowany w tle i na bieżąco aktualizowany.",
+ "f13da91b": "indeksowanie…",
+ "f1ff0bf0": "nie udało się zindeksować",
+ "6abadce2": "{root} {n} elementów, {mb} MB"
 }

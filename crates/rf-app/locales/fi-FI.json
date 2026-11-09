@@ -931,5 +931,19 @@
  "0a4fc336": "ZIP-tiedoston purku: 10 000 tiedostoa",
  "162b2359": "Jokainen sovellus avaa samat kansiot vuorotellen; aika, suoritin ja muisti mitataan. Muiden sovellusten ikkunat avautuvat ja sulkeutuvat testin aikana: älä koske hiireen tai näppäimistöön. Testi kestää noin 5–10 minuuttia; testitiedostot luodaan ensimmäisellä kerralla (~1,3 GB, paikallisissa sovellustiedoissa).",
  "f52afac8": "Mediaanit 3 ajosta (lämmittelyajoa ei lasketa). Aika: sovelluksen käynnistyksestä siihen, kun sen ikkuna ei ole muuttunut 500 ms:iin. * Sovellus oli jo käynnissä: suoritin lasketaan ikkunan ilmestymisestä, muisti on koko prosessi.",
- "252ff602": "rustyfiles on ilmainen ja yhden ihmisen tekemä. Jos pidät siitä, anna sille tähti GitHubissa: se auttaa muita löytämään sen."
+ "252ff602": "rustyfiles on ilmainen ja yhden ihmisen tekemä. Jos pidät siitä, anna sille tähti GitHubissa: se auttaa muita löytämään sen.",
+ "f2a18b26": "Jätä pois hakuindeksistä",
+ "24d2b2fb": "Indeksistä pois jätetyt kansiot",
+ "c5e022bb": "Aina:",
+ "8b968fdf": "Näissä kansioissa hakeminen käy levyn läpi. Voit myös napsauttaa kansiota hiiren kakkospainikkeella ja valita ”Jätä pois hakuindeksistä”.",
+ "df63b602": "Lisää kansio…",
+ "991da57f": "Indeksistä pois jätettävä kansio",
+ "290b8263": "Tulokset:",
+ "fab7cbfe": "Kopioi linkki",
+ "fc3bb67d": "Linkki kopioitu",
+ "4bf92434": "Nopea hakuindeksi",
+ "f87ce35b": "Paikallisten asemien tiedostonimet säilytetään indeksissä, joten alikansioiden haku kestää millisekunteja. Indeksi rakennetaan taustalla ja pidetään ajan tasalla.",
+ "f13da91b": "indeksoidaan…",
+ "f1ff0bf0": "indeksointi epäonnistui",
+ "6abadce2": "{root} {n} kohdetta, {mb} Mt"
 }

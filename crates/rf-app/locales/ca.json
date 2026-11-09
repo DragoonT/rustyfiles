@@ -931,5 +931,19 @@
  "0a4fc336": "Extracció d'un ZIP: 10.000 fitxers",
  "162b2359": "Cada aplicació obre les mateixes carpetes per torns; es mesuren el temps, la CPU i la memòria. Durant la prova s'obren i es tanquen finestres d'altres aplicacions: no toquis el ratolí ni el teclat. Triga uns 5–10 minuts; els fitxers de prova es creen la primera vegada (~1,3 GB, a les dades locals d'aplicacions).",
  "f52afac8": "Medianes de 3 execucions (una execució d'escalfament no compta). Temps: des que s'inicia l'aplicació fins que la seva finestra deixa de canviar durant 500 ms. * L'aplicació ja s'estava executant: la CPU es compta des que va aparèixer la finestra, la memòria és la de tot el procés.",
- "252ff602": "rustyfiles és gratuït i l'ha fet una sola persona. Si t'agrada, dona-li una estrella a GitHub: ajuda altres persones a trobar-lo."
+ "252ff602": "rustyfiles és gratuït i l'ha fet una sola persona. Si t'agrada, dona-li una estrella a GitHub: ajuda altres persones a trobar-lo.",
+ "f2a18b26": "Exclou de l'índex de cerca",
+ "24d2b2fb": "Carpetes excloses de l'índex",
+ "c5e022bb": "Sempre:",
+ "8b968fdf": "La cerca dins d'aquestes carpetes recorre el disc. També pots fer clic dret en una carpeta i triar «Exclou de l'índex de cerca».",
+ "df63b602": "Afegeix una carpeta…",
+ "991da57f": "Carpeta per excloure de l'índex",
+ "290b8263": "Resultats:",
+ "fab7cbfe": "Copia l'enllaç",
+ "fc3bb67d": "Enllaç copiat",
+ "4bf92434": "Índex de cerca ràpida",
+ "f87ce35b": "Els noms de fitxer de les unitats locals es guarden en un índex, de manera que la cerca a les subcarpetes triga mil·lisegons. L'índex es crea en segon pla i es manté actualitzat.",
+ "f13da91b": "indexant…",
+ "f1ff0bf0": "no s'ha pogut indexar",
+ "6abadce2": "{root} {n} elements, {mb} MB"
 }

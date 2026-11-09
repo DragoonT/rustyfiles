@@ -931,5 +931,19 @@
  "0a4fc336": "Packa upp en ZIP: 10 000 filer",
  "162b2359": "Varje app öppnar samma mappar i tur och ordning; tid, CPU och minne mäts. Fönster från andra appar öppnas och stängs under testet: rör inte musen eller tangentbordet. Det tar ungefär 5–10 minuter; testfilerna skapas första gången (~1,3 GB, i lokala appdata).",
  "f52afac8": "Medianer av 3 körningar (en uppvärmningskörning räknas inte). Tid: från att appen startas tills dess fönster inte har ändrats på 500 ms. * Appen körde redan: CPU räknas från att fönstret dök upp, minnet är hela processen.",
- "252ff602": "rustyfiles är gratis och gjort av en enda person. Gillar du det, ge det en stjärna på GitHub: det hjälper andra att hitta det."
+ "252ff602": "rustyfiles är gratis och gjort av en enda person. Gillar du det, ge det en stjärna på GitHub: det hjälper andra att hitta det.",
+ "f2a18b26": "Undanta från sökindexet",
+ "24d2b2fb": "Mappar som undantagits från indexet",
+ "c5e022bb": "Alltid:",
+ "8b968fdf": "Sökning i dessa mappar går igenom disken. Du kan också högerklicka på en mapp och välja ”Undanta från sökindexet”.",
+ "df63b602": "Lägg till mapp…",
+ "991da57f": "Mapp som ska undantas från indexet",
+ "290b8263": "Resultat:",
+ "fab7cbfe": "Kopiera länk",
+ "fc3bb67d": "Länken kopierades",
+ "4bf92434": "Snabbt sökindex",
+ "f87ce35b": "Filnamn på de lokala enheterna lagras i ett index, så sökning i undermappar tar millisekunder. Indexet byggs i bakgrunden och hålls uppdaterat.",
+ "f13da91b": "indexerar…",
+ "f1ff0bf0": "kunde inte indexeras",
+ "6abadce2": "{root} {n} objekt, {mb} MB"
 }

@@ -2466,6 +2466,90 @@
   "en": "Flattening:"
  },
  {
+  "id": "f2a18b26",
+  "key": "Aramada dizine alma",
+  "tr": "Aramada dizine alma",
+  "en": "Leave out of the search index"
+ },
+ {
+  "id": "24d2b2fb",
+  "key": "Dizine alınmayan klasörler",
+  "tr": "Dizine alınmayan klasörler",
+  "en": "Folders left out of the index"
+ },
+ {
+  "id": "c5e022bb",
+  "key": "Her zaman:",
+  "tr": "Her zaman:",
+  "en": "Always:"
+ },
+ {
+  "id": "8b968fdf",
+  "key": "Bu klasörlerin içinde arama diskte yapılır. Bir klasörü sağ tıklayıp \"Aramada dizine alma\" ile de ekleyebilirsiniz.",
+  "tr": "Bu klasörlerin içinde arama diskte yapılır. Bir klasörü sağ tıklayıp \"Aramada dizine alma\" ile de ekleyebilirsiniz.",
+  "en": "Searching inside these folders walks the disk. You can also right-click a folder and choose \"Leave out of the search index\"."
+ },
+ {
+  "id": "df63b602",
+  "key": "Klasör ekle…",
+  "tr": "Klasör ekle…",
+  "en": "Add folder…"
+ },
+ {
+  "id": "991da57f",
+  "key": "Dizine alınmayacak klasör",
+  "tr": "Dizine alınmayacak klasör",
+  "en": "Folder to leave out of the index"
+ },
+ {
+  "id": "290b8263",
+  "key": "Sonuçlar:",
+  "tr": "Sonuçlar:",
+  "en": "Results:"
+ },
+ {
+  "id": "fab7cbfe",
+  "key": "Bağlantıyı kopyala",
+  "tr": "Bağlantıyı kopyala",
+  "en": "Copy link"
+ },
+ {
+  "id": "fc3bb67d",
+  "key": "Bağlantı kopyalandı",
+  "tr": "Bağlantı kopyalandı",
+  "en": "Link copied"
+ },
+ {
+  "id": "4bf92434",
+  "key": "Hızlı arama dizini",
+  "tr": "Hızlı arama dizini",
+  "en": "Fast search index"
+ },
+ {
+  "id": "f87ce35b",
+  "key": "Yerel sürücülerdeki dosya adları bir dizinde tutulur: alt klasörlerde arama milisaniyeler sürer. Dizin arka planda hazırlanır ve güncel tutulur.",
+  "tr": "Yerel sürücülerdeki dosya adları bir dizinde tutulur: alt klasörlerde arama milisaniyeler sürer. Dizin arka planda hazırlanır ve güncel tutulur.",
+  "en": "File names on the local drives are kept in an index, so searching subfolders takes milliseconds. The index is built in the background and kept up to date."
+ },
+ {
+  "id": "f13da91b",
+  "key": "hazırlanıyor…",
+  "tr": "hazırlanıyor…",
+  "en": "indexing…"
+ },
+ {
+  "id": "f1ff0bf0",
+  "key": "dizinlenemedi",
+  "tr": "dizinlenemedi",
+  "en": "couldn't be indexed"
+ },
+ {
+  "id": "6abadce2",
+  "key": "{root} {n} öğe, {mb} MB",
+  "tr": "{root} {n} öğe, {mb} MB",
+  "en": "{root} {n} items, {mb} MB"
+ },
+ {
   "id": "5a82f544",
   "key": "aynı hızda",
   "tr": "aynı hızda",

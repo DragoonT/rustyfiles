@@ -931,5 +931,19 @@
  "0a4fc336": "Extragerea unui ZIP: 10.000 fișiere",
  "162b2359": "Fiecare aplicație deschide pe rând aceleași foldere; se măsoară timpul, CPU și memoria. Ferestrele altor aplicații se deschid și se închid în timpul testului: nu atinge mouse-ul sau tastatura. Durează aproximativ 5–10 minute; fișierele de test se creează prima dată (~1,3 GB, în datele locale ale aplicațiilor).",
  "f52afac8": "Mediane din 3 rulări (o rulare de încălzire nu se numără). Timp: de la pornirea aplicației până când fereastra ei nu se mai schimbă timp de 500 ms. * Aplicația rula deja: CPU se numără de la apariția ferestrei, memoria este a întregului proces.",
- "252ff602": "rustyfiles este gratuit și făcut de o singură persoană. Dacă îți place, dă-i o stea pe GitHub: îi ajută pe alții să-l găsească."
+ "252ff602": "rustyfiles este gratuit și făcut de o singură persoană. Dacă îți place, dă-i o stea pe GitHub: îi ajută pe alții să-l găsească.",
+ "f2a18b26": "Exclude din indexul de căutare",
+ "24d2b2fb": "Foldere excluse din index",
+ "c5e022bb": "Întotdeauna:",
+ "8b968fdf": "Căutarea în aceste foldere parcurge discul. Poți și să faci clic dreapta pe un folder și să alegi „Exclude din indexul de căutare”.",
+ "df63b602": "Adaugă folder…",
+ "991da57f": "Folder de exclus din index",
+ "290b8263": "Rezultate:",
+ "fab7cbfe": "Copiază linkul",
+ "fc3bb67d": "Link copiat",
+ "4bf92434": "Index de căutare rapidă",
+ "f87ce35b": "Numele fișierelor de pe unitățile locale sunt păstrate într-un index, așa că căutarea în subfoldere durează milisecunde. Indexul este creat în fundal și menținut actualizat.",
+ "f13da91b": "se indexează…",
+ "f1ff0bf0": "nu a putut fi indexat",
+ "6abadce2": "{root} {n} elemente, {mb} MB"
 }

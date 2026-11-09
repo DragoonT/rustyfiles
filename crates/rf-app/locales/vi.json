@@ -931,5 +931,19 @@
  "0a4fc336": "Giải nén ZIP: 10.000 tệp",
  "162b2359": "Mỗi ứng dụng lần lượt mở cùng các thư mục; thời gian, CPU và bộ nhớ được đo. Cửa sổ của các ứng dụng khác mở và đóng trong khi kiểm tra: đừng chạm vào chuột hoặc bàn phím. Mất khoảng 5–10 phút; các tệp kiểm tra được tạo vào lần đầu (~1,3 GB, trong dữ liệu ứng dụng cục bộ).",
  "f52afac8": "Trung vị của 3 lần chạy (lần chạy khởi động không được tính). Thời gian: từ khi khởi động ứng dụng đến khi cửa sổ của nó không thay đổi trong 500 ms. * Ứng dụng đã chạy sẵn: CPU được tính từ khi cửa sổ xuất hiện, bộ nhớ là của toàn bộ tiến trình.",
- "252ff602": "rustyfiles miễn phí và do một người làm ra. Nếu bạn thích, hãy tặng nó một ngôi sao trên GitHub: điều đó giúp người khác tìm thấy nó."
+ "252ff602": "rustyfiles miễn phí và do một người làm ra. Nếu bạn thích, hãy tặng nó một ngôi sao trên GitHub: điều đó giúp người khác tìm thấy nó.",
+ "f2a18b26": "Loại khỏi chỉ mục tìm kiếm",
+ "24d2b2fb": "Thư mục bị loại khỏi chỉ mục",
+ "c5e022bb": "Luôn luôn:",
+ "8b968fdf": "Tìm kiếm bên trong các thư mục này sẽ duyệt qua ổ đĩa. Bạn cũng có thể bấm chuột phải vào thư mục và chọn \"Loại khỏi chỉ mục tìm kiếm\".",
+ "df63b602": "Thêm thư mục…",
+ "991da57f": "Thư mục cần loại khỏi chỉ mục",
+ "290b8263": "Kết quả:",
+ "fab7cbfe": "Sao chép liên kết",
+ "fc3bb67d": "Đã sao chép liên kết",
+ "4bf92434": "Chỉ mục tìm kiếm nhanh",
+ "f87ce35b": "Tên tệp trên các ổ đĩa cục bộ được lưu trong một chỉ mục, nên tìm kiếm trong thư mục con chỉ mất vài mili giây. Chỉ mục được xây dựng ở nền và luôn được cập nhật.",
+ "f13da91b": "đang lập chỉ mục…",
+ "f1ff0bf0": "không thể lập chỉ mục",
+ "6abadce2": "{root} {n} mục, {mb} MB"
 }

@@ -931,5 +931,19 @@
  "0a4fc336": "Extracción de un ZIP: 10 000 archivos",
  "162b2359": "Cada aplicación abre por turnos las mismas carpetas; se miden el tiempo, la CPU y la memoria. Durante la prueba se abren y se cierran ventanas de otras aplicaciones: no toques el ratón ni el teclado. Tarda unos 5–10 minutos; los archivos de prueba se crean la primera vez (~1,3 GB, en los datos locales de aplicaciones).",
  "f52afac8": "Medianas de 3 ejecuciones (una ejecución de calentamiento no cuenta). Tiempo: desde que se inicia la aplicación hasta que su ventana deja de cambiar durante 500 ms. * La aplicación ya estaba en ejecución: la CPU cuenta desde que apareció la ventana, la memoria es la del proceso completo.",
- "252ff602": "rustyfiles es gratuito y lo ha hecho una sola persona. Si te gusta, dale una estrella en GitHub: ayuda a que otros lo encuentren."
+ "252ff602": "rustyfiles es gratuito y lo ha hecho una sola persona. Si te gusta, dale una estrella en GitHub: ayuda a que otros lo encuentren.",
+ "f2a18b26": "Excluir del índice de búsqueda",
+ "24d2b2fb": "Carpetas excluidas del índice",
+ "c5e022bb": "Siempre:",
+ "8b968fdf": "Buscar dentro de estas carpetas recorre el disco. También puedes hacer clic con el botón derecho en una carpeta y elegir «Excluir del índice de búsqueda».",
+ "df63b602": "Añadir carpeta…",
+ "991da57f": "Carpeta que se excluirá del índice",
+ "290b8263": "Resultados:",
+ "fab7cbfe": "Copiar vínculo",
+ "fc3bb67d": "Vínculo copiado",
+ "4bf92434": "Índice de búsqueda rápida",
+ "f87ce35b": "Los nombres de archivo de las unidades locales se guardan en un índice, así que buscar en subcarpetas tarda milisegundos. El índice se crea en segundo plano y se mantiene actualizado.",
+ "f13da91b": "indexando…",
+ "f1ff0bf0": "no se ha podido indexar",
+ "6abadce2": "{root} {n} elementos, {mb} MB"
 }
