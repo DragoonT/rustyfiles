@@ -93,29 +93,12 @@ enum Stream {
 fn video_samples(v: &mut VideoState, key: u16) -> (Vec<Sample>, std::sync::Arc<crate::ts::Layout>) {
     use crate::mpeg2::PicType;
     let units = v.split.finish();
-    let dur = crate::mpeg2::FRAME_RATES.get(v.rate_code as usize).filter(|r| r.0 > 0).map_or(3600, |r| (90000 * r.1 / r.0) as i64);
+    let times = crate::mpeg2::sample_times(&units, v.rate_code);
     let mut samples = Vec::with_capacity(units.len());
     let (mut skip, mut raw) = (Vec::new(), Vec::new());
-    let mut base: Option<i64> = None;
-    let mut group_len = 0i64;
-    let mut prev_dts: Option<i64> = None;
-    for (u, size) in &units {
+    for ((u, size), (pts, dts)) in units.iter().zip(times) {
         let k = v.map.partition_point(|m| m.0 <= u.start).saturating_sub(1);
         let (es0, off) = v.map.get(k).copied().unwrap_or((0, 0));
-        if u.has_header {
-            // a new GOP: its temporal references count from 0 again
-            base = base.map(|b| b + group_len * dur);
-            group_len = 0;
-        }
-        group_len += 1;
-        let tr = u.temporal_reference as i64 * dur;
-        if let Some(p) = u.pts {
-            base = Some(p - tr);
-        }
-        let pts = u.pts.unwrap_or_else(|| base.unwrap_or(0) + tr);
-        base.get_or_insert(pts - tr);
-        let dts = u.dts.unwrap_or_else(|| prev_dts.map_or(pts - dur, |d| d + dur)).min(pts);
-        prev_dts = Some(dts);
         samples.push(Sample { offset: off, size: *size as u32, dts, pts, key: u.coding_type == PicType::I });
         skip.push((u.start - es0) as u32);
         raw.push(*size as u32);

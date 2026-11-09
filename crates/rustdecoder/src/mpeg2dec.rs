@@ -379,6 +379,12 @@ impl Mpeg2Decoder {
 }
 
 fn check_supported(s: &Sequence) -> Result<()> {
+    if !s.mpeg2 {
+        // MPEG2and1_VLD on the NVIDIA driver tested here decodes the first macroblocks of an
+        // MPEG-1 picture and then loses the bitstream (its escape codes and dequantiser differ
+        // from MPEG-2 and nothing in the DXVA structures says "MPEG-1"): refused, not shown wrong
+        return Err(Error::Unsupported("MPEG-1 video: the video engine's MPEG-1 mode did not decode correctly on the GPU tested"));
+    }
     if s.chroma_format != 1 {
         return Err(Error::Unsupported("MPEG-2 4:2:2 / 4:4:4 (D3D11 has no decoder profile for it)"));
     }

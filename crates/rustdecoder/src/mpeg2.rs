@@ -466,6 +466,94 @@ impl Splitter {
     }
 }
 
+/// Presentation and decode times (90 kHz) for the units in decode order: those the PES packets
+/// gave are kept, the others are counted from the temporal references within the GOP.
+pub fn sample_times(units: &[(Unit, u64)], rate_code: u8) -> Vec<(i64, i64)> {
+    let dur = FRAME_RATES.get(rate_code as usize).filter(|r| r.0 > 0).map_or(3600, |r| (90000 * r.1 / r.0 as u32) as i64);
+    let mut out = Vec::with_capacity(units.len());
+    let mut base: Option<i64> = None;
+    let mut group_len = 0i64;
+    let mut prev_dts: Option<i64> = None;
+    for (u, _) in units {
+        if u.has_header {
+            // a new GOP: its temporal references count from 0 again
+            base = base.map(|b| b + group_len * dur);
+            group_len = 0;
+        }
+        group_len += 1;
+        let tr = u.temporal_reference as i64 * dur;
+        if let Some(p) = u.pts {
+            base = Some(p - tr);
+        }
+        let pts = u.pts.unwrap_or_else(|| base.unwrap_or(0) + tr);
+        base.get_or_insert(pts - tr);
+        let dts = u.dts.unwrap_or_else(|| prev_dts.map_or(pts - dur, |d| d + dur)).min(pts);
+        prev_dts = Some(dts);
+        out.push((pts, dts));
+    }
+    out
+}
+
+pub fn is_elementary(head: &[u8]) -> bool {
+    head.len() >= 4 && head[..4] == [0, 0, 1, SEQUENCE_HEADER]
+}
+
+/// A raw MPEG-1 / MPEG-2 video elementary stream (`.m2v`): one video track whose samples are
+/// the pictures, read straight from the file.
+pub fn read_elementary<R: std::io::Read + std::io::Seek>(r: &mut R) -> Result<crate::mp4::Movie> {
+    use crate::mp4::{Codec, Kind, Sample, Storage, Track};
+    r.seek(std::io::SeekFrom::Start(0))?;
+    let mut sp = Splitter::new();
+    let mut buf = vec![0u8; 1 << 20];
+    let mut pos = 0u64;
+    let mut first = Vec::new();
+    loop {
+        let n = r.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        if first.len() < 4096 {
+            first.extend_from_slice(&buf[..n.min(4096)]);
+        }
+        sp.push(pos, &buf[..n], None, None);
+        pos += n as u64;
+    }
+    let units = sp.finish();
+    if units.is_empty() {
+        return Err(Error::Invalid("MPEG video stream without pictures"));
+    }
+    let codes: Vec<(usize, u8)> = start_codes(&first).collect();
+    let seq = codes.iter().position(|c| c.1 == SEQUENCE_HEADER).and_then(|n| {
+        let p = codes[n].0;
+        let end = codes.get(n + 1).map_or(first.len(), |x| x.0);
+        let ext = codes.get(n + 1).filter(|x| x.1 == EXTENSION).map(|x| &first[x.0 + 4..codes.get(n + 2).map_or(first.len(), |y| y.0)]);
+        parse_sequence(&first[p + 3..end], ext).ok()
+    });
+    let seq = seq.ok_or(Error::Invalid("no MPEG sequence header"))?;
+    let times = sample_times(&units, seq.frame_rate_code);
+    let samples: Vec<Sample> = units.iter().zip(times).map(|((u, size), (pts, dts))| Sample { offset: u.start, size: *size as u32, dts, pts, key: u.coding_type == PicType::I }).collect();
+    let track = Track {
+        id: 1,
+        kind: Kind::Video,
+        fourcc: if seq.mpeg2 { *b"mpg2" } else { *b"mpg1" },
+        codec: Codec::Other,
+        timescale: 90000,
+        width: seq.width,
+        height: seq.height,
+        rotation: 0,
+        channels: 0,
+        sample_rate: 0,
+        samples,
+        colour: None,
+        default: true,
+        codec_delay_ns: 0,
+        discard_padding_ns: 0,
+        par: None,
+        storage: Storage::Plain,
+    };
+    Ok(crate::ts::finish_movie(vec![track]))
+}
+
 /// The access units in a block of an elementary stream (one container sample may hold several
 /// pictures, e.g. two field pictures): (start, end) byte ranges, each ending where the next
 /// begins.
