@@ -14,7 +14,7 @@ use crate::dxva::{self, SliceShort};
 use crate::dxva_h264::{self, PicInfo};
 use crate::h264::{self, Pps, SliceHeader, Sps, nal_type};
 use crate::h264_dpb::{Dpb, Started};
-use crate::mp4::{self, Codec, Track};
+use crate::mp4::{Codec, Track};
 use crate::{Error, Result, nal};
 
 /// One picture collected from a sample: its slice NAL units, as stored (escaped).
@@ -73,7 +73,7 @@ fn check_supported(sps: &Sps) -> Result<()> {
 impl H264Decoder {
     pub fn open(path: &Path) -> Result<Self> {
         let mut file = File::open(path)?;
-        let movie = mp4::read(&mut file)?;
+        let movie = crate::container::read(&mut file)?;
         let track = movie.video().ok_or(Error::Invalid("no video track"))?.clone();
         let Codec::H264 { config } = &track.codec else { return Err(Error::Unsupported("not an H.264 track")) };
         let cfg = nal::avcc(config)?;

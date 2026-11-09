@@ -34,12 +34,16 @@ impl Movie {
 
     /// The first video track.
     pub fn video(&self) -> Option<&Track> {
-        self.tracks.iter().find(|t| t.kind == Kind::Video && !t.samples.is_empty())
+        let mut v = self.tracks.iter().filter(|t| t.kind == Kind::Video && !t.samples.is_empty());
+        let first = v.next()?;
+        if first.default { Some(first) } else { std::iter::once(first).chain(v).find(|t| t.default).or(Some(first)) }
     }
 
     /// The first audio track.
     pub fn audio(&self) -> Option<&Track> {
-        self.tracks.iter().find(|t| t.kind == Kind::Audio && !t.samples.is_empty())
+        let mut v = self.tracks.iter().filter(|t| t.kind == Kind::Audio && !t.samples.is_empty());
+        let first = v.next()?;
+        if first.default { Some(first) } else { std::iter::once(first).chain(v).find(|t| t.default).or(Some(first)) }
     }
 }
 
@@ -58,6 +62,14 @@ pub enum Codec {
     Hevc { config: Vec<u8> },
     /// AAC; the AudioSpecificConfig from `esds`.
     Aac { config: Vec<u8> },
+    /// VP9 (Matroska / WebM); the optional `CodecPrivate` (usually empty).
+    Vp9 { config: Vec<u8> },
+    /// AV1 (Matroska / WebM); the `av1C` payload.
+    Av1 { config: Vec<u8> },
+    /// Opus (Matroska / WebM); the `OpusHead` packet.
+    Opus { config: Vec<u8> },
+    /// Vorbis (Matroska / WebM); the three Xiph-laced header packets.
+    Vorbis { config: Vec<u8> },
     /// Uncompressed audio.
     Pcm { bits: u16, float: bool, big_endian: bool },
     /// Anything else, by its sample entry's four letters.
@@ -81,6 +93,23 @@ pub struct Track {
     pub channels: u16,
     pub sample_rate: u32,
     pub samples: Vec<Sample>,
+    /// Colour description written in the container (Matroska `Colour`), if any.
+    pub colour: Option<Colour>,
+    /// The container marks this track as the one to play by default (always true for MP4).
+    pub default: bool,
+    /// Matroska `CodecDelay` in nanoseconds (Opus pre-skip), 0 otherwise.
+    pub codec_delay_ns: u64,
+}
+
+/// Matroska `Colour` element, values as ISO/IEC 23091-2 code points.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Colour {
+    pub matrix: u8,
+    pub transfer: u8,
+    pub primaries: u8,
+    /// `Some(true)` full range, `Some(false)` limited, `None` unspecified.
+    pub full_range: Option<bool>,
+    pub bits_per_channel: u8,
 }
 
 /// One sample: a compressed picture, or a block of audio.
@@ -348,6 +377,9 @@ fn parse_trak(b: &[u8], movie_timescale: u32) -> Result<Track> {
         channels: 0,
         sample_rate: 0,
         samples: Vec::new(),
+        colour: None,
+        default: true,
+        codec_delay_ns: 0,
     };
     if let Some(stsd) = child(&stbl, b"stsd") {
         parse_stsd(stsd, &mut t)?;

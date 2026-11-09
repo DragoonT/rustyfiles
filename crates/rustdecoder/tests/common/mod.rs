@@ -2,6 +2,8 @@
 #![allow(dead_code)]
 
 pub mod av;
+pub mod mkvclips;
+pub use mkvclips::*;
 
 use std::path::PathBuf;
 use std::process::{Command, Stdio};

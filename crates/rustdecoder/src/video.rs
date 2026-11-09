@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::d3d11::{Gpu, Planes};
 use crate::decoder::{Frame, HevcDecoder, StreamInfo};
 use crate::h264dec::H264Decoder;
-use crate::mp4::{self, Codec, Track};
+use crate::mp4::{Codec, Track};
 use crate::{Error, Result};
 
 pub enum VideoDecoder {
@@ -26,7 +26,7 @@ macro_rules! each {
 impl VideoDecoder {
     /// Opens the first video track of an MP4 / MOV file with the decoder its codec needs.
     pub fn open(path: &Path) -> Result<Self> {
-        let movie = mp4::read(&mut File::open(path)?)?;
+        let movie = crate::container::read(&mut File::open(path)?)?;
         let track = movie.video().ok_or(Error::Invalid("no video track"))?;
         match track.codec {
             Codec::H264 { .. } => Ok(Self::H264(H264Decoder::open(path)?)),

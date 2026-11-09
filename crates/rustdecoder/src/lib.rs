@@ -8,6 +8,8 @@ pub mod dpb;
 pub mod h264;
 pub mod h264_dpb;
 pub mod hevc;
+pub mod container;
+pub mod mkv;
 pub mod mp4;
 pub mod nal;
 pub mod resample;
