@@ -6418,8 +6418,11 @@ dependencies = [
 name = "rustdecoder"
 version = "0.4.0"
 dependencies = [
+ "crc32fast",
+ "flate2",
  "log",
  "thiserror 2.0.21",
+ "windows 0.62.2",
 ]
 
 [[package]]

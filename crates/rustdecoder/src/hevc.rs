@@ -10,6 +10,12 @@ pub mod nal_type {
     pub const IDR_W_RADL: u8 = 19;
     pub const IDR_N_LP: u8 = 20;
     pub const CRA_NUT: u8 = 21;
+    pub const RADL_N: u8 = 6;
+    pub const RADL_R: u8 = 7;
+    pub const RASL_N: u8 = 8;
+    pub const RASL_R: u8 = 9;
+    pub const EOS: u8 = 36;
+    pub const EOB: u8 = 37;
     pub const RSV_IRAP_23: u8 = 23;
     pub const VPS: u8 = 32;
     pub const SPS: u8 = 33;
@@ -196,6 +202,12 @@ impl StRps {
     /// st_ref_pic_set(idx) (7.3.7). `sets` are the SPS's sets read so far; `num_sets` is the
     /// SPS's count (equal to `idx` when read from a slice header).
     pub fn read(b: &mut BitReader, idx: usize, num_sets: usize, sets: &[StRps]) -> Result<Self> {
+        Ok(Self::read_with_ref(b, idx, num_sets, sets)?.0)
+    }
+
+    /// Like [`StRps::read`], also giving NumDeltaPocs of the set this one was predicted from
+    /// (0 when it is coded directly): the GPU wants it for sets sent in a slice header.
+    pub fn read_with_ref(b: &mut BitReader, idx: usize, num_sets: usize, sets: &[StRps]) -> Result<(Self, usize)> {
         let predicted = idx != 0 && r!(b, flag, "inter_ref_pic_set_prediction_flag");
         if predicted {
             let delta_idx = if idx == num_sets { r!(b, ue, "delta_idx_minus1") as usize + 1 } else { 1 };
@@ -258,7 +270,7 @@ impl StRps {
             if out.num_delta_pocs() > 16 {
                 return Err(Error::Invalid("too many reference pictures"));
             }
-            Ok(out)
+            Ok((out, n))
         } else {
             let nn = r!(b, ue, "num_negative_pics") as usize;
             let np = r!(b, ue, "num_positive_pics") as usize;
@@ -280,7 +292,7 @@ impl StRps {
                 out.delta_poc_s1.push(poc);
                 out.used_s1.push(r!(b, flag, "used_by_curr_pic_s1_flag[{}]", i));
             }
-            Ok(out)
+            Ok((out, 0))
         }
     }
 }
@@ -356,7 +368,7 @@ pub struct Vui {
     pub timing: Option<(u32, u32)>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Sps {
     pub id: u8,
     pub vps_id: u8,
