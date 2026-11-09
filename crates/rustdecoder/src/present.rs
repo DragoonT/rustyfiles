@@ -433,9 +433,34 @@ impl Converter {
         }
     }
 
+    /// Wraps an existing BGRA8 render-target texture (a swap chain's back buffer) as a target.
+    pub fn target_for(&self, texture: &ID3D11Texture2D) -> Result<Target> {
+        unsafe {
+            let mut d = D3D11_TEXTURE2D_DESC::default();
+            texture.GetDesc(&mut d);
+            if d.Format != DXGI_FORMAT_B8G8R8A8_UNORM || d.BindFlags & D3D11_BIND_RENDER_TARGET.0 as u32 == 0 {
+                return Err(Error::Unsupported("target texture other than a BGRA8 render target"));
+            }
+            let mut rtv = None;
+            gpu("CreateRenderTargetView", self.device.CreateRenderTargetView(texture, None, Some(&mut rtv)))?;
+            Ok(Target { texture: texture.clone(), rtv: rtv.ok_or(Error::Gpu("no view".into()))?, width: d.Width, height: d.Height })
+        }
+    }
+
+    /// Fills the whole target with a colour (red, green, blue, alpha; 0..1).
+    pub fn clear(&self, dst: &Target, rgba: [f32; 4]) {
+        unsafe { self.context.ClearRenderTargetView(&dst.rtv, &rgba) };
+    }
+
     /// Draws `src` into `dst`, scaled to the whole target. Commands go to the device's
     /// immediate context; nothing waits for the GPU.
     pub fn convert(&mut self, src: &Source, params: &Params, dst: &Target) -> Result<()> {
+        self.convert_rect(src, params, dst, (0, 0, dst.width, dst.height))
+    }
+
+    /// Like [`Converter::convert`], into the rectangle `(x, y, width, height)` of the target
+    /// only (a letterboxed picture); the rest of the target is left as it is.
+    pub fn convert_rect(&mut self, src: &Source, params: &Params, dst: &Target, rect: (i32, i32, u32, u32)) -> Result<()> {
         let (ysrv, csrv, sw, sh, _) = self.planes(&src.texture, src.slice)?;
         if src.left + src.width > sw || src.top + src.height > sh {
             return Err(Error::Invalid("visible rectangle outside the surface"));
@@ -450,7 +475,7 @@ impl Converter {
 
             let timer = self.timer_begin();
             ctx.OMSetRenderTargets(Some(&[Some(dst.rtv.clone())]), None);
-            ctx.RSSetViewports(Some(&[D3D11_VIEWPORT { TopLeftX: 0.0, TopLeftY: 0.0, Width: dst.width as f32, Height: dst.height as f32, MinDepth: 0.0, MaxDepth: 1.0 }]));
+            ctx.RSSetViewports(Some(&[D3D11_VIEWPORT { TopLeftX: rect.0 as f32, TopLeftY: rect.1 as f32, Width: rect.2 as f32, Height: rect.3 as f32, MinDepth: 0.0, MaxDepth: 1.0 }]));
             ctx.RSSetState(&self.raster);
             ctx.IASetInputLayout(None);
             ctx.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

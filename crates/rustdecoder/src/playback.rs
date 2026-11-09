@@ -69,6 +69,8 @@ pub struct Playback {
     audio: Option<Audio>,
     playing: bool,
     audio_note: String,
+    /// The device output when [`Playback::open`] made it: volume and mute go to it.
+    output: Option<Arc<AudioOutput>>,
 }
 
 fn feed(mut dec: AudioDecoder, sink: Arc<dyn AudioSink>, rx: std::sync::mpsc::Receiver<Feed>, ended: Arc<AtomicBool>, stop: Arc<AtomicBool>) {
@@ -120,9 +122,14 @@ impl Playback {
     /// system clock; [`Playback::audio_note`] says why.
     pub fn open(path: &Path, opts: PlaybackOptions) -> Result<Playback> {
         let mut note = String::new();
+        let mut output = None;
         let sink: Option<Arc<dyn AudioSink>> = if opts.audio {
             match AudioOutput::open(opts.output) {
-                Ok(o) => Some(Arc::new(o)),
+                Ok(o) => {
+                    let o = Arc::new(o);
+                    output = Some(o.clone());
+                    Some(o)
+                }
                 Err(e) => {
                     note = format!("no audio output: {e}");
                     None
@@ -133,6 +140,7 @@ impl Playback {
             None
         };
         let mut p = Self::open_with_sink(path, opts.ring, sink)?;
+        p.output = output;
         if p.audio.is_none() && p.audio_note.is_empty() {
             p.audio_note = note;
         }
@@ -168,7 +176,21 @@ impl Playback {
             }
             _ => None,
         };
-        Ok(Playback { player, audio, playing: false, audio_note: note })
+        Ok(Playback { player, audio, playing: false, audio_note: note, output: None })
+    }
+
+    /// Output volume 0..1 (with the device output [`Playback::open`] made; otherwise ignored).
+    pub fn set_volume(&self, v: f32) {
+        if let Some(o) = &self.output {
+            o.set_volume(v);
+        }
+    }
+
+    /// Silences the output (or not); same condition as [`Playback::set_volume`].
+    pub fn set_muted(&self, muted: bool) {
+        if let Some(o) = &self.output {
+            o.set_muted(muted);
+        }
     }
 
     /// Why there is no audio, empty when there is.

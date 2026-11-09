@@ -31,6 +31,8 @@ pub mod dxva_h264;
 pub mod h264dec;
 #[cfg(windows)]
 pub mod video;
+#[cfg(windows)]
+pub mod window;
 
 #[cfg(windows)]
 pub use decoder::{Frame, HevcDecoder, StreamInfo};

@@ -405,6 +405,7 @@ struct Current {
 
 pub struct Player {
     info: StreamInfo,
+    codec: &'static str,
     device: ID3D11Device,
     context: ID3D11DeviceContext,
     pub clock: Clock,
@@ -450,6 +451,7 @@ impl Player {
             }
         }
         let info = dec.info().clone();
+        let codec = dec.codec_name();
         let track = dec.track();
         let timescale = track.timescale.max(1) as f64;
         let pts: Vec<i64> = track.samples.iter().map(|s| s.pts).collect();
@@ -477,6 +479,7 @@ impl Player {
         clock.seek(first as f64 / timescale);
         Ok(Player {
             info,
+            codec,
             device,
             context,
             clock,
@@ -506,6 +509,11 @@ impl Player {
 
     pub fn info(&self) -> &StreamInfo {
         &self.info
+    }
+
+    /// "H.264" or "HEVC".
+    pub fn codec_name(&self) -> &'static str {
+        self.codec
     }
 
     /// The device pictures live on, for a [`crate::present::Converter`].
