@@ -37,6 +37,29 @@ fn render_image(b: &Bgra) -> Option<Arc<RenderImage>> {
 #[derive(Default)]
 pub struct PdfViewer {
     view: Option<Entity<PdfView>>,
+    /// The file opened off the UI thread (a network drive), see `Viewer::loader`.
+    opened: Option<Opened>,
+}
+
+/// A PDF opened by its worker: the page sizes (or why it can't be shown) and the worker's channels.
+struct Opened {
+    result: Result<Vec<(f32, f32)>, String>,
+    req: mpsc::Sender<(u32, u32)>,
+    out: futures::channel::mpsc::UnboundedReceiver<Out>,
+}
+
+/// Starts the worker for `path` and waits up to `wait` for it to open the file and report the
+/// page sizes (the window needs the first page's shape), not for any rendering.
+fn open_pdf(path: PathBuf, wait: Duration) -> Opened {
+    let (opened_tx, opened_rx) = mpsc::channel::<Result<Vec<(f32, f32)>, String>>();
+    let (req, req_rx) = mpsc::channel::<(u32, u32)>();
+    let (out_tx, out) = futures::channel::mpsc::unbounded::<Out>();
+    std::thread::Builder::new()
+        .name("directlook-pdf".into())
+        .spawn(move || worker(path, opened_tx, req_rx, out_tx))
+        .ok();
+    let result = opened_rx.recv_timeout(wait).unwrap_or_else(|_| Err(t!("PDF açılamadı.").to_string()));
+    Opened { result, req, out }
 }
 
 impl Viewer for PdfViewer {
@@ -49,20 +72,17 @@ impl Viewer for PdfViewer {
     fn can_handle(&self, f: &Probe) -> bool {
         f.is_file() && (f.ext == "pdf" || f.head.starts_with(b"%PDF-"))
     }
+    fn loader(&self) -> Option<fn(&Probe) -> crate::look::viewer::Loaded> {
+        // off the UI thread a slow share may take its time
+        Some(|f| Box::new(open_pdf(f.path.clone(), Duration::from_secs(120))))
+    }
+    fn take_loaded(&mut self, loaded: crate::look::viewer::Loaded) {
+        self.opened = loaded.downcast::<Opened>().ok().map(|o| *o);
+    }
     fn prepare(&mut self, f: &Probe, cx: &mut App) -> Prepared {
         let name = super::file_name(&f.path);
-        // the worker opens the file and reports the page sizes; the window waits for that (it
-        // needs the first page's shape) but not for any rendering
-        let (opened_tx, opened_rx) = mpsc::channel::<Result<Vec<(f32, f32)>, String>>();
-        let (req_tx, req_rx) = mpsc::channel::<(u32, u32)>();
-        let (out_tx, out_rx) = futures::channel::mpsc::unbounded::<Out>();
-        let path = f.path.clone();
-        std::thread::Builder::new()
-            .name("directlook-pdf".into())
-            .spawn(move || worker(path, opened_tx, req_rx, out_tx))
-            .ok();
-        let opened = opened_rx.recv_timeout(Duration::from_secs(5)).unwrap_or_else(|_| Err(t!("PDF açılamadı.").to_string()));
-        let (sizes, error) = match opened {
+        let Opened { result, req: req_tx, out: out_rx } = self.opened.take().unwrap_or_else(|| open_pdf(f.path.clone(), Duration::from_secs(5)));
+        let (sizes, error) = match result {
             Ok(s) if !s.is_empty() => (s, None),
             Ok(_) => (Vec::new(), Some(t!("Bu PDF'te sayfa yok.").to_string())),
             Err(e) => (Vec::new(), Some(e)),

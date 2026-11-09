@@ -170,6 +170,8 @@ pub fn mf_decodes(codec: &str) -> bool {
         return false;
     };
     let input = MFT_REGISTER_TYPE_INFO { guidMajorType: MFMediaType_Video, guidSubtype: sub };
+    // DirectLook may ask from a worker thread that has no apartment yet (already in one is fine)
+    let _ = unsafe { windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED) };
     unsafe {
         let mut list: *mut Option<IMFActivate> = std::ptr::null_mut();
         let mut n = 0u32;

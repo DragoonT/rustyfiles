@@ -31,6 +31,62 @@ const TICK: Duration = Duration::from_millis(8);
 #[derive(Default)]
 pub struct VideoViewer {
     view: Option<Entity<MediaView>>,
+    /// The file opened off the UI thread (a network drive), see `Viewer::loader`.
+    opened: Option<Opened>,
+}
+
+/// The route a file plays by and the window it asks for.
+struct Opened(Kind, Prepared);
+
+/// Opens `path`: reads the container's index (on a network drive this is the slow part) and
+/// picks the route it plays by.
+fn open_media(path: &std::path::Path) -> Opened {
+    let name = super::file_name(path);
+    let opened = rf_player::open(path);
+    let (kind, prepared) = match opened {
+        Ok(media) => match media.info().video.clone() {
+            // FilmCraft decodes on the CPU: 4K, or anything past 1080p60, doesn't keep up (4K60
+            // HEVC 10-bit: 42 frames/s on a 9800X3D with nothing else running). Windows'
+            // decoder uses the graphics card's video engine instead.
+            Some(v) if too_heavy(v.width, v.height, v.frame_rate.as_f64()) && rf_win::preview_host::is_playable(path) && rf_win::preview_host::mf_decodes(&v.codec) => {
+                log::info!("look: {}x{} {} at {:.2} fps is past software decoding, Media Foundation (hardware)", v.width, v.height, v.codec, v.frame_rate.as_f64());
+                (Kind::Mf, Prepared::new((960.0, 540.0), name))
+            }
+            Some(v) => {
+                let par = if v.par.1 > 0 { v.par.0 as f32 / v.par.1 as f32 } else { 1.0 };
+                let size = ((v.width as f32 * par).max(160.0), (v.height as f32).max(90.0));
+                let mut p = Prepared::new(size, name);
+                p.overlay_titlebar = true;
+                p.drag_by_body = false;
+                (Kind::Video(media), p)
+            }
+            None => {
+                let mut p = Prepared::new((500.0, 300.0), name);
+                p.resizable = false;
+                (Kind::Audio(media), p)
+            }
+        },
+        Err(e) if rf_win::preview_host::is_playable(path) => {
+            log::info!("look: rf-player cannot open {}, Media Foundation: {e:#}", path.display());
+            (Kind::Mf, Prepared::new((960.0, 540.0), name))
+        }
+        Err(e) => (Kind::Failed(format!("{e:#}")), Prepared::new((520.0, 220.0), name)),
+    };
+    // opt-in: rustdecoder plays MP4 / MOV with H.264 or HEVC; what it cannot open falls back to
+    // `kind` (decided when its decoder opens, see MediaView::rd_opened)
+    match kind {
+        Kind::Video(_) | Kind::Mf if rd_video::enabled() => match rd_video::probe(path) {
+            Some(p) => {
+                log::info!("look: rustdecoder route for {}: {} {}x{}", path.display(), p.codec, p.width, p.height);
+                Opened(Kind::Rd(Box::new(kind), p), Prepared::new((960.0, 540.0), super::file_name(path)))
+            }
+            None => {
+                log::info!("look: rustdecoder does not take {}, current route", path.display());
+                Opened(kind, prepared)
+            }
+        },
+        kind => Opened(kind, prepared),
+    }
 }
 
 impl Viewer for VideoViewer {
@@ -47,60 +103,15 @@ impl Viewer for VideoViewer {
         }
         f.is_file() && (rf_player::can_open(&f.path) || rf_win::preview_host::is_playable(&f.path))
     }
+    fn loader(&self) -> Option<fn(&Probe) -> crate::look::viewer::Loaded> {
+        Some(|f| Box::new(open_media(&f.path)))
+    }
+    fn take_loaded(&mut self, loaded: crate::look::viewer::Loaded) {
+        self.opened = loaded.downcast::<Opened>().ok().map(|o| *o);
+    }
     fn prepare(&mut self, f: &Probe, cx: &mut App) -> Prepared {
-        let name = super::file_name(&f.path);
         // yalnız dizin okunur (hızlı); ilk karenin çözülebildiği arka planda denenir (MediaView::new)
-        let opened = rf_player::open(&f.path);
-        let (kind, prepared) = match opened {
-            Ok(media) => match media.info().video.clone() {
-                // FilmCraft decodes on the CPU: 4K, or anything past 1080p60, doesn't keep up (4K60
-                // HEVC 10-bit: 42 frames/s on a 9800X3D with nothing else running). Windows'
-                // decoder uses the graphics card's video engine instead.
-                Some(v) if too_heavy(v.width, v.height, v.frame_rate.as_f64()) && rf_win::preview_host::is_playable(&f.path) && rf_win::preview_host::mf_decodes(&v.codec) => {
-                    log::info!(
-                        "look: {}x{} {} at {:.2} fps is past software decoding, Media Foundation (hardware)",
-                        v.width,
-                        v.height,
-                        v.codec,
-                        v.frame_rate.as_f64()
-                    );
-                    (Kind::Mf, Prepared::new((960.0, 540.0), name))
-                }
-                Some(v) => {
-                    let par = if v.par.1 > 0 { v.par.0 as f32 / v.par.1 as f32 } else { 1.0 };
-                    let size = ((v.width as f32 * par).max(160.0), (v.height as f32).max(90.0));
-                    let mut p = Prepared::new(size, name);
-                    p.overlay_titlebar = true;
-                    p.drag_by_body = false;
-                    (Kind::Video(media), p)
-                }
-                None => {
-                    let mut p = Prepared::new((500.0, 300.0), name);
-                    p.resizable = false;
-                    (Kind::Audio(media), p)
-                }
-            },
-            Err(e) if rf_win::preview_host::is_playable(&f.path) => {
-                log::info!("look: rf-player cannot open {}, Media Foundation: {e:#}", f.path.display());
-                (Kind::Mf, Prepared::new((960.0, 540.0), name))
-            }
-            Err(e) => (Kind::Failed(format!("{e:#}")), Prepared::new((520.0, 220.0), name)),
-        };
-        // opt-in: rustdecoder plays MP4 / MOV with H.264 or HEVC; what it cannot open falls back to
-        // `kind` (decided when its decoder opens, see MediaView::rd_opened)
-        let (kind, prepared) = match kind {
-            Kind::Video(_) | Kind::Mf if rd_video::enabled() => match rd_video::probe(&f.path) {
-                Some(p) => {
-                    log::info!("look: rustdecoder route for {}: {} {}x{}", f.path.display(), p.codec, p.width, p.height);
-                    (Kind::Rd(Box::new(kind), p), Prepared::new((960.0, 540.0), super::file_name(&f.path)))
-                }
-                None => {
-                    log::info!("look: rustdecoder does not take {}, current route", f.path.display());
-                    (kind, prepared)
-                }
-            },
-            kind => (kind, prepared),
-        };
+        let Opened(kind, prepared) = self.opened.take().unwrap_or_else(|| open_media(&f.path));
         let path = f.path.clone();
         self.view = Some(cx.new(|cx| MediaView::new(path, kind, cx)));
         prepared

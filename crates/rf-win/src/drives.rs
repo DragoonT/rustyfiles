@@ -97,6 +97,16 @@ pub fn list_drives() -> Vec<Drive> {
 
 #[cfg(test)]
 mod tests {
+    /// Network paths are slow without touching the network; a file on the system disk is not.
+    #[test]
+    fn slow_places() {
+        use std::path::Path;
+        assert!(super::slow_to_read(Path::new(r"\\nas\share\film.mkv")));
+        assert!(super::slow_to_read(Path::new(r"\\?\UNC\nas\share\film.mkv")));
+        assert!(!super::slow_to_read(&std::env::temp_dir()));
+        assert!(!super::slow_to_read(Path::new(r"C:\Windows\notepad.exe")));
+    }
+
     #[test]
     fn has_c_drive() {
         let d = super::list_drives();
@@ -115,6 +125,31 @@ pub fn is_removable(path: &std::path::Path) -> bool {
     let root = crate::wide::wide(format!("{}:\\", b[0] as char));
     // 2 = DRIVE_REMOVABLE
     unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) == 2 }
+}
+
+/// Whether reading `path` may take seconds: a network share, a removable or optical disk, or a
+/// cloud file whose data is not on this PC (reading it downloads it). DirectLook opens such files
+/// off the UI thread.
+pub fn slow_to_read(path: &std::path::Path) -> bool {
+    if crate::localized::is_network(path) {
+        return true;
+    }
+    let s = path.to_string_lossy();
+    let letter = match s.as_bytes() {
+        [l, b':', ..] => Some(*l),
+        [b'\\', b'\\', b'?', b'\\', l, b':', ..] => Some(*l),
+        _ => None,
+    };
+    if let Some(l) = letter {
+        let root = crate::wide::wide(format!("{}:\\", l as char));
+        // 2 = DRIVE_REMOVABLE, 5 = DRIVE_CDROM
+        if matches!(unsafe { GetDriveTypeW(PCWSTR(root.as_ptr())) }, 2 | 5) {
+            return true;
+        }
+    }
+    // FILE_ATTRIBUTE_OFFLINE, FILE_ATTRIBUTE_RECALL_ON_OPEN, FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+    use std::os::windows::fs::MetadataExt;
+    std::fs::metadata(path).is_ok_and(|m| m.file_attributes() & (0x1000 | 0x4_0000 | 0x40_0000) != 0)
 }
 
 /// Bitmask of present drive letters (cheap; poll it to notice USB plug/unplug).

@@ -73,6 +73,10 @@ pub enum ThemeChoice {
     Light,
 }
 
+/// What a viewer's [`Viewer::loader`] opened off the UI thread, handed back through
+/// [`Viewer::take_loaded`].
+pub type Loaded = Box<dyn std::any::Any + Send>;
+
 /// Görüntüleyicinin pencereye bildirdikleri.
 #[derive(Clone, Debug)]
 pub struct Prepared {
@@ -107,6 +111,14 @@ pub trait Viewer: 'static {
     fn name(&self) -> &'static str;
     fn priority(&self) -> i32;
     fn can_handle(&self, f: &Probe) -> bool;
+    /// The slow part of opening a file (a container's index, a PDF's pages). For a file on a
+    /// network drive or another slow place it runs off the UI thread and its result reaches
+    /// [`Viewer::take_loaded`] before [`Viewer::prepare`]; elsewhere `prepare` does the work
+    /// itself. Viewers that only start background work in `prepare` need none.
+    fn loader(&self) -> Option<fn(&Probe) -> Loaded> {
+        None
+    }
+    fn take_loaded(&mut self, _loaded: Loaded) {}
     fn prepare(&mut self, f: &Probe, cx: &mut App) -> Prepared;
     fn render(&mut self, window: &mut Window, cx: &mut App) -> AnyElement;
     fn more_menu(&self) -> Vec<MoreItem> {

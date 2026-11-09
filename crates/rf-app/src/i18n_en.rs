@@ -634,6 +634,7 @@ pub const EN: &[(&str, &str)] = &[
     ("zaten var.", "already exists."),
     ("Değiştirmek istiyor musunuz?", "Do you want to replace it?"),
     ("PDF açılamadı.", "The PDF could not be opened."),
+    ("Açılıyor…", "Opening…"),
     ("Bu PDF'te sayfa yok.", "This PDF has no pages."),
     ("1 sayfa", "1 page"),
     ("sayfa", "pages"),

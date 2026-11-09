@@ -120,7 +120,10 @@ impl LookManager {
     fn open(path: PathBuf, opts: ShowOpts, cx: &mut App) {
         let s = cx.global::<LookSettings>().clone();
         let work = rect(rf_win::look::win::work_area_at_cursor());
-        let (viewer, prepared) = window::prepare_viewer(&path, cx);
+        // a file in a slow place (a network drive) opens off the UI thread, in the window
+        let slow = rf_win::drives::slow_to_read(&path);
+        let (viewer, prepared): (Box<dyn viewer::Viewer>, _) =
+            if slow { (Box::new(window::Opening), window::Opening::prepared(&path)) } else { window::prepare_viewer(&path, cx) };
         let size = geometry::fit(prepared.preferred, work, prepared.fit_ratio);
         let r = geometry::first_rect(size, work);
         let topmost = opts.topmost || s.look_topmost;
@@ -153,6 +156,9 @@ impl LookManager {
             Ok(h) => {
                 Self::global(cx).active = Some(h);
                 Self::report_windows(cx);
+                if slow {
+                    let _ = h.update(cx, |v, window, cx| v.load_in_background(true, window, cx));
+                }
             }
             Err(e) => log::error!("look window: {e:#}"),
         }
