@@ -153,7 +153,7 @@ cbuffer P : register(b0) {
     float4 yp;     // black level, luma gain, chroma middle, chroma gain (in units of the sample range)
     float4 coef;   // R from Cr, G from Cb, G from Cr, B from Cb
     float4 misc;   // sample scale, rotation (0..3), flip, transfer (0 SDR, 1 PQ, 2 HLG)
-    float4 gamut;  // x: convert BT.2020 primaries to BT.709
+    float4 gamut;  // x: convert BT.2020 primaries to BT.709, y: blend neighbouring lines (deinterlace)
     float4 planar; // planar CPU pictures: chroma halved in x, Y rows, chroma plane width
     float4 vorg;   // planar CPU pictures: where the V plane starts relative to the U plane
 };
@@ -257,6 +257,18 @@ float4 ps(VOut i) : SV_Target {
     float3 uv = float3(p / surf.xy, 0);
     float y = TY.SampleLevel(S, uv, 0) * misc.x;
     float2 c = TC.SampleLevel(S, uv, 0) * misc.x;
+    if (gamut.y > 0.5) {
+        // Linear blend of the fields: the line with its two neighbours, 1 2 1 (luma), and the
+        // chroma row with the rows above and below (one chroma row is two luma lines). Moving
+        // edges lose their comb, still edges lose a little vertical sharpness.
+        float lo = crop.y + 0.5, hi = crop.y + crop.w - 0.5;
+        float3 up = float3(float2(p.x, clamp(p.y - 1.0, lo, hi)) / surf.xy, 0);
+        float3 dn = float3(float2(p.x, clamp(p.y + 1.0, lo, hi)) / surf.xy, 0);
+        y = 0.5 * y + 0.25 * (TY.SampleLevel(S, up, 0) + TY.SampleLevel(S, dn, 0)) * misc.x;
+        float3 cu = float3(float2(p.x, clamp(p.y - 2.0, lo, hi)) / surf.xy, 0);
+        float3 cd = float3(float2(p.x, clamp(p.y + 2.0, lo, hi)) / surf.xy, 0);
+        c = 0.5 * c + 0.25 * (TC.SampleLevel(S, cu, 0) + TC.SampleLevel(S, cd, 0)) * misc.x;
+    }
     return shade(y, c);
 }
 
@@ -325,6 +337,7 @@ pub struct Converter {
     gpu_ns: f64,
     gpu_samples: u64,
     staging: Option<(ID3D11Texture2D, u32, u32)>,
+    deinterlace: bool,
 }
 
 impl Converter {
@@ -379,6 +392,7 @@ impl Converter {
                 gpu_ns: 0.0,
                 gpu_samples: 0,
                 staging: None,
+                deinterlace: false,
             })
         }
     }
@@ -468,6 +482,15 @@ impl Converter {
         }
     }
 
+    /// Shows interlaced pictures with the two fields blended (a simple linear deinterlace in the
+    /// pixel shader, off by default). The decoder gives the fields woven into one frame; where
+    /// they were captured 1/50 s apart, moving edges show a comb that this removes at the price
+    /// of some vertical sharpness. Not a motion adaptive filter and not a bob (one picture per
+    /// field): frames come out at the frame rate. Applies to pictures converted afterwards.
+    pub fn set_deinterlace(&mut self, on: bool) {
+        self.deinterlace = on;
+    }
+
     /// Wraps an existing BGRA8 render-target texture (a swap chain's back buffer) as a target.
     pub fn target_for(&self, texture: &ID3D11Texture2D) -> Result<Target> {
         unsafe {
@@ -501,6 +524,7 @@ impl Converter {
             return Err(Error::Invalid("visible rectangle outside the surface"));
         }
         let mut c = Self::constants(src, params, (sw, sh));
+        c.gamut[1] = if self.deinterlace { 1.0 } else { 0.0 };
         let planar = format == DXGI_FORMAT_R16_UNORM;
         if planar {
             // Y plane rows = visible rows; the texture is 2x that (4:2:2) or 3x (4:4:4) high
