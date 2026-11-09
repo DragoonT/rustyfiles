@@ -87,7 +87,7 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
    and also requires the configuration without bitstream encryption. H.264 surfaces are rounded
    up to 16 (HEVC: 128). `DecoderBeginFrame` can answer `E_PENDING` when decoding runs far
    ahead of the GPU; it is retried like `DXGI_ERROR_WAS_STILL_DRAWING`. Unsupported, with
-   a clear error: MBAFF (at open), field pictures (at the first one), FMO (PPS), data partitioning,
+   a clear error: FMO (PPS), data partitioning,
    4:2:2 / 4:4:4, more than 8 bits, lossless transform bypass, frame_num gaps. A stream with
    `frame_mbs_only_flag` 0 whose pictures are all frames decodes. Streams starting on a non-IDR
    intra picture start there (earlier pictures dropped).
@@ -97,12 +97,55 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
    4 slices, `weightp=2:weightb=1` on a fade (explicit and implicit weights), 8 reference
    frames, 9 s long GOP (270 frames), open GOP (non-IDR I pictures), strict B-pyramid with
    MMCO, `fake-interlaced` (frame_mbs_only 0), 1080p level 4.1 phone style, and NVENC High
-   with B-pyramid: all bit-exact. MBAFF (`tff=1`) is refused. A 10 s 1080p60 High clip
+   with B-pyramid: all bit-exact. (Interlaced: see the next paragraph.) A 10 s 1080p60 High clip
    (600 frames, noisy) is bit-exact too and decodes at about 2000 fps (GPU only, no read-back,
    RTX 5070 Ti). MMCO 2 to 6, long-term pictures and POC type 1 have only unit tests in
    `h264_dpb` (x264 and NVENC never produce them).
-   Left for H.264: interlaced (field / MBAFF / PAFF), frame_num gap concealment, High 10 and
-   4:2:2 profiles, the long slice format for GPUs offering only that.
+   Left for H.264: frame_num gap concealment, High 10 and 4:2:2 profiles, the long slice
+   format for GPUs offering only that.
+   **H.264 interlaced done (2026-11-09):** MBAFF frames, field pictures (PAFF) and frame
+   pictures in interlaced streams decode on the GPU, bit-exact against ffmpeg's woven frames.
+   - MBAFF needed nothing but lifting the refusal: `MbaffFrameFlag` was already filled
+     (`mb_adaptive_frame_field_flag` and not a field picture) and the hardware does the rest.
+   - Field pictures: `h264_dpb::Pic` is a frame with two fields (`marks[2]`, `fields` mask, own
+     top / bottom order counts). `start_picture` decides whether a field is the second field of
+     the open frame (opposite parity, same `frame_num`, same reference-ness, not IDR) and says so
+     in `Started::second_of`; `H264Decoder::decode` then decodes into the first field's surface.
+     Output waits until the second field is decoded: a first field's frame is never bumped while
+     open, and when the next picture is not its second field the lone field comes out as a frame
+     (the other field's rows hold whatever the surface had). A non-reference first field that would
+     go straight out is held until its frame is complete, so the buffer can briefly hold one
+     more entry than `dpb_size` (the surface pool has 3 spare).
+   - POC: types 0, 1, 2 per field (a bottom field in type 1 adds `offset_for_top_to_bottom_field`
+     and uses `delta_pic_order_cnt[0]`); MMCO5 on a field zeroes that field's count; after MMCO5
+     `prevPicOrderCntLsb` is 0 for a bottom field, the top count otherwise.
+   - Marking per field: the sliding window counts a frame / pair / lone field once and does
+     nothing for the second field of a pair whose first field is short-term; MMCO 1 to 3 resolve
+     picNumX per field (`2 * FrameNumWrap + 1` same parity, `2 * FrameNumWrap` opposite;
+     `CurrPicNum = 2 * frame_num + 1`) or per frame (both fields marked) in frame pictures;
+     long-term indices are shared by the two fields of a frame.
+   - DXVA: `CurrPic` carries the bottom field flag, `CurrFieldOrderCnt` only the picture's own
+     parity, `FieldOrderCntList` and `UsedForReferenceFlags` per field (a field that is not a
+     reference counts as absent, 0), `field_pic_flag` as before. The second field's reference list
+     contains the first field's own entry (its surface is also `CurrPic`).
+   - Tests (`tests/gpu_h264.rs`, 90 frames each, every sample compared, in MP4 unless noted):
+     x264 `tff=1` and `bff=1` with B-frames (MBAFF; x264 writes no PAFF), NVENC with
+     `-flags +ildct+ilme` and `setfield=tff|bff` (writes every picture as two fields: P fields
+     only; with B fields, `-b_ref_mode middle`, 8 reference frames, non-reference B fields),
+     the MBAFF and the PAFF B clip remuxed into MPEG-TS, and 1920x1080 MBAFF / PAFF in AVCHD style
+     `.m2ts`: all bit-exact. NVENC clips skip where there is no NVENC. Unit tests in `h264_dpb`
+     for pairing, output once per frame, a lone field, the sliding window over pairs and MMCO1 on a
+     single field. Not covered by any stream here (unit tests or reasoning only): streams mixing
+     field and frame pictures, long-term fields, MMCO 2 / 3 / 6 on fields, MMCO5 on a field, a
+     reference first field with a non-reference second field (treated as two lone fields), fields
+     of one frame in separate MP4 samples / PES (the pairing does not depend on it).
+   - Display: the decoder gives the woven frame. `present::Converter::set_deinterlace(true)` blends
+     each line with its two neighbours (1 2 1 on luma, the chroma row with the rows above and
+     below) in the pixel shader: no comb on moving edges, a little less vertical sharpness; not
+     motion adaptive and not a bob (no frame rate doubling). Off by default, and the player does
+     not switch it on by itself yet (`StreamInfo` does not say a stream is interlaced).
+     `tests/deinterlace.rs`: a 60 fps source woven into 30 interlaced frames, comb measure 1.50 woven,
+     0.38 blended.
 4. Playback in DirectLook: clock, frame queue, seeking, audio; replaces the Media Foundation
    route, and FilmCraft for video.
    **Phase 4 groundwork, headless core done (2026-11-09):**
@@ -713,8 +756,8 @@ picture 0.4 ms). The 1.15 GB OpenDML AVI is indexed in a few milliseconds (index
 No AVCHD file was available in the camera folder, so no camera stream was tried.
 
 **Left.**
-- A real camera stream: AVCHD with interlaced H.264 (the decoder refuses field pictures and MBAFF),
-  PTS jumps, several programs, 0x06 streams with unusual descriptors.
+- A real camera stream: AVCHD with interlaced H.264 (decoding is tested on x264 / NVENC streams
+  in `.m2ts`, not on a camera file), PTS jumps, several programs, 0x06 streams with unusual descriptors.
 - TS: resync after lost sync inside a file (the rest of the file is ignored at the first bad
   sync byte), PES with several access units or an access unit over several PES (split by AUD),
   AAC LATM, HE-AAC signalling, DTS / TrueHD / VC-1 / PGS, an `.m2ts` arrival-time clock, several
