@@ -3,6 +3,8 @@
 //! `docs/design/rustdecoder.md`.
 
 pub mod audio;
+pub mod av1;
+pub mod dxva_av1;
 pub mod bits;
 pub mod dpb;
 pub mod h264;
@@ -32,6 +34,8 @@ pub mod dxva_h264;
 pub mod dxva_vp9;
 pub mod vp9;
 #[cfg(windows)]
+pub mod av1dec;
+#[cfg(windows)]
 pub mod vp9dec;
 #[cfg(windows)]
 pub mod h264dec;
@@ -46,6 +50,8 @@ pub use decoder::{Frame, HevcDecoder, StreamInfo};
 pub use h264dec::H264Decoder;
 #[cfg(windows)]
 pub use vp9dec::Vp9Decoder;
+#[cfg(windows)]
+pub use av1dec::Av1Decoder;
 #[cfg(windows)]
 pub use video::VideoDecoder;
 

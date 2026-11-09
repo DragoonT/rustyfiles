@@ -439,6 +439,7 @@ fn parse_stsd(b: &[u8], t: &mut Track) -> Result<()> {
             t.codec = match &fourcc {
                 b"avc1" | b"avc3" => child(&kids, b"avcC").map_or(Codec::Other, |x| Codec::H264 { config: x.to_vec() }),
                 b"hvc1" | b"hev1" => child(&kids, b"hvcC").map_or(Codec::Other, |x| Codec::Hevc { config: x.to_vec() }),
+                b"av01" => child(&kids, b"av1C").map_or(Codec::Other, |x| Codec::Av1 { config: x.to_vec() }),
                 _ => Codec::Other,
             };
         }

@@ -291,6 +291,17 @@ impl HwDecoder {
     /// format) as bytes, `bitstream` the slice NAL units each behind `00 00 01`. The last
     /// slice's size is grown over the zero padding the buffer gets.
     pub fn decode(&mut self, g: &Gpu, surface: usize, pic_params: &[u8], qmatrix: Option<&[u8]>, slices: &mut [crate::dxva::SliceShort], bitstream: &[u8]) -> Result<()> {
+        // the bitstream's padding changes the last slice
+        let padded = bitstream.len().next_multiple_of(128);
+        if let Some(last) = slices.last_mut() {
+            last.slice_bytes_in_buffer += (padded - bitstream.len()) as u32;
+        }
+        self.decode_controls(g, surface, pic_params, qmatrix, crate::dxva::slice_bytes(slices), bitstream)
+    }
+
+    /// Like [`HwDecoder::decode`] with the slice control buffer given as bytes, untouched (AV1:
+    /// one `DXVA_Tile_AV1` per tile).
+    pub fn decode_controls(&mut self, g: &Gpu, surface: usize, pic_params: &[u8], qmatrix: Option<&[u8]>, controls: &[u8], bitstream: &[u8]) -> Result<()> {
         let view = self.views.get(surface).ok_or(Error::Invalid("surface index"))?;
         let ctx = &g.video_context;
         unsafe {
@@ -315,13 +326,8 @@ impl HwDecoder {
                     descs.push(D3D11_VIDEO_DECODER_BUFFER_DESC { BufferType: D3D11_VIDEO_DECODER_BUFFER_INVERSE_QUANTIZATION_MATRIX, DataSize: n as u32, ..Default::default() });
                 }
                 // the bitstream first (its padding changes the last slice), then the controls
-                let padded = bitstream.len().next_multiple_of(128);
-                if let Some(last) = slices.last_mut() {
-                    last.slice_bytes_in_buffer += (padded - bitstream.len()) as u32;
-                }
                 let n = Self::put(g, &self.decoder, D3D11_VIDEO_DECODER_BUFFER_BITSTREAM, bitstream, 128)?;
-                let sl = crate::dxva::slice_bytes(slices);
-                let m = Self::put(g, &self.decoder, D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL, sl, 1)?;
+                let m = Self::put(g, &self.decoder, D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL, controls, 1)?;
                 descs.push(D3D11_VIDEO_DECODER_BUFFER_DESC { BufferType: D3D11_VIDEO_DECODER_BUFFER_SLICE_CONTROL, DataSize: m as u32, NumMBsInBuffer: mb_count, ..Default::default() });
                 descs.push(D3D11_VIDEO_DECODER_BUFFER_DESC { BufferType: D3D11_VIDEO_DECODER_BUFFER_BITSTREAM, DataSize: n as u32, NumMBsInBuffer: mb_count, ..Default::default() });
                 gpu("SubmitDecoderBuffers", ctx.SubmitDecoderBuffers(&self.decoder, &descs))
@@ -394,6 +400,16 @@ pub struct Planes {
     pub bit_depth: u8,
     pub y: Vec<u16>,
     pub uv: Vec<u16>,
+}
+
+/// The decoder profile and surface format for an AV1 stream of the given bit depth (main
+/// profile: 8-bit and 10-bit 4:2:0).
+pub fn av1_profile(bit_depth: u8) -> Result<(GUID, DXGI_FORMAT)> {
+    match bit_depth {
+        8 => Ok((D3D11_DECODER_PROFILE_AV1_VLD_PROFILE0, DXGI_FORMAT_NV12)),
+        10 => Ok((D3D11_DECODER_PROFILE_AV1_VLD_PROFILE0, DXGI_FORMAT_P010)),
+        _ => Err(Error::Unsupported("AV1 bit depth other than 8 and 10")),
+    }
 }
 
 /// The decoder profile and surface format for a VP9 stream of the given bit depth (profile 0
