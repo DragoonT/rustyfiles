@@ -331,6 +331,20 @@ fn hevc_in_mkv() {
     check_path("hevc in mkv", &p, 90);
 }
 
+#[test]
+fn profile1_444_is_refused_clearly() {
+    if !have_ffmpeg() {
+        return;
+    }
+    let mut c = Clip::new("vp9_444.webm", &["-profile:v", "1", "-b:v", "1M", "-cpu-used", "5"]);
+    c.pix_fmt = "yuv444p";
+    let clip = make_clip(&c);
+    match VideoDecoder::open(&clip) {
+        Err(rustdecoder::Error::Unsupported(m)) => eprintln!("4:4:4 refused: {m}"),
+        other => panic!("4:4:4 was not refused: {:?}", other.map(|d| d.codec_name())),
+    }
+}
+
 /// What the generated clips contain, so the bit-exact results above mean something: counts of
 /// the header features over every frame of every clip made by the tests.
 #[test]

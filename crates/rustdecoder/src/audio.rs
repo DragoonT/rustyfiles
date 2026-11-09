@@ -91,6 +91,8 @@ impl AudioDecoder {
                 sample_rate = mft.rate;
                 (Kind_::Aac(Box::new(mft)), "AAC")
             }
+            Codec::Opus { .. } => return Err(Error::Unsupported("Opus audio is not decoded yet (PCM and AAC are)")),
+            Codec::Vorbis { .. } => return Err(Error::Unsupported("Vorbis audio is not decoded yet (PCM and AAC are)")),
             _ => return Err(Error::Unsupported("audio codec other than PCM and AAC")),
         };
         if sample_rate == 0 {
