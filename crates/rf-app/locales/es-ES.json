@@ -953,5 +953,11 @@
  "2220b7a5": "Descargando rustyfiles {v}",
  "7daa795d": "rustyfiles {v} está listo",
  "099cc52a": "Se instala al reiniciar",
- "4dc479c7": "Reiniciar"
+ "4dc479c7": "Reiniciar",
+ "5d57c6f0": "Mostrar el tamaño en disco de las carpetas",
+ "241b2a9f": "La columna Tamaño muestra las carpetas según el espacio que ocupan en el disco (redondeado hacia arriba a clústeres completos) en lugar de la suma del tamaño de sus archivos; la ordenación también lo sigue",
+ "16fafed3": "Dispositivos",
+ "be3cb212": "Esta carpeta es de solo lectura",
+ "bba08e14": "Los elementos de dispositivos como teléfonos no se pueden cambiar aquí; cópielos y péguelos en otra carpeta.",
+ "7450cc15": "Copiando desde el dispositivo:"
 }

@@ -953,5 +953,11 @@
  "2220b7a5": "Pobieranie rustyfiles {v}",
  "7daa795d": "rustyfiles {v} jest gotowy",
  "099cc52a": "Zainstaluje się po ponownym uruchomieniu",
- "4dc479c7": "Uruchom ponownie"
+ "4dc479c7": "Uruchom ponownie",
+ "5d57c6f0": "Pokaż rozmiar na dysku dla folderów",
+ "241b2a9f": "Kolumna Rozmiar pokazuje foldery według miejsca zajmowanego na dysku (zaokrąglonego w górę do pełnych klastrów) zamiast sumy rozmiarów ich plików; sortowanie również się do tego stosuje",
+ "16fafed3": "Urządzenia",
+ "be3cb212": "Ten folder jest tylko do odczytu",
+ "bba08e14": "Elementów na urządzeniach, takich jak telefony, nie można tu zmieniać; skopiuj je i wklej do innego folderu.",
+ "7450cc15": "Kopiowanie z urządzenia:"
 }

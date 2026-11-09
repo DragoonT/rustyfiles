@@ -953,5 +953,11 @@
  "2220b7a5": "A rustyfiles {v} letöltése folyamatban",
  "7daa795d": "A rustyfiles {v} készen áll",
  "099cc52a": "Újraindításkor települ",
- "4dc479c7": "Újraindítás"
+ "4dc479c7": "Újraindítás",
+ "5d57c6f0": "Mappák lemezen elfoglalt helyének megjelenítése",
+ "241b2a9f": "A Méret oszlop a mappákat a lemezen elfoglalt hely szerint mutatja (egész klaszterekre felfelé kerekítve) a fájlméretek összege helyett; a rendezés is ezt követi",
+ "16fafed3": "Eszközök",
+ "be3cb212": "Ez a mappa írásvédett",
+ "bba08e14": "Az olyan eszközökön lévő elemek, mint a telefonok, itt nem módosíthatók; másolja őket, és illessze be egy másik mappába.",
+ "7450cc15": "Másolás az eszközről:"
 }

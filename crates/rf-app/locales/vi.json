@@ -953,5 +953,11 @@
  "2220b7a5": "Đang tải rustyfiles {v}",
  "7daa795d": "rustyfiles {v} đã sẵn sàng",
  "099cc52a": "Sẽ cài đặt khi bạn khởi động lại",
- "4dc479c7": "Khởi động lại"
+ "4dc479c7": "Khởi động lại",
+ "5d57c6f0": "Hiện kích cỡ trên đĩa của thư mục",
+ "241b2a9f": "Cột Kích cỡ hiển thị thư mục theo dung lượng chúng chiếm trên đĩa (làm tròn lên thành các cụm đầy đủ) thay vì tổng kích cỡ các tệp; việc sắp xếp cũng theo giá trị này",
+ "16fafed3": "Thiết bị",
+ "be3cb212": "Thư mục này ở chế độ chỉ đọc",
+ "bba08e14": "Không thể thay đổi các mục trên thiết bị như điện thoại tại đây; hãy sao chép rồi dán vào thư mục khác.",
+ "7450cc15": "Đang sao chép từ thiết bị:"
 }

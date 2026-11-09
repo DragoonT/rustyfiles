@@ -953,5 +953,11 @@
  "2220b7a5": "Mengunduh rustyfiles {v}",
  "7daa795d": "rustyfiles {v} siap",
  "099cc52a": "Dipasang saat Anda memulai ulang",
- "4dc479c7": "Mulai ulang"
+ "4dc479c7": "Mulai ulang",
+ "5d57c6f0": "Tampilkan ukuran pada disk untuk folder",
+ "241b2a9f": "Kolom Ukuran menampilkan folder berdasarkan ruang yang digunakan pada disk (dibulatkan ke atas ke klaster utuh) alih-alih jumlah ukuran file-nya; pengurutan mengikuti hal ini",
+ "16fafed3": "Perangkat",
+ "be3cb212": "Folder ini hanya-baca",
+ "bba08e14": "Item pada perangkat seperti ponsel tidak dapat diubah di sini; salin lalu tempel ke folder lain.",
+ "7450cc15": "Menyalin dari perangkat:"
 }

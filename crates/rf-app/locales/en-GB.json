@@ -953,5 +953,11 @@
  "2220b7a5": "Downloading rustyfiles {v}",
  "7daa795d": "rustyfiles {v} is ready",
  "099cc52a": "Installs when you restart",
- "4dc479c7": "Restart"
+ "4dc479c7": "Restart",
+ "5d57c6f0": "Show size on disk for folders",
+ "241b2a9f": "The Size column shows folders by the space they take on disk (rounded up to whole clusters) instead of the sum of their file sizes; sorting follows it",
+ "16fafed3": "Devices",
+ "be3cb212": "This folder is read-only",
+ "bba08e14": "Items on devices such as phones can't be changed here; copy them and paste them into another folder.",
+ "7450cc15": "Copying from device:"
 }

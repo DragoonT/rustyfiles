@@ -953,5 +953,11 @@
  "2220b7a5": "Laster ned rustyfiles {v}",
  "7daa795d": "rustyfiles {v} er klar",
  "099cc52a": "Installeres når du starter på nytt",
- "4dc479c7": "Start på nytt"
+ "4dc479c7": "Start på nytt",
+ "5d57c6f0": "Vis størrelse på disk for mapper",
+ "241b2a9f": "Størrelse-kolonnen viser mapper etter plassen de bruker på disken (rundet opp til hele klynger) i stedet for summen av filstørrelsene; sorteringen følger dette",
+ "16fafed3": "Enheter",
+ "be3cb212": "Denne mappen er skrivebeskyttet",
+ "bba08e14": "Elementer på enheter som telefoner kan ikke endres her; kopier dem og lim dem inn i en annen mappe.",
+ "7450cc15": "Kopierer fra enhet:"
 }

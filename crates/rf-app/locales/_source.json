@@ -5730,5 +5730,41 @@
   "tr": "%{v}",
   "en": "{v}%",
   "note": "where the % sign goes in this language"
+ },
+ {
+  "id": "5d57c6f0",
+  "key": "Klasörlerde disk üzerindeki boyutu göster",
+  "tr": "Klasörlerde disk üzerindeki boyutu göster",
+  "en": "Show size on disk for folders"
+ },
+ {
+  "id": "241b2a9f",
+  "key": "Boyut sütunu klasörler için dosya boyutlarının toplamı yerine kümelere yuvarlanmış boyutu gösterir; sıralama da buna göre yapılır",
+  "tr": "Boyut sütunu klasörler için dosya boyutlarının toplamı yerine kümelere yuvarlanmış boyutu gösterir; sıralama da buna göre yapılır",
+  "en": "The Size column shows folders by the space they take on disk (rounded up to whole clusters) instead of the sum of their file sizes; sorting follows it"
+ },
+ {
+  "id": "16fafed3",
+  "key": "Cihazlar",
+  "tr": "Cihazlar",
+  "en": "Devices"
+ },
+ {
+  "id": "be3cb212",
+  "key": "Bu klasör salt okunur",
+  "tr": "Bu klasör salt okunur",
+  "en": "This folder is read-only"
+ },
+ {
+  "id": "bba08e14",
+  "key": "Telefon gibi cihazlardaki öğeler burada değiştirilemez; kopyalayıp başka bir klasöre yapıştırabilirsiniz.",
+  "tr": "Telefon gibi cihazlardaki öğeler burada değiştirilemez; kopyalayıp başka bir klasöre yapıştırabilirsiniz.",
+  "en": "Items on devices such as phones can't be changed here; copy them and paste them into another folder."
+ },
+ {
+  "id": "7450cc15",
+  "key": "Cihazdan kopyalanıyor:",
+  "tr": "Cihazdan kopyalanıyor:",
+  "en": "Copying from device:"
  }
 ]

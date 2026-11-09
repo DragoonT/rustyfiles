@@ -953,5 +953,11 @@
  "2220b7a5": "Hämtar rustyfiles {v}",
  "7daa795d": "rustyfiles {v} är redo",
  "099cc52a": "Installeras när du startar om",
- "4dc479c7": "Starta om"
+ "4dc479c7": "Starta om",
+ "5d57c6f0": "Visa storlek på disk för mappar",
+ "241b2a9f": "Kolumnen Storlek visar mappar efter det utrymme de tar på disken (avrundat uppåt till hela kluster) i stället för summan av filstorlekarna; sorteringen följer detta",
+ "16fafed3": "Enheter",
+ "be3cb212": "Den här mappen är skrivskyddad",
+ "bba08e14": "Objekt på enheter som telefoner kan inte ändras här; kopiera dem och klistra in dem i en annan mapp.",
+ "7450cc15": "Kopierar från enhet:"
 }

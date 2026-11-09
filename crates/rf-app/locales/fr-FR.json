@@ -953,5 +953,11 @@
  "2220b7a5": "Téléchargement de rustyfiles {v}",
  "7daa795d": "rustyfiles {v} est prêt",
  "099cc52a": "S'installe au redémarrage",
- "4dc479c7": "Redémarrer"
+ "4dc479c7": "Redémarrer",
+ "5d57c6f0": "Afficher la taille sur le disque des dossiers",
+ "241b2a9f": "La colonne Taille affiche les dossiers selon l'espace qu'ils occupent sur le disque (arrondi aux clusters entiers supérieurs) au lieu de la somme de la taille de leurs fichiers ; le tri en tient compte",
+ "16fafed3": "Appareils",
+ "be3cb212": "Ce dossier est en lecture seule",
+ "bba08e14": "Les éléments des appareils tels que les téléphones ne peuvent pas être modifiés ici ; copiez-les et collez-les dans un autre dossier.",
+ "7450cc15": "Copie depuis l'appareil :"
 }

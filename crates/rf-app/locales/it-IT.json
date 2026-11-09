@@ -953,5 +953,11 @@
  "2220b7a5": "Download di rustyfiles {v}",
  "7daa795d": "rustyfiles {v} è pronto",
  "099cc52a": "Si installa al riavvio",
- "4dc479c7": "Riavvia"
+ "4dc479c7": "Riavvia",
+ "5d57c6f0": "Mostra le dimensioni su disco delle cartelle",
+ "241b2a9f": "La colonna Dimensione mostra le cartelle in base allo spazio che occupano su disco (arrotondato per eccesso a cluster interi) invece della somma delle dimensioni dei file; anche l'ordinamento lo segue",
+ "16fafed3": "Dispositivi",
+ "be3cb212": "Questa cartella è in sola lettura",
+ "bba08e14": "Gli elementi dei dispositivi come i telefoni non possono essere modificati qui; copiali e incollali in un'altra cartella.",
+ "7450cc15": "Copia dal dispositivo:"
 }

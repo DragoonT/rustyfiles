@@ -953,5 +953,11 @@
  "2220b7a5": "S'està baixant rustyfiles {v}",
  "7daa795d": "rustyfiles {v} està a punt",
  "099cc52a": "S'instal·la en reiniciar",
- "4dc479c7": "Reinicia"
+ "4dc479c7": "Reinicia",
+ "5d57c6f0": "Mostra la mida al disc de les carpetes",
+ "241b2a9f": "La columna Mida mostra les carpetes segons l'espai que ocupen al disc (arrodonit amunt a clústers sencers) en lloc de la suma de les mides dels fitxers; l'ordenació el segueix",
+ "16fafed3": "Dispositius",
+ "be3cb212": "Aquesta carpeta és només de lectura",
+ "bba08e14": "Els elements dels dispositius, com ara els telèfons, no es poden canviar aquí; copieu-los i enganxeu-los en una altra carpeta.",
+ "7450cc15": "S'està copiant des del dispositiu:"
 }

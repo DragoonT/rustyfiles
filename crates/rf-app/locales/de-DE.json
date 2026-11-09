@@ -953,5 +953,11 @@
  "2220b7a5": "rustyfiles {v} wird heruntergeladen",
  "7daa795d": "rustyfiles {v} ist bereit",
  "099cc52a": "Wird beim Neustart installiert",
- "4dc479c7": "Neu starten"
+ "4dc479c7": "Neu starten",
+ "5d57c6f0": "Größe auf Datenträger für Ordner anzeigen",
+ "241b2a9f": "Die Spalte „Größe“ zeigt Ordner mit dem Speicherplatz, den sie auf dem Datenträger belegen (aufgerundet auf ganze Cluster), statt mit der Summe ihrer Dateigrößen; die Sortierung richtet sich danach",
+ "16fafed3": "Geräte",
+ "be3cb212": "Dieser Ordner ist schreibgeschützt",
+ "bba08e14": "Elemente auf Geräten wie Smartphones können hier nicht geändert werden; kopieren Sie sie und fügen Sie sie in einen anderen Ordner ein.",
+ "7450cc15": "Kopieren vom Gerät:"
 }

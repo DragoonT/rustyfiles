@@ -953,5 +953,11 @@
  "2220b7a5": "rustyfiles {v} word afgelaai",
  "7daa795d": "rustyfiles {v} is gereed",
  "099cc52a": "Installeer wanneer jy herbegin",
- "4dc479c7": "Herbegin"
+ "4dc479c7": "Herbegin",
+ "5d57c6f0": "Wys grootte op skyf vir omslae",
+ "241b2a9f": "Die Grootte-kolom wys omslae volgens die spasie wat hulle op die skyf gebruik (opgerond tot volle klusters) in plaas van die som van hul lêergroottes; sortering volg dit",
+ "16fafed3": "Toestelle",
+ "be3cb212": "Hierdie omslag is leesalleen",
+ "bba08e14": "Items op toestelle soos foons kan nie hier verander word nie; kopieer hulle en plak hulle in 'n ander omslag.",
+ "7450cc15": "Kopieer van toestel:"
 }

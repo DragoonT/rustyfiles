@@ -953,5 +953,11 @@
  "2220b7a5": "Ladataan rustyfiles {v}",
  "7daa795d": "rustyfiles {v} on valmis",
  "099cc52a": "Asennetaan uudelleenkäynnistyksen yhteydessä",
- "4dc479c7": "Käynnistä uudelleen"
+ "4dc479c7": "Käynnistä uudelleen",
+ "5d57c6f0": "Näytä kansioiden koko levyllä",
+ "241b2a9f": "Koko-sarake näyttää kansiot levyllä viemän tilan mukaan (pyöristettynä ylöspäin kokonaisiin klustereihin) tiedostokokojen summan sijaan; lajittelu noudattaa tätä",
+ "16fafed3": "Laitteet",
+ "be3cb212": "Tämä kansio on vain luku -tilassa",
+ "bba08e14": "Laitteiden, kuten puhelinten, kohteita ei voi muuttaa täällä; kopioi ne ja liitä toiseen kansioon.",
+ "7450cc15": "Kopioidaan laitteelta:"
 }

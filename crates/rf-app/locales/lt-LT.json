@@ -953,5 +953,11 @@
  "2220b7a5": "Atsisiunčiama rustyfiles {v}",
  "7daa795d": "rustyfiles {v} paruošta",
  "099cc52a": "Bus įdiegta paleidus iš naujo",
- "4dc479c7": "Paleisti iš naujo"
+ "4dc479c7": "Paleisti iš naujo",
+ "5d57c6f0": "Rodyti aplankų dydį diske",
+ "241b2a9f": "Stulpelyje „Dydis“ aplankai rodomi pagal diske užimamą vietą (suapvalinta aukštyn iki sveikų klasterių), o ne pagal failų dydžių sumą; rikiavimas taip pat tuo vadovaujasi",
+ "16fafed3": "Įrenginiai",
+ "be3cb212": "Šis aplankas yra tik skaitomas",
+ "bba08e14": "Įrenginiuose, pvz., telefonuose, esančių elementų čia pakeisti negalima; nukopijuokite juos ir įklijuokite į kitą aplanką.",
+ "7450cc15": "Kopijuojama iš įrenginio:"
 }

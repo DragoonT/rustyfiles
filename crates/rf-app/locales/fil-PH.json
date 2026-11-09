@@ -953,5 +953,11 @@
  "2220b7a5": "Dina-download ang rustyfiles {v}",
  "7daa795d": "Handa na ang rustyfiles {v}",
  "099cc52a": "Mag-i-install kapag nag-restart ka",
- "4dc479c7": "I-restart"
+ "4dc479c7": "I-restart",
+ "5d57c6f0": "Ipakita ang laki sa disk para sa mga folder",
+ "241b2a9f": "Ipinapakita ng column na Laki ang mga folder ayon sa espasyong kinukuha nila sa disk (ni-round up sa buong cluster) sa halip na kabuuan ng laki ng mga file nila; sumusunod dito ang pag-aayos",
+ "16fafed3": "Mga device",
+ "be3cb212": "Read-only ang folder na ito",
+ "bba08e14": "Hindi mababago rito ang mga item sa mga device tulad ng telepono; kopyahin ang mga ito at i-paste sa ibang folder.",
+ "7450cc15": "Kinokopya mula sa device:"
 }

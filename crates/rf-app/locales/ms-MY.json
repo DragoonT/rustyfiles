@@ -953,5 +953,11 @@
  "2220b7a5": "Memuat turun rustyfiles {v}",
  "7daa795d": "rustyfiles {v} sudah sedia",
  "099cc52a": "Dipasang apabila anda mulakan semula",
- "4dc479c7": "Mulakan semula"
+ "4dc479c7": "Mulakan semula",
+ "5d57c6f0": "Tunjukkan saiz pada cakera untuk folder",
+ "241b2a9f": "Lajur Saiz menunjukkan folder mengikut ruang yang diambil pada cakera (dibundarkan ke atas kepada kluster penuh) dan bukannya jumlah saiz failnya; pengisihan turut mengikutinya",
+ "16fafed3": "Peranti",
+ "be3cb212": "Folder ini baca sahaja",
+ "bba08e14": "Item pada peranti seperti telefon tidak boleh diubah di sini; salin dan tampalkannya ke folder lain.",
+ "7450cc15": "Menyalin daripada peranti:"
 }

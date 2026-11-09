@@ -953,5 +953,11 @@
  "2220b7a5": "Preuzimanje rustyfiles {v}",
  "7daa795d": "rustyfiles {v} je spreman",
  "099cc52a": "Instalira se pri ponovnom pokretanju",
- "4dc479c7": "Ponovno pokreni"
+ "4dc479c7": "Ponovno pokreni",
+ "5d57c6f0": "Prikaži veličinu na disku za mape",
+ "241b2a9f": "Stupac Veličina prikazuje mape prema prostoru koji zauzimaju na disku (zaokruženo prema gore na cijele klastere) umjesto zbroja veličina njihovih datoteka; sortiranje slijedi to",
+ "16fafed3": "Uređaji",
+ "be3cb212": "Ova je mapa samo za čitanje",
+ "bba08e14": "Stavke na uređajima poput telefona ovdje se ne mogu mijenjati; kopirajte ih i zalijepite u drugu mapu.",
+ "7450cc15": "Kopiranje s uređaja:"
 }

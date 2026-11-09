@@ -953,5 +953,11 @@
  "2220b7a5": "Po shkarkohet rustyfiles {v}",
  "7daa795d": "rustyfiles {v} është gati",
  "099cc52a": "Instalohet kur të rindizni",
- "4dc479c7": "Rindiz"
+ "4dc479c7": "Rindiz",
+ "5d57c6f0": "Shfaq madhësinë në disk për dosjet",
+ "241b2a9f": "Kolona Madhësia i shfaq dosjet sipas hapësirës që zënë në disk (e rrumbullakosur lart në klasterë të plotë) në vend të shumës së madhësive të skedarëve të tyre; renditja e ndjek këtë",
+ "16fafed3": "Pajisjet",
+ "be3cb212": "Kjo dosje është vetëm për lexim",
+ "bba08e14": "Artikujt në pajisje si telefonat nuk mund të ndryshohen këtu; kopjojini dhe ngjitini në një dosje tjetër.",
+ "7450cc15": "Po kopjohet nga pajisja:"
 }

@@ -953,5 +953,11 @@
  "2220b7a5": "Se descarcă rustyfiles {v}",
  "7daa795d": "rustyfiles {v} este gata",
  "099cc52a": "Se instalează la repornire",
- "4dc479c7": "Repornește"
+ "4dc479c7": "Repornește",
+ "5d57c6f0": "Afișează dimensiunea pe disc pentru foldere",
+ "241b2a9f": "Coloana Dimensiune arată folderele după spațiul ocupat pe disc (rotunjit în sus la clustere întregi), nu după suma dimensiunilor fișierelor lor; sortarea urmează același criteriu",
+ "16fafed3": "Dispozitive",
+ "be3cb212": "Acest folder este doar în citire",
+ "bba08e14": "Elementele de pe dispozitive precum telefoanele nu pot fi modificate aici; copiați-le și lipiți-le într-un alt folder.",
+ "7450cc15": "Se copiază de pe dispozitiv:"
 }

@@ -953,5 +953,11 @@
  "2220b7a5": "Henter rustyfiles {v}",
  "7daa795d": "rustyfiles {v} er klar",
  "099cc52a": "Installeres, når du genstarter",
- "4dc479c7": "Genstart"
+ "4dc479c7": "Genstart",
+ "5d57c6f0": "Vis størrelse på disk for mapper",
+ "241b2a9f": "Kolonnen Størrelse viser mapper efter den plads, de fylder på disken (rundet op til hele klynger), i stedet for summen af filstørrelserne; sorteringen følger det",
+ "16fafed3": "Enheder",
+ "be3cb212": "Denne mappe er skrivebeskyttet",
+ "bba08e14": "Elementer på enheder som telefoner kan ikke ændres her; kopiér dem og indsæt dem i en anden mappe.",
+ "7450cc15": "Kopierer fra enhed:"
 }

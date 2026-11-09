@@ -953,5 +953,11 @@
  "2220b7a5": "Lejupielādē rustyfiles {v}",
  "7daa795d": "rustyfiles {v} ir gatavs",
  "099cc52a": "Tiks instalēts pēc restartēšanas",
- "4dc479c7": "Restartēt"
+ "4dc479c7": "Restartēt",
+ "5d57c6f0": "Rādīt mapju izmēru diskā",
+ "241b2a9f": "Kolonna Izmērs rāda mapes pēc diskā aizņemtās vietas (noapaļots uz augšu līdz veseliem klasteriem), nevis pēc failu izmēru summas; šķirošana seko tam",
+ "16fafed3": "Ierīces",
+ "be3cb212": "Šī mape ir tikai lasāma",
+ "bba08e14": "Ierīču, piemēram, tālruņu, vienumus šeit nevar mainīt; nokopējiet tos un ielīmējiet citā mapē.",
+ "7450cc15": "Notiek kopēšana no ierīces:"
 }

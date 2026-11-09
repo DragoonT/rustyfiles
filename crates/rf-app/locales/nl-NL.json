@@ -953,5 +953,11 @@
  "2220b7a5": "rustyfiles {v} wordt gedownload",
  "7daa795d": "rustyfiles {v} is klaar",
  "099cc52a": "Wordt geïnstalleerd bij herstart",
- "4dc479c7": "Opnieuw starten"
+ "4dc479c7": "Opnieuw starten",
+ "5d57c6f0": "Grootte op schijf tonen voor mappen",
+ "241b2a9f": "De kolom Grootte toont mappen volgens de ruimte die ze op schijf innemen (naar boven afgerond op hele clusters) in plaats van de som van hun bestandsgroottes; de sortering volgt dit",
+ "16fafed3": "Apparaten",
+ "be3cb212": "Deze map is alleen-lezen",
+ "bba08e14": "Items op apparaten zoals telefoons kunnen hier niet worden gewijzigd; kopieer ze en plak ze in een andere map.",
+ "7450cc15": "Kopiëren van apparaat:"
 }
