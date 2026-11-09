@@ -223,15 +223,28 @@ pub fn any_main_window(cx: &App) -> bool {
 /// (`rustyfiles /select,<file>`, like Explorer).
 pub const SELECT_PREFIX: &str = "\u{1}select:";
 
-/// What a launch message opens: a folder (or Home), and maybe a name to select there.
 /// A second launch on a shell folder (a phone, Network…) reaches the running window as this
-/// prefix plus the folder's parsing name.
+/// prefix plus the folder's parsing name (and, in a saved session, a tab and its name).
 pub const SHELL_PREFIX: &str = "rustyfiles-shell:";
 
+/// How a tab is kept in the saved session: a folder's path, a search's folder, the Recycle Bin
+/// and shell folders (a phone…) by name; other places come back as Home ("").
+fn session_text(loc: &Location) -> String {
+    match loc {
+        Location::Path(p) => rf_core::history::redact_credentials(&p.to_string_lossy()),
+        Location::Search { root, .. } => root.to_string_lossy().into_owned(),
+        Location::RecycleBin => "shell:RecycleBinFolder".into(),
+        Location::Shell { parsing, name } => format!("{SHELL_PREFIX}{parsing}\t{name}"),
+        _ => String::new(),
+    }
+}
+
+/// What a launch message opens: a folder (or Home), and maybe a name to select there.
 pub fn parse_launch(msg: &str) -> (Location, Option<String>) {
     let m = msg.trim();
-    if let Some(parsing) = m.strip_prefix(SHELL_PREFIX) {
-        return (Location::Shell { parsing: parsing.to_string(), name: String::new() }, None);
+    if let Some(rest) = m.strip_prefix(SHELL_PREFIX) {
+        let (parsing, name) = rest.split_once('\t').unwrap_or((rest, ""));
+        return (Location::Shell { parsing: parsing.to_string(), name: name.to_string() }, None);
     }
     if let Some(loc) = Location::from_shell_name(m) {
         return (loc, None);
@@ -518,7 +531,7 @@ impl Workspace {
             }
             None if prefs.startup == crate::settings::StartupPref::Continue && !prefs.session_tabs.is_empty() => {
                 for t in &prefs.session_tabs {
-                    let loc = if t.is_empty() { Location::Home } else { Location::Path(PathBuf::from(t)) };
+                    let loc = if t.is_empty() { Location::Home } else { parse_launch(t).0 };
                     this.open_tab(loc, window, cx);
                 }
                 let a = prefs.session_active.min(this.tabs.len() - 1);
@@ -606,11 +619,7 @@ impl Workspace {
         let tabs: Vec<String> = self
             .tabs
             .iter()
-            .map(|t| match t.left.read(cx).location() {
-                Location::Path(p) => rf_core::history::redact_credentials(&p.to_string_lossy()),
-                Location::Search { root, .. } => root.to_string_lossy().into_owned(),
-                _ => String::new(),
-            })
+            .map(|t| session_text(t.left.read(cx).location()))
             .collect();
         let active = self.active;
         cx.update_global::<crate::settings::Settings, _>(|s, _| {
@@ -3057,10 +3066,7 @@ impl Render for Workspace {
         let session: Vec<String> = self
             .tabs
             .iter()
-            .map(|t| {
-                let loc = t.left.read(cx).location();
-                loc.path().map(|p| rf_core::history::redact_credentials(&p.to_string_lossy())).unwrap_or_default()
-            })
+            .map(|t| session_text(t.left.read(cx).location()))
             .collect();
         if session != self.last_session && self.picker.is_none() {
             self.last_session = session.clone();
