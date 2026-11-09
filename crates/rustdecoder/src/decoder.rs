@@ -43,6 +43,10 @@ pub struct StreamInfo {
     pub frame_count: usize,
     pub frame_rate: f64,
     pub timescale: u32,
+    /// Clockwise degrees (0, 90, 180, 270) to turn the picture for display (`tkhd` matrix).
+    pub rotation: u16,
+    /// Colour description of the first SPS.
+    pub vui: crate::hevc::Vui,
 }
 
 struct Pending {
@@ -93,7 +97,7 @@ impl HevcDecoder {
         let (profile, format) = hevc_profile(first.bit_depth_luma)?;
         let gpu = Gpu::open(&profile, format)?;
         let (w, h) = first.display_size();
-        let info = StreamInfo { width: w, height: h, bit_depth: first.bit_depth_luma, frame_count: track.samples.len(), frame_rate: track.frame_rate(), timescale: track.timescale };
+        let info = StreamInfo { width: w, height: h, bit_depth: first.bit_depth_luma, frame_count: track.samples.len(), frame_rate: track.frame_rate(), timescale: track.timescale, rotation: track.rotation, vui: first.vui.clone() };
         Ok(Self {
             file,
             len_size: cfg.len_size,
@@ -148,6 +152,27 @@ impl HevcDecoder {
 
     pub fn info(&self) -> &StreamInfo {
         &self.info
+    }
+
+    /// The device the pictures live on (the player copies and converts on it).
+    pub fn gpu(&self) -> &Gpu {
+        &self.gpu
+    }
+
+    /// The video track with its sample table (presentation times, sync samples).
+    pub fn track(&self) -> &Track {
+        &self.track
+    }
+
+    /// Continues decoding at sample `i`, which must be a sync sample. Everything held for
+    /// output is dropped; leading RASL pictures of a CRA picture are skipped like at the start
+    /// of a stream. The next [`HevcDecoder::next_frame`] returns pictures from there on.
+    pub fn seek_to_sample(&mut self, i: usize) {
+        let pool = self.active.as_ref().map_or(0, |a| a.hw.surfaces());
+        self.dpb = Dpb::new(pool);
+        self.next_sample = i.min(self.track.samples.len());
+        self.pending = None;
+        self.flushed = false;
     }
 
     /// The name of the graphics adapter decoding.
