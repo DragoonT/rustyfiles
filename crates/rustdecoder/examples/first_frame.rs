@@ -13,7 +13,7 @@ fn main() {
         std::process::exit(2);
     }
     let index: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-    let mut dec = rustdecoder::HevcDecoder::open(std::path::Path::new(&args[0])).expect("open");
+    let mut dec = rustdecoder::VideoDecoder::open(std::path::Path::new(&args[0])).expect("open");
     let mut frame = None;
     for _ in 0..=index {
         frame = dec.next_frame().expect("decode");
@@ -26,6 +26,7 @@ fn main() {
     println!("{}x{} {}-bit, POC {}, adapter {}", p.width, p.height, p.bit_depth, frame.poc, dec.adapter());
 
     let (w, h) = (p.width as usize, p.height as usize);
+    println!("mean luma {:.1}", p.y.iter().map(|&v| v as f64).sum::<f64>() / p.y.len() as f64);
     let shift = p.bit_depth as u32 - 8;
     let mut rgb = Vec::with_capacity(w * h * 3);
     for y in 0..h {

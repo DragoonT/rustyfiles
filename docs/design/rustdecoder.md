@@ -59,7 +59,36 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
    4:2:0 8/10-bit, surfaces rounded up to 128, one frame stays valid until the next
    `next_frame`. Left for phase 4: frame queue holding several surfaces, shaders, seeking
    (start at a keyframe, drop RASL), mid-stream SPS changes beyond size, other GPUs.
-   H.264 is not started.
+   **Phase 3, H.264 done (2026-11-09):** progressive 4:2:0 8-bit Baseline, Main and High, CAVLC
+   and CABAC, from MP4 / MOV (`avcC`). New: `h264` (SPS with VUI reorder / DPB limits and scaling
+   lists, PPS, slice header up to dec_ref_pic_marking, `avcC` through `nal::avcc`), `h264_dpb`
+   (POC types 0, 1 and 2, sliding window and MMCO 1 to 6, IDR / MMCO5 flush,
+   `no_output_of_prior_pics`, bumping by the stream's own `max_num_reorder_frames` or else the
+   level's DPB size), `dxva_h264` (`DXVA_PicParams_H264`, `DXVA_Qmatrix_H264`; the short slice
+   structure is shared with HEVC), `h264dec` (`H264Decoder`, same shape as `HevcDecoder`), `video`
+   (`VideoDecoder`: opens the file, picks the decoder from the track's codec, same methods).
+   Findings: for H.264 `ConfigBitstreamRaw == 2` is the short slice format and 1 is the long one
+   (the reverse of HEVC); sending short structures to the raw 1 configuration decodes nothing (a
+   black surface, no error), so `HwDecoder::with_alignment` takes the value that means short
+   and also requires the configuration without bitstream encryption. H.264 surfaces are rounded
+   up to 16 (HEVC: 128). `DecoderBeginFrame` can answer `E_PENDING` when decoding runs far
+   ahead of the GPU; it is retried like `DXGI_ERROR_WAS_STILL_DRAWING`. Unsupported, with
+   a clear error: MBAFF (at open), field pictures (at the first one), FMO (PPS), data partitioning,
+   4:2:2 / 4:4:4, more than 8 bits, lossless transform bypass, frame_num gaps. A stream with
+   `frame_mbs_only_flag` 0 whose pictures are all frames decodes. Streams starting on a non-IDR
+   intra picture start there (earlier pictures dropped).
+   Tests (`tests/gpu_h264.rs`, x264 clips 640x360, 3 s unless noted, compared sample by sample
+   with `ffmpeg -f rawvideo` in display order): baseline CAVLC (POC type 2), main CABAC with
+   B-pyramid (MMCO 1), main CAVLC, high 8x8 transform, high with `cqm=jvt` (PPS scaling lists),
+   4 slices, `weightp=2:weightb=1` on a fade (explicit and implicit weights), 8 reference
+   frames, 9 s long GOP (270 frames), open GOP (non-IDR I pictures), strict B-pyramid with
+   MMCO, `fake-interlaced` (frame_mbs_only 0), 1080p level 4.1 phone style, and NVENC High
+   with B-pyramid: all bit-exact. MBAFF (`tff=1`) is refused. A 10 s 1080p60 High clip
+   (600 frames, noisy) is bit-exact too and decodes at about 2000 fps (GPU only, no read-back,
+   RTX 5070 Ti). MMCO 2 to 6, long-term pictures and POC type 1 have only unit tests in
+   `h264_dpb` (x264 and NVENC never produce them).
+   Left for H.264: interlaced (field / MBAFF / PAFF), frame_num gap concealment, High 10 and
+   4:2:2 profiles, the long slice format for GPUs offering only that.
 4. Playback in DirectLook: clock, frame queue, seeking, audio; replaces the Media Foundation
    route, and FilmCraft for video.
    **Phase 4 groundwork, headless core done (2026-11-09):**

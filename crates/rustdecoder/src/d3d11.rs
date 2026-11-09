@@ -4,6 +4,7 @@
 use std::ffi::c_void;
 
 use windows::Win32::Foundation::HMODULE;
+const E_PENDING: windows::core::HRESULT = windows::core::HRESULT(0x8000000Au32 as i32);
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1};
 use windows::Win32::Graphics::Direct3D11::*;
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT, DXGI_FORMAT_NV12, DXGI_FORMAT_P010, DXGI_SAMPLE_DESC};
@@ -23,6 +24,14 @@ pub fn hevc_profile(bit_depth: u8) -> Result<(GUID, DXGI_FORMAT)> {
         10 => Ok((D3D11_DECODER_PROFILE_HEVC_VLD_MAIN10, DXGI_FORMAT_P010)),
         _ => Err(Error::Unsupported("HEVC bit depth other than 8 and 10")),
     }
+}
+
+/// DXVA_NoEncrypt: the configuration takes the bitstream in the clear.
+const DXVA_NO_ENCRYPT: GUID = GUID::from_u128(0x1b81bed0_a0c7_11d3_b984_00c04f2e73c5);
+
+/// The decoder profile and surface format for H.264 (8-bit 4:2:0, no film grain).
+pub fn h264_profile() -> (GUID, DXGI_FORMAT) {
+    (D3D11_DECODER_PROFILE_H264_VLD_NOFGT, DXGI_FORMAT_NV12)
 }
 
 /// A D3D11 device with video support, on an adapter that decodes the profile asked for.
@@ -138,8 +147,16 @@ pub fn surface_size(coded: u32) -> u32 {
 
 impl HwDecoder {
     pub fn new(g: &Gpu, profile: &GUID, format: DXGI_FORMAT, coded_width: u32, coded_height: u32, surfaces: usize) -> Result<Self> {
-        let width = surface_size(coded_width);
-        let height = surface_size(coded_height);
+        Self::with_alignment(g, profile, format, coded_width, coded_height, surfaces, 128, 1)
+    }
+
+    /// Like [`HwDecoder::new`], with the surface size rounded up to a multiple of `align`
+    /// (128 for HEVC, 16 for H.264). `short_raw` is the ConfigBitstreamRaw value that means the
+    /// short slice format for the codec: 1 for HEVC, but 2 for H.264 (where 1 is the long one).
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_alignment(g: &Gpu, profile: &GUID, format: DXGI_FORMAT, coded_width: u32, coded_height: u32, surfaces: usize, align: u32, short_raw: u32) -> Result<Self> {
+        let width = coded_width.div_ceil(align) * align;
+        let height = coded_height.div_ceil(align) * align;
         let desc = D3D11_VIDEO_DECODER_DESC { Guid: *profile, SampleWidth: width, SampleHeight: height, OutputFormat: format };
         unsafe {
             let n = gpu("GetVideoDecoderConfigCount", g.video_device.GetVideoDecoderConfigCount(&desc))?;
@@ -148,11 +165,11 @@ impl HwDecoder {
                 let mut cfg = D3D11_VIDEO_DECODER_CONFIG::default();
                 gpu("GetVideoDecoderConfig", g.video_device.GetVideoDecoderConfig(&desc, i, &mut cfg))?;
                 log::debug!("decoder config {i}: ConfigBitstreamRaw {}, min render targets {}", cfg.ConfigBitstreamRaw, cfg.ConfigMinRenderTargetBuffCount);
-                if cfg.ConfigBitstreamRaw == 1 && chosen.is_none() {
+                if cfg.ConfigBitstreamRaw == short_raw && cfg.guidConfigBitstreamEncryption == DXVA_NO_ENCRYPT && chosen.is_none() {
                     chosen = Some(cfg);
                 }
             }
-            let cfg = chosen.ok_or(Error::Unsupported("this GPU decodes HEVC only with the long slice format"))?;
+            let cfg = chosen.ok_or(Error::Unsupported("this GPU decodes this codec only with the long slice format"))?;
             let decoder = gpu("CreateVideoDecoder", g.video_device.CreateVideoDecoder(&desc, &cfg))?;
 
             let tdesc = D3D11_TEXTURE2D_DESC {
@@ -217,7 +234,7 @@ impl HwDecoder {
             loop {
                 match ctx.DecoderBeginFrame(&self.decoder, view, 0, None) {
                     Ok(()) => break,
-                    Err(e) if e.code() == DXGI_ERROR_WAS_STILL_DRAWING && tries < 2000 => {
+                    Err(e) if (e.code() == DXGI_ERROR_WAS_STILL_DRAWING || e.code() == E_PENDING) && tries < 2000 => {
                         tries += 1;
                         std::thread::sleep(std::time::Duration::from_micros(500));
                     }
