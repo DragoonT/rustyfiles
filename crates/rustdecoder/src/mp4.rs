@@ -117,6 +117,31 @@ pub struct Track {
     /// Pixel aspect ratio the container states (MP4 `pasp`, derived from Matroska
     /// `DisplayWidth` / `DisplayHeight`): width : height of one pixel. `None` when it says nothing.
     pub par: Option<(u32, u32)>,
+    /// Where the sample bytes are and how they become what the decoders read.
+    pub storage: Storage,
+}
+
+/// How a track's samples are stored. [`Sample::offset`] and [`Sample::size`] always describe what
+/// [`Track::read_sample`] returns once the storage is undone, except for the byte position:
+/// [`Storage::Plain`] samples are one byte range of the file, the others are rebuilt on read.
+#[derive(Debug, Clone, Default)]
+pub enum Storage {
+    /// One byte range at `offset`, `size` long, exactly as the decoder wants it (MP4, Matroska).
+    #[default]
+    Plain,
+    /// MPEG transport stream: the bytes are spread over packets, see [`crate::ts::Layout`].
+    Ts(std::sync::Arc<crate::ts::Layout>),
+    /// One byte range holding Annex B NAL units (AVI): read as is, then turned into the length
+    /// prefixed form.
+    AnnexB(std::sync::Arc<AnnexB>),
+}
+
+/// AVI chunks of H.264 / HEVC in Annex B form.
+#[derive(Debug, Clone)]
+pub struct AnnexB {
+    pub hevc: bool,
+    /// Bytes of each chunk in the file (`Sample::size` is the length prefixed size).
+    pub raw: Vec<u32>,
 }
 
 /// Matroska `Colour` element, values as ISO/IEC 23091-2 code points.
@@ -152,6 +177,18 @@ impl Track {
     /// Reads sample `i` into `buf` (replacing its contents).
     pub fn read_sample<R: Read + Seek>(&self, r: &mut R, i: usize, buf: &mut Vec<u8>) -> Result<()> {
         let s = self.samples.get(i).ok_or(Error::Invalid("sample index"))?;
+        match &self.storage {
+            Storage::Plain => {}
+            Storage::Ts(l) => return l.read(r, s, i, buf),
+            Storage::AnnexB(a) => {
+                let mut raw = vec![0u8; *a.raw.get(i).ok_or(Error::Invalid("sample index"))? as usize];
+                r.seek(SeekFrom::Start(s.offset))?;
+                r.read_exact(&mut raw)?;
+                buf.clear();
+                crate::nal::annexb_to_length_prefixed(&raw, a.hevc, buf);
+                return Ok(());
+            }
+        }
         buf.clear();
         buf.resize(s.size as usize, 0);
         r.seek(SeekFrom::Start(s.offset))?;
@@ -578,6 +615,7 @@ fn parse_trak(b: &[u8], movie_timescale: u32, fragmented: bool) -> Result<(Track
         codec_delay_ns: 0,
         discard_padding_ns: 0,
         par: None,
+        storage: Storage::Plain,
     };
     if let Some(stsd) = child(&stbl, b"stsd") {
         parse_stsd(stsd, &mut t)?;

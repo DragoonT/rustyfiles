@@ -605,6 +605,7 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
             default: t.default,
             codec_delay_ns: t.codec_delay_ns,
             par: pixel_aspect(t),
+            storage: crate::mp4::Storage::Plain,
             discard_padding_ns: if kind == Kind::Audio { raws.iter().rev().find(|r| r.track == t.number).and_then(|r| r.discard).unwrap_or(0).max(0) as u64 } else { 0 },
         });
     }

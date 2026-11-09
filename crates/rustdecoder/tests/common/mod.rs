@@ -2,10 +2,14 @@
 #![allow(dead_code)]
 
 pub mod av;
+pub mod contclips;
+#[cfg(windows)]
+pub mod ffcompare;
 pub mod fragclips;
 pub mod mkvclips;
 #[allow(unused_imports)]
 pub use fragclips::*;
+pub use contclips::*;
 pub use mkvclips::*;
 
 use std::path::PathBuf;
