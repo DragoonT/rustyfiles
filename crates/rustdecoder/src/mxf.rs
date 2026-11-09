@@ -868,6 +868,8 @@ pub fn parse<R: Read + Seek>(r: &mut R) -> Result<Mxf> {
         }
     }
     let have_entries = entries.iter().filter(|e| e.is_some()).count();
+    // key frame: it points at itself and no prediction flags (0x30 forward / backward, 0x03) are set
+    let entry_key = |e: &IdxEntry| e.key_frame_offset == 0 && e.flags & 0x33 == 0;
 
     // essence groups to tracks: by track number, then by kind in order of appearance
     let mut tracks = res.tracks;
@@ -909,50 +911,77 @@ pub fn parse<R: Read + Seek>(r: &mut R) -> Result<Mxf> {
             let single = g.elems.len() == 1 && (ebc > 0 || have_entries >= 2);
             let clip = (label_clip || single) && !g.elems.is_empty();
             t.wrapping = if clip { Wrapping::Clip } else { Wrapping::Frame };
-            let mut samples: Vec<Sample> = Vec::new();
             let den = rate.1 as i64;
+            let intra = matches!(pc, PictureCodec::Vc3 | PictureCodec::ProRes(_) | PictureCodec::Uncompressed | PictureCodec::Jpeg2000);
+            // a frame: where it is, how big, and whether it is a key frame
+            let mut frames: Vec<(u64, u32, bool)> = Vec::new();
             if clip {
                 let st = Stream::new(&g.elems);
                 if ebc > 0 {
                     let n = (st.total / ebc as u64) as usize;
                     for i in 0..n.min(SAMPLES_MAX) {
                         let Some((off, _)) = st.at(i as u64 * ebc as u64) else { break };
-                        samples.push(Sample { offset: off, size: ebc, dts: i as i64 * den, pts: i as i64 * den, key: true });
+                        frames.push((off, ebc, true));
                     }
                 } else {
-                    let offs: Vec<u64> = entries.iter().flatten().map(|e| e.stream_offset).collect();
-                    for (i, &o) in offs.iter().enumerate() {
-                        let end = offs.get(i + 1).copied().unwrap_or(st.total);
+                    let list: Vec<&IdxEntry> = entries.iter().flatten().collect();
+                    for (i, e) in list.iter().enumerate() {
+                        let o = e.stream_offset;
+                        let end = list.get(i + 1).map_or(st.total, |n| n.stream_offset);
                         let Some((off, _)) = st.at(o) else { break };
-                        if end <= o || end > st.total {
+                        if end <= o || end > st.total || end - o > u32::MAX as u64 {
                             break;
                         }
-                        let e = entries.iter().flatten().nth(i).unwrap();
-                        samples.push(Sample { offset: off, size: (end - o) as u32, dts: i as i64 * den, pts: (i as i64 + e.temporal_offset as i64) * den, key: e.flags & 0x80 != 0 || e.key_frame_offset == 0 && pc == PictureCodec::Vc3 });
+                        frames.push((off, (end - o) as u32, intra || entry_key(e)));
                     }
                 }
             } else {
                 for (n, e) in g.elems.iter().enumerate() {
-                    let entry = if index_matches { entries.get(n).copied().flatten() } else { None };
-                    let (pts_units, key) = match entry {
-                        Some(x) => (n as i64 + x.temporal_offset as i64, x.key_frame_offset == 0 && x.flags & 0x80 != 0 || matches!(pc, PictureCodec::Vc3 | PictureCodec::ProRes(_) | PictureCodec::Uncompressed | PictureCodec::Jpeg2000)),
-                        None => {
-                            let key = match pc {
-                                PictureCodec::Avc | PictureCodec::Hevc | PictureCodec::Mpeg2 => {
-                                    let d = src.get(e.off, (e.len as usize).min(16384))?;
-                                    sniff_key(pc, d)
-                                }
-                                _ => true,
-                            };
-                            (n as i64, key)
-                        }
-                    };
                     if e.len > u32::MAX as u64 {
                         break;
                     }
-                    samples.push(Sample { offset: e.off, size: e.len as u32, dts: n as i64 * den, pts: pts_units * den, key });
+                    let entry = if index_matches { entries.get(n).copied().flatten() } else { None };
+                    let key = match entry {
+                        Some(x) => intra || entry_key(&x),
+                        None => match pc {
+                            PictureCodec::Avc | PictureCodec::Hevc | PictureCodec::Mpeg2 => {
+                                let d = src.get(e.off, (e.len as usize).min(16384))?;
+                                sniff_key(pc, d)
+                            }
+                            _ => true,
+                        },
+                    };
+                    frames.push((e.off, e.len as u32, key));
                 }
             }
+            // Presentation times from the temporal offsets, read as ffmpeg's demuxer does (it
+            // reads Sony's and Panasonic's files, and its own): the entry at position x says that
+            // the picture stored at x + offset is shown at x. Decode times are the stored
+            // position moved back by the largest offset, so that no picture is shown before it
+            // is decoded: the first picture is shown at 0 and decoded before, as in an MP4 with
+            // a `ctts` and an edit list. Without offsets, shown = decoded.
+            let total = frames.len();
+            let mut shown: Vec<i64> = (0..total as i64).collect();
+            let mut delay = 0i64;
+            if (index_matches || clip) && have_entries > 0 && !intra {
+                let mut inv: Vec<Option<i64>> = vec![None; total];
+                for (x, e) in entries.iter().enumerate() {
+                    let Some(e) = e else { continue };
+                    delay = delay.max(e.temporal_offset as i64);
+                    let s = x as i64 + e.temporal_offset as i64;
+                    if (0..total as i64).contains(&s) {
+                        inv[s as usize] = Some(x as i64);
+                    }
+                }
+                if inv.iter().all(|v| v.is_some()) {
+                    for (s, v) in inv.iter().enumerate() {
+                        shown[s] = v.unwrap();
+                    }
+                } else {
+                    delay = 0;
+                }
+            }
+            let samples: Vec<Sample> = frames.iter().enumerate().map(|(n, f)| Sample { offset: f.0, size: f.1, dts: (n as i64 - delay) * den, pts: shown[n] * den, key: f.2 }).collect();
             let (codec, fourcc) = video_codec(&mut src, pc, &pd, &samples)?;
             (samples, codec, fourcc, rate.0 as u32)
         } else {
@@ -976,6 +1005,7 @@ pub fn parse<R: Read + Seek>(r: &mut R) -> Result<Mxf> {
             let mut samples = Vec::new();
             let mut codec = Codec::Other;
             let mut fourcc = *b"mxfs";
+            let mut aes3_fourcc = false;
             let mut out_channels = ch;
             if pcm_ok {
                 let bits = (bytes * 8) as u16;
@@ -997,7 +1027,8 @@ pub fn parse<R: Read + Seek>(r: &mut R) -> Result<Mxf> {
                         sample_pos += n as i64;
                     }
                     out_channels = ch.min(sub.max(1));
-                    codec = Codec::Aes3Pcm { bits };
+                    codec = Codec::Pcm { bits, float: false, big_endian: false };
+                    aes3_fourcc = true;
                 } else if clip {
                     let st = Stream::new(&g.elems);
                     let frame_bytes = (bytes * ch) as u64;
@@ -1035,7 +1066,7 @@ pub fn parse<R: Read + Seek>(r: &mut R) -> Result<Mxf> {
                     }
                     codec = Codec::Pcm { bits, float: false, big_endian: false };
                 }
-                fourcc = *b"lpcm";
+                fourcc = if aes3_fourcc { crate::mp4::AES3 } else { *b"lpcm" };
             } else {
                 for (n, e) in g.elems.iter().enumerate() {
                     samples.push(Sample { offset: e.off, size: e.len.min(u32::MAX as u64) as u32, dts: n as i64, pts: n as i64, key: true });

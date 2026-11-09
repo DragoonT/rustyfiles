@@ -92,13 +92,6 @@ impl AudioDecoder {
                 }
                 (Kind_::Pcm { bits: *bits, float: *float, big_endian: *big_endian }, "PCM")
             }
-            // MXF AES3 elements: `Track::read_sample` hands out plain little-endian PCM
-            Codec::Aes3Pcm { bits } => {
-                if !matches!(*bits, 16 | 24 | 32) {
-                    return Err(Error::Unsupported("PCM sample size"));
-                }
-                (Kind_::Pcm { bits: *bits, float: false, big_endian: false }, "PCM")
-            }
             #[cfg(windows)]
             Codec::Aac { config } => Self::mft(MftCodec::Aac, config, &mut sample_rate, channels)?,
             #[cfg(windows)]
@@ -132,7 +125,7 @@ impl AudioDecoder {
             let last = track.samples.last();
             match (&kind, last) {
                 // an AES3 element's size is not its sample count: the step to the one before is
-                (Kind_::Pcm { .. }, Some(l)) if matches!(track.codec, Codec::Aes3Pcm { .. }) => {
+                (Kind_::Pcm { .. }, Some(l)) if track.fourcc == crate::mp4::AES3 => {
                     let step = track.samples.len().checked_sub(2).map_or(0, |i| l.pts - track.samples[i].pts);
                     (l.pts.max(0) + step) as f64 / track.timescale.max(1) as f64
                 }
