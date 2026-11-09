@@ -91,7 +91,17 @@ pub fn state() -> State {
 }
 
 fn set(s: State) {
+    if matches!(s, State::Ready(_)) && !matches!(state(), State::Ready(_)) {
+        *READY_SINCE.lock().unwrap() = Some(std::time::Instant::now());
+    }
     *STATE.lock().unwrap() = Some(s);
+}
+
+static READY_SINCE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// When the downloaded update became ready (the Status Center button pulses for a few seconds).
+pub fn ready_since() -> Option<std::time::Instant> {
+    *READY_SINCE.lock().unwrap()
 }
 
 /// A check or download is running (the About page redraws while this is true).
@@ -173,11 +183,13 @@ pub fn check() {
 /// Starts the background checks: soon after start, then every 2 hours (when auto-download is
 /// on; the Check button works either way). Calls `changed` on the UI thread after each.
 pub fn spawn_checks(cx: &mut gpui_kit::App, changed: impl Fn(&mut gpui_kit::App) + 'static) {
-    if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_some() {
-        return; // test copies
+    // test copies don't look for updates, unless they fake one (RUSTYFILES_FAKE_UPDATE)
+    let fake = std::env::var_os("RUSTYFILES_FAKE_UPDATE").is_some();
+    if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_some() && !fake {
+        return;
     }
     cx.spawn(async move |cx| {
-        let mut wait = Duration::from_secs(30);
+        let mut wait = Duration::from_secs(if fake { 2 } else { 30 });
         loop {
             cx.background_executor().timer(wait).await;
             // a file manager stays open for days: a long gap meant releases waited a day to arrive

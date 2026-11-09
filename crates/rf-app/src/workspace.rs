@@ -3364,6 +3364,7 @@ impl Render for Workspace {
             .child(div().h(px(8.)))
             // Last children = painted on top.
             .children(crate::status_center::render_flyout(&self.ops, &p, theme::TITLEBAR_H + px(44.), cx))
+            .children(crate::status_center::update_toast(&p, self.picker.is_some()))
             .children(quick_look_layer)
             .children(self.palette.clone())
             .children(crate::fluent_menu::current(window, cx))

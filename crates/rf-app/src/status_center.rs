@@ -597,6 +597,29 @@ pub fn render_button(ops: &Entity<Ops>, p: &Palette, cx: &App) -> AnyElement {
                     .child(div().h_full().rounded_full().bg(p.accent).w(relative(f.clamp(0.05, 1.0)))),
             )
         })
+        .when(running == 0 && matches!(crate::installer::state(), crate::installer::State::Ready(_)), |d| {
+            let dot = div().absolute().top(px(5.)).right(px(5.)).size(px(7.)).rounded_full().bg(p.accent);
+            // a few seconds of pulse when it becomes ready (an endless one would keep drawing frames)
+            let fresh = crate::installer::ready_since().is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(8));
+            if fresh {
+                let ring = p.accent;
+                d.child(dot).child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(theme::RADIUS_SM)
+                        .border_2()
+                        .border_color(ring)
+                        .with_animation(
+                            "sc-pulse",
+                            Animation::new(std::time::Duration::from_millis(1300)).repeat().with_easing(pulsating_between(0.0, 0.9)),
+                            |el, t| el.opacity(t),
+                        ),
+                )
+            } else {
+                d.child(dot)
+            }
+        })
         .when(running > 1, |d| {
             d.child(
                 div()
@@ -637,7 +660,10 @@ pub fn render_flyout(ops: &Entity<Ops>, p: &Palette, top: Pixels, cx: &App) -> O
         list = list.child(render_op(ops, op, p));
     }
     let (close_e, clear_e) = (ops.clone(), ops.clone());
-    let body: AnyElement = if o.ops.is_empty() {
+    let update = update_row(p);
+    let body: AnyElement = if o.ops.is_empty() && update.is_some() {
+        div().into_any_element()
+    } else if o.ops.is_empty() {
         div()
             .py_6()
             .flex()
@@ -704,6 +730,7 @@ pub fn render_flyout(ops: &Entity<Ops>, p: &Palette, top: Pixels, cx: &App) -> O
                                     .child(t!("Tamamlananları temizle")),
                             ),
                     )
+                    .children(update)
                     .child(body),
             )
             .into_any_element(),
@@ -1027,7 +1054,10 @@ fn panel(ops: &Entity<Ops>, p: &Palette, cx: &App) -> Div {
         list = list.child(render_op(ops, op, p));
     }
     let clear_e = ops.clone();
-    let body: AnyElement = if o.ops.is_empty() {
+    let update = update_row(p);
+    let body: AnyElement = if o.ops.is_empty() && update.is_some() {
+        div().into_any_element()
+    } else if o.ops.is_empty() {
         div().py_6().flex().justify_center().text_sm().text_color(p.text_secondary).child(t!("Devam eden dosya işlemleri yok")).into_any_element()
     } else {
         div().id("sc-list").max_h(px(460.)).overflow_y_scroll().child(list).into_any_element()
@@ -1058,5 +1088,147 @@ fn panel(ops: &Entity<Ops>, p: &Palette, cx: &App) -> Div {
                         .child(t!("Tamamlananları temizle")),
                 ),
         )
+        .children(update)
         .child(body)
+}
+
+/// The app's own update, pinned at the top of the Status Center while it downloads and once it
+/// is ready (`None` otherwise).
+fn update_row(p: &Palette) -> Option<AnyElement> {
+    use crate::installer::State;
+    let (title, detail, pct, ready) = match crate::installer::state() {
+        State::Downloading(v, pct) => (t!("rustyfiles {v} indiriliyor").replace("{v}", &v), format!("%{pct}"), Some(pct), false),
+        State::Ready(v) => (t!("rustyfiles {v} hazır").replace("{v}", &v), t!("Yeniden başlatınca kurulur").to_string(), None, true),
+        _ => return None,
+    };
+    Some(
+        v_flex()
+            .mx_1()
+            .mb_1()
+            .px_3()
+            .py_2p5()
+            .gap_2()
+            .rounded(theme::RADIUS_SM)
+            .bg(p.selection)
+            .border_1()
+            .border_color(p.accent)
+            .child(
+                h_flex()
+                    .gap_3()
+                    .items_center()
+                    .child(Icon::new(if ready { L::RefreshCw } else { L::Download }).size(px(16.)).text_color(p.accent))
+                    .child(
+                        v_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
+                            .child(div().text_xs().text_color(p.text_secondary).child(detail)),
+                    )
+                    .when(ready, |d| {
+                        d.child(
+                            div()
+                                .id("sc-update-restart")
+                                .px_3()
+                                .py_1()
+                                .rounded(theme::RADIUS_SM)
+                                .bg(p.accent)
+                                .text_color(p.accent_text)
+                                .text_xs()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .cursor_pointer()
+                                .hover(|s| s.opacity(0.9))
+                                .child(t!("Yeniden başlat"))
+                                .on_click(|_, _, _| {
+                                    std::thread::spawn(crate::installer::restart_to_update);
+                                }),
+                        )
+                    }),
+            )
+            .children(pct.map(|pct| {
+                div().h(px(3.)).w_full().rounded_full().bg(p.pressed).child(div().h_full().rounded_full().bg(p.accent).w(relative((pct as f32 / 100.).clamp(0.02, 1.0))))
+            }))
+            .into_any_element(),
+    )
+}
+
+/// The version whose "update ready" toast was closed (it doesn't come back for that version).
+static TOAST_CLOSED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// A small card at the bottom of the window once an update is downloaded: the version, Restart
+/// and Later. Slides in once; "Later" (or restarting) hides it for that version.
+pub fn update_toast(p: &Palette, picker: bool) -> Option<AnyElement> {
+    let crate::installer::State::Ready(v) = crate::installer::state() else { return None };
+    // file dialogs of other apps don't get it
+    if picker || TOAST_CLOSED.lock().unwrap().as_deref() == Some(v.as_str()) {
+        return None;
+    }
+    let ver = v.clone();
+    Some(
+        div()
+            .absolute()
+            .bottom(px(44.))
+            .left_0()
+            .right_0()
+            .flex()
+            .justify_center()
+            .child(
+                h_flex()
+                    .id("update-toast")
+                    .gap_3()
+                    .pl_4()
+                    .pr_2()
+                    .py_2()
+                    .items_center()
+                    .rounded(theme::RADIUS)
+                    .bg(p.card_bg)
+                    .border_1()
+                    .border_color(p.accent)
+                    .shadow_lg()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(Icon::new(L::RefreshCw).size(px(16.)).text_color(p.accent))
+                    .child(
+                        v_flex()
+                            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(t!("rustyfiles {v} hazır").replace("{v}", &v)))
+                            .child(div().text_xs().text_color(p.text_secondary).child(t!("Yeniden başlatınca kurulur"))),
+                    )
+                    .child(
+                        div()
+                            .id("update-toast-restart")
+                            .ml_2()
+                            .px_3()
+                            .py_1p5()
+                            .rounded(theme::RADIUS_SM)
+                            .bg(p.accent)
+                            .text_color(p.accent_text)
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .cursor_pointer()
+                            .hover(|s| s.opacity(0.9))
+                            .child(t!("Yeniden başlat"))
+                            .on_click(|_, _, _| {
+                                std::thread::spawn(crate::installer::restart_to_update);
+                            }),
+                    )
+                    .child(
+                        div()
+                            .id("update-toast-later")
+                            .px_3()
+                            .py_1p5()
+                            .rounded(theme::RADIUS_SM)
+                            .text_sm()
+                            .text_color(p.text_secondary)
+                            .cursor_pointer()
+                            .hover(|s| s.bg(p.hover))
+                            .child(t!("Sonra"))
+                            .on_click(move |_, window, _| {
+                                *TOAST_CLOSED.lock().unwrap() = Some(ver.clone());
+                                window.refresh();
+                            }),
+                    )
+                    .with_animation(("update-toast-in", v.len()), Animation::new(std::time::Duration::from_millis(260)).with_easing(ease_out_quint()), |el, t| {
+                        el.opacity(t).mb(px(-12. * (1. - t)))
+                    }),
+            )
+            .into_any_element(),
+    )
 }
