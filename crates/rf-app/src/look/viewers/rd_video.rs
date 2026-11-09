@@ -24,7 +24,7 @@ pub struct Probe {
 }
 
 /// Reads the container's index (no GPU): `Some` for an MP4 / MOV / MKV / WebM whose first video
-/// track is H.264, HEVC or VP9. Whether the stream itself is playable (4:2:0, 8 or 10 bit, a decoder in the graphics
+/// track is H.264, HEVC, VP9 or AV1. Whether the stream itself is playable (4:2:0, 8 or 10 bit, a decoder in the graphics
 /// card) is only known when the decoder opens; [`RdVideo::open`] fails then.
 pub fn probe(path: &Path) -> Option<Probe> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -37,6 +37,7 @@ pub fn probe(path: &Path) -> Option<Probe> {
         Codec::H264 { .. } => "H.264",
         Codec::Hevc { .. } => "HEVC",
         Codec::Vp9 { .. } => "VP9",
+        Codec::Av1 { .. } => "AV1",
         _ => return None,
     };
     let (w, h) = rustdecoder::present::rotated_size(t.width, t.height, t.rotation);
