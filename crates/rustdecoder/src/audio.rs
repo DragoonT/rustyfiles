@@ -124,6 +124,11 @@ impl AudioDecoder {
         let duration = {
             let last = track.samples.last();
             match (&kind, last) {
+                // an AES3 element's size is not its sample count: the step to the one before is
+                (Kind_::Pcm { .. }, Some(l)) if track.fourcc == crate::mp4::AES3 => {
+                    let step = track.samples.len().checked_sub(2).map_or(0, |i| l.pts - track.samples[i].pts);
+                    (l.pts.max(0) + step) as f64 / track.timescale.max(1) as f64
+                }
                 (Kind_::Pcm { bits, .. }, Some(l)) => {
                     let fb = (*bits as u64 / 8) * channels as u64;
                     (l.pts.max(0) as f64 + (l.size as u64 / fb.max(1)) as f64) / track.timescale.max(1) as f64

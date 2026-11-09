@@ -23,12 +23,12 @@ pub struct Probe {
     pub codec: &'static str,
 }
 
-/// Reads the container's index (no GPU): `Some` for an MP4 / MOV / MKV / WebM / MPEG-TS / AVI whose first video
+/// Reads the container's index (no GPU): `Some` for an MP4 / MOV / MKV / WebM / MPEG-TS / AVI / MXF whose first video
 /// track is H.264, HEVC, VP9, AV1, ProRes or DNxHD / DNxHR. Whether the stream itself is playable (4:2:0, 8 or 10 bit, a decoder in the graphics
 /// card) is only known when the decoder opens; [`RdVideo::open`] fails then.
 pub fn probe(path: &Path) -> Option<Probe> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    if !matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "mkv" | "webm" | "ts" | "m2ts" | "mts" | "avi") {
+    if !matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "mkv" | "webm" | "ts" | "m2ts" | "mts" | "avi" | "mxf") {
         return None;
     }
     let movie = rustdecoder::container::read(&mut std::fs::File::open(path).ok()?).ok()?;

@@ -2,6 +2,7 @@
 //! compressed pictures go to the graphics card's video engine (D3D11 Video). See
 //! `docs/design/rustdecoder.md`.
 
+pub mod annexb;
 pub mod audio;
 pub mod avi;
 pub mod av1;
@@ -17,6 +18,7 @@ pub mod mkv;
 pub mod mp4;
 pub mod ps;
 pub mod ts;
+pub mod mxf;
 pub mod nal;
 pub mod dnx;
 pub mod dnxtables;

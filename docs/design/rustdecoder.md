@@ -18,6 +18,7 @@ the same, with every step around that call written here:
 | Step | Who |
 | --- | --- |
 | Reading the container (MP4 / MOV, MKV / WebM, MPEG-TS / M2TS, MPEG-PS, AVI) | rustdecoder |
+| Reading the container (MP4 / MOV, MKV / WebM, MXF) | rustdecoder |
 | Splitting samples into NAL units, parsing VPS / SPS / PPS / slice headers | rustdecoder |
 | Reference picture management (DPB, POC, RPS) | rustdecoder |
 | Filling the DXVA picture parameters, slice controls, scaling lists | rustdecoder |
@@ -40,6 +41,9 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
 - `ts`, `ps`, `avi` — MPEG transport stream (188 / 192 byte M2TS), program stream and AVI readers
   producing the same `Movie` (see "Containers: TS, PS, AVI" below); `container::read` detects
   them (sync bytes, `00 00 01 BA`, `RIFF....AVI `).
+- `mxf` — MXF (SMPTE ST 377-1) OP1a and OP-Atom, same `Movie` / `Track` / flat sample table (see
+  the MXF section below); `annexb` — Annex B byte stream to length-prefixed NAL units, `avcC` /
+  `hvcC` made from the in-band parameter sets.
 - `bits` — bit reader with Exp-Golomb and emulation-prevention removal.
 - `h264`, `hevc` — parameter sets and slice headers.
 - `av1`, `dxva_av1`, `av1dec` — AV1 OBUs, sequence and frame headers with per-slot state, `DXVA_PicParams_AV1` + tiles,
@@ -726,6 +730,104 @@ No AVCHD file was available in the camera folder, so no camera stream was tried.
 Still to do before the route can be the default: formats the Media Foundation / FilmCraft
 routes play that the container readers do not take (WMV / ASF, FLV, MXF; MPEG-2 video and
 the other codecs listed under "Containers: TS, PS, AVI" are read but not decoded); several audio tracks and track choice, subtitles; playback keys
+### MXF (OP1a, OP-Atom) done 2026-11-09
+
+`mxf::parse` / `mxf::read` / `container::read` (an MXF is recognised by the header partition
+key at 0, or after a run-in of up to 64 KiB). What it does:
+
+- One linear scan of KLV triplets (BER lengths). Partition packs (header / body / footer, open or
+  closed, complete or not), the primer, the header metadata local sets, index table segments and
+  the essence elements are told apart by key; only key and length of an essence element are read.
+  Measured: a 212 MB OP1a file (20000 H.264 frames + 20000 PCM elements, 800 s, 80 index
+  segments) is indexed in 64 ms with the file in the cache (`mxf_dump`).
+- Metadata: Preface, ContentStorage, EssenceContainerData, the file SourcePackage (the one with a
+  picture or sound descriptor, the one the container data names first), its timeline Tracks
+  (TrackID, TrackNumber, EditRate, Origin), Sequence, descriptors (CDCI / RGBA / MPEG video:
+  stored and display size, display aspect, frame layout, component depth, subsampling, picture
+  essence coding label; WaveAudio / AES3 / generic sound: rate, channels, bits, block align,
+  coding label; MultipleDescriptor). Every header copy (each primer starts a generation) is tried
+  from the last to the first: a file that grew gets the footer's copy.
+- Codecs from the picture essence coding label, then the essence container label: AVC (`04 01 02
+  02 01 31|32`, container `0D 01 03 01 02 10`), HEVC (`..01 33..3F`, unverified: no sample), VC-3
+  (`..02 71`, the byte after is the compression ID less 1235: 1270 and up gets `AVdh`, else
+  `AVdn`), ProRes (RDD 44 `..03 06 <profile>` to `apco` .. `ap4x`), MPEG-2 and JPEG 2000 (listed
+  with their sample tables, `Codec::Other`, fourcc `mpg2` / `mjp2`, no decoder), uncompressed.
+- Frame wrapping: one sample per essence element, offset at the element's value, so KLV never
+  reaches a decoder. Clip wrapping (ffmpeg's and Avid's OP-Atom video): the single element is cut
+  by the index table, a constant `EditUnitByteCount` or the entries' stream offsets. PCM
+  (BWF) is cut into blocks of one edit unit when the edit rate is a frame rate, else (Avid's
+  audio files have the sample rate as edit rate) 1024 samples; sample times are in samples,
+  timescale = the sample rate.
+- Index tables: key frames and temporal offsets of Long GOP streams. Read the way ffmpeg's
+  demuxer reads them (it plays Sony, Panasonic and its own files): the entry at position x says
+  the picture stored at x + offset is shown at x; key = points at itself and no prediction flags
+  (`flags & 0x33 == 0`); `dts` = stored position less the largest offset, so the first picture
+  is shown at 0 and decoded before it (like an MP4 `ctts` with an edit list). Without an index
+  entry a frame's key flag comes from the stream (H.264 IDR, HEVC IRAP, MPEG-2 sequence / GOP
+  header), intra codecs are all key.
+- H.264 / HEVC: Annex B in the file; the track gets an `avcC` / `hvcC` made from the first frames
+  that hold parameter sets, `Track::read_sample` makes each frame length-prefixed (it tells the
+  forms apart by a leading `00 00 00 01`, which a length-prefixed sample cannot start with), so
+  `H264Decoder` reads MXF through `container::read` unchanged.
+- AES3 sound elements (D-10, SMPTE 386M: 4-byte header with the sample count, 32-bit subframes):
+  a PCM track with fourcc `aes3`, `read_sample` returns plain interleaved little-endian PCM.
+  Some writers (ffmpeg's OP1a) put the AES3 label on plain PCM: the header has to fit the
+  element's size in the first three elements, else it is read as plain PCM.
+- Cut and growing files: no footer or index is needed (the sample table comes from the
+  elements), a last element cut in the middle is dropped, `Mxf::incomplete` says the header was
+  open or the scan hit a cut. Run-in is skipped (`Mxf::run_in`).
+- OP-Atom: one essence per file. `Mxf::material_package` (shared by the files of a clip) and
+  `Mxf::related_packages` (the file packages its source clips name) are there for linking the
+  separate audio `.mxf`s to the video file; nothing links them yet.
+
+Measured (`tests/mxf.rs`, files from ffmpeg's `mxf`, `mxf_opatom`, `mxf_d10`; the table of the
+test prints on `--nocapture`):
+
+| clip | pattern / wrapping | tracks | against `ffprobe -show_packets` |
+| --- | --- | --- | --- |
+| DNxHD 1080p 120M + PCM 24 bit stereo | OP1a, frame | VC-3, PCM | 10 + 10 packets: count, size, CRC of bytes, key, pts, dts equal |
+| DNxHD 720p 90M | OP-Atom, clip, CBR index | VC-3 | 10 equal |
+| DNxHR HQ 640x360 + PCM 16 bit 6 ch | OP1a, frame | VC-3 (`AVdh`), PCM | 25 + 25 equal |
+| DNxHR HQ | OP-Atom, clip | VC-3 | 25 equal |
+| ProRes 422 HQ 720p + PCM | OP1a, frame | ProRes (`apch`), PCM | 10 + 10 equal |
+| H.264 Long GOP (g 12, 2 B-frames) + PCM | OP1a, frame, footer index | AVC, PCM | 50 + 50 equal (5 IDR) |
+| H.264 intra (`-g 1`) | OP1a | AVC | 20 equal |
+| MPEG-2 Long GOP (g 6, 2 B-frames) + PCM | OP1a, index with temporal offsets | MPEG-2 (list only) | 25 + 25 equal, dts -1 frame like ffprobe |
+| MPEG-2 D-10 50 Mb/s + 4 ch AES3 24 bit | OP1a, CBR index | MPEG-2, AES3 PCM | 10 + 10 equal, audio bytes after conversion equal |
+
+Decoding what came out of MXF: DNxHD / DNxHR 1080p, 720p and 640x360 through `DnxDecoder`
+(worst sample error 1 against ffmpeg, 2 for the 720p 90 Mb/s clip; the same packets in a MOV give
+identical pictures, so the 2 is the DNx decoder's rounding, not the container's), ProRes HQ
+(error 1), H.264 Long GOP (50 frames) and intra (20 frames) on the GPU bit for bit in display
+order (the reference is the raw stream: ffmpeg's own MXF demuxer numbers the pictures of the
+files its muxer wrote in decode order, the muxer's index has no temporal offsets for AVC), PCM
+through `AudioDecoder` (24 bit, 16 bit, 6 channels, D-10 AES3: identical to ffmpeg's float
+output), one OP1a DNxHR + PCM file through `Playback` with a fake clock (23 pictures in 0.9 s at
+60 Hz, none dropped, audio one run from 0 and on the clock). Structure: a run-in of 1000 bytes, a
+file cut in the middle of frame 6 with no footer (6 frames kept, keys from the stream), and a
+hand-built open-header file with clip-wrapped PCM at edit rate 25 and 48000 (blocks of 1920 and
+1024).
+
+Not done / left:
+- Files from ffmpeg's muxer for AVC carry no temporal offsets: B-frame pictures come out of the
+  decoder in display order but with `pts` of the decode order (the sample table has no other
+  information). Real recorders write the offsets; for the others the picture order count of the
+  slice headers would give the times.
+- Several mono audio tracks (cameras write 2 to 8): each is its own `Track`, `Movie::audio()`
+  returns the first; mixing them into one multichannel track belongs with the track choice work.
+- OP-Atom clips are not linked (video file and the audio `.mxf`s); essence in more than one
+  BodySID (OP2x, OP3x) is read as one stream; encrypted essence, MPEG-2 and JPEG 2000 decoders,
+  HEVC and ProRes-by-profile on real camera files (no samples here; the HEVC mapping label is
+  from the standard, not tested), AVC with 3-byte NAL lengths from other writers (always Annex
+  B here), the RIP and the footer partition's `PreviousPartition` chain are not used (the scan
+  needs neither).
+- The viewer route (`rd_video.rs`) only lists `mp4 mov m4v mkv webm`: `mxf` has to be added there.
+- No real camera file was available (nothing under `E:\gelen works 2026`); `RD_MXF=<file>` runs
+  `real_camera_mxf_if_there_is_one` on one.
+
+Still to do before the route can be the default: formats the Media Foundation / FilmCraft
+routes play that the container readers do not take (AVI, MPEG-TS / PS, WMV / ASF, FLV, ...
+DNxHR in progress elsewhere); several audio tracks and track choice, subtitles; playback keys
 (arrows, space, F) go to the viewer window, not checked with the popup in front; cursor hiding
 in fullscreen; HDR metadata in the tone mapper; a mid-stream size change; a real second audio
 device for the rate-change path; a hot-plug test with a physical device.
