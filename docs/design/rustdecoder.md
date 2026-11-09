@@ -40,7 +40,7 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
 - `d3d11` — video device, decoder creation by profile (H.264, HEVC Main, HEVC Main 10),
   per-frame submission, output texture array.
 - `present` — NV12 / P010 shaders, rotation, HDR → SDR tone mapping.
-- `audio` — PCM and AAC via the OS decoder at first; own AAC later.
+- `audio`, `resample`, `audio_out`, `playback` — PCM and AAC (OS decoder at first, own AAC later), sample-rate conversion, WASAPI output with the audio clock, A/V sync.
 
 ## Phases
 
@@ -135,6 +135,64 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      rate, looping, mid-stream size changes (the ring is built from the first picture), mastering
      display / content light metadata for the tone map, chroma siting other than centre,
      a better downscale filter than bilinear for large ratios, edit lists.
+   **Phase 4, audio and A/V sync done (2026-11-09):**
+   - `audio` (`AudioDecoder`): first audio track of an MP4 / MOV as interleaved `f32` blocks with
+     their time in seconds. PCM (`lpcm`, `sowt`, `twos`, `in24`, `in32`, `fl32`, `fl64`, `ipcm`,
+     `fpcm`; 8 / 16 / 24 / 32 bit int, 32 / 64 bit float, both byte orders) is converted here;
+     AAC goes through Windows' `CMSAACDecMFT` (raw frames in, AudioSpecificConfig as
+     `MF_MT_USER_DATA` after a 12 byte HEAACWAVEINFO tail, `MF_MT_AAC_PAYLOAD_TYPE` 0, float
+     out). No FilmCraft, no ffmpeg at runtime. The decoder drops every frame before time 0 and
+     before a seek target; the AAC encoder delay is the first edit of `elst`, which `mp4.rs`
+     already applied (first packet at -1024), so the first sample returned is the sample at 0.
+     A seek restarts AAC two packets before the target (priming) and trims.
+   - `resample` (`Resampler`, `map_channels`): streaming windowed-sinc (Blackman-Harris, 16 taps
+     per side, kernel stretched and cut off at 0.97 of the new Nyquist when going down, table of
+     512 steps with linear interpolation), no latency to compensate. Channels: mono to the front
+     pair, stereo to mono, 5.1 / 7.1 to stereo by ITU weights normalised so full scale cannot
+     clip, others by common channels.
+   - `audio_out` (`AudioOutput`, trait `AudioSink`): WASAPI shared mode, event driven, device mix
+     format (float32; 16-bit PCM mix formats also handled), a render thread filling from a queue.
+     The clock is `IAudioClock::GetPosition` interpolated with its QPC time (at most 20 ms,
+     never backwards), with the silence written for under-runs taken out once played, so the
+     clock stands still while the sound does; after `end_of_data` silence is time. It is a
+     `TimeSource` (`AudioClockSource`): seconds of sound played, still when paused. Muting is
+     explicit (`OutputOptions::muted`, the default): session volume 0, session mute, and silent
+     buffers, all before the stream starts.
+   - `playback` (`Playback`): `Player` plus an audio feed thread. The player's `Clock` runs over
+     the sink's clock, so the picture shown is `frame_for` of the sound heard; the late / drop
+     policy is the player's. `play` waits for 150 ms of queued sound before starting the device,
+     `seek(t)` moves the video as before and the audio to the packet containing `t` with the
+     sound before `t` dropped (the sink is flushed by the feed thread, so nothing old is
+     queued after the call returns), pause / play keep both in step. No audio track, no device
+     or an unsupported audio codec leave the system clock; `audio_note()` says why.
+   - Checked (all on generated clips with ffmpeg as the reference, tests `audio`, `playback_av`,
+     lib tests): PCM s16le / s24le in MOV and mono 44.1 kHz bit-exact with `ffmpeg -f f32le`
+     (max diff 0, same length); AAC-LC stereo 48 kHz max abs diff 1.1e-3, RMS 2.5e-5, AAC mono
+     44.1 kHz 1.5e-4 / 3.2e-6 (full scale 1.0), the first sample at 0.000 s and the length 144384
+     / 133120 frames, identical to ffmpeg's (edit list handled); seeks land on the exact frame
+     (PCM identical to a linear decode, AAC the same except the last 100 frames of the stream,
+     where a second pass of the OS decoder rounds a little differently). Resampler: a 1 kHz sine
+     keeps 1000.000 Hz and its level within 0.0002 dB for 44.1 to 48, 48 to 44.1, 96 to 48 and
+     22.05 to 48 kHz; 30 kHz at 96 kHz to 48 kHz comes out below -60 dB. Sync with a fake audio
+     clock: pictures in order and never from the future, none dropped at 60 Hz, audio blocks one
+     unbroken run from 0, after seeks to 1.5 / 0.2 / 2.9 / 0 s the first audio block starts at
+     the target (within 1/48000) and the first picture is the one at or just before it. Muted
+     real device: clock advances 0.4929 s in 0.5032 s of wall time, 0 under-runs, 51 periods per
+     half second; an under-run stops the clock (0.3 s queued, 0.9 s wall: 0.300 s).
+   - Camera clip (Sony XAVC HS, `20261011_C5743.MP4`): audio is PCM `twos` (16-bit big endian)
+     48 kHz stereo, 264264 frames; the device mixes at 48 kHz so nothing is resampled. 5 s muted,
+     4K59.94 HEVC Main 10 converted to 1080x1920: clock advanced 4.991 s, 300 of 300 pictures
+     shown, 0 dropped, 0 late, 0 audio under-runs, picture minus sound heard between -7.9 and
+     0 ms (never more than half a frame; trend +0.5 ms per second, no creeping), longest wait
+     between two pictures 25 ms.
+   - Left for audio: HE-AAC / AAC-PS only written for, not tested (no encoder here), AC-3 / E-AC-3
+     / Opus / FLAC, several audio tracks and track choice, 5.1 AAC channel order checked only
+     by the downmix maths, `Player` is HEVC only (H.264 plays through `VideoDecoder` but not
+     yet through `Player` / `Playback`), device change while playing (default device switched,
+     `AUDCLNT_E_DEVICE_INVALIDATED`), exclusive mode / low latency, volume ramp on seek (a click
+     is possible at a seek), playback rate (needs time stretching), edit lists beyond the first
+     edit, AAC tail trim to the edit end, the system mixer's session volume persists per
+     executable (muted runs of the test executables leave them muted).
 5. MKV / WebM, VP9 and AV1 (the GPU decodes them too), fragmented MP4.
 6. Formats no GPU decodes, on the CPU: ProRes and DNxHR (intra-only, slices decode in
    parallel), MXF, AIFF. Editing sources must keep previewing.
