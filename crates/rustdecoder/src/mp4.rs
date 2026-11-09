@@ -7,7 +7,11 @@
 //! decode time is negative). Nothing from the file is trusted: every table is bounded by the box
 //! that holds it, and tables that disagree are cut to the shortest.
 //!
-//! Fragmented files (`moof`) are not read yet.
+//! Fragmented files: `mvex` / `trex` give the defaults, and every `moof` (`mfhd`, `traf` with
+//! `tfhd`, `tfdt`, `trun`) appends its samples to the track's table after the ones `moov`
+//! lists (none for `empty_moov`), so everything downstream sees one flat table. Only box headers
+//! and the `moof` boxes themselves are read, never `mdat`; `sidx` / `mfra` are not needed because
+//! every `moof` is walked. A last fragment that was cut keeps its complete samples.
 
 use std::io::{Read, Seek, SeekFrom};
 
@@ -172,7 +176,7 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
     let end = r.seek(SeekFrom::End(0))?;
     let mut pos = 0u64;
     let mut moov = None;
-    let mut fragmented = false;
+    let mut moofs: Vec<(u64, Vec<u8>)> = Vec::new();
     while pos + 8 <= end {
         r.seek(SeekFrom::Start(pos))?;
         let mut h = [0u8; 16];
@@ -188,7 +192,8 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
             n => (n, 8),
         };
         if size < header || pos + size > end {
-            // a cut file: what was read so far still counts
+            // a cut file: what was read so far still counts (a cut `moof` is dropped, a cut
+            // `mdat` loses the samples that were not fully written)
             if moov.is_some() {
                 break;
             }
@@ -204,15 +209,164 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
                 r.read_exact(&mut b)?;
                 moov = Some(b);
             }
-            b"moof" => fragmented = true,
+            b"moof" if moov.is_some() => {
+                let len = size - header;
+                if len > MOOV_MAX {
+                    return Err(Error::Unsupported("fragment header over 256 MB"));
+                }
+                let mut b = vec![0u8; len as usize];
+                r.read_exact(&mut b)?;
+                moofs.push((pos, b));
+            }
             _ => {}
         }
         pos += size;
     }
     let Some(moov) = moov else {
-        return Err(if fragmented { Error::Unsupported("fragmented MP4") } else { Error::Invalid("no movie header (moov)") });
+        return Err(Error::Invalid("no movie header (moov)"));
     };
-    parse_moov(&moov)
+    let (mut movie, mut extra) = parse_moov(&moov)?;
+    if !moofs.is_empty() {
+        for (pos, b) in &moofs {
+            // one broken fragment ends the walk: what follows would be timed from a wrong place
+            if let Err(e) = add_fragment(&mut movie.tracks, &mut extra, *pos, b) {
+                log::debug!("mp4: fragment at {pos}: {e}");
+                break;
+            }
+        }
+        // a cut last `mdat`: only whole samples count
+        for (t, e) in movie.tracks.iter_mut().zip(&extra) {
+            let from = e.moov_samples.min(t.samples.len());
+            let whole = t.samples[from..].iter().take_while(|s| s.offset + s.size as u64 <= end).count();
+            t.samples.truncate(from + whole);
+        }
+        // `empty_moov` leaves the movie duration 0: the longest track's end
+        if movie.duration == 0 && movie.timescale > 0 {
+            movie.duration = movie
+                .tracks
+                .iter()
+                .filter(|t| t.timescale > 0)
+                .map(|t| {
+                    let n = t.samples.len();
+                    let last = t.samples.iter().map(|s| s.pts).max().unwrap_or(0).max(0);
+                    let step = if n >= 2 { (t.samples[n - 1].dts - t.samples[n - 2].dts).max(0) } else { 0 };
+                    ((last + step) as i128 * movie.timescale as i128 / t.timescale as i128) as u64
+                })
+                .max()
+                .unwrap_or(0);
+        }
+    }
+    Ok(movie)
+}
+
+/// What fragments need from `moov` per track, kept beside [`Track`].
+#[derive(Debug, Clone, Default)]
+struct Extra {
+    /// Samples that came from `moov` itself (they stay when the file is cut).
+    moov_samples: usize,
+    /// Shift of the first edit, applied to fragment samples too.
+    shift: i64,
+    /// `trex` defaults.
+    trex: Defaults,
+    /// Decode time after the last sample so far (`tfdt` is missing in some files).
+    next_dts: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Defaults {
+    duration: u32,
+    size: u32,
+    flags: u32,
+}
+
+/// Sample flags: not a sync sample, or depends on others (ISO 14496-12 8.8.3.1).
+const NON_SYNC: u32 = 0x0001_0000;
+const DEPENDS_YES: u32 = 0x0100_0000;
+
+fn add_fragment(tracks: &mut [Track], extra: &mut [Extra], moof_pos: u64, moof: &[u8]) -> Result<()> {
+    let boxes = children(moof)?;
+    let mut prev_end: Option<u64> = None;
+    for (k, traf) in &boxes {
+        if k != b"traf" {
+            continue;
+        }
+        let kids = children(traf)?;
+        let tfhd = child(&kids, b"tfhd").ok_or(Error::Invalid("no track fragment header"))?;
+        let mut c = Cur::new(tfhd);
+        let (_, f) = c.full()?;
+        let id = c.u32()?;
+        let base_named = if f & 0x01 != 0 { Some(c.u64()?) } else { None };
+        if f & 0x02 != 0 {
+            c.skip(4)?;
+        }
+        let Some(ti) = tracks.iter().position(|t| t.id == id) else { continue };
+        let mut d = extra[ti].trex;
+        if f & 0x08 != 0 {
+            d.duration = c.u32()?;
+        }
+        if f & 0x10 != 0 {
+            d.size = c.u32()?;
+        }
+        if f & 0x20 != 0 {
+            d.flags = c.u32()?;
+        }
+        // base of the data offsets: named, or the `moof` (default-base-is-moof, and the first
+        // `traf` otherwise), or where the previous `traf`'s data ended
+        let base = base_named.unwrap_or(if f & 0x02_0000 != 0 { moof_pos } else { prev_end.unwrap_or(moof_pos) });
+
+        if let Some(tfdt) = child(&kids, b"tfdt") {
+            let mut c = Cur::new(tfdt);
+            let (v, _) = c.full()?;
+            let t = if v == 1 { c.u64()? as i64 } else { c.u32()? as i64 };
+            extra[ti].next_dts = Some(t + extra[ti].shift);
+        }
+        let mut data_end = base;
+        let mut first_run = true;
+        for (k, trun) in &kids {
+            if k != b"trun" {
+                continue;
+            }
+            let mut c = Cur::new(trun);
+            let (v, f) = c.full()?;
+            let n = c.u32()? as usize;
+            let mut off = if f & 0x01 != 0 { (base as i64 + c.i32()? as i64) as u64 } else if first_run { base } else { data_end };
+            let first_flags = if f & 0x04 != 0 { Some(c.u32()?) } else { None };
+            first_run = false;
+            let per = 4 * ((f & 0x100 != 0) as usize + (f & 0x200 != 0) as usize + (f & 0x400 != 0) as usize + (f & 0x800 != 0) as usize);
+            let n = if per == 0 { n.min(SAMPLES_MAX) } else { n.min(c.left() / per) };
+            let t = &mut tracks[ti];
+            if t.samples.len() + n > SAMPLES_MAX {
+                return Err(Error::Unsupported("too many samples"));
+            }
+            t.samples.reserve(n);
+            for i in 0..n {
+                let dur = if f & 0x100 != 0 { c.u32()? } else { d.duration };
+                let size = if f & 0x200 != 0 { c.u32()? } else { d.size };
+                let flags = if f & 0x400 != 0 { c.u32()? } else if i == 0 { first_flags.unwrap_or(d.flags) } else { d.flags };
+                let cts = if f & 0x800 != 0 {
+                    let raw = c.u32()?;
+                    if v == 0 && raw <= i32::MAX as u32 { raw as i64 } else { raw as i32 as i64 }
+                } else {
+                    0
+                };
+                // no `tfdt`: continue where the track ended
+                let dts = match extra[ti].next_dts {
+                    Some(x) => x,
+                    None => match t.samples.as_slice() {
+                        [.., a, b] => b.dts + (b.dts - a.dts),
+                        [b] => b.dts,
+                        [] => extra[ti].shift,
+                    },
+                };
+                t.samples.push(Sample { offset: off, size, dts, pts: dts + cts, key: flags & (NON_SYNC | DEPENDS_YES) == 0 });
+                extra[ti].next_dts = Some(dts + dur as i64);
+                off += size as u64;
+            }
+            data_end = data_end.max(off);
+        }
+        prev_end = Some(data_end);
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------------------ byte cursor
@@ -296,7 +450,7 @@ fn child<'a>(boxes: &[([u8; 4], &'a [u8])], kind: &[u8; 4]) -> Option<&'a [u8]> 
 
 // ------------------------------------------------------------------ moov
 
-fn parse_moov(b: &[u8]) -> Result<Movie> {
+fn parse_moov(b: &[u8]) -> Result<(Movie, Vec<Extra>)> {
     let boxes = children(b)?;
     let mvhd = child(&boxes, b"mvhd").ok_or(Error::Invalid("no movie header (mvhd)"))?;
     let mut c = Cur::new(mvhd);
@@ -308,17 +462,45 @@ fn parse_moov(b: &[u8]) -> Result<Movie> {
         c.skip(8)?;
         (c.u32()?, c.u32()? as u64)
     };
+    // `mvex`: per-track defaults for the fragments
+    let fragmented = child(&boxes, b"mvex").is_some();
+    let mut trex: Vec<(u32, Defaults)> = Vec::new();
+    if let Some(mvex) = child(&boxes, b"mvex") {
+        for (k, t) in children(mvex).unwrap_or_default() {
+            if &k == b"trex" {
+                let mut c = Cur::new(t);
+                let r = (|| -> Result<(u32, Defaults)> {
+                    c.full()?;
+                    let id = c.u32()?;
+                    c.skip(4)?;
+                    Ok((id, Defaults { duration: c.u32()?, size: c.u32()?, flags: c.u32()? }))
+                })();
+                if let Ok(x) = r {
+                    trex.push(x);
+                }
+            }
+        }
+    }
     let mut tracks = Vec::new();
+    let mut extra = Vec::new();
     for (k, t) in &boxes {
         if k == b"trak" {
-            match parse_trak(t, timescale) {
-                Ok(t) => tracks.push(t),
+            match parse_trak(t, timescale, fragmented) {
+                Ok((t, shift)) => {
+                    extra.push(Extra {
+                        moov_samples: t.samples.len(),
+                        shift,
+                        trex: trex.iter().find(|x| x.0 == t.id).map_or(Defaults::default(), |x| x.1),
+                        next_dts: None,
+                    });
+                    tracks.push(t);
+                }
                 // one broken track doesn't take the others down
                 Err(e) => log::debug!("mp4: skipping a track: {e}"),
             }
         }
     }
-    Ok(Movie { timescale, duration, tracks })
+    Ok((Movie { timescale, duration, tracks }, extra))
 }
 
 /// Clockwise degrees from a track header's matrix (screen coordinates, y down).
@@ -328,7 +510,7 @@ fn rotation(m: &[i32; 9]) -> u16 {
     (((deg / 90.0).round() as i32).rem_euclid(4) * 90) as u16
 }
 
-fn parse_trak(b: &[u8], movie_timescale: u32) -> Result<Track> {
+fn parse_trak(b: &[u8], movie_timescale: u32, fragmented: bool) -> Result<(Track, i64)> {
     let boxes = children(b)?;
     let tkhd = child(&boxes, b"tkhd").ok_or(Error::Invalid("no track header"))?;
     let mut c = Cur::new(tkhd);
@@ -396,7 +578,13 @@ fn parse_trak(b: &[u8], movie_timescale: u32) -> Result<Track> {
     if let Some(stsd) = child(&stbl, b"stsd") {
         parse_stsd(stsd, &mut t)?;
     }
-    t.samples = if kind == Kind::Audio && matches!(t.codec, Codec::Pcm { .. }) { pcm_chunks(&stbl)? } else { samples(&stbl)? };
+    let table = if kind == Kind::Audio && matches!(t.codec, Codec::Pcm { .. }) { pcm_chunks(&stbl) } else { samples(&stbl) };
+    t.samples = match table {
+        Ok(s) => s,
+        // a fragmented file may leave the tables out altogether
+        Err(_) if fragmented => Vec::new(),
+        Err(e) => return Err(e),
+    };
     let shift = edit_shift(child(&boxes, b"edts"), movie_timescale, timescale)?;
     if shift != 0 {
         for s in &mut t.samples {
@@ -404,7 +592,7 @@ fn parse_trak(b: &[u8], movie_timescale: u32) -> Result<Track> {
             s.pts += shift;
         }
     }
-    Ok(t)
+    Ok((t, shift))
 }
 
 /// How far the first edit moves the track's times: an empty edit delays it, a media time
