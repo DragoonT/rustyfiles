@@ -19,6 +19,8 @@ pub mod dnx;
 pub mod dnxtables;
 pub mod prores;
 #[cfg(windows)]
+pub mod dnxdec;
+#[cfg(windows)]
 pub mod proresdec;
 pub mod resample;
 pub mod slice;
