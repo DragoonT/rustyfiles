@@ -470,7 +470,7 @@ impl Index {
 
     /// Bytes held (arrays, names and lookups).
     pub fn memory(&self) -> usize {
-        self.parent.capacity() * 4 + self.name_id.capacity() * 4 + self.flags.capacity() + self.names.memory() + self.dirs.memory()
+        self.parent.capacity() * 4 + self.name_id.capacity() * 4 + self.flags.capacity() + self.names.memory() + self.dirs.memory() + self.frn.capacity() * 13
     }
 
     /// Different names held (each stored once).
