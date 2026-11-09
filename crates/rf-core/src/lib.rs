@@ -7,6 +7,7 @@ pub mod rename;
 pub mod shelf;
 pub mod sort;
 pub mod tags;
+pub mod treemap;
 
 pub use entry::{Entry, EntryKind, attrs};
 pub use history::{History, Location};

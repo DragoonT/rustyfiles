@@ -12,6 +12,8 @@ pub enum Location {
     Tag(u32),
     /// A Windows library (`.library-ms`), shown as the merged contents of its folders.
     Library { file: PathBuf, name: String },
+    /// Where the space goes under a folder or drive (the disk usage view).
+    DiskUsage(PathBuf),
 }
 
 impl Location {
@@ -62,6 +64,7 @@ impl Location {
         match self {
             Location::Path(p) => Location::Path(clean_path(&p)),
             Location::Search { root, query } => Location::Search { root: clean_path(&root), query },
+            Location::DiskUsage(p) => Location::DiskUsage(clean_path(&p)),
             other => other,
         }
     }
@@ -86,6 +89,7 @@ impl Location {
                 _ => Some(Location::Home),
             },
             Location::Search { root, .. } => Some(Location::Path(root.clone())),
+            Location::DiskUsage(p) => Some(Location::Path(p.clone())),
             Location::RecycleBin | Location::Settings | Location::Tag(_) | Location::Library { .. } => {
                 Some(Location::Home)
             }
@@ -101,6 +105,7 @@ impl Location {
             Location::Tag(_) => "Etiket".into(),
             Location::Search { query, .. } => format!("Arama: {query}"),
             Location::Library { name, .. } => name.clone(),
+            Location::DiskUsage(p) => format!("Disk kullanımı — {}", display_name(p)),
             Location::Path(p) => display_name(p),
         }
     }
