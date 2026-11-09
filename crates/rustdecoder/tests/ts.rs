@@ -46,7 +46,9 @@ fn check_track(clip: &Path, t: &Track, stream: &str, base: i64, bytes: Bytes, to
     let mut raw = Vec::new();
     for (i, (s, w)) in t.samples.iter().zip(&want).enumerate() {
         let conv = |v: i64| ((v - base) as i128 * t.timescale as i128 + 45000).div_euclid(90000) as i64;
-        assert!((s.pts - conv(w.pts)).abs() <= tol, "{stream} packet {i}: pts {} want {}", s.pts, conv(w.pts));
+        if w.pts != i64::MIN {
+            assert!((s.pts - conv(w.pts)).abs() <= tol, "{stream} packet {i}: pts {} want {}", s.pts, conv(w.pts));
+        }
         if w.dts != i64::MIN {
             assert!((s.dts - conv(w.dts)).abs() <= tol, "{stream} packet {i}: dts {} want {}", s.dts, conv(w.dts));
         }
@@ -183,7 +185,7 @@ fn h264_mp3_ts() {
 }
 
 /// Program streams: the audio is read (frames, times, bytes against ffprobe), the MPEG video track
-/// is listed with its size and no samples (nothing decodes MPEG-2 video yet).
+/// is cut into pictures (sizes, bytes, times and key frames against ffprobe).
 fn check_ps(name: &str, video: &[&str], audio: &[&str], mux: &[&str], mpeg2: bool, a_codec: fn(&Codec) -> bool, a_channels: u16) {
     if !have_ffmpeg() {
         eprintln!("skipped: ffmpeg not found");
@@ -194,13 +196,14 @@ fn check_ps(name: &str, video: &[&str], audio: &[&str], mux: &[&str], mpeg2: boo
     let v = movie.tracks.iter().find(|t| t.kind == Kind::Video).expect("video track listed");
     assert_eq!(&v.fourcc, if mpeg2 { b"mpg2" } else { b"mpg1" });
     assert_eq!((v.width, v.height), (640, 360));
-    assert!(v.samples.is_empty() && movie.video().is_none());
+    assert!(!v.samples.is_empty() && movie.video().is_some());
     let a = movie.tracks.iter().find(|t| t.kind == Kind::Audio).expect("audio track");
     assert!(a_codec(&a.codec), "{name}: {:?}", a.codec);
     assert_eq!((a.sample_rate, a.channels), (48000, a_channels));
-    let base = earliest(&clip, &["a:0"]);
+    let base = earliest(&clip, &["v:0", "a:0"]);
+    let nv = check_track(&clip, v, "v:0", base, Bytes::Same, 1);
     let n = check_track(&clip, a, "a:0", base, Bytes::Same, 1);
-    eprintln!("{name}: video listed ({:?}), {n} audio packets match ffprobe", std::str::from_utf8(&v.fourcc).unwrap());
+    eprintln!("{name}: {nv} video pictures ({:?}) and {n} audio packets match ffprobe", std::str::from_utf8(&v.fourcc).unwrap());
 }
 
 #[test]

@@ -20,6 +20,8 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
         avi::read(r)
     } else if ps::is_ps(&head[..n]) {
         ps::read(r)
+    } else if crate::mpeg2::is_elementary(&head[..n]) {
+        crate::mpeg2::read_elementary(r)
     } else if mxf::sniff(r)? {
         mxf::read(r)
     } else {
