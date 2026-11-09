@@ -5766,5 +5766,59 @@
   "key": "Cihazdan kopyalanıyor:",
   "tr": "Cihazdan kopyalanıyor:",
   "en": "Copying from device:"
+ },
+ {
+  "id": "eecbf1b8",
+  "key": "Disk kullanımı",
+  "tr": "Disk kullanımı",
+  "en": "Disk usage"
+ },
+ {
+  "id": "84283d09",
+  "key": "Disk kullanımını göster",
+  "tr": "Disk kullanımını göster",
+  "en": "Show disk usage"
+ },
+ {
+  "id": "61ec32a9",
+  "key": "Disk kullanımı hesaplanıyor…",
+  "tr": "Disk kullanımı hesaplanıyor…",
+  "en": "Calculating disk usage…"
+ },
+ {
+  "id": "9de07d77",
+  "key": "Sekmeyi kapatmak taramayı durdurur",
+  "tr": "Sekmeyi kapatmak taramayı durdurur",
+  "en": "Closing the tab stops the scan"
+ },
+ {
+  "id": "c0187744",
+  "key": "Diskteki boyut",
+  "tr": "Diskteki boyut",
+  "en": "Size on disk"
+ },
+ {
+  "id": "69146383",
+  "key": "Bu klasöre git",
+  "tr": "Bu klasöre git",
+  "en": "Go to this folder"
+ },
+ {
+  "id": "22542ba8",
+  "key": "Klasörde göster",
+  "tr": "Klasörde göster",
+  "en": "Show in folder"
+ },
+ {
+  "id": "d76b8c14",
+  "key": "klasör okunamadı",
+  "tr": "klasör okunamadı",
+  "en": "folders couldn't be read"
+ },
+ {
+  "id": "186c7384",
+  "key": "öğe daha",
+  "tr": "öğe daha",
+  "en": "more items"
  }
 ]

@@ -959,5 +959,14 @@
  "16fafed3": "Devices",
  "be3cb212": "This folder is read-only",
  "bba08e14": "Items on devices such as phones can't be changed here; copy them and paste them into another folder.",
- "7450cc15": "Copying from device:"
+ "7450cc15": "Copying from device:",
+ "eecbf1b8": "Disk usage",
+ "84283d09": "Show disk usage",
+ "61ec32a9": "Calculating disk usage…",
+ "9de07d77": "Closing the tab stops the scan",
+ "c0187744": "Size on disk",
+ "69146383": "Go to this folder",
+ "22542ba8": "Show in folder",
+ "d76b8c14": "folders couldn't be read",
+ "186c7384": "more items"
 }
