@@ -163,7 +163,12 @@ impl Playback {
             (Some(s), Some(_)) => s.time_source(),
             _ => Arc::new(SystemTime::new()),
         };
-        let player = Player::open_with(path, ring, time)?;
+        let mut player = Player::open_with(path, ring, time)?;
+        // the clock starts at whichever comes first: with the sound earlier than the first
+        // picture, starting at the picture played the sound that much late
+        if let Some(d) = &decoder {
+            player.start_earlier(d.first_pts().max(0.0));
+        }
         let audio = match (sink, decoder) {
             (Some(sink), Some(dec)) => {
                 let info = dec.info().clone();

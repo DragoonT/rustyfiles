@@ -525,6 +525,16 @@ impl Player {
         &self.context
     }
 
+    /// Lets the movie start at `t` when that is before the first picture (a sound track that
+    /// starts earlier: B-frames without an edit list put the first picture a frame or two after
+    /// the first sound). Until the first picture's time nothing is shown.
+    pub fn start_earlier(&mut self, t: f64) {
+        if t < self.start_time {
+            self.start_time = t;
+            self.clock.seek(t);
+        }
+    }
+
     /// Movie time of the first picture, and the end (last picture plus one frame), in seconds.
     pub fn range(&self) -> (f64, f64) {
         (self.start_time, self.end_time)
