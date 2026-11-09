@@ -67,6 +67,7 @@ struct Report {
     first_mismatch: Option<String>,
     fps: f64,
     sizes: Vec<(u32, u32)>,
+    bad: usize,
 }
 
 /// Decodes on the GPU and compares each frame with ffmpeg's output, read from a pipe as it is
@@ -90,7 +91,7 @@ fn compare(clip: &Path) -> Option<Report> {
         .spawn()
         .expect("ffmpeg");
     let mut out = ff.stdout.take().unwrap();
-    let mut report = Report { frames: 0, first_mismatch: None, fps: 0.0, sizes: Vec::new() };
+    let mut report = Report { frames: 0, first_mismatch: None, fps: 0.0, sizes: Vec::new(), bad: 0 };
     let t0 = std::time::Instant::now();
     let bytes = if ten { 2 } else { 1 };
     let mut ref_frame = Vec::new();
@@ -102,7 +103,7 @@ fn compare(clip: &Path) -> Option<Report> {
             report.sizes.push((w as u32, h as u32));
         }
         let y_len = w * h * bytes;
-        ref_frame.resize(y_len + w * (h / 2) * bytes, 0);
+        ref_frame.resize(y_len + w.div_ceil(2) * 2 * h.div_ceil(2) * bytes, 0);
         if out.read_exact(&mut ref_frame).is_err() {
             report.first_mismatch = Some(format!("ffmpeg has fewer frames than we decoded (we are at {})", report.frames));
             break;
@@ -115,6 +116,7 @@ fn compare(clip: &Path) -> Option<Report> {
         let bad = bad.or_else(|| planes.uv.iter().enumerate().find(|(i, v)| **v != at(ruv, *i)).map(|(i, v)| format!("UV x={} y={} gpu={} ffmpeg={}", i % w, i / w, v, at(ruv, i))));
         if let Some(b) = bad {
             report.first_mismatch.get_or_insert(format!("frame {} (pts {}, {w}x{h}): {b}", report.frames, f.pts));
+            report.bad += 1;
         }
         report.frames += 1;
     }
@@ -132,7 +134,7 @@ fn compare(clip: &Path) -> Option<Report> {
 
 fn check_path(name: &str, clip: &Path, frames: usize) {
     let Some(r) = compare(clip) else { return };
-    eprintln!("{name}: {} frames compared with ffmpeg ({:.0} fps incl. read-back), sizes {:?}: {:?}", r.frames, r.fps, r.sizes, r.first_mismatch);
+    eprintln!("{name}: {} frames compared with ffmpeg ({:.0} fps incl. read-back), sizes {:?}: {:?} ({} frames differ)", r.frames, r.fps, r.sizes, r.first_mismatch, r.bad);
     assert_eq!(r.frames, frames, "{name}: frame count");
     assert_eq!(r.first_mismatch, None, "{name}");
 }
@@ -195,6 +197,65 @@ fn libaom_tiles_and_odd_size() {
     c.encoder = "libaom-av1";
     c.size = "642x362";
     check(c, 90);
+}
+
+/// A libaom clip with `-aom-params`.
+fn aom(name: &str, params: &str, extra: &[&str]) {
+    let mut args = vec!["-b:v", "1M", "-cpu-used", "6", "-g", "60", "-lag-in-frames", "16", "-row-mt", "1", "-aom-params", params];
+    args.extend_from_slice(extra);
+    let mut c = Clip::svt(name, &args);
+    c.encoder = "libaom-av1";
+    check(c, 90);
+}
+
+#[test]
+fn libaom_segmentation_aq() {
+    aom("av1_aom_aq.mp4", "aq-mode=1", &[]);
+}
+
+#[test]
+fn libaom_quantizer_matrices() {
+    aom("av1_aom_qm.mp4", "enable-qm=1:qm-min=2:qm-max=10", &[]);
+}
+
+#[test]
+fn libaom_delta_q_and_delta_lf() {
+    aom("av1_aom_deltaq.mp4", "deltaq-mode=1:delta-lf-mode=1", &[]);
+}
+
+#[test]
+fn svt_superres_fixed() {
+    check(Clip::svt("av1_svt_superres_fixed.mp4", &["-b:v", "1M", "-g", "60", "-svtav1-params", "superres-mode=1:superres-denom=12"]), 90);
+}
+
+#[test]
+fn svt_superres_random() {
+    check(Clip::svt("av1_svt_superres.mp4", &["-b:v", "1M", "-g", "60", "-svtav1-params", "superres-mode=2"]), 90);
+}
+
+#[test]
+fn svt_random_frame_sizes_reference_scaling() {
+    check(Clip::svt("av1_svt_resize.mp4", &["-b:v", "1M", "-g", "60", "-svtav1-params", "resize-mode=2"]), 90);
+}
+
+#[test]
+fn libaom_error_resilient() {
+    aom("av1_aom_errres.mp4", "error-resilient=1", &[]);
+}
+
+#[test]
+fn libaom_lossless() {
+    aom("av1_aom_lossless.mp4", "lossless=1", &[]);
+}
+
+#[test]
+fn libaom_screen_content() {
+    aom("av1_aom_screen.mp4", "tune-content=screen", &[]);
+}
+
+#[test]
+fn libaom_128_superblocks_and_tile_groups() {
+    aom("av1_aom_sb128.mp4", "sb-size=128:tile-columns=2:num-tile-groups=2", &[]);
 }
 
 #[test]

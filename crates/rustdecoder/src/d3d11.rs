@@ -379,7 +379,7 @@ impl HwDecoder {
                     y.push(sample(row + t as usize, col + l as usize, 0));
                 }
             }
-            let (cw, ch) = (w / 2, h / 2);
+            let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
             let mut uv = Vec::with_capacity((cw * ch * 2) as usize);
             for row in 0..ch as usize {
                 for col in 0..(cw * 2) as usize {

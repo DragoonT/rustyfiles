@@ -341,17 +341,13 @@ impl Av1Decoder {
         self.feedback = 0;
         let mut dims = [(0u32, 0u32); 8];
         for i in 0..8 {
-            dims[i] = (self.parser.slots[i].upscaled_width, self.parser.slots[i].frame_height);
+            // the size a reference was coded at (with superres: before upscaling), which is what the
+            // driver scales its prediction from
+            dims[i] = (self.parser.slots[i].frame_width, self.parser.slots[i].frame_height);
         }
         let pp = dxva_av1::pic_params(&PicInfo { seq: &seq, header: &h, surface, slots: self.slots, slot_dims: dims, feedback: self.feedback });
         let hw = self.hw.as_mut().ok_or(Error::Invalid("no decoder"))?;
-        if std::env::var_os("AV1_TRACE").is_some() {
-            eprintln!("  {:?}", (h.order_hint, h.primary_ref_frame, h.gm_type, h.lr_type, h.cdef_bits, h.seg.enabled, h.use_ref_frame_mvs, h.reference_select, h.skip_mode_present, h.interpolation_filter, h.tx_mode, h.base_q_idx));
-            eprintln!("slots {:?} users {:?}", self.slots, self.users); eprintln!("av1 frame type {} show {} {}x{} refresh {:02x} tiles {} bytes {} surface {} refs {:?}", h.frame_type, h.show_frame, h.upscaled_width, h.frame_height, h.refresh_frame_flags, p.tiles.len(), p.data.len(), surface, h.ref_frame_idx);
-        }
         hw.decode_controls(&self.gpu, surface, dxva::bytes_of(&pp), None, dxva_av1::tile_bytes(&p.tiles), &p.data)?;
-        if std::env::var_os("AV1_TRACE").is_some() { eprintln!("  decoded"); }
-        if std::env::var_os("AV1_SYNC").is_some() { self.gpu.wait_idle()?; }
 
         for i in 0..8 {
             if h.refresh_frame_flags >> i & 1 != 0 {

@@ -307,7 +307,7 @@ pub fn pic_params(p: &PicInfo) -> PicParams {
         max_width: s.max_frame_width,
         max_height: s.max_frame_height,
         curr_pic_texture_index: p.surface as u8,
-        superres_denom: if h.use_superres { h.superres_denom as u8 } else { 0 },
+        superres_denom: h.superres_denom as u8,
         bitdepth: s.bit_depth,
         seq_profile: s.profile,
         tiles,
