@@ -3440,4 +3440,17 @@ mod launch_tests {
         assert_eq!(parse_launch(r"C:\Windows"), (Location::Path(PathBuf::from(r"C:\Windows")), None));
         assert_eq!(parse_launch("  "), (Location::Home, None));
     }
+
+    #[test]
+    fn session_tabs_come_back_as_they_were() {
+        let phone = Location::Shell {
+            parsing: r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\?\usb#vid_04e8&pid_6860#r58n#{6ac27878-a6fa-4155-ba85-f98f491d4f33}".into(),
+            name: "Galaxy S24".into(),
+        };
+        for loc in [Location::Path(PathBuf::from(r"C:\Kullanıcılar\Özer")), Location::RecycleBin, phone] {
+            assert_eq!(parse_launch(&super::session_text(&loc)).0, loc);
+        }
+        // places a session can't keep come back as Home
+        assert_eq!(super::session_text(&Location::Settings), "");
+    }
 }
