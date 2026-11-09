@@ -532,3 +532,74 @@ mod prores {
         }
     }
 }
+
+/// What a default device change (or `AUDCLNT_E_DEVICE_INVALIDATED`) makes the output do, forced
+/// through the test hook while a muted stream plays: the stream moves to a freshly opened one, the
+/// clock goes on from where it was, the queued sound keeps flowing and the movie position follows.
+#[test]
+fn device_reopen_keeps_the_clock_and_the_sound() {
+    let out = match AudioOutput::open(OutputOptions { muted: true, volume: 1.0 }) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            return;
+        }
+    };
+    let src_rate = 44100u32;
+    out.set_input(src_rate, 2);
+    let tone: Vec<f32> = (0..src_rate as usize * 4).flat_map(|i| {
+        let v = (i as f64 * 2.0 * std::f64::consts::PI * 440.0 / src_rate as f64).sin() as f32 * 0.5;
+        [v, v]
+    }).collect();
+    out.push(10.0, &tone);
+    let clock = out.time_source();
+    out.play();
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(out.reopens(), 0);
+    for round in 1..=3u64 {
+        let before = clock.now();
+        let pos_before = out.position().unwrap();
+        let periods = out.device_periods();
+        let t0 = std::time::Instant::now();
+        assert!(out.force_reopen(), "the reopen did not happen");
+        let took = t0.elapsed().as_secs_f64();
+        let after = clock.now();
+        let pos_after = out.position().unwrap();
+        // the clock never goes back and does not jump: only the time the reopen took passes (the
+        // sound the old device had been given and not played went back into the queue)
+        let step = after - before;
+        println!("reopen {round}: took {took:.3} s, clock {before:.3} -> {after:.3} (+{step:.3}), position {pos_before:.3} -> {pos_after:.3}, buffered {:.3}", out.buffered());
+        assert!(step >= 0.0 && step < took + 0.03, "clock stepped by {step}");
+        assert!((pos_after - 10.0 - after).abs() < 0.03, "position {pos_after} against clock {after}");
+        assert_eq!(out.reopens(), round);
+        // runs on in real time, and the new stream is alive
+        let t1 = std::time::Instant::now();
+        std::thread::sleep(Duration::from_millis(400));
+        let adv = clock.now() - after;
+        let wall = t1.elapsed().as_secs_f64();
+        assert!((adv - wall).abs() < 0.06, "after the reopen: clock {adv} wall {wall}");
+        assert!(out.device_periods() > periods + 10, "no device periods on the new stream");
+    }
+    // the sound went on being consumed: 4 s pushed, the clock's seconds gone, the device buffer
+    // (100 ms) filled
+    let b = out.buffered();
+    let expect = 4.0 - clock.now() - 0.1;
+    assert!((b - expect).abs() < 0.08, "buffered {b}, expected {expect}");
+    // a pause across a reopen stays a pause
+    out.pause();
+    let p = clock.now();
+    assert!(out.force_reopen());
+    let p2 = clock.now();
+    assert!(p2 >= p && p2 - p < 0.1, "{p} {p2}");
+    std::thread::sleep(Duration::from_millis(200));
+    assert!((clock.now() - p2).abs() < 1e-6, "the clock ran while paused");
+    // play, flush and a new position still work on the new stream
+    out.flush();
+    assert!(out.position().is_none());
+    out.push(20.0, &tone[..44100 * 2]);
+    out.play();
+    std::thread::sleep(Duration::from_millis(300));
+    let pos = out.position().unwrap();
+    assert!(pos > 20.2 && pos < 20.45, "{pos}");
+    out.pause();
+}
