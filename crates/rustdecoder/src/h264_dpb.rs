@@ -650,4 +650,100 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!((refs[0].frame_num, refs[0].poc()), (0, 0));
     }
+
+    fn field(idr: bool, ref_idc: u8, frame_num: u32, lsb: u32, bottom: bool) -> SliceHeader {
+        SliceHeader { field_pic: true, bottom_field: bottom, ..hdr(idr, ref_idc, frame_num, lsb) }
+    }
+
+    /// Decodes a field; returns the surface it went into.
+    fn run_field(d: &mut Dpb, sps: &Sps, sh: &SliceHeader, out: &mut Vec<i32>) -> usize {
+        let st = d.start_picture(sh, sps).unwrap().unwrap();
+        let s = st.second_of.unwrap_or_else(|| d.alloc().unwrap());
+        d.finish_picture(s, &st, sh, sps, 0).unwrap();
+        while let Some(f) = d.next_output() {
+            out.push(f.poc);
+            d.release_held();
+        }
+        s
+    }
+
+    #[test]
+    fn a_frame_comes_out_once_both_fields_are_decoded() {
+        let sps = Sps { max_num_reorder_frames: Some(0), ..sps() };
+        let mut d = Dpb::new(8);
+        let mut out = Vec::new();
+        // IDR: top field poc 0, bottom field poc 1 (POC type 0, no delta for fields)
+        let a = run_field(&mut d, &sps, &field(true, 3, 0, 0, false), &mut out);
+        assert!(out.is_empty(), "the first field must not come out alone");
+        let b = run_field(&mut d, &sps, &field(false, 3, 0, 1, true), &mut out);
+        assert_eq!(a, b, "the second field goes into the surface of the first");
+        assert_eq!(out, vec![0]);
+        // a non-reference pair
+        let a = run_field(&mut d, &sps, &field(false, 0, 1, 4, false), &mut out);
+        assert_eq!(out.len(), 1);
+        let b = run_field(&mut d, &sps, &field(false, 0, 1, 5, true), &mut out);
+        assert_eq!(a, b);
+        assert_eq!(out, vec![0, 4]);
+    }
+
+    #[test]
+    fn a_lone_field_comes_out_when_the_next_picture_is_not_its_second_field() {
+        let sps = Sps { max_num_reorder_frames: Some(0), ..sps() };
+        let mut d = Dpb::new(8);
+        let mut out = Vec::new();
+        run_field(&mut d, &sps, &field(true, 3, 0, 0, false), &mut out);
+        run_field(&mut d, &sps, &field(false, 3, 0, 1, true), &mut out);
+        // a top field, then another top field: the first one is a frame of its own
+        let a = run_field(&mut d, &sps, &field(false, 2, 1, 4, false), &mut out);
+        let b = run_field(&mut d, &sps, &field(false, 2, 2, 8, false), &mut out);
+        assert_ne!(a, b);
+        assert_eq!(out, vec![0, 4]);
+        d.flush();
+        while let Some(f) = d.next_output() {
+            out.push(f.poc);
+            d.release_held();
+        }
+        assert_eq!(out, vec![0, 4, 8]);
+    }
+
+    #[test]
+    fn sliding_window_counts_a_field_pair_as_one_reference() {
+        let sps = sps(); // two reference frames
+        let mut d = Dpb::new(8);
+        let mut out = Vec::new();
+        for n in 0..5u32 {
+            run_field(&mut d, &sps, &field(n == 0, 2, n, 4 * n, false), &mut out);
+            run_field(&mut d, &sps, &field(false, 2, n, 4 * n + 1, true), &mut out);
+            assert!(d.ref_pics().len() <= 2);
+        }
+        let mut nums: Vec<u32> = d.ref_pics().iter().map(|p| p.frame_num).collect();
+        nums.sort();
+        assert_eq!(nums, vec![3, 4]);
+        // both fields of both frames are still references
+        assert!(d.ref_pics().iter().all(|p| p.marks == [RefMark::Short; 2]));
+    }
+
+    #[test]
+    fn a_memory_management_operation_can_drop_one_field() {
+        let sps = Sps { max_num_ref_frames: 3, ..sps() };
+        let mut d = Dpb::new(8);
+        let mut out = Vec::new();
+        run_field(&mut d, &sps, &field(true, 3, 0, 0, false), &mut out);
+        run_field(&mut d, &sps, &field(false, 3, 0, 1, true), &mut out);
+        run_field(&mut d, &sps, &field(false, 2, 1, 4, false), &mut out);
+        // second field of frame 1 (CurrPicNum 3): picNumX 1 is the same parity (bottom) field of
+        // frame 0 (2 * 0 + 1)
+        let mut sh = field(false, 2, 1, 5, true);
+        sh.adaptive_marking = true;
+        sh.mmco = vec![Mmco::ShortUnused { diff_minus1: 1 }];
+        run_field(&mut d, &sps, &sh, &mut out);
+        let f0 = d.ref_pics().into_iter().find(|p| p.frame_num == 0).unwrap().marks;
+        assert_eq!(f0, [RefMark::Short, RefMark::Unused]);
+        // a top field of frame 2 (CurrPicNum 5): picNumX 1 is the top field of frame 0 (same parity)
+        let mut sh = field(false, 2, 2, 8, false);
+        sh.adaptive_marking = true;
+        sh.mmco = vec![Mmco::ShortUnused { diff_minus1: 3 }];
+        run_field(&mut d, &sps, &sh, &mut out);
+        assert!(!d.ref_pics().iter().any(|p| p.frame_num == 0));
+    }
 }
