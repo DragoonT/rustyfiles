@@ -203,6 +203,10 @@ enum Msg {
     View(View),
     /// Search hits: entries plus their parent folders.
     Hits(Vec<Entry>, Vec<Arc<std::path::Path>>),
+    /// Shell folder items (a phone, Network…): entries plus what the shell knows about each.
+    Shell(Vec<Entry>, Vec<rf_win::shellfolder::ShellChild>),
+    /// The shell's own name for the folder being listed.
+    ShellName(String),
     Done(Result<usize, String>),
 }
 
@@ -257,6 +261,10 @@ pub struct FolderView {
     pub(crate) entries: Vec<Entry>,
     /// Search mode only: parent folder of each entry (aligned with `entries`).
     parents: Vec<Arc<std::path::Path>>,
+    /// Shell folders only: what the shell knows about each entry (aligned with `entries`).
+    pub(crate) shell_items: Vec<rf_win::shellfolder::ShellChild>,
+    /// Shell folders only: the shell's name for the folder (when the location carries none).
+    shell_title: Option<String>,
     visible: Vec<u32>,
     pub sort: SortSpec,
     pub group: GroupBy,
@@ -390,6 +398,8 @@ impl FolderView {
             content_width: px(900.),
             entries: Vec::new(),
             parents: Vec::new(),
+            shell_items: Vec::new(),
+            shell_title: None,
             visible: Vec::new(),
             sort: SortSpec {
                 key: prefs.default_sort,
@@ -468,6 +478,13 @@ impl FolderView {
                 return format!("{} {}", crate::t!("Etiket:"), crate::i18n::td(&d.name));
             }
         }
+        if let Location::Shell { name, .. } = self.location() {
+            if name.is_empty() {
+                if let Some(t) = &self.shell_title {
+                    return t.clone();
+                }
+            }
+        }
         if let Location::Path(p) = self.location() {
             if let Some(l) = rf_win::localized::folder_label(p, None) {
                 return l.to_string();
@@ -484,6 +501,7 @@ impl FolderView {
             Location::Search { .. } => L::Search,
             Location::Tag(_) => L::Tag,
             Location::Library { .. } => L::Library,
+            Location::Shell { .. } => L::Usb,
             Location::Path(p) if rf_win::network::server_root(p).is_some() => L::Server,
             // the archive itself or a folder inside it (name check only: no disk access here)
             Location::Path(p) if crate::archive_view::is_browsable_path(p) => L::FileArchive,
@@ -840,6 +858,8 @@ impl FolderView {
             self.soft_pending = None;
             self.entries.clear();
             self.parents.clear();
+            self.shell_items.clear();
+            self.shell_title = None;
             self.visible.clear();
             self.selected.clear();
             self.cursor = None;
@@ -903,6 +923,46 @@ impl FolderView {
                     msgs.push(m);
                 }
                 let _ = this.update(cx, |v, cx| v.apply(generation, msgs, cx));
+            }));
+            cx.notify();
+            return;
+        }
+        if let Location::Shell { parsing, .. } = self.location().clone() {
+            self.loading = true;
+            self.load_started = Instant::now();
+            let generation = self.generation;
+            let cancel = self.cancel.clone();
+            let (tx, mut rx) = mpsc::unbounded::<Msg>();
+            std::thread::Builder::new()
+                .name("rf-shell-list".into())
+                .spawn(move || {
+                    use rf_win::shellfolder as sf;
+                    if let Some(n) = sf::display_name(&parsing) {
+                        let _ = tx.unbounded_send(Msg::ShellName(n));
+                    }
+                    let r = sf::list(&parsing, &|| cancel.load(Ordering::Relaxed), &mut |batch| {
+                        let es = batch
+                            .iter()
+                            .map(|c| {
+                                let kind = if c.is_folder { rf_core::EntryKind::Dir } else { rf_core::EntryKind::File };
+                                Entry::new(&c.name, kind, c.size.unwrap_or(0), c.modified_ms.unwrap_or(0), 0, 0)
+                            })
+                            .collect();
+                        let _ = tx.unbounded_send(Msg::Shell(es, batch));
+                    });
+                    let _ = tx.unbounded_send(Msg::Done(r.map_err(|e| format!("{e:#}"))));
+                })
+                .ok();
+            self._load_task = Some(cx.spawn(async move |this, cx| {
+                while let Some(first) = rx.next().await {
+                    let mut msgs = vec![first];
+                    while let Ok(m) = rx.try_recv() {
+                        msgs.push(m);
+                    }
+                    if this.update(cx, |v, cx| v.apply(generation, msgs, cx)).is_err() {
+                        break;
+                    }
+                }
             }));
             cx.notify();
             return;
@@ -1159,6 +1219,11 @@ impl FolderView {
                     self.entries.extend(es);
                     self.parents.extend(ps);
                 }
+                Msg::Shell(es, items) => {
+                    self.entries.extend(es);
+                    self.shell_items.extend(items);
+                }
+                Msg::ShellName(n) => self.shell_title = Some(n),
                 Msg::Done(r) => {
                     done = true;
                     self.loading = false;
@@ -1242,7 +1307,7 @@ impl FolderView {
                         p.extend(b)
                     }
                 }
-                Msg::Hits(..) => {}
+                Msg::Hits(..) | Msg::Shell(..) | Msg::ShellName(_) => {}
                 Msg::Done(Err(e)) if e.contains("bulunamadı") => {
                     // The folder we are showing was deleted/renamed away: step up.
                     self.soft_pending = None;
@@ -2239,6 +2304,9 @@ impl FolderView {
 
     /// Folder containing entry `ei` (differs per entry in search results).
     pub(crate) fn parent_of(&self, ei: u32) -> Option<&std::path::Path> {
+        if matches!(self.location(), Location::Shell { .. }) {
+            return self.shell_items.get(ei as usize)?.fs_path.as_deref()?.parent();
+        }
         match self.parents.get(ei as usize) {
             Some(p) => Some(p),
             None => self.location().path(),
@@ -2246,6 +2314,10 @@ impl FolderView {
     }
 
     pub(crate) fn path_of(&self, ei: u32) -> Option<PathBuf> {
+        if matches!(self.location(), Location::Shell { .. }) {
+            // only items that are real files have a path; a phone's items have none
+            return self.shell_items.get(ei as usize)?.fs_path.clone();
+        }
         Some(self.parent_of(ei)?.join(&*self.entries.get(ei as usize)?.name))
     }
 
@@ -2343,7 +2415,55 @@ impl FolderView {
 
     // ---------- opening ----------
 
+    /// Shell folders (phones…): opens what only the shell can open. Returns false for items
+    /// that are real files or folders (they go the ordinary way through `path_of`).
+    fn open_shell_entry(&mut self, ei: u32, cx: &mut Context<Self>) -> bool {
+        let Some(child) = self.shell_items.get(ei as usize).cloned() else { return true };
+        let loc = if child.is_folder {
+            match &child.fs_path {
+                Some(p) if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("library-ms")) => {
+                    Location::Library { file: p.clone(), name: child.name.clone() }
+                }
+                Some(_) => return false,
+                // a network computer (`\nas`) is a path to us, the shell lists its shares
+                None if child.parsing.starts_with(r"\\") => Location::Path(PathBuf::from(&child.parsing)),
+                None => Location::Shell { parsing: child.parsing.clone(), name: child.name.clone() },
+            }
+        } else {
+            if child.fs_path.is_some() {
+                return false;
+            }
+            // an item on a phone: the shell fetches it and opens it with its default app
+            // (a dialog asking for a file cannot be answered with one)
+            if !self.picking {
+                let parsing = child.parsing;
+                std::thread::spawn(move || {
+                    if let Err(e) = rf_win::shellfolder::open(&parsing) {
+                        log::warn!("open {parsing}: {e:#}");
+                    }
+                });
+            }
+            return true;
+        };
+        if cx.global::<crate::settings::Settings>().open_folders_in_new_tab {
+            cx.emit(FolderEvent::OpenInNewTab(loc));
+        } else {
+            self.navigate(loc, cx);
+        }
+        true
+    }
+
+    /// The selected items of a shell folder, in list order.
+    pub(crate) fn selection_shell(&self) -> Vec<rf_win::shellfolder::ShellChild> {
+        let mut v: Vec<u32> = self.selected.iter().copied().collect();
+        v.sort_unstable();
+        v.into_iter().filter_map(|i| self.shell_items.get(i as usize).cloned()).collect()
+    }
+
     fn open_entry(&mut self, ei: u32, cx: &mut Context<Self>) {
+        if matches!(self.location(), Location::Shell { .. }) && self.open_shell_entry(ei, cx) {
+            return;
+        }
         let Some(path) = self.path_of(ei) else { return };
         let e = &self.entries[ei as usize];
         let browse = !e.is_dir()
@@ -3121,6 +3241,7 @@ impl FolderView {
         let pinned = places.pinned.clone();
         let drives = places.drives.clone();
         let recent = places.recent.clone();
+        let devices = places.devices.clone();
         let card = |id: ElementId| {
             v_flex()
                 .id(id)
@@ -3182,6 +3303,24 @@ impl FolderView {
                             ),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(root.clone()), cx))),
+            );
+        }
+
+        // phones and cameras (not drives): none connected = no group at all
+        let has_devices = !devices.is_empty();
+        let mut device_grid = div().grid().grid_cols(tile_cols(avail, 240., 340., 12.)).gap_3();
+        for (i, d) in devices.into_iter().enumerate() {
+            let loc = Location::Shell { parsing: d.parsing.clone(), name: d.name.clone() };
+            device_grid = device_grid.child(
+                card(("device", i).into())
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .items_center()
+                            .child(Icon::new(L::Usb).size(px(28.)).text_color(p.text_secondary))
+                            .child(div().flex_1().min_w_0().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(d.name)),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(loc.clone(), cx))),
             );
         }
 
@@ -3264,6 +3403,7 @@ impl FolderView {
                     .child(div().h_2())
                     .child(section(t!("Sürücüler")))
                     .child(drive_grid)
+                    .when(has_devices, |d| d.child(div().h_2()).child(section(t!("Cihazlar"))).child(device_grid))
                     .when(has_recent, |d| d.child(div().h_2()).child(section(t!("Son kullanılanlar"))))
                     .child(recent_list),
             )
