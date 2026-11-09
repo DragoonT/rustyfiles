@@ -195,7 +195,7 @@
  "348cba50": "Activer",
  "0b2d3472": "Performances",
  "a07795df": "Mode de rendu",
- "6fa80617": "Automatique : tant que le GPU est occupé (jeux, rendu), l'interface est dessinée par le CPU, et par le GPU tant que le CPU est occupé. Le basculement est transparent.",
+ "bd58a7bc": "Automatique : la carte graphique est vérifiée au démarrage et, si elle fonctionne, l'interface est dessinée par le GPU. Tant que le GPU est occupé (jeux, rendu), elle passe au CPU et revient quand le GPU est libre. Vous ne remarquerez pas le basculement.",
  "cf43a3ab": "Automatique",
  "5bde3bd1": "Raccourcis clavier",
  "b0f4ab30": "Pour les modifier, ajoutez ceci à settings.toml :  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

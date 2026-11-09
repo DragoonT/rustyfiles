@@ -195,7 +195,7 @@
  "348cba50": "Aktivér",
  "0b2d3472": "Ydeevne",
  "a07795df": "Gengivelsestilstand",
- "6fa80617": "Automatisk: mens GPU'en er optaget (spil, rendering), tegnes brugerfladen på CPU'en, og på GPU'en mens CPU'en er optaget. Skiftet er sømløst.",
+ "bd58a7bc": "Automatisk: ved start kontrolleres grafikkortet, og hvis det virker, tegnes brugerfladen på GPU'en. Mens GPU'en er optaget (spil, rendering), skifter den til CPU'en og tilbage, når GPU'en er fri. Du vil ikke mærke skiftet.",
  "cf43a3ab": "Automatisk",
  "5bde3bd1": "Tastaturgenveje",
  "b0f4ab30": "For at ændre dem skal du tilføje dette til settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

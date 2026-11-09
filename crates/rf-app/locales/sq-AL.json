@@ -195,7 +195,7 @@
  "348cba50": "Aktivizo",
  "0b2d3472": "Performanca",
  "a07795df": "Mënyra e vizatimit",
- "6fa80617": "Automatike: kur GPU është i zënë (lojëra, renderim), ndërfaqja vizatohet në CPU, dhe në GPU kur CPU është i zënë. Kalimi është i pandjeshëm.",
+ "bd58a7bc": "Automatike: gjatë nisjes kontrollohet karta grafike dhe, nëse funksionon, ndërfaqja vizatohet në GPU. Kur GPU është i zënë (lojëra, renderim), kalon te CPU dhe kthehet kur GPU lirohet. Kalimin nuk do ta vini re.",
  "cf43a3ab": "Automatike",
  "5bde3bd1": "Shkurtoret e tastierës",
  "b0f4ab30": "Për t'i ndryshuar, shtoje këtë te settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

@@ -1176,10 +1176,10 @@
   "en": "Rendering mode"
  },
  {
-  "id": "6fa80617",
-  "key": "Otomatik: GPU doluyken (oyun, render) arayüz CPU ile çizilir, CPU doluyken GPU ile. Geçiş fark edilmez.",
-  "tr": "Otomatik: GPU doluyken (oyun, render) arayüz CPU ile çizilir, CPU doluyken GPU ile. Geçiş fark edilmez.",
-  "en": "Automatic: while the GPU is busy (games, rendering) the UI is drawn on the CPU, and on the GPU while the CPU is busy. The switch is seamless."
+  "id": "bd58a7bc",
+  "key": "Otomatik: açılışta ekran kartı denetlenir, sorun yoksa arayüz GPU ile çizilir. GPU doluyken (oyun, render) CPU'ya geçer, boşalınca geri döner. Geçiş fark edilmez.",
+  "tr": "Otomatik: açılışta ekran kartı denetlenir, sorun yoksa arayüz GPU ile çizilir. GPU doluyken (oyun, render) CPU'ya geçer, boşalınca geri döner. Geçiş fark edilmez.",
+  "en": "Automatic: the graphics card is checked at start and, if it works, the interface is drawn on the GPU. While the GPU is busy (games, rendering) it moves to the CPU and back when the GPU is free. You won't notice the switch."
  },
  {
   "id": "cf43a3ab",

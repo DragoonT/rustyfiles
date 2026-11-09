@@ -195,7 +195,7 @@
  "348cba50": "Įjungti",
  "0b2d3472": "Našumas",
  "a07795df": "Vaizdavimo režimas",
- "6fa80617": "Automatinis: kol GPU užimtas (žaidimai, vaizdavimas), sąsaja piešiama CPU, o kol užimtas CPU – GPU. Perjungimas sklandus.",
+ "bd58a7bc": "Automatinis: paleidžiant patikrinama vaizdo plokštė ir, jei ji veikia, sąsaja piešiama GPU. Kol GPU užimtas (žaidimai, vaizdavimas), pereinama prie CPU, o GPU atsilaisvinus grįžtama atgal. Perjungimo nepastebėsite.",
  "cf43a3ab": "Automatinis",
  "5bde3bd1": "Spartieji klavišai",
  "b0f4ab30": "Norėdami juos pakeisti, įtraukite į settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

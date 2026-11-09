@@ -195,7 +195,7 @@
  "348cba50": "Włącz",
  "0b2d3472": "Wydajność",
  "a07795df": "Tryb renderowania",
- "6fa80617": "Automatyczny: gdy GPU jest zajęty (gry, renderowanie), interfejs jest rysowany przez CPU, a gdy zajęty jest CPU, przez GPU. Przełączanie jest płynne.",
+ "bd58a7bc": "Automatyczny: przy uruchomieniu sprawdzana jest karta graficzna i, jeśli działa, interfejs jest rysowany przez GPU. Gdy GPU jest zajęty (gry, renderowanie), rysowanie przechodzi na CPU i wraca, gdy GPU się zwolni. Przełączenia nie zauważysz.",
  "cf43a3ab": "Automatyczny",
  "5bde3bd1": "Skróty klawiaturowe",
  "b0f4ab30": "Aby je zmienić, dodaj to do settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

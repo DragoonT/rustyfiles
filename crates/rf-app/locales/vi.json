@@ -195,7 +195,7 @@
  "348cba50": "Bật",
  "0b2d3472": "Hiệu suất",
  "a07795df": "Chế độ kết xuất",
- "6fa80617": "Tự động: khi GPU bận (trò chơi, kết xuất), giao diện được vẽ bằng CPU, và bằng GPU khi CPU bận. Việc chuyển đổi diễn ra liền mạch.",
+ "bd58a7bc": "Tự động: card đồ họa được kiểm tra khi khởi động và, nếu hoạt động tốt, giao diện được vẽ bằng GPU. Khi GPU bận (trò chơi, kết xuất), giao diện chuyển sang CPU và quay lại khi GPU rảnh. Bạn sẽ không nhận ra sự chuyển đổi.",
  "cf43a3ab": "Tự động",
  "5bde3bd1": "Lối tắt bàn phím",
  "b0f4ab30": "Để thay đổi, hãy thêm nội dung này vào settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

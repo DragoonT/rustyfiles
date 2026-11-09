@@ -195,7 +195,7 @@
  "348cba50": "Ativar",
  "0b2d3472": "Desempenho",
  "a07795df": "Modo de renderização",
- "6fa80617": "Automático: enquanto a GPU está ocupada (jogos, renderização), a interface é desenhada pela CPU, e pela GPU enquanto a CPU está ocupada. A troca é contínua.",
+ "bd58a7bc": "Automático: ao iniciar, a placa de vídeo é verificada e, se funcionar, a interface é desenhada pela GPU. Enquanto a GPU está ocupada (jogos, renderização), passa para a CPU e volta quando a GPU fica livre. Você não notará a troca.",
  "cf43a3ab": "Automático",
  "5bde3bd1": "Atalhos do teclado",
  "b0f4ab30": "Para alterá-los, adicione isto ao settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

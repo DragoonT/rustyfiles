@@ -195,7 +195,7 @@
  "348cba50": "Aktivieren",
  "0b2d3472": "Leistung",
  "a07795df": "Rendering-Modus",
- "6fa80617": "Automatisch: Solange die GPU ausgelastet ist (Spiele, Rendering), wird die Oberfläche auf der CPU gezeichnet, und auf der GPU, solange die CPU ausgelastet ist. Der Wechsel erfolgt nahtlos.",
+ "bd58a7bc": "Automatisch: Beim Start wird die Grafikkarte geprüft und, wenn sie funktioniert, die Oberfläche auf der GPU gezeichnet. Solange die GPU ausgelastet ist (Spiele, Rendering), wechselt sie zur CPU und zurück, sobald die GPU frei ist. Der Wechsel ist nicht spürbar.",
  "cf43a3ab": "Automatisch",
  "5bde3bd1": "Tastenkombinationen",
  "b0f4ab30": "Zum Ändern füge Folgendes zu settings.toml hinzu:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

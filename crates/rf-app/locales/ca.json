@@ -195,7 +195,7 @@
  "348cba50": "Activa",
  "0b2d3472": "Rendiment",
  "a07795df": "Mode de renderització",
- "6fa80617": "Automàtic: mentre la GPU està ocupada (jocs, renderització) la interfície es dibuixa a la CPU, i a la GPU mentre la CPU està ocupada. El canvi és fluid.",
+ "bd58a7bc": "Automàtic: en iniciar es comprova la targeta gràfica i, si funciona, la interfície es dibuixa a la GPU. Mentre la GPU està ocupada (jocs, renderització) passa a la CPU i torna quan la GPU queda lliure. No notaràs el canvi.",
  "cf43a3ab": "Automàtic",
  "5bde3bd1": "Dreceres del teclat",
  "b0f4ab30": "Per canviar-les, afegeix això a settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

@@ -195,7 +195,7 @@
  "348cba50": "Attiva",
  "0b2d3472": "Prestazioni",
  "a07795df": "Modalità di rendering",
- "6fa80617": "Automatico: mentre la GPU è occupata (giochi, rendering) l'interfaccia viene disegnata dalla CPU, e dalla GPU mentre la CPU è occupata. Il passaggio è fluido.",
+ "bd58a7bc": "Automatico: all'avvio la scheda grafica viene controllata e, se funziona, l'interfaccia viene disegnata dalla GPU. Mentre la GPU è occupata (giochi, rendering) passa alla CPU e torna quando la GPU è libera. Non noterai il passaggio.",
  "cf43a3ab": "Automatico",
  "5bde3bd1": "Scorciatoie da tastiera",
  "b0f4ab30": "Per modificarle, aggiungi questo a settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

@@ -195,7 +195,7 @@
  "348cba50": "Enable",
  "0b2d3472": "Performance",
  "a07795df": "Rendering mode",
- "6fa80617": "Automatic: while the GPU is busy (games, rendering) the UI is drawn on the CPU, and on the GPU while the CPU is busy. The switch is seamless.",
+ "bd58a7bc": "Automatic: the graphics card is checked at start and, if it works, the interface is drawn on the GPU. While the GPU is busy (games, rendering) it moves to the CPU and back when the GPU is free. You won't notice the switch.",
  "cf43a3ab": "Automatic",
  "5bde3bd1": "Keyboard shortcuts",
  "b0f4ab30": "To change them, add this to settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

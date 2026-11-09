@@ -195,7 +195,7 @@
  "348cba50": "Activare",
  "0b2d3472": "Performanță",
  "a07795df": "Mod de randare",
- "6fa80617": "Automat: cât timp GPU-ul este ocupat (jocuri, randare), interfața este desenată de CPU, iar de GPU cât timp CPU-ul este ocupat. Comutarea este fluidă.",
+ "bd58a7bc": "Automat: la pornire se verifică placa video și, dacă funcționează, interfața este desenată de GPU. Cât timp GPU-ul este ocupat (jocuri, randare), trece la CPU și revine când GPU-ul se eliberează. Nu veți observa comutarea.",
  "cf43a3ab": "Automat",
  "5bde3bd1": "Comenzi rapide tastatură",
  "b0f4ab30": "Pentru a le modifica, adăugați aceasta în settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

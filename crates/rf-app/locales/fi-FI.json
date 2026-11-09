@@ -195,7 +195,7 @@
  "348cba50": "Ota käyttöön",
  "0b2d3472": "Suorituskyky",
  "a07795df": "Piirtotila",
- "6fa80617": "Automaattinen: kun GPU on kiireinen (pelit, renderöinti), käyttöliittymä piirretään suorittimella, ja GPU:lla kun suoritin on kiireinen. Vaihto on saumaton.",
+ "bd58a7bc": "Automaattinen: käynnistyksessä näytönohjain tarkistetaan ja jos se toimii, käyttöliittymä piirretään GPU:lla. Kun GPU on kiireinen (pelit, renderöinti), piirto siirtyy suorittimelle ja takaisin, kun GPU vapautuu. Vaihtoa ei huomaa.",
  "cf43a3ab": "Automaattinen",
  "5bde3bd1": "Pikanäppäimet",
  "b0f4ab30": "Voit muuttaa niitä lisäämällä tämän tiedostoon settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

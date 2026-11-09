@@ -195,7 +195,7 @@
  "348cba50": "Ativar",
  "0b2d3472": "Desempenho",
  "a07795df": "Modo de composição",
- "6fa80617": "Automático: enquanto a GPU está ocupada (jogos, composição), a interface é desenhada pela CPU, e pela GPU enquanto a CPU está ocupada. A alternância é contínua.",
+ "bd58a7bc": "Automático: ao iniciar, a placa gráfica é verificada e, se funcionar, a interface é desenhada pela GPU. Enquanto a GPU está ocupada (jogos, composição), passa para a CPU e volta quando a GPU fica livre. Não vai notar a alternância.",
  "cf43a3ab": "Automático",
  "5bde3bd1": "Teclas de atalho",
  "b0f4ab30": "Para os alterar, adicione isto a settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

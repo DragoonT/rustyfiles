@@ -195,7 +195,7 @@
  "348cba50": "Inschakelen",
  "0b2d3472": "Prestaties",
  "a07795df": "Weergavemodus",
- "6fa80617": "Automatisch: terwijl de GPU bezig is (games, renderen) wordt de interface door de CPU getekend, en door de GPU terwijl de CPU bezig is. De overgang is naadloos.",
+ "bd58a7bc": "Automatisch: bij het opstarten wordt de videokaart gecontroleerd en, als die werkt, wordt de interface door de GPU getekend. Terwijl de GPU bezig is (games, renderen) schakelt het over naar de CPU en weer terug zodra de GPU vrij is. Je merkt de overgang niet.",
  "cf43a3ab": "Automatisch",
  "5bde3bd1": "Sneltoetsen",
  "b0f4ab30": "Om ze te wijzigen, voeg dit toe aan settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

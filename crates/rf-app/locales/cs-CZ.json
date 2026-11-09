@@ -195,7 +195,7 @@
  "348cba50": "Zapnout",
  "0b2d3472": "Výkon",
  "a07795df": "Režim vykreslování",
- "6fa80617": "Automaticky: když je GPU vytížené (hry, renderování), rozhraní se kreslí na CPU, a když je vytížené CPU, na GPU. Přepnutí je plynulé.",
+ "bd58a7bc": "Automaticky: při spuštění se zkontroluje grafická karta a pokud funguje, rozhraní se kreslí na GPU. Když je GPU vytížené (hry, renderování), přepne se na CPU a vrátí se, jakmile se GPU uvolní. Přepnutí nepoznáte.",
  "cf43a3ab": "Automaticky",
  "5bde3bd1": "Klávesové zkratky",
  "b0f4ab30": "Chcete-li je změnit, přidejte do settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

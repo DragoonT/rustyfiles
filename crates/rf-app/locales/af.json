@@ -195,7 +195,7 @@
  "348cba50": "Aktiveer",
  "0b2d3472": "Werkverrigting",
  "a07795df": "Weergawemodus",
- "6fa80617": "Outomaties: terwyl die GPU besig is (speletjies, weergawe) word die UI op die CPU geteken, en op die GPU terwyl die CPU besig is. Die oorskakeling is naatloos.",
+ "bd58a7bc": "Outomaties: die grafiese kaart word met die begin gekontroleer en, as dit werk, word die UI op die GPU geteken. Terwyl die GPU besig is (speletjies, weergawe) skakel dit oor na die CPU en terug wanneer die GPU vry is. Jy sal nie die oorskakeling agterkom nie.",
  "cf43a3ab": "Outomaties",
  "5bde3bd1": "Sleutelbordkortpaaie",
  "b0f4ab30": "Om dit te verander, voeg dit by settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

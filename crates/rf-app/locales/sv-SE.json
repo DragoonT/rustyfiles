@@ -195,7 +195,7 @@
  "348cba50": "Aktivera",
  "0b2d3472": "Prestanda",
  "a07795df": "Renderingsläge",
- "6fa80617": "Automatiskt: medan GPU:n är upptagen (spel, rendering) ritas gränssnittet på CPU:n, och på GPU:n medan CPU:n är upptagen. Växlingen är sömlös.",
+ "bd58a7bc": "Automatiskt: grafikkortet kontrolleras vid start och, om det fungerar, ritas gränssnittet på GPU:n. Medan GPU:n är upptagen (spel, rendering) går det över till CPU:n och tillbaka när GPU:n är ledig. Du märker inte växlingen.",
  "cf43a3ab": "Automatiskt",
  "5bde3bd1": "Kortkommandon",
  "b0f4ab30": "Om du vill ändra dem lägger du till detta i settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

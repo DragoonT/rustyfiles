@@ -195,7 +195,7 @@
  "348cba50": "Ieslēgt",
  "0b2d3472": "Veiktspēja",
  "a07795df": "Renderēšanas režīms",
- "6fa80617": "Automātiski: kamēr GPU ir aizņemts (spēles, renderēšana), saskarne tiek zīmēta ar CPU, bet kamēr aizņemts CPU – ar GPU. Pārslēgšana ir nemanāma.",
+ "bd58a7bc": "Automātiski: startējot tiek pārbaudīta videokarte, un, ja tā darbojas, saskarne tiek zīmēta ar GPU. Kamēr GPU ir aizņemts (spēles, renderēšana), zīmēšana pāriet uz CPU un atgriežas, kad GPU atbrīvojas. Pārslēgšanu jūs nepamanīsiet.",
  "cf43a3ab": "Automātiski",
  "5bde3bd1": "Īsinājumtaustiņi",
  "b0f4ab30": "Lai tos mainītu, pievienojiet failam settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

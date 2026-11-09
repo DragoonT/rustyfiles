@@ -195,7 +195,7 @@
  "348cba50": "Omogući",
  "0b2d3472": "Performanse",
  "a07795df": "Način iscrtavanja",
- "6fa80617": "Automatski: dok je GPU zauzet (igre, renderiranje) sučelje se crta na CPU-u, a na GPU-u dok je CPU zauzet. Prebacivanje je neprimjetno.",
+ "bd58a7bc": "Automatski: pri pokretanju provjerava se grafička kartica i, ako radi, sučelje se crta na GPU-u. Dok je GPU zauzet (igre, renderiranje), prelazi na CPU, a vraća se kad se GPU oslobodi. Prebacivanje nećete primijetiti.",
  "cf43a3ab": "Automatski",
  "5bde3bd1": "Tipkovnički prečaci",
  "b0f4ab30": "Za promjenu dodajte ovo u settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

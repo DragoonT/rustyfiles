@@ -195,7 +195,7 @@
  "348cba50": "Aktiver",
  "0b2d3472": "Ytelse",
  "a07795df": "Gjengivelsesmodus",
- "6fa80617": "Automatisk: mens GPU-en er opptatt (spill, gjengivelse) tegnes grensesnittet på CPU-en, og på GPU-en mens CPU-en er opptatt. Byttet skjer sømløst.",
+ "bd58a7bc": "Automatisk: skjermkortet sjekkes ved oppstart, og hvis det fungerer, tegnes grensesnittet på GPU-en. Mens GPU-en er opptatt (spill, gjengivelse), går det over til CPU-en og tilbake når GPU-en er ledig. Du merker ikke byttet.",
  "cf43a3ab": "Automatisk",
  "5bde3bd1": "Hurtigtaster",
  "b0f4ab30": "For å endre dem, legg dette til i settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

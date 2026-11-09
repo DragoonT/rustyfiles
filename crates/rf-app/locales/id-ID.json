@@ -195,7 +195,7 @@
  "348cba50": "Aktifkan",
  "0b2d3472": "Performa",
  "a07795df": "Mode render",
- "6fa80617": "Otomatis: saat GPU sibuk (game, rendering) UI digambar di CPU, dan di GPU saat CPU sibuk. Peralihannya mulus.",
+ "bd58a7bc": "Otomatis: kartu grafis diperiksa saat mulai dan, jika berfungsi, UI digambar di GPU. Saat GPU sibuk (game, rendering) UI berpindah ke CPU dan kembali saat GPU bebas. Anda tidak akan menyadari peralihannya.",
  "cf43a3ab": "Otomatis",
  "5bde3bd1": "Pintasan keyboard",
  "b0f4ab30": "Untuk mengubahnya, tambahkan ini ke settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

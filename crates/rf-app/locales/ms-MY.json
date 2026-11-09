@@ -195,7 +195,7 @@
  "348cba50": "Dayakan",
  "0b2d3472": "Prestasi",
  "a07795df": "Mod pemaparan",
- "6fa80617": "Automatik: semasa GPU sibuk (permainan, pemaparan), UI dilukis pada CPU, dan pada GPU semasa CPU sibuk. Pertukaran berlaku dengan lancar.",
+ "bd58a7bc": "Automatik: kad grafik diperiksa semasa permulaan dan, jika berfungsi, UI dilukis pada GPU. Semasa GPU sibuk (permainan, pemaparan), ia beralih ke CPU dan kembali apabila GPU bebas. Anda tidak akan perasan peralihan itu.",
  "cf43a3ab": "Automatik",
  "5bde3bd1": "Pintasan papan kekunci",
  "b0f4ab30": "Untuk menukarnya, tambahkan ini pada settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

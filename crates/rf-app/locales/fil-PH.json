@@ -195,7 +195,7 @@
  "348cba50": "I-enable",
  "0b2d3472": "Performance",
  "a07795df": "Mode ng pag-render",
- "6fa80617": "Automatic: habang abala ang GPU (mga laro, rendering) ang UI ay iginuguhit sa CPU, at sa GPU naman habang abala ang CPU. Tuloy-tuloy ang paglipat.",
+ "bd58a7bc": "Automatic: sinusuri ang graphics card sa pagsisimula at, kung gumagana ito, ang UI ay iginuguhit sa GPU. Habang abala ang GPU (mga laro, rendering) lilipat ito sa CPU at babalik kapag libre na ang GPU. Hindi mo mapapansin ang paglipat.",
  "cf43a3ab": "Awtomatiko",
  "5bde3bd1": "Mga keyboard shortcut",
  "b0f4ab30": "Para baguhin ang mga ito, idagdag ito sa settings.toml:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",

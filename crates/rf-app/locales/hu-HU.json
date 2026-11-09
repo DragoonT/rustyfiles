@@ -195,7 +195,7 @@
  "348cba50": "Engedélyezés",
  "0b2d3472": "Teljesítmény",
  "a07795df": "Megjelenítési mód",
- "6fa80617": "Automatikus: amíg a GPU foglalt (játékok, renderelés), a felület a CPU-n rajzolódik, amíg a CPU foglalt, addig a GPU-n. Az átváltás zökkenőmentes.",
+ "bd58a7bc": "Automatikus: induláskor ellenőrzi a videókártyát, és ha működik, a felület a GPU-n rajzolódik. Amíg a GPU foglalt (játékok, renderelés), átvált a CPU-ra, majd visszatér, amint a GPU felszabadul. Az átváltást nem fogja észrevenni.",
  "cf43a3ab": "Automatikus",
  "5bde3bd1": "Billentyűparancsok",
  "b0f4ab30": "Módosításukhoz adja hozzá ezt a settings.toml fájlhoz:  [keybindings]  \"ctrl-k\" = \"NewFolder\"",
