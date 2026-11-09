@@ -173,3 +173,47 @@ pub fn bring_to_front(hwnd: isize) {
 pub fn is_foreground(hwnd: isize) -> bool {
     unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize == hwnd }
 }
+
+/// The colour on screen down a column of `hwnd`'s client area: `x` and `y0..y1` in client
+/// pixels. The median of each channel, so icons and markers crossing the column don't count.
+/// What the user sees there, Mica's wallpaper tint included, which the app can't know otherwise.
+pub fn screen_color(hwnd: isize, x: i32, y0: i32, y1: i32) -> Option<[u8; 3]> {
+    use windows::Win32::Foundation::{HWND, POINT};
+    use windows::Win32::Graphics::Gdi::{
+        BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, ClientToScreen, CreateCompatibleBitmap, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SRCCOPY, SelectObject,
+    };
+    let h = (y1 - y0).max(0);
+    if h == 0 {
+        return None;
+    }
+    unsafe {
+        let mut p = POINT { x, y: y0 };
+        if !ClientToScreen(HWND(hwnd as *mut _), &mut p).as_bool() {
+            return None;
+        }
+        let screen = GetDC(None);
+        let mem = CreateCompatibleDC(Some(screen));
+        let bmp = CreateCompatibleBitmap(screen, 1, h);
+        let old = SelectObject(mem, bmp.into());
+        let copied = BitBlt(mem, 0, 0, 1, h, Some(screen), p.x, p.y, SRCCOPY).is_ok();
+        let mut info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER { biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32, biWidth: 1, biHeight: -h, biPlanes: 1, biBitCount: 32, biCompression: BI_RGB.0, ..Default::default() },
+            ..Default::default()
+        };
+        let mut px = vec![0u32; h as usize];
+        let rows = if copied { GetDIBits(mem, bmp, 0, h as u32, Some(px.as_mut_ptr().cast()), &mut info, DIB_RGB_COLORS) } else { 0 };
+        SelectObject(mem, old);
+        let _ = DeleteObject(bmp.into());
+        let _ = DeleteDC(mem);
+        ReleaseDC(None, screen);
+        if rows <= 0 {
+            return None;
+        }
+        let median = |shift: u32| {
+            let mut v: Vec<u8> = px.iter().map(|c| (c >> shift) as u8).collect();
+            v.sort_unstable();
+            v[v.len() / 2]
+        };
+        Some([median(16), median(8), median(0)])
+    }
+}

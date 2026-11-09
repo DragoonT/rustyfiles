@@ -135,6 +135,10 @@ pub struct Workspace {
     sidebar_rail: bool,
     /// The full sidebar shown over the content while the pointer is on the rail (or on it).
     rail_peek: [bool; 2],
+    /// The colour the window shows behind the rail (Mica's wallpaper tint), read off the screen
+    /// when the full sidebar opens over the content: painted with it, the sidebar looks like the
+    /// docked one instead of a neutral grey slab over a tinted window.
+    rail_peek_bg: Option<Hsla>,
     preview_w: f32,
     /// Debounced settings write after a pane resize.
     _width_save: Option<Task<()>>,
@@ -506,6 +510,7 @@ impl Workspace {
             sidebar_w: prefs.sidebar_width.clamp(SIDEBAR_MIN, SIDEBAR_MAX),
             sidebar_rail: prefs.sidebar_rail,
             rail_peek: [false; 2],
+            rail_peek_bg: None,
             preview_w: prefs.preview_width.clamp(PREVIEW_MIN, PREVIEW_MAX),
             _width_save: None,
             palette: None,
@@ -3014,7 +3019,7 @@ impl Render for Workspace {
                 .left_0()
                 .h_full()
                 .w(px(self.sidebar_w))
-                .bg(Hsla { a: 1., ..p.content_bg })
+                .bg(self.rail_peek_bg.unwrap_or(Hsla { a: 1., ..p.content_bg }))
                 .border_r_1()
                 .border_color(p.border)
                 .rounded_r(theme::RADIUS)
@@ -3335,8 +3340,17 @@ impl Render for Workspace {
                             .child(s)
                             .child(resize_handle("sidebar-resize", ResizeSidebar, false))
                             // on the rail, hovering opens the full sidebar over the content
-                            .on_hover(cx.listener(|this, h: &bool, _, cx| {
+                            .on_hover(cx.listener(|this, h: &bool, window, cx| {
                                 if this.sidebar_rail && this.rail_peek[0] != *h {
+                                    if *h && !this.rail_peek[1] {
+                                        // before the sidebar covers it: a column near the rail's
+                                        // left edge, clear of the icons
+                                        let s = window.scale_factor();
+                                        let height = f32::from(window.viewport_size().height);
+                                        let at = |v: f32| (v * s) as i32;
+                                        this.rail_peek_bg = rf_win::window::screen_color(crate::look::window::hwnd_of(window), at(3.), at(110.), at(height - 60.))
+                                            .map(|[r, g, b]| Hsla::from(gpui_kit::rgb(u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))));
+                                    }
                                     this.rail_peek[0] = *h;
                                     cx.notify();
                                 }
