@@ -77,6 +77,7 @@ impl DnxVideo {
             timescale: track.timescale,
             rotation: track.rotation,
             vui,
+            display: crate::decoder::display_size(hdr.width, hdr.height, track.par, (0, 0)),
         };
         Ok(Self { file, track, gpu, dec: DnxDecoder::new(Self::threads()), pic: Picture::default(), packed: Vec::new(), buf, next_sample: 0, layout: None, slot: 0, info })
     }

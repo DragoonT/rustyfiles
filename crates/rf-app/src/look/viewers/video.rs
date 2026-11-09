@@ -209,6 +209,8 @@ pub struct MediaView {
     rd_opening: bool,
     rd_rect: Option<[i32; 4]>,
     rd_state: Option<rustdecoder::window::WindowState>,
+    /// The popup reported a double click: the next render toggles fullscreen (it has the window).
+    rd_fullscreen: bool,
     _hide: Option<Task<()>>,
     _tasks: Vec<Task<()>>,
 }
@@ -251,6 +253,7 @@ impl MediaView {
             rd_opening: false,
             rd_rect: None,
             rd_state: None,
+            rd_fullscreen: false,
             _hide: None,
             _tasks: Vec::new(),
         };
@@ -361,12 +364,33 @@ impl MediaView {
                 if v.rd_state.as_ref().is_none_or(|o| coarse(o) != coarse(&st)) {
                     cx.notify();
                 }
+                // the size on show (pixel aspect ratio and rotation applied) replaces what the
+                // container index said, so the popup's rectangle has the picture's shape
+                if st.video_size.0 > 0 && st.video_size.1 > 0 {
+                    let shown = (st.video_size.0 as f32, st.video_size.1 as f32);
+                    if shown != v.dims {
+                        v.dims = shown;
+                        cx.notify();
+                    }
+                }
                 v.rd_state = Some(st);
                 for e in events {
                     match e {
+                        // the popup swallows the pointer, so what the viewer's own root does for the
+                        // other routes (click plays, double click is fullscreen, the wheel is the
+                        // volume, moving shows the controls) is done here from the popup's events
                         rustdecoder::window::WindowEvent::Click => v.toggle_play(cx),
-                        rustdecoder::window::WindowEvent::Wheel(d) => v.set_volume(v.volume + 0.04 * d as f32 / 120.0, cx),
-                        _ => {}
+                        rustdecoder::window::WindowEvent::DoubleClick => {
+                            v.rd_fullscreen = true;
+                            cx.notify();
+                        }
+                        rustdecoder::window::WindowEvent::Wheel(d) => {
+                            v.set_volume(v.volume + 0.04 * d as f32 / 120.0, cx);
+                            v.show_controls(cx);
+                        }
+                        rustdecoder::window::WindowEvent::MouseMove => v.show_controls(cx),
+                        rustdecoder::window::WindowEvent::Leave => v.arm_hide(cx),
+                        rustdecoder::window::WindowEvent::Closed => {}
                     }
                 }
                 true
@@ -688,7 +712,10 @@ impl Render for MediaView {
         let (dw, dh) = ((vw * s).floor(), (vh * s).floor());
         let scale = window.scale_factor();
         self.target = (((dw * scale) as u32).max(2), ((dh * scale) as u32).max(2));
-        let controls = self.controls || self.mf || self.rd_mode;
+        let controls = self.controls || self.mf;
+        if std::mem::take(&mut self.rd_fullscreen) {
+            window.toggle_fullscreen();
+        }
         let mut root = div()
             .id("look-media")
             .relative()

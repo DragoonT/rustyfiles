@@ -114,6 +114,9 @@ pub struct Track {
     pub codec_delay_ns: u64,
     /// Matroska `DiscardPadding` of the last block, nanoseconds (Opus end trim), 0 otherwise.
     pub discard_padding_ns: u64,
+    /// Pixel aspect ratio the container states (MP4 `pasp`, derived from Matroska
+    /// `DisplayWidth` / `DisplayHeight`): width : height of one pixel. `None` when it says nothing.
+    pub par: Option<(u32, u32)>,
 }
 
 /// Matroska `Colour` element, values as ISO/IEC 23091-2 code points.
@@ -574,6 +577,7 @@ fn parse_trak(b: &[u8], movie_timescale: u32, fragmented: bool) -> Result<(Track
         default: true,
         codec_delay_ns: 0,
         discard_padding_ns: 0,
+        par: None,
     };
     if let Some(stsd) = child(&stbl, b"stsd") {
         parse_stsd(stsd, &mut t)?;
@@ -636,6 +640,12 @@ fn parse_stsd(b: &[u8], t: &mut Track) -> Result<()> {
             t.height = c.u16()? as u32;
             c.skip(4 + 4 + 4 + 2 + 32 + 2 + 2)?;
             let kids = children(c.rest())?;
+            if let Some(p) = child(&kids, b"pasp").filter(|p| p.len() >= 8) {
+                let (h, v) = (u32::from_be_bytes([p[0], p[1], p[2], p[3]]), u32::from_be_bytes([p[4], p[5], p[6], p[7]]));
+                if h > 0 && v > 0 {
+                    t.par = Some((h, v));
+                }
+            }
             t.codec = match &fourcc {
                 b"avc1" | b"avc3" => child(&kids, b"avcC").map_or(Codec::Other, |x| Codec::H264 { config: x.to_vec() }),
                 b"hvc1" | b"hev1" => child(&kids, b"hvcC").map_or(Codec::Other, |x| Codec::Hevc { config: x.to_vec() }),

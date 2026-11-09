@@ -52,6 +52,8 @@ mod id {
     pub const VIDEO: u32 = 0xE0;
     pub const PIXEL_WIDTH: u32 = 0xB0;
     pub const PIXEL_HEIGHT: u32 = 0xBA;
+    pub const DISPLAY_WIDTH: u32 = 0x54B0;
+    pub const DISPLAY_HEIGHT: u32 = 0x54BA;
     pub const COLOUR: u32 = 0x55B0;
     pub const MATRIX: u32 = 0x55B1;
     pub const BITS_PER_CHANNEL: u32 = 0x55B2;
@@ -182,10 +184,25 @@ struct RawTrack {
     encoded: bool,
     width: u32,
     height: u32,
+    display_width: u32,
+    display_height: u32,
     colour: Option<Colour>,
     rate: f64,
     channels: u16,
     bits: u16,
+}
+
+/// Pixel aspect ratio from `DisplayWidth` : `DisplayHeight` against the coded size.
+fn pixel_aspect(t: &RawTrack) -> Option<(u32, u32)> {
+    if [t.width, t.height, t.display_width, t.display_height].contains(&0) {
+        return None;
+    }
+    let (n, d) = (t.display_width as u64 * t.height as u64, t.display_height as u64 * t.width as u64);
+    fn gcd(a: u64, b: u64) -> u64 {
+        if b == 0 { a } else { gcd(b, a % b) }
+    }
+    let g = gcd(n, d).max(1);
+    u32::try_from(n / g).ok().zip(u32::try_from(d / g).ok())
 }
 
 fn parse_tracks(b: &[u8]) -> Vec<RawTrack> {
@@ -212,6 +229,8 @@ fn parse_tracks(b: &[u8]) -> Vec<RawTrack> {
                         match i {
                             id::PIXEL_WIDTH => t.width = uint(v) as u32,
                             id::PIXEL_HEIGHT => t.height = uint(v) as u32,
+                            id::DISPLAY_WIDTH => t.display_width = uint(v) as u32,
+                            id::DISPLAY_HEIGHT => t.display_height = uint(v) as u32,
                             id::COLOUR => {
                                 let mut c = Colour::default();
                                 for (i, v) in children(v) {
@@ -585,6 +604,7 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
             colour: t.colour,
             default: t.default,
             codec_delay_ns: t.codec_delay_ns,
+            par: pixel_aspect(t),
             discard_padding_ns: if kind == Kind::Audio { raws.iter().rev().find(|r| r.track == t.number).and_then(|r| r.discard).unwrap_or(0).max(0) as u64 } else { 0 },
         });
     }

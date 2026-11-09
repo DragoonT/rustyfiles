@@ -567,3 +567,52 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
 
 Fallback: GPUs without a decoder for the stream (old cards, AV1 before 2020) keep the
 Media Foundation route.
+
+DirectLook route, gaps closed (2026-11-09, branch worktree-agent-a657e1e417248d476):
+- Double click: the popup reports `WindowEvent::DoubleClick`; `poll_rd` in `video.rs` sets a flag
+  and the next `render` calls `window.toggle_fullscreen()` (it has the window), as the root's
+  `on_mouse_down` does for the other routes. The popup follows through the rect that `render`
+  recomputes from the window bounds.
+- Controls auto-hide: the popup reports `WindowEvent::MouseMove` (consecutive moves are one
+  queue entry; `TrackMouseEvent` asks for `WM_MOUSELEAVE`, reported as `Leave`). The viewer runs
+  `show_controls` on a move or a wheel turn and re-arms the hide timer on leave. The popup route
+  no longer forces the bar on (`controls = self.controls || self.mf`). The 48 px of the bar stay
+  reserved under the picture when hidden (no reflow).
+- Audio device change: `audio_out` keeps its stream in a replaceable `Stream`; an
+  `IMMNotificationClient` (default render / console changes) and `AUDCLNT_E_DEVICE_INVALIDATED`,
+  `..._RESOURCES_INVALIDATED`, `..._SERVICE_NOT_RUNNING` ask the render thread to open the new
+  default and `swap_device` the output over. Clock continues; what the old device had been given
+  but not played goes back to the front of the queue (a quarter second of history is kept), so
+  nothing is skipped; queue converted if rate / channels differ; mute applied to the new
+  session; a running stream is restarted; without a device the clock stands still and a retry
+  runs each second. `AudioOutput::force_reopen` is the test hook. Measured (muted, 3 reopens
+  while playing): clock steps 9..10 ms per reopen (the 12..13 ms the reopen takes), position
+  follows the clock within 3 ms, queue consumption stays on the clock, device periods keep
+  coming; a pause across a reopen stays a pause; flush and a new position work afterwards.
+  Not testable here: a real second device (rate change path is written, not exercised),
+  an actual invalidation (the hook runs the same path).
+- Pixel aspect ratio: `Track::par` from MP4 `pasp` and Matroska `DisplayWidth` /
+  `DisplayHeight` (relative to the pixel size), H.264 SPS VUI `aspect_ratio_idc` / extended SAR
+  (`Sps::sar`), HEVC VUI (already parsed). `StreamInfo::display` = coded width x par, coded
+  height (container wins over the VUI, as in ffmpeg); AV1, VP9 and ProRes use the container's only.
+  `window::shown_size` feeds the letterbox and `WindowState::video_size`; the viewer takes
+  its aspect from `video_size`, so the popup rect has the display shape (the `probe`'s size is only
+  the first guess). Tests (`tests/par.rs`): `setsar=4/3` H.264 and HEVC MP4 with `pasp` and with
+  the `pasp` box renamed (VUI only), 12:11 from the table, MKV 4:3 and 9/8, WebM VP9, and the
+  hidden window's letterbox rows (853x360 in 800x600: rows 131..469).
+- Viewer moves: no fix was needed. Checked on a DirectLook test instance
+  (`RUSTYFILES_RUSTDECODER=1`, muted, own config dir, a 640x360 `setsar=4/3` clip) driven only
+  with `SetWindowPos` / `PostMessage` on its own windows: three moves of the viewer left the popup
+  at the same offset (8, 43) each time, a resize to 900x700 re-fitted it (883x373, the 853:360
+  shape), and a posted `WM_LBUTTONDBLCLK` on the popup took the viewer to the full 2560x1440
+  monitor with the popup at 2560x1080 centred (rows 156..1236), a second one restored both. The
+  popup opened at 960x405: the pixel aspect ratio reaches the viewer. Controls: the bar (screen
+  capture of its strip, mean luma) was gone 4 s after opening, a posted `WM_MOUSEMOVE` on the popup
+  brought it back (26.5) and it was gone again 2.5 s later (0).
+
+Still to do before the route can be the default: formats the Media Foundation / FilmCraft
+routes play that the container readers do not take (AVI, MPEG-TS / PS, WMV / ASF, FLV, MXF,
+DNxHR in progress elsewhere); several audio tracks and track choice, subtitles; playback keys
+(arrows, space, F) go to the viewer window, not checked with the popup in front; cursor hiding
+in fullscreen; HDR metadata in the tone mapper; a mid-stream size change; a real second audio
+device for the rate-change path; a hot-plug test with a physical device.

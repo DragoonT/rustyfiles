@@ -106,6 +106,7 @@ impl Vp9Decoder {
             frame_rate: track.frame_rate(),
             timescale: track.timescale,
             rotation: 0,
+            display: crate::decoder::display_size(h.width, h.height, track.par, (0, 0)),
             vui: vui_of(&track, &h),
         };
         Ok(Self {
