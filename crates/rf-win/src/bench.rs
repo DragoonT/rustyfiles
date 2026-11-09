@@ -332,11 +332,26 @@ pub struct OpenResult {
 pub fn measure_open(app: &App, folder: &Path, timeout: Duration, cancel: &AtomicBool) -> anyhow::Result<OpenResult> {
     let leaf = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     anyhow::ensure!(!leaf.is_empty(), "folder without a name");
+    measure_launch(app, folder.as_os_str(), &leaf, QUIET, timeout, cancel)
+}
+
+/// [`measure_open`] with any argument (a search link, …): the new window is the one whose title
+/// contains `title`, and it counts as done after `quiet` without a change.
+pub fn measure_launch(app: &App, arg: &std::ffi::OsStr, title: &str, quiet: Duration, timeout: Duration, cancel: &AtomicBool) -> anyhow::Result<OpenResult> {
+    let leaf = title.to_string();
     let before: HashSet<isize> = windows().into_iter().map(|w| w.hwnd).collect();
     let launched_at = now_filetime();
     let t0 = Instant::now();
     let mut cmd = Command::new(&app.exe);
-    cmd.arg(folder);
+    // a search link carries '&': quoted as one argument exactly as written (unquoted, Explorer
+    // split it and asked Windows for a "location:" app)
+    let text = arg.to_string_lossy();
+    if text.contains('&') {
+        use std::os::windows::process::CommandExt;
+        cmd.raw_arg(format!("\"{text}\""));
+    } else {
+        cmd.arg(arg);
+    }
     for (k, v) in &app.env {
         cmd.env(k, v);
     }
@@ -399,7 +414,7 @@ pub fn measure_open(app: &App, folder: &Path, timeout: Duration, cancel: &Atomic
                 changes.push(now.as_secs_f64() * 1000.0);
             }
         }
-        if now.saturating_sub(last_change) >= QUIET && last_hash.is_some() {
+        if now.saturating_sub(last_change) >= quiet && last_hash.is_some() {
             break;
         }
         if now > timeout {
@@ -567,4 +582,74 @@ pub fn render_card(svg: &str, scale: f32) -> anyhow::Result<Picture> {
     let mut png = Vec::new();
     image::codecs::png::PngEncoder::new(&mut png).write_image(&rgba, w, h, image::ExtendedColorType::Rgba8)?;
     Ok(Picture { width: w, height: h, rgba, png })
+}
+
+/// Time from `trigger` until the picture of the already open window `hwnd` changed and then
+/// stayed the same for `quiet` (ms, with the times of every change): a search sent to a running
+/// app, a refresh.
+pub fn measure_change(hwnd_raw: isize, trigger: impl FnOnce() -> anyhow::Result<()>, quiet: Duration, timeout: Duration) -> anyhow::Result<(f64, Vec<f64>)> {
+    let h = hwnd(hwnd_raw);
+    let mut rect = RECT::default();
+    unsafe {
+        let _ = GetWindowRect(h, &mut rect);
+    }
+    let mut grab = Grabber::new((rect.right - rect.left).max(1), (rect.bottom - rect.top).max(1)).ok_or_else(|| anyhow::anyhow!("capture buffer"))?;
+    let start_hash = grab.hash(h);
+    let t0 = Instant::now();
+    trigger()?;
+    let mut last_hash = start_hash;
+    let mut last_change: Option<Duration> = None;
+    let mut changes = Vec::new();
+    loop {
+        let now = t0.elapsed();
+        if let Some(x) = grab.hash(h) {
+            if Some(x) != last_hash {
+                last_hash = Some(x);
+                last_change = Some(now);
+                changes.push(now.as_secs_f64() * 1000.0);
+            }
+        }
+        if let Some(lc) = last_change {
+            if now.saturating_sub(lc) >= quiet {
+                return Ok((lc.as_secs_f64() * 1000.0, changes));
+            }
+        }
+        if now > timeout {
+            anyhow::bail!("no settled picture within {timeout:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// The visible top-level windows of a process (handle, title).
+pub fn windows_of(pid: u32) -> Vec<(isize, String)> {
+    windows().into_iter().filter(|w| w.pid == pid).map(|w| (w.hwnd, w.title)).collect()
+}
+
+/// Puts a window on top at the measuring size without taking the focus (as [`measure_launch`]
+/// does for the windows it opens).
+pub fn place_on_top(hwnd_raw: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowPos};
+    unsafe {
+        let _ = SetWindowPos(hwnd(hwnd_raw), Some(HWND_TOPMOST), 80, 80, SIZE.0, SIZE.1, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+}
+
+/// (working set, private bytes, open handles) of a running process.
+pub fn process_memory(pid: u32) -> Option<(u64, u64, u32)> {
+    let p = Proc::open(pid)?;
+    let (ws, _, private) = p.memory()?;
+    let mut handles = 0u32;
+    unsafe {
+        let _ = windows::Win32::System::Threading::GetProcessHandleCount(p.0, &mut handles);
+    }
+    Some((ws, private, handles))
+}
+
+/// Asks a window to close, as Alt+F4 does.
+pub fn post_close(hwnd_raw: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+    unsafe {
+        let _ = PostMessageW(Some(hwnd(hwnd_raw)), WM_CLOSE, WPARAM(0), LPARAM(0));
+    }
 }

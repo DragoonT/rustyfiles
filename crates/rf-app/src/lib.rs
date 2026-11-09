@@ -312,6 +312,11 @@ pub fn main() {
         _ if select.is_some() => format!("{}{}", workspace::SELECT_PREFIX, select.as_deref().unwrap_or_default()),
         Some(Location::Path(p)) => p.to_string_lossy().into_owned(),
         Some(Location::RecycleBin) => "shell:RecycleBinFolder".to_string(),
+        // a search link goes on to the running window as a search link
+        Some(Location::Search { root, query }) => {
+            let enc = |s: &str| s.replace('%', "%25").replace('&', "%26");
+            format!("search-ms:query={}&crumb=location:{}", enc(query), enc(&root.to_string_lossy()))
+        }
         _ => String::new(),
     };
     // RUSTYFILES_MULTI_INSTANCE=1 skips forwarding (automated tests run several copies).

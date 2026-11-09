@@ -18,6 +18,9 @@ impl Location {
     /// Shell namespaces we show ourselves, as Explorer hands them over (desktop icons, Run box,
     /// links): This PC / Home / Quick access → `Home`, Recycle Bin → `RecycleBin`.
     pub fn from_shell_name(s: &str) -> Option<Location> {
+        if let Some(search) = Location::from_search_ms(s) {
+            return Some(search);
+        }
         let s = s.trim().trim_matches('"').trim_end_matches('\\').to_ascii_lowercase();
         match s.as_str() {
             "::{20d04fe0-3aea-1069-a2d8-08002b30309d}" | "shell:mycomputerfolder" | "::{f874310e-b6b7-47dc-bc84-b9e6b38f5903}"
@@ -27,6 +30,31 @@ impl Location {
             }
             _ => None,
         }
+    }
+
+    /// A Windows search link, as Explorer, the Start menu and other apps hand one to the file
+    /// manager: `search-ms:query=rapor&crumb=location:C%3A%5CUsers` (percent-encoded, `crumb`
+    /// may repeat; the first `location:` is the folder searched). `None` without a query or a
+    /// location.
+    pub fn from_search_ms(s: &str) -> Option<Location> {
+        let s = s.trim().trim_matches('"');
+        let rest = s.get(..10).filter(|p| p.eq_ignore_ascii_case("search-ms:")).map(|_| &s[10..])?;
+        let (mut query, mut root) = (None, None);
+        for part in rest.split('&') {
+            let (k, v) = part.split_once('=').unwrap_or((part, ""));
+            let v = percent_decode(v);
+            match k.to_ascii_lowercase().as_str() {
+                "query" => query = Some(v),
+                "crumb" if root.is_none() => {
+                    if let Some(loc) = v.get(..9).filter(|p| p.eq_ignore_ascii_case("location:")).map(|_| &v[9..]) {
+                        root = Some(PathBuf::from(percent_decode(loc)));
+                    }
+                }
+                _ => {}
+            }
+        }
+        let query = query.filter(|q| !q.trim().is_empty())?;
+        Some(Location::Search { root: root?, query: query.trim().to_string() })
     }
 
     /// The same place with its path tidied (see [`clean_path`]).
@@ -340,5 +368,60 @@ mod clean_tests {
         assert_eq!(c("||?|C:|a/b".replace('|', "\\").as_str()), "||?|C:|a/b");
         assert_eq!(c("C:/Fotoğraflar/Tatil"), "C:|Fotoğraflar|Tatil");
         assert_eq!(c("klasör/alt"), "klasör|alt");
+    }
+}
+
+/// `%XX` escapes (and `+` for a space, as search links write queries) to text; invalid escapes
+/// stay as they are.
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'%' if i + 2 < b.len() => {
+                let hex = std::str::from_utf8(&b[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok());
+                match hex {
+                    Some(v) => {
+                        out.push(v);
+                        i += 3;
+                    }
+                    None => {
+                        out.push(b'%');
+                        i += 1;
+                    }
+                }
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[cfg(test)]
+mod search_ms_tests {
+    use super::Location;
+    use std::path::PathBuf;
+
+    #[test]
+    fn search_links_open_a_search() {
+        let l = Location::from_search_ms("search-ms:query=rapor&crumb=location:C%3A%5CUsers%5Cozero");
+        assert_eq!(l, Some(Location::Search { root: PathBuf::from(r"C:\Users\ozero"), query: "rapor".into() }));
+        // plain path, other parameters, a spaced query, the first location wins
+        let l = Location::from_search_ms(r#""search-ms:displayname=Ara&crumb=location:D:\İş Klasörü&query=yıl+sonu%20raporu&crumb=location:E:\""#);
+        assert_eq!(l, Some(Location::Search { root: PathBuf::from(r"D:\İş Klasörü"), query: "yıl sonu raporu".into() }));
+        // through the launch parser too
+        assert!(matches!(Location::from_shell_name("SEARCH-MS:query=x&crumb=location:C:%5C"), Some(Location::Search { .. })));
+        // no query or no location: not a search we can show
+        assert_eq!(Location::from_search_ms("search-ms:crumb=location:C:%5C"), None);
+        assert_eq!(Location::from_search_ms("search-ms:query=x"), None);
+        assert_eq!(Location::from_search_ms(r"C:\Users"), None);
     }
 }
