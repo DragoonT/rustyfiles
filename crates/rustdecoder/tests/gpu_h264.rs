@@ -236,21 +236,13 @@ fn frame_pictures_in_an_interlaced_capable_stream() {
 }
 
 #[test]
-fn interlaced_is_refused_clearly() {
-    if !have_ffmpeg() {
-        eprintln!("skipped: ffmpeg not found");
-        return;
-    }
-    let clip = make_clip(&Clip::new("h264_interlaced.mp4", "high", "tff=1:bframes=2:keyint=30"));
-    match VideoDecoder::open(&clip) {
-        Err(rustdecoder::Error::Unsupported(m)) => eprintln!("interlaced clip refused: {m}"),
-        Err(rustdecoder::Error::Gpu(m)) => eprintln!("skipped: {m}"),
-        Ok(mut d) => match d.next_frame() {
-            Err(rustdecoder::Error::Unsupported(m)) => eprintln!("interlaced clip refused: {m}"),
-            other => panic!("interlaced clip was not refused: {:?}", other.map(|f| f.is_some())),
-        },
-        Err(e) => panic!("{e}"),
-    }
+fn mbaff_top_field_first() {
+    check(Clip::new("h264_mbaff_tff.mp4", "high", "tff=1:bframes=2:keyint=30"), 90);
+}
+
+#[test]
+fn mbaff_bottom_field_first() {
+    check(Clip::new("h264_mbaff_bff.mp4", "high", "bff=1:bframes=2:keyint=30"), 90);
 }
 
 /// Any clip named in RD_CLIP, for debugging (does nothing without it).

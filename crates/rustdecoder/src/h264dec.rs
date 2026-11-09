@@ -61,9 +61,6 @@ fn check_supported(sps: &Sps) -> Result<()> {
     if sps.bit_depth_luma != 8 || sps.bit_depth_chroma != 8 {
         return Err(Error::Unsupported("H.264 other than 8-bit"));
     }
-    if sps.mbaff {
-        return Err(Error::Unsupported("interlaced H.264 (MBAFF)"));
-    }
     if sps.transform_bypass {
         return Err(Error::Unsupported("H.264 lossless (qpprime_y_zero_transform_bypass)"));
     }
