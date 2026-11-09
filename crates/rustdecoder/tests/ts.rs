@@ -182,6 +182,45 @@ fn h264_mp3_ts() {
     check_clip("t_h264_mp3.ts", H264, a, TS, Expect { video: V, audio: Some((is_codec("mp3"), 48000, 1, Bytes::Same, 1)) });
 }
 
+/// Program streams: the audio is read (frames, times, bytes against ffprobe), the MPEG video track
+/// is listed with its size and no samples (nothing decodes MPEG-2 video yet).
+fn check_ps(name: &str, video: &[&str], audio: &[&str], mux: &[&str], mpeg2: bool, a_codec: fn(&Codec) -> bool, a_channels: u16) {
+    if !have_ffmpeg() {
+        eprintln!("skipped: ffmpeg not found");
+        return;
+    }
+    let clip = make_av(name, video, audio, mux);
+    let movie = rustdecoder::container::read(&mut File::open(&clip).unwrap()).unwrap();
+    let v = movie.tracks.iter().find(|t| t.kind == Kind::Video).expect("video track listed");
+    assert_eq!(&v.fourcc, if mpeg2 { b"mpg2" } else { b"mpg1" });
+    assert_eq!((v.width, v.height), (640, 360));
+    assert!(v.samples.is_empty() && movie.video().is_none());
+    let a = movie.tracks.iter().find(|t| t.kind == Kind::Audio).expect("audio track");
+    assert!(a_codec(&a.codec), "{name}: {:?}", a.codec);
+    assert_eq!((a.sample_rate, a.channels), (48000, a_channels));
+    let base = earliest(&clip, &["a:0"]);
+    let n = check_track(&clip, a, "a:0", base, Bytes::Same, 1);
+    eprintln!("{name}: video listed ({:?}), {n} audio packets match ffprobe", std::str::from_utf8(&v.fourcc).unwrap());
+}
+
+#[test]
+fn mpeg2_ac3_vob() {
+    let v = &["-c:v", "mpeg2video", "-pix_fmt", "yuv420p", "-g", "12", "-bf", "2"];
+    check_ps("p_mpeg2_ac3.vob", v, &["-c:a", "ac3", "-b:a", "192k"], &["-f", "vob"], true, is_codec("ac3"), 1);
+}
+
+#[test]
+fn mpeg2_mp2_mpg() {
+    let v = &["-c:v", "mpeg2video", "-pix_fmt", "yuv420p", "-g", "12"];
+    check_ps("p_mpeg2_mp2.mpg", v, &["-c:a", "mp2", "-b:a", "128k"], &["-f", "mpeg"], true, is_codec("mp2"), 1);
+}
+
+#[test]
+fn mpeg1_mp2_mpg() {
+    let v = &["-c:v", "mpeg1video", "-pix_fmt", "yuv420p", "-g", "12"];
+    check_ps("p_mpeg1_mp2.mpg", v, &["-c:a", "mp2", "-b:a", "128k"], &["-f", "mpeg", "-muxrate", "2000000"], false, is_codec("mp2"), 1);
+}
+
 #[test]
 fn mpeg2_mp2_ts_is_listed() {
     let v = &["-c:v", "mpeg2video", "-pix_fmt", "yuv420p", "-g", "12", "-bf", "2"];

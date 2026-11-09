@@ -54,8 +54,11 @@ pub fn detect(head: &[u8]) -> Option<usize> {
 /// Where the samples of one transport stream track are, see the module description.
 #[derive(Debug)]
 pub struct Layout {
-    /// 188, or 192 for M2TS.
+    /// 188, or 192 for M2TS; 0 for an MPEG program stream (see [`crate::ps`]), whose samples
+    /// are found by walking its PES packets.
     pub packet: usize,
+    /// The PID; for a program stream the stream id, with the private stream 1 substream id
+    /// (`0x80..`) in the high byte.
     pub pid: u16,
     /// `Some(is_hevc)` when the stream is Annex B and gets converted on read.
     pub annexb: Option<bool>,
@@ -76,6 +79,9 @@ impl Layout {
     /// The sample's elementary stream bytes as they are in the stream (no conversion).
     pub fn read_raw<R: Read + Seek>(&self, r: &mut R, s: &Sample, i: usize, out: &mut Vec<u8>) -> Result<()> {
         out.clear();
+        if self.packet == 0 {
+            return self.read_raw_ps(r, s, i, out);
+        }
         let want = *self.raw.get(i).ok_or(Error::Invalid("sample index"))? as usize;
         let mut skip = self.skip[i] as usize;
         let mut hdr_skip = 0usize;
@@ -119,6 +125,55 @@ impl Layout {
         Err(Error::Invalid("transport stream sample cut short"))
     }
 
+    /// Program stream: walks the PES packets from the sample's first one, keeps those of the
+    /// stream, cuts their headers (and the 4-byte private header of AC-3 in private stream 1).
+    fn read_raw_ps<R: Read + Seek>(&self, r: &mut R, s: &Sample, i: usize, out: &mut Vec<u8>) -> Result<()> {
+        let want = self.raw[i] as usize;
+        let mut skip = self.skip[i] as usize;
+        let (sid, sub) = ((self.pid & 0xff) as u8, (self.pid >> 8) as u8);
+        let mut pos = s.offset;
+        loop {
+            r.seek(SeekFrom::Start(pos))?;
+            let mut h = [0u8; 14];
+            if read_full(r, &mut h[..6])? < 6 || h[..3] != [0, 0, 1] {
+                return Err(Error::Invalid("program stream sample cut short"));
+            }
+            match h[3] {
+                0xBA => {
+                    read_full(r, &mut h[6..14])?;
+                    pos += if h[4] >> 6 == 1 { 14 + (h[13] & 7) as u64 } else { 12 };
+                    continue;
+                }
+                0xB9 => return Err(Error::Invalid("program stream sample cut short")),
+                _ => {}
+            }
+            let len = u16::from_be_bytes([h[4], h[5]]) as usize;
+            if h[3] == sid {
+                let mut pkt = vec![0u8; 6 + len];
+                pkt[..6].copy_from_slice(&h[..6]);
+                r.read_exact(&mut pkt[6..])?;
+                let (hl, _, _) = crate::ps::pes_header(&pkt).ok_or(Error::Invalid("PES header cut short"))?;
+                let mut body = pkt.get(hl..).unwrap_or(&[]);
+                if sub != 0 {
+                    if body.first() != Some(&sub) {
+                        pos += 6 + len as u64;
+                        continue;
+                    }
+                    body = body.get(4..).unwrap_or(&[]);
+                }
+                let k = skip.min(body.len());
+                body = &body[k..];
+                skip -= k;
+                let take = body.len().min(want - out.len());
+                out.extend_from_slice(&body[..take]);
+                if out.len() == want {
+                    return Ok(());
+                }
+            }
+            pos += 6 + len as u64;
+        }
+    }
+
     /// Reads sample `i` the way the decoders want it.
     pub fn read<R: Read + Seek>(&self, r: &mut R, s: &Sample, i: usize, buf: &mut Vec<u8>) -> Result<()> {
         match self.annexb {
@@ -147,7 +202,7 @@ fn read_full<R: Read>(r: &mut R, buf: &mut [u8]) -> std::io::Result<usize> {
     Ok(n)
 }
 
-fn pid_of(ts: &[u8]) -> u16 {
+pub(crate) fn pid_of(ts: &[u8]) -> u16 {
     (((ts[1] & 0x1f) as u16) << 8) | ts[2] as u16
 }
 
@@ -170,7 +225,7 @@ fn ts_time(b: &[u8]) -> i64 {
 
 /// A PES header at the start of `pay`: its total length (up to the first payload byte), PTS and
 /// DTS. `None` when the packet doesn't start with `00 00 01 sid`.
-fn pes_header(pay: &[u8]) -> Option<(usize, Option<i64>, Option<i64>)> {
+pub(crate) fn pes_header(pay: &[u8]) -> Option<(usize, Option<i64>, Option<i64>)> {
     if pay.len() < 6 || pay[..3] != [0, 0, 1] {
         return None;
     }
@@ -195,7 +250,7 @@ fn pes_header(pay: &[u8]) -> Option<(usize, Option<i64>, Option<i64>)> {
 // Program tables
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Format {
+pub(crate) enum Format {
     H264,
     Hevc,
     Mpeg2Video,
@@ -209,10 +264,10 @@ enum Format {
     Other(&'static str),
 }
 
-struct PmtEntry {
-    pid: u16,
-    stype: u8,
-    format: Format,
+pub(crate) struct PmtEntry {
+    pub(crate) pid: u16,
+    pub(crate) stype: u8,
+    pub(crate) format: Format,
 }
 
 fn classify(stype: u8, descriptors: &[u8]) -> Format {
@@ -630,7 +685,7 @@ impl FrameBuf {
     }
 }
 
-struct Es {
+pub(crate) struct Es {
     pid: u16,
     stype: u8,
     format: Format,
@@ -658,7 +713,7 @@ struct Es {
 }
 
 impl Es {
-    fn new(e: &PmtEntry) -> Self {
+    pub(crate) fn new(e: &PmtEntry) -> Self {
         Self {
             pid: e.pid,
             stype: e.stype,
@@ -711,30 +766,10 @@ impl Es {
         }
         let mut body = pay;
         if pusi {
-            self.finish_unit();
             let Some((hlen, pts, dts)) = pes_header(pay) else { return };
-            let (pts_raw, dts_raw) = (pts, dts);
-            let pts = pts_raw.map(|t| self.unwrap(t));
-            // the DTS stays next to its PTS, whatever side of a wrap each is on
-            let dts = match (dts_raw, pts_raw, pts) {
-                (Some(d), Some(pr), Some(p)) => Some(p + wrap_signed(d - pr)),
-                _ => None,
-            };
+            self.start_pes(slot, pts, dts);
             body = pay.get(hlen..).unwrap_or(&[]);
             self.hdr_skip = hlen.saturating_sub(pay.len());
-            if self.is_unit_based() {
-                self.open = true;
-                self.cur_off = slot;
-                self.cur_pts = pts;
-                self.cur_dts = dts;
-                self.cur.clear();
-            } else {
-                if let Some(p) = pts {
-                    let at = self.fb.total();
-                    self.fb.marks.push_back((at, p));
-                }
-                self.open = true;
-            }
         } else {
             if !self.open {
                 return;
@@ -743,6 +778,44 @@ impl Es {
             body = &body[k..];
             self.hdr_skip -= k;
         }
+        self.feed(slot, body);
+    }
+
+    /// A whole PES (program streams): `slot` is where it starts, `body` its payload.
+    pub(crate) fn pes(&mut self, slot: u64, pts: Option<i64>, dts: Option<i64>, body: &[u8]) {
+        if self.samples.len() >= SAMPLES_MAX || !(self.is_unit_based() || self.is_frame_based()) {
+            return;
+        }
+        self.start_pes(slot, pts, dts);
+        self.hdr_skip = 0;
+        self.feed(slot, body);
+    }
+
+    fn start_pes(&mut self, slot: u64, pts: Option<i64>, dts: Option<i64>) {
+        self.finish_unit();
+        let (pts_raw, dts_raw) = (pts, dts);
+        let pts = pts_raw.map(|t| self.unwrap(t));
+        // the DTS stays next to its PTS, whatever side of a wrap each is on
+        let dts = match (dts_raw, pts_raw, pts) {
+            (Some(d), Some(pr), Some(p)) => Some(p + wrap_signed(d - pr)),
+            _ => None,
+        };
+        if self.is_unit_based() {
+            self.open = true;
+            self.cur_off = slot;
+            self.cur_pts = pts;
+            self.cur_dts = dts;
+            self.cur.clear();
+        } else {
+            if let Some(p) = pts {
+                let at = self.fb.total();
+                self.fb.marks.push_back((at, p));
+            }
+            self.open = true;
+        }
+    }
+
+    fn feed(&mut self, slot: u64, body: &[u8]) {
         if self.is_unit_based() {
             self.cur.extend_from_slice(body);
         } else {
@@ -751,7 +824,7 @@ impl Es {
         }
     }
 
-    fn finish_unit(&mut self) {
+    pub(crate) fn finish_unit(&mut self) {
         if !self.is_unit_based() || !self.open {
             return;
         }
@@ -959,7 +1032,13 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
         return Err(Error::Invalid("transport stream without a program"));
     }
 
-    // tracks, in the order of the program map
+    let tracks = build_tracks(es, packet);
+    Ok(finish_movie(tracks))
+}
+
+/// The tracks of the streams found, in order. `packet` is the transport packet size, 0 for a
+/// program stream.
+pub(crate) fn build_tracks(es: Vec<Es>, packet: usize) -> Vec<Track> {
     let mut tracks = Vec::new();
     let mut seen_video = false;
     let mut seen_audio = false;
@@ -1059,8 +1138,11 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
         let _ = e.stype;
         tracks.push(t);
     }
+    tracks
+}
 
-    // the earliest presentation time of any stream becomes 0
+/// The movie of `tracks`: the earliest presentation time of any stream becomes 0.
+pub(crate) fn finish_movie(mut tracks: Vec<Track>) -> Movie {
     let to90 = |t: &Track, v: i64| (v as i128 * 90000 / t.timescale.max(1) as i128) as i64;
     let base = tracks.iter().filter_map(|t| t.samples.iter().map(|s| to90(t, s.pts)).min()).min().unwrap_or(0);
     let mut dur = 0i64;
@@ -1088,5 +1170,5 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
             dur = dur.max(to90(t, end));
         }
     }
-    Ok(Movie { timescale: 90000, duration: dur.max(0) as u64, tracks })
+    Movie { timescale: 90000, duration: dur.max(0) as u64, tracks }
 }

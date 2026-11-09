@@ -1,9 +1,10 @@
-//! Opens a media file's index whatever the container: MP4 / MOV or Matroska / WebM.
+//! Opens a media file's index whatever the container: MP4 / MOV, Matroska / WebM, MPEG transport
+//! stream (TS, M2TS), MPEG program stream (MPG, VOB) or AVI.
 
 use std::io::{Read, Seek, SeekFrom};
 
 use crate::mp4::Movie;
-use crate::{Result, avi, mkv, mp4, ts};
+use crate::{Result, avi, mkv, mp4, ps, ts};
 
 /// Reads the track tables of `r`, picking the reader from the first bytes.
 pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
@@ -17,6 +18,8 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
         ts::read(r)
     } else if avi::is_avi(&head[..n]) {
         avi::read(r)
+    } else if ps::is_ps(&head[..n]) {
+        ps::read(r)
     } else {
         mp4::read(r)
     }
