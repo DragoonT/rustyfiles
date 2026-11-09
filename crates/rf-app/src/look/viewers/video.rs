@@ -3,6 +3,8 @@
 //! kontroller içeriğin üstünde durur, fare durunca gizlenir. Tıklama oynat/duraklat, çift tık
 //! tam ekran, tekerlek ses düzeyi (0,04). Ses: 500×300 kart (kapak, başlık/sanatçı/albüm,
 //! süre, eşzamanlı şarkı sözü). FilmCraft'ın açamadığı dosyalar Media Foundation ile oynatılır.
+//! İsteğe bağlı: RUSTYFILES_RUSTDECODER=1 ile MP4/MOV (H.264, HEVC) kendi motorumuzla (rd_video.rs) oynatılır;
+//! açılamayan dosyalar yukarıdaki yollara düşer.
 
 use std::cell::Cell;
 use std::path::PathBuf;
@@ -16,6 +18,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_player::{AudioSink, Player, PlayerState};
 
+use super::rd_video;
 use crate::look::viewer::{Prepared, Probe, Viewer};
 use crate::look::config::LookSettings;
 use crate::t;
@@ -83,6 +86,21 @@ impl Viewer for VideoViewer {
             }
             Err(e) => (Kind::Failed(format!("{e:#}")), Prepared::new((520.0, 220.0), name)),
         };
+        // opt-in: rustdecoder plays MP4 / MOV with H.264 or HEVC; what it cannot open falls back to
+        // `kind` (decided when its decoder opens, see MediaView::rd_opened)
+        let (kind, prepared) = match kind {
+            Kind::Video(_) | Kind::Mf if rd_video::enabled() => match rd_video::probe(&f.path) {
+                Some(p) => {
+                    log::info!("look: rustdecoder route for {}: {} {}x{}", f.path.display(), p.codec, p.width, p.height);
+                    (Kind::Rd(Box::new(kind), p), Prepared::new((960.0, 540.0), super::file_name(&f.path)))
+                }
+                None => {
+                    log::info!("look: rustdecoder does not take {}, current route", f.path.display());
+                    (kind, prepared)
+                }
+            },
+            kind => (kind, prepared),
+        };
         let path = f.path.clone();
         self.view = Some(cx.new(|cx| MediaView::new(path, kind, cx)));
         prepared
@@ -127,6 +145,8 @@ enum Kind {
     Video(rf_player::Media),
     Audio(rf_player::Media),
     Mf,
+    /// rustdecoder first; the boxed kind is the fallback.
+    Rd(Box<Kind>, rd_video::Probe),
     Failed(String),
 }
 
@@ -181,6 +201,14 @@ pub struct MediaView {
     /// Görüntü boyutu (piksel en-boyu uygulanmış).
     dims: (f32, f32),
     mf_state: Option<rf_win::preview_host::MediaState>,
+    /// rustdecoder route chosen (its window may still be opening).
+    rd_mode: bool,
+    rd: Option<rd_video::RdVideo>,
+    /// What to play when rustdecoder cannot open the file.
+    rd_fallback: Option<Kind>,
+    rd_opening: bool,
+    rd_rect: Option<[i32; 4]>,
+    rd_state: Option<rustdecoder::window::WindowState>,
     _hide: Option<Task<()>>,
     _tasks: Vec<Task<()>>,
 }
@@ -217,40 +245,23 @@ impl MediaView {
             mf_owner: 0,
             dims: (16.0, 9.0),
             mf_state: None,
+            rd_mode: false,
+            rd: None,
+            rd_fallback: None,
+            rd_opening: false,
+            rd_rect: None,
+            rd_state: None,
             _hide: None,
             _tasks: Vec::new(),
         };
-        match kind {
-            Kind::Video(media) | Kind::Audio(media) => {
-                v.video = media.info().has_video();
-                if let Some(i) = media.info().video.as_ref() {
-                    let par = if i.par.1 > 0 { i.par.0 as f32 / i.par.1 as f32 } else { 1.0 };
-                    v.dims = ((i.width as f32 * par).max(1.0), (i.height as f32).max(1.0));
-                }
-                if v.video {
-                    v.probe_first_frame(media.clone(), cx);
-                }
-                let mut p = Player::new(media, sink());
-                p.set_volume(volume);
-                p.set_loop(looping);
-                p.play();
-                v.player = Some(p);
-                v.tick(cx);
-            }
-            Kind::Mf => {
-                v.mf = true;
-                v.video = true;
-                v.controls = true;
-                v.poll_mf(cx);
-            }
-            Kind::Failed(e) => v.failed = Some(e),
-        }
+        v.start_kind(kind, cx);
         if !v.video && v.failed.is_none() {
             v.load_audio_info(cx);
         }
         // pencere kapanınca: ses durur, GPU dokuları bırakılır
         cx.on_release(|v: &mut Self, cx| {
             v.player = None;
+            v.rd = None;
             if v.mf {
                 rf_win::sta::run(|_| rf_win::preview_host::hide());
             }
@@ -261,6 +272,109 @@ impl MediaView {
         .detach();
         v.arm_hide(cx);
         v
+    }
+
+    /// Starts what `kind` says: the rf-player route, Media Foundation, the audio card, or waits
+    /// for rustdecoder's window (opened by the first `render`, which knows where it goes).
+    fn start_kind(&mut self, kind: Kind, cx: &mut Context<Self>) {
+        match kind {
+            Kind::Video(media) | Kind::Audio(media) => {
+                self.video = media.info().has_video();
+                if let Some(i) = media.info().video.as_ref() {
+                    let par = if i.par.1 > 0 { i.par.0 as f32 / i.par.1 as f32 } else { 1.0 };
+                    self.dims = ((i.width as f32 * par).max(1.0), (i.height as f32).max(1.0));
+                }
+                if self.video {
+                    self.probe_first_frame(media.clone(), cx);
+                }
+                let (volume, looping) = (self.volume, self.looping);
+                let mut p = Player::new(media, sink());
+                p.set_volume(volume);
+                p.set_loop(looping);
+                p.play();
+                self.player = Some(p);
+                self.tick(cx);
+            }
+            Kind::Mf => {
+                self.mf = true;
+                self.video = true;
+                self.controls = true;
+                self.poll_mf(cx);
+            }
+            Kind::Rd(fallback, probe) => {
+                self.rd_mode = true;
+                self.video = true;
+                self.controls = true;
+                self.dims = (probe.width.max(1) as f32, probe.height.max(1) as f32);
+                self.rd_fallback = Some(*fallback);
+            }
+            Kind::Failed(e) => self.failed = Some(e),
+        }
+    }
+
+    /// Opens rustdecoder's popup over `rect` on a background thread.
+    fn rd_open(&mut self, owner: isize, rect: [i32; 4], cx: &mut Context<Self>) {
+        self.rd_opening = true;
+        let path = self.path.clone();
+        let s = rd_video::Settings { volume: self.volume, muted: self.muted, looping: self.looping };
+        let job = cx.background_spawn(async move { rd_video::RdVideo::open(&path, owner, rect, &s) });
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            let r = job.await;
+            // the viewer may be gone by now: the window then goes down with `r`
+            let _ = this.update(cx, |v, cx| v.rd_opened(r, cx));
+        }));
+    }
+
+    fn rd_opened(&mut self, r: Result<rd_video::RdVideo, String>, cx: &mut Context<Self>) {
+        self.rd_opening = false;
+        match r {
+            Ok(rd) => {
+                log::info!("look: rustdecoder opened {}", self.path.display());
+                if let Some(rect) = self.rd_rect {
+                    rd.reposition(rect);
+                }
+                self.rd = Some(rd);
+                self.poll_rd(cx);
+            }
+            Err(e) => {
+                log::info!("look: rustdecoder cannot play {}: {e}; falling back", self.path.display());
+                self.rd_mode = false;
+                self.rd_rect = None;
+                if let Some(kind) = self.rd_fallback.take() {
+                    self.opened_at = Instant::now();
+                    self.start_kind(kind, cx);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    /// Takes the window's state and events (clicks, the wheel) into the controls.
+    fn poll_rd(&mut self, cx: &mut Context<Self>) {
+        self._tasks.push(cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(Duration::from_millis(80)).await;
+            let alive = this.update(cx, |v, cx| {
+                let Some(rd) = v.rd.as_ref() else { return false };
+                let st = rd.state();
+                let events = rd.take_events();
+                let coarse = |s: &rustdecoder::window::WindowState| ((s.position * 10.0) as i64, s.playing, s.ended, (s.duration * 10.0) as i64);
+                if v.rd_state.as_ref().is_none_or(|o| coarse(o) != coarse(&st)) {
+                    cx.notify();
+                }
+                v.rd_state = Some(st);
+                for e in events {
+                    match e {
+                        rustdecoder::window::WindowEvent::Click => v.toggle_play(cx),
+                        rustdecoder::window::WindowEvent::Wheel(d) => v.set_volume(v.volume + 0.04 * d as f32 / 120.0, cx),
+                        _ => {}
+                    }
+                }
+                true
+            });
+            if !alive.unwrap_or(false) {
+                break;
+            }
+        }));
     }
 
     /// FilmCraft bazı biçimleri (ör. 4:2:2 HEVC) açar ama karesini çözemez: ilk kare arka planda
@@ -406,6 +520,12 @@ impl MediaView {
     }
 
     fn toggle_play(&mut self, cx: &mut Context<Self>) {
+        if self.rd_mode {
+            if let Some(rd) = &self.rd {
+                rd.toggle();
+            }
+            return;
+        }
         if self.mf {
             let playing = self.mf_state.is_some_and(|s| s.playing);
             let (owner, path) = (self.mf_owner, self.path.clone());
@@ -430,7 +550,11 @@ impl MediaView {
 
     fn seek_fraction(&mut self, f: f64) {
         let f = f.clamp(0.0, 1.0);
-        if self.mf {
+        if self.rd_mode {
+            if let Some(rd) = &self.rd {
+                rd.seek_fraction(f);
+            }
+        } else if self.mf {
             rf_win::sta::run(move |_| rf_win::preview_host::media_seek(f));
         } else if let Some(p) = &mut self.player {
             let d = p.state().duration;
@@ -443,12 +567,17 @@ impl MediaView {
         if let Some(p) = &mut self.player {
             p.set_volume(self.volume);
         }
+        if let Some(rd) = &self.rd {
+            rd.set_volume(self.volume);
+        }
         crate::look::config::update(cx, |s| s.look_volume = self.volume);
         cx.notify();
     }
 
     fn render_controls(&self, light_text: bool, cx: &mut Context<Self>) -> AnyElement {
-        let (playing, pos, dur) = if self.mf {
+        let (playing, pos, dur) = if self.rd_mode {
+            self.rd_state.as_ref().map_or((false, 0.0, 0.0), |s| (s.playing, s.position, s.duration))
+        } else if self.mf {
             self.mf_state.map_or((false, 0.0, 0.0), |s| (s.playing, s.position, s.duration))
         } else {
             (self.state.playing, self.state.position, self.state.duration)
@@ -510,6 +639,9 @@ impl MediaView {
                     if let Some(p) = &mut v.player {
                         p.set_loop(v.looping);
                     }
+                    if let Some(rd) = &v.rd {
+                        rd.set_looping(v.looping);
+                    }
                     let on = v.looping;
                     crate::look::config::update(cx, |s| s.look_loop = on);
                     cx.notify();
@@ -519,6 +651,9 @@ impl MediaView {
                     let m = v.muted;
                     if let Some(p) = &mut v.player {
                         p.set_mute(m);
+                    }
+                    if let Some(rd) = &v.rd {
+                        rd.set_muted(m);
                     }
                     cx.notify();
                 })))
@@ -553,7 +688,7 @@ impl Render for MediaView {
         let (dw, dh) = ((vw * s).floor(), (vh * s).floor());
         let scale = window.scale_factor();
         self.target = (((dw * scale) as u32).max(2), ((dh * scale) as u32).max(2));
-        let controls = self.controls || self.mf;
+        let controls = self.controls || self.mf || self.rd_mode;
         let mut root = div()
             .id("look-media")
             .relative()
@@ -575,14 +710,25 @@ impl Render for MediaView {
                     v.toggle_play(cx);
                 }
             }));
-        if self.mf {
-            // Media Foundation: video kendi penceresinde; kontroller altta sabit
-            let rect = [
-                ((f32::from(window.bounds().origin.x) + (aw - dw) / 2.0) * scale) as i32,
-                ((f32::from(window.bounds().origin.y) + (ah - 48.0 - dh.min(ah - 48.0)) / 2.0) * scale) as i32,
-                ((f32::from(window.bounds().origin.x) + (aw + dw) / 2.0) * scale) as i32,
-                ((f32::from(window.bounds().origin.y) + (ah - 48.0 + dh.min(ah - 48.0)) / 2.0) * scale) as i32,
-            ];
+        // the video's own window (Media Foundation, rustdecoder) goes over this rectangle (screen
+        // pixels); the controls stay at the bottom
+        let rect = [
+            ((f32::from(window.bounds().origin.x) + (aw - dw) / 2.0) * scale) as i32,
+            ((f32::from(window.bounds().origin.y) + (ah - 48.0 - dh.min(ah - 48.0)) / 2.0) * scale) as i32,
+            ((f32::from(window.bounds().origin.x) + (aw + dw) / 2.0) * scale) as i32,
+            ((f32::from(window.bounds().origin.y) + (ah - 48.0 + dh.min(ah - 48.0)) / 2.0) * scale) as i32,
+        ];
+        if self.rd_mode {
+            if self.rd_rect != Some(rect) {
+                self.rd_rect = Some(rect);
+                if let Some(rd) = &self.rd {
+                    rd.reposition(rect);
+                } else if !self.rd_opening && self.rd_fallback.is_some() {
+                    let owner = crate::look::window::hwnd_of(window);
+                    self.rd_open(owner, rect, cx);
+                }
+            }
+        } else if self.mf {
             if self.mf_rect != Some(rect) {
                 let first = self.mf_rect.is_none();
                 self.mf_rect = Some(rect);

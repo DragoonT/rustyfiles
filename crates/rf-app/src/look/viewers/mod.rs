@@ -10,6 +10,7 @@ pub mod image;
 pub mod info;
 pub mod markdown;
 pub mod pdf;
+pub mod rd_video;
 pub mod text;
 pub mod video;
 pub mod zoom;

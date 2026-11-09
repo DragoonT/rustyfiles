@@ -6153,6 +6153,7 @@ dependencies = [
  "rf-dialog",
  "rf-player",
  "rf-win",
+ "rustdecoder",
  "serde",
  "serde_json",
  "smallvec",

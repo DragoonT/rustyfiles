@@ -132,6 +132,9 @@ pub enum WindowEvent {
     /// Left button went down on the picture.
     Click,
     DoubleClick,
+    /// The wheel turned over the picture: `120` per notch away from the user (up), negative
+    /// towards.
+    Wheel(i32),
     /// The user closed the window.
     Closed,
 }
@@ -228,6 +231,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         WM_MOUSEACTIVATE => return LRESULT(MA_NOACTIVATE as isize),
         WM_LBUTTONDOWN => push(WindowEvent::Click),
         WM_LBUTTONDBLCLK => push(WindowEvent::DoubleClick),
+        WM_MOUSEWHEEL => push(WindowEvent::Wheel(((wp.0 >> 16) & 0xffff) as u16 as i16 as i32)),
         WM_CLOSE => {
             push(WindowEvent::Closed);
             SHARED.with(|s| {
