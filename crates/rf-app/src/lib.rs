@@ -165,6 +165,14 @@ pub(crate) fn quit_when_idle(cx: &mut App) {
 /// synchronously, so quitting cannot cut it off (a small file, only at exit).
 fn save_and_quit(cx: &mut App) {
     cx.global::<settings::Settings>().clone().save();
+    // the search index keeps its place in the change journal (or its changes): the next start
+    // then catches up instead of walking the drives; bounded, quitting must not hang on it
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        rf_win::indexer::stop();
+        let _ = tx.send(());
+    });
+    let _ = rx.recv_timeout(std::time::Duration::from_secs(2));
     cx.quit();
 }
 

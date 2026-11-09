@@ -903,6 +903,36 @@ impl Index {
         std::fs::rename(&tmp, path)
     }
 
+    /// Writes only the change journal position into `path`, saved earlier from this same index
+    /// with no change since (an index whose folders didn't change is current with the journal
+    /// up to wherever it is now: the changes went elsewhere on the volume). `Ok(false)` when the
+    /// file doesn't match this index (then save it whole).
+    pub fn save_position(&self, path: &Path) -> std::io::Result<bool> {
+        use std::io::{Seek, SeekFrom};
+        let Some((jid, jnext)) = self.journal else { return Ok(false) };
+        let mut f = std::fs::OpenOptions::new().read(true).write(true).open(path)?;
+        let mut magic = [0u8; 8];
+        f.read_exact(&mut magic)?;
+        let rl = read_u32(&mut f)? as u64;
+        f.seek(SeekFrom::Current(rl as i64))?;
+        let (n, k, pl) = (read_u64(&mut f)?, read_u64(&mut f)?, read_u64(&mut f)?);
+        if &magic != Self::MAGIC || n != self.parent.len() as u64 || k != self.names.len() as u64 || pl != self.names.pool.len() as u64 {
+            return Ok(false);
+        }
+        let at = 8 + 4 + rl + 24 + 9 * n + 4 * (k + 1) + pl;
+        f.seek(SeekFrom::Start(at))?;
+        let saved_id = read_u64(&mut f)?;
+        if saved_id != jid && saved_id != 0 {
+            return Ok(false);
+        }
+        f.seek(SeekFrom::Start(at))?;
+        let mut b = [0u8; 16];
+        b[..8].copy_from_slice(&jid.to_le_bytes());
+        b[8..].copy_from_slice(&jnext.to_le_bytes());
+        f.write_all(&b)?;
+        Ok(true)
+    }
+
     /// Reads an index file straight into its arrays (no second copy of the file in memory).
     pub fn load(path: &Path) -> std::io::Result<Index> {
         let bad = || std::io::Error::new(std::io::ErrorKind::InvalidData, "not an index file");
@@ -1218,6 +1248,15 @@ mod tests {
         assert!(found.contains(&root.join("Projeler/Çizimler/yeni rapor.png")), "{found:?}");
         // caught up: nothing more to read
         assert_eq!(back.catch_up(&AtomicBool::new(false)).unwrap(), 0);
+        // the position alone is written in place, the rest of the file untouched
+        back.save(&file).unwrap();
+        let (jid, next) = back.journal().unwrap();
+        back.set_journal_next(next + 1);
+        assert!(back.save_position(&file).unwrap());
+        assert_eq!(Index::load(&file).unwrap().journal(), Some((jid, next + 1)));
+        // a file of another shape is refused
+        back.push(0, "başka", 0);
+        assert!(!back.save_position(&file).unwrap());
         std::fs::remove_file(&file).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
     }

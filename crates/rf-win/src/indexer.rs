@@ -120,7 +120,12 @@ pub fn stop() {
 
 fn save(slot: &Slot) {
     if !slot.changed_since_save.swap(false, Ordering::Relaxed) {
-        return;
+        // unchanged: only the journal position moves on (16 bytes, not the whole file); a file
+        // that doesn't match the index is written whole below
+        match slot.index.read().as_ref().map(|ix| ix.save_position(&slot.file)) {
+            None | Some(Ok(true)) => return,
+            Some(_) => {}
+        }
     }
     let mut guard = slot.index.write();
     if let Some(ix) = guard.as_mut() {
@@ -154,7 +159,10 @@ fn run(slot: Arc<Slot>, cancel: Arc<AtomicBool>) {
             follow(&slot, &cancel);
             return;
         }
-        Some(Err(e)) => log::info!("indexer: {}: the change journal can't tell ({e:?}), walking", slot.root.display()),
+        Some(Err(e)) => {
+            let saved = slot.index.read().as_ref().and_then(|ix| ix.journal());
+            log::info!("indexer: {}: the change journal can't tell ({e:?}; saved at {saved:?}, journal now {:?}), walking", slot.root.display(), crate::usn::query(&slot.root));
+        }
         None => {}
     }
     let fresh = Index::build(&slot.root, &cancel);
@@ -196,7 +204,12 @@ fn follow(slot: &Slot, cancel: &AtomicBool) {
             }
         }
         seen = now;
-        if last_save.elapsed() > Duration::from_secs(600) {
+        // the position alone every minute (a crash or a shutdown then costs little re-reading),
+        // the whole index at most every ten minutes when it changed
+        if !slot.changed_since_save.load(Ordering::Relaxed) && last_save.elapsed() > Duration::from_secs(60) {
+            save(slot);
+            last_save = Instant::now();
+        } else if last_save.elapsed() > Duration::from_secs(600) {
             save(&slot);
             last_save = Instant::now();
         }
