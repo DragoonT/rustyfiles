@@ -732,7 +732,11 @@ fn sync_name_index(on: bool, excluded: &[String]) {
         if STATE.load(Ordering::Relaxed) != 2 || std::env::var_os("RUSTYFILES_NO_INDEX").is_some() || extra {
             return;
         }
-        let dir = std::env::var_os("LOCALAPPDATA").map_or_else(std::env::temp_dir, std::path::PathBuf::from).join("rustyfiles").join("index");
+        // a copy with its own settings folder (tests, portable) keeps its index there too
+        let dir = match std::env::var_os("RUSTYFILES_CONFIG_DIR") {
+            Some(cfg) => std::path::PathBuf::from(cfg).join("index"),
+            None => std::env::var_os("LOCALAPPDATA").map_or_else(std::env::temp_dir, std::path::PathBuf::from).join("rustyfiles").join("index"),
+        };
         // RUSTYFILES_INDEX_ROOTS="E:\;F:\" picks the roots (testing)
         let roots = match std::env::var("RUSTYFILES_INDEX_ROOTS") {
             Ok(v) => v.split(';').filter(|s| !s.is_empty()).map(std::path::PathBuf::from).collect(),
