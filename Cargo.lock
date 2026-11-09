@@ -3113,7 +3113,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-windows"
 version = "0.3.11"
-source = "git+https://github.com/callmejm/gpui-pre-windows?rev=601cb804dde668012b999be7b536f0f93427cc2d#601cb804dde668012b999be7b536f0f93427cc2d"
+source = "git+https://github.com/gelenmedya/gpui-pre-windows?rev=c72afd1326fb041db0187e7abda1861e853d097a#c72afd1326fb041db0187e7abda1861e853d097a"
 dependencies = [
  "accesskit",
  "accesskit_windows",

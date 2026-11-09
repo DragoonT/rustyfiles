@@ -142,5 +142,4 @@ incremental = true
 
 [patch.crates-io]
 # our fork of GPUI's Windows layer (GPU/CPU hot-swap renderer), see its FORK.md
-# callmejm fork until gelenmedya/gpui-pre-windows#1 is merged, then back to gelenmedya at the merged rev
-gpui-pre-windows = { git = "https://github.com/callmejm/gpui-pre-windows", rev = "601cb804dde668012b999be7b536f0f93427cc2d" }
+gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "c72afd1326fb041db0187e7abda1861e853d097a" }
