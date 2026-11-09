@@ -2055,6 +2055,8 @@ impl Workspace {
         let in_folder = tab.location().path().is_some();
         let (sel, _, _) = tab.selection_summary();
         let has_sel = sel > 0;
+        // a phone's folder is read-only here: changing commands are greyed out, not refused later
+        let writable_sel = has_sel && !matches!(tab.location(), Location::Shell { .. });
         let preview_open = self.preview_open;
         let filter_on = self.filter_bar;
         let paste_ok = in_folder && rf_win::clipboard::has_files();
@@ -2114,7 +2116,7 @@ impl Workspace {
             .border_color(p.divider)
             .child(drop("cb-new", L::CirclePlus, Some("Yeni"), "Yeni öğe", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::New))
             .child(sep())
-            .child(cmd("cb-cut", L::Scissors, "Kes  (Ctrl+X)", has_sel, cx, |this, w, cx| {
+            .child(cmd("cb-cut", L::Scissors, "Kes  (Ctrl+X)", writable_sel, cx, |this, w, cx| {
                 this.with_tab(cx, |v, cx| v.copy_to_clipboard(rf_win::fileops::Transfer::Move, w, cx))
             }))
             .child(cmd("cb-copy", L::Copy, "Kopyala  (Ctrl+C)", has_sel, cx, |this, w, cx| {
@@ -2123,11 +2125,11 @@ impl Workspace {
             .child(cmd("cb-paste", L::ClipboardPaste, "Yapıştır  (Ctrl+V)", paste_ok, cx, |this, w, cx| {
                 this.with_tab(cx, |v, cx| v.paste(w, cx))
             }))
-            .child(cmd("cb-rename", L::TextCursorInput, "Yeniden adlandır  (F2)", has_sel, cx, |this, w, cx| {
+            .child(cmd("cb-rename", L::TextCursorInput, "Yeniden adlandır  (F2)", writable_sel, cx, |this, w, cx| {
                 this.with_tab(cx, |v, cx| v.rename_selection(w, cx))
             }))
-            .child(cmd("cb-share", L::Share2, "Paylaş", has_sel, cx, |this, _, cx| this.with_tab(cx, |v, _| v.share())))
-            .child(cmd("cb-delete", L::Trash, "Sil  (Del)", has_sel, cx, |this, w, cx| {
+            .child(cmd("cb-share", L::Share2, "Paylaş", writable_sel, cx, |this, _, cx| this.with_tab(cx, |v, _| v.share())))
+            .child(cmd("cb-delete", L::Trash, "Sil  (Del)", writable_sel, cx, |this, w, cx| {
                 this.with_tab(cx, |v, cx| v.delete_selected(false, w, cx))
             }))
             .child(cmd("cb-props", L::Wrench, "Özellikler  (Alt+Enter)", in_folder, cx, |this, _, cx| {
