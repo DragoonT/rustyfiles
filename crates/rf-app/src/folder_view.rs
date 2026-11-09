@@ -3256,9 +3256,11 @@ impl FolderView {
                         }
                     }))
                     .child(body)
-                    // last child: painted over the list, so its clicks and drags come first
+                    // last child: painted over the list, so its clicks and drags come first. Shown
+                    // while scrolling and fading out after, like File Explorer's on Windows 11,
+                    // so it doesn't sit over the right-aligned Size column
                     .when(list_body && cx.global::<crate::settings::Settings>().show_scrollbar, |d| {
-                        d.child(Scrollbar::vertical(&self.scroll).id("list-scrollbar").mode(ScrollbarMode::Always))
+                        d.child(Scrollbar::vertical(&self.scroll).id("list-scrollbar").mode(ScrollbarMode::Scrolling))
                     }),
             )
             .into_any_element()
