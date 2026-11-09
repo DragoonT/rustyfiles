@@ -1,6 +1,8 @@
 //! Helpers shared by the playback tests: clips made with ffmpeg + x265 into a temp folder.
 #![allow(dead_code)]
 
+pub mod av;
+
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 

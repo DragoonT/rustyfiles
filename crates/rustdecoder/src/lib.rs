@@ -2,6 +2,7 @@
 //! compressed pictures go to the graphics card's video engine (D3D11 Video). See
 //! `docs/design/rustdecoder.md`.
 
+pub mod audio;
 pub mod bits;
 pub mod dpb;
 pub mod h264;
@@ -9,8 +10,11 @@ pub mod h264_dpb;
 pub mod hevc;
 pub mod mp4;
 pub mod nal;
+pub mod resample;
 pub mod slice;
 
+#[cfg(windows)]
+pub mod audio_out;
 #[cfg(windows)]
 pub mod d3d11;
 #[cfg(windows)]
@@ -18,6 +22,8 @@ pub mod decoder;
 pub mod dxva;
 #[cfg(windows)]
 pub mod player;
+#[cfg(windows)]
+pub mod playback;
 #[cfg(windows)]
 pub mod present;
 pub mod dxva_h264;
