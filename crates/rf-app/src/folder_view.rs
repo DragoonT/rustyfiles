@@ -211,26 +211,33 @@ enum Msg {
 pub(crate) enum DirSize {
     /// Being measured: bytes counted so far.
     Partial(u64),
-    Done(u64),
+    Done(rf_win::foldersize::FolderSize),
 }
 
 impl From<rf_win::foldersize::SizeState> for DirSize {
     fn from(s: rf_win::foldersize::SizeState) -> Self {
         match s {
             rf_win::foldersize::SizeState::Partial(b) => DirSize::Partial(b),
-            rf_win::foldersize::SizeState::Done(s) => DirSize::Done(s.bytes),
+            // a size remembered from the last run stands in until the new measurement ends; the
+            // fresh value then replaces it without any marking
+            rf_win::foldersize::SizeState::Provisional(s) | rf_win::foldersize::SizeState::Done(s) => DirSize::Done(s),
         }
     }
 }
 
 impl DirSize {
     /// "…" until something is counted, then the running total with "…", then the size.
-    pub(crate) fn text(self) -> String {
+    pub(crate) fn text(self, on_disk: bool) -> String {
         match self {
             DirSize::Partial(0) => "…".into(),
             DirSize::Partial(b) => format!("{}…", format::size(b)),
-            DirSize::Done(b) => format::size(b),
+            DirSize::Done(s) => format::size(Self::bytes(s, on_disk)),
         }
+    }
+
+    /// The size to show and sort by; without a known cluster size the logical size stands in.
+    fn bytes(s: rf_win::foldersize::FolderSize, on_disk: bool) -> u64 {
+        if on_disk { s.allocated.unwrap_or(s.bytes) } else { s.bytes }
     }
 }
 
@@ -360,6 +367,8 @@ impl FolderView {
                 this.filter.dot_hidden = dot;
                 this.rebuild_visible();
             }
+            // folders show (and sort by) size on disk or the sum of their files, as set
+            this.resort_for_sizes(cx);
             // turning a commit column on loads the commits
             if this.git.is_some() && this.git_commits.is_none() && Self::commit_cols_on(cx) {
                 this.refresh_git(cx);
@@ -1191,7 +1200,7 @@ impl FolderView {
             self.visible.extend(start..self.entries.len() as u32);
         }
         if done {
-            self.resort_for_sizes();
+            self.resort_for_sizes(cx);
             self.apply_reselect(cx);
         }
         cx.notify();
@@ -1268,7 +1277,7 @@ impl FolderView {
             self.rebuild_visible();
         }
         // measured folder sizes go back into the fresh entries (before the cursor is placed)
-        self.resort_for_sizes();
+        self.resort_for_sizes(cx);
         self.selected = self
             .entries
             .iter()
@@ -2129,7 +2138,7 @@ impl FolderView {
 
     /// Folders whose size was measured carry it in their entry, so sorting by Size puts them
     /// among the files by their real size. Returns whether anything changed.
-    fn apply_dir_sizes(&mut self) -> bool {
+    fn apply_dir_sizes(&mut self, on_disk: bool) -> bool {
         if self.folder_sizes.is_empty() {
             return false;
         }
@@ -2139,9 +2148,10 @@ impl FolderView {
                 continue;
             }
             let Some(p) = self.path_of(i as u32) else { continue };
-            if let Some(DirSize::Done(b)) = self.folder_sizes.get(&p) {
-                if self.entries[i].size != *b {
-                    self.entries[i].size = *b;
+            if let Some(DirSize::Done(s)) = self.folder_sizes.get(&p) {
+                let b = DirSize::bytes(*s, on_disk);
+                if self.entries[i].size != b {
+                    self.entries[i].size = b;
                     changed = true;
                 }
             }
@@ -2150,8 +2160,9 @@ impl FolderView {
     }
 
     /// Re-sorts when measured folder sizes changed what a Size sort shows.
-    fn resort_for_sizes(&mut self) {
-        if self.apply_dir_sizes() && self.sort.key == SortKey::Size {
+    fn resort_for_sizes(&mut self, cx: &App) {
+        let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
+        if self.apply_dir_sizes(on_disk) && self.sort.key == SortKey::Size {
             self.rebuild_visible();
         }
     }
@@ -2206,7 +2217,7 @@ impl FolderView {
                         }
                         v.size_batches.retain(|(b, _)| !b.finished());
                         if changed {
-                            v.resort_for_sizes();
+                            v.resort_for_sizes(cx);
                             cx.notify();
                         }
                         let more = !v.size_batches.is_empty();
@@ -2596,6 +2607,7 @@ impl FolderView {
         // folders inside an archive have no size of their own to measure
         let measurable = !self.location().path().is_some_and(crate::archive_view::is_browsable_path);
         let folder_sizes = prefs.calculate_folder_sizes;
+        let on_disk = prefs.folder_size_on_disk;
         let vis = self.visible_cols(cx);
         let show_date = vis.modified;
         let show_created = vis.created;
@@ -2642,9 +2654,9 @@ impl FolderView {
             let dir_path = (show_size && measurable && self.entries[ei as usize].is_dir()).then(|| self.path_of(ei)).flatten();
             let dir_size: Option<String> = dir_path.clone().and_then(|p| {
                 if folder_sizes {
-                    Some(self.folder_size(p, cx).text())
+                    Some(self.folder_size(p, cx).text(on_disk))
                 } else {
-                    self.folder_sizes.get(&p).map(|s| s.text())
+                    self.folder_sizes.get(&p).map(|s| s.text(on_disk))
                 }
             });
             let calc_link = dir_path.filter(|_| dir_size.is_none());

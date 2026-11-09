@@ -381,6 +381,10 @@ impl PropsView {
                             _ => ("—".into(), "—".into()),
                         };
                         card1.push(row(p, t!("Boyut"), size));
+                        // the same two figures a file shows
+                        if let Some(d) = self.folder.as_ref().and_then(|f| f.as_ref()).and_then(|fs| fs.allocated) {
+                            card1.push(row(p, t!("Disk üzerindeki boyut"), format!("{} ({} {})", format::size(d), group(d), t!("bayt"))));
+                        }
                         card1.push(row(p, t!("İçerik"), contents));
                     } else {
                         card1.push(row(p, t!("Boyut"), format!("{} ({} {})", format::size(i.size), group(i.size), t!("bayt"))));

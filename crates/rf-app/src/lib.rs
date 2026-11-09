@@ -360,6 +360,10 @@ pub fn main() {
         if let Some(d) = settings::app_dir() {
             rf_win::fastcopy::set_journal_dir(d.join("jobs"));
         }
+        // folder sizes survive a restart (shown at once, measured again when asked for)
+        if let Some(d) = settings::local_data_dir() {
+            rf_win::foldersize::shared_cache().persist(d.join("foldersizes.bin"));
+        }
         let bounds = restored_bounds(cx);
         match pick.clone() {
             // started only to answer a dialog: no main window

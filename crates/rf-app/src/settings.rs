@@ -335,6 +335,9 @@ pub struct Settings {
     pub select_previous_on_up: bool,
     pub decimal_sizes: bool,
     pub calculate_folder_sizes: bool,
+    /// Folders show their size on disk (files rounded up to whole clusters) instead of the sum
+    /// of their file sizes.
+    pub folder_size_on_disk: bool,
     /// Our own parallel engine for copies, moves to other drives and permanent deletes
     /// (off: Windows' engine for everything, like Explorer).
     pub fast_file_ops: bool,
@@ -431,6 +434,7 @@ impl Default for Settings {
             select_previous_on_up: true,
             decimal_sizes: false,
             calculate_folder_sizes: false,
+            folder_size_on_disk: false,
             fast_file_ops: true,
             copy_verify: CopyVerify::Off,
             copy_speed_limit: 0,
@@ -671,6 +675,15 @@ mod tests {
         assert_eq!(partial.theme, ThemePref::Dark);
         assert!(partial.restore_session);
     }
+}
+
+/// Where data that can be rebuilt lives (remembered folder sizes): `%LOCALAPPDATA%\rustyfiles`,
+/// or `RUSTYFILES_CONFIG_DIR` when set, so test copies keep their data apart.
+pub fn local_data_dir() -> Option<std::path::PathBuf> {
+    if let Some(d) = std::env::var_os("RUSTYFILES_CONFIG_DIR").filter(|d| !d.is_empty()) {
+        return Some(std::path::PathBuf::from(d));
+    }
+    dirs::data_local_dir().map(|d| d.join("rustyfiles"))
 }
 
 /// `%APPDATA%\rustyfiles`, or `RUSTYFILES_CONFIG_DIR` when set (portable use, tests).

@@ -716,6 +716,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Ondalık (1 KB = 1000 bayt)", "Decimal (1 KB = 1000 bytes)"),
     ("Klasör boyutlarını hesapla", "Calculate folder sizes"),
     ("Boyutu hesapla", "Calculate size"),
+    ("Klasörlerde disk üzerindeki boyutu göster", "Show size on disk for folders"),
+    ("Boyut sütunu klasörler için dosya boyutlarının toplamı yerine kümelere yuvarlanmış boyutu gösterir; sıralama da buna göre yapılır", "The Size column shows folders by the space they take on disk (rounded up to whole clusters) instead of the sum of their file sizes; sorting follows it"),
     ("Boyut sütununda klasörlerin toplam boyutu gösterilir", "The Size column shows the total size of folders"),
     ("Büyük klasörlerde disk ve işlemci yükü artabilir; hesap arka planda yapılır, arayüz donmaz.", "Large folders can increase disk and CPU usage; calculation runs in the background and the interface stays responsive."),
     ("Değiştirmek için bir komuta tıklayıp yeni tuşlara basın (Esc: vazgeç). ↺ varsayılana döndürür.", "To change a shortcut, click a command and press the new keys (Esc: cancel). ↺ restores the default."),

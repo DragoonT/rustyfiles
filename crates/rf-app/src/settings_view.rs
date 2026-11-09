@@ -930,6 +930,14 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         cx,
     ));
 
+    v.push(card(
+        p,
+        L::HardDrive,
+        t!("Klasörlerde disk üzerindeki boyutu göster"),
+        Some(t!("Boyut sütunu klasörler için dosya boyutlarının toplamı yerine kümelere yuvarlanmış boyutu gösterir; sıralama da buna göre yapılır")),
+        sw("folder-on-disk", p, s.folder_size_on_disk, |s, v| s.folder_size_on_disk = v),
+    ));
+
     // Files' folder aliases: "@name" in the address box
     v.push(section(p, t!("Klasör takma adları")));
     let aliases: Vec<(String, std::path::PathBuf)> = s.folder_aliases.iter().map(|(n, p)| (n.clone(), p.clone())).collect();
