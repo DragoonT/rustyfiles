@@ -2390,6 +2390,15 @@ impl FolderView {
         self.reselect = Some(name);
     }
 
+    /// Selects `name` and scrolls to it: now when the folder is listed, or once it is.
+    pub(crate) fn select_now(&mut self, name: String, cx: &mut Context<Self>) {
+        self.reselect = Some(name);
+        if !self.loading {
+            self.apply_reselect(cx);
+        }
+        cx.notify();
+    }
+
     pub(crate) fn clear_reselect(&mut self) {
         self.reselect = None;
         self.rename_after_load = false;

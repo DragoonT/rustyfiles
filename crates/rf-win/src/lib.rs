@@ -47,6 +47,7 @@ pub mod shell;
 pub mod shellfolder;
 pub mod shortcut;
 pub mod single_instance;
+pub mod shell_window;
 pub mod sta;
 pub mod removal;
 pub mod rotate;

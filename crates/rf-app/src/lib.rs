@@ -373,6 +373,26 @@ pub fn main() {
         )
     });
 
+    // "Show in folder" from other apps (SHOpenFolderAndSelectItems: Telegram, browsers) while we
+    // are the default file manager: Windows opens the folder through our verb and names the
+    // file afterwards, to a window it finds in its window list (see rf_win::shell_window). The
+    // folder opens at once; the file, if one comes, is selected in it.
+    const SHELL_SELECT_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
+    let shell_select = match &start {
+        Some(Location::Path(dir)) if select.is_none() && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none() && rf_win::default_fm::is_enabled(rf_win::default_fm::CLASSES) => {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let dir = dir.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(rf_win::shell_window::wait_for_select(&dir, SHELL_SELECT_WAIT));
+            });
+            Some(rx)
+        }
+        _ => None,
+    };
+    let shell_selected = move |rx: std::sync::mpsc::Receiver<Option<PathBuf>>| {
+        rx.recv_timeout(SHELL_SELECT_WAIT + std::time::Duration::from_secs(1)).ok().flatten().map(|f| format!("{}{}", workspace::SELECT_HERE_PREFIX, f.display()))
+    };
+
     // Single instance: a second launch opens its folder as a tab in the running window.
     let message = match &start {
         _ if open_look_settings => look::ipc::ToApp::OpenSettings.encode(),
@@ -395,11 +415,25 @@ pub fn main() {
         None
     } else {
         match rf_win::single_instance::acquire(&message) {
-            rf_win::single_instance::Role::Forwarded => return,
+            rf_win::single_instance::Role::Forwarded => {
+                // the folder is on its way to the running window; the file to select follows
+                if let Some(msg) = shell_select.and_then(shell_selected) {
+                    rf_win::single_instance::send_to("rustyfiles", &msg);
+                }
+                return;
+            }
             rf_win::single_instance::Role::Primary(guard) => Some(guard),
         }
     };
     let (ipc_tx, ipc_rx) = futures::channel::mpsc::unbounded::<String>();
+    if let Some(rx) = shell_select {
+        let tx = ipc_tx.clone();
+        std::thread::spawn(move || {
+            if let Some(msg) = shell_selected(rx) {
+                let _ = tx.unbounded_send(msg);
+            }
+        });
+    }
     if !multi {
         rf_win::single_instance::serve(move |m| {
             let _ = ipc_tx.unbounded_send(m);

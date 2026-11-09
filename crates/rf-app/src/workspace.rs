@@ -227,6 +227,10 @@ pub fn any_main_window(cx: &App) -> bool {
 /// (`rustyfiles /select,<file>`, like Explorer).
 pub const SELECT_PREFIX: &str = "\u{1}select:";
 
+/// A file to select in the window that just opened its folder ("Show in folder" from another app,
+/// see rf_win::shell_window): selected in place, or its folder opened when no window shows it.
+pub const SELECT_HERE_PREFIX: &str = "\u{1}select-here:";
+
 /// A second launch on a shell folder (a phone, Network…) reaches the running window as this
 /// prefix plus the folder's parsing name (and, in a saved session, a tab and its name).
 pub const SHELL_PREFIX: &str = "rustyfiles-shell:";
@@ -262,6 +266,35 @@ pub fn parse_launch(msg: &str) -> (Location, Option<String>) {
     if m.is_empty() { (Location::Home, None) } else { (Location::Path(PathBuf::from(m)), None) }
 }
 
+/// Selects `file` in the newest window whose current tab shows its folder (and brings that window
+/// forward); false when none does.
+fn select_in_open_folder(file: &std::path::Path, cx: &mut App) -> bool {
+    let (Some(dir), Some(name)) = (file.parent(), file.file_name()) else { return false };
+    let key = |p: &std::path::Path| p.to_string_lossy().trim_end_matches(['\\', '/']).to_lowercase();
+    let want = key(dir);
+    let name = name.to_string_lossy().into_owned();
+    let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
+    for (handle, ws) in list.into_iter().rev() {
+        let Some(ws) = ws.upgrade() else { continue };
+        let view = ws.read(cx).active_view();
+        let here = matches!(view.read(cx).location(), Location::Path(p) if key(p) == want);
+        if !here {
+            continue;
+        }
+        let name = name.clone();
+        if handle
+            .update(cx, |_, window, cx| {
+                view.update(cx, |v, cx| v.select_now(name, cx));
+                window.activate_window();
+            })
+            .is_ok()
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// The `/select,` file of the first launch, picked up by the first window.
 pub static START_SELECT: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
@@ -285,6 +318,12 @@ pub fn route_ipc(msg: String, cx: &mut App) {
             return;
         }
         None => {}
+    }
+    if let Some(file) = msg.strip_prefix(SELECT_HERE_PREFIX) {
+        if !select_in_open_folder(std::path::Path::new(file), cx) {
+            route_ipc(format!("{SELECT_PREFIX}{file}"), cx);
+        }
+        return;
     }
     if msg.trim() == rf_win::jumplist::NEW_WINDOW_ARG {
         crate::open_main_window(Some(Location::Home), None, None, cx);
