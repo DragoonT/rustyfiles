@@ -211,3 +211,56 @@ fn mpeg1_is_refused() {
         other => panic!("MPEG-1 should be refused, got {:?}", other.map(|d| d.codec_name())),
     }
 }
+
+/// The MP2 sound of a program stream through Windows' MPEG audio decoder, against ffmpeg's.
+#[test]
+fn mp2_audio_in_a_program_stream() {
+    if !have_ffmpeg() {
+        eprintln!("skipped: ffmpeg not found");
+        return;
+    }
+    let clip = make_clip(&Clip { name: "m2_prog_b.mpg", size: "640x352", secs: 3, args: &["mpeg2video", "-b:v", "4M", "-g", "12", "-bf", "2"], mux: &["-f", "mpeg"] });
+    let mut dec = match rustdecoder::audio::AudioDecoder::open(&clip) {
+        Ok(Some(d)) => d,
+        Ok(None) => panic!("no audio track"),
+        Err(e) => {
+            eprintln!("skipped: {e}");
+            return;
+        }
+    };
+    let (rate, ch) = (dec.info().sample_rate, dec.info().channels as usize);
+    let (start, ours) = dec.decode_all().unwrap();
+    let out = Command::new("ffmpeg").args(["-v", "error", "-i"]).arg(&clip).args(["-map", "0:a:0", "-f", "f32le", "-ac", &ch.to_string(), "-"]).output().expect("ffmpeg");
+    let theirs: Vec<f32> = out.stdout.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    // the decoders may start a few frames apart (priming): find the shift of the best match
+    let mut best = (f64::MAX, 0i64);
+    for shift in -1200i64..=1200 {
+        let mut e = 0f64;
+        for i in (20000..24000).step_by(ch) {
+            let j = i as i64 - shift * ch as i64;
+            if j < 0 || j as usize >= theirs.len() || i >= ours.len() {
+                continue;
+            }
+            let d = (ours[i] - theirs[j as usize]) as f64;
+            e += d * d;
+        }
+        if e < best.0 {
+            best = (e, shift);
+        }
+    }
+    let n = ours.len().min(theirs.len()) as i64 - 2400 * ch as i64;
+    let (mut max, mut sum, mut cnt) = (0f32, 0f64, 0u64);
+    for i in 4800 * ch as i64..n {
+        let j = i - best.1 * ch as i64;
+        if j < 0 || j as usize >= theirs.len() {
+            continue;
+        }
+        let d = (ours[i as usize] - theirs[j as usize]).abs();
+        max = max.max(d);
+        sum += (d as f64) * (d as f64);
+        cnt += 1;
+    }
+    let rms = (sum / cnt.max(1) as f64).sqrt();
+    eprintln!("MP2: {rate} Hz, {ch} ch, starts at {start:.4} s, {} frames ours / {} ffmpeg, best shift {} frames, max |diff| {max:.5}, rms {rms:.6}", ours.len() / ch, theirs.len() / ch, best.1);
+    assert!(rms < 0.01, "MP2 decode differs: rms {rms}");
+}
