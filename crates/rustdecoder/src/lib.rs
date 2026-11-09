@@ -15,7 +15,11 @@ pub mod container;
 pub mod mkv;
 pub mod mp4;
 pub mod nal;
+pub mod dnx;
+pub mod dnxtables;
 pub mod prores;
+#[cfg(windows)]
+pub mod dnxdec;
 #[cfg(windows)]
 pub mod proresdec;
 pub mod resample;

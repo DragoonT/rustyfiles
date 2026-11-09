@@ -307,3 +307,60 @@ mod prores {
         }
     }
 }
+
+/// DNxHR HQ (decoded on the CPU, every picture a sync sample): the same checks.
+fn clip_dnxhr() -> Option<std::path::PathBuf> {
+    if !have_ffmpeg() {
+        eprintln!("skipped: ffmpeg not found");
+        return None;
+    }
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let out = temp_dir().join("p_dnxhr_hq.mov");
+    if !out.exists() {
+        let tmp = out.with_file_name("part-p_dnxhr_hq.mov");
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-t", "3", "-vf", "noise=alls=6:allf=t"])
+            .args(["-c:v", "dnxhd", "-profile:v", "dnxhr_hq", "-pix_fmt", "yuv422p", "-f", "mov"])
+            .arg(&tmp)
+            .status()
+            .expect("ffmpeg");
+        assert!(status.success(), "ffmpeg could not make the DNxHR clip");
+        std::fs::rename(&tmp, &out).unwrap();
+    }
+    Some(out)
+}
+
+mod dnxhr {
+    use super::*;
+    #[test]
+    fn plays_in_order_without_extra_repeats() {
+        if let Some(c) = clip_dnxhr() {
+            super::plays_in_order_without_extra_repeats(c)
+        }
+    }
+    #[test]
+    fn slow_polling_drops_and_never_goes_back() {
+        if let Some(c) = clip_dnxhr() {
+            super::slow_polling_drops_and_never_goes_back(c)
+        }
+    }
+    #[test]
+    fn decode_ahead_stays_in_the_ring() {
+        if let Some(c) = clip_dnxhr() {
+            super::decode_ahead_stays_in_the_ring(c)
+        }
+    }
+    #[test]
+    fn seek_lands_on_the_right_picture() {
+        if let Some(c) = clip_dnxhr() {
+            super::seek_lands_on_the_right_picture(c)
+        }
+    }
+    #[test]
+    fn seek_then_play_on() {
+        if let Some(c) = clip_dnxhr() {
+            super::seek_then_play_on(c)
+        }
+    }
+}

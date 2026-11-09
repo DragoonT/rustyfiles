@@ -292,7 +292,7 @@ fn idct8(x: [i64; 8], shift: i32, round: i64) -> [i64; 8] {
 /// 8x8 inverse DCT of dequantised coefficients, in place (rows, then columns). The coefficients
 /// are scaled for samples of `bits` bits (the result is 1/32 of the DCT sum at 10 bit, 1/8 at 12
 /// bit); the result is the sample offset from the middle of the range, not yet clipped.
-fn idct(b: &mut [i32; 64], bits: u8) {
+pub(crate) fn idct(b: &mut [i32; 64], bits: u8) {
     let col_shift = 30 - bits as i32;
     for r in 0..8 {
         let o = r * 8;

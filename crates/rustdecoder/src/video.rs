@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::d3d11::{Gpu, Planes};
 use crate::decoder::{Frame, HevcDecoder, StreamInfo};
 use crate::h264dec::H264Decoder;
+use crate::dnxdec::DnxVideo;
 use crate::proresdec::ProResVideo;
 use crate::vp9dec::Vp9Decoder;
 use crate::av1dec::Av1Decoder;
@@ -18,6 +19,7 @@ pub enum VideoDecoder {
     Vp9(Vp9Decoder),
     Av1(Av1Decoder),
     ProRes(ProResVideo),
+    Dnx(DnxVideo),
 }
 
 macro_rules! each {
@@ -28,6 +30,7 @@ macro_rules! each {
             VideoDecoder::Vp9($d) => $e,
             VideoDecoder::Av1($d) => $e,
             VideoDecoder::ProRes($d) => $e,
+            VideoDecoder::Dnx($d) => $e,
         }
     };
 }
@@ -43,7 +46,8 @@ impl VideoDecoder {
             Codec::Vp9 { .. } => Ok(Self::Vp9(Vp9Decoder::open(path)?)),
             Codec::Av1 { .. } => Ok(Self::Av1(Av1Decoder::open(path)?)),
             _ if crate::prores::is_prores_fourcc(&track.fourcc) => Ok(Self::ProRes(ProResVideo::open(path)?)),
-            _ => Err(Error::Unsupported("video codec other than H.264, HEVC, VP9, AV1 and ProRes")),
+            _ if crate::dnx::is_dnx_fourcc(&track.fourcc) => Ok(Self::Dnx(DnxVideo::open(path)?)),
+            _ => Err(Error::Unsupported("video codec other than H.264, HEVC, VP9, AV1, ProRes and DNxHD / DNxHR")),
         }
     }
 
@@ -54,6 +58,7 @@ impl VideoDecoder {
             Self::Vp9(_) => "VP9",
             Self::Av1(_) => "AV1",
             Self::ProRes(_) => "ProRes",
+            Self::Dnx(_) => "DNxHR",
         }
     }
 
