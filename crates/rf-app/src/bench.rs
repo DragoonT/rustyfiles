@@ -266,7 +266,9 @@ fn median(mut v: Vec<f64>) -> Option<f64> {
         return None;
     }
     v.sort_by(f64::total_cmp);
-    Some(v[v.len() / 2])
+    let n = v.len();
+    // an even count averages the middle two (taking v[n / 2] of two runs took the slower one)
+    Some(if n % 2 == 0 { (v[n / 2 - 1] + v[n / 2]) / 2.0 } else { v[n / 2] })
 }
 
 fn time<T>(f: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<f64> {

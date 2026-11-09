@@ -33,7 +33,7 @@ use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
 use windows::Win32::Storage::FileSystem::{
-    COPY_FILE_FAIL_IF_EXISTS, COPY_FILE_NO_BUFFERING, COPY_FILE_RESTARTABLE, COPYFILE2_CALLBACK_CHUNK_FINISHED, COPYFILE2_EXTENDED_PARAMETERS, COPYFILE2_MESSAGE,
+    COPY_FILE_FAIL_IF_EXISTS, COPY_FILE_RESTARTABLE, COPYFILE2_CALLBACK_CHUNK_FINISHED, COPYFILE2_EXTENDED_PARAMETERS, COPYFILE2_MESSAGE,
     COPYFILE2_MESSAGE_ACTION, COPYFILE2_PROGRESS_CANCEL, COPYFILE2_PROGRESS_CONTINUE, CopyFile2, FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT,
     FILE_FLAGS_AND_ATTRIBUTES, GetFileAttributesW, MOVE_FILE_FLAGS, MOVEFILE_REPLACE_EXISTING, MoveFileExW, SetFileAttributesW,
 };
@@ -43,13 +43,13 @@ use crate::fileops::{Tracker, Transfer};
 use crate::wide::long_path;
 
 /// Files above this size are copied unbuffered (no point filling the cache with them).
-const UNBUFFERED: u64 = 256 << 20;
 /// Files above this size are started first (they set the pace; small ones fill the gaps).
 const BIG: u64 = 8 << 20;
 /// With a journal, files above this size are copied restartably (Windows keeps the progress in
 /// the target), so a copy cut off by a crash carries on mid-file instead of starting over. The
-/// bookkeeping costs a little speed, so small files, which restart cheaply, don't use it.
-const RESTARTABLE_MIN: u64 = 64 << 20;
+/// bookkeeping costs about 30 % (1 GB: 364 ms against 285 ms), and a file under 2 GB copies
+/// again in about a second, so only the files where carrying on saves real time use it.
+const RESTARTABLE_MIN: u64 = 2 << 30;
 /// A rename counts like this many bytes of progress.
 const RENAME_WEIGHT: u64 = 64 << 10;
 
@@ -458,10 +458,9 @@ unsafe extern "system" fn on_chunk(msg: *const COPYFILE2_MESSAGE, ctx: *const co
 /// `restart`: carry on a restartable copy into an existing partial `dst`.
 fn copy_file(src: &Path, dst: &Path, size: u64, run: &Run, restart: bool) -> windows::core::Result<()> {
     let (s, d) = (long_path(src), long_path(dst));
+    // Buffered, like Explorer: unbuffered writes of big files measured twice as slow
+    // (1 GB: 755 ms against Windows' 348 ms; buffered 285 against 265).
     let mut flags = if restart { 0 } else { COPY_FILE_FAIL_IF_EXISTS.0 };
-    if size >= UNBUFFERED {
-        flags |= COPY_FILE_NO_BUFFERING.0;
-    }
     if run.restartable && size >= RESTARTABLE_MIN {
         flags |= COPY_FILE_RESTARTABLE.0;
     }
