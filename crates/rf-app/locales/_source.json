@@ -5832,5 +5832,11 @@
   "key": "Ayrıntılar ve Izgara listelerinin sağında; sürükleyin ya da bir yere tıklayıp oraya atlayın.",
   "tr": "Ayrıntılar ve Izgara listelerinin sağında; sürükleyin ya da bir yere tıklayıp oraya atlayın.",
   "en": "On the right of the Details and Grid lists. Drag it, or click a spot to jump there."
+ },
+ {
+  "id": "2f99c3cb",
+  "key": "uygulama zaten çalışıyordu (sıfırdan açılış değil)",
+  "tr": "uygulama zaten çalışıyordu (sıfırdan açılış değil)",
+  "en": "the app was already running (not a start from scratch)"
  }
 ]
