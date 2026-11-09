@@ -41,6 +41,60 @@ pub fn units(sample: &[u8], len_size: usize) -> impl Iterator<Item = Result<&[u8
     })
 }
 
+/// Index of the next `00 00 01` at or after `from`.
+fn next_start_code(d: &[u8], from: usize) -> Option<usize> {
+    let mut i = from;
+    while i + 2 < d.len() {
+        // a start code needs a 1 as its third byte, so anything above 1 rules out three positions
+        if d[i + 2] > 1 {
+            i += 3;
+        } else if d[i] == 0 && d[i + 1] == 0 && d[i + 2] == 1 {
+            return Some(i);
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// The NAL units of an Annex B byte stream (start codes `00 00 01` / `00 00 00 01`), without the
+/// start codes and without the zero bytes that may trail a unit. Bytes before the first start
+/// code are ignored.
+pub fn annexb_units(data: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut at = next_start_code(data, 0);
+    std::iter::from_fn(move || {
+        let start = at? + 3;
+        at = next_start_code(data, start);
+        let mut end = at.unwrap_or(data.len());
+        while end > start && data[end - 1] == 0 {
+            end -= 1;
+        }
+        Some(&data[start..end])
+    })
+}
+
+/// Units the decoders have no use for: access unit delimiters and filler data.
+pub fn annexb_dropped(unit: &[u8], hevc: bool) -> bool {
+    match unit.first() {
+        None => true,
+        Some(b) if hevc => matches!((b >> 1) & 0x3f, 35 | 38),
+        Some(b) => matches!(b & 0x1f, 9 | 12),
+    }
+}
+
+/// Appends the NAL units of an Annex B access unit to `out`, each behind a 4-byte length (the
+/// form `avcC` / `hvcC` with a length size of 4 describes). Access unit delimiters and filler
+/// data are left out.
+pub fn annexb_to_length_prefixed(src: &[u8], hevc: bool, out: &mut Vec<u8>) {
+    for u in annexb_units(src) {
+        if annexb_dropped(u, hevc) {
+            continue;
+        }
+        out.extend_from_slice(&(u.len() as u32).to_be_bytes());
+        out.extend_from_slice(u);
+    }
+}
+
 /// What a decoder configuration record holds.
 #[derive(Debug, Clone, Default)]
 pub struct Config {
@@ -111,6 +165,16 @@ mod tests {
         assert_eq!(super::unescape(&[0, 0, 3, 1, 0, 0, 3, 0, 0, 3]), [0, 0, 1, 0, 0, 0, 0]);
         // a 03 not after two zeros stays
         assert_eq!(super::unescape(&[0, 3, 0, 0, 2, 3]), [0, 3, 0, 0, 2, 3]);
+    }
+
+    #[test]
+    fn annexb_to_lengths() {
+        // AUD, then a 4-byte start code SPS with trailing zeros, then a 3-byte start code slice
+        let s = [0, 0, 0, 1, 9, 0xf0, 0, 0, 0, 1, 0x67, 1, 2, 0, 0, 0, 0, 1, 0x65, 9, 8, 7];
+        let mut o = Vec::new();
+        super::annexb_to_length_prefixed(&s, false, &mut o);
+        assert_eq!(o, [0, 0, 0, 3, 0x67, 1, 2, 0, 0, 0, 4, 0x65, 9, 8, 7]);
+        assert_eq!(super::annexb_units(&[5, 5, 0, 0, 1, 1, 0, 0, 1, 2]).collect::<Vec<_>>(), [&[1u8][..], &[2u8][..]]);
     }
 
     #[test]
