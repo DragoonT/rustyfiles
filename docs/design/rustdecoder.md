@@ -17,7 +17,7 @@ the same, with every step around that call written here:
 
 | Step | Who |
 | --- | --- |
-| Reading the container (MP4 / MOV, later MKV / WebM) | rustdecoder |
+| Reading the container (MP4 / MOV, MKV / WebM) | rustdecoder |
 | Splitting samples into NAL units, parsing VPS / SPS / PPS / slice headers | rustdecoder |
 | Reference picture management (DPB, POC, RPS) | rustdecoder |
 | Filling the DXVA picture parameters, slice controls, scaling lists | rustdecoder |
@@ -35,9 +35,13 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
   matrix), sample description (`avcC`, `hvcC`, audio), sample table (`stts`, `ctts`, `stsc`,
   `stsz`/`stz2`, `stco`/`co64`, `stss`) flattened into one list: offset, size, decode time,
   presentation time, keyframe. Fragmented MP4 (`moof`) later.
+- `mkv` — Matroska / WebM reader producing the same `Movie` / `Track` / flat sample table as
+  `mp4` (see phase 5); `container::read` picks the reader from the first bytes.
 - `bits` — bit reader with Exp-Golomb and emulation-prevention removal.
 - `h264`, `hevc` — parameter sets and slice headers.
-- `d3d11` — video device, decoder creation by profile (H.264, HEVC Main, HEVC Main 10),
+- `vp9`, `dxva_vp9`, `vp9dec` — VP9 superframe split, uncompressed header, `DXVA_PicParams_VP9`,
+  `Vp9Decoder` (phase 5).
+- `d3d11` — video device, decoder creation by profile (H.264, HEVC Main, HEVC Main 10, VP9 0 and 2),
   per-frame submission, output texture array.
 - `present` — NV12 / P010 shaders, rotation, HDR → SDR tone mapping.
 - `audio`, `resample`, `audio_out`, `playback` — PCM and AAC (OS decoder at first, own AAC later), sample-rate conversion, WASAPI output with the audio clock, A/V sync.
@@ -194,6 +198,89 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      edit, AAC tail trim to the edit end, the system mixer's session volume persists per
      executable (muted runs of the test executables leave them muted).
 5. MKV / WebM, VP9 and AV1 (the GPU decodes them too), fragmented MP4.
+   **Phase 5, MKV / WebM and VP9 done (2026-11-09); AV1 and fragmented MP4 left:**
+   - `mkv` (`mkv::read`, `container::read`): EBML walk of the Segment: Info (`TimestampScale`,
+     `Duration`), Tracks (`CodecID` `V_MPEG4/ISO/AVC`, `V_MPEGH/ISO/HEVC`, `V_VP9`, `V_AV1`,
+     `A_AAC*`, `A_OPUS`, `A_VORBIS`, `A_PCM/INT/LIT|BIG`, `A_PCM/FLOAT/IEEE`; `CodecPrivate`,
+     pixel size, `Colour`, `FlagDefault`, `DefaultDuration`, `CodecDelay`, audio rate / channels /
+     bit depth), Clusters with SimpleBlock and BlockGroup (a group without `ReferenceBlock` is a
+     sync sample), Xiph / EBML / fixed lacing (each laced frame is its own sample, timed by
+     `DefaultDuration`, else `BlockDuration / n`), unknown-size Segment and Clusters (a cluster
+     ends at the first element that cannot sit inside one), cut files (keeps what is complete).
+     The result is the MP4 reader's `Movie`: `Track.samples` with offset, size, dts, pts, sync flag,
+     so `HevcDecoder`, `H264Decoder`, `AudioDecoder`, `Player` and `Playback` read MKV through
+     `container::read` unchanged. Only element headers and the bytes in front of each block are
+     read (32 KiB window), one 32 byte `Sample` per frame stays in memory; payloads are never
+     loaded. The `Cues` are skipped: every cluster is indexed, so the table already has every sync
+     sample. A track's timescale is 1e9 / `TimestampScale` (1000), `pts` is the container's own
+     integer (ffprobe prints the same). Audio times have `CodecDelay` taken off like ffmpeg does
+     (Opus pre-skip, ffmpeg's AAC priming), so the first AAC packet starts before 0 as in MP4 and
+     `AudioDecoder` trims it (it uses the exact delay for the first packet, not the rounded
+     millisecond). PCM blocks follow each other: a start time rounded to the container's tick
+     does not open gaps. Video `dts` are the `pts` sorted (Matroska has no decode time).
+     Not handled, listed without samples: `ContentEncodings` (header stripping, compression,
+     encryption: the frames are not a plain offset plus size). Video rotation (`Projection`) is not
+     read yet. 8-bit PCM is read as signed like QuickTime's `twos`; Matroska's is unsigned.
+   - Checked against ffprobe (`-show_packets`: count, size, pts, keyframe flag, all equal, every
+     packet): H.264 + AAC mkv (90 + 142 packets), HEVC + PCM mkv (90 + 141), VP9 + Opus webm
+     (90 + 151), VP9 + Vorbis webm (90 + 143), `-cluster_size_limit 30000 -cluster_time_limit 300
+     -reserve_index_space 4000` (14 clusters), `-live 1` (unknown-size Segment, no Cues) for mkv
+     and webm; `Colour` (BT.2020 / PQ / limited) read back. NAL lengths of every 7th H.264 / HEVC
+     sample add up to the sample, VP9 frame markers of all samples are right (the offsets point at
+     the frames). ffmpeg's muxer never laces and never writes unknown-size clusters, so a hand
+     built file covers Xiph, EBML and fixed lacing (3 + 4 + 5 frames), block groups with and
+     without references, an unknown-size Cluster followed by a sized one, Void elements and a
+     cut file; ffprobe reads the hand built file with the same audio packets (pts, size).
+   - `vp9` + `dxva_vp9` + `vp9dec` (`Vp9Decoder`, `VideoDecoder::Vp9`): `split_superframe`
+     (the index at the end of a packet; hidden frames travel with the next shown one), the
+     uncompressed header (frame type, `show_existing_frame`, `intra_only`, reset / refresh flags,
+     reference indices and sign bias, size from a reference, interpolation filter, loop filter and
+     its delta persistence, quantizer, segmentation with its persistence, tiles, compressed
+     header size, colour config: profiles 0 to 3, 8 / 10 / 12 bit parsed), `Parser` keeps what a
+     header depends on (deltas, features, colour, size of each of the 8 slots). `DXVA_PicParams_VP9`
+     (208 bytes packed, laid out from the SDK's `dxva.h`; `frame_refs` and `ref_frame_map` hold
+     surface indices like ffmpeg's `dxva2_vp9.c`; `use_prev_in_find_mv_refs` is: not error
+     resilient, same size as the last decoded frame, and that frame was shown),
+     `DXVA_Slice_VPx_Short` (one per frame, the whole frame is the bitstream: the video engine reads
+     the compressed header and the tiles), no scaling lists. Short slice format is
+     `ConfigBitstreamRaw` 1 as for HEVC. The host keeps 8 slots and a use count per surface (a pool
+     of 12, surfaces 64 aligned); frames go out in decode order (VP9 does not reorder);
+     `show_existing_frame` queues the slot's surface again. Profile 0 (NV12) and profile 2, 10 bit
+     (P010). Refused with a clear error: profiles 1 and 3 (4:4:4 / 4:2:2 / 4:4:0), 12 bit, a bit
+     depth change inside the stream, an inter frame larger than the surfaces made for the first
+     key frame. A key frame of another size is fine: smaller keeps the surfaces, larger makes a
+     new decoder (frames carry their own size).
+   - Bit-exact against ffmpeg (libavcodec's VP9 decoder, `-f rawvideo`, every sample of every
+     shown frame, `-noautoscale -fps_mode passthrough`), libvpx-vp9 clips 640x360 unless noted,
+     3 s, 90 frames: defaults; 1-pass with `-lag-in-frames 25 -auto-alt-ref 1` (libvpx makes no
+     hidden frames 1-pass); no alt ref, GOP 30; 1280x720 with `-tile-columns 2`; `-tile-columns 1
+     -tile-rows 2`; `-error-resilient 1 -frame-parallel 1`; `-aq-mode 1` and `-aq-mode 3`
+     (segmentation on 90 / 89 frames); `-lossless 1`; 642x362 (odd size); `-sharpness 5
+     -static-thresh 200`; 2-pass `-auto-alt-ref 1` (8 superframes with hidden frames); 2-pass
+     `-auto-alt-ref 6 -enable-tpl 1` on a clean source (20 superframes, 42 hidden frames, 42
+     `show_existing_frame`); profile 2 10-bit, 1-pass and 2-pass multi-layer alt ref (17
+     superframes, 36 hidden, 36 show-existing); a 640x360 stream joined to a 320x180 one at a key
+     frame and the other way round (120 frames, both bit-exact); a 1080p60 8 Mbit clip of 300
+     frames. Also H.264 and HEVC in mkv (B-frames, 90 frames each). All identical.
+     libvpx in this ffmpeg has no resize mode, so inter frames with references of another size
+     (scaled references), and `intra_only` frames (libvpx makes none here) are not exercised;
+     both are written to the spec and the DXVA structure carries the reference sizes.
+   - Speed (RTX 5070 Ti, GPU only, no read-back): 1080p60 VP9 8 Mbit, 300 frames in 0.20 s,
+     about 1500 fps (HEVC / H.264 1080p: 500 to 2000 fps, same order).
+   - `Playback::open` works on MKV / WebM with H.264, HEVC or VP9: the player and the sync
+     tests (pictures in order next to the audio clock, seeks landing both sides on the target
+     within 1/48000 s) pass on mkv with H.264 + AAC, HEVC + PCM, VP9 + PCM and VP9 + AAC. With
+     Opus or Vorbis the video plays on the system clock (36 pictures in 1.2 s) and `audio_note()`
+     says "audio track not playable: not supported yet: Opus audio is not decoded yet (PCM and AAC
+     are)". Matroska times are whole milliseconds, so a 30 fps picture can be 0.7 ms off its true
+     time (worst lag 33.7 ms instead of 33.3 ms at 60 Hz).
+   - Left for phase 5: AV1 (`Codec::Av1` is recognised, no decoder: `D3D11_DECODER_PROFILE_AV1_VLD_*`,
+     OBU parsing, film grain), Opus and Vorbis decoding (own, like the rest), fragmented MP4
+     (`moof`), `ContentEncodings` header stripping (mkvmerge's default for some codecs), Matroska
+     `Projection` rotation and HDR metadata into the tone mapper, VP9 4:4:4 (profile 1 / 3), 12 bit,
+     scaled references and `intra_only` tests with a stream that has them, several video tracks
+     (the default-flagged track is chosen), the `probe` in rf-app's `rd_video.rs` (still MP4 / MOV /
+     M4V only; route `.mkv` / `.webm` through `container::read` there).
 6. Formats no GPU decodes, on the CPU: ProRes and DNxHR (intra-only, slices decode in
    parallel), MXF, AIFF. Editing sources must keep previewing.
 7. FilmCraft removed in one step: dependency, `rf-player`'s FilmCraft code, texts and notes.

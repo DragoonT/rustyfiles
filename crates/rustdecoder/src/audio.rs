@@ -16,7 +16,7 @@
 use std::fs::File;
 use std::path::Path;
 
-use crate::mp4::{self, Codec, Track};
+use crate::mp4::{Codec, Track};
 use crate::{Error, Result};
 
 /// Frames per block at most (a PCM chunk can be a second long).
@@ -70,7 +70,7 @@ impl AudioDecoder {
     /// Opens the first audio track of `path`. `Ok(None)` when the file has none.
     pub fn open(path: &Path) -> Result<Option<Self>> {
         let mut file = File::open(path)?;
-        let movie = mp4::read(&mut file)?;
+        let movie = crate::container::read(&mut file)?;
         let Some(track) = movie.audio().cloned() else { return Ok(None) };
         Self::from_track(file, track).map(Some)
     }
@@ -91,6 +91,8 @@ impl AudioDecoder {
                 sample_rate = mft.rate;
                 (Kind_::Aac(Box::new(mft)), "AAC")
             }
+            Codec::Opus { .. } => return Err(Error::Unsupported("Opus audio is not decoded yet (PCM and AAC are)")),
+            Codec::Vorbis { .. } => return Err(Error::Unsupported("Vorbis audio is not decoded yet (PCM and AAC are)")),
             _ => return Err(Error::Unsupported("audio codec other than PCM and AAC")),
         };
         if sample_rate == 0 {
@@ -219,10 +221,16 @@ impl AudioDecoder {
                 let Some(s) = self.track.samples.get(self.next).copied() else { return Ok(false) };
                 self.track.read_sample(&mut self.file, self.next, &mut self.buf)?;
                 self.next += 1;
-                self.pending_start = ((s.pts as i128 * rate + ts / 2).div_euclid(ts)) as i64;
+                let derived = ((s.pts as i128 * rate + ts / 2).div_euclid(ts)) as i64;
+                // blocks follow each other; a time rounded to the container's tick (1 ms in
+                // Matroska) must not open a gap or an overlap
+                let slack = (rate / ts) as i64 + 1;
+                self.pending_start = if self.cursor_set && (derived - self.cursor).abs() <= slack { self.cursor } else { derived };
+                self.cursor_set = true;
                 convert_pcm(&self.buf, *bits, *float, *big_endian, &mut self.pending);
                 let ch = self.info.channels as usize;
                 self.pending.truncate(self.pending.len() / ch * ch);
+                self.cursor = self.pending_start + (self.pending.len() / ch) as i64;
                 Ok(true)
             }
             #[cfg(windows)]
@@ -244,6 +252,10 @@ impl AudioDecoder {
                 self.track.read_sample(&mut self.file, self.next, &mut self.buf)?;
                 if !self.cursor_set {
                     self.cursor = ((s.pts as i128 * rate + ts / 2).div_euclid(ts)) as i64;
+                    if self.next == 0 && self.track.codec_delay_ns > 0 {
+                        // Matroska: the first packet starts CodecDelay before 0, exactly
+                        self.cursor = -((self.track.codec_delay_ns as i128 * rate + 500_000_000) / 1_000_000_000) as i64;
+                    }
                     self.cursor_set = true;
                 }
                 self.next += 1;

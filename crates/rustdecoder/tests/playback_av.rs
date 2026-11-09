@@ -182,7 +182,8 @@ fn pictures_follow_the_audio_clock_in_order(clip: PathBuf) {
     println!("2.5 s at 60 Hz: {shown} pictures, dropped {}, late {}, worst lag {:.1} ms", st.dropped, st.late, worst_lag * 1000.0);
     assert!(shown >= 70 && shown <= 76, "{shown} pictures in 2.5 s of 30 fps");
     assert_eq!(st.dropped, 0);
-    assert!(worst_lag <= 1.0 / 30.0 + 1e-6);
+    // (Matroska times are whole milliseconds: a frame can sit up to 0.7 ms off its true time)
+    assert!(worst_lag <= 1.0 / 30.0 + 0.002);
     // the sound queued is one unbroken run from time 0
     let log = sink.log();
     let mut next = 0.0;
@@ -388,3 +389,66 @@ macro_rules! both {
 }
 
 both!(pictures_follow_the_audio_clock_in_order, seeking_lands_both_sides_on_the_target);
+
+// ------------------------------------------------------------------ Matroska / WebM
+
+const MKV_H264: &[&str] = &["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "veryfast", "-x264-params", "log-level=error:keyint=15:min-keyint=15:bframes=3:scenecut=0"];
+const MKV_HEVC: &[&str] = &["-c:v", "libx265", "-pix_fmt", "yuv420p", "-preset", "ultrafast", "-x265-params", "log-level=error:keyint=15:min-keyint=15"];
+const MKV_VP9: &[&str] = &["-c:v", "libvpx-vp9", "-pix_fmt", "yuv420p", "-deadline", "good", "-cpu-used", "5", "-g", "15", "-b:v", "1M"];
+
+fn mkv_clip(name: &str, video: &[&str], audio: &[&str]) -> Option<PathBuf> {
+    if !have_ffmpeg() {
+        eprintln!("skipped: ffmpeg not found");
+        return None;
+    }
+    Some(common::make_mkv(name, video, audio, &[]))
+}
+
+macro_rules! containers {
+    ($($m:ident: $name:expr, $video:expr, $audio:expr;)*) => {
+        $(mod $m {
+            use super::*;
+            fn clip() -> Option<PathBuf> { mkv_clip($name, $video, $audio) }
+            #[test] fn pictures_follow_the_audio_clock_in_order() { if let Some(c) = clip() { super::pictures_follow_the_audio_clock_in_order(c) } }
+            #[test] fn seeking_lands_both_sides_on_the_target() { if let Some(c) = clip() { super::seeking_lands_both_sides_on_the_target(c) } }
+        })*
+    };
+}
+
+containers! {
+    mkv_h264_aac: "pb_h264_aac.mkv", MKV_H264, &["-c:a", "aac", "-b:a", "96k"];
+    mkv_hevc_pcm: "pb_hevc_pcm.mkv", MKV_HEVC, &["-c:a", "pcm_s16le"];
+    mkv_vp9_pcm: "pb_vp9_pcm.mkv", MKV_VP9, &["-c:a", "pcm_s16le"];
+    mkv_vp9_aac: "pb_vp9_aac.mkv", MKV_VP9, &["-c:a", "aac", "-b:a", "96k"];
+}
+
+/// Opus and Vorbis are not decoded yet: the video plays on the system clock and the note says why.
+#[test]
+fn webm_with_opus_plays_without_sound_and_says_so() {
+    for (name, audio) in [("pb_vp9_opus.webm", &["-c:a", "libopus", "-b:a", "64k"]), ("pb_vp9_vorbis.webm", &["-c:a", "libvorbis", "-b:a", "64k"])] {
+        let Some(clip) = mkv_clip(name, MKV_VP9, audio) else { return };
+        let time = Arc::new(FakeTime::new());
+        let sink = FakeSink::new(time);
+        let Some(mut pb) = open(&clip, sink) else { return };
+        assert!(!pb.has_audio());
+        println!("{name}: audio note: {}", pb.audio_note());
+        assert!(pb.audio_note().contains("not playable"), "{}", pb.audio_note());
+        pb.play();
+        let t0 = std::time::Instant::now();
+        let mut shown = 0;
+        let mut last = -1.0;
+        while t0.elapsed() < Duration::from_millis(1200) {
+            pb.player.wait_ahead(pb.time(), Duration::from_millis(50));
+            if let Some(f) = pb.frame()
+                && f.pts != last
+            {
+                last = f.pts;
+                shown += 1;
+            }
+            std::thread::sleep(Duration::from_millis(8));
+        }
+        println!("{name}: {shown} pictures in 1.2 s of wall time, clock at {:.3}", pb.time());
+        assert!(shown >= 25, "{shown}");
+        assert!(pb.time() > 1.0 && pb.time() < 1.5);
+    }
+}

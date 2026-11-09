@@ -11,7 +11,7 @@ use crate::d3d11::{Gpu, HwDecoder, Planes, hevc_profile};
 use crate::dpb::{Dpb, PicKind, Started};
 use crate::dxva::{self, PicInfo, SliceShort};
 use crate::hevc::{self, Pps, Sps, nal_type};
-use crate::mp4::{self, Codec, Track};
+use crate::mp4::{Codec, Track};
 use crate::slice::{SliceHeader, slice_header};
 use crate::{Error, Result, nal};
 
@@ -85,7 +85,7 @@ pub struct HevcDecoder {
 impl HevcDecoder {
     pub fn open(path: &Path) -> Result<Self> {
         let mut file = File::open(path)?;
-        let movie = mp4::read(&mut file)?;
+        let movie = crate::container::read(&mut file)?;
         let track = movie.video().ok_or(Error::Invalid("no video track"))?.clone();
         let Codec::Hevc { config } = &track.codec else { return Err(Error::Unsupported("not an HEVC track")) };
         let cfg = nal::hvcc(config)?;
