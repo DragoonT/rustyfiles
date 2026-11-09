@@ -297,6 +297,8 @@ pub struct Settings {
     pub smooth_scroll: bool,
 
     // ---- Appearance
+    /// A scrollbar over the Details and Grid lists.
+    pub show_scrollbar: bool,
     pub animations: AnimPref,
     pub backdrop: BackdropPref,
     /// Background tint color (0xRRGGBB), `None` = the backdrop as is.
@@ -406,6 +408,7 @@ impl Default for Settings {
             dual_pane_vertical: true,
             menu: MenuPrefs::default(),
             smooth_scroll: true,
+            show_scrollbar: true,
             animations: AnimPref::System,
             backdrop: BackdropPref::Mica,
             tint: None,

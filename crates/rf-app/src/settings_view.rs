@@ -509,6 +509,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 |s, v| s.animations = v,
             ),
         ),
+        card(
+            p,
+            L::PanelRight,
+            t!("Kaydırma çubuğunu göster"),
+            Some(t!("Ayrıntılar ve Izgara listelerinin sağında; sürükleyin ya da bir yere tıklayıp oraya atlayın.")),
+            sw("scrollbar", p, s.show_scrollbar, |s, v| s.show_scrollbar = v),
+        ),
     ];
     // tint swatches
     let tint = s.tint;

@@ -13,6 +13,7 @@ use std::time::Instant;
 use futures::StreamExt;
 use futures::channel::mpsc;
 use gpui_kit::assets::IconName as L;
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{Icon, Sizable as _, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -3126,6 +3127,8 @@ impl FolderView {
 
     fn render_details(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let count = self.visible.len();
+        // Details and Grid get a scrollbar over the list (Columns has one list per column).
+        let mut list_body = false;
         let body: AnyElement = if let Some(err) = &self.error {
             empty_state(p, L::TriangleAlert, crate::i18n::td(err), t!("Klasör açılamadı")).into_any_element()
         } else if count == 0 && self.loading && self.load_started.elapsed() >= SLOW_LOAD {
@@ -3140,6 +3143,7 @@ impl FolderView {
             let cols = ((avail / (self.grid_tile_w() + GRID_GAP)).floor() as usize).max(1);
             self.grid_cols = cols;
             let rows = count.div_ceil(cols);
+            list_body = true;
             uniform_list("grid", rows, cx.processor(|this, range, window, cx| this.render_grid_rows(range, window, cx)))
                 .track_scroll(&self.scroll)
                 .flex_1()
@@ -3148,6 +3152,7 @@ impl FolderView {
                 .into_any_element()
         } else {
             let n_rows = if self.grouped() { self.rows.len() } else { count };
+            list_body = true;
             uniform_list("rows", n_rows, cx.processor(|this, range, window, cx| this.render_rows(range, window, cx)))
                 .track_scroll(&self.scroll)
                 .flex_1()
@@ -3250,7 +3255,11 @@ impl FolderView {
                             this.drop_into(dir, paths, cx);
                         }
                     }))
-                    .child(body),
+                    .child(body)
+                    // last child: painted over the list, so its clicks and drags come first
+                    .when(list_body && cx.global::<crate::settings::Settings>().show_scrollbar, |d| {
+                        d.child(Scrollbar::vertical(&self.scroll).id("list-scrollbar").mode(ScrollbarMode::Always))
+                    }),
             )
             .into_any_element()
     }
