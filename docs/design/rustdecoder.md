@@ -34,7 +34,7 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
 - `mp4` — ISO BMFF reader. Box walk, `moov` → tracks: timescale, duration, rotation (`tkhd`
   matrix), sample description (`avcC`, `hvcC`, audio), sample table (`stts`, `ctts`, `stsc`,
   `stsz`/`stz2`, `stco`/`co64`, `stss`) flattened into one list: offset, size, decode time,
-  presentation time, keyframe. Fragmented MP4 (`moof`) later.
+  presentation time, keyframe. Fragmented MP4 (`moof`) is read into the same table (phase 5).
 - `mkv` — Matroska / WebM reader producing the same `Movie` / `Track` / flat sample table as
   `mp4` (see phase 5); `container::read` picks the reader from the first bytes.
 - `bits` — bit reader with Exp-Golomb and emulation-prevention removal.
@@ -200,7 +200,7 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      edit, AAC tail trim to the edit end, the system mixer's session volume persists per
      executable (muted runs of the test executables leave them muted).
 5. MKV / WebM, VP9 and AV1 (the GPU decodes them too), fragmented MP4.
-   **Phase 5, MKV / WebM, VP9 and AV1 done (2026-11-09); fragmented MP4 left:**
+   **Phase 5, MKV / WebM, VP9 and AV1 done (2026-11-09); fragmented MP4 done below:**
    - `mkv` (`mkv::read`, `container::read`): EBML walk of the Segment: Info (`TimestampScale`,
      `Duration`), Tracks (`CodecID` `V_MPEG4/ISO/AVC`, `V_MPEGH/ISO/HEVC`, `V_VP9`, `V_AV1`,
      `A_AAC*`, `A_OPUS`, `A_VORBIS`, `A_PCM/INT/LIT|BIG`, `A_PCM/FLOAT/IEEE`; `CodecPrivate`,
@@ -327,7 +327,68 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
      but no sync test has run on an AV1 clip), the rf-app side (`rd_video.rs` probe, `DirectLook`
      route).
    - Left for phase 5: (AV1 is done, see above),
-     Opus and Vorbis decoding (own, like the rest), fragmented MP4
+     Opus and Vorbis decoding (own, like the rest)
+
+   **Fragmented MP4, done (2026-11-09):** `mp4::read` walks the top-level boxes as before (`mdat`
+     is skipped, never read); every `moof` after `moov` is read whole (a few hundred bytes) and
+     its samples are appended to the track's table after the ones `moov` lists, so the decoders,
+     `Player` and `Playback` see one flat table and nothing downstream changed. `sidx`, `mfra` and
+     `tfra` are not needed (all `moof`s are walked).
+   - Parsed: `mvex` / `trex` defaults; `mfhd`; per `traf`: `tfhd` (base-data-offset,
+     sample-description-index, default duration / size / flags, default-base-is-moof),
+     `tfdt` (v0 / v1, a negative decode time written as unsigned is read back signed),
+     any number of `trun` (data offset, first-sample-flags, per-sample duration / size / flags /
+     composition offset, v0 and v1 signed). The data base is the named one, else the `moof`
+     (default-base-is-moof, and the first `traf` otherwise), else the end of the previous `traf`'s
+     data; a `trun` without a data offset follows the previous `trun`. A sync sample is one
+     whose flags have neither `sample_is_non_sync_sample` nor `sample_depends_on = 1`
+     (ffmpeg's rule). Without `tfdt` the times go on from the last sample. The first edit
+     of `moov`'s `elst` shifts fragment samples the same way as the `moov` ones. A track whose
+     tables are missing (a fragmented file may omit `stco` and friends) starts empty. A `traf`
+     for an unknown track is skipped. `Movie::duration` is worked out from the samples when
+     `mvhd` says 0 (`empty_moov`).
+   - Mixed files (`moov` has samples, fragments follow) and `empty_moov` files give one table. A
+     broken `moof` stops the walk (what follows would be timed from a wrong place); a `moof`
+     cut off at the end of the file is dropped, and samples of the last `mdat` that are not
+     entirely in the file are dropped (ffprobe hands out the partial last packet, we do not; a
+     partial picture cannot be decoded).
+   - Cost: only box headers and the `moof` boxes are read. A one hour 320x180 30 fps clip with
+     AAC (382 MB, 3600 fragments, 108 000 + 168 751 samples) opens in 25 ms (warm file cache).
+   - Checked against ffprobe (`-show_packets`: count, size, file position, pts, dts, keyframe flag
+     of every packet, video and audio, H.264 with B-frames + AAC and HEVC + AAC, 90 video + 142
+     audio packets each, 6 keyframes): `frag_keyframe+empty_moov`, `+default_base_moof`,
+     `empty_moov -frag_duration 500000` (time based fragments), `+dash`,
+     `+separate_moof`, `+cmaf`, `+negative_cts_offsets`, `empty_moov+default_base_moof
+     -frag_duration 1` (a fragment per frame), mixed `frag_keyframe` (samples in `moov` plus
+     fragments): all equal. Cut copies (middle of the last `mdat`, middle of the last `moof`, a
+     cut mixed file): equal to ffprobe minus its partial last packet (82 + 116 packets for the
+     cut `mdat`). Hand built file (ffmpeg never writes these): base-data-offset, `tfhd` and
+     `trex` defaults, two `trun`s in a `traf`, first-sample-flags, per-sample flags, v1 signed
+     offsets, no `tfdt`, an unknown track, cut `moof` and cut `mdat`.
+   - Two places where the timeline differs from ffprobe's, both with negative composition
+     offsets (CMAF): ffmpeg moves the presentation times up by the most negative offset in
+     fragments (our pts are decode time + offset as the spec says: first picture at 0, ffprobe
+     says 1024 / 15360 s), and for `moov` tables followed by fragments it moves the `moov` part's
+     decode times down but not the fragments' (its dts jump at the boundary, ours run on). Sizes,
+     positions, keyframes and spacing are equal; the tests allow exactly those constant shifts
+     for those clips only.
+   - Decoding: the GPU decoders give bit-exact pictures against ffmpeg (`-fps_mode passthrough`,
+     NV12, every sample of every frame) on 90 of 90 frames for H.264 empty_moov, mixed, CMAF,
+     a fragment per frame, HEVC empty_moov, separate_moof, CMAF, and on the 80 whole pictures of
+     the cut recording. `Playback` with a fake clock and AAC (60 Hz, 2.5 s, 76 pictures, none
+     dropped, audio clock equal to the movie clock, one unbroken run of audio from 0, four seeks
+     with audio restarting exactly on the target): H.264 empty_moov (CMAF offsets), mixed,
+     HEVC CMAF, H.264 CMAF.
+   - Left: a fragmented file with B-frames and plain (non-negative) composition offsets, as
+     ffmpeg writes by default, has no edit list, so its first picture is at 1024 / 15360 s while
+     the AAC starts at 0 (ffprobe says the same: start 0.0667 s against 0). `Playback` starts the
+     clock at the first picture and the sound from its own start, so the sound plays about 67 ms
+     late against the picture (the sync tests on such a file fail on that; they use CMAF clips
+     for now). The clock should start at the earlier of the two streams, or the sound start at
+     the clock like after a seek. Not handled: a change of sample description index inside a
+     file (a track with two codecs), `sidx`-only random access (not needed), `senc` / `pssh`
+     (encrypted fragments: the samples are listed, the data is not decryptable), `emsg`, and
+     reading fragments that arrive while a file is still growing (the reader is one pass).
 
    **Audio codecs beyond AAC, done (2026-11-09):** `audio.rs` generalises the AAC path into
    `AudioMft` (any Media Foundation audio decoder found with `MFTEnumEx(MFT_CATEGORY_AUDIO_DECODER,
@@ -380,8 +441,8 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
    - Left for phase 5: AV1 (`Codec::Av1` is recognised, no decoder: `D3D11_DECODER_PROFILE_AV1_VLD_*`,
      OBU parsing, film grain), own Opus / Vorbis / MP3 / AC-3 decoders if the OS ones turn out
      missing on users' machines (Opus MFT is Windows 10 1809+, Vorbis needs the Web Media
-     Extensions, AC-3 has no decoder here), several audio tracks, fragmented MP4
-     (`moof`), `ContentEncodings` header stripping (mkvmerge's default for some codecs), Matroska
+     Extensions, AC-3 has no decoder here), several audio tracks,
+     `ContentEncodings` header stripping (mkvmerge's default for some codecs), Matroska
      `Projection` rotation and HDR metadata into the tone mapper, VP9 4:4:4 (profile 1 / 3), 12 bit,
      scaled references and `intra_only` tests with a stream that has them, several video tracks
      (the default-flagged track is chosen), the `probe` in rf-app's `rd_video.rs` (still MP4 / MOV /
