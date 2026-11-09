@@ -51,6 +51,9 @@ pub mod vp9;
 pub mod av1dec;
 #[cfg(windows)]
 pub mod vp9dec;
+pub mod dxva_mpeg2;
+#[cfg(windows)]
+pub mod mpeg2dec;
 #[cfg(windows)]
 pub mod h264dec;
 #[cfg(windows)]

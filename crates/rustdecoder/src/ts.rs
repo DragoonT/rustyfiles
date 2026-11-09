@@ -64,9 +64,9 @@ pub struct Layout {
     pub annexb: Option<bool>,
     /// Elementary stream bytes to skip from the start of the sample's first packet (after its
     /// PES header, if it has one).
-    skip: Vec<u32>,
+    pub(crate) skip: Vec<u32>,
     /// Elementary stream bytes of the sample as stored (before any conversion).
-    raw: Vec<u32>,
+    pub(crate) raw: Vec<u32>,
 }
 
 impl Layout {

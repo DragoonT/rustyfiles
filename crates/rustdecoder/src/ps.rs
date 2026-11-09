@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
-use crate::mp4::{Codec, Kind, Movie, Storage, Track};
+use crate::mp4::{Codec, Kind, Movie, Sample, Storage, Track};
 use crate::ts::{Es, Format, PmtEntry, build_tracks, finish_movie};
 use crate::{Error, Result};
 
@@ -55,23 +55,72 @@ pub(crate) fn pes_header(pkt: &[u8]) -> Option<(usize, Option<i64>, Option<i64>)
 
 /// Picture size from the first MPEG video sequence header in `b`, and whether an extension
 /// follows it (MPEG-2).
-fn sequence_header(b: &[u8]) -> Option<(u32, u32, bool)> {
+fn sequence_header(b: &[u8]) -> Option<(u32, u32, bool, u8)> {
     let mut i = 0;
     while i + 12 < b.len() {
         if b[i..i + 4] == [0, 0, 1, 0xB3] {
             let w = ((b[i + 4] as u32) << 4) | (b[i + 5] >> 4) as u32;
             let h = (((b[i + 5] & 0xf) as u32) << 8) | b[i + 6] as u32;
             let mpeg2 = b[i + 7..].windows(4).take(120).any(|x| x == [0, 0, 1, 0xB5]);
-            return Some((w, h, mpeg2));
+            return Some((w, h, mpeg2, b[i + 7] & 0xf));
         }
         i += 1;
     }
     None
 }
 
+/// A video stream being read: the picture splitter runs over the PES payloads.
+struct VideoState {
+    w: u32,
+    h: u32,
+    mpeg2: bool,
+    rate_code: u8,
+    split: crate::mpeg2::Splitter,
+    /// Bytes of the elementary stream so far.
+    es_pos: u64,
+    /// (ES position of a PES payload, file offset of the PES packet).
+    map: Vec<(u64, u64)>,
+}
+
 enum Stream {
     Audio(usize),
-    Video { w: u32, h: u32, mpeg2: bool },
+    Video(Box<VideoState>),
+}
+
+/// Samples of a video stream: one per picture, with times from the PES packets where there are
+/// any, else counted from the temporal references within the GOP. Returns the samples and
+/// the layout of how to read them.
+fn video_samples(v: &mut VideoState, key: u16) -> (Vec<Sample>, std::sync::Arc<crate::ts::Layout>) {
+    use crate::mpeg2::PicType;
+    let units = v.split.finish();
+    let dur = crate::mpeg2::FRAME_RATES.get(v.rate_code as usize).filter(|r| r.0 > 0).map_or(3600, |r| (90000 * r.1 / r.0) as i64);
+    let mut samples = Vec::with_capacity(units.len());
+    let (mut skip, mut raw) = (Vec::new(), Vec::new());
+    let mut base: Option<i64> = None;
+    let mut group_len = 0i64;
+    let mut prev_dts: Option<i64> = None;
+    for (u, size) in &units {
+        let k = v.map.partition_point(|m| m.0 <= u.start).saturating_sub(1);
+        let (es0, off) = v.map.get(k).copied().unwrap_or((0, 0));
+        if u.has_header {
+            // a new GOP: its temporal references count from 0 again
+            base = base.map(|b| b + group_len * dur);
+            group_len = 0;
+        }
+        group_len += 1;
+        let tr = u.temporal_reference as i64 * dur;
+        if let Some(p) = u.pts {
+            base = Some(p - tr);
+        }
+        let pts = u.pts.unwrap_or_else(|| base.unwrap_or(0) + tr);
+        base.get_or_insert(pts - tr);
+        let dts = u.dts.unwrap_or_else(|| prev_dts.map_or(pts - dur, |d| d + dur)).min(pts);
+        prev_dts = Some(dts);
+        samples.push(Sample { offset: off, size: *size as u32, dts, pts, key: u.coding_type == PicType::I });
+        skip.push((u.start - es0) as u32);
+        raw.push(*size as u32);
+    }
+    (samples, std::sync::Arc::new(crate::ts::Layout { packet: 0, pid: key, annexb: None, skip, raw }))
 }
 
 /// Reads the structure of a program stream.
@@ -161,7 +210,7 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
                 if !streams.contains_key(&key) {
                     let kind = if id >= 0xE0 {
                         video_order.push(key);
-                        Stream::Video { w: 0, h: 0, mpeg2: false }
+                        Stream::Video(Box::new(VideoState { w: 0, h: 0, mpeg2: false, rate_code: 0, split: crate::mpeg2::Splitter::new(), es_pos: 0, map: Vec::new() }))
                     } else {
                         let format = if id == 0xBD { Format::Ac3 } else { Format::Mpa };
                         es.push(Es::new(&PmtEntry { pid: key, stype: 0, format }));
@@ -171,10 +220,15 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
                 }
                 match streams.get_mut(&key) {
                     Some(Stream::Audio(i)) => es[*i].pes(start, pts, dts, body.get(strip..).unwrap_or(&[])),
-                    Some(Stream::Video { w, h, mpeg2 }) if *w == 0 => {
-                        if let Some((sw, sh, m2)) = sequence_header(body) {
-                            (*w, *h, *mpeg2) = (sw, sh, m2);
+                    Some(Stream::Video(v)) => {
+                        if v.w == 0 {
+                            if let Some((sw, sh, m2, rc)) = sequence_header(body) {
+                                (v.w, v.h, v.mpeg2, v.rate_code) = (sw, sh, m2, rc);
+                            }
                         }
+                        v.map.push((v.es_pos, start));
+                        v.split.push(v.es_pos, body, pts, dts);
+                        v.es_pos += body.len() as u64;
                     }
                     _ => {}
                 }
@@ -188,27 +242,28 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
     }
     let mut tracks = build_tracks(es, 0);
     for key in video_order {
-        let Some(Stream::Video { w, h, mpeg2 }) = streams.get(&key) else { continue };
+        let Some(Stream::Video(v)) = streams.get_mut(&key) else { continue };
+        let (samples, layout) = video_samples(v, key);
         tracks.insert(
             0,
             Track {
                 id: key as u32,
                 kind: Kind::Video,
-                fourcc: if *mpeg2 { *b"mpg2" } else { *b"mpg1" },
+                fourcc: if v.mpeg2 { *b"mpg2" } else { *b"mpg1" },
                 codec: Codec::Other,
                 timescale: 90000,
-                width: *w,
-                height: *h,
+                width: v.w,
+                height: v.h,
                 rotation: 0,
                 channels: 0,
                 sample_rate: 0,
-                samples: Vec::new(),
+                samples,
                 colour: None,
                 default: true,
                 codec_delay_ns: 0,
                 discard_padding_ns: 0,
                 par: None,
-                storage: Storage::Plain,
+                storage: Storage::Ts(layout),
             },
         );
     }

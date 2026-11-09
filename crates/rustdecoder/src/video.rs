@@ -20,6 +20,7 @@ pub enum VideoDecoder {
     Av1(Av1Decoder),
     ProRes(ProResVideo),
     Dnx(DnxVideo),
+    Mpeg2(crate::mpeg2dec::Mpeg2Decoder),
 }
 
 macro_rules! each {
@@ -31,6 +32,7 @@ macro_rules! each {
             VideoDecoder::Av1($d) => $e,
             VideoDecoder::ProRes($d) => $e,
             VideoDecoder::Dnx($d) => $e,
+            VideoDecoder::Mpeg2($d) => $e,
         }
     };
 }
@@ -45,6 +47,7 @@ impl VideoDecoder {
             Codec::Hevc { .. } => Ok(Self::Hevc(HevcDecoder::open(path)?)),
             Codec::Vp9 { .. } => Ok(Self::Vp9(Vp9Decoder::open(path)?)),
             Codec::Av1 { .. } => Ok(Self::Av1(Av1Decoder::open(path)?)),
+            _ if &track.fourcc == b"mpg2" || &track.fourcc == b"mpg1" => Ok(Self::Mpeg2(crate::mpeg2dec::Mpeg2Decoder::open(path)?)),
             _ if crate::prores::is_prores_fourcc(&track.fourcc) => Ok(Self::ProRes(ProResVideo::open(path)?)),
             _ if crate::dnx::is_dnx_fourcc(&track.fourcc) => Ok(Self::Dnx(DnxVideo::open(path)?)),
             _ => Err(Error::Unsupported("video codec other than H.264, HEVC, VP9, AV1, ProRes and DNxHD / DNxHR")),
@@ -59,6 +62,7 @@ impl VideoDecoder {
             Self::Av1(_) => "AV1",
             Self::ProRes(_) => "ProRes",
             Self::Dnx(_) => "DNxHR",
+            Self::Mpeg2(_) => "MPEG-2",
         }
     }
 
