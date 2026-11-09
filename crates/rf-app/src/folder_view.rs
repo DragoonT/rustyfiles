@@ -1397,6 +1397,24 @@ impl FolderView {
         let Location::Path(p) = self.location().clone() else { return };
         let (l, adaptive) = match crate::layouts::get(&p, cx) {
             Some(l) => (l, false),
+            // Adaptive, like Explorer's folder types: Pictures and Videos as a grid, Downloads
+            // newest first in date groups (the rest is decided once the folder is listed)
+            None if s.default_view == crate::settings::DefaultView::Adaptive && known_kind(&p).is_some() => {
+                let grid = known_kind(&p) != Some(KnownKind::Downloads);
+                (
+                    crate::layouts::FolderLayout {
+                        view: if grid { 1 } else { 0 },
+                        sort: if grid { s.default_sort } else { rf_core::SortKey::Modified },
+                        desc: if grid { s.default_sort_desc } else { true },
+                        dirs_first: s.folders_first,
+                        files_first: !s.folders_first && s.files_first,
+                        row_size: DEFAULT_ROW_SIZE,
+                        grid_size: DEFAULT_GRID_SIZE,
+                        group: if grid { crate::settings_view::group_ix(&s.default_group) as u8 } else { 3 },
+                    },
+                    false,
+                )
+            }
             None => (
                 crate::layouts::FolderLayout {
                     view: match s.default_view {
@@ -1438,6 +1456,37 @@ impl FolderView {
         self.adaptive_pending = adaptive;
     }
 
+}
+
+/// Known folders with a layout of their own in adaptive mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KnownKind {
+    Pictures,
+    Downloads,
+}
+
+/// Pictures and Videos (and folders inside them), or Downloads itself.
+fn known_kind(p: &std::path::Path) -> Option<KnownKind> {
+    use rf_win::known::KnownFolder;
+    static PATHS: std::sync::OnceLock<Vec<(std::path::PathBuf, KnownKind)>> = std::sync::OnceLock::new();
+    let paths = PATHS.get_or_init(|| {
+        [(KnownFolder::Pictures, KnownKind::Pictures), (KnownFolder::Videos, KnownKind::Pictures), (KnownFolder::Downloads, KnownKind::Downloads)]
+            .into_iter()
+            .filter_map(|(k, kind)| k.path().map(|p| (p, kind)))
+            .collect()
+    });
+    let lower = |q: &std::path::Path| q.to_string_lossy().to_lowercase();
+    let here = lower(p);
+    paths.iter().find_map(|(root, kind)| {
+        let r = lower(root);
+        match kind {
+            KnownKind::Downloads => (here == r).then_some(*kind),
+            KnownKind::Pictures => (here == r || here.starts_with(&format!("{r}\\"))).then_some(*kind),
+        }
+    })
+}
+
+impl FolderView {
     /// Adaptive layout: a folder of mostly pictures and videos opens as a grid.
     fn apply_adaptive(&mut self) {
         if !self.adaptive_pending {
@@ -3512,4 +3561,23 @@ fn _assert_category_used(_: Category) {}
 fn trace_live() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("RUSTYFILES_TRACE_LIVE").is_some())
+}
+
+#[cfg(test)]
+mod known_kind_tests {
+    use super::{KnownKind, known_kind};
+    use rf_win::known::KnownFolder;
+
+    #[test]
+    fn pictures_and_downloads_are_recognised() {
+        let (Some(pics), Some(dl)) = (KnownFolder::Pictures.path(), KnownFolder::Downloads.path()) else { return };
+        assert_eq!(known_kind(&pics), Some(KnownKind::Pictures));
+        assert_eq!(known_kind(&pics.join("Screenshots")), Some(KnownKind::Pictures));
+        assert_eq!(known_kind(&dl), Some(KnownKind::Downloads));
+        // only Downloads itself gets date groups, not the folders inside it
+        assert_eq!(known_kind(&dl.join("project")), None);
+        // a sibling whose name starts the same is not inside Pictures
+        let sibling = std::path::PathBuf::from(format!("{} old", pics.display()));
+        assert_eq!(known_kind(&sibling), None);
+    }
 }
