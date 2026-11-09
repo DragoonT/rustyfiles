@@ -9,3 +9,10 @@ publish.workspace = true
 [dependencies]
 thiserror.workspace = true
 log.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
+[dev-dependencies]
+flate2.workspace = true
+crc32fast.workspace = true

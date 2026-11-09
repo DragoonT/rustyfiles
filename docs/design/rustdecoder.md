@@ -47,6 +47,19 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
 1. MP4 reader with tests against ffprobe (sample count, sizes, timestamps, keyframes).
 2. Bit reader, H.264 / HEVC parameter sets and slice headers.
 3. D3D11 Video decode of HEVC Main / Main 10 and H.264 High, first frame to a PNG in a test.
+   **Phase 3, HEVC done (2026-11-09):** `d3d11` (adapter pick by profile, decoder, texture
+   array, submission), `slice` (slice header up to the long-term pictures; the GPU reads the
+   rest), `dpb` (POC, RPS, marking, bumping, CRA/RASL skipping), `dxva` (PicParams, Qmatrix,
+   short slice control), `decoder` (`HevcDecoder::open / next_frame / read_back`). Output is
+   bit-exact with ffmpeg on Main and Main 10 clips with B-frames, open GOP pyramid, default
+   scaling lists, 4 slices per picture, and on the first 60 frames of the Sony XAVC HS 4K60
+   clip (7 slices, PPS scaling lists, leading RADL pictures). That clip decodes at 511 fps
+   (330 frames, 0.65 s, GPU only, RTX 5070 Ti, short slice format, ConfigBitstreamRaw 1).
+   Assumptions: short slice format only (a GPU offering only the long format is refused),
+   4:2:0 8/10-bit, surfaces rounded up to 128, one frame stays valid until the next
+   `next_frame`. Left for phase 4: frame queue holding several surfaces, shaders, seeking
+   (start at a keyframe, drop RASL), mid-stream SPS changes beyond size, other GPUs.
+   H.264 is not started.
 4. Playback in DirectLook: clock, frame queue, seeking, audio; replaces the Media Foundation
    route, and FilmCraft for video.
 5. MKV / WebM, VP9 and AV1 (the GPU decodes them too), fragmented MP4.
