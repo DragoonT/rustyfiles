@@ -3,6 +3,8 @@
 mod actions;
 mod aliases;
 mod background;
+pub mod bench;
+mod bench_view;
 mod archive_view;
 mod bulk_rename;
 mod command_palette;
@@ -196,7 +198,9 @@ pub fn main() {
     // The folder check is bounded: an offline network path must not keep the window from
     // appearing for the whole SMB timeout. Undecided after 2 s = treat as a (slow) folder.
     // `--settings=directlook`: DirectLook'un simge menüsünden "DirectLook ayarları"
-    let open_look_settings = std::env::args().nth(1).as_deref() == Some("--settings=directlook");
+    // `--settings=speed`: straight to Settings → Speed test
+    let settings_arg = std::env::args().nth(1).and_then(|a| a.strip_prefix("--settings=").map(str::to_string));
+    let open_look_settings = settings_arg.is_some();
     // `--pick <pipe>`: an app's Open/Save dialog (rustyfiles_dialog.dll) asks for a file
     let pick = (std::env::args().nth(1).as_deref() == Some("--pick")).then(|| std::env::args().nth(2)).flatten();
     // `--bar-preview`: our taskbar, as an ordinary window (see taskbar_preview)
@@ -344,8 +348,8 @@ pub fn main() {
         actions::bind(cx);
         actions::bind_user(cx);
         keymap_editor::init(cx);
-        if open_look_settings {
-            settings_view::open_page(settings_view::Page::Look, cx);
+        if let Some(page) = &settings_arg {
+            settings_view::open_page(if page == "speed" { settings_view::Page::Speed } else { settings_view::Page::Look }, cx);
         }
         // copies and moves keep a crash-safe journal there (see rf_win::fastcopy)
         if let Some(d) = settings::app_dir() {

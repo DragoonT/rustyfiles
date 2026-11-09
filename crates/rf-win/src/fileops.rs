@@ -40,6 +40,19 @@ fn perform(op: &IFileOperation) -> anyhow::Result<bool> {
     }
 }
 
+/// Copies `sources` into `dest_dir` with the shell's engine and the given FOF_* flags (no undo
+/// record unless the flags ask for one).
+pub fn shell_copy(sources: &[PathBuf], dest_dir: &Path, flags: u32) -> anyhow::Result<()> {
+    let op = new_op(flags)?;
+    let dest = item(dest_dir)?;
+    for s in sources {
+        let it = item(s)?;
+        unsafe { op.CopyItem(&it, &dest, PCWSTR::null(), None)? };
+    }
+    anyhow::ensure!(perform(&op)?, "the copy was aborted");
+    Ok(())
+}
+
 /// Copy or move into `dest_dir`. Pasting into the same folder makes "x - Kopya" names.
 pub fn transfer(kind: Transfer, sources: &[PathBuf], dest_dir: &Path) -> anyhow::Result<bool> {
     let same_dir = sources.iter().all(|s| s.parent() == Some(dest_dir));

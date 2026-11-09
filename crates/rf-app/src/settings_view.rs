@@ -32,10 +32,11 @@ pub enum Page {
     Look,
     Dev,
     Advanced,
+    Speed,
     About,
 }
 
-const PAGES: [(Page, L, &str); 10] = [
+const PAGES: [(Page, L, &str); 11] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
     (Page::Layout, L::LayoutGrid, "Sayfa düzeni"),
@@ -45,6 +46,7 @@ const PAGES: [(Page, L, &str); 10] = [
     (Page::Look, L::Eye, "DirectLook"),
     (Page::Dev, L::SquareTerminal, "Geliştirici araçları"),
     (Page::Advanced, L::Wrench, "Gelişmiş"),
+    (Page::Speed, L::Gauge, "Hız testi"),
     (Page::About, L::Info, "Hakkında"),
 ];
 
@@ -267,6 +269,7 @@ pub fn render(p: &Palette, cx: &mut App) -> AnyElement {
         Page::Look => look(p, &s, cx),
         Page::Dev => dev(p, &s),
         Page::Advanced => advanced(p, &s),
+        Page::Speed => crate::bench_view::page(p, cx),
         Page::About => about(p, cx),
     };
     h_flex()

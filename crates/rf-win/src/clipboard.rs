@@ -132,3 +132,38 @@ pub fn get_files(owner: HWND) -> anyhow::Result<Option<(Vec<PathBuf>, Transfer)>
         Ok(Some((out, kind)))
     }
 }
+
+/// Puts a picture on the clipboard: as a bitmap (CF_DIB, every app) and as PNG (the format
+/// Discord, browsers and Office paste with transparency). `rgba` is `w * h * 4` bytes, top row
+/// first; `png` is the same picture encoded.
+pub fn set_image(owner: HWND, w: u32, h: u32, rgba: &[u8], png: &[u8]) -> anyhow::Result<()> {
+    use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAPINFOHEADER};
+    use windows::Win32::System::Ole::CF_DIB;
+    anyhow::ensure!(rgba.len() == (w * h * 4) as usize, "picture size");
+    let header = BITMAPINFOHEADER {
+        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+        biWidth: w as i32,
+        // positive height: rows bottom-up, what every reader of CF_DIB expects
+        biHeight: h as i32,
+        biPlanes: 1,
+        biBitCount: 32,
+        biCompression: BI_RGB.0,
+        biSizeImage: w * h * 4,
+        ..Default::default()
+    };
+    let mut dib = Vec::with_capacity(std::mem::size_of::<BITMAPINFOHEADER>() + rgba.len());
+    dib.extend_from_slice(unsafe { std::slice::from_raw_parts(&header as *const _ as *const u8, std::mem::size_of::<BITMAPINFOHEADER>()) });
+    for row in (0..h as usize).rev() {
+        for px in rgba[row * w as usize * 4..(row + 1) * w as usize * 4].chunks_exact(4) {
+            dib.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
+        }
+    }
+    let _g = open(owner)?;
+    unsafe {
+        EmptyClipboard()?;
+        SetClipboardData(CF_DIB.0 as u32, Some(HANDLE(alloc(&dib)?.0)))?;
+        let fmt = RegisterClipboardFormatW(w!("PNG"));
+        SetClipboardData(fmt, Some(HANDLE(alloc(png)?.0)))?;
+    }
+    Ok(())
+}
