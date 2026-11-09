@@ -1209,6 +1209,70 @@ fn video_codec<R: Read + Seek>(src: &mut Src<R>, pc: PictureCodec, pd: &PictureD
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ber_lengths() {
+        assert_eq!(ber(&[0x7f]), Some((127, 1)));
+        assert_eq!(ber(&[0x81, 0xc8]), Some((200, 2)));
+        assert_eq!(ber(&[0x83, 1, 0, 0]), Some((65536, 4)));
+        assert_eq!(ber(&[0x88, 0, 0, 0, 1, 0, 0, 0, 0]), Some((1 << 32, 9)));
+        assert_eq!(ber(&[0x80]), None);
+        assert_eq!(ber(&[0x83, 1]), None);
+    }
+
+    #[test]
+    fn detection_with_and_without_run_in() {
+        let mut pack = vec![0x06, 0x0e, 0x2b, 0x34, 0x02, 0x05, 0x01, 0x01, 0x0d, 0x01, 0x02, 0x01, 0x01, 0x02, 0x04, 0x00];
+        assert!(is_mxf(&pack));
+        let mut run = vec![0xaa; 300];
+        run.append(&mut pack);
+        assert!(is_mxf(&run));
+        assert!(!is_mxf(&[0, 0, 0, 0x18, b'f', b't', b'y', b'p', 0x06, 0x0e, 0x2b, 0x34, 0x02, 0x05, 0x01, 0x01, 0x0d, 0x01, 0x02]));
+        assert!(!is_mxf(&[0x1a, 0x45, 0xdf, 0xa3, 0, 0, 0, 0, 0, 0, 0, 0]));
+        assert!(!is_mxf(&[1, 2, 3]));
+    }
+
+    #[test]
+    fn labels() {
+        let atom = [0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x01, 0x0d, 0x01, 0x02, 0x01, 0x10, 0, 0, 0];
+        assert_eq!(OperationalPattern::from_label(&atom), OperationalPattern::Atom);
+        let op1a = [0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x01, 0x0d, 0x01, 0x02, 0x01, 0x01, 0x01, 0x09, 0];
+        assert!(OperationalPattern::from_label(&op1a).is_op1a());
+        let vc3 = [0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0a, 0x04, 0x01, 0x02, 0x02, 0x71, 0x26, 0, 0];
+        assert_eq!(classify_picture(&vc3, &[0; 16]), PictureCodec::Vc3);
+        let prores = [0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0d, 0x04, 0x01, 0x02, 0x02, 0x03, 0x06, 0x04, 0];
+        assert_eq!(classify_picture(&prores, &[0; 16]), PictureCodec::ProRes(4));
+        let mpeg2 = [0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x03, 0x04, 0x01, 0x02, 0x02, 0x01, 0x01, 0x11, 0];
+        assert_eq!(classify_picture(&mpeg2, &[0; 16]), PictureCodec::Mpeg2);
+        let avc_container = [0x06, 0x0e, 0x2b, 0x34, 0x04, 0x01, 0x01, 0x0a, 0x0d, 0x01, 0x03, 0x01, 0x02, 0x10, 0x60, 0x01];
+        assert_eq!(classify_picture(&mpeg2, &avc_container), PictureCodec::Avc);
+    }
+
+    #[test]
+    fn aes3_to_plain_pcm() {
+        // two samples, four subframes each, 24 bit: values 1, 2 (ch 0, 1) and the silent rest
+        let sub = |v: i32, ch: u32| (((v & 0xff_ffff) as u32) << 4 | ch).to_le_bytes();
+        let mut raw = vec![0, 2, 0, 0x0f];
+        for s in 0..2 {
+            for ch in 0..4u32 {
+                raw.extend_from_slice(&sub(if ch < 2 { (s + 1) * 256 * (ch as i32 + 1) * if s == 1 { -1 } else { 1 } } else { 0 }, ch));
+            }
+        }
+        assert_eq!(aes3_count(raw.len(), 2), Some((2, 4)));
+        let mut out = Vec::new();
+        aes3_to_pcm(&raw, 2, 24, &mut out);
+        let v = |i: usize| i32::from_le_bytes([0, out[i * 3], out[i * 3 + 1], out[i * 3 + 2]]) >> 8;
+        assert_eq!(out.len(), 12);
+        assert_eq!([v(0), v(1), v(2), v(3)], [256, 512, -512, -1024]);
+        let mut out16 = Vec::new();
+        aes3_to_pcm(&raw, 2, 16, &mut out16);
+        assert_eq!(i16::from_le_bytes([out16[0], out16[1]]), 1);
+    }
+}
+
 /// Samples and subframes per sample of an AES3 element of `len` bytes whose header says `n`
 /// samples; `None` when the size does not fit (the element is not in AES3 form).
 fn aes3_count(len: usize, n: u16) -> Option<(usize, usize)> {

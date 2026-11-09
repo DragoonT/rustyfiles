@@ -454,6 +454,37 @@ fn a_file_cut_before_its_footer_keeps_its_frames() {
 }
 
 #[test]
+fn damaged_files_do_not_panic() {
+    if !have_ffmpeg() {
+        return;
+    }
+    for name in ["dnxhr_hq_op1a", "h264_long_gop", "d10"] {
+        let s = specs().into_iter().find(|s| s.name == name).unwrap();
+        let bytes = std::fs::read(make(&s)).unwrap();
+        let out = temp_dir().join("mxf_damaged.mxf");
+        let (mut ok, mut err) = (0, 0);
+        // cut at many places, and flip bytes in the header metadata and in the first elements
+        for cut in (0..bytes.len().min(40_000)).step_by(331).chain((40_000..bytes.len()).step_by(bytes.len() / 40)) {
+            std::fs::write(&out, &bytes[..cut]).unwrap();
+            match mxf::parse(&mut File::open(&out).unwrap()) {
+                Ok(_) => ok += 1,
+                Err(_) => err += 1,
+            }
+        }
+        for at in (0..9000).step_by(29) {
+            let mut b = bytes[..bytes.len().min(100_000)].to_vec();
+            b[at] ^= 0xff;
+            std::fs::write(&out, &b).unwrap();
+            match mxf::parse(&mut File::open(&out).unwrap()) {
+                Ok(_) => ok += 1,
+                Err(_) => err += 1,
+            }
+        }
+        println!("{name}: {ok} damaged files read, {err} refused, no panic");
+    }
+}
+
+#[test]
 fn pcm_audio_decodes_and_matches_ffmpeg() {
     if !have_ffmpeg() {
         return;
