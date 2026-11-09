@@ -363,6 +363,17 @@ struct Swap {
     target: Option<Target>,
 }
 
+impl Drop for Swap {
+    fn drop(&mut self) {
+        // the frame latency object is ours to close (DXGI hands out a new handle)
+        if !self.waitable.is_invalid() {
+            unsafe {
+                let _ = windows::Win32::Foundation::CloseHandle(self.waitable);
+            }
+        }
+    }
+}
+
 fn gpu<T>(what: &str, r: windows::core::Result<T>) -> Result<T> {
     r.map_err(|e| Error::Gpu(format!("{what}: {e}")))
 }

@@ -35,6 +35,7 @@ pub fn h264_profile() -> (GUID, DXGI_FORMAT) {
 }
 
 /// A D3D11 device with video support, on an adapter that decodes the profile asked for.
+#[derive(Clone)]
 pub struct Gpu {
     pub device: ID3D11Device,
     pub context: ID3D11DeviceContext,
@@ -43,10 +44,43 @@ pub struct Gpu {
     pub adapter_name: String,
 }
 
+/// Devices already made, shared by every video of the process: making a device per video
+/// left two handles behind each time on this driver (and costs tens of milliseconds).
+struct Shared(Vec<Gpu>);
+// SAFETY: the device is created with multithread protection on (see `Gpu::open`) before it is
+// shared, and D3D11 devices themselves are free-threaded.
+unsafe impl Send for Shared {}
+static SHARED: std::sync::Mutex<Shared> = std::sync::Mutex::new(Shared(Vec::new()));
+
 impl Gpu {
     /// The first hardware adapter (fastest first) whose video engine decodes `profile` into
     /// `format`.
     pub fn open(profile: &GUID, format: DXGI_FORMAT) -> Result<Gpu> {
+        let mut shared = SHARED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(g) = shared.0.iter().find(|g| g.decodes(profile, format)) {
+            return Ok(g.clone());
+        }
+        let g = Self::open_new(profile, format)?;
+        // the decoder thread, the converter and the window share the immediate context
+        if let Ok(mt) = g.context.cast::<windows::Win32::Graphics::Direct3D11::ID3D11Multithread>() {
+            unsafe {
+                let _ = mt.SetMultithreadProtected(true);
+            }
+        }
+        shared.0.push(g.clone());
+        Ok(g)
+    }
+
+    /// Whether this device's video engine decodes `profile` into `format`.
+    fn decodes(&self, profile: &GUID, format: DXGI_FORMAT) -> bool {
+        unsafe {
+            let n = self.video_device.GetVideoDecoderProfileCount();
+            (0..n).any(|i| self.video_device.GetVideoDecoderProfile(i).is_ok_and(|g| g == *profile))
+                && self.video_device.CheckVideoDecoderFormat(profile, format).is_ok_and(|b| b.as_bool())
+        }
+    }
+
+    fn open_new(profile: &GUID, format: DXGI_FORMAT) -> Result<Gpu> {
         unsafe {
             let factory: IDXGIFactory6 = gpu("CreateDXGIFactory1", CreateDXGIFactory1())?;
             let mut why = String::from("no adapter");
@@ -147,6 +181,9 @@ pub fn surface_size(coded: u32) -> u32 {
 
 impl HwDecoder {
     pub fn new(g: &Gpu, profile: &GUID, format: DXGI_FORMAT, coded_width: u32, coded_height: u32, surfaces: usize) -> Result<Self> {
+        // D3D11 frees released objects on the next flush: the previous video's decoder and
+        // surfaces (several megabytes) go now, not whenever the shared device flushes next
+        unsafe { g.context.Flush() };
         Self::with_alignment(g, profile, format, coded_width, coded_height, surfaces, 128, 1)
     }
 

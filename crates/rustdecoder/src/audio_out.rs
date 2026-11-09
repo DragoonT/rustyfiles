@@ -285,6 +285,9 @@ impl Drop for AudioOutput {
         if let Some(h) = self.thread.lock().ok().and_then(|mut g| g.take()) {
             let _ = h.join();
         }
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.wake.0);
+        }
     }
 }
 
@@ -503,6 +506,17 @@ fn render_thread(
     let _ = init_tx.send(Ok((SendBox(wake), name)));
 
     let handles = [event, wake];
+    // the device's event goes with this thread; `wake` is closed by `AudioOutput::drop` after
+    // the join (it still signals it on the way out)
+    struct CloseOnDrop(HANDLE);
+    impl Drop for CloseOnDrop {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = windows::Win32::Foundation::CloseHandle(self.0);
+            }
+        }
+    }
+    let _event = CloseOnDrop(event);
     let fill = |max_frames: u32| {
         if max_frames == 0 {
             return;
