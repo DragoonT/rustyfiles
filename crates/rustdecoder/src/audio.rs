@@ -105,6 +105,8 @@ impl AudioDecoder {
             #[cfg(windows)]
             Codec::Mp3 => Self::mft(MftCodec::Mp3, &[], &mut sample_rate, channels)?,
             #[cfg(windows)]
+            Codec::Other if track.fourcc == *b"mp2 " => Self::mft(MftCodec::Mp2, &[], &mut sample_rate, channels)?,
+            #[cfg(windows)]
             Codec::Ac3 { config } => Self::mft(MftCodec::Ac3, config, &mut sample_rate, channels)?,
             #[cfg(windows)]
             Codec::Eac3 { config } => Self::mft(MftCodec::Eac3, config, &mut sample_rate, channels)?,
@@ -398,6 +400,8 @@ pub enum MftCodec {
     Aac,
     Opus,
     Mp3,
+    /// MPEG-1 audio layer I and II (`MFAudioFormat_MPEG`).
+    Mp2,
     Ac3,
     Eac3,
     Vorbis,
@@ -409,6 +413,7 @@ impl MftCodec {
             MftCodec::Aac => "AAC",
             MftCodec::Opus => "Opus",
             MftCodec::Mp3 => "MP3",
+            MftCodec::Mp2 => "MP2",
             MftCodec::Ac3 => "AC-3",
             MftCodec::Eac3 => "E-AC-3",
             MftCodec::Vorbis => "Vorbis",
@@ -420,7 +425,7 @@ impl MftCodec {
     fn preroll(self) -> usize {
         match self {
             MftCodec::Aac | MftCodec::Ac3 | MftCodec::Eac3 => 2,
-            MftCodec::Mp3 => 4,
+            MftCodec::Mp3 | MftCodec::Mp2 => 4,
             // 80 ms of 20 ms packets, what RFC 7845 asks for
             MftCodec::Opus => 4,
             MftCodec::Vorbis => 2,
@@ -433,13 +438,14 @@ impl MftCodec {
             MftCodec::Aac => "AAC audio: no decoder installed (the AAC decoder of Windows is missing)",
             MftCodec::Opus => "Opus audio: no decoder installed (Windows 10 1809 and later have one)",
             MftCodec::Mp3 => "MP3 audio: no decoder installed",
+            MftCodec::Mp2 => "MP2 audio: no decoder installed",
             MftCodec::Ac3 => "AC-3 audio: no decoder installed (Windows has only a passthrough converter, no Dolby Digital decoder)",
             MftCodec::Eac3 => "E-AC-3 audio: no decoder installed (Windows has only a passthrough converter, no Dolby Digital Plus decoder)",
             MftCodec::Vorbis => "Vorbis audio: no decoder installed (the Web Media Extensions add one)",
         }
     }
 
-    const ALL: [MftCodec; 6] = [MftCodec::Aac, MftCodec::Opus, MftCodec::Mp3, MftCodec::Ac3, MftCodec::Eac3, MftCodec::Vorbis];
+    const ALL: [MftCodec; 7] = [MftCodec::Aac, MftCodec::Opus, MftCodec::Mp3, MftCodec::Mp2, MftCodec::Ac3, MftCodec::Eac3, MftCodec::Vorbis];
 }
 
 /// For each codec, the audio decoders this machine offers (their friendly names).
@@ -487,6 +493,7 @@ mod mft {
             MftCodec::Aac => MFAudioFormat_AAC,
             MftCodec::Opus => MFAudioFormat_Opus,
             MftCodec::Mp3 => MFAudioFormat_MP3,
+            MftCodec::Mp2 => MFAudioFormat_MPEG,
             MftCodec::Ac3 => MFAudioFormat_Dolby_AC3,
             MftCodec::Eac3 => MFAudioFormat_Dolby_DDPlus,
             MftCodec::Vorbis => MFAudioFormat_Vorbis,
@@ -571,6 +578,19 @@ mod mft {
                 user.extend_from_slice(&0u16.to_le_bytes());
                 user.extend_from_slice(&1u16.to_le_bytes());
                 user.extend_from_slice(&0u16.to_le_bytes());
+                vec![user, Vec::new()]
+            }
+            MftCodec::Mp2 => {
+                // MPEG1WAVEFORMAT's tail: layer 2, bit rate 0, mode, extension, emphasis, flags
+                // (ACM_MPEG_ID_MPEG1 = 0x10), two zero PTS words
+                let mut user = Vec::new();
+                user.extend_from_slice(&2u16.to_le_bytes());
+                user.extend_from_slice(&0u32.to_le_bytes());
+                user.extend_from_slice(&1u16.to_le_bytes());
+                user.extend_from_slice(&0u16.to_le_bytes());
+                user.extend_from_slice(&1u16.to_le_bytes());
+                user.extend_from_slice(&0x10u16.to_le_bytes());
+                user.extend_from_slice(&[0u8; 8]);
                 vec![user, Vec::new()]
             }
             MftCodec::Ac3 | MftCodec::Eac3 => vec![Vec::new()],
