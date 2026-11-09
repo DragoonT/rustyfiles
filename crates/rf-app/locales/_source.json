@@ -5820,5 +5820,17 @@
   "key": "öğe daha",
   "tr": "öğe daha",
   "en": "more items"
+ },
+ {
+  "id": "592b041e",
+  "key": "Kaydırma çubuğunu göster",
+  "tr": "Kaydırma çubuğunu göster",
+  "en": "Show scrollbar"
+ },
+ {
+  "id": "bbee80be",
+  "key": "Ayrıntılar ve Izgara listelerinin sağında; sürükleyin ya da bir yere tıklayıp oraya atlayın.",
+  "tr": "Ayrıntılar ve Izgara listelerinin sağında; sürükleyin ya da bir yere tıklayıp oraya atlayın.",
+  "en": "On the right of the Details and Grid lists. Drag it, or click a spot to jump there."
  }
 ]

@@ -972,4 +972,6 @@ pub const EN: &[(&str, &str)] = &[
     ("klasör okunamadı", "folders could not be read"),
     ("Bu klasöre git", "Go to this folder"),
     ("Klasörde göster", "Show in folder"),
+    ("Kaydırma çubuğunu göster", "Show scrollbar"),
+    ("Ayrıntılar ve Izgara listelerinin sağında; sürükleyin ya da bir yere tıklayıp oraya atlayın.", "On the right of the Details and Grid lists. Drag it, or click a spot to jump there."),
 ];
