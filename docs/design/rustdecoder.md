@@ -50,6 +50,7 @@ Frames stay on the GPU from decode to screen: no copy back to system memory.
   `Av1Decoder` (phase 5).
 - `vp9`, `dxva_vp9`, `vp9dec` — VP9 superframe split, uncompressed header, `DXVA_PicParams_VP9`,
   `Vp9Decoder` (phase 5).
+- `mpeg2`, `dxva_mpeg2`, `mpeg2dec` — MPEG-1 / 2 video headers, picture splitter, `DXVA_PictureParameters` + slices, `Mpeg2Decoder` (MPEG-2 4:2:0 frame pictures on the GPU; see "MPEG-1 / MPEG-2 video on the GPU").
 - `dnx`, `dnxtables`, `dnxdec` — Avid DNxHD / DNxHR (VC-3) on the CPU, `DnxDecoder` and `DnxVideo` (phase 6).
 - `d3d11` — video device, decoder creation by profile (H.264, HEVC Main, HEVC Main 10, VP9 0 and 2, AV1 main),
   per-frame submission, output texture array.
@@ -646,7 +647,9 @@ walks the packets of the PID from there, cuts PES headers and converts. Nothing 
   16 / 24; one sample per PES). Frames are cut by their sync words and sizes across PES
   boundaries; a frame's time is the PES PTS that covers it, then running by frame length (the
   PTS only re-anchors when it is more than half a frame off). Audio track timescale = sample rate.
-- MPEG-2 video (0x01, 0x02): listed with its size, one sample per PES (sync = I picture), no decoder.
+- MPEG-2 video (0x01, 0x02): one sample per PES (sync = I picture; the PES is taken to be one
+  picture, which is what broadcast and ffmpeg do; a sample with several pictures is split by the
+  decoder, a picture over several PES is not handled). Decoded by `Mpeg2Decoder` (below).
 - Listed without samples: AAC in LATM (0x11, not supported), DTS, TrueHD, VC-1, subtitles, teletext.
 - Times are shifted so the earliest presentation time of the file is 0 (MP4's convention: DTS of
   a B-frame stream starts negative).
@@ -654,9 +657,14 @@ walks the packets of the PID from there, cuts PES headers and converts. Nothing 
 **MPEG-PS (`ps.rs`).** `.mpg`, `.vob`, MPEG-1 system streams: pack headers and PES packets (MPEG-2
 and MPEG-1 style headers). MPEG audio and AC-3 in private stream 1 (substream 0x80..0x87, the
 4-byte private header cut) are read as frames like in TS; samples are found by walking PES packets
-(`Layout` with packet size 0). MPEG-1 / 2 video is listed with its picture size from the first
-sequence header and **has no samples** (its pictures do not line up with PES packets; a picture
-splitter comes with an MPEG-2 decoder). H.264 / HEVC / LPCM / DTS in program streams: not handled.
+(`Layout` with packet size 0). MPEG-1 / 2 video is cut into pictures by `mpeg2::Splitter` while the
+PES packets are read: one sample per access unit (sequence / GOP headers belong to the picture
+that follows), its start found as (PES packet, bytes into its payload) like an audio frame that
+starts inside a packet; sync = I picture; times from the PES where it has them (the first picture
+that starts in the packet), else from the temporal references within the GOP (`mpeg2::sample_times`,
+dts in decode order, never after the pts). A raw `.m2v` (starts `00 00 01 B3`) is read the same way
+with plain storage (`mpeg2::read_elementary`). H.264 / HEVC / LPCM / DTS in program streams: not
+handled.
 
 **AVI (`avi.rs`).** `hdrl` (`avih`, `strl` with `strh` / `strf` / `indx`), chunks from the OpenDML
 super index and `ix##` chunk indexes (files with `RIFF AVIX` parts, > 1 GB) where every stream has
@@ -689,7 +697,7 @@ temp folder; times against `ffprobe -show_packets -show_data_hash CRC32`):
 | `.m2ts` | H.264 | `pcm_bluray` 16 bit 600, 24 bit 400 | same, LPCM size (+ 4 byte header) |
 | `.ts` | H.264 | MP3 126 | same |
 | `.ts` | MPEG-2 (8 I pictures of 90) | MP2 125 | same (listing only) |
-| `.vob`, `.mpg` (MPEG-2), `.mpg` (MPEG-1) | listed, no samples | AC-3 94, MP2 125, MP2 125 | audio frames: pts, size, CRC32 |
+| `.vob`, `.mpg` (MPEG-2), `.mpg` (MPEG-1) | 90 pictures each: pts (where ffprobe has one), size, CRC32, key | AC-3 94, MP2 125, MP2 125 | audio frames: pts, size, CRC32 |
 | `.avi` | H.264 | PCM 141 | count, sync, size + CRC32 of every chunk, dts (= pts) |
 | `.avi` | H.264 with B-frames | MP3 126 | same minus pts / dts (ffprobe shows none): pts a dense display run, dts <= pts |
 | `.avi` | H.264 | AAC 142, AC-3 94 | same |
@@ -720,16 +728,95 @@ No AVCHD file was available in the camera folder, so no camera stream was tried.
   AAC LATM, HE-AAC signalling, DTS / TrueHD / VC-1 / PGS, an `.m2ts` arrival-time clock, several
   programs (the first with audio or video is used), PTS discontinuities (segments that start
   over, as concatenated files do).
-- PS: a picture splitter for MPEG-1 / 2 video (then samples and an MPEG-2 decoder), PSM-signalled
-  H.264, DVD LPCM / DTS, a pack-less raw ES `.m2v`.
+- PS: PSM-signalled H.264, DVD LPCM / DTS. (The MPEG-1 / 2 picture splitter and raw `.m2v` are
+  done, see "MPEG-1 / MPEG-2 video".)
 - AVI: HEVC / POC types 1 and 2 reordering, `avc1` with an `avcC` (untested), packed B-frame
   bitstreams (DivX / MPEG-4 part 2 are listed only), `indx` sub-index types other than chunk indexes
   (field indexes), a cheaper H.264 open (the pictures are read once for their size; 1 GB of
   H.264 takes about as long as a TS index).
 
 Still to do before the route can be the default: formats the Media Foundation / FilmCraft
-routes play that the container readers do not take (WMV / ASF, FLV, MXF; MPEG-2 video and
-the other codecs listed under "Containers: TS, PS, AVI" are read but not decoded); several audio tracks and track choice, subtitles; playback keys
+routes play that the container readers do not take (WMV / ASF, FLV; the other codecs listed under
+"Containers: TS, PS, AVI" are read but not decoded); several audio tracks and track choice, subtitles; playback keys
+### MPEG-1 / MPEG-2 video on the GPU (done 2026-11-09)
+
+Files: `mpeg2.rs` (headers, splitter, raw ES reader), `dxva_mpeg2.rs` (DXVA 1.0 structures),
+`mpeg2dec.rs` (`Mpeg2Decoder`, `VideoDecoder::Mpeg2`), `tests/gpu_mpeg2.rs`,
+`tests/playback_mpeg2.rs`, `examples/mpeg2_profiles.rs` (lists the decoder profiles).
+
+- Headers parsed: sequence header + extension (size with extension bits, profile / level,
+  progressive_sequence, chroma format, low delay), quantiser matrices (default, loaded in the
+  sequence header, quantiser matrix extension; kept until the next sequence header; stored in scan
+  order as DXVA wants them), GOP (closed_gop), picture header + coding extension (f_codes,
+  intra_dc_precision, structure, top_field_first, frame_pred_frame_dct, concealment motion vectors,
+  q_scale_type, intra_vlc_format, alternate_scan, repeat_first_field, chroma_420_type,
+  progressive_frame) and, per slice, the row, the quantiser scale code and the bit offset of the
+  first macroblock from the start code (extra slice info skipped). The macroblock layer is the video
+  engine's: we never decode a coefficient.
+- GPU: `D3D11_DECODER_PROFILE_MPEG2_VLD` (`MPEG2and1_VLD` as a second choice), NV12, ConfigBitstreamRaw
+  1. `DXVA_PictureParameters` + `DXVA_QmatrixData` (all four matrices every picture) + one
+  `DXVA_SliceInfo` per slice (slices with their start codes packed into the bitstream buffer;
+  `wNumberMBsInSlice` from the distance to the next slice's row, so a slice is taken to start at
+  the left edge: several slices in one row get the wrong count). Layouts follow ffmpeg's
+  `dxva2_mpeg2.c`; checked by size in a unit test.
+- Order: B pictures go out when decoded; an I / P picture waits for the next I / P (backward
+  reference). Two reference surfaces, 8 in the pool. Seeking to a key sample drops the B pictures
+  that need the GOP before (unless the GOP is closed). A sequence header with a new size starts a
+  new decoder; what was queued is dropped (a mid-stream size change loses a picture).
+- Pictures are cropped to the sequence size (1080 lines out of 1088, checked).
+- Surface alignment 32 (rows of macroblocks are rounded to even for interlaced sequences).
+
+Measured (`tests/gpu_mpeg2.rs`; RTX 5070 Ti, ffmpeg 8.1.1 software decoder as reference through
+`-f rawvideo -pix_fmt nv12`, every sample of every frame; the MPEG-2 IDCT on the GPU is not
+ffmpeg's, so the pictures are not bit-exact; error grows along a GOP as prediction carries it):
+
+| Clip | Frames | max abs diff | samples that differ | histogram of abs diff 0 / 1 / 2 / 3 / 4+ |
+|---|---|---|---|---|
+| 640x352 PS, g 12, no B | 75 | 6 | 4.80 % | 24127970 / 1172330 / 40469 / 2858 / 373 |
+| 640x352 PS, g 12, 2 B | 75 | 4 | 3.51 % | 24453843 / 879210 / 10809 / 134 / 4 |
+| 720x576 interlaced (ilme+ildct, top first) `.vob`, 2 B | 50 | 4 | 2.41 % | 30353741 / 742765 / 7401 / 88 / 5 |
+| 640x352 TS, custom intra / inter matrices, 2 B | 50 | 4 | 4.25 % | 16177920 / 712983 / 5047 / 49 / 1 |
+| 640x352 PS, non-linear q scale + intra VLC + alternate scan | 50 | 3 | 2.57 % | 16461230 / 431379 / 3383 / 8 / 0 |
+| 1280x720 TS, 2 B | 50 | 3 | 1.60 % | 68014938 / 1096592 / 8443 / 27 / 0 |
+| 1920x1080 interlaced TS (1088 coded), 2 B | 25 | 3 | 0.92 % | 77045181 / 709859 / 4918 / 42 / 0 |
+| 640x352 raw `.m2v`, 2 B | 50 | 4 | 2.67 % | 16444602 / 445349 / 5992 / 55 / 2 |
+| 720x576 MXF D-10-like intra only (30 Mb/s) | 50 | 1 | 3.18 % | 30115316 / 988684 / 0 / 0 / 0 |
+| 720x576 MXF long GOP (g 6, 2 B) | 50 | 3 | 3.01 % | 30167713 / 928593 / 7681 / 13 / 0 |
+
+The test holds the largest difference to 12 and 98 % of the samples to within 1. Presentation
+times increase in display order in every clip. Also checked: PS video samples against ffprobe
+(`tests/ts.rs`: 90 pictures each in `.vob` / `.mpg` MPEG-2 and MPEG-1: size, CRC32, key, pts
+within 1 tick); seeking to a key sample (39 pictures after it equal the full decode's, the first
+at the key's time); cut and bit-flipped program streams (no panic); the MP2 sound.
+
+- **MP2 audio** (MPEG-1 layer II in PS / TS / MXF `mp2 ` tracks): Windows has "Microsoft MPEG Audio
+  Decoder MFT" for `MFAudioFormat_MPEG`; `MftCodec::Mp2` in `audio.rs` (an additive change: the
+  MPEG1WAVEFORMAT tail as user data, the track found by its `mp2 ` fourcc). Against `ffmpeg -f f32le`
+  (PS, 3 s stereo 48 kHz): 144000 frames each, shift 0, max diff 3e-5, rms 1.2e-5.
+  `tests/playback_mpeg2.rs`: MPEG-2 PS + MP2 through `Playback` with a fake sink and fake time
+  (38 pictures in 1.5 s at 25 fps, none dropped, audio one unbroken run, three seeks land on the
+  picture at or just before the target).
+- **MPEG-1 video is refused** (`Unsupported`): on this NVIDIA driver `MPEG2and1_VLD` (and
+  `MPEG2_VLD`) decode the first macroblocks of an MPEG-1 picture and then lose the bitstream (the
+  picture is mostly wrong, even an I picture, mean abs error 92 of 255). Nothing in the DXVA
+  structures says MPEG-1 (escape codes and the dequantiser differ); tried: the other profile,
+  `bMVprecisionAndChromaRelation` 0..3, PCE bits zero. ffmpeg itself has no DXVA MPEG-1 path.
+  Not shown wrong; the container reader still lists MPEG-1 tracks with samples.
+- **4:2:2** (D-10 50, XDCAM HD422): D3D11 has no 4:2:2 MPEG-2 decoder profile; refused with a message
+  (tested with a 4:2:2 PS). XDCAM HD 35 (4:2:0) in MXF is the same path as the 4:2:0 clips above.
+- **Field pictures** (two fields into one surface, `bSecondField`, the first field of the same frame
+  as a reference of the second): **not done**, refused with a message. ffmpeg has no encoder that
+  writes them (its mpeg2video makes frame pictures with interlaced DCT / `ilme`) and no such file was
+  on this machine, so there was nothing to check an implementation against; the DXVA reference
+  semantics of the second field are the part that would be guessed. Frame pictures of interlaced
+  material (what DVDs and most encoders write) work.
+- Not done / limits: slices that do not start at the left edge (several per row) get a wrong
+  `wNumberMBsInSlice`; a picture spread over several PES in a transport stream (TS keeps one sample
+  per PES; PS and raw ES are split properly); `repeat_first_field` / 3:2 pulldown is not used for
+  timing (one picture, one time, like ffmpeg's `-fps_mode passthrough`); sequence display extension
+  (colours: BT.709 for 720 lines and up, else BT.601, guessed); the viewer route takes `.mpg`, `.mpeg`,
+  `.vob`, `.m2v` (and TS / MXF) for MPEG-2 4:2:0 now (`rd_video.rs`, not compiled here).
+
 ### MXF (OP1a, OP-Atom) done 2026-11-09
 
 `mxf::parse` / `mxf::read` / `container::read` (an MXF is recognised by the header partition
@@ -792,7 +879,7 @@ test prints on `--nocapture`):
 | ProRes 422 HQ 720p + PCM | OP1a, frame | ProRes (`apch`), PCM | 10 + 10 equal |
 | H.264 Long GOP (g 12, 2 B-frames) + PCM | OP1a, frame, footer index | AVC, PCM | 50 + 50 equal (5 IDR) |
 | H.264 intra (`-g 1`) | OP1a | AVC | 20 equal |
-| MPEG-2 Long GOP (g 6, 2 B-frames) + PCM | OP1a, index with temporal offsets | MPEG-2 (list only) | 25 + 25 equal, dts -1 frame like ffprobe |
+| MPEG-2 Long GOP (g 6, 2 B-frames) + PCM | OP1a, index with temporal offsets | MPEG-2 (decoded since: see its section) | 25 + 25 equal, dts -1 frame like ffprobe |
 | MPEG-2 D-10 50 Mb/s + 4 ch AES3 24 bit | OP1a, CBR index | MPEG-2, AES3 PCM | 10 + 10 equal, audio bytes after conversion equal |
 
 Decoding what came out of MXF: DNxHD / DNxHR 1080p, 720p and 640x360 through `DnxDecoder`
@@ -816,7 +903,7 @@ Not done / left:
 - Several mono audio tracks (cameras write 2 to 8): each is its own `Track`, `Movie::audio()`
   returns the first; mixing them into one multichannel track belongs with the track choice work.
 - OP-Atom clips are not linked (video file and the audio `.mxf`s); essence in more than one
-  BodySID (OP2x, OP3x) is read as one stream; encrypted essence, MPEG-2 and JPEG 2000 decoders,
+  BodySID (OP2x, OP3x) is read as one stream; encrypted essence, JPEG 2000 decoders (MPEG-2: see its section),
   HEVC and ProRes-by-profile on real camera files (no samples here; the HEVC mapping label is
   from the standard, not tested), AVC with 3-byte NAL lengths from other writers (always Annex
   B here), the RIP and the footer partition's `PreviousPartition` chain are not used (the scan

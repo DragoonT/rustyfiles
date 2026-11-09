@@ -199,6 +199,11 @@ fn mpeg2_mxf() {
 }
 
 #[test]
+fn mpeg2_mxf_long_gop() {
+    check(Clip { name: "m2_long.mxf", size: "720x576", secs: 2, args: &["mpeg2video", "-b:v", "8M", "-g", "6", "-bf", "2"], mux: &["-an", "-f", "mxf"] }, 50, 12);
+}
+
+#[test]
 fn mpeg1_is_refused() {
     // the GPU's MPEG-1 mode garbles the picture (see mpeg2dec.rs): refused, not shown wrong
     if !have_ffmpeg() {
