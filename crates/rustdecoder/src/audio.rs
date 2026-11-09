@@ -19,7 +19,7 @@ use std::fs::File;
 use std::path::Path;
 
 use crate::flac::FlacDecoder;
-use crate::mp4::{Codec, Track};
+use crate::mp4::{AudioTrack, Codec, Movie, Track};
 use crate::{Error, Result};
 
 /// Frames per block at most (a PCM chunk can be a second long).
@@ -50,8 +50,40 @@ enum Kind_ {
     Mft(MftCodec, Box<AudioMft>),
 }
 
-/// Reads the first audio track of a file and decodes it.
+/// Mono tracks played as the channels of one stream (see [`AudioTrack::members`]): every member is
+/// a decoder of its own track, and blocks are cut so that frame `n` of every channel is the same
+/// instant. A member that ends early (or starts late) is silent for the rest (the start).
+struct Group {
+    members: Vec<Member>,
+}
+
+struct Member {
+    dec: AudioDecoder,
+    /// Decoded mono samples not handed out yet, and the frame index of the first.
+    buf: Vec<f32>,
+    start: i64,
+    ended: bool,
+}
+
+impl Member {
+    fn fill(&mut self) -> Result<()> {
+        if self.buf.is_empty() && !self.ended {
+            match self.dec.next_block()? {
+                Some(b) => {
+                    self.start = (b.pts * self.dec.info.sample_rate as f64).round() as i64;
+                    self.buf = b.samples;
+                }
+                None => self.ended = true,
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Decodes one audio track of a file (by default the one the container marks, see
+/// [`Movie::audio_tracks`]), or a group of mono tracks as one multichannel stream.
 pub struct AudioDecoder {
+    group: Option<Box<Group>>,
     file: File,
     track: Track,
     info: AudioInfo,
@@ -73,12 +105,36 @@ pub struct AudioDecoder {
 }
 
 impl AudioDecoder {
-    /// Opens the first audio track of `path`. `Ok(None)` when the file has none.
+    /// Opens the default audio of `path` (the container's default track, else the first; several
+    /// mono PCM tracks of one recording count as one). `Ok(None)` when the file has none.
     pub fn open(path: &Path) -> Result<Option<Self>> {
         let mut file = File::open(path)?;
         let movie = crate::container::read(&mut file)?;
-        let Some(track) = movie.audio().cloned() else { return Ok(None) };
-        Self::from_track(file, track).map(Some)
+        let list = movie.audio_tracks();
+        let Some(choice) = Movie::default_audio_track(&list) else { return Ok(None) };
+        Self::open_choice(path, &movie, &list[choice]).map(Some)
+    }
+
+    /// Opens one entry of [`Movie::audio_tracks`] (`movie` read from `path`).
+    pub fn open_choice(path: &Path, movie: &Movie, choice: &AudioTrack) -> Result<Self> {
+        let first = movie.tracks.get(*choice.members.first().ok_or(Error::Invalid("empty audio choice"))?).ok_or(Error::Invalid("audio choice"))?;
+        let mut d = Self::from_track(File::open(path)?, first.clone())?;
+        if choice.members.len() > 1 {
+            let mut members = Vec::new();
+            for &m in &choice.members {
+                let t = movie.tracks.get(m).ok_or(Error::Invalid("audio choice"))?;
+                members.push(Member { dec: Self::from_track(File::open(path)?, t.clone())?, buf: Vec::new(), start: 0, ended: false });
+            }
+            d.info.channels = members.len() as u16;
+            d.group = Some(Box::new(Group { members }));
+            d.seek(0.0);
+        }
+        Ok(d)
+    }
+
+    /// The decoder plays several mono tracks as channels.
+    pub fn is_group(&self) -> bool {
+        self.group.is_some()
     }
 
     fn from_track(file: File, track: Track) -> Result<Self> {
@@ -139,6 +195,7 @@ impl AudioDecoder {
         };
         let info = AudioInfo { sample_rate, channels, codec, duration };
         let mut d = AudioDecoder {
+            group: None,
             file,
             track,
             info,
@@ -203,6 +260,14 @@ impl AudioDecoder {
     /// frame when `t` is before the start). AAC restarts two packets earlier to prime the
     /// decoder; what it outputs before `t` is dropped.
     pub fn seek(&mut self, t: f64) {
+        if let Some(g) = &mut self.group {
+            for m in &mut g.members {
+                m.dec.seek(t);
+                m.buf.clear();
+                m.ended = false;
+            }
+            return;
+        }
         let t = t.max(0.0);
         let rate = self.info.sample_rate as f64;
         self.skip_frame = (t * rate).round() as i64;
@@ -227,6 +292,9 @@ impl AudioDecoder {
 
     /// The next block of audio, or `None` at the end.
     pub fn next_block(&mut self) -> Result<Option<AudioBlock>> {
+        if self.group.is_some() {
+            return self.group_block();
+        }
         let ch = self.info.channels as usize;
         loop {
             let have = (self.pending.len() / ch).saturating_sub(self.pending_off);
@@ -255,6 +323,32 @@ impl AudioDecoder {
             self.pending_off = from + n;
             return Ok(Some(AudioBlock { pts: (start + cut as i64) as f64 / self.info.sample_rate as f64, samples }));
         }
+    }
+
+    /// The next block of a group: up to [`BLOCK_FRAMES`] frames of all members, interleaved.
+    fn group_block(&mut self) -> Result<Option<AudioBlock>> {
+        let Some(g) = &mut self.group else { return Ok(None) };
+        for m in &mut g.members {
+            m.fill()?;
+        }
+        let Some(at) = g.members.iter().filter(|m| !m.buf.is_empty()).map(|m| m.start).min() else { return Ok(None) };
+        let mut n = BLOCK_FRAMES;
+        for m in g.members.iter().filter(|m| !m.buf.is_empty()) {
+            n = n.min(if m.start > at { (m.start - at) as usize } else { m.buf.len() });
+        }
+        let ch = g.members.len();
+        let mut samples = vec![0.0f32; n * ch];
+        for (c, m) in g.members.iter_mut().enumerate() {
+            if m.buf.is_empty() || m.start > at {
+                continue;
+            }
+            for (f, v) in m.buf[..n].iter().enumerate() {
+                samples[f * ch + c] = *v;
+            }
+            m.buf.drain(..n);
+            m.start += n as i64;
+        }
+        Ok(Some(AudioBlock { pts: at as f64 / self.info.sample_rate as f64, samples }))
     }
 
     /// Everything from the current position as one vector, with the time of its first frame.

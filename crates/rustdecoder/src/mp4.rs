@@ -43,12 +43,96 @@ impl Movie {
         if first.default { Some(first) } else { std::iter::once(first).chain(v).find(|t| t.default).or(Some(first)) }
     }
 
+    /// The audio a player offers: one entry per playable audio track, except that several mono
+    /// PCM tracks that belong together (see [`AudioTrack::members`]) are one multichannel entry.
+    /// In file order, the entry of a group at the place of its first track.
+    pub fn audio_tracks(&self) -> Vec<AudioTrack> {
+        let usable: Vec<usize> = (0..self.tracks.len()).filter(|&i| self.tracks[i].kind == Kind::Audio && !self.tracks[i].samples.is_empty()).collect();
+        let mut out: Vec<AudioTrack> = Vec::new();
+        let mut taken = vec![false; self.tracks.len()];
+        for &i in &usable {
+            if taken[i] {
+                continue;
+            }
+            let t = &self.tracks[i];
+            let mut members = vec![i];
+            if t.channels == 1 && matches!(t.codec, Codec::Pcm { .. }) {
+                for &j in usable.iter().filter(|&&j| j > i && !taken[j]) {
+                    if self.mono_pair(i, j) {
+                        members.push(j);
+                    }
+                }
+            }
+            // a lone mono track stays a track; two or more are a group
+            for &m in &members {
+                taken[m] = true;
+            }
+            out.push(AudioTrack {
+                channels: members.len() as u16 * t.channels.max(1),
+                codec: t.codec.audio_name(),
+                sample_rate: t.sample_rate,
+                language: t.meta.language.clone(),
+                name: t.meta.name.clone(),
+                default: members.iter().any(|&m| self.tracks[m].default),
+                members,
+            });
+        }
+        out
+    }
+
+    /// Which entry of [`Movie::audio_tracks`] to play first: the first the container marks as
+    /// default, else the first.
+    pub fn default_audio_track(list: &[AudioTrack]) -> Option<usize> {
+        list.iter().position(|a| a.default).or(if list.is_empty() { None } else { Some(0) })
+    }
+
+    /// Mono PCM tracks `a` and `b` of the same recording: same format and rate, the same length
+    /// (within a millisecond), and no two different languages.
+    fn mono_pair(&self, a: usize, b: usize) -> bool {
+        let (x, y) = (&self.tracks[a], &self.tracks[b]);
+        let same_lang = |p: &str, q: &str| p == q || p.is_empty() || q.is_empty() || p == "und" || q == "und";
+        let end = |t: &Track| t.samples.last().map_or(0.0, |s| t.seconds(s.pts));
+        x.channels == 1
+            && y.channels == 1
+            && x.codec == y.codec
+            && x.fourcc == y.fourcc
+            && x.sample_rate == y.sample_rate
+            && x.samples.len() == y.samples.len()
+            && (end(x) - end(y)).abs() < 0.001
+            && same_lang(&x.meta.language, &y.meta.language)
+    }
+
     /// The first audio track.
     pub fn audio(&self) -> Option<&Track> {
         let mut v = self.tracks.iter().filter(|t| t.kind == Kind::Audio && !t.samples.is_empty());
         let first = v.next()?;
         if first.default { Some(first) } else { std::iter::once(first).chain(v).find(|t| t.default).or(Some(first)) }
     }
+}
+
+/// One audio choice of a file (see [`Movie::audio_tracks`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioTrack {
+    /// Indices into [`Movie::tracks`]: one track, or the mono tracks of a group (channel 1 =
+    /// the first, channel 2 = the second, and so on).
+    pub members: Vec<usize>,
+    pub codec: &'static str,
+    /// Channels of the choice (the number of members for a group).
+    pub channels: u16,
+    pub sample_rate: u32,
+    /// ISO 639-2 (`eng`) or a BCP 47 tag (`en-US`); empty when the file does not say.
+    pub language: String,
+    /// The track's title when the file has one.
+    pub name: String,
+    /// The container marks it as the one to play (Matroska `FlagDefault`, MP4 enabled track).
+    pub default: bool,
+}
+
+/// What a container says about a track besides how to decode it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TrackMeta {
+    pub language: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +144,23 @@ pub enum Kind {
 
 /// The fourcc of an MXF track whose PCM is in AES3 element form (see [`Codec::Pcm`]).
 pub const AES3: [u8; 4] = *b"aes3";
+
+impl Codec {
+    /// A short name for audio codecs, `"other"` for the rest.
+    pub fn audio_name(&self) -> &'static str {
+        match self {
+            Codec::Aac { .. } => "AAC",
+            Codec::Opus { .. } => "Opus",
+            Codec::Vorbis { .. } => "Vorbis",
+            Codec::Flac { .. } => "FLAC",
+            Codec::Mp3 => "MP3",
+            Codec::Ac3 { .. } => "AC-3",
+            Codec::Eac3 { .. } => "E-AC-3",
+            Codec::Pcm { .. } => "PCM",
+            _ => "other",
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Codec {
@@ -124,6 +225,8 @@ pub struct Track {
     pub par: Option<(u32, u32)>,
     /// Where the sample bytes are and how they become what the decoders read.
     pub storage: Storage,
+    /// Language and title.
+    pub meta: TrackMeta,
 }
 
 /// How a track's samples are stored. [`Sample::offset`] and [`Sample::size`] always describe what
@@ -567,11 +670,19 @@ fn rotation(m: &[i32; 9]) -> u16 {
     (((deg / 90.0).round() as i32).rem_euclid(4) * 90) as u16
 }
 
+/// QuickTime language codes 0..=85 as ISO 639-2 (empty where the code has no plain equivalent).
+const MAC_LANGUAGES: [&str; 86] = [
+    "eng", "fra", "deu", "ita", "nld", "swe", "spa", "dan", "por", "nor", "heb", "jpn", "ara", "fin", "ell", "isl", "mlt", "tur", "hrv", "zho", "urd", "hin", "tha", "kor", "lit", "pol", "hun", "est",
+    "lav", "", "fao", "fas", "rus", "zho", "nld", "gle", "sqi", "ron", "ces", "slk", "slv", "yid", "srp", "mkd", "bul", "ukr", "bel", "uzb", "kaz", "aze", "aze", "hye", "kat", "ron", "kir", "tgk",
+    "tuk", "mon", "mon", "pus", "kur", "kas", "snd", "bod", "nep", "san", "mar", "ben", "asm", "guj", "pan", "ori", "mal", "kan", "tam", "tel", "sin", "mya", "khm", "lao", "vie", "ind", "tgl", "msa",
+    "msa", "amh",
+];
+
 fn parse_trak(b: &[u8], movie_timescale: u32, fragmented: bool) -> Result<(Track, i64)> {
     let boxes = children(b)?;
     let tkhd = child(&boxes, b"tkhd").ok_or(Error::Invalid("no track header"))?;
     let mut c = Cur::new(tkhd);
-    let (v, _) = c.full()?;
+    let (v, tkhd_flags) = c.full()?;
     let id = if v == 1 {
         c.skip(16)?;
         let id = c.u32()?;
@@ -601,6 +712,26 @@ fn parse_trak(b: &[u8], movie_timescale: u32, fragmented: bool) -> Result<(Track
         c.skip(8)?;
         c.u32()?
     };
+    // duration, then the language as three letters of 5 bits each (letter - 0x60)
+    let language = (|| -> Result<String> {
+        c.skip(if v == 1 { 8 } else { 4 })?;
+        let l = c.u16()?;
+        if l < 0x400 {
+            // QuickTime's older numbering (MOV files written by Apple software and ffmpeg)
+            return Ok(MAC_LANGUAGES.get(l as usize).copied().unwrap_or("").to_string());
+        }
+        let s: String = (0..3).map(|i| (((l >> (10 - 5 * i)) & 31) as u8 + 0x60) as char).collect();
+        Ok(if s.chars().all(|c| c.is_ascii_lowercase()) { s } else { String::new() })
+    })()
+    .unwrap_or_default();
+    let handler_name = child(&mdia, b"hdlr").map(|h| {
+        // version / flags, predefined, type, three reserved words, then the name (a C string,
+        // or a length-prefixed one in QuickTime files)
+        let b = h.get(24..).unwrap_or(&[]);
+        let s = String::from_utf8_lossy(b).trim_end_matches('\0').to_string();
+        let s = if !b.is_empty() && b[0] as usize == b.len() - 1 { s[1..].to_string() } else { s };
+        s.trim().to_string()
+    });
     let handler = child(&mdia, b"hdlr").map(|h| {
         let mut c = Cur::new(h);
         let _ = c.full();
@@ -633,6 +764,17 @@ fn parse_trak(b: &[u8], movie_timescale: u32, fragmented: bool) -> Result<(Track
         discard_padding_ns: 0,
         par: None,
         storage: Storage::Plain,
+        meta: TrackMeta::default(),
+    };
+    t.default = tkhd_flags & 1 != 0;
+    t.meta.language = if language == "und" { String::new() } else { language };
+    // a title: `udta/name`, else the handler's name unless it is the muxer's stock text
+    let udta_name = child(&boxes, b"udta").and_then(|u| children(u).ok()).and_then(|k| child(&k, b"name").map(|n| String::from_utf8_lossy(n).trim_end_matches('\0').trim().to_string()));
+    let stock = |n: &str| n.is_empty() || n.ends_with("Handler") || n.contains("Media Handler") || n == "Core Media Audio" || n == "Core Media Video";
+    t.meta.name = match (udta_name, handler_name) {
+        (Some(n), _) if !n.is_empty() => n,
+        (_, Some(n)) if !stock(&n) => n,
+        _ => String::new(),
     };
     if let Some(stsd) = child(&stbl, b"stsd") {
         parse_stsd(stsd, &mut t)?;

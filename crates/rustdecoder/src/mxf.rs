@@ -1091,6 +1091,7 @@ pub fn parse<R: Read + Seek>(r: &mut R) -> Result<Mxf> {
         };
         out_tracks.push(Track {
             storage: Default::default(),
+            meta: Default::default(),
             id: t.track_id,
             kind: t.kind,
             fourcc,

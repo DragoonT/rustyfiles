@@ -1062,6 +1062,7 @@ pub(crate) fn build_tracks(es: Vec<Es>, packet: usize) -> Vec<Track> {
             discard_padding_ns: 0,
             par: None,
             storage: Storage::Plain,
+            meta: Default::default(),
         };
         match e.format {
             Format::H264 | Format::Hevc => {

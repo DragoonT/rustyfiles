@@ -27,6 +27,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::audio::{AudioDecoder, AudioInfo};
+use crate::mp4::{AudioTrack, Movie};
 use crate::audio_out::{AudioOutput, AudioSink, OutputOptions};
 use crate::player::{Player, Shown, Stats, SystemTime, TimeSource};
 use crate::Result;
@@ -53,6 +54,8 @@ impl Default for PlaybackOptions {
 
 enum Feed {
     Seek(f64, Sender<()>),
+    /// Another audio track, started at movie time `t`.
+    Switch(Box<AudioDecoder>, f64, Sender<()>),
 }
 
 struct Audio {
@@ -71,11 +74,24 @@ pub struct Playback {
     audio_note: String,
     /// The device output when [`Playback::open`] made it: volume and mute go to it.
     output: Option<Arc<AudioOutput>>,
+    path: std::path::PathBuf,
+    /// What the file offers ([`Movie::audio_tracks`]) and which entry plays.
+    tracks: Vec<AudioTrack>,
+    current: Option<usize>,
+}
+
+/// The stream a decoder feeds the sink: a group of more than two mono tracks plays its first
+/// two as left and right (the rest stay in the decoder), anything else as it is.
+fn out_channels(dec: &AudioDecoder) -> (usize, bool) {
+    let ch = dec.info().channels as usize;
+    if dec.is_group() && ch > 2 { (2, true) } else { (ch, false) }
 }
 
 fn feed(mut dec: AudioDecoder, sink: Arc<dyn AudioSink>, rx: std::sync::mpsc::Receiver<Feed>, ended: Arc<AtomicBool>, stop: Arc<AtomicBool>) {
     let info = dec.info().clone();
-    sink.set_input(info.sample_rate, info.channels as usize);
+    let (mut out_ch, mut pair) = out_channels(&dec);
+    let mut in_ch = info.channels as usize;
+    sink.set_input(info.sample_rate, out_ch);
     let mut done = false;
     while !stop.load(Ordering::Relaxed) {
         // a seek is handled before anything else; the wait below also wakes for it
@@ -88,6 +104,18 @@ fn feed(mut dec: AudioDecoder, sink: Arc<dyn AudioSink>, rx: std::sync::mpsc::Re
         } else {
             rx.try_recv().ok()
         };
+        if let Some(Feed::Switch(new, t, ack)) = msg {
+            dec = *new;
+            (out_ch, pair) = out_channels(&dec);
+            in_ch = dec.info().channels as usize;
+            sink.set_input(dec.info().sample_rate, out_ch);
+            dec.seek(t);
+            sink.flush();
+            done = false;
+            ended.store(false, Ordering::SeqCst);
+            let _ = ack.send(());
+            continue;
+        }
         if let Some(Feed::Seek(t, ack)) = msg {
             dec.seek(t);
             sink.flush();
@@ -100,6 +128,10 @@ fn feed(mut dec: AudioDecoder, sink: Arc<dyn AudioSink>, rx: std::sync::mpsc::Re
             continue;
         }
         match dec.next_block() {
+            Ok(Some(b)) if pair => {
+                let front: Vec<f32> = b.samples.chunks_exact(in_ch).flat_map(|f| [f[0], f[1]]).collect();
+                sink.push(b.pts, &front);
+            }
             Ok(Some(b)) => sink.push(b.pts, &b.samples),
             Ok(None) => {
                 sink.end_of_data();
@@ -152,10 +184,30 @@ impl Playback {
     pub fn open_with_sink(path: &Path, ring: usize, sink: Option<Arc<dyn AudioSink>>) -> Result<Playback> {
         let mut note = String::new();
         let mut decoder = None;
+        let mut tracks = Vec::new();
+        let mut current = None;
         if sink.is_some() {
-            match AudioDecoder::open(path) {
-                Ok(Some(d)) => decoder = Some(d),
-                Ok(None) => note = "no audio track".into(),
+            match std::fs::File::open(path).map_err(crate::Error::Io).and_then(|mut f| crate::container::read(&mut f)) {
+                Ok(movie) => {
+                    tracks = movie.audio_tracks();
+                    // the default first, then the others in order: the first that opens plays
+                    let first = Movie::default_audio_track(&tracks);
+                    let order: Vec<usize> = first.into_iter().chain((0..tracks.len()).filter(|&i| Some(i) != first)).collect();
+                    for i in order {
+                        match AudioDecoder::open_choice(path, &movie, &tracks[i]) {
+                            Ok(d) => {
+                                decoder = Some(d);
+                                current = Some(i);
+                                note.clear();
+                                break;
+                            }
+                            Err(e) => note = format!("audio track not playable: {e}"),
+                        }
+                    }
+                    if tracks.is_empty() {
+                        note = "no audio track".into();
+                    }
+                }
                 Err(e) => note = format!("audio track not playable: {e}"),
             }
         }
@@ -169,9 +221,11 @@ impl Playback {
         if let Some(d) = &decoder {
             player.start_earlier(d.first_pts().max(0.0));
         }
+        let decoder_ok = decoder.is_some();
         let audio = match (sink, decoder) {
             (Some(sink), Some(dec)) => {
-                let info = dec.info().clone();
+                let mut info = dec.info().clone();
+                info.channels = out_channels(&dec).0 as u16;
                 let ended = Arc::new(AtomicBool::new(false));
                 let stop = Arc::new(AtomicBool::new(false));
                 let (tx, rx) = channel();
@@ -181,7 +235,7 @@ impl Playback {
             }
             _ => None,
         };
-        Ok(Playback { player, audio, playing: false, audio_note: note, output: None })
+        Ok(Playback { player, audio, playing: false, audio_note: note, output: None, path: path.to_path_buf(), tracks, current: if decoder_ok { current } else { None } })
     }
 
     /// Output volume 0..1 (with the device output [`Playback::open`] made; otherwise ignored).
@@ -196,6 +250,50 @@ impl Playback {
         if let Some(o) = &self.output {
             o.set_muted(muted);
         }
+    }
+
+    /// The audio the file offers: tracks (several mono tracks of one recording as one entry).
+    pub fn audio_tracks(&self) -> &[AudioTrack] {
+        &self.tracks
+    }
+
+    /// Which entry of [`Playback::audio_tracks`] is playing.
+    pub fn audio_track(&self) -> Option<usize> {
+        self.current
+    }
+
+    /// Plays entry `i` of [`Playback::audio_tracks`] from now on: the new track starts at the
+    /// movie time of the moment (the video is not touched), playing or paused. The track is
+    /// opened while the old one keeps playing; the sound is cut over by one flush, so what is
+    /// missing is the time to decode the first blocks.
+    pub fn set_audio_track(&mut self, i: usize) -> Result<()> {
+        if self.audio.is_none() {
+            return Err(crate::Error::Unsupported("no audio output to switch"));
+        }
+        let choice = self.tracks.get(i).ok_or(crate::Error::Invalid("no such audio track"))?;
+        if self.current == Some(i) {
+            return Ok(());
+        }
+        let mut f = std::fs::File::open(&self.path)?;
+        let movie = crate::container::read(&mut f)?;
+        let dec = AudioDecoder::open_choice(&self.path, &movie, choice)?;
+        let mut info = dec.info().clone();
+        info.channels = out_channels(&dec).0 as u16;
+        let was = self.playing;
+        self.pause();
+        let t = self.player.clock.time();
+        let (tx, rx) = channel();
+        let Some(a) = self.audio.as_mut() else { return Err(crate::Error::Unsupported("no audio output to switch")) };
+        if a.cmd.send(Feed::Switch(Box::new(dec), t, tx)).is_err() {
+            return Err(crate::Error::Invalid("audio feed stopped"));
+        }
+        let _ = rx.recv_timeout(Duration::from_secs(2));
+        a.info = info;
+        self.current = Some(i);
+        if was {
+            self.play();
+        }
+        Ok(())
     }
 
     /// Why there is no audio, empty when there is.

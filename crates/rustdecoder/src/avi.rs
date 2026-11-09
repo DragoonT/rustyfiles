@@ -267,6 +267,7 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
             discard_padding_ns: 0,
             par: None,
             storage: Storage::Plain,
+            meta: Default::default(),
         };
         match &s.kind_tag {
             b"vids" => build_video(r, s, &mut t)?,
