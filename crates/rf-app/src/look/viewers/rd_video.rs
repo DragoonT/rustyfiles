@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use rustdecoder::mp4::{self, Codec};
+use rustdecoder::mp4::Codec;
 use rustdecoder::window::{Placement, VideoWindow, WindowOptions, WindowState};
 
 /// The route is on only when `RUSTYFILES_RUSTDECODER=1`.
@@ -23,19 +23,20 @@ pub struct Probe {
     pub codec: &'static str,
 }
 
-/// Reads the container's index (no GPU): `Some` for an MP4 / MOV whose first video track is H.264
-/// or HEVC. Whether the stream itself is playable (4:2:0, 8 or 10 bit, a decoder in the graphics
+/// Reads the container's index (no GPU): `Some` for an MP4 / MOV / MKV / WebM whose first video
+/// track is H.264, HEVC or VP9. Whether the stream itself is playable (4:2:0, 8 or 10 bit, a decoder in the graphics
 /// card) is only known when the decoder opens; [`RdVideo::open`] fails then.
 pub fn probe(path: &Path) -> Option<Probe> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    if !matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
+    if !matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "mkv" | "webm") {
         return None;
     }
-    let movie = mp4::read(&mut std::fs::File::open(path).ok()?).ok()?;
+    let movie = rustdecoder::container::read(&mut std::fs::File::open(path).ok()?).ok()?;
     let t = movie.video()?;
     let codec = match t.codec {
         Codec::H264 { .. } => "H.264",
         Codec::Hevc { .. } => "HEVC",
+        Codec::Vp9 { .. } => "VP9",
         _ => return None,
     };
     let (w, h) = rustdecoder::present::rotated_size(t.width, t.height, t.rotation);
