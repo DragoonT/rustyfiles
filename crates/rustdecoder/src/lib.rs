@@ -12,6 +12,7 @@ pub mod container;
 pub mod mkv;
 pub mod mp4;
 pub mod nal;
+pub mod prores;
 pub mod resample;
 pub mod slice;
 
