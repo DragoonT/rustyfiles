@@ -182,6 +182,32 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
             "app picker: owner 0x{owner:x}, in front: {}, {retries} retries in {waited} ms",
             hwnd != 0 && rf_win::window::is_foreground(hwnd)
         ));
+        // Chrome: the picker is in front at first, yet users find it behind Chrome afterwards.
+        // For the next 10 s, every change of what is in front, whether the picker still has its
+        // owner and lies above it: which window takes over, and when, is in the log.
+        let mut last = String::new();
+        let mut lines = 0;
+        let mut t = waited;
+        while hwnd != 0 && t < 10_000 && lines < 20 {
+            cx.background_executor().timer(std::time::Duration::from_millis(100)).await;
+            t += 100;
+            if !rf_win::window::exists(hwnd) {
+                dialog_log(&format!("app picker: closed at {t} ms"));
+                break;
+            }
+            let front = rf_win::window::foreground();
+            let state = format!(
+                "front {}, picker's owner 0x{:x}, picker above its owner: {:?}",
+                if front == hwnd { "picker".to_string() } else { rf_win::window::describe(front) },
+                rf_win::window::owner_of(hwnd),
+                if owner != 0 { rf_win::window::is_above(hwnd, owner) } else { None },
+            );
+            if state != last {
+                dialog_log(&format!("app picker at {t} ms: {state}"));
+                last = state;
+                lines += 1;
+            }
+        }
     })
     .detach();
 }

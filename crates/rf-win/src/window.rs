@@ -217,3 +217,64 @@ pub fn screen_color(hwnd: isize, x: i32, y0: i32, y1: i32) -> Option<[u8; 3]> {
         Some([median(16), median(8), median(0)])
     }
 }
+
+/// A window for a log line: handle, process, class and title.
+pub fn describe(hwnd: isize) -> String {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetWindowTextW, GetWindowThreadProcessId};
+    if hwnd == 0 {
+        return "none".into();
+    }
+    unsafe {
+        let h = HWND(hwnd as *mut _);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(h, Some(&mut pid));
+        let exe = crate::tasklist::exe_of(pid).and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "?".into());
+        let mut class = [0u16; 128];
+        let n = GetClassNameW(h, &mut class);
+        let mut title = [0u16; 128];
+        let t = GetWindowTextW(h, &mut title);
+        format!(
+            "0x{hwnd:x} {exe}[{pid}] {} '{}'",
+            String::from_utf16_lossy(&class[..n.max(0) as usize]),
+            String::from_utf16_lossy(&title[..t.max(0) as usize])
+        )
+    }
+}
+
+/// The window that owns `hwnd` (0 when none).
+pub fn owner_of(hwnd: isize) -> isize {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GW_OWNER, GetWindow};
+    unsafe { GetWindow(HWND(hwnd as *mut _), GW_OWNER).map_or(0, |h| h.0 as isize) }
+}
+
+/// Whether `a` lies above `b` in the z-order (`None` when either isn't a top-level window).
+pub fn is_above(a: isize, b: isize) -> Option<bool> {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GW_HWNDNEXT, GetTopWindow, GetWindow};
+    unsafe {
+        let mut h = GetTopWindow(None).ok()?;
+        for _ in 0..10_000 {
+            let v = h.0 as isize;
+            if v == a {
+                return Some(true);
+            }
+            if v == b {
+                return Some(false);
+            }
+            h = GetWindow(HWND(h.0), GW_HWNDNEXT).ok()?;
+        }
+        None
+    }
+}
+
+/// Whether `hwnd` is still a window.
+pub fn exists(hwnd: isize) -> bool {
+    unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(windows::Win32::Foundation::HWND(hwnd as *mut _))).as_bool() }
+}
+
+/// The window in front (0 when none).
+pub fn foreground() -> isize {
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow().0 as isize }
+}

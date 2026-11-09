@@ -66,7 +66,7 @@ fn title(h: HWND) -> String {
     String::from_utf16_lossy(&buf[..got.max(0) as usize])
 }
 
-fn exe_of(pid: u32) -> Option<PathBuf> {
+pub(crate) fn exe_of(pid: u32) -> Option<PathBuf> {
     unsafe {
         let p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let mut buf = [0u16; 1024];
