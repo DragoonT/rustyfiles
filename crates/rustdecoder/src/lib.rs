@@ -3,6 +3,7 @@
 //! `docs/design/rustdecoder.md`.
 
 pub mod audio;
+pub mod avi;
 pub mod av1;
 pub mod dxva_av1;
 pub mod bits;

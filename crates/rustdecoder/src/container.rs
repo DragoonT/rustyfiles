@@ -3,7 +3,7 @@
 use std::io::{Read, Seek, SeekFrom};
 
 use crate::mp4::Movie;
-use crate::{Result, mkv, mp4, ts};
+use crate::{Result, avi, mkv, mp4, ts};
 
 /// Reads the track tables of `r`, picking the reader from the first bytes.
 pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
@@ -15,6 +15,8 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
         mkv::read(r)
     } else if ts::detect(&head[..n]).is_some() {
         ts::read(r)
+    } else if avi::is_avi(&head[..n]) {
+        avi::read(r)
     } else {
         mp4::read(r)
     }

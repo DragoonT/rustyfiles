@@ -467,21 +467,21 @@ fn parse_mpa(b: &[u8]) -> Parse {
 // Indexing
 
 #[derive(Default)]
-struct Params {
-    vps: Option<Vec<u8>>,
-    sps: Option<Vec<u8>>,
-    pps: Option<Vec<u8>>,
+pub(crate) struct Params {
+    pub(crate) vps: Option<Vec<u8>>,
+    pub(crate) sps: Option<Vec<u8>>,
+    pub(crate) pps: Option<Vec<u8>>,
 }
 
-struct AuInfo {
+pub(crate) struct AuInfo {
     /// Bytes after conversion to length prefixed form.
-    size: u32,
-    key: bool,
+    pub(crate) size: u32,
+    pub(crate) key: bool,
 }
 
 /// Looks through one Annex B access unit: converted size, whether decoding can start here, and
 /// the first parameter sets seen.
-fn scan_au(au: &[u8], hevc: bool, params: &mut Params) -> AuInfo {
+pub(crate) fn scan_au(au: &[u8], hevc: bool, params: &mut Params) -> AuInfo {
     let (mut size, mut key) = (0u32, false);
     for u in nal::annexb_units(au) {
         if nal::annexb_dropped(u, hevc) {
@@ -541,7 +541,7 @@ fn sei_has_recovery_point(mut b: &[u8]) -> bool {
 }
 
 /// Picture size and `avcC` from the first SPS / PPS.
-fn avcc_from(p: &Params) -> Option<(Vec<u8>, u32, u32)> {
+pub(crate) fn avcc_from(p: &Params) -> Option<(Vec<u8>, u32, u32)> {
     let (sps, pps) = (p.sps.as_ref()?, p.pps.as_ref()?);
     if sps.len() < 4 {
         return None;
@@ -559,7 +559,7 @@ fn avcc_from(p: &Params) -> Option<(Vec<u8>, u32, u32)> {
 }
 
 /// Picture size and `hvcC` from the first VPS / SPS / PPS.
-fn hvcc_from(p: &Params) -> Option<(Vec<u8>, u32, u32)> {
+pub(crate) fn hvcc_from(p: &Params) -> Option<(Vec<u8>, u32, u32)> {
     let (sps, pps) = (p.sps.as_ref()?, p.pps.as_ref()?);
     let rbsp = nal::unescape(sps);
     let mut b = BitReader::new(&rbsp);
