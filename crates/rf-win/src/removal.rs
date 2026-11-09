@@ -50,6 +50,9 @@ struct State {
     /// Letters released for a pending removal: not re-registered until it completes, fails,
     /// or the grace period passes (re-opening a handle now would block the eject again).
     released: HashMap<char, Instant>,
+    /// Volumes that can't be watched (a virtual drive such as Google Drive's refuses the
+    /// notification): not tried again while the letter stays, instead of every few seconds.
+    refused: std::collections::HashSet<char>,
 }
 
 static STATE: OnceLock<Mutex<State>> = OnceLock::new();
@@ -108,6 +111,7 @@ fn sync(hwnd: HWND) {
     let sys = system_drive();
     let mut st = state().lock();
     st.released.retain(|l, t| t.elapsed() < RELEASE_GRACE && mask & (1 << (*l as u8 - b'A')) != 0);
+    st.refused.retain(|l| mask & (1 << (*l as u8 - b'A')) != 0);
     let gone: Vec<char> = st.regs.keys().copied().filter(|l| mask & (1 << (*l as u8 - b'A')) == 0).collect();
     for l in gone {
         if let Some(r) = st.regs.remove(&l) {
@@ -116,22 +120,30 @@ fn sync(hwnd: HWND) {
     }
     for i in 0..26u8 {
         let l = (b'A' + i) as char;
-        if mask & (1 << i) == 0 || l == sys || st.regs.contains_key(&l) || st.released.contains_key(&l) {
+        if mask & (1 << i) == 0 || l == sys || st.regs.contains_key(&l) || st.released.contains_key(&l) || st.refused.contains(&l) {
             continue;
         }
-        if let Some(r) = register(hwnd, l) {
-            st.regs.insert(l, r);
+        match register(hwnd, l) {
+            Ok(Some(r)) => {
+                st.regs.insert(l, r);
+            }
+            Ok(None) => {}
+            Err(()) => {
+                st.refused.insert(l);
+            }
         }
     }
 }
 
-fn register(hwnd: HWND, letter: char) -> Option<Reg> {
+/// `Ok(None)`: nothing to watch now (not a local disk, an empty card reader: try again later);
+/// `Err`: the volume refuses to be watched.
+fn register(hwnd: HWND, letter: char) -> Result<Option<Reg>, ()> {
     let root = format!("{letter}:\\");
     let rw = wide(&root);
     // removable, fixed (USB disks report as fixed), optical; not network/RAM/unknown
     let t = unsafe { GetDriveTypeW(PCWSTR(rw.as_ptr())) };
     if !matches!(t, 2 | 3 | 5) {
-        return None;
+        return Ok(None);
     }
     unsafe {
         let h = CreateFileW(
@@ -142,8 +154,9 @@ fn register(hwnd: HWND, letter: char) -> Option<Reg> {
             OPEN_EXISTING,
             FILE_FLAG_BACKUP_SEMANTICS,
             None,
-        )
-        .ok()?; // empty card reader / no disc: try again on the next sync
+        );
+        // empty card reader / no disc: try again on the next sync
+        let Ok(h) = h else { return Ok(None) };
         let mut filter = DEV_BROADCAST_HANDLE {
             dbch_size: std::mem::size_of::<DEV_BROADCAST_HANDLE>() as u32,
             dbch_devicetype: DBT_DEVTYP_HANDLE.0,
@@ -151,11 +164,11 @@ fn register(hwnd: HWND, letter: char) -> Option<Reg> {
             ..Default::default()
         };
         match RegisterDeviceNotificationW(HANDLE(hwnd.0), &mut filter as *mut _ as *const _, DEVICE_NOTIFY_WINDOW_HANDLE) {
-            Ok(n) => Some(Reg { handle: h.0 as isize, notify: n.0 as isize }),
+            Ok(n) => Ok(Some(Reg { handle: h.0 as isize, notify: n.0 as isize })),
             Err(e) => {
-                log::warn!("RegisterDeviceNotification {letter}: {e}");
+                log::info!("{letter}: can't watch for removal ({e}), not trying again");
                 let _ = CloseHandle(h);
-                None
+                Err(())
             }
         }
     }
