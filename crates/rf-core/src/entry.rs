@@ -41,13 +41,9 @@ pub struct Entry {
 
 impl Entry {
     pub fn new(name: &str, kind: EntryKind, size: u64, modified_ms: i64, created_ms: i64, attrs: u32) -> Self {
-        let ext: Arc<str> = if kind == EntryKind::File {
-            match name.rfind('.') {
-                Some(i) if i > 0 && i + 1 < name.len() => name[i + 1..].to_lowercase().into(),
-                _ => "".into(),
-            }
-        } else {
-            "".into()
+        let ext = match name.rfind('.') {
+            Some(i) if kind == EntryKind::File && i > 0 && i + 1 < name.len() => shared_ext(&name[i + 1..]),
+            _ => shared_ext(""),
         };
         Self { name: name.into(), ext, kind, size, modified_ms, created_ms, attrs, label: None }
     }
@@ -221,4 +217,34 @@ mod tests {
         assert!(!f.accepts(&hidden));
         assert!(contains_ignore_case("Çalışma", "çalış"));
     }
+}
+
+/// One `Arc` per extension and listing thread instead of one per entry: a folder of 100,000
+/// photos holds a handful of different extensions, each then counted, not copied.
+fn shared_ext(raw: &str) -> Arc<str> {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+    thread_local! {
+        static EXTS: RefCell<HashMap<Box<str>, Arc<str>>> = RefCell::new(HashMap::new());
+    }
+    // most extensions are lower-case already: no allocation to look them up
+    let lower;
+    let key: &str = if raw.bytes().any(|b| b.is_ascii_uppercase()) || !raw.is_ascii() {
+        lower = raw.to_lowercase();
+        &lower
+    } else {
+        raw
+    };
+    EXTS.with(|m| {
+        let mut m = m.borrow_mut();
+        if let Some(a) = m.get(key) {
+            return a.clone();
+        }
+        let a: Arc<str> = key.into();
+        // long-tail extensions (hashes, numbered parts) must not grow it without bound
+        if m.len() < 4096 {
+            m.insert(key.into(), a.clone());
+        }
+        a
+    })
 }
