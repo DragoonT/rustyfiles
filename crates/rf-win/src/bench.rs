@@ -367,7 +367,12 @@ pub fn measure_launch(app: &App, arg: &std::ffi::OsStr, title: &str, quiet: Dura
             anyhow::bail!("{}: no window within {:?}", app.kind.name(), timeout);
         }
         let found = windows().into_iter().find(|w| {
-            !before.contains(&w.hwnd) && w.title.contains(&leaf) && (app.kind != AppKind::Rustyfiles || w.pid == child_pid)
+            // rustyfiles started as its own instance must show its own window, never one of the
+            // user's copy; started as a single instance, it hands the folder to the running one
+            // (the test's own, with the test's settings)
+            !before.contains(&w.hwnd)
+                && w.title.contains(&leaf)
+                && (app.kind != AppKind::Rustyfiles || !app.env.iter().any(|(k, _)| k == "RUSTYFILES_MULTI_INSTANCE") || w.pid == child_pid)
         });
         if let Some(w) = found {
             break w;

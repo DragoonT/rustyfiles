@@ -626,3 +626,46 @@ mod files_live {
         }
     }
 }
+
+#[cfg(test)]
+mod live_100k {
+    /// The 100 000-file folder: rustyfiles from scratch, rustyfiles already running (a copy with
+    /// the test's own settings, kept running in the background: its first start is the warm-up
+    /// run, then each start hands the folder to it, as README measures), Explorer and Files.
+    /// Never touches the user's copy: skipped while any other rustyfiles runs. Opens windows: run
+    /// by hand (`cargo test -p rf-app --lib live_100k -- --ignored --nocapture`), then end the
+    /// test's copy (it stays in the background).
+    #[test]
+    #[ignore]
+    fn open_100k() {
+        use rf_win::bench::{App, AppKind};
+        let fresh = super::rustyfiles_app();
+        let others = std::process::Command::new("tasklist").args(["/FI", "IMAGENAME eq rustyfiles.exe", "/NH"]).output().map(|o| String::from_utf8_lossy(&o.stdout).contains("rustyfiles.exe")).unwrap_or(true);
+        assert!(!others, "a rustyfiles is running: the warm runs would go to it");
+        let cfg = super::bench_dir().join("rustyfiles-warm");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join("settings.toml"), "restore_session = false
+run_in_background = true
+auto_update = false
+star_asked = true
+starts = 1
+search_index = false
+name_index = false
+directlook_enabled = false
+").unwrap();
+        let warm = App {
+            kind: AppKind::Rustyfiles,
+            exe: fresh.exe.clone(),
+            env: vec![("RUSTYFILES_CONFIG_DIR".into(), cfg.to_string_lossy().into_owned()), ("RUSTYFILES_MUTE".into(), "1".into())],
+        };
+        let mut apps = vec![fresh, warm];
+        apps.extend(rf_win::bench::detect().into_iter().filter(|a| matches!(a.kind, AppKind::Explorer | AppKind::Files)));
+        let names = ["rustyfiles, from scratch", "rustyfiles, already running", "File Explorer", "Files"];
+        let plan = super::Plan { apps, open: vec![super::OpenTest::Files100k], copy: false, engines: false };
+        let r = super::run(&plan, &|_| {}, &std::sync::atomic::AtomicBool::new(false)).unwrap();
+        for (name, a) in names.iter().zip(&r.open[0].apps) {
+            let runs: Vec<String> = a.runs.iter().map(|x| format!("{:.0}{}{}", x.settled_ms, if x.shared { "*" } else { "" }, if x.timed_out { "!" } else { "" })).collect();
+            eprintln!("{name}: median {:?} ms; window {:?} ms; runs [{}] {:?}", a.median().map(|m| m.settled_ms.round()), a.median().map(|m| m.window_ms.round()), runs.join(", "), a.error);
+        }
+    }
+}
