@@ -670,7 +670,9 @@ impl Workspace {
             FolderEvent::OpenInNewTab(loc) => {
                 let keep = this.active;
                 this.open_tab(loc.clone(), window, cx);
-                if !cx.global::<crate::settings::Settings>().focus_new_tab {
+                // a view asked for by name (disk usage) is what the user wants to see now
+                let wanted = matches!(loc, Location::DiskUsage(_));
+                if !wanted && !cx.global::<crate::settings::Settings>().focus_new_tab {
                     this.activate(keep, window, cx);
                 }
             }
