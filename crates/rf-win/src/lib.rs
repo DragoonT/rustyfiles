@@ -11,6 +11,7 @@ pub mod ctxmenu;
 pub mod default_fm;
 pub mod dialog_reg;
 pub mod dialogs;
+pub mod diskusage;
 pub mod dnd;
 pub mod drives;
 pub mod encoding;

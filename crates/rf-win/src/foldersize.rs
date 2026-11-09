@@ -65,7 +65,7 @@ impl Counters {
 }
 
 /// Bytes per cluster of the volume holding `dir`.
-fn cluster_size(dir: &Path) -> Option<u64> {
+pub(crate) fn cluster_size(dir: &Path) -> Option<u64> {
     let src = wide(dir);
     let mut root = [0u16; 261];
     unsafe {

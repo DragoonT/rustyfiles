@@ -963,4 +963,13 @@ pub const EN: &[(&str, &str)] = &[
     ("DirectLook arka planda çalışır ve Windows başladığında açılır (bildirim alanında simge); rustyfiles kapalıyken de", "DirectLook keeps running in the background and opens when Windows starts (icon in the notification area), even while rustyfiles is closed"),
     ("directlook.toml: look_ext_blocklist (ör. \".insv;.iso\")", "directlook.toml: look_ext_blocklist (e.g. \".insv;.iso\")"),
     ("DirectLook", "DirectLook"),
+    ("Disk kullanımı", "Disk usage"),
+    ("Disk kullanımını göster", "Show disk usage"),
+    ("Disk kullanımı hesaplanıyor…", "Working out disk usage…"),
+    ("Sekmeyi kapatmak taramayı durdurur", "Closing the tab stops the scan"),
+    ("Diskteki boyut", "Size on disk"),
+    ("öğe daha", "more items"),
+    ("klasör okunamadı", "folders could not be read"),
+    ("Bu klasöre git", "Go to this folder"),
+    ("Klasörde göster", "Show in folder"),
 ];

@@ -17,6 +17,8 @@ pub enum Location {
     /// the shell takes back; `name` is what it shows (may be empty: then the last part of
     /// `parsing` stands in until the shell has been asked).
     Shell { parsing: String, name: String },
+    /// Where the space goes under a folder or drive (the disk usage view).
+    DiskUsage(PathBuf),
 }
 
 impl Location {
@@ -67,6 +69,7 @@ impl Location {
         match self {
             Location::Path(p) => Location::Path(clean_path(&p)),
             Location::Search { root, query } => Location::Search { root: clean_path(&root), query },
+            Location::DiskUsage(p) => Location::DiskUsage(clean_path(&p)),
             other => other,
         }
     }
@@ -91,6 +94,7 @@ impl Location {
                 _ => Some(Location::Home),
             },
             Location::Search { root, .. } => Some(Location::Path(root.clone())),
+            Location::DiskUsage(p) => Some(Location::Path(p.clone())),
             Location::RecycleBin | Location::Settings | Location::Tag(_) | Location::Library { .. } => {
                 Some(Location::Home)
             }
@@ -109,6 +113,7 @@ impl Location {
             Location::Library { name, .. } => name.clone(),
             Location::Shell { parsing, name } if name.is_empty() => shell_last_segment(parsing).to_string(),
             Location::Shell { name, .. } => name.clone(),
+            Location::DiskUsage(p) => format!("Disk kullanımı — {}", display_name(p)),
             Location::Path(p) => display_name(p),
         }
     }

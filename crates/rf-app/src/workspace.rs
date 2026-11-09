@@ -1830,6 +1830,7 @@ impl Workspace {
             it.take(16)
                 .map(|l| match l {
                     Location::Path(p) => p.to_string_lossy().into_owned(),
+                    Location::DiskUsage(p) => crate::disk_usage::title(p),
                     other => crate::i18n::td(&other.title()),
                 })
                 .collect()
@@ -2179,6 +2180,7 @@ impl Workspace {
             Location::Path(path) | Location::Search { root: path, .. } => breadcrumbs(path),
             // the shell's own name for the folder (the location may carry none)
             Location::Shell { .. } => vec![(self.active_tab().read(cx).title(cx), loc.clone())],
+            Location::DiskUsage(path) => vec![(crate::disk_usage::title(path), loc.clone())],
             other => vec![(crate::i18n::td(&other.title()), other.clone())],
         };
         // Too long for the address box: hide leading segments after the drive behind "…"
