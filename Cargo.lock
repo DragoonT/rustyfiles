@@ -6160,6 +6160,7 @@ dependencies = [
  "syntect",
  "toml 0.9.12+spec-1.1.0",
  "ttf-parser",
+ "ureq",
  "velopack",
  "windows 0.62.2",
  "windows-registry 0.6.1",

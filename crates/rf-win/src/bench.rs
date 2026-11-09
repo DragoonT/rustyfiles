@@ -653,3 +653,45 @@ pub fn post_close(hwnd_raw: isize) {
         let _ = PostMessageW(Some(hwnd(hwnd_raw)), WM_CLOSE, WPARAM(0), LPARAM(0));
     }
 }
+
+/// What some work run inside this process cost: wall time, CPU time of the whole process
+/// (every thread: an engine's workers, the shell's copy engine), and the private memory it
+/// took on top of what the process held before (sampled every 5 ms, the peak).
+#[derive(Debug, Clone, Copy)]
+pub struct InProcess {
+    pub ms: f64,
+    pub cpu_ms: f64,
+    pub extra_mb: f64,
+}
+
+/// Runs `f` and reports [`InProcess`] for it.
+pub fn measure_in_process<T>(f: impl FnOnce() -> T) -> (T, InProcess) {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicU64;
+    let me = Proc::open(std::process::id());
+    let private = |p: &Option<Proc>| p.as_ref().and_then(|p| p.memory()).map_or(0, |m| m.2);
+    let start_mem = private(&me);
+    let start_cpu = me.as_ref().and_then(|p| p.times()).map_or(0.0, |t| t.1);
+    let done = Arc::new(AtomicBool::new(false));
+    let peak = Arc::new(AtomicU64::new(start_mem));
+    let sampler = {
+        let (done, peak) = (done.clone(), peak.clone());
+        std::thread::spawn(move || {
+            let me = Proc::open(std::process::id());
+            while !done.load(Ordering::Relaxed) {
+                let m = me.as_ref().and_then(|p| p.memory()).map_or(0, |m| m.2);
+                peak.fetch_max(m, Ordering::Relaxed);
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        })
+    };
+    let t = Instant::now();
+    let out = f();
+    let ms = t.elapsed().as_secs_f64() * 1000.0;
+    done.store(true, Ordering::Relaxed);
+    let _ = sampler.join();
+    let end_cpu = me.as_ref().and_then(|p| p.times()).map_or(0.0, |t| t.1);
+    peak.fetch_max(private(&me), Ordering::Relaxed);
+    let extra = peak.load(Ordering::Relaxed).saturating_sub(start_mem);
+    (out, InProcess { ms, cpu_ms: (end_cpu - start_cpu).max(0.0), extra_mb: extra as f64 / 1048576.0 })
+}

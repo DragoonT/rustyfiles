@@ -322,17 +322,38 @@ pub(crate) fn share_payload(r: &Results) -> serde_json::Value {
     }
     let e = &r.engines;
     let vs = |v: &Option<crate::bench::Versus>| v.as_ref().and_then(|v| Some((v.ours_ms?.round() as i64, v.windows_ms?.round() as i64)));
-    if let Some((a, b)) = vs(&e.copy_small) {
-        o.insert("copy".into(), json!({"n": 10000, "mb": 39, "rf": a, "win": b}));
-    }
-    if let Some((a, b)) = vs(&e.copy_big) {
-        o.insert("big".into(), json!({"mb": 1024, "rf": a, "win": b}));
-    }
-    if let Some((a, b)) = vs(&e.unzip) {
-        o.insert("zip".into(), json!({"n": 10000, "rf": a, "win": b}));
+    // CPU time (ms) and extra memory (MB) of each side, when measured (0.5.1 on)
+    let costs = |v: &crate::bench::Versus, m: &mut Map<String, Value>| {
+        for (k, x) in [("rfc", v.ours_cpu_ms), ("winc", v.windows_cpu_ms), ("rfm", v.ours_mb), ("winm", v.windows_mb)] {
+            if let Some(x) = x {
+                m.insert(k.into(), json!(x.round() as i64));
+            }
+        }
+    };
+    for (key, v, extra) in [
+        ("copy", &e.copy_small, json!({"n": 10000, "mb": 39})),
+        ("big", &e.copy_big, json!({"mb": 1024})),
+        ("zip", &e.unzip, json!({"n": 10000})),
+    ] {
+        if let (Some((a, b)), Some(full)) = (vs(v), v.as_ref()) {
+            let Value::Object(mut m) = extra else { continue };
+            m.insert("rf".into(), json!(a));
+            m.insert("win".into(), json!(b));
+            costs(full, &mut m);
+            o.insert(key.into(), Value::Object(m));
+        }
     }
     if let Some(ms) = e.search_ms {
-        o.insert("search".into(), json!({"n": e.search_entries, "rf": ms.round() as i64}));
+        let mut m = Map::new();
+        m.insert("n".into(), json!(e.search_entries));
+        m.insert("rf".into(), json!(ms.round() as i64));
+        if let Some(c) = e.search_cpu_ms {
+            m.insert("c".into(), json!(c.round() as i64));
+        }
+        if let Some(x) = e.search_mb {
+            m.insert("m".into(), json!(x.round() as i64));
+        }
+        o.insert("search".into(), Value::Object(m));
     }
     out
 }
@@ -343,23 +364,78 @@ pub(crate) fn share_link(r: &Results) -> String {
     format!("{SITE}/r/{}", b64url(&json))
 }
 
-fn summary_text(r: &Results) -> String {
+/// A short link from the site (rustyfiles.com/r/<8 characters>: the result is stored there), or
+/// the long one carrying the result itself when the site can't be reached (offline, an error,
+/// no answer in 5 s). Blocking: call it off the UI thread. Asked once per result.
+pub(crate) fn short_link(r: &Results) -> String {
+    static CACHE: std::sync::Mutex<Option<(i64, String)>> = std::sync::Mutex::new(None);
+    if let Some((when, url)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        if *when == r.when {
+            return url.clone();
+        }
+    }
+    let body = serde_json::to_vec(&share_payload(r)).unwrap_or_default();
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(std::time::Duration::from_secs(5))).http_status_as_error(false).build().into();
+    let prefix = format!("{SITE}/r/");
+    let got = agent
+        .post(format!("{SITE}/api/r"))
+        .header("User-Agent", format!("rustyfiles/{}", crate::installer::version()))
+        .content_type("application/json")
+        .send(&body[..])
+        .ok()
+        .filter(|resp| resp.status() == 200)
+        .and_then(|mut resp| resp.body_mut().read_to_string().ok())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|v| v["url"].as_str().map(str::to_string))
+        .filter(|url| url.starts_with(&prefix) && url.len() <= prefix.len() + 16);
+    match got {
+        Some(url) => {
+            *CACHE.lock().unwrap_or_else(|e| e.into_inner()) = Some((r.when, url.clone()));
+            url
+        }
+        None => share_link(r),
+    }
+}
+
+/// Runs `f` with the results and their link (short when the site gives one), the request made
+/// in the background so the window never waits on the network.
+fn with_link(cx: &mut App, f: impl FnOnce(&Results, &str, &mut App) + 'static) {
+    let Some(r) = state(cx).results.clone() else { return };
+    let r2 = r.clone();
+    cx.spawn(async move |cx| {
+        let link = cx.background_executor().spawn(async move { short_link(&r2) }).await;
+        let _ = cx.update(|cx| f(&r, &link, cx));
+    })
+    .detach();
+}
+
+fn summary_text(r: &Results, link: &str) -> String {
     let mut lines = vec![format!("rustyfiles · {}", machine_line(&r.machine))];
     for o in &r.open {
         if !matches!(o.test, OpenTest::Files100k | OpenTest::Start) {
             continue;
         }
-        let row: Vec<String> = o.apps.iter().filter_map(|a| a.median().map(|m| format!("{} {}", app_label(a.app), ms(m.settled_ms)))).collect();
+        // "*": the app was already running (Files keeps a process in the background), so the
+        // time isn't a start from scratch: the card and the table say so, the text must too
+        let row: Vec<String> = o
+            .apps
+            .iter()
+            .filter_map(|a| a.median().map(|m| format!("{} {}{}", app_label(a.app), ms(m.settled_ms), if m.shared { "*" } else { "" })))
+            .collect();
         if !row.is_empty() {
             lines.push(format!("{}: {}", test_label(o.test), row.join(", ")));
         }
     }
+    let any_shared = r.open.iter().filter(|o| matches!(o.test, OpenTest::Files100k | OpenTest::Start)).any(|o| o.apps.iter().any(|a| a.median().is_some_and(|m| m.shared)));
     if let Some(v) = &r.engines.copy_small {
         if let (Some(a), Some(b)) = (v.ours_ms, v.windows_ms) {
             lines.push(format!("{}: rustyfiles {} · Windows {}", t!("10.000 küçük dosya kopyalama"), ms(a), ms(b)));
         }
     }
-    lines.push(format!("{} {}", t!("Sonuçlar:"), share_link(r)));
+    if any_shared {
+        lines.push(format!("* {}", t!("uygulama zaten çalışıyordu (sıfırdan açılış değil)")));
+    }
+    lines.push(format!("{} {}", t!("Sonuçlar:"), link));
     lines.push(format!("{} {SITE}", t!("Ücretsiz ve açık kaynak:")));
     lines.join("\n")
 }
@@ -553,11 +629,11 @@ fn save_picture(cx: &mut App) {
 }
 
 fn copy_text(window: &Window, cx: &mut App) {
-    let Some(r) = state(cx).results.clone() else { return };
-    let text = summary_text(&r);
-    cx.write_to_clipboard(ClipboardItem::new_string(text));
     let _ = window;
-    note(t!("Sonuçlar panoya kopyalandı"), cx);
+    with_link(cx, |r, link, cx| {
+        cx.write_to_clipboard(ClipboardItem::new_string(summary_text(r, link)));
+        note(t!("Sonuçlar panoya kopyalandı"), cx);
+    });
 }
 
 // ---------------------------------------------------------------- page
@@ -836,12 +912,33 @@ fn table_card(p: &Palette, r: &Results) -> AnyElement {
 
 fn engines_card(p: &Palette, r: &Results) -> Option<AnyElement> {
     let e = &r.engines;
-    let mut rows = Vec::new();
+    let mut rows: Vec<(String, String, String, String)> = Vec::new();
+    // "işlemci süresi: rustyfiles 1.20 s · Windows 3.40 s · bellek: +12 MB · +40 MB"
+    let cost = |ours: (Option<f64>, Option<f64>), theirs: Option<(Option<f64>, Option<f64>, &str)>| -> String {
+        let mb = |m: f64| format!("+{m:.0} MB");
+        let mut parts = Vec::new();
+        if let Some(c) = ours.0 {
+            let mut s = format!("{}: rustyfiles {}", t!("işlemci süresi"), ms(c));
+            if let Some((Some(tc), _, name)) = theirs {
+                s.push_str(&format!(" · {name} {}", ms(tc)));
+            }
+            parts.push(s);
+        }
+        if let Some(m) = ours.1 {
+            let mut s = format!("{}: {}", t!("bellek"), mb(m));
+            if let Some((_, Some(tm), _)) = theirs {
+                s.push_str(&format!(" · {}", mb(tm)));
+            }
+            parts.push(s);
+        }
+        parts.join(" · ")
+    };
     let mut versus = |label: &str, v: &Option<crate::bench::Versus>, windows_name: &str| {
         let Some(v) = v else { return };
+        let usage = cost((v.ours_cpu_ms, v.ours_mb), Some((v.windows_cpu_ms, v.windows_mb, windows_name)));
         let (Some(a), Some(b)) = (v.ours_ms, v.windows_ms) else {
             if let Some(a) = v.ours_ms {
-                rows.push((label.to_string(), format!("rustyfiles {}", ms(a)), String::new()));
+                rows.push((label.to_string(), format!("rustyfiles {}", ms(a)), String::new(), usage));
             }
             return;
         };
@@ -853,20 +950,21 @@ fn engines_card(p: &Palette, r: &Results) -> Option<AnyElement> {
         } else {
             t!("{x} daha yavaş").replace("{x}", &times(a, b))
         };
-        rows.push((label.to_string(), format!("rustyfiles {} · {windows_name} {}", ms(a), ms(b)), verdict));
+        rows.push((label.to_string(), format!("rustyfiles {} · {windows_name} {}", ms(a), ms(b)), verdict, usage));
     };
     versus(t!("Kopyalama: 10.000 küçük dosya"), &e.copy_small, "Windows");
     versus(t!("Kopyalama: 1 GB'lık tek dosya"), &e.copy_big, "Windows");
     versus(t!("ZIP çıkarma: 10.000 dosya"), &e.unzip, "Windows");
     if let Some(s) = e.search_ms {
         let rate = e.search_entries as f64 / (s / 1000.0).max(0.001);
-        rows.push((t!("Alt klasörlerde arama").to_string(), format!("{} {} · {}", count(e.search_entries), t!("öğe"), ms(s)), t!("saniyede {n} öğe").replace("{n}", &count(rate as u64))));
+        let usage = cost((e.search_cpu_ms, e.search_mb), None);
+        rows.push((t!("Alt klasörlerde arama").to_string(), format!("{} {} · {}", count(e.search_entries), t!("öğe"), ms(s)), t!("saniyede {n} öğe").replace("{n}", &count(rate as u64)), usage));
     }
     if rows.is_empty() {
         return None;
     }
     let mut list = v_flex();
-    for (i, (label, detail, verdict)) in rows.into_iter().enumerate() {
+    for (i, (label, detail, verdict, usage)) in rows.into_iter().enumerate() {
         list = list.child(
             h_flex()
                 .px_4()
@@ -875,7 +973,14 @@ fn engines_card(p: &Palette, r: &Results) -> Option<AnyElement> {
                 .items_center()
                 .when(i > 0, |d| d.border_t_1().border_color(p.divider))
                 .child(div().w(px(230.)).flex_shrink_0().text_sm().child(label))
-                .child(div().flex_1().min_w_0().text_sm().text_color(p.text_secondary).child(detail))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .child(div().text_sm().text_color(p.text_secondary).child(detail))
+                        // what each side cost the machine, under the times
+                        .when(!usage.is_empty(), |d| d.child(div().text_xs().text_color(p.text_tertiary).child(usage))),
+                )
                 .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(p.accent).child(verdict)),
         );
     }
@@ -921,12 +1026,8 @@ fn star_card(p: &Palette, r: &Results) -> AnyElement {
 }
 
 fn share_card(p: &Palette, note_text: Option<String>) -> AnyElement {
-    let social = |id: &'static str, label: &'static str, make: fn(&Results) -> String| {
-        button(id, p, L::Send, label, false, move |_, cx| {
-            if let Some(r) = state(cx).results.clone() {
-                open_url(make(&r));
-            }
-        })
+    let social = |id: &'static str, label: &'static str, make: fn(&Results, &str) -> String| {
+        button(id, p, L::Send, label, false, move |_, cx| with_link(cx, move |r, link, _| open_url(make(r, link))))
     };
     shell(p)
         .p_4()
@@ -953,15 +1054,15 @@ fn share_card(p: &Palette, note_text: Option<String>) -> AnyElement {
                 .child(button("bench-save-card", p, L::Download, t!("Kartı kaydet"), false, |_, cx| save_picture(cx)))
                 .child(button("bench-copy-text", p, L::Copy, t!("Metni kopyala"), false, |w, cx| copy_text(w, cx)))
                 .child(button("bench-copy-link", p, L::Link, t!("Bağlantıyı kopyala"), false, |_, cx| {
-                    if let Some(r) = state(cx).results.clone() {
-                        cx.write_to_clipboard(ClipboardItem::new_string(share_link(&r)));
+                    with_link(cx, |_, link, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(link.to_string()));
                         note(t!("Bağlantı kopyalandı"), cx);
-                    }
+                    })
                 }))
-                .child(social("bench-x", "X", |r| format!("https://twitter.com/intent/tweet?text={}&url={}", enc(&headline(r)), enc(&share_link(r)))))
-                .child(social("bench-wa", "WhatsApp", |r| format!("https://wa.me/?text={}", enc(&format!("{} {}", headline(r), share_link(r))))))
-                .child(social("bench-reddit", "Reddit", |r| format!("https://www.reddit.com/submit?url={}&title={}", enc(&share_link(r)), enc(&headline(r)))))
-                .child(social("bench-li", "LinkedIn", |r| format!("https://www.linkedin.com/sharing/share-offsite/?url={}", enc(&share_link(r))))),
+                .child(social("bench-x", "X", |r, l| format!("https://twitter.com/intent/tweet?text={}&url={}", enc(&headline(r)), enc(l))))
+                .child(social("bench-wa", "WhatsApp", |r, l| format!("https://wa.me/?text={}", enc(&format!("{} {}", headline(r), l)))))
+                .child(social("bench-reddit", "Reddit", |r, l| format!("https://www.reddit.com/submit?url={}&title={}", enc(l), enc(&headline(r)))))
+                .child(social("bench-li", "LinkedIn", |_, l| format!("https://www.linkedin.com/sharing/share-offsite/?url={}", enc(l)))),
         )
         .into_any_element()
 }

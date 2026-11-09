@@ -14,6 +14,8 @@ name = "directlook"
 path = "src/bin/directlook.rs"
 
 [dependencies]
+# the speed test asks rustyfiles.com for a short result link (already in the tree through velopack)
+ureq = "3.5"
 rf-core.workspace = true
 rf-win.workspace = true
 # the Open/Save dialog request types (the DLL itself is a separate build output)

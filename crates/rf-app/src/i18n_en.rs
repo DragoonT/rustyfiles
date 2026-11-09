@@ -973,5 +973,6 @@ pub const EN: &[(&str, &str)] = &[
     ("Bu klasöre git", "Go to this folder"),
     ("Klasörde göster", "Show in folder"),
     ("Kaydırma çubuğunu göster", "Show scrollbar"),
+    ("uygulama zaten çalışıyordu (sıfırdan açılış değil)", "the app was already running (not a start from scratch)"),
     ("Ayrıntılar ve Izgara listelerinin sağında; sürükleyin ya da bir yere tıklayıp oraya atlayın.", "On the right of the Details and Grid lists. Drag it, or click a spot to jump there."),
 ];

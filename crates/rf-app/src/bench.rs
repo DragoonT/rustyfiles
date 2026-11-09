@@ -84,6 +84,16 @@ pub struct Versus {
     pub windows_ms: Option<f64>,
     pub bytes: u64,
     pub files: u64,
+    /// CPU time of each side (medians, ms) and the private memory it took on top (MB). Results
+    /// saved before these were measured have none.
+    #[serde(default)]
+    pub ours_cpu_ms: Option<f64>,
+    #[serde(default)]
+    pub windows_cpu_ms: Option<f64>,
+    #[serde(default)]
+    pub ours_mb: Option<f64>,
+    #[serde(default)]
+    pub windows_mb: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -97,6 +107,11 @@ pub struct Engines {
     /// Searching the test folders by name (ms, entries looked at).
     pub search_ms: Option<f64>,
     pub search_entries: u64,
+    /// The search's CPU time (ms) and extra memory (MB).
+    #[serde(default)]
+    pub search_cpu_ms: Option<f64>,
+    #[serde(default)]
+    pub search_mb: Option<f64>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -286,6 +301,7 @@ fn our_copy(sources: &[PathBuf], dest: &Path) -> anyhow::Result<()> {
 
 fn versus(runs: usize, scratch: &Path, ours: &dyn Fn(&Path) -> anyhow::Result<()>, windows: &dyn Fn(&Path) -> anyhow::Result<()>, cancel: &AtomicBool) -> Versus {
     let (mut a, mut b) = (Vec::new(), Vec::new());
+    let (mut ac, mut bc, mut am, mut bm) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for r in 0..runs {
         if cancel.load(Ordering::Relaxed) {
             break;
@@ -296,9 +312,13 @@ fn versus(runs: usize, scratch: &Path, ours: &dyn Fn(&Path) -> anyhow::Result<()
             if std::fs::create_dir_all(&dest).is_err() {
                 continue;
             }
-            match time(|| f(&dest)) {
-                Ok(ms) => [&mut a, &mut b][which].push(ms),
-                Err(e) => log::warn!("bench: {} failed: {e:#}", if which == 0 { "ours" } else { "windows" }),
+            match rf_win::bench::measure_in_process(|| f(&dest)) {
+                (Ok(()), cost) => {
+                    [&mut a, &mut b][which].push(cost.ms);
+                    [&mut ac, &mut bc][which].push(cost.cpu_ms);
+                    [&mut am, &mut bm][which].push(cost.extra_mb);
+                }
+                (Err(e), _) => log::warn!("bench: {} failed: {e:#}", if which == 0 { "ours" } else { "windows" }),
             }
             let _ = std::fs::remove_dir_all(&dest);
         }
@@ -308,7 +328,7 @@ fn versus(runs: usize, scratch: &Path, ours: &dyn Fn(&Path) -> anyhow::Result<()
             break;
         }
     }
-    Versus { ours_ms: median(a), windows_ms: median(b), ..Default::default() }
+    Versus { ours_ms: median(a), windows_ms: median(b), ours_cpu_ms: median(ac), windows_cpu_ms: median(bc), ours_mb: median(am), windows_mb: median(bm), ..Default::default() }
 }
 
 /// Runs `plan`. `progress` is called from this thread; `cancel` stops between steps.
@@ -418,9 +438,10 @@ pub fn run(plan: &Plan, progress: &dyn Fn(Progress), cancel: &AtomicBool) -> any
         }
         step("search".into());
         let q = rf_win::search::SearchQuery { root: root.clone(), pattern: "file 0999".into(), include_hidden: false, max_results: 50_000 };
-        let t = Instant::now();
-        if let Ok(s) = rf_win::search::search(&q, &|| false, &mut |_| {}) {
-            engines.search_ms = Some(t.elapsed().as_secs_f64() * 1000.0);
+        if let (Ok(s), cost) = rf_win::bench::measure_in_process(|| rf_win::search::search(&q, &|| false, &mut |_| {})) {
+            engines.search_ms = Some(cost.ms);
+            engines.search_cpu_ms = Some(cost.cpu_ms);
+            engines.search_mb = Some(cost.extra_mb);
             engines.search_entries = s.entries_scanned as u64;
         }
     }
@@ -435,4 +456,38 @@ pub fn run(plan: &Plan, progress: &dyn Fn(Progress), cancel: &AtomicBool) -> any
 /// The last results, if a test was run before.
 pub fn last_results() -> Option<Results> {
     serde_json::from_slice(&std::fs::read(bench_dir().join("results.json")).ok()?).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The engine comparison reports what each side cost: a real copy of 300 small files with
+    /// our engine and with Windows' (in this process), both measured.
+    #[test]
+    fn engine_comparison_reports_cpu_and_memory() {
+        let root = std::env::temp_dir().join(format!("rf-bench-cost-{}", std::process::id()));
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        for i in 0..300 {
+            std::fs::write(src.join(format!("f{i}.bin")), vec![7u8; 8192]).unwrap();
+        }
+        let scratch = root.join("scratch");
+        std::fs::create_dir_all(&scratch).unwrap();
+        let s = [src.clone()];
+        let v = versus(1, &scratch, &|d| our_copy(&s, d), &|d| rf_win::bench::shell_copy_quiet(&s, d), &AtomicBool::new(false));
+        assert!(v.ours_ms.is_some() && v.windows_ms.is_some(), "{v:?}");
+        assert!(v.ours_cpu_ms.is_some_and(|c| c >= 0.0) && v.windows_cpu_ms.is_some_and(|c| c > 0.0), "{v:?}");
+        assert!(v.ours_mb.is_some_and(|m| m >= 0.0) && v.windows_mb.is_some_and(|m| m >= 0.0), "{v:?}");
+        eprintln!("{v:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Results saved by 0.5.0 (no cost fields) still load.
+    #[test]
+    fn older_results_still_load() {
+        let old = r#"{"ours_ms":1.0,"windows_ms":2.0,"bytes":0,"files":0}"#;
+        let v: Versus = serde_json::from_str(old).unwrap();
+        assert_eq!(v.ours_cpu_ms, None);
+    }
 }
