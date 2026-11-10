@@ -108,6 +108,21 @@ pub fn set_owner(hwnd: isize, owner: isize) {
     }
 }
 
+/// Puts `hwnd` above the window that owns it, without activating anything.
+///
+/// An owner set after the window exists (`set_owner`) does not move it: our picker could be the
+/// window in front and still lie under the app that asked for it (seen with WhatsApp: you click
+/// the disabled app, it beeps, and only then does the picker come up). Raised to the top this way
+/// (no SWP_NOOWNERZORDER), Windows places the owner right under it. Moving the owner waits for
+/// the owner's thread: call it on a thread of its own, so a hung app can't hold ours.
+pub fn raise_above_owner(hwnd: isize) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos};
+    unsafe {
+        let _ = SetWindowPos(HWND(hwnd as *mut _), Some(HWND_TOP), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+
 /// Gives the foreground back to `owner` (another app's window) while we still hold it: when our
 /// window closes, Windows would otherwise activate whatever window comes next.
 pub fn hand_foreground(owner: isize) {
