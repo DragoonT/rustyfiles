@@ -58,7 +58,46 @@ pub fn keep_gdiplus_alive() {
     });
 }
 
+/// A design file's thumbnail from the file itself (`crate::design`), not from the shell: the
+/// program's own thumbnail provider may be missing, or draw only the page (CorelDRAW's is blank
+/// when the design sits beside the page). An Illustrator file that is a PDF and has no saved
+/// thumbnail gets its first artboard drawn.
+fn design_thumbnail(path: &Path, size: u32) -> Option<Bgra> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !crate::design::is_design_ext(&ext) {
+        return None;
+    }
+    if let Some(img) = crate::design::preview(path) {
+        return Some(crate::look::decode::bgra_within(img, size));
+    }
+    if ext != "ai" {
+        return None;
+    }
+    let mut head = [0u8; 5];
+    use std::io::Read;
+    std::fs::File::open(path).ok()?.read_exact(&mut head).ok()?;
+    if &head != b"%PDF-" {
+        return None;
+    }
+    // Windows' PDF engine on a thread of its own (it wants a multithreaded apartment)
+    let p = path.to_path_buf();
+    std::thread::spawn(move || -> Option<Bgra> {
+        let pdf = crate::look::pdf::Pdf::open(&p, None).ok()?;
+        let (w, h) = pdf.page_size(0).ok()?;
+        let width = if h > w { (size as f32 * w / h.max(1.0)).round() as u32 } else { size };
+        pdf.render(0, width.max(16)).ok()
+    })
+    .join()
+    .ok()
+    .flatten()
+}
+
 pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
+    if matches!(kind, Kind::Thumbnail) {
+        if let Some(b) = design_thumbnail(path, size) {
+            return Ok(b);
+        }
+    }
     keep_gdiplus_alive();
     ensure_com();
     let w = wide(path);

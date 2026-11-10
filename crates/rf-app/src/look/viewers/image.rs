@@ -42,7 +42,8 @@ impl Viewer for ImageViewer {
         0
     }
     fn can_handle(&self, f: &Probe) -> bool {
-        f.is_file() && EXTENSIONS.contains(&f.ext.as_str())
+        // design files (CorelDRAW, EPS, Krita…): the picture saved inside them
+        f.is_file() && (EXTENSIONS.contains(&f.ext.as_str()) || rf_win::design::sniff(&f.ext, &f.head))
     }
     fn prepare(&mut self, f: &Probe, cx: &mut App) -> Prepared {
         let name = super::file_name(&f.path);
@@ -51,6 +52,8 @@ impl Viewer for ImageViewer {
         self.view = Some(cx.new(|cx| ImageView::new(path, dims, cx)));
         let (w, h) = dims.map_or((800.0, 600.0), |(w, h)| (w as f32, h as f32));
         let title = match dims {
+            // (a design file's picture is its preview, not the design's size)
+            _ if rf_win::design::is_design_ext(&f.ext) => name,
             Some((w, h)) => format!("{w}×{h}: {name}"),
             None => name,
         };

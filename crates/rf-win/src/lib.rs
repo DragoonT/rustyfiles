@@ -9,6 +9,7 @@ pub mod clipboard;
 pub mod complete;
 pub mod ctxmenu;
 pub mod default_fm;
+pub mod design;
 pub mod dialog_reg;
 pub mod dialogs;
 pub mod diskusage;

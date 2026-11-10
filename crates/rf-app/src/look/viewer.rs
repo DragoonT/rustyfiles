@@ -171,6 +171,12 @@ mod tests {
         assert_eq!(pick(&probe("rapor.pdf", b"%PDF-1.7\n")).name(), "pdf");
         // a PDF with the wrong extension is still a PDF
         assert_eq!(pick(&probe("rapor.dat", b"%PDF-1.4\n")).name(), "pdf");
+        // design files: the picture saved inside them; an Illustrator file that is a PDF is a PDF
+        assert_eq!(pick(&probe("afis.cdr", b"PK\x03\x04\x14\0\0\x08")).name(), "image");
+        assert_eq!(pick(&probe("logo.ai", b"%PDF-1.6\n%")).name(), "pdf");
+        assert_eq!(pick(&probe("logo.eps", b"\xC5\xD0\xD3\xC6\x20\0\0\0")).name(), "image");
+        // a macOS "._" sidecar named like a design is not one
+        assert_eq!(pick(&probe("._afis.cdr", b"\0\x05\x16\x07\0\x02\0\0")).name(), "hex");
     }
 
     /// `.ts` hem TypeScript hem MPEG-TS: içerik karar verir (188 baytlık paketlerde 0x47 eşitleme baytı).

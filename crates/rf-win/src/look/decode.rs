@@ -212,6 +212,31 @@ fn raw_embedded_jpeg(bytes: &[u8], max_side: u32) -> anyhow::Result<Decoded> {
     with_image_crate(&bytes[start..], max_side)
 }
 
+/// A design file's own picture (see `crate::design`) is small (CorelDRAW saves 256 px on the
+/// short side): the previewer shows it enlarged smoothly to at least this long side.
+const DESIGN_SIDE: u32 = 720;
+
+/// The size a design file's picture is shown at: enlarged to `DESIGN_SIDE`, within `max_side`.
+fn design_size(w: u32, h: u32, max_side: u32) -> (u32, u32) {
+    let long = w.max(h).max(1);
+    let target = DESIGN_SIDE.max(long).min(max_side);
+    let s = target as f64 / long as f64;
+    (((w as f64 * s).round() as u32).max(1), ((h as f64 * s).round() as u32).max(1))
+}
+
+fn design(path: &Path, max_side: u32) -> Option<Decoded> {
+    let img = crate::design::preview(path)?;
+    let (w, h) = img.dimensions();
+    let (dw, dh) = design_size(w, h, max_side);
+    let img = if (dw, dh) == (w, h) { img } else { image::imageops::resize(&img, dw, dh, image::imageops::FilterType::CatmullRom) };
+    Some(Decoded { frames: vec![(to_bgra(img), 0)], orientation: 1, exif: Vec::new(), width: dw, height: dh })
+}
+
+/// `img` in BGRA, its long side at most `max_side` (never enlarged).
+pub(crate) fn bgra_within(img: RgbaImage, max_side: u32) -> Bgra {
+    to_bgra(shrink(img, max_side))
+}
+
 fn psd(bytes: &[u8], max_side: u32) -> anyhow::Result<Decoded> {
     let p = psd::Psd::from_bytes(bytes).map_err(|e| anyhow!("psd: {e}"))?;
     let img = RgbaImage::from_raw(p.width(), p.height(), p.rgba()).context("psd pixels")?;
@@ -222,6 +247,11 @@ fn psd(bytes: &[u8], max_side: u32) -> anyhow::Result<Decoded> {
 /// Resmin (EXIF yönüne göre döndürülmüş) boyutu; yalnız başlık okunur, hızlıdır.
 pub fn dimensions(path: &Path) -> Option<(u32, u32)> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    if crate::design::is_design_ext(&ext) {
+        if let Some(img) = crate::design::preview(path) {
+            return Some(design_size(img.width(), img.height(), u32::MAX));
+        }
+    }
     if ext == "svg" || ext == "svgz" {
         let bytes = std::fs::read(path).ok()?;
         let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default()).ok()?;
@@ -255,6 +285,12 @@ pub fn dimensions(path: &Path) -> Option<(u32, u32)> {
 /// Resmi tam çözünürlükte (en uzun kenar en çok `max_side`) çözer; sırayla dener.
 pub fn decode_full(path: &Path, max_side: u32) -> anyhow::Result<Decoded> {
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    // (before reading the file: a CorelDRAW file is tens of MB, its picture one small entry)
+    if crate::design::is_design_ext(&ext) {
+        if let Some(d) = design(path, max_side) {
+            return Ok(d);
+        }
+    }
     let bytes = std::fs::read(path).with_context(|| path.display().to_string())?;
     if ext == "svg" || ext == "svgz" {
         return svg(&bytes, max_side);

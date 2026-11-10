@@ -58,6 +58,7 @@ pub fn has_thumbnail(e: &Entry) -> bool {
     }
     matches!(category(e), Category::Image | Category::Video | Category::Pdf)
         || matches!(&*e.ext, "docx" | "pptx" | "xlsx" | "psd" | "blend" | "3mf" | "stl" | "glb")
+        || rf_win::design::is_design_ext(&e.ext)
 }
 
 pub fn icon_for(cat: Category) -> L {

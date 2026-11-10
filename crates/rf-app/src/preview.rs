@@ -517,6 +517,12 @@ impl Preview {
         if ext.is_empty() {
             return false;
         }
+        // Design files show the picture saved inside them (their thumbnail): CorelDRAW's preview
+        // handler draws only the page, an empty sheet when the design sits beside it. Adobe's
+        // handler for Illustrator / EPS draws the artwork itself, so it stays when installed.
+        if rf_win::design::is_design_ext(&ext) && !matches!(ext.as_str(), "ai" | "eps" | "epsf") {
+            return false;
+        }
         match self.handlers.get(&ext) {
             Some(v) => *v,
             None => {
