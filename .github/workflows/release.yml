@@ -35,6 +35,6 @@ jobs:
         continue-on-error: true
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }}
       - name: Pack
-        run: vpk pack -u rustyfiles -v ${{ steps.v.outputs.version }} -p publish -e rustyfiles.exe --packTitle rustyfiles --packAuthors "Özer Güzel" -i crates/rf-app/assets/rustyfiles.ico
+        run: vpk pack -u rustyfiles -v ${{ steps.v.outputs.version }} -p publish -e rustyfiles.exe --packTitle rustyfiles --packAuthors "Özer Güzel" -i crates/rf-app/assets/rustyfiles.ico -s crates/rf-app/assets/splash.gif --splashProgressColor "#ff6a1a"
       - name: Publish
         run: vpk upload github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} --publish --releaseName "rustyfiles ${{ steps.v.outputs.version }}" --tag ${{ github.ref_name }}
