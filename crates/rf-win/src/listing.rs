@@ -116,6 +116,41 @@ pub fn list_dir(
     result.map(|_| total)
 }
 
+/// The entry `name` in `dir` as [`list_dir`] would list it (the same source, the same fields):
+/// `Ok(None)` when there is no such entry (deleted, renamed away), `Err` when it can't be told
+/// (no access, the folder itself gone…). The name comes back as the disk spells it.
+pub fn stat_entry(dir: &Path, name: &str) -> Result<Option<Entry>, ListError> {
+    if name.is_empty() || name.contains(['*', '?', '\\', '/']) {
+        return Err(ListError::InvalidName);
+    }
+    let mut pattern = long_path(&dir.join(name));
+    if pattern.last() != Some(&0) {
+        pattern.push(0);
+    }
+    let mut data = WIN32_FIND_DATAW::default();
+    let handle = unsafe { FindFirstFileExW(PCWSTR(pattern.as_ptr()), FindExInfoBasic, &mut data as *mut _ as *mut _, FindExSearchNameMatch, None, Default::default()) };
+    let handle = match handle {
+        Ok(h) => h,
+        Err(_) => {
+            let err = unsafe { GetLastError() };
+            return match err {
+                ERROR_FILE_NOT_FOUND => Ok(None),
+                ERROR_PATH_NOT_FOUND => Err(ListError::NotFound),
+                ERROR_ACCESS_DENIED => Err(ListError::AccessDenied),
+                e => Err(ListError::Os(e.0)),
+            };
+        }
+    };
+    unsafe {
+        let _ = FindClose(handle);
+    }
+    let Some(mut e) = to_entry(&data) else { return Ok(None) };
+    if e.is_dir() && e.attrs & (attrs::READONLY | attrs::SYSTEM) != 0 && !crate::localized::is_network(dir) {
+        e.label = crate::localized::folder_label(&dir.join(&*e.name), Some(e.attrs));
+    }
+    Ok(Some(e))
+}
+
 pub(crate) fn to_entry(d: &WIN32_FIND_DATAW) -> Option<Entry> {
     let name = from_wide(&d.cFileName);
     if name == "." || name == ".." {

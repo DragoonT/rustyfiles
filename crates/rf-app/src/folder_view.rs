@@ -160,6 +160,8 @@ pub static QUICK_LOOK_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::A
 /// Filter + sort + grouping result, computable on any thread.
 struct View {
     visible: Vec<u32>,
+    /// Every entry in sort order (filter applied after): a filter change reuses it, no sort.
+    sorted: Arc<Vec<u32>>,
     rows: Vec<Row>,
     row_of_vi: Vec<usize>,
     /// What it was computed with (discarded if the user changed any of these meanwhile).
@@ -168,8 +170,15 @@ struct View {
 }
 
 fn compute_view(entries: &[Entry], filter: &Filter, sort: SortSpec, group: GroupBy) -> View {
-    let mut v: Vec<u32> = (0..entries.len() as u32).filter(|&i| filter.accepts(&entries[i as usize])).collect();
-    sort.sort_indices(entries, &mut v);
+    let mut all: Vec<u32> = (0..entries.len() as u32).collect();
+    sort.sort_indices(entries, &mut all);
+    view_from_sorted(entries, Arc::new(all), filter, sort, group)
+}
+
+/// [`compute_view`] from entries already in sort order: filtering only (typing in the filter
+/// box of a 100,000-file folder costs a pass over the names, not a sort per keystroke).
+fn view_from_sorted(entries: &[Entry], sorted: Arc<Vec<u32>>, filter: &Filter, sort: SortSpec, group: GroupBy) -> View {
+    let mut v: Vec<u32> = sorted.iter().copied().filter(|&i| filter.accepts(&entries[i as usize])).collect();
     let mut rows = Vec::new();
     let mut row_of_vi = Vec::new();
     if group != GroupBy::None {
@@ -195,7 +204,7 @@ fn compute_view(entries: &[Entry], filter: &Filter, sort: SortSpec, group: Group
             rows.push(Row::Item(vi));
         }
     }
-    View { visible: v, rows, row_of_vi, spec: (filter.clone(), sort, group), len: entries.len() }
+    View { visible: v, sorted, rows, row_of_vi, spec: (filter.clone(), sort, group), len: entries.len() }
 }
 
 enum Msg {
@@ -274,6 +283,10 @@ pub struct FolderView {
     /// Shell folders only: the shell's name for the folder (when the location carries none).
     shell_title: Option<String>,
     visible: Vec<u32>,
+    /// The entries in sort order, for the sort and the entries generation it was made with.
+    sorted_cache: Option<(SortSpec, u64, Arc<Vec<u32>>)>,
+    /// Changes whenever `entries` do (cache key of `sorted_cache`).
+    entries_gen: u64,
     pub sort: SortSpec,
     pub group: GroupBy,
     /// Details rows (headers + items) when grouping; empty = identity with `visible`.
@@ -409,6 +422,8 @@ impl FolderView {
             grid_style: GridStyle::Tiles,
             content_width: px(900.),
             entries: Vec::new(),
+            sorted_cache: None,
+            entries_gen: 0,
             parents: Vec::new(),
             shell_items: Vec::new(),
             shell_title: None,
@@ -817,11 +832,19 @@ impl FolderView {
         if rf_win::ftp::is_ftp(&path) {
             return; // no change notifications over FTP; F5 refreshes
         }
-        let (tx, mut rx) = mpsc::unbounded::<()>();
+        let (tx, mut rx) = mpsc::unbounded::<Option<Vec<(String, Option<Entry>)>>>();
+        // a plain folder is patched with what changed; inside an archive it is listed again
+        let patchable = crate::archive_view::split(&path).is_none();
         // Opening the directory handle can block (offline network share): do it off the UI thread.
         let setup = cx.background_spawn(async move {
-            rf_win::watch::watch_dir(&path, std::time::Duration::from_millis(150), move || {
-                let _ = tx.unbounded_send(());
+            let dir = path.clone();
+            rf_win::watch::watch_dir_changes(&path, std::time::Duration::from_millis(150), move |ch| {
+                // the changed names read from the disk here, on the watcher's own thread (in
+                // order, off the UI thread); None: list the whole folder again
+                let patch = (patchable && !ch.rescan && !ch.names.is_empty())
+                    .then(|| ch.names.into_iter().map(|n| rf_win::stat_entry(&dir, &n).map(|e| (n, e))).collect::<Result<Vec<_>, _>>().ok())
+                    .flatten();
+                let _ = tx.unbounded_send(patch);
             })
             .map_err(|e| log::warn!("watch {path:?}: {e}"))
             .ok()
@@ -843,8 +866,12 @@ impl FolderView {
             if !keep {
                 return;
             }
-            while rx.next().await.is_some() {
-                if this.update(cx, |v, cx| v.soft_reload(cx)).is_err() {
+            while let Some(patch) = rx.next().await {
+                let r = this.update(cx, |v, cx| match patch {
+                    Some(p) if !v.loading && v.soft_pending.is_none() && !v.is_search() => v.apply_patch(p, cx),
+                    _ => v.soft_reload(cx),
+                });
+                if r.is_err() {
                     break;
                 }
             }
@@ -874,6 +901,7 @@ impl FolderView {
         } else {
             self.soft_pending = None;
             self.entries.clear();
+            self.entries_gen += 1;
             self.parents.clear();
             self.shell_items.clear();
             self.shell_title = None;
@@ -1231,13 +1259,18 @@ impl FolderView {
         for m in msgs {
             match m {
                 Msg::View(v) => view = Some(v),
-                Msg::Batch(b) => self.entries.extend(b),
+                Msg::Batch(b) => {
+                    self.entries.extend(b);
+                    self.entries_gen += 1;
+                }
                 Msg::Hits(es, ps) => {
                     self.entries.extend(es);
+                    self.entries_gen += 1;
                     self.parents.extend(ps);
                 }
                 Msg::Shell(es, items) => {
                     self.entries.extend(es);
+                    self.entries_gen += 1;
                     self.shell_items.extend(items);
                 }
                 Msg::ShellName(n) => self.shell_title = Some(n),
@@ -1340,12 +1373,67 @@ impl FolderView {
             return;
         }
         let Some(new_entries) = self.soft_pending.take() else { return };
+        self.swap_in(new_entries, view, None, cx);
+    }
+
+    /// Changed entries read from the disk (the folder watcher): `found` is each changed name
+    /// with what is there now (None: gone). The rest of the listing is kept; the sort order is
+    /// patched too (no relisting, no sort: a file added to a 100,000-file folder costs a pass).
+    fn apply_patch(&mut self, found: Vec<(String, Option<Entry>)>, cx: &mut Context<Self>) {
+        fn fold(s: &str) -> std::borrow::Cow<'_, str> {
+            if s.bytes().all(|b| b.is_ascii() && !b.is_ascii_uppercase()) { s.into() } else { s.to_lowercase().into() }
+        }
+        if self.git.is_some() {
+            self.refresh_git(cx);
+        }
+        // (Windows names ignore case: a rename that only changes case reports the old spelling)
+        let mut gone: HashSet<String> = found.iter().map(|(n, _)| fold(n).into_owned()).collect();
+        gone.extend(found.iter().filter_map(|(_, e)| e.as_ref()).map(|e| fold(&e.name).into_owned()));
+        let old_n = self.entries.len();
+        let mut remap = vec![u32::MAX; old_n];
+        let mut fresh = Vec::with_capacity(old_n + found.len());
+        for (i, e) in self.entries.iter().enumerate() {
+            if gone.contains(fold(&e.name).as_ref()) {
+                continue;
+            }
+            remap[i] = fresh.len() as u32;
+            fresh.push(e.clone());
+        }
+        let kept = fresh.len();
+        let mut added = HashSet::new();
+        for e in found.into_iter().filter_map(|(_, e)| e) {
+            if added.insert(e.name.clone()) {
+                fresh.push(e);
+            }
+        }
+        let sorted = match &self.sorted_cache {
+            Some((sort, generation, s)) if *sort == self.sort && *generation == self.entries_gen && s.len() == old_n => {
+                let mut v: Vec<u32> = s.iter().filter_map(|&i| Some(remap[i as usize]).filter(|&j| j != u32::MAX)).collect();
+                for j in kept..fresh.len() {
+                    let pos = v.partition_point(|&x| self.sort.compare(&fresh[x as usize], &fresh[j]) == std::cmp::Ordering::Less);
+                    v.insert(pos, j as u32);
+                }
+                Some(v)
+            }
+            _ => None,
+        };
+        self.soft_started = Instant::now();
+        self.swap_in(fresh, None, sorted, cx);
+    }
+
+    /// Puts a new listing of the same folder in place, keeping the selection, the cursor and a
+    /// rename by name. `sorted`: the new entries' sort order when already known.
+    fn swap_in(&mut self, new_entries: Vec<Entry>, view: Option<View>, sorted: Option<Vec<u32>>, cx: &mut Context<Self>) {
         let (was_selected, applying) = (self.selected.len(), Instant::now());
         let selected_names: HashSet<Arc<str>> =
             self.selected.iter().map(|&i| self.entries[i as usize].name.clone()).collect();
         let cursor_name = self.cursor.and_then(|c| self.visible.get(c)).map(|&i| self.entries[i as usize].name.clone());
         let renaming_name = self.renaming.as_ref().map(|(i, _)| self.entries[*i as usize].name.clone());
         self.entries = new_entries;
+        self.entries_gen += 1;
+        if let Some(s) = sorted {
+            self.sorted_cache = Some((self.sort, self.entries_gen, Arc::new(s)));
+        }
         if !self.try_install_view(view) {
             self.rebuild_visible();
         }
@@ -1392,7 +1480,13 @@ impl FolderView {
     }
 
     fn rebuild_visible(&mut self) {
-        let view = compute_view(&self.entries, &self.filter, self.sort, self.group);
+        let view = match &self.sorted_cache {
+            // the same entries in the same order: only the filter or grouping changed
+            Some((sort, generation, sorted)) if *sort == self.sort && *generation == self.entries_gen && sorted.len() == self.entries.len() => {
+                view_from_sorted(&self.entries, sorted.clone(), &self.filter, self.sort, self.group)
+            }
+            _ => compute_view(&self.entries, &self.filter, self.sort, self.group),
+        };
         self.install_view(view);
     }
 
@@ -1408,6 +1502,8 @@ impl FolderView {
     }
 
     fn install_view(&mut self, view: View) {
+        // (installed only when it matches the current entries: see try_install_view)
+        self.sorted_cache = Some((view.spec.1, self.entries_gen, view.sorted));
         self.rows = view.rows;
         self.row_of_vi = view.row_of_vi;
         self.visible = view.visible;
@@ -2225,6 +2321,7 @@ impl FolderView {
                 let b = DirSize::bytes(*s, on_disk);
                 if self.entries[i].size != b {
                     self.entries[i].size = b;
+                    self.entries_gen += 1;
                     changed = true;
                 }
             }
@@ -2278,11 +2375,12 @@ impl FolderView {
                 wait = std::time::Duration::from_millis(100);
                 let more = this
                     .update(cx, |v, cx| {
-                        let mut changed = false;
+                        let (mut changed, mut finished) = (false, false);
                         for (b, dirs) in &v.size_batches {
                             for (i, d) in dirs.iter().enumerate() {
                                 let now = DirSize::from(b.state(i));
                                 if v.folder_sizes.get(d) != Some(&now) {
+                                    finished |= matches!(now, DirSize::Done(_));
                                     v.folder_sizes.insert(d.clone(), now);
                                     changed = true;
                                 }
@@ -2290,7 +2388,11 @@ impl FolderView {
                         }
                         v.size_batches.retain(|(b, _)| !b.finished());
                         if changed {
-                            v.resort_for_sizes(cx);
+                            // running totals only redraw; a finished size goes into the entries
+                            // (a pass over every folder of the listing), not ten times a second
+                            if finished {
+                                v.resort_for_sizes(cx);
+                            }
                             cx.notify();
                         }
                         let more = !v.size_batches.is_empty();
@@ -3491,6 +3593,31 @@ mod tile_tests {
             }
         }
         assert_eq!(tile_cols(100., 140., 220., 12.), 1); // narrow: one column
+    }
+
+    /// Filtering the cached sort order gives exactly what sorting the filtered entries gives.
+    #[test]
+    fn filtering_the_sorted_order_matches_a_full_sort() {
+        use super::{GroupBy, compute_view, view_from_sorted};
+        use rf_core::{Entry, EntryKind, entry::Filter, sort::{SortKey, SortSpec}};
+        let names = ["Rapor 10.pdf", "rapor 2.pdf", "Çizim.png", "notlar.txt", ".gizli", "Proje", "ışık.svg", "RAPOR eski.docx", "a", "b10", "b9"];
+        let entries: Vec<Entry> = names
+            .iter()
+            .enumerate()
+            .map(|(i, n)| Entry::new(n, if *n == "Proje" { EntryKind::Dir } else { EntryKind::File }, (i as u64 * 37) % 11, i as i64, 0, 0))
+            .collect();
+        for key in [SortKey::Name, SortKey::Size, SortKey::Modified] {
+            let sort = SortSpec { key, ..Default::default() };
+            let base = compute_view(&entries, &Filter::default(), sort, GroupBy::None);
+            for q in ["", "rapor", "R", "ı", "zzz"] {
+                for dot_hidden in [false, true] {
+                    let f = Filter { query: q.into(), dot_hidden, ..Default::default() };
+                    let full = compute_view(&entries, &f, sort, GroupBy::None);
+                    let fast = view_from_sorted(&entries, base.sorted.clone(), &f, sort, GroupBy::None);
+                    assert_eq!(full.visible, fast.visible, "{key:?} {q:?}");
+                }
+            }
+        }
     }
 }
 

@@ -64,4 +64,4 @@ pub mod wide;
 
 pub use drives::{Drive, DriveKind, list_drives};
 pub use known::{KnownFolder, known_folders};
-pub use listing::{ListError, list_dir};
+pub use listing::{ListError, list_dir, stat_entry};
