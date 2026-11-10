@@ -162,29 +162,39 @@ pub fn validate(name: &str) -> Result<(), RenameError> {
     Ok(())
 }
 
-fn transform(item: &RenameItem, idx: usize, spec: &RenameSpec) -> Result<String, RenameError> {
+/// The Find/Replace pattern, built once for all the items (not per item: with thousands of
+/// files selected that was a regex build per file per keystroke).
+fn find_regex(spec: &RenameSpec) -> Option<Result<regex::Regex, RenameError>> {
+    let Mode::FindReplace { find, case_insensitive, regex, .. } = &spec.mode else { return None };
+    if find.is_empty() {
+        return None;
+    }
+    let pat = if *regex { find.clone() } else { regex::escape(find) };
+    Some(RegexBuilder::new(&pat).case_insensitive(*case_insensitive).build().map_err(|e| RenameError::BadRegex(e.to_string().lines().last().unwrap_or("").trim().to_string())))
+}
+
+fn transform(item: &RenameItem, idx: usize, spec: &RenameSpec, re: Option<&Result<regex::Regex, RenameError>>) -> Result<String, RenameError> {
     let (stem, ext) = split_ext(&item.name, item.is_dir);
     let (target, tail): (&str, &str) = if spec.include_ext { (&item.name, "") } else { (stem, ext) };
     let body = match &spec.mode {
-        Mode::FindReplace { find, replace, case_insensitive, regex } => {
-            if find.is_empty() {
-                target.to_string()
-            } else {
-                let pat = if *regex { find.clone() } else { regex::escape(find) };
-                let re = RegexBuilder::new(&pat).case_insensitive(*case_insensitive).build().map_err(|e| {
-                    RenameError::BadRegex(e.to_string().lines().last().unwrap_or("").trim().to_string())
-                })?;
+        Mode::FindReplace { replace, regex, .. } => {
+            if let Some(re) = re {
+                let re = re.as_ref().map_err(Clone::clone)?;
                 if *regex {
                     re.replace_all(target, replace.as_str()).into_owned()
                 } else {
                     re.replace_all(target, regex::NoExpand(replace.as_str())).into_owned()
                 }
+            } else {
+                target.to_string()
             }
         }
         Mode::Pattern { pattern, start, step } => {
             let n = start.saturating_add(step.saturating_mul(idx as i64));
             let name_tok = if spec.include_ext { item.name.as_str() } else { stem };
-            expand_pattern(pattern, n, name_tok, ext, &format_date(item.modified_ms))
+            // (the date is formatted only when the pattern uses it)
+            let date = if pattern.contains("{date") { format_date(item.modified_ms) } else { String::new() };
+            expand_pattern(pattern, n, name_tok, ext, &date)
         }
         Mode::Case(k) => {
             // The extension (when included) is never cased with locale rules: ".AVI" must
@@ -208,11 +218,12 @@ fn transform(item: &RenameItem, idx: usize, spec: &RenameSpec) -> Result<String,
 
 /// Computes new names. The result has the same length/order as `items`; an unchanged name is `Ok(old)`.
 pub fn compute(items: &[RenameItem], spec: &RenameSpec) -> Vec<Result<String, RenameError>> {
+    let re = find_regex(spec);
     let mut out: Vec<Result<String, RenameError>> = items
         .iter()
         .enumerate()
         .map(|(i, it)| {
-            let n = transform(it, i, spec)?;
+            let n = transform(it, i, spec, re.as_ref())?;
             validate(&n)?;
             Ok(n)
         })
