@@ -2,7 +2,7 @@
 //! ve büyük dosyalar için satır dizini (dosya parça parça okunur, yalnız istenen satırlar çözülür).
 
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -65,7 +65,10 @@ pub fn detect_and_decode(bytes: &[u8]) -> (String, &'static str) {
 /// satır hemen okunabilir.
 pub struct TextFile {
     path: PathBuf,
-    file: Mutex<File>,
+    /// Read at positions (no shared cursor): the indexer's big reads never hold up a line.
+    file: File,
+    /// Lines read lately (a list asks for the same rows every frame while it scrolls).
+    cache: Mutex<std::collections::HashMap<usize, String>>,
     enc: &'static Encoding,
     start: u64,
     len: u64,
@@ -84,7 +87,8 @@ impl TextFile {
         let (enc, bom) = detect(&head);
         Ok(TextFile {
             path: path.to_path_buf(),
-            file: Mutex::new(file),
+            file,
+            cache: Mutex::new(std::collections::HashMap::new()),
             enc,
             start: bom as u64,
             len,
@@ -131,12 +135,9 @@ impl TextFile {
         }
         let from = self.scanned.load(Ordering::Acquire);
         let mut buf = vec![0u8; CHUNK.min((self.len - from) as usize)];
-        {
-            let mut f = self.file.lock();
-            if f.seek(SeekFrom::Start(from)).is_err() || f.read_exact(&mut buf).is_err() {
-                self.done.store(true, Ordering::Release);
-                return false;
-            }
+        if read_at(&self.file, &mut buf, from).is_err() {
+            self.done.store(true, Ordering::Release);
+            return false;
         }
         let mut found = Vec::new();
         match self.wide() {
@@ -175,6 +176,9 @@ impl TextFile {
 
     /// `i`. satır (satır sonu olmadan); dizinlenmemişse None.
     pub fn line(&self, i: usize) -> Option<String> {
+        if let Some(s) = self.cache.lock().get(&i) {
+            return Some(s.clone());
+        }
         let (a, b) = {
             let s = self.starts.read();
             let a = *s.get(i)?;
@@ -186,14 +190,32 @@ impl TextFile {
             (a, b)
         };
         let mut buf = vec![0u8; (b - a).min(1 << 20) as usize];
-        {
-            let mut f = self.file.lock();
-            f.seek(SeekFrom::Start(a)).ok()?;
-            f.read_exact(&mut buf).ok()?;
-        }
+        read_at(&self.file, &mut buf, a).ok()?;
         let (s, _) = self.enc.decode_without_bom_handling(&buf);
-        Some(s.trim_end_matches(['\n', '\r']).to_string())
+        let line = s.trim_end_matches(['\n', '\r']).to_string();
+        let mut c = self.cache.lock();
+        if c.len() >= 1024 {
+            c.clear();
+        }
+        c.insert(i, line.clone());
+        Some(line)
     }
+}
+
+/// Fills `buf` from `file` at `pos`, without moving a shared cursor.
+fn read_at(file: &File, mut buf: &mut [u8], mut pos: u64) -> std::io::Result<()> {
+    while !buf.is_empty() {
+        #[cfg(windows)]
+        let n = std::os::windows::fs::FileExt::seek_read(file, buf, pos)?;
+        #[cfg(unix)]
+        let n = std::os::unix::fs::FileExt::read_at(file, buf, pos)?;
+        if n == 0 {
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        buf = &mut buf[n..];
+        pos += n as u64;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

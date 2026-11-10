@@ -873,7 +873,10 @@ impl Render for MediaView {
         let s = (aw / vw).min(ah / vh);
         let (dw, dh) = ((vw * s).floor(), (vh * s).floor());
         let scale = window.scale_factor();
-        self.target = (((dw * scale) as u32).max(2), ((dh * scale) as u32).max(2));
+        // converted on the CPU at most at the video's own size: a larger window is filled by the
+        // GPU stretching the picture (a 1080p clip full screen on 4K was scaled to 33 MB a frame)
+        let k = ((vw / (dw * scale)).min(vh / (dh * scale))).min(1.0);
+        self.target = (((dw * scale * k) as u32).max(2), ((dh * scale * k) as u32).max(2));
         let controls = self.controls || self.mf;
         if std::mem::take(&mut self.want_fullscreen) {
             window.toggle_fullscreen();
