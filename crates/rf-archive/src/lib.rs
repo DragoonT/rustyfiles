@@ -386,6 +386,22 @@ pub fn smart_extract_dir(archive: &Path) -> PathBuf {
 
 // ---------------------------------------------------------------- name sanitizing
 
+/// A device name of Windows (CON, NUL, COM1… with or without an extension) can't be a file:
+/// written as is it vanishes (NUL) or fails. Such a member is kept as `NUL_.txt`.
+fn windows_safe(comp: &str) -> String {
+    let base = comp.split('.').next().unwrap_or("").trim_end_matches(' ').to_ascii_uppercase();
+    let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+        || ((base.starts_with("COM") || base.starts_with("LPT")) && base.len() == 4 && matches!(base.as_bytes()[3], b'1'..=b'9'))
+        || ((base.starts_with("COM") || base.starts_with("LPT")) && ["¹", "²", "³"].iter().any(|s| base[3..] == **s));
+    if !reserved {
+        return comp.to_string();
+    }
+    match comp.find('.') {
+        Some(i) => format!("{}_{}", &comp[..i], &comp[i..]),
+        None => format!("{comp}_"),
+    }
+}
+
 /// Validates an archive member name and turns it into a relative path. `Ok(None)` for names
 /// that denote the archive root (`./`, empty). Errors on anything that could escape the target.
 fn sanitize(name: &str) -> Result<Option<PathBuf>> {
@@ -405,7 +421,7 @@ fn sanitize(name: &str) -> Result<Option<PathBuf>> {
         if comp.trim_end_matches(['.', ' ']).is_empty() {
             bail!("Güvensiz arşiv girdisi (geçersiz ad): {name}");
         }
-        out.push(comp);
+        out.push(windows_safe(comp));
     }
     Ok(if out.as_os_str().is_empty() { None } else { Some(out) })
 }
@@ -1532,6 +1548,16 @@ fn write_tar_zst(items: &[Item], part: &Path, level: u32, ctx: &mut CompressCtx)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_names_keep_their_data() {
+        assert_eq!(windows_safe("NUL"), "NUL_");
+        assert_eq!(windows_safe("con.txt"), "con_.txt");
+        assert_eq!(windows_safe("COM1.tar.gz"), "COM1_.tar.gz");
+        assert_eq!(windows_safe("Console.txt"), "Console.txt");
+        assert_eq!(windows_safe("COM10"), "COM10");
+        assert_eq!(sanitize("a/AUX/b.txt").unwrap(), Some(PathBuf::from("a/AUX_/b.txt")));
+    }
     use std::sync::atomic::{AtomicU32, Ordering};
 
     static N: AtomicU32 = AtomicU32::new(0);

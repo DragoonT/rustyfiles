@@ -97,7 +97,14 @@ fn load(path: &std::path::Path) -> std::io::Result<Table> {
     std::fs::File::open(path)?.take(READ_MAX).read_to_end(&mut buf)?;
     let text = String::from_utf8_lossy(&buf).into_owned();
     let text = text.trim_start_matches('\u{feff}');
-    let sep = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("tsv")) { '\t' } else { detect(&text[..text.len().min(64 << 10)]) };
+    let sep = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("tsv")) { '\t' } else {
+        // (64 KB, cut back to a character boundary: a multi-byte letter may straddle it)
+        let mut cut = text.len().min(64 << 10);
+        while !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        detect(&text[..cut])
+    };
     let (rows, more) = parse(text, sep, ROWS_MAX);
     let cols = rows.iter().map(Vec::len).max().unwrap_or(0);
     let mut widths = vec![3usize; cols];

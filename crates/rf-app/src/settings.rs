@@ -742,6 +742,11 @@ yeni_alan = 3").unwrap();
 /// so it never competes with opening the window.
 fn sync_name_index(on: bool, excluded: &[String]) {
     use std::sync::atomic::{AtomicU8, Ordering};
+    // DirectLook reads these settings too: the index is rustyfiles' (a second indexer would walk
+    // every drive again and write the same index files)
+    if crate::background::DIRECTLOOK_PROCESS.load(Ordering::Relaxed) {
+        return;
+    }
     // 0 = not decided yet, 1 = off, 2 = on
     static STATE: AtomicU8 = AtomicU8::new(0);
     static EXCLUDED: parking_lot::Mutex<Option<Vec<String>>> = parking_lot::Mutex::new(None);

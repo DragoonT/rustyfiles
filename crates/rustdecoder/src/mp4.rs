@@ -351,7 +351,7 @@ pub fn read<R: Read + Seek>(r: &mut R) -> Result<Movie> {
             }
             n => (n, 8),
         };
-        if size < header || pos + size > end {
+        if size < header || pos.checked_add(size).is_none_or(|e| e > end) {
             // a cut file: what was read so far still counts (a cut `moof` is dropped, a cut
             // `mdat` loses the samples that were not fully written)
             if moov.is_some() {

@@ -159,7 +159,10 @@ mod com {
     impl Dialog {
         fn new(save: bool) -> Result<Dialog> {
             let real = real_dialog(if save { &FileSaveDialog } else { &FileOpenDialog })?;
-            Ok(Dialog { save, real, st: RefCell::new(State { type_index: 1, ..Default::default() }) })
+            // Windows' defaults (a Save dialog asks before overwriting): an app that never calls
+            // SetOptions relies on them
+            let options = unsafe { real.GetOptions() }.unwrap_or_default();
+            Ok(Dialog { save, real, st: RefCell::new(State { type_index: 1, options, ..Default::default() }) })
         }
 
         fn request(&self, owner: HWND) -> Request {

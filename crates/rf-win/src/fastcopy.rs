@@ -130,6 +130,29 @@ struct Plan {
     taken: HashSet<String>,
 }
 
+/// Whether two paths are the same file or folder (volume serial and file index).
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+    // (std opens long paths and resolves `..`; no access rights needed, folders too)
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+    let id = |p: &Path| -> Option<(u32, u32, u32)> {
+        let f = std::fs::OpenOptions::new()
+            .access_mode(0)
+            .share_mode(7)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(p)
+            .ok()?;
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        unsafe { GetFileInformationByHandle(HANDLE(f.as_raw_handle()), &mut info) }.ok()?;
+        Some((info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow))
+    };
+    matches!((id(a), id(b)), (Some(x), Some(y)) if x == y)
+}
+
 fn key(p: &Path) -> String {
     p.to_string_lossy().to_lowercase()
 }
@@ -196,6 +219,12 @@ impl Plan {
             return self.visit(src, &free, meta, rename);
         }
         let there = std::fs::symlink_metadata(dst).ok();
+        // the destination IS the source, reached by another path (Z: and \\nas\share, a
+        // junction, subst): nothing to do. As a conflict, "Replace" wrote the file over itself
+        // and a move then deleted the "source", the only copy.
+        if there.is_some() && same_file(src, dst) {
+            return Ok(());
+        }
         match there {
             None if rename => {
                 self.taken.insert(key(dst));
@@ -1171,6 +1200,21 @@ fn local_fs(p: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The same file by two spellings is one file; two files are two.
+    #[test]
+    fn same_file_through_another_path() {
+        let dir = std::env::temp_dir().join(format!("rf-samefile-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let (a, b) = (dir.join("a.txt"), dir.join("b.txt"));
+        std::fs::write(&a, "x").unwrap();
+        std::fs::write(&b, "x").unwrap();
+        assert!(same_file(&a, &dir.join("sub").join("..").join("A.TXT")));
+        assert!(same_file(&dir, &dir.join("sub").join("..")));
+        assert!(!same_file(&a, &b));
+        assert!(!same_file(&a, &dir.join("missing")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
     use std::sync::atomic::AtomicBool;
 
     fn tracker() -> Tracker {

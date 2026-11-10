@@ -106,8 +106,31 @@ pub fn repo_root(dir: &Path) -> Option<PathBuf> {
     dir.ancestors().find(|a| a.join(".git").exists()).map(Path::to_path_buf)
 }
 
+/// Settings in a repository's own `.git/config` that make `git status` run a program: a
+/// file monitor, and clean / process filters (status runs them to compare files). A folder
+/// someone else made (a downloaded project) could start anything that way just by being
+/// browsed; for the status we read they are switched off.
+fn neutralize_repo_programs(c: &mut Command, root: &Path) {
+    c.args(["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"]);
+    let config = std::fs::read_to_string(root.join(".git").join("config")).unwrap_or_default();
+    for line in config.lines() {
+        let l = line.trim();
+        // [filter "lfs"]
+        let Some(rest) = l.strip_prefix("[filter") else { continue };
+        let name = rest.trim().trim_end_matches(']').trim().trim_matches('"');
+        if name.is_empty() || name.contains(['\n', '\0']) {
+            continue;
+        }
+        for key in ["clean", "smudge", "process"] {
+            c.args(["-c", &format!("filter.{name}.{key}=")]);
+        }
+        c.args(["-c", &format!("filter.{name}.required=false")]);
+    }
+}
+
 fn git_cmd(root: &Path) -> Command {
     let mut c = Command::new("git");
+    neutralize_repo_programs(&mut c, root);
     c.arg("--no-optional-locks")
         .current_dir(root)
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -826,6 +849,32 @@ fn rel_inside(root: &Path, dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A repository whose own config runs programs (a clean filter, a file monitor): reading its
+    /// status must not start them. Skipped without git.
+    #[test]
+    fn status_does_not_run_the_repos_programs() {
+        let git = |dir: &Path, args: &[&str]| Command::new("git").args(args).current_dir(dir).creation_flags(CREATE_NO_WINDOW).output();
+        let dir = std::env::temp_dir().join(format!("rf-git-evil-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        if git(&dir, &["init", "-q", "."]).is_err() {
+            return;
+        }
+        let _ = git(&dir, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x"]);
+        std::fs::write(dir.join("f.txt"), "a").unwrap();
+        let _ = git(&dir, &["add", "f.txt"]);
+        let _ = git(&dir, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "y"]);
+        let (m1, m2) = (dir.join("marker1"), dir.join("marker2"));
+        let _ = git(&dir, &["config", "filter.evil.clean", &format!("cmd /c echo x> \"{}\" & more", m1.display())]);
+        let _ = git(&dir, &["config", "core.fsmonitor", &format!("cmd /c echo x> \"{}\"", m2.display())]);
+        std::fs::write(dir.join(".gitattributes"), "* filter=evil").unwrap();
+        std::fs::write(dir.join("f.txt"), "b").unwrap();
+        let st = status(&dir);
+        assert!(st.is_ok(), "{st:?}");
+        assert!(!m1.exists() && !m2.exists(), "a program from the repository's config ran");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn parses_synthetic_output() {

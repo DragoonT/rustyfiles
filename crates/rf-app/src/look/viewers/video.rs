@@ -972,9 +972,10 @@ impl MediaView {
     fn render_audio(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let lyric = crate::look::lyrics::line_at(&self.lyrics, self.state.position).map(str::to_string);
         if self.cover.is_none() {
-            if let (Some(images), Some(dir), Ok(m)) = (self.images.clone(), self.path.parent(), std::fs::metadata(&self.path)) {
+            // (no disk access here: this runs every frame, and the file may be on a network drive)
+            if let (Some(images), Some(dir)) = (self.images.clone(), self.path.parent()) {
                 let name = super::file_name(&self.path);
-                let e = rf_core::Entry::new(&name, rf_core::EntryKind::File, m.len(), 0, 0, 0);
+                let e = rf_core::Entry::new(&name, rf_core::EntryKind::File, 0, 0, 0, 0);
                 let dir = dir.to_path_buf();
                 // önbellek kendi dokusunu yönetir: burada bırakılmaz
                 let thumb = images.update(cx, |c, cx| c.thumbnail(&dir, &e, 256, cx));
