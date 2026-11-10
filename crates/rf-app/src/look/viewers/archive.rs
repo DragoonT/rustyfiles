@@ -29,7 +29,8 @@ impl Viewer for ArchiveViewer {
         -5
     }
     fn can_handle(&self, f: &Probe) -> bool {
-        f.is_file() && rf_archive::is_supported(&f.path)
+        // app packages (APK, MSIX, IPA, NuGet) are zips too, but what they are says more: the info card
+        f.is_file() && rf_archive::is_supported(&f.path) && rf_win::apppkg::kind_of(&f.path).is_none()
     }
     fn prepare(&mut self, f: &Probe, cx: &mut App) -> Prepared {
         self.path = f.path.clone();

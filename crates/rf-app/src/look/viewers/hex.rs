@@ -30,7 +30,13 @@ impl Viewer for HexViewer {
         -50
     }
     fn can_handle(&self, f: &Probe) -> bool {
-        f.is_file() && !f.head.is_empty() && !looks_like_text(&f.head) && !INFO_CARD.contains(&f.ext.as_str())
+        // programs, certificates, app packages and ELF files get the info card (what they are)
+        f.is_file()
+            && !f.head.is_empty()
+            && !looks_like_text(&f.head)
+            && !INFO_CARD.contains(&f.ext.as_str())
+            && rf_win::apppkg::kind_of(&f.path).is_none()
+            && !f.head.starts_with(b"ELF")
     }
     fn prepare(&mut self, f: &Probe, cx: &mut App) -> Prepared {
         let path = f.path.clone();

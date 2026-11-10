@@ -60,7 +60,7 @@ impl<T: Hash> HashPart for T {
     }
 }
 
-fn to_render_image(b: &Bgra) -> Option<Arc<RenderImage>> {
+pub(crate) fn to_render_image(b: &Bgra) -> Option<Arc<RenderImage>> {
     let buf = image::RgbaImage::from_raw(b.width, b.height, b.data.clone())?;
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(buf)])))
 }

@@ -36,7 +36,16 @@ impl Viewer for InfoCard {
         let path = f.path.clone();
         let (exists, is_dir) = (f.exists, f.is_dir);
         self.view = Some(cx.new(|cx| InfoView::new(path, exists, is_dir, images, cx)));
-        let h = if f.exists && !f.is_dir && (is_pe_ext(&f.path) || has_ext(&f.path, &["cer", "crt", "der", "pem"])) { 260.0 } else { 210.0 };
+        // (up to ten lines for a package, seven for an ELF file)
+        let h = if f.exists && !f.is_dir && rf_win::apppkg::kind_of(&f.path).is_some() {
+            380.0
+        } else if f.exists && !f.is_dir && f.head.starts_with(b"ELF") {
+            300.0
+        } else if f.exists && !f.is_dir && (is_pe_ext(&f.path) || has_ext(&f.path, &["cer", "crt", "der", "pem"])) {
+            260.0
+        } else {
+            210.0
+        };
         let mut p = Prepared::new((520.0, h), super::file_name(&f.path));
         p.resizable = false;
         p
@@ -65,6 +74,11 @@ pub struct InfoView {
     pe: Option<rf_win::pe::PeInfo>,
     /// Certificate files: subject, issuer, validity.
     cert: Option<rf_win::cert::CertInfo>,
+    /// App packages (MSIX, APK, IPA, NuGet): what the package says, and its icon.
+    app: Option<(rf_win::apppkg::Kind, rf_win::apppkg::AppInfo)>,
+    app_icon: Option<Arc<RenderImage>>,
+    /// Linux / Android / embedded programs and libraries.
+    elf: Option<rf_win::elf::ElfInfo>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -87,6 +101,11 @@ fn is_pe_ext(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).is_some_and(|e| EXT.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }
 
+/// Programs and libraries of Linux and the like: no extension, or one of theirs.
+fn maybe_elf(p: &Path) -> bool {
+    p.extension().is_none() || has_ext(p, &["so", "o", "ko", "elf", "axf", "out", "bin", "prx", "mod", "dbg"]) || p.to_string_lossy().contains(".so.")
+}
+
 fn is_drive_root(p: &Path) -> bool {
     let s = p.to_string_lossy();
     let b = s.as_bytes();
@@ -101,7 +120,7 @@ impl InfoView {
             let kind = if m.is_dir() { EntryKind::Dir } else { EntryKind::File };
             Entry::new(&name, kind, m.len(), ms(m.modified()), ms(m.created()), 0)
         });
-        let mut v = Self { path, exists, entry, images, folder: None, drive: None, pe: None, cert: None, cancel: Default::default() };
+        let mut v = Self { path, exists, entry, images, folder: None, drive: None, pe: None, cert: None, app: None, app_icon: None, elf: None, cancel: Default::default() };
         if is_dir && is_drive_root(&v.path) {
             let root = v.path.clone();
             let task = cx.background_spawn(async move { rf_win::volume::volume_info(&root).ok() });
@@ -123,6 +142,35 @@ impl InfoView {
                 if let Some(i) = task.await {
                     let _ = this.update(cx, |v, cx| {
                         v.cert = Some(i);
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+        } else if exists && rf_win::apppkg::kind_of(&v.path).is_some() {
+            let file = v.path.clone();
+            let task = cx.background_spawn(async move {
+                let (kind, mut info) = rf_win::apppkg::info(&file)?;
+                let icon = info.icon_png.take().and_then(|b| rf_win::apppkg::icon(&b, 256));
+                Some((kind, info, icon))
+            });
+            cx.spawn(async move |this, cx| {
+                if let Some((kind, info, icon)) = task.await {
+                    let _ = this.update(cx, |v, cx| {
+                        v.app_icon = icon.as_ref().and_then(crate::image_cache::to_render_image);
+                        v.app = Some((kind, info));
+                        cx.notify();
+                    });
+                }
+            })
+            .detach();
+        } else if exists && !is_dir && !is_pe_ext(&v.path) && maybe_elf(&v.path) {
+            let file = v.path.clone();
+            let task = cx.background_spawn(async move { rf_win::elf::is_elf(&file).then(|| rf_win::elf::info(&file)).flatten() });
+            cx.spawn(async move |this, cx| {
+                if let Some(i) = task.await {
+                    let _ = this.update(cx, |v, cx| {
+                        v.elf = Some(i);
                         cx.notify();
                     });
                 }
@@ -193,6 +241,7 @@ impl Render for InfoView {
         let p = Palette::for_window(window);
         let name = super::file_name(&self.path);
         let thumb = match (&self.entry, self.path.parent()) {
+            _ if self.app_icon.is_some() => self.app_icon.clone(),
             (Some(e), Some(dir)) => {
                 let (e, dir) = (e.clone(), dir.to_path_buf());
                 self.images.update(cx, |c, cx| c.thumbnail(&dir, &e, 128, cx))
@@ -237,6 +286,68 @@ impl Render for InfoView {
             }
             let ver = pe.version.clone().map_or_else(|| pe.arch.to_string(), |v| format!("{v} · {}", pe.arch));
             lines.push(line(&p, t!("Sürüm"), ver));
+        }
+        if let Some((kind, a)) = &self.app {
+            let kind = match kind {
+                rf_win::apppkg::Kind::Msix => t!("Windows uygulama paketi"),
+                rf_win::apppkg::Kind::MsixBundle => t!("Windows uygulama paketi grubu"),
+                rf_win::apppkg::Kind::Apk => t!("Android uygulaması"),
+                rf_win::apppkg::Kind::Ipa => t!("iOS uygulaması"),
+                rf_win::apppkg::Kind::Nuget => t!("NuGet paketi"),
+            };
+            lines.push(line(&p, t!("Tür"), kind.to_string()));
+            if let Some(n) = &a.name {
+                lines.push(line(&p, t!("Uygulama"), n.clone()));
+            }
+            if let Some(id) = &a.id {
+                lines.push(line(&p, t!("Kimlik"), id.clone()));
+            }
+            if let Some(v) = &a.version {
+                lines.push(line(&p, t!("Sürüm"), v.clone()));
+            }
+            if let Some(v) = &a.publisher {
+                lines.push(line(&p, t!("Yayıncı"), v.clone()));
+            }
+            if !a.arch.is_empty() {
+                lines.push(line(&p, t!("İşlemci"), a.arch.join(", ")));
+            }
+            if let Some(v) = &a.min_os {
+                lines.push(line(&p, t!("En düşük sistem"), v.clone()));
+            }
+            if a.permissions > 0 {
+                lines.push(line(&p, t!("İzinler"), a.permissions.to_string()));
+            }
+            if let Some(d) = &a.description {
+                let short: String = d.chars().take(140).collect();
+                lines.push(line(&p, t!("Açıklama"), if short.len() < d.len() { format!("{short}…") } else { short }));
+            }
+        }
+        if let Some(e) = &self.elf {
+            use rf_win::elf::Kind as K;
+            let kind = match e.kind {
+                K::Executable => t!("program"),
+                K::Shared => t!("paylaşılan kitaplık"),
+                K::Relocatable => t!("nesne dosyası"),
+                K::Core => t!("bellek dökümü"),
+                K::Unknown => "",
+            };
+            lines.push(line(&p, t!("Tür"), format!("ELF {} bit {kind}", e.bits).trim_end().to_string()));
+            let os = e.os.map(|o| format!(" · {o}")).unwrap_or_default();
+            lines.push(line(&p, t!("İşlemci"), format!("{}{os}", e.machine)));
+            if let Some(i) = &e.interpreter {
+                lines.push(line(&p, t!("Yükleyici"), i.clone()));
+            }
+            if let Some(s) = &e.soname {
+                lines.push(line(&p, t!("Kitaplık adı"), s.clone()));
+            }
+            if !e.needed.is_empty() {
+                let more = e.needed.len().saturating_sub(4);
+                let mut s = e.needed.iter().take(4).cloned().collect::<Vec<_>>().join(", ");
+                if more > 0 {
+                    s.push_str(&format!(" +{more}"));
+                }
+                lines.push(line(&p, t!("Gerekli kitaplıklar"), s));
+            }
         }
         if let Some(e) = &self.entry {
             if e.modified_ms > 0 {

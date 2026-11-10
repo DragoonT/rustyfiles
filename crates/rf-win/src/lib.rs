@@ -3,6 +3,7 @@
 //! Every function here may block (disk, network, shell extensions). Never call them on the UI thread.
 
 pub mod accent;
+pub mod apppkg;
 pub mod apps;
 pub mod bench;
 pub mod cert;
@@ -14,6 +15,7 @@ pub mod design;
 pub mod dialog_reg;
 pub mod dialogs;
 pub mod diskusage;
+pub mod elf;
 pub mod dnd;
 pub mod drives;
 pub mod encoding;
