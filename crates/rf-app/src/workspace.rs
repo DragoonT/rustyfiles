@@ -174,24 +174,26 @@ impl Global for OpenWorkspaces {}
 /// A second launch forwarded its argument: open it as a tab in the most recent live window
 /// and bring that window up; with no window left, open a new one.
 /// Taskbar jump list: "New window" / "New tab" and the pinned folders. Rewritten only when the
-/// pins change; test runs (several instances) leave the user's list alone.
+/// pins or the language change; test runs (several instances) leave the user's list alone.
 fn update_jump_list(places: &crate::places::Places) {
-    static LAST: std::sync::Mutex<Option<Vec<(String, PathBuf)>>> = std::sync::Mutex::new(None);
+    static LAST: std::sync::Mutex<Option<(Vec<(String, PathBuf)>, [&'static str; 3])>> = std::sync::Mutex::new(None);
     if !places.loaded || std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() {
         return;
     }
-    let pins: Vec<(String, PathBuf)> = places.pinned.iter().map(|p| (p.title.clone(), p.path.clone())).collect();
+    // in the UI language, as the sidebar shows them (a default pin's title is its Turkish name)
+    let pins: Vec<(String, PathBuf)> = places.pinned.iter().map(|p| (crate::i18n::td(&p.title), p.path.clone())).collect();
+    let labels = [t!("Yeni pencere"), t!("Yeni sekme"), t!("Sabitlenenler")];
     {
         let mut last = LAST.lock().unwrap();
-        if last.as_ref() == Some(&pins) {
+        if last.as_ref() == Some(&(pins.clone(), labels)) {
             return;
         }
-        *last = Some(pins.clone());
+        *last = Some((pins.clone(), labels));
     }
     let Ok(exe) = std::env::current_exe() else { return };
     std::thread::spawn(move || {
-        let tasks = [(t!("Yeni pencere"), rf_win::jumplist::NEW_WINDOW_ARG), (t!("Yeni sekme"), "")];
-        if let Err(e) = rf_win::jumplist::set(&exe, &tasks, t!("Sabitlenenler"), &pins) {
+        let tasks = [(labels[0], rf_win::jumplist::NEW_WINDOW_ARG), (labels[1], "")];
+        if let Err(e) = rf_win::jumplist::set(&exe, &tasks, labels[2], &pins) {
             log::warn!("jump list: {e:#}");
         }
     });
@@ -487,6 +489,8 @@ impl Workspace {
         .detach();
 
         cx.observe_global::<crate::settings::Settings>(|this, cx| {
+            // the language may have changed: the jump list follows
+            update_jump_list(this.places.read(cx));
             let s = cx.global::<crate::settings::Settings>();
             // a file dialog keeps its own preview state (shown by default)
             if this.picker.is_none() {
