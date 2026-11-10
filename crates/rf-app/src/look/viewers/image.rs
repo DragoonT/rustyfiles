@@ -110,7 +110,8 @@ pub struct ImageView {
     /// Asıl boyut (döndürülmüş); yakınlaştırma buna göre.
     dims: Option<(f32, f32)>,
     thumb: Option<Arc<RenderImage>>,
-    raw: Vec<(Arc<Bgra>, u32)>,
+    /// Each frame's delay (ms); the pixels live once, in `frames`.
+    delays: Vec<u32>,
     frames: Vec<Arc<RenderImage>>,
     frame: usize,
     has_alpha: bool,
@@ -127,8 +128,36 @@ pub struct ImageView {
 }
 
 fn render_image(b: &Bgra) -> Option<Arc<RenderImage>> {
-    let buf = image::RgbaImage::from_raw(b.width, b.height, b.data.clone())?;
+    render_image_owned(Bgra { width: b.width, height: b.height, data: b.data.clone() })
+}
+
+/// [`render_image`] taking the pixels over (no copy: a 24 MP photo is a 96 MB buffer).
+fn render_image_owned(b: Bgra) -> Option<Arc<RenderImage>> {
+    let buf = image::RgbaImage::from_raw(b.width, b.height, b.data)?;
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(buf)])))
+}
+
+/// A frame's pixels back out of the picture the GPU draws.
+fn pixels_of(img: &RenderImage) -> Option<Bgra> {
+    let s = img.size(0);
+    Some(Bgra { width: s.width.0 as u32, height: s.height.0 as u32, data: img.as_bytes(0)?.to_vec() })
+}
+
+/// The decoded image as the view keeps it, made off the UI thread.
+struct Ready {
+    width: u32,
+    height: u32,
+    exif: Vec<(String, String)>,
+    has_alpha: bool,
+    delays: Vec<u32>,
+    frames: Vec<Arc<RenderImage>>,
+}
+
+fn ready(d: rf_win::look::decode::Decoded) -> Ready {
+    let has_alpha = d.frames.first().is_some_and(|(b, _)| b.data.chunks_exact(4).any(|p| p[3] < 255));
+    let delays = d.frames.iter().map(|(_, ms)| *ms).collect();
+    let frames = d.frames.into_iter().filter_map(|(b, _)| render_image_owned(b)).collect();
+    Ready { width: d.width, height: d.height, exif: d.exif, has_alpha, delays, frames }
 }
 
 fn inverted(b: &Bgra) -> Bgra {
@@ -171,7 +200,7 @@ impl ImageView {
             path: path.clone(),
             dims: dims.map(|(w, h)| (w as f32, h as f32)),
             thumb: None,
-            raw: Vec::new(),
+            delays: Vec::new(),
             frames: Vec::new(),
             frame: 0,
             has_alpha: false,
@@ -205,7 +234,7 @@ impl ImageView {
                 });
             }
         }));
-        let full = cx.background_spawn(async move { rf_win::look::decode::decode_full(&path, MAX_SIDE) });
+        let full = cx.background_spawn(async move { rf_win::look::decode::decode_full(&path, MAX_SIDE).map(ready) });
         v._tasks.push(cx.spawn(async move |this, cx| {
             let r = full.await;
             let _ = this.update(cx, |v, cx| v.loaded(r, cx));
@@ -213,20 +242,27 @@ impl ImageView {
         v
     }
 
-    fn loaded(&mut self, r: anyhow::Result<rf_win::look::decode::Decoded>, cx: &mut Context<Self>) {
+    fn loaded(&mut self, r: anyhow::Result<Ready>, cx: &mut Context<Self>) {
         crate::look::trace::mark("tam resim");
         match r {
             Ok(d) => {
                 self.dims = Some((d.width as f32, d.height as f32));
                 self.exif = d.exif;
-                self.has_alpha = d.frames.first().is_some_and(|(b, _)| b.data.chunks_exact(4).any(|p| p[3] < 255));
-                self.raw = d.frames.into_iter().map(|(b, ms)| (Arc::new(b), ms)).collect();
-                self.rebuild_frames(cx);
+                self.has_alpha = d.has_alpha;
+                self.delays = d.delays;
+                for img in std::mem::replace(&mut self.frames, d.frames) {
+                    cx.drop_image(img, None);
+                }
+                // (inverted before it arrived: turn it now)
+                if self.inverted {
+                    self.inverted = false;
+                    self.toggle_invert(cx);
+                }
                 if let Some(t) = self.thumb.take() {
                     cx.drop_image(t, None);
                 }
                 self.state = State::Ready;
-                if self.raw.len() > 1 {
+                if self.frames.len() > 1 {
                     self.animate(cx);
                 }
             }
@@ -238,16 +274,8 @@ impl ImageView {
         cx.notify();
     }
 
-    fn rebuild_frames(&mut self, cx: &mut Context<Self>) {
-        for img in self.frames.drain(..) {
-            cx.drop_image(img, None);
-        }
-        let inv = self.inverted;
-        self.frames = self.raw.iter().filter_map(|(b, _)| if inv { render_image(&inverted(b)) } else { render_image(b) }).collect();
-    }
-
     fn animate(&mut self, cx: &mut Context<Self>) {
-        let delays: Vec<u32> = self.raw.iter().map(|(_, ms)| *ms).collect();
+        let delays: Vec<u32> = self.delays.clone();
         self._tasks.push(cx.spawn(async move |this, cx| {
             let mut i = 0usize;
             loop {
@@ -268,13 +296,32 @@ impl ImageView {
 
     fn toggle_invert(&mut self, cx: &mut Context<Self>) {
         self.inverted = !self.inverted;
-        self.rebuild_frames(cx);
         cx.notify();
+        if self.frames.is_empty() {
+            return; // turned when the image arrives
+        }
+        // the frames turned on a helper thread (inverting twice gives the original back)
+        let frames = self.frames.clone();
+        let want = self.inverted;
+        let work = cx.background_spawn(async move { frames.iter().filter_map(|f| pixels_of(f)).filter_map(|b| render_image_owned(inverted(&b))).collect::<Vec<_>>() });
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            let turned = work.await;
+            let _ = this.update(cx, |v, cx| {
+                if v.inverted != want {
+                    return; // toggled again meanwhile: that one wins
+                }
+                for img in std::mem::replace(&mut v.frames, turned) {
+                    cx.drop_image(img, None);
+                }
+                cx.notify();
+            });
+        }));
     }
 
     fn png_bytes(&self) -> Option<Vec<u8>> {
-        let (b, _) = self.raw.get(self.frame.min(self.raw.len().saturating_sub(1)))?;
-        let b = if self.inverted { inverted(b) } else { (**b).clone() };
+        let f = self.frames.get(self.frame.min(self.frames.len().saturating_sub(1)))?;
+        // (the shown frame: already inverted when that is on)
+        let b = pixels_of(f)?;
         let mut rgba = b.data;
         for px in rgba.chunks_exact_mut(4) {
             px.swap(0, 2);
