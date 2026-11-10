@@ -75,13 +75,23 @@ fn main() {
     println!("cargo:rerun-if-changed=directlook.rc");
     println!("cargo:rerun-if-changed=assets/rustyfiles.ico");
     // each exe gets its own name (Windows shows FileDescription in Open with / Task Manager)
+    // The .rc files say 0.1.0 as a placeholder: the version resource (Task Manager, Properties →
+    // Details, Apps & features) gets the crate's real version, written into a copy in OUT_DIR.
     #[cfg(windows)]
     {
-        embed_resource::compile_for("rustyfiles.rc", ["rustyfiles"], embed_resource::NONE)
-            .manifest_optional()
-            .expect("embed rustyfiles resources");
-        embed_resource::compile_for("directlook.rc", ["directlook"], embed_resource::NONE)
-            .manifest_optional()
-            .expect("embed directlook resources");
+        let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
+        let dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
+        let ver = std::env::var("CARGO_PKG_VERSION").unwrap();
+        let nums: Vec<u32> = ver.split(['.', '-', '+']).take(3).map(|p| p.parse().unwrap_or(0)).collect();
+        let commas = format!("{},{},{},0", nums.first().unwrap_or(&0), nums.get(1).unwrap_or(&0), nums.get(2).unwrap_or(&0));
+        for (rc, bin) in [("rustyfiles.rc", "rustyfiles"), ("directlook.rc", "directlook")] {
+            let text = std::fs::read_to_string(dir.join(rc)).expect("read .rc")
+                .replace("0,1,0,0", &commas)
+                .replace("\"0.1.0\"", &format!("\"{ver}\""))
+                .replace("\"assets/", &format!("\"{}/assets/", dir.display().to_string().replace('\\', "/")));
+            let copy = out.join(rc);
+            std::fs::write(&copy, text).expect("write .rc");
+            embed_resource::compile_for(&copy, [bin], embed_resource::NONE).manifest_optional().expect("embed resources");
+        }
     }
 }
