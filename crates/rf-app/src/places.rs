@@ -150,9 +150,18 @@ impl Places {
             }
         })
         .detach();
-        // Phones come and go without a drive letter: ask the shell now and then. Cheap, off the
-        // UI thread, and the list is only replaced when it changed.
+        // Phones come and go without a drive letter: ask the shell now and then. Off the UI
+        // thread, and the list is only replaced when it changed. Not while no window is in front
+        // of the user (minimised, or another app active): enumerating This PC loads shell
+        // extensions and can touch the drives; the look happens again when one comes back.
         cx.spawn(async move |this, cx| loop {
+            if !rf_win::window::app_in_front() {
+                cx.background_executor().timer(std::time::Duration::from_secs(5)).await;
+                if this.upgrade().is_none() {
+                    break;
+                }
+                continue;
+            }
             let found = cx.background_spawn(async move { rf_win::shellfolder::devices() }).await;
             let alive = this
                 .update(cx, |p, cx| {

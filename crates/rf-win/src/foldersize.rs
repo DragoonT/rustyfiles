@@ -195,7 +195,13 @@ fn take(s: &Sched) -> Taken {
                 return got;
             }
         }
-        s.cv.wait_for(&mut jobs, Duration::from_millis(250));
+        if jobs.is_empty() {
+            // nothing to do: sleep until a batch comes (start() notifies); no idle wake-ups
+            s.cv.wait(&mut jobs);
+        } else {
+            // work exists but its disk is busy with other workers: look again soon
+            s.cv.wait_for(&mut jobs, Duration::from_millis(250));
+        }
     }
 }
 

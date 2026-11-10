@@ -70,11 +70,18 @@ fn state() -> &'static Mutex<State> {
 
 /// Starts watching (idempotent; the first callback wins).
 pub fn start(on_query_remove: impl Fn(char, Sender<()>) + Send + 'static) {
+    // (not waited for: opening each drive's root can take a while with a sleeping disk, and the
+    // app's start must not wait on it)
+    let _ = start_inner(on_query_remove);
+}
+
+/// [`start`], with a receiver that gets a message once the drives are registered.
+fn start_inner(on_query_remove: impl Fn(char, Sender<()>) + Send + 'static) -> Option<std::sync::mpsc::Receiver<()>> {
     let cb = CALLBACK.get_or_init(|| Mutex::new(None));
     {
         let mut c = cb.lock();
         if c.is_some() {
-            return;
+            return None;
         }
         *c = Some(Box::new(on_query_remove));
     }
@@ -98,7 +105,7 @@ pub fn start(on_query_remove: impl Fn(char, Sender<()>) + Send + 'static) {
             DispatchMessageW(&msg);
         }
     });
-    let _ = rx.recv_timeout(Duration::from_secs(2));
+    Some(rx)
 }
 
 fn system_drive() -> char {
@@ -261,10 +268,12 @@ mod tests {
     fn query_remove_releases_and_failed_removal_reregisters() {
         let (seen_tx, seen_rx) = std::sync::mpsc::channel::<char>();
         let seen_tx = Mutex::new(seen_tx);
-        start(move |l, ack| {
+        if let Some(ready) = start_inner(move |l, ack| {
             let _ = seen_tx.lock().send(l);
             let _ = ack.send(());
-        });
+        }) {
+            let _ = ready.recv_timeout(Duration::from_secs(5));
+        }
         let regs = registered();
         let Some(&letter) = regs.first() else {
             eprintln!("no non-system volume on this machine; skipped");
