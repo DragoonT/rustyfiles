@@ -161,6 +161,8 @@ pub struct Index {
     frn: HashMap<u64, u32>,
     /// The change journal (id, next record) this index is current with.
     journal: Option<(u64, i64)>,
+    /// Changes when ids do (compaction): a refresh worked out before then is not applied.
+    generation: u64,
 }
 
 /// Every different name once: UTF-8 in one pool, name `k` is `pool[off[k]..off[k + 1]]`.
@@ -309,6 +311,130 @@ fn list(dir: &Path) -> Listing {
         });
     }
     out
+}
+
+/// A refresh worked out from a read of the index ([`Index::plan_refresh`]).
+pub struct RefreshPlan {
+    generation: u64,
+    dirs: Vec<PlanDir>,
+}
+
+struct PlanDir {
+    node: u32,
+    path: PathBuf,
+    kids: Vec<Kid>,
+}
+
+struct Kid {
+    id: u32,
+    name: String,
+    flags: u8,
+    /// The folder's file id (0: a file, or not known).
+    frn: u64,
+}
+
+/// What reading the folders from the disk found ([`read_refresh`]).
+pub struct Refresh {
+    generation: u64,
+    dirs: Vec<DirDiff>,
+}
+
+struct DirDiff {
+    node: u32,
+    removed: Vec<u32>,
+    flags: Vec<(u32, u8)>,
+    added: Vec<Added>,
+}
+
+struct Added {
+    name: String,
+    flags: u8,
+    frn: u64,
+    /// A new folder's contents, walked.
+    sub: Option<Index>,
+}
+
+/// Step 2 of a refresh: lists the planned folders from the disk and walks new folders. Needs
+/// no access to the index (no lock: searches go on meanwhile).
+pub fn read_refresh(plan: RefreshPlan, cancel: &AtomicBool) -> Refresh {
+    let mut out = Refresh { generation: plan.generation, dirs: Vec::new() };
+    for d in plan.dirs {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let Listing { names, lens, flags, ids } = list(&d.path);
+        let mut now: HashMap<String, (u8, u64)> = HashMap::new();
+        let mut off = 0usize;
+        for ((&len, &f), &frn) in lens.iter().zip(&flags).zip(&ids) {
+            now.insert(String::from_utf8_lossy(&names[off..off + len as usize]).into_owned(), (f, frn));
+            off += len as usize;
+        }
+        let mut diff = DirDiff { node: d.node, removed: Vec::new(), flags: Vec::new(), added: Vec::new() };
+        for kid in d.kids {
+            match now.remove(&kid.name) {
+                Some((f, frn)) => {
+                    // a folder made again under the same name, or a file that became a folder:
+                    // the old entry goes, the new one is read whole
+                    let replaced = kid.flags & DIR != 0 && f & DIR != 0 && kid.frn != 0 && frn != 0 && kid.frn != frn;
+                    if replaced || (kid.flags & DIR) != (f & DIR) {
+                        diff.removed.push(kid.id);
+                        now.insert(kid.name, (f, frn));
+                    } else {
+                        diff.flags.push((kid.id, f));
+                    }
+                }
+                None => diff.removed.push(kid.id),
+            }
+        }
+        for (name, (f, frn)) in now {
+            let path = d.path.join(&name);
+            let sub = (f & DIR != 0 && f & REPARSE == 0 && !skipped(&path) && !cancel.load(Ordering::Relaxed)).then(|| Index::build(&path, cancel));
+            diff.added.push(Added { name, flags: f, frn, sub });
+        }
+        out.dirs.push(diff);
+    }
+    out
+}
+
+/// [`Index::refresh_dirs`] on a shared index, so that searches are not held up: the index is
+/// read to plan, the folders are listed with no lock held, and the result applied in one short
+/// write.
+pub fn refresh_locked(lock: &parking_lot::RwLock<Option<Index>>, dirs: &[PathBuf], cancel: &AtomicBool) {
+    let Some(plan) = lock.read().as_ref().map(|ix| ix.plan_refresh(dirs)) else { return };
+    if plan.dirs.is_empty() {
+        return;
+    }
+    let r = read_refresh(plan, cancel);
+    if let Some(ix) = lock.write().as_mut() {
+        ix.apply_refresh(r);
+    }
+}
+
+/// [`Index::catch_up`] on a shared index, the same way as [`refresh_locked`].
+pub fn catch_up_locked(lock: &parking_lot::RwLock<Option<Index>>, cancel: &AtomicBool) -> Result<usize, crate::usn::Gap> {
+    let (root, (id, from)) = {
+        let g = lock.read();
+        let ix = g.as_ref().ok_or(crate::usn::Gap::Lost)?;
+        (ix.root.clone(), ix.journal.ok_or(crate::usn::Gap::Lost)?)
+    };
+    let (frns, next) = crate::usn::changed_folders(&root, id, from, 200_000)?;
+    let plan = {
+        let g = lock.read();
+        let ix = g.as_ref().ok_or(crate::usn::Gap::Lost)?;
+        ix.plan_refresh(&ix.journal_dirs(&frns))
+    };
+    let count = plan.dirs.len();
+    let r = read_refresh(plan, cancel);
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(count);
+    }
+    let mut g = lock.write();
+    let ix = g.as_mut().ok_or(crate::usn::Gap::Lost)?;
+    // (compacted meanwhile: the same records are read again next time)
+    if ix.journal.map(|j| j.0) == Some(id) && ix.apply_refresh(r) {
+        ix.journal = Some((id, next));
+    }
+    Ok(count)
 }
 
 /// `None` when the folder can't be read this way (the caller falls back).
@@ -494,7 +620,7 @@ impl Index {
     fn empty(root: PathBuf) -> Index {
         let mut names = Names::new();
         names.intern(b"");
-        Index { root, parent: vec![NONE], name_id: vec![0], flags: vec![DIR], names, dirs: IdTable::new(), removed: 0, frn: HashMap::new(), journal: None }
+        Index { root, parent: vec![NONE], name_id: vec![0], flags: vec![DIR], names, dirs: IdTable::new(), removed: 0, frn: HashMap::new(), journal: None, generation: 0 }
     }
 
     /// Walks `root` (blocking; `cancel` stops it, returning what was found so far).
@@ -585,13 +711,17 @@ impl Index {
     /// whether `under` (if given) is one of them.
     fn valid(&self, mut i: u32, hidden: bool, under: Option<u32>) -> bool {
         let mut inside = under.is_none_or(|u| u == 0);
+        // hidden folders count below the search's folder only: searching inside a hidden folder
+        // (one the user opened) finds what is in it
+        let mut above_under = false;
         while i != 0 && i != NONE {
             let f = self.flags[i as usize];
-            if f & REMOVED != 0 || (!hidden && f & HIDDEN != 0) {
-                return false;
-            }
             if Some(i) == under {
                 inside = true;
+                above_under = true;
+            }
+            if f & REMOVED != 0 || (!hidden && !above_under && f & HIDDEN != 0) {
+                return false;
             }
             i = self.parent[i as usize];
         }
@@ -626,48 +756,11 @@ impl Index {
             }
             None => None,
         };
-        let m = Matcher::new(pattern);
-        let ascii = pattern.trim().to_ascii_lowercase();
-        let fast = !ascii.is_empty() && ascii.is_ascii() && !ascii.contains(['*', '?']);
-        let needle = ascii.as_bytes();
-        let threads = std::thread::available_parallelism().map_or(4, |t| t.get()).clamp(1, 16);
-        // each different name once: which ones match (a bit per name)
-        let names = self.names.len();
-        let mut matched = vec![0u64; names.div_ceil(64)];
-        let any = AtomicBool::new(false);
-        // whole 64-bit words per thread: each owns its part of the bit set
-        let words_per = matched.len().div_ceil(threads).max(1);
-        std::thread::scope(|s| {
-            for (t, out) in matched.chunks_mut(words_per).enumerate() {
-                let (m, any) = (&m, &any);
-                s.spawn(move || {
-                    let lo = t * words_per * 64;
-                    for (w, word) in out.iter_mut().enumerate() {
-                        for b in 0..64 {
-                            let k = lo + w * 64 + b;
-                            if k >= names {
-                                break;
-                            }
-                            let name = self.names.get(k as u32);
-                            let hit = if fast && name.is_ascii() {
-                                name.len() >= needle.len() && name.windows(needle.len()).any(|w| w.eq_ignore_ascii_case(needle))
-                            } else {
-                                m.is_match(std::str::from_utf8(name).unwrap_or(""))
-                            };
-                            if hit {
-                                *word |= 1 << b;
-                            }
-                        }
-                    }
-                    if out.iter().any(|&w| w != 0) {
-                        any.store(true, Ordering::Relaxed);
-                    }
-                });
-            }
-        });
-        if !any.load(Ordering::Relaxed) {
+        let (matched, any) = self.name_matches(pattern);
+        if !any {
             return Some(Vec::new());
         }
+        let threads = std::thread::available_parallelism().map_or(4, |t| t.get()).clamp(1, 16);
         let matched = &matched;
         // then the entries carrying one of them
         let n = self.parent.len();
@@ -708,67 +801,243 @@ impl Index {
         Some(parts.into_iter().flat_map(|p| p.1).take(max).map(|i| self.path(i)).collect())
     }
 
-    /// Re-reads `dirs` (folders that changed): entries gone from a folder are marked removed,
-    /// new ones appended (new folders walked), the rest keep their place. Folders not in the
-    /// index are skipped.
-    pub fn refresh_dirs(&mut self, dirs: &[PathBuf], cancel: &AtomicBool) {
-        let nodes: Vec<(u32, &PathBuf)> = dirs.iter().filter_map(|d| self.node_of(d).map(|n| (n, d))).collect();
-        if nodes.is_empty() {
-            return;
-        }
-        // their current children, in one pass
-        let wanted: HashMap<u32, usize> = nodes.iter().enumerate().map(|(k, (n, _))| (*n, k)).collect();
-        let mut children: Vec<Vec<u32>> = vec![Vec::new(); nodes.len()];
-        for i in 1..self.parent.len() {
-            if self.flags[i] & REMOVED == 0 {
-                if let Some(&k) = wanted.get(&self.parent[i]) {
-                    children[k].push(i as u32);
-                }
-            }
-        }
-        let mut new_dirs = Vec::new();
-        for ((node, dir), kids) in nodes.iter().zip(children) {
-            let Listing { names, lens, flags, ids } = list(dir);
-            let mut now: HashMap<String, (u8, u64)> = HashMap::new();
-            let mut off = 0usize;
-            for ((&len, &f), &frn) in lens.iter().zip(&flags).zip(&ids) {
-                now.insert(String::from_utf8_lossy(&names[off..off + len as usize]).into_owned(), (f, frn));
-                off += len as usize;
-            }
-            for k in kids {
-                let name = self.name(k).to_string();
-                match now.remove(&name) {
-                    Some((f, _)) => self.flags[k as usize] = f,
-                    None => {
-                        self.flags[k as usize] |= REMOVED;
-                        self.removed += 1;
-                        if self.flags[k as usize] & DIR != 0 {
-                            let h = Self::dir_hash(*node, fold_key(&name));
-                            let (parent_of, names, name_id) = (&self.parent, &self.names, &self.name_id);
-                            let hash_of = |i: u32| Self::dir_hash(parent_of[i as usize], fold_key(std::str::from_utf8(names.get(name_id[i as usize])).unwrap_or("")));
-                            self.dirs.remove(h, k, hash_of);
+    /// Which distinct names match `pattern`: a bit per name (see [`Self::search`]).
+    fn name_matches(&self, pattern: &str) -> (Vec<u64>, bool) {
+        let m = Matcher::new(pattern);
+        let ascii = pattern.trim().to_ascii_lowercase();
+        let fast = !ascii.is_empty() && ascii.is_ascii() && !ascii.contains(['*', '?']);
+        let needle = ascii.as_bytes();
+        let threads = std::thread::available_parallelism().map_or(4, |t| t.get()).clamp(1, 16);
+        // each different name once: which ones match (a bit per name)
+        let names = self.names.len();
+        let mut matched = vec![0u64; names.div_ceil(64)];
+        let any = AtomicBool::new(false);
+        // whole 64-bit words per thread: each owns its part of the bit set
+        let words_per = matched.len().div_ceil(threads).max(1);
+        std::thread::scope(|s| {
+            for (t, out) in matched.chunks_mut(words_per).enumerate() {
+                let (m, any) = (&m, &any);
+                s.spawn(move || {
+                    let lo = t * words_per * 64;
+                    for (w, word) in out.iter_mut().enumerate() {
+                        for b in 0..64 {
+                            let k = lo + w * 64 + b;
+                            if k >= names {
+                                break;
+                            }
+                            let name = self.names.get(k as u32);
+                            let hit = if fast && name.is_ascii() {
+                                name.len() >= needle.len() && name.windows(needle.len()).any(|w| w.eq_ignore_ascii_case(needle))
+                            } else {
+                                m.is_match(std::str::from_utf8(name).unwrap_or(""))
+                            };
+                            if hit {
+                                *word |= 1 << b;
+                            }
                         }
                     }
-                }
+                    if out.iter().any(|&w| w != 0) {
+                        any.store(true, Ordering::Relaxed);
+                    }
+                });
             }
-            for (name, (f, frn)) in now {
-                let id = self.push(*node, &name, f);
-                if f & DIR != 0 && frn != 0 {
-                    self.frn.insert(frn, id);
+        });
+        let any = any.load(Ordering::Relaxed);
+        (matched, any)
+    }
+
+    /// Like [`Self::search`], but the best matches first whatever their place in the index:
+    /// `rank` scores a matching name (None: not wanted), the best names are kept, and their
+    /// entries come back best first (shallower paths first among equals), at most `max`.
+    pub fn search_ranked(&self, pattern: &str, under: Option<&Path>, include_hidden: bool, max: usize, rank: &(dyn Fn(&str) -> Option<i32> + Sync)) -> Option<Vec<(i32, PathBuf)>> {
+        let under = match under {
+            Some(p) => {
+                if p.ancestors().take_while(|a| a.starts_with(&self.root) && *a != self.root.as_path()).any(skipped) {
+                    return None;
                 }
-                if f & DIR != 0 && f & REPARSE == 0 && !skipped(&dir.join(&name)) {
-                    new_dirs.push((dir.join(&name), id));
+                Some(self.node_of(p)?)
+            }
+            None => None,
+        };
+        let (matched, any) = self.name_matches(pattern);
+        if !any {
+            return Some(Vec::new());
+        }
+        // score the matching names, keep the best few hundred (a common fragment matches tens
+        // of thousands; the best are what is shown)
+        const KEEP_NAMES: usize = 600;
+        let mut scored: Vec<(i32, u32)> = Vec::new();
+        for (w, &word) in matched.iter().enumerate() {
+            let mut bits = word;
+            while bits != 0 {
+                let b = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                let k = (w * 64 + b) as u32;
+                if let Some(sc) = rank(std::str::from_utf8(self.names.get(k)).unwrap_or("")) {
+                    scored.push((sc, k));
                 }
             }
         }
-        // new folders: walk them and graft their contents on
-        for (path, id) in new_dirs {
-            if cancel.load(Ordering::Relaxed) {
-                break;
-            }
-            let sub = Index::build(&path, cancel);
-            self.graft(&sub, id);
+        if scored.is_empty() {
+            return Some(Vec::new());
         }
+        scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        scored.truncate(KEEP_NAMES);
+        let mut score_of: HashMap<u32, i32> = HashMap::with_capacity(scored.len());
+        for (sc, k) in &scored {
+            score_of.insert(*k, *sc);
+        }
+        let threads = std::thread::available_parallelism().map_or(4, |t| t.get()).clamp(1, 16);
+        let n = self.parent.len();
+        let per = n.div_ceil(threads).max(1);
+        let found = Mutex::new(Vec::<(i32, u32, u32)>::new());
+        std::thread::scope(|s| {
+            for t in 0..threads {
+                let (lo, hi) = (t * per, ((t + 1) * per).min(n));
+                if lo >= hi {
+                    break;
+                }
+                let (found, score_of) = (&found, &score_of);
+                s.spawn(move || {
+                    let mut hits = Vec::new();
+                    for i in lo.max(1)..hi {
+                        if self.flags[i] & REMOVED != 0 {
+                            continue;
+                        }
+                        let Some(&sc) = score_of.get(&self.name_id[i]) else { continue };
+                        if self.valid(i as u32, include_hidden, under) {
+                            hits.push((sc, self.depth(i as u32), i as u32));
+                        }
+                    }
+                    found.lock().unwrap().extend(hits);
+                });
+            }
+        });
+        let mut hits = found.into_inner().unwrap();
+        hits.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        Some(hits.into_iter().take(max).map(|(sc, _, i)| (sc, self.path(i))).collect())
+    }
+
+    fn depth(&self, mut i: u32) -> u32 {
+        let mut d = 0;
+        while i != 0 && i != NONE {
+            d += 1;
+            i = self.parent[i as usize];
+        }
+        d
+    }
+
+    /// Re-reads `dirs` (folders that changed): entries gone from a folder are marked removed,
+    /// new ones appended (new folders walked), the rest keep their place. Folders not in the
+    /// index, or inside a folder the index leaves out, are skipped. (The indexer does the same
+    /// in three steps so that searches go on meanwhile: [`refresh_locked`].)
+    pub fn refresh_dirs(&mut self, dirs: &[PathBuf], cancel: &AtomicBool) {
+        let plan = self.plan_refresh(dirs);
+        let r = read_refresh(plan, cancel);
+        self.apply_refresh(r);
+    }
+
+    /// Whether `dir` is a folder the index leaves out, or inside one (below the root).
+    fn inside_skipped(&self, dir: &Path) -> bool {
+        dir.ancestors().take_while(|a| a.starts_with(&self.root) && *a != self.root.as_path()).any(skipped)
+    }
+
+    /// Step 1 of a refresh (needs only to read the index): the folders' nodes and their current
+    /// children.
+    pub fn plan_refresh(&self, dirs: &[PathBuf]) -> RefreshPlan {
+        let mut nodes: Vec<(u32, PathBuf)> = Vec::new();
+        for d in dirs {
+            // a change directly in a left-out folder (node_modules, .git…) must not bring its
+            // contents into the index
+            if self.inside_skipped(d) {
+                continue;
+            }
+            if let Some(n) = self.node_of(d) {
+                if !nodes.iter().any(|(m, _)| *m == n) {
+                    nodes.push((n, d.clone()));
+                }
+            }
+        }
+        let mut plan = RefreshPlan { generation: self.generation, dirs: Vec::new() };
+        if nodes.is_empty() {
+            return plan;
+        }
+        // their current children, in one pass (a few folders: a short list beats hashing)
+        let many = nodes.len() > 16;
+        let wanted: HashMap<u32, usize> = if many { nodes.iter().enumerate().map(|(k, (n, _))| (*n, k)).collect() } else { HashMap::new() };
+        let mut kids: Vec<Vec<u32>> = vec![Vec::new(); nodes.len()];
+        for i in 1..self.parent.len() {
+            if self.flags[i] & REMOVED != 0 {
+                continue;
+            }
+            let p = self.parent[i];
+            let k = if many { wanted.get(&p).copied() } else { nodes.iter().position(|(n, _)| *n == p) };
+            if let Some(k) = k {
+                kids[k].push(i as u32);
+            }
+        }
+        // the file ids of the child folders (a folder deleted and made again under the same name
+        // has a new one: its contents are read anew)
+        let child_dirs: std::collections::HashSet<u32> = kids.iter().flatten().copied().filter(|&i| self.flags[i as usize] & DIR != 0).collect();
+        let mut frn_of: HashMap<u32, u64> = HashMap::new();
+        if !child_dirs.is_empty() {
+            for (&frn, &id) in &self.frn {
+                if child_dirs.contains(&id) {
+                    frn_of.insert(id, frn);
+                }
+            }
+        }
+        for ((node, path), ids) in nodes.into_iter().zip(kids) {
+            let kids = ids.into_iter().map(|i| Kid { id: i, name: self.name(i).to_string(), flags: self.flags[i as usize], frn: frn_of.get(&i).copied().unwrap_or(0) }).collect();
+            plan.dirs.push(PlanDir { node, path, kids });
+        }
+        plan
+    }
+
+    /// Step 3 of a refresh: applies what [`read_refresh`] found, quickly (no disk access).
+    /// False when the index changed shape since the plan (compacted): nothing is applied, the
+    /// folders are read again next time.
+    pub fn apply_refresh(&mut self, r: Refresh) -> bool {
+        if r.generation != self.generation {
+            return false;
+        }
+        for d in r.dirs {
+            for k in d.removed {
+                self.mark_removed(d.node, k);
+            }
+            for (k, f) in d.flags {
+                self.flags[k as usize] = f;
+            }
+            for a in d.added {
+                let id = self.push(d.node, &a.name, a.flags);
+                if a.flags & DIR != 0 && a.frn != 0 {
+                    self.frn.insert(a.frn, id);
+                }
+                if let Some(sub) = a.sub {
+                    self.graft(&sub, id);
+                }
+            }
+        }
+        true
+    }
+
+    fn mark_removed(&mut self, parent: u32, k: u32) {
+        if self.flags[k as usize] & REMOVED != 0 {
+            return;
+        }
+        self.flags[k as usize] |= REMOVED;
+        self.removed += 1;
+        if self.flags[k as usize] & DIR != 0 {
+            let h = Self::dir_hash(parent, fold_key(self.name(k)));
+            let (parent_of, names, name_id) = (&self.parent, &self.names, &self.name_id);
+            let hash_of = |i: u32| Self::dir_hash(parent_of[i as usize], fold_key(std::str::from_utf8(names.get(name_id[i as usize])).unwrap_or("")));
+            self.dirs.remove(h, k, hash_of);
+        }
+    }
+
+    /// The folders (alive, as paths) the change journal names by file id.
+    fn journal_dirs(&self, frns: &std::collections::HashSet<u64>) -> Vec<PathBuf> {
+        frns.iter().filter_map(|f| self.frn.get(f).copied()).filter(|&n| self.valid(n, true, None)).map(|n| self.path(n)).collect()
     }
 
     /// Brings a loaded index up to date from the volume's change journal: the folders that
@@ -777,12 +1046,7 @@ impl Index {
     pub fn catch_up(&mut self, cancel: &AtomicBool) -> Result<usize, crate::usn::Gap> {
         let (id, from) = self.journal.ok_or(crate::usn::Gap::Lost)?;
         let (frns, next) = crate::usn::changed_folders(&self.root, id, from, 200_000)?;
-        let dirs: Vec<PathBuf> = frns
-            .iter()
-            .filter_map(|f| self.frn.get(f).copied())
-            .filter(|&n| self.valid(n, true, None))
-            .map(|n| self.path(n))
-            .collect();
+        let dirs = self.journal_dirs(&frns);
         let count = dirs.len();
         self.refresh_dirs(&dirs, cancel);
         if !cancel.load(Ordering::Relaxed) {
@@ -857,7 +1121,18 @@ impl Index {
         map[0] = 0;
         // the name table stays (a name no longer used costs a few bytes)
         let names = std::mem::replace(&mut self.names, Names::new());
-        let mut out = Index { root: self.root.clone(), parent: vec![NONE], name_id: vec![0], flags: vec![DIR], names, dirs: IdTable::new(), removed: 0, frn: HashMap::new(), journal: self.journal };
+        let mut out = Index {
+            root: self.root.clone(),
+            parent: vec![NONE],
+            name_id: vec![0],
+            flags: vec![DIR],
+            names,
+            dirs: IdTable::new(),
+            removed: 0,
+            frn: HashMap::new(),
+            journal: self.journal,
+            generation: self.generation + 1,
+        };
         for i in 1..n {
             let p = self.parent[i];
             if self.flags[i] & REMOVED != 0 || p == NONE || !keep[p as usize] {
@@ -1008,7 +1283,7 @@ impl Index {
         let mut names = Names { pool, off, lookup: IdTable::new() };
         names.rebuild_lookup();
         let journal = (jnext >= 0).then_some((jid, jnext));
-        let mut ix = Index { root, parent, name_id, flags, names, dirs: IdTable::new(), removed, frn: frns.into_iter().zip(nodes).collect(), journal };
+        let mut ix = Index { root, parent, name_id, flags, names, dirs: IdTable::new(), removed, frn: frns.into_iter().zip(nodes).collect(), journal, generation: 0 };
         ix.index_dirs();
         Ok(ix)
     }
@@ -1111,6 +1386,86 @@ mod tests {
         // the full path comes back
         let p = ix.search("main", None, false, 10).unwrap();
         assert_eq!(p, [root.join("Proje").join("main.rs")]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A change inside a folder the index leaves out does not bring its contents in.
+    #[test]
+    fn left_out_folders_stay_out_after_changes() {
+        let root = tree("skipout");
+        std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+        std::fs::write(root.join("node_modules/pkg/index.js"), b"x").unwrap();
+        let mut ix = Index::build(&root, &AtomicBool::new(false));
+        std::fs::write(root.join("node_modules/yeni.js"), b"x").unwrap();
+        ix.refresh_dirs(&[root.join("node_modules"), root.join("node_modules/pkg")], &AtomicBool::new(false));
+        assert!(names(&ix.search("js", None, false, 100).unwrap()).is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A folder deleted and made again under the same name: its new contents are read, the old
+    /// ones are gone.
+    #[test]
+    fn a_folder_made_again_is_read_anew() {
+        let root = tree("again");
+        let mut ix = Index::build(&root, &AtomicBool::new(false));
+        if ix.frn.is_empty() {
+            eprintln!("no file ids on this volume, skipped");
+            std::fs::remove_dir_all(&root).unwrap();
+            return;
+        }
+        std::fs::remove_dir_all(root.join("Proje")).unwrap();
+        std::fs::create_dir_all(root.join("Proje")).unwrap();
+        std::fs::write(root.join("Proje/yepyeni.txt"), b"x").unwrap();
+        // only the root is reported (the folder kept its name)
+        ix.refresh_dirs(&[root.clone()], &AtomicBool::new(false));
+        assert_eq!(names(&ix.search("yepyeni", None, false, 10).unwrap()), ["yepyeni.txt"]);
+        assert!(ix.search("main", None, false, 10).unwrap().is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// A refresh planned before the index was compacted is not applied (ids changed); the
+    /// locked refresh lets searches run while the folders are read.
+    #[test]
+    fn stale_refresh_is_dropped_and_searches_go_on() {
+        let root = tree("locked");
+        let mut ix = Index::build(&root, &AtomicBool::new(false));
+        std::fs::write(root.join("sonradan.txt"), b"x").unwrap();
+        let plan = ix.plan_refresh(&[root.clone()]);
+        let r = read_refresh(plan, &AtomicBool::new(false));
+        ix.compact();
+        assert!(!ix.apply_refresh(r));
+        assert!(ix.search("sonradan", None, false, 10).unwrap().is_empty());
+        let lock = parking_lot::RwLock::new(Some(ix));
+        // a reader holds the index while the refresh plans and reads: it is not blocked by it
+        let held = lock.read();
+        let plan = held.as_ref().unwrap().plan_refresh(&[root.clone()]);
+        let r = read_refresh(plan, &AtomicBool::new(false));
+        drop(held);
+        assert!(lock.write().as_mut().unwrap().apply_refresh(r));
+        assert_eq!(names(&lock.read().as_ref().unwrap().search("sonradan", None, false, 10).unwrap()), ["sonradan.txt"]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The ranked search returns the best names first, whatever their place in the index, and
+    /// shallower paths first among equals.
+    #[test]
+    fn ranked_search_puts_the_best_first() {
+        let root = tree("ranked");
+        for i in 0..50 {
+            std::fs::write(root.join(format!("eski rapor {i}.txt")), b"x").unwrap();
+        }
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::fs::write(root.join("a/b/rapor"), b"x").unwrap();
+        std::fs::write(root.join("a/rapor"), b"x").unwrap();
+        let ix = Index::build(&root, &AtomicBool::new(false));
+        let rank = |name: &str| {
+            let n = name.to_lowercase();
+            if n == "rapor" { Some(1000) } else if n.starts_with("rapor") { Some(800) } else if n.contains("rapor") { Some(400) } else { None }
+        };
+        let got = ix.search_ranked("rapor", None, false, 3, &rank).unwrap();
+        assert_eq!(got[0].1, root.join("a").join("rapor"));
+        assert_eq!(got[1].1, root.join("a").join("b").join("rapor"));
+        assert_eq!(got[2].0, 800); // Rapor.pdf
         std::fs::remove_dir_all(&root).unwrap();
     }
 
@@ -1283,6 +1638,8 @@ mod tests {
         let ix = Index::build(&root, &AtomicBool::new(false));
         assert!(!names(&ix.search("gizli", None, false, 10).unwrap()).contains(&"rapor gizli.txt".to_string()));
         assert!(names(&ix.search("gizli", None, true, 10).unwrap()).contains(&"rapor gizli.txt".to_string()));
+        // searching inside the hidden folder the user opened finds what is in it
+        assert_eq!(names(&ix.search("rapor", Some(&secret), false, 10).unwrap()), ["rapor gizli.txt"]);
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

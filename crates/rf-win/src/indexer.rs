@@ -137,11 +137,17 @@ fn save(slot: &Slot) {
             Some(_) => {}
         }
     }
-    let mut guard = slot.index.write();
-    if let Some(ix) = guard.as_mut() {
-        if ix.len() > 0 && ix.len() - ix.live() > ix.len() / 5 {
-            ix.compact();
+    // compacting changes ids: the only step that needs the index to itself
+    {
+        let mut guard = slot.index.write();
+        if let Some(ix) = guard.as_mut() {
+            if ix.len() > 0 && ix.len() - ix.live() > ix.len() / 5 {
+                ix.compact();
+            }
         }
+    }
+    // writing the file only reads it: searches go on meanwhile
+    if let Some(ix) = slot.index.read().as_ref() {
         if let Err(e) = ix.save(&slot.file) {
             log::info!("indexer: saving {}: {e}", slot.file.display());
         }
@@ -160,7 +166,8 @@ fn run(slot: Arc<Slot>, cancel: Arc<AtomicBool>) {
     }
     // 2. what changed while the app was closed: from the change journal, else a fresh walk
     let t = Instant::now();
-    let caught = slot.index.write().as_mut().map(|ix| ix.catch_up(&cancel));
+    // (the folders are listed with no lock held: searches use the loaded index meanwhile)
+    let caught = slot.index.read().is_some().then(|| crate::nameindex::catch_up_locked(&slot.index, &cancel));
     match caught {
         Some(Ok(n)) => {
             log::info!("indexer: {} caught up from the change journal in {:.2} s, {n} folders listed again", slot.root.display(), t.elapsed().as_secs_f32());
@@ -206,9 +213,7 @@ fn follow(slot: &Slot, cancel: &AtomicBool) {
         let now = crate::usn::query(&slot.root).map(|j| j.next);
         let dirs: Vec<PathBuf> = slot.dirty.lock().drain().collect();
         if !dirs.is_empty() {
-            if let Some(ix) = slot.index.write().as_mut() {
-                ix.refresh_dirs(&dirs, cancel);
-            }
+            crate::nameindex::refresh_locked(&slot.index, &dirs, cancel);
             slot.changed_since_save.store(true, Ordering::Relaxed);
         }
         if let Some(next) = seen {
@@ -242,6 +247,20 @@ pub fn search(pattern: &str, under: &Path, include_hidden: bool, max: usize) -> 
     }
     let ix = slot.index.read();
     ix.as_ref()?.search(pattern, Some(under), include_hidden, max)
+}
+
+/// [`search`] with the best matches first ([`Index::search_ranked`]): `rank` scores a name.
+pub fn search_ranked(pattern: &str, under: &Path, include_hidden: bool, max: usize, rank: &(dyn Fn(&str) -> Option<i32> + Sync)) -> Option<Vec<(i32, PathBuf)>> {
+    let slot = {
+        let g = service().lock();
+        let s = g.as_ref()?;
+        s.slots.iter().find(|s| under.starts_with(&s.root) || under.to_string_lossy().to_lowercase().starts_with(&s.root.to_string_lossy().to_lowercase())).cloned()?
+    };
+    if slot.state.load(Ordering::Relaxed) != State::Ready as u8 {
+        return None;
+    }
+    let ix = slot.index.read();
+    ix.as_ref()?.search_ranked(pattern, Some(under), include_hidden, max, rank)
 }
 
 /// (root, state, live entries, bytes in memory) per root.
@@ -284,10 +303,7 @@ fn follow_journal(slot: &Slot, cancel: &AtomicBool) {
     let mut unreadable = 0;
     while !cancel.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_secs(1));
-        let r = match slot.index.write().as_mut() {
-            Some(ix) => ix.catch_up(cancel),
-            None => Err(crate::usn::Gap::Lost),
-        };
+        let r = crate::nameindex::catch_up_locked(&slot.index, cancel);
         match r {
             Ok(0) => unreadable = 0,
             Ok(_) => {

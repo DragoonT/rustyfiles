@@ -559,17 +559,20 @@ fn search(query: &str, engine: WebSearch, with_bookmarks: bool, index_on: bool) 
             }
             _ => continue,
         }
-        // the index returns hits in its own order, not the best first: ask for many
-        if let Some(paths) = rf_win::indexer::search(query.trim(), &root, false, 3000) {
-            for p in paths {
+        // the best names first, whatever their place in the index (a common fragment matches
+        // tens of thousands of files)
+        let rank = |name: &str| if glob { Some(500) } else { score(name, &q) };
+        if let Some(found) = rf_win::indexer::search_ranked(query.trim(), &root, false, 60, &rank) {
+            for (_, p) in found {
                 add(p, &mut hits);
             }
         }
     }
-    // what was opened before is always a candidate (the cap above could leave it out)
+    // what was opened before is always a candidate (the cap above could leave it out); only a
+    // name that matches is looked for on the disk
     for u in used.values() {
         if let Target::Path { path, .. } = &u.target {
-            if path.exists() {
+            if (glob || score(&file_name(path), &q).is_some()) && path.exists() {
                 add(path.clone(), &mut hits);
             }
         }
