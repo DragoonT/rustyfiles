@@ -359,6 +359,9 @@ pub struct FolderView {
     col_scrolls: std::collections::HashMap<PathBuf, UniformListScrollHandle>,
     col_scrolled: HashSet<(PathBuf, String)>,
     _git_task: Option<Task<()>>,
+    /// When git status was last asked for, and a later ask waiting (changes coming in fast).
+    git_last: Option<Instant>,
+    git_soon: Option<Task<()>>,
     /// Re-renders once a load has been running for a while (shows the "loading" placeholder).
     _slow_task: Option<Task<()>>,
     /// Where a left-button press started on a row (for drag-out detection).
@@ -490,6 +493,8 @@ impl FolderView {
             col_scrolls: Default::default(),
             col_scrolled: HashSet::new(),
             _git_task: None,
+            git_last: None,
+            git_soon: None,
             _slow_task: None,
         };
         this.load(cx);
@@ -743,7 +748,32 @@ impl FolderView {
     }
 
     /// Re-reads git status for the current folder in the background (no-op outside a repo).
+    /// [`Self::refresh_git`] for changes on the disk: at most every 2 s (each one runs `git
+    /// status`, a process; a folder being written to would start one per change), the last
+    /// change always followed by one.
+    fn refresh_git_soon(&mut self, cx: &mut Context<Self>) {
+        const GAP: std::time::Duration = std::time::Duration::from_secs(2);
+        if self.git_soon.is_some() {
+            return; // one is already waiting
+        }
+        let wait = self.git_last.map_or(std::time::Duration::ZERO, |t| GAP.saturating_sub(t.elapsed()));
+        if wait.is_zero() {
+            self.refresh_git(cx);
+            return;
+        }
+        self.git_soon = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |v, cx| {
+                v.git_soon = None;
+                if v.git.is_some() {
+                    v.refresh_git(cx);
+                }
+            });
+        }));
+    }
+
     fn refresh_git(&mut self, cx: &mut Context<Self>) {
+        self.git_last = Some(Instant::now());
         let Some(dir) = self.location().path().map(|p| p.to_path_buf()).filter(|_| !self.is_search()) else {
             self.git = None;
             return;
@@ -817,7 +847,7 @@ impl FolderView {
             return;
         }
         if self.git.is_some() {
-            self.refresh_git(cx);
+            self.refresh_git_soon(cx);
         }
         self.load_inner(true, cx);
     }
@@ -1384,7 +1414,7 @@ impl FolderView {
             if s.bytes().all(|b| b.is_ascii() && !b.is_ascii_uppercase()) { s.into() } else { s.to_lowercase().into() }
         }
         if self.git.is_some() {
-            self.refresh_git(cx);
+            self.refresh_git_soon(cx);
         }
         // (Windows names ignore case: a rename that only changes case reports the old spelling)
         let mut gone: HashSet<String> = found.iter().map(|(n, _)| fold(n).into_owned()).collect();
