@@ -216,7 +216,8 @@ impl ImageCache {
 
     pub fn thumbnail(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         let wants_thumb = crate::icons::has_thumbnail(e);
-        let key = if wants_thumb || (!e.is_dir() && has_unique_icon(&e.ext)) {
+        let per_file = wants_thumb || (!e.is_dir() && has_unique_icon(&e.ext));
+        let key = if per_file {
             key_of(&[&"thumb", &dir, &&*e.name, &e.modified_ms, &size])
         } else if e.is_dir() {
             key_of(&[&"dirL", &size])
@@ -225,7 +226,9 @@ impl ImageCache {
         };
         let path = dir.join(&*e.name);
         let kind = if wants_thumb { Kind::Thumbnail } else { Kind::Icon };
-        let r = self.lookup(key, || Request { key, path, size, kind }, wants_thumb);
+        // every per-file picture (an exe's or a shortcut's icon too) is in the LRU, or browsing
+        // folders of programs would keep them all until the app closes
+        let r = self.lookup(key, || Request { key, path, size, kind }, per_file);
         self.evict_over_budget();
         self.release_evicted(cx);
         r
