@@ -495,11 +495,14 @@ impl MediaView {
     /// Oynatma döngüsü: yeni kare varsa arka planda çevrilir; durum güncellenir.
     fn tick(&mut self, cx: &mut Context<Self>) {
         self._tasks.push(cx.spawn(async move |this, cx| {
+            // paused or ended: a slower look (a click or a seek still shows within a few frames)
+            let mut wait = TICK;
             loop {
-                cx.background_executor().timer(TICK).await;
+                cx.background_executor().timer(wait).await;
                 let job = this.update(cx, |v, cx| {
                     let p = v.player.as_ref()?;
                     let st = p.state();
+                    wait = if st.playing { TICK } else { std::time::Duration::from_millis(33) };
                     let coarse = |s: &PlayerState| ((s.position * 10.0) as i64, s.playing, s.ended, (s.duration * 10.0) as i64);
                     if coarse(&st) != coarse(&v.state) {
                         cx.notify();

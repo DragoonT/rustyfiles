@@ -149,9 +149,9 @@ fn video_loop(s: &Shared, media: &Media) {
     let mut seen_gen = u64::MAX;
     let mut next = 0.0f64;
     while !s.stop.load(Ordering::Relaxed) {
-        let (g, pos) = {
+        let (g, pos, playing) = {
             let c = lock(&s.ctl);
-            (c.generation, c.position)
+            (c.generation, c.position, c.playing)
         };
         if g != seen_gen {
             seen_gen = g;
@@ -164,7 +164,8 @@ fn video_loop(s: &Shared, media: &Media) {
         }
         let full = lock(&s.queue).len() >= AHEAD;
         if full || next >= s.duration {
-            std::thread::sleep(Duration::from_millis(3));
+            // nothing to decode: while paused the queue only moves on a seek, look less often
+            std::thread::sleep(Duration::from_millis(if playing { 3 } else { 15 }));
             continue;
         }
         let idx = (next / fd + 1e-6).floor();
@@ -301,6 +302,8 @@ fn clock_loop(s: &Shared, media: &Media, mut sink: Box<dyn AudioSink>) {
             }
         }
         drop(c);
-        std::thread::sleep(Duration::from_millis(4));
+        // paused: the clock does not move, only a play or a seek wakes it (each read on the next
+        // look); playing keeps the audio fed
+        std::thread::sleep(Duration::from_millis(if playing || seek.is_some() { 4 } else { 20 }));
     }
 }
