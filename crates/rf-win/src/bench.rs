@@ -27,7 +27,7 @@ use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, CreateDIBSection, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
 };
 use windows::Win32::Storage::Xps::{PRINT_WINDOW_FLAGS, PrintWindow};
-use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX};
+use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX2};
 use windows::Win32::System::Threading::{
     GetProcessTimes, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW, TerminateProcess,
 };
@@ -270,11 +270,12 @@ impl Proc {
         Some((t(c), (t(k) + t(u)) as f64 / 10_000.0))
     }
 
-    /// (working set, peak working set, private bytes) in bytes.
-    fn memory(&self) -> Option<(u64, u64, u64)> {
-        let mut m = PROCESS_MEMORY_COUNTERS_EX { cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32, ..Default::default() };
+    /// (working set, peak working set, private bytes, private working set) in bytes. The last
+    /// is Task Manager's "Memory" column.
+    fn memory(&self) -> Option<(u64, u64, u64, u64)> {
+        let mut m = PROCESS_MEMORY_COUNTERS_EX2 { cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX2>() as u32, ..Default::default() };
         unsafe { GetProcessMemoryInfo(self.0, &mut m as *mut _ as *mut PROCESS_MEMORY_COUNTERS, m.cb) }.ok()?;
-        Some((m.WorkingSetSize as u64, m.PeakWorkingSetSize as u64, m.PrivateUsage as u64))
+        Some((m.WorkingSetSize as u64, m.PeakWorkingSetSize as u64, m.PrivateUsage as u64, m.PrivateWorkingSetSize as u64))
     }
 
     fn image(&self) -> String {
@@ -317,6 +318,10 @@ pub struct OpenResult {
     /// Manager's figure; leaves out mapped files and shared driver memory).
     #[serde(default)]
     pub private: u64,
+    /// Private working set when settled: Task Manager's "Memory" column (0 in results saved
+    /// before it was measured).
+    #[serde(default)]
+    pub private_ws: u64,
     /// The window lives in a process that was already running.
     pub shared: bool,
     /// Gave up before the picture settled (`settled_ms` is the last change seen).
@@ -428,13 +433,13 @@ pub fn measure_launch(app: &App, arg: &std::ffi::OsStr, title: &str, quiet: Dura
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    let (cpu_ms, ram, peak_ram, private, process) = match &proc {
+    let (cpu_ms, ram, peak_ram, private, private_ws, process) = match &proc {
         Some(p) => {
             let cpu = p.times().map_or(0.0, |t| t.1);
-            let (ws, peak, private) = p.memory().unwrap_or((0, 0, 0));
-            (if shared { cpu - cpu_at_window } else { cpu }, ws, if shared { 0 } else { peak }, private, p.image())
+            let (ws, peak, private, private_ws) = p.memory().unwrap_or((0, 0, 0, 0));
+            (if shared { cpu - cpu_at_window } else { cpu }, ws, if shared { 0 } else { peak }, private, private_ws, p.image())
         }
-        None => (0.0, 0, 0, 0, String::new()),
+        None => (0.0, 0, 0, 0, 0, String::new()),
     };
     close(win.hwnd, &mut child, app.kind);
     Ok(OpenResult {
@@ -444,6 +449,7 @@ pub fn measure_launch(app: &App, arg: &std::ffi::OsStr, title: &str, quiet: Dura
         ram,
         peak_ram,
         private,
+        private_ws,
         shared,
         timed_out,
         changes,
@@ -530,6 +536,15 @@ pub fn shell_copy_quiet(sources: &[PathBuf], dest_dir: &Path) -> anyhow::Result<
 
 #[cfg(test)]
 mod tests {
+    /// Task Manager's figure is read, and it is the smaller, resident part of what the process
+    /// allocated.
+    #[test]
+    fn task_manager_memory_is_read() {
+        let p = super::Proc::open(std::process::id()).unwrap();
+        let (ws, _, private, private_ws) = p.memory().unwrap();
+        assert!(private_ws > 0 && private_ws <= ws && private > 0, "{ws} {private} {private_ws}");
+    }
+
     #[test]
     fn explorer_is_always_found() {
         let apps = super::detect();
@@ -643,7 +658,7 @@ pub fn place_on_top(hwnd_raw: isize) {
 /// (working set, private bytes, open handles) of a running process.
 pub fn process_memory(pid: u32) -> Option<(u64, u64, u32)> {
     let p = Proc::open(pid)?;
-    let (ws, _, private) = p.memory()?;
+    let (ws, _, private, _) = p.memory()?;
     let mut handles = 0u32;
     unsafe {
         let _ = windows::Win32::System::Threading::GetProcessHandleCount(p.0, &mut handles);

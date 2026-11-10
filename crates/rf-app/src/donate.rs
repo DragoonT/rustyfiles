@@ -19,7 +19,7 @@ const MIN_RATIO: f64 = 1.3;
 pub struct Facts {
     /// Opening the biggest test folder: (files, times faster than File Explorer).
     pub open: Option<(u32, f64)>,
-    /// Times less memory than File Explorer for that folder.
+    /// Times less memory than File Explorer showing that folder (Task Manager's figure).
     pub memory: Option<f64>,
     /// Copying (small files or one big file, the better of the two), times faster than Windows.
     pub copy: Option<f64>,
@@ -62,9 +62,10 @@ pub fn facts(r: &Results) -> Facts {
         f.open = ratio(ex.settled_ms, ours.settled_ms).map(|x| (files, x));
         // Explorer's memory only means something when its window had a process of its own
         // (otherwise it is the whole shell: taskbar, desktop…)
-        let mem = |m: &rf_win::bench::OpenResult| if m.private > 0 { m.private } else { m.ram } as f64;
-        if !ex.shared && !ours.shared {
-            f.memory = ratio(mem(ex), mem(ours));
+        // Task Manager's figure, measured while both showed the same folder (results saved
+        // before it was measured say nothing about memory)
+        if !ex.shared && !ours.shared && ex.private_ws > 0 && ours.private_ws > 0 {
+            f.memory = ratio(ex.private_ws as f64, ours.private_ws as f64);
         }
         break;
     }
@@ -113,7 +114,7 @@ pub fn messages_for(f: &Facts, starts: u32) -> Vec<String> {
     }
     v.push(t!("rustyfiles'ı şimdiye kadar {n} kez açtın; demek ki işine yarıyor. Bir kahveyle destek olursan bir sonraki özellik biraz daha çabuk gelir.").replace("{n}", &thousands(starts as u64)));
     if let Some(x) = f.memory {
-        v.push(format!("{} {ask}", t!("Bu bilgisayardaki hız testinde rustyfiles, Dosya Gezgini'nden {x} kat daha az bellek kullandı.").replace("{x}", &times(x))));
+        v.push(format!("{} {ask}", t!("Bu bilgisayardaki hız testinde rustyfiles aynı klasörü gösterirken, Görev Yöneticisi'ne göre Dosya Gezgini'nden {x} kat daha az bellek kullandı.").replace("{x}", &times(x))));
     }
     v.push(t!("rustyfiles ücretsiz, reklamsız ve açık kaynak; öyle de kalacak. Yaşaması, senin gibi kullananların küçük desteklerine bağlı.").to_string());
     if let Some(x) = f.copy {

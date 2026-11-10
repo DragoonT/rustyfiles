@@ -751,7 +751,7 @@ pub fn page(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
             .text_xs()
             .text_color(p.text_tertiary)
             .child(div().flex_1().min_w_0().child(t!(
-                "Ortanca değerler (3 çalıştırma, ısınma turu sayılmaz). Süre: uygulama başlatıldığından pencere içeriği 500 ms boyunca değişmeyene dek. * işaretli değerlerde uygulama zaten çalışıyordu: işlemci pencere açıldıktan sonrasını, bellek tüm süreci gösterir."
+                "Ortanca değerler (3 çalıştırma, ısınma turu sayılmaz). Süre: uygulama başlatıldığından pencere içeriği 500 ms boyunca değişmeyene dek. * işaretli değerlerde uygulama zaten çalışıyordu: işlemci pencere açıldıktan sonrasını, bellek tüm süreci gösterir. Bellek, Görev Yöneticisi'nin gösterdiği değerdir."
             )))
             .child(
                 div()
@@ -886,7 +886,8 @@ fn table_card(p: &Palette, r: &Results) -> AnyElement {
             let cell = match (a.median(), &a.error) {
                 (Some(m), _) => {
                     let winner = m.settled_ms == best;
-                    let mem = if m.private > 0 { mb(m.private) } else { mb(m.ram) };
+                    // Task Manager's figure; older results: private bytes, else the working set
+                    let mem = if m.private_ws > 0 { mb(m.private_ws) } else if m.private > 0 { mb(m.private) } else { mb(m.ram) };
                     v_flex()
                         .gap_0p5()
                         .child(
