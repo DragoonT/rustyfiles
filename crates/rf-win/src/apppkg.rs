@@ -7,6 +7,8 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
+mod vector;
+
 /// The kind of package (the card names it).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -386,10 +388,15 @@ fn apk_icon(zip: &mut Zip, arsc: &[u8], id: u32, depth: u8) -> Option<Vec<u8>> {
     files.sort_by_key(|(d, f)| (f.ends_with(".xml"), std::cmp::Reverse(if *d >= 0xfffe { 0 } else { *d })));
     for (_, f) in &files {
         if f.ends_with(".xml") {
+            // a vector or an adaptive icon (its layers): drawn here
+            let Some(x) = member(zip, f) else { continue };
+            if let Some(v) = vector::render(zip, arsc, &x, 192) {
+                return Some(v);
+            }
             if depth > 0 {
                 continue;
             }
-            let Some(x) = member(zip, f) else { continue };
+            // (could not draw it: the foreground's bitmap, if it has one)
             let mut fg = None;
             axml(&x, &mut |tag, a| {
                 if tag == "foreground" && fg.is_none() {
@@ -413,6 +420,9 @@ struct ResValue {
     density: u16,
     language: [u8; 2],
     string: Option<String>,
+    /// The raw value: its type (0x01 reference, 0x03 string, 0x1c–0x1f colour…) and data.
+    dtype: u8,
+    data: u32,
 }
 
 /// The values of resource `id` in a compiled resource table, one per configuration.
@@ -476,7 +486,7 @@ fn arsc_values_inner(b: &[u8], id: u32) -> Option<Vec<ResValue>> {
                                 (0, 0) // a map (style, plural…): not a single value
                             };
                             let string = (dtype == 0x03).then(|| strings.get(data as usize).cloned()).flatten();
-                            out.push(ResValue { density, language, string });
+                            out.push(ResValue { density, language, string, dtype, data });
                         }
                     }
                     p += psize;
@@ -512,8 +522,24 @@ fn android_version(api: u32) -> Option<&'static str> {
 }
 
 /// Walks Android's binary XML: calls `on_tag(name, attributes)` for each start tag. Attribute
-/// values are strings as written, numbers in decimal, references as "@0x7f…".
+/// values are strings as written, numbers in decimal, references as "@0x7f…", colours as
+/// "#aarrggbb", dimensions as "12dp", fractions as "16%".
 fn axml(b: &[u8], on_tag: &mut dyn FnMut(&str, &std::collections::HashMap<String, String>)) -> Option<()> {
+    axml_events(b, &mut |ev| {
+        if let Some((tag, a)) = ev {
+            on_tag(tag, a);
+        }
+    })
+}
+
+/// A compiled dimension or fraction's number.
+fn complex(data: u32) -> f32 {
+    const MULT: [f32; 4] = [1.0 / 256.0, 1.0 / 32768.0, 1.0 / 8388608.0, 1.0 / 2147483648.0];
+    ((data & 0xffff_ff00) as i32) as f32 * MULT[((data >> 4) & 3) as usize]
+}
+
+/// [`axml`] with the end tags too (`None`), for nested drawables.
+fn axml_events(b: &[u8], on: &mut dyn FnMut(Option<(&str, &std::collections::HashMap<String, String>)>)) -> Option<()> {
     let u16_at = |o: usize| Some(u16::from_le_bytes(b.get(o..o + 2)?.try_into().ok()?));
     let u32_at = |o: usize| Some(u32::from_le_bytes(b.get(o..o + 4)?.try_into().ok()?));
     if u16_at(0)? != 0x0003 {
@@ -546,15 +572,25 @@ fn axml(b: &[u8], on_tag: &mut dyn FnMut(&str, &std::collections::HashMap<String
                         0x10 => (data as i32).to_string(),
                         0x11 => format!("0x{data:x}"),
                         0x12 => (data != 0).to_string(),
+                        0x04 => f32::from_bits(data).to_string(),
+                        0x05 => {
+                            let unit = ["px", "dp", "sp", "pt", "in", "mm"].get((data & 0xf) as usize).copied().unwrap_or("");
+                            format!("{}{unit}", complex(data))
+                        }
+                        0x06 => format!("{}%{}", complex(data) * 100.0, if data & 0xf == 1 { "p" } else { "" }),
+                        0x1c | 0x1e => format!("#{data:08x}"),
+                        0x1d | 0x1f => format!("#{:08x}", data | 0xff00_0000),
+                        0x02 => format!("?0x{data:08x}"),
                         _ if raw != u32::MAX => strings.get(raw as usize).cloned().unwrap_or_default(),
                         _ => data.to_string(),
                     };
                     attrs.insert(key.clone(), value);
                 }
                 if let Some(tag) = strings.get(name) {
-                    on_tag(tag, &attrs);
+                    on(Some((tag, &attrs)));
                 }
             }
+            0x0103 => on(None),
             _ => {}
         }
         let _ = header;
@@ -724,7 +760,91 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn zip_of(path: &Path, members: &[(&str, &[u8])]) {
+    /// A binary XML document of nested elements (each inside the one before), attributes given
+    /// as (name, type, data); a string attribute (type 3) takes `text`.
+    pub(super) fn axml_doc(elems: &[(&str, &[(&str, u8, u32)])], text: &str) -> Vec<u8> {
+        let mut strings: Vec<String> = Vec::new();
+        let mut sid = |s: &str| -> u32 {
+            if let Some(i) = strings.iter().position(|x| x == s) {
+                return i as u32;
+            }
+            strings.push(s.to_string());
+            strings.len() as u32 - 1
+        };
+        let text_id = sid(text);
+        let mut chunks = Vec::new();
+        for (tag, attrs) in elems {
+            let name = sid(tag);
+            let mut c = Vec::new();
+            c.extend(0x0102u16.to_le_bytes());
+            c.extend(16u16.to_le_bytes());
+            c.extend(((36 + 20 * attrs.len()) as u32).to_le_bytes());
+            c.extend([0u8; 8]); // line, comment
+            c.extend(u32::MAX.to_le_bytes()); // namespace
+            c.extend(name.to_le_bytes());
+            c.extend(20u16.to_le_bytes());
+            c.extend(20u16.to_le_bytes());
+            c.extend((attrs.len() as u16).to_le_bytes());
+            c.extend([0u8; 6]);
+            for (an, ty, data) in attrs.iter() {
+                let an = sid(an);
+                c.extend(u32::MAX.to_le_bytes());
+                c.extend(an.to_le_bytes());
+                c.extend(if *ty == 3 { text_id } else { u32::MAX }.to_le_bytes());
+                c.extend(8u16.to_le_bytes());
+                c.push(0);
+                c.push(*ty);
+                c.extend(if *ty == 3 { text_id } else { *data }.to_le_bytes());
+            }
+            chunks.push(c);
+        }
+        for _ in elems.iter() {
+            let mut c = Vec::new();
+            c.extend(0x0103u16.to_le_bytes());
+            c.extend(16u16.to_le_bytes());
+            c.extend(24u32.to_le_bytes());
+            c.extend([0u8; 16]);
+            chunks.push(c);
+        }
+        // the string pool (UTF-16)
+        let mut data = Vec::new();
+        let mut offs = Vec::new();
+        for s in &strings {
+            offs.push(data.len() as u32);
+            let u: Vec<u16> = s.encode_utf16().collect();
+            data.extend((u.len() as u16).to_le_bytes());
+            for x in u {
+                data.extend(x.to_le_bytes());
+            }
+            data.extend([0, 0]);
+        }
+        while data.len() % 4 != 0 {
+            data.push(0);
+        }
+        let start = 28 + 4 * strings.len();
+        let mut pool = Vec::new();
+        pool.extend(0x0001u16.to_le_bytes());
+        pool.extend(28u16.to_le_bytes());
+        pool.extend(((start + data.len()) as u32).to_le_bytes());
+        pool.extend((strings.len() as u32).to_le_bytes());
+        pool.extend(0u32.to_le_bytes());
+        pool.extend(0u32.to_le_bytes());
+        pool.extend((start as u32).to_le_bytes());
+        pool.extend(0u32.to_le_bytes());
+        for o in offs {
+            pool.extend(o.to_le_bytes());
+        }
+        pool.extend(data);
+        let body: Vec<u8> = std::iter::once(pool).chain(chunks).flatten().collect();
+        let mut out = Vec::new();
+        out.extend(0x0003u16.to_le_bytes());
+        out.extend(8u16.to_le_bytes());
+        out.extend(((8 + body.len()) as u32).to_le_bytes());
+        out.extend(body);
+        out
+    }
+
+    pub(super) fn zip_of(path: &Path, members: &[(&str, &[u8])]) {
         let mut z = zip::ZipWriter::new(File::create(path).unwrap());
         for (name, data) in members {
             z.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
@@ -809,6 +929,11 @@ mod tests {
     fn real_packages() {
         for p in std::env::var("RF_PACKAGES").unwrap_or_default().split(';').filter(|p| !p.is_empty()) {
             let r = info(Path::new(p)).map(|(k, mut i)| {
+                // RF_ICON_OUT=folder: the icons are saved there to look at
+                if let (Ok(dir), Some(png)) = (std::env::var("RF_ICON_OUT"), &i.icon_png) {
+                    let name = Path::new(p).file_stem().unwrap().to_string_lossy().into_owned();
+                    std::fs::write(Path::new(&dir).join(format!("{name}.png")), png).unwrap();
+                }
                 let icon = i.icon_png.take().map(|v| v.len());
                 (k, i, icon)
             });
