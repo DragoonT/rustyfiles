@@ -1179,7 +1179,13 @@ fn threads_for(sources: &[PathBuf], dest: &Path) -> usize {
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get());
     let paths = sources.iter().map(PathBuf::as_path).chain(std::iter::once(dest));
     let mut slow = false;
+    // once per drive or share (5,000 files selected in one folder asked the same disk 5,000
+    // times, each a volume open and a query, before the first byte)
+    let mut seen = std::collections::HashSet::new();
     for p in paths {
+        if !seen.insert(volume_key(p)) {
+            continue;
+        }
         match crate::drives::seek_penalty(p) {
             Some(true) => return 2,
             Some(false) => {}
@@ -1188,6 +1194,20 @@ fn threads_for(sources: &[PathBuf], dest: &Path) -> usize {
         slow |= crate::drives::is_removable(p);
     }
     if slow { 4 } else { cores.clamp(4, 16) }
+}
+
+/// The drive (`C:`) or share (`\\server\share`) a path is on, to ask about each once.
+fn volume_key(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    let s = s.strip_prefix(r"\\?\UNC\").map(|r| format!(r"\\{r}")).unwrap_or_else(|| s.strip_prefix(r"\\?\").unwrap_or(&s).to_string());
+    if s.len() >= 2 && s.as_bytes()[1] == b':' {
+        return s[..2].to_ascii_uppercase();
+    }
+    if let Some(rest) = s.strip_prefix(r"\\") {
+        let mut parts = rest.split('\\');
+        return format!(r"\\{}\{}", parts.next().unwrap_or(""), parts.next().unwrap_or("")).to_lowercase();
+    }
+    s
 }
 
 /// Whether `p` is on a local or network file system path we can copy into directly (not a
@@ -1199,6 +1219,16 @@ fn local_fs(p: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn volume_keys_group_by_drive_and_share() {
+        use super::volume_key;
+        use std::path::Path;
+        assert_eq!(volume_key(Path::new(r"c:\a\b.txt")), "C:");
+        assert_eq!(volume_key(Path::new(r"\\?\C:\uzun\yol")), "C:");
+        assert_eq!(volume_key(Path::new(r"\\NAS\Paylaşım\x")), r"\\nas\paylaşım");
+        assert_eq!(volume_key(Path::new(r"\\?\UNC\nas\paylaşım\y")), r"\\nas\paylaşım");
+    }
+
     use super::*;
 
     /// The same file by two spellings is one file; two files are two.
