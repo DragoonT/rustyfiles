@@ -242,6 +242,29 @@ pub fn star_due(s: &crate::settings::Settings) -> bool {
     !s.star_asked && s.first_start_ms > 0 && s.starts >= 30 && now - s.first_start_ms >= 7 * 24 * 3600 * 1000
 }
 
+/// Where a coffee is bought (the README's button).
+pub const DONATE: &str = "https://www.buymeacoffee.com/ozerguzel";
+
+const DAY_MS: i64 = 24 * 3600 * 1000;
+
+/// The "buy me a coffee" strip: after two weeks and 40 starts, then again some weeks after each
+/// answer, until turned off. Never on the same day as the star strip.
+pub fn donate_due(s: &crate::settings::Settings) -> bool {
+    let now = chrono::Utc::now().timestamp_millis();
+    if s.donate_never || star_due(s) || s.first_start_ms == 0 || s.starts < 40 {
+        return false;
+    }
+    let first = s.first_start_ms + 14 * DAY_MS;
+    now >= first.max(s.donate_next_ms)
+}
+
+/// How long the strip stays away after an answer: longer after a coffee than after "later".
+pub fn donate_answered(s: &mut crate::settings::Settings, donated: bool) {
+    let now = chrono::Utc::now().timestamp_millis();
+    s.donate_next_ms = now + if donated { 120 } else { 30 } * DAY_MS;
+    s.donate_seen = s.donate_seen.saturating_add(1);
+}
+
 /// Counted at each start of the app (not for test copies or a dialog-only start).
 pub fn count_start(cx: &mut gpui_kit::App) {
     if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_some() {
@@ -258,7 +281,36 @@ pub fn count_start(cx: &mut gpui_kit::App) {
 
 #[cfg(test)]
 mod tests {
-    use super::star_due;
+    use super::{DAY_MS, donate_answered, donate_due, star_due};
+
+    #[test]
+    fn coffee_strip_now_and_then() {
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut s = crate::settings::Settings::default();
+        s.star_asked = true;
+        s.first_start_ms = now - 15 * DAY_MS;
+        s.starts = 39;
+        assert!(!donate_due(&s)); // too few starts
+        s.starts = 40;
+        assert!(donate_due(&s));
+        s.first_start_ms = now - 13 * DAY_MS;
+        assert!(!donate_due(&s)); // not two weeks yet
+        s.first_start_ms = now - 15 * DAY_MS;
+        donate_answered(&mut s, false);
+        assert!(!donate_due(&s) && s.donate_seen == 1); // "later": a month away
+        s.donate_next_ms = now - 1;
+        assert!(donate_due(&s));
+        donate_answered(&mut s, true);
+        assert!(s.donate_next_ms - now >= 119 * DAY_MS); // after a coffee: four months
+        s.donate_next_ms = 0;
+        s.donate_never = true;
+        assert!(!donate_due(&s));
+        // never together with the star strip
+        let mut t = crate::settings::Settings::default();
+        t.first_start_ms = now - 15 * DAY_MS;
+        t.starts = 50;
+        assert!(star_due(&t) && !donate_due(&t));
+    }
 
     #[test]
     fn star_strip_waits_a_week_and_30_starts() {

@@ -1840,6 +1840,7 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
         ),
         section(p, "GitHub"),
         link_row(p, "gh-star", L::Star, t!("GitHub'da yıldız ver"), Some(t!("rustyfiles işinize yarıyorsa başkalarının da bulmasına yardım eder.")), |_, _| open_url(REPO_URL)),
+        link_row(p, "coffee", L::Coffee, t!("Bana bir kahve ısmarla"), Some(t!("rustyfiles'ı tek başıma geliştiriyorum; her destek, devam etmeme yardım eder.")), |_, _| open_url(crate::installer::DONATE)),
         link_row(p, "gh-issue", L::MessageSquare, t!("Hata bildir ya da öneride bulun"), None, |_, _| open_url(ISSUES_URL)),
         link_row(p, "gh-notes", L::ScrollText, t!("Sürüm notları"), None, |_, _| open_url(RELEASES_URL)),
         section(p, t!("Topluluk")),

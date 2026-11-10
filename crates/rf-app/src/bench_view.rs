@@ -171,6 +171,8 @@ fn start(cx: &mut App) {
                 let report = |p: Progress| shared.lock().progress = Some(p);
                 let r = crate::bench::run(&plan, &report, &cancel).map_err(|e| format!("{e:#}"));
                 shared.lock().done = Some(r);
+                // the coffee strip quotes the newest results
+                crate::donate::refresh();
             })
             .ok();
     }

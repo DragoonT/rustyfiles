@@ -3119,6 +3119,51 @@ impl Render for Workspace {
                 .child(action("star-yes", t!("Yıldız ver"), true))
                 .child(action("star-no", t!("Bir daha gösterme"), false))
         });
+        // now and then, a note from the author; its message changes each time it is answered
+        let donate_strip = (self.picker.is_none() && crate::installer::donate_due(cx.global::<crate::settings::Settings>())).then(|| {
+            let s = cx.global::<crate::settings::Settings>();
+            let all = crate::donate::messages(s.starts);
+            let message = all[s.donate_seen as usize % all.len()].clone();
+            let action = |id: &'static str, label: &'static str, kind: u8| {
+                div()
+                    .id(id)
+                    .px_2()
+                    .py_0p5()
+                    .flex_shrink_0()
+                    .rounded(theme::RADIUS_SM)
+                    .cursor_pointer()
+                    .when(kind == 0, |d| d.text_color(p.accent))
+                    .hover(|s| s.bg(p.hover))
+                    .child(label)
+                    .on_click(move |_, _, cx| {
+                        if kind == 0 {
+                            std::thread::spawn(|| {
+                                let _ = rf_win::shell::open(std::path::Path::new(crate::installer::DONATE));
+                            });
+                        }
+                        crate::settings::update(cx, |s| match kind {
+                            0 => crate::installer::donate_answered(s, true),
+                            1 => crate::installer::donate_answered(s, false),
+                            _ => s.donate_never = true,
+                        });
+                    })
+            };
+            h_flex()
+                .flex_shrink_0()
+                .px_3()
+                .py_1()
+                .gap_2()
+                .items_center()
+                .border_t_1()
+                .border_color(p.divider)
+                .text_xs()
+                .text_color(p.text_secondary)
+                .child(Icon::new(L::Coffee).size(px(12.)).text_color(p.accent))
+                .child(div().flex_1().min_w_0().child(message))
+                .child(action("coffee-yes", t!("Kahve ısmarla"), 0))
+                .child(action("coffee-later", t!("Sonra"), 1))
+                .child(action("coffee-no", t!("Bir daha gösterme"), 2))
+        });
         // Taskbar title follows the active folder.
         let title = format!("{} — rustyfiles", self.active_tab().read(cx).title(cx));
         if title != self.last_title {
@@ -3444,6 +3489,7 @@ impl Render for Workspace {
                                     .children(preview),
                             )
                             .children(star_strip)
+                            .children(donate_strip)
                             .when(show_statusbar, |d| d.child(status))
                             .children(picker_footer),
                     ),

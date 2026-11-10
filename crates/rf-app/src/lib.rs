@@ -5,6 +5,7 @@ mod aliases;
 mod background;
 pub mod bench;
 mod bench_view;
+mod donate;
 mod archive_view;
 mod bulk_rename;
 mod command_palette;
@@ -513,6 +514,7 @@ pub fn main() {
             None if quick_search => quick_search::toggle(cx),
             None => {
                 installer::count_start(cx);
+                donate::refresh();
                 start_mark("opening the window");
                 open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx);
                 start_mark("window opened");

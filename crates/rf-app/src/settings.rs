@@ -285,6 +285,12 @@ pub struct Settings {
     pub first_start_ms: i64,
     pub starts: u32,
     pub star_asked: bool,
+    /// The "buy me a coffee" strip, now and then: not before this time (Unix ms; 0 = by the
+    /// first-start rule), never again once turned off, and how many times it was answered (its
+    /// message changes each time).
+    pub donate_next_ms: i64,
+    pub donate_never: bool,
+    pub donate_seen: u32,
     /// The one-time move from "details" to "adaptive" (0.3.3) has been made.
     pub adaptive_offered: bool,
     pub show_extensions: bool,
@@ -416,6 +422,9 @@ impl Default for Settings {
             first_start_ms: 0,
             starts: 0,
             star_asked: false,
+            donate_next_ms: 0,
+            donate_never: false,
+            donate_seen: 0,
             adaptive_offered: false,
             show_extensions: true,
             keybindings: Default::default(),
