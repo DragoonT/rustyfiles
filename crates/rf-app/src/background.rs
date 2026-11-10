@@ -25,6 +25,7 @@ fn labels() -> rf_win::tray::Labels {
         tooltip: "rustyfiles".into(),
         open: t!("rustyfiles'ı aç").into(),
         new_window: t!("Yeni pencere").into(),
+        settings: t!("Ayarlar").into(),
         quit: t!("Çıkış").into(),
     }
 }
@@ -45,6 +46,9 @@ pub fn sync_tray(on: bool) {
     } else {
         rf_win::tray::hide();
     }
+    // One icon in the notification area: while ours is there, DirectLook leaves its own out
+    // (it reads this setting when told to reload; see look::app::tray_wanted).
+    crate::look::ipc::send(crate::look::ipc::Msg::Reload, false);
 }
 
 /// Routes tray clicks to the app (call once at startup).
@@ -76,6 +80,7 @@ fn on_tray(e: rf_win::tray::TrayEvent, cx: &mut App) {
             }
         }
         TrayEvent::NewWindow => crate::open_main_window(Some(rf_core::Location::Home), None, None, cx),
+        TrayEvent::Settings => crate::open_main_window(Some(rf_core::Location::Settings), None, None, cx),
         TrayEvent::Quit => {
             QUITTING.store(true, Ordering::Relaxed);
             let windows = cx.windows();

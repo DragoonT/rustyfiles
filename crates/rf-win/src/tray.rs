@@ -29,6 +29,8 @@ pub enum TrayEvent {
     /// Click on the icon (or "Open" in its menu).
     Open,
     NewWindow,
+    /// "Settings" in its menu.
+    Settings,
     Quit,
 }
 
@@ -38,6 +40,8 @@ pub struct Labels {
     pub tooltip: String,
     pub open: String,
     pub new_window: String,
+    /// Empty: no such item.
+    pub settings: String,
     pub quit: String,
 }
 
@@ -231,11 +235,14 @@ fn menu(hwnd: HWND) {
     unsafe {
         let Ok(m) = CreatePopupMenu() else { return };
         let ws = |s: &str| -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() };
-        let (a, b, c) = (ws(&l.open), ws(&l.new_window), ws(&l.quit));
+        let (a, b, c, d) = (ws(&l.open), ws(&l.new_window), ws(&l.quit), ws(&l.settings));
         let _ = AppendMenuW(m, MF_STRING, 1, PCWSTR(a.as_ptr()));
         // boş etiket: öğe yok (DirectLook'un menüsünde "Yeni pencere" yok)
         if !l.new_window.is_empty() {
             let _ = AppendMenuW(m, MF_STRING, 2, PCWSTR(b.as_ptr()));
+        }
+        if !l.settings.is_empty() {
+            let _ = AppendMenuW(m, MF_STRING, 4, PCWSTR(d.as_ptr()));
         }
         let _ = AppendMenuW(m, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(m, MF_STRING, 3, PCWSTR(c.as_ptr()));
@@ -249,6 +256,7 @@ fn menu(hwnd: HWND) {
             1 => fire(TrayEvent::Open),
             2 => fire(TrayEvent::NewWindow),
             3 => fire(TrayEvent::Quit),
+            4 => fire(TrayEvent::Settings),
             _ => {}
         }
     }

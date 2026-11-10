@@ -635,6 +635,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Değiştirmek istiyor musunuz?", "Do you want to replace it?"),
     ("PDF açılamadı.", "The PDF could not be opened."),
     ("Açılıyor…", "Opening…"),
+    ("Bildirim alanında DirectLook simgesi", "DirectLook icon in the notification area"),
+    ("rustyfiles arka planda çalışırken gösterilmez: tek simge rustyfiles'ınkidir", "Not shown while rustyfiles runs in the background: then rustyfiles' icon is the only one"),
     ("Bu PDF'te sayfa yok.", "This PDF has no pages."),
     ("1 sayfa", "1 page"),
     ("sayfa", "pages"),

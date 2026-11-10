@@ -28,6 +28,7 @@ fn tray_labels() -> rf_win::tray::Labels {
         tooltip: "DirectLook".into(),
         open: crate::t!("DirectLook ayarları").into(),
         new_window: String::new(),
+        settings: String::new(),
         quit: crate::t!("Çıkış").into(),
     }
 }
@@ -42,6 +43,20 @@ fn open_settings() {
             let _ = std::process::Command::new(me.with_file_name("rustyfiles.exe")).arg("--settings=directlook").spawn();
         }
     });
+}
+
+/// DirectLook's own icon: when its setting is on and rustyfiles has none (rustyfiles running in
+/// the background has one, with the settings in its menu): one icon, not two.
+fn tray_wanted(cx: &App) -> bool {
+    cx.global::<LookSettings>().look_tray_icon && !cx.global::<crate::settings::Settings>().run_in_background
+}
+
+fn sync_tray(cx: &App) {
+    if tray_wanted(cx) {
+        rf_win::tray::show(tray_labels());
+    } else {
+        rf_win::tray::hide();
+    }
 }
 
 fn handle(msg: Msg, cx: &mut App) {
@@ -61,7 +76,12 @@ fn handle(msg: Msg, cx: &mut App) {
             }
         }
         Msg::Close => LookManager::close(cx),
-        Msg::Reload => cx.set_global(LookSettings::load()),
+        Msg::Reload => {
+            cx.set_global(LookSettings::load());
+            // rustyfiles' settings too: language, theme, and whether it has a tray icon
+            cx.set_global(crate::settings::Settings::load());
+            sync_tray(cx);
+        }
         Msg::Quit => {
             rf_win::tray::hide();
             cx.quit();
@@ -107,9 +127,7 @@ pub fn main() {
         }
         crate::settings::apply_component_theme(cx);
         cx.set_global(LookSettings::load());
-        if cx.global::<LookSettings>().look_tray_icon {
-            rf_win::tray::show(tray_labels());
-        }
+        sync_tray(cx);
         // önizleme penceresi kapanınca DirectLook çalışmayı sürdürür (arka planda bekler)
         cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
         cx.on_window_closed(|cx, _| {
@@ -123,11 +141,7 @@ pub fn main() {
         super::system::sync(cx);
         cx.observe_global::<LookSettings>(|cx| {
             super::system::sync(cx);
-            if cx.global::<LookSettings>().look_tray_icon {
-                rf_win::tray::show(tray_labels());
-            } else {
-                rf_win::tray::hide();
-            }
+            sync_tray(cx);
         })
         .detach();
         handle(first.clone(), cx);

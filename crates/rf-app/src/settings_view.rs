@@ -1307,6 +1307,13 @@ fn look(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ),
         card(p, L::PictureInPicture, t!("Her zaman üstte"), None, lsw("look-top", p, l.look_topmost, |s, v| s.look_topmost = v)),
         card(p, L::PanelBottom, t!("Görev çubuğunda göster"), None, lsw("look-taskbar", p, l.look_show_in_taskbar, |s, v| s.look_show_in_taskbar = v)),
+        card(
+            p,
+            L::AppWindow,
+            t!("Bildirim alanında DirectLook simgesi"),
+            Some(t!("rustyfiles arka planda çalışırken gösterilmez: tek simge rustyfiles'ınkidir")),
+            lsw("look-tray", p, l.look_tray_icon, |s, v| s.look_tray_icon = v),
+        ),
         card(p, L::MousePointerClick, t!("Açılınca pencereyi odakla"), Some(t!("Kapalıyken klavye Explorer'da kalır: oklarla dosyalar arasında gezinilir")), lsw("look-focus", p, l.look_focus_on_open, |s, v| s.look_focus_on_open = v)),
         card(p, L::CircleX, t!("Başka pencereye geçince kapat"), Some(t!("Sabitlenmiş pencereler açık kalır")), lsw("look-lostfocus", p, l.look_close_on_lost_focus, |s, v| s.look_close_on_lost_focus = v)),
         card(p, L::Zap, t!("Geçiş animasyonu"), None, lsw("look-transition", p, l.look_transition, |s, v| s.look_transition = v)),
