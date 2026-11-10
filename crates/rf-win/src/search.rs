@@ -55,8 +55,23 @@ pub struct SearchStats {
 /// "İ" and "i" compare equal.
 /// Case-folded for matching. Dotless ı counts as i (and İ, lowered to i + combining dot, loses
 /// the dot), so "IŞIK", "ışık" and "Işık" find each other, as Windows' own comparison does.
+/// The other Turkish letters count as their plain ones too (ş = s, ğ = g, ü = u, ö = o, ç = c,
+/// and the circumflexed â î û): "sarki" finds "Şarkı", as people type on a keyboard without them.
 fn fold(s: &str) -> Vec<char> {
-    s.to_lowercase().chars().filter(|&c| c != '\u{307}').map(|c| if c == 'ı' { 'i' } else { c }).collect()
+    s.to_lowercase()
+        .chars()
+        .filter(|&c| c != '\u{307}')
+        .map(|c| match c {
+            'ı' | 'î' => 'i',
+            'ş' => 's',
+            'ğ' => 'g',
+            'ü' | 'û' => 'u',
+            'ö' => 'o',
+            'ç' => 'c',
+            'â' => 'a',
+            c => c,
+        })
+        .collect()
 }
 
 pub(crate) enum Matcher {
@@ -348,6 +363,11 @@ mod tests {
         assert_eq!(run(&root, "istanbul", 100).0, vec!["İstanbul.txt"]);
         assert_eq!(run(&root, "İSTANBUL", 100).0, vec!["İstanbul.txt"]);
         std::fs::remove_dir_all(&root).unwrap();
+        // typed without the Turkish letters, and the other way round
+        assert!(Matcher::new("sarki").is_match("Şarkı listesi.mp3"));
+        assert!(Matcher::new("ÖĞRENCİ").is_match("ogrenci.xlsx"));
+        assert!(Matcher::new("*cocuk*").is_match("Çocuk.jpg"));
+        assert!(!Matcher::new("sarki").is_match("saray.txt"));
     }
 
     #[test]
