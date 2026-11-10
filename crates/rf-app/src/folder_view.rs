@@ -287,6 +287,9 @@ pub struct FolderView {
     sorted_cache: Option<(SortSpec, u64, Arc<Vec<u32>>)>,
     /// Changes whenever `entries` do (cache key of `sorted_cache`).
     entries_gen: u64,
+    /// Whether any entry is a cloud file, for the entries generation it was worked out for (the
+    /// Sync column; asked several times per frame).
+    cloud_cache: std::cell::Cell<Option<(u64, bool)>>,
     pub sort: SortSpec,
     pub group: GroupBy,
     /// Details rows (headers + items) when grouping; empty = identity with `visible`.
@@ -427,6 +430,7 @@ impl FolderView {
             entries: Vec::new(),
             sorted_cache: None,
             entries_gen: 0,
+            cloud_cache: Default::default(),
             parents: Vec::new(),
             shell_items: Vec::new(),
             shell_title: None,
@@ -2690,7 +2694,16 @@ impl FolderView {
     fn visible_cols(&self, cx: &App) -> Cols {
         let c = &cx.global::<crate::settings::Settings>().columns;
         const PINNED: u32 = 0x80000;
-        let cloud = c.sync && self.location().path().is_some() && self.entries.iter().any(|e| e.is_cloud_placeholder() || e.attrs & PINNED != 0);
+        let cloud = c.sync && self.location().path().is_some() && {
+            match self.cloud_cache.get() {
+                Some((g, any)) if g == self.entries_gen => any,
+                _ => {
+                    let any = self.entries.iter().any(|e| e.is_cloud_placeholder() || e.attrs & PINNED != 0);
+                    self.cloud_cache.set(Some((self.entries_gen, any)));
+                    any
+                }
+            }
+        };
         let w = self.col_widths(cx);
         let mut free = f32::from(self.content_width) - 180. - 24.;
         let mut take = |want: bool, width: f32| -> bool {
