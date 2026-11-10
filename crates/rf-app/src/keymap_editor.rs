@@ -65,19 +65,33 @@ pub fn init(cx: &mut App) {
     cx.set_global(KeyCapture::default());
     cx.intercept_keystrokes(|ev, window, cx| {
         let Some((action, started)) = cx.global::<KeyCapture>().0.clone() else { return };
+        let quick_search = action == crate::quick_search::CAPTURE_ACTION;
         if started.elapsed() > std::time::Duration::from_secs(15) {
             // left Settings without pressing anything: give the keyboard back
             cx.global_mut::<KeyCapture>().0 = None;
+            if quick_search {
+                crate::quick_search::resync(cx);
+            }
             return;
         }
         cx.stop_propagation();
         if ev.keystroke.key == "escape" && !ev.keystroke.modifiers.modified() {
             cx.global_mut::<KeyCapture>().0 = None;
+            if quick_search {
+                crate::quick_search::resync(cx);
+            }
             window.refresh();
             return;
         }
         let Some(keys) = keys_of(&ev.keystroke) else { return };
         cx.global_mut::<KeyCapture>().0 = None;
+        if quick_search {
+            // the quick search's global shortcut: a setting, not an action binding
+            crate::settings::update(cx, |s| s.quick_search_keys = keys.clone());
+            crate::quick_search::resync(cx);
+            window.refresh();
+            return;
+        }
         crate::settings::update(cx, |s| {
             // one custom shortcut per command: replace an earlier one
             s.keybindings.retain(|_, a| *a != action);
@@ -97,7 +111,31 @@ pub fn init(cx: &mut App) {
 }
 
 pub fn start(action: String, cx: &mut App) {
-    cx.global_mut::<KeyCapture>().0 = Some((action, std::time::Instant::now()));
+    let quick_search = action == crate::quick_search::CAPTURE_ACTION;
+    // recording the quick search's shortcut was given up for another command: it comes back
+    if !quick_search && capturing(cx).as_deref() == Some(crate::quick_search::CAPTURE_ACTION) {
+        crate::quick_search::resync(cx);
+    }
+    let started = std::time::Instant::now();
+    if quick_search {
+        // the current global shortcut would swallow the keys being recorded
+        crate::quick_search::release_for_capture();
+        // left without pressing anything (the window closed, another app came up): the
+        // shortcut comes back by itself, it would otherwise stay off until a key reaches us
+        cx.spawn(async move |cx| {
+            cx.background_executor().timer(std::time::Duration::from_secs(16)).await;
+            cx.update(|cx| {
+                let still = cx.global::<KeyCapture>().0.as_ref().is_some_and(|(a, t)| a == crate::quick_search::CAPTURE_ACTION && *t == started);
+                if still {
+                    cx.global_mut::<KeyCapture>().0 = None;
+                    crate::quick_search::resync(cx);
+                    cx.refresh_windows();
+                }
+            });
+        })
+        .detach();
+    }
+    cx.global_mut::<KeyCapture>().0 = Some((action, started));
 }
 
 pub fn capturing(cx: &App) -> Option<String> {

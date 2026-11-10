@@ -225,6 +225,17 @@ impl Default for ColumnPrefs {
     }
 }
 
+/// Where the quick search's "search the web" row sends the query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSearch {
+    #[default]
+    Google,
+    Bing,
+    DuckDuckGo,
+    Yandex,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RendererPref {
@@ -368,6 +379,15 @@ pub struct Settings {
     // ---- DirectLook (Hızlı Bakış, ayrı program): ayarları kendi dosyasında (`look::config`)
     /// DirectLook kullanılsın mı (kapalıyken rustyfiles onu başlatmaz, Boşluk bir şey yapmaz).
     pub directlook_enabled: bool,
+
+    // ---- Quick search (quick_search.rs)
+    /// A global shortcut opens the quick search: apps, files, bookmarks, the web.
+    pub quick_search: bool,
+    /// Its shortcut, in GPUI's syntax ("alt-space").
+    pub quick_search_keys: String,
+    pub web_search: WebSearch,
+    /// Chrome's and Edge's bookmarks are searched too (read on this PC only).
+    pub quick_search_bookmarks: bool,
 }
 
 impl Default for Settings {
@@ -450,6 +470,10 @@ impl Default for Settings {
             ide_path: String::new(),
             show_flatten: false,
             directlook_enabled: true,
+            quick_search: true,
+            quick_search_keys: "alt-space".into(),
+            web_search: WebSearch::Google,
+            quick_search_bookmarks: true,
         }
     }
 }
@@ -566,6 +590,7 @@ impl Settings {
         crate::i18n::set(self.language);
         crate::aliases::set(self.folder_aliases.clone());
         crate::background::sync_tray(self.run_in_background);
+        crate::quick_search::sync(self);
         rf_core::format::set_date_style(match self.date_format {
             DatePref::Application => rf_core::format::DateStyle::Relative,
             DatePref::System => rf_core::format::DateStyle::Local,

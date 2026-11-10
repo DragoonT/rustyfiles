@@ -40,6 +40,7 @@ mod tags;
 mod undo;
 mod preview;
 mod properties_view;
+mod quick_search;
 mod recycle_view;
 mod theme;
 mod workspace;
@@ -178,7 +179,8 @@ pub fn open_main_window(
 /// Quits now, or once running copy/move/delete operations finish (closing the window must not
 /// cut a copy in half). A window opened meanwhile (second launch) cancels the quit.
 pub(crate) fn quit_when_idle(cx: &mut App) {
-    let running = |cx: &App| cx.try_global::<status_center::OpsGlobal>().map_or(0, |g| g.0.read(cx).running());
+    // (an app or file the quick search is still starting counts as running work)
+    let running = |cx: &App| cx.try_global::<status_center::OpsGlobal>().map_or(0, |g| g.0.read(cx).running()) + quick_search::launching();
     if running(cx) == 0 {
         save_and_quit(cx);
         return;
@@ -266,8 +268,14 @@ pub fn main() {
     let pick = (std::env::args().nth(1).as_deref() == Some("--pick")).then(|| std::env::args().nth(2)).flatten();
     // `--bar-preview`: our taskbar, as an ordinary window (see taskbar_preview)
     let bar_preview = std::env::args().nth(1).as_deref() == Some("--bar-preview");
+    // `--quick-search`: the quick search window, as its hotkey opens it (a shortcut of the
+    // user's own can run this)
+    let quick_search = std::env::args().nth(1).as_deref() == Some(quick_search::LAUNCH_ARG);
+    if bar_preview {
+        quick_search::disable_hotkey();
+    }
     let arg = std::env::args().nth(1).map(|a| a.trim().trim_matches('"').to_string()).filter(|a| !a.is_empty());
-    let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview);
+    let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search);
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
     let arg = arg.filter(|_| !new_window);
@@ -398,6 +406,7 @@ pub fn main() {
         _ if open_look_settings => look::ipc::ToApp::OpenSettings.encode(),
         _ if pick.is_some() => format!("{}{}", picker::PICK_PREFIX, pick.as_deref().unwrap_or_default()),
         _ if new_window => rf_win::jumplist::NEW_WINDOW_ARG.to_string(),
+        _ if quick_search => quick_search::LAUNCH_ARG.to_string(),
         _ if select.is_some() => format!("{}{}", workspace::SELECT_PREFIX, select.as_deref().unwrap_or_default()),
         Some(Location::Path(p)) => p.to_string_lossy().into_owned(),
         Some(Location::RecycleBin) => "shell:RecycleBinFolder".to_string(),
@@ -458,7 +467,14 @@ pub fn main() {
         actions::bind_user(cx);
         keymap_editor::init(cx);
         if let Some(page) = &settings_arg {
-            settings_view::open_page(if page == "speed" { settings_view::Page::Speed } else { settings_view::Page::Look }, cx);
+            settings_view::open_page(
+                match page.as_str() {
+                    "speed" => settings_view::Page::Speed,
+                    "general" => settings_view::Page::General,
+                    _ => settings_view::Page::Look,
+                },
+                cx,
+            );
         }
         // copies and moves keep a crash-safe journal there (see rf_win::fastcopy)
         if let Some(d) = settings::app_dir() {
@@ -473,6 +489,9 @@ pub fn main() {
             // started only to answer a dialog: no main window
             Some(pipe) => picker::begin(pipe, cx),
             None if bar_preview => taskbar_preview::open(cx),
+            // started for the quick search only: no main window (it quits when that closes,
+            // unless running in the background)
+            None if quick_search => quick_search::toggle(cx),
             None => {
                 installer::count_start(cx);
                 open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx);
@@ -514,6 +533,7 @@ pub fn main() {
         // linger invisibly and swallow every later launch through the single-instance pipe).
         // With "run in the background" on, the app stays in the notification area instead.
         background::init(cx);
+        quick_search::init(cx);
         // GPUI would quit by itself when the last window closes (QuitMode::Default on Windows):
         // that cut running copies in half and makes background mode impossible. We decide.
         cx.set_quit_mode(gpui_kit::QuitMode::Explicit);

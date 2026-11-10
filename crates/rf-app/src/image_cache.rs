@@ -202,6 +202,18 @@ impl ImageCache {
     }
 
     /// Large thumbnail (falls back to the large icon when the file has no thumbnail).
+    /// The shell's picture for a parsing name (an app of "All apps": `shell:AppsFolder\<id>`).
+    /// Asked as a thumbnail: inside rustyfiles the icon of a Store app comes back as the shell's
+    /// blank app placeholder, its thumbnail is the app's own logo.
+    pub fn shell_icon(&mut self, parsing: &str, px: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        let key = key_of(&[&"shell", &parsing, &px]);
+        let path = std::path::PathBuf::from(parsing);
+        let r = self.lookup(key, || Request { key, path, size: px, kind: Kind::Thumbnail }, true);
+        self.evict_over_budget();
+        self.release_evicted(cx);
+        r
+    }
+
     pub fn thumbnail(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         let wants_thumb = crate::icons::has_thumbnail(e);
         let key = if wants_thumb || (!e.is_dir() && has_unique_icon(&e.ext)) {

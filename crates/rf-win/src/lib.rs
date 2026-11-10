@@ -3,6 +3,7 @@
 //! Every function here may block (disk, network, shell extensions). Never call them on the UI thread.
 
 pub mod accent;
+pub mod apps;
 pub mod bench;
 pub mod cert;
 pub mod clipboard;
@@ -22,6 +23,7 @@ pub mod fileops;
 pub mod foldersize;
 pub mod sysparams;
 pub mod git;
+pub mod hotkey;
 pub mod hash;
 pub mod indexer;
 pub mod known;

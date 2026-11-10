@@ -331,6 +331,10 @@ pub fn route_ipc(msg: String, cx: &mut App) {
         crate::open_main_window(Some(Location::Home), None, None, cx);
         return;
     }
+    if msg.trim() == crate::quick_search::LAUNCH_ARG {
+        crate::quick_search::toggle(cx);
+        return;
+    }
     let (loc, select) = parse_launch(&msg);
     let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
     for (handle, ws) in list.into_iter().rev() {

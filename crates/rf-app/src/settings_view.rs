@@ -291,6 +291,78 @@ pub fn render(p: &Palette, cx: &mut App) -> AnyElement {
         .into_any_element()
 }
 
+/// Quick search: on/off, its shortcut (recorded like the keyboard shortcuts), web engine,
+/// bookmarks.
+fn quick_search_cards(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
+    let capture = crate::quick_search::CAPTURE_ACTION;
+    let waiting = crate::keymap_editor::capturing(cx).as_deref() == Some(capture);
+    let shown: SharedString = if waiting { t!("Tuşlara basın…").into() } else { crate::keymap_editor::pretty(&s.quick_search_keys).into() };
+    let keys_desc = match crate::quick_search::problem() {
+        Some(rf_win::hotkey::HotkeyError::Taken) if s.quick_search => t!("Bu kısayolu başka bir uygulama kullanıyor (ChatGPT, Gemini, PowerToys…): başka bir kısayol seçin"),
+        Some(rf_win::hotkey::HotkeyError::Invalid) if s.quick_search => t!("Bu kısayol kullanılamıyor: Ctrl, Alt, Shift ya da Win ile bir tuş seçin"),
+        _ => t!("Değiştirmek için tıklayıp yeni tuşlara basın"),
+    };
+    let warn = s.quick_search && crate::quick_search::problem().is_some();
+    let pill = div()
+        .id("qs-keys")
+        .px_3()
+        .py_1()
+        .rounded(px(4.))
+        .border_1()
+        .border_color(if warn { p.danger } else { p.border })
+        .text_sm()
+        .cursor_pointer()
+        .text_color(if waiting { p.accent } else { p.text })
+        .hover(|d| d.bg(p.pressed))
+        .when(waiting, |d| d.bg(p.selection))
+        .child(shown)
+        .on_click(move |_, window, cx| {
+            crate::keymap_editor::start(capture.to_string(), cx);
+            window.refresh();
+        })
+        .into_any_element();
+    vec![
+        section(p, t!("Hızlı arama")),
+        card(
+            p,
+            L::Search,
+            t!("Hızlı arama"),
+            Some(if s.run_in_background {
+                t!("Her yerden kısayolla: uygulamalar, dosyalar, klasörler, yer imleri ve web")
+            } else {
+                t!("Her yerden kısayolla: uygulamalar, dosyalar, klasörler, yer imleri ve web. Pencere kapalıyken de çalışması için Gelişmiş'te arka planda çalışmayı açın")
+            }),
+            sw("quick-search", p, s.quick_search, |s, v| s.quick_search = v),
+        ),
+        card(p, L::Keyboard, t!("Kısayol"), Some(keys_desc), pill),
+        card(
+            p,
+            L::Globe,
+            t!("Web araması"),
+            None,
+            dropdown(
+                "web-search",
+                p,
+                s.web_search,
+                vec![
+                    (crate::settings::WebSearch::Google, "Google".into()),
+                    (crate::settings::WebSearch::Bing, "Bing".into()),
+                    (crate::settings::WebSearch::DuckDuckGo, "DuckDuckGo".into()),
+                    (crate::settings::WebSearch::Yandex, "Yandex".into()),
+                ],
+                |s, v| s.web_search = v,
+            ),
+        ),
+        card(
+            p,
+            L::Bookmark,
+            t!("Chrome ve Edge yer imlerini de ara"),
+            Some(t!("Yer imleri bu bilgisayarda okunur, hiçbir yere gönderilmez")),
+            sw("qs-bookmarks", p, s.quick_search_bookmarks, |s, v| s.quick_search_bookmarks = v),
+        ),
+    ]
+}
+
 fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     let mut v = vec![
         card(
@@ -437,6 +509,7 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
 
     v.push(section(p, t!("Kaydırma")));
     v.push(card(p, L::ChevronsUpDown, t!("Akıcı kaydırma"), None, sw("smooth", p, s.smooth_scroll, |s, v| s.smooth_scroll = v)));
+    v.extend(quick_search_cards(p, s, cx));
     v
 }
 
