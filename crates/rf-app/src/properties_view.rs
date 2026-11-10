@@ -71,6 +71,9 @@ pub struct PropsView {
     readonly: Option<bool>,
     hidden: Option<bool>,
     loaded_flags: (Option<bool>, Option<bool>),
+    /// A single downloaded file (Windows may block it), and whether the user ticked "Unblock".
+    blocked: bool,
+    unblock: bool,
     hash: Option<Entity<crate::hash_panel::HashPanel>>,
     error: Option<SharedString>,
     busy: bool,
@@ -114,6 +117,8 @@ impl PropsView {
             readonly: None,
             hidden: None,
             loaded_flags: (None, None),
+            blocked: false,
+            unblock: false,
             hash: None,
             error: None,
             busy: false,
@@ -135,10 +140,15 @@ impl PropsView {
         let cancel = self.cancel.clone();
         if let Some(path) = self.single().map(Path::to_path_buf) {
             let p = path.clone();
-            let task = cx.background_spawn(async move { rf_win::fileinfo::info(&p).map_err(|e| e.to_string()) });
+            let task = cx.background_spawn(async move {
+                let info = rf_win::fileinfo::info(&p).map_err(|e| e.to_string());
+                let blocked = info.as_ref().is_ok_and(|i| !i.is_dir) && rf_win::fileinfo::zone_blocked(&p);
+                (info, blocked)
+            });
             cx.spawn(async move |this, cx| {
-                let r = task.await;
+                let (r, blocked) = task.await;
                 let _ = this.update(cx, |v, cx| {
+                    v.blocked = blocked;
                     if let Ok(i) = &r {
                         let flags = (Some(i.attrs & READONLY != 0), Some(i.attrs & HIDDEN != 0));
                         (v.readonly, v.hidden) = flags;
@@ -261,7 +271,7 @@ impl PropsView {
             (Some(n), Some(p)) => n.read(cx).value().trim() != file_name(p),
             _ => false,
         };
-        renamed || (self.readonly, self.hidden) != self.loaded_flags
+        renamed || (self.readonly, self.hidden) != self.loaded_flags || (self.blocked && self.unblock)
     }
 
     /// Applies the edits on a helper thread; `close` closes the window when it worked.
@@ -294,10 +304,14 @@ impl PropsView {
             (self.hidden != self.loaded_flags.1).then_some(self.hidden).flatten(),
         );
         let paths = self.paths.clone();
+        let unblock = self.blocked && self.unblock;
         self.busy = true;
         self.error = None;
         let task = cx.background_spawn(async move {
             let mut paths = paths;
+            if unblock {
+                rf_win::fileinfo::unblock(&paths[0]).map_err(|e| format!("{}: {e}", file_name(&paths[0])))?;
+            }
             if flags.0.is_some() || flags.1.is_some() {
                 for p in &paths {
                     rf_win::fileinfo::set_flags(p, flags.0, flags.1).map_err(|e| format!("{}: {e}", file_name(p)))?;
@@ -327,6 +341,9 @@ impl PropsView {
                         }
                         v.paths = paths;
                         v.loaded_flags = (v.readonly, v.hidden);
+                        if v.unblock {
+                            (v.blocked, v.unblock) = (false, false);
+                        }
                         if close {
                             window.remove_window();
                         }
@@ -462,6 +479,23 @@ impl PropsView {
                 })),
             ],
         ));
+        if self.blocked {
+            let on = self.unblock;
+            out.push(card(
+                p,
+                vec![
+                    div()
+                        .text_sm()
+                        .text_color(p.text_secondary)
+                        .child(t!("Bu dosya başka bir bilgisayardan geldi. Windows, bilgisayarınızı korumak için onu engelleyebilir."))
+                        .into_any_element(),
+                    check_row(p, "unblock", t!("Engellemeyi kaldır"), Some(on), cx.listener(move |v, _, _, cx| {
+                        v.unblock = !on;
+                        cx.notify();
+                    })),
+                ],
+            ));
+        }
         out.push(
             h_flex()
                 .id("win-props")

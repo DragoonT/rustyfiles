@@ -519,6 +519,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Verilen", "Issued to"),
     ("Veren", "Issued by"),
     ("Geçerlilik", "Valid"),
+    ("Bu dosya başka bir bilgisayardan geldi. Windows, bilgisayarınızı korumak için onu engelleyebilir.", "This file came from another computer and might be blocked to help protect this computer."),
+    ("Engellemeyi kaldır", "Unblock"),
     ("Windows uygulama paketi", "Windows app package"),
     ("Windows uygulama paketi grubu", "Windows app bundle"),
     ("Android uygulaması", "Android app"),

@@ -88,6 +88,34 @@ pub fn opens_with(path: &Path) -> Option<String> {
     Some(from_wide(&buf)).filter(|s| !s.is_empty())
 }
 
+fn zone_stream(path: &Path) -> std::ffi::OsString {
+    let mut s = path.as_os_str().to_owned();
+    s.push(":Zone.Identifier");
+    s
+}
+
+/// Whether Windows treats the file as downloaded (its Zone.Identifier stream names the Internet
+/// or Restricted zone): Explorer's "This file came from another computer… Unblock".
+pub fn zone_blocked(path: &Path) -> bool {
+    std::fs::read(zone_stream(path)).is_ok_and(|b| {
+        // usually ANSI, sometimes UTF-16 (written by other tools)
+        let text = if b.starts_with(&[0xff, 0xfe]) {
+            String::from_utf16_lossy(&b[2..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>())
+        } else {
+            String::from_utf8_lossy(&b).into_owned()
+        };
+        text.lines().any(|l| l.trim().strip_prefix("ZoneId=").and_then(|v| v.trim().parse::<u32>().ok()).is_some_and(|z| z >= 3))
+    })
+}
+
+/// Removes the downloaded mark (the Zone.Identifier stream), as Explorer's "Unblock" does.
+pub fn unblock(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(zone_stream(path)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        r => r,
+    }
+}
+
 /// Sets / clears read-only and hidden, keeping the other attribute bits.
 pub fn set_flags(path: &Path, readonly: Option<bool>, hidden: Option<bool>) -> std::io::Result<()> {
     let cur = std::fs::metadata(path)?.file_attributes();
@@ -108,6 +136,23 @@ pub fn set_flags(path: &Path, readonly: Option<bool>, hidden: Option<bool>) -> s
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn downloaded_mark_is_read_and_removed() {
+        let p = std::env::temp_dir().join(format!("rf-zone-{}.exe", std::process::id()));
+        std::fs::write(&p, b"MZ").unwrap();
+        assert!(!super::zone_blocked(&p));
+        std::fs::write(super::zone_stream(&p), "[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://example.com/\r\n").unwrap();
+        assert!(super::zone_blocked(&p));
+        super::unblock(&p).unwrap();
+        assert!(!super::zone_blocked(&p));
+        assert_eq!(std::fs::read(&p).unwrap(), b"MZ"); // the file itself untouched
+        super::unblock(&p).unwrap(); // nothing to remove: fine
+        // a local-intranet mark is not a block
+        std::fs::write(super::zone_stream(&p), "[ZoneTransfer]\r\nZoneId=1\r\n").unwrap();
+        assert!(!super::zone_blocked(&p));
+        std::fs::remove_file(&p).unwrap();
+    }
+
     use super::*;
 
     #[test]
