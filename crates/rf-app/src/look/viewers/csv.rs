@@ -13,7 +13,7 @@ const READ_MAX: u64 = 16 << 20;
 
 #[derive(Default)]
 pub struct CsvViewer {
-    table: Option<Table>,
+    table: Option<std::rc::Rc<Table>>,
     error: Option<String>,
 }
 
@@ -128,7 +128,7 @@ impl Viewer for CsvViewer {
     }
     fn prepare(&mut self, f: &Probe, _cx: &mut App) -> Prepared {
         match load(&f.path) {
-            Ok(t) => self.table = Some(t),
+            Ok(t) => self.table = Some(std::rc::Rc::new(t)),
             Err(e) => self.error = Some(e.to_string()),
         }
         Prepared::new((1000.0, 700.0), super::file_name(&f.path))
@@ -139,10 +139,10 @@ impl Viewer for CsvViewer {
             return div().size_full().p_4().text_color(p.danger).child(self.error.clone().unwrap_or_default()).into_any_element();
         };
         let char_w = 8.6;
-        let col_w: Vec<f32> = t.widths.iter().map(|&w| w as f32 * char_w + 24.0).collect();
+        let col_w: std::rc::Rc<Vec<f32>> = std::rc::Rc::new(t.widths.iter().map(|&w| w as f32 * char_w + 24.0).collect());
         let total: f32 = col_w.iter().sum::<f32>() + 48.0;
-        let mut body = div().flex().flex_col().w(px(total));
-        for (ri, r) in t.rows.iter().enumerate() {
+        // one row (only the rows on screen are built: the list below is virtual)
+        let row = move |ri: usize, r: &[String], col_w: &[f32]| -> AnyElement {
             let header = ri == 0;
             let mut line = div()
                 .flex()
@@ -167,11 +167,31 @@ impl Viewer for CsvViewer {
                         .child(v),
                 );
             }
-            body = body.child(line);
-        }
-        if t.more > 0 {
-            body = body.child(div().px_3().py_2().text_xs().text_color(p.text_secondary).child(format!("+{} {}", t.more, crate::t!("satır daha"))));
-        }
+            line.into_any_element()
+        };
+        let header = t.rows.first().map(|r| row(0, r, &col_w));
+        let body_rows = t.rows.len().saturating_sub(1);
+        let n = body_rows + usize::from(t.more > 0);
+        let (table, widths) = (t.clone(), col_w.clone());
+        let list = uniform_list("dl-csv-rows", n, move |range, _window, _cx| {
+            range
+                .map(|i| {
+                    if i < body_rows {
+                        row(i + 1, &table.rows[i + 1], &widths)
+                    } else {
+                        div().h(px(26.)).px_3().flex().items_center().text_xs().text_color(p.text_secondary).child(format!("+{} {}", table.more, crate::t!("satır daha"))).into_any_element()
+                    }
+                })
+                .collect()
+        })
+        .w(px(total))
+        .flex_1()
+        // a sideways wheel scrolls the table (the outer box), not the rows
+        .map(|mut l| {
+            l.style().restrict_scroll_to_axis = Some(true);
+            l
+        });
+        // the header stays on top; the whole table scrolls sideways, the rows up and down
         div()
             .id("dl-csv")
             .size_full()
@@ -180,7 +200,7 @@ impl Viewer for CsvViewer {
             .text_color(p.text)
             .text_sm()
             .font_family("Cascadia Mono")
-            .child(body)
+            .child(div().flex().flex_col().w(px(total)).h_full().children(header).child(list))
             .into_any_element()
     }
     fn cleanup(&mut self) {
