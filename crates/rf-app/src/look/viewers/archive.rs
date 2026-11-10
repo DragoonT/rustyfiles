@@ -196,21 +196,27 @@ pub struct ArchiveView {
     tree: Option<Tree>,
     error: Option<String>,
     open: HashSet<String>,
+    /// The shown rows (built when the tree or the open folders change, not every frame).
+    rows: Option<Rc<Vec<ShownRow>>>,
     scroll: UniformListScrollHandle,
     _task: Task<()>,
 }
+
+/// (depth, key, name, is a folder, size, date, open, icon)
+type ShownRow = (usize, String, String, bool, u64, i64, bool, L);
 
 impl ArchiveView {
     fn new(path: PathBuf, cx: &mut Context<Self>) -> Self {
         let p = path.clone();
         let opts = crate::archive_view::options(&path);
-        let task = cx.background_spawn(async move { rf_archive::list_with(&p, &opts) });
+        // the tree is built off the UI thread too (hundreds of thousands of entries take a while)
+        let task = cx.background_spawn(async move { rf_archive::list_with(&p, &opts).map(|list| build_tree(&list)) });
         let task = cx.spawn(async move |this, cx| {
             let r = task.await;
             let _ = this.update(cx, |v, cx| {
+                v.rows = None;
                 match r {
-                    Ok(list) => {
-                        let tree = build_tree(&list);
+                    Ok(tree) => {
                         // tek kök klasörlü arşivde o klasör açık gelir
                         if tree.root.children.len() == 1 && tree.root.children[0].is_dir {
                             v.open.insert(tree.root.children[0].key.clone());
@@ -228,7 +234,7 @@ impl ArchiveView {
                 cx.notify();
             });
         });
-        Self { path, tree: None, error: None, open: HashSet::new(), scroll: UniformListScrollHandle::new(), _task: task }
+        Self { path, tree: None, error: None, open: HashSet::new(), rows: None, scroll: UniformListScrollHandle::new(), _task: task }
     }
 
     fn kind_label(&self) -> String {
@@ -292,16 +298,21 @@ impl Render for ArchiveView {
             t!("Açılmış:"),
             format::size(tree.size)
         );
-        // satırlar: (derinlik, anahtar, ad, klasör mü, boyut, tarih, açık mı)
-        let list: Vec<(usize, String, String, bool, u64, i64, bool)> = rows(&tree.root, &self.open)
-            .into_iter()
-            .map(|r| (r.depth, r.key, r.node.name.clone(), r.node.is_dir, r.node.size, r.node.modified_ms, false))
-            .map(|mut r| {
-                r.6 = self.open.contains(&r.1);
-                r
-            })
-            .collect();
-        let icons: Vec<L> = rows(&tree.root, &self.open).iter().map(|r| icon_for(r.node)).collect();
+        let list = match &self.rows {
+            Some(r) => r.clone(),
+            None => {
+                let built: Vec<ShownRow> = rows(&tree.root, &self.open)
+                    .into_iter()
+                    .map(|r| {
+                        let open = self.open.contains(&r.key);
+                        (r.depth, r.key, r.node.name.clone(), r.node.is_dir, r.node.size, r.node.modified_ms, open, icon_for(r.node))
+                    })
+                    .collect();
+                let built = Rc::new(built);
+                self.rows = Some(built.clone());
+                built
+            }
+        };
         let n = list.len();
         let view = cx.entity().downgrade();
         v_flex()
@@ -321,7 +332,7 @@ impl Render for ArchiveView {
                 uniform_list("look-archive", n, move |range, _window, _cx| {
                     range
                         .map(|i| {
-                            let (depth, key, name, is_dir, size, ms, open) = list[i].clone();
+                            let (depth, key, name, is_dir, size, ms, open, icon) = list[i].clone();
                             let view = view.clone();
                             h_flex()
                                 .id(i)
@@ -339,7 +350,7 @@ impl Render for ArchiveView {
                                         .flex_shrink_0()
                                         .when(is_dir, |d| d.child(Icon::new(if open { L::ChevronDown } else { L::ChevronRight }).size(px(12.)))),
                                 )
-                                .child(Icon::new(icons[i]).size(px(16.)).text_color(if is_dir { rgb(0xE8B931).into() } else { p.text_secondary }))
+                                .child(Icon::new(icon).size(px(16.)).text_color(if is_dir { rgb(0xE8B931).into() } else { p.text_secondary }))
                                 .child(div().flex_1().min_w_0().truncate().text_color(p.text).child(name))
                                 .child(div().w(px(90.)).flex_shrink_0().text_right().text_color(p.text_secondary).child(if is_dir {
                                     String::new()
@@ -357,6 +368,7 @@ impl Render for ArchiveView {
                                             if !v.open.remove(&key) {
                                                 v.open.insert(key.clone());
                                             }
+                                            v.rows = None;
                                             cx.notify();
                                         });
                                     })
