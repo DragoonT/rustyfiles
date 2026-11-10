@@ -1,4 +1,4 @@
-//! Hashes panel (Files' properties "Hashes" tab): MD5 / SHA-1 / SHA-256 / SHA-512 / CRC32 computed
+//! Hashes panel (Files' properties "Hashes" tab): MD5 / SHA-1 / SHA-256 / SHA-384 / SHA-512 / CRC32 computed
 //! on a background thread with progress + cancel. Each row has a copy button and a compare input
 //! (paste a hash: green check on match, red X otherwise). Laid out for a ~300 px side panel.
 //!
@@ -24,7 +24,7 @@ use rf_win::hash::{Cancelled, Hashes};
 
 use crate::theme::{self, Palette};
 
-const ALGOS: [&str; 5] = ["MD5", "SHA-1", "SHA-256", "SHA-512", "CRC32"];
+const ALGOS: [&str; 6] = ["MD5", "SHA-1", "SHA-256", "SHA-384", "SHA-512", "CRC32"];
 const GREEN: u32 = 0x30D158;
 
 #[derive(Clone, PartialEq)]
@@ -171,8 +171,8 @@ impl HashPanel {
         cx.notify();
     }
 
-    fn values(&self) -> Option<[&str; 5]> {
-        self.hashes.as_ref().map(|h| [&*h.md5, &*h.sha1, &*h.sha256, &*h.sha512, &*h.crc32])
+    fn values(&self) -> Option<[&str; 6]> {
+        self.hashes.as_ref().map(|h| [&*h.md5, &*h.sha1, &*h.sha256, &*h.sha384, &*h.sha512, &*h.crc32])
     }
 
     fn ensure_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
