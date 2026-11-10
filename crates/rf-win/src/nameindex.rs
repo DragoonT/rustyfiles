@@ -1446,6 +1446,25 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
+    /// Memory of a saved index, part by part: `RF_INDEX=c.rfidx cargo test -p rf-win --lib --release index_memory -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn index_memory() {
+        let p = std::env::var("RF_INDEX").unwrap();
+        let t = std::time::Instant::now();
+        let ix = Index::load(Path::new(&p)).unwrap();
+        let mb = |b: usize| b as f64 / (1 << 20) as f64;
+        println!("load {:.0} ms; entries {} (live {}), distinct names {}", t.elapsed().as_secs_f64() * 1000.0, ix.len(), ix.live(), ix.distinct_names());
+        println!("parent {:.1} MB, name_id {:.1} MB, flags {:.1} MB", mb(ix.parent.capacity() * 4), mb(ix.name_id.capacity() * 4), mb(ix.flags.capacity()));
+        println!("names: pool {:.1} MB, offsets {:.1} MB, lookup {:.1} MB", mb(ix.names.pool.capacity()), mb(ix.names.off.capacity() * 4), mb(ix.names.lookup.memory()));
+        println!("dirs table {:.1} MB, frn map {} entries ~{:.1} MB; total {:.1} MB", mb(ix.dirs.memory()), ix.frn.len(), mb(ix.frn.capacity() * 13), mb(ix.memory()));
+        for q in ["rapor", "a", "zzzzqx", "*.pdf"] {
+            let t = std::time::Instant::now();
+            let n = ix.search(q, None, false, 3000).map_or(0, |v| v.len());
+            println!("search {q:?}: {n} hits in {:.1} ms", t.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+
     /// The ranked search returns the best names first, whatever their place in the index, and
     /// shallower paths first among equals.
     #[test]
