@@ -241,7 +241,17 @@ fn shell_place_bounded(arg: &str, limit: std::time::Duration) -> Option<rf_win::
 }
 
 /// rustyfiles'ın girişi.
+/// Start-up timing (`RUSTYFILES_TRACE_START=1`, logged at info): milliseconds since the process
+/// was created, at the steps before the first window.
+pub(crate) fn start_mark(step: &str) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if *ON.get_or_init(|| std::env::var_os("RUSTYFILES_TRACE_START").is_some()) {
+        eprintln!("start: {step} at {} ms", rf_win::process_age_ms());
+    }
+}
+
 pub fn main() {
+    start_mark("main");
     // Velopack (installer / updater): first, it may run an install hook and exit
     installer::startup();
     // the id Velopack gives the Start menu / taskbar shortcuts: a pin survives updates
@@ -254,7 +264,9 @@ pub fn main() {
     // GPU/CPU switches at info level.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,gpui_windows=info"))
         .target(env_logger::Target::Stderr)
+        .format_timestamp_millis()
         .init();
+    start_mark("logging");
 
     // As default file manager we also receive shell namespaces (Control Panel = "::{…}") and
     // non-folders: hand those back to Explorer so nothing becomes unreachable.
@@ -449,9 +461,12 @@ pub fn main() {
         });
     }
 
+    start_mark("before the app");
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
+        start_mark("app running");
         gpui_kit::init(cx);
         cx.set_global(settings::Settings::load());
+        start_mark("settings loaded");
         rf_core::sort::set_turkish_collation(rf_win::encoding::user_locale_is_turkish());
         // eski kod sayfalı metinlerin tahmini: Türkçe olmayan sistemde Türkçe ipucu verilmez
         if !rf_win::encoding::user_locale_is_turkish() {
@@ -498,7 +513,9 @@ pub fn main() {
             None if quick_search => quick_search::toggle(cx),
             None => {
                 installer::count_start(cx);
+                start_mark("opening the window");
                 open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx);
+                start_mark("window opened");
                 // a copy or move cut off last time: ask to carry it on
                 status_center::offer_resume(cx);
             }

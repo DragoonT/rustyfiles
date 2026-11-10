@@ -68,3 +68,19 @@ pub mod wide;
 pub use drives::{Drive, DriveKind, list_drives};
 pub use known::{KnownFolder, known_folders};
 pub use listing::{ListError, list_dir, stat_entry};
+
+/// Milliseconds since this process was created (start-up timing).
+pub fn process_age_ms() -> u64 {
+    use windows::Win32::Foundation::FILETIME;
+    use windows::Win32::System::SystemInformation::GetSystemTimePreciseAsFileTime;
+    use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+    let (mut created, mut a, mut b, mut c) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+    unsafe {
+        if GetProcessTimes(GetCurrentProcess(), &mut created, &mut a, &mut b, &mut c).is_err() {
+            return 0;
+        }
+        let now = GetSystemTimePreciseAsFileTime();
+        let t = |f: FILETIME| ((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64;
+        t(now).saturating_sub(t(created)) / 10_000
+    }
+}
