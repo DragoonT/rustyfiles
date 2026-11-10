@@ -66,16 +66,45 @@ struct Player {
     mp: windows::Win32::Media::MediaFoundation::IMFPMediaPlayer,
     /// Play was asked for before the file finished opening: the timer starts it.
     pending_play: u32,
+    /// The last play / pause asked for, and when. MFPlay applies both asynchronously: its own
+    /// state still says the old thing for a moment, and a second press decided from it would
+    /// repeat the first command instead of undoing it.
+    asked: Option<(bool, std::time::Instant)>,
 }
 
 const PLAY_TIMER: usize = 1;
+/// For this long after a play / pause, what was asked answers "is it playing" (see `Player::asked`).
+const ASKED_HOLDS: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// What the video's own window tells the app: clicks on the picture land on that window, never
+/// on the app's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MediaEvent {
+    /// Playback was started or paused (by the app or by a click on the picture).
+    Playing(bool),
+    /// The picture was double-clicked.
+    DoubleClick,
+}
+
+static MEDIA_EVENTS: std::sync::Mutex<Option<Box<dyn Fn(MediaEvent) + Send>>> = std::sync::Mutex::new(None);
+
+/// Sends the player's events to `f` (called on the shell STA thread; the newest caller wins).
+pub fn set_media_events(f: impl Fn(MediaEvent) + Send + 'static) {
+    *MEDIA_EVENTS.lock().unwrap_or_else(|e| e.into_inner()) = Some(Box::new(f));
+}
+
+fn emit(e: MediaEvent) {
+    if let Some(f) = MEDIA_EVENTS.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+        f(e);
+    }
+}
 
 thread_local! {
     static HOST: RefCell<Option<Host>> = const { RefCell::new(None) };
 }
 
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    use windows::Win32::UI::WindowsAndMessaging::{KillTimer, WM_LBUTTONUP, WM_PAINT, WM_SIZE, WM_TIMER};
+    use windows::Win32::UI::WindowsAndMessaging::{KillTimer, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_PAINT, WM_SIZE, WM_TIMER};
     // the player, if any (never while HOST is borrowed: messages can arrive re-entrantly)
     let player = || HOST.with(|h| h.try_borrow().ok().and_then(|h| h.as_ref().and_then(|x| x.player.as_ref().map(|p| p.mp.clone()))));
     match msg {
@@ -87,6 +116,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 }
                 return LRESULT(0);
             };
+            // paused meanwhile (a timer message already queued outlives KillTimer): nothing to start
+            let wanted = HOST.with(|h| h.try_borrow().ok().and_then(|h| h.as_ref().and_then(|x| x.player.as_ref().map(|p| p.pending_play > 0)))).unwrap_or(true);
+            if !wanted {
+                unsafe {
+                    let _ = KillTimer(Some(hwnd), PLAY_TIMER);
+                }
+                return LRESULT(0);
+            }
             let ready = unsafe { mp.GetMediaItem() }.is_ok();
             let started = ready && {
                 if muted_for_tests() {
@@ -125,9 +162,14 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             unsafe { DefWindowProcW(hwnd, msg, wp, lp) }
         }
-        // clicking the video toggles play / pause, like most players
+        // clicking the video toggles play / pause, like most players; a double click (two
+        // clicks: paused and resumed, or the other way round) is the app's to answer (fullscreen)
         WM_LBUTTONUP => {
-            toggle_play();
+            media_toggle();
+            LRESULT(0)
+        }
+        WM_LBUTTONDBLCLK => {
+            emit(MediaEvent::DoubleClick);
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
@@ -255,7 +297,7 @@ pub fn media_play(owner: isize, path: &Path, rect: Option<RECT>) {
         let mp = unsafe { IMFPMediaPlayer::from_raw(raw) };
         HOST.with(|h| {
             if let Some(x) = h.borrow_mut().as_mut() {
-                x.player = Some(Player { path: path.to_path_buf(), mp, pending_play: 0 });
+                x.player = Some(Player { path: path.to_path_buf(), mp, pending_play: 0, asked: None });
             }
         });
     }
@@ -263,6 +305,7 @@ pub fn media_play(owner: isize, path: &Path, rect: Option<RECT>) {
     HOST.with(|h| {
         if let Some(p) = h.borrow_mut().as_mut().and_then(|x| x.player.as_mut()) {
             p.pending_play = 200;
+            p.asked = Some((true, std::time::Instant::now()));
         }
     });
     unsafe {
@@ -274,29 +317,64 @@ fn current_player() -> Option<windows::Win32::Media::MediaFoundation::IMFPMediaP
     HOST.with(|h| h.try_borrow().ok().and_then(|h| h.as_ref().and_then(|x| x.player.as_ref().map(|p| p.mp.clone()))))
 }
 
-/// Pauses our player. STA thread.
-pub fn media_pause() {
-    if let Some(mp) = current_player() {
-        unsafe {
-            let _ = mp.Pause();
-        }
+/// Whether the player plays, as far as the user is concerned: a play still waiting for the file
+/// to open counts, and for a moment after a play / pause what was asked does (see `Player::asked`).
+fn playing_now(mp: &windows::Win32::Media::MediaFoundation::IMFPMediaPlayer) -> bool {
+    use windows::Win32::Media::MediaFoundation::MFP_MEDIAPLAYER_STATE_PLAYING;
+    let (pending, asked) =
+        HOST.with(|h| h.try_borrow().ok().and_then(|h| h.as_ref().and_then(|x| x.player.as_ref().map(|p| (p.pending_play > 0, p.asked))))).unwrap_or((false, None));
+    match asked {
+        Some((want, at)) if at.elapsed() < ASKED_HOLDS => want,
+        _ => pending || unsafe { mp.GetState() }.is_ok_and(|s| s == MFP_MEDIAPLAYER_STATE_PLAYING),
     }
 }
 
-fn toggle_play() {
-    use windows::Win32::Media::MediaFoundation::MFP_MEDIAPLAYER_STATE_PLAYING;
-    if let Some(mp) = current_player() {
-        unsafe {
-            if mp.GetState().is_ok_and(|s| s == MFP_MEDIAPLAYER_STATE_PLAYING) {
-                let _ = mp.Pause();
-            } else {
-                if muted_for_tests() {
-                    let _ = mp.SetMute(true);
-                }
-                let _ = mp.Play();
+/// Plays (`Some(true)`), pauses (`Some(false)`) or toggles (`None`) and returns whether the
+/// player now plays; `None` without a player. The one place play / pause is decided, on the
+/// thread that owns the player: the app's button and a click on the picture both end here, so
+/// neither works from a stale copy of the state. The video window is left as it is.
+fn set_playing(want: Option<bool>) -> Option<bool> {
+    use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
+    let mp = current_player()?;
+    let play = want.unwrap_or_else(|| !playing_now(&mp));
+    let ready = unsafe { mp.GetMediaItem() }.is_ok();
+    // (never call the player while HOST is borrowed: its calls can re-enter the window procedure)
+    let hwnd = HOST.with(|h| {
+        let mut h = h.try_borrow_mut().ok()?;
+        let x = h.as_mut()?;
+        let p = x.player.as_mut()?;
+        p.asked = Some((play, std::time::Instant::now()));
+        // a pause also calls off a play still waiting for the file to open (the timer would
+        // start it a moment later and the pause would be lost); a play before the file is open
+        // waits for it the same way the first one does
+        p.pending_play = if play && !ready { 200 } else { 0 };
+        Some(x.hwnd)
+    })?;
+    unsafe {
+        if play && ready {
+            if muted_for_tests() {
+                let _ = mp.SetMute(true);
             }
+            let _ = mp.Play();
+        } else if play {
+            let _ = SetTimer(Some(hwnd), PLAY_TIMER, 30, None);
+        } else {
+            let _ = KillTimer(Some(hwnd), PLAY_TIMER);
+            let _ = mp.Pause();
         }
     }
+    emit(MediaEvent::Playing(play));
+    Some(play)
+}
+
+/// Pauses our player. STA thread.
+pub fn media_pause() {
+    set_playing(Some(false));
+}
+
+/// Plays if paused, pauses if playing; returns whether it now plays. STA thread.
+pub fn media_toggle() -> Option<bool> {
+    set_playing(None)
 }
 
 /// Jumps to `fraction` (0..1) of the length. STA thread.
@@ -322,14 +400,13 @@ pub struct MediaState {
 
 /// The player's state, `None` without a player. STA thread.
 pub fn media_state() -> Option<MediaState> {
-    use windows::Win32::Media::MediaFoundation::{MFP_MEDIAPLAYER_STATE_PLAYING, MFP_POSITIONTYPE_100NS};
+    use windows::Win32::Media::MediaFoundation::MFP_POSITIONTYPE_100NS;
     let mp = current_player()?;
-    let pending = HOST.with(|h| h.try_borrow().ok().and_then(|h| h.as_ref().and_then(|x| x.player.as_ref().map(|p| p.pending_play > 0)))).unwrap_or(false);
     unsafe {
         let secs = |v: windows::core::Result<windows::Win32::System::Com::StructuredStorage::PROPVARIANT>| v.ok().and_then(|v| i64::try_from(&v).ok()).map_or(0.0, |t| t as f64 / 1e7);
         Some(MediaState {
             // a play that is about to start counts as playing (the button doesn't flicker)
-            playing: pending || mp.GetState().is_ok_and(|s| s == MFP_MEDIAPLAYER_STATE_PLAYING),
+            playing: playing_now(&mp),
             position: secs(mp.GetPosition(&MFP_POSITIONTYPE_100NS)),
             duration: secs(mp.GetDuration(&MFP_POSITIONTYPE_100NS)),
         })
@@ -382,7 +459,8 @@ fn host_window(owner: isize) -> Option<HWND> {
         unsafe {
             let inst = GetModuleHandleW(None).ok()?;
             let class = w!("rustyfiles-preview-host");
-            let wc = WNDCLASSW { lpfnWndProc: Some(wndproc), hInstance: inst.into(), lpszClassName: class, ..Default::default() };
+            // CS_DBLCLKS: the picture's double click arrives as one (see WM_LBUTTONDBLCLK)
+            let wc = WNDCLASSW { style: windows::Win32::UI::WindowsAndMessaging::CS_DBLCLKS, lpfnWndProc: Some(wndproc), hInstance: inst.into(), lpszClassName: class, ..Default::default() };
             RegisterClassW(&wc);
             let hwnd = CreateWindowExW(
                 WINDOW_EX_STYLE(WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0),

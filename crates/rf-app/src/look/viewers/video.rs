@@ -27,6 +27,24 @@ use crate::t;
 const HIDE_AFTER: Duration = Duration::from_millis(1500);
 /// Oynatma döngüsünün yoklama aralığı.
 const TICK: Duration = Duration::from_millis(8);
+/// While the timeline is dragged the player is sent a new position at most this often (every
+/// jump makes it decode from a key frame; the bar itself follows the pointer at once).
+const SCRUB_EVERY: Duration = Duration::from_millis(80);
+/// After a jump the bar stays on its target this long at most, until the player reports it (the
+/// Media Foundation and rustdecoder routes report their position with a delay).
+const SEEK_HOLD: Duration = Duration::from_millis(800);
+
+/// The timeline being dragged (GPUI's drag: its moves arrive wherever the pointer goes).
+struct SeekDrag;
+
+/// Nothing follows the pointer while the timeline is dragged.
+struct SeekGhost;
+
+impl Render for SeekGhost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Empty
+    }
+}
 
 #[derive(Default)]
 pub struct VideoViewer {
@@ -220,8 +238,20 @@ pub struct MediaView {
     rd_opening: bool,
     rd_rect: Option<[i32; 4]>,
     rd_state: Option<rustdecoder::window::WindowState>,
-    /// The popup reported a double click: the next render toggles fullscreen (it has the window).
-    rd_fullscreen: bool,
+    /// The video's own window reported a double click: the next render toggles fullscreen (it
+    /// has the window).
+    want_fullscreen: bool,
+    /// The timeline is being dragged: the fraction under the pointer, which the bar shows
+    /// instead of the player's position.
+    scrub: Option<f64>,
+    /// The fraction last sent to the player during the drag, and when.
+    scrub_sent: Option<(f64, Instant)>,
+    /// Playback was paused for the drag and goes on when it ends.
+    scrub_resume: bool,
+    /// The last jump's target and time: the bar stays there until the player reports it.
+    seek_hold: Option<(f64, Instant)>,
+    /// How long Media Foundation gets to open the file before it counts as unsupported.
+    mf_wait: Duration,
     _hide: Option<Task<()>>,
     _tasks: Vec<Task<()>>,
 }
@@ -264,7 +294,13 @@ impl MediaView {
             rd_opening: false,
             rd_rect: None,
             rd_state: None,
-            rd_fullscreen: false,
+            want_fullscreen: false,
+            scrub: None,
+            scrub_sent: None,
+            scrub_resume: false,
+            seek_hold: None,
+            // a network drive needs longer than a local disk to hand over the file's header
+            mf_wait: if rf_win::drives::slow_to_read(&path) { Duration::from_secs(20) } else { Duration::from_secs(2) },
             _hide: None,
             _tasks: Vec::new(),
         };
@@ -310,10 +346,8 @@ impl MediaView {
                 self.tick(cx);
             }
             Kind::Mf => {
-                self.mf = true;
                 self.video = true;
-                self.controls = true;
-                self.poll_mf(cx);
+                self.start_mf(cx);
             }
             Kind::Rd(fallback, probe) => {
                 self.rd_mode = true;
@@ -391,8 +425,10 @@ impl MediaView {
                         // other routes (click plays, double click is fullscreen, the wheel is the
                         // volume, moving shows the controls) is done here from the popup's events
                         rustdecoder::window::WindowEvent::Click => v.toggle_play(cx),
+                        // the second half of a double click: its first click's toggle is taken back
                         rustdecoder::window::WindowEvent::DoubleClick => {
-                            v.rd_fullscreen = true;
+                            v.toggle_play(cx);
+                            v.want_fullscreen = true;
                             cx.notify();
                         }
                         rustdecoder::window::WindowEvent::Wheel(d) => {
@@ -422,10 +458,8 @@ impl MediaView {
                 v.player = None;
                 if rf_win::preview_host::is_playable(&v.path) {
                     log::info!("look: rf-player cannot decode {}, Media Foundation: {err}", v.path.display());
-                    v.mf = true;
-                    v.controls = true;
                     v.opened_at = Instant::now();
-                    v.poll_mf(cx);
+                    v.start_mf(cx);
                 } else {
                     v.failed = Some(err);
                 }
@@ -508,6 +542,39 @@ impl MediaView {
         }));
     }
 
+    /// The Media Foundation route: Windows draws the video in a window of its own over ours.
+    /// Clicks on the picture land there, so that window tells us what they did.
+    fn start_mf(&mut self, cx: &mut Context<Self>) {
+        self.mf = true;
+        self.controls = true;
+        let (tx, mut rx) = futures::channel::mpsc::unbounded();
+        rf_win::preview_host::set_media_events(move |e| {
+            let _ = tx.unbounded_send(e);
+        });
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            use futures::StreamExt;
+            use rf_win::preview_host::MediaEvent;
+            while let Some(e) = rx.next().await {
+                let alive = this.update(cx, |v, cx| {
+                    match e {
+                        // the button follows at once (the state is otherwise polled)
+                        MediaEvent::Playing(playing) => {
+                            if let Some(s) = &mut v.mf_state {
+                                s.playing = playing;
+                            }
+                        }
+                        MediaEvent::DoubleClick => v.want_fullscreen = true,
+                    }
+                    cx.notify();
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        }));
+        self.poll_mf(cx);
+    }
+
     fn poll_mf(&mut self, cx: &mut Context<Self>) {
         self._tasks.push(cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(Duration::from_millis(250)).await;
@@ -519,7 +586,7 @@ impl MediaView {
             let gone = this.update(cx, |v, cx| {
                 v.mf_state = st;
                 // Media Foundation de açamadıysa (süre gelmedi): oynatıcı kapanır, açıklama gösterilir
-                if v.failed.is_none() && v.opened_at.elapsed() > Duration::from_secs(2) && st.is_none_or(|s| s.duration <= 0.0) {
+                if v.failed.is_none() && v.opened_at.elapsed() > v.mf_wait && st.is_none_or(|s| s.duration <= 0.0) {
                     v.failed = Some(t!("Bu biçim desteklenmiyor (ne FilmCraft ne de Windows çözebildi)").to_string());
                     v.mf = false;
                     v.video = false;
@@ -538,7 +605,8 @@ impl MediaView {
         self._hide = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(HIDE_AFTER).await;
             let _ = this.update(cx, |v, cx| {
-                if !v.hovered_controls && v.video && !v.mf {
+                // (hover is not reported while the timeline is dragged: the drag keeps them up)
+                if !v.hovered_controls && v.scrub.is_none() && v.video && !v.mf {
                     v.controls = false;
                     cx.notify();
                 }
@@ -562,14 +630,11 @@ impl MediaView {
             return;
         }
         if self.mf {
-            let playing = self.mf_state.is_some_and(|s| s.playing);
-            let (owner, path) = (self.mf_owner, self.path.clone());
-            rf_win::sta::run(move |_| {
-                if playing {
-                    rf_win::preview_host::media_pause()
-                } else {
-                    rf_win::preview_host::media_play(owner, &path, None)
-                }
+            // decided by the player's own thread from its real state (our copy is polled, up to
+            // 250 ms old: a second press decided from it repeated the first command); the button
+            // follows its event (see `start_mf`)
+            rf_win::sta::run(|_| {
+                rf_win::preview_host::media_toggle();
             });
             return;
         }
@@ -583,8 +648,47 @@ impl MediaView {
         cx.notify();
     }
 
+    /// The timeline is pressed or dragged to `f` (0..1): the bar goes there at once, the player
+    /// follows (at most every `SCRUB_EVERY`, and once more when the drag ends).
+    fn scrub_to(&mut self, f: f64, cx: &mut Context<Self>) {
+        let f = f.clamp(0.0, 1.0);
+        if self.scrub.is_none() {
+            self.scrub_sent = None;
+            self.scrub_resume = false;
+            // our own player would play a scrap of sound after every jump: it waits for the
+            // drag to end (its picture follows a jump while paused too)
+            if let Some(p) = self.player.as_mut().filter(|p| p.state().playing) {
+                p.pause();
+                self.scrub_resume = true;
+            }
+        }
+        self.scrub = Some(f);
+        if self.scrub_sent.is_none_or(|(_, at)| at.elapsed() >= SCRUB_EVERY) {
+            self.scrub_sent = Some((f, Instant::now()));
+            self.seek_fraction(f);
+        }
+        self.show_controls(cx);
+        cx.notify();
+    }
+
+    /// The button is up: the player goes to where the drag ended and plays on if it was playing.
+    fn end_scrub(&mut self, cx: &mut Context<Self>) {
+        let Some(f) = self.scrub.take() else { return };
+        if self.scrub_sent.take().is_none_or(|(sent, _)| sent != f) {
+            self.seek_fraction(f);
+        }
+        if std::mem::take(&mut self.scrub_resume) {
+            if let Some(p) = &mut self.player {
+                p.play();
+            }
+        }
+        self.arm_hide(cx);
+        cx.notify();
+    }
+
     fn seek_fraction(&mut self, f: f64) {
         let f = f.clamp(0.0, 1.0);
+        self.seek_hold = Some((f, Instant::now()));
         if self.rd_mode {
             if let Some(rd) = &self.rd {
                 rd.seek_fraction(f);
@@ -617,7 +721,15 @@ impl MediaView {
         } else {
             (self.state.playing, self.state.position, self.state.duration)
         };
-        let frac = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) as f32 } else { 0.0 };
+        let reported = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) } else { 0.0 };
+        // the pointer's place while dragging; after a jump its target, until the player is there
+        let held = self.seek_hold.filter(|(f, at)| at.elapsed() < SEEK_HOLD && (reported - f).abs() > 0.01).map(|(f, _)| f);
+        let shown = self.scrub.or(held).unwrap_or(reported);
+        let pos = if self.scrub.is_some() || held.is_some() { shown * dur } else { pos };
+        let frac = shown as f32;
+        let scrubbing = self.scrub.is_some();
+        // (paused only for the drag: the button keeps saying what happens when it ends)
+        let playing = playing || self.scrub_resume;
         let fg: Hsla = if light_text { white().into() } else { rgb(0x1a1a1a).into() };
         let track: Hsla = if light_text { hsla(0., 0., 1., 0.3) } else { hsla(0., 0., 0., 0.2) };
         let accent = cx.global::<gpui_kit::component::Theme>().primary;
@@ -644,6 +756,10 @@ impl MediaView {
             .text_color(fg)
             .text_xs()
             .on_hover(cx.listener(|v, h: &bool, _, _| v.hovered_controls = *h))
+            // A press on the controls stops here. The picture behind them toggles play on every
+            // press: reaching it, a click on the pause button paused on the press and played
+            // again on the release, and the loop and mute buttons paused the video too.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(btn("media-play", if playing { L::Pause } else { L::Play }, false).on_click(cx.listener(|v, _, _, cx| v.toggle_play(cx))))
             .child(div().w(px(84.)).flex_shrink_0().child(format!("{} / {}", clock(pos), clock(dur))))
             .child(
@@ -658,15 +774,50 @@ impl MediaView {
                         let bar = bar.clone();
                         canvas(move |b, _, _| bar.set(Some(b)), |_, _, _, _| {}).absolute().size_full()
                     })
-                    .child(div().relative().w_full().h(px(4.)).rounded(px(2.)).bg(track).child(div().h_full().w(relative(frac)).rounded(px(2.)).bg(accent)))
+                    .group("media-seek")
+                    .child(
+                        div()
+                            .relative()
+                            .w_full()
+                            .h(px(4.))
+                            .rounded(px(2.))
+                            .bg(track)
+                            .child(div().h_full().w(relative(frac)).rounded(px(2.)).bg(accent))
+                            // the handle: there while the pointer is on the timeline or drags it
+                            .child(
+                                div()
+                                    .absolute()
+                                    .top(px(-4.))
+                                    .left(relative(frac))
+                                    .ml(px(-6.))
+                                    .size(px(12.))
+                                    .rounded_full()
+                                    .bg(fg)
+                                    .when(!scrubbing, |d| d.opacity(0.).group_hover("media-seek", |s| s.opacity(1.))),
+                            ),
+                    )
                     .on_mouse_down(MouseButton::Left, cx.listener(move |v, ev: &MouseDownEvent, _, cx| {
                         if let Some(b) = bar.get() {
-                            let f = (f32::from(ev.position.x - b.origin.x) / f32::from(b.size.width).max(1.0)) as f64;
-                            v.seek_fraction(f);
-                            cx.notify();
+                            v.scrub_to((f32::from(ev.position.x - b.origin.x) / f32::from(b.size.width).max(1.0)) as f64, cx);
                         }
                         cx.stop_propagation();
-                    })),
+                    }))
+                    // dragging: the moves keep coming when the pointer leaves the thin bar (and
+                    // the window); the button going up anywhere ends it
+                    .on_drag(SeekDrag, |_, _, _, cx| cx.new(|_| SeekGhost))
+                    .on_drag_move(cx.listener(|v, ev: &DragMoveEvent<SeekDrag>, _, cx| {
+                        if v.scrub.is_none() {
+                            return;
+                        }
+                        if ev.event.pressed_button != Some(MouseButton::Left) {
+                            v.end_scrub(cx);
+                            return;
+                        }
+                        let b = ev.bounds;
+                        v.scrub_to((f32::from(ev.event.position.x - b.origin.x) / f32::from(b.size.width).max(1.0)) as f64, cx);
+                    }))
+                    .on_mouse_up(MouseButton::Left, cx.listener(|v, _: &MouseUpEvent, _, cx| v.end_scrub(cx)))
+                    .on_mouse_up_out(MouseButton::Left, cx.listener(|v, _: &MouseUpEvent, _, cx| v.end_scrub(cx))),
             )
             .when(!self.mf, |d| {
                 d.child(btn("media-loop", L::RotateCw, self.looping).on_click(cx.listener(|v, _, _, cx| {
@@ -724,7 +875,7 @@ impl Render for MediaView {
         let scale = window.scale_factor();
         self.target = (((dw * scale) as u32).max(2), ((dh * scale) as u32).max(2));
         let controls = self.controls || self.mf;
-        if std::mem::take(&mut self.rd_fullscreen) {
+        if std::mem::take(&mut self.want_fullscreen) {
             window.toggle_fullscreen();
         }
         let mut root = div()
@@ -732,7 +883,13 @@ impl Render for MediaView {
             .relative()
             .size_full()
             .bg(black())
-            .on_mouse_move(cx.listener(|v, _: &MouseMoveEvent, _, cx| v.show_controls(cx)))
+            .on_mouse_move(cx.listener(|v, ev: &MouseMoveEvent, _, cx| {
+                // a drag of the timeline whose button-up never arrived
+                if v.scrub.is_some() && ev.pressed_button != Some(MouseButton::Left) {
+                    v.end_scrub(cx);
+                }
+                v.show_controls(cx);
+            }))
             .on_scroll(cx.listener(|v, ev: &ScrollEvent, _, cx| {
                 let dy = match ev.delta {
                     ScrollDelta::Pixels(p) => f32::from(p.y) / 100.0,
@@ -741,11 +898,13 @@ impl Render for MediaView {
                 v.set_volume(v.volume + 0.04 * dy, cx);
                 v.show_controls(cx);
             }))
+            // A click on the picture plays / pauses at once. A double click is fullscreen: its
+            // second press takes the first one's toggle back, so playback is as it was. (The
+            // click count keeps growing while clicks come quickly: every even one is a second.)
             .on_mouse_down(MouseButton::Left, cx.listener(|v, ev: &MouseDownEvent, window, cx| {
-                if ev.click_count == 2 {
+                v.toggle_play(cx);
+                if ev.click_count % 2 == 0 {
                     window.toggle_fullscreen();
-                } else if ev.click_count == 1 {
-                    v.toggle_play(cx);
                 }
             }));
         // the video's own window (Media Foundation, rustdecoder) goes over this rectangle (screen

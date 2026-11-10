@@ -201,6 +201,10 @@ pub fn shown_size(frame: (u32, u32), coded: (u32, u32), display: (u32, u32)) -> 
 enum Cmd {
     Play,
     Pause,
+    /// Play if paused, pause if playing: decided by the render thread, which knows. (Deciding
+    /// from the published state sent a second Play while the first was still starting, and the
+    /// pause was lost.)
+    Toggle,
     /// Seconds from the start.
     Seek(f64),
     Volume(f32),
@@ -464,9 +468,26 @@ struct Render {
 }
 
 impl Render {
+    /// Applies `first` and whatever else is queued, in order, except that of several seeks only
+    /// the last runs: a dragged timeline sends many, and each blocks until its picture is there.
+    fn apply_queued(&mut self, first: Option<Cmd>, rx: &Receiver<Cmd>) {
+        let mut queued: Vec<Cmd> = first.into_iter().collect();
+        while let Ok(c) = rx.try_recv() {
+            queued.push(c);
+        }
+        let last_seek = queued.iter().rposition(|c| matches!(c, Cmd::Seek(_)));
+        for (i, c) in queued.into_iter().enumerate() {
+            if matches!(c, Cmd::Seek(_)) && Some(i) != last_seek {
+                continue;
+            }
+            self.apply(c);
+        }
+    }
+
     fn apply(&mut self, c: Cmd) {
         match c {
-            Cmd::Play => {
+            Cmd::Toggle if self.pb.is_playing() => self.pb.pause(),
+            Cmd::Play | Cmd::Toggle => {
                 if self.ended {
                     self.pb.seek(self.start);
                     self.ended = false;
@@ -615,9 +636,7 @@ impl Render {
         let mut error: Option<String> = None;
         let mut last_publish = Instant::now() - Duration::from_secs(1);
         while !self.shared.stop.load(Ordering::SeqCst) && error.is_none() {
-            while let Ok(c) = rx.try_recv() {
-                self.apply(c);
-            }
+            self.apply_queued(None, &rx);
             // size
             let (cw, ch) = client_size(self.hwnd);
             if cw > 0 && ch > 0 && (cw, ch) != self.swap.size {
@@ -661,7 +680,7 @@ impl Render {
             // sleep until the next look; a command wakes it at once
             let wait = if self.pb.is_playing() { Duration::from_millis(1) } else { Duration::from_millis(10) };
             match rx.recv_timeout(wait) {
-                Ok(c) => self.apply(c),
+                Ok(c) => self.apply_queued(Some(c), &rx),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => break,
             }
@@ -801,7 +820,7 @@ impl VideoWindow {
 
     /// Plays or pauses, whichever the state calls for.
     pub fn toggle(&self) {
-        if self.state().playing { self.pause() } else { self.play() }
+        let _ = self.cmd.send(Cmd::Toggle);
     }
 
     /// Jumps to `t` seconds from the start.

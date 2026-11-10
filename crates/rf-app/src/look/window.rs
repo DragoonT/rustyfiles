@@ -490,6 +490,8 @@ impl LookWindow {
             .right(px(150.))
             .w(px(220.))
             .p_1()
+            // a press on the menu is not also a press on the content under it (a video would pause)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .bg(p.card_bg)
             .border_1()
             .border_color(p.border)
@@ -605,8 +607,11 @@ impl Render for LookWindow {
             .map(|d| {
                 if overlay {
                     // içerik tüm pencereyi kaplar, çubuk üstünde
-                    d.child(div().absolute().inset_0().child(content))
-                        .when_some(bar, |d, bar| d.child(div().absolute().top_0().left_0().right_0().child(bar)))
+                    // (a press on the bar's buttons is not also a press on the content under
+                    // them: the pin button paused the video)
+                    d.child(div().absolute().inset_0().child(content)).when_some(bar, |d, bar| {
+                        d.child(div().absolute().top_0().left_0().right_0().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(bar))
+                    })
                 } else {
                     d.child(
                         v_flex()
