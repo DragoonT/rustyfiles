@@ -4,7 +4,7 @@
 use std::io::Read;
 use std::path::Path;
 
-use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
+use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerLanguageNameW, VerQueryValueW};
 use windows::core::{HSTRING, PCWSTR};
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -15,6 +15,18 @@ pub struct PeInfo {
     pub product: Option<String>,
     pub company: Option<String>,
     pub description: Option<String>,
+    /// ProductVersion string ("10.0.26100.1" or whatever the vendor wrote).
+    pub product_version: Option<String>,
+    /// LegalCopyright.
+    pub copyright: Option<String>,
+    /// OriginalFilename: the name the file was built under.
+    pub original_filename: Option<String>,
+    /// The version resource's language, spelled out by Windows ("English (United States)").
+    pub language: Option<String>,
+    /// LegalTrademarks.
+    pub trademarks: Option<String>,
+    /// InternalName.
+    pub internal_name: Option<String>,
 }
 
 fn machine_name(m: u16) -> &'static str {
@@ -78,13 +90,19 @@ fn version_strings(path: &Path, out: &mut PeInfo) {
             }
         }
         // strings: the first language/code page the file lists, else US English Unicode
-        let lang = query("\\VarFileInfo\\Translation")
-            .filter(|(_, len)| *len >= 4)
-            .map(|(p, _)| {
-                let t = std::slice::from_raw_parts(p, 4);
-                format!("{:04x}{:04x}", u16::from_le_bytes([t[0], t[1]]), u16::from_le_bytes([t[2], t[3]]))
-            })
-            .unwrap_or_else(|| "040904b0".into());
+        let translation = query("\\VarFileInfo\\Translation").filter(|(_, len)| *len >= 4).map(|(p, _)| {
+            let t = std::slice::from_raw_parts(p, 4);
+            (u16::from_le_bytes([t[0], t[1]]), u16::from_le_bytes([t[2], t[3]]))
+        });
+        let lang = translation.map(|(l, cp)| format!("{l:04x}{cp:04x}")).unwrap_or_else(|| "040904b0".into());
+        // the language id spelled out by Windows, e.g. "English (United States)"
+        if let Some((l, _)) = translation {
+            let mut name = [0u16; 128];
+            let n = VerLanguageNameW(l as u32, &mut name) as usize;
+            if n > 0 {
+                out.language = Some(String::from_utf16_lossy(&name[..n.min(name.len())]).trim_end_matches('\0').to_string()).filter(|s| !s.is_empty());
+            }
+        }
         let text = |key: &str| -> Option<String> {
             let (p, len) = query(&format!("\\StringFileInfo\\{lang}\\{key}"))?;
             let w = std::slice::from_raw_parts(p as *const u16, len as usize);
@@ -94,6 +112,11 @@ fn version_strings(path: &Path, out: &mut PeInfo) {
         out.product = text("ProductName");
         out.company = text("CompanyName");
         out.description = text("FileDescription");
+        out.product_version = text("ProductVersion");
+        out.copyright = text("LegalCopyright");
+        out.original_filename = text("OriginalFilename");
+        out.trademarks = text("LegalTrademarks");
+        out.internal_name = text("InternalName");
     }
 }
 
@@ -109,6 +132,19 @@ mod tests {
         assert_ne!(i.arch, "?");
         assert!(i.version.is_some());
         assert!(i.company.as_deref().unwrap_or("").contains("Microsoft"), "{i:?}");
+    }
+
+    #[test]
+    fn reads_extra_version_fields() {
+        let p = std::path::Path::new(r"C:\Windows\System32\cmd.exe");
+        if !p.exists() {
+            return;
+        }
+        let i = super::info(p).expect("cmd is a PE image");
+        assert!(i.copyright.as_deref().unwrap_or("").contains("Microsoft"), "{i:?}");
+        assert!(i.language.is_some(), "{i:?}");
+        assert!(i.product_version.is_some(), "{i:?}");
+        assert!(i.original_filename.is_some(), "{i:?}");
     }
 
     #[test]

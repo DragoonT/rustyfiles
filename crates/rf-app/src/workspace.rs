@@ -1821,16 +1821,9 @@ impl Workspace {
                     let _ = rf_win::shell::open_terminal(&p);
                 });
             })),
-            Item::action(t!("Özellikler"), MenuIcon::Lucide(L::Wrench), with(|_, p, _, _| {
-                rf_win::sta::run(move |owner| {
-                    let mut pt = windows::Win32::Foundation::POINT::default();
-                    unsafe {
-                        let _ = windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
-                    }
-                    if let Err(e) = rf_win::ctxmenu::invoke_verb(owner, &rf_win::ctxmenu::ShellTarget::One(p), "properties", (pt.x, pt.y)) {
-                        log::warn!("properties: {e:#}");
-                    }
-                });
+            // our Properties window (a drive gets its own page there)
+            Item::action(t!("Özellikler"), MenuIcon::Lucide(L::Wrench), with(|ws, p, _, cx| {
+                crate::properties_view::open(vec![p], ws.images.clone(), cx);
             }))
             .hint("Alt+Enter"),
             Item::Separator,

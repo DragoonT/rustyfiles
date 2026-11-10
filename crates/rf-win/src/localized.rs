@@ -128,7 +128,7 @@ fn resolve(res: &str) -> Option<Arc<str>> {
 }
 
 /// `%Name%` → the environment variable's value (unknown names stay as written).
-fn expand_env(s: &str) -> String {
+pub fn expand_env(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 32);
     let mut rest = s;
     while let Some(i) = rest.find('%') {

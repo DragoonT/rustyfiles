@@ -5,8 +5,9 @@ use std::os::windows::fs::MetadataExt;
 use std::path::Path;
 
 use windows::Win32::Storage::FileSystem::{
-    FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_READONLY, FILE_FLAGS_AND_ATTRIBUTES, GetCompressedFileSizeW, GetDiskFreeSpaceW,
-    INVALID_FILE_SIZE, SetFileAttributesW,
+    CreateFileW, DecryptFileW, EncryptFileW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_READONLY, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAGS_AND_ATTRIBUTES,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, GetCompressedFileSizeW, GetDiskFreeSpaceW, GetVolumeInformationW, GetVolumePathNameW,
+    INVALID_FILE_SIZE, OPEN_EXISTING, SetFileAttributesW,
 };
 use windows::Win32::UI::Shell::{ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_FRIENDLYAPPNAME, AssocQueryStringW};
 use windows::core::{PCWSTR, PWSTR, w};
@@ -134,8 +135,197 @@ pub fn set_flags(path: &Path, readonly: Option<bool>, hidden: Option<bool>) -> s
     unsafe { SetFileAttributesW(PCWSTR(w.as_ptr()), FILE_FLAGS_AND_ATTRIBUTES(a)) }.map_err(|e| std::io::Error::from_raw_os_error(e.code().0 & 0xFFFF))
 }
 
+pub const ARCHIVE: u32 = 0x20;
+pub const NOT_INDEXED: u32 = 0x2000;
+pub const COMPRESSED: u32 = 0x800;
+pub const ENCRYPTED: u32 = 0x4000;
+const READONLY: u32 = 0x1;
+const HIDDEN: u32 = 0x2;
+const REPARSE_POINT: u32 = 0x400;
+/// The bits `set_attrs` is allowed to change.
+const SETTABLE: u32 = READONLY | HIDDEN | ARCHIVE | NOT_INDEXED;
+
+fn os_err(e: windows::core::Error) -> std::io::Error {
+    std::io::Error::from_raw_os_error(e.code().0 & 0xFFFF)
+}
+
+/// Sets the bits in `set` and clears those in `clear` among READONLY/HIDDEN/ARCHIVE/NOT_CONTENT_INDEXED
+/// (others ignored), keeping the rest. Acts on a link itself, not its target.
+pub fn set_attrs(path: &Path, set: u32, clear: u32) -> std::io::Result<()> {
+    set_attrs_changed(path, set, clear).map(|_| ())
+}
+
+/// Like `set_attrs`; true when the attributes actually changed.
+fn set_attrs_changed(path: &Path, set: u32, clear: u32) -> std::io::Result<bool> {
+    let cur = std::fs::symlink_metadata(path)?.file_attributes();
+    let a = (cur & !(clear & SETTABLE)) | (set & SETTABLE);
+    if a == cur {
+        return Ok(false);
+    }
+    // SetFileAttributes refuses 0: "no attributes" is FILE_ATTRIBUTE_NORMAL
+    let a = if a == 0 { 0x80 } else { a };
+    let w = wide(path);
+    unsafe { SetFileAttributesW(PCWSTR(w.as_ptr()), FILE_FLAGS_AND_ATTRIBUTES(a)) }.map_err(os_err)?;
+    Ok(true)
+}
+
+/// `set_attrs` on the folder and everything under it (reparse points / junctions are changed themselves but
+/// not entered). Returns how many items changed; the first error stops. `cancel` is polled per item and ends
+/// the walk early with what was done so far.
+pub fn set_attrs_tree(dir: &Path, set: u32, clear: u32, cancel: &dyn Fn() -> bool) -> std::io::Result<usize> {
+    let mut changed = 0usize;
+    if cancel() {
+        return Ok(0);
+    }
+    if set_attrs_changed(dir, set, clear)? {
+        changed += 1;
+    }
+    if std::fs::symlink_metadata(dir)?.file_attributes() & REPARSE_POINT != 0 {
+        return Ok(changed);
+    }
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in std::fs::read_dir(&d)? {
+            if cancel() {
+                return Ok(changed);
+            }
+            let p = e?.path();
+            if set_attrs_changed(&p, set, clear)? {
+                changed += 1;
+            }
+            let m = std::fs::symlink_metadata(&p)?;
+            if m.is_dir() && m.file_attributes() & REPARSE_POINT == 0 {
+                stack.push(p);
+            }
+        }
+    }
+    Ok(changed)
+}
+
+/// NTFS compression on or off for a file or folder (FSCTL_SET_COMPRESSION, COMPRESSION_FORMAT_DEFAULT / NONE;
+/// a folder only changes what new files get).
+pub fn set_compressed(path: &Path, on: bool) -> std::io::Result<()> {
+    use windows::Win32::System::IO::DeviceIoControl;
+    use windows::Win32::System::Ioctl::FSCTL_SET_COMPRESSION;
+    let w = wide(path);
+    let h = unsafe {
+        CreateFileW(
+            PCWSTR(w.as_ptr()),
+            0xC000_0000, // GENERIC_READ | GENERIC_WRITE
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS, // lets a folder be opened
+            None,
+        )
+    }
+    .map_err(os_err)?;
+    let fmt: u16 = if on { 1 } else { 0 }; // COMPRESSION_FORMAT_DEFAULT / COMPRESSION_FORMAT_NONE
+    let mut ret = 0u32;
+    let r = unsafe { DeviceIoControl(h, FSCTL_SET_COMPRESSION, Some(&fmt as *const u16 as *const _), 2, None, 0, Some(&mut ret), None) };
+    let _ = unsafe { windows::Win32::Foundation::CloseHandle(h) };
+    r.map_err(os_err)
+}
+
+/// EFS encryption on or off (EncryptFileW / DecryptFileW).
+pub fn set_encrypted(path: &Path, on: bool) -> std::io::Result<()> {
+    let w = wide(path);
+    if on {
+        unsafe { EncryptFileW(PCWSTR(w.as_ptr())) }.map_err(os_err)
+    } else {
+        unsafe { DecryptFileW(PCWSTR(w.as_ptr()), None) }.map_err(os_err)
+    }
+}
+
+/// What the volume holding `path` supports: (compression, encryption), from the FILE_FILE_COMPRESSION /
+/// FILE_SUPPORTS_ENCRYPTION flags of GetVolumeInformationW.
+pub fn volume_caps(path: &Path) -> (bool, bool) {
+    let w = wide(path);
+    let mut root = [0u16; 261];
+    if unsafe { GetVolumePathNameW(PCWSTR(w.as_ptr()), &mut root) }.is_err() {
+        return (false, false);
+    }
+    let mut flags = 0u32;
+    if unsafe { GetVolumeInformationW(PCWSTR(root.as_ptr()), None, None, None, Some(&mut flags), None) }.is_err() {
+        return (false, false);
+    }
+    (flags & 0x10 != 0, flags & 0x2_0000 != 0)
+}
+
+/// The path a folder is shared as on the network (`\\PC\Paylaşım`), from the LanmanServer share list
+/// (REG_MULTI_SZ values holding `Path=...`). Case-insensitive; admin shares (ending in `$`) are ignored.
+/// None when not shared or the list is not readable.
+pub fn share_of(dir: &Path) -> Option<String> {
+    let key = windows_registry::LOCAL_MACHINE.open(r"SYSTEM\CurrentControlSet\Services\LanmanServer\Shares").ok()?;
+    let want = dir.to_string_lossy().trim_end_matches(['\\', '/']).to_lowercase();
+    for (name, _) in key.values().ok()? {
+        if name.ends_with('$') {
+            continue;
+        }
+        let Ok(lines) = key.get_multi_string(&name) else { continue };
+        let path = lines.iter().find_map(|l| l.strip_prefix("Path=")).map(|p| p.trim_end_matches(['\\', '/']).to_lowercase());
+        if path.as_deref() == Some(want.as_str()) {
+            let pc = std::env::var("COMPUTERNAME").unwrap_or_default();
+            return Some(format!(r"\\{pc}\{name}"));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn archive_and_not_indexed_toggle() {
+        let dir = std::env::temp_dir().join(format!("rf-attrs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.txt");
+        std::fs::write(&f, b"x").unwrap();
+        super::set_attrs(&f, super::NOT_INDEXED, super::ARCHIVE).unwrap();
+        let a = super::info(&f).unwrap().attrs;
+        assert!(a & super::NOT_INDEXED != 0 && a & super::ARCHIVE == 0);
+        super::set_attrs(&f, super::ARCHIVE, super::NOT_INDEXED).unwrap();
+        let a = super::info(&f).unwrap().attrs;
+        assert!(a & super::NOT_INDEXED == 0 && a & super::ARCHIVE != 0);
+        // bits outside the four are ignored
+        super::set_attrs(&f, super::COMPRESSED | super::ENCRYPTED, 0).unwrap();
+        assert!(super::info(&f).unwrap().attrs & (super::COMPRESSED | super::ENCRYPTED) == 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn compression_toggles_on_ntfs() {
+        let dir = std::env::temp_dir().join(format!("rf-compress-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("a.txt");
+        std::fs::write(&f, vec![b'a'; 100_000]).unwrap();
+        if super::volume_caps(&f).0 {
+            super::set_compressed(&f, true).unwrap();
+            assert!(super::info(&f).unwrap().attrs & super::COMPRESSED != 0);
+            super::set_compressed(&f, false).unwrap();
+            assert!(super::info(&f).unwrap().attrs & super::COMPRESSED == 0);
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn attrs_tree_and_share_lookup() {
+        use super::{NOT_INDEXED, info, set_attrs_tree};
+        let dir = std::env::temp_dir().join(format!("rf-attrs-tree-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("alt/derin")).unwrap();
+        std::fs::write(dir.join("a.txt"), b"x").unwrap();
+        std::fs::write(dir.join("alt/b.txt"), b"x").unwrap();
+        std::fs::write(dir.join("alt/derin/c.txt"), b"x").unwrap();
+        // 3 folders (the root, alt, derin) + 3 files
+        assert_eq!(set_attrs_tree(&dir, NOT_INDEXED, 0, &|| false).unwrap(), 6);
+        assert!(info(&dir.join("alt/derin/c.txt")).unwrap().attrs & NOT_INDEXED != 0);
+        assert!(info(&dir).unwrap().attrs & NOT_INDEXED != 0);
+        assert_eq!(set_attrs_tree(&dir, NOT_INDEXED, 0, &|| false).unwrap(), 0);
+        assert_eq!(set_attrs_tree(&dir, 0, NOT_INDEXED, &|| true).unwrap(), 0); // cancelled at once
+        assert_eq!(set_attrs_tree(&dir, 0, NOT_INDEXED, &|| false).unwrap(), 6);
+        assert_eq!(super::share_of(&dir), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn downloaded_mark_is_read_and_removed() {
         let p = std::env::temp_dir().join(format!("rf-zone-{}.exe", std::process::id()));

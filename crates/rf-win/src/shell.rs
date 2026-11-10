@@ -132,3 +132,16 @@ pub fn notify_updated(dir: &std::path::Path) {
     // SAFETY: a NUL-terminated wide path, read during the call
     unsafe { SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, Some(w.as_ptr() as *const _), None) };
 }
+
+/// Explorer's "Change..." next to "Opens with": the shell's app chooser for `path`, which on OK makes the
+/// chosen app the default for the extension (OAIF_REGISTER_EXT + OAIF_FORCE_REGISTRATION) without opening the
+/// file (no OAIF_EXEC). Modal: run it on the STA shell thread.
+pub fn open_with_dialog(owner: windows::Win32::Foundation::HWND, path: &Path) -> anyhow::Result<()> {
+    use windows::Win32::UI::Shell::{OAIF_ALLOW_REGISTRATION, OAIF_FORCE_REGISTRATION, OAIF_REGISTER_EXT, OPENASINFO, SHOpenWithDialog};
+    ensure_com();
+    let file = wide(path);
+    let info = OPENASINFO { pcszFile: PCWSTR(file.as_ptr()), pcszClass: PCWSTR::null(), oaifInFlags: OAIF_ALLOW_REGISTRATION | OAIF_REGISTER_EXT | OAIF_FORCE_REGISTRATION };
+    // SAFETY: info and the path buffer outlive the modal call
+    unsafe { SHOpenWithDialog(Some(owner), &info)? };
+    Ok(())
+}
