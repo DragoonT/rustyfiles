@@ -219,6 +219,14 @@ pub fn release_drive(letter: char, cx: &mut App) {
 }
 
 /// Whether any app window (not a menu / flyout popup) is still open.
+/// The open main windows (not Settings, DirectLook or popups).
+pub fn main_windows(cx: &App) -> Vec<AnyWindowHandle> {
+    let open = cx.windows();
+    cx.try_global::<OpenWorkspaces>()
+        .map(|g| open.into_iter().filter(|w| g.0.iter().any(|(h, ws)| ws.upgrade().is_some() && w.window_id() == h.window_id())).collect())
+        .unwrap_or_default()
+}
+
 pub fn any_main_window(cx: &App) -> bool {
     let open = cx.windows();
     cx.try_global::<OpenWorkspaces>()

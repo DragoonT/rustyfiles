@@ -461,7 +461,11 @@ pub fn main() {
         cx.set_global(tags::load());
         let ops = cx.new(status_center::Ops::new);
         // the Status Center flyout is its own Acrylic window, opened/closed with `open`
-        cx.observe(&ops, |ops, cx| status_center::sync_popup(&ops, cx)).detach();
+        cx.observe(&ops, |ops, cx| {
+            status_center::sync_popup(&ops, cx);
+            status_center::sync_taskbar(&ops, cx);
+        })
+        .detach();
         cx.set_global(status_center::OpsGlobal(ops));
         actions::bind(cx);
         actions::bind_user(cx);
