@@ -372,6 +372,9 @@ mod tests {
     fn the_shell_finds_the_window_and_selection_arrives() {
         let dir = std::env::temp_dir().join(format!("rf-shellwin-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
+        // the shell answers with long names: where TEMP is given in its short form
+        // (C:\Users\RUNNER~1\... on GitHub's runners) the folder is taken by its long name too
+        let dir = std::fs::canonicalize(&dir).map(|p| std::path::PathBuf::from(p.to_string_lossy().trim_start_matches(r"\\?\"))).unwrap_or(dir);
         let file = dir.join("rapor ü.txt");
         std::fs::write(&file, b"x").unwrap();
         let d = dir.clone();
