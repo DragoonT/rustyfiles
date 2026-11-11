@@ -1760,6 +1760,17 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
             Some(t!("Klasördeki tüm alt klasörlerin dosyalarını tek seviyeye taşır. Ctrl+Z ile geri alınır.")),
             sw("flatten", p, s.show_flatten, |s, v| s.show_flatten = v),
         ),
+        card(
+            p,
+            L::ScrollText,
+            t!("Günlük dosyası"),
+            Some(t!("Uyarılar ve hatalar rustyfiles.log dosyasına yazılır (en çok 1 MB; dolunca eskisi .old olur). Bir sorunu bildirirken eklenebilir.")),
+            button("log-open", p, t!("Klasörde göster"), |_, cx| {
+                if let Some(path) = crate::logfile::path() {
+                    crate::workspace::route_ipc(format!("{}{}", crate::workspace::SELECT_PREFIX, path.display()), cx);
+                }
+            }),
+        ),
     ]);
     out
 }

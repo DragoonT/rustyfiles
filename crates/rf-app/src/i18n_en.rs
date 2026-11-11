@@ -1210,4 +1210,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Özgün konum", "Original location"),
     ("Silinme tarihi", "Date deleted"),
     ("Önceki aramaları temizle", "Clear previous searches"),
+    ("Günlük dosyası", "Log file"),
+    ("Uyarılar ve hatalar rustyfiles.log dosyasına yazılır (en çok 1 MB; dolunca eskisi .old olur). Bir sorunu bildirirken eklenebilir.", "Warnings and errors are written to rustyfiles.log (1 MB at most; a full one becomes .old). It can be attached when reporting a problem."),
+    ("Veri akışları", "Data streams"),
+    ("Dosyanın içeriğinin yanında tutulan adlandırılmış akışlar (NTFS). İndirilen dosyalardaki Zone.Identifier bunlardan biridir.", "Named streams kept beside the file's content (NTFS). The Zone.Identifier of downloaded files is one of them."),
 ];

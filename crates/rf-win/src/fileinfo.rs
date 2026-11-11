@@ -109,6 +109,38 @@ pub fn zone_blocked(path: &Path) -> bool {
     })
 }
 
+/// The named data streams of a file or folder (NTFS alternate data streams): (name, bytes).
+/// The unnamed stream, which is the file's own content, is left out. Empty on file systems
+/// without streams and for items that can't be read.
+pub fn streams(path: &Path) -> Vec<(String, u64)> {
+    use windows::Win32::Storage::FileSystem::{FindClose, FindFirstStreamW, FindNextStreamW, FindStreamInfoStandard, WIN32_FIND_STREAM_DATA};
+    let mut out = Vec::new();
+    let w = wide(path);
+    let mut data = WIN32_FIND_STREAM_DATA::default();
+    unsafe {
+        let Ok(h) = FindFirstStreamW(PCWSTR(w.as_ptr()), FindStreamInfoStandard, &mut data as *mut _ as *mut _, Some(0)) else { return out };
+        loop {
+            // ":name:$DATA" (the unnamed one is "::$DATA")
+            let raw = from_wide(&data.cStreamName);
+            if let Some(name) = stream_name(&raw) {
+                out.push((name.to_string(), data.StreamSize.max(0) as u64));
+            }
+            if FindNextStreamW(h, &mut data as *mut _ as *mut _).is_err() {
+                break;
+            }
+        }
+        let _ = FindClose(h);
+    }
+    out
+}
+
+/// ":Zone.Identifier:$DATA" -> "Zone.Identifier"; None for the unnamed stream ("::$DATA").
+fn stream_name(raw: &str) -> Option<&str> {
+    let rest = raw.strip_prefix(':')?;
+    let name = rest.split(':').next().unwrap_or(rest);
+    (!name.is_empty()).then_some(name)
+}
+
 /// Removes the downloaded mark (the Zone.Identifier stream), as Explorer's "Unblock" does.
 pub fn unblock(path: &Path) -> std::io::Result<()> {
     match std::fs::remove_file(zone_stream(path)) {
@@ -274,6 +306,23 @@ pub fn share_of(dir: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// A stream written to a file is listed with its size; the file's own content is not.
+    #[test]
+    fn named_streams_are_listed() {
+        assert_eq!(super::stream_name(":Zone.Identifier:$DATA"), Some("Zone.Identifier"));
+        assert_eq!(super::stream_name("::$DATA"), None);
+        let f = std::env::temp_dir().join(format!("rf-streams-{}.txt", std::process::id()));
+        std::fs::write(&f, b"content").unwrap();
+        assert!(super::streams(&f).is_empty());
+        let mut named = f.as_os_str().to_owned();
+        named.push(":not");
+        // (a volume without streams, FAT or a RAM disk: nothing to check)
+        if std::fs::write(&named, b"12345").is_ok() {
+            assert_eq!(super::streams(&f), vec![("not".to_string(), 5)]);
+        }
+        let _ = std::fs::remove_file(&f);
+    }
+
     #[test]
     fn archive_and_not_indexed_toggle() {
         let dir = std::env::temp_dir().join(format!("rf-attrs-{}", std::process::id()));

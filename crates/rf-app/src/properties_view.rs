@@ -164,6 +164,8 @@ fn attrs_from(v: [Option<bool>; 6]) -> Attrs {
 struct Loaded {
     info: Option<Result<Info, String>>,
     blocked: bool,
+    /// Named data streams (NTFS alternate data streams): (name, bytes).
+    streams: Vec<(String, u64)>,
     /// The volume can compress / encrypt.
     caps: (bool, bool),
     drive: Option<rf_win::drives::Drive>,
@@ -203,6 +205,8 @@ pub struct PropsView {
     recurse: bool,
     /// A single downloaded file (Windows may block it), and whether the user ticked "Unblock".
     blocked: bool,
+    /// Named data streams (NTFS alternate data streams): (name, bytes).
+    streams: Vec<(String, u64)>,
     unblock: bool,
     drive: Option<rf_win::drives::Drive>,
     share: Option<String>,
@@ -288,6 +292,7 @@ impl PropsView {
             advanced_open: false,
             recurse: false,
             blocked: false,
+            streams: Vec::new(),
             unblock: false,
             drive: None,
             share: None,
@@ -331,6 +336,7 @@ impl PropsView {
                 let l = task.await;
                 let _ = this.update_in(cx, |v, window, cx| {
                     v.blocked = l.blocked;
+                    v.streams = l.streams;
                     v.caps = l.caps;
                     v.drive = l.drive;
                     v.share = l.share;
@@ -1360,6 +1366,12 @@ impl PropsView {
             }
             out.push(card(p, rows));
         }
+        if !self.streams.is_empty() {
+            let mut rows = vec![section(p, t!("Veri akışları"))];
+            rows.extend(self.streams.iter().map(|(name, size)| row_dyn(p, name.clone(), format::size(*size))));
+            rows.push(note(p, t!("Dosyanın içeriğinin yanında tutulan adlandırılmış akışlar (NTFS). İndirilen dosyalardaki Zone.Identifier bunlardan biridir.")));
+            out.push(card(p, rows));
+        }
         out
     }
 
@@ -1488,6 +1500,7 @@ fn load_one(p: &Path) -> Loaded {
     let is_dir = info.as_ref().is_ok_and(|i| i.is_dir);
     let is_file = info.as_ref().is_ok_and(|i| !i.is_dir);
     l.blocked = is_file && rf_win::fileinfo::zone_blocked(p);
+    l.streams = rf_win::fileinfo::streams(p);
     l.caps = rf_win::fileinfo::volume_caps(p);
     if is_dir && is_root(p) {
         let letter = p.to_string_lossy().chars().next().unwrap_or('C').to_ascii_uppercase();
@@ -1599,6 +1612,19 @@ fn row(p: &Palette, k: &'static str, v: String) -> AnyElement {
         .py(px(7.))
         .text_sm()
         .child(div().w(px(150.)).flex_shrink_0().text_color(p.text_secondary).child(k))
+        .child(div().flex_1().min_w_0().child(v))
+        .into_any_element()
+}
+
+/// [`row`] with a name that is data (a stream's name), not one of our texts.
+fn row_dyn(p: &Palette, k: String, v: String) -> AnyElement {
+    h_flex()
+        .w_full()
+        .gap_3()
+        .items_start()
+        .py(px(7.))
+        .text_sm()
+        .child(div().w(px(150.)).flex_shrink_0().overflow_hidden().text_ellipsis().text_color(p.text_secondary).child(k))
         .child(div().flex_1().min_w_0().child(v))
         .into_any_element()
 }

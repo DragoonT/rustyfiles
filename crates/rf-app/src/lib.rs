@@ -23,6 +23,7 @@ mod i18n_en;
 mod folder_view;
 mod icons;
 mod keymap_editor;
+mod logfile;
 mod layouts;
 pub mod look;
 mod image_cache;
@@ -262,10 +263,10 @@ pub fn main() {
     rf_win::shell::suppress_critical_error_dialogs();
     // before any shell icon/thumbnail work: see keep_gdiplus_alive (loader-lock deadlock)
     rf_win::thumbs::keep_gdiplus_alive();
-    // Logs go to stderr; override with RUST_LOG. The hybrid renderer (gpui_windows) logs its
-    // GPU/CPU switches at info level.
+    // Logs go to stderr and to rustyfiles.log in the settings folder; override the level with
+    // RUST_LOG. The hybrid renderer (gpui_windows) logs its GPU/CPU switches at info level.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn,gpui_windows=info"))
-        .target(env_logger::Target::Stderr)
+        .target(env_logger::Target::Pipe(Box::new(logfile::Tee::new())))
         .format_timestamp_millis()
         .init();
     start_mark("logging");
