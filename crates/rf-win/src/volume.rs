@@ -89,6 +89,20 @@ impl Drop for Pidl {
 
 /// Ejects a removable (or optical) drive by invoking the shell's "Eject" verb, which is exactly
 /// what Explorer does (flushes, locks, dismounts and asks the device to power down).
+/// Gives the volume a new label (empty = none). Windows lets a standard user rename removable
+/// drives; a fixed drive usually needs an administrator and fails with "access denied" here
+/// (nothing asks for elevation).
+pub fn set_label(root: &Path, label: &str) -> std::io::Result<()> {
+    use windows::Win32::Storage::FileSystem::SetVolumeLabelW;
+    let mut r = root.to_string_lossy().into_owned();
+    if !r.ends_with('\\') {
+        r.push('\\');
+    }
+    let (wr, wl) = (crate::wide::wide(&r), crate::wide::wide(label));
+    let label = if label.is_empty() { windows::core::PCWSTR::null() } else { windows::core::PCWSTR(wl.as_ptr()) };
+    unsafe { SetVolumeLabelW(windows::core::PCWSTR(wr.as_ptr()), label) }.map_err(|e| std::io::Error::from_raw_os_error(e.code().0 & 0xffff))
+}
+
 /// Fails when files are still open on the drive.
 pub fn eject(drive_letter: char) -> anyhow::Result<()> {
     let letter = drive_letter.to_ascii_uppercase();

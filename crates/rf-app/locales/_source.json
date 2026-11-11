@@ -6180,5 +6180,35 @@
   "key": "Arama sonuçları",
   "tr": "Arama sonuçları",
   "en": "Search results"
+ },
+ {
+  "id": "64cd6654",
+  "key": "Bu sürücünün etiketini değiştirmek yönetici izni ister",
+  "tr": "Bu sürücünün etiketini değiştirmek yönetici izni ister",
+  "en": "Changing this drive's label needs administrator rights"
+ },
+ {
+  "id": "0c057682",
+  "key": "Konu",
+  "tr": "Konu",
+  "en": "Subject"
+ },
+ {
+  "id": "a95f3f0a",
+  "key": "Yorumlar",
+  "tr": "Yorumlar",
+  "en": "Comments"
+ },
+ {
+  "id": "4288729f",
+  "key": "Yazarlar",
+  "tr": "Yazarlar",
+  "en": "Authors"
+ },
+ {
+  "id": "ee82b05e",
+  "key": "Dosyanın içine yazılır; birden çok etiket ya da yazar noktalı virgülle ayrılır.",
+  "tr": "Dosyanın içine yazılır; birden çok etiket ya da yazar noktalı virgülle ayrılır.",
+  "en": "Written into the file; several tags or authors are separated by semicolons."
  }
 ]

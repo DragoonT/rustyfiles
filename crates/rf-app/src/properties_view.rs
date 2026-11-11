@@ -178,6 +178,8 @@ struct Loaded {
     compat: Compat,
     compat_all_users: bool,
     folder_icon: Option<(String, i32)>,
+    /// Title, tags and the like, when the file's type lets them be written.
+    desc: Option<rf_win::props::Editable>,
 }
 
 /// The shortcut tab's text fields.
@@ -218,6 +220,13 @@ pub struct PropsView {
     link: Option<rf_win::shortcut::Details>,
     link_loaded: Option<rf_win::shortcut::Details>,
     link_inputs: Option<LinkInputs>,
+    /// The Details tab's writable fields as loaded, and their text boxes (title, subject, tags,
+    /// comment, authors).
+    desc_loaded: Option<rf_win::props::Editable>,
+    desc_inputs: Option<[Entity<InputState>; 5]>,
+    /// A drive's label as loaded, and its text box.
+    label_loaded: String,
+    label_input: Option<Entity<InputState>>,
     compat_exe: Option<PathBuf>,
     compat: Compat,
     compat_loaded: Compat,
@@ -304,6 +313,10 @@ impl PropsView {
             link: None,
             link_loaded: None,
             link_inputs: None,
+            desc_loaded: None,
+            desc_inputs: None,
+            label_loaded: String::new(),
+            label_input: None,
             compat_exe: None,
             compat: Compat::default(),
             compat_loaded: Compat::default(),
@@ -348,6 +361,22 @@ impl PropsView {
                     v.compat_all_users = l.compat_all_users;
                     v.folder_icon = l.folder_icon.clone();
                     v.folder_icon_loaded = l.folder_icon;
+                    let mk_input = |s: &str, window: &mut Window, cx: &mut Context<Self>| {
+                        let s = s.to_string();
+                        cx.new(|cx| {
+                            let mut i = InputState::new(window, cx);
+                            i.set_value(s, window, cx);
+                            i
+                        })
+                    };
+                    if let Some(d) = l.desc {
+                        v.desc_inputs = Some([&d.title, &d.subject, &d.tags, &d.comment, &d.authors].map(|s| mk_input(s, window, cx)));
+                        v.desc_loaded = Some(d);
+                    }
+                    if let Some(d) = &v.drive {
+                        v.label_loaded = d.label.clone();
+                        v.label_input = Some(mk_input(&d.label, window, cx));
+                    }
                     if let Some(d) = l.link {
                         let mk = |s: &str, window: &mut Window, cx: &mut Context<Self>| {
                             let s = s.to_string();
@@ -517,6 +546,19 @@ impl PropsView {
         Some(d)
     }
 
+    /// The Details tab's writable fields as typed.
+    fn desc_now(&self, cx: &App) -> Option<rf_win::props::Editable> {
+        let i = self.desc_inputs.as_ref()?;
+        let get = |n: usize| i[n].read(cx).value().trim().to_string();
+        Some(rf_win::props::Editable { title: get(0), subject: get(1), tags: get(2), comment: get(3), authors: get(4) })
+    }
+
+    /// The drive's label as typed, when it differs from the one it has.
+    fn label_now(&self, cx: &App) -> Option<String> {
+        let v = self.label_input.as_ref()?.read(cx).value().trim().to_string();
+        (v != self.label_loaded).then_some(v)
+    }
+
     fn renamed_to(&self, cx: &App) -> Option<String> {
         match (&self.name, self.single()) {
             (Some(n), Some(p)) => {
@@ -534,6 +576,8 @@ impl PropsView {
             || self.link_now(cx) != self.link_loaded
             || self.compat != self.compat_loaded
             || self.folder_icon != self.folder_icon_loaded
+            || self.desc_now(cx) != self.desc_loaded
+            || self.label_now(cx).is_some()
     }
 
     /// Applies the edits on a helper thread; `close` closes the window when it worked.
@@ -575,6 +619,11 @@ impl PropsView {
         let link = self.link_now(cx).filter(|d| Some(d) != self.link_loaded.as_ref());
         let compat = (self.compat != self.compat_loaded).then(|| (self.compat_exe.clone(), self.compat.clone()));
         let icon = (self.folder_icon != self.folder_icon_loaded).then(|| self.folder_icon.clone());
+        let desc = match (self.desc_loaded.clone(), self.desc_now(cx)) {
+            (Some(was), Some(now)) if was != now => Some((was, now)),
+            _ => None,
+        };
+        let label = self.label_now(cx);
         let cancel = self.cancel.clone();
         self.busy = true;
         self.error = None;
@@ -611,6 +660,16 @@ impl PropsView {
             }
             if let Some(d) = &link {
                 rf_win::shortcut::save(&paths[0], d).map_err(|e| named(&paths[0], &format!("{e:#}")))?;
+            }
+            if let Some((was, now)) = &desc {
+                rf_win::props::set_editable(&paths[0], was, now).map_err(|e| named(&paths[0], &format!("{e:#}")))?;
+            }
+            if let Some(l) = &label {
+                // (a fixed drive needs an administrator: Windows says "access denied", we never elevate)
+                rf_win::volume::set_label(&paths[0], l).map_err(|e| match e.kind() {
+                    std::io::ErrorKind::PermissionDenied => t!("Bu sürücünün etiketini değiştirmek yönetici izni ister").to_string(),
+                    _ => named(&paths[0], &e),
+                })?;
             }
             if let Some((Some(exe), c)) = &compat {
                 rf_win::compat::write(exe, c).map_err(|e| named(exe, &format!("{e:#}")))?;
@@ -650,6 +709,15 @@ impl PropsView {
                         v.link = v.link_loaded.clone();
                         v.compat_loaded = v.compat.clone();
                         v.folder_icon_loaded = v.folder_icon.clone();
+                        if v.desc_inputs.is_some() {
+                            v.desc_loaded = v.desc_now(cx);
+                        }
+                        if let Some(l) = v.label_now(cx) {
+                            v.label_loaded = l.clone();
+                            if let Some(d) = &mut v.drive {
+                                d.label = l;
+                            }
+                        }
                         if close {
                             window.remove_window();
                         }
@@ -959,7 +1027,18 @@ impl PropsView {
             vec![
                 row(p, t!("Tür"), kind.to_string()),
                 row(p, t!("Dosya sistemi"), if d.fs.is_empty() { "—".into() } else { d.fs.clone() }),
-                row(p, t!("Etiket"), if d.label.is_empty() { "—".into() } else { d.label.clone() }),
+                match &self.label_input {
+                    Some(input) => h_flex()
+                        .w_full()
+                        .gap_3()
+                        .items_center()
+                        .py(px(4.))
+                        .text_sm()
+                        .child(div().w(px(150.)).flex_shrink_0().text_color(p.text_secondary).child(t!("Etiket")))
+                        .child(text_field(p, input))
+                        .into_any_element(),
+                    None => row(p, t!("Etiket"), if d.label.is_empty() { "—".into() } else { d.label.clone() }),
+                },
             ],
         )];
         out.push(card(
@@ -1315,6 +1394,31 @@ impl PropsView {
 
     fn render_details(&self, p: &Palette) -> Vec<AnyElement> {
         let mut out = Vec::new();
+        if let Some(inputs) = &self.desc_inputs {
+            let field = |label: &'static str, input: &Entity<InputState>| {
+                h_flex()
+                    .w_full()
+                    .gap_3()
+                    .items_center()
+                    .py(px(4.))
+                    .text_sm()
+                    .child(div().w(px(150.)).flex_shrink_0().text_color(p.text_secondary).child(label))
+                    .child(text_field(p, input))
+                    .into_any_element()
+            };
+            out.push(card(
+                p,
+                vec![
+                    section(p, t!("Açıklama")),
+                    field(t!("Başlık"), &inputs[0]),
+                    field(t!("Konu"), &inputs[1]),
+                    field(t!("Etiketler"), &inputs[2]),
+                    field(t!("Yorumlar"), &inputs[3]),
+                    field(t!("Yazarlar"), &inputs[4]),
+                    note(p, t!("Dosyanın içine yazılır; birden çok etiket ya da yazar noktalı virgülle ayrılır.")),
+                ],
+            ));
+        }
         if let Some(pe) = &self.pe {
             let mut rows = vec![section(p, t!("Program"))];
             let mut add = |k: &'static str, v: &Option<String>| {
@@ -1501,6 +1605,9 @@ fn load_one(p: &Path) -> Loaded {
     let is_file = info.as_ref().is_ok_and(|i| !i.is_dir);
     l.blocked = is_file && rf_win::fileinfo::zone_blocked(p);
     l.streams = rf_win::fileinfo::streams(p);
+    if is_file {
+        l.desc = rf_win::props::editable(p);
+    }
     l.caps = rf_win::fileinfo::volume_caps(p);
     if is_dir && is_root(p) {
         let letter = p.to_string_lossy().chars().next().unwrap_or('C').to_ascii_uppercase();

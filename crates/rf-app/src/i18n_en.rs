@@ -1221,4 +1221,9 @@ pub const EN: &[(&str, &str)] = &[
     ("Ayarlarda ara", "Search settings"),
     ("Eşleşen ayar yok", "No setting matches"),
     ("Arama sonuçları", "Search results"),
+    ("Bu sürücünün etiketini değiştirmek yönetici izni ister", "Changing this drive's label needs administrator rights"),
+    ("Konu", "Subject"),
+    ("Yorumlar", "Comments"),
+    ("Yazarlar", "Authors"),
+    ("Dosyanın içine yazılır; birden çok etiket ya da yazar noktalı virgülle ayrılır.", "Written into the file; several tags or authors are separated by semicolons."),
 ];
