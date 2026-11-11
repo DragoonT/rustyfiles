@@ -6162,5 +6162,23 @@
   "key": "Terminalde aç  (Ctrl+Shift+`)",
   "tr": "Terminalde aç  (Ctrl+Shift+`)",
   "en": "Open in Terminal  (Ctrl+Shift+`)"
+ },
+ {
+  "id": "41e10276",
+  "key": "Ayarlarda ara",
+  "tr": "Ayarlarda ara",
+  "en": "Search settings"
+ },
+ {
+  "id": "0123a144",
+  "key": "Eşleşen ayar yok",
+  "tr": "Eşleşen ayar yok",
+  "en": "No setting matches"
+ },
+ {
+  "id": "0f7d40ac",
+  "key": "Arama sonuçları",
+  "tr": "Arama sonuçları",
+  "en": "Search results"
  }
 ]

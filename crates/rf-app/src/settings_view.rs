@@ -21,7 +21,7 @@ use crate::t;
 use crate::look::config::LookSettings;
 use crate::theme::{self, Palette};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Page {
     General,
     Appearance,
@@ -54,14 +54,86 @@ const PAGES: [(Page, L, &str); 11] = [
 struct Ui {
     page: Page,
     open: HashSet<&'static str>,
+    /// The search box above the pages (made at the first draw: it needs a window).
+    search: Option<Entity<gpui_kit::component::input::InputState>>,
 }
 impl Global for Ui {}
 
 fn ui(cx: &mut App) -> &mut Ui {
     if !cx.has_global::<Ui>() {
-        cx.set_global(Ui { page: Page::General, open: HashSet::new() });
+        cx.set_global(Ui { page: Page::General, open: HashSet::new(), search: None });
     }
     cx.global_mut::<Ui>()
+}
+
+/// A setting found while every page is built for the search: its texts and where it is.
+#[derive(Debug, Clone, PartialEq)]
+struct Found {
+    title: String,
+    desc: Option<String>,
+    page: Page,
+    /// The expander it is inside (opened when the result is picked).
+    expander: Option<&'static str>,
+}
+
+thread_local! {
+    /// Some while the pages are being built to list their settings (see [`collect`]).
+    static COLLECT: std::cell::RefCell<Option<Vec<Found>>> = const { std::cell::RefCell::new(None) };
+    static COLLECT_AT: std::cell::Cell<(Page, Option<&'static str>)> = const { std::cell::Cell::new((Page::General, None)) };
+}
+
+fn collecting() -> bool {
+    COLLECT.with(|c| c.borrow().is_some())
+}
+
+/// Notes a setting's texts (the card and row builders call it; a no-op outside a search).
+fn note_setting(title: &str, desc: Option<&str>) {
+    COLLECT.with(|c| {
+        if let Some(list) = c.borrow_mut().as_mut() {
+            let (page, expander) = COLLECT_AT.with(|a| a.get());
+            list.push(Found { title: title.to_string(), desc: desc.map(str::to_string), page, expander });
+        }
+    });
+}
+
+/// The settings whose title or description has every word of `query` (case-insensitive).
+fn matching(all: Vec<Found>, query: &str) -> Vec<Found> {
+    let words: Vec<String> = query.split_whitespace().map(rf_core::entry::fold_case).collect();
+    let mut seen = HashSet::new();
+    all.into_iter()
+        .filter(|f| {
+            let text = rf_core::entry::fold_case(&format!("{} {}", f.title, f.desc.as_deref().unwrap_or("")));
+            !words.is_empty() && words.iter().all(|w| text.contains(w.as_str()))
+        })
+        // (a setting drawn twice on a page is one result)
+        .filter(|f| seen.insert((f.title.clone(), f.page as u8)))
+        .collect()
+}
+
+/// Every setting of every page: the pages are built once with the builders noting their texts.
+fn collect(p: &Palette, s: &Settings, cx: &mut App) -> Vec<Found> {
+    COLLECT.with(|c| *c.borrow_mut() = Some(Vec::new()));
+    for (page, _, _) in PAGES {
+        COLLECT_AT.with(|a| a.set((page, None)));
+        let _ = build_page(page, p, s, cx);
+    }
+    COLLECT.with(|c| c.borrow_mut().take()).unwrap_or_default()
+}
+
+fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
+    match page {
+        Page::General => general(p, s, cx),
+        Page::Appearance => appearance(p, s, cx),
+        Page::Layout => layout(p, s, cx),
+        Page::Files => files(p, s, cx),
+        Page::Actions => actions(p, cx),
+        Page::Tags => tags(p, cx),
+        Page::Look => look(p, s, cx),
+        Page::Dev => dev(p, s),
+        Page::Advanced => advanced(p, s),
+        Page::Speed => crate::bench_view::page(p, cx),
+        Page::About => about(p, cx),
+    }
 }
 
 pub fn open_page(page: Page, cx: &mut App) {
@@ -132,6 +204,7 @@ fn button(id: impl Into<ElementId>, p: &Palette, label: impl Into<SharedString>,
 // ---------------------------------------------------------------- layout pieces
 
 fn card_body(p: &Palette, icon: L, title: SharedString, desc: Option<SharedString>, control: Option<AnyElement>) -> Div {
+    note_setting(&title, desc.as_deref());
     h_flex()
         .min_h(px(64.))
         .px_4()
@@ -181,16 +254,23 @@ fn expander(key: &'static str, p: &Palette, icon: L, title: &str, desc: Option<&
             window.refresh();
         });
     let header_control = h_flex().gap_2().items_center().children(control).child(chevron).into_any_element();
-    shell(p)
-        .child(card_body(p, icon, title.to_string().into(), desc.map(|d| d.to_string().into()), Some(header_control)))
-        .when(open, |d| {
-            d.child(div().h(px(1.)).bg(p.divider)).child(v_flex().py_1().children(children()))
-        })
-        .into_any_element()
+    let body = card_body(p, icon, title.to_string().into(), desc.map(|d| d.to_string().into()), Some(header_control));
+    // (a search looks inside closed expanders too)
+    let kids = if open || collecting() {
+        let at = COLLECT_AT.with(|a| a.get());
+        COLLECT_AT.with(|a| a.set((at.0, Some(key))));
+        let kids = children();
+        COLLECT_AT.with(|a| a.set(at));
+        Some(kids)
+    } else {
+        None
+    };
+    shell(p).child(body).when_some(kids.filter(|_| open), |d, kids| d.child(div().h(px(1.)).bg(p.divider)).child(v_flex().py_1().children(kids))).into_any_element()
 }
 
 /// A child row inside an expander (no icon, indented like Files).
 fn sub(p: &Palette, title: &str, desc: Option<&str>, control: AnyElement) -> AnyElement {
+    note_setting(title, desc);
     h_flex()
         .min_h(px(48.))
         .pl(px(56.))
@@ -230,12 +310,43 @@ fn link_row(p: &Palette, id: &'static str, icon: L, title: &str, desc: Option<&s
 
 // ---------------------------------------------------------------- page
 
-pub fn render(p: &Palette, cx: &mut App) -> AnyElement {
+pub fn render(p: &Palette, window: &mut Window, cx: &mut App) -> AnyElement {
+    use gpui_kit::component::input::{Input, InputState};
     let page = ui(cx).page;
     let s = cx.global::<Settings>().clone();
-    let mut nav = v_flex().w(px(232.)).flex_shrink_0().h_full().px_3().pt_5().gap_0p5().child(
-        div().px_2().pb_3().text_xl().font_weight(FontWeight::SEMIBOLD).child(t!("Ayarlar")),
-    );
+    let search = match ui(cx).search.clone() {
+        Some(e) => e,
+        None => {
+            let e = cx.new(|cx| InputState::new(window, cx).placeholder(t!("Ayarlarda ara")));
+            // typing redraws the page (the box is not part of a view of its own)
+            cx.observe(&e, |_, cx| cx.refresh_windows()).detach();
+            ui(cx).search = Some(e.clone());
+            e
+        }
+    };
+    let query = search.read(cx).value().trim().to_string();
+    let mut nav = v_flex()
+        .w(px(232.))
+        .flex_shrink_0()
+        .h_full()
+        .px_3()
+        .pt_5()
+        .gap_0p5()
+        .child(div().px_2().pb_3().text_xl().font_weight(FontWeight::SEMIBOLD).child(t!("Ayarlar")))
+        .child(
+            h_flex()
+                .h(px(32.))
+                .mb_2()
+                .px_2()
+                .gap_1()
+                .items_center()
+                .rounded(theme::RADIUS_SM)
+                .bg(p.hover)
+                .border_1()
+                .border_color(p.border)
+                .child(Icon::new(L::Search).size(px(14.)).flex_shrink_0().text_color(p.text_secondary))
+                .child(Input::new(&search).appearance(false).cleanable(true)),
+        );
     for (i, (pg, icon, label)) in PAGES.iter().copied().enumerate() {
         let on = pg == page;
         nav = nav.child(
@@ -252,25 +363,64 @@ pub fn render(p: &Palette, cx: &mut App) -> AnyElement {
                 .when(!on, |d| d.hover(|s| s.bg(p.hover)))
                 .child(Icon::new(icon).size(px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
                 .child(crate::i18n::t(label))
-                .on_click(move |_, window, cx| {
-                    open_page(pg, cx);
-                    window.refresh();
+                .on_click({
+                    let search = search.clone();
+                    move |_, window, cx| {
+                        open_page(pg, cx);
+                        // (a page picked by hand ends the search)
+                        search.update(cx, |s, cx| s.set_value("", window, cx));
+                        window.refresh();
+                    }
                 }),
         );
     }
-    let title = PAGES.iter().find(|x| x.0 == page).map(|x| crate::i18n::t(x.2)).unwrap_or_default();
-    let body: Vec<AnyElement> = match page {
-        Page::General => general(p, &s, cx),
-        Page::Appearance => appearance(p, &s, cx),
-        Page::Layout => layout(p, &s, cx),
-        Page::Files => files(p, &s, cx),
-        Page::Actions => actions(p, cx),
-        Page::Tags => tags(p, cx),
-        Page::Look => look(p, &s, cx),
-        Page::Dev => dev(p, &s),
-        Page::Advanced => advanced(p, &s),
-        Page::Speed => crate::bench_view::page(p, cx),
-        Page::About => about(p, cx),
+    let (title, body): (&str, Vec<AnyElement>) = if query.is_empty() {
+        (PAGES.iter().find(|x| x.0 == page).map(|x| crate::i18n::t(x.2)).unwrap_or_default(), build_page(page, p, &s, cx))
+    } else {
+        let found = matching(collect(p, &s, cx), &query);
+        let mut rows: Vec<AnyElement> = Vec::new();
+        if found.is_empty() {
+            rows.push(div().py_4().text_sm().text_color(p.text_secondary).child(t!("Eşleşen ayar yok")).into_any_element());
+        }
+        for (i, f) in found.into_iter().enumerate() {
+            let (pg, key) = (f.page, f.expander);
+            let page_label = PAGES.iter().find(|x| x.0 == pg).map(|x| crate::i18n::t(x.2)).unwrap_or_default();
+            let search = search.clone();
+            rows.push(
+                shell(p)
+                    .id(("set-found", i))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(p.pressed))
+                    .on_click(move |_, window, cx| {
+                        open_page(pg, cx);
+                        if let Some(k) = key {
+                            ui(cx).open.insert(k);
+                        }
+                        search.update(cx, |s, cx| s.set_value("", window, cx));
+                        window.refresh();
+                    })
+                    .child(
+                        h_flex()
+                            .min_h(px(52.))
+                            .px_4()
+                            .py_2()
+                            .gap_4()
+                            .items_center()
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap_0p5()
+                                    .child(div().text_sm().child(f.title))
+                                    .children(f.desc.map(|d| div().text_xs().text_color(p.text_secondary).child(d))),
+                            )
+                            .child(div().flex_shrink_0().text_xs().text_color(p.text_secondary).child(page_label))
+                            .child(Icon::new(L::ChevronRight).size(px(14.)).flex_shrink_0().text_color(p.text_secondary)),
+                    )
+                    .into_any_element(),
+            );
+        }
+        (t!("Arama sonuçları"), rows)
     };
     h_flex()
         .size_full()
@@ -2181,4 +2331,29 @@ fn index_exclusions(p: &Palette, s: &Settings) -> AnyElement {
         )
         .when(!s.index_excluded.is_empty(), |d| d.child(div().h(px(1.)).bg(p.divider)).child(list))
         .into_any_element()
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::{Found, Page, matching};
+
+    #[test]
+    fn settings_are_found_by_every_word_of_the_query() {
+        let f = |title: &str, desc: Option<&str>, page: Page| Found { title: title.into(), desc: desc.map(str::to_string), page, expander: None };
+        let all = vec![
+            f("Arşivleri klasör gibi aç", Some("ZIP, 7z ve tar dosyaları"), Page::Files),
+            f("Önizleme paneli", None, Page::Layout),
+            f("Önizleme paneli", None, Page::Layout),
+            f("İlerleme çubuğu", None, Page::Appearance),
+        ];
+        let titles = |q: &str| matching(all.clone(), q).into_iter().map(|f| f.title).collect::<Vec<_>>();
+        assert_eq!(titles("arşiv"), vec!["Arşivleri klasör gibi aç"]);
+        // a word of the description; every word must be there
+        assert_eq!(titles("zip klasör"), vec!["Arşivleri klasör gibi aç"]);
+        assert!(titles("zip panel").is_empty());
+        // the same setting drawn twice is one result; the Turkish İ folds
+        assert_eq!(titles("ÖNİZLEME"), vec!["Önizleme paneli"]);
+        assert_eq!(titles("ilerleme"), vec!["İlerleme çubuğu"]);
+        assert!(titles("   ").is_empty());
+    }
 }

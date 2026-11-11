@@ -1218,4 +1218,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Araç çubuğu düğmeleri", "Toolbar buttons"),
     ("Yeni klasör  (Ctrl+Shift+N)", "New folder  (Ctrl+Shift+N)"),
     ("Terminalde aç  (Ctrl+Shift+`)", "Open in Terminal  (Ctrl+Shift+`)"),
+    ("Ayarlarda ara", "Search settings"),
+    ("Eşleşen ayar yok", "No setting matches"),
+    ("Arama sonuçları", "Search results"),
 ];

@@ -4094,7 +4094,7 @@ impl Render for FolderView {
         let p = Palette::for_window(window);
         let content = match self.location() {
             Location::Home => self.render_home(&p, cx),
-            Location::Settings => crate::settings_view::render(&p, cx),
+            Location::Settings => crate::settings_view::render(&p, window, cx),
             Location::DiskUsage(root) => {
                 let root = root.clone();
                 let dv = match &self.disk_usage {
