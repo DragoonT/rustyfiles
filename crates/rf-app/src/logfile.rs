@@ -21,12 +21,14 @@ pub struct Tee {
     file: Option<File>,
     path: Option<PathBuf>,
     written: u64,
+    /// Also to stderr (off in the test, which writes a megabyte).
+    echo: bool,
 }
 
 impl Tee {
     pub fn new() -> Tee {
         let path = path();
-        let mut t = Tee { file: None, path, written: 0 };
+        let mut t = Tee { file: None, path, written: 0, echo: true };
         t.open();
         t
     }
@@ -55,7 +57,9 @@ impl Default for Tee {
 
 impl Write for Tee {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let _ = std::io::stderr().write_all(buf);
+        if self.echo {
+            let _ = std::io::stderr().write_all(buf);
+        }
         if let Some(f) = &mut self.file {
             if f.write_all(buf).is_ok() {
                 self.written += buf.len() as u64;
@@ -88,7 +92,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(NAME);
-        let mut t = Tee { file: None, path: Some(path.clone()), written: 0 };
+        let mut t = Tee { file: None, path: Some(path.clone()), written: 0, echo: false };
         t.open();
         let line = format!("{}\n", "x".repeat(1023));
         for _ in 0..1024 {
