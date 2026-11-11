@@ -1,10 +1,14 @@
-//! The window shown while an update is applied: the installer's animated logo (the same GIF
-//! Setup.exe shows) with a running bar, instead of Velopack's plain "Installing update" box
-//! (its updater shows the splash image only when installing, not when applying an update).
+//! The window shown while an update is applied: the installer's 3-D logo animation (the scene of
+//! tools/splash, as `splash.webp`: full colour, 2x, 30 frames a second) with a running bar,
+//! instead of Velopack's plain "Installing update" box (its updater shows a splash image only
+//! when installing, not when applying an update).
 //!
 //! `restart_to_update` copies this exe to a temporary folder (the installed one is being
 //! replaced) and starts the copy with [`ARG`]; the update is applied silently. The window
 //! closes when the new version's window is on the taskbar, or after two minutes at most.
+//!
+//! The frames are decoded one at a time on a helper thread, at their own pace: the window holds
+//! one or two of them (2.4 MB each), never the whole animation.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,6 +18,7 @@ use gpui_kit::*;
 
 pub const ARG: &str = "--update-splash";
 
+const ANIMATION: &[u8] = include_bytes!("../assets/splash.webp");
 const W: f32 = 520.;
 const H: f32 = 300.;
 /// The bar's colour, as Setup.exe's (`--splashProgressColor`).
@@ -21,48 +26,21 @@ const ORANGE: u32 = 0xff6a1a;
 const GIVE_UP: Duration = Duration::from_secs(120);
 
 struct Splash {
-    /// The GIF's frames (BGRA, as GPUI draws them) and how long each shows.
-    frames: Vec<(Arc<RenderImage>, Duration)>,
-    start: Instant,
-}
-
-/// The splash GIF's frames (GPUI shows only the first frame of a GIF given as bytes).
-fn frames() -> Vec<(Arc<RenderImage>, Duration)> {
-    use image::AnimationDecoder as _;
-    let Ok(dec) = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(&include_bytes!("../assets/splash.gif")[..])) else { return Vec::new() };
-    dec.into_frames()
-        .filter_map(Result::ok)
-        .map(|f| {
-            let delay = Duration::from(f.delay()).max(Duration::from_millis(20));
-            let mut buf = f.into_buffer();
-            for px in buf.chunks_exact_mut(4) {
-                px.swap(0, 2);
-            }
-            (Arc::new(RenderImage::new(vec![image::Frame::new(buf)])), delay)
-        })
-        .collect()
+    frame: Option<Arc<RenderImage>>,
+    /// Frames shown before: their textures are released at the next draw.
+    old: Vec<Arc<RenderImage>>,
 }
 
 impl Render for Splash {
-    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        // the frame for now, looping
-        let total: Duration = self.frames.iter().map(|f| f.1).sum();
-        let frame = (!total.is_zero()).then(|| {
-            let mut t = Duration::from_nanos((self.start.elapsed().as_nanos() % total.as_nanos()) as u64);
-            self.frames.iter().find(|f| {
-                if t < f.1 {
-                    return true;
-                }
-                t -= f.1;
-                false
-            })
-        });
-        window.request_animation_frame();
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        for f in self.old.drain(..) {
+            cx.drop_image(f, Some(window));
+        }
         div()
             .size_full()
             .relative()
             .bg(rgb(0x0b0b0d))
-            .children(frame.flatten().map(|f| img(f.0.clone()).size_full().object_fit(ObjectFit::Cover)))
+            .children(self.frame.clone().map(|f| img(f).size_full().object_fit(ObjectFit::Cover)))
             // how far is not known: a stretch of orange runs along the bottom
             .child(
                 div().absolute().left_0().right_0().bottom_0().h(px(4.)).bg(hsla(0., 0., 1., 0.08)).child(
@@ -75,6 +53,37 @@ impl Render for Splash {
                         .with_animation("run", Animation::new(Duration::from_millis(1400)).repeat(), |d, t| d.left(px(-W * 0.3 + t * W * 1.3))),
                 ),
             )
+    }
+}
+
+/// Plays the animation forever on this thread: each frame, decoded and turned BGRA (as GPUI
+/// draws), goes to `send` when it is due. Stops when `send` says the window is gone.
+fn play(send: impl Fn(Arc<RenderImage>) -> bool) {
+    use image::AnimationDecoder as _;
+    loop {
+        let Ok(dec) = image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(ANIMATION)) else { return };
+        let mut due = Instant::now();
+        let mut any = false;
+        for f in dec.into_frames() {
+            let Ok(f) = f else { break };
+            any = true;
+            let delay = Duration::from(f.delay()).max(Duration::from_millis(15));
+            let mut buf = f.into_buffer();
+            for px in buf.chunks_exact_mut(4) {
+                px.swap(0, 2);
+            }
+            let now = Instant::now();
+            if due > now {
+                std::thread::sleep(due - now);
+            }
+            if !send(Arc::new(RenderImage::new(vec![image::Frame::new(buf)]))) {
+                return;
+            }
+            due += delay;
+        }
+        if !any {
+            return;
+        }
     }
 }
 
@@ -99,7 +108,6 @@ pub fn run() {
     let before = installed_windows();
     let started = Instant::now();
     gpui_kit::application().run(move |cx| {
-        let frames = frames();
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(W), px(H)), cx))),
             titlebar: None,
@@ -111,11 +119,47 @@ pub fn run() {
             is_minimizable: false,
             ..Default::default()
         };
-        if let Err(e) = cx.open_window(options, |_, cx| cx.new(|_| Splash { frames, start: Instant::now() })) {
-            log::warn!("update splash: {e:#}");
-            cx.quit();
-            return;
-        }
+        let view = match cx.open_window(options, |_, cx| cx.new(|_| Splash { frame: None, old: Vec::new() })) {
+            Ok(w) => w,
+            Err(e) => {
+                log::warn!("update splash: {e:#}");
+                cx.quit();
+                return;
+            }
+        };
+        // the frames, from the decoding thread
+        let (tx, mut rx) = futures::channel::mpsc::channel::<Arc<RenderImage>>(2);
+        std::thread::Builder::new()
+            .name("rf-update-splash".into())
+            .spawn(move || {
+                let tx = std::sync::Mutex::new(tx);
+                play(|f| {
+                    let mut tx = tx.lock().unwrap_or_else(|e| e.into_inner());
+                    // a full channel (the window is behind): this frame is skipped
+                    match tx.try_send(f) {
+                        Ok(()) => true,
+                        Err(e) => !e.is_disconnected(),
+                    }
+                })
+            })
+            .ok();
+        cx.spawn(async move |cx| {
+            use futures::StreamExt;
+            while let Some(f) = rx.next().await {
+                let ok = view
+                    .update(cx, |v, _, cx| {
+                        if let Some(old) = v.frame.replace(f) {
+                            v.old.push(old);
+                        }
+                        cx.notify();
+                    })
+                    .is_ok();
+                if !ok {
+                    break;
+                }
+            }
+        })
+        .detach();
         cx.spawn(async move |cx| {
             loop {
                 cx.background_executor().timer(Duration::from_millis(300)).await;
@@ -145,4 +189,20 @@ pub fn launch() -> Option<std::process::Child> {
     let copy = dir.join("rustyfiles-update.exe");
     std::fs::copy(&me, &copy).ok()?;
     std::process::Command::new(&copy).arg(ARG).env("RUSTYFILES_MULTI_INSTANCE", "1").spawn().ok()
+}
+
+#[cfg(test)]
+mod tests {
+    /// The animation in the exe decodes: frames at 2x, a frame rate near 30 a second.
+    #[test]
+    fn animation_decodes() {
+        use image::AnimationDecoder as _;
+        let dec = image::codecs::webp::WebPDecoder::new(std::io::Cursor::new(super::ANIMATION)).unwrap();
+        let frames: Vec<_> = dec.into_frames().collect::<Result<_, _>>().unwrap();
+        assert!(frames.len() > 60, "{} frames", frames.len());
+        let f = &frames[0];
+        assert_eq!((f.buffer().width(), f.buffer().height()), (1040, 600));
+        let ms = std::time::Duration::from(f.delay()).as_millis();
+        assert!((25..=40).contains(&ms), "{ms} ms a frame");
+    }
 }
