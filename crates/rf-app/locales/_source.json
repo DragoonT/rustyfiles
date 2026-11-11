@@ -5898,5 +5898,83 @@
   "key": "tar biçimleri parola desteklemez; ZIP ya da 7z seçin",
   "tr": "tar biçimleri parola desteklemez; ZIP ya da 7z seçin",
   "en": "tar formats don't support passwords; choose ZIP or 7z"
+ },
+ {
+  "id": "3aa6d78e",
+  "key": "Dal sil",
+  "tr": "Dal sil",
+  "en": "Delete branch"
+ },
+ {
+  "id": "8b45a424",
+  "key": "başka bir dala birleştirilmemiş: silinirse bu daldaki commit'lere artık bir daldan ulaşılamaz.",
+  "tr": "başka bir dala birleştirilmemiş: silinirse bu daldaki commit'lere artık bir daldan ulaşılamaz.",
+  "en": "is not merged into another branch: if it is deleted, its commits can no longer be reached from a branch."
+ },
+ {
+  "id": "8fef08e0",
+  "key": "yerel dalı silinecek. Uzak depodaki dal olduğu gibi kalır.",
+  "tr": "yerel dalı silinecek. Uzak depodaki dal olduğu gibi kalır.",
+  "en": "will be deleted as a local branch. The branch on the remote stays as it is."
+ },
+ {
+  "id": "4c77ab95",
+  "key": "Yine de sil",
+  "tr": "Yine de sil",
+  "en": "Delete anyway"
+ },
+ {
+  "id": "4859e41a",
+  "key": "Dal silinsin mi?",
+  "tr": "Dal silinsin mi?",
+  "en": "Delete the branch?"
+ },
+ {
+  "id": "1f515411",
+  "key": "Dal silinemedi",
+  "tr": "Dal silinemedi",
+  "en": "Couldn't delete the branch"
+ },
+ {
+  "id": "d304af18",
+  "key": "Aynı kısayol:",
+  "tr": "Aynı kısayol:",
+  "en": "Same shortcut:"
+ },
+ {
+  "id": "f693ad0b",
+  "key": "Tüm sekmeleri kapat",
+  "tr": "Tüm sekmeleri kapat",
+  "en": "Close all tabs"
+ },
+ {
+  "id": "189240f0",
+  "key": "Bölmeyi yan yana böl",
+  "tr": "Bölmeyi yan yana böl",
+  "en": "Split pane side by side"
+ },
+ {
+  "id": "8732269c",
+  "key": "Bölmeyi üst üste böl",
+  "tr": "Bölmeyi üst üste böl",
+  "en": "Split pane top and bottom"
+ },
+ {
+  "id": "cd710c4b",
+  "key": "Terminalde yönetici olarak aç",
+  "tr": "Terminalde yönetici olarak aç",
+  "en": "Open in Terminal as administrator"
+ },
+ {
+  "id": "b35a9606",
+  "key": "Düzenleyicide aç",
+  "tr": "Düzenleyicide aç",
+  "en": "Open in editor"
+ },
+ {
+  "id": "3798a312",
+  "key": "Açık / koyu tema",
+  "tr": "Açık / koyu tema",
+  "en": "Light / dark theme"
  }
 ]

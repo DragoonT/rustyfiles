@@ -217,6 +217,7 @@ pub fn branch_menu(view: View, root: PathBuf, pos: Point<Pixels>, window: &mut W
             }
             items.push(Item::Separator);
             let mut remote = Vec::new();
+            let mut deletable = Vec::new();
             for b in branches {
                 let hint = match (b.ahead, b.behind) {
                     (0, 0) => None,
@@ -224,6 +225,7 @@ pub fn branch_menu(view: View, root: PathBuf, pos: Point<Pixels>, window: &mut W
                     (0, d) => Some(format!("↓{d}")),
                     (a, d) => Some(format!("↑{a} ↓{d}")),
                 };
+                let (dview, droot) = (view.clone(), root.clone());
                 let (view, root, name) = (view.clone(), root.clone(), b.name.clone());
                 let is_head = b.is_head;
                 let mut it = Item::action(b.name.clone(), MenuIcon::Lucide(L::GitBranch), move |window, cx| {
@@ -239,7 +241,18 @@ pub fn branch_menu(view: View, root: PathBuf, pos: Point<Pixels>, window: &mut W
                     remote.push(it);
                 } else {
                     items.push(it);
+                    // (git refuses to delete the branch you are on)
+                    if !b.is_head {
+                        let (view, root, name) = (dview, droot, b.name.clone());
+                        deletable.push(Item::action(b.name.clone(), MenuIcon::Lucide(L::GitBranch), move |window, cx| {
+                            delete_branch_dialog(view.clone(), root.clone(), name.clone(), false, window, cx)
+                        }));
+                    }
                 }
+            }
+            if !deletable.is_empty() {
+                items.push(Item::Separator);
+                items.push(Item::sub(t!("Dal sil"), MenuIcon::Lucide(L::Trash), deletable));
             }
             if !remote.is_empty() {
                 items.push(Item::Separator);
@@ -288,6 +301,45 @@ fn checkout(view: View, root: PathBuf, branch: String, mode: CheckoutMode, windo
         });
     })
     .detach();
+}
+
+/// Asks, then deletes a local branch. A branch with commits that are in no other branch is
+/// refused by git: the question is asked again (`force`), saying so.
+fn delete_branch_dialog(view: View, root: PathBuf, branch: String, force: bool, window: &mut Window, cx: &mut App) {
+    let msg = if force {
+        format!("\"{branch}\" {}", t!("başka bir dala birleştirilmemiş: silinirse bu daldaki commit'lere artık bir daldan ulaşılamaz."))
+    } else {
+        format!("\"{branch}\" {}", t!("yerel dalı silinecek. Uzak depodaki dal olduğu gibi kalır."))
+    };
+    let label = if force { t!("Yine de sil") } else { t!("Sil") };
+    prompt::show(
+        t!("Dal silinsin mi?"),
+        Some(msg),
+        None,
+        vec![
+            Button::new(label, Kind::Danger, move |_, window, cx| {
+                let handle = window.window_handle();
+                let task = cx.background_executor().spawn({
+                    let (root, branch) = (root.clone(), branch.clone());
+                    async move { git::delete_branch(&root, &branch, force).map_err(|e| format!("{e:#}")) }
+                });
+                let (view, root, branch) = (view.clone(), root.clone(), branch.clone());
+                cx.spawn(async move |cx| {
+                    let r = task.await;
+                    let _ = cx.update_window(handle, |_, window, cx| match r {
+                        Ok(()) => refresh(&view, cx),
+                        Err(e) if !force && e.contains("not fully merged") => delete_branch_dialog(view.clone(), root.clone(), branch.clone(), true, window, cx),
+                        Err(e) => error_dialog(t!("Dal silinemedi"), e, window, cx),
+                    });
+                })
+                .detach();
+                Ok(())
+            }),
+            Button::cancel(),
+        ],
+        window,
+        cx,
+    );
 }
 
 fn error_dialog(title: &str, message: String, window: &mut Window, cx: &mut App) {

@@ -64,6 +64,51 @@ pub fn open_terminal(dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Opens an elevated terminal in `dir` (Windows asks for permission: UAC). Windows Terminal if
+/// present, else PowerShell. Declining the permission prompt is not an error.
+pub fn open_terminal_admin(dir: &Path) -> anyhow::Result<()> {
+    let run = |file: &str, args: &str| -> windows::core::Result<()> {
+        ensure_com();
+        let (file, args, verb, cwd) = (wide(file), wide(args), wide("runas"), wide(dir));
+        let mut info = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,
+            lpVerb: PCWSTR(verb.as_ptr()),
+            lpFile: PCWSTR(file.as_ptr()),
+            lpParameters: PCWSTR(args.as_ptr()),
+            lpDirectory: PCWSTR(cwd.as_ptr()),
+            nShow: SW_SHOWNORMAL.0,
+            ..Default::default()
+        };
+        unsafe { ShellExecuteExW(&mut info) }
+    };
+    // ERROR_CANCELLED: the user said no at the prompt (asking again with PowerShell would nag)
+    let declined = |e: &windows::core::Error| e.code().0 as u32 == 0x8007_04C7;
+    match run("wt.exe", &terminal_args(dir)) {
+        Ok(()) => Ok(()),
+        Err(e) if declined(&e) => Ok(()),
+        Err(_) => match run("powershell.exe", &powershell_args(dir)) {
+            Ok(()) => Ok(()),
+            Err(e) if declined(&e) => Ok(()),
+            Err(e) => Err(e.into()),
+        },
+    }
+}
+
+/// `-d "C:\some dir"` for Windows Terminal. A trailing backslash would escape the closing
+/// quote (`"C:\"`), so it is doubled.
+fn terminal_args(dir: &Path) -> String {
+    let d = dir.to_string_lossy();
+    let tail = if d.ends_with('\\') { "\\" } else { "" };
+    format!("-d \"{d}{tail}\"")
+}
+
+/// An elevated process starts in System32 whatever directory is asked for: PowerShell is told
+/// to go to the folder itself (single quotes doubled, as PowerShell escapes them).
+fn powershell_args(dir: &Path) -> String {
+    format!("-NoExit -Command \"Set-Location -LiteralPath '{}'\"", dir.to_string_lossy().replace('\'', "''"))
+}
+
 /// Yes/No warning box owned by `owner` (call on the STA shell thread). True on "Yes".
 pub fn confirm(owner: windows::Win32::Foundation::HWND, title: &str, text: &str) -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{IDYES, MB_DEFBUTTON2, MB_ICONWARNING, MB_YESNO, MessageBoxW};
@@ -144,4 +189,17 @@ pub fn open_with_dialog(owner: windows::Win32::Foundation::HWND, path: &Path) ->
     // SAFETY: info and the path buffer outlive the modal call
     unsafe { SHOpenWithDialog(Some(owner), &info)? };
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    #[test]
+    fn elevated_terminal_arguments() {
+        assert_eq!(super::terminal_args(Path::new(r"C:\Users\a b")), r#"-d "C:\Users\a b""#);
+        // a drive root: the backslash must not escape the closing quote
+        assert_eq!(super::terminal_args(Path::new(r"D:\")), r#"-d "D:\\""#);
+        assert_eq!(super::powershell_args(Path::new(r"C:\it's")), r#"-NoExit -Command "Set-Location -LiteralPath 'C:\it''s'""#);
+    }
 }

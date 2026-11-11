@@ -1067,8 +1067,12 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
 fn actions(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
     let mut grid = div().px_4().py_3().flex().flex_wrap().gap_x_6().gap_y_0p5();
     let capturing = crate::keymap_editor::capturing(cx);
-    for (i, (label, keys, action)) in crate::command_palette::shortcut_entries().into_iter().enumerate() {
+    let entries = crate::command_palette::shortcut_entries();
+    let conflicts = crate::keymap_editor::conflicts(&entries, &|a| crate::keymap_editor::custom_keys(a, cx));
+    for (i, (label, keys, action)) in entries.into_iter().enumerate() {
         let custom = crate::keymap_editor::custom_keys(&action, cx);
+        // another command has the same keys: both are marked, hovering says which
+        let clash = conflicts.get(&action).map(|other| format!("{} {}", t!("Aynı kısayol:"), crate::i18n::t(other)));
         let waiting = capturing.as_deref() == Some(action.as_str());
         let shown: SharedString = if waiting {
             t!("Tuşlara basın…").into()
@@ -1101,6 +1105,7 @@ fn actions(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
                 .child(crate::i18n::t(label))
                 .child(
                     h_flex()
+                        .id(("kb-keys", i))
                         .gap_1()
                         .items_center()
                         .child(
@@ -1111,9 +1116,19 @@ fn actions(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
                                 .border_1()
                                 .border_color(p.border)
                                 .text_xs()
-                                .text_color(if waiting || custom.is_some() { p.accent } else { p.text_secondary })
+                                .text_color(if clash.is_some() && !waiting {
+                                    p.danger
+                                } else if waiting || custom.is_some() {
+                                    p.accent
+                                } else {
+                                    p.text_secondary
+                                })
+                                .when(clash.is_some() && !waiting, |d| d.border_color(p.danger))
                                 .child(shown),
                         )
+                        .when_some(clash.filter(|_| !waiting), |d, tip| {
+                            d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+                        })
                         .when(custom.is_some() && !waiting, |d| {
                             d.child(
                                 div()

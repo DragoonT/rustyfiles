@@ -3928,6 +3928,16 @@ impl Render for FolderView {
                     this.open_selected(cx)
                 }
             }))
+            .on_action(cx.listener(|this, _: &OpenInNewWindow, _, cx| {
+                // the selected folders (a handful at most), or this folder with none selected
+                let dirs: Vec<PathBuf> = this.selection_with_kind().into_iter().filter(|(_, d)| *d).map(|(p, _)| p).take(8).collect();
+                if dirs.is_empty() && this.selected.is_empty() {
+                    cx.emit(FolderEvent::OpenInNewWindow(this.location().clone()));
+                }
+                for d in dirs {
+                    cx.emit(FolderEvent::OpenInNewWindow(Location::Path(d)));
+                }
+            }))
             .on_action(cx.listener(|this, _: &Properties, _, cx| this.properties(cx)))
             .on_action(cx.listener(|this, _: &OpenWith, _, _| this.open_with()))
             .on_action(cx.listener(|this, _: &CopyItems, window, cx| this.copy_to_clipboard(rf_win::fileops::Transfer::Copy, window, cx)))

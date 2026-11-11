@@ -151,6 +151,48 @@ pub fn custom_keys(action: &str, cx: &App) -> Option<String> {
         .map(|(k, _)| k.clone())
 }
 
+/// A shortcut as compared between commands: "Ctrl+Shift+K" and "ctrl-shift-k" are the same,
+/// as are the arrows and Del of the built-in list and the names GPUI gives those keys.
+pub fn canon(shown: &str) -> String {
+    shown
+        .to_lowercase()
+        .split('+')
+        .map(|k| match k.trim() {
+            "←" => "left",
+            "→" => "right",
+            "↑" => "up",
+            "↓" => "down",
+            "del" => "delete",
+            k => k,
+        })
+        .collect::<Vec<_>>()
+        .join("+")
+}
+
+/// Commands whose keys another command has too: action name → the other command's label.
+/// `entries` is (label, built-in keys as shown, action name); a custom shortcut replaces the
+/// built-in one in the comparison.
+pub fn conflicts(entries: &[(&'static str, &'static str, String)], custom: &dyn Fn(&str) -> Option<String>) -> std::collections::HashMap<String, &'static str> {
+    let keys: Vec<Option<String>> = entries
+        .iter()
+        .map(|(_, built_in, action)| match custom(action) {
+            Some(k) => Some(canon(&pretty(&k))),
+            None if built_in.is_empty() => None,
+            None => Some(canon(built_in)),
+        })
+        .collect();
+    let mut out = std::collections::HashMap::new();
+    for (i, k) in keys.iter().enumerate() {
+        let Some(k) = k else { continue };
+        // only shortcuts the user set are reported: the built-in list may share a key between
+        // commands that apply in different places
+        if let Some(j) = (0..keys.len()).find(|&j| j != i && keys[j].as_ref() == Some(k) && (custom(&entries[i].2).is_some() || custom(&entries[j].2).is_some())) {
+            out.insert(entries[i].2.clone(), entries[j].0);
+        }
+    }
+    out
+}
+
 pub fn reset(action: &str, cx: &mut App) {
     let action = action.to_string();
     crate::settings::update(cx, |s| {
@@ -161,6 +203,29 @@ pub fn reset(action: &str, cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::pretty;
+
+    #[test]
+    fn a_custom_shortcut_on_another_commands_keys_is_reported() {
+        let entries = [("Yeni sekme", "Ctrl+T", "NewTab".to_string()), ("Geri", "Alt+←", "GoBack".to_string()), ("Rafı göster/gizle", "", "ToggleShelf".to_string())];
+        let none = |_: &str| None;
+        assert!(super::conflicts(&entries, &none).is_empty());
+        // the shelf gets Ctrl+T: both commands are marked, each naming the other
+        let shelf = |a: &str| (a == "ToggleShelf").then(|| "ctrl-t".to_string());
+        let c = super::conflicts(&entries, &shelf);
+        assert_eq!(c.get("ToggleShelf"), Some(&"Yeni sekme"));
+        assert_eq!(c.get("NewTab"), Some(&"Rafı göster/gizle"));
+        assert_eq!(c.len(), 2);
+        // an arrow key, written the way GPUI names it
+        let back = |a: &str| (a == "ToggleShelf").then(|| "alt-left".to_string());
+        assert_eq!(super::conflicts(&entries, &back).get("GoBack"), Some(&"Rafı göster/gizle"));
+        // moving a command away from its built-in keys frees them
+        let moved = |a: &str| match a {
+            "NewTab" => Some("ctrl-alt-n".to_string()),
+            "ToggleShelf" => Some("ctrl-t".to_string()),
+            _ => None,
+        };
+        assert!(super::conflicts(&entries, &moved).is_empty());
+    }
 
     #[test]
     fn pretty_keys() {

@@ -79,6 +79,12 @@ gpui_kit::actions!(
         CopyPathQuoted,
         OpenInIde,
         ToggleTheme,
+        CloseAllTabs,
+        SplitPaneSideBySide,
+        SplitPaneStacked,
+        CloseActivePane,
+        OpenInNewWindow,
+        OpenTerminalAdmin,
     ]
 );
 
@@ -164,6 +170,8 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("ctrl-+", ZoomIn, f),
         KeyBinding::new("ctrl--", ZoomOut, f),
         KeyBinding::new("ctrl-w", CloseTab, None),
+        KeyBinding::new("ctrl-shift-w", CloseActivePane, None),
+        KeyBinding::new("ctrl-alt-enter", OpenInNewWindow, f),
         KeyBinding::new("ctrl-tab", NextTab, None),
         KeyBinding::new("ctrl-shift-tab", PrevTab, None),
         KeyBinding::new("ctrl-shift-t", ReopenClosedTab, None),
