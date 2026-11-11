@@ -6090,5 +6090,23 @@
   "key": "Ana sayfa bölümleri",
   "tr": "Ana sayfa bölümleri",
   "en": "Home page sections"
+ },
+ {
+  "id": "37d24307",
+  "key": "Kutuda ara",
+  "tr": "Kutuda ara",
+  "en": "Search the bin"
+ },
+ {
+  "id": "a2d6f198",
+  "key": "Özgün konum",
+  "tr": "Özgün konum",
+  "en": "Original location"
+ },
+ {
+  "id": "241c63f7",
+  "key": "Silinme tarihi",
+  "tr": "Silinme tarihi",
+  "en": "Date deleted"
  }
 ]
