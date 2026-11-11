@@ -3,6 +3,7 @@
 
 pub mod archive;
 pub mod csv;
+pub mod document;
 pub mod email;
 pub mod font;
 pub mod hex;
@@ -22,6 +23,8 @@ pub fn all() -> Vec<Box<dyn Viewer>> {
         Box::new(image::ImageViewer::default()),
         Box::new(video::VideoViewer::default()),
         Box::new(pdf::PdfViewer::default()),
+        // (before the archive viewer: a docx is a zip, and equal priorities go in this order)
+        Box::new(document::DocumentViewer::default()),
         Box::new(archive::ArchiveViewer::default()),
         Box::new(markdown::MarkdownViewer::default()),
         Box::new(csv::CsvViewer::default()),

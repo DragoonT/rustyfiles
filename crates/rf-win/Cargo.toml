@@ -12,6 +12,8 @@ kamadak-exif = "0.6"
 psd = "0.3"
 # design files' own pictures are ZIP entries (CorelDRAW, Krita, Sketch…): see design.rs
 zip.workspace = true
+roxmltree = "0.20"
+encoding_rs = "0.8"
 rf-core.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

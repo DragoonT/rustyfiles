@@ -6210,5 +6210,179 @@
   "key": "Dosyanın içine yazılır; birden çok etiket ya da yazar noktalı virgülle ayrılır.",
   "tr": "Dosyanın içine yazılır; birden çok etiket ya da yazar noktalı virgülle ayrılır.",
   "en": "Written into the file; several tags or authors are separated by semicolons."
+ },
+ {
+  "id": "549cab9d",
+  "key": "tablo",
+  "tr": "tablo",
+  "en": "tables"
+ },
+ {
+  "id": "0bba5338",
+  "key": "bayt/sayfa",
+  "tr": "bayt/sayfa",
+  "en": "bytes per page"
+ },
+ {
+  "id": "ecbb14fb",
+  "key": "dizin, görünüm ve tetikleyici",
+  "tr": "dizin, görünüm ve tetikleyici",
+  "en": "indexes, views and triggers"
+ },
+ {
+  "id": "762d728e",
+  "key": "satır",
+  "tr": "satır",
+  "en": "rows"
+ },
+ {
+  "id": "7afd63dd",
+  "key": "Özellik",
+  "tr": "Özellik",
+  "en": "Property"
+ },
+ {
+  "id": "348d0e4c",
+  "key": "Değer",
+  "tr": "Değer",
+  "en": "Value"
+ },
+ {
+  "id": "55285af1",
+  "key": "İşlem",
+  "tr": "İşlem",
+  "en": "Process"
+ },
+ {
+  "id": "8a1e4390",
+  "key": "Zaman",
+  "tr": "Zaman",
+  "en": "Time"
+ },
+ {
+  "id": "d748a31b",
+  "key": "Hatanın yeri",
+  "tr": "Hatanın yeri",
+  "en": "Where it failed"
+ },
+ {
+  "id": "a3cb9f14",
+  "key": "İş parçacıkları",
+  "tr": "İş parçacıkları",
+  "en": "Threads"
+ },
+ {
+  "id": "fdbc5e7b",
+  "key": "Modüller",
+  "tr": "Modüller",
+  "en": "Modules"
+ },
+ {
+  "id": "c4253b6b",
+  "key": "Program",
+  "tr": "Program",
+  "en": "Program"
+ },
+ {
+  "id": "a34fc6d9",
+  "key": "Çalıştırılma sayısı",
+  "tr": "Çalıştırılma sayısı",
+  "en": "Times run"
+ },
+ {
+  "id": "d29e465c",
+  "key": "Son çalıştırma",
+  "tr": "Son çalıştırma",
+  "en": "Last run"
+ },
+ {
+  "id": "366042df",
+  "key": "Yüklediği dosyalar",
+  "tr": "Yüklediği dosyalar",
+  "en": "Files it loaded"
+ },
+ {
+  "id": "facc0786",
+  "key": "Açılıyor…",
+  "tr": "Açılıyor…",
+  "en": "Opening…"
+ },
+ {
+  "id": "e79ba9d7",
+  "key": "Belge açılamadı (zip değil)",
+  "tr": "Belge açılamadı (zip değil)",
+  "en": "Couldn't open the document (not a zip)"
+ },
+ {
+  "id": "dd7c59fa",
+  "key": "Belgede metin bulunamadı",
+  "tr": "Belgede metin bulunamadı",
+  "en": "No text found in the document"
+ },
+ {
+  "id": "25d2ed05",
+  "key": "Belge okunamadı",
+  "tr": "Belge okunamadı",
+  "en": "Couldn't read the document"
+ },
+ {
+  "id": "e9c378ca",
+  "key": "Sayfa okunamadı",
+  "tr": "Sayfa okunamadı",
+  "en": "Couldn't read the sheet"
+ },
+ {
+  "id": "b43d06d8",
+  "key": "Çalışma kitabı okunamadı",
+  "tr": "Çalışma kitabı okunamadı",
+  "en": "Couldn't read the workbook"
+ },
+ {
+  "id": "67fde1de",
+  "key": "Çalışma kitabında sayfa bulunamadı",
+  "tr": "Çalışma kitabında sayfa bulunamadı",
+  "en": "No sheet found in the workbook"
+ },
+ {
+  "id": "2d5add15",
+  "key": "Slayt okunamadı",
+  "tr": "Slayt okunamadı",
+  "en": "Couldn't read the slide"
+ },
+ {
+  "id": "3643ee88",
+  "key": "Sunuda slayt bulunamadı",
+  "tr": "Sunuda slayt bulunamadı",
+  "en": "No slide found in the presentation"
+ },
+ {
+  "id": "9740712f",
+  "key": "SQLite veritabanı okunamadı",
+  "tr": "SQLite veritabanı okunamadı",
+  "en": "Couldn't read the SQLite database"
+ },
+ {
+  "id": "006b1ae9",
+  "key": "SQLite veritabanı değil",
+  "tr": "SQLite veritabanı değil",
+  "en": "Not an SQLite database"
+ },
+ {
+  "id": "a86bde90",
+  "key": "Bellek dökümü okunamadı",
+  "tr": "Bellek dökümü okunamadı",
+  "en": "Couldn't read the crash dump"
+ },
+ {
+  "id": "92e9ca81",
+  "key": "Prefetch dosyası okunamadı",
+  "tr": "Prefetch dosyası okunamadı",
+  "en": "Couldn't read the prefetch file"
+ },
+ {
+  "id": "2b8d4f3e",
+  "key": "Prefetch dosyası açılamadı",
+  "tr": "Prefetch dosyası açılamadı",
+  "en": "Couldn't decompress the prefetch file"
  }
 ]

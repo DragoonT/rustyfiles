@@ -164,6 +164,12 @@ mod tests {
     fn picks_by_priority() {
         assert_eq!(pick(&probe("a.svg", b"<svg")).name(), "image");
         assert_eq!(pick(&probe("a.zip", b"PK\x03\x04")).name(), "archive");
+        // office files are zips, a database is known by its first bytes; HTML is drawn, not listed
+        assert_eq!(pick(&probe("rapor.docx", b"PK\x03\x04")).name(), "document");
+        assert_eq!(pick(&probe("tablo.xlsx", b"PK\x03\x04")).name(), "document");
+        assert_eq!(pick(&probe("veri.db", b"SQLite format 3\0")).name(), "document");
+        assert_eq!(pick(&probe("sayfa.html", b"<!doctype html>")).name(), "document");
+        assert_eq!(pick(&probe("cokme.dmp", b"MDMP\x93\xa7")).name(), "document");
         assert_eq!(pick(&probe("a.unknownext", b"\0\0\x01")).name(), "hex");
         assert_eq!(pick(&probe("setup.exe", b"MZ\x90\0\x03\0\0\0")).name(), "info");
         assert_eq!(pick(&probe("notlar.unknownext", b"metin")).name(), "text");
