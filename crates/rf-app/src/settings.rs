@@ -783,7 +783,7 @@ fn sync_name_index(on: bool, excluded: &[String]) {
         std::thread::sleep(std::time::Duration::from_secs(delay));
         // extra instances (tests, the speed test's) leave it to the main one
         // (RUSTYFILES_INDEX=1 indexes there too, for testing)
-        let extra = std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() && std::env::var_os("RUSTYFILES_INDEX").is_none();
+        let extra = (std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || std::env::var_os("RUSTYFILES_INSTANCE").is_some()) && std::env::var_os("RUSTYFILES_INDEX").is_none();
         if STATE.load(Ordering::Relaxed) != 2 || std::env::var_os("RUSTYFILES_NO_INDEX").is_some() || extra {
             return;
         }

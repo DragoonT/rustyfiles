@@ -177,7 +177,7 @@ impl Global for OpenWorkspaces {}
 /// pins or the language change; test runs (several instances) leave the user's list alone.
 fn update_jump_list(places: &crate::places::Places) {
     static LAST: std::sync::Mutex<Option<(Vec<(String, PathBuf)>, [&'static str; 3])>> = std::sync::Mutex::new(None);
-    if !places.loaded || std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() {
+    if !places.loaded || std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || std::env::var_os("RUSTYFILES_INSTANCE").is_some() {
         return;
     }
     // in the UI language, as the sidebar shows them (a default pin's title is its Turkish name)

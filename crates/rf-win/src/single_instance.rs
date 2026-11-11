@@ -50,7 +50,17 @@ impl Drop for InstanceGuard {
 
 /// Decides the role. `message` is sent to the primary when one exists ("" = just focus a new window/tab).
 pub fn acquire(message: &str) -> Role {
-    acquire_app("rustyfiles", message)
+    acquire_app(&instance_name(), message)
+}
+
+/// "rustyfiles", or "rustyfiles-NAME" with `RUSTYFILES_INSTANCE=NAME`: a copy that is a single
+/// instance of its own (the speed test's "already running" copy) and never forwards to, or
+/// receives from, the user's.
+pub fn instance_name() -> String {
+    match std::env::var("RUSTYFILES_INSTANCE") {
+        Ok(n) if !n.is_empty() => format!("rustyfiles-{n}"),
+        _ => "rustyfiles".to_string(),
+    }
 }
 
 /// [`acquire`] for another application of the bundle (e.g. "directlook").

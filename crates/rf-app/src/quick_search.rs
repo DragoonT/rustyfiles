@@ -55,6 +55,7 @@ fn hotkey_owner() -> bool {
     !crate::background::DIRECTLOOK_PROCESS.load(std::sync::atomic::Ordering::Relaxed)
         && !NO_HOTKEY.load(std::sync::atomic::Ordering::Relaxed)
         && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none()
+        && std::env::var_os("RUSTYFILES_INSTANCE").is_none()
 }
 
 /// Apps, files and pages being started on other threads: the app does not quit under them

@@ -400,7 +400,7 @@ pub fn main() {
     // folder opens at once; the file, if one comes, is selected in it.
     const SHELL_SELECT_WAIT: std::time::Duration = std::time::Duration::from_secs(4);
     let shell_select = match &start {
-        Some(Location::Path(dir)) if select.is_none() && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none() && rf_win::default_fm::is_enabled(rf_win::default_fm::CLASSES) => {
+        Some(Location::Path(dir)) if select.is_none() && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none() && std::env::var_os("RUSTYFILES_INSTANCE").is_none() && rf_win::default_fm::is_enabled(rf_win::default_fm::CLASSES) => {
             let (tx, rx) = std::sync::mpsc::channel();
             let dir = dir.clone();
             std::thread::spawn(move || {
@@ -440,7 +440,7 @@ pub fn main() {
             rf_win::single_instance::Role::Forwarded => {
                 // the folder is on its way to the running window; the file to select follows
                 if let Some(msg) = shell_select.and_then(shell_selected) {
-                    rf_win::single_instance::send_to("rustyfiles", &msg);
+                    rf_win::single_instance::send_to(&rf_win::single_instance::instance_name(), &msg);
                 }
                 return;
             }
