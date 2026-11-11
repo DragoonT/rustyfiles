@@ -347,6 +347,11 @@ pub fn route_ipc(msg: String, cx: &mut App) {
     let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
     for (handle, ws) in list.into_iter().rev() {
         let Some(ws) = ws.upgrade() else { continue };
+        // an Open/Save picker is another app's dialog: a launch never becomes one of its tabs
+        // (with only a picker open, rustyfiles started from the Start menu opened in it)
+        if ws.read(cx).picker.is_some() {
+            continue;
+        }
         let (target, sel) = (loc.clone(), select.clone());
         let ok = handle
             .update(cx, |_, window, cx| {
