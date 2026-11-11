@@ -5976,5 +5976,101 @@
   "key": "Açık / koyu tema",
   "tr": "Açık / koyu tema",
   "en": "Light / dark theme"
+ },
+ {
+  "id": "af866e2d",
+  "key": "Yıl",
+  "tr": "Yıl",
+  "en": "Year"
+ },
+ {
+  "id": "53d55eef",
+  "key": "Ay",
+  "tr": "Ay",
+  "en": "Month"
+ },
+ {
+  "id": "0b9b6e35",
+  "key": "Gün",
+  "tr": "Gün",
+  "en": "Day"
+ },
+ {
+  "id": "56fdece9",
+  "key": "Etiketsiz",
+  "tr": "Etiketsiz",
+  "en": "No tag"
+ },
+ {
+  "id": "af62345b",
+  "key": "Ocak",
+  "tr": "Ocak",
+  "en": "January"
+ },
+ {
+  "id": "e77340f0",
+  "key": "Şubat",
+  "tr": "Şubat",
+  "en": "February"
+ },
+ {
+  "id": "4d5aac8d",
+  "key": "Mart",
+  "tr": "Mart",
+  "en": "March"
+ },
+ {
+  "id": "8b7bd48a",
+  "key": "Nisan",
+  "tr": "Nisan",
+  "en": "April"
+ },
+ {
+  "id": "871b6dd2",
+  "key": "Mayıs",
+  "tr": "Mayıs",
+  "en": "May"
+ },
+ {
+  "id": "a9e27c08",
+  "key": "Haziran",
+  "tr": "Haziran",
+  "en": "June"
+ },
+ {
+  "id": "f8c8d80f",
+  "key": "Temmuz",
+  "tr": "Temmuz",
+  "en": "July"
+ },
+ {
+  "id": "15e24b81",
+  "key": "Ağustos",
+  "tr": "Ağustos",
+  "en": "August"
+ },
+ {
+  "id": "d8a51e02",
+  "key": "Eylül",
+  "tr": "Eylül",
+  "en": "September"
+ },
+ {
+  "id": "a039203f",
+  "key": "Ekim",
+  "tr": "Ekim",
+  "en": "October"
+ },
+ {
+  "id": "c0a0eea8",
+  "key": "Kasım",
+  "tr": "Kasım",
+  "en": "November"
+ },
+ {
+  "id": "1e3190f9",
+  "key": "Aralık",
+  "tr": "Aralık",
+  "en": "December"
  }
 ]

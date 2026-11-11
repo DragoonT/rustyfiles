@@ -505,7 +505,13 @@ fn group_items(me: &Me, group: GroupBy) -> Vec<Item> {
         grp(t!("Ad"), GroupBy::Name),
         grp(t!("Tür"), GroupBy::Type),
         grp(t!("Değiştirme tarihi"), GroupBy::Modified),
+        grp(t!("Yıl"), GroupBy::Year),
+        grp(t!("Ay"), GroupBy::Month),
+        grp(t!("Gün"), GroupBy::Day),
+        grp(t!("Oluşturma tarihi"), GroupBy::Created),
         grp(t!("Boyut"), GroupBy::Size),
+        grp(t!("Etiket"), GroupBy::Tag),
+        grp(t!("Klasör"), GroupBy::Folder),
     ]
 }
 

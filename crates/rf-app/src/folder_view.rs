@@ -52,6 +52,78 @@ pub enum GroupBy {
     Modified,
     Size,
     Name,
+    Created,
+    /// The modified date by calendar year / month / day (newest first).
+    Year,
+    Month,
+    Day,
+    /// The item's first tag (needs the tag store: computed on the UI thread only).
+    Tag,
+    /// The folder the item is in (search results).
+    Folder,
+}
+
+impl GroupBy {
+    /// Stored in folder layouts and (by name) in the settings.
+    pub const ALL: [(GroupBy, &'static str); 11] = [
+        (GroupBy::None, "none"),
+        (GroupBy::Name, "name"),
+        (GroupBy::Type, "type"),
+        (GroupBy::Modified, "modified"),
+        (GroupBy::Size, "size"),
+        (GroupBy::Created, "created"),
+        (GroupBy::Year, "year"),
+        (GroupBy::Month, "month"),
+        (GroupBy::Day, "day"),
+        (GroupBy::Tag, "tag"),
+        (GroupBy::Folder, "folder"),
+    ];
+
+    pub fn index(self) -> u8 {
+        Self::ALL.iter().position(|(g, _)| *g == self).unwrap_or(0) as u8
+    }
+
+    pub fn from_index(i: u8) -> GroupBy {
+        Self::ALL.get(i as usize).map_or(GroupBy::None, |(g, _)| *g)
+    }
+
+    /// Keys that need more than the entry itself (see [`view_from_sorted`]'s `extra`).
+    fn needs_extra(self) -> bool {
+        matches!(self, GroupBy::Tag | GroupBy::Folder)
+    }
+}
+
+const MONTHS: [&str; 12] = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+
+/// "Today / yesterday / this week ..." of a time.
+fn relative_day(ms: i64, now: chrono::DateTime<chrono::Local>) -> (u32, String) {
+    use chrono::{Datelike, TimeZone};
+    let Some(t) = chrono::Local.timestamp_millis_opt(ms).single().filter(|_| ms > 0) else {
+        return (6, "Bilinmiyor".into());
+    };
+    let days = (now.date_naive() - t.date_naive()).num_days();
+    match days {
+        d if d <= 0 => (0, "Bugün".into()),
+        1 => (1, "Dün".into()),
+        d if d < 7 && t.iso_week() == now.iso_week() => (2, "Bu hafta".into()),
+        _ if t.year() == now.year() && t.month() == now.month() => (3, "Bu ay".into()),
+        _ if t.year() == now.year() => (4, "Bu yıl".into()),
+        _ => (5, "Daha eski".into()),
+    }
+}
+
+/// The calendar year, month or day of a time; the order puts the newest first.
+fn calendar_key(g: GroupBy, ms: i64) -> (u32, String) {
+    use chrono::{Datelike, TimeZone};
+    let Some(t) = chrono::Local.timestamp_millis_opt(ms).single().filter(|_| ms > 0) else {
+        return (u32::MAX, "Bilinmiyor".into());
+    };
+    let (y, m, d) = (t.year().clamp(0, 9999) as u32, t.month(), t.day());
+    match g {
+        GroupBy::Year => (10_000 - y, y.to_string()),
+        GroupBy::Month => ((10_000 - y) * 12 + (12 - m), format!("{} {y}", crate::i18n::t(MONTHS[(m as usize - 1).min(11)]))),
+        _ => ((10_000 - y) * 372 + (12 - m) * 31 + (31 - d), format::datetime_full(ms).split(' ').next().unwrap_or_default().to_string()),
+    }
 }
 
 /// A line of the details list when grouping is on.
@@ -62,26 +134,14 @@ enum Row {
 }
 
 fn group_key(g: GroupBy, e: &Entry, now: chrono::DateTime<chrono::Local>) -> (u32, String) {
-    use chrono::{Datelike, TimeZone};
     match g {
-        GroupBy::None => (0, String::new()),
+        GroupBy::None | GroupBy::Tag | GroupBy::Folder => (0, String::new()),
+        GroupBy::Created => relative_day(e.created_ms, now),
+        GroupBy::Year | GroupBy::Month | GroupBy::Day => calendar_key(g, e.modified_ms),
         GroupBy::Type => {
             if e.is_dir() { (0, "Klasörler".into()) } else { (1, icons::type_label(e)) }
         }
-        GroupBy::Modified => {
-            let Some(t) = chrono::Local.timestamp_millis_opt(e.modified_ms).single() else {
-                return (6, "Bilinmiyor".into());
-            };
-            let days = (now.date_naive() - t.date_naive()).num_days();
-            match days {
-                d if d <= 0 => (0, "Bugün".into()),
-                1 => (1, "Dün".into()),
-                d if d < 7 && t.iso_week() == now.iso_week() => (2, "Bu hafta".into()),
-                _ if t.year() == now.year() && t.month() == now.month() => (3, "Bu ay".into()),
-                _ if t.year() == now.year() => (4, "Bu yıl".into()),
-                _ => (5, "Daha eski".into()),
-            }
-        }
+        GroupBy::Modified => relative_day(e.modified_ms, now),
         GroupBy::Size => {
             if e.is_dir() {
                 return (0, "Klasörler".into());
@@ -169,22 +229,31 @@ struct View {
     len: usize,
 }
 
-fn compute_view(entries: &[Entry], filter: &Filter, sort: SortSpec, group: GroupBy) -> View {
+fn compute_view(entries: &[Entry], filter: &Filter, sort: SortSpec, group: GroupBy, extra: Extra) -> View {
     let mut all: Vec<u32> = (0..entries.len() as u32).collect();
     sort.sort_indices(entries, &mut all);
-    view_from_sorted(entries, Arc::new(all), filter, sort, group)
+    view_from_sorted(entries, Arc::new(all), filter, sort, group, extra)
 }
+
+/// The group of an entry (by its index) for the keys the entry alone can't give: its tag, its
+/// folder. Without it such a grouping puts everything in one nameless group.
+type Extra<'a> = Option<&'a dyn Fn(u32) -> (u32, String)>;
 
 /// [`compute_view`] from entries already in sort order: filtering only (typing in the filter
 /// box of a 100,000-file folder costs a pass over the names, not a sort per keystroke).
-fn view_from_sorted(entries: &[Entry], sorted: Arc<Vec<u32>>, filter: &Filter, sort: SortSpec, group: GroupBy) -> View {
+fn view_from_sorted(entries: &[Entry], sorted: Arc<Vec<u32>>, filter: &Filter, sort: SortSpec, group: GroupBy, extra: Extra) -> View {
     let mut v: Vec<u32> = sorted.iter().copied().filter(|&i| filter.accepts(&entries[i as usize])).collect();
     let mut rows = Vec::new();
     let mut row_of_vi = Vec::new();
     if group != GroupBy::None {
         let now = chrono::Local::now();
-        let keys: std::collections::HashMap<u32, (u32, String)> =
-            v.iter().map(|&i| (i, group_key(group, &entries[i as usize], now))).collect();
+        let keys: std::collections::HashMap<u32, (u32, String)> = v
+            .iter()
+            .map(|&i| match extra {
+                Some(f) if group.needs_extra() => (i, f(i)),
+                _ => (i, group_key(group, &entries[i as usize], now)),
+            })
+            .collect();
         // stable: keeps the sort order inside each group
         v.sort_by(|a, b| keys[a].cmp(&keys[b]));
         let mut current: Option<&(u32, String)> = None;
@@ -292,6 +361,10 @@ pub struct FolderView {
     cloud_cache: std::cell::Cell<Option<(u64, bool)>>,
     pub sort: SortSpec,
     pub group: GroupBy,
+    /// Labels of the groups folded away (their header stays; a click on it toggles).
+    collapsed: HashSet<String>,
+    /// Tagged paths → (order, name) of their first tag, as of the last grouping by tag.
+    tag_snap: Arc<std::collections::HashMap<PathBuf, (u32, String)>>,
     /// Details rows (headers + items) when grouping; empty = identity with `visible`.
     rows: Vec<Row>,
     /// visible index → row index (grouping only).
@@ -388,6 +461,15 @@ impl FolderView {
     pub fn new(location: Location, places: Entity<Places>, images: Entity<ImageCache>, cx: &mut Context<Self>) -> Self {
         cx.observe(&places, |_, _, cx| cx.notify()).detach();
         cx.observe(&images, |_, _, cx| cx.notify()).detach();
+        // a tag given or taken: the groups by tag follow
+        cx.observe_global::<crate::tags::Tags>(|this, cx| {
+            if this.group == GroupBy::Tag {
+                this.refresh_tag_snap(cx);
+                this.rebuild_visible();
+                cx.notify();
+            }
+        })
+        .detach();
         cx.observe_global::<crate::settings::Settings>(|this, cx| {
             let s = cx.global::<crate::settings::Settings>();
             let (hidden, system, dot) = (s.show_hidden, s.show_system_files, !s.show_dot_files);
@@ -442,6 +524,8 @@ impl FolderView {
                 files_first: !prefs.folders_first && prefs.files_first,
             },
             group: GroupBy::None,
+            collapsed: HashSet::new(),
+            tag_snap: Default::default(),
             rows: Vec::new(),
             row_of_vi: Vec::new(),
             filter: Filter {
@@ -1258,7 +1342,7 @@ impl FolderView {
                     .map_err(|e| e.to_string()),
                 };
                 if r.is_ok() && !cancel.load(Ordering::Relaxed) {
-                    let _ = tx.unbounded_send(Msg::View(compute_view(&all, &spec.0, spec.1, spec.2)));
+                    let _ = tx.unbounded_send(Msg::View(compute_view(&all, &spec.0, spec.1, spec.2, None)));
                 }
                 let _ = tx.unbounded_send(Msg::Done(r.map_err(|e| e.to_string())));
             })
@@ -1514,20 +1598,53 @@ impl FolderView {
     }
 
     fn rebuild_visible(&mut self) {
-        let view = match &self.sorted_cache {
-            // the same entries in the same order: only the filter or grouping changed
-            Some((sort, generation, sorted)) if *sort == self.sort && *generation == self.entries_gen && sorted.len() == self.entries.len() => {
-                view_from_sorted(&self.entries, sorted.clone(), &self.filter, self.sort, self.group)
+        let view = {
+            let tags = self.tag_snap.clone();
+            let group = self.group;
+            let key = |i: u32| -> (u32, String) {
+                match group {
+                    GroupBy::Tag => self.path_of(i).and_then(|p| tags.get(&p).cloned()).unwrap_or((u32::MAX, "Etiketsiz".into())),
+                    _ => (0, self.parent_of(i).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()),
+                }
+            };
+            let extra: Extra = if group.needs_extra() { Some(&key) } else { None };
+            match &self.sorted_cache {
+                // the same entries in the same order: only the filter or grouping changed
+                Some((sort, generation, sorted)) if *sort == self.sort && *generation == self.entries_gen && sorted.len() == self.entries.len() => {
+                    view_from_sorted(&self.entries, sorted.clone(), &self.filter, self.sort, self.group, extra)
+                }
+                _ => compute_view(&self.entries, &self.filter, self.sort, self.group, extra),
             }
-            _ => compute_view(&self.entries, &self.filter, self.sort, self.group),
         };
         self.install_view(view);
+    }
+
+    /// Path → (order, name) of the first tag of every tagged item (for grouping by tag).
+    fn refresh_tag_snap(&mut self, cx: &App) {
+        let store = &cx.global::<crate::tags::Tags>().0;
+        let mut map = std::collections::HashMap::new();
+        for (order, d) in store.defs.iter().enumerate() {
+            for p in store.paths_with(d.id) {
+                map.entry(p).or_insert((order as u32, d.name.clone()));
+            }
+        }
+        self.tag_snap = Arc::new(map);
+    }
+
+    /// A click on a group's header: the group folds away, or comes back.
+    fn toggle_group(&mut self, label: &str, cx: &mut Context<Self>) {
+        if !self.collapsed.remove(label) {
+            self.collapsed.insert(label.to_string());
+        }
+        self.rebuild_visible();
+        cx.notify();
     }
 
     /// Uses a view computed elsewhere if it still matches the current entries and settings.
     fn try_install_view(&mut self, view: Option<View>) -> bool {
         match view {
-            Some(v) if v.len == self.entries.len() && v.spec == (self.filter.clone(), self.sort, self.group) => {
+            // (a grouping that needs the tag store or the parents was not computed off this thread)
+            Some(v) if v.len == self.entries.len() && v.spec == (self.filter.clone(), self.sort, self.group) && !self.group.needs_extra() => {
                 self.install_view(v);
                 true
             }
@@ -1541,6 +1658,26 @@ impl FolderView {
         self.rows = view.rows;
         self.row_of_vi = view.row_of_vi;
         self.visible = view.visible;
+        // folded groups: their header stays, their items are not in the list
+        if !self.collapsed.is_empty() && !self.rows.is_empty() && self.view_mode == ViewMode::Details {
+            let (mut rows, mut row_of_vi, mut visible) = (Vec::with_capacity(self.rows.len()), Vec::new(), Vec::new());
+            let mut hide = false;
+            for r in std::mem::take(&mut self.rows) {
+                match r {
+                    Row::Header(label, n) => {
+                        hide = self.collapsed.contains(label.as_ref());
+                        rows.push(Row::Header(label, n));
+                    }
+                    Row::Item(vi) if !hide => {
+                        row_of_vi.push(rows.len());
+                        rows.push(Row::Item(visible.len()));
+                        visible.push(self.visible[vi]);
+                    }
+                    Row::Item(_) => {}
+                }
+            }
+            (self.rows, self.row_of_vi, self.visible) = (rows, row_of_vi, visible);
+        }
         // Never act on items the user can't see (filtered out / hidden).
         if !self.selected.is_empty() {
             let vis: HashSet<u32> = self.visible.iter().copied().collect();
@@ -1555,6 +1692,10 @@ impl FolderView {
 
     pub fn set_group(&mut self, g: GroupBy, cx: &mut Context<Self>) {
         self.group = g;
+        self.collapsed.clear();
+        if g == GroupBy::Tag {
+            self.refresh_tag_snap(cx);
+        }
         self.rebuild_visible();
         self.remember_layout(cx);
         cx.notify();
@@ -1577,13 +1718,7 @@ impl FolderView {
             files_first: self.sort.files_first,
             row_size: self.row_size,
             grid_size: self.grid_size,
-            group: match self.group {
-                GroupBy::None => 0,
-                GroupBy::Name => 1,
-                GroupBy::Type => 2,
-                GroupBy::Modified => 3,
-                GroupBy::Size => 4,
-            },
+            group: self.group.index(),
         }
     }
 
@@ -1592,7 +1727,7 @@ impl FolderView {
     pub fn make_layout_default(&mut self, cx: &mut Context<Self>) {
         use crate::settings::DefaultView;
         let l = self.layout_now();
-        let group = ["none", "name", "type", "modified", "size"][l.group.min(4) as usize].to_string();
+        let group = GroupBy::ALL[GroupBy::from_index(l.group).index() as usize].1.to_string();
         crate::settings::update(cx, move |s| {
             s.default_view = match l.view {
                 1 | 3 | 4 => DefaultView::Grid,
@@ -1678,13 +1813,11 @@ impl FolderView {
         self.sort = SortSpec { key: l.sort, dir: if l.desc { SortDir::Desc } else { SortDir::Asc }, dirs_first: l.dirs_first, files_first: l.files_first };
         self.row_size = l.row_size.min(ROW_SIZES.len() as u8 - 1);
         self.grid_size = l.grid_size.min(GRID_SIZES.len() as u8 - 1);
-        self.group = match l.group {
-            1 => GroupBy::Name,
-            2 => GroupBy::Type,
-            3 => GroupBy::Modified,
-            4 => GroupBy::Size,
-            _ => GroupBy::None,
-        };
+        self.group = GroupBy::from_index(l.group);
+        self.collapsed.clear();
+        if self.group == GroupBy::Tag {
+            self.refresh_tag_snap(cx);
+        }
         self.adaptive_pending = adaptive;
     }
 
@@ -1891,6 +2024,11 @@ impl FolderView {
         if self.view_mode != m || self.grid_style != style {
             self.view_mode = m;
             self.grid_style = style;
+            // (folding is the details list's: every item is back in the other views)
+            if !self.collapsed.is_empty() {
+                self.collapsed.clear();
+                self.rebuild_visible();
+            }
             self.scroll.scroll_to_item(0, ScrollStrategy::Top);
             self.remember_layout(cx);
             cx.notify();
@@ -2906,6 +3044,8 @@ impl FolderView {
                 match self.rows.get(r).cloned() {
                     Some(Row::Item(vi)) => vi,
                     Some(Row::Header(label, n)) => {
+                        let folded = self.collapsed.contains(label.as_ref());
+                        let key = label.to_string();
                         out.push(
                             h_flex()
                                 .id(("grp", r))
@@ -2918,6 +3058,11 @@ impl FolderView {
                                 .text_xs()
                                 .font_weight(FontWeight::SEMIBOLD)
                                 .text_color(p.text_secondary)
+                                .cursor_pointer()
+                                .hover(|s| s.text_color(p.text))
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(move |this, _, _, cx| this.toggle_group(&key, cx)))
+                                .child(Icon::new(if folded { L::ChevronRight } else { L::ChevronDown }).size(px(12.)))
                                 .child(crate::i18n::td(&label))
                                 .child(div().text_color(p.text_tertiary).child(format!("{n}")))
                                 .child(div().flex_1().h(px(1.)).bg(p.divider))
@@ -3638,6 +3783,46 @@ mod tile_tests {
         assert_eq!(tile_cols(100., 140., 220., 12.), 1); // narrow: one column
     }
 
+    /// Grouping by year / month puts the newest first; a key the entry can't give (tag, folder)
+    /// comes from the caller, and without it everything is one group.
+    #[test]
+    fn calendar_and_extra_groups() {
+        use super::{GroupBy, Row, compute_view};
+        use chrono::TimeZone;
+        use rf_core::{Entry, EntryKind, entry::Filter, sort::SortSpec};
+        let at = |y: i32, m: u32, d: u32| chrono::Local.with_ymd_and_hms(y, m, d, 12, 0, 0).unwrap().timestamp_millis();
+        let entries = vec![
+            Entry::new("eski.txt", EntryKind::File, 1, at(2024, 3, 5), 0, 0),
+            Entry::new("yeni.txt", EntryKind::File, 1, at(2026, 11, 11), 0, 0),
+            Entry::new("ekim.txt", EntryKind::File, 1, at(2026, 10, 2), 0, 0),
+        ];
+        let headers = |g: GroupBy, extra: super::Extra| -> Vec<(String, usize)> {
+            compute_view(&entries, &Filter::default(), SortSpec::default(), g, extra)
+                .rows
+                .iter()
+                .filter_map(|r| match r {
+                    Row::Header(l, n) => Some((l.to_string(), *n)),
+                    Row::Item(_) => None,
+                })
+                .collect()
+        };
+        assert_eq!(headers(GroupBy::Year, None), vec![("2026".to_string(), 2), ("2024".to_string(), 1)]);
+        let months = headers(GroupBy::Month, None);
+        assert_eq!(months.len(), 3);
+        assert!(months[0].0.ends_with("2026") && months[1].0.ends_with("2026") && months[2].0.ends_with("2024"), "{months:?}");
+        assert_ne!(months[0].0, months[1].0);
+        assert_eq!(headers(GroupBy::Day, None).len(), 3);
+        // the first entry has a tag, the others none
+        let tag = |i: u32| if i == 0 { (0, "Kırmızı".to_string()) } else { (u32::MAX, "Etiketsiz".to_string()) };
+        assert_eq!(headers(GroupBy::Tag, Some(&tag)), vec![("Kırmızı".to_string(), 1), ("Etiketsiz".to_string(), 2)]);
+        assert_eq!(headers(GroupBy::Tag, None).len(), 1);
+        // every group has an index of its own, kept in folder layouts
+        for (i, (g, _)) in GroupBy::ALL.iter().enumerate() {
+            assert_eq!((g.index() as usize, GroupBy::from_index(i as u8)), (i, *g));
+        }
+        assert_eq!(GroupBy::from_index(200), GroupBy::None);
+    }
+
     /// Filtering the cached sort order gives exactly what sorting the filtered entries gives.
     #[test]
     fn filtering_the_sorted_order_matches_a_full_sort() {
@@ -3651,12 +3836,12 @@ mod tile_tests {
             .collect();
         for key in [SortKey::Name, SortKey::Size, SortKey::Modified] {
             let sort = SortSpec { key, ..Default::default() };
-            let base = compute_view(&entries, &Filter::default(), sort, GroupBy::None);
+            let base = compute_view(&entries, &Filter::default(), sort, GroupBy::None, None);
             for q in ["", "rapor", "R", "ı", "zzz"] {
                 for dot_hidden in [false, true] {
                     let f = Filter { query: q.into(), dot_hidden, ..Default::default() };
-                    let full = compute_view(&entries, &f, sort, GroupBy::None);
-                    let fast = view_from_sorted(&entries, base.sorted.clone(), &f, sort, GroupBy::None);
+                    let full = compute_view(&entries, &f, sort, GroupBy::None, None);
+                    let fast = view_from_sorted(&entries, base.sorted.clone(), &f, sort, GroupBy::None, None);
                     assert_eq!(full.visible, fast.visible, "{key:?} {q:?}");
                 }
             }
