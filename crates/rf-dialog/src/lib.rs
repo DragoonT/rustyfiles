@@ -93,12 +93,28 @@ mod com {
         }
     }
 
-    /// A shell item for a path; a file being saved may not exist yet.
+    /// A shell item for a path; a file being saved may not exist yet. Such a file is parsed with
+    /// a bind context in create mode, as Windows' own Save dialog does: the item is a real file
+    /// system item (windows::Win32::System::SystemServices::SFGAO_FILESYSTEM), which print drivers check ("Microsoft Print to PDF" fell
+    /// back to its own "Print to file" prompt with the bare ID list made below).
     fn item_for(path: &str) -> Result<IShellItem> {
         let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
         unsafe {
             if let Ok(i) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(wide.as_ptr()), None) {
                 return Ok(i);
+            }
+            if let Ok(bc) = windows::Win32::System::Com::CreateBindCtx(0) {
+                let opts = windows::Win32::System::Com::BIND_OPTS {
+                    cbStruct: std::mem::size_of::<windows::Win32::System::Com::BIND_OPTS>() as u32,
+                    grfFlags: 0,
+                    grfMode: windows::Win32::System::Com::STGM_CREATE.0,
+                    dwTickCountDeadline: 0,
+                };
+                if bc.SetBindOptions(&opts).is_ok() {
+                    if let Ok(i) = SHCreateItemFromParsingName::<_, _, IShellItem>(PCWSTR(wide.as_ptr()), &bc) {
+                        return Ok(i);
+                    }
+                }
             }
             let pidl = SHSimpleIDListFromPath(PCWSTR(wide.as_ptr()));
             if pidl.is_null() {
@@ -127,6 +143,14 @@ mod com {
         r
     }
 
+    /// RF_DIALOG_TRACE=1: every call the app makes, to dialog.log (diagnosing an app).
+    fn trace(call: &str) {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *ON.get_or_init(|| std::env::var_os("RF_DIALOG_TRACE").is_some()) {
+            crate::log(&format!("call {call}"));
+        }
+    }
+
     fn exe_name() -> String {
         std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_default()
     }
@@ -145,6 +169,8 @@ mod com {
         /// The app added its own controls: only the real dialog can show them.
         customized: bool,
         sinks: Vec<(u32, IFileDialogEvents)>,
+        /// The properties the app gave with SetProperties (a save dialog hands them back).
+        properties: Option<IPropertyStore>,
         /// Picked in rustyfiles (None: not shown by us, the real dialog has the answer).
         result: Option<Vec<String>>,
     }
@@ -193,6 +219,7 @@ mod com {
 
     impl IModalWindow_Impl for Dialog_Impl {
         fn Show(&self, owner: HWND) -> Result<()> {
+            trace("Show");
             let off = std::env::var_os("RUSTYFILES_DIALOG_OFF").is_some();
             if off || self.st.borrow().customized {
                 crate::log(&format!("show: Windows' dialog (customized={})", self.st.borrow().customized));
@@ -257,6 +284,7 @@ mod com {
 
     impl IFileDialog_Impl for Dialog_Impl {
         fn SetFileTypes(&self, n: u32, specs: *const COMDLG_FILTERSPEC) -> Result<()> {
+            trace("SetFileTypes");
             if specs.is_null() {
                 return Err(E_POINTER.into());
             }
@@ -265,43 +293,52 @@ mod com {
             unsafe { self.real.SetFileTypes(specs) }
         }
         fn SetFileTypeIndex(&self, i: u32) -> Result<()> {
+            trace("SetFileTypeIndex");
             self.st.borrow_mut().type_index = i;
             unsafe { self.real.SetFileTypeIndex(i) }
         }
         fn GetFileTypeIndex(&self) -> Result<u32> {
+            trace("GetFileTypeIndex");
             if self.st.borrow().result.is_some() {
                 return Ok(self.st.borrow().type_index);
             }
             unsafe { self.real.GetFileTypeIndex() }
         }
         fn Advise(&self, sink: Ref<IFileDialogEvents>) -> Result<u32> {
+            trace("Advise");
             let s = sink.ok()?;
             let cookie = unsafe { self.real.Advise(s)? };
             self.st.borrow_mut().sinks.push((cookie, s.clone()));
             Ok(cookie)
         }
         fn Unadvise(&self, cookie: u32) -> Result<()> {
+            trace("Unadvise");
             self.st.borrow_mut().sinks.retain(|(c, _)| *c != cookie);
             unsafe { self.real.Unadvise(cookie) }
         }
         fn SetOptions(&self, fos: FILEOPENDIALOGOPTIONS) -> Result<()> {
+            trace("SetOptions");
             self.st.borrow_mut().options = fos;
             unsafe { self.real.SetOptions(fos) }
         }
         fn GetOptions(&self) -> Result<FILEOPENDIALOGOPTIONS> {
+            trace("GetOptions");
             unsafe { self.real.GetOptions() }
         }
         fn SetDefaultFolder(&self, psi: Ref<IShellItem>) -> Result<()> {
+            trace("SetDefaultFolder");
             let i = psi.ok()?;
             self.st.borrow_mut().default_folder = item_path(i);
             unsafe { self.real.SetDefaultFolder(i) }
         }
         fn SetFolder(&self, psi: Ref<IShellItem>) -> Result<()> {
+            trace("SetFolder");
             let i = psi.ok()?;
             self.st.borrow_mut().folder = item_path(i);
             unsafe { self.real.SetFolder(i) }
         }
         fn GetFolder(&self) -> Result<IShellItem> {
+            trace("GetFolder");
             if let Some(first) = self.st.borrow().result.as_ref().and_then(|r| r.first().cloned()) {
                 crate::log("GetFolder");
                 if let Some(dir) = std::path::Path::new(&first).parent() {
@@ -311,16 +348,19 @@ mod com {
             unsafe { self.real.GetFolder() }
         }
         fn GetCurrentSelection(&self) -> Result<IShellItem> {
+            trace("GetCurrentSelection");
             if let Some(first) = self.st.borrow().result.as_ref().and_then(|r| r.first().cloned()) {
                 return item_for(&first);
             }
             unsafe { self.real.GetCurrentSelection() }
         }
         fn SetFileName(&self, name: &PCWSTR) -> Result<()> {
+            trace("SetFileName");
             self.st.borrow_mut().file_name = wstr(name);
             unsafe { self.real.SetFileName(*name) }
         }
         fn GetFileName(&self) -> Result<PWSTR> {
+            trace("GetFileName");
             if self.st.borrow().result.is_some() {
                 crate::log("GetFileName");
                 return co_string(&self.st.borrow().file_name);
@@ -328,50 +368,63 @@ mod com {
             unsafe { self.real.GetFileName() }
         }
         fn SetTitle(&self, title: &PCWSTR) -> Result<()> {
+            trace("SetTitle");
             self.st.borrow_mut().title = wstr(title);
             unsafe { self.real.SetTitle(*title) }
         }
         fn SetOkButtonLabel(&self, text: &PCWSTR) -> Result<()> {
+            trace("SetOkButtonLabel");
             self.st.borrow_mut().ok_label = wstr(text);
             unsafe { self.real.SetOkButtonLabel(*text) }
         }
         fn SetFileNameLabel(&self, label: &PCWSTR) -> Result<()> {
+            trace("SetFileNameLabel");
             unsafe { self.real.SetFileNameLabel(*label) }
         }
         fn GetResult(&self) -> Result<IShellItem> {
+            trace("GetResult");
             if let Some(first) = self.st.borrow().result.as_ref().and_then(|r| r.first().cloned()) {
                 let r = item_for(&first);
-                crate::log(&format!("GetResult -> {}", if r.is_ok() { "ok" } else { "FAILED" }));
+                // whether the app gets a file system item (what print drivers check)
+                let fs = r.as_ref().ok().and_then(|i| unsafe { i.GetAttributes(windows::Win32::System::SystemServices::SFGAO_FILESYSTEM) }.ok()).is_some_and(|a| a.0 & windows::Win32::System::SystemServices::SFGAO_FILESYSTEM.0 != 0);
+                crate::log(&format!("GetResult -> {}, file system item: {fs}", if r.is_ok() { "ok" } else { "FAILED" }));
                 return r;
             }
             unsafe { self.real.GetResult() }
         }
         fn AddPlace(&self, psi: Ref<IShellItem>, fdap: FDAP) -> Result<()> {
+            trace("AddPlace");
             unsafe { self.real.AddPlace(psi.ok()?, fdap) }
         }
         fn SetDefaultExtension(&self, ext: &PCWSTR) -> Result<()> {
+            trace("SetDefaultExtension");
             self.st.borrow_mut().default_ext = wstr(ext);
             unsafe { self.real.SetDefaultExtension(*ext) }
         }
         fn Close(&self, hr: HRESULT) -> Result<()> {
+            trace("Close");
             unsafe { self.real.Close(hr) }
         }
         fn SetClientGuid(&self, guid: *const GUID) -> Result<()> {
+            trace("SetClientGuid");
             if guid.is_null() {
                 return Err(E_POINTER.into());
             }
             unsafe { self.real.SetClientGuid(&*guid) }
         }
         fn ClearClientData(&self) -> Result<()> {
+            trace("ClearClientData");
             unsafe { self.real.ClearClientData() }
         }
         fn SetFilter(&self, filter: Ref<IShellItemFilter>) -> Result<()> {
+            trace("SetFilter");
             unsafe { self.real.SetFilter(filter.ok()?) }
         }
     }
 
     impl IFileOpenDialog_Impl for Dialog_Impl {
         fn GetResults(&self) -> Result<IShellItemArray> {
+            trace("GetResults");
             if let Some(r) = self.st.borrow().result.as_ref() {
                 let a = items_for(r);
                 crate::log(&format!("GetResults -> {}", if a.is_ok() { "ok" } else { "FAILED" }));
@@ -380,6 +433,7 @@ mod com {
             unsafe { self.real.cast::<IFileOpenDialog>()?.GetResults() }
         }
         fn GetSelectedItems(&self) -> Result<IShellItemArray> {
+            trace("GetSelectedItems");
             if let Some(r) = self.st.borrow().result.as_ref() {
                 return items_for(r);
             }
@@ -389,6 +443,7 @@ mod com {
 
     impl IFileSaveDialog_Impl for Dialog_Impl {
         fn SetSaveAsItem(&self, psi: Ref<IShellItem>) -> Result<()> {
+            trace("SetSaveAsItem");
             let i = psi.ok()?;
             if let Some(p) = item_path(i) {
                 let path = std::path::Path::new(&p);
@@ -399,15 +454,33 @@ mod com {
             unsafe { self.real.cast::<IFileSaveDialog>()?.SetSaveAsItem(i) }
         }
         fn SetProperties(&self, store: Ref<IPropertyStore>) -> Result<()> {
-            unsafe { self.real.cast::<IFileSaveDialog>()?.SetProperties(store.ok()?) }
+            trace("SetProperties");
+            let s = store.ok()?;
+            self.st.borrow_mut().properties = Some(s.clone());
+            unsafe { self.real.cast::<IFileSaveDialog>()?.SetProperties(s) }
         }
         fn SetCollectedProperties(&self, list: Ref<IPropertyDescriptionList>, append_default: WBOOL) -> Result<()> {
+            trace("SetCollectedProperties");
             unsafe { self.real.cast::<IFileSaveDialog>()?.SetCollectedProperties(list.ok()?, append_default.as_bool()) }
         }
         fn GetProperties(&self) -> Result<IPropertyStore> {
+            trace("GetProperties");
+            // Picked in rustyfiles: the real dialog was never shown and has none to give (it
+            // fails, and "Microsoft Print to PDF", which asks for them, then gave up on the file
+            // and fell back to its "Print to file" prompt). The app's own properties, else an
+            // empty store: nothing was edited.
+            if self.st.borrow().result.is_some() {
+                if let Some(s) = self.st.borrow().properties.clone() {
+                    return Ok(s);
+                }
+                let mut p: *mut c_void = std::ptr::null_mut();
+                unsafe { windows::Win32::UI::Shell::PropertiesSystem::PSCreateMemoryPropertyStore(&IPropertyStore::IID, &mut p)? };
+                return Ok(unsafe { IPropertyStore::from_raw(p) });
+            }
             unsafe { self.real.cast::<IFileSaveDialog>()?.GetProperties() }
         }
         fn ApplyProperties(&self, psi: Ref<IShellItem>, store: Ref<IPropertyStore>, hwnd: HWND, sink: Ref<IFileOperationProgressSink>) -> Result<()> {
+            trace("ApplyProperties");
             unsafe { self.real.cast::<IFileSaveDialog>()?.ApplyProperties(psi.ok()?, store.ok()?, hwnd, sink.as_ref()) }
         }
     }
