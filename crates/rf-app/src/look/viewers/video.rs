@@ -53,6 +53,13 @@ pub struct VideoViewer {
     opened: Option<Opened>,
 }
 
+/// The window a video asks for: its picture (pixel aspect applied) with the title bar above and
+/// the controls below, which the video's own window must not cover.
+fn video_window(width: u32, height: u32, par: (u32, u32)) -> (f32, f32) {
+    let par = if par.1 > 0 { par.0 as f32 / par.1 as f32 } else { 1.0 };
+    ((width as f32 * par).max(320.0), (height as f32).max(180.0) + f32::from(crate::theme::TITLEBAR_H) + 48.0)
+}
+
 /// The route a file plays by and the window it asks for.
 struct Opened(Kind, Prepared);
 
@@ -68,7 +75,9 @@ fn open_media(path: &std::path::Path) -> Opened {
             // decoder uses the graphics card's video engine instead.
             Some(v) if too_heavy(v.width, v.height, v.frame_rate.as_f64()) && rf_win::preview_host::is_playable(path) && rf_win::preview_host::mf_decodes(&v.codec) => {
                 log::info!("look: {}x{} {} at {:.2} fps is past software decoding, Media Foundation (hardware)", v.width, v.height, v.codec, v.frame_rate.as_f64());
-                (Kind::Mf, Prepared::new((960.0, 540.0), name))
+                // the window as for any video: the picture's own size, up to 80 % of the screen
+                // (a fixed 960 × 540 was a quarter of a 4K laptop's screen)
+                (Kind::Mf, Prepared::new(video_window(v.width, v.height, v.par), name))
             }
             Some(v) => {
                 let par = if v.par.1 > 0 { v.par.0 as f32 / v.par.1 as f32 } else { 1.0 };
@@ -96,7 +105,8 @@ fn open_media(path: &std::path::Path) -> Opened {
         Kind::Video(_) | Kind::Mf if rd_video::enabled() => match rd_video::probe(path) {
             Some(p) => {
                 log::info!("look: rustdecoder route for {}: {} {}x{}", path.display(), p.codec, p.width, p.height);
-                Opened(Kind::Rd(Box::new(kind), p), Prepared::new((960.0, 540.0), super::file_name(path)))
+                let size = video_window(p.width, p.height, (1, 1));
+                Opened(Kind::Rd(Box::new(kind), p), Prepared::new(size, super::file_name(path)))
             }
             None => {
                 log::info!("look: rustdecoder does not take {}, current route", path.display());
@@ -219,6 +229,9 @@ pub struct MediaView {
     controls: bool,
     hovered_controls: bool,
     bar: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Where this view is in the window (below the title bar when that is not an overlay): the
+    /// video's own window goes inside it, never over the title bar.
+    area: Rc<Cell<Option<Bounds<Pixels>>>>,
     meta: Vec<(&'static str, String)>,
     cover: Option<Arc<RenderImage>>,
     images: Option<Entity<crate::image_cache::ImageCache>>,
@@ -278,6 +291,7 @@ impl MediaView {
             controls: true,
             hovered_controls: false,
             bar: Default::default(),
+            area: Default::default(),
             meta: Vec::new(),
             cover: None,
             images: None,
@@ -869,9 +883,15 @@ impl Render for MediaView {
         if !self.video {
             return self.render_audio(window, cx);
         }
-        // video: alana sığan dikdörtgen
-        let area = window.viewport_size();
-        let (aw, ah) = (f32::from(area.width), f32::from(area.height));
+        // video: alana sığan dikdörtgen (this view's own area as last laid out; the whole
+        // window until then)
+        let (ox, oy, aw, ah) = match self.area.get() {
+            Some(b) => (f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height)),
+            None => {
+                let v = window.viewport_size();
+                (0.0, 0.0, f32::from(v.width), f32::from(v.height))
+            }
+        };
         let (vw, vh) = self.dims;
         let s = (aw / vw).min(ah / vh);
         let (dw, dh) = ((vw * s).floor(), (vh * s).floor());
@@ -915,12 +935,29 @@ impl Render for MediaView {
             }));
         // the video's own window (Media Foundation, rustdecoder) goes over this rectangle (screen
         // pixels); the controls stay at the bottom
+        // (inside this view: the title bar above it stays visible and draggable; the video's
+        // window covered it when placed over the whole window)
+        let (wx, wy) = (f32::from(window.bounds().origin.x) + ox, f32::from(window.bounds().origin.y) + oy);
         let rect = [
-            ((f32::from(window.bounds().origin.x) + (aw - dw) / 2.0) * scale) as i32,
-            ((f32::from(window.bounds().origin.y) + (ah - 48.0 - dh.min(ah - 48.0)) / 2.0) * scale) as i32,
-            ((f32::from(window.bounds().origin.x) + (aw + dw) / 2.0) * scale) as i32,
-            ((f32::from(window.bounds().origin.y) + (ah - 48.0 + dh.min(ah - 48.0)) / 2.0) * scale) as i32,
+            ((wx + (aw - dw) / 2.0) * scale) as i32,
+            ((wy + (ah - 48.0 - dh.min(ah - 48.0)) / 2.0) * scale) as i32,
+            ((wx + (aw + dw) / 2.0) * scale) as i32,
+            ((wy + (ah - 48.0 + dh.min(ah - 48.0)) / 2.0) * scale) as i32,
         ];
+        let area = self.area.clone();
+        root = root.child(
+            canvas(
+                move |b, window, _| {
+                    if area.get() != Some(b) {
+                        area.set(Some(b));
+                        window.refresh();
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .size_full(),
+        );
         if self.rd_mode {
             if self.rd_rect != Some(rect) {
                 self.rd_rect = Some(rect);
