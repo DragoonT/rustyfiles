@@ -375,11 +375,14 @@ impl FolderView {
         if paths.is_empty() {
             return;
         }
-        // inside an archive: remove the entries from it (always asks: there is no recycle bin)
-        if let Some((archive, _)) = crate::archive_view::split(&paths[0]) {
+        // inside an archive: remove the entries from it (always asks: there is no recycle bin).
+        // An archive file itself splits as its own root (an empty inner path): that is a plain
+        // file to delete (#11: deleting a .zip asked to delete "" from inside it and failed)
+        let inside = |p: &PathBuf| crate::archive_view::split_inside(p);
+        if let Some((archive, _)) = inside(&paths[0]) {
             let inners: Vec<String> = paths
                 .iter()
-                .filter_map(|p| crate::archive_view::split(p).filter(|(a, _)| *a == archive))
+                .filter_map(|p| inside(p).filter(|(a, _)| *a == archive))
                 .map(|(_, i)| i.to_string_lossy().replace('\\', "/"))
                 .collect();
             let what = if inners.len() == 1 { format!("\"{}\"", inners[0].rsplit('/').next().unwrap_or_default()) } else { crate::i18n::items(inners.len()) };

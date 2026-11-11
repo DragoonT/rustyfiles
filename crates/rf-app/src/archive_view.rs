@@ -211,6 +211,12 @@ pub fn split(path: &Path) -> Option<(PathBuf, PathBuf)> {
     None
 }
 
+/// [`split`] for an item somewhere inside an archive: None for the archive file itself (which
+/// splits as its own root, with an empty inner path).
+pub fn split_inside(path: &Path) -> Option<(PathBuf, PathBuf)> {
+    split(path).filter(|(_, inner)| !inner.as_os_str().is_empty())
+}
+
 type Listing = Arc<Vec<rf_archive::ArchiveEntry>>;
 
 static LISTINGS: Mutex<Option<HashMap<PathBuf, (i64, Listing)>>> = Mutex::new(None);
@@ -465,6 +471,23 @@ fn names(paths: &[PathBuf]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #11: a .zip file itself is not an item inside an archive (deleting it asked to delete ""
+    /// from inside it); its entries are.
+    #[test]
+    fn an_archive_is_not_inside_itself() {
+        let dir = std::env::temp_dir().join(format!("rf-av-inside-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let zip = dir.join("paket.zip");
+        // an empty ZIP (its end record): the path rules look at the name and that it is a file
+        let mut eocd = b"PK".to_vec();
+        eocd.resize(22, 0);
+        std::fs::write(&zip, eocd).unwrap();
+        assert!(split(&zip).is_some_and(|(_, inner)| inner.as_os_str().is_empty()), "the root still splits");
+        assert_eq!(split_inside(&zip), None);
+        assert_eq!(split_inside(&zip.join("a.txt")), Some((zip.clone(), PathBuf::from("a.txt"))));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn extracts_just_the_items_asked_for() {
