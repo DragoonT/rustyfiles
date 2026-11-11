@@ -1,5 +1,5 @@
-//! Taskbar jump list (right-click on the taskbar button): "New window" / "New tab" tasks and
-//! the pinned folders, like Files. Blocking + COM: call off the UI thread.
+//! Taskbar jump list (right-click on the taskbar button): "New window" / "New tab" tasks, the
+//! pinned folders and the folders used last, like Files. Blocking + COM: call off the UI thread.
 
 use std::path::{Path, PathBuf};
 
@@ -40,23 +40,32 @@ fn link(exe: &Path, args: &str, title: &str, icon: Option<(&str, i32)>) -> windo
     }
 }
 
-/// Replaces the jump list: tasks + a "pinned" category (`(title, folder)`).
-pub fn set(exe: &Path, tasks: &[(&str, &str)], pinned_title: &str, pinned: &[(String, PathBuf)]) -> anyhow::Result<()> {
+/// A named group of folders in the jump list: `(title, folder)` each.
+pub type Category = (String, Vec<(String, PathBuf)>);
+
+/// Replaces the jump list: tasks + categories of folders, in the order given (Windows shows
+/// only as many items as the list has room for; the first category is filled first).
+pub fn set(exe: &Path, tasks: &[(&str, &str)], categories: &[Category]) -> anyhow::Result<()> {
     ensure_com();
     unsafe {
         let list: ICustomDestinationList = CoCreateInstance(&DestinationList, None, CLSCTX_INPROC_SERVER)?;
         let mut slots = 0u32;
         let _removed: IObjectArray = list.BeginList(&mut slots)?;
         let folder_icon = std::env::var("SystemRoot").map(|r| format!(r"{r}\System32\imageres.dll")).unwrap_or_default();
-        if !pinned.is_empty() {
+        let mut room = slots.max(5) as usize;
+        for (cat_title, folders) in categories {
+            if folders.is_empty() || room == 0 {
+                continue;
+            }
             let coll: IObjectCollection = CoCreateInstance(&EnumerableObjectCollection, None, CLSCTX_INPROC_SERVER)?;
-            for (title, path) in pinned.iter().take(slots.max(5) as usize) {
+            for (title, path) in folders.iter().take(room) {
                 let args = format!("\"{}\"", path.display());
                 if let Ok(l) = link(exe, &args, title, Some((&folder_icon, 3))) {
                     coll.AddObject(&l)?;
                 }
             }
-            let wt = wide(pinned_title);
+            room = room.saturating_sub(folders.len());
+            let wt = wide(cat_title);
             list.AppendCategory(PCWSTR(wt.as_ptr()), &coll.cast::<IObjectArray>()?)?;
         }
         if !tasks.is_empty() {
@@ -78,6 +87,8 @@ mod tests {
     fn builds_jump_list() {
         let exe = std::env::current_exe().unwrap();
         let pins = vec![("Belgeler".to_string(), std::env::temp_dir())];
-        super::set(&exe, &[("Yeni pencere", super::NEW_WINDOW_ARG)], "Sabitlenenler", &pins).unwrap();
+        let recent = vec![("Son".to_string(), std::env::temp_dir()), ("Önceki".to_string(), std::env::temp_dir())];
+        let cats = [("Sabitlenenler".to_string(), pins), ("Son klasörler".to_string(), recent), ("Boş".to_string(), Vec::new())];
+        super::set(&exe, &[("Yeni pencere", super::NEW_WINDOW_ARG)], &cats).unwrap();
     }
 }

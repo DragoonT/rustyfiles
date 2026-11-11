@@ -6138,5 +6138,11 @@
   "key": "Dosyanın içeriğinin yanında tutulan adlandırılmış akışlar (NTFS). İndirilen dosyalardaki Zone.Identifier bunlardan biridir.",
   "tr": "Dosyanın içeriğinin yanında tutulan adlandırılmış akışlar (NTFS). İndirilen dosyalardaki Zone.Identifier bunlardan biridir.",
   "en": "Named streams kept beside the file's content (NTFS). The Zone.Identifier of downloaded files is one of them."
+ },
+ {
+  "id": "7e0733ea",
+  "key": "Son klasörler",
+  "tr": "Son klasörler",
+  "en": "Recent folders"
  }
 ]

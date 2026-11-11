@@ -176,24 +176,33 @@ impl Global for OpenWorkspaces {}
 /// Taskbar jump list: "New window" / "New tab" and the pinned folders. Rewritten only when the
 /// pins or the language change; test runs (several instances) leave the user's list alone.
 fn update_jump_list(places: &crate::places::Places) {
-    static LAST: std::sync::Mutex<Option<(Vec<(String, PathBuf)>, [&'static str; 3])>> = std::sync::Mutex::new(None);
+    static LAST: std::sync::Mutex<Option<(Vec<(String, PathBuf)>, Vec<(String, PathBuf)>, [&'static str; 4])>> = std::sync::Mutex::new(None);
     if !places.loaded || std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || std::env::var_os("RUSTYFILES_INSTANCE").is_some() {
         return;
     }
     // in the UI language, as the sidebar shows them (a default pin's title is its Turkish name)
     let pins: Vec<(String, PathBuf)> = places.pinned.iter().map(|p| (crate::i18n::td(&p.title), p.path.clone())).collect();
-    let labels = [t!("Yeni pencere"), t!("Yeni sekme"), t!("Sabitlenenler")];
+    // the folders used last (Windows' recent items), without the pinned ones
+    let recent: Vec<(String, PathBuf)> = places
+        .recent
+        .iter()
+        .filter(|r| r.is_dir && !pins.iter().any(|(_, p)| *p == r.target))
+        .take(6)
+        .map(|r| (rf_win::localized::folder_label(&r.target, None).map_or_else(|| r.name.clone(), |l| l.to_string()), r.target.clone()))
+        .collect();
+    let labels = [t!("Yeni pencere"), t!("Yeni sekme"), t!("Sabitlenenler"), t!("Son klasörler")];
     {
         let mut last = LAST.lock().unwrap();
-        if last.as_ref() == Some(&(pins.clone(), labels)) {
+        if last.as_ref() == Some(&(pins.clone(), recent.clone(), labels)) {
             return;
         }
-        *last = Some((pins.clone(), labels));
+        *last = Some((pins.clone(), recent.clone(), labels));
     }
     let Ok(exe) = std::env::current_exe() else { return };
     std::thread::spawn(move || {
         let tasks = [(labels[0], rf_win::jumplist::NEW_WINDOW_ARG), (labels[1], "")];
-        if let Err(e) = rf_win::jumplist::set(&exe, &tasks, labels[2], &pins) {
+        let cats = [(labels[2].to_string(), pins), (labels[3].to_string(), recent)];
+        if let Err(e) = rf_win::jumplist::set(&exe, &tasks, &cats) {
             log::warn!("jump list: {e:#}");
         }
     });
