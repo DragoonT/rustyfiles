@@ -733,6 +733,58 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         },
         cx,
     ));
+    let (bar_hidden, bar_extra) = (s.toolbar_hidden.clone(), s.toolbar_extra.clone());
+    v.push(expander(
+        "toolbar-buttons",
+        p,
+        L::PanelTop,
+        t!("Araç çubuğu düğmeleri"),
+        None,
+        None,
+        move || {
+            // (key, id, label, off unless asked for)
+            const BUTTONS: [(&str, &str, &str, bool); 16] = [
+                ("new", "tb-new", "Yeni", false),
+                ("newfolder", "tb-newfolder", "Yeni klasör", true),
+                ("cut", "tb-cut", "Kes", false),
+                ("copy", "tb-copy", "Kopyala", false),
+                ("paste", "tb-paste", "Yapıştır", false),
+                ("rename", "tb-rename", "Yeniden adlandır", false),
+                ("share", "tb-share", "Paylaş", false),
+                ("delete", "tb-delete", "Sil", false),
+                ("props", "tb-props", "Özellikler", false),
+                ("terminal", "tb-terminal", "Terminalde aç", true),
+                ("hidden", "tb-hidden", "Gizli öğeleri göster/gizle", true),
+                ("refresh", "tb-refresh", "Yenile", true),
+                ("filter", "tb-filter", "Filtrele", false),
+                ("sort", "tb-sort", "Sırala ve gruplandır", false),
+                ("view", "tb-view", "Görünüm", false),
+                ("preview", "tb-preview", "Önizleme paneli", false),
+            ];
+            BUTTONS
+                .iter()
+                .map(|&(key, id, label, optional)| {
+                    let shown = if optional { bar_extra.iter().any(|k| k == key) } else { !bar_hidden.iter().any(|k| k == key) };
+                    sub(
+                        &pp,
+                        crate::i18n::t(label),
+                        None,
+                        switch(id, &pp, shown, move |_, cx| {
+                            settings::update(cx, |s| {
+                                let list = if optional { &mut s.toolbar_extra } else { &mut s.toolbar_hidden };
+                                list.retain(|k| k != key);
+                                // (the optional ones are listed when on, the others when off)
+                                if shown != optional {
+                                    list.push(key.to_string());
+                                }
+                            })
+                        }),
+                    )
+                })
+                .collect()
+        },
+        cx,
+    ));
     let home_hidden = s.home_hidden.clone();
     v.push(expander(
         "home-sections",

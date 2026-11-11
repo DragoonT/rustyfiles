@@ -270,6 +270,12 @@ pub struct Settings {
     /// The last searches run with Enter (newest first, ten at most): offered under the empty
     /// search box.
     pub search_history: Vec<String>,
+    /// Buttons of the command bar that are hidden ("new", "cut", "copy", "paste", "rename",
+    /// "share", "delete", "props", "filter", "sort", "view", "preview").
+    pub toolbar_hidden: Vec<String>,
+    /// Buttons of the command bar that are off unless asked for ("newfolder", "terminal",
+    /// "hidden", "refresh").
+    pub toolbar_extra: Vec<String>,
     pub preview_width: f32,
     pub renderer: RendererPref,
     pub restore_session: bool,
@@ -422,6 +428,8 @@ impl Default for Settings {
             home_hidden: Vec::new(),
             recent_cleared_ms: 0,
             search_history: Vec::new(),
+            toolbar_hidden: Vec::new(),
+            toolbar_extra: Vec::new(),
             preview_width: 300.,
             renderer: RendererPref::Auto,
             restore_session: true,

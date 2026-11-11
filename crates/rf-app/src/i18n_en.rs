@@ -1215,4 +1215,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Veri akışları", "Data streams"),
     ("Dosyanın içeriğinin yanında tutulan adlandırılmış akışlar (NTFS). İndirilen dosyalardaki Zone.Identifier bunlardan biridir.", "Named streams kept beside the file's content (NTFS). The Zone.Identifier of downloaded files is one of them."),
     ("Son klasörler", "Recent folders"),
+    ("Araç çubuğu düğmeleri", "Toolbar buttons"),
+    ("Yeni klasör  (Ctrl+Shift+N)", "New folder  (Ctrl+Shift+N)"),
+    ("Terminalde aç  (Ctrl+Shift+`)", "Open in Terminal  (Ctrl+Shift+`)"),
 ];

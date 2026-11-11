@@ -6144,5 +6144,23 @@
   "key": "Son klasörler",
   "tr": "Son klasörler",
   "en": "Recent folders"
+ },
+ {
+  "id": "b5555dcb",
+  "key": "Araç çubuğu düğmeleri",
+  "tr": "Araç çubuğu düğmeleri",
+  "en": "Toolbar buttons"
+ },
+ {
+  "id": "111d0c58",
+  "key": "Yeni klasör  (Ctrl+Shift+N)",
+  "tr": "Yeni klasör  (Ctrl+Shift+N)",
+  "en": "New folder  (Ctrl+Shift+N)"
+ },
+ {
+  "id": "dfb11c63",
+  "key": "Terminalde aç  (Ctrl+Shift+`)",
+  "tr": "Terminalde aç  (Ctrl+Shift+`)",
+  "en": "Open in Terminal  (Ctrl+Shift+`)"
  }
 ]

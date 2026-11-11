@@ -2251,6 +2251,13 @@ impl Workspace {
                 })
         };
         let sep = || div().w(px(1.)).h(px(20.)).mx_1().bg(p.divider);
+        // which buttons the user wants (Settings > Appearance > Toolbar buttons)
+        let (hidden, extras) = {
+            let st = cx.global::<crate::settings::Settings>();
+            (st.toolbar_hidden.clone(), st.toolbar_extra.clone())
+        };
+        let on = |k: &str| !hidden.iter().any(|h| h == k);
+        let extra = |k: &str| extras.iter().any(|h| h == k);
 
         h_flex()
             .h(px(44.))
@@ -2259,29 +2266,39 @@ impl Workspace {
             .items_center()
             .border_b_1()
             .border_color(p.divider)
-            .child(drop("cb-new", L::CirclePlus, Some("Yeni"), "Yeni öğe", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::New))
-            .child(sep())
-            .child(cmd("cb-cut", L::Scissors, "Kes  (Ctrl+X)", writable_sel, cx, |this, w, cx| {
-                this.with_tab(cx, |v, cx| v.copy_to_clipboard(rf_win::fileops::Transfer::Move, w, cx))
+            .children(on("new").then(|| drop("cb-new", L::CirclePlus, Some("Yeni"), "Yeni öğe", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::New)))
+            .children(extra("newfolder").then(|| {
+                cmd("cb-newfolder", L::FolderPlus, "Yeni klasör  (Ctrl+Shift+N)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(NewFolder), cx))
             }))
-            .child(cmd("cb-copy", L::Copy, "Kopyala  (Ctrl+C)", has_sel, cx, |this, w, cx| {
-                this.with_tab(cx, |v, cx| v.copy_to_clipboard(rf_win::fileops::Transfer::Copy, w, cx))
+            .children(on("new").then(sep))
+            .children(on("cut").then(|| {
+                cmd("cb-cut", L::Scissors, "Kes  (Ctrl+X)", writable_sel, cx, |this, w, cx| {
+                    this.with_tab(cx, |v, cx| v.copy_to_clipboard(rf_win::fileops::Transfer::Move, w, cx))
+                })
             }))
-            .child(cmd("cb-paste", L::ClipboardPaste, "Yapıştır  (Ctrl+V)", paste_ok, cx, |this, w, cx| {
-                this.with_tab(cx, |v, cx| v.paste(w, cx))
+            .children(on("copy").then(|| {
+                cmd("cb-copy", L::Copy, "Kopyala  (Ctrl+C)", has_sel, cx, |this, w, cx| {
+                    this.with_tab(cx, |v, cx| v.copy_to_clipboard(rf_win::fileops::Transfer::Copy, w, cx))
+                })
             }))
-            .child(cmd("cb-rename", L::TextCursorInput, "Yeniden adlandır  (F2)", writable_sel, cx, |this, w, cx| {
-                this.with_tab(cx, |v, cx| v.rename_selection(w, cx))
+            .children(on("paste").then(|| cmd("cb-paste", L::ClipboardPaste, "Yapıştır  (Ctrl+V)", paste_ok, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.paste(w, cx)))))
+            .children(on("rename").then(|| {
+                cmd("cb-rename", L::TextCursorInput, "Yeniden adlandır  (F2)", writable_sel, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.rename_selection(w, cx)))
             }))
-            .child(cmd("cb-share", L::Share2, "Paylaş", writable_sel, cx, |this, _, cx| this.with_tab(cx, |v, _| v.share())))
-            .child(cmd("cb-delete", L::Trash, "Sil  (Del)", writable_sel, cx, |this, w, cx| {
-                this.with_tab(cx, |v, cx| v.delete_selected(false, w, cx))
+            .children(on("share").then(|| cmd("cb-share", L::Share2, "Paylaş", writable_sel, cx, |this, _, cx| this.with_tab(cx, |v, _| v.share()))))
+            .children(on("delete").then(|| {
+                cmd("cb-delete", L::Trash, "Sil  (Del)", writable_sel, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.delete_selected(false, w, cx)))
             }))
-            .child(cmd("cb-props", L::Wrench, "Özellikler  (Alt+Enter)", in_folder, cx, |this, _, cx| {
-                this.with_tab(cx, |v, cx| if v.selection_paths().is_empty() { v.folder_properties(cx) } else { v.properties(cx) })
+            .children(on("props").then(|| {
+                cmd("cb-props", L::Wrench, "Özellikler  (Alt+Enter)", in_folder, cx, |this, _, cx| {
+                    this.with_tab(cx, |v, cx| if v.selection_paths().is_empty() { v.folder_properties(cx) } else { v.properties(cx) })
+                })
             }))
+            .children(extra("terminal").then(|| cmd("cb-terminal", L::SquareTerminal, "Terminalde aç  (Ctrl+Shift+`)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(OpenTerminal), cx))))
+            .children(extra("hidden").then(|| cmd("cb-hidden", L::Eye, "Gizli öğeleri göster/gizle  (Ctrl+H)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(ToggleHidden), cx))))
+            .children(extra("refresh").then(|| cmd("cb-refresh", L::RotateCw, "Yenile  (F5)", true, cx, |_, w, cx| w.dispatch_action(Box::new(Refresh), cx))))
             .child(div().flex_1())
-            .child(
+            .children(on("filter").then(|| {
                 div()
                     .id("cb-filter")
                     .h(px(32.))
@@ -2295,15 +2312,14 @@ impl Workspace {
                     .when(!filter_on, |d| d.hover(|s| s.bg(p.hover)))
                     .when(in_folder, |d| d.on_click(cx.listener(|this, _, window, cx| this.toggle_filter_bar(window, cx))))
                     .when(!in_folder, |d| d.text_color(p.text_tertiary))
-                    .child(Icon::new(L::ListFilter).size(px(16.))),
-            )
-            .child(drop("cb-sort", L::ArrowUpDown, None, "Sırala ve gruplandır", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::Sort))
-            .child(drop("cb-view", L::LayoutGrid, None, "Görünüm", true, cx, move |this, _| crate::ctx_menu::BarMenu::View {
-                dual: this.tabs[this.active].right.is_some(),
-                shelf: this.shelf_open,
+                    .child(Icon::new(L::ListFilter).size(px(16.)))
             }))
-            .child(sep())
-            .child(
+            .children(on("sort").then(|| drop("cb-sort", L::ArrowUpDown, None, "Sırala ve gruplandır", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::Sort)))
+            .children(on("view").then(|| {
+                drop("cb-view", L::LayoutGrid, None, "Görünüm", true, cx, move |this, _| crate::ctx_menu::BarMenu::View { dual: this.tabs[this.active].right.is_some(), shelf: this.shelf_open })
+            }))
+            .children(on("preview").then(sep))
+            .children(on("preview").then(|| {
                 div()
                     .id("cb-preview")
                     .h(px(32.))
@@ -2318,8 +2334,8 @@ impl Workspace {
                     .child(Icon::new(L::PanelRight).size(px(16.)))
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_preview(cx);
-                    })),
-            )
+                    }))
+            }))
     }
 
     fn render_breadcrumb(&mut self, loc: &Location, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
