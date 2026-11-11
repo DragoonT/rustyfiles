@@ -224,15 +224,24 @@ pub fn restart_to_update() {
     let pending = PENDING.lock().unwrap().clone();
     rf_win::single_instance::send_to(&crate::look::ipc::app_name(), &crate::look::ipc::Msg::Quit.encode());
     std::thread::sleep(Duration::from_millis(300));
-    let r = match pending {
-        Some(info) => um.apply_updates_and_restart(&info),
+    let asset = match pending {
+        Some(info) => info.TargetFullRelease.clone(),
         None => match um.get_update_pending_restart() {
-            Some(asset) => um.apply_updates_and_restart(&asset),
+            Some(asset) => asset,
             None => return,
         },
     };
-    if let Err(e) = r {
-        set(State::Failed(e.to_string()));
+    // our window with the installer's logo while Velopack applies the update silently (its own
+    // box is a plain progress dialog); Velopack's box when that window couldn't start
+    let splash = crate::update_splash::launch();
+    match um.wait_exit_then_apply_updates(&asset, splash.is_some(), true, Vec::<String>::new()) {
+        Ok(()) => std::process::exit(0),
+        Err(e) => {
+            if let Some(mut s) = splash {
+                let _ = s.kill();
+            }
+            set(State::Failed(e.to_string()));
+        }
     }
 }
 

@@ -35,6 +35,7 @@ mod shell_view;
 mod select_box;
 mod settings_view;
 mod taskbar_preview;
+mod update_splash;
 mod shelf_view;
 mod status_center;
 mod tags;
@@ -268,6 +269,11 @@ pub fn main() {
         .format_timestamp_millis()
         .init();
     start_mark("logging");
+    // a copy of this exe showing the update window while the installed one is replaced
+    if std::env::args().nth(1).as_deref() == Some(update_splash::ARG) {
+        update_splash::run();
+        return;
+    }
 
     // As default file manager we also receive shell namespaces (Control Panel = "::{…}") and
     // non-folders: hand those back to Explorer so nothing becomes unreachable.
