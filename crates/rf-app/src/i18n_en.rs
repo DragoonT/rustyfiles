@@ -1203,4 +1203,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Ekim", "October"),
     ("Kasım", "November"),
     ("Aralık", "December"),
+    ("Ağ konumları", "Network locations"),
+    ("Listeyi boşaltır; Windows'un kendi son kullanılanlar listesine dokunulmaz", "Empties this list; Windows' own list of recent items is left alone"),
+    ("Ana sayfa bölümleri", "Home page sections"),
 ];

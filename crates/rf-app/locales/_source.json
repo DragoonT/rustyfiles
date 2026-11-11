@@ -6072,5 +6072,23 @@
   "key": "Aralık",
   "tr": "Aralık",
   "en": "December"
+ },
+ {
+  "id": "fe276e55",
+  "key": "Ağ konumları",
+  "tr": "Ağ konumları",
+  "en": "Network locations"
+ },
+ {
+  "id": "f2081af0",
+  "key": "Listeyi boşaltır; Windows'un kendi son kullanılanlar listesine dokunulmaz",
+  "tr": "Listeyi boşaltır; Windows'un kendi son kullanılanlar listesine dokunulmaz",
+  "en": "Empties this list; Windows' own list of recent items is left alone"
+ },
+ {
+  "id": "952763d0",
+  "key": "Ana sayfa bölümleri",
+  "tr": "Ana sayfa bölümleri",
+  "en": "Home page sections"
  }
 ]

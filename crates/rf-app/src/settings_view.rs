@@ -733,6 +733,33 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         },
         cx,
     ));
+    let home_hidden = s.home_hidden.clone();
+    v.push(expander(
+        "home-sections",
+        p,
+        L::House,
+        t!("Ana sayfa bölümleri"),
+        None,
+        None,
+        move || {
+            const SECTIONS: [(&str, &str, &str); 6] = [
+                ("quick", "hm-quick", "Hızlı Erişim"),
+                ("drives", "hm-drives", "Sürücüler"),
+                ("devices", "hm-devices", "Cihazlar"),
+                ("network", "hm-network", "Ağ konumları"),
+                ("tags", "hm-tags", "Etiketler"),
+                ("recent", "hm-recent", "Son kullanılanlar"),
+            ];
+            SECTIONS
+                .iter()
+                .map(|&(key, id, label)| {
+                    let on = !home_hidden.iter().any(|h| h == key);
+                    sub(&pp, crate::i18n::t(label), None, switch(id, &pp, on, move |_, cx| settings::update(cx, |s| show_home_section(s, key, !on))))
+                })
+                .collect()
+        },
+        cx,
+    ));
     v
 }
 
@@ -1913,6 +1940,14 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
             cx,
         ),
     ]
+}
+
+/// Shows or hides a section of the Home page (`Settings::home_hidden`).
+fn show_home_section(s: &mut Settings, key: &str, show: bool) {
+    s.home_hidden.retain(|h| h != key);
+    if !show {
+        s.home_hidden.push(key.to_string());
+    }
 }
 
 /// Shows or hides a sidebar section (`Settings::sidebar_hidden`).

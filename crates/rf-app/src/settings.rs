@@ -261,6 +261,12 @@ pub struct Settings {
     pub sidebar_width: f32,
     /// Sidebar sections the user turned off ("drives", "cloud", "libraries", "network", "tags").
     pub sidebar_hidden: Vec<String>,
+    /// Sections of the Home page that are hidden: "quick", "drives", "devices", "tags",
+    /// "network", "recent".
+    pub home_hidden: Vec<String>,
+    /// "Clear" on Home's recent items: only items used after this moment are listed (Windows'
+    /// own list of recent items is left alone).
+    pub recent_cleared_ms: i64,
     pub preview_width: f32,
     pub renderer: RendererPref,
     pub restore_session: bool,
@@ -410,6 +416,8 @@ impl Default for Settings {
             sidebar_rail: false,
             sidebar_width: 232.,
             sidebar_hidden: Vec::new(),
+            home_hidden: Vec::new(),
+            recent_cleared_ms: 0,
             preview_width: 300.,
             renderer: RendererPref::Auto,
             restore_session: true,

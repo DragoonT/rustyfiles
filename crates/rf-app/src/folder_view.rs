@@ -3569,8 +3569,19 @@ impl FolderView {
         let places = self.places.read(cx);
         let pinned = places.pinned.clone();
         let drives = places.drives.clone();
-        let recent = places.recent.clone();
         let devices = places.devices.clone();
+        let network = places.network.clone();
+        let (hidden, cleared) = {
+            let s = cx.global::<crate::settings::Settings>();
+            (s.home_hidden.clone(), s.recent_cleared_ms)
+        };
+        let shown = |k: &str| !hidden.iter().any(|h| h == k);
+        let recent: Vec<places::Recent> = places.recent.iter().filter(|r| r.used_ms > cleared).cloned().collect();
+        // every tag with how many items carry it
+        let tags: Vec<(u32, String, u32, usize)> = {
+            let store = &cx.global::<crate::tags::Tags>().0;
+            store.defs.iter().map(|d| (d.id, d.name.clone(), d.color, store.paths_with(d.id).len())).collect()
+        };
         let card = |id: ElementId| {
             v_flex()
                 .id(id)
@@ -3671,7 +3682,48 @@ impl FolderView {
             );
         }
 
-        let has_recent = !recent.is_empty();
+        let mut tag_grid = div().grid().grid_cols(tile_cols(avail, 140., 220., 12.)).gap_3();
+        let has_tags = !tags.is_empty() && shown("tags");
+        for (id, name, color, count) in tags {
+            tag_grid = tag_grid.child(
+                card(("home-tag", id as usize).into())
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(div().size(px(10.)).flex_shrink_0().rounded_full().bg(crate::tags::color(color)))
+                            .child(div().flex_1().min_w_0().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::i18n::td(&name))),
+                    )
+                    .child(div().text_xs().text_color(p.text_secondary).child(crate::i18n::items(count)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Tag(id), cx))),
+            );
+        }
+
+        let mut network_grid = div().grid().grid_cols(tile_cols(avail, 240., 340., 12.)).gap_3();
+        let has_network = !network.is_empty() && shown("network");
+        for (i, (name, target)) in network.into_iter().enumerate() {
+            let shown_target = target.to_string_lossy().into_owned();
+            network_grid = network_grid.child(
+                card(("home-net", i).into())
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .items_center()
+                            .child(Icon::new(L::Network).size(px(28.)).text_color(p.text_secondary))
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(div().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name))
+                                    .child(div().text_xs().text_color(p.text_secondary).overflow_hidden().text_ellipsis().whitespace_nowrap().child(shown_target)),
+                            ),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(target.clone()), cx))),
+            );
+        }
+
+        let has_recent = !recent.is_empty() && shown("recent");
+        let has_devices = has_devices && shown("devices");
         let mut recent_list = v_flex().gap_0p5().max_w(px(900.));
         for (i, r) in recent.into_iter().enumerate() {
             let e = rf_core::Entry::new(&r.name, if r.is_dir { rf_core::EntryKind::Dir } else { rf_core::EntryKind::File }, 0, 0, 0, 0);
@@ -3745,14 +3797,37 @@ impl FolderView {
                 v_flex()
                     .p_6()
                     .gap_4()
-                    .child(section(t!("Hızlı Erişim")))
-                    .child(pinned_grid)
-                    .child(div().h_2())
-                    .child(section(t!("Sürücüler")))
-                    .child(drive_grid)
+                    .when(shown("quick"), |d| d.child(section(t!("Hızlı Erişim"))).child(pinned_grid).child(div().h_2()))
+                    .when(shown("drives"), |d| d.child(section(t!("Sürücüler"))).child(drive_grid))
                     .when(has_devices, |d| d.child(div().h_2()).child(section(t!("Cihazlar"))).child(device_grid))
-                    .when(has_recent, |d| d.child(div().h_2()).child(section(t!("Son kullanılanlar"))))
-                    .child(recent_list),
+                    .when(has_network, |d| d.child(div().h_2()).child(section(t!("Ağ konumları"))).child(network_grid))
+                    .when(has_tags, |d| d.child(div().h_2()).child(section(t!("Etiketler"))).child(tag_grid))
+                    .when(has_recent, |d| {
+                        d.child(div().h_2())
+                            .child(
+                                h_flex().max_w(px(900.)).justify_between().items_center().child(section(t!("Son kullanılanlar"))).child(
+                                    div()
+                                        .id("recent-clear")
+                                        .px_2()
+                                        .py_0p5()
+                                        .rounded(theme::RADIUS_SM)
+                                        .text_xs()
+                                        .text_color(p.text_secondary)
+                                        .cursor_pointer()
+                                        .hover(|s| s.bg(p.hover).text_color(p.text))
+                                        .tooltip(|w, cx| {
+                                            gpui_kit::component::tooltip::Tooltip::new(t!("Listeyi boşaltır; Windows'un kendi son kullanılanlar listesine dokunulmaz")).build(w, cx)
+                                        })
+                                        .child(t!("Temizle"))
+                                        .on_click(cx.listener(|_, _, _, cx| {
+                                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64);
+                                            crate::settings::update(cx, |s| s.recent_cleared_ms = now);
+                                            cx.notify();
+                                        })),
+                                ),
+                            )
+                            .child(recent_list)
+                    }),
             )
             .into_any_element()
     }
