@@ -54,6 +54,12 @@ impl PickSession {
             }
             if let Err(e) = write_msg(&mut f, &resp) {
                 log::warn!("picker answer: {e}");
+                // the app that asked is gone (crashed, ended): it disabled its window for the
+                // dialog and can no longer enable it again; left so, that window ignored every
+                // click (a Chrome window whose print to PDF ended mid-way)
+                if self.req.owner != 0 {
+                    rf_win::window::enable(self.req.owner);
+                }
             }
         }
     }

@@ -123,6 +123,15 @@ pub fn raise_above_owner(hwnd: isize) {
     }
 }
 
+/// Makes a window usable again (EnableWindow): a dialog disables its owner while it is open.
+pub fn enable(hwnd: isize) {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
+    unsafe {
+        let _ = EnableWindow(HWND(hwnd as *mut _), true);
+    }
+}
+
 /// Gives the foreground back to `owner` (another app's window) while we still hold it: when our
 /// window closes, Windows would otherwise activate whatever window comes next.
 pub fn hand_foreground(owner: isize) {

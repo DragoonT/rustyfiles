@@ -362,12 +362,15 @@ pub fn main() {
         }
     }
     // Cache the registry state for the settings page (read once, off the hot path).
-    std::thread::spawn(|| {
+    // A picker started for another app's Open/Save (--pick) only reads: whichever rustyfiles.exe
+    // the dialog DLL started (a test build too) must not re-point the user's registrations.
+    let registers = pick.is_none() && std::env::var_os("RUSTYFILES_CONFIG_DIR").is_none();
+    std::thread::spawn(move || {
         // copies opened/copied out of archives days ago
         crate::archive_view::clean_temp();
         // default file manager whose registered exe vanished (moved / rebuilt elsewhere):
         // re-point it here, or Windows can't open any folder. Not from test instances.
-        if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_none() {
+        if registers {
             if let Ok(me) = std::env::current_exe() {
                 if rf_win::default_fm::heal(&me.display().to_string(), rf_win::default_fm::CLASSES) {
                     log::warn!("default file manager re-registered to {}", me.display());
@@ -378,7 +381,7 @@ pub fn main() {
             }
         }
         // Open/Save dialogs: a registration whose DLL moved is pointed here (not from tests)
-        if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_none() {
+        if registers {
             if rf_win::dialog_reg::is_enabled(rf_win::dialog_reg::CLASSES) {
                 if let Some(dll) = dialog_dll() {
                     if rf_win::dialog_reg::point_to(&dll, rf_win::dialog_reg::CLASSES) {
