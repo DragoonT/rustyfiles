@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
 PackageIdentifier: gelenmedya.rustyfiles
-PackageVersion: 0.3.2
+PackageVersion: 0.6.5
 PackageLocale: en-US
 Publisher: Özer Güzel
 PublisherUrl: https://github.com/gelenmedya
@@ -14,7 +14,7 @@ Copyright: Copyright (c) Özer Güzel (gelenmedya)
 ShortDescription: A fast, free and open-source file manager for Windows, written in Rust, that never freezes.
 Description: |-
   rustyfiles is a file manager for Windows, written from scratch in Rust, meant to replace File Explorer for everyday work. The window never waits on the disk: listing, icons, thumbnails, previews and file operations run off the UI thread, so a slow network share or a folder with 100,000 files can't freeze it.
-  Tabs, dual panes, details / grid / column views, colour tags, Git status, archives (ZIP, 7z, RAR, tar, ISO) that open like folders, DirectLook for Quick Look-style previews with Space, and a parallel copy engine with conflict handling, pause, verification and resume after a crash.
+  Tabs, dual panes, details / grid / column views, colour tags, Git status, archives (ZIP, 7z, RAR, tar, ISO) that open like folders, DirectLook for Quick Look-style previews with Space, and a parallel copy engine with conflict handling, pause, verification and resume after a crash. It can also stand in for the Open / Save dialogs of other apps.
 Moniker: rustyfiles
 Tags:
 - file-manager
@@ -25,6 +25,6 @@ Tags:
 - archive
 - rust
 - open-source
-ReleaseNotesUrl: https://github.com/gelenmedya/rustyfiles/releases/tag/v0.3.2
+ReleaseNotesUrl: https://github.com/gelenmedya/rustyfiles/releases/tag/v0.6.5
 ManifestType: defaultLocale
 ManifestVersion: 1.9.0
