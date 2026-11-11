@@ -314,19 +314,27 @@ impl FolderView {
                 .collect(),
             ));
         }
-        if mp.compress && items.len() == 1 && rf_archive::is_supported(&items[0]) {
-            let (a, b) = (items[0].clone(), items[0].clone());
+        if mp.compress && !items.is_empty() && items.iter().all(|p| rf_archive::is_supported(p)) {
+            use crate::status_center::ExtractTo;
+            let list = items.to_vec();
+            let act = |label: String, ic: L, to: ExtractTo| {
+                let list = list.clone();
+                Item::action(label, icon(ic), move |_, cx| crate::status_center::extract_to(cx, list.clone(), to.clone()))
+            };
+            let named = if items.len() > 1 {
+                t!("Her birini kendi klasörüne çıkar").to_string()
+            } else {
+                format!("{} {}\\", t!("Klasöre çıkar:"), crate::ops::archive_stem(&items[0]))
+            };
+            let pick = list.clone();
             v.push(Item::sub(
                 t!("Çıkar"),
                 icon(L::FolderOutput),
                 vec![
-                    Item::action(t!("Buraya çıkar"), icon(L::FolderDown), move |_, cx| {
-                        let dest = a.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-                        crate::status_center::extract(cx, a.clone(), Some(dest));
-                    }),
-                    Item::action(format!("{} {}\\", t!("Klasöre çıkar:"), crate::ops::archive_stem(&b)), icon(L::FolderInput), move |_, cx| {
-                        crate::status_center::extract(cx, b.clone(), None)
-                    }),
+                    act(t!("Buraya çıkar").to_string(), L::FolderDown, ExtractTo::Here),
+                    act(t!("Akıllı çıkar").to_string(), L::Zap, ExtractTo::Smart),
+                    act(named, L::FolderInput, ExtractTo::Named),
+                    Item::action(t!("Şuraya çıkar…"), icon(L::FolderSearch), move |_, cx| crate::status_center::extract_pick(cx, pick.clone())),
                 ],
             ));
         }

@@ -367,6 +367,8 @@ pub struct Settings {
     pub show_libraries: bool,
     /// Double-clicking a ZIP/7z/tar opens it like a folder (read-only).
     pub browse_archives: bool,
+    /// After extracting an archive into a new folder, that folder opens in a tab.
+    pub open_after_extract: bool,
     /// Search through the Windows Search index (contents, AQS) where the folder is indexed.
     pub search_index: bool,
     /// Our own name index of the local drives: searching in subfolders takes milliseconds.
@@ -472,6 +474,7 @@ impl Default for Settings {
             copy_speed_limit: 0,
             show_libraries: false,
             browse_archives: true,
+            open_after_extract: false,
             search_index: true,
             name_index: true,
             index_excluded: Vec::new(),

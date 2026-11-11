@@ -5838,5 +5838,41 @@
   "key": "uygulama zaten çalışıyordu (sıfırdan açılış değil)",
   "tr": "uygulama zaten çalışıyordu (sıfırdan açılış değil)",
   "en": "the app was already running (not a start from scratch)"
+ },
+ {
+  "id": "9ee271eb",
+  "key": "Her birini kendi klasörüne çıkar",
+  "tr": "Her birini kendi klasörüne çıkar",
+  "en": "Extract each to its own folder"
+ },
+ {
+  "id": "b8404574",
+  "key": "Akıllı çıkar",
+  "tr": "Akıllı çıkar",
+  "en": "Extract smartly"
+ },
+ {
+  "id": "68ab8279",
+  "key": "Şuraya çıkar…",
+  "tr": "Şuraya çıkar…",
+  "en": "Extract to…"
+ },
+ {
+  "id": "3fdd1252",
+  "key": "Çıkardıktan sonra klasörü aç",
+  "tr": "Çıkardıktan sonra klasörü aç",
+  "en": "Open the folder after extracting"
+ },
+ {
+  "id": "754af74f",
+  "key": "Bir arşiv yeni bir klasöre çıkarılınca o klasör yeni sekmede açılır",
+  "tr": "Bir arşiv yeni bir klasöre çıkarılınca o klasör yeni sekmede açılır",
+  "en": "When an archive is extracted into a new folder, that folder opens in a new tab"
+ },
+ {
+  "id": "398a5a17",
+  "key": "Çıkarılacak klasör",
+  "tr": "Çıkarılacak klasör",
+  "en": "Folder to extract to"
  }
 ]

@@ -955,6 +955,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     v.push(card(
         p,
+        L::FolderOutput,
+        t!("Çıkardıktan sonra klasörü aç"),
+        Some(t!("Bir arşiv yeni bir klasöre çıkarılınca o klasör yeni sekmede açılır")),
+        sw("open-extracted", p, s.open_after_extract, |s, v| s.open_after_extract = v),
+    ));
+    v.push(card(
+        p,
         L::Search,
         t!("Aramada Windows dizinini kullan"),
         Some(t!("Dizinlenmiş klasörlerde dosya içerikleri de aranır ve kind:picture, size:>10MB gibi filtreler çalışır")),

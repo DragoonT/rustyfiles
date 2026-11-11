@@ -1164,4 +1164,10 @@ pub const EN: &[(&str, &str)] = &[
     ("ISO okunamadı (bozuk olabilir)", "Couldn't read the ISO (it may be damaged)"),
     ("ISO okunamadı", "Couldn't read the ISO"),
     ("UDF okunamadı", "Couldn't read the UDF file system"),
+    ("Her birini kendi klasörüne çıkar", "Extract each to its own folder"),
+    ("Akıllı çıkar", "Extract smartly"),
+    ("Şuraya çıkar…", "Extract to…"),
+    ("Çıkardıktan sonra klasörü aç", "Open the folder after extracting"),
+    ("Bir arşiv yeni bir klasöre çıkarılınca o klasör yeni sekmede açılır", "When an archive is extracted into a new folder, that folder opens in a new tab"),
+    ("Çıkarılacak klasör", "Folder to extract to"),
 ];

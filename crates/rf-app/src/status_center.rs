@@ -450,47 +450,138 @@ fn archive_progress(t: &Tracker) -> impl FnMut(rf_archive::Progress) + '_ {
     }
 }
 
+/// Where an archive from the file list is extracted.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExtractTo {
+    /// Its own folder, as is.
+    Here,
+    /// A new folder named after it, next to it.
+    Named,
+    /// Its own folder when everything in it is under one folder (or it is a single file),
+    /// otherwise a new folder named after it.
+    Smart,
+    /// This folder, as is.
+    Into(std::path::PathBuf),
+    /// "Smart", inside this folder (several archives extracted to a chosen folder).
+    SmartInto(std::path::PathBuf),
+}
+
 /// `dest = None`: "extract to <name>\\" (unique folder chosen on the worker thread).
 /// A protected archive asks for its password first (probed off the UI thread).
 pub fn extract(cx: &mut App, archive: std::path::PathBuf, dest: Option<std::path::PathBuf>) {
+    let to = match dest {
+        None => ExtractTo::Named,
+        Some(d) if archive.parent() == Some(d.as_path()) => ExtractTo::Here,
+        Some(d) => ExtractTo::Into(d),
+    };
+    extract_to(cx, vec![archive], to)
+}
+
+/// Extracts each archive as its own job. Protected ones ask for their password one after the
+/// other (probed off the UI thread); the others start at once.
+pub fn extract_to(cx: &mut App, archives: Vec<std::path::PathBuf>, to: ExtractTo) {
     let probe = cx.background_spawn({
-        let a = archive.clone();
-        async move { crate::archive_view::needs_password_now(&a) }
+        let list = archives.clone();
+        async move { list.iter().map(|a| crate::archive_view::needs_password_now(a)).collect::<Vec<bool>>() }
     });
     cx.spawn(async move |cx| {
         let need = probe.await;
         cx.update(|cx| {
-            if need {
-                if let Some(w) = cx.active_window() {
-                    let (a, d) = (archive.clone(), dest.clone());
-                    let asked = w
-                        .update(cx, |_, window, cx| {
-                            crate::archive_view::ask_password(archive.clone(), false, window, cx, move |cx| extract_now(cx, a.clone(), d.clone()))
-                        })
-                        .is_ok();
-                    if asked {
-                        return;
-                    }
-                }
+            let mut ask = Vec::new();
+            for (a, need) in archives.into_iter().zip(need) {
+                if need { ask.push(a) } else { extract_now(cx, a, to.clone()) }
             }
-            extract_now(cx, archive, dest);
+            ask.reverse();
+            ask_then_extract(cx, ask, to);
         });
     })
     .detach();
 }
 
-fn extract_now(cx: &mut App, archive: std::path::PathBuf, dest: Option<std::path::PathBuf>) {
-    let title = match &dest {
-        Some(d) => format!("{} {} → {}", t!("Çıkarılıyor:"), short(&archive), short(d)),
-        None => format!("{} {}", t!("Çıkarılıyor:"), short(&archive)),
+/// Asks for a folder (Windows' folder dialog) and extracts the archives there: one archive as
+/// is, several each the "smart" way (its own folder, unless it already is one folder).
+pub fn extract_pick(cx: &mut App, archives: Vec<std::path::PathBuf>) {
+    if archives.is_empty() {
+        return;
+    }
+    let (tx, rx) = futures::channel::oneshot::channel::<Option<std::path::PathBuf>>();
+    let title = t!("Çıkarılacak klasör").to_string();
+    rf_win::sta::run(move |owner| {
+        let _ = tx.send(rf_win::dialogs::pick(owner, &title, rf_win::dialogs::Pick::Folder));
+    });
+    cx.spawn(async move |cx| {
+        let Ok(Some(dir)) = rx.await else { return };
+        cx.update(|cx| {
+            let to = if archives.len() == 1 { ExtractTo::Into(dir) } else { ExtractTo::SmartInto(dir) };
+            extract_to(cx, archives, to);
+        });
+    })
+    .detach();
+}
+
+/// Asks for the password of the last archive of `rest`, starts it, and goes on with the others.
+fn ask_then_extract(cx: &mut App, mut rest: Vec<std::path::PathBuf>, to: ExtractTo) {
+    let Some(archive) = rest.pop() else { return };
+    if let Some(w) = cx.active_window() {
+        let (a, t, r) = (archive.clone(), to.clone(), rest.clone());
+        let asked = w
+            .update(cx, |_, window, cx| {
+                crate::archive_view::ask_password(archive.clone(), false, window, cx, move |cx| {
+                    extract_now(cx, a.clone(), t.clone());
+                    // (the prompt is still closing: the next one opens after it)
+                    let (r, t) = (r.clone(), t.clone());
+                    cx.defer(move |cx| ask_then_extract(cx, r, t));
+                })
+            })
+            .is_ok();
+        if asked {
+            return;
+        }
+    }
+    extract_now(cx, archive, to.clone());
+    ask_then_extract(cx, rest, to);
+}
+
+fn extract_now(cx: &mut App, archive: std::path::PathBuf, to: ExtractTo) {
+    let title = match &to {
+        ExtractTo::Into(d) | ExtractTo::SmartInto(d) => format!("{} {} → {}", t!("Çıkarılıyor:"), short(&archive), short(d)),
+        _ => format!("{} {}", t!("Çıkarılıyor:"), short(&archive)),
     };
-    start(cx, title, move |t| {
-        let dest = dest.unwrap_or_else(|| rf_archive::smart_extract_dir(&archive));
+    // the folder holding the result, when it is a new one: opened afterwards if the user wants
+    let made = Arc::new(parking_lot::Mutex::new(None::<std::path::PathBuf>));
+    let made2 = made.clone();
+    let work = move |t: Arc<Tracker>| {
+        let opts = crate::archive_view::options(&archive);
+        let parent = archive.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+        let smart = |into: &std::path::Path| match rf_archive::list_with(&archive, &opts) {
+            Ok(entries) => {
+                let (d, r) = rf_archive::smart_dest(&archive, into, &entries);
+                let r = (r != parent).then_some(r);
+                (d, r)
+            }
+            // (a wrong password and the like: the extraction below reports it)
+            Err(_) => {
+                let d = rf_archive::named_dir(&archive, into);
+                (d.clone(), Some(d))
+            }
+        };
+        let (dest, result) = match &to {
+            ExtractTo::Here => (parent.clone(), None),
+            ExtractTo::Named => {
+                let d = rf_archive::smart_extract_dir(&archive);
+                (d.clone(), Some(d))
+            }
+            ExtractTo::Into(d) => (d.clone(), Some(d.clone())),
+            ExtractTo::Smart => smart(&parent),
+            ExtractTo::SmartInto(d) => smart(d),
+        };
         let cancel = t.cancel.clone();
         let mut prog = archive_progress(&t);
-        let opts = crate::archive_view::options(&archive);
         match rf_archive::extract_with(&archive, &dest, &opts, &mut prog, &|| cancel.load(Ordering::Relaxed)) {
-            Ok(_) => Ok(true),
+            Ok(_) => {
+                *made2.lock() = result;
+                Ok(true)
+            }
             Err(e) if e.downcast_ref::<rf_archive::Cancelled>().is_some() => Ok(false),
             Err(e) => {
                 if crate::archive_view::password_problem(&e) == Some(true) {
@@ -500,7 +591,16 @@ fn extract_now(cx: &mut App, archive: std::path::PathBuf, dest: Option<std::path
                 Err(e)
             }
         }
+    };
+    let done: OnDone = Box::new(move |ok, cx| {
+        let dir = made.lock().take();
+        if let (true, Some(dir), true) = (ok, dir, cx.global::<crate::settings::Settings>().open_after_extract) {
+            if dir.is_dir() {
+                crate::workspace::route_ipc(dir.to_string_lossy().into_owned(), cx);
+            }
+        }
     });
+    start_with(cx, title, work, Some(done));
 }
 
 /// Like `compress_level`, encrypted (ZIP: AES-256, 7z: AES-256 incl. names).

@@ -384,6 +384,55 @@ pub fn smart_extract_dir(archive: &Path) -> PathBuf {
     unique_path(&dir, false)
 }
 
+/// The one top-level name everything in the archive is under (`photos/a.jpg`, `photos/b/c.jpg`
+/// -> `photos`), when it is a folder. None for loose members, several top-level names, a
+/// single file, or an empty archive.
+pub fn single_root(entries: &[ArchiveEntry]) -> Option<String> {
+    let mut root: Option<&str> = None;
+    let mut is_dir = false;
+    for e in entries {
+        let p = e.path.trim_matches(|c| c == '/' || c == '\\');
+        if p.is_empty() {
+            continue;
+        }
+        let (top, rest) = match p.find(['/', '\\']) {
+            Some(i) => (&p[..i], true),
+            None => (p, false),
+        };
+        match root {
+            None => root = Some(top),
+            Some(r) if r.eq_ignore_ascii_case(top) => {}
+            Some(_) => return None,
+        }
+        is_dir |= rest || e.is_dir;
+    }
+    root.filter(|_| is_dir).map(str::to_string)
+}
+
+/// Where a "smart" extraction into `into` writes, and the folder that then holds the result.
+/// An archive whose members are all under one folder is extracted as is (no second wrapper
+/// folder around it); one with a single file too; anything else goes into a new folder named
+/// after the archive.
+pub fn smart_dest(archive: &Path, into: &Path, entries: &[ArchiveEntry]) -> (PathBuf, PathBuf) {
+    if let Some(root) = single_root(entries) {
+        return (into.to_path_buf(), into.join(windows_safe(&root)));
+    }
+    let files = entries.iter().filter(|e| !e.is_dir).count();
+    if files == 1 && entries.iter().all(|e| !e.path.trim_matches('/').contains(['/', '\\'])) {
+        return (into.to_path_buf(), into.to_path_buf());
+    }
+    let d = named_dir(archive, into);
+    (d.clone(), d)
+}
+
+/// A new folder in `into` named after the archive (`photos.tar.gz` -> `photos`, `photos (2)`).
+pub fn named_dir(archive: &Path, into: &Path) -> PathBuf {
+    let name = archive.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let (stem, _) = split_name(&name);
+    let stem = if stem.is_empty() { "Arşiv" } else { stem };
+    unique_path(&into.join(stem), false)
+}
+
 // ---------------------------------------------------------------- name sanitizing
 
 /// A device name of Windows (CON, NUL, COM1… with or without an extension) can't be a file:
@@ -1547,6 +1596,35 @@ fn write_tar_zst(items: &[Item], part: &Path, level: u32, ctx: &mut CompressCtx)
 
 #[cfg(test)]
 mod tests {
+    fn ent(path: &str, is_dir: bool) -> ArchiveEntry {
+        ArchiveEntry { path: path.into(), size: 1, packed: 0, is_dir, modified_ms: 0, encrypted: false }
+    }
+
+    #[test]
+    fn smart_extraction_wraps_only_loose_members() {
+        // everything under one folder: no wrapper
+        let one = [ent("photos/", true), ent("photos/a.jpg", false), ent("photos/sub/b.jpg", false)];
+        assert_eq!(single_root(&one).as_deref(), Some("photos"));
+        // (no directory entry of its own, back slashes)
+        assert_eq!(single_root(&[ent(r"Photos\a.jpg", false), ent(r"photos\b.jpg", false)]).as_deref(), Some("Photos"));
+        // loose members, a single file, nothing
+        assert_eq!(single_root(&[ent("a.txt", false), ent("b/c.txt", false)]), None);
+        assert_eq!(single_root(&[ent("a.txt", false)]), None);
+        assert_eq!(single_root(&[]), None);
+
+        let dir = std::env::temp_dir().join(format!("rf-smart-{}", std::process::id()));
+        let _ = fs::create_dir_all(&dir);
+        let arc = dir.join("stuff.tar.gz");
+        assert_eq!(smart_dest(&arc, &dir, &one), (dir.clone(), dir.join("photos")));
+        assert_eq!(smart_dest(&arc, &dir, &[ent("a.txt", false)]), (dir.clone(), dir.clone()));
+        let loose = [ent("a.txt", false), ent("b.txt", false)];
+        assert_eq!(smart_dest(&arc, &dir, &loose), (dir.join("stuff"), dir.join("stuff")));
+        // the name is taken: a new one
+        fs::create_dir_all(dir.join("stuff")).unwrap();
+        assert_eq!(smart_dest(&arc, &dir, &loose).0, dir.join("stuff (2)"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]

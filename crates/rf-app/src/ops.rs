@@ -35,6 +35,8 @@ const MENU_SHELF: u32 = 17;
 const MENU_OTHER_OPEN: u32 = 18;
 const MENU_OTHER_COPY: u32 = 19;
 const MENU_OTHER_MOVE: u32 = 20;
+const MENU_EXTRACT_SMART: u32 = 21;
+const MENU_EXTRACT_PICK: u32 = 22;
 
 /// "photos.tar.gz" → "photos" (pure string work; the unique folder is chosen at extract time).
 pub(crate) fn archive_stem(p: &std::path::Path) -> String {
@@ -690,9 +692,15 @@ impl FolderView {
             if items.len() > 1 && !self.is_search() {
                 v.push(item(MENU_BULK_RENAME, t!("Toplu yeniden adlandır…\tF2")));
             }
-            if items.len() == 1 && rf_archive::is_supported(&items[0]) {
+            if !items.is_empty() && items.iter().all(|p| rf_archive::is_supported(p)) {
                 v.push(item(MENU_EXTRACT_HERE, t!("Buraya çıkar")));
-                v.push(item(MENU_EXTRACT_TO, &format!("{} {}\\", t!("Klasöre çıkar:"), archive_stem(&items[0]))));
+                v.push(item(MENU_EXTRACT_SMART, t!("Akıllı çıkar")));
+                if items.len() == 1 {
+                    v.push(item(MENU_EXTRACT_TO, &format!("{} {}\\", t!("Klasöre çıkar:"), archive_stem(&items[0]))));
+                } else {
+                    v.push(item(MENU_EXTRACT_TO, t!("Her birini kendi klasörüne çıkar")));
+                }
+                v.push(item(MENU_EXTRACT_PICK, t!("Şuraya çıkar…")));
             }
             v.push(item(MENU_ZIP, t!("ZIP olarak sıkıştır")));
             v.push(item(MENU_7Z, t!("7z olarak sıkıştır")));
@@ -760,17 +768,16 @@ impl FolderView {
                     cx.emit(crate::folder_view::FolderEvent::OpenInNewTab(rf_core::Location::Path(target_dir.clone())))
                 }
                 MenuOutcome::Custom(MENU_PIN) => v.pin(target_dir.clone(), cx),
-                MenuOutcome::Custom(MENU_EXTRACT_HERE) => {
-                    if let Some(a) = tag_items.first() {
-                        let dest = a.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-                        crate::status_center::extract(cx, a.clone(), Some(dest));
-                    }
+                MenuOutcome::Custom(id @ (MENU_EXTRACT_HERE | MENU_EXTRACT_TO | MENU_EXTRACT_SMART)) => {
+                    use crate::status_center::ExtractTo;
+                    let to = match id {
+                        MENU_EXTRACT_HERE => ExtractTo::Here,
+                        MENU_EXTRACT_TO => ExtractTo::Named,
+                        _ => ExtractTo::Smart,
+                    };
+                    crate::status_center::extract_to(cx, tag_items.clone(), to);
                 }
-                MenuOutcome::Custom(MENU_EXTRACT_TO) => {
-                    if let Some(a) = tag_items.first() {
-                        crate::status_center::extract(cx, a.clone(), None);
-                    }
-                }
+                MenuOutcome::Custom(MENU_EXTRACT_PICK) => crate::status_center::extract_pick(cx, tag_items.clone()),
                 MenuOutcome::Custom(id @ (MENU_ZIP | MENU_7Z)) => {
                     let format = if id == MENU_ZIP { rf_archive::Format::Zip } else { rf_archive::Format::SevenZ };
                     if let Some(first) = tag_items.first() {
