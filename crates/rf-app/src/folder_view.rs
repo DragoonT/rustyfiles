@@ -1215,16 +1215,20 @@ impl FolderView {
             // "tag:Kırmızı" / "etiket:kırmızı": tagged items under this folder (Files' tag: query)
             let tag_paths: Option<Vec<PathBuf>> = {
                 let lower = rf_core::entry::fold_case(&query);
-                lower.strip_prefix("tag:").or_else(|| lower.strip_prefix("etiket:")).map(|name| {
-                    let name = name.trim().to_string();
+                lower.strip_prefix("tag:").or_else(|| lower.strip_prefix("etiket:")).map(|expr| {
+                    // "tag:kırmızı AND iş", "tag:kırmızı OR mavi NOT bitti" (left to right)
                     let store = &cx.global::<crate::tags::Tags>().0;
-                    store
-                        .defs
-                        .iter()
-                        .filter(|d| rf_core::entry::fold_case(&d.name) == name || rf_core::entry::fold_case(&crate::i18n::td(&d.name)) == name)
-                        .flat_map(|d| store.paths_with(d.id))
-                        .filter(|p| p.starts_with(&root))
-                        .collect()
+                    let with = |name: &str| -> Vec<PathBuf> {
+                        store
+                            .defs
+                            .iter()
+                            .filter(|d| rf_core::entry::fold_case(&d.name) == name || rf_core::entry::fold_case(&crate::i18n::td(&d.name)) == name)
+                            .flat_map(|d| store.paths_with(d.id))
+                            .filter(|p| p.starts_with(&root))
+                            .collect()
+                    };
+                    let all = || -> Vec<PathBuf> { store.defs.iter().flat_map(|d| store.paths_with(d.id)).filter(|p| p.starts_with(&root)).collect() };
+                    crate::tags::eval_query(&crate::tags::parse_query(expr), &with, &all)
                 })
             };
             std::thread::Builder::new()

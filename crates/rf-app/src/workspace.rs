@@ -367,6 +367,17 @@ pub fn route_ipc(msg: String, cx: &mut App) {
     crate::open_main_window(Some(loc), None, None, cx);
 }
 
+/// Puts a search at the front of the remembered ones (once, whatever its case; ten are kept).
+fn remember_search(history: &mut Vec<String>, q: &str) {
+    let q = q.trim();
+    if q.is_empty() {
+        return;
+    }
+    history.retain(|h| !h.eq_ignore_ascii_case(q) && rf_core::entry::fold_case(h) != rf_core::entry::fold_case(q));
+    history.insert(0, q.to_string());
+    history.truncate(10);
+}
+
 impl Workspace {
     pub fn new(
         start: Option<Location>,
@@ -467,11 +478,7 @@ impl Workspace {
             if let InputEvent::PressEnter { .. } = ev {
                 // Enter: search this folder and all subfolders.
                 let q = input.read(cx).value().trim().to_string();
-                let root = this.active_tab().read(cx).location().path().map(Path::to_path_buf);
-                if let (false, Some(root)) = (q.is_empty(), root) {
-                    this.active_tab().clone().update(cx, |v, cx| v.navigate(Location::Search { root, query: q }, cx));
-                    this.focus_active(window, cx);
-                }
+                this.run_search(q, window, cx);
                 return;
             }
             if let InputEvent::Change = ev {
@@ -1457,6 +1464,63 @@ impl Workspace {
         }
     }
 
+    /// Searches the active tab's folder and its subfolders for `q`, and remembers the search.
+    fn run_search(&mut self, q: String, window: &mut Window, cx: &mut Context<Self>) {
+        let root = match self.active_tab().read(cx).location() {
+            Location::Search { root, .. } => Some(root.clone()),
+            l => l.path().map(Path::to_path_buf),
+        };
+        let (false, Some(root)) = (q.is_empty(), root) else { return };
+        crate::settings::update(cx, |s| remember_search(&mut s.search_history, &q));
+        self.active_tab().clone().update(cx, |v, cx| v.navigate(Location::Search { root, query: q }, cx));
+        self.focus_active(window, cx);
+    }
+
+    /// Under the empty search box: the searches run before (a click runs one again).
+    fn render_search_history(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.search_mode || !self.search.read(cx).value().trim().is_empty() {
+            return None;
+        }
+        let history = cx.global::<crate::settings::Settings>().search_history.clone();
+        if history.is_empty() {
+            return None;
+        }
+        let mut list = v_flex().absolute().top(px(38.)).left_0().right_0().py_1().rounded(theme::RADIUS).bg(p.card_bg).border_1().border_color(p.border).shadow_lg();
+        let row = |id: ElementId| h_flex().id(id).mx_1().px_2().h(px(28.)).gap_2().items_center().rounded(theme::RADIUS_SM).text_sm().hover(|s| s.bg(p.hover)).cursor_pointer();
+        for (i, q) in history.into_iter().enumerate() {
+            let query = q.clone();
+            list = list.child(
+                row(("search-hist", i).into())
+                    .child(Icon::new(L::Clock).size(px(14.)).text_color(p.text_secondary))
+                    .child(div().overflow_hidden().text_ellipsis().whitespace_nowrap().child(q))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.search.update(cx, |s, cx| s.set_value(query.clone(), window, cx));
+                            this.run_search(query.clone(), window, cx);
+                            cx.notify();
+                        }),
+                    ),
+            );
+        }
+        list = list.child(
+            row("search-hist-clear".into())
+                .text_color(p.text_secondary)
+                .child(Icon::new(L::Trash).size(px(14.)))
+                .child(t!("Önceki aramaları temizle"))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|_, _, _, cx| {
+                        cx.stop_propagation();
+                        crate::settings::update(cx, |s| s.search_history.clear());
+                        cx.notify();
+                    }),
+                ),
+        );
+        Some(deferred(list).with_priority(2).into_any_element())
+    }
+
     fn render_suggestions(&self, p: &Palette, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.editing_address || self.addr_suggest.is_empty() {
             return None;
@@ -1973,7 +2037,7 @@ impl Workspace {
             _ => (!live_query.is_empty()).then_some(live_query),
         };
 
-        let suggestions = self.render_suggestions(p, cx);
+        let suggestions = if self.search_mode { self.render_search_history(p, cx) } else { self.render_suggestions(p, cx) };
         let field: AnyElement = if searching {
             Input::new(&self.search).appearance(false).cleanable(true).into_any_element()
         } else if self.editing_address {
@@ -2060,7 +2124,7 @@ impl Workspace {
             .on_action(cx.listener(|this, _: &gpui_kit::component::input::IndentInline, window, cx| this.accept_suggestion(window, cx)))
             .when(searching, |d| d.child(Icon::new(L::Search).size(px(14.)).text_color(p.text_secondary)))
             .child(div().flex_1().min_w_0().overflow_hidden().child(field))
-            .children(suggestions.filter(|_| !searching))
+            .children(suggestions)
             .children(chip)
             .child(div().w(px(1.)).h(px(18.)).mx_1().bg(p.divider))
             .child(mode_btn("omni-cmd", L::SquareChevronRight, self.palette.is_some(), "Komut paleti  (Ctrl+Shift+P)", cx, |this, window, cx| {

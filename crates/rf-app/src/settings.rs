@@ -267,6 +267,9 @@ pub struct Settings {
     /// "Clear" on Home's recent items: only items used after this moment are listed (Windows'
     /// own list of recent items is left alone).
     pub recent_cleared_ms: i64,
+    /// The last searches run with Enter (newest first, ten at most): offered under the empty
+    /// search box.
+    pub search_history: Vec<String>,
     pub preview_width: f32,
     pub renderer: RendererPref,
     pub restore_session: bool,
@@ -418,6 +421,7 @@ impl Default for Settings {
             sidebar_hidden: Vec::new(),
             home_hidden: Vec::new(),
             recent_cleared_ms: 0,
+            search_history: Vec::new(),
             preview_width: 300.,
             renderer: RendererPref::Auto,
             restore_session: true,

@@ -1209,4 +1209,5 @@ pub const EN: &[(&str, &str)] = &[
     ("Kutuda ara", "Search the bin"),
     ("Özgün konum", "Original location"),
     ("Silinme tarihi", "Date deleted"),
+    ("Önceki aramaları temizle", "Clear previous searches"),
 ];

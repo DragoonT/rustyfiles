@@ -6108,5 +6108,11 @@
   "key": "Silinme tarihi",
   "tr": "Silinme tarihi",
   "en": "Date deleted"
+ },
+ {
+  "id": "d5eafb48",
+  "key": "Önceki aramaları temizle",
+  "tr": "Önceki aramaları temizle",
+  "en": "Clear previous searches"
  }
 ]
