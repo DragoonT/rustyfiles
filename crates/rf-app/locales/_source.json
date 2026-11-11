@@ -5874,5 +5874,29 @@
   "key": "Çıkarılacak klasör",
   "tr": "Çıkarılacak klasör",
   "en": "Folder to extract to"
+ },
+ {
+  "id": "8ebdfd9c",
+  "key": "Parçalara böl",
+  "tr": "Parçalara böl",
+  "en": "Split into parts"
+ },
+ {
+  "id": "1e09e1a9",
+  "key": "Sözlük boyutu (7z)",
+  "tr": "Sözlük boyutu (7z)",
+  "en": "Dictionary size (7z)"
+ },
+ {
+  "id": "951a7d36",
+  "key": "RAR parçalara bölünemiyor; ZIP ya da 7z seçin",
+  "tr": "RAR parçalara bölünemiyor; ZIP ya da 7z seçin",
+  "en": "RAR can't be split here; choose ZIP or 7z"
+ },
+ {
+  "id": "4faff9d0",
+  "key": "tar biçimleri parola desteklemez; ZIP ya da 7z seçin",
+  "tr": "tar biçimleri parola desteklemez; ZIP ya da 7z seçin",
+  "en": "tar formats don't support passwords; choose ZIP or 7z"
  }
 ]

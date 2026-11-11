@@ -21,7 +21,8 @@
 //! followed by rarchive from any part's path.
 //!
 //! Known gaps:
-//! * Creating RAR / ISO, creating tar.gz / tar.xz, creating split volumes.
+//! * Creating RAR / ISO, creating tar.xz / tar.bz2 (zip, 7z, tar, tar.gz and tar.zst are written,
+//!   optionally cut into `.001` parts).
 //! * RAR 1.3 / 1.4, the RAR 1.5 / 2.0 encryption, a set with a part missing and RAR 7
 //!   dictionaries over 4 GB are refused with a message saying why (nothing is written); RAR split
 //!   as `x.rar.001` is not supported.
@@ -150,6 +151,12 @@ impl Options {
 pub struct CompressOptions {
     /// Encrypts the archive: AES-256 for zip, AES-256 with header encryption for 7z.
     pub password: Option<String>,
+    /// 7z only: the LZMA2 dictionary in bytes instead of the level's own (a bigger one finds
+    /// repeats further apart and needs about 11 times its size in memory per thread).
+    pub dict_size: Option<u64>,
+    /// Splits the finished archive into parts of this many bytes (`name.zip.001`, `.002`, ...,
+    /// as 7-Zip does); an archive that fits in one part stays one file.
+    pub volume_size: Option<u64>,
 }
 
 /// One archive member as shown in the preview list.
@@ -195,6 +202,9 @@ pub enum Format {
     Zip,
     SevenZ,
     TarZst,
+    /// Plain tar: nothing is compressed.
+    Tar,
+    TarGz,
 }
 
 impl Format {
@@ -204,7 +214,14 @@ impl Format {
             Format::Zip => "zip",
             Format::SevenZ => "7z",
             Format::TarZst => "tar.zst",
+            Format::Tar => "tar",
+            Format::TarGz => "tar.gz",
         }
+    }
+
+    /// Whether [`CompressOptions::password`] can be used with it.
+    pub fn encrypts(self) -> bool {
+        matches!(self, Format::Zip | Format::SevenZ)
     }
 }
 
@@ -1321,11 +1338,15 @@ pub fn compress_with(
         bail!("Sıkıştırılacak öğe yok");
     }
     let password = opts.password.as_deref().filter(|p| !p.is_empty());
-    if password.is_some() && format == Format::TarZst {
+    if password.is_some() && !format.encrypts() {
         bail!("Bu biçim parolayı desteklemiyor");
     }
     let level = level.min(9);
-    let final_path = unique_path(dest_archive, true);
+    let volume = opts.volume_size.filter(|v| *v > 0);
+    let final_path = match volume {
+        Some(_) => unique_split_path(dest_archive),
+        None => unique_path(dest_archive, true),
+    };
     let part = {
         let mut s = final_path.clone().into_os_string();
         s.push(".part");
@@ -1340,24 +1361,107 @@ pub fn compress_with(
 
     let res = match format {
         Format::Zip => write_zip(&items, &part, level, password, &mut ctx),
-        Format::SevenZ => write_7z(&items, &part, level, password, &mut ctx),
+        Format::SevenZ => write_7z(&items, &part, level, password, opts.dict_size, &mut ctx),
         Format::TarZst => write_tar_zst(&items, &part, level, &mut ctx),
+        Format::Tar => write_tar(&items, &part, &mut ctx),
+        Format::TarGz => write_tar_gz(&items, &part, level, &mut ctx),
     };
     match res {
         Ok(()) => {
-            fs::rename(&part, &final_path).with_context(|| format!("Arşiv kaydedilemedi: {}", final_path.display()))?;
+            let archive_bytes = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+            let path = match volume {
+                Some(v) if archive_bytes > v => match split_into_volumes(&part, &final_path, v, ctx.cancelled) {
+                    Ok(first) => first,
+                    Err(e) => {
+                        let _ = fs::remove_file(&part);
+                        return if (ctx.cancelled)() { Err(Cancelled.into()) } else { Err(e) };
+                    }
+                },
+                _ => {
+                    fs::rename(&part, &final_path).with_context(|| format!("Arşiv kaydedilemedi: {}", final_path.display()))?;
+                    final_path.clone()
+                }
+            };
             ctx.emit(true);
             Ok(CompressStats {
-                path: final_path.clone(),
+                path,
                 files: items.iter().filter(|i| !i.is_dir).count() as u64,
                 dirs: items.iter().filter(|i| i.is_dir).count() as u64,
                 bytes: total,
-                archive_bytes: fs::metadata(&final_path).map(|m| m.len()).unwrap_or(0),
+                archive_bytes,
             })
         }
         Err(e) => {
             let _ = fs::remove_file(&part);
             if ctx.was_cancelled || (ctx.cancelled)() { Err(Cancelled.into()) } else { Err(e) }
+        }
+    }
+}
+
+/// A free name for an archive that may be split: neither `x.zip` nor `x.zip.001` exists
+/// (`x (2).zip` and so on otherwise).
+fn unique_split_path(p: &Path) -> PathBuf {
+    let first = |p: &Path| {
+        let mut s = p.as_os_str().to_os_string();
+        s.push(".001");
+        PathBuf::from(s)
+    };
+    let free = |p: &Path| fs::symlink_metadata(p).is_err() && fs::symlink_metadata(first(p)).is_err();
+    if free(p) {
+        return p.to_path_buf();
+    }
+    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let (stem, ext) = split_name(&name);
+    let dir = p.parent().unwrap_or(Path::new(""));
+    (2..100_000u32).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|c| free(c)).unwrap_or_else(|| p.to_path_buf())
+}
+
+/// Cuts the finished archive `part` into `final.001`, `final.002`, ... of `size` bytes (the
+/// last one shorter) and removes `part`. Returns the first part. On failure the parts written
+/// so far are removed.
+fn split_into_volumes(part: &Path, final_path: &Path, size: u64, cancelled: &dyn Fn() -> bool) -> Result<PathBuf> {
+    let name = |n: u32| {
+        let mut s = final_path.as_os_str().to_os_string();
+        s.push(format!(".{n:03}"));
+        PathBuf::from(s)
+    };
+    let mut written: Vec<PathBuf> = Vec::new();
+    let mut run = || -> Result<()> {
+        let mut src = File::open(part)?;
+        let total = src.metadata()?.len();
+        let mut buf = vec![0u8; CHUNK.min(1 << 20)];
+        let mut done = 0u64;
+        let mut n = 1u32;
+        while done < total {
+            let path = name(n);
+            let mut out = File::create(&path).with_context(|| format!("Arşiv kaydedilemedi: {}", path.display()))?;
+            written.push(path);
+            let mut left = size.min(total - done);
+            while left > 0 {
+                if cancelled() {
+                    bail!("iptal");
+                }
+                let want = (buf.len() as u64).min(left) as usize;
+                src.read_exact(&mut buf[..want])?;
+                out.write_all(&buf[..want])?;
+                left -= want as u64;
+                done += want as u64;
+            }
+            out.flush()?;
+            n += 1;
+        }
+        Ok(())
+    };
+    match run() {
+        Ok(()) => {
+            let _ = fs::remove_file(part);
+            Ok(name(1))
+        }
+        Err(e) => {
+            for p in &written {
+                let _ = fs::remove_file(p);
+            }
+            Err(e)
         }
     }
 }
@@ -1422,19 +1526,23 @@ fn write_zip(items: &[Item], part: &Path, level: u32, password: Option<&str>, ct
 }
 
 fn sz_content_methods(level: u32, password: Option<&str>) -> Vec<sevenz_rust2::EncoderConfiguration> {
-    sz_content_methods_mt(level, password, false)
+    sz_content_methods_mt(level, password, false, None)
 }
 
 /// `mt`: LZMA2 in independent chunks on several threads (for big solid blocks).
-fn sz_content_methods_mt(level: u32, password: Option<&str>, mt: bool) -> Vec<sevenz_rust2::EncoderConfiguration> {
+fn sz_content_methods_mt(level: u32, password: Option<&str>, mt: bool, dict: Option<u64>) -> Vec<sevenz_rust2::EncoderConfiguration> {
     use sevenz_rust2::{EncoderConfiguration, EncoderMethod, encoder_options::*};
     let cfg = if level == 0 {
         EncoderConfiguration::new(EncoderMethod::COPY)
     } else {
-        let opts = match sz_threads(level) {
+        let dict = dict.map(|d| d.clamp(DICT_MIN, DICT_MAX));
+        let mut opts = match sz_threads(level, dict) {
             (t, chunk) if mt && t > 1 => Lzma2Options::from_level_mt(level, t, chunk),
             _ => Lzma2Options::from_level(level),
         };
+        if let Some(d) = dict {
+            opts.set_dictionary_size(d as u32);
+        }
         EncoderConfiguration::new(EncoderMethod::LZMA2).with_options(EncoderOptions::Lzma2(opts))
     };
     match password {
@@ -1504,8 +1612,8 @@ impl Read for LazySource<'_, '_> {
 /// LZMA2 threads and chunk size: 7-Zip-style, each chunk (4 × the dictionary, 32 MB at
 /// least) is compressed on its own thread. The encoder needs ~11 × the dictionary per thread,
 /// so the thread count keeps that near 1 GB.
-fn sz_threads(level: u32) -> (u32, u64) {
-    let dict: u64 = [1 << 18, 1 << 20, 1 << 21, 1 << 22, 1 << 22, 1 << 23, 1 << 23, 1 << 24, 1 << 25, 1 << 26][level.min(9) as usize];
+fn sz_threads(level: u32, dict: Option<u64>) -> (u32, u64) {
+    let dict: u64 = dict.unwrap_or([1 << 18, 1 << 20, 1 << 21, 1 << 22, 1 << 22, 1 << 23, 1 << 23, 1 << 24, 1 << 25, 1 << 26][level.min(9) as usize]);
     let chunk = (dict * 4).max(32 << 20);
     let per_thread = dict * 11 + chunk;
     let cores = std::thread::available_parallelism().map_or(4, |n| n.get()) as u64;
@@ -1513,14 +1621,18 @@ fn sz_threads(level: u32) -> (u32, u64) {
     (threads as u32, chunk)
 }
 
+/// The 7z dictionary sizes a caller may ask for ([`CompressOptions::dict_size`]).
+pub const DICT_MIN: u64 = 64 << 10;
+pub const DICT_MAX: u64 = 1 << 30;
+
 /// Files per solid block at most (bytes): one damaged block or one file to extract never
 /// means decoding everything.
 const SOLID_BLOCK: u64 = 1 << 30;
 
-fn write_7z(items: &[Item], part: &Path, level: u32, password: Option<&str>, ctx: &mut CompressCtx) -> Result<()> {
+fn write_7z(items: &[Item], part: &Path, level: u32, password: Option<&str>, dict: Option<u64>, ctx: &mut CompressCtx) -> Result<()> {
     use sevenz_rust2::{ArchiveEntry, SourceReader};
     let mut sw = sevenz_rust2::ArchiveWriter::create(part).map_err(|e| anyhow::Error::new(e).context("7z oluşturulamadı"))?;
-    sw.set_content_methods(sz_content_methods_mt(level, password, true));
+    sw.set_content_methods(sz_content_methods_mt(level, password, true, dict));
     // folders and empty files carry no data
     for item in items.iter().filter(|i| i.is_dir || i.size == 0) {
         if (ctx.cancelled)() {
@@ -1589,6 +1701,25 @@ fn write_tar_zst(items: &[Item], part: &Path, level: u32, ctx: &mut CompressCtx)
     }
     let enc = tb.into_inner()?;
     enc.finish()?.flush()?;
+    Ok(())
+}
+
+fn write_tar(items: &[Item], part: &Path, ctx: &mut CompressCtx) -> Result<()> {
+    let mut tb = tar::Builder::new(BufWriter::with_capacity(CHUNK, File::create(part)?));
+    for item in items {
+        tar_put(&mut tb, item, ctx)?;
+    }
+    tb.into_inner()?.flush()?;
+    Ok(())
+}
+
+fn write_tar_gz(items: &[Item], part: &Path, level: u32, ctx: &mut CompressCtx) -> Result<()> {
+    let enc = flate2::write::GzEncoder::new(BufWriter::with_capacity(CHUNK, File::create(part)?), flate2::Compression::new(level.min(9)));
+    let mut tb = tar::Builder::new(enc);
+    for item in items {
+        tar_put(&mut tb, item, ctx)?;
+    }
+    tb.into_inner()?.finish()?.flush()?;
     Ok(())
 }
 
@@ -1759,6 +1890,42 @@ mod tests {
     }
 
     #[test]
+    fn tar_and_tar_gz_roundtrip() {
+        roundtrip(Format::Tar, "proje.tar");
+        roundtrip(Format::TarGz, "proje.tar.gz");
+    }
+
+    /// An archive cut into parts reads back like the whole one; one that fits stays one file.
+    #[test]
+    fn split_volumes_roundtrip() {
+        for (format, name) in [(Format::Zip, "proje.zip"), (Format::SevenZ, "proje.7z")] {
+            let root = make_tree();
+            let out = tmp("split");
+            // (the name is taken by a part of an older set: a new name is used)
+            fs::write(out.join(format!("{name}.001")), b"x").unwrap();
+            let opts = CompressOptions { volume_size: Some(100_000), dict_size: Some(1 << 20), ..Default::default() };
+            let st = compress_with(&[root.clone()], &out.join(name), format, 0, &opts, &mut |_| {}, &|| false).unwrap();
+            let first = st.path.clone();
+            let fname = first.file_name().unwrap().to_string_lossy().into_owned();
+            assert!(fname.starts_with("proje (2).") && fname.ends_with(".001"), "{fname}");
+            let parts: Vec<_> = fs::read_dir(&out).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("proje (2).")).collect();
+            assert!(parts.len() >= 7, "{} parts", parts.len());
+            assert!(parts.iter().all(|e| e.metadata().unwrap().len() <= 100_000));
+            assert_eq!(parts.iter().map(|e| e.metadata().unwrap().len()).sum::<u64>(), st.archive_bytes);
+            let dest = out.join("back");
+            let es = extract(&first, &dest, &mut |_| {}, &|| false).unwrap();
+            assert_eq!(es.files, 4);
+            assert_same(&root, &dest.join("proje"));
+
+            let big = CompressOptions { volume_size: Some(1 << 30), ..Default::default() };
+            let st = compress_with(&[root.clone()], &out.join("tek.zip"), Format::Zip, 5, &big, &mut |_| {}, &|| false).unwrap();
+            assert_eq!(st.path, out.join("tek.zip"));
+            let _ = fs::remove_dir_all(&out);
+            let _ = fs::remove_dir_all(&root);
+        }
+    }
+
+    #[test]
     fn zip_slip_rejected() {
         let out = tmp("slip");
         let arch = out.join("kotu.zip");
@@ -1851,7 +2018,7 @@ mod tests {
         let root = make_tree();
         let out = tmp("pw");
         let arch = out.join(name);
-        let co = CompressOptions { password: Some("gizli-şifre 1".into()) };
+        let co = CompressOptions { password: Some("gizli-şifre 1".into()), ..Default::default() };
         compress_with(&[root.clone()], &arch, format, 5, &co, &mut |_| {}, &|| false).unwrap();
         assert!(needs_password(&arch).unwrap());
 
@@ -1928,7 +2095,7 @@ mod tests {
         for (fmt, name) in [(Format::Zip, "c.zip"), (Format::SevenZ, "c.7z")] {
             let out = tmp("chk");
             let arch = out.join(name);
-            let co = CompressOptions { password: Some("doğru".into()) };
+            let co = CompressOptions { password: Some("doğru".into()), ..Default::default() };
             compress_with(&[root.clone()], &arch, fmt, 5, &co, &mut |_| {}, &|| false).unwrap();
             check_password(&arch, &pw_opts("doğru")).unwrap();
             let e = check_password(&arch, &pw_opts("yanlış")).unwrap_err();
@@ -1941,7 +2108,7 @@ mod tests {
     fn password_unsupported_for_tar_zst_and_plain_probe() {
         let root = make_tree();
         let out = tmp("pwz");
-        let co = CompressOptions { password: Some("x".into()) };
+        let co = CompressOptions { password: Some("x".into()), ..Default::default() };
         let e = compress_with(&[root.clone()], &out.join("a.tar.zst"), Format::TarZst, 5, &co, &mut |_| {}, &|| false).unwrap_err();
         assert!(e.to_string().contains("parolayı desteklemiyor"));
         assert!(!out.join("a.tar.zst").exists());
@@ -1966,7 +2133,7 @@ mod tests {
         let root = make_tree();
         let out = tmp("split");
         let arch = out.join(name);
-        let co = CompressOptions { password: password.map(str::to_string) };
+        let co = CompressOptions { password: password.map(str::to_string), ..Default::default() };
         compress_with(&[root.clone()], &arch, format, 0, &co, &mut |_| {}, &|| false).unwrap();
         let parts = out.join("parts");
         fs::create_dir_all(&parts).unwrap();
@@ -2553,7 +2720,7 @@ mod tests {
     fn edit_encrypted_archives_keep_protection() {
         let pw = Options { password: Some("edit-pw".into()), ..Default::default() };
         for (name, format) in [("p.zip", Format::Zip), ("p.7z", Format::SevenZ)] {
-            let co = CompressOptions { password: Some("edit-pw".into()) };
+            let co = CompressOptions { password: Some("edit-pw".into()), ..Default::default() };
             edit_roundtrip(name, &|arch, root| {
                 compress_with(&[root.to_path_buf()], arch, format, 3, &co, &mut |_| {}, &|| false).unwrap();
             }, &pw);

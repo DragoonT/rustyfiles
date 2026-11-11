@@ -1170,4 +1170,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Çıkardıktan sonra klasörü aç", "Open the folder after extracting"),
     ("Bir arşiv yeni bir klasöre çıkarılınca o klasör yeni sekmede açılır", "When an archive is extracted into a new folder, that folder opens in a new tab"),
     ("Çıkarılacak klasör", "Folder to extract to"),
+    ("Parçalara böl", "Split into parts"),
+    ("Sözlük boyutu (7z)", "Dictionary size (7z)"),
+    ("RAR parçalara bölünemiyor; ZIP ya da 7z seçin", "RAR can't be split here; choose ZIP or 7z"),
+    ("tar biçimleri parola desteklemez; ZIP ya da 7z seçin", "tar formats don't support passwords; choose ZIP or 7z"),
 ];

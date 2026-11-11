@@ -629,7 +629,7 @@ mod tests {
         let arch = out.join(name);
         match format {
             Some(format) => {
-                let co = CompressOptions { password: pw.map(String::from) };
+                let co = CompressOptions { password: pw.map(String::from), ..Default::default() };
                 compress_with(&[root], &arch, format, 5, &co, &mut |_| {}, &|| false).unwrap();
             }
             None => {

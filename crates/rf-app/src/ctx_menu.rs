@@ -642,19 +642,21 @@ fn create_archive_dialog(items: Vec<PathBuf>, window: &mut Window, cx: &mut App)
     let format = std::rc::Rc::new(std::cell::Cell::new(0usize));
     let level = std::rc::Rc::new(std::cell::Cell::new(2usize));
     let protect = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let split = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    let dict = std::rc::Rc::new(std::cell::Cell::new(0usize));
+    // (None = RAR, WinRAR's format: offered only when its Rar.exe is installed)
+    let mut formats = vec![
+        ("ZIP", Some(rf_archive::Format::Zip)),
+        ("7z", Some(rf_archive::Format::SevenZ)),
+        ("tar.zst", Some(rf_archive::Format::TarZst)),
+        ("tar.gz", Some(rf_archive::Format::TarGz)),
+        ("tar", Some(rf_archive::Format::Tar)),
+    ];
+    if crate::archive_view::winrar().is_some() {
+        formats.push(("RAR", None));
+    }
     let choices = vec![
-        Choice {
-            label: t!("Biçim").into(),
-            options: {
-                let mut o: Vec<SharedString> = vec!["ZIP".into(), "7z".into(), "tar.zst".into()];
-                // RAR is WinRAR's format: offered only when its Rar.exe is installed
-                if crate::archive_view::winrar().is_some() {
-                    o.push("RAR".into());
-                }
-                o
-            },
-            selected: format.clone(),
-        },
+        Choice { label: t!("Biçim").into(), options: formats.iter().map(|(n, _)| SharedString::from(*n)).collect(), selected: format.clone() },
         Choice {
             label: t!("Sıkıştırma düzeyi").into(),
             options: vec![t!("Yok").into(), t!("Hızlı").into(), t!("Normal").into(), t!("En yüksek").into()],
@@ -662,6 +664,17 @@ fn create_archive_dialog(items: Vec<PathBuf>, window: &mut Window, cx: &mut App)
         },
         // ZIP: AES-256; 7z: AES-256 with encrypted names
         Choice { label: t!("Parola").into(), options: vec![t!("Yok").into(), t!("Parola koy…").into()], selected: protect.clone() },
+        // (parts as 7-Zip names them: name.zip.001, .002, ...)
+        Choice {
+            label: t!("Parçalara böl").into(),
+            options: std::iter::once(SharedString::from(t!("Yok"))).chain(SPLIT_SIZES.iter().map(|(n, _)| SharedString::from(*n))).collect(),
+            selected: split.clone(),
+        },
+        Choice {
+            label: t!("Sözlük boyutu (7z)").into(),
+            options: std::iter::once(SharedString::from(t!("Otomatik"))).chain(DICT_SIZES.iter().map(|(n, _)| SharedString::from(*n))).collect(),
+            selected: dict.clone(),
+        },
     ];
     let create = Button::new(t!("Oluştur"), Kind::Primary, move |name, window, cx| {
         let name = name.unwrap_or_default();
@@ -673,7 +686,13 @@ fn create_archive_dialog(items: Vec<PathBuf>, window: &mut Window, cx: &mut App)
             return Err(t!("Ad şu karakterleri içeremez: \\ / : * ? \" < > |").into());
         }
         let lvl = [0, 1, 5, 9][level.get().min(3)];
-        if format.get() == 3 {
+        let fmt = formats.get(format.get()).and_then(|f| f.1);
+        let volume_size = split.get().checked_sub(1).and_then(|i| SPLIT_SIZES.get(i)).map(|s| s.1);
+        let dict_size = dict.get().checked_sub(1).and_then(|i| DICT_SIZES.get(i)).map(|s| s.1);
+        let Some(fmt) = fmt else {
+            if volume_size.is_some() {
+                return Err(t!("RAR parçalara bölünemiyor; ZIP ya da 7z seçin").into());
+            }
             let dest = dir.join(format!("{name}.rar"));
             let items = items.clone();
             if protect.get() == 1 {
@@ -684,25 +703,24 @@ fn create_archive_dialog(items: Vec<PathBuf>, window: &mut Window, cx: &mut App)
                 crate::status_center::compress_rar(cx, items, dest, lvl, None);
             }
             return Ok(());
-        }
-        let fmt = match format.get() {
-            1 => rf_archive::Format::SevenZ,
-            2 => rf_archive::Format::TarZst,
-            _ => rf_archive::Format::Zip,
         };
         let dest = dir.join(format!("{name}.{}", fmt.extension()));
+        let opts = rf_archive::CompressOptions { password: None, dict_size, volume_size };
         if protect.get() == 1 {
-            if fmt == rf_archive::Format::TarZst {
-                return Err(t!("tar.zst parola desteklemez; ZIP ya da 7z seçin").into());
+            if !fmt.encrypts() {
+                return Err(t!("tar biçimleri parola desteklemez; ZIP ya da 7z seçin").into());
             }
             // asked after this dialog closes (one dialog at a time)
             let items = items.clone();
             let d = dest.clone();
-            let finish: Finish = Rc::new(move |cx, pw| crate::status_center::compress_protected(cx, items.clone(), dest.clone(), fmt, lvl, pw));
+            let finish: Finish = Rc::new(move |cx, pw| {
+                let opts = rf_archive::CompressOptions { password: Some(pw), ..opts.clone() };
+                crate::status_center::compress_opts(cx, items.clone(), dest.clone(), fmt, lvl, opts)
+            });
             window.defer(cx, move |window, cx| archive_password(d, finish, None, window, cx));
             return Ok(());
         }
-        crate::status_center::compress_level(cx, items.clone(), dest, fmt, lvl);
+        crate::status_center::compress_opts(cx, items.clone(), dest, fmt, lvl, opts);
         Ok(())
     });
     crate::prompt::show_with(
@@ -715,6 +733,10 @@ fn create_archive_dialog(items: Vec<PathBuf>, window: &mut Window, cx: &mut App)
         cx,
     );
 }
+
+/// "Split into parts" sizes: e-mail attachments, a CD, FAT32's file limit (4 GB less 1 MB).
+const SPLIT_SIZES: &[(&str, u64)] = &[("25 MB", 25 << 20), ("100 MB", 100 << 20), ("700 MB", 700 << 20), ("1 GB", 1 << 30), ("4 GB", (4 << 30) - (1 << 20))];
+const DICT_SIZES: &[(&str, u64)] = &[("1 MB", 1 << 20), ("16 MB", 16 << 20), ("64 MB", 64 << 20), ("256 MB", 256 << 20)];
 
 type Finish = Rc<dyn Fn(&mut App, String)>;
 
