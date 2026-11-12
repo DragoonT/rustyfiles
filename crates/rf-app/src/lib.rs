@@ -13,6 +13,7 @@ mod conflict_dialog;
 mod ctx_menu;
 mod disk_usage;
 pub mod dock;
+mod desktop_page;
 mod dock_page;
 mod fluent_menu;
 mod flyout;

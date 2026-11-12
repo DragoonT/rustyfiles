@@ -13,6 +13,7 @@
 //! | `wallwatch` | what tells us the wallpaper changed, debounced, compared with the last read | fake event source and reader |
 //! | `items` | the Desktop and Public Desktop folders and the virtual items, kept up to date by `watch.rs` | temp folders |
 //! | `import` | the one-time read of Explorer's icon positions (`IFolderView::GetItemPosition`) | the name classification |
+//! | `binwatch` | the Recycle Bin's folders on the fixed drives, watched so that its desktop icon follows full / empty | the letter and path rules |
 //! | `cover` | cover mode (F4): turns a window into one of the desktop's per-monitor cover windows and keeps it directly above Explorer's desktop (writes nothing of Explorer's; moves only our own windows) | styles, a fake-free read of the z-order; the rules are in `rf_core::desktop::cover` |
 //! | `bare` | the cover windows when Explorer's desktop leaves and comes back: placed again at once (moves only our own windows) | a fake z-order |
 //! | `showdesktop` | Show Desktop / Minimize All carried out over a trait | a fake desktop |
@@ -21,6 +22,7 @@
 //! see the comment there). Every function may block; none belongs on the UI thread.
 
 pub mod bare;
+pub mod binwatch;
 pub mod cover;
 pub mod import;
 pub mod items;
@@ -75,6 +77,10 @@ impl Coalescer {
     }
     pub(crate) fn poke(&self) {
         let _ = self.tx.send(());
+    }
+    /// A sender other threads may poke with.
+    pub(crate) fn sender(&self) -> crossbeam_channel::Sender<()> {
+        self.tx.clone()
     }
 }
 

@@ -20,6 +20,8 @@ pub enum Refusal {
     ReadOnly,
     /// A Public Desktop item, a virtual item, or a target in the Public Desktop.
     NotYours,
+    /// A scratch (test) desktop shows the user's REAL Recycle Bin; emptying it from there is not done.
+    RealBin,
 }
 
 /// The items themselves change (cut, delete, rename, their properties): every one of them must be the user's own file.
@@ -31,6 +33,19 @@ pub fn change_items(read_only: bool, origins: &[Origin]) -> Result<(), Refusal> 
         return Err(Refusal::NotYours);
     }
     Ok(())
+}
+
+/// Emptying the Recycle Bin: not in the protected preview, and not from a scratch desktop either. A scratch desktop is a place to try
+/// things on files of its own, but its Recycle Bin icon is the user's real bin, and emptying it would destroy what the user has kept
+/// in it. (What the user sends to the bin from a scratch desktop is only that desktop's own files.)
+pub fn empty_bin(read_only: bool, scratch: bool) -> Result<(), Refusal> {
+    if read_only {
+        Err(Refusal::ReadOnly)
+    } else if scratch {
+        Err(Refusal::RealBin)
+    } else {
+        Ok(())
+    }
 }
 
 /// Something is put into the Desktop folder (paste, new, files dropped on an empty place).
@@ -91,6 +106,14 @@ mod tests {
         assert_eq!(change_items(true, &[Origin::Public]), Err(Refusal::ReadOnly));
         // properties (rename, attributes) are the same rule
         assert_eq!(change_items(true, &[Origin::User]), Err(Refusal::ReadOnly), "the Properties window is locked in the read-only preview");
+    }
+
+    #[test]
+    fn the_bin_is_emptied_only_from_the_real_writable_desktop() {
+        assert_eq!(empty_bin(false, false), Ok(()));
+        assert_eq!(empty_bin(true, false), Err(Refusal::ReadOnly));
+        assert_eq!(empty_bin(false, true), Err(Refusal::RealBin), "a scratch desktop's bin icon is the real bin");
+        assert_eq!(empty_bin(true, true), Err(Refusal::ReadOnly), "read-only is what the status line says first");
     }
 
     #[test]

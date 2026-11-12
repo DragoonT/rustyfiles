@@ -18,7 +18,7 @@ use rf_core::desktop::registry::{Hive, RegRead};
 use rf_core::desktop::store::{LoadOutcome, Store};
 use rf_core::desktop::virtuals::{KEY_ADVANCED, VirtualKind, VirtualSettings, Why};
 use rf_core::desktop::wallpaper::Wallpaper;
-use rf_win::desktop::items::{DesktopItems, Folders, PathFolders, SystemFolders, SystemVirtuals, VirtualSource};
+use rf_win::desktop::items::{ChosenVirtuals, DesktopItems, Folders, PathFolders, SystemFolders, SystemVirtuals, VirtualSource};
 use rf_win::desktop::monitors::{self, MonitorInfo};
 use rf_win::desktop::registry::SystemRegistry;
 
@@ -157,6 +157,27 @@ impl VirtualSource for NoVirtuals {
     }
 }
 
+/// A scratch folder shows no system icon unless the user's own choice (Settings -> Masaüstü) says "show"; then the Recycle Bin on it
+/// is the real one and knows whether the real bin is full (a read; nothing is changed). Windows' own settings count for nothing here.
+struct ScratchVirtuals {
+    // (one of its own, so that "the shell did not answer" keeps the picture the bin had)
+    bin: SystemVirtuals,
+}
+
+impl VirtualSource for ScratchVirtuals {
+    fn settings(&self) -> VirtualSettings {
+        NoVirtuals.settings()
+    }
+    fn recycle_full(&self) -> bool {
+        self.bin.recycle_full()
+    }
+}
+
+/// The virtual source with the app's own choices on top.
+fn chosen(inner: Arc<dyn VirtualSource>) -> Arc<dyn VirtualSource> {
+    Arc::new(ChosenVirtuals { inner, choices: super::choices::source() })
+}
+
 /// The layout file's name. The real one is `desktop-layout.json`; a scratch folder gets one of its own, named after the folder, so
 /// that two scratch folders do not share cells and the real file is never touched.
 pub fn layout_file_name(scratch: Option<&Path>) -> String {
@@ -238,12 +259,14 @@ pub fn load(args: &PreviewArgs, visibility: Visibility, config_dir: Option<PathB
     let real_public = rf_win::desktop::items::public_desktop_dir();
     let (mode, note) = resolve_mode(args, real_user.as_deref(), real_public.as_deref());
     let (folders, virtuals, watch_registry): (Arc<dyn Folders>, Arc<dyn VirtualSource>, bool) = match &mode {
-        Mode::Scratch(dir) => (Arc::new(ScratchFolders { user: PathFolders { user: Some(dir.clone()), public: None } }), Arc::new(NoVirtuals), false),
-        Mode::Real => (Arc::new(SystemFolders::new()), Arc::new(SystemVirtuals { registry: Arc::new(SystemRegistry) }), true),
+        Mode::Scratch(dir) => (Arc::new(ScratchFolders { user: PathFolders { user: Some(dir.clone()), public: None } }), chosen(Arc::new(ScratchVirtuals { bin: SystemVirtuals::new(Arc::new(SystemRegistry)) })), false),
+        Mode::Real => (Arc::new(SystemFolders::new()), chosen(Arc::new(SystemVirtuals::new(Arc::new(SystemRegistry)))), true),
     };
     // (the wrapper above is what makes this Arc fit for threads)
     #[allow(clippy::arc_with_non_send_sync)]
     let items = SharedItems(Arc::new(DesktopItems::start(folders.clone(), virtuals, visibility, watch_registry, on_change)));
+    // the Recycle Bin's icon follows full / empty whoever fills or empties it
+    items.watch_recycle_bin();
     let infos = monitors::list();
     let specs: Vec<MonitorSpec> = infos.iter().map(|m| m.spec()).collect();
     let canvas = pick_canvas(&infos, args.monitor);
@@ -254,6 +277,10 @@ pub fn load(args: &PreviewArgs, visibility: Visibility, config_dir: Option<PathB
     let layout_path = config_dir.unwrap_or_else(|| std::env::temp_dir().join("rustyfiles")).join(layout_file_name(scratch_dir));
     let (mut store, outcome) = Store::load(&layout_path);
     with_windows_grid(&mut store);
+    // "show desktop icons" of the right-click menu is kept in the layout file; the item source reads it through the choices
+    if super::choices::set_menu_hidden(!store.show_icons) {
+        items.refresh_virtuals();
+    }
     let read_only = read_only_for(args, &mode);
     let label_shadow = SystemRegistry.dword(Hive::CurrentUser, KEY_ADVANCED, "ListviewShadow").is_none_or(|v| v != 0);
     Loaded { backend: Backend { mode, read_only, items, folders, infos, specs, canvas, layout_path, visibility, label_shadow }, store, outcome, note }

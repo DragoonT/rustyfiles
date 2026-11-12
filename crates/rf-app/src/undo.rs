@@ -36,6 +36,24 @@ pub fn push(op: UndoOp) {
     }
 }
 
+/// A short name for what an operation did, for a menu entry that says what it would undo ("Geri al: Silme").
+fn label(op: &UndoOp) -> &'static str {
+    match op {
+        UndoOp::Renamed { .. } => t!("Yeniden adlandırma"),
+        UndoOp::Created { .. } => t!("Oluşturma"),
+        UndoOp::Transferred { kind: Transfer::Copy, .. } => t!("Kopyalama"),
+        UndoOp::Transferred { kind: Transfer::Move, .. } => t!("Taşıma"),
+        UndoOp::Recycled { .. } => t!("Silme"),
+        UndoOp::Flattened { .. } => t!("Klasörü düzleştirme"),
+        UndoOp::Organized { .. } => t!("Düzenleme"),
+    }
+}
+
+/// What Ctrl+Z would undo now and what Ctrl+Y would redo (`None`: nothing).
+pub fn next_labels() -> (Option<&'static str>, Option<&'static str>) {
+    (STACK.lock().last().map(label), REDO.lock().last().map(label))
+}
+
 /// Reverses the most recent operation (in the background, through the Status Center).
 pub fn undo(cx: &mut App) {
     let Some(op) = STACK.lock().pop() else { return };

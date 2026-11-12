@@ -24,9 +24,10 @@ use rf_core::desktop::store::{SortName, SortPref};
 use rf_win::fileops::{self, Transfer};
 
 use super::drop::Accepts;
+use super::menupoint::Via;
 use super::policy::{self, Refusal};
 use super::rename_check::{self, Check, Problem};
-use super::view::{DesktopView, Msg, Renaming};
+use super::view::{DesktopView, Msg, Near, Renaming};
 use super::{names, source};
 use crate::t;
 
@@ -76,6 +77,7 @@ impl DesktopView {
         let text = match why {
             Refusal::ReadOnly => t!("Bu işlem salt okunur önizlemede kapalı"),
             Refusal::NotYours => t!("Ortak masaüstü ve sistem öğeleri burada değiştirilmez"),
+            Refusal::RealBin => t!("Deneme masaüstünde gerçek Geri Dönüşüm Kutusu boşaltılmaz"),
         };
         self.say(text, cx);
     }
@@ -98,19 +100,7 @@ impl DesktopView {
     pub(super) fn open_item(&mut self, id: &ItemId, cx: &mut Context<Self>) {
         let Some(it) = self.item(id).cloned() else { return };
         match it.origin {
-            Origin::Virtual(k) => {
-                let name = k.parsing_name();
-                if let Some(loc) = Location::from_shell_name(&name) {
-                    let shell_name = name.clone();
-                    cx.defer(move |cx| super::open::open_location(Some(&shell_name), loc, cx));
-                } else {
-                    rf_win::sta::run(move |_| {
-                        if let Err(e) = rf_win::shellfolder::open(&name) {
-                            log::warn!("desktop: open {name}: {e:#}");
-                        }
-                    });
-                }
-            }
+            Origin::Virtual(k) => self.open_virtual(k, cx),
             _ => {
                 let Some(path) = self.path_of(id) else { return };
                 if it.is_dir {
@@ -181,6 +171,12 @@ impl DesktopView {
     /// changing these files is not allowed: in the read-only preview, and for Public Desktop items.
     pub(super) fn properties(&mut self, cx: &mut Context<Self>) {
         let ids = self.selection_ids();
+        // a system icon has its own Properties (System for This PC, the bin's settings for the Recycle Bin ...), not the Desktop folder's
+        if let [only] = ids.as_slice()
+            && let Some(Origin::Virtual(k)) = self.item(only).map(|it| it.origin)
+        {
+            return self.virtual_properties(k, cx);
+        }
         let origins: Vec<Origin> = ids.iter().map(|i| self.item(i).map_or(Origin::Public, |it| it.origin)).collect();
         let locked = policy::change_items(self.read_only(), &origins).is_err();
         let mut paths = self.paths_of(&ids);
@@ -229,11 +225,13 @@ impl DesktopView {
         }
     }
 
-    pub(super) fn paste(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn paste(&mut self, via: Via, _window: &mut Window, cx: &mut Context<Self>) {
         if let Err(why) = policy::add_to_desktop(self.read_only()) {
             return self.refuse(why, cx);
         }
         let Some(dir) = self.backend.as_ref().and_then(|b| b.target_dir()) else { return };
+        // (pasted from the menu: next to where the right click was; from Ctrl+V: the first free cells)
+        let at = self.take_menu_point(via);
         // GetClipboardData can block on a slow source app
         let (tx, rx) = oneshot::channel();
         rf_win::sta::run(move |owner| {
@@ -242,15 +240,16 @@ impl DesktopView {
         cx.spawn(async move |this, cx| {
             if let Ok(Some((paths, kind))) = rx.await {
                 cx.update(|cx| {
-                    crate::status_center::transfer_then(cx, kind, paths, dir, move |arrived, cx| select_arrived(&this, arrived, cx));
+                    crate::status_center::transfer_then(cx, kind, paths, dir, move |arrived, cx| select_arrived(&this, arrived, at, cx));
                 });
             }
         })
         .detach();
     }
 
-    /// Files from other programs dropped on an empty place: into the Desktop folder, copied or moved by the usual rules.
-    pub(super) fn take_in(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Files from other programs dropped on an empty place: into the Desktop folder, copied or moved by the usual rules, and standing
+    /// next to the point (canvas pixels) they were dropped at.
+    pub(super) fn take_in(&mut self, paths: Vec<PathBuf>, at: (i32, i32), window: &mut Window, cx: &mut Context<Self>) {
         if let Err(why) = policy::add_to_desktop(self.read_only()) {
             return self.refuse(why, cx);
         }
@@ -261,7 +260,7 @@ impl DesktopView {
         let m = window.modifiers();
         let kind = rf_win::dnd::default_transfer(&paths, &dir, m.control, m.shift);
         let this = cx.entity().downgrade();
-        crate::status_center::transfer_then(cx, kind, paths, dir, move |arrived, cx| select_arrived(&this, arrived, cx));
+        crate::status_center::transfer_then(cx, kind, paths, dir, move |arrived, cx| select_arrived(&this, arrived, Some(at), cx));
     }
 
     // ---------- delete ----------
@@ -319,13 +318,15 @@ impl DesktopView {
 
     // ---------- new ----------
 
-    pub(super) fn new_item(&mut self, folder: bool, cx: &mut Context<Self>) {
+    pub(super) fn new_item(&mut self, folder: bool, via: Via, cx: &mut Context<Self>) {
         if let Err(why) = policy::add_to_desktop(self.read_only()) {
             return self.refuse(why, cx);
         }
         let Some(dir) = self.backend.as_ref().and_then(|b| b.target_dir()) else { return };
         // (named in the interface language, as in a folder window)
         let name = if folder { t!("Yeni klasör") } else { t!("Yeni metin belgesi") }.to_string();
+        // (made from the menu: next to where the right click was; from the keyboard: the first free cell)
+        let at = self.take_menu_point(via);
         let task = cx.background_spawn(async move { if folder { fileops::new_folder(&dir, &name) } else { fileops::new_text_file(&dir, &name) } });
         cx.spawn(async move |this, cx| {
             match task.await {
@@ -334,7 +335,10 @@ impl DesktopView {
                     let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
                     // its rename box opens as soon as the folder watcher has told the model about it
                     let _ = this.update(cx, |v, cx| {
-                        v.want_rename = name.map(|n| (ItemId::user(&n), Instant::now()));
+                        v.want_rename = name.as_ref().map(|n| (ItemId::user(n), Instant::now()));
+                        if let (Some(n), Some(at)) = (name, at) {
+                            v.near = Some(Near { ids: vec![ItemId::user(&n)], at, since: Instant::now() });
+                        }
                         cx.notify();
                     });
                 }
@@ -492,6 +496,11 @@ impl DesktopView {
         if delta == (0, 0) {
             return;
         }
+        // with auto arrange on the arrangement decides where an icon stands: it does not land where it is put down
+        if self.store.get().auto_arrange {
+            self.say(t!("Otomatik düzenleme açıkken simgeler taşınamaz"), cx);
+            return;
+        }
         self.touch_layout();
         let from: Vec<(ItemId, rf_core::desktop::geom::Rect)> = ids.iter().filter_map(|i| self.cell_rect_of(i).map(|r| (i.clone(), r))).collect();
         // the moving icons give up their cells first, so that they can take each other's
@@ -572,6 +581,12 @@ impl DesktopView {
         self.touch_layout();
         let pref = SortPref { key, descending };
         self.store.edit().set_sort(pref);
+        // auto arrange on: the sort IS the arrangement, and it stays on (the one-time layout below would end it)
+        if self.store.get().auto_arrange {
+            self.recompute(cx);
+            self.refresh_peers(cx);
+            return;
+        }
         let mut items = b.items.items();
         rf_core::desktop::items::sort_items(&mut items, key.key(), pref.dir());
         let shown: Vec<ItemId> = items.iter().map(|i| i.id.clone()).collect();
@@ -597,13 +612,10 @@ impl DesktopView {
     }
 }
 
-/// Selects what arrived (a paste, a drop) once the model shows it.
-fn select_arrived(this: &WeakEntity<DesktopView>, arrived: Vec<PathBuf>, cx: &mut App) {
+/// Selects what arrived (a paste, a drop) once the model shows it, and stands it next to `at` when the user asked for it at a point.
+fn select_arrived(this: &WeakEntity<DesktopView>, arrived: Vec<PathBuf>, at: Option<(i32, i32)>, cx: &mut App) {
     let ids: Vec<ItemId> = arrived.iter().filter_map(|p| p.file_name()).map(|n| ItemId::user(&n.to_string_lossy())).collect();
-    let _ = this.update(cx, |v, cx| {
-        v.reselect = Some((ids, Instant::now()));
-        v.recompute(cx);
-    });
+    let _ = this.update(cx, |v, cx| v.arrive(ids, at, cx));
 }
 
 /// What a shortcut that points at a FOLDER needs to know to treat the files like any folder of the desktop (`policy::into_folder`).

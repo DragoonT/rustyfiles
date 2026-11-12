@@ -237,6 +237,16 @@ impl WallpaperReader for SystemWallpaper {
 
 /// The settings file was (re)read, or the host started: brings cover mode in line with `shell_desktop_cover`.
 pub fn on_settings(cx: &mut App) {
+    // the choices for the system icons (Settings -> Masaüstü) are taken first, so that a desktop that starts now reads them; one that
+    // is running reads its items again when they changed
+    if cx.try_global::<Settings>().is_some_and(super::desktop::choices::update_from_settings)
+        && let Some(items) = cx.try_global::<CoverHost>().and_then(|h| h.shared.as_ref()).map(|s| super::desktop::source::SharedItems(s.template.items.0.clone()))
+    {
+        let spawned = std::thread::Builder::new().name("rf-desktop-icons".into()).spawn(move || items.refresh_virtuals());
+        if let Err(e) = spawned {
+            log::warn!("cover: could not start the system icons' refresh: {e}");
+        }
+    }
     let want = cx.try_global::<Settings>().is_some_and(|s| s.shell_desktop_cover);
     match (want, cx.has_global::<CoverHost>()) {
         (true, false) => start(cx),
@@ -341,11 +351,8 @@ fn start(cx: &mut App) {
             ImportOutcome::Failed(why) => log::warn!("cover: Explorer's icon positions were not imported: {why}"),
             ImportOutcome::NotNeeded(why) => log::info!("cover: no import: {why}"),
         }
-        let names = if scratch {
-            Vec::new()
-        } else {
-            rf_win::sta::call(Duration::from_secs(5), || VirtualKind::ALL.iter().filter_map(|k| rf_win::shellfolder::display_name(&k.parsing_name()).map(|n| (*k, n))).collect::<Vec<_>>()).unwrap_or_default()
-        };
+        // (also for a scratch folder: its system icons, when the user chose to show them, carry the shell's own names too)
+        let names = rf_win::sta::call(Duration::from_secs(5), || VirtualKind::ALL.iter().filter_map(|k| rf_win::shellfolder::display_name(&k.parsing_name()).map(|n| (*k, n))).collect::<Vec<_>>()).unwrap_or_default();
         let _ = load_tx.unbounded_send(Event::Loaded(Box::new(Ready { loaded, names })));
     });
     if let Err(e) = spawned {

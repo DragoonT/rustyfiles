@@ -8910,5 +8910,197 @@
   "key": "Sıfırla",
   "tr": "Sıfırla",
   "en": "Reset"
+ },
+ {
+  "id": "31be91c8",
+  "key": "SİMGELER",
+  "tr": "SİMGELER",
+  "en": "ICONS"
+ },
+ {
+  "id": "b671ab2f",
+  "key": "Windows ayarını izle",
+  "tr": "Windows ayarını izle",
+  "en": "Follow Windows' setting"
+ },
+ {
+  "id": "8db74511",
+  "key": "Masaüstü, Explorer'ın masaüstünün üstüne rustyfiles'ın çizdiği masaüstüdür: duvar kâğıdınız, simgeleriniz, sürükle-bırak ve menüler. Deneyseldir ve varsayılan olarak kapalıdır.",
+  "tr": "Masaüstü, Explorer'ın masaüstünün üstüne rustyfiles'ın çizdiği masaüstüdür: duvar kâğıdınız, simgeleriniz, sürükle-bırak ve menüler. Deneyseldir ve varsayılan olarak kapalıdır.",
+  "en": "The desktop is the one rustyfiles draws over Explorer's: your wallpaper, your icons, drag and drop and menus. It is experimental and off by default."
+ },
+ {
+  "id": "edda4d66",
+  "key": "Windows'un ayarları yalnızca okunur, hiçbir zaman değiştirilmez. \"Windows ayarını izle\" seçiliyken simge Windows'un kendi ayarına göre görünür; \"Göster\" ve \"Gizle\" yalnızca rustyfiles masaüstünü etkiler, Explorer'ın masaüstüne dokunmaz.",
+  "tr": "Windows'un ayarları yalnızca okunur, hiçbir zaman değiştirilmez. \"Windows ayarını izle\" seçiliyken simge Windows'un kendi ayarına göre görünür; \"Göster\" ve \"Gizle\" yalnızca rustyfiles masaüstünü etkiler, Explorer'ın masaüstüne dokunmaz.",
+  "en": "Windows' settings are only read and never changed. With \"Follow Windows' setting\" an icon appears as Windows' own setting says; \"Show\" and \"Hide\" affect only the rustyfiles desktop and leave Explorer's desktop alone."
+ },
+ {
+  "id": "0d0746d6",
+  "key": "Simge boyutu, ızgaraya hizalama, otomatik düzenleme ve sıralama masaüstünün yerleşimine aittir: masaüstüne sağ tıklayınca açılan menüden değiştirilir.",
+  "tr": "Simge boyutu, ızgaraya hizalama, otomatik düzenleme ve sıralama masaüstünün yerleşimine aittir: masaüstüne sağ tıklayınca açılan menüden değiştirilir.",
+  "en": "Icon size, align to grid, auto arrange and sorting belong to the desktop's layout: change them from the menu that opens when you right-click the desktop."
+ },
+ {
+  "id": "688c5828",
+  "key": "rustyfiles masaüstü kapalı: seçimleriniz kaydedilir ve masaüstü açılınca uygulanır.",
+  "tr": "rustyfiles masaüstü kapalı: seçimleriniz kaydedilir ve masaüstü açılınca uygulanır.",
+  "en": "The rustyfiles desktop is off: your choices are saved and applied when the desktop is turned on."
+ },
+ {
+  "id": "71329280",
+  "key": "Masaüstü simgelerini göster",
+  "tr": "Masaüstü simgelerini göster",
+  "en": "Show desktop icons"
+ },
+ {
+  "id": "32d22832",
+  "key": "\"Gizle\", dosyalar dahil bütün simgeleri saklar. Masaüstüne sağ tıklayınca açılan menüde de aynı anahtar vardır; ikisinden biri gizlediyse simgeler gizlidir.",
+  "tr": "\"Gizle\", dosyalar dahil bütün simgeleri saklar. Masaüstüne sağ tıklayınca açılan menüde de aynı anahtar vardır; ikisinden biri gizlediyse simgeler gizlidir.",
+  "en": "\"Hide\" hides every icon, files included. The menu that opens when you right-click the desktop has the same switch; if either one hides them, they are hidden."
+ },
+ {
+  "id": "c8aa8271",
+  "key": "Bu bilgisayar",
+  "tr": "Bu bilgisayar",
+  "en": "This PC"
+ },
+ {
+  "id": "00ab9813",
+  "key": "Çift tıklayınca rustyfiles'ta açılır; sağ tık menüsünde Özellikler (Sistem) vardır.",
+  "tr": "Çift tıklayınca rustyfiles'ta açılır; sağ tık menüsünde Özellikler (Sistem) vardır.",
+  "en": "A double click opens it in rustyfiles; its right-click menu has Properties (System)."
+ },
+ {
+  "id": "1c9b0657",
+  "key": "Kullanıcı dosyaları",
+  "tr": "Kullanıcı dosyaları",
+  "en": "User's files"
+ },
+ {
+  "id": "6f634ec7",
+  "key": "Kullanıcı klasörünüz (Belgeler, Resimler, İndirilenler ve diğerleri).",
+  "tr": "Kullanıcı klasörünüz (Belgeler, Resimler, İndirilenler ve diğerleri).",
+  "en": "Your user folder (Documents, Pictures, Downloads and the others)."
+ },
+ {
+  "id": "255f41a7",
+  "key": "Ağdaki bilgisayarlar ve paylaşımlar.",
+  "tr": "Ağdaki bilgisayarlar ve paylaşımlar.",
+  "en": "The computers and shares on the network."
+ },
+ {
+  "id": "04358069",
+  "key": "Dolu ya da boş olduğunu resminden gösterir; sağ tık menüsünde kutuyu boşaltma vardır, üzerine bırakılan dosyalar geri dönüşüm kutusuna gider.",
+  "tr": "Dolu ya da boş olduğunu resminden gösterir; sağ tık menüsünde kutuyu boşaltma vardır, üzerine bırakılan dosyalar geri dönüşüm kutusuna gider.",
+  "en": "Its picture shows whether it is full or empty; its right-click menu can empty it, and files dropped on it go to the Recycle Bin."
+ },
+ {
+  "id": "e76796f3",
+  "key": "Denetim Masası",
+  "tr": "Denetim Masası",
+  "en": "Control Panel"
+ },
+ {
+  "id": "58bb3168",
+  "key": "Windows'un eski ayar sayfaları; Explorer'ın kendi penceresinde açılır.",
+  "tr": "Windows'un eski ayar sayfaları; Explorer'ın kendi penceresinde açılır.",
+  "en": "Windows' older settings pages; it opens in Explorer's own window."
+ },
+ {
+  "id": "178e1b3d",
+  "key": "GÖREV ÇUBUĞU",
+  "tr": "GÖREV ÇUBUĞU",
+  "en": "TASKBAR"
+ },
+ {
+  "id": "9737466e",
+  "key": "deneysel",
+  "tr": "deneysel",
+  "en": "experimental"
+ },
+ {
+  "id": "e1e5b9e3",
+  "key": "Geri Dönüşüm Kutusu'nu boşalt",
+  "tr": "Geri Dönüşüm Kutusu'nu boşalt",
+  "en": "Empty Recycle Bin"
+ },
+ {
+  "id": "4e5b63f3",
+  "key": "Simgeleri otomatik düzenle",
+  "tr": "Simgeleri otomatik düzenle",
+  "en": "Auto arrange icons"
+ },
+ {
+  "id": "4b9ccf75",
+  "key": "Yinele",
+  "tr": "Yinele",
+  "en": "Redo"
+ },
+ {
+  "id": "18442b6a",
+  "key": "Görüntü ayarları",
+  "tr": "Görüntü ayarları",
+  "en": "Display settings"
+ },
+ {
+  "id": "f6c8ceb6",
+  "key": "Kişiselleştir",
+  "tr": "Kişiselleştir",
+  "en": "Personalize"
+ },
+ {
+  "id": "d2f1cb0c",
+  "key": "Otomatik düzenleme açıkken simgeler taşınamaz",
+  "tr": "Otomatik düzenleme açıkken simgeler taşınamaz",
+  "en": "Icons cannot be moved while auto arrange is on"
+ },
+ {
+  "id": "62c7d330",
+  "key": "Yeniden adlandırma",
+  "tr": "Yeniden adlandırma",
+  "en": "Rename"
+ },
+ {
+  "id": "1875407e",
+  "key": "Oluşturma",
+  "tr": "Oluşturma",
+  "en": "Create"
+ },
+ {
+  "id": "0771e962",
+  "key": "Kopyalama",
+  "tr": "Kopyalama",
+  "en": "Copy"
+ },
+ {
+  "id": "92186e17",
+  "key": "Taşıma",
+  "tr": "Taşıma",
+  "en": "Move"
+ },
+ {
+  "id": "887d1521",
+  "key": "Silme",
+  "tr": "Silme",
+  "en": "Delete"
+ },
+ {
+  "id": "2007fead",
+  "key": "Klasörü düzleştirme",
+  "tr": "Klasörü düzleştirme",
+  "en": "Flatten folder"
+ },
+ {
+  "id": "a179a764",
+  "key": "Düzenleme",
+  "tr": "Düzenleme",
+  "en": "Organize"
+ },
+ {
+  "id": "1377de8a",
+  "key": "Deneme masaüstünde gerçek Geri Dönüşüm Kutusu boşaltılmaz",
+  "tr": "Deneme masaüstünde gerçek Geri Dönüşüm Kutusu boşaltılmaz",
+  "en": "A test desktop does not empty the real Recycle Bin"
  }
 ]

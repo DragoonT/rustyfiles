@@ -26,6 +26,7 @@ pub enum Page {
     General,
     Appearance,
     Dock,
+    Desktop,
     Layout,
     Files,
     Actions,
@@ -38,10 +39,11 @@ pub enum Page {
     About,
 }
 
-const PAGES: [(Page, L, &str); 13] = [
+const PAGES: [(Page, L, &str); 14] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
     (Page::Dock, L::PanelBottom, "Dock"),
+    (Page::Desktop, L::Monitor, "Masaüstü"),
     (Page::Layout, L::LayoutGrid, "Sayfa düzeni"),
     (Page::Files, L::Folder, "Dosyalar ve klasörler"),
     (Page::Actions, L::Keyboard, "Eylemler"),
@@ -53,6 +55,22 @@ const PAGES: [(Page, L, &str); 13] = [
     (Page::Organizer, L::WandSparkles, "Dosya düzenleyici"),
     (Page::About, L::Info, "Hakkında"),
 ];
+
+/// The pages that are experimental: marked with a small "Deneysel" pill in the page list and "(deneysel)" in their title. The mark is
+/// NOT part of the page name in [`PAGES`], so the search and the translations still know the pages as "Dock" and "Masaüstü".
+fn experimental(page: Page) -> bool {
+    matches!(page, Page::Dock | Page::Desktop)
+}
+
+/// The heading of a page: its name, and "(deneysel)" after it for an experimental page.
+fn page_title(page: Page, name: &str) -> String {
+    if experimental(page) { format!("{name} ({})", t!("deneysel")) } else { name.to_string() }
+}
+
+/// The quiet pill next to an experimental page's name in the page list (the same for every such page).
+fn experimental_pill(p: &Palette) -> Div {
+    div().px(px(6.)).py(px(1.)).rounded_full().border_1().border_color(p.border).text_size(px(10.)).text_color(p.text_secondary).child(t!("Deneysel"))
+}
 
 /// Which page is shown and which expanders are open (kept while the app runs).
 struct Ui {
@@ -134,6 +152,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
             let size = crate::dock::size_slider::control(p, s, cx);
             crate::dock_page::page(p, s, Some(size))
         }
+        Page::Desktop => crate::desktop_page::page(p, s),
         Page::Layout => layout(p, s, cx),
         Page::Files => files(p, s, cx),
         Page::Actions => actions(p, cx),
@@ -396,7 +415,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
                 .when(on && lens, |d| d.child(crate::glass::lens_probe(crate::glass::SLOT_SETTINGS, crate::glass::key_of(&i))))
                 .when(!on, |d| d.hover(|s| s.bg(p.hover)))
                 .child(Icon::new(icon).size(px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
-                .child(crate::i18n::t(label))
+                .child(h_flex().gap_2().items_center().child(crate::i18n::t(label)).when(experimental(pg), |d| d.child(experimental_pill(p))))
                 .on_click({
                     let search = search.clone();
                     move |_, window, cx| {
@@ -408,8 +427,8 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
                 }),
         );
     }
-    let (title, body): (&str, Vec<AnyElement>) = if query.is_empty() {
-        (PAGES.iter().find(|x| x.0 == page).map(|x| crate::i18n::t(x.2)).unwrap_or_default(), build_page(page, p, &s, cx))
+    let (title, body): (String, Vec<AnyElement>) = if query.is_empty() {
+        (PAGES.iter().find(|x| x.0 == page).map(|x| page_title(x.0, crate::i18n::t(x.2))).unwrap_or_default(), build_page(page, p, &s, cx))
     } else {
         let found = matching(collect(p, &s, cx), &query);
         let mut rows: Vec<AnyElement> = Vec::new();
@@ -454,7 +473,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
                     .into_any_element(),
             );
         }
-        (t!("Arama sonuçları"), rows)
+        (t!("Arama sonuçları").to_string(), rows)
     };
     h_flex()
         .size_full()
@@ -2828,6 +2847,115 @@ mod search_tests {
                 }
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod desktop_page_tests {
+    use super::{COLLECT, COLLECT_AT, Found, PAGES, Page, experimental, matching, page_title};
+    use crate::settings::Settings;
+    use crate::theme::Palette;
+
+    fn noted_on_the_desktop_page(s: &Settings, p: &Palette) -> Vec<Found> {
+        COLLECT.with(|c| *c.borrow_mut() = Some(Vec::new()));
+        COLLECT_AT.with(|a| a.set((Page::Desktop, None)));
+        let _ = crate::desktop_page::page(p, s);
+        COLLECT.with(|c| c.borrow_mut().take()).unwrap_or_default()
+    }
+
+    #[test]
+    fn the_desktop_page_follows_the_dock_page_and_the_search_finds_every_desktop_setting_on_it() {
+        crate::dock_page::while_turkish(|| {
+            let at = |pg: Page| PAGES.iter().position(|x| x.0 == pg).unwrap();
+            assert_eq!(at(Page::Desktop), at(Page::Dock) + 1, "the Masaüstü page comes right after Dock");
+            for p in [Palette::light(), Palette::dark()] {
+                for dock_enabled in [false, true] {
+                    let s = Settings { dock_enabled, ..Default::default() };
+                    let noted = noted_on_the_desktop_page(&s, &p);
+                    let entries = crate::desktop_page::entries();
+                    assert_eq!(noted.len(), entries.len(), "one card per entry, none dropped and none twice");
+                    for e in &entries {
+                        let hits = matching(noted.clone(), e.title);
+                        assert!(hits.iter().any(|f| f.title == e.title && f.page == Page::Desktop), "{} is not found by its title", e.field);
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn both_experimental_pages_are_marked_and_the_mark_is_not_part_of_their_names() {
+        crate::dock_page::while_turkish(|| {
+            let exp: Vec<Page> = PAGES.iter().map(|x| x.0).filter(|p| experimental(*p)).collect();
+            assert_eq!(exp, [Page::Dock, Page::Desktop], "exactly these two");
+            for (page, _, name) in PAGES {
+                let title = page_title(page, name);
+                if experimental(page) {
+                    assert!(title.starts_with(name) && title.ends_with("(deneysel)"), "{title}");
+                    assert!(!name.contains("eney"), "the name in the list stays plain so the search and the translation find it: {name}");
+                } else {
+                    assert_eq!(title, name, "a page that is not experimental is not marked");
+                }
+            }
+            // the mark and the title word have their English pair
+            let en: std::collections::HashSet<&str> = crate::i18n_en::EN.iter().map(|(k, _)| *k).collect();
+            assert!(en.contains("Deneysel") && en.contains("deneysel"));
+            assert!(en.contains("Masaüstü"));
+        });
+    }
+
+    /// The text of the function that starts with `signature`, from its opening brace to the matching closing one (string literals are
+    /// skipped, so a brace inside a text does not count). The page's own braces end it, not a marker comment that may be moved.
+    fn fn_body<'a>(src: &'a str, signature: &str) -> &'a str {
+        let start = src.find(signature).unwrap_or_else(|| panic!("{signature} is not in the file any more"));
+        let open = start + src[start..].find('{').expect("a body");
+        let (mut depth, mut in_str, mut esc) = (0usize, false, false);
+        for (i, c) in src[open..].char_indices() {
+            if in_str {
+                match (esc, c) {
+                    (true, _) => esc = false,
+                    (false, '\\') => esc = true,
+                    (false, '"') => in_str = false,
+                    _ => {}
+                }
+                continue;
+            }
+            match c {
+                '"' => in_str = true,
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return &src[open..open + i + 1];
+                    }
+                }
+                _ => {}
+            }
+        }
+        panic!("{signature} has no closing brace");
+    }
+
+    #[test]
+    fn the_body_finder_stops_at_the_functions_own_closing_brace() {
+        let src = "fn a() { let s = \"}{\"; if x { y } }
+fn b() { z }";
+        assert_eq!(fn_body(src, "fn a("), "{ let s = \"}{\"; if x { y } }");
+        assert_eq!(fn_body(src, "fn b("), "{ z }");
+    }
+
+    #[test]
+    fn nothing_of_the_dock_or_the_desktop_is_on_the_developer_or_advanced_page() {
+        // the pages' builders live in this file: their source must not read or write a dock_*, shell_* (but shell_submenu) or desktop_* field
+        let src = include_str!("settings_view.rs");
+        let dev = fn_body(src, "fn dev(p: &Palette");
+        let adv = fn_body(src, "fn advanced(p: &Palette");
+        // (a finder that found the wrong text would let anything through: both pages are long and are made of rows)
+        assert!(dev.len() > 300 && adv.len() > 300, "{} {}", dev.len(), adv.len());
+        for (name, body) in [("dev", dev), ("advanced", adv)] {
+            for needle in [".dock_", ".shell_desktop", ".shell_win", ".shell_own", ".shell_tray", ".shell_hide", ".desktop_"] {
+                assert!(!body.contains(needle), "{name} page still touches {needle}");
+            }
+        }
     }
 }
 

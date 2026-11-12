@@ -7,7 +7,8 @@
 //! rustyfiles --desktop-preview --writable            the real Desktop, operations enabled (NOT when a --folder was given and could
 //!                                                    not be used: then the real Desktop is shown and stays read-only)
 //! rustyfiles --desktop-preview --folder <path>       SCRATCH: that folder pretends to be the Desktop (only its contents, no Public
-//!                                                    Desktop, no virtual items), its own layout file, every operation acts on it
+//!                                                    Desktop, no system icons unless Settings -> Masaüstü says "Göster" for them), its own
+//!                                                    layout file, every operation acts on it
 //! RUSTYFILES_DESKTOP_DIR=<path>                      the same as --folder (the argument wins)
 //! rustyfiles --desktop-preview ... --monitor <n>     show the n-th monitor (1 = primary, the default)
 //! ```

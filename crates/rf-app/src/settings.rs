@@ -554,6 +554,17 @@ pub struct Settings {
     /// Explorer's taskbar windows (and with them its notification icons) are hidden while the dock runs and shown again when it stops;
     /// only with rustyfiles-shellguard.exe running as the safety net (see `shell/taskbar_hide.rs`).
     pub shell_hide_taskbar: bool,
+
+    // ---- Desktop (shell/desktop/; Settings -> "Masaüstü"; experimental, it only matters while `shell_desktop_cover` is on)
+    // Each system icon of the desktop (and "show desktop icons" as a whole) follows Windows' own setting by default; "show" and "hide"
+    // are this app's own choice and are never written to Windows' settings (see `rf_core::desktop::virtuals`).
+    pub desktop_icon_this_pc: rf_core::desktop::virtuals::IconChoice,
+    pub desktop_icon_user_files: rf_core::desktop::virtuals::IconChoice,
+    pub desktop_icon_network: rf_core::desktop::virtuals::IconChoice,
+    pub desktop_icon_recycle_bin: rf_core::desktop::virtuals::IconChoice,
+    pub desktop_icon_control_panel: rf_core::desktop::virtuals::IconChoice,
+    /// "Show desktop icons" as a whole: follow Windows, always show, or hide every icon (files included).
+    pub desktop_show_icons: rf_core::desktop::virtuals::IconChoice,
 }
 
 impl Default for Settings {
@@ -680,6 +691,12 @@ impl Default for Settings {
             shell_own_switcher: false,
             shell_tray_host: false,
             shell_hide_taskbar: false,
+            desktop_icon_this_pc: Default::default(),
+            desktop_icon_user_files: Default::default(),
+            desktop_icon_network: Default::default(),
+            desktop_icon_recycle_bin: Default::default(),
+            desktop_icon_control_panel: Default::default(),
+            desktop_show_icons: Default::default(),
         }
     }
 }

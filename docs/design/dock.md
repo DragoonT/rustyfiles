@@ -757,7 +757,8 @@ the overflow panel's cells and a tip fall for that many icons (arithmetic only; 
 The dock has a page of its own in Settings, right after "Görünüm" (`dock_page.rs`). It used to be a block at the end of "Gelişmiş" called
 "Dock (deneysel)". One list of entries (`dock_page::entries`) draws the page and feeds the Settings search. Sections: GENEL (the dock,
 keep-out, size, magnification), SOL ADA (Start, recommended, weather city), ORTA ADA (previews, icon menu), SAĞ ADA (control centre,
-calendar, notifications), MASAÜSTÜ VE KABUK (desktop cover, hiding Windows' taskbar), DENEYSEL (Windows key, Alt+Tab, tray host). While the
+calendar, notifications), GÖREV ÇUBUĞU (hiding Windows' taskbar; the desktop cover switch is on the "Masaüstü" page, `desktop.md`), DENEYSEL
+(Windows key, Alt+Tab, tray host). Both pages carry a "Deneysel" pill in the page list and "(deneysel)" in their title. While the
 dock is off every control but the dock switch is dimmed with a line that says why; a shell switch that is still on can be turned off
 (it never needs the dock to be turned off). The shell switches reach the running dock at once, like the others.
 

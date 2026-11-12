@@ -24,12 +24,13 @@ pub(crate) enum Section {
     Left,
     Middle,
     Right,
-    Desktop,
+    /// What hides Explorer's taskbar while the dock runs (the desktop's own settings are on the Masaüstü page: `desktop_page.rs`).
+    Taskbar,
     Experimental,
 }
 
 impl Section {
-    pub(crate) const ALL: [Section; 6] = [Section::General, Section::Left, Section::Middle, Section::Right, Section::Desktop, Section::Experimental];
+    pub(crate) const ALL: [Section; 6] = [Section::General, Section::Left, Section::Middle, Section::Right, Section::Taskbar, Section::Experimental];
 
     pub(crate) fn title(self) -> &'static str {
         match self {
@@ -37,7 +38,7 @@ impl Section {
             Section::Left => t!("SOL ADA"),
             Section::Middle => t!("ORTA ADA"),
             Section::Right => t!("SAĞ ADA"),
-            Section::Desktop => t!("MASAÜSTÜ VE KABUK"),
+            Section::Taskbar => t!("GÖREV ÇUBUĞU"),
             Section::Experimental => t!("DENEYSEL"),
         }
     }
@@ -306,22 +307,11 @@ pub(crate) fn entries() -> Vec<Entry> {
             false,
             Control::Switch(|s| s.dock_own_notifications, |s, v| s.dock_own_notifications = v),
         ),
-        // ---- MASAÜSTÜ VE KABUK
-        e(
-            "shell-cover",
-            "shell_desktop_cover",
-            Desktop,
-            shell_needs,
-            L::Monitor,
-            t!("Masaüstünü rustyfiles çizsin (deneysel)"),
-            Some(t!("Explorer'ın masaüstü altta durur ve dock durduğunda yeniden görünür.")),
-            false,
-            Control::Switch(|s| s.shell_desktop_cover, |s, v| s.shell_desktop_cover = v),
-        ),
+        // ---- GÖREV ÇUBUĞU (the desktop's switch moved to the Masaüstü page)
         e(
             "shell-hide-taskbar",
             "shell_hide_taskbar",
-            Desktop,
+            Taskbar,
             shell_needs,
             L::Monitor,
             t!("Windows görev çubuğunu gizle (deneysel)"),
@@ -548,7 +538,8 @@ mod tests {
                 let rest = l.trim_start().strip_prefix("pub ")?;
                 let name = rest.split(':').next()?.trim();
                 // (`shell_submenu` is the context menu's "Show more options" switch, nothing to do with the shell host)
-                let ours = (name.starts_with("dock_") || name.starts_with("shell_")) && name != "shell_submenu";
+                // (`shell_desktop_cover` is the desktop's switch: it is on the Masaüstü page, `desktop_page.rs`)
+                let ours = (name.starts_with("dock_") || name.starts_with("shell_")) && name != "shell_submenu" && name != "shell_desktop_cover";
                 (ours && rest.contains(':') && !rest.contains('(')).then(|| name.to_string())
             })
             .collect()
@@ -558,7 +549,7 @@ mod tests {
     fn every_dock_and_shell_setting_is_on_the_page_and_nothing_else() {
         let on_page: HashSet<String> = entries().iter().map(|e| e.field.to_string()).collect();
         let in_struct = struct_fields();
-        assert!(in_struct.len() >= 17, "the source scan found too little: {in_struct:?}");
+        assert!(in_struct.len() >= 16, "the source scan found too little: {in_struct:?}");
         let missing: Vec<_> = in_struct.difference(&on_page).collect();
         let unknown: Vec<_> = on_page.difference(&in_struct).collect();
         assert!(missing.is_empty(), "settings with no place on the Dock page: {missing:?}");
@@ -603,7 +594,7 @@ mod tests {
         assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_start_grow", "dock_weather_city"]);
         assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);
-        assert_eq!(ids(Section::Desktop), ["shell_desktop_cover", "shell_hide_taskbar"]);
+        assert_eq!(ids(Section::Taskbar), ["shell_hide_taskbar"]);
         assert_eq!(ids(Section::Experimental), ["shell_win_key", "shell_own_switcher", "shell_tray_host"]);
     }
 
@@ -618,7 +609,7 @@ mod tests {
     #[test]
     fn each_switch_reads_and_writes_its_own_field_only() {
         let switches: Vec<Entry> = entries().into_iter().filter(|e| matches!(e.control, Control::Switch(..))).collect();
-        assert!(switches.len() >= 14);
+        assert!(switches.len() >= 13);
         for (i, e) in switches.iter().enumerate() {
             let Control::Switch(get, set) = e.control else { unreachable!() };
             for start in [false, true] {
@@ -648,7 +639,7 @@ mod tests {
         };
         assert!(!get("dock_enabled"), "experimental: off until asked for");
         assert!(get("dock_reserve"));
-        assert!(!get("shell_win_key") && !get("shell_own_switcher") && !get("shell_tray_host") && !get("shell_hide_taskbar") && !get("shell_desktop_cover"));
+        assert!(!get("shell_win_key") && !get("shell_own_switcher") && !get("shell_tray_host") && !get("shell_hide_taskbar"));
     }
 
     #[test]
@@ -702,7 +693,7 @@ mod tests {
 
     #[test]
     fn a_shell_switch_that_is_on_can_be_turned_off_while_the_dock_is_off() {
-        let shell = ["shell_desktop_cover", "shell_hide_taskbar", "shell_win_key", "shell_own_switcher", "shell_tray_host"];
+        let shell = ["shell_hide_taskbar", "shell_win_key", "shell_own_switcher", "shell_tray_host"];
         let on = Settings { dock_enabled: true, ..Default::default() };
         for e in entries() {
             let mut s = Settings { dock_enabled: false, ..Default::default() };

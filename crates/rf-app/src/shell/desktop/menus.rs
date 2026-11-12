@@ -19,6 +19,8 @@ use rf_win::fileops::Transfer;
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
+use super::menupoint::Via;
+use super::menu_plan::{BgCmd, BgCtx, ItemCmd, ItemCtx, Row, background_menu, item_menu, item_quick, paste_enabled};
 use super::view::DesktopView;
 use crate::fluent_menu::{self, Item, Menu, MenuIcon, MenuView, Pending, Quick, Sub};
 use crate::t;
@@ -61,6 +63,18 @@ fn icon(l: L) -> MenuIcon {
     MenuIcon::Lucide(l)
 }
 
+/// The menu entry of an item command.
+fn item_of(me: &Me, cmd: ItemCmd) -> Item {
+    match cmd {
+        ItemCmd::Open => Item::action(t!("Aç"), icon(L::SquareArrowOutUpRight), act(me, |v, w, cx| v.open_selection(w, cx))).hint("Enter"),
+        ItemCmd::OpenWith => Item::action(t!("Birlikte aç…"), icon(L::AppWindow), act(me, |v, _, cx| v.open_with_selection(cx))),
+        ItemCmd::CreateShortcut => Item::action(t!("Kısayol oluştur"), icon(L::Link), act(me, |v, _, cx| v.create_shortcuts(cx))),
+        ItemCmd::EmptyBin => Item::action(t!("Geri Dönüşüm Kutusu'nu boşalt"), icon(L::Trash), act(me, |v, _, cx| v.empty_bin(cx))),
+        ItemCmd::CopyPath => Item::action(t!("Öğe yolunu kopyala"), icon(L::ClipboardCopy), act(me, |v, _, cx| v.copy_paths_as_text(cx))).hint("Ctrl+Shift+C"),
+        ItemCmd::Properties => Item::action(t!("Özellikler"), icon(L::Wrench), act(me, |v, _, cx| v.properties(cx))).hint("Alt+Enter"),
+    }
+}
+
 fn cursor() -> (i32, i32) {
     let mut pt = POINT::default();
     unsafe {
@@ -70,7 +84,7 @@ fn cursor() -> (i32, i32) {
 }
 
 impl DesktopView {
-    /// The menu of the selected items, at the pointer.
+    /// The menu of the selected items, at the pointer. WHICH commands it holds is `menu_plan::item_menu`'s (tested); this draws them.
     pub(super) fn show_item_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let ids = self.selection_ids();
         if ids.is_empty() {
@@ -78,27 +92,32 @@ impl DesktopView {
         }
         let me = cx.entity().downgrade();
         let user_only = ids.iter().all(|i| self.item(i).is_some_and(|it| it.origin == Origin::User));
-        let can_change = !self.read_only() && user_only;
-        let has_paths = ids.iter().any(|i| self.item(i).is_some_and(|it| !it.is_virtual()));
         let single = ids.len() == 1;
-        let mut items = vec![Item::action(t!("Aç"), icon(L::SquareArrowOutUpRight), act(&me, |v, w, cx| v.open_selection(w, cx))).hint("Enter"), Item::Separator];
-        if has_paths {
-            items.push(Item::action(t!("Öğe yolunu kopyala"), icon(L::ClipboardCopy), act(&me, |v, _, cx| v.copy_paths_as_text(cx))).hint("Ctrl+Shift+C"));
-        }
-        items.push(Item::action(t!("Özellikler"), icon(L::Wrench), act(&me, |v, _, cx| v.properties(cx))).hint("Alt+Enter"));
-        items.push(Item::Separator);
-        items.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } });
+        let kinds = self.kinds_of(&ids);
+        let bin_full = ids.iter().any(|i| self.item(i).is_some_and(|it| it.recycle_full == Some(true)));
+        let ctx = ItemCtx { read_only: self.read_only(), bin_full, bin_locked: self.is_scratch() };
+        let items: Vec<Item> = item_menu(&kinds, ctx)
+            .into_iter()
+            .map(|row| match row {
+                Row::Sep => Item::Separator,
+                Row::More => Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
+                Row::Cmd(cmd, enabled) => item_of(&me, cmd).enabled(enabled),
+            })
+            .collect();
+        let q = item_quick(&kinds, ctx);
         let quick = vec![
-            Quick::new(L::Scissors, t!("Kes  (Ctrl+X)"), can_change, act(&me, |v, _, cx| v.copy_selection(Transfer::Move, cx))),
-            Quick::new(L::Copy, t!("Kopyala  (Ctrl+C)"), has_paths, act(&me, |v, _, cx| v.copy_selection(Transfer::Copy, cx))),
-            Quick::new(L::TextCursorInput, t!("Yeniden adlandır  (F2)"), can_change && single, act(&me, |v, w, cx| v.begin_rename(w, cx))),
-            Quick::new(L::Trash, t!("Sil  (Del)"), can_change, act(&me, |v, w, cx| v.delete_selection(false, w, cx))),
+            Quick::new(L::Scissors, t!("Kes  (Ctrl+X)"), q.cut, act(&me, |v, _, cx| v.copy_selection(Transfer::Move, cx))),
+            Quick::new(L::Copy, t!("Kopyala  (Ctrl+C)"), q.copy, act(&me, |v, _, cx| v.copy_selection(Transfer::Copy, cx))),
+            Quick::new(L::TextCursorInput, t!("Yeniden adlandır  (F2)"), q.rename, act(&me, |v, w, cx| v.begin_rename(w, cx))),
+            Quick::new(L::Trash, t!("Sil  (Del)"), q.delete, act(&me, |v, w, cx| v.delete_selection(false, w, cx))),
         ];
         let view = fluent_menu::show(Menu { quick, items }, window.mouse_position(), window, cx);
 
         // the shell's own commands for the selection: one origin only (they must share a parent folder)
         let first = ids.first().and_then(|i| self.item(i)).cloned();
+        // (a scratch desktop's Recycle Bin is the real one: Windows' own menu for it, with its Empty command, is not offered there)
         let target = match first.filter(|_| !self.read_only()) {
+            Some(it) if it.is_virtual() && self.is_scratch() => None,
             Some(it) if it.is_virtual() => single.then(|| ShellTarget::One(PathBuf::from(it.id.as_str()))),
             Some(it) if user_only || ids.iter().all(|i| self.item(i).is_some_and(|x| x.origin == it.origin)) => {
                 let paths = self.paths_of(&ids);
@@ -126,14 +145,23 @@ impl DesktopView {
         Pending::Ready(Rc::new(vec![Item::action(why, MenuIcon::None, |_, _| {}).enabled(false)]))
     }
 
-    /// The menu of the empty desktop, at the pointer.
+    /// The menu of the empty desktop, at the pointer. WHICH commands it holds is `menu_plan::background_menu`'s (tested).
     pub(super) fn show_background_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let me = cx.entity().downgrade();
-        let (size, sort, align) = {
+        let (size, sort, align, auto) = {
             let st = self.store.get();
-            (st.icon_size_step(), st.sort, st.align_to_grid)
+            (st.icon_size_step(), st.sort, st.align_to_grid, st.auto_arrange)
         };
         let read_only = self.read_only();
+        let (undo, redo) = crate::undo::next_labels();
+        let ctx = BgCtx {
+            read_only,
+            clipboard_files: rf_win::clipboard::has_files(),
+            undo: undo.map(str::to_string),
+            redo: redo.map(str::to_string),
+            has_folder: self.backend.as_ref().and_then(|b| b.target_dir()).is_some(),
+            icons_forced_hidden: super::choices::hidden_by_settings(),
+        };
         let size_item = |label: &str, s: IconSize| {
             Item::action(label.to_string(), MenuIcon::None, act(&me, move |v, _, cx| v.set_icon_size(s, cx))).checked(size == s)
         };
@@ -151,42 +179,51 @@ impl DesktopView {
             }))
             .checked(sort.descending == desc)
         };
-        // the read-only preview creates nothing: "New" is there but off, and the shell's own commands (which can write to the Desktop:
-        // archive, send to, templates) are not offered at all
-        let new_entry = if read_only {
-            Item::action(t!("Yeni"), icon(L::CirclePlus), |_, _| {}).enabled(false)
-        } else {
-            Item::Sub { label: t!("Yeni").into(), icon: icon(L::CirclePlus), items: Sub::Pending { key: "new", fallback: Some(Rc::new(own_new_items(&me))) } }
-        };
-        let items = vec![
-            Item::sub(
-                t!("Simge boyutu"),
-                icon(L::LayoutGrid),
-                vec![size_item(t!("Küçük"), IconSize::Small), size_item(t!("Orta boy"), IconSize::Medium), size_item(t!("Büyük"), IconSize::Large)],
-            ),
-            Item::action(t!("Simgeleri ızgaraya hizala"), icon(L::LayoutGrid), act(&me, move |v, _, cx| v.set_align(!align, cx))).checked(align),
-            Item::sub(
-                t!("Sırala"),
-                icon(L::ArrowUpDown),
-                vec![
-                    by(t!("Ad"), SortName::Name),
-                    by(t!("Değiştirme tarihi"), SortName::Modified),
-                    by(t!("Tür"), SortName::Type),
-                    by(t!("Boyut"), SortName::Size),
-                    Item::Separator,
-                    dir(t!("Artan"), false),
-                    dir(t!("Azalan"), true),
-                ],
-            ),
-            Item::action(t!("Yenile"), icon(L::RotateCw), act(&me, |v, _, cx| v.refresh(cx))).hint("Ctrl+R"),
-            Item::Separator,
-            new_entry,
-            Item::Separator,
-            Item::action(t!("rustyfiles'ta aç"), icon(L::FolderOpen), act(&me, |v, _, cx| v.open_desktop_folder(cx))),
-            Item::Separator,
-            Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
-        ];
-        let quick = vec![Quick::new(L::ClipboardPaste, t!("Yapıştır  (Ctrl+V)"), !read_only && rf_win::clipboard::has_files(), act(&me, |v, w, cx| v.paste(w, cx)))];
+        let shown = !super::choices::menu_hidden();
+        let items: Vec<Item> = background_menu(&ctx)
+            .into_iter()
+            .map(|row| match row {
+                Row::Sep => Item::Separator,
+                Row::More => Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
+                Row::Cmd(cmd, enabled) => match cmd {
+                    BgCmd::IconSize => Item::sub(
+                        t!("Simge boyutu"),
+                        icon(L::LayoutGrid),
+                        vec![size_item(t!("Küçük"), IconSize::Small), size_item(t!("Orta boy"), IconSize::Medium), size_item(t!("Büyük"), IconSize::Large)],
+                    ),
+                    BgCmd::AlignToGrid => Item::action(t!("Simgeleri ızgaraya hizala"), icon(L::LayoutGrid), act(&me, move |v, _, cx| v.set_align(!align, cx))).checked(align),
+                    BgCmd::AutoArrange => Item::action(t!("Simgeleri otomatik düzenle"), icon(L::ArrowDownUp), act(&me, move |v, _, cx| v.set_auto_arrange_mode(!auto, cx))).checked(auto),
+                    BgCmd::ShowIcons => Item::action(t!("Masaüstü simgelerini göster"), icon(L::Eye), act(&me, move |v, _, cx| v.set_show_icons(!shown, cx))).checked(shown && enabled),
+                    BgCmd::Sort => Item::sub(
+                        t!("Sırala"),
+                        icon(L::ArrowUpDown),
+                        vec![
+                            by(t!("Ad"), SortName::Name),
+                            by(t!("Değiştirme tarihi"), SortName::Modified),
+                            by(t!("Tür"), SortName::Type),
+                            by(t!("Boyut"), SortName::Size),
+                            Item::Separator,
+                            dir(t!("Artan"), false),
+                            dir(t!("Azalan"), true),
+                        ],
+                    ),
+                    BgCmd::Refresh => Item::action(t!("Yenile"), icon(L::RotateCw), act(&me, |v, _, cx| v.refresh(cx))).hint("Ctrl+R"),
+                    // the read-only preview creates nothing: "New" is there but off, and the shell's own commands (which can write to the
+                    // Desktop: archive, send to, templates) are not offered at all
+                    BgCmd::New if read_only => Item::action(t!("Yeni"), icon(L::CirclePlus), |_, _| {}).enabled(false),
+                    BgCmd::New => Item::Sub { label: t!("Yeni").into(), icon: icon(L::CirclePlus), items: Sub::Pending { key: "new", fallback: Some(Rc::new(own_new_items(&me))) } },
+                    BgCmd::PasteShortcut => Item::action(t!("Kısayol yapıştır"), icon(L::Link), act(&me, |v, _, cx| v.paste_shortcuts(cx))),
+                    BgCmd::Undo(what) => Item::action(format!("{}: {what}", t!("Geri al")), icon(L::Undo2), act(&me, |_, _, cx| crate::undo::undo(cx))).hint("Ctrl+Z"),
+                    BgCmd::Redo(what) => Item::action(format!("{}: {what}", t!("Yinele")), icon(L::Redo2), act(&me, |_, _, cx| crate::undo::redo(cx))).hint("Ctrl+Y"),
+                    BgCmd::OpenInRustyfiles => Item::action(t!("rustyfiles'ta aç"), icon(L::FolderOpen), act(&me, |v, _, cx| v.open_desktop_folder(cx))),
+                    BgCmd::OpenTerminal => Item::action(t!("Terminalde aç"), icon(L::SquareTerminal), act(&me, |v, _, _| v.open_terminal_here())),
+                    BgCmd::DisplaySettings => Item::action(t!("Görüntü ayarları"), icon(L::Monitor), act(&me, |v, _, _| v.open_settings_page("ms-settings:display"))),
+                    BgCmd::Personalize => Item::action(t!("Kişiselleştir"), icon(L::Palette), act(&me, |v, _, _| v.open_settings_page("ms-settings:personalization"))),
+                }
+                .enabled(enabled),
+            })
+            .collect();
+        let quick = vec![Quick::new(L::ClipboardPaste, t!("Yapıştır  (Ctrl+V)"), paste_enabled(&ctx), act(&me, |v, w, cx| v.paste(Via::Menu, w, cx)))];
         let view = fluent_menu::show(Menu { quick, items }, window.mouse_position(), window, cx);
         match self.backend.as_ref().and_then(|b| b.target_dir()).filter(|_| !read_only) {
             Some(dir) => self.load_shell(view.downgrade(), ShellTarget::Background(dir), true, cx),
@@ -234,8 +271,8 @@ impl DesktopView {
 
 fn own_new_items(me: &Me) -> Vec<Item> {
     vec![
-        Item::action(t!("Klasör"), MenuIcon::Tinted(L::Folder, crate::theme::kind_color(crate::icons::Category::Folder, true)), act(me, |v, _, cx| v.new_item(true, cx))).hint("Ctrl+Shift+N"),
-        Item::action(t!("Metin belgesi"), icon(L::FileText), act(me, |v, _, cx| v.new_item(false, cx))),
+        Item::action(t!("Klasör"), MenuIcon::Tinted(L::Folder, crate::theme::kind_color(crate::icons::Category::Folder, true)), act(me, |v, _, cx| v.new_item(true, Via::Menu, cx))).hint("Ctrl+Shift+N"),
+        Item::action(t!("Metin belgesi"), icon(L::FileText), act(me, |v, _, cx| v.new_item(false, Via::Menu, cx))),
     ]
 }
 

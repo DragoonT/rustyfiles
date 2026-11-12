@@ -28,8 +28,7 @@ use rf_core::desktop::wallpaper::Wallpaper;
 use rf_core::entry::{Entry, EntryKind};
 
 use super::args::PreviewArgs;
-use super::drop::{self, Accepts, DropAction, Over, Where};
-use super::geometry::Mapping;
+use super::drop::{self, Accepts, DropAction, Over, Where};use super::geometry::Mapping;
 use super::label::{self, Lines};
 use super::names;
 use super::select::{Placed, Selection, rect_of};
@@ -75,6 +74,14 @@ pub(super) struct Drag {
     pub over: Option<Over>,
     /// Every dragged item is a file or folder on the disk (so it can be handed to a folder or leave the window).
     pub files: bool,
+}
+
+/// New, pasted or dropped items that are to stand next to the point the user asked for them at (see `rf_core::desktop::arrival`),
+/// moved there as soon as the model shows them; given up after a few seconds.
+pub(super) struct Near {
+    pub ids: Vec<ItemId>,
+    pub at: (i32, i32),
+    pub since: Instant,
 }
 
 pub(super) struct Renaming {
@@ -171,6 +178,12 @@ pub struct DesktopView {
     /// after a few seconds.
     pub(super) want_rename: Option<(ItemId, Instant)>,
     pub(super) reselect: Option<(Vec<ItemId>, Instant)>,
+    /// Items that arrived by the user's hand at a point (see [`Near`]).
+    pub(super) near: Option<Near>,
+    /// Where the last right click on the empty desktop was (canvas pixels): what "New" and "Paste" from that menu mean by "here".
+    pub(super) menu_at: super::menupoint::MenuPoint,
+    /// The last picture of each system icon, drawn while the one for its new state (the Recycle Bin filled or emptied) is on its way.
+    last_virtual: HashMap<VirtualKind, Arc<RenderImage>>,
     pub(super) wheel: f32,
     pub(super) wheel_ms: u64,
     pub(super) notice: Option<String>,
@@ -193,6 +206,8 @@ pub struct DesktopView {
     /// The newest running file operation, for the strip (this window has no Status Center button), and the last failure shown.
     ops_line: Option<String>,
     ops_failure: u64,
+    /// Whether a file operation was running at the last Status Center change (the bin's icon is read again when this turns off).
+    pub(super) ops_busy: bool,
     save_task: Option<Task<()>>,
     pub(super) load_note: Option<String>,
     pub(super) tx: mpsc::UnboundedSender<Msg>,
@@ -243,6 +258,10 @@ impl DesktopView {
         // localised names) happens on this thread; the shell's own questions go through `sta::call`
         let settings = cx.global::<crate::settings::Settings>();
         let visibility = Visibility { show_hidden: settings.show_hidden, show_system: settings.show_system_files, dot_hidden: false };
+        // the choices for the system icons (Settings -> Masaüstü) are in place before the first read of the items
+        super::choices::update_from_settings(settings);
+        // (the preview lives in the main app, whose settings can change while it is open; a cover window's host does this itself)
+        cx.observe_global::<crate::settings::Settings>(|this, cx| this.settings_changed(cx)).detach();
         let config_dir = crate::settings::app_dir();
         let (worker_tx, worker_args) = (tx.clone(), args.clone());
         let spawned = std::thread::Builder::new().name("rf-desktop-load".into()).spawn(move || {
@@ -250,17 +269,16 @@ impl DesktopView {
             let loaded = source::load(&worker_args, visibility, config_dir, move |c| {
                 let _ = change_tx.lock().unbounded_send(Msg::Changed(c));
             });
-            let (infos, scratch) = (loaded.backend.infos.clone(), loaded.backend.is_scratch());
+            let infos = loaded.backend.infos.clone();
             let _ = worker_tx.unbounded_send(Msg::Loaded(Box::new(loaded)));
             let wp = source::read_wallpaper(&infos);
             let _ = worker_tx.unbounded_send(Msg::Wallpaper(Box::new(wp)));
-            if !scratch {
-                let names = rf_win::sta::call(Duration::from_secs(5), || {
-                    VirtualKind::ALL.iter().filter_map(|k| rf_win::shellfolder::display_name(&k.parsing_name()).map(|n| (*k, n))).collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-                let _ = worker_tx.unbounded_send(Msg::VirtualNames(names));
-            }
+            // (also for a scratch folder: its system icons, when the user chose to show them, carry the shell's own names too)
+            let names = rf_win::sta::call(Duration::from_secs(5), || {
+                VirtualKind::ALL.iter().filter_map(|k| rf_win::shellfolder::display_name(&k.parsing_name()).map(|n| (*k, n))).collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+            let _ = worker_tx.unbounded_send(Msg::VirtualNames(names));
         });
         if let Err(e) = spawned {
             log::error!("desktop preview: could not start the loader: {e}");
@@ -317,6 +335,9 @@ impl DesktopView {
             renaming: None,
             want_rename: None,
             reselect: None,
+            near: None,
+            menu_at: super::menupoint::MenuPoint::default(),
+            last_virtual: HashMap::new(),
             wheel: 0.0,
             wheel_ms: 0,
             notice: None,
@@ -331,6 +352,7 @@ impl DesktopView {
             line_counts: HashMap::new(),
             touched: false,
             ops_line: None,
+            ops_busy: false,
             ops_failure: 0,
             save_task: None,
             load_note: None,
@@ -470,6 +492,7 @@ impl DesktopView {
         self.line_counts.retain(|id, _| self.by_id.contains_key(id));
         self.items = items;
         self.resolved = resolved;
+        let arrived = self.place_arrivals(&b);
         self.rebuild_placed();
         self.sel.retain_existing(&self.placed);
         if let Some((ids, since)) = self.reselect.take() {
@@ -483,8 +506,61 @@ impl DesktopView {
                 self.reselect = Some((ids, since));
             }
         }
+        if arrived {
+            // the other monitors' views resolved a moment ago, before these items had their place
+            self.refresh_peers(cx);
+        }
         self.schedule_save(cx);
         cx.notify();
+    }
+
+    /// Items the user just made, pasted or dropped at a point: once the model shows them they are moved next to that point
+    /// (`rf_core::desktop::arrival`). Returns whether something was moved.
+    fn place_arrivals(&mut self, b: &Backend) -> bool {
+        let Some(n) = self.near.take() else { return false };
+        let there: Vec<ItemId> = n.ids.iter().filter(|i| self.resolved.placed.contains_key(*i)).cloned().collect();
+        if there.is_empty() {
+            // not shown yet: the folder watcher is a moment behind the operation
+            if n.since.elapsed() < Duration::from_secs(5) {
+                self.near = Some(n);
+            }
+            return false;
+        }
+        let moved = rf_core::desktop::arrival::place_near(&mut self.store.edit(), &b.specs, &mut self.resolved, &there, b.canvas, n.at);
+        if moved.is_empty() {
+            return false;
+        }
+        self.touch_layout();
+        // (the ones that were not there yet are placed when they come)
+        let rest: Vec<ItemId> = n.ids.into_iter().filter(|i| !there.contains(i)).collect();
+        if !rest.is_empty() && n.since.elapsed() < Duration::from_secs(5) {
+            self.near = Some(Near { ids: rest, at: n.at, since: n.since });
+        }
+        true
+    }
+
+    /// The point (canvas pixels) of the right click that opened the menu a command came from, while it is fresh: "here" for New and Paste.
+    pub(super) fn take_menu_point(&mut self, via: super::menupoint::Via) -> Option<(i32, i32)> {
+        self.menu_at.take(via, Instant::now())
+    }
+
+    /// The settings changed (the preview lives in the main app): the choices for the system icons may have.
+    fn settings_changed(&mut self, cx: &mut Context<Self>) {
+        let changed = super::choices::update_from_settings(cx.global::<crate::settings::Settings>());
+        if changed {
+            self.reread_system_icons();
+        }
+    }
+
+    /// Reads the system icons' settings and the Recycle Bin's state again, on a thread of its own (the shell answers the second one).
+    /// What changed reaches the view through the item source's own callback.
+    pub(super) fn reread_system_icons(&self) {
+        if let Some(b) = self.backend.clone() {
+            let spawned = std::thread::Builder::new().name("rf-desktop-icons".into()).spawn(move || b.items.refresh_virtuals());
+            if let Err(e) = spawned {
+                log::warn!("desktop: could not start the system icons' refresh: {e}");
+            }
+        }
     }
 
     /// `placed` and the grid from `resolved` (after a move as well as after a listing).
@@ -629,10 +705,12 @@ impl DesktopView {
     /// The Status Center changed: show the newest running operation, and a failure (once) as a notice.
     fn on_ops(&mut self, ops: &Entity<crate::status_center::Ops>, cx: &mut Context<Self>) {
         let g = ops.read(cx).glance();
+        let busy = g.running.is_some();
         self.ops_line = g.running.map(|(title, pct)| match pct {
             Some(p) => format!("{title} %{p}"),
             None => title,
         });
+        self.ops_busy_changed(busy);
         if let Some((id, why)) = g.failed
             && id > self.ops_failure
         {
@@ -685,7 +763,19 @@ impl DesktopView {
     fn icon_for(&mut self, it: &DesktopItem, frame: &Frame, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         let b = self.backend.clone()?;
         match it.origin {
-            Origin::Virtual(k) => self.images.update(cx, |c, cx| c.shell_icon(&k.parsing_name(), frame.icon_px, cx)),
+            Origin::Virtual(k) => {
+                // The Recycle Bin has a picture for full and one for empty: the state is part of the key, so the shell is asked again
+                // when it changes, and the old picture stays up until the new one has come (no flash of the stand-in).
+                let state = it.recycle_full.map_or(0u8, |full| if full { 2 } else { 1 });
+                let got = self.images.update(cx, |c, cx| c.shell_icon_state(&k.parsing_name(), frame.icon_px, state, cx));
+                match got {
+                    Some(img) => {
+                        self.last_virtual.insert(k, img.clone());
+                        Some(img)
+                    }
+                    None => self.last_virtual.get(&k).cloned(),
+                }
+            }
             o => {
                 let dir = b.dir_of(o)?;
                 let e = Entry::new(&it.name, if it.is_dir { EntryKind::Dir } else { EntryKind::File }, it.size, it.modified_ms, 0, it.attrs);
@@ -698,9 +788,12 @@ impl DesktopView {
 
     fn fallback_icon(it: &DesktopItem, size: f32, dark: bool) -> AnyElement {
         match it.origin {
+            // (only drawn until the shell's own picture, which tells full from empty, has arrived)
             Origin::Virtual(VirtualKind::RecycleBin) => Icon::new(L::Trash).size(px(size)).text_color(white(0.9)).into_any_element(),
             Origin::Virtual(VirtualKind::ThisPc) => Icon::new(L::Monitor).size(px(size)).text_color(white(0.9)).into_any_element(),
-            Origin::Virtual(_) => Icon::new(L::Folder).size(px(size)).text_color(white(0.9)).into_any_element(),
+            Origin::Virtual(VirtualKind::Network) => Icon::new(L::Network).size(px(size)).text_color(white(0.9)).into_any_element(),
+            Origin::Virtual(VirtualKind::UserFiles) => Icon::new(L::User).size(px(size)).text_color(white(0.9)).into_any_element(),
+            Origin::Virtual(VirtualKind::ControlPanel) => Icon::new(L::Settings).size(px(size)).text_color(white(0.9)).into_any_element(),
             _ => {
                 let e = Entry::new(&it.name, if it.is_dir { EntryKind::Dir } else { EntryKind::File }, it.size, it.modified_ms, 0, it.attrs);
                 let cat = icons::category(&e);
@@ -760,6 +853,25 @@ impl DesktopView {
             _ => div().into_any_element(),
         };
 
+        // A shortcut looks like what it points at, so a copy of a file and a shortcut to it cannot be told apart: its picture gets
+        // the small arrow badge Windows draws (our own drawing, over the icon's lower left corner).
+        let badge: Option<AnyElement> = (!it.is_virtual() && !it.is_dir && names::extension_never_shown(&it.name)).then(|| {
+            let side = (icon_l * 0.34).max(10.0);
+            div()
+                .absolute()
+                .left(px(self.map.len(icon_x as f32) + icon_l * 0.03))
+                .top(px(self.map.len(icon_y as f32) + icon_l - side - icon_l * 0.03))
+                .size(px(side))
+                .rounded(px(side * 0.2))
+                .bg(white(0.97))
+                .border_1()
+                .border_color(black(0.35))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Icon::new(L::ArrowUpRight).size(px(side * 0.78)).text_color(hsla(0.58, 0.85, 0.40, 1.0)))
+                .into_any_element()
+        });
         let id = it.id.clone();
         let radius = px(self.map.len(6.0 * self.scale_percent() as f32 / 100.0).max(3.0));
         let sel_bg = Hsla { a: 0.34, ..p.accent };
@@ -778,6 +890,7 @@ impl DesktopView {
             .when(drop_target, |d| d.bg(Hsla { a: 0.45, ..p.accent }).border_color(p.accent))
             .when(!selected && !ghost && !drop_target, |d| d.hover(|s| s.bg(white(0.10))))
             .child(div().absolute().left(px(self.map.len(icon_x as f32))).top(px(self.map.len(icon_y as f32))).size(px(icon_l)).flex().items_center().justify_center().child(visual))
+            .children(badge)
             .child(label);
         if !ghost {
             let accepts = self.accepts_of_item(it);
@@ -972,6 +1085,8 @@ impl Render for DesktopView {
                 && let Some(cell) = self.cell_rect_of(&d.grabbed)
                 && matches!(drop::decide_icons(&d.ids, &Where { over: d.over.as_ref(), cell: Some(Cell::new(0, 0)) }, d.files, ro), DropAction::MoveIcons { .. })
                 && self.map.contains(d.cur)
+                // (with auto arrange on an icon does not land where it is put down)
+                && !self.store.get().auto_arrange
             {
                 let delta = (d.cur.0 - d.start.0, d.cur.1 - d.start.1);
                 let (cell_c, _, _) = g.snap(cell.left + delta.0, cell.top + delta.1, align).unwrap_or((Cell::new(0, 0), 0, 0));

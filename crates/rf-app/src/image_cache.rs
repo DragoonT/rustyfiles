@@ -275,6 +275,18 @@ impl ImageCache {
         r
     }
 
+    /// [`shell_icon`](Self::shell_icon) for a place whose picture depends on a state the shell keeps (the Recycle Bin: full or empty).
+    /// The state is part of the key, so a picture made for one state is never shown for the other and a change of state asks the
+    /// shell again; `shell_icon` itself keeps one picture for ever.
+    pub fn shell_icon_state(&mut self, parsing: &str, px: u32, state: u8, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        let key = key_of(&[&"shell-state", &parsing, &px, &state]);
+        let path = std::path::PathBuf::from(parsing);
+        let r = self.lookup(key, || Request { key, path, size: px, kind: Kind::Thumbnail }, true);
+        self.evict_over_budget();
+        self.release_evicted(cx);
+        r
+    }
+
     pub fn thumbnail(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         let wants_thumb = crate::icons::has_thumbnail(e);
         let per_file = wants_thumb || (!e.is_dir() && has_unique_icon(&e.ext));

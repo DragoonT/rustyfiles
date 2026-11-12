@@ -17,6 +17,7 @@ use gpui_kit::*;
 use rf_core::desktop::items::{ItemId, Origin};
 
 use super::drop::{self, Accepts, DropAction, Effect, Over, Where, Why};
+use super::menupoint::Via;
 use super::policy::Refusal;
 use super::select::{Dir, Mods, rect_of};
 use super::view::{Band, DesktopView, Drag, Press};
@@ -61,6 +62,7 @@ impl DesktopView {
                 } else {
                     this.sel.clear();
                     this.notice = None;
+                    this.menu_at.clear();
                     cx.notify();
                 }
             }))
@@ -74,12 +76,12 @@ impl DesktopView {
             .on_action(cx.listener(|this, _: &Properties, _, cx| this.properties(cx)))
             .on_action(cx.listener(|this, _: &CopyItems, _, cx| this.copy_selection(rf_win::fileops::Transfer::Copy, cx)))
             .on_action(cx.listener(|this, _: &CutItems, _, cx| this.copy_selection(rf_win::fileops::Transfer::Move, cx)))
-            .on_action(cx.listener(|this, _: &PasteItems, window, cx| this.paste(window, cx)))
+            .on_action(cx.listener(|this, _: &PasteItems, window, cx| this.paste(Via::Keyboard, window, cx)))
             .on_action(cx.listener(|this, _: &DeleteItems, window, cx| this.delete_selection(false, window, cx)))
             .on_action(cx.listener(|this, _: &DeletePermanently, window, cx| this.delete_selection(true, window, cx)))
             .on_action(cx.listener(|this, _: &RenameItem, window, cx| this.begin_rename(window, cx)))
-            .on_action(cx.listener(|this, _: &NewFolder, _, cx| this.new_item(true, cx)))
-            .on_action(cx.listener(|this, _: &NewTextFile, _, cx| this.new_item(false, cx)))
+            .on_action(cx.listener(|this, _: &NewFolder, _, cx| this.new_item(true, Via::Keyboard, cx)))
+            .on_action(cx.listener(|this, _: &NewTextFile, _, cx| this.new_item(false, Via::Keyboard, cx)))
             .on_action(cx.listener(|this, _: &CopyPath, _, cx| this.copy_paths_as_text(cx)))
             .on_action(cx.listener(|this, _: &Undo, _, cx| {
                 if this.renaming.is_none() && !this.read_only() {
@@ -95,6 +97,8 @@ impl DesktopView {
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.step_icon_size(true, cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.step_icon_size(false, cx)))
             .on_action(cx.listener(|this, _: &ShowContextMenu, window, cx| {
+                // (a menu opened from the keyboard has no pointer position: an older right click's point is not its "here")
+                this.menu_at.clear();
                 if this.sel.selected.is_empty() {
                     this.show_background_menu(window, cx);
                 } else {
@@ -169,6 +173,7 @@ impl DesktopView {
     pub(super) fn on_tile_down(&mut self, id: &ItemId, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
         self.notice = None;
+        self.menu_at.clear();
         self.typing.reset();
         if self.renaming.is_some() {
             self.commit_rename(window, cx);
@@ -205,6 +210,7 @@ impl DesktopView {
     pub(super) fn on_background_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus, cx);
         self.notice = None;
+        self.menu_at.clear();
         self.typing.reset();
         if self.renaming.is_some() {
             self.commit_rename(window, cx);
@@ -226,6 +232,9 @@ impl DesktopView {
         if !window.modifiers().control {
             self.sel.clear();
         }
+        // "New" and "Paste" from this menu mean "here"
+        let m = window.mouse_position();
+        self.menu_at.set(self.map.to_canvas(f32::from(m.x), f32::from(m.y)), std::time::Instant::now());
         self.show_background_menu(window, cx);
         cx.notify();
     }
@@ -256,6 +265,9 @@ impl DesktopView {
                 self.begin_drag(window, cx);
             }
         }
+        // a drag of icons that can only be moved on the layout (system icons, the Public Desktop's) never turns into the system's file
+        // drag: it stays here, and where the button comes up decides the monitor (see `finish_drag`)
+        let layout_only = self.drag.as_ref().is_some_and(|d| self.layout_only(&d.ids));
         let Some(d) = &mut self.drag else { return };
         if !left {
             // the button came up where this window did not see it
@@ -265,7 +277,7 @@ impl DesktopView {
         }
         let vp = window.viewport_size();
         let outside = ev.position.x < px(0.) || ev.position.y < px(0.) || ev.position.x > vp.width || ev.position.y > vp.height;
-        if outside && d.files {
+        if outside && d.files && !layout_only {
             self.leave_window_with_the_drag(window, cx);
             return;
         }
@@ -361,8 +373,45 @@ impl DesktopView {
         })
     }
 
+    /// Whether these icons can only be moved on the layout, never handed to another program: a system icon has no file, and nothing is
+    /// moved or copied out of the Public Desktop from here. Only in cover mode with more than one monitor, where the other monitors are
+    /// other windows of this very desktop and a drag that leaves the window is a move to that monitor.
+    fn layout_only(&self, ids: &[ItemId]) -> bool {
+        if self.cover.is_none() || self.backend.as_ref().is_none_or(|b| b.specs.len() < 2) {
+            return false;
+        }
+        ids.iter().any(|i| self.item(i).is_some_and(|it| it.is_virtual() || it.origin == Origin::Public))
+    }
+
+    /// The icons of `d` put down on monitor `to`: only the layout changes.
+    fn move_icons_across(&mut self, d: &Drag, to: usize, cx: &mut Context<Self>) {
+        let Some(b) = self.backend.clone() else { return };
+        if self.store.get().auto_arrange {
+            return self.say(crate::t!("Otomatik düzenleme açıkken simgeler taşınamaz"), cx);
+        }
+        let delta = (d.cur.0 - d.start.0, d.cur.1 - d.start.1);
+        let items: Vec<(ItemId, (i32, i32))> = d.ids.iter().filter_map(|i| self.cell_rect_of(i).map(|r| (i.clone(), (r.left, r.top)))).collect();
+        self.touch_layout();
+        let moved = rf_core::desktop::arrival::move_across(&mut self.store.edit(), &b.specs, &mut self.resolved, &items, b.canvas, delta, to);
+        if !moved.is_empty() {
+            self.rebuild_placed();
+            self.sel.retain_existing(&self.placed);
+            self.schedule_save(cx);
+            // the other monitor's window draws the icons now
+            self.refresh_peers(cx);
+        }
+        cx.notify();
+    }
+
     fn finish_drag(&mut self, d: Drag, window: &mut Window, cx: &mut Context<Self>) {
         let inside = self.map.contains(d.cur);
+        // let go on another monitor: the icons that cannot leave as files are moved there
+        if !inside
+            && self.layout_only(&d.ids)
+            && let Some((to, _)) = self.backend.as_ref().and_then(|b| rf_core::desktop::arrival::monitor_under(&b.specs, b.canvas, d.cur))
+        {
+            return self.move_icons_across(&d, to, cx);
+        }
         let cell = if inside { self.grid.as_ref().and_then(|g| g.snap(d.cur.0, d.cur.1, true)).map(|(c, _, _)| c) } else { None };
         let over = d.over.clone().or_else(|| self.over_at(d.cur, &d.ids));
         let at = Where { over: over.as_ref(), cell };
@@ -475,7 +524,7 @@ impl DesktopView {
                 }
             }
             DropAction::HandTo { target, accepts } => self.hand_to(&target, accepts, paths, window, cx),
-            DropAction::TakeIn => self.take_in(paths, window, cx),
+            DropAction::TakeIn => self.take_in(paths, pt, window, cx),
             DropAction::Reject(why) => self.reject(why, cx),
         }
         cx.notify();

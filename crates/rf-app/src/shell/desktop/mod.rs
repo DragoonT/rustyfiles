@@ -19,14 +19,22 @@
 //! | `rename_check` | what may be typed in the rename box | table |
 //! | `drop` | what a drop means | table |
 //! | `policy` | what may change files (read-only, Public Desktop, shortcuts to folders), when to ask before opening many | table |
+//! | `choices` | the app's own choices for the system icons (Settings -> Masaüstü), carried to where the item source reads them | table |
+//! | `menu_plan` | what the item menu and the empty-desktop menu hold for a selection and a place | table |
+//! | `menupoint` | which command may use the point of the last right click on the empty desktop | table |
+//! | `links` | the names of the shortcuts the desktop makes | table |
 //! | `source` | items, monitors and layout file; the scratch rule | temp folders |
 //! | `wall` | the wallpaper bitmap | synthetic picture |
-//! | `view`, `input`, `operations`, `menus` | the GPUI view | not unit-testable (windows); run live |
+//! | `view`, `input`, `operations`, `actions`, `menus` | the GPUI view | not unit-testable (windows); run live (`actions` has the bin's job over a fake) |
 
 pub mod args;
+pub mod choices;
 pub mod drop;
 pub mod geometry;
 pub mod label;
+pub mod links;
+pub mod menu_plan;
+pub mod menupoint;
 pub mod names;
 pub mod policy;
 pub mod rename_check;
@@ -37,6 +45,7 @@ pub mod tile;
 pub mod typeahead;
 pub mod wall;
 
+mod actions;
 mod input;
 mod menus;
 mod open;

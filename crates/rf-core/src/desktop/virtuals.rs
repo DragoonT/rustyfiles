@@ -3,8 +3,15 @@
 //! `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\HideDesktopIcons\NewStartPanel` (named by the item's CLSID; 0 shows it, 1
 //! hides it). Read-only here; Windows' own Settings page is the only writer.
 //!
+//! OUR OWN CHOICE on top of that ([`IconChoice`], [`Choices`], [`apply`]): each of the five icons, and the master "show desktop icons"
+//! switch, can be left to Windows (the default: exactly what the registry says), forced on, or forced off, by a setting of this app.
+//! Nothing is ever written to the registry: the choice only changes what [`read`] found, in memory. An organisation's `NoDesktop`
+//! policy is stronger than any choice.
+//!
 //! What was seen on a real machine (note 4, 5.2): only This PC had a value (0). The CLSIDs of the other four, and the default for an
 //! item with no value (only the Recycle Bin is on a fresh Windows 11 desktop), are the widely published ones and UNVERIFIED here.
+
+use serde::{Deserialize, Serialize};
 
 use super::registry::{Hive, RegRead};
 
@@ -98,6 +105,65 @@ impl VirtualSettings {
     }
 }
 
+/// What the app's own setting says about one icon (or about "show desktop icons" as a whole).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum IconChoice {
+    /// Windows' own setting decides (the default).
+    #[default]
+    Follow,
+    Show,
+    Hide,
+}
+
+impl IconChoice {
+    /// The choice applied to what Windows says.
+    pub fn resolve(self, windows_shows: bool) -> bool {
+        match self {
+            IconChoice::Follow => windows_shows,
+            IconChoice::Show => true,
+            IconChoice::Hide => false,
+        }
+    }
+}
+
+/// The app's choices for the desktop's system icons (in [`VirtualKind::ALL`] order) and for "show desktop icons".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Choices {
+    pub kinds: [IconChoice; 5],
+    pub show_icons: IconChoice,
+}
+
+impl Choices {
+    pub fn of(&self, k: VirtualKind) -> IconChoice {
+        VirtualKind::ALL.iter().position(|x| *x == k).map_or(IconChoice::Follow, |i| self.kinds[i])
+    }
+    pub fn set(&mut self, k: VirtualKind, c: IconChoice) {
+        if let Some(i) = VirtualKind::ALL.iter().position(|x| *x == k) {
+            self.kinds[i] = c;
+        }
+    }
+    /// Every choice is "follow Windows": [`apply`] changes nothing.
+    pub fn is_default(&self) -> bool {
+        *self == Choices::default()
+    }
+}
+
+/// What Windows said, changed by the app's choices. The organisation's policy is kept as it is, so a `NoDesktop` policy still wins
+/// ([`VirtualSettings::desktop_disabled`] stays true whatever the choice for "show desktop icons" is). With every choice on "follow"
+/// the result is exactly `windows`.
+pub fn apply(windows: VirtualSettings, choices: &Choices) -> VirtualSettings {
+    let kinds = windows
+        .kinds
+        .iter()
+        .map(|(k, why)| match choices.of(*k) {
+            IconChoice::Follow => (*k, *why),
+            c => (*k, Why::Set(c.resolve(why.shown()))),
+        })
+        .collect();
+    VirtualSettings { kinds, show_icons: choices.show_icons.resolve(windows.show_icons), policy_no_desktop: windows.policy_no_desktop }
+}
+
 pub fn read(reg: &dyn RegRead) -> VirtualSettings {
     let cu = Hive::CurrentUser;
     let kinds = VirtualKind::ALL
@@ -159,6 +225,82 @@ mod tests {
         assert!(machine.policy_no_desktop);
         let zero = read(&MemRegistry::new().cu_dword(KEY_POLICIES_EXPLORER, "NoDesktop", 0));
         assert!(!zero.policy_no_desktop);
+    }
+
+    fn windows_default() -> VirtualSettings {
+        read(&MemRegistry::new())
+    }
+
+    #[test]
+    fn following_windows_changes_nothing_at_all() {
+        let w = windows_default();
+        assert_eq!(apply(w.clone(), &Choices::default()), w);
+        let busy = read(&MemRegistry::new().cu_dword(KEY_HIDE_ICONS, VirtualKind::ThisPc.clsid(), 0).cu_dword(KEY_ADVANCED, "HideIcons", 1));
+        assert_eq!(apply(busy.clone(), &Choices::default()), busy, "also when Windows has its own values");
+        assert!(Choices::default().is_default());
+    }
+
+    #[test]
+    fn a_choice_overrides_what_windows_says_in_both_directions() {
+        // a fresh Windows 11: only the Recycle Bin. We add This PC and take the Recycle Bin away.
+        let mut c = Choices::default();
+        c.set(VirtualKind::ThisPc, IconChoice::Show);
+        c.set(VirtualKind::RecycleBin, IconChoice::Hide);
+        let s = apply(windows_default(), &c);
+        assert_eq!(s.shown(), vec![VirtualKind::ThisPc]);
+        // the other three still follow Windows (hidden by default)
+        assert!(!s.is_shown(VirtualKind::Network) && !s.is_shown(VirtualKind::UserFiles) && !s.is_shown(VirtualKind::ControlPanel));
+        assert!(!c.is_default());
+        // "show" wins over Windows having hidden it explicitly, "hide" over Windows having shown it explicitly
+        let explicit = read(&MemRegistry::new().cu_dword(KEY_HIDE_ICONS, VirtualKind::Network.clsid(), 1).cu_dword(KEY_HIDE_ICONS, VirtualKind::ControlPanel.clsid(), 0));
+        let mut c = Choices::default();
+        c.set(VirtualKind::Network, IconChoice::Show);
+        c.set(VirtualKind::ControlPanel, IconChoice::Hide);
+        let s = apply(explicit, &c);
+        assert!(s.is_shown(VirtualKind::Network) && !s.is_shown(VirtualKind::ControlPanel));
+    }
+
+    #[test]
+    fn each_of_the_five_has_its_own_choice() {
+        for k in VirtualKind::ALL {
+            let mut c = Choices::default();
+            c.set(k, IconChoice::Show);
+            let shown = apply(windows_default(), &c).shown();
+            assert!(shown.contains(&k), "{k:?}");
+            // only that one (and the Recycle Bin, which is on by default) is shown
+            let extra = shown.iter().filter(|x| **x != k && **x != VirtualKind::RecycleBin).count();
+            assert_eq!(extra, 0, "{k:?}");
+            assert_eq!(c.of(k), IconChoice::Show);
+        }
+    }
+
+    #[test]
+    fn the_master_switch_follows_windows_unless_chosen_and_the_policy_always_wins() {
+        let hidden_by_windows = read(&MemRegistry::new().cu_dword(KEY_ADVANCED, "HideIcons", 1));
+        let mut c = Choices::default();
+        assert!(apply(hidden_by_windows.clone(), &c).desktop_disabled(), "follow: Windows hid the icons");
+        c.show_icons = IconChoice::Show;
+        assert!(!apply(hidden_by_windows, &c).desktop_disabled(), "our choice shows them");
+        c.show_icons = IconChoice::Hide;
+        assert!(apply(windows_default(), &c).desktop_disabled(), "our choice hides them");
+        // an organisation that forbids desktop items: no choice brings them back
+        let policy = read(&MemRegistry::new().cu_dword(KEY_POLICIES_EXPLORER, "NoDesktop", 1));
+        for choice in [IconChoice::Follow, IconChoice::Show, IconChoice::Hide] {
+            let mut c = Choices { show_icons: choice, ..Default::default() };
+            c.set(VirtualKind::ThisPc, IconChoice::Show);
+            let s = apply(policy.clone(), &c);
+            assert!(s.policy_no_desktop && s.desktop_disabled(), "{choice:?}");
+        }
+    }
+
+    #[test]
+    fn the_choice_is_written_as_a_lowercase_word_and_a_wrong_word_is_refused() {
+        for (c, word) in [(IconChoice::Follow, "follow"), (IconChoice::Show, "show"), (IconChoice::Hide, "hide")] {
+            assert_eq!(serde_json::to_string(&c).unwrap(), format!("\"{word}\""));
+            assert_eq!(serde_json::from_str::<IconChoice>(&format!("\"{word}\"")).unwrap(), c);
+        }
+        assert!(serde_json::from_str::<IconChoice>("\"maybe\"").is_err());
+        assert_eq!(IconChoice::default(), IconChoice::Follow);
     }
 
     #[test]
