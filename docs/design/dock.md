@@ -194,8 +194,10 @@ badges, thumbnails on hover. Hiding Explorer's taskbar is a later version and ne
 
 ## Known limits
 
-* Never run on a screen yet when this was written: the placement, styling, glass, magnification, the region and the clicks are covered
-  by pure tests of the arithmetic and decisions and by offscreen pictures of the glass, not by a live run. To look at: whether the
+* What has been seen on a screen: the placement, the glass, the apps and their icons, the light or dark foreground (main's live runs,
+  before the magnification was added). What has not: the magnification, the glass as a shape inside a larger window, the window
+  region and the clicks through it, and the merged whole; they are covered by pure tests of the arithmetic and decisions and by
+  offscreen pictures of the glass. To look at: whether the
   shadow shows with `RUSTYFILES_DOCK_SHADOW=1` (expected not: see above), the glass following the icons frame by frame, the top of a
   grown icon while it is still growing (the region follows the scene by one task of the message loop and is a pixel larger than it),
   the corners of the region (a region has no anti aliasing; the glass's own edge is inside it), and clicks on the margin reaching

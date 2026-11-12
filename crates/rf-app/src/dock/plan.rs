@@ -241,7 +241,7 @@ mod tests {
         let s = slots(5, Some(3));
         let width = middle_width_at_rest(5, 1);
         let mine = rest_layout(&s, width);
-        let theirs = slot_spans(&s, &vec![ICON_REST; 5]);
+        let theirs = slot_spans(&s, &[ICON_REST; 5]);
         assert_eq!(mine.len(), theirs.len());
         for (a, b) in mine.iter().zip(&theirs) {
             assert!((a.0 - b.0).abs() < 0.001 && (a.1 - b.1).abs() < 0.001, "{a:?} vs {b:?}");

@@ -661,8 +661,9 @@ pub fn exclude_from_capture(hwnd: isize, on: bool) {
 /// Draws the same glass the live path draws, through the same renderer code, over a picture the caller gives, into a private texture,
 /// and returns its pixels as premultiplied BGRA, `rect` sized. Creates no window and no swap chain; tries a hardware device first and
 /// falls back to WARP (a CI runner has no GPU). The look is the default one ([`LookParams::DEFAULT`]), not the process-wide one. A
-/// rectangle whose short side is under 160 CSS px gets the calmer rim of a small piece, as a small piece does in a window; every larger one
-/// (every window) is drawn with the look as it is. [`render_offscreen_look`] with `calm_small = false` draws a small piece with the rim of a window.
+/// rectangle whose short side is under 160 CSS px gets the bounded rim of a small piece (its band at most a third of the short side), as a
+/// small piece does in a window; every larger one (every window) is drawn with the look as it is. [`render_offscreen_look`] with
+/// `calm_small = false` draws a small piece with the rim of a window.
 ///
 /// `src_bgra` is `src_w` x `src_h` tightly packed BGRA8. `rect` is `(x, y, w, h)` of the glass in picture pixels (the part of it outside the
 /// picture reads the picture's edge pixels). `radius_px` is the corner radius in device pixels, `scale` the device pixels per CSS pixel
@@ -692,7 +693,7 @@ pub struct LensShot {
 }
 
 /// The same as [`render_offscreen`] with lenses, one picture per entry of `frames` (each entry the lenses of that picture, at most
-/// `MAX_LENSES` of them): the backdrop is prepared once and the pictures differ in their lenses only. The default look, with the calmer rim
+/// `MAX_LENSES` of them): the backdrop is prepared once and the pictures differ in their lenses only. The default look, with the bounded rim
 /// for a rectangle under 160 CSS px (see [`render_offscreen`]). For tests and the picture harness.
 pub fn render_offscreen_frames(
     src: (&[u8], u32, u32),
@@ -706,7 +707,7 @@ pub fn render_offscreen_frames(
 }
 
 /// [`render_offscreen_frames`] with the settings' values; `calm_small = false` draws a small piece with the rim of a window (what it
-/// looked like before the calmer rim), for comparing pictures.
+/// looked like before its rim was bounded), for comparing pictures.
 #[allow(clippy::too_many_arguments)]
 pub fn render_offscreen_look(
     src: (&[u8], u32, u32),

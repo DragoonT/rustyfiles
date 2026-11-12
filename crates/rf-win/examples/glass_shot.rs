@@ -11,7 +11,7 @@
 //! `--lens` puts a lens (a selection pill) on the glass: x, y, w, h, radius in device px relative to the glass; it can be given up to eight
 //! times. `--clip` cuts all the lenses to a rectangle (default: the whole glass).
 //! `--frost`, `--tint`, `--refraction` and `--saturation` are the four values of the HyperGlass settings, each 0 to 100 (defaults 52, 50,
-//! 67, 62: the shipped look). `--no-calm` draws a small piece with the rim of a window, as it was before the calmer rim of small pieces.
+//! 67, 62: the shipped look). `--no-calm` draws a small piece with the rim of a window, as it was before the rim of small pieces was bounded.
 //! `--shape X,Y,W,H` makes `--rect` a larger transparent WINDOW and the glass only this rectangle of it (device px from the window's top
 //! left corner), as the dock's islands are drawn live; `--radius` is then the shape's. `--shadow` adds the dock's soft shadow outside the
 //! shape (black 26 % at the outline, 4 px down, gone 22 px away). The picture shows the window's pixels over the source; where the
@@ -252,7 +252,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         a.params.tint,
         a.params.refraction,
         a.params.saturation,
-        if a.calm { "" } else { ", small pieces without the calmer rim" }
+        if a.calm { "" } else { ", small pieces without the bounded rim" }
     );
     paste(&mut pic, w, h, &glass, a.rect);
     save(&a.out, w, h, &pic)?;
