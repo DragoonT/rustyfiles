@@ -1,8 +1,9 @@
 // glass.hlsl - optical model and presets after tomacco/amazing-glass (MIT, (c) 2026 Ivan Tomac)
 //
 // Written here from the numbers and formulas of reference-sheet-amazing.md (its "Corrections" section applied); no code is copied.
-// Used by rf_win::glass. Difference to the experiment this grew out of: the optics of a small-radius window use a rounder box than the
-// outline (see "TWO OUTLINES" in PSGlass), and the footprint uses the fine derivatives (see "ddx_fine" there).
+// Used by rf_win::glass. Differences to the experiment this grew out of: in a window whose corner radius is smaller than the rim, the
+// direction of the bend comes from a rounder box than the outline while its depth keeps the true outline (see "DEPTH AND DIRECTION" in
+// PSGlass); a window's corners are not cut out here (uOpt.x); and the footprint uses the fine derivatives (see "ddx_fine" there).
 // One pixel shader (PSGlass) does the whole look per pixel; PSCrop and PSDown only prepare the backdrop (crop + mip chain for frost).
 //
 // UNITS. The shape, rim width, thickness, shifts, blur and line widths are CSS px (96 dpi). The window is in device px; s = uShape.w is
@@ -34,6 +35,7 @@ cbuffer CB : register(b0)
     float4 uExt;    // x: non-finite check 0/1  y: debug 0 = normal, 1 = write raw offsets, 2 = no rim shift (zoom term only)  z: region pad px
                     // w: 1 = point sampling of the sharp backdrop (what the screenshot shows), 0 = bilinear
     float4 uSub;    // xy: shift of the glass centre from the window centre, device px (sub pixel placement)  zw: extra shift of the outline only (test placement)
+    float4 uOpt;    // x: 1 = the corners are not cut out here (the whole rectangle is covered; a window's corners are cut by the system)
 };
 
 static const float IOR = 1.5;                                  // refraction index, constant in all three modes
@@ -175,24 +177,28 @@ float4 PSGlass(float4 pos : SV_Position) : SV_Target
     float r = min(uShape.z, min(h.x, h.y));
     // Rim width B (CSS px). Needed before the optics now, see the next comment.
     float B = max(4.0, min(uA.z, min(2.0 * h.x, 2.0 * h.y) * uA.y));
-    // TWO OUTLINES. A window's corner radius (8 px) is far smaller than the rim width B (about 30 px). ShapeDist's normal jumps from
-    // one side to the other along the corner diagonal, and inside a bent band that wide the jump is a visible seam. So the OPTICS (depth D,
-    // normal n, the read position, the rim shift) use a rounded box whose radius is at least B (still capped at the half sizes), where
-    // the normal turns smoothly, while the OUTLINE (coverage, the rim light's and the dark line's distance) keeps the true radius r. Pixels
-    // between the two outlines are outside the optical box, so D < 0 and t = saturate(D / B) = 0 there: the optics are continuous across
-    // that border. The rim light's DIRECTION (which side is lit) also comes from the smooth normal n: the outline's own normal flips along
-    // the corner diagonal, and with a light from one corner that showed as a faint 45 degree line, 4 of 255 at most, in the corners the
-    // light does not face.
+    // DEPTH AND DIRECTION. A window's corner radius (8 px) is far smaller than the rim width B (about 30 px).
+    //   - The DEPTH into the glass (how far from the edge: it sets how much a ray is bent) is the distance to the TRUE outline, radius r.
+    //     The bent band then has the same width all the way round and hugs the window's real corner.
+    //   - The DIRECTION a ray is bent in is the normal of a rounder box (radius at least B, capped at the half sizes). The true outline's
+    //     own normal jumps from one side to the other along the corner diagonal, a visible seam in a band that wide; the rounder box's
+    //     turns smoothly through the corner.
+    // (An earlier version took the depth from the rounder box too. The band then followed a 30 px curve inside an 8 px corner: a second,
+    // rounder outline showed inside the window and the wedge between the two read the backdrop from one far place.)
+    // The rim light's DIRECTION (which side is lit) also comes from the smooth normal: with the outline's own, a light from one corner
+    // showed a faint 45 degree line in the corners it does not face.
     float rO = min(max(r, B), min(h.x, h.y));
-    float2 n;
-    float d = ShapeDist(p, h, rO, n);
-    float D = -d;                                   // depth into the glass, CSS px
+    float2 n, nTrue;
+    ShapeDist(p, h, rO, n);
+    float D = -ShapeDist(p, h, r, nTrue);           // depth into the glass, CSS px
     float2 nE;                                      // outline: coverage, rim light and shadow use the outline's own centre (uSub.zw, zero in normal use); its normal is not used
     float2 pE = (pw - uSub.zw) / s;
     float DE = -ShapeDist(pE, h, r, nE);
     // STEP 7: edge coverage. Point mode: crisp, a pixel whose centre is 0.5 px or more inside is fully covered (the screenshot's clip).
     // Smooth mode: a ramp one pixel wide centred on the contour (the pixel's covered share), so the outline has no steps.
     float cov = (uExt.w > 0.5) ? saturate(DE * s * 2.0) : saturate(DE * s + 0.5);
+    // A window: the system cuts the corners itself, to its own curve. Cutting them here too leaves the pixels between the two curves empty.
+    if (uOpt.x > 0.5) cov = 1.0;
 
     // The read position without dispersion and its footprint (how far it moves per output pixel). Taken here, outside every branch,
     // for all pixels: screen derivatives are not allowed inside varying flow control. Outside the shape t = 0, so v stays continuous.

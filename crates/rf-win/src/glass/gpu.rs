@@ -54,6 +54,12 @@ pub(super) struct Look {
 
 impl Look {
     /// The one look the app ships. No outer shadow (DWM draws the window's own), no zoom, no colour fringe.
+    ///
+    /// The shape, frost and saturation are the "Regular" preset of the model. The grade and the tint are not: the preset lowers the
+    /// contrast to 0.81 (black becomes 24 of 255, white 229) and lays a 36 % dark or 50 % white tint over it, which is right for a
+    /// small panel but turned a whole window into a flat grey slab (dark theme: 26 over a black desktop, 158 over a white page). So
+    /// the dark glass keeps the contrast, dims what is behind it to 42 % and tints less (6 over black, 81 over white, colours stay
+    /// colours); the light glass keeps the brightness and tints more towards white (70 %: 182 over a black desktop instead of 138).
     pub(super) fn regular(dark: bool) -> Look {
         Look {
             depth: 1.188,
@@ -63,9 +69,9 @@ impl Look {
             dispersion: 0.0,
             blur: 10.351,
             saturate: 2.252,
-            lum: 0.991,
-            contrast: 0.813,
-            tint: if dark { [30.0 / 255.0, 30.0 / 255.0, 34.0 / 255.0, 0.36] } else { [1.0, 1.0, 1.0, 0.496] },
+            lum: if dark { 0.42 } else { 1.0 },
+            contrast: if dark { 1.0 } else { 0.9 },
+            tint: if dark { [20.0 / 255.0, 20.0 / 255.0, 24.0 / 255.0, 0.30] } else { [1.0, 1.0, 1.0, 0.70] },
             rim: 0.25,
             rim_width: 0.3,
             shade: 0.03,
@@ -78,7 +84,7 @@ impl Look {
 // Constant buffer
 // ---------------------------------------------------------------------------------------------------------------------------------
 
-/// Constant buffer shared by all passes; mirrors `cbuffer CB` in glass.hlsl field by field (eleven float4).
+/// Constant buffer shared by all passes; mirrors `cbuffer CB` in glass.hlsl field by field (twelve float4).
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub(super) struct Cb {
@@ -93,6 +99,7 @@ pub(super) struct Cb {
     pub pass: [f32; 4],
     pub ext: [f32; 4],
     pub sub: [f32; 4],
+    pub opt: [f32; 4],
 }
 
 /// What one draw needs to know besides the look.
@@ -107,6 +114,9 @@ pub(super) struct Geometry {
     pub scale: f32,
     /// Corner radius, device px (0 = square corners).
     pub radius_px: f32,
+    /// Whether the glass cuts its own corners out (a free-standing shape). A window does not: the system cuts a window's corners to its
+    /// own curve, and a second cut here that is not exactly the same leaves empty pixels between the two.
+    pub cut_corners: bool,
 }
 
 /// Backdrop kept around the glass in the region, device px: the rays reach inward only, the blur needs a little more.
@@ -131,6 +141,7 @@ fn make_cb(g: &Geometry, look: &Look, src: (u32, u32), region: &Region, check: b
         // x: non-finite check, y: debug 0, z: region pad, w: smooth sampling (never the point mode)
         ext: [check as u8 as f32, 0.0, pad as f32, 0.0],
         sub: [0.0; 4],
+        opt: [(!g.cut_corners) as u8 as f32, 0.0, 0.0, 0.0],
     }
 }
 
@@ -526,7 +537,7 @@ pub(super) fn render(src_bgra: &[u8], src_w: u32, src_h: u32, rect: (i32, i32, u
     if !(scale.is_finite() && scale > 0.0 && radius_px.is_finite() && radius_px >= 0.0) {
         return Err("scale must be positive and the radius not negative".into());
     }
-    let geo = Geometry { w, h, origin: (x, y), scale, radius_px };
+    let geo = Geometry { w, h, origin: (x, y), scale, radius_px, cut_corners: true };
     unsafe {
         let r = offscreen_renderer(force_warp)?;
         render_on(&r, src_bgra, src_w, src_h, &geo, look)

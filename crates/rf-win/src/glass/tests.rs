@@ -32,7 +32,7 @@ fn expected_centre(grey: u8, look: &Look) -> [f32; 3] {
 
 /// `gpu::render` at scale 1 with a look and the choice between hardware and WARP.
 fn render_with(src: &[u8], sw: u32, sh: u32, rect: (i32, i32, u32, u32), radius: f32, look: &Look, force_warp: bool) -> Result<Vec<u8>, String> {
-    let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: radius };
+    let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: radius, cut_corners: true };
     with_renderer(force_warp, |r| unsafe { gpu::render_on(r, src, sw, sh, &geo, look) })
 }
 
@@ -130,6 +130,12 @@ fn corner_is_cut_by_the_radius() {
         let square = render_with(&src, sw, sh, rect, 0.0, &look, warp).expect("render");
         assert_eq!(px(&square, rect.2, 0, 0)[3], 255, "corner pixel with radius 0 (warp {warp})");
         assert_eq!(px(&square, rect.2, rect.2 - 1, rect.3 - 1)[3], 255, "far corner with radius 0 (warp {warp})");
+        // a window: the system cuts the corners, the glass covers the whole rectangle whatever the radius of its rim line
+        let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: 8.0, cut_corners: false };
+        let window = with_renderer(warp, |r| unsafe { gpu::render_on(r, &src, sw, sh, &geo, &look) }).expect("render");
+        assert_eq!(px(&window, rect.2, 0, 0)[3], 255, "corner pixel of a window (warp {warp})");
+        assert_eq!(px(&window, rect.2, rect.2 - 1, 0)[3], 255, "top right corner pixel of a window (warp {warp})");
+        assert_eq!(px(&window, rect.2, rect.2 - 1, rect.3 - 1)[3], 255, "far corner pixel of a window (warp {warp})");
     }
 }
 
@@ -216,7 +222,7 @@ fn constant_buffer_matches_the_shader() {
     let body = &src[start..];
     let body = &body[body.find('{').unwrap() + 1..body.find("};").unwrap()];
     let fields = body.lines().filter(|l| l.trim_start().starts_with("float4 u")).count();
-    assert_eq!(fields, 11, "float4 fields of the shader's cbuffer");
+    assert_eq!(fields, 12, "float4 fields of the shader's cbuffer");
     assert_eq!(size_of::<Cb>() / 16, fields, "the Rust struct and the shader's cbuffer must have the same number of float4");
 }
 
@@ -238,7 +244,7 @@ fn fingerprint_follows_the_backdrop() {
         return;
     }
     let (sw, sh) = (700u32, 600u32);
-    let geo = Geometry { w: 300, h: 200, origin: (100, 100), scale: 1.0, radius_px: 8.0 };
+    let geo = Geometry { w: 300, h: 200, origin: (100, 100), scale: 1.0, radius_px: 8.0, cut_corners: true };
     let look = Look::regular(false);
     with_renderer(true, |r| unsafe {
         let region = Region::new(&r.g, geo.w, geo.h, region_pad(geo.scale)).expect("region");
@@ -350,35 +356,34 @@ fn frost_blurs_an_edge_by_the_look_s_sigma() {
     }
 }
 
-/// A window's corner radius (8 px) is smaller than the rim (about 30 px). The optics then use a rounder box (radius at least the rim
-/// width), so a window with radius 8 and one with radius 30 bend the backdrop identically; only the outline differs. A bend that took the
-/// true radius would show a seam along the corner diagonals and differ strongly in the corners.
+/// A window's corner radius (8 px) is smaller than the rim (about 30 px). How much a ray is bent depends on the distance to the TRUE
+/// outline, so the bent band hugs the real corner: on the corner's diagonal a point close to the corner is bent some pixels, a point
+/// further in less. (When the depth came from a rounder box, the point close to the corner lay outside that box and read the backdrop
+/// from about 28 px away, like everything else in the wedge between the two outlines; a second, rounder outline showed inside the
+/// window.) The DIRECTION of the bend still turns smoothly through the corner: beside the diagonal it is not straight away from the
+/// nearest edge.
 #[test]
-fn optics_do_not_depend_on_a_small_corner_radius() {
+fn the_bent_band_follows_the_true_corner() {
     if !can_draw() {
         return;
     }
     let (sw, sh) = (640u32, 400u32);
-    let src = picture(sw, sh, |x, y| [(x / 2) as u8, (y / 2) as u8, 60]);
-    let rect = (160, 60, 320u32, 280u32);
-    let (w, h) = (rect.2, rect.3);
+    // red rises by one level per pixel to the right
+    let src = picture(sw, sh, |x, _| [x.saturating_sub(80).min(255) as u8, 0, 60]);
+    let rect = (100, 60, 320u32, 280u32);
+    let flat = Look { depth: 0.0, ..bare_optics() };
     for warp in drivers() {
-        let small = render_with(&src, sw, sh, rect, 8.0, &bare_optics(), warp).expect("render");
-        let big = render_with(&src, sw, sh, rect, 30.0, &bare_optics(), warp).expect("render");
-        let mut worst = (0i32, 0u32, 0u32);
-        let mut compared = 0;
-        for y in 0..h {
-            for x in 0..w {
-                let (a, b) = (px(&small, w, x, y), px(&big, w, x, y));
-                if a[3] == 255 && b[3] == 255 {
-                    compared += 1;
-                    for c in 0..3 {
-                        worst = worst.max(((a[c] as i32 - b[c] as i32).abs(), x, y));
-                    }
-                }
-            }
-        }
-        assert!(compared > (w * h) as usize * 9 / 10, "too few pixels compared: {compared}");
-        assert!(worst.0 <= 1, "radius 8 and 30 differ by {} of 255 at x {} y {} (warp {warp}): the optics follow the true radius", worst.0, worst.1, worst.2);
+        let bent = render_with(&src, sw, sh, rect, 8.0, &bare_optics(), warp).expect("render");
+        let straight = render_with(&src, sw, sh, rect, 8.0, &flat, warp).expect("render");
+        // how many px further right (further in, seen from the top left corner) the bend reads at a point of the corner's diagonal
+        let shift = |d: u32| px(&bent, rect.2, d, d)[2] as i32 - px(&straight, rect.2, d, d)[2] as i32;
+        let (near, far) = (shift(6), shift(14));
+        // the model: depth 5.9 px -> 10.6 px along the diagonal = 7.5 px to the right; depth 14.5 px -> 2.2 px = 1.6 px to the right
+        assert!((4..=11).contains(&near), "6 px into the corner the bend is {near} px (warp {warp})");
+        assert!((0..=4).contains(&far) && far < near, "14 px into the corner the bend is {far} px, 6 px in it is {near} (warp {warp})");
+        // 20 px right, 10 px down of the corner: the nearest edge is the top one, straight away from it would not move the picture
+        // sideways at all. The smooth direction does: depth 10.5 px -> 4.7 px along (0.45, 0.89) = 2.1 px to the right.
+        let side = px(&bent, rect.2, 20, 10)[2] as i32 - px(&straight, rect.2, 20, 10)[2] as i32;
+        assert!((1..=4).contains(&side), "beside the diagonal the bend moves the picture {side} px sideways (warp {warp})");
     }
 }

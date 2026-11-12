@@ -17,7 +17,9 @@ use crossbeam_channel::{Receiver, RecvTimeoutError};
 use windows::Win32::Foundation::{HWND, LUID, POINT, RECT};
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::Win32::Graphics::DirectComposition::{DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual};
-use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+use windows::Win32::Graphics::Dwm::{
+    DWM_WINDOW_CORNER_PREFERENCE, DWMWA_CLOAKED, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUNDSMALL, DwmGetWindowAttribute,
+};
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
@@ -32,8 +34,9 @@ use super::capture::{MonError, Monitor, Pumped, is_device_lost, locate};
 use super::gpu::{Geometry, Gpu, Look, Region, Renderer, glass_pass, prep, region_pad};
 use super::{Cmd, GlassState};
 
-/// A window's corner radius, device px at 100 % (Windows 11 rounds its windows by 8 px).
+/// A window's corner radius, device px at 100 %: Windows 11 rounds its windows by 8 px, or by 4 px when asked for small corners.
 const WINDOW_RADIUS: f32 = 8.0;
+const WINDOW_RADIUS_SMALL: f32 = 4.0;
 /// How long the loop sleeps on the channel when no glass window is visible.
 const IDLE_WAIT: Duration = Duration::from_millis(250);
 /// AcquireNextFrame's wait on the first monitor with a duplication, and the sleep of a turn that waited nowhere.
@@ -160,6 +163,8 @@ struct WinGeo {
     dpi: u32,
     /// Maximized, or covering its whole monitor: square corners.
     square: bool,
+    /// The radius the system cuts this window's corners with, px at 100 % (0: it does not round, as on Windows 10).
+    round: f32,
     hmon: isize,
 }
 
@@ -168,7 +173,7 @@ impl WinGeo {
         self.dpi as f32 / 96.0
     }
     fn radius_px(&self) -> f32 {
-        if self.square { 0.0 } else { WINDOW_RADIUS * self.scale() }
+        if self.square { 0.0 } else { self.round * self.scale() }
     }
 }
 
@@ -210,7 +215,16 @@ unsafe fn measure(hwnd: isize) -> Seen {
         && origin.y <= mi.rcMonitor.top
         && origin.x + w as i32 >= mi.rcMonitor.right
         && origin.y + ht as i32 >= mi.rcMonitor.bottom;
-    Seen::Shown(WinGeo { x: origin.x, y: origin.y, w, h: ht, dpi, square: covers || IsZoomed(h).as_bool(), hmon: hmon.0 as isize })
+    // What the system does with the corners: the attribute does not exist before Windows 11 (the call fails: square corners there).
+    let mut pref = DWMWCP_DEFAULT;
+    let round = if DwmGetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &mut pref as *mut _ as *mut c_void, size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32).is_err() || pref == DWMWCP_DONOTROUND {
+        0.0
+    } else if pref == DWMWCP_ROUNDSMALL {
+        WINDOW_RADIUS_SMALL
+    } else {
+        WINDOW_RADIUS
+    };
+    Seen::Shown(WinGeo { x: origin.x, y: origin.y, w, h: ht, dpi, square: covers || IsZoomed(h).as_bool(), round, hmon: hmon.0 as isize })
 }
 
 /// What was last put on the screen for a window. A draw that would produce the same is not made.
@@ -285,7 +299,7 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     }
     let (Some(region), Some(target)) = (w.region.as_ref(), w.target.as_ref()) else { return Err(Fail::Window("lost its resources".into())) };
 
-    let g = Geometry { w: geo.w, h: geo.h, origin: (geo.x - mon.rect.left, geo.y - mon.rect.top), scale: geo.scale(), radius_px: geo.radius_px() };
+    let g = Geometry { w: geo.w, h: geo.h, origin: (geo.x - mon.rect.left, geo.y - mon.rect.top), scale: geo.scale(), radius_px: geo.radius_px(), cut_corners: false };
     let look = Look::regular(w.dark);
     let t0 = Instant::now();
     let prepared = prep(&gfx.r, region, mirror, &g, &look, false);
