@@ -324,7 +324,9 @@ impl DesktopView {
             return self.refuse(why, cx);
         }
         let Some(dir) = self.backend.as_ref().and_then(|b| b.target_dir()) else { return };
-        let task = cx.background_spawn(async move { if folder { fileops::new_folder(&dir) } else { fileops::new_text_file(&dir) } });
+        // (named in the interface language, as in a folder window)
+        let name = if folder { t!("Yeni klasör") } else { t!("Yeni metin belgesi") }.to_string();
+        let task = cx.background_spawn(async move { if folder { fileops::new_folder(&dir, &name) } else { fileops::new_text_file(&dir, &name) } });
         cx.spawn(async move |this, cx| {
             match task.await {
                 Ok(path) => {
