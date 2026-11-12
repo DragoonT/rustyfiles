@@ -26,7 +26,7 @@ pub fn location(app: &App) -> Option<PathBuf> {
     crate::sta::call(LOOK_LIMIT, move || target_of(&parsing)).flatten()
 }
 
-fn target_of(parsing: &str) -> Option<PathBuf> {
+pub(crate) fn target_of(parsing: &str) -> Option<PathBuf> {
     use windows::Win32::Foundation::PROPERTYKEY;
     use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
     use windows::Win32::UI::Shell::PropertiesSystem::{GPS_DEFAULT, IPropertyStore, SHGetPropertyStoreFromParsingName};
