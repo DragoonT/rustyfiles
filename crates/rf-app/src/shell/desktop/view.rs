@@ -221,20 +221,24 @@ fn rgb_of(c: Rgb) -> Hsla {
     gpui_kit::rgb((u32::from(c.0) << 16) | (u32::from(c.1) << 8) | u32::from(c.2)).into()
 }
 
-/// The offsets (in units of one scaled pixel) and strengths of the dark copies under a label's text: see `label_line`.
-const LABEL_HALO: [(f32, f32, f32); 12] = [
-    (-1.0, 0.0, 0.50),
-    (1.0, 0.0, 0.50),
-    (0.0, -1.0, 0.45),
-    (0.0, 1.0, 0.60),
-    (-1.0, -1.0, 0.35),
-    (1.0, -1.0, 0.35),
-    (-1.0, 1.0, 0.45),
-    (1.0, 1.0, 0.45),
-    (0.0, 2.0, 0.35),
-    (-2.0, 0.0, 0.18),
-    (2.0, 0.0, 0.18),
-    (0.0, -2.0, 0.14),
+/// The offsets (in units of one scaled pixel) and strengths of the dark copies under a label's text: see `label_line`. A soft
+/// shadow, not an outline: the weights fall off like a blur around a point one pixel below the text, so the dark is deepest right
+/// under the letters and gone three pixels out. (Eight strong copies one pixel away in every direction, tried first, read as a hard
+/// black stroke around every letter: the user's verdict was "çok kötü".)
+const LABEL_HALO: [(f32, f32, f32); 13] = [
+    (0.0, 1.0, 0.26),
+    (-1.0, 1.0, 0.17),
+    (1.0, 1.0, 0.17),
+    (0.0, 0.0, 0.17),
+    (0.0, 2.0, 0.17),
+    (-1.0, 0.0, 0.11),
+    (1.0, 0.0, 0.11),
+    (-1.0, 2.0, 0.11),
+    (1.0, 2.0, 0.11),
+    (-2.0, 1.0, 0.06),
+    (2.0, 1.0, 0.06),
+    (0.0, 3.0, 0.06),
+    (0.0, -1.0, 0.06),
 ];
 
 fn white(a: f32) -> Hsla {
@@ -762,11 +766,10 @@ impl DesktopView {
 
     // ---------- drawing ----------
 
-    /// One line of a label with the dark halo that keeps it readable on any wallpaper: the text, and under it copies of it in
-    /// translucent black one pixel away in all eight directions and two pixels away in four (GPUI has no text shadow of its own).
-    /// A shadow below alone was not enough: white names on a pale sky or on clouds could not be read (a user's report with a
-    /// picture). The copies add up to an outline that is dark right at the letters' edges and gone two pixels out, as Explorer's
-    /// desktop shadow reads. The desktop is drawn again only when something changes, so the copies cost nothing at rest.
+    /// One line of a label with the soft shadow that keeps it readable on any wallpaper: the text, and under it thirteen faint copies
+    /// of it in translucent black, spread like a blur (`LABEL_HALO`; GPUI has no text shadow of its own). Four copies below the text
+    /// alone were not enough: white names on a pale sky or on clouds could not be read (a user's report with a picture). The desktop
+    /// is drawn again only when something changes, so the copies cost nothing at rest.
     fn label_line(text: &str, w: f32, h: f32, font: f32, shadow: bool, scale: f32) -> Div {
         let one = |text: String| div().w(px(w)).h(px(h)).flex().justify_center().whitespace_nowrap().text_size(px(font)).line_height(px(h)).child(text);
         let mut line = div().relative().w(px(w)).h(px(h));
