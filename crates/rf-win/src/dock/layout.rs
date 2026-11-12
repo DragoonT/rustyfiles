@@ -61,6 +61,31 @@ pub const SEPARATOR_WIDTH: f32 = 1.0;
 /// it as big as the one below it, so a maximised window does not touch the dock. Logical px.
 pub const RESERVED_HEIGHT: f32 = MIDDLE_HEIGHT + 2.0 * MARGIN_BOTTOM;
 
+/// Room kept around every island's glass inside its window, logical px: the glass's anti aliased edge and the pixel the window region
+/// keeps beyond it must lie inside the window, and nothing more. This is all a window has by default, because of what the region does
+/// (see `hit`): the system shows nothing of a window outside its region, so room for a shadow would be paid for and never seen.
+pub const EDGE_MARGIN: f32 = 4.0;
+/// The middle island's room above its glass: an icon grown 1.55 times and standing 12 px above the island's bottom reaches 8 px over
+/// the glass's top edge, and the region keeps a pixel beyond the icon.
+pub const HEADROOM: f32 = 12.0;
+/// Room around every glass when the dock's shadow is switched on (`shadow_on`): the shadow falls 4 px down and up to 22 px out, and a
+/// little over. It also holds the middle island's headroom.
+pub const SHADOW_MARGIN: f32 = 28.0;
+/// What the middle island's window keeps beyond its side margin on each side, for the glass widening while icons grow, logical px.
+/// `magnify::the_widest_the_glass_ever_gets_fits_the_reserve` keeps it honest.
+pub const MIDDLE_RESERVE: f32 = 40.0;
+
+/// Whether the dock draws its soft shadow (`RUSTYFILES_DOCK_SHADOW=1`; off otherwise). WHY AN EXPERIMENT AND NOT A SETTING: the
+/// islands' windows have a window region so that the pointer passes through what is not the island's, and Windows' documentation
+/// says the region is where the system permits drawing; the shadow lies outside the region by design (a shadow that took clicks
+/// would be a dead band over the taskbar and over the windows above the dock). So the shadow is expected to be clipped away, and this
+/// switch lets the first live run see whether it is. It decides the windows' margins (`placements`) and the glass's shadow.
+pub fn shadow_on() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var("RUSTYFILES_DOCK_SHADOW").is_ok_and(|v| v == "1"))
+}
+
 /// Logical px to device px.
 pub fn px(logical: f32, scale: f32) -> i32 {
     (logical * scale).round() as i32
@@ -105,6 +130,68 @@ pub fn islands(work: Rect, scale: f32, widths: Widths) -> Islands {
     let x = centred.clamp(room_l, (room_r - w).max(room_l));
     let middle = Rect::from_xywh(x, bottom - mh, w, mh);
     Islands { left, middle, right }
+}
+
+/// An island's window and the glass inside it, device px, screen coordinates. The window is bigger than the glass: the margin holds the
+/// shadow and, for the middle island, what grows out of the glass and the room for it to widen. The margin is transparent and lets
+/// the pointer through (see `hit`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placement {
+    pub window: Rect,
+    /// The glass at rest: exactly the rectangle `islands` gave.
+    pub glass: Rect,
+}
+
+impl Placement {
+    /// Distances from the window's edges to the glass: left, top, right, bottom.
+    pub fn margins(&self) -> [i32; 4] {
+        [self.glass.left - self.window.left, self.glass.top - self.window.top, self.window.right - self.glass.right, self.window.bottom - self.glass.bottom]
+    }
+
+    /// The glass in the window's own coordinates: x, y, w, h.
+    pub fn glass_in_window(&self) -> [f32; 4] {
+        let [l, t, ..] = self.margins();
+        [l as f32, t as f32, self.glass.width() as f32, self.glass.height() as f32]
+    }
+}
+
+/// The three windows with their glass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Placements {
+    pub left: Placement,
+    pub middle: Placement,
+    pub right: Placement,
+}
+
+/// Grows `glass` by `margin` on every side but keeps it inside `monitor` (a margin that would stick out of the screen holds nothing
+/// that could be seen, and a window must not reach into the neighbouring monitor).
+fn inflate_within(glass: Rect, left: i32, right: i32, top: i32, bottom: i32, monitor: Rect) -> Rect {
+    Rect {
+        left: (glass.left - left).max(monitor.left.min(glass.left)),
+        top: (glass.top - top).max(monitor.top.min(glass.top)),
+        right: (glass.right + right).min(monitor.right.max(glass.right)),
+        bottom: (glass.bottom + bottom).min(monitor.bottom.max(glass.bottom)),
+    }
+}
+
+/// The windows for these glass rectangles: every glass keeps `EDGE_MARGIN` around it (`SHADOW_MARGIN` with `shadow`; less where the
+/// screen ends), the middle one `HEADROOM` above it for the icons that grow out of it and `MIDDLE_RESERVE` more on the left and the
+/// right. The glass stays exactly where `islands` put it, so the gaps, the bottom margin and the band the toolbar reserves are
+/// untouched: only the windows are bigger.
+pub fn placements(islands: &Islands, monitor: Rect, scale: f32, shadow: bool) -> Placements {
+    let edge = px(if shadow { SHADOW_MARGIN } else { EDGE_MARGIN }, scale);
+    let (head, reserve) = (px(if shadow { SHADOW_MARGIN } else { HEADROOM }, scale), px(MIDDLE_RESERVE, scale));
+    let make = |glass: Rect, side: i32, top: i32| Placement { window: inflate_within(glass, side, side, top, edge, monitor), glass };
+    Placements { left: make(islands.left, edge, edge), middle: make(islands.middle, edge + reserve, head), right: make(islands.right, edge, edge) }
+}
+
+/// How far the middle island's glass may widen on each side, device px: what its window reserves, and what the neighbouring islands
+/// leave (their least gap is kept), never negative.
+pub fn growth_room(islands: &Islands, scale: f32) -> i32 {
+    let reserve = px(MIDDLE_RESERVE, scale);
+    let gap = px(MIN_GAP, scale);
+    let (to_left, to_right) = (islands.middle.left - (islands.left.right + gap), (islands.right.left - gap) - islands.middle.right);
+    reserve.min(to_left).min(to_right).max(0)
 }
 
 /// The width of the middle island for these item sizes (logical px, icons only, in order) and this many thin separators: the
@@ -234,6 +321,98 @@ mod tests {
     fn reserved_band_is_the_dock_plus_its_margins() {
         assert_eq!(reserved_thickness(1.0), 92);
         assert_eq!(reserved_thickness(2.0), 184);
+    }
+
+    const MONITOR: Rect = Rect::new(0, 0, 1920, 1080);
+
+    #[test]
+    fn the_glass_stays_exactly_where_it_was_and_only_the_windows_grow() {
+        for shadow in [false, true] {
+            for (work, scale) in [(Rect::new(0, 0, 1920, 1032), 1.0), (Rect::new(100, 50, 2980, 1630), 1.5), (Rect::new(0, 0, 2560, 1440), 1.0)] {
+                let i = islands(work, scale, W);
+                let monitor = Rect::new(work.left.min(0), work.top.min(0), work.right, work.bottom + 48);
+                let p = placements(&i, monitor, scale, shadow);
+                assert_eq!((p.left.glass, p.middle.glass, p.right.glass), (i.left, i.middle, i.right), "the visible glass is where it always was");
+                for pl in [p.left, p.middle, p.right] {
+                    assert!(pl.window.covers(&pl.glass));
+                    assert_eq!(pl.glass_in_window()[2] as i32, pl.glass.width());
+                    let [l, t, r, b] = pl.margins();
+                    assert!(l >= 0 && t >= 0 && r >= 0 && b >= 0);
+                    assert_eq!(pl.window.width(), l + pl.glass.width() + r);
+                }
+                // the bottom of every glass is still 10 px above the work area's bottom
+                assert_eq!(p.middle.glass.bottom, work.bottom - px(MARGIN_BOTTOM, scale));
+            }
+        }
+    }
+
+    #[test]
+    fn the_windows_keep_a_little_room_and_the_middle_one_the_headroom_and_the_widening() {
+        let work = Rect::new(0, 0, 1920, 1032);
+        let i = islands(work, 1.0, W);
+        let p = placements(&i, MONITOR, 1.0, false);
+        // the left island is 12 px from the screen's edge: its window stops at the edge, the other sides keep the edge margin
+        assert_eq!(p.left.margins(), [4, 4, 4, 4]);
+        assert_eq!(p.right.margins(), [4, 4, 4, 4]);
+        // the middle: the edge margin and 40 for the widening on each side, 12 above (growing icons), 4 below
+        assert_eq!(p.middle.margins(), [44, 12, 44, 4]);
+        assert_eq!(p.middle.window, Rect::new(660 - 44, 1022 - 72 - 12, 1260 + 44, 1022 + 4));
+        // at 150 % the margins scale like everything else
+        let i15 = islands(Rect::new(0, 0, 2880, 1548), 1.5, W);
+        let p15 = placements(&i15, Rect::new(0, 0, 2880, 1620), 1.5, false);
+        assert_eq!(p15.middle.margins(), [66, 18, 66, 6]);
+        // with the shadow switched on every side keeps room for it, the middle one the reserve on top
+        let s = placements(&i, MONITOR, 1.0, true);
+        assert_eq!(s.left.margins(), [12, 28, 28, 28], "12 px from the screen's edge: the window stops there");
+        assert_eq!(s.right.margins(), [28, 28, 12, 28]);
+        assert_eq!(s.middle.margins(), [68, 28, 68, 28]);
+        // a window with a margin is much smaller than one that holds a shadow: what the default saves
+        let area = |r: Rect| r.width() * r.height();
+        assert!(area(p.left.window) * 2 < area(s.left.window), "{} vs {}", area(p.left.window), area(s.left.window));
+    }
+
+    #[test]
+    fn a_margin_never_reaches_past_the_monitor() {
+        // an auto-hiding taskbar: the work area is the monitor, the glass is 10 px above its bottom
+        let monitor = Rect::new(0, 0, 2560, 1440);
+        for shadow in [false, true] {
+            let p = placements(&islands(monitor, 1.0, W), monitor, 1.0, shadow);
+            for pl in [p.left, p.middle, p.right] {
+                assert!(monitor.covers(&pl.window), "{pl:?}");
+            }
+            let want = if shadow { 10 } else { 4 };
+            assert_eq!(p.middle.margins()[3], want.min(10), "the margin below is at most the 10 px the glass floats above the screen's edge");
+        }
+        // a monitor that is not at the origin
+        let second = Rect::new(-1920, 0, 0, 1080);
+        let q = placements(&islands(Rect::new(-1920, 0, 0, 1032), 1.0, W), second, 1.0, true);
+        assert!(second.covers(&q.left.window) && second.covers(&q.middle.window) && second.covers(&q.right.window));
+    }
+
+    #[test]
+    fn the_headroom_holds_the_biggest_icon_and_the_reserve_holds_the_widening() {
+        // an icon at 1.55 stands 12 px (the baseline) above the island's bottom: how far does it reach over the glass's top edge?
+        let over = 12.0 + ICON_REST * 1.55 - MIDDLE_HEIGHT;
+        assert!(over > 0.0 && over + 1.0 <= HEADROOM, "{over} px over the glass (and a pixel of the region's slack), the headroom is {HEADROOM}");
+        // the glass's edge and the region's slack fit the edge margin
+        const { assert!(EDGE_MARGIN >= 2.0 && HEADROOM <= SHADOW_MARGIN) };
+        // the shadow: 4 px down and 22 px of fall-off
+        const { assert!(SHADOW_MARGIN >= 4.0 + 22.0) };
+    }
+
+    #[test]
+    fn the_glass_widens_only_into_free_room() {
+        let i = islands(Rect::new(0, 0, 1920, 1032), 1.0, W);
+        assert_eq!(growth_room(&i, 1.0), 40, "plenty of room: what the window reserves");
+        assert_eq!(growth_room(&islands(Rect::new(0, 0, 2880, 1548), 1.5, W), 1.5), 60, "the reserve scales with the monitor");
+        // a squeezed middle island has no room to widen
+        let tight = islands(Rect::new(0, 0, 1000, 700), 1.0, W);
+        assert_eq!(growth_room(&tight, 1.0), 0);
+        // a little room is a little growth
+        let some = islands(Rect::new(0, 0, 1000, 700), 1.0, Widths { left: 330.0, middle: 280.0, right: 280.0 });
+        let room = growth_room(&some, 1.0);
+        assert_eq!(room, 10);
+        assert!(some.middle.left - room >= some.left.right + 8 && some.middle.right + room <= some.right.left - 8, "never closer than the least gap");
     }
 
     #[test]

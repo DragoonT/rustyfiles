@@ -1,4 +1,4 @@
-//! Tests of the look's settings (`LookParams`) and of the calmer rim of small pieces. The numbers are checked without a GPU; what the
+//! Tests of the look's settings (`LookParams`) and of the rim bound of small pieces. The numbers are checked without a GPU; what the
 //! numbers do to a picture goes through the offscreen path like the other drawing tests (skipped where `can_draw` says so).
 
 use super::gpu::{Look, LensLook};
@@ -146,34 +146,74 @@ fn the_light_lens_veil_stays_above_the_panes_at_every_tint() {
     }
 }
 
+/// The rule for small pieces: the rim band is bounded by the shape (at most a third of its short side) and NOTHING else is weakened, so
+/// an island has the same optics, frost, tint, saturation and rim light as a window. A shape of 160 px or more is the look itself.
 #[test]
-fn a_small_piece_gets_a_calmer_rim_and_a_window_does_not() {
+fn a_small_piece_gets_its_rim_bounded_by_its_size_and_a_window_does_not() {
+    use super::gpu::{RIM_BOUND_BELOW, rim_width};
     for dark in [false, true] {
         let base = Look::regular(dark, &LookParams::DEFAULT);
         // from 160 CSS px up: the look itself, to the bit (every window)
         for s in [160.0f32, 161.0, 400.0, 640.0, 1440.0, f32::INFINITY, f32::NAN] {
             assert!(base.sized(s) == base, "a shape of {s} px must not change");
         }
-        // 48 px and below: 40 % of the thickness, half the frost left at the edge; nothing else changes
-        for s in [48.0f32, 47.9, 30.0, 0.0, -5.0] {
+        // below: only the share of the short side the band may take changes; the thickness, the frost, the rim light, the tint and the
+        // saturation are the window's own
+        for s in [159.0f32, 104.0, 72.0, 48.0, 30.0, 0.0, -5.0] {
             let c = base.sized(s);
-            assert!((c.depth - base.depth * 0.4).abs() < 1e-6, "depth at {s}: {}", c.depth);
-            assert_eq!(c.rim_frost, 0.5, "rim_frost at {s}");
-            assert!(c == Look { depth: c.depth, rim_frost: 0.5, ..base });
+            assert_eq!(c.bezel, 1.0 / 3.0, "bezel at {s}");
+            assert!(c == Look { bezel: c.bezel, ..base }, "something besides the rim's share changed at {s}");
         }
-        // in between, straight lines: half way (104 px) is 70 % of the thickness and 0.31
-        let m = base.sized(104.0);
-        assert!((m.depth - base.depth * 0.7).abs() < 1e-6 && (m.rim_frost - 0.31).abs() < 1e-6, "{} {}", m.depth, m.rim_frost);
-        // and it only ever gets calmer as the shape shrinks
-        let mut last = base.sized(160.0);
-        for s in (0..160).rev() {
-            let c = base.sized(s as f32);
-            assert!(c.depth <= last.depth && c.rim_frost >= last.rim_frost, "not monotonic at {s}");
-            last = c;
+        // the band: a third of the short side for the dock's islands, the window's 44 px for a window, never wider than before
+        assert!((rim_width(&base.sized(48.0), 48.0) - 16.0).abs() < 1e-4);
+        assert!((rim_width(&base.sized(72.0), 72.0) - 24.0).abs() < 1e-4);
+        assert!((rim_width(&base.sized(640.0), 640.0) - 44.0).abs() < 1e-4);
+        assert!((rim_width(&base.sized(160.0), 160.0) - 44.0).abs() < 1e-4);
+        let mut last = 0.0f32;
+        for s in 1..400 {
+            let (small, old) = (rim_width(&base.sized(s as f32), s as f32), rim_width(&base, s as f32));
+            assert!(small <= old + 1e-4, "the bound only ever narrows the band ({s})");
+            assert!(s >= RIM_BOUND_BELOW as i32 || small <= (s as f32 / 3.0).max(4.0) + 1e-4, "a third of the short side at most ({s}): {small}");
+            assert!(small + 1e-4 >= last, "the band never gets narrower as the shape grows ({s})");
+            last = small;
         }
     }
     // the thickness setting still counts: 0 stays 0
     assert_eq!(Look::regular(true, &LookParams { refraction: 0.0, ..LookParams::DEFAULT }).sized(48.0).depth, 0.0);
+}
+
+/// Drawn: a 300 x 48 island keeps a clear centre band (a third of its height or more is not bent at all), its rim still bends the picture
+/// as the window's does (same thickness ratio), and a window-sized glass is the same picture with or without the rule.
+#[test]
+fn a_small_piece_keeps_a_clear_centre_and_a_bending_rim() {
+    if !can_draw() {
+        return;
+    }
+    let (sw, sh) = (640u32, 400u32);
+    // red rises by one level per 2 px DOWN, so the bend shows in the rows
+    let src = picture(sw, sh, |_, y| [(y.saturating_sub(60) / 2).min(255) as u8, 0, 60]);
+    let rect = (150, 120, 300u32, 48u32);
+    for warp in drivers() {
+        let window_rim = bare_optics();
+        let bounded = window_rim.sized(48.0);
+        let flat = Look { depth: 0.0, ..window_rim };
+        let draw = |l: &Look| render_with(&src, sw, sh, rect, 24.0, l, warp).expect("render");
+        let (a, b, f) = (draw(&window_rim), draw(&bounded), draw(&flat));
+        let x = rect.2 / 2;
+        // rows (of 48) at the middle of the island whose red is the straight picture's (within one level): the clear centre
+        let clear = |img: &[u8]| (0..rect.3).filter(|&y| (px(img, rect.2, x, y)[2] as i32 - px(&f, rect.2, x, y)[2] as i32).abs() <= 1).count();
+        let (with_window_rim, with_bounded) = (clear(&a), clear(&b));
+        assert!(with_bounded >= 14, "the bounded rim leaves only {with_bounded} of 48 rows clear (warp {warp})");
+        assert!(with_bounded > with_window_rim + 4, "the window's rim leaves {with_window_rim} rows clear, the bounded one {with_bounded}: no more room in the middle (warp {warp})");
+        // the rim bends: the first rows under the top edge read the picture from further in
+        let shift = |img: &[u8]| (1..8).map(|y| (px(img, rect.2, x, y)[2] as i32 - px(&f, rect.2, x, y)[2] as i32).abs()).max().unwrap_or(0);
+        assert!(shift(&b) >= 4, "the bounded rim does not bend (shift {}, warp {warp})", shift(&b));
+        // and a window-sized glass is the same picture with or without the rule
+        let big = (100, 40, 320u32, 280u32);
+        let w1 = render_with(&src, sw, sh, big, 8.0, &window_rim, warp).expect("render");
+        let w2 = render_with(&src, sw, sh, big, 8.0, &window_rim.sized(280.0), warp).expect("render");
+        assert!(w1 == w2, "a 280 px glass changed with the rule (warp {warp})");
+    }
 }
 
 /// `set_look` keeps the cut values for windows that come later and does nothing for the same value. (The only test that touches the
@@ -278,37 +318,5 @@ fn the_saturation_setting_strengthens_the_colours() {
         // factor 1.0 leaves the picture's own colours: 200 - 90 = 110
         assert!((zero - 110).abs() <= 2, "saturation 0 changed the colours: chroma {zero} (warp {warp})");
         assert!(zero < normal && normal < full, "chroma {zero} / {normal} / {full} must rise (warp {warp})");
-    }
-}
-
-/// Rule 2: a 300 x 48 piece with the rim of a window bends its edge like marble; with the calmer rim it bends visibly less. A window is
-/// above the size where the rule starts, so it is drawn with the very same look.
-#[test]
-fn a_small_piece_bends_its_edge_less_than_with_the_rim_of_a_window() {
-    if !can_draw() {
-        return;
-    }
-    let (sw, sh) = (640u32, 400u32);
-    // red rises by one level per 2 px to the right
-    let src = picture(sw, sh, |x, _| [(x.saturating_sub(40) / 2).min(255) as u8, 0, 60]);
-    let rect = (150, 120, 300u32, 48u32);
-    for warp in drivers() {
-        let full = bare_optics();
-        let calm = full.sized(48.0);
-        let flat = Look { depth: 0.0, ..full };
-        let draw = |l: &Look| render_with(&src, sw, sh, rect, 24.0, l, warp).expect("render");
-        let (a, b, f) = (draw(&full), draw(&calm), draw(&flat));
-        // the first 15 px inside the left end, half way down: the largest difference to the straight picture
-        let shift = |img: &[u8]| (1..16).map(|x| (px(img, rect.2, x, rect.3 / 2)[2] as i32 - px(&f, rect.2, x, rect.3 / 2)[2] as i32).abs()).max().unwrap_or(0);
-        let (strong, mild) = (shift(&a), shift(&b));
-        assert!(strong >= 8, "the rim of a window bends a 48 px piece by only {strong} levels (warp {warp})");
-        assert!(mild * 3 <= strong * 2, "the calmer rim bends {mild} levels, the window's {strong}: not visibly less (warp {warp})");
-        // the bending is still there, only calmer
-        assert!(mild >= 1, "the calmer rim bends nothing (warp {warp})");
-        // and a window-sized glass is the same picture with or without the rule
-        let big = (100, 40, 320u32, 280u32);
-        let w1 = render_with(&src, sw, sh, big, 8.0, &full, warp).expect("render");
-        let w2 = render_with(&src, sw, sh, big, 8.0, &full.sized(280.0), warp).expect("render");
-        assert!(w1 == w2, "a 280 px glass changed with the rule (warp {warp})");
     }
 }

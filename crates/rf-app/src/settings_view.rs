@@ -15,7 +15,7 @@ use crate::fluent_menu::{self, Item, Menu, MenuIcon};
 use crate::select_box::{Choice, select_box};
 use crate::i18n::Lang;
 use crate::settings::{
-    self, AnimPref, BackdropPref, ClickPref, DatePref, DefaultView, DeletePref, IdePref, RendererPref, Settings, StartupPref, ThemePref,
+    self, AnimPref, BackdropPref, ClickPref, DatePref, DefaultView, DeletePref, DockMagnify, IdePref, RendererPref, Settings, StartupPref, ThemePref,
 };
 use crate::t;
 use crate::look::config::LookSettings;
@@ -2296,6 +2296,19 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
             t!("Pencereler dock'un altına girmesin"),
             Some(t!("Büyütülmüş pencereler dock'un üstünde durur. Kapalıyken dock yalnızca pencerelerin üstünde yüzer.")),
             sw("dock-reserve", p, s.dock_reserve, |s, v| s.dock_reserve = v),
+        ),
+        card(
+            p,
+            L::ZoomIn,
+            t!("Simge büyütme"),
+            Some(t!("Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.")),
+            dropdown(
+                "dock-magnify",
+                p,
+                s.dock_magnify,
+                vec![(DockMagnify::Off, t!("Kapalı").into()), (DockMagnify::Subtle, t!("Hafif").into()), (DockMagnify::Full, t!("Tam").into())],
+                |s, v| s.dock_magnify = v,
+            ),
         ),
         card(
             p,

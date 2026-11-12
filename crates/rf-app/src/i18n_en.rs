@@ -1451,4 +1451,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Geri Dönüşüm Kutusu kapalı ya da bu dosya için fazla büyük", "The Recycle Bin is off or too small for this file"),
     ("Planlandıktan sonra değişti", "Changed since it was planned"),
     ("Bazı dosyalar atlandı", "Some files were skipped"),
+    ("Simge büyütme", "Icon magnification"),
+    ("Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.", "With the pointer over the dock the icons grow like the Mac's dock: Subtle up to 1.25 times, Full up to 1.55 times."),
+    ("Hafif", "Subtle"),
+    ("Tam", "Full"),
 ];

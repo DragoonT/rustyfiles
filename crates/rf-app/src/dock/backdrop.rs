@@ -1,5 +1,5 @@
-//! The glass behind one island: attaching it with the island's own radius and corner cutting, watching what the engine reports,
-//! telling the island when to paint its own fill instead, and trying again after a failure.
+//! The glass behind one island: attaching it with the island's own radius, its own rectangle inside the (larger) window and its shadow,
+//! watching what the engine reports, telling the island when to paint its own fill instead, and trying again after a failure.
 //!
 //! The decisions are in [`Machine`] (pure: the engine's report and the time are arguments); [`IslandGlass`] is the thin layer that
 //! makes the calls into `rf_win::glass`. It also holds the island's [`Tone`]: whether the foreground is light or dark, which follows
@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use std::time::Instant;
 
 use rf_win::dock::layout::RADIUS;
-use rf_win::glass::{GlassOptions, GlassState};
+use rf_win::glass::{GlassOptions, GlassState, Shadow};
 
 use super::look::Palette;
 use super::tone::Tone;
@@ -27,10 +27,20 @@ pub fn radius_px(scale: f32) -> f32 {
     RADIUS * scale.max(0.1)
 }
 
-/// The glass options of an island: its own radius and its own corners cut.
-pub fn options(dark: bool, scale: f32) -> GlassOptions {
-    GlassOptions { dark, radius_px: Some(radius_px(scale)), cut_corners: true }
+/// The glass options of an island: its own radius, its own corners cut, its own rectangle inside the window (`shape`: x, y, w, h in
+/// device px from the window's top left corner) and, only when the dock's shadow is switched on (`layout::shadow_on`: the window
+/// region is expected to clip it away, see `rf_win::dock::hit`), the soft shadow around it. The window is bigger than the glass;
+/// everything outside the shape is transparent.
+pub fn options(dark: bool, scale: f32, shape: [f32; 4]) -> GlassOptions {
+    GlassOptions { dark, radius_px: Some(radius_px(scale)), cut_corners: true, shape: Some(shape), shadow: shadow_on().then_some(Shadow::SOFT) }
 }
+
+fn shadow_on() -> bool {
+    rf_win::dock::layout::shadow_on()
+}
+
+/// Where an island's glass is until it is told: nowhere (it draws nothing), never the whole window for a moment.
+pub const NO_SHAPE: [f32; 4] = [0.0; 4];
 
 /// One island's glass. Shared (`Rc<RefCell<..>>`) between the island's view, which reads `fallback()` while it paints, and the host,
 /// which starts it, watches it and stops it.
@@ -40,6 +50,8 @@ pub struct IslandGlass {
     /// Light or dark foreground and glass tint (starts from the system theme).
     tone: Tone,
     scale: f32,
+    /// The glass's rectangle in the window, device px (see [`options`]).
+    shape: [f32; 4],
     /// The tint the engine was last given (`true` is the dark glass).
     sent_dark: bool,
     /// Whether the engine has been told about the window (and so must be told to let go of it).
@@ -48,7 +60,38 @@ pub struct IslandGlass {
 
 impl IslandGlass {
     pub fn new() -> IslandGlass {
-        IslandGlass { hwnd: 0, machine: Machine::default(), tone: Tone::new(true), scale: 1.0, sent_dark: true, attached: false }
+        IslandGlass { hwnd: 0, machine: Machine::default(), tone: Tone::new(true), scale: 1.0, shape: NO_SHAPE, sent_dark: true, attached: false }
+    }
+
+    /// The window handle (0 before [`IslandGlass::start`]).
+    pub fn hwnd(&self) -> isize {
+        self.hwnd
+    }
+
+    /// The options the engine holds for this island, or must hold: the tint it was last given, the scale, the shape as last told. The
+    /// tint (`poll_tone`, `sync`) and the shape (`set_shape`) change the SAME options value: every change of one is sent with the
+    /// current value of the other, so neither can undo the other.
+    fn engine_options(&self) -> GlassOptions {
+        options(self.sent_dark, self.scale, self.shape)
+    }
+
+    /// Where the glass is in the window (device px: x, y, w, h). Before the glass runs this is only remembered (it is what the glass
+    /// starts with); while it runs the engine is told, and only when it is something new: this is called for every frame of the
+    /// magnification, so it must cost nothing when nothing moved. The engine takes the change as one constant and one draw (only the
+    /// shape differs from the options it holds).
+    pub fn set_shape(&mut self, shape: [f32; 4]) {
+        if shape == self.shape {
+            return;
+        }
+        self.shape = shape;
+        if self.attached {
+            rf_win::glass::set_options(self.hwnd, self.engine_options());
+        }
+    }
+
+    /// Where the glass is in the window as last told (device px: x, y, w, h).
+    pub fn shape(&self) -> [f32; 4] {
+        self.shape
     }
 
     /// True while the island has to paint its own fill.
@@ -107,7 +150,7 @@ impl IslandGlass {
             return;
         }
         let dark = self.tone.glass_dark();
-        if rf_win::glass::attach_with(self.hwnd, options(dark, self.scale)) {
+        if rf_win::glass::attach_with(self.hwnd, options(dark, self.scale, self.shape)) {
             self.sent_dark = dark;
             self.attached = true;
         } else {
@@ -132,10 +175,9 @@ impl IslandGlass {
             return;
         }
         if scale_changed {
-            // the radius is in device px: it follows the DPI (this also carries the tint)
-            let tint = self.tone.glass_dark();
-            rf_win::glass::set_options(self.hwnd, options(tint, scale));
-            self.sent_dark = tint;
+            // the radius is in device px: it follows the DPI (this also carries the tint and the shape)
+            self.sent_dark = self.tone.glass_dark();
+            rf_win::glass::set_options(self.hwnd, self.engine_options());
         } else {
             self.send_tint();
         }
@@ -188,14 +230,56 @@ mod tests {
 
     #[test]
     fn an_island_uses_its_own_radius_and_cuts_its_own_corners() {
-        let o = options(true, 1.5);
+        let o = options(true, 1.5, [10.0, 10.0, 300.0, 72.0]);
         assert!(o.dark);
         assert_eq!(o.radius_px, Some(36.0));
         assert!(o.cut_corners);
-        assert!(!options(false, 1.0).dark);
+        assert!(!options(false, 1.0, NO_SHAPE).dark);
+        // its own rectangle inside the window and the dock's shadow: the window is bigger than the glass
+        assert_eq!(o.shape, Some([10.0, 10.0, 300.0, 72.0]));
+        assert_eq!(o.shadow, shadow_on().then_some(Shadow::SOFT), "no shadow unless the experiment is on (the region would clip it)");
         // a broken scale cannot make the radius zero or negative
         assert!(radius_px(0.0) > 0.0);
         assert!(radius_px(-3.0) > 0.0);
+    }
+
+    #[test]
+    fn the_glass_starts_nowhere_and_remembers_where_it_is_told_to_be() {
+        let mut g = IslandGlass::new();
+        // never the whole window while nothing has said where the glass is
+        assert_eq!(g.engine_options().shape, Some([0.0; 4]));
+        g.set_shape([12.0, 28.0, 330.0, 48.0]);
+        assert_eq!(g.engine_options().shape, Some([12.0, 28.0, 330.0, 48.0]));
+        // the same again changes nothing (it is called for every frame of the animation), and an unattached glass sends nothing
+        g.set_shape([12.0, 28.0, 330.0, 48.0]);
+        assert_eq!(g.shape(), [12.0, 28.0, 330.0, 48.0]);
+        assert_eq!(g.hwnd(), 0);
+    }
+
+    /// The tint and the shape are two changes of one options value. What a change of the shape sends carries the tint the engine
+    /// has, and what a change of the scale sends carries the shape: neither can undo the other.
+    #[test]
+    fn the_tint_and_the_shape_do_not_undo_each_other() {
+        let mut g = IslandGlass::new();
+        g.set_shape([12.0, 28.0, 330.0, 48.0]);
+        // the tone went across the line (the engine has the light glass), then the magnification moves the shape
+        g.sent_dark = false;
+        g.set_shape([8.0, 28.0, 340.0, 48.0]);
+        let o = g.engine_options();
+        assert!(!o.dark, "a new shape must not turn the tint back");
+        assert_eq!(o.shape, Some([8.0, 28.0, 340.0, 48.0]));
+        // and a new tint (or a new scale) keeps the shape
+        g.sent_dark = true;
+        g.scale = 2.0;
+        let o = g.engine_options();
+        assert!(o.dark);
+        assert_eq!(o.shape, Some([8.0, 28.0, 340.0, 48.0]));
+        assert_eq!(o.radius_px, Some(radius_px(2.0)));
+        // the options of a tint change and of a shape change differ in that one field only (the engine then takes the cheap path)
+        let before = g.engine_options();
+        g.set_shape([0.0, 28.0, 360.0, 48.0]);
+        let after = g.engine_options();
+        assert!(before.dark == after.dark && before.radius_px == after.radius_px && before.cut_corners == after.cut_corners && before.shape != after.shape);
     }
 
     #[test]

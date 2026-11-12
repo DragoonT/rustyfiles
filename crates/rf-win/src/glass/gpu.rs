@@ -5,7 +5,7 @@
 
 use std::ffi::c_void;
 
-use super::{LookParams, MAX_LENSES, luma};
+use super::{LookParams, MAX_LENSES, Shadow, luma};
 
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_IEEE_STRICTNESS, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
@@ -116,27 +116,33 @@ fn piece(v: f32, at: f32, lo: f32, def: f32, hi: f32) -> f32 {
     if v <= at { def + (def - lo) * (v / at - 1.0) } else { def + (hi - def) * ((v - at) / (100.0 - at)) }
 }
 
-/// A shape whose short side is this many CSS px or more is drawn with the rim as it is; below it the rim gets calmer.
-pub(super) const CALM_FROM: f32 = 160.0;
-/// At this short side (and below) the rim is at its calmest.
-pub(super) const CALM_FULL: f32 = 48.0;
-/// The thickness factor at `CALM_FULL`.
-const CALM_DEPTH: f32 = 0.40;
-/// The share of frost left at the edge at `CALM_FULL`.
-const CALM_RIM_FROST: f32 = 0.5;
+/// A shape whose short side is this many CSS px or more keeps the window's rim as it is: its band is capped by `max_bezel` (44 px)
+/// long before the shape's own size matters.
+pub(super) const RIM_BOUND_BELOW: f32 = 160.0;
+/// The share of a small shape's short side the rim band may take at most.
+pub(super) const RIM_SHARE_MAX: f32 = 1.0 / 3.0;
+
+/// The width of the rim band in CSS px for a glass of this short side (CSS px): what the shader works out, `max(4, min(max_bezel,
+/// short * bezel))`. Written down so that the rule can be tested without a picture.
+#[cfg(test)]
+pub(super) fn rim_width(look: &Look, short_side_css: f32) -> f32 {
+    4.0f32.max(look.max_bezel.min(short_side_css * look.bezel))
+}
 
 impl Look {
-    /// This look for a shape of the given short side (CSS px). The rim was tuned for a whole window; on a small piece (a dock island of
-    /// 48 or 72 px, a tile) the same rim bends the picture so hard that it looks like marble. From `CALM_FROM` down to `CALM_FULL` the
-    /// thickness falls to 40 % and the frost left at the edge rises to a half, in straight lines; below that it stays there. A shape
-    /// of `CALM_FROM` or more (every window) comes back unchanged.
+    /// This look for a shape of the given short side (CSS px). The rim was tuned for a whole window, where its band (a share of the
+    /// short side, at most 44 px) is a thin strip along the edge. On a small piece (a dock island of 48 or 72 px) the same share of the
+    /// short side (42 %) is nearly all of it: the bent band covered the whole island and the piece looked like marble, or, when the
+    /// rim was made weaker and frostier to cure that, like flat grey. What keeps the character of the glass is the optics, not
+    /// weakening them: the same thickness ratio, the same frost, the same rim light, and a band that is bounded by the shape, at most
+    /// a third of its short side, so that a clear, frosted centre is left. A shape of `RIM_BOUND_BELOW` or more (every window) comes
+    /// back unchanged, to the bit.
     pub(super) fn sized(self, short_side_css: f32) -> Look {
         // a number that is not a number also leaves the look alone
-        if short_side_css.is_nan() || short_side_css >= CALM_FROM {
+        if short_side_css.is_nan() || short_side_css >= RIM_BOUND_BELOW {
             return self;
         }
-        let u = ((short_side_css - CALM_FULL) / (CALM_FROM - CALM_FULL)).clamp(0.0, 1.0);
-        Look { depth: self.depth * (CALM_DEPTH + (1.0 - CALM_DEPTH) * u), rim_frost: self.rim_frost + (CALM_RIM_FROST - self.rim_frost) * (1.0 - u), ..self }
+        Look { bezel: self.bezel.min(RIM_SHARE_MAX), ..self }
     }
 
     /// The one look the app ships. No outer shadow (DWM draws the window's own), no zoom, no colour fringe. `p` is what the user set; with
@@ -266,6 +272,41 @@ pub(super) struct Geometry {
     /// Whether the glass cuts its own corners out (a free-standing shape). A window does not: the system cuts a window's corners to its
     /// own curve, and a second cut here that is not exactly the same leaves empty pixels between the two.
     pub cut_corners: bool,
+    /// The glass inside the target: x, y, w, h in device px from the target's top left corner. `None`: the glass is the whole target
+    /// (a window). With a shape everything outside it is transparent (but for the shadow), the outline, the rim, the depth and the
+    /// corners are the shape's, and the backdrop is read where it is on the screen whatever the shape does: moving or sizing the shape
+    /// changes one constant and no picture of the backdrop. A shape always cuts its own corners.
+    pub shape: Option<[f32; 4]>,
+    /// A soft shadow outside the shape (see [`Shadow`]); only for a glass that is not a whole window, which has the system's own.
+    pub shadow: Option<Shadow>,
+}
+
+impl Geometry {
+    /// The glass's rectangle in the target: the shape cut to the target (it cannot lie outside the window that holds it), else the whole
+    /// target. A shape that is not a number, or has no size once cut, has no area: nothing of it is drawn.
+    pub(super) fn glass_rect(&self) -> [f32; 4] {
+        match self.shape {
+            None => [0.0, 0.0, self.w as f32, self.h as f32],
+            Some(s) => clamp_rect(s, self.w as f32, self.h as f32),
+        }
+    }
+
+    /// From the window's centre to the glass's centre, device px: what the shader takes as the sub pixel placement of the glass. A
+    /// glass that is the whole window has none (exactly zero), so the numbers of a window do not change.
+    pub(super) fn centre_shift(&self) -> [f32; 2] {
+        let [x, y, w, h] = self.glass_rect();
+        [x + w / 2.0 - self.w as f32 / 2.0, y + h / 2.0 - self.h as f32 / 2.0]
+    }
+}
+
+/// `r` (x, y, w, h) cut to the rectangle 0, 0, `w`, `h`. Anything that is not a number, or lies outside, gives an empty rectangle.
+pub(super) fn clamp_rect(r: [f32; 4], w: f32, h: f32) -> [f32; 4] {
+    if !r.iter().all(|v| v.is_finite()) {
+        return [0.0; 4];
+    }
+    let (x0, y0) = (r[0].clamp(0.0, w), r[1].clamp(0.0, h));
+    let (x1, y1) = ((r[0] + r[2].max(0.0)).clamp(0.0, w), (r[1] + r[3].max(0.0)).clamp(0.0, h));
+    [x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0)]
 }
 
 /// Backdrop kept around the glass in the region, device px: the rays reach inward only, the blur needs a little more.
@@ -276,21 +317,25 @@ pub(super) fn region_pad(scale: f32) -> u32 {
 fn make_cb(g: &Geometry, look: &Look, src: (u32, u32), region: &Region, check: bool) -> Cb {
     let s = g.scale;
     let pad = region.pad;
+    let [_, _, gw, gh] = g.glass_rect();
+    let sub = g.centre_shift();
+    let sh = g.shadow.map_or([0.0; 3], |sh| [sh.opacity, sh.dy, sh.blur]);
     Cb {
         win: [g.w as f32, g.h as f32, region.w as f32, region.h as f32],
         reg: [(g.origin.0 - pad as i32) as f32, (g.origin.1 - pad as i32) as f32, src.0 as f32, src.1 as f32],
-        shape: [g.w as f32 / (2.0 * s), g.h as f32 / (2.0 * s), g.radius_px / s, s],
+        // (half sizes never quite zero: an empty shape then covers no pixel, instead of a division in the corner maths)
+        shape: [(gw / (2.0 * s)).max(1e-3), (gh / (2.0 * s)).max(1e-3), g.radius_px / s, s],
         a: [look.depth, look.bezel, look.max_bezel, look.zoom],
         b: [look.dispersion, look.blur, look.saturate, look.lum],
         c: [look.contrast, look.rim, look.rim_width, look.shade],
-        // alpha 0 = no outer shadow
-        d: [look.light, 0.0, 0.0, 0.0],
+        // y: the shadow's opacity at the outline (0 = none), z: its offset down and w: its reach, CSS px
+        d: [look.light, sh[0], sh[1], sh[2]],
         tint: look.tint,
         pass: [0.0; 4],
         // x: non-finite check, y: debug 0, z: region pad, w: smooth sampling (never the point mode)
         ext: [check as u8 as f32, 0.0, pad as f32, 0.0],
-        sub: [0.0; 4],
-        opt: [(!g.cut_corners) as u8 as f32, look.rim_frost, 0.0, 0.0],
+        sub: [sub[0], sub[1], 0.0, 0.0],
+        opt: [(!(g.cut_corners || g.shape.is_some())) as u8 as f32, look.rim_frost, 0.0, 0.0],
         // the lenses go in with `Prepared::set_lenses`; none until then
         ..Cb::default()
     }
@@ -629,39 +674,43 @@ impl Region {
     }
 
     /// A fingerprint of the backdrop as the glass will see it: one coarse level of the pyramid (the first at most 160 px wide), only the
-    /// part that belongs to this glass and its padding. Blocks until the GPU has finished the pyramid. The same bytes give the mean
-    /// brightness of the backdrop under the glass itself (see `luma.rs`), so knowing it costs nothing on the GPU.
-    pub(super) unsafe fn read_back(&self, g: &Gpu, glass_w: u32, glass_h: u32) -> R<Readback> {
+    /// part that belongs to this glass and its padding. `glass` is the glass's rectangle in the window (device px, see
+    /// [`Geometry::glass_rect`]): for a shape inside a larger window only what the SHAPE can see counts, so a change elsewhere in the
+    /// window's margin does not keep the glass drawing. Blocks until the GPU has finished the pyramid. The same bytes give the mean
+    /// brightness of the backdrop under the glass itself (see `luma.rs`), so knowing it costs nothing on the GPU. The hash and the
+    /// brightness are both about `glass`: one definition of "the texels under the glass" (`fingerprint_texels`, `luma::glass_texels`).
+    pub(super) unsafe fn read_back(&self, g: &Gpu, glass: [f32; 4]) -> R<Readback> {
         let l = self.guard_level;
         g.ctx.CopySubresourceRegion(&self.staging, 0, 0, 0, 0, &self.tex, l, None);
         let mut m = D3D11_MAPPED_SUBRESOURCE::default();
         g.ctx.Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut m))?;
         let (lw, lh) = ((self.w >> l).max(1), (self.h >> l).max(1));
-        // only the glass and its padding, rounded up to whole texels of this level
-        let used = |n: u32, full: u32| (((n + 2 * self.pad) + (1 << l) - 1) >> l).min(full);
-        let (uw, uh) = (used(glass_w, lw), used(glass_h, lh));
+        let (x0, x1, y0, y1) = fingerprint_texels(glass, self.pad, l, (lw, lh));
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for y in 0..uh {
-            let row = std::slice::from_raw_parts((m.pData as *const u8).add((y * m.RowPitch) as usize), (uw * 4) as usize);
+        for y in y0..y1 {
+            let row = std::slice::from_raw_parts((m.pData as *const u8).add((y * m.RowPitch) as usize + (x0 * 4) as usize), ((x1 - x0) * 4) as usize);
             let (words, _) = row.as_chunks::<4>();
             for px in words {
                 h = (h ^ u32::from_le_bytes(*px) as u64).wrapping_mul(0x0100_0000_01b3);
             }
         }
         // the glass's own texels, from the rows already in the cache: the block ends where the last row we need ends
-        let rect = luma::glass_texels(l, self.pad, glass_w, glass_h, lw, lh);
+        let rect = luma::glass_texels(l, self.pad, glass, lw, lh);
         let pitch = m.RowPitch as usize;
-        let len = pitch * (rect.3 as usize - 1) + rect.2 as usize * 4;
-        let block = std::slice::from_raw_parts(m.pData as *const u8, len);
-        let luma = luma::mean_luma(block, pitch, rect);
+        let luma = if rect.2 > rect.0 && rect.3 > rect.1 {
+            let len = pitch * (rect.3 as usize - 1) + rect.2 as usize * 4;
+            luma::mean_luma(std::slice::from_raw_parts(m.pData as *const u8, len), pitch, rect)
+        } else {
+            None
+        };
         g.ctx.Unmap(&self.staging, 0);
         Ok(Readback { hash: h, luma })
     }
 
     /// The fingerprint alone (what the loop guard compares).
     #[cfg(test)]
-    pub(super) unsafe fn fingerprint(&self, g: &Gpu, glass_w: u32, glass_h: u32) -> R<u64> {
-        Ok(self.read_back(g, glass_w, glass_h)?.hash)
+    pub(super) unsafe fn fingerprint(&self, g: &Gpu, glass: [f32; 4]) -> R<u64> {
+        Ok(self.read_back(g, glass)?.hash)
     }
 }
 
@@ -672,6 +721,22 @@ pub(super) struct Readback {
     pub hash: u64,
     /// The mean brightness (0 to 1) of the backdrop under the glass; `None` when the glass has no texel to read.
     pub luma: Option<f32>,
+}
+
+/// The texels of pyramid level `level` (of `size` texels) the loop guard hashes for a glass at `glass` (x, y, w, h in window px, the
+/// region's origin being `pad` px up and left of the window): the glass and its padding, rounded out to whole texels, as `x0..x1`,
+/// `y0..y1`. For a glass that is the whole window this starts at 0 and is the rectangle the guard always hashed.
+pub(super) fn fingerprint_texels(glass: [f32; 4], pad: u32, level: u32, size: (u32, u32)) -> (u32, u32, u32, u32) {
+    let step = (1u32 << level) as f32;
+    // window px x is region px x + pad; the glass's padded area starts at x - pad, which is region px x
+    let span = |start: f32, len: f32, full: u32| {
+        let lo = ((start.max(0.0) / step).floor() as u32).min(full);
+        let hi = (((start.max(0.0) + len + 2.0 * pad as f32) / step).ceil() as u32).min(full);
+        (lo, hi.max(lo))
+    };
+    let (x0, x1) = span(glass[0], glass[2], size.0);
+    let (y0, y1) = span(glass[1], glass[3], size.1);
+    (x0, x1, y0, y1)
 }
 
 fn fail() -> windows::core::Error {
@@ -778,7 +843,7 @@ pub(super) fn render(src_bgra: &[u8], src_w: u32, src_h: u32, rect: (i32, i32, u
 
 /// The geometry of a glass that cuts its own corners (the offscreen pictures; a window leaves that to the system).
 pub(super) fn free_standing(rect: (i32, i32, u32, u32), radius_px: f32, scale: f32) -> Geometry {
-    Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale, radius_px, cut_corners: true }
+    Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale, radius_px, cut_corners: true, shape: None, shadow: None }
 }
 
 /// The same for several pictures of one glass that differ in their lenses only: the backdrop is prepared once and one device is made.

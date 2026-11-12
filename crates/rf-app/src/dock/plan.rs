@@ -1,12 +1,14 @@
-//! The dock's arithmetic and decisions that need neither a window nor the system: how wide the side islands are, where the icons
-//! lie while one grows, which icon the pointer is over, which weather picture a code gets, how soon the weather is asked again.
-//! (The three rectangles, the hover animation, the click decision and the full-screen decision are in `rf_win::dock`.)
+//! The dock's arithmetic and decisions that need neither a window nor the system: how wide the side islands are, where the items of
+//! the middle island lie and what its window shows while the icons are magnified, which weather picture a code gets, how soon the
+//! weather is asked again. (The three rectangles and their windows, the magnification, the pointer region, the click decision and the
+//! full-screen decision are in `rf_win::dock`.)
 
 use std::time::Duration;
 
 use rf_win::dock::clock::ClockLines;
-use rf_win::dock::hover::{self, Slot};
-use rf_win::dock::layout::{DOCK_PADDING, ICON_GAP, ICON_REST, Rect, SEPARATOR_WIDTH};
+use rf_win::dock::hover::Slot;
+use rf_win::dock::layout::{ICON_REST, MIDDLE_HEIGHT, Rect, SEPARATOR_WIDTH};
+use rf_win::dock::magnify::{self, Frame};
 use rf_win::weather::Condition;
 
 // ---- the left island: [Windows logo] [search field] [weather]
@@ -69,64 +71,45 @@ pub fn middle_width_at_rest(icons: usize, separators: usize) -> f32 {
     rf_win::dock::layout::middle_width(&vec![ICON_REST; icons], separators)
 }
 
-/// The smallest gap two items are squeezed to while an icon grows.
-const MIN_GROWN_GAP: f32 = 2.0;
-
-/// Where each item lies (`(x, width)` in logical px from the island's left edge, padding included) while the icons have `icon_sizes`
-/// (one per [`Slot::Icon`]) inside an island that is `width` wide. The island does not change its width when an icon grows: the
-/// gaps between the items give way (down to 2 px), and only when even that is not enough all icons shrink together to fit. At rest
-/// the sizes are 44 px and the gaps 10 px, which is exactly `rf_win::dock::hover::slot_spans`.
-pub fn dock_layout(slots: &[Slot], icon_sizes: &[f32], width: f32) -> Vec<(f32, f32)> {
-    if slots.is_empty() {
-        return Vec::new();
-    }
-    let inner = (width - 2.0 * DOCK_PADDING).max(0.0);
-    let separators = slots.iter().filter(|s| **s == Slot::Separator).count();
-    let icon_total: f32 = icon_sizes.iter().sum();
-    let gaps = slots.len() - 1;
-    let fixed = icon_total + separators as f32 * SEPARATOR_WIDTH;
-    let (gap, k) = if gaps == 0 {
-        (0.0, if icon_total > inner && icon_total > 0.0 { inner / icon_total } else { 1.0 })
-    } else {
-        let gap = ((inner - fixed) / gaps as f32).min(ICON_GAP);
-        if gap >= MIN_GROWN_GAP {
-            (gap, 1.0)
-        } else {
-            // not even 2 px gaps fit: all icons give a little
-            let room = inner - separators as f32 * SEPARATOR_WIDTH - gaps as f32 * MIN_GROWN_GAP;
-            (MIN_GROWN_GAP, if icon_total > 0.0 { (room / icon_total).clamp(0.0, 1.0) } else { 1.0 })
-        }
-    };
-    let mut x = DOCK_PADDING;
-    let mut icon = 0usize;
-    let mut out = Vec::with_capacity(slots.len());
-    for (i, s) in slots.iter().enumerate() {
-        if i > 0 {
-            x += gap;
-        }
-        let w = match s {
-            Slot::Icon => {
-                let w = icon_sizes.get(icon).copied().unwrap_or(ICON_REST) * k;
-                icon += 1;
-                w
-            }
-            Slot::Separator => SEPARATOR_WIDTH,
-        };
-        out.push((x, w));
-        x += w;
-    }
-    out
+/// Where each slot lies at rest (`(x, width)` in logical px from the island's left edge, padding included) in an island that is
+/// `width` wide: 44 px icons with 10 px gaps, or, on a screen too narrow for that, the gaps and then the icons give way. This is
+/// `rf_win::dock::hover::slot_spans` whenever the island has its full width.
+pub fn rest_layout(slots: &[Slot], width: f32) -> Vec<(f32, f32)> {
+    let icons = slots.iter().filter(|s| **s == Slot::Icon).count();
+    magnify::fit(slots, &vec![ICON_REST; icons], width)
 }
 
-/// The icon the pointer is over, `x` logical px from the island's left edge. Judged against the icons AT REST, never against the
-/// growing ones: a grown icon moving under a still pointer would otherwise change the answer again and again (the dock would
-/// flicker). The gaps and the padding belong to the nearest icon, a separator to none.
-///
-/// `width` is the island's real width: when the screen is too narrow for it the icons lie closer (see [`dock_layout`]), and the
-/// pointer is judged against where they really are.
-pub fn hover_target(x: f32, slots: &[Slot], width: f32) -> Option<usize> {
-    let icons = slots.iter().filter(|s| **s == Slot::Icon).count();
-    hover::icon_at_spans(x, slots, &dock_layout(slots, &vec![ICON_REST; icons], width))
+/// One picture of the middle island, in LOGICAL px in the window's own coordinates (the window is bigger than the glass: `margins`
+/// are the distances from its edges to the glass at rest, left, top, right, bottom).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DockPicture {
+    /// The glass: x, y, w, h. It widens symmetrically around the rest island's centre while icons grow and its height never changes.
+    pub glass: [f32; 4],
+    /// Every slot: x, width (the icons stand on one baseline, the viewer places them from the bottom).
+    pub items: Vec<(f32, f32)>,
+    /// The boxes (x, y, w, h) of the icons that stand out over the glass's top edge; they are the island's too, for the pointer.
+    pub out_of_glass: Vec<[f32; 4]>,
+}
+
+/// The picture of a frame of the magnification. `baseline` is how far the icons' bottom edges are above the glass's bottom edge.
+pub fn picture(frame: &Frame, slots: &[Slot], margins: [f32; 4], baseline: f32) -> DockPicture {
+    let [ml, mt, ..] = margins;
+    let glass = [ml + frame.left, mt, frame.width, MIDDLE_HEIGHT];
+    let items: Vec<(f32, f32)> = frame.spans.iter().map(|&(x, w)| (ml + x, w)).collect();
+    let bottom = mt + MIDDLE_HEIGHT - baseline;
+    let out_of_glass = slots
+        .iter()
+        .zip(&items)
+        .filter(|(s, _)| **s == Slot::Icon)
+        .map(|(_, &(x, w))| [x, bottom - w, w, w])
+        .filter(|b| b[1] < mt)
+        .collect();
+    DockPicture { glass, items, out_of_glass }
+}
+
+/// Logical px to device px for a rectangle (x, y, w, h).
+pub fn to_device(r: [f32; 4], scale: f32) -> [f32; 4] {
+    r.map(|v| v * scale)
 }
 
 /// A window rectangle in device px as GPUI wants it: logical px (`x`, `y`, `w`, `h`) at this scale.
@@ -135,9 +118,9 @@ pub fn logical(r: Rect, scale: f32) -> (f32, f32, f32, f32) {
     (r.left as f32 / s, r.top as f32 / s, r.width() as f32 / s, r.height() as f32 / s)
 }
 
-/// How long the animation setting allows the hover grow to take.
+/// How long the animation setting allows the magnification to come in and go out.
 pub fn hover_duration(animations: bool) -> u32 {
-    if animations { hover::DURATION_MS } else { 0 }
+    if animations { magnify::FADE_MS } else { 0 }
 }
 
 // ---- weather
@@ -209,9 +192,10 @@ pub fn icon_key(src: &rf_win::dock::IconSource) -> String {
     format!("{src:?}")
 }
 
-/// The size to ask the shell for, in device px: the biggest an icon ever gets (56 logical px), so growing never enlarges a bitmap.
+/// The size to ask the shell for, in device px: the biggest an icon ever gets (44 logical px grown by the strongest magnification, 1.55
+/// times), so it is sharp when it is big and is only ever scaled DOWN, never enlarged.
 pub fn icon_request_px(scale: f32) -> u32 {
-    ((hover::GROWN * scale.max(1.0)).ceil() as u32).clamp(16, 512)
+    ((ICON_REST * magnify::MAX_PEAK * scale.max(1.0)).ceil() as u32).clamp(16, 512)
 }
 
 /// The letter a placeholder shows until (or instead of) the app's icon.
@@ -255,10 +239,9 @@ mod tests {
     #[test]
     fn at_rest_the_layout_is_the_one_rf_win_hit_tests() {
         let s = slots(5, Some(3));
-        let sizes = vec![ICON_REST; 5];
         let width = middle_width_at_rest(5, 1);
-        let mine = dock_layout(&s, &sizes, width);
-        let theirs = slot_spans(&s, &sizes);
+        let mine = rest_layout(&s, width);
+        let theirs = slot_spans(&s, &[ICON_REST; 5]);
         assert_eq!(mine.len(), theirs.len());
         for (a, b) in mine.iter().zip(&theirs) {
             assert!((a.0 - b.0).abs() < 0.001 && (a.1 - b.1).abs() < 0.001, "{a:?} vs {b:?}");
@@ -266,84 +249,64 @@ mod tests {
     }
 
     #[test]
-    fn a_growing_icon_takes_its_room_from_the_gaps_and_the_island_keeps_its_width() {
-        let s = slots(8, Some(6));
-        let width = middle_width_at_rest(8, 1);
-        for hovered in 0..8 {
-            let sizes = hover::target_sizes(8, Some(hovered));
-            let spans = dock_layout(&s, &sizes, width);
-            let (x, w) = *spans.last().unwrap();
-            assert!(x + w <= width - DOCK_PADDING + 0.01, "icon {hovered}: the last item ends at {} of {}", x + w, width - DOCK_PADDING);
-            assert_eq!(spans[0].0, DOCK_PADDING);
-            // no two items overlap, and no gap is below the least
-            for pair in spans.windows(2) {
-                assert!(pair[1].0 - (pair[0].0 + pair[0].1) >= MIN_GROWN_GAP - 0.01);
-            }
-        }
-    }
-
-    #[test]
-    fn the_hovered_icon_really_is_bigger_in_the_layout() {
-        let s = slots(6, Some(4));
-        let width = middle_width_at_rest(6, 1);
-        let sizes = hover::target_sizes(6, Some(2));
-        let spans = dock_layout(&s, &sizes, width);
-        assert_eq!(spans[2].1, hover::GROWN);
-        assert_eq!(spans[1].1, hover::NEIGHBOUR);
-        assert_eq!(spans[3].1, hover::NEIGHBOUR);
-        assert_eq!(spans[0].1, ICON_REST);
-    }
-
-    #[test]
     fn a_nearly_empty_dock_shrinks_its_icons_rather_than_overflow() {
-        // the places only: two icons and the separator
+        // one icon alone in an island too narrow for it: it shrinks to the room it has
+        let one = rest_layout(&[Slot::Icon], 40.0);
+        assert!(one[0].1 <= 16.0 + 0.01, "{one:?}");
+        // the places only: two icons and the separator, in their own width
         let s = slots(2, Some(0));
-        let width = middle_width_at_rest(2, 1);
-        let sizes = hover::target_sizes(2, Some(0)); // 56 + 50 > what 44 + 44 and two 10 px gaps leave
-        let spans = dock_layout(&s, &sizes, width);
-        let (x, w) = *spans.last().unwrap();
-        assert!(x + w <= width - DOCK_PADDING + 0.01);
-        // one icon alone: it shrinks to the room it has
-        let one = dock_layout(&[Slot::Icon], &[56.0], middle_width_at_rest(1, 0));
-        assert!(one[0].1 <= ICON_REST + 0.01, "{one:?}");
+        let w = middle_width_at_rest(2, 1);
+        let spans = rest_layout(&s, w);
+        let (x, ww) = *spans.last().unwrap();
+        assert!(x + ww <= w - rf_win::dock::layout::DOCK_PADDING + 0.01);
     }
 
     #[test]
     fn nothing_to_lay_out() {
-        assert!(dock_layout(&[], &[], 100.0).is_empty());
-        assert_eq!(hover_target(10.0, &[], 100.0), None);
+        assert!(rest_layout(&[], 100.0).is_empty());
     }
 
+    /// The island is narrower than its items want (the side islands and the screen leave it less): they still lie inside it.
     #[test]
-    fn the_pointer_is_judged_against_the_icons_at_rest() {
-        let s = slots(4, None);
-        let w = middle_width_at_rest(4, 0);
-        // padding 12, icons 44 + 10 gap: icon 0 is 12..56, icon 1 66..110
-        assert_eq!(hover_target(0.0, &s, w), Some(0), "the padding belongs to the first icon");
-        assert_eq!(hover_target(30.0, &s, w), Some(0));
-        assert_eq!(hover_target(80.0, &s, w), Some(1));
-        assert_eq!(hover_target(1000.0, &s, w), Some(3), "past the end belongs to the last icon");
-        // the separator is nobody's
-        let with_sep = slots(2, Some(1));
-        let sep = DOCK_PADDING + ICON_REST + ICON_GAP; // the separator's left edge
-        assert_eq!(hover_target(sep + 0.2, &with_sep, middle_width_at_rest(2, 1)), None);
-    }
-
-    #[test]
-    fn in_a_squeezed_island_the_icons_and_the_pointer_agree() {
+    fn in_a_squeezed_island_the_icons_lie_inside_it() {
         // 8 icons need 12 + 8*44 + 7*10 + 12 = 446 px; the screen leaves only 300
         let s = slots(8, None);
-        let squeezed = 300.0;
-        let spans = dock_layout(&s, &vec![ICON_REST; 8], squeezed);
+        let spans = rest_layout(&s, 300.0);
         let (last_x, last_w) = *spans.last().unwrap();
-        assert!(last_x + last_w <= squeezed - DOCK_PADDING + 0.01, "every icon is inside the window: {spans:?}");
-        // the pointer over the middle of each drawn icon finds that icon
-        for (i, &(x, w)) in spans.iter().enumerate() {
-            assert_eq!(hover_target(x + w / 2.0, &s, squeezed), Some(i), "icon {i}");
+        assert!(last_x + last_w <= 300.0 - rf_win::dock::layout::DOCK_PADDING + 0.01, "every icon is inside the window: {spans:?}");
+    }
+
+    /// One picture of the dock: the glass is the rest island plus what the magnification adds on both sides, its height is the
+    /// island's; the items are in the window's coordinates; the icons that stand out of the glass are listed for the pointer.
+    #[test]
+    fn a_picture_of_the_dock_is_in_the_windows_coordinates() {
+        let s = slots(7, None);
+        let w = middle_width_at_rest(7, 0);
+        let rest = rest_layout(&s, w);
+        let margins = [68.0, 28.0, 68.0, 28.0];
+        let baseline = 12.0;
+        // at rest: the glass is the island, nothing stands out
+        let at_rest = picture(&Frame::at_rest(&rest, w), &s, margins, baseline);
+        assert_eq!(at_rest.glass, [68.0, 28.0, w, 72.0]);
+        assert!(at_rest.out_of_glass.is_empty());
+        assert_eq!(at_rest.items[0], (68.0 + rest[0].0, 44.0));
+        // the pointer on the middle icon: wider glass, centred on the island's centre, an icon out of the top
+        let centre = rest[3].0 + rest[3].1 / 2.0;
+        let f = magnify::frame(&s, &rest, w, centre, 1.0, magnify::Strength::Full, w + 80.0);
+        let pic = picture(&f, &s, margins, baseline);
+        assert!(pic.glass[2] > w && pic.glass[3] == 72.0);
+        assert!((pic.glass[0] + pic.glass[2] / 2.0 - (68.0 + w / 2.0)).abs() < 0.01, "symmetric around the rest island's centre");
+        assert!(!pic.out_of_glass.is_empty());
+        for b in &pic.out_of_glass {
+            assert!(b[1] < 28.0, "only icons over the glass's top edge");
+            assert_eq!(b[1] + b[3], 28.0 + 72.0 - baseline, "standing on the baseline");
+            assert!(b[1] >= 0.0, "inside the window's headroom: {b:?}");
         }
-        // with the full width the same x finds an earlier icon: the answer depends on the real width
-        let (x7, w7) = spans[7];
-        assert_ne!(hover_target(x7 + w7 / 2.0, &s, middle_width_at_rest(8, 0)), Some(7));
+        // the biggest icon: 8.2 px over the glass
+        let big = pic.out_of_glass.iter().map(|b| b[3]).fold(0.0, f32::max);
+        assert!((big - 44.0 * 1.55).abs() < 0.01);
+        // the device rectangle at 150 %
+        assert_eq!(to_device([10.0, 20.0, 30.0, 40.0], 1.5), [15.0, 30.0, 45.0, 60.0]);
     }
 
     #[test]
@@ -356,7 +319,7 @@ mod tests {
 
     #[test]
     fn the_animation_setting_turns_the_grow_into_a_jump() {
-        assert_eq!(hover_duration(true), 120);
+        assert_eq!(hover_duration(true), 160);
         assert_eq!(hover_duration(false), 0);
     }
 
@@ -395,10 +358,16 @@ mod tests {
 
     #[test]
     fn icons_are_asked_for_at_the_biggest_size_they_get() {
-        assert_eq!(icon_request_px(1.0), 56);
-        assert_eq!(icon_request_px(1.5), 84);
-        assert_eq!(icon_request_px(0.0), 56);
+        // 44 px grown 1.55 times: 68.2, rounded up
+        assert_eq!(icon_request_px(1.0), 69);
+        assert_eq!(icon_request_px(1.5), 103);
+        assert_eq!(icon_request_px(2.0), 137);
+        assert_eq!(icon_request_px(0.0), 69);
         assert_eq!(icon_request_px(100.0), 512);
+        // never smaller than an icon at the biggest size is wide at this scale
+        for scale in [1.0f32, 1.25, 1.5, 1.75, 2.0, 3.0] {
+            assert!(icon_request_px(scale) as f32 >= ICON_REST * magnify::MAX_PEAK * scale - 0.001);
+        }
     }
 
     #[test]
