@@ -54,6 +54,19 @@ struct Cover {
     /// The click areas of the icons, in client pixels, and whether the view has said anything yet.
     hot: Vec<Rect>,
     known: bool,
+    /// The outer rectangle the window is to have (set by `place`): the procedure lets nobody give it another one. The toolkit set
+    /// the window's size again after the desktop's own menu had closed, as if the window still had the invisible resize frame that
+    /// `prepare` takes away: it came out 16 px wider and 8 px taller than its place and 8 px left and 4 px up of it (measured:
+    /// 2576x1447 at -8,-4 on a 2560x1440 monitor), the content looked shifted with grey bands at the right and bottom, and the dock
+    /// took the oversized window for a full-screen program and hid.
+    want: Option<Rect>,
+}
+
+/// What a size or position the system is about to apply to a cover window becomes: nothing changes when the window has no place
+/// yet or the change does not touch the rectangle; otherwise the rectangle is the window's own place, whatever was asked.
+pub fn guarded_rect(want: Option<Rect>, moves: bool, sizes: bool, asked: Rect) -> Option<Rect> {
+    let want = want?;
+    ((moves || sizes) && asked != want).then_some(want)
 }
 
 static COVERS: Mutex<Vec<Cover>> = Mutex::new(Vec::new());
@@ -155,6 +168,18 @@ unsafe extern "system" fn cover_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
                     Verdict::KeepOrder => pos.flags = windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS(pos.flags.0 | SWP_NOZORDER.0),
                     Verdict::InsertAfter(after) => pos.hwndInsertAfter = HWND(after as *mut _),
                 }
+                // the rectangle is the window's own place, whoever asks for another (see `Cover::want`)
+                let want = covers().iter().find(|c| c.hwnd == key).and_then(|c| c.want);
+                let (moves, sizes) = (pos.flags.0 & SWP_NOMOVE.0 == 0, pos.flags.0 & SWP_NOSIZE.0 == 0);
+                let (x, y) = if moves { (pos.x, pos.y) } else { want.map_or((pos.x, pos.y), |w| (w.left, w.top)) };
+                let (cx, cy) = if sizes { (pos.cx, pos.cy) } else { want.map_or((pos.cx, pos.cy), |w| (w.width(), w.height())) };
+                if let Some(w) = guarded_rect(want, moves, sizes, Rect::new(x, y, x + cx, y + cy)) {
+                    pos.x = w.left;
+                    pos.y = w.top;
+                    pos.cx = w.width();
+                    pos.cy = w.height();
+                    pos.flags = windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS(pos.flags.0 & !(SWP_NOMOVE.0 | SWP_NOSIZE.0));
+                }
             }
         }
         WM_MOUSEACTIVATE => {
@@ -224,7 +249,7 @@ pub fn prepare(hwnd: isize) -> anyhow::Result<()> {
             if old == 0 {
                 anyhow::bail!("the window procedure of {hwnd:#x} could not be replaced");
             }
-            covers().push(Cover { hwnd, prev: old, hot: Vec::new(), known: false });
+            covers().push(Cover { hwnd, prev: old, hot: Vec::new(), known: false, want: None });
         }
     }
     Ok(())
@@ -238,6 +263,10 @@ pub fn place(hwnd: isize, monitor: Rect) -> bool {
         return false;
     }
     let want = cover_rect(monitor);
+    // (the procedure's guard is told the new place first, or it would hold the window at the old one)
+    if let Some(c) = covers().iter_mut().find(|c| c.hwnd == hwnd) {
+        c.want = Some(want);
+    }
     let o = outer_for_client(want, crate::dock::panel::frame_insets(hwnd));
     // HWND_TOP is only what is asked: the procedure turns it into "directly above the desktop"
     let ok = unsafe { SetWindowPos(hwnd_of(hwnd), Some(HWND_TOP), o.left, o.top, o.width().max(1), o.height().max(1), SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW).is_ok() };
@@ -431,6 +460,20 @@ impl Drop for ZWatch {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_cover_window_is_given_no_rectangle_but_its_own() {
+        let own = Rect::new(0, 0, 2560, 1439);
+        // the toolkit's resize after the menu closed: 8 px out at the sides, 4 px up and down
+        assert_eq!(guarded_rect(Some(own), true, true, Rect::new(-8, -4, 2568, 1443)), Some(own));
+        // a move alone, a size alone
+        assert_eq!(guarded_rect(Some(own), true, false, Rect::new(10, 0, 2570, 1439)), Some(own));
+        assert_eq!(guarded_rect(Some(own), false, true, Rect::new(0, 0, 2560, 1440)), Some(own));
+        // its own place, a change of the order only, and a window that has no place yet are left alone
+        assert_eq!(guarded_rect(Some(own), true, true, own), None);
+        assert_eq!(guarded_rect(Some(own), false, false, Rect::new(5, 5, 50, 50)), None);
+        assert_eq!(guarded_rect(None, true, true, Rect::new(-8, -4, 2568, 1443)), None);
+    }
+
     use super::*;
 
     #[test]
