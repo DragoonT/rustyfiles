@@ -421,8 +421,8 @@ fn open_waiting(cx: &mut App) {
 }
 
 /// Where a panel's own content stands: inside the grown glass when it grows, else it is the window.
-fn content_of(grown: Option<Rect>, panel_rect: Rect, side: Side) -> Rect {
-    grown.map_or(panel_rect, |g| grow_panels::content_rect(g, panel_rect, Corner::from(side)))
+fn content_of(id: PanelId, grown: Option<Rect>, panel_rect: Rect, side: Side) -> Rect {
+    grown.map_or(panel_rect, |g| grow_panels::content_rect_in(g, panel_rect, Corner::from(side), id != OVERFLOW))
 }
 
 /// Whether the open panel is dark: the tone of the island it sits above at this moment decides (the island follows what is behind its
@@ -457,7 +457,7 @@ fn open_panel(id: PanelId, cx: &mut App) {
         grow_host::abort(cx);
     }
     let rect = grown.unwrap_or(panel_rect);
-    let content = content_of(grown, panel_rect, side);
+    let content = content_of(id, grown, panel_rect, side);
     // another panel is open: it goes at once (no easing: this one takes its place)
     if let Some(o) = other {
         put_away_now(o, cx);
@@ -504,7 +504,7 @@ fn open_panel(id: PanelId, cx: &mut App) {
     {
         let p = cx.global_mut::<PanelHost>();
         p.rect = rect;
-        p.content = content_of(grown, panel_rect, side);
+        p.content = content_of(id, grown, panel_rect, side);
     }
     // show, bring to the front, then glass (in this order: the engine attaches to a window that is on the screen)
     let h = hooks.clone();
@@ -602,7 +602,7 @@ fn refit(id: PanelId, size: Option<(f32, f32)>, cx: &mut App) {
         grow_host::prepare(grow_host::Prep { id, cfg, side, island_glass: glass, panel: panel_rect, hwnd, island, dark, scale }, cx)
     });
     let rect = grown.unwrap_or(panel_rect);
-    let content = content_of(grown, panel_rect, side);
+    let content = content_of(id, grown, panel_rect, side);
     let p = cx.global::<PanelHost>();
     if p.rect == rect && p.content == content {
         return;

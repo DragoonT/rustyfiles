@@ -54,6 +54,10 @@ const MIN_MOVE: f32 = 0.25;
 /// How often the taskbar's pins are read again (they change when the user pins or unpins in Windows).
 const PINS_EVERY: Duration = Duration::from_secs(20);
 
+/// How much of an icon's width is taken off each side while a button is down on it, and how opaque it is then.
+const PRESS_DIP: f32 = 0.07;
+const PRESS_DIM: f32 = 0.78;
+
 pub struct MiddleIsland {
     glass: Rc<RefCell<IslandGlass>>,
     pins: Vec<PinnedApp>,
@@ -86,6 +90,9 @@ pub struct MiddleIsland {
     /// goes up, so the icon that was pressed is still under the pointer when the press ends and the click is not lost to the bell
     /// moving the icons about (a click is a press and a release on the same icon).
     frozen: Option<(f32, f32)>,
+    /// The icon a button is down on: it is drawn a little smaller and dimmer until the button is up, so a press can be seen (a user's
+    /// report: "tıkladım mı tıklamadım mı anlayamıyorum").
+    pressed_ix: Option<usize>,
     /// A refresh is running; a change that arrives meanwhile makes it run once more.
     refreshing: bool,
     dirty: bool,
@@ -158,6 +165,7 @@ impl MiddleIsland {
             t0: Instant::now(),
             reported: 0.0,
             frozen: None,
+            pressed_ix: None,
             seen_order: Vec::new(),
             refreshing: false,
             dirty: false,
@@ -367,7 +375,16 @@ impl MiddleIsland {
     }
 
     fn released(&mut self, cx: &mut Context<Self>) {
-        if self.frozen.take().is_some() {
+        let was_pressed = self.pressed_ix.take().is_some();
+        if self.frozen.take().is_some() || was_pressed {
+            cx.notify();
+        }
+    }
+
+    /// A button went down on the icon `ix`: it dips until the button is up (`released`).
+    fn item_pressed(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.pressed_ix != Some(ix) {
+            self.pressed_ix = Some(ix);
             cx.notify();
         }
     }
@@ -606,7 +623,8 @@ impl Render for MiddleIsland {
                         .w(u(w))
                         .h(u(w))
                         .cursor_pointer()
-                        .child(picture)
+                        // (pressed: the picture a little smaller and dimmer, in place; the cell and the running mark do not move)
+                        .child(if self.pressed_ix == Some(ix) { div().size_full().p(u(w * PRESS_DIP)).opacity(PRESS_DIM).child(picture).into_any_element() } else { picture })
                         .when(running, |d| {
                             let (dw, dh) = look::running_dot_size(in_front);
                             // the mark stays under its icon: it is the icon's child, and the icons stand on one baseline
@@ -621,6 +639,7 @@ impl Render for MiddleIsland {
                                     .bg(pal.running_dot(in_front).hsla()),
                             )
                         })
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |me, _, _, cx| me.item_pressed(ix, cx)))
                         .on_click(cx.listener(move |me, _, _, cx| me.click(ix, cx)))
                         .on_hover(cx.listener(move |me, on: &bool, _, cx| me.item_hover(ix, *on, cx)))
                         .on_mouse_up(MouseButton::Right, cx.listener(move |me, _, _, cx| me.right_click(ix, cx)))

@@ -359,7 +359,7 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
     let grown = spec.grown;
     let extra = grown.bottom - p.panel.bottom;
     // (the Start panel is as wide as its glass; a narrow panel of the right island is lined up with the island's right edge in a glass as wide as the island)
-    let content = grow_panels::content_rect(grown, p.panel, Corner::from(p.side));
+    let content = grow_panels::content_rect_in(grown, p.panel, Corner::from(p.side), p.id != super::panel::OVERFLOW);
     let row = (p.cfg.stays == Stays::Logo).then(|| grow_row::bottom_row(p.island_glass, grown, unit, p.scale));
     let animate = crate::settings::animations();
     let now = backdrop::now_ms();

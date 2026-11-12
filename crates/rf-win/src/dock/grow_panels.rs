@@ -106,6 +106,19 @@ pub fn content_rect(grown: Rect, panel: Rect, corner: Corner) -> Rect {
     Rect::from_xywh(left, panel.top, panel.width(), panel.height())
 }
 
+/// [`content_rect`] for a panel whose content can take more room (every panel but the narrow overflow one, `fills`): a glass that is
+/// only a LITTLE wider than the panel gives the panel its whole width. The island grows by a few tray icons, and a 360 px control
+/// centre lined up with the corner of a 400 px glass left an empty band down its other side, which read as the content having
+/// slipped (a user's report with a picture). "A little" is up to a quarter of the panel's width; beyond that the panel keeps its size
+/// at the corner.
+pub fn content_rect_in(grown: Rect, panel: Rect, corner: Corner, fills: bool) -> Rect {
+    let spare = grown.width() - panel.width();
+    if fills && spare > 0 && spare * 4 <= panel.width() {
+        return Rect::from_xywh(grown.left, panel.top, grown.width(), panel.height());
+    }
+    content_rect(grown, panel, corner)
+}
+
 /// What the dock knows of the panels at one moment: the open one and the one waiting for its turn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Seen {
@@ -157,6 +170,22 @@ impl CloseSeqs {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_glass_a_little_wider_than_the_panel_gives_the_panel_its_whole_width() {
+        // the control centre (360) in a glass as wide as an island that grew to 400: no empty band at the left
+        let grown = Rect::from_xywh(2160, 900, 400, 540);
+        let panel = Rect::from_xywh(2200, 900, 360, 470);
+        assert_eq!(content_rect_in(grown, panel, Corner::BottomRight, true), Rect::from_xywh(2160, 900, 400, 470));
+        // exactly a quarter wider still fills; the same glass and panel: nothing changes
+        assert_eq!(content_rect_in(Rect::from_xywh(0, 0, 450, 500), Rect::from_xywh(90, 0, 360, 400), Corner::BottomRight, true).width(), 450);
+        assert_eq!(content_rect_in(Rect::from_xywh(0, 0, 360, 500), Rect::from_xywh(0, 0, 360, 400), Corner::BottomRight, true), Rect::from_xywh(0, 0, 360, 400));
+        // the overflow panel never fills, however little wider its glass is
+        assert_eq!(content_rect_in(Rect::from_xywh(0, 0, 272, 300), Rect::from_xywh(40, 0, 232, 230), Corner::BottomRight, false), Rect::from_xywh(40, 0, 232, 230));
+        // a narrow panel in a much wider glass keeps its size at the island's corner
+        assert_eq!(content_rect_in(Rect::from_xywh(2160, 900, 400, 300), Rect::from_xywh(2400, 900, 160, 230), Corner::BottomRight, true), Rect::from_xywh(2400, 900, 160, 230));
+        assert_eq!(content_rect_in(Rect::from_xywh(0, 900, 400, 300), Rect::from_xywh(0, 900, 160, 230), Corner::BottomLeft, true), Rect::from_xywh(0, 900, 160, 230));
+    }
+
     use super::*;
     use crate::dock::grow::Spec;
     use crate::dock::layout::{self, Widths};
