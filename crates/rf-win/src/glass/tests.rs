@@ -23,7 +23,7 @@ pub(super) fn px(img: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
 
 /// What a uniform grey source must become in the middle of the glass, computed on the CPU from the look's numbers: saturation does nothing
 /// to a grey, then the contrast / lum transfer, then the tint. (Far from the edge the rim light and the dark line have faded to nothing.)
-fn expected_centre(grey: u8, look: &Look) -> [f32; 3] {
+pub(super) fn expected_centre(grey: u8, look: &Look) -> [f32; 3] {
     let g = grey as f32 / 255.0;
     let c = (g * (look.lum * look.contrast) + 0.5 * (1.0 - look.contrast)).clamp(0.0, 1.0);
     let t = look.tint;
@@ -31,7 +31,7 @@ fn expected_centre(grey: u8, look: &Look) -> [f32; 3] {
 }
 
 /// `gpu::render` at scale 1 with a look and the choice between hardware and WARP.
-fn render_with(src: &[u8], sw: u32, sh: u32, rect: (i32, i32, u32, u32), radius: f32, look: &Look, force_warp: bool) -> Result<Vec<u8>, String> {
+pub(super) fn render_with(src: &[u8], sw: u32, sh: u32, rect: (i32, i32, u32, u32), radius: f32, look: &Look, force_warp: bool) -> Result<Vec<u8>, String> {
     let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: radius, cut_corners: true };
     with_renderer(force_warp, |r| unsafe { gpu::render_on(r, src, sw, sh, &geo, look) })
 }
@@ -93,7 +93,7 @@ fn uniform_grey_centre_is_grade_plus_tint() {
         for warp in drivers() {
             for grey in [60u8, 140, 220] {
                 let src = picture(sw, sh, |_, _| [grey; 3]);
-                let look = Look::regular(dark);
+                let look = Look::regular(dark, &LookParams::DEFAULT);
                 let out = render_with(&src, sw, sh, rect, 8.0, &look, warp).expect("render");
                 assert_eq!(out.len(), (rect.2 * rect.3 * 4) as usize);
                 let p = px(&out, rect.2, rect.2 / 2, rect.3 / 2);
@@ -122,7 +122,7 @@ fn corner_is_cut_by_the_radius() {
     let rect = (20, 20, 260u32, 200u32);
     let src = picture(sw, sh, |x, y| [(x % 251) as u8, (y % 241) as u8, 90]);
     for warp in drivers() {
-        let look = Look::regular(false);
+        let look = Look::regular(false, &LookParams::DEFAULT);
         let round = render_with(&src, sw, sh, rect, 8.0, &look, warp).expect("render");
         assert_eq!(px(&round, rect.2, 0, 0)[3], 0, "corner pixel with radius 8 (warp {warp})");
         assert_eq!(px(&round, rect.2, rect.2 / 2, rect.3 / 2)[3], 255, "centre pixel (warp {warp})");
@@ -162,7 +162,7 @@ fn striped_source_has_no_non_finite_pixel() {
     for dark in [false, true] {
         for warp in drivers() {
             for radius in [8.0f32, 0.0] {
-                let out = render_with(&src, sw, sh, rect, radius, &Look::regular(dark), warp).expect("render");
+                let out = render_with(&src, sw, sh, rect, radius, &Look::regular(dark, &LookParams::DEFAULT), warp).expect("render");
                 // the shader's marker for a NaN or an infinity is opaque magenta
                 let bad = out.as_chunks::<4>().0.iter().filter(|p| **p == [255, 0, 255, 255]).count();
                 assert_eq!(bad, 0, "non-finite pixels (dark {dark}, warp {warp}, radius {radius})");
@@ -182,7 +182,7 @@ fn symmetric_source_gives_symmetric_picture() {
     // level the frost reads. The rim light has a direction (the top left is lit), so it is switched off here: what is checked is the
     // optics, the frost and the outline.
     let rect = (160, 60, 320u32, 280u32);
-    let mut look = Look::regular(false);
+    let mut look = Look::regular(false, &LookParams::DEFAULT);
     look.rim = 0.0;
     look.shade = 0.0;
     for warp in drivers() {
@@ -263,7 +263,7 @@ fn fingerprint_follows_the_backdrop() {
     }
     let (sw, sh) = (700u32, 600u32);
     let geo = Geometry { w: 300, h: 200, origin: (100, 100), scale: 1.0, radius_px: 8.0, cut_corners: true };
-    let look = Look::regular(false);
+    let look = Look::regular(false, &LookParams::DEFAULT);
     with_renderer(true, |r| unsafe {
         let region = Region::new(&r.g, geo.w, geo.h, region_pad(geo.scale)).expect("region");
         let base = picture(sw, sh, |x, y| [(x / 5 % 256) as u8, (y / 5 % 256) as u8, 40]);
@@ -307,8 +307,8 @@ fn bad_arguments_are_errors_not_panics() {
 }
 
 /// A look that shows the optics and nothing else: no frost, no grade, no tint, no rim light, no dark line.
-fn bare_optics() -> Look {
-    let mut l = Look::regular(false);
+pub(super) fn bare_optics() -> Look {
+    let mut l = Look::regular(false, &LookParams::DEFAULT);
     l.blur = 0.0;
     l.saturate = 1.0;
     l.lum = 1.0;
@@ -346,7 +346,7 @@ fn rim_bends_the_backdrop_and_the_middle_does_not() {
 }
 
 /// The width of the transition of a vertical step edge in the middle of the glass, in px between 10 % and 90 % of the step.
-fn step_width(out: &[u8], w: u32, y: u32) -> u32 {
+pub(super) fn step_width(out: &[u8], w: u32, y: u32) -> u32 {
     let row: Vec<f32> = (0..w).map(|x| px(out, w, x, y)[1] as f32).collect();
     let (lo, hi) = (row[2], row[w as usize - 3]);
     let at = |frac: f32| row.iter().position(|&v| v >= lo + (hi - lo) * frac).unwrap_or(0) as u32;
@@ -364,7 +364,7 @@ fn frost_blurs_an_edge_by_the_look_s_sigma() {
     let src = picture(sw, sh, |x, _| if x < 320 { [20; 3] } else { [230; 3] });
     let rect = (120, 60, 400u32, 280u32);
     let mut frosted = bare_optics();
-    frosted.blur = Look::regular(false).blur;
+    frosted.blur = Look::regular(false, &LookParams::DEFAULT).blur;
     for warp in drivers() {
         let sharp = render_with(&src, sw, sh, rect, 8.0, &bare_optics(), warp).expect("render");
         let soft = render_with(&src, sw, sh, rect, 8.0, &frosted, warp).expect("render");

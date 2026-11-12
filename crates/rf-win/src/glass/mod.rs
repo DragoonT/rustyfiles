@@ -8,7 +8,12 @@
 //!
 //! Optical model and presets after tomacco/amazing-glass (MIT); the shader was written from numbers and formulas, no code is copied.
 //!
-//! LENSES. On top of a window's glass the engine can draw up to `MAX_LENSES` lenses (the selection pill of a list): clear, sharp pieces
+//! THE LOOK. Four numbers the user can set (`LookParams`: frost, tint, refraction, saturation; the fifth setting, the app's own surface
+//! wash, is the app's business) change the glass of every window at once and for windows attached later ([`set_look`]); the numbers
+//! behind each value are in `gpu.rs` (`Look::regular`). A small piece of glass (a dock island, a tile) is drawn with a calmer rim than a
+//! window (`Look::sized`).
+//!
+//! LENSES. On top of a window's glass the engine can draw up to `MAX_LENSES` lenses (the selection pill of a list, a tab): clear, sharp pieces
 //! of the same glass with their own rim, light and shadow, drawn by the same pixel shader in the same pass ([`set_lens`], `lens.rs` for
 //! the slots and fades, `spring.rs` for the slide). The app's own icons and text are drawn by GPUI's scene on top of them. While a lens
 //! moves or fades the engine draws once per display refresh; a lens at rest costs nothing more than the glass itself.
@@ -36,6 +41,8 @@ mod spring;
 #[cfg(test)]
 mod lens_tests;
 #[cfg(test)]
+mod look_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -59,8 +66,46 @@ pub enum GlassState {
     Failed(String),
 }
 
-/// How many lenses a window can have at once (slots 0 to 3). Keep equal to `MAX_LENSES` in glass.hlsl.
-pub const MAX_LENSES: usize = 4;
+/// How many lenses a window can have at once (slots 0 to 7). Keep equal to `MAX_LENSES` in glass.hlsl.
+pub const MAX_LENSES: usize = 8;
+
+/// What the user can set about the look of the glass, each from 0 to 100 (values outside are cut to that, a value that is not a number
+/// is the default). Each one moves a few numbers of the optical model; the default is the look the app shipped with, so a setting that
+/// is not touched changes nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LookParams {
+    /// The blur: 0 is clear glass, 100 a deviation of 20 CSS px (the default is 10.35 px).
+    pub frost: f32,
+    /// How much of the theme's tone lies over the picture and, in the dark theme, how much it is dimmed: 0 none, 100 about twice the
+    /// default.
+    pub tint: f32,
+    /// The thickness of the rim: 0 no bending at the edges, 100 one and a half times the default.
+    pub refraction: f32,
+    /// 0 keeps the picture's own colours, 100 makes them three times as strong.
+    pub saturation: f32,
+}
+
+impl LookParams {
+    /// The shipped look.
+    pub const DEFAULT: LookParams = LookParams { frost: 52.0, tint: 50.0, refraction: 67.0, saturation: 62.0 };
+
+    /// The same with every value in 0..=100 (a value that is not a number becomes the default one).
+    pub fn clamped(self) -> LookParams {
+        let c = |v: f32, d: f32| if v.is_nan() { d } else { v.clamp(0.0, 100.0) };
+        LookParams {
+            frost: c(self.frost, Self::DEFAULT.frost),
+            tint: c(self.tint, Self::DEFAULT.tint),
+            refraction: c(self.refraction, Self::DEFAULT.refraction),
+            saturation: c(self.saturation, Self::DEFAULT.saturation),
+        }
+    }
+}
+
+impl Default for LookParams {
+    fn default() -> LookParams {
+        LookParams::DEFAULT
+    }
+}
 
 /// A lens: a piece of clear glass on the window's glass (the selection pill of a list). All coordinates are DEVICE px relative to the
 /// window's client area.
@@ -82,6 +127,8 @@ pub(crate) enum Cmd {
     SetDark { hwnd: isize, dark: bool },
     Detach { hwnd: isize },
     SetLens { hwnd: isize, slot: u8, lens: Option<LensSpec>, animate: bool },
+    /// The process-wide look changed (`set_look`): every window draws again.
+    LookChanged,
 }
 
 /// What the callers see. The engine thread updates it through `set_state`, `fail` and `forget`.
@@ -91,6 +138,8 @@ static ENGINE: Mutex<Option<Sender<Cmd>>> = Mutex::new(None);
 /// What the app last asked for in each lens slot, so the same call made again (the UI draws many times a second) sends nothing. An absent
 /// entry is the same as `None`. Cleared for a window when its glass starts, ends or fails.
 static LENSES_SENT: Mutex<BTreeMap<(isize, u8), LensSpec>> = Mutex::new(BTreeMap::new());
+/// The look of the glass, one value for the whole process: the engine reads it at every draw, so a window attached later has it too.
+static LOOK: Mutex<LookParams> = Mutex::new(LookParams::DEFAULT);
 /// Other windows of ours (menus, flyouts, the Properties window, the preview pane's host) that asked to stay out of the screen capture.
 /// The exclusion only exists while some window has glass: it is applied when the first one gets it and lifted when the last one lets go,
 /// so a window that outlives the glass does not stay invisible to screenshots and screen sharing.
@@ -110,6 +159,10 @@ fn lenses_sent() -> std::sync::MutexGuard<'static, BTreeMap<(isize, u8), LensSpe
 
 fn forget_lenses(hwnd: isize) {
     lenses_sent().retain(|&(h, _), _| h != hwnd);
+}
+
+fn look_guard() -> std::sync::MutexGuard<'static, LookParams> {
+    LOOK.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 fn extras() -> std::sync::MutexGuard<'static, BTreeSet<isize>> {
@@ -316,6 +369,27 @@ pub fn set_lens(hwnd: isize, slot: u8, lens: Option<LensSpec>, animate: bool) {
     send_if_running(Cmd::SetLens { hwnd, slot, lens, animate });
 }
 
+/// Sets the look of the glass for every window that has it and for windows that get it later. The values are cut to 0..=100. Every glass
+/// window is drawn again once; calling it with what is set already does nothing. Cheap from any thread, so a slider may call it for
+/// every step of a drag.
+pub fn set_look(params: LookParams) {
+    let params = params.clamped();
+    {
+        let mut cur = look_guard();
+        if *cur == params {
+            return;
+        }
+        *cur = params;
+    }
+    // without a running engine nothing is drawn; the thread that starts later reads the value itself
+    send_if_running(Cmd::LookChanged);
+}
+
+/// The look set by [`set_look`] (the default until then).
+pub fn look() -> LookParams {
+    *look_guard()
+}
+
 /// What the window's glass is doing now.
 pub fn state(hwnd: isize) -> GlassState {
     states().get(&hwnd).cloned().unwrap_or(GlassState::Off)
@@ -356,13 +430,23 @@ pub fn exclude_from_capture(hwnd: isize, on: bool) {
 
 /// Draws the same glass the live path draws, through the same renderer code, over a picture the caller gives, into a private texture,
 /// and returns its pixels as premultiplied BGRA, `rect` sized. Creates no window and no swap chain; tries a hardware device first and
-/// falls back to WARP (a CI runner has no GPU).
+/// falls back to WARP (a CI runner has no GPU). The look is the default one ([`LookParams::DEFAULT`]), not the process-wide one. A
+/// rectangle whose short side is under 160 CSS px gets the calmer rim of a small piece, as a small piece does in a window; every larger one
+/// (every window) is drawn with the look as it is. [`render_offscreen_look`] with `calm_small = false` draws a small piece with the rim of a window.
 ///
 /// `src_bgra` is `src_w` x `src_h` tightly packed BGRA8. `rect` is `(x, y, w, h)` of the glass in picture pixels (the part of it outside the
 /// picture reads the picture's edge pixels). `radius_px` is the corner radius in device pixels, `scale` the device pixels per CSS pixel
 /// (the window's dpi / 96).
 pub fn render_offscreen(src_bgra: &[u8], src_w: u32, src_h: u32, rect: (i32, i32, u32, u32), radius_px: f32, scale: f32, dark: bool) -> Result<Vec<u8>, String> {
-    gpu::render(src_bgra, src_w, src_h, rect, radius_px, scale, &gpu::Opts { look: gpu::Look::regular(dark), force_warp: false })
+    let look = shot_look(dark, &LookParams::DEFAULT, true, rect, scale);
+    gpu::render(src_bgra, src_w, src_h, rect, radius_px, scale, &gpu::Opts { look, force_warp: false })
+}
+
+/// The look of an offscreen picture: the settings' numbers, and for a small piece the calmer rim (`calm_small`; a window is above the
+/// size where that starts, so for it the flag changes nothing).
+fn shot_look(dark: bool, params: &LookParams, calm_small: bool, rect: (i32, i32, u32, u32), scale: f32) -> gpu::Look {
+    let look = gpu::Look::regular(dark, params);
+    if calm_small { look.sized(rect.2.min(rect.3) as f32 / scale) } else { look }
 }
 
 /// One lens of an offscreen picture (see [`render_offscreen_frames`]). Device px relative to the glass.
@@ -378,7 +462,8 @@ pub struct LensShot {
 }
 
 /// The same as [`render_offscreen`] with lenses, one picture per entry of `frames` (each entry the lenses of that picture, at most
-/// `MAX_LENSES` of them): the backdrop is prepared once and the pictures differ in their lenses only. For tests and the picture harness.
+/// `MAX_LENSES` of them): the backdrop is prepared once and the pictures differ in their lenses only. The default look, with the calmer rim
+/// for a rectangle under 160 CSS px (see [`render_offscreen`]). For tests and the picture harness.
 pub fn render_offscreen_frames(
     src: (&[u8], u32, u32),
     rect: (i32, i32, u32, u32),
@@ -387,13 +472,30 @@ pub fn render_offscreen_frames(
     dark: bool,
     frames: &[Vec<LensShot>],
 ) -> Result<Vec<Vec<u8>>, String> {
+    render_offscreen_look(src, rect, radius_px, scale, dark, &LookParams::DEFAULT, true, frames)
+}
+
+/// [`render_offscreen_frames`] with the settings' values; `calm_small = false` draws a small piece with the rim of a window (what it
+/// looked like before the calmer rim), for comparing pictures.
+#[allow(clippy::too_many_arguments)]
+pub fn render_offscreen_look(
+    src: (&[u8], u32, u32),
+    rect: (i32, i32, u32, u32),
+    radius_px: f32,
+    scale: f32,
+    dark: bool,
+    params: &LookParams,
+    calm_small: bool,
+    frames: &[Vec<LensShot>],
+) -> Result<Vec<Vec<u8>>, String> {
     let (src_bgra, src_w, src_h) = src;
     let whole = [0.0, 0.0, rect.2 as f32, rect.3 as f32];
     let lists: Vec<gpu::LensList> = frames
         .iter()
         .map(|f| gpu::LensList::from_draws(f.iter().map(|l| gpu::LensDraw { rect: l.rect, clip: l.clip.unwrap_or(whole), radius: l.radius, opacity: l.opacity })))
         .collect();
-    gpu::render_frames(src_bgra, (src_w, src_h), &gpu::free_standing(rect, radius_px, scale), &gpu::Opts { look: gpu::Look::regular(dark), force_warp: false }, &lists)
+    let look = shot_look(dark, params, calm_small, rect, scale);
+    gpu::render_frames(src_bgra, (src_w, src_h), &gpu::free_standing(rect, radius_px, scale), &gpu::Opts { look, force_warp: false }, &lists)
 }
 
 /// The rectangles (x, y, w, h) of a lens that slides from `from` to `to`, one per display refresh at `hz`, with the engine's own springs:

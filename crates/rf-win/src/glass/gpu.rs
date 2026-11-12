@@ -5,7 +5,7 @@
 
 use std::ffi::c_void;
 
-use super::MAX_LENSES;
+use super::{LookParams, MAX_LENSES};
 
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_IEEE_STRICTNESS, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
@@ -60,6 +60,8 @@ pub(super) struct Look {
 }
 
 /// The look of a lens: the clear, sharp piece in the frosted pane. Lengths are CSS px. These are starting values the user judges live.
+/// The lens does not follow the settings itself (only through the pane it sits in: its grade is the window's, and in the light theme its
+/// white veil is measured from the pane's tint).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct LensLook {
     /// Gaussian deviation of the frost inside the lens (the window's glass around it has about 10): nearly none, so the lens is clear.
@@ -84,7 +86,11 @@ pub(super) struct LensLook {
 }
 
 impl LensLook {
-    pub(super) fn regular(dark: bool) -> LensLook {
+    /// `pane_tint` is the alpha of the tint of the window glass the lens sits in. In the dark theme the lens has its own faint white. In
+    /// the light theme its white veil is 40 % of what the pane leaves clear (0.82 over the default pane's 0.70), so a selection is the
+    /// lighter piece at every tint setting: with a veil lighter than the pane's own it would be the darker one (it was, at 0.35 over
+    /// 0.70), and a fixed veil would fall below the pane when the tint is raised.
+    pub(super) fn regular(dark: bool, pane_tint: f32) -> LensLook {
         LensLook {
             frost: 1.5,
             rim_max: 10.0,
@@ -92,7 +98,7 @@ impl LensLook {
             depth: 0.9,
             zoom: 1.04,
             bright: 1.08,
-            tint: [1.0, 1.0, 1.0, if dark { 0.10 } else { 0.35 }],
+            tint: [1.0, 1.0, 1.0, if dark { 0.10 } else { pane_tint + (1.0 - pane_tint) * 0.4 }],
             highlight: 0.6,
             dark_line: 0.2,
             shadow: 0.22,
@@ -102,8 +108,37 @@ impl LensLook {
     }
 }
 
+/// A value that is `def` at `at` on the 0..=100 scale, `lo` at 0 and `hi` at 100, straight lines between. Exactly `def` at `at`, so
+/// the default setting gives the shipped numbers to the last bit.
+fn piece(v: f32, at: f32, lo: f32, def: f32, hi: f32) -> f32 {
+    if v <= at { def + (def - lo) * (v / at - 1.0) } else { def + (hi - def) * ((v - at) / (100.0 - at)) }
+}
+
+/// A shape whose short side is this many CSS px or more is drawn with the rim as it is; below it the rim gets calmer.
+pub(super) const CALM_FROM: f32 = 160.0;
+/// At this short side (and below) the rim is at its calmest.
+pub(super) const CALM_FULL: f32 = 48.0;
+/// The thickness factor at `CALM_FULL`.
+const CALM_DEPTH: f32 = 0.40;
+/// The share of frost left at the edge at `CALM_FULL`.
+const CALM_RIM_FROST: f32 = 0.5;
+
 impl Look {
-    /// The one look the app ships. No outer shadow (DWM draws the window's own), no zoom, no colour fringe.
+    /// This look for a shape of the given short side (CSS px). The rim was tuned for a whole window; on a small piece (a dock island of
+    /// 48 or 72 px, a tile) the same rim bends the picture so hard that it looks like marble. From `CALM_FROM` down to `CALM_FULL` the
+    /// thickness falls to 40 % and the frost left at the edge rises to a half, in straight lines; below that it stays there. A shape
+    /// of `CALM_FROM` or more (every window) comes back unchanged.
+    pub(super) fn sized(self, short_side_css: f32) -> Look {
+        // a number that is not a number also leaves the look alone
+        if short_side_css.is_nan() || short_side_css >= CALM_FROM {
+            return self;
+        }
+        let u = ((short_side_css - CALM_FULL) / (CALM_FROM - CALM_FULL)).clamp(0.0, 1.0);
+        Look { depth: self.depth * (CALM_DEPTH + (1.0 - CALM_DEPTH) * u), rim_frost: self.rim_frost + (CALM_RIM_FROST - self.rim_frost) * (1.0 - u), ..self }
+    }
+
+    /// The one look the app ships. No outer shadow (DWM draws the window's own), no zoom, no colour fringe. `p` is what the user set; with
+    /// the defaults every number below is the shipped one.
     ///
     /// The shape, frost and saturation are the "Regular" preset of the model. The grade and the tint are not: the preset lowers the
     /// contrast to 0.81 (black becomes 24 of 255, white 229) and lays a 36 % dark or 50 % white tint over it, which is right for a
@@ -111,27 +146,38 @@ impl Look {
     /// the app's own translucent surfaces come on top of that). The user asked for less of that veil, so the dark glass is close to
     /// clear: the contrast is kept, what is behind is dimmed to 80 % and tinted by 10 % only (2 over black, 186 over white, colours
     /// stay colours). The light glass keeps the brightness and tints more towards white (70 %: 182 over a black desktop, was 138).
-    pub(super) fn regular(dark: bool) -> Look {
+    ///
+    /// What each setting moves (0 / default / 100): frost = the blur, 0 / 10.351 / 20 px; tint = the tint's alpha, 0 / 0.10 / 0.20 dark
+    /// and 0 / 0.70 / 0.92 light, and the dark glass's dimming (lum) 1.0 / 0.80 / 0.60; refraction = the rim's thickness factor,
+    /// 0 / 1.6 / 2.4; saturation = 1.0 / 2.252 / 3.0.
+    pub(super) fn regular(dark: bool, p: &LookParams) -> Look {
+        let p = p.clamped();
+        let d = LookParams::DEFAULT;
+        let (tint_alpha, lum) = if dark {
+            (piece(p.tint, d.tint, 0.0, 0.10, 0.20), piece(p.tint, d.tint, 1.0, 0.80, 0.60))
+        } else {
+            (piece(p.tint, d.tint, 0.0, 0.70, 0.92), 1.0)
+        };
         Look {
             // The preset's rim (thickness 1.188, at most 30.6 px wide, 35 % of the frost at the edge) bent the backdrop too little to be
             // noticed on a window (the user: more bending at the edges). Wider, thicker and with less frost on it: the edge now reads the
             // backdrop from up to about 77 px further in (was 39) and shows it almost sharp.
-            depth: 1.6,
+            depth: piece(p.refraction, d.refraction, 0.0, 1.6, 2.4),
             bezel: 0.421,
             max_bezel: 44.0,
             zoom: 1.0,
             dispersion: 0.0,
-            blur: 10.351,
-            saturate: 2.252,
-            lum: if dark { 0.80 } else { 1.0 },
+            blur: piece(p.frost, d.frost, 0.0, 10.351, 20.0),
+            saturate: piece(p.saturation, d.saturation, 1.0, 2.252, 3.0),
+            lum,
             contrast: if dark { 1.0 } else { 0.9 },
-            tint: if dark { [20.0 / 255.0, 20.0 / 255.0, 24.0 / 255.0, 0.10] } else { [1.0, 1.0, 1.0, 0.70] },
+            tint: if dark { [20.0 / 255.0, 20.0 / 255.0, 24.0 / 255.0, tint_alpha] } else { [1.0, 1.0, 1.0, tint_alpha] },
             rim: 0.25,
             rim_width: 0.3,
             shade: 0.03,
             light: -135.0,
             rim_frost: 0.12,
-            lens: LensLook::regular(dark),
+            lens: LensLook::regular(dark, tint_alpha),
         }
     }
 }
@@ -163,7 +209,8 @@ pub(super) struct Cb {
     /// x: dark line  y: shadow opacity  z: shadow offset  w: shadow blur
     pub lens_c: [f32; 4],
     pub lens_t: [f32; 4],
-    /// Per lens i: [i] centre + half size, [4 + i] the clip rectangle as x0 y0 x1 y1, [8 + i] radius + opacity. Device px.
+    /// Per lens i: [i] centre + half size, [MAX_LENSES + i] the clip rectangle as x0 y0 x1 y1, [2 * MAX_LENSES + i] radius + opacity.
+    /// Device px.
     pub lens: [[f32; 4]; 3 * MAX_LENSES],
 }
 

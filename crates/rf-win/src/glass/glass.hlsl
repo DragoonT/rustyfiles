@@ -41,13 +41,13 @@ cbuffer CB : register(b0)
     float4 uLensB;  // x: rim width max CSS px  y: rim width as a share of the lens's short side  z: brightness  w: highlight line gain
     float4 uLensC;  // x: dark line gain  y: shadow opacity (0 = none)  z: shadow offset y CSS px  w: shadow blur CSS px
     float4 uLensT;  // tint rgb, a
-    float4 uLens[12]; // lens i: [i] centre xy + half size zw, device px   [4 + i] clip rectangle x0 y0 x1 y1, device px   [8 + i] x: radius device px  y: opacity
+    float4 uLens[24]; // lens i: [i] centre xy + half size zw, device px   [MAX_LENSES + i] clip rectangle x0 y0 x1 y1, device px   [2 * MAX_LENSES + i] x: radius device px  y: opacity
 };
 
 static const float IOR = 1.5;                                  // refraction index, constant in all three modes
 static const float3 LUMA_W = float3(0.2126, 0.7152, 0.0722);   // luma weights of the repo's GLSL grade
 static const float MAX_LOD = 8.0;
-static const uint MAX_LENSES = 4;                              // keep equal to MAX_LENSES in mod.rs
+static const uint MAX_LENSES = 8;                              // keep equal to MAX_LENSES in mod.rs
 
 Texture2D<float4> tA : register(t0);   // crop pass: the source; others: the region pyramid
 SamplerState sLin : register(s0);      // linear, clamp
@@ -197,8 +197,8 @@ float4 ApplyLens(uint i, float4 base, float2 pos)
 {
     const float s = uShape.w;
     float4 g = uLens[i];
-    float4 cl = uLens[4 + i];
-    float2 ro = uLens[8 + i].xy;
+    float4 cl = uLens[MAX_LENSES + i];
+    float2 ro = uLens[2 * MAX_LENSES + i].xy;
     float opacity = ro.y;
     float2 p = (pos - g.xy) / s;                    // CSS px from the lens centre
     float2 h = g.zw / s;
@@ -407,9 +407,12 @@ float4 PSGlass(float4 pos : SV_Position) : SV_Target
     if (uExt.x > 0.5 && (any(isnan(col)) || any(isinf(col)) || isnan(a))) return float4(1, 0, 1, 1);
     float4 o = float4(col * cov, a);
     // the lenses, in slot order; with none (count 0) the picture is exactly the window's own
-    [unroll] for (uint i = 0; i < MAX_LENSES; i++)
+    // A real loop, not unrolled: ApplyLens is large and eight copies of it would make the shader slow to compile for no gain (the count
+    // is a constant of the draw, so every pixel takes the same path). With none the loop does not run at all.
+    uint nLens = min((uint)uLensA.x, MAX_LENSES);
+    [loop] for (uint i = 0; i < nLens; i++)
     {
-        if (i < (uint)uLensA.x && uLens[8 + i].y > 0.0)
+        if (uLens[2 * MAX_LENSES + i].y > 0.0)
             o = ApplyLens(i, o, pos.xy);
     }
     if (uExt.x > 0.5 && (any(isnan(o)) || any(isinf(o)))) return float4(1, 0, 1, 1);

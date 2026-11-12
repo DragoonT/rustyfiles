@@ -50,7 +50,7 @@ fn a_lens_of_no_opacity_or_none_leaves_the_picture_as_it_is() {
     let (sw, sh, src) = gradient_source();
     for dark in [false, true] {
         for warp in drivers() {
-            let look = Look::regular(dark);
+            let look = Look::regular(dark, &LookParams::DEFAULT);
             let none = render_lenses(&src, sw, sh, &look, &[], warp);
             // the lens reaches the shader with opacity 0, and with a rectangle that would show if it counted
             let zero = render_lenses(&src, sw, sh, &look, &[lens_at([60.0, 100.0, 200.0, 36.0], 0.0)], warp);
@@ -70,7 +70,7 @@ fn a_lens_changes_its_own_rectangle_and_by_its_shadow_a_few_px_around_it_and_not
     let lens = [60.0f32, 100.0, 200.0, 36.0];
     for dark in [false, true] {
         for warp in drivers() {
-            let look = Look::regular(dark);
+            let look = Look::regular(dark, &LookParams::DEFAULT);
             let none = render_lenses(&src, sw, sh, &look, &[], warp);
             let with = render_lenses(&src, sw, sh, &look, &[lens_at(lens, 1.0)], warp);
             let w = GLASS.2;
@@ -104,7 +104,7 @@ fn the_clip_rectangle_cuts_the_lens_and_its_shadow() {
     let (sw, sh, src) = gradient_source();
     let lens = [60.0f32, 100.0, 200.0, 36.0];
     for warp in drivers() {
-        let look = Look::regular(true);
+        let look = Look::regular(true, &LookParams::DEFAULT);
         let none = render_lenses(&src, sw, sh, &look, &[], warp);
         let mut cut = lens_at(lens, 1.0);
         cut.clip = [0.0, 0.0, 160.0, 280.0]; // the right part of the lens (from x 160) is outside
@@ -131,7 +131,7 @@ fn half_the_opacity_is_half_way_between_nothing_and_the_lens() {
     let lens = [60.0f32, 100.0, 200.0, 36.0];
     for dark in [false, true] {
         for warp in drivers() {
-            let look = Look::regular(dark);
+            let look = Look::regular(dark, &LookParams::DEFAULT);
             let at = |lenses: &[LensDraw]| {
                 let out = render_lenses(&src, sw, sh, &look, lenses, warp);
                 px(&out, GLASS.2, 160, 118)
@@ -158,7 +158,7 @@ fn a_lens_over_a_symmetric_source_is_symmetric() {
     // centred on the glass, which is centred on the source's axis; the light has a direction, so the lens's highlight and dark line are
     // switched off (as the window's rim light is in the test of the window)
     let lens = [60.0f32, 100.0, 200.0, 36.0];
-    let mut look = Look::regular(false);
+    let mut look = Look::regular(false, &LookParams::DEFAULT);
     look.rim = 0.0;
     look.shade = 0.0;
     look.lens.highlight = 0.0;
@@ -203,7 +203,7 @@ fn lenses_of_every_shape_make_no_non_finite_pixel() {
     for dark in [false, true] {
         for warp in drivers() {
             for set in &sets {
-                let out = render_lenses(&src, sw, sh, &Look::regular(dark), set, warp);
+                let out = render_lenses(&src, sw, sh, &Look::regular(dark, &LookParams::DEFAULT), set, warp);
                 let bad = out.as_chunks::<4>().0.iter().filter(|p| **p == [255, 0, 255, 255]).count();
                 assert_eq!(bad, 0, "non-finite pixels with lenses {set:?} (dark {dark}, warp {warp})");
             }
@@ -224,7 +224,7 @@ fn a_lens_is_sharp_where_the_window_glass_is_frosted() {
     let lum = |p: [u8; 4]| p[0] as i32 + p[1] as i32 + p[2] as i32;
     for dark in [false, true] {
         for warp in drivers() {
-            let look = Look::regular(dark);
+            let look = Look::regular(dark, &LookParams::DEFAULT);
             let w = GLASS.2;
             // the line's height above the ground beside it, in the lens's middle row
             let contrast = |lenses: &[LensDraw]| {
@@ -233,7 +233,9 @@ fn a_lens_is_sharp_where_the_window_glass_is_frosted() {
                 (150..170).map(|x| lum(px(&out, w, x, 118))).max().unwrap() - ground
             };
             let (frosted, clear) = (contrast(&[]), contrast(&[lens_at(lens, 1.0)]));
-            assert!(clear >= 3 * frosted.max(1) && clear >= 60, "line contrast {clear} in the lens, {frosted} in the window glass (dark {dark}, warp {warp})");
+            // the light lens's veil is 0.82 white, so 18 % of the line is left; the dark lens's is 0.10
+            let least = if dark { 60 } else { 30 };
+            assert!(clear >= 3 * frosted.max(1) && clear >= least, "line contrast {clear} in the lens, {frosted} in the window glass (dark {dark}, warp {warp})");
         }
     }
 }
@@ -245,7 +247,7 @@ fn lenses_in_different_slots_do_not_mix_their_numbers() {
         return;
     }
     let (sw, sh, src) = gradient_source();
-    let look = Look::regular(true);
+    let look = Look::regular(true, &LookParams::DEFAULT);
     // left: square, clipped at x 130; right: a capsule, clipped to its upper half. 60 px apart, well beyond the shadow's reach.
     let a = LensDraw { rect: [10.0, 40.0, 120.0, 50.0], clip: [0.0, 0.0, 130.0, 280.0], radius: 0.0, opacity: 1.0 };
     let b = LensDraw { rect: [190.0, 180.0, 120.0, 50.0], clip: [150.0, 0.0, 170.0, 205.0], radius: 25.0, opacity: 0.5 };
@@ -313,4 +315,75 @@ fn a_simulated_slide_runs_from_the_start_to_the_target() {
     assert_eq!(*sim.last().unwrap(), to);
     assert!(sim.windows(2).all(|p| p[0] != p[1]), "every refresh moves it, until the last");
     assert!((60..120).contains(&sim.len()), "{} refreshes", sim.len());
+}
+
+/// A selection must stand out: in the light theme the lens is the lighter, clearer piece (it was the DARKER one over a dark backdrop: its
+/// white veil was 35 % where the pane's is 70 %); in the dark theme it differs from the pane by a clear amount, at every tint setting. (Over white the light lens can only equal the pane: both clamp to white.)
+#[test]
+fn the_lens_is_the_lighter_piece_in_the_pane_in_both_themes() {
+    if !can_draw() {
+        return;
+    }
+    let (sw, sh) = (640u32, 400u32);
+    let lens = [60.0f32, 100.0, 200.0, 36.0];
+    let lum = |p: [u8; 4]| p[0] as i32 + p[1] as i32 + p[2] as i32;
+    for warp in drivers() {
+        for dark in [false, true] {
+            for tint in [0.0f32, 50.0, 100.0] {
+                let look = Look::regular(dark, &LookParams { tint, ..LookParams::DEFAULT });
+                for grey in [0u8, 128, 255] {
+                    let src = picture(sw, sh, |_, _| [grey; 3]);
+                    // the middle of the lens, and the pane at the same place without it (a uniform backdrop: the pane beside it is the same)
+                    let w = GLASS.2;
+                    let pane = px(&render_lenses(&src, sw, sh, &look, &[], warp), w, 160, 118);
+                    let inside = px(&render_lenses(&src, sw, sh, &look, &[lens_at(lens, 1.0)], warp), w, 160, 118);
+                    let what = format!("{} theme, tint {tint}, backdrop {grey}: pane {pane:?}, lens {inside:?} (warp {warp})", if dark { "dark" } else { "light" });
+                    if !dark {
+                        assert!(lum(inside) >= lum(pane), "the light lens is darker than the pane: {what}");
+                        // over white both clamp to white; anywhere else the lens is lighter by a clear step, not by rounding
+                        if grey < 255 {
+                            assert!(lum(inside) >= lum(pane) + 6, "the light lens hardly differs from the pane: {what}");
+                        }
+                    }
+                    if dark && grey == 128 {
+                        // at every tint setting, not only the default: the three colour channels, each at least 6 levels from the pane
+                        for c in 0..3 {
+                            assert!((inside[c] as i32 - pane[c] as i32).abs() >= 6, "the dark lens hardly differs from the pane: {what}");
+                        }
+                        assert!(lum(inside) > lum(pane), "the dark lens is not the lighter piece: {what}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// All eight slots draw, each at its own place, and the ninth would not be taken.
+#[test]
+fn eight_lenses_draw_each_at_its_own_place() {
+    if !can_draw() {
+        return;
+    }
+    assert_eq!(MAX_LENSES, 8);
+    let (sw, sh, src) = gradient_source();
+    let look = Look::regular(true, &LookParams::DEFAULT);
+    // two columns of four, apart enough that the shadows (24 px) do not meet
+    let places: Vec<[f32; 4]> = (0..8).map(|i| [10.0 + 160.0 * (i / 4) as f32, 10.0 + 66.0 * (i % 4) as f32, 140.0, 36.0]).collect();
+    let all: Vec<LensDraw> = places.iter().map(|&r| lens_at(r, 1.0)).collect();
+    assert_eq!(LensList::from_draws(all.iter().copied()).n, 8);
+    for warp in drivers() {
+        let none = render_lenses(&src, sw, sh, &look, &[], warp);
+        let with = render_lenses(&src, sw, sh, &look, &all, warp);
+        let w = GLASS.2;
+        for (i, r) in places.iter().enumerate() {
+            // the middle part of lens i
+            let mid = |x: u32, y: u32| (x as f32 - (r[0] + 70.0)).abs() <= 40.0 && (y as f32 - (r[1] + 18.0)).abs() <= 6.0;
+            assert!(worst_diff(&none, &with, w, mid).0 >= 6, "lens {i} is not in the picture (warp {warp})");
+            // and it is the same as when it is drawn alone: the other seven do not change it
+            let alone = render_lenses(&src, sw, sh, &look, &[lens_at(*r, 1.0)], warp);
+            assert_eq!(worst_diff(&with, &alone, w, mid).0, 0, "lens {i} changed by the others (warp {warp})");
+        }
+        let bad = with.as_chunks::<4>().0.iter().filter(|p| **p == [255, 0, 255, 255]).count();
+        assert_eq!(bad, 0, "non-finite pixels with eight lenses (warp {warp})");
+    }
 }

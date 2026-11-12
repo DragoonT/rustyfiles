@@ -227,7 +227,7 @@ mod tests {
         let mut l = LensSet::new();
         l.set(3, Some(spec(1, 10.0)), false);
         l.set(0, Some(spec(2, 60.0)), false);
-        l.set(4, Some(spec(3, 60.0)), false); // no such slot
+        l.set(MAX_LENSES, Some(spec(3, 60.0)), false); // no such slot
         l.set(1, Some(LensSpec { rect: [f32::NAN, 0.0, 10.0, 10.0], ..spec(4, 0.0) }), false);
         l.set(1, Some(LensSpec { rect: [0.0, 0.0, 0.0, 10.0], ..spec(5, 0.0) }), false);
         let d = l.draw_list();

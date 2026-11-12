@@ -2,13 +2,15 @@
 //! result into the picture at the rectangle and writes the whole picture as PNG. No window is created, nothing is shown.
 //!
 //!   cargo run -p rf-win --example glass_shot -- --src IN.png --out OUT.png --rect X,Y,W,H [--dark] [--scale F] [--radius PX]
-//!       [--lens X,Y,W,H,R]... [--clip X,Y,W,H]
+//!       [--lens X,Y,W,H,R]... [--clip X,Y,W,H] [--frost N] [--tint N] [--refraction N] [--saturation N] [--no-calm]
 //!   cargo run -p rf-win --example glass_shot -- --src IN.png --out SHEET.png --rect X,Y,W,H [--dark] --slide X0,Y0,X1,Y1,W,H,R
 //!       [--frames N] [--hz F] [--crop W,H]
 //!
 //! `--scale` is device px per CSS px (default 1), `--radius` the corner radius in device px (default 8 x scale, like a window).
-//! `--lens` puts a lens (a selection pill) on the glass: x, y, w, h, radius in device px relative to the glass; it can be given up to four
+//! `--lens` puts a lens (a selection pill) on the glass: x, y, w, h, radius in device px relative to the glass; it can be given up to eight
 //! times. `--clip` cuts all the lenses to a rectangle (default: the whole glass).
+//! `--frost`, `--tint`, `--refraction` and `--saturation` are the four values of the HyperGlass settings, each 0 to 100 (defaults 52, 50,
+//! 67, 62: the shipped look). `--no-calm` draws a small piece with the rim of a window, as it was before the calmer rim of small pieces.
 //! `--slide` simulates a lens that slides from (X0, Y0) to (X1, Y1), W x H with radius R, with the engine's own springs at `--hz` refreshes
 //! per second (default 120), picks `--frames` of the simulated refreshes spread evenly over the whole motion (default 12) and writes ONE
 //! contact sheet to `--out`: a crop of `--crop W,H` (default 260,240) around the lens for every frame, four per row. The time of each
@@ -18,7 +20,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 
-use rf_win::glass::LensShot;
+use rf_win::glass::{LensShot, LookParams};
 
 fn load(path: &str) -> Result<(u32, u32, Vec<u8>), Box<dyn Error>> {
     let mut dec = png::Decoder::new(BufReader::new(File::open(path)?));
@@ -90,6 +92,8 @@ struct Args {
     scale: f32,
     radius: Option<f32>,
     lenses: Vec<[f32; 5]>,
+    params: LookParams,
+    calm: bool,
     clip: Option<[f32; 4]>,
     slide: Option<[f32; 7]>,
     frames: usize,
@@ -100,6 +104,7 @@ struct Args {
 fn parse() -> Result<Args, Box<dyn Error>> {
     let (mut src, mut out, mut rect, mut dark, mut scale, mut radius) = (None, None, None, false, 1.0f32, None::<f32>);
     let (mut lenses, mut clip, mut slide, mut frames, mut hz, mut crop) = (Vec::new(), None, None, 12usize, 120.0f32, (260u32, 240u32));
+    let (mut params, mut calm) = (LookParams::DEFAULT, true);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -116,6 +121,11 @@ fn parse() -> Result<Args, Box<dyn Error>> {
             "--scale" => scale = it.next().ok_or("--scale needs a number")?.parse()?,
             "--radius" => radius = Some(it.next().ok_or("--radius needs a number")?.parse()?),
             "--lens" => lenses.push(floats(&it.next().ok_or("--lens needs X,Y,W,H,R")?)?),
+            "--frost" => params.frost = it.next().ok_or("--frost needs 0 to 100")?.parse()?,
+            "--tint" => params.tint = it.next().ok_or("--tint needs 0 to 100")?.parse()?,
+            "--refraction" => params.refraction = it.next().ok_or("--refraction needs 0 to 100")?.parse()?,
+            "--saturation" => params.saturation = it.next().ok_or("--saturation needs 0 to 100")?.parse()?,
+            "--no-calm" => calm = false,
             "--clip" => clip = Some(floats(&it.next().ok_or("--clip needs X,Y,W,H")?)?),
             "--slide" => slide = Some(floats(&it.next().ok_or("--slide needs X0,Y0,X1,Y1,W,H,R")?)?),
             "--frames" => frames = it.next().ok_or("--frames needs a number")?.parse()?,
@@ -138,6 +148,8 @@ fn parse() -> Result<Args, Box<dyn Error>> {
         scale,
         radius,
         lenses,
+        params,
+        calm,
         clip,
         slide,
         frames,
@@ -156,7 +168,7 @@ fn slide_sheet(a: &Args, w: u32, h: u32, pic: &[u8], sl: [f32; 7]) -> Result<(),
     // frame k of n: the simulated refresh nearest to k / (n - 1) of the way through the motion, the first and the last included
     let pick: Vec<usize> = (0..n).map(|k| if n == 1 { 0 } else { (k * (sim.len() - 1) + (n - 1) / 2) / (n - 1) }).collect();
     let shots: Vec<Vec<LensShot>> = pick.iter().map(|&i| vec![LensShot { rect: sim[i], clip: a.clip, radius: sl[6], opacity: 1.0 }]).collect();
-    let glasses = rf_win::glass::render_offscreen_frames((pic, w, h), a.rect, radius, a.scale, a.dark, &shots)?;
+    let glasses = rf_win::glass::render_offscreen_look((pic, w, h), a.rect, radius, a.scale, a.dark, &a.params, a.calm, &shots)?;
     println!(
         "{n} frames drawn in {:.0} ms; the slide takes {} refreshes at {} Hz = {:.0} ms",
         t.elapsed().as_secs_f64() * 1000.0,
@@ -201,14 +213,19 @@ fn run() -> Result<(), Box<dyn Error>> {
     let radius = a.radius.unwrap_or(8.0 * a.scale);
     let t = std::time::Instant::now();
     let shots: Vec<LensShot> = a.lenses.iter().map(|l| LensShot { rect: [l[0], l[1], l[2], l[3]], clip: a.clip, radius: l[4], opacity: 1.0 }).collect();
-    let glass = rf_win::glass::render_offscreen_frames((&pic, w, h), a.rect, radius, a.scale, a.dark, &[shots])?.remove(0);
+    let glass = rf_win::glass::render_offscreen_look((&pic, w, h), a.rect, radius, a.scale, a.dark, &a.params, a.calm, &[shots])?.remove(0);
     println!(
-        "glass drawn in {:.0} ms (rect {:?}, radius {radius} px, scale {}, {}, {} lenses)",
+        "glass drawn in {:.0} ms (rect {:?}, radius {radius} px, scale {}, {}, {} lenses, frost {} tint {} refraction {} saturation {}{})",
         t.elapsed().as_secs_f64() * 1000.0,
         a.rect,
         a.scale,
         if a.dark { "dark" } else { "light" },
-        a.lenses.len()
+        a.lenses.len(),
+        a.params.frost,
+        a.params.tint,
+        a.params.refraction,
+        a.params.saturation,
+        if a.calm { "" } else { ", small pieces without the calmer rim" }
     );
     paste(&mut pic, w, h, &glass, a.rect);
     save(&a.out, w, h, &pic)?;

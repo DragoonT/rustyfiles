@@ -342,6 +342,13 @@ pub struct Settings {
     pub background_image: Option<PathBuf>,
     /// 0.05 … 0.6
     pub background_opacity: f32,
+    /// HyperGlass look (Settings > Appearance, shown while the backdrop is Glass), each 0..=100; a value outside is cut to that when it is
+    /// used. See `rf_win::glass::LookParams` for what the first four do; the surface value is the app's own two washes over the glass.
+    pub hg_frost: u8,
+    pub hg_tint: u8,
+    pub hg_refraction: u8,
+    pub hg_saturation: u8,
+    pub hg_surface: u8,
     /// UI font family; `None` = Segoe UI Variable / system.
     pub font: Option<String>,
     pub show_toolbar: bool,
@@ -469,6 +476,11 @@ impl Default for Settings {
             tint: None,
             background_image: None,
             background_opacity: 0.2,
+            hg_frost: HG_DEFAULT[0],
+            hg_tint: HG_DEFAULT[1],
+            hg_refraction: HG_DEFAULT[2],
+            hg_saturation: HG_DEFAULT[3],
+            hg_surface: HG_DEFAULT[4],
             font: None,
             show_toolbar: true,
             show_statusbar: true,
@@ -516,7 +528,13 @@ impl Default for Settings {
 
 impl Global for Settings {}
 
+/// The HyperGlass defaults in the order frost, tint, refraction, saturation, surface. The first four are the engine's own defaults
+/// (`LookParams::DEFAULT`, a test keeps them equal); the surface default is the wash the app shipped with over glass.
+pub const HG_DEFAULT: [u8; 5] = [52, 50, 67, 62, 50];
+
 static THEME: AtomicU8 = AtomicU8::new(0);
+/// The surface value (0..=100) the palette reads on every call, cheaper than the settings struct.
+static HG_SURFACE: AtomicU8 = AtomicU8::new(HG_DEFAULT[4]);
 static SOLID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 static ANIM: AtomicU8 = AtomicU8::new(0);
@@ -534,6 +552,11 @@ pub fn animations() -> bool {
 /// "Solid" background material: the palette paints an opaque window background.
 pub fn solid_backdrop() -> bool {
     SOLID.load(Ordering::Relaxed)
+}
+
+/// How strongly the app's own washes lie over the glass, 0..=100 (Settings > HyperGlass > Surface wash).
+pub fn hg_surface() -> u8 {
+    HG_SURFACE.load(Ordering::Relaxed)
 }
 
 /// Read by `Palette::for_window` without needing an `App`.
@@ -616,6 +639,21 @@ impl Settings {
         Ok(Settings::deserialize(toml::Value::Table(base)).unwrap_or_default())
     }
 
+    /// The four values the engine takes, cut to 0..=100.
+    pub fn hyperglass_look(&self) -> rf_win::glass::LookParams {
+        rf_win::glass::LookParams {
+            frost: f32::from(self.hg_frost.min(100)),
+            tint: f32::from(self.hg_tint.min(100)),
+            refraction: f32::from(self.hg_refraction.min(100)),
+            saturation: f32::from(self.hg_saturation.min(100)),
+        }
+    }
+
+    /// Back to the shipped look (the "Reset to defaults" button).
+    pub fn reset_hyperglass(&mut self) {
+        [self.hg_frost, self.hg_tint, self.hg_refraction, self.hg_saturation, self.hg_surface] = HG_DEFAULT;
+    }
+
     /// For "Import settings".
     pub fn parse_lenient_pub(text: &str) -> Result<Settings, toml::de::Error> {
         Self::parse_lenient(text)
@@ -635,6 +673,9 @@ impl Settings {
         rf_core::format::set_decimal_sizes(self.decimal_sizes);
         SOLID.store(self.backdrop == BackdropPref::Solid, Ordering::Relaxed);
         ANIM.store(self.animations as u8, Ordering::Relaxed);
+        // HyperGlass: the engine redraws every glass window once when the look changes, and does nothing for the same look again
+        HG_SURFACE.store(self.hg_surface.min(100), Ordering::Relaxed);
+        rf_win::glass::set_look(self.hyperglass_look());
         gpui_windows::SMOOTH_SCROLL.store(self.smooth_scroll, Ordering::Relaxed);
         THEME.store(
             match self.theme {
@@ -704,6 +745,27 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut Settings)) {
     apply_component_theme(cx);
     std::thread::spawn(move || s.save());
     cx.refresh_windows();
+}
+
+/// Like [`update`] for a control that changes on every step of a drag (a slider): the change is applied and drawn at once, the file is
+/// written once the changes have settled (the pane resize does the same), so a drag is not hundreds of writes.
+pub fn update_live(cx: &mut App, f: impl FnOnce(&mut Settings)) {
+    static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    cx.update_global::<Settings, _>(|s, _| f(s));
+    cx.global::<Settings>().apply_side_effects();
+    cx.refresh_windows();
+    let mine = SERIAL.fetch_add(1, Ordering::Relaxed) + 1;
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+        // a later step has its own timer: only the last one writes
+        if SERIAL.load(Ordering::Relaxed) == mine {
+            cx.update(|cx| {
+                let snapshot = cx.global::<Settings>().clone();
+                std::thread::spawn(move || snapshot.save());
+            });
+        }
+    })
+    .detach();
 }
 
 #[cfg(test)]
@@ -785,6 +847,68 @@ yeni_alan = 3").unwrap();
         assert_eq!(Settings::parse_lenient(&text).unwrap().backdrop, BackdropPref::Glass);
         // the default stays Mica
         assert_eq!(Settings::default().backdrop, BackdropPref::Mica);
+    }
+
+    #[test]
+    fn hyperglass_defaults_match_the_engine_and_the_shipped_look() {
+        let d = Settings::default();
+        let engine = rf_win::glass::LookParams::DEFAULT;
+        assert_eq!(d.hyperglass_look(), engine, "the settings default is the engine's default");
+        assert_eq!(super::HG_DEFAULT.map(f32::from)[..4], [engine.frost, engine.tint, engine.refraction, engine.saturation]);
+        assert_eq!(d.hg_surface, 50);
+        assert_eq!(super::hg_surface(), 50, "the palette's atomic starts at the default as well");
+    }
+
+    #[test]
+    fn hyperglass_values_round_trip() {
+        let s = Settings { hg_frost: 0, hg_tint: 100, hg_refraction: 13, hg_saturation: 77, hg_surface: 5, ..Default::default() };
+        let text = toml::to_string_pretty(&s).unwrap();
+        let back = Settings::parse_lenient(&text).unwrap();
+        assert_eq!((back.hg_frost, back.hg_tint, back.hg_refraction, back.hg_saturation, back.hg_surface), (0, 100, 13, 77, 5));
+        // an old file has none of them: every one is the default
+        let old = Settings::parse_lenient("theme = \"dark\"
+").unwrap();
+        assert_eq!(super::HG_DEFAULT, [old.hg_frost, old.hg_tint, old.hg_refraction, old.hg_saturation, old.hg_surface]);
+    }
+
+    #[test]
+    fn a_bad_hyperglass_value_costs_only_that_field() {
+        // a negative number, a word, a float and a number too big for the field: each falls back alone, the neighbours and the other
+        // settings survive
+        let s = Settings::parse_lenient(
+            "hg_frost = -3
+hg_tint = \"cok\"
+hg_refraction = 12.5
+hg_saturation = 9999
+hg_surface = 80
+show_hidden = true
+",
+        )
+        .unwrap();
+        assert_eq!(s.hg_frost, super::HG_DEFAULT[0]);
+        assert_eq!(s.hg_tint, super::HG_DEFAULT[1]);
+        assert_eq!(s.hg_refraction, super::HG_DEFAULT[2]);
+        assert_eq!(s.hg_saturation, super::HG_DEFAULT[3]);
+        assert_eq!(s.hg_surface, 80, "the good value next to the bad ones is kept");
+        assert!(s.show_hidden);
+    }
+
+    #[test]
+    fn a_hyperglass_value_above_100_is_cut_when_used() {
+        let s = Settings::parse_lenient("hg_frost = 200
+hg_tint = 101
+").unwrap();
+        assert_eq!((s.hg_frost, s.hg_tint), (200, 101), "the file's number is kept as it is");
+        let look = s.hyperglass_look();
+        assert_eq!((look.frost, look.tint), (100.0, 100.0));
+    }
+
+    #[test]
+    fn resetting_hyperglass_leaves_the_rest_alone() {
+        let mut s = Settings { hg_frost: 1, hg_tint: 2, hg_refraction: 3, hg_saturation: 4, hg_surface: 5, show_hidden: true, ..Default::default() };
+        s.reset_hyperglass();
+        assert_eq!(super::HG_DEFAULT, [s.hg_frost, s.hg_tint, s.hg_refraction, s.hg_saturation, s.hg_surface]);
+        assert!(s.show_hidden);
     }
 
     #[test]

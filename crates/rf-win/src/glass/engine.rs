@@ -340,7 +340,9 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     let (Some(region), Some(target)) = (w.region.as_ref(), w.target.as_ref()) else { return Err(Fail::Window("lost its resources".into())) };
 
     let g = Geometry { w: geo.w, h: geo.h, origin: (geo.x - mon.rect.left, geo.y - mon.rect.top), scale: geo.scale(), radius_px: geo.radius_px(), cut_corners: false };
-    let look = Look::regular(w.dark);
+    // The settings' look; a shape below 160 CSS px gets the calmer rim (a window never does). The look is part of what the loop guard
+    // compares, so a change of the settings (or of the theme) is drawn.
+    let look = Look::regular(w.dark, &super::look()).sized(geo.w.min(geo.h) as f32 / geo.scale());
     let lenses = w.lenses.draw_list();
     let t0 = Instant::now();
     let (mut prepared, hash) = match w.presented.map(|p| p.hash) {
@@ -420,6 +422,12 @@ impl Engine {
             Cmd::SetDark { hwnd, dark } => {
                 if let Some(w) = self.wins.get_mut(&hwnd) {
                     w.dark = dark;
+                    w.restale();
+                }
+            }
+            Cmd::LookChanged => {
+                // Every window draws again, once, with the look that `draw` reads from the process-wide value.
+                for w in self.wins.values_mut() {
                     w.restale();
                 }
             }
@@ -748,5 +756,39 @@ impl Engine {
         }
         self.mons.clear();
         self.gfx = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::LookParams;
+    use super::*;
+
+    /// A change of the look reaches every window the engine holds, whether or not it was drawn before: each is marked for a new backdrop
+    /// and a new draw. (The draw reads the value itself, and the loop guard's `Presented` holds the whole `Look`, so that draw is made.)
+    /// No window or device is involved: the engine is only given its commands.
+    #[test]
+    fn a_look_change_marks_every_window_for_a_new_draw() {
+        let (_tx, rx) = crossbeam_channel::unbounded();
+        let mut e = Engine { rx, gfx: None, wins: BTreeMap::new(), mons: BTreeMap::new(), stats_on: false, last_device_check: Instant::now(), last_activity: Instant::now(), instant_flushes: 0 };
+        for hwnd in [1isize, 2] {
+            let mut w = Win::new(hwnd, hwnd == 1);
+            w.dirty = false;
+            w.stale = false;
+            e.wins.insert(hwnd, w);
+        }
+        e.command(Cmd::LookChanged);
+        assert!(e.wins.values().all(|w| w.dirty && w.stale), "a window was not marked by the look change");
+    }
+
+    /// The look is part of what the loop guard compares: the same picture with another look is not skipped.
+    #[test]
+    fn the_loop_guard_sees_a_new_look() {
+        let geo = Geometry { w: 400, h: 300, origin: (0, 0), scale: 1.0, radius_px: 8.0, cut_corners: false };
+        let lenses = LensList::default();
+        let a = Presented { hash: 7, geo, look: Look::regular(false, &LookParams::DEFAULT), lenses };
+        let b = Presented { look: Look::regular(false, &LookParams { frost: 80.0, ..LookParams::DEFAULT }), ..a };
+        let same = a;
+        assert!(same == a && a != b);
     }
 }

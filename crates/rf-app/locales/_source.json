@@ -6402,5 +6402,83 @@
   "key": "Cam başlatılamadı: {reason}. Mica kullanılıyor.",
   "tr": "Cam başlatılamadı: {reason}. Mica kullanılıyor.",
   "en": "Glass could not start: {reason}. Mica is used instead."
+ },
+ {
+  "id": "b320227d",
+  "key": "Bulanıklık",
+  "tr": "Bulanıklık",
+  "en": "Frost"
+ },
+ {
+  "id": "ff9b641e",
+  "key": "Ton",
+  "tr": "Ton",
+  "en": "Tint"
+ },
+ {
+  "id": "d154b901",
+  "key": "Kenar kırılması",
+  "tr": "Kenar kırılması",
+  "en": "Edge refraction"
+ },
+ {
+  "id": "0524f598",
+  "key": "Renk doygunluğu",
+  "tr": "Renk doygunluğu",
+  "en": "Colour saturation"
+ },
+ {
+  "id": "9ae2ea7f",
+  "key": "Yüzey örtüsü",
+  "tr": "Yüzey örtüsü",
+  "en": "Surface wash"
+ },
+ {
+  "id": "0c7a0e57",
+  "key": "Camın arkasındaki görüntünün ne kadar bulanık olacağı. En solda cam berraktır.",
+  "tr": "Camın arkasındaki görüntünün ne kadar bulanık olacağı. En solda cam berraktır.",
+  "en": "How blurred the picture behind the glass is. At the far left the glass is clear."
+ },
+ {
+  "id": "3154a02f",
+  "key": "Temanın tonunun görüntünün üstündeki payı. Koyu temada görüntüyü biraz da karartır.",
+  "tr": "Temanın tonunun görüntünün üstündeki payı. Koyu temada görüntüyü biraz da karartır.",
+  "en": "How much of the theme's tone lies over the picture. In the dark theme it also dims the picture."
+ },
+ {
+  "id": "243608f8",
+  "key": "Camın kenarlarının arkasındaki görüntüyü ne kadar büktüğü.",
+  "tr": "Camın kenarlarının arkasındaki görüntüyü ne kadar büktüğü.",
+  "en": "How much the edges of the glass bend the picture behind them."
+ },
+ {
+  "id": "76298339",
+  "key": "Camdan görünen renklerin canlılığı.",
+  "tr": "Camdan görünen renklerin canlılığı.",
+  "en": "How vivid the colours seen through the glass are."
+ },
+ {
+  "id": "d7c96bc0",
+  "key": "HyperGlass ayarları",
+  "tr": "HyperGlass ayarları",
+  "en": "HyperGlass settings"
+ },
+ {
+  "id": "af04a10d",
+  "key": "Cam görünümünü ayarlayın. Değişiklikler açık tüm pencerelerde hemen görünür.",
+  "tr": "Cam görünümünü ayarlayın. Değişiklikler açık tüm pencerelerde hemen görünür.",
+  "en": "Adjust how the glass looks. Changes show at once in every open window."
+ },
+ {
+  "id": "eb3e4c29",
+  "key": "Varsayılana dön",
+  "tr": "Varsayılana dön",
+  "en": "Reset to defaults"
+ },
+ {
+  "id": "8a95eecb",
+  "key": "Uygulamanın kendi yüzeylerinin camın üstündeki örtüsü. En solda örtü yoktur; yazılar zor okunabilir.",
+  "tr": "Uygulamanın kendi yüzeylerinin camın üstündeki örtüsü. En solda örtü yoktur; yazılar zor okunabilir.",
+  "en": "How strongly the app's own surfaces cover the glass. At the far left there is no cover and text can be hard to read."
  }
 ]

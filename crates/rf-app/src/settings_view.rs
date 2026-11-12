@@ -56,12 +56,14 @@ struct Ui {
     open: HashSet<&'static str>,
     /// The search box above the pages (made at the first draw: it needs a window).
     search: Option<Entity<gpui_kit::component::input::InputState>>,
+    /// One focus handle per HyperGlass slider (made at the first draw, kept so the arrow keys have something to be focused on).
+    hg_focus: Vec<FocusHandle>,
 }
 impl Global for Ui {}
 
 fn ui(cx: &mut App) -> &mut Ui {
     if !cx.has_global::<Ui>() {
-        cx.set_global(Ui { page: Page::General, open: HashSet::new(), search: None });
+        cx.set_global(Ui { page: Page::General, open: HashSet::new(), search: None, hg_focus: Vec::new() });
     }
     cx.global_mut::<Ui>()
 }
@@ -717,6 +719,215 @@ fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
         .into_any_element()
 }
 
+// ---------------------------------------------------------------- HyperGlass settings
+
+/// The five HyperGlass values, in the order of the card. The number is also the slider's id.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Hg {
+    Frost,
+    Tint,
+    Refraction,
+    Saturation,
+    Surface,
+}
+
+impl Hg {
+    const ALL: [Hg; 5] = [Hg::Frost, Hg::Tint, Hg::Refraction, Hg::Saturation, Hg::Surface];
+
+    fn get(self, s: &Settings) -> u8 {
+        match self {
+            Hg::Frost => s.hg_frost,
+            Hg::Tint => s.hg_tint,
+            Hg::Refraction => s.hg_refraction,
+            Hg::Saturation => s.hg_saturation,
+            Hg::Surface => s.hg_surface,
+        }
+        .min(100)
+    }
+
+    fn set(self, s: &mut Settings, v: u8) {
+        let v = v.min(100);
+        match self {
+            Hg::Frost => s.hg_frost = v,
+            Hg::Tint => s.hg_tint = v,
+            Hg::Refraction => s.hg_refraction = v,
+            Hg::Saturation => s.hg_saturation = v,
+            Hg::Surface => s.hg_surface = v,
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Hg::Frost => t!("Bulanıklık"),
+            Hg::Tint => t!("Ton"),
+            Hg::Refraction => t!("Kenar kırılması"),
+            Hg::Saturation => t!("Renk doygunluğu"),
+            Hg::Surface => t!("Yüzey örtüsü"),
+        }
+    }
+
+    fn desc(self) -> &'static str {
+        match self {
+            Hg::Frost => t!("Camın arkasındaki görüntünün ne kadar bulanık olacağı. En solda cam berraktır."),
+            Hg::Tint => t!("Temanın tonunun görüntünün üstündeki payı. Koyu temada görüntüyü biraz da karartır."),
+            Hg::Refraction => t!("Camın kenarlarının arkasındaki görüntüyü ne kadar büktüğü."),
+            Hg::Saturation => t!("Camdan görünen renklerin canlılığı."),
+            Hg::Surface => t!("Uygulamanın kendi yüzeylerinin camın üstündeki örtüsü. En solda örtü yoktur; yazılar zor okunabilir."),
+        }
+    }
+}
+
+/// Width of a slider's track and the thumb's size, in logical px.
+const SLIDER_W: f32 = 220.;
+const THUMB: f32 = 18.;
+
+/// The value (0..=100) under the pointer: `left` and `width` are the slider's box, the thumb's centre travels from half a thumb inside
+/// the left edge to half a thumb inside the right one.
+fn slider_value_at(x: f32, left: f32, width: f32) -> u8 {
+    let run = (width - THUMB).max(1.0);
+    (((x - left - THUMB / 2.0) / run).clamp(0.0, 1.0) * 100.0).round() as u8
+}
+
+/// What a key does to a slider that has the focus: the new value, or `None` for a key the slider does not take. Arrows move by 1,
+/// Shift or Page Up / Down by 10, Home and End jump to the ends.
+fn slider_key(value: u8, key: &str, shift: bool) -> Option<u8> {
+    let step = if shift { 10 } else { 1 };
+    let v = value.min(100);
+    Some(match key {
+        "left" | "down" => v.saturating_sub(step),
+        "right" | "up" => (v + step).min(100),
+        "pagedown" => v.saturating_sub(10),
+        "pageup" => (v + 10).min(100),
+        "home" => 0,
+        "end" => 100,
+        _ => return None,
+    })
+}
+
+/// What a slider drags: which of the five.
+#[derive(Clone)]
+struct SliderDrag(usize);
+
+struct SliderGhost;
+impl Render for SliderGhost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+    }
+}
+
+/// A slider for one HyperGlass value: a thin track filled up to a round thumb. A click puts the thumb there, a drag moves it, the arrow
+/// keys move it while it has the focus. Every step is applied and drawn at once and written to the file once the steps settle.
+fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle) -> AnyElement {
+    let id = which as usize;
+    let value = value.min(100);
+    let frac = f32::from(value) / 100.0;
+    let bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::<Pixels>::default()));
+    let apply = move |v: u8, cx: &mut App| {
+        if which.get(cx.global::<Settings>()) != v {
+            settings::update_live(cx, |s| which.set(s, v));
+        }
+    };
+    let (b_down, f_down) = (bounds.clone(), focus.clone());
+    let (b_drag, b_probe) = (bounds.clone(), bounds.clone());
+    div()
+        .id(("hg-slider", id))
+        .relative()
+        .w(px(SLIDER_W))
+        .h(px(24.))
+        .flex_shrink_0()
+        .cursor_pointer()
+        .rounded(px(12.))
+        .border_1()
+        .border_color(transparent_black())
+        .track_focus(&focus)
+        .focus(|s| s.border_color(p.accent))
+        // (the probe records where the slider is; the mouse events do not carry the element's box)
+        .child(canvas(move |b, _, _| b_probe.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full())
+        .child(
+            // the track, filled up to the thumb
+            div()
+                .absolute()
+                .left(px(THUMB / 2.0))
+                .right(px(THUMB / 2.0))
+                .top(px(10.))
+                .h(px(4.))
+                .rounded_full()
+                .bg(p.pressed)
+                .child(div().h_full().rounded_full().bg(p.accent).w(relative(frac))),
+        )
+        .child(
+            // The thumb's lane is the slider's inner width less one thumb, and the thumb sits at a share of it. Measured from the
+            // box the children are placed in (not from SLIDER_W), so it agrees with the track and with the pointer mapping whatever
+            // the border takes: the root's 1 px focus border made a thumb placed by SLIDER_W stick out by 2 px at the far right.
+            div().absolute().top(px(3.)).left_0().right(px(THUMB)).h(px(THUMB)).child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left(relative(frac))
+                    .size(px(THUMB))
+                    .rounded_full()
+                    .bg(p.card_bg)
+                    .border_1()
+                    .border_color(p.border)
+                    .child(div().m(px(4.)).size(px(8.)).rounded_full().bg(p.accent)),
+            ),
+        )
+        .on_mouse_down(MouseButton::Left, move |e, window, cx| {
+            window.focus(&f_down, cx);
+            let b = b_down.get();
+            apply(slider_value_at(f32::from(e.position.x), f32::from(b.left()), f32::from(b.size.width)), cx);
+            cx.stop_propagation();
+        })
+        .on_drag(SliderDrag(id), |_, _, _, cx| cx.new(|_| SliderGhost))
+        .on_drag_move(move |e: &DragMoveEvent<SliderDrag>, _, cx| {
+            if e.drag(cx).0 == id {
+                // the same box as a click uses (the probe's), so a click and a drag agree on the value under the pointer
+                let b = b_drag.get();
+                apply(slider_value_at(f32::from(e.event.position.x), f32::from(b.left()), f32::from(b.size.width)), cx);
+            }
+        })
+        // (captured, so the arrows reach the slider before the file list's own shortcuts do)
+        .capture_key_down(move |ev: &KeyDownEvent, _, cx| {
+            let now = which.get(cx.global::<Settings>());
+            if let Some(v) = slider_key(now, ev.keystroke.key.as_str(), ev.keystroke.modifiers.shift) {
+                apply(v, cx);
+                cx.stop_propagation();
+            }
+        })
+        .into_any_element()
+}
+
+/// The focus handle of slider `i`, made at the first call.
+fn hg_focus(cx: &mut App, i: usize) -> FocusHandle {
+    while ui(cx).hg_focus.len() <= i {
+        let h = cx.focus_handle();
+        ui(cx).hg_focus.push(h);
+    }
+    ui(cx).hg_focus[i].clone()
+}
+
+/// The HyperGlass card: five sliders for the look of the glass, each with its value, and a button back to the shipped look. Shown
+/// under the backdrop card while the backdrop is Glass.
+fn hyperglass_card(p: &Palette, s: &Settings, cx: &mut App) -> AnyElement {
+    let reset = button("hg-reset", p, t!("Varsayılana dön"), |_, cx| settings::update(cx, |s| s.reset_hyperglass()));
+    let mut rows: Vec<AnyElement> = Vec::new();
+    for which in Hg::ALL {
+        let value = which.get(s);
+        let control = h_flex()
+            .gap_3()
+            .items_center()
+            .child(slider(which, p, value, hg_focus(cx, which as usize)))
+            .child(div().w(px(32.)).flex_shrink_0().text_right().text_sm().text_color(p.text_secondary).child(value.to_string()))
+            .into_any_element();
+        rows.push(sub(p, which.title(), Some(which.desc()), control));
+    }
+    shell(p)
+        .child(card_body(p, L::Sparkles, t!("HyperGlass ayarları").into(), Some(t!("Cam görünümünü ayarlayın. Değişiklikler açık tüm pencerelerde hemen görünür.").into()), Some(reset)))
+        .child(div().h(px(1.)).bg(p.divider))
+        .child(v_flex().py_1().children(rows))
+        .into_any_element()
+}
+
 fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     let mut v = vec![
         card(
@@ -758,6 +969,10 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             sw("scrollbar", p, s.show_scrollbar, |s, v| s.show_scrollbar = v),
         ),
     ];
+    // HyperGlass look, right under the backdrop card (index 1) while Glass is the material
+    if s.backdrop == BackdropPref::Glass || crate::glass::forced() {
+        v.insert(2, hyperglass_card(p, s, cx));
+    }
     // tint swatches
     let tint = s.tint;
     let pp = *p;
@@ -2373,5 +2588,81 @@ mod search_tests {
         assert_eq!(titles("ÖNİZLEME"), vec!["Önizleme paneli"]);
         assert_eq!(titles("ilerleme"), vec!["İlerleme çubuğu"]);
         assert!(titles("   ").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod hyperglass_tests {
+    use super::{Hg, SLIDER_W, THUMB, slider_key, slider_value_at};
+    use crate::settings::Settings;
+
+    #[test]
+    fn the_thumbs_travel_maps_to_0_through_100() {
+        // a slider at x = 100: the thumb's centre runs from 100 + 9 to 100 + 220 - 9
+        let at = |x: f32| slider_value_at(x, 100.0, SLIDER_W);
+        assert_eq!(at(100.0), 0, "left of the track");
+        assert_eq!(at(100.0 + THUMB / 2.0), 0);
+        assert_eq!(at(100.0 + SLIDER_W - THUMB / 2.0), 100);
+        assert_eq!(at(100.0 + SLIDER_W + 500.0), 100, "far right of the track, as a drag goes on past the end");
+        assert_eq!(at(-300.0), 0);
+        let mid = at(100.0 + SLIDER_W / 2.0);
+        assert_eq!(mid, 50, "the middle of the track is the middle of the range");
+        // the thumb drawn for a value is under the pointer that gave it
+        for v in [0u8, 1, 37, 52, 99, 100] {
+            let centre = 100.0 + f32::from(v) / 100.0 * (SLIDER_W - THUMB) + THUMB / 2.0;
+            assert_eq!(at(centre), v);
+        }
+        // a box too small to hold the thumb does not divide by zero
+        assert_eq!(slider_value_at(5.0, 0.0, 0.0), 0);
+    }
+
+    #[test]
+    fn keys_move_a_slider_by_one_ten_or_to_an_end() {
+        assert_eq!(slider_key(50, "right", false), Some(51));
+        assert_eq!(slider_key(50, "up", false), Some(51));
+        assert_eq!(slider_key(50, "left", false), Some(49));
+        assert_eq!(slider_key(50, "down", false), Some(49));
+        assert_eq!(slider_key(50, "right", true), Some(60));
+        assert_eq!(slider_key(50, "left", true), Some(40));
+        assert_eq!(slider_key(50, "pageup", false), Some(60));
+        assert_eq!(slider_key(50, "pagedown", false), Some(40));
+        assert_eq!(slider_key(50, "home", false), Some(0));
+        assert_eq!(slider_key(50, "end", false), Some(100));
+        // at the ends they stay (and are still taken, so the file list does not move)
+        assert_eq!(slider_key(0, "left", false), Some(0));
+        assert_eq!(slider_key(3, "left", true), Some(0));
+        assert_eq!(slider_key(100, "right", false), Some(100));
+        assert_eq!(slider_key(95, "pageup", false), Some(100));
+        // a value the file had out of range counts as 100
+        assert_eq!(slider_key(200, "left", false), Some(99));
+        // other keys are not the slider's
+        assert_eq!(slider_key(50, "a", false), None);
+        assert_eq!(slider_key(50, "enter", false), None);
+        assert_eq!(slider_key(50, "tab", false), None);
+    }
+
+    #[test]
+    fn each_slider_reads_and_writes_its_own_setting() {
+        let mut s = Settings::default();
+        for (i, which) in Hg::ALL.into_iter().enumerate() {
+            which.set(&mut s, 10 + i as u8);
+        }
+        assert_eq!([s.hg_frost, s.hg_tint, s.hg_refraction, s.hg_saturation, s.hg_surface], [10, 11, 12, 13, 14]);
+        for (i, which) in Hg::ALL.into_iter().enumerate() {
+            assert_eq!(which.get(&s), 10 + i as u8);
+            assert_eq!(which as usize, i, "the slider id is the position on the card");
+        }
+        // a number out of range is cut on both sides
+        Hg::Frost.set(&mut s, 250);
+        assert_eq!(s.hg_frost, 100);
+        s.hg_tint = 180;
+        assert_eq!(Hg::Tint.get(&s), 100);
+    }
+
+    #[test]
+    fn every_label_and_description_is_there() {
+        for which in Hg::ALL {
+            assert!(!which.title().is_empty() && !which.desc().is_empty());
+        }
     }
 }
