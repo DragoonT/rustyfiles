@@ -60,6 +60,7 @@ mod capture;
 #[doc(hidden)]
 pub mod check;
 mod cover;
+mod crossproc;
 mod engine;
 mod geom;
 mod gpu;
@@ -503,6 +504,7 @@ pub(crate) fn fail(hwnd: isize, why: &str) {
     };
     forget_lenses(hwnd);
     lumas().remove(&hwnd);
+    crossproc::mark(hwnd, false);
     if present {
         let _ = set_affinity(hwnd, false);
         lift_extras_if_idle();
@@ -555,7 +557,10 @@ pub fn attach_with(hwnd: isize, opts: GlassOptions) -> bool {
     forget_lenses(hwnd);
     lumas().remove(&hwnd);
     states().insert(hwnd, GlassState::Starting);
+    // the other processes of ours find this window by the mark and leave it out of their pictures when it is above one of theirs
+    crossproc::mark(hwnd, true);
     if !send(Cmd::Attach { hwnd, opts }) {
+        crossproc::mark(hwnd, false);
         if affinity {
             let _ = set_affinity(hwnd, false);
         }
@@ -587,6 +592,7 @@ pub fn set_options(hwnd: isize, opts: GlassOptions) {
 pub fn detach(hwnd: isize) {
     let had = states().remove(&hwnd).is_some();
     lumas().remove(&hwnd);
+    crossproc::mark(hwnd, false);
     set_rim_cap(hwnd, None);
     forget_lenses(hwnd);
     // The engine lifts the window's capture exclusion itself, AFTER it has taken its target off the window: lifted earlier, one more

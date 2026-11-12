@@ -188,6 +188,9 @@ pub(super) fn probe_window(h: isize) -> WinProbe {
 pub(super) struct Exclusion {
     attached: BTreeSet<isize>,
     extras: BTreeSet<isize>,
+    /// Glass windows of OTHER processes of ours that lie above one of ours (see `crossproc.rs`): they are in the list a session is sent,
+    /// but they are not "listed" in the sense of `listed` (this process does not own them: no visibility record, no staleness check).
+    foreign: BTreeSet<isize>,
     /// Listed windows last seen visible.
     shown: BTreeSet<isize>,
     version: u64,
@@ -329,13 +332,37 @@ impl Exclusion {
         &self.extras
     }
 
+    /// Replaces the windows of other processes that are left out. A change is a new version to send; the same set sends nothing.
+    pub(super) fn set_foreign(&mut self, foreign: &BTreeSet<isize>) -> bool {
+        if self.foreign == *foreign {
+            return false;
+        }
+        self.foreign = foreign.clone();
+        self.bump();
+        true
+    }
+
+    pub(super) fn has_foreign(&self) -> bool {
+        !self.foreign.is_empty()
+    }
+
     pub(super) fn version(&self) -> u64 {
         self.version
     }
 
-    /// The list a session is given: attached windows and extras, each once, in order.
+    /// The list a session is given: attached windows, extras and the windows of other processes, each once, in order.
+    #[cfg(test)]
     pub(super) fn list(&self) -> Vec<isize> {
-        self.attached.union(&self.extras).copied().collect()
+        self.list_for(true)
+    }
+
+    /// The same list with or without the windows of other processes (a session that was refused them sends it without).
+    pub(super) fn list_for(&self, with_foreign: bool) -> Vec<isize> {
+        let mut all: BTreeSet<isize> = self.attached.union(&self.extras).copied().collect();
+        if with_foreign {
+            all.extend(self.foreign.iter().copied());
+        }
+        all.into_iter().collect()
     }
 }
 
@@ -500,6 +527,8 @@ pub(super) struct SessionMonitor {
     arrived: Arc<AtomicU64>,
     /// The exclusion version last sent to this session.
     sent: Option<u64>,
+    /// The capture service refused a list with windows of other processes: they are left out of the lists of this session from now on.
+    foreign_refused: bool,
     /// The number the last `SetWindowExclusionList` returned: frames below it are stale.
     last_set: u64,
     /// The iteration of the last frame that was used: a different one means the list changed, and the frame is a whole refresh.
@@ -709,6 +738,7 @@ impl SessionMonitor {
             interval_failed,
             arrived,
             sent: None,
+            foreign_refused: false,
             last_set: 0,
             last_iter: None,
             mismatched: 0,
@@ -726,12 +756,15 @@ impl SessionMonitor {
         if self.sent == Some(ex.version()) {
             return Ok(());
         }
-        let ids: Vec<WindowId> = ex.list().into_iter().map(|h| WindowId { Value: h as usize as u64 }).collect();
-        let count = ids.len();
-        let it: IIterable<WindowId> = ids.into();
-        let mut n = 0u64;
+        let live = &self.live;
         let t = std::time::Instant::now();
-        self.live.disp.SetWindowExclusionList(it.as_raw(), &mut n).ok().map_err(|e| Self::backend(format!("SetWindowExclusionList: {e}")))?;
+        let (n, count) = super::crossproc::send_list(&mut self.foreign_refused, ex.has_foreign(), |with_foreign| {
+            let ids: Vec<WindowId> = ex.list_for(with_foreign).into_iter().map(|h| WindowId { Value: h as usize as u64 }).collect();
+            let count = ids.len();
+            let it: IIterable<WindowId> = ids.into();
+            let mut n = 0u64;
+            live.disp.SetWindowExclusionList(it.as_raw(), &mut n).ok().map(|()| (n, count)).map_err(|e| Self::backend(format!("SetWindowExclusionList: {e}")))
+        })?;
         self.last_set_time = t.elapsed();
         log::debug!("glass: exclusion list of {count} windows sent, iteration {n}, {:?}", self.last_set_time);
         self.last_set = n;

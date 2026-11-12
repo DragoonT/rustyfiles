@@ -337,7 +337,8 @@ screen: the person who wrote it could not show a window). Off: everything above 
   over the first half of the time, the panel's content (the pages, the account row) fades in over the second half and, closing, goes
   first; the search field travels from its place in the island to the top of the panel with the glass. With animations off (the app's
   setting or Windows') the panel is whole in one frame and gone in one frame. `rf_win::dock::grow::arm_done`: the clock starts when the
-  panel's glass is running or after 90 ms.
+  panel's glass is running (at once when the engine has none and is not working on one; after 1000 ms, `ARM_ENGINE_MAX_MS`, only as a
+  net for an engine that neither runs nor fails).
 * HOW IT IS BUILT (`crates/rf-app/src/dock/grow_host.rs`) AND WHAT WAS CHOSEN INSTEAD OF THE ONE-WINDOW DESIGN. The panel keeps its own
   window; hosting its content in the island's window (the island is never activated, the panel must be: keyboard, text field, menus,
   hand-back of the keyboard) was judged too large a change to make without a screen. What changed: the panel's window is as big as
@@ -375,14 +376,50 @@ screen: the person who wrote it could not show a window). Off: everything above 
   (`dock: grow skipped: ...`), and the panel opens the ordinary way, a pop-up above the island with its own 120 ms easing, as with the
   setting off. A click on another island is therefore always outside the panel and closes it, as before. Not an L-shaped glass: the
   glass engine's shape is one rectangle.
+* ONE BOTTOM ROW (`dock/grow_row.rs` pure and tested, `start_row.rs` draws it; the user's "burası böyle olmamış": the grown glass showed the
+  panel's own bottom row AND, under it, the island's row with nothing in it but the logo). While the glass is grown the bottom row of
+  the glass IS the island's row. The logo stays where it is; the account's picture and name stand where the island's search field stood
+  (padding + logo + gap, in dock units); the gear and the power button end at the right edge with the island's padding (8 units), 32 units
+  square with 16 unit pictures and the island's 4 unit gap; the picture is 28 units, the name 14; all on the logo's centre line; the line
+  is the row's top edge across the glass. The panel's own line and row are not drawn and the panel is placed 65 px shorter
+  (`grow::height_without_own_row`, `grow_host::panel_size`): the content area keeps the height it had (the page layout counts the 65 px back in,
+  `grow_host::own_row_given_up`), and the 8 px gap stays inside the glass as room under the content. The row fades in with the
+  content (second half of the opening, first part of the closing). The power menu opens just over its button (`BottomRow::power_menu_bottom`),
+  the menus' backdrops cover the whole window, so the gear is dismissed by a click while a menu is open, as before. The island's window
+  lies over the island's rectangle and takes the pointer there, so where the gear would be under it (a long weather text at the
+  largest dock size: `grow_row::buttons_clear_of_island`) the panel does not grow and keeps its own row. A right click on the island's
+  empty glass is not Task Manager's while the glass is grown (the account's name stands over it), and the island's hidden search field
+  has no hand cursor or hover plate then. The island's width is not changed while the panel is grown out of it (`left.rs`
+  `width_to_report`: a weather text that comes in meanwhile is told when the growth is over), so the check above holds for as long as the
+  panel is open. With the setting off, or where the panel
+  does not grow, the panel keeps its own bottom row, as before. NOT SEEN ON A SCREEN.
 * THE TONE AT THE HAND-OVER. The island's own glass has no wash over it; the panel's has (28 % black, 45 % white in the light theme). The
   panel's wash is drawn with an opacity that follows the glass's growth (`Run::wash_alpha`: 0 while the glass starts and at the first
   frame, 1 at the end, 0 again when the island is home), so the first and the last frame of the motion are the island's glass and nothing
   else and there is no step in its tone. Where the panel's glass never comes (the plain fill) the fill is whole as soon as the clock runs.
+  THE DARK FIRST FRAME (seen in a capture on the user's screen: one frame of an opaque dark box, about 235 x 170, before the glass). The
+  cause, from the order of calls: the clock starts the moment the ENGINE reports the panel's glass running (`arm_step`, every 8 ms), but
+  the panel's view learned it from its `PopupGlass` watch, which looks every 50 ms. For up to 50 ms the view still believed "no glass
+  yet" with the island's glass already put away, and painted the plain fill whole (dark 0x1C1C1E at 82 %, alpha 1) over the growing shape.
+  Now one source decides: `Run::wash(u, engine_running)` is given the engine's report at that frame (`glass_running`, one table lookup
+  per frame drawn), and the view takes both the fill and its opacity from it (`ViewFrame::plain`).
+  THE SECOND WAY TO THE SAME BOX (found by the review, fixed): the old wait gave the engine at most 90 ms (`ARM_MAX_MS`) and then started
+  the clock anyway, which puts the island's glass away; an engine slower than that (the first opening, a busy GPU) left the island with no
+  glass and the panel with a plain dense fill for every frame until the engine caught up. The clock now waits for the engine's own signal:
+  `grow::arm_done(Engine, waited)`: running starts it, `Gone` (the engine refused the window or lost it, `GlassState::Off` or `Failed`)
+  starts it at once with the plain fill (waiting would only delay what is all there is), and `Starting` waits, up to the net of 1000 ms
+  (`ARM_ENGINE_MAX_MS`). THE LONGEST WAIT with a working engine is therefore however long its first frame takes, bounded by 1000 ms; the
+  island stays on the screen exactly as it was meanwhile, so a slow engine costs the press some delay and not a frame of the box. After
+  the net (an engine stuck in "starting" for a whole second) the plain fill is shown, as there is no glass.
+  WHAT IS NOT PROVEN: the cause was read from the order of calls; no capture has been looked at since. The log line at the end of each
+  motion says how many of its frames were drawn with the plain fill (`dock: grow end: opening finished after N frames in ..., M of them
+  with the plain fill`): M should be 0; if it is 0 and a dark frame is still seen, the cause is elsewhere (the first slow render of the
+  grown window, or the window shown before the engine has drawn the new shape) and the log line from `grow start` (`engine Running`/
+  `Starting`, `waited`) says which.
 * PRESSED AGAIN DURING A CLOSING reverses the motion from where it is and keeps what the panel shows (`StartView::on_reopen`: typed text,
   results, page and selection stay, the searches that closing stopped are asked again). With animations off the panel is whole in one
   frame and the island's glass comes back in the closing's deadline like in any closing, before the window is hidden, and the opening
-  waits for the panel's glass (at most 90 ms), not for any motion.
+  waits for the panel's glass (up to the 1000 ms net), not for any motion.
 * LIMITS. The hand-over between the island's glass and the panel's glass (two windows, two presents) may show one frame of either the
   one or the other at the first and the last frame of the motion; the two stand in the same rectangle for a few ms at the end of a
   closing (the window is hidden 60 ms after the motion, the island has its glass back 25 ms after it). The panel's glass is made when the panel opens, as before, so the first 20 to 90 ms after a press are the island as it was

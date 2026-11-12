@@ -216,6 +216,9 @@ use std::rc::Rc;
 // The pages, drawn (a child module: they draw this view's own state).
 #[path = "start_home.rs"]
 mod home;
+// The account, the gear and the power button, in the panel's own bottom row or in the island's (while the island has grown into it).
+#[path = "start_row.rs"]
+mod row;
 
 static WRITER: startpins::OrderedWriter = startpins::OrderedWriter::new();
 
@@ -1266,10 +1269,13 @@ impl Render for StartView {
         }
         let (pal, _) = super::host::frame_palette(&self.island, window);
         let dark = pal.mix < 0.5;
-        let fill = glass_watch::panel_fill(dark, self.popup.as_ref().is_none_or(|g| g.fallback()));
         // The island's glass is growing into this panel (the setting "Başlat adadan büyüyerek açılsın"): the motion decides what is seen
         // (the glass's shape, the content's opacity, the field's place) and the panel's own 120 ms easing stays out of it.
-        let grown = super::grow_host::view_frame(self.popup.as_ref().is_none_or(|g| g.fallback()), cx);
+        let grown = super::grow_host::view_frame(cx);
+        // (whether the plain fill is whole: while the glass grows, the engine's own report at this frame decides, not this view's watch,
+        // which is up to 50 ms late and used to paint one opaque dark frame at the start of the motion, see `Run::wash`)
+        let plain = grown.map_or_else(|| self.popup.as_ref().is_none_or(|g| g.fallback()), |g| g.plain);
+        let fill = glass_watch::panel_fill(dark, plain);
         let frame = match (self.anim, grown) {
             (_, Some(_)) => geo::Frame { opacity: 1.0, drop_px: 0.0, done: true },
             (Some((t, opening)), None) => geo::frame(t.elapsed().as_millis() as u32, opening, crate::settings::animations()),
@@ -1298,14 +1304,18 @@ impl Render for StartView {
             None => self.render_search_field(pal).into_any_element(),
         };
         let travelling_field = travelling.map(|(r, alpha)| div().absolute().left(px(r[0])).top(px(r[1])).w(px(r[2])).opacity(alpha).child(self.search_pill(pal).h(px(r[3]))));
+        // While the island's glass has grown into the panel its bottom row is the glass's one bottom row (`grow_row.rs`, drawn below): the
+        // panel's own line and row are not drawn, and the content above keeps the height it had.
+        let grown_row = grown.and_then(|g| g.row.map(|r| (r, g.content)));
+        let own_row = grown_row.is_none().then(|| (div().h(px(page::DIVIDER_H)).w_full().bg(pal.separator().hsla()), self.render_footer(pal, theme, cx)));
         let rest = v_flex()
             .flex_1()
             .min_h_0()
             .when_some(grown, |d, g| d.opacity(g.content))
             .child(div().flex_1().min_h_0().mt(px(page::SECTION_GAP)).child(body))
             .when_some(notice, |d, n| d.child(div().h(px(page::NOTICE_H)).flex_shrink_0().px(px(PAD)).flex().items_center().text_xs().text_color(pal.text_secondary().hsla()).truncate().child(n)))
-            .child(div().h(px(page::DIVIDER_H)).w_full().bg(pal.separator().hsla()))
-            .child(self.render_footer(pal, theme, cx));
+            .when_some(own_row, |d, (line, footer)| d.child(line).child(footer));
+        let island_row = grown_row.map(|(row, content)| self.render_grown_row(row, content, pal, theme, cx));
         let content = v_flex()
             .size_full()
             .when(grown.is_none(), |d| d.opacity(frame.opacity).mt(px(frame.drop_px)))
@@ -1329,7 +1339,10 @@ impl Render for StartView {
             // a click anywhere in the panel leaves the keyboard in the field: typing goes there wherever the click was
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| this.focus_field(window, cx)))
             .children(wash)
-            .child(div().absolute().top_0().left_0().right_0().bottom(px(extra)).child(content).children(travelling_field).children(overlays))
+            .child(div().absolute().top_0().left_0().right_0().bottom(px(extra)).child(content).children(travelling_field))
+            // (the glass's one bottom row is in the part the content leaves; the menus and their backdrops come after it, over all of it)
+            .children(island_row)
+            .child(div().absolute().inset_0().children(overlays))
             .into_any_element()
     }
 }
@@ -1464,7 +1477,10 @@ impl StartView {
         let border = pal.separator().hsla();
         let size = window.viewport_size();
         // (the window is taller than the panel by the gap and the island's row while the island's glass has grown into it)
-        let (view_w, view_h) = (f32::from(size.width), f32::from(size.height) - super::grow_host::extra_bottom(cx));
+        let extra_bottom = super::grow_host::extra_bottom(cx);
+        let (view_w, view_h) = (f32::from(size.width), f32::from(size.height) - extra_bottom);
+        // the power menu opens just over its button: in the panel's own bottom row, or in the island's row while the glass has grown
+        let (power_right, power_bottom) = super::grow_host::bottom_row(cx).map_or((PAD, BOTTOM_H + 6.0), |r| (r.right_margin, r.power_menu_bottom()));
         let item = move |id: (&'static str, usize), icon: L, label: &'static str, hot: bool| {
             h_flex()
                 .id(id)
@@ -1549,6 +1565,8 @@ impl StartView {
                         .id("start-power-confirm")
                         .absolute()
                         .inset_0()
+                        // (in the middle of the panel's own part of the window, not of the glass's bottom row)
+                        .bottom(px(extra_bottom))
                         .flex()
                         .items_center()
                         .justify_center()
@@ -1578,8 +1596,8 @@ impl StartView {
                 let mut col = v_flex()
                     .id("start-power-menu")
                     .absolute()
-                    .right(px(PAD))
-                    .bottom(px(BOTTOM_H + 6.0))
+                    .right(px(power_right))
+                    .bottom(px(power_bottom))
                     .w(px(MENU_W))
                     .p(px(6.))
                     .rounded(theme::RADIUS)

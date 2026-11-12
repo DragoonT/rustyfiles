@@ -28,6 +28,7 @@
 
 use super::layout::Rect;
 use super::panel::Side;
+use super::startpage;
 
 /// Opening takes this long (ms) from the island to the panel.
 pub const OPEN_MS: u32 = 220;
@@ -37,8 +38,28 @@ pub const CLOSE_MS: u32 = 160;
 pub const ISLAND_FADE_END: f32 = 0.5;
 /// The panel's content starts to appear at this `s` and is whole at 1.
 pub const CONTENT_FADE_START: f32 = 0.5;
-/// The longest the clock waits for the panel's glass to run before it starts anyway (ms).
-pub const ARM_MAX_MS: u64 = 90;
+/// The longest the clock waits for a glass the engine has ACCEPTED and is still starting (ms), before it gives the engine up and starts
+/// with the plain fill. It is a net for an engine that neither runs nor fails: the wait normally ends at the engine's own signal (its
+/// first frame presented), a few ms to a few tens of ms after the panel is shown. During the wait the island is on the screen exactly as
+/// it was, so a slow engine costs the press some delay and never a frame of the dark box.
+pub const ARM_ENGINE_MAX_MS: u64 = 1000;
+
+/// What the Start panel gives up when it grows out of the left island: its own bottom row (the line above it and the 64 px row with the
+/// account, the gear and the power button). The glass's bottom row is the island's row then, and those three stand in IT
+/// (`rf-app`'s `dock/grow_row.rs`), so the glass is this much shorter than the panel was and the content above keeps the height it had.
+pub const OWN_ROW_H: f32 = startpage::DIVIDER_H + startpage::FOOTER_H;
+
+/// The height (logical px) a panel that gives up its own bottom row is placed with, from the height it would have had with it: the
+/// content above keeps the height it had, the row is the island's. At least 1.
+pub fn height_without_own_row(h: f32) -> f32 {
+    (h - OWN_ROW_H).max(1.0)
+}
+
+/// The inverse for the page layout: the panel's height as the layout worked it out before (`startpage::home_layout` counts the line and
+/// the row as part of its chrome), from the height of the content area above the island's row.
+pub fn height_with_own_row(content_h: f32) -> f32 {
+    content_h + OWN_ROW_H
+}
 
 /// A rectangle as x, y, w, h in device px (the shape the glass engine takes).
 pub type FRect = [f32; 4];
@@ -198,6 +219,14 @@ pub struct Frame {
     pub field: Option<FRect>,
 }
 
+/// The panel's wash over its glass: how opaque it is, and whether it is the PLAIN fill (the dense one a window with no glass paints) or
+/// the thin wash that goes over a running glass.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Wash {
+    pub alpha: f32,
+    pub plain: bool,
+}
+
 /// The clock of one growth: where `s` is, and where it is going. Time is milliseconds on any steady clock, passed in.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Motion {
@@ -249,10 +278,27 @@ impl Motion {
     }
 }
 
-/// Whether the clock may start now: the panel's glass is running, or the wait has been long enough (a panel whose glass does not come
-/// opens all the same, with its plain fill, rather than never).
-pub fn arm_done(glass_running: bool, waited_ms: u64) -> bool {
-    glass_running || waited_ms >= ARM_MAX_MS
+/// What the glass engine says about the panel's window (`rf_win::glass::state`, read by the host).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Engine {
+    /// Its first frame has been presented: the glass is on the window.
+    Running,
+    /// The engine accepted the window and has not drawn it yet.
+    Starting,
+    /// The window has no glass and the engine is not working on one (refused, failed or lost): the plain fill is all there is.
+    Gone,
+}
+
+/// Whether the clock may start now. The island's own glass is put away the moment it starts, so it must not start before the panel's
+/// glass has a frame on the screen: with the engine STARTING the clock waits for the engine's own signal (the limit is only a net,
+/// [`ARM_ENGINE_MAX_MS`]; an earlier fixed limit of 90 ms put the island's glass away from under a slow engine and showed an opaque
+/// dark box until the engine caught up). With the engine GONE no glass is coming, waiting would only delay the plain fill, so it starts
+/// at once.
+pub fn arm_done(engine: Engine, waited_ms: u64) -> bool {
+    match engine {
+        Engine::Running | Engine::Gone => true,
+        Engine::Starting => waited_ms >= ARM_ENGINE_MAX_MS,
+    }
 }
 
 /// The panel's window cuts its own corners (the glass, and the window region that follows the glass), so the system's rounding and its
@@ -429,6 +475,18 @@ impl Run {
             Phase::Running => u.clamp(0.0, 1.0),
             Phase::Arming | Phase::Closed => 0.0,
         }
+    }
+
+    /// What the panel paints over its glass at this moment of the motion, from what the ENGINE reports for the panel's window right now
+    /// (`engine_running`: its first frame has been presented and it has not been lost since).
+    ///
+    /// WHY THE ENGINE AND NOT THE VIEW'S OWN BELIEF. The clock starts the moment the engine says it runs (`arm_done`, looked at every
+    /// 8 ms), but the panel's view learns it from `PopupGlass::tick`, which a watch calls every 50 ms. For up to those 50 ms the view
+    /// still believed "no glass yet" while the island's own glass had already been put away, and painted the plain fill WHOLE (dark
+    /// 0x1C1C1E at 82 %, `Run::wash_alpha`'s "a glass that never came" case) over the growing shape: one opaque dark box before the
+    /// first glass frame. The decision is made from one source now, the one the clock waited for.
+    pub fn wash(&self, u: f32, engine_running: bool) -> Wash {
+        Wash { alpha: self.wash_alpha(u, !engine_running), plain: !engine_running }
     }
 
     /// The deadline of a motion.
@@ -658,10 +716,12 @@ mod tests {
 
     #[test]
     fn the_clock_waits_for_the_glass_but_not_for_ever() {
-        assert!(!arm_done(false, 0));
-        assert!(!arm_done(false, ARM_MAX_MS - 1));
-        assert!(arm_done(false, ARM_MAX_MS));
-        assert!(arm_done(true, 0));
+        assert!(!arm_done(Engine::Starting, 0));
+        assert!(!arm_done(Engine::Starting, ARM_ENGINE_MAX_MS - 1));
+        assert!(arm_done(Engine::Starting, ARM_ENGINE_MAX_MS));
+        assert!(arm_done(Engine::Running, 0));
+        // no glass is coming: the plain fill is all there is, and nothing is gained by waiting
+        assert!(arm_done(Engine::Gone, 0));
     }
 
     /// The window region follows the glass: at the first frame only the island takes the pointer, at the last the whole panel does, and
@@ -833,6 +893,72 @@ mod tests {
         r.settle(160);
         assert_eq!(r.phase, Phase::Closed);
         assert_eq!(r.wash_alpha(u(0.0), false), 0.0, "home: the island's glass is back, the wash is gone");
+    }
+
+    /// What the wash is at each moment of the motion for a running glass (thin, coming in with the growth) and for none (plain, whole).
+    /// The rule that it is picked from the ENGINE'S report at the frame and not from the view's belief (a watch that looks every 50 ms)
+    /// is in the host (`view_frame`) and is not provable here; this pins the values and the home case.
+    #[test]
+    fn the_wash_is_thin_over_a_running_glass_and_whole_and_plain_only_where_there_is_none() {
+        let (_, _, spec) = setup(1.0, 1.0, Side::Left);
+        let mut r = Run::new(true);
+        // the glass has not come: nothing is drawn behind the island, plain or not
+        assert_eq!(r.wash(spec.at(0.0).u, false), Wash { alpha: 0.0, plain: true });
+        r.start(1_000);
+        // the clock has just started because the engine runs: every frame of the motion is a thin wash that comes in with the growth
+        for i in 0..=100 {
+            let w = r.wash(spec.at(i as f32 / 100.0).u, true);
+            assert!(!w.plain, "i={i}: the engine runs, so the dense fill must never be painted");
+            assert!(w.alpha <= 1.0 && w.alpha >= 0.0);
+        }
+        assert_eq!(r.wash(spec.at(0.0).u, true), Wash { alpha: 0.0, plain: false }, "the first frame is the island's glass, nothing over it");
+        let early = r.wash(spec.at(0.03).u, true);
+        assert!(early.alpha < 0.3 && !early.plain, "a few ms in, the wash is still faint: {early:?}");
+        // a glass that never came (the wait ran out), or one lost during the motion: the plain fill is all there is, whole
+        assert_eq!(r.wash(spec.at(0.3).u, false), Wash { alpha: 1.0, plain: true });
+        // home again: nothing
+        r.begin_close(1_000);
+        r.settle(1_160);
+        assert_eq!(r.wash(spec.at(0.0).u, true), Wash { alpha: 0.0, plain: false });
+    }
+
+    /// THE DARK BOX OF A SLOW ENGINE. The island's glass is put away when the clock starts; if the clock starts while the engine is still
+    /// starting (the old rule did, 90 ms after the panel was shown) the panel's wash is the plain, dense fill over a shape with no glass
+    /// under it. So whenever the clock may start without the engine running, the engine must be gone for good (the plain fill is the
+    /// right picture then) or the net must have run out, and a slow engine alone (anything below the net) never starts it. With the old
+    /// rule `arm_done(false, 90)` was true: a 90 ms start of the engine showed the box.
+    #[test]
+    fn a_slow_engine_never_gets_the_island_put_away_from_under_it() {
+        for waited in [0, 8, 90, 91, 200, 500, ARM_ENGINE_MAX_MS - 1] {
+            assert!(!arm_done(Engine::Starting, waited), "{waited} ms and the engine is still starting");
+        }
+        // only the net (an engine that neither runs nor fails for a whole second) starts it with the plain fill, and the longest wait is
+        // the one the docs and the log promise
+        assert!(arm_done(Engine::Starting, ARM_ENGINE_MAX_MS));
+        assert_eq!(ARM_ENGINE_MAX_MS, 1000);
+    }
+
+    /// The glass of a panel that grows out of the left island is one row shorter than the panel was: the line and the 64 px row are
+    /// the island's row now, and the content above keeps the height it had (the layout is worked out from the height it had).
+    #[test]
+    fn a_growing_start_panel_gives_up_its_own_bottom_row_and_the_content_keeps_its_height() {
+        assert_eq!(OWN_ROW_H, 65.0);
+        assert_eq!(height_without_own_row(720.0), 655.0);
+        assert_eq!(height_with_own_row(655.0), 720.0, "the layout sees the height the panel had");
+        for h in [720.0, 540.0, 300.0, 400.5] {
+            assert_eq!(height_with_own_row(height_without_own_row(h)), h);
+        }
+        // a screen with next to no room: never zero or negative
+        assert_eq!(height_without_own_row(1.0), 1.0);
+        assert_eq!(height_without_own_row(40.0), 1.0);
+        // on the user's screen: the glass is 65 px shorter than the 776 it was (panel 720 + 8 gap + 48 island) and still holds the island
+        let (island, panel_rect, spec) = setup(1.0, 1.0, Side::Left);
+        let work = Rect::new(0, 0, 2560, 1392);
+        let shorter = panel::place(island, (startpage::PANEL_W, height_without_own_row(startpage::PANEL_MAX_H)), 1.0, Side::Left, work);
+        assert_eq!(shorter.bottom, panel_rect.bottom, "still 8 px above the island");
+        let grown = grown_rect(island, shorter);
+        assert_eq!(grown.height(), spec.grown.height() - 65);
+        assert_eq!(grown.bottom, island.bottom);
     }
 
     #[test]

@@ -122,6 +122,11 @@ impl LeftIsland {
     /// A right click at `at` (the window's logical px): on the island's empty glass it starts Task Manager; on the logo or the field it is
     /// theirs and does nothing here.
     fn right_click(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        // While the glass has grown into the Start panel this row is its bottom row: the account's name stands over what is the island's
+        // empty glass at rest, and a right click on it is not a request for Task Manager.
+        if super::grow_host::island_fade(Kind::Left, cx).is_some() {
+            return;
+        }
         let k = super::look::dock_size(cx);
         let [ml, mt, ..] = super::host::insets(Kind::Left, cx).margins;
         let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
@@ -130,10 +135,14 @@ impl LeftIsland {
         }
     }
 
+    /// Tells the host the width the content needs now. Not while the Start panel is grown out of this island: the grown glass, the place
+    /// of its gear and power button and the check that the island does not lie over them (`grow_host::fits`) were made for the width the
+    /// island had when the panel opened, and a weather text that came in meanwhile would widen the island's window over them. The
+    /// width is told when the growth is over (`render` asks again then).
     fn report_width(&mut self, cx: &mut Context<Self>) {
         self.sync_room(cx);
-        let w = self.width();
-        if (w - self.reported).abs() > 0.5 {
+        let growing = super::grow_host::growing_from(Kind::Left, cx);
+        if let Some(w) = width_to_report(self.reported, self.width(), growing) {
             self.reported = w;
             super::host::set_width(Kind::Left, w, cx);
         }
@@ -202,6 +211,12 @@ impl LeftIsland {
         })
         .detach();
     }
+}
+
+/// The width (logical px) to tell the host, if any: the content's width when it differs from the one told last, and never while a panel
+/// is growing out of the island.
+fn width_to_report(reported: f32, wanted: f32, growing: bool) -> Option<f32> {
+    (!growing && (wanted - reported).abs() > 0.5).then_some(wanted)
 }
 
 fn picture_icon(p: WeatherPicture) -> L {
@@ -280,6 +295,11 @@ impl Render for LeftIsland {
             window.request_animation_frame();
         }
         let fallback = fallback && grown.is_none();
+        // a width that was held back while the panel grew out of this island is told now (not from inside the render: after it)
+        if width_to_report(self.reported, self.width(), super::grow_host::growing_from(Kind::Left, cx)).is_some() {
+            let me = cx.entity();
+            cx.defer(move |cx| me.update(cx, |l, cx| l.report_width(cx)));
+        }
         let (others, field_hidden) = grown.map_or((1.0, false), |g| (g.others, g.field_hidden));
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
         let k = super::look::dock_size(cx);
@@ -317,10 +337,10 @@ impl Render for LeftIsland {
             .items_center()
             .rounded_full()
             .bg(pal.field_fill().hsla())
-            .cursor_pointer()
-            .hover(move |s| s.bg(pressed))
-            // (away: the panel's field stands in its place; it keeps its room, so the weather does not move)
+            // (away: the panel's field stands in its place and the account's picture and name stand over this spot: no hand and no
+            // hover plate for a click that does nothing; it keeps its room, so the weather does not move)
             .when(field_hidden, |d| d.opacity(0.0))
+            .when(!field_hidden, |d| d.cursor_pointer().hover(move |s| s.bg(pressed)))
             .child(Icon::new(L::Search).size(px(14. * k)).flex_shrink_0().text_color(secondary))
             // what is being typed in the panel above is shown here too; the panel's own field takes the keys (this window is never
             // activated, so it cannot)
@@ -373,7 +393,18 @@ impl Render for LeftIsland {
 
 #[cfg(test)]
 mod tests {
-    use super::{WeatherPicture, picture_icon};
+    use super::{WeatherPicture, picture_icon, width_to_report};
+
+    /// A weather text that comes in while the Start panel is grown out of the island must not widen the island's window (over the gear
+    /// and the power button): the width is held back and told once the growth is over.
+    #[test]
+    fn the_islands_width_is_not_changed_while_a_panel_is_grown_out_of_it() {
+        assert_eq!(width_to_report(330.0, 372.0, true), None, "held back while it grows");
+        assert_eq!(width_to_report(330.0, 372.0, false), Some(372.0), "told when it is over");
+        assert_eq!(width_to_report(330.0, 330.2, false), None, "a change below half a pixel is no change");
+        assert_eq!(width_to_report(372.0, 330.0, true), None);
+        assert_eq!(width_to_report(372.0, 330.0, false), Some(330.0));
+    }
 
     #[test]
     fn different_conditions_get_different_pictures() {

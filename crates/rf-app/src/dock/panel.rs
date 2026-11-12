@@ -376,9 +376,12 @@ fn open_panel(id: PanelId, cx: &mut App) {
     let Some(glass) = host::visible_glass_rect(kind, cx) else { return };
     let dark = dark_now(&island);
     // A panel that grows out of its island (the Start panel with its setting on) has a window as big as the grown glass; see grow_host.rs.
-    let panel_rect = geo::place(glass, hooks.size(cx), scale, side, work);
+    let size = hooks.size(cx);
+    let panel_rect = geo::place(glass, size, scale, side, work);
     // (not where the grown glass would lie under another island: that screen opens the panel the ordinary way, see `grow_host::fits`)
     let grow_cfg = grow_host::config(id, cx).filter(|cfg| grow_host::fits(*cfg, glass, panel_rect, scale, cx));
+    // (a panel that grows gives up its own bottom row, the island's row is its bottom row: placed with the smaller height)
+    let panel_rect = grow_cfg.map_or(panel_rect, |cfg| geo::place(glass, grow_host::panel_size(cfg, size), scale, side, work));
     // pressed again while the panel shrinks back into its island: the motion turns round and the panel keeps what it shows
     let reversal = grow_cfg.is_some() && grow_host::is_closing(id, cx);
     let grown = grow_cfg.and_then(|cfg| grow_host::prepare(grow_host::Prep { id, cfg, side, island_glass: glass, panel: panel_rect, hwnd, island: island.clone(), dark, scale }, cx));
@@ -425,7 +428,8 @@ fn open_panel(id: PanelId, cx: &mut App) {
         hooks.on_open(dark, cx);
     }
     // the rectangle again: opening may have changed what the panel wants to show (its height)
-    let panel_rect = geo::place(glass, hooks.size(cx), scale, side, work);
+    let size = hooks.size(cx);
+    let panel_rect = geo::place(glass, grow_cfg.map_or(size, |cfg| grow_host::panel_size(cfg, size)), scale, side, work);
     let grown = grow_cfg.and_then(|cfg| grow_host::prepare(grow_host::Prep { id, cfg, side, island_glass: glass, panel: panel_rect, hwnd, island: island.clone(), dark, scale }, cx));
     let rect = grown.unwrap_or(panel_rect);
     cx.global_mut::<PanelHost>().rect = rect;

@@ -25,12 +25,21 @@
 //! * The island's search field is not drawn while it is away; the panel's field is drawn in its place and travels (the panel's view
 //!   does it: `start.rs` asks [`view_frame`] for the field's rectangle). The weather fades with [`island_fade`].
 //!
+//! * ONE BOTTOM ROW (`Stays::Logo`, the Start panel). The panel's own bottom row (the account, the gear, the power button and the line
+//!   above them) is not drawn while the glass is grown: the glass's bottom row is the island's, and the three stand in it (`grow_row.rs`
+//!   has the numbers, `start_row.rs` draws them). The panel is placed [`panel_size`] shorter, so the content keeps the height it had.
+//! * THE PLAIN FILL FOLLOWS THE ENGINE. Whether the panel paints its dense plain fill (a glass that is not there) or the thin wash over a
+//!   running glass is decided in [`view_frame`] from the engine's own report at that frame, the same signal the clock waited for. The
+//!   view's `PopupGlass` learns it from a watch every 50 ms; until it did, the first frames of the motion were an opaque dark box. A
+//!   frame drawn with the plain fill while the clock runs is counted and the count is in the log line at the end of the motion.
+//!
 //! WHERE IT DOES NOT HAPPEN. The grown glass is as wide as the panel down to the island's row. Where another island begins inside that
 //! width ([`fits`]: 1920 px wide at 125 %, 1366 or 1600 px at 100 %) the glass would lie under that island, so the panel opens the
 //! ordinary way there (one info line says why). The glass engine's shape is one rectangle: no L-shaped glass.
 //!
-//! THE CLOCK. [`rf_win::dock::grow::Run`] (phase, clock, animate; pure and tested) is started when the panel's glass is RUNNING (or
-//! after `grow::ARM_MAX_MS` = 90 ms, so a glass that never comes does not hold the panel back): until then the island's own glass is
+//! THE CLOCK. [`rf_win::dock::grow::Run`] (phase, clock, animate; pure and tested) is started when the panel's glass is RUNNING (at once
+//! when the engine has none and is not working on one; and, as a net for an engine that neither runs nor fails, after
+//! `grow::ARM_ENGINE_MAX_MS` = 1000 ms: the wait is for the engine's own signal, see `grow::arm_done`): until then the island's own glass is
 //! still the visible one and the panel is only its own rectangle (with no wash), so the hand-over from one glass to the other happens at
 //! the first frame of the motion, where they are the same rectangle with the same radius, not in the middle of it. With animations off
 //! the wait is the same (for the glass, not for time) and the panel is whole in one frame; its closing is one frame too and the island
@@ -73,6 +82,7 @@ use rf_win::dock::panel::{PanelId, Side};
 use rf_win::glass::GlassOptions;
 
 use super::backdrop::{self, IslandGlass};
+use super::grow_row::{self, BottomRow};
 use super::host::{self, Kind};
 use super::plan;
 use crate::settings::Settings;
@@ -102,6 +112,12 @@ pub fn active_for(id: PanelId, cx: &App) -> bool {
     grow_ref(cx).is_some_and(|g| g.id == id)
 }
 
+/// Whether a panel is growing out of the island `kind` (from the moment it is prepared until it is put away), in any phase. The island's
+/// width is not changed meanwhile: see `left.rs` (the grown glass was laid out for the width it had).
+pub fn growing_from(kind: Kind, cx: &App) -> bool {
+    grow_ref(cx).is_some_and(|g| g.cfg.kind == kind)
+}
+
 struct Grow {
     id: PanelId,
     cfg: Cfg,
@@ -115,9 +131,15 @@ struct Grow {
     scale: f32,
     /// How far the grown glass reaches below the panel's own rectangle (the gap and the island's row), device px.
     extra: i32,
+    /// The ONE bottom row of the glass (the island's row, with the account, the gear and the power button in it), for a panel that
+    /// gives up its own bottom row (`Stays::Logo`); `None` for one that keeps it.
+    row: Option<BottomRow>,
     shown_at: Instant,
     began: Instant,
     frames: u32,
+    /// How many of those frames were drawn with the PLAIN fill (the engine did not report the glass as running at that frame): zero is
+    /// what a good opening has; the count is logged at the end of the motion so a live run says whether the dark box came back.
+    plain_frames: u32,
     /// The last shape and radius queued for the window, and its area (to send the smaller glass before the smaller region).
     sent: Option<(FRect, f32)>,
     arm: Option<Task<()>>,
@@ -240,6 +262,15 @@ fn field_places(island: Rect, panel: Rect, unit: f32, scale: f32) -> (FRect, FRe
 pub fn fits(cfg: Cfg, island_glass: Rect, panel: Rect, scale: f32, cx: &App) -> bool {
     let grown = grow::grown_rect(island_glass, panel);
     let margin = layout::px(rf_win::dock::panel::GAP, scale);
+    // The panel's gear and power button stand in the island's row, and the island's window (raised above the panel's) takes the pointer
+    // over its whole rectangle: where it would lie over them (a long weather text at the largest dock size) they could not be clicked.
+    if cfg.stays == Stays::Logo
+        && let Some(unit) = host::dock_unit(cx)
+        && !grow_row::buttons_clear_of_island(island_glass, grown, unit, scale)
+    {
+        log::info!("dock: grow skipped: the island ({} px wide) would lie over the gear and the power button; the panel opens as an ordinary pop-up", island_glass.width());
+        return false;
+    }
     for kind in [Kind::Left, Kind::Middle, Kind::Right] {
         if kind == cfg.kind {
             continue;
@@ -262,6 +293,16 @@ pub fn fits(cfg: Cfg, island_glass: Rect, panel: Rect, scale: f32, cx: &App) -> 
     true
 }
 
+/// The size (logical px) a panel that grows is placed with, from the size it would have as an ordinary panel: one that stays as the
+/// logo (the Start panel) gives up its own bottom row, the island's row is its bottom row (`grow_row.rs`), so its content area keeps the
+/// height it had and the glass is one row shorter. The others keep their size.
+pub fn panel_size(cfg: Cfg, size: (f32, f32)) -> (f32, f32) {
+    match cfg.stays {
+        Stays::Logo => (size.0, grow::height_without_own_row(size.1)),
+        Stays::Row => size,
+    }
+}
+
 /// Sets up (or, for a panel that is already growing or shrinking, updates) the growth of a panel that is being opened, and returns the
 /// panel window's rectangle: the grown rectangle. `None` when there is no layout yet; the panel then opens as an ordinary one.
 /// Opening it again while it is closing keeps the clock where it is and turns it round.
@@ -274,6 +315,7 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
     }
     let grown = spec.grown;
     let extra = grown.bottom - p.panel.bottom;
+    let row = (p.cfg.stays == Stays::Logo).then(|| grow_row::bottom_row(p.island_glass, grown, unit, p.scale));
     let animate = crate::settings::animations();
     let now = backdrop::now_ms();
     if let Some(g) = grow_mut(cx)
@@ -283,6 +325,7 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
         // have moved, the clock is kept
         g.spec = spec;
         g.extra = extra;
+        g.row = row;
         g.dark = p.dark;
         g.sent = None;
         if let Again::TurnedBack { from, remaining_ms } = g.run.reopen(now, animate) {
@@ -303,9 +346,11 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
         dark: p.dark,
         scale: p.scale,
         extra,
+        row,
         shown_at: Instant::now(),
         began: Instant::now(),
         frames: 0,
+        plain_frames: 0,
         sent: None,
         arm: None,
         deadline: None,
@@ -357,9 +402,10 @@ pub fn keep_island_above(cx: &App) {
     }
 }
 
-/// The panel is on the screen and its glass has been asked for: the clock starts when the glass runs (or after the glass has had its time,
-/// `grow::ARM_MAX_MS`; with animations off too: the wait is for the glass and not for any motion, so that the island's own glass is
-/// not put away while the panel's is still starting; or at once when the glass is running already: a turn round).
+/// The panel is on the screen and its glass has been asked for: the clock starts when the glass runs (`grow::arm_done`: or at once when
+/// the engine has none and is not working on one; or after `grow::ARM_ENGINE_MAX_MS` for an engine that neither runs nor fails; with
+/// animations off too: the wait is for the glass and not for any motion, so that the island's own glass is not put away while the
+/// panel's is still starting; or at once when the glass is running already: a turn round).
 pub fn shown(cx: &mut App) {
     let Some(g) = grow_mut(cx) else { return };
     g.shown_at = Instant::now();
@@ -388,13 +434,24 @@ fn glass_running(hwnd: isize) -> bool {
     matches!(rf_win::glass::state(hwnd), rf_win::glass::GlassState::Running)
 }
 
+/// What the engine says about the panel's window now. (`attach_with` has put "starting" in the table by the time the panel's view has
+/// handled `on_shown`, which is before `shown` runs, so "off" here is a window the engine refused or lost, not one it has not met yet.)
+fn engine(hwnd: isize) -> grow::Engine {
+    use rf_win::glass::GlassState;
+    match rf_win::glass::state(hwnd) {
+        GlassState::Running => grow::Engine::Running,
+        GlassState::Starting => grow::Engine::Starting,
+        GlassState::Off | GlassState::Failed(_) => grow::Engine::Gone,
+    }
+}
+
 /// One look of the wait for the panel's glass. True when the wait is over.
 fn arm_step(cx: &mut App) -> bool {
     let Some(g) = grow_ref(cx) else { return true };
     if g.run.phase != Phase::Arming {
         return true;
     }
-    if grow::arm_done(glass_running(g.hwnd), g.shown_at.elapsed().as_millis() as u64) {
+    if grow::arm_done(engine(g.hwnd), g.shown_at.elapsed().as_millis() as u64) {
         start_clock(cx);
         return true;
     }
@@ -409,12 +466,14 @@ fn start_clock(cx: &mut App) {
     let rem = g.run.start(now);
     g.began = Instant::now();
     g.frames = 0;
+    g.plain_frames = 0;
     g.arm = None;
     g.island.borrow_mut().set_hidden(true);
     let (a, b) = (g.spec.island, g.spec.grown);
     log::info!(
-        "dock: grow start: opening, {rem} ms (animations {}), glass {}x{} -> {}x{} px, waited {:?} for the glass",
+        "dock: grow start: opening, {rem} ms (animations {}), engine {:?}, glass {}x{} -> {}x{} px, waited {:?} for the glass",
         if g.run.animate { "on" } else { "off" },
+        engine(g.hwnd),
         a.width(),
         a.height(),
         b.width(),
@@ -461,10 +520,11 @@ fn settle(cx: &mut App) {
     let f = g.frame(now);
     let send = g.plan_send(&f);
     log::info!(
-        "dock: grow end: {} finished after {} frames in {:?}",
+        "dock: grow end: {} finished after {} frames in {:?}, {} of them with the plain fill",
         if opening { "opening" } else { "closing" },
         g.frames,
-        g.began.elapsed()
+        g.began.elapsed(),
+        g.plain_frames
     );
     g.deadline = None;
     if !opening {
@@ -566,16 +626,22 @@ pub struct ViewFrame {
     pub wash_radius: f32,
     /// How opaque that fill is: it comes in with the growth (the island's own glass has none), see `Run::wash_alpha`.
     pub wash_alpha: f32,
+    /// The fill is the PLAIN one (the glass is not there). Decided from the engine's own report at this frame (`Run::wash`), not from
+    /// the view's belief, which is up to 50 ms late: see there for the dark first frame that came of it.
+    pub plain: bool,
     /// The height of the grown glass below the panel's own rectangle (the gap and the island's row): the view leaves it empty.
     pub extra_bottom: f32,
+    /// The glass's one bottom row, when the panel has given up its own: the view draws the account, the gear and the power button in it
+    /// (and the line above it) with `content` as their opacity, and no bottom row of its own.
+    pub row: Option<BottomRow>,
     /// Another frame is wanted.
     pub moving: bool,
 }
 
 /// The panel view's frame, and the sending of the glass's shape and the window's region for it. `None`: no growth is going on, the
-/// view draws as an ordinary panel. `glass_fallback`: the panel's glass is not there (the view draws the plain fill whole). Called from
-/// `render`: it queues the sending, it does not touch a window.
-pub fn view_frame(glass_fallback: bool, cx: &mut App) -> Option<ViewFrame> {
+/// view draws as an ordinary panel. Called from `render`: it queues the sending, it does not touch a window. Whether the glass is there
+/// is read from the engine here (a lookup in a table behind a lock, once for each frame drawn).
+pub fn view_frame(cx: &mut App) -> Option<ViewFrame> {
     let now = backdrop::now_ms();
     let g = grow_mut(cx)?;
     let f = g.frame(now);
@@ -584,6 +650,10 @@ pub fn view_frame(glass_fallback: bool, cx: &mut App) -> Option<ViewFrame> {
         g.frames += 1;
     }
     let running = g.run.phase == Phase::Running;
+    let wash = g.run.wash(f.u, glass_running(g.hwnd));
+    if running && wash.plain {
+        g.plain_frames += 1;
+    }
     let scale = g.scale.max(0.1);
     let origin = (g.spec.grown.left as f32, g.spec.grown.top as f32);
     let logical = |r: FRect| [(r[0] - origin.0) / scale, (r[1] - origin.1) / scale, r[2] / scale, r[3] / scale];
@@ -593,8 +663,10 @@ pub fn view_frame(glass_fallback: bool, cx: &mut App) -> Option<ViewFrame> {
         field_alpha: if running { 1.0 } else { 0.0 },
         wash: logical(f.rect),
         wash_radius: f.radius / scale,
-        wash_alpha: g.run.wash_alpha(f.u, glass_fallback),
+        wash_alpha: wash.alpha,
+        plain: wash.plain,
         extra_bottom: g.extra as f32 / scale,
+        row: g.row,
         moving,
     };
     let send = g.plan_send(&f);
@@ -623,6 +695,19 @@ pub fn extra_bottom(cx: &App) -> f32 {
     grow_ref(cx).map_or(0.0, |g| g.extra as f32 / g.scale.max(0.1))
 }
 
+/// The glass's one bottom row while a growth that has one is going on (the menus of the account, the gear and the power button open from
+/// it); `None`: the panel has its own bottom row.
+pub fn bottom_row(cx: &App) -> Option<BottomRow> {
+    grow_ref(cx)?.row
+}
+
+/// The height (logical px) of the bottom row the panel does not draw while its glass is grown (its line and its row: the island's row is
+/// the glass's bottom row then); 0 for a panel that draws its own. The page layout counts it back in, so the content has the height it
+/// had.
+pub fn own_row_given_up(cx: &App) -> f32 {
+    grow_ref(cx).filter(|g| g.row.is_some()).map_or(0.0, |_| grow::OWN_ROW_H)
+}
+
 /// What an island draws while its glass is part of the grown one.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IslandFade {
@@ -649,7 +734,7 @@ pub fn island_fade(kind: Kind, cx: &App) -> Option<IslandFade> {
 #[cfg(test)]
 mod tests {
     // (not `super::*`: that would bring in gpui's own `test` attribute, which shadows the standard one)
-    use super::{Cfg, Corner, Grow, IslandGlass, Instant, Kind, PanelId, Phase, Rc, RefCell, Rect, Run, Settings, Spec, Stays, field_places, hit, screen_rect};
+    use super::{Cfg, Corner, Grow, IslandGlass, Instant, Kind, PanelId, Phase, Rc, RefCell, Rect, Run, Settings, Spec, Stays, field_places, grow_row, hit, panel_size, screen_rect};
 
     #[test]
     fn the_search_field_goes_from_its_place_in_the_island_to_the_top_of_the_panel() {
@@ -668,6 +753,31 @@ mod tests {
         assert!((to[2] - (963.0 - 56.0 * 1.5)).abs() < 1e-3 && (to[3] - 36.0 * 1.5).abs() < 1e-3);
     }
 
+    /// The account's picture stands where the island's search field stood and on the same centre line: the field has gone to the top
+    /// of the panel and the account takes its place in the island's row.
+    #[test]
+    fn the_account_takes_the_place_of_the_islands_search_field_in_the_one_bottom_row() {
+        for (unit, scale) in [(1.0f32, 1.0f32), (1.25, 1.25), (1.8, 1.5)] {
+            // (the island is 48 dock units high, its bottom edge on the work area's)
+            let island = Rect::new(12, 1382 - (48.0 * unit).round() as i32, 342, 1382);
+            let panel = Rect::new(12, 671, 654, island.top - 8);
+            let grown = Rect::new(12, 671, 654, 1382);
+            let (from, _) = field_places(island, panel, unit, scale);
+            let row = grow_row::bottom_row(island, grown, unit, scale);
+            assert!((row.account_left * scale - (from[0] - grown.left as f32)).abs() < 1e-3, "x at {unit} {scale}");
+            // (the field is centred in the island's row, so its middle is the row's middle)
+            assert!((row.centre * scale - (from[1] + from[3] / 2.0 - grown.top as f32)).abs() < 1e-3, "y at {unit} {scale}");
+        }
+    }
+
+    /// The Start panel gives up its own bottom row when it grows; a panel that stays as a whole row keeps its size.
+    #[test]
+    fn only_the_panel_that_stays_as_the_logo_gives_up_its_bottom_row() {
+        let start = Cfg { kind: Kind::Left, stays: Stays::Logo };
+        assert_eq!(panel_size(start, (642.0, 720.0)), (642.0, 655.0));
+        assert_eq!(panel_size(Cfg { kind: Kind::Right, stays: Stays::Row }, (360.0, 500.0)), (360.0, 500.0));
+    }
+
     fn a_growth() -> Grow {
         let island = Rect::new(12, 1334, 342, 1382);
         let panel = Rect::new(12, 606, 654, 1326);
@@ -684,9 +794,11 @@ mod tests {
             dark: true,
             scale: 1.0,
             extra: 56,
+            row: None,
             shown_at: Instant::now(),
             began: Instant::now(),
             frames: 0,
+            plain_frames: 0,
             sent: None,
             arm: None,
             deadline: None,

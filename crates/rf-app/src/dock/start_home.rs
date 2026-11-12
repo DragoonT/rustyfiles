@@ -209,7 +209,8 @@ impl StartView {
             page::REC_MAX
         };
         // (the window is taller than the panel by the gap and the island's row while the island's glass has grown into it: `grow_host.rs`)
-        let panel_h = f32::from(window.viewport_size().height) - crate::dock::grow_host::extra_bottom(cx);
+        // (and a panel that has given up its own bottom row to the island's row has the height it had: the layout counts the row back in)
+        let panel_h = f32::from(window.viewport_size().height) - crate::dock::grow_host::extra_bottom(cx) + crate::dock::grow_host::own_row_given_up(cx);
         let layout = page::home_layout(page::page_room(panel_h, self.notice.is_some()), pins, for_layout);
         self.layout = layout;
         self.grid_page = page::clamp_page(self.grid_page, layout.pages);
@@ -429,74 +430,15 @@ impl StartView {
 
     // ------------------------------------------------------------------ the bottom row
 
-    /// The bottom row: the account picture and name at the left, the gear (Windows' Settings) and the power button at the right.
+    /// The bottom row: the account picture and name at the left, the gear (Windows' Settings) and the power button at the right. (While
+    /// the island's glass has grown into the panel the panel has no bottom row of its own: the same three stand in the island's row,
+    /// `start_row.rs`.)
     pub(super) fn render_footer(&mut self, pal: Palette, theme: ThemePalette, cx: &mut Context<Self>) -> impl IntoElement {
-        let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
-        let secondary = pal.text_secondary().hsla();
-        let ring = theme.accent;
-        let initial = self.user.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-        let button = |id: &'static str, icon: L, on: bool, focus: &FocusHandle, tip: &'static str| {
-            div()
-                .id(id)
-                .size(px(36.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(8.))
-                // (room for the keyboard ring, which is the border's colour)
-                .border_2()
-                .border_color(transparent_black())
-                .cursor_pointer()
-                .track_focus(focus)
-                .focus_visible(move |s| s.border_color(ring))
-                .when(on, |d| d.bg(pressed))
-                .when(!on, |d| d.hover(move |s| s.bg(hover)))
-                .active(move |s| s.bg(pressed))
-                .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(w, cx))
-                .child(Icon::new(icon).size(px(18.)).text_color(pal.text().hsla()))
-        };
-        // the account picture (round), or the initial in a disc until it has come or when the account has none
-        let avatar = match &self.avatar {
-            // (the radius is on the picture itself: a parent's overflow_hidden clips to a rectangle and would leave it square)
-            Some(img) => div().size(px(AVATAR)).flex_shrink_0().child(gpui_kit::img(img.clone()).size(px(AVATAR)).rounded_full()).into_any_element(),
-            None => div()
-                .size(px(AVATAR))
-                .flex_shrink_0()
-                .rounded_full()
-                .bg(pal.field_fill().hsla())
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px(13.))
-                .text_color(secondary)
-                .child(initial)
-                .into_any_element(),
-        };
         let (settings_focus, power_focus) = (self.settings_focus.clone(), self.power_focus.clone());
-        h_flex()
-            .h(px(BOTTOM_H))
-            .flex_shrink_0()
-            .px(px(PAD))
-            .gap_2()
-            .items_center()
-            .child(h_flex().flex_1().min_w_0().gap_3().items_center().child(avatar).child(div().min_w_0().truncate().text_size(px(14.)).child(self.user.clone())))
-            .child(button("start-settings", L::Settings, false, &settings_focus, t!("Ayarlar")).on_click(cx.listener(|this, _, _, cx| {
-                if !this.live() {
-                    return;
-                }
-                // (Windows' Settings, as the gear of Windows' own Start does; rustyfiles' settings are in its own window)
-                crate::dock::panel_parts::open_uri("ms-settings:");
-                this.finish(cx);
-            })))
-            .child(button("start-power", L::Power, self.power != PowerMenu::Closed, &power_focus, t!("Güç")).on_click(cx.listener(|this, _, _, cx| {
-                if !this.live() {
-                    return;
-                }
-                this.app_menu = None;
-                this.power_hi = 0;
-                let toggled = this.power.toggled();
-                this.set_power(toggled, cx);
-            })))
+        let power_on = self.power != PowerMenu::Closed;
+        let gear = self.row_button("start-settings", L::Settings, false, &settings_focus, t!("Ayarlar"), 36.0, 18.0, 8.0, pal, theme).on_click(cx.listener(|this, _, _, cx| this.open_settings(cx)));
+        let power = self.row_button("start-power", L::Power, power_on, &power_focus, t!("Güç"), 36.0, 18.0, 8.0, pal, theme).on_click(cx.listener(|this, _, _, cx| this.toggle_power(cx)));
+        h_flex().h(px(BOTTOM_H)).flex_shrink_0().px(px(PAD)).gap_2().items_center().child(self.account(AVATAR, 14.0, 12.0, pal)).child(gear).child(power)
     }
 }
 

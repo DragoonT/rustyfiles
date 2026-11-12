@@ -49,6 +49,7 @@ use windows::core::{BOOL, Interface};
 
 use super::capture::{Dirty, MonError, Monitor, Pumped, is_device_lost, locate};
 use super::cover;
+use super::crossproc::{self, Foreign};
 use super::geom::Rc;
 use super::gpu::{Geometry, Gpu, LensList, Look, Region, Renderer, glass_pass, prep, region_pad, reuse};
 use super::lens::LensSet;
@@ -651,6 +652,9 @@ struct Engine {
     mode: CaptureMode,
     /// The windows a capture session leaves out.
     excl: Exclusion,
+    /// The glass windows of other processes of ours that this process leaves out too (`crossproc.rs`), and when they were last looked for.
+    foreign: Foreign,
+    last_scan: Instant,
     last_access_check: Instant,
     /// A permission check running on its own thread (see `access_tick`).
     access_job: Option<Receiver<Access>>,
@@ -726,6 +730,8 @@ impl Engine {
             last_activity: Instant::now(),
             mode: CaptureMode::Off,
             excl: Exclusion::default(),
+            foreign: Foreign::default(),
+            last_scan: Instant::now(),
             last_access_check: Instant::now(),
             access_job: None,
             instant_flushes: 0,
@@ -1156,10 +1162,37 @@ impl Engine {
         }
     }
 
+    /// Looks at the glass windows of other processes of ours (a few times a second, only while some glass is seen) and leaves out of
+    /// the capture the ones that lie above one of ours: two glass windows of two processes that read each other build up a flat red and
+    /// blue (see `crossproc.rs`). One walk of the top-level windows, a property test per window.
+    fn scan_foreign(&mut self, now: Instant) {
+        if now.saturating_duration_since(self.last_scan) < crossproc::SCAN_EVERY {
+            return;
+        }
+        let seen: Vec<&Win> = self.wins.values().filter(|w| w.active()).collect();
+        if seen.is_empty() {
+            return;
+        }
+        self.last_scan = now;
+        // the glass reads this far around itself; a window whose edge is nearer than that can show in the frost
+        let margin = seen.iter().filter_map(|w| w.geo).map(|g| region_pad(g.scale())).max().unwrap_or(0) as i32;
+        let mine: BTreeSet<isize> = self.wins.keys().copied().collect();
+        let wanted = crossproc::foreign_above(&crossproc::scan(&mine), margin);
+        if self.foreign.update(&wanted, now, wgc::is_window) && self.excl.set_foreign(self.foreign.set()) {
+            log::debug!("glass: {} glass windows of other processes are left out of the capture", self.foreign.set().len());
+        }
+    }
+
     /// Takes the frames the monitors have. Returns whether a wait for a frame happened (the turn did not spin).
     fn pump(&mut self) -> bool {
-        let Some(gfx) = self.gfx.as_ref() else { return false };
+        if self.gfx.is_none() {
+            return false;
+        }
         let now = Instant::now();
+        if self.mode == CaptureMode::Session {
+            self.scan_foreign(now);
+        }
+        let Some(gfx) = self.gfx.as_ref() else { return false };
         if self.mode == CaptureMode::Session {
             // menus and flyouts show without telling the engine
             self.excl.poll_extras(wgc::probe_window);
@@ -1387,6 +1420,7 @@ impl Engine {
         self.mode = CaptureMode::Off;
         set_mode(CaptureMode::Off);
         self.excl = Exclusion::default();
+        self.foreign = Foreign::default();
     }
 }
 
