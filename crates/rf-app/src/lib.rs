@@ -37,6 +37,7 @@ mod organizer;
 mod picker;
 mod places;
 mod settings;
+pub mod shell;
 mod shell_view;
 mod select_box;
 mod settings_view;
@@ -293,7 +294,9 @@ pub fn main() {
     // `--pick <pipe>`: an app's Open/Save dialog (rustyfiles_dialog.dll) asks for a file
     let pick = (std::env::args().nth(1).as_deref() == Some("--pick")).then(|| std::env::args().nth(2)).flatten();
     // `--bar-preview`: our taskbar, as an ordinary window (see taskbar_preview)
-    let bar_preview = std::env::args().nth(1).as_deref() == Some("--bar-preview");
+    // `--desktop-preview`: our desktop, as an ordinary window (see shell::desktop); treated like the bar preview everywhere below
+    let desktop_preview = std::env::args().nth(1).as_deref() == Some(shell::desktop::args::ARG);
+    let bar_preview = desktop_preview || std::env::args().nth(1).as_deref() == Some("--bar-preview");
     // `--quick-search`: the quick search window, as its hotkey opens it (a shortcut of the
     // user's own can run this)
     let quick_search = std::env::args().nth(1).as_deref() == Some(quick_search::LAUNCH_ARG);
@@ -552,6 +555,10 @@ pub fn main() {
         match pick.clone() {
             // started only to answer a dialog: no main window
             Some(pipe) => picker::begin(pipe, cx),
+            None if desktop_preview => {
+                let args: Vec<String> = std::env::args().skip(1).collect();
+                shell::desktop::open_preview(shell::desktop::args::parse(&args, std::env::var(shell::desktop::args::ENV_DIR).ok().as_deref()), cx)
+            }
             None if bar_preview => taskbar_preview::open(cx),
             // the dock: three islands, no main window
             None if dock => dock::run(dock_messages.take(), cx),
@@ -624,7 +631,8 @@ pub fn main() {
         // that cut running copies in half and makes background mode impossible. We decide.
         cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
         cx.on_window_closed(|cx, _| {
-            if !workspace::any_main_window(cx) {
+            // (the desktop preview is no main window, but closing the folder windows it opened must not end it)
+            if !workspace::any_main_window(cx) && !shell::desktop::window_open(cx) {
                 // menus / flyouts left behind go too
                 for w in cx.windows() {
                     let _ = w.update(cx, |_, window, _| window.remove_window());

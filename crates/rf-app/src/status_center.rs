@@ -58,6 +58,24 @@ pub struct Ops {
     auto_closed: Option<Instant>,
 }
 
+/// What [`Ops::glance`] says.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Glance {
+    /// The newest running operation: its title and how far it is in percent (`None` before the first progress report).
+    pub running: Option<(String, Option<u32>)>,
+    /// The newest failed operation: its id (the same one is not news twice) and the reason.
+    pub failed: Option<(u64, String)>,
+}
+
+fn glance_of(ops: &[OpState]) -> Glance {
+    let running = ops.iter().rev().find(|o| o.phase == OpPhase::Running).map(|o| (o.title.clone(), (o.total > 0).then(|| (u64::from(o.done) * 100 / u64::from(o.total)).min(100) as u32)));
+    let failed = ops.iter().rev().find_map(|o| match &o.phase {
+        OpPhase::Failed(why) => Some((o.id, why.clone())),
+        _ => None,
+    });
+    Glance { running, failed }
+}
+
 /// Finished operations kept in the list (Files keeps them until "Clear").
 const HISTORY: usize = 30;
 
@@ -110,6 +128,11 @@ impl Ops {
 
     pub fn running(&self) -> usize {
         self.ops.iter().filter(|o| o.phase == OpPhase::Running).count()
+    }
+
+    /// For a window that has no Status Center button of its own (the desktop): the newest running operation and the newest failure.
+    pub fn glance(&self) -> Glance {
+        glance_of(&self.ops)
     }
 
     /// What the taskbar buttons show: the running operations' progress, yellow when all are
@@ -1092,7 +1115,43 @@ fn fmt_duration_with(secs: f32, (sec, min, hour): (&str, &str, &str)) -> String 
 
 #[cfg(test)]
 mod tests {
-    use super::fmt_duration_with;
+    use super::{Glance, OpPhase, OpState, fmt_duration_with, glance_of};
+
+    fn op(id: u64, title: &str, phase: OpPhase, done: u32, total: u32) -> OpState {
+        OpState {
+            id,
+            title: title.into(),
+            total,
+            done,
+            current: None,
+            phase,
+            cancel: Default::default(),
+            paused: Default::default(),
+            started: std::time::Instant::now(),
+            action: None,
+        }
+    }
+
+    #[test]
+    fn a_window_without_a_status_button_sees_the_running_operation_and_the_failure() {
+        assert_eq!(glance_of(&[]), Glance::default());
+        let ops = [
+            op(1, "old", OpPhase::Failed("access denied".into()), 3, 3),
+            op(2, "copy", OpPhase::Done, 5, 5),
+            op(3, "move", OpPhase::Running, 1, 4),
+            op(4, "later", OpPhase::Running, 0, 0),
+        ];
+        let g = glance_of(&ops);
+        assert_eq!(g.running, Some(("later".into(), None)), "the newest running one; no percentage before the first report");
+        assert_eq!(g.failed, Some((1, "access denied".into())));
+        let g = glance_of(&ops[..3]);
+        assert_eq!(g.running, Some(("move".into(), Some(25))));
+        // the newest failure wins, and a finished operation is not "running"
+        let ops = [op(1, "a", OpPhase::Failed("x".into()), 0, 1), op(2, "b", OpPhase::Failed("y".into()), 0, 1), op(3, "c", OpPhase::Cancelled, 0, 1)];
+        assert_eq!(glance_of(&ops), Glance { running: None, failed: Some((2, "y".into())) });
+        // done past total does not exceed 100
+        assert_eq!(glance_of(&[op(1, "z", OpPhase::Running, 9, 4)]).running, Some(("z".into(), Some(100))));
+    }
 
     #[test]
     fn durations() {

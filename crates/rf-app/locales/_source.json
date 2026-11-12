@@ -7890,5 +7890,191 @@
   "key": "Tam",
   "tr": "Tam",
   "en": "Full"
+ },
+ {
+  "id": "bb465316",
+  "key": "Salt okunur önizleme",
+  "tr": "Salt okunur önizleme",
+  "en": "Read-only preview"
+ },
+ {
+  "id": "dd7e1a82",
+  "key": "Simge boyutu",
+  "tr": "Simge boyutu",
+  "en": "Icon size"
+ },
+ {
+  "id": "13637409",
+  "key": "Küçük",
+  "tr": "Küçük",
+  "en": "Small"
+ },
+ {
+  "id": "0b7b7177",
+  "key": "Büyük",
+  "tr": "Büyük",
+  "en": "Large"
+ },
+ {
+  "id": "f1be4b07",
+  "key": "Simgeleri ızgaraya hizala",
+  "tr": "Simgeleri ızgaraya hizala",
+  "en": "Align icons to grid"
+ },
+ {
+  "id": "4a4d8f72",
+  "key": "Ortak masaüstü ve sistem öğeleri burada değiştirilmez",
+  "tr": "Ortak masaüstü ve sistem öğeleri burada değiştirilmez",
+  "en": "Public Desktop and system items are not changed here"
+ },
+ {
+  "id": "b042e4d6",
+  "key": "Bu ad Windows tarafından ayrılmıştır; başka bir ad deneyin.",
+  "tr": "Bu ad Windows tarafından ayrılmıştır; başka bir ad deneyin.",
+  "en": "Windows reserves this name; try another one."
+ },
+ {
+  "id": "1729b461",
+  "key": "Ad çok uzun (en çok 255 karakter).",
+  "tr": "Ad çok uzun (en çok 255 karakter).",
+  "en": "The name is too long (255 characters at most)."
+ },
+ {
+  "id": "04101b24",
+  "key": "Yerleşim dosyası okunamadı; yenisi kullanılıyor",
+  "tr": "Yerleşim dosyası okunamadı; yenisi kullanılıyor",
+  "en": "The layout file could not be read; a new one is in use"
+ },
+ {
+  "id": "311a199d",
+  "key": "Yerleşim dosyası kaydedilmeyecek (daha yeni bir sürümden ya da okunamıyor)",
+  "tr": "Yerleşim dosyası kaydedilmeyecek (daha yeni bir sürümden ya da okunamıyor)",
+  "en": "The layout file will not be saved (it is from a newer version or cannot be read)"
+ },
+ {
+  "id": "b77935cb",
+  "key": "İstenen klasör kullanılmadı; gerçek masaüstü korumalı gösteriliyor",
+  "tr": "İstenen klasör kullanılmadı; gerçek masaüstü korumalı gösteriliyor",
+  "en": "The requested folder was not used; the real Desktop is shown, protected"
+ },
+ {
+  "id": "0c5540cc",
+  "key": "Deneme klasörü masaüstü yerine geçiyor",
+  "tr": "Deneme klasörü masaüstü yerine geçiyor",
+  "en": "A scratch folder stands in for the Desktop"
+ },
+ {
+  "id": "37d0f9c8",
+  "key": "Pencere küçük: ızgara sığsın diye küçültüldü",
+  "tr": "Pencere küçük: ızgara sığsın diye küçültüldü",
+  "en": "Window is small: the grid is scaled down to fit, at"
+ },
+ {
+  "id": "484da827",
+  "key": "Bu pencere kilitli: değişiklikler uygulanmaz",
+  "tr": "Bu pencere kilitli: değişiklikler uygulanmaz",
+  "en": "This window is locked: changes are not applied"
+ },
+ {
+  "id": "fd4904bb",
+  "key": "Dosyalar salt okunur önizlemeden sürüklenip çıkarılamaz",
+  "tr": "Dosyalar salt okunur önizlemeden sürüklenip çıkarılamaz",
+  "en": "Files cannot be dragged out of the read-only preview"
+ },
+ {
+  "id": "36dba32b",
+  "key": "Salt okunur önizlemede kapalı",
+  "tr": "Salt okunur önizlemede kapalı",
+  "en": "Off in the read-only preview"
+ },
+ {
+  "id": "fb760995",
+  "key": "Bu öğeler için kullanılamıyor",
+  "tr": "Bu öğeler için kullanılamıyor",
+  "en": "Not available for these items"
+ },
+ {
+  "id": "4b46b10d",
+  "key": "rustyfiles masaüstü (önizleme, deneme klasörü)",
+  "tr": "rustyfiles masaüstü (önizleme, deneme klasörü)",
+  "en": "rustyfiles desktop (preview, scratch folder)"
+ },
+ {
+  "id": "70095f3c",
+  "key": "rustyfiles masaüstü (önizleme)",
+  "tr": "rustyfiles masaüstü (önizleme)",
+  "en": "rustyfiles desktop (preview)"
+ },
+ {
+  "id": "33e5715f",
+  "key": "Bu işlem salt okunur önizlemede kapalı",
+  "tr": "Bu işlem salt okunur önizlemede kapalı",
+  "en": "This action is turned off in the read-only preview"
+ },
+ {
+  "id": "d24a3bac",
+  "key": "aynı anda açılacak.",
+  "tr": "aynı anda açılacak.",
+  "en": "will all be opened at once."
+ },
+ {
+  "id": "86aff430",
+  "key": "Öğeler açılsın mı?",
+  "tr": "Öğeler açılsın mı?",
+  "en": "Open these items?"
+ },
+ {
+  "id": "c7db44a7",
+  "key": "Yalnızca ilk 8 klasör açıldı",
+  "tr": "Yalnızca ilk 8 klasör açıldı",
+  "en": "Only the first 8 folders were opened"
+ },
+ {
+  "id": "85f73967",
+  "key": "Yeni öğe oluşturulamadı",
+  "tr": "Yeni öğe oluşturulamadı",
+  "en": "The new item could not be created"
+ },
+ {
+  "id": "bd964483",
+  "key": "Yeniden adlandırılamadı",
+  "tr": "Yeniden adlandırılamadı",
+  "en": "Could not rename"
+ },
+ {
+  "id": "f1cb30af",
+  "key": "Program başlatılamadı. Yönetici izni gerekiyor olabilir.",
+  "tr": "Program başlatılamadı. Yönetici izni gerekiyor olabilir.",
+  "en": "The program could not be started. It may need administrator rights."
+ },
+ {
+  "id": "86a3d9a4",
+  "key": "Masaüstü pencereye sığsın diye %{n} ölçeğinde gösteriliyor",
+  "tr": "Masaüstü pencereye sığsın diye %{n} ölçeğinde gösteriliyor",
+  "en": "Shown at {n}% so the desktop fits the window"
+ },
+ {
+  "id": "6b9e20d1",
+  "key": "Yayılmış duvar kâğıdı: önizleme resmin tamamını bu tek ekrana sığdırır",
+  "tr": "Yayılmış duvar kâğıdı: önizleme resmin tamamını bu tek ekrana sığdırır",
+  "en": "Spanned wallpaper: the preview fits the whole picture on this one display"
+ },
+ {
+  "id": "2960a184",
+  "key": "Diğer ekranda {n} öğe var",
+  "tr": "Diğer ekranda {n} öğe var",
+  "en": "{n} items are on the other display"
+ },
+ {
+  "id": "b4fdf7a8",
+  "key": "Bu masaüstünde öğe yok",
+  "tr": "Bu masaüstünde öğe yok",
+  "en": "There are no items on this desktop"
+ },
+ {
+  "id": "d6806c89",
+  "key": "Orta boy",
+  "tr": "Orta boy",
+  "en": "Medium"
  }
 ]

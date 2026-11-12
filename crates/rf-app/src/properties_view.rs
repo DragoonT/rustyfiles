@@ -41,6 +41,13 @@ const HIDDEN: u32 = 0x2;
 /// Opens a Properties window for `paths` (one window per call), on the display of the window
 /// in front.
 pub fn open(paths: Vec<PathBuf>, images: Entity<ImageCache>, cx: &mut App) {
+    open_with(paths, images, false, cx);
+}
+
+/// Like [`open`], but LOCKED when `locked`: everything is shown, nothing is written (a rename, attribute bits, a shortcut's fields,
+/// the compatibility settings ... are all applied in one place, [`PropsView::apply`], which refuses). The desktop preview uses it
+/// for files it is not allowed to change.
+pub fn open_with(paths: Vec<PathBuf>, images: Entity<ImageCache>, locked: bool, cx: &mut App) {
     if paths.is_empty() {
         return;
     }
@@ -55,7 +62,11 @@ pub fn open(paths: Vec<PathBuf>, images: Entity<ImageCache>, cx: &mut App) {
     if let Err(e) = gpui_kit::open_window(options, cx, move |window, cx| {
         // it often lies over a main window: with glass behind it, the glass must not bend its picture
         crate::glass::keep_out_of_capture(crate::look::window::hwnd_of(window));
-        cx.new(|cx| PropsView::new(paths, images, window, cx))
+        cx.new(|cx| {
+            let mut v = PropsView::new(paths, images, window, cx);
+            v.locked = locked;
+            v
+        })
     }) {
         log::error!("properties window: {e:#}");
     }
@@ -240,6 +251,8 @@ pub struct PropsView {
     hash: Option<Entity<crate::hash_panel::HashPanel>>,
     error: Option<SharedString>,
     busy: bool,
+    /// Opened by [`open_with`] as locked: [`PropsView::apply`] writes nothing.
+    locked: bool,
     frame_dark: Option<bool>,
     cancel: Arc<AtomicBool>,
     focus: FocusHandle,
@@ -333,6 +346,7 @@ impl PropsView {
             frame_dark: None,
             cancel: Default::default(),
             focus: cx.focus_handle(),
+            locked: false,
         };
         v.load(window, cx);
         window.focus(&v.focus, cx);
@@ -593,6 +607,12 @@ impl PropsView {
             if close {
                 window.remove_window();
             }
+            return;
+        }
+        if self.locked {
+            // every write of this window is below this line
+            self.error = Some(t!("Bu pencere kilitli: değişiklikler uygulanmaz").into());
+            cx.notify();
             return;
         }
         let new_name = self.renamed_to(cx);
