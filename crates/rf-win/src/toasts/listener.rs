@@ -86,21 +86,31 @@ pub fn watch(poll: Duration, callback: impl Fn(&Snapshot) + Send + 'static) -> W
                     } else if let Some(l) = &listener {
                         // (a documented call; it is made only as the answer to the user's own click)
                         removal.asked([id]);
-                        if l.RemoveNotification(id).is_err() {
-                            log::warn!("notifications: RemoveNotification failed");
+                        if let Err(e) = l.RemoveNotification(id) {
+                            log::warn!("notifications: RemoveNotification failed ({:#010x})", e.code().0);
                             refused = true;
                         }
                     }
                 }
                 Ok(Msg::Clear) if removal_on => {
-                    removal.asked(last.iter().flat_map(|s| s.toasts.iter().map(|t| t.id)));
+                    let ids: Vec<u32> = last.iter().flat_map(|s| s.toasts.iter().map(|t| t.id)).collect();
+                    removal.asked(ids.iter().copied());
                     if let Some(list) = fake_list.as_mut() {
                         list.clear();
-                    } else if let Some(l) = &listener
-                        && l.ClearNotifications().is_err()
-                    {
-                        log::warn!("notifications: ClearNotifications failed");
-                        refused = true;
+                    } else if let Some(l) = &listener {
+                        // One by one, the notifications that are listed. `ClearNotifications()` was tried first and FAILED on the
+                        // user's machine (a program without package identity; seen in the log the first time "clear all" was
+                        // pressed), and it would also clear what arrived after the list was read. Counts and the first error's
+                        // number are logged, never a notification's text.
+                        let mut first_error = None;
+                        let failed = ids.iter().filter(|&&id| l.RemoveNotification(id).map_err(|e| first_error.get_or_insert(e.code().0)).is_err()).count();
+                        if failed > 0 {
+                            log::warn!("notifications: clear all removed {} of {}; first error {:#010x}", ids.len() - failed, ids.len(), first_error.unwrap_or(0));
+                        } else {
+                            log::info!("notifications: clear all removed {}", ids.len());
+                        }
+                        // (refused only when nothing at all could be removed: then the x and "clear all" are withdrawn)
+                        refused = !ids.is_empty() && failed == ids.len();
                     }
                 }
                 // (the panel does not offer them when removing is off; a stray message does nothing)
