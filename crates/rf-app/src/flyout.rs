@@ -1,13 +1,18 @@
 //! Windows 11 style flyouts with arbitrary content (the "Layout" panel…): a borderless
 //! Acrylic popup window under a toolbar button, as tall as its content, closed by clicking
 //! elsewhere or Esc. Menus use `fluent_menu`; this is for panels with controls.
+//!
+//! Opened from a window that shows glass the flyout is drawn on glass itself (`glass_watch::PopupGlass`) and its controls take the
+//! liquid look; until the glass runs, and for good if it fails, it paints a plain panel fill.
 
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::glass_watch::{self, PopupGlass};
 use crate::theme::Palette;
 
 /// Builds the flyout content on every frame (so it always shows the current state).
@@ -59,6 +64,8 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, own
     let x = f32::from(pos.x).min(vw - width - 8.).max(8.);
     let origin = owner.bounds().origin + point(px(x), pos.y);
     let dark = Palette::for_window(owner).dark;
+    // opened from a window that shows glass (or from a popup that does): on real glass, not Windows' acrylic
+    let liquid = crate::glass::liquid(crate::look::window::hwnd_of(owner));
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size(px(width), px(80.))))),
         titlebar: None,
@@ -68,7 +75,7 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, own
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: WindowBackgroundAppearance::Blurred,
+        window_background: if liquid { WindowBackgroundAppearance::Transparent } else { WindowBackgroundAppearance::Blurred },
         ..Default::default()
     };
     // the app window keeps its active look (Mica, caption) while the flyout has focus
@@ -81,7 +88,7 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, own
                 crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
-        cx.new(|cx| FlyoutView::new(key, width, body, w, cx))
+        cx.new(|cx| FlyoutView::new(key, width, body, liquid.then_some(dark), w, cx))
     });
     match r {
         Ok(w) => {
@@ -101,11 +108,15 @@ struct FlyoutView {
     width: f32,
     body: Body,
     focus: FocusHandle,
+    /// The glass behind the flyout, in the liquid look.
+    glass: Option<PopupGlass>,
+    _watch: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
 
 impl FlyoutView {
-    fn new(key: &'static str, width: f32, body: Body, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// `liquid`: `Some(dark)` to sit on glass, `None` for the Acrylic flyout.
+    fn new(key: &'static str, width: f32, body: Body, liquid: Option<bool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let subs = vec![cx.observe_window_activation(window, |this: &mut Self, window, cx| {
             if window.is_window_active() {
                 return;
@@ -121,7 +132,9 @@ impl FlyoutView {
         })];
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        Self { key, width, body, focus, _subs: subs }
+        let glass = liquid.map(|dark| PopupGlass::start(crate::look::window::hwnd_of(window), dark));
+        let watch = glass.is_some().then(|| glass_watch::watch(cx, |this: &mut Self| this.glass.as_mut()));
+        Self { key, width, body, focus, glass, _watch: watch, _subs: subs }
     }
 }
 
@@ -131,8 +144,11 @@ impl Render for FlyoutView {
         let content = (self.body)(&p, window, cx);
         let vh = window.viewport_size().height;
         let width = self.width;
+        // over glass a wash, or the plain fill until the glass runs (never a see-through panel with nothing behind it)
+        let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback()));
         v_flex()
             .size_full()
+            .when_some(fill, |d, f| d.bg(f))
             .track_focus(&self.focus)
             .text_color(p.text)
             .on_key_down(|ev: &KeyDownEvent, _, cx| {

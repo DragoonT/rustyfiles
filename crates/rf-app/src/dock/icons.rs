@@ -80,12 +80,13 @@ impl IconCache {
     }
 }
 
-/// Asks the shell for the icon at `px` device px square. Blocks (COM, the shell): worker thread only.
-pub fn load_bgra(src: &IconSource, px: u32) -> Option<rf_win::thumbs::Bgra> {
-    match rf_win::dock::icons::icon_bgra(src, px) {
+/// Asks for the icon at `px` device px square, from the first of `srcs` that has one (the app's own, what its windows have set
+/// themselves, its package's logo). Blocks (COM, the shell, other programs' windows): worker thread only.
+pub fn load_bgra(srcs: &[IconSource], px: u32) -> Option<rf_win::thumbs::Bgra> {
+    match rf_win::dock::icons::icon_bgra_chain(srcs, px) {
         Ok(bgra) => Some(bgra),
         Err(e) => {
-            log::debug!("dock icon {src:?}: {e:#}");
+            log::debug!("dock icon {:?}: {e:#}", srcs.first());
             None
         }
     }

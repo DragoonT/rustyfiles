@@ -21,7 +21,7 @@ pub fn request_size(px: u32) -> u32 {
 /// scaled to fit and centred on a transparent square.
 pub fn icon_bgra(src: &IconSource, px: u32) -> anyhow::Result<Bgra> {
     anyhow::ensure!((1..=1024).contains(&px), "icon size {px} out of range");
-    let shell = |p: &Path| shell_icon(p, request_size(px));
+    let shell = |p: &Path| on_shell_thread(p.to_path_buf(), request_size(px));
     let got = match src {
         IconSource::File(p) => shell(p)?,
         IconSource::Shell(name) => shell(Path::new(name))?,
@@ -34,6 +34,28 @@ pub fn icon_bgra(src: &IconSource, px: u32) -> anyhow::Result<Bgra> {
         IconSource::Window(hwnd) => window_icon(*hwnd, px).ok_or_else(|| anyhow::anyhow!("window {hwnd:#x} has no icon"))?,
     };
     Ok(fit_square(&got, px))
+}
+
+/// The first of `srcs` that gives a picture (see [`crate::dock::DockApp::icon_chain`]): the app's own icon, then what its windows have
+/// set themselves, then its package's logo. The error is the first source's, which is the one that says why the app has no icon of its
+/// own. An empty list is an error too.
+pub fn icon_bgra_chain(srcs: &[IconSource], px: u32) -> anyhow::Result<Bgra> {
+    let mut first_error = None;
+    for src in srcs {
+        let t = std::time::Instant::now();
+        log::debug!("dock icon: asking {src:?} at {px} px on tid {}", unsafe { windows::Win32::System::Threading::GetCurrentThreadId() });
+        match icon_bgra(src, px) {
+            Ok(b) => {
+                log::debug!("dock icon: {src:?} gave a picture in {:?}", t.elapsed());
+                return Ok(b);
+            }
+            Err(e) => {
+                log::debug!("dock icon: {src:?} failed in {:?}: {e:#}", t.elapsed());
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| anyhow::anyhow!("no icon source")))
 }
 
 /// The shell's icon for `p` at about `size` px. The shell answers E_PENDING ("not ready yet") when another thread is just extracting
@@ -50,6 +72,18 @@ fn shell_icon(p: &Path, size: u32) -> anyhow::Result<Bgra> {
             }
             other => return other,
         }
+    }
+}
+
+/// How long the shell may take for one icon before the dock gives up on this ask (it asks again later).
+const SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// The shell's icon for `p`, asked on the shell thread and waited for here, with a limit (see [`crate::sta::call`] for what happened
+/// when the dock's worker threads asked the shell themselves).
+fn on_shell_thread(p: std::path::PathBuf, size: u32) -> anyhow::Result<Bgra> {
+    match crate::sta::call(SHELL_TIMEOUT, move || shell_icon(&p, size)) {
+        Some(r) => r,
+        None => anyhow::bail!("the shell did not give the icon in {SHELL_TIMEOUT:?}"),
     }
 }
 
@@ -333,6 +367,20 @@ mod tests {
         assert!(f.data.iter().all(|&b| b == 0));
         assert!(icon_bgra(&IconSource::File("x".into()), 0).is_err());
         assert!(icon_bgra(&IconSource::Window(0), 44).is_err());
+    }
+
+    #[test]
+    fn the_chain_takes_the_first_source_that_gives_a_picture() {
+        let good = IconSource::File(r"C:\Windows\explorer.exe".into());
+        let bad = IconSource::File(r"C:\no\such\program.exe".into());
+        // a window that does not exist has no icon either
+        let no_window = IconSource::Window(0x7fff_0001);
+        let img = icon_bgra_chain(&[bad.clone(), no_window.clone(), good.clone()], 44).expect("the third source works");
+        assert_eq!((img.width, img.height), (44, 44));
+        assert_eq!(icon_bgra_chain(&[good.clone(), bad.clone()], 44).unwrap().data, icon_bgra(&good, 44).unwrap().data, "the first that works is the one used");
+        // nothing works: an error, not a panic (the dock draws its letter)
+        assert!(icon_bgra_chain(&[bad, no_window], 44).is_err());
+        assert!(icon_bgra_chain(&[], 44).is_err());
     }
 
     #[test]

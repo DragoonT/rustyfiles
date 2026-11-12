@@ -23,6 +23,11 @@ struct ShellThread {
     queue: Mutex<VecDeque<Job>>,
 }
 
+thread_local! {
+    /// Set on the shell thread itself, so a [`call`] made from a job running there runs in place instead of waiting for itself.
+    static ON_SHELL_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 static THREAD: OnceLock<ShellThread> = OnceLock::new();
 const WM_RUN: u32 = WM_APP + 1;
 
@@ -60,6 +65,7 @@ fn start() -> ShellThread {
     std::thread::Builder::new()
         .name("rf-shell-sta".into())
         .spawn(move || unsafe {
+            ON_SHELL_THREAD.with(|c| c.set(true));
             let _ = OleInitialize(None);
             let hinst = GetModuleHandleW(None).unwrap_or_default();
             let class = w!("rustyfiles.ShellOwner");
@@ -106,5 +112,47 @@ pub fn run(f: impl FnOnce(HWND) + Send + 'static) {
     }
 }
 
+/// Runs `f` on the shell thread and waits for its answer, at most `limit`. `None` when the thread did not get to it or did not
+/// finish in that time (the job still runs to its end there; its answer is dropped).
+///
+/// For shell work that must not run on worker threads. A worker that calls the shell becomes a single-threaded apartment that never
+/// pumps messages (`shell::ensure_com`), and the shell does not survive several of those asking at once: in the dock's first live
+/// runs, with eight workers extracting icons at the same moment, the logos of packaged apps never arrived (two to seven of them,
+/// never the same ones). Windows' wait-chain view showed the asking thread waiting for an apartment on a thread the shell had made
+/// itself, which was blocked, and workers waiting for each other's apartments. Sending only the packaged apps' requests here did
+/// not help (the very first one still hung while the workers were busy with files' icons); sending every shell request of the dock
+/// here did: 25 of 25 icons in each of four runs, and no worker apartment left in the process. The limit is there so that no shell
+/// answer, whatever its cause, can hold the caller for ever.
+pub fn call<R: Send + 'static>(limit: std::time::Duration, f: impl FnOnce() -> R + Send + 'static) -> Option<R> {
+    if ON_SHELL_THREAD.with(|c| c.get()) {
+        return Some(f());
+    }
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    run(move |_| {
+        let _ = tx.send(f());
+    });
+    rx.recv_timeout(limit).ok()
+}
+
 #[allow(dead_code)]
 fn _unused(_: WINDOW_EX_STYLE) {}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    #[test]
+    fn a_call_gives_its_answer_and_a_call_from_inside_a_call_does_not_wait_for_itself() {
+        assert_eq!(super::call(Duration::from_secs(10), || 6 * 7), Some(42));
+        let nested = super::call(Duration::from_secs(10), || super::call(Duration::from_secs(10), || "inner"));
+        assert_eq!(nested, Some(Some("inner")));
+    }
+
+    #[test]
+    fn a_call_that_takes_too_long_gives_none_and_the_thread_lives_on() {
+        let slow = super::call(Duration::from_millis(30), || std::thread::sleep(Duration::from_millis(300)));
+        assert_eq!(slow, None);
+        // the slow job ends; the next call is answered
+        assert_eq!(super::call(Duration::from_secs(10), || 1), Some(1));
+    }
+}

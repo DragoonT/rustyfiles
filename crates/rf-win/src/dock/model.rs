@@ -93,6 +93,30 @@ impl DockApp {
     pub fn running(&self) -> bool {
         !self.windows.is_empty()
     }
+
+    /// Everything its icon can come from, best first: the icon the app was given, then the icon one of its task windows has set itself
+    /// (a few windows are tried: the first may be a splash screen with none), then, for a packaged app, the logo of its package. The
+    /// dock asks for them in turn and draws a letter only when none gives a picture.
+    pub fn icon_chain(&self) -> Vec<IconSource> {
+        let mut chain = vec![self.icon.clone()];
+        // the same package under another letter case (the key is lower case) is the same logo
+        let same = |a: &IconSource, b: &IconSource| match (a, b) {
+            (IconSource::Packaged(x), IconSource::Packaged(y)) => x.eq_ignore_ascii_case(y),
+            _ => a == b,
+        };
+        let mut add = |s: IconSource| {
+            if !chain.iter().any(|c| same(c, &s)) {
+                chain.push(s);
+            }
+        };
+        for &w in self.windows.iter().take(3) {
+            add(IconSource::Window(w));
+        }
+        if looks_packaged(&self.key) {
+            add(IconSource::Packaged(self.key.clone()));
+        }
+        chain
+    }
 }
 
 /// An item of the middle island, left to right.
@@ -135,7 +159,8 @@ pub fn middle_click_action() -> ClickAction {
 }
 
 /// Whether a pinned app is the same app as a running group. `group` is [`Task::group`] (lower case AppUserModelID, else the
-/// program path), `tasks` the group's windows. They match when the identities agree, or - a pin with no AppUserModelID of its own, or
+/// program path; the windows of a packaged app are given their process's package id first, see [`super::identity`]), `tasks` the
+/// group's windows. They match when the identities agree, or - a pin with no AppUserModelID of its own, or
 /// a window that sets another one than its shortcut carries (a program that names itself at run time) - when the program is the
 /// same.
 pub fn pin_matches(pin: &PinnedApp, group: &str, tasks: &[Task]) -> bool {
@@ -356,6 +381,75 @@ mod tests {
         assert_eq!(click_action(&[3, 4], 3), ClickAction::Minimize(3));
         assert_eq!(click_action(&[3], 0), ClickAction::Raise(3), "nothing in front at all");
         assert_eq!(middle_click_action(), ClickAction::Start, "middle click: another instance");
+    }
+
+    // The shapes below are what this machine has: the taskbar pins Telegram and Spotify by package id; their windows set no id of their
+    // own, their processes' packages carry it (`identity::process_aumid`); WhatsApp is running and not pinned.
+    const TELEGRAM: &str = "TelegramMessengerLLP.TelegramDesktop_t4vj0pshhgkwm!Telegram.TelegramDesktop.Store";
+    const SPOTIFY: &str = "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify";
+    const WHATSAPP: &str = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App";
+
+    fn packaged_pin(name: &str, id: &str) -> PinnedApp {
+        PinnedApp { name: name.into(), aumid: Some(id.to_lowercase()), exe: None, launch: Launch::Packaged(id.into()), icon: IconSource::Packaged(id.into()) }
+    }
+
+    #[test]
+    fn a_packaged_app_is_one_item_whether_pinned_or_not() {
+        let pins = vec![packaged_pin("Telegram Desktop", TELEGRAM), packaged_pin("Spotify", SPOTIFY)];
+        let tasks = vec![
+            task(10, r"C:\Program Files\WindowsApps\telegrammessengerllp.telegramdesktop_7.3.3.0_x64__t4vj0pshhgkwm\telegram.exe", None),
+            task(11, r"C:\Program Files\WindowsApps\spotifyab.spotifymusic_1.308.620.0_x64__zpdnekdrzrea0\spotify.exe", None),
+            task(12, r"C:\Program Files\WindowsApps\5319275a.whatsappdesktop_2.2642.101.0_x64__cv1g1gvanyjgm\whatsapp.root.exe", None),
+        ];
+        let ids = |pid: u32| match pid {
+            10 => Some(TELEGRAM.to_string()),
+            11 => Some(SPOTIFY.to_string()),
+            12 => Some(WHATSAPP.to_string()),
+            _ => None,
+        };
+        let items = merge(&pins, crate::tasklist::grouped(super::super::identity::with_process_ids(tasks, ids)), 0);
+        let a = apps(&items);
+        assert_eq!(a.iter().map(|a| a.name.as_str()).collect::<Vec<_>>(), vec!["Telegram Desktop", "Spotify", "Whatsapp.root"], "no second Telegram or Spotify");
+        assert_eq!(a[0].windows, vec![10]);
+        assert_eq!(a[1].windows, vec![11]);
+        assert!(a[0].pinned && a[1].pinned && !a[2].pinned);
+        // WhatsApp's icon is its package's logo, not the picture of an exe the shell cannot open
+        assert_eq!(a[2].icon, IconSource::Packaged(WHATSAPP.into()));
+        assert_eq!(a[2].launch, Some(Launch::Packaged(WHATSAPP.into())));
+        // the same windows WITHOUT the process ids are the bug that was seen: two items for each app
+        let tasks = vec![task(10, r"C:\Program Files\WindowsApps\telegrammessengerllp.telegramdesktop_7.3.3.0_x64__t4vj0pshhgkwm\telegram.exe", None)];
+        let items = merge(&pins[..1], crate::tasklist::grouped(tasks), 0);
+        assert_eq!(apps(&items).len(), 2, "the id is what lets the pin and the window meet");
+    }
+
+    #[test]
+    fn a_pin_and_a_window_that_name_the_same_id_in_other_case_still_meet() {
+        let p = packaged_pin("Spotify", SPOTIFY);
+        assert!(pin_matches(&p, &SPOTIFY.to_lowercase(), &[]));
+        assert!(!pin_matches(&p, &TELEGRAM.to_lowercase(), &[]), "another package");
+        assert!(!pin_matches(&p, "spotifyab.spotifymusic_zpdnekdrzrea0!other", &[]), "another app of the same package is another app");
+    }
+
+    #[test]
+    fn the_icon_chain_tries_the_app_then_its_windows_then_its_package() {
+        let t = |h: isize| task(h, r"C:\x\a.exe", None);
+        let app = |a: Vec<DockItem>| match a.into_iter().next() {
+            Some(DockItem::App(a)) => a,
+            _ => panic!("an app"),
+        };
+        // a plain program: its icon, then up to three of its windows
+        let plain = app(merge(&[], vec![group(vec![t(1), t(2), t(3), t(4)])], 0));
+        assert_eq!(plain.icon_chain(), vec![IconSource::File(PathBuf::from(r"C:\x\a.exe")), IconSource::Window(1), IconSource::Window(2), IconSource::Window(3)]);
+        // a packaged app: its logo is the app's own icon, so it is not asked for twice
+        let pk = app(merge(&[], vec![group(vec![task(9, r"C:\p\telegram.exe", Some(TELEGRAM))])], 0));
+        assert_eq!(pk.icon_chain(), vec![IconSource::Packaged(TELEGRAM.into()), IconSource::Window(9)]);
+        // a pinned program that is not running: only its own icon
+        let idle = app(merge(&[pin("Idle", Some(r"C:\i\i.exe"), None)], vec![], 0));
+        assert_eq!(idle.icon_chain().len(), 1);
+        // a pin with a program path whose windows can supply what the shell cannot: its package logo comes last
+        let mut packaged_pin_running = app(merge(&[pin("P", Some(r"C:\i\i.exe"), Some("Pkg.Name_abcdefghijklm!App"))], vec![group(vec![t(5)])], 0));
+        packaged_pin_running.windows = vec![5];
+        assert_eq!(packaged_pin_running.icon_chain().last(), Some(&IconSource::Packaged("pkg.name_abcdefghijklm!app".into())));
     }
 
     #[test]

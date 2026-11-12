@@ -74,7 +74,7 @@ pub fn run(excluded: &[isize], max_wait: Duration, monitor_at: (i32, i32)) -> Re
         let start = Instant::now();
         let (mut frames, mut first_image) = (0u32, None);
         while start.elapsed() < max_wait && first_image.is_none() {
-            match mon.pump(&g, 50, &ex, None).map_err(why)? {
+            match mon.pump(&g, 50, &ex, None, &[]).map_err(why)? {
                 Pumped::Waited { frame, image, .. } => {
                     frames += frame as u32;
                     if image {

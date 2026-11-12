@@ -13,7 +13,7 @@ use rf_win::dock::clock::{self, ClockLines};
 
 use super::backdrop::IslandGlass;
 use super::host::Kind;
-use super::look::{self, Env};
+use super::look::Palette;
 use super::plan;
 
 pub struct RightIsland {
@@ -54,8 +54,8 @@ impl RightIsland {
     }
 }
 
-fn icon_button(id: &'static str, icon: L, dark: bool, on_click: impl Fn() + 'static) -> impl IntoElement {
-    let (hover, pressed) = (look::hover_fill(dark).hsla(), look::pressed_fill(dark).hsla());
+fn icon_button(id: &'static str, icon: L, pal: Palette, on_click: impl Fn() + 'static) -> impl IntoElement {
+    let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
     div()
         .id(id)
         .size(px(plan::BUTTON))
@@ -66,16 +66,14 @@ fn icon_button(id: &'static str, icon: L, dark: bool, on_click: impl Fn() + 'sta
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
         .active(move |s| s.bg(pressed))
-        .child(Icon::new(icon).size(px(16.)).text_color(look::text(dark).hsla()))
+        .child(Icon::new(icon).size(px(16.)).text_color(pal.text().hsla()))
         .on_click(move |_, _, _| on_click())
 }
 
 impl Render for RightIsland {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let env = *cx.global::<Env>();
-        let fallback = self.glass.borrow().fallback();
-        let dark = env.dark;
-        let (hover, pressed) = (look::hover_fill(dark).hsla(), look::pressed_fill(dark).hsla());
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let (pal, fallback) = super::host::frame_palette(&self.glass, window);
+        let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
 
         let quick_settings = || {
             rf_win::dock::triggers::quick_settings();
@@ -97,19 +95,19 @@ impl Render for RightIsland {
             .hover(move |s| s.bg(hover))
             .active(move |s| s.bg(pressed))
             .child(div().text_size(px(13.)).line_height(px(16.)).child(self.lines.time.clone()))
-            .child(div().text_size(px(12.)).line_height(px(15.)).text_color(look::text_secondary(dark).hsla()).child(self.lines.date.clone()))
+            .child(div().text_size(px(12.)).line_height(px(15.)).text_color(pal.text_secondary().hsla()).child(self.lines.date.clone()))
             .on_click(move |_, _, _| notifications());
 
-        super::host::island_box(&env, fallback).child(
+        super::host::island_box(pal, fallback).child(
             h_flex()
                 .size_full()
                 .px(px(plan::SIDE_PAD))
                 .items_center()
-                .child(icon_button("dock-network", L::Wifi, dark, quick_settings))
-                .child(div().ml(px(plan::RIGHT_GAP)).child(icon_button("dock-volume", L::Volume2, dark, quick_settings)))
-                .child(div().ml(px(plan::RIGHT_SEP_GAP)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH)).h(px(plan::RIGHT_SEP_HEIGHT)).bg(look::separator(dark).hsla()))
+                .child(icon_button("dock-network", L::Wifi, pal, quick_settings))
+                .child(div().ml(px(plan::RIGHT_GAP)).child(icon_button("dock-volume", L::Volume2, pal, quick_settings)))
+                .child(div().ml(px(plan::RIGHT_SEP_GAP)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH)).h(px(plan::RIGHT_SEP_HEIGHT)).bg(pal.separator().hsla()))
                 .child(clock)
-                .child(div().ml(px(plan::RIGHT_GAP)).child(icon_button("dock-bell", L::Bell, dark, notifications))),
+                .child(div().ml(px(plan::RIGHT_GAP)).child(icon_button("dock-bell", L::Bell, pal, notifications))),
         )
     }
 }

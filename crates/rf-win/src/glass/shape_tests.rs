@@ -127,6 +127,73 @@ fn the_loop_guard_reads_the_shapes_backdrop_not_the_windows() {
     assert_ne!(fingerprint_texels([100.0, 40.0, 300.0, 48.0], pad, level, size), fingerprint_texels([60.0, 40.0, 380.0, 48.0], pad, level, size));
 }
 
+/// The brightness and the loop guard's fingerprint are about the same texels: the brightness's are the glass (the shape for a shape),
+/// the fingerprint's the glass and its padding, so the first always lie inside the second. Whatever the shape, wherever it is.
+#[test]
+fn the_brightness_looks_at_the_texels_of_the_shape_the_fingerprint_hashes() {
+    let pad = 96u32;
+    for level in 0..6u32 {
+        let size = (((1024u32) >> level).max(1), ((768u32) >> level).max(1));
+        for shape in [[0.0, 0.0, 300.0, 100.0], [128.0, 40.0, 100.0, 48.0], [28.0, 28.0, 300.0, 48.0], [400.0, 200.0, 500.0, 500.0], [3.0, 5.0, 7.0, 9.0]] {
+            let (fx0, fx1, fy0, fy1) = fingerprint_texels(shape, pad, level, size);
+            let (lx0, ly0, lx1, ly1) = luma::glass_texels(level, pad, shape, size.0, size.1);
+            assert!(lx0 < lx1 && ly0 < ly1, "level {level}, {shape:?}: the shape has a texel");
+            assert!(fx0 <= lx0 && lx1 <= fx1 && fy0 <= ly0 && ly1 <= fy1, "level {level}, {shape:?}: brightness {lx0}..{lx1} x {ly0}..{ly1} inside hash {fx0}..{fx1} x {fy0}..{fy1}");
+        }
+    }
+    // a shape moves the texels the brightness counts; a glass that is the whole window starts at the padding as it always did
+    assert_ne!(luma::glass_texels(2, pad, [28.0, 28.0, 300.0, 48.0], 128, 128), luma::glass_texels(2, pad, [0.0, 0.0, 356.0, 104.0], 128, 128));
+    assert_eq!(luma::glass_texels(0, pad, [0.0, 0.0, 300.0, 200.0], 512, 512), (96, 96, 396, 296));
+    assert_eq!(luma::glass_texels(0, pad, [28.0, 20.0, 300.0, 48.0], 512, 512), (124, 116, 424, 164));
+    // no area, no texel (never the one under the corner of the window)
+    assert_eq!(luma::glass_texels(2, pad, [10.0, 10.0, 0.0, 30.0], 128, 128), (0, 0, 0, 0));
+    assert_eq!(luma::glass_texels(2, pad, [f32::NAN, 0.0, 30.0, 30.0], 128, 128), (0, 0, 0, 0));
+    assert_eq!(luma::glass_texels(2, pad, [0.0; 4], 128, 128), (0, 0, 0, 0));
+}
+
+/// The brightness a glass reports is that of the backdrop under its SHAPE: white behind the shape in a dark scene is near 1, white in
+/// the rest of the window (the transparent margin) does not count, while the same scene seen by a glass that is the whole window does
+/// count it. This is what an island of the dock (a shape in a larger window) turns its text by.
+#[test]
+fn the_brightness_under_a_shape_is_that_of_the_shape_and_not_of_its_window() {
+    if !can_draw() {
+        return;
+    }
+    let (sw, sh) = (700u32, 600u32);
+    // the window lies at 100,100 on the screen and is 300 x 200; the shape is 120 x 48 at 60,70 in it: the screen's 160..280 x 170..218
+    let window = (100, 100, 300, 200);
+    let shape = [60.0, 70.0, 120.0, 48.0];
+    let with_shape = geo(window, Some(shape), None, 24.0);
+    let plain = geo(window, None, None, 8.0);
+    let look = Look::regular(false, &LookParams::DEFAULT);
+    let in_window = |x: u32, y: u32| (100..400).contains(&x) && (100..300).contains(&y);
+    let near_shape = |x: u32, y: u32| (148..292).contains(&x) && (158..230).contains(&y); // the shape and 12 px around it
+    let behind_shape = |x: u32, y: u32| (160..280).contains(&x) && (170..218).contains(&y);
+    with_renderer(true, |r| unsafe {
+        let measure = |g: &Geometry, data: &[u8]| {
+            let region = gpu::Region::new(&r.g, g.w, g.h, gpu::region_pad(g.scale)).expect("region");
+            let src = gpu::Source::new(&r.g, sw, sh, Some(data)).expect("source");
+            gpu::prep(r, &region, &src, g, &look, false);
+            region.read_back(&r.g, g.glass_rect()).expect("read back").luma.expect("a glass has texels")
+        };
+        let white_behind_the_shape = picture(sw, sh, |x, y| if behind_shape(x, y) { [255, 255, 255] } else { [0, 0, 0] });
+        let white_in_the_margin = picture(sw, sh, |x, y| if in_window(x, y) && !near_shape(x, y) { [255, 255, 255] } else { [0, 0, 0] });
+        let a = measure(&with_shape, &white_behind_the_shape);
+        let b = measure(&with_shape, &white_in_the_margin);
+        let c = measure(&plain, &white_in_the_margin);
+        let d = measure(&plain, &white_behind_the_shape);
+        println!("shape: white behind it {a:.3}, white in the margin {b:.3}; whole-window glass: margin {c:.3}, behind the shape's place {d:.3}");
+        assert!(a > 0.8, "white behind the shape: {a}");
+        assert!(b < 0.12, "white in the window's margin, not behind the shape: {b}");
+        assert!(c > 0.5, "the same margin is most of a glass that is the whole window: {c}");
+        assert!(d < 0.2, "a small bright place is little of the whole window: {d}");
+        // a mid grey behind the shape reads as a mid grey, whatever is around it
+        let grey = picture(sw, sh, |x, y| if behind_shape(x, y) { [128, 128, 128] } else { [255, 255, 255] });
+        let g = measure(&with_shape, &grey);
+        assert!((0.3..0.7).contains(&g), "mid grey behind the shape, white around it: {g}");
+    });
+}
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------------------------------------------------------------

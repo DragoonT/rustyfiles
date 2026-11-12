@@ -407,7 +407,44 @@ fn dirty_of(frame: &Direct3D11CaptureFrame) -> Dirty {
     Dirty::Rects(rects)
 }
 
+/// Why a session's wait for a frame ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum WaitEnd {
+    /// A command is queued: the engine must read it before it takes any frame.
+    Command,
+    /// A frame arrived (on this monitor or one of `also`), or the wait ran out: the caller takes what there is.
+    Other,
+}
+
+/// Waits up to `wait` for the first of: a frame of this session (`wake`), a frame of another session (`also`), a command in `cmds`. This
+/// is what lets the engine's quiet wait be long: nothing the engine has to react to can arrive without ending it. A channel of `also`
+/// that is the session's own is skipped.
+pub(super) fn wait_end(wake: &Receiver<()>, also: &[Receiver<()>], cmds: Option<&Receiver<Cmd>>, wait: Duration) -> WaitEnd {
+    let mut sel = Select::new();
+    sel.recv(wake);
+    for r in also.iter().filter(|r| !r.same_channel(wake)) {
+        sel.recv(r);
+    }
+    let cmd_ix = cmds.map(|c| sel.recv(c));
+    match (sel.ready_timeout(wait), cmds) {
+        (Ok(i), Some(c)) if Some(i) == cmd_ix => {
+            if !c.is_empty() {
+                return WaitEnd::Command;
+            }
+            // the queue reads ready but is empty: it is closed. Wait on the frames only, or this would spin.
+            let _ = wake.recv_timeout(wait);
+            WaitEnd::Other
+        }
+        _ => WaitEnd::Other,
+    }
+}
+
 impl SessionMonitor {
+    /// The channel a frame of this session wakes (see `pump`).
+    pub(super) fn wake(&self) -> &Receiver<()> {
+        &self.wake
+    }
+
     /// Makes the session for a monitor and starts it. Never asks the user for anything: the caller has checked the permission
     /// (`access`), the border and the cursor are switched off before the start. `Err` is the reason it cannot be had.
     pub(super) unsafe fn open(g: &Gpu, hmon: isize) -> Result<SessionMonitor, String> {
@@ -543,7 +580,17 @@ impl SessionMonitor {
     /// `cmds` is the engine's command queue: a command waiting in it (a popup registered, a window attached) ends the wait and keeps this
     /// turn from taking any frame, so the engine reads the command and sends the new list BEFORE a frame that may show the new window is
     /// copied. The frames stay in the pool; the ones made with the old list are dropped by their iteration on the next turn.
-    pub(super) unsafe fn pump(&mut self, g: &Gpu, timeout_ms: u32, ex: &Exclusion, cmds: Option<&Receiver<Cmd>>) -> Result<Pumped, MonError> {
+    ///
+    /// `also` are the wake channels of the engine's OTHER monitors: only the first monitor of a turn waits, and without them a frame on
+    /// a second monitor would be noticed only when that wait ran out.
+    pub(super) unsafe fn pump(
+        &mut self,
+        g: &Gpu,
+        timeout_ms: u32,
+        ex: &Exclusion,
+        cmds: Option<&Receiver<Cmd>>,
+        also: &[Receiver<()>],
+    ) -> Result<Pumped, MonError> {
         let none = || Pumped::Waited { frame: false, image: false, dirty: Dirty::none() };
         let command_waiting = || cmds.is_some_and(|c| !c.is_empty());
         self.check_open()?;
@@ -555,23 +602,8 @@ impl SessionMonitor {
         while self.wake.try_recv().is_ok() {}
         let mut got = self.take(g)?;
         if !got.frame && timeout_ms > 0 {
-            let wait = Duration::from_millis(timeout_ms as u64);
-            match cmds {
-                Some(c) => {
-                    let mut sel = Select::new();
-                    sel.recv(&self.wake);
-                    sel.recv(c);
-                    if sel.ready_timeout(wait).is_ok_and(|i| i == 1) {
-                        if !c.is_empty() {
-                            return Ok(none());
-                        }
-                        // the queue reads ready but is empty: it is closed. Wait on the frames only, or this would spin.
-                        let _ = self.wake.recv_timeout(wait);
-                    }
-                }
-                None => {
-                    let _ = self.wake.recv_timeout(wait);
-                }
+            if wait_end(&self.wake, also, cmds, Duration::from_millis(timeout_ms as u64)) == WaitEnd::Command {
+                return Ok(none());
             }
             self.check_open()?;
             if command_waiting() {

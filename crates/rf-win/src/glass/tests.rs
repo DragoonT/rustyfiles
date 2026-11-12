@@ -297,6 +297,62 @@ fn fingerprint_follows_the_backdrop() {
     });
 }
 
+/// The brightness read back from the pyramid is that of the backdrop under the glass: white is near 1, black near 0, a mid grey in
+/// between, and a bright block in the padding (outside the glass) does not count.
+#[test]
+fn backdrop_luma_is_the_brightness_under_the_glass() {
+    if !can_draw() {
+        return;
+    }
+    let (sw, sh) = (700u32, 600u32);
+    let geo = Geometry { w: 300, h: 200, origin: (100, 100), scale: 1.0, radius_px: 8.0, cut_corners: true, shape: None, shadow: None };
+    let look = Look::regular(false, &LookParams::DEFAULT);
+    with_renderer(true, |r| unsafe {
+        let region = Region::new(&r.g, geo.w, geo.h, region_pad(geo.scale)).expect("region");
+        let luma_of = |data: &[u8]| {
+            let src = Source::new(&r.g, sw, sh, Some(data)).expect("source");
+            prep(r, &region, &src, &geo, &look, false);
+            region.read_back(&r.g, geo.glass_rect()).expect("read back").luma.expect("a glass has texels")
+        };
+        let white = luma_of(&picture(sw, sh, |_, _| [255, 255, 255]));
+        let black = luma_of(&picture(sw, sh, |_, _| [0, 0, 0]));
+        let grey = luma_of(&picture(sw, sh, |_, _| [128, 128, 128]));
+        assert!(white > 0.97, "white backdrop: {white}");
+        assert!(black < 0.03, "black backdrop: {black}");
+        assert!((grey - 128.0 / 255.0).abs() < 0.03, "mid grey backdrop: {grey}");
+        // the glass is at 100..400 x 100..300: a white block on the left of it, in the padding, must not make a dark glass bright
+        let beside = luma_of(&picture(sw, sh, |x, y| if x < 90 && y < 400 { [255, 255, 255] } else { [10, 10, 10] }));
+        assert!(beside < 0.06, "a bright block beside the glass, not behind it: {beside}");
+        // a bright half behind the glass counts for its half
+        let half = luma_of(&picture(sw, sh, |x, _| if x < 250 { [255, 255, 255] } else { [0, 0, 0] }));
+        assert!((0.4..0.6).contains(&half), "half of the glass is white: {half}");
+    });
+}
+
+/// The value the app reads: unknown until the engine has measured, only for a window the app still holds, gone with the glass.
+#[test]
+fn the_brightness_is_unknown_until_measured_and_goes_with_the_glass() {
+    let h: isize = 0x7ffe_0b01; // not a window: only the table is looked at
+    assert_eq!(backdrop_luma(h), None, "nothing measured");
+    set_luma(h, 0.7);
+    assert_eq!(backdrop_luma(h), None, "a window the app does not hold (detached meanwhile) keeps no value");
+    states().insert(h, GlassState::Running);
+    set_luma(h, 0.7);
+    assert_eq!(backdrop_luma(h), Some(0.7));
+    set_luma(h, 0.2);
+    assert_eq!(backdrop_luma(h), Some(0.2), "the latest measurement");
+    fail(h, "lost the device");
+    assert_eq!(backdrop_luma(h), None, "a failed glass has no backdrop");
+    states().insert(h, GlassState::Running);
+    set_luma(h, 0.9);
+    detach(h);
+    assert_eq!(backdrop_luma(h), None, "detached");
+    states().insert(h, GlassState::Running);
+    set_luma(h, 0.9);
+    forget(h);
+    assert_eq!(backdrop_luma(h), None, "forgotten by the engine");
+}
+
 #[test]
 fn bad_arguments_are_errors_not_panics() {
     let src = picture(8, 8, |_, _| [1, 2, 3]);
@@ -466,6 +522,59 @@ fn an_island_with_its_own_radius_is_a_capsule() {
         assert_eq!(px(&out, rect.2, rect.2 / 2, rect.3 / 2)[3], 255, "centre (warp {warp})");
         assert_eq!(px(&out, rect.2, rect.2 / 2, 0)[3], 255, "middle of the top edge (warp {warp})");
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// The shaders made at build time
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+/// What the build embeds is what a run-time compile makes, byte for byte, so a window's glass cannot look different for it, and a change
+/// of `glass.hlsl` or of the flags in only one of the two places is caught here. (An empty blob would mean the build could not make it
+/// and the program compiles at start: allowed for the program, not for this machine's build.)
+#[test]
+fn the_shaders_made_at_build_time_are_what_a_compile_at_start_makes() {
+    use gpu::{compile, embedded};
+    use windows::Win32::Graphics::Direct3D::Fxc::D3DCOMPILE_IEEE_STRICTNESS;
+    let cases: [(&str, &[u8], &str, &str, u32); 5] = [
+        ("vs_main", embedded::VS_MAIN, "VSMain", "vs_5_0", 0),
+        ("ps_crop", embedded::PS_CROP, "PSCrop", "ps_5_0", 0),
+        ("ps_down", embedded::PS_DOWN, "PSDown", "ps_5_0", 0),
+        ("ps_glass", embedded::PS_GLASS, "PSGlass", "ps_5_0", 0),
+        ("ps_glass_strict", embedded::PS_GLASS_STRICT, "PSGlass", "ps_5_0", D3DCOMPILE_IEEE_STRICTNESS),
+    ];
+    for (name, built, entry, target, flags) in cases {
+        let now = unsafe { compile(entry, target, flags) }.expect("the shader compiles");
+        assert!(!built.is_empty(), "{name}: the build made no bytecode (see the build warnings)");
+        assert!(built == now.as_slice(), "{name}: {} bytes from the build differ from the {} a compile now makes", built.len(), now.len());
+    }
+}
+
+/// The same picture from a renderer with the build's shaders and one that compiled its own, on one device; and what the start costs.
+#[test]
+fn a_renderer_from_build_time_shaders_draws_the_same_and_starts_much_sooner() {
+    if !can_draw() {
+        return;
+    }
+    use gpu::{Gpu, Shaders};
+    use std::time::Instant;
+    let src = picture(96, 96, |x, y| [(x * 2) as u8, (y * 2) as u8, ((x ^ y) * 3) as u8]);
+    let geo = Geometry { w: 48, h: 40, origin: (24, 28), scale: 1.0, radius_px: 12.0, cut_corners: true, shape: None, shadow: None };
+    let look = Look::regular(false, &LookParams::DEFAULT);
+    with_renderer(false, |shared| unsafe {
+        let same_device = || Gpu { dev: shared.g.dev.clone(), ctx: shared.g.ctx.clone() };
+        let t = Instant::now();
+        let built = Renderer::with_shaders(same_device(), true, Shaders::Embedded).expect("renderer from the build's shaders");
+        let from_build = t.elapsed();
+        let t = Instant::now();
+        let compiled = Renderer::with_shaders(same_device(), true, Shaders::Compile).expect("renderer with compiled shaders");
+        let from_compile = t.elapsed();
+        println!("Renderer::new: build-time shaders {from_build:?}, compiled at start {from_compile:?}");
+        assert!(from_build < from_compile, "creating the shaders from bytecode must be faster than compiling them");
+        let a = gpu::render_on(&built, &src, 96, 96, &geo, &look).expect("picture from build-time shaders");
+        let b = gpu::render_on(&compiled, &src, 96, 96, &geo, &look).expect("picture from compiled shaders");
+        assert!(a == b, "the two pictures differ");
+        assert!(a.iter().any(|&v| v != 0), "and are not empty");
+    });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -709,5 +818,58 @@ mod capture_backends {
         assert_eq!(min_interval_ticks(1000), 40_000, "not below 4 ms");
         assert_eq!(min_interval_ticks(0), 160_000, "an unknown rate gets the session's own default");
         assert_eq!(min_interval_ticks(1), 160_000);
+    }
+
+    /// The long quiet wait is only safe because nothing the engine has to react to can arrive without ending it: a command, a frame of
+    /// this monitor and a frame of another monitor all do, at once and not when the wait runs out.
+    #[test]
+    fn a_session_wait_ends_at_once_for_a_command_or_a_frame_on_any_monitor() {
+        use super::super::Cmd;
+        use super::super::wgc::{WaitEnd, wait_end};
+        use crossbeam_channel::bounded;
+        use std::time::{Duration, Instant};
+        const LONG: Duration = Duration::from_secs(5);
+        const PROMPT: Duration = Duration::from_millis(1000); // far from LONG, generous for a loaded machine
+        let (wake_tx, wake) = bounded::<()>(1);
+        let (other_tx, other) = bounded::<()>(1);
+        let (cmd_tx, cmds) = crossbeam_channel::unbounded::<Cmd>();
+        let others = [wake.clone(), other.clone()]; // the session's own channel is among them, as in the engine
+
+        // a frame of another monitor, sent from another thread while the wait is under way
+        let t = Instant::now();
+        let sender = other_tx.clone(); // the monitor keeps its sender for as long as it lives; a dropped one would read ready for ever
+        let h = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            let _ = sender.try_send(());
+        });
+        assert_eq!(wait_end(&wake, &others, Some(&cmds), LONG), WaitEnd::Other);
+        assert!(t.elapsed() < PROMPT, "a frame on the second monitor must end the wait, took {:?}", t.elapsed());
+        let _ = h.join();
+        assert!(other.try_recv().is_ok(), "the wait only looks: the other monitor takes its own token");
+
+        // a frame of this monitor
+        wake_tx.try_send(()).unwrap();
+        let t = Instant::now();
+        assert_eq!(wait_end(&wake, &others, Some(&cmds), LONG), WaitEnd::Other);
+        assert!(t.elapsed() < PROMPT);
+        let _ = wake.try_recv();
+
+        // a command
+        cmd_tx.send(Cmd::LookChanged).unwrap();
+        let t = Instant::now();
+        assert_eq!(wait_end(&wake, &others, Some(&cmds), LONG), WaitEnd::Command);
+        assert!(t.elapsed() < PROMPT, "a command must end the wait, took {:?}", t.elapsed());
+        let _ = cmds.try_recv();
+
+        // nothing: the wait runs its time out and says nothing happened
+        let t = Instant::now();
+        assert_eq!(wait_end(&wake, &others, Some(&cmds), Duration::from_millis(40)), WaitEnd::Other);
+        assert!(t.elapsed() >= Duration::from_millis(30), "it must really wait, took {:?}", t.elapsed());
+
+        // a closed command queue reads ready for ever: that must not make the wait return at once, again and again
+        drop(cmd_tx);
+        let t = Instant::now();
+        assert_eq!(wait_end(&wake, &others, Some(&cmds), Duration::from_millis(40)), WaitEnd::Other);
+        assert!(t.elapsed() >= Duration::from_millis(30), "a closed queue must not turn the wait into a spin, took {:?}", t.elapsed());
     }
 }

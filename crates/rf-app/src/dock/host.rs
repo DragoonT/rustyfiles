@@ -26,14 +26,17 @@ use rf_win::dock::layout::{self, Islands, Placement, Placements, RADIUS, Rect, W
 use rf_win::dock::hit;
 use rf_win::dock::{DockSystem, MonitorInfo, SystemEvent};
 
-use super::backdrop::IslandGlass;
+use super::backdrop::{self, IslandGlass};
 use super::control::{self, Command};
 use super::left::LeftIsland;
-use super::look::{self, Env};
+use super::look::{Env, Palette};
 use super::middle::MiddleIsland;
 use super::plan;
 use super::right::RightIsland;
 use crate::settings::Settings;
+
+/// How often the islands look at the brightness behind their glass: no faster than four times a second.
+const TONE_EVERY: Duration = Duration::from_millis(250);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -178,13 +181,27 @@ fn host_mut(cx: &mut App) -> Option<&mut Host> {
 }
 
 /// The base of every island view: the window-sized box, text colour, and - only while the glass is not running - the island's own
-/// rounded translucent fill, so the dock is never invisible.
-pub fn island_box(env: &Env, fallback: bool) -> Div {
+/// rounded translucent fill, so the dock is never invisible. The colours are the island's palette at this moment (see `tone.rs`).
+pub fn island_box(pal: Palette, fallback: bool) -> Div {
     div()
         .size_full()
         .text_size(px(13.))
-        .text_color(look::text(env.dark).hsla())
-        .when(fallback, |d| d.bg(look::fallback_fill(env.dark).hsla()).rounded(px(RADIUS)))
+        .text_color(pal.text().hsla())
+        .when(fallback, |d| d.bg(pal.fallback_fill().hsla()).rounded(px(RADIUS)))
+}
+
+/// What a view needs of its island's glass for one frame: the palette now, and a request for another frame while the foreground is
+/// still turning from one look to the other.
+pub fn frame_palette(glass: &RefCell<IslandGlass>, window: &mut Window) -> (Palette, bool) {
+    let now = backdrop::now_ms();
+    let (pal, settled, fallback) = {
+        let g = glass.borrow();
+        (g.palette(now), g.tone_settled(now), g.fallback())
+    };
+    if !settled {
+        window.request_animation_frame();
+    }
+    (pal, fallback)
 }
 
 /// The root of the left and the right island's window: the island's own view, inset by its margin, so that the view
@@ -334,7 +351,7 @@ fn publish_env(scale: f32, cx: &mut App) {
     cx.set_global(env);
     if let Some(host) = cx.try_global::<Host>() {
         for p in &host.placed {
-            p.glass.borrow_mut().sync(env.dark, env.scale);
+            p.glass.borrow_mut().sync(env.dark, env.scale, backdrop::now_ms());
         }
     }
     if changed {
@@ -641,6 +658,30 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
             });
             let Some(wait) = wait else { break };
             cx.background_executor().timer(wait).await;
+        }
+    })
+    .detach();
+
+    // The brightness behind each glass, four times a second: the engine measures it at its draws and keeps the last value per window;
+    // here an island only looks at it. Nothing is drawn unless an island's foreground has to turn.
+    cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor().timer(TONE_EVERY).await;
+            let alive = cx.update(|cx| {
+                let Some(host) = cx.try_global::<Host>() else { return false };
+                let now = backdrop::now_ms();
+                let mut changed = false;
+                for p in &host.placed {
+                    changed |= p.glass.borrow_mut().poll_tone(now);
+                }
+                if changed {
+                    cx.refresh_windows();
+                }
+                true
+            });
+            if !alive {
+                break;
+            }
         }
     })
     .detach();

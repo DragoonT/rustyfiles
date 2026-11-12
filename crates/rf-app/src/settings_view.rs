@@ -144,27 +144,33 @@ pub fn open_page(page: Page, cx: &mut App) {
 
 // ---------------------------------------------------------------- controls
 
-/// A Windows 11 switch with its state word ("Açık"/"Kapalı") on the left.
+/// A Windows 11 switch with its state word ("Açık"/"Kapalı") on the left. Over glass the track and the thumb are the liquid ones
+/// (`liquid::switch_track`); the word and the click are the same.
 pub(crate) fn switch(id: impl Into<ElementId>, p: &Palette, on: bool, toggle: impl Fn(&mut Window, &mut App) + 'static) -> AnyElement {
-    let knob = if on { p.accent_text } else { p.text_secondary };
+    let id: ElementId = id.into();
+    let track: AnyElement = if p.liquid {
+        crate::liquid::switch_track(id, p, on, false, toggle)
+    } else {
+        let knob = if on { p.accent_text } else { p.text_secondary };
+        h_flex()
+            .id(id)
+            .w(px(40.))
+            .h(px(20.))
+            .px(px(3.))
+            .items_center()
+            .rounded_full()
+            .border_1()
+            .when(on, |d| d.bg(p.accent).border_color(p.accent).justify_end())
+            .when(!on, |d| d.border_color(p.text_secondary).hover(|s| s.bg(p.hover)))
+            .child(div().size(px(12.)).rounded_full().bg(knob))
+            .on_click(move |_, window, cx| toggle(window, cx))
+            .into_any_element()
+    };
     h_flex()
         .gap_3()
         .items_center()
         .child(div().text_sm().text_color(p.text_secondary).child(if on { t!("Açık") } else { t!("Kapalı") }))
-        .child(
-            h_flex()
-                .id(id)
-                .w(px(40.))
-                .h(px(20.))
-                .px(px(3.))
-                .items_center()
-                .rounded_full()
-                .border_1()
-                .when(on, |d| d.bg(p.accent).border_color(p.accent).justify_end())
-                .when(!on, |d| d.border_color(p.text_secondary).hover(|s| s.bg(p.hover)))
-                .child(div().size(px(12.)).rounded_full().bg(knob))
-                .on_click(move |_, window, cx| toggle(window, cx)),
-        )
+        .child(track)
         .into_any_element()
 }
 
@@ -791,12 +797,17 @@ impl Hg {
 const SLIDER_W: f32 = 220.;
 const THUMB: f32 = 18.;
 
-/// The value (0..=100) under the pointer: `left` and `width` are the slider's box, the thumb's centre travels from half a thumb inside
-/// the left edge to half a thumb inside the right one.
-fn slider_value_at(x: f32, left: f32, width: f32) -> u8 {
-    let run = (width - THUMB).max(1.0);
-    (((x - left - THUMB / 2.0) / run).clamp(0.0, 1.0) * 100.0).round() as u8
+/// The value (0..=100) under the pointer: `left` and `width` are the slider's box, the thumb's centre travels from half a thumb
+/// inside the left edge to half a thumb inside the right one. `thumb` is the thumb's width AT REST (the classic round one, or the
+/// liquid capsule): a thumb that grows while it is held keeps its centre, so the mapping does not change under the pointer.
+fn slider_value_at(x: f32, left: f32, width: f32, thumb: f32) -> u8 {
+    let run = (width - thumb).max(1.0);
+    (((x - left - thumb / 2.0) / run).clamp(0.0, 1.0) * 100.0).round() as u8
 }
+
+/// The slider being dragged right now (its id), `usize::MAX` for none. Together with `cx.has_active_drag()` it says whether to draw
+/// the thumb as the held glass lens: the press state of the element is cleared by GPUI when a drag starts.
+static HG_DRAG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
 
 /// What a key does to a slider that has the focus: the new value, or `None` for a key the slider does not take. Arrows move by 1,
 /// Shift or Page Up / Down by 10, Home and End jump to the ends.
@@ -827,10 +838,15 @@ impl Render for SliderGhost {
 
 /// A slider for one HyperGlass value: a thin track filled up to a round thumb. A click puts the thumb there, a drag moves it, the arrow
 /// keys move it while it has the focus. Every step is applied and drawn at once and written to the file once the steps settle.
-fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle) -> AnyElement {
+fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle, dragging: bool) -> AnyElement {
     let id = which as usize;
     let value = value.min(100);
     let frac = f32::from(value) / 100.0;
+    let liquid = p.liquid;
+    // the width the pointer mapping leaves the thumb at rest (a thumb that grows while held keeps its centre)
+    let thumb_w = if liquid { crate::liquid::SL_REST_W } else { THUMB };
+    // (only the liquid thumb needs to know that the pointer is down on the slider; the classic slider stays as it was)
+    let group: Option<SharedString> = liquid.then(|| format!("hg-slider-{id}").into());
     let bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::<Pixels>::default()));
     let apply = move |v: u8, cx: &mut App| {
         if which.get(cx.global::<Settings>()) != v {
@@ -839,8 +855,9 @@ fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle) -> AnyElement {
     };
     let (b_down, f_down) = (bounds.clone(), focus.clone());
     let (b_drag, b_probe) = (bounds.clone(), bounds.clone());
-    div()
+    let root = div()
         .id(("hg-slider", id))
+        .when_some(group.clone(), |d, g| d.group(g))
         .relative()
         .w(px(SLIDER_W))
         .h(px(24.))
@@ -852,8 +869,13 @@ fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle) -> AnyElement {
         .track_focus(&focus)
         .focus(|s| s.border_color(p.accent))
         // (the probe records where the slider is; the mouse events do not carry the element's box)
-        .child(canvas(move |b, _, _| b_probe.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full())
-        .child(
+        .child(canvas(move |b, _, _| b_probe.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full());
+    let root = if let Some(group) = group {
+        // a 4 px track and a capsule thumb that turns into a glass lens while it is held (no clip anywhere: it overhangs the box)
+        let (track, lane) = crate::liquid::slider_parts(id, group, p, SLIDER_W - 2.0 * crate::liquid::SL_BORDER, frac, dragging);
+        root.child(track).child(lane)
+    } else {
+        root.child(
             // the track, filled up to the thumb
             div()
                 .absolute()
@@ -882,18 +904,24 @@ fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle) -> AnyElement {
                     .child(div().m(px(4.)).size(px(8.)).rounded_full().bg(p.accent)),
             ),
         )
+    };
+    let root = root
         .on_mouse_down(MouseButton::Left, move |e, window, cx| {
             window.focus(&f_down, cx);
             let b = b_down.get();
-            apply(slider_value_at(f32::from(e.position.x), f32::from(b.left()), f32::from(b.size.width)), cx);
+            apply(slider_value_at(f32::from(e.position.x), f32::from(b.left()), f32::from(b.size.width), thumb_w), cx);
             cx.stop_propagation();
         })
         .on_drag(SliderDrag(id), |_, _, _, cx| cx.new(|_| SliderGhost))
-        .on_drag_move(move |e: &DragMoveEvent<SliderDrag>, _, cx| {
+        .on_drag_move(move |e: &DragMoveEvent<SliderDrag>, window, cx| {
             if e.drag(cx).0 == id {
+                if liquid && HG_DRAG.swap(id, std::sync::atomic::Ordering::Relaxed) != id {
+                    // the thumb turns into the held lens at the first step of the drag, even when the value did not change
+                    window.refresh();
+                }
                 // the same box as a click uses (the probe's), so a click and a drag agree on the value under the pointer
                 let b = b_drag.get();
-                apply(slider_value_at(f32::from(e.event.position.x), f32::from(b.left()), f32::from(b.size.width)), cx);
+                apply(slider_value_at(f32::from(e.event.position.x), f32::from(b.left()), f32::from(b.size.width), thumb_w), cx);
             }
         })
         // (captured, so the arrows reach the slider before the file list's own shortcuts do)
@@ -903,8 +931,20 @@ fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle) -> AnyElement {
                 apply(v, cx);
                 cx.stop_propagation();
             }
-        })
-        .into_any_element()
+        });
+    if !liquid {
+        return root.into_any_element();
+    }
+    // the thumb goes back to rest when the pointer is let go, on the slider or off it
+    root.on_mouse_up(MouseButton::Left, |_, window, _| {
+        HG_DRAG.store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
+        window.refresh();
+    })
+    .on_mouse_up_out(MouseButton::Left, |_, window, _| {
+        HG_DRAG.store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
+        window.refresh();
+    })
+    .into_any_element()
 }
 
 /// The focus handle of slider `i`, made at the first call.
@@ -921,12 +961,19 @@ fn hg_focus(cx: &mut App, i: usize) -> FocusHandle {
 fn hyperglass_card(p: &Palette, s: &Settings, cx: &mut App) -> AnyElement {
     let reset = button("hg-reset", p, t!("Varsayılana dön"), |_, cx| settings::update(cx, |s| s.reset_hyperglass()));
     let mut rows: Vec<AnyElement> = Vec::new();
+    if !cx.has_active_drag() {
+        // No drag is on: whatever slider the flag still names lost its mouse-up (the page went away with the button down), and must not
+        // show as held when some other drag starts.
+        HG_DRAG.store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
+    }
     for which in Hg::ALL {
         let value = which.get(s);
+        // dragged right now: the drag is on and it is this slider's (a flag left over from a drag that ended does not count)
+        let dragging = cx.has_active_drag() && HG_DRAG.load(std::sync::atomic::Ordering::Relaxed) == which as usize;
         let control = h_flex()
             .gap_3()
             .items_center()
-            .child(slider(which, p, value, hg_focus(cx, which as usize)))
+            .child(slider(which, p, value, hg_focus(cx, which as usize), dragging))
             .child(div().w(px(32.)).flex_shrink_0().text_right().text_sm().text_color(p.text_secondary).child(value.to_string()))
             .into_any_element();
         rows.push(sub(p, which.title(), Some(which.desc()), control));
@@ -2674,22 +2721,30 @@ mod hyperglass_tests {
 
     #[test]
     fn the_thumbs_travel_maps_to_0_through_100() {
-        // a slider at x = 100: the thumb's centre runs from 100 + 9 to 100 + 220 - 9
-        let at = |x: f32| slider_value_at(x, 100.0, SLIDER_W);
-        assert_eq!(at(100.0), 0, "left of the track");
-        assert_eq!(at(100.0 + THUMB / 2.0), 0);
-        assert_eq!(at(100.0 + SLIDER_W - THUMB / 2.0), 100);
-        assert_eq!(at(100.0 + SLIDER_W + 500.0), 100, "far right of the track, as a drag goes on past the end");
-        assert_eq!(at(-300.0), 0);
-        let mid = at(100.0 + SLIDER_W / 2.0);
-        assert_eq!(mid, 50, "the middle of the track is the middle of the range");
-        // the thumb drawn for a value is under the pointer that gave it
-        for v in [0u8, 1, 37, 52, 99, 100] {
-            let centre = 100.0 + f32::from(v) / 100.0 * (SLIDER_W - THUMB) + THUMB / 2.0;
-            assert_eq!(at(centre), v);
+        // a slider at x = 100: the thumb's centre runs from 100 + 9 to 100 + 220 - 9 (the classic round thumb), or from + 11 (the liquid one)
+        for thumb in [THUMB, crate::liquid::SL_REST_W] {
+            let at = |x: f32| slider_value_at(x, 100.0, SLIDER_W, thumb);
+            assert_eq!(at(100.0), 0, "left of the track");
+            assert_eq!(at(100.0 + thumb / 2.0), 0);
+            assert_eq!(at(100.0 + SLIDER_W - thumb / 2.0), 100);
+            assert_eq!(at(100.0 + SLIDER_W + 500.0), 100, "far right of the track, as a drag goes on past the end");
+            assert_eq!(at(-300.0), 0);
+            let mid = at(100.0 + SLIDER_W / 2.0);
+            assert_eq!(mid, 50, "the middle of the track is the middle of the range");
+            // the thumb drawn for a value is under the pointer that gave it
+            for v in [0u8, 1, 37, 52, 99, 100] {
+                let centre = 100.0 + f32::from(v) / 100.0 * (SLIDER_W - thumb) + thumb / 2.0;
+                assert_eq!(at(centre), v);
+            }
+        }
+        // the liquid thumb's drawn centre (liquid::slider_centre) is the pointer position that gives the value; it grows about its
+        // centre while it is held, so the mapping always uses the resting width
+        for v in 0..=100u8 {
+            let centre = 100.0 + crate::liquid::slider_centre(SLIDER_W, f32::from(v) / 100.0);
+            assert_eq!(slider_value_at(centre, 100.0, SLIDER_W, crate::liquid::SL_REST_W), v);
         }
         // a box too small to hold the thumb does not divide by zero
-        assert_eq!(slider_value_at(5.0, 0.0, 0.0), 0);
+        assert_eq!(slider_value_at(5.0, 0.0, 0.0, THUMB), 0);
     }
 
     #[test]

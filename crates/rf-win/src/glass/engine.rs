@@ -54,8 +54,11 @@ const FRAME_WAIT_MS: u32 = 8;
 /// is what keeps the thread from waking 125 times a second.
 const QUIET_WAIT_MS: u32 = 50;
 const QUIET_AFTER: Duration = Duration::from_secs(1);
-/// While a window has a lens (even at rest) the quiet wait is cut to this: a lens command is only seen between two waits, and the
-/// selection pill must start sliding about when the scene shows the new selection, not up to `QUIET_WAIT_MS` later.
+/// While a window has a lens (even at rest) and the capture is Desktop Duplication, the quiet wait is cut to this: AcquireNextFrame
+/// cannot be interrupted, so a lens command is only seen between two waits, and the selection pill must start sliding about when the
+/// scene shows the new selection, not up to `QUIET_WAIT_MS` later. A capture session does not need it: its wait also ends the moment a
+/// command is queued (`wgc::wait_end`), and every glass window of the app holds a lens at rest, so using it there kept the thread at
+/// about 62 turns a second on an idle desktop instead of 20.
 const LENS_WAIT_MS: u32 = 16;
 /// A glass shape that changed this recently (a dock island widening under the pointer) shortens the wait for a frame to
 /// `SHAPE_WAIT_MS`; this long after the last change it is at rest again and costs nothing.
@@ -71,6 +74,11 @@ const STATS_EVERY: Duration = Duration::from_secs(5);
 const DEVICE_CHECK_EVERY: Duration = Duration::from_secs(1);
 /// How often a running session backend looks again at the permission it was started on (reading it is a cheap, silent query).
 const ACCESS_CHECK_EVERY: Duration = Duration::from_secs(10);
+
+/// The wait of a turn on a quiet desktop. Only Desktop Duplication needs the shorter one while a lens is held (see `LENS_WAIT_MS`).
+fn quiet_wait_ms(mode: CaptureMode, lens_held: bool) -> u32 {
+    if lens_held && mode != CaptureMode::Session { LENS_WAIT_MS } else { QUIET_WAIT_MS }
+}
 
 fn hwnd_of(h: isize) -> HWND {
     HWND(h as *mut c_void)
@@ -382,10 +390,10 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     let mirror = mon.mirror().ok_or_else(|| Fail::Window("no mirror of the monitor".into()))?;
 
     // the swap chain: made on the first draw, resized when the client area changed
+    let first_draw = w.target.is_none();
     match &mut w.target {
         None => {
             w.target = Some(Target::new(gfx, w.hwnd, geo.w, geo.h)?);
-            super::set_state(w.hwnd, GlassState::Running);
         }
         Some(t) if (t.w, t.h) != (geo.w, geo.h) => {
             t.resize(gfx, geo.w, geo.h)?;
@@ -432,9 +440,14 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
             // THE LOOP GUARD. Our own Present can make the compositor produce a new duplication frame whose picture (without our excluded
             // window) is unchanged; drawing for it would keep the engine busy at the refresh rate for ever. So a coarse level of the backdrop
             // is read back, and when it, the geometry, the look and the lenses all equal the last presented state, nothing is drawn.
-            let hash = region.fingerprint(&gfx.r.g, g.glass_rect()).map_err(|e| ctx("reading the backdrop back", e))?;
+            let read = region.read_back(&gfx.r.g, g.glass_rect()).map_err(|e| ctx("reading the backdrop back", e))?;
+            // the same bytes tell how bright the backdrop under the glass (the SHAPE, when there is one) is (`backdrop_luma`); no extra
+            // pass, copy or wait
+            if let Some(luma) = read.luma {
+                super::set_luma(w.hwnd, luma);
+            }
             w.stale = false;
-            (prepared, hash)
+            (prepared, read.hash)
         }
     };
     prepared.set_lenses(&look, &lenses);
@@ -455,6 +468,11 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     w.stats.glass += t1.elapsed();
     w.stats.presented += 1;
     w.presented = Some(now);
+    if first_draw {
+        // Running means "the first frame is presented", not "the swap chain exists": a window that drops its own fill on Running (a popup
+        // menu, the dock's island, the main window turning see-through) would otherwise be empty for the time the first frame takes.
+        super::set_state(w.hwnd, GlassState::Running);
+    }
     Ok(Drawn::Presented)
 }
 
@@ -473,6 +491,8 @@ struct Engine {
     /// The windows a capture session leaves out.
     excl: Exclusion,
     last_access_check: Instant,
+    /// A permission check running on its own thread (see `access_tick`).
+    access_job: Option<Receiver<Access>>,
     /// How many `DwmFlush` calls in a row returned without waiting (see `pace`).
     instant_flushes: u32,
 }
@@ -521,6 +541,7 @@ pub(super) fn run(rx: Receiver<Cmd>) {
         mode: CaptureMode::Off,
         excl: Exclusion::default(),
         last_access_check: Instant::now(),
+        access_job: None,
         instant_flushes: 0,
     };
     while e.step() {}
@@ -584,7 +605,7 @@ impl Engine {
         } else if self.shape_moving() {
             SHAPE_WAIT_MS
         } else if self.last_activity.elapsed() > QUIET_AFTER {
-            if self.wins.values().any(|w| w.visible && w.lenses.occupied()) { LENS_WAIT_MS } else { QUIET_WAIT_MS }
+            quiet_wait_ms(self.mode, self.wins.values().any(|w| w.visible && w.lenses.occupied()))
         } else {
             FRAME_WAIT_MS
         }
@@ -843,11 +864,14 @@ impl Engine {
             self.excl.poll_extras(wgc::probe_window);
         }
         let mut budget = self.frame_wait_ms(); // the first monitor that is waited on waits, the others only look
+        // A frame on another monitor ends that wait too, or a long quiet wait (`quiet_wait_ms`) would delay the notice of it by as much.
+        // With one monitor this is an empty list and costs nothing.
+        let others: Vec<Receiver<()>> = if self.mons.len() > 1 { self.mons.values().filter_map(|m| m.wake().cloned()).collect() } else { Vec::new() };
         let mut waited = false;
         let mut errors: Vec<(isize, MonError)> = vec![];
         let mut fresh: Vec<(isize, Dirty)> = vec![];
         for (&hmon, m) in self.mons.iter_mut() {
-            match unsafe { m.pump(&gfx.r.g, budget, &self.excl, Some(&self.rx)) } {
+            match unsafe { m.pump(&gfx.r.g, budget, &self.excl, Some(&self.rx), &others) } {
                 Ok(Pumped::NoWait) => {}
                 Ok(Pumped::Waited { frame, image, dirty }) => {
                     if budget > 0 {
@@ -946,13 +970,40 @@ impl Engine {
                 self.fail_all(&format!("the graphics device was removed: {e}"));
             }
         }
-        if self.mode == CaptureMode::Session && now.duration_since(self.last_access_check) >= ACCESS_CHECK_EVERY {
+        if self.mode == CaptureMode::Session
+            && let Some(why) = self.access_tick(now)
+        {
+            self.use_affinity(&format!("the permission was withdrawn: {why}"), true);
+        }
+    }
+
+    /// The look at the capture permission, off the engine thread: reading it takes about 3 ms (a WinRT call into the capability broker),
+    /// which would be a stall of the draw loop every `ACCESS_CHECK_EVERY` (15 refreshes at 200 Hz, if a lens happens to be sliding then).
+    /// Starts a check when one is due and none is running; returns the reason when a finished check says the permission is withdrawn.
+    /// Only a definite "no" counts: a read that failed just now says nothing about the permission.
+    fn access_tick(&mut self, now: Instant) -> Option<String> {
+        if let Some(job) = &self.access_job {
+            match job.try_recv() {
+                Ok(Access::Not(why)) => {
+                    self.access_job = None;
+                    return Some(why);
+                }
+                Ok(_) | Err(crossbeam_channel::TryRecvError::Disconnected) => self.access_job = None,
+                Err(crossbeam_channel::TryRecvError::Empty) => {}
+            }
+        } else if now.duration_since(self.last_access_check) >= ACCESS_CHECK_EVERY {
             self.last_access_check = now;
-            // only a definite "no" gives the session up: a read that failed just now says nothing about the permission
-            if let Access::Not(why) = wgc::access() {
-                self.use_affinity(&format!("the permission was withdrawn: {why}"), true);
+            let (tx, rx) = crossbeam_channel::bounded(1);
+            // WinRT needs the thread to be in an apartment; the check ends the thread, nothing is kept
+            let spawned = std::thread::Builder::new().name("rf-glass-access".into()).spawn(move || {
+                let _apartment = Apartment::enter();
+                let _ = tx.send(wgc::access());
+            });
+            if spawned.is_ok() {
+                self.access_job = Some(rx);
             }
         }
+        None
     }
 
     /// Takes the glass off a window that leaves the engine.
@@ -1000,6 +1051,7 @@ impl Engine {
     fn release_gfx(&mut self) {
         self.mons.clear();
         self.gfx = None;
+        self.access_job = None;
         self.mode = CaptureMode::Off;
         set_mode(CaptureMode::Off);
         self.excl = Exclusion::default();
@@ -1028,6 +1080,7 @@ mod tests {
             mode: CaptureMode::Off,
             excl: Exclusion::default(),
             last_access_check: Instant::now(),
+            access_job: None,
             instant_flushes: 0,
         };
         for hwnd in [1isize, 2] {
@@ -1079,20 +1132,9 @@ mod tests {
     /// show every frame one refresh late); a moment after the last change it is at rest again.
     #[test]
     fn a_changing_shape_shortens_the_wait_and_a_resting_one_does_not() {
-        let (_tx, rx) = crossbeam_channel::unbounded();
-        let mut e = Engine {
-            rx,
-            gfx: None,
-            wins: BTreeMap::new(),
-            mons: BTreeMap::new(),
-            stats_on: false,
-            last_device_check: Instant::now(),
-            last_activity: Instant::now(),
-            mode: CaptureMode::Off,
-            excl: Exclusion::default(),
-            last_access_check: Instant::now(),
-            instant_flushes: 0,
-        };
+        let mut e = idle_engine(CaptureMode::Off);
+        // just after activity, so the plain wait is the frame wait (the quiet one is tested apart)
+        e.last_activity = Instant::now();
         let mut w = Win::new(1, GlassOptions { shape: Some([0.0, 0.0, 10.0, 10.0]), ..GlassOptions::window(true) });
         w.visible = true;
         e.wins.insert(1, w);
@@ -1109,6 +1151,25 @@ mod tests {
         assert!(!e.shape_moving(), "a hidden window does not keep the loop running");
     }
 
+    /// On a quiet desktop the quiet wait is long (main's rule); a shape that moves still cuts it to the short one in both capture modes,
+    /// and once it rests the quiet wait is back.
+    #[test]
+    fn a_moving_shape_wins_over_the_quiet_wait_and_the_quiet_wait_comes_back() {
+        for mode in [CaptureMode::Session, CaptureMode::Affinity] {
+            let mut e = idle_engine(mode);
+            let mut w = Win::new(1, GlassOptions { shape: Some([0.0, 0.0, 10.0, 10.0]), ..GlassOptions::window(true) });
+            w.visible = true;
+            e.wins.insert(1, w);
+            assert_eq!(e.frame_wait_ms(), QUIET_WAIT_MS, "{mode:?}: a quiet desktop");
+            e.command(Cmd::SetOptions { hwnd: 1, opts: GlassOptions { shape: Some([0.0, 0.0, 20.0, 10.0]), ..GlassOptions::window(true) } });
+            assert_eq!(e.frame_wait_ms(), SHAPE_WAIT_MS, "{mode:?}: a moving shape");
+            // (a command counts as activity; let the desktop be quiet again as well as the shape at rest)
+            e.last_activity = Instant::now().checked_sub(QUIET_AFTER * 2).unwrap_or_else(Instant::now);
+            e.wins.get_mut(&1).unwrap().shape_changed = Some(Instant::now() - SHAPE_ACTIVE - Duration::from_millis(1));
+            assert_eq!(e.frame_wait_ms(), QUIET_WAIT_MS, "{mode:?}: at rest again");
+        }
+    }
+
     /// The look is part of what the loop guard compares: the same picture with another look is not skipped.
     #[test]
     fn the_loop_guard_sees_a_new_look() {
@@ -1118,5 +1179,111 @@ mod tests {
         let b = Presented { look: Look::regular(false, &LookParams { frost: 80.0, ..LookParams::DEFAULT }), ..a };
         let same = a;
         assert!(same == a && a != b);
+    }
+
+    fn idle_engine(mode: CaptureMode) -> Engine {
+        let (_tx, rx) = crossbeam_channel::unbounded();
+        Engine {
+            rx,
+            gfx: None,
+            wins: BTreeMap::new(),
+            mons: BTreeMap::new(),
+            stats_on: false,
+            last_device_check: Instant::now(),
+            // quiet for longer than QUIET_AFTER
+            last_activity: Instant::now().checked_sub(QUIET_AFTER * 2).unwrap_or_else(Instant::now),
+            mode,
+            excl: Exclusion::default(),
+            last_access_check: Instant::now(),
+            access_job: None,
+            instant_flushes: 0,
+        }
+    }
+
+    /// A glass window at rest with a selection lens on it, as every glass window of the app is.
+    fn window_with_resting_lens(hwnd: isize) -> Win {
+        let mut w = Win::new(hwnd, GlassOptions::window(true));
+        w.visible = true;
+        w.dirty = false;
+        w.lenses.set(0, Some(super::super::LensSpec { key: 1, rect: [10.0, 10.0, 80.0, 30.0], clip: [0.0, 0.0, 200.0, 100.0], radius: 15.0 }), false);
+        assert!(w.lenses.occupied() && !w.lenses.animating(), "the lens is placed and at rest");
+        w
+    }
+
+    /// On an idle desktop the loop turns once per wait. With a capture session a held lens no longer shortens the wait (the session's
+    /// wait ends for a command anyway); Desktop Duplication, whose wait cannot be interrupted, keeps it.
+    #[test]
+    fn a_resting_lens_shortens_the_quiet_wait_only_where_a_command_cannot_end_it() {
+        let turns_a_second = |ms: u32| 1000.0 / ms as f64;
+        for (mode, want) in [(CaptureMode::Session, QUIET_WAIT_MS), (CaptureMode::Affinity, LENS_WAIT_MS)] {
+            let mut e = idle_engine(mode);
+            e.wins.insert(1, window_with_resting_lens(1));
+            assert_eq!(e.frame_wait_ms(), want, "{mode:?} with a lens at rest");
+            println!("{mode:?}, lens at rest, idle desktop: wait {} ms = {:.0} turns a second", e.frame_wait_ms(), turns_a_second(e.frame_wait_ms()));
+        }
+        // without a lens both wait the same
+        for mode in [CaptureMode::Session, CaptureMode::Affinity] {
+            let mut e = idle_engine(mode);
+            let mut w = Win::new(1, GlassOptions::window(true));
+            w.visible = true;
+            e.wins.insert(1, w);
+            assert_eq!(e.frame_wait_ms(), QUIET_WAIT_MS);
+        }
+        // and a hidden window's lens does not count in either
+        let mut e = idle_engine(CaptureMode::Affinity);
+        let mut w = window_with_resting_lens(1);
+        w.visible = false;
+        e.wins.insert(1, w);
+        assert_eq!(e.frame_wait_ms(), QUIET_WAIT_MS);
+    }
+
+    /// A moving lens is still paced by the display, and a turn soon after activity is still the short one, whatever the backend.
+    #[test]
+    fn the_short_waits_after_activity_and_while_a_lens_moves_are_unchanged() {
+        let mut e = idle_engine(CaptureMode::Session);
+        e.last_activity = Instant::now();
+        e.wins.insert(1, window_with_resting_lens(1));
+        assert_eq!(e.frame_wait_ms(), FRAME_WAIT_MS, "just after activity");
+        e.last_activity = Instant::now().checked_sub(QUIET_AFTER * 2).unwrap_or_else(Instant::now);
+        e.wins.get_mut(&1).unwrap().lenses.set(0, Some(super::super::LensSpec { key: 2, rect: [100.0, 10.0, 80.0, 30.0], clip: [0.0, 0.0, 200.0, 100.0], radius: 15.0 }), true);
+        assert!(e.lens_active());
+        assert_eq!(e.frame_wait_ms(), 0, "a sliding lens: the display paces the turn");
+    }
+
+    /// The permission look runs on a thread of its own: `housekeeping` only starts it (and later collects the answer), so the draw loop
+    /// is not held up for the call's few milliseconds every ten seconds.
+    #[test]
+    fn the_permission_check_is_not_made_on_the_engine_thread() {
+        let mut e = idle_engine(CaptureMode::Session);
+        // not due yet: nothing starts
+        assert!(e.access_tick(Instant::now()).is_none());
+        assert!(e.access_job.is_none());
+        // due: a check starts and the call returns without its answer
+        e.last_access_check = Instant::now().checked_sub(ACCESS_CHECK_EVERY * 2).unwrap_or_else(Instant::now);
+        let t = Instant::now();
+        let first = e.access_tick(Instant::now());
+        let started_in = t.elapsed();
+        assert!(first.is_none(), "the answer cannot be there yet");
+        assert!(e.access_job.is_some(), "a check is running on its own thread");
+        // the same call made inline, for comparison
+        let t = Instant::now();
+        let inline = wgc::access();
+        let inline_took = t.elapsed();
+        let t = Instant::now();
+        let _ = wgc::access();
+        println!("starting the check took {started_in:?}; the same check inline took {inline_took:?} (first call of a process), then {:?}", t.elapsed());
+        // no second check is started while one runs; the answer arrives
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while e.access_job.is_some() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+            // a refusal is reported once, as the reason; anything else is dropped
+            if let Some(why) = e.access_tick(Instant::now()) {
+                assert!(matches!(inline, Access::Not(_)), "a refusal was reported but the inline check said {inline:?}: {why}");
+            }
+        }
+        assert!(e.access_job.is_none(), "the check finished");
+        // and the next one is only due after ACCESS_CHECK_EVERY
+        assert!(e.access_tick(Instant::now()).is_none());
+        assert!(e.access_job.is_none());
     }
 }

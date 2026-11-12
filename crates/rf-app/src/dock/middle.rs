@@ -50,8 +50,8 @@ pub struct MiddleIsland {
     pins_loaded: bool,
     items: Vec<DockItem>,
     slots: Vec<Slot>,
-    /// Per item: the key its icon is cached under and where the icon comes from (worked out once per refresh, not per frame).
-    icon_srcs: Vec<Option<(String, IconSource)>>,
+    /// Per item: the key its icon is cached under and where the icon can come from, best first (worked out once per refresh, not per frame).
+    icon_srcs: Vec<Option<(String, Vec<IconSource>)>>,
     icons: IconCache,
     /// The scale the cached icons were asked for.
     icon_scale: f32,
@@ -157,7 +157,8 @@ impl MiddleIsland {
         self.refreshing = true;
         cx.spawn(async move |this, cx| {
             loop {
-                let groups = cx.background_executor().spawn(async { tasklist::grouped(tasklist::tasks()) }).await;
+                // the windows of a packaged app are given their process's package id first, so they meet the app's pin
+                let groups = cx.background_executor().spawn(async { rf_win::dock::identity::running_groups() }).await;
                 let foreground = rf_win::dock::foreground_root();
                 let again = this.update(cx, |me, cx| {
                     me.apply(groups, foreground, cx);
@@ -175,7 +176,20 @@ impl MiddleIsland {
     }
 
     fn apply(&mut self, groups: Vec<(String, Vec<Task>)>, foreground: isize, cx: &mut Context<Self>) {
-        self.items = model::merge(&self.pins, groups, foreground);
+        let items = model::merge(&self.pins, groups, foreground);
+        if items == self.items {
+            // Most task-list events change nothing the island shows (a window that only moved, was shown again, took the focus within
+            // the same app: 26 of 28 refreshes in a minute of ordinary use). Every `notify` asks for a frame, and a frame keeps the
+            // vsync thread following the display for a second, so repainting for nothing means dozens of wake-ups a second in a
+            // process that should be idle. `DockItem` holds everything the island draws (windows, which one is in front), so equal
+            // items are an equal picture. Only a new display scale still needs the icons asked for again.
+            if self.scale_changed(cx) {
+                self.load_icons(cx);
+                cx.notify();
+            }
+            return;
+        }
+        self.items = items;
         self.slots = model::slots(&self.items);
         self.icon_srcs = icon_sources(&self.items);
         self.load_icons(cx);
@@ -187,16 +201,21 @@ impl MiddleIsland {
         cx.notify();
     }
 
+    /// The display scale is not the one the cached icons were asked for.
+    fn scale_changed(&self, cx: &Context<Self>) -> bool {
+        (cx.global::<Env>().scale - self.icon_scale).abs() > 0.001
+    }
+
     /// Asks for every icon not yet asked for (and every one that failed a while ago), on worker threads.
     fn load_icons(&mut self, cx: &mut Context<Self>) {
         let scale = cx.global::<Env>().scale;
-        if (scale - self.icon_scale).abs() > 0.001 {
+        if self.scale_changed(cx) {
             // the bitmaps were made for another scale: ask again for all of them
             self.icon_scale = scale;
             self.icons.clear();
         }
         let px = plan::icon_request_px(scale);
-        let wanted: Vec<(String, IconSource)> = self.icon_srcs.iter().flatten().cloned().collect();
+        let wanted: Vec<(String, Vec<IconSource>)> = self.icon_srcs.iter().flatten().cloned().collect();
         for (key, src) in wanted {
             if !self.icons.start_loading(&key, Instant::now()) {
                 continue;
@@ -292,18 +311,20 @@ fn icon_count(slots: &[Slot]) -> usize {
     slots.iter().filter(|s| **s == Slot::Icon).count()
 }
 
-fn item_icon(item: &DockItem) -> Option<IconSource> {
+/// Where an item's icon can come from, best first: an app's own, then what its windows have set themselves, then its package's logo;
+/// a place's own. Only when none gives a picture does the island draw the app's letter.
+fn item_icons(item: &DockItem) -> Option<Vec<IconSource>> {
     match item {
-        DockItem::App(a) => Some(a.icon.clone()),
-        DockItem::Place(p) => Some(p.icon_source()),
+        DockItem::App(a) => Some(a.icon_chain()),
+        DockItem::Place(p) => Some(vec![p.icon_source()]),
         DockItem::Separator => None,
     }
 }
 
-/// The icon key and source of every item, in the items' order. Worked out when the items change: the Downloads folder's place is a
-/// call to the shell, and a key is a string, neither of which belongs in a frame.
-fn icon_sources(items: &[DockItem]) -> Vec<Option<(String, IconSource)>> {
-    items.iter().map(|i| item_icon(i).map(|src| (plan::icon_key(&src), src))).collect()
+/// The icon key and sources of every item, in the items' order. Worked out when the items change: the Downloads folder's place is a
+/// call to the shell, and a key is a string, neither of which belongs in a frame. The key is that of the first source, the app's own.
+fn icon_sources(items: &[DockItem]) -> Vec<Option<(String, Vec<IconSource>)>> {
+    items.iter().map(|i| item_icons(i).and_then(|srcs| srcs.first().map(|first| (plan::icon_key(first), srcs.clone())))).collect()
 }
 
 /// The name a placeholder takes its letter from.
@@ -319,8 +340,8 @@ fn item_name(item: &DockItem) -> String {
 impl Render for MiddleIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let env = *cx.global::<Env>();
-        let fallback = self.glass.borrow().fallback();
-        let dark = env.dark;
+        // the palette follows the tone (what is behind the glass), the fill below it is the island's own while the glass is not running
+        let (pal, fallback) = super::host::frame_palette(&self.glass, window);
         let strength = cx.global::<Settings>().dock_magnify.strength();
         let now = self.now_ms();
         if !self.presence.settled(now) && self.frozen.is_none() {
@@ -363,7 +384,7 @@ impl Render for MiddleIsland {
                     .bottom(px(mb + BASELINE + (ICON_REST - 36.0) / 2.0))
                     .w(px(w))
                     .h(px(36.))
-                    .bg(look::separator(dark).hsla())
+                    .bg(pal.separator().hsla())
                     .into_any_element(),
                 DockItem::App(_) | DockItem::Place(_) => {
                     let picture: AnyElement = match self.icon_srcs.get(ix).and_then(|k| k.as_ref()).and_then(|(key, _)| self.icons.get(key)) {
@@ -371,7 +392,7 @@ impl Render for MiddleIsland {
                         None => div()
                             .size_full()
                             .rounded(px(w * 0.24))
-                            .bg(look::placeholder_fill(dark).hsla())
+                            .bg(pal.placeholder_fill().hsla())
                             .flex()
                             .items_center()
                             .justify_center()
@@ -403,7 +424,7 @@ impl Render for MiddleIsland {
                                     .w(px(dw))
                                     .h(px(dh))
                                     .rounded_full()
-                                    .bg(look::running_dot(dark, in_front).hsla()),
+                                    .bg(pal.running_dot(in_front).hsla()),
                             )
                         })
                         .on_click(cx.listener(move |me, _, _, _| me.click(ix)))
@@ -414,7 +435,8 @@ impl Render for MiddleIsland {
             cells.push(cell);
         }
 
-        // the glass paints its own fill only while the engine's glass is not running
+        // The glass paints its own fill only while the engine's glass is not running. The window is bigger than the glass, so the fill is
+        // the glass's rectangle in it (`pic.glass`), not the whole view; its colours are the tone's, as on main.
         let fill = fallback.then(|| {
             div()
                 .absolute()
@@ -423,12 +445,12 @@ impl Render for MiddleIsland {
                 .w(px(pic.glass[2]))
                 .h(px(pic.glass[3]))
                 .rounded(px(RADIUS))
-                .bg(look::fallback_fill(dark).hsla())
+                .bg(pal.fallback_fill().hsla())
         });
         div()
             .size_full()
             .text_size(px(13.))
-            .text_color(look::text(dark).hsla())
+            .text_color(pal.text().hsla())
             .children(fill)
             .child(
                 // The row covers the whole window, so the pointer over an icon that has grown out of the glass is still over the dock.
@@ -458,7 +480,7 @@ impl Render for MiddleIsland {
 
 #[cfg(test)]
 mod tests {
-    use super::{BASELINE, DOT_DROP, DockItem, ICON_REST, MIN_MOVE, Place, Slot, icon_count, item_icon, look, magnify, model, move_needs_frame, plan};
+    use super::{BASELINE, DOT_DROP, DockItem, ICON_REST, MIN_MOVE, Place, Slot, Task, icon_count, item_icons, look, magnify, model, move_needs_frame, plan};
 
     #[test]
     fn a_pointer_move_draws_a_frame_only_when_something_could_look_different() {
@@ -484,9 +506,9 @@ mod tests {
 
     #[test]
     fn the_places_have_icons_and_the_separator_has_none() {
-        assert!(item_icon(&DockItem::Separator).is_none());
-        assert!(item_icon(&DockItem::Place(Place::RecycleBin)).is_some());
-        assert!(item_icon(&DockItem::Place(Place::Downloads)).is_some());
+        assert!(item_icons(&DockItem::Separator).is_none());
+        assert!(item_icons(&DockItem::Place(Place::RecycleBin)).is_some());
+        assert!(item_icons(&DockItem::Place(Place::Downloads)).is_some());
     }
 
     #[test]
@@ -496,6 +518,32 @@ mod tests {
         assert_eq!(slots, vec![Slot::Separator, Slot::Icon, Slot::Icon]);
         // and its width is the one the layout formula gives for two icons and a separator
         assert_eq!(plan::middle_width_at_rest(2, 1), rf_win::dock::layout::middle_width(&[44.0, 44.0], 1));
+    }
+
+    fn task(hwnd: isize, title: &str, app: &str) -> Task {
+        Task { hwnd, title: title.into(), pid: hwnd as u32, exe: Some(std::path::PathBuf::from(app)), app_id: None, minimized: false }
+    }
+
+    /// `MiddleIsland::apply` repaints only when the items differ. What the island does not draw (a window's title, whether it is
+    /// minimised) must not make them differ; a window opening or closing, or another app coming to the front, must.
+    #[test]
+    fn a_refresh_that_changes_nothing_on_the_island_gives_equal_items() {
+        let groups = |t1: &str, t2: &str, min: bool| {
+            let mut b = task(11, t2, "c:/apps/b.exe");
+            b.minimized = min;
+            vec![("c:/apps/a.exe".to_string(), vec![task(10, t1, "c:/apps/a.exe")]), ("c:/apps/b.exe".to_string(), vec![b])]
+        };
+        let base = model::merge(&[], groups("one", "two", false), 10);
+        // the same windows with other titles, one minimised, the same one in front: the same picture
+        assert_eq!(base, model::merge(&[], groups("a loading page", "another", true), 10));
+        assert_eq!(base, model::merge(&[], groups("one", "two", false), 10));
+        // another app in front: the running mark of both changes
+        assert_ne!(base, model::merge(&[], groups("one", "two", false), 11));
+        // a window more or less
+        let mut more = groups("one", "two", false);
+        more[0].1.push(task(12, "x", "c:/apps/a.exe"));
+        assert_ne!(base, model::merge(&[], more, 10));
+        assert_ne!(base, model::merge(&[], groups("one", "two", false)[..1].to_vec(), 10));
     }
 
     #[test]

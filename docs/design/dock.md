@@ -76,10 +76,31 @@ HyperGlass is behind each island: the same engine and the same look as the main 
 at its start from the settings file, and when the file changes, which rustyfiles announces to the dock for every slider step once the
 slider has settled). A small piece has the same optics, frost, tint, saturation and rim light as a window; the only difference is
 that its rim band is bounded by its size, at most a third of its short side (16 px for the 48 px islands, 24 px for the 72 px one;
-a window's is 44 px): without the bound the band of a 48 px island was nearly all of it and the glass looked like marble. What is
+a window's is 44 px): without the bound the band of a 48 px island was nearly all of it and the glass looked like marble. The rule is
+the engine's, by the glass's short side below 160 CSS px, so it also holds for the popups drawn on HyperGlass (menus, dropdown lists,
+flyouts: `glass_watch.rs`): a 196 x 122 popup keeps a calm band of about 41 px across its middle, where text is read. What is
 seen: a bending band along the outline, a thin bright rim light, a frosted centre for text and icons. While the glass is not running
-(starting, failed) an island paints its own rounded translucent fill, so the dock is never invisible. It follows the system's light /
-dark theme.
+(starting, failed) an island paints its own rounded translucent fill, inside the glass's rectangle of its (larger) window and in the
+colours of the island's current tone, so the dock is never invisible. It starts from the system's light / dark theme.
+
+**Light or dark foreground.** Over a white page the glass is light grey and white text can hardly be read, so each island looks at
+how bright the picture behind its glass is and turns its text, symbols and glass tint the other way. The glass engine measures it
+for free: at each draw that looks at the backdrop it reads back one coarse level of it for its loop guard, and the mean brightness
+(Rec. 709 weights on the encoded colours, 0 to 1) comes from the same bytes (`rf_win::glass::backdrop_luma(hwnd)`; `None` while
+unknown). Which texels count is ONE definition for the brightness and for the loop guard's fingerprint: the texels under the glass
+(`Geometry::glass_rect`: the whole window for a window, the SHAPE for an island in its larger window), the fingerprint with the
+glass's padding added, the brightness without it. So a bright window beside an island, or in the transparent margin of its own window,
+neither turns the island's text dark nor keeps the glass drawing. (The brightness is the mean over the shape's bounding box; the
+four rounded corners are not cut out.) A draw that only moves the shape, which uses the backdrop it already has and reads nothing
+back, leaves the last brightness as it was; the next draw that looks at the backdrop measures the new rectangle. The dock looks at
+the value four times a second. An island switches to dark text on light glass above 0.58 and back to light text on dark glass
+below 0.46 (between the two it stays as it is, so a page near the line does not make it flicker); the colours ease over 300 ms and
+the engine is given the matching tint (`set_dark`). Nothing is drawn when nothing changed. While the glass is not running, or has
+not measured yet, the system's theme decides.
+
+The tint and the shape are two changes of ONE options value of an island (`IslandGlass`): a change of the shape is sent with the
+tint the engine has, a change of the scale with both, and the engine's `set_dark` changes the tint only, so neither undoes the
+other. A change of the tint is a new backdrop pass (the glass tint differs); a change of the shape alone is the cheap draw below.
 
 What the animation costs the engine: one constant buffer upload and one draw of the window's size per frame, and one `Present`. The
 backdrop did not change, so no copy of the screen, no blur pyramid, no read back and no new texture or swap chain (a change of the
@@ -114,6 +135,11 @@ the window's size, then the loop guard skips the draw); this is the same for a m
   `ping`, `reload` (the settings file changed) and `stop` (undo everything and exit). A second `--dock` greets the first and ends.
 * It reads the settings file again when the main rustyfiles tells it a dock setting changed, and every 5 seconds when the file's
   modification time differs (hand edits). A file it cannot read right now is left alone, and the dock keeps the settings it has.
+* Resource use: the middle island repaints only when what it shows changed (about 26 of 28 task-list events in a minute change
+  nothing: a repaint asks for a frame, and a frame keeps GPUI's vsync thread following the display for a second). With the renderer
+  setting on Auto the dock is kept on the graphics card (`settings::renderer_mode`), so a busy card cannot make it build a software
+  device; a user who chose the software renderer keeps it. The glass shaders are compiled when rustyfiles is built (`rf-win/build.rs`),
+  not at the dock's start.
 * `RUSTYFILES_NO_DOCK=1` keeps a rustyfiles from starting or stopping a dock (automated runs, a second copy for testing).
 * Updates and uninstalling: the dock holds `rustyfiles.exe` open, so the updater's restart and the uninstall hook ask it to stop
   first; the next start of rustyfiles brings it back while the setting is on.
@@ -127,16 +153,39 @@ the window's size, then the loop guard skips the draw); this is the same for a m
 ## Where things are
 
 * `crates/rf-win/src/dock/`: the system side. `layout.rs` (the three glass rectangles and their windows from a work area and a scale), `model.rs` (merge and
-  order of pinned and running apps, the click decision), `pins.rs` (the taskbar's pins and their order), `icons.rs` (the shell's
-  icons), `magnify.rs` (the magnification), `hit.rs` (which part of a window takes the pointer, and the window region), `hover.rs` (the slots), `clock.rs`, `fullscreen.rs` (the full-screen decision), `island.rs` (window styling and
+  order of pinned and running apps, the click decision), `identity.rs` (a window's packaged-app id), `pins.rs` (the taskbar's pins,
+  their order, and which are alive, moved or dead), `icons.rs` (the shell's icons and the window's own, as a chain of sources per app),
+  `magnify.rs` (the magnification), `hit.rs` (which part of a window takes the pointer, and the window region), `hover.rs` (the
+  slots), `clock.rs`, `fullscreen.rs` (the full-screen decision), `island.rs` (window styling and
   placing), `system.rs` (display / DPI / theme / work-area watch and the toolbar), `launch.rs`, `triggers.rs`. `weather.rs` has
-  the Open-Meteo requests (WinHTTP) and the weather-code mapping.
+  the Open-Meteo requests (WinHTTP) and the weather-code mapping. Every call into the shell runs on the one thread that pumps
+  messages (`rf_win::sta::call`).
 * `crates/rf-app/src/dock/`: the views and the process. `host.rs` (the three windows, events, settings, the clean exit), `left.rs`,
-  `middle.rs`, `right.rs`, `backdrop.rs` (an island's glass), `control.rs` (starting and stopping the process), `plan.rs` (widths,
-  layout and timing arithmetic), `look.rs`, `icons.rs`, `actions.rs`.
+  `middle.rs`, `right.rs`, `backdrop.rs` (an island's glass; its state machine is `glass_watch.rs`, shared with the popups), `control.rs`
+  (starting and stopping the process), `plan.rs` (widths, layout and timing arithmetic), `look.rs` (colours, and the palette that eases
+  between the dark and the light look), `tone.rs` (light or dark foreground from the brightness behind the glass, with its hysteresis),
+  `icons.rs` (the icon cache, keyed by an app's first source), `actions.rs`.
 * The glass engine takes a per-window corner radius, a shape and (off for the dock by default) a shadow:
   `rf_win::glass::attach_with(hwnd, GlassOptions { dark, radius_px, cut_corners, shape, shadow })`; the shape follows the glass through
-  `rf_win::glass::set_options` (cheap, made for animation).
+  `rf_win::glass::set_options` (cheap, made for animation) and the tint through `rf_win::glass::set_dark`.
+
+## Which apps appear
+
+* A pin and a running window are the same app when their AppUserModelIDs agree (case aside) or the program is the same. The windows
+  of a packaged (Store) app often set no id of their own (Telegram, Spotify, WhatsApp, Claude, Windows Terminal), so the id of the
+  process's package is used (`identity.rs`); without it the pin and the running app were two items, and the running one had the icon
+  of an exe under `WindowsApps` that the shell cannot open (a generic white window).
+* A pin whose program is gone is looked for under the next version: the deepest folder of its path with digits in its name is
+  looked for beside itself (`Adobe Photoshop 2026` -> `Adobe Photoshop 2027`, newest first, the rest of the path must exist), then
+  `App Paths` of Windows, then a Start menu shortcut to a program of the same file name. The pin then stands for that program (and
+  starts it). How Explorer itself resolves such a pin was not found out: its link tracking, `IShellLink::Resolve`, the
+  shortcut's property store and the `Taskband` data do not point at the new install on this machine; these rules reach the same
+  result for Photoshop, Illustrator and After Effects. A pin for which nothing is found is left out. A pin whose program is there
+  stays even when the icon file its shortcut names is gone (DaVinci Resolve's installer cache): the taskbar shows it, and the dock
+  draws the program's own icon. The Start menu rule only takes a shortcut that stands in a folder of the same name as the old
+  program's (the `Update.exe` of one app is not another's).
+* An icon that cannot be loaded is tried from the icon one of the app's task windows has set itself (`WM_GETICON` with a timeout, the
+  class icon), then from its package's logo; only then is the app's first letter drawn.
 
 ## Not in version 1
 
