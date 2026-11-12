@@ -3,8 +3,10 @@
 //! Every function here may block (disk, network, shell extensions). Never call them on the UI thread.
 
 pub mod accent;
+pub mod activate;
 pub mod apppkg;
 pub mod apps;
+pub mod apps_direct;
 pub mod bench;
 pub mod cert;
 pub mod clipboard;
@@ -22,6 +24,7 @@ pub mod dock;
 pub mod docs;
 pub mod drives;
 pub mod encoding;
+pub mod engine_guard;
 pub mod fastcopy;
 pub mod fastdelete;
 pub mod fileops;

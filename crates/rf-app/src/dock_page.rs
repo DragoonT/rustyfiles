@@ -328,7 +328,7 @@ pub(crate) fn entries() -> Vec<Entry> {
             shell_needs,
             L::Keyboard,
             t!("Windows tuşu rustyfiles Başlat'ını açsın (deneysel)"),
-            Some(t!("Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Windows tuşuna tek başına basıp bırakmaya bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. Windows tuşlu kısayollara dokunmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.")),
+            Some(t!("Explorer kabuk olarak çalışmıyorsa Windows tuşu hiçbir şey açmaz: Windows tuşunun rustyfiles Başlat'ını açması için bu anahtar GEREKLİDİR (Explorer çalışırken de Windows'un Başlat'ı yerine rustyfiles'ınki açılır). Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Windows tuşuna tek başına basıp bırakmaya (ve Windows tuşuyla E ya da D'ye) bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. Explorer kabuk değilken Win+E bir rustyfiles penceresi açar, Win+D masaüstünü gösterir; Windows tuşlu diğer kısayollara dokunmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.")),
             true,
             Control::Switch(|s| s.shell_win_key, |s, v| s.shell_win_key = v),
         ),
@@ -385,6 +385,11 @@ pub(crate) fn page(p: &Palette, s: &Settings, size_slider: Option<AnyElement>) -
         for e in rows {
             let slider = if matches!(e.control, Control::Size(..)) { size_slider.take() } else { None };
             out.push(row(p, s, &e, slider));
+            // the weather from the PC's position belongs with the weather city: its card (`dock/weather_card.rs`, a switch and Windows' own
+            // permission, which an entry cannot show) follows that row directly instead of standing at the end of the page
+            if e.field == "dock_weather_city" {
+                out.extend(crate::dock::weather_card::cards(p, s));
+            }
         }
     }
     out
@@ -540,8 +545,8 @@ mod tests {
                 let name = rest.split(':').next()?.trim();
                 // (`shell_submenu` is the context menu's "Show more options" switch, nothing to do with the shell host)
                 // (`shell_desktop_cover` is the desktop's switch: it is on the Masaüstü page, `desktop_page.rs`)
-                // (`dock_weather_location` is on this page too, drawn by a card of its own after the entries: `dock/weather_card.rs`,
-                // added in `settings_view.rs`; it shows Windows' own permission, which an entry cannot)
+                // (`dock_weather_location` is on this page too, drawn by a card of its own right after the weather city's row: `dock/weather_card.rs`,
+                // added by `page` above; it shows Windows' own permission, which an entry cannot)
                 let ours = (name.starts_with("dock_") || name.starts_with("shell_")) && name != "shell_submenu" && name != "shell_desktop_cover" && name != "dock_weather_location";
                 (ours && rest.contains(':') && !rest.contains('(')).then(|| name.to_string())
             })

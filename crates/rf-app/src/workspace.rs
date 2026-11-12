@@ -400,6 +400,7 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         crate::quick_search::toggle(cx);
         return true;
     }
+    crate::shell::desktop::open::mark("main: the line to open a place arrived");
     let (loc, select) = parse_launch(&msg);
     let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
     for (handle, ws) in list.into_iter().rev() {
@@ -417,11 +418,14 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
             })
             .is_ok();
         if ok {
+            crate::shell::desktop::open::mark("main: the place is open in a new tab and the window asked to come forward");
             return true;
         }
     }
     *START_SELECT.lock().unwrap() = select;
-    crate::open_main_window_made(Some(loc), None, None, cx)
+    let made = crate::open_main_window_made(Some(loc), None, None, cx);
+    crate::shell::desktop::open::mark("main: a new window was made for the place");
+    made
 }
 
 /// Puts a search at the front of the remembered ones (once, whatever its case; ten are kept).

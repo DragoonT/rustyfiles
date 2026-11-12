@@ -30,6 +30,7 @@ use rf_core::entry::{Entry, EntryKind};
 use super::args::PreviewArgs;
 use super::drop::{self, Accepts, DropAction, Over, Where};use super::geometry::Mapping;
 use super::label::{self, Lines};
+use super::label_shadow;
 use super::names;
 use super::select::{Placed, Selection, rect_of};
 use super::shared::{Peers, SharedStore};
@@ -779,7 +780,7 @@ impl DesktopView {
                 line = line.child(one(text.to_string()).absolute().left(px(dx * d)).top(px(dy * d)).text_color(black(a)));
             }
         }
-        line.child(one(text.to_string()).absolute().left(px(0.)).top(px(0.)).text_color(white(0.97)))
+        line.child(one(text.to_string()).absolute().left(px(0.)).top(px(0.)).text_color(white(label_shadow::TEXT_ALPHA)))
     }
 
     fn icon_for(&mut self, it: &DesktopItem, frame: &Frame, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {

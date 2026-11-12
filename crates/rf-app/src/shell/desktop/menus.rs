@@ -20,7 +20,7 @@ use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
 use super::menupoint::Via;
-use super::menu_plan::{BgCmd, BgCtx, ItemCmd, ItemCtx, Row, background_menu, item_menu, item_quick, paste_enabled};
+use super::menu_plan::{BgCmd, BgCtx, ItemCmd, ItemCtx, Row, SORT_ORDER, ViewCmd, background_menu, item_menu, item_quick, more_prefix, size_hint, sort_choice, sort_hint, view_menu};
 use super::view::DesktopView;
 use crate::fluent_menu::{self, Item, Menu, MenuIcon, MenuView, Pending, Quick, Sub};
 use crate::t;
@@ -130,7 +130,7 @@ impl DesktopView {
             _ => None,
         };
         match target {
-            Some(t) => self.load_shell(view.downgrade(), t, false, cx),
+            Some(t) => self.load_shell(view.downgrade(), t, false, Vec::new(), cx),
             None => {
                 let none = self.shell_items_off();
                 view.update(cx, |m, cx| m.set_pending("more", none, cx));
@@ -145,7 +145,8 @@ impl DesktopView {
         Pending::Ready(Rc::new(vec![Item::action(why, MenuIcon::None, |_, _| {}).enabled(false)]))
     }
 
-    /// The menu of the empty desktop, at the pointer. WHICH commands it holds is `menu_plan::background_menu`'s (tested).
+    /// The menu of the empty desktop, at the pointer. WHICH commands it holds, and in which groups, is `menu_plan::background_menu`'s
+    /// (tested; it follows Windows 11's own menu); this draws them.
     pub(super) fn show_background_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let me = cx.entity().downgrade();
         let (size, sort, align, auto) = {
@@ -162,80 +163,84 @@ impl DesktopView {
             has_folder: self.backend.as_ref().and_then(|b| b.target_dir()).is_some(),
             icons_forced_hidden: super::choices::hidden_by_settings(),
         };
-        let size_item = |label: &str, s: IconSize| {
-            Item::action(label.to_string(), MenuIcon::None, act(&me, move |v, _, cx| v.set_icon_size(s, cx))).checked(size == s)
-        };
-        let by = |label: &str, k: SortName| {
-            Item::action(label.to_string(), MenuIcon::None, act(&me, move |v, _, cx| {
-                let desc = v.store.get().sort.descending;
-                v.sort_by(k, desc, cx)
-            }))
-            .checked(sort.key == k)
-        };
-        let dir = |label: &str, desc: bool| {
-            Item::action(label.to_string(), MenuIcon::None, act(&me, move |v, _, cx| {
-                let k = v.store.get().sort.key;
-                v.sort_by(k, desc, cx)
-            }))
-            .checked(sort.descending == desc)
-        };
+        let p = crate::theme::Palette::for_window(window);
+        // the chosen one of a group is marked with a dot in front (a check mark is for switches)
+        let dot = |on: bool| if on { MenuIcon::Dot(p.text) } else { MenuIcon::None };
         let shown = !super::choices::menu_hidden();
+
+        let view_items: Vec<Item> = view_menu(&ctx)
+            .into_iter()
+            .map(|row| match row {
+                Row::Sep | Row::More => Item::Separator,
+                Row::Cmd(cmd, enabled) => match cmd {
+                    ViewCmd::Size(s) => Item::action(size_label(s), dot(size == s), act(&me, move |v, _, cx| v.set_icon_size(s, cx))).hint(size_hint(s)),
+                    ViewCmd::AutoArrange => Item::action(t!("Simgeleri otomatik düzenle"), MenuIcon::None, act(&me, move |v, _, cx| v.set_auto_arrange_mode(!auto, cx))).checked(auto),
+                    ViewCmd::AlignToGrid => Item::action(t!("Simgeleri kılavuz çizgisine hizala"), MenuIcon::None, act(&me, move |v, _, cx| v.set_align(!align, cx))).checked(align),
+                    ViewCmd::ShowIcons => Item::action(t!("Masaüstü öğelerini göster"), MenuIcon::None, act(&me, move |v, _, cx| v.set_show_icons(!shown, cx))).checked(shown && enabled),
+                }
+                .enabled(enabled),
+            })
+            .collect();
+        let sort_items: Vec<Item> = SORT_ORDER
+            .iter()
+            .map(|&k| {
+                let item = Item::action(
+                    sort_label(k),
+                    dot(sort.key == k),
+                    act(&me, move |v, _, cx| {
+                        let now = v.store.get().sort;
+                        let (key, descending) = sort_choice(now.key, now.descending, k);
+                        v.sort_by(key, descending, cx)
+                    }),
+                );
+                // (the chosen row says which way it runs: choosing it again turns the order round)
+                match sort_hint(sort.key, sort.descending, k) {
+                    Some(h) => item.hint(h),
+                    None => item,
+                }
+            })
+            .collect();
+
         let items: Vec<Item> = background_menu(&ctx)
             .into_iter()
             .map(|row| match row {
                 Row::Sep => Item::Separator,
-                Row::More => Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
+                Row::More => Item::Sub { label: t!("Daha fazla seçenek göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
                 Row::Cmd(cmd, enabled) => match cmd {
-                    BgCmd::IconSize => Item::sub(
-                        t!("Simge boyutu"),
-                        icon(L::LayoutGrid),
-                        vec![size_item(t!("Küçük"), IconSize::Small), size_item(t!("Orta boy"), IconSize::Medium), size_item(t!("Büyük"), IconSize::Large)],
-                    ),
-                    BgCmd::AlignToGrid => Item::action(t!("Simgeleri ızgaraya hizala"), icon(L::LayoutGrid), act(&me, move |v, _, cx| v.set_align(!align, cx))).checked(align),
-                    BgCmd::AutoArrange => Item::action(t!("Simgeleri otomatik düzenle"), icon(L::ArrowDownUp), act(&me, move |v, _, cx| v.set_auto_arrange_mode(!auto, cx))).checked(auto),
-                    BgCmd::ShowIcons => Item::action(t!("Masaüstü simgelerini göster"), icon(L::Eye), act(&me, move |v, _, cx| v.set_show_icons(!shown, cx))).checked(shown && enabled),
-                    BgCmd::Sort => Item::sub(
-                        t!("Sırala"),
-                        icon(L::ArrowUpDown),
-                        vec![
-                            by(t!("Ad"), SortName::Name),
-                            by(t!("Değiştirme tarihi"), SortName::Modified),
-                            by(t!("Tür"), SortName::Type),
-                            by(t!("Boyut"), SortName::Size),
-                            Item::Separator,
-                            dir(t!("Artan"), false),
-                            dir(t!("Azalan"), true),
-                        ],
-                    ),
+                    BgCmd::View => Item::sub(crate::i18n::tx("Görünüm", "View"), icon(L::LayoutGrid), view_items.clone()),
+                    BgCmd::SortBy => Item::sub(t!("Sıralama ölçütü"), icon(L::ArrowUpDown), sort_items.clone()),
                     BgCmd::Refresh => Item::action(t!("Yenile"), icon(L::RotateCw), act(&me, |v, _, cx| v.refresh(cx))).hint("Ctrl+R"),
                     // the read-only preview creates nothing: "New" is there but off, and the shell's own commands (which can write to the
                     // Desktop: archive, send to, templates) are not offered at all
                     BgCmd::New if read_only => Item::action(t!("Yeni"), icon(L::CirclePlus), |_, _| {}).enabled(false),
                     BgCmd::New => Item::Sub { label: t!("Yeni").into(), icon: icon(L::CirclePlus), items: Sub::Pending { key: "new", fallback: Some(Rc::new(own_new_items(&me))) } },
+                    BgCmd::Paste => Item::action(t!("Yapıştır"), icon(L::ClipboardPaste), act(&me, |v, w, cx| v.paste(Via::Menu, w, cx))).hint("Ctrl+V"),
                     BgCmd::PasteShortcut => Item::action(t!("Kısayol yapıştır"), icon(L::Link), act(&me, |v, _, cx| v.paste_shortcuts(cx))),
                     BgCmd::Undo(what) => Item::action(format!("{}: {what}", t!("Geri al")), icon(L::Undo2), act(&me, |_, _, cx| crate::undo::undo(cx))).hint("Ctrl+Z"),
                     BgCmd::Redo(what) => Item::action(format!("{}: {what}", t!("Yinele")), icon(L::Redo2), act(&me, |_, _, cx| crate::undo::redo(cx))).hint("Ctrl+Y"),
-                    BgCmd::OpenInRustyfiles => Item::action(t!("rustyfiles'ta aç"), icon(L::FolderOpen), act(&me, |v, _, cx| v.open_desktop_folder(cx))),
-                    BgCmd::OpenTerminal => Item::action(t!("Terminalde aç"), icon(L::SquareTerminal), act(&me, |v, _, _| v.open_terminal_here())),
+                    BgCmd::OpenTerminal => Item::action(t!("Terminalde Aç"), icon(L::SquareTerminal), act(&me, |v, _, _| v.open_terminal_here())),
                     BgCmd::DisplaySettings => Item::action(t!("Görüntü ayarları"), icon(L::Monitor), act(&me, |v, _, _| v.open_settings_page("ms-settings:display"))),
                     BgCmd::Personalize => Item::action(t!("Kişiselleştir"), icon(L::Palette), act(&me, |v, _, _| v.open_settings_page("ms-settings:personalization"))),
+                    // (not at the top level: see `more_prefix`)
+                    BgCmd::OpenInRustyfiles => own_more_item(&me, BgCmd::OpenInRustyfiles),
                 }
                 .enabled(enabled),
             })
             .collect();
-        let quick = vec![Quick::new(L::ClipboardPaste, t!("Yapıştır  (Ctrl+V)"), paste_enabled(&ctx), act(&me, |v, w, cx| v.paste(Via::Menu, w, cx)))];
-        let view = fluent_menu::show(Menu { quick, items }, window.mouse_position(), window, cx);
+        // Windows 11's desktop menu has no paste button above it: the menu is only its rows
+        let view = fluent_menu::show(Menu { quick: Vec::new(), items }, window.mouse_position(), window, cx);
+        let own = more_prefix(&ctx);
         match self.backend.as_ref().and_then(|b| b.target_dir()).filter(|_| !read_only) {
-            Some(dir) => self.load_shell(view.downgrade(), ShellTarget::Background(dir), true, cx),
+            Some(dir) => self.load_shell(view.downgrade(), ShellTarget::Background(dir), true, own, cx),
             None => {
-                let none = self.shell_items_off();
+                let none = with_own(own.iter().map(|c| own_more_item(&me, c.clone())).collect(), self.shell_items_off());
                 view.update(cx, |m, cx| m.set_pending("more", none, cx));
             }
         }
     }
 
     /// Fills "Show more options" (and, for the background, the shell's templates under "New") when the shell has answered.
-    fn load_shell(&mut self, menu: WeakEntity<MenuView>, target: ShellTarget, background: bool, cx: &mut Context<Self>) {
+    fn load_shell(&mut self, menu: WeakEntity<MenuView>, target: ShellTarget, background: bool, own: Vec<BgCmd>, cx: &mut Context<Self>) {
         let (tx, rx) = oneshot::channel();
         rf_win::sta::run(move |owner| {
             let _ = tx.send(rf_win::ctxmenu::build(owner, &target, false).map_err(|e| format!("{e:#}")));
@@ -251,6 +256,8 @@ impl DesktopView {
                         (Pending::Failed, Pending::Failed)
                     }
                 };
+                // (ours first, whatever the shell answered: they are there even when it did not)
+                let more = with_own(own.iter().map(|c| own_more_item(&me, c.clone())).collect(), more);
                 let inline = !cx.global::<crate::settings::Settings>().menu.shell_submenu;
                 if let Some(m) = menu.upgrade() {
                     m.update(cx, |m, cx| {
@@ -267,6 +274,56 @@ impl DesktopView {
         })
         .detach();
     }
+}
+
+/// The wording of the three sizes, as Windows 11's menu has it.
+fn size_label(s: IconSize) -> &'static str {
+    match s {
+        IconSize::Large => t!("Büyük simgeler"),
+        IconSize::Medium => t!("Orta boyutlu simgeler"),
+        IconSize::Small => t!("Küçük simgeler"),
+    }
+}
+
+/// The wording of the sort keys.
+fn sort_label(k: SortName) -> &'static str {
+    match k {
+        SortName::Name => t!("Ad"),
+        SortName::Size => t!("Boyut"),
+        SortName::Type => t!("Öğe türü"),
+        SortName::Modified => t!("Değiştirme tarihi"),
+    }
+}
+
+/// A command of ours that lives inside "more options" (not at the top level of the empty desktop's menu).
+fn own_more_item(me: &Me, cmd: BgCmd) -> Item {
+    match cmd {
+        BgCmd::OpenInRustyfiles => Item::action(t!("rustyfiles'ta aç"), icon(L::FolderOpen), act(me, |v, _, cx| v.open_desktop_folder(cx))),
+        // (only the command above is ever put there: `menu_plan::more_prefix`)
+        _ => Item::action("", MenuIcon::None, |_, _| {}).enabled(false),
+    }
+}
+
+/// Our own entries first in "more options", then the shell's (a separator between when both exist). When the shell's list could not
+/// be loaded ours are still there, with one line that says so.
+fn with_own(own: Vec<Item>, shell: Pending) -> Pending {
+    if own.is_empty() {
+        return shell;
+    }
+    let mut items = own;
+    match shell {
+        Pending::Ready(list) => {
+            if !list.is_empty() {
+                items.push(Item::Separator);
+                items.extend(list.iter().cloned());
+            }
+        }
+        Pending::Failed => {
+            items.push(Item::Separator);
+            items.push(Item::action(t!("Seçenekler yüklenemedi"), MenuIcon::None, |_, _| {}).enabled(false));
+        }
+    }
+    Pending::Ready(Rc::new(items))
 }
 
 fn own_new_items(me: &Me) -> Vec<Item> {

@@ -96,21 +96,39 @@ pub fn launch(app: &App) -> anyhow::Result<()> {
     }
 }
 
-/// What is tried for an entry: the file behind it, or the packaged app's activation.
+/// What is tried for an entry: its shortcut, the program with its arguments, or the packaged app's activation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Direct {
-    File(std::path::PathBuf),
+    /// The Start-menu shortcut of the entry, run by the shell's "open" of a file path (its arguments, start folder, show state and
+    /// AppUserModelID come along). See `apps_direct` for how it is found.
+    Shortcut(std::path::PathBuf),
+    /// The program the entry points at, with the arguments the entry carries and its own folder as the start folder.
+    File { path: std::path::PathBuf, args: String },
     Packaged(String),
     Nothing,
 }
 
-/// The pure choice: a file the entry names wins (a program, a shortcut); an id of the form `family!app` is a packaged app.
-pub fn direct_way(id: &str, target: Option<std::path::PathBuf>) -> Direct {
+/// The pure choice: the entry's shortcut wins (nothing is lost); else the program it names, with the arguments the entry carries;
+/// else an id of the form `family!app` is a packaged app.
+pub fn direct_way(id: &str, target: Option<std::path::PathBuf>, args: Option<String>, shortcut: Option<std::path::PathBuf>) -> Direct {
+    if let Some(s) = shortcut.filter(|s| !s.as_os_str().is_empty()) {
+        return Direct::Shortcut(s);
+    }
     match target {
-        Some(t) if !t.as_os_str().is_empty() => Direct::File(t),
+        Some(t) if !t.as_os_str().is_empty() => Direct::File { path: t, args: args.unwrap_or_default() },
         _ if id.contains('!') => Direct::Packaged(id.to_string()),
         _ => Direct::Nothing,
     }
+}
+
+/// The decision for an entry, from what the shell says about it (shell thread).
+#[doc(hidden)]
+pub fn direct_way_of(app: &App) -> Direct {
+    let parsing = app.parsing();
+    let target = crate::dock::startapps::target_of(&parsing);
+    let args = crate::apps_direct::arguments_of(&parsing);
+    let shortcut = target.as_deref().and_then(|t| crate::apps_direct::find_shortcut(&app.name, t));
+    direct_way(&app.id, target, args, shortcut)
 }
 
 /// For the probe example: the direct way alone.
@@ -120,57 +138,13 @@ pub fn launch_directly_for_probe(app: &App) -> anyhow::Result<()> {
 }
 
 fn launch_directly(app: &App) -> anyhow::Result<()> {
-    match direct_way(&app.id, crate::dock::startapps::target_of(&app.parsing())) {
-        Direct::File(path) => crate::dock::launch::start(&crate::dock::model::Launch::Link(path)),
-        Direct::Packaged(id) => activate_packaged(&id),
+    use crate::dock::model::Launch;
+    match direct_way_of(app) {
+        Direct::Shortcut(lnk) => crate::dock::launch::start(&Launch::Link(lnk)),
+        Direct::File { path, args } => crate::dock::launch::start(&Launch::Exe { path, args }),
+        Direct::Packaged(id) => crate::activate::packaged(&id, ""),
         Direct::Nothing => anyhow::bail!("the entry names no file and is not a packaged app"),
     }
-}
-
-/// How long the activation of a packaged app is waited for. With no Explorer the call starts the app and then does not come back
-/// (measured: the app's window was up, the call still out after 40 s), so the answer cannot be waited for: an error within this
-/// time is an error, silence is taken as started.
-const ACTIVATION_WAIT: std::time::Duration = std::time::Duration::from_millis(600);
-
-/// What the wait for the activation's answer means.
-pub fn activation_outcome(answer: Option<Result<(), String>>) -> Result<(), String> {
-    match answer {
-        Some(r) => r,
-        // no answer in time: the app is starting (or started) and the call is still out
-        None => Ok(()),
-    }
-}
-
-/// A packaged app by its id, without the shell's folder: the activation manager, as a local server first and in our process second.
-/// On a thread of its own, never the shared shell thread: the call can stay out for as long as there is no Explorer.
-fn activate_packaged(aumid: &str) -> anyhow::Result<()> {
-    let id_text = aumid.to_string();
-    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
-    std::thread::Builder::new().name("rf-activate-app".into()).spawn(move || {
-        use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER, CoCreateInstance};
-        use windows::Win32::UI::Shell::{AO_NONE, ApplicationActivationManager, IApplicationActivationManager};
-        ensure_com();
-        let id = wide(&id_text);
-        let mut last = String::new();
-        for ctx in [CLSCTX_LOCAL_SERVER, CLSCTX_INPROC_SERVER] {
-            let done = unsafe {
-                CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, ctx).and_then(|m| m.ActivateApplication(PCWSTR(id.as_ptr()), PCWSTR::null(), AO_NONE))
-            };
-            match done {
-                Ok(_) => {
-                    let _ = tx.send(Ok(()));
-                    return;
-                }
-                Err(e) => last = e.to_string(),
-            }
-        }
-        let _ = tx.send(Err(format!("activation: {last}")));
-    })?;
-    let answer = rx.recv_timeout(ACTIVATION_WAIT).ok();
-    if answer.is_none() {
-        log::info!("apps: the activation of {aumid} has not answered in {ACTIVATION_WAIT:?}; taken as started");
-    }
-    activation_outcome(answer).map_err(|e| anyhow::anyhow!(e))
 }
 
 #[cfg(test)]
@@ -180,21 +154,22 @@ mod tests {
     #[test]
     fn what_is_started_when_the_shell_refuses() {
         use std::path::PathBuf;
-        // a program or a shortcut behind the entry is started as a file, whatever the id looks like
-        assert_eq!(direct_way(r"{6D809377-6AF0-444B-8957-A3773F02200E}\Notepad++\notepad++.exe", Some(PathBuf::from(r"C:\Program Files\Notepad++\notepad++.exe"))), Direct::File(PathBuf::from(r"C:\Program Files\Notepad++\notepad++.exe")));
-        assert_eq!(direct_way("Vendor.App!Main", Some(PathBuf::from(r"C:\x\a.lnk"))), Direct::File(PathBuf::from(r"C:\x\a.lnk")));
+        let exe = || PathBuf::from(r"C:\Program Files\Notepad++\notepad++.exe");
+        let id = r"{6D809377-6AF0-444B-8957-A3773F02200E}\Notepad++\notepad++.exe";
+        // the entry's shortcut wins over its target: the start folder, the show state and the identity come with it
+        assert_eq!(direct_way(id, Some(exe()), Some("-multiInst".into()), Some(PathBuf::from(r"C:\x\Notepad++.lnk"))), Direct::Shortcut(PathBuf::from(r"C:\x\Notepad++.lnk")));
+        // no shortcut found: the program, with the arguments the entry carries (a shortcut such as "pythonw.exe + a script")
+        assert_eq!(direct_way(id, Some(exe()), Some("-multiInst".into()), None), Direct::File { path: exe(), args: "-multiInst".into() });
+        assert_eq!(direct_way(id, Some(exe()), None, None), Direct::File { path: exe(), args: String::new() });
+        // an empty shortcut path is no shortcut
+        assert_eq!(direct_way(id, Some(exe()), None, Some(PathBuf::new())), Direct::File { path: exe(), args: String::new() });
+        // a file the entry names wins over an id that looks packaged
+        assert_eq!(direct_way("Vendor.App!Main", Some(PathBuf::from(r"C:\x\a.exe")), None, None), Direct::File { path: PathBuf::from(r"C:\x\a.exe"), args: String::new() });
         // a packaged app has no file: its activation
-        assert_eq!(direct_way("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", None), Direct::Packaged("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App".into()));
-        assert_eq!(direct_way("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", Some(PathBuf::new())), Direct::Packaged("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App".into()));
+        assert_eq!(direct_way("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", None, None, None), Direct::Packaged("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App".into()));
+        assert_eq!(direct_way("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App", Some(PathBuf::new()), None, None), Direct::Packaged("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App".into()));
         // neither: nothing is guessed
-        assert_eq!(direct_way("Some.Classic.Id", None), Direct::Nothing);
-    }
-
-    #[test]
-    fn an_activation_that_does_not_answer_is_taken_as_started_and_an_error_in_time_is_an_error() {
-        assert_eq!(activation_outcome(Some(Ok(()))), Ok(()));
-        assert_eq!(activation_outcome(Some(Err("activation: no such app".into()))), Err("activation: no such app".into()));
-        assert_eq!(activation_outcome(None), Ok(()), "with no Explorer the call starts the app and stays out");
+        assert_eq!(direct_way("Some.Classic.Id", None, None, None), Direct::Nothing);
     }
 
     #[test]

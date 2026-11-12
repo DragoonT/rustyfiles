@@ -443,7 +443,7 @@ impl StartView {
         acts(self.shown, self.closing, Instant::now(), self.quiet_until)
     }
 
-    fn say(&mut self, text: &'static str, cx: &mut Context<Self>) {
+    fn say(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.notice = Some(text.into());
         cx.notify();
     }
@@ -693,7 +693,7 @@ impl StartView {
     /// Runs a start, a sign-out or the like off the UI thread and closes the panel when it went through. A failure that is reported
     /// within `OUTCOME_WAIT` keeps the panel open with `failure` said in it; a call that takes longer (a sleep returns only when the PC
     /// wakes, Windows' consent prompt waits for the user) is not waited for. Declining the consent prompt is not a failure.
-    fn run_then_close(&mut self, failure: &'static str, job: impl FnOnce() -> anyhow::Result<()> + Send + 'static, cx: &mut Context<Self>) {
+    fn run_then_close(&mut self, failure: impl FnOnce(&anyhow::Error) -> String + 'static, job: impl FnOnce() -> anyhow::Result<()> + Send + 'static, cx: &mut Context<Self>) {
         self.closing = true;
         self.notice = None;
         let work = cx.background_spawn(async move { job() });
@@ -709,9 +709,11 @@ impl StartView {
             };
             let _ = this.update(cx, |me, cx| match result {
                 Some(Err(e)) if !startapps::is_cancelled(&e) => {
-                    log::warn!("start: {failure}: {e:#}");
+                    // (what the notice says depends on what failed: see `shellless`)
+                    let text = failure(&e);
+                    log::warn!("start: {text}: {e:#}");
                     me.closing = false;
-                    me.say(failure, cx);
+                    me.say(text, cx);
                 }
                 Some(Err(_)) => {
                     me.closing = false;
@@ -729,7 +731,7 @@ impl StartView {
             return;
         }
         quick_search::remember(&Item { target: Target::App { id: app.id.clone(), name: app.name.clone() }, title: app.name.clone(), detail: String::new(), section: Section::Apps, score: 0 });
-        self.run_then_close(t!("Başlatılamadı. Kaldırılmış ya da taşınmış olabilir."), move || startapps::launch(&app), cx);
+        self.run_then_close(crate::shellless::start_failure_text, move || startapps::launch(&app), cx);
     }
 
     fn launch_app_as_admin(&mut self, app: AppEntry, cx: &mut Context<Self>) {
@@ -737,7 +739,7 @@ impl StartView {
             return;
         }
         // Windows shows its consent prompt: the user asked for it with this click
-        self.run_then_close(t!("Başlatılamadı. Kaldırılmış ya da taşınmış olabilir."), move || startapps::launch_as_admin(&app), cx);
+        self.run_then_close(crate::shellless::start_failure_text, move || startapps::launch_as_admin(&app), cx);
     }
 
     fn show_app_location(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -1000,7 +1002,7 @@ impl StartView {
     fn run_power(&mut self, step: PowerStep, cx: &mut Context<Self>) {
         if let PowerStep::Run(action) = step {
             // the real call, and only here: the user's click (or Enter) on the item, after the question where it has one
-            self.run_then_close(t!("Bu işlem yapılamadı. Yeniden deneyin."), move || power::perform(action), cx);
+            self.run_then_close(|_| t!("Bu işlem yapılamadı. Yeniden deneyin.").to_string(), move || power::perform(action), cx);
         }
         cx.notify();
     }

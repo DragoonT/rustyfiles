@@ -513,8 +513,16 @@ fn on_system_event(ev: SystemEvent, cx: &mut App) {
 fn reload(cx: &mut App) {
     cx.spawn(async move |cx| {
         // the stamp first: a write that lands while the file is being read shows up as a change at the next look
-        let (stamp, fresh) = cx.background_executor().spawn(async { (file_stamp(), Settings::load_readonly()) }).await;
-        cx.update(|cx| apply_reloaded(fresh, stamp, cx));
+        let (stamp, fresh) = cx.background_executor().spawn(async { (file_stamp(), Settings::load_followed()) }).await;
+        cx.update(|cx| {
+            // this process replaces its settings with what it read: its baseline for saves moves to the same table (a slider's save must
+            // not write back what another process set since)
+            let fresh = fresh.map(|(settings, file)| {
+                Settings::follow_file(file);
+                settings
+            });
+            apply_reloaded(fresh, stamp, cx)
+        });
     })
     .detach();
 }

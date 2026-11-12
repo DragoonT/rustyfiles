@@ -150,10 +150,8 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Appearance => appearance(p, s, cx),
         Page::Dock => {
             let size = crate::dock::size_slider::control(p, s, cx);
-            let mut page = crate::dock_page::page(p, s, Some(size));
-            // the weather from the PC's position (dock/weather_card.rs): its switch, its sentence and Windows' own permission
-            page.extend(crate::dock::weather_card::cards(p, s));
-            page
+            // (the weather-from-position card is part of the page, directly under the weather city's row: `dock_page::page`)
+            crate::dock_page::page(p, s, Some(size))
         }
         Page::Desktop => crate::desktop_page::page(p, s),
         Page::Layout => layout(p, s, cx),
@@ -2833,6 +2831,20 @@ mod search_tests {
     }
 
     #[test]
+    fn the_weather_from_position_card_stands_directly_after_the_weather_city_row() {
+        crate::dock_page::while_turkish(|| {
+            let p = Palette::light();
+            let s = Settings { dock_enabled: true, ..Default::default() };
+            let titles: Vec<String> = noted_on_the_dock_page(&s, &p).into_iter().map(|f| f.title).collect();
+            let city = titles.iter().position(|t| t == "Hava durumu şehri").expect("the city row");
+            assert_eq!(titles.get(city + 1).map(String::as_str), Some("Konumumu kullan"), "{titles:?}");
+            // and it is in the left island's section, not after the last one: the next row after it is the middle island's first
+            assert!(city + 2 < titles.len(), "the page goes on after the card: {titles:?}");
+            assert_eq!(titles.iter().filter(|t| *t == "Konumumu kullan").count(), 1);
+        });
+    }
+
+    #[test]
     fn the_dock_page_follows_the_look_page_and_the_search_finds_every_dock_setting_on_it() {
         crate::dock_page::while_turkish(|| {
             let at = |pg: Page| PAGES.iter().position(|x| x.0 == pg).unwrap();
@@ -2843,7 +2855,9 @@ mod search_tests {
                     let s = Settings { dock_enabled, ..Default::default() };
                     let noted = noted_on_the_dock_page(&s, &p);
                     let entries = crate::dock_page::entries();
-                    assert_eq!(noted.len(), entries.len(), "one card per entry, none dropped and none twice");
+                    // (the weather-from-position card stands right after the weather city's row, inside the page, and notes its texts too)
+                    let extra = crate::dock::weather_card::cards(&p, &s).len();
+                    assert_eq!(noted.len(), entries.len() + extra, "one card per entry, none dropped and none twice");
                     for e in &entries {
                         // searched by its own title, and by a word of its description, it is found and opens the Dock page
                         let hits = matching(noted.clone(), e.title);

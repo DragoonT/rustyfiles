@@ -616,7 +616,8 @@ pub fn start_with_id(
         .name("rf-op".into())
         .spawn(move || {
             rf_win::shell::ensure_com();
-            let r = work(tracker).map_err(|e| format!("{e:#}"));
+            // (a failure the shell's absence causes gets a sentence that says so: shellless.rs)
+            let r = work(tracker).map_err(|e| crate::shellless::op_failure_text(&e));
             let _ = tx.unbounded_send(Ev::Done(r));
         })
         .ok();

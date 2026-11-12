@@ -86,6 +86,13 @@ pub fn delete_permanent(paths: &[PathBuf], tracker: Arc<Tracker>, threads: usize
     delete_inner(paths, tracker, threads, true)
 }
 
+/// [`delete_permanent`] for a machine with no shell window (`engine_guard`): the same parallel delete, but what it cannot remove is
+/// not handed to the shell, it stays where it is and the answer is `Ok(false)` (or `Ok(false)` after a cancel; the caller looks at the
+/// tracker to tell them apart). An item that is already gone counts as deleted.
+pub fn delete_without_shell(paths: &[PathBuf], tracker: Arc<Tracker>, threads: usize) -> anyhow::Result<bool> {
+    delete_inner(paths, tracker, threads, false)
+}
+
 /// Removes the source of a finished move: exactly the `files` that were verified at the
 /// destination, then `dirs` (parents before children in the list) deepest first, and only when
 /// empty. Something added to the source meanwhile is never touched; its folder then stays.
@@ -121,9 +128,14 @@ fn delete_inner(paths: &[PathBuf], tracker: Arc<Tracker>, threads: usize, shell_
     let mut dirs: Vec<PathBuf> = Vec::new();
     let mut to_shell = Vec::new();
     for p in paths {
-        let Ok(m) = std::fs::symlink_metadata(p) else {
-            to_shell.push(p.clone());
-            continue;
+        let m = match std::fs::symlink_metadata(p) {
+            Ok(m) => m,
+            // with no shell to hand it to, an item that is already gone is simply done
+            Err(e) if !shell_fallback && e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                to_shell.push(p.clone());
+                continue;
+            }
         };
         if is_reparse(&m) {
             if dir_attr(&m) { links.push(p.clone()) } else { files.push(p.clone()) }

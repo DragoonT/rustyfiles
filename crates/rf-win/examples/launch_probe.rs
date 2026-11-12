@@ -6,7 +6,10 @@ fn main() -> anyhow::Result<()> {
     println!("{} apps", apps.len());
     for app in apps.iter().filter(|a| !want.is_empty() && a.name.to_lowercase().contains(&want)).take(4) {
         let target = rf_win::dock::startapps::location(app);
-        println!("{:?}: id {:?}, file behind it {:?}, direct way {:?}", app.name, app.id, target, rf_win::apps::direct_way(&app.id, target.clone()));
+        // (the direct way is read on the shell thread: it finds the entry's shortcut through COM)
+        let app1 = app.clone();
+        let way = rf_win::sta::call(std::time::Duration::from_secs(10), move || rf_win::apps::direct_way_of(&app1));
+        println!("{:?}: id {:?}, file behind it {:?}, direct way {:?}", app.name, app.id, target, way);
         // `shell` / `direct`: one way alone, timed (to see which one is slow or refuses without Explorer)
         if let Some(way) = std::env::args().nth(2).filter(|w| w == "shell" || w == "direct") {
             let app2 = app.clone();

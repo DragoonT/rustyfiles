@@ -18,6 +18,27 @@
 pub const VK_LWIN: u32 = 0x5B;
 pub const VK_RWIN: u32 = 0x5C;
 
+/// Win+E and Win+D, the two chords of Explorer's that the layer takes over when no Explorer is the shell (`shell_win_key`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Combo {
+    /// Win+E: a file window.
+    Explorer,
+    /// Win+D: show the desktop.
+    Desktop,
+}
+
+pub const VK_E: u32 = 0x45;
+pub const VK_D: u32 = 0x44;
+
+/// The chord a letter key makes with a Windows key, if it is one of ours.
+pub const fn combo_of(vk: u32) -> Option<Combo> {
+    match vk {
+        VK_E => Some(Combo::Explorer),
+        VK_D => Some(Combo::Desktop),
+        _ => None,
+    }
+}
+
 /// Whether `vk` is one of the two Windows keys.
 pub const fn is_win(vk: u32) -> bool {
     vk == VK_LWIN || vk == VK_RWIN
@@ -28,6 +49,9 @@ pub enum WinOutcome {
     Nothing,
     /// The release of a clean tap: this is the moment to open Start.
     Tap,
+    /// A chord of ours was pressed: the Windows key is down alone (no Shift, Ctrl or Alt, no other key before) and `E` or `D` went down.
+    /// The machine only SAYS so; whether the key is taken is the layer's decision (the setting, the shell, standing down).
+    Combo(Combo),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -38,16 +62,20 @@ pub struct WinMachine {
     armed: bool,
     /// Nothing else happened since that press.
     clean: bool,
+    /// Nothing but chords of ours (E, D) happened since that press, and no modifier was held at it: a further chord of ours is one.
+    combo_ok: bool,
+    /// The key of the chord reported last and still held: its auto-repeats are not new chords.
+    last_combo: Option<u32>,
 }
 
 impl WinMachine {
     pub const fn new() -> WinMachine {
-        WinMachine { left: false, right: false, armed: false, clean: false }
+        WinMachine { left: false, right: false, armed: false, clean: false, combo_ok: false, last_combo: None }
     }
 
     /// The hook came up (or came up again) with these Windows keys already down: their releases are not taps.
     pub const fn seeded(left_down: bool, right_down: bool) -> WinMachine {
-        WinMachine { left: left_down, right: right_down, armed: false, clean: false }
+        WinMachine { left: left_down, right: right_down, armed: false, clean: false, combo_ok: false, last_combo: None }
     }
 
     /// A key event while the layer is NOT looking (it stands down, or the setting is off). The machine only learns which Windows keys
@@ -65,6 +93,14 @@ impl WinMachine {
         }
         self.armed = false;
         self.clean = false;
+        self.combo_ok = false;
+        self.last_combo = None;
+    }
+
+    /// The keyboard says no Windows key is down although this machine believed one was (a release it never saw): forget the hold, so
+    /// nothing that follows is taken for part of it and the next press of a Windows key starts a fresh one.
+    pub fn forget_held(&mut self) {
+        *self = WinMachine::new();
     }
 
     pub const fn any_down(&self) -> bool {
@@ -78,9 +114,26 @@ impl WinMachine {
             return WinOutcome::Nothing;
         }
         if !is_win(vk) {
-            // another key pressed while a Windows key is down: the hold is a chord, not a tap (releases of other keys mean nothing)
-            if down && self.any_down() {
+            if !down {
+                // (releases of other keys mean nothing, except that the key of a chord of ours may be pressed again)
+                if self.last_combo == Some(vk) {
+                    self.last_combo = None;
+                }
+                return WinOutcome::Nothing;
+            }
+            // another key pressed while a Windows key is down: the hold is a chord, not a tap
+            if self.any_down() {
                 self.clean = false;
+                if self.last_combo == Some(vk) {
+                    // the auto-repeat of the chord's key: not a second chord
+                    return WinOutcome::Nothing;
+                }
+                // one Windows key (not both), nothing but our own chords so far, no modifier held now
+                if self.combo_ok && !modifier_held && self.left != self.right && let Some(c) = combo_of(vk) {
+                    self.last_combo = Some(vk);
+                    return WinOutcome::Combo(c);
+                }
+                self.combo_ok = false;
             }
             return WinOutcome::Nothing;
         }
@@ -99,9 +152,12 @@ impl WinMachine {
             if first {
                 self.armed = true;
                 self.clean = !modifier_held;
+                self.combo_ok = !modifier_held;
+                self.last_combo = None;
             } else {
                 // the second Windows key while the first is held
                 self.clean = false;
+                self.combo_ok = false;
             }
             return WinOutcome::Nothing;
         }
@@ -117,6 +173,8 @@ impl WinMachine {
         let tap = self.armed && self.clean;
         self.armed = false;
         self.clean = false;
+        self.combo_ok = false;
+        self.last_combo = None;
         if tap { WinOutcome::Tap } else { WinOutcome::Nothing }
     }
 }
@@ -251,5 +309,79 @@ mod tests {
     fn the_machine_is_plain_copy_data() {
         fn is_copy<T: Copy>() {}
         is_copy::<WinMachine>();
+    }
+
+    const KEY_E: u32 = VK_E;
+    const KEY_D: u32 = VK_D;
+
+    #[test]
+    fn win_and_e_is_a_chord_of_ours_and_the_release_is_no_tap() {
+        let mut m = WinMachine::new();
+        let r = run(&mut m, &[(VK_LWIN, true), (KEY_E, true), (KEY_E, false), (VK_LWIN, false)]);
+        assert_eq!(r, vec![WinOutcome::Nothing, WinOutcome::Combo(Combo::Explorer), WinOutcome::Nothing, WinOutcome::Nothing], "no Start after a chord");
+        let mut m = WinMachine::new();
+        let r = run(&mut m, &[(VK_RWIN, true), (KEY_D, true), (KEY_D, false), (VK_RWIN, false)]);
+        assert_eq!(r[1], WinOutcome::Combo(Combo::Desktop));
+        assert_eq!(r[3], WinOutcome::Nothing);
+    }
+
+    #[test]
+    fn the_auto_repeat_of_the_chords_key_is_not_a_second_chord_but_pressing_it_again_is() {
+        let mut m = WinMachine::new();
+        let r = run(&mut m, &[(VK_LWIN, true), (KEY_E, true), (KEY_E, true), (KEY_E, true), (KEY_E, false), (KEY_E, true), (KEY_E, false), (VK_LWIN, false)]);
+        let chords = r.iter().filter(|o| matches!(o, WinOutcome::Combo(_))).count();
+        assert_eq!(chords, 2, "{r:?}");
+        assert_eq!(r[2], WinOutcome::Nothing);
+        assert_eq!(r[3], WinOutcome::Nothing);
+    }
+
+    #[test]
+    fn a_second_chord_of_ours_with_the_windows_key_still_held_is_taken_too() {
+        let mut m = WinMachine::new();
+        let r = run(&mut m, &[(VK_LWIN, true), (KEY_E, true), (KEY_E, false), (KEY_D, true), (KEY_D, false), (VK_LWIN, false)]);
+        assert_eq!(r[1], WinOutcome::Combo(Combo::Explorer));
+        assert_eq!(r[3], WinOutcome::Combo(Combo::Desktop));
+        assert_eq!(r[5], WinOutcome::Nothing);
+    }
+
+    #[test]
+    fn any_other_key_first_spoils_the_chord_and_it_stays_spoiled_until_the_windows_key_is_up() {
+        let mut m = WinMachine::new();
+        let r = run(&mut m, &[(VK_LWIN, true), (A, true), (A, false), (KEY_E, true), (KEY_E, false), (VK_LWIN, false)]);
+        assert!(r.iter().all(|o| *o == WinOutcome::Nothing), "Win+A+E is Windows' business: {r:?}");
+        // and the next hold is fresh
+        assert_eq!(run(&mut m, &[(VK_LWIN, true), (KEY_E, true)])[1], WinOutcome::Combo(Combo::Explorer));
+    }
+
+    #[test]
+    fn modifiers_and_both_windows_keys_and_programs_keys_are_never_our_chord() {
+        // Shift held when the Windows key went down
+        let mut m = WinMachine::new();
+        m.feed(VK_LWIN, true, false, true);
+        assert_eq!(m.feed(KEY_E, true, false, true), WinOutcome::Nothing);
+        // Shift pressed after the Windows key: Shift itself is another key
+        let mut m = WinMachine::new();
+        let r = run(&mut m, &[(VK_LWIN, true), (0xA0, true), (KEY_E, true)]);
+        assert_eq!(r[2], WinOutcome::Nothing, "Win+Shift+E");
+        // both Windows keys
+        let mut m = WinMachine::new();
+        let r = run(&mut m, &[(VK_LWIN, true), (VK_RWIN, true), (KEY_E, true)]);
+        assert_eq!(r[2], WinOutcome::Nothing);
+        // an event a program sent
+        let mut m = WinMachine::new();
+        m.feed(VK_LWIN, true, false, false);
+        assert_eq!(m.feed(KEY_E, true, true, false), WinOutcome::Nothing);
+        // E alone is nothing
+        assert_eq!(WinMachine::new().feed(KEY_E, true, false, false), WinOutcome::Nothing);
+    }
+
+    #[test]
+    fn a_hold_seen_only_while_the_layer_stood_down_has_no_chord() {
+        let mut m = WinMachine::new();
+        m.feed(VK_LWIN, true, false, false);
+        m.observe_unseen(VK_LWIN, true, false);
+        assert_eq!(m.feed(KEY_E, true, false, false), WinOutcome::Nothing);
+        let mut s = WinMachine::seeded(true, false);
+        assert_eq!(s.feed(KEY_E, true, false, false), WinOutcome::Nothing, "a key already down when the hook came up");
     }
 }

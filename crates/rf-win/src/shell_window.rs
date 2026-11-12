@@ -370,6 +370,10 @@ mod tests {
     /// the file's path.
     #[test]
     fn the_shell_finds_the_window_and_selection_arrives() {
+        // IShellWindows is served by the shell: without a shell window the registration waits for ever (seen without Explorer)
+        if crate::engine_guard::not_run_without_shell("shell_window::tests::the_shell_finds_the_window_and_selection_arrives") {
+            return;
+        }
         let dir = std::env::temp_dir().join(format!("rf-shellwin-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         // the shell answers with long names: where TEMP is given in its short form

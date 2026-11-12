@@ -15,12 +15,14 @@
 //! | `select` | click / Ctrl / Shift / rubber band, the arrows over a sparse grid | table |
 //! | `typeahead` | type-to-select | table |
 //! | `label` | two lines, the middle of the second goes | table |
+//! | `label_shadow` | the shadow that keeps a name readable on any picture; its contrast arithmetic | table |
 //! | `names` | the name under an icon | table |
 //! | `rename_check` | what may be typed in the rename box | table |
 //! | `drop` | what a drop means | table |
 //! | `policy` | what may change files (read-only, Public Desktop, shortcuts to folders), when to ask before opening many | table |
 //! | `choices` | the app's own choices for the system icons (Settings -> Masaüstü), carried to where the item source reads them | table |
 //! | `menu_plan` | what the item menu and the empty-desktop menu hold for a selection and a place | table |
+//! | `size_keys` | the chords that choose an icon size, and the forms a keyboard layout gives them | fake layouts |
 //! | `menupoint` | which command may use the point of the last right click on the empty desktop | table |
 //! | `links` | the names of the shortcuts the desktop makes | table |
 //! | `source` | items, monitors and layout file; the scratch rule | temp folders |
@@ -32,9 +34,11 @@ pub mod choices;
 pub mod drop;
 pub mod geometry;
 pub mod label;
+pub mod label_shadow;
 pub mod links;
 pub mod menu_plan;
 pub mod menupoint;
+pub mod size_keys;
 pub mod names;
 pub mod policy;
 pub mod rename_check;
@@ -48,7 +52,7 @@ pub mod wall;
 mod actions;
 mod input;
 mod menus;
-mod open;
+pub mod open;
 mod operations;
 mod view;
 
@@ -61,10 +65,12 @@ use gpui_kit::*;
 /// `settings.toml`) works on the desktop too, plus the desktop's own.
 pub const CTX: &str = "FolderView DesktopView";
 
-gpui_kit::actions!(rustyfiles_desktop, [ExtendLeft, ExtendRight, ExtendHome, ExtendEnd]);
+gpui_kit::actions!(rustyfiles_desktop, [ExtendLeft, ExtendRight, ExtendHome, ExtendEnd, IconsLarge, IconsMedium, IconsSmall]);
 
 /// Keys of the desktop that the file list does not have: Shift+Left / Right extend the selection (the file list's Left and Right do
-/// something else in its views, so it has no Shift form of them), and so do Shift+Home / End (to the first / last item).
+/// something else in its views, so it has no Shift form of them), and so do Shift+Home / End (to the first / last item). Ctrl+Shift+2,
+/// 3 and 4 choose the large, medium and small icons, as in Explorer (the file list binds the same keys to its own views; the
+/// desktop's context is the deeper one, so on the desktop these win).
 fn bind(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("shift-left", ExtendLeft, Some("DesktopView")),
@@ -72,6 +78,34 @@ fn bind(cx: &mut App) {
         KeyBinding::new("shift-home", ExtendHome, Some("DesktopView")),
         KeyBinding::new("shift-end", ExtendEnd, Some("DesktopView")),
     ]);
+    bind_sizes(cx);
+}
+
+fn size_action(size: rf_core::desktop::grid::IconSize) -> Box<dyn Action> {
+    use rf_core::desktop::grid::IconSize;
+    match size {
+        IconSize::Large => Box::new(IconsLarge),
+        IconSize::Medium => Box::new(IconsMedium),
+        IconSize::Small => Box::new(IconsSmall),
+    }
+}
+
+/// The three size keys: the layout-independent form (`size_keys::plain_keys`, the chords the menu's hints name) and the form the
+/// keyboard layout produces (`size_keys::layout_keys`: GPUI reports Turkish Q's Ctrl+Shift+2 as `ctrl-"`, and Ctrl+Shift+4 as `ctrl-+`,
+/// which the file list binds to zoom; on the desktop the menu says it is small icons, so it is bound here, see that module).
+fn bind_sizes(cx: &mut App) {
+    let Ok(context) = KeyBindingContextPredicate::parse("DesktopView") else { return };
+    let context = std::rc::Rc::new(context);
+    let wanted: Vec<(String, rf_core::desktop::grid::IconSize)> =
+        size_keys::plain_keys().into_iter().map(|(k, s)| (k.to_string(), s)).chain(size_keys::layout_keys(rf_win::keys::shifted_char)).collect();
+    let mut bindings = Vec::new();
+    for (keys, size) in wanted {
+        match KeyBinding::load(&keys, size_action(size), Some(context.clone()), false, None, cx) {
+            Ok(b) => bindings.push(b),
+            Err(e) => log::debug!("desktop: size key {keys}: {e}"),
+        }
+    }
+    cx.bind_keys(bindings);
 }
 
 /// Binds the desktop's own keys. Once per process; the preview and the cover host both call it.

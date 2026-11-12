@@ -62,6 +62,7 @@ use super::gpu::{Geometry, Gpu, LensList, Look, Region, Renderer, glass_pass, pr
 use super::lens::LensSet;
 use super::rest::{self, Care};
 use super::watch;
+use super::retry::SessionRetry;
 use super::wgc::{self, Access, Exclusion, Power};
 use super::{CaptureMode, Cmd, GlassOptions, GlassState, Shadow, set_mode};
 
@@ -830,6 +831,9 @@ struct Engine {
     session_worked: bool,
     /// How long Desktop Duplication still leaves its frames alone (`rest.rs`), as of the last `pump`: the turn waits that long.
     throttle: Option<Duration>,
+    /// Set while Desktop Duplication is in use because a session could not be had (not because the system said no): the engine tries a
+    /// session again on this schedule (`retry.rs`) and goes back to sessions, and so back to visible windows, when one opens.
+    session_retry: Option<SessionRetry>,
 }
 
 /// The multithreaded WinRT apartment of the engine thread: entered before any WinRT object is touched, left when the thread ends (also
@@ -900,6 +904,7 @@ impl Engine {
             reopen: Reopen::default(),
             session_worked: false,
             throttle: None,
+            session_retry: None,
         }
     }
 
@@ -1309,6 +1314,55 @@ impl Engine {
         }
     }
 
+    /// Desktop Duplication is in use only because a session could not be had: on the schedule of `retry.rs`, looks at the permission and
+    /// tries a session on a monitor that has glass in view. When one opens the engine goes back to sessions for all its windows.
+    fn try_session_again(&mut self, now: Instant) {
+        if !self.session_retry.as_ref().is_some_and(|r| r.due(now)) {
+            return;
+        }
+        // nothing in view, nothing to gain (and nothing to count): the look waits for glass to be seen
+        let Some(hmon) = self.wins.values().filter(|w| w.active()).find_map(|w| w.geo.map(|g| g.hmon)) else { return };
+        let power = self.power;
+        let tried = match wgc::access() {
+            Access::Allowed => self.gfx.as_ref().map(|gfx| unsafe { Monitor::open_session(&gfx.r.g, hmon, power) }),
+            other => Some(Err(other.why_not().unwrap_or("not allowed").to_string())),
+        };
+        match tried {
+            Some(Ok(m)) => {
+                log::info!("glass: a capture session could be made again; going back to it, rustyfiles windows are visible to screenshots and recordings again");
+                self.switch_to_session(hmon, m);
+            }
+            Some(Err(why)) => {
+                if let Some(r) = self.session_retry.as_mut() {
+                    r.failed(now);
+                    log::info!("glass: the capture session still cannot be made ({why}); try {} of the schedule failed", r.failures());
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// From Desktop Duplication to sessions: `first` is the session just opened for `hmon`. The windows' flag goes, the other monitors
+    /// open their sessions on the next turn, every window draws from a new backdrop.
+    fn switch_to_session(&mut self, hmon: isize, first: Monitor) {
+        self.mons.clear();
+        self.mons.insert(hmon, first);
+        self.session_worked = true;
+        self.reopen = Reopen::default();
+        self.session_retry = None;
+        self.mode = CaptureMode::Session;
+        set_mode(CaptureMode::Session);
+        self.excl.set_extras(super::extras_snapshot());
+        let mut all: Vec<isize> = self.wins.keys().copied().collect();
+        all.extend(self.excl.extras().iter().copied());
+        for h in all {
+            super::clear_affinity(h);
+        }
+        for w in self.wins.values_mut() {
+            w.restale();
+        }
+    }
+
     /// One capture per monitor that has an ACTIVE window (shown and not covered); none for the others. A capture whose glass is no
     /// longer seen is kept for `SESSION_GRACE` (and not used), then closed, and opened again when a glass needs it. The first one made
     /// also decides the backend.
@@ -1357,7 +1411,10 @@ impl Engine {
     fn choose_backend(&mut self, hmon: isize) {
         let Some(gfx) = self.gfx.as_ref() else { return };
         let power = self.power;
-        match wgc::pick_backend(wgc::access(), || unsafe { Monitor::open_session(&gfx.r.g, hmon, power) }) {
+        let access = wgc::access();
+        // a system that says no is a decision, a session that fails with the permission there is a failure that may pass
+        let failure = matches!(access, Access::Allowed);
+        match wgc::pick_backend(access, || unsafe { Monitor::open_session(&gfx.r.g, hmon, power) }) {
             Ok(m) => {
                 self.mons.insert(hmon, m);
                 self.session_worked = true;
@@ -1374,13 +1431,13 @@ impl Engine {
                     super::clear_affinity(h);
                 }
             }
-            Err(why) => self.use_affinity(&why, false),
+            Err(why) => self.use_affinity(&why, false, failure),
         }
     }
 
     /// Desktop Duplication with the display-affinity exclusion from now on: the flag goes on every window of ours that must stay out of the
     /// picture BEFORE any capture is made, and the sessions (if there are any) are closed. `fell_back`: a session was in use and failed.
-    fn use_affinity(&mut self, why: &str, fell_back: bool) {
+    fn use_affinity(&mut self, why: &str, fell_back: bool, failure: bool) {
         if fell_back {
             log::info!("glass: the capture session failed ({why}); falling back to Desktop Duplication, rustyfiles windows are hidden from screenshots and recordings");
         } else {
@@ -1388,6 +1445,10 @@ impl Engine {
         }
         self.mode = CaptureMode::Affinity;
         set_mode(CaptureMode::Affinity);
+        self.session_retry = failure.then(|| SessionRetry::new(Instant::now()));
+        if failure {
+            log::info!("glass: a capture session will be tried again in {} s, and every {} s after the first minutes", super::retry::PAUSES[0].as_secs(), super::retry::LAST_PAUSE.as_secs());
+        }
         self.mons.clear();
         let keys: Vec<isize> = self.wins.keys().copied().collect();
         for k in keys {
@@ -1419,7 +1480,7 @@ impl Engine {
                     log::info!("glass: the capture session of monitor {hmon:#x} could not be opened again ({why}); trying again shortly");
                     return;
                 }
-                Some(Err(why)) => self.use_affinity(&why, true),
+                Some(Err(why)) => self.use_affinity(&why, true, true),
                 None => return,
             }
         }
@@ -1462,6 +1523,9 @@ impl Engine {
             return false;
         }
         let now = Instant::now();
+        if self.mode == CaptureMode::Affinity && self.session_retry.is_some() {
+            self.try_session_again(now);
+        }
         if self.mode == CaptureMode::Session {
             self.scan_foreign(now);
         }
@@ -1522,7 +1586,7 @@ impl Engine {
                 MonError::Monitor(why) => self.fail_on_monitor(hmon, &why),
                 MonError::Backend(why) => {
                     // the windows are not failed: Desktop Duplication takes over for all of them (opened on the next turn)
-                    self.use_affinity(&why, true);
+                    self.use_affinity(&why, true, true);
                     return waited;
                 }
             }
@@ -1630,7 +1694,7 @@ impl Engine {
         if self.mode == CaptureMode::Session
             && let Some(why) = self.access_tick(now)
         {
-            self.use_affinity(&format!("the permission was withdrawn: {why}"), true);
+            self.use_affinity(&format!("the permission was withdrawn: {why}"), true, false);
         }
     }
 
@@ -1710,6 +1774,7 @@ impl Engine {
         self.parked = Parking::default();
         self.reopen = Reopen::default();
         self.session_worked = false;
+        self.session_retry = None;
         self.gfx = None;
         self.access_job = None;
         self.mode = CaptureMode::Off;

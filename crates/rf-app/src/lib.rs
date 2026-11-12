@@ -43,6 +43,8 @@ mod nav_touch;
 mod ui_stall;
 mod places;
 mod settings;
+mod settings_merge;
+mod shellless;
 pub mod shell;
 mod shell_view;
 mod select_box;

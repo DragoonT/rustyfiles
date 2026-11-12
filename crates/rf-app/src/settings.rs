@@ -801,6 +801,9 @@ impl Settings {
             FileRead::Read(s) => *s,
             FileRead::Missing | FileRead::Bad => Settings::default(),
         };
+        // what the file held, as a save would write it: the base of every later save's "what did THIS process change" (settings_merge.rs).
+        // Taken before the migration, so a migrated value counts as this process's change and is written.
+        *BASELINE.lock() = toml::Table::try_from(&s).ok();
         s.migrate();
         s.apply_side_effects();
         s
@@ -811,13 +814,27 @@ impl Settings {
     /// when the file is there but cannot be read or understood right now (locked, mid-edit): the caller keeps what it has.
     /// Blocks briefly (the read retries a locked file): not for the UI thread.
     pub fn load_readonly() -> Option<Self> {
+        Self::load_followed().map(|(s, _)| s)
+    }
+
+    /// [`Settings::load_readonly`] and the file as it was read (in the table form a save produces, before the migration): for a process
+    /// that REPLACES its settings with the reload and so also has to move its baseline to this table ([`Settings::follow_file`]).
+    pub fn load_followed() -> Option<(Self, toml::Table)> {
         let mut s = match Self::read_file(false) {
             FileRead::Read(s) => *s,
             FileRead::Missing => Settings::default(),
             FileRead::Bad => return None,
         };
+        let file = toml::Table::try_from(&s).unwrap_or_default();
         s.migrate();
-        Some(s)
+        Some((s, file))
+    }
+
+    /// The process has replaced its settings with a [`Settings::load_followed`]: what the file held then is what it now knows. Without
+    /// this its next save would take every value the file got from another writer since start-up for its own change and write it back
+    /// over whatever the file has become meanwhile (see `settings_merge::follow`).
+    pub fn follow_file(file: toml::Table) {
+        crate::settings_merge::follow(&BASELINE, file);
     }
 
     /// Brings settings written by older versions up to date.
@@ -908,27 +925,29 @@ impl Settings {
         }
     }
 
+    /// Writes the settings file: only what THIS process changed since it read the file, on top of what the file holds now (a change
+    /// another writer made meanwhile survives, a key this build does not know survives, a process that changed nothing writes nothing).
+    /// The rule and its tests are in `settings_merge.rs`.
     pub fn save(&self) {
-        // One writer at a time; a unique temp name per write (saves come from several threads).
-        static LOCK: parking_lot::Mutex<u64> = parking_lot::Mutex::new(0);
-        let mut n = LOCK.lock();
-        *n += 1;
+        // One writer at a time inside this process (saves come from several threads); other processes are kept apart by the file lock.
+        static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
+        let _one = LOCK.lock();
         let Some(p) = path() else { return };
-        match toml::to_string_pretty(self) {
-            Ok(text) => {
-                if let Some(dir) = p.parent() {
-                    let _ = std::fs::create_dir_all(dir);
-                }
-                // write-then-rename so a crash never leaves a half-written file
-                let tmp = p.with_extension(format!("toml.{}.{}.tmp", std::process::id(), *n));
-                if std::fs::write(&tmp, text).is_ok() {
-                    let _ = std::fs::rename(&tmp, &p);
-                }
+        let mine = match toml::Table::try_from(self) {
+            Ok(t) => t,
+            Err(e) => {
+                log::warn!("settings save: {e}");
+                return;
             }
-            Err(e) => log::warn!("settings save: {e}"),
-        }
+        };
+        // (the baseline moves to what we hold once the save went through or needed no write; a save that did not happen keeps it, so the
+        // next one carries the same changes again)
+        crate::settings_merge::save_tracked(&BASELINE, &p, mine, || toml::Table::try_from(Settings::default()).unwrap_or_default());
     }
 }
+
+/// What this process last knew the settings file to hold (see [`Settings::save`]); `None` before the first `load`.
+static BASELINE: crate::settings_merge::BaselineCell = parking_lot::Mutex::new(None);
 
 /// Keeps gpui-component widgets (inputs, menus) in the same light/dark mode as our palette.
 pub fn apply_component_theme(cx: &mut App) {

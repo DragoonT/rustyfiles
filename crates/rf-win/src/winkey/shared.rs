@@ -86,6 +86,8 @@ pub struct Shared {
     clock: Arc<Clock>,
     win_on: AtomicBool,
     alt_on: AtomicBool,
+    /// Win+E and Win+D are ours (set by the interface: only while no Explorer is the shell).
+    combos_on: AtomicBool,
     log_only: AtomicBool,
     fullscreen: AtomicBool,
     /// The clock's reading at the last heartbeat, plus one (0: never stamped).
@@ -112,6 +114,7 @@ impl Shared {
             clock,
             win_on: AtomicBool::new(false),
             alt_on: AtomicBool::new(false),
+            combos_on: AtomicBool::new(false),
             log_only: AtomicBool::new(log_only),
             fullscreen: AtomicBool::new(false),
             heartbeat: AtomicU64::new(0),
@@ -134,6 +137,11 @@ impl Shared {
     pub fn set_wanted(&self, win_key: bool, own_switcher: bool) {
         self.win_on.store(win_key, Ordering::Relaxed);
         self.alt_on.store(own_switcher, Ordering::Relaxed);
+    }
+
+    /// Win+E and Win+D are to be taken (they need `win_on` as well).
+    pub fn set_combos(&self, on: bool) {
+        self.combos_on.store(on, Ordering::Relaxed);
     }
 
     pub fn set_waker(&self, t: Thread) {
@@ -198,6 +206,10 @@ impl Shared {
 
     pub fn alt_on(&self) -> bool {
         self.alt_on.load(Ordering::Relaxed)
+    }
+
+    pub fn combos_on(&self) -> bool {
+        self.combos_on.load(Ordering::Relaxed)
     }
 
     /// True when the layer must pass every key: the heartbeat is stale or was never made, or a full-screen program is in front.

@@ -23,7 +23,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rf_core::desktop::cover::activation;
-use rf_core::desktop::cover::geometry::{cover_rect, outer_correction};
+use rf_core::desktop::cover::geometry::{Pos, client_is_whole, cover_rect, min_max, outer_correction, pinned, refused_command, was_overruled};
 use rf_core::desktop::cover::zorder::{self, Desktop, Foreground, Neighbour, PosChange, Verdict};
 use rf_core::desktop::geom::Rect;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
@@ -33,7 +33,8 @@ use windows::Win32::Graphics::Dwm::{
 };
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, DefWindowProcW, EnumWindows, GCL_STYLE, GWL_EXSTYLE, GWL_STYLE, GWLP_WNDPROC, GW_HWNDPREV, GetClassLongPtrW, GetClassNameW, GetCursorPos, GetForegroundWindow, GetShellWindow, GetWindow, GetWindowLongPtrW, GetWindowRect,
+    CallWindowProcW, DefWindowProcW, EnumWindows, GCL_STYLE, GWL_EXSTYLE, GWL_STYLE, GWLP_WNDPROC, GW_HWNDPREV, GetClassLongPtrW, GetClassNameW, GetCursorPos, GetForegroundWindow, GetPropW, GetShellWindow, GetWindow, GetWindowLongPtrW, GetWindowRect,
+    MINMAXINFO, SetPropW, WM_GETMINMAXINFO, WM_NCCALCSIZE,
     HWND_NOTOPMOST, HWND_TOP, IsIconic, IsWindowVisible, SC_CLOSE, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetClassLongPtrW, SetWindowLongPtrW, SetWindowPos,
     WINDOWPOS, WM_CLOSE, WM_MOUSEACTIVATE, WM_NCDESTROY, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING, WNDPROC, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
     WS_POPUP,
@@ -54,20 +55,18 @@ struct Cover {
     /// The click areas of the icons, in client pixels, and whether the view has said anything yet.
     hot: Vec<Rect>,
     known: bool,
-    /// The outer rectangle the window is to have (set by `place`): the procedure lets nobody give it another one. The toolkit set
-    /// the window's size again after the desktop's own menu had closed, as if the window still had the invisible resize frame that
-    /// `prepare` takes away: it came out 16 px wider and 8 px taller than its place and 8 px left and 4 px up of it (measured:
-    /// 2576x1447 at -8,-4 on a 2560x1440 monitor), the content looked shifted with grey bands at the right and bottom, and the dock
-    /// took the oversized window for a full-screen program and hid.
+    /// The rectangle this window is allowed to have (the cover rectangle of its monitor, device px) and that monitor's whole
+    /// rectangle; `None` until [`place`] has been called. Every request for another rectangle is turned into this one.
     want: Option<Rect>,
+    monitor: Rect,
 }
 
-/// What a size or position the system is about to apply to a cover window becomes: nothing changes when the window has no place
-/// yet or the change does not touch the rectangle; otherwise the rectangle is the window's own place, whatever was asked.
-pub fn guarded_rect(want: Option<Rect>, moves: bool, sizes: bool, asked: Rect) -> Option<Rect> {
-    let want = want?;
-    ((moves || sizes) && asked != want).then_some(want)
-}
+/// The window property every cover window carries. Another process (a second shell host, an older copy) reads it to tell a desktop
+/// window from a full-screen program: the list of covers above is per process.
+const MARK: windows::core::PCWSTR = windows::core::w!("rustyfiles.DesktopCover");
+
+/// How many times the procedure has overruled a request for another rectangle (the first few are logged, with who asked how).
+static OVERRULED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 static COVERS: Mutex<Vec<Cover>> = Mutex::new(Vec::new());
 
@@ -84,6 +83,12 @@ fn covers() -> std::sync::MutexGuard<'static, Vec<Cover>> {
 /// Whether `hwnd` is a cover window of this process (the dock's full-screen test asks: ours are never a full-screen application).
 pub fn is_cover(hwnd: isize) -> bool {
     covers().iter().any(|c| c.hwnd == hwnd)
+}
+
+/// Whether `hwnd` is a cover window of ANY process (the property [`prepare`] sets): the dock's full-screen test must not take a desktop
+/// window for a game, whichever host made it. Read-only.
+pub fn is_marked_cover(hwnd: isize) -> bool {
+    !unsafe { GetPropW(hwnd_of(hwnd), MARK) }.is_invalid()
 }
 
 /// Every cover window that exists now.
@@ -162,25 +167,52 @@ unsafe extern "system" fn cover_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
             if !pos.is_null() {
                 // SAFETY: for this message `lParam` points at the WINDOWPOS the system is about to apply
                 let pos = unsafe { &mut *pos };
+                // The cover refuses every rectangle but its own, whoever asks: the toolkit after a scale change, the system
+                // maximizing it (a maximized pop-up is the work area plus a sizing frame: 2576 x 1447 at -8,-4 on a 2560 x 1440
+                // monitor), a restored "maximized" placement.
+                let want = covers().iter().find(|c| c.hwnd == key).and_then(|c| c.want);
+                let asked = Pos { x: pos.x, y: pos.y, cx: pos.cx, cy: pos.cy, flags: pos.flags.0 };
+                let kept = pinned(asked, want);
+                if kept != asked {
+                    if was_overruled(asked, kept) && OVERRULED.fetch_add(1, Ordering::Relaxed) < 12 {
+                        log::warn!("cover: {key:#x} was asked to be {}x{} at {},{} (flags {:#x}); kept at {}x{} at {},{}", asked.cx, asked.cy, asked.x, asked.y, asked.flags, kept.cx, kept.cy, kept.x, kept.y);
+                    }
+                    (pos.x, pos.y, pos.cx, pos.cy) = (kept.x, kept.y, kept.cx, kept.cy);
+                    pos.flags = windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS(kept.flags);
+                }
                 let c = PosChange { me: key, me_topmost: is_topmost(hwnd), flags: pos.flags.0, raised: RAISED.load(Ordering::Relaxed) };
                 match zorder::on_pos_changing(&c, &desktop_view()) {
                     Verdict::Keep => {}
                     Verdict::KeepOrder => pos.flags = windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS(pos.flags.0 | SWP_NOZORDER.0),
                     Verdict::InsertAfter(after) => pos.hwndInsertAfter = HWND(after as *mut _),
                 }
-                // the rectangle is the window's own place, whoever asks for another (see `Cover::want`)
-                let want = covers().iter().find(|c| c.hwnd == key).and_then(|c| c.want);
-                let (moves, sizes) = (pos.flags.0 & SWP_NOMOVE.0 == 0, pos.flags.0 & SWP_NOSIZE.0 == 0);
-                let (x, y) = if moves { (pos.x, pos.y) } else { want.map_or((pos.x, pos.y), |w| (w.left, w.top)) };
-                let (cx, cy) = if sizes { (pos.cx, pos.cy) } else { want.map_or((pos.cx, pos.cy), |w| (w.width(), w.height())) };
-                if let Some(w) = guarded_rect(want, moves, sizes, Rect::new(x, y, x + cx, y + cy)) {
-                    pos.x = w.left;
-                    pos.y = w.top;
-                    pos.cx = w.width();
-                    pos.cy = w.height();
-                    pos.flags = windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS(pos.flags.0 & !(SWP_NOMOVE.0 | SWP_NOSIZE.0));
-                }
             }
+        }
+        WM_GETMINMAXINFO => {
+            // "maximized" and every size the window can be dragged to are the cover rectangle (see `rf_core::...::geometry::min_max`)
+            let r = unsafe { CallWindowProcW(std::mem::transmute::<isize, WNDPROC>(prev), hwnd, msg, wp, lp) };
+            let mm = covers().iter().find(|c| c.hwnd == key).and_then(|c| c.want.map(|w| min_max(w, c.monitor)));
+            let info = lp.0 as *mut MINMAXINFO;
+            if let (Some(mm), false) = (mm, info.is_null()) {
+                // SAFETY: for this message `lParam` points at the MINMAXINFO the system fills in
+                let info = unsafe { &mut *info };
+                (info.ptMaxSize.x, info.ptMaxSize.y) = mm.max_size;
+                (info.ptMaxPosition.x, info.ptMaxPosition.y) = mm.max_pos;
+                (info.ptMinTrackSize.x, info.ptMinTrackSize.y) = mm.min_track;
+                (info.ptMaxTrackSize.x, info.ptMaxTrackSize.y) = mm.max_track;
+                return LRESULT(0);
+            }
+            return r;
+        }
+        // No non-client area, whatever style the window has: the client area is the whole window. `prepare` clears the sizing frame, and
+        // the outer rectangle is pinned to the cover rectangle (see `pinned`), so a frame that came back (the toolkit re-applying the
+        // style of its first placement) would otherwise eat 8 px of the client area on three sides: the content, laid out for the cover
+        // rectangle, would be cut off and a grey band left at the right and the bottom.
+        WM_NCCALCSIZE if wp.0 != 0 => return LRESULT(0),
+        // a window that cannot be sized, moved, minimized or maximized from its system menu or a key (Alt+Space, Win+Up)
+        WM_SYSCOMMAND if refused_command(wp.0) => {
+            log::debug!("cover: {key:#x} refused system command {:#x}", wp.0 & 0xFFF0);
+            return LRESULT(0);
         }
         WM_MOUSEACTIVATE => {
             let (hot, known) = covers().iter().find(|c| c.hwnd == key).map(|c| (c.hot.clone(), c.known)).unwrap_or_default();
@@ -244,12 +276,16 @@ pub fn prepare(hwnd: isize) -> anyhow::Result<()> {
         set(DWMWA_NCRENDERING_POLICY, DWMNCRP_DISABLED.0 as u32);
         // Aero Peek hides the other windows to show the desktop: this IS the desktop and must stay
         set(DWMWA_EXCLUDED_FROM_PEEK, 1);
+        // (any process can see this: the dock's full-screen test is not fooled by a desktop window of another host)
+        if let Err(e) = SetPropW(h, MARK, Some(windows::Win32::Foundation::HANDLE(std::ptr::dangling_mut()))) {
+            log::debug!("cover: the window mark was not set on {hwnd:#x}: {e}");
+        }
         if covers().iter().all(|c| c.hwnd != hwnd) {
             let old = SetWindowLongPtrW(h, GWLP_WNDPROC, cover_proc as *const () as usize as isize);
             if old == 0 {
                 anyhow::bail!("the window procedure of {hwnd:#x} could not be replaced");
             }
-            covers().push(Cover { hwnd, prev: old, hot: Vec::new(), known: false, want: None });
+            covers().push(Cover { hwnd, prev: old, hot: Vec::new(), known: false, want: None, monitor: Rect::default() });
         }
     }
     Ok(())
@@ -263,17 +299,31 @@ pub fn place(hwnd: isize, monitor: Rect) -> bool {
         return false;
     }
     let want = cover_rect(monitor);
-    // (the procedure's guard is told the new place first, or it would hold the window at the old one)
+    // The procedure keeps this rectangle from now on (see `pinned`), so the outer rectangle IS the cover rectangle: a measured frame
+    // (`frame_insets`) is not added any more. Adding it was how a window could come out larger than its monitor when the measure was
+    // taken while the toolkit's frame was on it.
     if let Some(c) = covers().iter_mut().find(|c| c.hwnd == hwnd) {
         c.want = Some(want);
+        c.monitor = monitor;
     }
-    let o = outer_for_client(want, crate::dock::panel::frame_insets(hwnd));
     // HWND_TOP is only what is asked: the procedure turns it into "directly above the desktop"
-    let ok = unsafe { SetWindowPos(hwnd_of(hwnd), Some(HWND_TOP), o.left, o.top, o.width().max(1), o.height().max(1), SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW).is_ok() };
+    let ok = unsafe { SetWindowPos(hwnd_of(hwnd), Some(HWND_TOP), want.left, want.top, want.width().max(1), want.height().max(1), SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_SHOWWINDOW | SWP_FRAMECHANGED).is_ok() };
     if ok {
         keep_inside(hwnd, want);
+        check_client(hwnd, want);
     }
     ok
+}
+
+/// Reads the client rectangle back and says so in the log when it is not the cover rectangle (it cannot be, with the frame removed by
+/// `WM_NCCALCSIZE`; the line is how a live run shows that nothing else is at work).
+fn check_client(hwnd: isize, want: Rect) {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+    let mut r = RECT::default();
+    if unsafe { GetClientRect(hwnd_of(hwnd), &mut r) }.is_ok() && !client_is_whole(want, r.right - r.left, r.bottom - r.top) {
+        log::warn!("cover: {hwnd:#x} has a client area of {}x{}, not {}x{}", r.right - r.left, r.bottom - r.top, want.width(), want.height());
+    }
 }
 
 /// The one-pixel rule is about the OUTER rectangle, and nothing but a measurement shows it holds: read the rectangle back and, if the
@@ -460,20 +510,6 @@ impl Drop for ZWatch {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn a_cover_window_is_given_no_rectangle_but_its_own() {
-        let own = Rect::new(0, 0, 2560, 1439);
-        // the toolkit's resize after the menu closed: 8 px out at the sides, 4 px up and down
-        assert_eq!(guarded_rect(Some(own), true, true, Rect::new(-8, -4, 2568, 1443)), Some(own));
-        // a move alone, a size alone
-        assert_eq!(guarded_rect(Some(own), true, false, Rect::new(10, 0, 2570, 1439)), Some(own));
-        assert_eq!(guarded_rect(Some(own), false, true, Rect::new(0, 0, 2560, 1440)), Some(own));
-        // its own place, a change of the order only, and a window that has no place yet are left alone
-        assert_eq!(guarded_rect(Some(own), true, true, own), None);
-        assert_eq!(guarded_rect(Some(own), false, false, Rect::new(5, 5, 50, 50)), None);
-        assert_eq!(guarded_rect(None, true, true, Rect::new(-8, -4, 2568, 1443)), None);
-    }
-
     use super::*;
 
     #[test]
@@ -493,6 +529,19 @@ mod tests {
         assert_eq!(COVER_STYLE & 0x0004_0000, 0, "no sizing frame");
         assert_eq!(COVER_STYLE & 0x0002_0000, 0, "no minimize box: Show Desktop leaves it alone");
         assert_ne!(COVER_STYLE & WS_POPUP.0, 0);
+    }
+
+    /// A message-only window is never shown and has no rectangle on any screen: it can carry the mark without a window appearing.
+    #[test]
+    fn a_window_with_the_mark_is_a_marked_cover_of_any_process_and_one_without_is_not() {
+        use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, HWND_MESSAGE, WINDOW_EX_STYLE, WINDOW_STYLE};
+        let h = unsafe { CreateWindowExW(WINDOW_EX_STYLE(0), windows::core::w!("STATIC"), windows::core::w!(""), WINDOW_STYLE(0), 0, 0, 0, 0, Some(HWND_MESSAGE), None, None, None) }.expect("a message-only window");
+        let key = h.0 as isize;
+        assert!(!is_marked_cover(key), "no mark yet");
+        unsafe { SetPropW(h, MARK, Some(windows::Win32::Foundation::HANDLE(std::ptr::dangling_mut()))) }.expect("set the mark");
+        assert!(is_marked_cover(key), "the mark is what another process reads");
+        assert!(!is_cover(key), "and it is not one of this process's own covers");
+        unsafe { DestroyWindow(h) }.expect("destroy the test window");
     }
 
     #[test]

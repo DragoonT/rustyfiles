@@ -27,7 +27,10 @@
 //!
 //! A dropped hook is installed again from scratch (a fresh layer, seeded from the keyboard's state), and the interface is told the layer
 //! lost track (`Lost`), which closes a switcher that was open. Installing again is limited: not twice within [`MIN_GAP_MS`], and after
-//! [`MAX_REINSTALLS`] within a minute the layer gives up and stays off until the settings are switched off and on again.
+//! [`MAX_REINSTALLS`] within a minute the layer gives up. It does not stay off for good: after [`GIVE_UP_COOLDOWN_MS`] the next
+//! heartbeat tries the hook again from scratch (a shell host with no Explorer has no other Windows key, and a hook that kept being
+//! lost because of a passing cause, a sleeping machine or a remote session that came and went, should come back by itself); if it is
+//! lost again it gives up again, for another pause. Switching the settings off and on starts afresh at once.
 
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -46,12 +49,14 @@ pub const MIN_GAP_MS: u64 = 2_000;
 /// After this many installations within [`WINDOW_MS`] the layer gives up.
 pub const MAX_REINSTALLS: usize = 5;
 pub const WINDOW_MS: u64 = 60_000;
+/// After giving up, the layer waits this long and then tries the hook again.
+pub const GIVE_UP_COOLDOWN_MS: u64 = 300_000;
 
 /// What the interface does with a post. Called on the dispatcher thread; it must be quick and must not call back into the service.
 pub type Deliver = Arc<dyn Fn(Posted) + Send + Sync>;
 
 /// The keyboard's own state, asked of the system.
-pub trait KeyProbe: Send {
+pub trait KeyProbe: Send + Sync {
     /// Whether the key is down right now.
     fn down(&self, vk: u32) -> bool;
 }
@@ -99,6 +104,8 @@ pub enum Why {
     ThreadEnded,
     Stall,
     Disagreement,
+    /// The pause after giving up is over.
+    Pause,
 }
 
 /// What a heartbeat found.
@@ -111,7 +118,7 @@ pub enum Beat {
     Reinstalled(Why),
     /// A reinstallation was wanted and refused (too soon after the last).
     Deferred(Why),
-    /// Too many reinstallations in a minute: the layer is off until the settings are switched off and on.
+    /// Too many reinstallations in a minute: the layer is off for [`GIVE_UP_COOLDOWN_MS`] (or until the settings are switched off and on).
     GaveUp,
 }
 
@@ -124,7 +131,7 @@ struct Running {
 pub struct KeyService<F: KeyFeed> {
     feed: F,
     mask: Arc<dyn MaskSender>,
-    probe: Box<dyn KeyProbe>,
+    probe: Arc<dyn KeyProbe>,
     deliver: Deliver,
     clock: Arc<Clock>,
     log_only: bool,
@@ -133,6 +140,10 @@ pub struct KeyService<F: KeyFeed> {
     last_beat: Option<u64>,
     installs: Vec<u64>,
     gave_up: bool,
+    /// When the layer gave up (the clock's reading).
+    gave_up_at: Option<u64>,
+    /// Win+E and Win+D are to be taken (set by the host while no Explorer is the shell).
+    combos: bool,
     mask_failures_logged: u32,
     /// Consecutive beats at which the chord was held and the keyboard said Alt was up.
     chord_strikes: u8,
@@ -151,7 +162,7 @@ impl<F: KeyFeed> KeyService<F> {
         KeyService {
             feed,
             mask,
-            probe,
+            probe: probe.into(),
             deliver,
             clock,
             log_only,
@@ -160,6 +171,8 @@ impl<F: KeyFeed> KeyService<F> {
             last_beat: None,
             installs: Vec::new(),
             gave_up: false,
+            gave_up_at: None,
+            combos: false,
             mask_failures_logged: 0,
             chord_strikes: 0,
         }
@@ -194,7 +207,7 @@ impl<F: KeyFeed> KeyService<F> {
     /// (within the limits above) as long as a setting is on.
     pub fn set_wanted(&mut self, win_key: bool, own_switcher: bool) -> anyhow::Result<()> {
         if !win_key && !own_switcher {
-            self.stop();
+            self.stop_because("both settings are off");
             return Ok(());
         }
         if self.running.is_none() {
@@ -205,6 +218,7 @@ impl<F: KeyFeed> KeyService<F> {
             self.last_beat = None;
             let shared = Arc::new(Shared::new(self.clock.clone(), self.log_only));
             shared.set_wanted(win_key, own_switcher);
+            shared.set_combos(self.combos);
             let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let dispatcher = spawn_dispatcher(shared.clone(), stop.clone(), self.deliver.clone());
             // (the first beat, so that the hook does not start out failing open for a quarter of a second)
@@ -217,6 +231,15 @@ impl<F: KeyFeed> KeyService<F> {
             r.shared.set_wanted(win_key, own_switcher);
         }
         Ok(())
+    }
+
+    /// Win+E and Win+D are taken (true) or left to whoever answers them (false). Takes effect at once on a running layer, and is
+    /// remembered for one that starts later. The host sets it from who owns the shell window.
+    pub fn set_combos(&mut self, on: bool) {
+        self.combos = on;
+        if let Some(r) = &self.running {
+            r.shared.set_combos(on);
+        }
     }
 
     /// The interface thread is alive: stamps the heartbeat, hands over whether a full-screen program is in front, and checks that the
@@ -233,7 +256,21 @@ impl<F: KeyFeed> KeyService<F> {
             log::warn!("keys: the system did not take the mask key {failures} time(s); Windows' own Start may open as well");
         }
         if self.gave_up {
-            return Beat::GaveUp;
+            let waited = now.saturating_sub(self.gave_up_at.unwrap_or(now));
+            if waited < GIVE_UP_COOLDOWN_MS {
+                return Beat::GaveUp;
+            }
+            // the pause is over: from scratch, as after a switch off and on
+            log::warn!("keys: the layer was off for {} s after the hook kept getting lost; trying the hook again", waited / 1000);
+            self.gave_up = false;
+            self.gave_up_at = None;
+            self.installs.clear();
+            self.watchdog.clear();
+            self.chord_strikes = 0;
+            if let Err(e) = self.install() {
+                log::error!("keys: the hook could not be installed after the pause: {e:#}");
+            }
+            return Beat::Reinstalled(Why::Pause);
         }
         let actual = read_tracked(self.probe.as_ref());
         self.watch_chord(&shared, actual);
@@ -269,8 +306,9 @@ impl<F: KeyFeed> KeyService<F> {
         self.installs.retain(|t| now.saturating_sub(*t) <= WINDOW_MS);
         if self.installs.len() >= MAX_REINSTALLS {
             self.gave_up = true;
+            self.gave_up_at = Some(now);
             self.feed.stop();
-            log::error!("keys: the hook keeps getting lost; the keyboard layer is off until the settings are switched off and on again");
+            log::error!("keys: the hook keeps getting lost; the keyboard layer is off for {} minutes (or until the settings are switched off and on again)", GIVE_UP_COOLDOWN_MS / 60_000);
             return Beat::GaveUp;
         }
         if self.installs.last().is_some_and(|t| now.saturating_sub(*t) < MIN_GAP_MS) {
@@ -280,6 +318,7 @@ impl<F: KeyFeed> KeyService<F> {
             Why::ThreadEnded => "the hook's thread had ended",
             Why::Stall => "the process was away for a long moment",
             Why::Disagreement => "the hook stopped seeing the keys",
+            Why::Pause => "the pause after giving up is over",
         });
         self.feed.stop();
         self.watchdog.clear();
@@ -298,7 +337,7 @@ impl<F: KeyFeed> KeyService<F> {
         let now = self.clock.now_ms();
         self.installs.push(now);
         let (l, r) = (self.probe.down(VK_LWIN), self.probe.down(VK_RWIN));
-        let mut layer = KeyLayer::new(shared.clone(), self.mask.clone(), l, r);
+        let mut layer = KeyLayer::new(shared.clone(), self.mask.clone(), l, r).with_probe(self.probe.clone());
         shared.set_believed(read_tracked(self.probe.as_ref()));
         match self.feed.start_raw(Box::new(move |k| layer.on_event(k))) {
             Ok(()) => {
@@ -314,6 +353,12 @@ impl<F: KeyFeed> KeyService<F> {
 
     /// Removes the hook and everything that served it. Safe to call twice.
     pub fn stop(&mut self) {
+        self.stop_because("stopped");
+    }
+
+    /// [`KeyService::stop`] with the reason that goes into the log line (`keys: layer off, hook removed (<why>)`). A reason is a short
+    /// phrase of the host's, never a key.
+    pub fn stop_because(&mut self, why: &str) {
         let Some(mut r) = self.running.take() else { return };
         self.feed.stop();
         r.stop.store(true, std::sync::atomic::Ordering::Release);
@@ -322,14 +367,15 @@ impl<F: KeyFeed> KeyService<F> {
             let _ = d.join();
         }
         self.gave_up = false;
+        self.gave_up_at = None;
         self.last_beat = None;
-        log::info!("keys: layer off, hook removed");
+        log::info!("keys: layer off, hook removed ({why})");
     }
 }
 
 impl<F: KeyFeed> Drop for KeyService<F> {
     fn drop(&mut self) {
-        self.stop();
+        self.stop_because("the service was dropped");
     }
 }
 
@@ -686,9 +732,75 @@ mod tests {
     }
 
     #[test]
+    fn after_giving_up_the_layer_comes_back_by_itself_when_the_pause_is_over() {
+        let mut r = rig();
+        r.svc.set_wanted(true, true).unwrap();
+        let mut t = 1_000u64;
+        for _ in 0..20 {
+            t += MIN_GAP_MS + 100;
+            r.clock.set(t);
+            r.svc.feed_mut().stop();
+            if r.svc.heartbeat(false) == Beat::GaveUp {
+                break;
+            }
+        }
+        assert!(!r.svc.feed_mut().running(), "gave up: the hook is out");
+        let gave_up_at = t;
+        // inside the pause: still off, however many beats come
+        for dt in [250, 5_000, 120_000, GIVE_UP_COOLDOWN_MS - 1] {
+            r.clock.set(gave_up_at + dt);
+            assert_eq!(r.svc.heartbeat(false), Beat::GaveUp, "dt = {dt}");
+            assert!(!r.svc.feed_mut().running());
+        }
+        // the pause is over: the hook is installed again, from scratch
+        r.clock.set(gave_up_at + GIVE_UP_COOLDOWN_MS);
+        assert_eq!(r.svc.heartbeat(false), Beat::Reinstalled(Why::Pause));
+        assert!(r.svc.feed_mut().running() && r.svc.installed());
+        // and the counting starts afresh: the next beats are quiet
+        r.clock.set(gave_up_at + GIVE_UP_COOLDOWN_MS + 250);
+        assert_eq!(r.svc.heartbeat(false), Beat::Fine);
+    }
+
+    #[test]
+    fn a_layer_that_is_lost_again_after_the_pause_gives_up_again_for_another_pause() {
+        let mut r = rig();
+        r.svc.set_wanted(true, false).unwrap();
+        let mut t = 1_000u64;
+        let mut gave_up = 0;
+        for _ in 0..60 {
+            t += MIN_GAP_MS + 100;
+            r.clock.set(t);
+            r.svc.feed_mut().stop();
+            if r.svc.heartbeat(false) == Beat::GaveUp {
+                gave_up += 1;
+                if gave_up == 2 {
+                    break;
+                }
+                t += GIVE_UP_COOLDOWN_MS;
+            }
+        }
+        assert_eq!(gave_up, 2);
+    }
+
+    #[test]
+    fn the_chords_setting_reaches_a_running_layer_and_one_that_starts_later() {
+        let mut r = rig();
+        r.svc.set_combos(true);
+        r.svc.set_wanted(true, false).unwrap();
+        assert!(r.svc.shared().unwrap().combos_on(), "remembered from before the layer started");
+        r.svc.set_combos(false);
+        assert!(!r.svc.shared().unwrap().combos_on(), "applied to the running layer");
+        r.svc.set_wanted(false, false).unwrap();
+        r.svc.set_combos(true);
+        r.svc.set_wanted(true, false).unwrap();
+        assert!(r.svc.shared().unwrap().combos_on());
+    }
+
+    #[test]
     fn the_service_never_asks_for_the_real_hook_in_tests() {
         // The real service is constructed (nothing is installed by that) and dropped without a setting having been on.
         let svc = KeyService::system(Arc::new(|_: Posted| {}), true);
         assert!(!svc.installed() && !svc.wanted());
     }
+
 }

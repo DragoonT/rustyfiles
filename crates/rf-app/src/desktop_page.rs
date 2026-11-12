@@ -16,7 +16,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_core::desktop::virtuals::{IconChoice, VirtualKind};
 
-use crate::dock_page::{Needs, RowState, off_only_line};
+use crate::dock_page::{Needs, RowState};
 use crate::settings::Settings;
 use crate::settings_view::{card_body, dropdown, section, shell, sw, switch};
 use crate::t;
@@ -106,6 +106,17 @@ pub(crate) fn layout_line() -> &'static str {
 /// The line under the icons while the desktop itself is off.
 pub(crate) fn kept_line() -> &'static str {
     t!("rustyfiles masaüstü kapalı: seçimleriniz kaydedilir ve masaüstü açılınca uygulanır.")
+}
+
+/// The line under the cover switch while the dock is off. The Dock switch is on the Dock page, not on this one (the Dock page's own
+/// sentence says "at the top of this page", which is wrong here).
+pub(crate) fn inert_reason() -> &'static str {
+    t!("Dock kapalı: bu ayar yalnızca Dock çalışırken işe yarar. Açmak için önce Dock sayfasındaki Dock anahtarını açın.")
+}
+
+/// The line under the cover switch while it is on and the dock is off (it can only be turned off).
+pub(crate) fn off_only_reason() -> &'static str {
+    t!("Dock kapalı: bu ayar şimdi işe yaramaz ve yalnızca kapatılabilir. Yeniden açmak için önce Dock sayfasındaki Dock anahtarını açın.")
 }
 
 /// Every setting of the page, in the order of the page.
@@ -229,8 +240,8 @@ fn row(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
     let body = if state == RowState::Inert { body.opacity(0.55) } else { body };
     shell(p)
         .child(body)
-        .when(state == RowState::Inert, |d| d.child(note_line(p, e.needs.reason())))
-        .when(state == RowState::OffOnly, |d| d.child(note_line(p, off_only_line())))
+        .when(state == RowState::Inert, |d| d.child(note_line(p, inert_reason())))
+        .when(state == RowState::OffOnly, |d| d.child(note_line(p, off_only_reason())))
         .into_any_element()
 }
 
@@ -282,7 +293,7 @@ mod tests {
 
     use rf_core::desktop::virtuals::{IconChoice, VirtualKind};
 
-    use super::{Control, Entry, Section, choice_labels, entries, grouped, intro, kept_line, layout_line, whose_line};
+    use super::{Control, Entry, Section, choice_labels, entries, grouped, inert_reason, intro, kept_line, layout_line, off_only_reason, whose_line};
     use crate::dock_page::{Needs, RowState, while_turkish};
     use crate::settings::Settings;
 
@@ -447,7 +458,7 @@ mod tests {
             for sec in Section::ALL {
                 assert!(has(sec.title()), "{sec:?}");
             }
-            for text in [intro(), whose_line(), layout_line(), kept_line()] {
+            for text in [intro(), whose_line(), layout_line(), kept_line(), inert_reason(), off_only_reason()] {
                 assert!(has(text), "{text}");
             }
             for (_, l) in choice_labels() {
@@ -464,6 +475,19 @@ mod tests {
                 assert!(layout_line().contains(word), "{word}");
             }
             assert!(whose_line().contains("hiçbir zaman değiştirilmez"));
+        });
+    }
+
+    #[test]
+    fn the_hints_of_a_dimmed_row_point_to_the_dock_page_and_not_to_the_top_of_this_one() {
+        while_turkish(|| {
+            for text in [inert_reason(), off_only_reason()] {
+                assert!(text.contains("Dock sayfasındaki Dock anahtarını"), "{text}");
+                assert!(!text.contains("sayfanın başındaki"), "the Dock switch is not at the top of THIS page: {text}");
+            }
+            // the cover switch is the only row that is ever dimmed on this page, and it uses these sentences
+            let dimmed: Vec<_> = entries().iter().filter(|e| e.needs.reason() != "").map(|e| e.field).collect();
+            assert_eq!(dimmed, ["shell_desktop_cover"]);
         });
     }
 

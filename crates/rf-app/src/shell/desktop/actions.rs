@@ -103,14 +103,18 @@ impl DesktopView {
             cx.defer(move |cx| super::open::open_location(Some(&name), loc, cx));
             return;
         }
-        // whether we can list it is a question for the shell
+        // whether we can list it is a question for the shell (it waits its turn on the shell thread, behind the icons being fetched)
         let (tx, rx) = oneshot::channel();
         let asked = name.clone();
+        let t0 = std::time::Instant::now();
         rf_win::sta::run(move |_| {
             let _ = tx.send(rf_win::shellfolder::browsable(&asked));
         });
         cx.spawn(async move |_, cx| {
             let place = rx.await.ok().flatten();
+            if super::open::tracing() {
+                log::warn!("open-trace: the shell answered \"can it be listed\" after {} ms", t0.elapsed().as_millis());
+            }
             cx.update(|cx| match place {
                 Some(p) => {
                     let loc = match p.fs_path {

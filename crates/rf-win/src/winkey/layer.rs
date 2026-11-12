@@ -19,12 +19,17 @@
 //!    sends no mask key.
 //! 7. Stood down (or switched off) in the middle of a chord: the chord is closed and the interface is told (`Lost`) so that it closes
 //!    the switcher; the releases of what was swallowed are still swallowed.
+//! 8. Win+E and Win+D (`Shared::combos_on`, only while no Explorer is the shell): the press of E or D, with a Windows key alone down
+//!    before it, is swallowed and posted; its auto-repeats are swallowed; its release is swallowed because its press was (also after the
+//!    layer stood down); ONE mask key is sent for the hold, so that Windows' own Start does not open when the Windows key comes up
+//!    (the system never saw a key between the press and the release). The Windows key itself is still never swallowed.
 
 use std::sync::Arc;
 
-use super::machine::{VK_LWIN, VK_RWIN, WinMachine, WinOutcome};
+use super::machine::{VK_D, VK_E, VK_LWIN, VK_RWIN, WinMachine, WinOutcome};
 use super::mask::MaskSender;
 use super::queue::Posted;
+use super::service::KeyProbe;
 use super::shared::{Shared, Tracked};
 use crate::switcher::chord::{Chord, Effect, Key};
 use crate::switcher::hook::{LLKHF_ALTDOWN, RawKey, VK_LMENU, VK_MENU, VK_RMENU, translate};
@@ -54,6 +59,12 @@ pub struct KeyLayer {
     /// The switcher could not be opened: Alt+Tab passes until Alt is released.
     given_up: bool,
     held: Held,
+    /// The keys of Win+E and Win+D whose press was swallowed and whose release is still to come: `[E, D]`.
+    combo_down: [bool; 2],
+    /// The mask key was sent for the current Windows-key hold because a chord of ours took a key.
+    combo_masked: bool,
+    /// The keyboard's own state, asked once at the press of E or D (see `on_event`); `None` in the layer's unit tests that do not need it.
+    probe: Option<Arc<dyn KeyProbe>>,
 }
 
 impl KeyLayer {
@@ -67,7 +78,17 @@ impl KeyLayer {
             seq: 0,
             given_up: false,
             held: Held { lwin: win_left, rwin: win_right, ..Held::default() },
+            combo_down: [false; 2],
+            combo_masked: false,
+            probe: None,
         }
+    }
+
+    /// The layer confirms a Windows key is really down (the keyboard's own state) before it takes E or D: a belief the hook's events
+    /// left stale (a release it never saw: the secure desktop, a stalled hook) must not make it swallow a typed letter.
+    pub fn with_probe(mut self, probe: Arc<dyn KeyProbe>) -> KeyLayer {
+        self.probe = Some(probe);
+        self
     }
 
     /// One key event. True: the key is swallowed.
@@ -84,17 +105,69 @@ impl KeyLayer {
         let stand_down = self.shared.standing_down();
         let log_only = self.shared.log_only();
 
+        // ---- the keys of Win+E / Win+D that were taken: their repeats and their release follow their press, whatever state the layer is in
+        if let Some(slot) = combo_slot(k.vk)
+            && self.combo_down[slot]
+        {
+            // (an event a program sent is not the user's key: it is never ours to take, and it is not tracked here. A synthetic key-up
+            // of E, sent by a remote-input tool or an IME while the real key is still held, must not end the tracking: the real key's
+            // repeats and release would then reach the focused program after the press was swallowed)
+            if !k.injected() {
+                if !k.down {
+                    self.combo_down[slot] = false;
+                    // the machine has to see the release too, or the next press of the same key (Windows key still held) is taken for
+                    // an auto-repeat of this one and passes to the focused program
+                    self.win.feed(k.vk, false, false, false);
+                }
+                return !log_only;
+            }
+        }
+
         // ---- the Windows key
+        let mut taken = false;
         if self.shared.win_on() && !stand_down {
+            // About to decide on E or D with a Windows key believed down: ask the keyboard once (a cheap read, only on these two keys).
+            // If it says neither Windows key is down, the belief is stale: drop it, so the letter passes as the typing it is.
+            if k.down && !k.injected() && combo_slot(k.vk).is_some() && self.win.any_down() && let Some(p) = &self.probe && !p.down(VK_LWIN) && !p.down(VK_RWIN) {
+                self.win.forget_held();
+                self.held.lwin = false;
+                self.held.rwin = false;
+                self.shared.set_believed(self.held.tracked());
+            }
             let modifier_held = k.mods.shift() || k.mods.ctrl() || k.flags & LLKHF_ALTDOWN != 0;
-            if self.win.feed(k.vk, k.down, k.injected(), modifier_held) == WinOutcome::Tap {
-                // the mask goes in BEFORE the release is let through; in log-only mode nothing is sent
-                self.send_mask(log_only);
-                self.shared.post(Posted::StartTap);
+            match self.win.feed(k.vk, k.down, k.injected(), modifier_held) {
+                WinOutcome::Tap => {
+                    // the mask goes in BEFORE the release is let through; in log-only mode nothing is sent
+                    self.send_mask(log_only);
+                    self.shared.post(Posted::StartTap);
+                }
+                WinOutcome::Combo(c) if self.shared.combos_on() => {
+                    // one mask for the hold: the system will see the Windows key go down and up with nothing between
+                    if !self.combo_masked {
+                        self.combo_masked = true;
+                        self.send_mask(log_only);
+                    }
+                    if let Some(slot) = combo_slot(k.vk) {
+                        self.combo_down[slot] = true;
+                    }
+                    self.shared.post(Posted::WinCombo(c));
+                    taken = true;
+                }
+                _ => {}
+            }
+            if !self.win.any_down() {
+                self.combo_masked = false;
             }
         } else {
             // (not looking, but the held Windows keys are still tracked: see the method)
             self.win.observe_unseen(k.vk, k.down, k.injected());
+            if !self.win.any_down() {
+                self.combo_masked = false;
+            }
+        }
+        if taken {
+            // the press is swallowed (in log-only mode nothing is: the layer only says what it would do)
+            return !log_only;
         }
 
         // ---- Alt+Tab
@@ -169,6 +242,15 @@ impl KeyLayer {
     }
 }
 
+/// Which of the two taken keys a virtual key is: `[E, D]`.
+fn combo_slot(vk: u32) -> Option<usize> {
+    match vk {
+        VK_E => Some(0),
+        VK_D => Some(1),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +277,11 @@ mod tests {
     }
 
     fn rig_with(win: bool, alt: bool, log_only: bool) -> Rig {
+        rig_probing(win, alt, log_only, None)
+    }
+
+    /// [`rig_with`] whose layer also asks a fake keyboard whether a Windows key is really down (what the service gives the real layer).
+    fn rig_probing(win: bool, alt: bool, log_only: bool, probe: Option<Arc<crate::winkey::fakes::FakeProbe>>) -> Rig {
         let clock = Arc::new(Clock::manual());
         clock.set(10_000);
         let shared = Arc::new(Shared::new(clock.clone(), log_only));
@@ -202,6 +289,9 @@ mod tests {
         shared.beat(false);
         let mask = Arc::new(FakeMask::default());
         let mut layer = KeyLayer::new(shared.clone(), mask.clone(), false, false);
+        if let Some(p) = probe {
+            layer = layer.with_probe(p);
+        }
         let mut feed = FakeFeed::default();
         feed.start_raw(Box::new(move |k| layer.on_event(k))).unwrap();
         Rig { feed, shared, clock, mask }
@@ -717,5 +807,196 @@ mod tests {
     fn a_layer_is_plain_data_and_ids_and_codes_are_the_only_state_it_keeps() {
         fn is_send<T: Send>() {}
         is_send::<KeyLayer>();
+    }
+
+    // ---------------------------------------------------------------- Win+E and Win+D (rule 8)
+
+    const KEY_E: u32 = 0x45;
+    const KEY_D: u32 = 0x44;
+    const SCAN_E: u32 = 0x12;
+    const SCAN_D: u32 = 0x20;
+
+    fn combo_rig(log_only: bool) -> Rig {
+        let r = rig_with(true, false, log_only);
+        r.shared.set_combos(true);
+        r
+    }
+
+    #[test]
+    fn win_and_e_takes_the_e_posts_the_chord_masks_once_and_never_opens_start() {
+        let mut r = combo_rig(false);
+        assert!(!r.win_down(VK_LWIN));
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true), "the press of E is swallowed");
+        assert_eq!(r.mask.sent(), 1, "the mask goes in while the Windows key is down, so Windows' Start does not open on its release");
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true), "the auto-repeat is swallowed too");
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, false), "the release follows the press");
+        assert!(!r.win_up(VK_LWIN), "the Windows key itself always passes");
+        assert_eq!(r.posted(), vec![Posted::WinCombo(crate::winkey::machine::Combo::Explorer)], "one chord, and no StartTap");
+        assert_eq!(r.mask.sent(), 1);
+        // the next ordinary tap is a tap again
+        r.win_down(VK_LWIN);
+        r.win_up(VK_LWIN);
+        assert_eq!(r.posted(), vec![Posted::StartTap]);
+        assert_eq!(r.mask.sent(), 2);
+    }
+
+    #[test]
+    fn a_second_chord_in_the_same_hold_is_taken_with_no_second_mask() {
+        let mut r = combo_rig(false);
+        r.win_down(VK_RWIN);
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        r.feed.push_raw(KEY_E, SCAN_E, 0, false);
+        assert!(r.feed.push_raw(KEY_D, SCAN_D, 0, true));
+        r.feed.push_raw(KEY_D, SCAN_D, 0, false);
+        r.win_up(VK_RWIN);
+        use crate::winkey::machine::Combo;
+        assert_eq!(r.posted(), vec![Posted::WinCombo(Combo::Explorer), Posted::WinCombo(Combo::Desktop)]);
+        assert_eq!(r.mask.sent(), 1, "one mask for the hold");
+    }
+
+    #[test]
+    fn the_release_of_a_taken_key_is_swallowed_even_after_the_layer_stood_down() {
+        let mut r = combo_rig(false);
+        r.win_down(VK_LWIN);
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        r.clock.set(10_000 + STALE_AFTER_MS + 10);
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, false), "a key that was swallowed down never comes up in the program");
+        // the next E is not tracked any more: while standing down it passes
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, false));
+        r.win_up(VK_LWIN);
+    }
+
+    #[test]
+    fn with_the_chords_not_ours_every_key_passes_and_nothing_is_masked() {
+        // the setting for the chords is off (an Explorer shell answers them itself)
+        let mut r = rig_with(true, false, false);
+        r.win_down(VK_LWIN);
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, false));
+        r.win_up(VK_LWIN);
+        assert_eq!(r.mask.sent(), 0);
+        assert_eq!(r.posted(), vec![]);
+        // and with the Windows-key setting off altogether, the chords are not looked at either
+        let mut r = rig_with(false, true, false);
+        r.shared.set_combos(true);
+        r.win_down(VK_LWIN);
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        r.win_up(VK_LWIN);
+        assert_eq!(r.posted(), vec![]);
+    }
+
+    #[test]
+    fn other_chords_a_shifted_chord_and_a_programs_own_key_are_not_ours() {
+        let mut r = combo_rig(false);
+        // Win+Shift+E
+        r.win_down(VK_LWIN);
+        r.feed.push_raw(VK_LSHIFT, 0x2A, 0, true);
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        r.feed.push_raw(KEY_E, SCAN_E, 0, false);
+        r.feed.push_raw(VK_LSHIFT, 0x2A, 0, false);
+        r.win_up(VK_LWIN);
+        // Win+L, Win+R, Win+Tab
+        for key in [0x4C, 0x52, 0x09] {
+            r.win_down(VK_LWIN);
+            assert!(!r.feed.push_raw(key, 0x1E, 0, true));
+            r.feed.push_raw(key, 0x1E, 0, false);
+            r.win_up(VK_LWIN);
+        }
+        // an E a program sent while the Windows key is held
+        r.win_down(VK_LWIN);
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, LLKHF_INJECTED, true));
+        r.feed.push_raw(KEY_E, SCAN_E, LLKHF_INJECTED, false);
+        r.win_up(VK_LWIN);
+        // (a key a program sent is not the user's key: it does not spoil the tap, so that hold ends as a tap, as the machine says)
+        assert_eq!(r.posted(), vec![Posted::StartTap]);
+        assert_eq!(r.mask.sent(), 1, "only that tap's mask");
+    }
+
+    #[test]
+    fn in_log_only_mode_the_chord_is_posted_and_nothing_is_swallowed_or_sent() {
+        let mut r = combo_rig(true);
+        r.win_down(VK_LWIN);
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, false));
+        r.win_up(VK_LWIN);
+        assert_eq!(r.mask.sent(), 0);
+        assert_eq!(r.posted(), vec![Posted::WinCombo(crate::winkey::machine::Combo::Explorer)]);
+    }
+
+    #[test]
+    fn a_mask_the_system_refused_is_counted_and_the_chord_still_works() {
+        let mut r = combo_rig(false);
+        r.mask.refuse.store(true, std::sync::atomic::Ordering::Relaxed);
+        r.win_down(VK_LWIN);
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        r.feed.push_raw(KEY_E, SCAN_E, 0, false);
+        r.win_up(VK_LWIN);
+        assert_eq!(r.shared.mask_failures(), 1);
+        assert_eq!(r.posted().len(), 1);
+    }
+
+    #[test]
+    fn the_same_chord_key_pressed_again_while_the_windows_key_is_still_held_is_taken_again() {
+        // Hold Win, press E (a window opens), let go of E, press E again: the second press is a second chord, not an auto-repeat
+        let mut r = combo_rig(false);
+        r.win_down(VK_LWIN);
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true), "its auto-repeat is swallowed");
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, false));
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true), "the second press is taken, not passed to the focused program");
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, false));
+        r.win_up(VK_LWIN);
+        use crate::winkey::machine::Combo;
+        assert_eq!(r.posted(), vec![Posted::WinCombo(Combo::Explorer), Posted::WinCombo(Combo::Explorer)]);
+        assert_eq!(r.mask.sent(), 1, "still one mask for the hold");
+    }
+
+    #[test]
+    fn a_key_up_a_program_sent_does_not_end_the_tracking_of_a_taken_key() {
+        // A remote-input tool or an IME injects an E key-up while the user still holds E: the real repeats and the real release must
+        // keep being swallowed (the press was)
+        let mut r = combo_rig(false);
+        r.win_down(VK_LWIN);
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        r.feed.push_raw(KEY_E, SCAN_E, LLKHF_INJECTED, false);
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true), "the real auto-repeat after the synthetic key-up is still swallowed");
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, false), "and the real release");
+        // after the real release the key is free again
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, false), "a stray release now is nobody's to swallow");
+        r.win_up(VK_LWIN);
+    }
+
+    #[test]
+    fn a_windows_key_the_keyboard_says_is_up_does_not_make_a_typed_e_a_chord() {
+        // The layer believes Win is down (its release was never seen: secure desktop, a stalled hook), the keyboard says it is up.
+        let probe = Arc::new(crate::winkey::fakes::FakeProbe::default());
+        let mut r = rig_probing(true, false, false, Some(probe.clone()));
+        r.shared.set_combos(true);
+        probe.set(VK_LWIN, true);
+        r.win_down(VK_LWIN);
+        probe.set(VK_LWIN, false); // released where the hook could not see it
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, true), "a typed e passes");
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, false));
+        assert_eq!(r.mask.sent(), 0, "no mask is sent for a chord that never was");
+        assert_eq!(r.posted(), vec![], "nothing is opened");
+        // the belief was repaired: the hold is over for the layer, and the next tap is a tap
+        r.win_down(VK_LWIN);
+        probe.set(VK_LWIN, true);
+        r.win_up(VK_LWIN);
+        assert_eq!(r.posted(), vec![Posted::StartTap]);
+    }
+
+    #[test]
+    fn a_windows_key_the_keyboard_says_is_down_still_makes_the_chord() {
+        let probe = Arc::new(crate::winkey::fakes::FakeProbe::default());
+        let mut r = rig_probing(true, false, false, Some(probe.clone()));
+        r.shared.set_combos(true);
+        probe.set(VK_LWIN, true);
+        r.win_down(VK_LWIN);
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        r.feed.push_raw(KEY_E, SCAN_E, 0, false);
+        r.win_up(VK_LWIN);
+        assert_eq!(r.posted(), vec![Posted::WinCombo(crate::winkey::machine::Combo::Explorer)]);
     }
 }

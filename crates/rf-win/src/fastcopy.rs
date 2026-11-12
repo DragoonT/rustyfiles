@@ -751,8 +751,12 @@ fn finish(kind: Transfer, sources: &[PathBuf], dest_dir: &Path, tracker: &Arc<Tr
     // its last value would read as a speed of 0 with no time left while the percentage moves
     tracker.bytes.set(0, 0);
     let mut ok = true;
+    // Leftovers go to the shell's engine. With no shell it refuses them, and our engine has ALREADY copied the rest: the refusal is
+    // counted and the verification and (for a move) the removal of the verified sources still happen, then the user is told how many
+    // items are left (`PartlyDone`), instead of being told nothing changed while the copies sit at the destination.
+    let mut left = 0usize;
     if !out.whole.is_empty() {
-        ok &= crate::fileops::transfer_tracked(kind, &out.whole, dest_dir, tracker.clone())?;
+        ok &= absorb_no_shell(crate::fileops::transfer_tracked(kind, &out.whole, dest_dir, tracker.clone()), out.whole.len(), &mut left)?;
     }
     // failed single files: one shell call per destination folder
     let mut by_dir: Vec<(PathBuf, Vec<PathBuf>)> = Vec::new();
@@ -765,7 +769,7 @@ fn finish(kind: Transfer, sources: &[PathBuf], dest_dir: &Path, tracker: &Arc<Tr
     for (d, fs) in by_dir {
         // the shell reports its own results; those files' undo is covered by their folder
         let t = Arc::new(Tracker::new(Box::new(|_, _, _| {}), tracker.cancel.clone()));
-        ok &= crate::fileops::transfer_tracked(kind, &fs, &d, t)?;
+        ok &= absorb_no_shell(crate::fileops::transfer_tracked(kind, &fs, &d, t), fs.len(), &mut left)?;
     }
     // checks: asked for, or a move about to delete its sources
     let mode = match (tracker.verify_mode(), kind) {
@@ -797,7 +801,23 @@ fn finish(kind: Transfer, sources: &[PathBuf], dest_dir: &Path, tracker: &Arc<Tr
         let names: Vec<String> = bad.iter().take(5).filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
         anyhow::bail!("{}: {} ({})", NOT_VERIFIED, bad.len(), names.join(", "));
     }
+    if left > 0 {
+        let op = if kind == Transfer::Copy { crate::engine_guard::Op::Copy } else { crate::engine_guard::Op::Move };
+        return Err(crate::engine_guard::PartlyDone { op, left: Some(left) }.into());
+    }
     Ok(ok)
+}
+
+/// The answer of a leftover hand-over to the shell's engine, with "no shell is running" turned into a count of items left (`false`: not
+/// everything is done) and every other error passed on as it was.
+fn absorb_no_shell(r: anyhow::Result<bool>, items: usize, left: &mut usize) -> anyhow::Result<bool> {
+    match r {
+        Err(e) if e.downcast_ref::<crate::engine_guard::NoShellEngine>().is_some() => {
+            *left += items;
+            Ok(false)
+        }
+        other => other,
+    }
 }
 
 // ---------------------------------------------------------------- crash-safe job journal
@@ -1642,5 +1662,67 @@ mod tests {
             }
         }
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Our engine has done its part; what it could not do goes to the shell's engine, and with no shell that is refused. The user must
+    /// then be told what is true: the rest WAS done.
+    fn done_by_us(base: &Path) -> (PathBuf, PathBuf, Outcome) {
+        let (src, dst) = (base.join("kaynak"), base.join("hedef"));
+        std::fs::create_dir_all(src.join("tree")).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("done.txt"), b"copied by our engine").unwrap();
+        std::fs::write(src.join("locked.txt"), b"our engine could not copy this one").unwrap();
+        std::fs::copy(src.join("done.txt"), dst.join("done.txt")).unwrap();
+        let pair = (src.join("done.txt"), dst.join("done.txt"));
+        let out = Outcome {
+            undo: vec![pair.clone()],
+            failed: vec![(src.join("locked.txt"), dst.clone())],
+            whole: vec![src.join("tree")],
+            copied: vec![pair],
+            src_dirs: Vec::new(),
+            cancelled: false,
+        };
+        (src, dst, out)
+    }
+
+    #[test]
+    fn a_copy_whose_leftovers_need_a_missing_shell_says_how_many_are_left_and_not_that_nothing_changed() {
+        let base = base("fastcopy-noshell-copy");
+        let (src, dst, out) = done_by_us(&base);
+        let t = Arc::new(tracker());
+        let sources = [src.join("done.txt"), src.join("locked.txt"), src.join("tree")];
+        let r = crate::engine_guard::with_no_shell(|| finish(Transfer::Copy, &sources, &dst, &t, out));
+        let e = r.expect_err("two items could not be copied");
+        let partly = e.downcast_ref::<crate::engine_guard::PartlyDone>().expect("the typed error, not the shell's refusal");
+        assert_eq!((partly.op, partly.left), (crate::engine_guard::Op::Copy, Some(2)));
+        assert!(!e.to_string().contains("Nothing was changed"), "{e}");
+        assert!(dst.join("done.txt").exists(), "what our engine copied stays");
+        assert_eq!(t.results.lock().unwrap().len(), 1, "and its undo pair was recorded");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_move_with_leftovers_the_shell_must_do_still_removes_the_sources_that_were_copied_and_checked() {
+        let base = base("fastcopy-noshell-move");
+        let (src, dst, out) = done_by_us(&base);
+        let t = Arc::new(tracker());
+        let sources = [src.join("done.txt"), src.join("locked.txt"), src.join("tree")];
+        let r = crate::engine_guard::with_no_shell(|| finish(Transfer::Move, &sources, &dst, &t, out));
+        let e = r.expect_err("two items could not be moved");
+        assert_eq!(e.downcast_ref::<crate::engine_guard::PartlyDone>().map(|p| (p.op, p.left)), Some((crate::engine_guard::Op::Move, Some(2))));
+        assert!(!src.join("done.txt").exists(), "the move is not left half done: the checked copy's source is gone");
+        assert!(dst.join("done.txt").exists());
+        assert!(src.join("locked.txt").exists() && src.join("tree").exists(), "what was not moved stays where it was");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn other_errors_from_the_shell_engine_still_end_the_finish_as_before() {
+        let mut left = 0;
+        assert!(absorb_no_shell(Err(anyhow::anyhow!("disk full")), 3, &mut left).is_err());
+        assert_eq!(left, 0);
+        assert!(absorb_no_shell(Ok(true), 3, &mut left).unwrap());
+        assert!(!absorb_no_shell(Err(crate::engine_guard::NoShellEngine { op: crate::engine_guard::Op::Copy }.into()), 3, &mut left).unwrap());
+        assert_eq!(left, 3);
     }
 }

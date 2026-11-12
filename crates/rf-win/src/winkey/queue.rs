@@ -5,6 +5,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
+use super::machine::Combo;
 use crate::switcher::chord::{Dir, Effect, Scope};
 
 /// What the callback posts. Plain `Copy` data that fits in one `u32`.
@@ -18,10 +19,14 @@ pub enum Posted {
     /// The layer lost track of the chord (it stood down or was switched off in the middle of one, the hook was installed again, or
     /// the queue overflowed): the switcher, if one is open, is to be closed.
     Lost,
+    /// A chord of ours (Win+E, Win+D) was pressed and its key was taken.
+    WinCombo(Combo),
 }
 
 const CODE_START: u32 = 1;
 const CODE_LOST: u32 = 2;
+const CODE_COMBO_EXPLORER: u32 = 3;
+const CODE_COMBO_DESKTOP: u32 = 4;
 const CODE_CHORD: u32 = 0x10;
 
 fn effect_code(e: Effect) -> u32 {
@@ -57,6 +62,8 @@ impl Posted {
         match self {
             Posted::StartTap => CODE_START,
             Posted::Lost => CODE_LOST,
+            Posted::WinCombo(Combo::Explorer) => CODE_COMBO_EXPLORER,
+            Posted::WinCombo(Combo::Desktop) => CODE_COMBO_DESKTOP,
             Posted::Chord { effect, seq } => (u32::from(seq) << 16) | (CODE_CHORD + effect_code(effect)),
         }
     }
@@ -65,6 +72,8 @@ impl Posted {
         match v & 0xFFFF {
             CODE_START => Some(Posted::StartTap),
             CODE_LOST => Some(Posted::Lost),
+            CODE_COMBO_EXPLORER => Some(Posted::WinCombo(Combo::Explorer)),
+            CODE_COMBO_DESKTOP => Some(Posted::WinCombo(Combo::Desktop)),
             c if c >= CODE_CHORD => effect_of(c - CODE_CHORD).map(|effect| Posted::Chord { effect, seq: (v >> 16) as u16 }),
             _ => None,
         }
@@ -147,6 +156,8 @@ mod tests {
     fn every_post_survives_the_trip_through_one_u32() {
         assert_eq!(Posted::decode(Posted::StartTap.encode()), Some(Posted::StartTap));
         assert_eq!(Posted::decode(Posted::Lost.encode()), Some(Posted::Lost));
+        assert_eq!(Posted::decode(Posted::WinCombo(Combo::Explorer).encode()), Some(Posted::WinCombo(Combo::Explorer)));
+        assert_eq!(Posted::decode(Posted::WinCombo(Combo::Desktop).encode()), Some(Posted::WinCombo(Combo::Desktop)));
         for effect in every_effect() {
             for seq in [0u16, 1, 2, 40_000, u16::MAX] {
                 let p = Posted::Chord { effect, seq };

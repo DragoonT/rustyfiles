@@ -47,26 +47,20 @@ fn start_packaged(aumid: &str) -> anyhow::Result<()> {
 }
 
 /// [`start`] of a packaged app with an argument string (a jump-list task such as "New window" carries one).
+///
+/// The activation goes through the one shared function (`crate::activate::packaged`: a thread of its own and a short wait, because
+/// with no Explorer the activation manager starts the app and never returns). An error from it sends the start to the shell, as before;
+/// when that fails too the error says both, so that "class not registered" from a shell that is not there is not taken for "the app
+/// was moved". An activation that fails only AFTER its wait (it was reported as started) runs the same shell step from its own
+/// thread, so the second step is not lost to a slow activation.
 pub fn start_packaged_with(aumid: &str, args: &str) -> anyhow::Result<()> {
-    use windows::Win32::System::Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance};
-    use windows::Win32::UI::Shell::{AO_NONE, ApplicationActivationManager, IApplicationActivationManager};
-    use windows::core::PCWSTR;
-    crate::shell::ensure_com();
-    let id = crate::wide::wide(aumid);
-    let arguments = crate::wide::wide(args);
-    let arguments = if args.is_empty() { PCWSTR::null() } else { PCWSTR(arguments.as_ptr()) };
-    let activated = unsafe {
-        CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
-            .and_then(|m| m.ActivateApplication(PCWSTR(id.as_ptr()), arguments, AO_NONE))
+    let first = match crate::activate::packaged_with(aumid, args, crate::activate::Late::Shell) {
+        Ok(()) => return Ok(()),
+        Err(e) => e,
     };
-    match activated {
-        Ok(_pid) => Ok(()),
-        Err(e) => {
-            // an id the manager does not know (a classic app that sets an id of its own): the shell can start it by the same name
-            log::debug!("dock: activation of {aumid} failed ({e}), trying the shell");
-            crate::shellfolder::open(&format!("shell:AppsFolder\\{aumid}"))
-        }
-    }
+    // an id the manager does not know (a classic app that sets an id of its own): the shell can start it by the same name
+    log::debug!("dock: activation of {aumid} failed ({first}), trying the shell");
+    crate::shellfolder::open(&format!("shell:AppsFolder\\{aumid}")).map_err(|second| anyhow::anyhow!("{first}; the shell: {second}"))
 }
 
 /// Brings a task window to the front and gives it the keyboard; a minimised one is restored first. The restore is asked

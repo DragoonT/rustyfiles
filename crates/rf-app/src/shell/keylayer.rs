@@ -14,6 +14,11 @@
 //! FAIL OPEN. The beat is what proves this thread is alive: when it stops (this thread stuck for a second) the hook passes every key
 //! (`rf_win::winkey::shared`). A full-screen program in front stands the layer down too (`dock::is_fullscreen`, stamped with the beat).
 //!
+//! WIN+E AND WIN+D (same switch as the Windows key, `shell_win_key`): Explorer answers these two chords, and without it they are dead.
+//! While the shell host runs with NO Explorer owning the shell window (`live::current()` is `Shell`), Win+E opens a rustyfiles window
+//! (This PC / Home) and Win+D shows the desktop (our Show Desktop, `rf_win::desktop::showdesktop`). Beside Explorer they are left to it
+//! (`combos_wanted`). The other Explorer chords stay untouched; the list is in docs/design/shell-keys.md.
+//!
 //! LOGGING. Lines say what was DECIDED ("start: toggled", "switcher: opened"), never a key code. `RUSTYFILES_KEYS_LOG_ONLY=1` makes
 //! the layer decide and log but swallow nothing, send nothing and open nothing: the first thing to try (the log says "would ...").
 //!
@@ -26,9 +31,10 @@ use std::time::Duration;
 
 use futures::StreamExt as _;
 use gpui_kit::*;
+use rf_win::shellhost::ShellMode;
 use rf_win::switcher::chord::{Effect, Scope};
 use rf_win::switcher::hook::LowLevelHook;
-use rf_win::winkey::{Beat, Deliver, HEARTBEAT_EVERY_MS, KeyService, Posted, Shared};
+use rf_win::winkey::{Beat, Combo, Deliver, HEARTBEAT_EVERY_MS, KeyService, Posted, Shared};
 
 use super::switcher::{self, Closing, OpenRequest};
 use crate::settings::Settings;
@@ -46,6 +52,26 @@ pub fn wanted(s: &Settings) -> (bool, bool) {
     (s.shell_win_key, s.shell_own_switcher)
 }
 
+/// Whether Win+E and Win+D are ours: the Windows-key switch is on and Explorer is NOT the shell (`mode` is what the host last saw; `None`
+/// before it has looked: left to Windows). Beside Explorer it answers them itself, and taking them would only change what they do.
+pub fn combos_wanted(win_key: bool, mode: Option<ShellMode>) -> bool {
+    win_key && mode == Some(ShellMode::Shell)
+}
+
+/// The one line the host writes when the layer is ready (or its state changed): what each key now does. Never names a key code.
+pub fn ready_line(win_key: bool, own_switcher: bool, combos: bool, log_only: bool) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if win_key {
+        parts.push("a tap of the Windows key opens our Start panel");
+        parts.push(if combos { "Win+E opens a file window and Win+D shows the desktop" } else { "Win+E and Win+D are left to Explorer" });
+    }
+    if own_switcher {
+        parts.push("Alt+Tab opens our switcher");
+    }
+    let tail = if log_only { " (log only: nothing is swallowed, sent or opened)" } else { "" };
+    format!("keys: ready - {}{}", parts.join("; "), tail)
+}
+
 // ---------------------------------------------------------------- what a post does (pure over a trait)
 
 /// What the host can be asked to do with a post.
@@ -57,6 +83,10 @@ pub trait Actions {
     fn windows_start(&mut self);
     /// Opens the switcher for the opening numbered `seq`. False when it could not be opened.
     fn open_switcher(&mut self, scope: Scope, backwards: bool, seq: u16) -> bool;
+    /// Win+E: a rustyfiles file window.
+    fn open_files_window(&mut self);
+    /// Win+D: our Show Desktop (minimizes the windows, or brings them back).
+    fn show_desktop(&mut self);
     /// An effect of the chord, for the open switcher.
     fn apply(&mut self, effect: Effect);
     /// Closes the switcher if one is open and says whether there was one.
@@ -108,6 +138,22 @@ pub fn handle(p: Posted, log_only: bool, shared: &Shared, a: &mut dyn Actions) {
                 a.log(&format!("switcher: {done}"));
             }
         }
+        Posted::WinCombo(Combo::Explorer) => {
+            if log_only {
+                a.log("win+e: would open a file window (log only)");
+            } else {
+                a.open_files_window();
+                a.log("win+e: opened a file window");
+            }
+        }
+        Posted::WinCombo(Combo::Desktop) => {
+            if log_only {
+                a.log("win+d: would show the desktop (log only)");
+            } else {
+                a.show_desktop();
+                a.log("win+d: show desktop toggled");
+            }
+        }
         Posted::Lost => {
             if !log_only && a.close_switcher() {
                 a.log("switcher: closed (the keyboard layer lost track of the chord)");
@@ -146,6 +192,16 @@ impl Actions for GpuiActions<'_> {
         switcher::open(req, self.cx)
     }
 
+    fn open_files_window(&mut self) {
+        // (the program itself, as the dock's places do: the running rustyfiles takes it as a new tab, none running starts one; "This PC"
+        // is a place we show ourselves, so this never goes to Explorer)
+        crate::dock::actions::run_rustyfiles(vec!["shell:MyComputerFolder".to_string()]);
+    }
+
+    fn show_desktop(&mut self) {
+        toggle_show_desktop();
+    }
+
     fn apply(&mut self, effect: Effect) {
         switcher::apply_effect(effect, self.cx);
     }
@@ -165,9 +221,24 @@ impl Actions for GpuiActions<'_> {
 
 // ---------------------------------------------------------------- the host
 
+/// Our Show Desktop. The driver remembers which windows it minimized, so it lives as long as the process; the work is done on a thread
+/// of its own (it enumerates every window and asks each to minimize or restore, without waiting).
+fn toggle_show_desktop() {
+    use rf_win::desktop::showdesktop::{Driver, SystemOps};
+    static DRIVER: parking_lot::Mutex<Option<Driver<SystemOps>>> = parking_lot::Mutex::new(None);
+    let spawned = std::thread::Builder::new().name("rf-show-desktop".into()).spawn(|| {
+        DRIVER.lock().get_or_insert_with(|| Driver::new(SystemOps)).toggle_show_desktop();
+    });
+    if let Err(e) = spawned {
+        log::warn!("win+d: the thread did not start: {e}");
+    }
+}
+
 struct KeysHost {
     service: KeyService<LowLevelHook>,
     log_only: bool,
+    /// The last "ready" line written, so that the same state is not written again at every reload of the settings.
+    last_ready: String,
     // (kept alive: dropping a task stops it)
     _beat: Task<()>,
     _posts: Task<()>,
@@ -179,24 +250,47 @@ impl Global for KeysHost {}
 pub fn on_settings(cx: &mut App) {
     let (win, alt) = cx.try_global::<Settings>().map_or((false, false), wanted);
     if !win && !alt {
-        stop(cx);
+        stop_because(cx, "both settings are off");
         return;
     }
     if !cx.has_global::<KeysHost>() {
         start(cx);
     }
-    if let Err(e) = cx.global_mut::<KeysHost>().service.set_wanted(win, alt) {
-        log::warn!("keys: the keyboard layer could not start: {e:#}");
+    let combos = combos_wanted(win, super::live::current());
+    let host = cx.global_mut::<KeysHost>();
+    host.service.set_combos(combos);
+    match host.service.set_wanted(win, alt) {
+        Ok(()) => {
+            // the one line that says the layer is ready and what it does now (again when that changes, e.g. Explorer came back)
+            let line = ready_line(win, alt, combos, host.log_only);
+            if line != host.last_ready {
+                log::info!("{line}");
+                host.last_ready = line;
+            }
+        }
+        Err(e) => log::warn!("keys: the keyboard layer could not start: {e:#}"),
     }
 }
 
-/// Removes the hook and everything that served it (both settings off, or the host ends). Safe to call at any time.
+/// The shell window came or went (`live::on_shell_changed`): Win+E and Win+D follow who owns it.
+pub fn shell_changed(cx: &mut App) {
+    if cx.has_global::<KeysHost>() {
+        on_settings(cx);
+    }
+}
+
+/// Removes the hook and everything that served it, because the host ends. Safe to call at any time.
 pub fn stop(cx: &mut App) {
+    stop_because(cx, "the host is ending");
+}
+
+/// [`stop`] with the reason that goes into the log line (`keys: layer off, hook removed (<why>)`).
+fn stop_because(cx: &mut App, why: &str) {
     if !cx.has_global::<KeysHost>() {
         return;
     }
     let mut host = cx.remove_global::<KeysHost>();
-    host.service.stop();
+    host.service.stop_because(why);
 }
 
 fn start(cx: &mut App) {
@@ -222,7 +316,7 @@ fn start(cx: &mut App) {
             }
         }
     });
-    cx.set_global(KeysHost { service, log_only, _beat: beat, _posts: posts });
+    cx.set_global(KeysHost { service, log_only, last_ready: String::new(), _beat: beat, _posts: posts });
 }
 
 /// One beat: proves this thread is alive to the hook and lets the service look at the hook. False when the layer is gone.
@@ -246,7 +340,7 @@ fn on_posted(p: Posted, cx: &mut App) {
 #[cfg(test)]
 mod tests {
     // (explicit names: `super::*` would bring in the toolkit's own `test` attribute, which replaces the standard one)
-    use super::{Actions, Settings, handle, log_only_from, wanted};
+    use super::{Actions, Settings, combos_wanted, handle, log_only_from, ready_line, wanted};
     use rf_win::switcher::chord::{Effect, Scope};
     use rf_win::winkey::{Deliver, KeyService, Posted, Shared};
     use std::sync::Arc;
@@ -268,6 +362,8 @@ mod tests {
         lines: Vec<String>,
         can_open: bool,
         switcher_up: bool,
+        files: u32,
+        desktops: u32,
     }
 
     impl Actions for Fake {
@@ -282,6 +378,12 @@ mod tests {
             self.opened.push((scope, backwards, seq));
             self.switcher_up = self.can_open;
             self.can_open
+        }
+        fn open_files_window(&mut self) {
+            self.files += 1;
+        }
+        fn show_desktop(&mut self) {
+            self.desktops += 1;
         }
         fn apply(&mut self, effect: Effect) {
             self.applied.push(effect);
@@ -476,5 +578,39 @@ mod tests {
         for banned in ["SetWindowsHookEx", "SendInput", "RegisterHotKey", "SetWindowPos", "ShowWindow", "PostMessage", "SendMessage"] {
             assert!(!code.contains(banned), "{banned}");
         }
+    }
+
+    #[test]
+    fn win_e_opens_a_file_window_and_win_d_shows_the_desktop_and_each_says_so() {
+        let mut f = Fake::default();
+        handle(Posted::WinCombo(rf_win::winkey::Combo::Explorer), false, &shared(), &mut f);
+        handle(Posted::WinCombo(rf_win::winkey::Combo::Desktop), false, &shared(), &mut f);
+        assert_eq!((f.files, f.desktops), (1, 1));
+        assert_eq!(f.lines, vec!["win+e: opened a file window", "win+d: show desktop toggled"]);
+    }
+
+    #[test]
+    fn in_log_only_mode_the_chords_open_and_toggle_nothing() {
+        let mut f = Fake::default();
+        handle(Posted::WinCombo(rf_win::winkey::Combo::Explorer), true, &shared(), &mut f);
+        handle(Posted::WinCombo(rf_win::winkey::Combo::Desktop), true, &shared(), &mut f);
+        assert_eq!((f.files, f.desktops), (0, 0));
+        assert!(f.lines.iter().all(|l| l.contains("would")), "{:?}", f.lines);
+    }
+
+    #[test]
+    fn the_chords_are_ours_only_with_the_switch_on_and_no_explorer_as_the_shell() {
+        use rf_win::shellhost::ShellMode::{Beside, Shell};
+        assert!(combos_wanted(true, Some(Shell)));
+        assert!(!combos_wanted(true, Some(Beside)), "Explorer answers them itself");
+        assert!(!combos_wanted(true, None), "the host has not looked yet: left to Windows");
+        assert!(!combos_wanted(false, Some(Shell)), "the switch is off");
+    }
+
+    #[test]
+    fn the_ready_line_says_what_each_key_does_and_names_no_key_code() {
+        assert_eq!(ready_line(true, false, true, false), "keys: ready - a tap of the Windows key opens our Start panel; Win+E opens a file window and Win+D shows the desktop");
+        assert_eq!(ready_line(true, true, false, false), "keys: ready - a tap of the Windows key opens our Start panel; Win+E and Win+D are left to Explorer; Alt+Tab opens our switcher");
+        assert_eq!(ready_line(false, true, false, true), "keys: ready - Alt+Tab opens our switcher (log only: nothing is swallowed, sent or opened)");
     }
 }

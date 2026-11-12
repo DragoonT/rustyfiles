@@ -9,6 +9,7 @@
 //! | the desktop cover | places its windows again at once (bottom of the z-order without a shell desktop, directly above it with one) and reads the wallpaper by the route that fits: [`super::cover::shell_changed`] |
 //! | the media and volume keys | [`sync_keys`]: a hidden shell-hook window exists only while nobody owns the shell window |
 //! | the work area | [`sync_work_area`]: only with `RUSTYFILES_SET_WORKAREA=1`, only with no shell, never beside Explorer |
+//! | minimized windows | [`sync_minimized`]: with no shell window at all, Windows is told to hide minimized windows (`ARW_HIDE`) as a shell does, instead of drawing them as small title bars at the bottom left; put back when the host ends; `RUSTYFILES_KEEP_MINIMIZED=1` leaves it alone |
 //!
 //! COST. With Explorer running and nothing changing this module does nothing at all: no thread, no window, no timer. A change costs one
 //! worker thread per part for as long as the part's work takes. Switches: the keys follow the shell window by themselves (they act only
@@ -22,8 +23,9 @@ use gpui_kit::App;
 use rf_win::dock::layout::Rect;
 use rf_win::shellhost::ShellMode;
 use rf_win::shellhost::appcmd::{Shell, shell_now};
+use rf_win::shellhost::minimized::{self, MetricsApi, MinimizedKeeper, SystemMetrics};
 use rf_win::shellhost::shellhook::ShellHook;
-use rf_win::shellhost::workarea::{Done, SystemSetter, SystemShell, WorkAreaKeeper};
+use rf_win::shellhost::workarea::{Done, ShellState, SystemSetter, SystemShell, WorkAreaKeeper};
 
 use crate::settings::Settings;
 
@@ -70,10 +72,12 @@ pub fn change_line(before: Option<ShellMode>, now: ShellMode) -> Option<String> 
 
 static HOOK: Mutex<Option<ShellHook>> = Mutex::new(None);
 static WORK: Mutex<Option<WorkAreaKeeper>> = Mutex::new(None);
+static MINIMIZED: Mutex<Option<MinimizedKeeper>> = Mutex::new(None);
 
 /// The host's start, after its windows exist: brings the parts in line with the mode it started in.
 pub fn start(cx: &mut App) {
     sync_keys();
+    sync_minimized();
     sync_work_area(cx);
 }
 
@@ -84,7 +88,10 @@ pub fn on_shell_changed(mode: ShellMode, cx: &mut App) {
     }
     CURRENT.store(code(mode), Ordering::Relaxed);
     super::cover::shell_changed(cx);
+    // Win+E and Win+D follow who owns the shell window
+    super::keylayer::shell_changed(cx);
     sync_keys();
+    sync_minimized();
     sync_work_area(cx);
 }
 
@@ -115,6 +122,10 @@ pub fn stop(cx: &mut App) {
     let _ = cx;
     let done = run_waiting("rf-live-stop", STOP_WAIT, || {
         *HOOK.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        // minimized windows: the metrics from before are put back (only while there is still no shell, and only if they are still ours)
+        if let Some(line) = minimized_stop(&mut MINIMIZED.lock().unwrap_or_else(|p| p.into_inner()), &SystemShell, &mut SystemMetrics) {
+            log::info!("{line}");
+        }
         let mut g = WORK.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(k) = g.as_mut()
             && k.active()
@@ -154,6 +165,43 @@ fn sync_keys() {
     if let Err(e) = spawned {
         log::warn!("shell host: the key watcher thread did not start: {e}");
     }
+}
+
+/// With NO window owning the shell window, tells Windows to hide minimized windows (a shell does that; without one they show as small
+/// title bars at the bottom left). With a shell there it does nothing, and lets go of what it did (see `rf_win::shellhost::minimized`
+/// for why Explorer's own value is never overwritten). On a worker thread: it is a system call, not for the interface thread.
+fn sync_minimized() {
+    if minimized::left_alone(std::env::var(minimized::ENV_KEEP).ok().as_deref()) {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("rf-minimized-sync".into()).spawn(|| {
+        let mut g = MINIMIZED.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(line) = minimized_sync(&mut g, &SystemShell, &mut SystemMetrics) {
+            log::info!("{line}");
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("shell host: the minimized-windows thread did not start: {e}");
+    }
+}
+
+/// The step of [`sync_minimized`] over the keeper in `slot` (made on first use), with the shell look and the metrics given in, so
+/// that it is tested on fakes. The line to log, when something changed.
+fn minimized_sync(slot: &mut Option<MinimizedKeeper>, state: &dyn ShellState, api: &mut dyn MetricsApi) -> Option<&'static str> {
+    let k = slot.get_or_insert_with(MinimizedKeeper::new);
+    let was = k.active();
+    match k.apply(state, api, true) {
+        minimized::Done::Hidden => Some("shell host: no shell window - minimized windows are hidden, as a shell does"),
+        minimized::Done::Restored => Some("shell host: another shell is there - the minimized windows setting is back as it was"),
+        minimized::Done::Nothing if was && !k.active() => Some("shell host: a shell window is there - minimized windows are left to it"),
+        minimized::Done::Nothing => None,
+    }
+}
+
+/// The host ends: what the keeper changed is put back (only while there is still no shell, and only if it is still ours).
+fn minimized_stop(slot: &mut Option<MinimizedKeeper>, state: &dyn ShellState, api: &mut dyn MetricsApi) -> Option<String> {
+    let k = slot.as_mut().filter(|k| k.active())?;
+    Some(format!("minimized windows: on stop {:?}", k.apply(state, api, false)))
 }
 
 /// The thickness of the dock's band for the work area, device px (`None`: no band wanted).
@@ -226,6 +274,74 @@ mod tests {
         assert!(!finished, "a job that outlasts the wait is reported as unfinished");
         assert!(t0.elapsed() < std::time::Duration::from_secs(2), "the caller was held for {:?}", t0.elapsed());
         assert!(run_waiting("t-quick", std::time::Duration::from_secs(5), || {}), "a job that is done in time is reported as done");
+    }
+
+    /// A shell look the test sets, and a system that holds one value and counts the writes.
+    struct FakeState(std::cell::Cell<rf_win::shellhost::appcmd::Shell>);
+    impl ShellState for FakeState {
+        fn shell(&self) -> rf_win::shellhost::appcmd::Shell {
+            self.0.get()
+        }
+    }
+    struct FakeMetrics {
+        now: minimized::Metrics,
+        writes: u32,
+    }
+    impl MetricsApi for FakeMetrics {
+        fn get(&mut self) -> Option<minimized::Metrics> {
+            Some(self.now)
+        }
+        fn set(&mut self, m: minimized::Metrics, _why: minimized::Write) -> bool {
+            self.now = m;
+            self.writes += 1;
+            true
+        }
+    }
+
+    #[test]
+    fn the_hosts_minimized_windows_wiring_hides_with_no_shell_leaves_a_shell_alone_and_puts_the_old_value_back_on_stop() {
+        use rf_win::shellhost::appcmd::Shell;
+        let before = minimized::Metrics { width: 160, horz_gap: 4, vert_gap: 4, arrange: 0 };
+        let state = FakeState(std::cell::Cell::new(Shell::Nobody));
+        let mut api = FakeMetrics { now: before, writes: 0 };
+        let mut slot: Option<MinimizedKeeper> = None;
+        // a start with a shell: nothing is written, nothing logged
+        state.0.set(Shell::Explorer);
+        assert_eq!(minimized_sync(&mut slot, &state, &mut api), None);
+        assert_eq!(api.writes, 0);
+        // the shell goes away: the bars are hidden, once
+        state.0.set(Shell::Nobody);
+        assert!(minimized_sync(&mut slot, &state, &mut api).unwrap().contains("hidden"));
+        assert!(api.now.hidden() && api.writes == 1);
+        assert_eq!(minimized_sync(&mut slot, &state, &mut api), None, "asked again, nothing more is written");
+        assert_eq!(api.writes, 1);
+        // Explorer comes back: its own value is not overwritten
+        state.0.set(Shell::Explorer);
+        assert!(minimized_sync(&mut slot, &state, &mut api).unwrap().contains("left to it"));
+        assert_eq!(api.writes, 1);
+        assert_eq!(minimized_stop(&mut slot, &state, &mut api), None, "nothing is held any more, so nothing is put back");
+        // the shell goes away again and the host ends while it is still the only shell: the metrics from before are put back exactly
+        api.now = before;
+        state.0.set(Shell::Nobody);
+        assert!(minimized_sync(&mut slot, &state, &mut api).is_some());
+        assert!(api.now.hidden());
+        let line = minimized_stop(&mut slot, &state, &mut api).expect("the stop puts them back");
+        assert!(line.contains("Restored"), "{line}");
+        assert_eq!(api.now, before);
+    }
+
+    /// A guard, not coverage (the behaviour is in the test above): the real metrics writer is made here and nowhere else in the app,
+    /// and the work is not done on the interface thread.
+    #[test]
+    fn the_real_minimized_metrics_writer_is_reached_only_from_here_and_off_the_interface_thread() {
+        let here = include_str!("live.rs");
+        let code = &here[..here.find("#[cfg(test)]").unwrap()];
+        assert_eq!(code.matches("SystemMetrics").count(), 3, "the import and the two uses, in stop and in sync_minimized");
+        let sync = &code[code.find("fn sync_minimized").unwrap()..];
+        assert!(sync[..1200].contains("thread::Builder"), "a worker thread");
+        for other in [include_str!("mod.rs"), include_str!("cover.rs"), include_str!("../dock/host.rs"), include_str!("../lib.rs")] {
+            assert!(!other.contains("SystemMetrics"), "another file reaches the real writer");
+        }
     }
 
     #[test]

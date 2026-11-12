@@ -162,6 +162,17 @@ pub fn list_keys_only() -> anyhow::Result<Vec<String>> {
     Ok(out)
 }
 
+/// The bin's own verbs (restore, delete) are carried out by the shell's file engine; with no shell window they are refused with a true
+/// message (`engine_guard::NoShellEngine`) instead of being started. There is no time limit on the verb itself once it runs: it has no
+/// sign of life to wait for, and its conflict prompts wait for the user.
+fn refuse_without_shell(op: crate::engine_guard::Op) -> anyhow::Result<()> {
+    use crate::engine_guard::{NoShellEngine, Plan, plan, shell_present};
+    match plan(op, shell_present()) {
+        Plan::Shell => Ok(()),
+        _ => Err(NoShellEngine { op }.into()),
+    }
+}
+
 /// Lists everything in the Recycle Bin (all drives), in shell order.
 pub fn list() -> anyhow::Result<Vec<RecycleItem>> {
     let folder = bin_folder()?;
@@ -177,6 +188,8 @@ pub fn restore(items: &[RecycleItem]) -> anyhow::Result<()> {
     if items.is_empty() {
         return Ok(());
     }
+    // the bin's verb runs the shell's file engine: with no shell window it would sit in its own progress window for ever
+    refuse_without_shell(crate::engine_guard::Op::RestoreFromBin)?;
     let folder = bin_folder()?;
     let wanted: Vec<String> = items.iter().map(|i| i.parsing_path.to_lowercase()).collect();
     // Keep the matching pidls alive past enumeration.
@@ -250,6 +263,7 @@ fn find_by_keys(folder: &IShellFolder2, wanted: &[String]) -> anyhow::Result<Vec
 /// No keys, or none found: an error, nothing is invoked. NOT RUN against a real bin by the author; see docs/design/recycle-bin.md.
 pub fn delete_by_keys(keys: &[String]) -> anyhow::Result<()> {
     anyhow::ensure!(!keys.is_empty(), "no items to delete");
+    refuse_without_shell(crate::engine_guard::Op::DeleteFromBin)?;
     let folder = bin_folder()?;
     let found = find_by_keys(&folder, keys)?;
     anyhow::ensure!(!found.is_empty(), "Öğeler Geri Dönüşüm Kutusu'nda bulunamadı");
@@ -344,5 +358,16 @@ mod tests {
     #[test]
     fn restore_empty_slice_is_noop() {
         restore(&[]).unwrap();
+    }
+
+    /// With no shell window the bin's verbs are refused before anything is looked up or invoked (the real bin is not touched).
+    #[test]
+    fn without_a_shell_restoring_and_deleting_in_the_bin_are_refused() {
+        use crate::engine_guard::{NoShellEngine, Op, with_no_shell};
+        let item = RecycleItem { name: "x".into(), original_location: String::new(), deleted_ms: 0, size: 0, parsing_path: "no-such-item".into(), is_dir: false };
+        let e = with_no_shell(|| restore(&[item])).expect_err("refused");
+        assert_eq!(e.downcast_ref::<NoShellEngine>().map(|n| n.op), Some(Op::RestoreFromBin));
+        let e = with_no_shell(|| delete_by_keys(&["no-such-key".to_string()])).expect_err("refused");
+        assert_eq!(e.downcast_ref::<NoShellEngine>().map(|n| n.op), Some(Op::DeleteFromBin));
     }
 }

@@ -26,7 +26,7 @@ pub mod service;
 pub mod shared;
 
 pub use layer::KeyLayer;
-pub use machine::{WinMachine, WinOutcome};
+pub use machine::{Combo, WinMachine, WinOutcome};
 pub use mask::{MASK_VK, MaskSender, SendInputMask};
 pub use queue::Posted;
 pub use service::{Beat, Deliver, KeyProbe, KeyService, SystemProbe, Why};

@@ -9252,5 +9252,149 @@
   "key": "Gizlemek için simgeleri buraya sürükleyin",
   "tr": "Gizlemek için simgeleri buraya sürükleyin",
   "en": "Drag icons here to hide them"
+ },
+ {
+  "id": "183e77bf",
+  "key": "Büyük simgeler",
+  "tr": "Büyük simgeler",
+  "en": "Large icons"
+ },
+ {
+  "id": "8478471b",
+  "key": "Orta boyutlu simgeler",
+  "tr": "Orta boyutlu simgeler",
+  "en": "Medium icons"
+ },
+ {
+  "id": "bd8c34a9",
+  "key": "Küçük simgeler",
+  "tr": "Küçük simgeler",
+  "en": "Small icons"
+ },
+ {
+  "id": "f687d5c9",
+  "key": "Simgeleri kılavuz çizgisine hizala",
+  "tr": "Simgeleri kılavuz çizgisine hizala",
+  "en": "Align icons to grid"
+ },
+ {
+  "id": "0b39882c",
+  "key": "Masaüstü öğelerini göster",
+  "tr": "Masaüstü öğelerini göster",
+  "en": "Show desktop icons"
+ },
+ {
+  "id": "5bd6255e",
+  "key": "Sıralama ölçütü",
+  "tr": "Sıralama ölçütü",
+  "en": "Sort by"
+ },
+ {
+  "id": "ab6905d4",
+  "key": "Öğe türü",
+  "tr": "Öğe türü",
+  "en": "Item type"
+ },
+ {
+  "id": "72c3cd33",
+  "key": "Terminalde Aç",
+  "tr": "Terminalde Aç",
+  "en": "Open in Terminal"
+ },
+ {
+  "id": "b640b1fc",
+  "key": "Daha fazla seçenek göster",
+  "tr": "Daha fazla seçenek göster",
+  "en": "Show more options"
+ },
+ {
+  "id": "c534d0f7",
+  "key": "Dock kapalı: bu ayar yalnızca Dock çalışırken işe yarar. Açmak için önce Dock sayfasındaki Dock anahtarını açın.",
+  "tr": "Dock kapalı: bu ayar yalnızca Dock çalışırken işe yarar. Açmak için önce Dock sayfasındaki Dock anahtarını açın.",
+  "en": "The dock is off: this setting only works while the dock runs. To turn it on, first turn on the dock switch on the Dock page."
+ },
+ {
+  "id": "b591fdc8",
+  "key": "Dock kapalı: bu ayar şimdi işe yaramaz ve yalnızca kapatılabilir. Yeniden açmak için önce Dock sayfasındaki Dock anahtarını açın.",
+  "tr": "Dock kapalı: bu ayar şimdi işe yaramaz ve yalnızca kapatılabilir. Yeniden açmak için önce Dock sayfasındaki Dock anahtarını açın.",
+  "en": "The dock is off: this setting does nothing now and can only be turned off. To turn it on again, first turn on the dock switch on the Dock page."
+ },
+ {
+  "id": "ac337139",
+  "key": "Explorer kabuk olarak çalışmıyorsa Windows tuşu hiçbir şey açmaz: Windows tuşunun rustyfiles Başlat'ını açması için bu anahtar GEREKLİDİR (Explorer çalışırken de Windows'un Başlat'ı yerine rustyfiles'ınki açılır). Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Windows tuşuna tek başına basıp bırakmaya (ve Windows tuşuyla E ya da D'ye) bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. Explorer kabuk değilken Win+E bir rustyfiles penceresi açar, Win+D masaüstünü gösterir; Windows tuşlu diğer kısayollara dokunmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.",
+  "tr": "Explorer kabuk olarak çalışmıyorsa Windows tuşu hiçbir şey açmaz: Windows tuşunun rustyfiles Başlat'ını açması için bu anahtar GEREKLİDİR (Explorer çalışırken de Windows'un Başlat'ı yerine rustyfiles'ınki açılır). Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Windows tuşuna tek başına basıp bırakmaya (ve Windows tuşuyla E ya da D'ye) bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. Explorer kabuk değilken Win+E bir rustyfiles penceresi açar, Win+D masaüstünü gösterir; Windows tuşlu diğer kısayollara dokunmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.",
+  "en": "While Explorer is not the shell, the Windows key opens nothing: this switch is NEEDED for the Windows key to open the rustyfiles Start panel (with Explorer running, rustyfiles' Start opens instead of Windows'). While on, rustyfiles listens to the keyboard with a system-wide hook and looks only at a tap of the Windows key by itself (and at the Windows key with E or D); it does not store, record or forward any other key. To keep Windows' own Start menu from opening it sends one invisible key that does nothing. While Explorer is not the shell, Win+E opens a rustyfiles window and Win+D shows the desktop; other shortcuts that use the Windows key are left alone. If rustyfiles stops or stalls, Windows goes back to its own behaviour."
+ },
+ {
+  "id": "5efd64a5",
+  "key": "Başlatılamadı: Windows kabuğu (Explorer) çalışmıyor ve Windows bu girdiyi kabuksuz açamadı.",
+  "tr": "Başlatılamadı: Windows kabuğu (Explorer) çalışmıyor ve Windows bu girdiyi kabuksuz açamadı.",
+  "en": "Could not be started: the Windows shell (Explorer) is not running and Windows could not open this entry without it."
+ },
+ {
+  "id": "a649beaf",
+  "key": "Başlatılamadı: Windows bu girdi için gereken bileşeni bulamadı (sınıf kayıtlı değil).",
+  "tr": "Başlatılamadı: Windows bu girdi için gereken bileşeni bulamadı (sınıf kayıtlı değil).",
+  "en": "Could not be started: Windows did not find the component this entry needs (class not registered)."
+ },
+ {
+  "id": "a1ae5d9a",
+  "key": "Başlatılamadı: Windows kabuğu zamanında yanıt vermedi.",
+  "tr": "Başlatılamadı: Windows kabuğu zamanında yanıt vermedi.",
+  "en": "Could not be started: the Windows shell did not answer in time."
+ },
+ {
+  "id": "76c43ff4",
+  "key": "Başlatılamadı:",
+  "tr": "Başlatılamadı:",
+  "en": "Could not be started:"
+ },
+ {
+  "id": "5d8c059c",
+  "key": "Geri Dönüşüm Kutusu'na taşıma Windows kabuğunu (Explorer) gerektiriyor ve kabuk çalışmıyor. Hiçbir şey silinmedi; kalıcı silme kullanılabilir.",
+  "tr": "Geri Dönüşüm Kutusu'na taşıma Windows kabuğunu (Explorer) gerektiriyor ve kabuk çalışmıyor. Hiçbir şey silinmedi; kalıcı silme kullanılabilir.",
+  "en": "Moving to the Recycle Bin needs the Windows shell (Explorer), which is not running. Nothing was deleted; permanent delete is still available."
+ },
+ {
+  "id": "d44905d2",
+  "key": "Bu kopyalama ya da taşıma Windows kabuğunu (Explorer) gerektiriyor ve kabuk çalışmıyor. Hiçbir şey değiştirilmedi.",
+  "tr": "Bu kopyalama ya da taşıma Windows kabuğunu (Explorer) gerektiriyor ve kabuk çalışmıyor. Hiçbir şey değiştirilmedi.",
+  "en": "This copy or move needs the Windows shell (Explorer), which is not running. Nothing was changed."
+ },
+ {
+  "id": "8804b9f9",
+  "key": "Geri Dönüşüm Kutusu işlemi Windows kabuğunu (Explorer) gerektiriyor ve kabuk çalışmıyor. Hiçbir şey değiştirilmedi.",
+  "tr": "Geri Dönüşüm Kutusu işlemi Windows kabuğunu (Explorer) gerektiriyor ve kabuk çalışmıyor. Hiçbir şey değiştirilmedi.",
+  "en": "This Recycle Bin operation needs the Windows shell (Explorer), which is not running. Nothing was changed."
+ },
+ {
+  "id": "f34fc688",
+  "key": "Bazı öğeler silinemedi (kilitli, salt okunur ya da izin yok) ve ayrıntıyı gösterecek Windows kabuğu (Explorer) çalışmıyor.",
+  "tr": "Bazı öğeler silinemedi (kilitli, salt okunur ya da izin yok) ve ayrıntıyı gösterecek Windows kabuğu (Explorer) çalışmıyor.",
+  "en": "Some items could not be deleted (locked, read-only or no permission), and the Windows shell (Explorer) that would show the details is not running."
+ },
+ {
+  "id": "b394727c",
+  "key": "Windows'un dosya motoru {n} saniyede başlamadı; Explorer kapanmış ya da takılmış olabilir. İşlem yine de bitebilir: Windows'un kendi penceresine bakın.",
+  "tr": "Windows'un dosya motoru {n} saniyede başlamadı; Explorer kapanmış ya da takılmış olabilir. İşlem yine de bitebilir: Windows'un kendi penceresine bakın.",
+  "en": "Windows' file engine did not start within {n} seconds; Explorer may have closed or hung. The operation may still finish: look at Windows' own window."
+ },
+ {
+  "id": "90666a4e",
+  "key": "{n} öğe kopyalanamadı: bunun için Windows kabuğu (Explorer) gerekiyor ve kabuk çalışmıyor. Geri kalan her şey yapıldı.",
+  "tr": "{n} öğe kopyalanamadı: bunun için Windows kabuğu (Explorer) gerekiyor ve kabuk çalışmıyor. Geri kalan her şey yapıldı.",
+  "en": "{n} items could not be copied: that needs the Windows shell (Explorer) and no shell is running. Everything else was done."
+ },
+ {
+  "id": "0808512f",
+  "key": "{n} öğe taşınamadı: bunun için Windows kabuğu (Explorer) gerekiyor ve kabuk çalışmıyor. Geri kalan her şey yapıldı.",
+  "tr": "{n} öğe taşınamadı: bunun için Windows kabuğu (Explorer) gerekiyor ve kabuk çalışmıyor. Geri kalan her şey yapıldı.",
+  "en": "{n} items could not be moved: that needs the Windows shell (Explorer) and no shell is running. Everything else was done."
+ },
+ {
+  "id": "7a4185dd",
+  "key": "Bazı öğeler silinemedi (kilitli, salt okunur ya da izin yok); geri kalanı silindi. Ayrıntıyı gösterecek Windows kabuğu (Explorer) çalışmıyor.",
+  "tr": "Bazı öğeler silinemedi (kilitli, salt okunur ya da izin yok); geri kalanı silindi. Ayrıntıyı gösterecek Windows kabuğu (Explorer) çalışmıyor.",
+  "en": "Some items could not be deleted (locked, read-only or access denied); the rest was deleted. No Windows shell (Explorer) is running to show details."
  }
 ]

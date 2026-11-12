@@ -71,6 +71,7 @@ mod gpu;
 mod lens;
 mod luma;
 mod rest;
+mod retry;
 mod spring;
 #[cfg(test)]
 mod lens_tests;

@@ -21,7 +21,7 @@ use super::menupoint::Via;
 use super::policy::Refusal;
 use super::select::{Dir, Mods, rect_of};
 use super::view::{Band, DesktopView, Drag, Press};
-use super::{ExtendEnd, ExtendHome, ExtendLeft, ExtendRight};
+use super::{ExtendEnd, ExtendHome, ExtendLeft, ExtendRight, IconsLarge, IconsMedium, IconsSmall};
 use crate::actions::*;
 
 /// How far a press must move before it is a drag (the file list uses the same).
@@ -94,6 +94,9 @@ impl DesktopView {
                 }
             }))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh(cx)))
+            .on_action(cx.listener(|this, _: &IconsLarge, _, cx| this.set_icon_size(rf_core::desktop::grid::IconSize::Large, cx)))
+            .on_action(cx.listener(|this, _: &IconsMedium, _, cx| this.set_icon_size(rf_core::desktop::grid::IconSize::Medium, cx)))
+            .on_action(cx.listener(|this, _: &IconsSmall, _, cx| this.set_icon_size(rf_core::desktop::grid::IconSize::Small, cx)))
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.step_icon_size(true, cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.step_icon_size(false, cx)))
             .on_action(cx.listener(|this, _: &ShowContextMenu, window, cx| {

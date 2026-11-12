@@ -7,7 +7,9 @@
 //!
 //! The shell's own commands ("Show more options") are not planned here: they come from Windows and are loaded in the background.
 
+use rf_core::desktop::grid::IconSize;
 use rf_core::desktop::items::Origin;
+use rf_core::desktop::store::SortName;
 use rf_core::desktop::virtuals::VirtualKind;
 
 /// What one selected item is, as far as a menu cares.
@@ -140,59 +142,133 @@ pub struct BgCtx {
     pub icons_forced_hidden: bool,
 }
 
+/// The top level of the empty desktop's menu: Windows 11's own, in its order (Görünüm, Sıralama ölçütü, Yenile | Yeni | Görüntü
+/// ayarları, Kişiselleştir | Terminalde Aç | Daha fazla seçenek göster), plus the few commands of ours that can act only now and then.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BgCmd {
-    IconSize,
-    AlignToGrid,
-    AutoArrange,
-    ShowIcons,
-    Sort,
+    /// The submenu of the icon size, the arrangement and the switch for the icons (see [`view_menu`]).
+    View,
+    /// The submenu of the sort keys (see [`SORT_ORDER`]).
+    SortBy,
     Refresh,
-    New,
+    /// Ours: shown only when files are on the clipboard and the desktop may be written.
+    Paste,
+    /// Ours: the same condition.
     PasteShortcut,
+    /// Ours: shown only when there is something to undo / redo, with what it would undo.
     Undo(String),
     Redo(String),
-    OpenInRustyfiles,
-    OpenTerminal,
+    New,
     DisplaySettings,
     Personalize,
+    OpenTerminal,
+    /// Ours, but NOT at the top level: the first entry inside "more options" (see [`more_prefix`]).
+    OpenInRustyfiles,
 }
 
-/// The menu of the empty desktop. (The paste button above it is its own quick row: `clipboard_files && !read_only`.)
+/// The menu of the empty desktop, as Windows 11's own is (a picture of it was the model):
+///
+/// ```text
+/// Görünüm >            (submenu)
+/// Sıralama ölçütü >    (submenu)
+/// Yenile
+/// -------------------  only when something below can act:
+/// Yapıştır / Kısayol yapıştır / Geri al / Yinele      <- ours, one group, directly under Yenile
+/// -------------------
+/// Yeni >
+/// -------------------
+/// Görüntü ayarları
+/// Kişiselleştir
+/// -------------------
+/// Terminalde Aç
+/// -------------------
+/// Daha fazla seçenek göster >
+/// ```
+///
+/// Nothing else is at the top level: size, arrangement and the icons' switch are in Görünüm, "open in rustyfiles" is the first entry of
+/// "more options".
 pub fn background_menu(ctx: &BgCtx) -> Vec<Row<BgCmd>> {
     use BgCmd::*;
-    let view = vec![
-        Row::Cmd(IconSize, true),
-        Row::Cmd(AlignToGrid, true),
-        // (the arrangement is our own layout file: allowed in the protected preview, like moving an icon)
-        Row::Cmd(AutoArrange, true),
-        Row::Cmd(ShowIcons, !ctx.icons_forced_hidden),
-        Row::Cmd(Sort, true),
-        Row::Cmd(Refresh, true),
-    ];
-    let mut make = vec![Row::Cmd(New, !ctx.read_only), Row::Cmd(PasteShortcut, ctx.clipboard_files && !ctx.read_only)];
+    let view = vec![Row::Cmd(View, true), Row::Cmd(SortBy, true), Row::Cmd(Refresh, true)];
+    let mut ours = Vec::new();
+    if paste_enabled(ctx) {
+        ours.push(Row::Cmd(Paste, true));
+        ours.push(Row::Cmd(PasteShortcut, true));
+    }
     if !ctx.read_only {
         if let Some(u) = &ctx.undo {
-            make.push(Row::Cmd(Undo(u.clone()), true));
+            ours.push(Row::Cmd(Undo(u.clone()), true));
         }
         if let Some(r) = &ctx.redo {
-            make.push(Row::Cmd(Redo(r.clone()), true));
+            ours.push(Row::Cmd(Redo(r.clone()), true));
         }
     }
-    let mut places = Vec::new();
-    if ctx.has_folder {
-        places.push(Row::Cmd(OpenInRustyfiles, true));
-        places.push(Row::Cmd(OpenTerminal, true));
-    }
+    let make = vec![Row::Cmd(New, !ctx.read_only)];
     // (Windows' own settings pages, which the shell's DesktopBackground handlers would otherwise be the only way to reach)
-    places.push(Row::Cmd(DisplaySettings, true));
-    places.push(Row::Cmd(Personalize, true));
-    join(vec![view, make, places, vec![Row::More]])
+    let pages = vec![Row::Cmd(DisplaySettings, true), Row::Cmd(Personalize, true)];
+    let terminal: Vec<Row<BgCmd>> = if ctx.has_folder { vec![Row::Cmd(OpenTerminal, true)] } else { Vec::new() };
+    join(vec![view, ours, make, pages, terminal, vec![Row::More]])
 }
 
-/// The paste button above the background menu.
+/// Ours, put at the head of "more options" so that the top level stays Windows 11's: empty without a folder to open.
+pub fn more_prefix(ctx: &BgCtx) -> Vec<BgCmd> {
+    if ctx.has_folder { vec![BgCmd::OpenInRustyfiles] } else { Vec::new() }
+}
+
+/// Whether the paste rows are offered (Windows 11's desktop menu has no paste button above it; ours are rows, [`BgCmd::Paste`]).
 pub fn paste_enabled(ctx: &BgCtx) -> bool {
     ctx.clipboard_files && !ctx.read_only
+}
+
+/// The commands inside Görünüm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewCmd {
+    /// One of the three sizes; the chosen one is marked with a dot.
+    Size(IconSize),
+    AutoArrange,
+    /// "Simgeleri kılavuz çizgisine hizala".
+    AlignToGrid,
+    /// "Masaüstü öğelerini göster".
+    ShowIcons,
+}
+
+/// Görünüm: the three sizes (largest first, as Windows lists them), the two arrangement switches, the switch for the icons.
+pub fn view_menu(ctx: &BgCtx) -> Vec<Row<ViewCmd>> {
+    use ViewCmd::*;
+    join(vec![
+        vec![Row::Cmd(Size(IconSize::Large), true), Row::Cmd(Size(IconSize::Medium), true), Row::Cmd(Size(IconSize::Small), true)],
+        // (the arrangement is our own layout file: allowed in the protected preview, like moving an icon)
+        vec![Row::Cmd(AutoArrange, true), Row::Cmd(AlignToGrid, true)],
+        vec![Row::Cmd(ShowIcons, !ctx.icons_forced_hidden)],
+    ])
+}
+
+/// The keys that choose a size on the desktop, as Explorer's: Ctrl+Shift+2 large, 3 medium, 4 small.
+pub const SIZE_KEYS: [(IconSize, &str); 3] = [(IconSize::Large, "ctrl-shift-2"), (IconSize::Medium, "ctrl-shift-3"), (IconSize::Small, "ctrl-shift-4")];
+
+/// The hint shown at the right of a size row.
+pub fn size_hint(size: IconSize) -> &'static str {
+    match size {
+        IconSize::Large => "Ctrl+Shift+2",
+        IconSize::Medium => "Ctrl+Shift+3",
+        IconSize::Small => "Ctrl+Shift+4",
+    }
+}
+
+/// Sıralama ölçütü: Ad, Boyut, Öğe türü, Değiştirme tarihi.
+pub const SORT_ORDER: [SortName; 4] = [SortName::Name, SortName::Size, SortName::Type, SortName::Modified];
+
+/// The mark at the right of a sort row: the chosen key shows which way the order runs (an arrow up for ascending, down for
+/// descending), the others show nothing. Without it a descending desktop looks like an ascending one, and picking the marked key to
+/// "confirm" it would silently turn the icons round.
+pub fn sort_hint(current: SortName, descending: bool, row: SortName) -> Option<&'static str> {
+    (row == current).then_some(if descending { "\u{2193}" } else { "\u{2191}" })
+}
+
+/// What choosing the sort key `chosen` does when the desktop is sorted by `current` (`descending`): the key already in use turns the
+/// order round, as it does in Explorer; another key sorts ascending.
+pub fn sort_choice(current: SortName, descending: bool, chosen: SortName) -> (SortName, bool) {
+    if chosen == current { (chosen, !descending) } else { (chosen, false) }
 }
 
 #[cfg(test)]
@@ -353,83 +429,185 @@ mod tests {
     fn bg_cmds(rows: &[Row<BgCmd>]) -> Vec<(BgCmd, bool)> {
         rows.iter().filter_map(|r| if let Row::Cmd(c, e) = r { Some((c.clone(), *e)) } else { None }).collect()
     }
-
-    #[test]
-    fn the_empty_desktop_has_the_view_commands_new_places_and_windows_own_pages_in_that_order() {
-        let m = bg(|_| {});
-        let order: Vec<BgCmd> = bg_cmds(&m).into_iter().map(|(c, _)| c).collect();
-        assert_eq!(
-            order,
-            [
-                BgCmd::IconSize,
-                BgCmd::AlignToGrid,
-                BgCmd::AutoArrange,
-                BgCmd::ShowIcons,
-                BgCmd::Sort,
-                BgCmd::Refresh,
-                BgCmd::New,
-                BgCmd::PasteShortcut,
-                BgCmd::OpenInRustyfiles,
-                BgCmd::OpenTerminal,
-                BgCmd::DisplaySettings,
-                BgCmd::Personalize
-            ]
-        );
-        assert_eq!(m.last(), Some(&Row::More));
-        assert!(m.windows(2).all(|w| !(w[0] == Row::Sep && w[1] == Row::Sep)));
+    fn no_doubled_or_edge_separators<C: PartialEq>(m: &[Row<C>]) -> bool {
+        m.windows(2).all(|w| !(w[0] == Row::Sep && w[1] == Row::Sep)) && !matches!(m.first(), Some(Row::Sep)) && !matches!(m.last(), Some(Row::Sep))
     }
 
     #[test]
-    fn paste_shortcut_needs_files_on_the_clipboard_and_a_writable_desktop() {
-        assert!(bg_cmds(&bg(|_| {})).contains(&(BgCmd::PasteShortcut, false)));
-        assert!(bg_cmds(&bg(|c| c.clipboard_files = true)).contains(&(BgCmd::PasteShortcut, true)));
-        assert!(bg_cmds(&bg(|c| {
+    fn the_empty_desktop_has_windows_11s_menu_in_its_order_and_grouping() {
+        use BgCmd::*;
+        // nothing on the clipboard, nothing to undo: exactly the picture
+        assert_eq!(
+            bg(|_| {}),
+            [
+                Row::Cmd(View, true),
+                Row::Cmd(SortBy, true),
+                Row::Cmd(Refresh, true),
+                Row::Sep,
+                Row::Cmd(New, true),
+                Row::Sep,
+                Row::Cmd(DisplaySettings, true),
+                Row::Cmd(Personalize, true),
+                Row::Sep,
+                Row::Cmd(OpenTerminal, true),
+                Row::Sep,
+                Row::More
+            ]
+        );
+    }
+
+    #[test]
+    fn our_paste_undo_and_redo_rows_are_one_group_directly_under_refresh_and_only_when_they_can_act() {
+        use BgCmd::*;
+        let full = bg(|c| {
             c.clipboard_files = true;
+            c.undo = Some("Silme".into());
+            c.redo = Some("Yeniden adlandırma".into());
+        });
+        assert_eq!(
+            full,
+            [
+                Row::Cmd(View, true),
+                Row::Cmd(SortBy, true),
+                Row::Cmd(Refresh, true),
+                Row::Sep,
+                Row::Cmd(Paste, true),
+                Row::Cmd(PasteShortcut, true),
+                Row::Cmd(Undo("Silme".into()), true),
+                Row::Cmd(Redo("Yeniden adlandırma".into()), true),
+                Row::Sep,
+                Row::Cmd(New, true),
+                Row::Sep,
+                Row::Cmd(DisplaySettings, true),
+                Row::Cmd(Personalize, true),
+                Row::Sep,
+                Row::Cmd(OpenTerminal, true),
+                Row::Sep,
+                Row::More
+            ]
+        );
+        // each appears alone when only its own condition holds
+        let only_undo = bg(|c| c.undo = Some("Silme".into()));
+        assert_eq!(bg_cmds(&only_undo)[3], (Undo("Silme".into()), true));
+        assert!(!bg_cmds(&only_undo).iter().any(|(c, _)| matches!(c, Paste | PasteShortcut | Redo(_))));
+        let only_paste = bg_cmds(&bg(|c| c.clipboard_files = true));
+        assert!(only_paste.contains(&(Paste, true)) && only_paste.contains(&(PasteShortcut, true)));
+        assert!(!only_paste.iter().any(|(c, _)| matches!(c, Undo(_) | Redo(_))));
+        // the protected preview changes nothing: none of the four, whatever the clipboard and the undo stack hold
+        let ro = bg_cmds(&bg(|c| {
             c.read_only = true;
-        }))
-        .contains(&(BgCmd::PasteShortcut, false)));
+            c.clipboard_files = true;
+            c.undo = Some("Silme".into());
+            c.redo = Some("Silme".into());
+        }));
+        assert!(!ro.iter().any(|(c, _)| matches!(c, Paste | PasteShortcut | Undo(_) | Redo(_))), "{ro:?}");
+        assert!(ro.contains(&(New, false)), "New is there and dimmed");
+    }
+
+    #[test]
+    fn nothing_else_is_at_the_top_level_and_no_separator_is_doubled_or_at_an_edge() {
+        use BgCmd::*;
+        for flags in 0u8..16 {
+            for has_folder in [true, false] {
+                let m = bg(|c| {
+                    c.has_folder = has_folder;
+                    c.read_only = flags & 1 != 0;
+                    c.clipboard_files = flags & 2 != 0;
+                    if flags & 4 != 0 {
+                        c.undo = Some("a".into());
+                    }
+                    if flags & 8 != 0 {
+                        c.redo = Some("b".into());
+                    }
+                });
+                assert!(no_doubled_or_edge_separators(&m), "{flags} {has_folder}: {m:?}");
+                assert_eq!(m.last(), Some(&Row::More));
+                for (c, _) in bg_cmds(&m) {
+                    assert!(matches!(c, View | SortBy | Refresh | Paste | PasteShortcut | Undo(_) | Redo(_) | New | DisplaySettings | Personalize | OpenTerminal), "{c:?} at the top level");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn open_in_rustyfiles_is_the_first_of_more_options_and_only_with_a_folder() {
+        let with = BgCtx { has_folder: true, ..Default::default() };
+        let without = BgCtx { has_folder: false, ..Default::default() };
+        assert_eq!(more_prefix(&with), [BgCmd::OpenInRustyfiles]);
+        assert!(more_prefix(&without).is_empty());
+        assert!(!bg_cmds(&background_menu(&with)).iter().any(|(c, _)| *c == BgCmd::OpenInRustyfiles));
+    }
+
+    #[test]
+    fn a_desktop_without_a_folder_has_no_terminal_and_keeps_the_pages_of_windows() {
+        let m = bg(|c| c.has_folder = false);
+        let cmds = bg_cmds(&m);
+        assert!(!cmds.iter().any(|(c, _)| *c == BgCmd::OpenTerminal));
+        assert!(cmds.contains(&(BgCmd::DisplaySettings, true)) && cmds.contains(&(BgCmd::Personalize, true)));
+        assert!(no_doubled_or_edge_separators(&m));
+    }
+
+    #[test]
+    fn paste_needs_files_on_the_clipboard_and_a_writable_desktop() {
         assert!(paste_enabled(&BgCtx { clipboard_files: true, ..Default::default() }));
         assert!(!paste_enabled(&BgCtx { clipboard_files: true, read_only: true, ..Default::default() }));
         assert!(!paste_enabled(&BgCtx::default()));
     }
 
     #[test]
-    fn undo_and_redo_are_offered_with_what_they_would_undo_and_only_when_there_is_something() {
-        let none = bg_cmds(&bg(|_| {}));
-        assert!(!none.iter().any(|(c, _)| matches!(c, BgCmd::Undo(_) | BgCmd::Redo(_))));
-        let both = bg_cmds(&bg(|c| {
-            c.undo = Some("Silme".into());
-            c.redo = Some("Yeniden adlandırma".into());
-        }));
-        assert!(both.contains(&(BgCmd::Undo("Silme".into()), true)));
-        assert!(both.contains(&(BgCmd::Redo("Yeniden adlandırma".into()), true)));
-        // the protected preview changes nothing, so it undoes nothing
-        let ro = bg_cmds(&bg(|c| {
-            c.undo = Some("Silme".into());
-            c.read_only = true;
-        }));
-        assert!(!ro.iter().any(|(c, _)| matches!(c, BgCmd::Undo(_))));
+    fn gorunum_holds_the_three_sizes_the_two_arrangement_switches_and_the_icons_switch() {
+        use ViewCmd::*;
+        let m = view_menu(&BgCtx::default());
+        assert_eq!(
+            m,
+            [
+                Row::Cmd(Size(IconSize::Large), true),
+                Row::Cmd(Size(IconSize::Medium), true),
+                Row::Cmd(Size(IconSize::Small), true),
+                Row::Sep,
+                Row::Cmd(AutoArrange, true),
+                Row::Cmd(AlignToGrid, true),
+                Row::Sep,
+                Row::Cmd(ShowIcons, true)
+            ]
+        );
+        // the layout is our own file: the protected preview keeps all of it
+        assert_eq!(view_menu(&BgCtx { read_only: true, ..Default::default() }), m);
+        // the settings hide every icon: the switch cannot bring them back, so it is shown dimmed
+        assert_eq!(view_menu(&BgCtx { icons_forced_hidden: true, ..Default::default() }).last(), Some(&Row::Cmd(ShowIcons, false)));
+        assert!(no_doubled_or_edge_separators(&m));
     }
 
     #[test]
-    fn the_read_only_preview_keeps_its_layout_commands_and_loses_new() {
-        let m = bg_cmds(&bg(|c| c.read_only = true));
-        assert!(m.contains(&(BgCmd::New, false)));
-        for layout in [BgCmd::AlignToGrid, BgCmd::AutoArrange, BgCmd::Sort, BgCmd::IconSize] {
-            assert!(m.contains(&(layout, true)), "arranging changes our own file only");
+    fn the_size_keys_are_explorers_and_each_has_its_hint() {
+        assert_eq!(SIZE_KEYS, [(IconSize::Large, "ctrl-shift-2"), (IconSize::Medium, "ctrl-shift-3"), (IconSize::Small, "ctrl-shift-4")]);
+        for (size, key) in SIZE_KEYS {
+            // the hint is the key written as the menus write it
+            let written: String = key.split('-').map(|w| w[..1].to_uppercase() + &w[1..]).collect::<Vec<_>>().join("+");
+            assert_eq!(size_hint(size), written, "{size:?}");
+        }
+        // every size is reachable
+        for s in [IconSize::Small, IconSize::Medium, IconSize::Large] {
+            assert!(SIZE_KEYS.iter().any(|(k, _)| *k == s), "{s:?}");
         }
     }
 
     #[test]
-    fn show_icons_is_dimmed_when_the_settings_hide_every_icon() {
-        assert!(bg_cmds(&bg(|_| {})).contains(&(BgCmd::ShowIcons, true)));
-        assert!(bg_cmds(&bg(|c| c.icons_forced_hidden = true)).contains(&(BgCmd::ShowIcons, false)));
+    fn the_sort_menu_lists_ad_boyut_oge_turu_degistirme_tarihi_and_the_chosen_key_turns_the_order_round() {
+        assert_eq!(SORT_ORDER, [SortName::Name, SortName::Size, SortName::Type, SortName::Modified]);
+        // another key: ascending; the same key: the other way round, and back
+        assert_eq!(sort_choice(SortName::Name, false, SortName::Size), (SortName::Size, false));
+        assert_eq!(sort_choice(SortName::Name, true, SortName::Size), (SortName::Size, false), "a new key starts ascending");
+        assert_eq!(sort_choice(SortName::Size, false, SortName::Size), (SortName::Size, true));
+        assert_eq!(sort_choice(SortName::Size, true, SortName::Size), (SortName::Size, false));
     }
 
     #[test]
-    fn a_desktop_without_a_folder_offers_neither_rustyfiles_nor_a_terminal() {
-        let m = bg_cmds(&bg(|c| c.has_folder = false));
-        assert!(!m.iter().any(|(c, _)| matches!(c, BgCmd::OpenInRustyfiles | BgCmd::OpenTerminal)));
-        assert!(m.contains(&(BgCmd::DisplaySettings, true)) && m.contains(&(BgCmd::Personalize, true)));
+    fn the_chosen_sort_key_shows_which_way_the_order_runs_and_no_other_row_shows_anything() {
+        assert_eq!(sort_hint(SortName::Name, false, SortName::Name), Some("\u{2191}"));
+        assert_eq!(sort_hint(SortName::Name, true, SortName::Name), Some("\u{2193}"), "a descending desktop does not look like an ascending one");
+        for row in SORT_ORDER.into_iter().filter(|r| *r != SortName::Size) {
+            assert_eq!(sort_hint(SortName::Size, true, row), None, "{row:?}");
+        }
     }
 }

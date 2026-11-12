@@ -95,8 +95,11 @@ pub fn foreground() -> Option<Foreground> {
         let style = GetWindowLongPtrW(h, GWL_STYLE) as u32;
         Some(Foreground {
             rect: Rect::new(r.left, r.top, r.right, r.bottom),
-            // (our own desktop's cover windows are the desktop: never a full-screen application, whichever process asks)
-            shell: is_shell_class(&class) || crate::desktop::cover::is_cover(h.0 as isize),
+            // (our own desktop's cover windows are the desktop: never a full-screen application, whichever process asks - the first
+            // test knows this process's covers, the second reads the mark every cover of a build with this change carries, so that the
+            // cover of ANOTHER host process of such a build is not taken for a game either. A cover of an older build carries no mark
+            // and is not recognised; the cover pin, not this test, is what keeps a cover from ever reaching all four edges)
+            shell: is_shell_class(&class) || crate::desktop::cover::is_cover(h.0 as isize) || crate::desktop::cover::is_marked_cover(h.0 as isize),
             own: pid == GetCurrentProcessId(),
             caption: has_caption(style),
             maximized_frame: has_maximized_frame(style),
@@ -189,6 +192,14 @@ mod tests {
         assert!(has_maximized_frame(0x0100_0000 | 0x0004_0000 | 0x1000_0000));
         assert!(!has_maximized_frame(0x0100_0000), "maximised without a sizing frame (a game)");
         assert!(!has_maximized_frame(0x0004_0000), "a sizing frame without being maximised");
+    }
+
+    /// Read-only: a window that is nobody's cover carries no mark (the real marked case needs a window, which no test here shows).
+    #[test]
+    fn an_ordinary_window_is_not_a_marked_cover() {
+        use windows::Win32::UI::WindowsAndMessaging::GetDesktopWindow;
+        assert!(!crate::desktop::cover::is_marked_cover(0));
+        assert!(!crate::desktop::cover::is_marked_cover(unsafe { GetDesktopWindow() }.0 as isize));
     }
 
     /// Read-only: the live read of the window in front is self-consistent (a rectangle that is not inverted, or no window at all).

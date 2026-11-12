@@ -17,7 +17,7 @@ pub fn place_args(place: Place) -> Vec<String> {
     vec![place.open_argument()]
 }
 
-pub(super) fn run_rustyfiles(args: Vec<String>) {
+pub(crate) fn run_rustyfiles(args: Vec<String>) {
     std::thread::spawn(move || {
         let exe = match std::env::current_exe() {
             Ok(e) => e,

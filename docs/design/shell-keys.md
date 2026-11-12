@@ -180,6 +180,14 @@ and the host opens nothing: the log says `start: would toggle (log only)`, `swit
 `keys: layer off, hook removed`, `start: toggled`, `switcher: opened`, `switcher: could not be opened; the chord was given up`,
 `switcher: chose` / `cancelled`, `switcher: closed (the keyboard layer lost track of the chord)`. Never a key.
 
+## Win+E and Win+D, and the pause after giving up (added with `shell-gaps.md`)
+
+With `shell_win_key` on and Explorer NOT the shell, Win+E opens a rustyfiles window and Win+D toggles our Show Desktop: the layer swallows the press of E or D (and its
+repeats and release), sends one mask key for the hold and posts `WinCombo`. The Windows key itself is still never swallowed; any other key, a modifier, both Windows keys
+or an injected key make the hold an ordinary one. Beside Explorer the keys are left to it. After the layer gave up (five reinstalls in a minute) it tries the hook again
+after five minutes. The log has `keys: ready - ...` when the layer is up or its state changes and the reason in `keys: layer off, hook removed (...)`. The table of the
+keys Explorer answers is in `shell-gaps.md`.
+
 ## Known limits
 
 * Secure-desktop input (UAC, Ctrl+Alt+Del, Win+L) never reaches the hook: Windows' own, as it should be.
