@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
-use gpui_kit::{Bounds, IntoElement, Pixels, Styled, Window, canvas};
+use std::time::{Duration, Instant};
+
+use gpui_kit::{Bounds, IntoElement, Pixels, Styled, Window, canvas, div, px};
 use rf_win::glass::LensSpec;
 
 /// `RUSTYFILES_GLASS=1`: every main window uses the Glass backdrop for this run, whatever the saved setting says (and nothing is saved).
@@ -122,21 +124,125 @@ fn rect_of(b: Bounds<Pixels>) -> [f32; 4] {
     [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height)]
 }
 
+/// THE LENS ONLY RESTS. The engine draws the lens into a layer of its own, behind the scene, and that layer reaches the screen a
+/// frame or two after the scene's own frame. For a row that stands still that is invisible. For a row that MOVES (the list scrolls, the
+/// window is resized) the pill would trail the row and catch up at every step: the user saw it "go up and down" while scrolling the
+/// sidebar. So while a row moves, the lens is taken off at once and the row paints a plain stand-in pill itself, in the scene's own
+/// frame; when the row has stood still for `SETTLE` the lens comes back, and the stand-in stays for `OVERLAP` more so there is no frame
+/// with neither. (A change of selection is not a move: the rows stand still and the lens slides between them.)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LensPhase {
+    /// The row stands still: the engine's lens, nothing from the scene.
+    Rest,
+    /// The row is moving: no lens, the scene's stand-in.
+    Moving,
+    /// The row has just come to rest: the lens is back, the stand-in is still there for a moment.
+    Settling,
+}
+
+const SETTLE: Duration = Duration::from_millis(140);
+const OVERLAP: Duration = Duration::from_millis(70);
+
+/// Where a slot's row was at its last paint, and when it last moved.
+#[derive(Clone, Copy)]
+struct Track {
+    key: u64,
+    rect: [f32; 4],
+    clip: [f32; 4],
+    last_move: Option<Instant>,
+}
+
+fn phase_at(last_move: Option<Instant>, now: Instant) -> LensPhase {
+    match last_move.map(|t| now.saturating_duration_since(t)) {
+        None => LensPhase::Rest,
+        Some(d) if d < SETTLE => LensPhase::Moving,
+        Some(d) if d < SETTLE + OVERLAP => LensPhase::Settling,
+        Some(_) => LensPhase::Rest,
+    }
+}
+
+/// Notes the row's place at this paint and says which phase the slot is in. A new entry, or another key (the selection moved), is at
+/// rest; the same key at another place is a move.
+fn note(track: &mut Option<Track>, key: u64, rect: [f32; 4], clip: [f32; 4], now: Instant) -> LensPhase {
+    let near = |a: &[f32; 4], b: &[f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.05);
+    let last_move = match track {
+        Some(t) if t.key == key => {
+            if near(&t.rect, &rect) && near(&t.clip, &clip) { t.last_move } else { Some(now) }
+        }
+        _ => None,
+    };
+    *track = Some(Track { key, rect, clip, last_move });
+    phase_at(last_move, now)
+}
+
+static TRACKS: Mutex<BTreeMap<(isize, u8), Track>> = Mutex::new(BTreeMap::new());
+
+fn tracks() -> std::sync::MutexGuard<'static, BTreeMap<(isize, u8), Track>> {
+    TRACKS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The phase a slot is in right now, for the row that is being built (it paints the stand-in in `Moving` and `Settling`).
+pub fn lens_phase(hwnd: isize, slot: u8) -> LensPhase {
+    phase_at(tracks().get(&(hwnd, slot)).and_then(|t| t.last_move), Instant::now())
+}
+
+/// The pill a moving row paints itself: the lens's shape and about its tone, without the glass.
+pub fn lens_stand_in(dark: bool, height: f32) -> impl IntoElement {
+    let (fill, edge) = if dark { (0.085, 0.20) } else { (0.55, 0.60) };
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .rounded(px((height / 2.0).min(LENS_MAX_RADIUS)))
+        .bg(gpui_kit::hsla(0., 0., 1., fill))
+        .border_1()
+        .border_color(gpui_kit::hsla(0., 0., 1., edge))
+}
+
 /// Called from a canvas inside the selected row, on every paint: puts the lens on the row (`rect`) and cuts it at `clip` (the viewport
-/// the row scrolls in). Only while this window shows glass, and only when something changed since the last call.
-pub fn report_lens(window: &Window, slot: u8, key: u64, rect: Bounds<Pixels>, clip: Bounds<Pixels>) {
+/// the row scrolls in). Only while this window shows glass, and only when something changed since the last call. While the row moves
+/// the lens is off (see [`LensPhase`]) and a frame is asked for, so the phase is looked at again when nothing else redraws.
+pub fn report_lens(window: &mut Window, slot: u8, key: u64, rect: Bounds<Pixels>, clip: Bounds<Pixels>) {
     let hwnd = crate::look::window::hwnd_of(window);
     if hwnd == 0 || !shown(hwnd) {
         return;
     }
-    let now = lens_spec(key, rect_of(rect), rect_of(clip), window.scale_factor());
-    if now.is_none() {
+    let (r, c) = (rect_of(rect), rect_of(clip));
+    let spec = lens_spec(key, r, c, window.scale_factor());
+    if spec.is_none() {
         // a row that cannot be drawn is no row: take the lens off, at once (it is not on screen to fade away from)
         clear_lens(hwnd, slot, false);
         return;
     }
-    if lenses().changed(hwnd, slot, now) {
-        rf_win::glass::set_lens(hwnd, slot, now, crate::settings::animations());
+    let phase = {
+        let mut t = tracks();
+        let mut cur = t.get(&(hwnd, slot)).copied();
+        let ph = note(&mut cur, key, r, c, Instant::now());
+        if let Some(cur) = cur {
+            t.insert((hwnd, slot), cur);
+        }
+        ph
+    };
+    match phase {
+        LensPhase::Moving => {
+            if lenses().changed(hwnd, slot, None) {
+                rf_win::glass::set_lens(hwnd, slot, None, false);
+            }
+            window.request_animation_frame();
+        }
+        LensPhase::Settling => {
+            // back at once, under the stand-in that is still painted: no fade, there is nothing to fade from
+            if lenses().changed(hwnd, slot, spec) {
+                rf_win::glass::set_lens(hwnd, slot, spec, false);
+            }
+            window.request_animation_frame();
+        }
+        LensPhase::Rest => {
+            if lenses().changed(hwnd, slot, spec) {
+                rf_win::glass::set_lens(hwnd, slot, spec, crate::settings::animations());
+            }
+        }
     }
 }
 
@@ -164,6 +270,8 @@ pub fn clear_lens(hwnd: isize, slot: u8, fade: bool) {
     if hwnd == 0 {
         return;
     }
+    // the row is gone: where it was says nothing about where it will be next
+    tracks().remove(&(hwnd, slot));
     if !shown(hwnd) {
         // no glass: the engine has no lens, and none must be remembered for a glass that may start later
         lenses().forget(hwnd);
@@ -193,10 +301,41 @@ pub(crate) fn lens_plan(glass_on: bool, sidebar_on_screen: bool, sidebar_claimed
 /// remembers having sent is void; the next glass gets the lenses sent again.
 pub fn forget_window(hwnd: isize) {
     lenses().forget(hwnd);
+    tracks().retain(|&(h, _), _| h != hwnd);
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{LensPhase, OVERLAP, SETTLE};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_row_that_moves_has_no_lens_until_it_has_stood_still() {
+        let t0 = Instant::now();
+        let mut tr = None;
+        let (a, b, clip) = ([8.0, 100.0, 200.0, 32.0], [8.0, 76.0, 200.0, 32.0], [0.0, 0.0, 240.0, 600.0]);
+        // first sight and an unchanged place: at rest
+        assert_eq!(super::note(&mut tr, 1, a, clip, t0), LensPhase::Rest);
+        assert_eq!(super::note(&mut tr, 1, a, clip, t0 + Duration::from_millis(16)), LensPhase::Rest);
+        // the list scrolls: the same entry at another place
+        let t1 = t0 + Duration::from_millis(32);
+        assert_eq!(super::note(&mut tr, 1, b, clip, t1), LensPhase::Moving);
+        // it stays there: still "moving" until SETTLE has passed, then the overlap, then rest
+        assert_eq!(super::note(&mut tr, 1, b, clip, t1 + SETTLE - Duration::from_millis(1)), LensPhase::Moving);
+        assert_eq!(super::note(&mut tr, 1, b, clip, t1 + SETTLE + Duration::from_millis(1)), LensPhase::Settling);
+        assert_eq!(super::note(&mut tr, 1, b, clip, t1 + SETTLE + OVERLAP + Duration::from_millis(1)), LensPhase::Rest);
+        // a move in the middle of the wait starts the wait again
+        let t2 = t1 + Duration::from_secs(1);
+        assert_eq!(super::note(&mut tr, 1, a, clip, t2), LensPhase::Moving);
+        assert_eq!(super::note(&mut tr, 1, b, clip, t2 + Duration::from_millis(100)), LensPhase::Moving);
+        assert_eq!(super::note(&mut tr, 1, b, clip, t2 + Duration::from_millis(100) + SETTLE - Duration::from_millis(1)), LensPhase::Moving);
+        // only the clip changes (the list's viewport is resized): also a move
+        let t3 = t2 + Duration::from_secs(1);
+        assert_eq!(super::note(&mut tr, 1, b, [0.0, 0.0, 240.0, 500.0], t3), LensPhase::Moving);
+        // another entry is selected: the rows stand still, the lens slides: at rest at once, even right after a move
+        assert_eq!(super::note(&mut tr, 2, a, clip, t3 + Duration::from_millis(5)), LensPhase::Rest);
+    }
+
     fn spec(key: u64, y: f32) -> super::LensSpec {
         super::lens_spec(key, [8.0, y, 200.0, 32.0], [0.0, 0.0, 240.0, 600.0], 1.0).unwrap()
     }

@@ -2521,6 +2521,10 @@ impl Workspace {
             .text_sm()
             .relative()
             .when(fluent, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+            // while the row moves (the sidebar scrolls) the scene paints the pill itself: the engine's lens would trail the row
+            .when(lens_key.is_some() && crate::glass::lens_phase(self.glass_hwnd, crate::glass::SLOT_SIDEBAR) != crate::glass::LensPhase::Rest, |d| {
+                d.child(crate::glass::lens_stand_in(p.dark, 32.))
+            })
             .when_some(lens_key, |d, key| d.child(crate::glass::lens_probe(crate::glass::SLOT_SIDEBAR, key)))
             .when(!active, |d| d.hover(|s| s.bg(p.hover)))
             .child(
