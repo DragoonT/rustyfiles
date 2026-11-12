@@ -29,7 +29,7 @@ fn shipped(dark: bool) -> Look {
         light: -135.0,
         rim_frost: 0.12,
         lens: LensLook {
-            frost: 1.5,
+            frost: 4.0,
             rim_max: 10.0,
             rim_frac: 0.45,
             depth: 0.9,

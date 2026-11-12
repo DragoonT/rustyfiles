@@ -92,7 +92,9 @@ impl LensLook {
     /// 0.70), and a fixed veil would fall below the pane when the tint is raised.
     pub(super) fn regular(dark: bool, pane_tint: f32) -> LensLook {
         LensLook {
-            frost: 1.5,
+            // 1.5 at first: so clear that text behind the window (an editor on the second monitor) read through the pill and mixed with
+            // the row's own label. 4 is still far sharper than the pane's 10 and blurs letters away.
+            frost: 4.0,
             rim_max: 10.0,
             rim_frac: 0.45,
             depth: 0.9,

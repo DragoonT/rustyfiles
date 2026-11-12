@@ -211,7 +211,9 @@ fn lenses_of_every_shape_make_no_non_finite_pixel() {
     }
 }
 
-/// The lens is the clear piece in a frosted pane: a one pixel line is still a line inside it and a smear outside.
+/// The lens is the clearer piece in a frosted pane: a one pixel line stands out at least twice as much inside it as outside. (The lens
+/// has a little frost of its own, 4 px against the pane's 10, so letters behind the window do not read through a selection pill; the
+/// ratio of the two deviations, about 2.6, is the most a thin line can show.)
 #[test]
 fn a_lens_is_sharp_where_the_window_glass_is_frosted() {
     if !can_draw() {
@@ -234,8 +236,8 @@ fn a_lens_is_sharp_where_the_window_glass_is_frosted() {
             };
             let (frosted, clear) = (contrast(&[]), contrast(&[lens_at(lens, 1.0)]));
             // the light lens's veil is 0.82 white, so 18 % of the line is left; the dark lens's is 0.10
-            let least = if dark { 60 } else { 30 };
-            assert!(clear >= 3 * frosted.max(1) && clear >= least, "line contrast {clear} in the lens, {frosted} in the window glass (dark {dark}, warp {warp})");
+            let least = if dark { 20 } else { 6 };
+            assert!(clear >= 2 * frosted.max(1) && clear >= least, "line contrast {clear} in the lens, {frosted} in the window glass (dark {dark}, warp {warp})");
         }
     }
 }
