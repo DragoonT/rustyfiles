@@ -580,7 +580,13 @@ impl Render for SidebarTree {
         let p = Palette::for_window(window);
         let now = self.now();
         if let Some(row) = self.model.take_scroll_target() {
-            self.goal = Some(Goal { row, centre: true, tries: 2 });
+            // The sidebar is never scrolled under the pointer: a click on a pinned folder, a drive or a tag is a navigation too, and
+            // following it by scrolling took the row the user had just clicked away from under the pointer (the user's report). The
+            // branch is still opened and the folder marked; it is scrolled to when the navigation came from somewhere else.
+            let sidebar = self.scroll.bounds();
+            if !sidebar.contains(&window.mouse_position()) {
+                self.goal = Some(Goal { row, centre: true, tries: 2 });
+            }
         }
         self.apply_goal(cx);
         let n = self.model.rows().len();

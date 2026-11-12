@@ -2764,6 +2764,9 @@ impl Workspace {
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.pin_dropped(paths, cx))),
             );
         }
+        // the folder tree stands right under the pinned folders, above the drives and the tags (where the user asked for it: the
+        // tree is what one works in, the drives and tags are looked at less often)
+        col = self.append_tree(col, &cur, rail, p, cx);
         let hidden = cx.global::<crate::settings::Settings>().sidebar_hidden.clone();
         let shown = |k: &str| !hidden.iter().any(|h| h == k);
         let drives = if shown("drives") { drives } else { Vec::new() };
@@ -2843,7 +2846,6 @@ impl Workspace {
                 cx,
             ));
         }
-        col = self.append_tree(col, &cur, rail, p, cx);
         col = col.child(div().h_2());
         col = col.child(self.sidebar_item(
             "sb-recycle".into(),

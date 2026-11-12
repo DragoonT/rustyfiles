@@ -6,9 +6,12 @@
 //!   cannot be clipped to a rounded corner: the cards leave a box for it and put their text around the box;
 //! * a thumbnail belongs to the process that registered it and must be unregistered by it: [`ThumbSet`] does so for every picture
 //!   it made when it is cleared or dropped, which is when the switcher closes. Nothing is registered while it is closed.
-//! * a minimized window has no live picture to show (the window does not render); it is not registered, and the card shows the
-//!   app's icon large instead. A window DWM refuses (an elevated window for a normal process, one that was just destroyed) gets the
-//!   icon too.
+//! * a MINIMIZED window is registered like any other: DWM keeps the last picture of a window that was minimized, which is what
+//!   Windows' own taskbar previews and Alt+Tab show. The first version gave every minimized window the app's icon instead, and the
+//!   user, hovering a minimized browser in the dock, got a card with only an icon. Only when DWM has no usable picture of it (it
+//!   reports a source smaller than [`MIN_SOURCE`] a side: a window that never drew, or only its minimized stub) does the card show
+//!   the icon, and that registration is given back at once. A window DWM refuses (an elevated window for a normal process, one that
+//!   was just destroyed) gets the icon too.
 //!
 //! The DWM calls are behind [`ThumbApi`] so that the order of calls, the fitting and the cleanup are tested with a fake.
 
@@ -42,18 +45,23 @@ pub struct ThumbSet<A: ThumbApi> {
     registered: Vec<isize>,
 }
 
+/// The smallest source, a side, that counts as a picture of a minimized window (its stub on a desktop without a taskbar is about
+/// 160 x 28; a window that never drew reports nothing).
+pub const MIN_SOURCE: i32 = 64;
+
 impl<A: ThumbApi> ThumbSet<A> {
     pub fn new(api: A, dest: isize) -> ThumbSet<A> {
         ThumbSet { api, dest, registered: Vec::new() }
     }
 
     /// Registers a picture for each `(source window, minimized, picture box)` and returns what each card shows, in the same
-    /// order. Minimized windows are not registered. A failure on one card is that card's icon, not an error.
+    /// order. A minimized window shows the last picture DWM has of it, or its icon when DWM has none. A failure on one card is
+    /// that card's icon, not an error.
     pub fn show(&mut self, cards: &[(isize, bool, Rect)]) -> Vec<Picture> {
         cards
             .iter()
             .map(|&(source, minimized, boxr)| {
-                if minimized || source == 0 {
+                if source == 0 {
                     return Picture::Icon;
                 }
                 let thumb = match self.api.register(self.dest, source) {
@@ -63,8 +71,14 @@ impl<A: ThumbApi> ThumbSet<A> {
                         return Picture::Icon;
                     }
                 };
+                let size = self.api.source_size(thumb).unwrap_or((0, 0));
+                if minimized && (size.0 < MIN_SOURCE || size.1 < MIN_SOURCE) {
+                    // (nothing worth showing: the registration is given back now, not kept invisible until the cards go)
+                    self.api.unregister(thumb);
+                    return Picture::Icon;
+                }
                 self.registered.push(thumb);
-                let at = fit_picture(self.api.source_size(thumb).unwrap_or((0, 0)), boxr);
+                let at = fit_picture(size, boxr);
                 match self.api.place(thumb, at) {
                     Ok(()) => Picture::Live(at),
                     Err(e) => {
@@ -151,12 +165,16 @@ mod tests {
         log: Rc<RefCell<Log>>,
         refuse: Vec<isize>,
         size: (i32, i32),
+        /// The size DWM reports for these source windows (the others: `size`).
+        sizes: Vec<(isize, (i32, i32))>,
+        /// Which source each thumbnail was registered for.
+        of: Vec<(isize, isize)>,
         fail_place: bool,
     }
 
     impl Fake {
         fn new(log: &Rc<RefCell<Log>>) -> Fake {
-            Fake { log: log.clone(), refuse: vec![], size: (1920, 1080), fail_place: false }
+            Fake { log: log.clone(), refuse: vec![], size: (1920, 1080), sizes: vec![], of: vec![], fail_place: false }
         }
     }
 
@@ -170,11 +188,13 @@ mod tests {
             l.next += 1;
             let t = l.next;
             l.live.push(t);
+            self.of.push((t, source));
             Ok(t)
         }
         fn source_size(&mut self, thumb: isize) -> Option<(i32, i32)> {
             self.log.borrow_mut().calls.push(format!("size {thumb}"));
-            Some(self.size)
+            let source = self.of.iter().find(|(t, _)| *t == thumb).map(|(_, s)| *s);
+            Some(self.sizes.iter().find(|(s, _)| Some(*s) == source).map_or(self.size, |(_, z)| *z))
         }
         fn place(&mut self, thumb: isize, r: Rect) -> anyhow::Result<()> {
             self.log.borrow_mut().calls.push(format!("place {thumb} {}x{}", r.width(), r.height()));
@@ -206,13 +226,34 @@ mod tests {
     }
 
     #[test]
-    fn a_minimized_window_is_not_registered_it_shows_its_icon() {
+    fn a_minimized_window_shows_the_last_picture_dwm_has_of_it() {
         let log = Rc::new(RefCell::new(Log::default()));
         let mut set = ThumbSet::new(Fake::new(&log), 1);
         let pics = set.show(&[(0x10, true, BOX), (0x20, false, BOX)]);
+        assert!(matches!(pics[0], Picture::Live(_)), "what the taskbar's own preview shows: {:?}", pics[0]);
+        assert!(matches!(pics[1], Picture::Live(_)));
+        assert_eq!(set.count(), 2);
+    }
+
+    #[test]
+    fn a_minimized_window_dwm_has_no_picture_of_shows_its_icon_and_keeps_no_registration() {
+        let log = Rc::new(RefCell::new(Log::default()));
+        let mut api = Fake::new(&log);
+        // only the minimized stub, and a window that never drew
+        api.sizes = vec![(0x10, (160, 28)), (0x30, (0, 0))];
+        let mut set = ThumbSet::new(api, 1);
+        let pics = set.show(&[(0x10, true, BOX), (0x20, true, BOX), (0x30, true, BOX)]);
         assert_eq!(pics[0], Picture::Icon);
         assert!(matches!(pics[1], Picture::Live(_)));
-        assert_eq!(log.borrow().calls.iter().filter(|c| c.starts_with("register")).count(), 1);
+        assert_eq!(pics[2], Picture::Icon);
+        assert_eq!(set.count(), 1, "the two without a picture were given back at once");
+        assert_eq!(log.borrow().calls.iter().filter(|c| c.starts_with("unregister")).count(), 2);
+        // a window that is NOT minimized is shown whatever its size (a small tool window is a picture too)
+        let log2 = Rc::new(RefCell::new(Log::default()));
+        let mut api2 = Fake::new(&log2);
+        api2.sizes = vec![(0x10, (40, 40))];
+        let mut set2 = ThumbSet::new(api2, 1);
+        assert!(matches!(set2.show(&[(0x10, false, BOX)])[0], Picture::Live(_)));
     }
 
     #[test]
