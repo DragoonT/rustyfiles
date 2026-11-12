@@ -1147,6 +1147,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     v.push(card(p, L::PanelRight, t!("Önizleme paneli"), Some("Alt+P"), sw("preview", p, s.preview_open, |s, v| s.preview_open = v)));
     let hidden = s.sidebar_hidden.clone();
     let libs = s.show_libraries;
+    let (tree_on, tree_follow) = (s.sidebar_tree, s.sidebar_tree_follow);
     let pp = *p;
     v.push(expander(
         "sidebar",
@@ -1176,6 +1177,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 sub(&pp, t!("Etiketler"), None, switch("sb-tags", &pp, shown("tags"), {
                     let on = shown("tags");
                     move |_, cx| settings::update(cx, |s| show_section(s, "tags", !on))
+                })),
+                // the folder tree (crate::sidebar_tree)
+                sub(&pp, t!("Klasör ağacı"), Some(t!("Kenar çubuğunun altına, sürücüleri ve kullanıcı klasörünü açılıp kapanan bir ağaç olarak gösteren Klasörler bölümü ekler")), switch("sb-tree", &pp, tree_on, move |_, cx| {
+                    settings::update(cx, |s| s.sidebar_tree = !tree_on)
+                })),
+                sub(&pp, t!("Açık klasörü izle"), Some(t!("Gezindikçe ağaç, açık klasöre giden dalı açar, klasörü seçili gösterir ve görünür yere kaydırır")), switch("sb-tree-follow", &pp, tree_follow, move |_, cx| {
+                    settings::update(cx, |s| s.sidebar_tree_follow = !tree_follow)
                 })),
             ]
         },

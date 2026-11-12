@@ -231,6 +231,11 @@ pub struct ColumnPrefs {
     pub git_date: bool,
     pub git_hash: bool,
     pub git_widths: [u16; 4],
+    /// Columns for Windows properties the user added ("Diğer sütunlar…"): `System.Media.Duration:140`
+    /// (canonical name, width), in the order they show after the fixed columns. Empty = none, and
+    /// then nothing of the property columns runs and the file has no such key.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<String>,
 }
 
 impl Default for ColumnPrefs {
@@ -250,6 +255,7 @@ impl Default for ColumnPrefs {
             git_date: false,
             git_hash: false,
             git_widths: [240, 130, 140, 90],
+            properties: Vec::new(),
         }
     }
 }
@@ -430,6 +436,10 @@ pub struct Settings {
     /// Copy speed limit in MB/s (0 = none).
     pub copy_speed_limit: u32,
     pub show_libraries: bool,
+    /// A "Klasörler" section in the sidebar: the folder tree (drives and the profile folder as roots). Off by default.
+    pub sidebar_tree: bool,
+    /// The tree opens the branch to the open folder, marks it and scrolls it into view after every navigation.
+    pub sidebar_tree_follow: bool,
     /// Double-clicking a ZIP/7z/tar opens it like a folder (read-only).
     pub browse_archives: bool,
     /// After extracting an archive into a new folder, that folder opens in a tab.
@@ -583,6 +593,8 @@ impl Default for Settings {
             copy_verify: CopyVerify::Off,
             copy_speed_limit: 0,
             show_libraries: false,
+            sidebar_tree: false,
+            sidebar_tree_follow: true,
             browse_archives: true,
             open_after_extract: false,
             search_index: true,

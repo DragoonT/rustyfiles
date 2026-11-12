@@ -18,6 +18,10 @@ use crate::preview::Preview;
 use crate::places::{self, Places};
 use crate::theme::{self, Palette};
 
+// the sidebar's folder tree (setting `sidebar_tree`): the view and the window's hooks for it
+#[path = "sidebar_tree.rs"]
+mod sidebar_tree;
+
 /// Payload while a pinned sidebar entry is dragged (reordering).
 #[derive(Clone)]
 struct PinDrag {
@@ -182,6 +186,8 @@ pub struct Workspace {
     drag_hover_tab: Option<(usize, u64)>,
     /// Files are being dragged over the window: the sidebar shows its "drop here to pin" row.
     sidebar_ext_drag: bool,
+    /// The sidebar's folder tree (empty unless the setting is on).
+    side_tree: sidebar_tree::Holder,
     /// This window answers another app's Open/Save dialog (see `picker`).
     picker: Option<std::rc::Rc<crate::picker::PickSession>>,
     /// Window width from the last frame (breadcrumb collapsing).
@@ -647,6 +653,7 @@ impl Workspace {
             tab_anim_serial: 0,
             drag_hover_tab: None,
             sidebar_ext_drag: false,
+            side_tree: Default::default(),
             picker: None,
             viewport_w: 1300.,
             last_session: Vec::new(),
@@ -1368,6 +1375,8 @@ impl Workspace {
                 .checked(self.sidebar_open)
                 .hint("Ctrl+B"),
         );
+        let tree_on = cx.global::<crate::settings::Settings>().sidebar_tree;
+        items.push(Item::action(t!("Klasör ağacı"), MenuIcon::Lucide(L::FolderTree), |_, cx| crate::settings::update(cx, |s| s.sidebar_tree = !s.sidebar_tree)).checked(tree_on));
         let pos = point(px(6.), theme::TITLEBAR_H);
         crate::fluent_menu::show(Menu { quick: Vec::new(), items }, pos, window, cx);
     }
@@ -1942,11 +1951,16 @@ impl Workspace {
     /// Right-click on a sidebar folder/drive: the Explorer menu (eject, properties, format…)
     /// plus open in new tab/window and pin/unpin.
     fn sidebar_menu(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
-        use crate::fluent_menu::{Item, Menu, MenuIcon, Sub};
         let shift = unsafe {
             windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(windows::Win32::UI::Input::KeyboardAndMouse::VK_SHIFT.0 as i32) < 0
         };
-        if shift {
+        self.sidebar_menu_at(path, shift, window.mouse_position(), window, cx);
+    }
+
+    /// The sidebar's folder menu at `at`; `classic`: Windows' own menu (extended verbs) instead of ours.
+    fn sidebar_menu_at(&mut self, path: PathBuf, classic: bool, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::fluent_menu::{Item, Menu, MenuIcon, Sub};
+        if classic {
             // the classic Explorer menu, extended verbs included
             let p2 = path.clone();
             rf_win::sta::run(move |owner| {
@@ -2006,7 +2020,7 @@ impl Workspace {
             Item::Separator,
             Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
         ];
-        let menu = crate::fluent_menu::show(Menu { quick: Vec::new(), items }, window.mouse_position(), window, cx);
+        let menu = crate::fluent_menu::show(Menu { quick: Vec::new(), items }, at, window, cx);
         let view = self.active_tab().downgrade();
         crate::ctx_menu::load_shell_more(menu.downgrade(), rf_win::ctxmenu::ShellTarget::One(path), view, cx);
     }
@@ -2814,6 +2828,7 @@ impl Workspace {
                 cx,
             ));
         }
+        col = self.append_tree(col, &cur, rail, p, cx);
         col = col.child(div().h_2());
         col = col.child(self.sidebar_item(
             "sb-recycle".into(),
@@ -2893,6 +2908,10 @@ impl Workspace {
             }
             if loading {
                 left = left.child(t!("Yükleniyor…"));
+            }
+            // values being read for a sort or grouping by a property column
+            if let Some(s) = tab.prop_status() {
+                left = left.child(s);
             }
         }
         let perf = cx.global::<crate::settings::Settings>().show_perf_info;
@@ -3414,6 +3433,7 @@ impl Render for Workspace {
         // Fluent selection.
         self.sidebar_lens = glass_on && !self.sidebar_rail;
         self.sidebar_lens_claimed.set(false);
+        self.ensure_side_tree(window, cx);
         let sidebar = show_sidebar.then(|| self.render_sidebar(&p, cx));
         self.sidebar_lens = false;
         let plan = crate::glass::lens_plan(
@@ -3438,7 +3458,9 @@ impl Render for Workspace {
         self.assign_settings_lens(plan.settings_owner, cx);
         let peek = (show_sidebar && self.sidebar_rail && (self.rail_peek[0] || self.rail_peek[1])).then(|| {
             self.sidebar_rail = false;
+            self.set_tree_peek(true);
             let full = self.render_sidebar(&p, cx);
+            self.set_tree_peek(false);
             self.sidebar_rail = true;
             div()
                 .id("rail-peek")
@@ -3606,7 +3628,7 @@ impl Render for Workspace {
         let pane_shown = self.preview_open && self.compact.is_none() && room_for_preview && self.active_tab().read(cx).location().path().is_some();
         // the hosted preview handler is a separate window: hide it whenever something of ours
         // could be under it (pane closed, a dialog or the Status Center open, palette, bulk rename)
-        let overlay_open = crate::prompt::current(window, cx).is_some() || crate::conflict_dialog::current(window, cx).is_some() || self.ops.read(cx).open || self.palette.is_some() || self.bulk.is_some() || crate::organizer::is_open(window, cx);
+        let overlay_open = crate::prompt::current(window, cx).is_some() || crate::conflict_dialog::current(window, cx).is_some() || self.ops.read(cx).open || self.palette.is_some() || self.bulk.is_some() || crate::organizer::is_open(window, cx) || crate::prop_chooser::is_open(window, cx);
         let covered = !pane_shown || overlay_open || self.quick_look.is_some();
         self.preview.update(cx, |pv, _| pv.set_occluded(covered));
         // Hızlı Bakış penceresi uygulamadan açıldıysa odaktaki öğeyi izler (oklar burada çalışır)
@@ -3899,6 +3921,7 @@ impl Render for Workspace {
             .children(self.palette.clone())
             .children(crate::fluent_menu::current(window, cx))
             .children(crate::prompt::current(window, cx))
+            .children(crate::prop_chooser::overlay(window, cx))
             .children(crate::conflict_dialog::current(window, cx))
             .children(crate::organizer::overlay(window, cx))
             .children(self.bulk.clone().map(|br| {

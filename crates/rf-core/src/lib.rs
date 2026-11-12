@@ -3,7 +3,11 @@
 pub mod entry;
 pub mod format;
 pub mod history;
+pub mod hotkey;
+pub mod navtree;
 pub mod organize;
+pub mod recycle_bin;
+pub mod propcols;
 pub mod rename;
 pub mod shelf;
 pub mod sort;

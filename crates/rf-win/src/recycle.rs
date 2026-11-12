@@ -4,12 +4,12 @@
 use windows::Win32::Foundation::{HWND, PROPERTYKEY, S_OK};
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::Common::{ITEMIDLIST, STRRET};
-use windows::Win32::System::SystemServices::SFGAO_FOLDER;
+use windows::Win32::System::SystemServices::{SFGAO_FOLDER, SFGAO_STREAM};
 use windows::Win32::System::Variant::{PSTF_UTC, VARIANT, VariantToFileTime, VariantToStringAlloc, VariantToUInt64};
 use windows::Win32::UI::Shell::{
     CMF_NORMAL, CMINVOKECOMMANDINFO, FOLDERID_RecycleBinFolder, IContextMenu, IEnumIDList, IShellFolder2,
     KF_FLAG_DEFAULT, SHBindToObject, SHCONTF_FOLDERS, SHCONTF_INCLUDEHIDDEN, SHCONTF_NONFOLDERS,
-    SHEmptyRecycleBinW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND, SHGDN_FORPARSING, SHGDN_NORMAL,
+    SEE_MASK_FLAG_NO_UI, SHEmptyRecycleBinW, SHERB_NOCONFIRMATION, SHERB_NOPROGRESSUI, SHERB_NOSOUND, SHGDN_FORPARSING, SHGDN_NORMAL,
     SHGetKnownFolderIDList, SHQUERYRBINFO, SHQueryRecycleBinW, StrRetToBufW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{CreatePopupMenu, DestroyMenu, SW_SHOWNORMAL};
@@ -118,9 +118,48 @@ fn read_item(folder: &IShellFolder2, pidl: *mut ITEMIDLIST) -> RecycleItem {
         .map(|ft| rf_core::format::filetime_to_unix_ms(((ft.dwHighDateTime as u64) << 32) | ft.dwLowDateTime as u64))
         .unwrap_or(0);
     let size = detail(folder, pidl, &PKEY_SIZE).and_then(|v| unsafe { VariantToUInt64(&v).ok() }).unwrap_or(0);
-    let mut attrs: u32 = SFGAO_FOLDER.0;
-    let is_dir = unsafe { folder.GetAttributesOf(&[pidl as *const _], &mut attrs) }.is_ok() && attrs & SFGAO_FOLDER.0 != 0;
+    // A compressed (zip) folder is a folder to the shell but also a stream (a file); only a folder the file system agrees is one is
+    // drawn as one. The file system is asked only for what the shell calls a folder (the rest cost no extra call).
+    let mut attrs: u32 = SFGAO_FOLDER.0 | SFGAO_STREAM.0;
+    let shell_ok = unsafe { folder.GetAttributesOf(&[pidl as *const _], &mut attrs) }.is_ok();
+    let shell_folder = shell_ok && attrs & SFGAO_FOLDER.0 != 0;
+    let shell_stream = shell_ok && attrs & SFGAO_STREAM.0 != 0;
+    // (a junction or a directory link is not a directory to a look that does not follow links: for those the shell decides)
+    let fs_is_dir = if shell_folder {
+        std::fs::symlink_metadata(&parsing_path).ok().and_then(|m| rf_core::recycle_bin::fs_dir_answer(m.is_dir(), m.file_type().is_symlink()))
+    } else {
+        None
+    };
+    let is_dir = shell_folder && rf_core::recycle_bin::is_real_folder(shell_folder, shell_stream, fs_is_dir);
     RecycleItem { name, original_location, deleted_ms, size, parsing_path, is_dir }
+}
+
+/// Counts of what the shell says about the bin's items against what the file system says (a read-only probe, counts only):
+/// `(items, shell says folder, shell says folder and stream, file system says directory, shell says folder but the file system a file)`.
+pub fn attribute_survey() -> anyhow::Result<(usize, usize, usize, usize, usize)> {
+    let folder = bin_folder()?;
+    let mut s = (0usize, 0usize, 0usize, 0usize, 0usize);
+    for_each_item(&folder, |f, p| {
+        s.0 += 1;
+        let mut attrs: u32 = SFGAO_FOLDER.0 | SFGAO_STREAM.0;
+        let ok = unsafe { f.GetAttributesOf(&[p as *const _], &mut attrs) }.is_ok();
+        let (shell_folder, stream) = (ok && attrs & SFGAO_FOLDER.0 != 0, ok && attrs & SFGAO_STREAM.0 != 0);
+        let fs_dir = std::fs::symlink_metadata(display_name(f, p, SHGDN_FORPARSING)).ok().map(|m| m.is_dir());
+        s.1 += usize::from(shell_folder);
+        s.2 += usize::from(shell_folder && stream);
+        s.3 += usize::from(fs_dir == Some(true));
+        s.4 += usize::from(shell_folder && fs_dir == Some(false));
+    })?;
+    Ok(s)
+}
+
+/// The keys ([`rf_core::recycle_bin::key_of`]) of everything in the bin, and nothing else is read from the items (no sizes, dates or
+/// attributes): the deletion lists the bin before and after, and a full listing of a big bin on the shared shell thread is costly.
+pub fn list_keys_only() -> anyhow::Result<Vec<String>> {
+    let folder = bin_folder()?;
+    let mut out = Vec::new();
+    for_each_item(&folder, |f, p| out.push(rf_core::recycle_bin::key_of(&display_name(f, p, SHGDN_FORPARSING))))?;
+    Ok(out)
 }
 
 /// Lists everything in the Recycle Bin (all drives), in shell order.
@@ -179,6 +218,83 @@ pub fn restore(items: &[RecycleItem]) -> anyhow::Result<()> {
     }
 }
 
+/// The items of the bin whose key (`rf_core::recycle_bin::key_of` of the parsing path) is in `wanted`. Keeps the matching ID lists
+/// alive for the caller; nothing is changed.
+fn find_by_keys(folder: &IShellFolder2, wanted: &[String]) -> anyhow::Result<Vec<Pidl>> {
+    let mut found: Vec<Pidl> = Vec::new();
+    unsafe {
+        let mut en: Option<IEnumIDList> = None;
+        let flags = (SHCONTF_FOLDERS.0 | SHCONTF_NONFOLDERS.0 | SHCONTF_INCLUDEHIDDEN.0) as u32;
+        let hr = folder.EnumObjects(HWND::default(), flags, &mut en);
+        if let (S_OK, Some(en)) = (hr, en) {
+            loop {
+                let mut item = [std::ptr::null_mut::<ITEMIDLIST>()];
+                let mut fetched = 0u32;
+                if en.Next(&mut item, Some(&mut fetched)) != S_OK || fetched == 0 {
+                    break;
+                }
+                let p = Pidl(item[0]);
+                let key = rf_core::recycle_bin::key_of(&display_name(folder, p.0, SHGDN_FORPARSING));
+                if !key.is_empty() && wanted.contains(&key) {
+                    found.push(p);
+                }
+            }
+        }
+    }
+    Ok(found)
+}
+
+/// Deletes exactly the items whose keys are given, for good, by invoking the bin's own "delete" verb on their ID lists
+/// (the same route as [`restore`] takes with "undelete"). The verb is the bin's, so it removes the item's `$R` data and `$I`
+/// record together, and its scope is the list of ID lists handed to `GetUIObjectOf`, which are only those found by key.
+/// No keys, or none found: an error, nothing is invoked. NOT RUN against a real bin by the author; see docs/design/recycle-bin.md.
+pub fn delete_by_keys(keys: &[String]) -> anyhow::Result<()> {
+    anyhow::ensure!(!keys.is_empty(), "no items to delete");
+    let folder = bin_folder()?;
+    let found = find_by_keys(&folder, keys)?;
+    anyhow::ensure!(!found.is_empty(), "Öğeler Geri Dönüşüm Kutusu'nda bulunamadı");
+    anyhow::ensure!(found.len() <= keys.len(), "more items matched than were asked for");
+    unsafe {
+        let raw: Vec<*const ITEMIDLIST> = found.iter().map(|p| p.0 as *const _).collect();
+        let cm: IContextMenu = folder.GetUIObjectOf(HWND::default(), &raw, None)?;
+        let menu = CreatePopupMenu()?;
+        let res = (|| -> anyhow::Result<()> {
+            cm.QueryContextMenu(menu, 0, 1, 0x7FFF, CMF_NORMAL).ok()?;
+            let info = CMINVOKECOMMANDINFO {
+                cbSize: std::mem::size_of::<CMINVOKECOMMANDINFO>() as u32,
+                // our own dialog has asked already: the shell is not to ask again (CMIC_MASK_FLAG_NO_UI is SEE_MASK_FLAG_NO_UI).
+                // How the bin's verb treats this flag is NOT known (skip its question, or refuse because it cannot ask): with
+                // RUSTYFILES_BIN_DELETE_SHELL_UI=1 the flag is left out, so that the first live run can try both without a rebuild.
+                fMask: if std::env::var_os("RUSTYFILES_BIN_DELETE_SHELL_UI").is_some_and(|v| v == "1") { 0 } else { SEE_MASK_FLAG_NO_UI },
+                lpVerb: PCSTR(s!("delete").as_ptr()),
+                nShow: SW_SHOWNORMAL.0,
+                ..Default::default()
+            };
+            cm.InvokeCommand(&info)?;
+            Ok(())
+        })();
+        let _ = DestroyMenu(menu);
+        res
+    }
+}
+
+/// [`rf_core::recycle_bin::BinBackend`] on the real bin. Both calls go through the shell thread ([`crate::sta::call`]).
+pub struct ShellBin;
+
+/// How long a listing or a deletion may keep the caller waiting.
+const SHELL_LIMIT: std::time::Duration = std::time::Duration::from_secs(600);
+
+impl rf_core::recycle_bin::BinBackend for ShellBin {
+    fn list_keys(&self) -> anyhow::Result<Vec<String>> {
+        crate::sta::call(SHELL_LIMIT, list_keys_only).unwrap_or_else(|| Err(anyhow::Error::new(rf_core::recycle_bin::TimedOut)))
+    }
+    fn delete_keys(&self, keys: &[String]) -> anyhow::Result<()> {
+        let keys = keys.to_vec();
+        // (on a timeout the job is still queued on the shell thread and may run later: the caller is told it is unknown)
+        crate::sta::call(SHELL_LIMIT, move || delete_by_keys(&keys)).unwrap_or_else(|| Err(anyhow::Error::new(rf_core::recycle_bin::TimedOut)))
+    }
+}
+
 /// Empties the bin on all drives. With `confirm == false` no confirmation dialog, progress UI or
 /// sound is shown (the caller is expected to have asked already).
 pub fn empty(confirm: bool) -> anyhow::Result<()> {
@@ -212,6 +328,17 @@ mod tests {
             assert!(!i.parsing_path.is_empty() && !i.name.contains('\\'));
         }
         println!("{items:#?}");
+    }
+
+    /// The keys-only listing the deletion uses sees exactly the items the full listing sees (read-only; counts only).
+    #[test]
+    fn the_keys_only_listing_matches_the_full_one() {
+        let mut full: Vec<String> = list().unwrap().iter().map(|i| rf_core::recycle_bin::key_of(&i.parsing_path)).collect();
+        let mut keys = list_keys_only().unwrap();
+        full.sort();
+        keys.sort();
+        assert_eq!(keys, full);
+        println!("bin keys: {}", keys.len());
     }
 
     #[test]

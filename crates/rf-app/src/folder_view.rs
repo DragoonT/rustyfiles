@@ -26,6 +26,9 @@ use crate::image_cache::ImageCache;
 use crate::places::{self, Places};
 use crate::theme::{self, Palette};
 
+/// Columns for any Windows property (the "Diğer sütunlar…" columns).
+pub(crate) mod prop_cols;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
     Details,
@@ -61,6 +64,9 @@ pub enum GroupBy {
     Tag,
     /// The folder the item is in (search results).
     Folder,
+    /// The value of a Windows property column (not in `ALL`: it is not remembered with a folder's layout, the
+    /// property is not part of it). Needs the values read first, so the groups come from the property state.
+    Property,
 }
 
 impl GroupBy {
@@ -89,7 +95,7 @@ impl GroupBy {
 
     /// Keys that need more than the entry itself (see [`view_from_sorted`]'s `extra`).
     fn needs_extra(self) -> bool {
-        matches!(self, GroupBy::Tag | GroupBy::Folder)
+        matches!(self, GroupBy::Tag | GroupBy::Folder | GroupBy::Property)
     }
 }
 
@@ -135,7 +141,7 @@ enum Row {
 
 fn group_key(g: GroupBy, e: &Entry, now: chrono::DateTime<chrono::Local>) -> (u32, String) {
     match g {
-        GroupBy::None | GroupBy::Tag | GroupBy::Folder => (0, String::new()),
+        GroupBy::None | GroupBy::Tag | GroupBy::Folder | GroupBy::Property => (0, String::new()),
         GroupBy::Created => relative_day(e.created_ms, now),
         GroupBy::Year | GroupBy::Month | GroupBy::Day => calendar_key(g, e.modified_ms),
         GroupBy::Type => {
@@ -374,6 +380,8 @@ pub struct FolderView {
     row_of_vi: Vec<usize>,
     pub filter: Filter,
     pub(crate) selected: HashSet<u32>,
+    /// Columns for Windows properties: nothing is allocated or started until one is chosen.
+    props: prop_cols::PropState,
     cursor: Option<usize>,
     anchor: Option<usize>,
     pub loading: bool,
@@ -539,6 +547,7 @@ impl FolderView {
                 ..Filter::default()
             },
             selected: HashSet::new(),
+            props: prop_cols::PropState::default(),
             cursor: None,
             anchor: None,
             loading: false,
@@ -819,6 +828,18 @@ impl FolderView {
         strip.into_any_element()
     }
 
+    /// Delete / Shift+Delete while the Recycle Bin page is shown (the folder list has the keyboard, e.g. after the address bar):
+    /// the bin page deletes its own selection for good, after its own confirmation. `false` anywhere else.
+    fn bin_delete(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        match (self.location(), self.recycle.clone()) {
+            (Location::RecycleBin, Some(rv)) => {
+                rv.update(cx, |r, cx| r.delete_selected(window, cx));
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         self.column_cache.clear();
         // F5 measures folder sizes afresh (deep changes don't move a folder's own date)
@@ -1011,6 +1032,7 @@ impl FolderView {
         self._load_task = None;
         // a soft reload (watcher) keeps sizes and running walks; a real load starts over
         if !soft {
+            self.props_reset();
             self.folder_sizes.clear();
             self.size_queue.clear();
             for (b, _) in self.size_batches.drain(..) {
@@ -1555,6 +1577,8 @@ impl FolderView {
             self.selected.iter().map(|&i| self.entries[i as usize].name.clone()).collect();
         let cursor_name = self.cursor.and_then(|c| self.visible.get(c)).map(|&i| self.entries[i as usize].name.clone());
         let renaming_name = self.renaming.as_ref().map(|(i, _)| self.entries[*i as usize].name.clone());
+        // (a grouping by a property keeps each file's group by name until the groups are made again)
+        self.props_before_swap();
         self.entries = new_entries;
         self.entries_gen += 1;
         if let Some(s) = sorted {
@@ -1602,6 +1626,8 @@ impl FolderView {
             }
         }
         self.apply_reselect(cx);
+        // a sort or grouping by a property column is made again for the new entries
+        self.props_entries_changed(cx);
         cx.notify();
     }
 
@@ -1612,6 +1638,7 @@ impl FolderView {
             let key = |i: u32| -> (u32, String) {
                 match group {
                     GroupBy::Tag => self.path_of(i).and_then(|p| tags.get(&p).cloned()).unwrap_or((u32::MAX, "Etiketsiz".into())),
+                    GroupBy::Property => self.props_group_key(i),
                     _ => (0, self.parent_of(i).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()),
                 }
             };
@@ -1699,6 +1726,7 @@ impl FolderView {
     }
 
     pub fn set_group(&mut self, g: GroupBy, cx: &mut Context<Self>) {
+        self.props_drop_group();
         self.group = g;
         self.collapsed.clear();
         if g == GroupBy::Tag {
@@ -1900,6 +1928,13 @@ impl FolderView {
     }
 
     pub fn set_sort_spec(&mut self, spec: SortSpec, cx: &mut Context<Self>) {
+        // a list sorted by a property column follows a change of direction or folder order
+        if self.props_sort_spec_changed(spec, cx) {
+            // (the list keeps its order until the property sort has been made again)
+            cx.notify();
+            return;
+        }
+        self.props_drop_sort();
         self.sort = spec;
         self.rebuild_visible();
         self.remember_layout(cx);
@@ -1907,7 +1942,9 @@ impl FolderView {
     }
 
     pub fn set_sort(&mut self, key: SortKey, cx: &mut Context<Self>) {
-        self.sort = self.sort.toggled(key);
+        // from a sort by a property column, a fixed column starts as a new sort (not a flip of the one under it)
+        self.sort = if self.props.sort_active() { self.props_fixed_sort(key) } else { self.sort.toggled(key) };
+        self.props_drop_sort();
         self.rebuild_visible();
         self.remember_layout(cx);
         cx.notify();
@@ -2851,7 +2888,8 @@ impl FolderView {
             }
         };
         let w = self.col_widths(cx);
-        let mut free = f32::from(self.content_width) - 180. - 24.;
+        // the property columns the user added are placed first: the fixed columns share what is left
+        let mut free = f32::from(self.content_width) - 180. - 24. - self.props_used_width(cx);
         let mut take = |want: bool, width: f32| -> bool {
             if want && width <= free {
                 free -= width;
@@ -2888,6 +2926,7 @@ impl FolderView {
         if vis.kind {
             used += f32::from(self.type_col_w(cx));
         }
+        used += self.props_used_width(cx);
         for (i, on) in vis.commit.iter().enumerate() {
             if *on {
                 used += w[7 + i];
@@ -2937,7 +2976,7 @@ impl FolderView {
                 .relative()
         };
         let col = |id: &'static str, label: &'static str, key: SortKey, w: Option<Pixels>, right: bool, cx: &mut Context<Self>| {
-            let active = self.sort.key == key;
+            let active = self.sort.key == key && !self.props.sort_active();
             let arrow = if self.sort.dir == SortDir::Asc { L::ChevronUp } else { L::ChevronDown };
             let mut d = h_flex()
                 .id(id)
@@ -2978,6 +3017,8 @@ impl FolderView {
                 this.schedule_col_save(cx);
                 cx.notify();
             }))
+            .on_drag_move(cx.listener(|this, e: &DragMoveEvent<prop_cols::PropResize>, _, cx| this.props_drag_move(e, cx)))
+            .on_mouse_down(MouseButton::Right, cx.listener(|this, ev: &MouseDownEvent, window, cx| this.show_header_menu(ev.position, window, cx)))
             .child(col("h-name", t!("Ad"), SortKey::Name, None, false, cx))
             .children(show_tags.then(|| plain("h-tags", t!("Dosya etiketi"), w[4]).child(handle(4, cx))))
             .children(show_git.then(|| plain("h-git", t!("Git durumu"), w[5]).child(handle(5, cx))))
@@ -2997,6 +3038,7 @@ impl FolderView {
                 if search { c } else { c.child(handle(2, cx)) }
             }))
             .children(vis.size.then(|| col("h-size", t!("Boyut"), SortKey::Size, Some(px(w[3])), true, cx).relative().child(handle(3, cx))))
+            .children(self.props_header_cells(p, cx))
     }
 
     /// Writes dragged column widths to Settings once the drag pauses (a save per move would
@@ -3046,6 +3088,9 @@ impl FolderView {
         let grouped = self.grouped();
         let row_h = self.row_h();
         let (col_tags, col_git, col_sync) = (vis.tags, vis.git, vis.sync);
+        // columns for Windows properties: None (and nothing else below runs) when the user has added none
+        let prop_ctx = self.props_row_ctx(cx);
+        let mut shown: Option<(usize, usize)> = None;
         let mut out = Vec::with_capacity(range.len());
         for r in range {
             let vi = if grouped {
@@ -3084,6 +3129,13 @@ impl FolderView {
                 r
             };
             let Some(&ei) = self.visible.get(vi) else { break };
+            let prop_cells = match &prop_ctx {
+                Some(c) => {
+                    shown = Some(shown.map_or((vi, vi), |(a, b)| (a.min(vi), b.max(vi))));
+                    self.props_cells(c, ei, &p)
+                }
+                None => Vec::new(),
+            };
             // Folder sizes: every visible one with Settings → "Calculate folder sizes", otherwise
             // only those clicked ("Boyutu hesapla"); measured in the background.
             let dir_path = (show_size && measurable && self.entries[ei as usize].is_dir()).then(|| self.path_of(ei)).flatten();
@@ -3418,6 +3470,7 @@ impl FolderView {
                     };
                     row.child(cell)
                 })
+                .children(prop_cells)
                 // Settings → "Select files and folders on hover"
                 .when(hover_select, |row| {
                     row.on_hover(cx.listener(move |this, on: &bool, _, cx| {
@@ -3429,6 +3482,7 @@ impl FolderView {
                 });
             out.push(row.into_any_element());
         }
+        self.props_after_rows(shown, prop_ctx.is_some(), cx);
         out
     }
 
@@ -4124,7 +4178,8 @@ impl Render for FolderView {
                 let rv = match &self.recycle {
                     Some(rv) => rv.clone(),
                     None => {
-                        let rv = cx.new(crate::recycle_view::RecycleView::new);
+                        let images = self.images.clone();
+                        let rv = cx.new(|cx| crate::recycle_view::RecycleView::new(images, cx));
                         self.recycle = Some(rv.clone());
                         rv
                     }
@@ -4213,8 +4268,16 @@ impl Render for FolderView {
             .on_action(cx.listener(|this, _: &PasteItems, window, cx| this.paste(window, cx)))
             .on_action(cx.listener(|this, _: &PasteIntoSelected, window, cx| this.paste_into_selected(window, cx)))
             .on_action(cx.listener(|this, _: &PasteShortcut, window, cx| this.paste_shortcuts(window, cx)))
-            .on_action(cx.listener(|this, _: &DeleteItems, w, cx| this.delete_selected(false, w, cx)))
-            .on_action(cx.listener(|this, _: &DeletePermanently, w, cx| this.delete_selected(true, w, cx)))
+            .on_action(cx.listener(|this, _: &DeleteItems, w, cx| {
+                if !this.bin_delete(w, cx) {
+                    this.delete_selected(false, w, cx)
+                }
+            }))
+            .on_action(cx.listener(|this, _: &DeletePermanently, w, cx| {
+                if !this.bin_delete(w, cx) {
+                    this.delete_selected(true, w, cx)
+                }
+            }))
             .on_action(cx.listener(|this, _: &RenameItem, window, cx| {
                 if this.selected.len() > 1 {
                     cx.emit(FolderEvent::BulkRename(this.selection_paths()));

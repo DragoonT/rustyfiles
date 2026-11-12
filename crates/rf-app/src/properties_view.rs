@@ -235,6 +235,8 @@ pub struct PropsView {
     link: Option<rf_win::shortcut::Details>,
     link_loaded: Option<rf_win::shortcut::Details>,
     link_inputs: Option<LinkInputs>,
+    /// The Shortcut tab's "Shortcut key" field (see hotkey_field.rs).
+    hotkey: crate::hotkey_field::HotkeyState,
     /// The Details tab's writable fields as loaded, and their text boxes (title, subject, tags,
     /// comment, authors).
     desc_loaded: Option<rf_win::props::Editable>,
@@ -330,6 +332,7 @@ impl PropsView {
             link: None,
             link_loaded: None,
             link_inputs: None,
+            hotkey: crate::hotkey_field::HotkeyState::new(window, cx),
             desc_loaded: None,
             desc_inputs: None,
             label_loaded: String::new(),
@@ -551,6 +554,26 @@ impl PropsView {
         })
         .detach();
         self.security = None;
+    }
+
+    /// A key press in the Shortcut key field (see hotkey_field.rs): sets or empties the combination, or says why it is not taken.
+    /// Only the link's hot key changes; Apply writes it with the rest through the existing save.
+    fn hotkey_decided(&mut self, d: rf_core::hotkey::Decision, cx: &mut Context<Self>) {
+        use rf_core::hotkey::Decision;
+        if let Some(l) = &mut self.link {
+            match d {
+                Decision::Clear => {
+                    l.hotkey = 0;
+                    self.hotkey.message = None;
+                }
+                Decision::Set(w) => {
+                    l.hotkey = w;
+                    self.hotkey.message = None;
+                }
+                Decision::Refused(r) => self.hotkey.message = Some(crate::recycle_text::refusal_text(r)),
+            }
+        }
+        cx.notify();
     }
 
     fn link_now(&self, cx: &App) -> Option<rf_win::shortcut::Details> {
@@ -1154,7 +1177,14 @@ impl PropsView {
         let admin = d.run_as_admin;
         let icon_start = if d.icon.is_empty() { (d.target.clone(), 0) } else { (d.icon.clone(), d.icon_index) };
         let icon_text = if d.icon.is_empty() { t!("Hedefin simgesi").to_string() } else { format!("{}, {}", file_name(Path::new(&d.icon)), d.icon_index) };
-        let hotkey = rf_win::shortcut::hotkey_text(d.hotkey);
+        let hotkey_row = {
+            let me = cx.entity().downgrade();
+            let focus = self.hotkey.focus.clone();
+            crate::hotkey_field::row(p, &self.hotkey, t!("Kısayol tuşu"), d.hotkey, move |window, cx| {
+                let me = me.clone();
+                crate::hotkey_field::arm(&focus, std::rc::Rc::new(move |dec, _, cx| { let _ = me.update(cx, |v, cx| v.hotkey_decided(dec, cx)); }), window, cx);
+            })
+        };
         let t2 = target.clone();
         vec![
             card(
@@ -1171,7 +1201,7 @@ impl PropsView {
                     field(t!("Bağımsız değişkenler"), &inp.args),
                     field(t!("Başlangıç yeri"), &inp.dir),
                     field(t!("Açıklama"), &inp.comment),
-                    row(p, t!("Kısayol tuşu"), if hotkey.is_empty() { t!("Yok").to_string() } else { hotkey }),
+                    hotkey_row,
                     h_flex()
                         .w_full()
                         .gap_3()
@@ -1864,6 +1894,7 @@ fn check_row(
 impl Render for PropsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Palette::for_window(window);
+        self.hotkey.sync(window);
         if self.frame_dark != Some(p.dark) {
             self.frame_dark = Some(p.dark);
             let h = Self::hwnd(window);

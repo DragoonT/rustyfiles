@@ -371,7 +371,9 @@ impl FolderView {
         let mut v: Vec<Item> = Vec::new();
         v.push(Item::sub(t!("Sayfa düzeni"), icon(L::LayoutGrid), layout_items(me, mode, self.grid_style)));
         v.push(Item::sub(t!("Sırala"), icon(L::ArrowUpDown), sort_items(me, sort)));
-        v.push(Item::sub(t!("Gruplandır"), icon(L::ListTree), group_items(me, group)));
+        let mut group_menu = group_items(me, group);
+        group_menu.extend(self.property_group_items(me, cx));
+        v.push(Item::sub(t!("Gruplandır"), icon(L::ListTree), group_menu));
         v.push(Item::action(t!("Yenile"), icon(L::RotateCw), act(me, |v, _, cx| v.refresh(cx))).hint("Ctrl+R"));
         v.push(Item::Separator);
         let fallback = Rc::new(own_new_items(me));
@@ -559,7 +561,12 @@ impl FolderView {
                 // this folder only (each folder remembers its own) unless "sync" is on
                 let mut v = vec![
                     Item::sub(t!("Sırala"), icon(L::ArrowUpDown), sort_items(&me, self.sort)),
-                    Item::sub(t!("Gruplandır"), icon(L::ListTree), group_items(&me, self.group)),
+                    Item::sub(t!("Gruplandır"), icon(L::ListTree), {
+                        // (the chosen property columns follow the fixed keys; none chosen: nothing is added)
+                        let mut g = group_items(&me, self.group);
+                        g.extend(self.property_group_items(&me, cx));
+                        g
+                    }),
                     Item::Separator,
                 ];
                 v.extend(order_items(&me, self.sort));

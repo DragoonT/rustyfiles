@@ -165,50 +165,10 @@ pub fn save(path: &Path, d: &Details) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// "Ctrl + Alt + K" text for a hotkey as IShellLinkW stores it (empty for 0).
+/// "Ctrl + Alt + K" text for a hotkey as IShellLinkW stores it (empty for 0). The rules and the text live in
+/// `rf_core::hotkey`, where they are tested; this is the name the Properties window has always called.
 pub fn hotkey_text(hotkey: u16) -> String {
-    let vk = (hotkey & 0xff) as u8;
-    if vk == 0 {
-        return String::new();
-    }
-    let mods = hotkey >> 8;
-    let mut parts: Vec<String> = Vec::new();
-    if mods & 0x02 != 0 {
-        parts.push("Ctrl".into());
-    }
-    if mods & 0x01 != 0 {
-        parts.push("Shift".into());
-    }
-    if mods & 0x04 != 0 {
-        parts.push("Alt".into());
-    }
-    parts.push(match vk {
-        b'0'..=b'9' | b'A'..=b'Z' => (vk as char).to_string(),
-        0x70..=0x87 => format!("F{}", vk - 0x6f),
-        0x60..=0x69 => format!("Num {}", vk - 0x60),
-        0x6a => "Num *".into(),
-        0x6b => "Num +".into(),
-        0x6d => "Num -".into(),
-        0x6e => "Num .".into(),
-        0x6f => "Num /".into(),
-        0x08 => "Backspace".into(),
-        0x09 => "Tab".into(),
-        0x0d => "Enter".into(),
-        0x1b => "Esc".into(),
-        0x20 => "Space".into(),
-        0x21 => "Page Up".into(),
-        0x22 => "Page Down".into(),
-        0x23 => "End".into(),
-        0x24 => "Home".into(),
-        0x25 => "Left".into(),
-        0x26 => "Up".into(),
-        0x27 => "Right".into(),
-        0x28 => "Down".into(),
-        0x2d => "Insert".into(),
-        0x2e => "Delete".into(),
-        _ => format!("0x{vk:02X}"),
-    });
-    parts.join(" + ")
+    rf_core::hotkey::text(hotkey)
 }
 
 #[cfg(test)]
@@ -248,6 +208,53 @@ mod tests {
         d.run_as_admin = false;
         save(&lnk, &d).unwrap();
         assert!(!details(&lnk).unwrap().run_as_admin);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The Shortcut tab's hot key edit: a combination decided by the field's rules is stored by the existing save, comes back as the same
+    /// text, and nothing else of the shortcut changes. Works on a link made in a temp folder.
+    #[test]
+    fn a_decided_hotkey_is_saved_and_nothing_else_changes() {
+        use rf_core::hotkey::{Decision, Held, decide, text};
+        let dir = std::env::temp_dir().join(format!("rf-lnk-hotkey-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("hedef.txt");
+        std::fs::write(&target, b"x").unwrap();
+        let lnk = dir.join("hedef.lnk");
+        create(&lnk, &target).unwrap();
+        // some other parts set first, so that "unchanged" means something
+        let mut d0 = details(&lnk).unwrap();
+        d0.args = "--a".into();
+        d0.comment = "açıklama".into();
+        d0.show = 7;
+        d0.run_as_admin = false;
+        save(&lnk, &d0).unwrap();
+        let d0 = details(&lnk).unwrap();
+        assert_eq!(d0.hotkey, 0);
+        // the file as the existing save writes it with the hot key empty (the reference for the byte comparison below)
+        save(&lnk, &d0).unwrap();
+        let base = std::fs::read(&lnk).unwrap();
+        // K alone is completed to Ctrl + Alt + K
+        let Decision::Set(w) = decide(b'K', Held::default()) else { panic!("K alone must be taken") };
+        let mut d1 = d0.clone();
+        d1.hotkey = w;
+        save(&lnk, &d1).unwrap();
+        // Not only the fields of `Details`: every byte of the .lnk (ID list, link info, extra data, property store) is the same
+        // except the two bytes of the header that hold the hot key (offset 64, HotKeyFlags of the shell link header).
+        let with_key = std::fs::read(&lnk).unwrap();
+        assert_eq!(base.len(), with_key.len(), "the file's size must not change");
+        let differing: Vec<usize> = (0..base.len()).filter(|&i| base[i] != with_key[i]).collect();
+        assert!(!differing.is_empty() && differing.iter().all(|&i| (64..66).contains(&i)), "bytes that differ: {differing:?}");
+        assert_eq!(u16::from_le_bytes([with_key[64], with_key[65]]), w);
+        let back = details(&lnk).unwrap();
+        assert_eq!(text(back.hotkey), "Ctrl + Alt + K");
+        assert_eq!(Details { hotkey: 0, ..back.clone() }, d0, "only the hot key may differ");
+        // Backspace empties it again, again with nothing else touched
+        assert_eq!(decide(0x08, Held::default()), Decision::Clear);
+        let mut d2 = back.clone();
+        d2.hotkey = 0;
+        save(&lnk, &d2).unwrap();
+        assert_eq!(details(&lnk).unwrap(), d0);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

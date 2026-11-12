@@ -8304,5 +8304,263 @@
   "key": "Görevler",
   "tr": "Görevler",
   "en": "Tasks"
+ },
+ {
+  "id": "b40c178f",
+  "key": "Silmek için Backspace",
+  "tr": "Silmek için Backspace",
+  "en": "Backspace clears"
+ },
+ {
+  "id": "94e2b14e",
+  "key": "Geri Dönüşüm Kutusu olan sürücü bulunamadı",
+  "tr": "Geri Dönüşüm Kutusu olan sürücü bulunamadı",
+  "en": "No drive with a Recycle Bin was found"
+ },
+ {
+  "id": "8fcab901",
+  "key": "Özel boyut (en çok, MB)",
+  "tr": "Özel boyut (en çok, MB)",
+  "en": "Custom size (maximum, MB)"
+ },
+ {
+  "id": "c01f4972",
+  "key": "Dosyaları Geri Dönüşüm Kutusu'na taşıma; silinir silinmez kaldır",
+  "tr": "Dosyaları Geri Dönüşüm Kutusu'na taşıma; silinir silinmez kaldır",
+  "en": "Do not move files to the Recycle Bin; remove them immediately when deleted"
+ },
+ {
+  "id": "31b01718",
+  "key": "Silme onayını göster (bir ilke tarafından belirlenmiş)",
+  "tr": "Silme onayını göster (bir ilke tarafından belirlenmiş)",
+  "en": "Display delete confirmation (set by a policy)"
+ },
+ {
+  "id": "60613d08",
+  "key": "Silme onayını göster",
+  "tr": "Silme onayını göster",
+  "en": "Display delete confirmation"
+ },
+ {
+  "id": "82548d68",
+  "key": "Geri Dönüşüm Kutusu ayarları",
+  "tr": "Geri Dönüşüm Kutusu ayarları",
+  "en": "Recycle Bin settings"
+ },
+ {
+  "id": "1b9511f7",
+  "key": "Geri Dönüşüm Kutusu'ndan kalıcı olarak silinecek.",
+  "tr": "Geri Dönüşüm Kutusu'ndan kalıcı olarak silinecek.",
+  "en": "will be permanently deleted from the Recycle Bin."
+ },
+ {
+  "id": "dfd77bf8",
+  "key": "Aralarındaki klasör sayısı:",
+  "tr": "Aralarındaki klasör sayısı:",
+  "en": "Folders among them:"
+ },
+ {
+  "id": "ba1316c1",
+  "key": "Bu işlem geri alınamaz.",
+  "tr": "Bu işlem geri alınamaz.",
+  "en": "This cannot be undone."
+ },
+ {
+  "id": "016368b1",
+  "key": "Silinecek öğe Geri Dönüşüm Kutusu'nda bulunamadı",
+  "tr": "Silinecek öğe Geri Dönüşüm Kutusu'nda bulunamadı",
+  "en": "The items to delete were not found in the Recycle Bin"
+ },
+ {
+  "id": "a6cde27a",
+  "key": "kalıcı olarak silindi",
+  "tr": "kalıcı olarak silindi",
+  "en": "permanently deleted"
+ },
+ {
+  "id": "2a3c4bde",
+  "key": "silinemedi",
+  "tr": "silinemedi",
+  "en": "could not be deleted"
+ },
+ {
+  "id": "4d52da67",
+  "key": "istenmediği halde kutudan kalktı",
+  "tr": "istenmediği halde kutudan kalktı",
+  "en": "left the bin although they were not asked for"
+ },
+ {
+  "id": "93fec0e4",
+  "key": "Hiçbir öğe silinmedi",
+  "tr": "Hiçbir öğe silinmedi",
+  "en": "No item was deleted"
+ },
+ {
+  "id": "66fabbc1",
+  "key": "Boyut, megabayt olarak bir tam sayı olmalı",
+  "tr": "Boyut, megabayt olarak bir tam sayı olmalı",
+  "en": "The size must be a whole number of megabytes"
+ },
+ {
+  "id": "e1b10ccc",
+  "key": "Boyut en az 1 MB olmalı",
+  "tr": "Boyut en az 1 MB olmalı",
+  "en": "The size must be at least 1 MB"
+ },
+ {
+  "id": "832c987c",
+  "key": "Boyut çok büyük",
+  "tr": "Boyut çok büyük",
+  "en": "The size is too large"
+ },
+ {
+  "id": "19ad0dd6",
+  "key": "Boyut sürücüden büyük olamaz:",
+  "tr": "Boyut sürücüden büyük olamaz:",
+  "en": "The size cannot exceed the drive's:"
+ },
+ {
+  "id": "22565566",
+  "key": "Ctrl, Alt ya da Shift tek başına olmaz; bir tuşa da basın",
+  "tr": "Ctrl, Alt ya da Shift tek başına olmaz; bir tuşa da basın",
+  "en": "Ctrl, Alt or Shift alone will not do; press a key too"
+ },
+ {
+  "id": "301177c0",
+  "key": "Windows tuşu kısayol tuşunda kullanılamaz",
+  "tr": "Windows tuşu kısayol tuşunda kullanılamaz",
+  "en": "The Windows key cannot be part of a shortcut key"
+ },
+ {
+  "id": "8dabfd91",
+  "key": "Bu tuş kısayol tuşu olamaz",
+  "tr": "Bu tuş kısayol tuşu olamaz",
+  "en": "This key cannot be a shortcut key"
+ },
+ {
+  "id": "8ae3a0df",
+  "key": "Windows bu tuş birleşimini kendine ayırmış",
+  "tr": "Windows bu tuş birleşimini kendine ayırmış",
+  "en": "Windows keeps this key combination for itself"
+ },
+ {
+  "id": "d480374a",
+  "key": "Geri Dönüşüm Kutusu ayarları kaydedildi",
+  "tr": "Geri Dönüşüm Kutusu ayarları kaydedildi",
+  "en": "Recycle Bin settings saved"
+ },
+ {
+  "id": "2e3523e6",
+  "key": "Ayarlarda değişiklik yok",
+  "tr": "Ayarlarda değişiklik yok",
+  "en": "No settings changed"
+ },
+ {
+  "id": "86f728f4",
+  "key": "Geri Dönüşüm Kutusu ayarları…",
+  "tr": "Geri Dönüşüm Kutusu ayarları…",
+  "en": "Recycle Bin settings…"
+ },
+ {
+  "id": "03618d12",
+  "key": "Sonuç bilinmiyor; öğeler silinmiş olabilir",
+  "tr": "Sonuç bilinmiyor; öğeler silinmiş olabilir",
+  "en": "Outcome unknown; the items may have been deleted"
+ },
+ {
+  "id": "d30999b2",
+  "key": "Klasör ağacı",
+  "tr": "Klasör ağacı",
+  "en": "Folder tree"
+ },
+ {
+  "id": "9488bdd0",
+  "key": "Kenar çubuğunun altına, sürücüleri ve kullanıcı klasörünü açılıp kapanan bir ağaç olarak gösteren Klasörler bölümü ekler",
+  "tr": "Kenar çubuğunun altına, sürücüleri ve kullanıcı klasörünü açılıp kapanan bir ağaç olarak gösteren Klasörler bölümü ekler",
+  "en": "Adds a Folders section under the sidebar that shows the drives and the user's folder as a tree that opens and closes"
+ },
+ {
+  "id": "66d9020f",
+  "key": "Açık klasörü izle",
+  "tr": "Açık klasörü izle",
+  "en": "Follow the open folder"
+ },
+ {
+  "id": "f715b2a2",
+  "key": "Gezindikçe ağaç, açık klasöre giden dalı açar, klasörü seçili gösterir ve görünür yere kaydırır",
+  "tr": "Gezindikçe ağaç, açık klasöre giden dalı açar, klasörü seçili gösterir ve görünür yere kaydırır",
+  "en": "As you browse, the tree opens the branch to the open folder, marks it selected and scrolls it into view"
+ },
+ {
+  "id": "35b19cfb",
+  "key": "Açılamadı",
+  "tr": "Açılamadı",
+  "en": "Could not be opened"
+ },
+ {
+  "id": "04ac3e04",
+  "key": "Bir özellik işleyicisi yanıt vermedi, sıralama yapılamadı",
+  "tr": "Bir özellik işleyicisi yanıt vermedi, sıralama yapılamadı",
+  "en": "A property handler did not answer, so the list could not be sorted"
+ },
+ {
+  "id": "9ab1b2c6",
+  "key": "Özellikler okunuyor…",
+  "tr": "Özellikler okunuyor…",
+  "en": "Reading properties…"
+ },
+ {
+  "id": "c5662c10",
+  "key": "Diğer sütunlar…",
+  "tr": "Diğer sütunlar…",
+  "en": "More columns…"
+ },
+ {
+  "id": "1982daf4",
+  "key": "Tüm özellikler",
+  "tr": "Tüm özellikler",
+  "en": "All properties"
+ },
+ {
+  "id": "5c82476d",
+  "key": "Özellik ara…",
+  "tr": "Özellik ara…",
+  "en": "Search properties…"
+ },
+ {
+  "id": "ca58dd81",
+  "key": "Bu kadar özellik sütunu seçilebilir:",
+  "tr": "Bu kadar özellik sütunu seçilebilir:",
+  "en": "The most property columns that can be chosen:"
+ },
+ {
+  "id": "0670ed25",
+  "key": "Eşleşen özellik yok",
+  "tr": "Eşleşen özellik yok",
+  "en": "No matching property"
+ },
+ {
+  "id": "57660379",
+  "key": "Özellikler yükleniyor…",
+  "tr": "Özellikler yükleniyor…",
+  "en": "Loading properties…"
+ },
+ {
+  "id": "c100eb5a",
+  "key": "Sütunları seç",
+  "tr": "Sütunları seç",
+  "en": "Choose columns"
+ },
+ {
+  "id": "51418f9f",
+  "key": "Bitti",
+  "tr": "Bitti",
+  "en": "Done"
+ },
+ {
+  "id": "86bef86c",
+  "key": "Belirtilmemiş",
+  "tr": "Belirtilmemiş",
+  "en": "Not specified"
  }
 ]
