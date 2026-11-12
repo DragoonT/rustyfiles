@@ -1,13 +1,14 @@
 //! The engine thread: one for the whole process, started by the first `attach`. It owns the D3D11 device, the DirectComposition device,
-//! one swap chain per glass window and one screen duplication per monitor that has a visible glass window on it. Every D3D, DXGI and
-//! DirectComposition object is created and used here and nowhere else.
+//! one swap chain per glass window and one screen capture per monitor that has a visible glass window on it (a Windows.Graphics.Capture
+//! session, or Desktop Duplication: see `capture.rs`). Every D3D, DXGI, WinRT and DirectComposition object is created and used here and
+//! nowhere else.
 //!
 //! Where the glass goes: GPUI creates its DirectComposition target on the window with `topmost = true`. This engine adds a second
 //! target on the same window with `topmost = false`, whose visual tree is composed BEHIND the scene GPUI draws. The app makes the
 //! GPUI window transparent, so the glass shows through wherever the scene is.
 //!
-//! The loop never spins: it waits on the command channel when there is nothing to poll, waits inside AcquireNextFrame when it has a
-//! duplication, and sleeps when neither happened.
+//! The loop never spins: it waits on the command channel when there is nothing to poll, waits inside AcquireNextFrame (or on the session's
+//! frame token) when it has a capture, and sleeps when neither happened.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::c_void;
@@ -26,13 +27,15 @@ use windows::Win32::Graphics::Dxgi::{
     DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGIFactory2, IDXGISwapChain1,
 };
 use windows::Win32::Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
+use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext};
 use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, IsIconic, IsWindow, IsWindowVisible, IsZoomed};
 use windows::core::{BOOL, Interface};
 
-use super::capture::{MonError, Monitor, Pumped, is_device_lost, locate};
+use super::capture::{Dirty, MonError, Monitor, Pumped, is_device_lost, locate};
 use super::gpu::{Geometry, Gpu, Look, Region, Renderer, glass_pass, prep, region_pad};
-use super::{Cmd, GlassState};
+use super::wgc::{self, Access, Exclusion};
+use super::{CaptureMode, Cmd, GlassState, set_mode};
 
 /// A window's corner radius, device px at 100 %: Windows 11 rounds its windows by 8 px, or by 4 px when asked for small corners.
 const WINDOW_RADIUS: f32 = 8.0;
@@ -48,6 +51,8 @@ const QUIET_WAIT_MS: u32 = 50;
 const QUIET_AFTER: Duration = Duration::from_secs(1);
 const STATS_EVERY: Duration = Duration::from_secs(5);
 const DEVICE_CHECK_EVERY: Duration = Duration::from_secs(1);
+/// How often a running session backend looks again at the permission it was started on (reading it is a cheap, silent query).
+const ACCESS_CHECK_EVERY: Duration = Duration::from_secs(10);
 
 fn hwnd_of(h: isize) -> HWND {
     HWND(h as *mut c_void)
@@ -278,7 +283,7 @@ enum Drawn {
 
 unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     let geo = w.geo.ok_or_else(|| Fail::Window("drawn before it was measured".into()))?;
-    let mirror = mon.mirror.as_ref().ok_or_else(|| Fail::Window("no mirror of the monitor".into()))?;
+    let mirror = mon.mirror().ok_or_else(|| Fail::Window("no mirror of the monitor".into()))?;
 
     // the swap chain: made on the first draw, resized when the client area changed
     match &mut w.target {
@@ -299,7 +304,8 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     }
     let (Some(region), Some(target)) = (w.region.as_ref(), w.target.as_ref()) else { return Err(Fail::Window("lost its resources".into())) };
 
-    let g = Geometry { w: geo.w, h: geo.h, origin: (geo.x - mon.rect.left, geo.y - mon.rect.top), scale: geo.scale(), radius_px: geo.radius_px(), cut_corners: false };
+    let mrect = mon.rect();
+    let g = Geometry { w: geo.w, h: geo.h, origin: (geo.x - mrect.left, geo.y - mrect.top), scale: geo.scale(), radius_px: geo.radius_px(), cut_corners: false };
     let look = Look::regular(w.dark);
     let t0 = Instant::now();
     let prepared = prep(&gfx.r, region, mirror, &g, &look, false);
@@ -336,16 +342,59 @@ struct Engine {
     last_device_check: Instant,
     /// The last time anything happened that the glass has to follow.
     last_activity: Instant,
+    /// How the windows are kept out of the capture. Chosen when the device is made (the first visible window), `Off` until then and again
+    /// when the engine goes idle.
+    mode: CaptureMode,
+    /// The windows a capture session leaves out.
+    excl: Exclusion,
+    last_access_check: Instant,
+}
+
+/// The multithreaded WinRT apartment of the engine thread: entered before any WinRT object is touched, left when the thread ends (also
+/// when it ends by a panic).
+pub(super) struct Apartment(bool);
+
+impl Apartment {
+    pub(super) fn enter() -> Apartment {
+        match unsafe { RoInitialize(RO_INIT_MULTITHREADED) } {
+            Ok(()) => Apartment(true),
+            Err(e) => {
+                // another apartment kind is already set on this thread: it is not ours to leave, and WinRT may still work in it
+                log::warn!("glass: the WinRT apartment could not be entered: {e}");
+                Apartment(false)
+            }
+        }
+    }
+}
+
+impl Drop for Apartment {
+    fn drop(&mut self) {
+        if self.0 {
+            unsafe { RoUninitialize() };
+        }
+    }
 }
 
 /// The engine thread's body. Returns when the command channel is closed.
 pub(super) fn run(rx: Receiver<Cmd>) {
+    let _apartment = Apartment::enter();
     unsafe {
         // window and monitor rectangles must come back in device pixels whatever the process was started as
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
     let stats_on = std::env::var("RUSTYFILES_GLASS_STATS").is_ok_and(|v| v == "1");
-    let mut e = Engine { rx, gfx: None, wins: BTreeMap::new(), mons: BTreeMap::new(), stats_on, last_device_check: Instant::now(), last_activity: Instant::now() };
+    let mut e = Engine {
+        rx,
+        gfx: None,
+        wins: BTreeMap::new(),
+        mons: BTreeMap::new(),
+        stats_on,
+        last_device_check: Instant::now(),
+        last_activity: Instant::now(),
+        mode: CaptureMode::Off,
+        excl: Exclusion::default(),
+        last_access_check: Instant::now(),
+    };
     while e.step() {}
     e.drop_all();
 }
@@ -355,9 +404,12 @@ impl Engine {
         self.last_activity = Instant::now();
         match c {
             Cmd::Attach { hwnd, dark } => {
-                // The exclusion is set by the caller already; set again here because a Detach of an earlier attach of the same window
-                // may have been handled since (it lifts the exclusion) and this command comes after it in the queue.
-                let _ = super::set_affinity(hwnd, true);
+                self.excl.attach(hwnd);
+                if self.mode == CaptureMode::Affinity {
+                    // The caller set the flag already; set again here because a Detach of an earlier attach of the same window may have
+                    // been handled since (it lifts the flag) and this command comes after it in the queue.
+                    let _ = super::set_affinity(hwnd, true);
+                }
                 let w = self.wins.entry(hwnd).or_insert_with(|| Win::new(hwnd, dark));
                 w.dark = dark;
                 w.dirty = true;
@@ -369,12 +421,14 @@ impl Engine {
                 }
             }
             Cmd::Detach { hwnd } => {
+                self.excl.detach(hwnd);
                 if let Some(w) = self.wins.remove(&hwnd) {
                     self.teardown(w);
                     // only now may the window be captured again: its target is off it
-                    let _ = super::set_affinity(hwnd, false);
+                    super::clear_affinity(hwnd);
                 }
             }
+            Cmd::ExtrasChanged => self.excl.set_extras(super::extras_snapshot()),
         }
     }
 
@@ -396,9 +450,8 @@ impl Engine {
     /// One turn of the loop. False ends the thread.
     fn step(&mut self) -> bool {
         if self.wins.is_empty() {
-            // Nothing attached: no device, no duplication, and nothing to do until a command arrives.
-            self.gfx = None;
-            self.mons.clear();
+            // Nothing attached: no device, no capture, and nothing to do until a command arrives.
+            self.release_gfx();
             match self.rx.recv() {
                 Ok(c) => self.command(c),
                 Err(_) => return false,
@@ -438,15 +491,19 @@ impl Engine {
                 Seen::Gone => {
                     // The app destroyed it without a detach. Nothing to restore on the window; the state goes with it.
                     self.wins.remove(&k);
+                    self.excl.detach(k);
                     super::forget(k);
                 }
                 Seen::Hidden => {
+                    self.excl.set_visible(k, false);
                     if let Some(w) = self.wins.get_mut(&k) {
                         moved |= w.visible;
                         w.visible = false;
                     }
                 }
                 Seen::Shown(g) => {
+                    // a window listed while it was hidden may not be honoured once it shows: the list is sent again
+                    self.excl.set_visible(k, true);
                     if let Some(w) = self.wins.get_mut(&k) {
                         if !w.visible {
                             w.visible = true;
@@ -468,7 +525,7 @@ impl Engine {
         }
     }
 
-    /// One duplication per monitor that has a visible window; none for the others.
+    /// One capture per monitor that has a visible window; none for the others. The first one made also decides the backend.
     fn sync_monitors(&mut self) {
         let want: BTreeSet<isize> = self.wins.values().filter(|w| w.visible).filter_map(|w| w.geo.map(|g| g.hmon)).collect();
         self.mons.retain(|k, _| want.contains(k));
@@ -485,27 +542,101 @@ impl Engine {
                     }
                 }
             }
-            let Some(luid) = self.gfx.as_ref().map(|g| g.luid) else { continue };
-            match unsafe { Monitor::open(hmon, luid) } {
-                Ok(m) => {
-                    self.mons.insert(hmon, m);
+            if self.mode == CaptureMode::Off {
+                self.choose_backend(hmon);
+                if self.mons.contains_key(&hmon) {
+                    continue;
                 }
-                Err(why) => self.fail_on_monitor(hmon, &why),
             }
+            self.open_monitor(hmon);
         }
     }
 
-    /// Takes the frames the monitors have. Returns whether an AcquireNextFrame wait happened (the turn did not spin).
+    /// Picks the backend, once per start of the engine: a capture session when the border-free capture is allowed and a session on this
+    /// first monitor can be made and offers the exclusion list (that session is then the monitor's capture), Desktop Duplication with
+    /// the display-affinity exclusion otherwise.
+    fn choose_backend(&mut self, hmon: isize) {
+        let Some(gfx) = self.gfx.as_ref() else { return };
+        match wgc::pick_backend(wgc::access(), || unsafe { Monitor::open_session(&gfx.r.g, hmon) }) {
+            Ok(m) => {
+                self.mons.insert(hmon, m);
+                self.mode = CaptureMode::Session;
+                set_mode(CaptureMode::Session);
+                // The registry is read AFTER the mode is published: a popup that registered before this read is in the snapshot, one that
+                // registers later sees `Session` and sends ExtrasChanged. Read before, one in between would be in neither.
+                self.excl.set_extras(super::extras_snapshot());
+                log::info!("glass: screen capture through a Windows.Graphics.Capture session; rustyfiles windows stay visible to screenshots and recordings");
+                // no window carries the flag any more (an earlier mode of this process may have set it)
+                let mut all: Vec<isize> = self.wins.keys().copied().collect();
+                all.extend(self.excl.extras().iter().copied());
+                for h in all {
+                    super::clear_affinity(h);
+                }
+            }
+            Err(why) => self.use_affinity(&why, false),
+        }
+    }
+
+    /// Desktop Duplication with the display-affinity exclusion from now on: the flag goes on every window of ours that must stay out of the
+    /// picture BEFORE any capture is made, and the sessions (if there are any) are closed. `fell_back`: a session was in use and failed.
+    fn use_affinity(&mut self, why: &str, fell_back: bool) {
+        if fell_back {
+            log::info!("glass: the capture session failed ({why}); falling back to Desktop Duplication, rustyfiles windows are hidden from screenshots and recordings");
+        } else {
+            log::info!("glass: screen capture through Desktop Duplication, rustyfiles windows are hidden from screenshots and recordings ({why})");
+        }
+        self.mode = CaptureMode::Affinity;
+        set_mode(CaptureMode::Affinity);
+        self.mons.clear();
+        let keys: Vec<isize> = self.wins.keys().copied().collect();
+        for k in keys {
+            if let Err(e) = super::set_affinity(k, true) {
+                self.fail_window(k, &format!("the window cannot be excluded from screen capture: {e}"));
+            }
+        }
+        for h in super::extras_snapshot() {
+            let _ = super::set_affinity(h, true);
+        }
+    }
+
+    /// Opens the capture of a monitor with the backend that was chosen. A session that cannot be made switches everything to Desktop
+    /// Duplication; a monitor Desktop Duplication cannot use makes its windows fail.
+    fn open_monitor(&mut self, hmon: isize) {
+        if self.mode == CaptureMode::Session {
+            let opened = self.gfx.as_ref().map(|gfx| unsafe { Monitor::open_session(&gfx.r.g, hmon) });
+            match opened {
+                Some(Ok(m)) => {
+                    self.mons.insert(hmon, m);
+                    return;
+                }
+                Some(Err(why)) => self.use_affinity(&why, true),
+                None => return,
+            }
+        }
+        let Some(luid) = self.gfx.as_ref().map(|g| g.luid) else { return };
+        match unsafe { Monitor::open(hmon, luid) } {
+            Ok(m) => {
+                self.mons.insert(hmon, m);
+            }
+            Err(why) => self.fail_on_monitor(hmon, &why),
+        }
+    }
+
+    /// Takes the frames the monitors have. Returns whether a wait for a frame happened (the turn did not spin).
     fn pump(&mut self) -> bool {
         let Some(gfx) = self.gfx.as_ref() else { return false };
-        let mut budget = self.frame_wait_ms(); // the first monitor that is acquired waits, the others only look
+        if self.mode == CaptureMode::Session {
+            // menus and flyouts show without telling the engine
+            self.excl.poll_extras(wgc::probe_window);
+        }
+        let mut budget = self.frame_wait_ms(); // the first monitor that is waited on waits, the others only look
         let mut waited = false;
         let mut errors: Vec<(isize, MonError)> = vec![];
-        let mut fresh: Vec<isize> = vec![];
+        let mut fresh: Vec<(isize, Dirty)> = vec![];
         for (&hmon, m) in self.mons.iter_mut() {
-            match unsafe { m.pump(&gfx.r.g, budget) } {
+            match unsafe { m.pump(&gfx.r.g, budget, &self.excl, Some(&self.rx)) } {
                 Ok(Pumped::NoWait) => {}
-                Ok(Pumped::Waited { frame, image }) => {
+                Ok(Pumped::Waited { frame, image, dirty }) => {
                     if budget > 0 {
                         waited = true;
                         budget = 0;
@@ -518,14 +649,21 @@ impl Engine {
                         self.last_activity = Instant::now();
                     }
                     if image {
-                        fresh.push(hmon);
+                        fresh.push((hmon, dirty));
                     }
                 }
                 Err(e) => errors.push((hmon, e)),
             }
         }
-        for w in self.wins.values_mut().filter(|w| w.geo.is_some_and(|g| fresh.contains(&g.hmon))) {
-            w.dirty = true;
+        // only the windows whose backdrop (their rectangle and the padding the glass reads around it) was touched are drawn again
+        for (hmon, dirty) in fresh {
+            let Some(r) = self.mons.get(&hmon).map(|m| m.rect()) else { continue };
+            for w in self.wins.values_mut() {
+                let Some(g) = w.geo.filter(|g| g.hmon == hmon) else { continue };
+                if dirty.touches(g.x - r.left, g.y - r.top, g.w, g.h, region_pad(g.scale())) {
+                    w.dirty = true;
+                }
+            }
         }
         for (hmon, e) in errors {
             match e {
@@ -534,6 +672,11 @@ impl Engine {
                     return waited;
                 }
                 MonError::Monitor(why) => self.fail_on_monitor(hmon, &why),
+                MonError::Backend(why) => {
+                    // the windows are not failed: Desktop Duplication takes over for all of them (opened on the next turn)
+                    self.use_affinity(&why, true);
+                    return waited;
+                }
             }
         }
         waited
@@ -545,7 +688,7 @@ impl Engine {
             let Some(gfx) = self.gfx.as_ref() else { return };
             let Some(w) = self.wins.get_mut(&k) else { continue };
             let Some(mon) = w.geo.and_then(|g| self.mons.get(&g.hmon)) else { continue };
-            if !mon.has_image {
+            if !mon.has_image() {
                 continue; // dirty stays; drawn as soon as the first picture of the screen is in
             }
             match unsafe { draw(gfx, mon, w) } {
@@ -589,6 +732,13 @@ impl Engine {
                 self.fail_all(&format!("the graphics device was removed: {e}"));
             }
         }
+        if self.mode == CaptureMode::Session && now.duration_since(self.last_access_check) >= ACCESS_CHECK_EVERY {
+            self.last_access_check = now;
+            // only a definite "no" gives the session up: a read that failed just now says nothing about the permission
+            if let Access::Not(why) = wgc::access() {
+                self.use_affinity(&format!("the permission was withdrawn: {why}"), true);
+            }
+        }
     }
 
     /// Takes the glass off a window that leaves the engine.
@@ -600,6 +750,7 @@ impl Engine {
 
     /// A window falls back: its glass is taken off, the capture exclusion lifted, the state says why. The app then shows Mica.
     fn fail_window(&mut self, hwnd: isize, why: &str) {
+        self.excl.detach(hwnd);
         if let Some(w) = self.wins.remove(&hwnd) {
             self.teardown(w);
         }
@@ -628,7 +779,15 @@ impl Engine {
         for w in all {
             self.teardown(w);
         }
+        self.release_gfx();
+    }
+
+    /// Lets go of the captures and the device. The next device made chooses the backend anew.
+    fn release_gfx(&mut self) {
         self.mons.clear();
         self.gfx = None;
+        self.mode = CaptureMode::Off;
+        set_mode(CaptureMode::Off);
+        self.excl = Exclusion::default();
     }
 }

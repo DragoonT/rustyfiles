@@ -1,11 +1,17 @@
-//! Screen capture for the glass: one DXGI Desktop Duplication per monitor that has a visible glass window on it, and a persistent
-//! mirror texture of that monitor which the glass reads. The windows themselves are left out of the picture
-//! (WDA_EXCLUDEFROMCAPTURE), so what is mirrored is what lies behind them.
+//! Screen capture for the glass: one capture per monitor that has a visible glass window on it, and a persistent mirror texture of that
+//! monitor which the glass reads. The glass windows themselves are left out of the picture, so what is mirrored is what lies behind them.
+//! Two backends do this behind the one [`Monitor`] type:
+//!
+//! * a Windows.Graphics.Capture session (`wgc.rs`), where the windows are put into the session's own exclusion list and stay visible to
+//!   every other screenshot, recording and screen share;
+//! * DXGI Desktop Duplication (here), the fallback, where the windows are left out by `WDA_EXCLUDEFROMCAPTURE`, which hides them from every
+//!   capture of the screen.
 
 use std::time::{Duration, Instant};
 
 use std::ffi::c_void;
 
+use crossbeam_channel::Receiver;
 use windows::Win32::Foundation::{E_ACCESSDENIED, HANDLE, LUID, RECT};
 use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MODE_ROTATION_IDENTITY, DXGI_MODE_ROTATION_UNSPECIFIED};
@@ -19,7 +25,9 @@ use windows::Win32::System::StationsAndDesktops::{
 };
 use windows::core::Interface;
 
+use super::Cmd;
 use super::gpu::{Gpu, Source};
+use super::wgc::{Exclusion, SessionMonitor};
 
 type R<T> = windows::core::Result<T>;
 
@@ -92,17 +100,124 @@ pub(super) enum MonError {
     Device(String),
     /// This monitor cannot be used (wrong adapter, rotated, odd format) or stayed broken too long: the windows on it fail.
     Monitor(String),
+    /// The capture session backend cannot go on (a call failed, the item closed, access was withdrawn): the engine switches to Desktop
+    /// Duplication for all windows instead of failing them.
+    Backend(String),
+}
+
+/// Which parts of a monitor a refresh of the mirror changed, in the monitor's own pixels.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum Dirty {
+    /// Anywhere: Desktop Duplication does not say, and a frame forced by a change of the exclusion list covers the whole monitor.
+    All,
+    Rects(Vec<RECT>),
+}
+
+/// More rectangles than this are as good as the whole monitor.
+const MAX_DIRTY_RECTS: usize = 64;
+
+impl Dirty {
+    pub(super) fn none() -> Dirty {
+        Dirty::Rects(Vec::new())
+    }
+
+    /// Adds what `other` changed.
+    pub(super) fn merge(&mut self, other: Dirty) {
+        match (&mut *self, other) {
+            (Dirty::All, _) => {}
+            (me, Dirty::All) => *me = Dirty::All,
+            (Dirty::Rects(a), Dirty::Rects(b)) => {
+                a.extend(b);
+                if a.len() > MAX_DIRTY_RECTS {
+                    *self = Dirty::All;
+                }
+            }
+        }
+    }
+
+    /// A refresh that reported nothing is not trusted to mean "nothing changed": every window is then treated as touched.
+    pub(super) fn or_all_if_empty(self) -> Dirty {
+        match self {
+            Dirty::Rects(r) if r.is_empty() => Dirty::All,
+            d => d,
+        }
+    }
+
+    /// Whether a window's backdrop may have changed: its client rectangle (`x`, `y`, `w`, `h`, in monitor pixels) grown by `pad` on every
+    /// side meets a dirty rectangle. The glass reads the backdrop that far around the window.
+    pub(super) fn touches(&self, x: i32, y: i32, w: u32, h: u32, pad: u32) -> bool {
+        match self {
+            Dirty::All => true,
+            Dirty::Rects(rects) => {
+                let (l, t) = (x as i64 - pad as i64, y as i64 - pad as i64);
+                let (r, b) = (x as i64 + w as i64 + pad as i64, y as i64 + h as i64 + pad as i64);
+                rects.iter().any(|d| (d.left as i64) < r && (d.right as i64) > l && (d.top as i64) < b && (d.bottom as i64) > t)
+            }
+        }
+    }
 }
 
 /// What one `pump` did.
 pub(super) enum Pumped {
     /// Returned at once (waiting for a retry, or a failure that is being backed off): the caller must not count this as having waited.
     NoWait,
-    /// AcquireNextFrame ran. `frame`: a frame came; `image`: the mirror was refreshed from it.
-    Waited { frame: bool, image: bool },
+    /// The capture waited (or looked). `frame`: a frame came; `image`: the mirror was refreshed from it, `dirty` says where.
+    Waited { frame: bool, image: bool, dirty: Dirty },
 }
 
-pub(super) struct Monitor {
+/// The screen capture of one monitor, by whichever backend the engine picked.
+pub(super) enum Monitor {
+    Dup(DupMonitor),
+    Session(Box<SessionMonitor>),
+}
+
+impl Monitor {
+    /// A Desktop Duplication monitor: checks that it can be mirrored on the glass device (`luid`): same adapter, not rotated.
+    pub(super) unsafe fn open(hmon: isize, luid: LUID) -> Result<Monitor, String> {
+        DupMonitor::open(hmon, luid).map(Monitor::Dup)
+    }
+
+    /// A capture session on the monitor. `Err` is the reason it cannot be had.
+    pub(super) unsafe fn open_session(g: &Gpu, hmon: isize) -> Result<Monitor, String> {
+        SessionMonitor::open(g, hmon).map(|s| Monitor::Session(Box::new(s)))
+    }
+
+    /// The monitor in desktop coordinates.
+    pub(super) fn rect(&self) -> RECT {
+        match self {
+            Monitor::Dup(m) => m.rect,
+            Monitor::Session(m) => m.rect,
+        }
+    }
+
+    pub(super) fn mirror(&self) -> Option<&Source> {
+        match self {
+            Monitor::Dup(m) => m.mirror.as_ref(),
+            Monitor::Session(m) => m.mirror.as_ref(),
+        }
+    }
+
+    /// The mirror holds a picture of the desktop that may be drawn from (for a session: not one made before the last change of the
+    /// exclusion list took effect).
+    pub(super) fn has_image(&self) -> bool {
+        match self {
+            Monitor::Dup(m) => m.has_image,
+            Monitor::Session(m) => m.ready(),
+        }
+    }
+
+    /// Takes what the capture has (waiting up to `timeout_ms` for it) and refreshes the mirror. `ex` is the set of windows a session
+    /// leaves out of its picture and `cmds` the engine's command queue (a session stops waiting when a command arrives); Desktop
+    /// Duplication uses neither.
+    pub(super) unsafe fn pump(&mut self, g: &Gpu, timeout_ms: u32, ex: &Exclusion, cmds: Option<&Receiver<Cmd>>) -> Result<Pumped, MonError> {
+        match self {
+            Monitor::Dup(m) => m.pump(g, timeout_ms),
+            Monitor::Session(m) => m.pump(g, timeout_ms, ex, cmds),
+        }
+    }
+}
+
+pub(super) struct DupMonitor {
     pub hmon: isize,
     /// The monitor in desktop coordinates.
     pub rect: RECT,
@@ -120,10 +235,10 @@ pub(super) struct Monitor {
     last_error: String,
 }
 
-impl Monitor {
+impl DupMonitor {
     /// Checks that the monitor can be mirrored on the glass device (`luid`): same adapter, not rotated. The duplication itself is made
     /// on the first `pump`, and again whenever it was lost.
-    pub(super) unsafe fn open(hmon: isize, luid: LUID) -> Result<Monitor, String> {
+    unsafe fn open(hmon: isize, luid: LUID) -> Result<DupMonitor, String> {
         let l = locate(hmon).map_err(|e| format!("the monitor is not among the DXGI outputs: {e}"))?;
         let al = l.adapter.GetDesc1().map_err(|e| format!("adapter description: {e}"))?.AdapterLuid;
         if al.LowPart != luid.LowPart || al.HighPart != luid.HighPart {
@@ -132,7 +247,7 @@ impl Monitor {
         if l.rotated {
             return Err("the monitor is rotated, which the glass does not handle".into());
         }
-        Ok(Monitor {
+        Ok(DupMonitor {
             hmon,
             rect: l.rect,
             output: l.output,
@@ -169,7 +284,7 @@ impl Monitor {
 
     /// Makes the duplication if it is missing and its retry time has come; takes at most one new frame (waiting up to `timeout_ms`) and
     /// copies it into the mirror when it carries a new picture.
-    pub(super) unsafe fn pump(&mut self, g: &Gpu, timeout_ms: u32) -> Result<Pumped, MonError> {
+    unsafe fn pump(&mut self, g: &Gpu, timeout_ms: u32) -> Result<Pumped, MonError> {
         let now = Instant::now();
         if self.dup.is_none() {
             if now < self.retry_at {
@@ -259,13 +374,14 @@ impl Monitor {
                 self.fresh = false;
                 self.broken_since = None;
                 self.backoff = BACKOFF_FIRST;
-                Ok(Pumped::Waited { frame: true, image })
+                // Desktop Duplication's dirty rectangles are not read: after a refresh any window may be touched
+                Ok(Pumped::Waited { frame: true, image, dirty: if image { Dirty::All } else { Dirty::none() } })
             }
             Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
                 // nothing new on screen, but the duplication works
                 self.broken_since = None;
                 self.backoff = BACKOFF_FIRST;
-                Ok(Pumped::Waited { frame: false, image: false })
+                Ok(Pumped::Waited { frame: false, image: false, dirty: Dirty::none() })
             }
             Err(e) if is_device_lost(&e) => Err(MonError::Device(format!("device lost while capturing the screen: {e}"))),
             // mode change, lock screen, secure desktop...: build the duplication again after a pause

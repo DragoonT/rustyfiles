@@ -130,6 +130,9 @@ pub struct Workspace {
     /// The engine has drawn this window's glass and the window is see-through now. Until then it keeps its Mica: a transparent window
     /// with nothing behind it shows the desktop through the palette's translucent layers.
     glass_shown: bool,
+    /// How the engine last said it keeps the windows out of the capture: the settings page's note depends on it, and the engine can
+    /// change it later (a session that fails makes it fall back).
+    glass_capture: rf_win::glass::CaptureMode,
     /// Counts the attach attempts; a watcher of an older attempt stops.
     glass_gen: u32,
     /// Address-bar folder completions for the typed text, and the highlighted one.
@@ -591,6 +594,7 @@ impl Workspace {
             glass_dark: None,
             glass_failed: false,
             glass_shown: false,
+            glass_capture: rf_win::glass::CaptureMode::Off,
             glass_gen: 0,
             addr_suggest: Vec::new(),
             addr_sel: None,
@@ -3160,6 +3164,11 @@ impl Workspace {
                     crate::glass::set_shown(self.glass_hwnd, true); // the palette thins its washes over the glass
                     window.set_background_appearance(WindowBackgroundAppearance::Transparent);
                     cx.notify();
+                }
+                let mode = rf_win::glass::capture_mode();
+                if mode != self.glass_capture {
+                    self.glass_capture = mode;
+                    cx.notify(); // the settings page tells whether the windows show in screenshots
                 }
                 true
             }

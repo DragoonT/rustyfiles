@@ -1253,7 +1253,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Bellek dökümü okunamadı", "Couldn't read the crash dump"),
     ("Prefetch dosyası okunamadı", "Couldn't read the prefetch file"),
     ("Prefetch dosyası açılamadı", "Couldn't decompress the prefetch file"),
-    ("Cam (deneysel)", "Glass (experimental)"),
-    ("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.", "Bends and frosts what is behind the window like real glass. While this is on, rustyfiles windows do not appear in screenshots, recordings or screen sharing."),
     ("Cam başlatılamadı: {reason}. Mica kullanılıyor.", "Glass could not start: {reason}. Mica is used instead."),
+    ("HyperGlass (deneysel)", "HyperGlass (experimental)"),
+    ("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Ekranı canlı izleyip her değişiklikte yeniden çizdiği için Mica'dan daha fazla ekran kartı ve pil kullanır.", "Bends and frosts what is behind the window like real glass. It watches the screen live and redraws on every change, so it uses more GPU and battery than Mica."),
+    ("Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.", "On this version of Windows, or while the screenshot border permission is off, rustyfiles windows do not appear in screenshots, recordings or screen sharing."),
 ];

@@ -694,13 +694,20 @@ fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
             (BackdropPref::MicaAlt, "Mica Alt".into()),
             (BackdropPref::Acrylic, t!("Akrilik").into()),
             (BackdropPref::Solid, t!("Düz").into()),
-            (BackdropPref::Glass, t!("Cam (deneysel)").into()),
+            // a product name: only the "(experimental)" is translated
+            (BackdropPref::Glass, t!("HyperGlass (deneysel)").into()),
         ],
         |s, v| s.backdrop = v,
     );
     let mut notes: Vec<String> = Vec::new();
     if s.backdrop == BackdropPref::Glass || crate::glass::forced() {
-        notes.push(t!("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.").to_string());
+        notes.push(t!("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Ekranı canlı izleyip her değişiklikte yeniden çizdiği için Mica'dan daha fazla ekran kartı ve pil kullanır.").to_string());
+        // Only where the windows really are hidden from screenshots: with a capture session (Windows 11 24H2 and the border-free capture
+        // permission) they are not, and the line would be untrue. Before the engine has chosen (no window has glass yet) the mode is
+        // Off and the line is left out; the page is drawn again once the glass is on the window.
+        if rf_win::glass::capture_mode() == rf_win::glass::CaptureMode::Affinity {
+            notes.push(t!("Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.").to_string());
+        }
         if let Some(why) = crate::glass::failure() {
             notes.push(t!("Cam başlatılamadı: {reason}. Mica kullanılıyor.").replace("{reason}", &why));
         }
