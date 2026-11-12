@@ -500,7 +500,7 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     // The settings' look; a shape below 160 CSS px (by the GLASS's short side, not the window's) gets its rim bounded by the shape
     // (a window never does, a dock island does). The look is part of what the loop guard compares, so a change of the settings (or of
     // the theme) is drawn.
-    let look = Look::regular(w.dark, &super::look()).sized(glass_w.min(glass_h) / geo.scale());
+    let look = Look::regular(w.dark, &super::look()).sized(glass_w.min(glass_h) / geo.scale()).rim_capped(super::rim_cap(w.hwnd));
     let lenses = w.lenses.draw_list();
     let t0 = Instant::now();
     let (mut prepared, hash) = match w.presented.map(|p| p.hash) {

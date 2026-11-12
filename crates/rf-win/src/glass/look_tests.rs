@@ -320,3 +320,42 @@ fn the_saturation_setting_strengthens_the_colours() {
         assert!(zero < normal && normal < full, "chroma {zero} / {normal} / {full} must rise (warp {warp})");
     }
 }
+
+/// A panel that asks for a thin edge gets its rim band capped, and a cap changes nothing but the band: the thickness, the frost, the rim
+/// light and the tint stay the window's own. No cap, or a cap that is not a number, is the look itself.
+#[test]
+fn a_rim_cap_narrows_the_band_and_touches_nothing_else() {
+    use super::gpu::rim_width;
+    for dark in [false, true] {
+        let base = Look::regular(dark, &LookParams::DEFAULT);
+        assert!(base.rim_capped(None) == base);
+        assert!(base.rim_capped(Some(f32::NAN)) == base);
+        assert!(base.rim_capped(Some(f32::INFINITY)) == base);
+        // a window of 150 CSS px short side: its band was 44, now the cap
+        let wide = base.sized(150.0);
+        assert!((rim_width(&wide, 150.0) - 44.0).abs() < 1e-4);
+        let thin = wide.rim_capped(Some(8.0));
+        assert!((rim_width(&thin, 150.0) - 8.0).abs() < 1e-4);
+        assert!(thin == Look { max_bezel: thin.max_bezel, ..wide }, "only the band's cap changes");
+        // the band's own floor is 4 px, whatever the cap; a cap above the band changes nothing
+        assert!((rim_width(&wide.rim_capped(Some(1.0)), 150.0) - 4.0).abs() < 1e-4);
+        assert!(wide.rim_capped(Some(500.0)) == wide);
+    }
+}
+
+/// The cap a window asked for is remembered for it alone and goes with its glass.
+#[test]
+fn a_rim_cap_belongs_to_one_window_and_goes_with_its_glass() {
+    let (a, b) = (0x7e57_0001isize, 0x7e57_0002isize);
+    assert_eq!(super::rim_cap(a), None);
+    super::set_rim_cap(a, Some(8.0));
+    assert_eq!(super::rim_cap(a), Some(8.0));
+    assert_eq!(super::rim_cap(b), None);
+    super::set_rim_cap(a, Some(f32::NAN));
+    assert_eq!(super::rim_cap(a), None, "not a number takes the cap back");
+    super::set_rim_cap(a, Some(6.0));
+    super::detach(a);
+    assert_eq!(super::rim_cap(a), None);
+    super::set_rim_cap(0, Some(6.0));
+    assert_eq!(super::rim_cap(0), None, "no window, no cap");
+}

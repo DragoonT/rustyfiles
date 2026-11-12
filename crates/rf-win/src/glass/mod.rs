@@ -297,6 +297,9 @@ static STATES: LazyLock<Mutex<HashMap<isize, GlassState>>> = LazyLock::new(|| Mu
 /// The mean brightness (0 to 1) of the backdrop under each window's glass, as of its last draw that looked at the backdrop. Written by
 /// the engine thread from the bytes the loop guard reads back anyway; read by the app through [`backdrop_luma`].
 static LUMAS: LazyLock<Mutex<HashMap<isize, f32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// A window's own cap on the width of the glass's rim band (CSS px), for a small panel that wants a thin edge. Set by the app before
+/// it attaches the window, read by the engine at every draw, forgotten when the window's glass is detached.
+static RIM_CAPS: Mutex<BTreeMap<isize, f32>> = Mutex::new(BTreeMap::new());
 /// The engine thread's command channel, once it has been started.
 static ENGINE: Mutex<Option<Sender<Cmd>>> = Mutex::new(None);
 /// What the app last asked for in each lens slot, so the same call made again (the UI draws many times a second) sends nothing. An absent
@@ -312,6 +315,26 @@ static EXTRAS: Mutex<BTreeSet<isize>> = Mutex::new(BTreeSet::new());
 
 fn states() -> std::sync::MutexGuard<'static, HashMap<isize, GlassState>> {
     STATES.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Asks for a thin rim on this window's glass: the band along the edge where the backdrop is bent is at most `cap` CSS px wide (it
+/// is a third of the short side up to 44 px otherwise, which on a small popup is a thick border). `None` takes the cap back. Call it
+/// BEFORE [`attach`] / [`attach_with`] (a window already drawn keeps its band until its next redraw). Nothing else of the look changes.
+pub fn set_rim_cap(hwnd: isize, cap: Option<f32>) {
+    let mut m = RIM_CAPS.lock().unwrap_or_else(|p| p.into_inner());
+    match cap {
+        Some(c) if c.is_finite() && hwnd != 0 => {
+            m.insert(hwnd, c);
+        }
+        _ => {
+            m.remove(&hwnd);
+        }
+    }
+}
+
+/// Engine side: the cap this window asked for.
+pub(crate) fn rim_cap(hwnd: isize) -> Option<f32> {
+    RIM_CAPS.lock().unwrap_or_else(|p| p.into_inner()).get(&hwnd).copied()
 }
 
 fn lumas() -> std::sync::MutexGuard<'static, HashMap<isize, f32>> {
@@ -556,6 +579,7 @@ pub fn set_options(hwnd: isize, opts: GlassOptions) {
 pub fn detach(hwnd: isize) {
     let had = states().remove(&hwnd).is_some();
     lumas().remove(&hwnd);
+    set_rim_cap(hwnd, None);
     forget_lenses(hwnd);
     // The engine lifts the window's capture exclusion itself, AFTER it has taken its target off the window: lifted earlier, one more
     // frame could be captured with the window in it and bent into the glass that is just being removed. Without a running engine

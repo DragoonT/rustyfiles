@@ -57,6 +57,7 @@ mod popup_win;
 mod right;
 mod search;
 mod start;
+mod start_button;
 mod sysstate;
 mod tone;
 mod tray_overflow;

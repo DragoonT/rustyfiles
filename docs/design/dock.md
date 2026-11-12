@@ -20,6 +20,20 @@ it exits.
 
 A dot under an app means it is running; the app in front has a wider dot.
 
+**The Start button** (`start_button.rs`). The logo is four squares (8 px, 1.5 px apart, 1.2 px corners) filled with one diagonal gradient, light sky
+blue (`GRADIENT_FROM`, 0x7FDBFF) at the top left to a deeper blue (`GRADIENT_TO`, 0x0A84E0) at the bottom right; both colours live in that file only.
+The toolkit fills one shape with one gradient, so each square has the piece of the big gradient its place has (`square_stops`; its two ends sit a corner
+away from the square's centre, outside the shader's 0..1, so no corner is clamped and the logo's corners show exactly the two tuned colours). The squares
+and the gap are whole device pixels at every scale factor and at every moment of the motion (`logo_geometry`), because GPUI snaps each quad's edges on its
+own: at 100 % the logo is 18 px at rest, 15 pressed and 20 at the top of the spring. Behind it a rounded
+plate fades in on hover (the dock's hover fill with a hairline lighter top edge), is stronger while pressed (x1.6), and stays while the Start panel is
+open. On press the logo shrinks to 0.82 in 80 ms (ease out); on release inside it springs to 1.06 in 110 ms and settles at 1.0 (280 ms in all); a
+release outside eases back in 160 ms without the spring (the pointer leaving while the button is held does not end the press: the
+pointer is followed by a probe on mouse moves, not by the toolkit's hover callback, which reports "gone" on the first move of a held button). A panel opened by the keyboard or by the search field plays
+the same press and release once; one opened by a press on the logo does not play it twice. With animations off (the app's setting or Windows') every
+state changes at once. The states are a pure function of the events and the time (`StartButton`, tested); a frame is asked for only while something
+moves, so the button at rest costs nothing.
+
 ## Magnification (the middle island)
 
 Like the Mac's dock. Icons rest at 44 px. With the pointer over the island every icon grows by a smooth bell of the horizontal
@@ -454,7 +468,26 @@ the window's button if the program refuses the foreground); the x asks the windo
   same icon gives no hover event either (the toolkit still believes the pointer is on it), so the preview comes again after the pointer
   has touched another element of the dock. There is no easing (DWM draws its pictures at full strength, so a fading card would show
   its picture first).
-* LOG (info): `dock: hover preview shown in <time> at x=<device px> (<n> cards, <m> live pictures)`.
+* LOG (info): `dock: hover preview shown in <time> at x=<device px> (<n> cards, <m> live pictures, shapes asked in <time>, <k> of unknown shape)`, and
+  `dock: hover preview pictures: <n> boxes, the first <w>x<h> at (<x>, <y>) in client px, client area starts at (<dx>, <dy>) in the window`.
+* THE CARDS' GEOMETRY IS ONE FUNCTION (`preview::layout`, then `Layout::card(i)` giving the card, its picture box and its title row).
+  The toolkit paints from those rectangles and DWM is given the same box (`to_device` of `card(i).picture`, then `fit_picture` of the
+  source's size into it), so the two cannot drift. A card is 196 px wide whatever the window; its picture box is 190 wide and as high as the
+  window's shape asks (`preview::pic_height`: height / width of the source times the box's width, kept between 1/3 and 1.1 of the width;
+  beyond that the picture is fitted and centred in the box; a source whose size is not yet known is 16:10). The cards of a row share the
+  row's tallest box (titles stay on one line) and the window follows the rows. The sources' sizes are asked BEFORE the window is sized
+  (`thumbs::probe_size`: register, ask, unregister; the window's own rectangle if DWM refuses). The gaps are thin: 4 px between the window's
+  edge and the cards, 3 px between a card's edge and its picture, a 1 px light frame on a card, and the glass's rim band is capped at
+  8 px (`rf_win::glass::set_rim_cap`, `hover_preview::RIM_CAP`; `RUSTYFILES_PREVIEW_RIM=<css px>` tries another value) so it does not read as a thick border.
+  The window is never taller than the room above the dock: `preview::layout_in` caps every row's box at the highest value whose rows fit
+  (never below the lowest box, 1/3 of the width), and a window taller than the cap is fitted and centred in the box.
+* WHY THE LIVE PICTURES STOOD "CROOKED": the preview window keeps the system's invisible resize frame (8 px at 100 % on the left, right and
+  below, none on top), so its client area starts 8 px right of the window's own left edge, and DWM measured the thumbnail's destination
+  from the window's own origin, not from the client area's. Every picture stood exactly the left inset (8 px) left of its box, with no
+  vertical error, whatever its proportions (measured on the user's screenshots, one and three cards). `ThumbSet::with_origin` adds the
+  client area's offset (`panel::client_origin_in_window`) to what DWM is given; the card keeps the client rectangle. For comparing on the
+  screen `RUSTYFILES_PREVIEW_THUMB_ORIGIN=0` sends the client rectangles unchanged. The switcher's window (`shell/switcher/view.rs`) uses the
+  same `ThumbSet` without an origin and may have the same offset if its window has the same frame: not changed here.
 
 ## The tray strip and its overflow panel (shell plan increment D3)
 

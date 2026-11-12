@@ -232,17 +232,32 @@ pub fn pointer_away(cursor: (i32, i32), preview: Rect, glass: Rect, scale: f32) 
 }
 
 // ---------------------------------------------------------------- the preview's cards
+//
+// ONE PLACE GIVES EVERY RECTANGLE. [`layout`] works out the grid and the heights from the windows' shapes, and [`Layout::card`] gives, for
+// card `i`, its rectangle, its picture box and its title row. The toolkit draws the card, the box and the title from those numbers
+// (`rf-app/src/dock/hover_preview.rs`) and DWM is told where to draw the live picture from the very same box (`picture`, through
+// [`to_device`]): there is no second formula that could drift from the first.
+//
+// A card is: CARD_PAD, the picture box (CARD_W - 2 CARD_PAD wide, as tall as the row's tallest window needs), the title row, CARD_PAD.
+// The box is DYNAMIC IN HEIGHT: it follows the shape of the window it shows ([`pic_height`]), the cards of one row share the row's
+// tallest box, and the window follows the rows.
 
-/// A card: the picture box (DWM draws the window live in it), and under it the app's small icon, the title and, on the card under the
-/// pointer, a small close button.
+/// A card's width, logical px. It does not change with the window's shape.
 pub const CARD_W: f32 = 196.0;
-pub const PIC_H: f32 = 110.0;
+/// Space between a card's edge and what is in it. Thin: the picture nearly fills the card.
+pub const CARD_PAD: f32 = 3.0;
+pub const CARD_GAP: f32 = 4.0;
+/// Space between the window's edge and the cards. Thin, so the glass's rim does not read as a thick border.
+pub const OUTER_PAD: f32 = 4.0;
 pub const TITLE_H: f32 = 28.0;
-/// Space between a card's edge and what is in it.
-pub const CARD_PAD: f32 = 6.0;
-pub const CARD_GAP: f32 = 6.0;
-/// Space between the window's edge and the cards.
-pub const OUTER_PAD: f32 = 8.0;
+/// The picture box's width.
+pub const PIC_W: f32 = CARD_W - 2.0 * CARD_PAD;
+/// The box is never lower than this share of its width (a very wide window is fitted into a box this low and centred) ...
+pub const MIN_PIC_RATIO: f32 = 1.0 / 3.0;
+/// ... and never higher than this (a very tall window is fitted and centred).
+pub const MAX_PIC_RATIO: f32 = 1.1;
+/// The height share of a window whose size is not known yet (16:10).
+pub const UNKNOWN_PIC_RATIO: f32 = 0.625;
 /// Most cards in a row, and most rows (more windows than that are not shown).
 pub const MAX_COLS: usize = 6;
 pub const MAX_ROWS: usize = 3;
@@ -250,7 +265,20 @@ pub const MAX_ROWS: usize = 3;
 /// ours that lies on it): its side.
 pub const CLOSE_SIZE: f32 = 22.0;
 
-pub const CARD_H: f32 = CARD_PAD + PIC_H + TITLE_H + CARD_PAD;
+/// The picture box's height, logical px, for a window of this size (`None`: not known yet, 16:10): the box's width times the window's
+/// height over its width, kept between [`MIN_PIC_RATIO`] and [`MAX_PIC_RATIO`] of the width and rounded to a whole px.
+pub fn pic_height(source: Option<(i32, i32)>) -> f32 {
+    let ratio = match source {
+        Some((w, h)) if w > 0 && h > 0 => (h as f32 / w as f32).clamp(MIN_PIC_RATIO, MAX_PIC_RATIO),
+        _ => UNKNOWN_PIC_RATIO,
+    };
+    (PIC_W * ratio).round()
+}
+
+/// A card's height for a picture box of `pic_h`.
+fn card_height(pic_h: f32) -> f32 {
+    CARD_PAD + pic_h + TITLE_H + CARD_PAD
+}
 
 /// How many cards go where.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -274,31 +302,108 @@ pub fn grid(windows: usize, room_w: f32) -> Grid {
     Grid { cols, rows, shown, hidden: windows - shown }
 }
 
-/// The window's size, logical px.
-pub fn size(g: &Grid) -> (f32, f32) {
-    let w = 2.0 * OUTER_PAD + g.cols as f32 * CARD_W + (g.cols.saturating_sub(1)) as f32 * CARD_GAP;
-    let h = 2.0 * OUTER_PAD + g.rows as f32 * CARD_H + (g.rows.saturating_sub(1)) as f32 * CARD_GAP;
-    (w, h)
+/// What one card is made of: three rectangles (x, y, width, height), logical px in the preview window.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CardBox {
+    pub card: [f32; 4],
+    /// The picture box: the toolkit paints its backdrop here and DWM draws the live window in it.
+    pub picture: [f32; 4],
+    /// The title row under the box (the small icon, the title, the close button).
+    pub title: [f32; 4],
+    /// `picture` and `title` again, relative to the card's own top left corner: the toolkit places them as children of the card, so its
+    /// drawing takes these and subtracts nothing of its own (the numbers cannot drift from `picture`, which DWM is given).
+    pub picture_in_card: [f32; 4],
+    pub title_in_card: [f32; 4],
 }
 
-/// Card `i`'s rectangle (x, y, width, height), logical px in the window. Cards fill the rows left to right; the last row is centred.
-pub fn card_rect(g: &Grid, i: usize) -> [f32; 4] {
-    let (row, col) = (i / g.cols, i % g.cols);
-    let in_row = if row + 1 == g.rows { g.shown - row * g.cols } else { g.cols };
-    let full = g.cols as f32 * CARD_W + (g.cols.saturating_sub(1)) as f32 * CARD_GAP;
-    let this = in_row as f32 * CARD_W + (in_row.saturating_sub(1)) as f32 * CARD_GAP;
-    let x = OUTER_PAD + (full - this) / 2.0 + col as f32 * (CARD_W + CARD_GAP);
-    let y = OUTER_PAD + row as f32 * (CARD_H + CARD_GAP);
-    [x, y, CARD_W, CARD_H]
+/// The grid and the height of each row's picture boxes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Layout {
+    grid: Grid,
+    /// Each row's picture box height: the tallest of the windows in the row.
+    pic_h: Vec<f32>,
 }
 
-/// Card `i`'s picture box (x, y, width, height), logical px in the window.
-pub fn picture_rect(g: &Grid, i: usize) -> [f32; 4] {
-    let [x, y, w, _] = card_rect(g, i);
-    [x + CARD_PAD, y + CARD_PAD, w - 2.0 * CARD_PAD, PIC_H]
+/// The layout for windows of these shapes (`sources`, in card order: a window's size in device px, `None` when it is not known yet) in
+/// a room `room_w` logical px wide. Windows beyond what fits are not drawn and do not count in a row's height.
+pub fn layout(sources: &[Option<(i32, i32)>], room_w: f32) -> Layout {
+    layout_in(sources, room_w, f32::INFINITY)
 }
 
-/// A logical rectangle in device px (for DWM, which takes the destination in the window's client pixels).
+/// [`layout`] for a room that is also `room_h` logical px high (what is above the dock): when the rows would not fit, every row's box is
+/// capped at the highest value that does (a cap, not a squeeze: a window taller than the cap is fitted and centred in the box as one
+/// beyond [`MAX_PIC_RATIO`] is), but never below [`MIN_PIC_RATIO`]'s height. Only when even the lowest boxes do not fit is the window
+/// left taller than the room (the caller's placement then shortens it).
+pub fn layout_in(sources: &[Option<(i32, i32)>], room_w: f32, room_h: f32) -> Layout {
+    let mut l = layout_unbounded(sources, room_w);
+    if l.size().1 > room_h {
+        let floor = (PIC_W * MIN_PIC_RATIO).round();
+        let mut cap = l.pic_h.iter().copied().fold(floor, f32::max);
+        while cap > floor && window_height(l.pic_h.iter().map(|h| h.min(cap))) > room_h {
+            cap -= 1.0;
+        }
+        for h in &mut l.pic_h {
+            *h = h.min(cap);
+        }
+    }
+    l
+}
+
+/// The window's height, logical px, for rows whose picture boxes are this high.
+fn window_height(rows: impl Iterator<Item = f32>) -> f32 {
+    let (n, sum) = rows.fold((0usize, 0.0f32), |(n, sum), h| (n + 1, sum + card_height(h)));
+    2.0 * OUTER_PAD + sum + n.saturating_sub(1) as f32 * CARD_GAP
+}
+
+fn layout_unbounded(sources: &[Option<(i32, i32)>], room_w: f32) -> Layout {
+    let g = grid(sources.len(), room_w);
+    let pic_h = (0..g.rows)
+        .map(|r| {
+            let row = &sources[(r * g.cols).min(g.shown)..((r + 1) * g.cols).min(g.shown)];
+            row.iter().map(|s| pic_height(*s)).fold(None::<f32>, |a, h| Some(a.map_or(h, |a| a.max(h)))).unwrap_or_else(|| pic_height(None))
+        })
+        .collect();
+    Layout { grid: g, pic_h }
+}
+
+impl Layout {
+    pub fn grid(&self) -> &Grid {
+        &self.grid
+    }
+
+    /// The picture boxes' height in row `row`.
+    pub fn row_pic_height(&self, row: usize) -> f32 {
+        self.pic_h.get(row).copied().unwrap_or_else(|| pic_height(None))
+    }
+
+    /// The window's size, logical px.
+    pub fn size(&self) -> (f32, f32) {
+        let g = &self.grid;
+        let w = 2.0 * OUTER_PAD + g.cols as f32 * CARD_W + (g.cols.saturating_sub(1)) as f32 * CARD_GAP;
+        (w, window_height((0..g.rows).map(|r| self.row_pic_height(r))))
+    }
+
+    /// Card `i`'s rectangles. Cards fill the rows left to right; the last row is centred.
+    pub fn card(&self, i: usize) -> CardBox {
+        let g = &self.grid;
+        let (row, col) = (i / g.cols, i % g.cols);
+        let in_row = if row + 1 == g.rows { g.shown - row * g.cols } else { g.cols };
+        let full = g.cols as f32 * CARD_W + (g.cols.saturating_sub(1)) as f32 * CARD_GAP;
+        let this = in_row as f32 * CARD_W + (in_row.saturating_sub(1)) as f32 * CARD_GAP;
+        let x = OUTER_PAD + (full - this) / 2.0 + col as f32 * (CARD_W + CARD_GAP);
+        let y = OUTER_PAD + (0..row).map(|r| card_height(self.row_pic_height(r)) + CARD_GAP).sum::<f32>();
+        let pic_h = self.row_pic_height(row);
+        CardBox {
+            card: [x, y, CARD_W, card_height(pic_h)],
+            picture: [x + CARD_PAD, y + CARD_PAD, PIC_W, pic_h],
+            title: [x + CARD_PAD, y + CARD_PAD + pic_h, PIC_W, TITLE_H],
+            picture_in_card: [CARD_PAD, CARD_PAD, PIC_W, pic_h],
+            title_in_card: [CARD_PAD, CARD_PAD + pic_h, PIC_W, TITLE_H],
+        }
+    }
+}
+
+/// A logical rectangle in device px (for DWM, which takes the destination in pixels).
 pub fn to_device(r: [f32; 4], scale: f32) -> Rect {
     let (l, t) = (px(r[0], scale), px(r[1], scale));
     Rect::new(l, t, px(r[0] + r[2], scale), px(r[1] + r[3], scale))
@@ -642,36 +747,137 @@ mod tests {
         assert_eq!(g.cols, 1, "never fewer than one");
     }
 
+    const SRC_169: Option<(i32, i32)> = Some((1920, 1080));
+
     #[test]
-    fn the_window_is_exactly_as_big_as_its_cards() {
-        let g = grid(3, 1_900.0);
-        let (w, h) = size(&g);
-        assert_eq!(w, 2.0 * OUTER_PAD + 3.0 * CARD_W + 2.0 * CARD_GAP);
-        assert_eq!(h, 2.0 * OUTER_PAD + CARD_H);
-        let last = card_rect(&g, 2);
-        assert_eq!(last[0] + last[2] + OUTER_PAD, w, "the last card ends one padding before the edge");
-        assert_eq!(last[1] + last[3] + OUTER_PAD, h);
+    fn the_box_follows_the_windows_shape_between_a_third_and_one_and_a_tenth_of_its_width() {
+        // 190 px wide boxes
+        assert_eq!(PIC_W, 190.0);
+        assert_eq!(pic_height(SRC_169), (190.0f32 * 9.0 / 16.0).round(), "16:9");
+        assert_eq!(pic_height(Some((1000, 1000))), 190.0, "square");
+        assert_eq!(pic_height(Some((1600, 1000))), 119.0, "16:10 as measured");
+        // a very wide window (ultra-wide, a strip): the lowest box, the picture is fitted into it and centred
+        let low = (190.0f32 / 3.0).round();
+        assert_eq!(pic_height(Some((3440, 600))), low);
+        assert_eq!(pic_height(Some((1000, 100))), low);
+        // a very tall one: the highest box
+        let high = (190.0f32 * 1.1).round();
+        assert_eq!(pic_height(Some((500, 2000))), high);
+        assert_eq!(pic_height(Some((100, 5000))), high);
+        // exactly at the limits
+        assert_eq!(pic_height(Some((300, 100))), low);
+        assert_eq!(pic_height(Some((1000, 1100))), high);
+        // not known: 16:10; nonsense is not known
+        assert_eq!(pic_height(None), 119.0);
+        assert_eq!(pic_height(Some((0, 0))), 119.0);
+        assert_eq!(pic_height(Some((-5, 100))), 119.0);
+        // monotone between the limits
+        let mut last = 0.0;
+        for h in (100..=1100).step_by(25) {
+            let v = pic_height(Some((1000, h)));
+            assert!(v >= last && v >= low && v <= high, "{h}: {v}");
+            last = v;
+        }
     }
 
     #[test]
-    fn the_last_row_is_centred_and_the_pictures_lie_inside_their_cards() {
-        let g = grid(9, 1_900.0);
+    fn the_cards_of_one_row_share_the_tallest_box_and_each_row_has_its_own_height() {
+        // a wide window, a tall one and a 16:9 one in one row
+        let l = layout(&[Some((2560, 1080)), Some((800, 1000)), SRC_169], 1_900.0);
+        assert_eq!((l.grid().cols, l.grid().rows), (3, 1));
+        let tall = pic_height(Some((800, 1000)));
+        for i in 0..3 {
+            let c = l.card(i);
+            assert_eq!(c.picture[3], tall, "card {i}");
+            assert_eq!(c.card[3], CARD_PAD + tall + TITLE_H + CARD_PAD);
+            assert_eq!(c.card[1], OUTER_PAD, "one row: every card starts at the same y");
+        }
+        // two rows: a low row above a tall one; the second starts where the first ends plus the gap
+        let mut src = vec![Some((3000, 600)); 4];
+        src.extend([Some((500, 900)), SRC_169, SRC_169]);
+        let l = layout(&src, 1_900.0);
+        assert_eq!((l.grid().cols, l.grid().rows), (4, 2));
+        assert_eq!(l.row_pic_height(0), pic_height(Some((3000, 600))));
+        assert_eq!(l.row_pic_height(1), pic_height(Some((500, 900))), "the row of 3 is as tall as its tallest");
+        let (a, b) = (l.card(0), l.card(4));
+        assert_eq!(b.card[1], a.card[1] + a.card[3] + CARD_GAP);
+        assert_eq!(a.picture[3], l.row_pic_height(0));
+        assert_eq!(b.picture[3], l.row_pic_height(1));
+    }
+
+    #[test]
+    fn windows_that_are_not_shown_do_not_make_a_row_taller() {
+        let mut src = vec![SRC_169; MAX_COLS * MAX_ROWS];
+        src.push(Some((100, 1000))); // the 19th window: not drawn
+        let l = layout(&src, 1_900.0);
+        assert_eq!(l.grid().hidden, 1);
+        assert_eq!(l.row_pic_height(l.grid().rows - 1), pic_height(SRC_169));
+    }
+
+    #[test]
+    fn a_source_that_is_not_known_yet_is_sixteen_to_ten() {
+        let l = layout(&[None, None], 1_900.0);
+        assert_eq!(l.card(0).picture[3], pic_height(None));
+        assert!((l.card(0).picture[2] / l.card(0).picture[3] - 1.6).abs() < 0.02, "16:10");
+        // one known and one unknown share the taller of the two
+        let l = layout(&[None, Some((800, 1000))], 1_900.0);
+        assert_eq!(l.card(0).picture[3], pic_height(Some((800, 1000))));
+    }
+
+    #[test]
+    fn the_window_is_exactly_as_big_as_its_cards() {
+        for src in [vec![SRC_169; 3], vec![Some((600, 900)), None, Some((2560, 700))], vec![SRC_169; 9], vec![Some((500, 900)); 1]] {
+            let l = layout(&src, 1_900.0);
+            let (w, h) = l.size();
+            let g = *l.grid();
+            let last = l.card(g.shown - 1);
+            assert_eq!(last.card[1] + last.card[3] + OUTER_PAD, h, "the last row ends one padding before the bottom edge");
+            // the widest row reaches both sides' padding exactly
+            let first = l.card(0);
+            assert_eq!(first.card[0].min(l.card(g.cols - 1).card[0]), OUTER_PAD, "{src:?}");
+            let right = (0..g.shown).map(|i| l.card(i).card[0] + l.card(i).card[2]).fold(0.0, f32::max);
+            assert_eq!(right + OUTER_PAD, w);
+        }
+        let l = layout(&[SRC_169; 3], 1_900.0);
+        let (w, h) = l.size();
+        assert_eq!(w, 2.0 * OUTER_PAD + 3.0 * CARD_W + 2.0 * CARD_GAP);
+        assert_eq!(h, 2.0 * OUTER_PAD + CARD_PAD + pic_height(SRC_169) + TITLE_H + CARD_PAD);
+    }
+
+    #[test]
+    fn the_edges_are_thin() {
+        // about 4 px outside the cards and 3 px inside a card at 100 %
+        assert_eq!(OUTER_PAD, 4.0);
+        assert_eq!(CARD_PAD, 3.0);
+        let c = layout(&[SRC_169], 1_900.0).card(0);
+        assert_eq!(c.card[0], OUTER_PAD);
+        assert_eq!(c.picture[0] - c.card[0], CARD_PAD);
+        assert_eq!(c.picture[1] - c.card[1], CARD_PAD);
+        assert_eq!(c.card[0] + c.card[2] - (c.picture[0] + c.picture[2]), CARD_PAD, "the same on the right");
+    }
+
+    #[test]
+    fn the_last_row_is_centred_and_everything_lies_inside_its_card_and_no_two_cards_overlap() {
+        let mut src = vec![SRC_169; 5];
+        src.extend([Some((500, 900)), Some((2000, 500)), None, SRC_169]);
+        let l = layout(&src, 1_900.0);
+        let g = *l.grid();
         assert_eq!((g.cols, g.rows), (5, 2), "5 and 4");
-        let (w, _) = size(&g);
-        let a = card_rect(&g, 5);
-        let b = card_rect(&g, 8);
+        let (w, _) = l.size();
+        let a = l.card(5).card;
+        let b = l.card(8).card;
         let left_gap = a[0];
         let right_gap = w - (b[0] + b[2]);
         assert!((left_gap - right_gap).abs() < 0.01, "{left_gap} vs {right_gap}");
         for i in 0..9 {
-            let c = card_rect(&g, i);
-            let p = picture_rect(&g, i);
-            assert!(p[0] >= c[0] && p[1] >= c[1] && p[0] + p[2] <= c[0] + c[2] && p[1] + p[3] <= c[1] + c[3]);
+            let c = l.card(i);
+            let inside = |p: [f32; 4]| p[0] >= c.card[0] && p[1] >= c.card[1] && p[0] + p[2] <= c.card[0] + c.card[2] && p[1] + p[3] <= c.card[1] + c.card[3];
+            assert!(inside(c.picture) && inside(c.title), "card {i}");
+            assert!(c.title[1] >= c.picture[1] + c.picture[3], "the title is under the box");
         }
-        // no two cards overlap
         for i in 0..9 {
             for j in (i + 1)..9 {
-                let (a, b) = (card_rect(&g, i), card_rect(&g, j));
+                let (a, b) = (l.card(i).card, l.card(j).card);
                 let apart = a[0] + a[2] <= b[0] || b[0] + b[2] <= a[0] || a[1] + a[3] <= b[1] || b[1] + b[3] <= a[1];
                 assert!(apart, "{i} and {j} overlap");
             }
@@ -679,12 +885,84 @@ mod tests {
     }
 
     #[test]
+    fn three_tall_rows_are_capped_to_the_room_above_the_dock_and_never_below_the_lowest_box() {
+        // 18 windows of ratio 1.0 or taller: 3 rows of the tallest box, 745 logical px high when nothing limits them
+        let src = vec![Some((900, 1000)); MAX_COLS * MAX_ROWS];
+        let free = layout(&src, 1_900.0);
+        assert_eq!(free.grid().rows, 3);
+        assert_eq!(free.size().1, 745.0, "what the old code asked of a short screen");
+        for room in [640.0f32, 560.0, 450.0] {
+            let l = layout_in(&src, 1_900.0, room);
+            assert!(l.size().1 <= room, "room {room}: {}", l.size().1);
+            // the window still has its three rows and every card lies inside the window (nothing is cut off)
+            let h = l.size().1;
+            for i in 0..l.grid().shown {
+                let c = l.card(i).card;
+                assert!(c[1] + c[3] + OUTER_PAD <= h + 0.001, "card {i} at room {room}");
+            }
+            // the cap is the highest that fits: one more px on every row would not
+            let one_more = l.row_pic_height(0) + 1.0;
+            assert!(window_height((0..3).map(|_| one_more)) > room || one_more > free.row_pic_height(0));
+        }
+        // a room that already holds the rows changes nothing
+        assert_eq!(layout_in(&src, 1_900.0, 745.0), free);
+        assert_eq!(layout_in(&src, 1_900.0, 5_000.0), free);
+        // a room too small for even the lowest boxes: the lowest boxes, not less (the placement shortens the window then)
+        let tiny = layout_in(&src, 1_900.0, 100.0);
+        assert_eq!(tiny.row_pic_height(0), (PIC_W * MIN_PIC_RATIO).round());
+        // a short row is not made taller by a cap, and a low row is left alone while a tall one is capped
+        let mut mixed = vec![Some((3000, 600)); MAX_COLS];
+        mixed.extend(vec![Some((900, 1000)); MAX_COLS * 2]);
+        let l = layout_in(&mixed, 1_900.0, 480.0);
+        assert!(l.size().1 <= 480.0);
+        assert_eq!(l.row_pic_height(0), pic_height(Some((3000, 600))), "the low row keeps its shape");
+        assert!(l.row_pic_height(1) < pic_height(Some((900, 1000))));
+    }
+
+    #[test]
+    fn what_the_toolkit_places_inside_a_card_is_the_same_place_as_what_dwm_is_given() {
+        let src = [Some((2560, 1392)), Some((900, 1400)), None, Some((3440, 600)), SRC_169, SRC_169, None];
+        let l = layout(&src, 1_900.0);
+        for i in 0..l.grid().shown {
+            let c = l.card(i);
+            // the child offsets plus the card's own corner give back the rectangles DWM is computed from (exactly: both are sums of the
+            // same constants and the card's x, y)
+            assert_eq!([c.card[0] + c.picture_in_card[0], c.card[1] + c.picture_in_card[1]], [c.picture[0], c.picture[1]], "{i}");
+            assert_eq!([c.card[0] + c.title_in_card[0], c.card[1] + c.title_in_card[1]], [c.title[0], c.title[1]], "{i}");
+            assert_eq!(c.picture_in_card[2..], c.picture[2..], "{i}: same size");
+            assert_eq!(c.title_in_card[2..], c.title[2..], "{i}: same size");
+        }
+    }
+
+    /// THE ONE FUNCTION: what the toolkit paints as the box and what DWM is given are the same numbers, at any scale, and the live picture
+    /// fitted into the device box lies inside what the toolkit painted.
+    #[test]
+    fn the_box_the_toolkit_paints_and_the_one_dwm_draws_in_are_the_same_rectangle() {
+        let src = [Some((2560, 1392)), Some((900, 1400)), None, Some((3440, 600))];
+        let l = layout(&src, 1_900.0);
+        for scale in [1.0f32, 1.25, 1.5, 2.0] {
+            for (i, source) in src.iter().enumerate() {
+                let painted = l.card(i).picture;
+                let dev = to_device(painted, scale);
+                // the same corners the toolkit's logical box has at this scale (its left/top and right/bottom edges rounded alike)
+                assert_eq!(dev.left, px(painted[0], scale));
+                assert_eq!(dev.top, px(painted[1], scale));
+                assert_eq!(dev.right, px(painted[0] + painted[2], scale));
+                assert_eq!(dev.bottom, px(painted[1] + painted[3], scale));
+                let fitted = crate::switcher::layout::fit_picture(source.unwrap_or((1600, 1000)), dev);
+                assert!(dev.covers(&fitted), "{i} at {scale}: {fitted:?} not inside {dev:?}");
+            }
+        }
+    }
+
+    #[test]
     fn a_picture_box_in_device_pixels_follows_the_scale() {
-        let g = grid(1, 1_900.0);
-        let p = picture_rect(&g, 0);
+        let l = layout(&[None], 1_900.0);
+        let p = l.card(0).picture;
         let r = to_device(p, 1.0);
-        assert_eq!((r.width(), r.height()), (184, 110));
+        assert_eq!((r.width(), r.height()), (190, 119));
         let r = to_device(p, 1.5);
-        assert_eq!((r.width(), r.height()), (276, 165));
+        // (both edges are rounded, not the height: 7 * 1.5 = 10.5 -> 11 and 126 * 1.5 = 189)
+        assert_eq!((r.width(), r.height()), (285, 178));
     }
 }

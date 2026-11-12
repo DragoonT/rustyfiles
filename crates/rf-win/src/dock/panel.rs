@@ -245,6 +245,13 @@ pub fn frame_insets(hwnd: isize) -> [i32; 4] {
     insets_from(Rect::new(window.left, window.top, window.right, window.bottom), (origin.x, origin.y), size)
 }
 
+/// Where the client area starts inside the window's own rectangle (left, top; device px): the first two of [`frame_insets`]. What a
+/// DWM thumbnail's destination is measured from (see `rf_win::switcher::thumbs::ThumbSet::with_origin`).
+pub fn client_origin_in_window(hwnd: isize) -> (i32, i32) {
+    let i = frame_insets(hwnd);
+    (i[0], i[1])
+}
+
 /// Moves and sizes the panel and shows it on top without activating it; the caller then brings it to the front
 /// (`crate::window::bring_to_front`) so it gets the keyboard. `r` (device px, screen coordinates) is where the panel's CLIENT area
 /// goes, which is what `place` worked out and what is seen: a window rectangle that is `r` itself would put the visible panel

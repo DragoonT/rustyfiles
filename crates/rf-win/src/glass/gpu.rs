@@ -145,6 +145,17 @@ impl Look {
         Look { bezel: self.bezel.min(RIM_SHARE_MAX), ..self }
     }
 
+    /// This look with the rim band capped at `cap` CSS px (`None`: as it is). The band is `max(4, min(max_bezel, short * bezel))`, so
+    /// a small panel that wants a THIN edge (the dock's hover preview: a thick bent band under 4 px of padding read as a heavy
+    /// border) gives its cap and nothing else changes: the same thickness ratio, frost, tint and rim light. A cap that is not a
+    /// number leaves the look alone; one below the band's own floor of 4 px is that floor.
+    pub(super) fn rim_capped(self, cap: Option<f32>) -> Look {
+        match cap {
+            Some(c) if c.is_finite() => Look { max_bezel: self.max_bezel.min(c.max(4.0)), ..self },
+            _ => self,
+        }
+    }
+
     /// The one look the app ships. No outer shadow (DWM draws the window's own), no zoom, no colour fringe. `p` is what the user set; with
     /// the defaults every number below is the shipped one.
     ///

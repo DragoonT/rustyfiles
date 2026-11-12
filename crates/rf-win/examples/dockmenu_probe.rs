@@ -92,7 +92,30 @@ fn main() {
     println!("== PREVIEW CARDS: {total} windows of {} running apps ({minimized} minimised: large icon; {untitled} without a title), titles read in {:?}", running.len(), t.elapsed());
     if let Some(biggest) = running.iter().map(|a| a.windows.len()).max() {
         let g = preview::grid(biggest, 2560.0);
-        let (w, h) = preview::size(&g);
-        println!("   the biggest app has {biggest} windows: {} columns x {} rows, {} shown, {} not shown, window {w:.0} x {h:.0} logical px", g.cols, g.rows, g.shown, g.hidden);
+        let (w, h) = preview::layout(&vec![None; biggest], 2560.0).size();
+        println!("   the biggest app has {biggest} windows: {} columns x {} rows, {} shown, {} not shown, window {w:.0} x {h:.0} logical px (shapes unknown: 16:10)", g.cols, g.rows, g.shown, g.hidden);
+    }
+    // the dynamic height: every running window's box from its own rectangle (a read, no DWM registration, nothing drawn); counts only
+    {
+        use rf_win::switcher::thumbs::{Dwm, ThumbApi, usable_size};
+        let (mut low, mut mid, mut high, mut unknown) = (0usize, 0usize, 0usize, 0usize);
+        for a in &running {
+            for &w in &a.windows {
+                match usable_size(Dwm.window_size(w), winops::is_minimized(w)) {
+                    None => unknown += 1,
+                    Some(s) => {
+                        let ph = preview::pic_height(Some(s));
+                        if ph <= (preview::PIC_W * preview::MIN_PIC_RATIO).round() {
+                            low += 1
+                        } else if ph >= (preview::PIC_W * preview::MAX_PIC_RATIO).round() {
+                            high += 1
+                        } else {
+                            mid += 1
+                        }
+                    }
+                }
+            }
+        }
+        println!("   box heights of those windows: {low} at the lowest limit, {mid} between, {high} at the highest limit, {unknown} not known (16:10)");
     }
 }

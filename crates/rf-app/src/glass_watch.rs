@@ -139,6 +139,13 @@ impl PopupGlass {
         Self::start_with(hwnd, dark, true)
     }
 
+    /// [`start_panel`](Self::start_panel) for a small panel that wants a THIN edge: the glass's rim band is at most `rim_cap` CSS px
+    /// wide (`rf_win::glass::set_rim_cap`, set before the window is attached; it goes when the glass is released).
+    pub fn start_panel_thin_rim(hwnd: isize, dark: bool, rim_cap: f32) -> PopupGlass {
+        rf_win::glass::set_rim_cap(hwnd, Some(rim_cap));
+        Self::start_with(hwnd, dark, true)
+    }
+
     fn start_with(hwnd: isize, dark: bool, round: bool) -> PopupGlass {
         let mut g = PopupGlass { hwnd, machine: Machine::default(), started: Instant::now(), attached: false, gave_up: false };
         if hwnd == 0 {

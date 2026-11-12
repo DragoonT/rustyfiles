@@ -3,16 +3,17 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::time::Instant;
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{Icon, h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex};
 use gpui_kit::*;
 use rf_win::weather::{Observation, Outcome, WeatherFeed};
 
 use super::backdrop::IslandGlass;
 use super::host::Kind;
-use super::look::Env;
 use super::plan::{self, WeatherPicture};
+use super::start_button::{self, StartButton};
 use crate::t;
 
 pub struct LeftIsland {
@@ -23,17 +24,64 @@ pub struct LeftIsland {
     weather_gen: u64,
     /// The width last reported to the host (logical px).
     reported: f32,
+    /// The Start button's states and motion (`start_button.rs`), and the clock its events are timed on.
+    button: StartButton,
+    t0: Instant,
 }
 
 impl LeftIsland {
     pub fn new(glass: Rc<RefCell<IslandGlass>>, city: &str, cx: &mut Context<Self>) -> Self {
-        let mut me = LeftIsland { glass, city: String::new(), weather: None, weather_gen: 0, reported: plan::left_width(None) };
+        let mut me = LeftIsland { glass, city: String::new(), weather: None, weather_gen: 0, reported: plan::left_width(None), button: StartButton::new(), t0: Instant::now() };
         me.set_city(city, cx);
         me
     }
 
     pub fn width(&self) -> f32 {
         plan::left_width(self.weather.map(|o| o.text()).as_deref())
+    }
+
+    fn now_ms(&self) -> u64 {
+        self.t0.elapsed().as_millis() as u64
+    }
+
+    /// Where the pointer is now relative to the logo (told by the probe in `render` on every mouse move and when the pointer leaves
+    /// the window). The toolkit's own hover callback is not used: it reports the pointer as gone on the first mouse move while a
+    /// button is down on the element, even one pixel inside it, which would end the press before the button comes up.
+    fn logo_pointer(&mut self, inside: bool, cx: &mut Context<Self>) {
+        if inside == self.button.is_hovered() {
+            return;
+        }
+        let (now, animate) = (self.now_ms(), crate::settings::animations());
+        if inside {
+            self.button.enter(now, animate);
+        } else {
+            self.button.leave(now, animate);
+        }
+        cx.notify();
+    }
+
+    fn logo_press(&mut self, cx: &mut Context<Self>) {
+        let (now, animate) = (self.now_ms(), crate::settings::animations());
+        self.button.press(now, animate);
+        cx.notify();
+    }
+
+    /// The mouse button came up on the logo (`inside`) or somewhere else after going down on it.
+    fn logo_release(&mut self, inside: bool, cx: &mut Context<Self>) {
+        if !self.button.is_pressed() {
+            return;
+        }
+        let (now, animate) = (self.now_ms(), crate::settings::animations());
+        self.button.release(now, inside, animate);
+        cx.notify();
+    }
+
+    /// The Start panel opened or closed (told by `panel.rs`): the logo keeps its plate while it is open, and plays one press and release
+    /// when it was opened by the keyboard or the search field.
+    pub fn panel_changed(&mut self, open: bool, cx: &mut Context<Self>) {
+        let (now, animate) = (self.now_ms(), crate::settings::animations());
+        self.button.panel_changed(open, now, animate);
+        cx.notify();
     }
 
     fn report_width(&mut self, cx: &mut Context<Self>) {
@@ -114,37 +162,60 @@ fn picture_icon(p: WeatherPicture) -> L {
     }
 }
 
+/// The Start button's plate corner radius, logical px.
+const LOGO_RADIUS: f32 = 8.0;
+
+/// Follows the pointer over the logo's `bounds` for the frame being painted: every mouse move says whether it is inside, and the
+/// pointer leaving the window says it is not. Mouse capture while a button is down keeps the moves coming from outside the window.
+fn pointer_probe(me: Entity<LeftIsland>, bounds: Bounds<Pixels>, window: &mut Window) {
+    let moved = me.clone();
+    window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+        if phase == DispatchPhase::Bubble {
+            let inside = bounds.contains(&e.position);
+            moved.update(cx, |l, cx| l.logo_pointer(inside, cx));
+        }
+    });
+    window.on_mouse_event(move |_: &MouseExitEvent, phase, _, cx| {
+        if phase == DispatchPhase::Bubble {
+            me.update(cx, |l, cx| l.logo_pointer(false, cx));
+        }
+    });
+}
+
 /// Whether the logo and the search field open our own Start panel (the setting "rustyfiles Başlat menüsünü kullan"; on by default).
 fn own_start(cx: &App) -> bool {
     cx.try_global::<crate::settings::Settings>().is_none_or(|s| s.dock_own_start)
 }
 
-/// The Windows logo: four squares in the accent colour.
-fn windows_logo(accent: Hsla) -> impl IntoElement {
-    let square = move || div().size(px(8.)).bg(accent);
-    v_flex().gap(px(2.)).child(h_flex().gap(px(2.)).child(square()).child(square())).child(h_flex().gap(px(2.)).child(square()).child(square()))
-}
-
 impl Render for LeftIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let env = *cx.global::<Env>();
         let typed = super::panel::typed_text(cx);
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
-        let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
+        let pressed = pal.pressed_fill().hsla();
         let secondary = pal.text_secondary().hsla();
-        let accent: Hsla = rgb(env.accent).into();
 
+        // the Start button: the plate, the logo's size and whether more frames are needed all come from its states at this moment
+        let now = self.now_ms();
+        let frame = self.button.frame(now);
+        if self.button.moving(now) {
+            window.request_animation_frame();
+        }
+        let scale_factor = window.scale_factor();
+        let me = cx.entity();
         let logo = div()
             .id("dock-logo")
+            .relative()
             .size(px(plan::LOGO))
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(8.))
             .cursor_pointer()
-            .hover(move |s| s.bg(hover))
-            .active(move |s| s.bg(pressed))
-            .child(windows_logo(accent))
+            .children(start_button::plate(frame.plate, pal.hover_fill(), pal.mix, LOGO_RADIUS))
+            .child(start_button::logo(frame.scale, scale_factor))
+            .child(canvas(|_, _, _| (), move |bounds, _, window, _| pointer_probe(me, bounds, window)).absolute().size_full())
+            .on_mouse_down(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_press(cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_release(true, cx)))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_release(false, cx)))
             // the user's click is the only thing that ever sends the Windows key (and only when our own Start is switched off)
             .on_click(|_, _, cx| {
                 if own_start(cx) {

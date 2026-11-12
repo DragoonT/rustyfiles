@@ -36,10 +36,10 @@ use gpui_kit::*;
 use rf_win::dock::island;
 use rf_win::dock::layout::Rect;
 use rf_win::dock::panel as geo;
-use rf_win::dock::preview::{self, Grid, Input, Machine, Output};
+use rf_win::dock::preview::{self, Input, Layout, Machine, Output};
 use rf_win::dock::winops::{self, WinRef};
 use rf_win::dock::DockApp;
-use rf_win::switcher::thumbs::{Dwm, Picture, ThumbSet};
+use rf_win::switcher::thumbs::{Dwm, Picture, ThumbSet, probe_size};
 
 use super::backdrop::IslandGlass;
 use super::host;
@@ -255,7 +255,7 @@ fn ensure_window(island: &Rc<RefCell<IslandGlass>>, cx: &mut App) -> Option<(Win
     let (scale, _, glass) = popup_win::anchor_basis(cx)?;
     let display = cx.primary_display().map(|d| d.id());
     let isl = island.clone();
-    let handle = popup_win::open_hidden((preview::CARD_W + 2.0 * preview::OUTER_PAD, preview::CARD_H + 2.0 * preview::OUTER_PAD), display, glass, scale, on_window_close, move |_, _| PreviewView::new(isl), cx)?;
+    let handle = popup_win::open_hidden(preview::layout(&[None], 1000.0).size(), display, glass, scale, on_window_close, move |_, _| PreviewView::new(isl), cx)?;
     let hwnd = handle.update(cx, |v, window, _| {
         let h = crate::look::window::hwnd_of(window);
         v.hwnd = h;
@@ -293,11 +293,21 @@ fn show_now(key: String, started: Instant, cx: &mut App) {
     }
     let grid = preview::grid(alive.len(), work.width() as f32 / scale);
     let cards: Vec<Card> = alive.iter().take(grid.shown).map(|&w| Card { win: w, title: winops::window_title(w.hwnd), minimized: winops::is_minimized(w.hwnd) }).collect();
-    let size = preview::size(&grid);
+    // The card's height follows the window's shape, so the shapes are asked BEFORE the window is sized: each source is registered to the
+    // (hidden or shown) preview window for a moment, asked and given back (`probe_size`); the windows that get no card stay unknown.
+    let probe_started = Instant::now();
+    let mut dwm = Dwm;
+    let mut sources: Vec<Option<(i32, i32)>> = cards.iter().map(|c| probe_size(&mut dwm, hwnd, c.win.hwnd, c.minimized)).collect();
+    sources.resize(alive.len(), None);
+    let unknown = sources.iter().take(cards.len()).filter(|s| s.is_none()).count();
+    let probe_took = probe_started.elapsed();
+    // Never taller than the room above the dock: a layout that would not fit has its boxes capped (the rows are not cut off).
+    let layout = preview::layout_in(&sources, work.width() as f32 / scale, preview::room_above(glass.top, scale, work));
+    let size = layout.size();
     let rect = preview::above_icon(info.anchor_x.round() as i32, glass.top, size, scale, work);
     let dark = info.glass.borrow().dark();
     let (count, hidden, anchor) = (cards.len(), grid.hidden, info.anchor_x.round() as i32);
-    let _ = handle.update(cx, |v, _, cx| v.set_cards(cards, grid, info.icon.clone(), scale, cx));
+    let _ = handle.update(cx, |v, _, cx| v.set_cards(cards, layout, info.icon.clone(), scale, cx));
     let generation = {
         let host = host_g(cx);
         host.generation += 1;
@@ -313,7 +323,7 @@ fn show_now(key: String, started: Instant, cx: &mut App) {
         cx.update(|cx| {
             let live = handle.update(cx, |v, _, cx| v.on_shown(dark, cx)).unwrap_or(0);
             log::info!(
-                "dock: hover preview shown in {:?} at x={anchor} ({count} cards, {live} live pictures{}{})",
+                "dock: hover preview shown in {:?} at x={anchor} ({count} cards, {live} live pictures, shapes asked in {probe_took:?}, {unknown} of unknown shape{}{})",
                 started.elapsed(),
                 if hidden > 0 { format!(", {hidden} windows not shown") } else { String::new() },
                 if made_now { "; window made for it" } else { "" }
@@ -443,7 +453,8 @@ pub struct PreviewView {
     _watch: Option<Task<()>>,
     shown: bool,
     cards: Vec<Card>,
-    grid: Grid,
+    /// Where everything of every card is: the drawing and the live pictures both take their rectangles from here.
+    layout: Layout,
     icon: Option<Arc<RenderImage>>,
     scale: f32,
     thumbs: Option<ThumbSet<Dwm>>,
@@ -460,7 +471,7 @@ impl PreviewView {
             _watch: None,
             shown: false,
             cards: Vec::new(),
-            grid: preview::grid(0, 1000.0),
+            layout: preview::layout(&[], 1000.0),
             icon: None,
             scale: 1.0,
             thumbs: None,
@@ -471,11 +482,11 @@ impl PreviewView {
 
     /// New cards: whatever pictures the last ones had are let go first (DWM thumbnails are unregistered before the window moves or
     /// changes size, and registered again once it has).
-    fn set_cards(&mut self, cards: Vec<Card>, grid: Grid, icon: Option<Arc<RenderImage>>, scale: f32, cx: &mut Context<Self>) {
+    fn set_cards(&mut self, cards: Vec<Card>, layout: Layout, icon: Option<Arc<RenderImage>>, scale: f32, cx: &mut Context<Self>) {
         self.thumbs = None;
         self.pictures.clear();
         self.cards = cards;
-        self.grid = grid;
+        self.layout = layout;
         self.icon = icon;
         self.scale = scale;
         self.hover = None;
@@ -487,12 +498,27 @@ impl PreviewView {
     /// above them). Returns how many cards have a live picture.
     fn on_shown(&mut self, dark: bool, cx: &mut Context<Self>) -> usize {
         if self.popup.is_none() && self.shown {
-            self.popup = Some(PopupGlass::start_panel(self.hwnd, dark));
+            self.popup = Some(PopupGlass::start_panel_thin_rim(self.hwnd, dark, rim_cap()));
             self._watch = Some(glass_watch::watch(cx, |this: &mut Self| this.popup.as_mut()));
         }
+        // THE SAME BOX the card is painted with (`Layout::card(i).picture`), in device px. DWM measures its destination from the window's
+        // own top left corner, and the client area of this window starts after the system's invisible frame (8 px at 100 % on the left,
+        // none at the top): the pictures were drawn that far left of their boxes. The origin is read now, with the window on the screen.
+        let origin = thumb_origin(self.hwnd);
         let boxes: Vec<(isize, bool, Rect)> =
-            self.cards.iter().enumerate().map(|(i, c)| (c.win.hwnd, c.minimized, preview::to_device(preview::picture_rect(&self.grid, i), self.scale))).collect();
-        let mut set = ThumbSet::new(Dwm, self.hwnd);
+            self.cards.iter().enumerate().map(|(i, c)| (c.win.hwnd, c.minimized, preview::to_device(self.layout.card(i).picture, self.scale))).collect();
+        if let Some(first) = boxes.first() {
+            log::info!(
+                "dock: hover preview pictures: {} boxes, the first {}x{} at ({}, {}) in client px, client area starts at {:?} in the window",
+                boxes.len(),
+                first.2.width(),
+                first.2.height(),
+                first.2.left,
+                first.2.top,
+                origin
+            );
+        }
+        let mut set = ThumbSet::new(Dwm, self.hwnd).with_origin(origin);
         self.pictures = set.show(&boxes);
         self.thumbs = Some(set);
         cx.notify();
@@ -525,6 +551,24 @@ impl PreviewView {
     }
 }
 
+/// How wide the glass's bent rim band may be, CSS px. The window's own is a third of its short side (up to 44 px), which under 4 px of
+/// padding read as a thick border; this is the thin edge. Tune it here.
+const RIM_CAP: f32 = 8.0;
+
+/// [`RIM_CAP`], or `RUSTYFILES_PREVIEW_RIM=<css px>` (1 to 44) to compare edges on the screen without a rebuild.
+fn rim_cap() -> f32 {
+    std::env::var("RUSTYFILES_PREVIEW_RIM").ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| (1.0..=44.0).contains(v)).unwrap_or(RIM_CAP)
+}
+
+/// Where DWM measures a thumbnail's destination from, relative to the client area: the client area's offset inside the window (the
+/// system's invisible frame). `RUSTYFILES_PREVIEW_THUMB_ORIGIN=0` sends the client rectangles as they are (to compare on the screen).
+fn thumb_origin(hwnd: isize) -> (i32, i32) {
+    if std::env::var("RUSTYFILES_PREVIEW_THUMB_ORIGIN").is_ok_and(|v| v == "0") {
+        return (0, 0);
+    }
+    geo::client_origin_in_window(hwnd)
+}
+
 fn with_alpha(mut c: Hsla, a: f32) -> Hsla {
     c.a = a;
     c
@@ -549,8 +593,13 @@ impl Render for PreviewView {
             .text_color(text)
             .text_size(px(12.))
             .on_hover(cx.listener(|_, on: &bool, _, cx| preview_hover(*on, cx)));
+        // a thin, light frame on every card (drawn as a child over the card's fill, not as a border of the card: a border would move the
+        // card's absolutely placed children in by its width)
+        let frame = if dark { with_alpha(rgb(0xFFFFFF).into(), 0.09) } else { with_alpha(rgb(0x000000).into(), 0.10) };
         for (i, card) in self.cards.iter().enumerate() {
-            let [x, y, w, h] = preview::card_rect(&self.grid, i);
+            // every rectangle of the card comes from the layout, the same ones the live pictures are placed from
+            let b = self.layout.card(i);
+            let [x, y, w, h] = b.card;
             let live = matches!(self.pictures.get(i), Some(Picture::Live(_)));
             let hot = self.hover == Some(i);
             let title: SharedString = if card.title.trim().is_empty() { crate::t!("(adsız)").into() } else { card.title.clone().into() };
@@ -558,11 +607,11 @@ impl Render for PreviewView {
             // the picture box: DWM draws the live window over it; a window with no live picture shows the app's large icon in it
             let picture_box = div()
                 .absolute()
-                .left(px(preview::CARD_PAD))
-                .top(px(preview::CARD_PAD))
-                .w(px(w - 2.0 * preview::CARD_PAD))
-                .h(px(preview::PIC_H))
-                .rounded(px(6.))
+                .left(px(b.picture_in_card[0]))
+                .top(px(b.picture_in_card[1]))
+                .w(px(b.picture_in_card[2]))
+                .h(px(b.picture_in_card[3]))
+                .rounded(px(4.))
                 .bg(letterbox)
                 .flex()
                 .items_center()
@@ -572,10 +621,11 @@ impl Render for PreviewView {
             // drawn over everything of ours that lies on it)
             let row = div()
                 .absolute()
-                .left(px(preview::CARD_PAD))
-                .top(px(preview::CARD_PAD + preview::PIC_H))
-                .w(px(w - 2.0 * preview::CARD_PAD))
-                .h(px(preview::TITLE_H))
+                .left(px(b.title_in_card[0]))
+                .top(px(b.title_in_card[1]))
+                .w(px(b.title_in_card[2]))
+                .h(px(b.title_in_card[3]))
+                .px(px(3.))
                 .flex()
                 .items_center()
                 .gap(px(6.))
@@ -608,11 +658,12 @@ impl Render for PreviewView {
                     .top(px(y))
                     .w(px(w))
                     .h(px(h))
-                    .rounded(px(10.))
+                    .rounded(px(7.))
                     .bg(if hot { card_hot } else { card_fill })
                     .cursor_pointer()
                     .on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_card(i, *on, cx)))
                     .on_click(cx.listener(move |_, _, _, cx| activate_window(win, cx)))
+                    .child(div().absolute().top_0().left_0().size_full().rounded(px(7.)).border_1().border_color(frame))
                     .child(picture_box)
                     .child(row),
             );

@@ -27,6 +27,36 @@ pub trait ThumbApi {
     /// Draws the thumbnail into `rect` (the destination window's client coordinates).
     fn place(&mut self, thumb: isize, rect: Rect) -> anyhow::Result<()>;
     fn unregister(&mut self, thumb: isize);
+    /// The source window's outer size, device px, read without DWM (the fallback when a size cannot be had from a registration).
+    fn window_size(&mut self, _source: isize) -> Option<(i32, i32)> {
+        None
+    }
+}
+
+/// The size of a source that is worth fitting a picture to: a known size, and for a minimized window not only its stub (see
+/// [`MIN_SOURCE`]). `None` means "not known", which the layout treats as 16:10 until it is.
+pub fn usable_size(size: Option<(i32, i32)>, minimized: bool) -> Option<(i32, i32)> {
+    let (w, h) = size?;
+    if w <= 0 || h <= 0 || (minimized && (w < MIN_SOURCE || h < MIN_SOURCE)) {
+        return None;
+    }
+    Some((w, h))
+}
+
+/// The size DWM would draw `source` at, found BEFORE the preview's window is sized (the card's height follows the window's shape, so
+/// the shape must be known first): the source is registered to `dest` for a moment, asked, and given back. Falls back to the window's
+/// own rectangle when DWM will not register it (a minimized window has no such fallback: its rectangle is the stub). Nothing stays
+/// registered and nothing is drawn.
+pub fn probe_size<A: ThumbApi>(api: &mut A, dest: isize, source: isize, minimized: bool) -> Option<(i32, i32)> {
+    if source == 0 {
+        return None;
+    }
+    let via_dwm = api.register(dest, source).ok().and_then(|t| {
+        let size = api.source_size(t);
+        api.unregister(t);
+        size
+    });
+    usable_size(via_dwm.or_else(|| if minimized { None } else { api.window_size(source) }), minimized)
 }
 
 /// What a card shows in its picture box.
@@ -42,6 +72,8 @@ pub enum Picture {
 pub struct ThumbSet<A: ThumbApi> {
     api: A,
     dest: isize,
+    /// Added to every destination rectangle before DWM gets it (see [`ThumbSet::with_origin`]).
+    origin: (i32, i32),
     registered: Vec<isize>,
 }
 
@@ -51,7 +83,18 @@ pub const MIN_SOURCE: i32 = 64;
 
 impl<A: ThumbApi> ThumbSet<A> {
     pub fn new(api: A, dest: isize) -> ThumbSet<A> {
-        ThumbSet { api, dest, registered: Vec::new() }
+        ThumbSet { api, dest, origin: (0, 0), registered: Vec::new() }
+    }
+
+    /// A set whose destination rectangles are moved by `origin` (device px) on their way to DWM, for a destination window whose client
+    /// area does not start at its own top left corner (the dock's pop-ups keep the system's invisible resize frame: 8 px left, right
+    /// and below at 100 %, and no caption). The pictures in [`Picture::Live`] stay in CLIENT coordinates, the ones the view draws its
+    /// boxes in; only the call to DWM is shifted. Seen with a real mouse: every live picture stood exactly the frame's left inset
+    /// (8 px) left of its box, whatever its proportions, with no vertical error (the top inset is 0), which is DWM taking the
+    /// destination from the window's own origin and not from the client area's.
+    pub fn with_origin(mut self, origin: (i32, i32)) -> ThumbSet<A> {
+        self.origin = origin;
+        self
     }
 
     /// Registers a picture for each `(source window, minimized, picture box)` and returns what each card shows, in the same
@@ -79,7 +122,8 @@ impl<A: ThumbApi> ThumbSet<A> {
                 }
                 self.registered.push(thumb);
                 let at = fit_picture(size, boxr);
-                match self.api.place(thumb, at) {
+                let sent = Rect::new(at.left + self.origin.0, at.top + self.origin.1, at.right + self.origin.0, at.bottom + self.origin.1);
+                match self.api.place(thumb, sent) {
                     Ok(()) => Picture::Live(at),
                     Err(e) => {
                         log::debug!("switcher: cannot place the picture of {source:#x}: {e:#}");
@@ -146,6 +190,14 @@ impl ThumbApi for Dwm {
             let _ = DwmUnregisterThumbnail(thumb);
         }
     }
+
+    fn window_size(&mut self, source: isize) -> Option<(i32, i32)> {
+        use windows::Win32::Foundation::{HWND, RECT};
+        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+        let mut r = RECT::default();
+        unsafe { GetWindowRect(HWND(source as *mut _), &mut r) }.ok()?;
+        Some((r.right - r.left, r.bottom - r.top))
+    }
 }
 
 #[cfg(test)]
@@ -170,11 +222,24 @@ mod tests {
         /// Which source each thumbnail was registered for.
         of: Vec<(isize, isize)>,
         fail_place: bool,
+        /// What `window_size` answers.
+        window: Option<(i32, i32)>,
+        /// The rectangles DWM was given.
+        placed: Rc<RefCell<Vec<Rect>>>,
     }
 
     impl Fake {
         fn new(log: &Rc<RefCell<Log>>) -> Fake {
-            Fake { log: log.clone(), refuse: vec![], size: (1920, 1080), sizes: vec![], of: vec![], fail_place: false }
+            Fake {
+                log: log.clone(),
+                refuse: vec![],
+                size: (1920, 1080),
+                sizes: vec![],
+                of: vec![],
+                fail_place: false,
+                window: None,
+                placed: Rc::new(RefCell::new(Vec::new())),
+            }
         }
     }
 
@@ -198,6 +263,7 @@ mod tests {
         }
         fn place(&mut self, thumb: isize, r: Rect) -> anyhow::Result<()> {
             self.log.borrow_mut().calls.push(format!("place {thumb} {}x{}", r.width(), r.height()));
+            self.placed.borrow_mut().push(r);
             if self.fail_place {
                 anyhow::bail!("bad rect");
             }
@@ -208,6 +274,63 @@ mod tests {
             l.calls.push(format!("unregister {thumb}"));
             l.live.retain(|t| *t != thumb);
         }
+        fn window_size(&mut self, _source: isize) -> Option<(i32, i32)> {
+            self.window
+        }
+    }
+
+    #[test]
+    fn an_origin_moves_what_dwm_is_given_and_not_what_the_card_keeps() {
+        let log = Rc::new(RefCell::new(Log::default()));
+        let api = Fake::new(&log);
+        let placed = api.placed.clone();
+        // the dock's pop-up: its client area starts 8 px right of the window's own left edge
+        let mut set = ThumbSet::new(api, 1).with_origin((8, 0));
+        let pics = set.show(&[(0x10, false, BOX)]);
+        let Picture::Live(kept) = pics[0] else { panic!("live") };
+        assert!(BOX.covers(&kept), "the card keeps the client rectangle {kept:?}");
+        let sent = placed.borrow()[0];
+        assert_eq!((sent.left, sent.top), (kept.left + 8, kept.top), "DWM gets it moved by the origin");
+        assert_eq!((sent.width(), sent.height()), (kept.width(), kept.height()), "moved, not resized");
+        // no origin: DWM gets exactly the client rectangle
+        let api = Fake::new(&log);
+        let placed = api.placed.clone();
+        let mut set = ThumbSet::new(api, 1);
+        let pics = set.show(&[(0x10, false, BOX)]);
+        assert_eq!(Picture::Live(placed.borrow()[0]), pics[0]);
+    }
+
+    #[test]
+    fn a_size_is_found_before_any_picture_is_drawn_and_nothing_stays_registered() {
+        let log = Rc::new(RefCell::new(Log::default()));
+        let mut api = Fake::new(&log);
+        api.sizes = vec![(0x10, (1000, 400))];
+        assert_eq!(probe_size(&mut api, 7, 0x10, false), Some((1000, 400)));
+        assert_eq!(log.borrow().calls, vec!["register 0x7 0x10", "size 1", "unregister 1"]);
+        assert!(log.borrow().live.is_empty());
+        assert!(api.placed.borrow().is_empty(), "nothing was placed");
+    }
+
+    #[test]
+    fn a_window_dwm_will_not_register_is_sized_by_its_rectangle_unless_it_is_minimized() {
+        let log = Rc::new(RefCell::new(Log::default()));
+        let mut api = Fake::new(&log);
+        api.refuse = vec![0x10];
+        api.window = Some((800, 600));
+        assert_eq!(probe_size(&mut api, 7, 0x10, false), Some((800, 600)));
+        assert_eq!(probe_size(&mut api, 7, 0x10, true), None, "a minimized window's rectangle is its stub");
+        assert_eq!(probe_size(&mut api, 7, 0, false), None, "no window");
+    }
+
+    #[test]
+    fn only_a_size_worth_a_picture_counts() {
+        assert_eq!(usable_size(Some((1920, 1080)), false), Some((1920, 1080)));
+        assert_eq!(usable_size(None, false), None);
+        assert_eq!(usable_size(Some((0, 0)), false), None);
+        assert_eq!(usable_size(Some((-3, 20)), false), None);
+        assert_eq!(usable_size(Some((160, 28)), true), None, "a minimized stub");
+        assert_eq!(usable_size(Some((160, 28)), false), Some((160, 28)), "a small tool window is a picture");
+        assert_eq!(usable_size(Some((800, 600)), true), Some((800, 600)), "the last picture DWM keeps");
     }
 
     const BOX: Rect = Rect::new(10, 10, 214, 134);

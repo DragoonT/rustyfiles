@@ -386,6 +386,7 @@ fn open_panel(id: PanelId, cx: &mut App) {
         p.mouse_was_down = geo::any_button_down();
         p.serial
     };
+    start_state_changed(id, true, cx);
     hooks.on_open(dark, cx);
     // the rectangle again: opening may have changed what the panel wants to show (its height)
     let rect = geo::place(glass, hooks.size(cx), scale, side, work);
@@ -492,7 +493,7 @@ pub fn close(cause: CloseCause, cx: &mut App) {
         p.typed.clear();
     }
     if let Some(left) = left {
-        left.update(cx, |_, cx| cx.notify());
+        left.update(cx, |l, cx| if id == PanelId::START { l.panel_changed(false, cx) } else { cx.notify() });
     }
     hooks.on_close(cx);
     let restore = cause.restores_foreground();
@@ -525,9 +526,20 @@ fn put_away_now(id: PanelId, cx: &mut App) {
         p.watcher = None;
         p.typed.clear();
     }
+    start_state_changed(id, false, cx);
     hooks.on_close(cx);
     geo::hide(hwnd);
     hooks.on_hidden(cx);
+}
+
+/// The Start panel opened or closed: the logo on the left island keeps its "active" plate while it is open and plays the press and
+/// release when the panel was opened by something other than a click on the logo. (Other panels are none of the logo's business.)
+fn start_state_changed(id: PanelId, open: bool, cx: &mut App) {
+    if id != PanelId::START {
+        return;
+    }
+    let Some(left) = panel(cx).and_then(|p| p.left.clone()) else { return };
+    left.update(cx, |l, cx| l.panel_changed(open, cx));
 }
 
 /// The dock ends: the panels' windows go with it.
