@@ -528,17 +528,30 @@ pub(super) fn render(src_bgra: &[u8], src_w: u32, src_h: u32, rect: (i32, i32, u
     }
     let geo = Geometry { w, h, origin: (x, y), scale, radius_px };
     unsafe {
-        let gpu = Gpu::offscreen(force_warp).map_err(|e| format!("no D3D11 device, not even WARP: {e}"))?;
-        let r = Renderer::new(gpu, true)?;
+        let r = offscreen_renderer(force_warp)?;
+        render_on(&r, src_bgra, src_w, src_h, &geo, look)
+    }
+}
+
+/// A device and the compiled shaders for offscreen pictures: hardware if there is any (unless `force_warp`), else WARP.
+pub(super) unsafe fn offscreen_renderer(force_warp: bool) -> Result<Renderer, String> {
+    let gpu = Gpu::offscreen(force_warp).map_err(|e| format!("no D3D11 device, not even WARP: {e}"))?;
+    Renderer::new(gpu, true)
+}
+
+/// The drawing of `render` on a renderer the caller holds (arguments already checked).
+pub(super) unsafe fn render_on(r: &Renderer, src_bgra: &[u8], src_w: u32, src_h: u32, geo: &Geometry, look: &Look) -> Result<Vec<u8>, String> {
+    let (w, h, scale) = (geo.w, geo.h, geo.scale);
+    {
         let e = |what: &'static str| move |er: windows::core::Error| format!("{what}: {er}");
         let src = Source::new(&r.g, src_w, src_h, Some(src_bgra)).map_err(e("source texture"))?;
         let region = Region::new(&r.g, w, h, region_pad(scale)).map_err(e("region texture"))?;
-        let prepared = prep(&r, &region, &src, &geo, look, true);
+        let prepared = prep(r, &region, &src, geo, look, true);
         let off = tex2d(&r.g, w, h, 1, DXGI_FORMAT_B8G8R8A8_UNORM, (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32)
             .map_err(e("target texture"))?;
         let rtv = rtv_mip(&r.g, &off, DXGI_FORMAT_B8G8R8A8_UNORM, 0).map_err(e("target view"))?;
         r.g.ctx.ClearRenderTargetView(&rtv, &[0.0; 4]);
-        glass_pass(&r, &region, &prepared, &geo, &rtv);
+        glass_pass(r, &region, &prepared, geo, &rtv);
         let out = readback(&r.g, &off, w, h, 4).map_err(e("read back"))?;
         if let Err(er) = r.g.dev.GetDeviceRemovedReason() {
             return Err(format!("the device was removed while drawing: {er}"));

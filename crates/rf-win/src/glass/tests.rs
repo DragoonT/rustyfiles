@@ -1,7 +1,7 @@
 //! Windowless tests of the glass: everything goes through the offscreen path (a hardware device if there is one, WARP when the GPU is
 //! forced off or absent), so they run on a CI runner. The live path (a window, the capture loop) is not covered here: it needs a screen.
 
-use super::gpu::{self, Cb, Geometry, Gpu, Look, Region, Renderer, Source, prep, region_pad, region_size};
+use super::gpu::{self, Cb, Geometry, Look, Region, Renderer, Source, prep, region_pad, region_size};
 use super::*;
 
 /// BGRA picture filled by `f(x, y) -> [r, g, b]`.
@@ -32,7 +32,24 @@ fn expected_centre(grey: u8, look: &Look) -> [f32; 3] {
 
 /// `gpu::render` at scale 1 with a look and the choice between hardware and WARP.
 fn render_with(src: &[u8], sw: u32, sh: u32, rect: (i32, i32, u32, u32), radius: f32, look: &Look, force_warp: bool) -> Result<Vec<u8>, String> {
-    gpu::render(src, sw, sh, rect, radius, 1.0, &gpu::Opts { look: *look, force_warp })
+    let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: radius };
+    with_renderer(force_warp, |r| unsafe { gpu::render_on(r, src, sw, sh, &geo, look) })
+}
+
+/// One device per driver for all the tests here, made by the first test that draws and never destroyed. A device per picture meant
+/// dozens of devices made and destroyed on parallel test threads; with the rest of the crate's tests running beside them the test
+/// process then ended with a wrong exit code although every test had passed (seen on CI and here).
+struct Shared(Renderer);
+// SAFETY: a D3D11 device may be used from any thread; its immediate context only from one at a time, which the mutex sees to.
+unsafe impl Send for Shared {}
+static RENDERERS: [std::sync::Mutex<Option<Shared>>; 2] = [std::sync::Mutex::new(None), std::sync::Mutex::new(None)];
+
+fn with_renderer<T>(force_warp: bool, f: impl FnOnce(&Renderer) -> T) -> T {
+    // the software renderer takes every core while it draws: not while a timing test measures (see `TEST_QUIET`)
+    let _quiet = crate::TEST_QUIET.lock().unwrap_or_else(|p| p.into_inner());
+    let mut slot = RENDERERS[force_warp as usize].lock().unwrap_or_else(|p| p.into_inner());
+    let shared = slot.get_or_insert_with(|| Shared(unsafe { gpu::offscreen_renderer(force_warp) }.expect("a D3D11 device (WARP at least)")));
+    f(&shared.0)
 }
 
 fn drivers() -> [bool; 2] {
@@ -182,13 +199,12 @@ fn fingerprint_follows_the_backdrop() {
     let (sw, sh) = (700u32, 600u32);
     let geo = Geometry { w: 300, h: 200, origin: (100, 100), scale: 1.0, radius_px: 8.0 };
     let look = Look::regular(false);
-    unsafe {
-        let r = Renderer::new(Gpu::offscreen(true).expect("WARP device"), true).expect("renderer");
+    with_renderer(true, |r| unsafe {
         let region = Region::new(&r.g, geo.w, geo.h, region_pad(geo.scale)).expect("region");
         let base = picture(sw, sh, |x, y| [(x / 5 % 256) as u8, (y / 5 % 256) as u8, 40]);
         let fp = |data: &[u8]| {
             let src = Source::new(&r.g, sw, sh, Some(data)).expect("source");
-            prep(&r, &region, &src, &geo, &look, false);
+            prep(r, &region, &src, &geo, &look, false);
             region.fingerprint(&r.g, geo.w, geo.h).expect("fingerprint")
         };
         let a = fp(&base);
@@ -213,7 +229,7 @@ fn fingerprint_follows_the_backdrop() {
             }
         }
         assert_eq!(a, fp(&outside), "a change in the slack of the region, beyond the glass's padding, must not change the fingerprint");
-    }
+    });
 }
 
 #[test]

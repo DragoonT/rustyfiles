@@ -71,6 +71,12 @@ pub mod volume;
 pub mod tasklist;
 pub mod wide;
 
+/// Held by tests that measure short times and by tests that load every core (the glass tests draw with the software renderer, which
+/// uses them all), so the two kinds never run at the same moment: with both in one parallel run the keyboard hook's "under one
+/// millisecond" test failed in half of the runs.
+#[cfg(test)]
+pub(crate) static TEST_QUIET: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub use drives::{Drive, DriveKind, list_drives};
 pub use known::{KnownFolder, known_folders};
 pub use listing::{ListError, list_dir, stat_entry};

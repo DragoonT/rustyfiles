@@ -204,6 +204,7 @@ mod tests {
     /// tam test takımı paralel koşarken bir kez 35 ms görüldü.)
     #[test]
     fn hook_work_under_one_ms() {
+        let _quiet = crate::TEST_QUIET.lock().unwrap_or_else(|p| p.into_inner());
         let (tx, _rx) = channel();
         let mut st = HookState { gate: KeyGate::new(), tx, trace: None };
         let mut times = Vec::with_capacity(1000);
