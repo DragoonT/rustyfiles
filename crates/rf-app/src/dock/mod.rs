@@ -60,6 +60,7 @@ mod start;
 mod sysstate;
 mod tone;
 mod tray_overflow;
+pub(crate) mod tray_feed;
 mod tray_source;
 mod tray_strip;
 mod tray_tip;

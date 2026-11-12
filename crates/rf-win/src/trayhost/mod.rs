@@ -25,6 +25,7 @@
 //! | `handshake.rs` | who closes the window when the starter has given up waiting | no |
 //! | `stall.rs` | notices a host thread that has stopped ticking (a log line; it cannot fix one) | no |
 //! | `traits.rs`, `fakes.rs` | the small traits and their stand-ins | no |
+//! | `testkit.rs` | a model + view + fake owners with no window and no thread, for the tests of whoever reads the view | no |
 //! | `win.rs` | the real implementations, the window class, the window procedure, the thread | YES, never run by a test |
 //! | `host.rs` | `TrayHost::start` / `stop` | through `win.rs` |
 //!
@@ -42,11 +43,12 @@ pub mod pixels;
 pub mod relay;
 pub mod shared;
 pub mod stall;
+pub mod testkit;
 pub mod traits;
 pub mod view;
 pub mod win;
 
-pub use clicks::{ClickOutcome, ClickRequest};
+pub use clicks::{ClickOutcome, ClickRequest, OwnerRef};
 pub use host::{TrayHost, TrayHostConfig};
 pub use model::{IconBitmap, IconId, Snapshot, StableKey, TrayEvent, TrayIcon};
 pub use shared::Counts;

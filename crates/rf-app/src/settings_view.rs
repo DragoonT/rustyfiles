@@ -134,7 +134,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Tags => tags(p, cx),
         Page::Look => look(p, s, cx),
         Page::Dev => dev(p, s),
-        Page::Advanced => advanced(p, s),
+        Page::Advanced => advanced(p, s, cx),
         Page::Speed => crate::bench_view::page(p, cx),
         Page::Organizer => crate::organizer::page::page(p, cx),
         Page::About => about(p, cx),
@@ -1145,6 +1145,19 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     v.push(card(p, L::PanelTop, t!("Araç çubuğunu göster"), Some("Ctrl+Shift+B"), sw("toolbar", p, s.show_toolbar, |s, v| s.show_toolbar = v)));
     v.push(card(p, L::PanelBottom, t!("Durum çubuğunu göster"), None, sw("statusbar", p, s.show_statusbar, |s, v| s.show_statusbar = v)));
     v.push(card(p, L::PanelRight, t!("Önizleme paneli"), Some("Alt+P"), sw("preview", p, s.preview_open, |s, v| s.preview_open = v)));
+    v.push(card(
+        p,
+        L::PanelBottom,
+        t!("Önizleme paneli yeri"),
+        Some(t!("Sağda: dosya listesinin yanında. Altta: listenin altında, tüm genişlikte; yüksekliği üst kenarından sürükleyerek ayarlanır")),
+        dropdown(
+            "preview-position",
+            p,
+            s.preview_position,
+            vec![(rf_core::previewpane::PreviewPos::Right, t!("Sağda").into()), (rf_core::previewpane::PreviewPos::Bottom, t!("Altta").into())],
+            |s, v| s.preview_position = v,
+        ),
+    ));
     let hidden = s.sidebar_hidden.clone();
     let libs = s.show_libraries;
     let (tree_on, tree_follow) = (s.sidebar_tree, s.sidebar_tree_follow);
@@ -2074,7 +2087,7 @@ mod ext_tests {
     }
 }
 
-fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
+fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
     let start_on = rf_win::dialogs::starts_with_windows();
     let load = hybrid::load_snapshot();
     let pct = |v: Option<f32>| v.map(crate::i18n::pct).unwrap_or_else(|| "—".into());
@@ -2280,6 +2293,9 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
             }),
         ),
     ]);
+    // the thumbnail cache's limit and a clear button (thumb_cache.rs)
+    out.push(section(p, t!("Önbellek")));
+    out.extend(crate::thumb_cache::cards(p, s, cx));
     out.extend(dock_cards(p, s));
     out
 }

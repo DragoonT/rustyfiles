@@ -184,6 +184,25 @@ pub fn looks_packaged(aumid: &str) -> bool {
     !app.is_empty() && family.contains('_') && !aumid.contains(char::is_whitespace) && !aumid.contains(['\\', '/', ':'])
 }
 
+/// What an app's jump list (and its names) are looked up by: its AppUserModelID when it has one that a jump-list file is named by
+/// (the launch is a packaged app, or the key looks like one), and its program when it has one on disk (the launch, else an icon that
+/// is a `.exe`). The app menu and the probe that measures it both read this, so a count taken by the probe is the menu's.
+pub fn jump_identity(app: &DockApp) -> (Option<String>, Option<PathBuf>) {
+    let aumid = match &app.launch {
+        Some(Launch::Packaged(id)) => Some(id.clone()),
+        _ if looks_packaged(&app.key) => Some(app.key.clone()),
+        _ => None,
+    };
+    let exe = match &app.launch {
+        Some(Launch::Exe { path, .. }) => Some(path.clone()),
+        _ => match &app.icon {
+            IconSource::File(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) => Some(p.clone()),
+            _ => None,
+        },
+    };
+    (aumid, exe)
+}
+
 /// A name for a running app that has no pin to take it from: the program's file name, else the first window's title.
 pub fn fallback_name(tasks: &[Task]) -> String {
     let t = tasks.first();
@@ -282,6 +301,26 @@ mod tests {
             launch: Launch::Link(PathBuf::from(format!(r"C:\pins\{name}.lnk"))),
             icon: IconSource::File(PathBuf::from(exe.unwrap_or("x.exe"))),
         }
+    }
+
+    fn app_of(key: &str, launch: Option<Launch>, icon: IconSource) -> DockApp {
+        DockApp { key: key.into(), name: "x".into(), pinned: false, launch, icon, windows: vec![1], active: false }
+    }
+
+    #[test]
+    fn a_jump_list_is_looked_up_by_the_packaged_id_and_the_program_whichever_the_app_has() {
+        let exe = PathBuf::from(r"C:\a\Code.exe");
+        // a classic program started from its file
+        let (aumid, found) = jump_identity(&app_of(r"c:\a\code.exe", Some(Launch::Exe { path: exe.clone(), args: String::new() }), IconSource::Window(1)));
+        assert_eq!((aumid, found), (None, Some(exe.clone())));
+        // a packaged app: its id, and no program
+        let (aumid, found) = jump_identity(&app_of("microsoft.paint_8wekyb3d8bbwe!app", Some(Launch::Packaged("Microsoft.Paint_8wekyb3d8bbwe!App".into())), IconSource::Window(1)));
+        assert_eq!((aumid.as_deref(), found), (Some("Microsoft.Paint_8wekyb3d8bbwe!App"), None));
+        // a running app whose launch is not known: the id from its key, the program from an icon that is an .exe (not from any other file)
+        let (aumid, found) = jump_identity(&app_of("vendor.app_abc!main", None, IconSource::File(exe.clone())));
+        assert_eq!((aumid.as_deref(), found), (Some("vendor.app_abc!main"), Some(exe)));
+        let (aumid, found) = jump_identity(&app_of("pid:42", None, IconSource::File(PathBuf::from(r"C:\a\doc.txt"))));
+        assert_eq!((aumid, found), (None, None));
     }
 
     fn apps(items: &[DockItem]) -> Vec<&DockApp> {

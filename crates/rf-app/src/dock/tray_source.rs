@@ -9,9 +9,9 @@
 //! * [`deliver_click`]: a click on an icon (which button, where the pointer is) for the host's click engine to hand to the program;
 //! * [`report_icon_rects`]: where each icon is on the screen now, for the host to answer `Shell_NotifyIconGetRect` with.
 //!
-//! IN THIS WORKTREE the tray host does not exist, so the bodies marked WIRE AT MERGE give `None` / `false` / nothing. The lead replaces
-//! those bodies (and only those) with calls into the host. Everything else in the dock's tray code is finished and tested against the
-//! types below. What each real body has to promise:
+//! THE REAL SOURCE is `tray_feed.rs`: it takes the running tray host's model (`rf_win::trayhost`, owned by `shell::trayhost` while the
+//! setting `shell_tray_host` is on) and gives the strip what these five promise. With no host attached (the setting off, the host in
+//! its log-only mode, or not yet started) there is no snapshot, and the island is exactly what it was. What each body promises:
 //!
 //! * `snapshot()` is cheap and does not block (it copies what the host's model holds; pictures are `Arc`s). Icons are in the host's order.
 //!   `TrayIcon::picture` is already RGBA pixels (the host copies the program's `HICON` inside its message handler, where the sender is
@@ -105,6 +105,13 @@ pub struct TrayClick {
 /// Keeps a [`subscribe`] alive; dropping it stops the calls.
 pub struct Subscription(Option<Box<dyn FnOnce() + Send>>);
 
+impl Subscription {
+    /// A subscription that runs `on_drop` when it is dropped (the source removes the callback there).
+    pub fn new(on_drop: impl FnOnce() + Send + 'static) -> Subscription {
+        Subscription(Some(Box::new(on_drop)))
+    }
+}
+
 impl Drop for Subscription {
     fn drop(&mut self) {
         if let Some(f) = self.0.take() {
@@ -121,31 +128,34 @@ impl fmt::Debug for Subscription {
 
 // ---------------------------------------------------------------- the five
 
-/// Whether there is a tray host in this build, or the made-up source is on. When there is none the dock makes no tray state at all.
-/// WIRE AT MERGE: `true` once `rf_win::trayhost` exists (the host being off is [`snapshot`]'s `None`, not this).
+/// Whether this build has a tray host (it always has) or the made-up source is on. The host being off is [`snapshot`]'s `None`, not
+/// this: the strip is made once at the dock's start and follows the host when the setting turns it on or off later.
 pub fn available() -> bool {
-    fake::on()
+    true
 }
 
-/// The icons now, or `None` when the tray host is off. WIRE AT MERGE.
+/// The icons now, or `None` when the tray host is off (or in log-only mode). Cheap: a copy of what `tray_feed`'s thread stored. The
+/// made-up source wins when `RUSTYFILES_TRAY_FAKE=1`.
 pub fn snapshot() -> Option<TraySnapshot> {
-    if fake::on() { Some(fake::snapshot()) } else { None }
+    if fake::on() { Some(fake::snapshot()) } else { super::tray_feed::snapshot() }
 }
 
-/// Calls `on_change` whenever [`snapshot`] may have changed. WIRE AT MERGE.
+/// Calls `on_change` whenever [`snapshot`] may have changed. Works while the host is off: the calls start when it starts.
 pub fn subscribe(on_change: impl Fn() + Send + Sync + 'static) -> Option<Subscription> {
-    if fake::on() { Some(fake::subscribe(Arc::new(on_change))) } else { None }
+    if fake::on() { Some(fake::subscribe(Arc::new(on_change))) } else { Some(super::tray_feed::subscribe(Arc::new(on_change))) }
 }
 
-/// Hands a click on an icon to the tray host. False: the icon is not there any more (or there is no host). WIRE AT MERGE.
+/// Hands a click on an icon to the tray host. False: the icon is not there any more (or there is no host).
 pub fn deliver_click(key: IconKey, click: TrayClick) -> bool {
-    if fake::on() { fake::click(key, click) } else { false }
+    if fake::on() { fake::click(key, click) } else { super::tray_feed::deliver_click(key, click) }
 }
 
-/// Tells the tray host where the icons are on the screen now. WIRE AT MERGE.
+/// Tells the tray host where the icons are on the screen now.
 pub fn report_icon_rects(rects: &[(IconKey, Rect)]) {
     if fake::on() {
         fake::rects(rects.len());
+    } else {
+        super::tray_feed::report_icon_rects(rects);
     }
 }
 
@@ -406,12 +416,12 @@ mod tests {
     }
 
     #[test]
-    fn without_the_switch_there_is_no_source() {
-        // (the test run does not set RUSTYFILES_TRAY_FAKE)
+    fn without_the_switch_and_with_no_host_there_are_no_icons() {
+        // (the test run does not set RUSTYFILES_TRAY_FAKE, and no test attaches a host to the process's one feed)
         if std::env::var_os("RUSTYFILES_TRAY_FAKE").is_none() {
-            assert!(!available());
-            assert!(snapshot().is_none());
-            assert!(subscribe(|| {}).is_none());
+            assert!(available(), "the strip is made, and follows the host when it comes");
+            assert!(snapshot().is_none(), "no host: the island is what it was");
+            assert!(subscribe(|| {}).is_some(), "a subscription works while the host is off");
             assert!(!deliver_click(1, TrayClick { kind: ClickKind::Left, at: (0, 0), id: StableId::from_program("x", 1) }));
             assert_eq!(fake_focus_after_ms(), None);
         }

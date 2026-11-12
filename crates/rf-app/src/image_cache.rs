@@ -26,20 +26,24 @@ pub struct ImageCache {
     thumb_use: HashMap<u64, (u64, usize)>,
     /// Running sum of `cost()` over `thumb_use`.
     thumb_cost: usize,
+    /// How many of the `thumb_use` pictures are made (`Slot::Ready`): pending and failed slots are
+    /// tracked and charged, but they are not pictures. What the settings page counts.
+    thumb_ready: usize,
     tick: u64,
     /// Evicted images whose GPU atlas tiles must be released (see `release_evicted`).
     evicted: Vec<Arc<RenderImage>>,
+    /// Pixel budget for thumbnails: Settings → Advanced → thumbnail cache (64 MB unless the user
+    /// chose another). By bytes, not count: a 4K screen of small tiles shows hundreds at once (a
+    /// count cap would evict on-screen images every frame), large tiles cost ~300 KB each.
+    budget: usize,
+    /// What the settings page shows about this cache (see `thumb_cache`).
+    stats: Arc<crate::thumb_cache::CacheStats>,
     _task: Task<()>,
+    _settings_sub: Subscription,
 }
 
-/// Pixel budget for thumbnails. By bytes, not count: a 4K screen of small tiles shows hundreds
-/// at once (a count cap would evict on-screen images every frame), large tiles cost ~300 KB each.
-const THUMB_BUDGET: usize = 64 * 1024 * 1024;
-/// Minimum charge per tracked entry, so pending/failed slots are bounded too.
-const NOMINAL: usize = 16 * 1024;
-
 fn cost(bytes: usize) -> usize {
-    bytes.max(NOMINAL)
+    rf_core::thumbcache::charge(bytes)
 }
 pub const ICON_PX: u32 = 32;
 
@@ -95,6 +99,7 @@ impl ImageCache {
                                         let bytes = r.image.as_ref().map_or(0, |b| b.data.len());
                                         c.thumb_cost = c.thumb_cost - cost(u.1) + cost(bytes);
                                         u.1 = bytes;
+                                        c.thumb_ready += 1;
                                     }
                                     Slot::Ready(img)
                                 }
@@ -112,15 +117,73 @@ impl ImageCache {
                 }
             }
         });
+        let stats = Arc::new(crate::thumb_cache::CacheStats::default());
+        let weak = cx.weak_entity();
+        crate::thumb_cache::register(weak, stats.clone(), cx);
+        // a changed limit applies at once (a lower one frees pictures now, not at the next miss)
+        let sub = cx.observe_global::<crate::settings::Settings>(|this, cx| {
+            let budget = crate::thumb_cache::budget(cx);
+            if budget != this.budget {
+                this.budget = budget;
+                this.evict_over_budget();
+                this.release_evicted(cx);
+                cx.notify();
+            }
+        });
         Self {
             pool,
             map: HashMap::new(),
             thumb_use: HashMap::new(),
             thumb_cost: 0,
+            thumb_ready: 0,
             tick: 0,
             evicted: Vec::new(),
+            budget: crate::thumb_cache::budget(cx),
+            stats,
             _task: task,
+            _settings_sub: sub,
         }
+    }
+
+    /// Tells the settings page how much this cache holds (two relaxed stores).
+    fn publish(&self) {
+        self.stats.set(self.thumb_cost, self.thumb_ready);
+    }
+
+    /// "Önbelleği temizle": drops every picture held (thumbnails, per-file and generic icons), so the
+    /// next draw asks for them again. Pictures still being made stay pending. Returns (pictures
+    /// dropped, pixel bytes of the tracked ones). Memory only: no file is touched, and Windows' own
+    /// thumbnail cache is not asked about.
+    pub fn clear_all(&mut self, cx: &mut Context<Self>) -> (usize, usize) {
+        let mut images = 0usize;
+        let mut dropped_keys = Vec::new();
+        let evicted = &mut self.evicted;
+        self.map.retain(|k, slot| match slot {
+            Slot::Pending => true,
+            Slot::Ready(img) => {
+                images += 1;
+                evicted.push(img.clone());
+                dropped_keys.push(*k);
+                false
+            }
+            Slot::Failed => {
+                dropped_keys.push(*k);
+                false
+            }
+        });
+        let mut bytes = 0usize;
+        for k in dropped_keys {
+            if let Some((_, b)) = self.thumb_use.remove(&k) {
+                bytes += b;
+                self.thumb_cost -= cost(b).min(self.thumb_cost);
+            }
+        }
+        // (every made picture is gone; what is still tracked is pending)
+        self.thumb_ready = 0;
+        self.publish();
+        self.release_evicted(cx);
+        cx.notify();
+        (images, bytes)
     }
 
     fn lookup(&mut self, key: u64, make: impl FnOnce() -> Request, is_thumb: bool) -> Option<Arc<RenderImage>> {
@@ -150,22 +213,20 @@ impl ImageCache {
     /// Drops least recently used thumbnails until under budget (cheap check; the sort only
     /// runs when over budget, and then frees a batch down to 90 % to avoid doing it per frame).
     fn evict_over_budget(&mut self) {
-        if self.thumb_cost <= THUMB_BUDGET {
-            return;
-        }
-        let target = THUMB_BUDGET / 10 * 9;
-        let mut order: Vec<(u64, u64, usize)> = self.thumb_use.iter().map(|(k, (t, b))| (*k, *t, *b)).collect();
-        order.sort_unstable_by_key(|(_, t, _)| *t);
-        for (key, _, bytes) in order {
-            if self.thumb_cost <= target {
-                break;
-            }
-            self.thumb_cost -= cost(bytes);
-            self.thumb_use.remove(&key);
-            if let Some(Slot::Ready(img)) = self.map.remove(&key) {
-                self.evicted.push(img);
+        if self.thumb_cost > self.budget {
+            // (which ones go is `rf_core::thumbcache::eviction_victims`, tested on its own)
+            let items: Vec<(u64, u64, usize)> = self.thumb_use.iter().map(|(k, (t, b))| (*k, *t, *b)).collect();
+            for key in rf_core::thumbcache::eviction_victims(&items, self.thumb_cost, self.budget) {
+                if let Some((_, bytes)) = self.thumb_use.remove(&key) {
+                    self.thumb_cost -= cost(bytes).min(self.thumb_cost);
+                }
+                if let Some(Slot::Ready(img)) = self.map.remove(&key) {
+                    self.evicted.push(img);
+                    self.thumb_ready = self.thumb_ready.saturating_sub(1);
+                }
             }
         }
+        self.publish();
     }
 
     /// Dropping the `Arc` is not enough: GPUI keeps an uploaded image in each window's sprite
@@ -247,5 +308,6 @@ impl ImageCache {
             keep
         });
         self.thumb_cost -= freed;
+        self.publish();
     }
 }

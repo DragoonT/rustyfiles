@@ -294,6 +294,10 @@ pub enum RendererPref {
     Cpu,
 }
 
+fn is_default_preview_height(h: &f32) -> bool {
+    *h == rf_core::previewpane::BOTTOM_DEFAULT_H
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -326,6 +330,12 @@ pub struct Settings {
     /// "hidden", "refresh").
     pub toolbar_extra: Vec<String>,
     pub preview_width: f32,
+    /// Where the preview pane sits: at the right of the list (the default) or under it. The key is written only for "bottom".
+    #[serde(skip_serializing_if = "rf_core::previewpane::PreviewPos::is_right")]
+    pub preview_position: rf_core::previewpane::PreviewPos,
+    /// The pane's height at the bottom (drag its top edge). Written only once the user has moved it.
+    #[serde(skip_serializing_if = "is_default_preview_height")]
+    pub preview_height: f32,
     pub renderer: RendererPref,
     pub restore_session: bool,
     /// Last session's tab locations ("" = Home).
@@ -435,6 +445,8 @@ pub struct Settings {
     pub copy_verify: CopyVerify,
     /// Copy speed limit in MB/s (0 = none).
     pub copy_speed_limit: u32,
+    /// The thumbnail cache's limit in MB (the cache is in memory); `None` = the default, 64 MB, and no key in the file.
+    pub thumb_cache_mb: Option<u32>,
     pub show_libraries: bool,
     /// A "Klasörler" section in the sidebar: the folder tree (drives and the profile folder as roots). Off by default.
     pub sidebar_tree: bool,
@@ -532,6 +544,8 @@ impl Default for Settings {
             toolbar_hidden: Vec::new(),
             toolbar_extra: Vec::new(),
             preview_width: 300.,
+            preview_position: rf_core::previewpane::PreviewPos::Right,
+            preview_height: rf_core::previewpane::BOTTOM_DEFAULT_H,
             renderer: RendererPref::Auto,
             restore_session: true,
             session_tabs: Vec::new(),
@@ -598,6 +612,7 @@ impl Default for Settings {
             fast_file_ops: true,
             copy_verify: CopyVerify::Off,
             copy_speed_limit: 0,
+            thumb_cache_mb: None,
             show_libraries: false,
             sidebar_tree: false,
             sidebar_tree_follow: true,
@@ -954,6 +969,25 @@ mod tests {
         let partial: Settings = toml::from_str("theme = \"dark\"").unwrap();
         assert_eq!(partial.theme, ThemePref::Dark);
         assert!(partial.restore_session);
+    }
+
+    #[test]
+    fn the_preview_position_leaves_no_key_until_it_is_asked_for() {
+        use rf_core::previewpane::{BOTTOM_DEFAULT_H, PreviewPos};
+        let d = Settings::default();
+        assert_eq!((d.preview_position, d.preview_height), (PreviewPos::Right, BOTTOM_DEFAULT_H));
+        let text = toml::to_string_pretty(&d).unwrap();
+        assert!(!text.contains("preview_position") && !text.contains("preview_height"), "default settings must not gain keys");
+        let bottom = Settings { preview_position: PreviewPos::Bottom, preview_height: 260., ..Default::default() };
+        let text = toml::to_string_pretty(&bottom).unwrap();
+        assert!(text.contains("preview_position = \"bottom\"") && text.contains("preview_height = 260.0"), "{text}");
+        let back: Settings = toml::from_str(&text).unwrap();
+        assert_eq!((back.preview_position, back.preview_height), (PreviewPos::Bottom, 260.));
+        // an unknown word does not break the file
+        let odd: Settings = toml::from_str("preview_position = \"left\"
+show_hidden = true").unwrap();
+        assert_eq!(odd.preview_position, PreviewPos::Right);
+        assert!(odd.show_hidden);
     }
 }
 

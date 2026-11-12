@@ -4,10 +4,13 @@
 //! (pure, tested), the icons and the clicks go through `tray_source.rs` (the one seam to the tray host).
 //!
 //! WHEN THERE IS NO SOURCE NOTHING IS MADE: `start` does nothing without `tray_source::available()`, and with a source that has no
-//! snapshot (the tray host off) the strip draws nothing and the island is exactly what it was.
+//! snapshot (the tray host off) the strip draws nothing and the island is exactly what it was. The state exists from the dock's start
+//! (the host may be turned on later), but while there is no snapshot it costs one subscription and one idle task: the order file is
+//! NOT read until the first snapshot arrives (then on a worker thread), and a refresh that finds no snapshot, where there was none,
+//! changes nothing and wakes nobody.
 //!
-//! THE STATE is one global (`TrayState`): the snapshot, the user's order (`tray-order.json`, read once, written only when the user changes
-//! something), the layout that follows from both, the pictures converted for the toolkit, and what the pointer and the keyboard are
+//! THE STATE is one global (`TrayState`): the snapshot, the user's order (`tray-order.json`, read once, off the interface thread, when the
+//! first snapshot comes; written only when the user changes something), the layout that follows from both, the pictures converted for the toolkit, and what the pointer and the keyboard are
 //! doing. Changing it through `update_global` tells whoever observes it (the island, the overflow panel); the bookkeeping nobody draws
 //! (a held button) is written without telling.
 //!
@@ -98,12 +101,24 @@ struct Keyboard {
     been_front: bool,
 }
 
+/// Whether the order file has been read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OrderLoad {
+    /// Not asked for yet (no snapshot has come).
+    NotYet,
+    /// A worker thread is reading it; snapshots wait for it (the strip draws nothing meanwhile).
+    Reading,
+    Done,
+}
+
 pub struct TrayState {
     right: WeakEntity<RightIsland>,
     snap: Option<TraySnapshot>,
     ids: Vec<StableId>,
     order: TrayOrder,
     order_path: Option<PathBuf>,
+    /// Where the order file stands: it is read when the first snapshot arrives, not at the dock's start.
+    order_load: OrderLoad,
     /// The order file exists and could not be read: it is set aside before the first write.
     unreadable: bool,
     arr: Arrangement,
@@ -244,14 +259,6 @@ pub fn start(right: Entity<RightIsland>, cx: &mut App) {
         return;
     }
     let path = crate::settings::app_dir().map(|d| d.join(tray_order::FILE));
-    let (order, unreadable) = match path.as_deref().map(tray_order::load_checked) {
-        Some(Loaded::Found(o)) => (o, false),
-        Some(Loaded::Unreadable) => {
-            log::warn!("tray: the order file cannot be read; it is set aside before anything is written");
-            (TrayOrder::new(), true)
-        }
-        _ => (TrayOrder::new(), false),
-    };
     let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
     let tx = Mutex::new(tx);
     let sub = tray_source::subscribe(move || {
@@ -263,9 +270,10 @@ pub fn start(right: Entity<RightIsland>, cx: &mut App) {
         right: right.downgrade(),
         snap: None,
         ids: Vec::new(),
-        order,
+        order: TrayOrder::new(),
         order_path: path,
-        unreadable,
+        order_load: OrderLoad::NotYet,
+        unreadable: false,
         arr: Arrangement::default(),
         lay: Layout::default(),
         limit: ts::strip_limit(1920.0),
@@ -323,6 +331,15 @@ fn refresh(cx: &mut App) {
         return;
     }
     let snap = tray_source::snapshot();
+    let st = cx.global::<TrayState>();
+    match refresh_plan(snap.is_some(), st.snap.is_some(), st.order_load) {
+        // no host and none before: nothing to draw, so nothing to recompute and nobody to wake (a monitor change lands here often)
+        RefreshPlan::Nothing => return,
+        // the user's order is needed to place the first icons: read it off this thread; it comes back here when it is in
+        RefreshPlan::ReadOrder => return read_order(cx),
+        RefreshPlan::WaitForOrder => return,
+        RefreshPlan::Apply => {}
+    }
     let work_width = host::monitor_work(cx).map(|(scale, work)| work.width() as f32 / scale.max(0.01));
     let retired = cx.update_global::<TrayState, _>(|st, _| st.set_snapshot(snap, work_width));
     retire(retired, cx);
@@ -351,6 +368,58 @@ fn after_change(cx: &mut App) {
         let anchor = tip_anchor(src, cx);
         super::tray_tip::update(anchor, cx);
     }
+}
+
+/// What a refresh does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RefreshPlan {
+    Nothing,
+    ReadOrder,
+    WaitForOrder,
+    Apply,
+}
+
+/// `now`: the source has a snapshot; `before`: the state holds one; `order`: where the order file stands.
+fn refresh_plan(now: bool, before: bool, order: OrderLoad) -> RefreshPlan {
+    match (now, before, order) {
+        (false, false, _) => RefreshPlan::Nothing,
+        (true, _, OrderLoad::NotYet) => RefreshPlan::ReadOrder,
+        (true, _, OrderLoad::Reading) => RefreshPlan::WaitForOrder,
+        _ => RefreshPlan::Apply,
+    }
+}
+
+/// Reads the order file on a worker thread, once, and refreshes when it is in. A file that is not there is an empty order; one that
+/// cannot be read is an empty order too and is set aside before anything is written.
+fn read_order(cx: &mut App) {
+    let path = {
+        let st = cx.global_mut::<TrayState>();
+        st.order_load = OrderLoad::Reading;
+        st.order_path.clone()
+    };
+    cx.spawn(async move |cx| {
+        let loaded = match path {
+            Some(path) => Some(cx.background_executor().spawn(async move { tray_order::load_checked(&path) }).await),
+            None => None,
+        };
+        cx.update(|cx| {
+            if !cx.has_global::<TrayState>() {
+                return;
+            }
+            let st = cx.global_mut::<TrayState>();
+            match loaded {
+                Some(Loaded::Found(o)) => st.order = o,
+                Some(Loaded::Unreadable) => {
+                    log::warn!("tray: the order file cannot be read; it is set aside before anything is written");
+                    st.unreadable = true;
+                }
+                _ => {}
+            }
+            st.order_load = OrderLoad::Done;
+            refresh(cx);
+        });
+    })
+    .detach();
 }
 
 // ---------------------------------------------------------------- where things are
@@ -966,6 +1035,22 @@ mod tests {
     use super::{Arrangement, Arc, DropTarget, Drag, HashMap, IconKey, Instant, Keyboard, Layout, Mutex, Source, TrayOrder, TrayState, WeakEntity, rules, to_image, tray_source, ts};
 
     #[test]
+    fn with_no_host_a_refresh_does_nothing_and_the_order_file_is_read_only_when_the_first_snapshot_comes() {
+        use super::{OrderLoad::*, RefreshPlan::*, refresh_plan};
+        // the host is off and was: no work, whatever the order file's state
+        for o in [NotYet, Reading, Done] {
+            assert_eq!(refresh_plan(false, false, o), Nothing);
+        }
+        // the first snapshot starts the read once; while it runs snapshots wait; then they are applied
+        assert_eq!(refresh_plan(true, false, NotYet), ReadOrder);
+        assert_eq!(refresh_plan(true, false, Reading), WaitForOrder);
+        assert_eq!(refresh_plan(true, false, Done), Apply);
+        assert_eq!(refresh_plan(true, true, Done), Apply);
+        // a host that goes away must be shown going away
+        assert_eq!(refresh_plan(false, true, Done), Apply);
+    }
+
+    #[test]
     fn the_strips_padding_is_the_islands() {
         assert_eq!(ts::SIDE_PAD, super::super::plan::SIDE_PAD);
         assert_eq!(ts::SEP_GAP, super::super::plan::RIGHT_SEP_GAP);
@@ -989,6 +1074,7 @@ mod tests {
             ids: Vec::new(),
             order: TrayOrder::new(),
             order_path: None,
+            order_load: super::OrderLoad::Done,
             unreadable: false,
             arr: Arrangement::default(),
             lay: Layout::default(),

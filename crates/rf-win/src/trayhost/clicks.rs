@@ -34,6 +34,9 @@ pub enum ClickOutcome {
     NoCallback,
     /// The owner is gone: the icon was dropped and nothing was sent.
     OwnerGone,
+    /// The icon is there, but its owner window or process is not the one the caller expected (see [`deliver_expecting`]): it was
+    /// taken over by another program since the caller drew it. Nothing was sent, the icon was left as it is.
+    OwnerChanged,
     /// A message could not be sent; `sent` went out before it.
     Failed { sent: usize },
 }
@@ -46,13 +49,27 @@ pub fn owner_alive(owners: &dyn OwnerSend, hwnd: isize, pid: u32) -> bool {
     pid != 0 && owners.is_window(hwnd) && owners.owner_pid(hwnd) == Some(pid)
 }
 
+/// An icon's owner as a caller saw it: `(window handle, process id)`.
+pub type OwnerRef = (isize, u32);
+
 pub fn deliver(shared: &Shared, owners: &dyn OwnerSend, req: &ClickRequest) -> ClickOutcome {
+    deliver_expecting(shared, owners, req, None)
+}
+
+/// [`deliver`] for a caller that drew the icon at some time and clicked on that picture later. A program that adds an icon again
+/// under a key the model already holds (the same GUID from another process, the same window handle and id) takes the model's icon
+/// over: same [`IconId`], new owner. `expect` is the owner the caller drew; when the model's icon has another one now, nothing is
+/// sent and no foreground is granted (`OwnerChanged`), so a click meant for the first program never reaches the second.
+pub fn deliver_expecting(shared: &Shared, owners: &dyn OwnerSend, req: &ClickRequest, expect: Option<OwnerRef>) -> ClickOutcome {
     // a copy of what is needed, under the lock; nothing is sent while it is held
     let found = {
         let st = shared.state.lock();
         st.model.get(req.id).map(|i| (i.hwnd_handle(), i.uid, i.callback, i.version, i.owner_pid))
     };
     let Some((hwnd, uid, callback, version, pid)) = found else { return ClickOutcome::UnknownIcon };
+    if expect.is_some_and(|e| e != (hwnd, pid)) {
+        return ClickOutcome::OwnerChanged;
+    }
     let Some(callback) = callback else { return ClickOutcome::NoCallback };
     if !owner_alive(owners, hwnd, pid) {
         shared.drop_icon(req.id);
@@ -185,6 +202,24 @@ mod tests {
         assert!(s.snapshot().icons.is_empty());
         assert_eq!(deliver(&s, &o, &click(id, HostEvent::LeftClick)), ClickOutcome::UnknownIcon);
         assert_eq!(s.counters.snapshot().clicks_dropped, 1);
+    }
+
+    #[test]
+    fn a_click_expecting_one_owner_is_refused_when_the_icon_has_another_now() {
+        let (s, id) = shared_with(IconVersion::V3, 0x1234, 7, 50);
+        let o = FakeOwners::new();
+        o.add_window(0x1234, 50);
+        // the owner the caller drew: delivered
+        assert_eq!(deliver_expecting(&s, &o, &click(id, HostEvent::LeftClick), Some((0x1234, 50))), ClickOutcome::Sent(3));
+        let before = o.log().len();
+        // another process, another window: refused, nothing sent, no foreground granted, and the icon is left alone
+        for other in [(0x1234, 99), (0x4321, 50)] {
+            assert_eq!(deliver_expecting(&s, &o, &click(id, HostEvent::LeftClick), Some(other)), ClickOutcome::OwnerChanged);
+        }
+        assert_eq!(o.log().len(), before);
+        assert_eq!(s.snapshot().icons.len(), 1);
+        // no expectation: as `deliver`
+        assert_eq!(deliver_expecting(&s, &o, &click(id, HostEvent::LeftClick), None), ClickOutcome::Sent(3));
     }
 
     #[test]

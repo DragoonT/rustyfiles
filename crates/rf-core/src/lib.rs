@@ -6,11 +6,14 @@ pub mod history;
 pub mod hotkey;
 pub mod navtree;
 pub mod organize;
+pub mod previewpane;
 pub mod recycle_bin;
 pub mod propcols;
 pub mod rename;
 pub mod shelf;
 pub mod sort;
+pub mod sortkeys;
+pub mod thumbcache;
 pub mod tags;
 pub mod treemap;
 

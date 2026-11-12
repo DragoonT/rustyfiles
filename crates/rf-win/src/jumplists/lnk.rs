@@ -39,6 +39,14 @@ pub enum Role {
 
 const PROGRAM_EXTENSIONS: [&str; 7] = ["exe", "bat", "cmd", "com", "msc", "cpl", "scr"];
 
+/// Whether a path is inside a `WindowsApps` folder: an app execution alias (`%LOCALAPPDATA%\Microsoft\WindowsApps\wt.exe`, a
+/// zero-length reparse point that only Windows can start) or a file of an installed package (`C:\Program Files\WindowsApps\...`, a
+/// folder ordinary users cannot read). The shell draws a plain generic picture for the first and cannot be asked for the second, so
+/// an entry whose icon would be one of these has no icon of its own: the menu shows the app's.
+pub fn is_package_path(p: &Path) -> bool {
+    p.components().any(|c| c.as_os_str().eq_ignore_ascii_case("WindowsApps"))
+}
+
 fn is_program(p: &Path) -> bool {
     p.extension().is_some_and(|e| PROGRAM_EXTENSIONS.iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
@@ -128,7 +136,7 @@ pub fn classify(f: &LinkFacts, role: Role, disk: &dyn Disk) -> Result<JumpItem, 
     let own_icon = f
         .icon
         .as_ref()
-        .filter(|(p, _)| !p.as_os_str().is_empty() && !p.to_string_lossy().starts_with('@') && disk.exists(p))
+        .filter(|(p, _)| !p.as_os_str().is_empty() && !p.to_string_lossy().starts_with('@') && !is_package_path(p) && disk.exists(p))
         .map(|(p, i)| IconSource::Resource { file: p.clone(), index: *i });
     if runs {
         // a task needs a program (or a packaged app) to run
@@ -149,7 +157,8 @@ pub fn classify(f: &LinkFacts, role: Role, disk: &dyn Disk) -> Result<JumpItem, 
             .or_else(|| f.aumid.clone())
             .ok_or(Dropped::NothingToOpen)?;
         let packaged_icon = f.aumid.as_deref().filter(|a| target.is_none() && looks_packaged(a)).map(|a| IconSource::Packaged(a.to_string()));
-        let icon = own_icon.or(packaged_icon).or_else(|| target.map(|t| IconSource::File(t.to_path_buf())));
+        // (a program that is an execution alias or sits in a package has no picture the reader can draw: no icon, the menu uses the app's)
+        let icon = own_icon.or(packaged_icon).or_else(|| target.filter(|t| !is_package_path(t)).map(|t| IconSource::File(t.to_path_buf())));
         return Ok(JumpItem {
             title,
             icon,
@@ -373,6 +382,32 @@ mod tests {
         assert_eq!(it.target, JumpTarget::Link { program: PathBuf::new(), arguments: String::new(), working_dir: None, aumid: Some(id.into()) });
         // nothing to run at all
         assert_eq!(to_item(&LinkFacts { title: Some("x".into()), ..Default::default() }, Role::Task, &disk(&[])), None);
+    }
+
+    #[test]
+    fn a_task_of_a_packaged_app_names_an_alias_or_a_package_file_and_so_has_no_icon_of_its_own() {
+        // Windows Terminal's tasks as seen live: the link points at the execution alias and its icon is a package resource
+        let alias = r"C:\Users\u\AppData\Local\Microsoft\WindowsApps\wt.exe";
+        let f = LinkFacts { target: Some(alias.into()), arguments: "-w 0 nt".into(), title: Some("New tab".into()), icon: Some((r"@{Microsoft.WindowsTerminal_1.0_x64__8wekyb3d8bbwe?ms-resource://x/Files/a.png}".into(), 0)), ..Default::default() };
+        let it = to_item(&f, Role::Task, &disk(&[alias])).unwrap();
+        assert_eq!(it.icon, None, "the alias would be drawn as a generic program");
+        assert!(matches!(it.target, JumpTarget::Link { .. }), "and the task still runs");
+        // an icon file inside a package folder cannot be read either: the normal program's own icon stands in
+        let pkg = r"C:\Program Files\WindowsApps\Microsoft.WindowsTerminal_1.0_x64__8wekyb3d8bbwe\WindowsTerminal.exe";
+        let g = LinkFacts { target: Some(r"C:\Apps\app.exe".into()), icon: Some((pkg.into(), 0)), ..Default::default() };
+        assert_eq!(to_item(&g, Role::Task, &disk(&[r"C:\Apps\app.exe", pkg])).unwrap().icon, Some(IconSource::File(r"C:\Apps\app.exe".into())));
+        // an ordinary program keeps its icon
+        let h = LinkFacts { target: Some(r"C:\Apps\app.exe".into()), ..Default::default() };
+        assert_eq!(to_item(&h, Role::Task, &disk(&[r"C:\Apps\app.exe"])).unwrap().icon, Some(IconSource::File(r"C:\Apps\app.exe".into())));
+    }
+
+    #[test]
+    fn a_package_path_is_one_with_a_windowsapps_folder_in_it_in_any_case() {
+        assert!(is_package_path(Path::new(r"C:\Users\u\AppData\Local\Microsoft\WindowsApps\wt.exe")));
+        assert!(is_package_path(Path::new(r"c:\program files\windowsapps\x\y.exe")));
+        assert!(!is_package_path(Path::new(r"C:\Apps\WindowsAppsHelper\x.exe")), "only a whole folder name counts");
+        assert!(!is_package_path(Path::new(r"C:\Apps\app.exe")));
+        assert!(!is_package_path(Path::new("")));
     }
 
     #[test]

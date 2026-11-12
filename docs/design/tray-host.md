@@ -7,9 +7,41 @@ Shell plan increment D2 (rows B3 to B6 and B9 of the plan's section 1.2). One se
 |---|---|
 | `shell_tray_host` | While Explorer runs, the shell host owns a window of class `Shell_TrayWnd` IN FRONT of Explorer's, keeps a model of the icons that programs send to the notification area, and passes EVERY message on to Explorer's own tray window, unchanged, returning Explorer's answer. |
 
-The dock does not draw the icons yet (the strip is increment D3). Nothing in this increment changes what the user sees. What exists is
-the host, the model the strip will read (`shell::trayhost::view`), the click engine the strip will call, and the answers to the icon
-position queries.
+The dock's tray strip (increment D3) is connected to the host through `rf-app/src/dock/tray_feed.rs`: while the host runs, the strip
+draws the model's icons in the right island and its clicks go to the click engine; with the setting off, or in log-only mode, the
+strip has no source and the island is as it was. The feed is described in the next section. The host itself, the model, the click
+engine and the answers to the icon position queries are as below.
+
+## The feed to the dock's strip (`dock/tray_feed.rs`)
+
+`shell::trayhost` attaches the running host to the feed (and detaches it FIRST when the host stops, so the strip hears the icons are
+gone before the window is). One small thread, `rf-tray-feed`, exists only while a non-log-only host is attached. It sleeps on the host's
+event hints; on a burst it drains them and rebuilds the strip's snapshot (hidden icons left out, BGRA pictures turned to RGBA once per
+picture change, the tip cleaned, a per-icon generation that moves only with the picture or the tip, the identity for `tray-order.json`),
+stores it, and wakes the subscribers only when something the strip draws changed, at most about every 40 ms. The interface thread only
+copies the stored snapshot; it never opens a process or waits for the host.
+
+* Identity: the GUID when the program gave one, else the owner program's FULL PATH (looked up from its process once, on the feed
+  thread, `rf_win::tasklist::process_exe_path`) and the id it chose. The model keeps only the file name; a path is accepted only if its
+  file name is the one the model recorded (a process number reused by another program lends nothing), a read that fails is tried again
+  at the next rebuilds (three in all), and if no path can be had the file name stands in (`exe:name.exe|id`); only without that the
+  identity is `exe:|id`.
+* Keys: the host numbers its icons from 1 at every start, so the key the strip gets is the host's number with the number of the ATTACH in
+  its upper half. A host that was stopped and started again never repeats a key, which keeps the strip's picture cache (key and
+  generation), its rectangle memo and a click it still held from meeting the wrong icon. The guard of an attach that was replaced does
+  not detach the later host.
+* Clicks: `ClickKind` becomes the wire event one to one (`KeySelect`, `KeyContext` anchor at the icon's top-left, which is the `at`
+  the strip gives). The click is refused when the icon is not in the snapshot the strip drew or has another identity than the click
+  names; it is sent with the owner (window, process) the snapshot was made with, and the engine (`TrayView::click_expecting`) refuses it
+  (`OwnerChanged`: nothing sent, no foreground granted) when the model's icon has another owner now, as well as a dead one. A program
+  that adds an icon again under a key the model holds (the same GUID from another process) keeps the icon's number and identity and
+  takes its owner, so the owner is part of what a snapshot is: the strip is told, and clicks drawn before the change go nowhere.
+* Rectangles: `report_icon_rects` goes to the host's rectangle book unchanged (device px, screen coordinates). They matter only with
+  `RUSTYFILES_TRAY_RECT_PACKING` set; until then Explorer answers `Shell_NotifyIconGetRect`.
+* `RUSTYFILES_TRAY_FAKE=1` (the invented icons) still wins when set.
+
+Tested through the stand-ins of the host's model (`rf_win::trayhost::testkit`: no window, no thread, a recorder for the messages a
+click would send). NOT RUN: any of it against a real host.
 
 `rf_win::tray` (rustyfiles' own tray icon) is a different thing and is not touched. Its `Shell_NotifyIcon` calls go to whichever
 `Shell_TrayWnd` is first, which with the host on is ours: they pass through the host to Explorer like everybody's.
@@ -283,11 +315,13 @@ is not a perfect undo, and a clean stop is.
 5. **Stop it** (quit the test copy from the dock's menu, or end it in Task Manager): run the probe: one `Shell_TrayWnd` again, Explorer's.
    Explorer's tray must be exactly as before, with every icon. The stop line in the log says `tray host: stopped; ...`.
 6. **Without log-only** (the same command without `RUSTYFILES_TRAY_LOG_ONLY`; still without the start broadcast): same as 3 to 5; the
-   log now says `icons held`. The model fills (visible only in the log counts; the dock draws nothing yet). Only after this went
+   log now says `icons held`. The model fills, and the strip in the dock's right island draws it (16 px pictures left of the system
+   symbols; clicks on them reach the programs: try a left and a right click on a harmless one first). Only after this went
    well, once **with** the start broadcast (leave `RUSTYFILES_TRAY_NO_START_BROADCAST` out): programs now add again, and
    `explorer_refused` and `re_adds` show what Explorer did with the duplicates; Explorer's tray must still be as in step 1.
-7. **Rectangles (probe P6), only after 6 went well:** add `RUSTYFILES_TRAY_RECT_PACKING=corners`. The dock must report rectangles for
-   that, which needs the strip (D3); until then the host has no rectangles and Explorer answers everything. This step belongs to D3.
+7. **Rectangles (probe P6), only after 6 went well:** add `RUSTYFILES_TRAY_RECT_PACKING=corners`. The strip now reports the rectangles
+   (`tray_feed`), so the host can answer `Shell_NotifyIconGetRect` from them; Explorer answers it when the variable is not set.
+   Look at where a program that asks (a balloon, a flyout) puts its window against the strip's icon.
 8. **Start and stop 20 times** with a few tray programs open; Explorer's tray must keep every icon after the last stop.
 9. Anything odd (an icon missing in Explorer, a program whose tray icon does not react, progress on a taskbar button gone): stop the
    copy at once (quit it from the dock's menu or the setting off, so that the stop broadcast is sent; end the process only if the

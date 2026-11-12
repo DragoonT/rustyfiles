@@ -57,6 +57,7 @@ mod recycle_settings_view;
 mod recycle_text;
 mod recycle_view;
 mod theme;
+mod thumb_cache;
 mod workspace;
 
 use std::path::PathBuf;

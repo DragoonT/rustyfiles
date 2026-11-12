@@ -8598,5 +8598,89 @@
   "key": "Gizli simge yok. Simgeleri buraya sürükleyin.",
   "tr": "Gizli simge yok. Simgeleri buraya sürükleyin.",
   "en": "No hidden icons. Drag icons here to hide them."
+ },
+ {
+  "id": "07a1c604",
+  "key": "Önizleme paneli yeri",
+  "tr": "Önizleme paneli yeri",
+  "en": "Preview pane position"
+ },
+ {
+  "id": "267fe7d7",
+  "key": "Sağda: dosya listesinin yanında. Altta: listenin altında, tüm genişlikte; yüksekliği üst kenarından sürükleyerek ayarlanır",
+  "tr": "Sağda: dosya listesinin yanında. Altta: listenin altında, tüm genişlikte; yüksekliği üst kenarından sürükleyerek ayarlanır",
+  "en": "Right: beside the file list. Bottom: under the list, across the whole width; drag its top edge to set the height"
+ },
+ {
+  "id": "05b2afbf",
+  "key": "Sağda",
+  "tr": "Sağda",
+  "en": "Right"
+ },
+ {
+  "id": "d560a77b",
+  "key": "Altta",
+  "tr": "Altta",
+  "en": "Bottom"
+ },
+ {
+  "id": "c323144a",
+  "key": "Önizleme sağda",
+  "tr": "Önizleme sağda",
+  "en": "Preview on the right"
+ },
+ {
+  "id": "9d7b2494",
+  "key": "Önizleme altta",
+  "tr": "Önizleme altta",
+  "en": "Preview at the bottom"
+ },
+ {
+  "id": "42aeb8f3",
+  "key": "Önbellek",
+  "tr": "Önbellek",
+  "en": "Cache"
+ },
+ {
+  "id": "9a91f410",
+  "key": "Küçük resim önbelleği",
+  "tr": "Küçük resim önbelleği",
+  "en": "Thumbnail cache"
+ },
+ {
+  "id": "48bff32e",
+  "key": "Önbellekte şu an",
+  "tr": "Önbellekte şu an",
+  "en": "In the cache now"
+ },
+ {
+  "id": "8d2a25b1",
+  "key": "görsel",
+  "tr": "görsel",
+  "en": "pictures"
+ },
+ {
+  "id": "5e78f382",
+  "key": "Son temizlik",
+  "tr": "Son temizlik",
+  "en": "Last clear"
+ },
+ {
+  "id": "095b29d4",
+  "key": "Önbelleği temizle",
+  "tr": "Önbelleği temizle",
+  "en": "Clear cache"
+ },
+ {
+  "id": "9643a703",
+  "key": "Küçük resimler ve simgeler yalnızca bellekte tutulur; sınır her pencerenin kendi önbelleği içindir ve aşılınca en eskiden kullanılanlar atılır. Windows'un kendi küçük resim önbelleğine dokunulmaz.",
+  "tr": "Küçük resimler ve simgeler yalnızca bellekte tutulur; sınır her pencerenin kendi önbelleği içindir ve aşılınca en eskiden kullanılanlar atılır. Windows'un kendi küçük resim önbelleğine dokunulmaz.",
+  "en": "Thumbnails and icons are kept in memory only; the limit is for each window's own cache and when it is passed the least recently used go. Windows' own thumbnail cache is left alone."
+ },
+ {
+  "id": "0a574c8d",
+  "key": "önbellek toplamı",
+  "tr": "önbellek toplamı",
+  "en": "caches in total"
  }
 ]

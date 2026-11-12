@@ -388,6 +388,15 @@ The rows and the keyboard's walk are `rf_win::dock::appmenu` (pure, tested).
 * THE JUMP-LIST SEAM is `jump_source.rs`: a section is a title and entries, an entry is a title, an optional icon and an opaque action
   (`Action(String)`). `sections(&JumpApp)` and `run(&JumpApp, &Action)` are the only two functions the menu calls; here they return
   nothing and do nothing, and wiring them to `rf_win::jumplists` is a matter of those two bodies. Both are called from worker threads.
+* THE NAME LINE. A pinned app shows its pin's name. A running app nobody pinned is named by the dock with its program's file name
+  ("WindowsTerminal"); the menu asks the shell apart from the lists (`jump_source::display_name`, shell thread, never waited for) and the
+  bold line changes when the answer comes: the name "All apps" shows for a packaged app (what the Start panel shows: "Terminal"), else
+  the program file's description for a classic program (at most 40 characters: a sentence is not a name), else the file name stays
+  (`appmenu::menu_name`, pure).
+* AN ENTRY WITHOUT A PICTURE OF ITS OWN WEARS THE APP'S. The tasks of a packaged app are links to an execution alias
+  (`...\Microsoft\WindowsApps\wt.exe`, a zero-length reparse point the shell draws as a generic program) or name a package resource; such an
+  entry has no icon (`jumplists::lnk::is_package_path`), and so does one whose icon the reader could not draw: the row shows the app's
+  picture, the one on the name row. While an entry's own icon is still being read the row is empty, as before.
 * KEYBOARD: Down, Up, Tab (Shift+Tab), Home, End, Enter or Space on the highlighted row, Escape. The menu IS activated (it needs the
   keys) and gives the keyboard back to the window that had it when it is put away with Escape.
 * CLOSES on Escape, on a mouse button going down anywhere outside it (the dock's own icons too: a right click on another icon closes
@@ -453,8 +462,10 @@ the window's button if the program refuses the foreground); the x asks the windo
 The other programs' notification icons in the right island: a row of small pictures to the LEFT of the island's own symbols, a chevron
 that opens an overflow panel above the island, and a thin separator before the network symbol. **Off unless there is a tray source:** the
 dock makes no tray state at all without one, and with a source that has no snapshot (the tray host off) the island is exactly what it
-was. In this checkout the tray host (`rf_win::trayhost`, built by another team) does not exist, so the only source is the made-up one
-(`RUSTYFILES_TRAY_FAKE=1`, below); the lead wires the real one in the five bodies of `tray_source.rs` that say WIRE AT MERGE.
+was. The real source is the tray host (`rf_win::trayhost`, setting `shell_tray_host`) through `tray_feed.rs` (see `tray-host.md`, "The
+feed to the dock's strip"); the made-up one (`RUSTYFILES_TRAY_FAKE=1`, below) wins when set. The strip is made at the dock's start whenever
+a source exists (the host being off is a missing snapshot, not a missing source) and follows the host when the setting turns it on or off.
+Cost with the host off: one small global, an order-file read that finds no file, one idle task; nothing runs and nothing is drawn.
 
 ```
  [ app app app app app app > ] |  [ net ] [ vol ] | [ 14:05 12.11.2026 ] [ bell ]

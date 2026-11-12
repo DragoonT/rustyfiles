@@ -210,6 +210,28 @@ impl Menu {
     }
 }
 
+/// The longest text taken for an app's name from a program's file description. Descriptions run from "Notepad" to whole sentences
+/// ("Microsoft (R) Windows Based Script Host"); a menu row truncates anyway, and a sentence is not a name.
+pub const MAX_DESCRIPTION_NAME: usize = 40;
+
+/// The bold name line of the menu. `current` is the name the dock holds for the app. Order of trust: a PINNED app keeps its pin's name
+/// (what the dock shows for it); else the name the shell shows for the app in "All apps" (`display`, which is what the Start panel
+/// shows: "Terminal" for Windows Terminal, whose program is called `WindowsTerminal`); else the program file's description (what Explorer's
+/// taskbar shows for a classic program); else `current`, which for a running app that nobody pinned is the bare file name.
+pub fn menu_name(pinned: bool, current: &str, display: Option<&str>, description: Option<&str>) -> String {
+    if pinned && !current.trim().is_empty() {
+        return current.to_string();
+    }
+    let usable = |s: Option<&str>, max: usize| s.map(str::trim).filter(|s| !s.is_empty() && s.chars().count() <= max).map(str::to_string);
+    usable(display, 80).or_else(|| usable(description, MAX_DESCRIPTION_NAME)).unwrap_or_else(|| current.to_string())
+}
+
+/// [`menu_name`] when it says something other than `current`, else `None` (keep the dock's name).
+pub fn better_name(pinned: bool, current: &str, display: Option<&str>, description: Option<&str>) -> Option<String> {
+    let name = menu_name(pinned, current, display, description);
+    (name != current).then_some(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,6 +379,45 @@ mod tests {
         assert_eq!(m.highlighted(), Some(RowId::Fixed(Fixed::Open)));
         m.step(-1);
         assert_eq!(m.highlighted(), Some(RowId::Entry(1, 0)), "up from the first fixed row reaches the last entry");
+    }
+
+    #[test]
+    fn the_name_line_is_the_display_name_then_the_description_then_the_file_name() {
+        // Windows Terminal, running and not pinned: the dock only has the program's file name
+        assert_eq!(menu_name(false, "WindowsTerminal", Some("Terminal"), None), "Terminal");
+        assert_eq!(menu_name(false, "WindowsTerminal", Some("Terminal"), Some("Windows Terminal")), "Terminal", "the Start panel's name wins");
+        // a classic program: its description
+        assert_eq!(menu_name(false, "Code", None, Some("Visual Studio Code")), "Visual Studio Code");
+        // nothing known: the bare file name stays
+        assert_eq!(menu_name(false, "Code", None, None), "Code");
+        assert_eq!(menu_name(false, "Code", Some("  "), Some("")), "Code", "blank answers are no answers");
+    }
+
+    #[test]
+    fn a_better_name_is_one_that_differs() {
+        assert_eq!(better_name(false, "WindowsTerminal", Some("Terminal"), None).as_deref(), Some("Terminal"));
+        assert_eq!(better_name(false, "Terminal", Some("Terminal"), None), None);
+        assert_eq!(better_name(false, "Code", None, None), None);
+        assert_eq!(better_name(true, "Chrome", Some("Google Chrome"), None), None);
+    }
+
+    #[test]
+    fn a_pinned_app_keeps_the_name_the_dock_shows_for_it() {
+        assert_eq!(menu_name(true, "Chrome", Some("Google Chrome"), Some("Google Chrome")), "Chrome");
+        // (a pin with no name at all has nothing to keep)
+        assert_eq!(menu_name(true, " ", Some("Google Chrome"), None), "Google Chrome");
+    }
+
+    #[test]
+    fn a_description_that_is_a_sentence_is_not_a_name_but_a_display_name_may_be_longer() {
+        let sentence = "Microsoft (R) Windows Based Script Host for the console";
+        assert!(sentence.chars().count() > MAX_DESCRIPTION_NAME);
+        assert_eq!(menu_name(false, "Cscript", None, Some(sentence)), "Cscript");
+        let at_limit = "x".repeat(MAX_DESCRIPTION_NAME);
+        assert_eq!(menu_name(false, "A", None, Some(&at_limit)), at_limit);
+        assert_eq!(menu_name(false, "A", Some("Microsoft Edge Beta Preview Channel Browser"), None), "Microsoft Edge Beta Preview Channel Browser");
+        // surrounding blanks are not part of a name
+        assert_eq!(menu_name(false, "A", Some("  Paint "), None), "Paint");
     }
 
     #[test]

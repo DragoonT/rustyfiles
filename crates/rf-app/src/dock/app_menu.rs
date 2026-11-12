@@ -201,11 +201,23 @@ fn open_now(req: MenuRequest, started: Instant, cx: &mut App) {
     })
     .detach();
     // the jump lists, off the UI thread; the menu is open already
+    let named = jump.clone();
     cx.spawn(async move |cx| {
         let sections = cx.background_executor().spawn(async move { jump_source::sections(&jump) }).await;
         cx.update(|cx| sections_arrived(serial, sections, cx));
     })
     .detach();
+    // the app's name as the Start panel shows it, asked apart from the lists (the shell thread answers one at a time, and neither waits
+    // for the other); nothing is asked for a pinned app
+    if !named.pinned {
+        cx.spawn(async move |cx| {
+            let name = cx.background_executor().spawn(async move { jump_source::display_name(&named) }).await;
+            if let Some(name) = name {
+                cx.update(|cx| name_arrived(serial, name, cx));
+            }
+        })
+        .detach();
+    }
     // the watch of an open menu
     let watcher = cx.spawn(async move |cx| {
         loop {
@@ -242,6 +254,14 @@ fn sections_arrived(serial: u64, sections: Vec<Section>, cx: &mut App) {
         geo::show_at(hwnd, rect);
     })
     .detach();
+}
+
+/// The shell named the app: the bold line changes (its width is fixed, so the menu does not move).
+fn name_arrived(serial: u64, name: String, cx: &mut App) {
+    let Some(h) = cx.try_global::<MenuHost>() else { return };
+    let (Some(made), true) = (h.made.as_ref(), h.open && h.serial == serial) else { return };
+    let handle = made.handle;
+    let _ = handle.update(cx, |v, _, cx| v.set_display_name(name, cx));
 }
 
 /// Whether what the menu was placed from is not what the dock has now.
@@ -332,6 +352,8 @@ struct Active {
     windows: Vec<WinRef>,
     jump: JumpApp,
     icon: Option<Arc<RenderImage>>,
+    /// A better name for the bold line than the dock's, once the shell has answered (see `jump_source::display_name`).
+    display_name: Option<String>,
     menu: Menu,
     /// The sections that have lines (the menu's indices count these).
     sections: Vec<Section>,
@@ -350,6 +372,8 @@ pub struct MenuView {
     active: Option<Active>,
     /// The pictures of jump-list lines, by `plan::icon_key`.
     entry_icons: HashMap<String, Arc<RenderImage>>,
+    /// Lines whose icon could not be drawn: they wear the app's icon instead.
+    failed: HashSet<String>,
     asked: HashSet<String>,
     _tasks: Vec<Task<()>>,
 }
@@ -367,6 +391,7 @@ impl MenuView {
             focus: cx.focus_handle(),
             active: None,
             entry_icons: HashMap::new(),
+            failed: HashSet::new(),
             asked: HashSet::new(),
             _tasks: Vec::new(),
         }
@@ -376,7 +401,7 @@ impl MenuView {
     fn on_open(&mut self, app: DockApp, icon: Option<Arc<RenderImage>>, jump: JumpApp, _serial: u64, _window: &mut Window, cx: &mut Context<Self>) {
         let fixed = model::fixed_rows(app.launch.is_some(), ownpins::pin_from_app(&app).is_some(), app.pinned, app.windows.len());
         let windows = winops::refs(&app.windows);
-        self.active = Some(Active { app, windows, jump, icon, menu: Menu::new(fixed), sections: Vec::new() });
+        self.active = Some(Active { app, windows, jump, icon, display_name: None, menu: Menu::new(fixed), sections: Vec::new() });
         self.shown = true;
         self.closing = false;
         // (a menu that moves from one icon to another does not ease in again from nothing)
@@ -412,6 +437,14 @@ impl MenuView {
         self._tasks.clear();
         self.asked.clear();
         self.entry_icons.clear();
+        self.failed.clear();
+        cx.notify();
+    }
+
+    /// The shell answered with a better name for the bold line.
+    fn set_display_name(&mut self, name: String, cx: &mut Context<Self>) {
+        let Some(a) = self.active.as_mut() else { return };
+        a.display_name = Some(name);
         cx.notify();
     }
 
@@ -454,12 +487,19 @@ impl MenuView {
             }
             let task = cx.spawn(async move |this, cx| {
                 let bgra = cx.background_executor().spawn(async move { icons::load_bgra(&[src], px) }).await;
-                if let Some(img) = bgra.and_then(icons::to_image) {
-                    let _ = this.update(cx, |me, cx| {
-                        me.entry_icons.insert(key, img);
-                        cx.notify();
-                    });
-                }
+                let img = bgra.and_then(icons::to_image);
+                let _ = this.update(cx, |me, cx| {
+                    match img {
+                        Some(img) => {
+                            me.entry_icons.insert(key, img);
+                        }
+                        // (it could not be drawn: the line wears the app's icon, not a hole)
+                        None => {
+                            me.failed.insert(key);
+                        }
+                    }
+                    cx.notify();
+                });
             });
             self._tasks.push(task);
         }
@@ -555,11 +595,18 @@ impl MenuView {
         match id {
             RowId::Entry(s, e) => {
                 let entry = a.sections.get(s).and_then(|x| x.entries.get(e));
-                let icon = entry.and_then(|en| en.icon.as_ref()).and_then(|src| self.entry_icons.get(&plan::icon_key(src)).cloned());
+                let own = entry.and_then(|en| en.icon.as_ref()).map(plan::icon_key);
+                let loaded = own.as_ref().and_then(|k| self.entry_icons.get(k)).cloned();
+                let failed = own.as_ref().is_some_and(|k| self.failed.contains(k));
+                let icon = match entry_picture(own.is_some(), loaded.is_some(), failed) {
+                    EntryPicture::Own => loaded,
+                    EntryPicture::App => a.icon.clone(),
+                    EntryPicture::Waiting => None,
+                };
                 (icon, None, entry.map(|en| en.title.clone()).unwrap_or_default().into())
             }
             RowId::Fixed(f) => {
-                let (glyph, label) = fixed_label(f, &a.app.name);
+                let (glyph, label) = fixed_label(f, a.display_name.as_deref().unwrap_or(&a.app.name));
                 // the name row wears the app's own picture
                 if f == Fixed::Open { (a.icon.clone(), Some(L::Play), label.into()) } else { (None, glyph, label.into()) }
             }
@@ -595,6 +642,26 @@ impl MenuView {
             .on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover(id, *on, cx)))
             .on_click(cx.listener(move |this, _, _, cx| this.choose(id, cx)))
             .into_any_element()
+    }
+}
+
+/// Which picture a jump-list line wears.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EntryPicture {
+    /// Its own, which has been drawn.
+    Own,
+    /// The app's: the line has no icon of its own to draw, or the reader could not draw it.
+    App,
+    /// Its own, which is still being read: nothing yet (a flash of the app's icon would be replaced a moment later).
+    Waiting,
+}
+
+/// `declared`: the entry names an icon; `loaded`: that icon has been drawn; `failed`: it could not be.
+fn entry_picture(declared: bool, loaded: bool, failed: bool) -> EntryPicture {
+    match (declared, loaded, failed) {
+        (false, _, _) | (true, false, true) => EntryPicture::App,
+        (true, true, _) => EntryPicture::Own,
+        (true, false, false) => EntryPicture::Waiting,
     }
 }
 
@@ -679,8 +746,17 @@ impl Render for MenuView {
 
 #[cfg(test)]
 mod tests {
-    use super::{Basis, Fixed, basis_changed, fixed_label};
+    use super::{Basis, EntryPicture, Fixed, basis_changed, entry_picture, fixed_label};
     use rf_win::dock::layout::Rect;
+
+    #[test]
+    fn a_line_wears_its_own_icon_the_apps_when_it_has_none_or_it_cannot_be_drawn_and_nothing_while_it_loads() {
+        assert_eq!(entry_picture(true, true, false), EntryPicture::Own);
+        assert_eq!(entry_picture(true, false, false), EntryPicture::Waiting);
+        assert_eq!(entry_picture(true, false, true), EntryPicture::App, "the reader gave nothing");
+        assert_eq!(entry_picture(false, false, false), EntryPicture::App, "a task of a packaged app names no icon");
+        assert_eq!(entry_picture(true, true, true), EntryPicture::Own, "a picture that arrived after a first failure is used");
+    }
 
     #[test]
     fn the_menu_is_on_by_default_and_a_file_from_before_it_reads_as_on() {

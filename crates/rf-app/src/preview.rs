@@ -14,6 +14,10 @@ use crate::icons::{self, Category};
 use crate::image_cache::ImageCache;
 use crate::theme::{self, Palette};
 
+// the same pane laid out for a wide and low box (setting preview_position = bottom)
+#[path = "preview_wide.rs"]
+mod wide;
+
 const TEXT_LIMIT: usize = 48 * 1024;
 const PREVIEW_PX: u32 = 384;
 
@@ -57,6 +61,9 @@ pub struct Preview {
     _archive_task: Option<Task<()>>,
     changed_at: std::time::Instant,
     _hold_task: Option<Task<()>>,
+    /// The pane sits at the bottom of the window: the size of its box (width, height), set by the window every frame.
+    /// None = at the right (the tall and narrow layout, which is all that was there before).
+    wide: Option<(f32, f32)>,
 }
 
 /// How long the previous thumbnail may stand in for one that is still loading.
@@ -124,6 +131,7 @@ impl Preview {
             _archive_task: None,
             changed_at: std::time::Instant::now(),
             _hold_task: None,
+            wide: None,
         }
     }
 
@@ -585,6 +593,65 @@ impl Preview {
         });
     }
 
+    /// The lines of the property block, in order (label, value): the same for the pane at the right and at the bottom.
+    fn property_rows(&self, path: &Path, e: &Entry, cx: &App) -> Vec<(&'static str, String)> {
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+        let mut rows: Vec<(&'static str, String)> = vec![(t!("Tür"), icons::type_label(e).to_string())];
+        if e.is_dir() && !crate::archive_view::is_browsable_path(path) {
+            let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
+            let txt = match &self.folder_size {
+                Some((fp, Some(fs))) if fp == path => {
+                    let shown = if on_disk { fs.allocated.unwrap_or(fs.bytes) } else { fs.bytes };
+                    format!("{} · {} {}, {} {}", format::size(shown), group(fs.files), t!("dosya"), group(fs.dirs), t!("klasör"))
+                }
+                _ => t!("Hesaplanıyor…").to_string(),
+            };
+            rows.push((t!("Boyut"), txt));
+        }
+        if !e.is_dir() {
+            rows.push((t!("Boyut"), format!("{} ({} {})", format::size(e.size), group(e.size), t!("bayt"))));
+        }
+        if let Some((mp, list)) = &self.media
+            && mp == path
+        {
+            for (label, value) in list {
+                rows.push((crate::i18n::t(label), value.clone()));
+            }
+        }
+        rows.push((t!("Değiştirilme"), format::datetime(e.modified_ms)));
+        rows.push((t!("Oluşturulma"), format::datetime(e.created_ms)));
+        // zero-width space after each separator: long paths wrap at folder boundaries
+        rows.push((t!("Konum"), dir.to_string_lossy().replace('\\', "\\\u{200B}")));
+        let mut flags = Vec::new();
+        if e.is_hidden() {
+            flags.push(t!("Gizli"));
+        }
+        if e.is_system() {
+            flags.push(t!("Sistem"));
+        }
+        if e.attrs & rf_core::attrs::READONLY != 0 {
+            flags.push(t!("Salt okunur"));
+        }
+        if e.is_cloud_placeholder() {
+            flags.push(t!("Yalnızca çevrimiçi"));
+        }
+        if e.is_symlink() {
+            flags.push(t!("Bağlantı"));
+        }
+        if !flags.is_empty() {
+            rows.push((t!("Öznitelikler"), flags.join(", ")));
+        }
+        rows
+    }
+
+    /// The workspace tells the pane every frame where it sits: Some((w, h)) = at the bottom with that box, None = at the right.
+    pub fn set_wide(&mut self, wide: Option<(f32, f32)>, cx: &mut Context<Self>) {
+        if self.wide != wide {
+            self.wide = wide;
+            cx.notify();
+        }
+    }
+
     /// Called by the workspace whenever the focused item may have changed.
     pub fn set_target(&mut self, target: Option<(PathBuf, Entry)>, cx: &mut Context<Self>) {
         let same = match (&self.target, &target) {
@@ -761,6 +828,11 @@ fn read_text_head(path: &Path) -> Option<String> {
 
 /// Archive contents / shortcut target block of the pane.
 fn render_extra(p: &Palette, x: &Extra) -> AnyElement {
+    render_extra_sized(p, x, false)
+}
+
+/// `tall`: the block fills the height of its box (the pane at the bottom) instead of stopping at 300 px.
+fn render_extra_sized(p: &Palette, x: &Extra, tall: bool) -> AnyElement {
     match x {
         Extra::Archive(list, total) => {
             let rows = list.iter().map(|(name, dir, size)| {
@@ -775,7 +847,8 @@ fn render_extra(p: &Palette, x: &Extra) -> AnyElement {
             v_flex()
                 .id("pv-archive")
                 .w_full()
-                .max_h(px(300.))
+                .when(!tall, |d| d.max_h(px(300.)))
+                .when(tall, |d| d.h_full())
                 .overflow_y_scroll()
                 .p_2()
                 .gap_1()
@@ -816,12 +889,15 @@ impl Render for Preview {
             return col
                 .items_center()
                 .justify_center()
-                .child(Icon::new(L::PanelRight).size(px(32.)).text_color(p.text_tertiary))
+                .child(Icon::new(if self.wide.is_some() { L::PanelBottom } else { L::PanelRight }).size(px(32.)).text_color(p.text_tertiary))
                 .child(div().text_sm().text_color(p.text_secondary).child(t!("Önizleme için bir öğe seçin")))
                 .into_any_element();
         };
         if self.large {
             return self.render_large(path, e, window, cx);
+        }
+        if let Some(size) = self.wide {
+            return self.render_wide(path, e, size, window, cx);
         }
         let cat = icons::category(&e);
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -926,51 +1002,8 @@ impl Render for Preview {
         }
 
         let mut props = v_flex().w_full().gap_1p5();
-        props = props.child(prop_row(&p, t!("Tür"), icons::type_label(&e)));
-        if e.is_dir() && !crate::archive_view::is_browsable_path(&path) {
-            let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
-            let txt = match &self.folder_size {
-                Some((fp, Some(fs))) if *fp == path => {
-                    let shown = if on_disk { fs.allocated.unwrap_or(fs.bytes) } else { fs.bytes };
-                    format!("{} · {} {}, {} {}", format::size(shown), group(fs.files), t!("dosya"), group(fs.dirs), t!("klasör"))
-                }
-                _ => t!("Hesaplanıyor…").to_string(),
-            };
-            props = props.child(prop_row(&p, t!("Boyut"), txt));
-        }
-        if !e.is_dir() {
-            props = props.child(prop_row(&p, t!("Boyut"), format!("{} ({} {})", format::size(e.size), group(e.size), t!("bayt"))));
-        }
-        if let Some((mp, list)) = &self.media {
-            if *mp == path {
-                for (label, value) in list {
-                    props = props.child(prop_row(&p, crate::i18n::t(label), value.clone()));
-                }
-            }
-        }
-        props = props
-            .child(prop_row(&p, t!("Değiştirilme"), format::datetime(e.modified_ms)))
-            .child(prop_row(&p, t!("Oluşturulma"), format::datetime(e.created_ms)))
-            // zero-width space after each separator: long paths wrap at folder boundaries
-            .child(prop_row(&p, t!("Konum"), dir.to_string_lossy().replace('\\', "\\\u{200B}")));
-        let mut flags = Vec::new();
-        if e.is_hidden() {
-            flags.push(t!("Gizli"));
-        }
-        if e.is_system() {
-            flags.push(t!("Sistem"));
-        }
-        if e.attrs & rf_core::attrs::READONLY != 0 {
-            flags.push(t!("Salt okunur"));
-        }
-        if e.is_cloud_placeholder() {
-            flags.push(t!("Yalnızca çevrimiçi"));
-        }
-        if e.is_symlink() {
-            flags.push(t!("Bağlantı"));
-        }
-        if !flags.is_empty() {
-            props = props.child(prop_row(&p, t!("Öznitelikler"), flags.join(", ")));
+        for (k, v) in self.property_rows(&path, &e, cx) {
+            props = props.child(prop_row(&p, k, v));
         }
         let hash_section: Option<AnyElement> = if e.is_dir() {
             None

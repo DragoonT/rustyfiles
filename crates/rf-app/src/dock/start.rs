@@ -1483,7 +1483,8 @@ impl StartView {
                 if !this.live() {
                     return;
                 }
-                super::actions::run_rustyfiles(super::actions::settings_args());
+                // (Windows' Settings, as the gear of Windows' own Start does; rustyfiles' settings are in its own window)
+                super::panel_parts::open_uri("ms-settings:");
                 this.finish(cx);
             })))
             .child(button("start-power", L::Power, self.power != PowerMenu::Closed, &power_focus, t!("Güç")).on_click(cx.listener(|this, _, _, cx| {

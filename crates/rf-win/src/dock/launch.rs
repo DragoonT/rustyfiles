@@ -113,30 +113,72 @@ pub fn perform(action: ClickAction, launch: Option<&Launch>) -> anyhow::Result<(
 /// What the app is called for a tooltip: the packaged app's display name, a program's file description (what Explorer's taskbar
 /// shows), else the file's name. `None` when nothing can be read.
 pub fn friendly_name(icon: &IconSource) -> Option<String> {
-    use windows::Win32::UI::Shell::PropertiesSystem::{GPS_DEFAULT, IPropertyStore, SHGetPropertyStoreFromParsingName};
     match icon {
         IconSource::Packaged(id) => super::pins::packaged_name(id),
-        IconSource::File(p) | IconSource::Resource { file: p, .. } => {
-            use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
-            crate::shell::ensure_com();
-            let w = crate::wide::wide(p);
-            unsafe {
-                let described: Option<String> = SHGetPropertyStoreFromParsingName::<_, _, IPropertyStore>(windows::core::PCWSTR(w.as_ptr()), None, GPS_DEFAULT)
-                    .ok()
-                    .and_then(|store| {
-                        // System.FileDescription
-                        let key = windows::Win32::Foundation::PROPERTYKEY { fmtid: windows::core::GUID::from_u128(0x0cef7d53_fa64_11d1_a203_0000f81fedee), pid: 3 };
-                        let v = store.GetValue(&key).ok()?;
-                        let s = PropVariantToStringAlloc(&v).ok()?;
-                        let out = s.to_string().ok();
-                        windows::Win32::System::Com::CoTaskMemFree(Some(s.0 as *const _));
-                        out
-                    })
-                    .filter(|s| !s.trim().is_empty());
-                described.or_else(|| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
-            }
-        }
+        IconSource::File(p) | IconSource::Resource { file: p, .. } => file_description(p).or_else(|| p.file_stem().map(|s| s.to_string_lossy().into_owned())),
         IconSource::Shell(_) | IconSource::Window(_) => None,
+    }
+}
+
+/// `System.FileDescription` of a program (what Explorer's taskbar calls a classic program), `None` when it has none. Shell thread (see
+/// [`crate::sta::call`]): [`known_names`] is the way to ask from anywhere else.
+fn file_description(p: &std::path::Path) -> Option<String> {
+    use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
+    use windows::Win32::UI::Shell::PropertiesSystem::{GPS_DEFAULT, IPropertyStore, SHGetPropertyStoreFromParsingName};
+    crate::shell::ensure_com();
+    let w = crate::wide::wide(p);
+    unsafe {
+        SHGetPropertyStoreFromParsingName::<_, _, IPropertyStore>(windows::core::PCWSTR(w.as_ptr()), None, GPS_DEFAULT)
+            .ok()
+            .and_then(|store| {
+                // System.FileDescription
+                let key = windows::Win32::Foundation::PROPERTYKEY { fmtid: windows::core::GUID::from_u128(0x0cef7d53_fa64_11d1_a203_0000f81fedee), pid: 3 };
+                let v = store.GetValue(&key).ok()?;
+                let s = PropVariantToStringAlloc(&v).ok()?;
+                let out = s.to_string().ok();
+                windows::Win32::System::Com::CoTaskMemFree(Some(s.0 as *const _));
+                out
+            })
+            .filter(|s| !s.trim().is_empty())
+    }
+}
+
+/// What the shell can say about an app's name, the two sources the app menu prefers over the bare file name (see
+/// [`super::appmenu::menu_name`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct KnownNames {
+    /// The name "All apps" (and so the Start panel) shows for a packaged app.
+    pub display: Option<String>,
+    /// The program file's description.
+    pub description: Option<String>,
+}
+
+/// Asks the shell thread for the names of an app: the display name of a packaged app (`packaged`, its AppUserModelID) and the
+/// description of a classic program (`exe`). Read-only; blocks up to a few seconds: a worker thread only.
+pub fn known_names(packaged: Option<&str>, exe: Option<&std::path::Path>) -> KnownNames {
+    let (packaged, exe) = (packaged.map(str::to_string), exe.map(std::path::Path::to_path_buf));
+    crate::sta::call(std::time::Duration::from_secs(5), move || KnownNames {
+        display: packaged.as_deref().and_then(super::pins::packaged_name),
+        description: exe.as_deref().and_then(file_description),
+    })
+    .unwrap_or_default()
+}
+
+/// Of a jump-list identity's AppUserModelID (`model::jump_identity`), the part that is asked for a display name: only a packaged app's
+/// id is (a classic program's explicit id is no package family). The `packaged` argument of [`known_names`].
+pub fn packaged_id(aumid: Option<&str>) -> Option<&str> {
+    aumid.filter(|a| super::model::looks_packaged(a))
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::packaged_id;
+
+    #[test]
+    fn only_a_packaged_apps_id_is_asked_for_a_display_name() {
+        assert_eq!(packaged_id(Some("Microsoft.Paint_8wekyb3d8bbwe!App")), Some("Microsoft.Paint_8wekyb3d8bbwe!App"));
+        assert_eq!(packaged_id(Some("Microsoft.VisualStudioCode")), None);
+        assert_eq!(packaged_id(None), None);
     }
 }
 

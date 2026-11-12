@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use rf_win::dock::{DockApp, IconSource, Launch};
+use rf_win::dock::{DockApp, IconSource};
 use rf_win::jumplists::{AppKey, JumpItem, JumpTarget, Which};
 
 use crate::t;
@@ -23,6 +23,8 @@ pub struct JumpApp {
     pub key: String,
     /// The name the dock shows.
     pub name: String,
+    /// The app is on the dock's pin list: its name is the pin's and stays (see [`display_name`]).
+    pub pinned: bool,
     /// The AppUserModelID, when the app has one that a jump-list file is named by.
     pub aumid: Option<String>,
     /// The program, when the app has one on disk.
@@ -31,20 +33,26 @@ pub struct JumpApp {
 
 impl JumpApp {
     pub fn of(app: &DockApp) -> JumpApp {
-        let aumid = match &app.launch {
-            Some(Launch::Packaged(id)) => Some(id.clone()),
-            _ if rf_win::dock::model::looks_packaged(&app.key) => Some(app.key.clone()),
-            _ => None,
-        };
-        let exe = match &app.launch {
-            Some(Launch::Exe { path, .. }) => Some(path.clone()),
-            _ => match &app.icon {
-                IconSource::File(p) if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")) => Some(p.clone()),
-                _ => None,
-            },
-        };
-        JumpApp { key: app.key.clone(), name: app.name.clone(), aumid, exe }
+        let (aumid, exe) = rf_win::dock::model::jump_identity(app);
+        JumpApp { key: app.key.clone(), name: app.name.clone(), pinned: app.pinned, aumid, exe }
     }
+}
+
+/// The name for the menu's bold line when the shell knows a better one than the dock's, else `None` (keep the dock's). A running app
+/// nobody pinned is named by its program's file name ("WindowsTerminal"); the Start panel shows "Terminal". The order is
+/// `rf_win::dock::appmenu::menu_name`'s: a pin's own name, the "All apps" name of a packaged app, the program's file description, the
+/// file name. Asks the shell thread: a worker thread only, and never waited for by the menu.
+pub fn display_name(app: &JumpApp) -> Option<String> {
+    if app.pinned {
+        return None;
+    }
+    let known = rf_win::dock::launch::known_names(rf_win::dock::launch::packaged_id(app.aumid.as_deref()), app.exe.as_deref());
+    better_name(app, &known)
+}
+
+/// [`display_name`] over already-asked names (pure).
+fn better_name(app: &JumpApp, known: &rf_win::dock::launch::KnownNames) -> Option<String> {
+    rf_win::dock::appmenu::better_name(app.pinned, &app.name, known.display.as_deref(), known.description.as_deref())
 }
 
 /// What an entry does when chosen. The menu keeps it and hands it back to [`run`]; it never looks inside.
@@ -55,7 +63,8 @@ pub struct Action(pub String);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {
     pub title: String,
-    /// The line's own icon, when it has one (a task's, a recent document's).
+    /// The line's own icon, when it has one (a task's, a recent document's). `None`: the entry names nothing the icon reader can draw
+    /// (a packaged app's task whose link is an execution alias or a package resource), and the menu shows the app's own icon.
     pub icon: Option<IconSource>,
     pub action: Action,
 }
@@ -146,6 +155,7 @@ pub fn run(_app: &JumpApp, action: &Action) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rf_win::dock::Launch;
 
     fn app(key: &str, launch: Option<Launch>, icon: IconSource) -> DockApp {
         DockApp { key: key.into(), name: "x".into(), pinned: true, launch, icon, windows: vec![], active: false }
@@ -171,7 +181,7 @@ mod tests {
 
     #[test]
     fn an_app_with_nothing_to_go_by_has_no_jump_list_and_a_strange_action_runs_nothing() {
-        let a = JumpApp { key: "pid:42".into(), name: "x".into(), aumid: None, exe: None };
+        let a = JumpApp { key: "pid:42".into(), name: "x".into(), pinned: false, aumid: None, exe: None };
         assert!(app_key(&a).is_empty());
         assert!(sections(&a).is_empty());
         assert!(run(&a, &Action("anything".into())).is_err());
@@ -181,16 +191,47 @@ mod tests {
     #[test]
     fn the_dock_s_key_becomes_the_reader_s_identity() {
         // an explicit AppUserModelID is the key itself
-        let k = app_key(&JumpApp { key: "microsoft.visualstudiocode".into(), name: "x".into(), aumid: None, exe: Some(PathBuf::from(r"C:\a\Code.exe")) });
+        let k = app_key(&JumpApp { key: "microsoft.visualstudiocode".into(), name: "x".into(), pinned: false, aumid: None, exe: Some(PathBuf::from(r"C:\a\Code.exe")) });
         assert_eq!((k.aumid.as_deref(), k.exe), (Some("microsoft.visualstudiocode"), Some(PathBuf::from(r"C:\a\Code.exe"))));
         // a path key is the program; the program's own spelling wins when it is known
-        let k = app_key(&JumpApp { key: r"c:\a\code.exe".into(), name: "x".into(), aumid: None, exe: Some(PathBuf::from(r"C:\a\Code.exe")) });
+        let k = app_key(&JumpApp { key: r"c:\a\code.exe".into(), name: "x".into(), pinned: false, aumid: None, exe: Some(PathBuf::from(r"C:\a\Code.exe")) });
         assert_eq!((k.aumid, k.exe), (None, Some(PathBuf::from(r"C:\a\Code.exe"))));
-        let k = app_key(&JumpApp { key: r"c:\a\code.exe".into(), name: "x".into(), aumid: None, exe: None });
+        let k = app_key(&JumpApp { key: r"c:\a\code.exe".into(), name: "x".into(), pinned: false, aumid: None, exe: None });
         assert_eq!(k.exe, Some(PathBuf::from(r"c:\a\code.exe")));
         // a packaged app's id as the launcher has it
-        let k = app_key(&JumpApp { key: "microsoft.paint_8wekyb3d8bbwe!app".into(), name: "x".into(), aumid: Some("Microsoft.Paint_8wekyb3d8bbwe!App".into()), exe: None });
+        let k = app_key(&JumpApp { key: "microsoft.paint_8wekyb3d8bbwe!app".into(), name: "x".into(), pinned: false, aumid: Some("Microsoft.Paint_8wekyb3d8bbwe!App".into()), exe: None });
         assert_eq!(k.aumid.as_deref(), Some("Microsoft.Paint_8wekyb3d8bbwe!App"));
+    }
+
+    fn named(name: &str, pinned: bool) -> JumpApp {
+        JumpApp { key: "k".into(), name: name.into(), pinned, aumid: None, exe: None }
+    }
+
+    #[test]
+    fn a_running_app_nobody_pinned_gets_the_name_the_shell_shows_and_a_pinned_one_keeps_its_own() {
+        use rf_win::dock::launch::KnownNames;
+        let known = KnownNames { display: Some("Terminal".into()), description: Some("Windows Terminal".into()) };
+        assert_eq!(better_name(&named("WindowsTerminal", false), &known).as_deref(), Some("Terminal"));
+        assert_eq!(better_name(&named("WindowsTerminal", true), &known), None, "a pin's name stays");
+        // nothing better known, or the same: the dock's name stays
+        assert_eq!(better_name(&named("Code", false), &KnownNames::default()), None);
+        assert_eq!(better_name(&named("Terminal", false), &known), None, "already the name: nothing to change");
+        let described = KnownNames { display: None, description: Some("Visual Studio Code".into()) };
+        assert_eq!(better_name(&named("Code", false), &described).as_deref(), Some("Visual Studio Code"));
+    }
+
+    #[test]
+    fn a_pinned_app_is_not_even_asked() {
+        // (no shell call: the answer is known from the pin alone)
+        assert_eq!(display_name(&named("Chrome", true)), None);
+    }
+
+    #[test]
+    fn the_app_of_a_dock_item_carries_whether_it_is_pinned() {
+        let mut a = app("k", None, IconSource::Window(1));
+        assert!(JumpApp::of(&a).pinned);
+        a.pinned = false;
+        assert!(!JumpApp::of(&a).pinned);
     }
 
     #[test]

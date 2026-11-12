@@ -13,6 +13,13 @@ pub enum SortKey {
     Created,
     Size,
     Type,
+    /// By tag (the order of the tags in Settings, untagged last). Needs one rank per entry:
+    /// see `sortkeys`. Stored apart from the five above in the layout file.
+    Tag,
+    /// By the folder the item lies in, then its name (results from several folders).
+    Path,
+    /// By the sync column's state (online only, here, always here).
+    Sync,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -61,30 +68,85 @@ impl SortSpec {
         }
     }
 
-    pub fn compare(&self, a: &Entry, b: &Entry) -> Ordering {
+    /// Folders before files (or the reverse), when the spec asks; `None` = decided by the key.
+    fn folder_order(&self, a: &Entry, b: &Entry) -> Option<Ordering> {
         if self.dirs_first && a.is_dir() != b.is_dir() {
-            return if a.is_dir() { Ordering::Less } else { Ordering::Greater };
+            return Some(if a.is_dir() { Ordering::Less } else { Ordering::Greater });
         }
         if self.files_first && a.is_dir() != b.is_dir() {
-            return if a.is_dir() { Ordering::Greater } else { Ordering::Less };
+            return Some(if a.is_dir() { Ordering::Greater } else { Ordering::Less });
         }
-        let primary = match self.key {
-            SortKey::Name => Ordering::Equal,
-            SortKey::Modified => a.modified_ms.cmp(&b.modified_ms),
-            SortKey::Created => a.created_ms.cmp(&b.created_ms),
-            SortKey::Size => a.size.cmp(&b.size),
-            SortKey::Type => a.ext.cmp(&b.ext),
-        };
-        let ord = primary.then_with(|| natural_cmp(a.shown(), b.shown()));
+        None
+    }
+
+    fn directed(&self, ord: Ordering) -> Ordering {
         match self.dir {
             SortDir::Asc => ord,
             SortDir::Desc => ord.reverse(),
         }
     }
 
+    /// Compares two entries by their own fields. The keys that need a value made beforehand
+    /// (`Tag`, `Path`: see [`SortSpec::compare_ranked`]) fall back to the name here.
+    pub fn compare(&self, a: &Entry, b: &Entry) -> Ordering {
+        if let Some(o) = self.folder_order(a, b) {
+            return o;
+        }
+        let primary = match self.key {
+            SortKey::Name | SortKey::Tag | SortKey::Path => Ordering::Equal,
+            SortKey::Modified => a.modified_ms.cmp(&b.modified_ms),
+            SortKey::Created => a.created_ms.cmp(&b.created_ms),
+            SortKey::Size => a.size.cmp(&b.size),
+            SortKey::Type => a.ext.cmp(&b.ext),
+            SortKey::Sync => crate::sortkeys::sync_rank(a).cmp(&crate::sortkeys::sync_rank(b)),
+        };
+        self.directed(primary.then_with(|| natural_cmp(a.shown(), b.shown())))
+    }
+
+    /// [`compare`](Self::compare) for the keys that sort by a rank made beforehand (one `u32` per
+    /// entry: `ra`, `rb`). A tag sort keeps the entries without a tag ([`crate::sortkeys::NO_RANK`])
+    /// last in both directions, the way folders stay first; ties are broken by name.
+    pub fn compare_ranked(&self, a: &Entry, ra: u32, b: &Entry, rb: u32) -> Ordering {
+        if !self.key.needs_ranks() {
+            return self.compare(a, b);
+        }
+        if self.key == SortKey::Path {
+            // The folder of the hit comes first, so every folder's hits stay one run. "Folders
+            // first" then applies inside a folder (a directory leads its own folder's hits);
+            // putting every directory before every file would split each folder's hits in two.
+            let by_folder = self.directed(ra.cmp(&rb));
+            if by_folder != Ordering::Equal {
+                return by_folder;
+            }
+            return self.folder_order(a, b).unwrap_or_else(|| self.directed(natural_cmp(a.shown(), b.shown())));
+        }
+        if let Some(o) = self.folder_order(a, b) {
+            return o;
+        }
+        if self.key == SortKey::Tag {
+            use crate::sortkeys::NO_RANK;
+            match (ra == NO_RANK, rb == NO_RANK) {
+                (true, false) => return Ordering::Greater,
+                (false, true) => return Ordering::Less,
+                _ => {}
+            }
+        }
+        self.directed(ra.cmp(&rb).then_with(|| natural_cmp(a.shown(), b.shown())))
+    }
+
     /// Sorts indices into `entries` (we sort indices, not entries, so re-sorting is cheap).
     pub fn sort_indices(&self, entries: &[Entry], idx: &mut [u32]) {
         idx.sort_unstable_by(|&x, &y| self.compare(&entries[x as usize], &entries[y as usize]));
+    }
+
+    /// [`sort_indices`](Self::sort_indices) with one rank per entry (`ranks[i]` for `entries[i]`;
+    /// a missing rank counts as none). Keys that need no rank sort as usual.
+    pub fn sort_indices_ranked(&self, entries: &[Entry], ranks: &[u32], idx: &mut [u32]) {
+        if !self.key.needs_ranks() {
+            return self.sort_indices(entries, idx);
+        }
+        let rank = |i: u32| ranks.get(i as usize).copied().unwrap_or(crate::sortkeys::NO_RANK);
+        idx.sort_unstable_by(|&x, &y| self.compare_ranked(&entries[x as usize], rank(x), &entries[y as usize], rank(y)));
     }
 }
 

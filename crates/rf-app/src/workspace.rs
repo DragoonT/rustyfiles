@@ -21,6 +21,9 @@ use crate::theme::{self, Palette};
 // the sidebar's folder tree (setting `sidebar_tree`): the view and the window's hooks for it
 #[path = "sidebar_tree.rs"]
 mod sidebar_tree;
+// the preview pane under the file list (setting `preview_position` = bottom)
+#[path = "preview_dock.rs"]
+mod preview_dock;
 
 /// Payload while a pinned sidebar entry is dragged (reordering).
 #[derive(Clone)]
@@ -170,6 +173,8 @@ pub struct Workspace {
     /// docked one instead of a neutral grey slab over a tinted window.
     rail_peek_bg: Option<Hsla>,
     preview_w: f32,
+    /// The preview pane at the bottom: its height, the measured row and the debounced write (idle while the pane is at the right).
+    preview_dock: preview_dock::Dock,
     /// Debounced settings write after a pane resize.
     _width_save: Option<Task<()>>,
     palette: Option<Entity<crate::command_palette::CommandPalette>>,
@@ -560,6 +565,8 @@ impl Workspace {
         cx.observe_global::<crate::settings::Settings>(|this, cx| {
             // the language may have changed: the jump list follows
             update_jump_list(this.places.read(cx));
+            // another window may have dragged the preview pane's height
+            this.sync_preview_height(cx);
             let s = cx.global::<crate::settings::Settings>();
             // a file dialog keeps its own preview state (shown by default)
             if this.picker.is_none() {
@@ -643,6 +650,7 @@ impl Workspace {
             rail_peek: [false; 2],
             rail_peek_bg: None,
             preview_w: prefs.preview_width.clamp(PREVIEW_MIN, PREVIEW_MAX),
+            preview_dock: preview_dock::Dock::new(prefs.preview_height),
             _width_save: None,
             palette: None,
             bulk: None,
@@ -1377,6 +1385,13 @@ impl Workspace {
         );
         let tree_on = cx.global::<crate::settings::Settings>().sidebar_tree;
         items.push(Item::action(t!("Klasör ağacı"), MenuIcon::Lucide(L::FolderTree), |_, cx| crate::settings::update(cx, |s| s.sidebar_tree = !s.sidebar_tree)).checked(tree_on));
+        // where the preview pane sits (Alt+P shows and hides it); a file dialog's window keeps it at the right, so it has no choice to offer
+        if self.picker.is_none() {
+            let preview_pos = cx.global::<crate::settings::Settings>().preview_position;
+            for (pos, label, icon) in [(rf_core::previewpane::PreviewPos::Right, t!("Önizleme sağda"), L::PanelRight), (rf_core::previewpane::PreviewPos::Bottom, t!("Önizleme altta"), L::PanelBottom)] {
+                items.push(Item::action(label, MenuIcon::Lucide(icon), move |_, cx| preview_dock::set_preview_position(cx, pos)).checked(preview_pos == pos));
+            }
+        }
         let pos = point(px(6.), theme::TITLEBAR_H);
         crate::fluent_menu::show(Menu { quick: Vec::new(), items }, pos, window, cx);
     }
@@ -3425,7 +3440,12 @@ impl Render for Workspace {
         const LIST_MIN: f32 = 380.;
         let side_w = if self.sidebar_rail { RAIL_W } else { self.sidebar_w };
         let show_sidebar = self.sidebar_open && self.compact.is_none() && self.viewport_w >= side_w + LIST_MIN;
-        let room_for_preview = self.viewport_w >= self.preview_w + LIST_MIN + if show_sidebar { side_w } else { 0. };
+        // (at the right this is the old rule, `viewport_w >= preview_w + LIST_MIN + sidebar`; at the bottom the height decides)
+        let preview_bottom = self.preview_at_bottom(cx);
+        let side_used = if show_sidebar { side_w } else { 0. };
+        // (the height and the split's shape matter only to the bottom position: the right one reads nothing else)
+        let (viewport_h, preview_stacked) = if preview_bottom { (f32::from(window.viewport_size().height), self.preview_stacked(cx)) } else { (0., false) };
+        let room_for_preview = self.preview_room(preview_bottom, preview_stacked, side_used, viewport_h);
         // Lenses (the selection pills of the sidebar and of the settings list) exist only while this window shows glass. The sidebar's
         // selected row claims its lens while it is built; a frame without a claim (no selected row, hidden sidebar, the rail) takes it
         // out. The settings lens belongs to the focused pane when that shows Settings: a split tab with Settings in both panes would
@@ -3679,7 +3699,7 @@ impl Render for Workspace {
                         }),
                 )
         });
-        let preview = if pane_shown {
+        let preview = if pane_shown && !preview_bottom {
             let target = self.active_tab().read(cx).preview_target();
             self.preview.update(cx, |pv, cx| pv.set_target(target, cx));
             Some(
@@ -3695,6 +3715,22 @@ impl Render for Workspace {
             )
         } else {
             None
+        };
+        let bottom_pane = self.preview_bottom_pane(preview_dock::BottomFrame { bottom: preview_bottom, shown: pane_shown, stacked: preview_stacked, side_w: side_used, viewport_h }, &p, cx);
+        // the file list's slot, and the row that holds it with the shelf and the preview pane (at the right, or under them)
+        let list_slot = div()
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .relative()
+            // Drop a tab here: it moves into a new window.
+            .drag_over::<TabDrag>(move |s, _, _, _| s.bg(p.selection))
+            .on_drop(cx.listener(|this, d: &TabDrag, window, cx| this.detach_tab(d.ix, window, cx)))
+            .child(content);
+        let main_row: AnyElement = if preview_bottom {
+            self.preview_bottom_row(list_slot, shelf, bottom_pane, cx)
+        } else {
+            h_flex().flex_1().min_h_0().child(list_slot).children(shelf).children(preview).into_any_element()
         };
 
         v_flex()
@@ -3889,24 +3925,7 @@ impl Render for Workspace {
                             .flex_col()
                             .when(show_commandbar && show_toolbar, |d| d.child(commandbar))
                             .children(filter_strip)
-                            .child(
-                                h_flex()
-                                    .flex_1()
-                                    .min_h_0()
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .h_full()
-                                            .relative()
-                                            // Drop a tab here: it moves into a new window.
-                                            .drag_over::<TabDrag>(move |s, _, _, _| s.bg(p.selection))
-                                            .on_drop(cx.listener(|this, d: &TabDrag, window, cx| this.detach_tab(d.ix, window, cx)))
-                                            .child(content),
-                                    )
-                                    .children(shelf)
-                                    .children(preview),
-                            )
+                            .child(main_row)
                             .children(star_strip)
                             .children(donate_strip)
                             .when(show_statusbar, |d| d.child(status))

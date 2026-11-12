@@ -78,6 +78,13 @@ pub(crate) fn exe_of(pid: u32) -> Option<PathBuf> {
     }
 }
 
+/// The full path of the program a process runs (`None` when it cannot be opened with the limited query right, or has gone). Read-only;
+/// it opens a handle, so it belongs on a worker thread. The tray feed uses it to give a notification icon the identity the order file
+/// remembers it by.
+pub fn process_exe_path(pid: u32) -> Option<PathBuf> {
+    exe_of(pid)
+}
+
 /// The window's AppUserModelID (`System.AppUserModel.ID` in its property store).
 fn app_id_of(h: HWND) -> Option<String> {
     use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;

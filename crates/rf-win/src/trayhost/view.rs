@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use super::clicks::{self, ClickOutcome, ClickRequest};
+use super::clicks::{self, ClickOutcome, ClickRequest, OwnerRef};
 use super::model::{IconId, Snapshot};
 use super::shared::{Counts, Shared};
 use super::traits::OwnerSend;
@@ -66,6 +66,15 @@ impl TrayView {
             return ClickOutcome::UnknownIcon;
         }
         clicks::deliver(&self.shared, &*self.owners, req)
+    }
+
+    /// [`TrayView::click`] on a picture drawn when the icon had owner `expect`: refused (`OwnerChanged`) when the model's icon has been
+    /// taken over by another window or process since.
+    pub fn click_expecting(&self, req: &ClickRequest, expect: OwnerRef) -> ClickOutcome {
+        if self.log_only {
+            return ClickOutcome::UnknownIcon;
+        }
+        clicks::deliver_expecting(&self.shared, &*self.owners, req, Some(expect))
     }
 
     /// Drops the icons whose owner windows are gone (the host does this every 5 s; the interface may also ask at once).

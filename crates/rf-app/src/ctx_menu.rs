@@ -370,7 +370,7 @@ impl FolderView {
         let group = self.group;
         let mut v: Vec<Item> = Vec::new();
         v.push(Item::sub(t!("Sayfa düzeni"), icon(L::LayoutGrid), layout_items(me, mode, self.grid_style)));
-        v.push(Item::sub(t!("Sırala"), icon(L::ArrowUpDown), sort_items(me, sort)));
+        v.push(Item::sub(t!("Sırala"), icon(L::ArrowUpDown), sort_items(me, sort, self.sort_offers(cx))));
         let mut group_menu = group_items(me, group);
         group_menu.extend(self.property_group_items(me, cx));
         v.push(Item::sub(t!("Gruplandır"), icon(L::ListTree), group_menu));
@@ -458,7 +458,7 @@ fn layout_items(me: &Me, mode: ViewMode, style: crate::folder_view::GridStyle) -
     ]
 }
 
-fn sort_items(me: &Me, sort: rf_core::SortSpec) -> Vec<Item> {
+fn sort_items(me: &Me, sort: rf_core::SortSpec, offers: crate::folder_view::sort_ext::SortOffers) -> Vec<Item> {
     let by = |label: &str, k: SortKey| {
         Item::action(label.to_string(), MenuIcon::None, act(me, move |v, _, cx| {
             let mut s = v.sort;
@@ -475,16 +475,27 @@ fn sort_items(me: &Me, sort: rf_core::SortSpec) -> Vec<Item> {
         }))
         .checked(sort.dir == d)
     };
-    vec![
+    let mut v = vec![
         by(t!("Ad"), SortKey::Name),
         by(t!("Değiştirme tarihi"), SortKey::Modified),
         by(t!("Oluşturma tarihi"), SortKey::Created),
         by(t!("Tür"), SortKey::Type),
         by(t!("Boyut"), SortKey::Size),
-        Item::Separator,
-        dir_item(t!("Artan"), SortDir::Asc),
-        dir_item(t!("Azalan"), SortDir::Desc),
-    ]
+    ];
+    // the keys that need more than the entry: tag, the folder (results from several folders), sync state
+    if offers.tag {
+        v.push(by(t!("Etiket"), SortKey::Tag));
+    }
+    if offers.path {
+        v.push(by(t!("Konum"), SortKey::Path));
+    }
+    if offers.sync {
+        v.push(by(t!("Eşitleme durumu"), SortKey::Sync));
+    }
+    v.push(Item::Separator);
+    v.push(dir_item(t!("Artan"), SortDir::Asc));
+    v.push(dir_item(t!("Azalan"), SortDir::Desc));
+    v
 }
 
 /// Folders first / files first / mixed (Files' three radio items under Sort and Group).
@@ -560,7 +571,7 @@ impl FolderView {
                 // Files' layout: Sort ▸ / Group ▸, then the folder/file order; these apply to
                 // this folder only (each folder remembers its own) unless "sync" is on
                 let mut v = vec![
-                    Item::sub(t!("Sırala"), icon(L::ArrowUpDown), sort_items(&me, self.sort)),
+                    Item::sub(t!("Sırala"), icon(L::ArrowUpDown), sort_items(&me, self.sort, self.sort_offers(cx))),
                     Item::sub(t!("Gruplandır"), icon(L::ListTree), {
                         // (the chosen property columns follow the fixed keys; none chosen: nothing is added)
                         let mut g = group_items(&me, self.group);

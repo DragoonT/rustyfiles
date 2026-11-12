@@ -4,7 +4,8 @@
 //! One setting, OFF by default: `shell_tray_host`. While it is on, and only inside the shell host process (this module is called from
 //! `dock::host` only), the host owns a window of class `Shell_TrayWnd` in front of Explorer's, keeps a model of the icons programs
 //! send to the notification area, and passes EVERY message on to Explorer's tray window untouched, returning Explorer's answer. The
-//! dock does not show the icons yet (the strip is increment D3); [`view`] is what it will read.
+//! dock's tray strip reads the model through `dock::tray_feed`, which this module attaches to the running host (and detaches first when the
+//! host stops); [`view`] is the same model for anything else in this process.
 //!
 //! WHAT RUNS WHEN. Nothing exists while the setting is off: no window, no thread, no timer, no message. When it goes on the host makes
 //! a [`TrayHost`] (a thread with its own message loop and the window) and one small reporting thread that writes the COUNTS to the
@@ -31,6 +32,7 @@ use gpui_kit::*;
 use rf_win::trayhost::{Counts, StallEvent, StallWatch, TrayHost, TrayHostConfig, TrayView};
 use rf_win::tray_wire::rect::RectPacking;
 
+use crate::dock::tray_feed::{self, Attachment};
 use crate::settings::Settings;
 
 pub const ENV_LOG_ONLY: &str = "RUSTYFILES_TRAY_LOG_ONLY";
@@ -118,6 +120,9 @@ fn counts_phrase(counts: &Counts, icons: usize, log_only: bool) -> String {
 }
 
 struct TrayGlobal {
+    /// The dock's tray strip reads the model through this. Declared first: it is dropped (the strip's source detached, its thread
+    /// joined) before the host is.
+    feed: Attachment,
     host: TrayHost,
     view: TrayView,
     log_only: bool,
@@ -142,8 +147,10 @@ pub fn stop(cx: &mut App) {
     if !cx.has_global::<TrayGlobal>() {
         return;
     }
-    let TrayGlobal { mut host, view, log_only, quit } = cx.remove_global::<TrayGlobal>();
+    let TrayGlobal { feed, mut host, view, log_only, quit } = cx.remove_global::<TrayGlobal>();
     drop(quit);
+    // the strip stops reading the model, and is told it is gone, before the host's window goes
+    drop(feed);
     let (counts, icons) = (view.counts(), view.icon_count());
     host.stop();
     log::info!("tray host: stopped; {}", counts_phrase(&counts, icons, log_only));
@@ -178,9 +185,10 @@ fn start(cx: &mut App) {
         }
     };
     let view = host.view();
+    let feed = tray_feed::attach(view.clone(), host.events().clone());
     let (quit, quit_rx) = crossbeam_channel::bounded::<()>(0);
     spawn_reporter(view.clone(), quit_rx, log_only);
-    cx.set_global(TrayGlobal { host, view, log_only, quit });
+    cx.set_global(TrayGlobal { feed, host, view, log_only, quit });
 }
 
 /// One small thread. Every [`REPORT_POLL`] it (1) feeds the host thread's heartbeat to a stall watch, which logs once when the host

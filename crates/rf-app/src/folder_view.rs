@@ -28,6 +28,8 @@ use crate::theme::{self, Palette};
 
 /// Columns for any Windows property (the "Diğer sütunlar…" columns).
 pub(crate) mod prop_cols;
+/// Sorting by tag, by path and by sync state.
+pub(crate) mod sort_ext;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewMode {
@@ -236,8 +238,19 @@ struct View {
 }
 
 fn compute_view(entries: &[Entry], filter: &Filter, sort: SortSpec, group: GroupBy, extra: Extra) -> View {
+    compute_view_ranked(entries, filter, sort, group, extra, None)
+}
+
+/// [`compute_view`] for the sort keys that sort by a rank made beforehand (tag, path: see
+/// `sort_ext`). Without the ranks the view is sorted by name and says so in its `spec` (it is
+/// then not taken for the view of the wanted sort).
+fn compute_view_ranked(entries: &[Entry], filter: &Filter, sort: SortSpec, group: GroupBy, extra: Extra, ranks: Option<&[u32]>) -> View {
     let mut all: Vec<u32> = (0..entries.len() as u32).collect();
-    sort.sort_indices(entries, &mut all);
+    let sort = if sort.key.needs_ranks() && ranks.is_none() { SortSpec { key: SortKey::Name, ..sort } } else { sort };
+    match ranks {
+        Some(r) => sort.sort_indices_ranked(entries, r, &mut all),
+        None => sort.sort_indices(entries, &mut all),
+    }
     view_from_sorted(entries, Arc::new(all), filter, sort, group, extra)
 }
 
@@ -382,6 +395,8 @@ pub struct FolderView {
     pub(crate) selected: HashSet<u32>,
     /// Columns for Windows properties: nothing is allocated or started until one is chosen.
     props: prop_cols::PropState,
+    /// Ranks for a sort by tag or path (see `sort_ext`); empty and idle for every other key.
+    sortx: sort_ext::SortxState,
     cursor: Option<usize>,
     anchor: Option<usize>,
     pub loading: bool,
@@ -474,6 +489,8 @@ impl FolderView {
         cx.observe(&images, |_, _, cx| cx.notify()).detach();
         // a tag given or taken: the groups by tag follow
         cx.observe_global::<crate::tags::Tags>(|this, cx| {
+            // (a sort by tag makes its ranks again; any other key: one comparison)
+            this.sortx_tags_changed(cx);
             if this.group == GroupBy::Tag {
                 this.refresh_tag_snap(cx);
                 this.rebuild_visible();
@@ -548,6 +565,7 @@ impl FolderView {
             },
             selected: HashSet::new(),
             props: prop_cols::PropState::default(),
+            sortx: Default::default(),
             cursor: None,
             anchor: None,
             loading: false,
@@ -1033,6 +1051,7 @@ impl FolderView {
         // a soft reload (watcher) keeps sizes and running walks; a real load starts over
         if !soft {
             self.props_reset();
+            self.sortx_reset();
             self.folder_sizes.clear();
             self.size_queue.clear();
             for (b, _) in self.size_batches.drain(..) {
@@ -1371,7 +1390,9 @@ impl FolderView {
                     })
                     .map_err(|e| e.to_string()),
                 };
-                if r.is_ok() && !cancel.load(Ordering::Relaxed) {
+                // (a sort by tag or path is made from ranks the view makes after the listing: a by-name view
+                // made here would be thrown away)
+                if r.is_ok() && !cancel.load(Ordering::Relaxed) && !spec.1.key.needs_ranks() {
                     let _ = tx.unbounded_send(Msg::View(compute_view(&all, &spec.0, spec.1, spec.2, None)));
                 }
                 let _ = tx.unbounded_send(Msg::Done(r.map_err(|e| e.to_string())));
@@ -1456,6 +1477,8 @@ impl FolderView {
         if done {
             self.resort_for_sizes(cx);
             self.apply_reselect(cx);
+            // a sort by tag or path makes its ranks now that the listing is complete
+            self.sortx_ensure(cx);
         }
         cx.notify();
     }
@@ -1537,11 +1560,17 @@ impl FolderView {
         // (Windows names ignore case: a rename that only changes case reports the old spelling)
         let mut gone: HashSet<String> = found.iter().map(|(n, _)| fold(n).into_owned()).collect();
         gone.extend(found.iter().filter_map(|(_, e)| e.as_ref()).map(|e| fold(&e.name).into_owned()));
+        // (a sort by tag keeps the ranks of the changed files, so that a modified tagged file stays where it was)
+        let old_ranks = self.sortx_fresh_ranks();
+        let mut gone_ranks: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
         let old_n = self.entries.len();
         let mut remap = vec![u32::MAX; old_n];
         let mut fresh = Vec::with_capacity(old_n + found.len());
         for (i, e) in self.entries.iter().enumerate() {
             if gone.contains(fold(&e.name).as_ref()) {
+                if let Some(r) = &old_ranks {
+                    gone_ranks.insert(fold(&e.name).into_owned(), r[i]);
+                }
                 continue;
             }
             remap[i] = fresh.len() as u32;
@@ -1555,13 +1584,23 @@ impl FolderView {
             }
         }
         let sorted = match &self.sorted_cache {
-            Some((sort, generation, s)) if *sort == self.sort && *generation == self.entries_gen && s.len() == old_n => {
+            // (a sort by tag or path has its ranks by entry index: the order is made again, not patched)
+            Some((sort, generation, s)) if *sort == self.sort && *generation == self.entries_gen && s.len() == old_n && !sort.key.needs_ranks() => {
                 let mut v: Vec<u32> = s.iter().filter_map(|&i| Some(remap[i as usize]).filter(|&j| j != u32::MAX)).collect();
                 for j in kept..fresh.len() {
                     let pos = v.partition_point(|&x| self.sort.compare(&fresh[x as usize], &fresh[j]) == std::cmp::Ordering::Less);
                     v.insert(pos, j as u32);
                 }
                 Some(v)
+            }
+            // a sort by tag or path: the order is patched from the ranks of the old entries (the new ones
+            // come in by their rank) instead of sorted again on this thread; new ranks are made right after
+            Some((sort, generation, s)) if *sort == self.sort && *generation == self.entries_gen && s.len() == old_n && sort.key.needs_ranks() => {
+                old_ranks.as_ref().map(|r| {
+                    rf_core::sortkeys::patch_ranked(&self.sort, &fresh, kept, s, &remap, r, |e| {
+                        gone_ranks.get(fold(&e.name).as_ref()).copied().unwrap_or(rf_core::sortkeys::NO_RANK)
+                    })
+                })
             }
             _ => None,
         };
@@ -1579,6 +1618,10 @@ impl FolderView {
         let renaming_name = self.renaming.as_ref().map(|(i, _)| self.entries[*i as usize].name.clone());
         // (a grouping by a property keeps each file's group by name until the groups are made again)
         self.props_before_swap();
+        // (a patched order needs no carried ranks: it is installed as it is)
+        if sorted.is_none() {
+            self.sortx_before_swap();
+        }
         self.entries = new_entries;
         self.entries_gen += 1;
         if let Some(s) = sorted {
@@ -1628,6 +1671,7 @@ impl FolderView {
         self.apply_reselect(cx);
         // a sort or grouping by a property column is made again for the new entries
         self.props_entries_changed(cx);
+        self.sortx_ensure(cx);
         cx.notify();
     }
 
@@ -1648,7 +1692,11 @@ impl FolderView {
                 Some((sort, generation, sorted)) if *sort == self.sort && *generation == self.entries_gen && sorted.len() == self.entries.len() => {
                     view_from_sorted(&self.entries, sorted.clone(), &self.filter, self.sort, self.group, extra)
                 }
-                _ => compute_view(&self.entries, &self.filter, self.sort, self.group, extra),
+                _ => {
+                    // (ranks for a sort by tag or path; None for every other key)
+                    let ranks = self.sortx_ranks();
+                    compute_view_ranked(&self.entries, &self.filter, self.sort, self.group, extra, ranks.as_deref().map(|r| r.as_slice()))
+                }
             }
         };
         self.install_view(view);
@@ -1770,8 +1818,12 @@ impl FolderView {
                 2 => DefaultView::Columns,
                 _ => DefaultView::Details,
             };
-            s.default_sort = l.sort;
-            s.default_sort_desc = l.desc;
+            // (the keys added later - tag, path, sync - belong to one folder's layout; the settings file
+            // keeps only the keys every build reads, so the default stays as it was)
+            if !l.sort.is_extra() {
+                s.default_sort = l.sort;
+                s.default_sort_desc = l.desc;
+            }
             s.folders_first = l.dirs_first;
             s.files_first = l.files_first;
             s.default_group = group;
@@ -1936,7 +1988,12 @@ impl FolderView {
         }
         self.props_drop_sort();
         self.sort = spec;
-        self.rebuild_visible();
+        // (a sort by tag or path keeps the list as it is until its ranks are made: sorted by name now
+        // and by the ranks a moment later would be two sorts and a flicker)
+        self.sortx_ensure(cx);
+        if !self.sortx_must_wait() {
+            self.rebuild_visible();
+        }
         self.remember_layout(cx);
         cx.notify();
     }
@@ -1945,7 +2002,10 @@ impl FolderView {
         // from a sort by a property column, a fixed column starts as a new sort (not a flip of the one under it)
         self.sort = if self.props.sort_active() { self.props_fixed_sort(key) } else { self.sort.toggled(key) };
         self.props_drop_sort();
-        self.rebuild_visible();
+        self.sortx_ensure(cx);
+        if !self.sortx_must_wait() {
+            self.rebuild_visible();
+        }
         self.remember_layout(cx);
         cx.notify();
     }
@@ -3020,9 +3080,9 @@ impl FolderView {
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<prop_cols::PropResize>, _, cx| this.props_drag_move(e, cx)))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, ev: &MouseDownEvent, window, cx| this.show_header_menu(ev.position, window, cx)))
             .child(col("h-name", t!("Ad"), SortKey::Name, None, false, cx))
-            .children(show_tags.then(|| plain("h-tags", t!("Dosya etiketi"), w[4]).child(handle(4, cx))))
+            .children(show_tags.then(|| self.sortx_header("h-tags", t!("Dosya etiketi"), w[4], SortKey::Tag, p, cx).child(handle(4, cx))))
             .children(show_git.then(|| plain("h-git", t!("Git durumu"), w[5]).child(handle(5, cx))))
-            .children(show_sync.then(|| plain("h-sync", t!("Eşitleme durumu"), w[6]).child(handle(6, cx))))
+            .children(show_sync.then(|| self.sortx_header("h-sync", t!("Eşitleme durumu"), w[6], SortKey::Sync, p, cx).child(handle(6, cx))))
             .children(vis.commit[0].then(|| plain("h-gmsg", t!("Son commit mesajı"), w[7]).child(handle(7, cx))))
             .children(vis.commit[1].then(|| plain("h-gauth", t!("Commit yazarı"), w[8]).child(handle(8, cx))))
             .children(vis.commit[2].then(|| plain("h-gdate", t!("Commit tarihi"), w[9]).child(handle(9, cx))))
@@ -3034,7 +3094,8 @@ impl FolderView {
                 col("h-created", t!("Oluşturma tarihi"), SortKey::Created, Some(px(w[1])), false, cx).relative().child(handle(1, cx))
             }))
             .children(vis.kind.then(|| {
-                let c = col("h-type", if search { t!("Konum") } else { t!("Tür") }, SortKey::Type, Some(self.type_col_w(cx)), false, cx).relative();
+                // (in results from several folders this column is the folder, and it sorts by it)
+                let c = col("h-type", if search { t!("Konum") } else { t!("Tür") }, if search { SortKey::Path } else { SortKey::Type }, Some(self.type_col_w(cx)), false, cx).relative();
                 if search { c } else { c.child(handle(2, cx)) }
             }))
             .children(vis.size.then(|| col("h-size", t!("Boyut"), SortKey::Size, Some(px(w[3])), true, cx).relative().child(handle(3, cx))))
