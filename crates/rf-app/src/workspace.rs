@@ -121,6 +121,17 @@ pub struct Workspace {
     frame_dark: Option<(bool, WindowAppearance)>,
     /// Background material last applied to the window.
     applied_backdrop: Option<crate::settings::BackdropPref>,
+    /// The backdrop setting last seen: a change of it lets Glass try again after a failure.
+    backdrop_pref_seen: Option<crate::settings::BackdropPref>,
+    /// This window's Glass: the HWND the engine was given (0: none), the tint it was given, and whether it failed (the window is on Mica).
+    glass_hwnd: isize,
+    glass_dark: Option<bool>,
+    glass_failed: bool,
+    /// The engine has drawn this window's glass and the window is see-through now. Until then it keeps its Mica: a transparent window
+    /// with nothing behind it shows the desktop through the palette's translucent layers.
+    glass_shown: bool,
+    /// Counts the attach attempts; a watcher of an older attempt stops.
+    glass_gen: u32,
     /// Address-bar folder completions for the typed text, and the highlighted one.
     addr_suggest: Vec<PathBuf>,
     addr_sel: Option<usize>,
@@ -575,6 +586,12 @@ impl Workspace {
             search_mode: false,
             frame_dark: None,
             applied_backdrop: None,
+            backdrop_pref_seen: None,
+            glass_hwnd: 0,
+            glass_dark: None,
+            glass_failed: false,
+            glass_shown: false,
+            glass_gen: 0,
             addr_suggest: Vec::new(),
             addr_sel: None,
             _addr_task: None,
@@ -3089,6 +3106,105 @@ fn expand_env(s: &str) -> String {
     out
 }
 
+impl Workspace {
+    /// Gives this window the glass (the window is already set transparent). A failure to even start is treated like a failure later:
+    /// the window goes to Mica and the settings page says why.
+    fn start_glass(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let hwnd = crate::look::window::hwnd_of(window);
+        self.glass_gen = self.glass_gen.wrapping_add(1);
+        let attached = hwnd != 0 && rf_win::glass::attach(hwnd, dark);
+        if !attached {
+            let why = match rf_win::glass::state(hwnd) {
+                rf_win::glass::GlassState::Failed(why) => why,
+                _ => "the window has no handle".into(),
+            };
+            self.glass_hwnd = hwnd;
+            self.give_up_glass(why, cx);
+            return;
+        }
+        self.glass_hwnd = hwnd;
+        self.glass_dark = Some(dark);
+        // The engine reports from its own thread, so ask it: every 50 ms until it has drawn (then the window turns see-through), and
+        // after that every 500 ms, so a glass that is lost later (a removed graphics device) is noticed within half a second.
+        let generation = self.glass_gen;
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                let Ok(shown) = this.update_in(cx, |ws, _, _| ws.glass_shown) else { break };
+                let ms = if shown { 500 } else { 50 };
+                cx.background_executor().timer(std::time::Duration::from_millis(ms)).await;
+                let Ok(go_on) = this.update_in(cx, |ws, window, cx| ws.check_glass(generation, window, cx)) else { break };
+                if !go_on {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// One look at the engine's report. False when there is nothing more to watch.
+    fn check_glass(&mut self, generation: u32, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if generation != self.glass_gen || self.glass_hwnd == 0 {
+            return false;
+        }
+        match rf_win::glass::state(self.glass_hwnd) {
+            rf_win::glass::GlassState::Failed(why) => {
+                self.give_up_glass(why, cx);
+                false
+            }
+            // taken off from elsewhere
+            rf_win::glass::GlassState::Off => false,
+            rf_win::glass::GlassState::Running => {
+                if !self.glass_shown {
+                    // the glass is on the window: now the scene may be see-through
+                    self.glass_shown = true;
+                    window.set_background_appearance(WindowBackgroundAppearance::Transparent);
+                    cx.notify();
+                }
+                true
+            }
+            // still starting: the window keeps its Mica
+            rf_win::glass::GlassState::Starting => true,
+        }
+    }
+
+    /// The glass is not kept: the engine lets go of the window, the settings page gets the reason and the next render puts Mica on. The
+    /// saved setting stays; choosing it again (or another one and back) tries again.
+    fn give_up_glass(&mut self, why: String, cx: &mut Context<Self>) {
+        log::warn!("glass: giving up on this window, Mica is used: {why}");
+        if self.glass_hwnd != 0 {
+            rf_win::glass::detach(self.glass_hwnd);
+        }
+        self.glass_hwnd = 0;
+        self.glass_dark = None;
+        self.glass_shown = false;
+        self.glass_failed = true;
+        crate::glass::set_failure(Some(why));
+        cx.notify();
+    }
+
+    /// Takes the glass off (the backdrop changed). Safe to call without glass.
+    fn stop_glass(&mut self, window: &mut Window) {
+        self.glass_gen = self.glass_gen.wrapping_add(1);
+        if self.glass_hwnd != 0 {
+            rf_win::glass::detach(self.glass_hwnd);
+            self.glass_hwnd = 0;
+            self.glass_dark = None;
+        }
+        self.glass_shown = false;
+        // "Transparent" turns on a window accent policy that the Mica calls do not turn off: clear it first so the next material is clean
+        window.set_background_appearance(WindowBackgroundAppearance::Opaque);
+    }
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        // the window closed
+        if self.glass_hwnd != 0 {
+            rf_win::glass::detach(self.glass_hwnd);
+        }
+    }
+}
+
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         {
@@ -3115,16 +3231,42 @@ impl Render for Workspace {
         );
         // Home and Settings have nothing to count: no empty strip at the bottom
         let show_statusbar = show_statusbar && !matches!(self.active_tab().read(cx).location(), Location::Home | Location::Settings);
+        use crate::settings::BackdropPref;
+        // RUSTYFILES_GLASS=1 forces Glass for this run (nothing is saved); a window whose glass failed is on Mica until the setting changes
+        if self.backdrop_pref_seen != Some(backdrop) {
+            if self.backdrop_pref_seen.is_some() {
+                // the user chose again: whatever was said about an earlier failure is old
+                crate::glass::set_failure(None);
+            }
+            self.backdrop_pref_seen = Some(backdrop);
+            self.glass_failed = false;
+        }
+        let backdrop = if crate::glass::forced() { BackdropPref::Glass } else { backdrop };
+        let backdrop = if backdrop == BackdropPref::Glass && self.glass_failed { BackdropPref::Mica } else { backdrop };
         if self.applied_backdrop != Some(backdrop) {
+            let was_glass = self.applied_backdrop == Some(BackdropPref::Glass);
             self.applied_backdrop = Some(backdrop);
-            use crate::settings::BackdropPref;
+            if was_glass {
+                self.stop_glass(window);
+            }
             window.set_background_appearance(match backdrop {
                 BackdropPref::Mica => WindowBackgroundAppearance::MicaBackdrop,
                 BackdropPref::MicaAlt => WindowBackgroundAppearance::MicaAltBackdrop,
                 BackdropPref::Acrylic => WindowBackgroundAppearance::Blurred,
                 // opaque surface painted by the palette; keep Mica under it so a switch back is instant
                 BackdropPref::Solid => WindowBackgroundAppearance::MicaBackdrop,
+                // The glass is a second DirectComposition target behind the scene, so the scene must become see-through, but only once the
+                // engine has drawn (`check_glass` does that): until then, and for good if the engine gives up, the window has Mica.
+                BackdropPref::Glass => WindowBackgroundAppearance::MicaBackdrop,
             });
+            if backdrop == BackdropPref::Glass {
+                self.start_glass(p.dark, window, cx);
+            }
+        }
+        // the theme changed: the glass changes its tint
+        if self.glass_hwnd != 0 && self.glass_dark != Some(p.dark) {
+            self.glass_dark = Some(p.dark);
+            rf_win::glass::set_dark(self.glass_hwnd, p.dark);
         }
         // background color tint and picture (under everything)
         let mut backdrop_layers: Vec<AnyElement> = Vec::new();
@@ -3566,7 +3708,9 @@ impl Render for Workspace {
                                         let s = window.scale_factor();
                                         let height = f32::from(window.viewport_size().height);
                                         let at = |v: f32| (v * s) as i32;
+                                        // (over glass the screen shows the desktop behind the window, not the window's tint)
                                         this.rail_peek_bg = rf_win::window::screen_color(crate::look::window::hwnd_of(window), at(3.), at(110.), at(height - 60.))
+                                            .filter(|_| this.glass_hwnd == 0)
                                             .map(|[r, g, b]| Hsla::from(gpui_kit::rgb(u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))));
                                     }
                                     this.rail_peek[0] = *h;

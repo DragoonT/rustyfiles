@@ -6384,5 +6384,23 @@
   "key": "Prefetch dosyası açılamadı",
   "tr": "Prefetch dosyası açılamadı",
   "en": "Couldn't decompress the prefetch file"
+ },
+ {
+  "id": "185b6cf2",
+  "key": "Cam (deneysel)",
+  "tr": "Cam (deneysel)",
+  "en": "Glass (experimental)"
+ },
+ {
+  "id": "6734409f",
+  "key": "Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
+  "tr": "Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
+  "en": "Bends and frosts what is behind the window like real glass. While this is on, rustyfiles windows do not appear in screenshots, recordings or screen sharing."
+ },
+ {
+  "id": "d04ff3d6",
+  "key": "Cam başlatılamadı: {reason}. Mica kullanılıyor.",
+  "tr": "Cam başlatılamadı: {reason}. Mica kullanılıyor.",
+  "en": "Glass could not start: {reason}. Mica is used instead."
  }
 ]

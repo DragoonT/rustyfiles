@@ -78,6 +78,7 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, own
         if let Ok(h) = w.window_handle() {
             if let RawWindowHandle::Win32(h) = h.as_raw() {
                 rf_win::window::set_dark_mode(h.hwnd.get(), dark);
+                crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
         cx.new(|cx| FlyoutView::new(key, width, body, w, cx))

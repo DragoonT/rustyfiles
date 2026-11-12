@@ -682,6 +682,35 @@ const TINTS: [(&str, u32); 15] = [
     ("Gri", 0x7A7574),
 ];
 
+/// The background material card. While Glass is in use (chosen, or forced for this run) a note under it says what the material
+/// costs; if the engine gave up on a window, another note says why that window is on Mica.
+fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
+    let control = dropdown(
+        "backdrop",
+        p,
+        s.backdrop,
+        vec![
+            (BackdropPref::Mica, "Mica".into()),
+            (BackdropPref::MicaAlt, "Mica Alt".into()),
+            (BackdropPref::Acrylic, t!("Akrilik").into()),
+            (BackdropPref::Solid, t!("Düz").into()),
+            (BackdropPref::Glass, t!("Cam (deneysel)").into()),
+        ],
+        |s, v| s.backdrop = v,
+    );
+    let mut notes: Vec<String> = Vec::new();
+    if s.backdrop == BackdropPref::Glass || crate::glass::forced() {
+        notes.push(t!("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.").to_string());
+        if let Some(why) = crate::glass::failure() {
+            notes.push(t!("Cam başlatılamadı: {reason}. Mica kullanılıyor.").replace("{reason}", &why));
+        }
+    }
+    shell(p)
+        .child(card_body(p, L::Layers, t!("Arka plan malzemesi").into(), Some(t!("Mica masaüstü renginden ton alır; Mica Alt daha renklidir.").into()), Some(control)))
+        .children(notes.into_iter().map(|n| div().pl(px(56.)).pr_4().pb_3().text_xs().text_color(p.text_secondary).child(n)))
+        .into_any_element()
+}
+
 fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     let mut v = vec![
         card(
@@ -697,24 +726,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 |s, v| s.theme = v,
             ),
         ),
-        card(
-            p,
-            L::Layers,
-            t!("Arka plan malzemesi"),
-            Some(t!("Mica masaüstü renginden ton alır; Mica Alt daha renklidir.")),
-            dropdown(
-                "backdrop",
-                p,
-                s.backdrop,
-                vec![
-                    (BackdropPref::Mica, "Mica".into()),
-                    (BackdropPref::MicaAlt, "Mica Alt".into()),
-                    (BackdropPref::Acrylic, t!("Akrilik").into()),
-                    (BackdropPref::Solid, t!("Düz").into()),
-                ],
-                |s, v| s.backdrop = v,
-            ),
-        ),
+        backdrop_card(p, s),
         card(
             p,
             L::Activity,

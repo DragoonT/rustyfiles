@@ -688,6 +688,7 @@ pub fn toggle(cx: &mut App) {
     match cx.open_window(opts, move |window, cx| {
         let hwnd = crate::look::window::hwnd_of(window);
         rf_win::window::set_dark_mode(hwnd, Palette::for_window(window).dark);
+        crate::glass::keep_out_of_capture(hwnd);
         // summoned from another app: take the keyboard (the hotkey press allows it)
         if !test {
             rf_win::window::bring_to_front(hwnd);

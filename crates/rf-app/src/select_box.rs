@@ -175,6 +175,7 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
         if let Ok(h) = w.window_handle() {
             if let RawWindowHandle::Win32(h) = h.as_raw() {
                 rf_win::window::set_dark_mode(h.hwnd.get(), dark);
+                crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
         cx.new(|cx| SelectView::new(key, choices, search, main, w, cx))

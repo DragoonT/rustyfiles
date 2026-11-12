@@ -14,6 +14,7 @@ mod ctx_menu;
 mod disk_usage;
 mod fluent_menu;
 mod flyout;
+mod glass;
 mod layout_panel;
 mod git_ui;
 mod prompt;

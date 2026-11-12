@@ -94,6 +94,10 @@ pub enum BackdropPref {
     MicaAlt,
     Acrylic,
     Solid,
+    /// Experimental: the screen behind the window, bent and frosted like glass (rf_win::glass).
+    /// An older version does not know this value and reads the field as the default (Mica);
+    /// the other settings are kept (see `parse_lenient`).
+    Glass,
 }
 
 /// Hızlı Bakış penceresinin arka planı.
@@ -767,6 +771,34 @@ yeni_alan = 3").unwrap();
         assert!(s.show_hidden, "valid fields survive");
         assert_eq!(s.sidebar_width, Settings::default().sidebar_width);
         assert!(Settings::parse_lenient("[[[bozuk").is_err(), "syntax errors still fail");
+    }
+
+    #[test]
+    fn glass_backdrop_round_trips() {
+        use super::BackdropPref;
+        let s = Settings { backdrop: BackdropPref::Glass, ..Default::default() };
+        let text = toml::to_string_pretty(&s).unwrap();
+        assert!(text.contains("backdrop = \"glass\""), "serialized as \"glass\": {text}");
+        let back: Settings = toml::from_str(&text).unwrap();
+        assert_eq!(back.backdrop, BackdropPref::Glass);
+        // through the loader the app uses
+        assert_eq!(Settings::parse_lenient(&text).unwrap().backdrop, BackdropPref::Glass);
+        // the default stays Mica
+        assert_eq!(Settings::default().backdrop, BackdropPref::Mica);
+    }
+
+    #[test]
+    fn unknown_backdrop_value_costs_only_that_field() {
+        // what a version without Glass meets after the user picked it and went back: the value
+        // is dropped (Mica), every other setting of the file survives
+        use super::BackdropPref;
+        let s = Settings::parse_lenient("backdrop = \"cam\"
+show_hidden = true
+theme = \"dark\"
+").unwrap();
+        assert_eq!(s.backdrop, BackdropPref::Mica);
+        assert!(s.show_hidden);
+        assert_eq!(s.theme, super::ThemePref::Dark);
     }
 }
 

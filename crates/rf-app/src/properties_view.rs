@@ -52,7 +52,11 @@ pub fn open(paths: Vec<PathBuf>, images: Entity<ImageCache>, cx: &mut App) {
         window_background: WindowBackgroundAppearance::MicaBackdrop,
         ..TitleBar::window_options()
     };
-    if let Err(e) = gpui_kit::open_window(options, cx, move |window, cx| cx.new(|cx| PropsView::new(paths, images, window, cx))) {
+    if let Err(e) = gpui_kit::open_window(options, cx, move |window, cx| {
+        // it often lies over a main window: with glass behind it, the glass must not bend its picture
+        crate::glass::keep_out_of_capture(crate::look::window::hwnd_of(window));
+        cx.new(|cx| PropsView::new(paths, images, window, cx))
+    }) {
         log::error!("properties window: {e:#}");
     }
 }

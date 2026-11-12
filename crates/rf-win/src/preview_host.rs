@@ -452,6 +452,7 @@ fn host_window(owner: isize) -> Option<HWND> {
                     let _ = p.mp.Shutdown();
                 }
             }
+            crate::glass::exclude_from_capture(old.hwnd.0 as isize, false);
             unsafe {
                 let _ = windows::Win32::UI::WindowsAndMessaging::DestroyWindow(old.hwnd);
             }
@@ -477,6 +478,9 @@ fn host_window(owner: isize) -> Option<HWND> {
                 None,
             )
             .ok()?;
+            // a playing video or a document in this popup lies over the glass window: while there is glass it must not be captured and
+            // bent into it (and a video would keep the glass redrawing at its frame rate)
+            crate::glass::exclude_from_capture(hwnd.0 as isize, true);
             *h = Some(Host { hwnd, owner, path: None, handler: None, player: None });
             Some(hwnd)
         }

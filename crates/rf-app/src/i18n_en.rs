@@ -1253,4 +1253,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Bellek dökümü okunamadı", "Couldn't read the crash dump"),
     ("Prefetch dosyası okunamadı", "Couldn't read the prefetch file"),
     ("Prefetch dosyası açılamadı", "Couldn't decompress the prefetch file"),
+    ("Cam (deneysel)", "Glass (experimental)"),
+    ("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.", "Bends and frosts what is behind the window like real glass. While this is on, rustyfiles windows do not appear in screenshots, recordings or screen sharing."),
+    ("Cam başlatılamadı: {reason}. Mica kullanılıyor.", "Glass could not start: {reason}. Mica is used instead."),
 ];

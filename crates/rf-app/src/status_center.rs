@@ -1110,6 +1110,7 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
         if let Ok(h) = w.window_handle() {
             if let RawWindowHandle::Win32(h) = h.as_raw() {
                 rf_win::window::set_dark_mode(h.hwnd.get(), dark);
+                crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
         cx.new(|cx| ScView::new(ops, w, cx))

@@ -26,6 +26,7 @@ pub mod fileops;
 pub mod foldersize;
 pub mod sysparams;
 pub mod git;
+pub mod glass;
 pub mod hotkey;
 pub mod hash;
 pub mod indexer;

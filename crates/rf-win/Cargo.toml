@@ -31,3 +31,7 @@ md-5.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 crc32fast.workspace = true
+
+[dev-dependencies]
+# the glass_shot example reads and writes pictures
+png = "0.18"
