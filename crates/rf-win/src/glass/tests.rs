@@ -5,7 +5,7 @@ use super::gpu::{self, Cb, Geometry, Look, Region, Renderer, Source, prep, regio
 use super::*;
 
 /// BGRA picture filled by `f(x, y) -> [r, g, b]`.
-fn picture(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
+pub(super) fn picture(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
     let mut v = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
@@ -16,14 +16,14 @@ fn picture(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
     v
 }
 
-fn px(img: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
+pub(super) fn px(img: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
     let i = ((y * w + x) * 4) as usize;
     [img[i], img[i + 1], img[i + 2], img[i + 3]]
 }
 
 /// What a uniform grey source must become in the middle of the glass, computed on the CPU from the look's numbers: saturation does nothing
 /// to a grey, then the contrast / lum transfer, then the tint. (Far from the edge the rim light and the dark line have faded to nothing.)
-fn expected_centre(grey: u8, look: &Look) -> [f32; 3] {
+pub(super) fn expected_centre(grey: u8, look: &Look) -> [f32; 3] {
     let g = grey as f32 / 255.0;
     let c = (g * (look.lum * look.contrast) + 0.5 * (1.0 - look.contrast)).clamp(0.0, 1.0);
     let t = look.tint;
@@ -31,7 +31,7 @@ fn expected_centre(grey: u8, look: &Look) -> [f32; 3] {
 }
 
 /// `gpu::render` at scale 1 with a look and the choice between hardware and WARP.
-fn render_with(src: &[u8], sw: u32, sh: u32, rect: (i32, i32, u32, u32), radius: f32, look: &Look, force_warp: bool) -> Result<Vec<u8>, String> {
+pub(super) fn render_with(src: &[u8], sw: u32, sh: u32, rect: (i32, i32, u32, u32), radius: f32, look: &Look, force_warp: bool) -> Result<Vec<u8>, String> {
     let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: radius, cut_corners: true };
     with_renderer(force_warp, |r| unsafe { gpu::render_on(r, src, sw, sh, &geo, look) })
 }
@@ -44,7 +44,7 @@ struct Shared(Renderer);
 unsafe impl Send for Shared {}
 static RENDERERS: [std::sync::Mutex<Option<Shared>>; 2] = [std::sync::Mutex::new(None), std::sync::Mutex::new(None)];
 
-fn with_renderer<T>(force_warp: bool, f: impl FnOnce(&Renderer) -> T) -> T {
+pub(super) fn with_renderer<T>(force_warp: bool, f: impl FnOnce(&Renderer) -> T) -> T {
     // the software renderer takes every core while it draws: not while a timing test measures (see `TEST_QUIET`)
     let _quiet = crate::TEST_QUIET.lock().unwrap_or_else(|p| p.into_inner());
     let mut slot = RENDERERS[force_warp as usize].lock().unwrap_or_else(|p| p.into_inner());
@@ -57,7 +57,7 @@ fn with_renderer<T>(force_warp: bool, f: impl FnOnce(&Renderer) -> T) -> T {
 /// out, with a device per picture and with the shared devices alike; the cause was not found (it does not happen here, where the same
 /// tests also draw with the software renderer forced). The runner does list an adapter that is not marked as software, so the adapter
 /// list alone does not tell it apart. So the drawing is tested on developers' machines only.
-fn can_draw() -> bool {
+pub(super) fn can_draw() -> bool {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIFactory1};
     static YES: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *YES.get_or_init(|| unsafe {
@@ -78,7 +78,7 @@ fn can_draw() -> bool {
     })
 }
 
-fn drivers() -> [bool; 2] {
+pub(super) fn drivers() -> [bool; 2] {
     [false, true] // hardware (or WARP if there is none), then WARP forced
 }
 
@@ -93,7 +93,7 @@ fn uniform_grey_centre_is_grade_plus_tint() {
         for warp in drivers() {
             for grey in [60u8, 140, 220] {
                 let src = picture(sw, sh, |_, _| [grey; 3]);
-                let look = Look::regular(dark);
+                let look = Look::regular(dark, &LookParams::DEFAULT);
                 let out = render_with(&src, sw, sh, rect, 8.0, &look, warp).expect("render");
                 assert_eq!(out.len(), (rect.2 * rect.3 * 4) as usize);
                 let p = px(&out, rect.2, rect.2 / 2, rect.3 / 2);
@@ -122,7 +122,7 @@ fn corner_is_cut_by_the_radius() {
     let rect = (20, 20, 260u32, 200u32);
     let src = picture(sw, sh, |x, y| [(x % 251) as u8, (y % 241) as u8, 90]);
     for warp in drivers() {
-        let look = Look::regular(false);
+        let look = Look::regular(false, &LookParams::DEFAULT);
         let round = render_with(&src, sw, sh, rect, 8.0, &look, warp).expect("render");
         assert_eq!(px(&round, rect.2, 0, 0)[3], 0, "corner pixel with radius 8 (warp {warp})");
         assert_eq!(px(&round, rect.2, rect.2 / 2, rect.3 / 2)[3], 255, "centre pixel (warp {warp})");
@@ -140,7 +140,7 @@ fn corner_is_cut_by_the_radius() {
 }
 
 /// Black / white / red bands, mirror symmetric about the vertical line x = w / 2, varying along y too.
-fn symmetric_stripes(w: u32, h: u32) -> Vec<u8> {
+pub(super) fn symmetric_stripes(w: u32, h: u32) -> Vec<u8> {
     picture(w, h, |x, y| {
         let d = x.min(w - 1 - x);
         match ((d / 12) + (y / 9)) % 3 {
@@ -162,7 +162,7 @@ fn striped_source_has_no_non_finite_pixel() {
     for dark in [false, true] {
         for warp in drivers() {
             for radius in [8.0f32, 0.0] {
-                let out = render_with(&src, sw, sh, rect, radius, &Look::regular(dark), warp).expect("render");
+                let out = render_with(&src, sw, sh, rect, radius, &Look::regular(dark, &LookParams::DEFAULT), warp).expect("render");
                 // the shader's marker for a NaN or an infinity is opaque magenta
                 let bad = out.as_chunks::<4>().0.iter().filter(|p| **p == [255, 0, 255, 255]).count();
                 assert_eq!(bad, 0, "non-finite pixels (dark {dark}, warp {warp}, radius {radius})");
@@ -182,7 +182,7 @@ fn symmetric_source_gives_symmetric_picture() {
     // level the frost reads. The rim light has a direction (the top left is lit), so it is switched off here: what is checked is the
     // optics, the frost and the outline.
     let rect = (160, 60, 320u32, 280u32);
-    let mut look = Look::regular(false);
+    let mut look = Look::regular(false, &LookParams::DEFAULT);
     look.rim = 0.0;
     look.shade = 0.0;
     for warp in drivers() {
@@ -221,9 +221,27 @@ fn constant_buffer_matches_the_shader() {
     let start = src.find("cbuffer CB").expect("cbuffer CB in the shader");
     let body = &src[start..];
     let body = &body[body.find('{').unwrap() + 1..body.find("};").unwrap()];
-    let fields = body.lines().filter(|l| l.trim_start().starts_with("float4 u")).count();
-    assert_eq!(fields, 12, "float4 fields of the shader's cbuffer");
+    // `float4 uName;` is one float4, `float4 uName[12];` is twelve
+    let fields: usize = body
+        .lines()
+        .map(|l| l.trim_start())
+        .filter(|l| l.starts_with("float4 u"))
+        .map(|l| {
+            let decl = l.split(';').next().unwrap_or("");
+            match (decl.find('['), decl.find(']')) {
+                (Some(a), Some(b)) => decl[a + 1..b].trim().parse::<usize>().expect("an array length"),
+                _ => 1,
+            }
+        })
+        .sum();
+    assert_eq!(fields, 12 + 4 + 3 * MAX_LENSES, "float4 fields of the shader's cbuffer");
     assert_eq!(size_of::<Cb>() / 16, fields, "the Rust struct and the shader's cbuffer must have the same number of float4");
+    // the lens count of the shader is the engine's
+    assert!(src.contains(&format!("static const uint MAX_LENSES = {MAX_LENSES};")), "MAX_LENSES differs between glass.hlsl and mod.rs");
+    // the order of the fields, by name: the lens block comes last, after uOpt
+    let names: Vec<&str> = body.lines().filter_map(|l| l.trim_start().strip_prefix("float4 ")).filter_map(|l| l.split([';', '[']).next()).collect();
+    assert_eq!(names[11], "uOpt");
+    assert_eq!(&names[12..], ["uLensA", "uLensB", "uLensC", "uLensT", "uLens"]);
 }
 
 #[test]
@@ -245,7 +263,7 @@ fn fingerprint_follows_the_backdrop() {
     }
     let (sw, sh) = (700u32, 600u32);
     let geo = Geometry { w: 300, h: 200, origin: (100, 100), scale: 1.0, radius_px: 8.0, cut_corners: true };
-    let look = Look::regular(false);
+    let look = Look::regular(false, &LookParams::DEFAULT);
     with_renderer(true, |r| unsafe {
         let region = Region::new(&r.g, geo.w, geo.h, region_pad(geo.scale)).expect("region");
         let base = picture(sw, sh, |x, y| [(x / 5 % 256) as u8, (y / 5 % 256) as u8, 40]);
@@ -289,8 +307,8 @@ fn bad_arguments_are_errors_not_panics() {
 }
 
 /// A look that shows the optics and nothing else: no frost, no grade, no tint, no rim light, no dark line.
-fn bare_optics() -> Look {
-    let mut l = Look::regular(false);
+pub(super) fn bare_optics() -> Look {
+    let mut l = Look::regular(false, &LookParams::DEFAULT);
     l.blur = 0.0;
     l.saturate = 1.0;
     l.lum = 1.0;
@@ -328,7 +346,7 @@ fn rim_bends_the_backdrop_and_the_middle_does_not() {
 }
 
 /// The width of the transition of a vertical step edge in the middle of the glass, in px between 10 % and 90 % of the step.
-fn step_width(out: &[u8], w: u32, y: u32) -> u32 {
+pub(super) fn step_width(out: &[u8], w: u32, y: u32) -> u32 {
     let row: Vec<f32> = (0..w).map(|x| px(out, w, x, y)[1] as f32).collect();
     let (lo, hi) = (row[2], row[w as usize - 3]);
     let at = |frac: f32| row.iter().position(|&v| v >= lo + (hi - lo) * frac).unwrap_or(0) as u32;
@@ -346,7 +364,7 @@ fn frost_blurs_an_edge_by_the_look_s_sigma() {
     let src = picture(sw, sh, |x, _| if x < 320 { [20; 3] } else { [230; 3] });
     let rect = (120, 60, 400u32, 280u32);
     let mut frosted = bare_optics();
-    frosted.blur = Look::regular(false).blur;
+    frosted.blur = Look::regular(false, &LookParams::DEFAULT).blur;
     for warp in drivers() {
         let sharp = render_with(&src, sw, sh, rect, 8.0, &bare_optics(), warp).expect("render");
         let soft = render_with(&src, sw, sh, rect, 8.0, &frosted, warp).expect("render");
@@ -438,7 +456,7 @@ fn an_island_with_its_own_radius_is_a_capsule() {
     let rect = (80, 60, 330u32, 48u32);
     let src = picture(sw, sh, |x, y| [(x % 251) as u8, (y % 241) as u8, 120]);
     for warp in drivers() {
-        let look = Look::regular(true);
+        let look = Look::regular(true, &LookParams::DEFAULT);
         let out = render_with(&src, sw, sh, rect, 24.0, &look, warp).expect("render");
         assert_eq!(px(&out, rect.2, 0, 0)[3], 0, "top left corner (warp {warp})");
         assert_eq!(px(&out, rect.2, rect.2 - 1, 0)[3], 0, "top right corner (warp {warp})");
@@ -447,5 +465,249 @@ fn an_island_with_its_own_radius_is_a_capsule() {
         assert_eq!(px(&out, rect.2, 3, rect.3 / 2)[3], 255, "middle of the left end (warp {warp})");
         assert_eq!(px(&out, rect.2, rect.2 / 2, rect.3 / 2)[3], 255, "centre (warp {warp})");
         assert_eq!(px(&out, rect.2, rect.2 / 2, 0)[3], 255, "middle of the top edge (warp {warp})");
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// The capture backends' pure parts: no session is started and nothing is drawn here.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+mod capture_backends {
+    use super::super::capture::Dirty;
+    use super::super::wgc::{Access, Exclusion, SizeCheck, WinProbe, is_stale, min_interval_ticks, pick_backend, size_check};
+    use super::super::{CaptureMode, capture_mode, set_mode};
+    use std::collections::BTreeSet;
+    use windows::Win32::Foundation::RECT;
+
+    fn rc(l: i32, t: i32, r: i32, b: i32) -> RECT {
+        RECT { left: l, top: t, right: r, bottom: b }
+    }
+
+    /// A window of 200 x 100 at (100, 100) and the 96 px padding the glass reads around it: the backdrop it depends on is 4..396 x 4..296.
+    #[test]
+    fn a_window_is_dirty_only_when_a_dirty_rectangle_meets_it_or_its_padding() {
+        let touches = |d: &Dirty| d.touches(100, 100, 200, 100, 96);
+        // inside the window
+        assert!(touches(&Dirty::Rects(vec![rc(150, 120, 160, 130)])));
+        // in the padding, on the right: 396 is the first column past it
+        assert!(touches(&Dirty::Rects(vec![rc(390, 150, 420, 160)])));
+        assert!(!touches(&Dirty::Rects(vec![rc(396, 150, 420, 160)])), "starts at the first column past the padding");
+        // above and below, left
+        assert!(touches(&Dirty::Rects(vec![rc(150, 0, 160, 5)])));
+        assert!(!touches(&Dirty::Rects(vec![rc(150, 0, 160, 4)])));
+        assert!(!touches(&Dirty::Rects(vec![rc(150, 296, 160, 400)])));
+        assert!(!touches(&Dirty::Rects(vec![rc(0, 150, 4, 160)])));
+        // far away, and several rectangles of which one is near
+        assert!(!touches(&Dirty::Rects(vec![rc(1000, 800, 1100, 900), rc(0, 900, 50, 1000)])));
+        assert!(touches(&Dirty::Rects(vec![rc(1000, 800, 1100, 900), rc(120, 120, 121, 121)])));
+        // a refresh of the whole monitor touches every window; no rectangle touches none
+        assert!(touches(&Dirty::All));
+        assert!(!touches(&Dirty::none()));
+        // extreme numbers do not overflow
+        assert!(Dirty::All.touches(i32::MIN + 1, i32::MAX - 1, u32::MAX, u32::MAX, u32::MAX));
+        assert!(!Dirty::Rects(vec![rc(0, 0, 1, 1)]).touches(i32::MAX - 10, i32::MAX - 10, 5, 5, 1));
+    }
+
+    #[test]
+    fn dirty_regions_merge_and_an_empty_report_is_not_trusted() {
+        let mut d = Dirty::none();
+        d.merge(Dirty::Rects(vec![rc(0, 0, 10, 10)]));
+        d.merge(Dirty::Rects(vec![rc(20, 20, 30, 30)]));
+        assert_eq!(d, Dirty::Rects(vec![rc(0, 0, 10, 10), rc(20, 20, 30, 30)]));
+        d.merge(Dirty::All);
+        assert_eq!(d, Dirty::All);
+        d.merge(Dirty::Rects(vec![rc(0, 0, 1, 1)]));
+        assert_eq!(d, Dirty::All, "once the whole monitor changed it stays so");
+        // very many small rectangles are as good as the whole monitor
+        let mut many = Dirty::none();
+        for i in 0..100 {
+            many.merge(Dirty::Rects(vec![rc(i, i, i + 1, i + 1)]));
+        }
+        assert_eq!(many, Dirty::All);
+        // a picture that came with no rectangle at all touches every window (the report may be missing, not the change)
+        assert_eq!(Dirty::none().or_all_if_empty(), Dirty::All);
+        assert_eq!(Dirty::Rects(vec![rc(0, 0, 1, 1)]).or_all_if_empty(), Dirty::Rects(vec![rc(0, 0, 1, 1)]));
+    }
+
+    /// A frame is stale when it was rendered before the last exclusion list took effect: its iteration is below the number the last
+    /// SetWindowExclusionList returned.
+    #[test]
+    fn frames_of_an_older_exclusion_list_are_dropped() {
+        assert!(is_stale(6, 7));
+        assert!(!is_stale(7, 7), "the iteration of the call itself is the new list");
+        assert!(!is_stale(8, 7));
+        assert!(!is_stale(0, 0), "before any list was sent nothing is stale");
+        assert!(is_stale(0, 1));
+        assert!(!is_stale(u64::MAX, u64::MAX));
+    }
+
+    #[test]
+    fn the_exclusion_set_follows_attached_windows_and_extras() {
+        let mut ex = Exclusion::default();
+        assert!(ex.list().is_empty());
+        let v0 = ex.version();
+        // attached windows are listed whether or not they are visible; a repeat changes nothing
+        ex.attach(30);
+        ex.attach(10);
+        let v1 = ex.version();
+        assert_ne!(v0, v1);
+        ex.attach(10);
+        assert_eq!(ex.version(), v1, "attaching a window that is attached already sends nothing");
+        assert_eq!(ex.list(), vec![10, 30]);
+        // extras join; a handle that is attached and an extra too is listed once
+        ex.set_extras(BTreeSet::from([20, 30, 40]));
+        assert_eq!(ex.list(), vec![10, 20, 30, 40]);
+        let v2 = ex.version();
+        assert_ne!(v1, v2);
+        ex.set_extras(BTreeSet::from([20, 30, 40]));
+        assert_eq!(ex.version(), v2, "the same registry again sends nothing");
+        // detach: an attached window that is also an extra stays listed through its extra entry
+        ex.detach(30);
+        assert_eq!(ex.list(), vec![10, 20, 30, 40]);
+        ex.detach(10);
+        assert_eq!(ex.list(), vec![20, 30, 40]);
+        let v3 = ex.version();
+        ex.detach(10);
+        assert_eq!(ex.version(), v3, "detaching a window that is not attached sends nothing");
+        // an extra that is closed leaves the list
+        ex.set_extras(BTreeSet::from([20]));
+        assert_eq!(ex.list(), vec![20]);
+        assert_eq!(ex.extras(), &BTreeSet::from([20]));
+    }
+
+    /// A handle listed while its window is hidden is sent again when the window shows (it is not known whether the system honours it
+    /// then); nothing else about visibility changes what is sent.
+    #[test]
+    fn a_listed_window_that_was_hidden_and_shows_makes_the_list_go_out_again() {
+        let mut ex = Exclusion::default();
+        ex.attach(7);
+        let listed = ex.version();
+        ex.set_visible(7, false);
+        assert_eq!(ex.version(), listed, "hidden stays hidden: nothing to send");
+        ex.set_visible(7, true);
+        let shown = ex.version();
+        assert_ne!(shown, listed, "it shows: the list is sent again");
+        ex.set_visible(7, true);
+        assert_eq!(ex.version(), shown, "still visible: nothing more");
+        ex.set_visible(7, false);
+        ex.set_visible(7, true);
+        assert_ne!(ex.version(), shown, "hidden again, shown again");
+        // a window that is not listed is of no concern
+        let v = ex.version();
+        ex.set_visible(99, true);
+        ex.set_visible(99, false);
+        assert_eq!(ex.version(), v);
+        // an extra that shows counts the same
+        ex.set_extras(BTreeSet::from([50]));
+        let v = ex.version();
+        ex.set_visible(50, true);
+        assert_ne!(ex.version(), v);
+        // a window that is detached forgets that it was shown: attached again, its first show sends the list
+        ex.detach(7);
+        ex.attach(7);
+        let v = ex.version();
+        ex.set_visible(7, true);
+        assert_ne!(ex.version(), v);
+    }
+
+    #[test]
+    fn the_backend_choice_needs_the_permission_and_a_session() {
+        // permission and session: the session backend, and the session the probe made is what comes back
+        assert_eq!(pick_backend(Access::Allowed, || Ok::<_, String>(5)), Ok(5));
+        // the permission is there but a session cannot be made (an older Windows has no exclusion list): Desktop Duplication
+        assert_eq!(pick_backend(Access::Allowed, || Err::<u8, _>("no exclusion list".to_string())), Err("no exclusion list".to_string()));
+        // no permission: the probe is not even tried (it would make a capture session)
+        let mut tried = false;
+        let r = pick_backend(Access::Not("denied by the user".into()), || {
+            tried = true;
+            Ok::<_, String>(1)
+        });
+        assert_eq!(r, Err("denied by the user".to_string()));
+        assert!(!tried, "no session may be made while the permission is not Allowed");
+    }
+
+    /// A handle that is no longer a window of ours is dropped from the list; the others are watched for showing.
+    #[test]
+    fn dead_extras_leave_the_list_and_a_shown_one_sends_it_again() {
+        let mut ex = Exclusion::default();
+        ex.set_extras(BTreeSet::from([1, 2, 3]));
+        let v = ex.version();
+        // 1 is hidden, 2 visible, 3 gone (destroyed, or its number now belongs to another process's window)
+        ex.poll_extras(|h| match h {
+            1 => WinProbe::Hidden,
+            2 => WinProbe::Visible,
+            _ => WinProbe::Gone,
+        });
+        assert_eq!(ex.list(), vec![1, 2], "the dead handle is not sent any more");
+        assert_ne!(ex.version(), v);
+        // nothing changed: nothing to send
+        let v = ex.version();
+        ex.poll_extras(|h| if h == 2 { WinProbe::Visible } else { WinProbe::Hidden });
+        assert_eq!(ex.version(), v);
+        // 1 shows
+        ex.poll_extras(|_| WinProbe::Visible);
+        assert_ne!(ex.version(), v);
+        // a dead window that was attached too stays listed through its attach
+        ex.attach(2);
+        ex.poll_extras(|_| WinProbe::Gone);
+        assert_eq!(ex.list(), vec![2]);
+        assert!(ex.extras().is_empty());
+    }
+
+    /// A monitor that changed its resolution makes the pool deliver buffers of its old size with the new picture in the content size.
+    #[test]
+    fn a_frame_of_another_size_than_the_mirror_is_told_apart() {
+        let item_never = || -> (i32, i32) { panic!("the item is not asked while the frame has the mirror's size") };
+        assert_eq!(size_check((2560, 1440), (2560, 1440), (2560, 1440), item_never), SizeCheck::Fine);
+        // the monitor went to 1920x1080: the buffer is still 2560x1440, the content is not
+        assert_eq!(size_check((1920, 1080), (2560, 1440), (2560, 1440), || (1920, 1080)), SizeCheck::Recreate);
+        // rotated: the sides swap
+        assert_eq!(size_check((1440, 2560), (2560, 1440), (2560, 1440), || (1440, 2560)), SizeCheck::Recreate);
+        // same content size but another buffer (the pool was made anew for a size the mirror does not have yet)
+        assert_eq!(size_check((1920, 1080), (1920, 1080), (2560, 1440), || (1920, 1080)), SizeCheck::Recreate);
+        // the pool and the mirror are of the item's size already, and a frame of the old size was still in flight: dropped, not an error
+        assert_eq!(size_check((2560, 1440), (2560, 1440), (1920, 1080), || (1920, 1080)), SizeCheck::Stale);
+        // an item that cannot say its size (0, 0) never matches a mirror: the pool is made anew, which then fails loudly if it must
+        assert_eq!(size_check((1, 1), (2, 2), (3, 3), || (0, 0)), SizeCheck::Recreate);
+        // negative sizes are not a size
+        assert_eq!(size_check((-1, 1080), (1920, 1080), (1920, 1080), || (1920, 1080)), SizeCheck::Stale);
+    }
+
+    #[test]
+    fn a_permission_that_cannot_be_read_does_not_start_a_session_and_is_not_a_refusal() {
+        let mut tried = false;
+        let r = pick_backend(Access::Unreadable("query failed".into()), || {
+            tried = true;
+            Ok::<_, String>(1)
+        });
+        assert_eq!(r, Err("query failed".to_string()));
+        assert!(!tried);
+        assert_eq!(Access::Allowed.why_not(), None);
+        assert_eq!(Access::Not("no".into()).why_not(), Some("no"));
+        assert_eq!(Access::Unreadable("?".into()).why_not(), Some("?"));
+        // the engine gives a running session up only for `Not`
+        assert_ne!(Access::Unreadable("?".into()), Access::Not("?".into()));
+    }
+
+    #[test]
+    fn the_capture_mode_is_what_the_engine_last_set() {
+        // without an engine the mode is Off
+        assert_eq!(capture_mode(), CaptureMode::Off, "tests never start the engine");
+        set_mode(CaptureMode::Session);
+        assert_eq!(capture_mode(), CaptureMode::Session);
+        set_mode(CaptureMode::Affinity);
+        assert_eq!(capture_mode(), CaptureMode::Affinity);
+        set_mode(CaptureMode::Off);
+        assert_eq!(capture_mode(), CaptureMode::Off);
+    }
+
+    #[test]
+    fn the_frame_interval_is_one_refresh_and_never_below_four_ms() {
+        assert_eq!(min_interval_ticks(60), 166_666);
+        assert_eq!(min_interval_ticks(144), 69_444);
+        assert_eq!(min_interval_ticks(240), 41_666);
+        assert_eq!(min_interval_ticks(1000), 40_000, "not below 4 ms");
+        assert_eq!(min_interval_ticks(0), 160_000, "an unknown rate gets the session's own default");
+        assert_eq!(min_interval_ticks(1), 160_000);
     }
 }

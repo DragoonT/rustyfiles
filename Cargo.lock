@@ -6257,6 +6257,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.21",
  "windows 0.62.2",
+ "windows-collections 0.3.2",
  "windows-core 0.62.2",
  "windows-registry 0.6.1",
  "zip 9.3.0",

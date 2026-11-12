@@ -56,6 +56,16 @@ hadris-storage = "3.0.0-rc.3"
 lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "xz", "encoder"] }
 windows = { version = "0.62", features = [
     "Data_Pdf",
+    # Windows.Graphics.Capture: the glass's screen capture that leaves chosen windows out of one capture only (glass/wgc.rs)
+    "Foundation_Collections",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Security_Authorization_AppCapabilityAccess",
+    "UI",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
     "Storage",
     "Storage_Streams",
     "Foundation",
@@ -114,6 +124,8 @@ windows = { version = "0.62", features = [
     "Win32_Media_MediaFoundation",
 ] }
 windows-core = "0.62"
+# IIterable / IVectorView for the window exclusion list of a capture session (windows-rs 0.62 does not ship them)
+windows-collections = "0.3"
 
 [profile.dev]
 # Keep debug builds snappy: optimize deps, keep our code debuggable.

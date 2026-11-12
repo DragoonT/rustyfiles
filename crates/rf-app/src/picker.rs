@@ -453,7 +453,7 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
             .rounded(theme::RADIUS_SM)
             .text_sm()
             .cursor_pointer()
-            .when(primary, |d| d.bg(p.accent).text_color(gpui_kit::rgb(0xFFFFFF)).font_weight(FontWeight::SEMIBOLD).hover(|d| d.opacity(0.9)))
+            .when(primary, |d| d.bg(p.accent).text_color(p.accent_text).font_weight(FontWeight::SEMIBOLD).hover(|d| d.opacity(0.9)))
             .when(!primary, |d| d.border_1().border_color(p.border).bg(p.card_bg).hover(|d| d.bg(p.hover)))
             .child(label)
     };
@@ -482,6 +482,8 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
         .items_center()
         .border_t_1()
         .border_color(p.divider)
+        // over glass this strip (name field, file type, buttons) has a wash of its own, as the window's layers are thin there
+        .bg(p.bar_bg)
         .child(
             // the same field look as the select box next to it
             h_flex()

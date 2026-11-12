@@ -130,8 +130,23 @@ pub struct Workspace {
     /// The engine has drawn this window's glass and the window is see-through now. Until then it keeps its Mica: a transparent window
     /// with nothing behind it shows the desktop through the palette's translucent layers.
     glass_shown: bool,
+    /// How the engine last said it keeps the windows out of the capture: the settings page's note depends on it, and the engine can
+    /// change it later (a session that fails makes it fall back).
+    glass_capture: rf_win::glass::CaptureMode,
     /// Counts the attach attempts; a watcher of an older attempt stops.
     glass_gen: u32,
+    /// Set by `render` around the call that builds the sidebar: the selected row of that sidebar is a glass lens (the engine draws the
+    /// pill behind the scene) instead of the Fluent fill. False for the rail and for the rail's peek over the content, which is opaque.
+    sidebar_lens: bool,
+    /// The selected row of this frame's sidebar has claimed the lens (only the first of several selected rows does). A frame that ends
+    /// without a claim takes the lens out.
+    sidebar_lens_claimed: std::cell::Cell<bool>,
+    /// Set by `render` around the call that builds the tab strip: the selected tab and the "+" button are glass lenses (the engine draws
+    /// them behind the scene) instead of the Fluent fill.
+    tab_lens: bool,
+    /// This frame's strip gave the selected tab its lens / the "+" button its lens. A frame that ends without a claim takes the lens out.
+    tab_lens_claimed: bool,
+    plus_lens_claimed: bool,
     /// Address-bar folder completions for the typed text, and the highlighted one.
     addr_suggest: Vec<PathBuf>,
     addr_sel: Option<usize>,
@@ -545,6 +560,13 @@ impl Workspace {
             cx.notify();
         })
         .detach();
+        // The system's light / dark switch reaches the window as an event only; nothing else redraws it. The palette and the glass's tint
+        // (`set_dark`) are decided in `render`, so a window left alone would keep the old theme until the next click.
+        cx.observe_window_appearance(window, |_: &mut Self, window, cx| {
+            window.refresh();
+            cx.notify();
+        })
+        .detach();
         // the hosted preview (its own window) follows the app window when it moves
         cx.observe_window_bounds(window, |this: &mut Self, _, cx| {
             this.preview.update(cx, |pv, _| pv.invalidate_host());
@@ -591,7 +613,13 @@ impl Workspace {
             glass_dark: None,
             glass_failed: false,
             glass_shown: false,
+            glass_capture: rf_win::glass::CaptureMode::Off,
             glass_gen: 0,
+            sidebar_lens: false,
+            sidebar_lens_claimed: std::cell::Cell::new(false),
+            tab_lens: false,
+            tab_lens_claimed: false,
+            plus_lens_claimed: false,
             addr_suggest: Vec::new(),
             addr_sel: None,
             _addr_task: None,
@@ -887,6 +915,18 @@ impl Workspace {
         }
         self.focus_active(window, cx);
         cx.notify();
+    }
+
+    /// Names the pane that owns the settings page's lens: the focused pane of the shown tab when `owner`, else none.
+    fn assign_settings_lens(&self, owner: bool, cx: &mut Context<Self>) {
+        let tab = &self.tabs[self.active];
+        let focused = tab.view().clone();
+        for v in std::iter::once(&tab.left).chain(tab.right.as_ref()) {
+            let on = owner && *v == focused;
+            if v.read(cx).lens_owner != on {
+                v.update(cx, |v, _| v.lens_owner = on);
+            }
+        }
     }
 
     /// The pane next to `view` when its tab is split.
@@ -1648,6 +1688,7 @@ impl Workspace {
         let n = self.tabs.len().max(1) as f32;
         let tab_w = ((strip - 4.) / n - 4.).clamp(TAB_MIN_W, TAB_MAX_W);
         let roomy = tab_w >= 110.;
+        let mut tab_claimed = false;
         for (i, tab) in self.tabs.iter().enumerate() {
             let v = tab.view().read(cx);
             let title = v.title(cx);
@@ -1657,6 +1698,11 @@ impl Workspace {
             let drag = TabDrag { ix: i, title: title.clone().into() };
             let accent = p.accent;
             let drop_bg = p.selection;
+            // Over glass the selected tab is a lens the engine draws behind the scene (the tab's rectangle made taller downwards by its
+            // corner, cut flat by the strip) instead of the Fluent fill. A stable key per tab, so another selection slides the lens.
+            let tab_lens = (active && self.tab_lens && !tab_claimed).then(|| crate::glass::key_of(&tab.left.entity_id().as_u64()));
+            tab_claimed |= tab_lens.is_some();
+            let lens_tab = tab_lens.is_some();
             let anim = self.tab_anim.as_ref().filter(|(v, _)| *v == tab.left).map(|(_, s)| *s);
             let el = h_flex()
                     .id(("tab", i))
@@ -1670,7 +1716,16 @@ impl Workspace {
                     .items_center()
                     .rounded_t(theme::RADIUS)
                     .text_sm()
-                    .when(active, |d| d.bg(p.tab_active))
+                    // while the tab moves (tabs open or close beside it, the window is resized) the scene paints the fill itself: the
+                    // engine's lens would trail the tab (see glass::LensPhase)
+                    .when(active && (tab_lens.is_none() || crate::glass::lens_phase(self.glass_hwnd, crate::glass::SLOT_TAB) != crate::glass::LensPhase::Rest), |d| d.bg(p.tab_active))
+                    .when_some(tab_lens, |d, key| {
+                        d.relative().child(crate::glass::lens_probe_shaped(
+                            crate::glass::SLOT_TAB,
+                            key,
+                            crate::glass::LensShape::Tab { radius: f32::from(theme::RADIUS) },
+                        ))
+                    })
                     .when(!active, |d| d.text_color(p.text_secondary).hover(|s| s.bg(p.hover)))
                     .child(Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }))
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
@@ -1715,7 +1770,9 @@ impl Workspace {
                         this.drag_over_tab(i, over, window, cx);
                     }))
                     .on_drag(drag, |d: &TabDrag, _, _, cx| cx.new(|_| d.clone()))
-                    .drag_over::<TabDrag>(move |s, _, _, _| s.border_l_2().border_color(accent))
+                    // The drop marker of a tab that carries the glass lens must not change its box: the lens is measured from the box, and a
+                    // 2 px left border made the pill jump and narrow while a dragged tab hovered the selected one. It gets a tint instead.
+                    .drag_over::<TabDrag>(move |s, _, _, _| if lens_tab { s.bg(accent.opacity(0.22)) } else { s.border_l_2().border_color(accent) })
                     .on_drop(cx.listener(move |this, d: &TabDrag, window, cx| this.move_tab(d.ix, i, window, cx)))
                     .when_some(tab_dir, |d, dir| {
                         d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg))
@@ -1731,6 +1788,10 @@ impl Workspace {
                 None => tabs.child(el),
             };
         }
+        self.tab_lens_claimed = tab_claimed;
+        // over glass the "+" sits in a round lens (a constant key: it never slides)
+        let plus_lens = self.tab_lens;
+        self.plus_lens_claimed = plus_lens;
         // outside the scrolling strip: always reachable
         let new_tab = div()
                 .id("new-tab")
@@ -1742,7 +1803,10 @@ impl Workspace {
                 .flex()
                 .items_center()
                 .justify_center()
-                .rounded(theme::RADIUS_SM)
+                .when(!plus_lens, |d| d.rounded(theme::RADIUS_SM))
+                .when(plus_lens, |d| d.relative().rounded_full().child(crate::glass::lens_probe_shaped(crate::glass::SLOT_NEW_TAB, crate::glass::key_of("new-tab"), crate::glass::LensShape::Circle)))
+                // the button moves when a tab opens or closes: a plain round fill stands in for the lens meanwhile
+                .when(plus_lens && crate::glass::lens_phase(self.glass_hwnd, crate::glass::SLOT_NEW_TAB) != crate::glass::LensPhase::Rest, |d| d.bg(p.tab_active))
                 .hover(|s| s.bg(p.hover))
                 .child(Icon::new(L::Plus).size(px(14.)))
                 // the title bar arms a window move on mouse down: the slightest jitter then
@@ -2474,6 +2538,11 @@ impl Workspace {
         let drop_border = p.accent;
         // on the rail only the icon; hovering the rail opens the full sidebar over the content
         let rail = self.sidebar_rail;
+        // Over glass the selected row is a lens the engine draws behind the scene: no fill and no accent bar, but a probe that reports
+        // the row's place on every paint (a scroll or a resize moves the lens with it). Two rows can be "selected" at once (a folder
+        // that is pinned and also a library): the first gets the lens, the other keeps the Fluent selection.
+        let lens_key = (active && self.sidebar_lens && !self.sidebar_lens_claimed.replace(true)).then(|| crate::glass::key_of(&target));
+        let fluent = active && lens_key.is_none();
         // drives look alike as bare icons: on the rail their letter sits in the icon's corner
         let letter = target3.path().filter(|_| rail).and_then(|p| {
             let s = p.to_str()?;
@@ -2491,7 +2560,12 @@ impl Workspace {
             .rounded(theme::RADIUS_SM)
             .text_sm()
             .relative()
-            .when(active, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+            .when(fluent, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+            // while the row moves (the sidebar scrolls) the scene paints the pill itself: the engine's lens would trail the row
+            .when(lens_key.is_some() && crate::glass::lens_phase(self.glass_hwnd, crate::glass::SLOT_SIDEBAR) != crate::glass::LensPhase::Rest, |d| {
+                d.child(crate::glass::lens_stand_in(p.dark, 32.))
+            })
+            .when_some(lens_key, |d, key| d.child(crate::glass::lens_probe(crate::glass::SLOT_SIDEBAR, key)))
             .when(!active, |d| d.hover(|s| s.bg(p.hover)))
             .child(
                 div()
@@ -3157,9 +3231,15 @@ impl Workspace {
                 if !self.glass_shown {
                     // the glass is on the window: now the scene may be see-through
                     self.glass_shown = true;
+                    crate::glass::forget_window(self.glass_hwnd); // a glass that shows now has no lens yet: send them all again
                     crate::glass::set_shown(self.glass_hwnd, true); // the palette thins its washes over the glass
                     window.set_background_appearance(WindowBackgroundAppearance::Transparent);
                     cx.notify();
+                }
+                let mode = rf_win::glass::capture_mode();
+                if mode != self.glass_capture {
+                    self.glass_capture = mode;
+                    cx.notify(); // the settings page tells whether the windows show in screenshots
                 }
                 true
             }
@@ -3175,6 +3255,7 @@ impl Workspace {
         if self.glass_hwnd != 0 {
             rf_win::glass::detach(self.glass_hwnd);
             crate::glass::set_shown(self.glass_hwnd, false);
+            crate::glass::forget_window(self.glass_hwnd); // the engine drops the lenses with the glass
         }
         self.glass_hwnd = 0;
         self.glass_dark = None;
@@ -3190,6 +3271,7 @@ impl Workspace {
         if self.glass_hwnd != 0 {
             rf_win::glass::detach(self.glass_hwnd);
             crate::glass::set_shown(self.glass_hwnd, false);
+            crate::glass::forget_window(self.glass_hwnd); // the engine drops the lenses with the glass
             self.glass_hwnd = 0;
             self.glass_dark = None;
         }
@@ -3205,6 +3287,7 @@ impl Drop for Workspace {
         if self.glass_hwnd != 0 {
             rf_win::glass::detach(self.glass_hwnd);
             crate::glass::set_shown(self.glass_hwnd, false);
+            crate::glass::forget_window(self.glass_hwnd); // the engine drops the lenses with the glass
         }
     }
 }
@@ -3301,7 +3384,14 @@ impl Render for Workspace {
             }
         }
         self.viewport_w = f32::from(window.viewport_size().width);
+        // (the tab strip's selected tab and "+" button are lenses over glass; they claim them while the strip is built)
+        let glass_on = self.glass_shown && self.glass_hwnd != 0;
+        self.tab_lens = glass_on;
+        self.tab_lens_claimed = false;
+        self.plus_lens_claimed = false;
         let titlebar = self.render_titlebar(&p, cx);
+        self.tab_lens = false;
+        let strip_frame = crate::glass::StripFrame { on_screen: true, tab_claimed: self.tab_lens_claimed, plus_claimed: self.plus_lens_claimed };
         let toolbar = self.render_toolbar(&p, cx);
         let commandbar = self.render_commandbar(&p, cx);
         let filter_strip = self.render_filter_bar(&p, window, cx);
@@ -3313,7 +3403,35 @@ impl Render for Workspace {
         let side_w = if self.sidebar_rail { RAIL_W } else { self.sidebar_w };
         let show_sidebar = self.sidebar_open && self.compact.is_none() && self.viewport_w >= side_w + LIST_MIN;
         let room_for_preview = self.viewport_w >= self.preview_w + LIST_MIN + if show_sidebar { side_w } else { 0. };
+        // Lenses (the selection pills of the sidebar and of the settings list) exist only while this window shows glass. The sidebar's
+        // selected row claims its lens while it is built; a frame without a claim (no selected row, hidden sidebar, the rail) takes it
+        // out. The settings lens belongs to the focused pane when that shows Settings: a split tab with Settings in both panes would
+        // otherwise have two probes setting one slot to two places on every frame. The rail's peek is opaque, so its rows keep the
+        // Fluent selection.
+        self.sidebar_lens = glass_on && !self.sidebar_rail;
+        self.sidebar_lens_claimed.set(false);
         let sidebar = show_sidebar.then(|| self.render_sidebar(&p, cx));
+        self.sidebar_lens = false;
+        let plan = crate::glass::lens_plan(
+            glass_on,
+            show_sidebar && !self.sidebar_rail,
+            self.sidebar_lens_claimed.get(),
+            matches!(self.active_tab().read(cx).location(), Location::Settings),
+            strip_frame,
+        );
+        if let Some(fade) = plan.clear_sidebar {
+            crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_SIDEBAR, fade);
+        }
+        if let Some(fade) = plan.clear_tab {
+            crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_TAB, fade);
+        }
+        if let Some(fade) = plan.clear_new_tab {
+            crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_NEW_TAB, fade);
+        }
+        if glass_on && !plan.settings_owner {
+            crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_SETTINGS, false);
+        }
+        self.assign_settings_lens(plan.settings_owner, cx);
         let peek = (show_sidebar && self.sidebar_rail && (self.rail_peek[0] || self.rail_peek[1])).then(|| {
             self.sidebar_rail = false;
             let full = self.render_sidebar(&p, cx);

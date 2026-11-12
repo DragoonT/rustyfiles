@@ -5,6 +5,8 @@
 
 use std::ffi::c_void;
 
+use super::{LookParams, MAX_LENSES};
+
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_IEEE_STRICTNESS, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
 use windows::Win32::Graphics::Direct3D::{
@@ -53,10 +55,92 @@ pub(super) struct Look {
     /// Share of the frost left at the very edge of the glass (it grows to the whole frost across the rim). The bending happens in the
     /// rim, and frost hides it: the smaller this is, the more of the bending is seen.
     pub rim_frost: f32,
+    /// The look of the lenses (selection pills) drawn on top of this glass.
+    pub lens: LensLook,
 }
 
+/// The look of a lens: the clear, sharp piece in the frosted pane. Lengths are CSS px. These are starting values the user judges live.
+/// The lens does not follow the settings itself (only through the pane it sits in: its grade is the window's, and in the light theme its
+/// white veil is measured from the pane's tint).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct LensLook {
+    /// Gaussian deviation of the frost inside the lens (the window's glass around it has about 10): nearly none, so the lens is clear.
+    pub frost: f32,
+    /// The rim is `min(rim_max, rim_frac * the short side)` wide.
+    pub rim_max: f32,
+    pub rim_frac: f32,
+    /// Thickness of the lens as a share of its rim width (the window's glass has 1.6).
+    pub depth: f32,
+    pub zoom: f32,
+    /// Brightness factor on top of the window's grade.
+    pub bright: f32,
+    pub tint: [f32; 4],
+    /// Strength of the highlight line along the edge (strongest where the light comes from) and of the faint dark line inside the
+    /// opposite side.
+    pub highlight: f32,
+    pub dark_line: f32,
+    /// The soft shadow the lens throws on the glass around it: opacity at most, offset down, blur radius (a CSS box-shadow's).
+    pub shadow: f32,
+    pub shadow_dy: f32,
+    pub shadow_blur: f32,
+}
+
+impl LensLook {
+    /// `pane_tint` is the alpha of the tint of the window glass the lens sits in. In the dark theme the lens has its own faint white. In
+    /// the light theme its white veil is 40 % of what the pane leaves clear (0.82 over the default pane's 0.70), so a selection is the
+    /// lighter piece at every tint setting: with a veil lighter than the pane's own it would be the darker one (it was, at 0.35 over
+    /// 0.70), and a fixed veil would fall below the pane when the tint is raised.
+    pub(super) fn regular(dark: bool, pane_tint: f32) -> LensLook {
+        LensLook {
+            // 1.5 at first: so clear that text behind the window (an editor on the second monitor) read through the pill and mixed with
+            // the row's own label. 4 is still far sharper than the pane's 10 and blurs letters away.
+            frost: 4.0,
+            rim_max: 10.0,
+            rim_frac: 0.45,
+            depth: 0.9,
+            zoom: 1.04,
+            bright: 1.08,
+            tint: [1.0, 1.0, 1.0, if dark { 0.10 } else { pane_tint + (1.0 - pane_tint) * 0.4 }],
+            highlight: 0.6,
+            dark_line: 0.2,
+            shadow: 0.22,
+            shadow_dy: 1.5,
+            shadow_blur: 8.0,
+        }
+    }
+}
+
+/// A value that is `def` at `at` on the 0..=100 scale, `lo` at 0 and `hi` at 100, straight lines between. Exactly `def` at `at`, so
+/// the default setting gives the shipped numbers to the last bit.
+fn piece(v: f32, at: f32, lo: f32, def: f32, hi: f32) -> f32 {
+    if v <= at { def + (def - lo) * (v / at - 1.0) } else { def + (hi - def) * ((v - at) / (100.0 - at)) }
+}
+
+/// A shape whose short side is this many CSS px or more is drawn with the rim as it is; below it the rim gets calmer.
+pub(super) const CALM_FROM: f32 = 160.0;
+/// At this short side (and below) the rim is at its calmest.
+pub(super) const CALM_FULL: f32 = 48.0;
+/// The thickness factor at `CALM_FULL`.
+const CALM_DEPTH: f32 = 0.40;
+/// The share of frost left at the edge at `CALM_FULL`.
+const CALM_RIM_FROST: f32 = 0.5;
+
 impl Look {
-    /// The one look the app ships. No outer shadow (DWM draws the window's own), no zoom, no colour fringe.
+    /// This look for a shape of the given short side (CSS px). The rim was tuned for a whole window; on a small piece (a dock island of
+    /// 48 or 72 px, a tile) the same rim bends the picture so hard that it looks like marble. From `CALM_FROM` down to `CALM_FULL` the
+    /// thickness falls to 40 % and the frost left at the edge rises to a half, in straight lines; below that it stays there. A shape
+    /// of `CALM_FROM` or more (every window) comes back unchanged.
+    pub(super) fn sized(self, short_side_css: f32) -> Look {
+        // a number that is not a number also leaves the look alone
+        if short_side_css.is_nan() || short_side_css >= CALM_FROM {
+            return self;
+        }
+        let u = ((short_side_css - CALM_FULL) / (CALM_FROM - CALM_FULL)).clamp(0.0, 1.0);
+        Look { depth: self.depth * (CALM_DEPTH + (1.0 - CALM_DEPTH) * u), rim_frost: self.rim_frost + (CALM_RIM_FROST - self.rim_frost) * (1.0 - u), ..self }
+    }
+
+    /// The one look the app ships. No outer shadow (DWM draws the window's own), no zoom, no colour fringe. `p` is what the user set; with
+    /// the defaults every number below is the shipped one.
     ///
     /// The shape, frost and saturation are the "Regular" preset of the model. The grade and the tint are not: the preset lowers the
     /// contrast to 0.81 (black becomes 24 of 255, white 229) and lays a 36 % dark or 50 % white tint over it, which is right for a
@@ -64,26 +148,38 @@ impl Look {
     /// the app's own translucent surfaces come on top of that). The user asked for less of that veil, so the dark glass is close to
     /// clear: the contrast is kept, what is behind is dimmed to 80 % and tinted by 10 % only (2 over black, 186 over white, colours
     /// stay colours). The light glass keeps the brightness and tints more towards white (70 %: 182 over a black desktop, was 138).
-    pub(super) fn regular(dark: bool) -> Look {
+    ///
+    /// What each setting moves (0 / default / 100): frost = the blur, 0 / 10.351 / 20 px; tint = the tint's alpha, 0 / 0.10 / 0.20 dark
+    /// and 0 / 0.70 / 0.92 light, and the dark glass's dimming (lum) 1.0 / 0.80 / 0.60; refraction = the rim's thickness factor,
+    /// 0 / 1.6 / 2.4; saturation = 1.0 / 2.252 / 3.0.
+    pub(super) fn regular(dark: bool, p: &LookParams) -> Look {
+        let p = p.clamped();
+        let d = LookParams::DEFAULT;
+        let (tint_alpha, lum) = if dark {
+            (piece(p.tint, d.tint, 0.0, 0.10, 0.20), piece(p.tint, d.tint, 1.0, 0.80, 0.60))
+        } else {
+            (piece(p.tint, d.tint, 0.0, 0.70, 0.92), 1.0)
+        };
         Look {
             // The preset's rim (thickness 1.188, at most 30.6 px wide, 35 % of the frost at the edge) bent the backdrop too little to be
             // noticed on a window (the user: more bending at the edges). Wider, thicker and with less frost on it: the edge now reads the
             // backdrop from up to about 77 px further in (was 39) and shows it almost sharp.
-            depth: 1.6,
+            depth: piece(p.refraction, d.refraction, 0.0, 1.6, 2.4),
             bezel: 0.421,
             max_bezel: 44.0,
             zoom: 1.0,
             dispersion: 0.0,
-            blur: 10.351,
-            saturate: 2.252,
-            lum: if dark { 0.80 } else { 1.0 },
+            blur: piece(p.frost, d.frost, 0.0, 10.351, 20.0),
+            saturate: piece(p.saturation, d.saturation, 1.0, 2.252, 3.0),
+            lum,
             contrast: if dark { 1.0 } else { 0.9 },
-            tint: if dark { [20.0 / 255.0, 20.0 / 255.0, 24.0 / 255.0, 0.10] } else { [1.0, 1.0, 1.0, 0.70] },
+            tint: if dark { [20.0 / 255.0, 20.0 / 255.0, 24.0 / 255.0, tint_alpha] } else { [1.0, 1.0, 1.0, tint_alpha] },
             rim: 0.25,
             rim_width: 0.3,
             shade: 0.03,
             light: -135.0,
             rim_frost: 0.12,
+            lens: LensLook::regular(dark, tint_alpha),
         }
     }
 }
@@ -108,6 +204,51 @@ pub(super) struct Cb {
     pub ext: [f32; 4],
     pub sub: [f32; 4],
     pub opt: [f32; 4],
+    /// x: how many lenses (0 = the lens loop does not run)  y: frost  z: zoom  w: thickness
+    pub lens_a: [f32; 4],
+    /// x: rim max  y: rim share of the short side  z: brightness  w: highlight
+    pub lens_b: [f32; 4],
+    /// x: dark line  y: shadow opacity  z: shadow offset  w: shadow blur
+    pub lens_c: [f32; 4],
+    pub lens_t: [f32; 4],
+    /// Per lens i: [i] centre + half size, [MAX_LENSES + i] the clip rectangle as x0 y0 x1 y1, [2 * MAX_LENSES + i] radius + opacity.
+    /// Device px.
+    pub lens: [[f32; 4]; 3 * MAX_LENSES],
+}
+
+/// One lens as the shader draws it. Device px relative to the glass.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub(super) struct LensDraw {
+    /// x, y, w, h.
+    pub rect: [f32; 4],
+    /// x, y, w, h: nothing of the lens shows outside it.
+    pub clip: [f32; 4],
+    pub radius: f32,
+    pub opacity: f32,
+}
+
+/// The lenses of one draw, in slot order. Part of what the loop guard compares: a moving lens must be presented, a resting one not.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub(super) struct LensList {
+    pub n: usize,
+    pub l: [LensDraw; MAX_LENSES],
+}
+
+impl LensList {
+    /// The first `MAX_LENSES` entries that are usable (finite, with a size, visible); the others are left out. An opacity above 1 is
+    /// cut to 1.
+    pub(super) fn from_draws(it: impl IntoIterator<Item = LensDraw>) -> LensList {
+        let mut out = LensList::default();
+        for d in it {
+            let finite = d.rect.iter().chain(&d.clip).chain([&d.radius, &d.opacity]).all(|v| v.is_finite());
+            if finite && d.rect[2] > 0.0 && d.rect[3] > 0.0 && d.opacity > 0.0 && out.n < MAX_LENSES {
+                // above 1 the shader's blend weight would turn negative and invert the glass under the lens
+                out.l[out.n] = LensDraw { opacity: d.opacity.min(1.0), ..d };
+                out.n += 1;
+            }
+        }
+        out
+    }
 }
 
 /// What one draw needs to know besides the look.
@@ -150,6 +291,8 @@ fn make_cb(g: &Geometry, look: &Look, src: (u32, u32), region: &Region, check: b
         ext: [check as u8 as f32, 0.0, pad as f32, 0.0],
         sub: [0.0; 4],
         opt: [(!g.cut_corners) as u8 as f32, look.rim_frost, 0.0, 0.0],
+        // the lenses go in with `Prepared::set_lenses`; none until then
+        ..Cb::default()
     }
 }
 
@@ -471,8 +614,34 @@ fn fail() -> windows::core::Error {
 // ---------------------------------------------------------------------------------------------------------------------------------
 
 /// A draw prepared by `prep`: the constant buffer that the glass pass needs too.
+#[derive(Clone)]
 pub(super) struct Prepared {
     cb: Cb,
+}
+
+impl Prepared {
+    /// Puts the lenses into the constant buffer of the glass pass (the prep passes do not use them).
+    pub(super) fn set_lenses(&mut self, look: &Look, lenses: &LensList) {
+        let (l, cb) = (&look.lens, &mut self.cb);
+        cb.lens_a = [lenses.n as f32, l.frost, l.zoom, l.depth];
+        cb.lens_b = [l.rim_max, l.rim_frac, l.bright, l.highlight];
+        cb.lens_c = [l.dark_line, l.shadow, l.shadow_dy, l.shadow_blur];
+        cb.lens_t = l.tint;
+        cb.lens = Default::default();
+        for (i, d) in lenses.l[..lenses.n].iter().enumerate() {
+            let [x, y, w, h] = d.rect;
+            let [cx, cy, cw, ch] = d.clip;
+            cb.lens[i] = [x + w * 0.5, y + h * 0.5, w * 0.5, h * 0.5];
+            cb.lens[MAX_LENSES + i] = [cx, cy, cx + cw, cy + ch];
+            cb.lens[2 * MAX_LENSES + i] = [d.radius, d.opacity, 0.0, 0.0];
+        }
+    }
+}
+
+/// A draw for a backdrop that is still the one `prep` last put into the region (only the lenses moved): the constant buffer, without
+/// the copy and the pyramid passes.
+pub(super) fn reuse(region: &Region, src: &Source, geo: &Geometry, look: &Look) -> Prepared {
+    Prepared { cb: make_cb(geo, look, (src.w, src.h), region, false) }
 }
 
 /// Passes 1 and 2: copy the glass rectangle plus padding out of the source, then build the blur pyramid.
@@ -534,21 +703,31 @@ pub(super) struct Opts {
 /// glass's pixels, premultiplied BGRA, `rect` sized. `opts` is for the tests; the public function passes the shipped look and lets the
 /// hardware go first.
 pub(super) fn render(src_bgra: &[u8], src_w: u32, src_h: u32, rect: (i32, i32, u32, u32), radius_px: f32, scale: f32, opts: &Opts) -> Result<Vec<u8>, String> {
+    let mut v = render_frames(src_bgra, (src_w, src_h), &free_standing(rect, radius_px, scale), opts, &[LensList::default()])?;
+    v.pop().ok_or_else(|| "no picture".to_string())
+}
+
+/// The geometry of a glass that cuts its own corners (the offscreen pictures; a window leaves that to the system).
+pub(super) fn free_standing(rect: (i32, i32, u32, u32), radius_px: f32, scale: f32) -> Geometry {
+    Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale, radius_px, cut_corners: true }
+}
+
+/// The same for several pictures of one glass that differ in their lenses only: the backdrop is prepared once and one device is made.
+pub(super) fn render_frames(src_bgra: &[u8], src: (u32, u32), geo: &Geometry, opts: &Opts, frames: &[LensList]) -> Result<Vec<Vec<u8>>, String> {
     let (look, force_warp) = (&opts.look, opts.force_warp);
-    let (x, y, w, h) = rect;
+    let ((src_w, src_h), (w, h)) = (src, (geo.w, geo.h));
     if src_w == 0 || src_h == 0 || w == 0 || h == 0 || src_w > OFFSCREEN_MAX || src_h > OFFSCREEN_MAX || w > OFFSCREEN_MAX || h > OFFSCREEN_MAX {
         return Err(format!("picture {src_w}x{src_h} or rectangle {w}x{h} is empty or too large"));
     }
     if src_bgra.len() as u64 != src_w as u64 * src_h as u64 * 4 {
         return Err(format!("the picture has {} bytes, {src_w}x{src_h} BGRA needs {}", src_bgra.len(), src_w as u64 * src_h as u64 * 4));
     }
-    if !(scale.is_finite() && scale > 0.0 && radius_px.is_finite() && radius_px >= 0.0) {
+    if !(geo.scale.is_finite() && geo.scale > 0.0 && geo.radius_px.is_finite() && geo.radius_px >= 0.0) {
         return Err("scale must be positive and the radius not negative".into());
     }
-    let geo = Geometry { w, h, origin: (x, y), scale, radius_px, cut_corners: true };
     unsafe {
         let r = offscreen_renderer(force_warp)?;
-        render_on(&r, src_bgra, src_w, src_h, &geo, look)
+        render_on_frames(&r, src_bgra, src_w, src_h, geo, look, frames)
     }
 }
 
@@ -558,8 +737,21 @@ pub(super) unsafe fn offscreen_renderer(force_warp: bool) -> Result<Renderer, St
     Renderer::new(gpu, true)
 }
 
-/// The drawing of `render` on a renderer the caller holds (arguments already checked).
+/// The drawing of `render` on a renderer the caller holds (arguments already checked), without lenses.
+#[cfg(test)]
 pub(super) unsafe fn render_on(r: &Renderer, src_bgra: &[u8], src_w: u32, src_h: u32, geo: &Geometry, look: &Look) -> Result<Vec<u8>, String> {
+    render_on_lenses(r, src_bgra, src_w, src_h, geo, look, &LensList::default())
+}
+
+/// The same with lenses.
+#[cfg(test)]
+pub(super) unsafe fn render_on_lenses(r: &Renderer, src_bgra: &[u8], src_w: u32, src_h: u32, geo: &Geometry, look: &Look, lenses: &LensList) -> Result<Vec<u8>, String> {
+    let mut v = render_on_frames(r, src_bgra, src_w, src_h, geo, look, std::slice::from_ref(lenses))?;
+    v.pop().ok_or_else(|| "no picture".to_string())
+}
+
+/// One picture per entry of `frames`; the backdrop is copied and blurred once.
+pub(super) unsafe fn render_on_frames(r: &Renderer, src_bgra: &[u8], src_w: u32, src_h: u32, geo: &Geometry, look: &Look, frames: &[LensList]) -> Result<Vec<Vec<u8>>, String> {
     let (w, h, scale) = (geo.w, geo.h, geo.scale);
     {
         let e = |what: &'static str| move |er: windows::core::Error| format!("{what}: {er}");
@@ -569,12 +761,17 @@ pub(super) unsafe fn render_on(r: &Renderer, src_bgra: &[u8], src_w: u32, src_h:
         let off = tex2d(&r.g, w, h, 1, DXGI_FORMAT_B8G8R8A8_UNORM, (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32)
             .map_err(e("target texture"))?;
         let rtv = rtv_mip(&r.g, &off, DXGI_FORMAT_B8G8R8A8_UNORM, 0).map_err(e("target view"))?;
-        r.g.ctx.ClearRenderTargetView(&rtv, &[0.0; 4]);
-        glass_pass(r, &region, &prepared, geo, &rtv);
-        let out = readback(&r.g, &off, w, h, 4).map_err(e("read back"))?;
-        if let Err(er) = r.g.dev.GetDeviceRemovedReason() {
-            return Err(format!("the device was removed while drawing: {er}"));
+        let mut pictures = Vec::with_capacity(frames.len());
+        for lenses in frames {
+            let mut p = prepared.clone();
+            p.set_lenses(look, lenses);
+            r.g.ctx.ClearRenderTargetView(&rtv, &[0.0; 4]);
+            glass_pass(r, &region, &p, geo, &rtv);
+            pictures.push(readback(&r.g, &off, w, h, 4).map_err(e("read back"))?);
+            if let Err(er) = r.g.dev.GetDeviceRemovedReason() {
+                return Err(format!("the device was removed while drawing: {er}"));
+            }
         }
-        Ok(out)
+        Ok(pictures)
     }
 }
