@@ -2200,6 +2200,9 @@ impl FolderView {
                         .text_xs()
                         .text_center()
                         .line_clamp(2)
+                        // a name longer than two lines ends in "…": without this the second line holds everything that is left and is
+                        // cut at both ends by the tile ("ding Page HTML Tem"), which reads as a broken name (a user's report)
+                        .text_ellipsis()
                         .when(dim, |d| d.opacity(0.6))
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
                         .child(SharedString::from(shown_name(e, show_ext)))

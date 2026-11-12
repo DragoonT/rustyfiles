@@ -379,7 +379,7 @@ impl Render for TipView {
             .text_size(px(12.))
             .px(px(rules::PAD_X))
             .py(px(rules::PAD_Y))
-            .child(div().w_full().line_height(px(rules::LINE_H)).line_clamp(rules::MAX_LINES).child(self.text.clone()))
+            .child(div().w_full().line_height(px(rules::LINE_H)).line_clamp(rules::MAX_LINES).text_ellipsis().child(self.text.clone()))
             .into_any_element()
     }
 }

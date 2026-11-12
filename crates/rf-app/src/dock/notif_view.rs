@@ -398,7 +398,7 @@ impl NotifView {
                             .child(div().flex_1().min_w_0().truncate().text_sm().font_weight(FontWeight::SEMIBOLD).child(t.title.clone()))
                             .child(div().flex_shrink_0().text_xs().text_color(secondary).child(when)),
                     )
-                    .when(!body.is_empty(), |d| d.child(div().w_full().line_clamp(3).text_xs().text_color(secondary).child(body))),
+                    .when(!body.is_empty(), |d| d.child(div().w_full().line_clamp(3).text_ellipsis().text_xs().text_color(secondary).child(body))),
             )
             .when(removable, |d| d.child(div().flex_shrink_0().opacity(if selected { 1.0 } else { 0.0 }).group_hover("notif-row", |s| s.opacity(1.0)).child(x)))
             .on_click(cx.listener(move |this, _, _, cx| this.open_app(id, cx)))
