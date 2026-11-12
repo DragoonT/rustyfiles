@@ -84,6 +84,31 @@ pub enum AnimPref {
     Off,
 }
 
+/// Settings -> Dock: how much the dock's icons grow under the pointer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DockMagnify {
+    /// They stay as they are.
+    Off,
+    /// The icon under the pointer grows to 1.25 times.
+    Subtle,
+    /// To 1.55 times, like the Mac's dock.
+    #[default]
+    Full,
+}
+
+impl DockMagnify {
+    /// What the dock's magnification takes.
+    pub fn strength(self) -> rf_win::dock::magnify::Strength {
+        use rf_win::dock::magnify::Strength;
+        match self {
+            DockMagnify::Off => Strength::Off,
+            DockMagnify::Subtle => Strength::Subtle,
+            DockMagnify::Full => Strength::Full,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum BackdropPref {
@@ -450,6 +475,8 @@ pub struct Settings {
     /// The dock's network and volume symbols open our own control centre (on). Off: the old behaviour, they send Win+A (Windows' quick
     /// settings).
     pub dock_own_control_centre: bool,
+    /// How much the dock's icons grow under the pointer (off / subtle / full).
+    pub dock_magnify: DockMagnify,
 }
 
 impl Default for Settings {
@@ -555,6 +582,7 @@ impl Default for Settings {
             dock_weather_city: String::new(),
             dock_own_start: true,
             dock_own_control_centre: true,
+            dock_magnify: DockMagnify::Full,
         }
     }
 }
@@ -825,7 +853,11 @@ pub fn update_live(cx: &mut App, f: impl FnOnce(&mut Settings)) {
         if SERIAL.load(Ordering::Relaxed) == mine {
             cx.update(|cx| {
                 let snapshot = cx.global::<Settings>().clone();
-                std::thread::spawn(move || snapshot.save());
+                std::thread::spawn(move || {
+                    snapshot.save();
+                    // the running dock takes the look from the file: tell it, or it hears of a slider only at its next look at the file
+                    crate::dock::control::sync_process(&snapshot);
+                });
             });
         }
     })
@@ -1101,6 +1133,24 @@ mod dock_tests {
         assert!(back.dock_enabled);
         assert!(!back.dock_reserve);
         assert_eq!(back.dock_weather_city, "Erzincan");
+    }
+
+    #[test]
+    fn the_magnification_is_full_by_default_and_round_trips() {
+        use super::DockMagnify;
+        use rf_win::dock::magnify::Strength;
+        assert_eq!(Settings::default().dock_magnify, DockMagnify::Full);
+        assert_eq!(Settings::parse_lenient("theme = \"dark\"\n").unwrap().dock_magnify, DockMagnify::Full, "a file from before has none: the default");
+        for (m, s, name) in [(DockMagnify::Off, Strength::Off, "off"), (DockMagnify::Subtle, Strength::Subtle, "subtle"), (DockMagnify::Full, Strength::Full, "full")] {
+            assert_eq!(m.strength(), s);
+            let text = toml::to_string_pretty(&Settings { dock_magnify: m, ..Default::default() }).unwrap();
+            assert!(text.contains(&format!("dock_magnify = \"{name}\"")), "{text}");
+            assert_eq!(Settings::parse_lenient(&text).unwrap().dock_magnify, m);
+        }
+        // a value this version does not know falls back to the default, the rest of the file is kept
+        let s = Settings::parse_lenient("dock_magnify = \"huge\"\nshow_hidden = true\n").unwrap();
+        assert_eq!(s.dock_magnify, DockMagnify::Full);
+        assert!(s.show_hidden);
     }
 
     #[test]

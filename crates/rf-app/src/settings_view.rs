@@ -15,7 +15,7 @@ use crate::fluent_menu::{self, Item, Menu, MenuIcon};
 use crate::select_box::{Choice, select_box};
 use crate::i18n::Lang;
 use crate::settings::{
-    self, AnimPref, BackdropPref, ClickPref, DatePref, DefaultView, DeletePref, IdePref, RendererPref, Settings, StartupPref, ThemePref,
+    self, AnimPref, BackdropPref, ClickPref, DatePref, DefaultView, DeletePref, DockMagnify, IdePref, RendererPref, Settings, StartupPref, ThemePref,
 };
 use crate::t;
 use crate::look::config::LookSettings;
@@ -33,10 +33,11 @@ pub enum Page {
     Dev,
     Advanced,
     Speed,
+    Organizer,
     About,
 }
 
-const PAGES: [(Page, L, &str); 11] = [
+const PAGES: [(Page, L, &str); 12] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
     (Page::Layout, L::LayoutGrid, "Sayfa düzeni"),
@@ -47,6 +48,7 @@ const PAGES: [(Page, L, &str); 11] = [
     (Page::Dev, L::SquareTerminal, "Geliştirici araçları"),
     (Page::Advanced, L::Wrench, "Gelişmiş"),
     (Page::Speed, L::Gauge, "Hız testi"),
+    (Page::Organizer, L::WandSparkles, "Dosya düzenleyici"),
     (Page::About, L::Info, "Hakkında"),
 ];
 
@@ -134,6 +136,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Dev => dev(p, s),
         Page::Advanced => advanced(p, s),
         Page::Speed => crate::bench_view::page(p, cx),
+        Page::Organizer => crate::organizer::page::page(p, cx),
         Page::About => about(p, cx),
     }
 }
@@ -160,6 +163,8 @@ pub(crate) fn switch(id: impl Into<ElementId>, p: &Palette, on: bool, toggle: im
             .items_center()
             .rounded_full()
             .border_1()
+            // Tab reaches the switch, Enter / Space flips it
+            .tab_index(0)
             .when(on, |d| d.bg(p.accent).border_color(p.accent).justify_end())
             .when(!on, |d| d.border_color(p.text_secondary).hover(|s| s.bg(p.hover)))
             .child(div().size(px(12.)).rounded_full().bg(knob))
@@ -190,7 +195,7 @@ fn dropdown<T: Copy + PartialEq + 'static>(id: &'static str, p: &Palette, curren
     })
 }
 
-fn button(id: impl Into<ElementId>, p: &Palette, label: impl Into<SharedString>, run: impl Fn(&mut Window, &mut App) + 'static) -> AnyElement {
+pub(crate) fn button(id: impl Into<ElementId>, p: &Palette, label: impl Into<SharedString>, run: impl Fn(&mut Window, &mut App) + 'static) -> AnyElement {
     div()
         .id(id)
         .h(px(32.))
@@ -202,6 +207,9 @@ fn button(id: impl Into<ElementId>, p: &Palette, label: impl Into<SharedString>,
         .border_1()
         .border_color(p.border)
         .text_sm()
+        .cursor_pointer()
+        // Tab reaches the button, Enter / Space presses it
+        .tab_index(0)
         .hover(|s| s.bg(p.pressed))
         .active(|s| s.opacity(0.8))
         .child(label.into())
@@ -211,7 +219,7 @@ fn button(id: impl Into<ElementId>, p: &Palette, label: impl Into<SharedString>,
 
 // ---------------------------------------------------------------- layout pieces
 
-fn card_body(p: &Palette, icon: L, title: SharedString, desc: Option<SharedString>, control: Option<AnyElement>) -> Div {
+pub(crate) fn card_body(p: &Palette, icon: L, title: SharedString, desc: Option<SharedString>, control: Option<AnyElement>) -> Div {
     note_setting(&title, desc.as_deref());
     h_flex()
         .min_h(px(64.))
@@ -231,12 +239,12 @@ fn card_body(p: &Palette, icon: L, title: SharedString, desc: Option<SharedStrin
         .children(control)
 }
 
-fn shell(p: &Palette) -> Div {
+pub(crate) fn shell(p: &Palette) -> Div {
     v_flex().w_full().rounded(theme::RADIUS).bg(p.hover).border_1().border_color(p.border)
 }
 
 /// One setting row.
-fn card(p: &Palette, icon: L, title: &str, desc: Option<&str>, control: AnyElement) -> AnyElement {
+pub(crate) fn card(p: &Palette, icon: L, title: &str, desc: Option<&str>, control: AnyElement) -> AnyElement {
     shell(p)
         .child(card_body(p, icon, title.to_string().into(), desc.map(|d| d.to_string().into()), Some(control)))
         .into_any_element()
@@ -297,7 +305,7 @@ fn sub(p: &Palette, title: &str, desc: Option<&str>, control: AnyElement) -> Any
         .into_any_element()
 }
 
-fn section(p: &Palette, title: &str) -> AnyElement {
+pub(crate) fn section(p: &Palette, title: &str) -> AnyElement {
     div().pt_5().pb_1().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(p.text).child(title.to_string()).into_any_element()
 }
 
@@ -2302,6 +2310,19 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
             t!("rustyfiles denetim merkezini kullan"),
             Some(t!("Dock'taki ağ ve ses simgeleri Windows'un hızlı ayarları yerine rustyfiles'ın panelini açar: ses, ağ, Bluetooth, şimdi çalan, parlaklık. Kapalıyken Windows'un hızlı ayarları açılır.")),
             sw("dock-own-cc", p, s.dock_own_control_centre, |s, v| s.dock_own_control_centre = v),
+        ),
+        card(
+            p,
+            L::ZoomIn,
+            t!("Simge büyütme"),
+            Some(t!("Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.")),
+            dropdown(
+                "dock-magnify",
+                p,
+                s.dock_magnify,
+                vec![(DockMagnify::Off, t!("Kapalı").into()), (DockMagnify::Subtle, t!("Hafif").into()), (DockMagnify::Full, t!("Tam").into())],
+                |s, v| s.dock_magnify = v,
+            ),
         ),
         card(
             p,

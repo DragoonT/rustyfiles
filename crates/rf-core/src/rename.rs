@@ -6,7 +6,6 @@
 //! [`plan`] turns the result into a swap-safe sequence of renames.
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write as _;
 
 use regex::RegexBuilder;
 
@@ -97,8 +96,11 @@ fn format_date(ms: i64) -> String {
         .unwrap_or_default()
 }
 
-/// Expands `{n}`, `{n:03}`, `{name}`, `{ext}`, `{date}`; unknown braces are kept literally.
-fn expand_pattern(pattern: &str, n: i64, stem: &str, ext: &str, date: &str) -> String {
+/// Expands `{token}` placeholders in `pattern`: `lookup` gives the text for a token, or `None`
+/// to keep `{token}` as it is (a typo then shows in the result instead of vanishing). A brace
+/// that is never closed is kept too. The bulk rename and the folder organizer both expand
+/// their templates with this, each with its own set of tokens.
+pub fn expand_template(pattern: &str, mut lookup: impl FnMut(&str) -> Option<String>) -> String {
     let mut out = String::new();
     let mut rest = pattern;
     while let Some(open) = rest.find('{') {
@@ -109,31 +111,30 @@ fn expand_pattern(pattern: &str, n: i64, stem: &str, ext: &str, date: &str) -> S
             return out;
         };
         let tok = &after[..close];
-        let mut handled = true;
-        match tok {
-            "name" => out.push_str(stem),
-            "ext" => out.push_str(ext.trim_start_matches('.')),
-            "date" => out.push_str(date),
-            "n" => {
-                let _ = write!(out, "{n}");
+        match lookup(tok) {
+            Some(text) => out.push_str(&text),
+            None => {
+                out.push('{');
+                out.push_str(tok);
+                out.push('}');
             }
-            t if t.starts_with("n:") => match t[2..].parse::<usize>() {
-                Ok(w) => {
-                    let _ = write!(out, "{n:0w$}", w = w.min(32));
-                }
-                Err(_) => handled = false,
-            },
-            _ => handled = false,
-        }
-        if !handled {
-            out.push('{');
-            out.push_str(tok);
-            out.push('}');
         }
         rest = &after[close + 1..];
     }
     out.push_str(rest);
     out
+}
+
+/// Expands `{n}`, `{n:03}`, `{name}`, `{ext}`, `{date}`; unknown braces are kept literally.
+fn expand_pattern(pattern: &str, n: i64, stem: &str, ext: &str, date: &str) -> String {
+    expand_template(pattern, |tok| match tok {
+        "name" => Some(stem.to_string()),
+        "ext" => Some(ext.trim_start_matches('.').to_string()),
+        "date" => Some(date.to_string()),
+        "n" => Some(n.to_string()),
+        t if t.starts_with("n:") => t[2..].parse::<usize>().ok().map(|w| format!("{n:0w$}", w = w.min(32))),
+        _ => None,
+    })
 }
 
 const RESERVED: [&str; 22] = [

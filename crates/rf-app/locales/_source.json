@@ -6828,5 +6828,1067 @@
   "key": "Çıkışı değiştir: Ses ayarları",
   "tr": "Çıkışı değiştir: Ses ayarları",
   "en": "Change output: Sound settings"
+ },
+ {
+  "id": "4ed5ef9b",
+  "key": "Klasörü düzenle",
+  "tr": "Klasörü düzenle",
+  "en": "Organize folder"
+ },
+ {
+  "id": "abecddc8",
+  "key": "Uzantı",
+  "tr": "Uzantı",
+  "en": "Extension"
+ },
+ {
+  "id": "d9e3c85c",
+  "key": "şunu içerir",
+  "tr": "şunu içerir",
+  "en": "contains"
+ },
+ {
+  "id": "fe9a050a",
+  "key": "şununla başlar",
+  "tr": "şununla başlar",
+  "en": "starts with"
+ },
+ {
+  "id": "9c07bbfa",
+  "key": "şununla biter",
+  "tr": "şununla biter",
+  "en": "ends with"
+ },
+ {
+  "id": "fa21d86c",
+  "key": "şu desene uyar (* ve ?)",
+  "tr": "şu desene uyar (* ve ?)",
+  "en": "matches the pattern (* and ?)"
+ },
+ {
+  "id": "1226ff75",
+  "key": "şundan büyük",
+  "tr": "şundan büyük",
+  "en": "is larger than"
+ },
+ {
+  "id": "4f293163",
+  "key": "şundan küçük",
+  "tr": "şundan küçük",
+  "en": "is smaller than"
+ },
+ {
+  "id": "2144f97e",
+  "key": "Klasöre taşı",
+  "tr": "Klasöre taşı",
+  "en": "Move to a folder"
+ },
+ {
+  "id": "992466d5",
+  "key": "Şablonla oluşturulan klasöre taşı",
+  "tr": "Şablonla oluşturulan klasöre taşı",
+  "en": "Move to a folder made from a template"
+ },
+ {
+  "id": "e08b2a58",
+  "key": "Şablonla yeniden adlandır",
+  "tr": "Şablonla yeniden adlandır",
+  "en": "Rename with a template"
+ },
+ {
+  "id": "3c57d9b0",
+  "key": "Geri Dönüşüm Kutusu'na gönder",
+  "tr": "Geri Dönüşüm Kutusu'na gönder",
+  "en": "Send to the Recycle Bin"
+ },
+ {
+  "id": "0da749f0",
+  "key": "Hedef klasör, örneğin D:\\Resimler",
+  "tr": "Hedef klasör, örneğin D:\\Resimler",
+  "en": "Destination folder, e.g. D:\\Pictures"
+ },
+ {
+  "id": "a091e32c",
+  "key": "Klasör şablonu, örneğin D:\\Resimler\\{year}\\{month}",
+  "tr": "Klasör şablonu, örneğin D:\\Resimler\\{year}\\{month}",
+  "en": "Folder template, e.g. D:\\Pictures\\{year}\\{month}"
+ },
+ {
+  "id": "8a246859",
+  "key": "Yeni ad şablonu, örneğin {year}-{month}-{day} {name}.{ext}",
+  "tr": "Yeni ad şablonu, örneğin {year}-{month}-{day} {name}.{ext}",
+  "en": "New name template, e.g. {year}-{month}-{day} {name}.{ext}"
+ },
+ {
+  "id": "6146db4e",
+  "key": "koşul boş: değerini yazın ya da koşulu kaldırın",
+  "tr": "koşul boş: değerini yazın ya da koşulu kaldırın",
+  "en": "condition is empty: enter a value or remove it"
+ },
+ {
+  "id": "b7b1a1a3",
+  "key": "Kuralın adı",
+  "tr": "Kuralın adı",
+  "en": "Rule name"
+ },
+ {
+  "id": "5d889afb",
+  "key": "jpg, png",
+  "tr": "jpg, png",
+  "en": "jpg, png"
+ },
+ {
+  "id": "b41e771a",
+  "key": "Boyut için bir sayı yazın",
+  "tr": "Boyut için bir sayı yazın",
+  "en": "Enter a number for the size"
+ },
+ {
+  "id": "e2abb64f",
+  "key": "Gün sayısı için bir tam sayı yazın",
+  "tr": "Gün sayısı için bir tam sayı yazın",
+  "en": "Enter a whole number of days"
+ },
+ {
+  "id": "232ac1b7",
+  "key": "Hedef klasörü seçin",
+  "tr": "Hedef klasörü seçin",
+  "en": "Choose the destination folder"
+ },
+ {
+  "id": "e6bd8804",
+  "key": "İzlenecek klasörü seçin",
+  "tr": "İzlenecek klasörü seçin",
+  "en": "Choose the folder to watch"
+ },
+ {
+  "id": "33ebb83b",
+  "key": "Bir klasör seçin",
+  "tr": "Bir klasör seçin",
+  "en": "Choose a folder"
+ },
+ {
+  "id": "e52cb829",
+  "key": "Seç…",
+  "tr": "Seç…",
+  "en": "Choose…"
+ },
+ {
+  "id": "fe040188",
+  "key": "şunlardan biri",
+  "tr": "şunlardan biri",
+  "en": "is one of"
+ },
+ {
+  "id": "079f7bde",
+  "key": "Koşulu kaldır",
+  "tr": "Koşulu kaldır",
+  "en": "Remove condition"
+ },
+ {
+  "id": "67be4f91",
+  "key": "Koşulların hepsi uysun",
+  "tr": "Koşulların hepsi uysun",
+  "en": "All conditions must match"
+ },
+ {
+  "id": "e870a0d4",
+  "key": "Koşullardan biri uysun",
+  "tr": "Koşullardan biri uysun",
+  "en": "Any condition may match"
+ },
+ {
+  "id": "447c7811",
+  "key": "Değişkenler (tıklayınca eklenir):",
+  "tr": "Değişkenler (tıklayınca eklenir):",
+  "en": "Variables (click to insert):"
+ },
+ {
+  "id": "b1f85e5b",
+  "key": "{name} dosya adı (uzantısız) · {ext} uzantı · {kind} tür klasörü · {year} {month} {day} değiştirilme tarihinden",
+  "tr": "{name} dosya adı (uzantısız) · {ext} uzantı · {kind} tür klasörü · {year} {month} {day} değiştirilme tarihinden",
+  "en": "{name} file name (no extension) · {ext} extension · {kind} kind folder · {year} {month} {day} from the modified date"
+ },
+ {
+  "id": "962259c8",
+  "key": "İzlenecek klasör",
+  "tr": "İzlenecek klasör",
+  "en": "Folder to watch"
+ },
+ {
+  "id": "b3fed76e",
+  "key": "Alt klasörlerdeki dosyalar da",
+  "tr": "Alt klasörlerdeki dosyalar da",
+  "en": "Files in subfolders too"
+ },
+ {
+  "id": "2c399601",
+  "key": "Koşullar",
+  "tr": "Koşullar",
+  "en": "Conditions"
+ },
+ {
+  "id": "bd71b9ec",
+  "key": "Koşul yok: klasördeki tüm dosyalar kurala uyar.",
+  "tr": "Koşul yok: klasördeki tüm dosyalar kurala uyar.",
+  "en": "No conditions: every file of the folder matches."
+ },
+ {
+  "id": "f6586229",
+  "key": "Koşul ekle",
+  "tr": "Koşul ekle",
+  "en": "Add condition"
+ },
+ {
+  "id": "d784d1f3",
+  "key": "Ne yapılsın",
+  "tr": "Ne yapılsın",
+  "en": "What to do"
+ },
+ {
+  "id": "0f3e315e",
+  "key": "Örnek:",
+  "tr": "Örnek:",
+  "en": "Example:"
+ },
+ {
+  "id": "697defdf",
+  "key": "Dosya geldiğinde kendiliğinden çalıştır",
+  "tr": "Dosya geldiğinde kendiliğinden çalıştır",
+  "en": "Run by itself when files arrive"
+ },
+ {
+  "id": "ed80f329",
+  "key": "Not: Ayarlar'daki otomatik düzenleme şu an kapalı; açılana kadar bu kural yalnızca elle çalışır.",
+  "tr": "Not: Ayarlar'daki otomatik düzenleme şu an kapalı; açılana kadar bu kural yalnızca elle çalışır.",
+  "en": "Note: automatic organizing is off in Settings; until it is turned on this rule only runs by hand."
+ },
+ {
+  "id": "a04ecc69",
+  "key": "Yeni kural",
+  "tr": "Yeni kural",
+  "en": "New rule"
+ },
+ {
+  "id": "a5826d46",
+  "key": "Kuralı düzenle",
+  "tr": "Kuralı düzenle",
+  "en": "Edit rule"
+ },
+ {
+  "id": "88f3ba7d",
+  "key": "Sesler",
+  "tr": "Sesler",
+  "en": "Audio"
+ },
+ {
+  "id": "4cfdf78c",
+  "key": "Arşivler",
+  "tr": "Arşivler",
+  "en": "Archives"
+ },
+ {
+  "id": "83b06d09",
+  "key": "İndirilenler: resimler Resimler klasörüne",
+  "tr": "İndirilenler: resimler Resimler klasörüne",
+  "en": "Downloads: images go to Pictures"
+ },
+ {
+  "id": "e059e274",
+  "key": "Bu klasör için kural yok",
+  "tr": "Bu klasör için kural yok",
+  "en": "No rules for this folder"
+ },
+ {
+  "id": "b5e275f5",
+  "key": "Dosyalarını kurallara göre düzenlemek için bu klasöre bir kural ekleyin.",
+  "tr": "Dosyalarını kurallara göre düzenlemek için bu klasöre bir kural ekleyin.",
+  "en": "Add a rule for this folder to organize its files."
+ },
+ {
+  "id": "00394817",
+  "key": "Kural ekle",
+  "tr": "Kural ekle",
+  "en": "Add a rule"
+ },
+ {
+  "id": "7973ed20",
+  "key": "Dosyalar düzenleniyor:",
+  "tr": "Dosyalar düzenleniyor:",
+  "en": "Organizing files:"
+ },
+ {
+  "id": "ea283943",
+  "key": "{n} dosya düzenlendi",
+  "tr": "{n} dosya düzenlendi",
+  "en": "{n} files organized"
+ },
+ {
+  "id": "556959e2",
+  "key": "{n} dosya atlandı",
+  "tr": "{n} dosya atlandı",
+  "en": "{n} files skipped"
+ },
+ {
+  "id": "7e87bf34",
+  "key": "{n} dosya sonraki çalıştırmada",
+  "tr": "{n} dosya sonraki çalıştırmada",
+  "en": "{n} files left for the next run"
+ },
+ {
+  "id": "cc27d363",
+  "key": "geri alındı",
+  "tr": "geri alındı",
+  "en": "undone"
+ },
+ {
+  "id": "2f51588f",
+  "key": "Bazı dosyalar düzenlenemedi",
+  "tr": "Bazı dosyalar düzenlenemedi",
+  "en": "Some files could not be organized"
+ },
+ {
+  "id": "c7f23ea4",
+  "key": "Geri alınıyor: dosya düzenleme",
+  "tr": "Geri alınıyor: dosya düzenleme",
+  "en": "Undoing: file organizing"
+ },
+ {
+  "id": "ad33ae05",
+  "key": "Yineleniyor: dosya düzenleme",
+  "tr": "Yineleniyor: dosya düzenleme",
+  "en": "Redoing: file organizing"
+ },
+ {
+  "id": "74d94e0b",
+  "key": "Kural dosyası okunamadı; silinmedi, şuraya taşındı:",
+  "tr": "Kural dosyası okunamadı; silinmedi, şuraya taşındı:",
+  "en": "The rules file could not be read; it was not deleted but moved to:"
+ },
+ {
+  "id": "7a06e7dc",
+  "key": "Kurallar boş bir listeyle başlıyor.",
+  "tr": "Kurallar boş bir listeyle başlıyor.",
+  "en": "Rules start with an empty list."
+ },
+ {
+  "id": "11bc9f8f",
+  "key": "Kural dosyası okunamadı ve yan yana alınamadı; kurallar kaydedilmeyecek. rustyfiles'ı yeniden başlatın.",
+  "tr": "Kural dosyası okunamadı ve yan yana alınamadı; kurallar kaydedilmeyecek. rustyfiles'ı yeniden başlatın.",
+  "en": "The rules file could not be read or set aside; rules will not be saved. Restart rustyfiles."
+ },
+ {
+  "id": "4bd0c988",
+  "key": "Kural dosyası şu an okunamıyor; yazmak onu ezebileceğinden kurallar kaydedilmeyecek. rustyfiles'ı yeniden başlatın.",
+  "tr": "Kural dosyası şu an okunamıyor; yazmak onu ezebileceğinden kurallar kaydedilmeyecek. rustyfiles'ı yeniden başlatın.",
+  "en": "The rules file cannot be read right now; writing could overwrite it, so rules will not be saved. Restart rustyfiles."
+ },
+ {
+  "id": "d5724b8b",
+  "key": "otomatik",
+  "tr": "otomatik",
+  "en": "automatic"
+ },
+ {
+  "id": "11e5071f",
+  "key": "alt klasörler dahil",
+  "tr": "alt klasörler dahil",
+  "en": "subfolders included"
+ },
+ {
+  "id": "0d2d0072",
+  "key": "Şimdi çalıştır",
+  "tr": "Şimdi çalıştır",
+  "en": "Run now"
+ },
+ {
+  "id": "01af9d35",
+  "key": "Yukarı taşı (önce bu kural denenir)",
+  "tr": "Yukarı taşı (önce bu kural denenir)",
+  "en": "Move up (this rule is tried first)"
+ },
+ {
+  "id": "8ba64dc3",
+  "key": "Aşağı taşı",
+  "tr": "Aşağı taşı",
+  "en": "Move down"
+ },
+ {
+  "id": "6bfc8b1c",
+  "key": "Kural silinsin mi?",
+  "tr": "Kural silinsin mi?",
+  "en": "Delete this rule?"
+ },
+ {
+  "id": "27a44249",
+  "key": "Kural kaldırılır. Daha önce düzenlenmiş dosyalara dokunulmaz.",
+  "tr": "Kural kaldırılır. Daha önce düzenlenmiş dosyalara dokunulmaz.",
+  "en": "The rule is removed. Files organized before are not touched."
+ },
+ {
+  "id": "d5428771",
+  "key": "Dosyalar geldikçe kendiliğinden düzenle",
+  "tr": "Dosyalar geldikçe kendiliğinden düzenle",
+  "en": "Organize files by themselves as they arrive"
+ },
+ {
+  "id": "35579e4f",
+  "key": "Kurallar",
+  "tr": "Kurallar",
+  "en": "Rules"
+ },
+ {
+  "id": "1219bdd1",
+  "key": "Düzenleme kuralları",
+  "tr": "Düzenleme kuralları",
+  "en": "Organizing rules"
+ },
+ {
+  "id": "64bd112d",
+  "key": "Henüz kural yok",
+  "tr": "Henüz kural yok",
+  "en": "No rules yet"
+ },
+ {
+  "id": "a6e79cfe",
+  "key": "Bir klasör seçin, hangi dosyalara bakacağını yazın ve nereye gideceklerini belirleyin. Hiçbir kural siz kaydedene kadar oluşmaz.",
+  "tr": "Bir klasör seçin, hangi dosyalara bakacağını yazın ve nereye gideceklerini belirleyin. Hiçbir kural siz kaydedene kadar oluşmaz.",
+  "en": "Choose a folder, say which files to look at and where they should go. No rule is made until you save it."
+ },
+ {
+  "id": "ef31e5e6",
+  "key": "Örnek kuralı dene",
+  "tr": "Örnek kuralı dene",
+  "en": "Try the example rule"
+ },
+ {
+  "id": "005c2997",
+  "key": "Örnek: İndirilenler klasöründeki resimler Resimler\\{year}\\{month} klasörüne gitsin.",
+  "tr": "Örnek: İndirilenler klasöründeki resimler Resimler\\{year}\\{month} klasörüne gitsin.",
+  "en": "Example: images in Downloads go to Pictures\\{year}\\{month}."
+ },
+ {
+  "id": "751626e3",
+  "key": "Dosyalar taranıyor…",
+  "tr": "Dosyalar taranıyor…",
+  "en": "Scanning files…"
+ },
+ {
+  "id": "27ecd901",
+  "key": "Düzenlenecek dosya yok",
+  "tr": "Düzenlenecek dosya yok",
+  "en": "No files to organize"
+ },
+ {
+  "id": "7841e58b",
+  "key": "Kurallara uyan, yerinden oynatılacak bir dosya yok.",
+  "tr": "Kurallara uyan, yerinden oynatılacak bir dosya yok.",
+  "en": "No file matches the rules and needs to move."
+ },
+ {
+  "id": "5bbca378",
+  "key": "Kural",
+  "tr": "Kural",
+  "en": "Rule"
+ },
+ {
+  "id": "1367bfa9",
+  "key": "seçili",
+  "tr": "seçili",
+  "en": "selected"
+ },
+ {
+  "id": "5270ffb3",
+  "key": "Hiçbirini seçme",
+  "tr": "Hiçbirini seçme",
+  "en": "Select none"
+ },
+ {
+  "id": "857114dd",
+  "key": "Kurala bir ad verin",
+  "tr": "Kurala bir ad verin",
+  "en": "Give the rule a name"
+ },
+ {
+  "id": "9ca27dbc",
+  "key": "Boş bir koşul var: değerini yazın ya da koşulu kaldırın",
+  "tr": "Boş bir koşul var: değerini yazın ya da koşulu kaldırın",
+  "en": "A condition is empty: enter a value or remove it"
+ },
+ {
+  "id": "6c310797",
+  "key": "Hedefi belirtin",
+  "tr": "Hedefi belirtin",
+  "en": "Specify the destination"
+ },
+ {
+  "id": "4ea7ec54",
+  "key": "Bilinmeyen değişken",
+  "tr": "Bilinmeyen değişken",
+  "en": "Unknown variable"
+ },
+ {
+  "id": "babbbe8f",
+  "key": "Hedef şablonu geçersiz: yasak karakter ya da \"..\" var",
+  "tr": "Hedef şablonu geçersiz: yasak karakter ya da \"..\" var",
+  "en": "The destination template is invalid: it has a forbidden character or \"..\""
+ },
+ {
+  "id": "72fab1c3",
+  "key": "Yeni ad şablonu bir dosya adı olmalı: klasör ayracı içeremez",
+  "tr": "Yeni ad şablonu bir dosya adı olmalı: klasör ayracı içeremez",
+  "en": "The new name template must be a file name: it cannot contain a folder separator"
+ },
+ {
+  "id": "aecf0d60",
+  "key": "Geri Dönüşüm Kutusu'na göndermek için en az bir koşul ekleyin",
+  "tr": "Geri Dönüşüm Kutusu'na göndermek için en az bir koşul ekleyin",
+  "en": "Add at least one condition before sending files to the Recycle Bin"
+ },
+ {
+  "id": "d0659b44",
+  "key": "Şablonun ürettiği ad geçerli bir Windows adı değil",
+  "tr": "Şablonun ürettiği ad geçerli bir Windows adı değil",
+  "en": "The name the template makes is not a valid Windows name"
+ },
+ {
+  "id": "c3d7e262",
+  "key": "Yeni yol çok uzun",
+  "tr": "Yeni yol çok uzun",
+  "en": "The new path is too long"
+ },
+ {
+  "id": "0a73b0b5",
+  "key": "Dosyanın tarihi bilinmiyor",
+  "tr": "Dosyanın tarihi bilinmiyor",
+  "en": "The file's date is unknown"
+ },
+ {
+  "id": "4e587e73",
+  "key": "Aynı adlı çok fazla dosya var",
+  "tr": "Aynı adlı çok fazla dosya var",
+  "en": "Too many files with the same name"
+ },
+ {
+  "id": "3025722d",
+  "key": "Bir sürücünün kökü düzenlenemez: daha belirli bir klasör seçin",
+  "tr": "Bir sürücünün kökü düzenlenemez: daha belirli bir klasör seçin",
+  "en": "The root of a drive cannot be organized: choose a more specific folder"
+ },
+ {
+  "id": "a42c675f",
+  "key": "Windows klasörü düzenlenemez",
+  "tr": "Windows klasörü düzenlenemez",
+  "en": "The Windows folder cannot be organized"
+ },
+ {
+  "id": "8f08d1dc",
+  "key": "Program Files klasörleri düzenlenemez",
+  "tr": "Program Files klasörleri düzenlenemez",
+  "en": "Program Files folders cannot be organized"
+ },
+ {
+  "id": "ca157600",
+  "key": "Kullanıcı klasörünün kendisi düzenlenemez: İndirilenler gibi bir alt klasör seçin",
+  "tr": "Kullanıcı klasörünün kendisi düzenlenemez: İndirilenler gibi bir alt klasör seçin",
+  "en": "The user folder itself cannot be organized: choose a subfolder such as Downloads"
+ },
+ {
+  "id": "00a1c4d2",
+  "key": "AppData klasörü düzenlenemez: uygulamaların ayarları orada durur",
+  "tr": "AppData klasörü düzenlenemez: uygulamaların ayarları orada durur",
+  "en": "The AppData folder cannot be organized: apps keep their settings there"
+ },
+ {
+  "id": "9f4ea023",
+  "key": "rustyfiles'ın kendi ayar ve veri klasörü düzenlenemez",
+  "tr": "rustyfiles'ın kendi ayar ve veri klasörü düzenlenemez",
+  "en": "rustyfiles' own settings and data folder cannot be organized"
+ },
+ {
+  "id": "7def4607",
+  "key": "resim",
+  "tr": "resim",
+  "en": "image"
+ },
+ {
+  "id": "cef90b6c",
+  "key": "video",
+  "tr": "video",
+  "en": "video"
+ },
+ {
+  "id": "cb270ee2",
+  "key": "ses",
+  "tr": "ses",
+  "en": "audio"
+ },
+ {
+  "id": "b0406874",
+  "key": "belge",
+  "tr": "belge",
+  "en": "document"
+ },
+ {
+  "id": "66fdf121",
+  "key": "arşiv",
+  "tr": "arşiv",
+  "en": "archive"
+ },
+ {
+  "id": "3d8466cb",
+  "key": "program",
+  "tr": "program",
+  "en": "program"
+ },
+ {
+  "id": "0584fd10",
+  "key": "diğer",
+  "tr": "diğer",
+  "en": "other"
+ },
+ {
+  "id": "8ad0fa86",
+  "key": "adında “{x}” geçen",
+  "tr": "adında “{x}” geçen",
+  "en": "the name contains “{x}”"
+ },
+ {
+  "id": "df5a6e98",
+  "key": "adı “{x}” ile başlayan",
+  "tr": "adı “{x}” ile başlayan",
+  "en": "the name starts with “{x}”"
+ },
+ {
+  "id": "3a1ec0aa",
+  "key": "adı “{x}” ile biten",
+  "tr": "adı “{x}” ile biten",
+  "en": "the name ends with “{x}”"
+ },
+ {
+  "id": "d761a62e",
+  "key": "adı “{x}” desenine uyan",
+  "tr": "adı “{x}” desenine uyan",
+  "en": "the name matches “{x}”"
+ },
+ {
+  "id": "0f8dbc60",
+  "key": "uzantısı {x} olan",
+  "tr": "uzantısı {x} olan",
+  "en": "the extension is {x}"
+ },
+ {
+  "id": "c826b875",
+  "key": "türü {x} olan",
+  "tr": "türü {x} olan",
+  "en": "the type is {x}"
+ },
+ {
+  "id": "56e5863b",
+  "key": "boyutu {x}'den büyük olan",
+  "tr": "boyutu {x}'den büyük olan",
+  "en": "the size is over {x}"
+ },
+ {
+  "id": "22b75455",
+  "key": "boyutu {x}'den küçük olan",
+  "tr": "boyutu {x}'den küçük olan",
+  "en": "the size is under {x}"
+ },
+ {
+  "id": "e7651f5e",
+  "key": "değiştirilme tarihi {x} günden eski olan",
+  "tr": "değiştirilme tarihi {x} günden eski olan",
+  "en": "it was modified more than {x} days ago"
+ },
+ {
+  "id": "10ab4b87",
+  "key": "değiştirilme tarihi {x} günden yeni olan",
+  "tr": "değiştirilme tarihi {x} günden yeni olan",
+  "en": "it was modified less than {x} days ago"
+ },
+ {
+  "id": "05ab8dd9",
+  "key": "oluşturulma tarihi {x} günden eski olan",
+  "tr": "oluşturulma tarihi {x} günden eski olan",
+  "en": "it was created more than {x} days ago"
+ },
+ {
+  "id": "16685ec8",
+  "key": "oluşturulma tarihi {x} günden yeni olan",
+  "tr": "oluşturulma tarihi {x} günden yeni olan",
+  "en": "it was created less than {x} days ago"
+ },
+ {
+  "id": "0f7e252e",
+  "key": "yeniden adlandır: {x}",
+  "tr": "yeniden adlandır: {x}",
+  "en": "rename to {x}"
+ },
+ {
+  "id": "2479ad02",
+  "key": "tüm dosyalar",
+  "tr": "tüm dosyalar",
+  "en": "all files"
+ },
+ {
+  "id": "dd467312",
+  "key": "veya",
+  "tr": "veya",
+  "en": "or"
+ },
+ {
+  "id": "e19d7fbd",
+  "key": "{c} dosyalar",
+  "tr": "{c} dosyalar",
+  "en": "files where {c}"
+ },
+ {
+  "id": "e7ef3623",
+  "key": "Dosya artık yok",
+  "tr": "Dosya artık yok",
+  "en": "The file is gone"
+ },
+ {
+  "id": "355e51ca",
+  "key": "Dosya değil",
+  "tr": "Dosya değil",
+  "en": "Not a file"
+ },
+ {
+  "id": "03b6e1ba",
+  "key": "Gizli ya da sistem dosyası",
+  "tr": "Gizli ya da sistem dosyası",
+  "en": "Hidden or system file"
+ },
+ {
+  "id": "54000d91",
+  "key": "Henüz yazılıyor (kısmi indirme)",
+  "tr": "Henüz yazılıyor (kısmi indirme)",
+  "en": "Still being written (partial download)"
+ },
+ {
+  "id": "b1028907",
+  "key": "İzlenen klasörün dışında",
+  "tr": "İzlenen klasörün dışında",
+  "en": "Outside the watched folder"
+ },
+ {
+  "id": "ca9bfb82",
+  "key": "Bağlantı (sembolik) dosya",
+  "tr": "Bağlantı (sembolik) dosya",
+  "en": "A link (symbolic) file"
+ },
+ {
+  "id": "39543906",
+  "key": "Başka bir uygulama kullanıyor",
+  "tr": "Başka bir uygulama kullanıyor",
+  "en": "Another app is using it"
+ },
+ {
+  "id": "f633c2f8",
+  "key": "Az önce değişti: biraz beklenecek",
+  "tr": "Az önce değişti: biraz beklenecek",
+  "en": "Changed a moment ago: waiting a little"
+ },
+ {
+  "id": "a3fafd5d",
+  "key": "Bu sürücüde Geri Dönüşüm Kutusu yok",
+  "tr": "Bu sürücüde Geri Dönüşüm Kutusu yok",
+  "en": "This drive has no Recycle Bin"
+ },
+ {
+  "id": "336f1246",
+  "key": "Hedef bir klasör değil, aynı adlı bir dosya var",
+  "tr": "Hedef bir klasör değil, aynı adlı bir dosya var",
+  "en": "The destination is not a folder: a file has the same name"
+ },
+ {
+  "id": "3b941bfd",
+  "key": "Geri Dönüşüm Kutusu'na gönderilemedi",
+  "tr": "Geri Dönüşüm Kutusu'na gönderilemedi",
+  "en": "Could not be sent to the Recycle Bin"
+ },
+ {
+  "id": "7d9e7873",
+  "key": "Hedef klasör oluşturulamadı",
+  "tr": "Hedef klasör oluşturulamadı",
+  "en": "Could not create the destination folder"
+ },
+ {
+  "id": "3c111765",
+  "key": "Hedefte aynı ad bulundu",
+  "tr": "Hedefte aynı ad bulundu",
+  "en": "The name is already taken at the destination"
+ },
+ {
+  "id": "2c55cdbd",
+  "key": "Dosya taşınamadı",
+  "tr": "Dosya taşınamadı",
+  "en": "The file could not be moved"
+ },
+ {
+  "id": "1ffe8096",
+  "key": "Eski yeri başka bir dosya tutuyor",
+  "tr": "Eski yeri başka bir dosya tutuyor",
+  "en": "Another file is in its old place"
+ },
+ {
+  "id": "6addbdac",
+  "key": "Dosya düzenleyici",
+  "tr": "Dosya düzenleyici",
+  "en": "File organizer"
+ },
+ {
+  "id": "ce92e96d",
+  "key": "Klasör bulunamadı ya da açılamadı; kural kendiliğinden çalışmıyor. Klasör yerine gelince kuralı kaydedin ya da rustyfiles'ı yeniden başlatın.",
+  "tr": "Klasör bulunamadı ya da açılamadı; kural kendiliğinden çalışmıyor. Klasör yerine gelince kuralı kaydedin ya da rustyfiles'ı yeniden başlatın.",
+  "en": "The folder was not found or cannot be opened; the rule is not running by itself. Save the rule once the folder is back, or restart rustyfiles."
+ },
+ {
+  "id": "72318c2f",
+  "key": "kural kendi sonucunu yeniden yakalıyor; çalıştırılmadı. Koşulu daraltın ya da dosyaları başka bir klasöre gönderin.",
+  "tr": "kural kendi sonucunu yeniden yakalıyor; çalıştırılmadı. Koşulu daraltın ya da dosyaları başka bir klasöre gönderin.",
+  "en": "the rule would match its own result again; not run. Narrow the condition or send the files to another folder."
+ },
+ {
+  "id": "c3948923",
+  "key": "daha eski",
+  "tr": "daha eski",
+  "en": "older"
+ },
+ {
+  "id": "6b5528e8",
+  "key": "Örnek (koşullardan bağımsız):",
+  "tr": "Örnek (koşullardan bağımsız):",
+  "en": "Example (ignores conditions):"
+ },
+ {
+  "id": "0fe26161",
+  "key": "Örnek (varsayımsal dosya):",
+  "tr": "Örnek (varsayımsal dosya):",
+  "en": "Example (made-up file):"
+ },
+ {
+  "id": "c508b954",
+  "key": "günden",
+  "tr": "günden",
+  "en": "days ago:"
+ },
+ {
+  "id": "d73b36b3",
+  "key": "Bu kural kendi sonucunu yeniden yakalıyor, bu yüzden hiçbir çalıştırmada kullanılmaz. Koşulu, yeni ad artık uymayacak şekilde daraltın (örneğin ad \"IMG\" ile başlasın) ya da dosyaları başka bir klasöre gönderin.",
+  "tr": "Bu kural kendi sonucunu yeniden yakalıyor, bu yüzden hiçbir çalıştırmada kullanılmaz. Koşulu, yeni ad artık uymayacak şekilde daraltın (örneğin ad \"IMG\" ile başlasın) ya da dosyaları başka bir klasöre gönderin.",
+  "en": "This rule would match its own result again, so no run uses it. Narrow the condition so the new name no longer matches (for example name starts with \"IMG\"), or send the files to another folder."
+ },
+ {
+  "id": "89331ecb",
+  "key": "Kendiliğinden çalışırken önizleme gösterilmez; her çalıştırma Durum Merkezi'ndeki satırından geri alınabilir.",
+  "tr": "Kendiliğinden çalışırken önizleme gösterilmez; her çalıştırma Durum Merkezi'ndeki satırından geri alınabilir.",
+  "en": "Runs by itself show no preview; every run can be undone from its row in the Status Center."
+ },
+ {
+  "id": "04b80b7a",
+  "key": "Dikkat: bu kural uyan dosyaları sormadan Geri Dönüşüm Kutusu'na gönderecek.",
+  "tr": "Dikkat: bu kural uyan dosyaları sormadan Geri Dönüşüm Kutusu'na gönderecek.",
+  "en": "Careful: this rule will send matching files to the Recycle Bin without asking."
+ },
+ {
+  "id": "f0758d83",
+  "key": "\"Daha eski\" yaş koşulu olan bir kural kendiliğinden çalışmaz (az önce kopyalanan ya da çıkarılan dosyaların tarihi eski olabilir); yalnızca elle çalışır.",
+  "tr": "\"Daha eski\" yaş koşulu olan bir kural kendiliğinden çalışmaz (az önce kopyalanan ya da çıkarılan dosyaların tarihi eski olabilir); yalnızca elle çalışır.",
+  "en": "A rule with an \"older\" age condition does not run by itself (files just copied or extracted can carry old dates); it runs by hand only."
+ },
+ {
+  "id": "b2789163",
+  "key": "Diğer dosyalar",
+  "tr": "Diğer dosyalar",
+  "en": "Other files"
+ },
+ {
+  "id": "d18b4aa3",
+  "key": "Bu klasörün açık kuralı yok",
+  "tr": "Bu klasörün açık kuralı yok",
+  "en": "No rule of this folder is switched on"
+ },
+ {
+  "id": "0e16b51d",
+  "key": "Ayarlar'dan bu klasörün kurallarından birini açın ya da yeni bir kural ekleyin.",
+  "tr": "Ayarlar'dan bu klasörün kurallarından birini açın ya da yeni bir kural ekleyin.",
+  "en": "Switch one of this folder's rules on in Settings, or add a new rule."
+ },
+ {
+  "id": "6715de6e",
+  "key": "Bu konum bir klasör değil",
+  "tr": "Bu konum bir klasör değil",
+  "en": "This location is not a folder"
+ },
+ {
+  "id": "9cafcf11",
+  "key": "Dosyalarını kurallara göre düzenlemek için bir klasör açın.",
+  "tr": "Dosyalarını kurallara göre düzenlemek için bir klasör açın.",
+  "en": "Open a folder to organize its files by rules."
+ },
+ {
+  "id": "62ac3faf",
+  "key": "1 dosya düzenlenemedi",
+  "tr": "1 dosya düzenlenemedi",
+  "en": "1 file could not be organized"
+ },
+ {
+  "id": "0ddf757e",
+  "key": "{n} dosya düzenlenemedi",
+  "tr": "{n} dosya düzenlenemedi",
+  "en": "{n} files could not be organized"
+ },
+ {
+  "id": "20898a0c",
+  "key": "1 dosya düzenlendi",
+  "tr": "1 dosya düzenlendi",
+  "en": "1 file organized"
+ },
+ {
+  "id": "7d668833",
+  "key": "1 dosya atlandı",
+  "tr": "1 dosya atlandı",
+  "en": "1 file skipped"
+ },
+ {
+  "id": "b598e051",
+  "key": "1 dosya sonraki çalıştırmada",
+  "tr": "1 dosya sonraki çalıştırmada",
+  "en": "1 file left for the next run"
+ },
+ {
+  "id": "919d3537",
+  "key": "zaten geri alınmıştı",
+  "tr": "zaten geri alınmıştı",
+  "en": "already undone"
+ },
+ {
+  "id": "1ac198b9",
+  "key": "geri alınıyor…",
+  "tr": "geri alınıyor…",
+  "en": "undoing…"
+ },
+ {
+  "id": "7ca86f86",
+  "key": "geri alınamadı: ayrıntı Durum Merkezi'nde",
+  "tr": "geri alınamadı: ayrıntı Durum Merkezi'nde",
+  "en": "could not be undone: details in the Status Center"
+ },
+ {
+  "id": "2b8123a5",
+  "key": "1 dosya geri alınamadı",
+  "tr": "1 dosya geri alınamadı",
+  "en": "1 file could not be put back"
+ },
+ {
+  "id": "8e28ae64",
+  "key": "{n} dosya geri alınamadı",
+  "tr": "{n} dosya geri alınamadı",
+  "en": "{n} files could not be put back"
+ },
+ {
+  "id": "7c44cbfe",
+  "key": "1 dosya taşınamadı",
+  "tr": "1 dosya taşınamadı",
+  "en": "1 file could not be moved"
+ },
+ {
+  "id": "0e85b339",
+  "key": "{n} dosya taşınamadı",
+  "tr": "{n} dosya taşınamadı",
+  "en": "{n} files could not be moved"
+ },
+ {
+  "id": "f5b308a5",
+  "key": "Kuralı değiştir",
+  "tr": "Kuralı değiştir",
+  "en": "Edit rule"
+ },
+ {
+  "id": "a61a5fa1",
+  "key": "Açıkken, \"kendiliğinden çalıştır\" seçili kuralların klasörleri izlenir; yeni gelen dosyalar 3 saniye durulduktan sonra önizleme gösterilmeden taşınır, yeniden adlandırılır ya da Geri Dönüşüm Kutusu'na gönderilir. Kapalıyken hiçbir şey izlenmez ve çalışmaz.",
+  "tr": "Açıkken, \"kendiliğinden çalıştır\" seçili kuralların klasörleri izlenir; yeni gelen dosyalar 3 saniye durulduktan sonra önizleme gösterilmeden taşınır, yeniden adlandırılır ya da Geri Dönüşüm Kutusu'na gönderilir. Kapalıyken hiçbir şey izlenmez ve çalışmaz.",
+  "en": "When on, the folders of rules set to run by themselves are watched; new files are moved, renamed or sent to the Recycle Bin 3 seconds after changes settle, without a preview. When off, nothing is watched and nothing runs."
+ },
+ {
+  "id": "0843712f",
+  "key": "Bir dosyaya uyan ilk kural uygulanır. Elle çalıştırmada önce önizleme gösterilir; kendiliğinden çalışan kurallar önizleme göstermez. Her çalıştırma, Durum Merkezi'ndeki satırından tek hamlede geri alınabilir.",
+  "tr": "Bir dosyaya uyan ilk kural uygulanır. Elle çalıştırmada önce önizleme gösterilir; kendiliğinden çalışan kurallar önizleme göstermez. Her çalıştırma, Durum Merkezi'ndeki satırından tek hamlede geri alınabilir.",
+  "en": "The first rule that matches a file is applied. Running by hand shows a preview first; rules that run by themselves show none. Every run can be undone in one step from its row in the Status Center."
+ },
+ {
+  "id": "4ee3f794",
+  "key": "kural kendi sonucunu yeniden yakalıyor; atlandı. Koşulu, yeni ad artık uymayacak şekilde daraltın (örneğin ad \"IMG\" ile başlasın) ya da dosyaları başka bir klasöre gönderin.",
+  "tr": "kural kendi sonucunu yeniden yakalıyor; atlandı. Koşulu, yeni ad artık uymayacak şekilde daraltın (örneğin ad \"IMG\" ile başlasın) ya da dosyaları başka bir klasöre gönderin.",
+  "en": "the rule would match its own result again; skipped. Narrow the condition so the new name no longer matches (for example name starts with \"IMG\"), or send the files to another folder."
+ },
+ {
+  "id": "e2f5c7de",
+  "key": "Klasör bulunamadı ya da açılamadı.",
+  "tr": "Klasör bulunamadı ya da açılamadı.",
+  "en": "The folder was not found or cannot be opened."
+ },
+ {
+  "id": "42482137",
+  "key": "1 dosya zaten olması gereken yerde",
+  "tr": "1 dosya zaten olması gereken yerde",
+  "en": "1 file is already where it belongs"
+ },
+ {
+  "id": "49c06a30",
+  "key": "{n} dosya zaten olması gereken yerde",
+  "tr": "{n} dosya zaten olması gereken yerde",
+  "en": "{n} files are already where they belong"
+ },
+ {
+  "id": "baf18071",
+  "key": "Hedef klasör korunuyor (Windows, Program Files, AppData ya da uygulamanın klasörü)",
+  "tr": "Hedef klasör korunuyor (Windows, Program Files, AppData ya da uygulamanın klasörü)",
+  "en": "The destination folder is protected (Windows, Program Files, AppData or the app's own folder)"
+ },
+ {
+  "id": "24622c11",
+  "key": "Geri Dönüşüm Kutusu kapalı ya da bu dosya için fazla büyük",
+  "tr": "Geri Dönüşüm Kutusu kapalı ya da bu dosya için fazla büyük",
+  "en": "The Recycle Bin is off or too small for this file"
+ },
+ {
+  "id": "fd272a87",
+  "key": "Planlandıktan sonra değişti",
+  "tr": "Planlandıktan sonra değişti",
+  "en": "Changed since it was planned"
+ },
+ {
+  "id": "bca10113",
+  "key": "Bazı dosyalar atlandı",
+  "tr": "Bazı dosyalar atlandı",
+  "en": "Some files were skipped"
+ },
+ {
+  "id": "43d0576f",
+  "key": "Simge büyütme",
+  "tr": "Simge büyütme",
+  "en": "Icon magnification"
+ },
+ {
+  "id": "04ddef5c",
+  "key": "Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.",
+  "tr": "Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.",
+  "en": "With the pointer over the dock the icons grow like the Mac's dock: Subtle up to 1.25 times, Full up to 1.55 times."
+ },
+ {
+  "id": "6834f5db",
+  "key": "Hafif",
+  "tr": "Hafif",
+  "en": "Subtle"
+ },
+ {
+  "id": "028363f1",
+  "key": "Tam",
+  "tr": "Tam",
+  "en": "Full"
  }
 ]

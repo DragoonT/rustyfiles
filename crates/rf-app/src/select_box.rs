@@ -60,7 +60,9 @@ pub fn select_box_h(id: impl Into<SharedString>, p: &Palette, label: impl Into<S
     let key: SharedString = id.into();
     let bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
     let seen = bounds.clone();
-    let base = h_flex().id(ElementId::Name(key.clone())).relative().h(px(height)).min_w(px(180.)).max_w(px(320.)).gap_2().items_center().text_sm().cursor_pointer();
+    let base = h_flex().id(ElementId::Name(key.clone())).relative().h(px(height)).min_w(px(180.)).max_w(px(320.)).gap_2().items_center().text_sm().cursor_pointer()
+        // Tab reaches the field, Enter / Space opens it
+        .tab_index(0);
     // over glass: a capsule with a chevron-down, a wash of white or black and no border; otherwise the bordered field
     let (field, chevron) = if p.liquid {
         let dark = p.dark;

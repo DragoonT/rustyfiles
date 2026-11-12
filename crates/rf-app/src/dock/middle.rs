@@ -1,7 +1,16 @@
 //! The middle island, the dock itself: the apps pinned to the Windows taskbar in the taskbar's order, then the other running apps,
-//! a thin separator, the Recycle Bin and the Downloads folder. Icons are 44 px at rest; the one under the pointer grows to 56 px and
-//! its two neighbours to 50 px (about 120 ms, eased; instantly when the app's animations are off). The island keeps its width while
-//! an icon grows - the gaps give way (`plan::dock_layout`) - and its height never changes.
+//! a thin separator, the Recycle Bin and the Downloads folder. Icons are 44 px at rest. With the pointer over the dock they grow like
+//! the Mac's dock (`rf_win::dock::magnify`): by a smooth bell of the distance from the pointer to each icon's rest centre, up to 1.55
+//! times for the one under it (a setting: off / subtle 1.25 / full 1.55), standing on one baseline so they grow UP, over the glass's top
+//! edge, into the window's headroom, and pushing their neighbours apart. The glass widens with them, symmetrically around the island's
+//! centre (its height never changes); coming in and going out are eased over about 160 ms, instantly when the app's animations are off.
+//!
+//! THE WINDOW IS BIGGER THAN THE GLASS (`layout::placements`): this view lays everything out in the whole window, from the margins the
+//! host gives it (`host::insets`), and for every frame tells the glass engine where the glass is and the system which parts of the
+//! window take the pointer (`host::set_middle_frame`): the glass and the icons that stand out of it, nothing else.
+//!
+//! At rest there are no timers and no frames. While the pointer moves over the dock: one layout, one shape for the engine, one region
+//! for the system per frame; the icons are never loaded again for it.
 //!
 //! Left click: start the app / bring its last used window forward / minimise it when it is in front. Middle click: another instance.
 
@@ -9,18 +18,20 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::h_flex;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use rf_win::dock::hover::{HoverAnim, Slot};
-use rf_win::dock::{DockItem, IconSource, PinnedApp, Place, model};
+use rf_win::dock::hover::Slot;
+use rf_win::dock::layout::{ICON_REST, RADIUS};
+use rf_win::dock::magnify::{self, Frame, Presence};
+use rf_win::dock::{DockItem, IconSource, PinnedApp, Place, hit, model};
 use rf_win::tasklist::{self, Task, TaskWatch};
 
 use super::backdrop::IslandGlass;
-use super::host::Kind;
+use super::host::{self, Kind};
 use super::icons::{self, IconCache};
 use super::look::{self, Env};
 use super::plan;
+use crate::settings::Settings;
 use crate::t;
 
 /// How far the icons' bottom edge is above the island's bottom edge (logical px): every icon, grown or not, stands on this line, so
@@ -28,6 +39,8 @@ use crate::t;
 const BASELINE: f32 = 12.0;
 /// The running mark's distance below the icons.
 const DOT_DROP: f32 = 7.0;
+/// A pointer move of less than this many logical px while the bell is settled does not draw a frame.
+const MIN_MOVE: f32 = 0.25;
 /// How often the taskbar's pins are read again (they change when the user pins or unpins in Windows).
 const PINS_EVERY: Duration = Duration::from_secs(20);
 
@@ -42,16 +55,18 @@ pub struct MiddleIsland {
     icons: IconCache,
     /// The scale the cached icons were asked for.
     icon_scale: f32,
-    /// The island window's real width (logical px) as last drawn: smaller than `width()` on a narrow screen.
-    view_width: f32,
-    /// Where the pointer last was over the island (logical px from its left edge); `None` when it is away.
+    /// Where the pointer last was over the dock (logical px from the REST island's left edge); `None` before it first came. It stays
+    /// where it was when the pointer leaves, so the bell shrinks away in place.
     pointer_x: Option<f32>,
-    anim: HoverAnim,
-    /// The number of icons the animation was sized for.
-    anim_icons: usize,
+    /// The height of the bell over time (0 away, 1 over the dock).
+    presence: Presence,
     /// Clock of the animation.
     t0: Instant,
     reported: f32,
+    /// While a mouse button is down on the dock: where the pointer and the bell were when it went down. The icons stand still until it
+    /// goes up, so the icon that was pressed is still under the pointer when the press ends and the click is not lost to the bell
+    /// moving the icons about (a click is a press and a release on the same icon).
+    frozen: Option<(f32, f32)>,
     /// A refresh is running; a change that arrives meanwhile makes it run once more.
     refreshing: bool,
     dirty: bool,
@@ -106,12 +121,11 @@ impl MiddleIsland {
             icon_srcs: Vec::new(),
             icons: IconCache::default(),
             icon_scale: cx.global::<Env>().scale,
-            view_width: 0.0,
             pointer_x: None,
-            anim: HoverAnim::new(0, plan::hover_duration(crate::settings::animations())),
-            anim_icons: 0,
+            presence: Presence::new(plan::hover_duration(crate::settings::animations())),
             t0: Instant::now(),
             reported: 0.0,
+            frozen: None,
             refreshing: false,
             dirty: false,
             _watch: watch,
@@ -120,8 +134,6 @@ impl MiddleIsland {
         me.items = model::merge(&[], Vec::new(), 0);
         me.slots = model::slots(&me.items);
         me.icon_srcs = icon_sources(&me.items);
-        me.anim_icons = icon_count(&me.slots);
-        me.anim = HoverAnim::new(me.anim_icons, plan::hover_duration(crate::settings::animations()));
         me.reported = me.width();
         me
     }
@@ -180,16 +192,6 @@ impl MiddleIsland {
         self.items = items;
         self.slots = model::slots(&self.items);
         self.icon_srcs = icon_sources(&self.items);
-        let icons = icon_count(&self.slots);
-        if icons != self.anim_icons {
-            let now = self.now_ms();
-            self.anim.resize(icons, now);
-            self.anim_icons = icons;
-            // the resize drops the hover; a pointer that has not moved is still over an icon
-            if let Some(x) = self.pointer_x {
-                self.pointer_moved(x, cx);
-            }
-        }
         self.load_icons(cx);
         let w = self.width();
         if (w - self.reported).abs() > 0.5 {
@@ -236,24 +238,50 @@ impl MiddleIsland {
         }
     }
 
-    fn pointer_moved(&mut self, x: f32, cx: &mut Context<Self>) {
+    /// The pointer is over the dock at `x`, logical px from the REST island's left edge: the bell follows it directly. `strength` is the
+    /// setting; `button_down` whether a mouse button is held.
+    fn pointer_moved(&mut self, x: f32, strength: magnify::Strength, button_down: bool, cx: &mut Context<Self>) {
+        // a move with no button held ends a press whose release this view never saw (it happened outside the window)
+        if !button_down && self.frozen.take().is_some() {
+            cx.notify();
+        }
+        // With the magnification off nothing here changes what is drawn: no frame, no animation, no look at the animations setting.
+        if strength == magnify::Strength::Off {
+            return;
+        }
+        let now = self.now_ms();
+        let entering = !self.presence.is_in();
+        let delta = self.pointer_x.map_or(f32::INFINITY, |old| (old - x).abs());
         self.pointer_x = Some(x);
-        let width = if self.view_width > 0.0 { self.view_width.min(self.width()) } else { self.width() };
-        let target = plan::hover_target(x, &self.slots, width);
-        if target != self.anim.hovered() {
-            let now = self.now_ms();
-            self.anim.set_duration(plan::hover_duration(crate::settings::animations()));
-            self.anim.set_hover(target, now);
+        if entering {
+            // the setting is looked at when the bell starts, not on every mouse event (it is a system call)
+            self.presence.set_duration(plan::hover_duration(crate::settings::animations()));
+            self.presence.enter(now);
+        }
+        // a hair of movement while the bell is settled is not worth a frame: the sizes would not differ by a pixel
+        if move_needs_frame(strength, entering, delta, self.presence.settled(now)) {
             cx.notify();
         }
     }
 
     fn pointer_left(&mut self, cx: &mut Context<Self>) {
-        self.pointer_x = None;
-        if self.anim.hovered().is_some() {
+        self.frozen = None;
+        if self.presence.is_in() {
             let now = self.now_ms();
-            self.anim.set_duration(plan::hover_duration(crate::settings::animations()));
-            self.anim.set_hover(None, now);
+            self.presence.set_duration(plan::hover_duration(crate::settings::animations()));
+            self.presence.leave(now);
+            cx.notify();
+        }
+    }
+
+    /// A button went down on the dock: the icons stand still until it is up.
+    fn pressed(&mut self) {
+        let now = self.now_ms();
+        self.frozen = self.pointer_x.map(|x| (x, self.presence.value(now)));
+    }
+
+    fn released(&mut self, cx: &mut Context<Self>) {
+        if self.frozen.take().is_some() {
             cx.notify();
         }
     }
@@ -271,6 +299,12 @@ impl MiddleIsland {
             super::actions::middle_click_app(app);
         }
     }
+}
+
+/// Whether a pointer move over the dock is worth a frame: never with the magnification off; always when the bell starts or is still
+/// moving; otherwise only when the pointer moved by `MIN_MOVE` (logical px) or more.
+fn move_needs_frame(strength: magnify::Strength, entering: bool, delta: f32, settled: bool) -> bool {
+    strength != magnify::Strength::Off && (entering || !settled || delta >= MIN_MOVE)
 }
 
 fn icon_count(slots: &[Slot]) -> usize {
@@ -305,27 +339,49 @@ fn item_name(item: &DockItem) -> String {
 
 impl Render for MiddleIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let env = *cx.global::<Env>();
+        // the palette follows the tone (what is behind the glass), the fill below it is the island's own while the glass is not running
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
+        let strength = cx.global::<Settings>().dock_magnify.strength();
         let now = self.now_ms();
-        if !self.anim.settled(now) {
-            // an icon is still growing or shrinking: one more frame
+        if !self.presence.settled(now) && self.frozen.is_none() {
+            // the bell is still coming in or going out: one more frame
             window.request_animation_frame();
         }
-        let sizes = self.anim.sizes(now);
+        let inset = host::insets(Kind::Middle, cx);
+        let [ml, _, mr, mb] = inset.margins;
         // The window may be narrower than the icons want (the side islands and the screen leave it less): lay the icons out for the
-        // width it really has, so none falls outside it.
-        let real = f32::from(window.viewport_size().width);
-        self.view_width = real;
-        let width = if real > 0.0 { real.min(self.width()) } else { self.width() };
-        let spans = plan::dock_layout(&self.slots, &sizes, width);
+        // island's real width at rest (the window less its margins), so none falls outside it.
+        let size = window.viewport_size();
+        let (vw, vh) = (f32::from(size.width), f32::from(size.height));
+        let real = vw - ml - mr;
+        let rest_width = if real > 0.0 { real.min(self.width()) } else { self.width() };
+        let rest = plan::rest_layout(&self.slots, rest_width);
+        // (a pressed button holds the sizes it went down with)
+        let (pointer, height) = match self.frozen {
+            Some((x, h)) => (Some(x), h),
+            None => (self.pointer_x, self.presence.value(now)),
+        };
+        let frame = match pointer {
+            Some(x) if height > 0.0 && strength != magnify::Strength::Off => magnify::frame(&self.slots, &rest, rest_width, x, height, strength, rest_width + 2.0 * inset.growth),
+            _ => Frame::at_rest(&rest, rest_width),
+        };
+        let pic = plan::picture(&frame, &self.slots, inset.margins, BASELINE);
+
+        // the glass and the part of the window that takes the pointer follow the frame (only what moved is sent on)
+        let scale = env.scale;
+        let boxes: Vec<[f32; 4]> = pic.out_of_glass.iter().map(|b| plan::to_device(*b, scale)).collect();
+        let glass_px = plan::to_device(pic.glass, scale);
+        let parts = hit::parts(glass_px, rf_win::dock::layout::px(RADIUS, scale) as f32, &boxes, (vw * scale).round() as i32, (vh * scale).round() as i32);
+        host::set_middle_frame(&self.glass, glass_px, parts, cx);
 
         let mut cells: Vec<AnyElement> = Vec::with_capacity(self.items.len());
-        for (ix, (item, &(x, w))) in self.items.iter().zip(&spans).enumerate() {
+        for (ix, (item, &(x, w))) in self.items.iter().zip(&pic.items).enumerate() {
             let cell = match item {
                 DockItem::Separator => div()
                     .absolute()
                     .left(px(x))
-                    .bottom(px(BASELINE + (rf_win::dock::layout::ICON_REST - 36.0) / 2.0))
+                    .bottom(px(mb + BASELINE + (ICON_REST - 36.0) / 2.0))
                     .w(px(w))
                     .h(px(36.))
                     .bg(pal.separator().hsla())
@@ -352,13 +408,14 @@ impl Render for MiddleIsland {
                         .id(("dock-item", ix))
                         .absolute()
                         .left(px(x))
-                        .bottom(px(BASELINE))
+                        .bottom(px(mb + BASELINE))
                         .w(px(w))
                         .h(px(w))
                         .cursor_pointer()
                         .child(picture)
                         .when(running, |d| {
                             let (dw, dh) = look::running_dot_size(in_front);
+                            // the mark stays under its icon: it is the icon's child, and the icons stand on one baseline
                             d.child(
                                 div()
                                     .absolute()
@@ -378,27 +435,68 @@ impl Render for MiddleIsland {
             cells.push(cell);
         }
 
-        super::host::island_box(pal, fallback).child(
-            h_flex().size_full().child(
+        // The glass paints its own fill only while the engine's glass is not running. The window is bigger than the glass, so the fill is
+        // the glass's rectangle in it (`pic.glass`), not the whole view; its colours are the tone's, as on main.
+        let fill = fallback.then(|| {
+            div()
+                .absolute()
+                .left(px(pic.glass[0]))
+                .top(px(pic.glass[1]))
+                .w(px(pic.glass[2]))
+                .h(px(pic.glass[3]))
+                .rounded(px(RADIUS))
+                .bg(pal.fallback_fill().hsla())
+        });
+        div()
+            .size_full()
+            .text_size(px(13.))
+            .text_color(pal.text().hsla())
+            .children(fill)
+            .child(
+                // The row covers the whole window, so the pointer over an icon that has grown out of the glass is still over the dock.
+                // (What of the window the system hands to this view at all is the region, see `hit`.)
                 div()
                     .id("dock-row")
-                    .relative()
+                    .absolute()
+                    .left(px(0.))
+                    .top(px(0.))
                     .size_full()
-                    .on_mouse_move(cx.listener(|me, ev: &MouseMoveEvent, _, cx| me.pointer_moved(f32::from(ev.position.x), cx)))
+                    .on_mouse_move(cx.listener(move |me, ev: &MouseMoveEvent, _, cx| {
+                        let strength = cx.global::<Settings>().dock_magnify.strength();
+                        me.pointer_moved(f32::from(ev.position.x) - host::insets(Kind::Middle, cx).margins[0], strength, ev.pressed_button.is_some(), cx)
+                    }))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|me, _, _, _| me.pressed()))
+                    .on_mouse_up(MouseButton::Left, cx.listener(|me, _, _, cx| me.released(cx)))
+                    .on_mouse_up_out(MouseButton::Left, cx.listener(|me, _, _, cx| me.released(cx)))
                     .on_hover(cx.listener(|me, hovered: &bool, _, cx| {
                         if !*hovered {
                             me.pointer_left(cx);
                         }
                     }))
                     .children(cells),
-            ),
-        )
+            )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BASELINE, DOT_DROP, DockItem, Place, Slot, Task, icon_count, item_icons, look, model, plan};
+    use super::{BASELINE, DOT_DROP, DockItem, ICON_REST, MIN_MOVE, Place, Slot, Task, icon_count, item_icons, look, magnify, model, move_needs_frame, plan};
+
+    #[test]
+    fn a_pointer_move_draws_a_frame_only_when_something_could_look_different() {
+        use magnify::Strength::{Full, Off, Subtle};
+        // magnification off: never, whatever the pointer does
+        assert!(!move_needs_frame(Off, true, 100.0, false));
+        assert!(!move_needs_frame(Off, false, 100.0, true));
+        // the bell starts or is still coming in or going out: every move
+        assert!(move_needs_frame(Full, true, 0.0, true));
+        assert!(move_needs_frame(Subtle, false, 0.0, false));
+        // settled: a move of a quarter of a pixel or more, not less
+        assert!(move_needs_frame(Full, false, MIN_MOVE, true));
+        assert!(move_needs_frame(Full, false, 3.0, true));
+        assert!(!move_needs_frame(Full, false, MIN_MOVE - 0.01, true));
+        assert!(!move_needs_frame(Full, false, 0.0, true));
+    }
 
     #[test]
     fn icons_are_counted_without_the_separator() {
@@ -449,10 +547,12 @@ mod tests {
     }
 
     #[test]
-    fn the_running_marks_stand_below_the_icons_inside_the_island() {
-        // the island is 72 high; the biggest icon (56) stands BASELINE up, its mark DOT_DROP below its bottom edge
-        let grown_top = BASELINE + rf_win::dock::hover::GROWN;
-        assert!(grown_top <= rf_win::dock::layout::MIDDLE_HEIGHT, "the grown icon fits in the island");
+    fn the_running_marks_stand_below_the_icons_inside_the_island_and_the_icons_grow_into_the_headroom() {
+        // the island is 72 high; the biggest icon (44 x 1.55) stands BASELINE up and reaches over the glass's top edge, into the window's
+        // headroom (the mark, DOT_DROP below its bottom edge, stays inside the glass)
+        let grown_top = BASELINE + ICON_REST * magnify::MAX_PEAK;
+        let over = grown_top - rf_win::dock::layout::MIDDLE_HEIGHT;
+        assert!(over > 0.0 && over + 1.0 <= rf_win::dock::layout::HEADROOM, "the grown icon reaches {over} px over the glass; the headroom is {}", rf_win::dock::layout::HEADROOM);
         assert!(BASELINE - DOT_DROP - look::running_dot_size(true).1 >= 0.0, "the mark stays inside the island");
     }
 }

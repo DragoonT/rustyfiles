@@ -29,12 +29,13 @@ cbuffer CB : register(b0)
     float4 uA;      // x: depth (thickness slider)  y: bezel (rim slider, fraction of the short side)  z: maxBezel px  w: zoom
     float4 uB;      // x: dispersion (rainbow)  y: blur sigma CSS px (frost)  z: saturate  w: lum
     float4 uC;      // x: contrast  y: rim gain  z: rimWidth px  w: shade (inner dark line)
-    float4 uD;      // x: light angle deg  y: outer shadow alpha (0 = none)  z: shadow offset y CSS px  w: shadow blur CSS px (box-shadow blur radius)
+    float4 uD;      // x: light angle deg  y: outer shadow opacity at the outline (0 = none)  z: shadow offset down CSS px  w: how far the shadow reaches, CSS px
     float4 uTint;   // rgb, a
     float4 uPass;   // xy: source texel size (down pass)  zw: output size px (down pass)
     float4 uExt;    // x: non-finite check 0/1  y: debug 0 = normal, 1 = write raw offsets, 2 = no rim shift (zoom term only)  z: region pad px
                     // w: 1 = point sampling of the sharp backdrop (what the screenshot shows), 0 = bilinear
-    float4 uSub;    // xy: shift of the glass centre from the window centre, device px (sub pixel placement)  zw: extra shift of the outline only (test placement)
+    float4 uSub;    // xy: shift of the glass centre from the window centre, device px (sub pixel placement; also where a SHAPE sits inside a larger window)
+                    // zw: extra shift of the outline only (test placement)
     float4 uOpt;    // x: 1 = the corners are not cut out here (the whole rectangle is covered; a window's corners are cut by the system)
                     // y: share of the frost left at the very edge (it grows to the whole frost across the rim): less frost, more visible bending
     float4 uLensA;  // x: number of lenses (0: the lens loop does not run)  y: frost sigma CSS px  z: zoom  w: thickness (share of the rim width)
@@ -317,16 +318,19 @@ float4 PSGlass(float4 pos : SV_Position) : SV_Target
     float glim = 48.0 / max(48.0, major);           // a jump of the normal (a seam) must not smear the whole pyramid in
     gx *= glim; gy *= glim; major *= glim;
 
-    // STEP 7: outer drop shadow (Lens only): CSS box-shadow 0 6px 20px rgba(0,0,0,.16) outside the shape. A CSS blur of radius 20 is a Gaussian
-    // of deviation 10; the shadow is the shape moved down by 6 px, blurred: coverage ~ Phi(-d_shifted / sigma), Phi approximated by the logistic
-    // 1 / (1 + exp(-1.702 x)) (max error 0.01).
+    // STEP 7: outer drop shadow, for a glass that is a shape inside a larger transparent window (a dock island; an ordinary window has the
+    // system's own). The shape moved down by uD.z px; d2 is the distance of this pixel from that outline (negative inside it). The shadow
+    // is uD.y (the opacity AT the outline) up to the outline and falls to nothing over uD.w px outside it, along a smoothstep, so it has no
+    // visible edge at either end. It is only ever drawn outside the glass: (1 - cov) takes it off the covered pixels, so the glass is as
+    // clear as without it. With uD.y = 0 (everything but a dock island) none of this runs. Mirrored on the CPU by `Shadow::alpha` (tests).
     float sh = 0.0;
-    if (uD.y > 0.0)
+    // (a real branch: left to itself the compiler flattens it and every pixel of an ordinary window pays for the shadow's maths)
+    [branch] if (uD.y > 0.0)
     {
         float2 n2;
         float d2 = ShapeDist(pE - float2(0.0, uD.z), h, r, n2);
-        float sig = max(uD.w * 0.5, 0.01);
-        sh = uD.y / (1.0 + exp(clamp(1.702 * d2 / sig, -30.0, 30.0))) * (1.0 - cov);
+        float t = saturate(d2 / max(uD.w, 0.01));
+        sh = uD.y * (1.0 - t * t * (3.0 - 2.0 * t)) * (1.0 - cov);
     }
 
     float3 col = 0;

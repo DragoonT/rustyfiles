@@ -93,16 +93,34 @@ struct Told {
 
 static TOLD: Mutex<Told> = Mutex::new(Told { started: None, keys: None });
 
-/// The settings the dock process acts on. A save that changes none of them does not need the dock to read the file again.
+/// The settings the dock process acts on. A save that changes none of them does not need the dock to read the file again. The look of
+/// the glass (the four HyperGlass sliders), the growth of the icons and the animations setting are the dock's too: it draws its own
+/// glass with the engine's process-wide look and decides by the animations setting whether sizes ease or jump.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Keys {
     pub reserve: bool,
     pub city: String,
+    /// Frost, tint, refraction, saturation.
+    pub look: [u8; 4],
+    pub magnify: crate::settings::DockMagnify,
+    pub animations: crate::settings::AnimPref,
+    /// Whether the logo and the search field open our own Start panel, and the right island's symbols our own control centre: the dock
+    /// reads both from the file when it opens a panel, so a switch in Settings must reach it.
+    pub own_start: bool,
+    pub own_control_centre: bool,
 }
 
 impl Keys {
     pub fn of(s: &Settings) -> Keys {
-        Keys { reserve: s.dock_reserve, city: s.dock_weather_city.trim().to_string() }
+        Keys {
+            reserve: s.dock_reserve,
+            city: s.dock_weather_city.trim().to_string(),
+            look: [s.hg_frost, s.hg_tint, s.hg_refraction, s.hg_saturation],
+            magnify: s.dock_magnify,
+            animations: s.animations,
+            own_start: s.dock_own_start,
+            own_control_centre: s.dock_own_control_centre,
+        }
     }
 }
 
@@ -235,7 +253,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into() }
+        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true }
     }
 
     #[test]
@@ -246,6 +264,32 @@ mod tests {
         assert!(needs_reload(&mut told, keys(false, "Ankara")));
         assert!(needs_reload(&mut told, keys(false, "")));
         assert!(!needs_reload(&mut told, keys(false, "")));
+    }
+
+    /// The glass of the dock is drawn by the dock process with the look it read from the file: a slider, the growth of the icons or the
+    /// animations setting must make the dock read the file again, or it would hold the old look until its next look at the file's date.
+    #[test]
+    fn the_look_the_growth_and_the_animations_are_the_docks_to_follow() {
+        let base = Settings::default();
+        let k = Keys::of(&base);
+        let mut told = Some(k.clone());
+        assert!(!needs_reload(&mut told, Keys::of(&base)), "nothing changed");
+        for change in [
+            Settings { hg_frost: 80, ..base.clone() },
+            Settings { hg_tint: 10, ..base.clone() },
+            Settings { hg_refraction: 100, ..base.clone() },
+            Settings { hg_saturation: 0, ..base.clone() },
+            Settings { dock_magnify: crate::settings::DockMagnify::Off, ..base.clone() },
+            Settings { animations: crate::settings::AnimPref::Off, ..base.clone() },
+            Settings { dock_own_start: false, ..base.clone() },
+            Settings { dock_own_control_centre: false, ..base.clone() },
+        ] {
+            let mut told = Some(k.clone());
+            assert!(needs_reload(&mut told, Keys::of(&change)), "{:?}", Keys::of(&change));
+        }
+        // the surface wash is the app's own business: the dock has none
+        let mut told = Some(k);
+        assert!(!needs_reload(&mut told, Keys::of(&Settings { hg_surface: 99, ..base })));
     }
 
     #[test]

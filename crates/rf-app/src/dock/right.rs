@@ -1,5 +1,5 @@
 //! The right island: a network and a volume symbol (they show the real state and open our own control centre, `control_centre.rs`;
-//! with "Kendi denetim merkezimiz" off they open Windows' quick settings as before), a thin separator, the time and the date in two
+//! with "rustyfiles denetim merkezini kullan" off they open Windows' quick settings as before), a thin separator, the time and the date in two
 //! lines (they open Windows' notification centre and calendar for now) and a bell (the notification centre). All of it is the user's
 //! own click on that element; nothing here ever presses a key by itself.
 //!
@@ -74,7 +74,7 @@ fn icon_button(id: &'static str, icon: L, pal: Palette, on_click: impl Fn(&mut A
         .on_click(move |_, _, cx| on_click(cx))
 }
 
-/// Whether the symbols open our own control centre (the setting "Kendi denetim merkezimiz"; on by default).
+/// Whether the symbols open our own control centre (the setting "rustyfiles denetim merkezini kullan"; on by default).
 fn own_control_centre(cx: &App) -> bool {
     cx.try_global::<crate::settings::Settings>().is_none_or(|s| s.dock_own_control_centre)
 }

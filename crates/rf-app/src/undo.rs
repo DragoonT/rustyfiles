@@ -18,6 +18,8 @@ pub enum UndoOp {
     Recycled { pairs: Vec<(PathBuf, PathBuf)> },
     /// "Flatten folder" on `dir`.
     Flattened { dir: PathBuf, rec: crate::ops::Flattened },
+    /// One run of the folder organizer (all its moves, renames and recycled files).
+    Organized { rec: crate::organizer::Record },
 }
 
 static STACK: Mutex<Vec<UndoOp>> = Mutex::new(Vec::new());
@@ -37,6 +39,29 @@ pub fn push(op: UndoOp) {
 /// Reverses the most recent operation (in the background, through the Status Center).
 pub fn undo(cx: &mut App) {
     let Some(op) = STACK.lock().pop() else { return };
+    undo_op(op, cx);
+}
+
+/// Takes one folder organizer run off the undo stack (the "Geri al" button of its Status Center row
+/// undoes it itself) and keeps it for Ctrl+Y. False when it is not on the stack: it ran by itself, or
+/// 50 newer operations have pushed it off, or it was undone already.
+pub fn forget_organized(token: u64) -> bool {
+    // (one lock for the search and the removal: a push from another thread cannot slip in between)
+    let op = {
+        let mut s = STACK.lock();
+        let at = s.iter().rposition(|op| matches!(op, UndoOp::Organized { rec } if rec.token == token));
+        at.map(|i| s.remove(i))
+    };
+    match op {
+        Some(op) => {
+            REDO.lock().push(op);
+            true
+        }
+        None => false,
+    }
+}
+
+fn undo_op(op: UndoOp, cx: &mut App) {
     // creating an item can't be replayed (its contents may have changed), everything else can
     if !matches!(op, UndoOp::Created { .. }) {
         REDO.lock().push(op.clone());
@@ -81,6 +106,7 @@ pub fn undo(cx: &mut App) {
             let name = rf_core::history::display_name(&dir);
             crate::status_center::start(cx, format!("{} {name}", t!("Geri alınıyor: düzleştirme →")), move |_| crate::ops::unflatten(&rec));
         }
+        UndoOp::Organized { rec } => crate::organizer::undo_run(rec, None, cx),
     }
 }
 
@@ -115,5 +141,6 @@ pub fn redo(cx: &mut App) {
             let name = rf_core::history::display_name(&dir);
             crate::status_center::start(cx, format!("{} {name}", t!("Yineleniyor: düzleştirme →")), move |_| crate::ops::reflatten(&rec));
         }
+        UndoOp::Organized { rec } => crate::organizer::redo_run(rec, cx),
     }
 }

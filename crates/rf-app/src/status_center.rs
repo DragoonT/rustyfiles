@@ -25,6 +25,9 @@ pub enum OpPhase {
     Failed(String),
 }
 
+/// A button's label and what it does.
+pub type ResultAction = (String, std::rc::Rc<dyn Fn(&mut App)>);
+
 pub struct OpState {
     id: u64,
     title: String,
@@ -36,6 +39,8 @@ pub struct OpState {
     /// Our copy engine waits while set (the shell engine ignores it).
     paused: Arc<AtomicBool>,
     started: Instant,
+    /// A button on the finished operation (the folder organizer's "Geri al"), see [`set_result`].
+    action: Option<ResultAction>,
 }
 
 pub struct Ops {
@@ -153,7 +158,18 @@ pub fn start_with(
     work: impl FnOnce(Arc<Tracker>) -> anyhow::Result<bool> + Send + 'static,
     on_done: Option<OnDone>,
 ) {
-    let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return };
+    start_with_id(cx, title, work, on_done);
+}
+
+/// [`start_with`] giving the operation's id (0 when there is no Status Center), for
+/// [`set_result`].
+pub fn start_with_id(
+    cx: &mut App,
+    title: String,
+    work: impl FnOnce(Arc<Tracker>) -> anyhow::Result<bool> + Send + 'static,
+    on_done: Option<OnDone>,
+) -> u64 {
+    let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return 0 };
     let cancel = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
     // questions about the operation go to the window it was started from
@@ -172,6 +188,7 @@ pub fn start_with(
             cancel: cancel.clone(),
             paused: paused.clone(),
             started: Instant::now(),
+            action: None,
         });
         cx.notify();
         id
@@ -291,6 +308,32 @@ pub fn start_with(
         }
     })
     .detach();
+    id
+}
+
+/// Gives a finished operation its final words and, optionally, one button (the folder
+/// organizer: "12 dosya düzenlendi" and "Geri al"). `title: None` keeps the title.
+pub fn set_result(cx: &mut App, id: u64, title: Option<String>, action: Option<ResultAction>) {
+    let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return };
+    entity.update(cx, |ops, cx| {
+        if let Some(op) = ops.ops.iter_mut().find(|o| o.id == id) {
+            if let Some(t) = title {
+                op.title = t;
+            }
+            op.action = action;
+        }
+        cx.notify();
+    });
+}
+
+/// Takes a finished operation off the list (an automatic run that found nothing to do should
+/// not leave a row behind).
+pub fn remove(cx: &mut App, id: u64) {
+    let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return };
+    entity.update(cx, |ops, cx| {
+        ops.ops.retain(|o| o.id != id || o.phase == OpPhase::Running);
+        cx.notify();
+    });
 }
 
 fn short(p: &Path) -> String {
@@ -955,6 +998,23 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                         .child(div().flex_shrink_0().text_color(color).child(status))
                         .children(op.current.clone().filter(|_| running).map(|c| {
                             div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(c)
+                        }))
+                        .children(op.action.as_ref().filter(|_| !running).map(|(label, run)| {
+                            let run = run.clone();
+                            div()
+                                .id(("op-act", op.id as usize))
+                                .flex_shrink_0()
+                                .h(px(24.))
+                                .flex()
+                                .items_center()
+                                .px_2()
+                                .rounded(theme::RADIUS_SM)
+                                .text_color(p.accent)
+                                .cursor_pointer()
+                                .hover(|s| s.bg(p.pressed))
+                                .tab_index(0)
+                                .child(label.clone())
+                                .on_click(move |_, _, cx| run(cx))
                         })),
                 ),
         )

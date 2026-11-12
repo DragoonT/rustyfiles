@@ -1,0 +1,29 @@
+[package]
+name = "rf-shellguard"
+description = "The watchdog the per-user Winlogon Shell value will point at one day: starts the shell host, restarts it, brings Explorer back"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "rf_shellguard"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rustyfiles-shellguard"
+path = "src/main.rs"
+
+# Tiny on purpose: std and the windows crate, nothing else (no GPUI, no rf-app, no serde, no logging crate).
+[dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Security",
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

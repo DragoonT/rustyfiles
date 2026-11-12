@@ -17,8 +17,15 @@
 //!
 //! THE LOOK. Four numbers the user can set (`LookParams`: frost, tint, refraction, saturation; the fifth setting, the app's own surface
 //! wash, is the app's business) change the glass of every window at once and for windows attached later ([`set_look`]); the numbers
-//! behind each value are in `gpu.rs` (`Look::regular`). A small piece of glass (a dock island, a tile) is drawn with a calmer rim than a
-//! window (`Look::sized`).
+//! behind each value are in `gpu.rs` (`Look::regular`). A small piece of glass (a dock island, a tile) has the same optics, frost, tint,
+//! saturation and rim light as a window; only the band of the rim is bounded by the piece's size, at most a third of its short side
+//! (`Look::sized`), so that a clear centre is left.
+//!
+//! SHAPES AND SHADOWS. The glass need not be the whole window: [`GlassOptions::shape`] makes it a rectangle inside a larger, otherwise
+//! transparent window (the dock's islands keep a margin for a soft shadow and for what grows out of the glass), and
+//! [`GlassOptions::shadow`] draws that shadow in the same pass. The backdrop is read where it is on the screen whatever the shape does,
+//! so changing the shape ([`set_options`]) is cheap, one constant and one draw: no new copy of the screen, no new blur pyramid, no new
+//! swap chain, which is what an animation of the shape (an island widening under the pointer) needs for every frame.
 //!
 //! LENSES. On top of a window's glass the engine can draw up to `MAX_LENSES` lenses (the selection pill of a list, a tab): clear, sharp pieces
 //! of the same glass with their own rim, light and shadow, drawn by the same pixel shader in the same pass ([`set_lens`], `lens.rs` for
@@ -57,6 +64,8 @@ mod lens_tests;
 #[cfg(test)]
 mod look_tests;
 #[cfg(test)]
+mod shape_tests;
+#[cfg(test)]
 mod tests;
 mod wgc;
 
@@ -84,10 +93,49 @@ pub enum GlassState {
     Failed(String),
 }
 
+/// A soft drop shadow the glass pass draws OUTSIDE a glass shape, in the transparent margin of the window that holds it (a dock island;
+/// an ordinary window gets the system's own shadow). Lengths are CSS px, so the shadow scales with the monitor like everything else.
+/// The glass itself is not touched: the shadow is never drawn under it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shadow {
+    /// How dark it is AT the outline, 0 to 1 (black).
+    pub opacity: f32,
+    /// How far the shadow is moved down.
+    pub dy: f32,
+    /// How far it reaches outside the (moved) outline before it is gone.
+    pub blur: f32,
+}
+
+impl Shadow {
+    /// The dock's shadow: black at 26 % at the outline, moved 4 px down, gone 22 px from the outline.
+    pub const SOFT: Shadow = Shadow { opacity: 0.26, dy: 4.0, blur: 22.0 };
+
+    /// The same with numbers that cannot hurt; `None` for one that would draw nothing (or cannot be drawn).
+    pub fn sanitized(self) -> Option<Shadow> {
+        let ok = self.opacity.is_finite() && self.dy.is_finite() && self.blur.is_finite();
+        (ok && self.opacity > 0.0 && self.blur > 0.0).then_some(Shadow { opacity: self.opacity.min(1.0), ..self })
+    }
+
+    /// The shadow's opacity at a point `d` CSS px from the outline of the glass MOVED DOWN by `dy` (negative: inside that moved outline).
+    /// This is what the shader computes (a smoothstep from `opacity` at 0 px to nothing at `blur` px), written down for the tests. At a
+    /// point of the real outline `d` is `-dy` below the glass, 0 beside it and `dy` above it.
+    pub fn alpha(&self, d: f32) -> f32 {
+        let t = (d / self.blur.max(0.01)).clamp(0.0, 1.0);
+        self.opacity * (1.0 - t * t * (3.0 - 2.0 * t))
+    }
+
+    /// How far outside the glass's outline (the moved one reaches `dy` further down) anything of the shadow can still be seen, CSS px.
+    pub fn reach(&self) -> f32 {
+        self.blur + self.dy.abs()
+    }
+}
+
 /// What a window's glass looks like beyond the system's theme: how it is cut, and which tint.
 ///
 /// `GlassOptions::window(dark)` is what [`attach`] always meant: a normal window, whose corners the system cuts and whose glass is
 /// drawn with the radius the system reports. A free-standing shape (the dock's islands) cuts its own corners, with its own radius.
+/// A shape that is only a part of a larger transparent window (the dock's islands, which keep a margin for a shadow and for what
+/// grows out of them) gives its rectangle in `shape` and may have a shadow.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GlassOptions {
     /// The dark tint (`true`) or the light one.
@@ -98,22 +146,39 @@ pub struct GlassOptions {
     /// Whether the glass cuts its own corners out (transparent outside the radius). A window leaves that to the system; a window
     /// that is itself a rounded shape needs it.
     pub cut_corners: bool,
+    /// The glass is this rectangle (x, y, w, h, DEVICE px from the window's client area's top left corner) and nothing else: outside it
+    /// the window is transparent. `None`: the glass is the whole window, as always. The picture behind the shape stays exactly where the
+    /// screen has it whatever the shape does, and changing only the shape ([`set_options`]) is cheap, made for animation: one constant
+    /// and one draw, no new picture of the backdrop. A shape is cut to the window; one that is not a number has no area. A shape cuts
+    /// its own corners whatever `cut_corners` says.
+    pub shape: Option<[f32; 4]>,
+    /// A soft shadow outside the shape, drawn in the same pass (`None`: none, and no cost). Only meaningful with a `shape`.
+    pub shadow: Option<Shadow>,
 }
 
 impl GlassOptions {
     /// An ordinary window: exactly what `attach(hwnd, dark)` does.
     pub const fn window(dark: bool) -> GlassOptions {
-        GlassOptions { dark, radius_px: None, cut_corners: false }
+        GlassOptions { dark, radius_px: None, cut_corners: false, shape: None, shadow: None }
     }
 
-    /// The same options with a radius that cannot hurt: not a number is "what the system does", a negative one is a square corner.
+    /// The same options with a radius that cannot hurt: not a number is "what the system does", a negative one is a square corner. A
+    /// shape that is not a number becomes an empty one (nothing is drawn, rather than the whole window), a negative size is none.
     pub fn sanitized(self) -> GlassOptions {
         let radius_px = match self.radius_px {
             Some(r) if !r.is_finite() => None,
             Some(r) => Some(r.max(0.0)),
             None => None,
         };
-        GlassOptions { radius_px, ..self }
+        let shape = self.shape.map(|s| if s.iter().all(|v| v.is_finite()) { [s[0], s[1], s[2].max(0.0), s[3].max(0.0)] } else { [0.0; 4] });
+        let shadow = self.shadow.and_then(Shadow::sanitized);
+        GlassOptions { radius_px, shape, shadow, ..self }
+    }
+
+    /// Whether going from `self` to `new` changes only what the engine can draw again from the backdrop it already has (the shape, the
+    /// shadow): no new copy of the screen and no new blur pyramid is needed for it.
+    pub(crate) fn only_the_shape_differs(&self, new: &GlassOptions) -> bool {
+        self.dark == new.dark && self.radius_px == new.radius_px && self.cut_corners == new.cut_corners
     }
 }
 
@@ -374,11 +439,13 @@ pub(crate) fn set_luma(hwnd: isize, luma: f32) {
     }
 }
 
-/// How bright the backdrop under the window's glass is: the mean of what is behind the glass itself (not its padding), 0 (black) to 1
+/// How bright the backdrop under the window's glass is: the mean of what is behind the glass itself (not its padding; for a glass that is
+/// only a [`GlassOptions::shape`] inside a larger window, what is behind the SHAPE, not the rest of the window), 0 (black) to 1
 /// (white), by the eye's weights on the encoded colours (what a person calls light or dark). `None` while it is not known: the window
 /// has no glass, the engine has not drawn it yet, or the glass failed. It is worked out from the bytes the loop guard reads back at each
 /// draw anyway, so asking costs the GPU nothing, and the value is that of the last draw that looked at the backdrop (the engine keeps
-/// no more than one value per window and draws only when something changed). Cheap, from any thread; the app can poll it a few times
+/// no more than one value per window and draws only when something changed; a draw that only moves the shape reads nothing back and
+/// leaves the value as it was). Cheap, from any thread; the app can poll it a few times
 /// a second to pick light or dark text for what lies behind.
 pub fn backdrop_luma(hwnd: isize) -> Option<f32> {
     lumas().get(&hwnd).copied()
@@ -594,22 +661,23 @@ pub fn exclude_from_capture(hwnd: isize, on: bool) {
 /// Draws the same glass the live path draws, through the same renderer code, over a picture the caller gives, into a private texture,
 /// and returns its pixels as premultiplied BGRA, `rect` sized. Creates no window and no swap chain; tries a hardware device first and
 /// falls back to WARP (a CI runner has no GPU). The look is the default one ([`LookParams::DEFAULT`]), not the process-wide one. A
-/// rectangle whose short side is under 160 CSS px gets the calmer rim of a small piece, as a small piece does in a window; every larger one
-/// (every window) is drawn with the look as it is. [`render_offscreen_look`] with `calm_small = false` draws a small piece with the rim of a window.
+/// rectangle whose short side is under 160 CSS px gets the bounded rim of a small piece (its band at most a third of the short side), as a
+/// small piece does in a window; every larger one (every window) is drawn with the look as it is. [`render_offscreen_look`] with
+/// `calm_small = false` draws a small piece with the rim of a window.
 ///
 /// `src_bgra` is `src_w` x `src_h` tightly packed BGRA8. `rect` is `(x, y, w, h)` of the glass in picture pixels (the part of it outside the
 /// picture reads the picture's edge pixels). `radius_px` is the corner radius in device pixels, `scale` the device pixels per CSS pixel
 /// (the window's dpi / 96).
 pub fn render_offscreen(src_bgra: &[u8], src_w: u32, src_h: u32, rect: (i32, i32, u32, u32), radius_px: f32, scale: f32, dark: bool) -> Result<Vec<u8>, String> {
-    let look = shot_look(dark, &LookParams::DEFAULT, true, rect, scale);
+    let look = shot_look(dark, &LookParams::DEFAULT, true, rect.2.min(rect.3), scale);
     gpu::render(src_bgra, src_w, src_h, rect, radius_px, scale, &gpu::Opts { look, force_warp: false })
 }
 
-/// The look of an offscreen picture: the settings' numbers, and for a small piece the calmer rim (`calm_small`; a window is above the
-/// size where that starts, so for it the flag changes nothing).
-fn shot_look(dark: bool, params: &LookParams, calm_small: bool, rect: (i32, i32, u32, u32), scale: f32) -> gpu::Look {
+/// The look of an offscreen picture: the settings' numbers, and for a small piece the bounded rim (`calm_small`; a window is above the
+/// size where that starts, so for it the flag changes nothing). `short_side` is the glass's, in device px.
+fn shot_look(dark: bool, params: &LookParams, calm_small: bool, short_side: u32, scale: f32) -> gpu::Look {
     let look = gpu::Look::regular(dark, params);
-    if calm_small { look.sized(rect.2.min(rect.3) as f32 / scale) } else { look }
+    if calm_small { look.sized(short_side as f32 / scale) } else { look }
 }
 
 /// One lens of an offscreen picture (see [`render_offscreen_frames`]). Device px relative to the glass.
@@ -625,7 +693,7 @@ pub struct LensShot {
 }
 
 /// The same as [`render_offscreen`] with lenses, one picture per entry of `frames` (each entry the lenses of that picture, at most
-/// `MAX_LENSES` of them): the backdrop is prepared once and the pictures differ in their lenses only. The default look, with the calmer rim
+/// `MAX_LENSES` of them): the backdrop is prepared once and the pictures differ in their lenses only. The default look, with the bounded rim
 /// for a rectangle under 160 CSS px (see [`render_offscreen`]). For tests and the picture harness.
 pub fn render_offscreen_frames(
     src: (&[u8], u32, u32),
@@ -639,7 +707,7 @@ pub fn render_offscreen_frames(
 }
 
 /// [`render_offscreen_frames`] with the settings' values; `calm_small = false` draws a small piece with the rim of a window (what it
-/// looked like before the calmer rim), for comparing pictures.
+/// looked like before its rim was bounded), for comparing pictures.
 #[allow(clippy::too_many_arguments)]
 pub fn render_offscreen_look(
     src: (&[u8], u32, u32),
@@ -657,8 +725,34 @@ pub fn render_offscreen_look(
         .iter()
         .map(|f| gpu::LensList::from_draws(f.iter().map(|l| gpu::LensDraw { rect: l.rect, clip: l.clip.unwrap_or(whole), radius: l.radius, opacity: l.opacity })))
         .collect();
-    let look = shot_look(dark, params, calm_small, rect, scale);
+    let look = shot_look(dark, params, calm_small, rect.2.min(rect.3), scale);
     gpu::render_frames(src_bgra, (src_w, src_h), &gpu::free_standing(rect, radius_px, scale), &gpu::Opts { look, force_warp: false }, &lists)
+}
+
+/// A glass SHAPE inside a larger window, drawn the way the live path draws it: `window` is the window's rectangle in picture pixels (the
+/// target of the draw), `opts.shape` the glass inside it in device px from the window's top left corner (see [`GlassOptions::shape`]),
+/// `opts.shadow` its shadow, `opts.radius_px` its corner radius. The result is the window's pixels, premultiplied BGRA, `window` sized:
+/// transparent where there is no glass and no shadow. Nothing is drawn for `opts.dark`'s sake but the tint. For the tests and the
+/// picture harness.
+#[allow(clippy::too_many_arguments)]
+pub fn render_offscreen_shape(
+    src: (&[u8], u32, u32),
+    window: (i32, i32, u32, u32),
+    opts: GlassOptions,
+    scale: f32,
+    params: &LookParams,
+    calm_small: bool,
+) -> Result<Vec<u8>, String> {
+    let (src_bgra, src_w, src_h) = src;
+    let opts = opts.sanitized();
+    let mut geo = gpu::free_standing(window, opts.radius_px.unwrap_or(0.0), scale);
+    geo.shape = opts.shape;
+    geo.shadow = opts.shadow;
+    geo.cut_corners = opts.cut_corners || opts.shape.is_some();
+    let glass = geo.glass_rect();
+    let look = shot_look(opts.dark, params, calm_small, glass[2].min(glass[3]) as u32, scale);
+    let mut v = gpu::render_frames(src_bgra, (src_w, src_h), &geo, &gpu::Opts { look, force_warp: false }, &[gpu::LensList::default()])?;
+    v.pop().ok_or_else(|| "no picture".to_string())
 }
 
 /// The rectangles (x, y, w, h) of a lens that slides from `from` to `to`, one per display refresh at `hz`, with the engine's own springs:

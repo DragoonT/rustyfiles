@@ -34,7 +34,7 @@ use gpui_kit::*;
 use rf_win::dock::layout::Rect;
 use rf_win::dock::panel::{self as geo, CloseCause, PanelId, Side, Toggle};
 
-use super::backdrop::{self, IslandGlass};
+use super::backdrop::IslandGlass;
 use super::control_centre::CcView;
 use super::host::{self, Kind};
 use super::left::LeftIsland;
@@ -298,9 +298,10 @@ fn toggle(id: PanelId, cx: &mut App) {
     }
 }
 
-/// Whether the system's colours are dark for the open panel: its island's tone decides (it follows what is behind the glass).
+/// Whether the open panel is dark: the tone of the island it sits above at this moment decides (the island follows what is behind its
+/// glass, and the panel is opened over the same wallpaper, so it takes the same look; it does not follow the island while open).
 fn dark_now(island: &RefCell<IslandGlass>) -> bool {
-    island.borrow().palette(backdrop::now_ms()).mix < 0.5
+    island.borrow().dark()
 }
 
 fn open_panel(id: PanelId, cx: &mut App) {

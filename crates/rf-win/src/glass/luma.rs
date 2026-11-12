@@ -11,11 +11,23 @@
 //! beside a dock island must not turn the island's text dark while the island itself sits over a dark wall.
 
 /// The texels of a pyramid level that lie under the glass, as `(x0, y0, x1, y1)` with the end exclusive. `level` is the pyramid level
-/// read back, `pad` the padding (device px) the region keeps around the glass, `glass_w` x `glass_h` the glass (device px) and
-/// `level_w` x `level_h` the size of the level. A texel counts when its centre is inside the glass; a glass smaller than one texel is
-/// given the one texel under its middle, so there is always something to average.
-pub(super) fn glass_texels(level: u32, pad: u32, glass_w: u32, glass_h: u32, level_w: u32, level_h: u32) -> (u32, u32, u32, u32) {
+/// read back, `pad` the padding (device px) the region keeps around the window, `glass` the glass's rectangle in the window (x, y, w, h
+/// in device px, [`Geometry::glass_rect`](super::gpu::Geometry::glass_rect): the whole window for a window, the SHAPE for a shape inside
+/// a larger window) and `level_w` x `level_h` the size of the level. A texel counts when its centre is inside the glass; a glass smaller
+/// than one texel is given the one texel under its middle, so there is always something to average. A glass with no area has no texel:
+/// the empty rectangle. This is the same rectangle the loop guard's fingerprint is about (`fingerprint_texels` in gpu.rs, which adds the
+/// padding to it), so the brightness and the "has it changed" answer never look at different parts of the backdrop. The rectangle is
+/// the shape's bounding box: the four rounded corners are not cut out of the average (a corner texel is a few percent of a dock island
+/// and the backdrop there is what the glass shows next to it).
+pub(super) fn glass_texels(level: u32, pad: u32, glass: [f32; 4], level_w: u32, level_h: u32) -> (u32, u32, u32, u32) {
     let s = 1u32 << level.min(31);
+    // the glass in region px (the region starts `pad` px up and left of the window), rounded to whole pixels at both ends
+    let edge = |v: f32| if v.is_finite() { v.max(0.0).round() as u32 } else { 0 };
+    let (gx0, gy0) = (edge(glass[0]), edge(glass[1]));
+    let (gx1, gy1) = (edge(glass[0] + glass[2].max(0.0)), edge(glass[1] + glass[3].max(0.0)));
+    if gx1 <= gx0 || gy1 <= gy0 {
+        return (0, 0, 0, 0);
+    }
     let span = |start: u32, len: u32, limit: u32| {
         let half = s / 2;
         // first texel whose centre (i * s + s / 2) is at or after `start`, and the first whose centre is at or after `start + len`
@@ -29,8 +41,8 @@ pub(super) fn glass_texels(level: u32, pad: u32, glass_w: u32, glass_h: u32, lev
             (mid, mid + 1)
         }
     };
-    let (x0, x1) = span(pad, glass_w, level_w);
-    let (y0, y1) = span(pad, glass_h, level_h);
+    let (x0, x1) = span(pad + gx0, gx1 - gx0, level_w);
+    let (y0, y1) = span(pad + gy0, gy1 - gy0, level_h);
     (x0, y0, x1, y1)
 }
 
@@ -125,23 +137,23 @@ mod tests {
     #[test]
     fn the_glass_texels_leave_the_padding_out() {
         // level 2 (4 px per texel), pad 96 = 24 texels, a glass of 300 x 200 px = 75 x 50 texels, a level of 128 x 128
-        let (x0, y0, x1, y1) = glass_texels(2, 96, 300, 200, 128, 128);
+        let (x0, y0, x1, y1) = glass_texels(2, 96, [0.0, 0.0, 300.0, 200.0], 128, 128);
         assert_eq!((x0, x1), (24, 99));
         assert_eq!((y0, y1), (24, 74));
         // level 0: exactly the glass rectangle
-        assert_eq!(glass_texels(0, 96, 300, 200, 512, 512), (96, 96, 396, 296));
+        assert_eq!(glass_texels(0, 96, [0.0, 0.0, 300.0, 200.0], 512, 512), (96, 96, 396, 296));
     }
 
     #[test]
     fn a_texel_counts_when_its_centre_is_inside_the_glass() {
         // 16 px texels, pad 100, glass 40 px wide: the glass is [100, 140); centres are at 8, 24, ..., 88, 104, 120, 136, 152
-        let (x0, _, x1, _) = glass_texels(4, 100, 40, 40, 64, 64);
+        let (x0, _, x1, _) = glass_texels(4, 100, [0.0, 0.0, 40.0, 40.0], 64, 64);
         assert_eq!((x0, x1), (6, 9), "the centres 104, 120 and 136 are inside; 88 and 152 are not");
     }
 
     #[test]
     fn a_glass_smaller_than_a_texel_still_has_one() {
-        let (x0, y0, x1, y1) = glass_texels(5, 96, 10, 10, 32, 32);
+        let (x0, y0, x1, y1) = glass_texels(5, 96, [0.0, 0.0, 10.0, 10.0], 32, 32);
         assert_eq!((x1 - x0, y1 - y0), (1, 1));
         assert!(x0 < 32 && y0 < 32);
     }
@@ -151,7 +163,7 @@ mod tests {
         for level in 0..8 {
             for (gw, gh) in [(1u32, 1u32), (48, 48), (300, 200), (4000, 3000)] {
                 let (lw, lh) = (((1024u32) >> level).max(1), ((768u32) >> level).max(1));
-                let (x0, y0, x1, y1) = glass_texels(level, 96, gw, gh, lw, lh);
+                let (x0, y0, x1, y1) = glass_texels(level, 96, [0.0, 0.0, gw as f32, gh as f32], lw, lh);
                 assert!(x0 < x1 && y0 < y1 && x1 <= lw && y1 <= lh, "level {level} glass {gw}x{gh}: {x0},{y0},{x1},{y1} in {lw}x{lh}");
             }
         }

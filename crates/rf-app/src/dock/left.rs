@@ -114,7 +114,7 @@ fn picture_icon(p: WeatherPicture) -> L {
     }
 }
 
-/// Whether the logo and the search field open our own Start panel (the setting "Kendi Başlat menümüz"; on by default).
+/// Whether the logo and the search field open our own Start panel (the setting "rustyfiles Başlat menüsünü kullan"; on by default).
 fn own_start(cx: &App) -> bool {
     cx.try_global::<crate::settings::Settings>().is_none_or(|s| s.dock_own_start)
 }
