@@ -41,4 +41,5 @@ pub fn read_config(path: &std::path::Path) -> std::io::Result<String> {
     }
     Err(last.unwrap_or_else(|| std::io::Error::other("read failed")))
 }
+pub mod desktop;
 pub mod textload;
