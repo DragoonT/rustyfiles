@@ -24,6 +24,9 @@ mod sidebar_tree;
 // the preview pane under the file list (setting `preview_position` = bottom)
 #[path = "preview_dock.rs"]
 mod preview_dock;
+// commands typed into the address field (setting `address_commands`): what the Enter handler does with text that is not a place
+#[path = "address_cmd.rs"]
+mod address_cmd;
 
 /// Payload while a pinned sidebar entry is dragged (reordering).
 #[derive(Clone)]
@@ -473,6 +476,7 @@ impl Workspace {
         let mut subs = Vec::new();
         subs.push(cx.subscribe_in(&address, window, |this, input, ev: &InputEvent, window, cx| match ev {
             InputEvent::PressEnter { .. } => {
+                let from_completion = this.addr_sel.and_then(|i| this.addr_suggest.get(i)).is_some();
                 let text = match this.addr_sel.and_then(|i| this.addr_suggest.get(i)) {
                     Some(p) => p.to_string_lossy().into_owned(),
                     None => input.read(cx).value().to_string(),
@@ -493,11 +497,8 @@ impl Workspace {
                     cx.notify();
                     return;
                 }
-                if let Some(loc) = parse_location(&text) {
-                    this.navigate(loc, window, cx);
-                }
-                this.focus_active(window, cx);
-                cx.notify();
+                // a place as always; with the setting on, text that names no place is tried as a program (address_cmd.rs)
+                this.enter_address_text(text, from_completion, window, cx);
             }
             InputEvent::Blur => {
                 this.editing_address = false;

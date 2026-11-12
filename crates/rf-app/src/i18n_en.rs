@@ -1655,4 +1655,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Dock'un tamamı seçtiğiniz boyuta göre büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. Orta, Dock'un her zamanki boyutudur. Değişiklik çalışan Dock'a hemen uygulanır.", "The whole dock grows or shrinks to the size you choose: the islands, the icons, the search field, the clock, the tray icons and the gaps. Medium is the dock's usual size. A change is applied to the running dock at once."),
     ("Orta boyut", "Medium"),
     ("Çok büyük", "Extra large"),
+    ("Adres çubuğundan komut çalıştır", "Run commands from the address bar"),
+    ("Adres çubuğuna yazılan metin var olan bir yer değilse program olarak aranır (cmd, powershell, wt…) ve açık klasörde başlatılır; Enter ile onaylanır", "Text typed into the address bar that is not an existing place is looked up as a program (cmd, powershell, wt…) and started in the open folder; confirmed with Enter"),
+    ("Program başlatılamadı", "The program could not be started"),
 ];

@@ -8808,5 +8808,23 @@
   "key": "Çok büyük",
   "tr": "Çok büyük",
   "en": "Extra large"
+ },
+ {
+  "id": "d2721fea",
+  "key": "Adres çubuğundan komut çalıştır",
+  "tr": "Adres çubuğundan komut çalıştır",
+  "en": "Run commands from the address bar"
+ },
+ {
+  "id": "cc39b4be",
+  "key": "Adres çubuğuna yazılan metin var olan bir yer değilse program olarak aranır (cmd, powershell, wt…) ve açık klasörde başlatılır; Enter ile onaylanır",
+  "tr": "Adres çubuğuna yazılan metin var olan bir yer değilse program olarak aranır (cmd, powershell, wt…) ve açık klasörde başlatılır; Enter ile onaylanır",
+  "en": "Text typed into the address bar that is not an existing place is looked up as a program (cmd, powershell, wt…) and started in the open folder; confirmed with Enter"
+ },
+ {
+  "id": "a92db2fa",
+  "key": "Program başlatılamadı",
+  "tr": "Program başlatılamadı",
+  "en": "The program could not be started"
  }
 ]

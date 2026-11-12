@@ -1,5 +1,6 @@
 //! rf-core: platform-independent model for rustyfiles (entries, sorting, filtering, navigation).
 
+pub mod addrcmd;
 pub mod entry;
 pub mod format;
 pub mod history;

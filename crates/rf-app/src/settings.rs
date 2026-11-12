@@ -470,6 +470,10 @@ pub struct Settings {
     pub sidebar_tree: bool,
     /// The tree opens the branch to the open folder, marks it and scrolls it into view after every navigation.
     pub sidebar_tree_follow: bool,
+    /// Text typed into the address field that names no place that exists is tried as a program (`cmd`, `wt`, `"C:\Tools\x.exe" /s`) and
+    /// started in the open folder, as Explorer does (see `workspace/address_cmd.rs`). On by default, as in Explorer (the issue that asked
+    /// for it expects it to work); only a name that IS a program on the search path starts anything, and the switch turns it off.
+    pub address_commands: bool,
     /// Double-clicking a ZIP/7z/tar opens it like a folder (read-only).
     pub browse_archives: bool,
     /// After extracting an archive into a new folder, that folder opens in a tab.
@@ -640,6 +644,7 @@ impl Default for Settings {
             show_libraries: false,
             sidebar_tree: false,
             sidebar_tree_follow: true,
+            address_commands: true,
             browse_archives: true,
             open_after_extract: false,
             search_index: true,

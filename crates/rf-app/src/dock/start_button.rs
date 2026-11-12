@@ -31,11 +31,11 @@ pub const GRADIENT_FROM: u32 = 0x7FDBFF;
 pub const GRADIENT_TO: u32 = 0x0A84E0;
 
 /// One square's side, logical px.
-pub const SQUARE: f32 = 8.0;
+pub const SQUARE: f32 = 11.0;
 /// The gap between the squares, logical px.
-pub const GAP: f32 = 1.5;
+pub const GAP: f32 = 1.0;
 /// The squares' corner radius, logical px ("very slightly rounded").
-pub const CORNER: f32 = 1.2;
+pub const CORNER: f32 = 0.75;
 /// The whole logo's side at rest, logical px.
 pub const LOGO_SIDE: f32 = 2.0 * SQUARE + GAP;
 
@@ -115,7 +115,7 @@ impl LogoGeometry {
 /// not whole would give gaps of one pixel here and two there, and squares that change by a pixel from frame to frame in different
 /// places. With whole numbers every edge is already on a pixel, and the same pixel offset moves all four squares together. The side
 /// is rounded first and the gap after it, so the logo grows and shrinks by whole pixels as the scale moves (the spring is seen at
-/// 100 % too: 18 px at rest, 20 px at the top of the spring, 15 px pressed).
+/// 100 % too: 23 px at rest, 25 px at the top of the spring, 19 px pressed).
 pub fn logo_geometry(scale: f32, scale_factor: f32) -> LogoGeometry {
     let k = scale_factor.max(0.25) * scale.max(0.0);
     let side = (LOGO_SIDE * k).round().max(3.0);
@@ -731,8 +731,9 @@ mod tests {
             let spring = logo_geometry(OVERSHOOT, sf);
             // the three sizes the motion goes through are different, in the right order, in whole pixels
             assert!(pressed.side() < rest.side() && rest.side() < spring.side(), "sf {sf}: {} {} {}", pressed.side(), rest.side(), spring.side());
-            // the rest is the size that was designed: within a pixel of the logical one
-            assert!((rest.side() as f32 - super::LOGO_SIDE * sf).abs() <= 1.0, "sf {sf}: {}", rest.side());
+            // the rest is the size that was designed: two squares and a gap are each put on whole pixels, so it is within one and a
+            // half pixels of the logical one (half a pixel a piece at the most)
+            assert!((rest.side() as f32 - super::LOGO_SIDE * sf).abs() <= 1.5, "sf {sf}: {}", rest.side());
             assert!(rest.gap >= 1 && pressed.gap >= 1 && spring.gap >= 1, "a gap that is a real line");
             // along the whole press-to-spring range every square and every gap is at least 1 px and the logo never gets smaller
             // while the scale grows
@@ -747,7 +748,7 @@ mod tests {
             }
         }
         // 100 %: the numbers the doc comment gives
-        assert_eq!((logo_geometry(1.0, 1.0).side(), logo_geometry(OVERSHOOT, 1.0).side(), logo_geometry(PRESS_SCALE, 1.0).side()), (18, 20, 15));
+        assert_eq!((logo_geometry(1.0, 1.0).side(), logo_geometry(OVERSHOOT, 1.0).side(), logo_geometry(PRESS_SCALE, 1.0).side()), (23, 25, 19));
     }
 
     #[test]

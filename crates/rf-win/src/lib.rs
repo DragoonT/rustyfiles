@@ -62,6 +62,7 @@ pub mod propcols;
 pub mod recycle;
 pub mod recycle_settings;
 pub mod search;
+pub mod runcmd;
 pub mod shell;
 pub mod shellfolder;
 pub mod sysstatus;

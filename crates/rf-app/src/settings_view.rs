@@ -1502,6 +1502,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     v.push(card(p, L::FolderUp, t!("Yukarı çıkınca önceki klasörü seç"), None, sw("prev-sel", p, s.select_previous_on_up, |s, v| s.select_previous_on_up = v)));
     v.push(card(
         p,
+        L::SquareTerminal,
+        t!("Adres çubuğundan komut çalıştır"),
+        Some(t!("Adres çubuğuna yazılan metin var olan bir yer değilse program olarak aranır (cmd, powershell, wt…) ve açık klasörde başlatılır; Enter ile onaylanır")),
+        sw("addr-cmd", p, s.address_commands, |s, v| s.address_commands = v),
+    ));
+    v.push(card(
+        p,
         L::FileArchive,
         t!("Arşivleri klasör gibi aç"),
         Some(t!("ZIP, 7z ve tar dosyalarının içine çift tıklayarak girilir; içindeki dosyalar açılınca geçici bir klasöre çıkarılır")),
