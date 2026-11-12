@@ -39,6 +39,7 @@ use rf_win::dock::panel::{self as geo, CloseCause, PanelId, Side, Toggle};
 
 use super::backdrop::IslandGlass;
 use super::control_centre::CcView;
+use super::grow_host;
 use super::host::{self, Kind};
 use super::left::LeftIsland;
 use super::start::StartView;
@@ -65,6 +66,11 @@ const WATCH_EVERY: Duration = Duration::from_millis(50);
 trait Hooks {
     /// About to be shown: start from a clean state and begin easing in.
     fn on_open(&self, dark: bool, cx: &mut App);
+    /// Opened again while it was still shrinking back into its island (the motion turns round): keep what it shows, as a panel that was
+    /// never closed. Others start from a clean state, as `on_open` does.
+    fn on_reopen(&self, dark: bool, cx: &mut App) {
+        self.on_open(dark, cx);
+    }
     /// On the screen: the glass goes on, the keyboard goes to the view.
     fn on_shown(&self, dark: bool, cx: &mut App);
     /// Being put away: ease out, stop what was running for it.
@@ -175,6 +181,10 @@ impl Hooks for StartHooks {
         // the input field's colours come from the component theme: make it the panel's tone
         apply_input_theme(dark, cx);
         let _ = self.handle.update(cx, |v, window, cx| v.on_open(dark, window, cx));
+    }
+    fn on_reopen(&self, dark: bool, cx: &mut App) {
+        apply_input_theme(dark, cx);
+        let _ = self.handle.update(cx, |v, window, cx| v.on_reopen(window, cx));
     }
     fn on_shown(&self, dark: bool, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_shown(dark, window, cx));
@@ -297,6 +307,11 @@ pub fn view(cx: &App) -> Option<Entity<StartView>> {
     panel(cx).and_then(|p| p.start.clone())
 }
 
+/// The left island's view (the growth tells it to draw again when it starts and ends).
+pub fn left_view(cx: &App) -> Option<Entity<LeftIsland>> {
+    panel(cx).and_then(|p| p.left.clone())
+}
+
 /// What the user has typed in the open Start panel's field, for the left island's search field to show; `None` when nothing is typed.
 pub fn typed_text(cx: &App) -> Option<String> {
     panel(cx).map(|p| p.typed.clone()).filter(|t| !t.is_empty())
@@ -359,12 +374,23 @@ fn open_panel(id: PanelId, cx: &mut App) {
     let (kind, side, hwnd, island, hooks) = (slot.kind, slot.side, slot.hwnd, slot.island.clone(), slot.hooks.clone());
     let other = p.open.filter(|o| *o != id);
     let Some(glass) = host::visible_glass_rect(kind, cx) else { return };
-    let rect = geo::place(glass, hooks.size(cx), scale, side, work);
+    let dark = dark_now(&island);
+    // A panel that grows out of its island (the Start panel with its setting on) has a window as big as the grown glass; see grow_host.rs.
+    let panel_rect = geo::place(glass, hooks.size(cx), scale, side, work);
+    // (not where the grown glass would lie under another island: that screen opens the panel the ordinary way, see `grow_host::fits`)
+    let grow_cfg = grow_host::config(id, cx).filter(|cfg| grow_host::fits(*cfg, glass, panel_rect, scale, cx));
+    // pressed again while the panel shrinks back into its island: the motion turns round and the panel keeps what it shows
+    let reversal = grow_cfg.is_some() && grow_host::is_closing(id, cx);
+    let grown = grow_cfg.and_then(|cfg| grow_host::prepare(grow_host::Prep { id, cfg, side, island_glass: glass, panel: panel_rect, hwnd, island: island.clone(), dark, scale }, cx));
+    // (the setting was switched off while this panel was still shrinking: the growth is over, the window opens as an ordinary one)
+    if grow_cfg.is_none() && grow_host::active_for(id, cx) {
+        grow_host::abort(cx);
+    }
+    let rect = grown.unwrap_or(panel_rect);
     // another panel is open: it goes at once (no easing: this one takes its place)
     if let Some(o) = other {
         put_away_now(o, cx);
     }
-    let dark = dark_now(&island);
     let front = rf_win::dock::foreground_root();
     let front_is_island = [Kind::Left, Kind::Middle, Kind::Right].into_iter().any(|k| host::island_window(k, cx).is_some_and(|(_, h)| h == front));
     let serial = {
@@ -393,19 +419,40 @@ fn open_panel(id: PanelId, cx: &mut App) {
         p.serial
     };
     start_state_changed(id, true, cx);
-    hooks.on_open(dark, cx);
+    if reversal {
+        hooks.on_reopen(dark, cx);
+    } else {
+        hooks.on_open(dark, cx);
+    }
     // the rectangle again: opening may have changed what the panel wants to show (its height)
-    let rect = geo::place(glass, hooks.size(cx), scale, side, work);
+    let panel_rect = geo::place(glass, hooks.size(cx), scale, side, work);
+    let grown = grow_cfg.and_then(|cfg| grow_host::prepare(grow_host::Prep { id, cfg, side, island_glass: glass, panel: panel_rect, hwnd, island: island.clone(), dark, scale }, cx));
+    let rect = grown.unwrap_or(panel_rect);
     cx.global_mut::<PanelHost>().rect = rect;
     // show, bring to the front, then glass (in this order: the engine attaches to a window that is on the screen)
     let h = hooks.clone();
+    let is_grown = grown.is_some();
     cx.spawn(async move |cx| {
         rf_win::window::set_dark_mode(hwnd, dark);
+        if is_grown {
+            // the window's region is the island's rectangle (or where the glass is) before the window is shown (the styling and the
+            // region are window calls: made here, with nothing of the app borrowed, like the showing below)
+            if let Some(prepare_window) = cx.update(grow_host::before_show) {
+                prepare_window();
+            }
+        }
         geo::show_at(hwnd, rect);
         // (the quiet kind: no tap of the Alt key into the window that is in front; the click that opened the panel was ours)
         rf_win::window::bring_to_front_quietly(hwnd);
+        if is_grown && let Some(island) = cx.update(|cx| grow_host::island_to_raise(cx)) {
+            // the island's window goes back above the panel's, so the logo is drawn over the grown glass and takes its clicks
+            rf_win::dock::island::raise(island);
+        }
         cx.update(|cx| {
             h.on_shown(dark, cx);
+            if is_grown {
+                grow_host::shown(cx);
+            }
             // the time the user waited: from the click on the button to the panel being on the screen with its glass attached
             if let Some(p) = cx.try_global::<PanelHost>()
                 && let Some(t) = p.clicked_at
@@ -461,6 +508,10 @@ fn watch_once(serial: u64, cx: &mut App) -> bool {
     let Some(slot) = p.slot(open) else { return false };
     let (hwnd, kind) = (slot.hwnd, slot.kind);
     let (rect, opened_at, been_front, was_down) = (p.rect, p.opened_at, p.been_front, p.mouse_was_down);
+    // (a panel that grows is "on" where its glass is now, not where it will be: a click on the desktop above the half-grown glass is outside)
+    let rect = grow_host::visible_rect(cx).unwrap_or(rect);
+    // (and the island stays above it: the panel's window covers the island's row, and a panel that was activated again is on top)
+    grow_host::keep_island_above(cx);
     let keep = host::visible_glass_rect(kind, cx).unwrap_or_default();
     let fg = rf_win::dock::foreground_root();
     let front = fg == hwnd;
@@ -490,7 +541,19 @@ pub fn close(cause: CloseCause, cx: &mut App) {
     let Some(slot) = p.slot(id) else { return };
     let (hwnd, hooks) = (slot.hwnd, slot.hooks.clone());
     let (previous, left) = (p.previous, p.left.clone());
-    let animate = crate::settings::animations();
+    // A panel that grows out of its island shrinks back into it (the clock turns; `wait` is how long the window stays). A layout that
+    // changed under it or a full-screen program do not wait: the island has moved or is hidden. Else the 120 ms easing of any panel.
+    let forced = matches!(cause, CloseCause::LayoutChanged | CloseCause::FullScreen);
+    let wait = if !grow_host::active_for(id, cx) {
+        None
+    } else if forced {
+        grow_host::abort(cx);
+        Some(0)
+    } else {
+        grow_host::begin_close(cx)
+    };
+    let was_grown = wait.is_some();
+    let animate = crate::settings::animations() && !(forced && was_grown);
     {
         let p = cx.global_mut::<PanelHost>();
         p.open = None;
@@ -503,9 +566,16 @@ pub fn close(cause: CloseCause, cx: &mut App) {
     }
     hooks.on_close(cx);
     let restore = cause.restores_foreground();
+    let wait_ms = match wait {
+        // (a growth says how long itself: a little over the motion's end and its deadline, which gives the island its glass back, also
+        // with animations off)
+        Some(ms) => u64::from(ms),
+        None if animate => u64::from(geo::ANIM_MS) + 20,
+        None => 0,
+    };
     cx.spawn(async move |cx| {
-        if animate {
-            cx.background_executor().timer(Duration::from_millis(u64::from(geo::ANIM_MS) + 20)).await;
+        if wait_ms > 0 {
+            cx.background_executor().timer(Duration::from_millis(wait_ms)).await;
         }
         // opened again meanwhile (this panel itself): leave everything as it is. Another panel that opened has put this one away.
         let again = cx.update(|cx| panel(cx).is_some_and(|p| p.open == Some(id)));
@@ -514,7 +584,12 @@ pub fn close(cause: CloseCause, cx: &mut App) {
         }
         let fg = rf_win::dock::foreground_root();
         geo::hide(hwnd);
-        cx.update(|cx| hooks.on_hidden(cx));
+        cx.update(|cx| {
+            hooks.on_hidden(cx);
+            if was_grown {
+                grow_host::finish(cx);
+            }
+        });
         if restore && let Some(target) = geo::restore_to(previous, fg, hwnd, geo::exists(previous)) {
             geo::give_back(target);
         }
@@ -534,6 +609,12 @@ fn put_away_now(id: PanelId, cx: &mut App) {
     }
     start_state_changed(id, false, cx);
     hooks.on_close(cx);
+    // (a panel that was growing out of its island: the island has its glass, the window its region and frame back; before the window
+    // goes, so the island never stands without a glass for a frame)
+    // (the setting may have been switched off meanwhile, so this asks whether a growth is going on and not what the setting says)
+    if grow_host::active_for(id, cx) {
+        grow_host::abort(cx);
+    }
     geo::hide(hwnd);
     hooks.on_hidden(cx);
 }

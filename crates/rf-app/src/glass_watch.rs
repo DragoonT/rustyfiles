@@ -146,7 +146,20 @@ impl PopupGlass {
         Self::start_with(hwnd, dark, true)
     }
 
+    /// [`start_panel`](Self::start_panel) for a panel that is a SHAPE inside its window while an island grows into it (the dock's
+    /// `grow_host.rs`): the glass is `shape` (x, y, w, h in the window's device px) with `radius_px`, cuts its own corners, and the
+    /// caller moves both with `rf_win::glass::set_options`. The system's rounding is not asked for here: the caller has put it away
+    /// (`rf_win::dock::grow::set_frameless`).
+    pub fn start_panel_shaped(hwnd: isize, dark: bool, shape: [f32; 4], radius_px: f32) -> PopupGlass {
+        let opts = rf_win::glass::GlassOptions { dark, radius_px: Some(radius_px), cut_corners: true, shape: Some(shape), shadow: None };
+        Self::start_with_options(hwnd, dark, true, Some(opts))
+    }
+
     fn start_with(hwnd: isize, dark: bool, round: bool) -> PopupGlass {
+        Self::start_with_options(hwnd, dark, round, None)
+    }
+
+    fn start_with_options(hwnd: isize, dark: bool, round: bool, shaped: Option<rf_win::glass::GlassOptions>) -> PopupGlass {
         let mut g = PopupGlass { hwnd, machine: Machine::default(), started: Instant::now(), attached: false, gave_up: false };
         if hwnd == 0 {
             g.machine.attach_failed(0);
@@ -154,12 +167,18 @@ impl PopupGlass {
             return g;
         }
         crate::glass::set_liquid_popup(hwnd, true);
-        if round {
+        if shaped.is_some() {
+            // (the window cuts its own corners)
+        } else if round {
             rf_win::window::set_round_corners(hwnd);
         } else {
             rf_win::window::set_small_corners(hwnd);
         }
-        if rf_win::glass::attach(hwnd, dark) {
+        let attached = match shaped {
+            Some(opts) => rf_win::glass::attach_with(hwnd, opts),
+            None => rf_win::glass::attach(hwnd, dark),
+        };
+        if attached {
             g.attached = true;
         } else {
             let why = match rf_win::glass::state(hwnd) {

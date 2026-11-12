@@ -116,6 +116,8 @@ pub struct Keys {
     pub app_menu: bool,
     /// The Start panel's "Önerilenler" section: read from the settings when the panel opens.
     pub start_recommended: bool,
+    /// The Start panel grows out of the left island: read from the settings when the panel opens.
+    pub start_grow: bool,
     /// The dock's size: the islands, the icons and everything else change with it, so the running dock must read the file again.
     pub size: super::size_pref::DockSizePref,
     /// The shell's five switches, in this order: desktop cover, hiding Windows' taskbar, the Windows key, Alt+Tab, the tray host. The
@@ -138,6 +140,7 @@ impl Keys {
             hover_previews: s.dock_hover_previews,
             app_menu: s.dock_app_menu,
             start_recommended: s.dock_start_recommended,
+            start_grow: s.dock_start_grow,
             size: s.dock_size,
             shell: [s.shell_desktop_cover, s.shell_hide_taskbar, s.shell_win_key, s.shell_own_switcher, s.shell_tray_host],
         }
@@ -273,7 +276,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true, size: Default::default(), shell: [false; 5] }
+        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true, start_grow: true, size: Default::default(), shell: [false; 5] }
     }
 
     #[test]
@@ -308,6 +311,7 @@ mod tests {
             Settings { dock_hover_previews: false, ..base.clone() },
             Settings { dock_app_menu: false, ..base.clone() },
             Settings { dock_start_recommended: false, ..base.clone() },
+            Settings { dock_start_grow: false, ..base.clone() },
             Settings { dock_size: crate::dock::size_pref::DockSizePref::XLarge, ..base.clone() },
             // the shell's five switches (Settings, Dock): the dock applies them when it reads the file, so a switch must not wait for
             // its look at the file's date

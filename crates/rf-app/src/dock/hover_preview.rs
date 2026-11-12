@@ -56,8 +56,10 @@ const LOOK_EVERY: Duration = Duration::from_millis(100);
 #[derive(Clone)]
 pub struct IconInfo {
     pub app: DockApp,
-    /// The app's picture, if the island has it by now.
+    /// The app's picture for the big icon of a window with no live picture (48 px), if the island has it by now.
     pub icon: Option<Arc<RenderImage>>,
+    /// The same for the title row's small icon (16 px): a picture kept near that size, not the big one reduced.
+    pub icon_small: Option<Arc<RenderImage>>,
     /// The icon's centre, device px, screen coordinates.
     pub anchor_x: f32,
     /// The middle island's glass (its tone is the preview's).
@@ -307,7 +309,7 @@ fn show_now(key: String, started: Instant, cx: &mut App) {
     let rect = preview::above_icon(info.anchor_x.round() as i32, glass.top, size, scale, super::look::dock_size(cx), work);
     let dark = info.glass.borrow().dark();
     let (count, hidden, anchor) = (cards.len(), grid.hidden, info.anchor_x.round() as i32);
-    let _ = handle.update(cx, |v, _, cx| v.set_cards(cards, layout, info.icon.clone(), scale, cx));
+    let _ = handle.update(cx, |v, _, cx| v.set_cards(cards, layout, info.icon.clone(), info.icon_small.clone(), scale, cx));
     let generation = {
         let host = host_g(cx);
         host.generation += 1;
@@ -456,6 +458,7 @@ pub struct PreviewView {
     /// Where everything of every card is: the drawing and the live pictures both take their rectangles from here.
     layout: Layout,
     icon: Option<Arc<RenderImage>>,
+    icon_small: Option<Arc<RenderImage>>,
     scale: f32,
     thumbs: Option<ThumbSet<Dwm>>,
     pictures: Vec<Picture>,
@@ -473,6 +476,7 @@ impl PreviewView {
             cards: Vec::new(),
             layout: preview::layout(&[], 1000.0),
             icon: None,
+            icon_small: None,
             scale: 1.0,
             thumbs: None,
             pictures: Vec::new(),
@@ -482,12 +486,13 @@ impl PreviewView {
 
     /// New cards: whatever pictures the last ones had are let go first (DWM thumbnails are unregistered before the window moves or
     /// changes size, and registered again once it has).
-    fn set_cards(&mut self, cards: Vec<Card>, layout: Layout, icon: Option<Arc<RenderImage>>, scale: f32, cx: &mut Context<Self>) {
+    fn set_cards(&mut self, cards: Vec<Card>, layout: Layout, icon: Option<Arc<RenderImage>>, icon_small: Option<Arc<RenderImage>>, scale: f32, cx: &mut Context<Self>) {
         self.thumbs = None;
         self.pictures.clear();
         self.cards = cards;
         self.layout = layout;
         self.icon = icon;
+        self.icon_small = icon_small;
         self.scale = scale;
         self.hover = None;
         self.shown = true;
@@ -535,6 +540,7 @@ impl PreviewView {
         self.hover = None;
         self.shown = false;
         self.icon = None;
+        self.icon_small = None;
         cx.notify();
     }
 
@@ -629,7 +635,7 @@ impl Render for PreviewView {
                 .flex()
                 .items_center()
                 .gap(px(6.))
-                .child(div().size(px(16.)).flex_shrink_0().when_some(self.icon.clone(), |d, img| d.child(gpui_kit::img(img).size(px(16.)))))
+                .child(div().size(px(16.)).flex_shrink_0().when_some(self.icon_small.clone(), |d, img| d.child(gpui_kit::img(img).size(px(16.)))))
                 .child(div().flex_1().min_w_0().truncate().child(title))
                 .when(hot, |d| {
                     d.child(

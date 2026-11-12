@@ -231,6 +231,17 @@ pub(crate) fn entries() -> Vec<Entry> {
             false,
             Control::Switch(|s| s.dock_start_recommended, |s, v| s.dock_start_recommended = v),
         ),
+        e(
+            "dock-start-grow",
+            "dock_start_grow",
+            Left,
+            dock,
+            L::Sparkles,
+            t!("Başlat adadan büyüyerek açılsın"),
+            Some(t!("Başlat düğmesine ya da arama alanına basınca soldaki cam ada yukarı ve sağa büyüyüp Başlat paneline dönüşür, kapanırken adaya geri küçülür. Kapalıyken panel eskisi gibi adanın üstünde ayrı bir pencere olarak açılır. Animasyonlar kapalıysa tek karede açılır.")),
+            false,
+            Control::Switch(|s| s.dock_start_grow, |s, v| s.dock_start_grow = v),
+        ),
         e("dock-city-edit", "dock_weather_city", Left, dock, L::MapPin, t!("Hava durumu şehri"), None, false, Control::City(|s| s.dock_weather_city.as_str(), |s, v| s.dock_weather_city = v)),
         // ---- ORTA ADA
         e(
@@ -581,7 +592,7 @@ mod tests {
         // the sections hold what the page promises
         let ids = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
         assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_magnify"]);
-        assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_weather_city"]);
+        assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_start_grow", "dock_weather_city"]);
         assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);
         assert_eq!(ids(Section::Desktop), ["shell_desktop_cover", "shell_hide_taskbar"]);

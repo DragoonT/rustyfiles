@@ -187,6 +187,14 @@ impl GlassOptions {
     pub(crate) fn only_the_shape_differs(&self, new: &GlassOptions) -> bool {
         self.dark == new.dark && self.radius_px == new.radius_px && self.cut_corners == new.cut_corners
     }
+
+    /// Whether going from `self` to `new` moves the shape and may change the corner radius with it, and nothing else: a growing island
+    /// (the dock's Start panel) eases its radius together with its rectangle, and the radius is only a constant of the draw, so that
+    /// is as cheap as the shape alone. A change of the radius WITHOUT a new shape is not this (it is a new backdrop pass, as before:
+    /// it is what a new DPI looks like, and it moves the window too).
+    pub(crate) fn only_the_shape_and_radius_differ(&self, new: &GlassOptions) -> bool {
+        self.dark == new.dark && self.cut_corners == new.cut_corners && self.shape != new.shape && self.radius_px.is_some() && new.radius_px.is_some()
+    }
 }
 
 /// How the engine keeps its own windows out of the picture it bends.

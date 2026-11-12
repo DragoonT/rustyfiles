@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use gpui_kit::assets::IconName as L;
 use gpui_kit::component::{Icon, h_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_win::weather::{Observation, Outcome, WeatherFeed};
 
@@ -218,6 +219,14 @@ impl Render for LeftIsland {
             window.request_animation_frame();
         }
         let scale_factor = window.scale_factor();
+        // While the panel's glass has grown out of this island (grow_host.rs) the island's own glass is put away: the weather fades, the
+        // search field is the panel's now (it is not drawn here), and the island paints no fill of its own.
+        let grown = super::grow_host::island_fade(Kind::Left, cx);
+        if grown.is_some_and(|g| g.moving) {
+            window.request_animation_frame();
+        }
+        let fallback = fallback && grown.is_none();
+        let (others, field_hidden) = grown.map_or((1.0, false), |g| (g.others, g.field_hidden));
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
         let k = super::look::dock_size(cx);
         let me = cx.entity();
@@ -256,6 +265,8 @@ impl Render for LeftIsland {
             .bg(pal.field_fill().hsla())
             .cursor_pointer()
             .hover(move |s| s.bg(pressed))
+            // (away: the panel's field stands in its place; it keeps its room, so the weather does not move)
+            .when(field_hidden, |d| d.opacity(0.0))
             .child(Icon::new(L::Search).size(px(14. * k)).flex_shrink_0().text_color(secondary))
             // what is being typed in the panel above is shown here too; the panel's own field takes the keys (this window is never
             // activated, so it cannot)
@@ -263,17 +274,20 @@ impl Render for LeftIsland {
                 Some(text) => text_14(div().flex_1().min_w_0().truncate(), k).child(text),
                 None => text_14(div(), k).text_color(secondary).child(t!("Ara")),
             })
-            .on_click(|_, _, cx| {
-                if own_start(cx) {
-                    super::panel::toggle_start(cx);
-                } else {
-                    super::actions::open_quick_search();
-                }
+            .when(!field_hidden, |d| {
+                d.on_click(|_, _, cx| {
+                    if own_start(cx) {
+                        super::panel::toggle_start(cx);
+                    } else {
+                        super::actions::open_quick_search();
+                    }
+                })
             });
 
         let weather = self.weather.map(|o| {
             h_flex()
                 .ml(px(plan::WEATHER_GAP * k))
+                .when(grown.is_some(), |d| d.opacity(others))
                 .gap(px(plan::WEATHER_TEXT_GAP * k))
                 .items_center()
                 .child(Icon::new(picture_icon(plan::weather_picture(o.code, o.is_day))).size(px(plan::WEATHER_ICON * k)).flex_shrink_0().text_color(pal.text().hsla()))

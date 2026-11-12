@@ -214,6 +214,12 @@ pub fn monitor_work(cx: &App) -> Option<(f32, Rect)> {
     Some((mon.scale(), mon.work))
 }
 
+/// Device px per dock unit (the monitor's scale times the dock's size) as of the last layout: what the islands' lengths, and the island's
+/// corner radius, are worked out with. `None` before a layout.
+pub fn dock_unit(cx: &App) -> Option<f32> {
+    cx.try_global::<Host>()?.geo.map(|g| g.unit)
+}
+
 /// An island's window: the toolkit's handle and the system's. For the tray strip, which takes the keyboard for the right island.
 pub fn island_window(kind: Kind, cx: &App) -> Option<(AnyWindowHandle, isize)> {
     cx.try_global::<Host>()?.placed.iter().find(|p| p.kind == kind).map(|p| (p.handle, p.hwnd))
@@ -431,6 +437,10 @@ fn on_system_event(ev: SystemEvent, cx: &mut App) {
             if scale_changed {
                 // the reserved band is in device px
                 apply_reserve(cx);
+                // and so are the icons: they were asked for at the old scale's pixels (kept on show until the new arrive)
+                if let Some(middle) = cx.try_global::<Host>().and_then(|h| h.middle.clone()) {
+                    middle.update(cx, |v, cx| v.size_changed(cx));
+                }
             }
             // the islands move; a panel that is open would be left where they were
             super::panel::close(rf_win::dock::panel::CloseCause::LayoutChanged, cx);

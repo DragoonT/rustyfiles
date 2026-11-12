@@ -139,6 +139,35 @@ pub fn raise(hwnd: isize) {
     }
 }
 
+/// Whether `above` is higher in the z order than `below` (among the top-level windows). A read-only look, no message is sent: what a
+/// panel that covers an island asks before it puts the island back on top (the activation of a topmost window raises it over the other
+/// topmost windows, the islands included). `false` when either window is gone.
+pub fn is_above(above: isize, below: isize) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GW_HWNDPREV, GetWindow, IsWindow};
+    if above == 0 || below == 0 || above == below {
+        return false;
+    }
+    unsafe {
+        if !IsWindow(Some(hwnd_of(above))).as_bool() || !IsWindow(Some(hwnd_of(below))).as_bool() {
+            return false;
+        }
+        // from `below` up to the top: `above` is among the windows in front of it. A bound on the walk, in case the list changes under us.
+        let mut cur = hwnd_of(below);
+        for _ in 0..4096 {
+            match GetWindow(cur, GW_HWNDPREV) {
+                Ok(prev) if !prev.0.is_null() => {
+                    if prev == hwnd_of(above) {
+                        return true;
+                    }
+                    cur = prev;
+                }
+                _ => return false,
+            }
+        }
+    }
+    false
+}
+
 /// Shows or hides the island without activating anything (a full-screen application is in front: hide; it left: show).
 pub fn set_visible(hwnd: isize, visible: bool) {
     unsafe {

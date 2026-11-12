@@ -321,6 +321,80 @@ process has no window and no tray icon, so it ends itself after 10 minutes witho
 in it by then (`search_pipe::watch_idle`; a window opened in it makes it an ordinary rustyfiles). The field in the left island shows what is
 typed in the panel (the island is never activated, so it cannot take keys itself).
 
+## The Start panel grows out of the left island (setting "Başlat adadan büyüyerek açılsın" / Start grows out of the island)
+
+The user's idea: when Start is pressed the glass at the left grows and widens and IS the Start panel; when the search field is pressed it
+grows too, the field going up, selected, ready to type. **Off by default** (`dock_start_grow`; a new look is off until it has been seen on a
+screen: the person who wrote it could not show a window). Off: everything above this section is exactly as it was. NOT SEEN ON A SCREEN.
+
+* THE MOTION (`rf_win::dock::grow`, pure and tested at the four dock sizes and at 100, 125 and 150 %). The island's glass (a capsule)
+  grows to the GROWN rectangle: the panel's rectangle taken down to the island's bottom edge, so the panel's content is on top, then the
+  8 px gap, then the island's own row, all one glass. One corner of the island stays where it is while it grows (`Corner::BottomLeft` for
+  the left island: up and to the right; `BottomRight` for the right one: up and to the left); the logo does not move. The corner radius
+  eases from the island's (24 units) to the panel's (8 px) with the rectangle. Opening takes 220 ms, closing 160 ms; the glass follows
+  `u = ease_out(s)` where `s` is the position along the motion (time), so the way back is the same curve run the other way; a press during
+  the motion turns `s` round where it is (no jump, the rest of the way at the speed of the new direction). The island's weather fades out
+  over the first half of the time, the panel's content (the pages, the account row) fades in over the second half and, closing, goes
+  first; the search field travels from its place in the island to the top of the panel with the glass. With animations off (the app's
+  setting or Windows') the panel is whole in one frame and gone in one frame. `rf_win::dock::grow::arm_done`: the clock starts when the
+  panel's glass is running or after 90 ms.
+* HOW IT IS BUILT (`crates/rf-app/src/dock/grow_host.rs`) AND WHAT WAS CHOSEN INSTEAD OF THE ONE-WINDOW DESIGN. The panel keeps its own
+  window; hosting its content in the island's window (the island is never activated, the panel must be: keyboard, text field, menus,
+  hand-back of the keyboard) was judged too large a change to make without a screen. What changed: the panel's window is as big as
+  the grown glass and its glass is a SHAPE inside it (`GlassOptions::shape`, the way the middle island's glass is inside its window)
+  that every frame of the motion moves together with its radius (`glass::set_options`; the engine treats shape plus radius as one
+  constant and one draw, `only_the_shape_and_radius_differ`), and the window's REGION follows the shape (`hit::set_region`), so a click
+  outside the visible glass reaches what lies below. The island's own glass is put away while the panel's stands in its place
+  (`IslandGlass::set_hidden`: the engine is given no shape, the tone stays as it was) and the growing island's window (only that one)
+  is raised above the panel's, and put back above it whenever the panel's activation has lifted it (`island::is_above`, asked in the
+  panel's own 50 ms watch), so the logo is drawn over the grown glass, is pressed where it is (pressing it again closes), and takes its click through the
+  island's own window region, whatever the panel's region is. The island's window is never activated; the panel's window is, as before,
+  and gives the keyboard back as before. The panel's own system rounding and border are put away (`grow::set_frameless`) and given
+  back when it is hidden (`finish`).
+* OPENING BY THE LOGO OR BY THE SEARCH FIELD is the same path (`panel::toggle_start`); the field in the panel has the keyboard from the
+  moment the window is shown and what is typed meanwhile stays in it; with text in it the results show as before. The panel's
+  field is drawn at the rectangle of the moment while it travels (`start.rs`: a spacer keeps its room in the layout, the field is an
+  absolutely placed child; the island's own field is not drawn meanwhile and keeps its room).
+* WHAT DRIVES THE FRAMES. `view_frame` (the panel's `render`) reads the clock, queues the glass shape and the region for that frame (one
+  task of the message loop; nothing when it is the frame already sent) and says whether another frame is wanted; the island's `render` asks
+  `island_fade` the same way. The frames therefore follow the display. A DEADLINE task per motion (the motion's end plus 25 ms,
+  replaced at every turn) applies the last frame and ends the motion whatever the views did, and the close path's `finish` gives the island
+  its glass and the window its region and frame back whether the deadline ran or not: the click region is right even if no frame is ever
+  drawn again. The region of the panel's window is set BEFORE the window is shown (the island's rectangle), so the window never shows
+  as a whole for a frame. A press on the desktop outside the glass as it is at that moment closes the panel (`grow_host::visible_rect`).
+  A layout change or a full-screen program close it at once, without the motion.
+* COST. Off: nothing (`grow_host::config` reads one setting when a panel opens; the views call `view_frame` and `island_fade`, which look
+  at a global that is not there). On: while a motion runs, per frame one layout (a few numbers), one `set_options` (a constant and a
+  draw of the window's size, no new picture of the screen), one window region (a few rectangles) and the two views' render; after
+  the motion nothing runs (no timer, no frame request; the 50 ms look of an open panel is the panel's own, as before). One info line
+  at the start and one at the end: `dock: grow start: opening, 220 ms ...`, `dock: grow end: opening finished after 14 frames in 231 ms`.
+* NARROW SCREENS. The grown glass is as wide as the panel (642 px, 803 at 125 %) all the way down to the island's bottom edge, so where
+  the middle island begins less than that from the left island's left edge (1920 px wide at 125 %, 1366 or 1600 px wide at 100 %; the
+  user's 2560 px at 100 % has 400 px to spare) the glass would lie under the middle island's first icons and take their clicks. Such a
+  panel does NOT grow: `grow_host::fits` (`grow::reaches_other_island`, with the 8 px gap as margin) says no, an info line says why
+  (`dock: grow skipped: ...`), and the panel opens the ordinary way, a pop-up above the island with its own 120 ms easing, as with the
+  setting off. A click on another island is therefore always outside the panel and closes it, as before. Not an L-shaped glass: the
+  glass engine's shape is one rectangle.
+* THE TONE AT THE HAND-OVER. The island's own glass has no wash over it; the panel's has (28 % black, 45 % white in the light theme). The
+  panel's wash is drawn with an opacity that follows the glass's growth (`Run::wash_alpha`: 0 while the glass starts and at the first
+  frame, 1 at the end, 0 again when the island is home), so the first and the last frame of the motion are the island's glass and nothing
+  else and there is no step in its tone. Where the panel's glass never comes (the plain fill) the fill is whole as soon as the clock runs.
+* PRESSED AGAIN DURING A CLOSING reverses the motion from where it is and keeps what the panel shows (`StartView::on_reopen`: typed text,
+  results, page and selection stay, the searches that closing stopped are asked again). With animations off the panel is whole in one
+  frame and the island's glass comes back in the closing's deadline like in any closing, before the window is hidden, and the opening
+  waits for the panel's glass (at most 90 ms), not for any motion.
+* LIMITS. The hand-over between the island's glass and the panel's glass (two windows, two presents) may show one frame of either the
+  one or the other at the first and the last frame of the motion; the two stand in the same rectangle for a few ms at the end of a
+  closing (the window is hidden 60 ms after the motion, the island has its glass back 25 ms after it). The panel's glass is made when the panel opens, as before, so the first 20 to 90 ms after a press are the island as it was
+  (and the logo's own press motion) before the motion starts. The size of the panel's window changes (56 px taller by the gap and the
+  island's row at 100 %); the panel's own rectangle, its contents and its layout are the same.
+* MOVING THE RIGHT ISLAND'S PANELS ONTO IT (asked for by the user, not done here): `grow_host::config` gets a row for the control centre,
+  the calendar and the notifications (`Kind::Right`, `Stays::Row`: the island's whole row, network, volume, clock and bell, stays as it is
+  and nothing of it fades; no field), `grow_host::prepare` is given `Side::Right` (the pure side already has `Corner::BottomRight`), each
+  panel's view draws its content inside the part above `ViewFrame::extra_bottom` and fades it with `ViewFrame::content`, attaches its glass
+  with `PopupGlass::start_panel_shaped`, and the right island's view asks `island_fade(Kind::Right)` for a frame request. `panel.rs` calls
+  the rest for any slot that has a `config`; the right island's glass is put away and raised the same way.
+
 ## The control centre
 
 The network and volume glyphs of the right island open our own panel instead of Windows' quick settings. It is the same machinery as
@@ -702,6 +776,8 @@ dock is off every control but the dock switch is dimmed with a line that says wh
 * **Pencereler dock'un altına girmesin** / Keep windows from going under the dock. On by default. The dock registers as an
   application desktop toolbar at the bottom of the primary monitor (the middle island's height plus the margins), so maximised
   windows stop above it, and unregisters on exit. Off: it only floats.
+* **Başlat adadan büyüyerek açılsın** / Start grows out of the island. Off by default (`dock_start_grow`). The left island's glass grows
+  into the Start panel and shrinks back into the island (see "The Start panel grows out of the left island").
 * **Dock boyutu** / Dock size. Orta (Medium) by default (`dock_size`; Küçük 0.85, Orta 1.0, Büyük 1.2, Çok büyük 1.4). Scales the whole dock
   and applies to the running dock at once (see "The dock's size").
 * **Simge büyütme** / Icon magnification. Full by default (see "Magnification").
@@ -836,6 +912,8 @@ The dock process is told to read the settings file again when any of these chang
 * The panels' system side in `crates/rf-win/src/dock/`: `panel.rs` (placement, toggle, close and foreground decisions, the easing),
   `power.rs` (the power menu and its question, the real calls, the user's name), `startlist.rs` (the alphabet, headers, rows, arrow
   keys), `startpins.rs` (the pin file and its seeding), `startapps.rs` (start, start as administrator, find the program).
+* The island that grows into its panel: `crates/rf-win/src/dock/grow.rs` (the motion, the clock, the fades; pure) and
+  `crates/rf-app/src/dock/grow_host.rs` (the windows, the glass, the region, the deadline; the views ask it for their frame).
 * The glass engine takes a per-window corner radius, a shape and (off for the dock by default) a shadow:
   `rf_win::glass::attach_with(hwnd, GlassOptions { dark, radius_px, cut_corners, shape, shadow })`; the shape follows the glass through
   `rf_win::glass::set_options` (cheap, made for animation) and the tint through `rf_win::glass::set_dark`.

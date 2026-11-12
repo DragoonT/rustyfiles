@@ -37,6 +37,7 @@ use rf_win::tasklist::{self, Task, TaskWatch};
 use super::backdrop::IslandGlass;
 use super::host::{self, Kind};
 use super::{app_menu, hover_preview};
+use super::icon_levels::{self, LevelStore};
 use super::icons::{self, IconCache};
 use super::look::{self, Env};
 use super::plan;
@@ -62,8 +63,15 @@ pub struct MiddleIsland {
     /// Per item: the key its icon is cached under and where the icon can come from, best first (worked out once per refresh, not per frame).
     icon_srcs: Vec<Option<(String, Vec<IconSource>)>>,
     icons: IconCache,
-    /// The scale the cached icons were asked for.
+    /// The same icons at every size they are drawn at (the rest size, the peak and the steps between, see `icon_levels`): what is
+    /// drawn comes from here, `icons` keeps the largest picture of each for the menus and the state of the loads.
+    levels: LevelStore,
+    /// The dock unit (the display scale times the dock's size) the cached icons were asked for.
     icon_scale: f32,
+    /// The magnification's peak factor the sizes of the cached icons were worked out for; a stronger setting asks again.
+    levels_peak: f32,
+    /// Counts the times the icons were asked for again (a new unit or peak): a load that ends under an older number is dropped.
+    icon_gen: u32,
     /// Where the pointer last was over the dock (logical px from the REST island's left edge); `None` before it first came. It stays
     /// where it was when the pointer leaves, so the bell shrinks away in place.
     pointer_x: Option<f32>,
@@ -139,7 +147,10 @@ impl MiddleIsland {
             slots: Vec::new(),
             icon_srcs: Vec::new(),
             icons: IconCache::default(),
+            levels: LevelStore::default(),
             icon_scale: cx.global::<Env>().unit(),
+            levels_peak: 0.0,
+            icon_gen: 0,
             pointer_x: None,
             presence: Presence::new(plan::hover_duration(crate::settings::animations())),
             t0: Instant::now(),
@@ -217,6 +228,7 @@ impl MiddleIsland {
         self.items = items;
         self.slots = model::slots(&self.items);
         self.icon_srcs = icon_sources(&self.items);
+        self.prune_icons(cx);
         self.load_icons(cx);
         let w = self.width();
         if (w - self.reported).abs() > 0.5 {
@@ -238,30 +250,55 @@ impl MiddleIsland {
         cx.notify();
     }
 
+    /// Lets go of the icons of apps that are not in the dock any more once there are many (a long session sees many apps come and go):
+    /// the sets are given back to the toolkit, the states forgotten. The icons of the items now in the dock are never touched.
+    fn prune_icons(&mut self, cx: &mut Context<Self>) {
+        let live: std::collections::HashSet<String> = self.icon_srcs.iter().flatten().map(|(k, _)| k.clone()).collect();
+        let dropped = self.levels.prune(&live, icon_levels::LIMIT);
+        if !dropped.is_empty() {
+            self.icons.retain(|k| live.contains(k));
+            icon_levels::retire(dropped, cx);
+        }
+    }
+
     /// Asks for every icon not yet asked for (and every one that failed a while ago), on worker threads.
     fn load_icons(&mut self, cx: &mut Context<Self>) {
         let scale = cx.global::<Env>().unit();
-        if self.scale_changed(cx) {
-            // the bitmaps were made for another unit: ask again for all of them, and keep drawing the old ones until the new arrive
+        // the sizes the icons are kept at: the rest size, the peak of the magnification in force, the steps between
+        let peak = cx.global::<Settings>().dock_magnify.strength().peak();
+        if self.scale_changed(cx) || peak > self.levels_peak + 0.001 {
+            // the bitmaps were made for another unit (the monitor's scale or the dock's size changed) or for a weaker magnification:
+            // ask again for all of them, and keep drawing the old ones until the new arrive
             self.icon_scale = scale;
+            self.levels_peak = peak;
+            self.icon_gen = self.icon_gen.wrapping_add(1);
             self.icons.mark_stale();
         }
-        let px = plan::icon_request_px(scale);
+        let gen_now = self.icon_gen;
+        let sizes = plan::icon_sizes_with_small(scale, self.levels_peak, cx.global::<Env>().scale);
         let wanted: Vec<(String, Vec<IconSource>)> = self.icon_srcs.iter().flatten().cloned().collect();
         for (key, src) in wanted {
             if !self.icons.start_loading(&key, Instant::now()) {
                 continue;
             }
+            let sizes = sizes.clone();
             cx.spawn(async move |this, cx| {
                 let asked = src.clone();
-                let bgra = cx.background_executor().spawn(async move { icons::load_bgra(&asked, px) }).await;
+                let made = cx.background_executor().spawn(async move { icons::load_levels(&asked, &sizes) }).await;
                 let retry = this.update(cx, |me, cx| {
-                    // a load asked for at a unit that is not the current one (the size changed meanwhile) is dropped: the ask at the
-                    // new unit is on its way
-                    if (me.icon_scale - scale).abs() > 0.001 {
+                    // a load asked for at a unit or a peak that is not the current one (the size changed meanwhile) is dropped: the ask
+                    // at the new one is on its way
+                    if me.icon_gen != gen_now {
                         return false;
                     }
-                    let retry = me.icons.finish(&key, bgra.and_then(icons::to_image), Instant::now());
+                    let set = made.and_then(icons::to_levels);
+                    let top = set.as_ref().map(|s| s.top().clone());
+                    if let Some(set) = set
+                        && let Some(old) = me.levels.insert(key.clone(), set)
+                    {
+                        icon_levels::retire(vec![old], cx);
+                    }
+                    let retry = me.icons.finish(&key, top, Instant::now());
                     cx.notify();
                     retry
                 });
@@ -285,6 +322,11 @@ impl MiddleIsland {
         // With the magnification off nothing here changes what is drawn: no frame, no animation, no look at the animations setting.
         if strength == magnify::Strength::Off {
             return;
+        }
+        // The magnification was made stronger since the icons were asked for (the setting is read here, not watched): their biggest
+        // pictures are too small for it, ask again (the old ones stay on show until the new arrive).
+        if strength.peak() > self.levels_peak + 0.001 {
+            self.load_icons(cx);
         }
         let now = self.now_ms();
         let entering = !self.presence.is_in();
@@ -338,9 +380,14 @@ impl MiddleIsland {
         .detach();
     }
 
-    /// The icon of item `ix`, if it has been loaded.
-    fn icon_for(&self, ix: usize) -> Option<std::sync::Arc<RenderImage>> {
-        self.icon_srcs.get(ix).and_then(|k| k.as_ref()).and_then(|(key, _)| self.icons.get(key))
+    /// The icon of item `ix` for a picture `logical_px` wide in a window at the monitor's scale (the preview and the menu draw it at
+    /// their own sizes), if it has been loaded: the kept picture nearest above that size, so it is not reduced by much.
+    fn icon_for(&self, ix: usize, logical_px: f32, cx: &App) -> Option<std::sync::Arc<RenderImage>> {
+        let (key, _) = self.icon_srcs.get(ix)?.as_ref()?;
+        match self.levels.get(key) {
+            Some(set) => Some(set.pick(logical_px * cx.global::<Env>().scale).clone()),
+            None => self.icons.get(key),
+        }
     }
 
     /// The centre of item `ix` at rest, device px in screen coordinates: the rest glass's left edge plus the rest layout's distance from it.
@@ -356,7 +403,7 @@ impl MiddleIsland {
             self.hover_ix = Some(ix);
             let info = match (self.items.get(ix), self.icon_anchor_x(ix, cx)) {
                 (Some(DockItem::App(a)), Some(anchor_x)) if a.running() => {
-                    Some(hover_preview::IconInfo { app: a.clone(), icon: self.icon_for(ix), anchor_x, glass: self.glass.clone() })
+                    Some(hover_preview::IconInfo { app: a.clone(), icon: self.icon_for(ix, 48.0, cx), icon_small: self.icon_for(ix, 16.0, cx), anchor_x, glass: self.glass.clone() })
                 }
                 _ => None,
             };
@@ -374,7 +421,7 @@ impl MiddleIsland {
             return;
         }
         let (Some(DockItem::App(app)), Some(anchor_x)) = (self.items.get(ix), self.icon_anchor_x(ix, cx)) else { return };
-        app_menu::open(app_menu::MenuRequest { app: app.clone(), icon: self.icon_for(ix), anchor_x, glass: self.glass.clone() }, cx);
+        app_menu::open(app_menu::MenuRequest { app: app.clone(), icon: self.icon_for(ix, 18.0, cx), anchor_x, glass: self.glass.clone() }, cx);
     }
 
     /// A right click anywhere in the dock's window at `at` (logical px of the window): on the empty glass - not on an icon, whose own
@@ -523,7 +570,11 @@ impl Render for MiddleIsland {
                     .bg(pal.separator().hsla())
                     .into_any_element(),
                 DockItem::App(_) | DockItem::Place(_) => {
-                    let picture: AnyElement = match self.icon_srcs.get(ix).and_then(|k| k.as_ref()).and_then(|(key, _)| self.icons.get(key)) {
+                    // The picture kept at the size nearest above the one this icon is drawn at in this frame (device px: its width in
+                    // dock units times the unit), so it is reduced by a quarter at most - and not at all at rest and at the peak.
+                    let drawn_px = w * scale;
+                    let shown = self.icon_srcs.get(ix).and_then(|k| k.as_ref()).and_then(|(key, _)| self.levels.get(key).map(|l| l.pick(drawn_px).clone()).or_else(|| self.icons.get(key)));
+                    let picture: AnyElement = match shown {
                         Some(img) => gpui_kit::img(img).size_full().into_any_element(),
                         None => div()
                             .size_full()

@@ -1,5 +1,5 @@
-//! The dock's icons: one bitmap per app / place, asked from the shell on a worker thread at the biggest size it will ever be drawn
-//! (so growing on hover never enlarges a bitmap) and kept until the dock ends or the scale changes. Until one has arrived, or when
+//! The dock's icons: one bitmap per app / place, loaded on a worker thread from the best source for the biggest size it will ever be
+//! drawn (so growing on hover never enlarges a bitmap) and kept until the dock ends or the scale changes. Until one has arrived, or when
 //! an app has none, the island draws a placeholder with the app's first letter.
 //!
 //! The shell can fail to give an icon for a moment (its icon cache is cold right after sign-in and many icons are asked for at
@@ -24,8 +24,11 @@ enum State {
     /// Was ready, but at a size that is not wanted any more (the dock's size or the display scale changed): still drawn, so the icon does
     /// not flash back to its letter, and to be asked for again.
     Stale(Arc<RenderImage>),
-    /// A stale icon whose new bitmap is being loaded: still drawn until it arrives (or kept for good if the new ask fails).
-    Refreshing(Arc<RenderImage>),
+    /// A stale icon whose new bitmap is being loaded: still drawn until it arrives. `tries` counts the asks of the new bitmap so far.
+    Refreshing { img: Arc<RenderImage>, tries: u8 },
+    /// The new bitmap of a stale icon could not be had: the old one is still drawn (it is of another size, so a little soft or
+    /// enlarged), and the new one is asked for again after [`RETRY_AFTER`] while `tries` is below [`MAX_TRIES`].
+    RefreshFailed { img: Arc<RenderImage>, tries: u8, at: Instant },
     /// The last ask failed. Asked again after [`RETRY_AFTER`] while `tries` is below [`MAX_TRIES`].
     Missing { tries: u8, at: Instant },
 }
@@ -39,7 +42,7 @@ impl IconCache {
     /// The finished icon for this key (`plan::icon_key`), if there is one.
     pub fn get(&self, key: &str) -> Option<Arc<RenderImage>> {
         match self.map.get(key) {
-            Some(State::Ready(img) | State::Stale(img) | State::Refreshing(img)) => Some(img.clone()),
+            Some(State::Ready(img) | State::Stale(img) | State::Refreshing { img, .. } | State::RefreshFailed { img, .. }) => Some(img.clone()),
             _ => None,
         }
     }
@@ -47,10 +50,21 @@ impl IconCache {
     /// Whether the caller has to start loading this icon now: a new one, or one that failed long enough ago and has tries left. It
     /// is marked as loading.
     pub fn start_loading(&mut self, key: &str, now: Instant) -> bool {
-        if let Some(State::Stale(img)) = self.map.get(key) {
-            let img = img.clone();
-            self.map.insert(key.to_string(), State::Refreshing(img));
-            return true;
+        match self.map.get(key) {
+            Some(State::Stale(img)) => {
+                let img = img.clone();
+                self.map.insert(key.to_string(), State::Refreshing { img, tries: 1 });
+                return true;
+            }
+            Some(State::RefreshFailed { img, tries, at }) => {
+                if *tries >= MAX_TRIES || now.saturating_duration_since(*at) < RETRY_AFTER {
+                    return false;
+                }
+                let (img, tries) = (img.clone(), *tries + 1);
+                self.map.insert(key.to_string(), State::Refreshing { img, tries });
+                return true;
+            }
+            _ => {}
         }
         let tries = match self.map.get(key) {
             None => 0,
@@ -68,12 +82,18 @@ impl IconCache {
                 self.map.insert(key.to_string(), State::Ready(img));
                 false
             }
-            None if matches!(self.map.get(key), Some(State::Refreshing(_))) => {
-                // the new size could not be had: the old bitmap is still a picture of the app (a little soft), better than the letter
-                if let Some(State::Refreshing(img)) = self.map.remove(key) {
+            None if matches!(self.map.get(key), Some(State::Refreshing { .. })) => {
+                // the new size could not be had: the old bitmap is still a picture of the app (a little soft), better than the letter,
+                // and the new one is asked for again a few times - a hiccup of the shell or of a package folder must not leave the
+                // icon at the wrong size for good
+                let Some(State::Refreshing { img, tries }) = self.map.remove(key) else { return false };
+                if tries < MAX_TRIES {
+                    self.map.insert(key.to_string(), State::RefreshFailed { img, tries, at: now });
+                    true
+                } else {
                     self.map.insert(key.to_string(), State::Ready(img));
+                    false
                 }
-                false
             }
             None => {
                 let tries = match self.map.get(key) {
@@ -97,7 +117,7 @@ impl IconCache {
     pub fn mark_stale(&mut self) {
         let old = std::mem::take(&mut self.map);
         for (key, state) in old {
-            if let State::Ready(img) | State::Stale(img) | State::Refreshing(img) = state {
+            if let State::Ready(img) | State::Stale(img) | State::Refreshing { img, .. } | State::RefreshFailed { img, .. } = state {
                 self.map.insert(key, State::Stale(img));
             }
         }
@@ -114,16 +134,36 @@ impl IconCache {
     }
 }
 
-/// Asks for the icon at `px` device px square, from the first of `srcs` that has one (the app's own, what its windows have set
-/// themselves, its package's logo). Blocks (COM, the shell, other programs' windows): worker thread only.
+/// Asks for the icon at `px` device px square, from the best source of `srcs` (a package's own logo files, a program's icon frame, the
+/// shell, a window's icon last: `rf_win::dock::iconload`), resampled by us. Blocks (the disk, COM, the shell, other programs'
+/// windows): worker thread only.
 pub fn load_bgra(srcs: &[IconSource], px: u32) -> Option<rf_win::thumbs::Bgra> {
-    match rf_win::dock::icons::icon_bgra_chain(srcs, px) {
+    match rf_win::dock::iconload::load_one(srcs, px) {
         Ok(bgra) => Some(bgra),
         Err(e) => {
             log::debug!("dock icon {:?}: {e:#}", srcs.first());
             None
         }
     }
+}
+
+/// The same icon at every one of `sizes` (ascending; see `rf_win::dock::iconpick::level_sizes`), each made from the one best picture.
+/// Worker thread only.
+pub fn load_levels(srcs: &[IconSource], sizes: &[u32]) -> Option<Vec<rf_win::thumbs::Bgra>> {
+    match rf_win::dock::iconload::load_levels(srcs, sizes) {
+        Ok(got) => Some(got.levels),
+        Err(e) => {
+            log::debug!("dock icon {:?}: {e:#}", srcs.first());
+            None
+        }
+    }
+}
+
+/// The set of pictures a [`load_levels`] gave, ready to draw. UI thread.
+pub fn to_levels(bgra: Vec<rf_win::thumbs::Bgra>) -> Option<super::icon_levels::Levels> {
+    let sizes: Vec<u32> = bgra.iter().map(|b| b.width).collect();
+    let images: Vec<Arc<RenderImage>> = bgra.into_iter().filter_map(to_image).collect();
+    super::icon_levels::Levels::new(sizes, images)
 }
 
 /// The picture GPUI draws. GPUI's `RenderImage` holds BGRA bytes inside an image buffer (the `image` crate's type is only the
@@ -212,18 +252,49 @@ mod tests {
     }
 
     #[test]
-    fn a_new_size_that_cannot_be_had_leaves_the_old_picture_and_does_not_retry() {
+    fn a_new_size_that_cannot_be_had_leaves_the_old_picture_on_show_and_is_asked_for_again() {
         let mut c = IconCache::default();
-        let t = Instant::now();
+        let mut t = Instant::now();
         let old = picture();
         c.start_loading("a", t);
         c.finish("a", Some(old.clone()), t);
         c.mark_stale();
         assert!(c.start_loading("a", t));
-        assert!(!c.finish("a", None, t), "no retry loop for an icon that has a picture");
+        assert!(c.finish("a", None, t), "the caller is told to look again");
+        assert!(Arc::ptr_eq(&c.get("a").unwrap(), &old), "the old picture stays on show");
+        assert!(!c.start_loading("a", t), "not at once");
+        t += RETRY_AFTER;
+        assert!(c.start_loading("a", t), "after a while");
+        assert!(!c.start_loading("a", t), "one ask at a time");
+        // the ask that works replaces the picture
+        let new = picture();
+        assert!(!c.finish("a", Some(new.clone()), t));
+        assert!(Arc::ptr_eq(&c.get("a").unwrap(), &new));
+        assert!(!c.start_loading("a", t + RETRY_AFTER * 10), "a finished icon is not asked for again");
+    }
+
+    #[test]
+    fn an_icon_whose_new_size_never_comes_is_asked_for_a_few_times_and_then_left_with_the_old_picture() {
+        let mut c = IconCache::default();
+        let mut t = Instant::now();
+        let old = picture();
+        c.start_loading("a", t);
+        c.finish("a", Some(old.clone()), t);
+        c.mark_stale();
+        let mut asks = 0;
+        for _ in 0..12 {
+            if c.start_loading("a", t) {
+                asks += 1;
+                assert_eq!(c.finish("a", None, t), asks < MAX_TRIES, "ask {asks}");
+            }
+            t += RETRY_AFTER;
+        }
+        assert_eq!(asks, MAX_TRIES, "a few tries, not for ever");
         assert!(Arc::ptr_eq(&c.get("a").unwrap(), &old));
-        assert!(!c.start_loading("a", t + RETRY_AFTER * 10));
-        // a second change of size while one is under way starts over from the picture that is shown
+        // a second change of size starts over from the picture that is shown, however far the tries had come
+        c.mark_stale();
+        assert!(c.start_loading("a", t));
+        assert!(c.finish("a", None, t), "the tries are counted again");
         c.mark_stale();
         c.start_loading("a", t);
         c.mark_stale();

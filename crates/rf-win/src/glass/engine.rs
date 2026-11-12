@@ -397,7 +397,7 @@ impl Win {
             return false;
         }
         let relook = before.shape != opts.shape && (self.covered || shape_is_empty(before.shape));
-        let cheap = before.only_the_shape_differs(&opts);
+        let cheap = before.only_the_shape_differs(&opts) || before.only_the_shape_and_radius_differ(&opts);
         self.dark = opts.dark;
         self.radius_px = opts.radius_px;
         self.cut_corners = opts.cut_corners;
@@ -1445,6 +1445,31 @@ mod tests {
             w.set_options(changed);
             assert!(w.dirty && w.stale, "{changed:?}");
         }
+        // an island growing into its panel eases its radius together with its rectangle: as cheap as the rectangle alone (the radius is
+        // a constant of the draw); the theme or the corner cutting with it, or a radius with no new rectangle, is not
+        settled(&mut w);
+        w.set_options(island);
+        settled(&mut w);
+        w.set_options(GlassOptions { radius_px: Some(12.0), shape: Some([8.0, 28.0, 340.0, 300.0]), ..island });
+        assert!(w.dirty && !w.stale, "shape and radius together");
+        assert_eq!(w.radius_px, Some(12.0));
+        // What the draw takes from it: the radius the draw uses is worked out from the window's options at EVERY draw (`effective_radius`
+        // in `draw`, and nowhere else is the radius used: the backdrop pass takes none), so a glass that reuses its backdrop is drawn with
+        // the radius of the moment. Eased over a motion, frame by frame, each one cheap and each one drawn with its own radius.
+        settled(&mut w);
+        w.set_options(island);
+        settled(&mut w);
+        for i in 1..=20 {
+            let t = i as f32 / 20.0;
+            let (radius, height) = (24.0 + (8.0 - 24.0) * t, 48.0 + (700.0 - 48.0) * t);
+            w.set_options(GlassOptions { radius_px: Some(radius), shape: Some([8.0, 28.0, 340.0 + 300.0 * t, height]), ..island });
+            assert!(w.dirty && !w.stale, "frame {i}: no new backdrop");
+            let drawn = effective_radius(w.radius_px, 8.0, (340.0 + 300.0 * t) as u32, height as u32);
+            assert_eq!(drawn, radius.min((340.0 + 300.0 * t).min(height).floor() / 2.0), "frame {i}: the radius of the moment is the one drawn");
+            settled(&mut w);
+        }
+        w.set_options(GlassOptions { radius_px: Some(12.0), shape: Some([8.0, 28.0, 340.0, 300.0]), dark: false, ..island });
+        assert!(w.dirty && w.stale, "a theme change is a new backdrop pass even with a new shape");
     }
 
     /// While a shape changes the engine takes each new one at once (a short wait for a frame, and not paced by the display, which would

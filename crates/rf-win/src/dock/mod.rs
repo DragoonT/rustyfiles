@@ -16,6 +16,9 @@
 //! | `pins` | the taskbar's pinned apps, read-only (pin folder + `Taskband\Favorites` order); which pins are alive, moved to a newer install, or dead | the order, the fate rules |
 //! | `identity` | a running window's packaged-app id (its process's package), so a Store app's windows match its pin | the id handed to the windows |
 //! | `icons` | one bitmap with alpha at an exact size for a program, a packaged app, a shell place, a window | the resampling |
+//! | `iconpick` | which picture a dock icon starts from and the sizes it is kept at: the size needed (rest x peak x monitor scale x dock size), the kept sizes, the package logo file or the icon frame to take | all of it |
+//! | `iconload` | the loader: a package's own logo files, a program's icon frame by frame, the shell, a window's icon last; one resampled picture per kept size | the order, the group directory |
+//! | `resample` | Lanczos-3 on premultiplied colour and the colour bleed into transparent pixels | all of it |
 //! | `island` | turns a GPUI window into an island, places it, shows / hides it | the style bits |
 //! | `system` | primary monitor, the toolbar band, a hidden window that hears about display / DPI / theme / full-screen changes | the placement area |
 //! | `fullscreen` | is a full-screen application in front on the primary monitor | the decision |
@@ -38,6 +41,7 @@
 //! | `size` | the dock's size setting: the four sizes (0.85, 1.0, 1.2, 1.4) and the one product, the monitor's scale times the size, that every pure layout function takes in place of the monitor's scale | all of it |
 //! | `empty_spot` | which point of an island is its empty glass (no icon, field, symbol or other control), from the layout's rectangles | all of it |
 //! | `taskmgr` | starting Windows' Task Manager from a right click on the empty glass: once, the shell's "open" and never "runas" | the gate |
+//! | `grow` | an island that grows into its panel: the glass's rectangle from the island's to the panel's with one corner fixed, the radius, the fades, the search field's path, the 220 / 160 ms clock that can turn at any moment | all of it |
 //! | `startapps` | start an app of "All apps", as administrator (the user's click), find its program (shell thread) | - |
 //!
 //! HOW THE APP USES IT (the order that works):
@@ -66,8 +70,11 @@ pub mod calendar;
 pub mod clock;
 pub mod empty_spot;
 pub mod fullscreen;
+pub mod grow;
 pub mod hit;
 pub mod hover;
+pub mod iconload;
+pub mod iconpick;
 pub mod icons;
 pub mod identity;
 pub mod island;
@@ -80,6 +87,7 @@ pub mod panel;
 pub mod pins;
 pub mod preview;
 pub mod power;
+pub mod resample;
 pub mod startapps;
 pub mod startlist;
 pub mod startpage;

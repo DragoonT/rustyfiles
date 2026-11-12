@@ -20,6 +20,12 @@ pub fn request_size(px: u32) -> u32 {
 /// The icon for `src`, `px` x `px`, straight (not premultiplied) BGRA with alpha, top-down rows. A picture that is not square is
 /// scaled to fit and centred on a transparent square.
 pub fn icon_bgra(src: &IconSource, px: u32) -> anyhow::Result<Bgra> {
+    Ok(fit_square(&raw_icon(src, px)?, px))
+}
+
+/// What the system gives for `src` when about `px` is wanted, at the size it came in (not fitted to a square). The dock's own loader
+/// (`iconload`) takes it from here and does the resampling itself, from this picture, once for every size it keeps.
+pub(super) fn raw_icon(src: &IconSource, px: u32) -> anyhow::Result<Bgra> {
     anyhow::ensure!((1..=1024).contains(&px), "icon size {px} out of range");
     let shell = |p: &Path| on_shell_thread(p.to_path_buf(), request_size(px));
     let got = match src {
@@ -33,7 +39,7 @@ pub fn icon_bgra(src: &IconSource, px: u32) -> anyhow::Result<Bgra> {
         },
         IconSource::Window(hwnd) => window_icon(*hwnd, px).ok_or_else(|| anyhow::anyhow!("window {hwnd:#x} has no icon"))?,
     };
-    Ok(fit_square(&got, px))
+    Ok(got)
 }
 
 /// The first of `srcs` that gives a picture (see [`crate::dock::DockApp::icon_chain`]): the app's own icon, then what its windows have
@@ -229,7 +235,7 @@ fn window_icon(hwnd: isize, px: u32) -> Option<Bgra> {
 }
 
 /// An `HICON` as straight-alpha BGRA at its own size. An icon without an alpha channel gets its transparency from its mask.
-fn hicon_to_bgra(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Bgra> {
+pub(super) fn hicon_to_bgra(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Bgra> {
     use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits, GetObjectW, HGDIOBJ, ReleaseDC};
     use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, ICONINFO};
     unsafe {

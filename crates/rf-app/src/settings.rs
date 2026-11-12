@@ -533,6 +533,9 @@ pub struct Settings {
     /// The Start panel shows "Önerilenler" (the documents opened most recently) under the pinned apps (on). Off: the section is not
     /// drawn and the pinned grid takes its room.
     pub dock_start_recommended: bool,
+    /// The Start panel grows out of the left island: the island's glass widens upwards into the panel and shrinks back into the island
+    /// when it closes (`dock/grow_host.rs`). On by default; off: the panel opens above the island as a window of its own, as it always did.
+    pub dock_start_grow: bool,
     /// How big the whole dock is (small / medium / large / extra large; medium is the dock as it always was).
     pub dock_size: crate::dock::size_pref::DockSizePref,
 
@@ -669,6 +672,8 @@ impl Default for Settings {
             dock_hover_previews: true,
             dock_app_menu: true,
             dock_start_recommended: true,
+            // on: the user asked for the Start panel to grow out of the island; the switch on the Dock page turns it off
+            dock_start_grow: true,
             dock_size: Default::default(),
             shell_desktop_cover: false,
             shell_win_key: false,

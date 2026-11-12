@@ -370,10 +370,30 @@ impl StartView {
         cx.notify();
     }
 
+    /// The button was pressed again while the panel was shrinking back into its island (`grow_host.rs`): the motion turns round and the
+    /// panel is open again AS IT WAS, not as a new one. The typed text, the results, the page and the selection stay; what `on_close`
+    /// stopped (the searches for the text) is started again, and the keyboard goes to the field.
+    pub fn on_reopen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.shown = true;
+        self.closing = false;
+        self.anim = None;
+        super::panel::set_typed(&self.query, cx);
+        if search::wants_files(&self.query) {
+            self.run_local(cx);
+            self.request_files(cx);
+        }
+        self.focus_field(window, cx);
+        cx.notify();
+    }
+
     /// The window is on the screen: the glass goes on, the keyboard goes to the field.
     pub fn on_shown(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.popup.is_none() && self.shown {
-            self.popup = Some(PopupGlass::start_panel(self.hwnd, dark));
+            // an island growing into this panel: its glass is a shape in the window that the growth moves (grow_host.rs)
+            self.popup = Some(match super::grow_host::shape_for_attach(cx) {
+                Some((shape, radius)) => PopupGlass::start_panel_shaped(self.hwnd, dark, shape, radius),
+                None => PopupGlass::start_panel(self.hwnd, dark),
+            });
             self._watch = Some(glass_watch::watch(cx, |this: &mut Self| this.popup.as_mut()));
         }
         self.focus_field(window, cx);
@@ -1247,11 +1267,15 @@ impl Render for StartView {
         let (pal, _) = super::host::frame_palette(&self.island, window);
         let dark = pal.mix < 0.5;
         let fill = glass_watch::panel_fill(dark, self.popup.as_ref().is_none_or(|g| g.fallback()));
-        let frame = match self.anim {
-            Some((t, opening)) => geo::frame(t.elapsed().as_millis() as u32, opening, crate::settings::animations()),
-            None => geo::Frame { opacity: 1.0, drop_px: 0.0, done: true },
+        // The island's glass is growing into this panel (the setting "Başlat adadan büyüyerek açılsın"): the motion decides what is seen
+        // (the glass's shape, the content's opacity, the field's place) and the panel's own 120 ms easing stays out of it.
+        let grown = super::grow_host::view_frame(self.popup.as_ref().is_none_or(|g| g.fallback()), cx);
+        let frame = match (self.anim, grown) {
+            (_, Some(_)) => geo::Frame { opacity: 1.0, drop_px: 0.0, done: true },
+            (Some((t, opening)), None) => geo::frame(t.elapsed().as_millis() as u32, opening, crate::settings::animations()),
+            (None, None) => geo::Frame { opacity: 1.0, drop_px: 0.0, done: true },
         };
-        if !frame.done {
+        if !frame.done || grown.is_some_and(|g| g.moving) {
             window.request_animation_frame();
         }
         let searching = !self.query.trim().is_empty();
@@ -1266,28 +1290,46 @@ impl Render for StartView {
             self.render_all(pal, theme, cx)
         };
         let notice = self.notice.clone();
-        let content = v_flex()
-            .size_full()
-            .opacity(frame.opacity)
-            .mt(px(frame.drop_px))
-            .child(self.render_search_field(pal))
+        // While the island's field travels to the top of the panel the layout keeps its room empty and the field is drawn at the
+        // rectangle of the moment; the rest of the panel fades in with the motion's second half (`grow_host.rs`).
+        let travelling = grown.and_then(|g| g.field.map(|r| (r, g.field_alpha)));
+        let field_in_flow = match travelling {
+            Some(_) => div().h(px(page::TOP_PAD + page::SEARCH_H)).flex_shrink_0().into_any_element(),
+            None => self.render_search_field(pal).into_any_element(),
+        };
+        let travelling_field = travelling.map(|(r, alpha)| div().absolute().left(px(r[0])).top(px(r[1])).w(px(r[2])).opacity(alpha).child(self.search_pill(pal).h(px(r[3]))));
+        let rest = v_flex()
+            .flex_1()
+            .min_h_0()
+            .when_some(grown, |d, g| d.opacity(g.content))
             .child(div().flex_1().min_h_0().mt(px(page::SECTION_GAP)).child(body))
             .when_some(notice, |d, n| d.child(div().h(px(page::NOTICE_H)).flex_shrink_0().px(px(PAD)).flex().items_center().text_xs().text_color(pal.text_secondary().hsla()).truncate().child(n)))
             .child(div().h(px(page::DIVIDER_H)).w_full().bg(pal.separator().hsla()))
             .child(self.render_footer(pal, theme, cx));
+        let content = v_flex()
+            .size_full()
+            .when(grown.is_none(), |d| d.opacity(frame.opacity).mt(px(frame.drop_px)))
+            .child(field_in_flow)
+            .child(rest);
+        // the plain fill: the whole window as an ordinary panel; the glass's own rectangle while it grows (the window is bigger than that)
+        // (it comes in with the growth: the island's glass has none, so the first and the last frame carry no step in the tone)
+        let wash = grown.map(|g| div().absolute().left(px(g.wash[0])).top(px(g.wash[1])).w(px(g.wash[2])).h(px(g.wash[3])).rounded(px(g.wash_radius)).bg(fill.opacity(g.wash_alpha)));
+        // the panel's own part of the window: all of it, or, while the island's glass has grown into it, what is above the island's row
+        let extra = grown.map_or(0.0, |g| g.extra_bottom);
+        let overlays = self.render_overlays(pal, window, cx);
 
         div()
             .id("start-panel")
             .relative()
             .size_full()
-            .bg(fill)
+            .when(grown.is_none(), |d| d.bg(fill))
             .text_color(pal.text().hsla())
             .text_size(px(13.))
             .capture_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.on_key(ev, window, cx)))
             // a click anywhere in the panel leaves the keyboard in the field: typing goes there wherever the click was
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| this.focus_field(window, cx)))
-            .child(content)
-            .children(self.render_overlays(pal, window, cx))
+            .children(wash)
+            .child(div().absolute().top_0().left_0().right_0().bottom(px(extra)).child(content).children(travelling_field).children(overlays))
             .into_any_element()
     }
 }
@@ -1421,7 +1463,8 @@ impl StartView {
         let text = pal.text().hsla();
         let border = pal.separator().hsla();
         let size = window.viewport_size();
-        let (view_w, view_h) = (f32::from(size.width), f32::from(size.height));
+        // (the window is taller than the panel by the gap and the island's row while the island's glass has grown into it)
+        let (view_w, view_h) = (f32::from(size.width), f32::from(size.height) - super::grow_host::extra_bottom(cx));
         let item = move |id: (&'static str, usize), icon: L, label: &'static str, hot: bool| {
             h_flex()
                 .id(id)

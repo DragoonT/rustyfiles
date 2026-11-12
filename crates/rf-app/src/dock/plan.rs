@@ -194,10 +194,28 @@ pub fn icon_key(src: &rf_win::dock::IconSource) -> String {
     format!("{src:?}")
 }
 
-/// The size to ask the shell for, in device px: the biggest an icon ever gets (44 logical px grown by the strongest magnification, 1.55
-/// times), so it is sharp when it is big and is only ever scaled DOWN, never enlarged.
-pub fn icon_request_px(scale: f32) -> u32 {
-    ((ICON_REST * magnify::MAX_PEAK * scale.max(1.0)).ceil() as u32).clamp(16, 512)
+/// The sizes the pictures of an icon are kept at, smallest first, for a dock unit `scale` (the monitor's scale times the dock's size, so
+/// a small dock on a 100 % monitor needs fewer pixels than a big one) and the magnification's `peak` factor (1 when it is off): the
+/// rest size, the peak size (44 dock units grown by the peak, in device px: the most an icon is ever drawn at, so every picture is
+/// only ever scaled DOWN) and the steps between (`rf_win::dock::iconpick::level_sizes`).
+pub fn icon_sizes(scale: f32, peak: f32) -> Vec<u32> {
+    rf_win::dock::iconpick::level_sizes(rf_win::dock::iconpick::rest_px(scale), rf_win::dock::iconpick::peak_px(scale, peak))
+}
+
+/// Logical px of the small picture the hover preview's title row (16) and the app menu's name row (18) draw an app's icon at: the
+/// dock keeps one picture of about this size beside its big ones, so those two do not reduce the dock's 44+ px picture by a factor of
+/// three or four with one bilinear tap of the toolkit.
+pub const SMALL_ICON: f32 = 20.0;
+
+/// [`icon_sizes`] with the small picture in front (device px at the monitor's scale `monitor_scale`, not the dock's size: the menus do
+/// not follow the dock's size). The smallest kept size is the rest size, 37 dock units or more, so the small one is always below it.
+pub fn icon_sizes_with_small(unit: f32, peak: f32, monitor_scale: f32) -> Vec<u32> {
+    let mut sizes = icon_sizes(unit, peak);
+    let small = ((SMALL_ICON * if monitor_scale.is_finite() && monitor_scale > 0.0 { monitor_scale } else { 1.0 }).round() as u32).max(rf_win::dock::iconpick::MIN_PX);
+    if sizes.first().is_some_and(|&rest| small < rest) {
+        sizes.insert(0, small);
+    }
+    sizes
 }
 
 /// The letter a placeholder shows until (or instead of) the app's icon.
@@ -209,6 +227,11 @@ pub fn initial(name: &str) -> String {
 mod tests {
     use super::*;
     use rf_win::dock::hover::slot_spans;
+
+    /// The most device px an icon is drawn at with the strongest magnification, at this dock unit.
+    fn icon_request_px(scale: f32) -> u32 {
+        rf_win::dock::iconpick::peak_px(scale, magnify::MAX_PEAK)
+    }
 
     fn slots(n_icons: usize, sep_at: Option<usize>) -> Vec<Slot> {
         let mut v: Vec<Slot> = (0..n_icons).map(|_| Slot::Icon).collect();
@@ -370,6 +393,72 @@ mod tests {
         for scale in [1.0f32, 1.25, 1.5, 1.75, 2.0, 3.0] {
             assert!(icon_request_px(scale) as f32 >= ICON_REST * magnify::MAX_PEAK * scale - 0.001);
         }
+    }
+
+    #[test]
+    fn icons_are_asked_for_at_the_size_the_dock_unit_draws_them() {
+        // the unit is the monitor's scale times the dock's size: a small dock (0.85) on a 100 % monitor needs fewer pixels, a big one more
+        assert_eq!(icon_request_px(0.85), 58);
+        assert_eq!(icon_request_px(1.4), 96);
+        assert_eq!(icon_request_px(1.25 * 1.2), 103);
+        // the kept sizes: rest, peak, a step between; one when the magnification is off; two for the subtle one
+        assert_eq!(icon_sizes(1.0, magnify::MAX_PEAK), vec![44, 55, 69]);
+        assert_eq!(icon_sizes(1.0, 1.0), vec![44]);
+        assert_eq!(icon_sizes(1.0, magnify::Strength::Subtle.peak()), vec![44, 55]);
+        assert_eq!(icon_sizes(1.5, magnify::MAX_PEAK), vec![66, 82, 103]);
+        assert_eq!(*icon_sizes(2.0, magnify::MAX_PEAK).last().unwrap(), icon_request_px(2.0));
+    }
+
+    #[test]
+    fn the_picture_drawn_is_one_to_one_at_rest_and_at_the_peak_and_never_reduced_much_between() {
+        use rf_win::dock::iconpick::{MAX_STEP, pick_level};
+        // The layout (rest widths, the magnification's frames) decides the width an icon is drawn at; the kept sizes are chosen from the
+        // unit and the peak alone. This ties the two together, for every dock size x monitor scale a user can have.
+        let slots: Vec<Slot> = vec![Slot::Icon, Slot::Icon, Slot::Separator, Slot::Icon, Slot::Icon, Slot::Icon];
+        let rest = rest_layout(&slots, 5.0 * 54.0 + 20.0);
+        for unit in [0.85f32, 1.0, 1.1, 1.2, 1.25, 1.4, 1.5, 1.7, 1.75, 2.0, 2.4, 3.0] {
+            for strength in [magnify::Strength::Subtle, magnify::Strength::Full] {
+                let sizes = icon_sizes_with_small(unit, strength.peak(), unit);
+                let pick = |w: f32| sizes[pick_level(&sizes, w * unit)] as f32;
+                // at rest every icon is drawn at 44 units: the rest picture, pixel for pixel (within the rounding of a pixel)
+                for &(_, w) in rest.iter().zip(&slots).filter(|(_, s)| **s == Slot::Icon).map(|(r, _)| r) {
+                    assert!((pick(w) - w * unit).abs() <= 1.0, "rest at {unit}: drawn {} px, picture {} px, {sizes:?}", w * unit, pick(w));
+                }
+                // under the pointer at the full height of the bell: the icon is as big as it gets, and the top picture is the one
+                let rest_width = 5.0 * 54.0 + 20.0;
+                let centre_of_third = rest[3].0 + rest[3].1 / 2.0;
+                let top = magnify::frame(&slots, &rest, rest_width, centre_of_third, 1.0, strength, 10_000.0);
+                let biggest = top.spans.iter().zip(&slots).filter(|(_, s)| **s == Slot::Icon).map(|(s, _)| s.1).fold(0.0f32, f32::max);
+                assert!((biggest - ICON_REST * strength.peak()).abs() < 0.01, "{biggest}");
+                assert!((pick(biggest) - biggest * unit).abs() <= 1.0, "peak at {unit}: drawn {} px, picture {} px, {sizes:?}", biggest * unit, pick(biggest));
+                assert_eq!(*sizes.last().unwrap() as f32, pick(biggest), "the peak is drawn with the largest picture");
+                // in between, whatever the pointer and the height of the bell: not enlarged by more than a pixel, reduced by a quarter at most
+                for step in 0..=20 {
+                    let height = step as f32 / 20.0;
+                    for x in (0..=24).map(|i| i as f32 * rest_width / 24.0) {
+                        let f = magnify::frame(&slots, &rest, rest_width, x, height, strength, 10_000.0);
+                        for (&(_, w), _) in f.spans.iter().zip(&slots).filter(|(_, s)| **s == Slot::Icon) {
+                            let (drawn, kept) = (w * unit, pick(w));
+                            assert!(kept + 1.0 >= drawn, "enlarged at {unit}: drawn {drawn}, picture {kept}, {sizes:?}");
+                            assert!(kept / drawn <= MAX_STEP + 0.05, "reduced too much at {unit}: drawn {drawn}, picture {kept}, {sizes:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_small_picture_for_the_menus_is_below_the_rest_size_and_only_added_when_it_is() {
+        // a 20 px picture at 100 %, 40 at 200 %: the preview's title (16) and the app menu's name row (18) are drawn at about that
+        assert_eq!(icon_sizes_with_small(1.0, magnify::MAX_PEAK, 1.0), vec![20, 44, 55, 69]);
+        assert_eq!(icon_sizes_with_small(2.0, magnify::MAX_PEAK, 2.0), vec![40, 88, 110, 137]);
+        // a dock size of 0.85 on a 100 % monitor: the rest picture is 37 px, still above it (38 is the peak, rounded up)
+        assert_eq!(icon_sizes_with_small(0.85, 1.0, 1.0), vec![20, 37, 38]);
+        // nonsense scale of the monitor reads as 100 %
+        assert_eq!(icon_sizes_with_small(1.0, 1.0, f32::NAN)[0], 20);
+        // a rest picture that is not above it leaves the set alone
+        assert_eq!(icon_sizes_with_small(0.3, 1.0, 1.0), icon_sizes(0.3, 1.0));
     }
 
     #[test]

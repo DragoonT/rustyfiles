@@ -139,20 +139,24 @@ impl StartView {
 
     /// The search field: a pill, 36 px high, with the keyboard in it.
     pub(super) fn render_search_field(&mut self, pal: Palette) -> impl IntoElement {
-        div().flex_shrink_0().px(px(page::SIDE_PAD)).pt(px(page::TOP_PAD)).child(
-            h_flex()
-                .h(px(page::SEARCH_H))
-                .w_full()
-                .px(px(14.))
-                .gap_2()
-                .items_center()
-                .rounded(px(page::SEARCH_RADIUS))
-                .bg(pal.field_fill().hsla())
-                .border_1()
-                .border_color(pal.separator().hsla())
-                .child(Icon::new(L::Search).size(px(16.)).text_color(pal.text_secondary().hsla()))
-                .child(div().flex_1().min_w_0().text_size(px(14.)).child(Input::new(&self.input).appearance(false))),
-        )
+        div().flex_shrink_0().px(px(page::SIDE_PAD)).pt(px(page::TOP_PAD)).child(self.search_pill(pal))
+    }
+
+    /// The pill itself (the field and its picture), as wide as the room it is given: in its place at the top of the panel, or, while the
+    /// island's field travels to it (`grow_host.rs`), at the rectangle of that moment.
+    pub(super) fn search_pill(&mut self, pal: Palette) -> Div {
+        h_flex()
+            .h(px(page::SEARCH_H))
+            .w_full()
+            .px(px(14.))
+            .gap_2()
+            .items_center()
+            .rounded(px(page::SEARCH_RADIUS))
+            .bg(pal.field_fill().hsla())
+            .border_1()
+            .border_color(pal.separator().hsla())
+            .child(Icon::new(L::Search).size(px(16.)).text_color(pal.text_secondary().hsla()))
+            .child(div().flex_1().min_w_0().text_size(px(14.)).child(Input::new(&self.input).appearance(false)))
     }
 
     // ------------------------------------------------------------------ the buttons that change the page
@@ -204,7 +208,9 @@ impl StartView {
         } else {
             page::REC_MAX
         };
-        let layout = page::home_layout(page::page_room(f32::from(window.viewport_size().height), self.notice.is_some()), pins, for_layout);
+        // (the window is taller than the panel by the gap and the island's row while the island's glass has grown into it: `grow_host.rs`)
+        let panel_h = f32::from(window.viewport_size().height) - crate::dock::grow_host::extra_bottom(cx);
+        let layout = page::home_layout(page::page_room(panel_h, self.notice.is_some()), pins, for_layout);
         self.layout = layout;
         self.grid_page = page::clamp_page(self.grid_page, layout.pages);
         if let Some(Spot::Rec(j)) = self.spot

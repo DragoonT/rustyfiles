@@ -58,6 +58,12 @@ fn options_with_a_shape_are_cleaned_up() {
     assert!(!a.only_the_shape_differs(&GlassOptions { dark: false, ..a }));
     assert!(!a.only_the_shape_differs(&GlassOptions { radius_px: Some(3.0), ..a }));
     assert!(!a.only_the_shape_differs(&GlassOptions { cut_corners: true, ..a }));
+    // what changes the shape and the radius together (a growing island) is as cheap; the radius alone is not
+    let r = GlassOptions { radius_px: Some(24.0), cut_corners: true, ..a };
+    assert!(r.only_the_shape_and_radius_differ(&GlassOptions { radius_px: Some(9.0), shape: Some([9.0, 2.0, 30.0, 40.0]), ..r }));
+    assert!(!r.only_the_shape_and_radius_differ(&GlassOptions { radius_px: Some(9.0), ..r }), "a radius without a new shape is a DPI change");
+    assert!(!r.only_the_shape_and_radius_differ(&GlassOptions { radius_px: Some(9.0), shape: Some([9.0, 2.0, 30.0, 40.0]), dark: false, ..r }));
+    assert!(!a.only_the_shape_and_radius_differ(&GlassOptions { radius_px: Some(9.0), shape: Some([9.0, 2.0, 30.0, 40.0]), ..a }), "no radius asked for: the system's");
 }
 
 /// The shadow: 26 % black at the outline of the moved shape, gone `blur` px outside it, smooth, never negative or above its opacity.

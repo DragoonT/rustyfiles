@@ -8886,5 +8886,17 @@
   "key": "Dock kapalı: bu ayar şimdi işe yaramaz ve yalnızca kapatılabilir. Yeniden açmak için önce sayfanın başındaki Dock anahtarını açın.",
   "tr": "Dock kapalı: bu ayar şimdi işe yaramaz ve yalnızca kapatılabilir. Yeniden açmak için önce sayfanın başındaki Dock anahtarını açın.",
   "en": "The dock is off: this setting does nothing now and can only be turned off. To turn it on again, first turn on the dock switch at the top of the page."
+ },
+ {
+  "id": "6aa78225",
+  "key": "Başlat adadan büyüyerek açılsın",
+  "tr": "Başlat adadan büyüyerek açılsın",
+  "en": "Start grows out of the island"
+ },
+ {
+  "id": "736af30b",
+  "key": "Başlat düğmesine ya da arama alanına basınca soldaki cam ada yukarı ve sağa büyüyüp Başlat paneline dönüşür, kapanırken adaya geri küçülür. Kapalıyken panel eskisi gibi adanın üstünde ayrı bir pencere olarak açılır. Animasyonlar kapalıysa tek karede açılır.",
+  "tr": "Başlat düğmesine ya da arama alanına basınca soldaki cam ada yukarı ve sağa büyüyüp Başlat paneline dönüşür, kapanırken adaya geri küçülür. Kapalıyken panel eskisi gibi adanın üstünde ayrı bir pencere olarak açılır. Animasyonlar kapalıysa tek karede açılır.",
+  "en": "Pressing the Start button or the search field makes the glass island on the left grow upwards and to the right and become the Start panel; it shrinks back into the island when it closes. When off, the panel opens as before, as a separate window above the island. With animations off it opens in one frame."
  }
 ]

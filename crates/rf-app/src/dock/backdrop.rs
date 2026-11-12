@@ -56,11 +56,26 @@ pub struct IslandGlass {
     sent_dark: bool,
     /// Whether the engine has been told about the window (and so must be told to let go of it).
     attached: bool,
+    /// The island's glass is put away while a panel's glass, grown out of it, stands in its place (`grow_host.rs`): the engine is given
+    /// no shape (it draws nothing), the shape the layout wants is only remembered, and the tone stays as it was.
+    hidden: bool,
 }
 
 impl IslandGlass {
     pub fn new() -> IslandGlass {
-        IslandGlass { hwnd: 0, machine: Machine::default(), tone: Tone::new(true), scale: 1.0, shape: NO_SHAPE, sent_dark: true, attached: false }
+        IslandGlass { hwnd: 0, machine: Machine::default(), tone: Tone::new(true), scale: 1.0, shape: NO_SHAPE, sent_dark: true, attached: false, hidden: false }
+    }
+
+    /// Puts the glass away (`true`) or back: the engine is told at once, and only when something differs. The remembered shape is
+    /// kept, so a layout that comes while it is away is not lost.
+    pub fn set_hidden(&mut self, hidden: bool) {
+        if hidden == self.hidden {
+            return;
+        }
+        self.hidden = hidden;
+        if self.attached {
+            rf_win::glass::set_options(self.hwnd, self.engine_options());
+        }
     }
 
     /// The window handle (0 before [`IslandGlass::start`]).
@@ -72,7 +87,7 @@ impl IslandGlass {
     /// tint (`poll_tone`, `sync`) and the shape (`set_shape`) change the SAME options value: every change of one is sent with the
     /// current value of the other, so neither can undo the other.
     fn engine_options(&self) -> GlassOptions {
-        options(self.sent_dark, self.scale, self.shape)
+        options(self.sent_dark, self.scale, if self.hidden { NO_SHAPE } else { self.shape })
     }
 
     /// Where the glass is in the window (device px: x, y, w, h). Before the glass runs this is only remembered (it is what the glass
@@ -84,7 +99,7 @@ impl IslandGlass {
             return;
         }
         self.shape = shape;
-        if self.attached {
+        if self.attached && !self.hidden {
             rf_win::glass::set_options(self.hwnd, self.engine_options());
         }
     }
@@ -123,6 +138,10 @@ impl IslandGlass {
     /// Looks at how bright the backdrop is (a few times a second, from the host) and moves the foreground and the glass tint if the
     /// page behind went across a line. True when the island has to be drawn again; false and nothing else when nothing changed.
     pub fn poll_tone(&mut self, now_ms: u64) -> bool {
+        // a glass that is put away measures nothing (it has no area): the tone stays as it was until the glass is back
+        if self.hidden {
+            return false;
+        }
         // a glass that is not running measures nothing: the system's theme decides, as for the fallback fill
         let luma = if self.attached && !self.machine.fallback() { rf_win::glass::backdrop_luma(self.hwnd) } else { None };
         let changed = self.tone.feed(luma, now_ms);
@@ -156,7 +175,7 @@ impl IslandGlass {
             return;
         }
         let dark = self.tone.glass_dark();
-        if rf_win::glass::attach_with(self.hwnd, options(dark, self.scale, self.shape)) {
+        if rf_win::glass::attach_with(self.hwnd, options(dark, self.scale, if self.hidden { NO_SHAPE } else { self.shape })) {
             self.sent_dark = dark;
             self.attached = true;
         } else {
@@ -305,6 +324,29 @@ mod tests {
         // a restart of the island starts from the system again
         g.start(0, false, 1.0, 0);
         assert_eq!(g.palette(0).mix, 1.0);
+    }
+
+    /// While a panel's glass stands in the island's place the island's glass has no shape for the engine, whatever the layout says, and
+    /// the shape the layout wanted meanwhile is there when the glass comes back.
+    #[test]
+    fn a_glass_put_away_draws_nothing_and_remembers_where_it_belongs() {
+        let mut g = IslandGlass::new();
+        g.set_shape([12.0, 28.0, 330.0, 48.0]);
+        assert!(!g.hidden);
+        g.set_hidden(true);
+        assert_eq!(g.engine_options().shape, Some(NO_SHAPE), "nothing is drawn");
+        g.set_shape([14.0, 28.0, 340.0, 48.0]);
+        assert_eq!(g.shape(), [14.0, 28.0, 340.0, 48.0], "the layout is remembered");
+        assert_eq!(g.engine_options().shape, Some(NO_SHAPE));
+        assert!(!g.poll_tone(10_000), "no tone is measured meanwhile");
+        g.set_hidden(true);
+        g.set_hidden(false);
+        assert_eq!(g.engine_options().shape, Some([14.0, 28.0, 340.0, 48.0]));
+        // the tint of an hidden glass is still the one the engine has (a change of the tint carries the shape the engine has)
+        g.set_hidden(true);
+        g.sent_dark = false;
+        let o = g.engine_options();
+        assert!(!o.dark && o.shape == Some(NO_SHAPE));
     }
 
     #[test]
