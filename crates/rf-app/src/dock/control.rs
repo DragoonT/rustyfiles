@@ -111,6 +111,9 @@ pub struct Keys {
     /// The clock opens our own calendar and the bell our own notification panel (else Win+N): read from the file when they open.
     pub own_calendar: bool,
     pub own_notifications: bool,
+    /// The previews and the menu of the middle island's icons: read from the file when they are asked for.
+    pub hover_previews: bool,
+    pub app_menu: bool,
 }
 
 impl Keys {
@@ -125,6 +128,8 @@ impl Keys {
             own_control_centre: s.dock_own_control_centre,
             own_calendar: s.dock_own_calendar,
             own_notifications: s.dock_own_notifications,
+            hover_previews: s.dock_hover_previews,
+            app_menu: s.dock_app_menu,
         }
     }
 }
@@ -258,7 +263,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true }
+        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true }
     }
 
     #[test]
@@ -290,6 +295,8 @@ mod tests {
             Settings { dock_own_control_centre: false, ..base.clone() },
             Settings { dock_own_calendar: false, ..base.clone() },
             Settings { dock_own_notifications: false, ..base.clone() },
+            Settings { dock_hover_previews: false, ..base.clone() },
+            Settings { dock_app_menu: false, ..base.clone() },
         ] {
             let mut told = Some(k.clone());
             assert!(needs_reload(&mut told, Keys::of(&change)), "{:?}", Keys::of(&change));

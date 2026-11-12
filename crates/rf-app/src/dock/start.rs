@@ -299,13 +299,8 @@ impl StartView {
             icon_scale: 0.0,
             _subs: subs,
         };
-        // The list of apps, the pins and the user's name are read once, in the background, a few seconds after the dock is up (so the
-        // islands' own icons, which ask the same shell thread, come first): the first opening finds them. One wait, not a timer.
-        cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(Duration::from_secs(4)).await;
-            let _ = this.update(cx, |me, cx| me.load_data(cx));
-        })
-        .detach();
+        // (the list of apps, the pins and the user's name are read when the panel opens, `on_open`: the view is made by the first click
+        // on the Start button, so there is nothing to warm up before it, and a timer started here would only read it all a second time)
         me
     }
 

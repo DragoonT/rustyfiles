@@ -36,6 +36,13 @@ pub enum Key {
     Other,
 }
 
+impl Key {
+    /// This key's place in a [`Chord`]'s set of swallowed keys.
+    const fn bit(self) -> u16 {
+        1 << (self as u16)
+    }
+}
+
 /// One key event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct KeyInput {
@@ -113,11 +120,14 @@ enum State {
     Open { held: bool },
 }
 
-#[derive(Clone, Debug)]
+/// `Copy` on purpose: the chord is fed from a keyboard hook's callback, which must not allocate, and a value that is `Copy` cannot
+/// own a heap block (a test pins that).
+#[derive(Clone, Copy, Debug)]
 pub struct Chord {
     state: State,
-    /// Keys whose press was swallowed: their release is swallowed too (a release with no press confuses programs).
-    swallowed: Vec<Key>,
+    /// Keys whose press was swallowed, one bit each (see [`Key::bit`]): their release is swallowed too (a release with no press
+    /// confuses programs). A set of bits and not a list: pushing to a list allocates, in a hook callback.
+    swallowed: u16,
     /// A key was swallowed while Alt was down: the next Alt release needs the mask key.
     tainted: bool,
 }
@@ -130,7 +140,7 @@ impl Default for Chord {
 
 impl Chord {
     pub fn new() -> Chord {
-        Chord { state: State::Closed, swallowed: Vec::new(), tainted: false }
+        Chord { state: State::Closed, swallowed: 0, tainted: false }
     }
 
     pub fn is_open(&self) -> bool {
@@ -142,15 +152,24 @@ impl Chord {
         self.state = State::Open { held: false };
     }
 
-    /// The switcher was closed by something else (a click on a card, losing the foreground): the chord forgets it was open.
+    /// The switcher was closed by something else (a click on a card, losing the foreground): the chord forgets it was open. The
+    /// keys it swallowed stay in the set: their releases are still swallowed (a release must follow its press).
     pub fn closed_elsewhere(&mut self) {
         self.state = State::Closed;
     }
 
+    /// The chord is open and the user is holding Alt (the real chord; not the sticky one a command opens).
+    pub fn is_open_held(&self) -> bool {
+        matches!(self.state, State::Open { held: true })
+    }
+
+    /// Whether a key's press was swallowed and its release has not come yet.
+    pub fn holds(&self, key: Key) -> bool {
+        self.swallowed & key.bit() != 0
+    }
+
     fn swallow_down(&mut self, key: Key, alt: bool) {
-        if !self.swallowed.contains(&key) {
-            self.swallowed.push(key);
-        }
+        self.swallowed |= key.bit();
         if alt {
             self.tainted = true;
         }
@@ -171,8 +190,8 @@ impl Chord {
                 }
                 return Reaction { swallow: false, effect: choose.then_some(Effect::Choose), mask_alt: mask };
             }
-            if let Some(p) = self.swallowed.iter().position(|s| *s == k.key) {
-                self.swallowed.remove(p);
+            if self.swallowed & k.key.bit() != 0 {
+                self.swallowed &= !k.key.bit();
                 return Reaction { swallow: true, ..Reaction::NOTHING };
             }
             return Reaction::NOTHING;
@@ -402,5 +421,29 @@ mod tests {
         c.feed(KeyInput::down(Key::Grave).with_alt());
         let r = c.feed(KeyInput::down(Key::Grave).with_alt().with_shift());
         assert_eq!(r.effect, Some(Effect::Step { backwards: true }));
+    }
+
+    #[test]
+    fn the_chord_owns_no_heap_block_so_feeding_it_from_a_hook_callback_cannot_allocate() {
+        fn is_copy<T: Copy>() {}
+        is_copy::<Chord>();
+        is_copy::<Reaction>();
+        // every key has its own bit in a 16-bit set
+        let all = [Key::Tab, Key::Grave, Key::Left, Key::Right, Key::Up, Key::Down, Key::Enter, Key::Escape, Key::Alt, Key::Other];
+        let mut seen = 0u16;
+        for k in all {
+            assert_eq!(seen & k.bit(), 0, "{k:?} shares a bit");
+            seen |= k.bit();
+        }
+    }
+
+    #[test]
+    fn a_chord_closed_elsewhere_still_swallows_the_release_of_the_key_it_swallowed() {
+        let mut c = Chord::new();
+        c.feed(alt_tab());
+        c.closed_elsewhere();
+        assert!(c.holds(Key::Tab));
+        assert!(c.feed(KeyInput::up(Key::Tab)).swallow, "its press never reached the program, so its release must not either");
+        assert!(!c.holds(Key::Tab));
     }
 }

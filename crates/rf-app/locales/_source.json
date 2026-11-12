@@ -8214,5 +8214,95 @@
   "key": "(adsız)",
   "tr": "(adsız)",
   "en": "(untitled)"
+ },
+ {
+  "id": "fa8f574a",
+  "key": "Windows tuşu rustyfiles Başlat'ını açsın (deneysel)",
+  "tr": "Windows tuşu rustyfiles Başlat'ını açsın (deneysel)",
+  "en": "Windows key opens rustyfiles' Start (experimental)"
+ },
+ {
+  "id": "7eb53d49",
+  "key": "Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Windows tuşuna tek başına basıp bırakmaya bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. Windows tuşlu kısayollara dokunmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.",
+  "tr": "Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Windows tuşuna tek başına basıp bırakmaya bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. Windows tuşlu kısayollara dokunmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.",
+  "en": "While on, rustyfiles listens to the keyboard with a system-wide hook and looks only at a tap of the Windows key by itself; it does not store, record or forward any other key. To keep Windows' own Start menu from opening it sends one invisible key that does nothing. Shortcuts that use the Windows key are left alone. If rustyfiles stops or stalls, Windows goes back to its own behaviour."
+ },
+ {
+  "id": "0d6e292d",
+  "key": "Alt+Tab rustyfiles pencere değiştiricisini açsın (deneysel)",
+  "tr": "Alt+Tab rustyfiles pencere değiştiricisini açsın (deneysel)",
+  "en": "Alt+Tab opens rustyfiles' window switcher (experimental)"
+ },
+ {
+  "id": "147cbee7",
+  "key": "Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Alt+Tab'a (ve açıkken Sekme, oklar, Enter, Esc, Alt'ı bırakmaya) bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Alt bırakılırken öndeki programın menü çubuğu etkinleşmesin diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. rustyfiles durursa ya da takılırsa Windows'un kendi Alt+Tab'ı geri gelir.",
+  "tr": "Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Alt+Tab'a (ve açıkken Sekme, oklar, Enter, Esc, Alt'ı bırakmaya) bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Alt bırakılırken öndeki programın menü çubuğu etkinleşmesin diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. rustyfiles durursa ya da takılırsa Windows'un kendi Alt+Tab'ı geri gelir.",
+  "en": "While on, rustyfiles listens to the keyboard with a system-wide hook and looks only at Alt+Tab (and, while the switcher is open, Tab, the arrows, Enter, Esc and letting go of Alt); it does not store, record or forward any other key. To keep the menu bar of the program in front from activating when Alt is released it sends one invisible key that does nothing. If rustyfiles stops or stalls, Windows' own Alt+Tab comes back."
+ },
+ {
+  "id": "8395560c",
+  "key": "Uygulamayı başlat",
+  "tr": "Uygulamayı başlat",
+  "en": "Start the app"
+ },
+ {
+  "id": "a24b72ea",
+  "key": "Dock'a sabitle",
+  "tr": "Dock'a sabitle",
+  "en": "Pin to the dock"
+ },
+ {
+  "id": "0f642ea9",
+  "key": "Dock'tan kaldır",
+  "tr": "Dock'tan kaldır",
+  "en": "Remove from the dock"
+ },
+ {
+  "id": "d33523e6",
+  "key": "Pencereyi kapat",
+  "tr": "Pencereyi kapat",
+  "en": "Close window"
+ },
+ {
+  "id": "f775da76",
+  "key": "Tüm pencereleri kapat",
+  "tr": "Tüm pencereleri kapat",
+  "en": "Close all windows"
+ },
+ {
+  "id": "d1b0f8d9",
+  "key": "Simge üzerinde pencere önizlemesi",
+  "tr": "Simge üzerinde pencere önizlemesi",
+  "en": "Window previews on icons"
+ },
+ {
+  "id": "0f0daa46",
+  "key": "Dock'taki çalışan bir uygulamanın simgesinde fareyi bir an bekletince, o uygulamanın pencereleri canlı küçük resimlerle üstte görünür: pencereye tıklayınca öne gelir, x pencereyi kapatmasını ister.",
+  "tr": "Dock'taki çalışan bir uygulamanın simgesinde fareyi bir an bekletince, o uygulamanın pencereleri canlı küçük resimlerle üstte görünür: pencereye tıklayınca öne gelir, x pencereyi kapatmasını ister.",
+  "en": "Rest the pointer on a running app's icon in the dock and its windows appear above it as live thumbnails: clicking a window brings it to the front, the x asks it to close."
+ },
+ {
+  "id": "1ee08506",
+  "key": "Simge sağ tık menüsü",
+  "tr": "Simge sağ tık menüsü",
+  "en": "Right-click menu on icons"
+ },
+ {
+  "id": "35b8fa67",
+  "key": "Dock'taki bir uygulamanın simgesine sağ tıklayınca rustyfiles'ın kendi menüsü açılır: uygulamanın adı, Dock'a sabitle / Dock'tan kaldır ve pencereleri kapat. Dock'un sabitleme listesi kendisinindir; Windows'un görev çubuğu sabitlerine yazılmaz.",
+  "tr": "Dock'taki bir uygulamanın simgesine sağ tıklayınca rustyfiles'ın kendi menüsü açılır: uygulamanın adı, Dock'a sabitle / Dock'tan kaldır ve pencereleri kapat. Dock'un sabitleme listesi kendisinindir; Windows'un görev çubuğu sabitlerine yazılmaz.",
+  "en": "A right click on an app's icon in the dock opens rustyfiles' own menu: the app's name, pin to / remove from the dock, and close windows. The dock keeps its own list of pins; the Windows taskbar's pins are never written."
+ },
+ {
+  "id": "fca9e5c0",
+  "key": "Sık kullanılanlar",
+  "tr": "Sık kullanılanlar",
+  "en": "Frequent"
+ },
+ {
+  "id": "c09a9e8f",
+  "key": "Görevler",
+  "tr": "Görevler",
+  "en": "Tasks"
  }
 ]

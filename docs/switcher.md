@@ -4,9 +4,10 @@ Windows' own Alt+Tab, Task View and Snap flyout live in `explorer.exe` and go wi
 is a model (what is listed, in what order), a chord (the keys), a layout (where the cards go), a window (a glass panel with one card
 per window and a live picture on each) and a short sequence that brings the chosen window to the front.
 
-Beside Explorer it is tried with a command and Windows' Alt+Tab is left alone. **Nothing registers a global hotkey or installs a
-keyboard hook**: the hook that will feed the chord in the shell host is written, compiled and tested through its pure part, and
-called by nothing.
+Beside Explorer it is tried with a command and Windows' Alt+Tab is left alone, unless the setting `shell_own_switcher` is on (off
+by default): then the shell host's keyboard layer (`rf_win::winkey`, `docs/design/shell-keys.md`) feeds the chord from the one
+keyboard hook. **Nothing registers a global hotkey, and the hook exists only in the shell host and only while that setting (or
+`shell_win_key`) is on.** `--switcher-preview` installs no hook.
 
 ## Trying it
 
@@ -59,7 +60,7 @@ row is centred. A live picture is `DwmRegisterThumbnail` with the switcher's own
 rectangle for the card; it is registered when the window is on the screen and unregistered when it closes. A minimized window, a
 suspended app and a window DWM refuses show the app's icon large instead.
 
-## For the shell host (later)
+## For the shell host (done in increment B7: `rf-app/src/shell/keylayer.rs`)
 
 The host opens the switcher with `shell::switcher::open(OpenRequest { hooked: true, on_closed: Some(..), .. })` and feeds the
 chord's effects to `apply_effect`. `Effect::Open` is already done by `open` and is ignored by an open session, so feeding it back
@@ -67,7 +68,8 @@ is harmless. `on_closed` is called once however the switcher closed (a card chos
 where the host's own chord is told (`Chord::closed_elsewhere`); without it the chord would go on swallowing Tab, the arrows, Enter
 and Escape for a switcher that is gone. With `hooked` only a click outside puts the window away on its own.
 
-The keyboard hook (`hook.rs`, installed by nothing yet) knows Shift and Ctrl from the events it sees, not from `GetKeyState`
+The keyboard hook (`hook.rs`, installed by `winkey::KeyService` only, see `docs/design/shell-keys.md`; its callback now runs both the
+chord and the Windows-key machine, allocates nothing and takes no lock) knows Shift and Ctrl from the events it sees, not from `GetKeyState`
 (which follows the messages a thread has read, and the hook thread reads none); finds the "windows of this app" key by its scan
 code (0x29, the key above Tab on every layout); and treats a key pressed with Ctrl down as not its own, which keeps AltGr (a right
 Alt plus a Ctrl Windows makes up) and Ctrl+Alt+Tab out of the chord.
@@ -90,4 +92,4 @@ Not run (no window may be shown by the work that wrote this): the panel itself; 
 show over a GPUI window with the glass attached (the first thing to look at in a live run); the glass on this window; the keyboard
 and the foreground in a real run; activation of a minimized, a suspended or an elevated window; the real keyboard hook; the Alt
 release mask key. The real `WH_KEYBOARD_LL` hook, the real activation calls and the real DWM calls are only ever reached by the
-user's own use of the switcher.
+user's own use of the switcher (with `shell_own_switcher` on, the hook; the mask key is `winkey::mask`).

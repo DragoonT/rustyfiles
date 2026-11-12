@@ -2320,6 +2320,20 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::Keyboard,
+            t!("Windows tuşu rustyfiles Başlat'ını açsın (deneysel)"),
+            Some(t!("Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Windows tuşuna tek başına basıp bırakmaya bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. Windows tuşlu kısayollara dokunmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.")),
+            sw("shell-winkey", p, s.shell_win_key, |s, v| s.shell_win_key = v),
+        ),
+        card(
+            p,
+            L::Layers,
+            t!("Alt+Tab rustyfiles pencere değiştiricisini açsın (deneysel)"),
+            Some(t!("Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Alt+Tab'a (ve açıkken Sekme, oklar, Enter, Esc, Alt'ı bırakmaya) bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Alt bırakılırken öndeki programın menü çubuğu etkinleşmesin diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. rustyfiles durursa ya da takılırsa Windows'un kendi Alt+Tab'ı geri gelir.")),
+            sw("shell-altab", p, s.shell_own_switcher, |s, v| s.shell_own_switcher = v),
+        ),
+        card(
+            p,
             L::Calendar,
             t!("rustyfiles takvimini kullan"),
             Some(t!("Dock'taki saate tıklayınca Windows'un takvimi yerine rustyfiles'ın paneli açılır: ay, hafta numarasız gün tablosu, saniyeli saat. Kapalıyken Windows'un bildirim merkezi ve takvimi açılır.")),
@@ -2344,6 +2358,20 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
                 vec![(DockMagnify::Off, t!("Kapalı").into()), (DockMagnify::Subtle, t!("Hafif").into()), (DockMagnify::Full, t!("Tam").into())],
                 |s, v| s.dock_magnify = v,
             ),
+        ),
+        card(
+            p,
+            L::AppWindow,
+            t!("Simge üzerinde pencere önizlemesi"),
+            Some(t!("Dock'taki çalışan bir uygulamanın simgesinde fareyi bir an bekletince, o uygulamanın pencereleri canlı küçük resimlerle üstte görünür: pencereye tıklayınca öne gelir, x pencereyi kapatmasını ister.")),
+            sw("dock-hover-previews", p, s.dock_hover_previews, |s, v| s.dock_hover_previews = v),
+        ),
+        card(
+            p,
+            L::Pin,
+            t!("Simge sağ tık menüsü"),
+            Some(t!("Dock'taki bir uygulamanın simgesine sağ tıklayınca rustyfiles'ın kendi menüsü açılır: uygulamanın adı, Dock'a sabitle / Dock'tan kaldır ve pencereleri kapat. Dock'un sabitleme listesi kendisinindir; Windows'un görev çubuğu sabitlerine yazılmaz.")),
+            sw("dock-app-menu", p, s.dock_app_menu, |s, v| s.dock_app_menu = v),
         ),
         card(
             p,

@@ -53,6 +53,7 @@ pub mod fileactions;
 pub mod fileinfo;
 pub mod journal;
 pub mod jumplist;
+pub mod jumplists;
 pub mod wsearch;
 pub mod preview_host;
 pub mod props;
@@ -76,6 +77,7 @@ pub mod tray_wire;
 pub mod watch;
 pub mod weather;
 pub mod window;
+pub mod winkey;
 pub mod volume;
 pub mod tasklist;
 // (not called `notify`: that is the name of a crate this one uses)

@@ -13,6 +13,9 @@
 //! for the system per frame; the icons are never loaded again for it.
 //!
 //! Left click: start the app / bring its last used window forward / minimise it when it is in front. Middle click: another instance.
+//! Right click: the dock's own app menu (`app_menu.rs`). The pointer resting on a running app's icon: a preview of its windows
+//! (`hover_preview.rs`). Both are anchored on the icon's centre AT REST (it does not move while the icons grow). The pins are the
+//! Windows taskbar's until the user pins or unpins from the menu, then the dock's own list (`own_pins.rs`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -28,6 +31,7 @@ use rf_win::tasklist::{self, Task, TaskWatch};
 
 use super::backdrop::IslandGlass;
 use super::host::{self, Kind};
+use super::{app_menu, hover_preview};
 use super::icons::{self, IconCache};
 use super::look::{self, Env};
 use super::plan;
@@ -70,6 +74,12 @@ pub struct MiddleIsland {
     /// A refresh is running; a change that arrives meanwhile makes it run once more.
     refreshing: bool,
     dirty: bool,
+    /// The icon the pointer is on (for the hover preview), and where the items lie AT REST (logical px from the island's left edge): a
+    /// preview or a menu is anchored on the icon's rest centre, which does not move while the icons grow and shrink under the pointer
+    /// (a preview opens 400 ms after the pointer came, when the bell is still easing in, and the pointer then goes into the preview, so
+    /// the bell shrinks away).
+    hover_ix: Option<usize>,
+    rest_items: Vec<(f32, f32)>,
     _watch: Option<TaskWatch>,
 }
 
@@ -97,7 +107,7 @@ impl MiddleIsland {
         // the taskbar's pins: read now and then again, off the UI thread
         cx.spawn(async move |this, cx| {
             loop {
-                let pins = cx.background_executor().spawn(async { rf_win::dock::pins::read_pins() }).await;
+                let pins = cx.background_executor().spawn(async { super::own_pins::effective_pins() }).await;
                 let alive = this.update(cx, |me, cx| {
                     if !me.pins_loaded || me.pins != pins {
                         me.pins = pins;
@@ -128,8 +138,12 @@ impl MiddleIsland {
             frozen: None,
             refreshing: false,
             dirty: false,
+            hover_ix: None,
+            rest_items: Vec::new(),
             _watch: watch,
         };
+        // (the app menu tells it when the dock's own pin list changed)
+        super::own_pins::register(cx.entity().downgrade(), cx);
         // until the first refresh is done the dock shows what it always has: the separator and the two places
         me.items = model::merge(&[], Vec::new(), 0);
         me.slots = model::slots(&me.items);
@@ -286,7 +300,63 @@ impl MiddleIsland {
         }
     }
 
-    fn click(&mut self, ix: usize) {
+    /// Reads the pins again now (the dock's own list was just changed from the app menu), off the UI thread.
+    pub fn reload_pins(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let pins = cx.background_executor().spawn(async { super::own_pins::effective_pins() }).await;
+            let _ = this.update(cx, |me, cx| {
+                if !me.pins_loaded || me.pins != pins {
+                    me.pins = pins;
+                    me.pins_loaded = true;
+                    me.refresh(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// The icon of item `ix`, if it has been loaded.
+    fn icon_for(&self, ix: usize) -> Option<std::sync::Arc<RenderImage>> {
+        self.icon_srcs.get(ix).and_then(|k| k.as_ref()).and_then(|(key, _)| self.icons.get(key))
+    }
+
+    /// The centre of item `ix` at rest, device px in screen coordinates: the rest glass's left edge plus the rest layout's distance from it.
+    fn icon_anchor_x(&self, ix: usize, cx: &App) -> Option<f32> {
+        let &(x, w) = self.rest_items.get(ix)?;
+        let glass = host::visible_glass_rect(Kind::Middle, cx)?;
+        Some(screen_center_x(glass.left, x, w, cx.global::<Env>().scale))
+    }
+
+    /// The pointer came onto item `ix` (`on`) or left it: a running app's icon is what a preview belongs to.
+    fn item_hover(&mut self, ix: usize, on: bool, cx: &mut Context<Self>) {
+        if on {
+            self.hover_ix = Some(ix);
+            let info = match (self.items.get(ix), self.icon_anchor_x(ix, cx)) {
+                (Some(DockItem::App(a)), Some(anchor_x)) if a.running() => {
+                    Some(hover_preview::IconInfo { app: a.clone(), icon: self.icon_for(ix), anchor_x, glass: self.glass.clone() })
+                }
+                _ => None,
+            };
+            hover_preview::icon_hover(info, cx);
+        } else if self.hover_ix == Some(ix) {
+            // (a leave that arrives after the next icon's enter is not news)
+            self.hover_ix = None;
+            hover_preview::icon_hover(None, cx);
+        }
+    }
+
+    /// A right click on item `ix`: the app menu, for an app.
+    fn right_click(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if !cx.global::<Settings>().dock_app_menu {
+            return;
+        }
+        let (Some(DockItem::App(app)), Some(anchor_x)) = (self.items.get(ix), self.icon_anchor_x(ix, cx)) else { return };
+        app_menu::open(app_menu::MenuRequest { app: app.clone(), icon: self.icon_for(ix), anchor_x, glass: self.glass.clone() }, cx);
+    }
+
+    fn click(&mut self, ix: usize, cx: &mut Context<Self>) {
+        // (a click answers the question a preview asks: it goes)
+        hover_preview::clicked(cx);
         match self.items.get(ix) {
             Some(DockItem::App(app)) => super::actions::click_app(app, rf_win::dock::foreground_root()),
             Some(DockItem::Place(p)) => super::actions::open_place(*p),
@@ -299,6 +369,12 @@ impl MiddleIsland {
             super::actions::middle_click_app(app);
         }
     }
+}
+
+/// The screen x (device px) of the centre of an item that lies at `x`, `w` wide (logical px from the rest island's left edge), given the
+/// rest glass's left edge on the screen (`glass_left`, device px).
+fn screen_center_x(glass_left: i32, x: f32, w: f32, scale: f32) -> f32 {
+    glass_left as f32 + (x + w / 2.0) * scale
 }
 
 /// Whether a pointer move over the dock is worth a frame: never with the magnification off; always when the bell starts or is still
@@ -367,6 +443,7 @@ impl Render for MiddleIsland {
             _ => Frame::at_rest(&rest, rest_width),
         };
         let pic = plan::picture(&frame, &self.slots, inset.margins, BASELINE);
+        self.rest_items.clone_from(&rest);
 
         // the glass and the part of the window that takes the pointer follow the frame (only what moved is sent on)
         let scale = env.scale;
@@ -427,7 +504,9 @@ impl Render for MiddleIsland {
                                     .bg(pal.running_dot(in_front).hsla()),
                             )
                         })
-                        .on_click(cx.listener(move |me, _, _, _| me.click(ix)))
+                        .on_click(cx.listener(move |me, _, _, cx| me.click(ix, cx)))
+                        .on_hover(cx.listener(move |me, on: &bool, _, cx| me.item_hover(ix, *on, cx)))
+                        .on_mouse_up(MouseButton::Right, cx.listener(move |me, _, _, cx| me.right_click(ix, cx)))
                         .on_mouse_up(MouseButton::Middle, cx.listener(move |me, _, _, _| me.middle_click(ix)))
                         .into_any_element()
                 }
@@ -496,6 +575,20 @@ mod tests {
         assert!(move_needs_frame(Full, false, 3.0, true));
         assert!(!move_needs_frame(Full, false, MIN_MOVE - 0.01, true));
         assert!(!move_needs_frame(Full, false, 0.0, true));
+    }
+
+    #[test]
+    fn an_icons_anchor_is_its_rest_centre_on_the_screen_at_any_scale() {
+        // 100 %: the rest glass starts at screen x 700; the first icon lies 12 px (the padding) into it and is 44 wide
+        assert_eq!(super::screen_center_x(700, 12.0, 44.0, 1.0), 734.0, "12 + 22 px into the glass");
+        // 150 %: the same logical place is 1.5 times as far from the glass's edge in device px
+        assert_eq!(super::screen_center_x(1050, 12.0, 44.0, 1.5), 1101.0);
+        // the n-th icon of a row at rest lies 54 px (44 + the 10 px gap) after the one before
+        assert_eq!(super::screen_center_x(700, 12.0 + 3.0 * 54.0, 44.0, 1.0), 734.0 + 162.0);
+        // and the rest layout is what the island hands to it
+        let rest = plan::rest_layout(&[Slot::Icon, Slot::Icon, Slot::Separator, Slot::Icon], plan::middle_width_at_rest(3, 1));
+        assert_eq!(rest[0], (12.0, 44.0));
+        assert_eq!(rest[1].0, 66.0);
     }
 
     #[test]

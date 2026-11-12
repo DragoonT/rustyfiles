@@ -472,6 +472,8 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     }
     // the desktop cover follows its own switch (see shell::cover)
     crate::shell::cover::on_settings(cx);
+    // the keyboard layer follows its two switches (see shell::keylayer)
+    crate::shell::keylayer::on_settings(cx);
     cx.refresh_windows();
 }
 
@@ -487,7 +489,9 @@ pub fn shutdown(cx: &mut App) {
         return;
     }
     let host = cx.remove_global::<Host>();
-    // the desktop cover goes first: its windows close and Explorer's desktop is simply visible again
+    // the keyboard hook goes first of all: from here on Windows' own Start and Alt+Tab are back
+    crate::shell::keylayer::stop(cx);
+    // the desktop cover goes next: its windows close and Explorer's desktop is simply visible again
     crate::shell::cover::stop(cx);
     super::panel::shutdown(cx);
     for p in &host.placed {
@@ -636,10 +640,10 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     cx.set_global(host);
     // the views were drawn once with the margins assumed before the layout was known
     cx.refresh_windows();
-    // The panels (Start and search, the control centre): their windows are made now, hidden, so that opening one is a show and not a
-    // creation. They come AFTER the islands are placed and have their shapes and regions in hand (`setup` below sends them from the
-    // message loop): a panel is not an island, it is never in `Host::placed` and gets no shape and no region. The island's glass that
-    // is passed is only read, for the tone.
+    // The panels (Start and search, the control centre, the calendar, the notifications): only the islands' glass is handed over now (for
+    // the tone); each panel's window is made when it is first opened (`panel_more::toggle_made`), so a panel nobody opens costs nothing.
+    // A panel is not an island, it is never in `Host::placed` and gets no shape and no region. The island's glass that is passed is only
+    // read, for the tone.
     if let Some(left) = panel_left {
         super::panel::init(panel_glass, left, display, scale, geo.placements.left.glass, cx);
     }
@@ -673,6 +677,8 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     apply_reserve(cx);
     // the desktop cover, when its setting is on (see shell::cover)
     crate::shell::cover::on_settings(cx);
+    // the keyboard layer, when one of its settings is on (see shell::keylayer)
+    crate::shell::keylayer::on_settings(cx);
 
     // system events -> the app
     cx.spawn(async move |cx| {

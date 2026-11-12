@@ -7,10 +7,14 @@
 //! * The desktop view (`desktop/`, increment F3) draws the desktop in an ordinary window (`--desktop-preview`).
 //! * Cover mode (`cover`, increment F4): with the setting `shell_desktop_cover` on, the host puts that same view over Explorer's
 //!   desktop, one borderless window per monitor.
-//! * The window switcher (`switcher`, increment G1): our own Alt+Tab panel, so far behind `--switcher-preview` only.
+//! * The window switcher (`switcher`, increment G1): our own Alt+Tab panel, behind `--switcher-preview`, and (increment B7) from
+//!   Alt+Tab itself when the setting `shell_own_switcher` is on.
+//! * The keyboard layer (`keylayer`, increment B7): with `shell_win_key` and/or `shell_own_switcher` on, the host listens to the
+//!   keyboard with one system-wide hook, looks only at the Windows key and Alt+Tab, and opens OUR Start panel and switcher.
 
 pub mod cover;
 pub mod desktop;
+pub mod keylayer;
 pub mod probe;
 pub mod switcher;
 

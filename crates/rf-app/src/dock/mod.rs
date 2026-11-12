@@ -8,6 +8,9 @@
 //!   weather of the city set in Settings. `left.rs`
 //! * MIDDLE: the dock. The apps pinned to the Windows taskbar, the other running apps, a separator, the Recycle Bin and the
 //!   Downloads folder; the icon under the pointer grows. `middle.rs`
+//!   A right click on an app opens the dock's own app menu (`app_menu.rs`: jump-list sections through `jump_source.rs`, the app's name,
+//!   pin / unpin on the dock's own list `own_pins.rs`, close), and resting the pointer on a running app shows its windows
+//!   (`hover_preview.rs`: live pictures, never activated).
 //! * RIGHT: network and volume symbols that show the real state and open our own control centre (`control_centre.rs`; Win+A when
 //!   "rustyfiles denetim merkezini kullan" is off), the time and date (our own calendar panel, `cal_view.rs`; Win+N when
 //!   "rustyfiles takvimi kullan" is off), a bell (our own notification panel, `notif_view.rs`, with a dot while there are notifications;
@@ -30,22 +33,27 @@
 //! full-screen decision are pure and tested in `rf_win::dock` / `rf_win::weather`.
 
 pub mod actions;
+mod app_menu;
 mod backdrop;
 mod cal_view;
 mod cc_model;
 pub mod control;
 mod control_centre;
 mod host;
+mod hover_preview;
 mod icons;
+mod jump_source;
 mod left;
 mod look;
 mod middle;
 mod notif_model;
 mod notif_state;
 mod notif_view;
+mod own_pins;
 mod panel;
 mod panel_parts;
 mod plan;
+mod popup_win;
 mod right;
 mod search;
 mod start;
@@ -76,4 +84,15 @@ pub fn acquire() -> Option<(rf_win::single_instance::InstanceGuard, UnboundedRec
 /// Runs the dock in this (already started) application: opens the islands and keeps them up to date until told to stop.
 pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     host::run(messages, cx);
+}
+
+/// Opens the Start panel, or closes it when it is the open one: what a click on the logo does. The shell host's keyboard layer
+/// (`shell/keylayer.rs`) calls it for a tap of the Windows key. False: it could not open (see `panel::toggle_start_reported`).
+pub fn toggle_start(cx: &mut App) -> bool {
+    panel::toggle_start_reported(cx)
+}
+
+/// Whether a full-screen application is in front (the islands are hidden). The keyboard layer stands down then.
+pub fn is_fullscreen(cx: &App) -> bool {
+    host::is_fullscreen(cx)
 }

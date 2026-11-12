@@ -43,14 +43,21 @@ fn open_with_shell(file: &std::ffi::OsStr, args: &str, dir: Option<&std::path::P
 }
 
 fn start_packaged(aumid: &str) -> anyhow::Result<()> {
+    start_packaged_with(aumid, "")
+}
+
+/// [`start`] of a packaged app with an argument string (a jump-list task such as "New window" carries one).
+pub fn start_packaged_with(aumid: &str, args: &str) -> anyhow::Result<()> {
     use windows::Win32::System::Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance};
     use windows::Win32::UI::Shell::{AO_NONE, ApplicationActivationManager, IApplicationActivationManager};
     use windows::core::PCWSTR;
     crate::shell::ensure_com();
     let id = crate::wide::wide(aumid);
+    let arguments = crate::wide::wide(args);
+    let arguments = if args.is_empty() { PCWSTR::null() } else { PCWSTR(arguments.as_ptr()) };
     let activated = unsafe {
         CoCreateInstance::<_, IApplicationActivationManager>(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)
-            .and_then(|m| m.ActivateApplication(PCWSTR(id.as_ptr()), PCWSTR::null(), AO_NONE))
+            .and_then(|m| m.ActivateApplication(PCWSTR(id.as_ptr()), arguments, AO_NONE))
     };
     match activated {
         Ok(_pid) => Ok(()),

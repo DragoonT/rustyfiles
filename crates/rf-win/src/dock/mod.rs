@@ -25,6 +25,10 @@
 //! | `power` | the Start panel's power menu (lock, sleep, sign out, restart, shut down) and its "Emin misiniz?" step; the user's display name | the menu |
 //! | `startlist` | the app list's order (Turkish alphabet), letter headers, rows, arrow-key movement through the pinned grid and the list | all of it |
 //! | `startpins` | the Start panel's own pinned apps file and its first seeding from the taskbar's pins | all of it |
+//! | `appmenu` | the app menu (right click on an icon): the jump-list sections, the fixed rows (name, pin / unpin, close), the keyboard's walk through them, the height | all of it |
+//! | `preview` | the hover previews: dwell / swap / grace timing of a pointer on running apps' icons, where a pop-up above an icon goes, the cards' grid | all of it |
+//! | `ownpins` | the dock's OWN pin list (`dock-pins.json`): seeded once from the taskbar's pins at the first pin / unpin from the dock's menu, Windows' stores never written | all of it |
+//! | `winops` | a window's title, minimised or not, a posted request to close it | - |
 //! | `startapps` | start an app of "All apps", as administrator (the user's click), find its program (shell thread) | - |
 //!
 //! HOW THE APP USES IT (the order that works):
@@ -46,6 +50,7 @@
 //!
 //! Everything that blocks (COM, the shell, the disk, other programs' windows) is documented as such and meant for a worker thread.
 
+pub mod appmenu;
 pub mod calendar;
 pub mod clock;
 pub mod fullscreen;
@@ -58,14 +63,17 @@ pub mod launch;
 pub mod layout;
 pub mod magnify;
 pub mod model;
+pub mod ownpins;
 pub mod panel;
 pub mod pins;
+pub mod preview;
 pub mod power;
 pub mod startapps;
 pub mod startlist;
 pub mod startpins;
 pub mod system;
 pub mod triggers;
+pub mod winops;
 
 pub use layout::{Islands, Rect, Widths};
 pub use model::{ClickAction, DockApp, DockItem, IconSource, Launch, PinnedApp, Place};

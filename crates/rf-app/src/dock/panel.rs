@@ -3,11 +3,14 @@
 //! who gets the keyboard back, the 120 ms easing); this file puts them on windows. Each panel is a slot: its id, the island it sits
 //! above and lines up with, its window, and the hooks that tell its view what is happening to it.
 //!
-//! WHAT WAS CHOSEN. A panel's window is created once, when the dock starts, and kept HIDDEN; opening is a move, a show and a bring
-//! to the front, not a window creation. At rest that costs one hidden GPUI window per panel (its swap chain at the panel's size and
-//! the view tree, not measured), no timer, no thread and no glass: the glass engine is attached when the panel opens and taken off
-//! when it has closed, so a closed panel costs the engine nothing. While the glass starts (a few frames) the panel paints the plain
-//! fill the popups paint (`glass_watch::panel_fill`).
+//! WHAT WAS CHOSEN. A panel's window is made WHEN IT IS FIRST OPENED (the click that asks for it makes it, from a task of the foreground
+//! executor, `panel_more::toggle_made`) and kept, HIDDEN, from then on; every later opening is a move, a show and a bring to the front.
+//! Until a panel is first asked for it costs nothing at all: no window, no swap chain, no view tree. (They used to be made hidden at the
+//! dock's start; a dock that never opens a panel, or one that opens only the Start panel, held up to four idle GPUI windows for
+//! nothing.) The price is one window creation at the first click of each panel; the time from the click to the panel being shown is
+//! logged at info level (`dock: panel ... shown in ...`) with a note when the window was made for it. A panel at rest has no timer,
+//! no thread and no glass: the glass engine is attached when the panel opens and taken off when it has closed. While the glass starts
+//! (a few frames) the panel paints the plain fill the popups paint (`glass_watch::panel_fill`).
 //!
 //! THE KEYBOARD. The islands are never activated; a panel is. On opening, the window that is in front is remembered; the panel is
 //! brought to the front (the click that opened it was this process's own input, which is what lets it take the foreground) and its
@@ -99,6 +102,12 @@ struct PanelHost {
     watcher: Option<Task<()>>,
     /// What is typed in the Start panel's field (the left island shows it).
     typed: String,
+    /// The islands' glass the panels made later take their tone from (set at the dock's start by `init` and `init_control_centre`).
+    left_island: Option<Rc<RefCell<IslandGlass>>>,
+    right_island: Option<Rc<RefCell<IslandGlass>>>,
+    /// When the button that asked for the panel now opening was clicked, and whether its window had to be made for it (both for the log).
+    clicked_at: Option<Instant>,
+    made_for_click: bool,
 }
 
 impl Global for PanelHost {}
@@ -124,12 +133,17 @@ fn host_global(cx: &mut App) -> &mut PanelHost {
             mouse_was_down: false,
             watcher: None,
             typed: String::new(),
+            left_island: None,
+            right_island: None,
+            clicked_at: None,
+            made_for_click: false,
         });
     }
     cx.global_mut::<PanelHost>()
 }
 
-/// The hidden window of a panel: a transparent pop-up that is not shown yet.
+/// The hidden window of a panel: a transparent pop-up that is not shown yet (made by `popup_win`, which the dock's other pop-ups share;
+/// Alt+F4 in an open panel puts it away, it must not destroy the window: a destroyed window is never opened again).
 fn open_hidden<V: Render + 'static>(
     initial: (f32, f32),
     display: Option<DisplayId>,
@@ -138,36 +152,7 @@ fn open_hidden<V: Render + 'static>(
     build: impl FnOnce(&mut Window, &mut Context<V>) -> V + 'static,
     cx: &mut App,
 ) -> Option<WindowHandle<V>> {
-    let (x, y, _, _) = super::plan::logical(near, scale);
-    let opts = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::new(point(px(x), px(y)), size(px(initial.0), px(initial.1))))),
-        display_id: display,
-        titlebar: None,
-        focus: false,
-        show: false,
-        kind: WindowKind::PopUp,
-        is_movable: false,
-        is_resizable: false,
-        is_minimizable: false,
-        window_background: WindowBackgroundAppearance::Transparent,
-        ..Default::default()
-    };
-    match cx.open_window(opts, move |window, cx| cx.new(|cx| build(window, cx))) {
-        Ok(h) => {
-            // Alt+F4 in an open panel puts it away; it must not destroy the window (a destroyed window is never opened again)
-            let _ = h.update(cx, |_, window, cx| {
-                window.on_window_should_close(cx, |_, cx| {
-                    cx.defer(|cx| close(CloseCause::WindowClose, cx));
-                    false
-                });
-            });
-            Some(h)
-        }
-        Err(e) => {
-            log::error!("dock: cannot make a panel: {e:#}");
-            None
-        }
-    }
+    super::popup_win::open_hidden(initial, display, near, scale, |cx| close(CloseCause::WindowClose, cx), build, cx)
 }
 
 // ---------------------------------------------------------------- the Start panel
@@ -202,17 +187,33 @@ impl Hooks for StartHooks {
     }
 }
 
-/// Makes the Start panel's window, hidden. Called once, from the dock's start-up.
-pub fn init(island: Rc<RefCell<IslandGlass>>, left: Entity<LeftIsland>, display: Option<DisplayId>, scale: f32, near: Rect, cx: &mut App) {
-    let isl = island.clone();
-    let Some(handle) = open_hidden(START_SIZE, display, near, scale, move |window, cx| StartView::new(isl, window, cx), cx) else { return };
-    let Ok(hwnd) = handle.update(cx, |_, window, _| crate::look::window::hwnd_of(window)) else { return };
-    let Ok(view) = handle.entity(cx) else { return };
-    let window = handle.window_id();
+/// The Start panel at the dock's start-up: only remembers the left island (its glass gives the panel its tone, the entity shows what is
+/// typed in the panel). The window is made when the panel is first opened, see [`create_start`]. The other parameters are what the window
+/// used to be made from at this point and are looked up again when it is made (the display may have changed by then).
+pub fn init(island: Rc<RefCell<IslandGlass>>, left: Entity<LeftIsland>, _display: Option<DisplayId>, _scale: f32, _near: Rect, cx: &mut App) {
     let p = host_global(cx);
     p.left = Some(left);
+    p.left_island = Some(island);
+}
+
+/// Makes the Start panel's window, hidden, and its slot. True when it exists afterwards (made now or before).
+fn create_start(cx: &mut App) -> bool {
+    if panel(cx).is_some_and(|p| p.slot(PanelId::START).is_some()) {
+        return true;
+    }
+    let Some((scale, _)) = host::monitor_work(cx) else { return false };
+    let Some(near) = host::visible_glass_rect(Kind::Left, cx) else { return false };
+    let Some(island) = panel(cx).and_then(|p| p.left_island.clone()) else { return false };
+    let display = cx.primary_display().map(|d| d.id());
+    let isl = island.clone();
+    let Some(handle) = open_hidden(START_SIZE, display, near, scale, move |window, cx| StartView::new(isl, window, cx), cx) else { return false };
+    let Ok(hwnd) = handle.update(cx, |_, window, _| crate::look::window::hwnd_of(window)) else { return false };
+    let Ok(view) = handle.entity(cx) else { return false };
+    let window = handle.window_id();
+    let p = host_global(cx);
     p.start = Some(view);
     p.slots.push(Slot { id: PanelId::START, kind: Kind::Left, side: Side::Left, hwnd, window, island, hooks: Rc::new(StartHooks { handle }) });
+    true
 }
 
 // ---------------------------------------------------------------- the control centre
@@ -246,15 +247,29 @@ impl Hooks for CcHooks {
     }
 }
 
-/// Makes the control centre's window, hidden. Called once, from the dock's start-up, after the right island exists.
-pub fn init_control_centre(island: Rc<RefCell<IslandGlass>>, display: Option<DisplayId>, scale: f32, near: Rect, cx: &mut App) {
+/// The control centre at the dock's start-up: only remembers the right island (the glass that gives this panel and the clock's and the
+/// bell's their tone). The window is made when the panel is first opened, see [`create_control_centre`].
+pub fn init_control_centre(island: Rc<RefCell<IslandGlass>>, _display: Option<DisplayId>, _scale: f32, _near: Rect, cx: &mut App) {
+    host_global(cx).right_island = Some(island);
+}
+
+/// Makes the control centre's window, hidden, and its slot. True when it exists afterwards (made now or before).
+fn create_control_centre(cx: &mut App) -> bool {
+    if panel(cx).is_some_and(|p| p.slot(PanelId::CONTROL_CENTRE).is_some()) {
+        return true;
+    }
+    let Some((scale, _)) = host::monitor_work(cx) else { return false };
+    let Some(near) = host::visible_glass_rect(Kind::Right, cx) else { return false };
+    let Some(island) = panel(cx).and_then(|p| p.right_island.clone()) else { return false };
+    let display = cx.primary_display().map(|d| d.id());
     let isl = island.clone();
-    let Some(handle) = open_hidden((super::cc_model::WIDTH, 300.0), display, near, scale, move |window, cx| CcView::new(isl, window, cx), cx) else { return };
-    let Ok(hwnd) = handle.update(cx, |_, window, _| crate::look::window::hwnd_of(window)) else { return };
-    let Ok(view) = handle.entity(cx) else { return };
+    let Some(handle) = open_hidden((super::cc_model::WIDTH, 300.0), display, near, scale, move |window, cx| CcView::new(isl, window, cx), cx) else { return false };
+    let Ok(hwnd) = handle.update(cx, |_, window, _| crate::look::window::hwnd_of(window)) else { return false };
+    let Ok(view) = handle.entity(cx) else { return false };
     let window = handle.window_id();
     let p = host_global(cx);
     p.slots.push(Slot { id: PanelId::CONTROL_CENTRE, kind: Kind::Right, side: Side::Right, hwnd, window, island, hooks: Rc::new(CcHooks { handle, view }) });
+    true
 }
 
 // ---------------------------------------------------------------- opening, watching, closing
@@ -288,12 +303,22 @@ pub fn set_typed(text: &str, cx: &mut App) {
 
 /// The island button's click: opens the Start panel, closes it when it is the open one.
 pub fn toggle_start(cx: &mut App) {
-    toggle(PanelId::START, cx);
+    more::toggle_made(PanelId::START, cx);
+}
+
+/// [`toggle_start`], and says whether it ended with the Start panel opened or closed as asked. False: it was asked to open and could
+/// not (a full-screen program in front, the dock being rebuilt, no glass to sit above); nothing happened. The keyboard layer needs
+/// the answer: it has already kept Windows' own Start shut by then.
+pub fn toggle_start_reported(cx: &mut App) -> bool {
+    let is_open = |cx: &App| panel(cx).is_some_and(|p| p.open == Some(PanelId::START));
+    let was_open = is_open(cx);
+    toggle_start(cx);
+    was_open || is_open(cx)
 }
 
 /// The right island's network or volume symbol: opens the control centre, closes it when it is the open one.
 pub fn toggle_control_centre(cx: &mut App) {
-    toggle(PanelId::CONTROL_CENTRE, cx);
+    more::toggle_made(PanelId::CONTROL_CENTRE, cx);
 }
 
 fn toggle(id: PanelId, cx: &mut App) {
@@ -354,7 +379,15 @@ fn open_panel(id: PanelId, cx: &mut App) {
         geo::show_at(hwnd, rect);
         // (the quiet kind: no tap of the Alt key into the window that is in front; the click that opened the panel was ours)
         rf_win::window::bring_to_front_quietly(hwnd);
-        cx.update(|cx| h.on_shown(dark, cx));
+        cx.update(|cx| {
+            h.on_shown(dark, cx);
+            // the time the user waited: from the click on the button to the panel being on the screen with its glass attached
+            if let Some(p) = cx.try_global::<PanelHost>()
+                && let Some(t) = p.clicked_at
+            {
+                log::info!("dock: panel {} shown in {:?} from the click{}", id.0, t.elapsed(), if p.made_for_click { " (window made for it)" } else { "" });
+            }
+        });
     })
     .detach();
     // the watch of an open panel
@@ -481,6 +514,9 @@ fn put_away_now(id: PanelId, cx: &mut App) {
 
 /// The dock ends: the panels' windows go with it.
 pub fn shutdown(cx: &mut App) {
+    // the pop-ups above the icons (made when first needed) go with the dock
+    super::app_menu::shutdown(cx);
+    super::hover_preview::shutdown(cx);
     if !cx.has_global::<PanelHost>() {
         return;
     }
@@ -493,7 +529,9 @@ pub fn shutdown(cx: &mut App) {
 /// True when every window left is a panel's or one of the desktop's cover windows (or none is left): the islands are gone, the dock
 /// has nothing to show. (The cover windows are not the dock: counting them as live windows would keep the host running with no dock.)
 pub fn only_panels_left(cx: &App) -> bool {
-    let mine: Vec<WindowId> = panel(cx).map(|p| p.slots.iter().map(|s| s.window).collect()).unwrap_or_default();
+    let mut mine: Vec<WindowId> = panel(cx).map(|p| p.slots.iter().map(|s| s.window).collect()).unwrap_or_default();
+    mine.extend(super::app_menu::window_ids(cx));
+    mine.extend(super::hover_preview::window_ids(cx));
     let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
     crate::shell::cover::only_these_left(&open, &mine, &crate::shell::cover::window_ids(cx))
 }

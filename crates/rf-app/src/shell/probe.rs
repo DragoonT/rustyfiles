@@ -21,6 +21,8 @@ pub fn settings_on(s: &Settings) -> Vec<String> {
         ("dock_own_start", s.dock_own_start),
         ("dock_own_control_centre", s.dock_own_control_centre),
         ("shell_desktop_cover", s.shell_desktop_cover),
+        ("shell_win_key", s.shell_win_key),
+        ("shell_own_switcher", s.shell_own_switcher),
     ]
     .into_iter()
     .filter(|(_, on)| *on)

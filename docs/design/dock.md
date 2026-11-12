@@ -15,7 +15,7 @@ it exits.
 | Island | Contents | Clicks |
 | --- | --- | --- |
 | Left (48 px high) | Windows logo, a search field, the weather | logo: our own Start panel (see "Panels, Start and search"; with "rustyfiles Başlat menüsünü kullan" off, the Windows key as before); search field: the same panel with the keyboard in its field, and the text typed there is shown in the field on the island (off: rustyfiles' quick search window); the weather is shown, not clicked |
-| Middle (72 px high at rest) | the apps pinned to the Windows taskbar in its order, the other running apps, a thin separator, the Recycle Bin, Downloads | not running: start it; running: bring its last used window forward; in front: minimise it; middle click: another instance |
+| Middle (72 px high at rest) | the apps pinned to the Windows taskbar in its order, the other running apps, a thin separator, the Recycle Bin, Downloads | not running: start it; running: bring its last used window forward; in front: minimise it; middle click: another instance; right click: the dock's own app menu; the pointer resting on a running app: a preview of its windows (see "The app menu, the hover previews and the dock's own pins") |
 | Right (48 px high) | network and volume glyphs that show the real state (the volume glyph shows mute), the time and date in two lines, a bell | network, volume: our own control centre (see "The control centre"; with "rustyfiles denetim merkezini kullan" off, Windows' quick settings, Win+A, as in version 1); time: our own calendar panel (see "The calendar and the notification panel"; with "rustyfiles takvimini kullan" off, Windows' notification centre and calendar, Win+N, as before); bell: our own notification panel, with a small dot while there are notifications (with "rustyfiles bildirim panelini kullan" off, Win+N as before) |
 
 A dot under an app means it is running; the app in front has a wider dot.
@@ -147,11 +147,19 @@ failure that arrives within that keeps the panel open with a line above the bott
 olabilir.", "Bu işlem yapılamadı. Yeniden deneyin."), a call that takes longer (a sleep returns only when the PC wakes, Windows' consent
 prompt waits for the user) is not waited for, and declining the consent prompt is not a failure.
 
-**What it costs.** Each panel's window (the Start panel's and the control centre's) is made once, when the dock starts, and kept
-hidden: two GPUI windows and their views at rest (memory not measured), no timer, no thread and no glass of theirs (the control
-centre's sources run only while it is open; the sound and the network are followed all the time, as the right island shows them). The glass engine is attached when the panel opens and taken off after it has closed.
-While it is open one 50 ms task looks at the foreground and the mouse buttons. Four seconds after the dock is up the app list, the
-pins and the user's name are read once on the shell thread (about 0.4 s for 273 apps on the machine this was written on).
+**What it costs.** Each panel's window (the Start panel's, the control centre's, the calendar's, the notifications') is made WHEN THE
+PANEL IS FIRST OPENED and kept hidden after that (it used to be made at the dock's start): a dock whose user never opens a panel holds
+no window, no swap chain and no view tree for it. The click that asks for the panel makes the window from a task of the foreground
+executor (`panel_more::toggle_made`, with its `Making` guard so that a second click before the window exists does not toggle the panel
+shut again), then opens it; every later opening is a move and a show. The time the user waited is logged at info level, from the
+click to the panel being on the screen with its glass attached:
+`dock: panel start window made in 31ms from the click` (only the first time) and `dock: panel start shown in 74ms from the click
+(window made for it)`. There is no timer, no thread and no glass of a closed panel (the control centre's sources run only while it is
+open; the sound and the network are followed all the time, as the right island shows them). The glass engine is attached when the panel
+opens and taken off after it has closed. While it is open one 50 ms task looks at the foreground and the mouse buttons. The Start
+panel's app list, pins and the user's name are read when the panel is first made (about 0.4 s for 273 apps on the machine this was
+written on: the first opening shows the empty list for that long, where the old four-second warm-up after the dock's start had it
+ready; this is the price of making nothing at the start).
 
 **The Start panel** (620 x 680 logical px; the logo, and the search field, open it). Top: the search field. Empty query:
 "Sabitlenenler" (the user's pinned apps, a grid of six) and "Tüm uygulamalar" (every installed app in the user's alphabet, Turkish
@@ -280,8 +288,8 @@ no titles).
 Two more panels of the same machinery (`panel.rs`; their slots are in `panel_more.rs`): the same placement above the right island's
 glass (8 px up, lined up with its right edge, kept inside the work area), the same closing rules (Escape, a click elsewhere, another
 window in front, a layout change, the button again), one panel at a time, the glass, the island's tone, the 120 ms easing. Each has
-its own setting (below) and falls back to Win+N when it is off. A panel's window is made hidden at the dock's start only when its
-setting is on; a setting switched on while the dock runs makes the window at the first click (that second way has not been run).
+its own setting (below) and falls back to Win+N when it is off. A panel's window is made at its first click (see "What it costs" above), so a
+setting switched on while the dock runs needs no special case.
 
 ### The clock's panel (a click on the clock)
 
@@ -352,6 +360,94 @@ setting is on; a setting switched on while the dock runs makes the window at the
   Windows' own banners (beside Explorer they still appear; the panel is the list, not a replacement for the pop-ups); get the push
   event without a package identity.
 
+## The app menu, the hover previews and the dock's own pins
+
+Three things that belong to the middle island's icons (shell plan increment B8). Each of the two pop-ups has its window made when first
+needed, kept hidden afterwards, and is placed above the ICON (`rf_win::dock::preview::above_icon`: centred on the icon, 16 px above the
+dock's glass, kept inside the work area), not lined up with an island's edge like the panels.
+
+### The app menu (a right click on an app's icon; setting "Simge sağ tık menüsü", on)
+
+On glass above the icon, top to bottom, like the taskbar's: the app's jump-list SECTIONS (Tasks, the app's own categories, Pinned,
+Recent or Frequent, as the source orders and names them, a title above each that has one), a separator, and the FIXED part: the app's
+name with its picture (starts a new instance, as a middle click does), "Dock'a sabitle" / "Dock'tan kaldır", and for a running app
+"Pencereyi kapat" (one window) or "Tüm pencereleri kapat (n)" (the windows are asked to close the way their own close button does,
+`WM_SYSCOMMAND` with `SC_CLOSE`, posted: the program may ask about unsaved work, and one that has no close command is not sent one).
+The rows and the keyboard's walk are `rf_win::dock::appmenu` (pure, tested).
+
+* A WINDOW IS ACTED ON ONLY WHILE IT IS STILL THE ONE SEEN (`rf_win::dock::winops::WinRef`: the handle and the process it belonged to
+  when the menu opened or the pointer came onto the icon; the close request, a card's activation and the card list check that the
+  handle still belongs to that process and is visible). A menu left open on the keyboard for minutes cannot close a window of another
+  program that was given the number of a destroyed one.
+* A LONG JUMP LIST IS CUT, never scrolled or clipped: at most 10 lines to a section, and fewer when the menu would be taller than the
+  room above the dock; lines go from the end of the last section first (`appmenu::fit_entries`), so the fixed rows at the bottom are
+  always on the screen and the keyboard only reaches rows that are.
+
+* THE MENU OPENS AT ONCE with the fixed part; the sections are asked for on a worker thread afterwards and appear when they arrive
+  (the window is anchored by its bottom edge, so it grows upwards). A highlighted row stays highlighted. Nothing waits for them.
+* THE JUMP-LIST SEAM is `jump_source.rs`: a section is a title and entries, an entry is a title, an optional icon and an opaque action
+  (`Action(String)`). `sections(&JumpApp)` and `run(&JumpApp, &Action)` are the only two functions the menu calls; here they return
+  nothing and do nothing, and wiring them to `rf_win::jumplists` is a matter of those two bodies. Both are called from worker threads.
+* KEYBOARD: Down, Up, Tab (Shift+Tab), Home, End, Enter or Space on the highlighted row, Escape. The menu IS activated (it needs the
+  keys) and gives the keyboard back to the window that had it when it is put away with Escape.
+* CLOSES on Escape, on a mouse button going down anywhere outside it (the dock's own icons too: a right click on another icon closes
+  this menu and that click's release opens the other icon's), when another window takes the foreground (after the 1.2 s grace the panels
+  have), when the dock hides for a full-screen application, when the monitor, its scale or the glass's top changes, on Alt+F4 (only put
+  away) and when a row has been chosen. One menu at a time. While it is open the hover previews are blocked.
+* LOG (info): `dock: app menu shown in <time> from the click at x=<device px>` (with "window made for it" the first time).
+* Only apps have a menu; a right click on the Recycle Bin or Downloads does nothing, as before.
+
+### The dock's own pin list (`own_pins.rs`, `rf_win::dock::ownpins`, file `dock-pins.json` in the config folder)
+
+Until the user pins or unpins from the dock's menu, the middle island shows the apps pinned to the Windows taskbar, read-only, as it
+always has (so nothing changes for a user who does not use the menu). The FIRST pin or unpin copies the taskbar's pins into
+`dock-pins.json` (once, up to 32), applies the change, writes the file atomically and makes the island read it again at once; from
+then on the file is the list, the taskbar's pins are not read for the island and an empty list is the user's choice. The seeded shortcuts are COPIED into
+`dock-pins/` beside the file, so that unpinning in Windows does not take the dock's pin away. WINDOWS' STORES
+(the taskbar's pin folder, `Taskband`) ARE NEVER WRITTEN. An entry holds the name, the identities a running window is matched by (the
+AppUserModelID, the program), how to start it (shortcut, program with arguments, package id) and where its icon comes from; a pin
+whose program is gone stays in the file and out of the island. A file that exists and cannot be read is moved aside
+(`dock-pins.json.broken`), never written over, and the island follows the taskbar meanwhile; a seeding whose taskbar read did not come
+back in time writes nothing, and neither does one whose read came back EMPTY while the pin folder could not be listed or held shortcuts
+that could not be read (`ownpins::empty_read_is_believable`: that would make an empty list the user's list for good). The shortcuts are
+copied only after the change is known to change something (a change that changes nothing leaves no copy and no file). Changes are made
+one at a time under a lock, each reading the file again.
+
+An app is found again among the pins by its AppUserModelID, then its program, then the program it starts, and by NAME only when the
+dock already shows it as pinned (a second build of the same app with the same name is not "pinned"). Not yet done: dragging to reorder
+or to pin.
+
+### The hover previews (setting "Simge üzerinde pencere önizlemesi", on by default for the dock; the dock itself is opt-in)
+
+The pointer resting on a RUNNING app's icon for 400 ms opens a small glass preview above it: one card per window of the app (up to 6
+to a row and 3 rows; a window beyond that is not shown), each with a LIVE picture of the window (DWM, `DwmRegisterThumbnail`, through
+the switcher's `ThumbApi`, this pop-up as the destination; registered after the glass is on, unregistered before the window moves,
+changes size or hides), the app's large icon in the box for a MINIMISED window (or one DWM refuses), the title under the picture, and
+on the card under the pointer a small x at the right end of the title row (not over the picture: DWM's picture is drawn over anything of
+ours that lies on it). A click on a card brings that window to the front with the switcher's activation sequence
+(`rf_win::switcher::activate`, off the UI thread: it may wait a quarter of a second for a minimised window to restore; it flashes
+the window's button if the program refuses the foreground); the x asks the window to close.
+
+* THE TIMING is `rf_win::dock::preview::Machine` (pure, tested): 400 ms dwell; moving to another running app's icon swaps the preview
+  at once; moving from the icon into the preview keeps it open (either order of the two hover events); leaving both closes it after
+  300 ms and coming back inside that time cancels the closing; a click on an icon closes it and it does not come back until the
+  pointer has left that icon; a right click replaces it with the menu (the menu blocks the machine while it is open); a block closes at
+  once. No polling: the app sleeps until the machine's next deadline.
+* IT IS NEVER ACTIVATED AND NEVER TAKES THE KEYBOARD. The panels are activated (they need keys); this is not a panel. Its window is
+  styled like the islands' (`island::make_island`: a tool window with `WS_EX_NOACTIVATE`, `MA_NOACTIVATE` for `WM_MOUSEACTIVATE`, so
+  even a click on a card does not activate it), shown with `SWP_NOACTIVATE` and never brought to the front. A click on a card is still
+  input of this process, which is what lets the activation sequence bring the chosen window forward.
+* It closes when the dock hides for a full-screen application, when the monitor or the work area changes, when the setting is switched
+  off, and when its last window closes; while it is open one 100 ms look removes the cards of windows that have closed and reads the
+  REAL POINTER: Windows sends a window no last mouse move when the pointer leaves it, so the toolkit's hover events never report a
+  pointer that goes from a card straight out of the preview or from an icon up out of the dock's window. When the pointer is on
+  neither the preview nor the dock's glass (`preview::pointer_away`; the part an icon grows over the glass counts as the dock) the look
+  tells the machine that it left both, and the 300 ms of grace runs from there. Expected limit (from reading the toolkit; not yet seen live): after that, coming back onto the very
+  same icon gives no hover event either (the toolkit still believes the pointer is on it), so the preview comes again after the pointer
+  has touched another element of the dock. There is no easing (DWM draws its pictures at full strength, so a fading card would show
+  its picture first).
+* LOG (info): `dock: hover preview shown in <time> at x=<device px> (<n> cards, <m> live pictures)`.
+
 ## Settings (Settings, "Dock (deneysel)" / "Dock (experimental)")
 
 * **rustyfiles takvimini kullan** / Use rustyfiles' calendar. On by default. The clock opens the calendar panel; off: it sends Win+N
@@ -369,6 +465,10 @@ setting is on; a setting switched on while the dock runs makes the window at the
   application desktop toolbar at the bottom of the primary monitor (the middle island's height plus the margins), so maximised
   windows stop above it, and unregisters on exit. Off: it only floats.
 * **Simge büyütme** / Icon magnification. Full by default (see "Magnification").
+* **Simge üzerinde pencere önizlemesi** / Window previews on icons. On by default (`dock_hover_previews`). Off: resting the pointer on
+  an icon shows nothing.
+* **Simge sağ tık menüsü** / Right-click menu on icons. On by default (`dock_app_menu`). Off: a right click on an icon does nothing, as
+  before.
 * **Hava durumu şehri** / Weather city. Empty (the default): no weather is shown and **no network request is made at all**. With a
   city, the dock asks Open-Meteo (`geocoding-api.open-meteo.com` once for the place, `api.open-meteo.com` for the temperature) every
   30 minutes. Nothing else leaves the machine: only the city name you typed and the coordinates it returned; no location API is
@@ -376,7 +476,8 @@ setting is on; a setting switched on while the dock runs makes the window at the
   about again only once an hour.
 
 The dock process is told to read the settings file again when any of these changes: the four switches of the panels (`dock_own_start`,
-`dock_own_control_centre`, `dock_own_calendar`, `dock_own_notifications`), the keep-out switch, the city, the magnification, the animations setting and the four HyperGlass sliders
+`dock_own_control_centre`, `dock_own_calendar`, `dock_own_notifications`), the two switches of the icons' menu and previews
+(`dock_app_menu`, `dock_hover_previews`), the keep-out switch, the city, the magnification, the animations setting and the four HyperGlass sliders
 (`control::Keys`). The process's views read the two panel switches from the settings it loaded last, at every click.
 
 ## The process
@@ -517,8 +618,8 @@ volume and brightness on-screen display for the hardware keys.
 
 ## Not in version 1
 
-Hiding or replacing Windows' taskbar, becoming the shell, other monitors' docks, drag to reorder or pin, jump lists, notification
-badges, thumbnails on hover. Hiding Explorer's taskbar is a later version and needs a watchdog that brings it back if the dock dies.
+Hiding or replacing Windows' taskbar, becoming the shell, other monitors' docks, drag to reorder or pin, the jump-list DATA in the app
+menu (the menu and its seam are there, see below), notification badges, progress rings. Hiding Explorer's taskbar is a later version and needs a watchdog that brings it back if the dock dies.
 
 ## Known limits
 

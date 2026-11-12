@@ -482,11 +482,20 @@ pub struct Settings {
     pub dock_own_notifications: bool,
     /// How much the dock's icons grow under the pointer (off / subtle / full).
     pub dock_magnify: DockMagnify,
+    /// Resting the pointer on a running app's icon in the dock shows a preview of its windows (on; the dock itself is opt-in). Off: nothing.
+    pub dock_hover_previews: bool,
+    /// A right click on an app's icon in the dock opens the dock's own app menu (on). Off: it does nothing, as before.
+    pub dock_app_menu: bool,
 
     // ---- Shell host (shell/: `rustyfiles --shell`, the dock's process); experimental, every switch off by default
     /// Our desktop (the wallpaper, the icons) is drawn over Explorer's, one window per monitor, while the shell host runs. Explorer's
     /// desktop stays underneath and is visible again when the host stops.
     pub shell_desktop_cover: bool,
+    /// A tap of the Windows key alone opens rustyfiles' Start panel instead of Windows' (the shell host listens to the keyboard with a
+    /// system-wide hook while this or `shell_own_switcher` is on; see `shell/keylayer.rs`).
+    pub shell_win_key: bool,
+    /// Alt+Tab opens rustyfiles' window switcher instead of Windows' (same hook).
+    pub shell_own_switcher: bool,
 }
 
 impl Default for Settings {
@@ -595,7 +604,11 @@ impl Default for Settings {
             dock_own_calendar: true,
             dock_own_notifications: true,
             dock_magnify: DockMagnify::Full,
+            dock_hover_previews: true,
+            dock_app_menu: true,
             shell_desktop_cover: false,
+            shell_win_key: false,
+            shell_own_switcher: false,
         }
     }
 }

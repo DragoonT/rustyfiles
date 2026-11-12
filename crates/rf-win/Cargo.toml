@@ -33,6 +33,8 @@ md-5.workspace = true
 sha1.workspace = true
 sha2.workspace = true
 crc32fast.workspace = true
+# the compound files of the jump lists (jumplists/), read from bytes held in memory; the crate's writer is used by tests only
+cfb = "0.14"
 
 [dev-dependencies]
 # the glass_shot example reads and writes pictures

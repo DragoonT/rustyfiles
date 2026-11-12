@@ -43,6 +43,13 @@ Explorer's desktop stays underneath and is visible again when the host stops.
 | Show Desktop / Minimize All | `rf_core::desktop::cover::showdesktop` (bookkeeping, tested) and `rf_win::desktop::showdesktop` (carried out over a trait, tested on a fake). Not bound to a key. |
 | Stopping | the windows close. Nothing of Explorer's was hidden, moved or changed, so there is nothing to put back; `rf_win::desktop::cover` has a test that its code calls nothing that could change or message a window that is not ours, and every call that changes a window starts by checking that the window belongs to this process. |
 
+## Keyboard layer (`shell_win_key`, `shell_own_switcher`)
+
+Two more switches on the same Settings page, both off: a tap of the Windows key alone opens our Start panel, Alt+Tab opens our
+switcher. They need one system-wide keyboard hook, which exists only in this process and only while one of them is on. Rules,
+fail-open design and what was not run: `docs/design/shell-keys.md`. `RUSTYFILES_KEYS_LOG_ONLY=1` for a first try that decides and
+logs but swallows, sends and opens nothing.
+
 ## Known limits
 
 * **One virtual desktop.** The cover windows belong to the virtual desktop they were made on; Windows hides a top-level window of another one while Explorer's own desktop window shows on all of them. On a second virtual desktop the user sees Explorer's desktop and icons, not ours (a rename or delete done on one is true on both, but the picture differs). Showing a window on every desktop needs an undocumented interface; not attempted.

@@ -3,16 +3,17 @@
 //! views and their hooks are new. This file is a child module of `panel.rs` (it is included from there with `#[path]`) so that it
 //! can use the machinery's private parts without making them public.
 //!
-//! WHEN THE WINDOWS ARE MADE. Like the other panels' windows, these are made hidden: opening is a show, not a window creation. But
-//! each is made only when its setting is on (`dock_own_calendar`, `dock_own_notifications`; both on by default): a dock whose user
-//! turned a panel off holds no window for it. A setting switched on while the dock runs makes the window at the first click, from a
-//! task of the foreground executor (outside any update of the app, like every other call that touches a window), and opens it. That
-//! second way is the one that was not run: only the dock's start has been (see the notes of the increment).
+//! WHEN THE WINDOWS ARE MADE. Every panel's window (the Start panel's, the control centre's, the calendar's and the notifications') is
+//! made when the panel is FIRST OPENED, by [`toggle_made`]: the click that asks for it makes the window from a task of the foreground
+//! executor (outside any update of the app, like every other call that touches a window), hidden, opens it, and keeps it for every later
+//! opening. Nothing is made at the dock's start; a panel nobody opens costs nothing, and a setting switched on while the dock runs needs
+//! no special case. The click's time is kept for the log line that says how long the user waited (`panel::open_panel`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::{Hooks, PanelId, Side, Slot, host, host_global, open_hidden, panel};
+use std::time::Instant;
 use crate::dock::backdrop::IslandGlass;
 use crate::dock::cal_view::{self, CalView};
 use crate::dock::host::Kind;
@@ -102,16 +103,22 @@ fn has_slot(id: PanelId, cx: &App) -> bool {
     panel(cx).is_some_and(|p| p.slot(id).is_some())
 }
 
-/// Makes the window of one of the two panels, hidden. False when it cannot be made now (no monitor yet, the right island's glass is
-/// not there). Does nothing, and says true, when the panel is already made.
+/// Makes the window of a panel, hidden. False when it cannot be made now (no monitor yet, the island's glass is not there). Does
+/// nothing, and says true, when the panel is already made.
 fn create(id: PanelId, cx: &mut App) -> bool {
     if has_slot(id, cx) {
         return true;
     }
+    if id == PanelId::START {
+        return super::create_start(cx);
+    }
+    if id == PanelId::CONTROL_CENTRE {
+        return super::create_control_centre(cx);
+    }
     let Some((scale, _)) = host::monitor_work(cx) else { return false };
     let Some(near) = host::visible_glass_rect(Kind::Right, cx) else { return false };
-    // (the tone of the panel is the right island's: the control centre's slot has its glass)
-    let Some(island) = panel(cx).and_then(|p| p.slots.iter().find(|s| s.kind == Kind::Right).map(|s| s.island.clone())) else { return false };
+    // (the tone of the clock's and the bell's panel is the right island's)
+    let Some(island) = panel(cx).and_then(|p| p.right_island.clone()) else { return false };
     let display = cx.primary_display().map(|d| d.id());
     if id == CALENDAR {
         let isl = island.clone();
@@ -136,19 +143,9 @@ fn register(id: PanelId, island: Rc<RefCell<IslandGlass>>, window: WindowId, hwn
     true
 }
 
-fn wanted(id: PanelId, cx: &App) -> bool {
-    let s = cx.try_global::<crate::settings::Settings>();
-    if id == CALENDAR { s.is_none_or(|s| s.dock_own_calendar) } else { s.is_none_or(|s| s.dock_own_notifications) }
-}
-
-/// Makes the windows of the panels whose settings are on. Called once, from the dock's start-up, after the control centre's window.
-pub fn init_extra(cx: &mut App) {
-    for id in [CALENDAR, NOTIFICATIONS] {
-        if wanted(id, cx) && !create(id, cx) {
-            log::warn!("dock: cannot make the {} panel", id.0);
-        }
-    }
-}
+/// Called once from the dock's start-up, where the clock's and the bell's panels' windows used to be made: they are made when first
+/// opened now (see the top of this file), so there is nothing to do.
+pub fn init_extra(_cx: &mut App) {}
 
 // ---------------------------------------------------------------- opening
 
@@ -186,7 +183,14 @@ thread_local! {
     static MAKING: RefCell<Making> = RefCell::new(Making::default());
 }
 
-fn toggle_made(id: PanelId, cx: &mut App) {
+/// A panel's button was clicked: opens the panel, closes it when it is the open one; the first time, the window is made first.
+pub(super) fn toggle_made(id: PanelId, cx: &mut App) {
+    let clicked = Instant::now();
+    {
+        let p = host_global(cx);
+        p.clicked_at = Some(clicked);
+        p.made_for_click = false;
+    }
     if has_slot(id, cx) {
         super::toggle(id, cx);
         return;
@@ -194,10 +198,14 @@ fn toggle_made(id: PanelId, cx: &mut App) {
     if !MAKING.with(|m| m.borrow_mut().begin(id.0)) {
         return;
     }
-    // Not made at the start (its setting was off then): made now, from the message loop and not from this click's update, then opened.
+    // Not made yet: made now, from the message loop and not from this click's update, then opened.
     cx.spawn(async move |cx| {
         cx.update(|cx| {
             if create(id, cx) {
+                let p = host_global(cx);
+                p.clicked_at = Some(clicked);
+                p.made_for_click = true;
+                log::info!("dock: panel {} window made in {:?} from the click", id.0, clicked.elapsed());
                 super::toggle(id, cx);
             } else {
                 log::warn!("dock: cannot make the {} panel", id.0);

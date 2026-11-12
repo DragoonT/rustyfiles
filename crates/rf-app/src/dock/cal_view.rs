@@ -12,8 +12,7 @@
 //! `rf_win::dock::calendar` (pure and tested); [`CalModel`] below holds the chosen day and today.
 //!
 //! WHAT RUNS. The seconds tick only while the panel is open: one task, ended when the panel is hidden, that wakes at each second.
-//! Closed, the panel costs nothing (its window is made at the dock's start and kept hidden, or made on the first click when the
-//! setting was switched on later).
+//! Closed, the panel costs nothing (its window is made at the first click and kept hidden after that).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
