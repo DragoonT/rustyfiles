@@ -56,6 +56,7 @@ use windows_collections::IIterable;
 use super::Cmd;
 use super::capture::{Dirty, MonError, Pumped, is_device_lost};
 use super::gpu::{Gpu, Source};
+use super::rest::Pace;
 
 type R<T> = windows::core::Result<T>;
 
@@ -454,6 +455,15 @@ pub(super) fn min_interval_ticks(hz: u32, power: Power) -> i64 {
 /// (a number of frames a second; `0` is the old behaviour, one refresh period). It exists so that the cap can be compared with no cap
 /// on a live desktop without a new build.
 pub(super) fn interval_for(hz: u32, power: Power) -> i64 {
+    interval_for_pace(hz, power, Pace::Full)
+}
+
+/// [`interval_for`] for a monitor whose glass is not in front: the same policy, and never faster than `rest::BEHIND_FPS` (see `rest.rs`).
+pub(super) fn interval_for_pace(hz: u32, power: Power, pace: Pace) -> i64 {
+    super::rest::interval_ticks(interval_for_full(hz, power), pace, super::rest::behind_fps())
+}
+
+fn interval_for_full(hz: u32, power: Power) -> i64 {
     static OVERRIDE: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
     let fps = *OVERRIDE.get_or_init(|| std::env::var("RUSTYFILES_GLASS_MAX_FPS").ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0));
     match fps {
@@ -523,6 +533,8 @@ pub(super) struct SessionMonitor {
     interval: i64,
     /// A change of the interval that the system refused, already logged.
     interval_failed: bool,
+    /// How fast the monitor's glass wants frames: slower while none of it is in front (`rest.rs`).
+    pace: Pace,
     /// How many times the frame handler ran (frames the capture service announced, whether or not the engine took them).
     arrived: Arc<AtomicU64>,
     /// The exclusion version last sent to this session.
@@ -736,6 +748,7 @@ impl SessionMonitor {
             hz,
             interval,
             interval_failed,
+            pace: Pace::Full,
             arrived,
             sent: None,
             foreign_refused: false,
@@ -978,7 +991,7 @@ impl SessionMonitor {
         if let Some((_, hz)) = monitor_info(self.hmon) {
             self.hz = hz;
         }
-        let want = interval_for(self.hz, power);
+        let want = interval_for_pace(self.hz, power, self.pace);
         if want == self.interval {
             return false;
         }
@@ -996,6 +1009,17 @@ impl SessionMonitor {
                 false
             }
         }
+    }
+
+    /// The pace the glass on this monitor needs (`rest::pace`): a running session takes the new interval at once. Returns whether the
+    /// pace changed.
+    pub(super) unsafe fn set_pace(&mut self, pace: Pace, power: Power) -> bool {
+        if pace == self.pace {
+            return false;
+        }
+        self.pace = pace;
+        self.retune(power);
+        true
     }
 
     /// Sets the interval to exactly this many ticks, whatever the policy says (the measurements compare intervals).

@@ -35,7 +35,11 @@
 //! WHAT IT COSTS. The engine works only for glass that somebody sees: a window that is hidden, minimised, cloaked or completely
 //! covered by opaque windows above it is not prepared, drawn or read back (it keeps reporting `Running` and its last picture), and the
 //! capture session of a monitor that has no seen glass is closed after a few seconds. A session is asked for 60 frames a second at most
-//! (30 on battery). The reasons and the numbers are in `engine.rs`, `wgc.rs`, `cover.rs` and `docs/design/dock.md`.
+//! (30 on battery). Glass that is seen but not in front (a window behind the one the user works in, a dock island) is asked for 20 frames
+//! a second at most and draws from a new backdrop at most 20 times a second, and returns to the full rate when its window is the foreground
+//! window or the pointer is over it (`rest.rs`); with the setting [`set_freeze_when_behind`] the windows the app marks ([`set_freezable`])
+//! are not worked for at all meanwhile. A window nobody sees gives back its backdrop pyramid after 15 s. The reasons and the numbers are
+//! in `engine.rs`, `wgc.rs`, `cover.rs`, `rest.rs` and `docs/design/dock.md`.
 //!
 //! THREADING. One thread ("rf-glass") for the whole process, started by the first [`attach`] and idle (blocked on its channel, no
 //! duplication held) when no window is attached. All D3D / DXGI / DirectComposition objects are made and used on that thread only. The
@@ -66,6 +70,7 @@ mod geom;
 mod gpu;
 mod lens;
 mod luma;
+mod rest;
 mod spring;
 #[cfg(test)]
 mod lens_tests;
@@ -75,6 +80,7 @@ mod look_tests;
 mod shape_tests;
 #[cfg(test)]
 mod tests;
+mod watch;
 mod wgc;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -299,6 +305,28 @@ pub(crate) enum Cmd {
     SetLens { hwnd: isize, slot: u8, lens: Option<LensSpec>, animate: bool },
     /// The process-wide look changed (`set_look`): every window draws again.
     LookChanged,
+    /// A window's glass may (or may not) freeze while the window is not in front, see [`set_freezable`].
+    Freezable { hwnd: isize, on: bool },
+    /// Something that decides what a window is owed changed (the setting [`set_freeze_when_behind`], the foreground window, the pointer
+    /// coming over a window, [`pointer_over`]): every window looks again at what it is owed.
+    CareChanged,
+}
+
+impl Cmd {
+    /// A short name for the engine's per-cause turn counters (`RUSTYFILES_GLASS_STATS=1`).
+    pub(crate) fn name(&self) -> &'static str {
+        match self {
+            Cmd::Attach { .. } => "attach",
+            Cmd::SetOptions { .. } => "set_options",
+            Cmd::SetDark { .. } => "set_dark",
+            Cmd::Detach { .. } => "detach",
+            Cmd::ExtrasChanged => "extras",
+            Cmd::SetLens { .. } => "set_lens",
+            Cmd::LookChanged => "look",
+            Cmd::Freezable { .. } => "freezable",
+            Cmd::CareChanged => "care",
+        }
+    }
 }
 
 /// What the callers see. The engine thread updates it through `set_state`, `fail` and `forget`.
@@ -316,6 +344,8 @@ static ENGINE: Mutex<Option<Sender<Cmd>>> = Mutex::new(None);
 static LENSES_SENT: Mutex<BTreeMap<(isize, u8), LensSpec>> = Mutex::new(BTreeMap::new());
 /// The look of the glass, one value for the whole process: the engine reads it at every draw, so a window attached later has it too.
 static LOOK: Mutex<LookParams> = Mutex::new(LookParams::DEFAULT);
+/// The setting "freeze the glass while not in front" (see [`set_freeze_when_behind`]).
+static FREEZE_BEHIND: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Other windows of ours (menus, flyouts, the Properties window, the preview pane's host) that asked to stay out of the screen capture.
 /// The exclusion only exists while some window has glass. With `CaptureMode::Affinity` it is applied when the first one gets it and
 /// lifted when the last one lets go, so a window that outlives the glass does not stay invisible to screenshots and screen sharing; with
@@ -653,6 +683,58 @@ pub fn set_look(params: LookParams) {
 /// The look set by [`set_look`] (the default until then).
 pub fn look() -> LookParams {
     *look_guard()
+}
+
+/// The setting "freeze the glass while the window is not in front" (off by default, for the whole process). It only touches windows
+/// the app marked with [`set_freezable`]: a dock island, a menu or a panel is never "in front" and must not freeze. A window whose
+/// glass is frozen is not prepared, drawn or read back and does not keep a capture alive; its last picture stays on the screen. It
+/// thaws the moment the window comes to the front or the pointer is over it. Cheap from any thread; calling it with the value it has
+/// does nothing.
+pub fn set_freeze_when_behind(on: bool) {
+    if FREEZE_BEHIND.swap(on, Ordering::AcqRel) != on {
+        send_if_running(Cmd::CareChanged);
+    }
+}
+
+/// The value set by [`set_freeze_when_behind`].
+pub fn freeze_when_behind() -> bool {
+    FREEZE_BEHIND.load(Ordering::Acquire)
+}
+
+/// The windows whose glass is not in front right now (behind or frozen), as the engine last saw them. Written by the engine, read by
+/// [`pointer_over`].
+static NOT_FRONT: Mutex<BTreeSet<isize>> = Mutex::new(BTreeSet::new());
+
+/// Engine side: the windows that are not in front. Returns whether the set changed.
+pub(crate) fn set_not_front(set: BTreeSet<isize>) -> bool {
+    let mut g = NOT_FRONT.lock().unwrap_or_else(|p| p.into_inner());
+    if *g == set {
+        return false;
+    }
+    *g = set;
+    true
+}
+
+/// Whether a window is one of those the engine last saw as not in front.
+fn is_not_front(hwnd: isize) -> bool {
+    NOT_FRONT.lock().unwrap_or_else(|p| p.into_inner()).contains(&hwnd)
+}
+
+/// The app tells that the pointer came over this window (the window's own hover, one event when it enters, nothing while it moves):
+/// the engine then gives the window the full rate and thaws it if it was frozen, without looking on a clock. Cheap from any thread, and
+/// nothing is sent for a window that is in front already (or has no glass), so calling it on every enter costs a lookup.
+pub fn pointer_over(hwnd: isize) {
+    if is_not_front(hwnd) {
+        send_if_running(Cmd::CareChanged);
+    }
+}
+
+/// Marks a window (one of the app's own windows with glass) as one whose glass freezes when [`set_freeze_when_behind`] is on and the
+/// window is seen but not in front. Ignored for a window that has no glass; forgotten when the glass goes.
+pub fn set_freezable(hwnd: isize, on: bool) {
+    if matches!(states().get(&hwnd), Some(GlassState::Starting | GlassState::Running)) {
+        send_if_running(Cmd::Freezable { hwnd, on });
+    }
 }
 
 /// What the window's glass is doing now.

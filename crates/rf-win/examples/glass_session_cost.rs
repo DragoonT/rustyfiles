@@ -8,7 +8,7 @@
 //!                                                                      [--wait 50] [--buffers 2] [--switch] [--drive MS] [--monitor X,Y]
 //!   cargo run --release -p rf-win --example glass_session_cost -- force [--trials 10]
 //!   cargo run --release -p rf-win --example glass_session_cost -- resume [--pause 3000]  (a session used again after a pause: stale frames?)
-//!   cargo run --release -p rf-win --example glass_session_cost -- dirty [--secs 30] [--interval refresh|battery|MS]   (do the dirty rectangles cover every change?)
+//!   cargo run --release -p rf-win --example glass_session_cost -- dirty [--secs 30] [--interval refresh|battery|MS]   [--dup [--slow]]   (do the dirty rectangles cover every change? --dup: Desktop Duplication, --slow: with the gap of the not-in-front pace)
 //!   cargo run --release -p rf-win --example glass_session_cost -- device [--secs 10]    (a D3D device with the renderer, no session)
 //!   cargo run --release -p rf-win --example glass_session_cost -- idle  [--secs 10]     (a device and nothing else: the baseline)
 //!   cargo run --release -p rf-win --example glass_session_cost -- copy                  (GPU time of a whole-monitor copy against a rectangle's)
@@ -204,7 +204,10 @@ fn main() {
                 Some(ms) => ProbeInterval::Millis(ms.parse().unwrap_or(16.7)),
                 None => ProbeInterval::Policy { on_battery: false },
             };
-            match check::probe_dirty(secs, interval, (0, 0)) {
+            // --dup: Desktop Duplication (the fallback backend) instead of a capture session; --slow adds the gap of the "not in front" pace
+            let dup = args.iter().any(|a| a == "--dup");
+            let result = if dup { check::probe_dirty_dup(secs, args.iter().any(|a| a == "--slow"), (0, 0)) } else { check::probe_dirty(secs, interval, (0, 0)) };
+            match result {
                 Ok(r) => println!(
                     "{:.1} s at an interval of {:?} ms: {} pictures, {} differed from the one before, {} of those reported a bounded list of rectangles; changed pixels inside the reported rectangles {}, OUTSIDE {} (in {} pictures; must be 0)",
                     r.secs, r.interval_ms, r.images, r.changed, r.bounded, r.inside, r.outside, r.violations

@@ -9228,5 +9228,17 @@
   "key": "Başlat, denetim merkezi, takvim, bildirimler ve gizli simgeler paneli açılırken ilgili cam ada yukarı büyüyüp panele dönüşür, kapanırken adaya geri küçülür. Sağ adanın simgeleri, saati ve zili panelin alt satırı olarak yerinde kalır ve çalışır: açık panelin düğmesine basmak onu kapatır, satırdaki başka bir düğmeye basmak o panele geçirir (önceki küçülür, yenisi büyür). Kapalıyken paneller eskisi gibi adaların üstünde ayrı pencereler olarak açılır. Animasyonlar kapalıysa tek karede açılır.",
   "tr": "Başlat, denetim merkezi, takvim, bildirimler ve gizli simgeler paneli açılırken ilgili cam ada yukarı büyüyüp panele dönüşür, kapanırken adaya geri küçülür. Sağ adanın simgeleri, saati ve zili panelin alt satırı olarak yerinde kalır ve çalışır: açık panelin düğmesine basmak onu kapatır, satırdaki başka bir düğmeye basmak o panele geçirir (önceki küçülür, yenisi büyür). Kapalıyken paneller eskisi gibi adaların üstünde ayrı pencereler olarak açılır. Animasyonlar kapalıysa tek karede açılır.",
   "en": "When Start, the control centre, the calendar, the notifications or the hidden icons open, the island they belong to grows upwards into the panel, and shrinks back into the island when it closes. The right island's icons, clock and bell stay where they are as the panel's bottom row and keep working: pressing the open panel's button closes it, pressing another button of the row switches to that panel (the first shrinks, the new one grows). When off, the panels open as before, as separate windows above the islands. With animations off they open in one frame."
+ },
+ {
+  "id": "b48198a6",
+  "key": "Odakta değilken camı dondur",
+  "tr": "Odakta değilken camı dondur",
+  "en": "Freeze the glass while not in front"
+ },
+ {
+  "id": "fe3fd448",
+  "key": "Öndeki pencere değilse ve imleç üstünde durmuyorsa camın son görüntüsü kalır; arkada ne değişirse değişsin hiçbir şey yakalanmaz ya da çizilmez. Pencere öne gelince cam yeniden akar.",
+  "tr": "Öndeki pencere değilse ve imleç üstünde durmuyorsa camın son görüntüsü kalır; arkada ne değişirse değişsin hiçbir şey yakalanmaz ya da çizilmez. Pencere öne gelince cam yeniden akar.",
+  "en": "While the window is not in front and the pointer is not over it, the glass keeps its last picture: nothing is captured or drawn, whatever changes behind it. It flows again when the window comes to the front."
  }
 ]

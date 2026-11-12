@@ -183,6 +183,152 @@ visible (the magnification off, or a quarter of a pixel while the bell is settle
 fallback) the compositor may report a new frame after our own `Present`, which restales the islands once (a copy and a pyramid at
 the window's size, then the loop guard skips the draw); this is the same for a moving lens and has not been measured.
 
+## Glass that is not in front (`rf_win::glass::rest`, `engine.rs`)
+
+The engine already did no work for glass nobody can see (hidden, minimised, cloaked, completely covered: `cover.rs`). This section is
+about the glass that IS seen but is not the window the user works in: a window behind the one in front, a dock island, a window on
+the other monitor. Each such window is owed one of three things (`rest::Care`), worked out by the engine on every turn from facts it
+can read without a timer of its own (`Engine::update_care`: `GetForegroundWindow`, `GetCursorPos` + `WindowFromPoint`, and the root
+owner of each window, a few syscalls a turn). The turn itself does not wait for a clock to learn that something changed: a change of
+the foreground window is an event (`glass/watch.rs`, a WinEvent hook on a thread of its own that only puts `Cmd::CareChanged` in the
+engine's channel; one tiny message per change, nothing between), and the pointer coming over one of the app's main windows is another
+(`glass::pointer_over`, called from the window's own hover event, one call on entering; nothing is sent for a window that is in front
+already). Both end the engine's wait like any command. What has no event: a window that another program moves or resizes (it is seen
+by the next turn; see "Frozen" below for how long that can be), and a window that is covered or uncovered (the z order is looked at,
+as before this section). If the foreground hook cannot be set the engine keeps looking on its short clock.
+
+* **Front**: the window (or the window that owns it or that it owns, so an open menu counts) is the foreground window, or the pointer
+  is over it, or it was either a moment ago (400 ms, so a click that moves the focus, or a pointer that crosses an edge and comes
+  back, does not make the frost step down and up). The old behaviour: the capture runs at the normal rate (60 a second, 30 on
+  battery), a changed backdrop is drawn at once.
+* **Behind**: seen, not in front. The monitor's capture is asked for 20 frames a second at most when NO glass on it is in front
+  (`SetMinUpdateInterval` on the running session, `Monitor::set_pace`; Desktop Duplication, which has no such interval, leaves a gap
+  of 50 ms between two `AcquireNextFrame` calls). And a window that is behind while another window of its monitor is in front, so
+  that the capture is fast, still draws from a new backdrop only once the 50 ms are over (`rest::draw_due`; the loop never sleeps
+  past that moment, `Engine::draw_wait`). A lens that slides or a shape that widens does not depend on the capture: it is drawn as
+  often as before. A window whose RECTANGLE changes (a panel growing, a window dragged by another program) is treated as in front
+  for 400 ms from each change (`Win::geometry_changed`), so its glass follows its edge at the full rate whoever has the focus. The
+  engine's quiet wait for a frame is 100 ms instead of 50 ms while no glass is in front, a capture session is used and no glass
+  window of another process of ours was seen at the last scan (`rest::quiet_wait_ms`; a frame or a command ends the wait anyway).
+  THAT LONGER WAIT WAS NOT SHOWN TO LOWER THE ENGINE THREAD'S WAKE-UPS (see the measurements): it stays because it cannot delay
+  anything the events above deliver, not because a number supports it.
+* **Frozen**: only for a window the app marked (`set_freezable`: the main windows, not the dock's islands or a menu) and only when the
+  setting "Odakta değilken camı dondur" / "Freeze the glass while not in front" (Settings, Appearance, in the HyperGlass card; off by
+  default; `hg_freeze_behind`) is on, and only once the window has shown a picture. It is then treated like a covered window: not
+  prepared, not drawn, not read back, not counted when the engine decides what to capture (a monitor with only frozen glass lets its
+  session go after 5 s), and its last picture stays on the screen. It thaws the moment the window is in front or the pointer is over
+  it, and is drawn from a fresh backdrop, presented whatever the loop guard remembers, like a window that comes out from under a
+  cover. While all the engine's glass is frozen it sleeps up to 1 s (`FROZEN_NET`) and is woken by the two events above; the second
+  is only the net for a frozen window that another program moves (a geometry change thaws it). That is a clock, and it is the only
+  one this section adds: about 1 turn a second in that state, not measured; without the foreground hook the engine looks every 100 ms
+  while all its glass is covered or frozen, as it does for covered glass. (Glass that is COVERED is still looked at every 100 ms, as
+  before this section: nothing tells the engine that the window above it went away.)
+
+`RUSTYFILES_GLASS_BG_FPS=<n>` (read once) overrides the 20; `0` turns the rate rules off (`rest::rules_on`): every seen window is
+treated as in front (nothing slowed, nothing frozen, the old quiet wait, no Desktop Duplication gap), for comparing on a live desktop
+without a new build. It does NOT turn off what a window nobody sees gives back (the pyramid after 15 s), the scan for glass of other
+processes (step 1) or Desktop Duplication's use of its dirty rectangles, so it is the old behaviour only for what the rules slow.
+
+**Why Desktop Duplication frames that stand for several are "changed everywhere".** The engine leaves Desktop Duplication frames alone
+for 50 ms while no glass is in front (`DupMonitor::gap`); the duplication then reports one frame for several of the display
+(`AccumulatedFrames` above 1). How the system merges the dirty and move rectangles of the frames in between was not checked against
+a moving desktop (the probe `glass_session_cost dirty --dup --slow` was written for it and has not been run), and a
+window that is not drawn when its backdrop changed keeps an old frost, which no CPU number would show. Such a frame is therefore
+taken as changed everywhere (`capture::dup_dirty`); only a frame that is exactly one frame of the display uses its rectangles. Cost:
+while content moves behind seen glass, every window of that monitor is drawn again at its own 20 a second, not only the ones the
+rectangles touch. For the capture session the rectangles are used at 50 ms on the evidence of the earlier probe at 400 ms (54 frames,
+none outside) and 16.7 ms; the probe at 50 ms (`glass_session_cost dirty --interval 50`) has not been run either. It is item 6 of the
+live test.
+
+**What a window that nobody sees gives back.** After 15 s of not being worked for (hidden, covered or frozen) a window drops its
+backdrop pyramid (`Win::region`; the swap chain stays, it holds the picture the window shows) and, when no glass is worked for at all,
+the driver is told to release what it caches for the device (`IDXGIDevice3::Trim`). The next draw makes the pyramid again after the
+first fresh capture, before anything is shown.
+
+**Desktop Duplication reports where a frame changed** (`capture::frame_dirty`: the dirty rectangles and the destinations of the move
+rectangles of the frame that is held). Before, every frame was treated as touching every window, so a change anywhere on the monitor
+(a video, a clock, a visualiser) made every glass window copy, blur and read back its backdrop, only for the loop guard to find nothing
+had changed under it. Anything the duplication does not say clearly is "everywhere", as before, and so is a frame that stands for more
+than one frame of the display (above).
+
+**What it measured** (2026-11-12 and 13). A 900 x 560 glass window and a Mica window of the same size, each a test copy of its own
+with its own settings folder, neither activated, about 25 s per state. The picture behind the glass was a still window of ours, or a
+window of moving bars of ours at about 60 repaints a second (the "backdrop changes" line of the script is the proof the bars moved; only
+the later runs have it). CPU is a percentage of ONE core, GPU the sum of the process's GPU engines. Each cell is every run, in the order
+before1/before2/before3 and after1/after2/after3; a median of three is shown only where there are three valid runs. The runs are NOT
+alike: the "before" and "after" executables were built at different times and the Mica control process, which this change does not
+touch, differs between them too (working set 87 to 92 MB in the before runs, 106 MB in the first after run, 88 to 92 MB in the other
+two), so a difference smaller than the spread inside one column is not a result. What is below is what holds and what does not.
+
+*Desktop Duplication* (that evening `CreateForMonitor` of the capture session failed with E_INVALIDARG on both monitors for every
+process, ours and a windowless probe alike, so the session path was measured only the next day, below):
+
+| state | CPU % before | CPU % after | GPU % before | GPU % after | wake-ups/s before | after |
+|---|---|---|---|---|---|---|
+| seen, not in front, still | 7.85 / 3.87 / 1.23 (median 3.87) | 0.88 / 0.79 / 0.77 (0.79) | 2.3 / 0.58 / 0.03 | 0 / 0.02 / 0.25 | 1215 / 740 / 395 | 359 / 436 / 463 |
+| seen, not in front, moving behind | 18.27 / (1.06) / 16.69 | 2.05 / 0.66 / 1.97 | 5.44 / (0.11) / 3.33 | 0.34 / 0.02 / 0.36 | 2644 / (414) / 1848 | 462 / 415 / 494 |
+| completely covered | 0.31 / 0.31 / 0.77 (0.31) | 0.44 / 0.55 / 1.17 (0.55) | 0 / 0 / 0 | 0 / 0 / 0.14 | 275 / 262 / 286 | 257 / 280 / 385 |
+| minimised | 0.25 / 0.31 / 0.66 (0.31) | 0.25 / 0.30 / 0.00 (0.25) | 0 / 0 / 0 | 0 / 0 / 0 | 257 / 248 / 258 | 251 / 262 / 248 |
+
+| state | private MB before | private MB after | GPU memory MB before | after | working set MB before | after |
+|---|---|---|---|---|---|---|
+| seen, not in front (still, moving) | 127 / 127 / 124 and 127 / 127 / 125 | 125 / 124 / 126 and 127 / 124 / 127 | 75 | 75 to 76 | 108 / 109 / 103 and 108 / 109 / 104 | 140 / 112 / 104 and 142 / 112 / 105 |
+| completely covered | 127 / 127 / 125 | 103 / 103 / 126 | 75 / 75 / 75 | 41 / 41 / 76 | 108 / 109 / 104 | 139 / 111 / 103 |
+| minimised | 140 / 141 / 139 | 103 / 102 / 102 | 90 / 90 / 90 | 41 / 41 / 41 | 108 / 108 / 104 | 139 / 111 / 101 |
+
+(Figures in brackets: the second before run's "moving" cost 1.06 % CPU, so the mover evidently was not moving then (a check picture was
+taken to find out why), and it is not a before of the moving case. Only the third after run and the session runs carry the "backdrop
+changes" check that proves the bars moved (321 of 3525 sampled pixels in 250 ms in the third after run); that the mover moved in the
+first and third before runs (16 to 18 %) and in the first two after runs (2.05 and 0.66 %) is not proven by a check of their own, and
+the 0.66 % of the second after run is below the other two.)
+
+What holds: (1) **Moving behind seen glass**: about 17 to 18 % of a core and 3 to 5 % GPU before (two valid runs) against about 2 %
+and 0.02 to 0.4 % after (three runs); the engine took every frame of the monitor and drew all of them (620 frames and 312 draws in
+5 s) and now takes and draws 20 a second (99 frames, about 96 draws). (2) **Minimised and covered, memory**: the private bytes fall from
+about 127 (covered) or 140 (minimised) MB to about 103 and the GPU memory from 75 or 90 MB to 41 MB, in 2 of 3 covered runs and in 3 of
+3 minimised runs; the third covered run did not give the memory back (1.17 % CPU, 0.14 % GPU, 385 wake-ups: it looks like an uncovered
+window, the cause was not looked into), so for "covered" the saving was seen in two runs out of three. What does NOT
+hold: the "still" row (the spread of the before runs, 1.2 to 7.9 %, is larger than every difference; the first run had the user's own
+screen behind the glass and changing), the "covered" and "minimised" CPU and wake-up figures (0.25 to 1.2 %, 250 to 390 wake-ups in
+both columns: no saving shown, and the covered after median is higher than the before one), the working set (not lower after; the
+140 MB of the first after run was also seen in its Mica control), and GPU memory in the "seen" states (unchanged). The wake-up counts
+are of the whole process; 200 of them a second in every glass process are the display driver's own threads (two of them at exactly 100
+a second, one per D3D device) and cannot be reached from here. In a Mica process the biggest idle cost of ours is the GPUI fork's
+renderer monitor thread (a 500 ms sampler, 6 to 21 wake-ups a second).
+
+*The same on the capture session* (the default backend; 2026-11-13, 28 s per state, ONE run before and ONE after, the same two test
+copies, the user's own screen around them, so the "still" rows are not still: other windows changed on the monitor, and the "backdrop
+changes" probe saw 0 changed pixels in the still row and 639 to 657 in the moving row). Noisy, read the direction, not the decimals:
+
+| state | CPU % before / after | GPU % before / after | wake-ups/s before / after | private MB | GPU memory MB | working set MB |
+|---|---|---|---|---|---|---|
+| seen, not in front, "still" | 3.42 / 2.11 | 0.23 / 0.05 | 883 / 728 | 128 / 125 | 90 / 90 | 110 / 140 |
+| seen, not in front, moving behind | 5.95 / 4.57 | 1.10 / 0.46 | 1449 / 1609 | 128 / 127 | 90 / 106 | 110 / 142 |
+| minimised | 0.39 / 0.25 | 0 / 0 | 273 / 261 | 128 / 104 | 105 / 56 | 109 / 140 |
+
+The completely covered state was NOT measured on this path: the script's cover window (a PowerShell process that has to compile its
+form first) came late, so the window was not covered during the sample (3.41 % CPU and 1026 wake-ups before, 1.66 % and 537 after:
+both are those of an uncovered window).
+
+The frames the engine took in the moving case: 290 per 5 s before (the monitor's rate), 96 per 5 s after (19 a second). What this
+supports: the cap of 20 frames a second on the session path, and that a minimised window gives back about 24 MB of private bytes and
+49 MB of GPU memory. What it does NOT support: any CPU, GPU or wake-up saving worth the name on the session path (one run each, the
+difference is inside the noise seen on the Desktop Duplication path), the covered state, and anything about
+working sets (the after copy's 140 MB is also in its Mica control: 88 to 106 MB). **Wake-ups did not fall on this path**: the
+`rf-glass` thread woke 521 times a second in the "still" state before and 517 after, in the moving state 765 and 935 (up), and
+142 times a second on Desktop Duplication; the 100 ms quiet wait therefore did nothing visible, and it was not found what wakes the
+thread 500 times a second when the capture delivers at most 20 frames a second and nothing changes behind the glass (the 50 ms scan
+for glass windows of other processes, `crossproc.rs`, costs about 0.3 ms a scan on this PC with 311 top-level windows, about 0.6 % of a
+core, and is part of the turn, not a wake source). The engine now counts why its thread wakes (turns, commands by name, waits for a
+frame that ended with and without one, command waits that ran out) and logs it with the other statistics under
+`RUSTYFILES_GLASS_STATS=1`; the first live run with that on says what it is. Until then wake-ups are a goal NOT met on the session path.
+
+A covered window measured in an own run with the debug log (17.4 s sample, 0.36 % CPU, 269 wake-ups, 105 MB private) is a diagnosis
+run, not a table row, and shorter than the 20 s asked for: its log shows the window reported covered, uncovered again about 5 s
+later, and the capture session closing about 10 s after the first report, so about 10 s of the sample came before the close. The
+scratchpad of this track holds 10 launches of the two test copies (6 on Desktop Duplication, 2 on the session, 1 cover diagnosis, 1
+picture): the whole budget. The review that followed made no launch.
+
 ## Panels, Start and search
 
 A panel is a borderless pop-up window of the dock process on HyperGlass that opens 8 px above an island's visible glass, lined up with

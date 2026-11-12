@@ -60,7 +60,10 @@ macro_rules! prop {
 }
 
 /// How often the engine looks at the other processes' windows while some glass is seen. A new window of another process is left out
-/// of the capture at most this long (plus the engine's own turn, at most `QUIET_WAIT_MS`, and one send of the list) after it showed.
+/// of the capture at most this long (plus the engine's own turn, and one send of the list) after it showed. The turn is at most the
+/// quiet wait of 50 ms while a glass window of another process is known; when none was seen at the last scan and no glass is in front
+/// it may be `rest::BEHIND_QUIET_WAIT_MS` (100 ms, `rest::quiet_wait_ms`): the first such window is then noticed up to about 150 ms
+/// after it showed, still well inside `HOLD`.
 pub(super) const SCAN_EVERY: Duration = Duration::from_millis(50);
 
 /// How long a window that no longer has to be left out stays in the list. Two processes scan on their own clocks, so after a window
@@ -68,7 +71,8 @@ pub(super) const SCAN_EVERY: Duration = Duration::from_millis(50);
 /// the process that now has to STOP does. If the stopping one let go at once, both pictures would hold each other for that time (the
 /// very loop this file prevents, a flash on every change of the z order). Letting go only after this long makes the order the safe
 /// one: both leave each other out for a moment (a window shows what is behind both, as inside one process), never neither. It is far
-/// more than the latency of a start (`SCAN_EVERY` + 50 ms wait + a send of a few ms); a test steps both clocks through it.
+/// more than the latency of a start (`SCAN_EVERY` + the engine's turn, 50 ms, or 100 ms before the first foreign window is known,
+/// + a send of a few ms); a test steps both clocks through it, with a latency up to 100 ms.
 pub(super) const HOLD: Duration = Duration::from_millis(250);
 
 /// Marks a window as one that has glass (`true`) or takes the mark off. Cheap, from any thread; a handle that is not a window of this

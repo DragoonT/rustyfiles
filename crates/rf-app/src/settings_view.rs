@@ -1098,6 +1098,13 @@ fn hyperglass_card(p: &Palette, s: &Settings, cx: &mut App) -> AnyElement {
             .into_any_element();
         rows.push(sub(p, which.title(), Some(which.desc()), control));
     }
+    // not a look but a cost: the glass of a window that is not in front stops following the screen (off by default)
+    rows.push(sub(
+        p,
+        t!("Odakta değilken camı dondur"),
+        Some(t!("Öndeki pencere değilse ve imleç üstünde durmuyorsa camın son görüntüsü kalır; arkada ne değişirse değişsin hiçbir şey yakalanmaz ya da çizilmez. Pencere öne gelince cam yeniden akar.")),
+        sw("hg-freeze", p, s.hg_freeze_behind, |s, v| s.hg_freeze_behind = v),
+    ));
     shell(p)
         .child(card_body(p, L::Sparkles, t!("HyperGlass ayarları").into(), Some(t!("Cam görünümünü ayarlayın. Değişiklikler açık tüm pencerelerde hemen görünür.").into()), Some(reset)))
         .child(div().h(px(1.)).bg(p.divider))

@@ -420,6 +420,9 @@ pub struct Settings {
     pub hg_refraction: u8,
     pub hg_saturation: u8,
     pub hg_surface: u8,
+    /// Freeze the glass of this app's windows while they are not in front: the last picture stays and nothing is captured or drawn for
+    /// the window until it is in front again or the pointer is over it (`rf_win::glass::set_freeze_when_behind`). Off by default.
+    pub hg_freeze_behind: bool,
     /// UI font family; `None` = Segoe UI Variable / system.
     pub font: Option<String>,
     pub show_toolbar: bool,
@@ -630,6 +633,7 @@ impl Default for Settings {
             hg_refraction: HG_DEFAULT[2],
             hg_saturation: HG_DEFAULT[3],
             hg_surface: HG_DEFAULT[4],
+            hg_freeze_behind: false,
             font: None,
             show_toolbar: true,
             show_statusbar: true,
@@ -888,6 +892,7 @@ impl Settings {
         // HyperGlass: the engine redraws every glass window once when the look changes, and does nothing for the same look again
         HG_SURFACE.store(self.hg_surface.min(100), Ordering::Relaxed);
         rf_win::glass::set_look(self.hyperglass_look());
+        rf_win::glass::set_freeze_when_behind(self.hg_freeze_behind);
         gpui_windows::SMOOTH_SCROLL.store(self.smooth_scroll, Ordering::Relaxed);
         THEME.store(
             match self.theme {

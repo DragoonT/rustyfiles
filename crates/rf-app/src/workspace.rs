@@ -3260,6 +3260,9 @@ impl Workspace {
         }
         self.glass_hwnd = hwnd;
         self.glass_dark = Some(dark);
+        // this is a window the user works in: its glass may freeze while it is not in front, if the setting is on (a dock island or a
+        // menu never does)
+        rf_win::glass::set_freezable(hwnd, true);
         // The engine reports from its own thread, so ask it: every 50 ms until it has drawn (then the window turns see-through), and
         // after that every 500 ms, so a glass that is lost later (a removed graphics device) is noticed within half a second.
         let generation = self.glass_gen;
@@ -3770,6 +3773,13 @@ impl Render for Workspace {
             .size_full()
             .bg(p.window_bg)
             .text_color(p.text)
+            // the pointer coming over the window gives its glass back the full rate (and thaws it): one event on entering, none while
+            // it moves
+            .on_hover(cx.listener(|this, over: &bool, _, _| {
+                if *over && this.glass_hwnd != 0 {
+                    rf_win::glass::pointer_over(this.glass_hwnd);
+                }
+            }))
             .on_action(cx.listener(|this, _: &GoBack, _, cx| this.with_tab(cx, |v, cx| v.back(cx))))
             // Windows' own dialogs (credentials, reconnect at sign-in); the drive list notices
             // the new / removed drive by itself

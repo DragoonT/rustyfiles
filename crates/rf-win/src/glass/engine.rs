@@ -18,6 +18,13 @@
 //! mirror are tens of megabytes of video memory, and the capture service stops working for us), and opened again on demand; a failure
 //! to open it again is tried again a few times with a pause (`Reopen`) before the whole process gives up the session backend.
 //!
+//! WORK ONLY AS OFTEN AS IT IS LOOKED AT. Glass that is seen but not in front (not the foreground window, the pointer not over it,
+//! `rest.rs`) follows the screen at 20 frames a second at most: its monitor's capture is asked for that rate when no glass on it is in
+//! front, and a window that is behind while another one of its monitor is in front still draws from a new backdrop only at that rate.
+//! The window the app marks and the setting asks for can be frozen: it is then left out like a covered one. A window that nobody
+//! sees gives back its backdrop pyramid after a while. A change of the foreground window (`watch.rs`) and the pointer coming over a window
+//! (`glass::pointer_over`) are events that wake the loop; the only clock added is the 1 s net while all glass is frozen (`FROZEN_NET`).
+//!
 //! The loop never spins: it waits on the command channel when there is nothing to poll, waits inside AcquireNextFrame (or on the session's
 //! frame token) when it has a capture, and sleeps when neither happened. While a lens moves or fades it is paced by the display instead
 //! (`pace`): one turn per refresh, and none of the other waits. A glass SHAPE that moves (a dock island widening) is not paced: its
@@ -39,12 +46,12 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_PRESENT, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
-    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGIFactory2, IDXGISwapChain1,
+    DXGI_USAGE_RENDER_TARGET_OUTPUT, IDXGIDevice, IDXGIDevice3, IDXGIFactory2, IDXGISwapChain1,
 };
 use windows::Win32::Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext};
-use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, IsIconic, IsWindow, IsWindowVisible, IsZoomed};
+use windows::Win32::UI::WindowsAndMessaging::{GA_ROOTOWNER, GetAncestor, GetClientRect, GetCursorPos, IsIconic, IsWindow, IsWindowVisible, IsZoomed, WindowFromPoint};
 use windows::core::{BOOL, Interface};
 
 use super::capture::{Dirty, MonError, Monitor, Pumped, is_device_lost, locate};
@@ -53,6 +60,8 @@ use super::crossproc::{self, Foreign};
 use super::geom::Rc;
 use super::gpu::{Geometry, Gpu, LensList, Look, Region, Renderer, glass_pass, prep, region_pad, reuse};
 use super::lens::LensSet;
+use super::rest::{self, Care};
+use super::watch;
 use super::wgc::{self, Access, Exclusion, Power};
 use super::{CaptureMode, Cmd, GlassOptions, GlassState, Shadow, set_mode};
 
@@ -93,6 +102,9 @@ const SESSION_GRACE: Duration = Duration::from_secs(5);
 /// foreground window, or a move of it, looks at once (`Engine::update_cover`).
 const COVER_EVERY: Duration = Duration::from_millis(500);
 const COVER_POLL: Duration = Duration::from_millis(100);
+/// The longest the loop sleeps while all its glass is frozen and the foreground window is watched by an event: the net for a frozen
+/// window that another program moves or resizes (no event reaches the engine for that).
+const FROZEN_NET: Duration = Duration::from_millis(1000);
 /// How often the power state (and with it the capture rate) is looked at.
 /// The pauses before a capture session that could not be opened again (after it had worked in this run) is tried once more. A failure
 /// after the last of them is a real one: the process goes over to Desktop Duplication.
@@ -104,6 +116,20 @@ const DEVICE_CHECK_EVERY: Duration = Duration::from_secs(1);
 const ACCESS_CHECK_EVERY: Duration = Duration::from_secs(10);
 
 /// The wait of a turn on a quiet desktop. Only Desktop Duplication needs the shorter one while a lens is held (see `LENS_WAIT_MS`).
+/// How long the loop sleeps when no glass is worked for. Covered glass may come into view at any moment and nothing tells (the z order
+/// is looked at), so it is looked at often. Glass that is only frozen comes back by an event (the foreground window changed, the
+/// pointer came over the window), so with the foreground watch set it sleeps `FROZEN_NET`, which is only the net for what has no event
+/// (the window moved by another program); without the watch it is looked at as often as covered glass. Hidden glass is waited for as before.
+fn idle_wait(covered: bool, frozen: bool, events: bool) -> Duration {
+    if covered || (frozen && !events) {
+        COVER_POLL
+    } else if frozen {
+        FROZEN_NET
+    } else {
+        IDLE_WAIT
+    }
+}
+
 fn quiet_wait_ms(mode: CaptureMode, lens_held: bool) -> u32 {
     if lens_held && mode != CaptureMode::Session { LENS_WAIT_MS } else { QUIET_WAIT_MS }
 }
@@ -141,6 +167,34 @@ impl Gfx {
         let dcomp: IDCompositionDevice = DCompositionCreateDevice(&dxgi_dev).map_err(|e| format!("cannot create the DirectComposition device: {e}"))?;
         let factory: IDXGIFactory2 = CreateDXGIFactory1().map_err(|e| format!("cannot create the DXGI factory: {e}"))?;
         Ok(Gfx { r, factory, dcomp, luid })
+    }
+
+    /// Lets the driver release the memory it caches for this device (what Windows asks of an app that goes to the background). Nothing
+    /// is bound or in flight when it is called; the next draw allocates what it needs again.
+    unsafe fn trim(&self) {
+        self.r.unbind();
+        self.r.g.ctx.ClearState();
+        self.r.g.ctx.Flush();
+        if let Ok(d) = self.r.g.dev.cast::<IDXGIDevice3>() {
+            d.Trim();
+        }
+    }
+}
+
+/// The window that owns `hwnd` all the way up (itself when it is not owned): the window the user would call "the app's window".
+fn root_owner(hwnd: isize) -> isize {
+    unsafe { GetAncestor(hwnd_of(hwnd), GA_ROOTOWNER).0 as isize }
+}
+
+/// The root owner of the window under the pointer, 0 when there is none (or the pointer cannot be read).
+fn root_at_pointer() -> isize {
+    unsafe {
+        let mut p = POINT::default();
+        if GetCursorPos(&mut p).is_err() {
+            return 0;
+        }
+        let h = WindowFromPoint(p);
+        if h.0.is_null() { 0 } else { GetAncestor(h, GA_ROOTOWNER).0 as isize }
     }
 }
 
@@ -314,6 +368,48 @@ impl Stats {
     }
 }
 
+/// Why the engine thread woke, counted per cause and logged with the other statistics (`RUSTYFILES_GLASS_STATS=1`). On the capture-session
+/// path the thread was seen waking about 500 times a second on a desktop where nothing changed behind the glass, and the reason was not
+/// found by reading the code; these counters are there to find it on a live desktop instead of guessing.
+#[derive(Default)]
+struct Turns {
+    since: Option<Instant>,
+    /// Turns of the loop (`step`).
+    turns: u32,
+    /// Commands taken, by name.
+    commands: BTreeMap<&'static str, u32>,
+    /// Waits for a frame that ended with a frame taken / with none (a command, a frame of another monitor, or the time).
+    frames: u32,
+    no_frame: u32,
+    /// Waits for a command that ran out of time.
+    timeouts: u32,
+}
+
+impl Turns {
+    /// The line for the log, per second over `secs`; `None` when it is too early. Resets the counters when it returns a line.
+    fn report(&mut self, now: Instant) -> Option<String> {
+        let since = *self.since.get_or_insert(now);
+        let secs = now.saturating_duration_since(since).as_secs_f64();
+        if secs < STATS_EVERY.as_secs_f64() {
+            return None;
+        }
+        let per = |n: u32| n as f64 / secs;
+        let cmds: u32 = self.commands.values().sum();
+        let names: Vec<String> = self.commands.iter().map(|(k, v)| format!("{k} {:.1}", per(*v))).collect();
+        let line = format!(
+            "glass engine thread: {:.0} turns/s, {:.1} commands/s ({}), {:.1} frame waits/s ended by a frame, {:.1} ended without one, {:.1} command waits/s ran out",
+            per(self.turns),
+            per(cmds),
+            if names.is_empty() { "none".to_string() } else { names.join(", ") },
+            per(self.frames),
+            per(self.no_frame),
+            per(self.timeouts),
+        );
+        *self = Turns { since: Some(now), ..Turns::default() };
+        Some(line)
+    }
+}
+
 struct Win {
     hwnd: isize,
     dark: bool,
@@ -342,6 +438,20 @@ struct Win {
     /// The backdrop has to be copied and blurred again (a new picture of the screen, another place or size, another look). A draw that
     /// is dirty for a lens alone keeps the last backdrop.
     stale: bool,
+    /// What the window is owed while it is seen (`rest.rs`): the full rate in front, a slower one behind, nothing when frozen.
+    care: Care,
+    /// The app marked this window as one whose glass may freeze while it is not in front (`set_freezable`).
+    freezable: bool,
+    /// Frozen: seen, not in front, asked to freeze and with a picture. Not worked for (see `Win::active`).
+    frozen: bool,
+    /// When the window was last in front or under the pointer.
+    last_front: Option<Instant>,
+    /// A frame of this window has been put on the screen (a window with none is never frozen: it would stay empty).
+    had_picture: bool,
+    /// Since when the window has not been worked for (hidden, covered or frozen); `None` while it is.
+    idle_since: Option<Instant>,
+    /// When the window last drew from a backdrop it looked at (a window that is not in front draws at most `rest::BEHIND_FPS` times a second).
+    last_draw: Option<Instant>,
 }
 
 impl Win {
@@ -365,13 +475,35 @@ impl Win {
             lenses: LensSet::new(),
             lens_tick: None,
             stale: true,
+            care: Care::Front,
+            freezable: false,
+            frozen: false,
+            last_front: None,
+            had_picture: false,
+            idle_since: None,
+            last_draw: None,
         }
     }
 
-    /// Whether anybody can see this glass: it is shown and not hidden under other windows. Only an active window is prepared, drawn,
-    /// read back and counted when the engine decides what to capture and how long to wait.
+    /// Whether anybody can see this glass: it is shown, not hidden under other windows and not frozen. Only an active window is
+    /// prepared, drawn, read back and counted when the engine decides what to capture and how long to wait.
     fn active(&self) -> bool {
-        self.visible && !self.covered
+        self.visible && !self.covered && !self.frozen
+    }
+
+    /// Freezes the glass (`true`) or lets it follow the screen again. Thawing means drawing at once from a fresh backdrop, whatever
+    /// the loop guard remembers, like coming into view from under a cover. Returns whether it thawed.
+    fn set_frozen(&mut self, frozen: bool) -> bool {
+        if frozen == self.frozen {
+            return false;
+        }
+        self.frozen = frozen;
+        if frozen {
+            return false;
+        }
+        self.restale();
+        self.presented = None;
+        true
     }
 
     /// Records whether other windows hide this one. Coming into view again means drawing at once from a fresh backdrop, and presenting
@@ -387,6 +519,20 @@ impl Win {
         self.restale();
         self.presented = None;
         true
+    }
+
+    /// The window's rectangle (or its monitor) changed: somebody is moving or resizing it, and its glass has to follow at once, at the
+    /// rate of the window in front, whoever has the focus: a window that animates its size on its own (a panel growing, a window moved by
+    /// another program) would otherwise get a frost drawn 20 times a second while its edge moves 60 times. It is treated as in front for
+    /// `rest::HOLD` from now on, and a frozen window thaws.
+    fn geometry_changed(&mut self, g: WinGeo, now: Instant) {
+        self.geo = Some(g);
+        self.restale();
+        // A window that moves is in view (its owner is dragging it), and it reads a new part of the screen at every step.
+        self.covered = false;
+        self.last_front = Some(now);
+        self.care = Care::Front;
+        self.set_frozen(false);
     }
 
     /// Takes new options. Returns whether the place the glass shows on the screen changed in a way that makes a new look at the z order
@@ -543,6 +689,7 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     w.stats.glass += t1.elapsed();
     w.stats.presented += 1;
     w.presented = Some(now);
+    w.had_picture = true;
     if first_draw {
         // Running means "the first frame is presented", not "the swap chain exists": a window that drops its own fill on Running (a popup
         // menu, the dock's island, the main window turning see-through) would otherwise be empty for the time the first frame takes.
@@ -655,6 +802,10 @@ struct Engine {
     /// The glass windows of other processes of ours that this process leaves out too (`crossproc.rs`), and when they were last looked for.
     foreign: Foreign,
     last_scan: Instant,
+    /// A glass window of another process of ours was seen at the last scan (above or below ours): the turn then stays as short as the scan.
+    foreign_seen: bool,
+    /// Why the thread woke (statistics).
+    turns: Turns,
     last_access_check: Instant,
     /// A permission check running on its own thread (see `access_tick`).
     access_job: Option<Receiver<Access>>,
@@ -677,6 +828,8 @@ struct Engine {
     reopen: Reopen,
     /// A capture session was opened in this run, so the backend works here and a failure to open one again is probably a transient one.
     session_worked: bool,
+    /// How long Desktop Duplication still leaves its frames alone (`rest.rs`), as of the last `pump`: the turn waits that long.
+    throttle: Option<Duration>,
 }
 
 /// The multithreaded WinRT apartment of the engine thread: entered before any WinRT object is touched, left when the thread ends (also
@@ -732,6 +885,8 @@ impl Engine {
             excl: Exclusion::default(),
             foreign: Foreign::default(),
             last_scan: Instant::now(),
+            foreign_seen: false,
+            turns: Turns::default(),
             last_access_check: Instant::now(),
             access_job: None,
             instant_flushes: 0,
@@ -744,13 +899,17 @@ impl Engine {
             last_fg_rect: None,
             reopen: Reopen::default(),
             session_worked: false,
+            throttle: None,
         }
     }
 
     fn command(&mut self, c: Cmd) {
         self.last_activity = Instant::now();
+        *self.turns.commands.entry(c.name()).or_default() += 1;
         match c {
             Cmd::Attach { hwnd, opts } => {
+                // the foreground window is watched by an event from the first glass on (see `watch.rs`)
+                watch::start();
                 self.cover_due = true;
                 self.excl.attach(hwnd);
                 if self.mode == CaptureMode::Affinity {
@@ -796,19 +955,127 @@ impl Engine {
                 }
             }
             Cmd::ExtrasChanged => self.excl.set_extras(super::extras_snapshot()),
+            Cmd::Freezable { hwnd, on } => {
+                if let Some(w) = self.wins.get_mut(&hwnd) {
+                    w.freezable = on;
+                }
+            }
+            // (the next turn looks at what every window is owed; the command itself ended the wait)
+            Cmd::CareChanged => {}
         }
+    }
+
+    /// How long until a window that is held back (it is not in front and drew a moment ago) may draw: the turn must not wait longer.
+    fn draw_wait(&self) -> Option<Duration> {
+        let now = Instant::now();
+        let gap = rest::gap_for(rest::behind_fps());
+        self.wins
+            .values()
+            .filter(|w| w.active() && w.dirty)
+            .filter_map(|w| rest::draw_wait(w.care, w.stale, w.last_draw.map(|t| now.saturating_duration_since(t)), gap))
+            .min()
     }
 
     /// How long this turn may wait for a frame.
     fn frame_wait_ms(&self) -> u32 {
+        let ms = self.frame_wait_unheld_ms();
+        match self.draw_wait() {
+            Some(d) => ms.min(d.as_millis().max(1) as u32),
+            None => ms,
+        }
+    }
+
+    fn frame_wait_unheld_ms(&self) -> u32 {
         if self.paced() {
             0 // the display paces the turn (`pace`); a frame that is not there yet is taken next turn
         } else if self.shape_moving() {
             SHAPE_WAIT_MS
         } else if self.last_activity.elapsed() > QUIET_AFTER {
-            quiet_wait_ms(self.mode, self.wins.values().any(|w| w.active() && w.lenses.occupied()))
+            let ms = quiet_wait_ms(self.mode, self.wins.values().any(|w| w.active() && w.lenses.occupied()));
+            // Seen glass but none in front: nothing it would notice in time needs a shorter wait (`rest.rs`). Only for a capture session,
+            // whose wait also ends for a command; Desktop Duplication's cannot be interrupted, so a longer wait would delay a lens.
+            rest::quiet_wait_ms(ms, self.mode == CaptureMode::Session, self.none_in_front(), self.foreign_seen)
         } else {
             FRAME_WAIT_MS
+        }
+    }
+
+    /// Some glass is worked for and none of it is in front or under the pointer.
+    fn none_in_front(&self) -> bool {
+        let mut any = false;
+        for w in self.wins.values().filter(|w| w.active()) {
+            if w.care == Care::Front {
+                return false;
+            }
+            any = true;
+        }
+        any
+    }
+
+    /// Looks at what every glass window that is seen is owed (`rest.rs`): is it in front (its root owner is the foreground window's),
+    /// is the pointer over it, has it been either a moment ago. A window that is to freeze stops being worked for; one that thaws is
+    /// drawn at once from a fresh backdrop. One `GetForegroundWindow`, one `GetCursorPos` + `WindowFromPoint` and one `GetAncestor` per
+    /// window, a turn. A turn comes when the foreground window changes (`watch.rs`) or the pointer comes over a window
+    /// (`glass::pointer_over`) because both send a command, so a long wait does not delay either; the app's windows that are not in front
+    /// are published (`glass::set_not_front`) so that the pointer event costs nothing for a window that is in front.
+    fn update_care(&mut self) {
+        if !self.wins.values().any(|w| w.visible && !w.covered) {
+            return;
+        }
+        let now = Instant::now();
+        let fg = cover::foreground();
+        let fg_root = if fg == 0 { 0 } else { root_owner(fg) };
+        let under_pointer = root_at_pointer();
+        let freeze_all = super::freeze_when_behind();
+        let rules = rest::rules_on();
+        let mut thawed = false;
+        for w in self.wins.values_mut().filter(|w| w.visible && !w.covered) {
+            let (facts, last) = rest::facts_of(root_owner(w.hwnd), fg_root, under_pointer, w.last_front, now, freeze_all && w.freezable, w.had_picture);
+            w.last_front = last;
+            w.care = rest::care_under(rules, &facts);
+            thawed |= w.set_frozen(w.care == Care::Frozen);
+        }
+        if thawed {
+            self.last_activity = now;
+        }
+        super::set_not_front(self.wins.values().filter(|w| w.visible && w.care != Care::Front).map(|w| w.hwnd).collect());
+    }
+
+    /// Tells every capture how fast its monitor's glass wants frames: the normal rate while some glass on it is in front, a slower one
+    /// while none is (`rest::pace`). A running session takes the new interval at once.
+    fn sync_pace(&mut self) {
+        let power = self.power;
+        for (hmon, m) in self.mons.iter_mut() {
+            let pace = rest::pace(self.wins.values().filter(|w| w.active() && w.geo.is_some_and(|g| g.hmon == *hmon)).map(|w| w.care));
+            if unsafe { m.set_pace(pace, power) } {
+                log::debug!("glass: monitor {hmon:#x} is paced {pace:?}");
+            }
+        }
+    }
+
+    /// Gives back what a window that nobody sees does not need: after `rest::TRIM_AFTER` of not being worked for its backdrop pyramid
+    /// goes (the next draw makes it again, from a fresh capture, before anything is shown), and when no glass is worked for at all the
+    /// driver is told to let go of what it caches for the device (`IDXGIDevice3::Trim`, what Windows asks of an app that goes to the
+    /// background). The swap chain stays: it holds the picture the window shows.
+    fn trim_idle(&mut self, now: Instant) {
+        let mut dropped = false;
+        for w in self.wins.values_mut() {
+            if w.active() {
+                w.idle_since = None;
+                continue;
+            }
+            let since = *w.idle_since.get_or_insert(now);
+            if w.region.is_some() && rest::trim_due(now.saturating_duration_since(since)) {
+                w.region = None;
+                w.stale = true;
+                dropped = true;
+            }
+        }
+        if dropped
+            && !self.wins.values().any(|w| w.active())
+            && let Some(gfx) = &self.gfx
+        {
+            unsafe { gfx.trim() };
         }
     }
 
@@ -877,7 +1144,7 @@ impl Engine {
     fn wait_command(&mut self, t: Duration) -> bool {
         match self.rx.recv_timeout(t) {
             Ok(c) => self.command(c),
-            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Timeout) => self.turns.timeouts += 1,
             Err(RecvTimeoutError::Disconnected) => return false,
         }
         true
@@ -885,6 +1152,7 @@ impl Engine {
 
     /// One turn of the loop. False ends the thread.
     fn step(&mut self) -> bool {
+        self.turns.turns += 1;
         if self.wins.is_empty() {
             // Nothing attached: no device, no capture, and nothing to do until a command arrives.
             self.release_gfx();
@@ -895,7 +1163,7 @@ impl Engine {
         } else if !self.wins.values().any(|w| w.active()) {
             // Nobody can see any glass. A window that is only covered is looked at often (it may come into view any moment); one that
             // is hidden is waited for as before.
-            let wait = if self.wins.values().any(|w| w.visible && w.covered) { COVER_POLL } else { IDLE_WAIT };
+            let wait = idle_wait(self.wins.values().any(|w| w.visible && w.covered), self.wins.values().any(|w| w.visible && w.frozen), watch::running());
             if !self.wait_command(wait) {
                 return false;
             }
@@ -912,7 +1180,9 @@ impl Engine {
             self.measure_all();
         }
         self.update_cover();
+        self.update_care();
         self.sync_monitors();
+        self.sync_pace();
         let waited = self.pump();
         // The window may have moved while we waited for the frame. A covered window that moved is in view (its owner moved it) and so
         // active now, while its monitor's capture may still be parked: it is resumed before anything is drawn from it, and the turn does
@@ -922,6 +1192,7 @@ impl Engine {
         let appeared = !self.active_set().is_subset(&seen_before);
         if appeared {
             self.sync_monitors();
+            self.sync_pace();
         }
         self.advance_lenses();
         self.draw_dirty();
@@ -930,8 +1201,10 @@ impl Engine {
             return self.pace();
         }
         if !waited && !appeared && self.wins.values().any(|w| w.active()) {
-            // no AcquireNextFrame wait happened this turn (a duplication is being rebuilt, or failed and backs off): never spin
-            return self.wait_command(Duration::from_millis(self.frame_wait_ms() as u64));
+            // no AcquireNextFrame wait happened this turn (a duplication is being rebuilt, or failed and backs off, or leaves its frames
+            // alone for a while: then exactly that long): never spin
+            let wait = self.throttle.take().map_or_else(|| Duration::from_millis(self.frame_wait_ms() as u64), |left| left.max(Duration::from_millis(1)));
+            return self.wait_command(wait);
         }
         true
     }
@@ -954,6 +1227,7 @@ impl Engine {
                         moved |= w.visible;
                         w.visible = false;
                         w.covered = false;
+                        w.frozen = false;
                     }
                 }
                 Seen::Shown(g) => {
@@ -969,11 +1243,7 @@ impl Engine {
                             moved = true;
                         }
                         if w.geo != Some(g) {
-                            w.geo = Some(g);
-                            w.restale();
-                            // A window that moves is in view (its owner is dragging it), and it reads a new part of the screen at
-                            // every step.
-                            w.covered = false;
+                            w.geometry_changed(g, Instant::now());
                             moved = true;
                         }
                     }
@@ -1177,7 +1447,9 @@ impl Engine {
         // the glass reads this far around itself; a window whose edge is nearer than that can show in the frost
         let margin = seen.iter().filter_map(|w| w.geo).map(|g| region_pad(g.scale())).max().unwrap_or(0) as i32;
         let mine: BTreeSet<isize> = self.wins.keys().copied().collect();
-        let wanted = crossproc::foreign_above(&crossproc::scan(&mine), margin);
+        let order = crossproc::scan(&mine);
+        self.foreign_seen = order.iter().any(|e| !e.mine);
+        let wanted = crossproc::foreign_above(&order, margin);
         if self.foreign.update(&wanted, now, wgc::is_window) && self.excl.set_foreign(self.foreign.set()) {
             log::debug!("glass: {} glass windows of other processes are left out of the capture", self.foreign.set().len());
         }
@@ -1185,6 +1457,7 @@ impl Engine {
 
     /// Takes the frames the monitors have. Returns whether a wait for a frame happened (the turn did not spin).
     fn pump(&mut self) -> bool {
+        self.throttle = None;
         if self.gfx.is_none() {
             return false;
         }
@@ -1214,6 +1487,11 @@ impl Engine {
                     if budget > 0 {
                         waited = true;
                         budget = 0;
+                        if frame {
+                            self.turns.frames += 1;
+                        } else {
+                            self.turns.no_frame += 1;
+                        }
                     }
                     for w in self.wins.values_mut().filter(|w| w.geo.is_some_and(|g| g.hmon == hmon)) {
                         w.stats.frames += frame as u32;
@@ -1225,6 +1503,10 @@ impl Engine {
                 }
                 Err(e) => errors.push((hmon, e)),
             }
+        }
+        // a Desktop Duplication monitor that is leaving its frames alone says for how long: the turn then waits exactly that
+        if !waited {
+            self.throttle = self.mons.iter().filter(|(h, _)| in_use.contains(h)).filter_map(|(_, m)| m.throttled_for()).min();
         }
         // only the windows whose backdrop (their rectangle and the padding the glass reads around it) was touched are drawn again
         for (hmon, dirty) in fresh {
@@ -1268,10 +1550,14 @@ impl Engine {
     }
 
     fn draw_dirty(&mut self) {
-        let todo: Vec<isize> = self.wins.values().filter(|w| w.active() && w.dirty).map(|w| w.hwnd).collect();
+        let now = Instant::now();
+        let gap = rest::gap_for(rest::behind_fps());
+        let todo: Vec<isize> =
+            self.wins.values().filter(|w| w.active() && w.dirty && rest::draw_due(w.care, w.stale, w.last_draw.map(|t| now.saturating_duration_since(t)), gap)).map(|w| w.hwnd).collect();
         for k in todo {
             let Some(gfx) = self.gfx.as_ref() else { return };
             let Some(w) = self.wins.get_mut(&k) else { continue };
+            let looked = w.stale;
             let Some(hmon) = w.geo.map(|g| g.hmon) else { continue };
             // A parked session has not been resumed yet (see `sync_monitors`): its mirror is from before the pause.
             if self.parked.is_parked(hmon) {
@@ -1282,7 +1568,12 @@ impl Engine {
                 continue; // dirty stays; drawn as soon as the first picture of the screen is in
             }
             match unsafe { draw(gfx, mon, w) } {
-                Ok(_) => w.dirty = false,
+                Ok(_) => {
+                    w.dirty = false;
+                    if looked {
+                        w.last_draw = Some(Instant::now());
+                    }
+                }
                 Err(Fail::Window(why)) => self.fail_window(k, &why),
                 Err(Fail::Device(why)) => {
                     self.fail_all(&why);
@@ -1295,7 +1586,11 @@ impl Engine {
     /// Statistics every few seconds (RUSTYFILES_GLASS_STATS=1), and a look at the device.
     fn housekeeping(&mut self) {
         let now = Instant::now();
+        self.trim_idle(now);
         if self.stats_on {
+            if let Some(line) = self.turns.report(now) {
+                log::info!("{line}");
+            }
             for w in self.wins.values_mut() {
                 let s = &mut w.stats;
                 if now.duration_since(s.since) >= STATS_EVERY {
@@ -1421,6 +1716,8 @@ impl Engine {
         set_mode(CaptureMode::Off);
         self.excl = Exclusion::default();
         self.foreign = Foreign::default();
+        self.foreign_seen = false;
+        super::set_not_front(BTreeSet::new());
     }
 }
 
@@ -1951,5 +2248,212 @@ mod tests {
                 assert!(r.fresh_ms.is_some_and(|ms| ms < 1000.0), "a new picture must follow the resume at once: {:?}", r.fresh_ms);
             }
         }
+    }
+
+    // --- glass that is seen but not in front ------------------------------------------------------------------------------------------
+
+    /// A window that is frozen is not worked for: not active, no capture kept for it, and the loop waits as it does for a covered one.
+    /// Thawing is drawing at once from a fresh backdrop, like coming into view.
+    #[test]
+    fn a_frozen_window_is_not_worked_for_and_a_thawed_one_is_drawn_at_once_from_a_fresh_backdrop() {
+        let mut e = idle_engine(CaptureMode::Session);
+        let mut w = settled_window(1, geo_at(0, 0, 400, 300, 1));
+        w.freezable = true;
+        w.had_picture = true;
+        e.wins.insert(1, w);
+        assert!(e.active_set().contains(&1));
+        assert!(!e.wins.get_mut(&1).unwrap().set_frozen(true), "freezing is not thawing");
+        let w = e.wins.get(&1).unwrap();
+        assert!(w.frozen && !w.active(), "frozen glass is not worked for");
+        assert!(!w.dirty && !w.stale && w.presented.is_some(), "freezing forgets nothing: the picture on the screen stays");
+        assert!(e.active_set().is_empty() && !e.paced() && !e.shape_moving());
+        assert!(!e.wins.get_mut(&1).unwrap().set_frozen(true), "still frozen: nothing");
+        assert!(e.wins.get_mut(&1).unwrap().set_frozen(false), "thawed");
+        let w = e.wins.get(&1).unwrap();
+        assert!(w.dirty && w.stale && w.presented.is_none() && w.active(), "drawn from a fresh backdrop, and presented whatever the loop guard remembers");
+        assert!(!e.wins.get_mut(&1).unwrap().set_frozen(false), "thawed and still thawed: nothing");
+    }
+
+    /// Windows that are hidden lose the frozen mark with the rest of what they knew about being seen; a window freezes only when the
+    /// app marked it, and only once it has a picture.
+    #[test]
+    fn only_a_marked_window_with_a_picture_is_to_freeze() {
+        let mut e = idle_engine(CaptureMode::Session);
+        e.command(Cmd::Attach { hwnd: 1, opts: GlassOptions::window(true) });
+        assert!(!e.wins[&1].freezable, "no window freezes unless the app says so (a dock island, a menu)");
+        e.command(Cmd::Freezable { hwnd: 1, on: true });
+        assert!(e.wins[&1].freezable);
+        e.command(Cmd::Freezable { hwnd: 1, on: false });
+        assert!(!e.wins[&1].freezable);
+        // a window the engine does not know is ignored
+        e.command(Cmd::Freezable { hwnd: 99, on: true });
+        assert!(!e.wins.contains_key(&99));
+        // the setting changing only wakes the loop
+        e.command(Cmd::CareChanged);
+    }
+
+    /// When no glass that is worked for is in front, the quiet wait is the longer one; one window in front brings back the short one.
+    #[test]
+    fn the_quiet_wait_is_longer_while_no_glass_is_in_front() {
+        let mut e = idle_engine(CaptureMode::Session);
+        let mut a = settled_window(1, geo_at(0, 0, 400, 300, 1));
+        a.care = Care::Behind;
+        e.wins.insert(1, a);
+        assert!(e.none_in_front());
+        assert_eq!(e.frame_wait_ms(), 100, "twice the 50 ms of a quiet desktop with something in front");
+        // a glass window of another process was seen at the last scan: the turn stays as short as the scan (crossproc.rs)
+        e.foreign_seen = true;
+        assert_eq!(e.frame_wait_ms(), QUIET_WAIT_MS);
+        e.foreign_seen = false;
+        let mut b = settled_window(2, geo_at(500, 0, 400, 300, 1));
+        b.care = Care::Front;
+        e.wins.insert(2, b);
+        assert!(!e.none_in_front());
+        assert_eq!(e.frame_wait_ms(), QUIET_WAIT_MS);
+        // a frozen or covered window in front does not count: it is not worked for
+        e.wins.get_mut(&2).unwrap().covered = true;
+        assert!(e.none_in_front());
+        // no glass worked for at all is not "none in front": there is nothing to wait for
+        e.wins.get_mut(&1).unwrap().visible = false;
+        assert!(!e.none_in_front());
+        // and recently active: the short wait, whoever is in front
+        let mut e = idle_engine(CaptureMode::Session);
+        let mut a = settled_window(1, geo_at(0, 0, 400, 300, 1));
+        a.care = Care::Behind;
+        e.wins.insert(1, a);
+        e.last_activity = Instant::now();
+        assert_eq!(e.frame_wait_ms(), FRAME_WAIT_MS);
+    }
+
+    /// A pyramid is given back only by a window nobody sees, only after the time, and a window that is seen again starts the clock over.
+    #[test]
+    fn the_idle_clock_runs_only_for_a_window_that_is_not_worked_for() {
+        let mut e = idle_engine(CaptureMode::Session);
+        e.wins.insert(1, settled_window(1, geo_at(0, 0, 400, 300, 1)));
+        let t0 = Instant::now();
+        e.trim_idle(t0);
+        assert_eq!(e.wins[&1].idle_since, None, "a window that is worked for is never idle");
+        e.wins.get_mut(&1).unwrap().covered = true;
+        e.trim_idle(t0);
+        assert_eq!(e.wins[&1].idle_since, Some(t0));
+        e.trim_idle(t0 + Duration::from_secs(3));
+        assert_eq!(e.wins[&1].idle_since, Some(t0), "the clock keeps its start");
+        e.wins.get_mut(&1).unwrap().covered = false;
+        e.trim_idle(t0 + Duration::from_secs(4));
+        assert_eq!(e.wins[&1].idle_since, None, "seen again: the clock starts over");
+    }
+
+    /// A window that is not in front draws at most 20 times a second even when the capture is fast (another window of its monitor is in
+    /// front): it is held back until the gap is over and the loop never sleeps past that moment. A window in front is never held.
+    #[test]
+    fn a_window_behind_another_is_held_to_its_own_rate_and_the_loop_wakes_for_it() {
+        let mut e = idle_engine(CaptureMode::Session);
+        e.last_activity = Instant::now();
+        let mut behind = settled_window(1, geo_at(0, 0, 400, 300, 1));
+        behind.care = Care::Behind;
+        behind.dirty = true;
+        behind.stale = true;
+        behind.last_draw = Some(Instant::now());
+        e.wins.insert(1, behind);
+        let held = e.draw_wait().expect("a window that drew a moment ago waits");
+        assert!(held <= Duration::from_millis(50) && held > Duration::ZERO, "{held:?}");
+        assert!(e.frame_wait_ms() <= 50, "the turn does not wait past the moment the window may draw: {}", e.frame_wait_ms());
+        // the gap is over: its turn
+        e.wins.get_mut(&1).unwrap().last_draw = Some(Instant::now() - Duration::from_millis(60));
+        assert_eq!(e.draw_wait(), None);
+        // in front: never held
+        let w = e.wins.get_mut(&1).unwrap();
+        w.last_draw = Some(Instant::now());
+        w.care = Care::Front;
+        assert_eq!(e.draw_wait(), None);
+        // a draw that only moves a lens uses the backdrop it has: never held
+        let w = e.wins.get_mut(&1).unwrap();
+        w.care = Care::Behind;
+        w.stale = false;
+        assert_eq!(e.draw_wait(), None);
+    }
+
+
+    /// A window that moves or is resized is followed at the full rate whoever has the focus, and a frozen one thaws. This is what keeps
+    /// a panel that grows, or a window another program drags, from getting a frost at 20 draws a second while its edge moves at 60.
+    #[test]
+    fn a_window_that_moves_is_in_front_for_a_moment_and_a_frozen_one_thaws() {
+        let now = Instant::now();
+        let mut w = settled_window(1, geo_at(0, 0, 400, 300, 1));
+        w.care = Care::Behind;
+        w.dirty = false;
+        w.stale = false;
+        w.last_draw = Some(now);
+        let before = w.care;
+        assert_eq!(before, Care::Behind);
+        // not moved: held to its own rate when the backdrop is new
+        w.restale();
+        assert!(!rest::draw_due(w.care, w.stale, Some(Duration::from_millis(5)), rest::gap_for(rest::BEHIND_FPS)));
+        // moved
+        w.geometry_changed(geo_at(10, 0, 500, 300, 1), now);
+        assert_eq!(w.care, Care::Front);
+        assert!(w.dirty && w.stale && !w.covered);
+        assert_eq!(w.geo, Some(geo_at(10, 0, 500, 300, 1)));
+        assert!(rest::draw_due(w.care, w.stale, Some(Duration::from_millis(5)), rest::gap_for(rest::BEHIND_FPS)), "drawn at once, not at the slow rate");
+        // the clock the next update_care reads keeps it in front for HOLD
+        let (facts, _) = rest::facts_of(0, 0, 0, w.last_front, now + Duration::from_millis(100), false, true);
+        assert_eq!(rest::care(&facts), Care::Front);
+        let (facts, _) = rest::facts_of(0, 0, 0, w.last_front, now + rest::HOLD, false, true);
+        assert_eq!(rest::care(&facts), Care::Behind, "and not for ever");
+        // a frozen window that moved thaws, to be drawn at once from a fresh backdrop
+        let mut f = settled_window(2, geo_at(0, 0, 400, 300, 1));
+        f.freezable = true;
+        f.had_picture = true;
+        f.set_frozen(true);
+        f.care = Care::Frozen;
+        assert!(!f.active());
+        f.geometry_changed(geo_at(0, 0, 600, 300, 1), now);
+        assert!(f.active() && !f.frozen && f.care == Care::Front);
+        assert!(f.presented.is_none(), "presented whatever the loop guard remembers");
+    }
+
+    /// How long the loop sleeps when no glass is worked for: covered glass is looked at often, glass that is only frozen sleeps long
+    /// when the foreground window is watched by an event and as often as covered glass when it is not, hidden glass as before.
+    #[test]
+    fn the_idle_sleep_depends_on_what_can_wake_the_loop() {
+        assert_eq!(idle_wait(true, false, true), COVER_POLL, "covered: nothing tells when it comes into view");
+        assert_eq!(idle_wait(true, true, true), COVER_POLL);
+        assert_eq!(idle_wait(false, true, true), FROZEN_NET, "frozen: an event thaws it");
+        assert_eq!(idle_wait(false, true, false), COVER_POLL, "no event: it is looked at on a clock, as before");
+        assert_eq!(idle_wait(false, false, true), IDLE_WAIT);
+        assert_eq!(idle_wait(false, false, false), IDLE_WAIT);
+        assert!(FROZEN_NET > COVER_POLL && FROZEN_NET <= Duration::from_secs(2));
+    }
+
+    /// Where the thread's wakes are counted: by cause, per second, after the statistics period; nothing before it.
+    #[test]
+    fn the_wake_counters_report_per_second_after_the_period_and_start_over() {
+        let t0 = Instant::now();
+        let mut t = Turns::default();
+        assert!(t.report(t0).is_none(), "the first look only starts the clock");
+        t.turns = 500;
+        t.frames = 10;
+        t.no_frame = 20;
+        t.timeouts = 5;
+        *t.commands.entry("care").or_default() += 5;
+        assert!(t.report(t0 + Duration::from_secs(1)).is_none(), "too early");
+        let line = t.report(t0 + STATS_EVERY).expect("due");
+        assert!(line.contains("100 turns/s"), "{line}");
+        assert!(line.contains("1.0 commands/s (care 1.0)"), "{line}");
+        assert!(line.contains("2.0 frame waits/s ended by a frame, 4.0 ended without one, 1.0 command waits/s"), "{line}");
+        assert_eq!(t.turns, 0);
+        assert!(t.commands.is_empty());
+        assert!(t.report(t0 + STATS_EVERY + Duration::from_secs(1)).is_none());
+    }
+
+    /// A command is counted by its name.
+    #[test]
+    fn a_command_is_counted_by_name_and_a_care_change_changes_nothing_else() {
+        let mut e = idle_engine(CaptureMode::Session);
+        e.command(Cmd::CareChanged);
+        e.command(Cmd::CareChanged);
+        e.command(Cmd::LookChanged);
+        assert_eq!(e.turns.commands.get("care"), Some(&2));
+        assert_eq!(e.turns.commands.get("look"), Some(&1));
     }
 }

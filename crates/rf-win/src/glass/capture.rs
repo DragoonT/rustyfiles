@@ -17,7 +17,7 @@ use windows::Win32::Graphics::Direct3D11::{D3D11_TEXTURE2D_DESC, ID3D11Texture2D
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_MODE_ROTATION_IDENTITY, DXGI_MODE_ROTATION_UNSPECIFIED};
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_DEVICE_HUNG, DXGI_ERROR_DEVICE_REMOVED, DXGI_ERROR_DEVICE_RESET,
-    DXGI_ERROR_DRIVER_INTERNAL_ERROR, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, IDXGIAdapter1, IDXGIFactory1,
+    DXGI_ERROR_DRIVER_INTERNAL_ERROR, DXGI_ERROR_NOT_FOUND, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO, DXGI_OUTDUPL_MOVE_RECT, IDXGIAdapter1, IDXGIFactory1,
     IDXGIOutput, IDXGIOutput1, IDXGIOutput5, IDXGIOutputDuplication, IDXGIResource,
 };
 use windows::Win32::System::StationsAndDesktops::{
@@ -27,6 +27,7 @@ use windows::core::Interface;
 
 use super::Cmd;
 use super::gpu::{Gpu, Source};
+use super::rest::Pace;
 use super::wgc::{Exclusion, Power, SessionMonitor};
 
 type R<T> = windows::core::Result<T>;
@@ -248,12 +249,72 @@ impl Monitor {
         }
     }
 
+    /// How fast the capture is asked to go while no glass on this monitor is in front (`rest.rs`). A session takes it as its minimum
+    /// update interval, Desktop Duplication as a gap it leaves between two `AcquireNextFrame` calls. Returns whether anything changed.
+    pub(super) unsafe fn set_pace(&mut self, pace: Pace, power: Power) -> bool {
+        match self {
+            Monitor::Session(m) => m.set_pace(pace, power),
+            Monitor::Dup(m) => m.set_pace(pace),
+        }
+    }
+
+    /// For Desktop Duplication: how much longer the next frame is left alone, so a loop that has nothing else to do waits exactly that.
+    pub(super) fn throttled_for(&self) -> Option<Duration> {
+        match self {
+            Monitor::Dup(m) => m.throttled_for(Instant::now()),
+            Monitor::Session(_) => None,
+        }
+    }
+
     /// The channel a frame of a session monitor wakes; `None` for Desktop Duplication, whose wait cannot be shared.
     pub(super) fn wake(&self) -> Option<&Receiver<()>> {
         match self {
             Monitor::Dup(_) => None,
             Monitor::Session(m) => Some(m.wake()),
         }
+    }
+}
+
+/// Where the frame that is held right now (between `AcquireNextFrame` and `ReleaseFrame`) differs from the one taken before: its dirty
+/// rectangles and the destinations of its move rectangles, in the monitor's own pixels (the picture is not rotated). The duplication
+/// accumulates them over the frames that were not taken, so a gap between two takes (`DupMonitor::gap`) loses nothing. Anything it does
+/// not say clearly is `Dirty::All`: no metadata for a frame that was presented, an error, nothing reported, too many rectangles.
+unsafe fn frame_dirty(dup: &IDXGIOutputDuplication, info: &DXGI_OUTDUPL_FRAME_INFO) -> Dirty {
+    let total = info.TotalMetadataBufferSize as usize;
+    if total == 0 {
+        return Dirty::All;
+    }
+    let mut rects: Vec<RECT> = Vec::new();
+    let mut dirty = vec![RECT::default(); (total / size_of::<RECT>()).max(1)];
+    let mut needed = 0u32;
+    if dup.GetFrameDirtyRects((dirty.len() * size_of::<RECT>()) as u32, dirty.as_mut_ptr(), &mut needed).is_err() {
+        return Dirty::All;
+    }
+    dirty.truncate(needed as usize / size_of::<RECT>());
+    rects.extend(dirty);
+    let mut moves = vec![DXGI_OUTDUPL_MOVE_RECT::default(); (total / size_of::<DXGI_OUTDUPL_MOVE_RECT>()).max(1)];
+    if dup.GetFrameMoveRects((moves.len() * size_of::<DXGI_OUTDUPL_MOVE_RECT>()) as u32, moves.as_mut_ptr(), &mut needed).is_err() {
+        return Dirty::All;
+    }
+    moves.truncate(needed as usize / size_of::<DXGI_OUTDUPL_MOVE_RECT>());
+    // what moved is new where it landed; the area it left is reported as dirty by the system itself
+    rects.extend(moves.iter().map(|m| m.DestinationRect));
+    if rects.len() > MAX_DIRTY_RECTS { Dirty::All } else { Dirty::Rects(rects).or_all_if_empty() }
+}
+
+/// Where a Desktop Duplication frame changed, for the windows that have to be drawn again. A frame that is the first picture, or that
+/// stands for more than one frame of the display (`accumulated`, `DXGI_OUTDUPL_FRAME_INFO::AccumulatedFrames`: the engine leaves
+/// frames alone while no glass is in front, `DupMonitor::gap`) is taken as changed everywhere: how the system merges the rectangles of
+/// frames that were not asked for was not checked against a moving desktop, and a window that is not drawn when its backdrop changed
+/// keeps an old frost for as long as nothing else touches it, which no number of CPU or GPU would show. Only a frame that is one frame
+/// of the display uses its rectangles (`read`, called only then). No picture taken (`image` false) changed nothing.
+pub(super) fn dup_dirty(image: bool, whole: bool, accumulated: u32, read: impl FnOnce() -> Dirty) -> Dirty {
+    if !image {
+        Dirty::none()
+    } else if whole || accumulated != 1 {
+        Dirty::All
+    } else {
+        read()
     }
 }
 
@@ -273,6 +334,17 @@ pub(super) struct DupMonitor {
     retry_at: Instant,
     backoff: Duration,
     last_error: String,
+    /// The least time between two frames taken (zero: as fast as the display makes them). Desktop Duplication has no minimum update
+    /// interval of its own, so a window that is seen but not in front gets this gap instead (`rest.rs`).
+    gap: Duration,
+    /// When the last frame was taken.
+    last_taken: Option<Instant>,
+}
+
+/// How much of `gap` is left since `last` (a frame taken), `None` when a frame may be taken now. Pure, for the tests.
+pub(super) fn gap_left(last: Option<Instant>, gap: Duration, now: Instant) -> Option<Duration> {
+    let since = now.saturating_duration_since(last?);
+    (since < gap).then(|| gap - since)
 }
 
 impl DupMonitor {
@@ -299,7 +371,24 @@ impl DupMonitor {
             retry_at: Instant::now(),
             backoff: BACKOFF_FIRST,
             last_error: String::new(),
+            gap: Duration::ZERO,
+            last_taken: None,
         })
+    }
+
+    fn set_pace(&mut self, pace: Pace) -> bool {
+        let gap = match pace {
+            Pace::Full => Duration::ZERO,
+            Pace::Slow => super::rest::gap_for(super::rest::behind_fps()),
+        };
+        let changed = gap != self.gap;
+        self.gap = gap;
+        changed
+    }
+
+    fn throttled_for(&self, now: Instant) -> Option<Duration> {
+        self.dup.as_ref()?;
+        gap_left(self.last_taken, self.gap, now)
     }
 
     /// Records a failure of the duplication and arranges the retry. Gives up after BROKEN_LIMIT, except while the input desktop is not the
@@ -373,6 +462,11 @@ impl DupMonitor {
             self.fresh = true;
         }
         let Some(dup) = self.dup.clone() else { return Ok(Pumped::NoWait) };
+        // Seen but not in front: leave the frames alone for a while. The duplication keeps the newest picture and the changes since
+        // the last one taken, so nothing is lost by not asking; the engine waits for the rest of the gap (`throttled_for`).
+        if self.throttled_for(now).is_some() {
+            return Ok(Pumped::NoWait);
+        }
         let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
         let mut res: Option<IDXGIResource> = None;
         match dup.AcquireNextFrame(timeout_ms, &mut info, &mut res) {
@@ -383,6 +477,8 @@ impl DupMonitor {
                 let want = info.LastPresentTime != 0 || !self.has_image || self.fresh;
                 let mut image = false;
                 let mut bad: Option<String> = None;
+                // the first picture of a monitor, or of a duplication made anew, says nothing about what changed
+                let whole = !self.has_image || self.fresh;
                 if want {
                     match (res.take().and_then(|x| x.cast::<ID3D11Texture2D>().ok()), &self.mirror) {
                         (Some(tex), Some(m)) => {
@@ -407,15 +503,17 @@ impl DupMonitor {
                     }
                 }
                 drop(res);
+                // where it changed: only while the frame is still held, and only for a frame that became the picture
+                let dirty = dup_dirty(image, whole, info.AccumulatedFrames, || frame_dirty(&dup, &info));
                 let _ = dup.ReleaseFrame();
+                self.last_taken = Some(Instant::now());
                 if let Some(why) = bad {
                     return Err(MonError::Monitor(why));
                 }
                 self.fresh = false;
                 self.broken_since = None;
                 self.backoff = BACKOFF_FIRST;
-                // Desktop Duplication's dirty rectangles are not read: after a refresh any window may be touched
-                Ok(Pumped::Waited { frame: true, image, dirty: if image { Dirty::All } else { Dirty::none() } })
+                Ok(Pumped::Waited { frame: true, image, dirty })
             }
             Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
                 // nothing new on screen, but the duplication works
@@ -428,5 +526,26 @@ impl DupMonitor {
             Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST => self.broken(format!("the screen capture was lost: {e}"), Instant::now(), true),
             Err(e) => self.broken(format!("AcquireNextFrame failed: {e}"), Instant::now(), e.code() == E_ACCESSDENIED),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_duplication_frame_that_stands_for_several_is_taken_as_changed_everywhere() {
+        let rects = || Dirty::Rects(vec![RECT { left: 1, top: 2, right: 3, bottom: 4 }]);
+        // one frame of the display: its rectangles count
+        assert!(matches!(dup_dirty(true, false, 1, rects), Dirty::Rects(_)));
+        // more than one (frames were left alone): everywhere, and the rectangles are not even read
+        assert!(matches!(dup_dirty(true, false, 2, || panic!("not read")), Dirty::All));
+        assert!(matches!(dup_dirty(true, false, 7, || panic!("not read")), Dirty::All));
+        // the system says 0: that is not a statement about this frame
+        assert!(matches!(dup_dirty(true, false, 0, || panic!("not read")), Dirty::All));
+        // the first picture of a monitor
+        assert!(matches!(dup_dirty(true, true, 1, || panic!("not read")), Dirty::All));
+        // no picture: nothing changed
+        assert!(matches!(dup_dirty(false, false, 5, || panic!("not read")), Dirty::Rects(r) if r.is_empty()));
     }
 }

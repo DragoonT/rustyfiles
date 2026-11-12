@@ -688,3 +688,93 @@ pub fn probe_dirty(secs: f64, interval: ProbeInterval, monitor_at: (i32, i32)) -
         Ok(rep)
     }
 }
+
+/// [`probe_dirty`] for Desktop Duplication, the fallback backend: the engine's own `DupMonitor` (the dirty rectangles it reads, and,
+/// with `slow`, the gap it leaves between two frames while no glass is in front) on one monitor. After every picture the mirror is read
+/// back and compared with the one before: every pixel that differs must lie inside the rectangles the pump reported for the frames it
+/// took in between (frames the gap made it leave alone included, that is the point of `slow`). Only changes on the screen can feed it.
+pub fn probe_dirty_dup(secs: f64, slow: bool, monitor_at: (i32, i32)) -> Result<DirtyReport, String> {
+    unsafe {
+        SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        let hmon = MonitorFromPoint(POINT { x: monitor_at.0, y: monitor_at.1 }, MONITOR_DEFAULTTOPRIMARY).0 as isize;
+        let loc = locate(hmon).map_err(|e| format!("the monitor is not among the DXGI outputs: {e}"))?;
+        let luid = loc.adapter.GetDesc1().map_err(|e| format!("adapter description: {e}"))?.AdapterLuid;
+        let gpu = Gpu::on_adapter(&loc.adapter).map_err(|e| format!("the D3D11 device: {e}"))?;
+        let mut mon = Monitor::open(hmon, luid)?;
+        if slow {
+            mon.set_pace(super::rest::Pace::Slow, wgc::Power::Mains);
+        }
+        let ex = Exclusion::default();
+        let mut rep = DirtyReport { interval_ms: slow.then(|| super::rest::gap_for(super::rest::behind_fps()).as_secs_f64() * 1000.0), ..Default::default() };
+        let (w, h) = ((loc.rect.right - loc.rect.left) as usize, (loc.rect.bottom - loc.rect.top) as usize);
+        let mut staging: Option<windows::Win32::Graphics::Direct3D11::ID3D11Texture2D> = None;
+        let mut prev: Option<Vec<u8>> = None;
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs_f64(secs) {
+            if let Some(left) = mon.throttled_for() {
+                std::thread::sleep(left.min(Duration::from_millis(50)));
+                continue;
+            }
+            let Pumped::Waited { image: true, dirty, .. } = mon.pump(&gpu, 20, &ex, None, &[]).map_err(why)? else { continue };
+            rep.images += 1;
+            let mirror = mon.mirror().ok_or("no mirror")?;
+            if staging.is_none() {
+                let mut d = D3D11_TEXTURE2D_DESC::default();
+                mirror.tex.GetDesc(&mut d);
+                d.Usage = D3D11_USAGE_STAGING;
+                d.BindFlags = 0;
+                d.MiscFlags = 0;
+                d.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+                let mut t = None;
+                gpu.dev.CreateTexture2D(&d, None, Some(&mut t)).map_err(|e| format!("staging texture: {e}"))?;
+                staging = t;
+            }
+            let staging = staging.as_ref().ok_or("no staging texture")?;
+            gpu.ctx.CopyResource(staging, &mirror.tex);
+            let mut map = D3D11_MAPPED_SUBRESOURCE::default();
+            gpu.ctx.Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut map)).map_err(|e| format!("reading the mirror back: {e}"))?;
+            let mut now = vec![0u8; w * h * 4];
+            for y in 0..h {
+                now[y * w * 4..(y + 1) * w * 4].copy_from_slice(std::slice::from_raw_parts((map.pData as *const u8).add(y * map.RowPitch as usize), w * 4));
+            }
+            gpu.ctx.Unmap(staging, 0);
+            if let Some(before) = &prev {
+                let rects = match &dirty {
+                    super::capture::Dirty::Rects(r) => Some(r),
+                    super::capture::Dirty::All => None,
+                };
+                if rects.is_some() {
+                    rep.bounded += 1;
+                }
+                let (mut inside, mut outside) = (0u64, 0u64);
+                for y in 0..h {
+                    let (a, b) = (&before[y * w * 4..(y + 1) * w * 4], &now[y * w * 4..(y + 1) * w * 4]);
+                    if a == b {
+                        continue;
+                    }
+                    for x in 0..w {
+                        if a[x * 4..x * 4 + 4] != b[x * 4..x * 4 + 4] {
+                            let covered = rects.is_none_or(|rs| rs.iter().any(|r| (x as i32) >= r.left && (x as i32) < r.right && (y as i32) >= r.top && (y as i32) < r.bottom));
+                            if covered {
+                                inside += 1;
+                            } else {
+                                outside += 1;
+                            }
+                        }
+                    }
+                }
+                if inside + outside > 0 {
+                    rep.changed += 1;
+                }
+                if outside > 0 {
+                    rep.violations += 1;
+                }
+                rep.inside += inside;
+                rep.outside += outside;
+            }
+            prev = Some(now);
+        }
+        rep.secs = start.elapsed().as_secs_f64();
+        Ok(rep)
+    }
+}
