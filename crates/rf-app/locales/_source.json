@@ -8562,5 +8562,41 @@
   "key": "Belirtilmemiş",
   "tr": "Belirtilmemiş",
   "en": "Not specified"
+ },
+ {
+  "id": "ee680141",
+  "key": "Tepsi simgelerini rustyfiles de toplasın (deneysel)",
+  "tr": "Tepsi simgelerini rustyfiles de toplasın (deneysel)",
+  "en": "Let rustyfiles collect tray icons too (experimental)"
+ },
+ {
+  "id": "4c5c2d8f",
+  "key": "Açıkken rustyfiles, programların bildirim alanına gönderdiği simge iletilerini Explorer'ın görev çubuğu penceresinin önünde bir pencereyle karşılar, kendine kaydeder ve her iletiyi değiştirmeden Explorer'a da iletir; Explorer'ın kendi tepsisi aynen çalışır. Dock simgeleri henüz göstermez. Kapatınca ya da rustyfiles durunca bu pencere kaldırılır ve programlardan simgelerini yeniden eklemeleri istenir. Her ileti Explorer'a da gittiği için Explorer'ın kendi listesi eksiksiz kalır.",
+  "tr": "Açıkken rustyfiles, programların bildirim alanına gönderdiği simge iletilerini Explorer'ın görev çubuğu penceresinin önünde bir pencereyle karşılar, kendine kaydeder ve her iletiyi değiştirmeden Explorer'a da iletir; Explorer'ın kendi tepsisi aynen çalışır. Dock simgeleri henüz göstermez. Kapatınca ya da rustyfiles durunca bu pencere kaldırılır ve programlardan simgelerini yeniden eklemeleri istenir. Her ileti Explorer'a da gittiği için Explorer'ın kendi listesi eksiksiz kalır.",
+  "en": "When on, rustyfiles receives the icon messages that programs send to the notification area with a window placed in front of the Explorer taskbar's window, keeps them, and also passes every message on to Explorer unchanged; Explorer's own tray works exactly as before. The dock does not show the icons yet. When you turn it off, or when rustyfiles stops, this window is removed and programs are asked to add their icons again. Because every message also goes to Explorer, Explorer's own list stays complete."
+ },
+ {
+  "id": "445037c1",
+  "key": "Windows görev çubuğunu gizle (deneysel)",
+  "tr": "Windows görev çubuğunu gizle (deneysel)",
+  "en": "Hide the Windows taskbar (experimental)"
+ },
+ {
+  "id": "cb8c604c",
+  "key": "Dock çalıştığı sürece Windows'un görev çubuğu ve bildirim alanı simgeleri gizlenir; dock durunca geri gelir. Windows'un hiçbir görev çubuğu ayarı değiştirilmez. rustyfiles beklenmedik biçimde durursa küçük bir yardımcı program (rustyfiles-shellguard.exe) görev çubuğunu bir iki saniye içinde geri getirir; yardımcı çalışmıyorsa görev çubuğu gizlenmez. Windows tuşu ve Windows'un kendi açılır pencereleri (Başlat, hızlı ayarlar, saat) hâlâ gizli görev çubuğunun yerine göre açılır; Windows tuşunun rustyfiles Başlat'ını açması için aşağıdaki Windows tuşu anahtarını da açmanız önerilir.",
+  "tr": "Dock çalıştığı sürece Windows'un görev çubuğu ve bildirim alanı simgeleri gizlenir; dock durunca geri gelir. Windows'un hiçbir görev çubuğu ayarı değiştirilmez. rustyfiles beklenmedik biçimde durursa küçük bir yardımcı program (rustyfiles-shellguard.exe) görev çubuğunu bir iki saniye içinde geri getirir; yardımcı çalışmıyorsa görev çubuğu gizlenmez. Windows tuşu ve Windows'un kendi açılır pencereleri (Başlat, hızlı ayarlar, saat) hâlâ gizli görev çubuğunun yerine göre açılır; Windows tuşunun rustyfiles Başlat'ını açması için aşağıdaki Windows tuşu anahtarını da açmanız önerilir.",
+  "en": "While the dock runs, the Windows taskbar and its notification-area icons are hidden; they come back when the dock stops. None of Windows' taskbar settings is changed. If rustyfiles stops unexpectedly, a small helper program (rustyfiles-shellguard.exe) brings the taskbar back within a second or two; if the helper is not running, the taskbar is not hidden. The Windows key and Windows' own flyouts (Start, quick settings, clock) still open where the hidden taskbar was; to have the Windows key open the rustyfiles Start panel, turn on the Windows key switch below as well."
+ },
+ {
+  "id": "7719c317",
+  "key": "Gizli simgeleri göster",
+  "tr": "Gizli simgeleri göster",
+  "en": "Show hidden icons"
+ },
+ {
+  "id": "da44260e",
+  "key": "Gizli simge yok. Simgeleri buraya sürükleyin.",
+  "tr": "Gizli simge yok. Simgeleri buraya sürükleyin.",
+  "en": "No hidden icons. Drag icons here to hide them."
  }
 ]

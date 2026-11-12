@@ -4,7 +4,8 @@
 //!
 //! A pure machine like the main one, with its own actions, so the retry rule is tested without Windows.
 
-use crate::sys::{PidWait, Sys};
+use crate::sys::{HostLink, PidWait, Sys};
+use crate::tbmodel;
 
 /// Explorer may be restarting just then (a crash of the dock is often not alone): try this often, this far apart.
 pub const RETRIES: u8 = 5;
@@ -37,6 +38,8 @@ pub enum BEvent {
     Delayed,
     PendingCleared,
     SessionEnding,
+    /// The host said, through the named event, that it restored the taskbar cleanly and is leaving the work to nobody.
+    Told,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +68,9 @@ pub fn step(st: BState, ev: BEvent) -> (BState, Vec<BAction>) {
     match (st, ev) {
         (S::Done { code }, _) => (S::Done { code }, vec![]),
         (_, BEvent::SessionEnding) => (S::Done { code: 0 }, vec![A::Exit { code: 0 }]),
+        // Told: the host showed the taskbar, removed its record and set the event. There is nothing left to do, and nothing is
+        // looked at: the host may already have hidden the taskbar again for a new guard, and that guard's record is not ours to undo.
+        (S::Watching, BEvent::Told) => (S::Done { code: 0 }, vec![A::Exit { code: 0 }]),
         (S::Init, BEvent::Boot { host_alive: true }) => (S::Watching, vec![]),
         // The host was already gone when we started: the taskbar may be hidden with nobody to show it.
         (S::Init, BEvent::Boot { host_alive: false }) | (S::Watching, BEvent::HostGone) => (S::Showing { attempt: 1 }, vec![A::ShowTaskbar]),
@@ -81,10 +87,87 @@ pub fn step(st: BState, ev: BEvent) -> (BState, Vec<BAction>) {
     }
 }
 
-/// Runs the beside-guard to its end and returns the exit code.
+/// Exit codes of the beside-guard that are not "the taskbar is back" (0) or "could not show it" (1).
+pub const EXIT_NOT_ARMED: i32 = 3;
+pub const EXIT_NOT_CONFIRMED: i32 = 4;
+
+/// Runs the beside-guard without the host's events (the older way: it only watches the process handle).
 pub fn run_beside(sys: &mut Sys, pid: u32, log: &mut dyn FnMut(&str)) -> i32 {
+    run_beside_linked(sys, None, pid, log)
+}
+
+/// Shows what the record names, then puts the work areas back and clears the shared flag and the record. True when everything
+/// that was due is done.
+fn restore_now(sys: &mut Sys, rec: &tbmodel::HideRecord, log: &mut dyn FnMut(&str)) -> bool {
+    match sys.taskbar.show_recorded(rec) {
+        Ok(n) => log(&format!("beside-guard: {n} recorded window(s) are visible")),
+        Err(e) => {
+            log(&format!("beside-guard: the recorded windows were not all shown: {e}"));
+            return false;
+        }
+    }
+    clear_pending(sys, log);
+    true
+}
+
+/// `pending_restore` is one flag for everything the host changed: work areas as well as the taskbar. Clearing it after only the
+/// taskbar came back would leave a shrunk work area that no later start looks for, so the work areas are put back first, and if
+/// that fails the flag (and the record) stay.
+fn clear_pending(sys: &mut Sys, log: &mut dyn FnMut(&str)) {
+    let f = sys.store.load();
+    let mut restored = true;
+    if f.pending_restore()
+        && let Err(e) = sys.workarea.restore(&f.original_work_areas())
+    {
+        log(&format!("beside-guard: work areas not restored: {e}"));
+        restored = false;
+    }
+    if restored {
+        // Read again for the write: the host's other keys may have changed since.
+        let mut f = sys.store.load();
+        f.set_pending_restore(false);
+        f.clear_hidden_taskbar();
+        if let Err(e) = sys.store.save(&f) {
+            log(&format!("beside-guard: state file: {e}"));
+        }
+    }
+}
+
+/// A record left by another host (it crashed, the power went) is undone before this guard says it is armed.
+fn undo_stale_record(sys: &mut Sys, host_pid: u32, log: &mut dyn FnMut(&str)) {
+    let f = sys.store.load();
+    let Some(rec) = f.hidden_taskbar() else { return };
+    let start = sys.procs.start_time(host_pid);
+    if !tbmodel::is_stale(&rec, host_pid, start) {
+        return;
+    }
+    log("beside-guard: a record of hidden windows from an earlier host was found; showing them first");
+    restore_now(sys, &rec, log);
+}
+
+/// Runs the beside-guard to its end and returns the exit code. With a `link` (the named events of the dock host) it first opens
+/// them, undoes a stale record, and only then tells the host it is armed; the host hides nothing before that.
+pub fn run_beside_linked(sys: &mut Sys, mut link: Option<&mut dyn HostLink>, pid: u32, log: &mut dyn FnMut(&str)) -> i32 {
+    if let Some(l) = link.as_deref_mut()
+        && let Err(e) = l.arm()
+    {
+        // Not confirmed, so the host will hide nothing.
+        log(&format!("beside-guard: the host's events could not be opened: {e}"));
+        return EXIT_NOT_ARMED;
+    }
     let alive = sys.procs.wait_pid(pid, 0, Some(0)) != PidWait::Gone;
     log(&format!("beside-guard: host pid {pid} alive at start: {alive}"));
+    if alive {
+        undo_stale_record(sys, pid, log);
+        if let Some(l) = link.as_deref_mut()
+            && let Err(e) = l.confirm_ready()
+        {
+            log(&format!("beside-guard: could not say that it is armed: {e}"));
+            return EXIT_NOT_CONFIRMED;
+        }
+        log("beside-guard: armed");
+    }
+    let done = link.as_deref().map_or(0, |l| l.done_waitable());
     let mut state = BState::Init;
     let mut pending = std::collections::VecDeque::from([BEvent::Boot { host_alive: alive }]);
     loop {
@@ -95,7 +178,14 @@ pub fn run_beside(sys: &mut Sys, pid: u32, log: &mut dyn FnMut(&str)) -> i32 {
                 log(&format!("beside-guard: {}", a.describe()));
                 match a {
                     BAction::ShowTaskbar => {
-                        let r = match sys.taskbar.show_windows_taskbar() {
+                        let f = sys.store.load();
+                        // With a record: exactly the windows it names, if they still are those windows. Without one (never
+                        // written, or garbled): every hidden taskbar window of Explorer's.
+                        let shown = match f.hidden_taskbar() {
+                            Some(rec) => sys.taskbar.show_recorded(&rec),
+                            None => sys.taskbar.show_windows_taskbar(),
+                        };
+                        let r = match shown {
                             Ok(0) => TaskbarResult::NoneFound,
                             Ok(_) => TaskbarResult::Shown,
                             Err(e) => {
@@ -111,25 +201,7 @@ pub fn run_beside(sys: &mut Sys, pid: u32, log: &mut dyn FnMut(&str)) -> i32 {
                         pending.push_back(BEvent::Delayed);
                     }
                     BAction::ClearPending => {
-                        // `pending_restore` is one flag for everything the host changed: work areas as well as the
-                        // taskbar. Clearing it after only the taskbar came back would leave a shrunk work area that no
-                        // later start looks for, so the work areas are put back first, and if that fails the flag stays.
-                        let f = sys.store.load();
-                        let mut restored = true;
-                        if f.pending_restore()
-                            && let Err(e) = sys.workarea.restore(&f.original_work_areas())
-                        {
-                            log(&format!("beside-guard: work areas not restored: {e}"));
-                            restored = false;
-                        }
-                        if restored {
-                            // Read again for the write: the host's other keys may have changed since.
-                            let mut f = sys.store.load();
-                            f.set_pending_restore(false);
-                            if let Err(e) = sys.store.save(&f) {
-                                log(&format!("beside-guard: state file: {e}"));
-                            }
-                        }
+                        clear_pending(sys, log);
                         pending.push_back(BEvent::PendingCleared);
                     }
                     BAction::Exit { code } => return code,
@@ -139,10 +211,12 @@ pub fn run_beside(sys: &mut Sys, pid: u32, log: &mut dyn FnMut(&str)) -> i32 {
         if let BState::Done { code } = state {
             return code;
         }
-        // Watching: block on the host's process handle. Nothing else wakes this process.
-        let _ = sys.procs.wait_pid(pid, 0, None);
+        // Watching: block on the host's process handle and on the host's "restored" event. Nothing else wakes this process.
+        let woke = sys.procs.wait_pid(pid, done, None);
         if sys.session.session_ending() {
             pending.push_back(BEvent::SessionEnding);
+        } else if woke == PidWait::Extra && done != 0 {
+            pending.push_back(BEvent::Told);
         } else {
             pending.push_back(BEvent::HostGone);
         }

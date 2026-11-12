@@ -29,6 +29,9 @@
 //! | `preview` | the hover previews: dwell / swap / grace timing of a pointer on running apps' icons, where a pop-up above an icon goes, the cards' grid | all of it |
 //! | `ownpins` | the dock's OWN pin list (`dock-pins.json`): seeded once from the taskbar's pins at the first pin / unpin from the dock's menu, Windows' stores never written | all of it |
 //! | `winops` | a window's title, minimised or not, a posted request to close it | - |
+//! | `tray_order` | the tray strip's order and hidden set (`tray-order.json`): an icon is known by its GUID or its program and id, never by its tip; the file form | all of it |
+//! | `tray_strip` | the tray strip and its overflow panel: how many cells fit, where each lies, where a dragged icon lands, which click a pointer or key means, the keyboard's walk | all of it |
+//! | `tray_tip` | a tray icon's tooltip: the 400 ms dwell, swap and close rules, the text's cleaning, its window's size and place | all of it |
 //! | `startapps` | start an app of "All apps", as administrator (the user's click), find its program (shell thread) | - |
 //!
 //! HOW THE APP USES IT (the order that works):
@@ -72,6 +75,9 @@ pub mod startapps;
 pub mod startlist;
 pub mod startpins;
 pub mod system;
+pub mod tray_order;
+pub mod tray_strip;
+pub mod tray_tip;
 pub mod triggers;
 pub mod winops;
 

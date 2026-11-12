@@ -6268,6 +6268,7 @@ dependencies = [
  "rayon",
  "resvg 0.46.0",
  "rf-core",
+ "rf-shellguard",
  "roxmltree 0.20.0",
  "serde",
  "serde_json",

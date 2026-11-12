@@ -50,6 +50,12 @@ switcher. They need one system-wide keyboard hook, which exists only in this pro
 fail-open design and what was not run: `docs/design/shell-keys.md`. `RUSTYFILES_KEYS_LOG_ONLY=1` for a first try that decides and
 logs but swallows, sends and opens nothing.
 
+## Hiding Explorer's taskbar (`shell_hide_taskbar`)
+
+A fourth switch on the same page, off: the host hides Explorer's taskbar windows while the dock runs, only with the guard
+(`rustyfiles-shellguard.exe`, beside role) confirmed running, and shows them again on off, on quit, from a panic hook, and from the
+guard if the host dies. Rules, the guard's protocol, the work-area question and the steps of a first try: `docs/design/taskbar-hide.md`.
+
 ## Known limits
 
 * **One virtual desktop.** The cover windows belong to the virtual desktop they were made on; Windows hides a top-level window of another one while Explorer's own desktop window shows on all of them. On a second virtual desktop the user sees Explorer's desktop and icons, not ours (a rename or delete done on one is true on both, but the picture differs). Showing a window on every desktop needs an undocumented interface; not attempted.

@@ -27,6 +27,11 @@ pub struct RightIsland {
     glass: Rc<RefCell<IslandGlass>>,
     lines: ClockLines,
     reported: f32,
+    /// What the tray strip adds to the island's width (logical px; 0 without one).
+    tray_extra: f32,
+    /// The keys, once the keyboard is in the tray strip (`tray_strip::focus_strip`). Made when the island first draws a strip: without
+    /// one the island tracks no focus at all, so it behaves as it did before the strip existed.
+    focus: Option<FocusHandle>,
 }
 
 impl RightIsland {
@@ -43,7 +48,7 @@ impl RightIsland {
             }
         })
         .detach();
-        RightIsland { glass, lines, reported }
+        RightIsland { glass, lines, reported, tray_extra: 0.0, focus: None }
     }
 
     /// Reads the time and the user's formats again (a minute went by, or the system time or zone changed).
@@ -51,13 +56,37 @@ impl RightIsland {
         let lines = clock::system_lines();
         if lines != self.lines {
             self.lines = lines;
-            let w = plan::right_width(&self.lines);
+            let w = plan::right_width(&self.lines) + self.tray_extra;
             if (w - self.reported).abs() > 0.5 {
                 self.reported = w;
                 super::host::set_width(Kind::Right, w, cx);
             }
             cx.notify();
         }
+    }
+
+    /// The tray strip needs `extra` logical px of the island's width (0: it has gone). All three islands are placed again.
+    pub fn set_tray_extra(&mut self, extra: f32, cx: &mut Context<Self>) {
+        if (extra - self.tray_extra).abs() < 0.01 {
+            return;
+        }
+        self.tray_extra = extra;
+        let w = plan::right_width(&self.lines) + extra;
+        if (w - self.reported).abs() > 0.5 {
+            self.reported = w;
+            super::host::set_width(Kind::Right, w, cx);
+        }
+        cx.notify();
+    }
+
+    /// The island's glass (the tray strip's tips take its tone).
+    pub fn island_glass(&self) -> Rc<RefCell<IslandGlass>> {
+        self.glass.clone()
+    }
+
+    /// The focus the island's keys go to while the keyboard is in the tray strip.
+    pub fn focus_handle(&self) -> Option<FocusHandle> {
+        self.focus.clone()
     }
 }
 
@@ -162,11 +191,25 @@ impl Render for RightIsland {
             .child(div().text_size(px(12.)).line_height(px(15.)).text_color(pal.text_secondary().hsla()).child(self.lines.date.clone()))
             .on_click(move |_, _, cx| open_calendar(cx));
 
-        super::host::island_box(pal, fallback).child(
+        // the other programs' tray icons, with a thin separator after them (nothing at all without a tray source)
+        let tray = super::tray_strip::strip_element(pal, cx);
+
+        // (keys are listened to, and focus tracked, only while a strip is drawn)
+        let focus = tray.is_some().then(|| self.focus.get_or_insert_with(|| cx.focus_handle()).clone());
+        super::host::island_box(pal, fallback)
+            .when_some(focus, |d, focus| {
+                d.track_focus(&focus).on_key_down(cx.listener(|_, ev: &KeyDownEvent, _, cx| {
+                    if super::tray_strip::key_down(ev, cx) {
+                        cx.stop_propagation();
+                    }
+                }))
+            })
+            .child(
             h_flex()
                 .size_full()
                 .px(px(plan::SIDE_PAD))
                 .items_center()
+                .children(tray)
                 .child(icon_button("dock-network", network_icon, pal, open_controls))
                 .child(div().ml(px(plan::RIGHT_GAP)).child(icon_button("dock-volume", volume_icon, pal, open_controls)))
                 .child(div().ml(px(plan::RIGHT_SEP_GAP)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH)).h(px(plan::RIGHT_SEP_HEIGHT)).bg(pal.separator().hsla()))

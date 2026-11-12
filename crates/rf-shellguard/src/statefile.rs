@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 
 use crate::json::Json;
 use crate::machine::{Crash, Persist, Reason};
+use crate::tbmodel::{HideRecord, Target};
 
 pub const STATE_VERSION: u64 = 1;
 /// A state file larger than this is not ours.
@@ -228,6 +229,62 @@ impl ShellStateFile {
 
     pub fn set_pending_restore(&mut self, on: bool) {
         self.doc.set("pending_restore", Json::Bool(on));
+    }
+
+    /// `hidden_taskbar` (shell plan E1): which Explorer taskbar windows the dock host hid, written BEFORE the first one is hidden.
+    /// A record with ANY entry that is not understood, without a usable host identity or without any window is `None` as a whole
+    /// (the restore then falls back to showing every hidden taskbar window of Explorer). Trimming it instead would show the entries
+    /// that parse, remove the key, and leave the others hidden with nothing left that remembers them.
+    pub fn hidden_taskbar(&self) -> Option<HideRecord> {
+        let o = self.doc.get("hidden_taskbar")?;
+        let host_pid = o.get("host_pid").and_then(Json::as_u64).and_then(|p| u32::try_from(p).ok()).filter(|p| *p != 0)?;
+        let host_start = o.get("host_start").and_then(Json::as_u64).unwrap_or(0);
+        let at_ms = o.get("at").and_then(Json::as_u64).unwrap_or(0);
+        let windows: Vec<Target> = o
+            .get("windows")
+            .and_then(Json::as_arr)?
+            .iter()
+            .map(|v| {
+                Some(Target {
+                    handle: isize::try_from(v.get("hwnd")?.as_i64()?).ok()?,
+                    class: v.get("class")?.as_str()?.to_string(),
+                    pid: u32::try_from(v.get("pid")?.as_u64()?).ok()?,
+                    start: v.get("start").and_then(Json::as_u64).unwrap_or(0),
+                })
+            })
+            .collect::<Option<Vec<Target>>>()?;
+        if windows.is_empty() { None } else { Some(HideRecord { host_pid, host_start, at_ms, windows }) }
+    }
+
+    pub fn set_hidden_taskbar(&mut self, rec: &HideRecord) {
+        let windows = rec
+            .windows
+            .iter()
+            .map(|t| {
+                Json::Obj(vec![
+                    ("hwnd".to_string(), Json::Num((t.handle as i64).to_string())),
+                    ("class".to_string(), Json::Str(t.class.clone())),
+                    ("pid".to_string(), Json::num(u64::from(t.pid))),
+                    ("start".to_string(), Json::num(t.start)),
+                ])
+            })
+            .collect();
+        let o = Json::Obj(vec![
+            ("host_pid".to_string(), Json::num(u64::from(rec.host_pid))),
+            ("host_start".to_string(), Json::num(rec.host_start)),
+            ("at".to_string(), Json::num(rec.at_ms)),
+            ("windows".to_string(), Json::Arr(windows)),
+        ]);
+        self.doc.set("hidden_taskbar", o);
+    }
+
+    pub fn clear_hidden_taskbar(&mut self) {
+        self.doc.remove("hidden_taskbar");
+    }
+
+    /// The key is there, whether or not it can be understood.
+    pub fn has_hidden_taskbar_key(&self) -> bool {
+        self.doc.get("hidden_taskbar").is_some()
     }
 
     fn set_crashes(&mut self, crashes: &[Crash]) {
@@ -483,6 +540,79 @@ mod tests {
             std::fs::write(&p, text).unwrap();
             assert_eq!(ShellStateFile::peek(&p).host_pid(), None, "{text}");
         }
+        cleanup(&d);
+    }
+
+    fn rec() -> HideRecord {
+        HideRecord {
+            host_pid: 4242,
+            host_start: 133_700_000_000_000_000,
+            at_ms: 1_731_000_000_000,
+            windows: vec![
+                Target { handle: 0x10_0A2E, class: "Shell_TrayWnd".into(), pid: 8800, start: 133_699_000_000_000_001 },
+                // handles are sign-extended 32-bit values: a negative one must survive
+                Target { handle: -65_538, class: "Shell_SecondaryTrayWnd".into(), pid: 8800, start: 133_699_000_000_000_001 },
+            ],
+        }
+    }
+
+    #[test]
+    fn the_hidden_taskbar_record_round_trips_with_64_bit_times_and_negative_handles() {
+        let d = temp("hidden");
+        let p = path_in(&d);
+        let mut f = ShellStateFile::empty();
+        assert!(f.hidden_taskbar().is_none() && !f.has_hidden_taskbar_key());
+        f.set_hidden_taskbar(&rec());
+        f.set_pending_restore(true);
+        f.save(&p).unwrap();
+        let back = ShellStateFile::load(&p);
+        assert_eq!(back.hidden_taskbar(), Some(rec()));
+        assert!(back.pending_restore());
+        let mut back = back;
+        back.clear_hidden_taskbar();
+        assert!(back.hidden_taskbar().is_none() && !back.has_hidden_taskbar_key());
+        cleanup(&d);
+    }
+
+    #[test]
+    fn a_garbled_hidden_taskbar_record_is_none_but_the_key_is_still_seen() {
+        let d = temp("hidden-bad");
+        let p = path_in(&d);
+        for text in [
+            r#"{"version":1,"hidden_taskbar":"yes"}"#,
+            r#"{"version":1,"hidden_taskbar":{"host_pid":0,"windows":[{"hwnd":1,"class":"Shell_TrayWnd","pid":2}]}}"#,
+            r#"{"version":1,"hidden_taskbar":{"host_pid":5,"windows":[]}}"#,
+            r#"{"version":1,"hidden_taskbar":{"host_pid":5,"windows":[{"hwnd":"x","class":1,"pid":-2}]}}"#,
+            r#"{"version":1,"hidden_taskbar":{"host_pid":5}}"#,
+        ] {
+            std::fs::write(&p, text).unwrap();
+            let f = ShellStateFile::peek(&p);
+            assert!(f.hidden_taskbar().is_none(), "{text}");
+            assert!(f.has_hidden_taskbar_key(), "{text}");
+        }
+        // one good entry among bad ones is NOT enough: a record that is only partly understood is garbled as a whole, so that the
+        // sweep shows every hidden window and none is orphaned by a trimmed record being deleted
+        std::fs::write(&p, r#"{"version":1,"hidden_taskbar":{"host_pid":5,"windows":[{"hwnd":"x"},{"hwnd":7,"class":"Shell_TrayWnd","pid":9}]}}"#).unwrap();
+        let f = ShellStateFile::peek(&p);
+        assert!(f.hidden_taskbar().is_none() && f.has_hidden_taskbar_key(), "a partly unreadable record is garbled as a whole");
+        // the host's start time may be missing from an otherwise good record
+        std::fs::write(&p, r#"{"version":1,"hidden_taskbar":{"host_pid":5,"windows":[{"hwnd":7,"class":"Shell_TrayWnd","pid":9}]}}"#).unwrap();
+        let r = ShellStateFile::peek(&p).hidden_taskbar().unwrap();
+        assert_eq!((r.host_pid, r.host_start, r.windows.len(), r.windows[0].start), (5, 0, 1, 0));
+        cleanup(&d);
+    }
+
+    #[test]
+    fn the_hidden_taskbar_record_survives_the_guards_own_rewrites() {
+        let d = temp("hidden-keep");
+        let p = path_in(&d);
+        let mut f = ShellStateFile::empty();
+        f.set_hidden_taskbar(&rec());
+        f.save(&p).unwrap();
+        let mut g = ShellStateFile::load(&p);
+        g.apply(&Persist::Crashes(vec![Crash { at: 1, uptime_ms: 2 }]));
+        g.save(&p).unwrap();
+        assert_eq!(ShellStateFile::peek(&p).hidden_taskbar(), Some(rec()));
         cleanup(&d);
     }
 

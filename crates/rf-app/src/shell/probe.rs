@@ -23,6 +23,8 @@ pub fn settings_on(s: &Settings) -> Vec<String> {
         ("shell_desktop_cover", s.shell_desktop_cover),
         ("shell_win_key", s.shell_win_key),
         ("shell_own_switcher", s.shell_own_switcher),
+        ("shell_tray_host", s.shell_tray_host),
+        ("shell_hide_taskbar", s.shell_hide_taskbar),
     ]
     .into_iter()
     .filter(|(_, on)| *on)

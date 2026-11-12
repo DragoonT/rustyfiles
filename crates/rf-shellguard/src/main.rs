@@ -12,8 +12,9 @@ use rf_shellguard::cli::{self, Mode};
 use rf_shellguard::fakes::{MemRegistry, NoHotkey, NullTaskbar, NullWorkAreas, new_rec};
 use rf_shellguard::runner::{RunConfig, run_guard};
 use rf_shellguard::statefile::{self, FsStore, ShellStateFile};
-use rf_shellguard::sys::{Clock, HostLaunch, Hotkey, Registry, Sys, TaskbarVisibility, WorkAreas};
+use rf_shellguard::sys::{Clock, HostLaunch, HostLink, Hotkey, Registry, Sys, TaskbarVisibility, WorkAreas};
 use rf_shellguard::win::hotkey::RealHotkey;
+use rf_shellguard::win::link::RealLink;
 use rf_shellguard::win::procs::RealProcesses;
 use rf_shellguard::win::registry::RealRegistry;
 use rf_shellguard::win::session::{Names, RealSession, install_end_session_handler};
@@ -84,7 +85,6 @@ fn main() -> ExitCode {
 }
 
 fn run_beside(args: &cli::Args, dir: &std::path::Path, pid: u32, log: &mut dyn FnMut(&str)) -> i32 {
-    let _ = args;
     let mut registry = RealRegistry;
     let mut procs = RealProcesses::new(None);
     let mut hotkey = NoHotkey;
@@ -105,7 +105,9 @@ fn run_beside(args: &cli::Args, dir: &std::path::Path, pid: u32, log: &mut dyn F
         store: &mut store,
         ui: &mut ui,
     };
-    beside::run_beside(&mut sys, pid, log)
+    // With the host's two events the guard confirms to the host that it is armed and hears when the host restored cleanly.
+    let mut link = args.link.as_ref().map(|(r, d)| RealLink::new(r, d));
+    beside::run_beside_linked(&mut sys, link.as_mut().map(|l| l as &mut dyn HostLink), pid, log)
 }
 
 fn run_shell(args: &cli::Args, dir: &std::path::Path, log: &mut dyn FnMut(&str)) -> i32 {

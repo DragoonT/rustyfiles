@@ -16,7 +16,7 @@ it exits.
 | --- | --- | --- |
 | Left (48 px high) | Windows logo, a search field, the weather | logo: our own Start panel (see "Panels, Start and search"; with "rustyfiles Başlat menüsünü kullan" off, the Windows key as before); search field: the same panel with the keyboard in its field, and the text typed there is shown in the field on the island (off: rustyfiles' quick search window); the weather is shown, not clicked |
 | Middle (72 px high at rest) | the apps pinned to the Windows taskbar in its order, the other running apps, a thin separator, the Recycle Bin, Downloads | not running: start it; running: bring its last used window forward; in front: minimise it; middle click: another instance; right click: the dock's own app menu; the pointer resting on a running app: a preview of its windows (see "The app menu, the hover previews and the dock's own pins") |
-| Right (48 px high) | network and volume glyphs that show the real state (the volume glyph shows mute), the time and date in two lines, a bell | network, volume: our own control centre (see "The control centre"; with "rustyfiles denetim merkezini kullan" off, Windows' quick settings, Win+A, as in version 1); time: our own calendar panel (see "The calendar and the notification panel"; with "rustyfiles takvimini kullan" off, Windows' notification centre and calendar, Win+N, as before); bell: our own notification panel, with a small dot while there are notifications (with "rustyfiles bildirim panelini kullan" off, Win+N as before) |
+| Right (48 px high) | (with a tray source only: the other programs' notification icons and a chevron, see "The tray strip and its overflow panel") network and volume glyphs that show the real state (the volume glyph shows mute), the time and date in two lines, a bell | network, volume: our own control centre (see "The control centre"; with "rustyfiles denetim merkezini kullan" off, Windows' quick settings, Win+A, as in version 1); time: our own calendar panel (see "The calendar and the notification panel"; with "rustyfiles takvimini kullan" off, Windows' notification centre and calendar, Win+N, as before); bell: our own notification panel, with a small dot while there are notifications (with "rustyfiles bildirim panelini kullan" off, Win+N as before) |
 
 A dot under an app means it is running; the app in front has a wider dot.
 
@@ -448,6 +448,86 @@ the window's button if the program refuses the foreground); the x asks the windo
   its picture first).
 * LOG (info): `dock: hover preview shown in <time> at x=<device px> (<n> cards, <m> live pictures)`.
 
+## The tray strip and its overflow panel (shell plan increment D3)
+
+The other programs' notification icons in the right island: a row of small pictures to the LEFT of the island's own symbols, a chevron
+that opens an overflow panel above the island, and a thin separator before the network symbol. **Off unless there is a tray source:** the
+dock makes no tray state at all without one, and with a source that has no snapshot (the tray host off) the island is exactly what it
+was. In this checkout the tray host (`rf_win::trayhost`, built by another team) does not exist, so the only source is the made-up one
+(`RUSTYFILES_TRAY_FAKE=1`, below); the lead wires the real one in the five bodies of `tray_source.rs` that say WIRE AT MERGE.
+
+```
+ [ app app app app app app > ] |  [ net ] [ vol ] | [ 14:05 12.11.2026 ] [ bell ]
+   strip: 16 px pictures in 24 px cells, chevron      the island's own symbols, unchanged
+```
+
+* **The strip.** Cells of 24 px (the picture 16 px, centred) at the island's left padding, as many as fit a width limit (a quarter of the
+  monitor's work area, at most 240 px, chevron included), then the chevron. The icons that do not fit are the LAST of the strip and go to
+  the overflow panel, together with the ones the user moved there. The chevron is there whenever there is any icon (it is the place to
+  drop an icon to hide it; with nothing hidden the panel says so). The island is anchored at the right edge of the screen, so it grows to
+  the left by `Layout::extra_width` and the symbols stay where they were; the dock's layout follows (`RightIsland::set_tray_extra` ->
+  `host::set_width`), the middle island gives way as it always does.
+* **Clicks.** Left, right, middle and the second press of a double click go to the program through the tray host's click engine
+  (`tray_source::deliver_click(key, TrayClick { kind, at, id })`). A press is not yet a click: it might become a drag, so the click is made
+  when the button comes up without the pointer having moved 4 px, and only if the pointer is still on the cell it went down on and the
+  key still names the icon that was pressed. The click carries that icon's identity (`id`) and the host must refuse it when its icon
+  under the key has another identity by then (a program that exited and another that took its key).
+* **Tooltip.** The pointer resting on an icon for 400 ms opens its tip (cleaned: control characters and runs of blanks gone, cut at 200
+  characters; no tip, no tooltip) in a small glass window above it that is NEVER ACTIVATED (the hover previews' kind of window). Moving to
+  another icon swaps it at once, a press (which also covers the menu the program opens from the click), a drag or the keyboard in the strip closes it and keeps it
+  from coming back until the pointer has left the icon, or the keyboard has left the strip. The window is made when the first tip is due (`tray_tip.rs`); the timing is `rf_win::dock::tray_tip` (pure).
+* **Drag.** A left press that moves 4 px is a drag of that icon. The real pointer is read every 16 ms while the button is held (the
+  toolkit's events stop at the window's edge and do not follow a drag from the overflow panel to the island). A marker shows the gap in the
+  strip the icon would land on, the chevron lights when it is the target, the open panel gets a frame. Let go on a gap: reorder. On the
+  chevron or the open panel: hidden (moved into the overflow). From the panel onto a gap of the strip: shown again. Anywhere else, or on
+  the panel again for an icon that came from there: nothing happens. There is no picture of the icon following the pointer (the dragged
+  icon is dimmed where it was).
+* **Keyboard.** The islands are never activated, so the keys reach the strip only after `dock::focus_tray_strip(cx)` took the foreground
+  for the island's window (`SetForegroundWindow` only: unlike the panels it does not touch the window's topmost state). Then: Left,
+  Right, Home, End and Tab move a ring over the icons and the chevron, Enter or Space is a left click, the context-menu key or Shift+F10
+  a right click (the click carries the icon's top left corner as its place), Tab past either end and Escape leave. The ring is on an icon by its key, so an icon
+  that comes or goes under it moves the ring along and Enter always reaches the icon the ring shows. The keyboard goes back to the
+  window that had it: at once after Escape or Tab; after a click 400 ms later, and only if the program did not take the foreground
+  itself (an icon that does its work in the background); and Enter on the chevron opens the overflow panel with that window handed over
+  as the one to go back to, so Escape in the panel gives the keyboard back to the user's program and not to the island. If Windows refuses the foreground the strip gives the keyboard up after 1.2 s. **Nothing calls
+  `focus_tray_strip` by itself:** a key is wired to it at the merge. The overflow panel IS activated like the other panels and has its
+  own keys: the arrows walk the cells (down into a shorter last row lands on its last cell), Tab and Shift+Tab walk on and wrap, Enter,
+  Space, the context-menu key and Shift+F10 as above, Escape closes.
+* **The overflow panel** (`tray_overflow.rs`, its slot `tray_panel.rs` is a child module of `panel.rs`): up to six columns of 40 px cells
+  with 20 px pictures, lined up with the island's right edge like the calendar and the bell's panel (not above the chevron), made when
+  first opened like the other panels, a tip after 400 ms, a click puts it away after the click was delivered (on every path, also when
+  the icon went meanwhile). A drop on the end gap of a full strip makes the icon the strip's last cell (the last shown icon goes out).
+* **The order** is `tray-order.json` in the config folder (`rf_win::dock::tray_order`): one list of every icon ever shown in the user's
+  order and the list of the hidden ones. An icon is known by its GUID (when the program gave one) or by its program's path and the id
+  the program chose, NEVER by its tip text (it changes with the program's state) and never by a window handle. An icon that is not there
+  now keeps its place and its hiding; the list is cut at 256. The file is written (whole, to a temporary file, then renamed) only when the
+  user changes something, never for reading; a file that exists and cannot be read is moved aside (`.broken`) before anything is written.
+  A packaged app gets a new GUID with every version, so after an update its icon is a new icon at the end of the strip.
+* **Where the icons are** is reported to the tray host (`tray_source::report_icon_rects`): the cells of the strip, and for an icon in the
+  overflow its cell while the panel is open and the chevron's rectangle otherwise, for `Shell_NotifyIconGetRect`.
+
+### The made-up source (`RUSTYFILES_TRAY_FAKE=1`)
+
+Six invented icons (coloured 16 px squares): "Posta" (a GUID; a left click or Enter on it counts a message, which changes its tip and its
+colour: the way an update from the host reaches the strip), "Bulut eşitleme", "Ses karıştırıcı", "VPN" (a GUID; a tip of two lines),
+"Güncelleme" and one with no tip (a GUID; no tooltip). Three are known by a GUID and three by a program and an id. Clicks are logged
+(`tray fake: click #n Kind on icon k at (x, y)`), nothing else. `RUSTYFILES_TRAY_FAKE_FOCUS_MS=<n>` moves the keyboard to the strip `n` ms
+after the dock started, so that the keyboard can be tried before a key is wired to do it. Use a test config folder
+(`RUSTYFILES_CONFIG_DIR`): reordering writes `tray-order.json` there.
+
+`cargo run -p rf-win --example tray_strip_probe --offline -- <icons> <work width> <scale> <hidden>` prints where the cells, the chevron,
+the overflow panel's cells and a tip fall for that many icons (arithmetic only; no window, nothing read from the system).
+
+### Not run, and limits
+
+* No window was shown by the work that wrote this: the strip, the drag, the tooltip, the overflow panel, the keyboard's taking of the
+  foreground for a no-activate island and the keyboard in it have been compiled and covered by tests of the arithmetic and the state, not
+  seen.
+* The tray host is not wired; the wire format its parser expects is still the documents' and the other shells' (not this machine's).
+* Not built: moving an icon by keyboard, a picture following the pointer in a drag, "restart that app" for programs that never re-add
+  their icon, balloons, a Settings switch for the strip (the tray host being on is the switch). The island's own symbols (network, volume,
+  clock, bell) are unchanged.
+
 ## Settings (Settings, "Dock (deneysel)" / "Dock (experimental)")
 
 * **rustyfiles takvimini kullan** / Use rustyfiles' calendar. On by default. The clock opens the calendar panel; off: it sends Win+N
@@ -578,6 +658,10 @@ The dock process is told to read the settings file again when any of these chang
   symbols, the slider's pointer arithmetic; all pure), `sysstate.rs` (the sound and network the island follows all the time), and in
   rf-win `crates/rf-win/src/sysstatus/` (`audio`, `network`, `media`, `bluetooth`, `power`, `brightness`, and the hub / write-coalescing
   helpers in `mod.rs`).
+* The tray strip: `crates/rf-app/src/dock/tray_source.rs` (the one seam to the tray host, and the made-up source), `tray_strip.rs` (state,
+  pointer, drag, keyboard, the strip's elements), `tray_tip.rs` (the tooltip window), `tray_overflow.rs` (the overflow panel's view),
+  `tray_panel.rs` (its slot in `panel.rs`); in rf-win `crates/rf-win/src/dock/tray_order.rs` (identity, order, file), `tray_strip.rs`
+  (layout, drop targets, clicks, keys), `tray_tip.rs` (tip timing, text, window).
 * The calendar and the notification panel: `crates/rf-app/src/dock/cal_view.rs` (the calendar's view and its small model),
   `notif_view.rs` (the notification panel's view), `notif_model.rs` (its height, words and cursor arithmetic; pure), `notif_state.rs`
   (the count behind the bell's dot and its worker), `panel_more.rs` (their slots in the panel machinery), `panel_parts.rs` (the colours

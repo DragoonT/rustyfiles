@@ -130,6 +130,39 @@ pub fn restore_to(previous: isize, foreground_now: isize, panel: isize, previous
     (foreground_now == panel || foreground_now == 0).then_some(previous)
 }
 
+/// Whose window is in front at the moment a panel opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FrontIs {
+    /// Somebody else's: the user's program. That is the window to give the keyboard back to.
+    Other,
+    /// A panel's own window (another panel easing out): the window it remembered is still the one to go back to.
+    PanelSlot,
+    /// One of the dock's islands. They are never activated, except while the keyboard is in the tray strip; the island is no window to go
+    /// back to, so remembering it would hand the keyboard to a window that ignores keys.
+    Island,
+}
+
+/// How long a handed-over window ([`previous_on_open`]'s `hint`) may wait for the panel to open (the window of a panel is made on its
+/// first opening, which takes a moment).
+pub const PREVIOUS_HINT_MS: u64 = 2_000;
+
+/// The window to remember as the one that had the keyboard when a panel opens: `Some(window)` replaces what was remembered (0: nothing
+/// to go back to), `None` leaves it. `hint` is a window that the opener handed over (with its age in ms) because it knows better than the
+/// foreground does: the tray strip, when the keyboard walk in it opens the overflow panel, hands over the program the keyboard was taken
+/// from, because the foreground is the island by then.
+pub fn previous_on_open(front: isize, whose: FrontIs, hint: Option<(isize, u64)>) -> Option<isize> {
+    if let Some((window, age_ms)) = hint
+        && age_ms <= PREVIOUS_HINT_MS
+    {
+        return Some(window);
+    }
+    match whose {
+        FrontIs::Other => Some(front),
+        FrontIs::PanelSlot => None,
+        FrontIs::Island => Some(0),
+    }
+}
+
 /// One frame of the opening or closing: `opacity` 0..=1 and the extra distance (logical px) the panel is lower than its place.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Frame {
@@ -362,6 +395,25 @@ mod tests {
         for c in [CloseCause::ClickOutside, CloseCause::ForegroundLost, CloseCause::FullScreen, CloseCause::Chosen, CloseCause::LayoutChanged] {
             assert!(!c.restores_foreground(), "{c:?}");
         }
+    }
+
+    #[test]
+    fn an_island_in_front_is_never_the_window_to_go_back_to() {
+        let (prog, island) = (0x10, 0x30);
+        assert_eq!(previous_on_open(prog, FrontIs::Other, None), Some(prog), "the user's program is remembered");
+        assert_eq!(previous_on_open(0x20, FrontIs::PanelSlot, None), None, "a panel easing out leaves what was remembered");
+        // (before: the island was remembered, and Escape handed the keyboard to a window that ignores keys)
+        assert_eq!(previous_on_open(island, FrontIs::Island, None), Some(0));
+        assert_eq!(restore_to(0, island, 0x20, true), None, "nothing to go back to is nothing");
+    }
+
+    #[test]
+    fn a_handed_over_window_wins_while_it_is_fresh() {
+        let (prog, island) = (0x10, 0x30);
+        assert_eq!(previous_on_open(island, FrontIs::Island, Some((prog, 5))), Some(prog));
+        assert_eq!(previous_on_open(island, FrontIs::Island, Some((prog, PREVIOUS_HINT_MS))), Some(prog));
+        assert_eq!(previous_on_open(island, FrontIs::Island, Some((prog, PREVIOUS_HINT_MS + 1))), Some(0), "a stale hint is ignored");
+        assert_eq!(previous_on_open(prog, FrontIs::Other, Some((0, 1))), Some(0), "a hint of 'none' is also an answer");
     }
 
     #[test]

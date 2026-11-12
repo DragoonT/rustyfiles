@@ -259,6 +259,10 @@ impl Processes for RealProcesses {
         }
     }
 
+    fn start_time(&mut self, pid: u32) -> Option<u64> {
+        super::tbwin::process_start_time(pid)
+    }
+
     fn host_hung(&mut self) -> bool {
         let Some(c) = &self.child else { return false };
         let mut s = HungSearch { pid: c.id(), hung: false };

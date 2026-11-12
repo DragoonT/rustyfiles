@@ -199,6 +199,11 @@ pub fn monitor_work(cx: &App) -> Option<(f32, Rect)> {
     Some((mon.scale(), mon.work))
 }
 
+/// An island's window: the toolkit's handle and the system's. For the tray strip, which takes the keyboard for the right island.
+pub fn island_window(kind: Kind, cx: &App) -> Option<(AnyWindowHandle, isize)> {
+    cx.try_global::<Host>()?.placed.iter().find(|p| p.kind == kind).map(|p| (p.handle, p.hwnd))
+}
+
 /// Whether a full-screen application is in front (the islands are hidden).
 pub fn is_fullscreen(cx: &App) -> bool {
     cx.try_global::<Host>().is_some_and(|h| h.fullscreen)
@@ -410,6 +415,8 @@ fn on_system_event(ev: SystemEvent, cx: &mut App) {
             }
             // the islands move; a panel that is open would be left where they were
             super::panel::close(rf_win::dock::panel::CloseCause::LayoutChanged, cx);
+            // the tray strip's room is a quarter of the new work area
+            super::tray_strip::layout_changed(cx);
             request_layout(cx);
             // the desktop's windows follow the monitors, once they have been quiet (see shell::cover)
             crate::shell::cover::layout_changed(cx);
@@ -474,6 +481,10 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     crate::shell::cover::on_settings(cx);
     // the keyboard layer follows its two switches (see shell::keylayer)
     crate::shell::keylayer::on_settings(cx);
+    // the tray host follows its switch (see shell::trayhost)
+    crate::shell::trayhost::on_settings(cx);
+    // Explorer's taskbar follows its switch (see shell::taskbar_hide)
+    crate::shell::taskbar_hide::on_settings(cx);
     cx.refresh_windows();
 }
 
@@ -491,6 +502,10 @@ pub fn shutdown(cx: &mut App) {
     let host = cx.remove_global::<Host>();
     // the keyboard hook goes first of all: from here on Windows' own Start and Alt+Tab are back
     crate::shell::keylayer::stop(cx);
+    // Explorer's taskbar comes back before anything else is torn down
+    crate::shell::taskbar_hide::stop(cx);
+    // the tray host's window goes next: Explorer's tray window is the first again and programs are asked to add their icons again
+    crate::shell::trayhost::stop(cx);
     // the desktop cover goes next: its windows close and Explorer's desktop is simply visible again
     crate::shell::cover::stop(cx);
     super::panel::shutdown(cx);
@@ -613,6 +628,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 
     let panel_left = left_entity.clone();
     let sys_right = right_entity.clone();
+    let tray_right = right_entity.clone();
     let fullscreen = system.as_ref().is_some_and(|s| s.fullscreen());
     let host = Host {
         system,
@@ -675,10 +691,20 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         apply_visibility(cx);
     }
     apply_reserve(cx);
+    // The other programs' tray icons (nothing at all without a tray source: see tray_source.rs). After the setup job above has been queued:
+    // the strip asks for a wider right island at once, and that placement must come after the first one, which was worked out for the
+    // island without a strip and would otherwise be the last word.
+    if let Some(right) = tray_right {
+        super::tray_strip::start(right, cx);
+    }
     // the desktop cover, when its setting is on (see shell::cover)
     crate::shell::cover::on_settings(cx);
     // the keyboard layer, when one of its settings is on (see shell::keylayer)
     crate::shell::keylayer::on_settings(cx);
+    // the tray host, when its setting is on (see shell::trayhost)
+    crate::shell::trayhost::on_settings(cx);
+    // Explorer's taskbar, when its setting is on (see shell::taskbar_hide)
+    crate::shell::taskbar_hide::on_settings(cx);
 
     // system events -> the app
     cx.spawn(async move |cx| {

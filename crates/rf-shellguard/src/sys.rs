@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use crate::machine::{Message, Millis};
 use crate::statefile::{ShellStateFile, WorkAreaRec};
+use crate::tbmodel::HideRecord;
 
 /// Wall clock, milliseconds since the Unix epoch.
 pub trait Clock {
@@ -57,6 +58,11 @@ pub trait Processes {
     /// Waits for any process id (the beside-guard watches a host it did not start). Process id 0 with no
     /// extra handle is a plain timed wait. A process that cannot be opened counts as gone.
     fn wait_pid(&mut self, pid: u32, extra: isize, timeout_ms: Option<Millis>) -> PidWait;
+    /// When the process `pid` started (FILETIME ticks), None when that cannot be read. With the id it tells a process from
+    /// another one that was given the same id later.
+    fn start_time(&mut self, _pid: u32) -> Option<u64> {
+        None
+    }
     /// Does a top-level window of the running host not answer?
     fn host_hung(&mut self) -> bool;
     fn kill_host(&mut self);
@@ -109,8 +115,26 @@ pub trait WorkAreas {
 
 /// The Windows taskbar's visibility (beside mode hides it; the guard shows it again).
 pub trait TaskbarVisibility {
-    /// How many taskbar windows were shown (0 when Explorer has none, e.g. it is not running).
+    /// The sweep: shows every hidden taskbar window of Explorer's, whoever hid it. Used when there is no usable record of what was
+    /// hidden. How many taskbar windows were found (0 when Explorer has none, e.g. it is not running).
     fn show_windows_taskbar(&mut self) -> Result<usize, String>;
+    /// Shows the windows of the record that still are the windows it names (class, owner process id and start time, Explorer);
+    /// any other window is left alone. `Ok(n)`: how many of them are visible afterwards (0: none exists any more); `Err`: one
+    /// that is ours could not be shown.
+    fn show_recorded(&mut self, rec: &HideRecord) -> Result<usize, String>;
+}
+
+/// The two named events between the dock host and its beside-guard (plan 6.6). The host creates both and starts the guard with their
+/// names; the guard opens them, and
+/// * sets `ready` once it is armed: the host's process handle can be waited on and the state file was read (and any stale record undone),
+/// * waits on `done` together with the host's process handle: the host sets it after it showed the taskbar and removed its record.
+pub trait HostLink {
+    /// Opens both events. An error means the host cannot be told or cannot tell: the guard then ends without confirming.
+    fn arm(&mut self) -> Result<(), String>;
+    /// A handle `Processes::wait_pid` can wait on for "the host restored cleanly".
+    fn done_waitable(&self) -> isize;
+    /// Says "armed" to the host.
+    fn confirm_ready(&mut self) -> Result<(), String>;
 }
 
 pub trait StateStore {

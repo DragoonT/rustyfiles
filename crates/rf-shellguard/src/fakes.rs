@@ -11,7 +11,9 @@ use std::rc::Rc;
 
 use crate::machine::{Message, Millis};
 use crate::statefile::{ShellStateFile, WorkAreaRec};
-use crate::sys::{Clock, Hotkey, HostLaunch, PidWait, Processes, Registry, Session, StateStore, Sys, TaskbarVisibility, Ui, Wait, WorkAreas};
+use crate::sys::{Clock, Hotkey, HostLaunch, HostLink, PidWait, Processes, Registry, Session, StateStore, Sys, TaskbarVisibility, Ui, Wait, WorkAreas};
+use crate::tbfakes::{Desktop, set_visible};
+use crate::tbmodel::{self, HideRecord};
 
 pub type Rec = Rc<RefCell<Vec<String>>>;
 
@@ -72,6 +74,8 @@ pub struct ScriptProcs {
     /// Explorer already owns the desktop when the guard looks at boot.
     pub explorer_is_shell: bool,
     pub last_pid: u32,
+    /// Start times by process id, for `start_time`.
+    pub start_times: Vec<(u32, u64)>,
     rec: Rec,
     clock: Rc<Cell<Millis>>,
 }
@@ -88,6 +92,7 @@ impl ScriptProcs {
             self_test: true,
             explorer_is_shell: false,
             last_pid: 100,
+            start_times: Vec::new(),
             rec,
             clock,
         }
@@ -123,6 +128,9 @@ impl Processes for ScriptProcs {
             }
             None => PidWait::Gone,
         }
+    }
+    fn start_time(&mut self, pid: u32) -> Option<u64> {
+        self.start_times.iter().find(|(p, _)| *p == pid).map(|(_, t)| *t)
     }
     fn host_hung(&mut self) -> bool {
         self.hung.pop_front().unwrap_or(false)
@@ -259,22 +267,73 @@ impl WorkAreas for NullWorkAreas {
     }
 }
 
-/// A taskbar that is not touched; answers from a script (empty script: one window shown).
+/// A taskbar that is not touched; answers from a script (empty script: one window shown). With a [`Desktop`] it also behaves like
+/// one: the sweep and the record-driven show change the pretend windows, with the same ownership rules as the real thing.
 pub struct NullTaskbar {
     pub results: VecDeque<Result<usize, String>>,
+    pub desktop: Option<Desktop>,
     rec: Rec,
 }
 
 impl NullTaskbar {
     pub fn new(rec: Rec) -> NullTaskbar {
-        NullTaskbar { results: VecDeque::new(), rec }
+        NullTaskbar { results: VecDeque::new(), desktop: None, rec }
     }
 }
 
 impl TaskbarVisibility for NullTaskbar {
     fn show_windows_taskbar(&mut self) -> Result<usize, String> {
         self.rec.borrow_mut().push("taskbar.show".into());
+        if let (Some(d), None) = (&self.desktop, self.results.front()) {
+            let live = d.borrow().clone();
+            let targets = tbmodel::plan_sweep(&live);
+            for t in &targets {
+                set_visible(d, t, true)?;
+            }
+            return Ok(live.iter().filter(|w| tbmodel::is_taskbar_class(&w.class)).count());
+        }
         self.results.pop_front().unwrap_or(Ok(1))
+    }
+    fn show_recorded(&mut self, rec: &HideRecord) -> Result<usize, String> {
+        self.rec.borrow_mut().push("taskbar.show_recorded".into());
+        if let Some(r) = self.results.pop_front() {
+            return r;
+        }
+        let Some(d) = &self.desktop else { return Ok(rec.windows.len()) };
+        let live = d.borrow().clone();
+        let plan = tbmodel::plan_restore(rec, &live);
+        for t in &plan.show {
+            set_visible(d, t, true)?;
+        }
+        Ok(plan.restored_count())
+    }
+}
+
+/// The host's two events, as a fake: records what the guard did with them.
+pub struct FakeLink {
+    pub arm_ok: bool,
+    pub confirm_ok: bool,
+    pub done_handle: isize,
+    rec: Rec,
+}
+
+impl FakeLink {
+    pub fn new(rec: Rec) -> FakeLink {
+        FakeLink { arm_ok: true, confirm_ok: true, done_handle: 77, rec }
+    }
+}
+
+impl HostLink for FakeLink {
+    fn arm(&mut self) -> Result<(), String> {
+        self.rec.borrow_mut().push("link.arm".into());
+        if self.arm_ok { Ok(()) } else { Err("no such event".into()) }
+    }
+    fn done_waitable(&self) -> isize {
+        self.done_handle
+    }
+    fn confirm_ready(&mut self) -> Result<(), String> {
+        self.rec.borrow_mut().push("link.confirm_ready".into());
+        if self.confirm_ok { Ok(()) } else { Err("denied".into()) }
     }
 }
 

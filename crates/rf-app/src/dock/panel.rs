@@ -49,6 +49,11 @@ use super::start::StartView;
 mod more;
 pub use more::{NOTIFICATIONS, init_extra, toggle_calendar, toggle_notifications};
 
+// The overflow panel of the tray strip (its slot and hooks are in `tray_panel.rs`, a child module for the same reason).
+#[path = "tray_panel.rs"]
+mod tray_panel;
+pub use tray_panel::{OVERFLOW, overflow_rect, toggle_overflow, toggle_overflow_from_keyboard};
+
 /// The Start panel's size, logical px.
 pub const START_SIZE: (f32, f32) = (620.0, 680.0);
 
@@ -96,6 +101,8 @@ struct PanelHost {
     rect: Rect,
     /// The window that had the foreground when the panel opened.
     previous: isize,
+    /// A window the opener hands over as the one to go back to, and when (see `tray_panel::toggle_overflow_from_keyboard`).
+    previous_hint: Option<(isize, Instant)>,
     opened_at: Instant,
     been_front: bool,
     mouse_was_down: bool,
@@ -128,6 +135,7 @@ fn host_global(cx: &mut App) -> &mut PanelHost {
             serial: 0,
             rect: Rect::default(),
             previous: 0,
+            previous_hint: None,
             opened_at: Instant::now(),
             been_front: false,
             mouse_was_down: false,
@@ -351,14 +359,24 @@ fn open_panel(id: PanelId, cx: &mut App) {
         put_away_now(o, cx);
     }
     let dark = dark_now(&island);
+    let front = rf_win::dock::foreground_root();
+    let front_is_island = [Kind::Left, Kind::Middle, Kind::Right].into_iter().any(|k| host::island_window(k, cx).is_some_and(|(_, h)| h == front));
     let serial = {
         let p = cx.global_mut::<PanelHost>();
         p.serial += 1;
-        // (a panel that is still easing out has no `open`, and the window in front is the panel itself then: nothing to remember)
+        // (a panel that is still easing out has no `open`, and the window in front is the panel itself then: nothing to remember. An island
+        // in front is the tray strip's keyboard walk: not a window to go back to either; the strip says which one it took the keyboard from.)
+        let hint = p.previous_hint.take().map(|(w, at)| (w, at.elapsed().as_millis() as u64));
         if p.open.is_none() {
-            let front = rf_win::dock::foreground_root();
-            if !p.slots.iter().any(|s| s.hwnd == front) {
-                p.previous = front;
+            let whose = if p.slots.iter().any(|s| s.hwnd == front) {
+                geo::FrontIs::PanelSlot
+            } else if front_is_island {
+                geo::FrontIs::Island
+            } else {
+                geo::FrontIs::Other
+            };
+            if let Some(prev) = geo::previous_on_open(front, whose, hint) {
+                p.previous = prev;
             }
         }
         p.open = Some(id);
@@ -517,6 +535,8 @@ pub fn shutdown(cx: &mut App) {
     // the pop-ups above the icons (made when first needed) go with the dock
     super::app_menu::shutdown(cx);
     super::hover_preview::shutdown(cx);
+    super::tray_tip::shutdown(cx);
+    super::tray_strip::shutdown(cx);
     if !cx.has_global::<PanelHost>() {
         return;
     }
@@ -532,6 +552,7 @@ pub fn only_panels_left(cx: &App) -> bool {
     let mut mine: Vec<WindowId> = panel(cx).map(|p| p.slots.iter().map(|s| s.window).collect()).unwrap_or_default();
     mine.extend(super::app_menu::window_ids(cx));
     mine.extend(super::hover_preview::window_ids(cx));
+    mine.extend(super::tray_tip::window_ids(cx));
     let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
     crate::shell::cover::only_these_left(&open, &mine, &crate::shell::cover::window_ids(cx))
 }

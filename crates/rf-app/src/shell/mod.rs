@@ -9,14 +9,20 @@
 //!   desktop, one borderless window per monitor.
 //! * The window switcher (`switcher`, increment G1): our own Alt+Tab panel, behind `--switcher-preview`, and (increment B7) from
 //!   Alt+Tab itself when the setting `shell_own_switcher` is on.
+//! * Hiding Explorer's taskbar (`taskbar_hide`, increment E1): with `shell_hide_taskbar` on, the host hides Explorer's taskbar windows
+//!   while the guard (`rustyfiles-shellguard.exe`) is confirmed running; docs/design/taskbar-hide.md.
 //! * The keyboard layer (`keylayer`, increment B7): with `shell_win_key` and/or `shell_own_switcher` on, the host listens to the
 //!   keyboard with one system-wide hook, looks only at the Windows key and Alt+Tab, and opens OUR Start panel and switcher.
+//! * The tray host (`trayhost`, increment D2): with `shell_tray_host` on, the host owns a `Shell_TrayWnd` window in front of Explorer's,
+//!   keeps a model of the icons programs send to it, and passes every message on to Explorer's window untouched.
 
 pub mod cover;
 pub mod desktop;
 pub mod keylayer;
 pub mod probe;
 pub mod switcher;
+pub mod trayhost;
+pub mod taskbar_hide;
 
 use std::sync::OnceLock;
 

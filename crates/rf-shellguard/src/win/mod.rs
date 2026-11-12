@@ -6,16 +6,19 @@
 //! * `procs`: starts the host and `explorer.exe`, kills the host.
 //! * `session`: creates and signals `ShellReadyEvent`.
 //! * `hotkey`: the escape chord (a hotkey and a keyboard hook on a thread of their own).
-//! * `taskbar`, `workarea`: undo what a dead host left changed.
+//! * `taskbar` (re-exports `tbwin`, the only file that hides or shows a window of Explorer's), `workarea`: undo what a dead host left changed.
+//! * `link`: opens and sets the two named events of the dock host's beside-guard.
 //! * `ui`: the one message box.
 
 pub mod console;
 pub mod hotkey;
+pub mod link;
 pub mod procs;
 pub mod registry;
 pub mod session;
 pub mod signals;
 pub mod taskbar;
+pub mod tbwin;
 pub mod ui;
 pub mod workarea;
 

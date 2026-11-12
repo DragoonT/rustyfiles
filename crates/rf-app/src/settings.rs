@@ -506,6 +506,12 @@ pub struct Settings {
     pub shell_win_key: bool,
     /// Alt+Tab opens rustyfiles' window switcher instead of Windows' (same hook).
     pub shell_own_switcher: bool,
+    /// The shell host owns a window of class `Shell_TrayWnd` in front of Explorer's, takes the icons programs send to the notification
+    /// area, and passes every message on to Explorer's own window unchanged (see `shell/trayhost.rs`, `docs/design/tray-host.md`).
+    pub shell_tray_host: bool,
+    /// Explorer's taskbar windows (and with them its notification icons) are hidden while the dock runs and shown again when it stops;
+    /// only with rustyfiles-shellguard.exe running as the safety net (see `shell/taskbar_hide.rs`).
+    pub shell_hide_taskbar: bool,
 }
 
 impl Default for Settings {
@@ -621,6 +627,8 @@ impl Default for Settings {
             shell_desktop_cover: false,
             shell_win_key: false,
             shell_own_switcher: false,
+            shell_tray_host: false,
+            shell_hide_taskbar: false,
         }
     }
 }

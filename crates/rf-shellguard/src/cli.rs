@@ -4,6 +4,8 @@
 //! rustyfiles-shellguard.exe                      run as the shell (what Winlogon starts)
 //! rustyfiles-shellguard.exe --panic              give the user Explorer back, now
 //! rustyfiles-shellguard.exe --beside-guard <pid> watch the dock host, show the Windows taskbar when it dies
+//!                           [--ready-event <name> --done-event <name>]   the host's two named events (Local\...): the guard
+//!                           says "armed" through the first, the host says "restored cleanly" through the second
 //! rustyfiles-shellguard.exe --test-shell <exe>   supervise <exe> with an in-memory registry (never the real one)
 //!                           --test-explorer <exe> [--test-hotkey]   (a test run keeps its files in a temp folder)
 //! rustyfiles-shellguard.exe --dry-run [...]      print what it would do, change nothing
@@ -48,6 +50,8 @@ pub struct Args {
     pub test_hotkey: bool,
     pub state_dir: Option<PathBuf>,
     pub host: Option<PathBuf>,
+    /// `--beside-guard` only: the names of the events the dock host created (both or neither).
+    pub link: Option<(String, String)>,
     /// Arguments that were not understood.
     pub ignored: Vec<String>,
 }
@@ -64,6 +68,7 @@ impl Default for Args {
             test_hotkey: false,
             state_dir: None,
             host: None,
+            link: None,
             ignored: Vec::new(),
         }
     }
@@ -74,6 +79,7 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Args, String> 
     let mut it = args.into_iter();
     let mut beside = None;
     let mut check = false;
+    let (mut ready, mut done) = (None, None);
     while let Some(raw) = it.next() {
         let s = raw.to_string_lossy().into_owned();
         let mut value = |flag: &str| -> Result<OsString, String> { it.next().ok_or_else(|| format!("{flag} needs a value")) };
@@ -94,6 +100,8 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Args, String> 
             "--test-explorer" => a.test_explorer = Some(PathBuf::from(value("--test-explorer")?)),
             "--state-dir" => a.state_dir = Some(PathBuf::from(value("--state-dir")?)),
             "--host" => a.host = Some(PathBuf::from(value("--host")?)),
+            "--ready-event" => ready = Some(value("--ready-event")?.to_string_lossy().into_owned()),
+            "--done-event" => done = Some(value("--done-event")?.to_string_lossy().into_owned()),
             "--simulate" => {
                 let v = value("--simulate")?;
                 a.simulate = Some(match v.to_string_lossy().as_ref() {
@@ -111,6 +119,19 @@ pub fn parse<I: IntoIterator<Item = OsString>>(args: I) -> Result<Args, String> 
             return Err("--beside-guard cannot be combined with --panic or --test-shell".into());
         }
         a.mode = Mode::Beside(pid);
+        match (ready, done) {
+            (None, None) => {}
+            (Some(r), Some(d)) => {
+                // Only names in the session's own namespace: a guard must not be pointed at a machine-wide object by a typo.
+                if !r.starts_with("Local\\") || !d.starts_with("Local\\") || r == d {
+                    return Err("--ready-event and --done-event need two different names that start with Local\\".into());
+                }
+                a.link = Some((r, d));
+            }
+            _ => return Err("--ready-event and --done-event go together".into()),
+        }
+    } else if ready.is_some() || done.is_some() {
+        return Err("--ready-event and --done-event only make sense with --beside-guard".into());
     }
     if check {
         a.mode = Mode::Check;
@@ -161,6 +182,18 @@ mod tests {
         assert!(p(&["--beside-guard", "-5"]).is_err());
         assert!(p(&["--beside-guard", "5", "--panic"]).is_err());
         assert!(p(&["--beside-guard", "5", "--test-shell", "x.exe"]).is_err());
+    }
+
+    #[test]
+    fn beside_guard_takes_the_hosts_two_events_or_none() {
+        let a = p(&["--beside-guard", "5", "--ready-event", "Local\\r-1", "--done-event", "Local\\d-1"]).unwrap();
+        assert_eq!(a.link, Some(("Local\\r-1".to_string(), "Local\\d-1".to_string())));
+        assert_eq!(p(&["--beside-guard", "5"]).unwrap().link, None);
+        assert!(p(&["--beside-guard", "5", "--ready-event", "Local\\r"]).is_err(), "one without the other");
+        assert!(p(&["--beside-guard", "5", "--done-event", "Local\\d"]).is_err());
+        assert!(p(&["--beside-guard", "5", "--ready-event", "Global\\r", "--done-event", "Local\\d"]).is_err(), "machine-wide names are refused");
+        assert!(p(&["--beside-guard", "5", "--ready-event", "Local\\x", "--done-event", "Local\\x"]).is_err(), "two different events");
+        assert!(p(&["--ready-event", "Local\\r", "--done-event", "Local\\d"]).is_err(), "not outside the beside role");
     }
 
     #[test]

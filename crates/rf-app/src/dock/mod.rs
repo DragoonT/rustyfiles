@@ -59,6 +59,10 @@ mod search;
 mod start;
 mod sysstate;
 mod tone;
+mod tray_overflow;
+mod tray_source;
+mod tray_strip;
+mod tray_tip;
 
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::App;
@@ -90,6 +94,13 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 /// (`shell/keylayer.rs`) calls it for a tap of the Windows key. False: it could not open (see `panel::toggle_start_reported`).
 pub fn toggle_start(cx: &mut App) -> bool {
     panel::toggle_start_reported(cx)
+}
+
+/// Moves the keyboard into the right island's tray strip (the arrows walk its icons, Enter and Shift+F10 click them, Escape leaves).
+/// False: there is no strip to walk (no tray source, no icons) or a full-screen program is in front. Nothing calls this by itself: a key
+/// is wired to it when the tray host is (`RUSTYFILES_TRAY_FAKE_FOCUS_MS` tries it with the made-up source).
+pub fn focus_tray_strip(cx: &mut App) -> bool {
+    tray_strip::focus_strip(cx)
 }
 
 /// Whether a full-screen application is in front (the islands are hidden). The keyboard layer stands down then.

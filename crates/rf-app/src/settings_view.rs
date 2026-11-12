@@ -2328,6 +2328,13 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::Monitor,
+            t!("Windows görev çubuğunu gizle (deneysel)"),
+            Some(t!("Dock çalıştığı sürece Windows'un görev çubuğu ve bildirim alanı simgeleri gizlenir; dock durunca geri gelir. Windows'un hiçbir görev çubuğu ayarı değiştirilmez. rustyfiles beklenmedik biçimde durursa küçük bir yardımcı program (rustyfiles-shellguard.exe) görev çubuğunu bir iki saniye içinde geri getirir; yardımcı çalışmıyorsa görev çubuğu gizlenmez. Windows tuşu ve Windows'un kendi açılır pencereleri (Başlat, hızlı ayarlar, saat) hâlâ gizli görev çubuğunun yerine göre açılır; Windows tuşunun rustyfiles Başlat'ını açması için aşağıdaki Windows tuşu anahtarını da açmanız önerilir.")),
+            sw("shell-hide-taskbar", p, s.shell_hide_taskbar, |s, v| s.shell_hide_taskbar = v),
+        ),
+        card(
+            p,
             L::Keyboard,
             t!("Windows tuşu rustyfiles Başlat'ını açsın (deneysel)"),
             Some(t!("Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Windows tuşuna tek başına basıp bırakmaya bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. Windows tuşlu kısayollara dokunmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.")),
@@ -2339,6 +2346,13 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
             t!("Alt+Tab rustyfiles pencere değiştiricisini açsın (deneysel)"),
             Some(t!("Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Alt+Tab'a (ve açıkken Sekme, oklar, Enter, Esc, Alt'ı bırakmaya) bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Alt bırakılırken öndeki programın menü çubuğu etkinleşmesin diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. rustyfiles durursa ya da takılırsa Windows'un kendi Alt+Tab'ı geri gelir.")),
             sw("shell-altab", p, s.shell_own_switcher, |s, v| s.shell_own_switcher = v),
+        ),
+        card(
+            p,
+            L::Layers,
+            t!("Tepsi simgelerini rustyfiles de toplasın (deneysel)"),
+            Some(t!("Açıkken rustyfiles, programların bildirim alanına gönderdiği simge iletilerini Explorer'ın görev çubuğu penceresinin önünde bir pencereyle karşılar, kendine kaydeder ve her iletiyi değiştirmeden Explorer'a da iletir; Explorer'ın kendi tepsisi aynen çalışır. Dock simgeleri henüz göstermez. Kapatınca ya da rustyfiles durunca bu pencere kaldırılır ve programlardan simgelerini yeniden eklemeleri istenir. Her ileti Explorer'a da gittiği için Explorer'ın kendi listesi eksiksiz kalır.")),
+            sw("shell-tray", p, s.shell_tray_host, |s, v| s.shell_tray_host = v),
         ),
         card(
             p,
