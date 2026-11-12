@@ -85,6 +85,16 @@ pub struct SidebarTree {
     epoch: Instant,
     goal: Option<Goal>,
     last_roots: Vec<(PathBuf, String, RootKind)>,
+    /// Another row of the sidebar (a pinned folder, a drive) already shows the open folder as selected: the tree then draws no
+    /// selection and no mark of its own, so the sidebar never has two selected rows (the user's report).
+    shown_elsewhere: bool,
+    /// Over glass the tree's selected row is the sidebar's glass lens, like the selected row of the sidebar's other sections (the
+    /// engine draws the pill behind the scene; the row carries a probe that says where it is): the lens's key and the window, when
+    /// this frame's sidebar gave the lens to the tree. `None`: the Fluent fill and accent pill.
+    lens: Option<(u64, isize)>,
+    /// The selected row was among the rows built at the last paint (the rows are virtualised: a selected row that is scrolled far
+    /// out of view is not built, carries no probe, and must not hold the lens, which would stay where it last was).
+    selected_in_view: bool,
     /// The user's profile folder, asked once (the first root).
     home: Option<PathBuf>,
     /// The open folder and the follow setting the model was last told about.
@@ -171,6 +181,9 @@ impl SidebarTree {
             epoch: Instant::now(),
             goal: None,
             last_roots: Vec::new(),
+            shown_elsewhere: false,
+            lens: None,
+            selected_in_view: true,
             home: dirs::home_dir(),
             followed: None,
             watchers: HashMap::new(),
@@ -212,7 +225,12 @@ impl SidebarTree {
     }
 
     /// Called by the window at every frame the section is drawn: the settings that shape the tree and the open folder.
-    pub fn sync(&mut self, cur: Option<&Path>, cx: &mut Context<Self>) {
+    pub fn sync(&mut self, cur: Option<&Path>, shown_elsewhere: bool, lens: Option<(u64, isize)>, cx: &mut Context<Self>) {
+        if self.shown_elsewhere != shown_elsewhere || self.lens != lens {
+            self.shown_elsewhere = shown_elsewhere;
+            self.lens = lens;
+            cx.notify();
+        }
         let s = cx.global::<crate::settings::Settings>();
         let filter = TreeFilter { show_hidden: s.show_hidden, show_system: s.show_system_files, dot_hidden: !s.show_dot_files };
         let follow = s.sidebar_tree_follow;
@@ -227,6 +245,11 @@ impl SidebarTree {
         if changed {
             self.after_change(cx);
         }
+    }
+
+    /// Whether the open folder's own row is in the tree now (the row that is drawn selected).
+    pub fn has_selected_row(&self) -> bool {
+        self.selected_in_view && self.model.marked_row().is_some_and(|(_, own)| own)
     }
 
     fn after_change(&mut self, cx: &mut Context<Self>) {
@@ -447,7 +470,9 @@ impl SidebarTree {
 
     fn render_row(&self, ix: usize, row: Row, frame: &Frame, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let Frame { mark, focused, now } = *frame;
-        let info = self.model.info(&row, now);
+        let mut info = self.model.info(&row, now);
+        // (one selected row in the whole sidebar: see `shown_elsewhere`)
+        info.selected &= !self.shown_elsewhere;
         let id = row.id;
         let pad = 8. + INDENT * f32::from(row.depth.min(MAX_INDENT_LEVELS));
         let deep = row.depth > MAX_INDENT_LEVELS;
@@ -471,6 +496,7 @@ impl SidebarTree {
                 .into_any_element();
         }
         let selected = info.selected;
+        let lens = self.lens.filter(|_| selected);
         // the open folder's branch is closed (or it is not listed): the closest open folder above it carries a quieter mark
         let covers = !selected && mark == Some((ix, false));
         let cursor = info.cursor && focused;
@@ -509,7 +535,12 @@ impl SidebarTree {
             .rounded(theme::RADIUS_SM)
             .text_sm()
             .relative()
-            .when(selected, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+            .when(selected && lens.is_none(), |d| d.bg(p.selection).child(theme::selection_pill(p)))
+            .when_some(lens, |d, (key, hwnd)| {
+                // (while the row moves with a scroll the scene paints the pill itself: the engine's lens would trail the row)
+                let moving = crate::glass::lens_phase(hwnd, crate::glass::SLOT_SIDEBAR) != crate::glass::LensPhase::Rest;
+                d.when(moving, |d| d.child(crate::glass::lens_stand_in(p.dark, ROW_H))).child(crate::glass::lens_probe(crate::glass::SLOT_SIDEBAR, key))
+            })
             .when(covers, |d| d.bg(p.hover))
             .when(cursor && !selected, |d| d.bg(p.pressed))
             .when(!selected && !covers && !cursor, |d| d.hover(|s| s.bg(p.hover)))
@@ -595,7 +626,13 @@ impl Render for SidebarTree {
         let view_h = f32::from(self.scroll.bounds().size.height);
         let into_tree = -f32::from(self.scroll.offset().y) - self.tree_top.get();
         let (first, last) = visible_range(n, into_tree, view_h, ROW_H, OVERSCAN, FIRST_FRAME_ROWS);
-        let frame = Frame { mark: self.model.marked_row(), focused: self.focus.is_focused(window), now };
+        let in_view = self.model.marked_row().is_none_or(|(row, _)| (first..last).contains(&row));
+        if in_view != self.selected_in_view {
+            // (the window decides who has the lens when it builds the sidebar: it is asked again)
+            self.selected_in_view = in_view;
+            cx.notify();
+        }
+        let frame = Frame { mark: self.model.marked_row().filter(|_| !self.shown_elsewhere), focused: self.focus.is_focused(window), now };
         let rows: Vec<AnyElement> = (first..last)
             .map(|ix| {
                 let row = self.model.rows()[ix];
@@ -657,6 +694,12 @@ impl Workspace {
         self.side_tree.sub = Some(sub);
     }
 
+    /// Whether the sidebar that is being built shows the tree (the setting is on; not the rail, not the rail's peek). The drives are
+    /// the tree's roots then, and the separate "Sürücüler" section would show them a second time.
+    pub(super) fn shows_tree(&self, rail: bool) -> bool {
+        !rail && self.side_tree.view.is_some() && !self.side_tree.in_peek
+    }
+
     pub(super) fn set_tree_peek(&mut self, peek: bool) {
         self.side_tree.in_peek = peek;
     }
@@ -682,7 +725,7 @@ impl Workspace {
 
     /// Adds the "Klasörler" section to the sidebar column (when the setting is on, the sidebar is not the rail) and the sidebar's own
     /// menu on a right click in it (the sidebar's rows that have a menu of their own keep it).
-    pub(super) fn append_tree(&mut self, col: Stateful<Div>, cur: &Location, rail: bool, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
+    pub(super) fn append_tree(&mut self, col: Stateful<Div>, cur: &Location, shown_elsewhere: bool, rail: bool, p: &Palette, cx: &mut Context<Self>) -> Stateful<Div> {
         if rail {
             return col;
         }
@@ -696,7 +739,13 @@ impl Workspace {
             Location::Path(p) => Some(p.clone()),
             _ => None,
         };
-        view.update(cx, |t, cx| t.sync(path.as_deref(), cx));
+        // Over glass the selected row of the sidebar is a lens. No other row has it this frame (they were built first or are known
+        // not to be selected): the tree's selected row takes it, and the window is told that the lens is in use.
+        let lens = (self.sidebar_lens && !shown_elsewhere && !self.sidebar_lens_claimed.get() && view.read(cx).has_selected_row()).then(|| {
+            self.sidebar_lens_claimed.set(true);
+            (crate::glass::key_of(cur), self.glass_hwnd)
+        });
+        view.update(cx, |t, cx| t.sync(path.as_deref(), shown_elsewhere, lens, cx));
         col.track_scroll(&self.side_tree.scroll).child(
             v_flex()
                 .child(div().px_2().pt_3().pb_1().text_xs().font_weight(FontWeight::SEMIBOLD).text_color(p.text_tertiary).child(t!("Klasörler")))

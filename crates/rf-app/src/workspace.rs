@@ -2724,6 +2724,8 @@ impl Workspace {
                 .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.pin_dropped(paths, cx))),
         );
         let accent = p.accent;
+        // the open folder is already a selected row of the sidebar (a pinned folder or a drive): the tree draws no second selection
+        let mut shown_elsewhere = pinned.iter().any(|f| cur == Location::Path(f.path.clone()));
         for (i, f) in pinned.into_iter().enumerate() {
             let loc = Location::Path(f.path.clone());
             let active = cur == loc;
@@ -2766,10 +2768,12 @@ impl Workspace {
         }
         // the folder tree stands right under the pinned folders, above the drives and the tags (where the user asked for it: the
         // tree is what one works in, the drives and tags are looked at less often)
-        col = self.append_tree(col, &cur, rail, p, cx);
         let hidden = cx.global::<crate::settings::Settings>().sidebar_hidden.clone();
         let shown = |k: &str| !hidden.iter().any(|h| h == k);
-        let drives = if shown("drives") { drives } else { Vec::new() };
+        // (with the folder tree on, the drives are the tree's roots: the user found the second list of them needless)
+        let drives = if shown("drives") && !self.shows_tree(rail) { drives } else { Vec::new() };
+        shown_elsewhere |= drives.iter().any(|d| cur == Location::Path(d.root.clone()));
+        col = self.append_tree(col, &cur, shown_elsewhere, rail, p, cx);
         if !drives.is_empty() {
             col = col.child(header(t!("Sürücüler")));
         }
