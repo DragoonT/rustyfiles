@@ -127,13 +127,15 @@ pub struct Places {
     /// folders.
     pub devices: Vec<rf_win::shellfolder::ShellChild>,
     pub loaded: bool,
+    /// The recent items and the cloud / WSL entries are in too (they come a little after `loaded`: see `refresh`).
+    pub extras_loaded: bool,
     _task: Option<Task<()>>,
 }
 
 impl Places {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let mut this =
-            Self { drives: Vec::new(), cloud: Vec::new(), pinned: Vec::new(), recent: Vec::new(), libraries: Vec::new(), network: Vec::new(), devices: Vec::new(), loaded: false, _task: None };
+            Self { drives: Vec::new(), cloud: Vec::new(), pinned: Vec::new(), recent: Vec::new(), libraries: Vec::new(), network: Vec::new(), devices: Vec::new(), loaded: false, extras_loaded: false, _task: None };
         this.refresh(cx);
         // Notice drives appearing/disappearing (USB, network mappings) without any shell hooks.
         cx.spawn(async move |this, cx| {
@@ -182,6 +184,12 @@ impl Places {
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         let user_pins = cx.try_global::<crate::settings::Settings>().and_then(|s| s.pinned.clone());
+        // Two pieces of work, so that the sidebar does not wait for the slow one. The recent items ask the disk about the place each
+        // one names (a stat each), and so do the cloud entries (OneDrive, Dropbox, Google Drive...); a place that has to wake up first
+        // (an offline share, a sleeping disk, a WSL folder opened lately) answers after seconds. The WSL distributions are read from
+        // the registry and cost nothing. The pinned folders and the drives need none of that.
+        // The lists are not complete until the second piece is in, so the jump list waits for it again after a refresh.
+        self.extras_loaded = false;
         let work = cx.background_spawn(async move {
             let known = rf_win::known_folders();
             let pinned = match user_pins {
@@ -202,24 +210,42 @@ impl Places {
                     .collect(),
             };
             let drives = rf_win::list_drives();
-            let recent = load_recent(14);
-            let cloud = load_cloud_and_wsl();
             let libraries = rf_win::libraries::list();
             let network = rf_win::network::network_shortcuts();
-            (pinned, drives, recent, cloud, libraries, network)
+            (pinned, drives, libraries, network)
+        });
+        let extras = cx.background_spawn(async move {
+            let recent = load_recent(14);
+            // the localized names the jump list and the Home view show for these folders are read here, on this thread: the
+            // drawing only looks in the cache (see rf_win::localized::label_if_known)
+            rf_win::localized::warm(recent.iter().filter(|r| r.is_dir).flat_map(|r| crate::nav_touch::label_paths(&r.target)));
+            (recent, load_cloud_and_wsl())
         });
         self._task = Some(cx.spawn(async move |this, cx| {
-            let (pinned, drives, recent, cloud, libraries, network) = work.await;
+            let (pinned, drives, libraries, network) = work.await;
+            // the names of the pinned folders and of the folders above them (the breadcrumb of a click on a pin), read off the UI
+            // thread and not in the piece the sidebar waits for
+            let pin_paths: Vec<PathBuf> = pinned.iter().flat_map(|p| crate::nav_touch::label_paths(&p.path)).collect();
+            let pin_names = cx.background_spawn(async move { rf_win::localized::warm(pin_paths) });
             let _ = this.update(cx, |p, cx| {
                 p.pinned = pinned;
                 p.drives = drives;
-                p.recent = recent;
-                p.cloud = cloud;
                 p.libraries = libraries;
                 p.network = network;
                 p.loaded = true;
                 cx.notify();
             });
+            let (recent, cloud) = extras.await;
+            let _ = this.update(cx, |p, cx| {
+                p.recent = recent;
+                p.cloud = cloud;
+                p.extras_loaded = true;
+                cx.notify();
+            });
+            if pin_names.await > 0 {
+                // a pinned folder has a localized name: the views that show it are drawn again
+                let _ = this.update(cx, |_, cx| cx.notify());
+            }
         }));
     }
 }

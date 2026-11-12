@@ -15,12 +15,34 @@ use crate::t;
 
 /// Archive types that open like folders (single-stream .gz/.xz/.zst files open normally).
 pub fn is_browsable(p: &Path) -> bool {
-    let n = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-    [".zip", ".7z", ".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".tar.bz2", ".tbz2", ".tbz", ".jar", ".apk", ".nupkg", ".vsix", ".rar", ".iso"]
-        .iter()
-        .any(|s| n.ends_with(s))
-        // first part of a split archive (name.7z.001, name.zip.001…)
+    let n = lower_name(p);
+    ends_with_archive_suffix(&n)
+        // first part of a split archive (name.7z.001, name.zip.001…); a bare `name.001` is told by its first bytes (disk access)
         || (n.ends_with(".001") && rf_archive::is_supported(p))
+}
+
+const ARCHIVE_SUFFIXES: [&str; 18] =
+    [".zip", ".7z", ".tar", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.zst", ".tzst", ".tar.bz2", ".tbz2", ".tbz", ".jar", ".apk", ".nupkg", ".vsix", ".rar", ".iso"];
+
+fn lower_name(p: &Path) -> String {
+    p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+fn ends_with_archive_suffix(n: &str) -> bool {
+    ARCHIVE_SUFFIXES.iter().any(|s| n.ends_with(s))
+}
+
+/// [`is_browsable`] from the name alone, for the UI thread: it never opens the file. A bare `name.001` (a split set whose format only
+/// the first bytes tell) counts as not browsable here; `name.7z.001` is told by its name.
+pub fn is_browsable_by_name(p: &Path) -> bool {
+    let n = lower_name(p);
+    ends_with_archive_suffix(&n) || n.strip_suffix(".001").is_some_and(ends_with_archive_suffix)
+}
+
+/// Whether the name of `p` MAY be that of an archive: [`is_browsable_by_name`] and any `.001`, which only the first bytes can tell.
+/// Never opens the file.
+pub fn may_be_archive_name(p: &Path) -> bool {
+    is_browsable_by_name(p) || lower_name(p).ends_with(".001")
 }
 
 /// WinRAR's Rar.exe (looked up once; RAR creation needs it).
@@ -188,27 +210,22 @@ pub fn ask_password(archive: PathBuf, wrong: bool, window: &mut gpui_kit::Window
     );
 }
 
-/// Whether some component of `p` is named like an archive (no disk access).
+/// Whether some component of `p` is named like an archive (no disk access, except the first bytes of a `.001` file: use
+/// [`is_browsable_path_by_name`] on the UI thread).
 pub fn is_browsable_path(p: &Path) -> bool {
     p.ancestors().any(is_browsable)
+}
+
+/// [`is_browsable_path`] from the names alone: it never opens a file.
+pub fn is_browsable_path_by_name(p: &Path) -> bool {
+    p.ancestors().any(is_browsable_by_name)
 }
 
 /// Splits a path into (archive file, path inside it) when some ancestor is an archive file.
 /// A plain folder (or a non-existent path outside any archive) gives `None`.
 pub fn split(path: &Path) -> Option<(PathBuf, PathBuf)> {
-    if path.is_dir() {
-        return None;
-    }
-    for a in path.ancestors() {
-        if a.as_os_str().len() <= 3 {
-            break;
-        }
-        if is_browsable(a) && a.is_file() {
-            let inner = path.strip_prefix(a).ok()?.to_path_buf();
-            return Some((a.to_path_buf(), inner));
-        }
-    }
-    None
+    // (the disk is asked only when a name in the path looks like an archive: see nav_touch)
+    crate::nav_touch::archive_split(&crate::nav_touch::RealDisk, path)
 }
 
 /// [`split`] for an item somewhere inside an archive: None for the archive file itself (which

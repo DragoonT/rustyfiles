@@ -36,7 +36,7 @@ fn tray_labels() -> rf_win::tray::Labels {
 /// Ayarlar sayfasını rustyfiles'ta açar (çalışmıyorsa başlatır).
 fn open_settings() {
     std::thread::spawn(|| {
-        if rf_win::single_instance::send_to("rustyfiles", &ToApp::OpenSettings.encode()) {
+        if rf_win::single_instance::send_to(&rf_win::single_instance::instance_name(), &ToApp::OpenSettings.encode()) {
             return;
         }
         if let Ok(me) = std::env::current_exe() {
@@ -133,7 +133,7 @@ pub fn main() {
         cx.on_window_closed(|cx, _| {
             if !LookManager::is_visible(cx) {
                 std::thread::spawn(|| {
-                    let _ = rf_win::single_instance::send_to("rustyfiles", &ToApp::LookClosed.encode());
+                    let _ = rf_win::single_instance::send_to(&rf_win::single_instance::instance_name(), &ToApp::LookClosed.encode());
                 });
             }
         })

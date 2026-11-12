@@ -38,7 +38,7 @@ pub fn session_id() -> u32 {
 }
 
 /// (kilit adı, boru adı) bir uygulama için: rustyfiles ve DirectLook ayrı örnek gruplarıdır.
-fn names_for(app: &str) -> (String, String) {
+pub(crate) fn names_for(app: &str) -> (String, String) {
     names_in_session(app, session_id())
 }
 
@@ -67,7 +67,7 @@ pub enum Role {
     Forwarded,
 }
 
-pub struct InstanceGuard(HANDLE);
+pub struct InstanceGuard(pub(crate) HANDLE);
 unsafe impl Send for InstanceGuard {}
 impl Drop for InstanceGuard {
     fn drop(&mut self) {
@@ -148,7 +148,9 @@ fn send(pipe: &str, message: &str) -> bool {
 
 /// Serves the pipe on a background thread; each received line is passed to `on_message`.
 pub fn serve(on_message: impl Fn(String) + Send + Sync + 'static) {
-    serve_app("rustyfiles", on_message)
+    // the pipe of the group the mutex was taken in (`acquire` uses `instance_name`): with RUSTYFILES_INSTANCE set, a copy used to
+    // take the mutex of its own group and serve the pipe of the user's everyday one
+    serve_app(&instance_name(), on_message)
 }
 
 /// [`serve`] for another application of the bundle.

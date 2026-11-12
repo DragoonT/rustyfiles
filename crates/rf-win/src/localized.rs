@@ -58,6 +58,26 @@ pub fn folder_label(dir: &Path, attrs: Option<u32>) -> Option<Arc<str>> {
     label
 }
 
+/// The localized name of `dir` if it was already asked for, from the cache alone: it never touches the disk, so it is the one to call
+/// while drawing (a breadcrumb, a tab title). A folder that was not asked for yet shows under its real name until [`warm`] has run on
+/// a worker thread. [`folder_label`] reads attributes and `desktop.ini`, and on a place that has to wake up first (a sleeping disk, a
+/// phone, a WSL distribution) that holds the calling thread for seconds.
+pub fn label_if_known(dir: &Path) -> Option<Arc<str>> {
+    by_path().lock().ok()?.get(dir)?.clone()
+}
+
+/// Whether [`folder_label`] has already answered for `dir` (with a name or with "none").
+pub fn is_known(dir: &Path) -> bool {
+    by_path().lock().is_ok_and(|c| c.contains_key(dir))
+}
+
+/// Asks [`folder_label`] for every folder not asked for yet, so that [`label_if_known`] has the answers. Touches the disk: call it
+/// from a worker thread only. Returns how many of them have a localized name (when it is more than none, what is on the screen
+/// should be drawn again).
+pub fn warm<I: IntoIterator<Item = PathBuf>>(dirs: I) -> usize {
+    dirs.into_iter().filter(|d| !is_known(d)).filter(|d| folder_label(d, None).is_some()).count()
+}
+
 /// A UNC path or a network drive letter (reading desktop.ini there costs a round trip).
 pub fn is_network(p: &Path) -> bool {
     let s = p.to_string_lossy();
@@ -187,6 +207,34 @@ mod tests {
         assert!(is_network(Path::new(r"\\?\UNC\nas\x")));
         assert!(!is_network(Path::new(r"C:\Users")));
         assert!(!is_network(Path::new(r"\\?\C:\Users")));
+    }
+
+    /// The drawing path asks the cache only: a folder not asked for before is not looked at (nothing is cached for it), and after
+    /// `warm` on a worker the same call has the answer.
+    #[test]
+    fn the_cache_only_call_never_reads_and_warm_fills_it() {
+        let d = std::env::temp_dir().join(format!("rf-loc-warm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let sub = d.join("salt");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("desktop.ini"), "[.ShellClassInfo]\r\nLocalizedResourceName=Önbellek Adı\r\n").unwrap();
+        let mut perm = std::fs::metadata(&sub).unwrap().permissions();
+        perm.set_readonly(true); // Explorer reads desktop.ini of read-only or system folders only
+        std::fs::set_permissions(&sub, perm).unwrap();
+
+        assert_eq!(label_if_known(&sub), None);
+        assert!(!is_known(&sub), "the cache-only call must not fill the cache");
+        assert_eq!(warm([sub.clone(), d.clone()]), 1);
+        assert!(is_known(&sub) && is_known(&d));
+        assert_eq!(label_if_known(&sub).as_deref(), Some("Önbellek Adı"));
+        assert_eq!(label_if_known(&d), None);
+        // asked once: a second warm has nothing to do
+        assert_eq!(warm([sub.clone()]), 0);
+
+        let mut perm = std::fs::metadata(&sub).unwrap().permissions();
+        perm.set_readonly(false);
+        let _ = std::fs::set_permissions(&sub, perm);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

@@ -30,6 +30,7 @@ mod i18n_en;
 mod folder_view;
 mod icons;
 mod keymap_editor;
+mod last_window;
 mod logfile;
 mod layouts;
 pub mod look;
@@ -38,6 +39,8 @@ mod installer;
 mod ops;
 mod organizer;
 mod picker;
+mod nav_touch;
+mod ui_stall;
 mod places;
 mod settings;
 pub mod shell;
@@ -86,6 +89,7 @@ pub(crate) fn restored_bounds(cx: &App) -> Option<WindowBounds> {
 pub(crate) fn install_panic_log() {
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        rf_win::handover::trace("panic (see crash.log)");
         if let Some(dir) = crate::settings::app_dir() {
             let _ = std::fs::create_dir_all(&dir);
             let bt = std::backtrace::Backtrace::force_capture();
@@ -186,6 +190,16 @@ pub fn open_main_window(
     bounds: Option<WindowBounds>,
     cx: &mut App,
 ) {
+    open_main_window_made(start, ipc, bounds, cx);
+}
+
+/// [`open_main_window`], saying whether the window was made (a second launch waits for that answer: see `rf_win::handover`).
+pub fn open_main_window_made(
+    start: Option<Location>,
+    ipc: Option<futures::channel::mpsc::UnboundedReceiver<String>>,
+    bounds: Option<WindowBounds>,
+    cx: &mut App,
+) -> bool {
     let options = WindowOptions {
         window_bounds: Some(bounds.unwrap_or_else(|| WindowBounds::centered(size(px(1280.), px(800.)), cx))),
         window_min_size: Some(size(px(720.), px(420.))),
@@ -194,7 +208,10 @@ pub fn open_main_window(
     };
     if let Err(e) = gpui_kit::open_window(options, cx, move |window, cx| cx.new(|cx| Workspace::new(start, ipc, window, cx))) {
         log::error!("open window: {e:#}");
+        rf_win::handover::trace("open window: failed");
+        return false;
     }
+    true
 }
 
 /// Quits now, or once running copy/move/delete operations finish (closing the window must not
@@ -229,6 +246,15 @@ pub(crate) fn quit_when_idle(cx: &mut App) {
 /// The session/placement save on window close runs on a helper thread; write once more here,
 /// synchronously, so quitting cannot cut it off (a small file, only at exit).
 fn save_and_quit(cx: &mut App) {
+    // The quit and a second launch's request meet here (GitHub issue 15): a request that was taken and is not acted on yet stops the
+    // quit (it opens a window, and that keeps the process); once the quit goes ahead, requests are refused with `leaving` and the
+    // second launch shows its folder itself. Without this a folder opened while the app was quitting was forwarded to a process
+    // that closed the window it opened, or that never looked at it.
+    if !rf_win::handover::GATE.try_leave() {
+        rf_win::handover::trace("quit: held back, a request is in flight");
+        return;
+    }
+    rf_win::handover::trace("quit: leaving, requests are refused from now on");
     cx.global::<settings::Settings>().clone().save();
     // the search index keeps its place in the change journal (or its changes): the next start
     // then catches up instead of walking the drives; bounded, quitting must not hang on it
@@ -237,12 +263,15 @@ fn save_and_quit(cx: &mut App) {
         rf_win::indexer::stop();
         let _ = tx.send(());
     });
-    let _ = rx.recv_timeout(std::time::Duration::from_secs(2));
+    // (kept on the UI thread and before the process ends on purpose: the index must be at rest when the next process opens it, and
+    // a launch meanwhile is told `leaving` and waits for the mutex; the trace gives the real time of this wait)
+    let stopped = rx.recv_timeout(std::time::Duration::from_secs(2)).is_ok();
+    rf_win::handover::trace(&format!("quit: index stopped {}, ending", if stopped { "in time" } else { "late (2 s limit)" }));
     cx.quit();
 }
 
 /// `Path::is_dir` with a time limit (it can block for the SMB timeout on an offline share).
-fn is_dir_bounded(p: PathBuf, limit: std::time::Duration) -> Option<bool> {
+pub(crate) fn is_dir_bounded(p: PathBuf, limit: std::time::Duration) -> Option<bool> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(p.is_dir());
@@ -383,8 +412,10 @@ pub fn main() {
             if is_dir == Some(false) && !archive {
                 // Explorer opens folders through the verb we took over: what we just handed it may
                 // come straight back. Never ping-pong; a path is then shown here (with its error).
+                rf_win::handover::trace("main: not a folder for us (or a namespace we do not list): to Explorer unless it just came from there");
                 if !rf_win::default_fm::forwarded_recently(&arg) {
                     rf_win::default_fm::note_forward(&arg);
+                    rf_win::handover::trace("main: handed to Explorer, this process ends");
                     let _ = std::process::Command::new("explorer.exe").arg(&arg).spawn();
                     return;
                 }
@@ -502,14 +533,16 @@ pub fn main() {
         Some((guard, rx)) => (Some(guard), Some(rx)),
         None => (None, None),
     };
+    rf_win::handover::trace(&format!("main: launch, request of {} bytes, multi {multi}", message.len()));
     let _instance = if multi {
         None
     } else {
-        match rf_win::single_instance::acquire(&message) {
+        // (the hand-over waits for the running instance's answer, and shows the folder here when that one is leaving: see rf_win::handover)
+        match rf_win::handover::acquire(&message) {
             rf_win::single_instance::Role::Forwarded => {
                 // the folder is on its way to the running window; the file to select follows
                 if let Some(msg) = shell_select.and_then(shell_selected) {
-                    rf_win::single_instance::send_to(&rf_win::single_instance::instance_name(), &msg);
+                    rf_win::handover::send_followup(&msg);
                 }
                 return;
             }
@@ -518,6 +551,8 @@ pub fn main() {
     };
     let primary_instance = _instance.is_some() && pick.is_none() && !quick_search && !bar_preview && !dock;
     let (ipc_tx, ipc_rx) = futures::channel::mpsc::unbounded::<String>();
+    // second launches: each comes with the acknowledgement it waits for (the other senders of ipc_tx need none)
+    let (launch_tx, launch_rx) = futures::channel::mpsc::unbounded::<(String, rf_win::handover::Ack)>();
     if let Some(rx) = shell_select {
         let tx = ipc_tx.clone();
         std::thread::spawn(move || {
@@ -529,8 +564,8 @@ pub fn main() {
     if !multi {
         // the dock's file search has a pipe of its own (an older main app never sees its requests as launch arguments)
         search_pipe::serve(ipc_tx.clone());
-        rf_win::single_instance::serve(move |m| {
-            let _ = ipc_tx.unbounded_send(m);
+        rf_win::handover::serve(move |m, ack| {
+            let _ = launch_tx.unbounded_send((m, ack));
         });
     }
 
@@ -538,6 +573,7 @@ pub fn main() {
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
         start_mark("app running");
         gpui_kit::init(cx);
+        ui_stall::start(cx);
         cx.set_global(settings::Settings::load());
         start_mark("settings loaded");
         rf_core::sort::set_turkish_collation(rf_win::encoding::user_locale_is_turkish());
@@ -649,6 +685,23 @@ pub fn main() {
             }
         })
         .detach();
+        // The launches of second processes, which wait for this answer: told once the tab or window is there. A quit that was held
+        // back for the sake of a request (see save_and_quit) is looked at again when the last one is acted on, and goes ahead if the
+        // request left nothing open.
+        let mut launch_rx = launch_rx;
+        cx.spawn(async move |cx| {
+            use futures::StreamExt;
+            while let Some((msg, ack)) = launch_rx.next().await {
+                rf_win::handover::trace("first: acting on a request");
+                let shown = cx.update(|cx| workspace::route_ipc_shown(msg, cx));
+                // (no window could be made: the second launch is told, and shows the folder itself)
+                let quit_held_back = if shown { ack.done() } else { ack.refuse() };
+                if quit_held_back {
+                    cx.update(|cx| last_window::settle(cx, switcher_preview));
+                }
+            }
+        })
+        .detach();
         // The last window closing ends the app (GPUI does not on its own: the process would
         // linger invisibly and swallow every later launch through the single-instance pipe).
         // With "run in the background" on, the app stays in the notification area instead.
@@ -661,25 +714,11 @@ pub fn main() {
         // GPUI would quit by itself when the last window closes (QuitMode::Default on Windows):
         // that cut running copies in half and makes background mode impossible. We decide.
         cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
-        cx.on_window_closed(move |cx, _| {
-            // (the desktop preview is no main window, but closing the folder windows it opened must not end it)
-            if !workspace::any_main_window(cx) && !shell::desktop::window_open(cx) {
-                // menus / flyouts left behind go too
-                for w in cx.windows() {
-                    let _ = w.update(cx, |_, window, _| window.remove_window());
-                }
-                // (the switcher preview never stays in the notification area: it is one window, shown once)
-                if cx.global::<settings::Settings>().run_in_background && !background::quitting() && !switcher_preview {
-                    let s = cx.global::<settings::Settings>().clone();
-                    std::thread::spawn(move || s.save());
-                } else {
-                    quit_when_idle(cx);
-                }
-            }
-        })
+        cx.on_window_closed(move |cx, _| last_window::settle(cx, switcher_preview))
         .detach();
         cx.activate(true);
     });
+    rf_win::handover::trace("main: event loop ended");
     // (the host's process says why it ended when no earlier line did)
     shell::exits::after_run();
 }

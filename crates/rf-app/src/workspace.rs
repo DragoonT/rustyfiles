@@ -217,7 +217,7 @@ impl Global for OpenWorkspaces {}
 /// pins or the language change; test runs (several instances) leave the user's list alone.
 fn update_jump_list(places: &crate::places::Places) {
     static LAST: std::sync::Mutex<Option<(Vec<(String, PathBuf)>, Vec<(String, PathBuf)>, [&'static str; 4])>> = std::sync::Mutex::new(None);
-    if !places.loaded || std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || std::env::var_os("RUSTYFILES_INSTANCE").is_some() {
+    if !places.loaded || !places.extras_loaded || std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || std::env::var_os("RUSTYFILES_INSTANCE").is_some() {
         return;
     }
     // in the UI language, as the sidebar shows them (a default pin's title is its Turkish name)
@@ -228,7 +228,7 @@ fn update_jump_list(places: &crate::places::Places) {
         .iter()
         .filter(|r| r.is_dir && !pins.iter().any(|(_, p)| *p == r.target))
         .take(6)
-        .map(|r| (rf_win::localized::folder_label(&r.target, None).map_or_else(|| r.name.clone(), |l| l.to_string()), r.target.clone()))
+        .map(|r| (rf_win::localized::label_if_known(&r.target).map_or_else(|| r.name.clone(), |l| l.to_string()), r.target.clone()))
         .collect();
     let labels = [t!("Yeni pencere"), t!("Yeni sekme"), t!("Sabitlenenler"), t!("Son klasörler")];
     {
@@ -361,40 +361,44 @@ pub static START_SELECT: std::sync::Mutex<Option<String>> = std::sync::Mutex::ne
 static LOOK_FOLLOWED: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 pub fn route_ipc(msg: String, cx: &mut App) {
+    route_ipc_shown(msg, cx);
+}
+
+/// [`route_ipc`], saying whether the request is taken care of: false only when it needed a window and none could be made. The
+/// launch of a second process waits for this answer (see `rf_win::handover`) and shows the folder itself on false.
+pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
     // the dock's file search asks this app over the pipe (the dock does not hold the name index), and a window-less start greets it
     if crate::search_pipe::handle_private(&msg, cx.global::<crate::settings::Settings>().name_index) {
-        return;
+        return true;
     }
     if let Some(pipe) = msg.strip_prefix(crate::picker::PICK_PREFIX) {
         crate::picker::begin(pipe.to_string(), cx);
-        return;
+        return true;
     }
     match crate::look::ipc::ToApp::decode(&msg) {
         Some(crate::look::ipc::ToApp::LookClosed) => {
             crate::folder_view::QUICK_LOOK_OPEN.store(false, std::sync::atomic::Ordering::Relaxed);
             *LOOK_FOLLOWED.lock().unwrap() = None;
-            return;
+            return true;
         }
         Some(crate::look::ipc::ToApp::OpenSettings) => {
             crate::settings_view::open_page(crate::settings_view::Page::Look, cx);
-            crate::open_main_window(Some(Location::Settings), None, None, cx);
-            return;
+            return crate::open_main_window_made(Some(Location::Settings), None, None, cx);
         }
         None => {}
     }
     if let Some(file) = msg.strip_prefix(SELECT_HERE_PREFIX) {
         if !select_in_open_folder(std::path::Path::new(file), cx) {
-            route_ipc(format!("{SELECT_PREFIX}{file}"), cx);
+            return route_ipc_shown(format!("{SELECT_PREFIX}{file}"), cx);
         }
-        return;
+        return true;
     }
     if msg.trim() == rf_win::jumplist::NEW_WINDOW_ARG {
-        crate::open_main_window(Some(Location::Home), None, None, cx);
-        return;
+        return crate::open_main_window_made(Some(Location::Home), None, None, cx);
     }
     if msg.trim() == crate::quick_search::LAUNCH_ARG {
         crate::quick_search::toggle(cx);
-        return;
+        return true;
     }
     let (loc, select) = parse_launch(&msg);
     let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
@@ -413,11 +417,11 @@ pub fn route_ipc(msg: String, cx: &mut App) {
             })
             .is_ok();
         if ok {
-            return;
+            return true;
         }
     }
     *START_SELECT.lock().unwrap() = select;
-    crate::open_main_window(Some(loc), None, None, cx);
+    crate::open_main_window_made(Some(loc), None, None, cx)
 }
 
 /// Puts a search at the front of the remembered ones (once, whatever its case; ten are kept).
@@ -3180,7 +3184,8 @@ fn breadcrumbs(path: &Path) -> Vec<(String, Location)> {
             }
             continue;
         }
-        let label = match rf_win::localized::folder_label(&acc, None) {
+        // (the cache only: this runs while drawing; FolderView::warm_labels fills it from a worker)
+        let label = match rf_win::localized::label_if_known(&acc) {
             Some(l) => l.to_string(),
             None => rf_core::history::redact_credentials(comp.as_os_str().to_string_lossy().trim_end_matches('\\')),
         };
@@ -4011,10 +4016,12 @@ mod tests {
 
     #[test]
     fn crumbs() {
+        // the names are read on a worker in the app (FolderView::warm_labels); here the same call, first
+        rf_win::localized::warm(crate::nav_touch::label_paths(Path::new(r"C:\Users\demo")));
         let c = breadcrumbs(Path::new(r"C:\Users\demo"));
         let labels: Vec<_> = c.iter().map(|(l, _)| l.as_str()).collect();
         // C:\Users shows Explorer's localized name ("Kullanıcılar" on Turkish Windows)
-        let users = rf_win::localized::folder_label(Path::new(r"C:\Users"), None).map_or("Users".to_string(), |l| l.to_string());
+        let users = rf_win::localized::label_if_known(Path::new(r"C:\Users")).map_or("Users".to_string(), |l| l.to_string());
         assert_eq!(labels, vec!["C:", users.as_str(), "demo"]);
         assert_ne!(users, "");
         assert_eq!(c[0].1, Location::Path(PathBuf::from(r"C:\")));

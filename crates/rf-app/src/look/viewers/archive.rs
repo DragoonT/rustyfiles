@@ -74,7 +74,7 @@ fn open_in_rustyfiles(path: PathBuf) {
     std::thread::spawn(move || {
         let (msg, arg) = rustyfiles_launch(&path);
         rf_win::look::win::allow_any_foreground();
-        if rf_win::single_instance::send_to("rustyfiles", &msg) {
+        if rf_win::single_instance::send_to(&rf_win::single_instance::instance_name(), &msg) {
             return;
         }
         let exe = std::env::current_exe().map(|e| e.with_file_name("rustyfiles.exe"));

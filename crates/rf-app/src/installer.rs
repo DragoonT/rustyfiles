@@ -239,7 +239,11 @@ pub fn restart_to_update() {
     // box is a plain progress dialog); Velopack's box when that window couldn't start
     let splash = crate::update_splash::launch();
     match um.wait_exit_then_apply_updates(&asset, splash.is_some(), true, Vec::<String>::new()) {
-        Ok(()) => std::process::exit(0),
+        Ok(()) => {
+            // a launch in the next moments must not be forwarded to a process that ends now (see rf_win::handover)
+            rf_win::handover::GATE.leave_now();
+            std::process::exit(0)
+        }
         Err(e) => {
             if let Some(mut s) = splash {
                 let _ = s.kill();

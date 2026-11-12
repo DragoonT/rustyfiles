@@ -117,7 +117,14 @@ fn picker_size(cx: &App) -> Size<Pixels> {
 
 fn open_window(pipe: File, req: Request, cx: &mut App) {
     crate::preview_trace::process_facts("picker: window requested");
-    let start = req.folder.as_deref().map(PathBuf::from).filter(|p| p.is_dir()).map(Location::Path).unwrap_or(Location::Home);
+    // (bounded: a folder on a place that has to wake up first, a WSL distribution, must not hold the dialog's window back)
+    let start = req
+        .folder
+        .as_deref()
+        .map(PathBuf::from)
+        .filter(|p| crate::is_dir_bounded(p.clone(), std::time::Duration::from_secs(2)) != Some(false))
+        .map(Location::Path)
+        .unwrap_or(Location::Home);
     let title = {
         let base = if req.title.trim().is_empty() { mode_title(req.mode).to_string() } else { req.title.clone() };
         if req.app.is_empty() { base } else { format!("{base} — {}", req.app.trim_end_matches(".exe")) }

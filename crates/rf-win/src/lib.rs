@@ -69,6 +69,7 @@ pub mod sysstatus;
 pub mod shortcut;
 pub mod startup;
 pub mod single_instance;
+pub mod handover;
 pub mod shell_window;
 pub mod shellhost;
 pub mod sta;

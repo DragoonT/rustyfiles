@@ -638,7 +638,9 @@ impl FolderView {
             }
         }
         if let Location::Path(p) = self.location() {
-            if let Some(l) = rf_win::localized::folder_label(p, None) {
+            // (the cache only: reading the folder's attributes here would hold the window on a place that has to wake up first;
+            // `warm_labels` fills the cache from a worker)
+            if let Some(l) = rf_win::localized::label_if_known(p) {
                 return l.to_string();
             }
         }
@@ -659,8 +661,8 @@ impl FolderView {
             Location::Shell { .. } => L::Usb,
             Location::DiskUsage(_) => L::ChartPie,
             Location::Path(p) if rf_win::network::server_root(p).is_some() => L::Server,
-            // the archive itself or a folder inside it (name check only: no disk access here)
-            Location::Path(p) if crate::archive_view::is_browsable_path(p) => L::FileArchive,
+            // the archive itself or a folder inside it (name check only: no disk access here, not even for a `.001` name)
+            Location::Path(p) if crate::archive_view::is_browsable_path_by_name(p) => L::FileArchive,
             Location::Path(p) => {
                 if p.parent().is_none() {
                     L::HardDrive
@@ -969,6 +971,25 @@ impl FolderView {
         self._rename_sub = None;
         self.load_inner(false, cx);
         self.start_watch(cx);
+        self.warm_labels(cx);
+    }
+
+    /// The localized names of the folders in the path (the breadcrumb and the tab title show them) are read from the disk on a
+    /// worker, and the view is drawn again when one of them is found. The drawing itself only looks in the cache, so a place that is
+    /// slow to answer cannot hold the window: until the answer comes the folders show under their real names.
+    fn warm_labels(&self, cx: &mut Context<Self>) {
+        let (Location::Path(path) | Location::Search { root: path, .. }) = self.location() else { return };
+        let paths = crate::nav_touch::label_paths(path);
+        if paths.iter().all(|p| rf_win::localized::is_known(p)) {
+            return;
+        }
+        cx.spawn(async move |this, cx| {
+            let found = cx.background_spawn(async move { rf_win::localized::warm(paths) }).await;
+            if found > 0 {
+                let _ = this.update(cx, |_, cx| cx.notify());
+            }
+        })
+        .detach();
     }
 
     /// Re-lists the current folder in the background and swaps the result in, keeping
@@ -995,7 +1016,9 @@ impl FolderView {
         }
         let (tx, mut rx) = mpsc::unbounded::<Option<Vec<(String, Option<Entry>)>>>();
         // a plain folder is patched with what changed; inside an archive it is listed again
-        let patchable = crate::archive_view::split(&path).is_none();
+        // (read from the names alone: asking the disk here, on the UI thread, held the window for the seconds a WSL distribution
+        // needs to start; a folder that is merely named like an archive is just listed again on a change)
+        let patchable = !crate::nav_touch::may_hold_archive(&path);
         // Opening the directory handle can block (offline network share): do it off the UI thread.
         let setup = cx.background_spawn(async move {
             let dir = path.clone();
@@ -2909,7 +2932,7 @@ impl FolderView {
             for i in sel {
                 if !self.entries[i as usize].is_dir() {
                     if let Some(p) = self.path_of(i) {
-                        if !p.exists() && crate::archive_view::split(&p).is_some() {
+                        if crate::nav_touch::may_hold_archive(&p) && !p.exists() && crate::archive_view::split(&p).is_some() {
                             // extracted together, one Status Center entry
                             in_archive.push(p);
                         } else {
@@ -3858,7 +3881,7 @@ impl FolderView {
             let target = r.target.clone();
             let is_dir = r.is_dir;
             // folders under their Explorer name (Downloads → İndirilenler)
-            let shown: String = if is_dir { rf_win::localized::folder_label(&target, None).map_or_else(|| r.name.clone(), |l| l.to_string()) } else { r.name.clone() };
+            let shown: String = if is_dir { rf_win::localized::label_if_known(&target).map_or_else(|| r.name.clone(), |l| l.to_string()) } else { r.name.clone() };
             recent_list = recent_list.child(
                 h_flex()
                     .id(("recent", i))
@@ -4175,7 +4198,8 @@ fn empty_state(p: &Palette, icon: L, title: String, sub: &'static str) -> impl I
 const RENAME_INSET: f32 = 5.;
 
 pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
-    if !rf_win::ftp::is_ftp(&path) && !path.exists() && crate::archive_view::split(&path).is_some() {
+    // (the name test first: it costs nothing, and `exists` on a place that has to wake up holds the UI thread)
+    if !rf_win::ftp::is_ftp(&path) && crate::nav_touch::may_hold_archive(&path) && !path.exists() && crate::archive_view::split(&path).is_some() {
         // an item inside an archive: extract just it (Status Center), open the real file
         crate::archive_view::open_items(cx, vec![path]);
         return;
