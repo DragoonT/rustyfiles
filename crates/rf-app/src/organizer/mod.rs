@@ -200,7 +200,27 @@ pub fn protected() -> ProtectedPaths {
 /// the path really leads to (a junction or symbolic link, a `subst` drive, 8.3 short names such as
 /// `C:\PROGRA~1`), which the text alone would not give away.
 pub fn refusal(protected: &ProtectedPaths, folder: &Path, subfolders: bool) -> Option<rf_core::organize::Refusal> {
-    protected.refuse(folder, subfolders).or_else(|| std::fs::canonicalize(folder).ok().and_then(|real| protected.refuse(&real, subfolders)))
+    protected.refuse(folder, subfolders).or_else(|| {
+        let real = std::fs::canonicalize(folder).ok()?;
+        // The real path is compared with the protected places as they are written AND as their own real paths: a protected place can
+        // be written in another spelling than the one the system resolves to (a short 8.3 name such as C:\Users\RUNNER~1, which is
+        // what %TEMP% holds on some machines; a place that is itself reached through a link), and then the two texts never meet.
+        protected.refuse(&real, subfolders).or_else(|| real_places(protected).refuse(&real, subfolders))
+    })
+}
+
+/// The protected places with every path replaced by the real path the system resolves it to (a place that cannot be resolved, for
+/// example because it does not exist, stays as it is written).
+fn real_places(p: &ProtectedPaths) -> ProtectedPaths {
+    let real = |x: &PathBuf| std::fs::canonicalize(x).unwrap_or_else(|_| x.clone());
+    ProtectedPaths {
+        windows: p.windows.as_ref().map(real),
+        program_files: p.program_files.iter().map(real).collect(),
+        user_profile: p.user_profile.as_ref().map(real),
+        app_data: p.app_data.iter().map(real).collect(),
+        app_dirs: p.app_dirs.iter().map(real).collect(),
+        app_files: p.app_files.iter().map(real).collect(),
+    }
 }
 
 pub fn home() -> Option<PathBuf> {
