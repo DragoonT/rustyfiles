@@ -15,13 +15,21 @@
 //! waits on that channel (never spins), takes every frame the pool has, keeps the newest one that was rendered with the current exclusion
 //! list and copies it into the monitor's mirror texture. A frame whose configuration iteration is below the number the last
 //! `SetWindowExclusionList` returned was rendered with the OLD list (our window may be in it) and is dropped.
-
+//!
+//! HOW OFTEN. A session is asked for at most 60 frames a second (30 on battery power), see `min_interval_ticks`: the glass is frosted,
+//! nothing it shows needs a fresher backdrop, and every frame costs the engine, the capture service and the graphics driver some work.
+//! (A frame that the engine itself asks for by sending the list again is not held back by that interval: those are rare and only
+//! sent when something needs a fresh picture, see `SessionMonitor::resume` and `Exclusion::nudge`.) Every frame that is taken is copied
+//! WHOLE into the mirror; copying only the parts some glass reads was tried and taken out again (see `docs/design/dock.md`): it saved
+//! about seven microseconds of GPU time a frame and nothing measurable on the CPU, and it made the mirror's contents depend on the
+//! dirty rectangles of every frame being true across the frames the interval skips.
+//!
 #![allow(non_snake_case)] // the hand-declared interfaces keep the names of the WinRT methods
 
 use std::collections::BTreeSet;
 use std::ffi::c_void;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, Select, bounded};
@@ -143,6 +151,11 @@ pub(super) enum WinProbe {
     Visible,
 }
 
+/// Whether the number is a window of anybody right now.
+pub(super) fn is_window(h: isize) -> bool {
+    unsafe { IsWindow(Some(HWND(h as *mut c_void))).as_bool() }
+}
+
 /// Looks at one of our windows.
 pub(super) fn probe_window(h: isize) -> WinProbe {
     unsafe {
@@ -164,6 +177,13 @@ pub(super) fn probe_window(h: isize) -> WinProbe {
 ///
 /// A listed window that was hidden and becomes visible also bumps the version: it is not known whether a handle that was listed while
 /// its window was hidden is honoured once the window shows, and sending the list again costs next to nothing.
+///
+/// TAKING A WINDOW OUT SENDS NOTHING. A popup that is gone (or no longer registered) only leaves the list; nothing needs to be sent for
+/// that, because a handle of a window that does not exist leaves nothing out of any picture, and a send costs a call of 1 to 3 ms, a
+/// forced whole frame and a new backdrop for every glass window on the monitor. The removal goes out with the next change that has to
+/// be sent anyway. The one thing a stale handle can do is be handed to a window of another process, which would then be cut out of the
+/// backdrop; so the handles that left are looked at once a second (`settle`: `IsWindow`, a few nanoseconds each) and the list is sent
+/// as soon as one of them is a window again.
 #[derive(Default)]
 pub(super) struct Exclusion {
     attached: BTreeSet<isize>,
@@ -171,16 +191,38 @@ pub(super) struct Exclusion {
     /// Listed windows last seen visible.
     shown: BTreeSet<isize>,
     version: u64,
+    /// Handles that left the lists while the sessions' copy still holds them (nothing was sent for them), and when they were last
+    /// looked at. Cleared by every send.
+    gone: BTreeSet<isize>,
+    gone_looked: Option<Instant>,
 }
+
+/// How often the handles that left the lists are checked for having become somebody else's window.
+const GONE_LOOK_EVERY: Duration = Duration::from_secs(1);
 
 impl Exclusion {
     fn listed(&self, h: isize) -> bool {
         self.attached.contains(&h) || self.extras.contains(&h)
     }
 
+    /// Something has to be sent: a new version, which carries every removal that waited.
+    fn bump(&mut self) {
+        self.version += 1;
+        self.gone.clear();
+        self.gone_looked = None;
+    }
+
+    /// A handle left the lists and nothing has to be sent for it now.
+    fn lazy_removal(&mut self, h: isize, now: Instant) {
+        if !self.listed(h) {
+            self.gone.insert(h);
+            self.gone_looked.get_or_insert(now);
+        }
+    }
+
     pub(super) fn attach(&mut self, h: isize) {
         if self.attached.insert(h) {
-            self.version += 1;
+            self.bump();
         }
     }
 
@@ -189,17 +231,31 @@ impl Exclusion {
             if !self.listed(h) {
                 self.shown.remove(&h);
             }
-            self.version += 1;
+            // a window that stays on the screen after its glass is gone must show in the backdrop of the others again: sent at once
+            self.bump();
         }
     }
 
-    /// Replaces the registry of extra windows.
+    /// Replaces the registry of extra windows. A registry that only lost windows sends nothing now (see the type's docs).
     pub(super) fn set_extras(&mut self, extras: BTreeSet<isize>) {
-        if self.extras != extras {
-            self.extras = extras;
-            let keep: BTreeSet<isize> = self.shown.iter().copied().filter(|h| self.listed(*h)).collect();
-            self.shown = keep;
-            self.version += 1;
+        self.set_extras_at(extras, Instant::now());
+    }
+
+    fn set_extras_at(&mut self, extras: BTreeSet<isize>, now: Instant) {
+        if self.extras == extras {
+            return;
+        }
+        let only_removals = extras.is_subset(&self.extras);
+        let removed: Vec<isize> = self.extras.difference(&extras).copied().collect();
+        self.extras = extras;
+        let keep: BTreeSet<isize> = self.shown.iter().copied().filter(|h| self.listed(*h)).collect();
+        self.shown = keep;
+        if only_removals {
+            for h in removed {
+                self.lazy_removal(h, now);
+            }
+        } else {
+            self.bump();
         }
     }
 
@@ -211,7 +267,7 @@ impl Exclusion {
         }
         if visible {
             if self.shown.insert(h) {
-                self.version += 1;
+                self.bump();
             }
         } else {
             self.shown.remove(&h);
@@ -221,19 +277,52 @@ impl Exclusion {
     /// Looks at the extras (they come and go without the engine being told when they show) and keeps the record of who is visible. A
     /// handle that is no longer a window of ours is dropped from the list (the number may be handed to another process's window, which
     /// would then be cut out of the backdrop).
-    pub(super) fn poll_extras(&mut self, mut probe: impl FnMut(isize) -> WinProbe) {
+    pub(super) fn poll_extras(&mut self, probe: impl FnMut(isize) -> WinProbe) {
+        self.poll_extras_at(probe, Instant::now());
+    }
+
+    fn poll_extras_at(&mut self, mut probe: impl FnMut(isize) -> WinProbe, now: Instant) {
         let extras: Vec<isize> = self.extras.iter().copied().collect();
         for h in extras {
             match probe(h) {
                 WinProbe::Gone => {
                     self.extras.remove(&h);
                     self.shown.remove(&h);
-                    self.version += 1;
+                    self.lazy_removal(h, now);
                 }
                 WinProbe::Hidden => self.set_visible(h, false),
                 WinProbe::Visible => self.set_visible(h, true),
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn set_extras_at_for_test(&mut self, extras: BTreeSet<isize>, now: Instant) {
+        self.set_extras_at(extras, now);
+    }
+
+    #[cfg(test)]
+    pub(super) fn poll_extras_at_for_test(&mut self, probe: impl FnMut(isize) -> WinProbe, now: Instant) {
+        self.poll_extras_at(probe, now);
+    }
+
+    /// Looks at the handles that left the lists without a send, once a second: one that is a window again (`is_window`) is somebody
+    /// else's now and the list is sent. Called once per turn of the engine.
+    pub(super) fn settle(&mut self, now: Instant, mut is_window: impl FnMut(isize) -> bool) {
+        if self.gone.is_empty() || self.gone_looked.is_some_and(|t| now.duration_since(t) < GONE_LOOK_EVERY) {
+            return;
+        }
+        self.gone_looked = Some(now);
+        if self.gone.iter().any(|&h| is_window(h)) {
+            self.bump();
+        }
+    }
+
+    /// Makes every session send its list again, unchanged, which makes the capture service produce a whole new frame (a frame made
+    /// after a configuration change is a full picture). The engine asks for it when a glass moved onto a part of the screen the
+    /// mirror does not hold, and the desktop is so still that no frame would come by itself.
+    pub(super) fn nudge(&mut self) {
+        self.bump();
     }
 
     pub(super) fn extras(&self) -> &BTreeSet<isize> {
@@ -280,9 +369,75 @@ pub(super) fn size_check(content: (i32, i32), texture: (u32, u32), mirror: (u32,
     }
 }
 
-/// The shortest time between two frames the session is asked for: one refresh period of the monitor, never below 4 ms (a monitor that
-/// does not say its rate gets the session's own default, 16 ms).
-pub(super) fn min_interval_ticks(hz: u32) -> i64 {
+/// Where the power comes from. The capture rate follows it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Power {
+    /// Plugged in (or no battery at all, or not known: a desktop PC is never on battery).
+    Mains,
+    /// On battery, or with the battery saver on.
+    Battery,
+}
+
+/// Reads the power state (`GetSystemPowerStatus`: a local, cheap call). Anything it does not say is `Mains`.
+pub(super) fn read_power() -> Power {
+    #[repr(C)]
+    #[derive(Default)]
+    struct SystemPowerStatus {
+        ac_line_status: u8,
+        battery_flag: u8,
+        battery_life_percent: u8,
+        /// Bit 0: the battery saver is on.
+        system_status_flag: u8,
+        battery_life_time: u32,
+        battery_full_life_time: u32,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetSystemPowerStatus(status: *mut SystemPowerStatus) -> i32;
+    }
+    let mut st = SystemPowerStatus::default();
+    if unsafe { GetSystemPowerStatus(&mut st) } == 0 {
+        return Power::Mains;
+    }
+    // ACLineStatus: 0 offline (on battery), 1 online, 255 unknown
+    if st.ac_line_status == 0 || st.system_status_flag & 1 != 0 { Power::Battery } else { Power::Mains }
+}
+
+/// The frame rate a session is asked for: 60 a second, 30 on battery.
+///
+/// WHY SO LOW. The glass shows the screen behind a window through a frost of about 10 px and a bent rim. Nothing the engine animates
+/// by itself (a lens that slides, a shape that widens) needs a fresher backdrop: those draw again from the backdrop already held.
+/// What a faster rate buys is only that a video, a game or an animation BEHIND a glass window shows in the frost at 200 instead of 60
+/// updates a second, which the frost hides. What it costs is a wake of the capture service, a frame handler, the engine thread and the
+/// graphics driver for every frame, whatever the glass does with it: about a tenth of a millisecond of CPU a frame on this machine's
+/// 200 Hz display, a few percent of a core while something plays on the monitor.
+pub(super) const FRAMES_PER_SECOND: f64 = 60.0;
+pub(super) const FRAMES_PER_SECOND_ON_BATTERY: f64 = 30.0;
+
+/// The shortest time between two frames the session is asked for, in 100 ns ticks: `1 / FRAMES_PER_SECOND` (on battery
+/// `1 / FRAMES_PER_SECOND_ON_BATTERY`), but never shorter than one refresh period of the display (a 30 Hz display cannot make 60 frames)
+/// and never below 4 ms. A display that does not say its rate (`hz` 0 or 1) gets the session's own default period, 16 ms, as the floor.
+pub(super) fn min_interval_ticks(hz: u32, power: Power) -> i64 {
+    let period_ms = if hz > 1 { 1000.0 / hz as f64 } else { 16.0 };
+    let want_ms = 1000.0 / if power == Power::Battery { FRAMES_PER_SECOND_ON_BATTERY } else { FRAMES_PER_SECOND };
+    (period_ms.max(want_ms).max(4.0) * 10_000.0) as i64
+}
+
+/// The interval a session is given: the policy (`min_interval_ticks`), unless `RUSTYFILES_GLASS_MAX_FPS` says otherwise for this run
+/// (a number of frames a second; `0` is the old behaviour, one refresh period). It exists so that the cap can be compared with no cap
+/// on a live desktop without a new build.
+pub(super) fn interval_for(hz: u32, power: Power) -> i64 {
+    static OVERRIDE: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+    let fps = *OVERRIDE.get_or_init(|| std::env::var("RUSTYFILES_GLASS_MAX_FPS").ok().and_then(|v| v.trim().parse::<f64>().ok()).filter(|v| v.is_finite() && *v >= 0.0));
+    match fps {
+        Some(0.0) => refresh_period_ticks(hz),
+        Some(f) => (refresh_period_ticks(hz) as f64).max(1e7 / f) as i64,
+        None => min_interval_ticks(hz, power),
+    }
+}
+
+/// What the engine used before the cap: one refresh period (kept for the measurements that compare the two).
+pub(super) fn refresh_period_ticks(hz: u32) -> i64 {
     let ms = if hz > 1 { 1000.0 / hz as f64 } else { 16.0 };
     (ms.max(4.0) * 10_000.0) as i64
 }
@@ -335,6 +490,14 @@ pub(super) struct SessionMonitor {
     closed: Arc<AtomicBool>,
     /// DirtyRegions can be read (mode ReportOnly was accepted).
     dirty_ok: bool,
+    /// The refresh rate of the display, as read when the session was opened (and again by `retune`).
+    hz: u32,
+    /// The interval the session was last given, in ticks (100 ns).
+    interval: i64,
+    /// A change of the interval that the system refused, already logged.
+    interval_failed: bool,
+    /// How many times the frame handler ran (frames the capture service announced, whether or not the engine took them).
+    arrived: Arc<AtomicU64>,
     /// The exclusion version last sent to this session.
     sent: Option<u64>,
     /// The number the last `SetWindowExclusionList` returned: frames below it are stale.
@@ -447,7 +610,12 @@ impl SessionMonitor {
 
     /// Makes the session for a monitor and starts it. Never asks the user for anything: the caller has checked the permission
     /// (`access`), the border and the cursor are switched off before the start. `Err` is the reason it cannot be had.
-    pub(super) unsafe fn open(g: &Gpu, hmon: isize) -> Result<SessionMonitor, String> {
+    pub(super) unsafe fn open(g: &Gpu, hmon: isize, power: Power) -> Result<SessionMonitor, String> {
+        SessionMonitor::open_with(g, hmon, power, POOL_BUFFERS)
+    }
+
+    /// `open` with a number of pool buffers of its own (the measurements compare them).
+    pub(super) unsafe fn open_with(g: &Gpu, hmon: isize, power: Power, buffers: i32) -> Result<SessionMonitor, String> {
         let (rect, hz) = monitor_info(hmon).ok_or("the monitor is gone")?;
         let step = |what: &str| {
             let what = what.to_string();
@@ -464,7 +632,7 @@ impl SessionMonitor {
         if size.Width <= 0 || size.Height <= 0 {
             return Err("the capture item has no size".into());
         }
-        let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&winrt, FORMAT, POOL_BUFFERS, size).map_err(step("the frame pool"))?;
+        let pool = Direct3D11CaptureFramePool::CreateFreeThreaded(&winrt, FORMAT, buffers, size).map_err(step("the frame pool"))?;
         let session = match pool.CreateCaptureSession(&item) {
             Ok(s) => s,
             Err(e) => {
@@ -492,15 +660,22 @@ impl SessionMonitor {
         }
         // Only the places that changed are reported; the frames themselves stay whole.
         let dirty_ok = live.session.SetDirtyRegionMode(GraphicsCaptureDirtyRegionMode::ReportOnly).is_ok();
-        // A frame is wanted at most once per refresh of the monitor (the default is 16 ms whatever the monitor does).
-        let _ = live.session.SetMinUpdateInterval(TimeSpan { Duration: min_interval_ticks(hz) });
+        // At most 60 frames a second, 30 on battery (see `min_interval_ticks`). The default is 16 ms whatever the monitor does.
+        let interval = interval_for(hz, power);
+        let interval_failed = live.session.SetMinUpdateInterval(TimeSpan { Duration: interval }).is_err();
+        if interval_failed {
+            log::info!("glass: the capture session does not take a minimum update interval (it needs Windows 11 22H2); it delivers at the display's rate");
+        }
 
         let (tx, wake) = bounded::<()>(1);
         let tx2 = tx.clone();
+        let arrived = Arc::new(AtomicU64::new(0));
+        let arrived2 = arrived.clone();
         live.arrived = Some(
             live.pool
                 .FrameArrived(&TypedEventHandler::<Direct3D11CaptureFramePool, IInspectable>::new(move |_, _| {
                     // runs on a thread of the system: only wake the engine
+                    arrived2.fetch_add(1, Ordering::Relaxed);
                     let _ = tx.try_send(());
                     Ok(())
                 }))
@@ -529,6 +704,10 @@ impl SessionMonitor {
             wake,
             closed,
             dirty_ok,
+            hz,
+            interval,
+            interval_failed,
+            arrived,
             sent: None,
             last_set: 0,
             last_iter: None,
@@ -666,8 +845,8 @@ impl SessionMonitor {
             drop_frame(newest.replace(f));
         }
         if queued >= POOL_BUFFERS as usize {
-            // Every buffer was full, so the system may have skipped frames; whether the dirty rectangles of a frame are relative to the
-            // last frame delivered or to the last one made has not been measured. Any window may be touched.
+            // Every buffer was full, so the system may have skipped frames. Any window may be touched: the rectangles of this frame
+            // are not trusted.
             dirty.merge(Dirty::All);
         }
         let Some(frame) = newest else { return Ok(Taken { frame: false, image: false, dirty: Dirty::none() }) };
@@ -684,8 +863,8 @@ impl SessionMonitor {
         Ok(Taken { frame: true, image, dirty: if image { dirty } else { Dirty::none() } })
     }
 
-    /// Copies a frame into the mirror. False when the frame had another size than the mirror (it is dropped; the pool and the mirror are
-    /// made anew when the monitor really changed its size).
+    /// Copies a frame into the mirror (all of it). False when the frame had another size than the mirror (it is dropped; the pool and the
+    /// mirror are made anew when the monitor really changed its size).
     unsafe fn copy_frame(&mut self, g: &Gpu, frame: &Direct3D11CaptureFrame) -> Result<bool, MonError> {
         let lost = |what: &str, e: windows::core::Error| {
             if is_device_lost(&e) { MonError::Device(format!("{what}: {e}")) } else { Self::backend(format!("{what}: {e}")) }
@@ -743,6 +922,64 @@ impl SessionMonitor {
         self.has_image = false;
         self.mismatched = 0;
         Ok(())
+    }
+
+    /// The session is used again after a pause in which nobody took its frames. The frames in its pool are from before the pause (the
+    /// pool filled up, and the system drops newer frames while it is full, so they can be seconds old, and on a still desktop nothing
+    /// newer follows). They must not be drawn from: the list is sent again, which gives every frame made before it an older iteration
+    /// (`take` drops those) and makes the capture service produce a whole new frame; until that frame is in, the mirror is not ready.
+    pub(super) fn resume(&mut self) {
+        self.sent = None;
+        self.pending = Some(Instant::now());
+    }
+
+    /// How many times the frame handler has run since the session was made.
+    pub(super) fn arrived(&self) -> u64 {
+        self.arrived.load(Ordering::Relaxed)
+    }
+
+    /// Sets the minimum update interval for the power state and the display's CURRENT refresh rate (read again here: it can change while
+    /// the session runs). A running session takes the new value; if the system refuses, that is logged once and the session goes on
+    /// with the one it has. Returns whether the interval changed.
+    pub(super) unsafe fn retune(&mut self, power: Power) -> bool {
+        if let Some((_, hz)) = monitor_info(self.hmon) {
+            self.hz = hz;
+        }
+        let want = interval_for(self.hz, power);
+        if want == self.interval {
+            return false;
+        }
+        match self.live.session.SetMinUpdateInterval(TimeSpan { Duration: want }) {
+            Ok(()) => {
+                log::debug!("glass: capture interval {:.1} ms -> {:.1} ms ({power:?}, display {} Hz)", self.interval as f64 / 1e4, want as f64 / 1e4, self.hz);
+                self.interval = want;
+                true
+            }
+            Err(e) => {
+                if !self.interval_failed {
+                    self.interval_failed = true;
+                    log::info!("glass: the capture interval cannot be changed on a running session: {e}");
+                }
+                false
+            }
+        }
+    }
+
+    /// Sets the interval to exactly this many ticks, whatever the policy says (the measurements compare intervals).
+    pub(super) fn set_interval_ticks(&mut self, ticks: i64) {
+        if self.live.session.SetMinUpdateInterval(TimeSpan { Duration: ticks }).is_ok() {
+            self.interval = ticks;
+        }
+    }
+
+    /// The refresh rate of the display as last read.
+    pub(super) fn hz(&self) -> u32 {
+        self.hz
+    }
+
+    /// What the session says its minimum update interval is (for the measurements).
+    pub(super) fn reported_interval(&self) -> Option<i64> {
+        self.live.session.MinUpdateInterval().ok().map(|t| t.Duration)
     }
 
     /// The list the session reports, for the manual check: `None` when it has none yet (the call succeeds with a null pointer then).

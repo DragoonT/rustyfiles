@@ -583,6 +583,12 @@ unsafe fn rtv_mip(g: &Gpu, t: &ID3D11Texture2D, fmt: DXGI_FORMAT, mip: u32) -> R
     v.ok_or_else(fail)
 }
 
+/// A private BGRA render target of `w` x `h` px (what a swap chain's buffer is, for the measurements that draw without a window).
+pub(super) unsafe fn offscreen_target(g: &Gpu, w: u32, h: u32) -> R<ID3D11RenderTargetView> {
+    let t = tex2d(g, w, h, 1, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_RENDER_TARGET.0 as u32)?;
+    rtv_mip(g, &t, DXGI_FORMAT_B8G8R8A8_UNORM, 0)
+}
+
 unsafe fn srv_mip(g: &Gpu, t: &ID3D11Texture2D, fmt: DXGI_FORMAT, mip: u32, count: u32) -> R<ID3D11ShaderResourceView> {
     let mut v = None;
     g.dev.CreateShaderResourceView(

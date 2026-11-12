@@ -7,6 +7,17 @@
 //! target on the same window with `topmost = false`, whose visual tree is composed BEHIND the scene GPUI draws. The app makes the
 //! GPUI window transparent, so the glass shows through wherever the scene is.
 //!
+//! WORK ONLY FOR GLASS THAT IS SEEN. A glass window that is hidden, minimised or cloaked is left out of everything, and so is one that
+//! the windows above it hide completely (`cover.rs`; looked at when the foreground window changes or moves, about ten times a second
+//! while some glass is covered and twice a second otherwise, never per frame). A window that is left out is not prepared, not drawn and
+//! not read back, and it reports the state it had: a window that was showing glass stays `Running` with its last picture on the screen
+//! (the app must not fall back to its Mica fill and back for a cover that lasts a few seconds). When the window can be seen again it
+//! is drawn from a fresh backdrop and presented whatever the loop guard remembers: its capture is resumed first (`Monitor::resume`: the
+//! frames queued from before the pause are never drawn from), and until a frame made after the resume is in, the window keeps its last
+//! picture. When no glass on a monitor is seen, that monitor's capture session is closed after `SESSION_GRACE` (its frame pool and
+//! mirror are tens of megabytes of video memory, and the capture service stops working for us), and opened again on demand; a failure
+//! to open it again is tried again a few times with a pause (`Reopen`) before the whole process gives up the session backend.
+//!
 //! The loop never spins: it waits on the command channel when there is nothing to poll, waits inside AcquireNextFrame (or on the session's
 //! frame token) when it has a capture, and sleeps when neither happened. While a lens moves or fades it is paced by the display instead
 //! (`pace`): one turn per refresh, and none of the other waits. A glass SHAPE that moves (a dock island widening) is not paced: its
@@ -37,9 +48,11 @@ use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, IsIconic, IsWindow,
 use windows::core::{BOOL, Interface};
 
 use super::capture::{Dirty, MonError, Monitor, Pumped, is_device_lost, locate};
+use super::cover;
+use super::geom::Rc;
 use super::gpu::{Geometry, Gpu, LensList, Look, Region, Renderer, glass_pass, prep, region_pad, reuse};
 use super::lens::LensSet;
-use super::wgc::{self, Access, Exclusion};
+use super::wgc::{self, Access, Exclusion, Power};
 use super::{CaptureMode, Cmd, GlassOptions, GlassState, Shadow, set_mode};
 
 /// A window's corner radius, device px at 100 %: Windows 11 rounds its windows by 8 px, or by 4 px when asked for small corners.
@@ -70,6 +83,20 @@ const SHAPE_WAIT_MS: u32 = 2;
 const INSTANT_FLUSH: Duration = Duration::from_micros(500);
 /// This many such returns in a row and `pace` waits on the channel instead, so a broken DwmFlush cannot make a busy loop.
 const INSTANT_FLUSHES_BEFORE_WAIT: u32 = 3;
+/// How long a monitor's capture session is kept after the last glass that needed it stopped being seen (hidden, minimised, covered):
+/// a window that comes back within this time (an Alt+Tab, a minimise and restore) finds the session as it was.
+const SESSION_GRACE: Duration = Duration::from_secs(5);
+/// How often the z order is walked to see whether a glass window is covered, while no glass is covered (a window is then only
+/// noticed to go under others: that costs nothing but the work it could have saved) / while some glass is covered (it may come into
+/// view any moment: the window that covered it was closed, minimised or moved, and nothing tells the engine). A change of the
+/// foreground window, or a move of it, looks at once (`Engine::update_cover`).
+const COVER_EVERY: Duration = Duration::from_millis(500);
+const COVER_POLL: Duration = Duration::from_millis(100);
+/// How often the power state (and with it the capture rate) is looked at.
+/// The pauses before a capture session that could not be opened again (after it had worked in this run) is tried once more. A failure
+/// after the last of them is a real one: the process goes over to Desktop Duplication.
+const REOPEN_PAUSES: [Duration; 3] = [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(5)];
+const POWER_CHECK_EVERY: Duration = Duration::from_secs(5);
 const STATS_EVERY: Duration = Duration::from_secs(5);
 const DEVICE_CHECK_EVERY: Duration = Duration::from_secs(1);
 /// How often a running session backend looks again at the permission it was started on (reading it is a cheap, silent query).
@@ -299,6 +326,8 @@ struct Win {
     /// When the shape last changed: while that is recent the engine does not wait long for a frame (`Engine::frame_wait_ms`).
     shape_changed: Option<Instant>,
     visible: bool,
+    /// Other windows hide this one completely (see `cover.rs`). Such a window is not worked for: see `Win::active`.
+    covered: bool,
     geo: Option<WinGeo>,
     target: Option<Target>,
     region: Option<Region>,
@@ -325,6 +354,7 @@ impl Win {
             shadow: opts.shadow,
             shape_changed: None,
             visible: false,
+            covered: false,
             geo: None,
             target: None,
             region: None,
@@ -337,11 +367,36 @@ impl Win {
         }
     }
 
-    fn set_options(&mut self, opts: GlassOptions) {
+    /// Whether anybody can see this glass: it is shown and not hidden under other windows. Only an active window is prepared, drawn,
+    /// read back and counted when the engine decides what to capture and how long to wait.
+    fn active(&self) -> bool {
+        self.visible && !self.covered
+    }
+
+    /// Records whether other windows hide this one. Coming into view again means drawing at once from a fresh backdrop, and presenting
+    /// whatever the loop guard remembers: the picture on the screen is from before the cover. Returns whether it came into view.
+    fn set_covered(&mut self, covered: bool) -> bool {
+        if covered == self.covered {
+            return false;
+        }
+        self.covered = covered;
+        if covered {
+            return false;
+        }
+        self.restale();
+        self.presented = None;
+        true
+    }
+
+    /// Takes new options. Returns whether the place the glass shows on the screen changed in a way that makes a new look at the z order
+    /// worth it right now: the shape of a covered window moved (it may be in view now), or the glass was nothing at all (an island
+    /// attached with an empty shape, which is never "covered") and now has an area.
+    fn set_options(&mut self, opts: GlassOptions) -> bool {
         let before = GlassOptions { dark: self.dark, radius_px: self.radius_px, cut_corners: self.cut_corners, shape: self.shape, shadow: self.shadow };
         if before == opts {
-            return;
+            return false;
         }
+        let relook = before.shape != opts.shape && (self.covered || shape_is_empty(before.shape));
         let cheap = before.only_the_shape_differs(&opts);
         self.dark = opts.dark;
         self.radius_px = opts.radius_px;
@@ -358,6 +413,7 @@ impl Win {
         } else {
             self.restale();
         }
+        relook
     }
 
     /// Something behind the glass or about the glass itself changed: draw again, from a new backdrop.
@@ -376,6 +432,24 @@ pub(super) fn effective_radius(asked: Option<f32>, system: f32, w: u32, h: u32) 
         Some(r) if r.is_finite() => r.clamp(0.0, w.min(h) as f32 / 2.0),
         _ => system,
     }
+}
+
+/// A shape with no area (the dock starts every island with an empty one until it has its first real shape).
+fn shape_is_empty(shape: Option<[f32; 4]>) -> bool {
+    shape.is_some_and(|[_, _, w, h]| w <= 0.0 || h <= 0.0)
+}
+
+/// What the glass of a window shows on the screen: its client area, or the shape inside it, rounded OUT to whole pixels (the glass is
+/// not hidden unless the pixels around it are). `None` when there is nothing to show: a window or shape with no area has nothing that
+/// could be hidden, so it is never "covered" (the empty target of `geom::covered_by` is trivially covered, which would hold back an
+/// island that is only waiting for its first shape).
+fn glass_on_screen(geo: &WinGeo, shape: Option<[f32; 4]>) -> Option<Rc> {
+    if geo.w == 0 || geo.h == 0 || shape_is_empty(shape) {
+        return None;
+    }
+    let [x, y, gw, gh] = Geometry { w: geo.w, h: geo.h, origin: (0, 0), scale: 1.0, radius_px: 0.0, cut_corners: false, shape, shadow: None }.glass_rect();
+    let r = Rc::new(geo.x + x.floor() as i32, geo.y + y.floor() as i32, geo.x + (x + gw).ceil() as i32, geo.y + (y + gh).ceil() as i32);
+    (!r.is_empty()).then_some(r)
 }
 
 /// How a draw ended.
@@ -476,6 +550,93 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     Ok(Drawn::Presented)
 }
 
+/// The capture sessions that are kept but not used (no glass on their monitor is seen), and since when.
+#[derive(Default)]
+struct Parking {
+    since: BTreeMap<isize, Instant>,
+}
+
+/// What a look at the sessions changed.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct ParkChange {
+    /// Sessions that were parked and are wanted again: their mirror was not kept up to date meanwhile.
+    resumed: Vec<isize>,
+    /// Sessions that stayed unused for the whole grace time: to be closed.
+    expired: Vec<isize>,
+}
+
+impl Parking {
+    /// Whether the session of a monitor is kept but not used: its mirror and queue are from before the pause until the next
+    /// `Engine::sync_monitors` has resumed it.
+    fn is_parked(&self, hmon: isize) -> bool {
+        self.since.contains_key(&hmon)
+    }
+
+    /// `open`: the monitors that have a session; `want`: those with a glass that is seen.
+    fn update(&mut self, open: &[isize], want: &BTreeSet<isize>, now: Instant, grace: Duration) -> ParkChange {
+        self.since.retain(|k, _| open.contains(k));
+        let mut change = ParkChange::default();
+        for k in open {
+            if want.contains(k) {
+                if self.since.remove(k).is_some() {
+                    change.resumed.push(*k);
+                }
+            } else {
+                self.since.entry(*k).or_insert(now);
+            }
+        }
+        change.expired = self.since.iter().filter(|(_, t)| now.duration_since(**t) >= grace).map(|(k, _)| *k).collect();
+        for k in &change.expired {
+            self.since.remove(k);
+        }
+        change
+    }
+}
+
+/// What to do with a capture session that could not be opened again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Retry {
+    /// Try again after the pause (until then the windows keep their last picture).
+    Later,
+    /// Enough failures in a row: the failure is a real one.
+    GiveUp,
+}
+
+/// Failed attempts to open the session of a monitor again, after sessions had worked in this run. A closed session is reopened every
+/// time glass comes into view after more than `SESSION_GRACE`, so one transient failure (a display waking up, a mode change, a GPU
+/// reset, the secure desktop) must not turn the whole process over to Desktop Duplication, hide its windows from screenshots and keep
+/// it so for the rest of the run. It is tried again after 1, 2 and 5 seconds; the fourth failure in a row counts.
+#[derive(Default)]
+struct Reopen {
+    /// Per monitor: failures in a row, and when the next attempt may be made.
+    failed: BTreeMap<isize, (usize, Instant)>,
+}
+
+impl Reopen {
+    /// Whether an attempt may be made now.
+    fn due(&self, hmon: isize, now: Instant) -> bool {
+        self.failed.get(&hmon).is_none_or(|(_, at)| now >= *at)
+    }
+
+    fn failed(&mut self, hmon: isize, now: Instant) -> Retry {
+        let n = self.failed.get(&hmon).map_or(0, |(n, _)| *n);
+        match REOPEN_PAUSES.get(n) {
+            Some(pause) => {
+                self.failed.insert(hmon, (n + 1, now + *pause));
+                Retry::Later
+            }
+            None => {
+                self.failed.remove(&hmon);
+                Retry::GiveUp
+            }
+        }
+    }
+
+    fn opened(&mut self, hmon: isize) {
+        self.failed.remove(&hmon);
+    }
+}
+
 struct Engine {
     rx: Receiver<Cmd>,
     gfx: Option<Gfx>,
@@ -495,6 +656,23 @@ struct Engine {
     access_job: Option<Receiver<Access>>,
     /// How many `DwmFlush` calls in a row returned without waiting (see `pace`).
     instant_flushes: u32,
+    /// Where the power comes from, as last read, and when (the capture rate follows it).
+    power: Power,
+    last_power_check: Instant,
+    /// Monitors whose capture session is kept but not used (no glass on them is seen). A session that stays here for `SESSION_GRACE` is
+    /// closed.
+    parked: Parking,
+    /// The foreground window at the last look at the z order, and when that look was made. `cover_due`: look at the next turn.
+    last_foreground: isize,
+    last_cover_check: Instant,
+    cover_due: bool,
+    /// The foreground window's rectangle at the last look at the z order, while some glass was covered: a covering window that is
+    /// dragged or resized away changes no foreground window, but it does change this.
+    last_fg_rect: Option<Rc>,
+    /// Capture sessions that cannot be opened again are tried again after a pause (see `Reopen`).
+    reopen: Reopen,
+    /// A capture session was opened in this run, so the backend works here and a failure to open one again is probably a transient one.
+    session_worked: bool,
 }
 
 /// The multithreaded WinRT apartment of the engine thread: entered before any WinRT object is touched, left when the thread ends (also
@@ -530,29 +708,44 @@ pub(super) fn run(rx: Receiver<Cmd>) {
         SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     }
     let stats_on = std::env::var("RUSTYFILES_GLASS_STATS").is_ok_and(|v| v == "1");
-    let mut e = Engine {
-        rx,
-        gfx: None,
-        wins: BTreeMap::new(),
-        mons: BTreeMap::new(),
-        stats_on,
-        last_device_check: Instant::now(),
-        last_activity: Instant::now(),
-        mode: CaptureMode::Off,
-        excl: Exclusion::default(),
-        last_access_check: Instant::now(),
-        access_job: None,
-        instant_flushes: 0,
-    };
+    let mut e = Engine::new(rx);
+    e.stats_on = stats_on;
     while e.step() {}
     e.drop_all();
 }
 
 impl Engine {
+    fn new(rx: Receiver<Cmd>) -> Engine {
+        Engine {
+            rx,
+            gfx: None,
+            wins: BTreeMap::new(),
+            mons: BTreeMap::new(),
+            stats_on: false,
+            last_device_check: Instant::now(),
+            last_activity: Instant::now(),
+            mode: CaptureMode::Off,
+            excl: Exclusion::default(),
+            last_access_check: Instant::now(),
+            access_job: None,
+            instant_flushes: 0,
+            power: wgc::read_power(),
+            last_power_check: Instant::now(),
+            parked: Parking::default(),
+            last_foreground: 0,
+            last_cover_check: Instant::now(),
+            cover_due: true,
+            last_fg_rect: None,
+            reopen: Reopen::default(),
+            session_worked: false,
+        }
+    }
+
     fn command(&mut self, c: Cmd) {
         self.last_activity = Instant::now();
         match c {
             Cmd::Attach { hwnd, opts } => {
+                self.cover_due = true;
                 self.excl.attach(hwnd);
                 if self.mode == CaptureMode::Affinity {
                     // The caller set the flag already; set again here because a Detach of an earlier attach of the same window may have
@@ -563,8 +756,10 @@ impl Engine {
                 w.set_options(opts);
             }
             Cmd::SetOptions { hwnd, opts } => {
-                if let Some(w) = self.wins.get_mut(&hwnd) {
-                    w.set_options(opts);
+                if let Some(w) = self.wins.get_mut(&hwnd)
+                    && w.set_options(opts)
+                {
+                    self.cover_due = true;
                 }
             }
             Cmd::SetDark { hwnd, dark } => {
@@ -605,21 +800,26 @@ impl Engine {
         } else if self.shape_moving() {
             SHAPE_WAIT_MS
         } else if self.last_activity.elapsed() > QUIET_AFTER {
-            quiet_wait_ms(self.mode, self.wins.values().any(|w| w.visible && w.lenses.occupied()))
+            quiet_wait_ms(self.mode, self.wins.values().any(|w| w.active() && w.lenses.occupied()))
         } else {
             FRAME_WAIT_MS
         }
     }
 
+    /// The windows that are shown and not hidden under others.
+    fn active_set(&self) -> BTreeSet<isize> {
+        self.wins.values().filter(|w| w.active()).map(|w| w.hwnd).collect()
+    }
+
     /// Whether a lens of a visible window is moving or fading: the engine then draws once per display refresh.
     fn lens_active(&self) -> bool {
-        self.wins.values().any(|w| w.visible && w.lenses.animating())
+        self.wins.values().any(|w| w.active() && w.lenses.animating())
     }
 
     /// Whether a visible window's glass shape changed a moment ago (an island widening under the pointer sends a new shape for every
     /// frame of the animation, and each must be drawn about when the UI draws its scene: soon after it arrives, not at the next refresh).
     fn shape_moving(&self) -> bool {
-        self.wins.values().any(|w| w.visible && w.shape_changed.is_some_and(|t| t.elapsed() < SHAPE_ACTIVE))
+        self.wins.values().any(|w| w.active() && w.shape_changed.is_some_and(|t| t.elapsed() < SHAPE_ACTIVE))
     }
 
     /// Whether the display paces the loop: a lens moves or fades. (Not a shape: see the module docs.)
@@ -632,7 +832,7 @@ impl Engine {
     fn advance_lenses(&mut self) {
         let now = Instant::now();
         for w in self.wins.values_mut() {
-            if !w.visible || !w.lenses.animating() {
+            if !w.active() || !w.lenses.animating() {
                 w.lens_tick = None;
                 continue;
             }
@@ -686,8 +886,13 @@ impl Engine {
                 Ok(c) => self.command(c),
                 Err(_) => return false,
             }
-        } else if !self.wins.values().any(|w| w.visible) && !self.wait_command(IDLE_WAIT) {
-            return false;
+        } else if !self.wins.values().any(|w| w.active()) {
+            // Nobody can see any glass. A window that is only covered is looked at often (it may come into view any moment); one that
+            // is hidden is waited for as before.
+            let wait = if self.wins.values().any(|w| w.visible && w.covered) { COVER_POLL } else { IDLE_WAIT };
+            if !self.wait_command(wait) {
+                return false;
+            }
         }
         while let Ok(c) = self.rx.try_recv() {
             self.command(c);
@@ -700,16 +905,25 @@ impl Engine {
         if self.wins.values().any(|w| w.geo.is_none() || !w.visible) {
             self.measure_all();
         }
+        self.update_cover();
         self.sync_monitors();
         let waited = self.pump();
-        self.measure_all(); // the window may have moved while we waited for the frame
+        // The window may have moved while we waited for the frame. A covered window that moved is in view (its owner moved it) and so
+        // active now, while its monitor's capture may still be parked: it is resumed before anything is drawn from it, and the turn does
+        // not wait (the new frame is asked for by the resume).
+        let seen_before = self.active_set();
+        self.measure_all();
+        let appeared = !self.active_set().is_subset(&seen_before);
+        if appeared {
+            self.sync_monitors();
+        }
         self.advance_lenses();
         self.draw_dirty();
         self.housekeeping();
         if self.paced() {
             return self.pace();
         }
-        if !waited && self.wins.values().any(|w| w.visible) {
+        if !waited && !appeared && self.wins.values().any(|w| w.active()) {
             // no AcquireNextFrame wait happened this turn (a duplication is being rebuilt, or failed and backs off): never spin
             return self.wait_command(Duration::from_millis(self.frame_wait_ms() as u64));
         }
@@ -733,6 +947,7 @@ impl Engine {
                     if let Some(w) = self.wins.get_mut(&k) {
                         moved |= w.visible;
                         w.visible = false;
+                        w.covered = false;
                     }
                 }
                 Seen::Shown(g) => {
@@ -741,13 +956,18 @@ impl Engine {
                     if let Some(w) = self.wins.get_mut(&k) {
                         if !w.visible {
                             w.visible = true;
+                            w.covered = false;
                             w.restale();
                             w.presented = None; // it may have been off screen a long while
+                            self.cover_due = true;
                             moved = true;
                         }
                         if w.geo != Some(g) {
                             w.geo = Some(g);
                             w.restale();
+                            // A window that moves is in view (its owner is dragging it), and it reads a new part of the screen at
+                            // every step.
+                            w.covered = false;
                             moved = true;
                         }
                     }
@@ -759,12 +979,81 @@ impl Engine {
         }
     }
 
-    /// One capture per monitor that has a visible window; none for the others. The first one made also decides the backend.
+    /// How often the z order is walked at least: fast while some glass is covered (it may come into view at any moment, and nothing but
+    /// a look tells), slowly otherwise (a window that goes under others is only a saving missed for a moment). The dock's islands are
+    /// always in view, so "some glass is uncovered" must not set the pace: the main window under a browser would be noticed 500 ms late.
+    fn cover_interval(&self) -> Duration {
+        if self.wins.values().any(|w| w.visible && w.covered) { COVER_POLL } else { COVER_EVERY }
+    }
+
+    /// Looks at the z order and marks the glass windows that other windows hide completely (and unmarks those that are in view again).
+    /// Done when a window appeared or its shape moved, when the foreground window changed or moved (the window on top is dragged, resized,
+    /// snapped, closed: one `GetWindowRect` a turn, and only while some glass is covered), and otherwise at `cover_interval`, never per
+    /// frame: one pass over the top-level windows is about a tenth of a millisecond.
+    fn update_cover(&mut self) {
+        let any_visible = self.wins.values().any(|w| w.visible);
+        if !any_visible {
+            self.last_foreground = 0;
+            self.last_fg_rect = None;
+            return;
+        }
+        let fg = cover::foreground();
+        let fg_rect = if self.wins.values().any(|w| w.visible && w.covered) { cover::window_rect(fg) } else { None };
+        let fg_moved = fg_rect != self.last_fg_rect;
+        if !(self.cover_due || fg != self.last_foreground || fg_moved || self.last_cover_check.elapsed() >= self.cover_interval()) {
+            return;
+        }
+        self.cover_due = false;
+        self.last_foreground = fg;
+        self.last_fg_rect = fg_rect;
+        self.last_cover_check = Instant::now();
+        // what each visible glass shows, on the screen
+        let mine: Vec<(isize, Rc)> = self.wins.values().filter(|w| w.visible).filter_map(|w| Some((w.hwnd, glass_on_screen(&w.geo?, w.shape)?))).collect();
+        let answer = cover::covered_windows(&mine);
+        self.apply_cover(&answer, Instant::now());
+    }
+
+    /// Takes the verdict of a look at the z order: every shown window is covered when the answer says so (a window the walk did not meet
+    /// is not, and neither is one with nothing to show). Changes nothing a window reports: see the module docs.
+    fn apply_cover(&mut self, answer: &BTreeMap<isize, bool>, now: Instant) {
+        let mut uncovered = false;
+        for w in self.wins.values_mut().filter(|w| w.visible) {
+            let Some(geo) = w.geo else { continue };
+            let covered = glass_on_screen(&geo, w.shape).is_some() && answer.get(&w.hwnd).copied().unwrap_or(false);
+            let was = w.covered;
+            if w.set_covered(covered) {
+                log::debug!("glass: window {:#x} is in view again", w.hwnd);
+                uncovered = true;
+            } else if covered && !was {
+                log::debug!("glass: window {:#x} is covered by other windows: no work is done for it", w.hwnd);
+            }
+        }
+        if uncovered {
+            self.last_activity = now;
+        }
+    }
+
+    /// One capture per monitor that has an ACTIVE window (shown and not covered); none for the others. A capture whose glass is no
+    /// longer seen is kept for `SESSION_GRACE` (and not used), then closed, and opened again when a glass needs it. The first one made
+    /// also decides the backend.
     fn sync_monitors(&mut self) {
-        let want: BTreeSet<isize> = self.wins.values().filter(|w| w.visible).filter_map(|w| w.geo.map(|g| g.hmon)).collect();
-        self.mons.retain(|k, _| want.contains(k));
+        let want: BTreeSet<isize> = self.wins.values().filter(|w| w.active()).filter_map(|w| w.geo.map(|g| g.hmon)).collect();
+        let open: Vec<isize> = self.mons.keys().copied().collect();
+        let change = self.parked.update(&open, &want, Instant::now(), SESSION_GRACE);
+        for k in change.resumed {
+            // back in use after a pause: it was not pumped meanwhile, so its mirror and the frames queued in it are old; a new picture
+            // is asked for and nothing is drawn until it is in
+            if let Some(m) = self.mons.get_mut(&k) {
+                m.resume();
+            }
+        }
+        for k in change.expired {
+            log::debug!("glass: no glass on monitor {k:#x} is seen: its capture is closed");
+            self.mons.remove(&k);
+        }
+        let now = Instant::now();
         for hmon in want {
-            if self.mons.contains_key(&hmon) {
+            if self.mons.contains_key(&hmon) || !self.reopen.due(hmon, now) {
                 continue;
             }
             if self.gfx.is_none() {
@@ -791,9 +1080,11 @@ impl Engine {
     /// the display-affinity exclusion otherwise.
     fn choose_backend(&mut self, hmon: isize) {
         let Some(gfx) = self.gfx.as_ref() else { return };
-        match wgc::pick_backend(wgc::access(), || unsafe { Monitor::open_session(&gfx.r.g, hmon) }) {
+        let power = self.power;
+        match wgc::pick_backend(wgc::access(), || unsafe { Monitor::open_session(&gfx.r.g, hmon, power) }) {
             Ok(m) => {
                 self.mons.insert(hmon, m);
+                self.session_worked = true;
                 self.mode = CaptureMode::Session;
                 set_mode(CaptureMode::Session);
                 // The registry is read AFTER the mode is published: a popup that registered before this read is in the snapshot, one that
@@ -837,10 +1128,19 @@ impl Engine {
     /// Duplication; a monitor Desktop Duplication cannot use makes its windows fail.
     fn open_monitor(&mut self, hmon: isize) {
         if self.mode == CaptureMode::Session {
-            let opened = self.gfx.as_ref().map(|gfx| unsafe { Monitor::open_session(&gfx.r.g, hmon) });
+            let power = self.power;
+            let opened = self.gfx.as_ref().map(|gfx| unsafe { Monitor::open_session(&gfx.r.g, hmon, power) });
             match opened {
                 Some(Ok(m)) => {
                     self.mons.insert(hmon, m);
+                    self.session_worked = true;
+                    self.reopen.opened(hmon);
+                    return;
+                }
+                // Sessions worked in this run: this failure is probably a passing one (a display waking up, a mode change). The
+                // windows keep their last picture and the session is tried again after a pause; only repeated failures change the backend.
+                Some(Err(why)) if self.session_worked && self.reopen.failed(hmon, Instant::now()) == Retry::Later => {
+                    log::info!("glass: the capture session of monitor {hmon:#x} could not be opened again ({why}); trying again shortly");
                     return;
                 }
                 Some(Err(why)) => self.use_affinity(&why, true),
@@ -859,18 +1159,22 @@ impl Engine {
     /// Takes the frames the monitors have. Returns whether a wait for a frame happened (the turn did not spin).
     fn pump(&mut self) -> bool {
         let Some(gfx) = self.gfx.as_ref() else { return false };
+        let now = Instant::now();
         if self.mode == CaptureMode::Session {
             // menus and flyouts show without telling the engine
             self.excl.poll_extras(wgc::probe_window);
+            self.excl.settle(now, wgc::is_window);
         }
+        // only monitors with a glass that is seen are looked at; the others hold their session for a while (`parked`)
+        let in_use: BTreeSet<isize> = self.wins.values().filter(|w| w.active()).filter_map(|w| w.geo.map(|g| g.hmon)).collect();
         let mut budget = self.frame_wait_ms(); // the first monitor that is waited on waits, the others only look
         // A frame on another monitor ends that wait too, or a long quiet wait (`quiet_wait_ms`) would delay the notice of it by as much.
         // With one monitor this is an empty list and costs nothing.
-        let others: Vec<Receiver<()>> = if self.mons.len() > 1 { self.mons.values().filter_map(|m| m.wake().cloned()).collect() } else { Vec::new() };
+        let others: Vec<Receiver<()>> = if in_use.len() > 1 { self.mons.iter().filter(|(h, _)| in_use.contains(h)).filter_map(|(_, m)| m.wake().cloned()).collect() } else { Vec::new() };
         let mut waited = false;
         let mut errors: Vec<(isize, MonError)> = vec![];
         let mut fresh: Vec<(isize, Dirty)> = vec![];
-        for (&hmon, m) in self.mons.iter_mut() {
+        for (&hmon, m) in self.mons.iter_mut().filter(|(h, _)| in_use.contains(h)) {
             match unsafe { m.pump(&gfx.r.g, budget, &self.excl, Some(&self.rx), &others) } {
                 Ok(Pumped::NoWait) => {}
                 Ok(Pumped::Waited { frame, image, dirty }) => {
@@ -882,9 +1186,6 @@ impl Engine {
                         w.stats.frames += frame as u32;
                         w.stats.with_image += image as u32;
                     }
-                    if frame {
-                        self.last_activity = Instant::now();
-                    }
                     if image {
                         fresh.push((hmon, dirty));
                     }
@@ -895,12 +1196,7 @@ impl Engine {
         // only the windows whose backdrop (their rectangle and the padding the glass reads around it) was touched are drawn again
         for (hmon, dirty) in fresh {
             let Some(r) = self.mons.get(&hmon).map(|m| m.rect()) else { continue };
-            for w in self.wins.values_mut() {
-                let Some(g) = w.geo.filter(|g| g.hmon == hmon) else { continue };
-                if dirty.touches(g.x - r.left, g.y - r.top, g.w, g.h, region_pad(g.scale())) {
-                    w.restale();
-                }
-            }
+            self.note_fresh(hmon, r, &dirty);
         }
         for (hmon, e) in errors {
             match e {
@@ -919,12 +1215,36 @@ impl Engine {
         waited
     }
 
+    /// A new picture of a monitor came in, `dirty` says where it changed: the active windows whose backdrop (their rectangle and the
+    /// padding the glass reads around it) was touched are drawn again. Only a picture that touched some glass counts as activity: a
+    /// frame that changed something elsewhere (a blinking caret, a terminal) must not keep the quiet clock from running down, or an
+    /// ordinary desktop would keep the loop at its short wait for ever instead of 20 turns a second.
+    fn note_fresh(&mut self, hmon: isize, r: RECT, dirty: &Dirty) -> bool {
+        let mut touched = false;
+        for w in self.wins.values_mut().filter(|w| w.active()) {
+            let Some(g) = w.geo.filter(|g| g.hmon == hmon) else { continue };
+            if dirty.touches(g.x - r.left, g.y - r.top, g.w, g.h, region_pad(g.scale())) {
+                w.restale();
+                touched = true;
+            }
+        }
+        if touched {
+            self.last_activity = Instant::now();
+        }
+        touched
+    }
+
     fn draw_dirty(&mut self) {
-        let todo: Vec<isize> = self.wins.values().filter(|w| w.visible && w.dirty).map(|w| w.hwnd).collect();
+        let todo: Vec<isize> = self.wins.values().filter(|w| w.active() && w.dirty).map(|w| w.hwnd).collect();
         for k in todo {
             let Some(gfx) = self.gfx.as_ref() else { return };
             let Some(w) = self.wins.get_mut(&k) else { continue };
-            let Some(mon) = w.geo.and_then(|g| self.mons.get(&g.hmon)) else { continue };
+            let Some(hmon) = w.geo.map(|g| g.hmon) else { continue };
+            // A parked session has not been resumed yet (see `sync_monitors`): its mirror is from before the pause.
+            if self.parked.is_parked(hmon) {
+                continue;
+            }
+            let Some(mon) = self.mons.get(&hmon) else { continue };
             if !mon.has_image() {
                 continue; // dirty stays; drawn as soon as the first picture of the screen is in
             }
@@ -960,6 +1280,15 @@ impl Engine {
                     );
                     *s = Stats::new(now);
                 }
+            }
+        }
+        if now.duration_since(self.last_power_check) >= POWER_CHECK_EVERY {
+            self.last_power_check = now;
+            let power = wgc::read_power();
+            self.power = power;
+            // (a call that changes nothing when the rate stays: only a change of power or of the display's rate is sent on)
+            for m in self.mons.values_mut() {
+                unsafe { m.retune(power) };
             }
         }
         if now.duration_since(self.last_device_check) >= DEVICE_CHECK_EVERY {
@@ -1024,7 +1353,7 @@ impl Engine {
     }
 
     fn fail_on_monitor(&mut self, hmon: isize, why: &str) {
-        let victims: Vec<isize> = self.wins.values().filter(|w| w.visible && w.geo.is_some_and(|g| g.hmon == hmon)).map(|w| w.hwnd).collect();
+        let victims: Vec<isize> = self.wins.values().filter(|w| w.active() && w.geo.is_some_and(|g| g.hmon == hmon)).map(|w| w.hwnd).collect();
         for k in victims {
             self.fail_window(k, why);
         }
@@ -1050,6 +1379,9 @@ impl Engine {
     /// Lets go of the captures and the device. The next device made chooses the backend anew.
     fn release_gfx(&mut self) {
         self.mons.clear();
+        self.parked = Parking::default();
+        self.reopen = Reopen::default();
+        self.session_worked = false;
         self.gfx = None;
         self.access_job = None;
         self.mode = CaptureMode::Off;
@@ -1069,20 +1401,7 @@ mod tests {
     #[test]
     fn a_look_change_marks_every_window_for_a_new_draw() {
         let (_tx, rx) = crossbeam_channel::unbounded();
-        let mut e = Engine {
-            rx,
-            gfx: None,
-            wins: BTreeMap::new(),
-            mons: BTreeMap::new(),
-            stats_on: false,
-            last_device_check: Instant::now(),
-            last_activity: Instant::now(),
-            mode: CaptureMode::Off,
-            excl: Exclusion::default(),
-            last_access_check: Instant::now(),
-            access_job: None,
-            instant_flushes: 0,
-        };
+        let mut e = Engine::new(rx);
         for hwnd in [1isize, 2] {
             let mut w = Win::new(hwnd, GlassOptions::window(hwnd == 1));
             w.dirty = false;
@@ -1183,21 +1502,11 @@ mod tests {
 
     fn idle_engine(mode: CaptureMode) -> Engine {
         let (_tx, rx) = crossbeam_channel::unbounded();
-        Engine {
-            rx,
-            gfx: None,
-            wins: BTreeMap::new(),
-            mons: BTreeMap::new(),
-            stats_on: false,
-            last_device_check: Instant::now(),
-            // quiet for longer than QUIET_AFTER
-            last_activity: Instant::now().checked_sub(QUIET_AFTER * 2).unwrap_or_else(Instant::now),
-            mode,
-            excl: Exclusion::default(),
-            last_access_check: Instant::now(),
-            access_job: None,
-            instant_flushes: 0,
-        }
+        let mut e = Engine::new(rx);
+        // quiet for longer than QUIET_AFTER
+        e.last_activity = Instant::now().checked_sub(QUIET_AFTER * 2).unwrap_or_else(Instant::now);
+        e.mode = mode;
+        e
     }
 
     /// A glass window at rest with a selection lens on it, as every glass window of the app is.
@@ -1285,5 +1594,303 @@ mod tests {
         // and the next one is only due after ACCESS_CHECK_EVERY
         assert!(e.access_tick(Instant::now()).is_none());
         assert!(e.access_job.is_none());
+    }
+
+    // --- glass that is seen -----------------------------------------------------------------------------------------------------------
+
+    fn geo_at(x: i32, y: i32, w: u32, h: u32, hmon: isize) -> WinGeo {
+        WinGeo { x, y, w, h, dpi: 96, square: false, round: 8.0, hmon }
+    }
+
+    /// A window that is shown, measured, drawn and at rest.
+    fn settled_window(hwnd: isize, geo: WinGeo) -> Win {
+        let mut w = Win::new(hwnd, GlassOptions::window(true));
+        w.visible = true;
+        w.geo = Some(geo);
+        w.dirty = false;
+        w.stale = false;
+        let g = Geometry { w: geo.w, h: geo.h, origin: (geo.x, geo.y), scale: 1.0, radius_px: 8.0, cut_corners: false, shape: None, shadow: None };
+        w.presented = Some(Presented { hash: 7, geo: g, look: Look::regular(true, &LookParams::DEFAULT), lenses: LensList::default() });
+        w
+    }
+
+    /// A dock island as the dock attaches it: a window much larger than its glass, with the shape still empty.
+    fn island(hwnd: isize, shape: [f32; 4]) -> Win {
+        let opts = GlassOptions { radius_px: Some(24.0), cut_corners: true, shape: Some(shape), shadow: Some(Shadow::SOFT), ..GlassOptions::window(true) };
+        let mut w = Win::new(hwnd, opts);
+        w.visible = true;
+        w.geo = Some(geo_at(100, 1300, 720, 96, 1));
+        w
+    }
+
+    /// A window that comes into view again is drawn at once from a fresh backdrop and presented whatever the loop guard remembers: the
+    /// picture on its screen is from before it was covered. Going under other windows marks nothing.
+    #[test]
+    fn a_window_that_comes_into_view_is_drawn_at_once_from_a_fresh_backdrop_and_never_skipped() {
+        let mut w = settled_window(1, geo_at(0, 0, 400, 300, 1));
+        assert!(w.active());
+        assert!(!w.set_covered(true), "going under other windows is not coming into view");
+        assert!(w.covered && !w.active());
+        assert!(!w.dirty && !w.stale && w.presented.is_some(), "being covered marks nothing and forgets nothing");
+        assert!(!w.set_covered(true), "still covered: nothing");
+        assert!(w.set_covered(false), "in view again");
+        assert!(w.dirty && w.stale, "drawn again, from a new backdrop and not from the one it had");
+        assert!(w.presented.is_none(), "and presented even if the loop guard remembers the same picture");
+        assert!(!w.set_covered(false), "in view and still in view: nothing");
+    }
+
+    /// Glass nobody sees does not pace the loop, does not shorten the wait and wants no capture.
+    #[test]
+    fn glass_that_is_covered_does_not_keep_the_engine_busy() {
+        let mut e = idle_engine(CaptureMode::Session);
+        let mut w = settled_window(1, geo_at(0, 0, 400, 300, 1));
+        let spec = |key, x| Some(super::super::LensSpec { key, rect: [x, 10.0, 80.0, 30.0], clip: [0.0, 0.0, 400.0, 300.0], radius: 15.0 });
+        w.lenses.set(0, spec(1, 10.0), false);
+        w.lenses.set(0, spec(2, 100.0), true);
+        w.shape_changed = Some(Instant::now());
+        e.wins.insert(1, w);
+        assert!(e.lens_active() && e.shape_moving() && e.paced(), "an uncovered one does");
+        e.wins.get_mut(&1).unwrap().covered = true;
+        assert!(!e.lens_active() && !e.shape_moving() && !e.paced(), "a covered one does not");
+        assert!(!e.wins.values().any(|w| w.active()));
+        e.advance_lenses();
+        assert!(e.wins.get(&1).unwrap().lens_tick.is_none(), "its lens is not stepped");
+        // the wait of a turn with nothing to do is the long one: no lens counts
+        e.last_activity = Instant::now().checked_sub(QUIET_AFTER * 2).unwrap_or_else(Instant::now);
+        assert_eq!(e.frame_wait_ms(), QUIET_WAIT_MS);
+        // it is not among the windows a frame is drawn for
+        e.wins.get_mut(&1).unwrap().dirty = true;
+        let todo: Vec<isize> = e.wins.values().filter(|w| w.active() && w.dirty).map(|w| w.hwnd).collect();
+        assert!(todo.is_empty());
+    }
+
+    /// The dock attaches every island with an empty shape and gives it the real one a moment later. An empty glass has nothing that
+    /// could be hidden: the empty target of the covering test is trivially covered, and the island must not wait (with the plain fill
+    /// of its fallback on the screen) for the next look at the z order.
+    #[test]
+    fn an_island_with_an_empty_shape_is_not_covered_and_its_real_shape_is_drawn_at_once() {
+        let geo = geo_at(100, 1300, 720, 96, 1);
+        assert_eq!(glass_on_screen(&geo, Some([0.0; 4])), None, "an empty shape shows nothing");
+        assert_eq!(glass_on_screen(&geo, Some([20.0, 10.0, 0.0, 48.0])), None);
+        assert_eq!(glass_on_screen(&geo, Some([20.0, 10.5, 300.0, 48.0])), Some(Rc::new(120, 1310, 420, 1359)), "a shape is rounded out to whole pixels");
+        assert_eq!(glass_on_screen(&geo, None), Some(Rc::new(100, 1300, 820, 1396)), "a window shows its client area");
+        assert_eq!(glass_on_screen(&geo_at(0, 0, 0, 30, 1), None), None);
+
+        let mut e = idle_engine(CaptureMode::Session);
+        e.wins.insert(1, island(1, [0.0; 4]));
+        e.wins.insert(2, settled_window(2, geo_at(0, 0, 400, 300, 1)));
+        // the look at the z order says that everything on the screen is covered
+        let all_covered = BTreeMap::from([(1isize, true), (2isize, true)]);
+        e.apply_cover(&all_covered, Instant::now());
+        assert!(!e.wins.get(&1).unwrap().covered, "an island with an empty shape is waiting for its shape, not hidden");
+        assert!(e.wins.get(&2).unwrap().covered, "an ordinary window under others is");
+
+        // its first real shape arrives: nothing is waited for
+        e.cover_due = false;
+        e.command(Cmd::SetOptions { hwnd: 1, opts: GlassOptions { radius_px: Some(24.0), cut_corners: true, shape: Some([20.0, 10.0, 300.0, 48.0]), shadow: Some(Shadow::SOFT), ..GlassOptions::window(true) } });
+        assert!(e.cover_due, "a glass that was nothing and is something now is looked at at once");
+        e.cover_due = false;
+        e.apply_cover(&all_covered, Instant::now());
+        assert!(e.wins.get(&1).unwrap().covered, "and a glass with an area that is under others is covered, as any");
+    }
+
+    /// A covered window whose shape moves may come into view by it; a shape that moves in a window in view changes nothing about that.
+    #[test]
+    fn a_shape_that_moves_in_a_covered_window_asks_for_a_new_look_at_the_z_order() {
+        let mut e = idle_engine(CaptureMode::Session);
+        e.wins.insert(1, island(1, [20.0, 10.0, 300.0, 48.0]));
+        let moved = |x: f32| GlassOptions { radius_px: Some(24.0), cut_corners: true, shape: Some([x, 10.0, 300.0, 48.0]), shadow: Some(Shadow::SOFT), ..GlassOptions::window(true) };
+        e.cover_due = false;
+        e.command(Cmd::SetOptions { hwnd: 1, opts: moved(30.0) });
+        assert!(!e.cover_due, "a shape that moves in a window in view: the walk is not made per animation frame");
+        e.wins.get_mut(&1).unwrap().covered = true;
+        e.command(Cmd::SetOptions { hwnd: 1, opts: moved(40.0) });
+        assert!(e.cover_due, "a covered window whose glass moved may be in view now");
+        e.cover_due = false;
+        e.command(Cmd::SetOptions { hwnd: 1, opts: moved(40.0) });
+        assert!(!e.cover_due, "the same options again: nothing");
+    }
+
+    /// The dock's islands are always in view, so the pace of the walks must follow the covered windows, not the others: the main window
+    /// under a browser that is dragged away is noticed within the short interval, not the long one.
+    #[test]
+    fn the_z_order_is_looked_at_often_while_any_glass_is_covered_whatever_else_is_in_view() {
+        let mut e = idle_engine(CaptureMode::Session);
+        e.wins.insert(1, island(1, [20.0, 10.0, 300.0, 48.0]));
+        e.wins.insert(2, settled_window(2, geo_at(0, 0, 400, 300, 1)));
+        assert_eq!(e.cover_interval(), COVER_EVERY, "everything in view: no hurry");
+        e.wins.get_mut(&2).unwrap().covered = true;
+        assert_eq!(e.cover_interval(), COVER_POLL, "one covered window while the island is in view: the short interval");
+        assert!(COVER_POLL <= Duration::from_millis(100));
+        e.wins.get_mut(&2).unwrap().visible = false;
+        assert_eq!(e.cover_interval(), COVER_EVERY, "a hidden window is not covered, it is waited for as before");
+    }
+
+    /// What a window reports while its glass is covered or its capture sleeps is the state it had: `Running` stays `Running` (the app
+    /// would put its Mica fill on and take it off again for a cover that lasts seconds), a window that never drew stays `Starting`.
+    /// Run through the engine's own steps (the verdict, the sessions' bookkeeping, the sleep and the wake), with the states table.
+    #[test]
+    fn covering_a_window_and_waking_its_capture_never_change_the_state_it_reports() {
+        let (running, starting) = (0x7e57_0001isize, 0x7e57_0002isize);
+        {
+            let mut st = super::super::states();
+            st.insert(running, GlassState::Running);
+            st.insert(starting, GlassState::Starting);
+        }
+        let mut e = idle_engine(CaptureMode::Session);
+        e.wins.insert(running, settled_window(running, geo_at(0, 0, 400, 300, 1)));
+        let mut never_drawn = settled_window(starting, geo_at(500, 0, 400, 300, 1));
+        never_drawn.presented = None;
+        e.wins.insert(starting, never_drawn);
+        let answer = BTreeMap::from([(running, true), (starting, true)]);
+        let states = || (super::super::state(running), super::super::state(starting));
+        for round in 0..3 {
+            e.apply_cover(&answer, Instant::now());
+            e.sync_monitors(); // nothing is shown: no monitor wanted, none opened, no device made
+            assert!(e.wins.values().all(|w| w.covered), "round {round}");
+            assert_eq!(states(), (GlassState::Running, GlassState::Starting), "covered, round {round}");
+            e.apply_cover(&BTreeMap::new(), Instant::now());
+            assert!(e.wins.values().all(|w| !w.covered));
+            assert_eq!(states(), (GlassState::Running, GlassState::Starting), "in view again, round {round}");
+        }
+        super::super::forget(running);
+        super::super::forget(starting);
+    }
+
+    /// A failure to open a capture session again, after sessions worked in this run, is tried again after a pause; only the fourth in a
+    /// row changes the backend. A success starts the count again, and monitors count apart.
+    #[test]
+    fn a_session_that_cannot_be_opened_again_is_tried_again_before_the_process_gives_the_backend_up() {
+        let t0 = Instant::now();
+        let mut r = Reopen::default();
+        assert!(r.due(1, t0), "nothing failed yet");
+        assert_eq!(r.failed(1, t0), Retry::Later);
+        assert!(!r.due(1, t0 + Duration::from_millis(900)), "paused for a second");
+        assert!(r.due(1, t0 + Duration::from_secs(1)));
+        assert!(r.due(2, t0), "another monitor is not held back");
+        let t1 = t0 + Duration::from_secs(1);
+        assert_eq!(r.failed(1, t1), Retry::Later);
+        assert!(!r.due(1, t1 + Duration::from_millis(1900)) && r.due(1, t1 + Duration::from_secs(2)), "then two seconds");
+        let t2 = t1 + Duration::from_secs(2);
+        assert_eq!(r.failed(1, t2), Retry::Later);
+        assert!(!r.due(1, t2 + Duration::from_millis(4900)) && r.due(1, t2 + Duration::from_secs(5)), "then five");
+        assert_eq!(r.failed(1, t2 + Duration::from_secs(5)), Retry::GiveUp, "the fourth in a row is a real failure");
+        assert!(r.due(1, t2 + Duration::from_secs(5)), "and the count starts again");
+        // a success clears the count
+        assert_eq!(r.failed(3, t0), Retry::Later);
+        assert_eq!(r.failed(3, t0 + Duration::from_secs(1)), Retry::Later);
+        r.opened(3);
+        assert!(r.due(3, t0));
+        assert_eq!(r.failed(3, t0), Retry::Later);
+        assert_eq!(r.failed(3, t0 + Duration::from_secs(1)), Retry::Later);
+        assert_eq!(r.failed(3, t0 + Duration::from_secs(3)), Retry::Later, "three failures are still not enough after a success");
+    }
+
+    /// Only a picture that touched some glass is activity. A frame that changed something else on the monitor (a caret that blinks, a
+    /// terminal) must not keep the quiet clock from running down: on an ordinary desktop the loop would stay at its short wait, about a
+    /// hundred turns a second, instead of 20.
+    #[test]
+    fn a_picture_that_touches_no_glass_is_not_activity() {
+        let mon = RECT { left: 0, top: 0, right: 2560, bottom: 1440 };
+        let mut e = idle_engine(CaptureMode::Session);
+        e.wins.insert(1, settled_window(1, geo_at(1000, 500, 400, 300, 7)));
+        let far = Dirty::Rects(vec![RECT { left: 10, top: 10, right: 40, bottom: 30 }]);
+        let near = Dirty::Rects(vec![RECT { left: 1100, top: 600, right: 1120, bottom: 620 }]);
+        let quiet = |e: &mut Engine| e.last_activity = Instant::now().checked_sub(QUIET_AFTER * 2).unwrap_or_else(Instant::now);
+        assert!(e.last_activity.elapsed() > QUIET_AFTER);
+        assert!(!e.note_fresh(7, mon, &far));
+        assert!(e.last_activity.elapsed() > QUIET_AFTER, "a change elsewhere on the monitor leaves the quiet clock running");
+        assert_eq!(e.frame_wait_ms(), QUIET_WAIT_MS);
+        assert!(!e.wins.get(&1).unwrap().dirty && !e.wins.get(&1).unwrap().stale, "and the window is not drawn again");
+        assert!(!e.note_fresh(7, mon, &Dirty::none()));
+        // another monitor's picture is not this window's
+        assert!(!e.note_fresh(9, mon, &near));
+        quiet(&mut e);
+        assert!(e.note_fresh(7, mon, &near), "a change under the window is");
+        assert!(e.last_activity.elapsed() < QUIET_AFTER);
+        let w = e.wins.get(&1).unwrap();
+        assert!(w.dirty && w.stale, "and the window is drawn again from a new backdrop");
+        // a picture of the whole monitor (the first one, or after a new exclusion list) touches every window
+        quiet(&mut e);
+        assert!(e.note_fresh(7, mon, &Dirty::All));
+        // a covered window is no one's concern
+        quiet(&mut e);
+        e.wins.get_mut(&1).unwrap().covered = true;
+        assert!(!e.note_fresh(7, mon, &Dirty::All));
+        assert!(e.last_activity.elapsed() > QUIET_AFTER);
+    }
+
+    /// A monitor whose capture is parked is not drawn from until it is resumed: a window that came into view between two looks (it
+    /// moved while it was covered) is active before `sync_monitors` has run for it.
+    #[test]
+    fn a_parked_capture_is_known_as_parked_until_it_is_wanted_again() {
+        let t0 = Instant::now();
+        let grace = Duration::from_secs(5);
+        let mut p = Parking::default();
+        let want = |ks: &[isize]| ks.iter().copied().collect::<BTreeSet<_>>();
+        assert!(!p.is_parked(1));
+        p.update(&[1], &want(&[]), t0, grace);
+        assert!(p.is_parked(1), "no glass is seen on it: parked");
+        p.update(&[1], &want(&[]), t0 + Duration::from_secs(1), grace);
+        assert!(p.is_parked(1));
+        let c = p.update(&[1], &want(&[1]), t0 + Duration::from_secs(2), grace);
+        assert_eq!(c.resumed, vec![1]);
+        assert!(!p.is_parked(1), "wanted again: resumed, no longer parked");
+        p.update(&[1], &want(&[]), t0 + Duration::from_secs(3), grace);
+        p.update(&[1], &want(&[]), t0 + Duration::from_secs(9), grace);
+        assert!(!p.is_parked(1), "closed after the grace time: nothing is kept");
+    }
+
+    /// A capture is kept for the grace time after its last seen glass went, closed then, and one that is used again has missed frames.
+    #[test]
+    fn a_session_is_kept_for_the_grace_time_then_closed_and_one_that_comes_back_is_not_trusted() {
+        let t0 = Instant::now();
+        let grace = Duration::from_secs(5);
+        let mut p = Parking::default();
+        let want = |ks: &[isize]| ks.iter().copied().collect::<BTreeSet<_>>();
+        let nothing = ParkChange::default();
+        // two monitors with a session, glass seen on both
+        assert_eq!(p.update(&[1, 2], &want(&[1, 2]), t0, grace), nothing);
+        // the glass on 2 is covered: its session is kept
+        assert_eq!(p.update(&[1, 2], &want(&[1]), t0 + Duration::from_secs(1), grace), nothing);
+        assert_eq!(p.update(&[1, 2], &want(&[1]), t0 + Duration::from_millis(5900), grace), nothing, "4.9 s: still kept");
+        // it comes back in time: kept, and told that its mirror was not kept up to date
+        let c = p.update(&[1, 2], &want(&[1, 2]), t0 + Duration::from_millis(5950), grace);
+        assert_eq!(c, ParkChange { resumed: vec![2], expired: vec![] });
+        // covered again, for good: closed after the grace time, counted from when it was parked
+        assert_eq!(p.update(&[1, 2], &want(&[1]), t0 + Duration::from_secs(10), grace), nothing);
+        assert_eq!(p.update(&[1, 2], &want(&[1]), t0 + Duration::from_secs(14), grace), nothing);
+        let c = p.update(&[1, 2], &want(&[1]), t0 + Duration::from_secs(15), grace);
+        assert_eq!(c, ParkChange { resumed: vec![], expired: vec![2] });
+        // closed: the next look sees one session, and the one for 2 is forgotten
+        assert_eq!(p.update(&[1], &want(&[1]), t0 + Duration::from_secs(16), grace), nothing);
+        // nothing seen anywhere: closed once, after the grace time
+        assert_eq!(p.update(&[1], &want(&[]), t0 + Duration::from_secs(20), grace), nothing);
+        let c = p.update(&[1], &want(&[]), t0 + Duration::from_secs(25), grace);
+        assert_eq!(c.expired, vec![1]);
+        // a session that was closed by someone else (a failed monitor) is forgotten without being closed again
+        assert_eq!(p.update(&[], &want(&[]), t0 + Duration::from_secs(40), grace), nothing);
+    }
+
+    /// The real thing, with no window: a capture session that was not used for a while holds frames from before the pause (the pool
+    /// fills up and newer ones are dropped), and on a still desktop nothing newer comes by itself. After `resume` those frames are not
+    /// accepted and a new picture arrives within a moment. Needs the capture permission and a monitor; reads the screen, shows nothing.
+    #[test]
+    fn a_session_that_is_used_again_after_a_pause_never_draws_from_the_frames_queued_before_it() {
+        let _quiet = crate::TEST_QUIET.lock().unwrap_or_else(|p| p.into_inner());
+        let _apartment = super::super::check::enter_apartment();
+        match super::super::check::probe_resume(Duration::from_millis(1500), Duration::from_millis(1500), (0, 0)) {
+            Err(e) => println!("not run: {e}"),
+            Ok(r) => {
+                println!("{r:?}");
+                if !r.frame_was_queued {
+                    println!("the capture service made no frame for the forced list: nothing to test");
+                    return;
+                }
+                assert!(!r.ready_right_after, "the mirror must not be ready before a picture made after the resume is in");
+                assert!(!r.old_frame_accepted, "a frame queued before the pause was taken as the picture");
+                assert!(r.fresh_ms.is_some_and(|ms| ms < 1000.0), "a new picture must follow the resume at once: {:?}", r.fresh_ms);
+            }
+        }
     }
 }

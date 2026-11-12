@@ -27,7 +27,7 @@ use windows::core::Interface;
 
 use super::Cmd;
 use super::gpu::{Gpu, Source};
-use super::wgc::{Exclusion, SessionMonitor};
+use super::wgc::{Exclusion, Power, SessionMonitor};
 
 type R<T> = windows::core::Result<T>;
 
@@ -178,8 +178,8 @@ impl Monitor {
     }
 
     /// A capture session on the monitor. `Err` is the reason it cannot be had.
-    pub(super) unsafe fn open_session(g: &Gpu, hmon: isize) -> Result<Monitor, String> {
-        SessionMonitor::open(g, hmon).map(|s| Monitor::Session(Box::new(s)))
+    pub(super) unsafe fn open_session(g: &Gpu, hmon: isize, power: Power) -> Result<Monitor, String> {
+        SessionMonitor::open(g, hmon, power).map(|s| Monitor::Session(Box::new(s)))
     }
 
     /// The monitor in desktop coordinates.
@@ -223,6 +223,28 @@ impl Monitor {
         match self {
             Monitor::Dup(m) => m.pump(g, timeout_ms),
             Monitor::Session(m) => m.pump(g, timeout_ms, ex, cmds, also),
+        }
+    }
+
+    /// The monitor is used again after a pause in which its frames were not taken: whatever its mirror and queue hold is from before
+    /// the pause, so nothing is drawn from them until a picture taken after it is in. A session sends its list again (which makes the
+    /// service produce a whole new frame at once); a duplication is made anew, because on a desktop that has not changed since, an
+    /// existing one would send no frame at all, while a new one answers its first request with the current picture.
+    pub(super) fn resume(&mut self) {
+        match self {
+            Monitor::Session(m) => m.resume(),
+            Monitor::Dup(m) => {
+                m.dup = None;
+                m.has_image = false;
+                m.retry_at = Instant::now();
+            }
+        }
+    }
+
+    /// Follows the power state and the display's refresh rate with the session's frame interval (a session only).
+    pub(super) unsafe fn retune(&mut self, power: Power) {
+        if let Monitor::Session(m) = self {
+            m.retune(power);
         }
     }
 

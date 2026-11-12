@@ -32,6 +32,11 @@
 //! the slots and fades, `spring.rs` for the slide). The app's own icons and text are drawn by GPUI's scene on top of them. While a lens
 //! moves or fades the engine draws once per display refresh; a lens at rest costs nothing more than the glass itself.
 //!
+//! WHAT IT COSTS. The engine works only for glass that somebody sees: a window that is hidden, minimised, cloaked or completely
+//! covered by opaque windows above it is not prepared, drawn or read back (it keeps reporting `Running` and its last picture), and the
+//! capture session of a monitor that has no seen glass is closed after a few seconds. A session is asked for 60 frames a second at most
+//! (30 on battery). The reasons and the numbers are in `engine.rs`, `wgc.rs`, `cover.rs` and `docs/design/dock.md`.
+//!
 //! THREADING. One thread ("rf-glass") for the whole process, started by the first [`attach`] and idle (blocked on its channel, no
 //! duplication held) when no window is attached. All D3D / DXGI / DirectComposition objects are made and used on that thread only. The
 //! functions here are cheap and can be called from any thread, the UI thread included: they flip an entry in a table and send a command.
@@ -54,7 +59,9 @@
 mod capture;
 #[doc(hidden)]
 pub mod check;
+mod cover;
 mod engine;
+mod geom;
 mod gpu;
 mod lens;
 mod luma;

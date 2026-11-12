@@ -678,10 +678,70 @@ mod capture_backends {
         let v3 = ex.version();
         ex.detach(10);
         assert_eq!(ex.version(), v3, "detaching a window that is not attached sends nothing");
-        // an extra that is closed leaves the list
+        // an extra that is closed leaves the list (nothing is sent for it, see `taking_a_popup_out_sends_nothing...`)
         ex.set_extras(BTreeSet::from([20]));
         assert_eq!(ex.list(), vec![20]);
         assert_eq!(ex.extras(), &BTreeSet::from([20]));
+    }
+
+    /// Opening a popup sends the list (once it is registered and once it shows); closing it sends nothing, not even later: the removal
+    /// goes out with the next list that has to be sent. The one thing that would need a send is a handle that left the list becoming
+    /// somebody else's window, and that is looked for once a second. Counted the way a session counts: a send is a change of the version
+    /// seen at a look.
+    #[test]
+    fn taking_a_popup_out_sends_nothing_and_a_handle_that_becomes_a_window_again_is_caught() {
+        use std::time::{Duration, Instant};
+        let sends = |ex: &Exclusion, seen: &mut u64| {
+            let changed = ex.version() != *seen;
+            *seen = ex.version();
+            changed as u32
+        };
+        let t0 = Instant::now();
+        let mut ex = Exclusion::default();
+        ex.attach(1);
+        let mut seen = ex.version();
+        let mut total = 0;
+        // ten menus, each opened (registered hidden, then shown) and closed (the window is gone), a moment apart
+        for i in 0..10isize {
+            let h = 100 + i;
+            let now = t0 + Duration::from_millis(300 * i as u64);
+            ex.set_extras_at_for_test(BTreeSet::from([h]), now);
+            total += sends(&ex, &mut seen); // registered while hidden
+            ex.poll_extras_at_for_test(|_| WinProbe::Visible, now);
+            total += sends(&ex, &mut seen); // it shows
+            ex.poll_extras_at_for_test(|_| WinProbe::Gone, now + Duration::from_millis(250));
+            assert_eq!(ex.list(), vec![1], "a closed popup is not in the list the next send carries");
+            ex.settle(now + Duration::from_millis(260), |_| false);
+            total += sends(&ex, &mut seen); // its removal: nothing
+        }
+        // 10 popups: two sends to open each (the second is the one that shows it) and none to close them. Counting a send for the close
+        // as well it was thirty.
+        assert_eq!(total, 20, "two sends per popup, none for the close");
+        // nothing follows: the last handle (109) stays out of the list and nothing is sent for it, however long it takes...
+        let closed = t0 + Duration::from_millis(300 * 9 + 250);
+        ex.settle(closed + Duration::from_millis(500), |_| true);
+        assert_eq!(sends(&ex, &mut seen), 0, "(it is looked at once a second: not yet)");
+        ex.settle(closed + Duration::from_secs(1), |_| false);
+        ex.settle(closed + Duration::from_secs(30), |_| false);
+        assert_eq!(sends(&ex, &mut seen), 0, "...as long as the handle belongs to no window");
+        // ...but a handle that is somebody's window again is cut out of every backdrop until the list is sent: that is looked for
+        ex.settle(closed + Duration::from_millis(30_500), |_| true);
+        assert_eq!(sends(&ex, &mut seen), 0, "(a look was made half a second ago)");
+        ex.settle(closed + Duration::from_secs(31), |h| h == 109);
+        assert_eq!(sends(&ex, &mut seen), 1, "a removed handle that is a window of another process now: the list goes out");
+        ex.settle(closed + Duration::from_secs(60), |_| true);
+        assert_eq!(sends(&ex, &mut seen), 0, "and the send carried the removal: nothing left to look at");
+    }
+
+    /// `nudge` makes the sessions send the (unchanged) list again, which is what makes the capture service produce a whole new frame.
+    #[test]
+    fn a_nudge_is_one_more_send_of_the_same_list() {
+        let mut ex = Exclusion::default();
+        ex.attach(7);
+        let (v, list) = (ex.version(), ex.list());
+        ex.nudge();
+        assert_ne!(ex.version(), v);
+        assert_eq!(ex.list(), list);
     }
 
     /// A handle listed while its window is hidden is sent again when the window shows (it is not known whether the system honours it
@@ -748,14 +808,15 @@ mod capture_backends {
             _ => WinProbe::Gone,
         });
         assert_eq!(ex.list(), vec![1, 2], "the dead handle is not sent any more");
-        assert_ne!(ex.version(), v);
+        assert_eq!(ex.version(), v + 1, "one send, for 2 showing; the removal of 3 sends nothing (see `taking_a_popup_out_sends_nothing...`)");
         // nothing changed: nothing to send
         let v = ex.version();
         ex.poll_extras(|h| if h == 2 { WinProbe::Visible } else { WinProbe::Hidden });
         assert_eq!(ex.version(), v);
-        // 1 shows
+        // 1 shows: this send carries the removal too
         ex.poll_extras(|_| WinProbe::Visible);
         assert_ne!(ex.version(), v);
+        assert_eq!(ex.list(), vec![1, 2]);
         // a dead window that was attached too stays listed through its attach
         ex.attach(2);
         ex.poll_extras(|_| WinProbe::Gone);
@@ -810,14 +871,41 @@ mod capture_backends {
         assert_eq!(capture_mode(), CaptureMode::Off);
     }
 
+    /// The session is asked for 60 frames a second (30 on battery), but never for more than the display makes and never below 4 ms.
     #[test]
-    fn the_frame_interval_is_one_refresh_and_never_below_four_ms() {
-        assert_eq!(min_interval_ticks(60), 166_666);
-        assert_eq!(min_interval_ticks(144), 69_444);
-        assert_eq!(min_interval_ticks(240), 41_666);
-        assert_eq!(min_interval_ticks(1000), 40_000, "not below 4 ms");
-        assert_eq!(min_interval_ticks(0), 160_000, "an unknown rate gets the session's own default");
-        assert_eq!(min_interval_ticks(1), 160_000);
+    fn the_frame_interval_is_sixty_a_second_thirty_on_battery_and_never_faster_than_the_display() {
+        use super::super::wgc::{Power, refresh_period_ticks};
+        let ms = |hz, p| min_interval_ticks(hz, p) as f64 / 10_000.0;
+        // the user's 200 Hz and 250 Hz displays, and the common ones: 60 a second, not one refresh period
+        for hz in [75, 100, 144, 165, 200, 240, 250, 360] {
+            assert!((ms(hz, Power::Mains) - 16.6666).abs() < 0.001, "{hz} Hz on mains is 16.67 ms, not {}", ms(hz, Power::Mains));
+            assert!((ms(hz, Power::Battery) - 33.3333).abs() < 0.001, "{hz} Hz on battery is 33.33 ms");
+        }
+        // a display that makes fewer frames than that cannot be asked for more
+        assert_eq!(min_interval_ticks(60, Power::Mains), 166_666, "60 Hz: 60 a second is a refresh period");
+        assert!(ms(50, Power::Mains) > 19.9 && ms(50, Power::Mains) < 20.1, "50 Hz makes 50 a second");
+        assert!(ms(30, Power::Mains) > 33.2 && ms(30, Power::Mains) < 33.4);
+        assert!(ms(24, Power::Battery) > 41.6 && ms(24, Power::Battery) < 41.7, "a 24 Hz display stays at its own rate on battery too");
+        // an unknown rate: the session's own 16 ms is the floor of the period, and the wanted rate is the longer
+        assert_eq!(min_interval_ticks(0, Power::Mains), 166_666);
+        assert_eq!(min_interval_ticks(1, Power::Mains), 166_666);
+        assert_eq!(min_interval_ticks(0, Power::Battery), 333_333);
+        // never below 4 ms (not reachable with 60 a second, kept as the floor)
+        assert!(min_interval_ticks(100_000, Power::Mains) >= 40_000);
+        // what the engine did before: one refresh period (5 ms at 200 Hz)
+        assert_eq!(refresh_period_ticks(200), 50_000);
+        assert_eq!(refresh_period_ticks(1000), 40_000);
+        assert_eq!(refresh_period_ticks(0), 160_000);
+        // the cost it saves, per second of anything moving behind a glass window, at 200 Hz: 60 frames instead of up to 200
+        assert!(1e7 / min_interval_ticks(200, Power::Mains) as f64 <= 60.01);
+        assert!(1e7 / refresh_period_ticks(200) as f64 >= 199.9);
+    }
+
+    /// The power state is read from the system without failing: either answer is fine on the machine that runs the tests.
+    #[test]
+    fn the_power_state_can_be_read() {
+        let p = super::super::wgc::read_power();
+        assert!(matches!(p, super::super::wgc::Power::Mains | super::super::wgc::Power::Battery));
     }
 
     /// The long quiet wait is only safe because nothing the engine has to react to can arrive without ending it: a command, a frame of

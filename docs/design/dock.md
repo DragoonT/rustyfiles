@@ -312,6 +312,56 @@ The dock process is told to read the settings file again when any of these chang
   setting on Auto the dock is kept on the graphics card (`settings::renderer_mode`), so a busy card cannot make it build a software
   device; a user who chose the software renderer keeps it. The glass shaders are compiled when rustyfiles is built (`rf-win/build.rs`),
   not at the dock's start.
+* What the glass engine costs (`crates/rf-win/src/glass`, shared with the main window and the popups; measured windowless with
+  `examples/glass_session_cost.rs`, `glass_cover_probe.rs`, `glass_capture_check.rs`):
+  * Every D3D11 device of a process has a thread of the graphics driver (`nvwgf2umx.dll` here) that wakes about 100 times a second
+    from the moment the device exists, with no capture and no frame: the engine's device and GPUI's device each have one. It is the
+    driver's, and cannot be changed from here.
+  * A capture session is asked for at most 60 frames a second, 30 on battery or with the battery saver on (`wgc::min_interval_ticks`;
+    never faster than the display makes them), where it was one refresh period (5 ms at 200 Hz). Nothing the engine animates itself
+    needs a fresher backdrop: lenses and shapes draw again from the backdrop already held, and a window that is dragged is drawn on a
+    picture that is at most one interval old. What is given up: a video, a game or an animation BEHIND a glass window shows through
+    the frost at 60 instead of up to 200 updates a second. A running session takes a new interval (`SetMinUpdateInterval` on the live
+    session; read back as 16.67 and 33.33 ms); the power state is looked at every 5 s. A frame that the engine asks for (the list is
+    sent again: after a pause, `Exclusion::nudge`) is not held back by the interval (measured: 300 forced frames a second at 5, 16.7
+    and 100 ms alike). NOT measured here: that natural frames follow the interval (this desktop made 0.3 to 7 frames a second in every
+    run, far below either cap), and that the frame that ends a burst of changes is still delivered once the interval has passed (the
+    documentation of `MinUpdateInterval` says nothing about it). `RUSTYFILES_GLASS_MAX_FPS=0` (or any number) sets the cap for one run
+    of the program, 0 being the old behaviour: it is how to compare on a live desktop with a video playing.
+  * Glass that is seen is the only glass that is worked for. A window that is hidden, minimised or cloaked, or that other windows hide
+    completely (`cover.rs`: a z order walk from the top down to the window, counting only opaque windows), is not prepared, not
+    drawn and not read back. The walk is made when the foreground window changes or moves, and otherwise every 100 ms while some
+    glass is covered and every 500 ms while none is (the dock's islands are always in view, so they do not set the pace). A layered
+    window without a redirection bitmap (a Chromium browser, and also a transparent overlay made with the same toolkit) counts only
+    when it is maximised or has a title bar and is not a tool window. A glass with no area (an island that has not had its shape yet)
+    is never covered. The window keeps reporting `Running`, and the app's Mica fallback is never involved (the app reacts to
+    `Failed`, and to `Starting` only before the first picture). When it is in view again its capture is resumed first (the frames
+    queued from before the pause are not drawn from: measured, a session left alone for 3 s hands out a frame from before the pause
+    right after, and on a still desktop nothing newer follows; now the list is sent again, which makes the service produce a new
+    frame in about 2 ms), then it is drawn from a fresh backdrop and presented whatever the loop guard remembers; meanwhile its window
+    shows its last picture. The dock's islands are topmost and are only covered by other topmost windows; the full screen case stays
+    the dock's own (`fullscreen.rs` hides its windows).
+  * A monitor's capture session (frame pool and mirror: about 38 MiB of video memory at 2560x1440 here) is kept for 5 s after its last
+    seen glass went, and then closed; it is opened again when a glass needs it. If that fails after sessions had worked in this run,
+    it is tried again after 1, 2 and 5 s (the window keeps its last picture) before the process goes over to Desktop Duplication.
+  * Every frame that is taken is copied whole into the mirror. Copying only the parts some glass reads was built and measured and taken
+    out again: it saved 0.8 to 7 us of GPU time a frame against 15 us for the monitor (`glass_session_cost copy`), nothing on the CPU
+    (205 us a frame with it, 214 without, in a forced-frame loop), and it made the mirror depend on the dirty rectangles of every
+    frame being true across the frames a minimum interval skips, with a "wait and ask for a frame" path for a glass that moves onto a
+    part that was not copied. Not worth a picture that can be wrong. (The dirty rectangles still decide which windows are drawn again;
+    `glass_session_cost dirty` compares every picture with the one before it: 0 changed pixels outside the reported rectangles in
+    30 s at the 16.7 ms interval, on a desktop that changed in only one picture, so this is weak evidence; the earlier probe at 400 ms
+    saw 54 frames and none outside.)
+  * Only a picture that changed something a glass reads counts as activity for the engine's clock. A frame that changed something
+    elsewhere (a caret, a terminal) no longer keeps the loop at its 8 ms wait for a second after it, which on an ordinary desktop made
+    it turn about 100 times a second instead of 20.
+  * Taking a popup out of the exclusion list sends nothing: the removal goes with the next list that has to be sent. The handles that
+    left are looked at once a second and the list is sent if one has become a window of another process. Opening a popup is two sends.
+  * Where the busy threads of a process with glass are (no window needed to see it: `glass_session_cost run --drive 2`): the driver's
+    worker (`nvwgf2umx.dll`, unnamed) wakes 2 to 4 times per captured frame and the capture service's thread once per frame, so a
+    busy monitor at 200 frames a second is 400 to 800 context switches a second in threads that are not ours; the cap cuts that to
+    a third of it when frames are the cause. The driver's timer thread (about 100 a second) is there with a device and no frame.
+    A session's video memory is the same with one pool buffer as with two (48.5 MiB both), so the pool stays at two.
 * `RUSTYFILES_NO_DOCK=1` keeps a rustyfiles from starting or stopping a dock (automated runs, a second copy for testing).
 * Updates and uninstalling: the dock holds `rustyfiles.exe` open, so the updater's restart and the uninstall hook ask it to stop
   first; the next start of rustyfiles brings it back while the setting is on.
