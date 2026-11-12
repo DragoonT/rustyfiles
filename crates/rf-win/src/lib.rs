@@ -39,6 +39,7 @@ pub mod look;
 pub mod listing;
 pub mod localized;
 pub mod nameindex;
+pub mod organize;
 pub mod taskbar_progress;
 pub mod usn;
 pub mod network;
@@ -71,6 +72,7 @@ pub mod weather;
 pub mod window;
 pub mod volume;
 pub mod tasklist;
+pub mod tree_watch;
 pub mod wide;
 
 /// Held by tests that measure short times and by tests that load every core (the glass tests draw with the software renderer, which

@@ -209,6 +209,8 @@ pub fn switch_track(id: ElementId, p: &Palette, on: bool, disabled: bool, toggle
     let mut track = div()
         .id(id)
         .group(group)
+        // Tab reaches the switch, Enter / Space flips it (as the classic one)
+        .tab_index(0)
         .relative()
         .flex_shrink_0()
         .w(px(SW_W))

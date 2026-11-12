@@ -364,7 +364,7 @@ impl FolderView {
         Menu { quick: self.quick_clipboard(me, true), items: v }
     }
 
-    fn background_menu(&self, me: &Me, dir: &std::path::Path, _cx: &mut Context<Self>) -> Menu {
+    fn background_menu(&self, me: &Me, dir: &std::path::Path, cx: &mut Context<Self>) -> Menu {
         let mode = self.view_mode;
         let sort = self.sort;
         let group = self.group;
@@ -391,6 +391,11 @@ impl FolderView {
         v.push(Item::Separator);
         let d = dir.to_path_buf();
         v.push(Item::action(t!("Terminalde aç"), icon(L::SquareTerminal), move |_, _| open_terminal(d.clone())).hint("Ctrl+Shift+`"));
+        // the folder organizer: only where the folder has rules
+        if !self.is_search() && crate::organizer::has_rules_for(dir, cx) {
+            let d = dir.to_path_buf();
+            v.push(Item::action(t!("Klasörü düzenle"), icon(L::WandSparkles), move |w, cx| crate::organizer::organize_folder(d.clone(), w, cx)));
+        }
         // Git (Files: initialize / clone from the folder background)
         if !self.is_search() && !crate::archive_view::is_browsable_path(dir) {
             let mut git_items = Vec::new();

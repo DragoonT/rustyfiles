@@ -3,6 +3,7 @@
 pub mod entry;
 pub mod format;
 pub mod history;
+pub mod organize;
 pub mod rename;
 pub mod shelf;
 pub mod sort;

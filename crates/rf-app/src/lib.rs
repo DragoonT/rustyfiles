@@ -33,6 +33,7 @@ pub mod look;
 mod image_cache;
 mod installer;
 mod ops;
+mod organizer;
 mod picker;
 mod places;
 mod settings;
@@ -483,6 +484,7 @@ pub fn main() {
             rf_win::single_instance::Role::Primary(guard) => Some(guard),
         }
     };
+    let primary_instance = _instance.is_some() && pick.is_none() && !quick_search && !bar_preview && !dock;
     let (ipc_tx, ipc_rx) = futures::channel::mpsc::unbounded::<String>();
     if let Some(rx) = shell_select {
         let tx = ipc_tx.clone();
@@ -606,6 +608,10 @@ pub fn main() {
         // With "run in the background" on, the app stays in the notification area instead.
         background::init(cx);
         quick_search::init(cx);
+        // the folder organizer's watchers (only if a rule runs by itself); not in helper processes
+        if primary_instance {
+            organizer::init(cx);
+        }
         // GPUI would quit by itself when the last window closes (QuitMode::Default on Windows):
         // that cut running copies in half and makes background mode impossible. We decide.
         cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
