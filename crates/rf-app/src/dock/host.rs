@@ -875,6 +875,29 @@ mod tests {
         assert_ne!(wrong, cc);
     }
 
+    /// A 2560 x 1440 monitor at 100 %: with the 48 px taskbar (work area 1392 high) and with an auto-hiding one (the work area is the
+    /// whole monitor, so the glass floats 10 px above the screen's edge and the window's lower margin is 4 px, not more).
+    #[test]
+    fn a_panel_is_placed_from_the_glass_on_a_2560_by_1440_monitor() {
+        let monitor = Rect::new(0, 0, 2560, 1440);
+        let work = Rect::new(0, 0, 2560, 1392);
+        let g = geo(monitor, work, 1.0);
+        assert_eq!(g.glass(Kind::Left), Rect::new(12, 1334, 342, 1382));
+        assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 1330, 346, 1386));
+        let (start, cc) = panels(&g, work);
+        // 8 px above the glass's top (1334), lined up with its left edge (12)
+        assert_eq!(start, Rect::new(12, 646, 632, 1326));
+        assert_eq!(g.glass(Kind::Right), Rect::new(2268, 1334, 2548, 1382));
+        assert_eq!(cc, Rect::new(2188, 926, 2548, 1326), "lined up with the right glass's right edge");
+
+        let g = geo(monitor, monitor, 1.0);
+        assert_eq!(g.glass(Kind::Left), Rect::new(12, 1382, 342, 1430));
+        assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 1378, 346, 1434));
+        let (start, cc) = panels(&g, monitor);
+        assert_eq!(start, Rect::new(12, 694, 632, 1374));
+        assert_eq!(cc, Rect::new(2188, 974, 2548, 1374));
+    }
+
     /// The click on an island's own button is not "outside" the panel: the glass is what is kept, and the rest of the window (a margin that
     /// the window region lets the pointer through) is another program's.
     #[test]

@@ -175,11 +175,51 @@ pub fn exists(hwnd: isize) -> bool {
     hwnd != 0 && unsafe { IsWindow(Some(HWND(hwnd as *mut _))).as_bool() }
 }
 
-/// Moves and sizes the panel (device px) and shows it on top without activating it; the caller then brings it to the front
-/// (`crate::window::bring_to_front`) so it gets the keyboard.
-pub fn show_at(hwnd: isize, r: Rect) -> bool {
+/// Distances from a window's outer rectangle to its client area (left, top, right, bottom), from where the client area starts and how
+/// big it is. Never negative: a client area that sticks out of its window is a reading gone wrong, not a frame.
+pub fn insets_from(window: Rect, client_origin: (i32, i32), client_size: (i32, i32)) -> [i32; 4] {
+    [
+        (client_origin.0 - window.left).max(0),
+        (client_origin.1 - window.top).max(0),
+        (window.right - (client_origin.0 + client_size.0)).max(0),
+        (window.bottom - (client_origin.1 + client_size.1)).max(0),
+    ]
+}
+
+/// The outer rectangle that gives a window a client area of exactly `client`.
+pub fn outer_for_client(client: Rect, insets: [i32; 4]) -> Rect {
+    Rect::new(client.left - insets[0], client.top - insets[1], client.right + insets[2], client.bottom + insets[3])
+}
+
+/// How far the window's outer rectangle reaches beyond its client area now, device px (all zero for a window that has no frame, and
+/// when the window cannot be asked). The dock's pop-up windows can keep the system's invisible resize frame (the islands' do: 8 px at
+/// 100 % left, right and below), and what a panel draws and what its glass covers is the client area, not the window.
+pub fn frame_insets(hwnd: isize) -> [i32; 4] {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
+    let h = HWND(hwnd as *mut _);
+    let (mut window, mut client, mut origin) = (RECT::default(), RECT::default(), POINT::default());
     unsafe {
-        SetWindowPos(HWND(hwnd as *mut _), Some(HWND_TOPMOST), r.left, r.top, r.width().max(1), r.height().max(1), SWP_NOACTIVATE | SWP_SHOWWINDOW).is_ok()
+        if GetWindowRect(h, &mut window).is_err() || GetClientRect(h, &mut client).is_err() || !ClientToScreen(h, &mut origin).as_bool() {
+            return [0; 4];
+        }
+    }
+    let size = (client.right - client.left, client.bottom - client.top);
+    if size.0 <= 0 || size.1 <= 0 {
+        return [0; 4];
+    }
+    insets_from(Rect::new(window.left, window.top, window.right, window.bottom), (origin.x, origin.y), size)
+}
+
+/// Moves and sizes the panel and shows it on top without activating it; the caller then brings it to the front
+/// (`crate::window::bring_to_front`) so it gets the keyboard. `r` (device px, screen coordinates) is where the panel's CLIENT area
+/// goes, which is what `place` worked out and what is seen: a window rectangle that is `r` itself would put the visible panel
+/// inside the invisible frame, 8 px in on three sides, if the window has one.
+pub fn show_at(hwnd: isize, r: Rect) -> bool {
+    let outer = outer_for_client(r, frame_insets(hwnd));
+    unsafe {
+        SetWindowPos(HWND(hwnd as *mut _), Some(HWND_TOPMOST), outer.left, outer.top, outer.width().max(1), outer.height().max(1), SWP_NOACTIVATE | SWP_SHOWWINDOW).is_ok()
     }
 }
 
@@ -365,7 +405,27 @@ mod tests {
     }
 
     #[test]
+    fn a_frame_is_taken_off_the_window_and_put_back_around_the_client_area() {
+        // a window at (100, 200) that is 640 x 700 with the system's invisible frame: 8 px left, right and below, none above
+        let window = Rect::new(100, 200, 740, 900);
+        let insets = insets_from(window, (108, 200), (624, 692));
+        assert_eq!(insets, [8, 0, 8, 8]);
+        // the client area the panel wants is the rectangle `place` gave: the window is that, grown by the frame
+        let want = Rect::new(12, 286, 632, 966);
+        let outer = outer_for_client(want, insets);
+        assert_eq!(outer, Rect::new(4, 286, 640, 974));
+        // and the client area of that window is exactly the wanted one
+        assert_eq!(insets_from(outer, (want.left, want.top), (want.width(), want.height())), insets);
+        // no frame: nothing changes
+        assert_eq!(insets_from(window, (100, 200), (640, 700)), [0; 4]);
+        assert_eq!(outer_for_client(want, [0; 4]), want);
+        // a reading that puts the client area outside its window is no frame
+        assert_eq!(insets_from(window, (90, 190), (700, 800)), [0; 4]);
+    }
+
+    #[test]
     fn a_window_that_is_not_there_is_left_alone() {
+        assert_eq!(frame_insets(0), [0; 4]);
         assert!(!exists(0));
         assert!(!show_at(0, Rect::from_xywh(0, 0, 10, 10)));
         hide(0);

@@ -120,7 +120,12 @@ its left edge (left island) or right edge (right island), inside the monitor's w
 visible glass is `host::visible_glass_rect`: the glass rectangle of the layout (`Placement::glass`, screen coordinates, device px),
 NOT the island's window, which is larger (a transparent margin, the middle island's headroom) and keeps the system's invisible
 frame. At 100 % the left island's glass is (12, 974, 342, 1022) on a 1920 x 1080 monitor and its window (8, 970, 346, 1026): the Start
-panel's bottom edge is 966 (8 px above the glass), not 962. The same rectangle is what the open panel's outside-click test keeps (a
+panel's bottom edge is 966 (8 px above the glass), not 962; on a 2560 x 1440 monitor with the 48 px taskbar the left glass is
+(12, 1334, 342, 1382) and the Start panel (12, 646, 632, 1326), the control centre (2188, 926, 2548, 1326). The rectangle is where
+the panel's CLIENT area goes (what it draws and what its glass covers): `rf_win::dock::panel::show_at` measures how far the window's
+outer rectangle reaches beyond its client area (the islands' windows keep the system's invisible resize frame, 8 px left, right and
+below at 100 %; the panels are the same kind of pop-up and may too, nothing is changed if they do not) and sets the outer rectangle that gives exactly that client area. This was not seen
+on a screen. The same rectangle is what the open panel's outside-click test keeps (a
 click on the island's own logo, field or symbol is the island's button, which toggles the panel; a click on the island's transparent
 margin is another program's and closes the panel). Only one panel is open at a time. Unlike the islands a panel IS activated: it takes the keyboard while it is open, and when it is put away with Escape
 or by its button the window that had the keyboard gets it back (after a click elsewhere, a thing started from the panel or a window
@@ -379,6 +384,10 @@ badges, thumbnails on hover. Hiding Explorer's taskbar is a later version and ne
 
 ## Known limits
 
+* Whether the islands' GLASS stands where the layout says: `visible_glass_rect` is the layout's glass rectangle, and the islands' windows
+  are placed by their outer rectangle while the glass is drawn from the client area (which starts at the invisible frame). If the
+  frame is really 8 px there, the seen glass is that far from the layout's, and a panel lined up with the layout's rectangle would be
+  that far from the seen glass. One look at a running dock settles it (the first step of the panels' live test).
 * What has been seen on a screen: the placement, the glass, the apps and their icons, the light or dark foreground (main's live runs,
   before the magnification was added). What has not: the magnification, the glass as a shape inside a larger window, the window
   region and the clicks through it, the merged whole, and the control centre and the Start panel (the sources were read with a
