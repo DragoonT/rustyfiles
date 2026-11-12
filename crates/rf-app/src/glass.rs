@@ -181,6 +181,11 @@ pub enum LensPhase {
 
 const SETTLE: Duration = Duration::from_millis(140);
 const OVERLAP: Duration = Duration::from_millis(70);
+/// After the selection moved to another entry the lens is on its way there for about this long. If the entry's place changes meanwhile
+/// (a new tab is still growing to its width while the lens slides to it, the tabs beside a closed one are closing up), that is part of
+/// the same glide: the lens is given the new place to go to and keeps sliding. Without this the growing tab counted as "moving", the
+/// lens was taken off in mid-slide and came back with a jump once the tab stood still (the user: opening a tab breaks the animation).
+const GLIDE: Duration = Duration::from_millis(450);
 
 /// Where a slot's row was at its last paint, and when it last moved.
 #[derive(Clone, Copy)]
@@ -189,6 +194,8 @@ struct Track {
     rect: [f32; 4],
     clip: [f32; 4],
     last_move: Option<Instant>,
+    /// When this entry became the selected one (or was first seen).
+    since: Instant,
 }
 
 fn phase_at(last_move: Option<Instant>, now: Instant) -> LensPhase {
@@ -204,13 +211,18 @@ fn phase_at(last_move: Option<Instant>, now: Instant) -> LensPhase {
 /// rest; the same key at another place is a move.
 fn note(track: &mut Option<Track>, key: u64, rect: [f32; 4], clip: [f32; 4], now: Instant) -> LensPhase {
     let near = |a: &[f32; 4], b: &[f32; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.05);
-    let last_move = match track {
+    let (last_move, since) = match track {
         Some(t) if t.key == key => {
-            if near(&t.rect, &rect) && near(&t.clip, &clip) { t.last_move } else { Some(now) }
+            if near(&t.rect, &rect) && near(&t.clip, &clip) || now.saturating_duration_since(t.since) < GLIDE {
+                // nothing moved, or the lens is still gliding to this entry: the new place is only where the glide ends
+                (t.last_move, t.since)
+            } else {
+                (Some(now), t.since)
+            }
         }
-        _ => None,
+        _ => (None, now),
     };
-    *track = Some(Track { key, rect, clip, last_move });
+    *track = Some(Track { key, rect, clip, last_move, since });
     phase_at(last_move, now)
 }
 
@@ -296,7 +308,18 @@ pub fn lens_probe(slot: u8, key: u64) -> impl IntoElement {
 pub fn lens_probe_shaped(slot: u8, key: u64, shape: LensShape) -> impl IntoElement {
     canvas(
         move |bounds, window, _| {
-            let clip = window.content_mask().bounds;
+            let mut clip = window.content_mask().bounds;
+            if matches!(shape, LensShape::Tab { .. }) {
+                // A tab that is still growing to its width clips its own content, so the mask here is the tab's own box and not the
+                // strip: a lens sliding over from another tab would be cut to that box and seem to appear inside the new tab instead
+                // of travelling to it. The strip's mask is remembered from the frames where the tab does not clip itself.
+                let hwnd = crate::look::window::hwnd_of(window);
+                let (use_clip, remember) = strip_clip(rect_of(clip), rect_of(bounds), strips().get(&hwnd).copied());
+                if remember {
+                    strips().insert(hwnd, use_clip);
+                }
+                clip = Bounds { origin: gpui_kit::point(px(use_clip[0]), px(use_clip[1])), size: gpui_kit::size(px(use_clip[2]), px(use_clip[3])) };
+            }
             report_lens(window, slot, key, shape, bounds, clip);
         },
         |_, _, _, _| {},
@@ -305,6 +328,31 @@ pub fn lens_probe_shaped(slot: u8, key: u64, shape: LensShape) -> impl IntoEleme
     .top_0()
     .left_0()
     .size_full()
+}
+
+/// The tab strip's clip for each window, as last seen (see `lens_probe_shaped`).
+static STRIPS: Mutex<BTreeMap<isize, [f32; 4]>> = Mutex::new(BTreeMap::new());
+
+fn strips() -> std::sync::MutexGuard<'static, BTreeMap<isize, [f32; 4]>> {
+    STRIPS.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The clip a tab's lens gets: the mask at the tab when that is wider than the tab (it is the strip's); else (the tab is clipping
+/// itself while it animates open) the strip's as remembered, made wider to hold the tab as well: a new tab opens BEYOND the end of the
+/// strip as it was, and with the old strip alone the lens slid to the strip's old end and vanished there until the tab had opened
+/// (seen in the first live run). With nothing remembered, the mask as it is. The flag says whether the mask is the strip's and is to
+/// be remembered.
+fn strip_clip(mask: [f32; 4], tab: [f32; 4], remembered: Option<[f32; 4]>) -> ([f32; 4], bool) {
+    if mask[2] > tab[2] + 0.5 {
+        return (mask, true);
+    }
+    match remembered {
+        Some(s) => {
+            let (x0, x1) = (s[0].min(tab[0]), (s[0] + s[2]).max(tab[0] + tab[2]));
+            ([x0, s[1], x1 - x0, s[3]], false)
+        }
+        None => (mask, false),
+    }
 }
 
 /// Takes the lens out of a slot (the list has no selected entry, is hidden or is not the one on show). Cheap when nothing is there.
@@ -369,12 +417,29 @@ pub(crate) fn lens_plan(glass_on: bool, sidebar_on_screen: bool, sidebar_claimed
 pub fn forget_window(hwnd: isize) {
     lenses().forget(hwnd);
     tracks().retain(|&(h, _), _| h != hwnd);
+    strips().remove(&hwnd);
 }
 
 #[cfg(test)]
 mod tests {
     use super::{LensPhase, OVERLAP, SETTLE};
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_growing_tab_does_not_clip_the_lens_that_slides_to_it() {
+        let strip = [40.0, 0.0, 900.0, 34.0];
+        // a tab at rest: the mask is the strip's, it is used and remembered
+        assert_eq!(super::strip_clip(strip, [200.0, 2.0, 180.0, 32.0], None), (strip, true));
+        // a tab that is opening inside the strip clips itself: the mask is its own narrow box; the strip's is used instead and not
+        // overwritten
+        let own = [380.0, 2.0, 40.0, 32.0];
+        assert_eq!(super::strip_clip(own, own, Some(strip)), (strip, false));
+        // a tab that opens beyond the strip's old end (the strip grows with it): the clip reaches as far as the tab does
+        let beyond = [940.0, 2.0, 120.0, 32.0];
+        assert_eq!(super::strip_clip(beyond, beyond, Some(strip)), ([40.0, 0.0, 1020.0, 34.0], false));
+        // nothing remembered yet (the very first tab opens animated): the mask as it is
+        assert_eq!(super::strip_clip(own, own, None), (own, false));
+    }
 
     #[test]
     fn a_row_that_moves_has_no_lens_until_it_has_stood_still() {
@@ -384,8 +449,11 @@ mod tests {
         // first sight and an unchanged place: at rest
         assert_eq!(super::note(&mut tr, 1, a, clip, t0), LensPhase::Rest);
         assert_eq!(super::note(&mut tr, 1, a, clip, t0 + Duration::from_millis(16)), LensPhase::Rest);
-        // the list scrolls: the same entry at another place
-        let t1 = t0 + Duration::from_millis(32);
+        // right after the entry was selected its place may still change (a tab that grows): the lens glides on, nothing is taken off
+        assert_eq!(super::note(&mut tr, 1, [8.0, 100.0, 120.0, 32.0], clip, t0 + Duration::from_millis(60)), LensPhase::Rest);
+        assert_eq!(super::note(&mut tr, 1, a, clip, t0 + Duration::from_millis(120)), LensPhase::Rest);
+        // later the list scrolls: the same entry at another place
+        let t1 = t0 + Duration::from_secs(2);
         assert_eq!(super::note(&mut tr, 1, b, clip, t1), LensPhase::Moving);
         // it stays there: still "moving" until SETTLE has passed, then the overlap, then rest
         assert_eq!(super::note(&mut tr, 1, b, clip, t1 + SETTLE - Duration::from_millis(1)), LensPhase::Moving);
@@ -401,6 +469,9 @@ mod tests {
         assert_eq!(super::note(&mut tr, 1, b, [0.0, 0.0, 240.0, 500.0], t3), LensPhase::Moving);
         // another entry is selected: the rows stand still, the lens slides: at rest at once, even right after a move
         assert_eq!(super::note(&mut tr, 2, a, clip, t3 + Duration::from_millis(5)), LensPhase::Rest);
+        // and its place may change for the length of the glide, but not after it
+        assert_eq!(super::note(&mut tr, 2, b, clip, t3 + Duration::from_millis(5) + super::GLIDE - Duration::from_millis(1)), LensPhase::Rest);
+        assert_eq!(super::note(&mut tr, 2, a, clip, t3 + Duration::from_millis(5) + super::GLIDE + Duration::from_millis(1)), LensPhase::Moving);
     }
 
     fn spec(key: u64, y: f32) -> super::LensSpec {
