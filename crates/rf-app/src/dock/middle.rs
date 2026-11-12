@@ -58,6 +58,8 @@ pub struct MiddleIsland {
     glass: Rc<RefCell<IslandGlass>>,
     pins: Vec<PinnedApp>,
     pins_loaded: bool,
+    /// The running apps' group keys in the order they were first seen: an icon keeps its place when its app is clicked.
+    seen_order: Vec<String>,
     items: Vec<DockItem>,
     slots: Vec<Slot>,
     /// Per item: the key its icon is cached under and where the icon can come from, best first (worked out once per refresh, not per frame).
@@ -156,6 +158,7 @@ impl MiddleIsland {
             t0: Instant::now(),
             reported: 0.0,
             frozen: None,
+            seen_order: Vec::new(),
             refreshing: false,
             dirty: false,
             hover_ix: None,
@@ -212,6 +215,8 @@ impl MiddleIsland {
     }
 
     fn apply(&mut self, groups: Vec<(String, Vec<Task>)>, foreground: isize, cx: &mut Context<Self>) {
+        // (the task list comes in Z order; the island's order must not follow the clicks)
+        let groups = model::keep_order(&mut self.seen_order, groups);
         let items = model::merge(&self.pins, groups, foreground);
         if items == self.items {
             // Most task-list events change nothing the island shows (a window that only moved, was shown again, took the focus within

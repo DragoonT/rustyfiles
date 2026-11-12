@@ -275,6 +275,25 @@ pub fn merge(pins: &[PinnedApp], groups: Vec<(String, Vec<Task>)>, foreground: i
     items
 }
 
+/// Puts the running groups in the order they were FIRST SEEN in, whatever order they come in now. The task list comes in Z order
+/// (the active window first), so without this every click on a running app that is not pinned moved it to the front of the
+/// running ones and its neighbours shifted (a user's report: "discorda tıklayınca terminal ile yer değiştiriyor"). `seen` is the
+/// island's memory: a group that is gone leaves it (and takes the end if it comes back, as on the taskbar), a new one joins at the
+/// end, several new ones in the order given.
+pub fn keep_order(seen: &mut Vec<String>, groups: Vec<(String, Vec<Task>)>) -> Vec<(String, Vec<Task>)> {
+    seen.retain(|k| groups.iter().any(|(g, t)| g == k && !t.is_empty()));
+    for (k, t) in &groups {
+        if !t.is_empty() && !seen.contains(k) {
+            seen.push(k.clone());
+        }
+    }
+    let place = |k: &str| seen.iter().position(|s| s == k).unwrap_or(usize::MAX);
+    let mut groups = groups;
+    // (stable: groups with no window keep their place among themselves at the end; `merge` drops them)
+    groups.sort_by_key(|(k, _)| place(k));
+    groups
+}
+
 /// The `hover` slots of an item list: one per item, icons for apps and places, a separator for the line.
 pub fn slots(items: &[DockItem]) -> Vec<super::hover::Slot> {
     items.iter().map(|i| if matches!(i, DockItem::Separator) { super::hover::Slot::Separator } else { super::hover::Slot::Icon }).collect()
@@ -301,6 +320,34 @@ mod tests {
             launch: Launch::Link(PathBuf::from(format!(r"C:\pins\{name}.lnk"))),
             icon: IconSource::File(PathBuf::from(exe.unwrap_or("x.exe"))),
         }
+    }
+
+    #[test]
+    fn running_apps_keep_the_order_they_were_first_seen_in_when_one_is_activated() {
+        let keys = |g: &[(String, Vec<Task>)]| g.iter().map(|(k, _)| k.clone()).collect::<Vec<_>>();
+        let terminal = || group(vec![task(1, r"C:\t\terminal.exe", None)]);
+        let discord = || group(vec![task(2, r"C:\d\discord.exe", None)]);
+        let notepad = || group(vec![task(3, r"C:\n\notepad.exe", None)]);
+        let mut seen = Vec::new();
+        // first look: the Z order of that moment is the order
+        let first = keep_order(&mut seen, vec![terminal(), discord()]);
+        let order = keys(&first);
+        // Discord is clicked: it is now first in Z order, and nothing moves
+        assert_eq!(keys(&keep_order(&mut seen, vec![discord(), terminal()])), order);
+        // a new app joins at the end, wherever it is in Z order
+        let with_new = keep_order(&mut seen, vec![notepad(), discord(), terminal()]);
+        assert_eq!(keys(&with_new)[..2], order[..]);
+        assert_eq!(keys(&with_new).len(), 3);
+        // the first app closes: the others close the gap in the same order; when it comes back it takes the end
+        let without = keep_order(&mut seen, vec![notepad(), discord()]);
+        assert_eq!(keys(&without), vec![order[1].clone(), keys(&with_new)[2].clone()]);
+        let back = keep_order(&mut seen, vec![terminal(), notepad(), discord()]);
+        assert_eq!(keys(&back)[2], order[0]);
+        // the same list twice changes nothing; a group with no window is not remembered
+        assert_eq!(keys(&keep_order(&mut seen, vec![discord(), terminal(), notepad()])), keys(&back));
+        let mut empty_seen = Vec::new();
+        keep_order(&mut empty_seen, vec![("x".to_string(), Vec::new())]);
+        assert!(empty_seen.is_empty());
     }
 
     fn app_of(key: &str, launch: Option<Launch>, icon: IconSource) -> DockApp {
