@@ -1,27 +1,35 @@
 //! The left island: the Windows logo (opens the Start menu), the search field (opens rustyfiles' quick search) and, at its right end,
-//! the weather for the city the user typed in Settings.
+//! the weather: for the PC's position when "Konumumu kullan" is on and Windows gives it, else for the city the user typed in Settings
+//! (the order is in `rf_win::weather_location`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Instant;
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{Icon, h_flex};
+use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use rf_win::weather::{Observation, Outcome, WeatherFeed};
+use rf_win::weather::{Observation, Outcome};
+use rf_win::weather_location::LocatedWeather;
 
 use super::backdrop::IslandGlass;
 use super::host::Kind;
 use super::plan::{self, WeatherPicture};
 use super::start_button::{self, StartButton};
+use super::weather_text;
 use crate::t;
 
 pub struct LeftIsland {
     glass: Rc<RefCell<IslandGlass>>,
     city: String,
+    /// The weather is for the PC's position (the city is the fallback).
+    location: bool,
     weather: Option<Observation>,
-    /// Bumped whenever the city changes: a weather task of an older city ends when it sees it.
+    /// The display has room for the condition line under the temperature (see `plan::condition_line_fits`); on a narrow display it is
+    /// the first thing to go.
+    condition_room: bool,
+    /// Bumped whenever the source changes: a weather task of an older source ends when it sees it.
     weather_gen: u64,
     /// The width last reported to the host (logical px).
     reported: f32,
@@ -31,14 +39,40 @@ pub struct LeftIsland {
 }
 
 impl LeftIsland {
-    pub fn new(glass: Rc<RefCell<IslandGlass>>, city: &str, cx: &mut Context<Self>) -> Self {
-        let mut me = LeftIsland { glass, city: String::new(), weather: None, weather_gen: 0, reported: plan::left_width(None), button: StartButton::new(), t0: Instant::now() };
-        me.set_city(city, cx);
+    pub fn new(glass: Rc<RefCell<IslandGlass>>, city: &str, location: bool, cx: &mut Context<Self>) -> Self {
+        let mut me = LeftIsland {
+            glass,
+            city: String::new(),
+            location: false,
+            weather: None,
+            condition_room: true,
+            weather_gen: 0,
+            reported: plan::left_width(None),
+            button: StartButton::new(),
+            t0: Instant::now(),
+        };
+        me.set_weather_source(city, location, cx);
         me
     }
 
     pub fn width(&self) -> f32 {
-        plan::left_width(self.weather.map(|o| o.text()).as_deref())
+        let temp = self.weather.map(|o| o.text());
+        plan::left_width_lines(temp.as_deref(), self.condition_text())
+    }
+
+    /// The condition in words, when there is weather and the display has room for the line.
+    fn condition_text(&self) -> Option<&'static str> {
+        self.weather.filter(|_| self.condition_room).and_then(|o| weather_text::code_label(o.code))
+    }
+
+    /// Works out whether the display has room for the condition line (told by the host's last layout). True when that changed, so the
+    /// island's width has to be reported again.
+    fn sync_room(&mut self, cx: &App) -> bool {
+        let Some(o) = self.weather else { return false };
+        let Some(label) = weather_text::code_label(o.code) else { return false };
+        let Some((display, right, middle)) = super::host::weather_room(cx) else { return false };
+        let fits = plan::condition_line_fits(display, right, middle, plan::left_width_lines(Some(&o.text()), Some(label)));
+        std::mem::replace(&mut self.condition_room, fits) != fits
     }
 
     fn now_ms(&self) -> u64 {
@@ -97,6 +131,7 @@ impl LeftIsland {
     }
 
     fn report_width(&mut self, cx: &mut Context<Self>) {
+        self.sync_room(cx);
         let w = self.width();
         if (w - self.reported).abs() > 0.5 {
             self.reported = w;
@@ -104,31 +139,35 @@ impl LeftIsland {
         }
     }
 
-    /// The city changed (or is set for the first time). An empty city shows no weather and makes no request at all.
-    pub fn set_city(&mut self, city: &str, cx: &mut Context<Self>) {
+    /// The weather's source changed (or is set for the first time): the city, or the switch for the PC's position. With neither, no
+    /// weather is shown and no request of any kind is made (Windows' location service is not asked either).
+    pub fn set_weather_source(&mut self, city: &str, location: bool, cx: &mut Context<Self>) {
         let city = city.trim().to_string();
-        if city == self.city && self.weather_gen != 0 {
+        if city == self.city && location == self.location && self.weather_gen != 0 {
             return;
         }
         self.weather_gen += 1;
         self.city = city.clone();
+        self.location = location;
         self.weather = None;
         self.report_width(cx);
         cx.notify();
-        if city.is_empty() {
+        if city.is_empty() && !location {
             return;
         }
         let generation = self.weather_gen;
         cx.spawn(async move |this, cx| {
-            let mut feed = WeatherFeed::new(&city);
+            let mut feed = LocatedWeather::new(&city, location);
             let mut failures = 0u32;
+            // when the reading on the screen was fetched (see `plan::keeps_last_reading`)
+            let mut good_at: Option<Instant> = None;
             loop {
                 // Still the city the user wants? Checked before every request, also after the long wait: a city that was cleared or
                 // changed while this task slept must not cost one more request.
                 if !matches!(this.update(cx, |me, _| me.weather_gen == generation), Ok(true)) {
                     break;
                 }
-                // the requests block: a worker thread; the feed comes back with the place it has found
+                // the requests block (and so does Windows' answer about the position): a worker thread; the feed comes back with what it holds
                 let (back, outcome) = cx
                     .background_executor()
                     .spawn(async move {
@@ -139,13 +178,20 @@ impl LeftIsland {
                 feed = back;
                 failures = if matches!(outcome, Outcome::Failed) { failures + 1 } else { 0 };
                 let observation = outcome.observation();
+                let keep = plan::keeps_last_reading(location, &outcome, good_at.map(|t| t.elapsed()));
+                if observation.is_some() {
+                    good_at = Some(Instant::now());
+                }
                 let alive = this.update(cx, |me, cx| {
                     if me.weather_gen != generation {
                         return false;
                     }
-                    me.weather = observation;
-                    me.report_width(cx);
-                    cx.notify();
+                    // a miss of the position-based weather leaves the last reading (and the island's width) as it is
+                    if !keep {
+                        me.weather = observation;
+                        me.report_width(cx);
+                        cx.notify();
+                    }
                     true
                 });
                 if !matches!(alive, Ok(true)) {
@@ -218,6 +264,14 @@ impl Render for LeftIsland {
         if self.button.moving(now) {
             window.request_animation_frame();
         }
+        // a layout that changed the display's room (a monitor, a size) may take the condition line away or give it back: the width is
+        // reported again from a task, never from inside this render
+        if self.sync_room(cx) {
+            cx.spawn(async move |this, cx| {
+                let _ = this.update(cx, |me, cx| me.report_width(cx));
+            })
+            .detach();
+        }
         let scale_factor = window.scale_factor();
         // While the panel's glass has grown out of this island (grow_host.rs) the island's own glass is put away: the weather fades, the
         // search field is the panel's now (it is not drawn here), and the island paints no fill of its own.
@@ -284,14 +338,29 @@ impl Render for LeftIsland {
                 })
             });
 
+        // the picture at the left of the temperature and, when the display has room, the condition in words under it
+        let words = self.condition_text();
         let weather = self.weather.map(|o| {
+            // the text column is exactly as wide as the plan says (the island's width is the sum), whatever the real font makes of the
+            // words: a longer one is cut with an ellipsis inside the column and never pushes into the search field
+            let column = px(plan::weather_text_width(&o.text(), words) * k);
+            let text = match words {
+                Some(words) => v_flex()
+                    .w(column)
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .child(text_14(div(), k).line_height(px(17. * k)).child(o.text()))
+                    .child(div().text_size(px(11. * k)).line_height(px(14. * k)).text_color(secondary).truncate().child(words))
+                    .into_any_element(),
+                None => text_14(div(), k).child(o.text()).into_any_element(),
+            };
             h_flex()
                 .ml(px(plan::WEATHER_GAP * k))
                 .when(grown.is_some(), |d| d.opacity(others))
                 .gap(px(plan::WEATHER_TEXT_GAP * k))
                 .items_center()
                 .child(Icon::new(picture_icon(plan::weather_picture(o.code, o.is_day))).size(px(plan::WEATHER_ICON * k)).flex_shrink_0().text_color(pal.text().hsla()))
-                .child(text_14(div(), k).child(o.text()))
+                .child(text)
         });
 
         super::host::island_box(pal, fallback, k)

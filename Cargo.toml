@@ -121,6 +121,8 @@ windows = { version = "0.62", features = [
     "ApplicationModel",
     "Networking_Connectivity",
     "Devices_Radios",
+    # the dock's weather from the PC's approximate position (rf-win weather_location.rs)
+    "Devices_Geolocation",
     "Devices_Bluetooth",
     "Devices_Enumeration",
     "Win32_UI_Accessibility",

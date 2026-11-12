@@ -150,7 +150,10 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Appearance => appearance(p, s, cx),
         Page::Dock => {
             let size = crate::dock::size_slider::control(p, s, cx);
-            crate::dock_page::page(p, s, Some(size))
+            let mut page = crate::dock_page::page(p, s, Some(size));
+            // the weather from the PC's position (dock/weather_card.rs): its switch, its sentence and Windows' own permission
+            page.extend(crate::dock::weather_card::cards(p, s));
+            page
         }
         Page::Desktop => crate::desktop_page::page(p, s),
         Page::Layout => layout(p, s, cx),

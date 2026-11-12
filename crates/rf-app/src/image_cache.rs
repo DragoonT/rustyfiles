@@ -47,6 +47,20 @@ fn cost(bytes: usize) -> usize {
 }
 pub const ICON_PX: u32 = 32;
 
+/// Takes back what `lookup` charged for a picture that was asked for and then dropped before it was made.
+fn forget_pending(thumb_use: &mut HashMap<u64, (u64, usize)>, thumb_cost: &mut usize, key: u64) {
+    if let Some((_, bytes)) = thumb_use.remove(&key) {
+        *thumb_cost -= cost(bytes).min(*thumb_cost);
+    }
+}
+
+/// The key of a file's picture. The preview pane's picture (made by the pool's urgent lane) has a key space of its own:
+/// were it the list's key, a tile the list had already queued at the same size would answer the pane's request
+/// "pending" and the pane would wait behind the list again (no size is shared today; this keeps it so).
+fn file_picture_key(pane: bool, dir: &Path, name: &str, modified_ms: &impl Hash, size: u32) -> u64 {
+    key_of(&[&(if pane { "pane" } else { "thumb" }), &dir, &name, modified_ms, &size])
+}
+
 fn key_of(parts: &[&dyn HashPart]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for p in parts {
@@ -85,8 +99,12 @@ impl ImageCache {
                 let ok = this
                     .update(cx, |c, cx| {
                         for r in batch {
+                            crate::preview_trace::pool_answer(r.urgent, r.dropped, r.image.is_some(), r.waited, r.took);
                             if r.dropped {
                                 c.map.remove(&r.key);
+                                // (and what was charged for it: a dropped pane picture is not asked for again once the
+                                // user has moved on, so nothing else would ever take its entry away)
+                                forget_pending(&mut c.thumb_use, &mut c.thumb_cost, r.key);
                                 continue;
                             }
                             // evicted while it was being made: nobody wants it any more
@@ -256,7 +274,7 @@ impl ImageCache {
         };
         let path = dir.join(&*e.name);
         // Per-file icons (exe/lnk/…) are unbounded in number: keep them in the LRU too.
-        let r = self.lookup(key, || Request { key, path, size: ICON_PX, kind: Kind::Icon }, unique);
+        let r = self.lookup(key, || Request::new(key, path, ICON_PX, Kind::Icon), unique);
         self.evict_over_budget();
         self.release_evicted(cx);
         r
@@ -269,7 +287,7 @@ impl ImageCache {
     pub fn shell_icon(&mut self, parsing: &str, px: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         let key = key_of(&[&"shell", &parsing, &px]);
         let path = std::path::PathBuf::from(parsing);
-        let r = self.lookup(key, || Request { key, path, size: px, kind: Kind::Thumbnail }, true);
+        let r = self.lookup(key, || Request::new(key, path, px, Kind::Thumbnail), true);
         self.evict_over_budget();
         self.release_evicted(cx);
         r
@@ -281,17 +299,27 @@ impl ImageCache {
     pub fn shell_icon_state(&mut self, parsing: &str, px: u32, state: u8, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         let key = key_of(&[&"shell-state", &parsing, &px, &state]);
         let path = std::path::PathBuf::from(parsing);
-        let r = self.lookup(key, || Request { key, path, size: px, kind: Kind::Thumbnail }, true);
+        let r = self.lookup(key, || Request::new(key, path, px, Kind::Thumbnail), true);
         self.evict_over_budget();
         self.release_evicted(cx);
         r
     }
 
     pub fn thumbnail(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        self.thumbnail_as(dir, e, size, false, cx)
+    }
+
+    /// The picture the user is looking at right now (the preview pane's, Quick Look's): made by the pool's urgent lane,
+    /// at normal priority and not behind the list's own tiles. The list's tiles use `thumbnail`.
+    pub fn pane_picture(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        self.thumbnail_as(dir, e, size, true, cx)
+    }
+
+    fn thumbnail_as(&mut self, dir: &Path, e: &Entry, size: u32, urgent: bool, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         let wants_thumb = crate::icons::has_thumbnail(e);
         let per_file = wants_thumb || (!e.is_dir() && has_unique_icon(&e.ext));
         let key = if per_file {
-            key_of(&[&"thumb", &dir, &&*e.name, &e.modified_ms, &size])
+            file_picture_key(urgent && wants_thumb, dir, &e.name, &e.modified_ms, size)
         } else if e.is_dir() {
             key_of(&[&"dirL", &size])
         } else {
@@ -301,7 +329,15 @@ impl ImageCache {
         let kind = if wants_thumb { Kind::Thumbnail } else { Kind::Icon };
         // every per-file picture (an exe's or a shortcut's icon too) is in the LRU, or browsing
         // folders of programs would keep them all until the app closes
-        let r = self.lookup(key, || Request { key, path, size, kind }, per_file);
+        let r = self.lookup(
+            key,
+            || {
+                let mut req = Request::new(key, path, size, kind);
+                req.urgent = urgent && wants_thumb;
+                req
+            },
+            per_file,
+        );
         self.evict_over_budget();
         self.release_evicted(cx);
         r
@@ -321,5 +357,47 @@ impl ImageCache {
         });
         self.thumb_cost -= freed;
         self.publish();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // (not `super::*`: the toolkit's glob import brings a `test` attribute of its own that shadows the standard one)
+    use super::{cost, file_picture_key, forget_pending};
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    /// A picture asked for and dropped leaves nothing charged behind; one that holds pixels gives back what it cost.
+    #[test]
+    fn a_dropped_picture_takes_back_its_charge() {
+        let mut thumb_use: HashMap<u64, (u64, usize)> = HashMap::new();
+        let mut thumb_cost = 0usize;
+        // what `lookup` does for a new picture: an entry with no pixels yet, charged the nominal cost
+        thumb_use.insert(7, (1, 0));
+        thumb_cost += cost(0);
+        thumb_use.insert(8, (2, 4096));
+        thumb_cost += cost(4096);
+        assert!(thumb_cost > 0);
+        forget_pending(&mut thumb_use, &mut thumb_cost, 7);
+        assert!(!thumb_use.contains_key(&7));
+        assert_eq!(thumb_cost, cost(4096), "only the other picture is still charged");
+        // a key that is not tracked changes nothing
+        forget_pending(&mut thumb_use, &mut thumb_cost, 99);
+        assert_eq!(thumb_cost, cost(4096));
+        forget_pending(&mut thumb_use, &mut thumb_cost, 8);
+        assert_eq!((thumb_use.len(), thumb_cost), (0, 0));
+    }
+
+    /// The pane's picture of a file never has the key of the list's picture of it, whatever the size; the same
+    /// question always gets the same key.
+    #[test]
+    fn the_pane_has_keys_of_its_own() {
+        let dir = Path::new(r"C:\pics");
+        let list = file_picture_key(false, dir, "a.jpg", &5u64, 384);
+        let pane = file_picture_key(true, dir, "a.jpg", &5u64, 384);
+        assert_ne!(list, pane);
+        assert_eq!(pane, file_picture_key(true, dir, "a.jpg", &5u64, 384));
+        assert_ne!(pane, file_picture_key(true, dir, "a.jpg", &6u64, 384), "a changed file is a new picture");
+        assert_ne!(pane, file_picture_key(true, dir, "a.jpg", &5u64, 1280), "another size is another picture");
     }
 }

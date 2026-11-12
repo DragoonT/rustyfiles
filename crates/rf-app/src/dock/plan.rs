@@ -29,15 +29,58 @@ pub const WEATHER_ICON: f32 = 18.0;
 pub const WEATHER_TEXT_GAP: f32 = 6.0;
 /// What one character of the temperature takes (14 px text, tabular enough for "12°" and "-3°").
 const WEATHER_CHAR: f32 = 8.5;
+/// What one character of the condition line under the temperature takes (11 px text). Words are wider than digits, and this is an
+/// estimate that errs on the wide side: the text is drawn on one line and cut with an ellipsis rather than ever run into the field.
+const WEATHER_SUB_CHAR: f32 = 6.4;
+/// The least room the middle island is given (dock units) before the condition line may take any of the display, however few icons it
+/// holds at rest: below it the line goes first. With more icons the middle island's own width counts instead.
+pub const MIN_MIDDLE_ROOM: f32 = 320.0;
+/// How long the last good reading is still shown when the weather from the PC's position cannot be refreshed (two hours: four of the
+/// normal 30 minute refreshes). After that the stale number would mislead, and nothing is shown.
+pub const STALE_AFTER: Duration = Duration::from_secs(2 * 60 * 60);
 
-/// The weather block's width for this text ("12°").
-pub fn weather_width(text: &str) -> f32 {
-    WEATHER_ICON + WEATHER_TEXT_GAP + text.chars().count() as f32 * WEATHER_CHAR
+/// The weather block's width (the picture, a gap and the text) for the temperature ("12°") and, under it, the condition in words: the picture, a gap and the LONGER of the two
+/// lines. Dock units, like every length here: the host multiplies them by the monitor's scale and the dock's size, so the block is the
+/// right width at every size.
+pub fn weather_width_lines(temp: &str, condition: Option<&str>) -> f32 {
+    WEATHER_ICON + WEATHER_TEXT_GAP + weather_text_width(temp, condition)
+}
+
+/// The width of the text column of the weather block (the longer of the two lines). The block gives the column exactly this width, so
+/// a condition line wider than the estimate is cut with an ellipsis inside it and never pushes into the search field.
+pub fn weather_text_width(temp: &str, condition: Option<&str>) -> f32 {
+    let top = temp.chars().count() as f32 * WEATHER_CHAR;
+    let sub = condition.map_or(0.0, |c| c.chars().count() as f32 * WEATHER_SUB_CHAR);
+    top.max(sub)
 }
 
 /// The left island's width (logical px): the logo, the search field and, when there is weather, a gap and the weather.
 pub fn left_width(weather_text: Option<&str>) -> f32 {
-    SIDE_PAD + LOGO + LOGO_GAP + SEARCH_W + weather_text.map_or(0.0, |t| WEATHER_GAP + weather_width(t)) + SIDE_PAD
+    left_width_lines(weather_text, None)
+}
+
+/// [`left_width`] with the condition line under the temperature.
+pub fn left_width_lines(temp: Option<&str>, condition: Option<&str>) -> f32 {
+    SIDE_PAD + LOGO + LOGO_GAP + SEARCH_W + temp.map_or(0.0, |t| WEATHER_GAP + weather_width_lines(t, condition)) + SIDE_PAD
+}
+
+/// Whether the condition line may be shown on this display: with it, the middle island must still fit, whole, between the left island
+/// (that wide) and the right one. "Whole" is the middle island's own width at rest (more icons, more room), and never less than
+/// [`MIN_MIDDLE_ROOM`]. All numbers are dock units: the display's width (work area over the monitor's scale times the dock's size), the
+/// right island's width, the middle island's width and the left island's width WITH the line. When the answer is no (a narrow display,
+/// a big dock size, many icons) the weather is the picture and the temperature, as before, and the icons keep their size.
+pub fn condition_line_fits(display_units: f32, right_units: f32, middle_units: f32, left_units_with_line: f32) -> bool {
+    use rf_win::dock::layout::{MARGIN_SIDE, MIN_GAP};
+    let others = 2.0 * MARGIN_SIDE + 2.0 * MIN_GAP + right_units + left_units_with_line;
+    display_units - others >= middle_units.max(MIN_MIDDLE_ROOM)
+}
+
+/// Whether a refresh that failed leaves the last good reading on the screen. Only for the weather from the PC's position: there a miss
+/// (Windows has no position yet after a wake or a change of network) is common and passes, so the picture does not flicker away; a
+/// typed city keeps the old behaviour (a failed request shows nothing). `since_good` is how long ago the shown reading was fetched
+/// (`None`: nothing is shown). A refusal or an unknown place is not a miss and always clears it.
+pub fn keeps_last_reading(location: bool, outcome: &rf_win::weather::Outcome, since_good: Option<Duration>) -> bool {
+    location && matches!(outcome, rf_win::weather::Outcome::Failed) && since_good.is_some_and(|d| d < STALE_AFTER)
 }
 
 // ---- the right island: [network] [volume] | [time / date] [bell]
@@ -248,7 +291,116 @@ mod tests {
         assert!(with > left_width(None) + WEATHER_GAP);
         // a longer text is wider
         assert!(left_width(Some("-12°")) > with);
-        assert_eq!(weather_width("12°"), 18.0 + 6.0 + 3.0 * 8.5);
+        assert_eq!(weather_width_lines("12°", None), 18.0 + 6.0 + 3.0 * 8.5);
+    }
+
+    #[test]
+    fn the_weather_block_is_as_wide_as_the_longer_of_its_two_lines() {
+        // no condition line: exactly what it always was
+                assert_eq!(left_width_lines(Some("12°"), None), left_width(Some("12°")));
+        // a short word under a temperature: the temperature is the longer line
+        assert_eq!(weather_width_lines("-12°", Some("Açık")), 18.0 + 6.0 + 4.0 * 8.5);
+        // a long word: the word is
+        let w = weather_width_lines("6°", Some("Parçalı bulutlu"));
+        assert_eq!(w, 18.0 + 6.0 + 15.0 * 6.4);
+        assert!(w > weather_width_lines("6°", None));
+        // the island is the logo, the field and the block, with nothing shared between them
+        let island = left_width_lines(Some("6°"), Some("Parçalı bulutlu"));
+        assert_eq!(island, SIDE_PAD + LOGO + LOGO_GAP + SEARCH_W + WEATHER_GAP + w + SIDE_PAD);
+        assert!(island > left_width_lines(Some("6°"), Some("Açık")));
+        // without a temperature there is nothing at all, whatever the line
+        assert_eq!(left_width_lines(None, Some("Açık")), left_width(None));
+    }
+
+    /// At every dock size the layout turns dock units into device px by the same unit, so the block's room for each line and the gap
+    /// before it keep their proportions: the weather never reaches back into the field.
+    #[test]
+    fn at_every_dock_size_the_block_clears_the_search_field() {
+        use rf_win::dock::layout::{self, Rect, Widths};
+        use rf_win::dock::size::{self, DockSize};
+        let units = left_width_lines(Some("-12°"), Some("Dondurucu yağmur"));
+        let field_end = SIDE_PAD + LOGO + LOGO_GAP + SEARCH_W;
+        let block = weather_width_lines("-12°", Some("Dondurucu yağmur"));
+        assert_eq!(units, field_end + WEATHER_GAP + block + SIDE_PAD);
+        for s in DockSize::ALL {
+            for scale in [1.0, 1.25, 1.5, 2.0] {
+                let unit = size::unit(scale, s.factor());
+                let work = Rect::new(0, 0, 2560, 1400);
+                let i = layout::islands(work, unit, Widths { left: units, middle: 400.0, right: 215.0 });
+                // the island is the width the plan asked for (the side islands are never squeezed) ...
+                assert_eq!(i.left.width(), layout::px(units, unit), "{s:?} at {scale}");
+                // ... and the block starts after the field with the gap, and ends before the island's padding
+                let start = layout::px(field_end + WEATHER_GAP, unit);
+                let end = layout::px(units - SIDE_PAD, unit);
+                assert!(end - start >= layout::px(block, unit) - 2, "{s:?} at {scale}: {start}..{end} for {}", layout::px(block, unit));
+                assert!(start > layout::px(field_end, unit));
+            }
+        }
+    }
+
+    #[test]
+    fn on_a_narrow_display_the_condition_line_is_the_first_thing_to_go() {
+        let with = left_width_lines(Some("6°"), Some("Parçalı bulutlu"));
+        let right = 215.0;
+        let rest = middle_width_at_rest(2, 1);
+        // 1920 px at 100 %, the four dock sizes: the display in dock units is 1920 / size
+        for (display, fits) in [(1920.0, true), (1920.0 / 1.2, true), (1366.0, true), (1366.0 / 1.2, true), (1366.0 / 1.4, false), (1024.0, true), (900.0, false), (800.0, false)] {
+            assert_eq!(condition_line_fits(display, right, rest, with), fits, "{display}");
+        }
+        // it goes before the weather itself would: without the line there is more room by exactly the line's width
+        let without = left_width_lines(Some("6°"), None);
+        let tight = 2.0 * 12.0 + 2.0 * 8.0 + right + without + MIN_MIDDLE_ROOM;
+        assert!(condition_line_fits(tight + (with - without) + 0.01, right, rest, with));
+        assert!(!condition_line_fits(tight + (with - without) - 1.0, right, rest, with));
+        // ... and the temperature alone still fits where the line does not
+        assert!(condition_line_fits(tight + (with - without) - 1.0, right, rest, without));
+        // the right island's width counts
+        assert!(!condition_line_fits(1366.0, 600.0, rest, with));
+    }
+
+    /// 1366 px at the default size. With the old fixed floor of 320 the line was judged to fit whatever the dock held, and a dock of
+    /// fourteen icons (791 units wanted, against 703 of room) was squeezed by the text; with the middle island's real width the line
+    /// goes first and the icons keep their size. Ten icons (565) still leave the line its room.
+    #[test]
+    fn many_icons_take_the_room_before_the_condition_line_does() {
+        let with = left_width_lines(Some("6°"), Some("Parçalı bulutlu"));
+        let right = 215.0;
+        let (ten, fourteen) = (middle_width_at_rest(10, 1), middle_width_at_rest(14, 1));
+        assert!(ten > MIN_MIDDLE_ROOM, "the case needs a middle island wider than the floor: {ten}");
+        assert!(condition_line_fits(1366.0, right, middle_width_at_rest(2, 1), with), "few icons: room for the line");
+        assert!(condition_line_fits(1366.0, right, ten, with), "ten icons: the middle island still fits whole beside the line");
+        assert!(!condition_line_fits(1366.0, right, fourteen, with), "fourteen icons: no room, the line goes");
+        assert!(condition_line_fits(1366.0, right, MIN_MIDDLE_ROOM, with), "the old fixed floor would have kept the line");
+        // exactly at the edge: the middle island fits whole
+        let edge = 2.0 * 12.0 + 2.0 * 8.0 + right + with + fourteen;
+        assert!(condition_line_fits(edge, right, fourteen, with));
+        assert!(!condition_line_fits(edge - 0.5, right, fourteen, with));
+        // a middle island narrower than the floor still gets the floor
+        assert_eq!(condition_line_fits(edge, right, 10.0, with), condition_line_fits(edge, right, MIN_MIDDLE_ROOM, with));
+    }
+
+    #[test]
+    fn the_text_column_is_exactly_what_the_block_is_wider_than_the_picture() {
+        for (t, c) in [("6°", None), ("-12°", Some("Açık")), ("6°", Some("Parçalı bulutlu")), ("21°", Some("Gök gürültülü"))] {
+            assert_eq!(WEATHER_ICON + WEATHER_TEXT_GAP + weather_text_width(t, c), weather_width_lines(t, c), "{t} {c:?}");
+        }
+    }
+
+    #[test]
+    fn a_missed_refresh_keeps_the_reading_only_for_the_position_and_only_for_a_while() {
+        use rf_win::weather::Outcome;
+        let fresh = Some(Duration::from_secs(40 * 60));
+        let stale = Some(STALE_AFTER);
+        // the position: a miss keeps what is shown ...
+        assert!(keeps_last_reading(true, &Outcome::Failed, fresh));
+        // ... but not when nothing is shown, and not for ever
+        assert!(!keeps_last_reading(true, &Outcome::Failed, None));
+        assert!(!keeps_last_reading(true, &Outcome::Failed, stale));
+        assert!(keeps_last_reading(true, &Outcome::Failed, Some(STALE_AFTER - Duration::from_secs(1))));
+        // a refusal or an unknown place is not a miss
+        assert!(!keeps_last_reading(true, &Outcome::UnknownPlace, fresh));
+        // a typed city behaves as it always did: a failed request shows nothing
+        assert!(!keeps_last_reading(false, &Outcome::Failed, fresh));
     }
 
     #[test]

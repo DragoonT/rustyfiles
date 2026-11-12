@@ -51,15 +51,17 @@ pub enum Kind {
 pub struct Prefs {
     /// Keep other windows from going under the dock (the application desktop toolbar).
     pub reserve: bool,
-    /// The weather city, trimmed. Empty: no weather.
+    /// The weather city, trimmed. Empty: no weather from a city.
     pub city: String,
+    /// The weather from the PC's position (Windows' location service); the city is the fallback.
+    pub location: bool,
     /// How big the whole dock is.
     pub size: super::size_pref::DockSizePref,
 }
 
 impl Prefs {
     pub fn of(s: &Settings) -> Prefs {
-        Prefs { reserve: s.dock_reserve, city: s.dock_weather_city.trim().to_string(), size: s.dock_size }
+        Prefs { reserve: s.dock_reserve, city: s.dock_weather_city.trim().to_string(), location: s.dock_weather_location, size: s.dock_size }
     }
 }
 
@@ -67,12 +69,13 @@ impl Prefs {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Changes {
     pub reserve: bool,
+    /// The weather's source changed: the city or the switch for the PC's position.
     pub city: bool,
     pub size: bool,
 }
 
 pub fn changes(old: &Prefs, new: &Prefs) -> Changes {
-    Changes { reserve: old.reserve != new.reserve, city: old.city != new.city, size: old.size != new.size }
+    Changes { reserve: old.reserve != new.reserve, city: old.city != new.city || old.location != new.location, size: old.size != new.size }
 }
 
 /// Whether the settings file is new since last looked at (its modification time differs; a file that appears or disappears counts).
@@ -100,6 +103,9 @@ pub struct Geo {
     pub placements: Placements,
     /// How far the middle glass may widen on each side.
     pub growth_px: i32,
+    /// The width of the area the islands were placed in (device px): the display's room, kept so that the left island can tell whether
+    /// the weather's condition line fits without asking Windows about the monitor on every frame.
+    pub area_width: i32,
 }
 
 impl Geo {
@@ -197,7 +203,7 @@ fn geo_for(mon: &MonitorInfo, area: Rect, widths: Widths, size: f32) -> Geo {
     let scale = mon.scale();
     let unit = rf_win::dock::size::unit(scale, size);
     let islands = layout::islands(area, unit, widths);
-    Geo { scale, unit, islands, placements: layout::placements(&islands, mon.rect, unit, layout::shadow_on()), growth_px: layout::growth_room(&islands, unit) }
+    Geo { scale, unit, islands, placements: layout::placements(&islands, mon.rect, unit, layout::shadow_on()), growth_px: layout::growth_room(&islands, unit), area_width: area.width() }
 }
 
 /// The size factor the dock is drawn at on this monitor: the setting, cut to what the screen's width can hold (`size_live::fit_to_width`).
@@ -233,6 +239,15 @@ pub fn monitor_work(cx: &App) -> Option<(f32, Rect)> {
 /// corner radius, are worked out with. `None` before a layout.
 pub fn dock_unit(cx: &App) -> Option<f32> {
     cx.try_global::<Host>()?.geo.map(|g| g.unit)
+}
+
+/// What the left island needs to decide whether its weather has room for the condition line: the display's width (the work area) and
+/// the right and the middle islands' widths, all in dock units. From the last layout the host worked out, so no question is asked of
+/// Windows (the left island asks at every frame). `None` before the host has seen a monitor.
+pub fn weather_room(cx: &App) -> Option<(f32, f32, f32)> {
+    let host = cx.try_global::<Host>()?;
+    let geo = host.geo?;
+    Some((geo.area_width as f32 / geo.unit.max(0.01), host.widths.right, host.widths.middle))
 }
 
 /// An island's window: the toolkit's handle and the system's. For the tray strip, which takes the keyboard for the right island.
@@ -550,7 +565,7 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     if ch.city
         && let Some(left) = left
     {
-        left.update(cx, |v, cx| v.set_city(&new.city, cx));
+        left.update(cx, |v, cx| v.set_weather_source(&new.city, new.location, cx));
     }
     // the desktop cover follows its own switch (see shell::cover)
     crate::shell::cover::on_settings(cx);
@@ -737,10 +752,10 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     let display = cx.primary_display().map(|d| d.id());
 
     let (left_glass, middle_glass, right_glass) = (Rc::new(RefCell::new(IslandGlass::new())), Rc::new(RefCell::new(IslandGlass::new())), Rc::new(RefCell::new(IslandGlass::new())));
-    let city = prefs.city.clone();
+    let (city, locate) = (prefs.city.clone(), prefs.location);
     let panel_glass = left_glass.clone();
     let lg = left_glass.clone();
-    let left = open_island(geo.placements.left.window, scale, display, Kind::Left, true, move |_, cx| LeftIsland::new(lg, &city, cx), cx);
+    let left = open_island(geo.placements.left.window, scale, display, Kind::Left, true, move |_, cx| LeftIsland::new(lg, &city, locate, cx), cx);
     let mg = middle_glass.clone();
     let middle = open_island(geo.placements.middle.window, scale, display, Kind::Middle, false, move |_, cx| MiddleIsland::new(mg, cx), cx);
     let rg = right_glass.clone();
@@ -990,7 +1005,7 @@ mod tests {
     }
 
     fn prefs(reserve: bool, city: &str) -> Prefs {
-        Prefs { reserve, city: city.into(), size: Default::default() }
+        Prefs { reserve, city: city.into(), location: false, size: Default::default() }
     }
 
     #[test]
@@ -1000,6 +1015,17 @@ mod tests {
         let d = Prefs::of(&Settings::default());
         assert!(d.reserve);
         assert!(d.city.is_empty());
+    }
+
+    #[test]
+    fn the_switch_for_the_position_changes_the_weather_source_like_the_city_does() {
+        let base = prefs(true, "Ankara");
+        let located = Prefs { location: true, ..base.clone() };
+        assert_eq!(changes(&base, &located), Changes { reserve: false, city: true, size: false });
+        assert_eq!(changes(&located, &located), Changes { reserve: false, city: false, size: false });
+        // off by default, and the settings carry it through
+        assert!(!Prefs::of(&Settings::default()).location);
+        assert!(Prefs::of(&Settings { dock_weather_location: true, ..Default::default() }).location);
     }
 
     #[test]
@@ -1038,7 +1064,7 @@ mod tests {
     fn geo(monitor: Rect, work: Rect, scale: f32) -> Geo {
         let widths = Widths { left: 330.0, middle: 600.0, right: 280.0 };
         let islands = layout::islands(work, scale, widths);
-        Geo { scale, unit: scale, islands, placements: layout::placements(&islands, monitor, scale, false), growth_px: layout::growth_room(&islands, scale) }
+        Geo { scale, unit: scale, islands, placements: layout::placements(&islands, monitor, scale, false), growth_px: layout::growth_room(&islands, scale), area_width: work.width() }
     }
 
     /// The Start panel (its real size, `START_SIZE`: 642 x 720) over the left island and the control centre (360 x 400) over the right one, placed from the glass.

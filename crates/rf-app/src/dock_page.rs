@@ -539,7 +539,9 @@ mod tests {
                 let name = rest.split(':').next()?.trim();
                 // (`shell_submenu` is the context menu's "Show more options" switch, nothing to do with the shell host)
                 // (`shell_desktop_cover` is the desktop's switch: it is on the Masaüstü page, `desktop_page.rs`)
-                let ours = (name.starts_with("dock_") || name.starts_with("shell_")) && name != "shell_submenu" && name != "shell_desktop_cover";
+                // (`dock_weather_location` is on this page too, drawn by a card of its own after the entries: `dock/weather_card.rs`,
+                // added in `settings_view.rs`; it shows Windows' own permission, which an entry cannot)
+                let ours = (name.starts_with("dock_") || name.starts_with("shell_")) && name != "shell_submenu" && name != "shell_desktop_cover" && name != "dock_weather_location";
                 (ours && rest.contains(':') && !rest.contains('(')).then(|| name.to_string())
             })
             .collect()

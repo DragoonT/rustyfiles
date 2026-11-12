@@ -116,6 +116,7 @@ fn picker_size(cx: &App) -> Size<Pixels> {
 }
 
 fn open_window(pipe: File, req: Request, cx: &mut App) {
+    crate::preview_trace::process_facts("picker: window requested");
     let start = req.folder.as_deref().map(PathBuf::from).filter(|p| p.is_dir()).map(Location::Path).unwrap_or(Location::Home);
     let title = {
         let base = if req.title.trim().is_empty() { mode_title(req.mode).to_string() } else { req.title.clone() };
@@ -164,6 +165,7 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
             });
             *session._sub.borrow_mut() = Some(sub);
             ws.set_picker(session, window, cx);
+            crate::preview_trace::mark("picker: workspace built");
             ws
         })
     });

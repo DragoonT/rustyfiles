@@ -9102,5 +9102,119 @@
   "key": "Deneme masaüstünde gerçek Geri Dönüşüm Kutusu boşaltılmaz",
   "tr": "Deneme masaüstünde gerçek Geri Dönüşüm Kutusu boşaltılmaz",
   "en": "A test desktop does not empty the real Recycle Bin"
+ },
+ {
+  "id": "09d9a750",
+  "key": "Çoğunlukla açık",
+  "tr": "Çoğunlukla açık",
+  "en": "Mostly clear"
+ },
+ {
+  "id": "fecd2b39",
+  "key": "Parçalı bulutlu",
+  "tr": "Parçalı bulutlu",
+  "en": "Partly cloudy"
+ },
+ {
+  "id": "a0b4cff0",
+  "key": "Çok bulutlu",
+  "tr": "Çok bulutlu",
+  "en": "Overcast"
+ },
+ {
+  "id": "082aa055",
+  "key": "Sisli",
+  "tr": "Sisli",
+  "en": "Foggy"
+ },
+ {
+  "id": "6fff203b",
+  "key": "Çisenti",
+  "tr": "Çisenti",
+  "en": "Drizzle"
+ },
+ {
+  "id": "dd6380f1",
+  "key": "Yağmurlu",
+  "tr": "Yağmurlu",
+  "en": "Rainy"
+ },
+ {
+  "id": "45c50278",
+  "key": "Buzlu yağmur",
+  "tr": "Buzlu yağmur",
+  "en": "Freezing rain"
+ },
+ {
+  "id": "b21edf03",
+  "key": "Sağanak",
+  "tr": "Sağanak",
+  "en": "Rain showers"
+ },
+ {
+  "id": "f1b51da0",
+  "key": "Karlı",
+  "tr": "Karlı",
+  "en": "Snowy"
+ },
+ {
+  "id": "b8a5868f",
+  "key": "Kar taneleri",
+  "tr": "Kar taneleri",
+  "en": "Snow grains"
+ },
+ {
+  "id": "29362f12",
+  "key": "Kar sağanağı",
+  "tr": "Kar sağanağı",
+  "en": "Snow showers"
+ },
+ {
+  "id": "6a7a53b3",
+  "key": "Gök gürültülü",
+  "tr": "Gök gürültülü",
+  "en": "Thunderstorm"
+ },
+ {
+  "id": "ded840d5",
+  "key": "Dolulu fırtına",
+  "tr": "Dolulu fırtına",
+  "en": "Thunderstorm with hail"
+ },
+ {
+  "id": "769d71f5",
+  "key": "Konumumu kullan",
+  "tr": "Konumumu kullan",
+  "en": "Use my location"
+ },
+ {
+  "id": "2c222971",
+  "key": "Bilgisayarın yaklaşık konumu (yaklaşık bir kilometreye yuvarlanmış) Windows'tan istenir ve hava durumunu almak için Open-Meteo'ya gönderilir; başka hiçbir yere gönderilmez.",
+  "tr": "Bilgisayarın yaklaşık konumu (yaklaşık bir kilometreye yuvarlanmış) Windows'tan istenir ve hava durumunu almak için Open-Meteo'ya gönderilir; başka hiçbir yere gönderilmez.",
+  "en": "The PC's approximate position (rounded to about a kilometre) is asked from Windows and sent to Open-Meteo to get the forecast; nothing else is sent anywhere."
+ },
+ {
+  "id": "500f115f",
+  "key": "Konum Windows'ta kapalı ya da masaüstü uygulamalara izin verilmemiş; şehir adı yazılmışsa o kullanılır.",
+  "tr": "Konum Windows'ta kapalı ya da masaüstü uygulamalara izin verilmemiş; şehir adı yazılmışsa o kullanılır.",
+  "en": "Location is off in Windows, or desktop apps are not allowed to use it; the typed city is used if there is one."
+ },
+ {
+  "id": "4751e90e",
+  "key": "Konum ayarlarını aç",
+  "tr": "Konum ayarlarını aç",
+  "en": "Open location settings"
+ },
+ {
+  "id": "cd554dac",
+  "key": "Ayarlanmadı: hava durumu konumdan alınır",
+  "tr": "Ayarlanmadı: hava durumu konumdan alınır",
+  "en": "Not set: the weather comes from the PC's position"
+ },
+ {
+  "id": "4a5f49c0",
+  "key": "Dock'un sol adasında sıcaklık gösterilir (Open-Meteo). Konum kullanımı açıkken şehir, konum alınamazsa yedek olarak kullanılır; boş bırakırsanız ve konum da alınamazsa hava durumu gösterilmez.",
+  "tr": "Dock'un sol adasında sıcaklık gösterilir (Open-Meteo). Konum kullanımı açıkken şehir, konum alınamazsa yedek olarak kullanılır; boş bırakırsanız ve konum da alınamazsa hava durumu gösterilmez.",
+  "en": "The temperature is shown in the dock's left island (Open-Meteo). With \"Use my location\" on, the city is the fallback when the position cannot be had; left empty, and with no position either, no weather is shown."
  }
 ]

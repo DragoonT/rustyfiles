@@ -70,6 +70,9 @@ pub(crate) mod tray_feed;
 mod tray_source;
 mod tray_strip;
 mod tray_tip;
+// the weather's condition in words, and Settings' card for the weather from the PC's position
+pub(crate) mod weather_card;
+mod weather_text;
 
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::App;

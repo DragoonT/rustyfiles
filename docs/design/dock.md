@@ -792,8 +792,23 @@ dock is off every control but the dock switch is dimmed with a line that says wh
 * **Hava durumu şehri** / Weather city. Empty (the default): no weather is shown and **no network request is made at all**. With a
   city, the dock asks Open-Meteo (`geocoding-api.open-meteo.com` once for the place, `api.open-meteo.com` for the temperature) every
   30 minutes. Nothing else leaves the machine: only the city name you typed and the coordinates it returned; no location API is
-  used. A failed request shows nothing and is retried after 5 minutes, then 10, 20 and 30; a city Open-Meteo does not know is asked
+  used (unless "Konumumu kullan" below is on). A failed request shows nothing and is retried after 5 minutes, then 10, 20 and 30; a city Open-Meteo does not know is asked
   about again only once an hour.
+* **Konumumu kullan** / Use my location. Off by default (`dock_weather_location`); a user who did not ask for it sees and sends nothing
+  new. On: the PC's approximate position is asked from Windows' location service (`Windows.Devices.Geolocation`, the lowest accuracy,
+  on a worker thread with a 10 second limit) each time the weather is refreshed, and the forecast is asked for that position. The
+  numbers are cut to two decimals (about a kilometre) the moment Windows gives them; only that rounded pair goes into the Open-Meteo
+  forecast address, and it is not written to the settings file, not logged and not looked up as a name (no IP guess, no reverse
+  geocoding). The ORDER: the position when the switch is on and Windows gives it; else the typed city; else no weather and no request.
+  If location is off in Windows (Privacy > Location: "Location services" or "Let desktop apps access your location") Windows is not
+  asked at all, Settings shows one line saying so with a button that opens `ms-settings:privacy-location`, and the weather falls back
+  to the city; a refusal is asked again only at the next refresh (an hour), never in a loop. With the switch on, a refresh that fails
+  (Windows has no position yet after a wake, a change of network) leaves the last good reading on the screen for up to two hours
+  (`plan::keeps_last_reading`); a typed city alone still shows nothing after a failed request.
+* **The condition in words.** Under the temperature, in smaller text, as Windows' taskbar shows it ("Çok bulutlu"): one text for every
+  group of weather codes (`dock/weather_text.rs`). The left island is as wide as the longer of the two lines (`plan::weather_width_lines`)
+  at every dock size. On a narrow display (less room between the islands than the middle island's own width, and never less than 320 dock units) the line is the first thing to go, before the icons are squeezed,
+  and the weather is the picture and the temperature, as before. The text column has exactly the planned width and cuts a longer word with an ellipsis.
 
 The dock process is told to read the settings file again when any of these changes: the four switches of the panels (`dock_own_start`,
 `dock_own_control_centre`, `dock_own_calendar`, `dock_own_notifications`), the two switches of the icons' menu and previews

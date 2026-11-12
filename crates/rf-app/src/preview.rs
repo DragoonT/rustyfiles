@@ -64,6 +64,8 @@ pub struct Preview {
     /// The pane sits at the bottom of the window: the size of its box (width, height), set by the window every frame.
     /// None = at the right (the tall and narrow layout, which is all that was there before).
     wide: Option<(f32, f32)>,
+    /// Time marks (a test copy with RUSTYFILES_PREVIEW_TRACE only).
+    trace: crate::preview_trace::PaneTrace,
 }
 
 /// How long the previous thumbnail may stand in for one that is still loading.
@@ -132,6 +134,7 @@ impl Preview {
             changed_at: std::time::Instant::now(),
             _hold_task: None,
             wide: None,
+            trace: Default::default(),
         }
     }
 
@@ -146,9 +149,14 @@ impl Preview {
             .and_then(|(_, real)| real.parent().map(Path::to_path_buf));
         let dir = copy_dir.as_deref().unwrap_or(dir);
         let wants = icons::has_thumbnail(e);
-        let thumb = if wants { self.images.update(cx, |c, cx| c.thumbnail(dir, e, size, cx)) } else { None };
+        if wants {
+            self.trace.asked(size, true, self.last_thumb.is_some());
+        }
+        // (the pane's picture is what the user waits for: it is not made behind the list's own tiles)
+        let thumb = if wants { self.images.update(cx, |c, cx| c.pane_picture(dir, e, size, cx)) } else { None };
         match thumb {
             Some(im) => {
+                self.trace.shown();
                 self.last_thumb = Some(im.clone());
                 Some(im)
             }
@@ -664,6 +672,9 @@ impl Preview {
         }
         self.target = target;
         self.changed_at = std::time::Instant::now();
+        if let Some((_, e)) = &self.target {
+            self.trace.selected(&e.ext, e.size);
+        }
         // redraw once the hold is over: the icon then shows if the thumbnail still isn't there
         self._hold_task = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(HOLD).await;

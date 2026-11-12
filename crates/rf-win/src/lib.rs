@@ -74,6 +74,7 @@ pub mod shellhost;
 pub mod sta;
 pub mod switcher;
 pub mod removal;
+pub mod pane_picture;
 pub mod rotate;
 pub mod thumbs;
 pub mod tray;
@@ -81,6 +82,8 @@ pub mod tray_wire;
 pub mod trayhost;
 pub mod watch;
 pub mod weather;
+// the weather from Windows' location service instead of a typed city (see the module)
+pub mod weather_location;
 pub mod window;
 pub mod winkey;
 pub mod volume;

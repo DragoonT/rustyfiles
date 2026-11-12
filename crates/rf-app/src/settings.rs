@@ -513,6 +513,10 @@ pub struct Settings {
     pub dock_reserve: bool,
     /// The city the dock's weather is for. Empty: no weather and no network request.
     pub dock_weather_city: String,
+    /// The dock's weather is for the PC's approximate position from Windows' location service (off by default). The order: the position
+    /// when this is on and Windows gives it, else the city above, else no weather (see `rf_win::weather_location`). The position is
+    /// never stored here or anywhere else.
+    pub dock_weather_location: bool,
     /// The dock's logo opens our own Start panel and its search field our own search (on). Off: the old behaviour, the logo sends the
     /// Windows key and the field opens the quick search window.
     pub dock_own_start: bool,
@@ -675,6 +679,7 @@ impl Default for Settings {
             dock_enabled: false,
             dock_reserve: true,
             dock_weather_city: String::new(),
+            dock_weather_location: false,
             dock_own_start: true,
             dock_own_control_centre: true,
             dock_own_calendar: true,
@@ -1263,6 +1268,20 @@ mod dock_tests {
 dock_own_notifications = 3
 ").unwrap();
         assert!(wrong.dock_own_calendar && wrong.dock_own_notifications, "wrong values fall back to the default");
+    }
+
+    /// The weather from the PC's position is a mode nobody gets without asking: off by default, off for a file from before it, and a
+    /// wrong value costs nothing.
+    #[test]
+    fn the_weather_from_the_position_is_off_unless_asked_for() {
+        assert!(!Settings::default().dock_weather_location);
+        assert!(!Settings::parse_lenient("theme = \"dark\"\n").unwrap().dock_weather_location, "a file from before it: off");
+        let on = Settings { dock_weather_location: true, ..Default::default() };
+        let text = toml::to_string_pretty(&on).unwrap();
+        assert!(Settings::parse_lenient(&text).unwrap().dock_weather_location);
+        assert!(!Settings::parse_lenient("dock_weather_location = \"yes\"\n").unwrap().dock_weather_location, "a wrong value falls back to off");
+        // and no coordinates are ever part of the settings file
+        assert!(!text.to_lowercase().contains("latitude") && !text.to_lowercase().contains("longitude"));
     }
 
     #[test]

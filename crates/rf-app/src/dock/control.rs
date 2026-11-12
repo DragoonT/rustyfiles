@@ -116,6 +116,8 @@ static TOLD: Mutex<Told> = Mutex::new(Told { started: None, keys: None });
 pub struct Keys {
     pub reserve: bool,
     pub city: String,
+    /// The weather from the PC's position: the running dock must start (or stop) asking Windows for it.
+    pub weather_location: bool,
     /// Frost, tint, refraction, saturation.
     pub look: [u8; 4],
     pub magnify: crate::settings::DockMagnify,
@@ -146,6 +148,7 @@ impl Keys {
         Keys {
             reserve: s.dock_reserve,
             city: s.dock_weather_city.trim().to_string(),
+            weather_location: s.dock_weather_location,
             look: [s.hg_frost, s.hg_tint, s.hg_refraction, s.hg_saturation],
             magnify: s.dock_magnify,
             animations: s.animations,
@@ -310,7 +313,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true, start_grow: true, size: Default::default(), shell: [false; 5] }
+        Keys { reserve, city: city.into(), weather_location: false, look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true, start_grow: true, size: Default::default(), shell: [false; 5] }
     }
 
     #[test]
@@ -355,6 +358,7 @@ mod tests {
             Settings { shell_win_key: true, ..base.clone() },
             Settings { shell_own_switcher: true, ..base.clone() },
             Settings { shell_tray_host: true, ..base.clone() },
+            Settings { dock_weather_location: true, ..base.clone() },
         ] {
             let mut told = Some(k.clone());
             assert!(needs_reload(&mut told, Keys::of(&change)), "{:?}", Keys::of(&change));

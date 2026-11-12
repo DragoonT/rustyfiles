@@ -2,7 +2,8 @@
 //! key), for the city the user typed in Settings.
 //!
 //! PRIVACY. The only thing that ever leaves the machine is the city name the user typed, in one geocoding request, and the
-//! coordinates it gave back, in the forecast requests that follow. No location API is asked. NO REQUEST IS MADE while the city is
+//! coordinates it gave back, in the forecast requests that follow. No location API is asked here (the optional weather from the PC's
+//! position is `weather_location.rs`). NO REQUEST IS MADE while the city is
 //! empty (not even a failed one): [`WeatherFeed::refresh`] returns before it touches the network.
 //!
 //! The HTTP is Windows' own (WinHTTP, through the `windows` crate), with timeouts. Everything here blocks: call it from a worker

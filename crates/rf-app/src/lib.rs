@@ -52,6 +52,7 @@ mod transfer_view;
 mod tags;
 mod undo;
 mod preview;
+mod preview_trace;
 mod properties_view;
 mod quick_search;
 mod search_pipe;
