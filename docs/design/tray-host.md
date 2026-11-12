@@ -43,6 +43,123 @@ copies the stored snapshot; it never opens a process or waits for the host.
 Tested through the stand-ins of the host's model (`rf_win::trayhost::testkit`: no window, no thread, a recorder for the messages a
 click would send). NOT RUN: any of it against a real host.
 
+## After the first real run (the strip: volume twice, icons missing, the panel by default)
+
+The first real run (the setting switched on by the user, start broadcast on) logged
+`9 icons held; messages 50, notify 20, appbar 30, adds 9, modifies 2, modify_unknown 1, delete_unknown 6, set_versions 2, forwarded 50,
+explorer_refused 11`, and the strip showed nine icons. Four things were asked for. What was built, and what was not measured:
+
+### 1. The volume icon twice (`rf_win::trayhost::own_icons`, applied in `dock/tray_feed.rs`)
+
+STATUS: A HYPOTHESIS, NOT A FINDING. What is known: the strip held a speaker that some process added through our window, and the
+dock's right island has a volume button of its own. What is NOT known is whose speaker it was, because the first run's log holds
+counts only. On Windows 11 the volume, network and power indicators are not ordinary notification icons: Explorer draws them as its
+own "system controls", and the research note (`notes/research/shell/2-tray-notifications.md`, 1.8) found no `NotifyIconSettings` entry
+with the volume, network or power GUIDs and says Explorer-owned icons "are never visible to us". Three sources of a speaker are
+possible, and nothing here ranks them:
+1. a part of Explorer's old systray service object (`stobject.dll`; its hidden window of class `SystemTray_Main` is in Explorer's
+   process on this build) adding its volume icon through our window. Whether that object handles `TaskbarCreated` is from ReactOS's
+   reimplementation, not checked here. If it did, its other icon, Safely Remove Hardware, would be re-added the same way and would
+   not be missing (2 below): the two observations point against each other, so this source is the least supported;
+2. an audio driver's own notification icon (Realtek and others ship one; the machine has the Realtek audio service running);
+3. another program's.
+The rule below fits only the first and acts on nothing else: it needs BOTH the owner (a Windows program) and the identity (the
+indicator's GUID). It is kept because it is exact and cannot hide a third party's icon, not because it is shown to fix this speaker.
+The next run settles it (see "How to tell").
+
+* **Left out** of the strip and of the panel (the model still holds it: Explorer's list and the click engine are untouched): an icon
+  whose GUID is one of the three Explorer's own parts use for the indicators (volume `{7820AE73-...}`, network `{7820AE74-...}`, power
+  `{7820AE75-...}`, all `-23E3-4229-82C1-E41CB67D5B9C`; from another shell's source, recorded in `notes/research/shell/2-tray-notifications.md`,
+  not read from a block here) AND whose owner is a program of Windows (a path below the Windows directory; when only the file name is
+  known, `explorer.exe`; when nothing is known the icon stays) AND for which the dock shows a button now (`tray_feed::OWN_BUTTONS`:
+  volume and network yes, power no, because the right island has no battery button). Never by text, never by picture.
+* **Stays:** a third party's audio or network icon (another owner, another identity), an Explorer-owned icon with another GUID (the
+  hardware and security ones), an icon with no GUID (it has no identity the rule can name; a legacy `uID` table would be a guess, and a
+  wrong row would hide a program's icon).
+* **How to tell what it was** on the next run: the log gets `tray feed: S icon(s) not hidden by their programs, G with a GUID, E of
+  Explorer, N left out as duplicates of the dock's own volume or network button` (counts, when they change; no names). N = 1 or 2 and
+  the strip no longer has a speaker: it was Explorer's. N = 0 and a speaker is still there: it is not Windows' indicator by owner and
+  GUID (no GUID, or another owner, i.e. an audio driver's or a program's) and the rule rightly leaves it; E and G say whether the
+  speaker could have been Explorer's at all (E = 0: it was not). A speaker of that kind is the audio program's own icon; the user
+  hides it by dragging it to the panel, which is where new icons start anyway (3 below).
+
+### 2. "Safely Remove Hardware" and "Windows Security" missing
+
+STATUS: HYPOTHESES FROM THE CODE AND THE COUNTS, NOT CONFIRMED. The model learns an icon only from a `NIM_ADD` it sees, or from a
+program that adds again after the start broadcast. Anything else is in Explorer's list and not in ours. Two candidates:
+* Safely Remove Hardware: the research note lists an Explorer-owned `NotifyIconSettings` entry with the family GUID `{7820AE78-...}`
+  (hardware). Its program is `explorer.exe`, so it is added from inside Explorer (the systray object is the usual source) and, from
+  what the note says, never reaches a host. Why it does not come with the start broadcast is not known: either its part does not hear
+  `TaskbarCreated` (then the speaker of 1 is not that part either) or it adds in a way a host does not see.
+* Windows Security: `SecurityHealthSystray.exe` (GUID `{BA82E2DC-...}`, a `NotifyIconSettings` entry with `IsPromoted=1`) is a
+  separate process that does call `Shell_NotifyIcon`, so it reaches a host. It has a hidden top-level window of class `SecHealth
+  Window Class`, so the broadcast reaches it. It did not add its icon again after the broadcast; a scan of its program file for the
+  strings `TaskbarCreated` and `Shell_NotifyIcon` found neither and the file imports no `shell32`, but that proves nothing, since the
+  icon may be added by a library it loads (not traced). Whether it handles the announcement is therefore not known; it stays silent
+  until its status changes and it sends a modify or an add.
+`delete_unknown 6` and `modify_unknown 1` are such icons speaking: requests for icons the model never held. The deletes may be the
+habit of "delete, then add" that programs do on `TaskbarCreated` (the add follows and is counted as an add); that is a guess too. The
+run's counters cannot say whose they were, so each such request now gets ONE log line (the first 40 of a run): `tray host: delete for
+an icon the host never saw added: owner Explorer | another program | unknown, GUID none | the volume indicator's | ... | another,
+Explorer accepted | refused | no answer, callback yes/no, picture yes/no`. Kinds only, never a program name or a GUID. With those
+lines the next run says whether the unknown requests came from Explorer's parts (the owner) and from icons with a GUID.
+
+What a taskbar may ask of the running programs: the `TaskbarCreated` broadcast (done at the start; repeating it later is left out on
+purpose, see "Gaps while Explorer's window is first"), and nothing else. There is no query for "send me your icons" and no query to
+Explorer for its list (no supported object model; the toolbar of Windows 10 is gone on this build). The only complete source is
+Explorer's own memory, which this program does not read. What a taskbar CAN do is use what a program says when it speaks:
+
+* **A modify for an unknown icon is taken as an add** (`adopt.rs`, tested) when ALL hold: Explorer ACCEPTED the same request (so the icon
+  exists in Explorer's list; a refusal means it exists nowhere and would be a ghost; no answer is no proof), the request names a callback
+  message, it carries a picture that could be read, the owner window is a live window of a known process, and it does not state the icon
+  hidden. A tip-only or picture-only modify (the common animation) stays ignored. The one thing adoption can get wrong is the icon's
+  VERSION: Explorer holds it and nothing can ask for it. The model remembers the version a program set (`NIM_SETVERSION`, accepted by
+  Explorer) for an icon it did not hold, up to 256, and uses it at the adoption; with none, 0. A version 3 or 4 program then gets the
+  callbacks of version 0 until it sends its version again. Counted as `adopted` (all) and `adopted_version_guessed` (no version seen) in the
+  log line. Version 0 stays the guess on purpose: its packing still delivers the mouse message in the low word of `lParam`, where a
+  version 3 or 4 program reads the event (the click lands; only the anchor point in `wParam` is wrong), while version 4 packing sent
+  to a version 0 program is read as no message at all, and the programs that miss the announcement are the likelier version 0. A
+  further limit: a program that hid its icon before the host started and then sends full modifies without a state has its icon
+  adopted although Explorer holds it hidden (the hidden bit, like the version, lives in Explorer's memory); the user puts it away in
+  the panel.
+* The owner of a modify is looked up only for a modify that could become an add (unknown icon, callback, picture handle): a stream of tip
+  updates for icons we hold costs no process lookup.
+
+**Icons that can still be missing, and why:** (a) an Explorer-owned icon present before the host started and not re-added (Safely Remove
+Hardware while a device is plugged in; it appears when Explorer sends an add or a full modify through the door after the host runs, and
+not before); (b) a program that never re-adds and never sends a full modify (Windows Security until its status changes; any program that
+only changes its tip); (c) a program whose window cannot receive the broadcast (elevated programs; message-only windows); (d) an icon
+that is deleted and added by a program while ours is not the first window (the gap above). The remedy for (a) and (b) that is NOT built
+is a native replacement (an eject menu from the app's own USB code; Windows Security's status), a separate piece of work; restarting
+the program makes it add again.
+
+### 3. New icons start in the hidden-icons panel (`dock/tray_order.rs`)
+
+As on Windows: an icon the user has not placed is in the panel behind the chevron; only what the user drags to the strip is on it. The
+file `tray-order.json` has a new list, `shown`: the icons the user put on the strip. The identity is as before (the GUID, or the
+program's full path with the icon's id; never the window, the process or the tip), so a placement survives restarts of the dock and of
+the program. Placements made before this change are kept: a file without `shown` is read as `shown` = `order` without `hidden` (every
+icon had been on the strip unless hidden); the first write adds the key; the file version stays 1 (an older program ignores `shown`).
+A file from before holds only the icons that were present at the user's last move, so an icon that arrived after that move (it had
+sat at the end of the strip, never placed by the user) is in the panel after the change, like any icon nobody placed. Icons nobody
+placed are listed in the panel by their identity, not in the order the programs happened to add them (which differs at every start). A
+fresh install has no file and every icon starts in the panel. The chevron is there whenever there is any icon; with the panel
+holding something it is the way to it, and when the user has put every icon on the strip it stays as the place to drop one to hide it
+again (a chevron only while the panel holds something would leave an icon on the strip with no way back: a deviation from the
+request, on purpose).
+
+### 4. The panel's text and size (`dock/tray_strip.rs`, `tray_overflow.rs`)
+
+The empty panel said one long sentence that ran out of its 232 px. It now says "Gizli simge yok" / "No hidden icons" with a quieter
+second line "Gizlemek için simgeleri buraya sürükleyin" / "Drag icons here to hide them". `ts::ovf_empty` breaks both texts into lines
+for the panel's inner width with a width estimate that counts a little wide, the view draws each line as it is (no second wrapping), and
+the window's height is computed from the number of lines, so the text can neither run out at the side nor be cut at the bottom. The panel
+is drawn at the monitor's scale, not the dock's size, so the dock's size does not change it. With icons in it the grid is rows of up to
+six, evened out, and when the rows would not fit the screen (three quarters of the work area's height) it grows wider instead, up to
+nine tenths of the width; the window grows upwards from the island and is never taller than that. One, nine and thirty icons are 1 x 1,
+5 x 2 and 6 x 5 cells (56 x 56, 216 x 96 and 256 x 216 px); 256 icons (the host's most) fit every screen from about 1100 x 660 logical
+px up.
+
 `rf_win::tray` (rustyfiles' own tray icon) is a different thing and is not touched. Its `Shell_NotifyIcon` calls go to whichever
 `Shell_TrayWnd` is first, which with the host on is ours: they pass through the host to Explorer like everybody's.
 
@@ -58,6 +175,8 @@ click would send). NOT RUN: any of it against a real host.
 | `.../clicks.rs` | Host events to the callback messages of the icon's version; dead owners. Over traits. |
 | `.../lifecycle.rs` | Start (window, THEN broadcast), stop (window FIRST, then broadcast), the 250 ms tick. Over traits. |
 | `.../order.rs` | Strip / overflow / order from the user's own list (row B9). Pure. |
+| `.../adopt.rs` | When a modify for an icon the host never saw added may be taken as the add it missed. Pure. |
+| `.../own_icons.rs` | Which of Windows' own indicators the dock already shows as a button (left out of the strip). Pure. |
 | `.../shared.rs`, `view.rs` | The lock, the generation, the counters, the event hints, the host thread's heartbeat; what the interface holds. |
 | `.../handshake.rs` | Pure: who closes the window when the starter gave up waiting (a late start leaves no window behind). |
 | `.../stall.rs` | Pure: notices a host thread whose heartbeat stopped (a log line; it cannot repair one). |

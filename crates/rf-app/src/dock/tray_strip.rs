@@ -125,6 +125,9 @@ pub struct TrayState {
     lay: Layout,
     /// How wide the strip block may be, logical px (a quarter of the monitor's work area, at most 240).
     limit: f32,
+    /// How much of the monitor the hidden-icons panel may take (monitor-scale logical px): more icons than rows make it wider, never
+    /// taller than this.
+    ovf: ts::OvfLimits,
     /// The pictures converted for the toolkit, with the icon generation they were made from.
     images: HashMap<IconKey, (u64, Arc<RenderImage>)>,
     hover: Option<Source>,
@@ -277,6 +280,7 @@ pub fn start(right: Entity<RightIsland>, cx: &mut App) {
         arr: Arrangement::default(),
         lay: Layout::default(),
         limit: ts::strip_limit(1920.0),
+        ovf: ts::OvfLimits::for_work(1920.0, 1040.0),
         images: HashMap::new(),
         hover: None,
         press: None,
@@ -343,7 +347,14 @@ fn refresh(cx: &mut App) {
     // (the strip's room is a quarter of the screen in dock units: the cells are dock units wide)
     let size = super::look::dock_size(cx);
     let work_width = host::monitor_work(cx).map(|(scale, work)| work.width() as f32 / (scale * size).max(0.01));
-    let retired = cx.update_global::<TrayState, _>(|st, _| st.set_snapshot(snap, work_width));
+    // (the hidden-icons panel is drawn at the monitor's scale, not the dock's size: its limits are the work area in those px)
+    let panel_limits = host::monitor_work(cx).map(|(scale, work)| ts::OvfLimits::for_work(work.width() as f32 / scale.max(0.01), work.height() as f32 / scale.max(0.01)));
+    let retired = cx.update_global::<TrayState, _>(|st, _| {
+        if let Some(l) = panel_limits {
+            st.ovf = l;
+        }
+        st.set_snapshot(snap, work_width)
+    });
     retire(retired, cx);
     after_change(cx);
 }
@@ -351,7 +362,7 @@ fn refresh(cx: &mut App) {
 /// The state changed: the island gets its new width, the host its new rectangles, the open panel its new size.
 fn after_change(cx: &mut App) {
     let Some(st) = cx.try_global::<TrayState>() else { return };
-    let (right, extra, count, gone) = (st.right.clone(), st.lay.extra_width(), st.lay.overflow.len(), st.snap.is_none());
+    let (right, extra, gone) = (st.right.clone(), st.lay.extra_width(), st.snap.is_none());
     if let Some(r) = right.upgrade() {
         r.update(cx, |v, cx| v.set_tray_extra(extra, cx));
     }
@@ -360,7 +371,7 @@ fn after_change(cx: &mut App) {
             // the host went away under an open panel
             super::panel::close(CloseCause::LayoutChanged, cx);
         } else {
-            super::panel::relayout_sized(super::panel::OVERFLOW, ts::ovf_size(count), cx);
+            super::panel::relayout_sized(super::panel::OVERFLOW, overflow_size(cx), cx);
         }
     }
     report_rects(cx);
@@ -455,8 +466,8 @@ fn source_rect(src: Source, cx: &App) -> Option<Rect> {
             let scale = host::monitor_work(cx)?.0;
             let panel = overflow_rect(cx)?;
             let n = st.lay.overflow.len();
-            (k < n).then(|| {
-                let [x, y, w, h] = ts::ovf_cell(n, k);
+            (k < ts::ovf_grid(n, st.ovf).shown).then(|| {
+                let [x, y, w, h] = ts::ovf_cell_in(n, k, st.ovf);
                 Rect::from_xywh(panel.left + device_px(x, scale), panel.top + device_px(y, scale), device_px(w, scale), device_px(h, scale))
             })
         }
@@ -622,21 +633,47 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
 
 /// The overflow panel's content: how many icons, which one is being dragged, whether a dragged icon is over the panel.
 pub struct OverflowData {
+    /// The cells the panel draws (all the icons in it, unless the screen is too small for the grid, see `ts::ovf_grid`).
     pub count: usize,
+    /// The icons in the panel: the grid is worked out from this number.
+    pub total: usize,
+    pub limits: ts::OvfLimits,
     pub dragged: Option<usize>,
     pub drop_into: bool,
     pub hover: Option<usize>,
 }
 
 pub fn overflow_data(cx: &App) -> OverflowData {
-    let Some(st) = cx.try_global::<TrayState>() else { return OverflowData { count: 0, dragged: None, drop_into: false, hover: None } };
+    let Some(st) = cx.try_global::<TrayState>() else {
+        return OverflowData { count: 0, total: 0, limits: ts::OvfLimits::UNBOUNDED, dragged: None, drop_into: false, hover: None };
+    };
     let dragged = st.drag.as_ref().and_then(|d| st.index_of(d.key)).and_then(|i| st.lay.overflow.iter().position(|&o| o == i));
     let hover = match st.hover {
         Some(Source::Overflow(k)) if st.drag.is_none() => Some(k),
         _ => None,
     };
+    let total = st.lay.overflow.len();
     // (the frame that says "drop here" is for an icon coming from the strip)
-    OverflowData { count: st.lay.overflow.len(), dragged, drop_into: dragged.is_none() && st.drag.as_ref().is_some_and(|d| d.target == DropTarget::Overflow), hover }
+    OverflowData {
+        count: ts::ovf_grid(total, st.ovf).shown,
+        total,
+        limits: st.ovf,
+        dragged,
+        drop_into: dragged.is_none() && st.drag.as_ref().is_some_and(|d| d.target == DropTarget::Overflow),
+        hover,
+    }
+}
+
+/// The empty panel's text, in the user's language, already broken into lines that fit the panel (see `ts::ovf_empty`): the title and the
+/// quieter hint under it.
+pub fn empty_panel() -> ts::EmptyPanel {
+    ts::ovf_empty(crate::t!("Gizli simge yok"), crate::t!("Gizlemek için simgeleri buraya sürükleyin"))
+}
+
+/// The panel window's size now, logical px: its grid for the icons it holds (within what the screen allows), or the empty panel's text.
+pub fn overflow_size(cx: &App) -> (f32, f32) {
+    let d = overflow_data(cx);
+    if d.total == 0 { empty_panel().size } else { ts::ovf_size_in(d.total, d.limits) }
 }
 
 /// The picture of the overflow panel's cell `k`.
@@ -649,7 +686,7 @@ pub fn overflow_picture(k: usize, size: f32, pal: Palette, cx: &App) -> AnyEleme
 
 /// How many columns the panel has for the icons it holds now.
 pub fn overflow_cols(cx: &App) -> usize {
-    ts::ovf_dims(cx.try_global::<TrayState>().map_or(0, |st| st.lay.overflow.len())).0
+    cx.try_global::<TrayState>().map_or(0, |st| ts::ovf_grid(st.lay.overflow.len(), st.ovf).cols)
 }
 
 /// The key of the icon in cell `k` of the overflow panel now.
@@ -1046,7 +1083,7 @@ pub fn key_down(ev: &KeyDownEvent, cx: &mut App) -> bool {
 #[cfg(test)]
 mod tests {
     // (not `super::*`: that would bring in the toolkit's own `test` attribute, which shadows the standard one)
-    use super::{Arrangement, Arc, DropTarget, Drag, HashMap, IconKey, Instant, Keyboard, Layout, Mutex, Source, TrayOrder, TrayState, WeakEntity, rules, to_image, tray_source, ts};
+    use super::{Arrangement, Arc, Dest, DropTarget, Drag, HashMap, IconKey, Instant, Keyboard, Layout, Mutex, Source, StableId, TrayOrder, TrayState, WeakEntity, rules, to_image, tray_source, ts};
 
     #[test]
     fn with_no_host_a_refresh_does_nothing_and_the_order_file_is_read_only_when_the_first_snapshot_comes() {
@@ -1093,6 +1130,7 @@ mod tests {
             arr: Arrangement::default(),
             lay: Layout::default(),
             limit,
+            ovf: ts::OvfLimits::for_work(2560.0, 1392.0),
             images: HashMap::new(),
             hover: None,
             press: None,
@@ -1104,11 +1142,83 @@ mod tests {
         }
     }
 
-    /// A work area `work_width` px wide gives a quarter of it, at most 240.
+    /// A work area `work_width` px wide gives a quarter of it, at most 240. The user has put every one of the made-up icons on the strip
+    /// (a new icon starts in the hidden-icons panel; the tests of the strip's layout begin from a strip that is full).
     fn loaded(work_width: f32) -> TrayState {
         let mut st = state(0.0);
-        let _ = st.set_snapshot(Some(tray_source::test_snapshot(0)), Some(work_width));
+        let snap = tray_source::test_snapshot(0);
+        let ids: Vec<StableId> = snap.icons.iter().map(|i| i.id.clone()).collect();
+        for i in 0..ids.len() {
+            st.order.reorder(&ids, i, Dest::Strip, i);
+        }
+        let _ = st.set_snapshot(Some(snap), Some(work_width));
         st
+    }
+
+    #[test]
+    fn with_nothing_placed_by_the_user_every_icon_waits_in_the_panel_and_the_chevron_is_there() {
+        let mut st = state(0.0);
+        let _ = st.set_snapshot(Some(tray_source::test_snapshot(0)), Some(2560.0));
+        assert!(st.lay.visible.is_empty(), "as on Windows: only what the user drags to the strip is on it");
+        // (icons nobody placed are listed by their identity, not by arrival: the order is `rf_win`'s rule, tested there; here all six are in it)
+        let sorted = |v: &[usize]| {
+            let mut v = v.to_vec();
+            v.sort_unstable();
+            v
+        };
+        assert_eq!(sorted(&st.lay.overflow), vec![0, 1, 2, 3, 4, 5]);
+        assert!(st.lay.chevron);
+        assert_eq!(st.lay.extra_width(), 24.0 + 17.0, "just the chevron and the separator");
+        // the user drags the second icon to the strip: it is the only one there, the rest stay in the panel
+        let (dest, at) = ts::drop_move(&st.lay.visible, 1, true, DropTarget::Strip(0), 9).unwrap();
+        assert!(st.move_icon(1, dest, at));
+        assert_eq!(st.lay.visible, vec![1]);
+        assert_eq!(sorted(&st.lay.overflow), vec![0, 2, 3, 4, 5]);
+        // a new program's icon arrives: in the panel
+        let mut snap = tray_source::test_snapshot(0);
+        let mut extra = snap.icons[0].clone();
+        extra.key = 900;
+        extra.id = StableId::from_program(r"C:\Fake\Yeni.exe", 9);
+        snap.icons.push(extra);
+        let _ = st.set_snapshot(Some(snap), Some(2560.0));
+        assert_eq!(st.lay.visible, vec![1]);
+        assert_eq!(st.lay.overflow.len(), 6);
+    }
+
+    #[test]
+    fn the_chevron_stays_when_every_icon_is_on_the_strip_so_one_can_be_hidden_again() {
+        let st = loaded(2560.0);
+        assert!(st.lay.overflow.is_empty() && st.lay.chevron);
+        assert_eq!(super::ts::ovf_grid(0, st.ovf).shown, 0);
+    }
+
+    #[test]
+    fn the_panels_size_follows_its_icons_and_its_text() {
+        let mut st = loaded(2560.0);
+        // nothing in the panel: the two lines of text decide
+        let e = super::empty_panel();
+        assert_eq!(e.size.0, ts::OVF_EMPTY_W);
+        assert!(e.size.1 > ts::OVF_EMPTY_H, "a title and a hint of at least one line each");
+        // one, nine and thirty icons in the panel (rows of a fixed number; a fixed limit: the screen of the test)
+        let mut counts = Vec::new();
+        for n in [1usize, 9, 30] {
+            let mut snap = tray_source::test_snapshot(0);
+            let template = snap.icons[0].clone();
+            snap.icons.clear();
+            for i in 0..n {
+                let mut ic = template.clone();
+                ic.key = 1000 + i as u64;
+                ic.id = StableId::from_program(r"C:\Fake\Many.exe", i as u32);
+                snap.icons.push(ic);
+            }
+            let _ = st.set_snapshot(Some(snap), Some(2560.0));
+            assert_eq!(st.lay.overflow.len(), n, "none of them was placed on the strip");
+            let (cols, rows) = (ts::ovf_grid(n, st.ovf).cols, ts::ovf_grid(n, st.ovf).rows);
+            let (w, h) = ts::ovf_size_in(n, st.ovf);
+            assert!(w <= st.ovf.max_w && h <= st.ovf.max_h);
+            counts.push((n, cols, rows));
+        }
+        assert_eq!(counts, vec![(1, 1, 1), (9, 5, 2), (30, 6, 5)]);
     }
 
     #[test]
@@ -1186,8 +1296,7 @@ mod tests {
         // the ring is on the third icon (key 103)
         st.kb = Some(Keyboard { cursor: 2, on: st.key_at_stop(2), previous: 0, opened_at: Instant::now(), been_front: false });
         assert_eq!(st.kb.unwrap().on, Some(103));
-        // a new program's icon is listed first (the user's order is empty, so the host's order stands): everything is one place later and
-        // the ring went with its icon (by place alone it would now be on the icon that was second)
+        // a new program's icon is listed first: it waits in the panel, the strip is as it was and the ring stays
         let mut snap = tray_source::test_snapshot(0);
         let mut extra = snap.icons[0].clone();
         extra.key = 900;
@@ -1195,14 +1304,16 @@ mod tests {
         snap.icons.insert(0, extra);
         let _ = st.set_snapshot(Some(snap), Some(2560.0));
         let k = st.kb.unwrap();
-        assert_eq!((k.cursor, k.on), (3, Some(103)));
-        assert_eq!(st.key_at_stop(k.cursor), Some(103));
-        // the user puts the new icon last: the ring comes back with its icon
+        assert_eq!((k.cursor, k.on), (2, Some(103)));
+        assert_eq!(st.lay.overflow.len(), 1);
+        // the user puts the new icon at the front of the strip: everything is one place later and the ring went with its icon (by place
+        // alone it would now be on the icon that was second)
         let moved = st.index_of(900).unwrap();
-        let (dest, at) = ts::drop_move(&st.lay.visible, moved, false, DropTarget::Strip(7), 9).unwrap();
+        let (dest, at) = ts::drop_move(&st.lay.visible, moved, true, DropTarget::Strip(0), 9).unwrap();
         assert!(st.move_icon(moved, dest, at));
         let k = st.kb.unwrap();
-        assert_eq!((k.cursor, k.on), (2, Some(103)), "the ring is where its icon is now");
+        assert_eq!((k.cursor, k.on), (3, Some(103)), "the ring is where its icon is now");
+        assert_eq!(st.key_at_stop(k.cursor), Some(103));
         // its icon goes: the ring stays at the nearest stop and names the icon that is there
         let mut snap = tray_source::test_snapshot(0);
         snap.icons.retain(|i| i.key != 103);

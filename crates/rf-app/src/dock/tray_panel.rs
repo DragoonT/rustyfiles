@@ -10,7 +10,6 @@ use std::rc::Rc;
 
 use gpui_kit::*;
 use rf_win::dock::layout::Rect;
-use rf_win::dock::tray_strip as ts;
 
 use super::{Hooks, PanelId, Side, Slot, host, host_global, open_hidden, panel};
 use crate::dock::host::Kind;
@@ -65,7 +64,9 @@ pub(super) fn create(cx: &mut App) -> bool {
     let Some(island) = panel(cx).and_then(|p| p.right_island.clone()) else { return false };
     let display = cx.primary_display().map(|d| d.id());
     let isl = island.clone();
-    let Some(handle) = open_hidden(ts::ovf_size(0), display, near, scale, move |window, cx| OverflowView::new(isl, window, cx), cx) else { return false };
+    // (the window starts at the size the panel has now: its icons' grid, or the empty panel's text; it is fitted again as they change)
+    let size = crate::dock::tray_strip::overflow_size(cx);
+    let Some(handle) = open_hidden(size, display, near, scale, move |window, cx| OverflowView::new(isl, window, cx), cx) else { return false };
     let Ok(view) = handle.entity(cx) else { return false };
     let hwnd = handle.update(cx, |_, window, _| crate::look::window::hwnd_of(window)).unwrap_or(0);
     if hwnd == 0 {

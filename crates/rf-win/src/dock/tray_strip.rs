@@ -48,8 +48,10 @@ pub struct Layout {
     pub visible: Vec<usize>,
     /// Present icons in the overflow panel: the ones the user hid and the ones that did not fit, in the user's order.
     pub overflow: Vec<usize>,
-    /// There is a chevron whenever there is any icon at all: it is the place to drop an icon to hide it, and with nothing hidden the
-    /// panel explains that.
+    /// There is a chevron whenever there is any icon at all. It is where the icons the user has not placed wait (the usual case now:
+    /// every new icon starts there), and when the user has put every icon on the strip it stays, as the place to drop an icon to hide
+    /// it again; the empty panel then says so. (A chevron only while the panel holds something would leave an icon on the strip with no
+    /// way back.)
     pub chevron: bool,
 }
 
@@ -183,32 +185,97 @@ pub const OVF_ICON: f32 = 20.0;
 pub const OVF_PAD: f32 = 8.0;
 /// Most cells in a row.
 pub const OVF_COLS: usize = 6;
-/// The panel's width and the height of its one line when nothing is in it.
+/// The panel's width when nothing is in it (the text inside is wrapped to fit, see [`ovf_empty`]).
 pub const OVF_EMPTY_W: f32 = 232.0;
+/// The height of the empty panel for the old one-line text; the real height now comes from [`ovf_empty`].
 pub const OVF_EMPTY_H: f32 = 48.0;
 
-/// Columns and rows for `count` icons: a row of up to [`OVF_COLS`], then more rows, evened out (7 icons are 4 and 3, not 6 and 1).
-pub fn ovf_dims(count: usize) -> (usize, usize) {
-    if count == 0 {
-        return (0, 0);
-    }
-    let rows = count.div_ceil(OVF_COLS);
-    (count.div_ceil(rows), rows)
+/// The most room the panel may take on a screen, logical px (the panel's own scale: the monitor's, not the dock's size). It grows
+/// upwards from above the island, so what it may take of the height is limited by the island under it and a margin above.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OvfLimits {
+    pub max_w: f32,
+    pub max_h: f32,
 }
 
-/// The panel's size, logical px.
+impl OvfLimits {
+    /// No limit: the panel is as large as its icons want (what the plain functions below use).
+    pub const UNBOUNDED: OvfLimits = OvfLimits { max_w: f32::MAX, max_h: f32::MAX };
+
+    /// For a monitor whose work area is `work_w` x `work_h` logical px: nine tenths of the width and three quarters of the height, so
+    /// that the island, the gap above it and a margin at the top of the screen are never covered.
+    pub fn for_work(work_w: f32, work_h: f32) -> OvfLimits {
+        OvfLimits { max_w: (work_w * 0.9).max(OVF_CELL + 2.0 * OVF_PAD), max_h: (work_h * 0.75).max(OVF_CELL + 2.0 * OVF_PAD) }
+    }
+
+    fn max_cols(self) -> usize {
+        (((self.max_w - 2.0 * OVF_PAD) / OVF_CELL).floor().max(1.0)) as usize
+    }
+
+    fn max_rows(self) -> usize {
+        (((self.max_h - 2.0 * OVF_PAD) / OVF_CELL).floor().max(1.0)) as usize
+    }
+}
+
+/// The grid of the panel: its columns and rows, and how many icons it can show (all of them, unless the screen is so small that even
+/// the widest grid the limits allow cannot hold them; for the host's most, 256 icons, that is a screen below about 1100 x 660
+/// logical px).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OvfGrid {
+    pub cols: usize,
+    pub rows: usize,
+    pub shown: usize,
+}
+
+/// The grid for `count` icons within `limits`: a row of up to [`OVF_COLS`], then more rows, evened out (7 icons are 4 and 3, not 6 and
+/// 1); when the rows would not fit the height the grid gets wider instead (as wide as the width allows), so the panel grows
+/// sideways rather than off the screen.
+pub fn ovf_grid(count: usize, limits: OvfLimits) -> OvfGrid {
+    if count == 0 {
+        return OvfGrid { cols: 0, rows: 0, shown: 0 };
+    }
+    let base_rows = count.div_ceil(OVF_COLS);
+    let base_cols = count.div_ceil(base_rows);
+    let (max_cols, max_rows) = (limits.max_cols(), limits.max_rows());
+    if base_rows <= max_rows && base_cols <= max_cols {
+        return OvfGrid { cols: base_cols, rows: base_rows, shown: count };
+    }
+    let mut cols = base_cols.min(max_cols);
+    while count.div_ceil(cols) > max_rows && cols < max_cols {
+        cols += 1;
+    }
+    let rows = count.div_ceil(cols).min(max_rows);
+    OvfGrid { cols, rows, shown: (cols * rows).min(count) }
+}
+
+/// Columns and rows for `count` icons with no limit (see [`ovf_grid`]).
+pub fn ovf_dims(count: usize) -> (usize, usize) {
+    let g = ovf_grid(count, OvfLimits::UNBOUNDED);
+    (g.cols, g.rows)
+}
+
+/// The panel's size for icons, logical px. For no icons the size depends on the text, see [`ovf_empty`]; this gives the old default.
 pub fn ovf_size(count: usize) -> (f32, f32) {
+    ovf_size_in(count, OvfLimits::UNBOUNDED)
+}
+
+/// [`ovf_size`] within `limits`.
+pub fn ovf_size_in(count: usize, limits: OvfLimits) -> (f32, f32) {
     if count == 0 {
         return (OVF_EMPTY_W, OVF_EMPTY_H + 2.0 * OVF_PAD);
     }
-    let (cols, rows) = ovf_dims(count);
-    (2.0 * OVF_PAD + cols as f32 * OVF_CELL, 2.0 * OVF_PAD + rows as f32 * OVF_CELL)
+    let g = ovf_grid(count, limits);
+    (2.0 * OVF_PAD + g.cols as f32 * OVF_CELL, 2.0 * OVF_PAD + g.rows as f32 * OVF_CELL)
 }
 
 /// Cell `i` (x, y, w, h), logical px in the panel.
 pub fn ovf_cell(count: usize, i: usize) -> [f32; 4] {
-    let (cols, _) = ovf_dims(count);
-    let cols = cols.max(1);
+    ovf_cell_in(count, i, OvfLimits::UNBOUNDED)
+}
+
+/// [`ovf_cell`] within `limits`.
+pub fn ovf_cell_in(count: usize, i: usize, limits: OvfLimits) -> [f32; 4] {
+    let cols = ovf_grid(count, limits).cols.max(1);
     [OVF_PAD + (i % cols) as f32 * OVF_CELL, OVF_PAD + (i / cols) as f32 * OVF_CELL, OVF_CELL, OVF_CELL]
 }
 
@@ -218,6 +285,87 @@ pub fn ovf_hit(count: usize, x: f32, y: f32) -> Option<usize> {
         let [cx, cy, w, h] = ovf_cell(count, i);
         x >= cx && x < cx + w && y >= cy && y < cy + h
     })
+}
+
+// ---------------------------------------------------------------- the empty panel's text
+
+/// The text sizes and line heights of the empty panel, logical px.
+pub const OVF_TITLE_PX: f32 = 13.0;
+pub const OVF_HINT_PX: f32 = 12.0;
+pub const OVF_TITLE_LINE: f32 = 18.0;
+pub const OVF_HINT_LINE: f32 = 16.0;
+/// Space above the first and below the last line, and between the title and the hint.
+pub const OVF_EMPTY_VPAD: f32 = 12.0;
+pub const OVF_EMPTY_GAP: f32 = 2.0;
+
+/// How wide `text` is at `px` logical px, ESTIMATED and on purpose a little wide: a line that is wrapped to this estimate is never wider
+/// than its room in the real font (a panel with too much room is a smaller fault than text that runs out of it). Classes of letters by
+/// their usual share of the em in the system's UI font; Turkish letters count as ordinary letters.
+pub fn text_width(text: &str, px: f32) -> f32 {
+    text.chars()
+        .map(|c| {
+            let em = match c {
+                ' ' => 0.30,
+                'i' | 'ı' | 'l' | 'j' | 'I' | '\'' | '.' | ',' | ';' | ':' | '!' | '|' | '(' | ')' | '[' | ']' | 't' | 'f' | 'r' | '1' => 0.40,
+                'm' | 'w' | 'M' | 'W' | '@' | '%' => 0.95,
+                '0'..='9' => 0.58,
+                c if c.is_uppercase() => 0.70,
+                c if (c as u32) >= 0x2E80 => 1.05,
+                _ => 0.58,
+            };
+            em * px
+        })
+        .sum()
+}
+
+/// `text` broken into lines no wider than `max_w` (by [`text_width`]) at `px`, at spaces; a word that is wider than a line by itself is
+/// broken between letters. Always at least one line (an empty text is one empty line).
+pub fn wrap_text(text: &str, px: f32, max_w: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let candidate = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
+        if text_width(&candidate, px) <= max_w {
+            line = candidate;
+            continue;
+        }
+        if !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+        }
+        // the word on a line of its own; broken between letters when it still does not fit
+        let mut piece = String::new();
+        for ch in word.chars() {
+            let mut next = piece.clone();
+            next.push(ch);
+            if !piece.is_empty() && text_width(&next, px) > max_w {
+                lines.push(std::mem::take(&mut piece));
+            }
+            piece.push(ch);
+        }
+        line = piece;
+    }
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
+/// What the empty panel shows: the title and the quieter hint, already broken into lines, and the size the panel needs for them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EmptyPanel {
+    pub title: Vec<String>,
+    pub hint: Vec<String>,
+    pub size: (f32, f32),
+}
+
+/// The empty panel for a title and a hint (any language): the width is [`OVF_EMPTY_W`] less the padding at both sides, each text is
+/// wrapped to it, and the height follows the number of lines.
+pub fn ovf_empty(title: &str, hint: &str) -> EmptyPanel {
+    let inner = OVF_EMPTY_W - 2.0 * OVF_PAD;
+    let title = wrap_text(title, OVF_TITLE_PX, inner);
+    let hint = wrap_text(hint, OVF_HINT_PX, inner);
+    let h = 2.0 * OVF_EMPTY_VPAD + title.len() as f32 * OVF_TITLE_LINE + OVF_EMPTY_GAP + hint.len() as f32 * OVF_HINT_LINE;
+    EmptyPanel { title, hint, size: (OVF_EMPTY_W, h) }
 }
 
 // ---------------------------------------------------------------- what a click means
@@ -689,6 +837,147 @@ mod tests {
         assert_eq!(ovf_hit(7, 8.0 + 3.0 * 40.0 + 5.0, 55.0), None, "the last row has three cells; this is past the 7th");
         assert_eq!(ovf_hit(7, 2.0, 2.0), None, "the panel's padding");
         assert_eq!(ovf_hit(0, 10.0, 10.0), None);
+    }
+
+    #[test]
+    fn one_nine_and_thirty_icons_in_the_panel() {
+        // a 2560 x 1440 screen at 100 % (work area about 2560 x 1392): plenty of room, rows of up to six as before
+        let big = OvfLimits::for_work(2560.0, 1392.0);
+        let g1 = ovf_grid(1, big);
+        assert_eq!((g1.cols, g1.rows, g1.shown), (1, 1, 1));
+        assert_eq!(ovf_size_in(1, big), (56.0, 56.0));
+        let g9 = ovf_grid(9, big);
+        assert_eq!((g9.cols, g9.rows, g9.shown), (5, 2, 9), "5 and 4, not 6 and 3");
+        assert_eq!(ovf_size_in(9, big), (16.0 + 200.0, 16.0 + 80.0));
+        let g30 = ovf_grid(30, big);
+        assert_eq!((g30.cols, g30.rows, g30.shown), (6, 5, 30));
+        assert_eq!(ovf_size_in(30, big), (16.0 + 240.0, 16.0 + 200.0));
+        // the cells of 30 icons fill a 6 x 5 grid, none outside the panel
+        let (w, h) = ovf_size_in(30, big);
+        for i in 0..30 {
+            let [x, y, cw, ch] = ovf_cell_in(30, i, big);
+            assert!(x >= OVF_PAD && y >= OVF_PAD && x + cw <= w - OVF_PAD && y + ch <= h - OVF_PAD, "cell {i}");
+        }
+        assert_eq!(ovf_cell_in(30, 29, big), [8.0 + 5.0 * 40.0, 8.0 + 4.0 * 40.0, 40.0, 40.0]);
+    }
+
+    #[test]
+    fn a_small_screen_gets_a_wider_panel_not_a_taller_one() {
+        // a 1366 x 768 laptop at 100 % (work area 1366 x 728): three quarters of the height is 546 px = 13 rows of 40 px
+        let lim = OvfLimits::for_work(1366.0, 728.0);
+        let g = ovf_grid(30, lim);
+        assert_eq!((g.cols, g.rows, g.shown), (6, 5, 30), "30 still fit in five rows");
+        // 125 % on a 1920 x 1080 screen: work area 1536 x 854 logical, 640 px high: 15 rows
+        let lim125 = OvfLimits::for_work(1536.0, 854.0);
+        assert_eq!(lim125.max_rows(), 15);
+        // far more icons than rows: wider, never past the rows the height allows
+        let tall = OvfLimits::for_work(1000.0, 400.0); // 300 px: 7 rows
+        let g = ovf_grid(40, tall);
+        assert_eq!(g.rows, 7);
+        assert_eq!(g.cols, 6, "6 columns x 7 rows hold 40");
+        assert_eq!(g.shown, 40);
+        let g = ovf_grid(100, tall);
+        assert_eq!((g.rows, g.cols, g.shown), (7, 15, 100));
+    }
+
+    #[test]
+    fn the_panel_never_leaves_the_screen_for_any_number_of_icons() {
+        // every screen from a small laptop to a big monitor, every count the host can hold (256), every scale: the panel's size is within the
+        // limits, every cell inside the panel, and every icon has a cell on screens of at least 1100 x 660 logical px
+        for (w, h) in [(1100.0, 660.0), (1280.0, 720.0), (1366.0, 728.0), (1536.0, 854.0), (1920.0, 1032.0), (2560.0, 1392.0), (3840.0, 2072.0)] {
+            let lim = OvfLimits::for_work(w, h);
+            for count in 1..=256usize {
+                let g = ovf_grid(count, lim);
+                let (pw, ph) = ovf_size_in(count, lim);
+                assert!(pw <= lim.max_w + 0.01 && ph <= lim.max_h + 0.01, "{w}x{h}, {count}: {pw} x {ph}");
+                assert!(g.cols * g.rows >= g.shown && g.shown <= count && g.shown >= 1, "{w}x{h}, {count}");
+                assert_eq!(g.shown, count, "{w}x{h}: all {count} icons have a cell");
+                let [x, y, cw, ch] = ovf_cell_in(count, count - 1, lim);
+                assert!(x + cw <= pw && y + ch <= ph, "{w}x{h}, {count}: the last cell is inside");
+            }
+        }
+        // a screen too small for 256 icons shows what fits and says so by `shown`
+        let tiny = OvfLimits::for_work(400.0, 300.0);
+        let g = ovf_grid(256, tiny);
+        assert!(g.shown < 256 && g.shown == g.cols * g.rows);
+        let (pw, ph) = ovf_size_in(256, tiny);
+        assert!(pw <= tiny.max_w && ph <= tiny.max_h);
+    }
+
+    #[test]
+    fn the_unbounded_plain_functions_are_the_old_ones() {
+        for n in 0..80 {
+            assert_eq!(ovf_grid(n, OvfLimits::UNBOUNDED).shown, n);
+            assert_eq!(ovf_size(n), ovf_size_in(n, OvfLimits::UNBOUNDED));
+        }
+        assert_eq!(ovf_dims(30), (6, 5));
+    }
+
+    // ---- the empty panel's text
+
+    #[test]
+    fn the_empty_panel_says_two_lines_and_fits_them() {
+        let p = ovf_empty("Gizli simge yok", "Gizlemek için simgeleri buraya sürükleyin");
+        assert_eq!(p.title, vec!["Gizli simge yok".to_string()]);
+        assert!(p.hint.len() >= 2, "the hint is longer than one line of the panel: {:?}", p.hint);
+        // every line is within the panel's inner width, by the same estimate that broke it
+        let inner = OVF_EMPTY_W - 2.0 * OVF_PAD;
+        for l in &p.title {
+            assert!(text_width(l, OVF_TITLE_PX) <= inner, "{l}");
+        }
+        for l in &p.hint {
+            assert!(text_width(l, OVF_HINT_PX) <= inner, "{l}");
+        }
+        // the lines joined are the text (nothing lost, no word split)
+        assert_eq!(p.hint.join(" "), "Gizlemek için simgeleri buraya sürükleyin");
+        // the height holds exactly its lines
+        let want = 2.0 * OVF_EMPTY_VPAD + p.title.len() as f32 * OVF_TITLE_LINE + OVF_EMPTY_GAP + p.hint.len() as f32 * OVF_HINT_LINE;
+        assert_eq!(p.size, (OVF_EMPTY_W, want));
+    }
+
+    #[test]
+    fn the_english_pair_fits_too() {
+        let p = ovf_empty("No hidden icons", "Drag icons here to hide them");
+        assert_eq!(p.title.len(), 1);
+        assert!(!p.hint.is_empty() && p.hint.len() <= 2);
+        assert_eq!(p.hint.join(" "), "Drag icons here to hide them");
+        assert!(p.size.1 >= 2.0 * OVF_EMPTY_VPAD + OVF_TITLE_LINE + OVF_EMPTY_GAP + OVF_HINT_LINE);
+    }
+
+    #[test]
+    fn wrapping_is_by_words_then_by_letters_and_never_loses_text() {
+        assert_eq!(wrap_text("", 12.0, 100.0), vec![String::new()]);
+        assert_eq!(wrap_text("abc", 12.0, 100.0), vec!["abc".to_string()]);
+        // a narrow room: one word per line
+        let lines = wrap_text("alpha beta gamma", 12.0, 50.0);
+        assert!(lines.len() >= 3, "{lines:?}");
+        assert_eq!(lines.join(" "), "alpha beta gamma");
+        // a word wider than the line is broken between letters, every letter kept
+        let long = "Windows-Hakkındaki-Cok-Uzun-Bir-Kelime-Ki-Satira-Sigmaz";
+        let lines = wrap_text(long, 12.0, 100.0);
+        assert!(lines.len() > 1);
+        assert_eq!(lines.concat(), long);
+        for l in &lines {
+            assert!(text_width(l, 12.0) <= 100.0 + 12.0 * 1.05, "{l}: at most one letter over");
+        }
+        // a room narrower than one letter: still terminates, one letter per line
+        let lines = wrap_text("abc", 12.0, 1.0);
+        assert_eq!(lines, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn at_any_width_the_text_fits_the_height_it_asks_for() {
+        // (the panel does not scale with the dock's size: it is drawn at the monitor's scale; these are the inner widths it could have at
+        // the smallest and the largest sensible widths, for both languages)
+        for (title, hint) in [("Gizli simge yok", "Gizlemek için simgeleri buraya sürükleyin"), ("No hidden icons", "Drag icons here to hide them")] {
+            for inner in (60..=400).step_by(10) {
+                let inner = inner as f32;
+                let (t, h) = (wrap_text(title, OVF_TITLE_PX, inner), wrap_text(hint, OVF_HINT_PX, inner));
+                assert!(t.iter().all(|l| text_width(l, OVF_TITLE_PX) <= inner + OVF_TITLE_PX * 1.05), "{inner}: {t:?}");
+                assert!(h.iter().all(|l| text_width(l, OVF_HINT_PX) <= inner + OVF_HINT_PX * 1.05), "{inner}: {h:?}");
+                assert_eq!(h.concat().replace(' ', ""), hint.replace(' ', ""), "{inner}: no letter lost");
+            }
+        }
     }
 
     // ---- clicks

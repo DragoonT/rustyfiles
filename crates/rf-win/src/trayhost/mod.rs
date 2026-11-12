@@ -21,6 +21,8 @@
 //! | `clicks.rs` | host events to the owners' callback messages, dead owners | through traits |
 //! | `lifecycle.rs` | start (window, then broadcast), stop (window FIRST, then broadcast), the 250 ms tick | through traits |
 //! | `order.rs` | strip / overflow / order from the user's own list | no |
+//! | `adopt.rs` | when a modify for an icon the host never saw added may be taken as the add it missed | no |
+//! | `own_icons.rs` | which of Windows' own indicators the dock already shows as a button (left out of the strip) | no |
 //! | `shared.rs`, `view.rs` | the lock, the generation, the counters, the event queue; what the interface holds | no |
 //! | `handshake.rs` | who closes the window when the starter has given up waiting | no |
 //! | `stall.rs` | notices a host thread that has stopped ticking (a log line; it cannot fix one) | no |
@@ -31,6 +33,7 @@
 //!
 //! What the tests never do (scanned in `scans` below): create a window, send or post a message, broadcast, start the host.
 
+pub mod adopt;
 pub mod clicks;
 pub mod core;
 pub mod fakes;
@@ -39,6 +42,7 @@ pub mod host;
 pub mod lifecycle;
 pub mod model;
 pub mod order;
+pub mod own_icons;
 pub mod pixels;
 pub mod relay;
 pub mod shared;
@@ -62,6 +66,8 @@ mod scans {
 
     fn sources() -> Vec<(&'static str, &'static str)> {
         vec![
+            ("adopt.rs", include_str!("adopt.rs")),
+            ("own_icons.rs", include_str!("own_icons.rs")),
             ("clicks.rs", include_str!("clicks.rs")),
             ("core.rs", include_str!("core.rs")),
             ("fakes.rs", include_str!("fakes.rs")),

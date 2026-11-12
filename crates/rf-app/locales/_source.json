@@ -9240,5 +9240,17 @@
   "key": "Öndeki pencere değilse ve imleç üstünde durmuyorsa camın son görüntüsü kalır; arkada ne değişirse değişsin hiçbir şey yakalanmaz ya da çizilmez. Pencere öne gelince cam yeniden akar.",
   "tr": "Öndeki pencere değilse ve imleç üstünde durmuyorsa camın son görüntüsü kalır; arkada ne değişirse değişsin hiçbir şey yakalanmaz ya da çizilmez. Pencere öne gelince cam yeniden akar.",
   "en": "While the window is not in front and the pointer is not over it, the glass keeps its last picture: nothing is captured or drawn, whatever changes behind it. It flows again when the window comes to the front."
+ },
+ {
+  "id": "f33457fc",
+  "key": "Gizli simge yok",
+  "tr": "Gizli simge yok",
+  "en": "No hidden icons"
+ },
+ {
+  "id": "6e6f368d",
+  "key": "Gizlemek için simgeleri buraya sürükleyin",
+  "tr": "Gizlemek için simgeleri buraya sürükleyin",
+  "en": "Drag icons here to hide them"
  }
 ]

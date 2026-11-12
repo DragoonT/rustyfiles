@@ -27,6 +27,7 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::clicks::{self, ClickOutcome, ClickRequest};
 use super::model::{ApplyNote, ImageUpdate, Prepared};
@@ -35,7 +36,7 @@ use super::traits::{Clock, IconPixels, OwnerSend, Raw, Relay, Relayed};
 use crate::tray_wire::forward::{Method, Outcome, reply_for};
 use crate::tray_wire::notify::{BalloonKind, Nim, NotifyIconRequest};
 use crate::tray_wire::rect::{IconRectQuery, RectPacking, pack_reply};
-use crate::tray_wire::{DW_ICON_RECT, TrayRequest, WireError, parse_copydata};
+use crate::tray_wire::{DW_ICON_RECT, IconKey, TrayRequest, WireError, parse_copydata};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CoreConfig {
@@ -54,11 +55,17 @@ pub struct Core {
     pixels: Box<dyn IconPixels>,
     owners: Arc<dyn OwnerSend>,
     clock: Box<dyn Clock>,
+    /// Log lines still allowed for requests about icons the host never saw ([`UNKNOWN_LINES`] at the start).
+    unknown_lines_left: AtomicU32,
 }
+
+/// How many requests about unknown icons are described in the log in one run: enough to name every owner of a first run (it counted
+/// 7), few enough that a program that keeps deleting an icon it never added cannot fill the log.
+pub const UNKNOWN_LINES: u32 = 40;
 
 impl Core {
     pub fn new(shared: Arc<Shared>, cfg: CoreConfig, relay: Box<dyn Relay>, pixels: Box<dyn IconPixels>, owners: Arc<dyn OwnerSend>, clock: Box<dyn Clock>) -> Core {
-        Core { shared, cfg, relay, pixels, owners, clock }
+        Core { shared, cfg, relay, pixels, owners, clock, unknown_lines_left: AtomicU32::new(UNKNOWN_LINES) }
     }
 
     pub fn config(&self) -> CoreConfig {
@@ -208,6 +215,11 @@ impl Core {
             (_, Some(ApplyNote::ReAdded)) => bump(&c.re_adds),
             (_, Some(ApplyNote::Modified)) | (Nim::Modify, None) => bump(&c.modifies),
             (_, Some(ApplyNote::ModifyUnknown)) => bump(&c.modify_unknown),
+            (_, Some(ApplyNote::Adopted)) => bump(&c.adopted),
+            (_, Some(ApplyNote::AdoptedVersionGuessed)) => {
+                bump(&c.adopted);
+                bump(&c.adopted_version_guessed);
+            }
             (_, Some(ApplyNote::Deleted)) | (Nim::Delete, None) => bump(&c.deletes),
             (_, Some(ApplyNote::DeleteUnknown)) => bump(&c.delete_unknown),
             (_, Some(ApplyNote::VersionSet)) | (Nim::SetVersion, None) => bump(&c.set_versions),
@@ -241,10 +253,37 @@ impl Core {
         let prep = self.prepare(req, verdict);
         let out = self.shared.apply(req, prep);
         self.count_nim(req.message, Some(out.note));
+        if matches!(out.note, ApplyNote::ModifyUnknown | ApplyNote::DeleteUnknown | ApplyNote::VersionRefused) {
+            self.say_unknown(req, verdict);
+        }
         if out.events.iter().any(|e| matches!(e, super::model::TrayEvent::Balloon(_))) {
             bump(&self.shared.counters.balloons);
         }
         out.answer
+    }
+
+    /// One log line for a request about an icon the host never saw added, so that a run says WHOSE icons are missing (the counters
+    /// only count them). It says kinds, never a name: who the owner is (Explorer, another program, unknown), whether a GUID came and
+    /// whether it is one of the dock's own indicators, what Explorer answered and what the request carried. Only the first
+    /// [`UNKNOWN_LINES`] of a run, and the owner is looked up only while lines are left.
+    fn say_unknown(&self, req: &NotifyIconRequest, verdict: Option<bool>) {
+        if self.unknown_lines_left.try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1)).is_err() {
+            return;
+        }
+        let d = &req.data;
+        let owner_exe = self.owners.owner_pid(d.hwnd_handle()).and_then(|pid| self.owners.owner_exe(pid));
+        let line = super::adopt::unknown_line(&super::adopt::UnknownFacts {
+            message: req.message,
+            owner: super::adopt::owner_kind(owner_exe.as_deref()),
+            guid: super::adopt::guid_kind(match d.key() {
+                IconKey::Guid(g) => Some(g),
+                _ => None,
+            }),
+            verdict,
+            callback: d.callback().is_some(),
+            picture: d.icon_handle().is_some_and(|h| h != 0),
+        });
+        log::info!("tray host: {line}");
     }
 
     /// Reads, from the sender's process, what the model needs and the sender may take away: the pictures. Done before the model is
@@ -273,7 +312,10 @@ impl Core {
         {
             prep.balloon_icon = self.pixels.read(h).map(Arc::new);
         }
-        if req.message == Nim::Add {
+        // (an add always; a modify only when it could become an add: the icon is not in the model and the request carries a callback and
+        // a picture, see `adopt.rs`. A stream of updates for icons we hold costs no process lookup.)
+        // (the cheap fields of the request first: the model's lock is taken only for a modify that has the pieces of an add)
+        if req.message == Nim::Add || (super::adopt::could_become_add(req) && !self.shared.knows(req)) {
             let hwnd = d.hwnd_handle();
             prep.owner = self.owners.owner_pid(hwnd).map(|pid| (pid, self.owners.owner_exe(pid).unwrap_or_default()));
         }
@@ -507,6 +549,87 @@ mod tests {
         r.owners.remove_window(1);
         r.core.on_copydata(DW_NOTIFY_ICON, &icon_block(Nim::Modify, 1, 1, nif::TIP, 0), raw());
         assert_eq!(r.core.shared.snapshot().icons[0].owner_pid, 50, "a modify does not ask again");
+    }
+
+    fn late_modify(hwnd: u32, uid: u32) -> Vec<u8> {
+        let mut d = data(hwnd, uid, nif::MESSAGE | nif::ICON | nif::TIP);
+        d.icon = 0x77;
+        d.tip = "late".into();
+        block(&req(Nim::Modify, d))
+    }
+
+    #[test]
+    fn a_full_modify_for_an_icon_the_host_never_saw_is_adopted_when_explorer_accepted_it() {
+        let r = rig(Some(200), CoreConfig::default());
+        r.pixels.set(0x77, 16, 16, 1);
+        r.owners.add_window(9, 60);
+        r.owners.set_exe(60, "late.exe");
+        r.core.on_copydata(DW_NOTIFY_ICON, &late_modify(9, 4), raw());
+        let snap = r.core.shared.snapshot();
+        assert_eq!(snap.icons.len(), 1);
+        assert_eq!((snap.icons[0].owner_pid, snap.icons[0].owner_exe.as_str()), (60, "late.exe"));
+        assert!(snap.icons[0].image.is_some());
+        let c = r.core.shared.counters.snapshot();
+        assert_eq!((c.adopted, c.adopted_version_guessed, c.modify_unknown, c.modifies), (1, 1, 0, 0));
+        assert!(c.summary().contains("adopted 1") && c.summary().contains("adopted_version_guessed 1"));
+    }
+
+    #[test]
+    fn a_modify_that_explorer_refused_or_could_not_answer_is_not_adopted() {
+        for outcome in [Outcome::Delivered(0), Outcome::TimedOut] {
+            let r = rig(Some(200), CoreConfig::default());
+            r.pixels.set(0x77, 16, 16, 1);
+            r.owners.add_window(9, 60);
+            r.relay.set_outcome(outcome);
+            r.core.on_copydata(DW_NOTIFY_ICON, &late_modify(9, 4), raw());
+            assert!(r.core.shared.snapshot().icons.is_empty(), "{outcome:?}");
+        }
+        // an owner that is not a window: nothing to click, nothing added (the counted note is the old one)
+        let r = rig(Some(200), CoreConfig::default());
+        r.pixels.set(0x77, 16, 16, 1);
+        r.core.on_copydata(DW_NOTIFY_ICON, &late_modify(9, 4), raw());
+        assert!(r.core.shared.snapshot().icons.is_empty());
+        assert_eq!(r.core.shared.counters.snapshot().modify_unknown, 1);
+        // no Explorer at all: the table says an unknown modify is false, and the model agrees
+        let r = rig(None, CoreConfig::default());
+        r.pixels.set(0x77, 16, 16, 1);
+        r.owners.add_window(9, 60);
+        assert_eq!(r.core.on_copydata(DW_NOTIFY_ICON, &late_modify(9, 4), raw()), 0);
+        assert!(r.core.shared.snapshot().icons.is_empty());
+    }
+
+    #[test]
+    fn a_version_the_program_set_before_it_was_adopted_is_kept() {
+        let r = rig(Some(200), CoreConfig::default());
+        r.pixels.set(0x77, 16, 16, 1);
+        r.owners.add_window(9, 60);
+        let mut v = data(9, 4, 0);
+        v.timeout_or_version = 4;
+        r.core.on_copydata(DW_NOTIFY_ICON, &block(&req(Nim::SetVersion, v)), raw());
+        r.core.on_copydata(DW_NOTIFY_ICON, &late_modify(9, 4), raw());
+        assert_eq!(r.core.shared.snapshot().icons[0].version.raw(), 4);
+        let c = r.core.shared.counters.snapshot();
+        assert_eq!((c.adopted, c.adopted_version_guessed), (1, 0), "the version was seen, so nothing was guessed");
+    }
+
+    #[test]
+    fn requests_about_unknown_icons_are_described_a_bounded_number_of_times() {
+        let r = rig(Some(200), CoreConfig::default());
+        assert_eq!(r.core.unknown_lines_left.load(Ordering::Relaxed), UNKNOWN_LINES);
+        let del = |uid: u32| block(&req(Nim::Delete, data(9, uid, 0)));
+        r.core.on_copydata(DW_NOTIFY_ICON, &del(1), raw());
+        assert_eq!(r.core.unknown_lines_left.load(Ordering::Relaxed), UNKNOWN_LINES - 1, "an unknown delete is described once");
+        for uid in 2..(UNKNOWN_LINES + 30) {
+            r.core.on_copydata(DW_NOTIFY_ICON, &del(uid), raw());
+        }
+        assert_eq!(r.core.unknown_lines_left.load(Ordering::Relaxed), 0, "and then no more, however many come");
+        assert_eq!(r.core.shared.counters.snapshot().delete_unknown as u32, UNKNOWN_LINES + 29, "the counter still counts every one");
+        // an icon the host holds is not described when it is deleted
+        let r = rig(Some(200), CoreConfig::default());
+        r.owners.add_window(9, 60);
+        r.core.on_copydata(DW_NOTIFY_ICON, &block(&req(Nim::Add, data(9, 1, nif::MESSAGE))), raw());
+        r.core.on_copydata(DW_NOTIFY_ICON, &block(&req(Nim::Delete, data(9, 1, 0))), raw());
+        assert_eq!(r.core.unknown_lines_left.load(Ordering::Relaxed), UNKNOWN_LINES);
     }
 
     #[test]

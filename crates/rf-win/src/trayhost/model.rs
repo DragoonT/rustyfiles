@@ -179,6 +179,11 @@ pub enum ApplyNote {
     ReAdded,
     Modified,
     ModifyUnknown,
+    /// `NIM_MODIFY` of an icon the model did not hold, taken as the add the host missed (`adopt.rs` says when that is allowed).
+    Adopted,
+    /// As [`ApplyNote::Adopted`], and no `NIM_SETVERSION` of the program was seen: the icon starts at version 0, which is a guess. Counted
+    /// apart so a run shows how many adopted icons may get a mis-packed click (see `adopt.rs`).
+    AdoptedVersionGuessed,
     Deleted,
     DeleteUnknown,
     VersionSet,
@@ -212,6 +217,9 @@ pub struct TrayModel {
     generation: u64,
     seq: u64,
     balloon_seq: u64,
+    /// The version a program set (`NIM_SETVERSION`, accepted by Explorer) for an icon the model does not hold. An icon taken from a
+    /// modify (`adopt.rs`) has no version of its own to read; this is the only place one may have been seen. At most [`MAX_ICONS`].
+    pending_versions: std::collections::HashMap<IconKey, IconVersion>,
 }
 
 fn clamp_chars(s: &str, max: usize) -> String {
@@ -286,7 +294,10 @@ impl TrayModel {
         let key = d.key();
         let pos = self.icons.iter().position(|i| i.key == key);
         let outcome = |answer, note, events: Vec<TrayEvent>, removed| ApplyOutcome { answer, events, note, removed };
-        match req.message {
+        // a modify that carries everything an add carries, for an icon Explorer has and we never saw added, is the add we missed
+        let adopting = req.message == Nim::Modify && pos.is_none() && super::adopt::modify_as_add(req, &prep).is_ok();
+        let message = if adopting { Nim::Add } else { req.message };
+        match message {
             Nim::Add => {
                 let explorer_accepted = prep.explorer_accepted;
                 let (at, fresh) = match pos {
@@ -318,6 +329,13 @@ impl TrayModel {
                     }
                 };
                 let (mut changes, new_balloon) = self.merge(at, req, prep.clone());
+                // (Windows forgets a version at every add, so a version seen before an add is stale; an adopted icon was never added
+                // here and takes the one its program set earlier, if we saw it)
+                let remembered = self.pending_versions.remove(&key);
+                if adopting && let Some(v) = remembered {
+                    self.icons[at].version = v;
+                }
+                let version_guessed = adopting && remembered.is_none();
                 if !fresh {
                     // a program that adds again starts a new life for the icon: Windows forgets the version at every add and the
                     // program sends `NIM_SETVERSION` again. Not when Explorer refused the add: it kept the icon and its version.
@@ -352,7 +370,13 @@ impl TrayModel {
                     self.icons[at].generation = g;
                 }
                 self.push_balloon_event(at, new_balloon, &mut events);
-                outcome(fresh, if fresh { ApplyNote::Added } else { ApplyNote::ReAdded }, events, None)
+                let note = match (adopting, fresh) {
+                    (true, _) if version_guessed => ApplyNote::AdoptedVersionGuessed,
+                    (true, _) => ApplyNote::Adopted,
+                    (false, true) => ApplyNote::Added,
+                    (false, false) => ApplyNote::ReAdded,
+                };
+                outcome(fresh, note, events, None)
             }
             Nim::Modify => {
                 let Some(at) = pos else { return outcome(false, ApplyNote::ModifyUnknown, vec![], None) };
@@ -374,10 +398,23 @@ impl TrayModel {
                     self.bump();
                     outcome(true, ApplyNote::Deleted, vec![TrayEvent::Removed(id)], Some(id))
                 }
-                None => outcome(false, ApplyNote::DeleteUnknown, vec![], None),
+                None => {
+                    self.pending_versions.remove(&key);
+                    outcome(false, ApplyNote::DeleteUnknown, vec![], None)
+                }
             },
             Nim::SetVersion => {
-                let (Some(at), Some(v)) = (pos, d.requested_version()) else { return outcome(false, ApplyNote::VersionRefused, vec![], None) };
+                let (Some(at), Some(v)) = (pos, d.requested_version()) else {
+                    // an icon Explorer holds and we do not: remember the version for the day its program speaks and is adopted
+                    if pos.is_none()
+                        && prep.explorer_accepted == Some(true)
+                        && let Some(v) = d.requested_version()
+                        && (self.pending_versions.len() < MAX_ICONS || self.pending_versions.contains_key(&key))
+                    {
+                        self.pending_versions.insert(key, v);
+                    }
+                    return outcome(false, ApplyNote::VersionRefused, vec![], None);
+                };
                 let mut events = Vec::new();
                 if self.icons[at].version != v {
                     self.icons[at].version = v;
@@ -817,6 +854,95 @@ mod tests {
         let mut m2 = TrayModel::new();
         m2.apply(&add(999, 3), Prepared { owner: Some((77, "chrome.exe".into())), ..none() });
         assert_eq!(m2.icons()[0].stable_key(), k1, "another window, another pid, the same icon for the user's order");
+    }
+
+    // ---- a modify for an icon we never saw added
+
+    fn adoptable() -> Prepared {
+        Prepared { image: ImageUpdate::Set(bitmap(16, 16, 3)), owner: Some((50, "a.exe".into())), explorer_accepted: Some(true), ..none() }
+    }
+
+    fn full_modify(hwnd: u32, uid: u32) -> NotifyIconRequest {
+        let mut d = data(hwnd, uid, nif::MESSAGE | nif::ICON | nif::TIP);
+        d.tip = "late".into();
+        req(Nim::Modify, d)
+    }
+
+    #[test]
+    fn a_full_modify_that_explorer_accepted_for_an_unknown_icon_is_taken_as_the_add_we_missed() {
+        let mut m = TrayModel::new();
+        let o = m.apply(&full_modify(5, 2), adoptable());
+        assert_eq!(o.note, ApplyNote::AdoptedVersionGuessed, "no version was seen: version 0 is a guess and is counted as one");
+        assert!(o.answer);
+        assert!(matches!(o.events.as_slice(), [TrayEvent::Added(_)]));
+        assert_eq!(m.len(), 1);
+        let i = &m.icons()[0];
+        assert_eq!((i.hwnd, i.uid, i.callback, i.tip.as_str(), i.owner_pid, i.version), (5, 2, Some(0x8005), "late", 50, IconVersion::V0));
+        assert!(i.image.is_some());
+        // the next modify of it is an ordinary modify
+        assert_eq!(m.apply(&full_modify(5, 2), Prepared { explorer_accepted: Some(true), ..none() }).note, ApplyNote::Modified);
+        assert_eq!(m.len(), 1);
+    }
+
+    #[test]
+    fn nothing_is_invented_without_proof_or_without_the_pieces() {
+        for (prep, why) in [
+            (Prepared { explorer_accepted: Some(false), ..adoptable() }, "Explorer refused"),
+            (Prepared { explorer_accepted: None, ..adoptable() }, "no verdict"),
+            (Prepared { image: ImageUpdate::Keep, ..adoptable() }, "no picture"),
+            (Prepared { owner: None, ..adoptable() }, "no owner"),
+        ] {
+            let mut m = TrayModel::new();
+            let o = m.apply(&full_modify(5, 2), prep);
+            assert_eq!((o.note, m.len()), (ApplyNote::ModifyUnknown, 0), "{why}");
+            assert!(!o.answer);
+        }
+        // a tip-only modify (no callback, no picture) stays what it was
+        let mut m = TrayModel::new();
+        let o = m.apply(&req(Nim::Modify, data(5, 2, nif::TIP)), adoptable());
+        assert_eq!((o.note, m.len()), (ApplyNote::ModifyUnknown, 0));
+    }
+
+    #[test]
+    fn a_version_seen_before_the_adoption_is_used_and_a_delete_forgets_it() {
+        let mut m = TrayModel::new();
+        let mut v = data(5, 2, 0);
+        v.timeout_or_version = 4;
+        let o = m.apply(&req(Nim::SetVersion, v.clone()), Prepared { explorer_accepted: Some(true), ..none() });
+        assert_eq!(o.note, ApplyNote::VersionRefused, "still no icon to give a version to");
+        let o = m.apply(&full_modify(5, 2), adoptable());
+        assert_eq!(o.note, ApplyNote::Adopted, "the version was seen, so nothing was guessed");
+        assert_eq!(m.icons()[0].version, IconVersion::V4);
+        // a refused version is not remembered; a delete forgets one
+        let mut m = TrayModel::new();
+        m.apply(&req(Nim::SetVersion, v.clone()), Prepared { explorer_accepted: Some(false), ..none() });
+        m.apply(&full_modify(5, 2), adoptable());
+        assert_eq!(m.icons()[0].version, IconVersion::V0);
+        let mut m = TrayModel::new();
+        m.apply(&req(Nim::SetVersion, v), Prepared { explorer_accepted: Some(true), ..none() });
+        m.apply(&req(Nim::Delete, data(5, 2, 0)), none());
+        m.apply(&full_modify(5, 2), adoptable());
+        assert_eq!(m.icons()[0].version, IconVersion::V0, "the program deleted its icon: what it said before is gone");
+        // an ordinary add starts the version over, so a version seen before it is stale and must not leak into a later adoption
+        let mut m = TrayModel::new();
+        let mut v = data(6, 1, 0);
+        v.timeout_or_version = 3;
+        m.apply(&req(Nim::SetVersion, v), Prepared { explorer_accepted: Some(true), ..none() });
+        m.apply(&add(6, 1), none());
+        m.apply(&req(Nim::Delete, data(6, 1, 0)), none());
+        m.apply(&full_modify(6, 1), adoptable());
+        assert_eq!(m.icons()[0].version, IconVersion::V0);
+    }
+
+    #[test]
+    fn remembered_versions_are_bounded() {
+        let mut m = TrayModel::new();
+        for i in 0..(MAX_ICONS as u32 + 50) {
+            let mut v = data(1000 + i, 1, 0);
+            v.timeout_or_version = 3;
+            m.apply(&req(Nim::SetVersion, v), Prepared { explorer_accepted: Some(true), ..none() });
+        }
+        assert_eq!(m.pending_versions.len(), MAX_ICONS);
     }
 
     #[test]

@@ -28,7 +28,6 @@ use super::panel_parts::Look;
 use super::tray_source;
 use super::tray_strip::{self, Source, TrayState};
 use crate::glass_watch::{self, PopupGlass};
-use crate::t;
 
 pub struct OverflowView {
     island: Rc<RefCell<IslandGlass>>,
@@ -69,14 +68,15 @@ impl OverflowView {
             focus: cx.focus_handle(),
             cursor: None,
             cursor_key: None,
-            reported: ts::ovf_size(0),
+            reported: tray_strip::overflow_size(cx),
             _obs: obs,
         }
     }
 
-    /// The window's size now, logical px.
+    /// The window's size now, logical px: the grid of the icons in it (wider rather than taller on a small screen), or the empty
+    /// panel's text.
     pub fn size(&self, cx: &App) -> (f32, f32) {
-        ts::ovf_size(tray_strip::overflow_data(cx).count)
+        tray_strip::overflow_size(cx)
     }
 
     fn live(&self) -> bool {
@@ -97,7 +97,7 @@ impl OverflowView {
             };
             self.cursor_key = self.cursor.and_then(|k| tray_strip::overflow_key(k, cx));
         }
-        let size = ts::ovf_size(count);
+        let size = tray_strip::overflow_size(cx);
         if size != self.reported {
             self.reported = size;
             super::panel::relayout_sized(super::panel::OVERFLOW, size, cx);
@@ -212,21 +212,27 @@ impl Render for OverflowView {
 
         let mut body = div().relative().size_full().opacity(frame.opacity).mt(px(frame.drop_px));
         if data.count == 0 {
+            // The two texts are broken into lines by the same rule that gave the window its height (`ts::ovf_empty`, which counts a little
+            // wide), and each line is drawn on its own without wrapping again, so the text can neither run out at the side nor be cut at
+            // the bottom, in either language.
+            let empty = tray_strip::empty_panel();
+            let line = |text: &str, size: f32, height: f32, color: Hsla| div().w_full().h(px(height)).flex().justify_center().text_size(px(size)).text_color(color).whitespace_nowrap().child(text.to_string());
+            let (title_color, hint_color) = (look.pal.text().hsla(), look.pal.text_secondary().hsla());
             body = body.child(
                 div()
                     .size_full()
                     .flex()
+                    .flex_col()
                     .items_center()
                     .justify_center()
                     .px(px(ts::OVF_PAD))
-                    .text_sm()
-                    .text_center()
-                    .text_color(look.pal.text_secondary().hsla())
-                    .child(t!("Gizli simge yok. Simgeleri buraya sürükleyin.")),
+                    .children(empty.title.iter().map(|l| line(l, ts::OVF_TITLE_PX, ts::OVF_TITLE_LINE, title_color)))
+                    .child(div().h(px(ts::OVF_EMPTY_GAP)))
+                    .children(empty.hint.iter().map(|l| line(l, ts::OVF_HINT_PX, ts::OVF_HINT_LINE, hint_color))),
             );
         }
         for k in 0..data.count {
-            let [x, y, w, _] = ts::ovf_cell(data.count, k);
+            let [x, y, w, _] = ts::ovf_cell_in(data.total, k, data.limits);
             let cell = div()
                 .id(("tray-ovf", k))
                 .absolute()

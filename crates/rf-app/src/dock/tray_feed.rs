@@ -45,6 +45,7 @@ use rf_win::dock::tray_strip::ClickKind;
 use rf_win::dock::tray_tip as rules;
 use rf_win::tray_wire::click::{ClickOptions, HostEvent};
 use rf_win::tray_wire::{self as wire, IconKey as WireKey, Point};
+use rf_win::trayhost::own_icons::{self, OwnButtons, Owner};
 use rf_win::trayhost::{ClickOutcome, ClickRequest, IconId, OwnerRef, Snapshot, TrayEvent, TrayView};
 
 use super::tray_source::{Bitmap, IconKey, Subscription, TrayClick, TrayIcon, TraySnapshot};
@@ -181,8 +182,35 @@ struct PathEntry {
     tries: u8,
 }
 
+/// The buttons of its own that the dock's right island draws (`right.rs`: `dock-network` and `dock-volume`, always; no battery or
+/// power button). A notification icon that is Windows' own indicator for one of these is left out of the strip (see
+/// `rf_win::trayhost::own_icons`): the dock already shows it. If the right island ever hides one of its buttons or gets a battery,
+/// this is the one place to change (a test reads `right.rs` and fails when the two disagree).
+pub const OWN_BUTTONS: OwnButtons = OwnButtons { volume: true, network: true, power: false };
+
+/// The Windows directory (`C:\Windows`), where the programs of Windows itself live.
+fn windows_dir() -> String {
+    std::env::var("SystemRoot").or_else(|_| std::env::var("windir")).unwrap_or_else(|_| "C:\\Windows".to_string())
+}
+
+/// Counts of the last conversion, for the one log line that lets a run say what the strip is made of without naming anything: how many
+/// icons the model held (hidden ones not counted), how many of them gave a GUID, how many belong to `explorer.exe` (by file name, which
+/// costs no lookup), and how many were left out as duplicates of the dock's own buttons.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FeedCounts {
+    pub shown: usize,
+    pub with_guid: usize,
+    pub of_explorer: usize,
+    pub left_out: usize,
+}
+
 pub struct Converter {
     paths: Box<dyn PathResolver>,
+    /// Which of Windows' own indicators the dock shows as buttons, and where Windows is: what [`own_icons::duplicate_of`] needs.
+    buttons: OwnButtons,
+    windows_dir: String,
+    /// What the last [`Converter::convert`] saw, as counts (for one log line; see [`FeedCounts`]).
+    counts: FeedCounts,
     /// The number of the attach this converter works for; it is the upper half of every key it makes.
     epoch: u32,
     /// `(owner process, file name)` -> what is known of its path. Kept while the process has an icon.
@@ -196,13 +224,36 @@ pub struct Converter {
 
 impl Converter {
     pub fn new(paths: Box<dyn PathResolver>) -> Converter {
-        Converter { paths, epoch: 0, path_cache: HashMap::new(), owners: HashMap::new(), seen: HashMap::new(), next_generation: 0 }
+        Converter {
+            paths,
+            buttons: OWN_BUTTONS,
+            windows_dir: windows_dir(),
+            counts: FeedCounts::default(),
+            epoch: 0,
+            path_cache: HashMap::new(),
+            owners: HashMap::new(),
+            seen: HashMap::new(),
+            next_generation: 0,
+        }
     }
 
     /// The converter of attach number `epoch`.
     pub fn with_epoch(mut self, epoch: u32) -> Converter {
         self.epoch = epoch;
         self
+    }
+
+    /// For tests: other buttons and another Windows directory.
+    #[cfg(test)]
+    pub fn with_buttons(mut self, buttons: OwnButtons, windows_dir: &str) -> Converter {
+        self.buttons = buttons;
+        self.windows_dir = windows_dir.to_string();
+        self
+    }
+
+    /// What the last conversion saw, as counts.
+    pub fn counts(&self) -> FeedCounts {
+        self.counts
     }
 
     /// The owner of each icon [`Converter::convert`] last returned, by the key it was given.
@@ -212,7 +263,16 @@ impl Converter {
 
     fn path_of(&mut self, icon: &rf_win::trayhost::TrayIcon) -> Option<String> {
         // (a GUID icon is told apart by its GUID: its path is not asked for; an owner of unknown process has nothing to ask)
-        if icon.owner_pid == 0 || matches!(icon.key, WireKey::Guid(g) if StableId::from_guid(&g.to_string()).is_some()) {
+        if matches!(icon.key, WireKey::Guid(g) if StableId::from_guid(&g.to_string()).is_some()) {
+            return None;
+        }
+        self.owner_path(icon)
+    }
+
+    /// The owner's program path, looked up once per process and cached (also for a GUID icon: the owner check of a system indicator
+    /// asks for it).
+    fn owner_path(&mut self, icon: &rf_win::trayhost::TrayIcon) -> Option<String> {
+        if icon.owner_pid == 0 {
             return None;
         }
         let key = (icon.owner_pid, icon.owner_exe.clone());
@@ -233,17 +293,41 @@ impl Converter {
         found
     }
 
-    /// The strip's icons for a model: hidden icons left out (`NIS_HIDDEN` means the program does not want to be shown), the host's
-    /// order kept.
+    /// Whether the dock already shows this icon as a button of its own (a Windows indicator whose button is there): see
+    /// `rf_win::trayhost::own_icons`. Only the three indicator GUIDs ever cost a process lookup.
+    fn duplicates_own_button(&mut self, ic: &rf_win::trayhost::TrayIcon) -> bool {
+        let WireKey::Guid(guid) = ic.key else { return false };
+        if !own_icons::needs_owner_check(Some(&guid)) {
+            return false;
+        }
+        let path = self.owner_path(ic);
+        let owner = match path.as_deref() {
+            Some(p) => Owner::Path(p),
+            None if !ic.owner_exe.is_empty() => Owner::Name(&ic.owner_exe),
+            None => Owner::Unknown,
+        };
+        own_icons::duplicate_of(owner, Some(&guid), &self.windows_dir, self.buttons).is_some()
+    }
+
+    /// The strip's icons for a model: hidden icons left out (`NIS_HIDDEN` means the program does not want to be shown), and Windows'
+    /// own indicators the dock shows as buttons (volume, network) left out too; the host's order kept.
     pub fn convert(&mut self, snap: &Snapshot) -> Vec<TrayIcon> {
         let mut out = Vec::with_capacity(snap.icons.len());
         let mut present: HashSet<IconId> = HashSet::with_capacity(snap.icons.len());
         let mut live_paths: HashSet<(u32, String)> = HashSet::new();
         let mut owners: HashMap<IconKey, OwnerRef> = HashMap::with_capacity(snap.icons.len());
+        let mut counts = FeedCounts::default();
         for ic in &snap.icons {
             present.insert(ic.id);
             live_paths.insert((ic.owner_pid, ic.owner_exe.clone()));
             if ic.hidden() {
+                continue;
+            }
+            counts.shown += 1;
+            counts.with_guid += usize::from(matches!(ic.key, WireKey::Guid(_)));
+            counts.of_explorer += usize::from(ic.owner_exe.trim().eq_ignore_ascii_case("explorer.exe"));
+            if self.duplicates_own_button(ic) {
+                counts.left_out += 1;
                 continue;
             }
             let Some(key) = compose_key(self.epoch, ic.id) else { continue };
@@ -269,6 +353,7 @@ impl Converter {
             out.push(TrayIcon { key, id, tip, picture, generation });
         }
         self.owners = owners;
+        self.counts = counts;
         // what left the model is forgotten (its picture goes with it)
         self.seen.retain(|id, _| present.contains(id));
         self.path_cache.retain(|k, _| live_paths.contains(k));
@@ -513,8 +598,16 @@ impl Drop for Attachment {
 
 fn run_pump(feed: Arc<Feed>, port: Arc<dyn HostPort>, events: Receiver<TrayEvent>, quit: Receiver<()>, paths: Box<dyn PathResolver>, gap: Duration, epoch: u32) {
     let mut conv = Converter::new(paths).with_epoch(epoch);
-    let rebuild = |conv: &mut Converter| {
+    // (what the strip is made of, as counts: said in the log when it changes, so that a run tells whether the duplicate rule found
+    // anything (`left_out`) and how many icons are Explorer's own or carry a GUID, which is what the rule goes by)
+    let mut said = FeedCounts::default();
+    let mut rebuild = |conv: &mut Converter| {
         let icons = conv.convert(&port.snapshot());
+        if conv.counts() != said {
+            said = conv.counts();
+            let FeedCounts { shown, with_guid, of_explorer, left_out } = said;
+            log::info!("tray feed: {shown} icon(s) not hidden by their programs, {with_guid} with a GUID, {of_explorer} of Explorer, {left_out} left out as duplicates of the dock's own volume or network button");
+        }
         feed.publish(icons, conv.owners());
     };
     rebuild(&mut conv);
@@ -615,6 +708,78 @@ mod tests {
         assert_eq!(icons[0].id, StableId::from_guid("{7820ae73-23e3-4229-82c1-e41cb67d5b9c}").unwrap());
         assert_eq!(icons[1].id, StableId::from_program("c:\\apps\\cloud.exe", 7), "the path is resolved, lower-cased by the identity");
         assert_ne!(icons[0].key, icons[1].key);
+    }
+
+    fn system_spec(hwnd: u32, pid: u32, exe: &str, kind: own_icons::SystemIcon) -> IconSpec {
+        let mut s = spec(hwnd, 0, pid, exe, "tip");
+        s.guid = Some(own_icons::system_guid(kind));
+        s
+    }
+
+    #[test]
+    fn windows_own_volume_and_network_icons_are_left_out_and_a_third_partys_stay() {
+        use own_icons::SystemIcon::{Network, Volume};
+        let h = FakeHost::new(false);
+        h.add(&system_spec(1, 10, "explorer.exe", Volume));
+        h.add(&system_spec(2, 10, "explorer.exe", Network));
+        h.add(&spec(4, 7, 10, "explorer.exe", "an Explorer icon with no GUID"));
+        h.add(&spec(5, 1, 30, "vpn.exe", "a VPN"));
+        let paths = [(10, "C:\\Windows\\explorer.exe"), (30, "C:\\Apps\\vpn.exe")];
+        let (table_a, asked) = table(&paths);
+        let mut c = Converter::new(table_a).with_buttons(OWN_BUTTONS, "C:\\Windows");
+        let icons = c.convert(&h.view.snapshot());
+        assert_eq!(c.counts().left_out, 2);
+        assert_eq!(icons.iter().map(|i| i.tip.as_str()).collect::<Vec<_>>(), vec!["an Explorer icon with no GUID", "a VPN"]);
+        // the model still holds all four (Explorer's list and the click engine are untouched)
+        assert_eq!(h.view.snapshot().icons.len(), 4);
+        // one lookup per owner process: the two indicators share Explorer's
+        assert_eq!(asked.load(Ordering::SeqCst), 2);
+        // only while the dock shows the button: no volume button, Windows' volume icon is the only one
+        let mut c = Converter::new(table(&paths).0).with_buttons(OwnButtons { volume: false, network: true, power: false }, "C:\\Windows");
+        let icons = c.convert(&h.view.snapshot());
+        assert_eq!((c.counts().left_out, icons.len()), (1, 3));
+        // an audio driver's icon that carries the indicator's GUID is not Windows': it stays
+        let d = FakeHost::new(false);
+        d.add(&system_spec(3, 20, "RtkNGUI64.exe", Volume));
+        let mut c = Converter::new(table(&[(20, "C:\\Program Files\\Realtek\\RtkNGUI64.exe")]).0).with_buttons(OWN_BUTTONS, "C:\\Windows");
+        assert_eq!((c.convert(&d.view.snapshot()).len(), c.counts().left_out), (1, 0));
+    }
+
+    #[test]
+    fn the_counts_for_the_log_say_what_the_strip_is_made_of_and_nothing_else() {
+        use own_icons::SystemIcon::{Network, Power, Volume};
+        let h = FakeHost::new(false);
+        h.add(&system_spec(1, 10, "explorer.exe", Volume));
+        h.add(&system_spec(2, 10, "Explorer.EXE", Network));
+        h.add(&spec(4, 7, 10, "explorer.exe", "no GUID"));
+        h.add(&system_spec(3, 20, "RtkNGUI64.exe", Power));
+        h.add(&spec(5, 1, 30, "vpn.exe", "a VPN"));
+        let paths = [(10, r"C:\Windows\explorer.exe"), (20, r"C:\Program Files\Realtek\RtkNGUI64.exe"), (30, r"C:\Apps\vpn.exe")];
+        let mut c = Converter::new(table(&paths).0).with_buttons(OWN_BUTTONS, r"C:\Windows");
+        c.convert(&h.view.snapshot());
+        assert_eq!(c.counts(), FeedCounts { shown: 5, with_guid: 3, of_explorer: 3, left_out: 2 });
+        // nothing but numbers: the counts hold no text
+        assert_eq!(format!("{:?}", c.counts()), "FeedCounts { shown: 5, with_guid: 3, of_explorer: 3, left_out: 2 }");
+    }
+
+    #[test]
+    fn an_owner_that_cannot_be_read_keeps_a_system_icon_unless_it_is_called_explorer() {
+        use own_icons::SystemIcon::Volume;
+        for (exe, pid, kept) in [("somebody.exe", 10, true), ("Explorer.EXE", 11, false), ("", 0, true)] {
+            let h = FakeHost::new(false);
+            h.add(&system_spec(1, pid, exe, Volume));
+            let mut c = Converter::new(table(&[]).0).with_buttons(OWN_BUTTONS, "C:\\Windows");
+            let icons = c.convert(&h.view.snapshot());
+            assert_eq!(icons.len() == 1, kept, "{exe:?}: only a file name of explorer.exe is taken for Windows' when the path cannot be had");
+        }
+    }
+
+    #[test]
+    fn the_buttons_the_feed_assumes_are_the_ones_the_right_island_draws() {
+        let right = include_str!("right.rs");
+        assert!(right.contains("\"dock-volume\"") && right.contains("\"dock-network\""));
+        assert!(!right.contains("dock-power") && !right.contains("dock-battery"));
+        assert_eq!(OWN_BUTTONS, OwnButtons { volume: true, network: true, power: false });
     }
 
     #[test]
@@ -1167,7 +1332,8 @@ mod tests").next().unwrap_or(src).lines().filter(|l| !l.trim_start().starts_with
             let printed = args.get(2).map_or("", |a| a.trim().trim_start_matches(',').trim());
             assert!(["", "click.kind, outcome"].contains(&printed), "a log line prints `{printed}`: {line}");
             let placeholders: Vec<&str> = args.get(1).map_or(vec![], |f| f.split('{').skip(1).filter_map(|p| p.split('}').next()).collect());
-            assert!(placeholders.iter().all(|p| ["", ":?", "e"].contains(p)), "a log line has {placeholders:?}: {line}");
+            // (the others are counts of the strip's icons, see `FeedCounts`)
+            assert!(placeholders.iter().all(|p| ["", ":?", "e", "shown", "with_guid", "of_explorer", "left_out"].contains(p)), "a log line has {placeholders:?}: {line}");
         }
         assert!(statements >= 2, "the scan found the log lines");
         for banned in ["CreateWindow", "SendMessage", "PostMessage", "SetWindowPos", "ShowWindow", "windows::", "TrayHost::start"] {

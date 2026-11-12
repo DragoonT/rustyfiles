@@ -54,6 +54,8 @@ counters!(
     re_adds,
     modifies,
     modify_unknown,
+    adopted,
+    adopted_version_guessed,
     deletes,
     delete_unknown,
     set_versions,
@@ -173,6 +175,11 @@ impl Shared {
 
     pub fn snapshot(&self) -> Snapshot {
         self.state.lock().model.snapshot()
+    }
+
+    /// Whether the model holds the icon this request names (one short look under the lock).
+    pub(crate) fn knows(&self, req: &NotifyIconRequest) -> bool {
+        self.state.lock().model.find(&req.data.key()).is_some()
     }
 
     /// The snapshot if the model changed since `last` (a generation the caller remembers), else `None` without taking the lock.
