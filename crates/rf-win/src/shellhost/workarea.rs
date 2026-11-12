@@ -110,6 +110,16 @@ impl WorkAreaKeeper {
             Some(t) => {
                 let want = target(monitor, t);
                 if work == want {
+                    // Already as wanted. When it is not from this keeper (a host that ran before set it and was restarted: the work
+                    // area outlives the process), it is adopted: the band is ours, or the islands would be placed from the shrunken
+                    // area and sit ABOVE their own band (seen on the user's PC after a restart of the dock with no Explorer). What was
+                    // there before is not known then; with no shell the whole monitor is what is given back.
+                    if self.applied.is_none() {
+                        self.applied = Some(want);
+                        if self.before.is_none() {
+                            self.before = Some(monitor);
+                        }
+                    }
                     self.last_held = Some(Held::AsWanted);
                     return Done::Nothing;
                 }
@@ -191,6 +201,22 @@ mod tests {
             self.calls.push(rc);
             !self.refuse
         }
+    }
+
+    #[test]
+    fn a_work_area_that_an_earlier_host_left_shrunk_is_adopted_as_ours() {
+        let state = State(Cell::new(Shell::Nobody));
+        let mut set = Setter::default();
+        let mut k = WorkAreaKeeper::new();
+        let want = target(MON, 78);
+        // a new host finds the work area already the monitor less its band: nothing is set, but the band counts as ours
+        assert_eq!(k.apply(&state, &mut set, Some(78), MON, want), Done::Nothing);
+        assert!(set.calls.is_empty());
+        assert!(k.active(), "or the islands are placed above their own band");
+        // giving the band back puts the whole monitor back
+        assert_eq!(k.apply(&state, &mut set, None, MON, want), Done::Restored(MON));
+        assert_eq!(set.calls, vec![MON]);
+        assert!(!k.active());
     }
 
     #[test]
