@@ -1,18 +1,22 @@
-//! The Start panel: the view that opens above the left island when its logo (or its search field) is clicked. About 620 x 680 logical
-//! px, on HyperGlass (`panel.rs` opens, places and closes it; this is what is inside).
+//! The Start panel: the view that opens above the left island when its logo (or its search field) is clicked. 642 x 720 logical px at
+//! most (never taller than the room above the island), on HyperGlass (`panel.rs` opens, places and closes it; this is what is inside).
+//! The numbers and the decisions are `rf_win::dock::startpage`; the drawing of the pages is `start_home.rs`.
 //!
-//! * Top: a search field with the keyboard in it. Typing is the search; Escape clears it first and closes the panel second.
-//! * Empty query: "Sabitlenenler" (the user's pinned apps, a grid; right click any app to pin or unpin it) and "Tüm uygulamalar" (every
-//!   installed app in the alphabet of the user's language with letter headers, in the app's virtual list: only the rows in view are
-//!   built and only they ask for an icon).
+//! * Top: a search field (a pill) with the keyboard in it. Typing is the search from either page.
+//! * Two pages, and the panel always opens on the first. HOME: "Sabitlenenler" (the user's pinned apps, six columns of tiles, three
+//!   rows, more of them on pages with dots at the grid's right edge; right click any app to pin or unpin it) with a "Tümü" button, and
+//!   "Önerilenler" (the documents opened most recently, two columns; the setting `dock_start_recommended`). ALL APPS ("Tümü" opens it,
+//!   "Geri" and Escape and Backspace on an empty search lead back): "Tüm uygulamalar", every installed app in the alphabet of the
+//!   user's language with letter headers, in the app's virtual list: only the rows in view are built and only they ask for an icon.
 //! * With a query: the result list of the quick search (`quick_search::search_local`, and the files the running rustyfiles answers
 //!   over a pipe: `search_pipe`). Local rows appear within a frame of the keystroke; the files arrive after them without moving the row
 //!   the user is on (`search.rs`).
-//! * Bottom: the user's name, Settings (rustyfiles' own) and the power button (Kilitle, Uyku, Oturumu kapat, Yeniden başlat, Bilgisayarı
-//!   kapat; the last two ask "Emin misiniz?" first, in the panel).
+//! * Bottom: the user's account picture and name, the gear (Windows' Settings) and the power button (Kilitle, Uyku, Oturumu kapat,
+//!   Yeniden başlat, Bilgisayarı kapat; the last two ask "Emin misiniz?" first, in the panel).
 //!
-//! Keyboard: typing goes to the field wherever the pointer was last clicked; the arrows move through the grid and the list (or the
-//! results), Enter starts the one under the cursor, Ctrl+Enter shows it in its folder in rustyfiles, Escape steps back.
+//! Keyboard: typing goes to the field wherever the pointer was last clicked; the arrows move through the grid, the recommended entries
+//! and the list (or the results), Page Up and Page Down turn the grid's pages, Tab goes field, Tümü (Geri), gear, power; Enter starts
+//! the one under the cursor, Ctrl+Enter shows it in its folder in rustyfiles, Escape steps back (query, all apps, then the panel).
 //!
 //! Menus (right click on an app, the power button) are drawn inside this window: a separate menu window would take the activation and
 //! the panel would close under it.
@@ -33,6 +37,7 @@ use rf_win::dock::panel::{self as geo, CloseCause};
 use rf_win::dock::power::{self, Action as PowerAction, Menu as PowerMenu, Step as PowerStep};
 use rf_win::dock::startapps;
 use rf_win::dock::startlist::{self, Cursor, Move, Row};
+use rf_win::dock::startpage::{self as page, Page, Spot};
 use rf_win::dock::startpins::{self, Loaded, PinFile, Plan};
 
 use super::backdrop::IslandGlass;
@@ -46,14 +51,12 @@ use crate::settings::Settings;
 use crate::t;
 use crate::theme::{self, Palette as ThemePalette};
 
-const PAD: f32 = 22.0;
-const SEARCH_H: f32 = 56.0;
-const BOTTOM_H: f32 = 56.0;
-const CELL_W: f32 = 96.0;
-const CELL_H: f32 = 86.0;
-/// The pinned grid shows three rows (the taskbar seed of a typical PC is 13 apps: six, six and one) and scrolls beyond them, keeping
-/// the keyboard cursor in view.
-const GRID_MAX_H: f32 = 3.0 * CELL_H + 4.0;
+const PAD: f32 = page::SIDE_PAD;
+const BOTTOM_H: f32 = page::FOOTER_H;
+/// A pinned tile's width: the grid's six tiles share the width inside the side padding.
+const CELL_W: f32 = (page::PANEL_W - 2.0 * page::SIDE_PAD) / page::COLS as f32;
+/// Where the list of results begins, from the panel's top.
+const RESULTS_TOP: f32 = page::TOP_PAD + page::SEARCH_H + page::SECTION_GAP;
 /// A start, a sign-out or a lock is waited for this long before the panel closes without knowing how it went; an answer that comes
 /// sooner and says "failed" keeps the panel open with a note (a sleep call returns only when the PC wakes: it is never waited for).
 const OUTCOME_WAIT: Duration = Duration::from_millis(300);
@@ -145,15 +148,32 @@ pub struct StartView {
     /// The pinned apps that are installed: indexes into `apps`.
     pin_cells: Vec<usize>,
     user: String,
+    /// The account picture (None: the initial is drawn), the size it was last asked for in device px, and whether a read is running.
+    avatar: Option<Arc<RenderImage>>,
+    avatar_px: u32,
+    /// "Önerilenler": the entries with their second lines, whether the section is switched on (read from the settings at each opening)
+    /// and whether this opening's reading has come.
+    recs: Vec<home::RecEntry>,
+    recs_wanted: bool,
+    recs_loaded: bool,
+    _recs_task: Option<Task<()>>,
 
     // the interface
     input: Entity<InputState>,
     query: String,
+    /// The page shown when nothing is typed; the panel opens on the home page every time.
+    page: Page,
+    /// The keyboard cursor on the home page (a pinned tile or a recommended entry) and on the all-apps page (an app).
+    spot: Option<Spot>,
     cursor: Option<Cursor>,
+    /// The pinned grid's page, how the home page was last fitted to the window's height, and the wheel's page turning.
+    grid_page: usize,
+    layout: page::HomeLayout,
+    wheel: page::WheelPager,
+    /// Whether the last frame drew the "Tümü" / "Geri" button (Tab only stops on what is drawn).
+    page_button_drawn: bool,
     list_scroll: UniformListScrollHandle,
     results_scroll: ScrollHandle,
-    /// The pinned grid's scroll (the keyboard cursor is kept in view in it).
-    pins_scroll: ScrollHandle,
     reveal_results: bool,
     app_menu: Option<AppMenu>,
     /// The row of the app menu the keyboard is on.
@@ -165,7 +185,8 @@ pub struct StartView {
     /// The keyboard is on "Evet" (it starts on "Hayır").
     confirm_yes: bool,
     _grace: Option<Task<()>>,
-    /// Keyboard stops of the bottom row (Tab goes field, Settings, power).
+    /// Keyboard stops (Tab goes field, "Tümü" or "Geri", the gear, power).
+    page_focus: FocusHandle,
     settings_focus: FocusHandle,
     power_focus: FocusHandle,
 
@@ -191,6 +212,10 @@ pub struct StartView {
 
 use std::cell::RefCell;
 use std::rc::Rc;
+
+// The pages, drawn (a child module: they draw this view's own state).
+#[path = "start_home.rs"]
+mod home;
 
 static WRITER: startpins::OrderedWriter = startpins::OrderedWriter::new();
 
@@ -266,12 +291,23 @@ impl StartView {
             pins_loaded: false,
             pin_cells: Vec::new(),
             user: String::new(),
+            avatar: None,
+            avatar_px: 0,
+            recs: Vec::new(),
+            recs_wanted: true,
+            recs_loaded: false,
+            _recs_task: None,
             input,
             query: String::new(),
+            page: Page::Home,
+            spot: None,
             cursor: None,
+            grid_page: 0,
+            layout: page::home_layout(page::PANEL_MAX_H, 0, page::REC_MAX),
+            wheel: page::WheelPager::default(),
+            page_button_drawn: false,
             list_scroll: UniformListScrollHandle::new(),
             results_scroll: ScrollHandle::new(),
-            pins_scroll: ScrollHandle::new(),
             reveal_results: false,
             app_menu: None,
             app_hi: 0,
@@ -280,6 +316,7 @@ impl StartView {
             power_since: None,
             confirm_yes: false,
             _grace: None,
+            page_focus: cx.focus_handle(),
             settings_focus: cx.focus_handle(),
             power_focus: cx.focus_handle(),
             generation: 0,
@@ -317,12 +354,19 @@ impl StartView {
         self.power_since = None;
         self.confirm_yes = false;
         self._grace = None;
+        // (the panel always opens on its home page, at the first page of the pins, with the keyboard nowhere in particular)
+        self.page = Page::Home;
+        self.spot = None;
         self.cursor = None;
+        self.grid_page = 0;
+        self.wheel = page::WheelPager::default();
+        self.list_scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.pending = None;
         self.reset_query(window, cx);
         // what was opened since this dock started is in the file now
         quick_search::reload_usage();
         self.load_data(cx);
+        self.load_recs(cx);
         cx.notify();
     }
 
@@ -359,7 +403,9 @@ impl StartView {
         self.anim = None;
         self.popup = None;
         self._watch = None;
-        self.icons.retain(|k| k.starts_with("app:"));
+        // (the pictures of the entries recommended now stay too: at most six, and the next opening shows them at once)
+        self.trim_icons_on_hide();
+        self._recs_task = None;
         self.reset_query(window, cx);
         cx.notify();
     }
@@ -409,6 +455,9 @@ impl StartView {
         let have_pins = self.pins_loaded;
         let have_user = !self.user.is_empty();
         let last = self.source.clone();
+        // the account picture is read once for each size it is drawn at (the registry, a small file: off the UI thread)
+        let avatar_px = home::avatar_px(cx.global::<Env>().scale);
+        let want_avatar = (self.avatar_px != avatar_px).then_some(avatar_px);
         cx.spawn(async move |this, cx| {
             let work = cx.background_executor().spawn(async move {
                 let list = quick_search::apps();
@@ -422,13 +471,19 @@ impl StartView {
                 let pins = if have_pins { None } else { load_or_seed_pins(&list) };
                 // (a domain account's display name can take a moment to come from the server: not on the UI thread)
                 let user = (!have_user).then(rf_win::dock::power::display_name);
-                (list, sorted, pins, user)
+                let avatar = want_avatar.map(rf_win::dock::startuser::account_picture);
+                (list, sorted, pins, user, avatar)
             });
-            let (list, sorted, pins, user) = work.await;
+            let (list, sorted, pins, user, avatar) = work.await;
             let _ = this.update(cx, |me, cx| {
                 me.loading = false;
                 if let Some(u) = user {
                     me.user = u;
+                }
+                if let Some(picture) = avatar {
+                    // (also when there is none: the registry is not asked again at every opening)
+                    me.avatar_px = avatar_px;
+                    me.avatar = picture.and_then(icons::to_image);
                 }
                 me.source = Some(list);
                 if let Some((v, rows)) = sorted {
@@ -450,11 +505,12 @@ impl StartView {
 
     fn rebuild_pin_cells(&mut self) {
         self.pin_cells = self.pins.resolve(&self.apps).into_iter().map(|(i, _)| i).collect();
-        if let Some(Cursor::Pin(i)) = self.cursor
+        if let Some(Spot::Pin(i)) = self.spot
             && i >= self.pin_cells.len()
         {
-            self.cursor = None;
+            self.spot = None;
         }
+        self.grid_page = page::clamp_page(self.grid_page, self.layout.pages);
     }
 
     // ------------------------------------------------------------------ the search
@@ -467,6 +523,7 @@ impl StartView {
         self.query = q.clone();
         super::panel::set_typed(&q, cx);
         self.cursor = None;
+        self.spot = None;
         self.generation += 1;
         self.selection = Selection::First;
         self.sel_ix = 0;
@@ -670,9 +727,9 @@ impl StartView {
 
     fn open_in_shell(path: PathBuf) {
         std::thread::spawn(move || {
-            let p = path.clone();
-            if rf_win::sta::call(Duration::from_secs(15), move || rf_win::shell::open(&p)).and_then(Result::ok).is_none() {
-                log::warn!("start: cannot open {}", path.display());
+            // (the path is not logged: it can be a document from the user's recent files)
+            if rf_win::sta::call(Duration::from_secs(15), move || rf_win::shell::open(&path)).and_then(Result::ok).is_none() {
+                log::warn!("start: a file or folder could not be opened");
             }
         });
     }
@@ -736,25 +793,27 @@ impl StartView {
     /// Where the app menu opens for the keyboard (Menu key, Shift+F10): by the thing the cursor is on, in the panel's coordinates.
     /// Roughly: the menu clamps itself inside the panel.
     fn keyboard_menu_target(&self) -> Option<(AppEntry, Point<Pixels>)> {
-        let top = SEARCH_H + 1.0 + 34.0;
         if !self.query.trim().is_empty() {
             return match self.entries.get(self.sel_ix) {
                 Some(Entry::Item(Item { target: Target::App { id, name }, .. })) => {
-                    Some((AppEntry { id: id.clone(), name: name.clone() }, point(px(PAD + 60.0), px(SEARCH_H + 24.0 + self.sel_ix.min(8) as f32 * RESULT_H))))
+                    Some((AppEntry { id: id.clone(), name: name.clone() }, point(px(PAD + 60.0), px(RESULTS_TOP + 24.0 + self.sel_ix.min(8) as f32 * RESULT_H))))
                 }
                 _ => None,
             };
         }
-        match self.cursor? {
-            Cursor::Pin(i) => {
+        match (self.page, self.spot, self.cursor) {
+            (Page::Home, Some(Spot::Pin(i)), _) => {
                 let app = self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned()?;
-                let (col, row) = (i % startlist::GRID_COLS, (i / startlist::GRID_COLS).min(2));
-                Some((app, point(px(PAD + col as f32 * CELL_W + CELL_W / 2.0), px(top + row as f32 * CELL_H + CELL_H / 2.0))))
+                let (col, row) = (i % page::COLS, (i % self.layout.per_page.max(1)) / page::COLS);
+                let top = RESULTS_TOP + page::HEAD_H;
+                Some((app, point(px(PAD + col as f32 * CELL_W + CELL_W / 2.0), px(top + row as f32 * page::TILE_H + page::TILE_H / 2.0))))
             }
-            Cursor::App(j) => {
+            // (a recommended entry is a document: it has no app menu)
+            (Page::All, _, Some(Cursor::App(j))) => {
                 let app = self.apps.get(j).cloned()?;
-                Some((app, point(px(PAD + 80.0), px(top + GRID_MAX_H.min(PANEL_H / 3.0) + 120.0))))
+                Some((app, point(px(PAD + 80.0), px(RESULTS_TOP + page::HEAD_H + PANEL_H / 4.0))))
             }
+            _ => None,
         }
     }
 
@@ -764,10 +823,14 @@ impl StartView {
             return;
         }
         if self.query.trim().is_empty() {
-            let app = match self.cursor {
-                Some(Cursor::Pin(i)) => self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned(),
-                Some(Cursor::App(j)) => self.apps.get(j).cloned(),
-                None => None,
+            let app = match (self.page, self.spot, self.cursor) {
+                (Page::Home, Some(Spot::Pin(i)), _) => self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned(),
+                (Page::Home, Some(Spot::Rec(j)), _) => {
+                    self.activate_rec(j, how, cx);
+                    None
+                }
+                (Page::All, _, Some(Cursor::App(j))) => self.apps.get(j).cloned(),
+                _ => None,
             };
             if let Some(app) = app {
                 self.activate_app(app, how, cx);
@@ -921,19 +984,23 @@ impl StartView {
 
     // ------------------------------------------------------------------ keys
 
-    /// Tab: the field, then Settings, then the power button.
+    /// Tab: the field, then the page button ("Tümü" or "Geri"), then the gear, then the power button.
     fn tab(&mut self, back: bool, window: &mut Window, cx: &mut Context<Self>) {
-        let at = if self.settings_focus.is_focused(window) {
-            1
+        use page::TabStop;
+        let at = if self.page_focus.is_focused(window) {
+            TabStop::PageButton
+        } else if self.settings_focus.is_focused(window) {
+            TabStop::Gear
         } else if self.power_focus.is_focused(window) {
-            2
+            TabStop::Power
         } else {
-            0
+            TabStop::Field
         };
-        match if back { (at + 2) % 3 } else { (at + 1) % 3 } {
-            0 => self.focus_field(window, cx),
-            1 => window.focus(&self.settings_focus, cx),
-            _ => window.focus(&self.power_focus, cx),
+        match page::next_tab_stop(at, back, self.page_button_drawn) {
+            TabStop::Field => self.focus_field(window, cx),
+            TabStop::PageButton => window.focus(&self.page_focus, cx),
+            TabStop::Gear => window.focus(&self.settings_focus, cx),
+            TabStop::Power => window.focus(&self.power_focus, cx),
         }
         cx.notify();
     }
@@ -951,7 +1018,7 @@ impl StartView {
             return;
         }
         self.notice = None;
-        let footer = self.settings_focus.is_focused(window) || self.power_focus.is_focused(window);
+        let footer = self.page_focus.is_focused(window) || self.settings_focus.is_focused(window) || self.power_focus.is_focused(window);
 
         // the power menu and the app menu take the keys while they are open
         if self.power != PowerMenu::Closed {
@@ -1020,12 +1087,21 @@ impl StartView {
         match key {
             "escape" => {
                 cx.stop_propagation();
-                if !self.query.is_empty() {
-                    self.reset_query(window, cx);
-                    cx.notify();
-                } else {
-                    cx.defer(|cx| super::panel::close(CloseCause::Escape, cx));
+                match page::escape(self.page, self.query.is_empty()) {
+                    page::Escape::ClearQuery => {
+                        self.reset_query(window, cx);
+                        cx.notify();
+                    }
+                    // (the all-apps page steps back to the home page first; only the home page closes the panel)
+                    page::Escape::Back => self.set_page(Page::Home, window, cx),
+                    page::Escape::Close => cx.defer(|cx| super::panel::close(CloseCause::Escape, cx)),
                 }
+            }
+            // Backspace on an empty search has nothing to delete: on the all-apps page it goes back
+            // (a held key that has just emptied the field does not go on to leave the page)
+            "backspace" if !ev.is_held && page::backspace_goes_back(self.page, self.query.is_empty()) => {
+                cx.stop_propagation();
+                self.set_page(Page::Home, window, cx);
             }
             "menu" | "f10" if key == "menu" || m.shift => {
                 cx.stop_propagation();
@@ -1047,8 +1123,8 @@ impl StartView {
                 self.move_cursor(if key == "pageup" { Move::PageUp } else { Move::PageDown });
                 cx.notify();
             }
-            // left and right are the text field's, except while the cursor is in the pinned grid
-            "left" | "right" if !searching && matches!(self.cursor, Some(Cursor::Pin(_))) => {
+            // left and right are the text field's, except while the cursor is in the pinned grid or the recommended entries
+            "left" | "right" if !searching && self.page == Page::Home && self.spot.is_some() => {
                 cx.stop_propagation();
                 self.move_cursor(if key == "left" { Move::Left } else { Move::Right });
                 cx.notify();
@@ -1062,18 +1138,42 @@ impl StartView {
         }
     }
 
+    /// The keyboard cursor after an arrow or page key: on the home page through the grid and the recommended entries (the grid's page
+    /// follows the cursor), on the all-apps page through the list.
     fn move_cursor(&mut self, mv: Move) {
-        self.cursor = startlist::step(self.cursor, mv, self.pin_cells.len(), self.apps.len());
-        match self.cursor {
-            Some(Cursor::App(j)) => {
-                if let Some(row) = startlist::row_of_app(&self.rows, j) {
+        match self.page {
+            Page::Home => {
+                let (per, shown) = (self.layout.per_page, self.rec_shown());
+                self.spot = page::step_home(self.spot, mv, self.grid_page, per, self.pin_cells.len(), shown);
+                if let Some(Spot::Pin(i)) = self.spot {
+                    self.grid_page = page::page_of(i, per);
+                }
+            }
+            Page::All => {
+                self.cursor = startlist::step(self.cursor, mv, 0, self.apps.len());
+                if let Some(Cursor::App(j)) = self.cursor
+                    && let Some(row) = startlist::row_of_app(&self.rows, j)
+                {
                     self.list_scroll.scroll_to_item(row, ScrollStrategy::Nearest);
                 }
             }
-            // (a pin in a row that is scrolled out of the grid is brought into it)
-            Some(Cursor::Pin(i)) => self.pins_scroll.scroll_to_item(i),
-            None => {}
         }
+    }
+
+    /// Shows a page ("Tümü", "Geri", Escape, Backspace). The keyboard goes to the field; the all-apps list starts at its top.
+    fn set_page(&mut self, to: Page, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.live() {
+            return;
+        }
+        self.page = to;
+        self.spot = None;
+        self.cursor = None;
+        self.app_menu = None;
+        if to == Page::All {
+            self.list_scroll.scroll_to_item(0, ScrollStrategy::Top);
+        }
+        self.focus_field(window, cx);
+        cx.notify();
     }
 
     // ------------------------------------------------------------------ icons
@@ -1156,19 +1256,25 @@ impl Render for StartView {
         }
         let searching = !self.query.trim().is_empty();
         let theme = theme_of(pal);
+        self.page_button_drawn = page::page_button_shown(searching, self.apps_ready);
 
-        let body = if searching { self.render_results(pal, theme, cx) } else { self.render_start(pal, theme, window, cx) };
+        let body = if searching {
+            self.render_results(pal, theme, cx)
+        } else if self.page == Page::Home {
+            self.render_home(pal, theme, window, cx)
+        } else {
+            self.render_all(pal, theme, cx)
+        };
         let notice = self.notice.clone();
         let content = v_flex()
             .size_full()
             .opacity(frame.opacity)
             .mt(px(frame.drop_px))
-            .child(self.render_search_bar(pal, cx))
-            .child(div().h(px(1.)).w_full().bg(pal.separator().hsla()))
-            .child(div().flex_1().min_h_0().child(body))
-            .when_some(notice, |d, n| d.child(div().px(px(PAD)).py(px(6.)).text_xs().text_color(pal.text_secondary().hsla()).child(n)))
-            .child(div().h(px(1.)).w_full().bg(pal.separator().hsla()))
-            .child(self.render_bottom(pal, theme, cx));
+            .child(self.render_search_field(pal))
+            .child(div().flex_1().min_h_0().mt(px(page::SECTION_GAP)).child(body))
+            .when_some(notice, |d, n| d.child(div().h(px(page::NOTICE_H)).flex_shrink_0().px(px(PAD)).flex().items_center().text_xs().text_color(pal.text_secondary().hsla()).truncate().child(n)))
+            .child(div().h(px(page::DIVIDER_H)).w_full().bg(pal.separator().hsla()))
+            .child(self.render_footer(pal, theme, cx));
 
         div()
             .id("start-panel")
@@ -1192,135 +1298,13 @@ fn theme_of(pal: Palette) -> ThemePalette {
 }
 
 impl StartView {
-    fn render_search_bar(&mut self, pal: Palette, _cx: &mut Context<Self>) -> impl IntoElement {
-        h_flex()
-            .h(px(SEARCH_H))
-            .flex_shrink_0()
-            .px(px(PAD))
-            .gap_3()
-            .items_center()
-            .child(Icon::new(L::Search).size(px(18.)).text_color(pal.text_secondary().hsla()))
-            .child(div().flex_1().text_lg().child(Input::new(&self.input).appearance(false)))
-    }
-
-    /// The empty query: pinned grid, then all apps.
-    fn render_start(&mut self, pal: Palette, theme: ThemePalette, _window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if !self.apps_ready {
-            let text = if self.apps_failed && !self.loading { t!("Uygulama listesi okunamadı. Yeniden denemek için paneli kapatıp açın.") } else { t!("Uygulamalar yükleniyor…") };
-            return div().p(px(PAD)).text_color(pal.text_secondary().hsla()).child(text).into_any_element();
-        }
-        let hover = pal.hover_fill().hsla();
-        let secondary = pal.text_secondary().hsla();
-        let sel_fill = theme.selection;
-
-        // the pinned grid: the scroll container itself wraps its cells, so a cell can be scrolled to by its number
-        let cells: Vec<usize> = self.pin_cells.clone();
-        let mut grid = h_flex().id("pins").flex_wrap().w_full().max_h(px(GRID_MAX_H)).overflow_y_scroll().track_scroll(&self.pins_scroll);
-        for (i, &ai) in cells.iter().enumerate() {
-            let Some(app) = self.apps.get(ai).cloned() else { continue };
-            let selected = self.cursor == Some(Cursor::Pin(i));
-            let icon = self.app_picture(&app, 40.0, pal, cx);
-            let (a1, a2) = (app.clone(), app.clone());
-            grid = grid.child(
-                v_flex()
-                    .id(("pin", i))
-                    .relative()
-                    .w(px(CELL_W))
-                    .h(px(CELL_H))
-                    .flex_shrink_0()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.))
-                    .rounded(px(8.))
-                    .cursor_pointer()
-                    .when(selected, |d| d.bg(sel_fill).child(theme::selection_pill(&theme)))
-                    .when(!selected, |d| d.hover(move |s| s.bg(hover)))
-                    .child(icon)
-                    .child(div().w_full().px(px(6.)).text_xs().text_center().truncate().child(app.name.clone()))
-                    .on_click(cx.listener(move |this, _, _, cx| this.launch_app(a1.clone(), cx)))
-                    .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| this.open_menu(a2.clone(), ev.position, cx))),
-            );
-        }
-        let pinned_block = if cells.is_empty() {
-            div().h(px(44.)).flex().items_center().text_color(secondary).child(t!("Henüz sabitlenmiş uygulama yok. Bir uygulamaya sağ tıklayıp (ya da Menü tuşuna basıp) “Başlat'a sabitle”yi seçin.")).into_any_element()
-        } else {
-            grid.into_any_element()
-        };
-
-        // all apps
-        let n = self.rows.len();
-        let list = uniform_list(
-            "start-all-apps",
-            n,
-            cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
-                let pal = this.island.borrow().palette(super::backdrop::now_ms());
-                let theme = theme_of(pal);
-                let (hover, sel_fill) = (pal.hover_fill().hsla(), theme.selection);
-                let wanted: Vec<(usize, Row)> = range.filter_map(|r| this.rows.get(r).cloned().map(|row| (r, row))).collect();
-                wanted
-                    .into_iter()
-                    .map(|(r, row)| match row {
-                        Row::Header(h) => div()
-                            .id(("start-header", r))
-                            .h(px(ROW_H))
-                            .flex()
-                            .items_center()
-                            .px(px(10.))
-                            .text_sm()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(pal.text_secondary().hsla())
-                            .child(h)
-                            .into_any_element(),
-                        Row::App(ai) => {
-                            let Some(app) = this.apps.get(ai).cloned() else { return div().h(px(ROW_H)).into_any_element() };
-                            let selected = this.cursor == Some(Cursor::App(ai));
-                            let icon = this.app_picture(&app, 24.0, pal, cx);
-                            let (a1, a2) = (app.clone(), app.clone());
-                            h_flex()
-                                .id(("start-app", r))
-                                .relative()
-                                .h(px(ROW_H))
-                                .px(px(10.))
-                                .gap_3()
-                                .items_center()
-                                .rounded(px(8.))
-                                .cursor_pointer()
-                                .when(selected, |d| d.bg(sel_fill).child(theme::selection_pill(&theme)))
-                                .when(!selected, |d| d.hover(move |s| s.bg(hover)))
-                                .child(icon)
-                                .child(div().flex_1().min_w_0().truncate().text_sm().child(app.name.clone()))
-                                .on_click(cx.listener(move |this, _, _, cx| this.launch_app(a1.clone(), cx)))
-                                .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| this.open_menu(a2.clone(), ev.position, cx)))
-                                .into_any_element()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            }),
-        )
-        .track_scroll(&self.list_scroll)
-        .flex_1()
-        .min_h_0();
-
-        v_flex()
-            .size_full()
-            .px(px(PAD))
-            .child(self.section_label(t!("Sabitlenenler"), secondary))
-            .child(pinned_block)
-            .child(self.section_label(t!("Tüm uygulamalar"), secondary))
-            .child(list)
-            .into_any_element()
-    }
-
-    fn section_label(&self, text: &'static str, color: Hsla) -> impl IntoElement {
-        div().h(px(34.)).flex().items_end().pb(px(4.)).px(px(10.)).text_sm().font_weight(FontWeight::SEMIBOLD).text_color(color).child(text)
-    }
-
     /// With a query: the rows of the quick search, sectioned.
     fn render_results(&mut self, pal: Palette, theme: ThemePalette, cx: &mut Context<Self>) -> AnyElement {
         let (hover, sel_fill) = (pal.hover_fill().hsla(), theme.selection);
         let (secondary, tertiary) = (pal.text_secondary().hsla(), pal.text_secondary().hsla());
         let entries = self.entries.clone();
-        let mut list = v_flex().px(px(12.)).pb(px(8.));
+        // (a row's own padding is 10 px: the text lines up with the pages' content)
+        let mut list = v_flex().px(px(PAD - 10.0)).pb(px(8.));
         let mut last: Option<Section> = None;
         let (mut child, mut selected_child) = (0usize, 0usize);
         for (ix, entry) in entries.iter().enumerate() {
@@ -1425,77 +1409,6 @@ impl StartView {
                 )
             })
             .into_any_element()
-    }
-
-    fn render_bottom(&mut self, pal: Palette, theme: ThemePalette, cx: &mut Context<Self>) -> impl IntoElement {
-        let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
-        let secondary = pal.text_secondary().hsla();
-        let ring = theme.accent;
-        let initial = self.user.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
-        let button = |id: &'static str, icon: L, on: bool, focus: &FocusHandle, tip: &'static str| {
-            div()
-                .id(id)
-                .size(px(36.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(8.))
-                // (room for the keyboard ring, which is the border's colour)
-                .border_2()
-                .border_color(transparent_black())
-                .cursor_pointer()
-                .track_focus(focus)
-                .focus_visible(move |s| s.border_color(ring))
-                .when(on, |d| d.bg(pressed))
-                .when(!on, |d| d.hover(move |s| s.bg(hover)))
-                .active(move |s| s.bg(pressed))
-                .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(w, cx))
-                .child(Icon::new(icon).size(px(18.)).text_color(pal.text().hsla()))
-        };
-        let (settings_focus, power_focus) = (self.settings_focus.clone(), self.power_focus.clone());
-        h_flex()
-            .h(px(BOTTOM_H))
-            .flex_shrink_0()
-            .px(px(PAD))
-            .gap_2()
-            .items_center()
-            .child(
-                h_flex()
-                    .flex_1()
-                    .min_w_0()
-                    .gap_3()
-                    .items_center()
-                    .child(
-                        div()
-                            .size(px(32.))
-                            .flex_shrink_0()
-                            .rounded_full()
-                            .bg(pal.field_fill().hsla())
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_color(secondary)
-                            .child(initial),
-                    )
-                    .child(div().min_w_0().truncate().text_sm().child(self.user.clone())),
-            )
-            .child(button("start-settings", L::Settings, false, &settings_focus, t!("Ayarlar")).on_click(cx.listener(|this, _, _, cx| {
-                if !this.live() {
-                    return;
-                }
-                // (Windows' Settings, as the gear of Windows' own Start does; rustyfiles' settings are in its own window)
-                super::panel_parts::open_uri("ms-settings:");
-                this.finish(cx);
-            })))
-            .child(button("start-power", L::Power, self.power != PowerMenu::Closed, &power_focus, t!("Güç")).on_click(cx.listener(|this, _, _, cx| {
-                if !this.live() {
-                    return;
-                }
-                this.app_menu = None;
-                this.power_hi = 0;
-                let toggled = this.power.toggled();
-                this.set_power(toggled, cx);
-            })))
     }
 
     /// The power menu and the app menu, drawn over the panel with a backdrop that closes them. They are placed from the panel's real
@@ -1724,8 +1637,9 @@ mod tests {
 
     #[test]
     fn the_panels_size_is_the_design_size() {
-        assert_eq!((PANEL_W, PANEL_H), (620.0, 680.0));
+        assert_eq!((PANEL_W, PANEL_H), (642.0, 720.0));
         // the grid is six cells wide inside the padding
-        assert_eq!(CELL_W * 6.0 + 2.0 * PAD, PANEL_W - 0.0);
+        assert!((CELL_W * 6.0 + 2.0 * PAD - PANEL_W).abs() < 0.001);
+        assert_eq!(PAD, 28.0);
     }
 }

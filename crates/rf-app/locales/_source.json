@@ -8682,5 +8682,47 @@
   "key": "önbellek toplamı",
   "tr": "önbellek toplamı",
   "en": "caches in total"
+ },
+ {
+  "id": "54142fe2",
+  "key": "Önerilenler",
+  "tr": "Önerilenler",
+  "en": "Recommended"
+ },
+ {
+  "id": "26b3001c",
+  "key": "Tümü",
+  "tr": "Tümü",
+  "en": "All"
+ },
+ {
+  "id": "a7601963",
+  "key": "Az önce",
+  "tr": "Az önce",
+  "en": "Just now"
+ },
+ {
+  "id": "5f9d172e",
+  "key": "önce",
+  "tr": "önce",
+  "en": "ago"
+ },
+ {
+  "id": "e8c1d5df",
+  "key": "Son eklenen",
+  "tr": "Son eklenen",
+  "en": "Recently added"
+ },
+ {
+  "id": "d7f0ee24",
+  "key": "Başlat'ta önerilenler",
+  "tr": "Başlat'ta önerilenler",
+  "en": "Recommended in Start"
+ },
+ {
+  "id": "81db0eae",
+  "key": "Başlat panelinde sabitlenmiş uygulamaların altında en son açtığınız belgeler (ne zaman açıldığıyla birlikte) görünür. Kapalıyken bölüm çizilmez ve sabitlenenler o yeri kullanır.",
+  "tr": "Başlat panelinde sabitlenmiş uygulamaların altında en son açtığınız belgeler (ne zaman açıldığıyla birlikte) görünür. Kapalıyken bölüm çizilmez ve sabitlenenler o yeri kullanır.",
+  "en": "The Start panel shows the documents you opened most recently (with when you opened them) under the pinned apps. When off, the section is not drawn and the pinned apps take its room."
  }
 ]

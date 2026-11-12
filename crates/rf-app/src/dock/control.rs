@@ -114,6 +114,8 @@ pub struct Keys {
     /// The previews and the menu of the middle island's icons: read from the file when they are asked for.
     pub hover_previews: bool,
     pub app_menu: bool,
+    /// The Start panel's "Önerilenler" section: read from the settings when the panel opens.
+    pub start_recommended: bool,
 }
 
 impl Keys {
@@ -130,6 +132,7 @@ impl Keys {
             own_notifications: s.dock_own_notifications,
             hover_previews: s.dock_hover_previews,
             app_menu: s.dock_app_menu,
+            start_recommended: s.dock_start_recommended,
         }
     }
 }
@@ -263,7 +266,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true }
+        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true }
     }
 
     #[test]
@@ -297,6 +300,7 @@ mod tests {
             Settings { dock_own_notifications: false, ..base.clone() },
             Settings { dock_hover_previews: false, ..base.clone() },
             Settings { dock_app_menu: false, ..base.clone() },
+            Settings { dock_start_recommended: false, ..base.clone() },
         ] {
             let mut told = Some(k.clone());
             assert!(needs_reload(&mut told, Keys::of(&change)), "{:?}", Keys::of(&change));

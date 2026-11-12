@@ -508,6 +508,9 @@ pub struct Settings {
     pub dock_hover_previews: bool,
     /// A right click on an app's icon in the dock opens the dock's own app menu (on). Off: it does nothing, as before.
     pub dock_app_menu: bool,
+    /// The Start panel shows "Önerilenler" (the documents opened most recently) under the pinned apps (on). Off: the section is not
+    /// drawn and the pinned grid takes its room.
+    pub dock_start_recommended: bool,
 
     // ---- Shell host (shell/: `rustyfiles --shell`, the dock's process); experimental, every switch off by default
     /// Our desktop (the wallpaper, the icons) is drawn over Explorer's, one window per monitor, while the shell host runs. Explorer's
@@ -639,6 +642,7 @@ impl Default for Settings {
             dock_magnify: DockMagnify::Full,
             dock_hover_previews: true,
             dock_app_menu: true,
+            dock_start_recommended: true,
             shell_desktop_cover: false,
             shell_win_key: false,
             shell_own_switcher: false,

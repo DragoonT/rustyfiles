@@ -24,6 +24,9 @@
 //! | `panel` | where a panel above an island's visible glass (not its larger window) goes, when it opens / closes / switches, who gets the keyboard back, the 120 ms easing | all of it |
 //! | `power` | the Start panel's power menu (lock, sleep, sign out, restart, shut down) and its "Emin misiniz?" step; the user's display name | the menu |
 //! | `startlist` | the app list's order (Turkish alphabet), letter headers, rows, arrow-key movement through the pinned grid and the list | all of it |
+//! | `startpage` | the Start panel's two pages (home, all apps), where Escape and Backspace lead, the home page's rows and pages for a height, the keyboard cursor through the grid and the recommended entries, the wheel's page turns, the panel's height for the room above the island | all of it |
+//! | `startrecent` | "Önerilenler": the recent documents Windows keeps, chosen newest first, each once, only those still there, with how long ago | the choice |
+//! | `startuser` | the account picture Windows keeps for the signed-in user (read-only), the size to try, decoded to a square | the size order, the crop |
 //! | `startpins` | the Start panel's own pinned apps file and its first seeding from the taskbar's pins | all of it |
 //! | `appmenu` | the app menu (right click on an icon): the jump-list sections, the fixed rows (name, pin / unpin, close), the keyboard's walk through them, the height | all of it |
 //! | `preview` | the hover previews: dwell / swap / grace timing of a pointer on running apps' icons, where a pop-up above an icon goes, the cards' grid | all of it |
@@ -73,7 +76,10 @@ pub mod preview;
 pub mod power;
 pub mod startapps;
 pub mod startlist;
+pub mod startpage;
 pub mod startpins;
+pub mod startrecent;
+pub mod startuser;
 pub mod system;
 pub mod tray_order;
 pub mod tray_strip;

@@ -2413,6 +2413,13 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::Clock,
+            t!("Başlat'ta önerilenler"),
+            Some(t!("Başlat panelinde sabitlenmiş uygulamaların altında en son açtığınız belgeler (ne zaman açıldığıyla birlikte) görünür. Kapalıyken bölüm çizilmez ve sabitlenenler o yeri kullanır.")),
+            sw("dock-start-recommended", p, s.dock_start_recommended, |s, v| s.dock_start_recommended = v),
+        ),
+        card(
+            p,
             L::MapPin,
             t!("Hava durumu şehri"),
             Some(&city_label),

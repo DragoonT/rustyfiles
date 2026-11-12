@@ -1634,4 +1634,11 @@ pub const EN: &[(&str, &str)] = &[
     ("Önbelleği temizle", "Clear cache"),
     ("Küçük resimler ve simgeler yalnızca bellekte tutulur; sınır her pencerenin kendi önbelleği içindir ve aşılınca en eskiden kullanılanlar atılır. Windows'un kendi küçük resim önbelleğine dokunulmaz.", "Thumbnails and icons are kept in memory only; the limit is for each window's own cache and when it is passed the least recently used go. Windows' own thumbnail cache is left alone."),
     ("önbellek toplamı", "caches in total"),
+    ("Önerilenler", "Recommended"),
+    ("Tümü", "All"),
+    ("Az önce", "Just now"),
+    ("önce", "ago"),
+    ("Son eklenen", "Recently added"),
+    ("Başlat'ta önerilenler", "Recommended in Start"),
+    ("Başlat panelinde sabitlenmiş uygulamaların altında en son açtığınız belgeler (ne zaman açıldığıyla birlikte) görünür. Kapalıyken bölüm çizilmez ve sabitlenenler o yeri kullanır.", "The Start panel shows the documents you opened most recently (with when you opened them) under the pinned apps. When off, the section is not drawn and the pinned apps take its room."),
 ];

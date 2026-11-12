@@ -54,8 +54,9 @@ pub use more::{NOTIFICATIONS, init_extra, toggle_calendar, toggle_notifications}
 mod tray_panel;
 pub use tray_panel::{OVERFLOW, overflow_rect, toggle_overflow, toggle_overflow_from_keyboard};
 
-/// The Start panel's size, logical px.
-pub const START_SIZE: (f32, f32) = (620.0, 680.0);
+/// The Start panel's size when the screen has the room, logical px (642 x 720; `StartHooks::size` shortens it to the room above the
+/// island).
+pub const START_SIZE: (f32, f32) = (rf_win::dock::startpage::PANEL_W, rf_win::dock::startpage::PANEL_MAX_H);
 
 /// How often an open panel looks at the foreground and the mouse.
 const WATCH_EVERY: Duration = Duration::from_millis(50);
@@ -184,8 +185,13 @@ impl Hooks for StartHooks {
     fn on_hidden(&self, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_hidden(window, cx));
     }
-    fn size(&self, _cx: &App) -> (f32, f32) {
-        START_SIZE
+    fn size(&self, cx: &App) -> (f32, f32) {
+        // 720 where the room above the island allows it, else all of that room (the window is placed from this; `geo::place` also
+        // keeps it inside the work area)
+        let room = host::monitor_work(cx)
+            .zip(host::visible_glass_rect(Kind::Left, cx))
+            .map(|((scale, work), glass)| rf_win::dock::startpage::room_above(glass.top, work.top, scale, geo::GAP));
+        (START_SIZE.0, room.map_or(START_SIZE.1, rf_win::dock::startpage::panel_height))
     }
     fn remove(&self, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| {

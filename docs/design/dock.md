@@ -134,8 +134,8 @@ its left edge (left island) or right edge (right island), inside the monitor's w
 visible glass is `host::visible_glass_rect`: the glass rectangle of the layout (`Placement::glass`, screen coordinates, device px),
 NOT the island's window, which is larger (a transparent margin, the middle island's headroom) and keeps the system's invisible
 frame. At 100 % the left island's glass is (12, 974, 342, 1022) on a 1920 x 1080 monitor and its window (8, 970, 346, 1026): the Start
-panel's bottom edge is 966 (8 px above the glass), not 962; on a 2560 x 1440 monitor with the 48 px taskbar the left glass is
-(12, 1334, 342, 1382) and the Start panel (12, 646, 632, 1326), the control centre (2188, 926, 2548, 1326). The rectangle is where
+panel's bottom edge is 966 (8 px above the glass), not 962, and its top edge 246 (it is 720 high); on a 2560 x 1440 monitor with the 48 px taskbar the left glass is
+(12, 1334, 342, 1382) and the Start panel (12, 606, 654, 1326), the control centre (2188, 926, 2548, 1326). The rectangle is where
 the panel's CLIENT area goes (what it draws and what its glass covers): `rf_win::dock::panel::show_at` measures how far the window's
 outer rectangle reaches beyond its client area (the islands' windows keep the system's invisible resize frame, 8 px left, right and
 below at 100 %; the panels are the same kind of pop-up and may too, nothing is changed if they do not) and sets the outer rectangle that gives exactly that client area. This was not seen
@@ -175,28 +175,79 @@ panel's app list, pins and the user's name are read when the panel is first made
 written on: the first opening shows the empty list for that long, where the old four-second warm-up after the dock's start had it
 ready; this is the price of making nothing at the start).
 
-**The Start panel** (620 x 680 logical px; the logo, and the search field, open it). Top: the search field. Empty query:
-"Sabitlenenler" (the user's pinned apps, a grid of six) and "Tüm uygulamalar" (every installed app in the user's alphabet, Turkish
-letters in the Turkish order, with letter headers, in the app's virtual list; an icon is asked for only for rows in view, through the
-dock's icon cache and the shell thread). Right click an app anywhere: pin / unpin ("Başlat'a sabitle", "Sabitlemeyi kaldır"), run as
-administrator (Windows' consent prompt, because that is what the user asked for), open the program's place in rustyfiles. Bottom: the
-user's name, Settings (rustyfiles' own), the power button (Kilitle, Uyku, Oturumu kapat, Yeniden başlat, Bilgisayarı kapat; the last
-two ask "Emin misiniz?" in the panel first). The question is a small box in the MIDDLE of the panel, not where the menu's rows were
+**The Start panel** (642 x 720 logical px at most, shortened to the room above the island on a short screen: `startpage::panel_height`; the
+logo, and the search field, open it). It is shaped after Windows 11's Start menu, in the panels' glass, on TWO PAGES, and always opens on
+the first.
+
+* Top: the search field, a pill (36 px high, 18 px radius, 28 px from the sides, 24 px under the panel's top edge). Typing searches from
+  either page (the result list is shown over the page); Escape empties it first.
+* THE HOME PAGE. "Sabitlenenler" (14 px semibold) with a "Tümü >" button at the right of its heading; the user's pinned apps in six
+  columns, three rows of 94 px tiles (a 36 px icon and the name under it on up to two centred lines); under it, 24 px lower,
+  "Önerilenler" (see below). Right click a tile: pin / unpin ("Başlat'a sabitle", "Sabitlemeyi kaldır"), run as administrator (Windows'
+  consent prompt, because that is what the user asked for), open the program's place in rustyfiles. More pins than a page holds
+  (18) are reached by PAGES, with dots in the padding at the grid's right edge (a click on a dot), the mouse wheel over the grid (one
+  page for each roll, the smooth stream of small steps counted by `startpage::WheelPager`) and the keyboard (Page Up / Page Down, or
+  the arrows running on past the last tile). A page turned by the wheel or a dot drops a keyboard cursor that was on a pin of the page
+  that went (`startpage::spot_after_turn`), so Enter never starts an app that is not on the screen. Paging was chosen over scrolling because a page never shows half a tile, the keyboard
+  cursor needs no scroll-into-view arithmetic (the page simply follows it), and it is how Windows 11's Start does it. On a panel too
+  short for three rows the grid gives up a row first (down to two), then "Önerilenler" a row (down to one), then the grid's last rows,
+  last "Önerilenler" itself (`startpage::home_layout`, tested over every height). With nothing recommended the grid takes the room
+  (up to five rows, as many as the pins need).
+* "ÖNERİLENLER" (`dock_start_recommended`, on by default; one switch in Settings, "Başlat'ta önerilenler"). Up to six entries in two
+  columns filled across, each a 32 px icon, the name and a quieter second line: for a document, when it was last opened ("Az önce",
+  "5 dk önce", "3 sa önce", "dün", else the date in the user's own format); for an app, "Son eklenen". The documents are the recent
+  files Windows keeps (the shortcuts in `%APPDATA%\Microsoft\Windows\Recent`, whose modification time is the last opening; the same
+  source as the file manager's Home page), read on a worker thread at each opening (the shortcuts through the one shell thread,
+  `sta::call`, six shortcuts to a job and no more jobs once six files are there, 3 s in all: `startrecent::gather`, so the icon requests
+  that share that thread are never behind forty resolutions), newest first, each file once, folders left out, a file that is gone or lies on a network (a UNC path or
+  a network drive: a share that is asleep must not make the panel wait) not shown, and the entries of the last opening are put away
+  first, so a file deleted since is not shown even for the moment the reading takes (`startrecent::choose`). RECENTLY INSTALLED APPS:
+  the list of installed apps the panel has (`apps::list`, the AppsFolder) gives a name and an id and no date of installation, so there is
+  no source for them today; the code has the entry kind ("Son eklenen") and its ordering by time, and nothing makes one. A click opens
+  the document (Ctrl+click shows it in its folder; a failed opening is logged without the path). The pictures of the documents stay in
+  the icon cache only while they are among the recommended ones (`keep_icon_on_hide`), so the cache does not grow with every document
+  opened over weeks. With nothing to recommend, or the setting off, the section is not drawn and the
+  grid gets its room. While the first reading is on its way its room is kept empty, so the grid does not grow when the entries come.
+* THE ALL APPS PAGE ("Tümü", or Tab to the button and Enter). Heading "Tüm uygulamalar" with a "Geri" button at the right, and the
+  alphabetical list of every installed app in the user's alphabet (Turkish letters in the Turkish order) with letter headers, in the
+  app's virtual list; an icon is asked for only for rows in view, through the dock's icon cache and the shell thread. Escape and
+  Backspace on an empty search, and "Geri", lead back to the home page; ONLY from the home page does Escape close the panel
+  (`startpage::escape`, `backspace_goes_back`; a held Backspace does not step back).
+* Bottom: a line, then the user's ACCOUNT PICTURE (round, 28 px) and name at the left; the gear (Windows' Settings, `ms-settings:`)
+  and the power button at the right (Kilitle, Uyku, Oturumu kapat, Yeniden başlat, Bilgisayarı kapat; the last two ask "Emin
+  misiniz?" in the panel first). The picture is the one Windows keeps for the account: the files listed under
+  `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AccountPicture\Users\<SID>` (values `Image32` ... `Image1080`), read on a worker thread
+  once for each size it is drawn at (the smallest that is big enough, decoded and cropped to a square: `rf_win::dock::startuser`).
+  It is only read (the registry key and the file); an account without a picture shows the initial in a disc, as before. The round clip is
+  the picture's own corner radius (the toolkit's `overflow_hidden` clips to a rectangle only).
+* A one-line notice ("Başlatılamadı…") is paid for before the home page is fitted to the window (`startpage::page_room`, 28 px), so
+  that a page that fits exactly does not draw over it.
+
+The question of the power button is a small box in the MIDDLE of the panel, not where the menu's rows were
 (it appears under the pointer that chose "Yeniden başlat" or "Bilgisayarı kapat", and the second click of a double click must not
 answer it), "Evet" is drawn faint and does not count for the first 600 ms (`power::yes_counts`), and the keyboard starts on "Hayır"
 (Left / Right move, Enter answers what it is on). The pins are `start-pins.json` in the config folder: seeded once from the taskbar's
 pins (matched by AppUserModelID, program or name), then the user's own; an app that is not installed any more stays in the file and out
 of the grid. A seeding whose taskbar read did not come back in time writes nothing and is tried again at the next opening (an empty
 list from a failed read must not become the user's choice for good); a pin file that exists and cannot be read is moved aside
-(`start-pins.json.broken`), never written over; writes are numbered and a stale snapshot never overwrites a newer one. The pinned grid
-shows three rows and scrolls beyond them; the keyboard cursor scrolls it into view. Keyboard: typing goes to the field (also from the
-bottom row's buttons), the arrows move through the grid and the list, Enter starts, Ctrl+Enter shows the program in rustyfiles (the
-footer offers it only for a file or an app), Escape clears the query first and closes second, Tab goes field, Settings, power, the Menu
-key or Shift+F10 opens the app menu of the thing under the cursor (arrows and Enter in it), and the power menu takes the arrows and
-Enter. The keyboard cursor is the app's selection pill, like every list. Menus are drawn inside the panel (a window of their own
-would take the activation and close it), placed from the panel's real size: the window is shorter than 680 px on a small screen.
-There is no key that opens the panel: the logo and the search field are the way in, and the Windows key still opens Windows' own
-Start menu (a keyboard hook in the shell's process is a decision of its own, not made here).
+(`start-pins.json.broken`), never written over; writes are numbered and a stale snapshot never overwrites a newer one.
+
+Keyboard: typing goes to the field (also from the bottom row's buttons); the arrows move through the grid (a page follows the
+cursor), on to "Önerilenler" and back (`startpage::step_home`: down from the bottom row lands under the same half of the grid, up
+from the first row returns to the bottom row), and through the all-apps list; Page Up / Page Down turn the grid's pages; Enter starts,
+Ctrl+Enter shows the program in rustyfiles (the footer offers it only for a file or an app); Escape steps back (query, all apps, then
+the panel); Tab goes field, "Tümü" ("Geri"), gear, power (the button is a stop only while it is drawn: over a result list or before the apps have
+come, Tab goes field, gear, power: `startpage::next_tab_stop`); the Menu key or Shift+F10 opens the app menu of the thing under the cursor
+(arrows and Enter in it), and the power menu takes the arrows and Enter. The keyboard cursor is the app's selection pill, like every
+list. Menus are drawn inside the panel (a window of their own would take the activation and close it), placed from the panel's real
+size: the window is shorter than 720 px on a small screen. There is no key that opens the panel from the keyboard but the Windows
+key's tap when `shell_win_key` is on; the logo and the search field are the way in.
+
+WHAT THE REDESIGN COSTS. Nothing while the panel is hidden or closed (no timer, no thread). An opening starts two reads on worker
+threads (the recent shortcuts, about 40 files' times and, six at a time on the shell thread, as many resolved as it takes to find six files; the account picture, once for each
+size) and builds one page of the grid (at most 18 tiles) and at most six entries instead of the whole pin file; the all-apps list is
+built only when that page is open. The first opening's window creation is unchanged. With "Başlat'ta önerilenler" off the shortcuts
+are not read at all.
 
 **Search.** The sources and the ranking are the quick search's own (`quick_search::search_local`: apps, bookmarks, the web;
 `quick_search::search_files`: the name index), shared, not copied. The dock process does not hold the name index (memory), so the
@@ -592,6 +643,9 @@ the overflow panel's cells and a tip fall for that many icons (arithmetic only; 
   an icon shows nothing.
 * **Simge sağ tık menüsü** / Right-click menu on icons. On by default (`dock_app_menu`). Off: a right click on an icon does nothing, as
   before.
+* **Başlat'ta önerilenler** / Recommended in Start. On by default (`dock_start_recommended`). The Start panel's "Önerilenler" section
+  (the documents opened most recently). Off: the section is not drawn, the recent shortcuts are not read, and the pinned grid takes its
+  room.
 * **Hava durumu şehri** / Weather city. Empty (the default): no weather is shown and **no network request is made at all**. With a
   city, the dock asks Open-Meteo (`geocoding-api.open-meteo.com` once for the place, `api.open-meteo.com` for the temperature) every
   30 minutes. Nothing else leaves the machine: only the city name you typed and the coordinates it returned; no location API is
@@ -600,7 +654,7 @@ the overflow panel's cells and a tip fall for that many icons (arithmetic only; 
 
 The dock process is told to read the settings file again when any of these changes: the four switches of the panels (`dock_own_start`,
 `dock_own_control_centre`, `dock_own_calendar`, `dock_own_notifications`), the two switches of the icons' menu and previews
-(`dock_app_menu`, `dock_hover_previews`), the keep-out switch, the city, the magnification, the animations setting and the four HyperGlass sliders
+(`dock_app_menu`, `dock_hover_previews`), the Start panel's recommended section (`dock_start_recommended`), the keep-out switch, the city, the magnification, the animations setting and the four HyperGlass sliders
 (`control::Keys`). The process's views read the two panel switches from the settings it loaded last, at every click.
 
 ## The process
@@ -694,7 +748,7 @@ The dock process is told to read the settings file again when any of these chang
   (starting and stopping the process), `plan.rs` (widths, layout and timing arithmetic), `look.rs` (colours, and the palette that eases
   between the dark and the light look), `tone.rs` (light or dark foreground from the brightness behind the glass, with its hysteresis),
   `icons.rs` (the icon cache, keyed by an app's first source), `actions.rs`. The panels:
-  `panel.rs` (the hidden window, opening, closing, the watch), `start.rs` (the Start panel's view), `search.rs` (the result rows, the
+  `panel.rs` (the hidden window, opening, closing, the watch), `start.rs` (the Start panel's view and keys) with its child `start_home.rs` (the pages, drawn), `search.rs` (the result rows, the
   selection that stays on its row, whether Enter waits). `crate::search_pipe` is the pipe protocol for files; `quick_search.rs` holds
   the sources and the ranking.
 * The control centre: `crates/rf-app/src/dock/control_centre.rs` (the view), `cc_model.rs` (what is shown, the heights, the words and
@@ -767,6 +821,11 @@ menu (the menu and its seam are there, see below), notification badges, progress
   (their first reading takes tens to hundreds of milliseconds), so the panel grows upwards once; later openings start from what was
   last known. The brightness row sits between the sound card and the gear, so on that first opening it moves the sound card up by its
   own height (the tiles and the media card are above everything and move nothing).
+* The Start panel's two pages, the paging dots, the wheel, "Önerilenler" and the account picture were written without a screen: the
+  arithmetic (rows for a height, pages, the cursor's walk, the wheel, the second lines, the choice of entries, the picture's size) is
+  tested, and the two readings were run windowless on this PC (the recent shortcuts: 32 candidates, 6 chosen; the account picture: 11
+  sizes listed, 56 x 56 read in 2 ms). NOT seen: the pill field's inner padding (the input has its own), the dots in the padding, the
+  round picture's clipping, the tiles' two-line names, the wheel's feel, every click, the pages at 125 % / 150 % / 200 %.
 * The icon cache of the Start panel lets go of the pictures of found files when the panel hides, but a fast scroll through the app
   list still queues one icon job per row passed (no cancellation); they share the shell thread with the middle island's icons.
 * The 50 ms look at the foreground and the mouse buttons while a panel is open is kept (the foreground rule catches a click that took

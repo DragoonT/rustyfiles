@@ -875,10 +875,10 @@ mod tests {
         Geo { scale, islands, placements: layout::placements(&islands, monitor, scale, false), growth_px: layout::growth_room(&islands, scale) }
     }
 
-    /// The Start panel (620 x 680) over the left island and the control centre (360 x 400) over the right one, placed from the glass.
+    /// The Start panel (its real size, `START_SIZE`: 642 x 720) over the left island and the control centre (360 x 400) over the right one, placed from the glass.
     fn panels(g: &Geo, work: Rect) -> (Rect, Rect) {
         (
-            panel_geo::place(g.glass(Kind::Left), (620.0, 680.0), g.scale, Side::Left, work),
+            panel_geo::place(g.glass(Kind::Left), crate::dock::panel::START_SIZE, g.scale, Side::Left, work),
             panel_geo::place(g.glass(Kind::Right), (360.0, 400.0), g.scale, Side::Right, work),
         )
     }
@@ -893,13 +893,13 @@ mod tests {
         assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 970, 346, 1026), "the window is 4 px larger on every side");
         let (start, cc) = panels(&g, work);
         // 8 px above the glass's top edge (974), lined up with its left edge (12)
-        assert_eq!(start, Rect::new(12, 286, 632, 966));
+        assert_eq!(start, Rect::new(12, 246, 654, 966));
         assert_eq!(start.bottom, g.glass(Kind::Left).top - 8);
         // 8 px above the right glass (top 974), its right edge (1908)
         assert_eq!(g.glass(Kind::Right), Rect::new(1628, 974, 1908, 1022));
         assert_eq!(cc, Rect::new(1548, 566, 1908, 966));
         // from the windows' rectangles the numbers would be wrong
-        let wrong = panel_geo::place(g.placement(Kind::Left).window, (620.0, 680.0), 1.0, Side::Left, work);
+        let wrong = panel_geo::place(g.placement(Kind::Left).window, crate::dock::panel::START_SIZE, 1.0, Side::Left, work);
         assert_ne!(wrong, start);
         assert_eq!((wrong.left, wrong.bottom), (8, 962));
     }
@@ -911,8 +911,8 @@ mod tests {
         assert_eq!(g.glass(Kind::Left), Rect::new(18, 1461, 513, 1533));
         assert_eq!(g.placement(Kind::Left).window, Rect::new(12, 1455, 519, 1539), "the window is 6 px (4 logical) larger on every side");
         let (start, cc) = panels(&g, work);
-        // 12 px (8 logical) above the glass, 930 x 1020 (620 x 680 logical)
-        assert_eq!(start, Rect::new(18, 429, 948, 1449));
+        // 12 px (8 logical) above the glass, 963 x 1080 (642 x 720 logical)
+        assert_eq!(start, Rect::new(18, 369, 981, 1449));
         assert_eq!(start.bottom, g.glass(Kind::Left).top - 12);
         assert_eq!(g.glass(Kind::Right), Rect::new(2442, 1461, 2862, 1533));
         assert_eq!(cc, Rect::new(2322, 849, 2862, 1449));
@@ -932,7 +932,7 @@ mod tests {
         assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 1330, 346, 1386));
         let (start, cc) = panels(&g, work);
         // 8 px above the glass's top (1334), lined up with its left edge (12)
-        assert_eq!(start, Rect::new(12, 646, 632, 1326));
+        assert_eq!(start, Rect::new(12, 606, 654, 1326));
         assert_eq!(g.glass(Kind::Right), Rect::new(2268, 1334, 2548, 1382));
         assert_eq!(cc, Rect::new(2188, 926, 2548, 1326), "lined up with the right glass's right edge");
 
@@ -940,7 +940,7 @@ mod tests {
         assert_eq!(g.glass(Kind::Left), Rect::new(12, 1382, 342, 1430));
         assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 1378, 346, 1434));
         let (start, cc) = panels(&g, monitor);
-        assert_eq!(start, Rect::new(12, 694, 632, 1374));
+        assert_eq!(start, Rect::new(12, 654, 654, 1374));
         assert_eq!(cc, Rect::new(2188, 974, 2548, 1374));
     }
 
