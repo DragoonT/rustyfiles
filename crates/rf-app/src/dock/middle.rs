@@ -238,9 +238,11 @@ impl MiddleIsland {
         cx.notify();
     }
 
-    /// The dock unit (the display scale times the dock's size) is not the one the cached icons were asked for.
+    /// The dock unit (the display scale times the dock's size) is not the one the cached icons were asked for. Not while the Dock page's
+    /// size slider is being dragged: the icons are asked for once, at the size the drag ends at (`Step::Icons`), and a task-list refresh
+    /// in the middle of it must not ask the shell and the packages for every icon at a size that is gone by the time they arrive.
     fn scale_changed(&self, cx: &Context<Self>) -> bool {
-        (cx.global::<Env>().unit() - self.icon_scale).abs() > 0.001
+        (cx.global::<Env>().unit() - self.icon_scale).abs() > 0.001 && !super::host::size_drag_active(cx)
     }
 
     /// The dock's size was changed in the settings: the icons are asked for again at the size the new unit draws them (the old pictures

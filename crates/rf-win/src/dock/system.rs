@@ -11,7 +11,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use super::band::{AppBarCalls, Applied, Band, MAX_REGISTER_TRIES};
 use super::layout::{Rect, placement_area};
+use crate::shellhost::ShellMode;
+use crate::shellhost::watch::{Cause, ModeWatch, Seen, SystemLook};
 
 /// The primary monitor as the dock sees it, device px.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -92,6 +95,9 @@ pub enum SystemEvent {
     Fullscreen(bool),
     /// The system time or time zone changed, or the machine woke up: show the clock again.
     TimeChanged,
+    /// The shell window came, went or is another one (Explorer closed, restarted or replaced), and the mode is now this. Sent from the
+    /// watch in [`crate::shellhost::watch`]; the receiver compares the mode with the one it knows to see whether the MODE changed.
+    ShellChanged(ShellMode),
 }
 
 #[derive(Default)]
@@ -115,6 +121,19 @@ pub struct DockSystem {
 /// How long dropping waits for the window thread to take the band back and end.
 const END_WAIT: Duration = Duration::from_secs(3);
 
+/// The band the host took out of the work area ITSELF, with no shell to ask (see `shellhost/workarea.rs`). The islands float inside it
+/// just like inside a granted band, so [`DockSystem::placement_area`] puts it back the same way. `None`: there is none.
+static OWN_BAND: Mutex<Option<Rect>> = Mutex::new(None);
+
+fn own_band() -> Option<Rect> {
+    *OWN_BAND.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Tells the placement about a band the host took itself (or that it gave it back).
+pub fn set_own_band(band: Option<Rect>) {
+    *OWN_BAND.lock().unwrap_or_else(|p| p.into_inner()) = band;
+}
+
 /// The window that holds our toolbar registration right now (0: none). Read by the panic hook, which can run on any thread.
 static BAR_WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
@@ -123,6 +142,9 @@ const WM_RESERVE: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 2;
 const WM_BAR: u32 = windows::Win32::UI::WindowsAndMessaging::WM_APP + 1;
 const TIMER_POLL: usize = 1;
 const TIMER_DEBOUNCE: usize = 2;
+/// One shot: the toolbar registration is tried again after Explorer refused it right after its announcement.
+const TIMER_RETRY: usize = 3;
+const RETRY_MS: u32 = 1000;
 const POLL_MS: u32 = 500;
 const DEBOUNCE_MS: u32 = 150;
 
@@ -130,7 +152,13 @@ struct Ctx {
     on_event: Box<dyn Fn(SystemEvent) + Send>,
     shared: Arc<Mutex<Shared>>,
     fullscreen: Arc<AtomicBool>,
-    registered: bool,
+    /// The toolbar registration and the band last granted (see `band.rs`).
+    band: Band,
+    /// Failed registrations since the last announcement or success.
+    register_tries: u8,
+    /// Whether the shell window is still the one the host saw (see `shellhost/watch.rs`).
+    shell: ModeWatch,
+    started: std::time::Instant,
     last_monitor: Option<MonitorInfo>,
     ticks: u32,
     layout_pending: bool,
@@ -157,7 +185,18 @@ impl DockSystem {
         let (end_tx, ended) = std::sync::mpsc::channel::<()>();
         install_panic_cleanup();
         let thread = std::thread::Builder::new().name("rf-dock-system".into()).spawn(move || {
-            let ctx = Box::new(Ctx { on_event: Box::new(on_event), shared: s2, fullscreen: f2, registered: false, last_monitor: None, ticks: 0, layout_pending: false });
+            let ctx = Box::new(Ctx {
+                on_event: Box::new(on_event),
+                shared: s2,
+                fullscreen: f2,
+                band: Band::new(),
+                register_tries: 0,
+                shell: ModeWatch::new(&SystemLook),
+                started: std::time::Instant::now(),
+                last_monitor: None,
+                ticks: 0,
+                layout_pending: false,
+            });
             run(ctx, tx);
             let _ = end_tx.send(());
         })?;
@@ -199,7 +238,7 @@ impl DockSystem {
     /// [`placement_area`]). `None` without a monitor.
     pub fn placement_area(&self) -> Option<(MonitorInfo, Rect)> {
         let m = primary_monitor()?;
-        Some((m, placement_area(m.work, self.band(), m.rect)))
+        Some((m, placement_area(m.work, self.band().or(own_band()), m.rect)))
     }
 
     /// The last known state of the full-screen check (kept up to date by the watch).
@@ -263,47 +302,80 @@ fn bar_data(hwnd: windows::Win32::Foundation::HWND) -> windows::Win32::UI::Shell
     windows::Win32::UI::Shell::APPBARDATA { cbSize: size_of::<windows::Win32::UI::Shell::APPBARDATA>() as u32, hWnd: hwnd, uCallbackMessage: WM_BAR, ..Default::default() }
 }
 
-/// Registers (once), asks the system where the band may go and takes it. Updates the shared band.
+/// The real toolbar calls: messages to Explorer's taskbar window (`SHAppBarMessage`), for this window.
+struct RealBar {
+    hwnd: windows::Win32::Foundation::HWND,
+}
+
+impl AppBarCalls for RealBar {
+    fn register(&mut self) -> bool {
+        let mut d = bar_data(self.hwnd);
+        if unsafe { windows::Win32::UI::Shell::SHAppBarMessage(windows::Win32::UI::Shell::ABM_NEW, &mut d) } == 0 {
+            return false;
+        }
+        BAR_WINDOW.store(self.hwnd.0 as isize, Ordering::SeqCst);
+        true
+    }
+
+    fn query(&mut self, edge: Rect) -> Rect {
+        let mut d = bar_data(self.hwnd);
+        d.uEdge = windows::Win32::UI::Shell::ABE_BOTTOM;
+        d.rc = windows::Win32::Foundation::RECT { left: edge.left, top: edge.top, right: edge.right, bottom: edge.bottom };
+        unsafe { windows::Win32::UI::Shell::SHAppBarMessage(windows::Win32::UI::Shell::ABM_QUERYPOS, &mut d) };
+        rect_of(d.rc)
+    }
+
+    fn set_pos(&mut self, rc: Rect) {
+        let mut d = bar_data(self.hwnd);
+        d.uEdge = windows::Win32::UI::Shell::ABE_BOTTOM;
+        d.rc = windows::Win32::Foundation::RECT { left: rc.left, top: rc.top, right: rc.right, bottom: rc.bottom };
+        unsafe { windows::Win32::UI::Shell::SHAppBarMessage(windows::Win32::UI::Shell::ABM_SETPOS, &mut d) };
+    }
+
+    fn remove(&mut self) {
+        let mut d = bar_data(self.hwnd);
+        unsafe { windows::Win32::UI::Shell::SHAppBarMessage(windows::Win32::UI::Shell::ABM_REMOVE, &mut d) };
+        BAR_WINDOW.store(0, Ordering::SeqCst);
+    }
+}
+
+/// Brings the band in line with what the app wants (see `band.rs` for the rules) and tells the app when it changed.
 unsafe fn apply_reservation(hwnd: windows::Win32::Foundation::HWND, ctx: &mut Ctx) {
-    use windows::Win32::UI::Shell::{ABE_BOTTOM, ABM_NEW, ABM_QUERYPOS, ABM_REMOVE, ABM_SETPOS, SHAppBarMessage};
+    use windows::Win32::UI::WindowsAndMessaging::SetTimer;
     let want = ctx.shared().want;
-    let mut d = bar_data(hwnd);
-    match want {
-        Some(thickness) => {
-            let Some(mon) = primary_monitor() else { return };
-            if !ctx.registered {
-                if unsafe { SHAppBarMessage(ABM_NEW, &mut d) } == 0 {
-                    log::warn!("dock: the desktop toolbar could not be registered");
-                    return;
-                }
-                ctx.registered = true;
-                BAR_WINDOW.store(hwnd.0 as isize, Ordering::SeqCst);
-            }
-            // ask for the whole bottom edge of the monitor; the system takes away what the Windows taskbar (and any other toolbar that
-            // came first) already holds, then the band is cut to its thickness at the bottom of what is left
-            d.uEdge = ABE_BOTTOM;
-            d.rc = windows::Win32::Foundation::RECT { left: mon.rect.left, top: mon.rect.top, right: mon.rect.right, bottom: mon.rect.bottom };
-            unsafe { SHAppBarMessage(ABM_QUERYPOS, &mut d) };
-            d.rc.top = d.rc.bottom - thickness;
-            let granted = rect_of(d.rc);
-            if ctx.shared().band == Some(granted) {
-                return; // nothing changed: no new SETPOS, so no new notification either
-            }
-            unsafe { SHAppBarMessage(ABM_SETPOS, &mut d) };
+    let view = primary_monitor().map(|m| (m.rect, m.work));
+    let applied = ctx.band.apply(&mut RealBar { hwnd }, want, view);
+    match applied {
+        Applied::Set(granted) => {
+            ctx.register_tries = 0;
             ctx.shared().band = Some(granted);
             log::debug!("dock: reserved {granted:?}");
             ctx.emit(SystemEvent::LayoutChanged);
         }
-        None => {
-            if ctx.registered {
-                unsafe { SHAppBarMessage(ABM_REMOVE, &mut d) };
-                ctx.registered = false;
-                BAR_WINDOW.store(0, Ordering::SeqCst);
-            }
-            if ctx.shared().band.take().is_some() {
-                ctx.emit(SystemEvent::LayoutChanged);
+        Applied::Released => {
+            ctx.shared().band = None;
+            ctx.emit(SystemEvent::LayoutChanged);
+        }
+        Applied::RegisterFailed => {
+            ctx.register_tries += 1;
+            if ctx.register_tries < MAX_REGISTER_TRIES {
+                log::debug!("dock: the desktop toolbar was refused (try {}), again in {RETRY_MS} ms", ctx.register_tries);
+                unsafe { SetTimer(Some(hwnd), TIMER_RETRY, RETRY_MS, None) };
+            } else {
+                log::warn!("dock: the desktop toolbar could not be registered ({} tries); it is tried again at the next change of the screen or of the taskbar", ctx.register_tries);
+                ctx.register_tries = 0;
             }
         }
+        Applied::Unchanged => {}
+    }
+}
+
+/// The 2 s tick and the taskbar announcement ask the shell watch whether the shell window is another one; the app is told when it is.
+fn watch_shell(ctx: &mut Ctx, cause: Cause) {
+    let now = ctx.started.elapsed().as_millis() as u64;
+    if let Seen::Changed { mode, mode_changed } = ctx.shell.check(&SystemLook, now, cause) {
+        log::info!("shell host: the shell window changed, mode {}{}", mode.name(), if mode_changed { " (the mode changed)" } else { "" });
+        ctx.emit(SystemEvent::ShellChanged(mode));
     }
 }
 
@@ -371,12 +443,8 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
             // the last message: free the state, end the loop
             let mut ctx = Box::from_raw(ptr);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            if ctx.registered {
-                let mut d = bar_data(hwnd);
-                windows::Win32::UI::Shell::SHAppBarMessage(windows::Win32::UI::Shell::ABM_REMOVE, &mut d);
-                ctx.registered = false;
-                BAR_WINDOW.store(0, Ordering::SeqCst);
-            }
+            // (the band is given back: want None)
+            ctx.band.apply(&mut RealBar { hwnd }, None, None);
             ctx.shared().band = None;
             drop(ctx);
             PostQuitMessage(0);
@@ -391,12 +459,16 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
         };
         if msg == taskbar_created() {
             // Explorer started again and knows nothing of our toolbar: register anew. The granted band is the same rectangle as
-            // before, so forget it, or the new registration would be skipped as "unchanged".
-            ctx.registered = false;
+            // before, so forget it, or the new registration would be skipped as "unchanged". (Not every announcement is a restart - our
+            // own tray host broadcasts it too - so `Band` gives a registration that is still held back first. BAR_WINDOW is left as it
+            // is: it names the window that may hold a registration, which the panic hook gives back.)
+            ctx.band.announced();
+            ctx.register_tries = 0;
             ctx.shared().band = None;
-            BAR_WINDOW.store(0, Ordering::SeqCst);
             apply_reservation(hwnd, ctx);
             schedule_layout(ctx);
+            // (and the shell window is looked at: it is new, and the parts that depend on it - the desktop, the band - are told)
+            watch_shell(ctx, Cause::Announced);
             return LRESULT(0);
         }
         match msg {
@@ -460,11 +532,17 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
                         ctx.last_monitor = primary_monitor();
                         ctx.emit(SystemEvent::LayoutChanged);
                     }
+                    TIMER_RETRY => {
+                        let _ = KillTimer(Some(hwnd), TIMER_RETRY);
+                        apply_reservation(hwnd, ctx);
+                    }
                     TIMER_POLL => {
                         check_fullscreen(ctx);
                         ctx.ticks = ctx.ticks.wrapping_add(1);
                         // every 2 s: a DPI change does not always come with a message to a window that is not shown
                         if ctx.ticks.is_multiple_of(4) {
+                            // (one GetShellWindow call; see shellhost/watch.rs)
+                            watch_shell(ctx, Cause::Tick);
                             let now = primary_monitor();
                             if now != ctx.last_monitor && !ctx.layout_pending {
                                 ctx.last_monitor = now;
@@ -477,11 +555,10 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
                 LRESULT(0)
             }
             WM_ENDSESSION => {
-                if wp.0 != 0 && ctx.registered {
-                    let mut d = bar_data(hwnd);
-                    windows::Win32::UI::Shell::SHAppBarMessage(windows::Win32::UI::Shell::ABM_REMOVE, &mut d);
-                    ctx.registered = false;
-                    BAR_WINDOW.store(0, Ordering::SeqCst);
+                if wp.0 != 0 {
+                    // (written to the log so that a dock that ends with the session says why)
+                    log::warn!("shell host exits: the session is ending");
+                    ctx.band.apply(&mut RealBar { hwnd }, None, None);
                 }
                 LRESULT(0)
             }

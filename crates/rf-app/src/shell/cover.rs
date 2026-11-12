@@ -226,7 +226,12 @@ struct SystemWallpaper;
 
 impl WallpaperReader for SystemWallpaper {
     fn read(&self) -> Wallpaper {
-        source::read_wallpaper(&monitors::list())
+        let infos = monitors::list();
+        // with no shell desktop window the registry alone is read: the COM object may never answer without Explorer (see bare.rs)
+        match rf_core::desktop::cover::bare::route_for(rf_win::desktop::bare::state_now()) {
+            rf_core::desktop::cover::bare::Route::ComThenRegistry => source::read_wallpaper(&infos),
+            route => rf_win::desktop::wallpaper::current_via(route, Arc::new(rf_win::desktop::registry::SystemRegistry), &monitors::device_rects(&infos)),
+        }
     }
 }
 
@@ -238,6 +243,20 @@ pub fn on_settings(cx: &mut App) {
         (false, true) => stop(cx),
         _ => {}
     }
+}
+
+/// The shell host noticed that the shell's desktop window came or went (Explorer closed, restarted, replaced). The desktop windows are
+/// placed again at once (to the bottom of the z-order without a shell desktop, directly above it with one) and the wallpaper is read
+/// again, by the route that fits (see `rf_core::desktop::cover::bare`). Nothing at all while cover mode is off.
+pub fn shell_changed(cx: &mut App) {
+    let Some(host) = cx.try_global::<CoverHost>() else { return };
+    host._follower.poke(rf_win::desktop::wallwatch::Cause::Manual);
+    // (from the message loop, with the app not borrowed: moving a window answers messages the toolkit must be able to take)
+    cx.foreground_executor()
+        .spawn(async {
+            rf_win::desktop::bare::shell_changed();
+        })
+        .detach();
 }
 
 /// The display configuration changed (a monitor came or went, a resolution, a scale, a work area). The windows follow once the
@@ -348,6 +367,7 @@ fn start(cx: &mut App) {
             None
         }
     };
+    rf_win::desktop::bare::begin();
     cx.set_global(CoverHost {
         generation,
         windows: Vec::new(),
@@ -579,6 +599,7 @@ pub fn stop(cx: &mut App) {
         let _ = w.handle.update(cx, |_, window, _| window.remove_window());
     }
     rf_win::desktop::cover::set_raised(false);
+    rf_win::desktop::bare::end();
     drop(host);
     log::info!("cover: off");
 }

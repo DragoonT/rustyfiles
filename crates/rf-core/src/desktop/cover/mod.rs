@@ -8,9 +8,11 @@
 //! | `zorder` | where the window may sit: directly above the shell's desktop window, below every other window, whatever is asked of it |
 //! | `activation` | which presses may activate the window (an icon: yes; empty space: no) |
 //! | `plan` | monitors added, removed or changed -> windows to create, remove, place again; the debounce that waits for a hot-plug to settle |
+//! | `bare` | the state with NO shell desktop window (Explorer away): the windows at the bottom, the wallpaper read from the registry, what is drawn |
 //! | `showdesktop` | Show Desktop and Minimize All: which windows to minimize, what to restore and in which order |
 
 pub mod activation;
+pub mod bare;
 pub mod geometry;
 pub mod plan;
 pub mod showdesktop;

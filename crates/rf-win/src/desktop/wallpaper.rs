@@ -142,6 +142,16 @@ pub fn current(registry: std::sync::Arc<dyn RegRead + Send + Sync>, monitors: &[
     }
 }
 
+/// [`current`] for a chosen route (`rf_core::desktop::cover::bare::route_for`): with no shell desktop window the registry alone is read,
+/// without waiting for a COM activation that may not come back (see [`read_com`]).
+pub fn current_via(route: rf_core::desktop::cover::bare::Route, registry: std::sync::Arc<dyn RegRead + Send + Sync>, monitors: &[(String, Rect)]) -> Wallpaper {
+    use rf_core::desktop::cover::bare::Route;
+    match route {
+        Route::ComThenRegistry => current(registry, monitors),
+        Route::RegistryOnly => read_registry(registry.as_ref(), monitors),
+    }
+}
+
 /// File size and modification time from the disk.
 pub struct DiskStamper;
 

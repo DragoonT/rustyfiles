@@ -130,7 +130,10 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
     match page {
         Page::General => general(p, s, cx),
         Page::Appearance => appearance(p, s, cx),
-        Page::Dock => crate::dock_page::page(p, s),
+        Page::Dock => {
+            let size = crate::dock::size_slider::control(p, s, cx);
+            crate::dock_page::page(p, s, Some(size))
+        }
         Page::Layout => layout(p, s, cx),
         Page::Files => files(p, s, cx),
         Page::Actions => actions(p, cx),
@@ -814,27 +817,43 @@ const THUMB: f32 = 18.;
 /// The value (0..=100) under the pointer: `left` and `width` are the slider's box, the thumb's centre travels from half a thumb
 /// inside the left edge to half a thumb inside the right one. `thumb` is the thumb's width AT REST (the classic round one, or the
 /// liquid capsule): a thumb that grows while it is held keeps its centre, so the mapping does not change under the pointer.
+#[cfg(test)]
 fn slider_value_at(x: f32, left: f32, width: f32, thumb: f32) -> u8 {
+    slider_position_at(x, left, width, thumb, 100)
+}
+
+/// [`slider_value_at`] for a slider over the positions 0..=`max`.
+fn slider_position_at(x: f32, left: f32, width: f32, thumb: f32, max: u8) -> u8 {
     let run = (width - thumb).max(1.0);
-    (((x - left - thumb / 2.0) / run).clamp(0.0, 1.0) * 100.0).round() as u8
+    (((x - left - thumb / 2.0) / run).clamp(0.0, 1.0) * f32::from(max)).round() as u8
 }
 
 /// The slider being dragged right now (its id), `usize::MAX` for none. Together with `cx.has_active_drag()` it says whether to draw
 /// the thumb as the held glass lens: the press state of the element is cleared by GPUI when a drag starts.
 static HG_DRAG: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
 
+/// The slider the pointer went down on and has not been let go from (its id), `usize::MAX` for none. A mouse-up anywhere else on the page
+/// reaches every slider as a mouse-up-out; only the one that was pressed has a gesture to end.
+static SLIDER_HELD: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
+
 /// What a key does to a slider that has the focus: the new value, or `None` for a key the slider does not take. Arrows move by 1,
 /// Shift or Page Up / Down by 10, Home and End jump to the ends.
+#[cfg(test)]
 fn slider_key(value: u8, key: &str, shift: bool) -> Option<u8> {
-    let step = if shift { 10 } else { 1 };
-    let v = value.min(100);
+    slider_key_in(value, key, shift, 100, 10)
+}
+
+/// [`slider_key`] for a slider over the positions 0..=`max` whose big step (Shift, Page Up / Down) is `big`.
+fn slider_key_in(value: u8, key: &str, shift: bool, max: u8, big: u8) -> Option<u8> {
+    let step = if shift { big } else { 1 };
+    let v = value.min(max);
     Some(match key {
         "left" | "down" => v.saturating_sub(step),
-        "right" | "up" => (v + step).min(100),
-        "pagedown" => v.saturating_sub(10),
-        "pageup" => (v + 10).min(100),
+        "right" | "up" => v.saturating_add(step).min(max),
+        "pagedown" => v.saturating_sub(big),
+        "pageup" => v.saturating_add(big).min(max),
         "home" => 0,
-        "end" => 100,
+        "end" => max,
         _ => return None,
     })
 }
@@ -853,20 +872,55 @@ impl Render for SliderGhost {
 /// A slider for one HyperGlass value: a thin track filled up to a round thumb. A click puts the thumb there, a drag moves it, the arrow
 /// keys move it while it has the focus. Every step is applied and drawn at once and written to the file once the steps settle.
 fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle, dragging: bool) -> AnyElement {
-    let id = which as usize;
-    let value = value.min(100);
-    let frac = f32::from(value) / 100.0;
+    let spec = SliderSpec {
+        id: which as usize,
+        max: 100,
+        big: 10,
+        get: std::rc::Rc::new(move |cx| which.get(cx.global::<Settings>())),
+        apply: std::rc::Rc::new(move |v, cx| {
+            if which.get(cx.global::<Settings>()) != v {
+                settings::update_live(cx, |s| which.set(s, v));
+            }
+        }),
+        release: None,
+    };
+    slider_for(spec, p, value, focus, dragging)
+}
+
+/// What a slider is bound to: the positions 0..=`max` it offers, how to read the current one and what to do for each step. The
+/// HyperGlass sliders are positions 0..=100; the Dock page's size slider (`dock::size_slider`) is positions 0..=15.
+#[derive(Clone)]
+pub(crate) struct SliderSpec {
+    /// Tells the sliders apart (focus, drag, the lens): the HyperGlass ones are 0..=4.
+    pub id: usize,
+    pub max: u8,
+    /// The step of Shift and of Page Up / Down.
+    pub big: u8,
+    /// The position the setting has now (read at a key press).
+    pub get: std::rc::Rc<dyn Fn(&App) -> u8>,
+    /// A step of a click, a drag or a key: the new position.
+    pub apply: SliderStep,
+    /// The pointer was let go: nothing more is coming for now. (Not called for keys: see the key handler.)
+    pub release: Option<SliderEnd>,
+}
+
+/// What a slider does for a step (the new position) and at the end of a gesture.
+pub(crate) type SliderStep = std::rc::Rc<dyn Fn(u8, &mut App)>;
+pub(crate) type SliderEnd = std::rc::Rc<dyn Fn(&mut App)>;
+
+/// The slider of a [`SliderSpec`], with its box and thumb as the HyperGlass sliders have them.
+pub(crate) fn slider_for(spec: SliderSpec, p: &Palette, value: u8, focus: FocusHandle, dragging: bool) -> AnyElement {
+    let id = spec.id;
+    let max = spec.max.max(1);
+    let value = value.min(max);
+    let frac = f32::from(value) / f32::from(max);
     let liquid = p.liquid;
     // the width the pointer mapping leaves the thumb at rest (a thumb that grows while held keeps its centre)
     let thumb_w = if liquid { crate::liquid::SL_REST_W } else { THUMB };
     // (only the liquid thumb needs to know that the pointer is down on the slider; the classic slider stays as it was)
     let group: Option<SharedString> = liquid.then(|| format!("hg-slider-{id}").into());
     let bounds = std::rc::Rc::new(std::cell::Cell::new(Bounds::<Pixels>::default()));
-    let apply = move |v: u8, cx: &mut App| {
-        if which.get(cx.global::<Settings>()) != v {
-            settings::update_live(cx, |s| which.set(s, v));
-        }
-    };
+    let (apply_down, apply_drag, apply_key) = (spec.apply.clone(), spec.apply.clone(), spec.apply.clone());
     let (b_down, f_down) = (bounds.clone(), focus.clone());
     let (b_drag, b_probe) = (bounds.clone(), bounds.clone());
     let root = div()
@@ -922,8 +976,9 @@ fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle, dragging: bool)
     let root = root
         .on_mouse_down(MouseButton::Left, move |e, window, cx| {
             window.focus(&f_down, cx);
+            SLIDER_HELD.store(id, std::sync::atomic::Ordering::Relaxed);
             let b = b_down.get();
-            apply(slider_value_at(f32::from(e.position.x), f32::from(b.left()), f32::from(b.size.width), thumb_w), cx);
+            apply_down(slider_position_at(f32::from(e.position.x), f32::from(b.left()), f32::from(b.size.width), thumb_w, max), cx);
             cx.stop_propagation();
         })
         .on_drag(SliderDrag(id), |_, _, _, cx| cx.new(|_| SliderGhost))
@@ -935,34 +990,63 @@ fn slider(which: Hg, p: &Palette, value: u8, focus: FocusHandle, dragging: bool)
                 }
                 // the same box as a click uses (the probe's), so a click and a drag agree on the value under the pointer
                 let b = b_drag.get();
-                apply(slider_value_at(f32::from(e.event.position.x), f32::from(b.left()), f32::from(b.size.width), thumb_w), cx);
+                apply_drag(slider_position_at(f32::from(e.event.position.x), f32::from(b.left()), f32::from(b.size.width), thumb_w, max), cx);
             }
         })
         // (captured, so the arrows reach the slider before the file list's own shortcuts do)
-        .capture_key_down(move |ev: &KeyDownEvent, _, cx| {
-            let now = which.get(cx.global::<Settings>());
-            if let Some(v) = slider_key(now, ev.keystroke.key.as_str(), ev.keystroke.modifiers.shift) {
-                apply(v, cx);
-                cx.stop_propagation();
+        .capture_key_down({
+            let get = spec.get.clone();
+            let big = spec.big;
+            move |ev: &KeyDownEvent, _, cx| {
+                let now = get(cx);
+                if let Some(v) = slider_key_in(now, ev.keystroke.key.as_str(), ev.keystroke.modifiers.shift, max, big) {
+                    apply_key(v, cx);
+                    // (no release here: a held key is a run of key presses, and a slider whose end does costly work (the dock's band
+                    // and icons) would do it for each one. Whoever listens settles by itself once the steps stop.)
+                    cx.stop_propagation();
+                }
             }
         });
-    if !liquid {
+    let release = spec.release.clone();
+    if !liquid && release.is_none() {
         return root.into_any_element();
     }
-    // the thumb goes back to rest when the pointer is let go, on the slider or off it
-    root.on_mouse_up(MouseButton::Left, |_, window, _| {
+    // the thumb goes back to rest when the pointer is let go, on the slider or off it; a slider with something to do at the end of a drag
+    // does it then
+    let (release_in, release_out) = (release.clone(), release);
+    root.on_mouse_up(MouseButton::Left, move |_, window, cx| {
         HG_DRAG.store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
         window.refresh();
+        if let Some(r) = &release_in
+            && SLIDER_HELD.swap(usize::MAX, std::sync::atomic::Ordering::Relaxed) == id
+        {
+            r(cx);
+        }
     })
-    .on_mouse_up_out(MouseButton::Left, |_, window, _| {
+    .on_mouse_up_out(MouseButton::Left, move |_, window, cx| {
         HG_DRAG.store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
         window.refresh();
+        if let Some(r) = &release_out
+            && SLIDER_HELD.swap(usize::MAX, std::sync::atomic::Ordering::Relaxed) == id
+        {
+            r(cx);
+        }
     })
     .into_any_element()
 }
 
+/// Whether the slider `id` is the one being dragged right now (for the lens thumb). A flag left by a drag that ended without its mouse-up
+/// is cleared here.
+pub(crate) fn slider_dragged(cx: &App, id: usize) -> bool {
+    if !cx.has_active_drag() {
+        HG_DRAG.store(usize::MAX, std::sync::atomic::Ordering::Relaxed);
+        return false;
+    }
+    HG_DRAG.load(std::sync::atomic::Ordering::Relaxed) == id
+}
+
 /// The focus handle of slider `i`, made at the first call.
-fn hg_focus(cx: &mut App, i: usize) -> FocusHandle {
+pub(crate) fn hg_focus(cx: &mut App, i: usize) -> FocusHandle {
     while ui(cx).hg_focus.len() <= i {
         let h = cx.focus_handle();
         ui(cx).hg_focus.push(h);
@@ -2715,7 +2799,7 @@ mod search_tests {
     fn noted_on_the_dock_page(s: &Settings, p: &Palette) -> Vec<Found> {
         COLLECT.with(|c| *c.borrow_mut() = Some(Vec::new()));
         COLLECT_AT.with(|a| a.set((Page::Dock, None)));
-        let _ = crate::dock_page::page(p, s);
+        let _ = crate::dock_page::page(p, s, None);
         COLLECT.with(|c| c.borrow_mut().take()).unwrap_or_default()
     }
 

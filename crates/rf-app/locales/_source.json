@@ -8898,5 +8898,17 @@
   "key": "Başlat düğmesine ya da arama alanına basınca soldaki cam ada yukarı ve sağa büyüyüp Başlat paneline dönüşür, kapanırken adaya geri küçülür. Kapalıyken panel eskisi gibi adanın üstünde ayrı bir pencere olarak açılır. Animasyonlar kapalıysa tek karede açılır.",
   "tr": "Başlat düğmesine ya da arama alanına basınca soldaki cam ada yukarı ve sağa büyüyüp Başlat paneline dönüşür, kapanırken adaya geri küçülür. Kapalıyken panel eskisi gibi adanın üstünde ayrı bir pencere olarak açılır. Animasyonlar kapalıysa tek karede açılır.",
   "en": "Pressing the Start button or the search field makes the glass island on the left grow upwards and to the right and become the Start panel; it shrinks back into the island when it closes. When off, the panel opens as before, as a separate window above the island. With animations off it opens in one frame."
+ },
+ {
+  "id": "64fff824",
+  "key": "Dock'un tamamı kaydırıcıyla seçtiğiniz oranda büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. %100, Dock'un her zamanki boyutudur. Kaydırırken çalışan Dock sizinle birlikte değişir; ekranda ayrılan şerit ve simgelerin keskinliği bıraktığınızda güncellenir.",
+  "tr": "Dock'un tamamı kaydırıcıyla seçtiğiniz oranda büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. %100, Dock'un her zamanki boyutudur. Kaydırırken çalışan Dock sizinle birlikte değişir; ekranda ayrılan şerit ve simgelerin keskinliği bıraktığınızda güncellenir.",
+  "en": "The whole Dock grows or shrinks by the percentage you choose with the slider: the islands, icons, search field, clock, tray icons and gaps. 100% is the Dock as it always was. While you drag, a running Dock changes with you; the band reserved on screen and the sharpness of the icons update when you let go."
+ },
+ {
+  "id": "8308868b",
+  "key": "Sıfırla",
+  "tr": "Sıfırla",
+  "en": "Reset"
  }
 ]

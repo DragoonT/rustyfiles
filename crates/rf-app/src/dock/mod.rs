@@ -59,6 +59,7 @@ mod plan;
 mod popup_win;
 mod right;
 pub mod size_pref;
+pub(crate) mod size_slider;
 mod search;
 mod start;
 mod start_button;

@@ -96,6 +96,8 @@ pub(crate) fn install_panic_log() {
                 let _ = f.write_all(line.as_bytes());
             }
         }
+        // (the shell host's process also says it in the log, where the other exit reasons are)
+        shell::exits::on_panic(info);
         prev(info);
     }));
 }
@@ -485,7 +487,11 @@ pub fn main() {
     let dock_instance = if dock {
         match dock::acquire() {
             Some(held) => Some(held),
-            None => return,
+            None => {
+                // (this used to end the process without a word)
+                shell::exits::log_exit(shell::exits::Exit::AnotherHost, "");
+                return;
+            }
         }
     } else {
         None
@@ -672,4 +678,6 @@ pub fn main() {
         .detach();
         cx.activate(true);
     });
+    // (the host's process says why it ended when no earlier line did)
+    shell::exits::after_run();
 }

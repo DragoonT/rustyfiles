@@ -7,6 +7,8 @@
 //! * `ping`    - "are you there?" (the answer is only that the pipe could be written to)
 //! * `reload`  - the settings file changed: read it again
 //! * `stop`    - undo everything and exit
+//! * `size <stamp> <permille> <0|1>` - the Dock page's slider moved (1: it was let go): follow it now, without waiting for the file
+//!   (`rf_win::dock::size_live`)
 //!
 //! The dock KEEPS RUNNING when rustyfiles' window closes or rustyfiles quits: it is the user's taskbar. It stops only when the
 //! switch in Settings goes off (a `stop` message), when it is asked to from outside the same way, or when Windows ends the session.
@@ -24,6 +26,8 @@ pub const APP: &str = "rustyfiles-dock";
 pub enum Command {
     Stop,
     Reload,
+    /// The size slider moved or was let go.
+    Size(rf_win::dock::size_live::Msg),
     /// "ping", the hello of a second `--dock` launch, or anything unknown: nothing to do.
     Nothing,
 }
@@ -32,7 +36,7 @@ pub fn parse_command(line: &str) -> Command {
     match line.trim() {
         "stop" => Command::Stop,
         "reload" => Command::Reload,
-        _ => Command::Nothing,
+        other => rf_win::dock::size_live::parse_message(other).map_or(Command::Nothing, Command::Size),
     }
 }
 
@@ -58,6 +62,18 @@ pub fn plan(wanted: bool, running: bool) -> Step {
 /// `RUSTYFILES_NO_DOCK=1`: this rustyfiles never starts or stops a dock (automated runs, a second copy for testing).
 fn disabled_by_environment() -> bool {
     std::env::var_os("RUSTYFILES_NO_DOCK").is_some_and(|v| !v.is_empty() && v != "0")
+}
+
+/// Whether this process may send the size slider's numbers to a dock: not a side process, not when `RUSTYFILES_NO_DOCK` is set, and not
+/// when `RUSTYFILES_CONFIG_DIR` is (a test copy). WHY THE LAST: the pipe's name is the same for every copy, so a test copy would resize
+/// the user's own dock with a number from its own test settings, and the user's dock, reading its real file, would keep that number for
+/// a while. `sync_process` only asks the dock to read the file again, which can do no such harm.
+pub fn may_send_size() -> bool {
+    may_send_size_in(crate::background::side_process(), disabled_by_environment(), std::env::var_os("RUSTYFILES_CONFIG_DIR").is_some_and(|d| !d.is_empty()))
+}
+
+fn may_send_size_in(side_process: bool, no_dock: bool, config_dir_override: bool) -> bool {
+    !side_process && !no_dock && !config_dir_override
 }
 
 /// Whether a dock process answers on its pipe right now.
@@ -268,6 +284,24 @@ mod tests {
     }
 
     #[test]
+    fn only_the_real_settings_may_resize_the_real_dock() {
+        assert!(may_send_size_in(false, false, false));
+        assert!(!may_send_size_in(true, false, false), "a side process");
+        assert!(!may_send_size_in(false, true, false), "RUSTYFILES_NO_DOCK");
+        assert!(!may_send_size_in(false, false, true), "a test copy with its own settings folder");
+    }
+
+    #[test]
+    fn a_size_message_is_a_command_and_a_malformed_one_is_harmless() {
+        use rf_win::dock::size_live::Msg;
+        assert_eq!(parse_command("size 12 1250 0"), Command::Size(Msg { stamp: 12, permille: 1250, released: false }));
+        assert_eq!(parse_command("size 13 1250 1\r"), Command::Size(Msg { stamp: 13, permille: 1250, released: true }));
+        for bad in ["size", "size 1", "size 1 2", "size a b c", "size 1 1000 5", "sizes 1 1000 0"] {
+            assert_eq!(parse_command(bad), Command::Nothing, "{bad}");
+        }
+    }
+
+    #[test]
     fn what_to_do_about_the_dock() {
         assert_eq!(plan(true, false), Step::Start);
         assert_eq!(plan(true, true), Step::Reload);
@@ -312,7 +346,8 @@ mod tests {
             Settings { dock_app_menu: false, ..base.clone() },
             Settings { dock_start_recommended: false, ..base.clone() },
             Settings { dock_start_grow: false, ..base.clone() },
-            Settings { dock_size: crate::dock::size_pref::DockSizePref::XLarge, ..base.clone() },
+            Settings { dock_size: crate::dock::size_pref::DockSizePref::from_permille(1400), ..base.clone() },
+            Settings { dock_size: crate::dock::size_pref::DockSizePref::from_permille(1050), ..base.clone() },
             // the shell's five switches (Settings, Dock): the dock applies them when it reads the file, so a switch must not wait for
             // its look at the file's date
             Settings { shell_desktop_cover: true, ..base.clone() },

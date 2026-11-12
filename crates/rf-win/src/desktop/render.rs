@@ -16,9 +16,10 @@ use std::path::{Path, PathBuf};
 
 use image::imageops::{self, FilterType};
 use image::{ImageBuffer, Rgba};
+use rf_core::desktop::cover::bare::{Backdrop, backdrop_for};
 use rf_core::desktop::geom::{Rect, Rgb, Size, virtual_screen};
 use rf_core::desktop::placement::{Plan, TileAnchor, plan};
-use rf_core::desktop::wallpaper::{BackgroundKind, CacheKey, Stamper, Wallpaper};
+use rf_core::desktop::wallpaper::{CacheKey, Stamper, Wallpaper};
 
 use super::wallcache::DiskCache;
 use crate::thumbs::Bgra;
@@ -213,7 +214,6 @@ pub struct RenderOptions<'a> {
 pub fn render_all(wp: &Wallpaper, opts: &RenderOptions, decoder: &dyn Decoder, stamper: &dyn Stamper) -> Vec<MonitorBitmap> {
     let rects: Vec<Rect> = wp.monitors.iter().map(|m| m.rect).collect();
     let vs = virtual_screen(&rects);
-    let pictures = wp.pictures();
     let mut out: Vec<Option<MonitorBitmap>> = (0..wp.monitors.len()).map(|_| None).collect();
     let solid = |i: usize, note: Option<String>| {
         let m = &wp.monitors[i];
@@ -221,21 +221,25 @@ pub fn render_all(wp: &Wallpaper, opts: &RenderOptions, decoder: &dyn Decoder, s
         MonitorBitmap { device: m.device.clone(), rect: m.rect, bitmap: std::sync::Arc::new(compose(None, &p, wp.background)), from_cache: false, note }
     };
 
+    // What each monitor shows is `bare::backdrop_for`'s rule (the picture with its fit mode, or the colour: never a black window), asked
+    // here so that the rule that is tested is the one that runs. A file's stamp is read once however many monitors show it.
+    let stamps: std::cell::RefCell<BTreeMap<PathBuf, Option<rf_core::desktop::wallpaper::FileStamp>>> = Default::default();
+    let stamp_of = |p: &Path| *stamps.borrow_mut().entry(p.to_path_buf()).or_insert_with(|| stamper.stamp(p));
     // monitors by picture path, so each picture is decoded once
     let mut by_path: BTreeMap<PathBuf, Vec<usize>> = BTreeMap::new();
-    for (i, pic) in pictures.iter().enumerate() {
-        match pic {
-            Some(p) if wp.kind != BackgroundKind::SolidColor => by_path.entry(p.clone()).or_default().push(i),
-            _ => out[i] = Some(solid(i, None)),
+    for (i, slot) in out.iter_mut().enumerate() {
+        let unreadable = std::cell::Cell::new(false);
+        match backdrop_for(wp, i, &|p| {
+            let ok = stamp_of(p).is_some();
+            unreadable.set(!ok);
+            ok
+        }) {
+            Backdrop::Picture { path, .. } => by_path.entry(path).or_default().push(i),
+            Backdrop::Colour(_) => *slot = Some(solid(i, unreadable.get().then(|| "the picture file is missing".to_string()))),
         }
     }
     for (path, monitors) in by_path {
-        let Some(stamp) = stamper.stamp(&path) else {
-            for i in monitors {
-                out[i] = Some(solid(i, Some("the picture file is missing".into())));
-            }
-            continue;
-        };
+        let Some(stamp) = stamp_of(&path) else { continue }; // (a picture only gets here when its stamp was read)
         let key_of = |i: usize| CacheKey::new(&path, stamp, wp.monitors[i].rect, vs, wp.position, wp.background, opts.anchor);
         // the cache first
         let mut misses = Vec::new();
@@ -289,6 +293,7 @@ pub fn spawn(wp: Wallpaper, anchor: TileAnchor, cache: Option<DiskCache>, done: 
 #[cfg(test)]
 #[allow(clippy::chunks_exact_to_as_chunks)] // tests compare whole pixels; the lint is new and wants const-generic chunks everywhere
 mod tests {
+    use rf_core::desktop::wallpaper::BackgroundKind;
     use super::*;
     use rf_core::desktop::placement::Position;
     use rf_core::desktop::wallpaper::{FileStamp, MonitorWallpaper, Source};

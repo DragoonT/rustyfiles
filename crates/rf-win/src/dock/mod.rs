@@ -38,6 +38,7 @@
 //! | `tray_order` | the tray strip's order and hidden set (`tray-order.json`): an icon is known by its GUID or its program and id, never by its tip; the file form | all of it |
 //! | `tray_strip` | the tray strip and its overflow panel: how many cells fit, where each lies, where a dragged icon lands, which click a pointer or key means, the keyboard's walk | all of it |
 //! | `tray_tip` | a tray icon's tooltip: the 400 ms dwell, swap and close rules, the text's cleaning, its window's size and place | all of it |
+//! | `size_live` | the dock's size as a slider value (%75 to %150): the range, old names and numbers, the percent text, the message the settings window sends while it is dragged, what a drag redoes and what waits for the release, the dock's once-a-frame pacing | all of it |
 //! | `size` | the dock's size setting: the four sizes (0.85, 1.0, 1.2, 1.4) and the one product, the monitor's scale times the size, that every pure layout function takes in place of the monitor's scale | all of it |
 //! | `empty_spot` | which point of an island is its empty glass (no icon, field, symbol or other control), from the layout's rectangles | all of it |
 //! | `taskmgr` | starting Windows' Task Manager from a right click on the empty glass: once, the shell's "open" and never "runas" | the gate |
@@ -66,6 +67,7 @@
 //! Everything that blocks (COM, the shell, the disk, other programs' windows) is documented as such and meant for a worker thread.
 
 pub mod appmenu;
+pub mod band;
 pub mod calendar;
 pub mod clock;
 pub mod empty_spot;
@@ -95,6 +97,7 @@ pub mod startpins;
 pub mod startrecent;
 pub mod startuser;
 pub mod size;
+pub mod size_live;
 pub mod system;
 pub mod taskmgr;
 pub mod tray_order;

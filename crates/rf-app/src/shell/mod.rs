@@ -15,10 +15,15 @@
 //!   keyboard with one system-wide hook, looks only at the Windows key and Alt+Tab, and opens OUR Start panel and switcher.
 //! * The tray host (`trayhost`, increment D2): with `shell_tray_host` on, the host owns a `Shell_TrayWnd` window in front of Explorer's,
 //!   keeps a model of the icons programs send to it, and passes every message on to Explorer's window untouched.
+//! * While it runs (`live`, `exits`): the host notices that the shell window came or went (Explorer closed, restarted, replaced), tells the
+//!   desktop cover, the media-key window and the work-area keeper, and every way the process ends writes `shell host exits: <reason>`.
+//!   docs/design/shell-host.md, "While it runs".
 
 pub mod cover;
 pub mod desktop;
+pub mod exits;
 pub mod keylayer;
+pub mod live;
 pub mod probe;
 pub mod switcher;
 pub mod trayhost;
@@ -69,12 +74,14 @@ pub fn note_host_start(args: &[String]) -> HostInfo {
         log::warn!("shell host: asked to run as {:?}, found {:?}", info.requested.map(ShellMode::name), info.mode.name());
     }
     log::info!("shell host: mode {}", info.mode.name());
+    live::init(info.mode);
     HOST.get_or_init(|| info).clone()
 }
 
-/// The mode the host found at its start (`None` before it has started, and in processes that are not the host).
+/// The mode the host runs in NOW: what it found at its start, kept up to date while it runs (`None` before it has started, and in
+/// processes that are not the host).
 pub fn mode() -> Option<ShellMode> {
-    HOST.get().map(|h| h.mode)
+    live::current().or_else(|| HOST.get().map(|h| h.mode))
 }
 
 #[cfg(test)]

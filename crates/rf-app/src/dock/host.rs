@@ -22,6 +22,7 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_win::dock::island;
+use rf_win::dock::size_live::{self, Act, File as SizeFile, Live as SizeLive, Msg as SizeMsg, Redo, Step};
 use rf_win::dock::layout::{self, Islands, Placement, Placements, RADIUS, Rect, Widths};
 use rf_win::dock::hit;
 use rf_win::dock::{DockSystem, MonitorInfo, SystemEvent};
@@ -164,6 +165,9 @@ pub struct Host {
     prefs: Prefs,
     settings_stamp: Option<SystemTime>,
     started: Instant,
+    /// The size the Dock page's slider gives while it is dragged (see `rf_win::dock::size_live`): the dock follows the slider's messages
+    /// and keeps the settings file from overruling it until the drag is over.
+    live: SizeLive,
 }
 
 impl Global for Host {}
@@ -182,7 +186,7 @@ impl Host {
     /// The layout for the display as it is now.
     fn compute_geo(&self) -> Option<Geo> {
         let (mon, area) = self.area()?;
-        Some(geo_for(&mon, area, self.widths, self.prefs.size.factor()))
+        Some(geo_for(&mon, area, self.widths, fitted_factor(self.prefs.size, &mon)))
     }
 }
 
@@ -194,6 +198,17 @@ fn geo_for(mon: &MonitorInfo, area: Rect, widths: Widths, size: f32) -> Geo {
     let unit = rf_win::dock::size::unit(scale, size);
     let islands = layout::islands(area, unit, widths);
     Geo { scale, unit, islands, placements: layout::placements(&islands, mon.rect, unit, layout::shadow_on()), growth_px: layout::growth_room(&islands, unit) }
+}
+
+/// The size factor the dock is drawn at on this monitor: the setting, cut to what the screen's width can hold (`size_live::fit_to_width`).
+/// The ONE place the setting becomes a factor, so the layout, the band and the views cannot disagree about it.
+fn fitted_factor(size: super::size_pref::DockSizePref, mon: &MonitorInfo) -> f32 {
+    size_live::factor(size_live::fit_to_width(size.permille(), mon.work.width() as f32 / mon.scale()))
+}
+
+/// Whether a size slider is at work: the islands follow it but the deferred work (the band, the icons) has not been done yet.
+pub fn size_drag_active(cx: &App) -> bool {
+    cx.try_global::<Host>().is_some_and(|h| h.live.dragging())
 }
 
 fn host_mut(cx: &mut App) -> Option<&mut Host> {
@@ -401,7 +416,7 @@ fn apply_visibility(cx: &mut App) {
 
 /// Puts the (re)read system facts where the views and the glass can see them.
 fn publish_env(scale: f32, cx: &mut App) {
-    let size = cx.try_global::<Host>().map_or(1.0, |h| h.prefs.size.factor());
+    let size = cx.try_global::<Host>().map_or(1.0, |h| h.area().map_or_else(|| h.prefs.size.factor(), |(m, _)| fitted_factor(h.prefs.size, &m)));
     let env = Env::read_sized(scale, size);
     let changed = cx.try_global::<Env>().is_none_or(|old| *old != env);
     cx.set_global(env);
@@ -421,7 +436,7 @@ fn apply_reserve(cx: &mut App) {
     let Some(system) = host.system.as_ref() else { return };
     if host.prefs.reserve {
         // the band is the dock's own height and margins: it follows the size too
-        let unit = host.area().map_or(1.0, |(m, _)| rf_win::dock::size::unit(m.scale(), host.prefs.size.factor()));
+        let unit = host.area().map_or(1.0, |(m, _)| rf_win::dock::size::unit(m.scale(), fitted_factor(host.prefs.size, &m)));
         system.reserve(layout::reserved_thickness(unit));
     } else {
         system.release();
@@ -449,6 +464,8 @@ fn on_system_event(ev: SystemEvent, cx: &mut App) {
             request_layout(cx);
             // the desktop's windows follow the monitors, once they have been quiet (see shell::cover)
             crate::shell::cover::layout_changed(cx);
+            // the work area the host sets itself follows the band's size (only with RUSTYFILES_SET_WORKAREA=1, see shell::live)
+            crate::shell::live::layout_changed(cx);
         }
         SystemEvent::ThemeChanged => {
             let scale = cx.try_global::<Env>().map_or(1.0, |e| e.scale);
@@ -460,6 +477,7 @@ fn on_system_event(ev: SystemEvent, cx: &mut App) {
             }
             apply_visibility(cx);
         }
+        SystemEvent::ShellChanged(mode) => crate::shell::live::on_shell_changed(mode, cx),
         SystemEvent::TimeChanged => {
             if let Some(right) = cx.try_global::<Host>().and_then(|h| h.right.clone()) {
                 right.update(cx, |v, cx| v.refresh_clock(cx));
@@ -488,6 +506,27 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
         }
         return;
     };
+    let mut fresh = fresh;
+    // A size slider that is being dragged (or just was) is ahead of the file: the file may hold an earlier step of the same drag.
+    let size_verdict = host_mut(cx).map(|h| h.live.file(Instant::now(), fresh.dock_size.permille()));
+    if let Some(SizeFile::Keep { recheck }) = size_verdict
+        && let Some(host) = cx.try_global::<Host>()
+    {
+        fresh.dock_size = host.prefs.size;
+        if let Some(after) = recheck {
+            // The file may hold the final value although the message that carried it was lost: look at it again once the hold is over.
+            cx.spawn(async move |cx| {
+                cx.background_executor().timer(after).await;
+                cx.update(|cx| {
+                    if let Some(host) = host_mut(cx) {
+                        host.live.recheck_fired();
+                    }
+                    reload(cx);
+                });
+            })
+            .detach();
+        }
+    }
     fresh.apply_side_effects();
     let new = Prefs::of(&fresh);
     cx.set_global(fresh);
@@ -498,22 +537,14 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     let ch = changes(&host.prefs, &new);
     host.prefs = new.clone();
     let left = host.left.clone();
-    let middle = host.middle.clone();
     if ch.size {
-        // Everything of the islands follows the size at once: the environment (the glass's radius, the views' unit), the reserved band,
-        // the windows' places and the tray strip's room; a panel that is open would stay where the islands were.
-        let scale = cx.try_global::<Env>().map_or(1.0, |e| e.scale);
-        publish_env(scale, cx);
-        super::panel::close(rf_win::dock::panel::CloseCause::LayoutChanged, cx);
-        super::tray_strip::layout_changed(cx);
-        request_layout(cx);
-        // the icons were asked for at the old size's pixels: ask again now, keeping the old pictures drawn until the new ones come (a
-        // size change must not leave the dock soft, nor flash letters)
-        if let Some(middle) = middle {
-            middle.update(cx, |v, cx| v.size_changed(cx));
-        }
+        // A size from the file: everything at once (what a drag does step by step and at its end).
+        perform(size_live::FROM_FILE, cx);
+    } else if size_verdict == Some(SizeFile::Take { settle: true }) {
+        // the sizes agree but the end-of-drag work was never done (its timers were lost)
+        perform(size_live::AT_REST, cx);
     }
-    if ch.reserve || ch.size {
+    if ch.reserve && !ch.size {
         apply_reserve(cx);
     }
     if ch.city
@@ -532,6 +563,70 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     cx.refresh_windows();
 }
 
+/// Does the pieces of work a [`Redo`] lists, in the order `Redo::steps` gives them (so what the dock does while a slider is dragged,
+/// when it rests and for a size from the file is the table in `size_live`, not a copy of it). Reads the size from `Host::prefs`.
+///
+/// * `Environment`: the environment the views read (the unit) and the glass's corner radius.
+/// * `ClosePanels`: a panel that is open would stay where the islands were.
+/// * `TrayStrip`: the strip's room.
+/// * `Windows`: the three windows' places and regions.
+/// * `ReservedBand`: the band the dock reserves (changing it resizes other programs' windows).
+/// * `Icons`: asked for again at the new pixel size; the old pictures stay on show until the new ones come (a size change must not
+///   leave the dock soft, nor flash letters).
+fn perform(redo: Redo, cx: &mut App) {
+    for step in redo.steps() {
+        match step {
+            Step::Environment => {
+                let scale = cx.try_global::<Env>().map_or(1.0, |e| e.scale);
+                publish_env(scale, cx);
+            }
+            Step::ClosePanels => super::panel::close(rf_win::dock::panel::CloseCause::LayoutChanged, cx),
+            Step::TrayStrip => super::tray_strip::layout_changed(cx),
+            Step::Windows => request_layout(cx),
+            Step::ReservedBand => apply_reserve(cx),
+            Step::Icons => {
+                if let Some(middle) = cx.try_global::<Host>().and_then(|h| h.middle.clone()) {
+                    middle.update(cx, |v, cx| v.size_changed(cx));
+                }
+            }
+        }
+    }
+}
+
+/// A size message of the Dock page's slider.
+fn on_size_message(m: SizeMsg, cx: &mut App) {
+    let out = match host_mut(cx) {
+        Some(host) => host.live.message(Instant::now(), m),
+        None => return,
+    };
+    run_size_out(out, cx);
+}
+
+/// Does what the pacing says and asks for the timer it wants.
+fn run_size_out(out: size_live::Out, cx: &mut App) {
+    for act in out.acts {
+        if let Act::Layout(permille) = act
+            && let Some(host) = host_mut(cx)
+        {
+            host.prefs.size = super::size_pref::DockSizePref::from_permille(permille);
+        }
+        perform(act.redo(), cx);
+    }
+    if let Some(wait) = out.wake {
+        cx.spawn(async move |cx| {
+            cx.background_executor().timer(wait).await;
+            cx.update(|cx| {
+                let next = match host_mut(cx) {
+                    Some(host) => host.live.tick(Instant::now()),
+                    None => return,
+                };
+                run_size_out(next, cx);
+            });
+        })
+        .detach();
+    }
+}
+
 fn file_stamp() -> Option<SystemTime> {
     crate::settings::path().and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok())
 }
@@ -548,6 +643,8 @@ pub fn shutdown(cx: &mut App) {
     crate::shell::keylayer::stop(cx);
     // Explorer's taskbar comes back before anything else is torn down
     crate::shell::taskbar_hide::stop(cx);
+    // the media-key window goes, and a work area the host set itself is put back
+    crate::shell::live::stop(cx);
     // the tray host's window goes next: Explorer's tray window is the first again and programs are asked to add their icons again
     crate::shell::trayhost::stop(cx);
     // the desktop cover goes next: its windows close and Explorer's desktop is simply visible again
@@ -625,11 +722,12 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     let area = system.as_ref().and_then(|s| s.placement_area()).or_else(|| rf_win::dock::primary_monitor().map(|m| (m, m.work)));
     let Some((monitor, area)) = area else {
         log::error!("dock: this session has no monitor to put the dock on");
+        crate::shell::exits::log_exit(crate::shell::exits::Exit::NoMonitor, "");
         cx.quit();
         return;
     };
     let scale = monitor.scale();
-    let size = prefs.size.factor();
+    let size = fitted_factor(prefs.size, &monitor);
     let env = Env::read_sized(scale, size);
     cx.set_global(env);
 
@@ -668,6 +766,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     }
     if placed.is_empty() {
         log::error!("dock: no island could be opened");
+        crate::shell::exits::log_exit(crate::shell::exits::Exit::NoIsland, "");
         drop(system);
         cx.quit();
         return;
@@ -689,6 +788,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         prefs: prefs.clone(),
         settings_stamp: file_stamp(),
         started: Instant::now(),
+        live: SizeLive::new(prefs.size.permille()),
     };
     // the first styling, placing, region and glass, from the message loop (the windows exist now but are still being set up). Each glass
     // is told where it is in its window now, before it starts: it never covers the whole window, not even for a frame.
@@ -753,6 +853,8 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     crate::shell::trayhost::on_settings(cx);
     // Explorer's taskbar, when its setting is on (see shell::taskbar_hide)
     crate::shell::taskbar_hide::on_settings(cx);
+    // the parts that depend on who owns the shell window (see shell::live)
+    crate::shell::live::start(cx);
 
     // system events -> the app
     cx.spawn(async move |cx| {
@@ -773,10 +875,12 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
                 }
                 match control::parse_command(&line) {
                     Command::Stop => {
+                        crate::shell::exits::log_exit(crate::shell::exits::Exit::StopMessage, "");
                         cx.update(shutdown);
                         break;
                     }
                     Command::Reload => cx.update(reload),
+                    Command::Size(m) => cx.update(|cx| on_size_message(m, cx)),
                     Command::Nothing => {}
                 }
             }
@@ -853,6 +957,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     // all islands gone for some other reason: nothing left to run
     cx.on_window_closed(|cx, _| {
         if super::panel::only_panels_left(cx) {
+            crate::shell::exits::log_exit(crate::shell::exits::Exit::IslandsClosed, "");
             shutdown(cx);
         }
     })
@@ -904,7 +1009,7 @@ mod tests {
         assert_eq!(changes(&base, &prefs(false, "Ankara")), Changes { reserve: true, city: false, size: false });
         assert_eq!(changes(&base, &prefs(true, "İzmir")), Changes { reserve: false, city: true, size: false });
         assert_eq!(changes(&base, &prefs(false, "")), Changes { reserve: true, city: true, size: false });
-        let bigger = Prefs { size: crate::dock::size_pref::DockSizePref::Large, ..base.clone() };
+        let bigger = Prefs { size: crate::dock::size_pref::DockSizePref::from_permille(1200), ..base.clone() };
         assert_eq!(changes(&base, &bigger), Changes { reserve: false, city: false, size: true });
     }
 

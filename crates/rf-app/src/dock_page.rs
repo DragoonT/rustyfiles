@@ -79,7 +79,8 @@ impl Needs {
 pub(crate) enum Control {
     /// A switch on a boolean setting.
     Switch(fn(&Settings) -> bool, fn(&mut Settings, bool)),
-    Size(fn(&Settings) -> DockSizePref, fn(&mut Settings, DockSizePref)),
+    /// The size slider (`dock::size_slider`, which writes the field itself): the setter is what ties the entry to its field in the tests.
+    Size(fn(&Settings) -> DockSizePref, #[cfg_attr(not(test), allow(dead_code))] fn(&mut Settings, DockSizePref)),
     Magnify(fn(&Settings) -> DockMagnify, fn(&mut Settings, DockMagnify)),
     City(fn(&Settings) -> &str, fn(&mut Settings, String)),
 }
@@ -125,6 +126,11 @@ impl Entry {
             _ => RowState::Inert,
         }
     }
+}
+
+/// What the size slider does, under its title.
+pub(crate) fn size_desc() -> &'static str {
+    t!("Dock'un tamamı kaydırıcıyla seçtiğiniz oranda büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. %100, Dock'un her zamanki boyutudur. Kaydırırken çalışan Dock sizinle birlikte değişir; ekranda ayrılan şerit ve simgelerin keskinliği bıraktığınızda güncellenir.")
 }
 
 /// The line under a switch that is still on while the dock is off.
@@ -193,7 +199,7 @@ pub(crate) fn entries() -> Vec<Entry> {
             dock,
             L::Maximize2,
             t!("Dock boyutu"),
-            Some(t!("Dock'un tamamı seçtiğiniz boyuta göre büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. Orta, Dock'un her zamanki boyutudur. Değişiklik çalışan Dock'a hemen uygulanır.")),
+            Some(size_desc()),
             false,
             Control::Size(|s| s.dock_size, |s, v| s.dock_size = v),
         ),
@@ -378,25 +384,34 @@ pub(crate) fn city_line(city: &str) -> String {
 // ---------------------------------------------------------------- the page
 
 /// The page: the intro, then the sections. A control that needs the dock is drawn dimmed and inert, with a line that says why;
-/// it is never left out, so it is found by the search and the user sees where it is.
-pub(crate) fn page(p: &Palette, s: &Settings) -> Vec<AnyElement> {
+/// it is never left out, so it is found by the search and the user sees where it is. `size_slider` is the size row's slider, built by
+/// the caller (it needs the app's focus handles); without one the row shows the value.
+pub(crate) fn page(p: &Palette, s: &Settings, size_slider: Option<AnyElement>) -> Vec<AnyElement> {
     let mut out: Vec<AnyElement> = vec![div().pb_1().text_sm().text_color(p.text_secondary).child(intro()).into_any_element()];
+    let mut size_slider = size_slider;
     for (sec, rows) in grouped(&entries()) {
         out.push(section(p, sec.title()));
         for e in rows {
-            out.push(row(p, s, &e));
+            let slider = if matches!(e.control, Control::Size(..)) { size_slider.take() } else { None };
+            out.push(row(p, s, &e, slider));
         }
     }
     out
 }
 
-fn row(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
+fn row(p: &Palette, s: &Settings, e: &Entry, slider: Option<AnyElement>) -> AnyElement {
     let state = e.state(s);
     let desc: Option<String> = match e.control {
         Control::City(get, _) => Some(city_line(get(s))),
         _ => e.desc.map(str::to_string),
     };
-    let control = if state == RowState::Inert { inert_control(p, s, e) } else { live_control(p, s, e) };
+    let is_size = matches!(e.control, Control::Size(..));
+    let control = match slider {
+        Some(slider) if is_size && state != RowState::Inert => slider,
+        // (the size row without its slider, as in a test, shows the value)
+        _ if state == RowState::Inert || is_size => inert_control(p, s, e),
+        _ => live_control(p, s, e),
+    };
     // (the card notes its title and description for the Settings search, usable or not)
     let body = card_body(p, e.icon, e.title.into(), desc.map(Into::into), Some(control));
     // (the opacity is the card's own: it reaches the icon, the texts and the control)
@@ -414,15 +429,6 @@ fn note_line(p: &Palette, text: &'static str, warning: bool) -> Div {
     div().pl(px(50.)).pr_4().pb_3().text_xs().text_color(if warning { p.danger } else { p.text_secondary }).child(text)
 }
 
-fn size_choices() -> Vec<(DockSizePref, String)> {
-    vec![
-        (DockSizePref::Small, t!("Küçük").into()),
-        (DockSizePref::Medium, t!("Orta boyut").into()),
-        (DockSizePref::Large, t!("Büyük").into()),
-        (DockSizePref::XLarge, t!("Çok büyük").into()),
-    ]
-}
-
 fn magnify_choices() -> Vec<(DockMagnify, String)> {
     vec![(DockMagnify::Off, t!("Kapalı").into()), (DockMagnify::Subtle, t!("Hafif").into()), (DockMagnify::Full, t!("Tam").into())]
 }
@@ -431,7 +437,8 @@ fn magnify_choices() -> Vec<(DockMagnify, String)> {
 fn live_control(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
     match e.control {
         Control::Switch(get, set) => sw(e.id, p, get(s), set),
-        Control::Size(get, set) => dropdown(e.id, p, get(s), size_choices(), set),
+        // (the slider is built by `dock::size_slider` and handed to `page`; with none the row shows the value)
+        Control::Size(..) => inert_control(p, s, e),
         Control::Magnify(get, set) => dropdown(e.id, p, get(s), magnify_choices(), set),
         Control::City(get, set) => {
             let city = get(s).trim().to_string();
@@ -489,7 +496,7 @@ fn inert_control(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
                 )
                 .into_any_element()
         }
-        Control::Size(get, _) => label(size_choices().into_iter().find(|(v, _)| *v == get(s)).map(|(_, l)| l).unwrap_or_default()),
+        Control::Size(get, _) => label(get(s).percent_text(crate::i18n::is_tr())),
         Control::Magnify(get, _) => label(magnify_choices().into_iter().find(|(v, _)| *v == get(s)).map(|(_, l)| l).unwrap_or_default()),
         Control::City(..) => v_flex().into_any_element(),
     }
@@ -519,7 +526,8 @@ mod tests {
     use std::collections::HashSet;
 
     // (not `super::*`: the glob of gpui_kit up there brings a `test` of its own that would shadow `#[test]`)
-    use super::{Control, Entry, Needs, RowState, while_turkish, Section, city_line, entries, grouped, intro, magnify_choices, never_run_line, off_only_line, size_choices};
+    use super::{Control, Entry, Needs, RowState, while_turkish, Section, city_line, entries, grouped, intro, magnify_choices, never_run_line, off_only_line};
+    use crate::dock::size_pref::DockSizePref;
     use crate::settings::Settings;
 
     #[test]
@@ -665,7 +673,7 @@ mod tests {
     fn change_once(e: &Entry, s: &mut Settings) {
         match e.control {
             Control::Switch(get, set) => set(s, !get(s)),
-            Control::Size(get, set) => set(s, size_choices().into_iter().map(|(v, _)| v).find(|v| *v != get(s)).unwrap()),
+            Control::Size(get, set) => set(s, DockSizePref::at_position((get(s).position() + 1) % 16)),
             Control::Magnify(get, set) => set(s, magnify_choices().into_iter().map(|(v, _)| v).find(|v| *v != get(s)).unwrap()),
             Control::City(get, set) => {
                 assert_ne!(get(s), "Erzincan");
@@ -739,9 +747,6 @@ mod tests {
             }
             for text in [intro(), never_run_line(), off_only_line(), Needs::DockOn.reason()] {
                 assert!(has(text), "{text}");
-            }
-            for (_, l) in size_choices() {
-                assert!(has(&l), "{l}");
             }
             for (_, l) in magnify_choices() {
                 assert!(has(&l), "{l}");

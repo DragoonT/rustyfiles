@@ -78,6 +78,11 @@ pub fn all() -> Vec<isize> {
     covers().iter().map(|c| c.hwnd).collect()
 }
 
+/// Whether Show Desktop is on (the windows are allowed above the programs).
+pub fn is_raised() -> bool {
+    RAISED.load(Ordering::Relaxed)
+}
+
 /// Show Desktop is on (`true`) or off. Takes effect for the next placement; [`reinsert_all`] applies it now.
 pub fn set_raised(on: bool) {
     RAISED.store(on, Ordering::Relaxed);
