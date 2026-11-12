@@ -444,6 +444,12 @@ pub struct Settings {
     pub dock_reserve: bool,
     /// The city the dock's weather is for. Empty: no weather and no network request.
     pub dock_weather_city: String,
+    /// The dock's logo opens our own Start panel and its search field our own search (on). Off: the old behaviour, the logo sends the
+    /// Windows key and the field opens the quick search window.
+    pub dock_own_start: bool,
+    /// The dock's network and volume symbols open our own control centre (on). Off: the old behaviour, they send Win+A (Windows' quick
+    /// settings).
+    pub dock_own_control_centre: bool,
 }
 
 impl Default for Settings {
@@ -547,6 +553,8 @@ impl Default for Settings {
             dock_enabled: false,
             dock_reserve: true,
             dock_weather_city: String::new(),
+            dock_own_start: true,
+            dock_own_control_centre: true,
         }
     }
 }
@@ -1061,6 +1069,28 @@ mod dock_tests {
         // a settings file from before the dock has none of the keys: the same defaults
         let old = Settings::parse_lenient("theme = \"dark\"\n").unwrap();
         assert!(!old.dock_enabled && old.dock_reserve && old.dock_weather_city.is_empty());
+    }
+
+    #[test]
+    fn the_dock_opens_our_own_control_centre_unless_told_not_to() {
+        assert!(Settings::default().dock_own_control_centre);
+        assert!(Settings::parse_lenient("theme = \"dark\"
+").unwrap().dock_own_control_centre, "a file from before it: on");
+        let off = Settings { dock_own_control_centre: false, ..Default::default() };
+        let back = Settings::parse_lenient(&toml::to_string_pretty(&off).unwrap()).unwrap();
+        assert!(!back.dock_own_control_centre);
+        assert!(Settings::parse_lenient("dock_own_control_centre = 3
+").unwrap().dock_own_control_centre, "a wrong value falls back to the default");
+    }
+
+    #[test]
+    fn the_dock_opens_our_own_start_unless_told_not_to() {
+        assert!(Settings::default().dock_own_start);
+        assert!(Settings::parse_lenient("theme = \"dark\"\n").unwrap().dock_own_start, "a file from before it: on");
+        let off = Settings { dock_own_start: false, ..Default::default() };
+        let back = Settings::parse_lenient(&toml::to_string_pretty(&off).unwrap()).unwrap();
+        assert!(!back.dock_own_start);
+        assert!(Settings::parse_lenient("dock_own_start = \"nein\"\n").unwrap().dock_own_start, "a wrong value falls back to the default");
     }
 
     #[test]

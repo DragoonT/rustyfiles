@@ -113,6 +113,26 @@ fn host_mut(cx: &mut App) -> Option<&mut Host> {
     if cx.has_global::<Host>() { Some(cx.global_mut::<Host>()) } else { None }
 }
 
+/// The screen rectangle (device px) of an island's VISIBLE glass: what a panel is put above and lined up with. Today an island's window
+/// is exactly its glass, so this is the window's rectangle now; when the windows grow a margin around the glass (for a shadow), THIS is
+/// the one place that has to take the margin off.
+pub fn visible_glass_rect(kind: Kind, cx: &App) -> Option<Rect> {
+    let host = cx.try_global::<Host>()?;
+    let hwnd = host.placed.iter().find(|p| p.kind == kind)?.hwnd;
+    island::rect(hwnd)
+}
+
+/// The primary monitor's scale and work area (device px): what a panel is kept inside.
+pub fn monitor_work(cx: &App) -> Option<(f32, Rect)> {
+    let (mon, _) = cx.try_global::<Host>()?.area()?;
+    Some((mon.scale(), mon.work))
+}
+
+/// Whether a full-screen application is in front (the islands are hidden).
+pub fn is_fullscreen(cx: &App) -> bool {
+    cx.try_global::<Host>().is_some_and(|h| h.fullscreen)
+}
+
 /// The base of every island view: the window-sized box, text colour, and - only while the glass is not running - the island's own
 /// rounded translucent fill, so the dock is never invisible. The colours are the island's palette at this moment (see `tone.rs`).
 pub fn island_box(pal: Palette, fallback: bool) -> Div {
@@ -195,6 +215,10 @@ fn apply_visibility(cx: &mut App) {
             island::set_visible(h, visible);
         }
     });
+    // a panel above a hidden island would float on its own
+    if !visible {
+        super::panel::close(rf_win::dock::panel::CloseCause::FullScreen, cx);
+    }
 }
 
 /// Puts the (re)read system facts where the views and the glass can see them.
@@ -233,6 +257,8 @@ fn on_system_event(ev: SystemEvent, cx: &mut App) {
                 // the reserved band is in device px
                 apply_reserve(cx);
             }
+            // the islands move; a panel that is open would be left where they were
+            super::panel::close(rf_win::dock::panel::CloseCause::LayoutChanged, cx);
             request_layout(cx);
         }
         SystemEvent::ThemeChanged => {
@@ -304,6 +330,7 @@ pub fn shutdown(cx: &mut App) {
         return;
     }
     let host = cx.remove_global::<Host>();
+    super::panel::shutdown(cx);
     for p in &host.placed {
         p.glass.borrow_mut().release();
         let _ = p.handle.update(cx, |_, window, _| window.remove_window());
@@ -381,11 +408,13 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 
     let (left_glass, middle_glass, right_glass) = (Rc::new(RefCell::new(IslandGlass::new())), Rc::new(RefCell::new(IslandGlass::new())), Rc::new(RefCell::new(IslandGlass::new())));
     let city = prefs.city.clone();
+    let panel_glass = left_glass.clone();
     let lg = left_glass.clone();
     let left = open_island(rects.left, scale, display, move |_, cx| LeftIsland::new(lg, &city, cx), cx);
     let mg = middle_glass.clone();
     let middle = open_island(rects.middle, scale, display, move |_, cx| MiddleIsland::new(mg, cx), cx);
     let rg = right_glass.clone();
+    let panel_right_glass = right_glass.clone();
     let right_lines = lines.clone();
     let right = open_island(rects.right, scale, display, move |_, cx| RightIsland::new(rg, right_lines, cx), cx);
 
@@ -410,6 +439,8 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         return;
     }
 
+    let panel_left = left_entity.clone();
+    let sys_right = right_entity.clone();
     let fullscreen = system.as_ref().is_some_and(|s| s.fullscreen());
     let host = Host {
         system,
@@ -436,6 +467,15 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         })
         .collect();
     cx.set_global(host);
+    // the panels (Start and search): their window is made now, hidden, so that opening one is a show and not a creation
+    if let Some(left) = panel_left {
+        super::panel::init(panel_glass, left, display, scale, rects.left, cx);
+    }
+    // the control centre's window, hidden too, and what the right island's symbols follow all the time (sound, network)
+    super::panel::init_control_centre(panel_right_glass, display, scale, rects.right, cx);
+    if let Some(right) = sys_right {
+        super::sysstate::start(right, cx);
+    }
     on_message_loop(cx, move || {
         for (hwnd, r, _) in &setup {
             if let Err(e) = island::make_island(*hwnd) {
@@ -465,6 +505,11 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     if let Some(mut messages) = messages {
         cx.spawn(async move |cx| {
             while let Some(line) = messages.next().await {
+                // the main app's answer to a file search (see search_pipe)
+                if crate::search_pipe::is_reply(&line) {
+                    cx.update(|cx| super::start::on_files_reply(&line, cx));
+                    continue;
+                }
                 match control::parse_command(&line) {
                     Command::Stop => {
                         cx.update(shutdown);
@@ -546,7 +591,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 
     // all islands gone for some other reason: nothing left to run
     cx.on_window_closed(|cx, _| {
-        if cx.windows().is_empty() {
+        if super::panel::only_panels_left(cx) {
             shutdown(cx);
         }
     })

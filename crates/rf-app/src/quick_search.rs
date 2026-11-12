@@ -149,15 +149,27 @@ static APPS: Mutex<Option<(Instant, Arc<Vec<rf_win::apps::App>>)>> = Mutex::new(
 /// One enumeration at a time (each keystroke's search would start its own).
 static LISTING: Mutex<()> = Mutex::new(());
 
-/// "All apps": cached; a stale list is served while a fresh one is read.
-fn apps() -> Arc<Vec<rf_win::apps::App>> {
+/// Reads "All apps" from the shell. In the dock process this runs on the one shell thread that pumps messages: a worker thread that
+/// asks the shell becomes an apartment that never pumps, and several of those asking at once hang the shell (see `rf_win::sta::call`).
+/// The main app has always asked from its own worker threads and keeps doing so.
+fn read_apps() -> anyhow::Result<Vec<rf_win::apps::App>> {
+    if crate::background::DOCK_PROCESS.load(std::sync::atomic::Ordering::Relaxed) {
+        let limit = Duration::from_secs(20);
+        return rf_win::sta::call(limit, rf_win::apps::list).unwrap_or_else(|| anyhow::bail!("the shell did not list the apps in {limit:?}"));
+    }
+    rf_win::apps::list()
+}
+
+/// "All apps": cached; a stale list is served while a fresh one is read. Blocks while the very first list is read (a second to
+/// start with): not on the UI thread.
+pub(crate) fn apps() -> Arc<Vec<rf_win::apps::App>> {
     let cached = APPS.lock().unwrap().clone();
     match cached {
         Some((at, list)) => {
             if at.elapsed() > APPS_STALE {
                 *APPS.lock().unwrap() = Some((Instant::now(), list.clone()));
                 std::thread::spawn(|| {
-                    if let Ok(l) = rf_win::apps::list() {
+                    if let Ok(l) = read_apps() {
                         *APPS.lock().unwrap() = Some((Instant::now(), Arc::new(l)));
                     }
                 });
@@ -169,7 +181,7 @@ fn apps() -> Arc<Vec<rf_win::apps::App>> {
             if let Some((_, list)) = APPS.lock().unwrap().clone() {
                 return list;
             }
-            match rf_win::apps::list() {
+            match read_apps() {
                 Ok(l) if !l.is_empty() => {
                     let list = Arc::new(l);
                     *APPS.lock().unwrap() = Some((Instant::now(), list.clone()));
@@ -309,10 +321,17 @@ fn now_secs() -> u64 {
     SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
+/// Reads the use counts from the file again at the next search. The dock calls it when its panel opens: the main app writes the same
+/// file, and a process that loaded it once would otherwise rank by what it saw at its own start.
+pub(crate) fn reload_usage() {
+    USAGE.lock().unwrap().loaded = false;
+}
+
 fn with_usage<R>(f: impl FnOnce(&mut HashMap<String, Use>) -> R) -> R {
     let mut u = USAGE.lock().unwrap();
     if !u.loaded {
         u.loaded = true;
+        u.map.clear();
         if let Some(text) = usage_path().and_then(|p| std::fs::read(p).ok()) {
             // entry by entry: one this version can't read does not cost the others
             let raw: HashMap<String, serde_json::Value> = serde_json::from_slice(&text).unwrap_or_default();
@@ -329,7 +348,7 @@ fn boost(u: &Use) -> i32 {
     ((u.count as f64).ln_1p() * 60.0 * recency).min(240.0) as i32
 }
 
-fn remember(item: &Item) {
+pub(crate) fn remember(item: &Item) {
     // a typed web search is not something to offer again (and stays off the disk)
     if matches!(item.target, Target::Web { .. }) {
         return;
@@ -393,7 +412,7 @@ pub fn score(name: &str, q: &str) -> Option<i32> {
 
 /// `score`, and for app names also the initials of their words ("vsc" → Visual Studio Code;
 /// for page titles and file names that matched too much by chance).
-fn score_with(name: &str, q: &str, initials: bool) -> Option<i32> {
+pub(crate) fn score_with(name: &str, q: &str, initials: bool) -> Option<i32> {
     if q.is_empty() {
         return Some(0);
     }
@@ -435,7 +454,7 @@ pub enum Target {
 }
 
 impl Target {
-    fn key(&self) -> String {
+    pub(crate) fn key(&self) -> String {
         match self {
             Target::App { id, .. } => format!("app:{id}"),
             Target::Path { path, .. } => format!("path:{}", path.to_string_lossy().to_lowercase()),
@@ -454,7 +473,7 @@ pub enum Section {
     Web,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Item {
     pub target: Target,
     pub title: String,
@@ -472,7 +491,7 @@ pub struct Found {
     pub index_off: bool,
 }
 
-fn web_url(engine: WebSearch, q: &str) -> String {
+pub(crate) fn web_url(engine: WebSearch, q: &str) -> String {
     let enc: String = q
         .bytes()
         .map(|b| match b {
@@ -489,7 +508,7 @@ fn web_url(engine: WebSearch, q: &str) -> String {
     }
 }
 
-fn engine_name(engine: WebSearch) -> &'static str {
+pub(crate) fn engine_name(engine: WebSearch) -> &'static str {
     match engine {
         WebSearch::Google => "Google",
         WebSearch::Bing => "Bing",
@@ -498,26 +517,41 @@ fn engine_name(engine: WebSearch) -> &'static str {
     }
 }
 
-fn file_name(p: &Path) -> String {
+pub(crate) fn file_name(p: &Path) -> String {
     p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string_lossy().into_owned())
 }
 
 /// Searches every source for `query` (blocks: run off the UI thread).
 fn search(query: &str, engine: WebSearch, with_bookmarks: bool, index_on: bool) -> Found {
+    if fold(query.trim()).is_empty() {
+        // nothing typed: what was opened most lately
+        return Found { items: recent(), index_building: false, index_off: false };
+    }
+    let local = search_local(query, engine, with_bookmarks);
+    let files = search_files(query, index_on);
+    Found { items: merge(local, files.items), index_building: files.index_building, index_off: files.index_off }
+}
+
+/// What was opened most lately, for an empty query.
+pub(crate) fn recent() -> Vec<Item> {
+    let used: HashMap<String, Use> = with_usage(|m| m.clone());
+    let mut v: Vec<&Use> = used.values().filter(|u| !matches!(u.target, Target::Web { .. })).collect();
+    v.sort_by_key(|u| std::cmp::Reverse(boost(u)));
+    // a file deleted since is left out
+    v.into_iter()
+        .filter(|u| !matches!(&u.target, Target::Path { path, .. } if !path.exists()))
+        .take(8)
+        .map(|u| Item { target: u.target.clone(), title: u.title.clone(), detail: u.detail.clone(), section: Section::Recent, score: 0 })
+        .collect()
+}
+
+/// The sources that need no file index and answer at once: installed apps, bookmarks (when asked for) and the web search, in that
+/// order. The dock's search shows these on every keystroke and the files when they arrive. `query` must not be blank.
+pub(crate) fn search_local(query: &str, engine: WebSearch, with_bookmarks: bool) -> Vec<Item> {
     let q = fold(query.trim());
     let used: HashMap<String, Use> = with_usage(|m| m.clone());
     let lift = |t: &Target| used.get(&t.key()).map_or(0, boost);
     let mut items = Vec::new();
-    if q.is_empty() {
-        // nothing typed: what was opened most lately
-        let mut v: Vec<&Use> = used.values().filter(|u| !matches!(u.target, Target::Web { .. })).collect();
-        v.sort_by_key(|u| std::cmp::Reverse(boost(u)));
-        // a file deleted since is left out
-        for u in v.into_iter().filter(|u| !matches!(&u.target, Target::Path { path, .. } if !path.exists())).take(8) {
-            items.push(Item { target: u.target.clone(), title: u.title.clone(), detail: u.detail.clone(), section: Section::Recent, score: 0 });
-        }
-        return Found { items, index_building: false, index_off: false };
-    }
     // apps
     let mut a: Vec<Item> = apps()
         .iter()
@@ -528,7 +562,46 @@ fn search(query: &str, engine: WebSearch, with_bookmarks: bool, index_on: bool) 
         .collect();
     a.sort_by_key(|i| std::cmp::Reverse(i.score));
     items.extend(a.into_iter().take(MAX_APPS));
-    // files and folders: the name index, every indexed drive
+    // bookmarks
+    if with_bookmarks {
+        let mut b: Vec<Item> = bookmarks()
+            .iter()
+            .filter_map(|bm| {
+                let host = bm.url.split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("").trim_start_matches("www.");
+                let s = score(&bm.name, &q).or_else(|| score(host, &q).map(|s| s - 100))?;
+                let t = Target::Url { url: bm.url.clone() };
+                Some(Item { score: s + lift(&t), title: bm.name.clone(), detail: host.to_string(), section: Section::Bookmarks, target: t })
+            })
+            .collect();
+        b.sort_by_key(|i| std::cmp::Reverse(i.score));
+        items.extend(b.into_iter().take(MAX_BOOKMARKS));
+    }
+    // the web, always last
+    items.push(Item {
+        target: Target::Web { query: query.trim().to_string() },
+        title: query.trim().to_string(),
+        detail: engine_name(engine).to_string(),
+        section: Section::Web,
+        score: 0,
+    });
+    items
+}
+
+/// What the file index found for a query.
+pub(crate) struct FilesFound {
+    pub items: Vec<Item>,
+    /// The file index is still being built: files may be missing.
+    pub index_building: bool,
+    /// No file index (turned off in Settings): no files at all.
+    pub index_off: bool,
+}
+
+/// Files and folders from the name index, every indexed drive, ranked (blocks: off the UI thread). Needs the index, which only the
+/// main app loads. `query` must not be blank.
+pub(crate) fn search_files(query: &str, index_on: bool) -> FilesFound {
+    let q = fold(query.trim());
+    let used: HashMap<String, Use> = with_usage(|m| m.clone());
+    let lift = |t: &Target| used.get(&t.key()).map_or(0, boost);
     let mut index_building = false;
     let status = rf_win::indexer::status();
     // on in Settings but not started yet (it starts a few seconds after rustyfiles): coming
@@ -572,10 +645,11 @@ fn search(query: &str, engine: WebSearch, with_bookmarks: bool, index_on: bool) 
     // what was opened before is always a candidate (the cap above could leave it out); only a
     // name that matches is looked for on the disk
     for u in used.values() {
-        if let Target::Path { path, .. } = &u.target {
-            if (glob || score(&file_name(path), &q).is_some()) && path.exists() {
-                add(path.clone(), &mut hits);
-            }
+        if let Target::Path { path, .. } = &u.target
+            && (glob || score(&file_name(path), &q).is_some())
+            && path.exists()
+        {
+            add(path.clone(), &mut hits);
         }
     }
     let mut f: Vec<Item> = hits
@@ -592,30 +666,15 @@ fn search(query: &str, engine: WebSearch, with_bookmarks: bool, index_on: bool) 
             *dir = std::fs::metadata(&*path).is_ok_and(|m| m.is_dir());
         }
     }
-    items.extend(f);
-    // bookmarks
-    if with_bookmarks {
-        let mut b: Vec<Item> = bookmarks()
-            .iter()
-            .filter_map(|bm| {
-                let host = bm.url.split("://").nth(1).unwrap_or("").split('/').next().unwrap_or("").trim_start_matches("www.");
-                let s = score(&bm.name, &q).or_else(|| score(host, &q).map(|s| s - 100))?;
-                let t = Target::Url { url: bm.url.clone() };
-                Some(Item { score: s + lift(&t), title: bm.name.clone(), detail: host.to_string(), section: Section::Bookmarks, target: t })
-            })
-            .collect();
-        b.sort_by_key(|i| std::cmp::Reverse(i.score));
-        items.extend(b.into_iter().take(MAX_BOOKMARKS));
-    }
-    // the web, always last
-    items.push(Item {
-        target: Target::Web { query: query.trim().to_string() },
-        title: query.trim().to_string(),
-        detail: engine_name(engine).to_string(),
-        section: Section::Web,
-        score: 0,
-    });
-    Found { items, index_building, index_off }
+    FilesFound { items: f, index_building, index_off }
+}
+
+/// Puts the sources' answers in the order shown: by section (apps, files, bookmarks, web), each section keeping its own ranking.
+pub(crate) fn merge(local: Vec<Item>, files: Vec<Item>) -> Vec<Item> {
+    let mut all = local;
+    all.extend(files);
+    all.sort_by_key(|i| i.section);
+    all
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -850,7 +909,7 @@ fn close_later<T>(cx: &mut Context<T>) {
     cx.defer(close);
 }
 
-fn section_title(s: Section) -> &'static str {
+pub(crate) fn section_title(s: Section) -> &'static str {
     match s {
         Section::Recent => t!("Son kullanılanlar"),
         Section::Apps => t!("Uygulamalar"),

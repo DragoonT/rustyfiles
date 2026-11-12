@@ -130,6 +130,16 @@ impl PopupGlass {
     /// Marks the window as a liquid popup (its controls take the liquid look), asks for the system's small round corners and attaches
     /// the glass. A window that cannot get glass is not an error: [`fallback`](Self::fallback) stays true.
     pub fn start(hwnd: isize, dark: bool) -> PopupGlass {
+        Self::start_with(hwnd, dark, false)
+    }
+
+    /// [`start`](Self::start) for a large panel (the dock's Start and control centre): the system's ordinary round corners (8 px at
+    /// 100 %, what Windows' own Start has) instead of the small ones a menu gets.
+    pub fn start_panel(hwnd: isize, dark: bool) -> PopupGlass {
+        Self::start_with(hwnd, dark, true)
+    }
+
+    fn start_with(hwnd: isize, dark: bool, round: bool) -> PopupGlass {
         let mut g = PopupGlass { hwnd, machine: Machine::default(), started: Instant::now(), attached: false, gave_up: false };
         if hwnd == 0 {
             g.machine.attach_failed(0);
@@ -137,7 +147,11 @@ impl PopupGlass {
             return g;
         }
         crate::glass::set_liquid_popup(hwnd, true);
-        rf_win::window::set_small_corners(hwnd);
+        if round {
+            rf_win::window::set_round_corners(hwnd);
+        } else {
+            rf_win::window::set_small_corners(hwnd);
+        }
         if rf_win::glass::attach(hwnd, dark) {
             g.attached = true;
         } else {

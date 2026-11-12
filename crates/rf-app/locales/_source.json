@@ -6546,5 +6546,287 @@
   "key": "Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
   "tr": "Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
   "en": "On this version of Windows, or while the screenshot border permission is off, rustyfiles windows do not appear in screenshots, recordings or screen sharing."
+ },
+ {
+  "id": "ae35b06a",
+  "key": "Uygulamalar yükleniyor…",
+  "tr": "Uygulamalar yükleniyor…",
+  "en": "Loading apps…"
+ },
+ {
+  "id": "b49252e9",
+  "key": "Tüm uygulamalar",
+  "tr": "Tüm uygulamalar",
+  "en": "All apps"
+ },
+ {
+  "id": "7aaebf4d",
+  "key": "Dosyaları aramak için rustyfiles'ı arka planda başlat",
+  "tr": "Dosyaları aramak için rustyfiles'ı arka planda başlat",
+  "en": "Start rustyfiles in the background to search files"
+ },
+ {
+  "id": "4c46d867",
+  "key": "Ana uygulama başlatılıyor: dosyalar birazdan gelir",
+  "tr": "Ana uygulama başlatılıyor: dosyalar birazdan gelir",
+  "en": "Starting the main app: files will appear in a moment"
+ },
+ {
+  "id": "e3d6f6ea",
+  "key": "Esc: temizle",
+  "tr": "Esc: temizle",
+  "en": "Esc: clear"
+ },
+ {
+  "id": "93265ca4",
+  "key": "Sabitlemeyi kaldır",
+  "tr": "Sabitlemeyi kaldır",
+  "en": "Unpin"
+ },
+ {
+  "id": "7e56aaf5",
+  "key": "Başlat'a sabitle",
+  "tr": "Başlat'a sabitle",
+  "en": "Pin to Start"
+ },
+ {
+  "id": "548f25f8",
+  "key": "Emin misiniz?",
+  "tr": "Emin misiniz?",
+  "en": "Are you sure?"
+ },
+ {
+  "id": "7fcb6c08",
+  "key": "Hayır",
+  "tr": "Hayır",
+  "en": "No"
+ },
+ {
+  "id": "57bc2cc3",
+  "key": "Evet",
+  "tr": "Evet",
+  "en": "Yes"
+ },
+ {
+  "id": "12e72e8d",
+  "key": "Kilitle",
+  "tr": "Kilitle",
+  "en": "Lock"
+ },
+ {
+  "id": "68ebf72f",
+  "key": "Uyku",
+  "tr": "Uyku",
+  "en": "Sleep"
+ },
+ {
+  "id": "3f63247b",
+  "key": "Oturumu kapat",
+  "tr": "Oturumu kapat",
+  "en": "Sign out"
+ },
+ {
+  "id": "165b6c06",
+  "key": "Bilgisayarı kapat",
+  "tr": "Bilgisayarı kapat",
+  "en": "Shut down"
+ },
+ {
+  "id": "8da39e9a",
+  "key": "Zayıf",
+  "tr": "Zayıf",
+  "en": "Weak"
+ },
+ {
+  "id": "6b6daec3",
+  "key": "Orta",
+  "tr": "Orta",
+  "en": "Fair"
+ },
+ {
+  "id": "4bcbffaa",
+  "key": "Güçlü",
+  "tr": "Güçlü",
+  "en": "Strong"
+ },
+ {
+  "id": "7d7895d7",
+  "key": "Bağlı değil",
+  "tr": "Bağlı değil",
+  "en": "Not connected"
+ },
+ {
+  "id": "f9e08da4",
+  "key": "Bağlı",
+  "tr": "Bağlı",
+  "en": "Connected"
+ },
+ {
+  "id": "559cdaea",
+  "key": "İnternet yok",
+  "tr": "İnternet yok",
+  "en": "No internet"
+ },
+ {
+  "id": "e3cbb12c",
+  "key": "Hücresel",
+  "tr": "Hücresel",
+  "en": "Mobile data"
+ },
+ {
+  "id": "d5494740",
+  "key": "Kullanılamıyor",
+  "tr": "Kullanılamıyor",
+  "en": "Unavailable"
+ },
+ {
+  "id": "9dde7b51",
+  "key": "Pil tasarrufu",
+  "tr": "Pil tasarrufu",
+  "en": "Battery saver"
+ },
+ {
+  "id": "b382e4af",
+  "key": "Şarj oluyor",
+  "tr": "Şarj oluyor",
+  "en": "Charging"
+ },
+ {
+  "id": "8f4afbc3",
+  "key": "Prize takılı",
+  "tr": "Prize takılı",
+  "en": "Plugged in"
+ },
+ {
+  "id": "d6479d5a",
+  "key": "Pil",
+  "tr": "Pil",
+  "en": "Battery"
+ },
+ {
+  "id": "02915209",
+  "key": "Ses aygıtı",
+  "tr": "Ses aygıtı",
+  "en": "Sound device"
+ },
+ {
+  "id": "20f7bd69",
+  "key": "Şimdi çalıyor",
+  "tr": "Şimdi çalıyor",
+  "en": "Now playing"
+ },
+ {
+  "id": "523a3a8c",
+  "key": "Parlaklık",
+  "tr": "Parlaklık",
+  "en": "Brightness"
+ },
+ {
+  "id": "c42ebb7e",
+  "key": "rustyfiles Başlat menüsünü kullan",
+  "tr": "rustyfiles Başlat menüsünü kullan",
+  "en": "Use the rustyfiles Start menu"
+ },
+ {
+  "id": "d95f3c3f",
+  "key": "Dock'taki logo ve arama alanı Windows'un Başlat menüsü yerine rustyfiles'ın kendi panelini açar. Kapalıyken Windows'un Başlat menüsü ve hızlı arama açılır.",
+  "tr": "Dock'taki logo ve arama alanı Windows'un Başlat menüsü yerine rustyfiles'ın kendi panelini açar. Kapalıyken Windows'un Başlat menüsü ve hızlı arama açılır.",
+  "en": "The dock's logo and search field open the rustyfiles Start panel instead of Windows' Start menu. When off, Windows' Start menu and the quick search open."
+ },
+ {
+  "id": "7dbe8ecc",
+  "key": "rustyfiles denetim merkezini kullan",
+  "tr": "rustyfiles denetim merkezini kullan",
+  "en": "Use the rustyfiles control centre"
+ },
+ {
+  "id": "77b68886",
+  "key": "Dock'taki ağ ve ses simgeleri Windows'un hızlı ayarları yerine rustyfiles'ın panelini açar: ses, ağ, Bluetooth, şimdi çalan, parlaklık. Kapalıyken Windows'un hızlı ayarları açılır.",
+  "tr": "Dock'taki ağ ve ses simgeleri Windows'un hızlı ayarları yerine rustyfiles'ın panelini açar: ses, ağ, Bluetooth, şimdi çalan, parlaklık. Kapalıyken Windows'un hızlı ayarları açılır.",
+  "en": "The dock's network and volume symbols open the rustyfiles panel instead of Windows' quick settings: sound, network, Bluetooth, now playing, brightness. When off, Windows' quick settings open."
+ },
+ {
+  "id": "a839a55a",
+  "key": "Henüz sabitlenmiş uygulama yok. Bir uygulamaya sağ tıklayıp (ya da Menü tuşuna basıp) “Başlat'a sabitle”yi seçin.",
+  "tr": "Henüz sabitlenmiş uygulama yok. Bir uygulamaya sağ tıklayıp (ya da Menü tuşuna basıp) “Başlat'a sabitle”yi seçin.",
+  "en": "No pinned apps yet. Right click an app (or press the Menu key) and choose “Pin to Start”."
+ },
+ {
+  "id": "501934cb",
+  "key": "Dosya dizini ana uygulamada tutulur; 10 dakika aranmazsa kendiliğinden kapanır",
+  "tr": "Dosya dizini ana uygulamada tutulur; 10 dakika aranmazsa kendiliğinden kapanır",
+  "en": "The file index is kept by the main app; it closes by itself after 10 minutes without a search"
+ },
+ {
+  "id": "fa12da41",
+  "key": "Başlatılamadı. Kaldırılmış ya da taşınmış olabilir.",
+  "tr": "Başlatılamadı. Kaldırılmış ya da taşınmış olabilir.",
+  "en": "Could not be started. It may have been uninstalled or moved."
+ },
+ {
+  "id": "68972dc2",
+  "key": "Bu işlem yapılamadı. Yeniden deneyin.",
+  "tr": "Bu işlem yapılamadı. Yeniden deneyin.",
+  "en": "That did not work. Try again."
+ },
+ {
+  "id": "78d7e6c0",
+  "key": "Bu uygulamanın klasörü yok",
+  "tr": "Bu uygulamanın klasörü yok",
+  "en": "This app has no folder"
+ },
+ {
+  "id": "94194086",
+  "key": "Uygulama listesi okunamadı. Yeniden denemek için paneli kapatıp açın.",
+  "tr": "Uygulama listesi okunamadı. Yeniden denemek için paneli kapatıp açın.",
+  "en": "The app list could not be read. Close and reopen the panel to try again."
+ },
+ {
+  "id": "4941cf4b",
+  "key": "Güç",
+  "tr": "Güç",
+  "en": "Power"
+ },
+ {
+  "id": "eab32622",
+  "key": "Önceki",
+  "tr": "Önceki",
+  "en": "Previous"
+ },
+ {
+  "id": "65ef70cc",
+  "key": "Oynat",
+  "tr": "Oynat",
+  "en": "Play"
+ },
+ {
+  "id": "c2bc7132",
+  "key": "Sonraki",
+  "tr": "Sonraki",
+  "en": "Next"
+ },
+ {
+  "id": "7e9c0968",
+  "key": "Sesi aç",
+  "tr": "Sesi aç",
+  "en": "Unmute"
+ },
+ {
+  "id": "b733f954",
+  "key": "Sessize al",
+  "tr": "Sessize al",
+  "en": "Mute"
+ },
+ {
+  "id": "27fd541e",
+  "key": "Çıkış aygıtları",
+  "tr": "Çıkış aygıtları",
+  "en": "Output devices"
+ },
+ {
+  "id": "4687a399",
+  "key": "Çıkışı değiştir: Ses ayarları",
+  "tr": "Çıkışı değiştir: Ses ayarları",
+  "en": "Change output: Sound settings"
  }
 ]

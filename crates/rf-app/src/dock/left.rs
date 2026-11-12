@@ -114,6 +114,11 @@ fn picture_icon(p: WeatherPicture) -> L {
     }
 }
 
+/// Whether the logo and the search field open our own Start panel (the setting "Kendi Başlat menümüz"; on by default).
+fn own_start(cx: &App) -> bool {
+    cx.try_global::<crate::settings::Settings>().is_none_or(|s| s.dock_own_start)
+}
+
 /// The Windows logo: four squares in the accent colour.
 fn windows_logo(accent: Hsla) -> impl IntoElement {
     let square = move || div().size(px(8.)).bg(accent);
@@ -123,6 +128,7 @@ fn windows_logo(accent: Hsla) -> impl IntoElement {
 impl Render for LeftIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let env = *cx.global::<Env>();
+        let typed = super::panel::typed_text(cx);
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
         let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
         let secondary = pal.text_secondary().hsla();
@@ -139,9 +145,13 @@ impl Render for LeftIsland {
             .hover(move |s| s.bg(hover))
             .active(move |s| s.bg(pressed))
             .child(windows_logo(accent))
-            // the user's click is the only thing that ever sends the Windows key
-            .on_click(|_, _, _| {
-                rf_win::dock::triggers::start_menu();
+            // the user's click is the only thing that ever sends the Windows key (and only when our own Start is switched off)
+            .on_click(|_, _, cx| {
+                if own_start(cx) {
+                    super::panel::toggle_start(cx);
+                } else {
+                    rf_win::dock::triggers::start_menu();
+                }
             });
 
         let search = h_flex()
@@ -157,8 +167,19 @@ impl Render for LeftIsland {
             .cursor_pointer()
             .hover(move |s| s.bg(pressed))
             .child(Icon::new(L::Search).size(px(14.)).flex_shrink_0().text_color(secondary))
-            .child(div().text_sm().text_color(secondary).child(t!("Ara")))
-            .on_click(|_, _, _| super::actions::open_quick_search());
+            // what is being typed in the panel above is shown here too; the panel's own field takes the keys (this window is never
+            // activated, so it cannot)
+            .child(match typed {
+                Some(text) => div().flex_1().min_w_0().truncate().text_sm().child(text),
+                None => div().text_sm().text_color(secondary).child(t!("Ara")),
+            })
+            .on_click(|_, _, cx| {
+                if own_start(cx) {
+                    super::panel::toggle_start(cx);
+                } else {
+                    super::actions::open_quick_search();
+                }
+            });
 
         let weather = self.weather.map(|o| {
             h_flex()

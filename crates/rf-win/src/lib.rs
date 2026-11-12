@@ -58,6 +58,7 @@ pub mod recycle;
 pub mod search;
 pub mod shell;
 pub mod shellfolder;
+pub mod sysstatus;
 pub mod shortcut;
 pub mod single_instance;
 pub mod shell_window;

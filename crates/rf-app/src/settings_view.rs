@@ -2291,6 +2291,20 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::Search,
+            t!("rustyfiles Başlat menüsünü kullan"),
+            Some(t!("Dock'taki logo ve arama alanı Windows'un Başlat menüsü yerine rustyfiles'ın kendi panelini açar. Kapalıyken Windows'un Başlat menüsü ve hızlı arama açılır.")),
+            sw("dock-own-start", p, s.dock_own_start, |s, v| s.dock_own_start = v),
+        ),
+        card(
+            p,
+            L::Volume2,
+            t!("rustyfiles denetim merkezini kullan"),
+            Some(t!("Dock'taki ağ ve ses simgeleri Windows'un hızlı ayarları yerine rustyfiles'ın panelini açar: ses, ağ, Bluetooth, şimdi çalan, parlaklık. Kapalıyken Windows'un hızlı ayarları açılır.")),
+            sw("dock-own-cc", p, s.dock_own_control_centre, |s, v| s.dock_own_control_centre = v),
+        ),
+        card(
+            p,
             L::MapPin,
             t!("Hava durumu şehri"),
             Some(&city_label),

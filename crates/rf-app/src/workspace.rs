@@ -347,6 +347,10 @@ pub static START_SELECT: std::sync::Mutex<Option<String>> = std::sync::Mutex::ne
 static LOOK_FOLLOWED: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
 pub fn route_ipc(msg: String, cx: &mut App) {
+    // the dock's file search asks this app over the pipe (the dock does not hold the name index), and a window-less start greets it
+    if crate::search_pipe::handle_private(&msg, cx.global::<crate::settings::Settings>().name_index) {
+        return;
+    }
     if let Some(pipe) = msg.strip_prefix(crate::picker::PICK_PREFIX) {
         crate::picker::begin(pipe.to_string(), cx);
         return;

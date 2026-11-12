@@ -561,9 +561,14 @@ pub fn inspect_pins(disk: &dyn Disk) -> Vec<PinReport> {
 /// shortcut names that is gone, a package that was removed) are left out; a pin whose program was replaced by a newer install stands
 /// for that one. Blocks (COM, the shell, the disk): call it from a worker thread, and again when the pin folder changes.
 pub fn read_pins() -> Vec<PinnedApp> {
+    read_pins_checked().unwrap_or_default()
+}
+
+/// [`read_pins`] that says when the shell thread did not answer (`None`) instead of passing it off as "no pins".
+pub fn read_pins_checked() -> Option<Vec<PinnedApp>> {
     // On the shell thread, like every other shell call of the dock (see `crate::sta::call`). No answer in time is "no pins for now":
     // the caller reads them again on its next turn.
-    crate::sta::call(std::time::Duration::from_secs(15), || inspect_pins(&RealDisk).into_iter().filter_map(|r| r.app).collect()).unwrap_or_default()
+    crate::sta::call(std::time::Duration::from_secs(15), || inspect_pins(&RealDisk).into_iter().filter_map(|r| r.app).collect())
 }
 
 #[cfg(test)]

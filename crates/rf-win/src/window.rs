@@ -109,6 +109,15 @@ pub fn set_small_corners(hwnd: isize) {
     }
 }
 
+/// Asks the system for its ordinary round corners (8 px at 100 %): for the large panels, which are not menus.
+pub fn set_round_corners(hwnd: isize) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
+    let v = DWMWCP_ROUND;
+    unsafe {
+        let _ = DwmSetWindowAttribute(HWND(hwnd as *mut _), DWMWA_WINDOW_CORNER_PREFERENCE, &v as *const _ as _, std::mem::size_of_val(&v) as u32);
+    }
+}
+
 /// Makes `owner` (a window of another process, possibly) the owner of `hwnd`: it stays above
 /// it and minimizes with it, like the owner's own dialog.
 pub fn set_owner(hwnd: isize, owner: isize) {
@@ -166,6 +175,17 @@ pub fn hand_foreground(owner: isize) {
 /// can't grant it), the window would open behind the app: then our thread shares the input
 /// state of the window in front for a moment, which lets the switch through.
 pub fn bring_to_front(hwnd: isize) {
+    bring_to_front_inner(hwnd, true);
+}
+
+/// [`bring_to_front`] without the last resort of tapping the Alt key: that tap goes to whatever window is in front and can light up
+/// its menu bar. For a panel the user opened by clicking in our own window the first two ways are enough, and when Windows still
+/// refuses the panel is left on top without the keyboard and closes itself like any panel that never got the foreground.
+pub fn bring_to_front_quietly(hwnd: isize) {
+    bring_to_front_inner(hwnd, false);
+}
+
+fn bring_to_front_inner(hwnd: isize, alt_tap: bool) {
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
     use windows::Win32::UI::WindowsAndMessaging::{BringWindowToTop, GetForegroundWindow, GetWindowThreadProcessId, SW_SHOW, SetForegroundWindow, ShowWindow};
@@ -184,7 +204,7 @@ pub fn bring_to_front(hwnd: isize) {
         if attached {
             let _ = AttachThreadInput(mine, theirs, false);
         }
-        if GetForegroundWindow() != h {
+        if alt_tap && GetForegroundWindow() != h {
             // Windows lifts the foreground lock while Alt is down (how Alt+Tab works): a tap of
             // it, then the switch (GPUI's activate does the same)
             use windows::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_KEYBOARD, KEYBD_EVENT_FLAGS, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput, VK_MENU};

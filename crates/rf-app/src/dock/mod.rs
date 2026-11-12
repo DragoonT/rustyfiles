@@ -3,11 +3,13 @@
 //! desktop, the Start menu and the notifications, nothing is injected into anything and nothing needs elevation. Everything it does
 //! is undone when it exits.
 //!
-//! * LEFT: the Windows logo (opens the Start menu), a search field (opens rustyfiles' quick search) and the weather of the city set
-//!   in Settings. `left.rs`
+//! * LEFT: the Windows logo (opens our own Start panel, `panel.rs` / `start.rs`; the Windows key when "Kendi Başlat menümüz" is off), a
+//!   search field (the same panel with the keyboard in its field, results from the quick search's sources: `search.rs`) and the
+//!   weather of the city set in Settings. `left.rs`
 //! * MIDDLE: the dock. The apps pinned to the Windows taskbar, the other running apps, a separator, the Recycle Bin and the
 //!   Downloads folder; the icon under the pointer grows. `middle.rs`
-//! * RIGHT: network and volume (Win+A), the time and date (Win+N), a bell (Win+N). `right.rs`
+//! * RIGHT: network and volume symbols that show the real state and open our own control centre (`control_centre.rs`; Win+A when
+//!   "Kendi denetim merkezimiz" is off), the time and date (Win+N), a bell (Win+N). `right.rs`
 //!
 //! Each island is a window of its own (a GPUI pop-up with a transparent background) that is never activated, has no taskbar
 //! button and is always on top; `rf_win::dock` makes it so and places it. Each has HyperGlass behind it with its own corner radius
@@ -27,14 +29,20 @@
 
 pub mod actions;
 mod backdrop;
+mod cc_model;
 pub mod control;
+mod control_centre;
 mod host;
 mod icons;
 mod left;
 mod look;
 mod middle;
+mod panel;
 mod plan;
 mod right;
+mod search;
+mod start;
+mod sysstate;
 mod tone;
 
 use futures::channel::mpsc::UnboundedReceiver;

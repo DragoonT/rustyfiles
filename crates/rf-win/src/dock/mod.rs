@@ -18,6 +18,11 @@
 //! | `fullscreen` | is a full-screen application in front on the primary monitor | the decision |
 //! | `triggers` | Start, Win+A, Win+N as `SendInput` answers to a click | the key sequences |
 //! | `launch` | start an app, bring a window forward, minimise it | - |
+//! | `panel` | where a panel above an island goes, when it opens / closes / switches, who gets the keyboard back, the 120 ms easing | all of it |
+//! | `power` | the Start panel's power menu (lock, sleep, sign out, restart, shut down) and its "Emin misiniz?" step; the user's display name | the menu |
+//! | `startlist` | the app list's order (Turkish alphabet), letter headers, rows, arrow-key movement through the pinned grid and the list | all of it |
+//! | `startpins` | the Start panel's own pinned apps file and its first seeding from the taskbar's pins | all of it |
+//! | `startapps` | start an app of "All apps", as administrator (the user's click), find its program (shell thread) | - |
 //!
 //! HOW THE APP USES IT (the order that works):
 //! 1. `system::DockSystem::start(cb)` once; `system::primary_monitor()` for the work area and the scale;
@@ -44,7 +49,12 @@ pub mod island;
 pub mod launch;
 pub mod layout;
 pub mod model;
+pub mod panel;
 pub mod pins;
+pub mod power;
+pub mod startapps;
+pub mod startlist;
+pub mod startpins;
 pub mod system;
 pub mod triggers;
 

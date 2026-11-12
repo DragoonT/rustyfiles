@@ -48,6 +48,7 @@ mod undo;
 mod preview;
 mod properties_view;
 mod quick_search;
+mod search_pipe;
 mod recycle_view;
 mod theme;
 mod workspace;
@@ -297,6 +298,8 @@ pub fn main() {
     let quick_search = std::env::args().nth(1).as_deref() == Some(quick_search::LAUNCH_ARG);
     // `--dock`: the dock (see dock/), a process of its own that lives beside the main rustyfiles
     let dock = std::env::args().nth(1).as_deref() == Some(dock::ARG);
+    // `--no-window`: the main app with no window, started by the dock so that its search has the file index (see search_pipe)
+    let no_window = std::env::args().nth(1).as_deref() == Some(search_pipe::START_ARG);
     if bar_preview || dock {
         quick_search::disable_hotkey();
     }
@@ -305,7 +308,7 @@ pub fn main() {
         background::DOCK_PROCESS.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let arg = std::env::args().nth(1).map(|a| a.trim().trim_matches('"').to_string()).filter(|a| !a.is_empty());
-    let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search && !dock);
+    let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search && !dock && !no_window);
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
     let arg = arg.filter(|_| !new_window);
@@ -443,6 +446,7 @@ pub fn main() {
         _ if pick.is_some() => format!("{}{}", picker::PICK_PREFIX, pick.as_deref().unwrap_or_default()),
         _ if new_window => rf_win::jumplist::NEW_WINDOW_ARG.to_string(),
         _ if quick_search => quick_search::LAUNCH_ARG.to_string(),
+        _ if no_window => search_pipe::START_MSG.to_string(),
         _ if select.is_some() => format!("{}{}", workspace::SELECT_PREFIX, select.as_deref().unwrap_or_default()),
         Some(Location::Path(p)) => p.to_string_lossy().into_owned(),
         Some(Location::RecycleBin) => "shell:RecycleBinFolder".to_string(),
@@ -493,6 +497,8 @@ pub fn main() {
         });
     }
     if !multi {
+        // the dock's file search has a pipe of its own (an older main app never sees its requests as launch arguments)
+        search_pipe::serve(ipc_tx.clone());
         rf_win::single_instance::serve(move |m| {
             let _ = ipc_tx.unbounded_send(m);
         });
@@ -550,6 +556,8 @@ pub fn main() {
             // started for the quick search only: no main window (it quits when that closes,
             // unless running in the background)
             None if quick_search => quick_search::toggle(cx),
+            // started by the dock for its file search: no window, no tray icon; it ends by itself when nobody searches for a while
+            None if no_window => search_pipe::watch_idle(cx),
             None => {
                 installer::count_start(cx);
                 donate::refresh();

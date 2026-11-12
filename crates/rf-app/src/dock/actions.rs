@@ -17,7 +17,7 @@ pub fn place_args(place: Place) -> Vec<String> {
     vec![place.open_argument()]
 }
 
-fn run_rustyfiles(args: Vec<String>) {
+pub(super) fn run_rustyfiles(args: Vec<String>) {
     std::thread::spawn(move || {
         let exe = match std::env::current_exe() {
             Ok(e) => e,
@@ -34,6 +34,26 @@ fn run_rustyfiles(args: Vec<String>) {
 
 pub fn open_quick_search() {
     run_rustyfiles(quick_search_args());
+}
+
+/// The command line that starts the main rustyfiles without a window (for the file index the dock's search asks it for).
+pub fn background_main_args() -> Vec<String> {
+    vec![crate::search_pipe::START_ARG.to_string()]
+}
+
+/// The user chose "start rustyfiles in the background" in the search results.
+pub fn start_main_in_background() {
+    run_rustyfiles(background_main_args());
+}
+
+/// The command line that opens rustyfiles' settings (the same one the main app's own tray menu leads to).
+pub fn settings_args() -> Vec<String> {
+    vec!["--settings=general".to_string()]
+}
+
+/// The command line that opens a folder with `path` selected in it: Explorer's own `/select,` form, which rustyfiles takes.
+pub fn show_in_folder_args(path: &std::path::Path) -> Vec<String> {
+    vec![format!("/select,{}", path.display())]
 }
 
 pub fn open_place(place: Place) {
@@ -68,6 +88,13 @@ mod tests {
     #[test]
     fn the_search_field_opens_the_quick_search_the_way_the_launch_argument_does() {
         assert_eq!(quick_search_args(), vec!["--quick-search".to_string()]);
+    }
+
+    #[test]
+    fn the_start_panels_actions_use_the_command_lines_rustyfiles_understands() {
+        assert_eq!(background_main_args(), vec!["--no-window".to_string()]);
+        assert_eq!(settings_args(), vec!["--settings=general".to_string()]);
+        assert_eq!(show_in_folder_args(std::path::Path::new(r"C:\Users\x\a b\c.txt")), vec![r"/select,C:\Users\x\a b\c.txt".to_string()]);
     }
 
     #[test]

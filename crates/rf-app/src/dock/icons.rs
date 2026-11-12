@@ -74,6 +74,11 @@ impl IconCache {
         self.map.clear();
     }
 
+    /// Keeps only the entries whose key `keep` accepts (a cache that must not grow for ever lets go of what is not worth keeping).
+    pub fn retain(&mut self, keep: impl Fn(&str) -> bool) {
+        self.map.retain(|k, _| keep(k));
+    }
+
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.map.len()
