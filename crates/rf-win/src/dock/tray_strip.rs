@@ -171,6 +171,13 @@ pub fn drop_move(visible: &[usize], icon: usize, in_overflow: bool, target: Drop
             Some((Dest::Strip, at))
         }
         DropTarget::Overflow if in_overflow => None,
+        // An icon dragged OUT of the panel and let go on the chevron is meant for the strip: it becomes the strip's last cell. Since
+        // new icons start in the panel the strip is often empty, and an empty strip is only its padding wide: without this there was
+        // no place to drop the first icon (a user's report: icons could not be brought from the panel to the bar).
+        DropTarget::Chevron if in_overflow => {
+            let at = visible.len();
+            Some((Dest::Strip, if cap > 0 { at.min(cap - 1) } else { at }))
+        }
         DropTarget::Chevron | DropTarget::Overflow => Some((Dest::Hidden, usize::MAX)),
         DropTarget::Nowhere => None,
     }
@@ -780,9 +787,12 @@ mod tests {
         assert_eq!(drop_move(&[5, 7, 9], 7, false, DropTarget::Chevron, 9), Some((Dest::Hidden, usize::MAX)));
         assert_eq!(drop_move(&[5, 7, 9], 7, false, DropTarget::Overflow, 9), Some((Dest::Hidden, usize::MAX)));
         assert_eq!(drop_move(&[5, 7, 9], 7, false, DropTarget::Nowhere, 9), None);
-        // an icon of the panel let go over the panel again: nothing moves (it is a click that wandered); on the chevron it is hidden
+        // an icon of the panel let go over the panel again: nothing moves (it is a click that wandered); on the chevron it comes to
+        // the strip as its last cell (an empty strip has no other place to drop on)
         assert_eq!(drop_move(&[5, 7, 9], 2, true, DropTarget::Overflow, 9), None);
-        assert_eq!(drop_move(&[5, 7, 9], 2, true, DropTarget::Chevron, 9), Some((Dest::Hidden, usize::MAX)));
+        assert_eq!(drop_move(&[5, 7, 9], 2, true, DropTarget::Chevron, 9), Some((Dest::Strip, 3)));
+        assert_eq!(drop_move(&[], 4, true, DropTarget::Chevron, 6), Some((Dest::Strip, 0)));
+        assert_eq!(drop_move(&[1, 2, 3], 4, true, DropTarget::Chevron, 3), Some((Dest::Strip, 2)), "a full strip: the last place");
     }
 
     #[test]
