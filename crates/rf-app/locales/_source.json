@@ -6386,18 +6386,6 @@
   "en": "Couldn't decompress the prefetch file"
  },
  {
-  "id": "185b6cf2",
-  "key": "Cam (deneysel)",
-  "tr": "Cam (deneysel)",
-  "en": "Glass (experimental)"
- },
- {
-  "id": "6734409f",
-  "key": "Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
-  "tr": "Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
-  "en": "Bends and frosts what is behind the window like real glass. While this is on, rustyfiles windows do not appear in screenshots, recordings or screen sharing."
- },
- {
   "id": "d04ff3d6",
   "key": "Cam başlatılamadı: {reason}. Mica kullanılıyor.",
   "tr": "Cam başlatılamadı: {reason}. Mica kullanılıyor.",
@@ -6480,5 +6468,23 @@
   "key": "Uygulamanın kendi yüzeylerinin camın üstündeki örtüsü. En solda örtü yoktur; yazılar zor okunabilir.",
   "tr": "Uygulamanın kendi yüzeylerinin camın üstündeki örtüsü. En solda örtü yoktur; yazılar zor okunabilir.",
   "en": "How strongly the app's own surfaces cover the glass. At the far left there is no cover and text can be hard to read."
+ },
+ {
+  "id": "95b197bb",
+  "key": "HyperGlass (deneysel)",
+  "tr": "HyperGlass (deneysel)",
+  "en": "HyperGlass (experimental)"
+ },
+ {
+  "id": "0709f168",
+  "key": "Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Ekranı canlı izleyip her değişiklikte yeniden çizdiği için Mica'dan daha fazla ekran kartı ve pil kullanır.",
+  "tr": "Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Ekranı canlı izleyip her değişiklikte yeniden çizdiği için Mica'dan daha fazla ekran kartı ve pil kullanır.",
+  "en": "Bends and frosts what is behind the window like real glass. It watches the screen live and redraws on every change, so it uses more GPU and battery than Mica."
+ },
+ {
+  "id": "dc8493b0",
+  "key": "Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
+  "tr": "Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
+  "en": "On this version of Windows, or while the screenshot border permission is off, rustyfiles windows do not appear in screenshots, recordings or screen sharing."
  }
 ]

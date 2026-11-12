@@ -367,6 +367,9 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
                 .rounded(theme::RADIUS_SM)
                 .text_sm()
                 .when(on && !lens, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+                .when(on && lens && crate::glass::lens_phase(crate::look::window::hwnd_of(window), crate::glass::SLOT_SETTINGS) != crate::glass::LensPhase::Rest, |d| {
+                    d.child(crate::glass::lens_stand_in(p.dark, 36.))
+                })
                 .when(on && lens, |d| d.child(crate::glass::lens_probe(crate::glass::SLOT_SETTINGS, crate::glass::key_of(&i))))
                 .when(!on, |d| d.hover(|s| s.bg(p.hover)))
                 .child(Icon::new(icon).size(px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
@@ -702,13 +705,20 @@ fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
             (BackdropPref::MicaAlt, "Mica Alt".into()),
             (BackdropPref::Acrylic, t!("Akrilik").into()),
             (BackdropPref::Solid, t!("Düz").into()),
-            (BackdropPref::Glass, t!("Cam (deneysel)").into()),
+            // a product name: only the "(experimental)" is translated
+            (BackdropPref::Glass, t!("HyperGlass (deneysel)").into()),
         ],
         |s, v| s.backdrop = v,
     );
     let mut notes: Vec<String> = Vec::new();
     if s.backdrop == BackdropPref::Glass || crate::glass::forced() {
-        notes.push(t!("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.").to_string());
+        notes.push(t!("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Ekranı canlı izleyip her değişiklikte yeniden çizdiği için Mica'dan daha fazla ekran kartı ve pil kullanır.").to_string());
+        // Only where the windows really are hidden from screenshots: with a capture session (Windows 11 24H2 and the border-free capture
+        // permission) they are not, and the line would be untrue. Before the engine has chosen (no window has glass yet) the mode is
+        // Off and the line is left out; the page is drawn again once the glass is on the window.
+        if rf_win::glass::capture_mode() == rf_win::glass::CaptureMode::Affinity {
+            notes.push(t!("Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.").to_string());
+        }
         if let Some(why) = crate::glass::failure() {
             notes.push(t!("Cam başlatılamadı: {reason}. Mica kullanılıyor.").replace("{reason}", &why));
         }

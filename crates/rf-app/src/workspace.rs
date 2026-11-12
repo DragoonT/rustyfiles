@@ -130,6 +130,9 @@ pub struct Workspace {
     /// The engine has drawn this window's glass and the window is see-through now. Until then it keeps its Mica: a transparent window
     /// with nothing behind it shows the desktop through the palette's translucent layers.
     glass_shown: bool,
+    /// How the engine last said it keeps the windows out of the capture: the settings page's note depends on it, and the engine can
+    /// change it later (a session that fails makes it fall back).
+    glass_capture: rf_win::glass::CaptureMode,
     /// Counts the attach attempts; a watcher of an older attempt stops.
     glass_gen: u32,
     /// Set by `render` around the call that builds the sidebar: the selected row of that sidebar is a glass lens (the engine draws the
@@ -610,6 +613,7 @@ impl Workspace {
             glass_dark: None,
             glass_failed: false,
             glass_shown: false,
+            glass_capture: rf_win::glass::CaptureMode::Off,
             glass_gen: 0,
             sidebar_lens: false,
             sidebar_lens_claimed: std::cell::Cell::new(false),
@@ -1712,7 +1716,9 @@ impl Workspace {
                     .items_center()
                     .rounded_t(theme::RADIUS)
                     .text_sm()
-                    .when(active && tab_lens.is_none(), |d| d.bg(p.tab_active))
+                    // while the tab moves (tabs open or close beside it, the window is resized) the scene paints the fill itself: the
+                    // engine's lens would trail the tab (see glass::LensPhase)
+                    .when(active && (tab_lens.is_none() || crate::glass::lens_phase(self.glass_hwnd, crate::glass::SLOT_TAB) != crate::glass::LensPhase::Rest), |d| d.bg(p.tab_active))
                     .when_some(tab_lens, |d, key| {
                         d.relative().child(crate::glass::lens_probe_shaped(
                             crate::glass::SLOT_TAB,
@@ -1799,6 +1805,8 @@ impl Workspace {
                 .justify_center()
                 .when(!plus_lens, |d| d.rounded(theme::RADIUS_SM))
                 .when(plus_lens, |d| d.relative().rounded_full().child(crate::glass::lens_probe_shaped(crate::glass::SLOT_NEW_TAB, crate::glass::key_of("new-tab"), crate::glass::LensShape::Circle)))
+                // the button moves when a tab opens or closes: a plain round fill stands in for the lens meanwhile
+                .when(plus_lens && crate::glass::lens_phase(self.glass_hwnd, crate::glass::SLOT_NEW_TAB) != crate::glass::LensPhase::Rest, |d| d.bg(p.tab_active))
                 .hover(|s| s.bg(p.hover))
                 .child(Icon::new(L::Plus).size(px(14.)))
                 // the title bar arms a window move on mouse down: the slightest jitter then
@@ -2553,6 +2561,10 @@ impl Workspace {
             .text_sm()
             .relative()
             .when(fluent, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+            // while the row moves (the sidebar scrolls) the scene paints the pill itself: the engine's lens would trail the row
+            .when(lens_key.is_some() && crate::glass::lens_phase(self.glass_hwnd, crate::glass::SLOT_SIDEBAR) != crate::glass::LensPhase::Rest, |d| {
+                d.child(crate::glass::lens_stand_in(p.dark, 32.))
+            })
             .when_some(lens_key, |d, key| d.child(crate::glass::lens_probe(crate::glass::SLOT_SIDEBAR, key)))
             .when(!active, |d| d.hover(|s| s.bg(p.hover)))
             .child(
@@ -3223,6 +3235,11 @@ impl Workspace {
                     crate::glass::set_shown(self.glass_hwnd, true); // the palette thins its washes over the glass
                     window.set_background_appearance(WindowBackgroundAppearance::Transparent);
                     cx.notify();
+                }
+                let mode = rf_win::glass::capture_mode();
+                if mode != self.glass_capture {
+                    self.glass_capture = mode;
+                    cx.notify(); // the settings page tells whether the windows show in screenshots
                 }
                 true
             }

@@ -1,10 +1,17 @@
 //! Glass: a window background that bends and frosts the live screen behind the window (the experimental "Glass" backdrop).
 //!
-//! HOW IT WORKS. The screen is captured with DXGI Desktop Duplication, the window itself is kept out of that capture
-//! (`WDA_EXCLUDEFROMCAPTURE`, otherwise the glass would bend its own picture), and one pixel shader (`glass.hlsl`) draws the glass over
-//! a cropped, mip-blurred copy of the screen into a swap chain that DirectComposition shows BEHIND the window's own scene. GPUI is not
-//! changed: it makes its composition target with `topmost = true`, the engine makes a second one on the same window with
-//! `topmost = false`, and the app sets the GPUI window transparent so the glass shows through.
+//! HOW IT WORKS. The screen is captured, the window itself is kept out of that capture (otherwise the glass would bend its own picture),
+//! and one pixel shader (`glass.hlsl`) draws the glass over a cropped, mip-blurred copy of the screen into a swap chain that
+//! DirectComposition shows BEHIND the window's own scene. GPUI is not changed: it makes its composition target with `topmost = true`,
+//! the engine makes a second one on the same window with `topmost = false`, and the app sets the GPUI window transparent so the glass
+//! shows through.
+//!
+//! TWO WAYS TO CAPTURE ([`CaptureMode`], chosen by the engine each time it starts). Where the system allows capture without the
+//! screenshot border (Windows 11 24H2, and the `graphicsCaptureWithoutBorder` permission reads Allowed), a Windows.Graphics.Capture
+//! session leaves the windows out through its own exclusion list: `CaptureMode::Session`, no window flag is set, and the windows stay in
+//! every screenshot, recording and screen share. Otherwise DXGI Desktop Duplication is used and the windows are marked
+//! `WDA_EXCLUDEFROMCAPTURE`: `CaptureMode::Affinity`, which hides them from every capture of the screen. A session that fails later makes
+//! the engine switch to the second way for all its windows.
 //!
 //! Optical model and presets after tomacco/amazing-glass (MIT); the shader was written from numbers and formulas, no code is copied.
 //!
@@ -34,6 +41,8 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 mod capture;
+#[doc(hidden)]
+pub mod check;
 mod engine;
 mod gpu;
 mod lens;
@@ -44,14 +53,18 @@ mod lens_tests;
 mod look_tests;
 #[cfg(test)]
 mod tests;
+mod wgc;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use crossbeam_channel::Sender;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Threading::GetCurrentProcessId;
-use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, IsWindow, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetWindowDisplayAffinity, GetWindowThreadProcessId, IsWindow, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+};
 
 /// What a window's glass is doing.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -64,6 +77,41 @@ pub enum GlassState {
     Running,
     /// The glass could not be kept; the reason is in the text. The capture exclusion is lifted and the window is not drawn any more.
     Failed(String),
+}
+
+/// How the engine keeps its own windows out of the picture it bends.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureMode {
+    /// The engine is not running (no window has glass): nothing is captured and nothing excluded.
+    Off,
+    /// A capture session with its own exclusion list: the windows are visible to screenshots, recordings and screen sharing.
+    Session,
+    /// Desktop Duplication with `WDA_EXCLUDEFROMCAPTURE` on the windows: they are hidden from screenshots, recordings and screen sharing.
+    Affinity,
+}
+
+static MODE: AtomicU8 = AtomicU8::new(0);
+
+/// How the windows with glass are kept out of the capture right now. `Off` while no window has glass (the engine chooses each time it
+/// starts, and again after it was idle), so the answer for a window that has just been attached is only known once the engine has chosen.
+pub fn capture_mode() -> CaptureMode {
+    match MODE.load(Ordering::Acquire) {
+        1 => CaptureMode::Session,
+        2 => CaptureMode::Affinity,
+        _ => CaptureMode::Off,
+    }
+}
+
+/// Engine side: records the choice.
+pub(crate) fn set_mode(m: CaptureMode) {
+    MODE.store(
+        match m {
+            CaptureMode::Off => 0,
+            CaptureMode::Session => 1,
+            CaptureMode::Affinity => 2,
+        },
+        Ordering::Release,
+    );
 }
 
 /// How many lenses a window can have at once (slots 0 to 7). Keep equal to `MAX_LENSES` in glass.hlsl.
@@ -126,6 +174,8 @@ pub(crate) enum Cmd {
     Attach { hwnd: isize, dark: bool },
     SetDark { hwnd: isize, dark: bool },
     Detach { hwnd: isize },
+    /// The registry of extra windows changed (see [`exclude_from_capture`]).
+    ExtrasChanged,
     SetLens { hwnd: isize, slot: u8, lens: Option<LensSpec>, animate: bool },
     /// The process-wide look changed (`set_look`): every window draws again.
     LookChanged,
@@ -141,8 +191,9 @@ static LENSES_SENT: Mutex<BTreeMap<(isize, u8), LensSpec>> = Mutex::new(BTreeMap
 /// The look of the glass, one value for the whole process: the engine reads it at every draw, so a window attached later has it too.
 static LOOK: Mutex<LookParams> = Mutex::new(LookParams::DEFAULT);
 /// Other windows of ours (menus, flyouts, the Properties window, the preview pane's host) that asked to stay out of the screen capture.
-/// The exclusion only exists while some window has glass: it is applied when the first one gets it and lifted when the last one lets go,
-/// so a window that outlives the glass does not stay invisible to screenshots and screen sharing.
+/// The exclusion only exists while some window has glass. With `CaptureMode::Affinity` it is applied when the first one gets it and
+/// lifted when the last one lets go, so a window that outlives the glass does not stay invisible to screenshots and screen sharing; with
+/// `CaptureMode::Session` the engine puts these windows into the capture sessions' exclusion lists and no window is touched.
 static EXTRAS: Mutex<BTreeSet<isize>> = Mutex::new(BTreeSet::new());
 
 fn states() -> std::sync::MutexGuard<'static, HashMap<isize, GlassState>> {
@@ -179,15 +230,26 @@ fn prune_extras(e: &mut BTreeSet<isize>) {
     });
 }
 
-/// Applies or lifts the exclusion on every registered window.
+/// The registered windows that still exist.
+pub(crate) fn extras_snapshot() -> BTreeSet<isize> {
+    let mut e = extras();
+    prune_extras(&mut e);
+    e.clone()
+}
+
+/// Applies or lifts the display-affinity exclusion on every registered window.
 fn apply_extras(exclude: bool) {
-    let list: Vec<isize> = {
-        let mut e = extras();
-        prune_extras(&mut e);
-        e.iter().copied().collect()
-    };
-    for h in list {
+    for h in extras_snapshot() {
         let _ = set_affinity(h, exclude);
+    }
+}
+
+/// Lifts the display-affinity exclusion of a window if it has one (an earlier capture mode may have set it; with the session backend no
+/// window carries it).
+pub(crate) fn clear_affinity(hwnd: isize) {
+    let mut a = 0u32;
+    if unsafe { GetWindowDisplayAffinity(hwnd_of(hwnd), &mut a) }.is_ok() && a != WDA_NONE.0 {
+        let _ = set_affinity(hwnd, false);
     }
 }
 
@@ -226,6 +288,7 @@ fn send(mut cmd: Cmd) -> bool {
         if r.is_err() {
             log::error!("glass: the engine thread panicked");
             *engine() = None;
+            set_mode(CaptureMode::Off);
             fail_everything("the glass engine crashed");
         }
     });
@@ -283,8 +346,10 @@ fn fail_everything(why: &str) {
 }
 
 /// Gives the window glass. `dark` picks the dark tint. Returns false if it cannot even start (the handle is not a window, the capture
-/// exclusion is refused, the engine thread does not start); the reason is in [`state`] and the log. Excludes the window from screen
-/// capture first: without that the engine would bend the window's own picture.
+/// exclusion is refused, the engine thread does not start); the reason is in [`state`] and the log. The window is kept out of the capture
+/// the engine bends, or the glass would bend the window's own picture: by the engine's session exclusion list, which needs nothing here,
+/// or, when the engine is already capturing with Desktop Duplication, by the display-affinity flag set here first (when the engine
+/// starts, it sets the flag itself before it captures anything).
 pub fn attach(hwnd: isize, dark: bool) -> bool {
     let fail_now = |why: String| {
         log::warn!("glass: window {hwnd:#x} cannot be attached: {why}");
@@ -302,17 +367,20 @@ pub fn attach(hwnd: isize, dark: bool) -> bool {
             return true;
         }
     }
-    if let Err(e) = set_affinity(hwnd, true) {
+    let affinity = capture_mode() == CaptureMode::Affinity;
+    if affinity && let Err(e) = set_affinity(hwnd, true) {
         return fail_now(format!("the window cannot be excluded from screen capture: {e}"));
     }
     let first = !any_active();
     forget_lenses(hwnd);
     states().insert(hwnd, GlassState::Starting);
     if !send(Cmd::Attach { hwnd, dark }) {
-        let _ = set_affinity(hwnd, false);
+        if affinity {
+            let _ = set_affinity(hwnd, false);
+        }
         return fail_now("the glass engine thread could not be started".into());
     }
-    if first {
+    if first && affinity {
         apply_extras(true);
     }
     true
@@ -423,8 +491,18 @@ pub fn exclude_from_capture(hwnd: isize, on: bool) {
     } else {
         extras().remove(&hwnd);
     }
-    if let Err(e) = set_affinity(hwnd, on) {
-        log::debug!("glass: display affinity of {hwnd:#x} not changed: {e}");
+    match capture_mode() {
+        // the sessions' lists change; no window is touched
+        CaptureMode::Session => {
+            send_if_running(Cmd::ExtrasChanged);
+        }
+        // not chosen yet: the engine reads the registry when it chooses
+        CaptureMode::Off => {}
+        CaptureMode::Affinity => {
+            if let Err(e) = set_affinity(hwnd, on) {
+                log::debug!("glass: display affinity of {hwnd:#x} not changed: {e}");
+            }
+        }
     }
 }
 
