@@ -52,14 +52,19 @@ fn with_renderer<T>(force_warp: bool, f: impl FnOnce(&Renderer) -> T) -> T {
     f(&shared.0)
 }
 
-/// Whether this machine has a real graphics adapter. Without one (a CI runner: only the software renderer) the tests that draw are
-/// skipped. They passed there, all of them, but the test process then ended with STATUS_INVALID_PARAMETER on its way out, with a
-/// device per picture and with the shared devices alike; the cause was not found (it does not happen here, where the same tests also
-/// draw with the software renderer forced). So the drawing is tested on machines with a graphics card only.
+/// Whether the tests that draw run here: not on a CI runner (the `CI` variable GitHub sets), and not on a machine without a real
+/// graphics adapter. On the runner they passed, all of them, but the test process then ended with STATUS_INVALID_PARAMETER on its way
+/// out, with a device per picture and with the shared devices alike; the cause was not found (it does not happen here, where the same
+/// tests also draw with the software renderer forced). The runner does list an adapter that is not marked as software, so the adapter
+/// list alone does not tell it apart. So the drawing is tested on developers' machines only.
 fn can_draw() -> bool {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIFactory1};
     static YES: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *YES.get_or_init(|| unsafe {
+        if std::env::var_os("CI").is_some() || std::env::var_os("GITHUB_ACTIONS").is_some() {
+            eprintln!("glass tests: on a CI runner, the drawing tests are skipped");
+            return false;
+        }
         let Ok(f) = CreateDXGIFactory1::<IDXGIFactory1>() else { return false };
         let mut i = 0;
         while let Ok(a) = f.EnumAdapters1(i) {
