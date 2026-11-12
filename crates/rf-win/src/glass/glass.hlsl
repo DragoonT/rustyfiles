@@ -37,11 +37,17 @@ cbuffer CB : register(b0)
     float4 uSub;    // xy: shift of the glass centre from the window centre, device px (sub pixel placement)  zw: extra shift of the outline only (test placement)
     float4 uOpt;    // x: 1 = the corners are not cut out here (the whole rectangle is covered; a window's corners are cut by the system)
                     // y: share of the frost left at the very edge (it grows to the whole frost across the rim): less frost, more visible bending
+    float4 uLensA;  // x: number of lenses (0: the lens loop does not run)  y: frost sigma CSS px  z: zoom  w: thickness (share of the rim width)
+    float4 uLensB;  // x: rim width max CSS px  y: rim width as a share of the lens's short side  z: brightness  w: highlight line gain
+    float4 uLensC;  // x: dark line gain  y: shadow opacity (0 = none)  z: shadow offset y CSS px  w: shadow blur CSS px
+    float4 uLensT;  // tint rgb, a
+    float4 uLens[12]; // lens i: [i] centre xy + half size zw, device px   [4 + i] clip rectangle x0 y0 x1 y1, device px   [8 + i] x: radius device px  y: opacity
 };
 
 static const float IOR = 1.5;                                  // refraction index, constant in all three modes
 static const float3 LUMA_W = float3(0.2126, 0.7152, 0.0722);   // luma weights of the repo's GLSL grade
 static const float MAX_LOD = 8.0;
+static const uint MAX_LENSES = 4;                              // keep equal to MAX_LENSES in mod.rs
 
 Texture2D<float4> tA : register(t0);   // crop pass: the source; others: the region pyramid
 SamplerState sLin : register(s0);      // linear, clamp
@@ -167,6 +173,103 @@ float RimShift(float t, float B, float T)
 float SigmaToLod(float sigmaDevice)
 {
     return min(log2(max(1.0, 1.2 * sigmaDevice)), MAX_LOD);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// LENSES: pieces of clear glass on the window's glass (the selection pill of a list). Drawn after the window's own colour, in slot order.
+// The same optics as the window (HeightProfile / RimShift), reading the same backdrop pyramid, but nearly without frost: the lens is the
+// sharp, clear piece in the frosted pane. A lens is a rounded rectangle with a 1 px anti aliased outline, its coverage is multiplied by the
+// clip rectangle's coverage and by its opacity.
+// There are no screen derivatives here (the loop is under flow control that depends on the lens count), so every read is SampleLevel, and
+// its level is the frost plus a term that grows towards the edge, where the picture is squeezed: the footprint of the read position there
+// is |1 + d(shift)/d(depth)| pixels per pixel along the normal and 1 along the edge; half of that (in levels) is the geometric mean.
+// ---------------------------------------------------------------------------------------------------------------------------------
+
+// Distance (device px, negative inside) to a box with centre c and half size h.
+float BoxDist(float2 p, float2 c, float2 h)
+{
+    float2 q = abs(p - c) - h;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+}
+
+// base: premultiplied colour so far.
+float4 ApplyLens(uint i, float4 base, float2 pos)
+{
+    const float s = uShape.w;
+    float4 g = uLens[i];
+    float4 cl = uLens[4 + i];
+    float2 ro = uLens[8 + i].xy;
+    float opacity = ro.y;
+    float2 p = (pos - g.xy) / s;                    // CSS px from the lens centre
+    float2 h = g.zw / s;
+    float hmin = min(h.x, h.y);
+    float r = min(ro.x / s, hmin);
+    float B = max(1.0, min(uLensB.x, 2.0 * hmin * uLensB.y));   // rim width: min(10 px, 0.45 * the short side)
+    float T = B * uLensA.w;
+
+    // depth into the lens from the true outline, direction from the smooth one (as in PSGlass; a capsule has the same one)
+    float rO = min(max(r, B), hmin);
+    float2 n, nT;
+    ShapeDist(p, h, rO, n);
+    float D = -ShapeDist(p, h, r, nT);
+    float cov = saturate(D * s + 0.5);              // the lens's own coverage, a ramp one pixel wide
+    float2 cc = (cl.xy + cl.zw) * 0.5;
+    float clipCov = saturate(0.5 - BoxDist(pos, cc, (cl.zw - cl.xy) * 0.5));
+
+    // the soft shadow on the glass around the lens: the shape moved down, blurred (logistic ~ Gaussian, as the window's shadow); it is
+    // clipped like the lens, and does not show through a lens that is only partly opaque, so it is taken outside the shape's own coverage
+    float sh = 0.0;
+    if (uLensC.y > 0.0)
+    {
+        float2 n2;
+        float d2 = ShapeDist(p - float2(0.0, uLensC.z), h, r, n2);
+        float sig = max(uLensC.w * 0.5, 0.01);
+        sh = uLensC.y / (1.0 + exp(clamp(1.702 * d2 / sig, -30.0, 30.0))) * (1.0 - cov) * clipCov * opacity;
+    }
+    float4 o = base;
+    o.rgb *= 1.0 - sh;
+    o.a = o.a + sh * (1.0 - o.a);
+
+    float covL = cov * clipCov * opacity;
+    if (covL > 0.0)
+    {
+        float t = saturate(D / B);
+        float rim = RimShift(t, B, T);
+        float2 v = -n * rim - p * (1.0 - 1.0 / uLensA.z);
+        // squeeze of the picture at this depth: |1 + d rim / d depth| along the normal (rim falls with depth, so the sum is a difference)
+        float t1 = max(t, 0.002), t2 = min(t1 + 0.02, 1.0);
+        float dRim = (RimShift(t2, B, T) - RimShift(t1, B, T)) / (max(t2 - t1, 1e-4) * B);
+        float squeeze = max(1.0, abs(1.0 + dRim));
+        float lod = min(SigmaToLod(uLensA.y * s) + 0.5 * log2(squeeze), MAX_LOD);
+        float2 uv = (pos + uExt.z + v * s) / uWin.zw;
+        float3 c = tA.SampleLevel(sLin, uv, lod).rgb;
+
+        // the window's grade, then brighter, then the lens's own tint
+        float luma = dot(c, LUMA_W);
+        c = saturate(lerp(float3(luma, luma, luma), c, uB.z));
+        c = saturate(c * (uB.w * uC.x) + 0.5 * (1.0 - uC.x));
+        c = saturate(c * uLensB.z);
+        c = lerp(c, uLensT.rgb, uLensT.a);
+
+        // light: a highlight line just inside the edge, strongest on the side the light comes from, a soft glow behind it, and a faint
+        // dark line further in on the opposite side
+        float ang = radians(uD.x);
+        float facing = dot(n, float2(cos(ang), sin(ang)));
+        float lit = pow(max(0.0, facing), 1.6);
+        float back = pow(max(0.0, -facing), 1.6);
+        float Dd = D * s;                           // device px
+        float rw = max(0.9 * s, 1.0);
+        float aa = saturate(Dd + 1.0);
+        float edgeLine = exp(-((Dd - 0.8 * rw) / rw) * ((Dd - 0.8 * rw) / rw)) * (0.25 + 0.75 * lit);
+        float glow = exp(-Dd / (0.5 * B * s)) * 0.2 * lit;
+        c = lerp(c, float3(1, 1, 1), min(1.0, (edgeLine + glow) * aa * uLensB.w));
+        float dz = (Dd - 2.4 * rw) / (1.2 * rw);
+        c = lerp(c, float3(0, 0, 0), exp(-dz * dz) * back * aa * uLensC.x);
+
+        o.rgb = c * covL + o.rgb * (1.0 - covL);
+        o.a = covL + o.a * (1.0 - covL);
+    }
+    return o;
 }
 
 float4 PSGlass(float4 pos : SV_Position) : SV_Target
@@ -302,5 +405,13 @@ float4 PSGlass(float4 pos : SV_Position) : SV_Target
 
     float a = cov + sh;                             // the shadow is black: premultiplied colour = glass * coverage
     if (uExt.x > 0.5 && (any(isnan(col)) || any(isinf(col)) || isnan(a))) return float4(1, 0, 1, 1);
-    return float4(col * cov, a);
+    float4 o = float4(col * cov, a);
+    // the lenses, in slot order; with none (count 0) the picture is exactly the window's own
+    [unroll] for (uint i = 0; i < MAX_LENSES; i++)
+    {
+        if (i < (uint)uLensA.x && uLens[8 + i].y > 0.0)
+            o = ApplyLens(i, o, pos.xy);
+    }
+    if (uExt.x > 0.5 && (any(isnan(o)) || any(isinf(o)))) return float4(1, 0, 1, 1);
+    return o;
 }

@@ -8,6 +8,11 @@
 //!
 //! Optical model and presets after tomacco/amazing-glass (MIT); the shader was written from numbers and formulas, no code is copied.
 //!
+//! LENSES. On top of a window's glass the engine can draw up to `MAX_LENSES` lenses (the selection pill of a list): clear, sharp pieces
+//! of the same glass with their own rim, light and shadow, drawn by the same pixel shader in the same pass ([`set_lens`], `lens.rs` for
+//! the slots and fades, `spring.rs` for the slide). The app's own icons and text are drawn by GPUI's scene on top of them. While a lens
+//! moves or fades the engine draws once per display refresh; a lens at rest costs nothing more than the glass itself.
+//!
 //! THREADING. One thread ("rf-glass") for the whole process, started by the first [`attach`] and idle (blocked on its channel, no
 //! duplication held) when no window is attached. All D3D / DXGI / DirectComposition objects are made and used on that thread only. The
 //! functions here are cheap and can be called from any thread, the UI thread included: they flip an entry in a table and send a command.
@@ -26,10 +31,14 @@
 mod capture;
 mod engine;
 mod gpu;
+mod lens;
+mod spring;
+#[cfg(test)]
+mod lens_tests;
 #[cfg(test)]
 mod tests;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{LazyLock, Mutex};
 
 use crossbeam_channel::Sender;
@@ -50,16 +59,38 @@ pub enum GlassState {
     Failed(String),
 }
 
+/// How many lenses a window can have at once (slots 0 to 3). Keep equal to `MAX_LENSES` in glass.hlsl.
+pub const MAX_LENSES: usize = 4;
+
+/// A lens: a piece of clear glass on the window's glass (the selection pill of a list). All coordinates are DEVICE px relative to the
+/// window's client area.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LensSpec {
+    /// What the lens is on (the selected entry). The same key again means the place changed but not the selection; another key means the
+    /// selection moved and the lens slides to the new rectangle.
+    pub key: u64,
+    /// x, y, w, h.
+    pub rect: [f32; 4],
+    /// x, y, w, h: nothing of the lens shows outside it (a list that scrolls cuts the pill at its own edge).
+    pub clip: [f32; 4],
+    /// Corner radius; a capsule is half the height.
+    pub radius: f32,
+}
+
 pub(crate) enum Cmd {
     Attach { hwnd: isize, dark: bool },
     SetDark { hwnd: isize, dark: bool },
     Detach { hwnd: isize },
+    SetLens { hwnd: isize, slot: u8, lens: Option<LensSpec>, animate: bool },
 }
 
 /// What the callers see. The engine thread updates it through `set_state`, `fail` and `forget`.
 static STATES: LazyLock<Mutex<HashMap<isize, GlassState>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// The engine thread's command channel, once it has been started.
 static ENGINE: Mutex<Option<Sender<Cmd>>> = Mutex::new(None);
+/// What the app last asked for in each lens slot, so the same call made again (the UI draws many times a second) sends nothing. An absent
+/// entry is the same as `None`. Cleared for a window when its glass starts, ends or fails.
+static LENSES_SENT: Mutex<BTreeMap<(isize, u8), LensSpec>> = Mutex::new(BTreeMap::new());
 /// Other windows of ours (menus, flyouts, the Properties window, the preview pane's host) that asked to stay out of the screen capture.
 /// The exclusion only exists while some window has glass: it is applied when the first one gets it and lifted when the last one lets go,
 /// so a window that outlives the glass does not stay invisible to screenshots and screen sharing.
@@ -71,6 +102,14 @@ fn states() -> std::sync::MutexGuard<'static, HashMap<isize, GlassState>> {
 
 fn engine() -> std::sync::MutexGuard<'static, Option<Sender<Cmd>>> {
     ENGINE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn lenses_sent() -> std::sync::MutexGuard<'static, BTreeMap<(isize, u8), LensSpec>> {
+    LENSES_SENT.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn forget_lenses(hwnd: isize) {
+    lenses_sent().retain(|&(h, _), _| h != hwnd);
 }
 
 fn extras() -> std::sync::MutexGuard<'static, BTreeSet<isize>> {
@@ -161,6 +200,7 @@ pub(crate) fn set_state(hwnd: isize, st: GlassState) {
 /// Engine side: the window is gone; its entry goes with it.
 pub(crate) fn forget(hwnd: isize) {
     states().remove(&hwnd);
+    forget_lenses(hwnd);
 }
 
 /// Engine side: the glass of this window failed. The capture exclusion is lifted, the state says why.
@@ -175,6 +215,7 @@ pub(crate) fn fail(hwnd: isize, why: &str) {
             None => false,
         }
     };
+    forget_lenses(hwnd);
     if present {
         let _ = set_affinity(hwnd, false);
         lift_extras_if_idle();
@@ -212,6 +253,7 @@ pub fn attach(hwnd: isize, dark: bool) -> bool {
         return fail_now(format!("the window cannot be excluded from screen capture: {e}"));
     }
     let first = !any_active();
+    forget_lenses(hwnd);
     states().insert(hwnd, GlassState::Starting);
     if !send(Cmd::Attach { hwnd, dark }) {
         let _ = set_affinity(hwnd, false);
@@ -234,6 +276,7 @@ pub fn set_dark(hwnd: isize, dark: bool) {
 /// any number of times.
 pub fn detach(hwnd: isize) {
     let had = states().remove(&hwnd).is_some();
+    forget_lenses(hwnd);
     // The engine lifts the window's capture exclusion itself, AFTER it has taken its target off the window: lifted earlier, one more
     // frame could be captured with the window in it and bent into the glass that is just being removed. Without a running engine
     // (or when the command cannot be sent) nothing draws, so it is lifted here.
@@ -243,6 +286,34 @@ pub fn detach(hwnd: isize) {
     if had {
         lift_extras_if_idle();
     }
+}
+
+/// Puts a lens into one of the window's slots (0 to `MAX_LENSES` - 1), or takes it out with `None`. The engine keeps the lens's motion:
+/// - into an empty slot the lens appears (it fades in over about 120 ms and grows from 92 % of its size; `animate = false`: it is there);
+/// - with the key the slot's lens has, the place changed but not the selection (a scroll, a resize): the lens follows at once (a slide
+///   that is under way keeps going towards the new place);
+/// - with another key the selection moved: the lens slides to the new rectangle, stretching in the direction of travel like a drop and
+///   settling in about 0.4 s (`animate = false`: it jumps);
+/// - `None` fades it out (about 120 ms; `animate = false`: gone at once).
+///
+/// Ignored for a window that has no glass (Mica, Acrylic, a failed or detached window), for a slot that does not exist and for a lens
+/// that cannot be drawn (not finite, no size). Calling it again with what the slot already has costs nothing, so the UI may call it on
+/// every draw. Cheap from any thread.
+pub fn set_lens(hwnd: isize, slot: u8, lens: Option<LensSpec>, animate: bool) {
+    if slot as usize >= MAX_LENSES || !matches!(states().get(&hwnd), Some(GlassState::Starting | GlassState::Running)) {
+        return;
+    }
+    {
+        let mut sent = lenses_sent();
+        if sent.get(&(hwnd, slot)).copied() == lens {
+            return;
+        }
+        match lens {
+            Some(l) => sent.insert((hwnd, slot), l),
+            None => sent.remove(&(hwnd, slot)),
+        };
+    }
+    send_if_running(Cmd::SetLens { hwnd, slot, lens, animate });
 }
 
 /// What the window's glass is doing now.
@@ -292,6 +363,51 @@ pub fn exclude_from_capture(hwnd: isize, on: bool) {
 /// (the window's dpi / 96).
 pub fn render_offscreen(src_bgra: &[u8], src_w: u32, src_h: u32, rect: (i32, i32, u32, u32), radius_px: f32, scale: f32, dark: bool) -> Result<Vec<u8>, String> {
     gpu::render(src_bgra, src_w, src_h, rect, radius_px, scale, &gpu::Opts { look: gpu::Look::regular(dark), force_warp: false })
+}
+
+/// One lens of an offscreen picture (see [`render_offscreen_frames`]). Device px relative to the glass.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LensShot {
+    /// x, y, w, h.
+    pub rect: [f32; 4],
+    /// x, y, w, h; `None`: the whole glass.
+    pub clip: Option<[f32; 4]>,
+    pub radius: f32,
+    /// 0 to 1.
+    pub opacity: f32,
+}
+
+/// The same as [`render_offscreen`] with lenses, one picture per entry of `frames` (each entry the lenses of that picture, at most
+/// `MAX_LENSES` of them): the backdrop is prepared once and the pictures differ in their lenses only. For tests and the picture harness.
+pub fn render_offscreen_frames(
+    src: (&[u8], u32, u32),
+    rect: (i32, i32, u32, u32),
+    radius_px: f32,
+    scale: f32,
+    dark: bool,
+    frames: &[Vec<LensShot>],
+) -> Result<Vec<Vec<u8>>, String> {
+    let (src_bgra, src_w, src_h) = src;
+    let whole = [0.0, 0.0, rect.2 as f32, rect.3 as f32];
+    let lists: Vec<gpu::LensList> = frames
+        .iter()
+        .map(|f| gpu::LensList::from_draws(f.iter().map(|l| gpu::LensDraw { rect: l.rect, clip: l.clip.unwrap_or(whole), radius: l.radius, opacity: l.opacity })))
+        .collect();
+    gpu::render_frames(src_bgra, (src_w, src_h), &gpu::free_standing(rect, radius_px, scale), &gpu::Opts { look: gpu::Look::regular(dark), force_warp: false }, &lists)
+}
+
+/// The rectangles (x, y, w, h) of a lens that slides from `from` to `to`, one per display refresh at `hz`, with the engine's own springs:
+/// the first is `from`, the last is `to`. For the picture harness, which has no window to watch.
+pub fn simulate_slide(from: [f32; 4], to: [f32; 4], hz: f32) -> Vec<[f32; 4]> {
+    let mut s = spring::RectSpring::at(from);
+    s.slide_to(to);
+    let mut out = vec![s.rect()];
+    let dt = 1.0 / hz.clamp(1.0, 1000.0);
+    while !s.settled() && out.len() < 4000 {
+        s.step(dt);
+        out.push(s.rect());
+    }
+    out
 }
 
 /// Whether the engine thread has been started (the tests use it to see that a failed attach starts nothing).
