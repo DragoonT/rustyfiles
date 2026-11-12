@@ -116,7 +116,12 @@ pub fn bounds(parts: &[Part]) -> Option<Rect> {
 /// it. The system owns the region from then on; a region it did not take is freed here.
 pub fn set_region(hwnd: isize, parts: &[Part]) -> bool {
     use windows::Win32::Foundation::HWND;
-    use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, HRGN, RGN_OR, SetWindowRgn};
+    use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, HRGN, OffsetRgn, RGN_OR, SetWindowRgn};
+    // The pieces are in the client area's coordinates (where the app draws); a window region is in the WINDOW's, and the two differ:
+    // the islands' windows keep the system's invisible resize frame (8 px left, right and below at 100 %), so the client area starts
+    // 8 px in. Without the shift every piece sat 8 px left of what it belongs to: the right ends of the glass and of each grown icon
+    // were cut off (seen in the first live run of the magnification, as a step in the corner of the icon under the pointer).
+    let (dx, dy) = client_origin_in_window(hwnd);
     unsafe {
         let mut acc: Option<HRGN> = None;
         for p in parts {
@@ -140,6 +145,9 @@ pub fn set_region(hwnd: isize, parts: &[Part]) -> bool {
             Some(r) => r,
             None => CreateRectRgn(0, 0, 0, 0),
         };
+        if dx != 0 || dy != 0 {
+            OffsetRgn(region, dx, dy);
+        }
         // `false`: no repaint of the window's old area; the next frame the app draws covers it
         if SetWindowRgn(HWND(hwnd as *mut _), Some(region), false) == 0 {
             let _ = DeleteObject(region.into());
@@ -147,6 +155,23 @@ pub fn set_region(hwnd: isize, parts: &[Part]) -> bool {
         }
         true
     }
+}
+
+/// Where the client area's top-left corner is inside the window's own rectangle, device px ((0, 0) for a window with no frame, and
+/// when the window cannot be asked).
+pub fn client_origin_in_window(hwnd: isize) -> (i32, i32) {
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
+    use windows::Win32::Graphics::Gdi::ClientToScreen;
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    let h = HWND(hwnd as *mut _);
+    let mut wr = RECT::default();
+    let mut pt = POINT::default();
+    unsafe {
+        if GetWindowRect(h, &mut wr).is_err() || !ClientToScreen(h, &mut pt).as_bool() {
+            return (0, 0);
+        }
+    }
+    (pt.x - wr.left, pt.y - wr.top)
 }
 
 #[cfg(test)]
