@@ -33,7 +33,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_win::apps::App as AppEntry;
 use rf_win::dock::IconSource;
-use rf_win::dock::panel::{self as geo, CloseCause};
+use rf_win::dock::panel::{self as geo, CloseCause, PanelId};
 use rf_win::dock::power::{self, Action as PowerAction, Menu as PowerMenu, Step as PowerStep};
 use rf_win::dock::startapps;
 use rf_win::dock::startlist::{self, Cursor, Move, Row};
@@ -393,7 +393,7 @@ impl StartView {
     pub fn on_shown(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.popup.is_none() && self.shown {
             // an island growing into this panel: its glass is a shape in the window that the growth moves (grow_host.rs)
-            self.popup = Some(match super::grow_host::shape_for_attach(cx) {
+            self.popup = Some(match super::grow_host::shape_for_attach(PanelId::START, cx) {
                 Some((shape, radius)) => PopupGlass::start_panel_shaped(self.hwnd, dark, shape, radius),
                 None => PopupGlass::start_panel(self.hwnd, dark),
             });
@@ -1269,9 +1269,9 @@ impl Render for StartView {
         }
         let (pal, _) = super::host::frame_palette(&self.island, window);
         let dark = pal.mix < 0.5;
-        // The island's glass is growing into this panel (the setting "Başlat adadan büyüyerek açılsın"): the motion decides what is seen
+        // The island's glass is growing into this panel (the setting "Paneller adalardan büyüyerek açılsın"): the motion decides what is seen
         // (the glass's shape, the content's opacity, the field's place) and the panel's own 120 ms easing stays out of it.
-        let grown = super::grow_host::view_frame(cx);
+        let grown = super::grow_host::view_frame(PanelId::START, cx);
         // (whether the plain fill is whole: while the glass grows, the engine's own report at this frame decides, not this view's watch,
         // which is up to 50 ms late and used to paint one opaque dark frame at the start of the motion, see `Run::wash`)
         let plain = grown.map_or_else(|| self.popup.as_ref().is_none_or(|g| g.fallback()), |g| g.plain);

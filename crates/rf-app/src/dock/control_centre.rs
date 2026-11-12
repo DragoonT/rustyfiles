@@ -221,10 +221,24 @@ impl CcView {
         cx.notify();
     }
 
+    /// The button was pressed again while the panel was shrinking back into its island (`grow_host.rs`): the motion turns round and the
+    /// panel is open again AS IT WAS (its sources never stopped), not as a new one.
+    pub fn on_reopen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.shown = true;
+        self.closing = false;
+        self.anim = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
     /// The window is on the screen: the glass goes on, the keyboard goes to the panel.
     pub fn on_shown(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.popup.is_none() && self.shown {
-            self.popup = Some(PopupGlass::start_panel(self.hwnd, dark));
+            // an island growing into this panel: its glass is a shape in the window that the growth moves (grow_host.rs)
+            self.popup = Some(match super::grow_host::shape_for_attach(PanelId::CONTROL_CENTRE, cx) {
+                Some((shape, radius)) => PopupGlass::start_panel_shaped(self.hwnd, dark, shape, radius),
+                None => PopupGlass::start_panel(self.hwnd, dark),
+            });
             self._watch = Some(glass_watch::watch(cx, |this: &mut Self| this.popup.as_mut()));
         }
         window.focus(&self.focus, cx);
@@ -758,12 +772,15 @@ impl Render for CcView {
         let theme = if dark { ThemePalette::dark() } else { ThemePalette::light() };
         let look = Look { pal, theme, accent: theme.accent, on_accent: theme.accent_text };
         let words = Words::current();
-        let fill = glass_watch::panel_fill(dark, self.popup.as_ref().is_none_or(|g| g.fallback()));
-        let frame = match self.anim {
-            Some((t, opening)) => geo::frame(t.elapsed().as_millis() as u32, opening, crate::settings::animations()),
-            None => geo::Frame { opacity: 1.0, drop_px: 0.0, done: true },
+        // The island's glass is growing into this panel (the setting "Paneller adalardan büyüyerek açılsın"): the motion decides what is
+        // seen (the glass's shape, the content's opacity) and the panel's own 120 ms easing stays out of it (`grow_host.rs`).
+        let grown = super::grow_host::view_frame(PanelId::CONTROL_CENTRE, cx);
+        let fill = glass_watch::panel_fill(dark, grown.map_or_else(|| self.popup.as_ref().is_none_or(|g| g.fallback()), |g| g.plain));
+        let frame = match (self.anim, grown) {
+            (_, Some(_)) | (None, None) => geo::Frame { opacity: 1.0, drop_px: 0.0, done: true },
+            (Some((t, opening)), None) => geo::frame(t.elapsed().as_millis() as u32, opening, crate::settings::animations()),
         };
-        if !frame.done {
+        if !frame.done || grown.is_some_and(|g| g.moving) {
             window.request_animation_frame();
         }
 
@@ -781,7 +798,10 @@ impl Render for CcView {
             .id("control-centre")
             .relative()
             .size_full()
-            .bg(fill)
+            // (an ordinary panel paints its fill over its whole window; a growing one over the glass's rectangle of the moment)
+            .when(grown.is_none(), |d| d.bg(fill))
+            .children(grown.map(|g| super::grow_view::wash(&g, fill)))
+            .children(grown.and_then(|g| super::grow_view::hairline(&g, look.pal)))
             .text_color(look.pal.text().hsla())
             .text_size(px(13.))
             .track_focus(&self.focus)
@@ -800,7 +820,10 @@ impl Render for CcView {
                 }
                 _ => {}
             }))
-            .child(body)
+            .child(match grown {
+                Some(g) => super::grow_view::body(&g, body).into_any_element(),
+                None => body.into_any_element(),
+            })
             .into_any_element()
     }
 }

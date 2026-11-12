@@ -215,6 +215,18 @@ pub(crate) fn entries() -> Vec<Entry> {
             false,
             Control::Magnify(|s| s.dock_magnify, |s, v| s.dock_magnify = v),
         ),
+        // (the name of the setting is still `dock_start_grow`: it was the Start panel's, and now every panel's)
+        e(
+            "dock-start-grow",
+            "dock_start_grow",
+            General,
+            dock,
+            L::Sparkles,
+            t!("Paneller adalardan büyüyerek açılsın"),
+            Some(t!("Başlat, denetim merkezi, takvim, bildirimler ve gizli simgeler paneli açılırken ilgili cam ada yukarı büyüyüp panele dönüşür, kapanırken adaya geri küçülür. Sağ adanın simgeleri, saati ve zili panelin alt satırı olarak yerinde kalır ve çalışır: açık panelin düğmesine basmak onu kapatır, satırdaki başka bir düğmeye basmak o panele geçirir (önceki küçülür, yenisi büyür). Kapalıyken paneller eskisi gibi adaların üstünde ayrı pencereler olarak açılır. Animasyonlar kapalıysa tek karede açılır.")),
+            false,
+            Control::Switch(|s| s.dock_start_grow, |s, v| s.dock_start_grow = v),
+        ),
         // ---- SOL ADA
         e(
             "dock-own-start",
@@ -237,17 +249,6 @@ pub(crate) fn entries() -> Vec<Entry> {
             Some(t!("Başlat panelinde sabitlenmiş uygulamaların altında en son açtığınız belgeler (ne zaman açıldığıyla birlikte) görünür. Kapalıyken bölüm çizilmez ve sabitlenenler o yeri kullanır.")),
             false,
             Control::Switch(|s| s.dock_start_recommended, |s, v| s.dock_start_recommended = v),
-        ),
-        e(
-            "dock-start-grow",
-            "dock_start_grow",
-            Left,
-            dock,
-            L::Sparkles,
-            t!("Başlat adadan büyüyerek açılsın"),
-            Some(t!("Başlat düğmesine ya da arama alanına basınca soldaki cam ada yukarı ve sağa büyüyüp Başlat paneline dönüşür, kapanırken adaya geri küçülür. Kapalıyken panel eskisi gibi adanın üstünde ayrı bir pencere olarak açılır. Animasyonlar kapalıysa tek karede açılır.")),
-            false,
-            Control::Switch(|s| s.dock_start_grow, |s, v| s.dock_start_grow = v),
         ),
         e("dock-city-edit", "dock_weather_city", Left, dock, L::MapPin, t!("Hava durumu şehri"), None, false, Control::City(|s| s.dock_weather_city.as_str(), |s, v| s.dock_weather_city = v)),
         // ---- ORTA ADA
@@ -592,8 +593,8 @@ mod tests {
         assert_eq!(secs, Section::ALL.to_vec(), "an empty section would be a heading with nothing under it");
         // the sections hold what the page promises
         let ids = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
-        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_magnify"]);
-        assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_start_grow", "dock_weather_city"]);
+        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_magnify", "dock_start_grow"]);
+        assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_weather_city"]);
         assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);
         assert_eq!(ids(Section::Taskbar), ["shell_hide_taskbar"]);

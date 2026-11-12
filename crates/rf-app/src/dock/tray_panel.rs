@@ -28,6 +28,12 @@ impl Hooks for OverflowHooks {
     fn on_open(&self, dark: bool, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_open(dark, window, cx));
     }
+    fn on_reopen(&self, _dark: bool, cx: &mut App) {
+        let _ = self.handle.update(cx, |v, window, cx| v.on_reopen(window, cx));
+    }
+    fn redraw(&self, cx: &mut App) {
+        let _ = self.handle.update(cx, |_, window, _| window.refresh());
+    }
     fn on_shown(&self, dark: bool, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_shown(dark, window, cx));
     }
@@ -86,8 +92,10 @@ pub fn toggle_overflow_from_keyboard(previous: isize, cx: &mut App) {
     toggle_overflow(cx);
 }
 
-/// Where the overflow panel is on the screen (device px, the client area) while it is open; `None` while it is closed or easing out.
+/// Where the overflow panel's own content is on the screen (device px, the client area) while it is open; `None` while it is closed or
+/// easing out. (When the panel has grown out of the island the window is the whole glass, with the island's row; the icons' cells are
+/// counted from the content's rectangle.)
 pub fn overflow_rect(cx: &App) -> Option<Rect> {
     let p = panel(cx)?;
-    (p.open == Some(OVERFLOW)).then_some(p.rect)
+    (p.open == Some(OVERFLOW)).then_some(p.content)
 }

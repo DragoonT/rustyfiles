@@ -255,6 +255,11 @@ pub fn island_window(kind: Kind, cx: &App) -> Option<(AnyWindowHandle, isize)> {
     cx.try_global::<Host>()?.placed.iter().find(|p| p.kind == kind).map(|p| (p.handle, p.hwnd))
 }
 
+/// The right island's view (a panel that grows out of that island tells it to draw again when the growth starts and ends).
+pub fn right_island(cx: &App) -> Option<Entity<RightIsland>> {
+    cx.try_global::<Host>()?.right.clone()
+}
+
 /// Whether a full-screen application is in front (the islands are hidden).
 pub fn is_fullscreen(cx: &App) -> bool {
     cx.try_global::<Host>().is_some_and(|h| h.fullscreen)
@@ -376,6 +381,8 @@ pub fn request_layout(cx: &mut App) {
     });
     // the views' margins follow, and the middle island sends its region and its glass for the new window
     cx.refresh_windows();
+    // a panel grown out of an island works its glass out again for the island's new rectangle (nothing when none is grown)
+    super::panel::layout_applied(cx);
 }
 
 /// The middle island's frame of the animation: where its glass is inside its window (device px) and which parts of the window take the

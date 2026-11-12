@@ -21,10 +21,11 @@
 //! or have had its time); [`island_fade`] says what of the island stays. [`set_frameless`] is the one call into Windows: the panel's
 //! window cuts its own corners here (its glass and its window region do), so the system's rounding and border are put away for it.
 //!
-//! HOW THE RIGHT ISLAND'S PANELS WOULD USE IT. `Spec::new(island, panel, Corner::BottomRight, ..)` with the right island's glass and
-//! the panel `panel::place` gives with `Side::Right`; `Stays::Row` (the whole row of the island, network, volume, clock, bell, stays
-//! as it is and nothing of it fades); no field (`with_field` is simply not called). Everything else, the clock, the glass, the
-//! region, the island's glass being put away while the panel stands, is the host's and does not know which island it is.
+//! HOW THE RIGHT ISLAND'S PANELS USE IT. `Spec::new(island, panel, Corner::BottomRight, ..)` with the right island's glass and
+//! the panel `panel::place` gives with `Side::Right`; `Stays::Row` (the whole row of the island, network, volume, clock, bell and the
+//! tray strip, stays as it is and nothing of it fades); no field (`with_field` is simply not called). Everything else, the clock, the
+//! glass, the region, the island's glass being put away while the panel stands, is the host's and does not know which island it is.
+//! The rules about WHICH panel (a press on another button of the row, whether a panel may grow on this screen) are `grow_panels`.
 
 use super::layout::Rect;
 use super::panel::Side;

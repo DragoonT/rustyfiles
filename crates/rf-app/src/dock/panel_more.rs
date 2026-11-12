@@ -35,6 +35,9 @@ impl Hooks for CalHooks {
     fn on_open(&self, dark: bool, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_open(dark, window, cx));
     }
+    fn on_reopen(&self, _dark: bool, cx: &mut App) {
+        let _ = self.handle.update(cx, |v, window, cx| v.on_reopen(window, cx));
+    }
     fn on_shown(&self, dark: bool, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_shown(dark, window, cx));
     }
@@ -46,6 +49,9 @@ impl Hooks for CalHooks {
     }
     fn size(&self, _cx: &App) -> (f32, f32) {
         cal_view::size()
+    }
+    fn redraw(&self, cx: &mut App) {
+        let _ = self.handle.update(cx, |_, window, _| window.refresh());
     }
     fn remove(&self, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| {
@@ -66,6 +72,9 @@ impl Hooks for NotifHooks {
     fn on_open(&self, dark: bool, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_open(dark, window, cx));
     }
+    fn on_reopen(&self, _dark: bool, cx: &mut App) {
+        let _ = self.handle.update(cx, |v, window, cx| v.on_reopen(window, cx));
+    }
     fn on_shown(&self, dark: bool, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_shown(dark, window, cx));
     }
@@ -78,6 +87,9 @@ impl Hooks for NotifHooks {
     }
     fn size(&self, cx: &App) -> (f32, f32) {
         (notif_view::WIDTH, self.view.read(cx).height(cx))
+    }
+    fn redraw(&self, cx: &mut App) {
+        let _ = self.handle.update(cx, |_, window, _| window.refresh());
     }
     fn remove(&self, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| {

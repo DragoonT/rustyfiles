@@ -42,6 +42,7 @@ mod control_centre;
 mod empty;
 mod grow_host;
 mod grow_row;
+mod grow_view;
 mod host;
 mod hover_preview;
 mod icon_levels;

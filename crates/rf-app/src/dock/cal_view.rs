@@ -174,9 +174,23 @@ impl CalView {
         cx.notify();
     }
 
+    /// The button was pressed again while the panel was shrinking back into its island (`grow_host.rs`): the motion turns round and the
+    /// panel is open again as it was (the month the user turned to stays).
+    pub fn on_reopen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.shown = true;
+        self.closing = false;
+        self.anim = None;
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
     pub fn on_shown(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.popup.is_none() && self.shown {
-            self.popup = Some(PopupGlass::start_panel(self.hwnd, dark));
+            // an island growing into this panel: its glass is a shape in the window that the growth moves (grow_host.rs)
+            self.popup = Some(match super::grow_host::shape_for_attach(super::panel::CALENDAR, cx) {
+                Some((shape, radius)) => PopupGlass::start_panel_shaped(self.hwnd, dark, shape, radius),
+                None => PopupGlass::start_panel(self.hwnd, dark),
+            });
             self._watch = Some(glass_watch::watch(cx, |this: &mut Self| this.popup.as_mut()));
         }
         window.focus(&self.focus, cx);
@@ -383,12 +397,14 @@ impl Render for CalView {
         let (pal, _) = super::host::frame_palette(&self.island, window);
         let look = Look::of(pal);
         let lang = lang();
-        let fill = glass_watch::panel_fill(look.dark, self.popup.as_ref().is_none_or(|g| g.fallback()));
-        let frame = match self.anim {
-            Some((t, opening)) => geo::frame(t.elapsed().as_millis() as u32, opening, crate::settings::animations()),
-            None => geo::Frame { opacity: 1.0, drop_px: 0.0, done: true },
+        // The island's glass is growing into this panel (`grow_host.rs`): the motion decides what is seen, the 120 ms easing stays out of it.
+        let grown = super::grow_host::view_frame(super::panel::CALENDAR, cx);
+        let fill = glass_watch::panel_fill(look.dark, grown.map_or_else(|| self.popup.as_ref().is_none_or(|g| g.fallback()), |g| g.plain));
+        let frame = match (self.anim, grown) {
+            (_, Some(_)) | (None, None) => geo::Frame { opacity: 1.0, drop_px: 0.0, done: true },
+            (Some((t, opening)), None) => geo::frame(t.elapsed().as_millis() as u32, opening, crate::settings::animations()),
         };
-        if !frame.done {
+        if !frame.done || grown.is_some_and(|g| g.moving) {
             window.request_animation_frame();
         }
 
@@ -418,7 +434,9 @@ impl Render for CalView {
             .id("calendar-panel")
             .relative()
             .size_full()
-            .bg(fill)
+            .when(grown.is_none(), |d| d.bg(fill))
+            .children(grown.map(|g| super::grow_view::wash(&g, fill)))
+            .children(grown.and_then(|g| super::grow_view::hairline(&g, look.pal)))
             .text_color(look.pal.text().hsla())
             .text_size(px(13.))
             .track_focus(&self.focus)
@@ -440,7 +458,10 @@ impl Render for CalView {
                     cx.notify();
                 }
             }))
-            .child(body)
+            .child(match grown {
+                Some(g) => super::grow_view::body(&g, body).into_any_element(),
+                None => body.into_any_element(),
+            })
             .into_any_element()
     }
 }

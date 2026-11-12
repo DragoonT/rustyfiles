@@ -34,8 +34,10 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::*;
+use rf_win::dock::grow::Corner;
+use rf_win::dock::grow_panels;
 use rf_win::dock::layout::Rect;
-use rf_win::dock::panel::{self as geo, CloseCause, PanelId, Side, Toggle};
+use rf_win::dock::panel::{self as geo, CloseCause, PanelId, Side};
 
 use super::backdrop::IslandGlass;
 use super::control_centre::CcView;
@@ -48,7 +50,7 @@ use super::start::StartView;
 // this module so that it can use the machinery below.
 #[path = "panel_more.rs"]
 mod more;
-pub use more::{NOTIFICATIONS, init_extra, toggle_calendar, toggle_notifications};
+pub use more::{CALENDAR, NOTIFICATIONS, init_extra, toggle_calendar, toggle_notifications};
 
 // The overflow panel of the tray strip (its slot and hooks are in `tray_panel.rs`, a child module for the same reason).
 #[path = "tray_panel.rs"]
@@ -79,6 +81,9 @@ trait Hooks {
     fn on_hidden(&self, cx: &mut App);
     /// The size it wants now, logical px (its height may depend on what it shows).
     fn size(&self, cx: &App) -> (f32, f32);
+    /// Draw again: the growth out of the island started, moved to a new rectangle or ended (a view that draws only while an animation
+    /// asks for frames would otherwise keep the last picture).
+    fn redraw(&self, _cx: &mut App) {}
     /// The dock ends: the window goes with it.
     fn remove(&self, cx: &mut App);
 }
@@ -104,8 +109,16 @@ struct PanelHost {
     open: Option<PanelId>,
     /// Bumped at every open and close: a task of an earlier state sees that and does nothing.
     serial: u64,
-    /// Where the open panel is, device px.
+    /// Where the open panel's window is, device px (the grown glass's rectangle while the panel grows out of its island).
     rect: Rect,
+    /// Where the open panel's own content is, device px: `rect` for an ordinary panel; inside the grown glass for one that grows (the
+    /// glass also holds the island's row). The tray strip finds the overflow panel's cells from it.
+    content: Rect,
+    /// The panel that opens when the one now leaving (shrinking back into its island) is gone: a press on another button of the island's
+    /// row while a panel is open (`rf_win::dock::grow_panels::press`).
+    after: Option<PanelId>,
+    /// How many times each panel has been told to close: the closing task of an earlier close leaves the hiding to a later one.
+    close_seqs: grow_panels::CloseSeqs,
     /// The window that had the foreground when the panel opened.
     previous: isize,
     /// A window the opener hands over as the one to go back to, and when (see `tray_panel::toggle_overflow_from_keyboard`).
@@ -141,6 +154,9 @@ fn host_global(cx: &mut App) -> &mut PanelHost {
             open: None,
             serial: 0,
             rect: Rect::default(),
+            content: Rect::default(),
+            after: None,
+            close_seqs: grow_panels::CloseSeqs::default(),
             previous: 0,
             previous_hint: None,
             opened_at: Instant::now(),
@@ -203,6 +219,9 @@ impl Hooks for StartHooks {
             .map(|((scale, work), glass)| rf_win::dock::startpage::room_above(glass.top, work.top, scale, geo::GAP));
         (START_SIZE.0, room.map_or(START_SIZE.1, rf_win::dock::startpage::panel_height))
     }
+    fn redraw(&self, cx: &mut App) {
+        let _ = self.handle.update(cx, |_, window, _| window.refresh());
+    }
     fn remove(&self, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| {
             v.on_hidden(window, cx);
@@ -251,6 +270,9 @@ impl Hooks for CcHooks {
     fn on_open(&self, dark: bool, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_open(dark, window, cx));
     }
+    fn on_reopen(&self, _dark: bool, cx: &mut App) {
+        let _ = self.handle.update(cx, |v, window, cx| v.on_reopen(window, cx));
+    }
     fn on_shown(&self, dark: bool, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| v.on_shown(dark, window, cx));
     }
@@ -262,6 +284,9 @@ impl Hooks for CcHooks {
     }
     fn size(&self, cx: &App) -> (f32, f32) {
         (super::cc_model::WIDTH, self.view.read(cx).height(cx))
+    }
+    fn redraw(&self, cx: &mut App) {
+        let _ = self.handle.update(cx, |_, window, _| window.refresh());
     }
     fn remove(&self, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| {
@@ -339,10 +364,11 @@ pub fn toggle_start(cx: &mut App) {
 /// not (a full-screen program in front, the dock being rebuilt, no glass to sit above); nothing happened. The keyboard layer needs
 /// the answer: it has already kept Windows' own Start shut by then.
 pub fn toggle_start_reported(cx: &mut App) -> bool {
-    let is_open = |cx: &App| panel(cx).is_some_and(|p| p.open == Some(PanelId::START));
-    let was_open = is_open(cx);
+    let seen = |cx: &App| panel(cx).map_or(grow_panels::Seen { open: None, waiting: None }, |p| grow_panels::Seen { open: p.open, waiting: p.after });
+    let before = seen(cx);
     toggle_start(cx);
-    was_open || is_open(cx)
+    // (a tap while another panel is grown only QUEUES Start behind the one shrinking into its island: that is not "could not open")
+    grow_panels::took_effect(before, seen(cx), PanelId::START)
 }
 
 /// The right island's network or volume symbol: opens the control centre, closes it when it is the open one.
@@ -351,11 +377,52 @@ pub fn toggle_control_centre(cx: &mut App) {
 }
 
 fn toggle(id: PanelId, cx: &mut App) {
-    let open = panel(cx).and_then(|p| p.open);
-    match geo::toggle(open, id) {
-        Toggle::Open | Toggle::Switch => open_panel(id, cx),
-        Toggle::Close => close(CloseCause::Button, cx),
+    let (open, waiting) = panel(cx).map_or((None, None), |p| (p.open, p.after));
+    // A panel that has grown out of its island: the island's row stays, so a button of the row can be pressed while it is open. The
+    // open panel shrinks into the island and the pressed one grows out of it when the first has gone (`grow_panels` says why it is not
+    // one glass going from panel to panel). A panel that is leaving is still the growth's (it is no longer `open`).
+    let state = grow_panels::PressState {
+        open,
+        open_grown: open.is_some_and(|o| grow_host::active_for(o, cx)),
+        leaving: grow_host::current_id(cx).filter(|g| Some(*g) != open),
+        waiting,
+    };
+    match grow_panels::press(&state, id) {
+        grow_panels::Press::OpenNow => {
+            // (a press on the panel that is shrinking turns it round; whatever waited for it to go is dropped)
+            host_global(cx).after = None;
+            open_panel(id, cx);
+        }
+        grow_panels::Press::SwitchNow => {
+            host_global(cx).after = None;
+            open_panel(id, cx);
+        }
+        grow_panels::Press::Close => close(CloseCause::Button, cx),
+        grow_panels::Press::CloseThenOpen => {
+            host_global(cx).after = Some(id);
+            close(CloseCause::Button, cx);
+            // (nothing to put away after all: it opens now rather than wait for a window that is not going)
+            if panel(cx).is_some_and(|p| p.open.is_some()) {
+                host_global(cx).after = None;
+                open_panel(id, cx);
+            }
+        }
+        grow_panels::Press::OpenWhenHome => host_global(cx).after = Some(id),
+        grow_panels::Press::Withdraw => host_global(cx).after = None,
     }
+}
+
+/// The panel that was waiting for the one leaving is opened now that the leaving one is gone (its window hidden, its growth ended).
+fn open_waiting(cx: &mut App) {
+    let Some(id) = host_global(cx).after.take() else { return };
+    if panel(cx).is_some_and(|p| p.open.is_none()) {
+        open_panel(id, cx);
+    }
+}
+
+/// Where a panel's own content stands: inside the grown glass when it grows, else it is the window.
+fn content_of(grown: Option<Rect>, panel_rect: Rect, side: Side) -> Rect {
+    grown.map_or(panel_rect, |g| grow_panels::content_rect(g, panel_rect, Corner::from(side)))
 }
 
 /// Whether the open panel is dark: the tone of the island it sits above at this moment decides (the island follows what is behind its
@@ -375,11 +442,11 @@ fn open_panel(id: PanelId, cx: &mut App) {
     let other = p.open.filter(|o| *o != id);
     let Some(glass) = host::visible_glass_rect(kind, cx) else { return };
     let dark = dark_now(&island);
-    // A panel that grows out of its island (the Start panel with its setting on) has a window as big as the grown glass; see grow_host.rs.
+    // A panel that grows out of its island (with the setting on) has a window as big as the grown glass; see grow_host.rs.
     let size = hooks.size(cx);
     let panel_rect = geo::place(glass, size, scale, side, work);
     // (not where the grown glass would lie under another island: that screen opens the panel the ordinary way, see `grow_host::fits`)
-    let grow_cfg = grow_host::config(id, cx).filter(|cfg| grow_host::fits(*cfg, glass, panel_rect, scale, cx));
+    let grow_cfg = grow_host::config(id, kind, cx).filter(|cfg| grow_host::fits(*cfg, glass, panel_rect, scale, cx));
     // (a panel that grows gives up its own bottom row, the island's row is its bottom row: placed with the smaller height)
     let panel_rect = grow_cfg.map_or(panel_rect, |cfg| geo::place(glass, grow_host::panel_size(cfg, size), scale, side, work));
     // pressed again while the panel shrinks back into its island: the motion turns round and the panel keeps what it shows
@@ -390,6 +457,7 @@ fn open_panel(id: PanelId, cx: &mut App) {
         grow_host::abort(cx);
     }
     let rect = grown.unwrap_or(panel_rect);
+    let content = content_of(grown, panel_rect, side);
     // another panel is open: it goes at once (no easing: this one takes its place)
     if let Some(o) = other {
         put_away_now(o, cx);
@@ -416,6 +484,7 @@ fn open_panel(id: PanelId, cx: &mut App) {
         }
         p.open = Some(id);
         p.rect = rect;
+        p.content = content;
         p.opened_at = Instant::now();
         p.been_front = false;
         p.mouse_was_down = geo::any_button_down();
@@ -432,7 +501,11 @@ fn open_panel(id: PanelId, cx: &mut App) {
     let panel_rect = geo::place(glass, grow_cfg.map_or(size, |cfg| grow_host::panel_size(cfg, size)), scale, side, work);
     let grown = grow_cfg.and_then(|cfg| grow_host::prepare(grow_host::Prep { id, cfg, side, island_glass: glass, panel: panel_rect, hwnd, island: island.clone(), dark, scale }, cx));
     let rect = grown.unwrap_or(panel_rect);
-    cx.global_mut::<PanelHost>().rect = rect;
+    {
+        let p = cx.global_mut::<PanelHost>();
+        p.rect = rect;
+        p.content = content_of(grown, panel_rect, side);
+    }
     // show, bring to the front, then glass (in this order: the engine attaches to a window that is on the screen)
     let h = hooks.clone();
     let is_grown = grown.is_some();
@@ -486,23 +559,84 @@ pub fn relayout(id: PanelId, height: f32, cx: &mut App) {
 
 /// [`relayout`] for a panel that is not as wide as the control centre.
 pub fn relayout_sized(id: PanelId, size: (f32, f32), cx: &mut App) {
+    refit(id, Some(size), cx);
+}
+
+/// The host's layout was worked out again (an island's width changed: the clock's text, an icon moved between the tray strip and the
+/// overflow panel). An ordinary panel needs nothing (it is lined up with the island's edge, which does not move). A panel grown out of
+/// its island works its glass out again for the island's new rectangle and moves its window. Called from inside the layout, so the
+/// work is deferred.
+pub fn layout_applied(cx: &mut App) {
+    let Some(id) = grow_host::current_id(cx) else { return };
+    if panel(cx).and_then(|p| p.open) != Some(id) {
+        return;
+    }
+    cx.defer(move |cx| refit(id, None, cx));
+}
+
+/// Places the open panel again: with the size it asks for now (`size`, or the hooks' own when `None`) and the island's glass as it is
+/// now. A panel that grows out of its island keeps growing: its glass is worked out again and the window follows it.
+fn refit(id: PanelId, size: Option<(f32, f32)>, cx: &mut App) {
     let Some(p) = cx.try_global::<PanelHost>() else { return };
     if p.open != Some(id) {
         return;
     }
     let Some(slot) = p.slot(id) else { return };
-    let (kind, side, hwnd) = (slot.kind, slot.side, slot.hwnd);
+    let (kind, side, hwnd, island, hooks) = (slot.kind, slot.side, slot.hwnd, slot.island.clone(), slot.hooks.clone());
     let Some((scale, work)) = host::monitor_work(cx) else { return };
     let Some(glass) = host::visible_glass_rect(kind, cx) else { return };
-    let rect = geo::place(glass, size, scale, side, work);
-    if cx.global::<PanelHost>().rect == rect {
+    let size = size.unwrap_or_else(|| hooks.size(cx));
+    let grow_cfg = grow_host::cfg_of(id, cx);
+    // The islands may have moved since the panel opened (a pinned or launched app widens the middle island): the grown glass is checked
+    // again against them, with the same rule the opening used. One that now lies under another island cannot stay: the panel is put
+    // away at once (a deferred close: this can run inside the panel's own update, which must not be re-entered).
+    if let Some(cfg) = grow_cfg
+        && !grow_host::fits(cfg, glass, geo::place(glass, size, scale, side, work), scale, cx)
+    {
+        cx.defer(|cx| close(CloseCause::LayoutChanged, cx));
         return;
     }
-    cx.global_mut::<PanelHost>().rect = rect;
+    let panel_rect = geo::place(glass, grow_cfg.map_or(size, |cfg| grow_host::panel_size(cfg, size)), scale, side, work);
+    let grown = grow_cfg.and_then(|cfg| {
+        let dark = dark_now(&island);
+        grow_host::prepare(grow_host::Prep { id, cfg, side, island_glass: glass, panel: panel_rect, hwnd, island, dark, scale }, cx)
+    });
+    let rect = grown.unwrap_or(panel_rect);
+    let content = content_of(grown, panel_rect, side);
+    let p = cx.global::<PanelHost>();
+    if p.rect == rect && p.content == content {
+        return;
+    }
+    {
+        let p = cx.global_mut::<PanelHost>();
+        p.rect = rect;
+        p.content = content;
+    }
+    // (the island's window is raised again in the same task: moving a topmost window puts it at the top of the topmost windows, over the
+    // island's row, which would stay covered and swallow its clicks until the watch looked at the order 50 ms later)
+    let island_above = grown.and_then(|_| grow_host::island_to_raise(cx));
+    // (the glass and the region are in the window's coordinates: they are sent in the same task as the move, not a frame later)
+    let resend = grown.and_then(|_| grow_host::after_move(cx));
     cx.spawn(async move |_| {
         geo::show_at(hwnd, rect);
+        if let Some(island) = island_above {
+            rf_win::dock::island::raise(island);
+        }
+        if let Some(resend) = resend {
+            resend();
+        }
     })
     .detach();
+    // (and a frame is asked for, outside the update this may be running in: the view's own update cannot be entered again)
+    if grown.is_some() {
+        cx.defer(move |cx| redraw(id, cx));
+    }
+}
+
+/// Asks a panel's view to draw again.
+pub fn redraw(id: PanelId, cx: &mut App) {
+    let Some(hooks) = panel(cx).and_then(|p| p.slot(id)).map(|s| s.hooks.clone()) else { return };
+    hooks.redraw(cx);
 }
 
 /// One look of the open panel at the foreground and the mouse. False when this watch is over (the panel closed or reopened).
@@ -548,6 +682,10 @@ pub fn close(cause: CloseCause, cx: &mut App) {
     // A panel that grows out of its island shrinks back into it (the clock turns; `wait` is how long the window stays). A layout that
     // changed under it or a full-screen program do not wait: the island has moved or is hidden. Else the 120 ms easing of any panel.
     let forced = matches!(cause, CloseCause::LayoutChanged | CloseCause::FullScreen);
+    if forced {
+        // (a hand-over to another panel is off too: the island moved, or is hidden)
+        host_global(cx).after = None;
+    }
     let wait = if !grow_host::active_for(id, cx) {
         None
     } else if forced {
@@ -565,6 +703,8 @@ pub fn close(cause: CloseCause, cx: &mut App) {
         p.watcher = None;
         p.typed.clear();
     }
+    // (the number this close's task keeps: see `CloseSeqs`)
+    let mine = host_global(cx).close_seqs.bump(id);
     if let Some(left) = left {
         left.update(cx, |l, cx| if id == PanelId::START { l.panel_changed(false, cx) } else { cx.notify() });
     }
@@ -581,20 +721,36 @@ pub fn close(cause: CloseCause, cx: &mut App) {
         if wait_ms > 0 {
             cx.background_executor().timer(Duration::from_millis(wait_ms)).await;
         }
-        // opened again meanwhile (this panel itself): leave everything as it is. Another panel that opened has put this one away.
-        let again = cx.update(|cx| panel(cx).is_some_and(|p| p.open == Some(id)));
-        if again {
+        // opened again meanwhile (this panel itself): leave everything as it is. Another panel that opened has put this one away. And a
+        // later close of this panel (opened again, closed again) owns the hiding: this task is not the one to do it in the middle of that.
+        let stale = cx.update(|cx| panel(cx).is_some_and(|p| p.open == Some(id) || !p.close_seqs.is_latest(id, mine)));
+        if stale {
             return;
         }
         let fg = rf_win::dock::foreground_root();
         geo::hide(hwnd);
-        cx.update(|cx| {
+        // a panel waits for this one to be gone (a press on another button of the island's row): it opens now, and the window that had
+        // the keyboard before this one is not given it back in between: the next panel is handed it as the window to go back to (the
+        // foreground at this moment is whatever Windows activated when this window went, not the user's window), takes the keyboard and
+        // gives it back when it is put away. A waiting panel that could not open leaves the keyboard with nobody: it is given back here.
+        let handing_over = cx.update(|cx| {
             hooks.on_hidden(cx);
             if was_grown {
-                grow_host::finish(cx);
+                grow_host::finish(id, cx);
             }
+            let waiting = panel(cx).is_some_and(|p| p.after.is_some());
+            let ours = waiting && host_global(cx).previous_hint.is_none();
+            if ours {
+                host_global(cx).previous_hint = Some((previous, Instant::now()));
+            }
+            open_waiting(cx);
+            let opened = panel(cx).is_some_and(|p| p.open.is_some());
+            if ours && !opened {
+                host_global(cx).previous_hint = None;
+            }
+            grow_panels::hands_keyboard_on(waiting, opened)
         });
-        if restore && let Some(target) = geo::restore_to(previous, fg, hwnd, geo::exists(previous)) {
+        if restore && !handing_over && let Some(target) = geo::restore_to(previous, fg, hwnd, geo::exists(previous)) {
             geo::give_back(target);
         }
     })

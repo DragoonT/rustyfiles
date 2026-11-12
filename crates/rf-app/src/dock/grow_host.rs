@@ -1,7 +1,8 @@
 //! An island that grows into its panel: the part that carries the pure motion (`rf_win::dock::grow`) out on windows, glass and the
-//! pointer. Today only the Start panel uses it (setting "Başlat adadan büyüyerek açılsın", `dock_start_grow`, on by default); the
-//! right island's panels (notifications, calendar, control centre) are meant to open the same way next, see "Moving the right island's
-//! panels onto it" at the end of this comment.
+//! pointer. The Start panel (out of the left island, `Stays::Logo`) and the right island's four panels (the control centre, the
+//! calendar, the notifications and the tray's overflow, out of the right island, `Stays::Row`) use it, all with ONE setting
+//! ("Paneller adalardan büyüyerek açılsın", `dock_start_grow`, on by default); see "The right island's panels" at the end of this
+//! comment.
 //!
 //! WHAT WAS BUILT: THE FALLBACK OF THE BRIEF, AND WHY. The brief preferred hosting the panel's content in the island's own window, so
 //! that one window's glass changes shape. That means the island's window (338 x 56 px, never activated, with the system's rules for an
@@ -64,10 +65,22 @@
 //! end line nothing of this runs: no task, no frame request (the views ask for a frame only while `moving`), and the next line of this
 //! kind comes with the next press.
 //!
-//! Moving the right island's panels onto it: [`config`] gets a row for each panel (`Kind::Right`, `Stays::Row`, no field); the panel's
-//! view asks [`view_frame`] and draws its content inside the part above the island's row (`extra_bottom` is the island's row and the
-//! gap, so the view keeps it empty), and the right island's view asks [`island_fade`] (for `Stays::Row` it answers "nothing fades").
-//! `panel.rs` already calls the rest for any slot that has a [`config`].
+//! THE RIGHT ISLAND'S PANELS (`Stays::Row`, `Corner::BottomRight`, no field). The glass grows up and to the left from the island's
+//! bottom right corner, which does not move. The island's WHOLE row stays as the bottom row of the grown glass: the network and volume
+//! buttons, the clock, the bell and the tray strip are the island's own window (raised above the panel's, as the logo is for the
+//! Start panel), so they are drawn where they were and keep working; nothing of the row fades. A hairline stands above the row
+//! ([`ViewFrame::line_y`]) and the panel's content comes in over the second half of the motion and leaves first on closing, exactly as
+//! the Start panel's. The panel's content is drawn in [`ViewFrame::area`], its own rectangle inside the glass (the narrow overflow
+//! panel is lined up with the island's right edge, where it stands with the setting off). Each panel keeps the contents and the layout it has.
+//!
+//! * PRESSING A BUTTON OF THE ROW while a panel is open: the button of the open panel closes it; another button HANDS OVER. The hand-over
+//!   is "close, then open" (the first shrinks into the island, the second grows out of it when the first has gone) and not one glass
+//!   going from the one panel's size to the other's; why is in `rf_win::dock::grow_panels` (the rules: `press`), the sequencing is in
+//!   `panel.rs` (`PanelHost::after`).
+//! * THE ISLAND'S WIDTH CAN CHANGE while a panel is grown (a minute that changes the clock's width, an icon dragged between the
+//!   overflow panel and the strip): the host's layout hands the new island to `panel::layout_applied`, which works the growth out again
+//!   for the new rectangles and moves the panel's window; the corner it is anchored by does not move. (The left island holds its width
+//!   instead, see `left.rs`: its gear and power button are placed for the width it had.)
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -75,6 +88,7 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::*;
 use rf_win::dock::grow::{self, Again, Arrival, Corner, FRect, Frame, Phase, Run, Shrink, Spec, Stays};
+use rf_win::dock::grow_panels;
 use rf_win::dock::hit;
 use rf_win::dock::island;
 use rf_win::dock::layout::{self, Rect};
@@ -97,14 +111,30 @@ pub struct Cfg {
     pub stays: Stays,
 }
 
-/// Whether (and how) this panel grows out of its island right now. The Start panel does when the setting is on; no other panel has a row
-/// yet.
-pub fn config(id: PanelId, cx: &App) -> Option<Cfg> {
-    if id != PanelId::START {
+/// Whether (and how) this panel grows out of its island right now. `kind` is the island the panel sits above. The Start panel grows out
+/// of the left island (it stays as the logo) when the setting is on and our own Start is; the right island's panels grow out of the
+/// right island (the whole row stays) when the setting is on. The panels exist only while their own setting is on, so nothing else is
+/// asked here.
+pub fn config(id: PanelId, kind: Kind, cx: &App) -> Option<Cfg> {
+    let s = cx.try_global::<Settings>()?;
+    if !s.dock_start_grow {
         return None;
     }
-    let s = cx.try_global::<Settings>()?;
-    (s.dock_start_grow && s.dock_own_start).then_some(Cfg { kind: Kind::Left, stays: Stays::Logo })
+    match kind {
+        Kind::Left => (id == PanelId::START && s.dock_own_start).then_some(Cfg { kind, stays: Stays::Logo }),
+        Kind::Right => Some(Cfg { kind, stays: Stays::Row }),
+        Kind::Middle => None,
+    }
+}
+
+/// The panel that has a growth going on (open, shrinking back, or home with its window still there), if any.
+pub fn current_id(cx: &App) -> Option<PanelId> {
+    grow_ref(cx).map(|g| g.id)
+}
+
+/// How the growth of the panel `id` is configured, when one is going on.
+pub fn cfg_of(id: PanelId, cx: &App) -> Option<Cfg> {
+    grow_ref(cx).filter(|g| g.id == id).map(|g| g.cfg)
 }
 
 /// Whether this panel is the one that is growing (open, or shrinking back and not hidden yet).
@@ -131,6 +161,8 @@ struct Grow {
     scale: f32,
     /// How far the grown glass reaches below the panel's own rectangle (the gap and the island's row), device px.
     extra: i32,
+    /// The panel's own rectangle inside the grown glass (screen coordinates, device px): where its view draws its content.
+    content: Rect,
     /// The ONE bottom row of the glass (the island's row, with the account, the gear and the power button in it), for a panel that
     /// gives up its own bottom row (`Stays::Logo`); `None` for one that keeps it.
     row: Option<BottomRow>,
@@ -271,13 +303,17 @@ pub fn fits(cfg: Cfg, island_glass: Rect, panel: Rect, scale: f32, cx: &App) -> 
         log::info!("dock: grow skipped: the island ({} px wide) would lie over the gear and the power button; the panel opens as an ordinary pop-up", island_glass.width());
         return false;
     }
-    for kind in [Kind::Left, Kind::Middle, Kind::Right] {
-        if kind == cfg.kind {
-            continue;
+    let kinds: Vec<Kind> = [Kind::Left, Kind::Middle, Kind::Right].into_iter().filter(|k| *k != cfg.kind).collect();
+    // (an island with no glass rectangle yet is an empty one, which is no island)
+    let others: Vec<Rect> = kinds.iter().map(|k| host::visible_glass_rect(*k, cx).unwrap_or_default()).collect();
+    match grow_panels::grown_if_clear(island_glass, panel, cfg_corner(cfg), &others, margin) {
+        Ok(_) => true,
+        Err(grow_panels::Blocked::CornerMoves) => {
+            log::info!("dock: grow skipped: the panel is not lined up with its island's edge on this screen; it opens as an ordinary pop-up");
+            false
         }
-        if let Some(other) = host::visible_glass_rect(kind, cx)
-            && grow::reaches_other_island(grown, other, margin)
-        {
+        Err(grow_panels::Blocked::ReachesIsland(i)) => {
+            let (kind, other) = (kinds[i], others[i]);
             log::info!(
                 "dock: grow skipped: the grown glass ({}x{} px) would lie under the {kind:?} island ({}x{} px at {},{}); the panel opens as an ordinary pop-up",
                 grown.width(),
@@ -287,10 +323,17 @@ pub fn fits(cfg: Cfg, island_glass: Rect, panel: Rect, scale: f32, cx: &App) -> 
                 other.left,
                 other.top
             );
-            return false;
+            false
         }
     }
-    true
+}
+
+/// The corner of its island a panel's growth is anchored by.
+fn cfg_corner(cfg: Cfg) -> Corner {
+    match cfg.kind {
+        Kind::Right => Corner::BottomRight,
+        Kind::Left | Kind::Middle => Corner::BottomLeft,
+    }
 }
 
 /// The size (logical px) a panel that grows is placed with, from the size it would have as an ordinary panel: one that stays as the
@@ -315,6 +358,8 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
     }
     let grown = spec.grown;
     let extra = grown.bottom - p.panel.bottom;
+    // (the Start panel is as wide as its glass; a narrow panel of the right island is lined up with the island's right edge in a glass as wide as the island)
+    let content = grow_panels::content_rect(grown, p.panel, Corner::from(p.side));
     let row = (p.cfg.stays == Stays::Logo).then(|| grow_row::bottom_row(p.island_glass, grown, unit, p.scale));
     let animate = crate::settings::animations();
     let now = backdrop::now_ms();
@@ -325,6 +370,7 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
         // have moved, the clock is kept
         g.spec = spec;
         g.extra = extra;
+        g.content = content;
         g.row = row;
         g.dark = p.dark;
         g.sent = None;
@@ -346,6 +392,7 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
         dark: p.dark,
         scale: p.scale,
         extra,
+        content,
         row,
         shown_at: Instant::now(),
         began: Instant::now(),
@@ -379,6 +426,17 @@ pub fn before_show(cx: &mut App) -> Option<impl FnOnce() + use<>> {
             send.run();
         }
     })
+}
+
+/// After the panel's window was moved while it is open (its height changed, the island's rectangle changed): what to do, outside any
+/// update of the app, so that the window's region and the glass's shape are in the new window's coordinates at once and not with the
+/// view's next frame. `None`: no growth.
+pub fn after_move(cx: &mut App) -> Option<impl FnOnce() + use<>> {
+    let now = backdrop::now_ms();
+    let g = grow_mut(cx)?;
+    let f = g.frame(now);
+    let send = g.plan_send(&f)?;
+    Some(move || send.run())
 }
 
 /// The island's window (the one the glass grows out of): to be raised above the panel's after the panel is in front, so that the logo
@@ -547,6 +605,17 @@ fn nudge_views(cx: &mut App) {
     if let Some(l) = super::panel::left_view(cx) {
         l.update(cx, |_, cx| cx.notify());
     }
+    // the right island (its fill is not drawn while its glass has grown) and the right island's panel that is growing
+    // (deferred: the press that started this may come from the right island's own key handler, and an entity cannot be updated while it
+    // is being updated)
+    if let Some(r) = host::right_island(cx) {
+        cx.defer(move |cx| {
+            r.update(cx, |_, cx| cx.notify());
+        });
+    }
+    if let Some(id) = current_id(cx) {
+        super::panel::redraw(id, cx);
+    }
 }
 
 // ---------------------------------------------------------------- closing
@@ -586,8 +655,11 @@ pub fn abort(cx: &mut App) {
 
 /// The panel's window has been hidden: the island has its glass (it has, since the deadline: this is the net for a deadline that never
 /// ran), the window its region and its system frame (the next opening, grown or not, starts from a plain window), the state is gone.
-pub fn finish(cx: &mut App) {
-    release(cx);
+pub fn finish(id: PanelId, cx: &mut App) {
+    // (only the growth of this panel: a panel that was handed over to has started its own growth by now, which is not this window's)
+    if grow_ref(cx).is_some_and(|g| g.id == id) {
+        release(cx);
+    }
 }
 
 fn release(cx: &mut App) {
@@ -631,6 +703,11 @@ pub struct ViewFrame {
     pub plain: bool,
     /// The height of the grown glass below the panel's own rectangle (the gap and the island's row): the view leaves it empty.
     pub extra_bottom: f32,
+    /// The panel's own rectangle inside the window (x, y, w, h): its view draws its content there. For a panel as wide as its glass that
+    /// is the window above the island's row; the narrow overflow panel is lined up with the island's right edge.
+    pub area: FRect,
+    /// The hairline above the island's row, when the whole row stays (`Stays::Row`): its y in the window. It comes in with `content`.
+    pub line_y: Option<f32>,
     /// The glass's one bottom row, when the panel has given up its own: the view draws the account, the gear and the power button in it
     /// (and the line above it) with `content` as their opacity, and no bottom row of its own.
     pub row: Option<BottomRow>,
@@ -641,9 +718,9 @@ pub struct ViewFrame {
 /// The panel view's frame, and the sending of the glass's shape and the window's region for it. `None`: no growth is going on, the
 /// view draws as an ordinary panel. Called from `render`: it queues the sending, it does not touch a window. Whether the glass is there
 /// is read from the engine here (a lookup in a table behind a lock, once for each frame drawn).
-pub fn view_frame(cx: &mut App) -> Option<ViewFrame> {
+pub fn view_frame(id: PanelId, cx: &mut App) -> Option<ViewFrame> {
     let now = backdrop::now_ms();
-    let g = grow_mut(cx)?;
+    let g = grow_mut(cx).filter(|g| g.id == id)?;
     let f = g.frame(now);
     let moving = g.run.moving(now);
     if moving {
@@ -666,6 +743,8 @@ pub fn view_frame(cx: &mut App) -> Option<ViewFrame> {
         wash_alpha: wash.alpha,
         plain: wash.plain,
         extra_bottom: g.extra as f32 / scale,
+        area: logical([g.content.left as f32, g.content.top as f32, g.content.width() as f32, g.content.height() as f32]),
+        line_y: (g.cfg.stays == Stays::Row).then(|| (g.spec.island.top - g.spec.grown.top) as f32 / scale),
         row: g.row,
         moving,
     };
@@ -678,8 +757,8 @@ pub fn view_frame(cx: &mut App) -> Option<ViewFrame> {
 
 /// The panel's glass shape for the moment its glass is attached: x, y, w, h in the window's device px, and the radius. `None` when the
 /// panel does not grow.
-pub fn shape_for_attach(cx: &App) -> Option<(FRect, f32)> {
-    let g = grow_ref(cx)?;
+pub fn shape_for_attach(id: PanelId, cx: &App) -> Option<(FRect, f32)> {
+    let g = grow_ref(cx).filter(|g| g.id == id)?;
     let f = g.frame(backdrop::now_ms());
     Some((g.spec.in_window(&f), f.radius))
 }
@@ -734,7 +813,20 @@ pub fn island_fade(kind: Kind, cx: &App) -> Option<IslandFade> {
 #[cfg(test)]
 mod tests {
     // (not `super::*`: that would bring in gpui's own `test` attribute, which shadows the standard one)
-    use super::{Cfg, Corner, Grow, IslandGlass, Instant, Kind, PanelId, Phase, Rc, RefCell, Rect, Run, Settings, Spec, Stays, field_places, grow_row, hit, panel_size, screen_rect};
+    use super::{Cfg, Corner, Grow, IslandGlass, Instant, Kind, PanelId, Phase, Rc, RefCell, Rect, Run, Settings, Spec, Stays, cfg_corner, field_places, grow_row, hit, panel_size, screen_rect};
+
+    /// The right island's panels grow out of its bottom RIGHT corner, the left island's out of its bottom left one, and neither of them
+    /// gives up any bottom row but the Start panel's (the right island's whole row stays as it is).
+    #[test]
+    fn a_panel_is_anchored_by_its_islands_corner_and_only_the_logo_panel_gives_up_a_row() {
+        let right = Cfg { kind: Kind::Right, stays: Stays::Row };
+        let left = Cfg { kind: Kind::Left, stays: Stays::Logo };
+        assert_eq!(cfg_corner(right), Corner::BottomRight);
+        assert_eq!(cfg_corner(left), Corner::BottomLeft);
+        for size in [(360.0, 480.0), (340.0, 520.0), (380.0, 300.0), (136.0, 64.0)] {
+            assert_eq!(panel_size(right, size), size, "the right island's panels keep the size they have");
+        }
+    }
 
     #[test]
     fn the_search_field_goes_from_its_place_in_the_island_to_the_top_of_the_panel() {
@@ -794,6 +886,7 @@ mod tests {
             dark: true,
             scale: 1.0,
             extra: 56,
+            content: panel,
             row: None,
             shown_at: Instant::now(),
             began: Instant::now(),

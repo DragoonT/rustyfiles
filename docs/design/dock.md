@@ -321,7 +321,7 @@ process has no window and no tray icon, so it ends itself after 10 minutes witho
 in it by then (`search_pipe::watch_idle`; a window opened in it makes it an ordinary rustyfiles). The field in the left island shows what is
 typed in the panel (the island is never activated, so it cannot take keys itself).
 
-## The Start panel grows out of the left island (setting "Başlat adadan büyüyerek açılsın" / Start grows out of the island)
+## The Start panel grows out of the left island (setting "Paneller adalardan büyüyerek açılsın" / Panels grow out of the islands)
 
 The user's idea: when Start is pressed the glass at the left grows and widens and IS the Start panel; when the search field is pressed it
 grows too, the field going up, selected, ready to type. **Off by default** (`dock_start_grow`; a new look is off until it has been seen on a
@@ -425,12 +425,65 @@ screen: the person who wrote it could not show a window). Off: everything above 
   closing (the window is hidden 60 ms after the motion, the island has its glass back 25 ms after it). The panel's glass is made when the panel opens, as before, so the first 20 to 90 ms after a press are the island as it was
   (and the logo's own press motion) before the motion starts. The size of the panel's window changes (56 px taller by the gap and the
   island's row at 100 %); the panel's own rectangle, its contents and its layout are the same.
-* MOVING THE RIGHT ISLAND'S PANELS ONTO IT (asked for by the user, not done here): `grow_host::config` gets a row for the control centre,
-  the calendar and the notifications (`Kind::Right`, `Stays::Row`: the island's whole row, network, volume, clock and bell, stays as it is
-  and nothing of it fades; no field), `grow_host::prepare` is given `Side::Right` (the pure side already has `Corner::BottomRight`), each
-  panel's view draws its content inside the part above `ViewFrame::extra_bottom` and fades it with `ViewFrame::content`, attaches its glass
-  with `PopupGlass::start_panel_shaped`, and the right island's view asks `island_fade(Kind::Right)` for a frame request. `panel.rs` calls
-  the rest for any slot that has a `config`; the right island's glass is put away and raised the same way.
+* THE RIGHT ISLAND'S PANELS: see the next section.
+
+## The right island's panels grow out of their island (the same setting, now "Paneller adalardan büyüyerek açılsın" / Panels grow out of the islands)
+
+The user: "sağdaki kontrol merkezi de büyüyerek açılmıyor" (the control centre on the right does not open by growing). The control centre
+(the network and volume buttons), the calendar (the clock), the notifications (the bell) and the tray's overflow (the chevron) now open
+on the same mechanism as the Start panel. ONE setting for all of them: `dock_start_grow` keeps its name (it was the Start panel's), its
+text on the Dock page is about every panel and the row is in the page's general section. On by default, as it was. NOT SEEN ON A SCREEN.
+
+* THE MOTION. The island's bottom RIGHT corner stays where it is (`Corner::BottomRight`); the glass grows up and to the left into the
+  panel; radius, clock (220 / 160 ms), fades and the engine wait are the Start panel's (`rf_win::dock::grow`, unchanged). The grown
+  glass is the panel's rectangle taken down to the island's bottom edge: content on top, the 8 px gap, the island's row at the bottom.
+* THE WHOLE ROW STAYS (`Stays::Row`). The right island's window is raised above the panel's, as the left island's is, so the tray
+  strip, the network and volume buttons, the clock and the bell are drawn where they were and keep working; nothing of the row fades.
+  The island's own glass is put away while the panel's stands in its place and the island paints no fill of its own over it
+  (`right.rs`). A HAIRLINE (`grow_view::hairline`, the island's separator tone, 1 px) stands across the glass at the row's top edge
+  and comes in with the content. The panel's content comes in over the second half of the opening and goes first on closing
+  (`ViewFrame::content`), in its own rectangle of the window (`ViewFrame::area`): the 8 px gap stays inside the glass above the hairline.
+  Each panel keeps its contents and its layout; the views changed only in WHERE they paint their fill (over the glass's rectangle of the
+  moment, `grow_view::wash`, instead of the whole window) and where their body stands (`grow_view::body`).
+* A PANEL NARROWER THAN THE ISLAND. The overflow panel (136 px for three icons) is narrower than the right island (207 px and the tray
+  strip). The glass is as wide as the island then (`grow::grown_rect` is the union) and the panel's content is lined up with the island's right edge in it, where it stands with the setting off
+  (`grow_panels::content_rect`); the strip finds the overflow panel's cells from that rectangle (`panel::overflow_rect` is the CONTENT's
+  rectangle now, which is the window's for an ordinary panel).
+* PRESSING A BUTTON OF THE ROW while a panel is open (`rf_win::dock::grow_panels::press`, pure and tested): the button of the open
+  panel closes it (it shrinks into the island); ANOTHER button hands over to that button's panel. WHAT WAS BUILT: close, then open. The
+  open panel shrinks into the island (its content out, then the glass: 160 ms) and the pressed one grows out of it when the first one's
+  window has gone (`PanelHost::after`, opened from the end of `panel::close`'s task; 220 ms). WHY NOT ONE GLASS GOING FROM THE ONE
+  PANEL'S SIZE TO THE OTHER'S: each panel is a window of its own with a glass of its own, and the rules that exist (`Spec`: one starting
+  rectangle, the island's; `Run`: one hand-over, island glass to panel glass, where the two are the same rectangle) do not cover a
+  hand-over between two panel windows. It would need the second window's glass on the screen at the first one's rectangle while the
+  first still stands (two glasses over each other, the tint twice) and then the first taken off in the very frame the second starts to
+  move; that could not be tried here and would show as a flash on the user's screen. Each half of the sequence is a motion that
+  exists already. The foreground is not given back to the window that had it before in between: the window it would go back to is handed
+  to the next panel as the one to remember (the foreground at that moment is whatever Windows activated when the first window went),
+  and when the waiting panel cannot open it is given back at once. A tap of the Windows key with a panel grown only queues Start behind
+  it, and counts as having worked (`grow_panels::took_effect`), so Windows' own Start does not open as well. More presses: a press on the button of
+  a panel that waits for its turn takes it back; a press on a third button takes the waiting one's place; a press on the button of
+  the panel that is shrinking turns it round (and drops the one that waited). Where the first panel is not grown (setting off, no room)
+  the old way stays: it goes at once and the new one opens.
+* WHERE IT DOES NOT HAPPEN. Where the grown glass would reach the middle (or the left) island, with the 8 px gap as margin, the panel
+  opens as it does with the setting off, a pop-up above the island (`grow_host::fits`, `grow_panels::grown_if_clear`; one info line
+  says why). The same where the panel had to be moved off the island's right edge to fit the screen. On the user's 2560 x 1440 monitor at
+  100 % every panel grows at every dock size and tray width tested; at 125 % and 150 % at the default size or smaller; the largest dock
+  at 150 % squeezes the middle island up to the right one and falls back (the tests check both verdicts across 1366, 1600, 1920, 2560,
+  3440 and 3840 px wide screens at 100, 125 and 150 % and the four dock sizes).
+* THE ISLAND'S WIDTH CHANGES WHILE A PANEL IS GROWN (a new minute that makes the clock wider, an icon dragged between the overflow
+  panel and the strip): the host's layout tells `panel::layout_applied`, which works the growth out again for the island's new rectangle
+  and moves the panel's window (`panel::refit`, the same path as a panel that changes its height: the control centre gaining a card, the
+  overflow panel gaining an icon). The corner does not move, so the island does not jump. (The left island still holds its width.) The
+  window is moved without anything else being in front of the island's row (the island's window is raised again in the same task) and
+  the glass's shape and the region are sent in that task too. The same check as the opening's (`grow_host::fits`) runs again at every
+  such move: a middle island that has come to meet the glass (apps pinned or launched while the panel is open) puts the panel away at
+  once (`CloseCause::LayoutChanged`) instead of leaving it grown over the island.
+* PRESSED AGAIN DURING A CLOSING reverses the motion and the panel keeps what it shows (`on_reopen` of each view: the sources never
+  stopped, the month the user turned to stays).
+* COST. Off: nothing more than the Start panel's (`grow_host::config` reads one setting when a panel opens; `layout_applied` looks at a
+  global that is not there). On: as the Start panel's, per frame one layout, one `set_options`, one region and the two views' render.
+  The right island's width and the clock's tick are not held back.
 
 ## The control centre
 
@@ -814,8 +867,10 @@ dock is off every control but the dock switch is dimmed with a line that says wh
 * **Pencereler dock'un altına girmesin** / Keep windows from going under the dock. On by default. The dock registers as an
   application desktop toolbar at the bottom of the primary monitor (the middle island's height plus the margins), so maximised
   windows stop above it, and unregisters on exit. Off: it only floats.
-* **Başlat adadan büyüyerek açılsın** / Start grows out of the island. Off by default (`dock_start_grow`). The left island's glass grows
-  into the Start panel and shrinks back into the island (see "The Start panel grows out of the left island").
+* **Paneller adalardan büyüyerek açılsın** / Panels grow out of the islands. On by default (`dock_start_grow`, in this general section).
+  The left island's glass grows into the Start panel and the right island's into the control centre, the calendar, the notifications
+  and the overflow panel, and shrink back into their island (see "The Start panel grows out of the left island" and "The right
+  island's panels grow out of their island").
 * **Dock boyutu** / Dock size. Orta (Medium) by default (`dock_size`; Küçük 0.85, Orta 1.0, Büyük 1.2, Çok büyük 1.4). Scales the whole dock
   and applies to the running dock at once (see "The dock's size").
 * **Simge büyütme** / Icon magnification. Full by default (see "Magnification").

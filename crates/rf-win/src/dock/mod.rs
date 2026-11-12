@@ -43,6 +43,7 @@
 //! | `empty_spot` | which point of an island is its empty glass (no icon, field, symbol or other control), from the layout's rectangles | all of it |
 //! | `taskmgr` | starting Windows' Task Manager from a right click on the empty glass: once, the shell's "open" and never "runas" | the gate |
 //! | `grow` | an island that grows into its panel: the glass's rectangle from the island's to the panel's with one corner fixed, the radius, the fades, the search field's path, the 220 / 160 ms clock that can turn at any moment | all of it |
+//! | `grow_panels` | which panel a press on a button of the right island's row leads to (close, hand over, wait), the grown rectangle of a panel or why it must open the ordinary way, where the panel's content stands in the glass | all of it |
 //! | `startapps` | start an app of "All apps", as administrator (the user's click), find its program (shell thread) | - |
 //!
 //! HOW THE APP USES IT (the order that works):
@@ -73,6 +74,7 @@ pub mod clock;
 pub mod empty_spot;
 pub mod fullscreen;
 pub mod grow;
+pub mod grow_panels;
 pub mod hit;
 pub mod hover;
 pub mod iconload;

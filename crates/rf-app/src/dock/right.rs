@@ -183,6 +183,9 @@ fn open_controls(cx: &mut App) {
 impl Render for RightIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
+        // While a panel's glass has grown out of this island (grow_host.rs) the island's own glass is put away and the whole row stays on
+        // the panel's glass: the island paints no fill of its own over it (nothing of the row fades, so no frames are asked for).
+        let fallback = fallback && super::grow_host::island_fade(Kind::Right, cx).is_none();
         let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
         let k = super::look::dock_size(cx);
