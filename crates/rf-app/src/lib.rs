@@ -46,6 +46,7 @@ mod taskbar_preview;
 mod update_splash;
 mod shelf_view;
 mod status_center;
+mod transfer_view;
 mod tags;
 mod undo;
 mod preview;

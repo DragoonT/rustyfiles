@@ -51,6 +51,22 @@ impl CopyVerify {
     }
 }
 
+/// Where the progress of a running copy, move or delete is shown besides the Status Center
+/// (whose button always has a progress ring).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TransferProgress {
+    /// A strip in the status bar of every window.
+    #[default]
+    StatusBar,
+    /// A card at the bottom right corner of the window's content.
+    #[serde(rename = "card")]
+    FloatingCard,
+    /// Only in the Status Center (how it was before).
+    #[serde(rename = "statuscenter")]
+    StatusCenter,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DatePref {
@@ -445,6 +461,8 @@ pub struct Settings {
     pub copy_verify: CopyVerify,
     /// Copy speed limit in MB/s (0 = none).
     pub copy_speed_limit: u32,
+    /// Where a running operation's progress is shown (see [`TransferProgress`]).
+    pub transfer_progress: TransferProgress,
     /// The thumbnail cache's limit in MB (the cache is in memory); `None` = the default, 64 MB, and no key in the file.
     pub thumb_cache_mb: Option<u32>,
     pub show_libraries: bool,
@@ -615,6 +633,7 @@ impl Default for Settings {
             fast_file_ops: true,
             copy_verify: CopyVerify::Off,
             copy_speed_limit: 0,
+            transfer_progress: TransferProgress::StatusBar,
             thumb_cache_mb: None,
             show_libraries: false,
             sidebar_tree: false,

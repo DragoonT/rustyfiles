@@ -13,7 +13,8 @@ use gpui_kit::assets::IconName as L;
 use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use rf_win::fileops::{self, Tracker, Transfer};
+use rf_core::transfer::{self as xfer, OpStats, Outcome, Pace, Stage};
+use rf_win::fileops::{self, ByteProgress, Tracker, Transfer};
 
 use crate::theme::{self, Palette};
 
@@ -41,6 +42,71 @@ pub struct OpState {
     started: Instant,
     /// A button on the finished operation (the folder organizer's "Geri al"), see [`set_result`].
     action: Option<ResultAction>,
+    /// When it ended (for how long its card stays).
+    ended: Option<Instant>,
+    /// Speed, time left and the pace chart, fed from the progress reports.
+    stats: OpStats,
+    /// Bytes done and in all, when the engine counts them (shared with the worker's tracker).
+    bytes: Arc<ByteProgress>,
+    /// What the status bar's strip says while it runs ("12 öğe kopyalanıyor: Belgeler"); the title when `None`.
+    words: Option<String>,
+    /// The user sent its card / strip away (a failure stays up until then).
+    dismissed: bool,
+    /// Its card is folded to a one-line pill.
+    collapsed: bool,
+    /// Names that already exist, waiting for an answer.
+    question: Option<Question>,
+    /// A folder the finished card offers to open.
+    open_dest: Option<std::path::PathBuf>,
+    /// What the undo stack's top must hold for this operation to be undone from its card: a path it made.
+    undo_mark: Option<Arc<std::sync::Mutex<Option<std::path::PathBuf>>>>,
+}
+
+/// A question from the copy engine, kept here so every window's strip or card can ask it, not
+/// only the dialog in the window the copy began in. Whoever answers first takes the reply.
+#[derive(Clone)]
+pub struct Question {
+    count: usize,
+    /// What the dialog lists, kept for "Seç…" on the strip or a card (the dialog is not opened until then).
+    list: Vec<rf_win::fastcopy::Conflict>,
+    reply: std::rc::Rc<std::cell::RefCell<Option<crate::conflict_dialog::Reply>>>,
+}
+
+impl Question {
+    /// Still waiting (the dialog may have answered it already).
+    fn pending(&self) -> bool {
+        self.reply.borrow().is_some()
+    }
+}
+
+impl OpState {
+    fn new(id: u64, title: String, cancel: Arc<AtomicBool>, paused: Arc<AtomicBool>, bytes: Arc<ByteProgress>) -> Self {
+        Self {
+            id,
+            title,
+            total: 0,
+            done: 0,
+            current: None,
+            phase: OpPhase::Running,
+            cancel,
+            paused,
+            started: Instant::now(),
+            action: None,
+            ended: None,
+            stats: OpStats::default(),
+            bytes,
+            words: None,
+            dismissed: false,
+            collapsed: false,
+            question: None,
+            open_dest: None,
+            undo_mark: None,
+        }
+    }
+
+    fn secs(&self) -> f64 {
+        self.started.elapsed().as_secs_f64()
+    }
 }
 
 pub struct Ops {
@@ -56,6 +122,17 @@ pub struct Ops {
     /// When the popup closed itself (focus left it): a click on the button right after must
     /// not reopen it.
     auto_closed: Option<Instant>,
+    /// Since when something has been running without a break (None = nothing runs).
+    busy_since: Option<Instant>,
+    /// The button's attention pulse: when it began, and which one it is (an animation restarts only under a new id).
+    pulse: Option<(Instant, u64)>,
+    pulse_count: u64,
+    /// When the last of the running operations ended after a run long enough to be noticed (the ring closes and fades from here).
+    all_done: Option<Instant>,
+    /// Which pulse that was (the ring's fade is an animation under this id).
+    done_epoch: u64,
+    /// A once-a-second wake-up task is running (see [`keep_ticking`]).
+    ticking: bool,
 }
 
 /// What [`Ops::glance`] says.
@@ -91,7 +168,11 @@ enum Ev {
 
 impl Ops {
     pub fn new(_: &mut Context<Self>) -> Self {
-        Self { ops: Vec::new(), next: 1, open: false, unseen_failure: false, owner: None, in_window: false, auto_closed: None }
+        Self::blank()
+    }
+
+    fn blank() -> Self {
+        Self { ops: Vec::new(), next: 1, open: false, unseen_failure: false, owner: None, in_window: false, auto_closed: None, busy_since: None, pulse: None, pulse_count: 0, all_done: None, done_epoch: 0, ticking: false }
     }
 
     pub fn toggle(&mut self, owner: AnyWindowHandle, cx: &mut Context<Self>) {
@@ -104,6 +185,12 @@ impl Ops {
         self.open = !self.open;
         if self.open {
             self.unseen_failure = false;
+            // the failures are in front of the user now: their strip / card is done
+            for o in &mut self.ops {
+                if matches!(o.phase, OpPhase::Failed(_)) {
+                    o.dismissed = true;
+                }
+            }
         }
         cx.notify();
     }
@@ -160,6 +247,285 @@ impl Ops {
         let f: f32 = run.iter().map(|o| if o.total > 0 { o.done as f32 / o.total as f32 } else { 0.0 }).sum();
         Some(f / run.len() as f32)
     }
+
+    /// An operation was added: the attention pulse, and a new run begins when nothing ran before.
+    /// True when the caller must start the once-a-second wake-up (none runs yet).
+    fn began(&mut self) -> bool {
+        self.busy_since.get_or_insert_with(Instant::now);
+        self.all_done = None;
+        self.pulse_now();
+        !std::mem::replace(&mut self.ticking, true)
+    }
+
+    /// Something runs that is not waiting: its speed and time left change by the clock, not only
+    /// by progress reports (a disk that stops answering sends none).
+    fn wants_tick(&self) -> bool {
+        self.ops.iter().any(|o| o.phase == OpPhase::Running && !o.paused.load(Ordering::Relaxed))
+    }
+
+    /// An operation ended. When it was the last one of a run long enough to be noticed, the ring
+    /// closes and fades and the button pulses once; a run that was over before anyone could see
+    /// it leaves nothing behind.
+    fn ended_one(&mut self) {
+        if self.running() > 0 {
+            return;
+        }
+        let long = self.busy_since.take().is_some_and(|t| t.elapsed() >= Duration::from_millis(xfer::CARD_APPEAR_MS));
+        if long {
+            self.all_done = Some(Instant::now());
+            self.pulse_now();
+            self.done_epoch = self.pulse_count;
+        }
+    }
+
+    fn pulse_now(&mut self) {
+        self.pulse_count += 1;
+        self.pulse = Some((Instant::now(), self.pulse_count));
+    }
+
+    /// What the button's ring and pulse need: (something runs, the overall progress when any
+    /// total is known, how long since the last run ended, the pulse's id and age in ms).
+    fn ring_state(&self) -> RingState {
+        let running = self.running() > 0;
+        let known = self.ops.iter().any(|o| o.phase == OpPhase::Running && o.total > 0);
+        RingState {
+            running,
+            fraction: if known { self.overall() } else { None },
+            since_end_ms: if running { None } else { self.all_done.map(|t| t.elapsed().as_millis() as u64) },
+            end_epoch: self.done_epoch,
+            pulse: self.pulse.map(|(t, n)| (n, t.elapsed().as_millis() as u64)).filter(|&(_, ms)| ms < xfer::PULSE_MS),
+        }
+    }
+
+    /// The operations as the strip and the cards see them, oldest first: the running ones, the
+    /// ones that ended lately and the failures nobody has looked at.
+    pub(crate) fn views(&self) -> Vec<OpView> {
+        self.ops
+            .iter()
+            .filter(|o| match &o.phase {
+                OpPhase::Running => true,
+                OpPhase::Failed(_) => !o.dismissed,
+                _ => o.ended.is_some_and(|e| e.elapsed() < Duration::from_secs(10)),
+            })
+            .map(OpState::view)
+            .collect()
+    }
+
+    // The state changes below take no window or context so they can be tested; the methods after
+    // them are the thin callers the buttons use.
+
+    fn pause_toggled(&mut self, id: u64) {
+        if let Some(op) = self.ops.iter_mut().find(|o| o.id == id) {
+            let now_paused = !op.paused.load(Ordering::Relaxed);
+            op.paused.store(now_paused, Ordering::Relaxed);
+            if now_paused {
+                op.stats.pause();
+            } else {
+                let t = op.secs();
+                op.stats.resume(t);
+            }
+        }
+    }
+
+    /// Stops operation `id`. Gives back the reply of the question it was waiting on, if any
+    /// (answered "cancel" here), so the dialog showing it can be taken away.
+    fn cancelled(&mut self, id: u64) -> Option<std::rc::Rc<std::cell::RefCell<Option<crate::conflict_dialog::Reply>>>> {
+        let op = self.ops.iter_mut().find(|o| o.id == id)?;
+        op.cancel.store(true, Ordering::Relaxed);
+        let q = op.question.take()?;
+        let reply = q.reply.borrow_mut().take()?;
+        let _ = reply.send(None);
+        Some(q.reply)
+    }
+
+    fn dismissed(&mut self, id: u64) {
+        if let Some(op) = self.ops.iter_mut().find(|o| o.id == id) {
+            op.dismissed = true;
+        }
+        if !self.ops.iter().any(|o| matches!(o.phase, OpPhase::Failed(_)) && !o.dismissed) {
+            self.unseen_failure = false;
+        }
+    }
+
+    fn collapsed_toggled(&mut self, id: u64) {
+        if let Some(op) = self.ops.iter_mut().find(|o| o.id == id) {
+            op.collapsed = !op.collapsed;
+        }
+    }
+
+    /// Answers operation `id`'s question for every name. Gives back the reply it took (the
+    /// dialog showing it is taken away), or `None` when there was nothing to answer: no such
+    /// operation, no question, or somebody answered first.
+    fn answered(&mut self, id: u64, r: rf_win::fastcopy::Resolve) -> Option<std::rc::Rc<std::cell::RefCell<Option<crate::conflict_dialog::Reply>>>> {
+        let q = self.ops.iter_mut().find(|o| o.id == id)?.question.take()?;
+        let reply = q.reply.borrow_mut().take()?;
+        let _ = reply.send(Some(vec![r; q.count]));
+        Some(q.reply)
+    }
+
+    pub(crate) fn toggle_pause(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.pause_toggled(id);
+        cx.notify();
+    }
+
+    pub(crate) fn cancel_op(&mut self, id: u64, cx: &mut Context<Self>) {
+        if let Some(reply) = self.cancelled(id) {
+            // (not now: the click that got us here may be in the window holding the dialog)
+            cx.defer(move |cx| crate::conflict_dialog::dismiss_if(&reply, cx));
+        }
+        cx.notify();
+    }
+
+    /// Sends a card / strip away (a failure stays until this).
+    pub(crate) fn dismiss(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.dismissed(id);
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_collapsed(&mut self, id: u64, cx: &mut Context<Self>) {
+        self.collapsed_toggled(id);
+        cx.notify();
+    }
+
+    /// The same answer for every name the copy asked about, from the strip or a card.
+    pub(crate) fn answer(&mut self, id: u64, r: rf_win::fastcopy::Resolve, cx: &mut Context<Self>) {
+        if let Some(reply) = self.answered(id, r) {
+            // the dialog (if "Seç…" opened one) is answered by this: take it away
+            cx.defer(move |cx| crate::conflict_dialog::dismiss_if(&reply, cx));
+        }
+        cx.notify();
+    }
+
+    /// "Seç…" on the strip or a card: the per-name dialog, in the window the click was in.
+    pub(crate) fn choose_each(&mut self, id: u64, window: AnyWindowHandle, cx: &mut Context<Self>) {
+        let Some(q) = self.ops.iter().find(|o| o.id == id).and_then(|o| o.question.clone()).filter(Question::pending) else { return };
+        // (not now: the click is inside that window's update)
+        cx.defer(move |cx| crate::conflict_dialog::show_shared(q.list, q.reply, Some(window), cx));
+    }
+
+    /// Opens the Status Center from a strip or card in `owner`.
+    pub(crate) fn show_center(&mut self, owner: AnyWindowHandle, cx: &mut Context<Self>) {
+        if !self.open {
+            self.toggle(owner, cx);
+        }
+    }
+}
+
+/// What the Status Center button's ring and pulse are drawn from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RingState {
+    pub running: bool,
+    pub fraction: Option<f32>,
+    pub since_end_ms: Option<u64>,
+    /// The id of the run that ended (its fade is an animation under it).
+    pub end_epoch: u64,
+    /// The pulse's id and how many milliseconds old it is.
+    pub pulse: Option<(u64, u64)>,
+}
+
+/// An operation as the views draw it: copied out of [`Ops`] so they hold nothing of it.
+pub(crate) struct OpView {
+    pub id: u64,
+    /// The strip's sentence ("12 öğe kopyalanıyor: Belgeler"), the title when there is no better one.
+    pub words: String,
+    pub title: String,
+    pub current: Option<String>,
+    pub phase: OpPhase,
+    /// `None` while the total is unknown.
+    pub frac: Option<f32>,
+    /// Bytes done and in all, when the engine counts them.
+    pub bytes: Option<(u64, u64)>,
+    pub pace: Pace,
+    /// The last minute's speed, 0 ..= 1 a bar.
+    pub bars: Vec<f32>,
+    pub paused: bool,
+    /// Names waiting for an answer: how many.
+    pub question: Option<usize>,
+    pub stage: Stage,
+    pub collapsed: bool,
+    pub open_dest: Option<std::path::PathBuf>,
+    pub can_undo: bool,
+    pub action: Option<ResultAction>,
+    pub brief: xfer::Brief,
+}
+
+impl OpState {
+    fn view(&self) -> OpView {
+        let running = self.phase == OpPhase::Running;
+        let paused = running && self.paused.load(Ordering::Relaxed);
+        let b = self.bytes.get();
+        let outcome = match &self.phase {
+            OpPhase::Running => None,
+            OpPhase::Done => Some(Outcome::Done),
+            OpPhase::Cancelled => Some(Outcome::Cancelled),
+            OpPhase::Failed(_) => Some(Outcome::Failed),
+        };
+        let ran_ms = self.ended.unwrap_or_else(Instant::now).duration_since(self.started).as_millis() as u64;
+        let since_end_ms = self.ended.map_or(0, |e| e.elapsed().as_millis() as u64);
+        let question = self.question.as_ref().filter(|q| q.pending()).map(|q| q.count);
+        let stage = xfer::card_stage(&xfer::CardIn { outcome, ran_ms, since_end_ms, asking: question.is_some(), dismissed: self.dismissed });
+        let pace = if running && !paused { self.stats.pace(self.secs(), (self.done, self.total), b) } else { Pace::default() };
+        let can_undo = self.undo_mark.as_ref().and_then(|m| m.lock().ok().and_then(|g| g.clone())).is_some_and(|p| crate::undo::last_made(&p));
+        OpView {
+            id: self.id,
+            words: self.words.clone().unwrap_or_else(|| self.title.clone()),
+            title: self.title.clone(),
+            current: self.current.clone(),
+            phase: self.phase.clone(),
+            frac: (self.total > 0).then(|| (self.done as f32 / self.total as f32).clamp(0.0, 1.0)),
+            bytes: (b.1 > 0).then_some(b),
+            pace,
+            bars: if stage == Stage::Running { self.stats.bars(self.secs()) } else { Vec::new() },
+            paused,
+            question,
+            stage,
+            collapsed: self.collapsed,
+            open_dest: self.open_dest.clone(),
+            can_undo,
+            action: self.action.clone(),
+            brief: xfer::Brief { running, noticed: ran_ms >= xfer::CARD_APPEAR_MS, asking: question.is_some(), failed: matches!(self.phase, OpPhase::Failed(_)), dismissed: self.dismissed },
+        }
+    }
+}
+
+/// Wakes the windows `ms` from now (a card appears or goes by the clock, not by an event).
+fn notify_in(cx: &mut App, ops: &Entity<Ops>, ms: u64) {
+    let ops = ops.clone();
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(Duration::from_millis(ms)).await;
+        ops.update(cx, |_, cx| cx.notify());
+    })
+    .detach();
+}
+
+/// How often the windows are woken while something runs.
+const TICK_MS: u64 = 1000;
+
+/// While something runs, wakes the windows once a second. The speed and the time left are worked
+/// out from the clock each time a window draws, and a window draws on progress reports: when a
+/// disk or a share stops answering no report comes, and without this the last "45 MB/sn · ~12 sn"
+/// would stay on screen. Stops by itself once nothing runs (nothing wakes anything when idle).
+fn keep_ticking(cx: &mut App, ops: &Entity<Ops>) {
+    let ops = ops.clone();
+    cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor().timer(Duration::from_millis(TICK_MS)).await;
+            let go = ops.update(cx, |o, cx| {
+                if o.running() == 0 {
+                    o.ticking = false;
+                    return false;
+                }
+                if o.wants_tick() {
+                    cx.notify();
+                }
+                true
+            });
+            if !go {
+                break;
+            }
+        }
+    })
+    .detach();
 }
 
 /// Starts a tracked operation. `work` runs on a new thread with COM initialized.
@@ -195,27 +561,26 @@ pub fn start_with_id(
     let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return 0 };
     let cancel = Arc::new(AtomicBool::new(false));
     let paused = Arc::new(AtomicBool::new(false));
+    let bytes = Arc::new(ByteProgress::default());
     // questions about the operation go to the window it was started from
     let origin = cx.active_window();
     let (tx, mut rx) = mpsc::unbounded::<Ev>();
-    let id = entity.update(cx, |ops, cx| {
+    let (id, tick) = entity.update(cx, |ops, cx| {
         let id = ops.next;
         ops.next += 1;
-        ops.ops.push(OpState {
-            id,
-            title,
-            total: 0,
-            done: 0,
-            current: None,
-            phase: OpPhase::Running,
-            cancel: cancel.clone(),
-            paused: paused.clone(),
-            started: Instant::now(),
-            action: None,
-        });
+        ops.ops.push(OpState::new(id, title, cancel.clone(), paused.clone(), bytes.clone()));
+        let tick = ops.began();
+        // ring pictures an earlier colour left behind are given back to the toolkit now and then (see `transfer_view::release_retired`)
+        crate::transfer_view::release_retired(cx);
         cx.notify();
-        id
+        (id, tick)
     });
+    if tick {
+        keep_ticking(cx, &entity);
+    }
+    // the card is due once the operation has run a moment, the attention pulse is over a moment after it began
+    notify_in(cx, &entity, xfer::CARD_APPEAR_MS + 50);
+    notify_in(cx, &entity, xfer::PULSE_MS + 50);
 
     let ptx = tx.clone();
     let asking_cancel = cancel.clone();
@@ -232,6 +597,7 @@ pub fn start_with_id(
         cancel,
     );
     tracker.paused = paused;
+    tracker.bytes = bytes;
     let atx = tx.clone();
     tracker.ask = Some(Box::new(move |list| {
         let (rtx, rrx) = std::sync::mpsc::channel();
@@ -271,12 +637,16 @@ pub fn start_with_id(
                         match e {
                             Ev::Ask(list, reply) => {
                                 op.current = Some(t!("Hedefte aynı adlı öğeler var").to_string());
+                                // shared with the dialog: the strip or card of any window can answer too, the first answer wins
+                                let reply = std::rc::Rc::new(std::cell::RefCell::new(Some(reply)));
+                                op.question = Some(Question { count: list.len(), list: list.clone(), reply: reply.clone() });
                                 asks.push((list, reply));
                             }
                             Ev::Progress(t, d, cur) => {
                                 if t > 0 {
                                     op.total = t;
                                     op.done = d;
+                                    op.stats.update(op.started.elapsed().as_secs_f64(), (d, t), op.bytes.get());
                                 }
                                 if cur.is_some() {
                                     op.current = cur;
@@ -284,6 +654,8 @@ pub fn start_with_id(
                             }
                             Ev::Done(r) => {
                                 finished = true;
+                                op.ended = Some(Instant::now());
+                                op.question = None;
                                 ok = matches!(r, Ok(true));
                                 op.phase = match r {
                                     Ok(true) => OpPhase::Done,
@@ -296,8 +668,16 @@ pub fn start_with_id(
                     }
                 }
                 if finished {
+                    ops.ended_one();
+                    crate::transfer_view::release_retired(cx);
                     if ops.ops.iter().any(|o| o.id == id && matches!(o.phase, OpPhase::Failed(_))) && !ops.open {
                         ops.unseen_failure = true;
+                    }
+                    // a failure that ends while the Status Center is open is in front of the user already: no strip or card for it
+                    if ops.open
+                        && let Some(op) = ops.ops.iter_mut().find(|o| o.id == id && matches!(o.phase, OpPhase::Failed(_)))
+                    {
+                        op.dismissed = true;
                     }
                     // keep a bounded history of finished operations (oldest finished go first)
                     while ops.ops.len() > HISTORY {
@@ -308,10 +688,24 @@ pub fn start_with_id(
                 cx.notify();
             });
             for (list, reply) in asks {
-                let _ = cx.update(|cx| crate::conflict_dialog::show(list, reply, origin, cx));
+                cx.update(|cx| {
+                    let mode = cx.global::<crate::settings::Settings>().transfer_progress;
+                    if crate::transfer_view::question_in_dialog(mode, !cx.windows().is_empty()) {
+                        crate::conflict_dialog::show_shared(list, reply, origin, cx);
+                    } else if let Some(w) = origin.or_else(|| cx.active_window()).or_else(|| cx.windows().first().copied()) {
+                        // the question is on the strip or the card (every window's); the app comes forward as the dialog would have brought it
+                        let _ = w.update(cx, |_, window, _| window.activate_window());
+                    }
+                });
             }
             if finished {
                 ended = true;
+                // the result card goes away by itself, and the ring and the pulse after the last one: wake the windows up then
+                cx.update(|cx| {
+                    notify_in(cx, &entity, xfer::CARD_CANCELLED_MS + 100);
+                    notify_in(cx, &entity, xfer::CARD_DONE_MS + 100);
+                    notify_in(cx, &entity, xfer::RING_FADE_MS + 100);
+                });
                 break;
             }
         }
@@ -320,7 +714,10 @@ pub fn start_with_id(
             let _ = entity.update(cx, |ops, cx| {
                 if let Some(op) = ops.ops.iter_mut().find(|o| o.id == id) {
                     op.phase = OpPhase::Failed(t!("İşlem beklenmedik şekilde sonlandı").into());
+                    op.ended = Some(Instant::now());
+                    op.question = None;
                 }
+                ops.ended_one();
                 ops.unseen_failure |= !ops.open;
                 cx.notify();
             });
@@ -404,7 +801,17 @@ fn transfer_inner(
     let landed = arrived.clone();
     let top = dest.clone();
     let on_done: Option<OnDone> = after.map(|f| -> OnDone { Box::new(move |_, cx: &mut App| f(std::mem::take(&mut *arrived.lock().unwrap()), cx)) });
-    start_with(cx, title, move |t| {
+    // the strip's sentence, what the finished card opens, and the mark that tells its "Geri al" which undo record is its own
+    let words = match kind {
+        Transfer::Copy => t!("{items} kopyalanıyor: {dest}"),
+        Transfer::Move => t!("{items} taşınıyor: {dest}"),
+    }
+    .replace("{items}", &crate::i18n::items(sources.len()))
+    .replace("{dest}", &short(&dest));
+    let open_dest = dest.clone();
+    let mark = Arc::new(std::sync::Mutex::new(None::<std::path::PathBuf>));
+    let marker = mark.clone();
+    let id = start_with_id(cx, title, move |t| {
         t.set_verify(verify);
         t.limit.store(limit, Ordering::Relaxed);
         // our engine (conflicts asked in one list); Windows' engine when it is turned off
@@ -426,10 +833,26 @@ fn transfer_inner(
         }
         *landed.lock().unwrap() = tops;
         if record && !pairs.is_empty() {
+            *marker.lock().unwrap() = pairs.first().map(|(_, made)| made.clone());
             crate::undo::push(crate::undo::UndoOp::Transferred { kind, pairs });
         }
         r
     }, on_done);
+    set_extras(cx, id, Some(words), Some(open_dest), record.then_some(mark));
+}
+
+/// Words for the strip, a folder for the finished card to open, and the mark that tells the
+/// card's "Geri al" which undo record is this operation's own (see `undo::last_made`).
+pub fn set_extras(cx: &mut App, id: u64, words: Option<String>, open_dest: Option<std::path::PathBuf>, undo_mark: Option<Arc<std::sync::Mutex<Option<std::path::PathBuf>>>>) {
+    let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return };
+    entity.update(cx, |ops, cx| {
+        if let Some(op) = ops.ops.iter_mut().find(|o| o.id == id) {
+            op.words = words;
+            op.open_dest = open_dest;
+            op.undo_mark = undo_mark;
+        }
+        cx.notify();
+    });
 }
 
 /// A copy or move cut off by a crash or a shutdown: asked about once the main window is up
@@ -512,6 +935,8 @@ fn archive_progress(t: &Tracker) -> impl FnMut(rf_archive::Progress) + '_ {
     move |p: rf_archive::Progress| {
         let total = p.total_bytes.max(1);
         let done = (p.done_bytes.min(total) * 1000 / total) as u32;
+        // the bytes too, for a speed in MB/s
+        t.bytes.set(p.done_bytes, p.total_bytes);
         (t.on_progress)(1000, done, Some(p.current))
     }
 }
@@ -731,7 +1156,9 @@ pub fn delete_ex(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, 
         format!("{} {}", t!("Geri dönüşüm kutusuna taşınıyor:"), crate::i18n::items(paths.len()))
     };
     let fast = cx.global::<crate::settings::Settings>().fast_file_ops;
-    start(cx, title, move |t| {
+    let mark = Arc::new(std::sync::Mutex::new(None::<std::path::PathBuf>));
+    let marker = mark.clone();
+    let id = start_with_id(cx, title, move |t| {
         // permanent: our parallel delete (the shell takes what it can't); recycle bin: the shell
         let r = if permanent && fast {
             rf_win::fastdelete::delete_permanent(&paths, t.clone(), rf_win::fastdelete::threads_for(&paths))
@@ -740,10 +1167,14 @@ pub fn delete_ex(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, 
         };
         let pairs = t.results.lock().unwrap().clone();
         if record && !permanent && !pairs.is_empty() {
+            *marker.lock().unwrap() = pairs.first().map(|(_, bin)| bin.clone());
             crate::undo::push(crate::undo::UndoOp::Recycled { pairs });
         }
         r
-    });
+    }, None);
+    if record && !permanent {
+        set_extras(cx, id, None, None, Some(mark));
+    }
 }
 
 /// Title-bar button (top right, like Files): idle icon, a progress bar under it while work
@@ -780,10 +1211,13 @@ pub fn sync_taskbar(ops: &Entity<Ops>, cx: &mut App) {
 pub fn render_button(ops: &Entity<Ops>, p: &Palette, cx: &App) -> AnyElement {
     let o = ops.read(cx);
     let running = o.running();
-    let overall = o.overall();
+    let ring = o.ring_state();
     let (open, unseen) = (o.open, o.unseen_failure);
     let ops = ops.clone();
     let color = if unseen { p.danger } else if running > 0 { p.accent } else { p.text };
+    // the ring around the icon: the overall progress, a turning arc before the first report, the failed look in red
+    let animate = crate::settings::animations();
+    let ring_color = if unseen { p.danger } else { p.accent };
     div()
         .id("status-center")
         // no tooltip while the flyout is open: it would sit on top of the flyout
@@ -799,20 +1233,9 @@ pub fn render_button(ops: &Entity<Ops>, p: &Palette, cx: &App) -> AnyElement {
         .when(open, |d| d.bg(p.pressed))
         .when(!open, |d| d.hover(|s| s.bg(p.hover)))
         .active(|s| s.bg(p.pressed))
+        .children(crate::transfer_view::ring_layer(&ring, ring_color, p.text, animate))
+        .children(crate::transfer_view::pulse_layer(&ring, p.accent, animate))
         .child(Icon::new(if unseen { L::CircleAlert } else { L::ListChecks }).size(px(16.)))
-        .when_some(overall, |d, f| {
-            d.child(
-                div()
-                    .absolute()
-                    .bottom(px(4.))
-                    .left(px(7.))
-                    .w(px(18.))
-                    .h(px(2.))
-                    .rounded_full()
-                    .bg(p.pressed)
-                    .child(div().h_full().rounded_full().bg(p.accent).w(relative(f.clamp(0.05, 1.0)))),
-            )
-        })
         .when(running == 0 && matches!(crate::installer::state(), crate::installer::State::Ready(_)), |d| {
             let dot = div().absolute().top(px(5.)).right(px(5.)).size(px(7.)).rounded_full().bg(p.accent);
             // a few seconds of pulse when it becomes ready (an endless one would keep drawing frames)
@@ -955,8 +1378,6 @@ pub fn render_flyout(ops: &Entity<Ops>, p: &Palette, top: Pixels, cx: &App) -> O
 
 fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
     let frac = if op.total > 0 { op.done as f32 / op.total as f32 } else { 0.0 };
-    let cancel = op.cancel.clone();
-    let pause = op.paused.clone();
     let is_paused = op.paused.load(Ordering::Relaxed);
     let running = op.phase == OpPhase::Running;
     let (ops_e, op_id) = (ops.clone(), op.id);
@@ -964,15 +1385,18 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
         OpPhase::Running if is_paused => (t!("Duraklatıldı").to_string(), p.text_secondary, L::Pause),
         OpPhase::Running => {
             let elapsed = op.started.elapsed().as_secs_f32();
-            // ETA from the average rate so far; only once there is enough signal
-            let eta = (frac > 0.03 && frac < 1.0 && elapsed > 1.5).then(|| elapsed * (1.0 - frac) / frac);
+            // speed and time left from the moving average of the last few seconds
+            let pace = op.stats.pace(op.secs(), (op.done, op.total), op.bytes.get());
             let text = if op.total == 0 {
                 format!("{} {}", elapsed as u64, t!("sn"))
             } else {
-                let pct = crate::i18n::pct(frac * 100.0);
-                match eta {
-                    Some(r) => format!("{pct} · {} {}", fmt_duration(r), t!("kaldı")),
-                    None => format!("{pct} · {} {}", elapsed as u64, t!("sn")),
+                let mut text = crate::i18n::pct(frac * 100.0);
+                if let Some(v) = pace.speed.filter(|v| *v >= 1.0) {
+                    text = format!("{text} · {}", crate::transfer_view::speed_text(v));
+                }
+                match pace.eta_secs {
+                    Some(r) => format!("{text} · {} {}", fmt_duration(r as f32), t!("kaldı")),
+                    None => format!("{text} · {} {}", elapsed as u64, t!("sn")),
                 }
             };
             (text, p.text_secondary, L::LoaderCircle)
@@ -1057,10 +1481,7 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                     .child(Icon::new(if is_paused { L::Play } else { L::Pause }).size(px(12.)))
                     .on_click({
                         let ops_e = ops.clone();
-                        move |_, _, cx| {
-                            pause.store(!is_paused, Ordering::Relaxed);
-                            ops_e.update(cx, |_, cx| cx.notify());
-                        }
+                        move |_, _, cx| ops_e.update(cx, |o, cx| o.toggle_pause(op_id, cx))
                     }),
             )
         })
@@ -1081,7 +1502,7 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                 .child(Icon::new(L::X).size(px(12.)))
                 .on_click(move |_, _, cx| {
                     if running {
-                        cancel.store(true, Ordering::Relaxed);
+                        ops_e.update(cx, |o, cx| o.cancel_op(op_id, cx));
                     } else {
                         ops_e.update(cx, |o, cx| {
                             o.ops.retain(|x| x.id != op_id);
@@ -1094,7 +1515,7 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
 }
 
 /// "~45 sn", "~3 dk", "~1 sa 5 dk" (rounded; it is an estimate).
-fn fmt_duration(secs: f32) -> String {
+pub(crate) fn fmt_duration(secs: f32) -> String {
     fmt_duration_with(secs, (crate::t!("sn"), crate::t!("dk"), crate::t!("sa")))
 }
 
@@ -1115,21 +1536,13 @@ fn fmt_duration_with(secs: f32, (sec, min, hour): (&str, &str, &str)) -> String 
 
 #[cfg(test)]
 mod tests {
-    use super::{Glance, OpPhase, OpState, fmt_duration_with, glance_of};
+    use super::{Glance, OpPhase, OpState, Ops, Ordering, Question, fmt_duration_with, glance_of};
+    use rf_core::transfer::{self as xfer, Stage};
+    use rf_win::fastcopy::Resolve;
+    use std::time::{Duration, Instant};
 
     fn op(id: u64, title: &str, phase: OpPhase, done: u32, total: u32) -> OpState {
-        OpState {
-            id,
-            title: title.into(),
-            total,
-            done,
-            current: None,
-            phase,
-            cancel: Default::default(),
-            paused: Default::default(),
-            started: std::time::Instant::now(),
-            action: None,
-        }
+        OpState { total, done, phase, ..OpState::new(id, title.into(), Default::default(), Default::default(), Default::default()) }
     }
 
     #[test]
@@ -1161,6 +1574,223 @@ mod tests {
         assert_eq!(fmt_duration_with(150.0, u), "~3 dk");
         assert_eq!(fmt_duration_with(3580.0, u), "~1 sa 0 dk");
         assert_eq!(fmt_duration_with(3900.0, u), "~1 sa 5 dk");
+    }
+
+    fn ago(ms: u64) -> Instant {
+        Instant::now().checked_sub(Duration::from_millis(ms)).expect("the clock is far enough from its start")
+    }
+
+    #[test]
+    fn a_run_that_was_over_before_anyone_could_see_it_leaves_no_ring_and_no_pulse_at_the_end() {
+        let mut o = Ops::blank();
+        o.began();
+        assert!(o.ring_state().pulse.is_some(), "a start pulses at once");
+        o.ops.push(op(1, "a", OpPhase::Done, 1, 1));
+        o.ended_one();
+        assert_eq!(o.all_done, None);
+        assert_eq!(o.ring_state().since_end_ms, None);
+        assert_eq!(o.busy_since, None, "the run is over");
+    }
+
+    #[test]
+    fn a_long_run_closes_its_ring_and_pulses_once_more_when_the_last_operation_ends() {
+        let mut o = Ops::blank();
+        o.began();
+        let first = o.pulse_count;
+        o.busy_since = Some(ago(3000));
+        o.ops.push(op(1, "a", OpPhase::Running, 1, 2));
+        o.began();
+        assert_eq!(o.busy_since.map(|t| t.elapsed() >= Duration::from_millis(2900)), Some(true), "a second operation does not restart the run");
+        assert!(o.pulse_count > first, "each start pulses");
+        // one of the two ends: the other still runs
+        o.ops.push(op(2, "b", OpPhase::Running, 0, 0));
+        o.ops[0].phase = OpPhase::Done;
+        o.ended_one();
+        assert_eq!(o.all_done, None);
+        assert!(o.ring_state().running);
+        // the last one ends
+        o.ops[1].phase = OpPhase::Done;
+        let before = o.pulse_count;
+        o.ended_one();
+        assert!(o.all_done.is_some() && o.pulse_count == before + 1 && o.done_epoch == o.pulse_count);
+        let r = o.ring_state();
+        assert!(!r.running && r.since_end_ms.is_some() && r.end_epoch == o.done_epoch);
+        // a new run takes the fade away
+        o.began();
+        assert_eq!(o.all_done, None);
+    }
+
+    #[test]
+    fn the_ring_has_no_amount_until_a_total_is_known() {
+        let mut o = Ops::blank();
+        assert_eq!(o.ring_state().fraction, None);
+        o.ops.push(op(1, "git", OpPhase::Running, 0, 0));
+        let r = o.ring_state();
+        assert!(r.running && r.fraction.is_none(), "an unknown total turns the short arc");
+        o.ops.push(op(2, "copy", OpPhase::Running, 1, 4));
+        // the overall progress is the mean of the running ones (the unknown counts as nothing done)
+        assert_eq!(o.ring_state().fraction, Some(0.125));
+    }
+
+    #[test]
+    fn the_strip_and_cards_see_what_runs_what_just_ended_and_failures_nobody_looked_at() {
+        let mut o = Ops::blank();
+        let mut old = op(1, "old", OpPhase::Done, 1, 1);
+        old.ended = Some(ago(11_000));
+        let mut recent = op(2, "recent", OpPhase::Done, 1, 1);
+        recent.ended = Some(ago(500));
+        let failed = op(3, "failed", OpPhase::Failed("x".into()), 0, 1);
+        let mut seen = op(4, "seen", OpPhase::Failed("y".into()), 0, 1);
+        seen.dismissed = true;
+        let running = op(5, "running", OpPhase::Running, 1, 3);
+        o.ops = vec![old, recent, failed, seen, running];
+        let ids: Vec<u64> = o.views().iter().map(|v| v.id).collect();
+        assert_eq!(ids, [2, 3, 5]);
+        // the real thing the button calls
+        o.dismissed(3);
+        assert_eq!(o.views().iter().map(|v| v.id).collect::<Vec<_>>(), [2, 5]);
+    }
+
+    type Replies = std::sync::mpsc::Receiver<Option<Vec<Resolve>>>;
+
+    /// An operation waiting on a question about `count` names, and where its answer will arrive.
+    fn asking(id: u64, count: usize) -> (OpState, Replies) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut o = op(id, "asking", OpPhase::Running, 0, 1);
+        o.question = Some(Question { count, list: Vec::new(), reply: std::rc::Rc::new(std::cell::RefCell::new(Some(tx))) });
+        (o, rx)
+    }
+
+    #[test]
+    fn an_answer_goes_to_the_operation_that_asked_and_the_first_answer_wins() {
+        let mut o = Ops::blank();
+        let ((a, rx_a), (b, rx_b)) = (asking(1, 2), asking(2, 3));
+        o.ops = vec![a, b];
+        // the second operation is answered: only its channel hears, with one answer per name
+        assert!(o.answered(2, Resolve::Replace).is_some());
+        assert_eq!(rx_b.try_recv().unwrap(), Some(vec![Resolve::Replace; 3]));
+        assert!(rx_a.try_recv().is_err(), "the first operation's question is still open");
+        assert!(o.ops[0].question.is_some() && o.ops[1].question.is_none());
+        // a second answer for it finds nothing to answer
+        assert!(o.answered(2, Resolve::Skip).is_none());
+        assert!(rx_b.try_recv().is_err());
+        // the dialog answered the first one before the strip: the strip's answer is not sent
+        let taken = o.ops[0].question.as_ref().unwrap().reply.borrow_mut().take();
+        taken.unwrap().send(Some(vec![Resolve::KeepBoth; 2])).unwrap();
+        assert!(o.answered(1, Resolve::Skip).is_none());
+        assert_eq!(rx_a.try_recv().unwrap(), Some(vec![Resolve::KeepBoth; 2]));
+        assert!(rx_a.try_recv().is_err());
+        // an operation that is not there
+        assert!(o.answered(99, Resolve::Skip).is_none());
+    }
+
+    #[test]
+    fn cancelling_stops_that_operation_and_answers_its_question_cancel() {
+        let mut o = Ops::blank();
+        let ((a, rx_a), (b, rx_b)) = (asking(1, 2), asking(2, 2));
+        o.ops = vec![a, b, op(3, "plain", OpPhase::Running, 1, 4)];
+        assert!(o.cancelled(1).is_some());
+        assert!(o.ops[0].cancel.load(Ordering::Relaxed));
+        assert_eq!(rx_a.try_recv().unwrap(), None, "a cancelled copy is told to stop");
+        // the others were not touched
+        assert!(!o.ops[1].cancel.load(Ordering::Relaxed) && o.ops[1].question.is_some());
+        assert!(rx_b.try_recv().is_err());
+        // one without a question is only flagged
+        assert!(o.cancelled(3).is_none());
+        assert!(o.ops[2].cancel.load(Ordering::Relaxed));
+        assert!(o.cancelled(99).is_none());
+    }
+
+    #[test]
+    fn pausing_flips_the_operation_and_hides_its_pace() {
+        let mut o = Ops::blank();
+        let mut running = op(1, "copy", OpPhase::Running, 0, 1000);
+        let mut t = 0.0;
+        while t < 4.0 {
+            t += 0.1;
+            running.stats.update(t, (0, 1000), ((t * 1_000_000.0) as u64, 8_000_000));
+        }
+        o.ops = vec![running, op(2, "other", OpPhase::Running, 0, 10)];
+        assert!(!o.ops[0].paused.load(Ordering::Relaxed));
+        o.pause_toggled(1);
+        assert!(o.ops[0].paused.load(Ordering::Relaxed));
+        assert!(!o.ops[1].paused.load(Ordering::Relaxed), "only the one asked about");
+        let pace = o.ops[0].stats.pace(t, (0, 1000), ((t * 1_000_000.0) as u64, 8_000_000));
+        assert_eq!(pace.speed, None, "no speed while it waits");
+        o.pause_toggled(1);
+        assert!(!o.ops[0].paused.load(Ordering::Relaxed));
+        o.pause_toggled(99);
+    }
+
+    #[test]
+    fn a_failure_stays_unseen_until_the_last_one_is_sent_away() {
+        let mut o = Ops::blank();
+        o.ops = vec![op(1, "a", OpPhase::Failed("x".into()), 0, 1), op(2, "b", OpPhase::Failed("y".into()), 0, 1)];
+        o.unseen_failure = true;
+        o.dismissed(1);
+        assert!(o.ops[0].dismissed && !o.ops[1].dismissed);
+        assert!(o.unseen_failure, "another failure is still waiting");
+        o.dismissed(2);
+        assert!(!o.unseen_failure);
+        o.collapsed_toggled(1);
+        assert!(o.ops[0].collapsed && !o.ops[1].collapsed);
+        o.collapsed_toggled(1);
+        assert!(!o.ops[0].collapsed);
+    }
+
+    #[test]
+    fn the_wake_up_runs_once_per_run_and_only_for_work_that_is_not_waiting() {
+        let mut o = Ops::blank();
+        assert!(!o.wants_tick(), "nothing runs");
+        assert!(o.began(), "the first operation starts the wake-up");
+        assert!(!o.began(), "a second one does not start another");
+        o.ops = vec![op(1, "a", OpPhase::Running, 0, 1)];
+        assert!(o.wants_tick());
+        o.ops[0].paused.store(true, Ordering::Relaxed);
+        assert!(!o.wants_tick(), "a paused operation changes nothing by the clock");
+        o.ops[0].paused.store(false, Ordering::Relaxed);
+        o.ops[0].phase = OpPhase::Done;
+        assert!(!o.wants_tick());
+    }
+
+    #[test]
+    fn a_card_waits_for_the_operation_to_have_run_a_moment_and_a_question_does_not() {
+        let mut slow = op(1, "slow", OpPhase::Running, 1, 4);
+        slow.started = ago(2000);
+        assert_eq!(slow.view().stage, Stage::Running);
+        let fresh = op(2, "fresh", OpPhase::Running, 1, 4);
+        assert_eq!(fresh.view().stage, Stage::Hidden);
+        // a question
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut asking = op(3, "asking", OpPhase::Running, 0, 1);
+        asking.question = Some(Question { count: 3, list: Vec::new(), reply: std::rc::Rc::new(std::cell::RefCell::new(Some(tx))) });
+        let v = asking.view();
+        assert_eq!((v.stage, v.question), (Stage::Asking, Some(3)));
+        assert!(v.brief.asking);
+        // answered elsewhere (the dialog took the reply): the question is gone
+        if let Some(q) = &asking.question {
+            q.reply.borrow_mut().take();
+        }
+        let v = asking.view();
+        assert_eq!(v.question, None);
+        assert!(!v.brief.asking);
+    }
+
+    #[test]
+    fn a_finished_operations_card_lives_by_how_long_ago_it_ended() {
+        let mut done = op(1, "done", OpPhase::Done, 1, 1);
+        done.started = ago(10_000);
+        done.ended = Some(ago(1000));
+        assert_eq!(done.view().stage, Stage::Result(xfer::Outcome::Done));
+        done.ended = Some(ago(5000));
+        assert_eq!(done.view().stage, Stage::Hidden);
+        // a failure stays however long ago it was, until it is sent away
+        let mut bad = op(2, "bad", OpPhase::Failed("disk full".into()), 0, 1);
+        bad.started = ago(3_600_000);
+        bad.ended = Some(ago(3_000_000));
+        assert_eq!(bad.view().stage, Stage::Result(xfer::Outcome::Failed));
+        bad.dismissed = true;
+        assert_eq!(bad.view().stage, Stage::Hidden);
     }
 }
 

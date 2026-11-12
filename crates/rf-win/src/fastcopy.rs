@@ -460,6 +460,8 @@ impl Run<'_> {
     fn report(&self, name: Option<&Path>) {
         let d = self.done.load(Ordering::Relaxed).min(self.total);
         let permille = (d as u128 * 1000 / self.total.max(1) as u128) as u32;
+        // the bytes first: the interface reads them when the report below reaches it
+        self.tracker.bytes.set(d, self.total);
         (self.tracker.on_progress)(1000, permille, name.and_then(|n| n.file_name()).map(|n| n.to_string_lossy().into_owned()));
     }
 }
@@ -744,6 +746,10 @@ fn finish(kind: Transfer, sources: &[PathBuf], dest_dir: &Path, tracker: &Arc<Tr
     if out.cancelled || tracker.cancel.load(Ordering::Relaxed) {
         return Ok(false);
     }
+    // our byte counting is over: what follows (the shell's leftovers, the check, the removal of
+    // a move's sources) reports other units on this tracker, and a byte count left standing at
+    // its last value would read as a speed of 0 with no time left while the percentage moves
+    tracker.bytes.set(0, 0);
     let mut ok = true;
     if !out.whole.is_empty() {
         ok &= crate::fileops::transfer_tracked(kind, &out.whole, dest_dir, tracker.clone())?;
@@ -1383,6 +1389,40 @@ mod tests {
         assert!(out.whole.is_empty());
         assert!(dst.join("kaynak/kök (2).txt").exists());
         assert!(dst.join("kaynak/a/b/c/f7 (2).txt").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The byte counts the interface turns into a speed: all of them by the end, never more than the total.
+    #[test]
+    fn the_tracker_ends_with_every_byte_counted() {
+        let base = base("fastcopy-bytes");
+        let (src, dst) = (base.join("kaynak"), base.join("hedef"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("a.bin"), vec![7u8; 300_000]).unwrap();
+        std::fs::write(src.join("b.bin"), vec![9u8; 120_000]).unwrap();
+        let t = tracker();
+        assert_eq!(t.bytes.get(), (0, 0), "nothing is counted before a report");
+        let out = copy(&[src.join("a.bin"), src.join("b.bin")], &dst, &t, 2);
+        assert!(out.whole.is_empty() && out.failed.is_empty());
+        assert_eq!(t.bytes.get(), (420_000, 420_000));
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The whole transfer, not only the copy stage: when our byte counting is over the counter
+    /// is cleared so the interface goes on with the units of what follows.
+    #[test]
+    fn the_byte_count_is_cleared_when_the_copy_stage_is_over() {
+        let base = base("fastcopy-bytes-end");
+        let (src, dst) = (base.join("kaynak"), base.join("hedef"));
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(src.join("a.bin"), vec![7u8; 200_000]).unwrap();
+        let t = Arc::new(tracker());
+        let ok = transfer(Transfer::Copy, &[src.join("a.bin")], &dst, t.clone()).unwrap();
+        assert!(ok);
+        assert!(dst.join("a.bin").exists());
+        assert_eq!(t.bytes.get(), (0, 0));
         let _ = std::fs::remove_dir_all(&base);
     }
 

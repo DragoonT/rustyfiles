@@ -2882,7 +2882,7 @@ impl Workspace {
             .child(div().px_2().py_1().child(settings))
     }
 
-    fn render_statusbar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_statusbar(&mut self, p: &Palette, strip_bar_w: Option<f32>, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let tab = self.active_tab().read(cx);
         let count = tab.item_count();
         let (sel, sel_size, has_dir) = tab.selection_summary();
@@ -2917,6 +2917,7 @@ impl Workspace {
             })
         };
         let mut left = h_flex().gap_3();
+        let mut busy = false;
         if in_folder {
             left = left.child(crate::i18n::items(count));
             if sel > 0 {
@@ -2929,12 +2930,26 @@ impl Workspace {
             }
             if loading {
                 left = left.child(t!("Yükleniyor…"));
+                busy = true;
             }
             // values being read for a sort or grouping by a property column
             if let Some(s) = tab.prop_status() {
                 left = left.child(s);
+                busy = true;
             }
         }
+        // a running operation's strip, given what else this bar holds (it takes the room that is left)
+        let strip = strip_bar_w.and_then(|bar_w| {
+            let held = rf_core::transfer::BarContents {
+                items: in_folder,
+                selected: in_folder && sel > 0,
+                busy,
+                git: git.is_some(),
+                ide: ide_button.is_some(),
+                update: matches!(crate::installer::state(), crate::installer::State::Ready(_)),
+            };
+            crate::transfer_view::strip(&self.ops, p, rf_core::transfer::strip_room(bar_w, held), cx)
+        });
         let perf = cx.global::<crate::settings::Settings>().show_perf_info;
         h_flex()
             .h(px(32.))
@@ -2947,6 +2962,8 @@ impl Workspace {
             .text_xs()
             .text_color(p.text_secondary)
             .child(left)
+            // a running operation's progress (Settings → Aktarım ilerlemesi → Durum çubuğu)
+            .children(strip)
             .child(
                 h_flex()
                     .gap_3()
@@ -3361,7 +3378,10 @@ impl Render for Workspace {
             prefs.show_statusbar,
         );
         // Home and Settings have nothing to count: no empty strip at the bottom
-        let show_statusbar = show_statusbar && !matches!(self.active_tab().read(cx).location(), Location::Home | Location::Settings);
+        // where a running operation's progress is shown; a strip brings the status bar up on Home and Settings too
+        let surface = crate::transfer_view::surface(cx.global::<crate::settings::Settings>().transfer_progress, show_statusbar, self.picker.is_some());
+        let strip_due = surface == crate::transfer_view::Surface::Strip && crate::transfer_view::strip_due(&self.ops, cx);
+        let show_statusbar = show_statusbar && (strip_due || !matches!(self.active_tab().read(cx).location(), Location::Home | Location::Settings));
         use crate::settings::BackdropPref;
         // RUSTYFILES_GLASS=1 forces Glass for this run (nothing is saved); a window whose glass failed is on Mica until the setting changes
         if self.backdrop_pref_seen != Some(backdrop) {
@@ -3506,7 +3526,12 @@ impl Render for Workspace {
                 }))
                 .child(full)
         });
-        let status = self.render_statusbar(&p, cx);
+        // (the status bar is the content panel's: the window less the sidebar when it is shown, and the panel's margin)
+        let strip_bar_w = (surface == crate::transfer_view::Surface::Strip).then(|| (f32::from(window.viewport_size().width) - side_used - 10.0).max(0.0));
+        let cards = (surface == crate::transfer_view::Surface::Card)
+            .then(|| crate::transfer_view::cards(&self.ops, &p, if show_statusbar { 44.0 } else { 12.0 }, cx))
+            .flatten();
+        let status = self.render_statusbar(&p, strip_bar_w, cx);
         let picker_footer = self.picker.clone().map(|pk| crate::picker::footer(self, &pk, &p, window, cx));
         let star_strip = (self.picker.is_none() && crate::installer::star_due(cx.global::<crate::settings::Settings>())).then(|| {
             let action = |id: &'static str, label: &'static str, star: bool| {
@@ -3932,6 +3957,8 @@ impl Render for Workspace {
                             .when(show_commandbar && show_toolbar, |d| d.child(commandbar))
                             .children(filter_strip)
                             .child(main_row)
+                            // the floating card of a running operation (Settings → Aktarım ilerlemesi → Yüzen kart)
+                            .children(cards)
                             .children(star_strip)
                             .children(donate_strip)
                             .when(show_statusbar, |d| d.child(status))

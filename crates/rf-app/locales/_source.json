@@ -8724,5 +8724,65 @@
   "key": "Başlat panelinde sabitlenmiş uygulamaların altında en son açtığınız belgeler (ne zaman açıldığıyla birlikte) görünür. Kapalıyken bölüm çizilmez ve sabitlenenler o yeri kullanır.",
   "tr": "Başlat panelinde sabitlenmiş uygulamaların altında en son açtığınız belgeler (ne zaman açıldığıyla birlikte) görünür. Kapalıyken bölüm çizilmez ve sabitlenenler o yeri kullanır.",
   "en": "The Start panel shows the documents you opened most recently (with when you opened them) under the pinned apps. When off, the section is not drawn and the pinned apps take its room."
+ },
+ {
+  "id": "bcae7519",
+  "key": "{items} kopyalanıyor: {dest}",
+  "tr": "{items} kopyalanıyor: {dest}",
+  "en": "Copying {items}: {dest}"
+ },
+ {
+  "id": "5e2e4c2c",
+  "key": "{items} taşınıyor: {dest}",
+  "tr": "{items} taşınıyor: {dest}",
+  "en": "Moving {items}: {dest}"
+ },
+ {
+  "id": "888bc089",
+  "key": "Aktarım ilerlemesi",
+  "tr": "Aktarım ilerlemesi",
+  "en": "Transfer progress"
+ },
+ {
+  "id": "c7fe25e5",
+  "key": "Kopyalama, taşıma ve silme çalışırken ilerlemenin nerede görüneceği. Durum Merkezi düğmesindeki halka her durumda çalışır.",
+  "tr": "Kopyalama, taşıma ve silme çalışırken ilerlemenin nerede görüneceği. Durum Merkezi düğmesindeki halka her durumda çalışır.",
+  "en": "Where the progress of a running copy, move or delete is shown. The ring on the Status Center button works in every case."
+ },
+ {
+  "id": "e5afa18e",
+  "key": "Durum çubuğu",
+  "tr": "Durum çubuğu",
+  "en": "Status bar"
+ },
+ {
+  "id": "b480ac5a",
+  "key": "Yüzen kart",
+  "tr": "Yüzen kart",
+  "en": "Floating card"
+ },
+ {
+  "id": "efed7ea4",
+  "key": "Yalnız Durum Merkezi",
+  "tr": "Yalnız Durum Merkezi",
+  "en": "Status Center only"
+ },
+ {
+  "id": "3d391279",
+  "key": "Hedefi aç",
+  "tr": "Hedefi aç",
+  "en": "Open destination"
+ },
+ {
+  "id": "78bbea79",
+  "key": "Genişlet",
+  "tr": "Genişlet",
+  "en": "Expand"
+ },
+ {
+  "id": "00929c38",
+  "key": "Küçült",
+  "tr": "Küçült",
+  "en": "Collapse"
  }
 ]

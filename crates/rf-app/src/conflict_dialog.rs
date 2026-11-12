@@ -38,16 +38,19 @@ pub struct ConflictView {
 struct Host(Option<(AnyWindowHandle, Entity<ConflictView>, Option<FocusHandle>)>);
 impl Global for Host {}
 
-/// Shows the dialog in `window` (or the active window, or any). No window: both are kept.
-pub fn show(list: Vec<Conflict>, reply: Reply, window: Option<AnyWindowHandle>, cx: &mut App) {
+/// Shows the dialog in `window` (or the active window, or any). No window: both are kept. The
+/// reply can be answered by something else too (the strip or card of the Status Center):
+/// whoever takes it first answers, and the other finds it gone.
+pub fn show_shared(list: Vec<Conflict>, reply: Rc<RefCell<Option<Reply>>>, window: Option<AnyWindowHandle>, cx: &mut App) {
     let target = window.or_else(|| cx.active_window()).or_else(|| cx.windows().first().copied());
     let Some(target) = target else {
-        let _ = reply.send(Some(vec![Resolve::KeepBoth; list.len()]));
+        if let Some(r) = reply.borrow_mut().take() {
+            let _ = r.send(Some(vec![Resolve::KeepBoth; list.len()]));
+        }
         return;
     };
-    // if the window is gone, the reply is dropped: the copy thread takes that as "cancel"
-    let r2 = Rc::new(RefCell::new(Some(reply)));
-    let _ = target.update(cx, move |_, window, cx| {
+    let r2 = reply.clone();
+    let shown = target.update(cx, move |_, window, cx| {
         // one at a time: an older question still open is answered "cancel"
         if let Some(Some((_, old, _))) = cx.try_global::<Host>().map(|h| h.0.clone()) {
             old.update(cx, |v, _| v.send(None));
@@ -60,6 +63,23 @@ pub fn show(list: Vec<Conflict>, reply: Reply, window: Option<AnyWindowHandle>, 
         cx.set_global(Host(Some((window.window_handle(), view, restore))));
         window.refresh();
     });
+    // the window is gone: the copy takes "no reply" as "cancel"
+    if shown.is_err() {
+        drop(reply.borrow_mut().take());
+    }
+}
+
+/// Takes the dialog away without answering, when it is the one showing `reply`'s question
+/// (somebody else answered from the strip or a card). A dialog showing another operation's
+/// question stays: closing it would answer that one "cancel".
+pub fn dismiss_if(reply: &Rc<RefCell<Option<Reply>>>, cx: &mut App) {
+    let Some(Some((handle, view, _))) = cx.try_global::<Host>().map(|h| h.0.clone()) else { return };
+    if !Rc::ptr_eq(&view.read(cx).reply, reply) {
+        return;
+    }
+    if handle.update(cx, |_, window, cx| close(window, cx)).is_err() {
+        cx.set_global(Host(None));
+    }
 }
 
 pub fn current(window: &Window, cx: &App) -> Option<Entity<ConflictView>> {

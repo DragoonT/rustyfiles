@@ -42,6 +42,40 @@ pub fn undo(cx: &mut App) {
     undo_op(op, cx);
 }
 
+/// Whether the most recent operation is a copy, move or recycle that made `path` (a copy or
+/// move's new item, or the item's place in the Recycle Bin). The cards that offer "Geri al" ask
+/// this: the button undoes the top of the stack, so it must be their own operation's record.
+pub fn last_made(path: &std::path::Path) -> bool {
+    top_made(&STACK.lock(), path)
+}
+
+fn top_made(stack: &[UndoOp], path: &std::path::Path) -> bool {
+    match stack.last() {
+        Some(UndoOp::Transferred { pairs, .. } | UndoOp::Recycled { pairs }) => pairs.iter().any(|(_, made)| made == path),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // (not `use super::*`: the toolkit's glob brings an attribute named `test` that shadows the real one)
+    use super::{PathBuf, Transfer, UndoOp, top_made};
+
+    #[test]
+    fn the_undo_button_of_a_card_needs_its_own_record_on_top_of_the_stack() {
+        let made = PathBuf::from(r"C:\rf-test-card\made.bin");
+        let copy = UndoOp::Transferred { kind: Transfer::Copy, pairs: vec![(PathBuf::from(r"C:\rf-test-card\src.bin"), made.clone())] };
+        let bin = UndoOp::Recycled { pairs: vec![(PathBuf::from(r"C:\rf-test-card\gone.bin"), PathBuf::from(r"C:\$Recycle.Bin\S-1\$R123.bin"))] };
+        assert!(!top_made(&[], &made), "an empty stack");
+        assert!(top_made(&[copy.clone()], &made));
+        assert!(!top_made(&[copy.clone()], std::path::Path::new(r"C:\rf-test-card\src.bin")), "the source is not what the copy made");
+        assert!(top_made(std::slice::from_ref(&bin), std::path::Path::new(r"C:\$Recycle.Bin\S-1\$R123.bin")));
+        // a newer operation on top: the button would undo that one instead
+        assert!(!top_made(&[copy.clone(), UndoOp::Created { path: PathBuf::from(r"C:\rf-test-card\other") }], &made));
+        assert!(top_made(&[bin, copy], &made));
+    }
+}
+
 /// Takes one folder organizer run off the undo stack (the "Geri al" button of its Status Center row
 /// undoes it itself) and keeps it for Ctrl+Y. False when it is not on the stack: it ran by itself, or
 /// 50 newer operations have pushed it off, or it was undone already.

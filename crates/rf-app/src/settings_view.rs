@@ -2162,6 +2162,23 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
             Some(t!("Kopyalama, taşıma, sıkıştırma 10 saniyeden uzun sürdüyse ve rustyfiles önde değilse")),
             sw("notify-ops", p, s.notify_long_ops, |s, v| s.notify_long_ops = v),
         ),
+        card(
+            p,
+            L::ListChecks,
+            t!("Aktarım ilerlemesi"),
+            Some(t!("Kopyalama, taşıma ve silme çalışırken ilerlemenin nerede görüneceği. Durum Merkezi düğmesindeki halka her durumda çalışır.")),
+            dropdown(
+                "transfer-progress",
+                p,
+                s.transfer_progress,
+                vec![
+                    (crate::settings::TransferProgress::StatusBar, t!("Durum çubuğu").into()),
+                    (crate::settings::TransferProgress::FloatingCard, t!("Yüzen kart").into()),
+                    (crate::settings::TransferProgress::StatusCenter, t!("Yalnız Durum Merkezi").into()),
+                ],
+                |s, v| s.transfer_progress = v,
+            ),
+        ),
         section(p, t!("Performans")),
         card(
             p,
