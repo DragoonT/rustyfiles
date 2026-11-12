@@ -32,7 +32,7 @@ pub(super) fn expected_centre(grey: u8, look: &Look) -> [f32; 3] {
 
 /// `gpu::render` at scale 1 with a look and the choice between hardware and WARP.
 pub(super) fn render_with(src: &[u8], sw: u32, sh: u32, rect: (i32, i32, u32, u32), radius: f32, look: &Look, force_warp: bool) -> Result<Vec<u8>, String> {
-    let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: radius, cut_corners: true };
+    let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: radius, cut_corners: true, shape: None, shadow: None };
     with_renderer(force_warp, |r| unsafe { gpu::render_on(r, src, sw, sh, &geo, look) })
 }
 
@@ -131,7 +131,7 @@ fn corner_is_cut_by_the_radius() {
         assert_eq!(px(&square, rect.2, 0, 0)[3], 255, "corner pixel with radius 0 (warp {warp})");
         assert_eq!(px(&square, rect.2, rect.2 - 1, rect.3 - 1)[3], 255, "far corner with radius 0 (warp {warp})");
         // a window: the system cuts the corners, the glass covers the whole rectangle whatever the radius of its rim line
-        let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: 8.0, cut_corners: false };
+        let geo = Geometry { w: rect.2, h: rect.3, origin: (rect.0, rect.1), scale: 1.0, radius_px: 8.0, cut_corners: false, shape: None, shadow: None };
         let window = with_renderer(warp, |r| unsafe { gpu::render_on(r, &src, sw, sh, &geo, &look) }).expect("render");
         assert_eq!(px(&window, rect.2, 0, 0)[3], 255, "corner pixel of a window (warp {warp})");
         assert_eq!(px(&window, rect.2, rect.2 - 1, 0)[3], 255, "top right corner pixel of a window (warp {warp})");
@@ -262,7 +262,7 @@ fn fingerprint_follows_the_backdrop() {
         return;
     }
     let (sw, sh) = (700u32, 600u32);
-    let geo = Geometry { w: 300, h: 200, origin: (100, 100), scale: 1.0, radius_px: 8.0, cut_corners: true };
+    let geo = Geometry { w: 300, h: 200, origin: (100, 100), scale: 1.0, radius_px: 8.0, cut_corners: true, shape: None, shadow: None };
     let look = Look::regular(false, &LookParams::DEFAULT);
     with_renderer(true, |r| unsafe {
         let region = Region::new(&r.g, geo.w, geo.h, region_pad(geo.scale)).expect("region");
@@ -270,7 +270,7 @@ fn fingerprint_follows_the_backdrop() {
         let fp = |data: &[u8]| {
             let src = Source::new(&r.g, sw, sh, Some(data)).expect("source");
             prep(r, &region, &src, &geo, &look, false);
-            region.fingerprint(&r.g, geo.w, geo.h).expect("fingerprint")
+            region.fingerprint(&r.g, geo.glass_rect()).expect("fingerprint")
         };
         let a = fp(&base);
         assert_eq!(a, fp(&base), "an unchanged screen must give the same fingerprint");
@@ -426,17 +426,17 @@ fn the_radius_is_the_apps_or_the_systems() {
 
 #[test]
 fn options_are_what_attach_always_meant_unless_asked_otherwise() {
-    assert_eq!(GlassOptions::window(true), GlassOptions { dark: true, radius_px: None, cut_corners: false });
-    let o = GlassOptions { dark: false, radius_px: Some(f32::NAN), cut_corners: true }.sanitized();
+    assert_eq!(GlassOptions::window(true), GlassOptions { dark: true, radius_px: None, cut_corners: false, shape: None, shadow: None });
+    let o = GlassOptions { dark: false, radius_px: Some(f32::NAN), cut_corners: true, ..GlassOptions::window(false) }.sanitized();
     assert_eq!(o.radius_px, None);
     assert!(o.cut_corners);
-    assert_eq!(GlassOptions { dark: false, radius_px: Some(-4.0), cut_corners: true }.sanitized().radius_px, Some(0.0));
-    assert_eq!(GlassOptions { dark: false, radius_px: Some(36.0), cut_corners: true }.sanitized().radius_px, Some(36.0));
+    assert_eq!(GlassOptions { dark: false, radius_px: Some(-4.0), cut_corners: true, ..GlassOptions::window(false) }.sanitized().radius_px, Some(0.0));
+    assert_eq!(GlassOptions { dark: false, radius_px: Some(36.0), cut_corners: true, ..GlassOptions::window(false) }.sanitized().radius_px, Some(36.0));
 }
 
 #[test]
 fn attach_with_a_non_window_starts_nothing_either() {
-    assert!(!attach_with(0, GlassOptions { dark: true, radius_px: Some(24.0), cut_corners: true }));
+    assert!(!attach_with(0, GlassOptions { dark: true, radius_px: Some(24.0), cut_corners: true, ..GlassOptions::window(true) }));
     assert!(!any_active());
     assert!(!engine_started());
     // the other calls that take options do nothing for a window that has no glass

@@ -6546,5 +6546,29 @@
   "key": "Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
   "tr": "Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.",
   "en": "On this version of Windows, or while the screenshot border permission is off, rustyfiles windows do not appear in screenshots, recordings or screen sharing."
+ },
+ {
+  "id": "43d0576f",
+  "key": "Simge büyütme",
+  "tr": "Simge büyütme",
+  "en": "Icon magnification"
+ },
+ {
+  "id": "04ddef5c",
+  "key": "Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.",
+  "tr": "Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.",
+  "en": "With the pointer over the dock the icons grow like the Mac's dock: Subtle up to 1.25 times, Full up to 1.55 times."
+ },
+ {
+  "id": "6834f5db",
+  "key": "Hafif",
+  "tr": "Hafif",
+  "en": "Subtle"
+ },
+ {
+  "id": "028363f1",
+  "key": "Tam",
+  "tr": "Tam",
+  "en": "Full"
  }
 ]

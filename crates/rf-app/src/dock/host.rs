@@ -1,6 +1,12 @@
 //! The dock process's centre: the three island windows, their places, the system events they react to (display, DPI, theme,
 //! full-screen, time), the settings file, and the clean exit.
 //!
+//! THE WINDOWS ARE BIGGER THAN THE GLASS. Each island's window holds its glass plus a transparent margin (a few px; room for the shadow only with `RUSTYFILES_DOCK_SHADOW=1`; for the middle
+//! island also headroom for the icons that grow out of the glass and room for the glass to widen). `layout::placements` works out
+//! both rectangles; the host keeps the result (`Host::geo`) for the views, tells the glass engine where the glass is inside its window
+//! (`IslandGlass::set_shape`) and gives every window a REGION (`rf_win::dock::hit`) so that the margin lets the pointer through to
+//! other programs' windows.
+//!
 //! WHY WIN32 CALLS GO THROUGH A TASK. Moving or styling a GPUI window sends it messages (`WM_SIZE`, `WM_WINDOWPOSCHANGED`) that GPUI
 //! answers by updating the window. When that happens while the app is being updated (inside a click handler, a render, a
 //! `cx.update`), the answer cannot be taken and the window keeps its old size in GPUI's eyes. So every call that moves, styles,
@@ -16,7 +22,8 @@ use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_win::dock::island;
-use rf_win::dock::layout::{self, Islands, RADIUS, Rect, Widths};
+use rf_win::dock::layout::{self, Islands, Placement, Placements, RADIUS, Rect, Widths};
+use rf_win::dock::hit;
 use rf_win::dock::{DockSystem, MonitorInfo, SystemEvent};
 
 use super::backdrop::IslandGlass;
@@ -73,6 +80,57 @@ struct Placed {
     glass: Rc<RefCell<IslandGlass>>,
 }
 
+/// Everything the host works out from the display and the islands' widths: the glass rectangles, the windows around them, and how far
+/// the middle island's glass may widen. Device px. Kept (see `Host::geo`) so the views do not ask Windows for it on every frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Geo {
+    pub scale: f32,
+    pub islands: Islands,
+    pub placements: Placements,
+    /// How far the middle glass may widen on each side.
+    pub growth_px: i32,
+}
+
+impl Geo {
+    pub fn placement(&self, kind: Kind) -> Placement {
+        match kind {
+            Kind::Left => self.placements.left,
+            Kind::Middle => self.placements.middle,
+            Kind::Right => self.placements.right,
+        }
+    }
+}
+
+/// What a view needs to know about its window, logical px: the distances from the window's edges to the glass at rest (left, top, right,
+/// bottom) and how far the glass may widen to each side (the middle island's).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Insets {
+    pub margins: [f32; 4],
+    pub growth: f32,
+}
+
+impl Insets {
+    pub fn of(geo: &Geo, kind: Kind) -> Insets {
+        let m = geo.placement(kind).margins();
+        Insets { margins: m.map(|v| v as f32 / geo.scale), growth: geo.growth_px as f32 / geo.scale }
+    }
+
+    /// What a window has before the host has worked out the real numbers (the first frame): the margins the layout wants, all round.
+    pub fn assumed(kind: Kind) -> Insets {
+        let (edge, head) = if layout::shadow_on() { (layout::SHADOW_MARGIN, layout::SHADOW_MARGIN) } else { (layout::EDGE_MARGIN, layout::HEADROOM) };
+        let (side, top) = match kind {
+            Kind::Middle => (edge + layout::MIDDLE_RESERVE, head),
+            _ => (edge, edge),
+        };
+        Insets { margins: [side, top, side, edge], growth: if kind == Kind::Middle { layout::MIDDLE_RESERVE } else { 0.0 } }
+    }
+}
+
+/// The insets of an island's window, from the host's last layout.
+pub fn insets(kind: Kind, cx: &App) -> Insets {
+    cx.try_global::<Host>().and_then(|h| h.geo).map_or_else(|| Insets::assumed(kind), |g| Insets::of(&g, kind))
+}
+
 pub struct Host {
     system: Option<DockSystem>,
     placed: Vec<Placed>,
@@ -80,6 +138,8 @@ pub struct Host {
     right: Option<Entity<RightIsland>>,
     /// The islands' logical widths (what their contents need).
     widths: Widths,
+    /// The last layout (see [`Geo`]); `None` until a monitor has been seen.
+    geo: Option<Geo>,
     fullscreen: bool,
     prefs: Prefs,
     settings_stamp: Option<SystemTime>,
@@ -99,11 +159,18 @@ impl Host {
         self.system.as_ref().and_then(|s| s.placement_area()).or_else(|| rf_win::dock::primary_monitor().map(|m| (m, m.work)))
     }
 
-    fn rectangles(&self) -> Option<(f32, Islands)> {
+    /// The layout for the display as it is now.
+    fn compute_geo(&self) -> Option<Geo> {
         let (mon, area) = self.area()?;
-        let scale = mon.scale();
-        Some((scale, layout::islands(area, scale, self.widths)))
+        Some(geo_for(&mon, area, self.widths))
     }
+}
+
+/// The layout for a monitor, the area the islands are placed in and the islands' widths.
+fn geo_for(mon: &MonitorInfo, area: Rect, widths: Widths) -> Geo {
+    let scale = mon.scale();
+    let islands = layout::islands(area, scale, widths);
+    Geo { scale, islands, placements: layout::placements(&islands, mon.rect, scale, layout::shadow_on()), growth_px: layout::growth_room(&islands, scale) }
 }
 
 fn host_mut(cx: &mut App) -> Option<&mut Host> {
@@ -118,6 +185,23 @@ pub fn island_box(env: &Env, fallback: bool) -> Div {
         .text_size(px(13.))
         .text_color(look::text(env.dark).hsla())
         .when(fallback, |d| d.bg(look::fallback_fill(env.dark).hsla()).rounded(px(RADIUS)))
+}
+
+/// The root of the left and the right island's window: the island's own view, inset by its margin, so that the view
+/// sees a box exactly as big as the glass (which is how it was laid out when the window was as big as the glass). The middle island lays
+/// itself out in the whole window.
+struct Frame<V: Render + 'static> {
+    inner: Entity<V>,
+    kind: Kind,
+    /// Inset the view by the margins (the left and the right island); the middle island lays itself out in the whole window.
+    inset: bool,
+}
+
+impl<V: Render + 'static> Render for Frame<V> {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let [l, t, r, b] = if self.inset { insets(self.kind, cx).margins } else { [0.0; 4] };
+        div().size_full().pl(px(l)).pt(px(t)).pr(px(r)).pb(px(b)).child(self.inner.clone())
+    }
 }
 
 /// Runs `job` from the message loop, outside any update of the app (see the module docs).
@@ -144,28 +228,91 @@ pub fn set_width(kind: Kind, width: f32, cx: &mut App) {
     request_layout(cx);
 }
 
+/// What the system is told about one island's window for a layout: where it is, and which part of it takes the pointer (`None`: the
+/// island's own view decides, see [`request_layout`]).
+struct Job {
+    hwnd: isize,
+    window: Rect,
+    parts: Option<Vec<hit::Part>>,
+}
+
+/// The pieces of a window that take the pointer when nothing sticks out of the glass: the glass itself.
+fn rest_parts(pl: &Placement, scale: f32) -> Vec<hit::Part> {
+    hit::parts(pl.glass_in_window(), layout::px(RADIUS, scale) as f32, &[], pl.window.width(), pl.window.height())
+}
+
+thread_local! {
+    /// The region the middle window has been given last (`None`: none yet, or it must be given again).
+    static MIDDLE_REGION: RefCell<Option<Vec<hit::Part>>> = const { RefCell::new(None) };
+}
+
 /// Places the three windows by the current work area, scale and widths. The rectangles are worked out now, the windows are moved
-/// from the message loop.
+/// from the message loop. Each side island's glass is told where it is in its window, and its window's region is set to its glass.
+/// The middle island is different: its region and its glass follow the icons that stand out of the glass, which only its view knows
+/// (a rest region here would cut off an icon that is grown at this moment), so it is only told to draw again, and the region it was
+/// last given is forgotten so that the view's next frame sets it for the new window even if its pieces came out the same.
 pub fn request_layout(cx: &mut App) {
-    let Some(host) = cx.try_global::<Host>() else { return };
-    let Some((_, rects)) = host.rectangles() else { return };
-    let jobs: Vec<(isize, Rect)> = host
+    let Some(host) = host_mut(cx) else { return };
+    let Some(geo) = host.compute_geo() else { return };
+    host.geo = Some(geo);
+    let jobs: Vec<Job> = host
         .placed
         .iter()
         .map(|p| {
-            let r = match p.kind {
-                Kind::Left => rects.left,
-                Kind::Middle => rects.middle,
-                Kind::Right => rects.right,
-            };
-            (p.hwnd, r)
+            let pl = geo.placement(p.kind);
+            let own = p.kind != Kind::Middle;
+            if own {
+                p.glass.borrow_mut().set_shape(pl.glass_in_window());
+            }
+            Job { hwnd: p.hwnd, window: pl.window, parts: own.then(|| rest_parts(&pl, geo.scale)) }
         })
         .collect();
+    MIDDLE_REGION.with(|r| *r.borrow_mut() = None);
     on_message_loop(cx, move || {
-        for (hwnd, r) in jobs {
-            island::place(hwnd, r);
+        for j in jobs {
+            island::place(j.hwnd, j.window);
+            if let Some(parts) = &j.parts {
+                hit::set_region(j.hwnd, parts);
+            }
         }
     });
+    // the views' margins follow, and the middle island sends its region and its glass for the new window
+    cx.refresh_windows();
+}
+
+/// The middle island's frame of the animation: where its glass is inside its window (device px) and which parts of the window take the
+/// pointer. Called for every frame while the icons are magnified (and when the layout changes). Nothing is sent when neither differs
+/// from what was sent last. What is sent goes in ONE task from the message loop, the region first and then the glass: the window's
+/// region only ever lags the scene by the task, and never lets the system clip a glass or an icon that has just grown (the region is
+/// only a pixel larger than they are).
+pub fn set_middle_frame(glass: &Rc<RefCell<IslandGlass>>, shape: [f32; 4], parts: Vec<hit::Part>, cx: &App) {
+    let (hwnd, shape_moved) = {
+        let g = glass.borrow();
+        (g.hwnd(), g.shape() != shape)
+    };
+    if hwnd == 0 {
+        return;
+    }
+    let region_moved = MIDDLE_REGION.with(|r| region_differs(r.borrow().as_deref(), &parts));
+    if !region_moved && !shape_moved {
+        return;
+    }
+    if region_moved {
+        MIDDLE_REGION.with(|r| *r.borrow_mut() = Some(parts.clone()));
+    }
+    let glass = glass.clone();
+    on_message_loop(cx, move || {
+        if region_moved {
+            hit::set_region(hwnd, &parts);
+        }
+        glass.borrow_mut().set_shape(shape);
+    });
+}
+
+/// Whether the region the window was last given (`None`: none, or forgotten because the window was placed again) is not the one these
+/// `parts` make. A forgotten region always differs, even from the same pieces: it is the new window that has none.
+fn region_differs(last: Option<&[hit::Part]>, parts: &[hit::Part]) -> bool {
+    last != Some(parts)
 }
 
 /// Shows or hides all three (a full-screen application is in front, or left).
@@ -304,6 +451,8 @@ fn open_island<V: Render + 'static>(
     rect: Rect,
     scale: f32,
     display: Option<DisplayId>,
+    kind: Kind,
+    framed: bool,
     build: impl FnOnce(&mut Window, &mut Context<V>) -> V + 'static,
     cx: &mut App,
 ) -> Option<(AnyWindowHandle, isize, Entity<V>)> {
@@ -321,7 +470,14 @@ fn open_island<V: Render + 'static>(
         window_background: WindowBackgroundAppearance::Transparent,
         ..Default::default()
     };
-    let handle = match cx.open_window(opts, move |window, cx| cx.new(|cx| build(window, cx))) {
+    // the view the caller asked for; for a framed island it is the frame's child, not the window's root
+    let inner: Rc<RefCell<Option<Entity<V>>>> = Rc::new(RefCell::new(None));
+    let slot = inner.clone();
+    let handle = match cx.open_window(opts, move |window, cx| {
+        let view = cx.new(|cx| build(window, cx));
+        *slot.borrow_mut() = Some(view.clone());
+        cx.new(|_| Frame { inner: view, kind, inset: framed })
+    }) {
         Ok(h) => h,
         Err(e) => {
             log::error!("dock: cannot open an island: {e:#}");
@@ -329,7 +485,7 @@ fn open_island<V: Render + 'static>(
         }
     };
     let hwnd = handle.update(cx, |_, window, _| crate::look::window::hwnd_of(window)).ok()?;
-    let entity = handle.entity(cx).ok()?;
+    let entity = inner.borrow_mut().take()?;
     Some((handle.into(), hwnd, entity))
 }
 
@@ -359,18 +515,18 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 
     let lines = rf_win::dock::clock::system_lines();
     let widths = Widths { left: plan::left_width(None), middle: plan::middle_width_at_rest(2, 1), right: plan::right_width(&lines) };
-    let rects = layout::islands(area, scale, widths);
+    let geo = geo_for(&monitor, area, widths);
     let display = cx.primary_display().map(|d| d.id());
 
     let (left_glass, middle_glass, right_glass) = (Rc::new(RefCell::new(IslandGlass::new())), Rc::new(RefCell::new(IslandGlass::new())), Rc::new(RefCell::new(IslandGlass::new())));
     let city = prefs.city.clone();
     let lg = left_glass.clone();
-    let left = open_island(rects.left, scale, display, move |_, cx| LeftIsland::new(lg, &city, cx), cx);
+    let left = open_island(geo.placements.left.window, scale, display, Kind::Left, true, move |_, cx| LeftIsland::new(lg, &city, cx), cx);
     let mg = middle_glass.clone();
-    let middle = open_island(rects.middle, scale, display, move |_, cx| MiddleIsland::new(mg, cx), cx);
+    let middle = open_island(geo.placements.middle.window, scale, display, Kind::Middle, false, move |_, cx| MiddleIsland::new(mg, cx), cx);
     let rg = right_glass.clone();
     let right_lines = lines.clone();
-    let right = open_island(rects.right, scale, display, move |_, cx| RightIsland::new(rg, right_lines, cx), cx);
+    let right = open_island(geo.placements.right.window, scale, display, Kind::Right, true, move |_, cx| RightIsland::new(rg, right_lines, cx), cx);
 
     let mut placed = Vec::new();
     let mut left_entity = None;
@@ -400,35 +556,39 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         left: left_entity,
         right: right_entity,
         widths,
+        geo: Some(geo),
         fullscreen,
         prefs: prefs.clone(),
         settings_stamp: file_stamp(),
         started: Instant::now(),
     };
-    // the first styling, placing and glass, from the message loop (the windows exist now but are still being set up)
-    let setup: Vec<(isize, Rect, Rc<RefCell<IslandGlass>>)> = host
+    // the first styling, placing, region and glass, from the message loop (the windows exist now but are still being set up). Each glass
+    // is told where it is in its window now, before it starts: it never covers the whole window, not even for a frame.
+    let setup: Vec<(Job, Rc<RefCell<IslandGlass>>)> = host
         .placed
         .iter()
         .map(|p| {
-            let r = match p.kind {
-                Kind::Left => rects.left,
-                Kind::Middle => rects.middle,
-                Kind::Right => rects.right,
-            };
-            (p.hwnd, r, p.glass.clone())
+            let pl = geo.placement(p.kind);
+            p.glass.borrow_mut().set_shape(pl.glass_in_window());
+            (Job { hwnd: p.hwnd, window: pl.window, parts: Some(rest_parts(&pl, scale)) }, p.glass.clone())
         })
         .collect();
     cx.set_global(host);
+    // the views were drawn once with the margins assumed before the layout was known
+    cx.refresh_windows();
     on_message_loop(cx, move || {
-        for (hwnd, r, _) in &setup {
-            if let Err(e) = island::make_island(*hwnd) {
+        for (job, _) in &setup {
+            if let Err(e) = island::make_island(job.hwnd) {
                 log::warn!("dock: island style: {e:#}");
             }
-            island::place(*hwnd, *r);
+            island::place(job.hwnd, job.window);
+            if let Some(parts) = &job.parts {
+                hit::set_region(job.hwnd, parts);
+            }
         }
         let env = Env::read(scale);
-        for (hwnd, _, glass) in &setup {
-            glass.borrow_mut().start(*hwnd, env.dark, env.scale, 0);
+        for (job, glass) in &setup {
+            glass.borrow_mut().start(job.hwnd, env.dark, env.scale, 0);
         }
     });
     if fullscreen {
@@ -514,8 +674,27 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Changes, Prefs, Settings, changes, file_changed};
+    use super::{Changes, Prefs, Settings, changes, file_changed, region_differs};
+    use rf_win::dock::hit::{self, Part};
+    use rf_win::dock::layout::Rect;
     use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn a_region_given_again_after_a_layout_is_sent_even_when_its_pieces_are_the_same() {
+        let grown = hit::parts([44.0, 12.0, 600.0, 72.0], 24.0, &[[200.0, 4.0, 68.0, 68.0]], 700, 100);
+        let rest = hit::parts([44.0, 12.0, 600.0, 72.0], 24.0, &[], 700, 100);
+        assert!(matches!(grown.last(), Some(Part::Rect(r)) if *r == Rect::new(199, 3, 269, 73)));
+        // nothing sent yet, or forgotten by a layout (the window was placed again): always send
+        assert!(region_differs(None, &grown));
+        // the same pieces as last time: nothing to send
+        assert!(!region_differs(Some(&grown), &grown));
+        // other pieces: send
+        assert!(region_differs(Some(&grown), &rest));
+        assert!(region_differs(Some(&rest), &grown));
+        // an empty region is a region too: it is sent the first time
+        assert!(region_differs(None, &[]));
+        assert!(!region_differs(Some(&[]), &[]));
+    }
 
     fn prefs(reserve: bool, city: &str) -> Prefs {
         Prefs { reserve, city: city.into() }

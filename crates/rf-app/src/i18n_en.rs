@@ -1279,4 +1279,8 @@ pub const EN: &[(&str, &str)] = &[
     ("HyperGlass (deneysel)", "HyperGlass (experimental)"),
     ("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Ekranı canlı izleyip her değişiklikte yeniden çizdiği için Mica'dan daha fazla ekran kartı ve pil kullanır.", "Bends and frosts what is behind the window like real glass. It watches the screen live and redraws on every change, so it uses more GPU and battery than Mica."),
     ("Bu Windows sürümünde ya da ekran görüntüsü kenarlığı izni kapalıyken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.", "On this version of Windows, or while the screenshot border permission is off, rustyfiles windows do not appear in screenshots, recordings or screen sharing."),
+    ("Simge büyütme", "Icon magnification"),
+    ("Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.", "With the pointer over the dock the icons grow like the Mac's dock: Subtle up to 1.25 times, Full up to 1.55 times."),
+    ("Hafif", "Subtle"),
+    ("Tam", "Full"),
 ];

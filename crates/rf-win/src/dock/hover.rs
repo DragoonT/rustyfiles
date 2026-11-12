@@ -1,108 +1,13 @@
-//! The Mac-like grow of the dock's icons: the one under the pointer goes from 44 to 56 px, its two neighbours to 50 px, eased over
-//! about 120 ms. Pure: the pointer and the clock are arguments, so the animation can be tested at any moment.
+//! The dock's slots (icons and thin separators) and the hit test along it. The growth of the icons under the pointer is `magnify`.
+//! Pure: everything is an argument.
 
 use super::layout::{DOCK_PADDING, ICON_GAP, ICON_REST, SEPARATOR_WIDTH};
-
-/// Size of the icon under the pointer, logical px.
-pub const GROWN: f32 = 56.0;
-/// Size of its two neighbours.
-pub const NEIGHBOUR: f32 = 50.0;
-/// How long the grow takes.
-pub const DURATION_MS: u32 = 120;
 
 /// What the dock holds, left to right: icons (apps and places) and thin separators.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Slot {
     Icon,
     Separator,
-}
-
-/// The size each icon is heading for when icon `hovered` (a count of icons, separators not counted) is under the pointer. A
-/// neighbour is the next icon on either side, also across a separator.
-pub fn target_sizes(icons: usize, hovered: Option<usize>) -> Vec<f32> {
-    (0..icons)
-        .map(|i| match hovered {
-            Some(h) if h == i => GROWN,
-            Some(h) if h + 1 == i || i + 1 == h => NEIGHBOUR,
-            _ => ICON_REST,
-        })
-        .collect()
-}
-
-/// Ease-out cubic, 0 -> 1 for `t` 0 -> 1 (clamped).
-pub fn ease_out(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    1.0 - (1.0 - t).powi(3)
-}
-
-/// The value `elapsed_ms` after a change from `from` to `to`. A zero duration (the app's animations are off) is the end at once.
-pub fn eased(from: f32, to: f32, elapsed_ms: f32, duration_ms: u32) -> f32 {
-    if duration_ms == 0 || elapsed_ms >= duration_ms as f32 {
-        return to;
-    }
-    from + (to - from) * ease_out(elapsed_ms / duration_ms as f32)
-}
-
-/// The sizes of all icons over time. Call [`HoverAnim::set_hover`] when the pointer moves onto another icon (or off the dock) and
-/// [`HoverAnim::sizes`] for every frame; [`HoverAnim::settled`] says when frames are no longer needed.
-///
-/// A change of target in mid-flight starts from where each icon is at that moment, so moving along the dock never jumps.
-#[derive(Clone, Debug)]
-pub struct HoverAnim {
-    from: Vec<f32>,
-    to: Vec<f32>,
-    started_ms: u64,
-    duration_ms: u32,
-    hovered: Option<usize>,
-}
-
-impl HoverAnim {
-    /// `duration_ms` is [`DURATION_MS`], or 0 when the app's animation setting is off.
-    pub fn new(icons: usize, duration_ms: u32) -> HoverAnim {
-        let rest = vec![ICON_REST; icons];
-        HoverAnim { from: rest.clone(), to: rest, started_ms: 0, duration_ms, hovered: None }
-    }
-
-    pub fn hovered(&self) -> Option<usize> {
-        self.hovered
-    }
-
-    pub fn set_duration(&mut self, duration_ms: u32) {
-        self.duration_ms = duration_ms;
-    }
-
-    /// The icons changed (an app started or ended): the count follows, the new ones start at rest, no hover.
-    pub fn resize(&mut self, icons: usize, now_ms: u64) {
-        let cur = self.sizes(now_ms);
-        let mut from = cur;
-        from.resize(icons, ICON_REST);
-        self.from = from;
-        self.to = vec![ICON_REST; icons];
-        self.started_ms = now_ms;
-        self.hovered = None;
-    }
-
-    /// The pointer is over icon `hovered` (`None`: not over any). Same icon again: nothing restarts.
-    pub fn set_hover(&mut self, hovered: Option<usize>, now_ms: u64) {
-        let hovered = hovered.filter(|&h| h < self.to.len());
-        if hovered == self.hovered {
-            return;
-        }
-        self.from = self.sizes(now_ms);
-        self.to = target_sizes(self.to.len(), hovered);
-        self.started_ms = now_ms;
-        self.hovered = hovered;
-    }
-
-    pub fn sizes(&self, now_ms: u64) -> Vec<f32> {
-        let elapsed = now_ms.saturating_sub(self.started_ms) as f32;
-        self.from.iter().zip(&self.to).map(|(&a, &b)| eased(a, b, elapsed, self.duration_ms)).collect()
-    }
-
-    /// True once every icon has reached its target: no more frames are needed until the pointer moves.
-    pub fn settled(&self, now_ms: u64) -> bool {
-        self.duration_ms == 0 || self.from == self.to || now_ms.saturating_sub(self.started_ms) >= self.duration_ms as u64
-    }
 }
 
 /// Where each item of the dock lies along its width: `(x, width)` in logical px from the island's left edge, for the given slots
@@ -177,94 +82,6 @@ pub fn icon_at_spans(x: f32, slots: &[Slot], spans: &[(f32, f32)]) -> Option<usi
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn targets_grow_the_icon_and_its_two_neighbours() {
-        assert_eq!(target_sizes(5, None), vec![44.0; 5]);
-        assert_eq!(target_sizes(5, Some(2)), vec![44.0, 50.0, 56.0, 50.0, 44.0]);
-        assert_eq!(target_sizes(5, Some(0)), vec![56.0, 50.0, 44.0, 44.0, 44.0]);
-        assert_eq!(target_sizes(5, Some(4)), vec![44.0, 44.0, 44.0, 50.0, 56.0]);
-        assert_eq!(target_sizes(0, Some(0)), Vec::<f32>::new());
-    }
-
-    #[test]
-    fn easing_runs_from_start_to_end_and_never_overshoots() {
-        assert_eq!(eased(44.0, 56.0, 0.0, 120), 44.0);
-        assert_eq!(eased(44.0, 56.0, 120.0, 120), 56.0);
-        assert_eq!(eased(44.0, 56.0, 500.0, 120), 56.0);
-        let mid = eased(44.0, 56.0, 60.0, 120);
-        assert!(mid > 50.0 && mid < 56.0, "ease-out is past half way at half the time: {mid}");
-        let mut last = 44.0;
-        for t in 0..=120 {
-            let v = eased(44.0, 56.0, t as f32, 120);
-            assert!(v >= last && v <= 56.0);
-            last = v;
-        }
-        assert_eq!(eased(44.0, 56.0, 10.0, 0), 56.0, "animations off: at once");
-        // shrinking works the same way
-        assert_eq!(eased(56.0, 44.0, 120.0, 120), 44.0);
-    }
-
-    #[test]
-    fn animation_follows_the_pointer_and_settles() {
-        let mut a = HoverAnim::new(4, DURATION_MS);
-        assert!(a.settled(0));
-        a.set_hover(Some(1), 1000);
-        assert!(!a.settled(1050));
-        assert_eq!(a.sizes(1000), vec![44.0; 4]);
-        let half = a.sizes(1060);
-        assert!(half[1] > 50.0 && half[1] < 56.0);
-        assert!(half[0] > 44.0 && half[0] < 50.0);
-        assert_eq!(half[3], 44.0);
-        assert_eq!(a.sizes(1120), vec![50.0, 56.0, 50.0, 44.0]);
-        assert!(a.settled(1120));
-        // moving to the next icon in mid flight starts from the current sizes
-        a.set_hover(Some(2), 1200);
-        a.set_hover(Some(3), 1230);
-        let at_turn = a.sizes(1230);
-        let before = {
-            let mut b = HoverAnim::new(4, DURATION_MS);
-            b.set_hover(Some(1), 1000);
-            b.set_hover(Some(2), 1200);
-            b.sizes(1230)
-        };
-        assert_eq!(at_turn, before, "no jump when the target changes in mid flight");
-        // the pointer leaves
-        a.set_hover(None, 2000);
-        assert_eq!(a.sizes(2200), vec![44.0; 4]);
-        assert_eq!(a.hovered(), None);
-    }
-
-    #[test]
-    fn the_same_hover_does_not_restart_and_a_stale_index_is_ignored() {
-        let mut a = HoverAnim::new(3, DURATION_MS);
-        a.set_hover(Some(1), 100);
-        let s = a.sizes(150);
-        a.set_hover(Some(1), 140);
-        assert_eq!(a.sizes(150), s);
-        a.set_hover(Some(9), 300); // beyond the icons: same as off
-        assert_eq!(a.hovered(), None);
-    }
-
-    #[test]
-    fn animations_off_means_no_waiting() {
-        let mut a = HoverAnim::new(3, 0);
-        a.set_hover(Some(0), 10);
-        assert_eq!(a.sizes(10), vec![56.0, 50.0, 44.0]);
-        assert!(a.settled(10));
-    }
-
-    #[test]
-    fn resize_keeps_old_sizes_and_drops_the_hover() {
-        let mut a = HoverAnim::new(3, DURATION_MS);
-        a.set_hover(Some(1), 0);
-        a.resize(5, 120);
-        assert_eq!(a.hovered(), None);
-        let s = a.sizes(120);
-        assert_eq!(s.len(), 5);
-        assert_eq!(s[1], 56.0);
-        assert_eq!(s[4], 44.0);
-    }
 
     fn row() -> (Vec<Slot>, Vec<f32>) {
         // three apps, a separator, two places

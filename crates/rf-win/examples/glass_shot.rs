@@ -3,6 +3,7 @@
 //!
 //!   cargo run -p rf-win --example glass_shot -- --src IN.png --out OUT.png --rect X,Y,W,H [--dark] [--scale F] [--radius PX]
 //!       [--lens X,Y,W,H,R]... [--clip X,Y,W,H] [--frost N] [--tint N] [--refraction N] [--saturation N] [--no-calm]
+//!       [--shape X,Y,W,H] [--shadow]
 //!   cargo run -p rf-win --example glass_shot -- --src IN.png --out SHEET.png --rect X,Y,W,H [--dark] --slide X0,Y0,X1,Y1,W,H,R
 //!       [--frames N] [--hz F] [--crop W,H]
 //!
@@ -11,6 +12,10 @@
 //! times. `--clip` cuts all the lenses to a rectangle (default: the whole glass).
 //! `--frost`, `--tint`, `--refraction` and `--saturation` are the four values of the HyperGlass settings, each 0 to 100 (defaults 52, 50,
 //! 67, 62: the shipped look). `--no-calm` draws a small piece with the rim of a window, as it was before the calmer rim of small pieces.
+//! `--shape X,Y,W,H` makes `--rect` a larger transparent WINDOW and the glass only this rectangle of it (device px from the window's top
+//! left corner), as the dock's islands are drawn live; `--radius` is then the shape's. `--shadow` adds the dock's soft shadow outside the
+//! shape (black 26 % at the outline, 4 px down, gone 22 px away). The picture shows the window's pixels over the source; where the
+//! window is transparent the source shows.
 //! `--slide` simulates a lens that slides from (X0, Y0) to (X1, Y1), W x H with radius R, with the engine's own springs at `--hz` refreshes
 //! per second (default 120), picks `--frames` of the simulated refreshes spread evenly over the whole motion (default 12) and writes ONE
 //! contact sheet to `--out`: a crop of `--crop W,H` (default 260,240) around the lens for every frame, four per row. The time of each
@@ -95,6 +100,8 @@ struct Args {
     params: LookParams,
     calm: bool,
     clip: Option<[f32; 4]>,
+    shape: Option<[f32; 4]>,
+    shadow: bool,
     slide: Option<[f32; 7]>,
     frames: usize,
     hz: f32,
@@ -104,6 +111,7 @@ struct Args {
 fn parse() -> Result<Args, Box<dyn Error>> {
     let (mut src, mut out, mut rect, mut dark, mut scale, mut radius) = (None, None, None, false, 1.0f32, None::<f32>);
     let (mut lenses, mut clip, mut slide, mut frames, mut hz, mut crop) = (Vec::new(), None, None, 12usize, 120.0f32, (260u32, 240u32));
+    let (mut shape, mut shadow) = (None, false);
     let (mut params, mut calm) = (LookParams::DEFAULT, true);
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -126,6 +134,8 @@ fn parse() -> Result<Args, Box<dyn Error>> {
             "--refraction" => params.refraction = it.next().ok_or("--refraction needs 0 to 100")?.parse()?,
             "--saturation" => params.saturation = it.next().ok_or("--saturation needs 0 to 100")?.parse()?,
             "--no-calm" => calm = false,
+            "--shape" => shape = Some(floats(&it.next().ok_or("--shape needs X,Y,W,H")?)?),
+            "--shadow" => shadow = true,
             "--clip" => clip = Some(floats(&it.next().ok_or("--clip needs X,Y,W,H")?)?),
             "--slide" => slide = Some(floats(&it.next().ok_or("--slide needs X0,Y0,X1,Y1,W,H,R")?)?),
             "--frames" => frames = it.next().ok_or("--frames needs a number")?.parse()?,
@@ -151,6 +161,8 @@ fn parse() -> Result<Args, Box<dyn Error>> {
         params,
         calm,
         clip,
+        shape,
+        shadow,
         slide,
         frames,
         hz,
@@ -212,6 +224,21 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
     let radius = a.radius.unwrap_or(8.0 * a.scale);
     let t = std::time::Instant::now();
+    if let Some(shape) = a.shape {
+        let opts = rf_win::glass::GlassOptions {
+            dark: a.dark,
+            radius_px: Some(radius),
+            cut_corners: true,
+            shape: Some(shape),
+            shadow: a.shadow.then_some(rf_win::glass::Shadow::SOFT),
+        };
+        let glass = rf_win::glass::render_offscreen_shape((&pic, w, h), a.rect, opts, a.scale, &a.params, a.calm)?;
+        println!("shape {shape:?} in a window of {:?} drawn in {:.0} ms ({}{})", a.rect, t.elapsed().as_secs_f64() * 1000.0, if a.dark { "dark" } else { "light" }, if a.shadow { ", with the shadow" } else { "" });
+        paste(&mut pic, w, h, &glass, a.rect);
+        save(&a.out, w, h, &pic)?;
+        println!("wrote {}", a.out);
+        return Ok(());
+    }
     let shots: Vec<LensShot> = a.lenses.iter().map(|l| LensShot { rect: [l[0], l[1], l[2], l[3]], clip: a.clip, radius: l[4], opacity: 1.0 }).collect();
     let glass = rf_win::glass::render_offscreen_look((&pic, w, h), a.rect, radius, a.scale, a.dark, &a.params, a.calm, &[shots])?.remove(0);
     println!(

@@ -1,11 +1,11 @@
-//! The glass behind one island: attaching it with the island's own radius and corner cutting, watching what the engine reports,
-//! telling the island when to paint its own fill instead, and trying again after a failure.
+//! The glass behind one island: attaching it with the island's own radius, its own rectangle inside the (larger) window and its shadow,
+//! watching what the engine reports, telling the island when to paint its own fill instead, and trying again after a failure.
 //!
 //! The decisions are in [`Machine`] (pure: the engine's report and the time are arguments); [`IslandGlass`] is the thin layer that
 //! makes the calls into `rf_win::glass`.
 
 use rf_win::dock::layout::RADIUS;
-use rf_win::glass::{GlassOptions, GlassState};
+use rf_win::glass::{GlassOptions, GlassState, Shadow};
 
 /// How long to wait before trying again after the 1st, 2nd and 3rd failure. After the third retry fails the island keeps its own fill
 /// for good (until the dock is restarted): a glass that cannot be kept should not be retried forever.
@@ -97,10 +97,20 @@ pub fn radius_px(scale: f32) -> f32 {
     RADIUS * scale.max(0.1)
 }
 
-/// The glass options of an island: its own radius and its own corners cut.
-pub fn options(dark: bool, scale: f32) -> GlassOptions {
-    GlassOptions { dark, radius_px: Some(radius_px(scale)), cut_corners: true }
+/// The glass options of an island: its own radius, its own corners cut, its own rectangle inside the window (`shape`: x, y, w, h in
+/// device px from the window's top left corner) and, only when the dock's shadow is switched on (`layout::shadow_on`: the window
+/// region is expected to clip it away, see `rf_win::dock::hit`), the soft shadow around it. The window is bigger than the glass;
+/// everything outside the shape is transparent.
+pub fn options(dark: bool, scale: f32, shape: [f32; 4]) -> GlassOptions {
+    GlassOptions { dark, radius_px: Some(radius_px(scale)), cut_corners: true, shape: Some(shape), shadow: shadow_on().then_some(Shadow::SOFT) }
 }
+
+fn shadow_on() -> bool {
+    rf_win::dock::layout::shadow_on()
+}
+
+/// Where an island's glass is until it is told: nowhere (it draws nothing), never the whole window for a moment.
+pub const NO_SHAPE: [f32; 4] = [0.0; 4];
 
 /// One island's glass. Shared (`Rc<RefCell<..>>`) between the island's view, which reads `fallback()` while it paints, and the host,
 /// which starts it, watches it and stops it.
@@ -109,13 +119,38 @@ pub struct IslandGlass {
     machine: Machine,
     dark: bool,
     scale: f32,
+    /// The glass's rectangle in the window, device px (see [`options`]).
+    shape: [f32; 4],
     /// Whether the engine has been told about the window (and so must be told to let go of it).
     attached: bool,
 }
 
 impl IslandGlass {
     pub fn new() -> IslandGlass {
-        IslandGlass { hwnd: 0, machine: Machine::default(), dark: true, scale: 1.0, attached: false }
+        IslandGlass { hwnd: 0, machine: Machine::default(), dark: true, scale: 1.0, shape: NO_SHAPE, attached: false }
+    }
+
+    /// The window handle (0 before [`IslandGlass::start`]).
+    pub fn hwnd(&self) -> isize {
+        self.hwnd
+    }
+
+    /// Where the glass is in the window (device px: x, y, w, h). Before the glass runs this is only remembered (it is what the glass
+    /// starts with); while it runs the engine is told, and only when it is something new: this is called for every frame of the
+    /// magnification, so it must cost nothing when nothing moved. The engine takes the change as one constant and one draw.
+    pub fn set_shape(&mut self, shape: [f32; 4]) {
+        if shape == self.shape {
+            return;
+        }
+        self.shape = shape;
+        if self.attached {
+            rf_win::glass::set_options(self.hwnd, options(self.dark, self.scale, shape));
+        }
+    }
+
+    /// Where the glass is in the window as last told (device px: x, y, w, h).
+    pub fn shape(&self) -> [f32; 4] {
+        self.shape
     }
 
     /// True while the island has to paint its own fill.
@@ -141,7 +176,7 @@ impl IslandGlass {
             self.machine.attach_failed(now_ms);
             return;
         }
-        if rf_win::glass::attach_with(self.hwnd, options(self.dark, self.scale)) {
+        if rf_win::glass::attach_with(self.hwnd, options(self.dark, self.scale, self.shape)) {
             self.attached = true;
         } else {
             let why = match rf_win::glass::state(self.hwnd) {
@@ -164,7 +199,7 @@ impl IslandGlass {
         }
         if scale_changed {
             // the radius is in device px: it follows the DPI (this also carries the new tint)
-            rf_win::glass::set_options(self.hwnd, options(dark, scale));
+            rf_win::glass::set_options(self.hwnd, options(dark, scale, self.shape));
         } else if dark_changed {
             rf_win::glass::set_dark(self.hwnd, dark);
         }
@@ -278,14 +313,30 @@ mod tests {
 
     #[test]
     fn an_island_uses_its_own_radius_and_cuts_its_own_corners() {
-        let o = options(true, 1.5);
+        let o = options(true, 1.5, [10.0, 10.0, 300.0, 72.0]);
         assert!(o.dark);
         assert_eq!(o.radius_px, Some(36.0));
         assert!(o.cut_corners);
-        assert!(!options(false, 1.0).dark);
+        assert!(!options(false, 1.0, NO_SHAPE).dark);
+        // its own rectangle inside the window and the dock's shadow: the window is bigger than the glass
+        assert_eq!(o.shape, Some([10.0, 10.0, 300.0, 72.0]));
+        assert_eq!(o.shadow, shadow_on().then_some(Shadow::SOFT), "no shadow unless the experiment is on (the region would clip it)");
         // a broken scale cannot make the radius zero or negative
         assert!(radius_px(0.0) > 0.0);
         assert!(radius_px(-3.0) > 0.0);
+    }
+
+    #[test]
+    fn the_glass_starts_nowhere_and_remembers_where_it_is_told_to_be() {
+        let mut g = IslandGlass::new();
+        // never the whole window while nothing has said where the glass is
+        assert_eq!(options(true, 1.0, g.shape).shape, Some([0.0; 4]));
+        g.set_shape([12.0, 28.0, 330.0, 48.0]);
+        assert_eq!(options(true, 1.0, g.shape).shape, Some([12.0, 28.0, 330.0, 48.0]));
+        // the same again changes nothing (it is called for every frame of the animation), and an unattached glass sends nothing
+        g.set_shape([12.0, 28.0, 330.0, 48.0]);
+        assert_eq!(g.shape, [12.0, 28.0, 330.0, 48.0]);
+        assert_eq!(g.hwnd(), 0);
     }
 
     #[test]

@@ -16,7 +16,7 @@ fn lens_at(rect: [f32; 4], opacity: f32) -> LensDraw {
 
 /// Draws the glass with exactly these lenses (not filtered: an opacity of 0 reaches the shader as it is).
 fn render_lenses(src: &[u8], sw: u32, sh: u32, look: &Look, lenses: &[LensDraw], warp: bool) -> Vec<u8> {
-    let geo = Geometry { w: GLASS.2, h: GLASS.3, origin: (GLASS.0, GLASS.1), scale: 1.0, radius_px: 8.0, cut_corners: true };
+    let geo = Geometry { w: GLASS.2, h: GLASS.3, origin: (GLASS.0, GLASS.1), scale: 1.0, radius_px: 8.0, cut_corners: true, shape: None, shadow: None };
     let mut list = LensList { n: lenses.len(), ..LensList::default() };
     list.l[..lenses.len()].copy_from_slice(lenses);
     with_renderer(warp, |r| unsafe { gpu::render_on_lenses(r, src, sw, sh, &geo, look, &list) }).expect("render")

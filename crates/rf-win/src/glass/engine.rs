@@ -9,7 +9,10 @@
 //!
 //! The loop never spins: it waits on the command channel when there is nothing to poll, waits inside AcquireNextFrame (or on the session's
 //! frame token) when it has a capture, and sleeps when neither happened. While a lens moves or fades it is paced by the display instead
-//! (`pace`): one turn per refresh, and none of the other waits.
+//! (`pace`): one turn per refresh, and none of the other waits. A glass SHAPE that moves (a dock island widening) is not paced: its
+//! commands come once per frame of the app's own animation, and the engine takes each the moment it arrives (a capture session's wait
+//! ends on a command; Desktop Duplication's is cut short, see `SHAPE_WAIT_MS`) and presents it at once, so it lands in the same
+//! composition as the scene the app drew for that frame. Pacing it by the display would show every frame one refresh late.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::c_void;
@@ -37,7 +40,7 @@ use super::capture::{Dirty, MonError, Monitor, Pumped, is_device_lost, locate};
 use super::gpu::{Geometry, Gpu, LensList, Look, Region, Renderer, glass_pass, prep, region_pad, reuse};
 use super::lens::LensSet;
 use super::wgc::{self, Access, Exclusion};
-use super::{CaptureMode, Cmd, GlassOptions, GlassState, set_mode};
+use super::{CaptureMode, Cmd, GlassOptions, GlassState, Shadow, set_mode};
 
 /// A window's corner radius, device px at 100 %: Windows 11 rounds its windows by 8 px, or by 4 px when asked for small corners.
 const WINDOW_RADIUS: f32 = 8.0;
@@ -54,6 +57,12 @@ const QUIET_AFTER: Duration = Duration::from_secs(1);
 /// While a window has a lens (even at rest) the quiet wait is cut to this: a lens command is only seen between two waits, and the
 /// selection pill must start sliding about when the scene shows the new selection, not up to `QUIET_WAIT_MS` later.
 const LENS_WAIT_MS: u32 = 16;
+/// A glass shape that changed this recently (a dock island widening under the pointer) shortens the wait for a frame to
+/// `SHAPE_WAIT_MS`; this long after the last change it is at rest again and costs nothing.
+const SHAPE_ACTIVE: Duration = Duration::from_millis(120);
+/// The wait for a frame while a shape is moving: a command ends the wait of a capture session at once, and Desktop Duplication's
+/// `AcquireNextFrame` does not know about commands, so this bounds how long a new shape waits to be taken.
+const SHAPE_WAIT_MS: u32 = 2;
 /// A DwmFlush that returns faster than this did not wait for a composition at all.
 const INSTANT_FLUSH: Duration = Duration::from_micros(500);
 /// This many such returns in a row and `pace` waits on the channel instead, so a broken DwmFlush cannot make a busy loop.
@@ -257,7 +266,7 @@ struct Stats {
     with_image: u32,
     presented: u32,
     skipped: u32,
-    /// Draws that kept the backdrop of the last one (only a lens moved) and so made no copy, no pyramid and no read-back.
+    /// Draws that kept the backdrop of the last one (only a lens or the glass shape moved) and so made no copy, no pyramid and no read-back.
     reused: u32,
     prep: Duration,
     glass: Duration,
@@ -276,6 +285,11 @@ struct Win {
     radius_px: Option<f32>,
     /// The app asked for the glass to cut its own corners (a shape that is not a window).
     cut_corners: bool,
+    /// The glass is only this rectangle of the window (device px from its top left corner), see `GlassOptions::shape`.
+    shape: Option<[f32; 4]>,
+    shadow: Option<Shadow>,
+    /// When the shape last changed: while that is recent the engine does not wait long for a frame (`Engine::frame_wait_ms`).
+    shape_changed: Option<Instant>,
     visible: bool,
     geo: Option<WinGeo>,
     target: Option<Target>,
@@ -299,6 +313,9 @@ impl Win {
             dark: opts.dark,
             radius_px: opts.radius_px,
             cut_corners: opts.cut_corners,
+            shape: opts.shape,
+            shadow: opts.shadow,
+            shape_changed: None,
             visible: false,
             geo: None,
             target: None,
@@ -313,10 +330,26 @@ impl Win {
     }
 
     fn set_options(&mut self, opts: GlassOptions) {
+        let before = GlassOptions { dark: self.dark, radius_px: self.radius_px, cut_corners: self.cut_corners, shape: self.shape, shadow: self.shadow };
+        if before == opts {
+            return;
+        }
+        let cheap = before.only_the_shape_differs(&opts);
         self.dark = opts.dark;
         self.radius_px = opts.radius_px;
         self.cut_corners = opts.cut_corners;
-        self.restale();
+        if before.shape != opts.shape || before.shadow != opts.shadow {
+            self.shape_changed = Some(Instant::now());
+        }
+        self.shape = opts.shape;
+        self.shadow = opts.shadow;
+        if cheap {
+            // Only the shape or the shadow moved: the backdrop under the window is the one the region holds, so one draw with another
+            // constant is all it takes (no copy of the screen, no pyramid, no read back). This is what an animation of the shape costs.
+            self.dirty = true;
+        } else {
+            self.restale();
+        }
     }
 
     /// Something behind the glass or about the glass itself changed: draw again, from a new backdrop.
@@ -369,17 +402,23 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     let (Some(region), Some(target)) = (w.region.as_ref(), w.target.as_ref()) else { return Err(Fail::Window("lost its resources".into())) };
 
     let mrect = mon.rect();
-    let g = Geometry {
+    let mut g = Geometry {
         w: geo.w,
         h: geo.h,
         origin: (geo.x - mrect.left, geo.y - mrect.top),
         scale: geo.scale(),
-        radius_px: effective_radius(w.radius_px, geo.radius_px(), geo.w, geo.h),
+        radius_px: 0.0,
         cut_corners: w.cut_corners,
+        shape: w.shape,
+        shadow: w.shadow,
     };
-    // The settings' look; a shape below 160 CSS px gets the calmer rim (a window never does, a dock island does). The look is part of
-    // what the loop guard compares, so a change of the settings (or of the theme) is drawn.
-    let look = Look::regular(w.dark, &super::look()).sized(geo.w.min(geo.h) as f32 / geo.scale());
+    // the corner radius is the glass's own: a shape's is kept inside the shape, not inside the window that holds it
+    let [_, _, glass_w, glass_h] = g.glass_rect();
+    g.radius_px = effective_radius(w.radius_px, geo.radius_px(), glass_w as u32, glass_h as u32);
+    // The settings' look; a shape below 160 CSS px (by the GLASS's short side, not the window's) gets its rim bounded by the shape
+    // (a window never does, a dock island does). The look is part of what the loop guard compares, so a change of the settings (or of
+    // the theme) is drawn.
+    let look = Look::regular(w.dark, &super::look()).sized(glass_w.min(glass_h) / geo.scale());
     let lenses = w.lenses.draw_list();
     let t0 = Instant::now();
     let (mut prepared, hash) = match w.presented.map(|p| p.hash) {
@@ -393,7 +432,7 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
             // THE LOOP GUARD. Our own Present can make the compositor produce a new duplication frame whose picture (without our excluded
             // window) is unchanged; drawing for it would keep the engine busy at the refresh rate for ever. So a coarse level of the backdrop
             // is read back, and when it, the geometry, the look and the lenses all equal the last presented state, nothing is drawn.
-            let hash = region.fingerprint(&gfx.r.g, g.w, g.h).map_err(|e| ctx("reading the backdrop back", e))?;
+            let hash = region.fingerprint(&gfx.r.g, g.glass_rect()).map_err(|e| ctx("reading the backdrop back", e))?;
             w.stale = false;
             (prepared, hash)
         }
@@ -540,8 +579,10 @@ impl Engine {
 
     /// How long this turn may wait for a frame.
     fn frame_wait_ms(&self) -> u32 {
-        if self.lens_active() {
+        if self.paced() {
             0 // the display paces the turn (`pace`); a frame that is not there yet is taken next turn
+        } else if self.shape_moving() {
+            SHAPE_WAIT_MS
         } else if self.last_activity.elapsed() > QUIET_AFTER {
             if self.wins.values().any(|w| w.visible && w.lenses.occupied()) { LENS_WAIT_MS } else { QUIET_WAIT_MS }
         } else {
@@ -552,6 +593,17 @@ impl Engine {
     /// Whether a lens of a visible window is moving or fading: the engine then draws once per display refresh.
     fn lens_active(&self) -> bool {
         self.wins.values().any(|w| w.visible && w.lenses.animating())
+    }
+
+    /// Whether a visible window's glass shape changed a moment ago (an island widening under the pointer sends a new shape for every
+    /// frame of the animation, and each must be drawn about when the UI draws its scene: soon after it arrives, not at the next refresh).
+    fn shape_moving(&self) -> bool {
+        self.wins.values().any(|w| w.visible && w.shape_changed.is_some_and(|t| t.elapsed() < SHAPE_ACTIVE))
+    }
+
+    /// Whether the display paces the loop: a lens moves or fades. (Not a shape: see the module docs.)
+    fn paced(&self) -> bool {
+        self.lens_active()
     }
 
     /// Steps the lenses of the visible windows to now and marks them dirty. The step is the time since the last one, so the motion does not
@@ -633,7 +685,7 @@ impl Engine {
         self.advance_lenses();
         self.draw_dirty();
         self.housekeeping();
-        if self.lens_active() {
+        if self.paced() {
             return self.pace();
         }
         if !waited && self.wins.values().any(|w| w.visible) {
@@ -872,7 +924,7 @@ impl Engine {
                 if now.duration_since(s.since) >= STATS_EVERY {
                     let draws = (s.presented + s.skipped).max(1) as f64;
                     log::info!(
-                        "glass {:#x}: {} frames acquired, {} with an image, {} draws presented, {} skipped by the loop guard ({} draws only moved a lens), prep {:.2} ms, glass pass {:.2} ms (CPU time per draw)",
+                        "glass {:#x}: {} frames acquired, {} with an image, {} draws presented, {} skipped by the loop guard ({} draws only moved a lens or the shape), prep {:.2} ms, glass pass {:.2} ms (CPU time per draw)",
                         w.hwnd,
                         s.frames,
                         s.with_image,
@@ -988,10 +1040,79 @@ mod tests {
         assert!(e.wins.values().all(|w| w.dirty && w.stale), "a window was not marked by the look change");
     }
 
+    /// A change of the shape alone (the dock's island widening under the pointer) draws again from the backdrop the window already has:
+    /// no new copy of the screen, no new blur pyramid, no read back. Anything else about the options is a new backdrop pass as before.
+    #[test]
+    fn a_shape_change_is_one_draw_and_not_a_new_backdrop() {
+        let island = GlassOptions { radius_px: Some(24.0), cut_corners: true, shape: Some([28.0, 28.0, 300.0, 48.0]), shadow: Some(Shadow::SOFT), ..GlassOptions::window(true) };
+        let mut w = Win::new(1, island);
+        assert!(w.dirty && w.stale, "a new window needs everything");
+        let settled = |w: &mut Win| {
+            w.dirty = false;
+            w.stale = false;
+            w.shape_changed = None;
+        };
+        settled(&mut w);
+        // the same options again: nothing at all
+        w.set_options(island);
+        assert!(!w.dirty && !w.stale && w.shape_changed.is_none());
+        // a wider shape: one draw, and the engine does not wait long for a frame for a moment
+        w.set_options(GlassOptions { shape: Some([8.0, 28.0, 340.0, 48.0]), ..island });
+        assert!(w.dirty && !w.stale, "the backdrop is the one the region holds");
+        assert_eq!(w.shape, Some([8.0, 28.0, 340.0, 48.0]));
+        assert!(w.shape_changed.is_some());
+        // the shadow going on or off is as cheap
+        settled(&mut w);
+        w.set_options(GlassOptions { shape: Some([8.0, 28.0, 340.0, 48.0]), shadow: None, ..island });
+        assert!(w.dirty && !w.stale);
+        // a theme, a radius or a corner change is a new backdrop pass, as before
+        for changed in [GlassOptions { dark: false, ..island }, GlassOptions { radius_px: Some(12.0), ..island }, GlassOptions { cut_corners: false, ..island }] {
+            settled(&mut w);
+            w.set_options(island);
+            settled(&mut w);
+            w.set_options(changed);
+            assert!(w.dirty && w.stale, "{changed:?}");
+        }
+    }
+
+    /// While a shape changes the engine takes each new one at once (a short wait for a frame, and not paced by the display, which would
+    /// show every frame one refresh late); a moment after the last change it is at rest again.
+    #[test]
+    fn a_changing_shape_shortens_the_wait_and_a_resting_one_does_not() {
+        let (_tx, rx) = crossbeam_channel::unbounded();
+        let mut e = Engine {
+            rx,
+            gfx: None,
+            wins: BTreeMap::new(),
+            mons: BTreeMap::new(),
+            stats_on: false,
+            last_device_check: Instant::now(),
+            last_activity: Instant::now(),
+            mode: CaptureMode::Off,
+            excl: Exclusion::default(),
+            last_access_check: Instant::now(),
+            instant_flushes: 0,
+        };
+        let mut w = Win::new(1, GlassOptions { shape: Some([0.0, 0.0, 10.0, 10.0]), ..GlassOptions::window(true) });
+        w.visible = true;
+        e.wins.insert(1, w);
+        assert!(!e.shape_moving(), "a window with a shape that never changed is at rest");
+        assert_eq!(e.frame_wait_ms(), FRAME_WAIT_MS);
+        e.command(Cmd::SetOptions { hwnd: 1, opts: GlassOptions { shape: Some([0.0, 0.0, 20.0, 10.0]), ..GlassOptions::window(true) } });
+        assert!(e.shape_moving(), "the shape changed a moment ago");
+        assert!(!e.paced(), "the display does not pace a shape: every frame would be a refresh late");
+        assert_eq!(e.frame_wait_ms(), SHAPE_WAIT_MS, "a short wait, so the next shape is taken soon after it is sent");
+        e.wins.get_mut(&1).unwrap().shape_changed = Some(Instant::now() - SHAPE_ACTIVE - Duration::from_millis(1));
+        assert!(!e.shape_moving(), "and at rest again after a moment");
+        e.wins.get_mut(&1).unwrap().visible = false;
+        e.wins.get_mut(&1).unwrap().shape_changed = Some(Instant::now());
+        assert!(!e.shape_moving(), "a hidden window does not keep the loop running");
+    }
+
     /// The look is part of what the loop guard compares: the same picture with another look is not skipped.
     #[test]
     fn the_loop_guard_sees_a_new_look() {
-        let geo = Geometry { w: 400, h: 300, origin: (0, 0), scale: 1.0, radius_px: 8.0, cut_corners: false };
+        let geo = Geometry { w: 400, h: 300, origin: (0, 0), scale: 1.0, radius_px: 8.0, cut_corners: false, shape: None, shadow: None };
         let lenses = LensList::default();
         let a = Presented { hash: 7, geo, look: Look::regular(false, &LookParams::DEFAULT), lenses };
         let b = Presented { look: Look::regular(false, &LookParams { frost: 80.0, ..LookParams::DEFAULT }), ..a };
