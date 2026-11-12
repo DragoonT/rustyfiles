@@ -252,10 +252,21 @@ pub fn load(args: &PreviewArgs, visibility: Visibility, config_dir: Option<PathB
         Mode::Real => None,
     };
     let layout_path = config_dir.unwrap_or_else(|| std::env::temp_dir().join("rustyfiles")).join(layout_file_name(scratch_dir));
-    let (store, outcome) = Store::load(&layout_path);
+    let (mut store, outcome) = Store::load(&layout_path);
+    with_windows_grid(&mut store);
     let read_only = read_only_for(args, &mode);
     let label_shadow = SystemRegistry.dword(Hive::CurrentUser, KEY_ADVANCED, "ListviewShadow").is_none_or(|v| v != 0);
     Loaded { backend: Backend { mode, read_only, items, folders, infos, specs, canvas, layout_path, visibility, label_shadow }, store, outcome, note }
+}
+
+/// A layout that holds no position yet and has no spacing starts on the grid Windows' own desktop uses (75 across, 99 down for
+/// medium icons: `Spacing::WINDOWS_11`), so a desktop that never imports from Explorer (a scratch folder; no Explorer to ask) has
+/// rows with room for the label's two lines. A layout that already holds positions keeps the grid they were stored in. Nothing is
+/// marked for saving: the spacing is written with the first real change, and until then every start gives the same answer.
+pub fn with_windows_grid(store: &mut Store) {
+    if store.spacing.is_none() && store.layouts.is_empty() {
+        store.spacing = Some(rf_core::desktop::grid::Spacing::WINDOWS_11);
+    }
 }
 
 /// The user's wallpaper (read-only), for the monitors given.

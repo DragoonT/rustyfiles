@@ -25,7 +25,8 @@ use gpui_kit::*;
 use rf_core::desktop::cover::geometry::cover_rect;
 use rf_core::desktop::cover::plan::{self, Debounce, Have, Op, Want};
 use rf_core::desktop::geom::Rect;
-use rf_core::desktop::import::{Assumption, ImportFailure, RawPosition, convert};
+use rf_core::desktop::grid::{Spacing, metrics_spaced};
+use rf_core::desktop::import::{Assumption, ImportFailure, RawPosition, RawView, convert_with};
 use rf_core::desktop::items::{ItemChange, Visibility};
 use rf_core::desktop::layout::MonitorSpec;
 use rf_core::desktop::store::Store;
@@ -60,6 +61,11 @@ pub enum ImportOutcome {
 /// The one-time import. `scratch`: the desktop is a scratch folder, which has nothing to do with Explorer's. `read` asks Explorer's
 /// desktop view for its positions (it blocks: call this off the UI thread; a fake in the tests).
 pub fn import_once(store: &mut Store, scratch: bool, specs: &[MonitorSpec], read: impl FnOnce() -> Result<Vec<RawPosition>, ImportFailure>) -> ImportOutcome {
+    import_view_once(store, scratch, specs, || read().map(RawView::from))
+}
+
+/// [`import_once`] with everything the view said: its positions and the spacing and icon size it reports for itself.
+pub fn import_view_once(store: &mut Store, scratch: bool, specs: &[MonitorSpec], read: impl FnOnce() -> Result<RawView, ImportFailure>) -> ImportOutcome {
     if scratch {
         return ImportOutcome::NotNeeded("a scratch folder (or a protected Desktop) has nothing to import");
     }
@@ -70,16 +76,30 @@ pub fn import_once(store: &mut Store, scratch: bool, specs: &[MonitorSpec], read
         // a layout file we may not write: importing into it would be lost, and the user's file is not ours to replace
         return ImportOutcome::NotNeeded("the layout file is not writable");
     }
-    let raw = match read() {
+    let view = match read() {
         Ok(r) => r,
         Err(e) => return ImportOutcome::Failed(e.to_string()),
     };
-    match convert(&raw, specs, store.icon_size_step(), Assumption::default()) {
+    // The grid the positions are turned into cells of is EXPLORER'S: the spacing its view reports for itself (75 across and 99 down
+    // for medium icons on a default Windows 11; other numbers when the user changed Windows' icon spacing). Cells of a grid with
+    // another row height would put the icons in uneven rows. The view's numbers are in the primary display's pixels. A view that
+    // does not say keeps the store's grid.
+    let before = store.spacing;
+    let primary_scale = specs.iter().find(|m| m.primary).or(specs.first()).map_or(100, |m| m.scale_percent);
+    if let Some(sp) = view.spacing.zip(view.icon_px).and_then(|(s, icon)| Spacing::from_view(s, icon, primary_scale)) {
+        store.set_spacing(Some(sp));
+    }
+    let (step, spacing) = (store.icon_size_step(), store.spacing);
+    match convert_with(&view.positions, specs, &|pct| metrics_spaced(step, pct, spacing), Assumption::default()) {
         Ok(c) => {
             store.import_positions(specs, &c.assignments, false);
             ImportOutcome::Imported { fit: c.fit, total: c.total }
         }
-        Err(e) => ImportOutcome::Failed(e.to_string()),
+        Err(e) => {
+            // (nothing was imported: the grid stays what it was)
+            store.set_spacing(before);
+            ImportOutcome::Failed(e.to_string())
+        }
     }
 }
 
@@ -296,7 +316,7 @@ fn start(cx: &mut App) {
         let (user, public) = (rf_win::desktop::items::user_desktop_dir(), rf_win::desktop::items::public_desktop_dir());
         let specs = loaded.backend.specs.clone();
         // (a protected Desktop imports nothing either: it is not meant to be touched, and the layout file is not ours to settle yet)
-        let outcome = import_once(&mut loaded.store, scratch || loaded.backend.read_only, &specs, || rf_win::desktop::import::read_explorer_positions(user, public).map(|p| p.positions));
+        let outcome = import_view_once(&mut loaded.store, scratch || loaded.backend.read_only, &specs, || rf_win::desktop::import::read_explorer_positions(user, public).map(|p| RawView { positions: p.positions, spacing: p.spacing, icon_px: p.icon_px }));
         match &outcome {
             ImportOutcome::Imported { fit, total } => log::info!("cover: imported the positions of {fit} of {total} icons from Explorer"),
             ImportOutcome::Failed(why) => log::warn!("cover: Explorer's icon positions were not imported: {why}"),
@@ -566,7 +586,7 @@ pub fn stop(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     // (explicit names: `use super::*` would bring in the toolkit's own `test` attribute through its glob and break `#[test]`)
-    use super::{ImportOutcome, MonitorInfo, MonitorSpec, Rect, RawPosition, ImportFailure, Store, Settings, import_once, is_same_display, logical_bounds};
+    use super::{ImportOutcome, MonitorInfo, MonitorSpec, Rect, RawPosition, RawView, ImportFailure, Spacing, Store, Settings, import_once, import_view_once, is_same_display, logical_bounds};
     use super::source::Mode;
     use rf_core::desktop::geom::Size;
     use rf_core::desktop::items::ItemId;
@@ -619,6 +639,43 @@ mod tests {
         assert!(!only_these_left(&[1, 10, 20], &[10], &[20]));
         // the rule before cover mode counted the covers as live windows: with them as the only others it never ended
         assert!(!only_these_left(&[10, 20, 21], &[10], &[]), "what the rule said when covers were not told apart");
+    }
+
+    #[test]
+    fn the_import_takes_explorers_own_spacing_so_rows_of_99_become_neighbouring_rows() {
+        // what Explorer's view reports on this machine: icons 13 right of and 2 below their cell's corner, cells of 75 x 99
+        let specs = [spec("A", 1920, 1080)];
+        let view = || RawView { positions: vec![raw("a", 13, 2), raw("b", 13, 101), raw("c", 13, 200), raw("d", 13, 299), raw("e", 88, 2)], spacing: Some((75, 99)), icon_px: Some(48) };
+        let mut s = Store::default();
+        let out = import_view_once(&mut s, false, &specs, || Ok(view()));
+        assert!(matches!(out, ImportOutcome::Imported { fit: 5, total: 5 }), "{out:?}");
+        assert_eq!(s.spacing, Some(Spacing::WINDOWS_11));
+        let cells = |s: &Store| {
+            let l = s.layouts.values().next().unwrap().values().next().unwrap();
+            ["a", "b", "c", "d", "e"].map(|n| { let slot = &l.items[ItemId::user(n).as_str()]; (slot.col, slot.row) })
+        };
+        assert_eq!(cells(&s), [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0)], "one row each, no gap");
+        assert_eq!(s.metrics_at(100).pitch_y, 99);
+
+        // the same positions on the bare square grid (a view that does not say its spacing): rows of 75, and a gap after the third
+        let mut bare = Store::default();
+        import_view_once(&mut bare, false, &specs, || Ok(RawView { spacing: None, icon_px: None, ..view() }));
+        assert_eq!(bare.spacing, None);
+        assert_eq!(cells(&bare), [(0, 0), (0, 1), (0, 2), (0, 4), (1, 0)], "what the first version did");
+
+        // an import that is refused leaves the grid as it was
+        let mut refused = Store::default();
+        let out = import_view_once(&mut refused, false, &specs, || Ok(RawView { positions: vec![raw("a", 90_000, 90_000)], spacing: Some((75, 99)), icon_px: Some(48) }));
+        assert!(matches!(out, ImportOutcome::Failed(_)));
+        assert_eq!(refused.spacing, None);
+        assert!(!refused.imported_from_explorer);
+
+        // a view on a 150 % primary display reports the same grid in bigger numbers
+        let mut big = Store::default();
+        let mut hi = spec("A", 2880, 1620);
+        hi.scale_percent = 150;
+        import_view_once(&mut big, false, &[hi], || Ok(RawView { positions: vec![raw("a", 20, 3)], spacing: Some((113, 149)), icon_px: Some(72) }));
+        assert_eq!(big.spacing, Some(Spacing::WINDOWS_11));
     }
 
     #[test]

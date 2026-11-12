@@ -4,9 +4,18 @@
 //! [`super::geometry::Mapping`]. The numbers come from the 100 % figures (a 75 pixel cell for the 48 pixel icon, which is the one
 //! size seen on a real machine, `rf_core::desktop::grid`) times the display scale, rounded half up like the grid's own.
 //!
-//! The tile is the cell shrunk by a margin and as tall as its content: the picture on top, then one or two lines of label. A cell can
-//! not hold a 48 pixel picture and two lines of text (75 pixels of cell), so the tile of a two-line label reaches a few pixels past
-//! its cell, like Explorer's; the next cell's tile starts below that for one-line labels and overlaps it a little for two-line ones.
+//! The tile is the cell shrunk by a margin and as tall as its content: the picture on top, then one or two lines of label. On the
+//! bare square grid (75 pixels for the 48 pixel icon) a cell cannot hold the picture and two lines of text, so the tile of a
+//! two-line label reaches a few pixels past its cell; on Windows' own desktop grid (75 x 99, `Spacing::WINDOWS_11`) it fits.
+//!
+//! THE LABEL'S WIDTH. Explorer's labels on this machine are up to 71 pixels wide in the 75 pixel cell ("Bu bilgisayar", 67 pixels,
+//! stands on one line there). The tile is therefore the cell less ONE pixel on each side and the text one pixel inside the tile:
+//! 71 pixels at 100 %. With the 2 + 3 pixels of the first version (65 pixels of text) common names wrapped that Explorer shows on
+//! one line.
+//!
+//! WHERE THE PICTURE AND THE LABEL SIT. Measured against Explorer's desktop on the same screen (medium icons, 100 %): the picture's
+//! top is 6 pixels below the cell's top and the label's first line begins 3 pixels under the picture. So: 1 pixel of margin, 5 above
+//! the picture, 3 between picture and label, 2 under the label; a two-line tile is then 88 pixels tall and fits the 99 pixel row.
 
 use rf_core::desktop::geom::Rect;
 use rf_core::desktop::grid::{GridMetrics, scaled};
@@ -17,7 +26,11 @@ pub struct TileLayout {
     pub margin: u32,
     pub tile_w: u32,
     pub icon: u32,
-    /// Gap above the picture, and between the picture and the label.
+    /// Gap above the picture.
+    pub top: u32,
+    /// Gap between the picture and the label.
+    pub gap: u32,
+    /// Gap under the label (under the picture when there is no label).
     pub pad: u32,
     /// Horizontal gap between the tile's edge and the text.
     pub text_pad: u32,
@@ -31,14 +44,16 @@ pub struct TileLayout {
 impl TileLayout {
     pub fn new(m: GridMetrics, scale_percent: u32) -> TileLayout {
         let s = |v: u32| scaled(v, scale_percent.max(50));
-        let margin = s(2);
+        let margin = s(1);
         let font = s(12);
         TileLayout {
             margin,
             tile_w: m.pitch_x.saturating_sub(2 * margin),
             icon: m.icon_px,
+            top: s(5),
+            gap: s(3),
             pad: s(2),
-            text_pad: s(3),
+            text_pad: s(1),
             font,
             line_h: (font * 6).div_ceil(5), // 1.2 times the font, rounded up
             pitch_y: m.pitch_y,
@@ -47,7 +62,12 @@ impl TileLayout {
 
     /// Where the picture goes, inside the tile (x, y).
     pub fn icon_at(&self) -> (u32, u32) {
-        (self.tile_w.saturating_sub(self.icon) / 2, self.pad)
+        (self.tile_w.saturating_sub(self.icon) / 2, self.top)
+    }
+
+    /// Where the label's first line begins, from the tile's top.
+    pub fn label_top(&self) -> u32 {
+        self.top + self.icon + self.gap
     }
 
     /// The width a line of the label may be.
@@ -57,7 +77,7 @@ impl TileLayout {
 
     /// The tile's height for a label of `lines` lines (0 for none).
     pub fn height(&self, lines: usize) -> u32 {
-        self.pad + self.icon + if lines == 0 { self.pad } else { self.pad / 2 + lines as u32 * self.line_h + self.pad }
+        self.top + self.icon + if lines == 0 { self.pad } else { self.gap + lines as u32 * self.line_h + self.pad }
     }
 
     /// The tile for the cell at (`left`, `top`) in canvas pixels, `lines` tall.
@@ -91,23 +111,24 @@ mod tests {
     #[test]
     fn the_medium_tile_at_100_percent() {
         let t = TileLayout::new(metrics(IconSize::Medium, 100), 100);
-        assert_eq!((t.margin, t.tile_w, t.icon, t.pad, t.text_pad, t.font, t.line_h), (2, 71, 48, 2, 3, 12, 15));
-        assert_eq!(t.icon_at(), (11, 2), "the picture is centred in the tile");
-        assert_eq!(t.text_w(), 65);
-        assert_eq!(t.height(1), 2 + 48 + 1 + 15 + 2);
-        assert_eq!(t.height(2), 2 + 48 + 1 + 30 + 2);
-        assert_eq!(t.height(0), 2 + 48 + 2);
-        assert_eq!(t.rect(75, 150, 2), Rect::from_size(77, 152, 71, 83));
+        assert_eq!((t.margin, t.tile_w, t.icon, t.top, t.gap, t.pad, t.text_pad, t.font, t.line_h), (1, 73, 48, 5, 3, 2, 1, 12, 15));
+        assert_eq!(t.icon_at(), (12, 5), "the picture is centred in the tile, 6 pixels under the cell's top with the margin");
+        assert_eq!(t.label_top(), 5 + 48 + 3);
+        assert_eq!(t.text_w(), 71, "as wide as Explorer's labels in the 75 pixel cell");
+        assert_eq!(t.height(1), 5 + 48 + 3 + 15 + 2);
+        assert_eq!(t.height(2), 5 + 48 + 3 + 30 + 2);
+        assert_eq!(t.height(0), 5 + 48 + 2);
+        assert_eq!(t.rect(75, 150, 2), Rect::from_size(76, 151, 73, 88));
     }
 
     #[test]
     fn the_tile_scales_with_the_display() {
         let t150 = TileLayout::new(metrics(IconSize::Medium, 150), 150);
-        assert_eq!((t150.icon, t150.margin, t150.font), (72, 3, 18));
-        assert_eq!(t150.tile_w, 113 - 6);
+        assert_eq!((t150.icon, t150.margin, t150.font), (72, 2, 18));
+        assert_eq!(t150.tile_w, 113 - 4);
         assert_eq!(t150.line_h, 22); // 18 * 1.2 = 21.6, rounded up
         let t200 = TileLayout::new(metrics(IconSize::Small, 200), 200);
-        assert_eq!((t200.icon, t200.tile_w), (64, 128 - 8));
+        assert_eq!((t200.icon, t200.tile_w), (64, 128 - 4));
     }
 
     #[test]
@@ -128,9 +149,12 @@ mod tests {
     #[test]
     fn the_hit_rectangle_is_the_tile_cut_where_the_next_row_begins() {
         let t = TileLayout::new(metrics(IconSize::Medium, 100), 100);
-        // 2 + 48 + 1 + 30 + 2 = 83 tall from y = 2 would end at 85; the next row's tile starts at 75 + 2
-        assert_eq!(t.hit(0, 0), Rect::from_size(2, 2, 71, 75));
-        assert_eq!(t.hit_for(0, 0, 1), t.rect(0, 0, 1), "a one-line label's tile fits in its cell: no cut");
+        // 5 + 48 + 3 + 30 + 2 = 88 tall from y = 1 would end at 89; the next row's tile starts at 75 + 1
+        assert_eq!(t.hit(0, 0), Rect::from_size(1, 1, 73, 75));
+        // on Windows' own grid (99 down) the two-line tile fits in its cell and nothing is cut
+        let w = TileLayout::new(rf_core::desktop::grid::metrics_spaced(IconSize::Medium, 100, Some(rf_core::desktop::grid::Spacing::WINDOWS_11)), 100);
+        assert_eq!(w.hit(0, 0), w.rect(0, 0, 2));
+        assert_eq!(t.hit_for(0, 0, 1), t.rect(0, 0, 1), "a one-line label's tile (73 tall from y = 1) fits in its cell: no cut");
         assert!(t.hit(0, 0).height() > t.hit_for(0, 0, 1).height());
     }
 

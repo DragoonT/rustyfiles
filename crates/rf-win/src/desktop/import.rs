@@ -24,7 +24,7 @@ use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, I
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Shell::Common::{ITEMIDLIST, STRRET};
 use windows::Win32::UI::Shell::{
-    IEnumIDList, IFolderView, IShellBrowser, IShellFolder, IShellWindows, SHGDN_FORPARSING, SID_STopLevelBrowser, SVGIO_ALLVIEW, ShellWindows, StrRetToStrW, SWC_DESKTOP,
+    IEnumIDList, IFolderView, IFolderView2, IShellBrowser, IShellFolder, IShellWindows, SHGDN_FORPARSING, SID_STopLevelBrowser, SVGIO_ALLVIEW, ShellWindows, StrRetToStrW, SWC_DESKTOP,
     SWFO_NEEDDISPATCH,
 };
 use windows::core::PWSTR;
@@ -38,6 +38,11 @@ pub struct ExplorerPositions {
     /// Items whose name is neither in one of the two Desktop folders nor one of our virtual items (the user's profile folder, OneDrive, a
     /// library ...): they are not imported and are placed fresh.
     pub unmapped: usize,
+    /// The distance between two neighbouring icons as the view reports it (`IFolderView::GetSpacing`), in the same units as the
+    /// positions: across, down. `None` when the view would not say.
+    pub spacing: Option<(i32, i32)>,
+    /// The icon's edge as the view reports it (`IFolderView2::GetViewModeAndIconSize`).
+    pub icon_px: Option<i32>,
 }
 
 /// What a parsing name from Explorer's view is, in our identities. A file-system item comes as its full path
@@ -90,6 +95,17 @@ fn read_on_shell_thread(user_dir: Option<PathBuf>, public_dir: Option<PathBuf>) 
         let en: IEnumIDList = fv.Items(SVGIO_ALLVIEW).map_err(|e| com("IFolderView::Items", e))?;
 
         let mut out = ExplorerPositions::default();
+        // (both only read the view's state)
+        let mut sp = windows::Win32::Foundation::POINT::default();
+        if fv.GetSpacing(&mut sp).is_ok() && sp.x > 0 && sp.y > 0 {
+            out.spacing = Some((sp.x, sp.y));
+        }
+        if let Ok(fv2) = windows::core::Interface::cast::<IFolderView2>(&view) {
+            let (mut mode, mut icon) = (Default::default(), 0i32);
+            if fv2.GetViewModeAndIconSize(&mut mode, &mut icon).is_ok() && icon > 0 {
+                out.icon_px = Some(icon);
+            }
+        }
         loop {
             let mut batch = [std::ptr::null_mut::<ITEMIDLIST>(); 32];
             let mut got = 0u32;

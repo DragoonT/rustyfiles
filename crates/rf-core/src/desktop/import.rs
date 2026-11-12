@@ -9,9 +9,24 @@
 //! is the measurement T13 asks for.
 
 use super::geom::{Rect, virtual_screen};
-use super::grid::{Cell, Grid, IconSize, metrics};
+use super::grid::{Cell, Grid, GridMetrics, IconSize, metrics};
 use super::items::ItemId;
 use super::layout::MonitorSpec;
+
+/// What one reading of Explorer's desktop view gave: the positions, and the spacing and icon size the view reports for itself (the
+/// same units as the positions), when it says.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RawView {
+    pub positions: Vec<RawPosition>,
+    pub spacing: Option<(i32, i32)>,
+    pub icon_px: Option<i32>,
+}
+
+impl From<Vec<RawPosition>> for RawView {
+    fn from(positions: Vec<RawPosition>) -> Self {
+        RawView { positions, spacing: None, icon_px: None }
+    }
+}
 
 /// A position exactly as Explorer's view returned it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,17 +104,22 @@ fn locate(x: i32, y: i32, vs: Rect, monitors: &[MonitorSpec], grids: &[Grid], a:
     })
 }
 
-fn grids(monitors: &[MonitorSpec], size: IconSize) -> Vec<Grid> {
-    monitors.iter().map(|m| Grid::new(m.work, metrics(size, m.scale_percent))).collect()
+fn grids(monitors: &[MonitorSpec], metrics_at: &dyn Fn(u32) -> GridMetrics) -> Vec<Grid> {
+    monitors.iter().map(|m| Grid::new(m.work, metrics_at(m.scale_percent))).collect()
 }
 
-/// Turns the raw positions into cells, or says why it will not.
+/// Turns the raw positions into cells of the default grid for `size`, or says why it will not.
 pub fn convert(raw: &[RawPosition], monitors: &[MonitorSpec], size: IconSize, a: Assumption) -> Result<Converted, ImportFailure> {
+    convert_with(raw, monitors, &|pct| metrics(size, pct), a)
+}
+
+/// [`convert`] on the grid `metrics_at` gives for a display scale (a store's own: `Store::metrics_at`).
+pub fn convert_with(raw: &[RawPosition], monitors: &[MonitorSpec], metrics_at: &dyn Fn(u32) -> GridMetrics, a: Assumption) -> Result<Converted, ImportFailure> {
     if raw.is_empty() {
         return Err(ImportFailure::NoItems);
     }
     let vs = virtual_screen(&monitors.iter().map(|m| m.rect).collect::<Vec<_>>());
-    let gs = grids(monitors, size);
+    let gs = grids(monitors, metrics_at);
     let assignments: Vec<(ItemId, usize, Cell)> = raw.iter().filter_map(|r| locate(r.x, r.y, vs, monitors, &gs, a).map(|(m, c)| (r.id.clone(), m, c))).collect();
     let (fit, total) = (assignments.len(), raw.len());
     if fit * 10 < total * 9 {
@@ -108,11 +128,28 @@ pub fn convert(raw: &[RawPosition], monitors: &[MonitorSpec], size: IconSize, a:
     Ok(Converted { assignments, fit, total })
 }
 
+/// The step between neighbouring icons as the positions themselves show it: the most common positive difference between two
+/// consecutive distinct x values, and the same for y. `None` with fewer than two distinct values on an axis. A cross-check of what
+/// the view says its spacing is.
+pub fn observed_pitch(raw: &[RawPosition]) -> Option<(u32, u32)> {
+    fn step(mut v: Vec<i32>) -> Option<u32> {
+        v.sort_unstable();
+        v.dedup();
+        let mut count: std::collections::BTreeMap<i32, usize> = std::collections::BTreeMap::new();
+        for w in v.windows(2) {
+            *count.entry(w[1] - w[0]).or_default() += 1;
+        }
+        // (the most common step; of equally common ones the smallest, which is the pitch and not a multiple of it)
+        count.into_iter().max_by_key(|&(d, n)| (n, -d)).map(|(d, _)| d as u32)
+    }
+    Some((step(raw.iter().map(|r| r.x).collect())?, step(raw.iter().map(|r| r.y).collect())?))
+}
+
 /// For each common scale: how many positions would land on a monitor's grid if the raw numbers were in units of that scale. The
 /// probe prints this; it does not change anything.
 pub fn diagnose(raw: &[RawPosition], monitors: &[MonitorSpec], size: IconSize) -> Vec<(u32, usize)> {
     let vs = virtual_screen(&monitors.iter().map(|m| m.rect).collect::<Vec<_>>());
-    let gs = grids(monitors, size);
+    let gs = grids(monitors, &|pct| metrics(size, pct));
     [100u32, 125, 150, 175, 200].into_iter().map(|p| (p, raw.iter().filter(|r| locate(r.x, r.y, vs, monitors, &gs, Assumption { scale_percent: p }).is_some()).count())).collect()
 }
 
@@ -129,6 +166,17 @@ pub fn coordinate_range(raw: &[RawPosition]) -> Option<((i32, i32), (i32, i32))>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_pitch_is_read_off_the_positions_themselves() {
+        let at = |x: i32, y: i32| RawPosition { id: ItemId::user(&format!("{x}-{y}")), x, y };
+        // three columns 75 apart, rows 99 apart with one row left empty (a step of 198 once)
+        let pts: Vec<RawPosition> = [(13, 2), (13, 101), (13, 200), (13, 398), (88, 2), (88, 101), (163, 2)].into_iter().map(|(x, y)| at(x, y)).collect();
+        assert_eq!(observed_pitch(&pts), Some((75, 99)));
+        // one column: no step across to read
+        assert_eq!(observed_pitch(&[at(13, 2), at(13, 101)]), None);
+        assert_eq!(observed_pitch(&[]), None);
+    }
     use crate::desktop::geom::Size;
     use crate::desktop::store::Store;
 

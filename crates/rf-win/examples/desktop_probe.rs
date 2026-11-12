@@ -188,6 +188,7 @@ fn main() {
                 ours.difference(&theirs).count(),
                 theirs.difference(&ours).count()
             );
+            println!("  the view's own spacing (GetSpacing): {:?}, icon size: {:?}; pitch seen in the positions (most common step across, down): {:?}", ep.spacing, ep.icon_px, rf_core::desktop::import::observed_pitch(&ep.positions));
             if let Some(((x0, x1), (y0, y1))) = coordinate_range(&ep.positions) {
                 println!("  coordinates as returned: x {x0} .. {x1}, y {y0} .. {y1} (virtual screen {} x {}, origin {}, {})", vs.width(), vs.height(), vs.left, vs.top);
             }

@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::sort::{SortDir, SortKey};
 
-use super::grid::IconSize;
+use super::grid::{GridMetrics, IconSize, Spacing, metrics_spaced};
 
 pub const STORE_VERSION: u32 = 1;
 
@@ -170,6 +170,9 @@ pub struct Store {
     /// The one-time import of Explorer's positions has been done (or declined).
     #[serde(default)]
     pub imported_from_explorer: bool,
+    /// The spacing Explorer's desktop view reported at that import; `None`: the default grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spacing: Option<Spacing>,
     /// monitor device path -> "WxH@pct" -> that layout
     #[serde(default)]
     pub layouts: BTreeMap<String, BTreeMap<String, MonitorLayout>>,
@@ -190,6 +193,7 @@ impl Default for Store {
             show_icons: true,
             clock: 0,
             imported_from_explorer: false,
+            spacing: None,
             layouts: BTreeMap::new(),
             dirty: false,
             blocked: None,
@@ -200,6 +204,18 @@ impl Default for Store {
 impl Store {
     pub fn icon_size_step(&self) -> IconSize {
         IconSize::from_px(self.icon_size)
+    }
+    /// The grid's metrics for this store's icon size on a display at `scale_percent`: on the imported spacing when there is one.
+    pub fn metrics_at(&self, scale_percent: u32) -> GridMetrics {
+        metrics_spaced(self.icon_size_step(), scale_percent, self.spacing)
+    }
+    /// Takes over the spacing Explorer's view reported. Called by the import BEFORE the positions are turned into cells; the cells
+    /// stored afterwards are cells of this grid.
+    pub fn set_spacing(&mut self, spacing: Option<Spacing>) {
+        if self.spacing != spacing {
+            self.spacing = spacing;
+            self.mark();
+        }
     }
     pub fn is_dirty(&self) -> bool {
         self.dirty

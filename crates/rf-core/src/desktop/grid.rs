@@ -1,10 +1,17 @@
 //! The icon grid: icon size steps, the size of a cell at every display scale, cells and their column-major order.
 //!
-//! WHERE THE NUMBERS COME FROM. The only value read on a real machine (note 4, 5.3) is the one for the default, medium, size: icon
-//! 48, `SM_CXICONSPACING` = `SM_CYICONSPACING` = 75 pixels at 100 %. Small = 32 and Large = 96 are the sizes the same note reports
-//! from memory (UNVERIFIED). The rule for the cell is this file's own proposal: icon + 27 pixels, but never narrower than 64 (room
-//! for a two-line label), which gives exactly 75 for medium. At other scales every length is the 100 % one times the scale, rounded
-//! half up. Windows' own desktop uses the same numbers only for medium; compare with the real desktop before trusting the others.
+//! WHERE THE NUMBERS COME FROM. Measured on Windows 11 build 26300 at 100 % with the default, medium, size: Explorer's desktop view
+//! reports a spacing of 75 across and 99 DOWN for its 48-pixel icons (`IFolderView::GetSpacing`; the icons' own positions step by
+//! the same 75 and 99). The system metrics `SM_CXICONSPACING` = `SM_CYICONSPACING` = 75 are NOT the desktop's row height: the view
+//! adds room for the label's two lines. The first version of this file took 75 for both, and imported icons stood in rows of 75
+//! with a gap after every third.
+//!
+//! TWO GRIDS THEREFORE. [`metrics`] is the BARE square grid (icon + 27, never under 64: 75 for medium), which a layout file written
+//! before the spacing was known is in, and which the pure tests use. [`metrics_spaced`] is the grid of a [`Spacing`]: the one
+//! Explorer's view reported when its positions were imported (so changed Windows icon spacing is followed), or
+//! [`Spacing::WINDOWS_11`], the measured default, for a layout that starts with no Explorer to ask; the room around the icon is
+//! kept for the other icon sizes (Small = 32 and Large = 96, sizes reported from memory: UNVERIFIED, like their spacing). At other
+//! scales every length is the 100 % one times the scale, rounded half up.
 
 use std::collections::HashSet;
 
@@ -48,10 +55,34 @@ impl IconSize {
             _ => IconSize::Small,
         }
     }
-    /// The cell at 100 %: icon + 27, at least 64, square.
+    /// The bare cell at 100 %: icon + 27, at least 64, square.
     pub const fn pitch(self) -> u32 {
         let p = self.px() + 27;
         if p < 64 { 64 } else { p }
+    }
+}
+
+/// The spacing Explorer's desktop view reported when its positions were imported, at 100 %: for icons of `icon` pixels, `x` across
+/// and `y` down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Spacing {
+    pub icon: u32,
+    pub x: u32,
+    pub y: u32,
+}
+
+impl Spacing {
+    /// What Explorer's desktop view reports on Windows 11 with the default settings (measured, see the head of this file).
+    pub const WINDOWS_11: Spacing = Spacing { icon: 48, x: 75, y: 99 };
+
+    /// From the view's numbers, which are in pixels of a display at `scale_percent`. `None` for numbers that cannot be a spacing:
+    /// an icon outside 16..=256, a step smaller than the icon or more than 200 past it.
+    pub fn from_view(spacing: (i32, i32), icon_px: i32, scale_percent: u32) -> Option<Spacing> {
+        let pct = scale_percent.max(50) as i64;
+        let at_100 = |v: i32| (v as i64 * 100 + pct / 2).div_euclid(pct);
+        let (icon, x, y) = (at_100(icon_px), at_100(spacing.0), at_100(spacing.1));
+        let fits = |v: i64| v >= icon && v <= icon + 200;
+        ((16..=256).contains(&icon) && fits(x) && fits(y)).then_some(Spacing { icon: icon as u32, x: x as u32, y: y as u32 })
     }
 }
 
@@ -78,6 +109,16 @@ impl GridMetrics {
 pub fn metrics(size: IconSize, scale_percent: u32) -> GridMetrics {
     let pct = scale_percent.max(50);
     GridMetrics { icon_px: scaled(size.px(), pct), pitch_x: scaled(size.pitch(), pct), pitch_y: scaled(size.pitch(), pct) }
+}
+
+/// The metrics of a size at a display scale on the grid of a spacing: the room around the icon is kept for the other icon sizes
+/// (never under 64 either way). With `None`, the bare square grid of [`metrics`].
+pub fn metrics_spaced(size: IconSize, scale_percent: u32, spacing: Option<Spacing>) -> GridMetrics {
+    let Some(sp) = spacing else { return metrics(size, scale_percent) };
+    let pct = scale_percent.max(50);
+    let across = (size.px() + sp.x.saturating_sub(sp.icon)).max(64);
+    let down = (size.px() + sp.y.saturating_sub(sp.icon)).max(64);
+    GridMetrics { icon_px: scaled(size.px(), pct), pitch_x: scaled(across, pct), pitch_y: scaled(down, pct) }
 }
 
 /// One grid cell. The derived order is column-major (compare the column first), which is the order Windows fills the desktop in: down
@@ -177,6 +218,41 @@ impl Grid {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_grid_of_a_spacing_keeps_the_room_around_the_icon() {
+        // what Explorer reports here: 75 x 99 for 48-pixel icons
+        let w = Some(Spacing::WINDOWS_11);
+        let m = metrics_spaced(IconSize::Medium, 100, w);
+        assert_eq!((m.icon_px, m.pitch_x, m.pitch_y), (48, 75, 99));
+        // the other sizes keep the 27 and 51 around the icon; small is held at 64 across
+        let s = metrics_spaced(IconSize::Small, 100, w);
+        assert_eq!((s.icon_px, s.pitch_x, s.pitch_y), (32, 64, 83));
+        let l = metrics_spaced(IconSize::Large, 100, w);
+        assert_eq!((l.icon_px, l.pitch_x, l.pitch_y), (96, 123, 147));
+        // scaled like everything else
+        let m150 = metrics_spaced(IconSize::Medium, 150, w);
+        assert_eq!((m150.icon_px, m150.pitch_x, m150.pitch_y), (72, 113, 149));
+        // no spacing: the bare square grid
+        assert_eq!(metrics_spaced(IconSize::Medium, 100, None), metrics(IconSize::Medium, 100));
+        // a user who widened Windows' icon spacing gets that grid
+        let wide = Spacing::from_view((100, 120), 48, 100).unwrap();
+        let mw = metrics_spaced(IconSize::Medium, 100, Some(wide));
+        assert_eq!((mw.pitch_x, mw.pitch_y), (100, 120));
+    }
+
+    #[test]
+    fn a_views_numbers_become_a_spacing_at_100_percent_or_are_refused() {
+        assert_eq!(Spacing::from_view((75, 99), 48, 100), Some(Spacing::WINDOWS_11));
+        // a view on a 150 % display reports bigger numbers for the same grid
+        assert_eq!(Spacing::from_view((113, 149), 72, 150), Some(Spacing { icon: 48, x: 75, y: 99 }));
+        // nonsense is refused: no icon, a step smaller than the icon, a step far past it, negative numbers
+        assert_eq!(Spacing::from_view((75, 99), 0, 100), None);
+        assert_eq!(Spacing::from_view((40, 99), 48, 100), None);
+        assert_eq!(Spacing::from_view((75, 400), 48, 100), None);
+        assert_eq!(Spacing::from_view((-75, -99), 48, 100), None);
+        assert_eq!(Spacing::from_view((75, 99), 1000, 100), None);
+    }
 
     #[test]
     fn icon_size_steps() {

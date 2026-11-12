@@ -3,7 +3,11 @@
 //!
 //! RULES. A name that fits on one line stays on one line. Otherwise the first line ends at the last place where a name can be broken
 //! (after a space, `-`, `_`, `.`, `(`, `[`, `,`) that still fits; a name with no such place, or whose first piece would be tiny, is
-//! cut where the text no longer fits. The second line is what is left. When that does not fit either, its MIDDLE goes: the start and
+//! cut where the text no longer fits. A no-break space is not a place to break (Windows' own names use it: the Turkish Recycle
+//! Bin is "Geri Dönüşüm Kutusu" with one after "Geri", and Explorer shows "Geri Dönüşü" / "m Kutusu"). Compared with Explorer on a
+//! real desktop, a name of several words breaks between words there too ("Ultimate" / "Vocal R..."), and a rule tried here that
+//! filled the first line whenever that showed the whole name ("Ultimate Voc" / "al Remover") was taken out again: it read worse.
+//! The second line is what is left. When that does not fit either, its MIDDLE goes: the start and
 //! the end of the line stay and an ellipsis stands between them, because the end of a file name is the part that tells files apart
 //! (the extension, a number, a version). The end kept is the extension and the three characters before it, or the last four
 //! characters of a name without one.
@@ -118,6 +122,23 @@ mod tests {
     /// 'i', 'l', '.', ' ' are half a unit, 'W' and 'M' one and a half, the rest one.
     fn varied(s: &str) -> f32 {
         s.chars().map(|c| if "il. ".contains(c) { 0.5 } else if "WM".contains(c) { 1.5 } else { 1.0 }).sum()
+    }
+
+    #[test]
+    fn a_no_break_space_is_not_a_place_to_break() {
+        // 11 units a line. Windows' own name of the Turkish Recycle Bin has a no-break space after "Geri": the first line is filled,
+        // as on Explorer's desktop
+        let l = wrap("Geri\u{a0}Dönüşüm Kutusu", 11.0, &unit);
+        assert_eq!((l.first.as_str(), l.second.as_deref()), ("Geri\u{a0}Dönüşü", Some("m Kutusu")));
+        // with an ordinary space the words stay whole and the second line loses its middle
+        let l = wrap("Geri Dönüşüm Kutusu", 11.0, &unit);
+        assert_eq!(l.first, "Geri");
+        assert!(l.second.as_deref().is_some_and(|s| s.contains('…') && unit(s) <= 11.0), "{l:?}");
+        // several words: between words, like Explorer
+        let l = wrap("Ultimate Vocal Remover", 11.0, &unit);
+        assert_eq!(l.first, "Ultimate");
+        let l = wrap("Google Chrome", 11.0, &unit);
+        assert_eq!((l.first.as_str(), l.second.as_deref()), ("Google", Some("Chrome")));
     }
 
     #[test]

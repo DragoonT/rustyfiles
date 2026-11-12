@@ -25,7 +25,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use super::geom::{Rect, Size};
-use super::grid::{Cell, Grid, IconSize, metrics};
+use super::grid::{Cell, Grid, IconSize, metrics_spaced};
 use super::items::ItemId;
 use super::store::{MonitorLayout, Removed, Slot, Store};
 
@@ -233,8 +233,7 @@ impl Store {
             out.unplaced = items.to_vec();
             return out;
         }
-        let size = self.icon_size_step();
-        let grids: Vec<Grid> = monitors.iter().map(|m| Grid::new(m.work, metrics(size, m.scale_percent))).collect();
+        let grids: Vec<Grid> = monitors.iter().map(|m| Grid::new(m.work, self.metrics_at(m.scale_percent))).collect();
         let order = monitor_order(monitors);
         let n = monitors.len();
         let align = self.align_to_grid;
@@ -461,7 +460,7 @@ impl Store {
     /// (the nearest free one), records it, and removes the item from the other connected monitors' layouts. Returns where it went.
     pub fn drop_item(&mut self, monitors: &[MonitorSpec], resolved: &mut Resolved, id: &ItemId, to: usize, x: i32, y: i32) -> Option<Placement> {
         let m = monitors.get(to)?;
-        let grid = Grid::new(m.work, metrics(self.icon_size_step(), m.scale_percent));
+        let grid = Grid::new(m.work, self.metrics_at(m.scale_percent));
         let (cell, dx, dy) = grid.snap(x, y, self.align_to_grid)?;
         let taken: HashSet<Cell> = resolved.placed.iter().filter(|(k, p)| *k != id && p.monitor == to).map(|(_, p)| p.cell).collect();
         let (cell, dx, dy) = if self.align_to_grid && taken.contains(&cell) { (grid.nearest_free(cell, &taken)?, 0, 0) } else { (cell, dx, dy) };
@@ -532,10 +531,11 @@ impl Store {
         if old == size && self.icon_size == size.px() {
             return;
         }
+        let spacing = self.spacing;
         for by_key in self.layouts.values_mut() {
             for (key, l) in by_key.iter_mut() {
                 let pct = parse_layout_key(key).map_or(100, |(_, _, p)| p);
-                let (a, b) = (metrics(old, pct), metrics(size, pct));
+                let (a, b) = (metrics_spaced(old, pct, spacing), metrics_spaced(size, pct, spacing));
                 let remap = |c: u32, o: u32, n: u32| ((c as u64 * o as u64 + o as u64 / 2) / n.max(1) as u64) as u32;
                 let off = |d: i32, o: u32, n: u32| (d as i64 * n as i64 / o.max(1) as i64) as i32;
                 for s in l.items.values_mut().chain(l.provisional.values_mut()) {

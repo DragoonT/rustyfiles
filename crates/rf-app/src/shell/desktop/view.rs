@@ -18,7 +18,7 @@ use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_core::desktop::geom::{Rect, Rgb, Size};
-use rf_core::desktop::grid::{Cell, Grid, metrics};
+use rf_core::desktop::grid::{Cell, Grid};
 use rf_core::desktop::items::{DesktopItem, ItemChange, ItemId, Origin, Visibility, sort_items};
 use rf_core::desktop::layout::{Listing, Resolved};
 use rf_core::desktop::placement::Position;
@@ -496,8 +496,7 @@ impl DesktopView {
             self.tl = None;
             return;
         };
-        let icon_step = self.store.get().icon_size_step();
-        let m = metrics(icon_step, spec.scale_percent);
+        let m = self.store.get().metrics_at(spec.scale_percent);
         let grid = Grid::new(spec.work, m);
         let tl = TileLayout::new(m, spec.scale_percent);
         let mut placed: Vec<Placed> = self
@@ -734,7 +733,7 @@ impl DesktopView {
             Some(im) => img(im).size(px(icon_l)).object_fit(ObjectFit::Contain).into_any_element(),
             None => Self::fallback_icon(it, icon_l, p.dark),
         };
-        let label_top = self.map.len((tl.pad + tl.icon + tl.pad / 2) as f32);
+        let label_top = self.map.len(tl.label_top() as f32);
         let label: AnyElement = match (&renaming, &lines) {
             (Some(inp), _) => div()
                 .absolute()
