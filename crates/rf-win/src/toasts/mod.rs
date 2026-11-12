@@ -17,10 +17,12 @@
 //! a count (the dot).
 //!
 //! REMOVING. `RemoveNotification(id)` and `ClearNotifications()` are documented calls of the same class; whether they take effect for
-//! a program without package identity is NOT known (the probe of the research did not call them: they change the user's list). So in
-//! the real mode they are OFF until the person running the program has tried them and says so with `RUSTYFILES_TOASTS_REMOVE=1`
-//! ([`removal_enabled`]); with it the panel offers the small x and "clear all" only while [`RemoveWatch`] has not caught them doing
-//! nothing, and a call that returns an error hides them at once. In the made-up mode (below) they work on the made-up list.
+//! a program without package identity was not known when this was written (the probe of the research did not call them: they
+//! change the user's list), so they were first shipped OFF. The user tried the panel, missed the clearing and asked for it: they are
+//! ON now ([`removal_enabled`]; `RUSTYFILES_TOASTS_REMOVE=0` turns them off). The panel offers the small x and "clear all" only
+//! while [`RemoveWatch`] has not caught them doing nothing, and a call that returns an error hides them at once: if Windows does
+//! not obey a program without package identity, the x simply goes away after the first try. In the made-up mode (below) they work
+//! on the made-up list.
 //!
 //! THE PURE PARTS, tested: the access decision, grouping and ordering, the three-line clamp, the relative time, the difference between
 //! two polls (so the list does not flicker or lose the keyboard cursor), the remove watch, what a poll that failed does (nothing)
@@ -141,12 +143,17 @@ pub fn fake_from_env() -> Option<Fake> {
     std::env::var("RUSTYFILES_TOASTS_FAKE").ok().and_then(|v| parse_fake(&v))
 }
 
-/// The variable that turns the x and "clear all" on in the real mode (see the header: nobody has seen Windows obey them yet).
+/// The variable that turns the x and "clear all" OFF in the real mode (`0`, `false`, `no` or `off`); see the header.
 pub const REMOVE_ENV: &str = "RUSTYFILES_TOASTS_REMOVE";
 
-/// Whether removing is offered at all: always on the made-up list (it is in memory), and on the real one only when asked for.
+/// Whether removing is offered at all: on the made-up list always (it is in memory), on the other made-up states never (there is
+/// nothing to remove), and on the real list unless the variable says no.
 pub fn removal_enabled(fake: Option<Fake>, env: Option<&str>) -> bool {
-    fake == Some(Fake::Many) || env.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+    match fake {
+        Some(Fake::Many) => true,
+        Some(_) => false,
+        None => !env.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off")),
+    }
 }
 
 /// The invented list: three programs without an AppUserModelID (so a click starts nothing), a long title, a body of five lines, and
@@ -782,12 +789,12 @@ mod tests {
     }
 
     #[test]
-    fn removing_is_off_in_the_real_mode_until_asked_for() {
-        assert!(!removal_enabled(None, None));
-        assert!(!removal_enabled(None, Some("")));
-        assert!(!removal_enabled(None, Some("0")));
+    fn removing_is_on_in_the_real_mode_unless_switched_off() {
+        assert!(removal_enabled(None, None));
+        assert!(removal_enabled(None, Some("")));
         assert!(removal_enabled(None, Some("1")));
-        assert!(removal_enabled(None, Some(" True ")));
+        assert!(!removal_enabled(None, Some("0")));
+        assert!(!removal_enabled(None, Some(" Off ")));
         assert!(removal_enabled(Some(Fake::Many), None), "the made-up list is in memory");
         for f in [Fake::Empty, Fake::Denied, Fake::NotAsked] {
             assert!(!removal_enabled(Some(f), None));

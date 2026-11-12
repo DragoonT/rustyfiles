@@ -326,9 +326,8 @@ setting switched on while the dock runs needs no special case.
   AppUserModelID, as the Start panel does); it does not press any button of the toast (no API for that). With none: "Bildirim yok".
 * REMOVING. A small x on a notification (shown when the pointer is on it or the keyboard is) calls `RemoveNotification(id)`, and
   "Tümünü temizle" calls `ClearNotifications()`. Both are documented, but whether they work for a program without package identity
-  was NOT verified (they change the user's list, so the research did not call them). So they are OFF in the real mode (no x, no
-  "Tümünü temizle", Delete does nothing) until `RUSTYFILES_TOASTS_REMOVE=1` is set, which is how the first live try is made; making
-  it the default is a decision for after that try. With it on, `rf_win::toasts::RemoveWatch` hides the x and "clear all" for the rest
+  was NOT verified (they change the user's list, so the research did not call them). They were first shipped off; the user tried the panel, missed the clearing and
+  asked for it, so they are ON now (`RUSTYFILES_TOASTS_REMOVE=0` switches them off). While on, `rf_win::toasts::RemoveWatch` hides the x and "clear all" for the rest
   of the opening when a call returns an error, or when a notification asked to go is still listed after two more polls and no
   removal has been seen to work. In the made-up mode below they work on the made-up list without the variable.
 * THE BELL'S DOT is a count of the list, kept while the panel is closed by ONE cheap signal: a plain directory-change wait
