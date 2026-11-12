@@ -56,4 +56,52 @@ fn main() {
             });
         }
     }
+
+    // `--icons`: what each source of each app's icon chain gives, at the size the dock asks for. A picture that is nearly all one
+    // light colour is the shell's blank page, which is an answer but not the app's icon.
+    if std::env::args().any(|a| a == "--icons") {
+        // `--parallel`: every app on a thread of its own at the same moment, as the dock's worker pool asks; the shell answers
+        // differently under that load than one at a time.
+        let parallel = std::env::args().any(|a| a == "--parallel");
+        println!("
+== ICONS (each source of the chain, 64 px{})", if parallel { ", all apps at once" } else { "" });
+        let apps: Vec<_> = items.iter().filter_map(|it| if let DockItem::App(a) = it { Some(a.clone()) } else { None }).collect();
+        let one = |a: &rf_win::dock::DockApp| {
+            let mut out = format!("  {}
+", a.name);
+            {
+                for src in a.icon_chain() {
+                    let what = match &src {
+                        rf_win::dock::IconSource::Packaged(id) => format!("package {id}"),
+                        rf_win::dock::IconSource::File(p) => format!("file {}", name_of(p)),
+                        rf_win::dock::IconSource::Resource { file, index } => format!("resource {}#{index}", name_of(file)),
+                        rf_win::dock::IconSource::Window(_) => "window icon".to_string(),
+                        other => format!("{other:?}"),
+                    };
+                    match rf_win::dock::icons::icon_bgra(&src, 64) {
+                        Ok(b) => {
+                            let px = b.data.chunks_exact(4);
+                            let n = px.len().max(1) as f32;
+                            let opaque = b.data.chunks_exact(4).filter(|p| p[3] > 16).count() as f32 / n;
+                            let white = b.data.chunks_exact(4).filter(|p| p[3] > 200 && p[0] > 235 && p[1] > 235 && p[2] > 235).count() as f32 / n;
+                            out += &format!("      {what:<70} ok {}x{} opaque {:.0} % near-white {:.0} %
+", b.width, b.height, opaque * 100.0, white * 100.0);
+                        }
+                        Err(e) => out += &format!("      {what:<70} FAILED: {e:#}
+"),
+                    }
+                }
+            }
+            out
+        };
+        if parallel {
+            let outs: Vec<String> = std::thread::scope(|s| {
+                let hs: Vec<_> = apps.iter().map(|a| s.spawn(|| one(a))).collect();
+                hs.into_iter().map(|h| h.join().unwrap_or_default()).collect()
+            });
+            outs.iter().for_each(|o| print!("{o}"));
+        } else {
+            apps.iter().for_each(|a| print!("{}", one(a)));
+        }
+    }
 }

@@ -224,8 +224,16 @@ fn read_link(path: &Path) -> Option<LinkFacts> {
     }
 }
 
-/// What the shell calls the app with this AppUserModelID, or `None` when no such app is installed (a pin whose app was removed).
+/// What the shell calls the app with this AppUserModelID, or `None` when no such app is installed (a pin whose app was removed) or
+/// the shell did not answer in a few seconds.
+///
+/// Asked on the shell thread, like every shell call of the dock (see [`crate::sta::call`]).
 pub fn packaged_name(aumid: &str) -> Option<String> {
+    let aumid = aumid.to_string();
+    crate::sta::call(std::time::Duration::from_secs(4), move || packaged_name_here(&aumid)).flatten()
+}
+
+fn packaged_name_here(aumid: &str) -> Option<String> {
     use windows::Win32::System::Com::CoTaskMemFree;
     use windows::Win32::UI::Shell::{IShellItem, SHCreateItemFromParsingName, SIGDN_NORMALDISPLAY};
     use windows::core::PCWSTR;
@@ -553,7 +561,9 @@ pub fn inspect_pins(disk: &dyn Disk) -> Vec<PinReport> {
 /// shortcut names that is gone, a package that was removed) are left out; a pin whose program was replaced by a newer install stands
 /// for that one. Blocks (COM, the shell, the disk): call it from a worker thread, and again when the pin folder changes.
 pub fn read_pins() -> Vec<PinnedApp> {
-    inspect_pins(&RealDisk).into_iter().filter_map(|r| r.app).collect()
+    // On the shell thread, like every other shell call of the dock (see `crate::sta::call`). No answer in time is "no pins for now":
+    // the caller reads them again on its next turn.
+    crate::sta::call(std::time::Duration::from_secs(15), || inspect_pins(&RealDisk).into_iter().filter_map(|r| r.app).collect()).unwrap_or_default()
 }
 
 #[cfg(test)]

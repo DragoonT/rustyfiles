@@ -21,7 +21,7 @@ pub fn request_size(px: u32) -> u32 {
 /// scaled to fit and centred on a transparent square.
 pub fn icon_bgra(src: &IconSource, px: u32) -> anyhow::Result<Bgra> {
     anyhow::ensure!((1..=1024).contains(&px), "icon size {px} out of range");
-    let shell = |p: &Path| shell_icon(p, request_size(px));
+    let shell = |p: &Path| on_shell_thread(p.to_path_buf(), request_size(px));
     let got = match src {
         IconSource::File(p) => shell(p)?,
         IconSource::Shell(name) => shell(Path::new(name))?,
@@ -42,9 +42,15 @@ pub fn icon_bgra(src: &IconSource, px: u32) -> anyhow::Result<Bgra> {
 pub fn icon_bgra_chain(srcs: &[IconSource], px: u32) -> anyhow::Result<Bgra> {
     let mut first_error = None;
     for src in srcs {
+        let t = std::time::Instant::now();
+        log::debug!("dock icon: asking {src:?} at {px} px on tid {}", unsafe { windows::Win32::System::Threading::GetCurrentThreadId() });
         match icon_bgra(src, px) {
-            Ok(b) => return Ok(b),
+            Ok(b) => {
+                log::debug!("dock icon: {src:?} gave a picture in {:?}", t.elapsed());
+                return Ok(b);
+            }
             Err(e) => {
+                log::debug!("dock icon: {src:?} failed in {:?}: {e:#}", t.elapsed());
                 first_error.get_or_insert(e);
             }
         }
@@ -66,6 +72,18 @@ fn shell_icon(p: &Path, size: u32) -> anyhow::Result<Bgra> {
             }
             other => return other,
         }
+    }
+}
+
+/// How long the shell may take for one icon before the dock gives up on this ask (it asks again later).
+const SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// The shell's icon for `p`, asked on the shell thread and waited for here, with a limit (see [`crate::sta::call`] for what happened
+/// when the dock's worker threads asked the shell themselves).
+fn on_shell_thread(p: std::path::PathBuf, size: u32) -> anyhow::Result<Bgra> {
+    match crate::sta::call(SHELL_TIMEOUT, move || shell_icon(&p, size)) {
+        Some(r) => r,
+        None => anyhow::bail!("the shell did not give the icon in {SHELL_TIMEOUT:?}"),
     }
 }
 
