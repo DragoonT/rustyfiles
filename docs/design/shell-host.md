@@ -23,7 +23,7 @@ single-instance group: a second `--shell` or `--dock` in the same Windows sessio
   policy override, the monitors with their work areas, whether `rustyfiles-shellguard.exe` is next to the exe, the host's settings
   that are on. A release build has no console: `rustyfiles.exe --shell-probe > probe.json`.
 
-## Cover mode (`shell_desktop_cover`, Settings, "Dock (deneysel)")
+## Cover mode (`shell_desktop_cover`, Settings, "Dock" page)
 
 With the switch on, the host puts OUR desktop (the view of `shell/desktop`) over Explorer's: one borderless window per monitor.
 Explorer's desktop stays underneath and is visible again when the host stops.

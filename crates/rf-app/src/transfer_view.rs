@@ -700,10 +700,10 @@ mod tests {
 
     #[test]
     fn speeds_are_in_the_apps_own_sizes() {
-        // (the global language and the decimal setting are at their defaults in a test)
+        // (the word for "a second" is not looked at: another test walks through every interface language at the same time,
+        // and the ending is that language's: "/sn", "/s", "/วินาที")
         let s = speed_text(46_137_344.0);
-        assert!(s.contains("MB"), "{s}");
-        assert!(s.ends_with("/sn") || s.ends_with("/s"), "{s}");
+        assert!(s.contains("MB") && s.contains('/') && !s.ends_with('/'), "{s}");
         assert_eq!(bytes_text((0, 1024)), format!("{} / {}", format::size(0), format::size(1024)));
     }
 

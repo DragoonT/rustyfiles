@@ -118,6 +118,9 @@ pub struct Keys {
     pub start_recommended: bool,
     /// The dock's size: the islands, the icons and everything else change with it, so the running dock must read the file again.
     pub size: super::size_pref::DockSizePref,
+    /// The shell's five switches, in this order: desktop cover, hiding Windows' taskbar, the Windows key, Alt+Tab, the tray host. The
+    /// dock starts or stops each of them when it reads the file, so the reload must not wait for its 5 s look at the file's date.
+    pub shell: [bool; 5],
 }
 
 impl Keys {
@@ -136,6 +139,7 @@ impl Keys {
             app_menu: s.dock_app_menu,
             start_recommended: s.dock_start_recommended,
             size: s.dock_size,
+            shell: [s.shell_desktop_cover, s.shell_hide_taskbar, s.shell_win_key, s.shell_own_switcher, s.shell_tray_host],
         }
     }
 }
@@ -269,7 +273,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true, size: Default::default() }
+        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true, size: Default::default(), shell: [false; 5] }
     }
 
     #[test]
@@ -305,6 +309,13 @@ mod tests {
             Settings { dock_app_menu: false, ..base.clone() },
             Settings { dock_start_recommended: false, ..base.clone() },
             Settings { dock_size: crate::dock::size_pref::DockSizePref::XLarge, ..base.clone() },
+            // the shell's five switches (Settings, Dock): the dock applies them when it reads the file, so a switch must not wait for
+            // its look at the file's date
+            Settings { shell_desktop_cover: true, ..base.clone() },
+            Settings { shell_hide_taskbar: true, ..base.clone() },
+            Settings { shell_win_key: true, ..base.clone() },
+            Settings { shell_own_switcher: true, ..base.clone() },
+            Settings { shell_tray_host: true, ..base.clone() },
         ] {
             let mut told = Some(k.clone());
             assert!(needs_reload(&mut told, Keys::of(&change)), "{:?}", Keys::of(&change));

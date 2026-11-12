@@ -50,7 +50,7 @@ Where the glass cannot widen (a narrow screen, the side islands close by: their 
 give way down to 2 px and then the icons shrink together; the icon under the pointer is still the biggest. The icon bitmaps are loaded
 once at 44 x 1.55 px times the scale and only ever scaled down, so a big icon is sharp.
 
-Settings, "Dock (deneysel)": "Simge büyütme" / Icon magnification: off, subtle (1.25) or full (1.55, the default). All the lengths
+Settings, "Dock" page, GENEL: "Simge büyütme" / Icon magnification: off, subtle (1.25) or full (1.55, the default). All the lengths
 here, and the 12 px of headroom, are for the default dock size; the size setting scales them together (see "The dock's size").
 
 ## The dock's size (setting "Dock boyutu" / Dock size)
@@ -678,7 +678,15 @@ the overflow panel's cells and a tip fall for that many icons (arithmetic only; 
   their icon, balloons, a Settings switch for the strip (the tray host being on is the switch). The island's own symbols (network, volume,
   clock, bell) are unchanged.
 
-## Settings (Settings, "Dock (deneysel)" / "Dock (experimental)")
+## Settings (Settings, "Dock" page)
+
+The dock has a page of its own in Settings, right after "Görünüm" (`dock_page.rs`). It used to be a block at the end of "Gelişmiş" called
+"Dock (deneysel)". One list of entries (`dock_page::entries`) draws the page and feeds the Settings search. Sections: GENEL (the dock,
+keep-out, size, magnification), SOL ADA (Start, recommended, weather city), ORTA ADA (previews, icon menu), SAĞ ADA (control centre,
+calendar, notifications), MASAÜSTÜ VE KABUK (desktop cover, hiding Windows' taskbar), DENEYSEL (Windows key, Alt+Tab, tray host). While the
+dock is off every control but the dock switch is dimmed with a line that says why; a shell switch that is still on can be turned off
+(it never needs the dock to be turned off). The shell switches reach the running dock at once, like the others.
+
 
 * **rustyfiles takvimini kullan** / Use rustyfiles' calendar. On by default. The clock opens the calendar panel; off: it sends Win+N
   (Windows' notification centre and calendar), as before.
@@ -712,7 +720,7 @@ the overflow panel's cells and a tip fall for that many icons (arithmetic only; 
 
 The dock process is told to read the settings file again when any of these changes: the four switches of the panels (`dock_own_start`,
 `dock_own_control_centre`, `dock_own_calendar`, `dock_own_notifications`), the two switches of the icons' menu and previews
-(`dock_app_menu`, `dock_hover_previews`), the Start panel's recommended section (`dock_start_recommended`), the keep-out switch, the city, the size, the magnification, the animations setting and the four HyperGlass sliders
+(`dock_app_menu`, `dock_hover_previews`), the Start panel's recommended section (`dock_start_recommended`), the keep-out switch, the city, the size, the magnification, the animations setting, the four HyperGlass sliders and the shell's five switches
 (`control::Keys`). The process's views read the two panel switches from the settings it loaded last, at every click.
 
 ## The process

@@ -13,10 +13,9 @@ use gpui_windows::hybrid;
 
 use crate::fluent_menu::{self, Item, Menu, MenuIcon};
 use crate::select_box::{Choice, select_box};
-use crate::dock::size_pref::DockSizePref;
 use crate::i18n::Lang;
 use crate::settings::{
-    self, AnimPref, BackdropPref, ClickPref, DatePref, DefaultView, DeletePref, DockMagnify, IdePref, RendererPref, Settings, StartupPref, ThemePref,
+    self, AnimPref, BackdropPref, ClickPref, DatePref, DefaultView, DeletePref, IdePref, RendererPref, Settings, StartupPref, ThemePref,
 };
 use crate::t;
 use crate::look::config::LookSettings;
@@ -26,6 +25,7 @@ use crate::theme::{self, Palette};
 pub enum Page {
     General,
     Appearance,
+    Dock,
     Layout,
     Files,
     Actions,
@@ -38,9 +38,10 @@ pub enum Page {
     About,
 }
 
-const PAGES: [(Page, L, &str); 12] = [
+const PAGES: [(Page, L, &str); 13] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
+    (Page::Dock, L::PanelBottom, "Dock"),
     (Page::Layout, L::LayoutGrid, "Sayfa düzeni"),
     (Page::Files, L::Folder, "Dosyalar ve klasörler"),
     (Page::Actions, L::Keyboard, "Eylemler"),
@@ -129,6 +130,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
     match page {
         Page::General => general(p, s, cx),
         Page::Appearance => appearance(p, s, cx),
+        Page::Dock => crate::dock_page::page(p, s),
         Page::Layout => layout(p, s, cx),
         Page::Files => files(p, s, cx),
         Page::Actions => actions(p, cx),
@@ -181,12 +183,12 @@ pub(crate) fn switch(id: impl Into<ElementId>, p: &Palette, on: bool, toggle: im
 }
 
 /// Switch bound to a boolean setting.
-fn sw(id: &'static str, p: &Palette, on: bool, set: fn(&mut Settings, bool)) -> AnyElement {
+pub(crate) fn sw(id: &'static str, p: &Palette, on: bool, set: fn(&mut Settings, bool)) -> AnyElement {
     switch(id, p, on, move |_, cx| settings::update(cx, |s| set(s, !on)))
 }
 
 /// A button showing the current value; clicking opens the choices in our menu.
-fn dropdown<T: Copy + PartialEq + 'static>(id: &'static str, p: &Palette, current: T, options: Vec<(T, String)>, set: fn(&mut Settings, T)) -> AnyElement {
+pub(crate) fn dropdown<T: Copy + PartialEq + 'static>(id: &'static str, p: &Palette, current: T, options: Vec<(T, String)>, set: fn(&mut Settings, T)) -> AnyElement {
     let label = options.iter().find(|(v, _)| *v == current).map(|(_, l)| l.clone()).unwrap_or_default();
     select_box(id, p, label, move |_| {
         options.iter().map(|(v, l)| {
@@ -343,10 +345,13 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
         }
     };
     let query = search.read(cx).value().trim().to_string();
+    // (scrolls: the 13 entries need more than the 420 px the window may be as low as)
     let mut nav = v_flex()
+        .id("settings-nav")
         .w(px(232.))
         .flex_shrink_0()
         .h_full()
+        .overflow_y_scroll()
         .px_3()
         .pt_5()
         .gap_0p5()
@@ -2321,175 +2326,7 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
     // the thumbnail cache's limit and a clear button (thumb_cache.rs)
     out.push(section(p, t!("Önbellek")));
     out.extend(crate::thumb_cache::cards(p, s, cx));
-    out.extend(dock_cards(p, s));
     out
-}
-
-/// The dock (dock/): a separate process, started and stopped by the first switch.
-fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
-    let on = s.dock_enabled;
-    let city = s.dock_weather_city.trim().to_string();
-    let city_label = if city.is_empty() { t!("Ayarlanmadı: hava durumu gösterilmez").to_string() } else { city.clone() };
-    vec![
-        section(p, t!("Dock (deneysel)")),
-        card(
-            p,
-            L::PanelBottom,
-            t!("Dock'u göster (deneysel)"),
-            Some(t!("Ekranın altında üç yüzen ada: Başlat ve arama, uygulamalar, sistem simgeleri ve saat. Ayrı bir süreç olarak çalışır ve rustyfiles kapansa da açık kalır; Windows görev çubuğuna dokunmaz.")),
-            switch("dock-show", p, on, move |_, cx| settings::update(cx, |s| s.dock_enabled = !on)),
-        ),
-        card(
-            p,
-            L::AppWindow,
-            t!("Pencereler dock'un altına girmesin"),
-            Some(t!("Büyütülmüş pencereler dock'un üstünde durur. Kapalıyken dock yalnızca pencerelerin üstünde yüzer.")),
-            sw("dock-reserve", p, s.dock_reserve, |s, v| s.dock_reserve = v),
-        ),
-        card(
-            p,
-            L::Search,
-            t!("rustyfiles Başlat menüsünü kullan"),
-            Some(t!("Dock'taki logo ve arama alanı Windows'un Başlat menüsü yerine rustyfiles'ın kendi panelini açar. Kapalıyken Windows'un Başlat menüsü ve hızlı arama açılır.")),
-            sw("dock-own-start", p, s.dock_own_start, |s, v| s.dock_own_start = v),
-        ),
-        card(
-            p,
-            L::Volume2,
-            t!("rustyfiles denetim merkezini kullan"),
-            Some(t!("Dock'taki ağ ve ses simgeleri Windows'un hızlı ayarları yerine rustyfiles'ın panelini açar: ses, ağ, Bluetooth, şimdi çalan, parlaklık. Kapalıyken Windows'un hızlı ayarları açılır.")),
-            sw("dock-own-cc", p, s.dock_own_control_centre, |s, v| s.dock_own_control_centre = v),
-        ),
-        card(
-            p,
-            L::Monitor,
-            t!("Masaüstünü rustyfiles çizsin (deneysel)"),
-            Some(t!("Explorer'ın masaüstü altta durur ve dock durduğunda yeniden görünür.")),
-            sw("shell-cover", p, s.shell_desktop_cover, |s, v| s.shell_desktop_cover = v),
-        ),
-        card(
-            p,
-            L::Monitor,
-            t!("Windows görev çubuğunu gizle (deneysel)"),
-            Some(t!("Dock çalıştığı sürece Windows'un görev çubuğu ve bildirim alanı simgeleri gizlenir; dock durunca geri gelir. Windows'un hiçbir görev çubuğu ayarı değiştirilmez. rustyfiles beklenmedik biçimde durursa küçük bir yardımcı program (rustyfiles-shellguard.exe) görev çubuğunu bir iki saniye içinde geri getirir; yardımcı çalışmıyorsa görev çubuğu gizlenmez. Windows tuşu ve Windows'un kendi açılır pencereleri (Başlat, hızlı ayarlar, saat) hâlâ gizli görev çubuğunun yerine göre açılır; Windows tuşunun rustyfiles Başlat'ını açması için aşağıdaki Windows tuşu anahtarını da açmanız önerilir.")),
-            sw("shell-hide-taskbar", p, s.shell_hide_taskbar, |s, v| s.shell_hide_taskbar = v),
-        ),
-        card(
-            p,
-            L::Keyboard,
-            t!("Windows tuşu rustyfiles Başlat'ını açsın (deneysel)"),
-            Some(t!("Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Windows tuşuna tek başına basıp bırakmaya bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. Windows tuşlu kısayollara dokunmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.")),
-            sw("shell-winkey", p, s.shell_win_key, |s, v| s.shell_win_key = v),
-        ),
-        card(
-            p,
-            L::Layers,
-            t!("Alt+Tab rustyfiles pencere değiştiricisini açsın (deneysel)"),
-            Some(t!("Açıkken rustyfiles klavyeyi sistem genelinde bir kancayla dinler ve yalnızca Alt+Tab'a (ve açıkken Sekme, oklar, Enter, Esc, Alt'ı bırakmaya) bakar; başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Alt bırakılırken öndeki programın menü çubuğu etkinleşmesin diye tek bir görünmez, hiçbir şey yapmayan tuş gönderir. rustyfiles durursa ya da takılırsa Windows'un kendi Alt+Tab'ı geri gelir.")),
-            sw("shell-altab", p, s.shell_own_switcher, |s, v| s.shell_own_switcher = v),
-        ),
-        card(
-            p,
-            L::Layers,
-            t!("Tepsi simgelerini rustyfiles de toplasın (deneysel)"),
-            Some(t!("Açıkken rustyfiles, programların bildirim alanına gönderdiği simge iletilerini Explorer'ın görev çubuğu penceresinin önünde bir pencereyle karşılar, kendine kaydeder ve her iletiyi değiştirmeden Explorer'a da iletir; Explorer'ın kendi tepsisi aynen çalışır. Dock simgeleri henüz göstermez. Kapatınca ya da rustyfiles durunca bu pencere kaldırılır ve programlardan simgelerini yeniden eklemeleri istenir. Her ileti Explorer'a da gittiği için Explorer'ın kendi listesi eksiksiz kalır.")),
-            sw("shell-tray", p, s.shell_tray_host, |s, v| s.shell_tray_host = v),
-        ),
-        card(
-            p,
-            L::Calendar,
-            t!("rustyfiles takvimini kullan"),
-            Some(t!("Dock'taki saate tıklayınca Windows'un takvimi yerine rustyfiles'ın paneli açılır: ay, hafta numarasız gün tablosu, saniyeli saat. Kapalıyken Windows'un bildirim merkezi ve takvimi açılır.")),
-            sw("dock-own-cal", p, s.dock_own_calendar, |s, v| s.dock_own_calendar = v),
-        ),
-        card(
-            p,
-            L::Bell,
-            t!("rustyfiles bildirim panelini kullan"),
-            Some(t!("Dock'taki zile tıklayınca Windows'un bildirim merkezi yerine rustyfiles'ın paneli açılır: diğer uygulamaların bildirimleri uygulamaya göre gruplanır, zilde bildirim varken küçük bir nokta görünür. Kapalıyken Windows'un bildirim merkezi açılır.")),
-            sw("dock-own-notif", p, s.dock_own_notifications, |s, v| s.dock_own_notifications = v),
-        ),
-        card(
-            p,
-            L::Maximize2,
-            t!("Dock boyutu"),
-            Some(t!("Dock'un tamamı seçtiğiniz boyuta göre büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. Orta, Dock'un her zamanki boyutudur. Değişiklik çalışan Dock'a hemen uygulanır.")),
-            dropdown(
-                "dock-size",
-                p,
-                s.dock_size,
-                vec![
-                    (DockSizePref::Small, t!("Küçük").into()),
-                    (DockSizePref::Medium, t!("Orta boyut").into()),
-                    (DockSizePref::Large, t!("Büyük").into()),
-                    (DockSizePref::XLarge, t!("Çok büyük").into()),
-                ],
-                |s, v| s.dock_size = v,
-            ),
-        ),
-        card(
-            p,
-            L::ZoomIn,
-            t!("Simge büyütme"),
-            Some(t!("Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.")),
-            dropdown(
-                "dock-magnify",
-                p,
-                s.dock_magnify,
-                vec![(DockMagnify::Off, t!("Kapalı").into()), (DockMagnify::Subtle, t!("Hafif").into()), (DockMagnify::Full, t!("Tam").into())],
-                |s, v| s.dock_magnify = v,
-            ),
-        ),
-        card(
-            p,
-            L::AppWindow,
-            t!("Simge üzerinde pencere önizlemesi"),
-            Some(t!("Dock'taki çalışan bir uygulamanın simgesinde fareyi bir an bekletince, o uygulamanın pencereleri canlı küçük resimlerle üstte görünür: pencereye tıklayınca öne gelir, x pencereyi kapatmasını ister.")),
-            sw("dock-hover-previews", p, s.dock_hover_previews, |s, v| s.dock_hover_previews = v),
-        ),
-        card(
-            p,
-            L::Pin,
-            t!("Simge sağ tık menüsü"),
-            Some(t!("Dock'taki bir uygulamanın simgesine sağ tıklayınca rustyfiles'ın kendi menüsü açılır: uygulamanın adı, Dock'a sabitle / Dock'tan kaldır ve pencereleri kapat. Dock'un sabitleme listesi kendisinindir; Windows'un görev çubuğu sabitlerine yazılmaz.")),
-            sw("dock-app-menu", p, s.dock_app_menu, |s, v| s.dock_app_menu = v),
-        ),
-        card(
-            p,
-            L::Clock,
-            t!("Başlat'ta önerilenler"),
-            Some(t!("Başlat panelinde sabitlenmiş uygulamaların altında en son açtığınız belgeler (ne zaman açıldığıyla birlikte) görünür. Kapalıyken bölüm çizilmez ve sabitlenenler o yeri kullanır.")),
-            sw("dock-start-recommended", p, s.dock_start_recommended, |s, v| s.dock_start_recommended = v),
-        ),
-        card(
-            p,
-            L::MapPin,
-            t!("Hava durumu şehri"),
-            Some(&city_label),
-            h_flex()
-                .gap_2()
-                .child(button("dock-city-edit", p, t!("Değiştir…"), {
-                    let city = city.clone();
-                    move |window, cx| {
-                        let ok = crate::prompt::Button::new(t!("Kaydet"), crate::prompt::Kind::Primary, move |text, _, cx| {
-                            let text = text.unwrap_or_default().trim().to_string();
-                            settings::update(cx, |s| s.dock_weather_city = text);
-                            Ok(())
-                        });
-                        crate::prompt::show(
-                            t!("Hava durumu şehri"),
-                            Some(t!("Dock'un sol adasında sıcaklık gösterilir (Open-Meteo). Boş bırakırsanız hava durumu gösterilmez ve ağa hiç istek gitmez.").to_string()),
-                            Some((city.clone(), t!("Şehir adı, örneğin: Erzincan").to_string())),
-                            vec![ok, crate::prompt::Button::cancel()],
-                            window,
-                            cx,
-                        );
-                    }
-                }))
-                .children((!city.is_empty()).then(|| button("dock-city-clear", p, t!("Temizle"), |_, cx| settings::update(cx, |s| s.dock_weather_city.clear()))))
-                .into_any_element(),
-        ),
-    ]
 }
 
 fn open_url(url: &'static str) {
@@ -2850,7 +2687,9 @@ fn index_exclusions(p: &Palette, s: &Settings) -> AnyElement {
 
 #[cfg(test)]
 mod search_tests {
-    use super::{Found, Page, matching};
+    use super::{COLLECT, COLLECT_AT, Found, PAGES, Page, matching};
+    use crate::settings::Settings;
+    use crate::theme::Palette;
 
     #[test]
     fn settings_are_found_by_every_word_of_the_query() {
@@ -2870,6 +2709,41 @@ mod search_tests {
         assert_eq!(titles("ÖNİZLEME"), vec!["Önizleme paneli"]);
         assert_eq!(titles("ilerleme"), vec!["İlerleme çubuğu"]);
         assert!(titles("   ").is_empty());
+    }
+
+    /// Builds the Dock page the way the search does (the builders note their texts) and returns what was noted.
+    fn noted_on_the_dock_page(s: &Settings, p: &Palette) -> Vec<Found> {
+        COLLECT.with(|c| *c.borrow_mut() = Some(Vec::new()));
+        COLLECT_AT.with(|a| a.set((Page::Dock, None)));
+        let _ = crate::dock_page::page(p, s);
+        COLLECT.with(|c| c.borrow_mut().take()).unwrap_or_default()
+    }
+
+    #[test]
+    fn the_dock_page_follows_the_look_page_and_the_search_finds_every_dock_setting_on_it() {
+        crate::dock_page::while_turkish(|| {
+            let at = |pg: Page| PAGES.iter().position(|x| x.0 == pg).unwrap();
+            assert_eq!(at(Page::Dock), at(Page::Appearance) + 1, "the Dock page comes right after Görünüm");
+            for p in [Palette::light(), Palette::dark()] {
+                // dock off (the dimmed rows) and on (the live ones): the same texts are noted either way
+                for dock_enabled in [false, true] {
+                    let s = Settings { dock_enabled, ..Default::default() };
+                    let noted = noted_on_the_dock_page(&s, &p);
+                    let entries = crate::dock_page::entries();
+                    assert_eq!(noted.len(), entries.len(), "one card per entry, none dropped and none twice");
+                    for e in &entries {
+                        // searched by its own title, and by a word of its description, it is found and opens the Dock page
+                        let hits = matching(noted.clone(), e.title);
+                        assert!(hits.iter().any(|f| f.title == e.title && f.page == Page::Dock), "{} is not found by its title", e.field);
+                        if let Some(d) = e.desc {
+                            let word = d.split_whitespace().find(|w| w.chars().count() > 6).unwrap_or(d);
+                            assert!(matching(noted.clone(), word).iter().any(|f| f.title == e.title), "{} is not found by `{word}`", e.field);
+                        }
+                    }
+                    assert!(noted.iter().all(|f| f.page == Page::Dock));
+                }
+            }
+        });
     }
 }
 

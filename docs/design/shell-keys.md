@@ -1,7 +1,7 @@
 # The shell host's keyboard layer (experimental, off by default)
 
 Shell plan increment B7 and the switcher's wiring (rows C5 and D9 of the plan's section 1.2). Two settings, each ONE switch on the
-dock's Settings page ("Dock (deneysel)"), both off:
+dock's Settings page ("Dock", DENEYSEL), both off:
 
 | Setting | What it does |
 |---|---|

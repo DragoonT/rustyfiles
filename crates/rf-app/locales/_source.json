@@ -6392,12 +6392,6 @@
   "en": "Glass could not start: {reason}. Mica is used instead."
  },
  {
-  "id": "a22468ec",
-  "key": "Dock (deneysel)",
-  "tr": "Dock (deneysel)",
-  "en": "Dock (experimental)"
- },
- {
   "id": "1d66e78c",
   "key": "Dock'u göster (deneysel)",
   "tr": "Dock'u göster (deneysel)",
@@ -8826,5 +8820,71 @@
   "key": "Program başlatılamadı",
   "tr": "Program başlatılamadı",
   "en": "The program could not be started"
+ },
+ {
+  "id": "a7caf1ba",
+  "key": "Dock",
+  "tr": "Dock",
+  "en": "Dock"
+ },
+ {
+  "id": "05ebba14",
+  "key": "GENEL",
+  "tr": "GENEL",
+  "en": "GENERAL"
+ },
+ {
+  "id": "04c303d5",
+  "key": "SOL ADA",
+  "tr": "SOL ADA",
+  "en": "LEFT ISLAND"
+ },
+ {
+  "id": "51cb585f",
+  "key": "ORTA ADA",
+  "tr": "ORTA ADA",
+  "en": "MIDDLE ISLAND"
+ },
+ {
+  "id": "6353cef7",
+  "key": "SAĞ ADA",
+  "tr": "SAĞ ADA",
+  "en": "RIGHT ISLAND"
+ },
+ {
+  "id": "56c241eb",
+  "key": "MASAÜSTÜ VE KABUK",
+  "tr": "MASAÜSTÜ VE KABUK",
+  "en": "DESKTOP AND SHELL"
+ },
+ {
+  "id": "a048e0ee",
+  "key": "DENEYSEL",
+  "tr": "DENEYSEL",
+  "en": "EXPERIMENTAL"
+ },
+ {
+  "id": "e141bf70",
+  "key": "Dock kapalı: bu ayar yalnızca Dock çalışırken işe yarar. Açmak için sayfanın başındaki Dock anahtarını kullanın.",
+  "tr": "Dock kapalı: bu ayar yalnızca Dock çalışırken işe yarar. Açmak için sayfanın başındaki Dock anahtarını kullanın.",
+  "en": "The dock is off: this setting only works while the dock runs. Use the dock switch at the top of the page to turn it on."
+ },
+ {
+  "id": "e6e2580b",
+  "key": "Henüz hiç çalıştırılmadı: bu özelliğin gerçek yolu bir bilgisayarda denenmedi, yalnızca sahte girdilerle sınandı.",
+  "tr": "Henüz hiç çalıştırılmadı: bu özelliğin gerçek yolu bir bilgisayarda denenmedi, yalnızca sahte girdilerle sınandı.",
+  "en": "Never run yet: the real path of this feature has not been tried on a computer, only tested with fake input."
+ },
+ {
+  "id": "e60473bb",
+  "key": "Dock, ekranın altındaki üç yüzen adadır: Başlat ve arama, uygulamalar, sistem simgeleri ve saat. Deneyseldir ve varsayılan olarak kapalıdır.",
+  "tr": "Dock, ekranın altındaki üç yüzen adadır: Başlat ve arama, uygulamalar, sistem simgeleri ve saat. Deneyseldir ve varsayılan olarak kapalıdır.",
+  "en": "The dock is three floating islands at the bottom of the screen: Start and search, apps, system icons and the clock. It is experimental and off by default."
+ },
+ {
+  "id": "7bda88fe",
+  "key": "Dock kapalı: bu ayar şimdi işe yaramaz ve yalnızca kapatılabilir. Yeniden açmak için önce sayfanın başındaki Dock anahtarını açın.",
+  "tr": "Dock kapalı: bu ayar şimdi işe yaramaz ve yalnızca kapatılabilir. Yeniden açmak için önce sayfanın başındaki Dock anahtarını açın.",
+  "en": "The dock is off: this setting does nothing now and can only be turned off. To turn it on again, first turn on the dock switch at the top of the page."
  }
 ]

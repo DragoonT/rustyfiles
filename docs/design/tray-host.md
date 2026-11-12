@@ -1,7 +1,7 @@
 # The tray host (experimental, off by default)
 
 Shell plan increment D2 (rows B3 to B6 and B9 of the plan's section 1.2). One setting, one switch on the dock's Settings page
-("Dock (deneysel)"), OFF:
+("Dock", DENEYSEL), OFF:
 
 | Setting | What it does |
 |---|---|
