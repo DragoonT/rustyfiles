@@ -5,7 +5,7 @@ use super::gpu::{self, Cb, Geometry, Look, Region, Renderer, Source, prep, regio
 use super::*;
 
 /// BGRA picture filled by `f(x, y) -> [r, g, b]`.
-fn picture(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
+pub(super) fn picture(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
     let mut v = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
@@ -16,7 +16,7 @@ fn picture(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 3]) -> Vec<u8> {
     v
 }
 
-fn px(img: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
+pub(super) fn px(img: &[u8], w: u32, x: u32, y: u32) -> [u8; 4] {
     let i = ((y * w + x) * 4) as usize;
     [img[i], img[i + 1], img[i + 2], img[i + 3]]
 }
@@ -44,7 +44,7 @@ struct Shared(Renderer);
 unsafe impl Send for Shared {}
 static RENDERERS: [std::sync::Mutex<Option<Shared>>; 2] = [std::sync::Mutex::new(None), std::sync::Mutex::new(None)];
 
-fn with_renderer<T>(force_warp: bool, f: impl FnOnce(&Renderer) -> T) -> T {
+pub(super) fn with_renderer<T>(force_warp: bool, f: impl FnOnce(&Renderer) -> T) -> T {
     // the software renderer takes every core while it draws: not while a timing test measures (see `TEST_QUIET`)
     let _quiet = crate::TEST_QUIET.lock().unwrap_or_else(|p| p.into_inner());
     let mut slot = RENDERERS[force_warp as usize].lock().unwrap_or_else(|p| p.into_inner());
@@ -57,7 +57,7 @@ fn with_renderer<T>(force_warp: bool, f: impl FnOnce(&Renderer) -> T) -> T {
 /// out, with a device per picture and with the shared devices alike; the cause was not found (it does not happen here, where the same
 /// tests also draw with the software renderer forced). The runner does list an adapter that is not marked as software, so the adapter
 /// list alone does not tell it apart. So the drawing is tested on developers' machines only.
-fn can_draw() -> bool {
+pub(super) fn can_draw() -> bool {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIFactory1};
     static YES: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *YES.get_or_init(|| unsafe {
@@ -78,7 +78,7 @@ fn can_draw() -> bool {
     })
 }
 
-fn drivers() -> [bool; 2] {
+pub(super) fn drivers() -> [bool; 2] {
     [false, true] // hardware (or WARP if there is none), then WARP forced
 }
 
@@ -140,7 +140,7 @@ fn corner_is_cut_by_the_radius() {
 }
 
 /// Black / white / red bands, mirror symmetric about the vertical line x = w / 2, varying along y too.
-fn symmetric_stripes(w: u32, h: u32) -> Vec<u8> {
+pub(super) fn symmetric_stripes(w: u32, h: u32) -> Vec<u8> {
     picture(w, h, |x, y| {
         let d = x.min(w - 1 - x);
         match ((d / 12) + (y / 9)) % 3 {
@@ -221,9 +221,27 @@ fn constant_buffer_matches_the_shader() {
     let start = src.find("cbuffer CB").expect("cbuffer CB in the shader");
     let body = &src[start..];
     let body = &body[body.find('{').unwrap() + 1..body.find("};").unwrap()];
-    let fields = body.lines().filter(|l| l.trim_start().starts_with("float4 u")).count();
-    assert_eq!(fields, 12, "float4 fields of the shader's cbuffer");
+    // `float4 uName;` is one float4, `float4 uName[12];` is twelve
+    let fields: usize = body
+        .lines()
+        .map(|l| l.trim_start())
+        .filter(|l| l.starts_with("float4 u"))
+        .map(|l| {
+            let decl = l.split(';').next().unwrap_or("");
+            match (decl.find('['), decl.find(']')) {
+                (Some(a), Some(b)) => decl[a + 1..b].trim().parse::<usize>().expect("an array length"),
+                _ => 1,
+            }
+        })
+        .sum();
+    assert_eq!(fields, 12 + 4 + 3 * MAX_LENSES, "float4 fields of the shader's cbuffer");
     assert_eq!(size_of::<Cb>() / 16, fields, "the Rust struct and the shader's cbuffer must have the same number of float4");
+    // the lens count of the shader is the engine's
+    assert!(src.contains(&format!("static const uint MAX_LENSES = {MAX_LENSES};")), "MAX_LENSES differs between glass.hlsl and mod.rs");
+    // the order of the fields, by name: the lens block comes last, after uOpt
+    let names: Vec<&str> = body.lines().filter_map(|l| l.trim_start().strip_prefix("float4 ")).filter_map(|l| l.split([';', '[']).next()).collect();
+    assert_eq!(names[11], "uOpt");
+    assert_eq!(&names[12..], ["uLensA", "uLensB", "uLensC", "uLensT", "uLens"]);
 }
 
 #[test]

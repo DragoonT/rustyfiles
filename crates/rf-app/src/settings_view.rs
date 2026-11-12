@@ -310,7 +310,8 @@ fn link_row(p: &Palette, id: &'static str, icon: L, title: &str, desc: Option<&s
 
 // ---------------------------------------------------------------- page
 
-pub fn render(p: &Palette, window: &mut Window, cx: &mut App) -> AnyElement {
+/// `lens_owner`: this page owns the window's settings lens (see `FolderView::lens_owner`); only then is the selected entry glass.
+pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) -> AnyElement {
     use gpui_kit::component::input::{Input, InputState};
     let page = ui(cx).page;
     let s = cx.global::<Settings>().clone();
@@ -347,6 +348,10 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App) -> AnyElement {
                 .child(Icon::new(L::Search).size(px(14.)).flex_shrink_0().text_color(p.text_secondary))
                 .child(Input::new(&search).appearance(false).cleanable(true)),
         );
+    // Over glass the selected entry is a lens the engine draws behind the scene (slot 1): no fill and no accent bar, a probe that
+    // reports the row's place on every paint instead. The page is only built for the active tab; the workspace names the one pane that
+    // owns the lens and takes the lens out when no pane does.
+    let lens = lens_owner && crate::glass::shown(crate::look::window::hwnd_of(window));
     for (i, (pg, icon, label)) in PAGES.iter().copied().enumerate() {
         let on = pg == page;
         nav = nav.child(
@@ -359,7 +364,8 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App) -> AnyElement {
                 .relative()
                 .rounded(theme::RADIUS_SM)
                 .text_sm()
-                .when(on, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+                .when(on && !lens, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+                .when(on && lens, |d| d.child(crate::glass::lens_probe(crate::glass::SLOT_SETTINGS, crate::glass::key_of(&i))))
                 .when(!on, |d| d.hover(|s| s.bg(p.hover)))
                 .child(Icon::new(icon).size(px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
                 .child(crate::i18n::t(label))

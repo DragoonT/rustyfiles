@@ -8,7 +8,8 @@
 //! GPUI window transparent, so the glass shows through wherever the scene is.
 //!
 //! The loop never spins: it waits on the command channel when there is nothing to poll, waits inside AcquireNextFrame (or on the session's
-//! frame token) when it has a capture, and sleeps when neither happened.
+//! frame token) when it has a capture, and sleeps when neither happened. While a lens moves or fades it is paced by the display instead
+//! (`pace`): one turn per refresh, and none of the other waits.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::c_void;
@@ -19,7 +20,7 @@ use windows::Win32::Foundation::{HWND, LUID, POINT, RECT};
 use windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 use windows::Win32::Graphics::DirectComposition::{DCompositionCreateDevice, IDCompositionDevice, IDCompositionTarget, IDCompositionVisual};
 use windows::Win32::Graphics::Dwm::{
-    DWM_WINDOW_CORNER_PREFERENCE, DWMWA_CLOAKED, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUNDSMALL, DwmGetWindowAttribute,
+    DWM_WINDOW_CORNER_PREFERENCE, DWMWA_CLOAKED, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT, DWMWCP_DONOTROUND, DWMWCP_ROUNDSMALL, DwmFlush, DwmGetWindowAttribute,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_ALPHA_MODE_PREMULTIPLIED, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{
@@ -33,7 +34,8 @@ use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, IsIconic, IsWindow,
 use windows::core::{BOOL, Interface};
 
 use super::capture::{Dirty, MonError, Monitor, Pumped, is_device_lost, locate};
-use super::gpu::{Geometry, Gpu, Look, Region, Renderer, glass_pass, prep, region_pad};
+use super::gpu::{Geometry, Gpu, LensList, Look, Region, Renderer, glass_pass, prep, region_pad, reuse};
+use super::lens::LensSet;
 use super::wgc::{self, Access, Exclusion};
 use super::{CaptureMode, Cmd, GlassState, set_mode};
 
@@ -49,6 +51,13 @@ const FRAME_WAIT_MS: u32 = 8;
 /// is what keeps the thread from waking 125 times a second.
 const QUIET_WAIT_MS: u32 = 50;
 const QUIET_AFTER: Duration = Duration::from_secs(1);
+/// While a window has a lens (even at rest) the quiet wait is cut to this: a lens command is only seen between two waits, and the
+/// selection pill must start sliding about when the scene shows the new selection, not up to `QUIET_WAIT_MS` later.
+const LENS_WAIT_MS: u32 = 16;
+/// A DwmFlush that returns faster than this did not wait for a composition at all.
+const INSTANT_FLUSH: Duration = Duration::from_micros(500);
+/// This many such returns in a row and `pace` waits on the channel instead, so a broken DwmFlush cannot make a busy loop.
+const INSTANT_FLUSHES_BEFORE_WAIT: u32 = 3;
 const STATS_EVERY: Duration = Duration::from_secs(5);
 const DEVICE_CHECK_EVERY: Duration = Duration::from_secs(1);
 /// How often a running session backend looks again at the permission it was started on (reading it is a cheap, silent query).
@@ -238,6 +247,8 @@ struct Presented {
     hash: u64,
     geo: Geometry,
     look: Look,
+    /// Where the lenses were drawn and how opaque: a moving lens makes a draw different, a resting one does not.
+    lenses: LensList,
 }
 
 struct Stats {
@@ -246,13 +257,15 @@ struct Stats {
     with_image: u32,
     presented: u32,
     skipped: u32,
+    /// Draws that kept the backdrop of the last one (only a lens moved) and so made no copy, no pyramid and no read-back.
+    reused: u32,
     prep: Duration,
     glass: Duration,
 }
 
 impl Stats {
     fn new(now: Instant) -> Stats {
-        Stats { since: now, frames: 0, with_image: 0, presented: 0, skipped: 0, prep: Duration::ZERO, glass: Duration::ZERO }
+        Stats { since: now, frames: 0, with_image: 0, presented: 0, skipped: 0, reused: 0, prep: Duration::ZERO, glass: Duration::ZERO }
     }
 }
 
@@ -266,11 +279,37 @@ struct Win {
     dirty: bool,
     presented: Option<Presented>,
     stats: Stats,
+    /// The lenses (selection pills) the app asked for, with their springs.
+    lenses: LensSet,
+    /// When the lenses were last advanced; `None` while they rest, so the first step of a new motion is a zero step.
+    lens_tick: Option<Instant>,
+    /// The backdrop has to be copied and blurred again (a new picture of the screen, another place or size, another look). A draw that
+    /// is dirty for a lens alone keeps the last backdrop.
+    stale: bool,
 }
 
 impl Win {
     fn new(hwnd: isize, dark: bool) -> Win {
-        Win { hwnd, dark, visible: false, geo: None, target: None, region: None, dirty: true, presented: None, stats: Stats::new(Instant::now()) }
+        Win {
+            hwnd,
+            dark,
+            visible: false,
+            geo: None,
+            target: None,
+            region: None,
+            dirty: true,
+            presented: None,
+            stats: Stats::new(Instant::now()),
+            lenses: LensSet::new(),
+            lens_tick: None,
+            stale: true,
+        }
+    }
+
+    /// Something behind the glass or about the glass itself changed: draw again, from a new backdrop.
+    fn restale(&mut self) {
+        self.dirty = true;
+        self.stale = true;
     }
 }
 
@@ -301,21 +340,35 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     let pad = region_pad(geo.scale());
     if !w.region.as_ref().is_some_and(|r| r.fits(geo.w, geo.h, pad)) {
         w.region = Some(Region::new(&gfx.r.g, geo.w, geo.h, pad).map_err(|e| ctx("creating the backdrop texture", e))?);
+        w.stale = true; // the new texture is empty
     }
     let (Some(region), Some(target)) = (w.region.as_ref(), w.target.as_ref()) else { return Err(Fail::Window("lost its resources".into())) };
 
     let mrect = mon.rect();
     let g = Geometry { w: geo.w, h: geo.h, origin: (geo.x - mrect.left, geo.y - mrect.top), scale: geo.scale(), radius_px: geo.radius_px(), cut_corners: false };
     let look = Look::regular(w.dark);
+    let lenses = w.lenses.draw_list();
     let t0 = Instant::now();
-    let prepared = prep(&gfx.r, region, mirror, &g, &look, false);
-    // THE LOOP GUARD. Our own Present can make the compositor produce a new duplication frame whose picture (without our excluded
-    // window) is unchanged; drawing for it would keep the engine busy at the refresh rate for ever. So a coarse level of the backdrop is
-    // read back, and when it, the geometry and the look all equal the last presented state, nothing is drawn.
-    let hash = region.fingerprint(&gfx.r.g, g.w, g.h).map_err(|e| ctx("reading the backdrop back", e))?;
+    let (mut prepared, hash) = match w.presented.map(|p| p.hash) {
+        // only a lens moved: the region still holds the backdrop of the last draw, and its fingerprint is that draw's
+        Some(hash) if !w.stale => {
+            w.stats.reused += 1;
+            (reuse(region, mirror, &g, &look), hash)
+        }
+        _ => {
+            let prepared = prep(&gfx.r, region, mirror, &g, &look, false);
+            // THE LOOP GUARD. Our own Present can make the compositor produce a new duplication frame whose picture (without our excluded
+            // window) is unchanged; drawing for it would keep the engine busy at the refresh rate for ever. So a coarse level of the backdrop
+            // is read back, and when it, the geometry, the look and the lenses all equal the last presented state, nothing is drawn.
+            let hash = region.fingerprint(&gfx.r.g, g.w, g.h).map_err(|e| ctx("reading the backdrop back", e))?;
+            w.stale = false;
+            (prepared, hash)
+        }
+    };
+    prepared.set_lenses(&look, &lenses);
     let t1 = Instant::now();
     w.stats.prep += t1 - t0;
-    let now = Presented { hash, geo: g, look };
+    let now = Presented { hash, geo: g, look, lenses };
     if w.presented == Some(now) {
         gfx.r.unbind();
         w.stats.skipped += 1;
@@ -348,6 +401,8 @@ struct Engine {
     /// The windows a capture session leaves out.
     excl: Exclusion,
     last_access_check: Instant,
+    /// How many `DwmFlush` calls in a row returned without waiting (see `pace`).
+    instant_flushes: u32,
 }
 
 /// The multithreaded WinRT apartment of the engine thread: entered before any WinRT object is touched, left when the thread ends (also
@@ -394,6 +449,7 @@ pub(super) fn run(rx: Receiver<Cmd>) {
         mode: CaptureMode::Off,
         excl: Exclusion::default(),
         last_access_check: Instant::now(),
+        instant_flushes: 0,
     };
     while e.step() {}
     e.drop_all();
@@ -412,11 +468,18 @@ impl Engine {
                 }
                 let w = self.wins.entry(hwnd).or_insert_with(|| Win::new(hwnd, dark));
                 w.dark = dark;
-                w.dirty = true;
+                w.restale();
             }
             Cmd::SetDark { hwnd, dark } => {
                 if let Some(w) = self.wins.get_mut(&hwnd) {
                     w.dark = dark;
+                    w.restale();
+                }
+            }
+            Cmd::SetLens { hwnd, slot, lens, animate } => {
+                // a window the engine does not know (detached since, or failed) has nothing to put a lens on
+                if let Some(w) = self.wins.get_mut(&hwnd) {
+                    w.lenses.set(slot as usize, lens, animate);
                     w.dirty = true;
                 }
             }
@@ -434,7 +497,58 @@ impl Engine {
 
     /// How long this turn may wait for a frame.
     fn frame_wait_ms(&self) -> u32 {
-        if self.last_activity.elapsed() > QUIET_AFTER { QUIET_WAIT_MS } else { FRAME_WAIT_MS }
+        if self.lens_active() {
+            0 // the display paces the turn (`pace`); a frame that is not there yet is taken next turn
+        } else if self.last_activity.elapsed() > QUIET_AFTER {
+            if self.wins.values().any(|w| w.visible && w.lenses.occupied()) { LENS_WAIT_MS } else { QUIET_WAIT_MS }
+        } else {
+            FRAME_WAIT_MS
+        }
+    }
+
+    /// Whether a lens of a visible window is moving or fading: the engine then draws once per display refresh.
+    fn lens_active(&self) -> bool {
+        self.wins.values().any(|w| w.visible && w.lenses.animating())
+    }
+
+    /// Steps the lenses of the visible windows to now and marks them dirty. The step is the time since the last one, so the motion does not
+    /// depend on how often the loop turns; `LensSet::advance` cuts a step after a stall.
+    fn advance_lenses(&mut self) {
+        let now = Instant::now();
+        for w in self.wins.values_mut() {
+            if !w.visible || !w.lenses.animating() {
+                w.lens_tick = None;
+                continue;
+            }
+            let dt = w.lens_tick.map_or(0.0, |t| now.duration_since(t).as_secs_f32());
+            w.lens_tick = Some(now);
+            w.lenses.advance(dt);
+            if !w.lenses.animating() {
+                // At rest: the next motion starts with a zero step, not with the time that passed since this one's last step.
+                w.lens_tick = None;
+            }
+            w.dirty = true; // also the step that puts the lens exactly on its target: that one is drawn, the next turn is not
+        }
+    }
+
+    /// Ends a turn that drew a moving lens: waits for the display's next composition (DwmFlush returns once per refresh, so a 60 Hz
+    /// screen is drawn 60 times a second and a 240 Hz one 240 times, with no spinning). Should the call fail or return at once, a short
+    /// wait on the channel stands in, so this can never become a busy loop.
+    fn pace(&mut self) -> bool {
+        let t = Instant::now();
+        let ok = unsafe { DwmFlush() }.is_ok();
+        // The stopwatch starts after the draw, so a healthy DwmFlush only waits for the next composition: on a 144 or 240 Hz screen that
+        // is often well under 2 ms. One quick return therefore proves nothing; only a run of returns that took no time at all (the
+        // compositor is off, or the call does not wait any more) or an error switches to the channel wait.
+        if ok && t.elapsed() >= INSTANT_FLUSH {
+            self.instant_flushes = 0;
+        } else if ok {
+            self.instant_flushes += 1;
+        }
+        if !ok || self.instant_flushes >= INSTANT_FLUSHES_BEFORE_WAIT {
+            return self.wait_command(Duration::from_millis(4));
+        }
+        true
     }
 
     /// Waits for a command for at most `t`. False when the channel is closed.
@@ -473,8 +587,12 @@ impl Engine {
         self.sync_monitors();
         let waited = self.pump();
         self.measure_all(); // the window may have moved while we waited for the frame
+        self.advance_lenses();
         self.draw_dirty();
         self.housekeeping();
+        if self.lens_active() {
+            return self.pace();
+        }
         if !waited && self.wins.values().any(|w| w.visible) {
             // no AcquireNextFrame wait happened this turn (a duplication is being rebuilt, or failed and backs off): never spin
             return self.wait_command(Duration::from_millis(self.frame_wait_ms() as u64));
@@ -507,13 +625,13 @@ impl Engine {
                     if let Some(w) = self.wins.get_mut(&k) {
                         if !w.visible {
                             w.visible = true;
-                            w.dirty = true;
+                            w.restale();
                             w.presented = None; // it may have been off screen a long while
                             moved = true;
                         }
                         if w.geo != Some(g) {
                             w.geo = Some(g);
-                            w.dirty = true;
+                            w.restale();
                             moved = true;
                         }
                     }
@@ -661,7 +779,7 @@ impl Engine {
             for w in self.wins.values_mut() {
                 let Some(g) = w.geo.filter(|g| g.hmon == hmon) else { continue };
                 if dirty.touches(g.x - r.left, g.y - r.top, g.w, g.h, region_pad(g.scale())) {
-                    w.dirty = true;
+                    w.restale();
                 }
             }
         }
@@ -711,12 +829,13 @@ impl Engine {
                 if now.duration_since(s.since) >= STATS_EVERY {
                     let draws = (s.presented + s.skipped).max(1) as f64;
                     log::info!(
-                        "glass {:#x}: {} frames acquired, {} with an image, {} draws presented, {} skipped by the loop guard, prep {:.2} ms, glass pass {:.2} ms (CPU time per draw)",
+                        "glass {:#x}: {} frames acquired, {} with an image, {} draws presented, {} skipped by the loop guard ({} draws only moved a lens), prep {:.2} ms, glass pass {:.2} ms (CPU time per draw)",
                         w.hwnd,
                         s.frames,
                         s.with_image,
                         s.presented,
                         s.skipped,
+                        s.reused,
                         s.prep.as_secs_f64() * 1000.0 / draws,
                         s.glass.as_secs_f64() * 1000.0 / s.presented.max(1) as f64,
                     );

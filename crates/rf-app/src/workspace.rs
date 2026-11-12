@@ -135,6 +135,12 @@ pub struct Workspace {
     glass_capture: rf_win::glass::CaptureMode,
     /// Counts the attach attempts; a watcher of an older attempt stops.
     glass_gen: u32,
+    /// Set by `render` around the call that builds the sidebar: the selected row of that sidebar is a glass lens (the engine draws the
+    /// pill behind the scene) instead of the Fluent fill. False for the rail and for the rail's peek over the content, which is opaque.
+    sidebar_lens: bool,
+    /// The selected row of this frame's sidebar has claimed the lens (only the first of several selected rows does). A frame that ends
+    /// without a claim takes the lens out.
+    sidebar_lens_claimed: std::cell::Cell<bool>,
     /// Address-bar folder completions for the typed text, and the highlighted one.
     addr_suggest: Vec<PathBuf>,
     addr_sel: Option<usize>,
@@ -596,6 +602,8 @@ impl Workspace {
             glass_shown: false,
             glass_capture: rf_win::glass::CaptureMode::Off,
             glass_gen: 0,
+            sidebar_lens: false,
+            sidebar_lens_claimed: std::cell::Cell::new(false),
             addr_suggest: Vec::new(),
             addr_sel: None,
             _addr_task: None,
@@ -891,6 +899,18 @@ impl Workspace {
         }
         self.focus_active(window, cx);
         cx.notify();
+    }
+
+    /// Names the pane that owns the settings page's lens: the focused pane of the shown tab when `owner`, else none.
+    fn assign_settings_lens(&self, owner: bool, cx: &mut Context<Self>) {
+        let tab = &self.tabs[self.active];
+        let focused = tab.view().clone();
+        for v in std::iter::once(&tab.left).chain(tab.right.as_ref()) {
+            let on = owner && *v == focused;
+            if v.read(cx).lens_owner != on {
+                v.update(cx, |v, _| v.lens_owner = on);
+            }
+        }
     }
 
     /// The pane next to `view` when its tab is split.
@@ -2478,6 +2498,11 @@ impl Workspace {
         let drop_border = p.accent;
         // on the rail only the icon; hovering the rail opens the full sidebar over the content
         let rail = self.sidebar_rail;
+        // Over glass the selected row is a lens the engine draws behind the scene: no fill and no accent bar, but a probe that reports
+        // the row's place on every paint (a scroll or a resize moves the lens with it). Two rows can be "selected" at once (a folder
+        // that is pinned and also a library): the first gets the lens, the other keeps the Fluent selection.
+        let lens_key = (active && self.sidebar_lens && !self.sidebar_lens_claimed.replace(true)).then(|| crate::glass::key_of(&target));
+        let fluent = active && lens_key.is_none();
         // drives look alike as bare icons: on the rail their letter sits in the icon's corner
         let letter = target3.path().filter(|_| rail).and_then(|p| {
             let s = p.to_str()?;
@@ -2495,7 +2520,8 @@ impl Workspace {
             .rounded(theme::RADIUS_SM)
             .text_sm()
             .relative()
-            .when(active, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+            .when(fluent, |d| d.bg(p.selection).child(theme::selection_pill(p)))
+            .when_some(lens_key, |d, key| d.child(crate::glass::lens_probe(crate::glass::SLOT_SIDEBAR, key)))
             .when(!active, |d| d.hover(|s| s.bg(p.hover)))
             .child(
                 div()
@@ -3161,6 +3187,7 @@ impl Workspace {
                 if !self.glass_shown {
                     // the glass is on the window: now the scene may be see-through
                     self.glass_shown = true;
+                    crate::glass::forget_window(self.glass_hwnd); // a glass that shows now has no lens yet: send them all again
                     crate::glass::set_shown(self.glass_hwnd, true); // the palette thins its washes over the glass
                     window.set_background_appearance(WindowBackgroundAppearance::Transparent);
                     cx.notify();
@@ -3184,6 +3211,7 @@ impl Workspace {
         if self.glass_hwnd != 0 {
             rf_win::glass::detach(self.glass_hwnd);
             crate::glass::set_shown(self.glass_hwnd, false);
+            crate::glass::forget_window(self.glass_hwnd); // the engine drops the lenses with the glass
         }
         self.glass_hwnd = 0;
         self.glass_dark = None;
@@ -3199,6 +3227,7 @@ impl Workspace {
         if self.glass_hwnd != 0 {
             rf_win::glass::detach(self.glass_hwnd);
             crate::glass::set_shown(self.glass_hwnd, false);
+            crate::glass::forget_window(self.glass_hwnd); // the engine drops the lenses with the glass
             self.glass_hwnd = 0;
             self.glass_dark = None;
         }
@@ -3214,6 +3243,7 @@ impl Drop for Workspace {
         if self.glass_hwnd != 0 {
             rf_win::glass::detach(self.glass_hwnd);
             crate::glass::set_shown(self.glass_hwnd, false);
+            crate::glass::forget_window(self.glass_hwnd); // the engine drops the lenses with the glass
         }
     }
 }
@@ -3322,7 +3352,29 @@ impl Render for Workspace {
         let side_w = if self.sidebar_rail { RAIL_W } else { self.sidebar_w };
         let show_sidebar = self.sidebar_open && self.compact.is_none() && self.viewport_w >= side_w + LIST_MIN;
         let room_for_preview = self.viewport_w >= self.preview_w + LIST_MIN + if show_sidebar { side_w } else { 0. };
+        // Lenses (the selection pills of the sidebar and of the settings list) exist only while this window shows glass. The sidebar's
+        // selected row claims its lens while it is built; a frame without a claim (no selected row, hidden sidebar, the rail) takes it
+        // out. The settings lens belongs to the focused pane when that shows Settings: a split tab with Settings in both panes would
+        // otherwise have two probes setting one slot to two places on every frame. The rail's peek is opaque, so its rows keep the
+        // Fluent selection.
+        let glass_on = self.glass_shown && self.glass_hwnd != 0;
+        self.sidebar_lens = glass_on && !self.sidebar_rail;
+        self.sidebar_lens_claimed.set(false);
         let sidebar = show_sidebar.then(|| self.render_sidebar(&p, cx));
+        self.sidebar_lens = false;
+        let plan = crate::glass::lens_plan(
+            glass_on,
+            show_sidebar && !self.sidebar_rail,
+            self.sidebar_lens_claimed.get(),
+            matches!(self.active_tab().read(cx).location(), Location::Settings),
+        );
+        if let Some(fade) = plan.clear_sidebar {
+            crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_SIDEBAR, fade);
+        }
+        if glass_on && !plan.settings_owner {
+            crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_SETTINGS, false);
+        }
+        self.assign_settings_lens(plan.settings_owner, cx);
         let peek = (show_sidebar && self.sidebar_rail && (self.rail_peek[0] || self.rail_peek[1])).then(|| {
             self.sidebar_rail = false;
             let full = self.render_sidebar(&p, cx);

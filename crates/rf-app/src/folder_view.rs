@@ -328,6 +328,9 @@ pub struct FolderView {
     pub history: History,
     /// Set by the workspace while this view is one of two panes.
     pub(crate) dual: bool,
+    /// Set by the workspace: this is the pane that owns the settings page's glass lens (the focused pane, when it shows Settings). The
+    /// other pane of a split tab that shows Settings too keeps the flat selection fill, so two panes never fight over one lens slot.
+    pub(crate) lens_owner: bool,
     /// (library file, default save folder) of the library being shown (paste/new item target).
     pub(crate) library_save: Option<(PathBuf, PathBuf)>,
     places: Entity<Places>,
@@ -492,6 +495,7 @@ impl FolderView {
         let mut this = Self {
             history: History::new(location),
             dual: false,
+            lens_owner: false,
             library_save: None,
             places,
             images,
@@ -4094,7 +4098,7 @@ impl Render for FolderView {
         let p = Palette::for_window(window);
         let content = match self.location() {
             Location::Home => self.render_home(&p, cx),
-            Location::Settings => crate::settings_view::render(&p, window, cx),
+            Location::Settings => crate::settings_view::render(&p, window, cx, self.lens_owner),
             Location::DiskUsage(root) => {
                 let root = root.clone();
                 let dv = match &self.disk_usage {
