@@ -34,6 +34,9 @@ pub struct Palette {
     pub selection_border: Hsla,
     pub tab_active: Hsla,
     pub danger: Hsla,
+    /// The controls of this window are drawn the liquid way (the window shows glass, or it is a popup opened from one): see `liquid`.
+    /// Set by `for_window`; `light()` and `dark()` are the classic look.
+    pub liquid: bool,
 }
 
 fn hex(c: u32) -> Hsla {
@@ -81,6 +84,7 @@ impl Palette {
             selection_border: hexa(accent, 0.55),
             tab_active: hexa(0xFFFFFF, 0.70),
             danger: hex(0xC42B1C),
+            liquid: false,
         }
     }
 
@@ -114,6 +118,7 @@ impl Palette {
             selection_border: hexa(accent, 0.55),
             tab_active: hexa(0xFFFFFF, 0.06),
             danger: hex(0xFF99A4),
+            liquid: false,
         }
     }
 
@@ -130,7 +135,10 @@ impl Palette {
             // "Solid" material: Windows 11's plain window color instead of Mica
             p.window_bg = if p.dark { hex(0x202020) } else { hex(0xF3F3F3) };
         }
-        if crate::glass::shown(crate::look::window::hwnd_of(window)) {
+        let hwnd = crate::look::window::hwnd_of(window);
+        // one place decides the look of the controls: every control asks the palette
+        p.liquid = crate::glass::liquid(hwnd);
+        if crate::glass::shown(hwnd) {
             // Over the glass the two washes are the veil: Mica is already a quiet, nearly opaque tone, the glass is the live screen.
             // At the strength made for Mica they hid two thirds of it in the dark theme (the user: too black), so the default is half
             // of that; the HyperGlass "surface wash" setting moves it either way.

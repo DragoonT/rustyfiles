@@ -357,10 +357,10 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     let mirror = mon.mirror().ok_or_else(|| Fail::Window("no mirror of the monitor".into()))?;
 
     // the swap chain: made on the first draw, resized when the client area changed
+    let first_draw = w.target.is_none();
     match &mut w.target {
         None => {
             w.target = Some(Target::new(gfx, w.hwnd, geo.w, geo.h)?);
-            super::set_state(w.hwnd, GlassState::Running);
         }
         Some(t) if (t.w, t.h) != (geo.w, geo.h) => {
             t.resize(gfx, geo.w, geo.h)?;
@@ -428,6 +428,11 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     w.stats.glass += t1.elapsed();
     w.stats.presented += 1;
     w.presented = Some(now);
+    if first_draw {
+        // Running means "the first frame is presented", not "the swap chain exists": a window that drops its own fill on Running (a popup
+        // menu, the dock's island, the main window turning see-through) would otherwise be empty for the time the first frame takes.
+        super::set_state(w.hwnd, GlassState::Running);
+    }
     Ok(Drawn::Presented)
 }
 

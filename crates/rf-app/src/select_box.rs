@@ -2,6 +2,9 @@
 //! open in an Acrylic popup right under it (the material of the context menus), at least as
 //! wide as the field, the chosen one ticked on the right. More than [`SEARCH_FROM`] options get
 //! a search box. Keys: ↑ ↓, PgUp/PgDn, Home/End, Enter, Esc. Clicking elsewhere closes it.
+//!
+//! Opened from a window that shows glass, it is the liquid look instead (`liquid`): a capsule button with a chevron-down, and a list
+//! on real glass whose chosen option is ticked at the leading edge and whose highlight is one capsule that glides between the rows.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -13,13 +16,13 @@ use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
+use crate::glass_watch::{self, PopupGlass};
+use crate::liquid::{self, Glide};
 use crate::t;
 use crate::theme::{self, Palette};
 
 /// More options than this: a search box on top.
 pub const SEARCH_FROM: usize = 10;
-const ROW_H: f32 = 32.;
-const PAD: f32 = 4.;
 const SEARCH_H: f32 = 40.;
 const LIST_MAX: f32 = 320.;
 const EDGE: f32 = 8.;
@@ -57,24 +60,20 @@ pub fn select_box_h(id: impl Into<SharedString>, p: &Palette, label: impl Into<S
     let key: SharedString = id.into();
     let bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
     let seen = bounds.clone();
-    h_flex()
-        .id(ElementId::Name(key.clone()))
-        .relative()
-        .h(px(height))
-        .min_w(px(180.))
-        .max_w(px(320.))
-        .px_3()
-        .gap_2()
-        .items_center()
-        .rounded(theme::RADIUS_SM)
-        .bg(p.hover)
-        .border_1()
-        .border_color(p.border)
-        .text_sm()
-        .cursor_pointer()
-        .hover(|s| s.border_color(p.text_tertiary))
+    let base = h_flex().id(ElementId::Name(key.clone())).relative().h(px(height)).min_w(px(180.)).max_w(px(320.)).gap_2().items_center().text_sm().cursor_pointer();
+    // over glass: a capsule with a chevron-down, a wash of white or black and no border; otherwise the bordered field
+    let (field, chevron) = if p.liquid {
+        let dark = p.dark;
+        (
+            base.px(px(14.)).rounded(px(height / 2.)).bg(liquid::dropdown_fill(dark, false)).hover(move |s| s.bg(liquid::dropdown_fill(dark, true))),
+            L::ChevronDown,
+        )
+    } else {
+        (base.px_3().rounded(theme::RADIUS_SM).bg(p.hover).border_1().border_color(p.border).hover(|s| s.border_color(p.text_tertiary)), L::ChevronsUpDown)
+    };
+    field
         .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(label.into()))
-        .child(Icon::new(L::ChevronsUpDown).size(px(14.)).text_color(p.text_secondary))
+        .child(Icon::new(chevron).size(px(14.)).text_color(p.text_secondary))
         .child(canvas(move |b, _, _| seen.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full())
         .on_click(move |_, window, cx| {
             let key = key.clone();
@@ -135,12 +134,16 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
     }
     close_open(cx);
     let search = choices.len() > SEARCH_FROM;
-    // wide enough for the longest label (estimated: the popup is sized before it is drawn)
+    // opened from a window that shows glass (or from a popup that does): the liquid list on real glass
+    let liquid = crate::glass::liquid(crate::look::window::hwnd_of(window));
+    let m = liquid::metrics(liquid);
+    // wide enough for the longest label (estimated: the popup is sized before it is drawn); the leading tick column adds its width
     let longest = choices.iter().map(|c| c.label.chars().count()).max().unwrap_or(0) as f32;
+    let column = liquid::has_tick_column(liquid, choices.iter().any(|c| c.selected));
     let fw = f32::from(field.size.width);
-    let w = (longest * 7.4 + 64.).clamp(fw.max(180.), fw.max(440.));
-    let list_h = (choices.len() as f32 * ROW_H).min(LIST_MAX);
-    let h = list_h + 2. * PAD + if search { SEARCH_H } else { 0. };
+    let w = (longest * 7.4 + 64. + if column { liquid::TICK_COL } else { 0. }).clamp(fw.max(180.), fw.max(440.));
+    let list_h = (choices.len() as f32 * m.row_h).min(LIST_MAX);
+    let h = list_h + 2. * m.pad_y + if search { SEARCH_H } else { 0. };
 
     let win = window.bounds();
     let area = window.display(cx).map(|d| d.bounds()).unwrap_or(win);
@@ -167,7 +170,8 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: WindowBackgroundAppearance::Blurred,
+        // over glass the window is see-through and the glass engine draws behind it (the view paints its own fill until it does)
+        window_background: if liquid { WindowBackgroundAppearance::Transparent } else { WindowBackgroundAppearance::Blurred },
         ..Default::default()
     };
     let opened = cx.open_window(opts, move |w, cx| {
@@ -178,7 +182,7 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
                 crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
-        cx.new(|cx| SelectView::new(key, choices, search, main, w, cx))
+        cx.new(|cx| SelectView::new(key, choices, search, main, liquid.then_some(dark), w, cx))
     });
     match opened {
         Ok(h) => {
@@ -212,11 +216,17 @@ struct SelectView {
     scroll: ScrollHandle,
     main: AnyWindowHandle,
     done: bool,
+    /// The liquid look: the list sits on real glass (`glass`), its rows are 34 high and one capsule (`glide`) is the highlight.
+    liquid: bool,
+    glass: Option<PopupGlass>,
+    glide: Glide,
+    _watch: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
 
 impl SelectView {
-    fn new(key: SharedString, choices: Vec<Choice>, search: bool, main: AnyWindowHandle, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// `liquid`: `Some(dark)` for the liquid look over glass (and which tint), `None` for the Acrylic list.
+    fn new(key: SharedString, choices: Vec<Choice>, search: bool, main: AnyWindowHandle, liquid: Option<bool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let labels: Vec<SharedString> = choices.iter().map(|c| c.label.clone()).collect();
         let hl = choices.iter().position(|c| c.selected).unwrap_or(0);
         let focus = cx.focus_handle();
@@ -232,7 +242,10 @@ impl SelectView {
                     let q = input.read(cx).value().to_string();
                     this.shown = filter(&this.labels, &q);
                     this.hl = 0;
-                    this.scroll.scroll_to_item(0);
+                    this.scroll.scroll_to_item(this.item_ix(0));
+                    // the list changed under the capsule: it appears at the first row, it does not glide there
+                    let m = liquid::metrics(this.liquid);
+                    this.glide.jump(liquid::highlight_top(0., &m));
                     cx.notify();
                 }
             }));
@@ -243,8 +256,36 @@ impl SelectView {
             None => window.focus(&focus, cx),
         }
         let scroll = ScrollHandle::new();
-        scroll.scroll_to_item(hl);
-        Self { key, shown: (0..choices.len()).collect(), choices: Rc::new(choices), labels, hl, search, focus, scroll, main, done: false, _subs: subs }
+        let is_liquid = liquid.is_some();
+        // (the highlight capsule is the list's first child in the liquid look: the rows come one place later)
+        scroll.scroll_to_item(hl + usize::from(is_liquid));
+        let m = liquid::metrics(is_liquid);
+        let glide = Glide::at(liquid::highlight_top(hl as f32 * m.row_h, &m));
+        // the glass of the popup: attached to its window, which is marked as a liquid one so its controls look the part
+        let glass = liquid.map(|dark| PopupGlass::start(crate::look::window::hwnd_of(window), dark));
+        let watch = glass.is_some().then(|| glass_watch::watch(cx, |this: &mut Self| this.glass.as_mut()));
+        Self {
+            key,
+            shown: (0..choices.len()).collect(),
+            choices: Rc::new(choices),
+            labels,
+            hl,
+            search,
+            focus,
+            scroll,
+            main,
+            done: false,
+            liquid: is_liquid,
+            glass,
+            glide,
+            _watch: watch,
+            _subs: subs,
+        }
+    }
+
+    /// The scroll handle's index of the list's child for the row at `pos` (the highlight capsule is the first child in the liquid look).
+    fn item_ix(&self, pos: usize) -> usize {
+        pos + usize::from(self.liquid)
     }
 
     /// Closes without choosing (Esc, a click elsewhere).
@@ -276,7 +317,18 @@ impl SelectView {
             return;
         }
         self.hl = to.min(self.shown.len() - 1);
-        self.scroll.scroll_to_item(self.hl);
+        let ix = self.item_ix(self.hl);
+        if self.liquid {
+            // A row that is not wholly in view scrolls the list under the capsule at once; a capsule that glided from the old row
+            // would start a row away from where its row now is. So it goes there without gliding (a row in view gets the glide).
+            let (view, row) = (self.scroll.bounds(), self.scroll.bounds_for_item(ix));
+            let in_view = row.is_some_and(|r| liquid::row_in_view(f32::from(view.top()), f32::from(view.bottom()), f32::from(r.top()), f32::from(r.bottom())));
+            if !in_view {
+                let m = liquid::metrics(true);
+                self.glide.jump(liquid::highlight_top(self.hl as f32 * m.row_h, &m));
+            }
+        }
+        self.scroll.scroll_to_item(ix);
         cx.notify();
     }
 
@@ -301,46 +353,68 @@ impl SelectView {
 impl Render for SelectView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Palette::for_window(window);
-        let mut list = v_flex().id("select-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.scroll);
+        let liquid = self.liquid;
+        let m = liquid::metrics(liquid);
+        let mut list = v_flex().id("select-list").relative().flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.scroll);
         if self.shown.is_empty() {
-            list = list.child(div().h(px(ROW_H)).flex().items_center().justify_center().text_sm().text_color(p.text_secondary).child(t!("Eşleşen öğe yok")));
+            list = list.child(div().h(px(m.row_h)).flex().items_center().justify_center().text_sm().text_color(p.text_secondary).child(t!("Eşleşen öğe yok")));
+        }
+        let column = liquid::has_tick_column(liquid, self.choices.iter().any(|c| c.selected));
+        if liquid && !self.shown.is_empty() {
+            // One capsule for the highlight (the first child: behind the rows, and before them for the scroll handle's indices). It
+            // glides to the row the pointer or the keyboard is on over about 120 ms; a frame is asked for only while it moves.
+            let (now, animate) = (Instant::now(), crate::settings::animations());
+            let top = liquid::highlight_top(self.hl.min(self.shown.len() - 1) as f32 * m.row_h, &m);
+            let y = self.glide.aim(top, now, animate);
+            if self.glide.running(now, animate) {
+                window.request_animation_frame();
+            }
+            list = list.child(liquid::highlight_capsule(y, &m, p.dark));
         }
         for (pos, &ix) in self.shown.iter().enumerate() {
             let c = &self.choices[ix];
-            list = list.child(
-                h_flex()
-                    .id(("opt", ix))
-                    .flex_shrink_0()
-                    .h(px(ROW_H))
-                    .px_3()
-                    .gap_2()
-                    .items_center()
+            let row = h_flex()
+                .id(("opt", ix))
+                .flex_shrink_0()
+                .h(px(m.row_h))
+                .gap_2()
+                .items_center()
+                .text_sm()
+                .on_hover(cx.listener(move |this, on: &bool, _, cx| {
+                    if *on && this.hl != pos {
+                        this.hl = pos;
+                        cx.notify();
+                    }
+                }))
+                .on_click(cx.listener(move |this, _, _, cx| this.pick(pos, cx)));
+            let label = div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(c.label.clone());
+            list = list.child(if liquid {
+                // the tick at the leading edge, the others make room for it; no fill of its own: the capsule behind is the highlight
+                row.px(px(12.)).children(liquid::tick_cell(liquid::tick_slot(column, c.selected), p.text)).child(label)
+            } else {
+                row.px_3()
                     .rounded(px(4.))
-                    .text_sm()
                     .when(pos == self.hl, |d| d.bg(p.hover))
                     .active(|s| s.bg(p.pressed))
-                    .on_hover(cx.listener(move |this, on: &bool, _, cx| {
-                        if *on && this.hl != pos {
-                            this.hl = pos;
-                            cx.notify();
-                        }
-                    }))
-                    .on_click(cx.listener(move |this, _, _, cx| this.pick(pos, cx)))
-                    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(c.label.clone()))
-                    .child(div().w(px(16.)).flex_shrink_0().when(c.selected, |d| d.child(Icon::new(L::Check).size(px(16.)).text_color(p.accent)))),
-            );
+                    .child(label)
+                    .child(div().w(px(16.)).flex_shrink_0().when(c.selected, |d| d.child(Icon::new(L::Check).size(px(16.)).text_color(p.accent))))
+            });
         }
+        // the panel: over glass a wash (or the plain fill until the glass runs); the Acrylic list has no fill of its own
+        let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback()));
         v_flex()
             .size_full()
-            .p(px(PAD))
+            .px(px(m.pad_x))
+            .py(px(m.pad_y))
+            .when_some(fill, |d, f| d.bg(f))
             .text_color(p.text)
             .track_focus(&self.focus)
             .capture_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.on_key(ev, cx)))
             .children(self.search.as_ref().map(|input| {
                 div()
                     .flex_shrink_0()
-                    .h(px(SEARCH_H - PAD))
-                    .mb(px(PAD))
+                    .h(px(SEARCH_H - m.pad_y))
+                    .mb(px(m.pad_y))
                     .child(Input::new(input).prefix(Icon::new(L::Search).size(px(14.)).text_color(p.text_secondary)))
             }))
             .child(list)

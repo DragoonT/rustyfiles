@@ -16,6 +16,8 @@ pub mod dock;
 mod fluent_menu;
 mod flyout;
 mod glass;
+mod glass_watch;
+mod liquid;
 mod layout_panel;
 mod git_ui;
 mod prompt;

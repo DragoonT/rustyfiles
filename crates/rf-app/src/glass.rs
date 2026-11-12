@@ -48,6 +48,34 @@ pub fn shown(hwnd: isize) -> bool {
     SHOWN_ANY.load(std::sync::atomic::Ordering::Relaxed) && SHOWN.lock().unwrap_or_else(|p| p.into_inner()).contains(&hwnd)
 }
 
+/// The popups (menus, dropdown lists, flyouts) that were opened from a window with glass and are drawn on glass themselves. They are
+/// not "shown" windows (their own washes stay as they are), but their controls take the liquid look like the window they came from.
+static LIQUID_POPUPS: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+static LIQUID_POPUPS_ANY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Marks a popup window as one that is drawn the liquid way (or takes the mark off when it closes).
+pub fn set_liquid_popup(hwnd: isize, on: bool) {
+    let mut v = LIQUID_POPUPS.lock().unwrap_or_else(|p| p.into_inner());
+    v.retain(|&h| h != hwnd);
+    if on && hwnd != 0 {
+        v.push(hwnd);
+    }
+    LIQUID_POPUPS_ANY.store(!v.is_empty(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The one rule for the liquid look of the controls: a window that shows glass, and the popups opened from one, get it; every other
+/// window and every other backdrop keeps the classic controls.
+pub(crate) fn liquid_decision(window_shows_glass: bool, popup_over_glass: bool) -> bool {
+    window_shows_glass || popup_over_glass
+}
+
+/// Whether the controls of this window are drawn the liquid way (the palette asks this once per paint, so the common case, no glass
+/// anywhere, is two atomic reads).
+pub fn liquid(hwnd: isize) -> bool {
+    let popup = LIQUID_POPUPS_ANY.load(std::sync::atomic::Ordering::Relaxed) && LIQUID_POPUPS.lock().unwrap_or_else(|p| p.into_inner()).contains(&hwnd);
+    liquid_decision(shown(hwnd), popup)
+}
+
 /// A popup, menu or flyout of ours (its HWND at hand) stays out of the screen capture while some window has glass. Otherwise the glass
 /// would show a copy of the popup, bent, behind the popup itself. Called for every such window, glass or not: the engine remembers it,
 /// applies the exclusion when glass starts (also for a window that is already open) and lifts it when the last glass goes.
@@ -676,6 +704,29 @@ mod tests {
         use super::{LensShape, lens_spec, shape_spec};
         let (rect, clip) = ([8.0, 100.0, 200.0, 32.0], [0.0, 0.0, 240.0, 600.0]);
         assert_eq!(shape_spec(LensShape::Row, 3, rect, clip, 1.25), lens_spec(3, rect, clip, 1.25));
+    }
+
+    #[test]
+    fn the_liquid_look_is_for_glass_windows_and_their_popups_only() {
+        use super::liquid_decision;
+        assert!(!liquid_decision(false, false), "Mica, Acrylic, Solid and every window without glass stay classic");
+        assert!(liquid_decision(true, false), "a window that shows glass");
+        assert!(liquid_decision(false, true), "a popup opened from one");
+        assert!(liquid_decision(true, true));
+        // the registry: a popup is liquid from the moment it is marked until it is unmarked, and only that window
+        assert!(!super::liquid(7001));
+        super::set_liquid_popup(7001, true);
+        assert!(super::liquid(7001) && !super::liquid(7002));
+        super::set_liquid_popup(7001, false);
+        assert!(!super::liquid(7001));
+        // no window handle, no mark
+        super::set_liquid_popup(0, true);
+        assert!(!super::liquid(0));
+        // a window whose glass is on the screen is liquid by itself
+        super::set_shown(7003, true);
+        assert!(super::liquid(7003));
+        super::set_shown(7003, false);
+        assert!(!super::liquid(7003));
     }
 
     #[test]

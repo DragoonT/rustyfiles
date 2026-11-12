@@ -78,7 +78,7 @@ pub enum GlassState {
     Off,
     /// Attached; the engine has not drawn it yet (it may be waiting for the window to become visible).
     Starting,
-    /// The glass is on the window.
+    /// The glass is on the window: its first frame has been presented.
     Running,
     /// The glass could not be kept; the reason is in the text. The capture exclusion is lifted and the window is not drawn any more.
     Failed(String),

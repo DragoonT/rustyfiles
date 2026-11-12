@@ -98,6 +98,17 @@ pub fn set_dark_mode(hwnd: isize, dark: bool) {
     }
 }
 
+/// Asks the system for small round corners (4 px at 100 %) on a window: what the Acrylic popups get from their material, for a popup
+/// whose background is the glass engine's instead. The glass takes its own corners from what the system reports, so this is also what
+/// the glass is cut to. Ignored before Windows 11.
+pub fn set_small_corners(hwnd: isize) {
+    use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL, DwmSetWindowAttribute};
+    let v = DWMWCP_ROUNDSMALL;
+    unsafe {
+        let _ = DwmSetWindowAttribute(HWND(hwnd as *mut _), DWMWA_WINDOW_CORNER_PREFERENCE, &v as *const _ as _, std::mem::size_of_val(&v) as u32);
+    }
+}
+
 /// Makes `owner` (a window of another process, possibly) the owner of `hwnd`: it stays above
 /// it and minimizes with it, like the owner's own dialog.
 pub fn set_owner(hwnd: isize, owner: isize) {
