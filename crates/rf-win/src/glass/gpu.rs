@@ -50,6 +50,9 @@ pub(super) struct Look {
     pub shade: f32,
     /// Direction of the rim light in degrees; y points down, so -135 is the top left.
     pub light: f32,
+    /// Share of the frost left at the very edge of the glass (it grows to the whole frost across the rim). The bending happens in the
+    /// rim, and frost hides it: the smaller this is, the more of the bending is seen.
+    pub rim_frost: f32,
 }
 
 impl Look {
@@ -57,25 +60,30 @@ impl Look {
     ///
     /// The shape, frost and saturation are the "Regular" preset of the model. The grade and the tint are not: the preset lowers the
     /// contrast to 0.81 (black becomes 24 of 255, white 229) and lays a 36 % dark or 50 % white tint over it, which is right for a
-    /// small panel but turned a whole window into a flat grey slab (dark theme: 26 over a black desktop, 158 over a white page). So
-    /// the dark glass keeps the contrast, dims what is behind it to 42 % and tints less (6 over black, 81 over white, colours stay
-    /// colours); the light glass keeps the brightness and tints more towards white (70 %: 182 over a black desktop instead of 138).
+    /// small panel but laid a grey-black veil over a whole window (dark theme: 26 over a black desktop, 158 over a white page, and
+    /// the app's own translucent surfaces come on top of that). The user asked for less of that veil, so the dark glass is close to
+    /// clear: the contrast is kept, what is behind is dimmed to 80 % and tinted by 10 % only (2 over black, 186 over white, colours
+    /// stay colours). The light glass keeps the brightness and tints more towards white (70 %: 182 over a black desktop, was 138).
     pub(super) fn regular(dark: bool) -> Look {
         Look {
-            depth: 1.188,
+            // The preset's rim (thickness 1.188, at most 30.6 px wide, 35 % of the frost at the edge) bent the backdrop too little to be
+            // noticed on a window (the user: more bending at the edges). Wider, thicker and with less frost on it: the edge now reads the
+            // backdrop from up to about 77 px further in (was 39) and shows it almost sharp.
+            depth: 1.6,
             bezel: 0.421,
-            max_bezel: 30.629,
+            max_bezel: 44.0,
             zoom: 1.0,
             dispersion: 0.0,
             blur: 10.351,
             saturate: 2.252,
-            lum: if dark { 0.42 } else { 1.0 },
+            lum: if dark { 0.80 } else { 1.0 },
             contrast: if dark { 1.0 } else { 0.9 },
-            tint: if dark { [20.0 / 255.0, 20.0 / 255.0, 24.0 / 255.0, 0.30] } else { [1.0, 1.0, 1.0, 0.70] },
+            tint: if dark { [20.0 / 255.0, 20.0 / 255.0, 24.0 / 255.0, 0.10] } else { [1.0, 1.0, 1.0, 0.70] },
             rim: 0.25,
             rim_width: 0.3,
             shade: 0.03,
             light: -135.0,
+            rim_frost: 0.12,
         }
     }
 }
@@ -141,7 +149,7 @@ fn make_cb(g: &Geometry, look: &Look, src: (u32, u32), region: &Region, check: b
         // x: non-finite check, y: debug 0, z: region pad, w: smooth sampling (never the point mode)
         ext: [check as u8 as f32, 0.0, pad as f32, 0.0],
         sub: [0.0; 4],
-        opt: [(!g.cut_corners) as u8 as f32, 0.0, 0.0, 0.0],
+        opt: [(!g.cut_corners) as u8 as f32, look.rim_frost, 0.0, 0.0],
     }
 }
 

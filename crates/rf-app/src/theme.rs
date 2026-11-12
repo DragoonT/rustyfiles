@@ -125,6 +125,12 @@ impl Palette {
             // "Solid" material: Windows 11's plain window color instead of Mica
             p.window_bg = if p.dark { hex(0x202020) } else { hex(0xF3F3F3) };
         }
+        if crate::glass::shown(crate::look::window::hwnd_of(window)) {
+            // Over the glass the two washes are the veil: Mica is already a quiet, nearly opaque tone, the glass is the live screen.
+            // At the strength made for Mica they hid two thirds of it in the dark theme (the user: too black). Half of that.
+            p.window_bg.a = if p.dark { 0.18 } else { 0.20 };
+            p.content_bg.a = if p.dark { 0.22 } else { 0.35 };
+        }
         p
     }
 }

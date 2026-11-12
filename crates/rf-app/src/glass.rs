@@ -22,6 +22,25 @@ pub fn set_failure(why: Option<String>) {
     *FAILURE.lock().unwrap_or_else(|p| p.into_inner()) = why;
 }
 
+/// The windows whose glass is on the screen right now (their scene is see-through). The palette asks for every window it paints, so a
+/// flag answers first when no window has glass at all.
+static SHOWN: Mutex<Vec<isize>> = Mutex::new(Vec::new());
+static SHOWN_ANY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_shown(hwnd: isize, on: bool) {
+    let mut v = SHOWN.lock().unwrap_or_else(|p| p.into_inner());
+    v.retain(|&h| h != hwnd);
+    if on && hwnd != 0 {
+        v.push(hwnd);
+    }
+    SHOWN_ANY.store(!v.is_empty(), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether this window has its glass on the screen.
+pub fn shown(hwnd: isize) -> bool {
+    SHOWN_ANY.load(std::sync::atomic::Ordering::Relaxed) && SHOWN.lock().unwrap_or_else(|p| p.into_inner()).contains(&hwnd)
+}
+
 /// A popup, menu or flyout of ours (its HWND at hand) stays out of the screen capture while some window has glass. Otherwise the glass
 /// would show a copy of the popup, bent, behind the popup itself. Called for every such window, glass or not: the engine remembers it,
 /// applies the exclusion when glass starts (also for a window that is already open) and lifts it when the last glass goes.
@@ -39,6 +58,18 @@ mod tests {
         assert_eq!(super::failure().as_deref(), Some("no duplication"));
         super::set_failure(None);
         assert_eq!(super::failure(), None);
+    }
+
+    #[test]
+    fn shown_windows_are_remembered_one_by_one() {
+        assert!(!super::shown(41));
+        super::set_shown(41, true);
+        super::set_shown(42, true);
+        assert!(super::shown(41) && super::shown(42) && !super::shown(43));
+        super::set_shown(41, false);
+        assert!(!super::shown(41) && super::shown(42));
+        super::set_shown(42, false);
+        assert!(!super::shown(42));
     }
 
     #[test]

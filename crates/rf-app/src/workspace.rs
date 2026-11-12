@@ -3157,6 +3157,7 @@ impl Workspace {
                 if !self.glass_shown {
                     // the glass is on the window: now the scene may be see-through
                     self.glass_shown = true;
+                    crate::glass::set_shown(self.glass_hwnd, true); // the palette thins its washes over the glass
                     window.set_background_appearance(WindowBackgroundAppearance::Transparent);
                     cx.notify();
                 }
@@ -3173,6 +3174,7 @@ impl Workspace {
         log::warn!("glass: giving up on this window, Mica is used: {why}");
         if self.glass_hwnd != 0 {
             rf_win::glass::detach(self.glass_hwnd);
+            crate::glass::set_shown(self.glass_hwnd, false);
         }
         self.glass_hwnd = 0;
         self.glass_dark = None;
@@ -3187,6 +3189,7 @@ impl Workspace {
         self.glass_gen = self.glass_gen.wrapping_add(1);
         if self.glass_hwnd != 0 {
             rf_win::glass::detach(self.glass_hwnd);
+            crate::glass::set_shown(self.glass_hwnd, false);
             self.glass_hwnd = 0;
             self.glass_dark = None;
         }
@@ -3201,6 +3204,7 @@ impl Drop for Workspace {
         // the window closed
         if self.glass_hwnd != 0 {
             rf_win::glass::detach(self.glass_hwnd);
+            crate::glass::set_shown(self.glass_hwnd, false);
         }
     }
 }

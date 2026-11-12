@@ -36,6 +36,7 @@ cbuffer CB : register(b0)
                     // w: 1 = point sampling of the sharp backdrop (what the screenshot shows), 0 = bilinear
     float4 uSub;    // xy: shift of the glass centre from the window centre, device px (sub pixel placement)  zw: extra shift of the outline only (test placement)
     float4 uOpt;    // x: 1 = the corners are not cut out here (the whole rectangle is covered; a window's corners are cut by the system)
+                    // y: share of the frost left at the very edge (it grows to the whole frost across the rim): less frost, more visible bending
 };
 
 static const float IOR = 1.5;                                  // refraction index, constant in all three modes
@@ -240,8 +241,8 @@ float4 PSGlass(float4 pos : SV_Position) : SV_Target
 
         float2 rp = pos.xy + uExt.z;                // this pixel in region px
         // STEP 4: frost, the blur is in the region pyramid, taken before the displacement.
-        // Deviation from the sheet: the outermost ring samples a sharper mip (factor 0.35 at the edge, 1 from the middle of the band) so the rim bending stays visible.
-        float lod = SigmaToLod(uB.y * s) * lerp(0.35, 1.0, smoothstep(0.0, 1.0, t));
+        // Deviation from the sheet: the outermost ring samples a sharper mip (factor uOpt.y at the edge, 1 where the band ends) so the rim bending stays visible.
+        float lod = SigmaToLod(uB.y * s) * lerp(uOpt.y, 1.0, smoothstep(0.0, 1.0, t));
         float3 k = float3(1.0 + uB.x, 1.0, 1.0 - uB.x);
         float3 c;
         if (uExt.w > 0.5 && lod < 0.001)

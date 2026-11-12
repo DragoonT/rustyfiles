@@ -371,9 +371,11 @@ fn the_bent_band_follows_the_true_corner() {
     // red rises by one level per pixel to the right
     let src = picture(sw, sh, |x, _| [x.saturating_sub(80).min(255) as u8, 0, 60]);
     let rect = (100, 60, 320u32, 280u32);
-    let flat = Look { depth: 0.0, ..bare_optics() };
+    // the rim the numbers below were worked out for (the shipped look's rim may be tuned without touching this test)
+    let rim = Look { depth: 1.188, max_bezel: 30.629, ..bare_optics() };
+    let flat = Look { depth: 0.0, ..rim };
     for warp in drivers() {
-        let bent = render_with(&src, sw, sh, rect, 8.0, &bare_optics(), warp).expect("render");
+        let bent = render_with(&src, sw, sh, rect, 8.0, &rim, warp).expect("render");
         let straight = render_with(&src, sw, sh, rect, 8.0, &flat, warp).expect("render");
         // how many px further right (further in, seen from the top left corner) the bend reads at a point of the corner's diagonal
         let shift = |d: u32| px(&bent, rect.2, d, d)[2] as i32 - px(&straight, rect.2, d, d)[2] as i32;
