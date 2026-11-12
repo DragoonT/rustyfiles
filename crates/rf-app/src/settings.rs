@@ -475,8 +475,18 @@ pub struct Settings {
     /// The dock's network and volume symbols open our own control centre (on). Off: the old behaviour, they send Win+A (Windows' quick
     /// settings).
     pub dock_own_control_centre: bool,
+    /// The dock's clock opens our own calendar panel (on). Off: the old behaviour, it sends Win+N (Windows' notification centre and calendar).
+    pub dock_own_calendar: bool,
+    /// The dock's bell opens our own notification panel and wears a dot while there are notifications (on). Off: the old behaviour,
+    /// it sends Win+N.
+    pub dock_own_notifications: bool,
     /// How much the dock's icons grow under the pointer (off / subtle / full).
     pub dock_magnify: DockMagnify,
+
+    // ---- Shell host (shell/: `rustyfiles --shell`, the dock's process); experimental, every switch off by default
+    /// Our desktop (the wallpaper, the icons) is drawn over Explorer's, one window per monitor, while the shell host runs. Explorer's
+    /// desktop stays underneath and is visible again when the host stops.
+    pub shell_desktop_cover: bool,
 }
 
 impl Default for Settings {
@@ -582,7 +592,10 @@ impl Default for Settings {
             dock_weather_city: String::new(),
             dock_own_start: true,
             dock_own_control_centre: true,
+            dock_own_calendar: true,
+            dock_own_notifications: true,
             dock_magnify: DockMagnify::Full,
+            shell_desktop_cover: false,
         }
     }
 }
@@ -1113,6 +1126,23 @@ mod dock_tests {
         assert!(!back.dock_own_control_centre);
         assert!(Settings::parse_lenient("dock_own_control_centre = 3
 ").unwrap().dock_own_control_centre, "a wrong value falls back to the default");
+    }
+
+    #[test]
+    fn the_dock_opens_our_own_calendar_and_notification_panels_unless_told_not_to() {
+        let d = Settings::default();
+        assert!(d.dock_own_calendar && d.dock_own_notifications);
+        // a settings file from before them has neither key: both on
+        let old = Settings::parse_lenient("theme = \"dark\"
+").unwrap();
+        assert!(old.dock_own_calendar && old.dock_own_notifications, "a file from before them: on");
+        let off = Settings { dock_own_calendar: false, dock_own_notifications: false, ..Default::default() };
+        let back = Settings::parse_lenient(&toml::to_string_pretty(&off).unwrap()).unwrap();
+        assert!(!back.dock_own_calendar && !back.dock_own_notifications, "off survives a save and a load");
+        let wrong = Settings::parse_lenient("dock_own_calendar = \"nein\"
+dock_own_notifications = 3
+").unwrap();
+        assert!(wrong.dock_own_calendar && wrong.dock_own_notifications, "wrong values fall back to the default");
     }
 
     #[test]

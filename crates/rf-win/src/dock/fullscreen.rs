@@ -95,7 +95,8 @@ pub fn foreground() -> Option<Foreground> {
         let style = GetWindowLongPtrW(h, GWL_STYLE) as u32;
         Some(Foreground {
             rect: Rect::new(r.left, r.top, r.right, r.bottom),
-            shell: is_shell_class(&class),
+            // (our own desktop's cover windows are the desktop: never a full-screen application, whichever process asks)
+            shell: is_shell_class(&class) || crate::desktop::cover::is_cover(h.0 as isize),
             own: pid == GetCurrentProcessId(),
             caption: has_caption(style),
             maximized_frame: has_maximized_frame(style),

@@ -8076,5 +8076,143 @@
   "key": "Orta boy",
   "tr": "Orta boy",
   "en": "Medium"
+ },
+ {
+  "id": "b28bcc80",
+  "key": "Masaüstünü rustyfiles çizsin (deneysel)",
+  "tr": "Masaüstünü rustyfiles çizsin (deneysel)",
+  "en": "Let rustyfiles draw the desktop (experimental)"
+ },
+ {
+  "id": "f542bb4a",
+  "key": "Explorer'ın masaüstü altta durur ve dock durduğunda yeniden görünür.",
+  "tr": "Explorer'ın masaüstü altta durur ve dock durduğunda yeniden görünür.",
+  "en": "Explorer's desktop stays underneath and is visible again when the dock stops."
+ },
+ {
+  "id": "74012269",
+  "key": "Gerçek masaüstü korumalı: deneme kopyasına RUSTYFILES_DESKTOP_DIR verilmedi",
+  "tr": "Gerçek masaüstü korumalı: deneme kopyasına RUSTYFILES_DESKTOP_DIR verilmedi",
+  "en": "The real Desktop is protected: this test copy was not given RUSTYFILES_DESKTOP_DIR"
+ },
+ {
+  "id": "341083b0",
+  "key": "Bildirimler",
+  "tr": "Bildirimler",
+  "en": "Notifications"
+ },
+ {
+  "id": "b355eadc",
+  "key": "Bildirim yok",
+  "tr": "Bildirim yok",
+  "en": "No notifications"
+ },
+ {
+  "id": "dc34425b",
+  "key": "Tümünü temizle",
+  "tr": "Tümünü temizle",
+  "en": "Clear all"
+ },
+ {
+  "id": "c3c72134",
+  "key": "şimdi",
+  "tr": "şimdi",
+  "en": "now"
+ },
+ {
+  "id": "11d83e9e",
+  "key": "dün",
+  "tr": "dün",
+  "en": "yesterday"
+ },
+ {
+  "id": "c7bdaf80",
+  "key": "Tarih ve saat ayarları",
+  "tr": "Tarih ve saat ayarları",
+  "en": "Date and time settings"
+ },
+ {
+  "id": "852d41f4",
+  "key": "Önceki ay",
+  "tr": "Önceki ay",
+  "en": "Previous month"
+ },
+ {
+  "id": "7f246c84",
+  "key": "Sonraki ay",
+  "tr": "Sonraki ay",
+  "en": "Next month"
+ },
+ {
+  "id": "88f54ef8",
+  "key": "Bugüne dön",
+  "tr": "Bugüne dön",
+  "en": "Go to today"
+ },
+ {
+  "id": "29588242",
+  "key": "Bilinmeyen uygulama",
+  "tr": "Bilinmeyen uygulama",
+  "en": "Unknown app"
+ },
+ {
+  "id": "ea9cce80",
+  "key": "Bu bildirimi kaldır",
+  "tr": "Bu bildirimi kaldır",
+  "en": "Remove this notification"
+ },
+ {
+  "id": "fa76dd1e",
+  "key": "Bildirim ayarlarını aç",
+  "tr": "Bildirim ayarlarını aç",
+  "en": "Open notification settings"
+ },
+ {
+  "id": "ccc73275",
+  "key": "Bildirimler okunamadı.",
+  "tr": "Bildirimler okunamadı.",
+  "en": "Notifications could not be read."
+ },
+ {
+  "id": "b3a239ea",
+  "key": "Bildirimlere erişim kapalı. Windows'ta izin verin.",
+  "tr": "Bildirimlere erişim kapalı. Windows'ta izin verin.",
+  "en": "Notification access is off. Allow it in Windows."
+ },
+ {
+  "id": "c920928a",
+  "key": "rustyfiles takvimini kullan",
+  "tr": "rustyfiles takvimini kullan",
+  "en": "Use rustyfiles' calendar"
+ },
+ {
+  "id": "2a186a48",
+  "key": "rustyfiles bildirim panelini kullan",
+  "tr": "rustyfiles bildirim panelini kullan",
+  "en": "Use rustyfiles' notification panel"
+ },
+ {
+  "id": "a6c4a1fe",
+  "key": "Dock'taki saate tıklayınca Windows'un takvimi yerine rustyfiles'ın paneli açılır: ay, hafta numarasız gün tablosu, saniyeli saat. Kapalıyken Windows'un bildirim merkezi ve takvimi açılır.",
+  "tr": "Dock'taki saate tıklayınca Windows'un takvimi yerine rustyfiles'ın paneli açılır: ay, hafta numarasız gün tablosu, saniyeli saat. Kapalıyken Windows'un bildirim merkezi ve takvimi açılır.",
+  "en": "Clicking the clock in the dock opens rustyfiles' own panel instead of Windows' calendar: the month, a grid of days without week numbers, the time with seconds. When off, Windows' notification centre and calendar open."
+ },
+ {
+  "id": "ab0406ce",
+  "key": "Dock'taki zile tıklayınca Windows'un bildirim merkezi yerine rustyfiles'ın paneli açılır: diğer uygulamaların bildirimleri uygulamaya göre gruplanır, zilde bildirim varken küçük bir nokta görünür. Kapalıyken Windows'un bildirim merkezi açılır.",
+  "tr": "Dock'taki zile tıklayınca Windows'un bildirim merkezi yerine rustyfiles'ın paneli açılır: diğer uygulamaların bildirimleri uygulamaya göre gruplanır, zilde bildirim varken küçük bir nokta görünür. Kapalıyken Windows'un bildirim merkezi açılır.",
+  "en": "Clicking the bell in the dock opens rustyfiles' own panel instead of Windows' notification centre: other apps' notifications grouped by app, and a small dot on the bell while there are notifications. When off, Windows' notification centre opens."
+ },
+ {
+  "id": "1d7d8489",
+  "key": "Açık pencere yok",
+  "tr": "Açık pencere yok",
+  "en": "No open windows"
+ },
+ {
+  "id": "006e7091",
+  "key": "(adsız)",
+  "tr": "(adsız)",
+  "en": "(untitled)"
  }
 ]

@@ -16,7 +16,7 @@ it exits.
 | --- | --- | --- |
 | Left (48 px high) | Windows logo, a search field, the weather | logo: our own Start panel (see "Panels, Start and search"; with "rustyfiles Başlat menüsünü kullan" off, the Windows key as before); search field: the same panel with the keyboard in its field, and the text typed there is shown in the field on the island (off: rustyfiles' quick search window); the weather is shown, not clicked |
 | Middle (72 px high at rest) | the apps pinned to the Windows taskbar in its order, the other running apps, a thin separator, the Recycle Bin, Downloads | not running: start it; running: bring its last used window forward; in front: minimise it; middle click: another instance |
-| Right (48 px high) | network and volume glyphs that show the real state (the volume glyph shows mute), the time and date in two lines, a bell | network, volume: our own control centre (see "The control centre"; with "rustyfiles denetim merkezini kullan" off, Windows' quick settings, Win+A, as in version 1); time, bell: Windows' notification centre and calendar (Win+N) FOR NOW: they are still Windows' own panels |
+| Right (48 px high) | network and volume glyphs that show the real state (the volume glyph shows mute), the time and date in two lines, a bell | network, volume: our own control centre (see "The control centre"; with "rustyfiles denetim merkezini kullan" off, Windows' quick settings, Win+A, as in version 1); time: our own calendar panel (see "The calendar and the notification panel"; with "rustyfiles takvimini kullan" off, Windows' notification centre and calendar, Win+N, as before); bell: our own notification panel, with a small dot while there are notifications (with "rustyfiles bildirim panelini kullan" off, Win+N as before) |
 
 A dot under an app means it is running; the app in front has a wider dot.
 
@@ -275,8 +275,89 @@ the pointer to slider arithmetic, the brightness range mapping, the program name
 status decoding. `cargo run -p rf-win --example sysstatus_probe` prints what each source reports on the machine it runs on (read-only;
 no titles).
 
+## The calendar and the notification panel
+
+Two more panels of the same machinery (`panel.rs`; their slots are in `panel_more.rs`): the same placement above the right island's
+glass (8 px up, lined up with its right edge, kept inside the work area), the same closing rules (Escape, a click elsewhere, another
+window in front, a layout change, the button again), one panel at a time, the glass, the island's tone, the 120 ms easing. Each has
+its own setting (below) and falls back to Win+N when it is off. A panel's window is made hidden at the dock's start only when its
+setting is on; a setting switched on while the dock runs makes the window at the first click (that second way has not been run).
+
+### The clock's panel (a click on the clock)
+
+* Top: today's long date ("12 Kasım 2026 Perşembe" / "Thursday, November 12, 2026"). Then the month's name with the buttons to the
+  month before and after (a click on the name goes back to today), the month grid, the time WITH SECONDS in the user's own time
+  pattern, and "Tarih ve saat ayarları" (opens `ms-settings:dateandtime`).
+* The grid is always six rows of seven (the panel does not change its height from month to month). The week starts on the user's own
+  first day (`GetLocaleInfoEx(LOCALE_IFIRSTDAYOFWEEK)`); week numbers are off. Today is filled with the accent colour, the days of the
+  neighbouring months are dimmed, the chosen day (the keyboard's) has a ring. A click on a day chooses it; on a dimmed day, moves to
+  its month. The years are 1900 to 2100; the month buttons stop at the ends.
+* Keys: the arrows move the chosen day (left and right a day, up and down a week: the day above or below in the grid), Page Up and Page
+  Down a month, Home goes to today, Escape closes, Tab visits the month buttons, the name and the link.
+* NAMES come from the app's own Turkish and English tables, chosen by the app's language and not by the Windows region (the rest of the
+  panel speaks the app's language; a mix would read badly). Any other language of the app gets the English table.
+* NOT in this version: an agenda (there is no source of events that works without an account), other time zones, alarms.
+* The seconds tick only while the panel is open: one task that wakes at each second, ended when the window is hidden.
+* Pure and tested (`rf_win::dock::calendar`, `cal_view.rs`): leap years (1900 no, 2000 yes, 2100 no), the weekday of every day of 1900 to
+  2100, month grids for all seven first days of the week, adding days and months with the ends held, the names, the keys.
+
+### The bell's panel (a click on the bell)
+
+* It shows the notifications other programs have posted, read through the WinRT `UserNotificationListener` WITHOUT package identity.
+  What was verified on this machine (build 26300, from a program with no identity): `GetAccessStatus()` and
+  `GetNotificationsAsync(Toast)` work (about 10 ms a call), the push event `NotificationChanged` throws `0x80070490`. So the list is
+  POLLED: when the panel opens and every 2 seconds while it is open, never while it is closed (the reader is a thread of its own, COM
+  MTA, ended when the panel is hidden).
+* ACCESS. Only `GetAccessStatus()` is called; the call that makes Windows show a consent prompt (`RequestAccessAsync`) is never made
+  (a test reads the module's source and fails if it ever appears in code), and the list is read only when the status is `Allowed`.
+  Otherwise the panel says it in one line ("Bildirimlere erişim kapalı. Windows'ta izin verin.") with a button that opens
+  `ms-settings:privacy-notifications`.
+* EACH NOTIFICATION: its program's icon (the dock's icon code, on the shell thread, by the AppUserModelID) and name as a heading, then
+  its title, up to three lines of text and its age ("şimdi", "5 dk", "2 sa", "dün", else the date in the user's format). Grouped by
+  program, the program with the newest notification first, newest first inside a program. A click starts the program (by its
+  AppUserModelID, as the Start panel does); it does not press any button of the toast (no API for that). With none: "Bildirim yok".
+* REMOVING. A small x on a notification (shown when the pointer is on it or the keyboard is) calls `RemoveNotification(id)`, and
+  "Tümünü temizle" calls `ClearNotifications()`. Both are documented, but whether they work for a program without package identity
+  was NOT verified (they change the user's list, so the research did not call them). So they are OFF in the real mode (no x, no
+  "Tümünü temizle", Delete does nothing) until `RUSTYFILES_TOASTS_REMOVE=1` is set, which is how the first live try is made; making
+  it the default is a decision for after that try. With it on, `rf_win::toasts::RemoveWatch` hides the x and "clear all" for the rest
+  of the opening when a call returns an error, or when a notification asked to go is still listed after two more polls and no
+  removal has been seen to work. In the made-up mode below they work on the made-up list without the variable.
+* THE BELL'S DOT is a count of the list, kept while the panel is closed by ONE cheap signal: a plain directory-change wait
+  (`ReadDirectoryChangesW`, no polling) on `%LOCALAPPDATA%\Microsoft\Windows\Notifications`, where the notification database lives. A
+  change there only triggers one count (after the folder settles for 0.8 s, never later than 3 s after the burst began, and never
+  within 3 s of the last read: `rf_win::toasts::read_at`, kept by `HintTimer`). While the panel is open the worker is paused (the
+  panel polls the list itself), and the panel's closing makes it read once for what changed meanwhile; the panel also tells the count
+  at each of its readings. That every new notification touches that folder is an observation of the research, not a promise of
+  Windows. How much it costs on a busy machine is NOT measured: in one 85 s observation with no new notification on the test PC the
+  folder was silent (0 change bursts), which says nothing about a machine whose programs update tiles or badges all day; the worst
+  case is one count (about 10 ms of a worker thread) per 3 s. If the folder cannot be watched, the dot is only as fresh as the last
+  time the panel was open.
+* PRIVACY. The texts of notifications are never logged and never written to a file (`Toast`'s `Debug` prints only an id and the
+  lengths). They live in memory while the panel is open and are dropped when the window is hidden (the view lets go of them, and the hidden
+  window is drawn twice with nothing in it so that GPUI's copies of the last frame, its elements and its shaped text, go too:
+  `panel_more::scrub`, not yet seen live); what stays is the count. A notification Windows gave no time shows no age.
+  A read of the list that fails is not an empty list: the panel keeps what it shows and the dot keeps its count until a read works.
+* NO FLICKER. A poll that finds the same list (`rf_win::toasts::diff` is empty, whatever order Windows lists them in) redraws
+  nothing. A poll that finds a different list keeps the keyboard cursor on its notification (or moves it to the one that followed).
+* Keys: Up and Down walk the notifications, Enter starts the program of the one under the cursor, Delete removes it, Escape closes.
+* Pure and tested (`rf_win::toasts`, `notif_model.rs`): the access decision, grouping and order, the three-line clamp, the age in both
+  languages, the difference between two polls, the keyboard cursor across polls, the remove watch, a poll that failed, the timing of the dot's reads and its pause, the one answer for "is the x offered", the age of a notification with no time, the
+  panel's height. `cargo run -p rf-win --example toasts_probe` prints COUNTS only (never a title, a text or a program's name).
+* TRYING IT WITHOUT TOUCHING THE REAL LIST. `RUSTYFILES_TOASTS_FAKE=many` makes the reader answer with five invented notifications
+  (three programs, a long title, a five-line text, ages from seconds to days) that the x, Delete and "Tümünü temizle" really remove,
+  in memory; `empty`, `denied` and `notasked` show the other states. In this mode Windows is not asked at all and nothing is changed
+  there. Off unless the variable is set.
+* WHAT THIS CANNOT DO (unchanged from the research): press the buttons or type in the reply boxes of other programs' toasts; stop
+  Windows' own banners (beside Explorer they still appear; the panel is the list, not a replacement for the pop-ups); get the push
+  event without a package identity.
+
 ## Settings (Settings, "Dock (deneysel)" / "Dock (experimental)")
 
+* **rustyfiles takvimini kullan** / Use rustyfiles' calendar. On by default. The clock opens the calendar panel; off: it sends Win+N
+  (Windows' notification centre and calendar), as before.
+* **rustyfiles bildirim panelini kullan** / Use rustyfiles' notification panel. On by default. The bell opens the notification panel
+  and wears a dot while there are notifications; off: it sends Win+N, as before, and the dot's worker and folder watch are not running.
 * **rustyfiles Başlat menüsünü kullan** / Use the rustyfiles Start menu. On by default. The logo opens the Start panel and the search
   field the search; off: the logo sends the Windows key and the field opens the quick search window, as in version 1.
 * **rustyfiles denetim merkezini kullan** / Use the rustyfiles control centre. On by default. The network and volume symbols open the
@@ -294,8 +375,8 @@ no titles).
   used. A failed request shows nothing and is retried after 5 minutes, then 10, 20 and 30; a city Open-Meteo does not know is asked
   about again only once an hour.
 
-The dock process is told to read the settings file again when any of these changes: the two switches of the panels (`dock_own_start`,
-`dock_own_control_centre`), the keep-out switch, the city, the magnification, the animations setting and the four HyperGlass sliders
+The dock process is told to read the settings file again when any of these changes: the four switches of the panels (`dock_own_start`,
+`dock_own_control_centre`, `dock_own_calendar`, `dock_own_notifications`), the keep-out switch, the city, the magnification, the animations setting and the four HyperGlass sliders
 (`control::Keys`). The process's views read the two panel switches from the settings it loaded last, at every click.
 
 ## The process
@@ -371,7 +452,8 @@ The dock process is told to read the settings file again when any of these chang
   dock's next start registers again. If Explorer restarts, the dock hears the `TaskbarCreated` broadcast and registers again.
 * Keystrokes (`SendInput`: Win, Win+A, Win+N, and the Alt tap that lets a window come forward) are sent only as the direct answer to
   your click on that element, never at start-up and never from a timer. Win+A is now only the answer to the network and volume
-  symbols with "rustyfiles denetim merkezini kullan" off; Win+N is the clock's and the bell's.
+  symbols with "rustyfiles denetim merkezini kullan" off; Win+N is the clock's and the bell's only with "rustyfiles takvimini kullan"
+  and "rustyfiles bildirim panelini kullan" off.
 
 ## Where things are
 
@@ -395,6 +477,12 @@ The dock process is told to read the settings file again when any of these chang
   symbols, the slider's pointer arithmetic; all pure), `sysstate.rs` (the sound and network the island follows all the time), and in
   rf-win `crates/rf-win/src/sysstatus/` (`audio`, `network`, `media`, `bluetooth`, `power`, `brightness`, and the hub / write-coalescing
   helpers in `mod.rs`).
+* The calendar and the notification panel: `crates/rf-app/src/dock/cal_view.rs` (the calendar's view and its small model),
+  `notif_view.rs` (the notification panel's view), `notif_model.rs` (its height, words and cursor arithmetic; pure), `notif_state.rs`
+  (the count behind the bell's dot and its worker), `panel_more.rs` (their slots in the panel machinery), `panel_parts.rs` (the colours
+  and buttons they share); in rf-win `crates/rf-win/src/dock/calendar.rs` (dates, grids, names, keys) and `crates/rf-win/src/toasts/`
+  (`mod.rs` the pure model, `listener.rs` the WinRT reader, `hint.rs` the dot's worker; named `toasts` because `notify` is a crate this
+  one uses).
 * The panels' system side in `crates/rf-win/src/dock/`: `panel.rs` (placement, toggle, close and foreground decisions, the easing),
   `power.rs` (the power menu and its question, the real calls, the user's name), `startlist.rs` (the alphabet, headers, rows, arrow
   keys), `startpins.rs` (the pin file and its seeding), `startapps.rs` (start, start as administrator, find the program).

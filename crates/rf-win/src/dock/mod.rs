@@ -11,6 +11,7 @@
 //! | `hit` | which part of an island's window takes the pointer (the glass and the icons standing out of it) and the window region that lets the rest through to other programs | the pieces |
 //! | `hover` | the dock's slots and the icon hit test along it (the grow itself is `magnify`) | all of it |
 //! | `clock` | the right island's two lines for a time and the user's locale patterns | formatting |
+//! | `calendar` | the clock panel's month grid (six rows, the user's first day of the week), the Turkish and English names, how the keys move through it | all of it |
 //! | `model` | pinned + running apps merged in the taskbar's order, the places, the click decision | all of it |
 //! | `pins` | the taskbar's pinned apps, read-only (pin folder + `Taskband\Favorites` order); which pins are alive, moved to a newer install, or dead | the order, the fate rules |
 //! | `identity` | a running window's packaged-app id (its process's package), so a Store app's windows match its pin | the id handed to the windows |
@@ -45,6 +46,7 @@
 //!
 //! Everything that blocks (COM, the shell, the disk, other programs' windows) is documented as such and meant for a worker thread.
 
+pub mod calendar;
 pub mod clock;
 pub mod fullscreen;
 pub mod hit;

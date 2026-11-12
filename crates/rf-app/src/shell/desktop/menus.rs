@@ -129,23 +129,24 @@ impl DesktopView {
     /// The menu of the empty desktop, at the pointer.
     pub(super) fn show_background_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let me = cx.entity().downgrade();
-        let size = self.store.icon_size_step();
-        let sort = self.store.sort;
-        let align = self.store.align_to_grid;
+        let (size, sort, align) = {
+            let st = self.store.get();
+            (st.icon_size_step(), st.sort, st.align_to_grid)
+        };
         let read_only = self.read_only();
         let size_item = |label: &str, s: IconSize| {
             Item::action(label.to_string(), MenuIcon::None, act(&me, move |v, _, cx| v.set_icon_size(s, cx))).checked(size == s)
         };
         let by = |label: &str, k: SortName| {
             Item::action(label.to_string(), MenuIcon::None, act(&me, move |v, _, cx| {
-                let desc = v.store.sort.descending;
+                let desc = v.store.get().sort.descending;
                 v.sort_by(k, desc, cx)
             }))
             .checked(sort.key == k)
         };
         let dir = |label: &str, desc: bool| {
             Item::action(label.to_string(), MenuIcon::None, act(&me, move |v, _, cx| {
-                let k = v.store.sort.key;
+                let k = v.store.get().sort.key;
                 v.sort_by(k, desc, cx)
             }))
             .checked(sort.descending == desc)

@@ -31,6 +31,7 @@ pub mod names;
 pub mod policy;
 pub mod rename_check;
 pub mod select;
+pub mod shared;
 pub mod source;
 pub mod tile;
 pub mod typeahead;
@@ -38,11 +39,12 @@ pub mod wall;
 
 mod input;
 mod menus;
+mod open;
 mod operations;
 mod view;
 
 pub use args::PreviewArgs;
-pub use view::DesktopView;
+pub use view::{DesktopView, Hosted};
 
 use gpui_kit::*;
 
@@ -63,6 +65,12 @@ fn bind(cx: &mut App) {
     ]);
 }
 
+/// Binds the desktop's own keys. Once per process; the preview and the cover host both call it.
+pub fn init(cx: &mut App) {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| bind(cx));
+}
+
 /// The preview window. The process lives as long as it is open: the rustyfiles windows it opens (a double click on a folder) are
 /// "main windows" and closing the last of them would otherwise end the whole process, preview included.
 struct PreviewWindow(AnyWindowHandle);
@@ -76,7 +84,7 @@ pub fn window_open(cx: &App) -> bool {
 
 /// Opens the preview window. Nothing is read or listed on the calling thread: the window opens at once and fills in.
 pub fn open_preview(args: PreviewArgs, cx: &mut App) {
-    bind(cx);
+    init(cx);
     let display = cx.primary_display().map(|d| d.bounds());
     // 90 % of the primary display, centred: close to the size of the canvas it shows by default (the primary monitor)
     let bounds = match display {

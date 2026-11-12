@@ -2313,6 +2313,27 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::Monitor,
+            t!("Masaüstünü rustyfiles çizsin (deneysel)"),
+            Some(t!("Explorer'ın masaüstü altta durur ve dock durduğunda yeniden görünür.")),
+            sw("shell-cover", p, s.shell_desktop_cover, |s, v| s.shell_desktop_cover = v),
+        ),
+        card(
+            p,
+            L::Calendar,
+            t!("rustyfiles takvimini kullan"),
+            Some(t!("Dock'taki saate tıklayınca Windows'un takvimi yerine rustyfiles'ın paneli açılır: ay, hafta numarasız gün tablosu, saniyeli saat. Kapalıyken Windows'un bildirim merkezi ve takvimi açılır.")),
+            sw("dock-own-cal", p, s.dock_own_calendar, |s, v| s.dock_own_calendar = v),
+        ),
+        card(
+            p,
+            L::Bell,
+            t!("rustyfiles bildirim panelini kullan"),
+            Some(t!("Dock'taki zile tıklayınca Windows'un bildirim merkezi yerine rustyfiles'ın paneli açılır: diğer uygulamaların bildirimleri uygulamaya göre gruplanır, zilde bildirim varken küçük bir nokta görünür. Kapalıyken Windows'un bildirim merkezi açılır.")),
+            sw("dock-own-notif", p, s.dock_own_notifications, |s, v| s.dock_own_notifications = v),
+        ),
+        card(
+            p,
             L::ZoomIn,
             t!("Simge büyütme"),
             Some(t!("Fare dock'un üzerindeyken simgeler Mac'teki gibi büyür: Hafif 1,25 katına, Tam 1,55 katına kadar.")),

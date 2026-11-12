@@ -64,7 +64,36 @@ pub struct Backend {
     pub label_shadow: bool,
 }
 
+impl Clone for Backend {
+    fn clone(&self) -> Backend {
+        Backend {
+            mode: self.mode.clone(),
+            read_only: self.read_only,
+            items: SharedItems(self.items.0.clone()),
+            folders: self.folders.clone(),
+            infos: self.infos.clone(),
+            specs: self.specs.clone(),
+            canvas: self.canvas,
+            layout_path: self.layout_path.clone(),
+            visibility: self.visibility,
+            label_shadow: self.label_shadow,
+        }
+    }
+}
+
 impl Backend {
+    /// The same desktop, drawn for another monitor (cover mode: one backend is loaded, each monitor's view gets its own copy of it with
+    /// its own canvas; the items, the folders and the layout file are shared).
+    pub fn for_canvas(&self, canvas: usize) -> Backend {
+        Backend { canvas: if canvas < self.specs.len() { canvas } else { 0 }, ..self.clone() }
+    }
+
+    /// The same desktop after the monitors changed: the new list, and the canvas at `canvas` in it.
+    pub fn with_monitors(&self, infos: Vec<MonitorInfo>, canvas: usize) -> Backend {
+        let specs: Vec<MonitorSpec> = infos.iter().map(|m| m.spec()).collect();
+        Backend { canvas: if canvas < specs.len() { canvas } else { 0 }, infos, specs, ..self.clone() }
+    }
+
     /// The folder new files, pasted files and dropped files go into: the user's Desktop, or the scratch folder.
     pub fn target_dir(&self) -> Option<PathBuf> {
         self.folders.dir(FolderOrigin::User)
@@ -181,6 +210,14 @@ pub fn read_only_for(args: &PreviewArgs, mode: &Mode) -> bool {
 /// placement of every item would otherwise be saved as if the user had chosen it): it is kept from the first arrangement on.
 pub fn keeps_layout(scratch: bool, touched: bool) -> bool {
     scratch || touched
+}
+
+/// Whether a desktop view hosted in cover mode keeps the layout file from its first placement on. A scratch folder has a file of its
+/// own and keeps it. The real layout is kept once it is known to be the user's: Explorer's positions were taken, or the user arranged
+/// something (both set `imported_from_explorer`). While that is not so (the import failed and is tried again at the next start, or the
+/// Desktop is protected) the placement of the first look is the sort order's and not the user's, and is not written down as if it were.
+pub fn hosted_keeps_layout(scratch: bool, imported_or_arranged: bool) -> bool {
+    scratch || imported_or_arranged
 }
 
 /// The user arranged something in the real Desktop's layout. That also settles the one-time import of Explorer's icon positions:
@@ -371,6 +408,13 @@ mod tests {
         assert!(!keeps_layout(false, false), "looking only: nothing is written");
         assert!(keeps_layout(false, true), "arranged: kept");
         assert!(keeps_layout(true, true));
+    }
+
+    #[test]
+    fn a_hosted_view_keeps_the_real_layout_only_once_it_is_the_users() {
+        assert!(hosted_keeps_layout(true, false), "a scratch folder keeps its own file");
+        assert!(hosted_keeps_layout(false, true), "after the import, or an arrangement by the user");
+        assert!(!hosted_keeps_layout(false, false), "the import failed: the sort order's placement is not written down as the user's layout");
     }
 
     #[test]

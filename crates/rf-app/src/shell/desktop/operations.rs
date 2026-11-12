@@ -101,7 +101,8 @@ impl DesktopView {
             Origin::Virtual(k) => {
                 let name = k.parsing_name();
                 if let Some(loc) = Location::from_shell_name(&name) {
-                    cx.defer(move |cx| crate::open_main_window(Some(loc), None, None, cx));
+                    let shell_name = name.clone();
+                    cx.defer(move |cx| super::open::open_location(Some(&shell_name), loc, cx));
                 } else {
                     rf_win::sta::run(move |_| {
                         if let Err(e) = rf_win::shellfolder::open(&name) {
@@ -114,7 +115,7 @@ impl DesktopView {
                 let Some(path) = self.path_of(id) else { return };
                 if it.is_dir {
                     // a folder opens in a rustyfiles window
-                    cx.defer(move |cx| crate::open_main_window(Some(Location::Path(path)), None, None, cx));
+                    cx.defer(move |cx| super::open::open_location(None, Location::Path(path), cx));
                 } else {
                     crate::folder_view::open_in_background(path, cx);
                 }
@@ -172,7 +173,7 @@ impl DesktopView {
     /// The Desktop folder itself in a rustyfiles window ("Open in rustyfiles").
     pub(super) fn open_desktop_folder(&mut self, cx: &mut Context<Self>) {
         if let Some(dir) = self.backend.as_ref().and_then(|b| b.target_dir()) {
-            cx.defer(move |cx| crate::open_main_window(Some(Location::Path(dir)), None, None, cx));
+            cx.defer(move |cx| super::open::open_location(None, Location::Path(dir), cx));
         }
     }
 
@@ -457,7 +458,7 @@ impl DesktopView {
                     cx.update(|cx| crate::tags::update(cx, |t| t.moved(&from, &to)));
                     // the cell goes with the item; the folder watcher shows the new name a moment later
                     let _ = this.update(cx, |v, cx| {
-                        v.store.rename(&old_id, &new_id);
+                        v.store.edit().rename(&old_id, &new_id);
                         v.sel.renamed(&old_id, &new_id);
                         cx.notify();
                     });
@@ -496,7 +497,7 @@ impl DesktopView {
             self.resolved.placed.remove(id);
         }
         for (id, r) in &from {
-            self.store.drop_item(&b.specs, &mut self.resolved, id, b.canvas, r.left + delta.0, r.top + delta.1);
+            self.store.edit().drop_item(&b.specs, &mut self.resolved, id, b.canvas, r.left + delta.0, r.top + delta.1);
         }
         self.rebuild_placed();
         self.schedule_save(cx);
@@ -542,7 +543,7 @@ impl DesktopView {
     // ---------- the rest ----------
 
     pub(super) fn step_icon_size(&mut self, larger: bool, cx: &mut Context<Self>) {
-        let now = self.store.icon_size_step();
+        let now = self.store.get().icon_size_step();
         let next = if larger { now.larger() } else { now.smaller() };
         if next != now {
             self.set_icon_size(next, cx);
@@ -551,14 +552,16 @@ impl DesktopView {
 
     pub(super) fn set_icon_size(&mut self, size: rf_core::desktop::grid::IconSize, cx: &mut Context<Self>) {
         self.touch_layout();
-        self.store.set_icon_size(size);
+        self.store.edit().set_icon_size(size);
         self.recompute(cx);
+        self.refresh_peers(cx);
     }
 
     pub(super) fn set_align(&mut self, on: bool, cx: &mut Context<Self>) {
         self.touch_layout();
-        self.store.set_align_to_grid(on);
+        self.store.edit().set_align_to_grid(on);
         self.recompute(cx);
+        self.refresh_peers(cx);
     }
 
     /// "Sort by": the icons are laid out once in that order from the top-left and stay where they are put from then on.
@@ -566,15 +569,16 @@ impl DesktopView {
         let Some(b) = self.backend.clone() else { return };
         self.touch_layout();
         let pref = SortPref { key, descending };
-        self.store.set_sort(pref);
+        self.store.edit().set_sort(pref);
         let mut items = b.items.items();
         rf_core::desktop::items::sort_items(&mut items, key.key(), pref.dir());
         let shown: Vec<ItemId> = items.iter().map(|i| i.id.clone()).collect();
         let model = b.items.listing();
-        self.store.set_auto_arrange(true);
-        let resolved = self.store.resolve(&b.specs, rf_core::desktop::layout::Listing { shown: &shown, kept: &model.kept, complete: model.complete }, chrono::Utc::now().timestamp_millis());
-        self.store.freeze(&b.specs, &resolved);
+        self.store.edit().set_auto_arrange(true);
+        let resolved = self.store.edit().resolve(&b.specs, rf_core::desktop::layout::Listing { shown: &shown, kept: &model.kept, complete: model.complete }, chrono::Utc::now().timestamp_millis());
+        self.store.edit().freeze(&b.specs, &resolved);
         self.recompute(cx);
+        self.refresh_peers(cx);
     }
 
     /// F5: lists the folders and the wallpaper again (on a thread of its own: the shell may take its time).

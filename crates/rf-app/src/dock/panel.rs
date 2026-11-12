@@ -40,6 +40,12 @@ use super::host::{self, Kind};
 use super::left::LeftIsland;
 use super::start::StartView;
 
+// The clock's panel and the bell's panel (the calendar and the notifications): their slots and hooks are in `panel_more.rs`, a child of
+// this module so that it can use the machinery below.
+#[path = "panel_more.rs"]
+mod more;
+pub use more::{NOTIFICATIONS, init_extra, toggle_calendar, toggle_notifications};
+
 /// The Start panel's size, logical px.
 pub const START_SIZE: (f32, f32) = (620.0, 680.0);
 
@@ -366,6 +372,11 @@ fn open_panel(id: PanelId, cx: &mut App) {
 /// A panel that changed its mind about its height while open: placed again above its island (it grows upwards). `height` is the new
 /// one, logical px (the view's own height cannot be read from inside its own update).
 pub fn relayout(id: PanelId, height: f32, cx: &mut App) {
+    relayout_sized(id, (super::cc_model::WIDTH, height), cx);
+}
+
+/// [`relayout`] for a panel that is not as wide as the control centre.
+pub fn relayout_sized(id: PanelId, size: (f32, f32), cx: &mut App) {
     let Some(p) = cx.try_global::<PanelHost>() else { return };
     if p.open != Some(id) {
         return;
@@ -374,7 +385,7 @@ pub fn relayout(id: PanelId, height: f32, cx: &mut App) {
     let (kind, side, hwnd) = (slot.kind, slot.side, slot.hwnd);
     let Some((scale, work)) = host::monitor_work(cx) else { return };
     let Some(glass) = host::visible_glass_rect(kind, cx) else { return };
-    let rect = geo::place(glass, (super::cc_model::WIDTH, height), scale, side, work);
+    let rect = geo::place(glass, size, scale, side, work);
     if cx.global::<PanelHost>().rect == rect {
         return;
     }
@@ -479,10 +490,12 @@ pub fn shutdown(cx: &mut App) {
     }
 }
 
-/// True when every window left is a panel's (or none is left): the islands are gone, the dock has nothing to show.
+/// True when every window left is a panel's or one of the desktop's cover windows (or none is left): the islands are gone, the dock
+/// has nothing to show. (The cover windows are not the dock: counting them as live windows would keep the host running with no dock.)
 pub fn only_panels_left(cx: &App) -> bool {
     let mine: Vec<WindowId> = panel(cx).map(|p| p.slots.iter().map(|s| s.window).collect()).unwrap_or_default();
-    cx.windows().iter().all(|w| mine.contains(&w.window_id()))
+    let open: Vec<WindowId> = cx.windows().iter().map(|w| w.window_id()).collect();
+    crate::shell::cover::only_these_left(&open, &mine, &crate::shell::cover::window_ids(cx))
 }
 
 /// The component theme (the text field's colours) follows the panel's tone, not the app's theme setting: the dock process has no

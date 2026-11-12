@@ -15,6 +15,7 @@
 //! | `store` | the layout file (`desktop-layout.json`): format, atomic write, corruption, newer versions |
 //! | `import` | turning Explorer's icon positions (as read from its view) into our cells, refusing when the numbers do not fit the monitors |
 
+pub mod cover;
 pub mod geom;
 pub mod grid;
 pub mod import;

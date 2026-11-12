@@ -13,16 +13,20 @@
 //! | `wallwatch` | what tells us the wallpaper changed, debounced, compared with the last read | fake event source and reader |
 //! | `items` | the Desktop and Public Desktop folders and the virtual items, kept up to date by `watch.rs` | temp folders |
 //! | `import` | the one-time read of Explorer's icon positions (`IFolderView::GetItemPosition`) | the name classification |
+//! | `cover` | cover mode (F4): turns a window into one of the desktop's per-monitor cover windows and keeps it directly above Explorer's desktop (writes nothing of Explorer's; moves only our own windows) | styles, a fake-free read of the z-order; the rules are in `rf_core::desktop::cover` |
+//! | `showdesktop` | Show Desktop / Minimize All carried out over a trait | a fake desktop |
 //!
 //! Every shell call that is not a plain file call goes through [`crate::sta::call`] (workers that call the shell themselves hang it:
 //! see the comment there). Every function may block; none belongs on the UI thread.
 
+pub mod cover;
 pub mod import;
 pub mod items;
 pub mod monitors;
 pub mod regnotify;
 pub mod registry;
 pub mod render;
+pub mod showdesktop;
 pub mod wallcache;
 pub mod wallpaper;
 pub mod wallwatch;

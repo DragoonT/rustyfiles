@@ -335,6 +335,16 @@ impl DesktopView {
             return;
         }
         if self.band.take().is_some() {
+            // Cover mode: a press on empty space did not activate the window (so that it never takes the keyboard from the user's
+            // program for nothing). If the rubber band picked icons, the keyboard belongs to them now: Delete, F2 and Ctrl+C must
+            // act on the icons just chosen, as they do on Explorer's desktop.
+            // (not `Window::activate_window`: the toolkit's version moves the window back to its first rectangle and sends fake key
+            // presses to win the foreground; ours has just been clicked, which is the right to take it)
+            if let Some(hwnd) = self.cover.filter(|h| *h != 0)
+                && !self.sel.selected.is_empty()
+            {
+                rf_win::desktop::cover::activate(hwnd);
+            }
             cx.notify();
         }
         if self.press.take().is_some() {

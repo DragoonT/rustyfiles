@@ -411,6 +411,8 @@ fn on_system_event(ev: SystemEvent, cx: &mut App) {
             // the islands move; a panel that is open would be left where they were
             super::panel::close(rf_win::dock::panel::CloseCause::LayoutChanged, cx);
             request_layout(cx);
+            // the desktop's windows follow the monitors, once they have been quiet (see shell::cover)
+            crate::shell::cover::layout_changed(cx);
         }
         SystemEvent::ThemeChanged => {
             let scale = cx.try_global::<Env>().map_or(1.0, |e| e.scale);
@@ -453,6 +455,8 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     fresh.apply_side_effects();
     let new = Prefs::of(&fresh);
     cx.set_global(fresh);
+    // the bell's dot follows its setting
+    super::notif_state::sync(cx);
     let Some(host) = host_mut(cx) else { return };
     host.settings_stamp = stamp;
     let ch = changes(&host.prefs, &new);
@@ -466,6 +470,8 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     {
         left.update(cx, |v, cx| v.set_city(&new.city, cx));
     }
+    // the desktop cover follows its own switch (see shell::cover)
+    crate::shell::cover::on_settings(cx);
     cx.refresh_windows();
 }
 
@@ -481,6 +487,8 @@ pub fn shutdown(cx: &mut App) {
         return;
     }
     let host = cx.remove_global::<Host>();
+    // the desktop cover goes first: its windows close and Explorer's desktop is simply visible again
+    crate::shell::cover::stop(cx);
     super::panel::shutdown(cx);
     for p in &host.placed {
         p.glass.borrow_mut().release();
@@ -636,8 +644,12 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         super::panel::init(panel_glass, left, display, scale, geo.placements.left.glass, cx);
     }
     super::panel::init_control_centre(panel_right_glass, display, scale, geo.placements.right.glass, cx);
+    // the clock's panel and the bell's panel (each only when its setting is on)
+    super::panel::init_extra(cx);
     // what the right island's symbols follow all the time (sound, network)
     if let Some(right) = sys_right {
+        // (the bell's dot: a count of the notifications, followed only with the setting on)
+        super::notif_state::init(right.clone(), cx);
         super::sysstate::start(right, cx);
     }
     on_message_loop(cx, move || {
@@ -659,6 +671,8 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         apply_visibility(cx);
     }
     apply_reserve(cx);
+    // the desktop cover, when its setting is on (see shell::cover)
+    crate::shell::cover::on_settings(cx);
 
     // system events -> the app
     cx.spawn(async move |cx| {
@@ -704,7 +718,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
                     all_settled &= g.settled();
                 }
                 if changed {
-                    cx.refresh_windows();
+                    crate::shell::cover::refresh_dock_windows(cx);
                 }
                 Some(Duration::from_millis(if all_settled { 1000 } else { 100 }))
             });
@@ -727,7 +741,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
                     changed |= p.glass.borrow_mut().poll_tone(now);
                 }
                 if changed {
-                    cx.refresh_windows();
+                    crate::shell::cover::refresh_dock_windows(cx);
                 }
                 true
             });

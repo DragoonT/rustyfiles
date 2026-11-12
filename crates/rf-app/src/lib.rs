@@ -262,6 +262,10 @@ pub(crate) fn start_mark(step: &str) {
 
 pub fn main() {
     start_mark("main");
+    // `--shell-probe`: what the shell host finds, windowless and read-only, before anything else is done (see shell::probe)
+    if std::env::args().nth(1).as_deref() == Some(shell::probe::ARG) {
+        std::process::exit(shell::probe::run());
+    }
     // Velopack (installer / updater): first, it may run an install hook and exit
     installer::startup();
     // the id Velopack gives the Start menu / taskbar shortcuts: a pin survives updates
@@ -296,12 +300,15 @@ pub fn main() {
     // `--bar-preview`: our taskbar, as an ordinary window (see taskbar_preview)
     // `--desktop-preview`: our desktop, as an ordinary window (see shell::desktop); treated like the bar preview everywhere below
     let desktop_preview = std::env::args().nth(1).as_deref() == Some(shell::desktop::args::ARG);
-    let bar_preview = desktop_preview || std::env::args().nth(1).as_deref() == Some("--bar-preview");
+    // `--switcher-preview`: our window switcher, shown once (see shell::switcher); also treated like the bar preview below
+    let switcher_preview = std::env::args().nth(1).as_deref() == Some(shell::switcher::ARG);
+    let bar_preview = desktop_preview || switcher_preview || std::env::args().nth(1).as_deref() == Some("--bar-preview");
     // `--quick-search`: the quick search window, as its hotkey opens it (a shortcut of the
     // user's own can run this)
     let quick_search = std::env::args().nth(1).as_deref() == Some(quick_search::LAUNCH_ARG);
-    // `--dock`: the dock (see dock/), a process of its own that lives beside the main rustyfiles
-    let dock = std::env::args().nth(1).as_deref() == Some(dock::ARG);
+    // `--dock`: the dock (see dock/), a process of its own that lives beside the main rustyfiles. `--shell` is the same process under
+    // its new name, the shell host (see shell/): the one with the desktop cover, the shell mode and the probe.
+    let dock = shell::is_host_arg(std::env::args().nth(1).as_deref());
     // `--no-window`: the main app with no window, started by the dock so that its search has the file index (see search_pipe)
     let no_window = std::env::args().nth(1).as_deref() == Some(search_pipe::START_ARG);
     if bar_preview || dock {
@@ -310,6 +317,8 @@ pub fn main() {
     if dock {
         // before the settings are loaded: the dock owns no tray icon, no name index and no hotkey
         background::DOCK_PROCESS.store(true, std::sync::atomic::Ordering::Relaxed);
+        // which mode it runs in: found by looking at the shell window (read-only); only logged for now
+        shell::note_host_start(&std::env::args().skip(1).collect::<Vec<_>>());
     }
     let arg = std::env::args().nth(1).map(|a| a.trim().trim_matches('"').to_string()).filter(|a| !a.is_empty());
     let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search && !dock && !no_window);
@@ -389,7 +398,8 @@ pub fn main() {
     // A picker started for another app's Open/Save (--pick) only reads: whichever rustyfiles.exe
     // the dialog DLL started (a test build too) must not re-point the user's registrations.
     // The dock is a side process that only reads: it neither re-points the registrations nor cleans the main app's temp copies.
-    let registers = pick.is_none() && !dock && std::env::var_os("RUSTYFILES_CONFIG_DIR").is_none();
+    // (nor from the switcher preview, a try-out of one window: it re-points nothing in the registry, config directory or not)
+    let registers = pick.is_none() && !dock && !switcher_preview && std::env::var_os("RUSTYFILES_CONFIG_DIR").is_none();
     std::thread::spawn(move || {
         // copies opened/copied out of archives days ago
         if !dock {
@@ -559,6 +569,12 @@ pub fn main() {
                 let args: Vec<String> = std::env::args().skip(1).collect();
                 shell::desktop::open_preview(shell::desktop::args::parse(&args, std::env::var(shell::desktop::args::ENV_DIR).ok().as_deref()), cx)
             }
+            // (when no window could be made the process would stay with nothing on the screen and no tray icon: it ends here)
+            None if switcher_preview => {
+                if !shell::switcher::open_preview(cx) {
+                    cx.quit();
+                }
+            }
             None if bar_preview => taskbar_preview::open(cx),
             // the dock: three islands, no main window
             None if dock => dock::run(dock_messages.take(), cx),
@@ -630,14 +646,15 @@ pub fn main() {
         // GPUI would quit by itself when the last window closes (QuitMode::Default on Windows):
         // that cut running copies in half and makes background mode impossible. We decide.
         cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
-        cx.on_window_closed(|cx, _| {
+        cx.on_window_closed(move |cx, _| {
             // (the desktop preview is no main window, but closing the folder windows it opened must not end it)
             if !workspace::any_main_window(cx) && !shell::desktop::window_open(cx) {
                 // menus / flyouts left behind go too
                 for w in cx.windows() {
                     let _ = w.update(cx, |_, window, _| window.remove_window());
                 }
-                if cx.global::<settings::Settings>().run_in_background && !background::quitting() {
+                // (the switcher preview never stays in the notification area: it is one window, shown once)
+                if cx.global::<settings::Settings>().run_in_background && !background::quitting() && !switcher_preview {
                     let s = cx.global::<settings::Settings>().clone();
                     std::thread::spawn(move || s.save());
                 } else {

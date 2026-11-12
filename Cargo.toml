@@ -86,6 +86,8 @@ windows = { version = "0.62", features = [
     "Win32_System_Performance",
     "Win32_System_ProcessStatus",
     "Win32_System_SystemInformation",
+    # the notification panel: a notification's UTC time to the user's local date
+    "Win32_System_Time",
     "Win32_System_IO",
     "Win32_System_Ioctl",
     "Win32_System_DataExchange",
@@ -105,12 +107,18 @@ windows = { version = "0.62", features = [
     "Win32_System_Power",
     "Win32_System_Shutdown",
     "Win32_Security_Authentication_Identity",
+    # the shell host: the session number of a process (the single-instance names of the dock / shell group carry it)
+    "Win32_System_RemoteDesktop",
     # the dock's control centre: Core Audio (volume, devices), the system media session, network / radio / Bluetooth state, battery,
     # and DDC/CI brightness
     "Win32_Media_Audio_Endpoints",
     "Win32_Devices_FunctionDiscovery",
     "Win32_Devices_Display",
     "Media_Control",
+    # the dock's notification panel: UserNotificationListener (the list other apps have posted, read-only polling) and the app behind each
+    "UI_Notifications",
+    "UI_Notifications_Management",
+    "ApplicationModel",
     "Networking_Connectivity",
     "Devices_Radios",
     "Devices_Bluetooth",
@@ -173,4 +181,4 @@ incremental = true
 
 [patch.crates-io]
 # our fork of GPUI's Windows layer (GPU/CPU hot-swap renderer), see its FORK.md
-gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "4af70d9a19462bef51f9be736f92558f8761672d" }
+gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "b348429d978fca76060cff4883242720ae5f371a" }

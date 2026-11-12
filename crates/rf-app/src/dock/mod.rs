@@ -9,7 +9,9 @@
 //! * MIDDLE: the dock. The apps pinned to the Windows taskbar, the other running apps, a separator, the Recycle Bin and the
 //!   Downloads folder; the icon under the pointer grows. `middle.rs`
 //! * RIGHT: network and volume symbols that show the real state and open our own control centre (`control_centre.rs`; Win+A when
-//!   "rustyfiles denetim merkezini kullan" is off), the time and date (Win+N), a bell (Win+N). `right.rs`
+//!   "rustyfiles denetim merkezini kullan" is off), the time and date (our own calendar panel, `cal_view.rs`; Win+N when
+//!   "rustyfiles takvimi kullan" is off), a bell (our own notification panel, `notif_view.rs`, with a dot while there are notifications;
+//!   Win+N when "rustyfiles bildirim panelini kullan" is off). `right.rs`
 //!
 //! Each island is a window of its own (a GPUI pop-up with a transparent background) that is never activated, has no taskbar
 //! button and is always on top; `rf_win::dock` makes it so and places it. Each has HyperGlass behind it with its own corner radius
@@ -29,6 +31,7 @@
 
 pub mod actions;
 mod backdrop;
+mod cal_view;
 mod cc_model;
 pub mod control;
 mod control_centre;
@@ -37,7 +40,11 @@ mod icons;
 mod left;
 mod look;
 mod middle;
+mod notif_model;
+mod notif_state;
+mod notif_view;
 mod panel;
+mod panel_parts;
 mod plan;
 mod right;
 mod search;

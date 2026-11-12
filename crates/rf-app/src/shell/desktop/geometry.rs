@@ -36,6 +36,13 @@ impl Mapping {
         Mapping { canvas, shown, window_scale: sf }
     }
 
+    /// Cover mode: the canvas is the monitor and the window is the monitor (less one row), so the canvas is shown at its own size
+    /// whatever the window's size says - the row that is missing must not make it a fraction smaller.
+    pub fn full(canvas: Size, window_scale: f32) -> Mapping {
+        let sf = if window_scale.is_finite() && window_scale > 0.0 { window_scale } else { 1.0 };
+        Mapping { canvas, shown: 1.0, window_scale: sf }
+    }
+
     /// Logical pixels per canvas pixel.
     pub fn unit(&self) -> f32 {
         self.shown / self.window_scale
@@ -102,6 +109,20 @@ mod tests {
         assert_eq!(m.to_canvas(100.0, 200.0), (100, 200));
         assert_eq!(m.to_window(100, 200), (100.0, 200.0));
         assert_eq!(m.rect(Rect::new(75, 150, 150, 225)), (75.0, 150.0, 75.0, 75.0));
+    }
+
+    #[test]
+    fn a_cover_window_one_row_short_of_its_monitor_still_shows_the_canvas_whole_size() {
+        // 2560 x 1440 monitor, window 2560 x 1439: `new` would scale by 0.9993 and shift every icon; `full` does not
+        let canvas = Size::new(2560, 1440);
+        assert!(Mapping::new(canvas, (2560.0, 1439.0), 1.0).scaled_down());
+        let m = Mapping::full(canvas, 1.0);
+        assert_eq!((m.shown, m.scaled_down(), m.percent()), (1.0, false, 100));
+        assert_eq!(m.to_canvas(100.0, 200.0), (100, 200));
+        // at 150 %: the window is 1706.67 x 959.3 logical, the canvas 2560 x 1440 physical, 1:1
+        let m = Mapping::full(canvas, 1.5);
+        assert_eq!(m.to_window(150, 150), (100.0, 100.0));
+        assert_eq!(Mapping::full(canvas, f32::NAN).window_scale, 1.0);
     }
 
     #[test]

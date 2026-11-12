@@ -65,7 +65,9 @@ pub mod shortcut;
 pub mod startup;
 pub mod single_instance;
 pub mod shell_window;
+pub mod shellhost;
 pub mod sta;
+pub mod switcher;
 pub mod removal;
 pub mod rotate;
 pub mod thumbs;
@@ -76,6 +78,8 @@ pub mod weather;
 pub mod window;
 pub mod volume;
 pub mod tasklist;
+// (not called `notify`: that is the name of a crate this one uses)
+pub mod toasts;
 pub mod tree_watch;
 pub mod wide;
 

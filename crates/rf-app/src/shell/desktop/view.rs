@@ -33,6 +33,7 @@ use super::geometry::Mapping;
 use super::label::{self, Lines};
 use super::names;
 use super::select::{Placed, Selection, rect_of};
+use super::shared::{Peers, SharedStore};
 use super::source::{self, Backend, Loaded};
 use super::tile::TileLayout;
 use super::typeahead::TypeSelect;
@@ -118,9 +119,32 @@ struct Frame {
     icon_px: u32,
 }
 
+/// What the host of a cover window gives its view: everything the preview's own loader would have read, read once for all the
+/// monitors' views.
+pub struct Hosted {
+    /// The shared backend, for the canvas this view draws (`Backend::for_canvas`).
+    pub backend: Arc<Backend>,
+    pub store: SharedStore,
+    pub peers: Peers,
+    /// Why the layout file or the requested folder was not used, as the loader found it.
+    pub note: Option<String>,
+    pub wallpaper: Option<Wallpaper>,
+    pub virtual_names: Vec<(VirtualKind, String)>,
+}
+
 pub struct DesktopView {
     pub(super) backend: Option<Arc<Backend>>,
-    pub(super) store: Store,
+    pub(super) store: SharedStore,
+    /// The views that draw this desktop together (cover mode: one per monitor; the preview: just this one).
+    pub(super) peers: Peers,
+    /// Cover mode: this view is the desktop of one monitor, shown 1:1 in a window that IS the monitor (less one row). `Some(hwnd)` once
+    /// the host has said which window it is (0 until then). There is no status strip, no scaling, and the click areas of the icons are
+    /// told to the window so that only a press on an icon activates it.
+    pub(super) cover: Option<isize>,
+    /// The click areas last told to the window.
+    hot_sent: Vec<Rect>,
+    /// The folder (under the app's local data) the wallpaper bitmaps are cached in.
+    wall_cache: &'static str,
     pub(super) images: Entity<ImageCache>,
     pub(super) focus: FocusHandle,
     focused_once: bool,
@@ -191,7 +215,8 @@ fn black(a: f32) -> Hsla {
 }
 
 impl DesktopView {
-    pub fn new(args: PreviewArgs, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// What both kinds of view start with: the picture cache, the link to the Status Center, and the channel the worker threads report on.
+    fn start(cx: &mut Context<Self>) -> (Entity<ImageCache>, mpsc::UnboundedSender<Msg>) {
         let images = cx.new(ImageCache::new);
         cx.observe(&images, |_, _, cx| cx.notify()).detach();
         // the file operations the desktop starts report to the Status Center, whose button and flyout belong to main windows: this
@@ -208,6 +233,11 @@ impl DesktopView {
             }
         })
         .detach();
+        (images, tx)
+    }
+
+    pub fn new(args: PreviewArgs, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let (images, tx) = Self::start(cx);
 
         // everything that can block (listing the folders, asking the shell where the Desktop is, reading the wallpaper, asking for the
         // localised names) happens on this thread; the shell's own questions go through `sta::call`
@@ -236,9 +266,37 @@ impl DesktopView {
             log::error!("desktop preview: could not start the loader: {e}");
         }
 
+        Self::blank(images, tx, SharedStore::new(Store::default()), Peers::default(), None, "wallcache-preview", cx)
+    }
+
+    /// The view of one monitor's desktop in cover mode. Nothing is loaded here: the host read the folders, the layout file and the
+    /// wallpaper once for all the monitors and hands them over; `window` is told by [`DesktopView::set_window`] once it exists.
+    pub fn hosted(h: Hosted, cx: &mut Context<Self>) -> Self {
+        let (images, tx) = Self::start(cx);
+        let mut v = Self::blank(images, tx, h.store, h.peers.clone(), Some(0), "wallcache", cx);
+        v.load_note = h.note;
+        v.backend = Some(h.backend);
+        v.virtual_names.extend(h.virtual_names);
+        if let Some(wp) = h.wallpaper {
+            v.wall_src = Some(wp);
+            v.wall_gen += 1;
+        }
+        // (in cover mode the layout is the desktop's own, kept from the first placement on once it is the user's: see `hosted_keeps_layout`)
+        v.touched = source::hosted_keeps_layout(v.backend.as_ref().is_some_and(|b| b.is_scratch()), v.store.get().imported_from_explorer);
+        h.peers.add(cx.weak_entity());
+        v.recompute(cx);
+        v
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn blank(images: Entity<ImageCache>, tx: mpsc::UnboundedSender<Msg>, store: SharedStore, peers: Peers, cover: Option<isize>, wall_cache: &'static str, cx: &mut Context<Self>) -> Self {
         DesktopView {
             backend: None,
-            store: Store::default(),
+            store,
+            peers,
+            cover,
+            hot_sent: Vec::new(),
+            wall_cache,
             images,
             focus: cx.focus_handle(),
             focused_once: false,
@@ -280,8 +338,49 @@ impl DesktopView {
         }
     }
 
+    /// Height of the strip under the canvas: the preview has one, the cover has none (it IS the desktop; a notice floats over it).
+    fn status_h(&self) -> f32 {
+        if self.cover.is_some() { 0.0 } else { STATUS_H }
+    }
+
     pub(super) fn now_ms(&self) -> u64 {
         self.boot.elapsed().as_millis() as u64
+    }
+
+    // ---------- what the host of a cover window tells its view ----------
+
+    /// Cover mode: the window this view lives in (the click areas of the icons are told to it from now on).
+    pub fn set_window(&mut self, hwnd: isize) {
+        if self.cover.is_some() {
+            self.cover = Some(hwnd);
+            self.hot_sent.clear();
+        }
+    }
+
+    /// The Desktop folders changed (the host's watcher heard it once, for all the monitors' views).
+    pub fn items_changed(&mut self, changes: Vec<ItemChange>, cx: &mut Context<Self>) {
+        self.on_msg(Msg::Changed(changes), cx);
+    }
+
+    /// The wallpaper setting changed (or was read for the first time).
+    pub fn wallpaper_changed(&mut self, wp: Wallpaper, cx: &mut Context<Self>) {
+        self.on_msg(Msg::Wallpaper(Box::new(wp)), cx);
+    }
+
+    /// The monitors changed (a resolution, a scale, a work area, a monitor added or removed): this view follows the monitor with the
+    /// device key `key`. Does nothing when that monitor is not in the list (its window is about to be closed).
+    pub fn monitors_changed(&mut self, infos: Vec<rf_win::desktop::monitors::MonitorInfo>, key: &str, cx: &mut Context<Self>) {
+        let Some(b) = self.backend.clone() else { return };
+        let Some(canvas) = infos.iter().position(|m| m.device_key == key) else { return };
+        self.backend = Some(Arc::new(b.with_monitors(infos, canvas)));
+        self.wall_asked = None;
+        self.recompute(cx);
+    }
+
+    /// A change that is the whole desktop's (the icon size, the sort, "align to grid") was made here: the other monitors' views draw it too.
+    pub(super) fn refresh_peers(&self, cx: &mut Context<Self>) {
+        let (me, peers) = (cx.entity_id(), self.peers.clone());
+        peers.for_others(me, cx, |v, cx| v.recompute(cx));
     }
 
     pub(super) fn read_only(&self) -> bool {
@@ -314,7 +413,7 @@ impl DesktopView {
         match m {
             Msg::Loaded(l) => {
                 let Loaded { backend, store, outcome, note } = *l;
-                self.store = store;
+                self.store.replace(store);
                 self.load_note = match (&outcome, note) {
                     (LoadOutcome::Recovered { .. }, _) => Some(t!("Yerleşim dosyası okunamadı; yenisi kullanılıyor").to_string()),
                     (LoadOutcome::Newer { .. } | LoadOutcome::Unreadable { .. }, _) => Some(t!("Yerleşim dosyası kaydedilmeyecek (daha yeni bir sürümden ya da okunamıyor)").to_string()),
@@ -331,7 +430,7 @@ impl DesktopView {
                 for c in &changes {
                     if let ItemChange::Renamed { from, to } = c {
                         // the cell goes with the item
-                        self.store.rename(from, to);
+                        self.store.edit().rename(from, to);
                         self.sel.renamed(from, to);
                     }
                 }
@@ -358,11 +457,15 @@ impl DesktopView {
     pub(super) fn recompute(&mut self, cx: &mut Context<Self>) {
         let Some(b) = self.backend.clone() else { return };
         let mut items = b.items.items();
-        sort_items(&mut items, self.store.sort.key.key(), self.store.sort.dir());
+        let (sort_key, sort_dir) = {
+            let st = self.store.get();
+            (st.sort.key.key(), st.sort.dir())
+        };
+        sort_items(&mut items, sort_key, sort_dir);
         let model = b.items.listing();
         // new items are placed in the order of the sort setting (a first start), the model's own order is by origin
         let shown: Vec<ItemId> = items.iter().map(|i| i.id.clone()).collect();
-        let resolved = self.store.resolve(&b.specs, Listing { shown: &shown, kept: &model.kept, complete: model.complete }, now_ms());
+        let resolved = self.store.edit().resolve(&b.specs, Listing { shown: &shown, kept: &model.kept, complete: model.complete }, now_ms());
         self.by_id = items.iter().enumerate().map(|(i, it)| (it.id.clone(), i)).collect();
         self.line_counts.retain(|id, _| self.by_id.contains_key(id));
         self.items = items;
@@ -393,7 +496,8 @@ impl DesktopView {
             self.tl = None;
             return;
         };
-        let m = metrics(self.store.icon_size_step(), spec.scale_percent);
+        let icon_step = self.store.get().icon_size_step();
+        let m = metrics(icon_step, spec.scale_percent);
         let grid = Grid::new(spec.work, m);
         let tl = TileLayout::new(m, spec.scale_percent);
         let mut placed: Vec<Placed> = self
@@ -423,7 +527,7 @@ impl DesktopView {
     pub(super) fn touch_layout(&mut self) {
         self.touched = true;
         let scratch = self.backend.as_ref().is_some_and(|b| b.is_scratch());
-        source::arranged_by_user(&mut self.store, scratch);
+        source::arranged_by_user(&mut self.store.edit(), scratch);
     }
 
     fn keeps_layout(&self) -> bool {
@@ -432,7 +536,7 @@ impl DesktopView {
 
     /// Saves the layout file half a second after the last change (one timer at a time, none at rest).
     pub(super) fn schedule_save(&mut self, cx: &mut Context<Self>) {
-        if !self.keeps_layout() || !self.store.is_dirty() || self.save_task.is_some() {
+        if !self.keeps_layout() || !self.store.get().is_dirty() || self.save_task.is_some() {
             return;
         }
         self.save_task = Some(cx.spawn(async move |this, cx| {
@@ -449,7 +553,8 @@ impl DesktopView {
             return;
         }
         let Some(b) = &self.backend else { return };
-        if let Err(e) = self.store.save_if_dirty(&b.layout_path) {
+        let saved = self.store.edit().save_if_dirty(&b.layout_path);
+        if let Err(e) = saved {
             log::warn!("desktop layout not saved: {e}");
         }
     }
@@ -476,7 +581,8 @@ impl DesktopView {
         let (Some(wp), Some(b)) = (self.wall_src.clone(), self.backend.clone()) else { return };
         let first = self.wall.is_none();
         let gen_now = self.wall_gen;
-        let cache_dir = crate::settings::local_data_dir().map(|d| d.join("wallcache-preview"));
+        let cache_name = self.wall_cache;
+        let cache_dir = crate::settings::local_data_dir().map(|d| d.join(cache_name));
         self.wall_busy = true;
         cx.spawn(async move |this, cx| {
             if !first {
@@ -702,6 +808,41 @@ impl DesktopView {
         }
     }
 
+    /// Cover mode: the click areas of the icons, in client pixels (the canvas is shown 1:1), told to the window whenever they change, so
+    /// that a press on an icon activates the window and a press on empty space does not (see `rf_core::desktop::cover::activation`).
+    fn tell_window_where_the_icons_are(&mut self) {
+        let Some(hwnd) = self.cover.filter(|h| *h != 0) else { return };
+        let hits: Vec<Rect> = self.placed.iter().map(|p| p.hit).collect();
+        if hits != self.hot_sent {
+            rf_win::desktop::cover::set_hot_regions(hwnd, &hits);
+            self.hot_sent = hits;
+        }
+    }
+
+    /// Cover mode has no status strip: what it would say (a refused change, a running operation, a layout file that was not used)
+    /// floats over the desktop, low and in the middle, and goes when there is nothing to say.
+    fn cover_notice(&self, p: &Palette) -> Option<AnyElement> {
+        self.cover?;
+        let (text, color) = match (&self.notice, &self.ops_line, &self.load_note) {
+            (Some(n), _, _) => (n.clone(), p.danger),
+            (None, Some(o), _) => (o.clone(), p.accent),
+            (None, None, Some(l)) => (l.clone(), p.text_secondary),
+            _ => return None,
+        };
+        let (w, h) = self.map.shown_size();
+        Some(
+            div()
+                .absolute()
+                .left(px(0.))
+                .top(px(h - 96.0))
+                .w(px(w))
+                .flex()
+                .justify_center()
+                .child(div().px_3().py_1().rounded(px(6.)).bg(black(0.62)).text_xs().text_color(color).child(text))
+                .into_any_element(),
+        )
+    }
+
     /// The click areas follow the number of lines each label has now (a two-line label's tile is taller than a one-line one's).
     fn refresh_hits(&mut self) {
         let Some(tl) = self.tl else { return };
@@ -783,9 +924,10 @@ impl Render for DesktopView {
         }
 
         let vp = window.viewport_size();
-        let (vw, vh) = (f32::from(vp.width), (f32::from(vp.height) - STATUS_H).max(1.0));
+        let (vw, vh) = (f32::from(vp.width), (f32::from(vp.height) - self.status_h()).max(1.0));
         let canvas_px = self.canvas_size();
-        self.map = Mapping::new(canvas_px, (vw, vh), window.scale_factor());
+        // cover mode: the window is the monitor less one pixel row, and the canvas is the whole monitor: shown 1:1, never scaled by that row
+        self.map = if self.cover.is_some() { Mapping::full(canvas_px, window.scale_factor()) } else { Mapping::new(canvas_px, (vw, vh), window.scale_factor()) };
         let (sw, sh) = self.map.shown_size();
         // the wallpaper is made for the physical size it is shown at
         let want = Size::new((sw * window.scale_factor()).round().max(1.0) as u32, (sh * window.scale_factor()).round().max(1.0) as u32);
@@ -808,6 +950,7 @@ impl Render for DesktopView {
         let mut tiles: Vec<AnyElement> = Vec::new();
         let mut ghosts: Vec<AnyElement> = Vec::new();
         let mut outline: Option<AnyElement> = None;
+        let align = self.store.get().align_to_grid;
         if let Some(frame) = &frame {
             let dragging: BTreeSet<ItemId> = self.drag.as_ref().map(|d| d.ids.iter().cloned().collect()).unwrap_or_default();
             // (an item is lit only when dropping on it would hand it the files; files dragged in from other programs light the tile they
@@ -832,14 +975,15 @@ impl Render for DesktopView {
                 && self.map.contains(d.cur)
             {
                 let delta = (d.cur.0 - d.start.0, d.cur.1 - d.start.1);
-                let (cell_c, _, _) = g.snap(cell.left + delta.0, cell.top + delta.1, self.store.align_to_grid).unwrap_or((Cell::new(0, 0), 0, 0));
-                let target = if self.store.align_to_grid { g.cell_rect(cell_c) } else { Rect::from_size(cell.left + delta.0, cell.top + delta.1, g.metrics.pitch_x, g.metrics.pitch_y) };
+                let (cell_c, _, _) = g.snap(cell.left + delta.0, cell.top + delta.1, align).unwrap_or((Cell::new(0, 0), 0, 0));
+                let target = if align { g.cell_rect(cell_c) } else { Rect::from_size(cell.left + delta.0, cell.top + delta.1, g.metrics.pitch_x, g.metrics.pitch_y) };
                 let (x, y, w, h) = self.map.rect(target);
                 outline = Some(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)).rounded(px(6.)).border_1().border_color(Hsla { a: 0.8, ..frame.p.accent }).bg(Hsla { a: 0.10, ..frame.p.accent }).into_any_element());
             }
         }
 
         self.refresh_hits();
+        self.tell_window_where_the_icons_are();
 
         // the rubber band
         let band: Option<AnyElement> = self.band.as_ref().and_then(|b| {
@@ -877,7 +1021,8 @@ impl Render for DesktopView {
         // while the desktop is being read, and when there is nothing on it, the canvas says so
         let note_over_canvas: Option<AnyElement> = match (&self.backend, self.items.is_empty()) {
             (None, _) => Some(t!("Yükleniyor…")),
-            (Some(_), true) if self.load_note.is_none() => Some(t!("Bu masaüstünde öğe yok")),
+            // (an empty desktop that is the real one says nothing: the wallpaper is the whole picture)
+            (Some(_), true) if self.load_note.is_none() && self.cover.is_none() => Some(t!("Bu masaüstünde öğe yok")),
             _ => None,
         }
         .map(|text| div().absolute().left(px(0.)).top(px(0.)).w(px(sw)).h(px(sh)).flex().items_center().justify_center().text_color(white(0.85)).child(text).into_any_element());
@@ -901,7 +1046,8 @@ impl Render for DesktopView {
             .children(outline)
             .children(ghosts)
             .children(band)
-            .children(note_over_canvas);
+            .children(note_over_canvas)
+            .children(self.cover_notice(&p));
 
         let root = div()
             .id("desktop-view")
@@ -911,7 +1057,8 @@ impl Render for DesktopView {
             .flex()
             .flex_col()
             .text_color(p.text);
-        self.bind_actions(root, cx).child(area).child(self.status(&p, scaled))
+        let root = self.bind_actions(root, cx).child(area);
+        if self.cover.is_some() { root } else { root.child(self.status(&p, scaled)) }
     }
 }
 

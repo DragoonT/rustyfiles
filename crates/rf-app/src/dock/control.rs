@@ -108,6 +108,9 @@ pub struct Keys {
     /// reads both from the file when it opens a panel, so a switch in Settings must reach it.
     pub own_start: bool,
     pub own_control_centre: bool,
+    /// The clock opens our own calendar and the bell our own notification panel (else Win+N): read from the file when they open.
+    pub own_calendar: bool,
+    pub own_notifications: bool,
 }
 
 impl Keys {
@@ -120,6 +123,8 @@ impl Keys {
             animations: s.animations,
             own_start: s.dock_own_start,
             own_control_centre: s.dock_own_control_centre,
+            own_calendar: s.dock_own_calendar,
+            own_notifications: s.dock_own_notifications,
         }
     }
 }
@@ -253,7 +258,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true }
+        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true }
     }
 
     #[test]
@@ -283,6 +288,8 @@ mod tests {
             Settings { animations: crate::settings::AnimPref::Off, ..base.clone() },
             Settings { dock_own_start: false, ..base.clone() },
             Settings { dock_own_control_centre: false, ..base.clone() },
+            Settings { dock_own_calendar: false, ..base.clone() },
+            Settings { dock_own_notifications: false, ..base.clone() },
         ] {
             let mut told = Some(k.clone());
             assert!(needs_reload(&mut told, Keys::of(&change)), "{:?}", Keys::of(&change));
