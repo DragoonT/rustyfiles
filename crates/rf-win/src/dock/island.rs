@@ -118,10 +118,17 @@ pub fn make_island(hwnd: isize) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Moves and sizes the island (device px, screen coordinates) and keeps it on top, without activating it and without changing
-/// whether it is shown. Returns false when Windows refused.
+/// Moves and sizes the island so that its CLIENT AREA is `r` (device px, screen coordinates) and keeps it on top, without activating
+/// it and without changing whether it is shown. Returns false when Windows refused.
+///
+/// The client area, not the window: the islands' windows keep the system's invisible resize frame (8 px left, right and below at
+/// 100 %), and everything the dock works out (where the glass is, where a panel opens, the window's region) is in the area the app
+/// draws in. Placed by the outer rectangle, the client area came out 16 px narrower and 8 px shorter than the layout's window: the
+/// glass, laid out for the full size, lost its right end and its bottom edge (measured on a running dock: a 278 x 50 glass in a
+/// 268 x 48 client area).
 pub fn place(hwnd: isize, r: Rect) -> bool {
-    unsafe { SetWindowPos(hwnd_of(hwnd), Some(HWND_TOPMOST), r.left, r.top, r.width().max(1), r.height().max(1), SWP_NOACTIVATE | SWP_NOOWNERZORDER).is_ok() }
+    let o = super::panel::outer_for_client(r, super::panel::frame_insets(hwnd));
+    unsafe { SetWindowPos(hwnd_of(hwnd), Some(HWND_TOPMOST), o.left, o.top, o.width().max(1), o.height().max(1), SWP_NOACTIVATE | SWP_NOOWNERZORDER).is_ok() }
 }
 
 /// Puts the island back above the other topmost windows (a full-screen application or another always-on-top window may have taken
