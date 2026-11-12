@@ -194,29 +194,39 @@ impl<K: Clone + PartialEq> Machine<K> {
 
 // ---------------------------------------------------------------- where a pop-up above an icon goes
 
-/// The gap between the top of the dock's glass and the bottom of a pop-up above an icon, logical px. An icon under the pointer grows
-/// up to 8 px over the glass's top edge (`rf-app` middle island), so the gap is that and the panels' own 8 px.
+/// The gap between the top of the dock's glass and the bottom of a pop-up above an icon, logical px at the default dock size. An icon
+/// under the pointer grows up to [`ICON_GROW`] px over the glass's top edge (`rf-app` middle island), so the gap is that and the
+/// panels' own 8 px.
 pub const ICON_GAP: f32 = 16.0;
+
+/// How far an icon under the pointer grows above the top of the dock's glass, logical px at the default dock size (the middle island's
+/// magnification).
+pub const ICON_GROW: f32 = 8.0;
+
+/// The gap above the glass at a dock size (`dock` is the size factor, 1.0 the default): the growth of the icons scales with the dock,
+/// the 8 px beyond it do not (they are the pop-up's own distance from what it comes from).
+pub fn icon_gap(dock: f32) -> f32 {
+    ICON_GROW * super::size::sane(dock) + (ICON_GAP - ICON_GROW)
+}
 
 /// The rectangle (device px, screen coordinates) of a pop-up of `size` logical px that sits above the dock's glass (`glass_top`, its top
 /// edge) and is centred on an icon (`icon_center`, device px), kept inside the monitor's `work` area. A pop-up wider than the work
-/// area is narrowed to it; one taller than the room above the dock is shortened to that room. `scale` is the monitor's.
-pub fn above_icon(icon_center: i32, glass_top: i32, size: (f32, f32), scale: f32, work: Rect) -> Rect {
+/// area is narrowed to it; one taller than the room above the dock is shortened to that room. `scale` is the monitor's (the pop-up's
+/// own contents do not follow the dock's size); `dock` is the dock's size factor, which only moves the pop-up higher.
+pub fn above_icon(icon_center: i32, glass_top: i32, size: (f32, f32), scale: f32, dock: f32, work: Rect) -> Rect {
     let w = px(size.0, scale).clamp(1, work.width().max(1));
-    let room = (glass_top - px(ICON_GAP, scale) - work.top).max(1);
+    let gap = px(icon_gap(dock), scale);
+    let room = (glass_top - gap - work.top).max(1);
     let h = px(size.1, scale).clamp(1, room);
-    let bottom = glass_top - px(ICON_GAP, scale);
+    let bottom = glass_top - gap;
     let top = (bottom - h).max(work.top);
     let left = (icon_center - w / 2).clamp(work.left, (work.right - w).max(work.left));
     Rect::from_xywh(left, top, w, h)
 }
 
-/// How far an icon under the pointer grows above the top of the dock's glass, logical px (the middle island's magnification).
-pub const ICON_GROW: f32 = 8.0;
-
 /// The room above the dock's glass for a pop-up, logical px (what [`above_icon`] shortens a tall pop-up to).
-pub fn room_above(glass_top: i32, scale: f32, work: Rect) -> f32 {
-    let room = (glass_top - px(ICON_GAP, scale) - work.top).max(1);
+pub fn room_above(glass_top: i32, scale: f32, dock: f32, work: Rect) -> f32 {
+    let room = (glass_top - px(icon_gap(dock), scale) - work.top).max(1);
     room as f32 / scale.max(0.01)
 }
 
@@ -226,8 +236,8 @@ pub fn room_above(glass_top: i32, scale: f32, work: Rect) -> f32 {
 /// of the preview, or from an icon up out of the dock's window, would leave the machine believing it is still there. The caller asks
 /// this while a preview is open and, when it is true, tells the machine that the pointer left both. Inside the dock's glass the toolkit's
 /// own events are reliable (the pointer moves inside that window), so the glass counts as "not away" whatever icon is under it.
-pub fn pointer_away(cursor: (i32, i32), preview: Rect, glass: Rect, scale: f32) -> bool {
-    let dock = Rect::new(glass.left, glass.top - px(ICON_GROW, scale), glass.right, glass.bottom);
+pub fn pointer_away(cursor: (i32, i32), preview: Rect, glass: Rect, scale: f32, dock: f32) -> bool {
+    let dock = Rect::new(glass.left, glass.top - px(ICON_GROW * super::size::sane(dock), scale), glass.right, glass.bottom);
     !preview.contains(cursor.0, cursor.1) && !dock.contains(cursor.0, cursor.1)
 }
 
@@ -646,7 +656,7 @@ mod tests {
 
     #[test]
     fn a_popup_is_centred_over_its_icon_and_sits_above_the_glass() {
-        let r = above_icon(1_000, 1_334, (200.0, 140.0), 1.0, WORK);
+        let r = above_icon(1_000, 1_334, (200.0, 140.0), 1.0, 1.0, WORK);
         assert_eq!((r.width(), r.height()), (200, 140));
         assert_eq!(r.left, 900);
         assert_eq!(r.bottom, 1_334 - 16, "16 px above the glass");
@@ -655,9 +665,9 @@ mod tests {
 
     #[test]
     fn a_popup_over_an_icon_near_the_edge_is_kept_on_the_screen() {
-        let r = above_icon(40, 1_334, (300.0, 140.0), 1.0, WORK);
+        let r = above_icon(40, 1_334, (300.0, 140.0), 1.0, 1.0, WORK);
         assert_eq!(r.left, 0);
-        let r = above_icon(2_550, 1_334, (300.0, 140.0), 1.0, WORK);
+        let r = above_icon(2_550, 1_334, (300.0, 140.0), 1.0, 1.0, WORK);
         assert_eq!(r.right, 2_560);
         assert!(WORK.covers(&r));
     }
@@ -666,7 +676,7 @@ mod tests {
     fn a_popup_on_a_monitor_with_a_negative_origin_stays_on_that_monitor() {
         // the portrait monitor to the left of the primary one: x from -1440, y from -400
         let work = Rect::new(-1_440, -400, 0, 2_100);
-        let r = above_icon(-1_400, 2_050, (300.0, 200.0), 1.0, work);
+        let r = above_icon(-1_400, 2_050, (300.0, 200.0), 1.0, 1.0, work);
         assert_eq!(r.left, -1_440);
         assert!(work.covers(&r), "{r:?}");
         assert_eq!(r.bottom, 2_050 - 16);
@@ -674,10 +684,10 @@ mod tests {
 
     #[test]
     fn a_tall_popup_is_cut_to_the_room_above_the_dock_and_scaled_with_the_monitor() {
-        let r = above_icon(500, 200, (200.0, 900.0), 1.0, Rect::new(0, 0, 1_000, 1_000));
+        let r = above_icon(500, 200, (200.0, 900.0), 1.0, 1.0, Rect::new(0, 0, 1_000, 1_000));
         assert_eq!(r.top, 0);
         assert_eq!(r.bottom, 184);
-        let r = above_icon(900, 1_500, (200.0, 100.0), 1.5, Rect::new(0, 0, 2_880, 1_548));
+        let r = above_icon(900, 1_500, (200.0, 100.0), 1.5, 1.0, Rect::new(0, 0, 2_880, 1_548));
         assert_eq!((r.width(), r.height()), (300, 150));
         assert_eq!(r.bottom, 1_500 - 24, "16 px at 150 %");
     }
@@ -689,31 +699,31 @@ mod tests {
         let preview = Rect::new(1000, 900, 1400, 1100);
         let glass = Rect::new(900, 1134, 1500, 1206);
         // on a card, on the dock's glass, on an icon grown over the glass's top edge (8 px at 100 %)
-        assert!(!pointer_away((1200, 1000), preview, glass, 1.0));
-        assert!(!pointer_away((1200, 1170), preview, glass, 1.0));
-        assert!(!pointer_away((1200, 1127), preview, glass, 1.0), "the grown icon is the dock");
+        assert!(!pointer_away((1200, 1000), preview, glass, 1.0, 1.0));
+        assert!(!pointer_away((1200, 1170), preview, glass, 1.0, 1.0));
+        assert!(!pointer_away((1200, 1127), preview, glass, 1.0, 1.0), "the grown icon is the dock");
         // the 16 px gap between them, beside the preview, above it, on another island, off the screen's work area
-        assert!(pointer_away((1200, 1115), preview, glass, 1.0), "the gap is neither");
-        assert!(pointer_away((1450, 1000), preview, glass, 1.0));
-        assert!(pointer_away((1200, 850), preview, glass, 1.0));
-        assert!(pointer_away((300, 1170), preview, glass, 1.0));
+        assert!(pointer_away((1200, 1115), preview, glass, 1.0, 1.0), "the gap is neither");
+        assert!(pointer_away((1450, 1000), preview, glass, 1.0, 1.0));
+        assert!(pointer_away((1200, 850), preview, glass, 1.0, 1.0));
+        assert!(pointer_away((300, 1170), preview, glass, 1.0, 1.0));
         // the right/bottom edge is outside, as everywhere else
-        assert!(pointer_away((1400, 1000), preview, glass, 1.0));
+        assert!(pointer_away((1400, 1000), preview, glass, 1.0, 1.0));
         // the growth is scaled with the monitor: 8 px at 100 % is 12 px at 150 %
-        assert!(!pointer_away((1200, 1123), preview, glass, 1.5));
-        assert!(pointer_away((1200, 1123), preview, glass, 1.0));
+        assert!(!pointer_away((1200, 1123), preview, glass, 1.5, 1.0));
+        assert!(pointer_away((1200, 1123), preview, glass, 1.0, 1.0));
     }
 
     #[test]
     fn the_room_above_the_dock_is_what_a_tall_popup_is_cut_to() {
         let work = Rect::new(0, 0, 2560, 1392);
         // 100 %: 1334 - 16 - 0 = 1318; 150 %: the same device room is fewer logical px
-        assert_eq!(room_above(1334, 1.0, work), 1318.0);
-        assert_eq!(room_above(1334, 2.0, work), (1334 - 32) as f32 / 2.0);
+        assert_eq!(room_above(1334, 1.0, 1.0, work), 1318.0);
+        assert_eq!(room_above(1334, 2.0, 1.0, work), (1334 - 32) as f32 / 2.0);
         // never zero, even with no room at all
-        assert!(room_above(10, 1.0, work) > 0.0);
-        let r = above_icon(1000, 1334, (272.0, 5000.0), 1.0, work);
-        assert_eq!(r.height() as f32, room_above(1334, 1.0, work));
+        assert!(room_above(10, 1.0, 1.0, work) > 0.0);
+        let r = above_icon(1000, 1334, (272.0, 5000.0), 1.0, 1.0, work);
+        assert_eq!(r.height() as f32, room_above(1334, 1.0, 1.0, work));
     }
 
     #[test]

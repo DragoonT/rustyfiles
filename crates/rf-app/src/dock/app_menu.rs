@@ -186,7 +186,7 @@ fn open_now(req: MenuRequest, started: Instant, cx: &mut App) {
             (model::WIDTH, v.height())
         })
         .unwrap_or((model::WIDTH, 160.0));
-    let rect = place::above_icon(anchor_x, glass.top, size, scale, work);
+    let rect = place::above_icon(anchor_x, glass.top, size, scale, super::look::dock_size(cx), work);
     host_g(cx).rect = rect;
     // show, bring to the front, then glass (in this order: the engine attaches to a window that is on the screen)
     cx.spawn(async move |cx| {
@@ -238,14 +238,14 @@ fn sections_arrived(serial: u64, sections: Vec<Section>, cx: &mut App) {
     let (basis, anchor_x) = (h.basis, h.anchor_x);
     let Some(basis) = basis else { return };
     // (the room above the dock: a long jump list is cut to what fits, so that the fixed rows at the bottom are never cut off)
-    let room = place::room_above(basis.glass_top, basis.scale, basis.work);
+    let room = place::room_above(basis.glass_top, basis.scale, super::look::dock_size(cx), basis.work);
     let Ok(height) = handle.update(cx, |v, _, cx| {
         v.set_sections(sections, room, cx);
         v.height()
     }) else {
         return;
     };
-    let rect = place::above_icon(anchor_x, basis.glass_top, (model::WIDTH, height), basis.scale, basis.work);
+    let rect = place::above_icon(anchor_x, basis.glass_top, (model::WIDTH, height), basis.scale, super::look::dock_size(cx), basis.work);
     if cx.global::<MenuHost>().rect == rect {
         return;
     }

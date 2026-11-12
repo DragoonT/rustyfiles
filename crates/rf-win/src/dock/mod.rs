@@ -35,13 +35,18 @@
 //! | `tray_order` | the tray strip's order and hidden set (`tray-order.json`): an icon is known by its GUID or its program and id, never by its tip; the file form | all of it |
 //! | `tray_strip` | the tray strip and its overflow panel: how many cells fit, where each lies, where a dragged icon lands, which click a pointer or key means, the keyboard's walk | all of it |
 //! | `tray_tip` | a tray icon's tooltip: the 400 ms dwell, swap and close rules, the text's cleaning, its window's size and place | all of it |
+//! | `size` | the dock's size setting: the four sizes (0.85, 1.0, 1.2, 1.4) and the one product, the monitor's scale times the size, that every pure layout function takes in place of the monitor's scale | all of it |
+//! | `empty_spot` | which point of an island is its empty glass (no icon, field, symbol or other control), from the layout's rectangles | all of it |
+//! | `taskmgr` | starting Windows' Task Manager from a right click on the empty glass: once, the shell's "open" and never "runas" | the gate |
 //! | `startapps` | start an app of "All apps", as administrator (the user's click), find its program (shell thread) | - |
 //!
 //! HOW THE APP USES IT (the order that works):
+//! 0. `unit = size::unit(monitor.scale(), size_factor)` (device px per design number; the monitor's scale at the default size): every `scale`
+//!    argument of `layout`, `tray_strip::cell_rect` and the like below is this unit.
 //! 1. `system::DockSystem::start(cb)` once; `system::primary_monitor()` for the work area and the scale;
-//!    `layout::reserved_thickness(scale)` -> `DockSystem::reserve(..)` when "Keep windows from going under the dock" is on.
+//!    `layout::reserved_thickness(unit)` -> `DockSystem::reserve(..)` when "Keep windows from going under the dock" is on.
 //! 2. For each island window: `island::make_island(hwnd)`, then `island::place(hwnd, rect)` with the WINDOW rectangle from
-//!    `layout::placements(&layout::islands(area, scale, widths), monitor, scale, layout::shadow_on())` where `area` is `DockSystem::placement_area()` (NOT the
+//!    `layout::placements(&layout::islands(area, unit, widths), monitor, unit, layout::shadow_on())` where `area` is `DockSystem::placement_area()` (NOT the
 //!    raw work area: see there). The glass is `Placement::glass`, where `islands` put it; the window is bigger.
 //! 3. Glass: `crate::glass::attach_with(hwnd, GlassOptions { dark, radius_px: Some(24.0 * scale), cut_corners: true, shape: Some(glass in
 //!    the window), shadow: layout::shadow_on().then_some(Shadow::SOFT) })`; the shape follows the glass through `glass::set_options` (cheap, made for animation).
@@ -59,6 +64,7 @@
 pub mod appmenu;
 pub mod calendar;
 pub mod clock;
+pub mod empty_spot;
 pub mod fullscreen;
 pub mod hit;
 pub mod hover;
@@ -80,7 +86,9 @@ pub mod startpage;
 pub mod startpins;
 pub mod startrecent;
 pub mod startuser;
+pub mod size;
 pub mod system;
+pub mod taskmgr;
 pub mod tray_order;
 pub mod tray_strip;
 pub mod tray_tip;

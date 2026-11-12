@@ -116,6 +116,8 @@ pub struct Keys {
     pub app_menu: bool,
     /// The Start panel's "Önerilenler" section: read from the settings when the panel opens.
     pub start_recommended: bool,
+    /// The dock's size: the islands, the icons and everything else change with it, so the running dock must read the file again.
+    pub size: super::size_pref::DockSizePref,
 }
 
 impl Keys {
@@ -133,6 +135,7 @@ impl Keys {
             hover_previews: s.dock_hover_previews,
             app_menu: s.dock_app_menu,
             start_recommended: s.dock_start_recommended,
+            size: s.dock_size,
         }
     }
 }
@@ -266,7 +269,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true }
+        Keys { reserve, city: city.into(), look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true, size: Default::default() }
     }
 
     #[test]
@@ -301,6 +304,7 @@ mod tests {
             Settings { dock_hover_previews: false, ..base.clone() },
             Settings { dock_app_menu: false, ..base.clone() },
             Settings { dock_start_recommended: false, ..base.clone() },
+            Settings { dock_size: crate::dock::size_pref::DockSizePref::XLarge, ..base.clone() },
         ] {
             let mut told = Some(k.clone());
             assert!(needs_reload(&mut told, Keys::of(&change)), "{:?}", Keys::of(&change));

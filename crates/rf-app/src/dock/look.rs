@@ -1,7 +1,7 @@
 //! What the dock looks like: the system's light / dark theme and accent colour (the dock follows the system like the Windows taskbar
 //! does, not the app's own theme setting) and the colours that go with each.
 
-use gpui_kit::{Global, Hsla, rgb};
+use gpui_kit::{App, Global, Hsla, rgb};
 
 /// A colour and how opaque it is.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -96,14 +96,39 @@ pub struct Env {
     pub accent: u32,
     /// Device px per logical px of the primary monitor.
     pub scale: f32,
+    /// The dock's size factor (`rf_win::dock::size`; 1.0 is the default size). Every length of the islands is multiplied by it; the
+    /// panels' own contents are not (they keep `scale`).
+    pub size: f32,
 }
 
 impl Global for Env {}
 
 impl Env {
+    #[cfg(test)]
     pub fn read(scale: f32) -> Env {
-        Env { dark: rf_win::accent::system_is_dark(), accent: rf_win::accent::color(), scale: if scale > 0.0 { scale } else { 1.0 } }
+        Env::read_sized(scale, 1.0)
     }
+
+    /// The environment for a dock of this size factor (1.0 is the default size).
+    pub fn read_sized(scale: f32, size: f32) -> Env {
+        Env {
+            dark: rf_win::accent::system_is_dark(),
+            accent: rf_win::accent::color(),
+            scale: if scale > 0.0 { scale } else { 1.0 },
+            size: rf_win::dock::size::sane(size),
+        }
+    }
+
+    /// Device px per dock unit (a length of the default-size dock): the monitor's scale times the dock's size. What the layout takes
+    /// where it took the monitor's scale before.
+    pub fn unit(&self) -> f32 {
+        rf_win::dock::size::unit(self.scale, self.size)
+    }
+}
+
+/// The dock's size factor now (1.0 before the dock has published its environment).
+pub fn dock_size(cx: &App) -> f32 {
+    cx.try_global::<Env>().map_or(1.0, |e| e.size)
 }
 
 /// The island's own fill, painted only while the glass is not running (starting, failed): dark 0x1C1C1E at 72 %, light 0xF5F5F7 at
@@ -249,5 +274,14 @@ mod tests {
     fn a_broken_scale_reads_as_one() {
         assert_eq!(Env::read(0.0).scale, 1.0);
         assert_eq!(Env::read(1.5).scale, 1.5);
+    }
+
+    #[test]
+    fn the_dock_unit_is_the_scale_times_the_size_and_the_default_size_changes_nothing() {
+        assert_eq!(Env::read(1.5).size, 1.0);
+        assert_eq!(Env::read(1.5).unit(), 1.5);
+        assert_eq!(Env::read_sized(1.0, 1.4).unit(), 1.4);
+        assert!((Env::read_sized(1.5, 0.85).unit() - 1.275).abs() < 1e-6);
+        assert_eq!(Env::read_sized(1.0, f32::NAN).size, 1.0, "a broken size reads as the default");
     }
 }

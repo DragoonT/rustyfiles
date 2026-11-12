@@ -340,7 +340,9 @@ fn refresh(cx: &mut App) {
         RefreshPlan::WaitForOrder => return,
         RefreshPlan::Apply => {}
     }
-    let work_width = host::monitor_work(cx).map(|(scale, work)| work.width() as f32 / scale.max(0.01));
+    // (the strip's room is a quarter of the screen in dock units: the cells are dock units wide)
+    let size = super::look::dock_size(cx);
+    let work_width = host::monitor_work(cx).map(|(scale, work)| work.width() as f32 / (scale * size).max(0.01));
     let retired = cx.update_global::<TrayState, _>(|st, _| st.set_snapshot(snap, work_width));
     retire(retired, cx);
     after_change(cx);
@@ -424,8 +426,16 @@ fn read_order(cx: &mut App) {
 
 // ---------------------------------------------------------------- where things are
 
-fn glass_and_scale(cx: &App) -> Option<(Rect, f32)> {
-    Some((host::visible_glass_rect(Kind::Right, cx)?, host::monitor_work(cx)?.0))
+/// The right island's visible glass and the device px per dock unit (the monitor's scale times the dock's size): what the strip's cells
+/// and chevron are placed with. (The overflow panel's own cells keep the monitor's scale: see `source_rect`.)
+fn glass_and_unit(cx: &App) -> Option<(Rect, f32)> {
+    Some((host::visible_glass_rect(Kind::Right, cx)?, rf_win::dock::size::unit(host::monitor_work(cx)?.0, super::look::dock_size(cx))))
+}
+
+/// What the strip shows now, for the right island's empty-glass test (`empty.rs`): `None` without a strip.
+pub fn shape(cx: &App) -> Option<super::empty::TrayShape> {
+    let st = cx.try_global::<TrayState>()?;
+    (st.snap.is_some() && st.lay.chevron).then_some(super::empty::TrayShape { visible: st.lay.visible.len(), chevron: st.lay.chevron })
 }
 
 /// The open overflow panel's rectangle (device px), `None` while it is closed.
@@ -436,11 +446,13 @@ pub fn overflow_rect(cx: &App) -> Option<Rect> {
 /// Where a source is on the screen now, device px.
 fn source_rect(src: Source, cx: &App) -> Option<Rect> {
     let st = cx.try_global::<TrayState>()?;
-    let (glass, scale) = glass_and_scale(cx)?;
+    let (glass, unit) = glass_and_unit(cx)?;
     match src {
-        Source::Strip(j) => (j < st.lay.visible.len()).then(|| ts::cell_rect(glass, scale, j)),
-        Source::Chevron => st.lay.chevron.then(|| ts::chevron_rect(glass, scale, st.lay.visible.len())),
+        Source::Strip(j) => (j < st.lay.visible.len()).then(|| ts::cell_rect(glass, unit, j)),
+        Source::Chevron => st.lay.chevron.then(|| ts::chevron_rect(glass, unit, st.lay.visible.len())),
         Source::Overflow(k) => {
+            // the overflow panel is a window of its own: its cells are in the monitor's scale, not the dock's size
+            let scale = host::monitor_work(cx)?.0;
             let panel = overflow_rect(cx)?;
             let n = st.lay.overflow.len();
             (k < n).then(|| {
@@ -480,12 +492,12 @@ thread_local! {
 pub fn report_rects(cx: &App) {
     let Some(st) = cx.try_global::<TrayState>() else { return };
     let Some(snap) = &st.snap else { return };
-    let Some((glass, scale)) = glass_and_scale(cx) else { return };
+    let Some((glass, unit)) = glass_and_unit(cx) else { return };
     let mut rects: Vec<(IconKey, Rect)> = Vec::with_capacity(snap.icons.len());
     for (j, &i) in st.lay.visible.iter().enumerate() {
-        rects.push((snap.icons[i].key, ts::cell_rect(glass, scale, j)));
+        rects.push((snap.icons[i].key, ts::cell_rect(glass, unit, j)));
     }
-    let chevron = ts::chevron_rect(glass, scale, st.lay.visible.len());
+    let chevron = ts::chevron_rect(glass, unit, st.lay.visible.len());
     for (k, &i) in st.lay.overflow.iter().enumerate() {
         let r = if overflow_rect(cx).is_some() { source_rect(Source::Overflow(k), cx).unwrap_or(chevron) } else { chevron };
         rects.push((snap.icons[i].key, r));
@@ -541,12 +553,14 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
         return None;
     }
     report_rects(cx);
+    // every length below is a dock unit (the default size's logical px) times the dock's size factor
+    let k = super::look::dock_size(cx);
     let ring = accent(cx);
     let (hover_bg, drop_bg) = (pal.hover_fill().hsla(), with_alpha(ring, 0.35));
     let n = st.lay.visible.len();
     let dragging = st.drag.as_ref().map(|d| d.key);
     let target = st.drag.as_ref().map(|d| d.target);
-    let mut row = div().id("tray-strip").relative().flex_shrink_0().w(px(st.lay.block_width())).h(px(ts::CELL));
+    let mut row = div().id("tray-strip").relative().flex_shrink_0().w(px(st.lay.block_width() * k)).h(px(ts::CELL * k));
     for (j, &i) in st.lay.visible.iter().enumerate() {
         let key = st.icons()[i].key;
         let hot = dragging.is_none() && st.hover == Some(Source::Strip(j));
@@ -554,43 +568,43 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
         let cell = div()
             .id(("tray-cell", j))
             .absolute()
-            .left(px(j as f32 * ts::CELL))
+            .left(px(j as f32 * ts::CELL * k))
             .top(px(0.))
-            .size(px(ts::CELL))
+            .size(px(ts::CELL * k))
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(6.))
+            .rounded(px(6. * k))
             .border_2()
             .border_color(if on_cursor { ring } else { transparent_black() })
             .cursor_pointer()
             .when(hot, |d| d.bg(hover_bg))
             .when(dragging == Some(key), |d| d.opacity(0.35))
-            .child(picture_of(st, i, ts::ICON, pal));
+            .child(picture_of(st, i, ts::ICON * k, pal));
         row = row.child(wire(cell, Source::Strip(j)));
     }
     // where a dragged icon would land
-    if let Some(DropTarget::Strip(k)) = target {
-        row = row.child(div().absolute().left(px(k as f32 * ts::CELL - 1.0)).top(px(2.)).w(px(2.)).h(px(ts::CELL - 4.)).rounded_full().bg(ring));
+    if let Some(DropTarget::Strip(drop_at)) = target {
+        row = row.child(div().absolute().left(px(drop_at as f32 * ts::CELL * k - 1.0)).top(px(2. * k)).w(px(2.)).h(px((ts::CELL - 4.) * k)).rounded_full().bg(ring));
     }
     let chevron_hot = (dragging.is_none() && st.hover == Some(Source::Chevron)) || target == Some(DropTarget::Chevron);
     let chevron_cursor = st.kb.as_ref().is_some_and(|k| k.cursor == n);
     let chevron = div()
         .id("tray-chevron")
         .absolute()
-        .left(px(n as f32 * ts::CELL))
+        .left(px(n as f32 * ts::CELL * k))
         .top(px(0.))
-        .w(px(ts::CHEVRON_W))
-        .h(px(ts::CELL))
+        .w(px(ts::CHEVRON_W * k))
+        .h(px(ts::CELL * k))
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(6.))
+        .rounded(px(6. * k))
         .border_2()
         .border_color(if chevron_cursor { ring } else { transparent_black() })
         .cursor_pointer()
         .when(chevron_hot, |d| d.bg(if target == Some(DropTarget::Chevron) { drop_bg } else { hover_bg }))
-        .child(Icon::new(L::ChevronUp).size(px(14.)).text_color(pal.text_secondary().hsla()));
+        .child(Icon::new(L::ChevronUp).size(px(14. * k)).text_color(pal.text_secondary().hsla()));
     row = row.child(wire(chevron, Source::Chevron));
     Some(
         div()
@@ -599,7 +613,7 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
             .items_center()
             .flex_shrink_0()
             .child(row)
-            .child(div().mx(px(ts::SEP_GAP)).w(px(ts::SEP_W)).h(px(super::plan::RIGHT_SEP_HEIGHT)).bg(pal.separator().hsla()))
+            .child(div().mx(px(ts::SEP_GAP * k)).w(px(ts::SEP_W * k)).h(px(super::plan::RIGHT_SEP_HEIGHT * k)).bg(pal.separator().hsla()))
             .into_any_element(),
     )
 }
@@ -704,7 +718,7 @@ fn tip_anchor(src: Source, cx: &App) -> Option<super::tray_tip::Anchor> {
     // a tip over the strip clears the island's top edge, not just the 24 px cell inside it (an overflow cell has no island under it)
     let clear_top = match src {
         Source::Overflow(_) => rect.top,
-        _ => glass_and_scale(cx).map_or(rect.top, |(glass, _)| glass.top.min(rect.top)),
+        _ => glass_and_unit(cx).map_or(rect.top, |(glass, _)| glass.top.min(rect.top)),
     };
     (!text.is_empty()).then_some(super::tray_tip::Anchor { key, text, rect, clear_top })
 }
@@ -817,8 +831,8 @@ fn sync_tip_block(cx: &mut App) {
 
 fn drop_target_at(cursor: (i32, i32), cx: &App) -> Option<DropTarget> {
     let st = cx.try_global::<TrayState>()?;
-    let (glass, scale) = glass_and_scale(cx)?;
-    Some(ts::drop_target(&Geometry { glass, scale, visible: st.lay.visible.len(), chevron: st.lay.chevron, overflow: overflow_rect(cx) }, cursor))
+    let (glass, unit) = glass_and_unit(cx)?;
+    Some(ts::drop_target(&Geometry { glass, scale: unit, visible: st.lay.visible.len(), chevron: st.lay.chevron, overflow: overflow_rect(cx) }, cursor))
 }
 
 /// A dragged icon was let go on `target`: the order changes (and is written) when that moves something.

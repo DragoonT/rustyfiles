@@ -21,6 +21,11 @@ enum State {
     /// Being loaded; `tries` counts the asks so far, this one included.
     Loading { tries: u8 },
     Ready(Arc<RenderImage>),
+    /// Was ready, but at a size that is not wanted any more (the dock's size or the display scale changed): still drawn, so the icon does
+    /// not flash back to its letter, and to be asked for again.
+    Stale(Arc<RenderImage>),
+    /// A stale icon whose new bitmap is being loaded: still drawn until it arrives (or kept for good if the new ask fails).
+    Refreshing(Arc<RenderImage>),
     /// The last ask failed. Asked again after [`RETRY_AFTER`] while `tries` is below [`MAX_TRIES`].
     Missing { tries: u8, at: Instant },
 }
@@ -34,7 +39,7 @@ impl IconCache {
     /// The finished icon for this key (`plan::icon_key`), if there is one.
     pub fn get(&self, key: &str) -> Option<Arc<RenderImage>> {
         match self.map.get(key) {
-            Some(State::Ready(img)) => Some(img.clone()),
+            Some(State::Ready(img) | State::Stale(img) | State::Refreshing(img)) => Some(img.clone()),
             _ => None,
         }
     }
@@ -42,6 +47,11 @@ impl IconCache {
     /// Whether the caller has to start loading this icon now: a new one, or one that failed long enough ago and has tries left. It
     /// is marked as loading.
     pub fn start_loading(&mut self, key: &str, now: Instant) -> bool {
+        if let Some(State::Stale(img)) = self.map.get(key) {
+            let img = img.clone();
+            self.map.insert(key.to_string(), State::Refreshing(img));
+            return true;
+        }
         let tries = match self.map.get(key) {
             None => 0,
             Some(State::Missing { tries, at }) if *tries < MAX_TRIES && now.saturating_duration_since(*at) >= RETRY_AFTER => *tries,
@@ -58,6 +68,13 @@ impl IconCache {
                 self.map.insert(key.to_string(), State::Ready(img));
                 false
             }
+            None if matches!(self.map.get(key), Some(State::Refreshing(_))) => {
+                // the new size could not be had: the old bitmap is still a picture of the app (a little soft), better than the letter
+                if let Some(State::Refreshing(img)) = self.map.remove(key) {
+                    self.map.insert(key.to_string(), State::Ready(img));
+                }
+                false
+            }
             None => {
                 let tries = match self.map.get(key) {
                     Some(State::Loading { tries }) => *tries,
@@ -69,9 +86,21 @@ impl IconCache {
         }
     }
 
-    /// Forgets everything (the scale changed: the bitmaps have the wrong size).
+    /// Forgets everything (the Start panel's icons: nothing of them is on show while they are asked for again).
     pub fn clear(&mut self) {
         self.map.clear();
+    }
+
+    /// The bitmaps have the wrong size (the display scale or the dock's size changed): every finished icon stays on show until its new
+    /// bitmap arrives, so nothing flashes back to a letter; what was still loading or had failed is forgotten, because it was asked for
+    /// at the old size (a load of the old size that ends later is dropped by the caller).
+    pub fn mark_stale(&mut self) {
+        let old = std::mem::take(&mut self.map);
+        for (key, state) in old {
+            if let State::Ready(img) | State::Stale(img) | State::Refreshing(img) = state {
+                self.map.insert(key, State::Stale(img));
+            }
+        }
     }
 
     /// Keeps only the entries whose key `keep` accepts (a cache that must not grow for ever lets go of what is not worth keeping).
@@ -151,13 +180,64 @@ mod tests {
         assert!(!c.start_loading("a", later + RETRY_AFTER * 10), "a finished icon is not asked for again");
     }
 
+    fn picture() -> Arc<RenderImage> {
+        Arc::new(RenderImage::new(vec![image::Frame::new(image::RgbaImage::new(1, 1))]))
+    }
+
     #[test]
-    fn clearing_forgets_everything() {
+    fn a_size_change_keeps_the_old_pictures_until_the_new_ones_arrive() {
+        let mut c = IconCache::default();
+        let t = Instant::now();
+        let old = picture();
+        assert!(c.start_loading("a", t));
+        c.finish("a", Some(old.clone()), t);
+        assert!(c.start_loading("loading", t));
+        assert!(c.start_loading("failed", t));
+        c.finish("failed", None, t);
+        c.mark_stale();
+        // no flash: the finished icon is still there to draw while it is asked for again
+        assert!(Arc::ptr_eq(&c.get("a").unwrap(), &old));
+        // what was loading or had failed at the old size is forgotten, so it is asked for at the new size
+        assert!(c.get("loading").is_none() && c.start_loading("loading", t));
+        assert!(c.start_loading("failed", t));
+        // the stale icon is asked for once, and its old picture shows meanwhile
+        assert!(c.start_loading("a", t));
+        assert!(!c.start_loading("a", t), "already being loaded");
+        assert!(Arc::ptr_eq(&c.get("a").unwrap(), &old));
+        // the new bitmap replaces it
+        let new = picture();
+        assert!(!c.finish("a", Some(new.clone()), t));
+        assert!(Arc::ptr_eq(&c.get("a").unwrap(), &new));
+        assert!(!c.start_loading("a", t + RETRY_AFTER * 10), "a finished icon is not asked for again");
+    }
+
+    #[test]
+    fn a_new_size_that_cannot_be_had_leaves_the_old_picture_and_does_not_retry() {
+        let mut c = IconCache::default();
+        let t = Instant::now();
+        let old = picture();
+        c.start_loading("a", t);
+        c.finish("a", Some(old.clone()), t);
+        c.mark_stale();
+        assert!(c.start_loading("a", t));
+        assert!(!c.finish("a", None, t), "no retry loop for an icon that has a picture");
+        assert!(Arc::ptr_eq(&c.get("a").unwrap(), &old));
+        assert!(!c.start_loading("a", t + RETRY_AFTER * 10));
+        // a second change of size while one is under way starts over from the picture that is shown
+        c.mark_stale();
+        c.start_loading("a", t);
+        c.mark_stale();
+        assert!(c.start_loading("a", t));
+        assert!(Arc::ptr_eq(&c.get("a").unwrap(), &old));
+    }
+
+    #[test]
+    fn forgetting_makes_everything_new() {
         let mut c = IconCache::default();
         let t = Instant::now();
         c.start_loading("a", t);
-        c.clear();
-        assert_eq!(c.len(), 0);
+        c.mark_stale();
+        assert_eq!(c.len(), 0, "a load in flight has no picture to keep");
         assert!(c.start_loading("a", t));
     }
 }

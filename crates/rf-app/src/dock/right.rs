@@ -79,6 +79,18 @@ impl RightIsland {
         cx.notify();
     }
 
+    /// A right click at `at` (the window's logical px): on the island's empty glass it starts Task Manager; on a symbol, the clock, the
+    /// bell or a tray icon it is theirs and does nothing here.
+    fn right_click(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let k = super::look::dock_size(cx);
+        let [ml, mt, ..] = super::host::insets(Kind::Right, cx).margins;
+        let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
+        let controls = super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra);
+        if super::empty::side_is_empty(plan::right_width(&self.lines) + self.tray_extra, &controls, point) {
+            super::actions::open_task_manager();
+        }
+    }
+
     /// The island's glass (the tray strip's tips take its tone).
     pub fn island_glass(&self) -> Rc<RefCell<IslandGlass>> {
         self.glass.clone()
@@ -90,19 +102,20 @@ impl RightIsland {
     }
 }
 
-fn icon_button(id: &'static str, icon: L, pal: Palette, on_click: impl Fn(&mut App) + 'static) -> impl IntoElement {
+/// (`k` is the dock's size factor: the lengths are dock units.)
+fn icon_button(id: &'static str, icon: L, pal: Palette, k: f32, on_click: impl Fn(&mut App) + 'static) -> impl IntoElement {
     let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
     div()
         .id(id)
-        .size(px(plan::BUTTON))
+        .size(px(plan::BUTTON * k))
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(8.))
+        .rounded(px(8. * k))
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
         .active(move |s| s.bg(pressed))
-        .child(Icon::new(icon).size(px(16.)).text_color(pal.text().hsla()))
+        .child(Icon::new(icon).size(px(16. * k)).text_color(pal.text().hsla()))
         .on_click(move |_, _, cx| on_click(cx))
 }
 
@@ -140,21 +153,21 @@ fn open_notifications(cx: &mut App) {
 }
 
 /// The bell, wearing a small dot in the system accent colour while there are notifications.
-fn bell_button(pal: Palette, dot: Option<Hsla>, on_click: impl Fn(&mut App) + 'static) -> impl IntoElement {
+fn bell_button(pal: Palette, dot: Option<Hsla>, k: f32, on_click: impl Fn(&mut App) + 'static) -> impl IntoElement {
     let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
     div()
         .id("dock-bell")
         .relative()
-        .size(px(plan::BUTTON))
+        .size(px(plan::BUTTON * k))
         .flex()
         .items_center()
         .justify_center()
-        .rounded(px(8.))
+        .rounded(px(8. * k))
         .cursor_pointer()
         .hover(move |s| s.bg(hover))
         .active(move |s| s.bg(pressed))
-        .child(Icon::new(L::Bell).size(px(16.)).text_color(pal.text().hsla()))
-        .when_some(dot, |d, color| d.child(div().absolute().top(px(7.)).right(px(8.)).size(px(8.)).rounded_full().bg(color)))
+        .child(Icon::new(L::Bell).size(px(16. * k)).text_color(pal.text().hsla()))
+        .when_some(dot, |d, color| d.child(div().absolute().top(px(7. * k)).right(px(8. * k)).size(px(8. * k)).rounded_full().bg(color)))
         .on_click(move |_, _, cx| on_click(cx))
 }
 
@@ -171,24 +184,26 @@ impl Render for RightIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
         let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
+        // every length below is a dock unit (the default size's logical px) times the dock's size factor
+        let k = super::look::dock_size(cx);
 
         let dot: Option<Hsla> = super::notif_state::dot_visible(cx).then(|| gpui_kit::rgb(cx.try_global::<super::look::Env>().map_or(0x0078D4, |e| e.accent)).into());
         let (network_icon, volume_icon) = (super::sysstate::network_icon(cx), super::sysstate::volume_icon(cx));
 
         let clock = v_flex()
             .id("dock-clock")
-            .ml(px(plan::RIGHT_SEP_GAP))
-            .w(px(plan::clock_width(&self.lines)))
-            .h(px(36.))
-            .px(px(plan::CLOCK_PAD / 2.0))
+            .ml(px(plan::RIGHT_SEP_GAP * k))
+            .w(px(plan::clock_width(&self.lines) * k))
+            .h(px(plan::CLOCK_H * k))
+            .px(px(plan::CLOCK_PAD / 2.0 * k))
             .items_end()
             .justify_center()
-            .rounded(px(8.))
+            .rounded(px(8. * k))
             .cursor_pointer()
             .hover(move |s| s.bg(hover))
             .active(move |s| s.bg(pressed))
-            .child(div().text_size(px(13.)).line_height(px(16.)).child(self.lines.time.clone()))
-            .child(div().text_size(px(12.)).line_height(px(15.)).text_color(pal.text_secondary().hsla()).child(self.lines.date.clone()))
+            .child(div().text_size(px(13. * k)).line_height(px(16. * k)).child(self.lines.time.clone()))
+            .child(div().text_size(px(12. * k)).line_height(px(15. * k)).text_color(pal.text_secondary().hsla()).child(self.lines.date.clone()))
             .on_click(move |_, _, cx| open_calendar(cx));
 
         // the other programs' tray icons, with a thin separator after them (nothing at all without a tray source)
@@ -196,7 +211,11 @@ impl Render for RightIsland {
 
         // (keys are listened to, and focus tracked, only while a strip is drawn)
         let focus = tray.is_some().then(|| self.focus.get_or_insert_with(|| cx.focus_handle()).clone());
-        super::host::island_box(pal, fallback)
+        super::host::island_box(pal, fallback, k)
+            // a right click on the glass between and around the controls: Windows' Task Manager (the controls are told from the glass
+            // by their boxes, `empty.rs::right_controls`, which mirror the row below in its order and distances: tray strip, network,
+            // volume, separator, clock, bell; change one, change both)
+            .on_mouse_up(MouseButton::Right, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.right_click(ev.position, cx)))
             .when_some(focus, |d, focus| {
                 d.track_focus(&focus).on_key_down(cx.listener(|_, ev: &KeyDownEvent, _, cx| {
                     if super::tray_strip::key_down(ev, cx) {
@@ -207,14 +226,14 @@ impl Render for RightIsland {
             .child(
             h_flex()
                 .size_full()
-                .px(px(plan::SIDE_PAD))
+                .px(px(plan::SIDE_PAD * k))
                 .items_center()
                 .children(tray)
-                .child(icon_button("dock-network", network_icon, pal, open_controls))
-                .child(div().ml(px(plan::RIGHT_GAP)).child(icon_button("dock-volume", volume_icon, pal, open_controls)))
-                .child(div().ml(px(plan::RIGHT_SEP_GAP)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH)).h(px(plan::RIGHT_SEP_HEIGHT)).bg(pal.separator().hsla()))
+                .child(icon_button("dock-network", network_icon, pal, k, open_controls))
+                .child(div().ml(px(plan::RIGHT_GAP * k)).child(icon_button("dock-volume", volume_icon, pal, k, open_controls)))
+                .child(div().ml(px(plan::RIGHT_SEP_GAP * k)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH * k)).h(px(plan::RIGHT_SEP_HEIGHT * k)).bg(pal.separator().hsla()))
                 .child(clock)
-                .child(div().ml(px(plan::RIGHT_GAP)).child(bell_button(pal, dot, open_notifications))),
+                .child(div().ml(px(plan::RIGHT_GAP * k)).child(bell_button(pal, dot, k, open_notifications))),
         )
     }
 }

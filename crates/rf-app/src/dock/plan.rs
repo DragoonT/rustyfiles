@@ -53,6 +53,8 @@ const CLOCK_CHAR: f32 = 7.0;
 const CLOCK_MIN_CHARS: usize = 10;
 /// Padding inside the clock block, so its click target is not tight around the digits.
 pub const CLOCK_PAD: f32 = 8.0;
+/// The clock block's height (its click target).
+pub const CLOCK_H: f32 = 36.0;
 
 pub fn clock_width(lines: &ClockLines) -> f32 {
     let chars = lines.time.chars().count().max(lines.date.chars().count()).max(CLOCK_MIN_CHARS);

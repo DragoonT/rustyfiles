@@ -52,11 +52,13 @@ pub struct Prefs {
     pub reserve: bool,
     /// The weather city, trimmed. Empty: no weather.
     pub city: String,
+    /// How big the whole dock is.
+    pub size: super::size_pref::DockSizePref,
 }
 
 impl Prefs {
     pub fn of(s: &Settings) -> Prefs {
-        Prefs { reserve: s.dock_reserve, city: s.dock_weather_city.trim().to_string() }
+        Prefs { reserve: s.dock_reserve, city: s.dock_weather_city.trim().to_string(), size: s.dock_size }
     }
 }
 
@@ -65,10 +67,11 @@ impl Prefs {
 pub struct Changes {
     pub reserve: bool,
     pub city: bool,
+    pub size: bool,
 }
 
 pub fn changes(old: &Prefs, new: &Prefs) -> Changes {
-    Changes { reserve: old.reserve != new.reserve, city: old.city != new.city }
+    Changes { reserve: old.reserve != new.reserve, city: old.city != new.city, size: old.size != new.size }
 }
 
 /// Whether the settings file is new since last looked at (its modification time differs; a file that appears or disappears counts).
@@ -87,7 +90,11 @@ struct Placed {
 /// the middle island's glass may widen. Device px. Kept (see `Host::geo`) so the views do not ask Windows for it on every frame.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Geo {
+    /// The monitor's DPI scale: device px per logical px of a window's own coordinates.
     pub scale: f32,
+    /// Device px per dock unit (the monitor's scale times the dock's size): what the layout was worked out with. Equal to `scale` at the
+    /// default size.
+    pub unit: f32,
     pub islands: Islands,
     pub placements: Placements,
     /// How far the middle glass may widen on each side.
@@ -123,26 +130,31 @@ impl Insets {
         Insets { margins: m.map(|v| v as f32 / geo.scale), growth: geo.growth_px as f32 / geo.scale }
     }
 
-    /// What a window has before the host has worked out the real numbers (the first frame): the margins the layout wants, all round.
-    pub fn assumed(kind: Kind) -> Insets {
+    /// What a window has before the host has worked out the real numbers (the first frame): the margins the layout wants, all round,
+    /// for a dock of this size factor (logical px of the window's own coordinates).
+    pub fn assumed(kind: Kind, size: f32) -> Insets {
         let (edge, head) = if layout::shadow_on() { (layout::SHADOW_MARGIN, layout::SHADOW_MARGIN) } else { (layout::EDGE_MARGIN, layout::HEADROOM) };
         let (side, top) = match kind {
             Kind::Middle => (edge + layout::MIDDLE_RESERVE, head),
             _ => (edge, edge),
         };
-        Insets { margins: [side, top, side, edge], growth: if kind == Kind::Middle { layout::MIDDLE_RESERVE } else { 0.0 } }
+        let grow = if kind == Kind::Middle { layout::MIDDLE_RESERVE } else { 0.0 };
+        Insets { margins: [side * size, top * size, side * size, edge * size], growth: grow * size }
     }
 }
 
-/// The insets of an island's window, from the host's last layout.
+/// The insets of an island's window, from the host's last layout (real logical px of the window; a view that lays itself out in dock
+/// units divides them by the size factor).
 pub fn insets(kind: Kind, cx: &App) -> Insets {
-    cx.try_global::<Host>().and_then(|h| h.geo).map_or_else(|| Insets::assumed(kind), |g| Insets::of(&g, kind))
+    cx.try_global::<Host>().and_then(|h| h.geo).map_or_else(|| Insets::assumed(kind, super::look::dock_size(cx)), |g| Insets::of(&g, kind))
 }
 
 pub struct Host {
     system: Option<DockSystem>,
     placed: Vec<Placed>,
     left: Option<Entity<LeftIsland>>,
+    /// The middle island, told when the dock's size changes (its icons are asked for again at the new size).
+    middle: Option<Entity<MiddleIsland>>,
     right: Option<Entity<RightIsland>>,
     /// The islands' logical widths (what their contents need).
     widths: Widths,
@@ -170,15 +182,18 @@ impl Host {
     /// The layout for the display as it is now.
     fn compute_geo(&self) -> Option<Geo> {
         let (mon, area) = self.area()?;
-        Some(geo_for(&mon, area, self.widths))
+        Some(geo_for(&mon, area, self.widths, self.prefs.size.factor()))
     }
 }
 
-/// The layout for a monitor, the area the islands are placed in and the islands' widths.
-fn geo_for(mon: &MonitorInfo, area: Rect, widths: Widths) -> Geo {
+/// The layout for a monitor, the area the islands are placed in, the islands' widths (dock units) and the dock's size factor. Every
+/// length of the layout is a number of dock units, so the layout is given the unit (the monitor's scale times the size) where it used
+/// to be given the monitor's scale: the one place the size enters.
+fn geo_for(mon: &MonitorInfo, area: Rect, widths: Widths, size: f32) -> Geo {
     let scale = mon.scale();
-    let islands = layout::islands(area, scale, widths);
-    Geo { scale, islands, placements: layout::placements(&islands, mon.rect, scale, layout::shadow_on()), growth_px: layout::growth_room(&islands, scale) }
+    let unit = rf_win::dock::size::unit(scale, size);
+    let islands = layout::islands(area, unit, widths);
+    Geo { scale, unit, islands, placements: layout::placements(&islands, mon.rect, unit, layout::shadow_on()), growth_px: layout::growth_room(&islands, unit) }
 }
 
 fn host_mut(cx: &mut App) -> Option<&mut Host> {
@@ -210,13 +225,14 @@ pub fn is_fullscreen(cx: &App) -> bool {
 }
 
 /// The base of every island view: the window-sized box, text colour, and - only while the glass is not running - the island's own
-/// rounded translucent fill, so the dock is never invisible. The colours are the island's palette at this moment (see `tone.rs`).
-pub fn island_box(pal: Palette, fallback: bool) -> Div {
+/// rounded translucent fill, so the dock is never invisible. The colours are the island's palette at this moment (see `tone.rs`);
+/// `size` is the dock's size factor (the lengths here are dock units).
+pub fn island_box(pal: Palette, fallback: bool, size: f32) -> Div {
     div()
         .size_full()
-        .text_size(px(13.))
+        .text_size(px(13. * size))
         .text_color(pal.text().hsla())
-        .when(fallback, |d| d.bg(pal.fallback_fill().hsla()).rounded(px(RADIUS)))
+        .when(fallback, |d| d.bg(pal.fallback_fill().hsla()).rounded(px(RADIUS * size)))
 }
 
 /// What a view needs of its island's glass for one frame: the palette now, and a request for another frame while the foreground is
@@ -283,8 +299,8 @@ struct Job {
 }
 
 /// The pieces of a window that take the pointer when nothing sticks out of the glass: the glass itself.
-fn rest_parts(pl: &Placement, scale: f32) -> Vec<hit::Part> {
-    hit::parts(pl.glass_in_window(), layout::px(RADIUS, scale) as f32, &[], pl.window.width(), pl.window.height())
+fn rest_parts(pl: &Placement, unit: f32) -> Vec<hit::Part> {
+    hit::parts(pl.glass_in_window(), layout::px(RADIUS, unit) as f32, &[], pl.window.width(), pl.window.height())
 }
 
 thread_local! {
@@ -310,7 +326,7 @@ pub fn request_layout(cx: &mut App) {
             if own {
                 p.glass.borrow_mut().set_shape(pl.glass_in_window());
             }
-            Job { hwnd: p.hwnd, window: pl.window, parts: own.then(|| rest_parts(&pl, geo.scale)) }
+            Job { hwnd: p.hwnd, window: pl.window, parts: own.then(|| rest_parts(&pl, geo.unit)) }
         })
         .collect();
     MIDDLE_REGION.with(|r| *r.borrow_mut() = None);
@@ -379,12 +395,14 @@ fn apply_visibility(cx: &mut App) {
 
 /// Puts the (re)read system facts where the views and the glass can see them.
 fn publish_env(scale: f32, cx: &mut App) {
-    let env = Env::read(scale);
+    let size = cx.try_global::<Host>().map_or(1.0, |h| h.prefs.size.factor());
+    let env = Env::read_sized(scale, size);
     let changed = cx.try_global::<Env>().is_none_or(|old| *old != env);
     cx.set_global(env);
     if let Some(host) = cx.try_global::<Host>() {
         for p in &host.placed {
-            p.glass.borrow_mut().sync(env.dark, env.scale, backdrop::now_ms());
+            // (the glass's corner radius is in device px: it follows the monitor's scale AND the dock's size)
+            p.glass.borrow_mut().sync(env.dark, env.unit(), backdrop::now_ms());
         }
     }
     if changed {
@@ -396,8 +414,9 @@ fn apply_reserve(cx: &mut App) {
     let Some(host) = cx.try_global::<Host>() else { return };
     let Some(system) = host.system.as_ref() else { return };
     if host.prefs.reserve {
-        let scale = host.area().map_or(1.0, |(m, _)| m.scale());
-        system.reserve(layout::reserved_thickness(scale));
+        // the band is the dock's own height and margins: it follows the size too
+        let unit = host.area().map_or(1.0, |(m, _)| rf_win::dock::size::unit(m.scale(), host.prefs.size.factor()));
+        system.reserve(layout::reserved_thickness(unit));
     } else {
         system.release();
     }
@@ -469,7 +488,22 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     let ch = changes(&host.prefs, &new);
     host.prefs = new.clone();
     let left = host.left.clone();
-    if ch.reserve {
+    let middle = host.middle.clone();
+    if ch.size {
+        // Everything of the islands follows the size at once: the environment (the glass's radius, the views' unit), the reserved band,
+        // the windows' places and the tray strip's room; a panel that is open would stay where the islands were.
+        let scale = cx.try_global::<Env>().map_or(1.0, |e| e.scale);
+        publish_env(scale, cx);
+        super::panel::close(rf_win::dock::panel::CloseCause::LayoutChanged, cx);
+        super::tray_strip::layout_changed(cx);
+        request_layout(cx);
+        // the icons were asked for at the old size's pixels: ask again now, keeping the old pictures drawn until the new ones come (a
+        // size change must not leave the dock soft, nor flash letters)
+        if let Some(middle) = middle {
+            middle.update(cx, |v, cx| v.size_changed(cx));
+        }
+    }
+    if ch.reserve || ch.size {
         apply_reserve(cx);
     }
     if ch.city
@@ -585,12 +619,13 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         return;
     };
     let scale = monitor.scale();
-    let env = Env::read(scale);
+    let size = prefs.size.factor();
+    let env = Env::read_sized(scale, size);
     cx.set_global(env);
 
     let lines = rf_win::dock::clock::system_lines();
     let widths = Widths { left: plan::left_width(None), middle: plan::middle_width_at_rest(2, 1), right: plan::right_width(&lines) };
-    let geo = geo_for(&monitor, area, widths);
+    let geo = geo_for(&monitor, area, widths, size);
     let display = cx.primary_display().map(|d| d.id());
 
     let (left_glass, middle_glass, right_glass) = (Rc::new(RefCell::new(IslandGlass::new())), Rc::new(RefCell::new(IslandGlass::new())), Rc::new(RefCell::new(IslandGlass::new())));
@@ -607,13 +642,15 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 
     let mut placed = Vec::new();
     let mut left_entity = None;
+    let mut middle_entity = None;
     let mut right_entity = None;
     if let Some((handle, hwnd, entity)) = left {
         placed.push(Placed { kind: Kind::Left, handle, hwnd, glass: left_glass });
         left_entity = Some(entity);
     }
-    if let Some((handle, hwnd, _)) = middle {
+    if let Some((handle, hwnd, entity)) = middle {
         placed.push(Placed { kind: Kind::Middle, handle, hwnd, glass: middle_glass });
+        middle_entity = Some(entity);
     }
     if let Some((handle, hwnd, entity)) = right {
         placed.push(Placed { kind: Kind::Right, handle, hwnd, glass: right_glass });
@@ -634,6 +671,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         system,
         placed,
         left: left_entity,
+        middle: middle_entity,
         right: right_entity,
         widths,
         geo: Some(geo),
@@ -650,7 +688,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         .map(|p| {
             let pl = geo.placement(p.kind);
             p.glass.borrow_mut().set_shape(pl.glass_in_window());
-            (Job { hwnd: p.hwnd, window: pl.window, parts: Some(rest_parts(&pl, scale)) }, p.glass.clone())
+            (Job { hwnd: p.hwnd, window: pl.window, parts: Some(rest_parts(&pl, geo.unit)) }, p.glass.clone())
         })
         .collect();
     cx.set_global(host);
@@ -682,9 +720,9 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
                 hit::set_region(job.hwnd, parts);
             }
         }
-        let env = Env::read(scale);
+        let env = Env::read_sized(scale, size);
         for (job, glass) in &setup {
-            glass.borrow_mut().start(job.hwnd, env.dark, env.scale, 0);
+            glass.borrow_mut().start(job.hwnd, env.dark, env.unit(), 0);
         }
     });
     if fullscreen {
@@ -837,7 +875,7 @@ mod tests {
     }
 
     fn prefs(reserve: bool, city: &str) -> Prefs {
-        Prefs { reserve, city: city.into() }
+        Prefs { reserve, city: city.into(), size: Default::default() }
     }
 
     #[test]
@@ -852,10 +890,23 @@ mod tests {
     #[test]
     fn only_what_changed_is_applied() {
         let base = prefs(true, "Ankara");
-        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false });
-        assert_eq!(changes(&base, &prefs(false, "Ankara")), Changes { reserve: true, city: false });
-        assert_eq!(changes(&base, &prefs(true, "İzmir")), Changes { reserve: false, city: true });
-        assert_eq!(changes(&base, &prefs(false, "")), Changes { reserve: true, city: true });
+        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false });
+        assert_eq!(changes(&base, &prefs(false, "Ankara")), Changes { reserve: true, city: false, size: false });
+        assert_eq!(changes(&base, &prefs(true, "İzmir")), Changes { reserve: false, city: true, size: false });
+        assert_eq!(changes(&base, &prefs(false, "")), Changes { reserve: true, city: true, size: false });
+        let bigger = Prefs { size: crate::dock::size_pref::DockSizePref::Large, ..base.clone() };
+        assert_eq!(changes(&base, &bigger), Changes { reserve: false, city: false, size: true });
+    }
+
+    /// What a window has before the first layout is the layout's own margins, times the dock's size factor.
+    #[test]
+    fn the_assumed_margins_follow_the_size() {
+        use super::Insets;
+        let m = Insets::assumed(Kind::Middle, 1.0);
+        assert_eq!((m.margins, m.growth), ([44.0, 12.0, 44.0, 4.0], 40.0), "the default size is the dock as it was");
+        assert_eq!(Insets::assumed(Kind::Left, 1.0).margins, [4.0; 4]);
+        let big = Insets::assumed(Kind::Middle, 1.4);
+        assert!((big.margins[0] - 61.6).abs() < 1e-4 && (big.margins[1] - 16.8).abs() < 1e-4 && (big.growth - 56.0).abs() < 1e-4, "{big:?}");
     }
 
     #[test]
@@ -872,7 +923,7 @@ mod tests {
     fn geo(monitor: Rect, work: Rect, scale: f32) -> Geo {
         let widths = Widths { left: 330.0, middle: 600.0, right: 280.0 };
         let islands = layout::islands(work, scale, widths);
-        Geo { scale, islands, placements: layout::placements(&islands, monitor, scale, false), growth_px: layout::growth_room(&islands, scale) }
+        Geo { scale, unit: scale, islands, placements: layout::placements(&islands, monitor, scale, false), growth_px: layout::growth_room(&islands, scale) }
     }
 
     /// The Start panel (its real size, `START_SIZE`: 642 x 720) over the left island and the control centre (360 x 400) over the right one, placed from the glass.

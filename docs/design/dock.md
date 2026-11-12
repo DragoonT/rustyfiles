@@ -50,7 +50,63 @@ Where the glass cannot widen (a narrow screen, the side islands close by: their 
 give way down to 2 px and then the icons shrink together; the icon under the pointer is still the biggest. The icon bitmaps are loaded
 once at 44 x 1.55 px times the scale and only ever scaled down, so a big icon is sharp.
 
-Settings, "Dock (deneysel)": "Simge büyütme" / Icon magnification: off, subtle (1.25) or full (1.55, the default).
+Settings, "Dock (deneysel)": "Simge büyütme" / Icon magnification: off, subtle (1.25) or full (1.55, the default). All the lengths
+here, and the 12 px of headroom, are for the default dock size; the size setting scales them together (see "The dock's size").
+
+## The dock's size (setting "Dock boyutu" / Dock size)
+
+One setting scales the whole dock: Küçük (Small, 0.85), Orta (Medium, 1.0, the default), Büyük (Large, 1.2), Çok büyük (Extra large, 1.4)
+(`dock_size` = `small` / `medium` / `large` / `xlarge`, `dock/size_pref.rs`; the numbers and the arithmetic are `rf_win::dock::size`).
+Orta is exactly the dock of the rest of this page: every number written here is for it. The size applies to a running dock at once (the
+dock reads its settings file, which the main app announces when the choice changes) and is kept.
+
+* HOW IT IS BUILT. Every length of the islands is a number of DOCK UNITS, the logical px of the default size. A unit becomes device px by
+  `size::unit(dpi_scale, factor)`, the monitor's scale times the size factor (the factor 1.0 gives the DPI scale itself, bit for bit), and
+  that one product is what every pure layout function takes where it took the monitor's scale: `layout::islands`, `layout::placements`,
+  `layout::growth_room`, `layout::reserved_thickness`, `tray_strip::cell_rect`, `chevron_rect`, `drop_target`, and the corner radius the
+  glass is given. `magnify`, `hover` and `plan` work in units and have no size parameter at all; the views multiply a unit by the factor
+  at the moment something is drawn (`look::Env::size`; `Env::unit()` is the product). The places the lengths were spread over (`layout`,
+  `magnify`, `plan`, the views, `tray_strip` in both crates, `start_button`) therefore keep their numbers and the size enters in one
+  place (`host::geo_for`) and at the drawing.
+* WHAT FOLLOWS: the three islands' heights, the margin above the screen's bottom and from its sides, the gaps between the islands, the
+  corner radius of the glass, the icon cells, gaps, padding and the icons, the running marks, the magnification (its peak is relative to
+  the rest size, the bell's reach is in slots, the headroom and the window's reserve for the glass to widen are in units, so the region
+  and the room follow), the Start button's logo and plate, the search field and its text and icon, the weather, the network and volume
+  symbols, the clock's two lines and its block, the bell and its dot, the tray strip (cells, chevron, separator, the room it may take),
+  the band the dock reserves when it reserves space (`reserved_thickness`), and the distance a pop-up above an icon keeps from the glass
+  (the growth of the icons is a unit length: `preview::icon_gap`).
+* WHAT DOES NOT: the panels' contents (Start, search, control centre, calendar, notifications, the tray's overflow panel, the app menu,
+  the preview's cards) are windows of their own and keep the monitor's scale; they follow the dock by where they are anchored, which is
+  the island's glass rectangle the layout gives, so they open above the bigger or smaller islands without a change of their own. The
+  drag threshold of a tray icon stays in the monitor's scale.
+* ICONS. The icon bitmaps are asked for at the largest size they get at the current size (`plan::icon_request_px(unit)`, 44 x 1.55 x
+  unit, at least at the monitor's scale), so they are sharp at every size; a change of size (or of the monitor's scale) asks for them
+  again at once (`MiddleIsland::size_changed`, called by the host), and the cache keeps drawing the old pictures until the new ones
+  arrive (`IconCache::mark_stale`), so the dock is neither soft nor flashing letters meanwhile. A load that was asked for at the old unit
+  and ends later is dropped.
+* LIMITS. At 1366 px wide the middle island gives way first at every size (`size::tests::nothing_overlaps_on_a_1366_screen_at_any_size`).
+  A change of size closes a panel that is open, as a change of monitor does. NOT seen on a screen by the one who wrote it.
+
+## A right click on the empty glass starts Task Manager
+
+A right click on the glass of any island where there is no icon, field, symbol or other control starts Windows' Task Manager
+(`taskmgr.exe`), as a right click on the empty part of Windows' taskbar offers it. It is started through the shell's "open" on the shell
+thread (`actions::open_task_manager` -> `rf_win::sta::run`, `rf_win::dock::launch::start`), by the program's full path in the system
+folder (`taskmgr::launch`: the shell does no search of its own); the dock requests no elevation (the verb is never "runas": Task
+Manager's own manifest decides, as when the taskbar starts it, and a declined prompt is an answer, not a fault, `taskmgr::was_cancelled`).
+Once: a right click while it starts, and for 2 s after the call returned, starts nothing (`rf_win::dock::taskmgr::StartGate`, opened
+by the same job when the call returns; it stays shut as long as an elevation prompt is waiting, with 5 minutes as the net for a call
+that never comes back); with Task Manager already open, starting it again brings the open one forward. Note that the shell thread is
+shared: a prompt left unanswered holds the dock's other shell requests (icons) behind it until it is answered or closes itself.
+
+WHAT IS EMPTY is decided from the layout's rectangles, never from what the toolkit has under the pointer (`rf_win::dock::empty_spot`,
+the boxes in `dock/empty.rs`): the point is on the island's rounded glass and in none of the boxes of the controls. The controls are the
+logo and the search field (left); the tray strip's cells and chevron, the network and volume buttons, the clock and the bell (right);
+the icons of the dock, as they are drawn at that moment, with the ones grown out of the glass (middle). An icon's own right click (its
+menu) is not changed. The weather and the thin separators are drawn but are not controls: a right click on them is a right click on the
+glass. The running mark under an icon belongs to the icon: the strip from the icon's bottom edge to the mark's lower edge is part of its
+box (`empty::IconBox`), and a right click on it opens that icon's menu (it is outside the icon's element, so the middle island's row
+passes it on, `MiddleIsland::row_right_click`). There is no setting; the right click did nothing there before.
 
 ## Windows, margins and the pointer
 
@@ -638,6 +694,8 @@ the overflow panel's cells and a tip fall for that many icons (arithmetic only; 
 * **Pencereler dock'un altına girmesin** / Keep windows from going under the dock. On by default. The dock registers as an
   application desktop toolbar at the bottom of the primary monitor (the middle island's height plus the margins), so maximised
   windows stop above it, and unregisters on exit. Off: it only floats.
+* **Dock boyutu** / Dock size. Orta (Medium) by default (`dock_size`; Küçük 0.85, Orta 1.0, Büyük 1.2, Çok büyük 1.4). Scales the whole dock
+  and applies to the running dock at once (see "The dock's size").
 * **Simge büyütme** / Icon magnification. Full by default (see "Magnification").
 * **Simge üzerinde pencere önizlemesi** / Window previews on icons. On by default (`dock_hover_previews`). Off: resting the pointer on
   an icon shows nothing.
@@ -654,7 +712,7 @@ the overflow panel's cells and a tip fall for that many icons (arithmetic only; 
 
 The dock process is told to read the settings file again when any of these changes: the four switches of the panels (`dock_own_start`,
 `dock_own_control_centre`, `dock_own_calendar`, `dock_own_notifications`), the two switches of the icons' menu and previews
-(`dock_app_menu`, `dock_hover_previews`), the Start panel's recommended section (`dock_start_recommended`), the keep-out switch, the city, the magnification, the animations setting and the four HyperGlass sliders
+(`dock_app_menu`, `dock_hover_previews`), the Start panel's recommended section (`dock_start_recommended`), the keep-out switch, the city, the size, the magnification, the animations setting and the four HyperGlass sliders
 (`control::Keys`). The process's views read the two panel switches from the settings it loaded last, at every click.
 
 ## The process
@@ -735,7 +793,8 @@ The dock process is told to read the settings file again when any of these chang
 
 ## Where things are
 
-* `crates/rf-win/src/dock/`: the system side. `layout.rs` (the three glass rectangles and their windows from a work area and a scale), `model.rs` (merge and
+* `crates/rf-win/src/dock/`: the system side. `size.rs` (the four sizes and the unit every layout function takes), `empty_spot.rs` (is this
+  point the island's empty glass), `taskmgr.rs` (the start-once gate for Task Manager), `layout.rs` (the three glass rectangles and their windows from a work area and a scale), `model.rs` (merge and
   order of pinned and running apps, the click decision), `identity.rs` (a window's packaged-app id), `pins.rs` (the taskbar's pins,
   their order, and which are alive, moved or dead), `icons.rs` (the shell's icons and the window's own, as a chain of sources per app),
   `magnify.rs` (the magnification), `hit.rs` (which part of a window takes the pointer, and the window region), `hover.rs` (the
@@ -745,7 +804,8 @@ The dock process is told to read the settings file again when any of these chang
   messages (`rf_win::sta::call`).
 * `crates/rf-app/src/dock/`: the views and the process. `host.rs` (the three windows, events, settings, the clean exit), `left.rs`,
   `middle.rs`, `right.rs`, `backdrop.rs` (an island's glass; its state machine is `glass_watch.rs`, shared with the popups), `control.rs`
-  (starting and stopping the process), `plan.rs` (widths, layout and timing arithmetic), `look.rs` (colours, and the palette that eases
+  (starting and stopping the process), `size_pref.rs` (the saved size), `empty.rs` (the controls' boxes and the empty-glass test of each
+  island), `plan.rs` (widths, layout and timing arithmetic), `look.rs` (colours, and the palette that eases
   between the dark and the light look), `tone.rs` (light or dark foreground from the brightness behind the glass, with its hysteresis),
   `icons.rs` (the icon cache, keyed by an app's first source), `actions.rs`. The panels:
   `panel.rs` (the hidden window, opening, closing, the watch), `start.rs` (the Start panel's view and keys) with its child `start_home.rs` (the pages, drawn), `search.rs` (the result rows, the

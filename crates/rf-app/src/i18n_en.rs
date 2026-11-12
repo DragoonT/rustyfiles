@@ -1651,4 +1651,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Hedefi aç", "Open destination"),
     ("Genişlet", "Expand"),
     ("Küçült", "Collapse"),
+    ("Dock boyutu", "Dock size"),
+    ("Dock'un tamamı seçtiğiniz boyuta göre büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. Orta, Dock'un her zamanki boyutudur. Değişiklik çalışan Dock'a hemen uygulanır.", "The whole dock grows or shrinks to the size you choose: the islands, the icons, the search field, the clock, the tray icons and the gaps. Medium is the dock's usual size. A change is applied to the running dock at once."),
+    ("Orta boyut", "Medium"),
+    ("Çok büyük", "Extra large"),
 ];

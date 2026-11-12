@@ -60,6 +60,40 @@ pub fn open_place(place: Place) {
     run_rustyfiles(place_args(place));
 }
 
+/// Whether a start of Task Manager is under way or has just been made (a second right click in that moment must not start another).
+static TASK_MANAGER: std::sync::Mutex<rf_win::dock::taskmgr::StartGate> = std::sync::Mutex::new(rf_win::dock::taskmgr::StartGate::new());
+
+/// The clock the gate is timed on: milliseconds since the first look at it.
+fn gate_ms() -> u64 {
+    use std::sync::LazyLock;
+    static START: LazyLock<std::time::Instant> = LazyLock::new(std::time::Instant::now);
+    START.elapsed().as_millis() as u64
+}
+
+/// A right click on the empty glass of an island: Windows' Task Manager, as a right click on Windows' taskbar offers it. Started
+/// through the shell's "open" (no elevation is asked for by us: Task Manager's own manifest decides what it needs), once: a second
+/// right click while it starts, or in the moment after, starts nothing. If Task Manager is already open, starting it again brings it
+/// forward. The shell call is made on the shell thread (`rf_win::sta`), not on a thread of our own: a worker that calls the shell
+/// becomes an apartment that never pumps, which that module's comment says the shell does not survive. The gate is opened from the
+/// same job when the call returns, so it stays shut for as long as the call is held (an elevation prompt waiting for an answer).
+pub fn open_task_manager() {
+    let go = TASK_MANAGER.lock().map(|mut g| g.begin(gate_ms())).unwrap_or(false);
+    if !go {
+        return;
+    }
+    rf_win::sta::run(|_| {
+        match rf_win::dock::launch::start(&rf_win::dock::taskmgr::launch()) {
+            Ok(()) => {}
+            // the user said no at the prompt Task Manager's manifest asked for: an answer, not a fault
+            Err(e) if rf_win::dock::taskmgr::was_cancelled(&e) => log::debug!("dock: Task Manager was not started: the prompt was declined"),
+            Err(e) => log::warn!("dock: cannot start Task Manager: {e:#}"),
+        }
+        if let Ok(mut g) = TASK_MANAGER.lock() {
+            g.finished(gate_ms());
+        }
+    });
+}
+
 /// A click on an app: start, bring forward or minimise, as `rf_win::dock::model::click_action` decides.
 pub fn click_app(app: &DockApp, foreground: isize) {
     perform(rf_win::dock::model::click_action(&app.windows, foreground), app.launch.clone());
@@ -95,6 +129,14 @@ mod tests {
         assert_eq!(background_main_args(), vec!["--no-window".to_string()]);
         assert_eq!(settings_args(), vec!["--settings=general".to_string()]);
         assert_eq!(show_in_folder_args(std::path::Path::new(r"C:\Users\x\a b\c.txt")), vec![r"/select,C:\Users\x\a b\c.txt".to_string()]);
+    }
+
+    #[test]
+    fn task_manager_is_started_on_the_shell_thread_and_not_on_a_thread_of_our_own() {
+        let src = include_str!("actions.rs");
+        let body = src.split("pub fn open_task_manager()").nth(1).and_then(|rest| rest.split("\n}").next()).expect("the function is there");
+        assert!(body.contains("rf_win::sta::run("), "the shell call belongs on the shell thread");
+        assert!(!body.contains("thread::spawn"), "a worker that calls the shell becomes an apartment that never pumps");
     }
 
     #[test]

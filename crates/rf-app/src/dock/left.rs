@@ -84,6 +84,17 @@ impl LeftIsland {
         cx.notify();
     }
 
+    /// A right click at `at` (the window's logical px): on the island's empty glass it starts Task Manager; on the logo or the field it is
+    /// theirs and does nothing here.
+    fn right_click(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let k = super::look::dock_size(cx);
+        let [ml, mt, ..] = super::host::insets(Kind::Left, cx).margins;
+        let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
+        if super::empty::side_is_empty(self.width(), &super::empty::left_controls(), point) {
+            super::actions::open_task_manager();
+        }
+    }
+
     fn report_width(&mut self, cx: &mut Context<Self>) {
         let w = self.width();
         if (w - self.reported).abs() > 0.5 {
@@ -187,6 +198,12 @@ fn own_start(cx: &App) -> bool {
     cx.try_global::<crate::settings::Settings>().is_none_or(|s| s.dock_own_start)
 }
 
+/// The island's small text: the toolkit's own `text_sm` at the default size (so the default dock is exactly what it was, whatever
+/// that style's value is), and 14 dock units times the size factor at any other size.
+fn text_14<E: Styled>(el: E, k: f32) -> E {
+    if k == 1.0 { el.text_sm() } else { el.text_size(px(14. * k)) }
+}
+
 impl Render for LeftIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let typed = super::panel::typed_text(cx);
@@ -201,17 +218,19 @@ impl Render for LeftIsland {
             window.request_animation_frame();
         }
         let scale_factor = window.scale_factor();
+        // every length below is a dock unit (the default size's logical px) times the dock's size factor
+        let k = super::look::dock_size(cx);
         let me = cx.entity();
         let logo = div()
             .id("dock-logo")
             .relative()
-            .size(px(plan::LOGO))
+            .size(px(plan::LOGO * k))
             .flex()
             .items_center()
             .justify_center()
             .cursor_pointer()
-            .children(start_button::plate(frame.plate, pal.hover_fill(), pal.mix, LOGO_RADIUS))
-            .child(start_button::logo(frame.scale, scale_factor))
+            .children(start_button::plate(frame.plate, pal.hover_fill(), pal.mix, LOGO_RADIUS * k))
+            .child(start_button::logo(frame.scale * k, scale_factor))
             .child(canvas(|_, _, _| (), move |bounds, _, window, _| pointer_probe(me, bounds, window)).absolute().size_full())
             .on_mouse_down(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_press(cx)))
             .on_mouse_up(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_release(true, cx)))
@@ -227,22 +246,22 @@ impl Render for LeftIsland {
 
         let search = h_flex()
             .id("dock-search")
-            .ml(px(plan::LOGO_GAP))
-            .w(px(plan::SEARCH_W))
-            .h(px(plan::SEARCH_H))
-            .px(px(12.))
-            .gap(px(8.))
+            .ml(px(plan::LOGO_GAP * k))
+            .w(px(plan::SEARCH_W * k))
+            .h(px(plan::SEARCH_H * k))
+            .px(px(12. * k))
+            .gap(px(8. * k))
             .items_center()
             .rounded_full()
             .bg(pal.field_fill().hsla())
             .cursor_pointer()
             .hover(move |s| s.bg(pressed))
-            .child(Icon::new(L::Search).size(px(14.)).flex_shrink_0().text_color(secondary))
+            .child(Icon::new(L::Search).size(px(14. * k)).flex_shrink_0().text_color(secondary))
             // what is being typed in the panel above is shown here too; the panel's own field takes the keys (this window is never
             // activated, so it cannot)
             .child(match typed {
-                Some(text) => div().flex_1().min_w_0().truncate().text_sm().child(text),
-                None => div().text_sm().text_color(secondary).child(t!("Ara")),
+                Some(text) => text_14(div().flex_1().min_w_0().truncate(), k).child(text),
+                None => text_14(div(), k).text_color(secondary).child(t!("Ara")),
             })
             .on_click(|_, _, cx| {
                 if own_start(cx) {
@@ -254,15 +273,18 @@ impl Render for LeftIsland {
 
         let weather = self.weather.map(|o| {
             h_flex()
-                .ml(px(plan::WEATHER_GAP))
-                .gap(px(plan::WEATHER_TEXT_GAP))
+                .ml(px(plan::WEATHER_GAP * k))
+                .gap(px(plan::WEATHER_TEXT_GAP * k))
                 .items_center()
-                .child(Icon::new(picture_icon(plan::weather_picture(o.code, o.is_day))).size(px(plan::WEATHER_ICON)).flex_shrink_0().text_color(pal.text().hsla()))
-                .child(div().text_sm().child(o.text()))
+                .child(Icon::new(picture_icon(plan::weather_picture(o.code, o.is_day))).size(px(plan::WEATHER_ICON * k)).flex_shrink_0().text_color(pal.text().hsla()))
+                .child(text_14(div(), k).child(o.text()))
         });
 
-        super::host::island_box(pal, fallback)
-            .child(h_flex().size_full().px(px(plan::SIDE_PAD)).items_center().child(logo).child(search).children(weather))
+        super::host::island_box(pal, fallback, k)
+            // a right click on the glass between and around the controls: Windows' Task Manager (the controls are told from the glass
+            // by their boxes, `empty.rs::left_controls`, which mirror the row below: padding, logo, gap, field; change one, change both)
+            .on_mouse_up(MouseButton::Right, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.right_click(ev.position, cx)))
+            .child(h_flex().size_full().px(px(plan::SIDE_PAD * k)).items_center().child(logo).child(search).children(weather))
     }
 }
 

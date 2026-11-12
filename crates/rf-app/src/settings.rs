@@ -529,6 +529,8 @@ pub struct Settings {
     /// The Start panel shows "Önerilenler" (the documents opened most recently) under the pinned apps (on). Off: the section is not
     /// drawn and the pinned grid takes its room.
     pub dock_start_recommended: bool,
+    /// How big the whole dock is (small / medium / large / extra large; medium is the dock as it always was).
+    pub dock_size: crate::dock::size_pref::DockSizePref,
 
     // ---- Shell host (shell/: `rustyfiles --shell`, the dock's process); experimental, every switch off by default
     /// Our desktop (the wallpaper, the icons) is drawn over Explorer's, one window per monitor, while the shell host runs. Explorer's
@@ -662,6 +664,7 @@ impl Default for Settings {
             dock_hover_previews: true,
             dock_app_menu: true,
             dock_start_recommended: true,
+            dock_size: Default::default(),
             shell_desktop_cover: false,
             shell_win_key: false,
             shell_own_switcher: false,

@@ -8784,5 +8784,29 @@
   "key": "Küçült",
   "tr": "Küçült",
   "en": "Collapse"
+ },
+ {
+  "id": "823cf624",
+  "key": "Dock boyutu",
+  "tr": "Dock boyutu",
+  "en": "Dock size"
+ },
+ {
+  "id": "76cc15bd",
+  "key": "Dock'un tamamı seçtiğiniz boyuta göre büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. Orta, Dock'un her zamanki boyutudur. Değişiklik çalışan Dock'a hemen uygulanır.",
+  "tr": "Dock'un tamamı seçtiğiniz boyuta göre büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. Orta, Dock'un her zamanki boyutudur. Değişiklik çalışan Dock'a hemen uygulanır.",
+  "en": "The whole dock grows or shrinks to the size you choose: the islands, the icons, the search field, the clock, the tray icons and the gaps. Medium is the dock's usual size. A change is applied to the running dock at once."
+ },
+ {
+  "id": "7c94de40",
+  "key": "Orta boyut",
+  "tr": "Orta boyut",
+  "en": "Medium"
+ },
+ {
+  "id": "d1ef5321",
+  "key": "Çok büyük",
+  "tr": "Çok büyük",
+  "en": "Extra large"
  }
 ]

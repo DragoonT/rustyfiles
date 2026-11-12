@@ -2,6 +2,10 @@
 //!
 //! All the design numbers are logical px and are scaled by the monitor's DPI only here, with one rounding rule (round half up per
 //! number, never per sum), so the same inputs give the same rectangles on every machine and a test can pin them.
+//!
+//! THE `scale` OF EVERY FUNCTION HERE IS THE DOCK UNIT: device px per design number, which is the monitor's DPI scale times the dock's
+//! size factor (`size::unit`). At the default size the factor is 1.0 and the unit is the DPI scale itself, so the numbers below are
+//! the dock the way it always was; the size setting multiplies every length of the dock by passing a different unit, nothing else.
 
 /// A rectangle in device px, `right` and `bottom` exclusive (the same shape as Win32's `RECT`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

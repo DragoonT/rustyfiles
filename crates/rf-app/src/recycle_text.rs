@@ -111,6 +111,8 @@ mod tests {
     }
 
     #[test]
+    // (the numbers are looked for without the word that follows them: another test walks through every interface language at the
+    // same time, and in some of them the count is not followed by a space: "항목 2개")
     fn the_status_line_counts_what_happened() {
         let ok = DeleteReport { requested: 3, deleted: 3, left: 0, collateral: 0, error: None, unknown: false };
         let (s, problem) = delete_status(&ok);
@@ -118,16 +120,16 @@ mod tests {
         assert!(!problem);
         let part = DeleteReport { requested: 3, deleted: 2, left: 1, collateral: 0, error: Some("in use".into()), unknown: false };
         let (s, problem) = delete_status(&part);
-        assert!(s.contains("2 ") && s.contains("1 ") && s.ends_with(": in use"), "{s}");
+        assert!(s.contains('2') && s.contains('1') && s.ends_with(": in use"), "{s}");
         assert!(problem);
         let none = DeleteReport::default();
         assert!(delete_status(&none).1);
         let unknown = DeleteReport { requested: 2, deleted: 0, left: 0, collateral: 0, error: Some("timeout".into()), unknown: true };
         let (s, problem) = delete_status(&unknown);
-        assert!(problem && s.ends_with(": timeout") && !s.contains("0 "), "{s}");
+        assert!(problem && s.ends_with(": timeout") && !s.contains('0'), "{s}");
         let extra = DeleteReport { requested: 1, deleted: 1, left: 0, collateral: 2, error: None, unknown: false };
         let (s, problem) = delete_status(&extra);
-        assert!(problem && s.contains("2 "), "{s}");
+        assert!(problem && s.contains('2'), "{s}");
     }
 
     #[test]

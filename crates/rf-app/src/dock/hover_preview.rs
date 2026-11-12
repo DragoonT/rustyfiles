@@ -302,9 +302,9 @@ fn show_now(key: String, started: Instant, cx: &mut App) {
     let unknown = sources.iter().take(cards.len()).filter(|s| s.is_none()).count();
     let probe_took = probe_started.elapsed();
     // Never taller than the room above the dock: a layout that would not fit has its boxes capped (the rows are not cut off).
-    let layout = preview::layout_in(&sources, work.width() as f32 / scale, preview::room_above(glass.top, scale, work));
+    let layout = preview::layout_in(&sources, work.width() as f32 / scale, preview::room_above(glass.top, scale, super::look::dock_size(cx), work));
     let size = layout.size();
-    let rect = preview::above_icon(info.anchor_x.round() as i32, glass.top, size, scale, work);
+    let rect = preview::above_icon(info.anchor_x.round() as i32, glass.top, size, scale, super::look::dock_size(cx), work);
     let dark = info.glass.borrow().dark();
     let (count, hidden, anchor) = (cards.len(), grid.hidden, info.anchor_x.round() as i32);
     let _ = handle.update(cx, |v, _, cx| v.set_cards(cards, layout, info.icon.clone(), scale, cx));
@@ -386,7 +386,7 @@ fn look_once(generation: u64, cx: &mut App) -> bool {
     // the preview, or from an icon up out of the dock's window, is never reported by the toolkit's hover events. Read it here; the
     // machine ignores a repeat of what it already knows.
     if let (Some(cursor), Some((scale, _, glass))) = (geo::cursor(), popup_win::anchor_basis(cx))
-        && preview::pointer_away(cursor, rect, glass, scale)
+        && preview::pointer_away(cursor, rect, glass, scale, super::look::dock_size(cx))
     {
         feed(Input::Icon(None), cx);
         feed(Input::Preview(false), cx);

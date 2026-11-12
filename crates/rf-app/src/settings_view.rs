@@ -13,6 +13,7 @@ use gpui_windows::hybrid;
 
 use crate::fluent_menu::{self, Item, Menu, MenuIcon};
 use crate::select_box::{Choice, select_box};
+use crate::dock::size_pref::DockSizePref;
 use crate::i18n::Lang;
 use crate::settings::{
     self, AnimPref, BackdropPref, ClickPref, DatePref, DefaultView, DeletePref, DockMagnify, IdePref, RendererPref, Settings, StartupPref, ThemePref,
@@ -2400,6 +2401,24 @@ fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
             t!("rustyfiles bildirim panelini kullan"),
             Some(t!("Dock'taki zile tıklayınca Windows'un bildirim merkezi yerine rustyfiles'ın paneli açılır: diğer uygulamaların bildirimleri uygulamaya göre gruplanır, zilde bildirim varken küçük bir nokta görünür. Kapalıyken Windows'un bildirim merkezi açılır.")),
             sw("dock-own-notif", p, s.dock_own_notifications, |s, v| s.dock_own_notifications = v),
+        ),
+        card(
+            p,
+            L::Maximize2,
+            t!("Dock boyutu"),
+            Some(t!("Dock'un tamamı seçtiğiniz boyuta göre büyür ya da küçülür: adalar, simgeler, arama alanı, saat, tepsi simgeleri ve aralıklar. Orta, Dock'un her zamanki boyutudur. Değişiklik çalışan Dock'a hemen uygulanır.")),
+            dropdown(
+                "dock-size",
+                p,
+                s.dock_size,
+                vec![
+                    (DockSizePref::Small, t!("Küçük").into()),
+                    (DockSizePref::Medium, t!("Orta boyut").into()),
+                    (DockSizePref::Large, t!("Büyük").into()),
+                    (DockSizePref::XLarge, t!("Çok büyük").into()),
+                ],
+                |s, v| s.dock_size = v,
+            ),
         ),
         card(
             p,

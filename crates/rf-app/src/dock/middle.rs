@@ -9,11 +9,16 @@
 //! host gives it (`host::insets`), and for every frame tells the glass engine where the glass is and the system which parts of the
 //! window take the pointer (`host::set_middle_frame`): the glass and the icons that stand out of it, nothing else.
 //!
+//! THE SIZE. All the arithmetic here (the rest layout, the magnification, the picture, the boxes) is in dock units, the default size's
+//! logical px; only where something is drawn or measured on the window is a length multiplied by the dock's size factor (`k`), and the
+//! device conversions use the dock unit (the monitor's scale times `k`).
+//!
 //! At rest there are no timers and no frames. While the pointer moves over the dock: one layout, one shape for the engine, one region
 //! for the system per frame; the icons are never loaded again for it.
 //!
 //! Left click: start the app / bring its last used window forward / minimise it when it is in front. Middle click: another instance.
-//! Right click: the dock's own app menu (`app_menu.rs`). The pointer resting on a running app's icon: a preview of its windows
+//! Right click on an icon: the dock's own app menu (`app_menu.rs`); on the empty glass between and around the icons: Windows' Task Manager
+//! (`empty.rs`). The pointer resting on a running app's icon: a preview of its windows
 //! (`hover_preview.rs`). Both are anchored on the icon's centre AT REST (it does not move while the icons grow). The pins are the
 //! Windows taskbar's until the user pins or unpins from the menu, then the dock's own list (`own_pins.rs`).
 
@@ -80,6 +85,10 @@ pub struct MiddleIsland {
     /// the bell shrinks away).
     hover_ix: Option<usize>,
     rest_items: Vec<(f32, f32)>,
+    /// The glass and the icons' boxes as they were drawn last (dock units, the window's coordinates): what a right click is told
+    /// "empty glass" or "an icon" by.
+    last_glass: [f32; 4],
+    last_icons: Vec<super::empty::IconBox>,
     _watch: Option<TaskWatch>,
 }
 
@@ -130,7 +139,7 @@ impl MiddleIsland {
             slots: Vec::new(),
             icon_srcs: Vec::new(),
             icons: IconCache::default(),
-            icon_scale: cx.global::<Env>().scale,
+            icon_scale: cx.global::<Env>().unit(),
             pointer_x: None,
             presence: Presence::new(plan::hover_duration(crate::settings::animations())),
             t0: Instant::now(),
@@ -140,6 +149,8 @@ impl MiddleIsland {
             dirty: false,
             hover_ix: None,
             rest_items: Vec::new(),
+            last_glass: [0.0; 4],
+            last_icons: Vec::new(),
             _watch: watch,
         };
         // (the app menu tells it when the dock's own pin list changed)
@@ -215,18 +226,25 @@ impl MiddleIsland {
         cx.notify();
     }
 
-    /// The display scale is not the one the cached icons were asked for.
+    /// The dock unit (the display scale times the dock's size) is not the one the cached icons were asked for.
     fn scale_changed(&self, cx: &Context<Self>) -> bool {
-        (cx.global::<Env>().scale - self.icon_scale).abs() > 0.001
+        (cx.global::<Env>().unit() - self.icon_scale).abs() > 0.001
+    }
+
+    /// The dock's size was changed in the settings: the icons are asked for again at the size the new unit draws them (the old pictures
+    /// stay on show until they arrive, so nothing goes back to a letter), and the next frame is drawn at the new size.
+    pub fn size_changed(&mut self, cx: &mut Context<Self>) {
+        self.load_icons(cx);
+        cx.notify();
     }
 
     /// Asks for every icon not yet asked for (and every one that failed a while ago), on worker threads.
     fn load_icons(&mut self, cx: &mut Context<Self>) {
-        let scale = cx.global::<Env>().scale;
+        let scale = cx.global::<Env>().unit();
         if self.scale_changed(cx) {
-            // the bitmaps were made for another scale: ask again for all of them
+            // the bitmaps were made for another unit: ask again for all of them, and keep drawing the old ones until the new arrive
             self.icon_scale = scale;
-            self.icons.clear();
+            self.icons.mark_stale();
         }
         let px = plan::icon_request_px(scale);
         let wanted: Vec<(String, Vec<IconSource>)> = self.icon_srcs.iter().flatten().cloned().collect();
@@ -238,6 +256,11 @@ impl MiddleIsland {
                 let asked = src.clone();
                 let bgra = cx.background_executor().spawn(async move { icons::load_bgra(&asked, px) }).await;
                 let retry = this.update(cx, |me, cx| {
+                    // a load asked for at a unit that is not the current one (the size changed meanwhile) is dropped: the ask at the
+                    // new unit is on its way
+                    if (me.icon_scale - scale).abs() > 0.001 {
+                        return false;
+                    }
                     let retry = me.icons.finish(&key, bgra.and_then(icons::to_image), Instant::now());
                     cx.notify();
                     retry
@@ -324,7 +347,7 @@ impl MiddleIsland {
     fn icon_anchor_x(&self, ix: usize, cx: &App) -> Option<f32> {
         let &(x, w) = self.rest_items.get(ix)?;
         let glass = host::visible_glass_rect(Kind::Middle, cx)?;
-        Some(screen_center_x(glass.left, x, w, cx.global::<Env>().scale))
+        Some(screen_center_x(glass.left, x, w, cx.global::<Env>().unit()))
     }
 
     /// The pointer came onto item `ix` (`on`) or left it: a running app's icon is what a preview belongs to.
@@ -354,6 +377,20 @@ impl MiddleIsland {
         app_menu::open(app_menu::MenuRequest { app: app.clone(), icon: self.icon_for(ix), anchor_x, glass: self.glass.clone() }, cx);
     }
 
+    /// A right click anywhere in the dock's window at `at` (logical px of the window): on the empty glass - not on an icon, whose own
+    /// click is the app menu - it starts Task Manager.
+    fn row_right_click(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let k = super::look::dock_size(cx);
+        let point = (f32::from(at.x) / k, f32::from(at.y) / k);
+        // the running mark under an icon is outside the icon's element (so the icon's own handler did not hear this click) but it is
+        // the icon's: its menu
+        if let Some(ix) = super::empty::mark_owner(&self.last_icons, point) {
+            self.right_click(ix, cx);
+        } else if super::empty::middle_is_empty(self.last_glass, &self.last_icons, point) {
+            super::actions::open_task_manager();
+        }
+    }
+
     fn click(&mut self, ix: usize, cx: &mut Context<Self>) {
         // (a click answers the question a preview asks: it goes)
         hover_preview::clicked(cx);
@@ -371,10 +408,10 @@ impl MiddleIsland {
     }
 }
 
-/// The screen x (device px) of the centre of an item that lies at `x`, `w` wide (logical px from the rest island's left edge), given the
-/// rest glass's left edge on the screen (`glass_left`, device px).
-fn screen_center_x(glass_left: i32, x: f32, w: f32, scale: f32) -> f32 {
-    glass_left as f32 + (x + w / 2.0) * scale
+/// The screen x (device px) of the centre of an item that lies at `x`, `w` wide (dock units from the rest island's left edge), given the
+/// rest glass's left edge on the screen (`glass_left`, device px) and the device px per dock unit.
+fn screen_center_x(glass_left: i32, x: f32, w: f32, unit: f32) -> f32 {
+    glass_left as f32 + (x + w / 2.0) * unit
 }
 
 /// Whether a pointer move over the dock is worth a frame: never with the magnification off; always when the bell starts or is still
@@ -416,6 +453,9 @@ fn item_name(item: &DockItem) -> String {
 impl Render for MiddleIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let env = *cx.global::<Env>();
+        // the dock's size factor: the arithmetic below is in dock units, a length is drawn as units times `k`
+        let k = env.size;
+        let u = move |v: f32| px(v * k);
         // the palette follows the tone (what is behind the glass), the fill below it is the island's own while the glass is not running
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
         let strength = cx.global::<Settings>().dock_magnify.strength();
@@ -424,12 +464,14 @@ impl Render for MiddleIsland {
             // the bell is still coming in or going out: one more frame
             window.request_animation_frame();
         }
-        let inset = host::insets(Kind::Middle, cx);
+        let mut inset = host::insets(Kind::Middle, cx);
+        inset.margins = inset.margins.map(|v| v / k);
+        inset.growth /= k;
         let [ml, _, mr, mb] = inset.margins;
         // The window may be narrower than the icons want (the side islands and the screen leave it less): lay the icons out for the
         // island's real width at rest (the window less its margins), so none falls outside it.
         let size = window.viewport_size();
-        let (vw, vh) = (f32::from(size.width), f32::from(size.height));
+        let (vw, vh) = (f32::from(size.width) / k, f32::from(size.height) / k);
         let real = vw - ml - mr;
         let rest_width = if real > 0.0 { real.min(self.width()) } else { self.width() };
         let rest = plan::rest_layout(&self.slots, rest_width);
@@ -444,11 +486,28 @@ impl Render for MiddleIsland {
         };
         let pic = plan::picture(&frame, &self.slots, inset.margins, BASELINE);
         self.rest_items.clone_from(&rest);
+        // what a right click is judged by: the glass and the icons as they are drawn in this frame
+        self.last_glass = pic.glass;
+        // (one list, reused: this runs on every frame of the magnification)
+        self.last_icons.clear();
+        self.last_icons.extend(super::empty::middle_icon_boxes(&self.slots, &pic, inset.margins[1], BASELINE, DOT_DROP));
 
         // the glass and the part of the window that takes the pointer follow the frame (only what moved is sent on)
-        let scale = env.scale;
+        let scale = env.unit();
         let boxes: Vec<[f32; 4]> = pic.out_of_glass.iter().map(|b| plan::to_device(*b, scale)).collect();
-        let glass_px = plan::to_device(pic.glass, scale);
+        let mut glass_px = plan::to_device(pic.glass, scale);
+        // At a size other than the default the glass is as high as the layout's whole-pixel rectangle says (72 units times the factor are
+        // not a whole number of device px, and the other two islands' glass is the layout's): its height never changes while the icons
+        // grow. At the default size nothing is touched: the height stays 72 units times the monitor's scale, as it always was (a
+        // fraction of a pixel off the layout's rectangle at 110 %, 125 % ... which is how the dock has always been drawn).
+        let glass_h = if k == 1.0 {
+            pic.glass[3]
+        } else {
+            if let Some(rest) = host::visible_glass_rect(Kind::Middle, cx) {
+                glass_px[3] = rest.height() as f32;
+            }
+            glass_px[3] / env.scale
+        };
         let parts = hit::parts(glass_px, rf_win::dock::layout::px(RADIUS, scale) as f32, &boxes, (vw * scale).round() as i32, (vh * scale).round() as i32);
         host::set_middle_frame(&self.glass, glass_px, parts, cx);
 
@@ -457,10 +516,10 @@ impl Render for MiddleIsland {
             let cell = match item {
                 DockItem::Separator => div()
                     .absolute()
-                    .left(px(x))
-                    .bottom(px(mb + BASELINE + (ICON_REST - 36.0) / 2.0))
-                    .w(px(w))
-                    .h(px(36.))
+                    .left(u(x))
+                    .bottom(u(mb + BASELINE + (ICON_REST - 36.0) / 2.0))
+                    .w(u(w))
+                    .h(u(36.))
                     .bg(pal.separator().hsla())
                     .into_any_element(),
                 DockItem::App(_) | DockItem::Place(_) => {
@@ -468,12 +527,12 @@ impl Render for MiddleIsland {
                         Some(img) => gpui_kit::img(img).size_full().into_any_element(),
                         None => div()
                             .size_full()
-                            .rounded(px(w * 0.24))
+                            .rounded(u(w * 0.24))
                             .bg(pal.placeholder_fill().hsla())
                             .flex()
                             .items_center()
                             .justify_center()
-                            .text_size(px(w * 0.45))
+                            .text_size(u(w * 0.45))
                             .child(plan::initial(&item_name(item)))
                             .into_any_element(),
                     };
@@ -484,10 +543,10 @@ impl Render for MiddleIsland {
                     div()
                         .id(("dock-item", ix))
                         .absolute()
-                        .left(px(x))
-                        .bottom(px(mb + BASELINE))
-                        .w(px(w))
-                        .h(px(w))
+                        .left(u(x))
+                        .bottom(u(mb + BASELINE))
+                        .w(u(w))
+                        .h(u(w))
                         .cursor_pointer()
                         .child(picture)
                         .when(running, |d| {
@@ -496,10 +555,10 @@ impl Render for MiddleIsland {
                             d.child(
                                 div()
                                     .absolute()
-                                    .bottom(px(-DOT_DROP))
-                                    .left(px((w - dw) / 2.0))
-                                    .w(px(dw))
-                                    .h(px(dh))
+                                    .bottom(u(-DOT_DROP))
+                                    .left(u((w - dw) / 2.0))
+                                    .w(u(dw))
+                                    .h(u(dh))
                                     .rounded_full()
                                     .bg(pal.running_dot(in_front).hsla()),
                             )
@@ -519,16 +578,16 @@ impl Render for MiddleIsland {
         let fill = fallback.then(|| {
             div()
                 .absolute()
-                .left(px(pic.glass[0]))
-                .top(px(pic.glass[1]))
-                .w(px(pic.glass[2]))
-                .h(px(pic.glass[3]))
-                .rounded(px(RADIUS))
+                .left(u(pic.glass[0]))
+                .top(u(pic.glass[1]))
+                .w(u(pic.glass[2]))
+                .h(px(glass_h))
+                .rounded(u(RADIUS))
                 .bg(pal.fallback_fill().hsla())
         });
         div()
             .size_full()
-            .text_size(px(13.))
+            .text_size(u(13.))
             .text_color(pal.text().hsla())
             .children(fill)
             .child(
@@ -542,8 +601,11 @@ impl Render for MiddleIsland {
                     .size_full()
                     .on_mouse_move(cx.listener(move |me, ev: &MouseMoveEvent, _, cx| {
                         let strength = cx.global::<Settings>().dock_magnify.strength();
-                        me.pointer_moved(f32::from(ev.position.x) - host::insets(Kind::Middle, cx).margins[0], strength, ev.pressed_button.is_some(), cx)
+                        // (dock units from the rest island's left edge)
+                        let k = super::look::dock_size(cx);
+                        me.pointer_moved((f32::from(ev.position.x) - host::insets(Kind::Middle, cx).margins[0]) / k, strength, ev.pressed_button.is_some(), cx)
                     }))
+                    .on_mouse_up(MouseButton::Right, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.row_right_click(ev.position, cx)))
                     .on_mouse_down(MouseButton::Left, cx.listener(|me, _, _, _| me.pressed()))
                     .on_mouse_up(MouseButton::Left, cx.listener(|me, _, _, cx| me.released(cx)))
                     .on_mouse_up_out(MouseButton::Left, cx.listener(|me, _, _, cx| me.released(cx)))
@@ -575,6 +637,17 @@ mod tests {
         assert!(move_needs_frame(Full, false, 3.0, true));
         assert!(!move_needs_frame(Full, false, MIN_MOVE - 0.01, true));
         assert!(!move_needs_frame(Full, false, 0.0, true));
+    }
+
+    #[test]
+    fn an_icons_anchor_follows_the_dock_unit_at_every_size() {
+        // the unit is the monitor's scale times the size factor; the glass starts at screen x 500 and the first icon's centre lies
+        // 12 + 22 = 34 units into it, the fourth's (after a separator) 12 + 54 + 54 + 11 + 22 = 153
+        for (unit, first, fourth) in [(0.85, 528.9, 630.05), (1.0, 534.0, 653.0), (1.2, 540.8, 683.6), (1.4, 547.6, 714.2), (1.25 * 1.4, 559.5, 767.75)] {
+            let a = super::screen_center_x(500, 12.0, 44.0, unit);
+            let b = super::screen_center_x(500, 12.0 + 54.0 + 54.0 + 11.0, 44.0, unit);
+            assert!((a - first).abs() < 0.01 && (b - fourth).abs() < 0.01, "unit {unit}: {a} {b}");
+        }
     }
 
     #[test]
