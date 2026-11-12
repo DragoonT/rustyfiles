@@ -33,9 +33,18 @@ fn labels() -> rf_win::tray::Labels {
 /// Bu süreç DirectLook: rustyfiles'ın bildirim alanı simgesi gösterilmez (DirectLook'un kendisi var).
 pub static DIRECTLOOK_PROCESS: AtomicBool = AtomicBool::new(false);
 
+/// This process is the dock (`rustyfiles --dock`): a side process like DirectLook, so it owns no tray icon, no name index and no
+/// hotkey, and does not start or stop the dock itself.
+pub static DOCK_PROCESS: AtomicBool = AtomicBool::new(false);
+
+/// A process that only helps the main rustyfiles (DirectLook, the dock) and must leave the machine-wide things to it.
+pub fn side_process() -> bool {
+    DIRECTLOOK_PROCESS.load(Ordering::Relaxed) || DOCK_PROCESS.load(Ordering::Relaxed)
+}
+
 /// Settings changed: the tray icon is there exactly while background mode is on.
 pub fn sync_tray(on: bool) {
-    if DIRECTLOOK_PROCESS.load(Ordering::Relaxed) {
+    if side_process() {
         return;
     }
     if TRAY_ON.swap(on, Ordering::Relaxed) == on {

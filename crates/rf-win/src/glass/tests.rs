@@ -389,3 +389,63 @@ fn the_bent_band_follows_the_true_corner() {
         assert!((1..=4).contains(&side), "beside the diagonal the bend moves the picture {side} px sideways (warp {warp})");
     }
 }
+
+/// The choice of the radius a window's glass is drawn with: the app's own wins, kept inside the window; without one the system's stays.
+#[test]
+fn the_radius_is_the_apps_or_the_systems() {
+    use super::engine::effective_radius;
+    assert_eq!(effective_radius(None, 8.0, 300, 200), 8.0, "no radius asked: what the system does, as before");
+    assert_eq!(effective_radius(None, 0.0, 300, 200), 0.0);
+    assert_eq!(effective_radius(Some(24.0), 8.0, 330, 48), 24.0, "an island's own radius beats the system's");
+    assert_eq!(effective_radius(Some(24.0), 0.0, 330, 48), 24.0, "also where the system does not round at all");
+    assert_eq!(effective_radius(Some(0.0), 8.0, 330, 48), 0.0, "an asked-for square corner stays square");
+    assert_eq!(effective_radius(Some(36.0), 8.0, 330, 48), 24.0, "no more than half of the shorter side: a capsule");
+    assert_eq!(effective_radius(Some(36.0), 8.0, 48, 330), 24.0, "whichever side is shorter");
+    assert_eq!(effective_radius(Some(-3.0), 8.0, 330, 48), 0.0);
+    assert_eq!(effective_radius(Some(f32::NAN), 8.0, 330, 48), 8.0, "not a number: the system's");
+    assert_eq!(effective_radius(Some(f32::INFINITY), 8.0, 330, 48), 8.0);
+}
+
+#[test]
+fn options_are_what_attach_always_meant_unless_asked_otherwise() {
+    assert_eq!(GlassOptions::window(true), GlassOptions { dark: true, radius_px: None, cut_corners: false });
+    let o = GlassOptions { dark: false, radius_px: Some(f32::NAN), cut_corners: true }.sanitized();
+    assert_eq!(o.radius_px, None);
+    assert!(o.cut_corners);
+    assert_eq!(GlassOptions { dark: false, radius_px: Some(-4.0), cut_corners: true }.sanitized().radius_px, Some(0.0));
+    assert_eq!(GlassOptions { dark: false, radius_px: Some(36.0), cut_corners: true }.sanitized().radius_px, Some(36.0));
+}
+
+#[test]
+fn attach_with_a_non_window_starts_nothing_either() {
+    assert!(!attach_with(0, GlassOptions { dark: true, radius_px: Some(24.0), cut_corners: true }));
+    assert!(!any_active());
+    assert!(!engine_started());
+    // the other calls that take options do nothing for a window that has no glass
+    set_options(0, GlassOptions::window(false));
+    set_dark(0, true);
+    assert!(!engine_started());
+}
+
+/// A free-standing island: 48 px high, 330 px wide, radius 24 and cutting its own corners (a capsule). Its corner pixels are
+/// transparent, the middle of its ends is not, and the middle is opaque. Through the same offscreen path the live draw uses.
+#[test]
+fn an_island_with_its_own_radius_is_a_capsule() {
+    if !can_draw() {
+        return;
+    }
+    let (sw, sh) = (500u32, 200u32);
+    let rect = (80, 60, 330u32, 48u32);
+    let src = picture(sw, sh, |x, y| [(x % 251) as u8, (y % 241) as u8, 120]);
+    for warp in drivers() {
+        let look = Look::regular(true);
+        let out = render_with(&src, sw, sh, rect, 24.0, &look, warp).expect("render");
+        assert_eq!(px(&out, rect.2, 0, 0)[3], 0, "top left corner (warp {warp})");
+        assert_eq!(px(&out, rect.2, rect.2 - 1, 0)[3], 0, "top right corner (warp {warp})");
+        assert_eq!(px(&out, rect.2, 0, rect.3 - 1)[3], 0, "bottom left corner (warp {warp})");
+        assert_eq!(px(&out, rect.2, rect.2 - 1, rect.3 - 1)[3], 0, "bottom right corner (warp {warp})");
+        assert_eq!(px(&out, rect.2, 3, rect.3 / 2)[3], 255, "middle of the left end (warp {warp})");
+        assert_eq!(px(&out, rect.2, rect.2 / 2, rect.3 / 2)[3], 255, "centre (warp {warp})");
+        assert_eq!(px(&out, rect.2, rect.2 / 2, 0)[3], 255, "middle of the top edge (warp {warp})");
+    }
+}

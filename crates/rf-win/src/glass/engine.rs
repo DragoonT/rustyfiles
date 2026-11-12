@@ -32,7 +32,7 @@ use windows::core::{BOOL, Interface};
 
 use super::capture::{MonError, Monitor, Pumped, is_device_lost, locate};
 use super::gpu::{Geometry, Gpu, Look, Region, Renderer, glass_pass, prep, region_pad};
-use super::{Cmd, GlassState};
+use super::{Cmd, GlassOptions, GlassState};
 
 /// A window's corner radius, device px at 100 %: Windows 11 rounds its windows by 8 px, or by 4 px when asked for small corners.
 const WINDOW_RADIUS: f32 = 8.0;
@@ -254,6 +254,10 @@ impl Stats {
 struct Win {
     hwnd: isize,
     dark: bool,
+    /// The radius the app asked for, device px (`None`: what the system does, see `effective_radius`).
+    radius_px: Option<f32>,
+    /// The app asked for the glass to cut its own corners (a shape that is not a window).
+    cut_corners: bool,
     visible: bool,
     geo: Option<WinGeo>,
     target: Option<Target>,
@@ -264,8 +268,28 @@ struct Win {
 }
 
 impl Win {
-    fn new(hwnd: isize, dark: bool) -> Win {
-        Win { hwnd, dark, visible: false, geo: None, target: None, region: None, dirty: true, presented: None, stats: Stats::new(Instant::now()) }
+    fn new(hwnd: isize, opts: GlassOptions) -> Win {
+        Win { hwnd, dark: opts.dark, radius_px: opts.radius_px, cut_corners: opts.cut_corners, visible: false, geo: None, target: None, region: None, dirty: true, presented: None, stats: Stats::new(Instant::now()) }
+    }
+}
+
+impl Win {
+    fn set_options(&mut self, opts: GlassOptions) {
+        self.dark = opts.dark;
+        self.radius_px = opts.radius_px;
+        self.cut_corners = opts.cut_corners;
+        self.dirty = true;
+    }
+}
+
+/// The corner radius a window's glass is drawn with, device px: the one the app asked for, else the one the system cuts the window
+/// with (`system`, as measured). An asked-for radius is kept inside what the window can hold (no more than half of its shorter side:
+/// a 48 px island with 24 px is a capsule, more would only make the shader's corner circle run past the edges) and ignores the
+/// "maximised or covering its monitor" rule, which is the system's own rounding going away, not the app's shape.
+pub(super) fn effective_radius(asked: Option<f32>, system: f32, w: u32, h: u32) -> f32 {
+    match asked {
+        Some(r) if r.is_finite() => r.clamp(0.0, w.min(h) as f32 / 2.0),
+        _ => system,
     }
 }
 
@@ -299,7 +323,14 @@ unsafe fn draw(gfx: &Gfx, mon: &Monitor, w: &mut Win) -> Result<Drawn, Fail> {
     }
     let (Some(region), Some(target)) = (w.region.as_ref(), w.target.as_ref()) else { return Err(Fail::Window("lost its resources".into())) };
 
-    let g = Geometry { w: geo.w, h: geo.h, origin: (geo.x - mon.rect.left, geo.y - mon.rect.top), scale: geo.scale(), radius_px: geo.radius_px(), cut_corners: false };
+    let g = Geometry {
+        w: geo.w,
+        h: geo.h,
+        origin: (geo.x - mon.rect.left, geo.y - mon.rect.top),
+        scale: geo.scale(),
+        radius_px: effective_radius(w.radius_px, geo.radius_px(), geo.w, geo.h),
+        cut_corners: w.cut_corners,
+    };
     let look = Look::regular(w.dark);
     let t0 = Instant::now();
     let prepared = prep(&gfx.r, region, mirror, &g, &look, false);
@@ -354,13 +385,17 @@ impl Engine {
     fn command(&mut self, c: Cmd) {
         self.last_activity = Instant::now();
         match c {
-            Cmd::Attach { hwnd, dark } => {
+            Cmd::Attach { hwnd, opts } => {
                 // The exclusion is set by the caller already; set again here because a Detach of an earlier attach of the same window
                 // may have been handled since (it lifts the exclusion) and this command comes after it in the queue.
                 let _ = super::set_affinity(hwnd, true);
-                let w = self.wins.entry(hwnd).or_insert_with(|| Win::new(hwnd, dark));
-                w.dark = dark;
-                w.dirty = true;
+                let w = self.wins.entry(hwnd).or_insert_with(|| Win::new(hwnd, opts));
+                w.set_options(opts);
+            }
+            Cmd::SetOptions { hwnd, opts } => {
+                if let Some(w) = self.wins.get_mut(&hwnd) {
+                    w.set_options(opts);
+                }
             }
             Cmd::SetDark { hwnd, dark } => {
                 if let Some(w) = self.wins.get_mut(&hwnd) {

@@ -1256,4 +1256,13 @@ pub const EN: &[(&str, &str)] = &[
     ("Cam (deneysel)", "Glass (experimental)"),
     ("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Bu seçenek açıkken rustyfiles pencereleri ekran görüntülerinde, kayıtlarda ve ekran paylaşımında görünmez.", "Bends and frosts what is behind the window like real glass. While this is on, rustyfiles windows do not appear in screenshots, recordings or screen sharing."),
     ("Cam başlatılamadı: {reason}. Mica kullanılıyor.", "Glass could not start: {reason}. Mica is used instead."),
+    ("Dock (deneysel)", "Dock (experimental)"),
+    ("Dock'u göster (deneysel)", "Show the dock (experimental)"),
+    ("Ekranın altında üç yüzen ada: Başlat ve arama, uygulamalar, sistem simgeleri ve saat. Ayrı bir süreç olarak çalışır ve rustyfiles kapansa da açık kalır; Windows görev çubuğuna dokunmaz.", "Three floating islands at the bottom of the screen: Start and search, apps, system icons and the clock. It runs as a process of its own and stays open when rustyfiles closes; the Windows taskbar is left as it is."),
+    ("Pencereler dock'un altına girmesin", "Keep windows from going under the dock"),
+    ("Büyütülmüş pencereler dock'un üstünde durur. Kapalıyken dock yalnızca pencerelerin üstünde yüzer.", "Maximised windows stop above the dock. When off, the dock only floats on top of windows."),
+    ("Hava durumu şehri", "Weather city"),
+    ("Ayarlanmadı: hava durumu gösterilmez", "Not set: no weather is shown"),
+    ("Dock'un sol adasında sıcaklık gösterilir (Open-Meteo). Boş bırakırsanız hava durumu gösterilmez ve ağa hiç istek gitmez.", "The temperature is shown in the dock's left island (Open-Meteo). Left empty, no weather is shown and no network request is made."),
+    ("Şehir adı, örneğin: Erzincan", "City name, for example: Erzincan"),
 ];

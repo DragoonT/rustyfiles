@@ -40,9 +40,52 @@ pub fn palette() -> Option<AccentPalette> {
     parse_palette(&raw)
 }
 
+/// Fluent's default blue, for a machine whose accent cannot be read.
+pub const DEFAULT_ACCENT: u32 = 0x0078D4;
+
+/// The accent colour as 0xRRGGBB (the palette's base shade), Fluent's blue when it cannot be read.
+pub fn color() -> u32 {
+    palette().map_or(DEFAULT_ACCENT, |p| p.base())
+}
+
+/// What Windows' "light theme" values mean: 0 is dark, anything else light, and a missing value is light (the system default).
+pub fn dark_from_value(light_theme: Option<u32>) -> bool {
+    light_theme == Some(0)
+}
+
+fn theme_value(name: &str) -> Option<u32> {
+    let key = windows_registry::CURRENT_USER.open(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize").ok()?;
+    key.get_u32(name).ok()
+}
+
+/// Whether the system (taskbar, Start, the shell's surfaces) is in the dark theme. This is what the dock follows, like the Windows
+/// taskbar does. Read again when `dock::SystemEvent::ThemeChanged` arrives.
+pub fn system_is_dark() -> bool {
+    dark_from_value(theme_value("SystemUsesLightTheme"))
+}
+
+/// Whether apps are asked to use the dark theme (the other of the two settings; rustyfiles' own windows use it by default).
+pub fn apps_use_dark() -> bool {
+    dark_from_value(theme_value("AppsUseLightTheme"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_theme_value_means_dark_only_when_it_is_zero() {
+        assert!(dark_from_value(Some(0)));
+        assert!(!dark_from_value(Some(1)));
+        assert!(!dark_from_value(None), "no value: the light default");
+    }
+
+    #[test]
+    fn the_live_values_are_readable() {
+        // read-only; whatever the machine's theme is, the calls answer and the accent is a colour
+        let _ = (system_is_dark(), apps_use_dark());
+        assert!(color() <= 0xFFFFFF);
+    }
 
     #[test]
     fn parses_shades() {

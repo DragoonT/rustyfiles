@@ -415,6 +415,14 @@ pub struct Settings {
     pub web_search: WebSearch,
     /// Chrome's and Edge's bookmarks are searched too (read on this PC only).
     pub quick_search_bookmarks: bool,
+
+    // ---- Dock (dock/: `rustyfiles --dock`, a separate process; experimental)
+    /// The dock runs: started with rustyfiles and when this is switched on, stopped when it is switched off.
+    pub dock_enabled: bool,
+    /// The dock keeps other windows from going under it (it registers as an application desktop toolbar).
+    pub dock_reserve: bool,
+    /// The city the dock's weather is for. Empty: no weather and no network request.
+    pub dock_weather_city: String,
 }
 
 impl Default for Settings {
@@ -510,6 +518,9 @@ impl Default for Settings {
             quick_search_keys: "alt-space".into(),
             web_search: WebSearch::Google,
             quick_search_bookmarks: true,
+            dock_enabled: false,
+            dock_reserve: true,
+            dock_weather_city: String::new(),
         }
     }
 }
@@ -549,36 +560,68 @@ pub fn path() -> Option<PathBuf> {
     app_dir().map(|d| d.join("settings.toml"))
 }
 
+/// What reading the settings file gave.
+enum FileRead {
+    /// There is no file (or no folder to keep one in): the defaults apply.
+    Missing,
+    /// The file could not be read or understood.
+    Bad,
+    Read(Box<Settings>),
+}
+
 impl Settings {
-    pub fn load() -> Self {
-        let s: Settings = path()
-            .and_then(|p| {
-                let text = match rf_core::read_config(&p) {
-                    Ok(t) => t,
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-                    Err(e) => {
-                        // unreadable (not UTF-8, locked): keep it aside rather than overwrite it
-                        log::warn!("settings: {e}");
-                        rf_core::backup_corrupt(&p);
-                        return None;
-                    }
-                };
-                match Self::parse_lenient(text.trim_start_matches('\u{feff}')) {
-                    Ok(s) => Some(s),
-                    Err(e) => {
-                        // a typo while hand-editing must not cost the user every setting:
-                        // keep the file aside, start with defaults
-                        log::warn!("settings: {e}");
-                        rf_core::backup_corrupt(&p);
-                        None
-                    }
+    /// Reads the file. With `set_aside_bad` an unreadable or broken file is moved aside (so the next save does not overwrite what
+    /// the user may want to repair); a reader that is not the owner of the file leaves it where it is.
+    fn read_file(set_aside_bad: bool) -> FileRead {
+        let Some(p) = path() else { return FileRead::Missing };
+        let text = match rf_core::read_config(&p) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return FileRead::Missing,
+            Err(e) => {
+                // unreadable (not UTF-8, locked): keep it aside rather than overwrite it
+                log::warn!("settings: {e}");
+                if set_aside_bad {
+                    rf_core::backup_corrupt(&p);
                 }
-            })
-            .unwrap_or_default();
-        let mut s = s;
+                return FileRead::Bad;
+            }
+        };
+        match Self::parse_lenient(text.trim_start_matches('\u{feff}')) {
+            Ok(s) => FileRead::Read(Box::new(s)),
+            Err(e) => {
+                // a typo while hand-editing must not cost the user every setting:
+                // keep the file aside, start with defaults
+                log::warn!("settings: {e}");
+                if set_aside_bad {
+                    rf_core::backup_corrupt(&p);
+                }
+                FileRead::Bad
+            }
+        }
+    }
+
+    pub fn load() -> Self {
+        let mut s = match Self::read_file(true) {
+            FileRead::Read(s) => *s,
+            FileRead::Missing | FileRead::Bad => Settings::default(),
+        };
         s.migrate();
         s.apply_side_effects();
         s
+    }
+
+    /// For a process that only follows the file (the dock): the settings as the file has them now, brought up to date but with no
+    /// side effects yet (call [`Settings::apply_side_effects`] on the thread that wants them) and without touching the file. `None`
+    /// when the file is there but cannot be read or understood right now (locked, mid-edit): the caller keeps what it has.
+    /// Blocks briefly (the read retries a locked file): not for the UI thread.
+    pub fn load_readonly() -> Option<Self> {
+        let mut s = match Self::read_file(false) {
+            FileRead::Read(s) => *s,
+            FileRead::Missing => Settings::default(),
+            FileRead::Bad => return None,
+        };
+        s.migrate();
+        Some(s)
     }
 
     /// Brings settings written by older versions up to date.
@@ -621,7 +664,7 @@ impl Settings {
         Self::parse_lenient(text)
     }
 
-    fn apply_side_effects(&self) {
+    pub(crate) fn apply_side_effects(&self) {
         sync_name_index(self.name_index, &self.index_excluded);
         crate::i18n::set(self.language);
         crate::aliases::set(self.folder_aliases.clone());
@@ -702,7 +745,11 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut Settings)) {
     let s = cx.global::<Settings>().clone();
     s.apply_side_effects();
     apply_component_theme(cx);
-    std::thread::spawn(move || s.save());
+    std::thread::spawn(move || {
+        s.save();
+        // after the save: the dock process reads the file when it is told to reload
+        crate::dock::control::sync_process(&s);
+    });
     cx.refresh_windows();
 }
 
@@ -808,7 +855,7 @@ fn sync_name_index(on: bool, excluded: &[String]) {
     use std::sync::atomic::{AtomicU8, Ordering};
     // DirectLook reads these settings too: the index is rustyfiles' (a second indexer would walk
     // every drive again and write the same index files)
-    if crate::background::DIRECTLOOK_PROCESS.load(Ordering::Relaxed) {
+    if crate::background::side_process() {
         return;
     }
     // 0 = not decided yet, 1 = off, 2 = on
@@ -854,4 +901,38 @@ fn sync_name_index(on: bool, excluded: &[String]) {
         };
         rf_win::indexer::start(roots, dir);
     });
+}
+
+#[cfg(test)]
+mod dock_tests {
+    use super::Settings;
+
+    #[test]
+    fn the_dock_is_off_keeps_windows_out_from_under_it_and_has_no_city() {
+        let s = Settings::default();
+        assert!(!s.dock_enabled, "experimental: off until asked for");
+        assert!(s.dock_reserve);
+        assert!(s.dock_weather_city.is_empty(), "no city, so no weather request");
+        // a settings file from before the dock has none of the keys: the same defaults
+        let old = Settings::parse_lenient("theme = \"dark\"\n").unwrap();
+        assert!(!old.dock_enabled && old.dock_reserve && old.dock_weather_city.is_empty());
+    }
+
+    #[test]
+    fn the_dock_settings_round_trip() {
+        let s = Settings { dock_enabled: true, dock_reserve: false, dock_weather_city: "Erzincan".into(), ..Default::default() };
+        let text = toml::to_string_pretty(&s).unwrap();
+        let back = Settings::parse_lenient(&text).unwrap();
+        assert!(back.dock_enabled);
+        assert!(!back.dock_reserve);
+        assert_eq!(back.dock_weather_city, "Erzincan");
+    }
+
+    #[test]
+    fn a_wrong_dock_value_falls_back_without_costing_the_other_settings() {
+        let s = Settings::parse_lenient("dock_enabled = \"evet\"\ndock_reserve = false\nshow_hidden = true\n").unwrap();
+        assert!(!s.dock_enabled);
+        assert!(!s.dock_reserve);
+        assert!(s.show_hidden);
+    }
 }

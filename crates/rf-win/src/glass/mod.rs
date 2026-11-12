@@ -50,8 +50,42 @@ pub enum GlassState {
     Failed(String),
 }
 
+/// What a window's glass looks like beyond the system's theme: how it is cut, and which tint.
+///
+/// `GlassOptions::window(dark)` is what [`attach`] always meant: a normal window, whose corners the system cuts and whose glass is
+/// drawn with the radius the system reports. A free-standing shape (the dock's islands) cuts its own corners, with its own radius.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GlassOptions {
+    /// The dark tint (`true`) or the light one.
+    pub dark: bool,
+    /// The corner radius of the glass in DEVICE px. `None` is what the system does (a window's 8 px corner at 100 %, none before
+    /// Windows 11, none for a maximised window). Whoever gives a radius gives it again when the DPI changes ([`set_options`]).
+    pub radius_px: Option<f32>,
+    /// Whether the glass cuts its own corners out (transparent outside the radius). A window leaves that to the system; a window
+    /// that is itself a rounded shape needs it.
+    pub cut_corners: bool,
+}
+
+impl GlassOptions {
+    /// An ordinary window: exactly what `attach(hwnd, dark)` does.
+    pub const fn window(dark: bool) -> GlassOptions {
+        GlassOptions { dark, radius_px: None, cut_corners: false }
+    }
+
+    /// The same options with a radius that cannot hurt: not a number is "what the system does", a negative one is a square corner.
+    pub fn sanitized(self) -> GlassOptions {
+        let radius_px = match self.radius_px {
+            Some(r) if !r.is_finite() => None,
+            Some(r) => Some(r.max(0.0)),
+            None => None,
+        };
+        GlassOptions { radius_px, ..self }
+    }
+}
+
 pub(crate) enum Cmd {
-    Attach { hwnd: isize, dark: bool },
+    Attach { hwnd: isize, opts: GlassOptions },
+    SetOptions { hwnd: isize, opts: GlassOptions },
     SetDark { hwnd: isize, dark: bool },
     Detach { hwnd: isize },
 }
@@ -191,7 +225,16 @@ fn fail_everything(why: &str) {
 /// Gives the window glass. `dark` picks the dark tint. Returns false if it cannot even start (the handle is not a window, the capture
 /// exclusion is refused, the engine thread does not start); the reason is in [`state`] and the log. Excludes the window from screen
 /// capture first: without that the engine would bend the window's own picture.
+///
+/// This is [`attach_with`] with [`GlassOptions::window`]: the system cuts the window's corners, the glass takes the system's radius.
 pub fn attach(hwnd: isize, dark: bool) -> bool {
+    attach_with(hwnd, GlassOptions::window(dark))
+}
+
+/// [`attach`] with the options of [`GlassOptions`]: a window of its own shape (the dock's islands) gives its corner radius and has
+/// the glass cut its corners. Attaching a window that already has glass changes its options like [`set_options`] does.
+pub fn attach_with(hwnd: isize, opts: GlassOptions) -> bool {
+    let opts = opts.sanitized();
     let fail_now = |why: String| {
         log::warn!("glass: window {hwnd:#x} cannot be attached: {why}");
         states().insert(hwnd, GlassState::Failed(why));
@@ -204,7 +247,7 @@ pub fn attach(hwnd: isize, dark: bool) -> bool {
         let s = states();
         if matches!(s.get(&hwnd), Some(GlassState::Starting | GlassState::Running)) {
             drop(s);
-            set_dark(hwnd, dark);
+            set_options(hwnd, opts);
             return true;
         }
     }
@@ -213,7 +256,7 @@ pub fn attach(hwnd: isize, dark: bool) -> bool {
     }
     let first = !any_active();
     states().insert(hwnd, GlassState::Starting);
-    if !send(Cmd::Attach { hwnd, dark }) {
+    if !send(Cmd::Attach { hwnd, opts }) {
         let _ = set_affinity(hwnd, false);
         return fail_now("the glass engine thread could not be started".into());
     }
@@ -223,10 +266,18 @@ pub fn attach(hwnd: isize, dark: bool) -> bool {
     true
 }
 
-/// Changes the tint of a window that has glass. Ignored for other windows.
+/// Changes the tint of a window that has glass (its radius and corner cutting stay as they are). Ignored for other windows.
 pub fn set_dark(hwnd: isize, dark: bool) {
     if matches!(states().get(&hwnd), Some(GlassState::Starting | GlassState::Running)) {
         send_if_running(Cmd::SetDark { hwnd, dark });
+    }
+}
+
+/// Changes all the options of a window that has glass: a new radius after the monitor's DPI changed, a new tint. Ignored for other
+/// windows.
+pub fn set_options(hwnd: isize, opts: GlassOptions) {
+    if matches!(states().get(&hwnd), Some(GlassState::Starting | GlassState::Running)) {
+        send_if_running(Cmd::SetOptions { hwnd, opts: opts.sanitized() });
     }
 }
 

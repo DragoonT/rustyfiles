@@ -12,6 +12,7 @@ mod command_palette;
 mod conflict_dialog;
 mod ctx_menu;
 mod disk_usage;
+pub mod dock;
 mod fluent_menu;
 mod flyout;
 mod glass;
@@ -292,11 +293,17 @@ pub fn main() {
     // `--quick-search`: the quick search window, as its hotkey opens it (a shortcut of the
     // user's own can run this)
     let quick_search = std::env::args().nth(1).as_deref() == Some(quick_search::LAUNCH_ARG);
-    if bar_preview {
+    // `--dock`: the dock (see dock/), a process of its own that lives beside the main rustyfiles
+    let dock = std::env::args().nth(1).as_deref() == Some(dock::ARG);
+    if bar_preview || dock {
         quick_search::disable_hotkey();
     }
+    if dock {
+        // before the settings are loaded: the dock owns no tray icon, no name index and no hotkey
+        background::DOCK_PROCESS.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let arg = std::env::args().nth(1).map(|a| a.trim().trim_matches('"').to_string()).filter(|a| !a.is_empty());
-    let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search);
+    let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search && !dock);
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
     let arg = arg.filter(|_| !new_window);
@@ -372,10 +379,13 @@ pub fn main() {
     // Cache the registry state for the settings page (read once, off the hot path).
     // A picker started for another app's Open/Save (--pick) only reads: whichever rustyfiles.exe
     // the dialog DLL started (a test build too) must not re-point the user's registrations.
-    let registers = pick.is_none() && std::env::var_os("RUSTYFILES_CONFIG_DIR").is_none();
+    // The dock is a side process that only reads: it neither re-points the registrations nor cleans the main app's temp copies.
+    let registers = pick.is_none() && !dock && std::env::var_os("RUSTYFILES_CONFIG_DIR").is_none();
     std::thread::spawn(move || {
         // copies opened/copied out of archives days ago
-        crate::archive_view::clean_temp();
+        if !dock {
+            crate::archive_view::clean_temp();
+        }
         // default file manager whose registered exe vanished (moved / rebuilt elsewhere):
         // re-point it here, or Windows can't open any folder. Not from test instances.
         if registers {
@@ -443,7 +453,20 @@ pub fn main() {
         _ => String::new(),
     };
     // RUSTYFILES_MULTI_INSTANCE=1 skips forwarding (automated tests run several copies).
-    let multi = std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || bar_preview;
+    let multi = std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || bar_preview || dock;
+    // the dock is a single instance of its own group: a second `--dock` greets the first and ends; the guard lives to the end
+    let dock_instance = if dock {
+        match dock::acquire() {
+            Some(held) => Some(held),
+            None => return,
+        }
+    } else {
+        None
+    };
+    let (_dock_guard, mut dock_messages) = match dock_instance {
+        Some((guard, rx)) => (Some(guard), Some(rx)),
+        None => (None, None),
+    };
     let _instance = if multi {
         None
     } else {
@@ -520,6 +543,8 @@ pub fn main() {
             // started only to answer a dialog: no main window
             Some(pipe) => picker::begin(pipe, cx),
             None if bar_preview => taskbar_preview::open(cx),
+            // the dock: three islands, no main window
+            None if dock => dock::run(dock_messages.take(), cx),
             // started for the quick search only: no main window (it quits when that closes,
             // unless running in the background)
             None if quick_search => quick_search::toggle(cx),
@@ -532,6 +557,17 @@ pub fn main() {
                 // a copy or move cut off last time: ask to carry it on
                 status_center::offer_resume(cx);
             }
+        }
+        if dock {
+            // a side process: no updates, no DirectLook, no tray, no drive-eject handler, and no "last window closed" saving of
+            // the settings (it only ever reads them); it ends when the dock module quits it
+            cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
+            return;
+        }
+        // the dock, when the setting is on (a separate process, started off the UI thread; it keeps running without us)
+        // (not for a picker or the quick search started on their own, not for a test copy)
+        if pick.is_none() && !quick_search && !multi {
+            dock::control::start_if_wanted(cx.global::<settings::Settings>());
         }
         // updates from GitHub Releases (installed copies only)
         installer::spawn_checks(cx, |cx| cx.refresh_windows());

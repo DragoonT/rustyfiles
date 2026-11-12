@@ -1986,7 +1986,60 @@ fn advanced(p: &Palette, s: &Settings) -> Vec<AnyElement> {
             }),
         ),
     ]);
+    out.extend(dock_cards(p, s));
     out
+}
+
+/// The dock (dock/): a separate process, started and stopped by the first switch.
+fn dock_cards(p: &Palette, s: &Settings) -> Vec<AnyElement> {
+    let on = s.dock_enabled;
+    let city = s.dock_weather_city.trim().to_string();
+    let city_label = if city.is_empty() { t!("Ayarlanmadı: hava durumu gösterilmez").to_string() } else { city.clone() };
+    vec![
+        section(p, t!("Dock (deneysel)")),
+        card(
+            p,
+            L::PanelBottom,
+            t!("Dock'u göster (deneysel)"),
+            Some(t!("Ekranın altında üç yüzen ada: Başlat ve arama, uygulamalar, sistem simgeleri ve saat. Ayrı bir süreç olarak çalışır ve rustyfiles kapansa da açık kalır; Windows görev çubuğuna dokunmaz.")),
+            switch("dock-show", p, on, move |_, cx| settings::update(cx, |s| s.dock_enabled = !on)),
+        ),
+        card(
+            p,
+            L::AppWindow,
+            t!("Pencereler dock'un altına girmesin"),
+            Some(t!("Büyütülmüş pencereler dock'un üstünde durur. Kapalıyken dock yalnızca pencerelerin üstünde yüzer.")),
+            sw("dock-reserve", p, s.dock_reserve, |s, v| s.dock_reserve = v),
+        ),
+        card(
+            p,
+            L::MapPin,
+            t!("Hava durumu şehri"),
+            Some(&city_label),
+            h_flex()
+                .gap_2()
+                .child(button("dock-city-edit", p, t!("Değiştir…"), {
+                    let city = city.clone();
+                    move |window, cx| {
+                        let ok = crate::prompt::Button::new(t!("Kaydet"), crate::prompt::Kind::Primary, move |text, _, cx| {
+                            let text = text.unwrap_or_default().trim().to_string();
+                            settings::update(cx, |s| s.dock_weather_city = text);
+                            Ok(())
+                        });
+                        crate::prompt::show(
+                            t!("Hava durumu şehri"),
+                            Some(t!("Dock'un sol adasında sıcaklık gösterilir (Open-Meteo). Boş bırakırsanız hava durumu gösterilmez ve ağa hiç istek gitmez.").to_string()),
+                            Some((city.clone(), t!("Şehir adı, örneğin: Erzincan").to_string())),
+                            vec![ok, crate::prompt::Button::cancel()],
+                            window,
+                            cx,
+                        );
+                    }
+                }))
+                .children((!city.is_empty()).then(|| button("dock-city-clear", p, t!("Temizle"), |_, cx| settings::update(cx, |s| s.dock_weather_city.clear()))))
+                .into_any_element(),
+        ),
+    ]
 }
 
 fn open_url(url: &'static str) {

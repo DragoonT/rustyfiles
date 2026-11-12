@@ -67,6 +67,8 @@ fn before_uninstall() {
     // DirectLook holds its exe open
     rf_win::single_instance::send_to(&crate::look::ipc::app_name(), &crate::look::ipc::Msg::Quit.encode());
     std::thread::sleep(Duration::from_millis(500));
+    // and so does a running dock (a process of its own that outlives rustyfiles' window)
+    crate::dock::control::stop_for_update();
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -224,6 +226,8 @@ pub fn restart_to_update() {
     let pending = PENDING.lock().unwrap().clone();
     rf_win::single_instance::send_to(&crate::look::ipc::app_name(), &crate::look::ipc::Msg::Quit.encode());
     std::thread::sleep(Duration::from_millis(300));
+    // the dock is its own process and holds the exe open too; the new version's start brings it back
+    crate::dock::control::stop_for_update();
     let asset = match pending {
         Some(info) => info.TargetFullRelease.clone(),
         None => match um.get_update_pending_restart() {
