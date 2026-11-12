@@ -34,6 +34,10 @@
 //! engine thread is caught and turned into the same failure only in debug builds and tests: the release profile is `panic = "abort"`, where
 //! a panic ends the process like any other panic of the app. The engine code therefore has no `unwrap` or `expect` on a path that can fail.)
 //!
+//! THE BRIGHTNESS BEHIND THE GLASS. The loop guard reads one coarse level of each window's backdrop back at every draw that looks at the
+//! backdrop; the mean brightness of the part under the glass is worked out from the same bytes (`luma.rs`), kept per window and given
+//! to the app by [`backdrop_luma`] (the dock picks light or dark text with it). It costs no GPU time: no pass, no copy, no wait.
+//!
 //! `RUSTYFILES_GLASS_STATS=1` makes the engine log, every 5 s per window, how many frames it acquired, how many carried an image, how
 //! many draws it presented and how many the loop guard skipped, and the average time of the prep and of the glass pass.
 
@@ -46,6 +50,7 @@ pub mod check;
 mod engine;
 mod gpu;
 mod lens;
+mod luma;
 mod spring;
 #[cfg(test)]
 mod lens_tests;
@@ -217,6 +222,9 @@ pub(crate) enum Cmd {
 
 /// What the callers see. The engine thread updates it through `set_state`, `fail` and `forget`.
 static STATES: LazyLock<Mutex<HashMap<isize, GlassState>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// The mean brightness (0 to 1) of the backdrop under each window's glass, as of its last draw that looked at the backdrop. Written by
+/// the engine thread from the bytes the loop guard reads back anyway; read by the app through [`backdrop_luma`].
+static LUMAS: LazyLock<Mutex<HashMap<isize, f32>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// The engine thread's command channel, once it has been started.
 static ENGINE: Mutex<Option<Sender<Cmd>>> = Mutex::new(None);
 /// What the app last asked for in each lens slot, so the same call made again (the UI draws many times a second) sends nothing. An absent
@@ -232,6 +240,10 @@ static EXTRAS: Mutex<BTreeSet<isize>> = Mutex::new(BTreeSet::new());
 
 fn states() -> std::sync::MutexGuard<'static, HashMap<isize, GlassState>> {
     STATES.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn lumas() -> std::sync::MutexGuard<'static, HashMap<isize, f32>> {
+    LUMAS.lock().unwrap_or_else(|p| p.into_inner())
 }
 
 fn engine() -> std::sync::MutexGuard<'static, Option<Sender<Cmd>>> {
@@ -350,7 +362,26 @@ pub(crate) fn set_state(hwnd: isize, st: GlassState) {
 /// Engine side: the window is gone; its entry goes with it.
 pub(crate) fn forget(hwnd: isize) {
     states().remove(&hwnd);
+    lumas().remove(&hwnd);
     forget_lenses(hwnd);
+}
+
+/// Engine side: what the backdrop under this window's glass measured at its last look. Ignored for a window the app has detached in the
+/// meantime (its value would never be taken away again).
+pub(crate) fn set_luma(hwnd: isize, luma: f32) {
+    if states().contains_key(&hwnd) {
+        lumas().insert(hwnd, luma);
+    }
+}
+
+/// How bright the backdrop under the window's glass is: the mean of what is behind the glass itself (not its padding), 0 (black) to 1
+/// (white), by the eye's weights on the encoded colours (what a person calls light or dark). `None` while it is not known: the window
+/// has no glass, the engine has not drawn it yet, or the glass failed. It is worked out from the bytes the loop guard reads back at each
+/// draw anyway, so asking costs the GPU nothing, and the value is that of the last draw that looked at the backdrop (the engine keeps
+/// no more than one value per window and draws only when something changed). Cheap, from any thread; the app can poll it a few times
+/// a second to pick light or dark text for what lies behind.
+pub fn backdrop_luma(hwnd: isize) -> Option<f32> {
+    lumas().get(&hwnd).copied()
 }
 
 /// Engine side: the glass of this window failed. The capture exclusion is lifted, the state says why.
@@ -366,6 +397,7 @@ pub(crate) fn fail(hwnd: isize, why: &str) {
         }
     };
     forget_lenses(hwnd);
+    lumas().remove(&hwnd);
     if present {
         let _ = set_affinity(hwnd, false);
         lift_extras_if_idle();
@@ -416,6 +448,7 @@ pub fn attach_with(hwnd: isize, opts: GlassOptions) -> bool {
     }
     let first = !any_active();
     forget_lenses(hwnd);
+    lumas().remove(&hwnd);
     states().insert(hwnd, GlassState::Starting);
     if !send(Cmd::Attach { hwnd, opts }) {
         if affinity {
@@ -448,6 +481,7 @@ pub fn set_options(hwnd: isize, opts: GlassOptions) {
 /// any number of times.
 pub fn detach(hwnd: isize) {
     let had = states().remove(&hwnd).is_some();
+    lumas().remove(&hwnd);
     forget_lenses(hwnd);
     // The engine lifts the window's capture exclusion itself, AFTER it has taken its target off the window: lifted earlier, one more
     // frame could be captured with the window in it and bent into the glass that is just being removed. Without a running engine

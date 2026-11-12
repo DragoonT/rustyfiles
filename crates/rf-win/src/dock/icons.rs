@@ -36,6 +36,22 @@ pub fn icon_bgra(src: &IconSource, px: u32) -> anyhow::Result<Bgra> {
     Ok(fit_square(&got, px))
 }
 
+/// The first of `srcs` that gives a picture (see [`crate::dock::DockApp::icon_chain`]): the app's own icon, then what its windows have
+/// set themselves, then its package's logo. The error is the first source's, which is the one that says why the app has no icon of its
+/// own. An empty list is an error too.
+pub fn icon_bgra_chain(srcs: &[IconSource], px: u32) -> anyhow::Result<Bgra> {
+    let mut first_error = None;
+    for src in srcs {
+        match icon_bgra(src, px) {
+            Ok(b) => return Ok(b),
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| anyhow::anyhow!("no icon source")))
+}
+
 /// The shell's icon for `p` at about `size` px. The shell answers E_PENDING ("not ready yet") when another thread is just extracting
 /// the same icon (the dock asks for many at once, and a program's icon can be asked for at two sizes); the answer is there a moment
 /// later, so a few short waits are worth more than a missing icon.
@@ -333,6 +349,20 @@ mod tests {
         assert!(f.data.iter().all(|&b| b == 0));
         assert!(icon_bgra(&IconSource::File("x".into()), 0).is_err());
         assert!(icon_bgra(&IconSource::Window(0), 44).is_err());
+    }
+
+    #[test]
+    fn the_chain_takes_the_first_source_that_gives_a_picture() {
+        let good = IconSource::File(r"C:\Windows\explorer.exe".into());
+        let bad = IconSource::File(r"C:\no\such\program.exe".into());
+        // a window that does not exist has no icon either
+        let no_window = IconSource::Window(0x7fff_0001);
+        let img = icon_bgra_chain(&[bad.clone(), no_window.clone(), good.clone()], 44).expect("the third source works");
+        assert_eq!((img.width, img.height), (44, 44));
+        assert_eq!(icon_bgra_chain(&[good.clone(), bad.clone()], 44).unwrap().data, icon_bgra(&good, 44).unwrap().data, "the first that works is the one used");
+        // nothing works: an error, not a panic (the dock draws its letter)
+        assert!(icon_bgra_chain(&[bad, no_window], 44).is_err());
+        assert!(icon_bgra_chain(&[], 44).is_err());
     }
 
     #[test]

@@ -20,6 +20,71 @@ impl Tint {
         h.a = self.alpha;
         h
     }
+
+    /// Between two tints: `t` 0 is `a`, 1 is `b` (colour channel by channel, and the opacity).
+    pub fn mix(a: Tint, b: Tint, t: f32) -> Tint {
+        let t = t.clamp(0.0, 1.0);
+        let ch = |shift: u32| {
+            let (x, y) = (((a.rgb >> shift) & 0xFF) as f32, ((b.rgb >> shift) & 0xFF) as f32);
+            (x + (y - x) * t).round() as u32
+        };
+        Tint { rgb: ch(16) << 16 | ch(8) << 8 | ch(0), alpha: a.alpha + (b.alpha - a.alpha) * t }
+    }
+}
+
+/// The colours of one island at one moment: the dark look (light text on dark glass) and the light look (dark text on light glass)
+/// and everything between them while the island turns from one to the other (`tone.rs`). `0.0` is the dark look, `1.0` the light one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Palette {
+    pub mix: f32,
+}
+
+impl Palette {
+    /// A palette at rest in the dark look (`true`) or the light one.
+    #[cfg(test)]
+    pub fn of(dark: bool) -> Palette {
+        Palette { mix: if dark { 0.0 } else { 1.0 } }
+    }
+
+    fn pick(self, f: impl Fn(bool) -> Tint) -> Tint {
+        Tint::mix(f(true), f(false), self.mix)
+    }
+
+    pub fn fallback_fill(self) -> Tint {
+        self.pick(fallback_fill)
+    }
+
+    pub fn text(self) -> Tint {
+        self.pick(text)
+    }
+
+    pub fn text_secondary(self) -> Tint {
+        self.pick(text_secondary)
+    }
+
+    pub fn field_fill(self) -> Tint {
+        self.pick(field_fill)
+    }
+
+    pub fn hover_fill(self) -> Tint {
+        self.pick(hover_fill)
+    }
+
+    pub fn pressed_fill(self) -> Tint {
+        self.pick(pressed_fill)
+    }
+
+    pub fn separator(self) -> Tint {
+        self.pick(separator)
+    }
+
+    pub fn running_dot(self, in_front: bool) -> Tint {
+        self.pick(|d| running_dot(d, in_front))
+    }
+
+    pub fn placeholder_fill(self) -> Tint {
+        self.pick(placeholder_fill)
+    }
 }
 
 /// What every island needs to know about the system: read again when `SystemEvent::ThemeChanged` or `LayoutChanged` arrives.
@@ -154,6 +219,30 @@ mod tests {
     fn a_tint_becomes_a_colour_with_its_opacity() {
         let h = Tint::new(0x1C1C1E, 0.72).hsla();
         assert!((h.a - 0.72).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_palette_at_rest_is_the_plain_look_and_between_it_is_a_mix() {
+        assert_eq!(Palette::of(true).text(), text(true));
+        assert_eq!(Palette::of(false).text(), text(false));
+        assert_eq!(Palette::of(true).fallback_fill(), fallback_fill(true));
+        assert_eq!(Palette::of(false).running_dot(true), running_dot(false, true));
+        let mid = Palette { mix: 0.5 }.text();
+        let (d, l) = (text(true), text(false));
+        assert!(mid.rgb > l.rgb && mid.rgb < d.rgb, "between the dark text colour and the light one: {:06x}", mid.rgb);
+        assert!(mid.alpha > l.alpha.min(d.alpha) - 1e-6 && mid.alpha < d.alpha.max(l.alpha) + 1e-6);
+    }
+
+    #[test]
+    fn mixing_tints_stays_inside_their_range() {
+        let (a, b) = (Tint::new(0x000000, 0.0), Tint::new(0xFFFFFF, 1.0));
+        assert_eq!(Tint::mix(a, b, 0.0), a);
+        assert_eq!(Tint::mix(a, b, 1.0), b);
+        assert_eq!(Tint::mix(a, b, 7.0), b, "beyond the ends is the end");
+        assert_eq!(Tint::mix(a, b, -1.0), a);
+        let m = Tint::mix(a, b, 0.5);
+        assert_eq!(m.rgb, 0x808080);
+        assert!((m.alpha - 0.5).abs() < 1e-6);
     }
 
     #[test]

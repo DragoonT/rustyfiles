@@ -2,10 +2,23 @@
 //! telling the island when to paint its own fill instead, and trying again after a failure.
 //!
 //! The decisions are in [`Machine`] (pure: the engine's report and the time are arguments); [`IslandGlass`] is the thin layer that
-//! makes the calls into `rf_win::glass`.
+//! makes the calls into `rf_win::glass`. It also holds the island's [`Tone`]: whether the foreground is light or dark, which follows
+//! the brightness of what is behind the glass (`rf_win::glass::backdrop_luma`) and gives the engine the matching glass tint.
+
+use std::sync::LazyLock;
+use std::time::Instant;
 
 use rf_win::dock::layout::RADIUS;
 use rf_win::glass::{GlassOptions, GlassState};
+
+use super::look::Palette;
+use super::tone::Tone;
+
+/// The clock of the islands' easing: milliseconds since the first look at it. One for the whole process, so the views and the host agree.
+pub fn now_ms() -> u64 {
+    static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+    START.elapsed().as_millis() as u64
+}
 
 /// How long to wait before trying again after the 1st, 2nd and 3rd failure. After the third retry fails the island keeps its own fill
 /// for good (until the dock is restarted): a glass that cannot be kept should not be retried forever.
@@ -107,15 +120,18 @@ pub fn options(dark: bool, scale: f32) -> GlassOptions {
 pub struct IslandGlass {
     hwnd: isize,
     machine: Machine,
-    dark: bool,
+    /// Light or dark foreground and glass tint (starts from the system theme).
+    tone: Tone,
     scale: f32,
+    /// The tint the engine was last given (`true` is the dark glass).
+    sent_dark: bool,
     /// Whether the engine has been told about the window (and so must be told to let go of it).
     attached: bool,
 }
 
 impl IslandGlass {
     pub fn new() -> IslandGlass {
-        IslandGlass { hwnd: 0, machine: Machine::default(), dark: true, scale: 1.0, attached: false }
+        IslandGlass { hwnd: 0, machine: Machine::default(), tone: Tone::new(true), scale: 1.0, sent_dark: true, attached: false }
     }
 
     /// True while the island has to paint its own fill.
@@ -127,10 +143,42 @@ impl IslandGlass {
         self.machine.settled()
     }
 
+    /// The colours the island paints with at `now_ms`: the system's while the glass is not running, otherwise those that suit what
+    /// is behind it, eased from one look to the other.
+    pub fn palette(&self, now_ms: u64) -> Palette {
+        Palette { mix: self.tone.mix(now_ms) }
+    }
+
+    /// Whether the foreground has stopped changing (the island needs no more frames for it).
+    pub fn tone_settled(&self, now_ms: u64) -> bool {
+        self.tone.settled(now_ms)
+    }
+
+    /// Looks at how bright the backdrop is (a few times a second, from the host) and moves the foreground and the glass tint if the
+    /// page behind went across a line. True when the island has to be drawn again; false and nothing else when nothing changed.
+    pub fn poll_tone(&mut self, now_ms: u64) -> bool {
+        // a glass that is not running measures nothing: the system's theme decides, as for the fallback fill
+        let luma = if self.attached && !self.machine.fallback() { rf_win::glass::backdrop_luma(self.hwnd) } else { None };
+        let changed = self.tone.feed(luma, now_ms);
+        if changed {
+            self.send_tint();
+        }
+        changed
+    }
+
+    /// The engine is told the tint when it differs from the one it has.
+    fn send_tint(&mut self) {
+        let dark = self.tone.glass_dark();
+        if self.attached && dark != self.sent_dark {
+            rf_win::glass::set_dark(self.hwnd, dark);
+            self.sent_dark = dark;
+        }
+    }
+
     /// Gives the window its glass. A window that cannot get one is not an error: the island paints its own fill.
     pub fn start(&mut self, hwnd: isize, dark: bool, scale: f32, now_ms: u64) {
         self.hwnd = hwnd;
-        self.dark = dark;
+        self.tone = Tone::new(dark);
         self.scale = scale;
         self.machine = Machine::default();
         self.attach(now_ms);
@@ -141,7 +189,9 @@ impl IslandGlass {
             self.machine.attach_failed(now_ms);
             return;
         }
-        if rf_win::glass::attach_with(self.hwnd, options(self.dark, self.scale)) {
+        let dark = self.tone.glass_dark();
+        if rf_win::glass::attach_with(self.hwnd, options(dark, self.scale)) {
+            self.sent_dark = dark;
             self.attached = true;
         } else {
             let why = match rf_win::glass::state(self.hwnd) {
@@ -154,19 +204,23 @@ impl IslandGlass {
         }
     }
 
-    /// The theme or the monitor's scale changed: the engine is told only what is new.
-    pub fn sync(&mut self, dark: bool, scale: f32) {
-        let (dark_changed, scale_changed) = (dark != self.dark, (scale - self.scale).abs() > 0.001);
-        self.dark = dark;
+    /// The theme or the monitor's scale changed: the engine is told only what is new. The theme decides the tint only while the
+    /// brightness behind the glass is not known (see `tone.rs`).
+    pub fn sync(&mut self, dark: bool, scale: f32, now_ms: u64) {
+        let scale_changed = (scale - self.scale).abs() > 0.001;
         self.scale = scale;
+        let known = self.attached && !self.machine.fallback() && rf_win::glass::backdrop_luma(self.hwnd).is_some();
+        self.tone.set_system(dark, known, now_ms);
         if !self.attached {
             return;
         }
         if scale_changed {
-            // the radius is in device px: it follows the DPI (this also carries the new tint)
-            rf_win::glass::set_options(self.hwnd, options(dark, scale));
-        } else if dark_changed {
-            rf_win::glass::set_dark(self.hwnd, dark);
+            // the radius is in device px: it follows the DPI (this also carries the tint)
+            let tint = self.tone.glass_dark();
+            rf_win::glass::set_options(self.hwnd, options(tint, scale));
+            self.sent_dark = tint;
+        } else {
+            self.send_tint();
         }
     }
 
@@ -286,6 +340,32 @@ mod tests {
         // a broken scale cannot make the radius zero or negative
         assert!(radius_px(0.0) > 0.0);
         assert!(radius_px(-3.0) > 0.0);
+    }
+
+    #[test]
+    fn an_island_with_no_glass_has_the_systems_look_and_follows_its_theme() {
+        let mut g = IslandGlass::new();
+        g.start(0, true, 1.0, 0);
+        assert_eq!(g.palette(0).mix, 0.0, "dark system: the dark look");
+        assert!(g.tone_settled(0));
+        assert!(!g.poll_tone(10), "nothing is measured without glass: no change, no redraw");
+        assert!(!g.poll_tone(260));
+        // the user switches the system to the light theme: the look turns over 300 ms
+        g.sync(false, 1.0, 1_000);
+        assert!(!g.tone_settled(1_100));
+        assert!(g.palette(1_150).mix > 0.4 && g.palette(1_150).mix < 0.6);
+        assert_eq!(g.palette(1_300).mix, 1.0);
+        assert!(g.tone_settled(1_300));
+        // a restart of the island starts from the system again
+        g.start(0, false, 1.0, 0);
+        assert_eq!(g.palette(0).mix, 1.0);
+    }
+
+    #[test]
+    fn the_clock_of_the_easing_only_goes_forward() {
+        let a = now_ms();
+        let b = now_ms();
+        assert!(b >= a);
     }
 
     #[test]

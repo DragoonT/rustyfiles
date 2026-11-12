@@ -240,6 +240,20 @@ pub enum WebSearch {
     Yandex,
 }
 
+/// The renderer mode a process runs in. The dock (a process of its own, three small windows) is kept on the graphics card when the
+/// setting is Auto: under Auto a card that another program keeps busy (a video render) makes the renderer build a software device and
+/// move the islands to it, which costs seconds of CPU for windows that are a few hundred pixels wide. A user who chose the software
+/// renderer on purpose keeps it.
+pub(crate) fn renderer_mode(pref: RendererPref, dock: bool) -> gpui_windows::hybrid::RendererMode {
+    use gpui_windows::hybrid::RendererMode;
+    match pref {
+        RendererPref::Auto if dock => RendererMode::Gpu,
+        RendererPref::Auto => RendererMode::Auto,
+        RendererPref::Gpu => RendererMode::Gpu,
+        RendererPref::Cpu => RendererMode::Cpu,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RendererPref {
@@ -730,12 +744,7 @@ impl Settings {
         );
         // An explicit RUSTYFILES_RENDERER env var wins (debugging).
         if std::env::var_os("RUSTYFILES_RENDERER").is_none() {
-            use gpui_windows::hybrid::{RendererMode, set_mode};
-            set_mode(match self.renderer {
-                RendererPref::Auto => RendererMode::Auto,
-                RendererPref::Gpu => RendererMode::Gpu,
-                RendererPref::Cpu => RendererMode::Cpu,
-            });
+            gpui_windows::hybrid::set_mode(renderer_mode(self.renderer, crate::background::DOCK_PROCESS.load(Ordering::Relaxed)));
         }
     }
 
@@ -817,6 +826,18 @@ pub fn update_live(cx: &mut App, f: impl FnOnce(&mut Settings)) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_dock_stays_on_the_graphics_card_unless_the_user_chose_the_software_renderer() {
+        use super::{RendererPref as P, renderer_mode};
+        use gpui_windows::hybrid::RendererMode as M;
+        assert_eq!(renderer_mode(P::Auto, false), M::Auto, "the file manager keeps the automatic switch");
+        assert_eq!(renderer_mode(P::Auto, true), M::Gpu, "the dock never builds a software device on its own");
+        assert_eq!(renderer_mode(P::Cpu, true), M::Cpu, "a choice made on purpose is kept");
+        assert_eq!(renderer_mode(P::Gpu, true), M::Gpu);
+        assert_eq!(renderer_mode(P::Gpu, false), M::Gpu);
+        assert_eq!(renderer_mode(P::Cpu, false), M::Cpu);
+    }
+
     #[test]
     fn details_moves_to_adaptive_once() {
         // a file from before the move: details becomes adaptive

@@ -5,7 +5,7 @@
 
 use std::ffi::c_void;
 
-use super::{LookParams, MAX_LENSES};
+use super::{LookParams, MAX_LENSES, luma};
 
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_IEEE_STRICTNESS, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompile};
@@ -343,7 +343,7 @@ impl Gpu {
     }
 }
 
-unsafe fn compile(entry: &str, target: &str, extra_flags: u32) -> Result<Vec<u8>, String> {
+pub(super) unsafe fn compile(entry: &str, target: &str, extra_flags: u32) -> Result<Vec<u8>, String> {
     let (mut blob, mut err): (Option<ID3DBlob>, Option<ID3DBlob>) = (None, None);
     let (n, e, t) = ("glass.hlsl\0", format!("{entry}\0"), format!("{target}\0"));
     let r = D3DCompile(
@@ -380,22 +380,69 @@ pub(super) struct Renderer {
     smp_ani: ID3D11SamplerState,
 }
 
+/// The shaders compiled at build time (`build.rs`, with the flags `compile` uses). An empty one means the build could not make it.
+pub(super) mod embedded {
+    pub const VS_MAIN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/vs_main.dxbc"));
+    pub const PS_CROP: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ps_crop.dxbc"));
+    pub const PS_DOWN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ps_down.dxbc"));
+    pub const PS_GLASS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ps_glass.dxbc"));
+    pub const PS_GLASS_STRICT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/ps_glass_strict.dxbc"));
+}
+
+/// Where a shader's bytecode comes from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Shaders {
+    /// The bytecode made at build time. A shader the build could not make, or that the device refuses, is compiled instead.
+    Embedded,
+    /// Every shader compiled now, as the program did before the build made them (the test that compares the two, and the timing).
+    #[cfg(test)]
+    Compile,
+}
+
+unsafe fn create_vs(dev: &ID3D11Device, bytes: &[u8]) -> Result<ID3D11VertexShader, String> {
+    let mut vs = None;
+    dev.CreateVertexShader(bytes, None::<&ID3D11ClassLinkage>, Some(&mut vs)).map_err(|e| format!("CreateVertexShader: {e}"))?;
+    vs.ok_or_else(|| "CreateVertexShader: no shader".to_string())
+}
+
+unsafe fn create_ps(dev: &ID3D11Device, bytes: &[u8], entry: &str) -> Result<ID3D11PixelShader, String> {
+    let mut ps = None;
+    dev.CreatePixelShader(bytes, None::<&ID3D11ClassLinkage>, Some(&mut ps)).map_err(|e| format!("CreatePixelShader {entry}: {e}"))?;
+    ps.ok_or_else(|| format!("CreatePixelShader {entry}: no shader"))
+}
+
 impl Renderer {
     /// `strict` compiles the glass shader with IEEE strictness, so the shader's own "not finite" check (turned on by the offscreen path)
     /// is not optimised away. The live path does not check and does not need it.
     pub(super) unsafe fn new(g: Gpu, strict: bool) -> Result<Renderer, String> {
-        let mkps = |entry: &str, flags: u32| -> Result<ID3D11PixelShader, String> {
-            let b = compile(entry, "ps_5_0", flags)?;
-            let mut ps = None;
-            g.dev.CreatePixelShader(&b, None::<&ID3D11ClassLinkage>, Some(&mut ps)).map_err(|e| format!("CreatePixelShader {entry}: {e}"))?;
-            ps.ok_or_else(|| format!("CreatePixelShader {entry}: no shader"))
+        Renderer::with_shaders(g, strict, Shaders::Embedded)
+    }
+
+    /// The compile took about 160 ms of CPU at every start of the engine, so the bytecode comes from the build (`build.rs`); the run-time
+    /// compile stays as the way out when the build could not make a shader or this device does not take one.
+    pub(super) unsafe fn with_shaders(g: Gpu, strict: bool, from: Shaders) -> Result<Renderer, String> {
+        let prebuilt = |bytes: &'static [u8]| if from == Shaders::Embedded { bytes } else { &[] };
+        let mkps = |bytes: &'static [u8], entry: &str, flags: u32| -> Result<ID3D11PixelShader, String> {
+            let bytes = prebuilt(bytes);
+            if !bytes.is_empty() {
+                match create_ps(&g.dev, bytes, entry) {
+                    Ok(ps) => return Ok(ps),
+                    Err(e) => log::warn!("glass: the device refused a shader made at build time ({e}); compiling it"),
+                }
+            }
+            create_ps(&g.dev, &compile(entry, "ps_5_0", flags)?, entry)
         };
-        let vsb = compile("VSMain", "vs_5_0", 0)?;
-        let mut vs = None;
-        g.dev.CreateVertexShader(&vsb, None::<&ID3D11ClassLinkage>, Some(&mut vs)).map_err(|e| format!("CreateVertexShader: {e}"))?;
-        let ps_crop = mkps("PSCrop", 0)?;
-        let ps_down = mkps("PSDown", 0)?;
-        let ps_glass = mkps("PSGlass", if strict { D3DCOMPILE_IEEE_STRICTNESS } else { 0 })?;
+        let vs = match prebuilt(embedded::VS_MAIN) {
+            b if !b.is_empty() => create_vs(&g.dev, b).or_else(|e| {
+                log::warn!("glass: the device refused the vertex shader made at build time ({e}); compiling it");
+                create_vs(&g.dev, &compile("VSMain", "vs_5_0", 0)?)
+            })?,
+            _ => create_vs(&g.dev, &compile("VSMain", "vs_5_0", 0)?)?,
+        };
+        let ps_crop = mkps(embedded::PS_CROP, "PSCrop", 0)?;
+        let ps_down = mkps(embedded::PS_DOWN, "PSDown", 0)?;
+        let ps_glass =
+            if strict { mkps(embedded::PS_GLASS_STRICT, "PSGlass", D3DCOMPILE_IEEE_STRICTNESS)? } else { mkps(embedded::PS_GLASS, "PSGlass", 0)? };
         let (mut cbuf, mut smp, mut smp_ani) = (None, None, None);
         g.dev
             .CreateBuffer(
@@ -424,8 +471,8 @@ impl Renderer {
         };
         g.dev.CreateSamplerState(&sampler(D3D11_FILTER_MIN_MAG_MIP_LINEAR, 1), Some(&mut smp)).map_err(|e| format!("CreateSamplerState: {e}"))?;
         g.dev.CreateSamplerState(&sampler(D3D11_FILTER_ANISOTROPIC, 16), Some(&mut smp_ani)).map_err(|e| format!("CreateSamplerState: {e}"))?;
-        match (vs, cbuf, smp, smp_ani) {
-            (Some(vs), Some(cb), Some(smp), Some(smp_ani)) => Ok(Renderer { g, vs, ps_crop, ps_down, ps_glass, cb, smp, smp_ani }),
+        match (cbuf, smp, smp_ani) {
+            (Some(cb), Some(smp), Some(smp_ani)) => Ok(Renderer { g, vs, ps_crop, ps_down, ps_glass, cb, smp, smp_ani }),
             _ => Err("D3D11 returned no object".into()),
         }
     }
@@ -582,8 +629,9 @@ impl Region {
     }
 
     /// A fingerprint of the backdrop as the glass will see it: one coarse level of the pyramid (the first at most 160 px wide), only the
-    /// part that belongs to this glass and its padding. Blocks until the GPU has finished the pyramid.
-    pub(super) unsafe fn fingerprint(&self, g: &Gpu, glass_w: u32, glass_h: u32) -> R<u64> {
+    /// part that belongs to this glass and its padding. Blocks until the GPU has finished the pyramid. The same bytes give the mean
+    /// brightness of the backdrop under the glass itself (see `luma.rs`), so knowing it costs nothing on the GPU.
+    pub(super) unsafe fn read_back(&self, g: &Gpu, glass_w: u32, glass_h: u32) -> R<Readback> {
         let l = self.guard_level;
         g.ctx.CopySubresourceRegion(&self.staging, 0, 0, 0, 0, &self.tex, l, None);
         let mut m = D3D11_MAPPED_SUBRESOURCE::default();
@@ -600,9 +648,30 @@ impl Region {
                 h = (h ^ u32::from_le_bytes(*px) as u64).wrapping_mul(0x0100_0000_01b3);
             }
         }
+        // the glass's own texels, from the rows already in the cache: the block ends where the last row we need ends
+        let rect = luma::glass_texels(l, self.pad, glass_w, glass_h, lw, lh);
+        let pitch = m.RowPitch as usize;
+        let len = pitch * (rect.3 as usize - 1) + rect.2 as usize * 4;
+        let block = std::slice::from_raw_parts(m.pData as *const u8, len);
+        let luma = luma::mean_luma(block, pitch, rect);
         g.ctx.Unmap(&self.staging, 0);
-        Ok(h)
+        Ok(Readback { hash: h, luma })
     }
+
+    /// The fingerprint alone (what the loop guard compares).
+    #[cfg(test)]
+    pub(super) unsafe fn fingerprint(&self, g: &Gpu, glass_w: u32, glass_h: u32) -> R<u64> {
+        Ok(self.read_back(g, glass_w, glass_h)?.hash)
+    }
+}
+
+/// What one read back of the backdrop gives.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct Readback {
+    /// The fingerprint of the glass and its padding.
+    pub hash: u64,
+    /// The mean brightness (0 to 1) of the backdrop under the glass; `None` when the glass has no texel to read.
+    pub luma: Option<f32>,
 }
 
 fn fail() -> windows::core::Error {

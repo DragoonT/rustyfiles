@@ -10,7 +10,8 @@
 //! | `hover` | the icons' grow on hover (44 -> 56, neighbours 50, ~120 ms eased), hit testing along the dock | all of it |
 //! | `clock` | the right island's two lines for a time and the user's locale patterns | formatting |
 //! | `model` | pinned + running apps merged in the taskbar's order, the places, the click decision | all of it |
-//! | `pins` | the taskbar's pinned apps, read-only (pin folder + `Taskband\Favorites` order) | the order |
+//! | `pins` | the taskbar's pinned apps, read-only (pin folder + `Taskband\Favorites` order); which pins are alive, moved to a newer install, or dead | the order, the fate rules |
+//! | `identity` | a running window's packaged-app id (its process's package), so a Store app's windows match its pin | the id handed to the windows |
 //! | `icons` | one bitmap with alpha at an exact size for a program, a packaged app, a shell place, a window | the resampling |
 //! | `island` | turns a GPUI window into an island, places it, shows / hides it | the style bits |
 //! | `system` | primary monitor, the toolbar band, a hidden window that hears about display / DPI / theme / full-screen changes | the placement area |
@@ -38,6 +39,7 @@ pub mod clock;
 pub mod fullscreen;
 pub mod hover;
 pub mod icons;
+pub mod identity;
 pub mod island;
 pub mod launch;
 pub mod layout;

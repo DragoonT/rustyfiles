@@ -11,7 +11,7 @@ use rf_win::weather::{Observation, Outcome, WeatherFeed};
 
 use super::backdrop::IslandGlass;
 use super::host::Kind;
-use super::look::{self, Env};
+use super::look::Env;
 use super::plan::{self, WeatherPicture};
 use crate::t;
 
@@ -121,12 +121,11 @@ fn windows_logo(accent: Hsla) -> impl IntoElement {
 }
 
 impl Render for LeftIsland {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let env = *cx.global::<Env>();
-        let fallback = self.glass.borrow().fallback();
-        let dark = env.dark;
-        let (hover, pressed) = (look::hover_fill(dark).hsla(), look::pressed_fill(dark).hsla());
-        let secondary = look::text_secondary(dark).hsla();
+        let (pal, fallback) = super::host::frame_palette(&self.glass, window);
+        let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
+        let secondary = pal.text_secondary().hsla();
         let accent: Hsla = rgb(env.accent).into();
 
         let logo = div()
@@ -154,7 +153,7 @@ impl Render for LeftIsland {
             .gap(px(8.))
             .items_center()
             .rounded_full()
-            .bg(look::field_fill(dark).hsla())
+            .bg(pal.field_fill().hsla())
             .cursor_pointer()
             .hover(move |s| s.bg(pressed))
             .child(Icon::new(L::Search).size(px(14.)).flex_shrink_0().text_color(secondary))
@@ -166,11 +165,11 @@ impl Render for LeftIsland {
                 .ml(px(plan::WEATHER_GAP))
                 .gap(px(plan::WEATHER_TEXT_GAP))
                 .items_center()
-                .child(Icon::new(picture_icon(plan::weather_picture(o.code, o.is_day))).size(px(plan::WEATHER_ICON)).flex_shrink_0().text_color(look::text(dark).hsla()))
+                .child(Icon::new(picture_icon(plan::weather_picture(o.code, o.is_day))).size(px(plan::WEATHER_ICON)).flex_shrink_0().text_color(pal.text().hsla()))
                 .child(div().text_sm().child(o.text()))
         });
 
-        super::host::island_box(&env, fallback)
+        super::host::island_box(pal, fallback)
             .child(h_flex().size_full().px(px(plan::SIDE_PAD)).items_center().child(logo).child(search).children(weather))
     }
 }

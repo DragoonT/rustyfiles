@@ -21,7 +21,7 @@
 //! stopping one.
 //!
 //! WHAT IS PURE (and tested): the widths and the icon layout (`plan.rs`), the glass state machine (`backdrop.rs`), the colours
-//! (`look.rs`), the process decisions (`control.rs`), the settings differences (`host.rs`), the icon cache (`icons.rs`) and the
+//! (`look.rs`), the light or dark foreground that follows the brightness behind the glass (`tone.rs`), the process decisions (`control.rs`), the settings differences (`host.rs`), the icon cache (`icons.rs`) and the
 //! click commands (`actions.rs`). The rectangles, the hover animation, the click decision, the clock, the weather parsing and the
 //! full-screen decision are pure and tested in `rf_win::dock` / `rf_win::weather`.
 
@@ -35,6 +35,7 @@ mod look;
 mod middle;
 mod plan;
 mod right;
+mod tone;
 
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::App;

@@ -209,10 +209,28 @@ impl Monitor {
     /// Takes what the capture has (waiting up to `timeout_ms` for it) and refreshes the mirror. `ex` is the set of windows a session
     /// leaves out of its picture and `cmds` the engine's command queue (a session stops waiting when a command arrives); Desktop
     /// Duplication uses neither.
-    pub(super) unsafe fn pump(&mut self, g: &Gpu, timeout_ms: u32, ex: &Exclusion, cmds: Option<&Receiver<Cmd>>) -> Result<Pumped, MonError> {
+    ///
+    /// `also` are the other session monitors' wake channels (see [`Monitor::wake`]): a session that waits stops waiting for a frame of
+    /// any of them as well.
+    pub(super) unsafe fn pump(
+        &mut self,
+        g: &Gpu,
+        timeout_ms: u32,
+        ex: &Exclusion,
+        cmds: Option<&Receiver<Cmd>>,
+        also: &[Receiver<()>],
+    ) -> Result<Pumped, MonError> {
         match self {
             Monitor::Dup(m) => m.pump(g, timeout_ms),
-            Monitor::Session(m) => m.pump(g, timeout_ms, ex, cmds),
+            Monitor::Session(m) => m.pump(g, timeout_ms, ex, cmds, also),
+        }
+    }
+
+    /// The channel a frame of a session monitor wakes; `None` for Desktop Duplication, whose wait cannot be shared.
+    pub(super) fn wake(&self) -> Option<&Receiver<()>> {
+        match self {
+            Monitor::Dup(_) => None,
+            Monitor::Session(m) => Some(m.wake()),
         }
     }
 }
