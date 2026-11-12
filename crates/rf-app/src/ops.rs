@@ -463,8 +463,9 @@ impl FolderView {
             }
             return;
         }
+        let name = if folder { t!("Yeni klasör") } else { t!("Yeni metin belgesi") }.to_string();
         let task = cx.background_spawn(async move {
-            if folder { fileops::new_folder(&dir) } else { fileops::new_text_file(&dir) }
+            if folder { fileops::new_folder(&dir, &name) } else { fileops::new_text_file(&dir, &name) }
         });
         cx.spawn(async move |this, cx| {
             if let Ok(path) = task.await {
@@ -485,7 +486,8 @@ impl FolderView {
         if items.is_empty() {
             return;
         }
-        let task = cx.background_spawn(async move { fileops::new_folder(&dir) });
+        let name = t!("Yeni klasör").to_string();
+        let task = cx.background_spawn(async move { fileops::new_folder(&dir, &name) });
         cx.spawn(async move |this, cx| {
             if let Ok(folder) = task.await {
                 let name = folder.file_name().map(|n| n.to_string_lossy().into_owned());
