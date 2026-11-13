@@ -15,8 +15,28 @@ use crate::look::config::LookSettings;
 use crate::t;
 use crate::theme::{self, Palette};
 
-/// Başlık çubuğu, fare bu kadar süre durunca gizlenir (yalnız içerik üstündeki çubuk).
-const HIDE_AFTER: Duration = Duration::from_millis(1500);
+/// The bar that lies over the content (a picture, a video) is shown only while the pointer is in the window's top strip, where the
+/// bar is (the user: "sadece üst bar hoverda görünsün"). While it is shown, the pointer's place is looked at this often ...
+const BAR_WATCH: Duration = Duration::from_millis(120);
+/// ... and the bar goes when this many looks in a row found the pointer away: about a third of a second, so a pointer that slips
+/// under the bar and comes back does not make it blink.
+const BAR_AWAY_LOOKS: u8 = 3;
+
+/// How many looks in a row found the pointer away from the bar's strip.
+#[derive(Default)]
+struct BarAway(u8);
+
+impl BarAway {
+    /// One look. True when the bar is to go now. The bar's own menu keeps it: the pointer is in the menu then, under the strip.
+    fn hide_now(&mut self, over: bool, menu_open: bool) -> bool {
+        if over || menu_open {
+            self.0 = 0;
+            return false;
+        }
+        self.0 = self.0.saturating_add(1);
+        self.0 >= BAR_AWAY_LOOKS
+    }
+}
 
 pub(crate) fn hwnd_of(window: &Window) -> isize {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -33,8 +53,8 @@ pub struct LookWindow {
     pub(crate) topmost: bool,
     /// Başlık çubuğu içeriğin üstünde durur ve kendiliğinden gizlenir (resim, video).
     pub(crate) overlay_titlebar: bool,
+    /// The bar over the content is on the screen (only for `overlay_titlebar`; the other bar is always there).
     chrome_shown: bool,
-    bar_hovered: bool,
     more_open: bool,
     pub(crate) busy: bool,
     /// Gövdeden sürükleme dosyayı dışarı sürükler (kendi sürüklemesi olmayan içerikte).
@@ -178,8 +198,7 @@ impl LookWindow {
             pinned: false,
             topmost,
             overlay_titlebar: false,
-            chrome_shown: true,
-            bar_hovered: false,
+            chrome_shown: false,
             more_open: false,
             busy: false,
             drag_by_body: true,
@@ -275,7 +294,6 @@ impl LookWindow {
         window.set_window_title(&self.title);
         self.more_open = false;
         self.load_gen += 1;
-        self.show_chrome(window, cx);
         self.watch(window, cx);
         cx.notify();
     }
@@ -329,24 +347,43 @@ impl LookWindow {
         cx.notify();
     }
 
-    /// Fare hareketi: çubuk görünür, bir süre sonra (içerik üstündeyse) gizlenir.
-    fn show_chrome(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.chrome_shown {
-            self.chrome_shown = true;
-            cx.notify();
-        }
-        if !self.overlay_titlebar {
-            self._hide = None;
+    /// The pointer moved over the content. The bar that lies over a picture or a video comes when the pointer enters the window's top
+    /// strip, where the bar is; it used to come with every movement anywhere in the window and stay for a second and a half.
+    fn pointer_moved(&mut self, at: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.overlay_titlebar || self.chrome_shown || at.y < px(0.) || at.y >= theme::TITLEBAR_H {
             return;
         }
+        self.chrome_shown = true;
+        cx.notify();
+        self.watch_bar(window, cx);
+    }
+
+    /// While the bar is shown: looks where the pointer is a few times a second and takes the bar away when it has left the strip.
+    /// The pointer itself is asked, not the toolkit's events: over the bar the window gets no ordinary mouse messages (it is a
+    /// caption to Windows), and a pointer that leaves the window sends none at all.
+    fn watch_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let hwnd = self.hwnd;
+        let strip = (f32::from(theme::TITLEBAR_H) * window.scale_factor()).round() as i32;
         self._hide = Some(cx.spawn_in(window, async move |this, cx| {
-            cx.background_executor().timer(HIDE_AFTER).await;
-            let _ = this.update(cx, |v, cx| {
-                if !v.bar_hovered && !v.more_open {
-                    v.chrome_shown = false;
-                    cx.notify();
+            let mut away = BarAway::default();
+            loop {
+                cx.background_executor().timer(BAR_WATCH).await;
+                let over = rf_win::look::win::pointer_in_top_strip(hwnd, strip);
+                let go_on = this.update(cx, |v, cx| {
+                    if !v.chrome_shown {
+                        return false;
+                    }
+                    if away.hide_now(over, v.more_open) {
+                        v.chrome_shown = false;
+                        cx.notify();
+                        return false;
+                    }
+                    true
+                });
+                if !matches!(go_on, Ok(true)) {
+                    break;
                 }
-            });
+            }
         }));
     }
 
@@ -411,6 +448,11 @@ impl LookWindow {
             .when(active, |d| d.bg(p.selection))
             .hover(|s| s.bg(p.hover))
             .active(|s| s.bg(p.pressed))
+            // The button lies on the bar's drag area, which is a caption to Windows. A press there that nobody stops goes to Windows'
+            // own caption handling, which waits to see whether the window is being dragged and swallows the release: the click never
+            // came (the user: "üstte tut seçeneği kapatılmıyor"). Stopped here, the press is the button's alone and the release
+            // arrives; the rest of the bar still drags the window.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(Icon::new(icon).size(px(16.)))
             .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
     }
@@ -557,7 +599,7 @@ impl Render for LookWindow {
         super::trace::mark("pencere çizildi");
         let p = Palette::for_window(window);
         let overlay = self.overlay_titlebar;
-        let show_bar = !overlay || self.chrome_shown || window.is_fullscreen() && self.bar_hovered;
+        let show_bar = !overlay || self.chrome_shown || self.more_open;
         let content = self.render_content(window, cx);
         // geçiş: yeni içerik kısa bir solmayla gelir
         let content = if cx.global::<LookSettings>().look_transition {
@@ -579,7 +621,7 @@ impl Render for LookWindow {
             .text_color(p.text)
             .when(!overlay, |d| d.bg(p.window_bg))
             .when_some(cx.global::<LookSettings>().look_backdrop_color, |d, c| d.bg(rgb(c)))
-            .on_mouse_move(cx.listener(|v, _: &MouseMoveEvent, window, cx| v.show_chrome(window, cx)))
+            .on_mouse_move(cx.listener(|v, ev: &MouseMoveEvent, window, cx| v.pointer_moved(ev.position, window, cx)))
             .on_key_down(cx.listener(|v, ev: &KeyDownEvent, window, cx| {
                 let k = ev.keystroke.key.as_str();
                 let m = &ev.keystroke.modifiers;
@@ -607,27 +649,8 @@ impl Render for LookWindow {
                     // the mouse by OCCLUDING the content, not by stopping the press: a press on the bar's drag area reaches Windows as
                     // a press on a caption only when nobody stopped it (the toolkit answers the message itself otherwise), and with
                     // the press stopped the window of a picture or a video could not be moved by its bar (the user's report).
-                    // The content under the bar no longer sees the pointer, so the bar's own hover keeps it shown, and starts the
-                    // hide timer again when the pointer leaves it.
-                    d.child(div().absolute().inset_0().child(content)).when_some(bar, |d, bar| {
-                        d.child(
-                            div()
-                                .id("look-bar-over")
-                                .absolute()
-                                .top_0()
-                                .left_0()
-                                .right_0()
-                                .occlude()
-                                .on_hover(cx.listener(|v, hovered: &bool, window, cx| {
-                                    v.bar_hovered = *hovered;
-                                    if !*hovered {
-                                        v.show_chrome(window, cx);
-                                    }
-                                    cx.notify();
-                                }))
-                                .child(bar),
-                        )
-                    })
+                    // (When the bar comes and goes is `pointer_moved` and `watch_bar`.)
+                    d.child(div().absolute().inset_0().child(content)).when_some(bar, |d, bar| d.child(div().absolute().top_0().left_0().right_0().occlude().child(bar)))
                 } else {
                     d.child(
                         v_flex()
@@ -643,7 +666,31 @@ impl Render for LookWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::should_reload;
+    use super::{BAR_AWAY_LOOKS, BarAway, should_reload};
+
+    #[test]
+    fn the_bar_goes_after_the_pointer_was_away_a_few_looks_in_a_row() {
+        let mut a = BarAway::default();
+        assert!(!a.hide_now(true, false), "over the bar: it stays");
+        for _ in 1..BAR_AWAY_LOOKS {
+            assert!(!a.hide_now(false, false), "away for a moment: not yet");
+        }
+        assert!(a.hide_now(false, false), "away long enough");
+        // a pointer that slips under the bar and comes back starts the count again
+        let mut b = BarAway::default();
+        assert!(!b.hide_now(false, false));
+        assert!(!b.hide_now(true, false));
+        for _ in 1..BAR_AWAY_LOOKS {
+            assert!(!b.hide_now(false, false));
+        }
+        assert!(b.hide_now(false, false));
+        // the bar's menu is open: the pointer is in the menu, and the bar stays however long
+        let mut c = BarAway::default();
+        for _ in 0..20 {
+            assert!(!c.hide_now(false, true));
+        }
+        assert!(!c.hide_now(false, false), "the menu closed just now: the count starts here");
+    }
 
     #[test]
     fn deleted_or_restored_file_always_reloads() {

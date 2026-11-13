@@ -136,8 +136,41 @@ pub fn process_running(exe: &str) -> bool {
     }
 }
 
+/// Whether a point of a client area (device px) lies in the area's top `strip` rows. Pure.
+pub fn in_top_strip(p: (i32, i32), width: i32, strip: i32) -> bool {
+    p.0 >= 0 && p.0 < width && p.1 >= 0 && p.1 < strip
+}
+
+/// Whether the POINTER is over the top `strip` pixel rows of the window's client area right now. The pointer itself is asked: over a
+/// caption area a window gets no ordinary mouse messages, and a pointer that leaves the window sends none.
+pub fn pointer_in_top_strip(hwnd: isize, strip: i32) -> bool {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::Graphics::Gdi::ScreenToClient;
+    use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetCursorPos};
+    let (mut p, mut r) = (POINT::default(), RECT::default());
+    // SAFETY: plain reads of the pointer's place and of the window's client rectangle
+    unsafe {
+        if GetCursorPos(&mut p).is_err() || !ScreenToClient(h(hwnd), &mut p).as_bool() || GetClientRect(h(hwnd), &mut r).is_err() {
+            return false;
+        }
+    }
+    in_top_strip((p.x, p.y), r.right - r.left, strip)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_top_strip_is_the_first_rows_of_the_client_area_and_nothing_outside_it() {
+        use super::in_top_strip;
+        assert!(in_top_strip((0, 0), 800, 36));
+        assert!(in_top_strip((799, 35), 800, 36));
+        assert!(!in_top_strip((400, 36), 800, 36), "the first row under the strip");
+        assert!(!in_top_strip((800, 10), 800, 36), "right of the window");
+        assert!(!in_top_strip((-1, 10), 800, 36));
+        assert!(!in_top_strip((400, -1), 800, 36), "above the window");
+        assert!(!in_top_strip((400, 10), 800, 0), "no strip");
+    }
+
     #[test]
     fn finds_own_process() {
         let me = std::env::current_exe().unwrap();
