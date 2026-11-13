@@ -31,6 +31,7 @@ use std::time::Duration;
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 
+use super::layout::Rect;
 use super::thin::{WinFacts, counts_as_maximized};
 
 const WS_MAXIMIZE: u32 = 0x0100_0000;
@@ -299,16 +300,20 @@ impl Drop for ZoomWatch {
 /// Fine on a worker thread (the dock calls it from the one that follows the events), a few hundred microseconds on a desktop of 300
 /// windows.
 pub fn maximized_on(monitor: isize) -> bool {
+    stands_on_band(monitor, None)
+}
+
+/// Whether a window the user can see STANDS ON THE BAND of `monitor`: a maximised one ([`maximized_on`]), or, when the middle island's
+/// full glass is given (`glass`, device px, screen coordinates), one that is docked to the work area's bottom edge under that glass
+/// (`thin::docked_under`: snapped to a half or a lower quarter). The same walk; a window that is not maximised costs one more style
+/// test, and its rectangle is read only when it is visible and not a child.
+pub fn stands_on_band(monitor: isize, glass: Option<Rect>) -> bool {
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO};
     use windows::Win32::UI::WindowsAndMessaging::EnumWindows;
     use windows::core::BOOL;
-    struct Walk {
-        monitor: isize,
-        pid: u32,
-        found: bool,
-    }
     unsafe extern "system" fn each(h: HWND, l: LPARAM) -> BOOL {
         let walk = unsafe { &mut *(l.0 as *mut Walk) };
-        if let Some(facts) = facts_of(h, walk.monitor, walk.pid)
+        if let Some(facts) = facts_of(h, walk)
             && counts_as_maximized(&facts)
         {
             walk.found = true;
@@ -316,11 +321,54 @@ pub fn maximized_on(monitor: isize) -> bool {
         }
         BOOL(1)
     }
-    let mut walk = Walk { monitor, pid: std::process::id(), found: false };
+    // the edge a docked window stands on: the monitor's work area as it is now
+    let edge = glass.and_then(|glass| {
+        let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+        unsafe { GetMonitorInfoW(HMONITOR(monitor as *mut _), &mut mi) }.as_bool().then_some(Edge { work_bottom: mi.rcWork.bottom, glass })
+    });
+    let mut walk = Walk { monitor, pid: std::process::id(), edge, found: false };
     unsafe {
         let _ = EnumWindows(Some(each), LPARAM(&mut walk as *mut Walk as isize));
     }
     walk.found
+}
+
+/// The bottom of the monitor's work area and the middle island's full glass: what a docked window is measured against.
+#[derive(Clone, Copy)]
+struct Edge {
+    work_bottom: i32,
+    glass: Rect,
+}
+
+struct Walk {
+    monitor: isize,
+    pid: u32,
+    edge: Option<Edge>,
+    found: bool,
+}
+
+/// Whether a window that is not maximised is docked to the edge under the dock (`thin::docked_under`). The cheap rejections first: no
+/// edge to stand on, a child, a hidden or a minimised window (all from the style that was read already).
+fn is_docked(h: HWND, style: u32, edge: Option<Edge>) -> bool {
+    use windows::Win32::Foundation::RECT;
+    use windows::Win32::UI::HiDpi::GetDpiForWindow;
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+    const WS_VISIBLE: u32 = 0x1000_0000;
+    const WS_MINIMIZE: u32 = 0x2000_0000;
+    let Some(edge) = edge else { return false };
+    if style & WS_VISIBLE == 0 || style & (WS_CHILD | WS_MINIMIZE) != 0 {
+        return false;
+    }
+    let mut r = RECT::default();
+    if unsafe { GetWindowRect(h, &mut r) }.is_err() || r.bottom < edge.work_bottom - super::thin::DOCK_ABOVE {
+        return false;
+    }
+    // (the invisible frame under the edge is as thick as the window's own scale makes it)
+    let scale = match unsafe { GetDpiForWindow(h) } {
+        0 => 1.0,
+        dpi => dpi as f32 / 96.0,
+    };
+    super::thin::docked_under(Rect::new(r.left, r.top, r.right, r.bottom), edge.work_bottom, edge.glass, super::thin::dock_below_px(scale))
 }
 
 /// Where the pointer is (device px) and whether a mouse button is held. Two system calls, no allocation: the thin dock asks every 60 ms
@@ -338,14 +386,18 @@ pub fn pointer() -> Option<(i32, i32, bool)> {
     }
 }
 
-/// What the rules need to know about a window; `None` when it is not even maximised (the cheap rejection that most windows get).
-fn facts_of(h: HWND, monitor: isize, own_pid: u32) -> Option<WinFacts> {
+/// What the rules need to know about a window; `None` when it is neither maximised nor docked to the edge (the cheap rejection that
+/// most windows get).
+fn facts_of(h: HWND, walk: &Walk) -> Option<WinFacts> {
     use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
     use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTONULL, MonitorFromWindow};
     use windows::Win32::UI::WindowsAndMessaging::{GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetClassNameW, GetWindow, GetWindowLongPtrW, GetWindowThreadProcessId, IsIconic, IsWindowVisible};
+    let (monitor, own_pid) = (walk.monitor, walk.pid);
     unsafe {
         let style = GetWindowLongPtrW(h, GWL_STYLE) as u32;
-        if style & WS_MAXIMIZE == 0 {
+        let zoomed = style & WS_MAXIMIZE != 0;
+        let docked = !zoomed && is_docked(h, style, walk.edge);
+        if !zoomed && !docked {
             return None;
         }
         let mut cloaked: u32 = 0;
@@ -359,7 +411,8 @@ fn facts_of(h: HWND, monitor: isize, own_pid: u32) -> Option<WinFacts> {
             visible: IsWindowVisible(h).as_bool(),
             minimized: IsIconic(h).as_bool(),
             cloaked: is_cloaked,
-            zoomed: true,
+            zoomed,
+            docked,
             has_owner: GetWindow(h, GW_OWNER).is_ok_and(|o| !o.is_invalid()),
             ex_style: GetWindowLongPtrW(h, GWL_EXSTYLE) as u32,
             own: pid == own_pid,

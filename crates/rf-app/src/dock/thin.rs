@@ -1,7 +1,9 @@
-//! The thin dock, app side (the rules are `rf_win::dock::thin`, tested without a window): while a maximised window the user can see is on
-//! the dock's monitor the middle island is as high as the side islands and its band is the thin one; the pointer coming near grows it
-//! back over the window; it goes thin again the moment the pointer has left and nothing of the dock is open (in one motion with the
-//! magnification going out: a user saw two steps when it waited 400 ms).
+//! The thin dock, app side (the rules are `rf_win::dock::thin`, tested without a window): while a window the user can see stands on the
+//! band on the dock's monitor (a maximised one, or one docked to the band's edge under the dock) the middle island is as high as the
+//! side islands; the pointer coming near grows it back over the window; it goes thin again the moment the pointer has left and nothing
+//! of the dock is open (in one motion with the magnification going out: a user saw two steps when it waited 400 ms). THE BAND the dock
+//! reserves is the thin one for as long as the setting is on and does not follow the windows: a window is maximised into the room it
+//! keeps, in one step (`rf_win::dock::thin::BandRule` says why).
 //! Setting "Pencere büyütüldüğünde dock'u incelt" (`dock_thin_when_maximized`, on by default, a key of the running dock: off is the dock
 //! of today and costs nothing but one atomic read per task-list event and per mouse move over the dock).
 //!
@@ -15,7 +17,7 @@
 //! WHERE THE FACTS COME FROM.
 //! * A maximised window: the task list's events the dock already follows (`MiddleIsland` calls [`task_changed`] from its watch) and the
 //!   placement events of `rf_win::dock::zoomwatch` (maximise, restore, snap; started only while the setting is on). Either one asks for
-//!   ONE walk over the windows on a worker thread (`zoomwatch::maximized_on`), at most one at a time and one more if events came while it
+//!   ONE walk over the windows on a worker thread (`zoomwatch::stands_on_band`), at most one at a time and one more if events came while it
 //!   ran; the answer comes back to the UI thread only as a fact. No timer reads windows.
 //! * The pointer: a window with a region is not told that the pointer is NEAR it, and the part above the thin glass is another
 //!   program's window, so while the setting is on AND a maximised window is seen (and only then) the UI thread looks at the cursor
@@ -27,8 +29,8 @@
 //! WHAT IT DOES. The island's window never changes (it was always big enough for the full glass and the icons that grow out of it); only
 //! the glass inside it and the icons do, in the frames the magnification already draws (`host::set_middle_frame` sends the glass and the
 //! pointer region), so the growth costs what a pointer move over the dock costs and nothing moves under the user's hand: the icons keep
-//! their centres, the glass keeps its bottom edge and its width. The band is another matter and is [`BandSettle`]'s: it follows the
-//! window (with a settle time), not the pointer.
+//! their centres, the glass keeps its bottom edge and its width. The band is another matter: it follows the setting alone
+//! (`rf_win::dock::thin::BandRule`).
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -143,9 +145,14 @@ pub fn band_is_thin(cx: &App) -> bool {
     band_is_thin_on(MonId::HOME, cx)
 }
 
-/// The band the dock on this monitor reserves is the thin one right now.
-pub fn band_is_thin_on(mon: MonId, cx: &App) -> bool {
-    cx.try_global::<ThinHost>().and_then(|h| h.mon(mon)).is_some_and(|m| m.model.band_thin())
+/// The band the dock on this monitor reserves is the thin one right now: the setting is on (every dock's band follows it alone). Asked
+/// before the thin dock has started (the host sets its first band earlier), the answer is the setting's too, so that the first band is
+/// the one that stays and no window is moved twice at the dock's start.
+pub fn band_is_thin_on(_mon: MonId, cx: &App) -> bool {
+    match cx.try_global::<ThinHost>() {
+        Some(h) => h.enabled,
+        None => cx.try_global::<Settings>().is_some_and(|s| s.dock_thin_when_maximized),
+    }
 }
 
 /// The picture of a frame of the middle island at this squeeze: the glass lowers its top edge and keeps its bottom edge, the icons
@@ -265,18 +272,22 @@ pub fn on_settings(cx: &mut App) {
         return;
     }
     // off: the dock of today, at once
-    let now = h.now_ms();
     h.watch = None;
     h.poller = None;
     h.poll_alive = false;
-    let mut was_thin_band = false;
+    let (mut home, mut other) = (false, false);
     for m in &mut h.mons {
-        let thin_band = m.model.switch_off(now);
-        was_thin_band |= thin_band && m.mon.is_home();
+        let thin_band = m.model.switch_off();
+        home |= thin_band && m.mon.is_home();
+        other |= thin_band && !m.mon.is_home();
     }
     reevaluate_all(cx);
-    if was_thin_band {
+    // the full bands are back: the home dock's is the desktop toolbar's, a second monitor's is told to the host that holds the taskbar hidden
+    if home {
         host::apply_reserve(cx);
+    }
+    if other {
+        host::apply_secondary_bands(cx);
     }
 }
 
@@ -322,9 +333,13 @@ pub fn pointer_on_island(mon: MonId, cx: &mut App) {
 
 // ---------------------------------------------------------------- the work
 
+/// What a walk asks: each dock, its monitor, and its middle island's full glass (what a docked window is measured against).
+fn what_to_ask(cx: &mut App) -> Vec<(MonId, isize, Option<rf_win::dock::layout::Rect>)> {
+    host::dock_monitors(cx).into_iter().map(|(id, m)| (id, m.handle, host::visible_glass_rect_on(id, Kind::Middle, cx))).collect()
+}
+
 /// A walk over the windows, off the UI thread; at most one at a time. One question for each dock's monitor.
 fn read_maximized(cx: &mut App) {
-    let monitors = host::dock_monitors(cx);
     let Some(h) = me(cx) else { return };
     if !h.enabled {
         return;
@@ -336,16 +351,17 @@ fn read_maximized(cx: &mut App) {
     h.reading = true;
     cx.spawn(async move |cx| {
         loop {
-            let asked = monitors.clone();
+            // (asked anew for every walk: a dock may have come, gone or changed its size since the last one)
+            let asked = cx.update(what_to_ask);
             let seen: Vec<(MonId, bool)> = cx
                 .background_executor()
                 .spawn(async move {
                     asked
                         .into_iter()
-                        .map(|(id, m)| {
+                        .map(|(id, handle, glass)| {
                             // (the home dock follows the primary monitor, whichever handle it has now)
-                            let handle = if id.is_home() { rf_win::dock::primary_monitor().map_or(m.handle, |p| p.handle) } else { m.handle };
-                            (id, zoomwatch::maximized_on(handle))
+                            let handle = if id.is_home() { rf_win::dock::primary_monitor().map_or(handle, |p| p.handle) } else { handle };
+                            (id, zoomwatch::stands_on_band(handle, glass))
                         })
                         .collect()
                 })
@@ -378,7 +394,7 @@ fn apply_maximized(seen: Vec<(MonId, bool)>, cx: &mut App) -> bool {
             if !now {
                 m.model.inputs.near = false;
             }
-            log::debug!("dock: a maximised window is {} on the monitor of dock {}", if now { "there" } else { "gone" }, id.0);
+            log::debug!("dock: a window on the band is {} on the monitor of dock {}", if now { "there" } else { "gone" }, id.0);
             changed.push(id);
         }
     }
@@ -391,7 +407,7 @@ fn apply_maximized(seen: Vec<(MonId, bool)>, cx: &mut App) -> bool {
     again
 }
 
-/// The cursor is looked at while, and only while, a dock can be thin or its band is still the thin one (`Model::needs_polling`).
+/// The cursor is looked at while, and only while, a dock can be thin: a window stands on its band (`Model::needs_polling`).
 fn sync_poller(cx: &mut App) {
     let Some(h) = me(cx) else { return };
     let wanted = h.mons.iter().any(|m| m.model.needs_polling());
@@ -484,7 +500,7 @@ fn reevaluate(mon: MonId, cx: &mut App) {
         }
         motion = true;
     }
-    // (the band follows the window, not the pointer, and waits while a panel, a menu or a preview is open: see `Model::look`)
+    // (the band follows the setting alone: it changes here only when the setting was switched on)
     let (band, wake) = (look.band, look.wake_at);
     m.wake_gen += 1;
     let gen_now = m.wake_gen;

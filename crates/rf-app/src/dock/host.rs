@@ -825,7 +825,7 @@ fn apply_home_reserve(cx: &mut App) {
     let band = if host.prefs.reserve {
         // the band is the dock's own height and margins: it follows the size too
         let unit = host.area().map_or(1.0, |(m, _)| rf_win::dock::size::unit(m.scale(), fitted_factor(host.prefs.size, &m)));
-        // (the thin band while a maximised window has been there for a while: see thin.rs)
+        // (the thin band while the thin dock's setting is on, whatever the windows do: see thin.rs)
         let thickness = rf_win::dock::thin::reserved_thickness(unit, super::thin::band_is_thin(cx));
         system.reserve(thickness);
         Some(thickness)
