@@ -1,9 +1,11 @@
 name: CI
 
+# Not on every push to main: the work goes straight to main in many small commits a day, the whole workspace's tests are run on the
+# developer's PC before a push, and a run for each commit only sent mail. It runs for pull requests (contributors' changes) and
+# by hand (Actions > CI > Run workflow).
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
