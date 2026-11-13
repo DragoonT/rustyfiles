@@ -1,7 +1,8 @@
 //! Quick search (Alt+Space by default): a small window over whatever app is in front that finds
 //! installed apps, files and folders (rustyfiles' name index), Chrome / Edge bookmarks, and
 //! offers a web search. Enter opens, Ctrl+Enter shows the item in its folder, Shift+Enter
-//! previews it with DirectLook, Esc closes. What is opened often comes first.
+//! previews it with DirectLook, Esc closes. What is opened often comes first, and what was chosen
+//! for the same typed letters before comes first of all ("En iyi eşleşme": see `Picks`).
 //!
 //! The hotkey is registered by the running rustyfiles (`rf_win::hotkey`); with "keep running in
 //! the background" on it works while no window is open.
@@ -317,7 +318,11 @@ struct Use {
 #[derive(Default)]
 struct Usage {
     map: HashMap<String, Use>,
+    /// What was chosen for what was typed.
+    picks: Picks,
     loaded: bool,
+    /// The dates of the two files when they were read: a file that another rustyfiles process has written since is read again.
+    stamps: [Option<SystemTime>; 2],
 }
 
 static USAGE: std::sync::LazyLock<Mutex<Usage>> = std::sync::LazyLock::new(|| Mutex::new(Usage::default()));
@@ -336,18 +341,32 @@ pub(crate) fn reload_usage() {
     USAGE.lock().unwrap().loaded = false;
 }
 
-fn with_usage<R>(f: impl FnOnce(&mut HashMap<String, Use>) -> R) -> R {
+fn file_stamp(path: Option<PathBuf>) -> Option<SystemTime> {
+    path.and_then(|p| std::fs::metadata(p).ok()).and_then(|m| m.modified().ok())
+}
+
+/// The use counts and the picks, read from their files when they were not read yet or when a file's date is not the one they were
+/// read at: the dock and the main app are two processes that both write them (a choice made in the dock's Start must count in the
+/// main app's file search at the next keystroke, not at the next start). Two looks at a file's date for every search.
+fn with_store<R>(f: impl FnOnce(&mut Usage) -> R) -> R {
     let mut u = USAGE.lock().unwrap();
-    if !u.loaded {
+    let stamps = [file_stamp(usage_path()), file_stamp(picks_path())];
+    if !u.loaded || u.stamps != stamps {
         u.loaded = true;
+        u.stamps = stamps;
         u.map.clear();
         if let Some(text) = usage_path().and_then(|p| std::fs::read(p).ok()) {
             // entry by entry: one this version can't read does not cost the others
             let raw: HashMap<String, serde_json::Value> = serde_json::from_slice(&text).unwrap_or_default();
             u.map = raw.into_iter().filter_map(|(k, v)| serde_json::from_value(v).ok().map(|u| (k, u))).collect();
         }
+        u.picks = picks_path().and_then(|p| std::fs::read(p).ok()).map(|text| parse_picks(&text)).unwrap_or_default();
     }
-    f(&mut u.map)
+    f(&mut u)
+}
+
+fn with_usage<R>(f: impl FnOnce(&mut HashMap<String, Use>) -> R) -> R {
+    with_store(|u| f(&mut u.map))
 }
 
 /// How much use lifts an item: grows with the count, fades over weeks without use.
@@ -355,6 +374,13 @@ fn boost(u: &Use) -> i32 {
     let days = now_secs().saturating_sub(u.last) as f64 / 86_400.0;
     let recency = 1.0 / (1.0 + days / 14.0);
     ((u.count as f64).ln_1p() * 60.0 * recency).min(240.0) as i32
+}
+
+/// The item was opened after `query` was typed: its use is counted ([`remember`]) and the choice is kept for those letters
+/// ([`remember_pick`]).
+pub(crate) fn remember_for(query: &str, item: &Item) {
+    remember(item);
+    remember_pick(query, &item.target);
 }
 
 pub(crate) fn remember(item: &Item) {
@@ -380,6 +406,152 @@ pub(crate) fn remember(item: &Item) {
         serde_json::to_vec(m).ok()
     });
     if let (Some(bytes), Some(path)) = (snapshot, usage_path()) {
+        std::thread::spawn(move || {
+            static WRITE: Mutex<()> = Mutex::new(());
+            let _g = WRITE.lock().unwrap();
+            let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+            if std::fs::write(&tmp, bytes).is_ok() {
+                let _ = std::fs::rename(&tmp, &path);
+            }
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// What was chosen for what was typed (`quicksearch-picks.json` next to settings.toml)
+//
+// The use counts above say what is opened often. They do not say what the user MEANS by two letters: "ph" matches Phone Link by its
+// first letters and Photoshop by a word, and the one the user opens after typing "ph" is the answer. So every choice made with a
+// query in the box is kept under that query (folded, as the matching folds it), and at the next search:
+// * an item chosen for these letters is lifted in its own section (`pick_points`, up to 800: above a better match by name), and
+// * the item the picks speak for most becomes the first row, whatever its kind, under "En iyi eşleşme" (`merge_with`): Enter opens
+//   what was opened the last times.
+// A choice counts in full for the very letters it was made with, less for a shorter or a longer query that begins the same way
+// (typed "pho" then, "ph" now), and fades over months without use. A web search is never kept (as its use is not): what was typed
+// to be looked up on the web stays off the disk.
+
+/// One choice: how often, and when last (seconds since 1970).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Pick {
+    count: u32,
+    last: u64,
+}
+
+/// Folded query -> the key of what was opened (`Target::key`) -> the choice.
+pub(crate) type Picks = HashMap<String, HashMap<String, Pick>>;
+
+/// How many typed queries are kept, and how many choices under each.
+const MAX_PICK_QUERIES: usize = 400;
+const MAX_PICKS_PER_QUERY: usize = 6;
+/// A query is kept up to this many characters (a longer one is a sentence, not a habit).
+const MAX_PICK_QUERY_CHARS: usize = 48;
+/// What a choice is worth for a query that is not the one it was made with: the user typed more then (and less now), or less then.
+const PICK_TYPED_MORE: f64 = 0.6;
+const PICK_TYPED_LESS: f64 = 0.4;
+/// A choice loses half its weight in this many days without being made again.
+const PICK_HALF_DAYS: f64 = 60.0;
+/// The weight from which an item is the best match: one choice for these very letters within about two months, or more than one
+/// for letters that begin the same way.
+const BEST_MIN: f64 = 0.5;
+
+fn picks_path() -> Option<PathBuf> {
+    crate::settings::app_dir().map(|d| d.join("quicksearch-picks.json"))
+}
+
+/// The picks file (a query whose entry this version cannot read does not cost the others).
+pub(crate) fn parse_picks(json: &[u8]) -> Picks {
+    let raw: HashMap<String, serde_json::Value> = serde_json::from_slice(json).unwrap_or_default();
+    raw.into_iter().filter_map(|(q, v)| serde_json::from_value::<HashMap<String, Pick>>(v).ok().map(|m| (q, m))).filter(|(_, m)| !m.is_empty()).collect()
+}
+
+/// The query as the picks know it: folded like the matching folds it, without the spaces around it, not longer than a habit is.
+pub(crate) fn pick_query(query: &str) -> String {
+    fold(query.trim()).chars().take(MAX_PICK_QUERY_CHARS).collect()
+}
+
+/// Notes that `key` was opened after `query` was typed, at `now`. False when there is nothing to note (no query). Keeps the list
+/// small: the weakest choice of a query goes when it has more than [`MAX_PICKS_PER_QUERY`], and the queries not chosen from for the
+/// longest go when there are more than [`MAX_PICK_QUERIES`].
+pub(crate) fn note_pick(picks: &mut Picks, query: &str, key: &str, now: u64) -> bool {
+    let q = pick_query(query);
+    if q.is_empty() {
+        return false;
+    }
+    let chosen = picks.entry(q).or_default();
+    let p = chosen.entry(key.to_string()).or_insert(Pick { count: 0, last: 0 });
+    p.count = p.count.saturating_add(1);
+    p.last = now;
+    while chosen.len() > MAX_PICKS_PER_QUERY {
+        let Some(weakest) = chosen.iter().filter(|(k, _)| k.as_str() != key).min_by_key(|(_, p)| (p.count, p.last)).map(|(k, _)| k.clone()) else { break };
+        chosen.remove(&weakest);
+    }
+    if picks.len() > MAX_PICK_QUERIES {
+        let mut by_age: Vec<(u64, String)> = picks.iter().map(|(q, m)| (m.values().map(|p| p.last).max().unwrap_or(0), q.clone())).collect();
+        by_age.sort();
+        for (_, q) in by_age.into_iter().take(picks.len() - MAX_PICK_QUERIES * 9 / 10) {
+            picks.remove(&q);
+        }
+    }
+    true
+}
+
+/// What the picks say for the folded query `q` at `now`: the key of each item that was chosen for these letters, or for letters that
+/// begin the same way, and how much speaks for it. One pass over the picks for a search, not one for every candidate.
+pub(crate) fn pick_weights(picks: &Picks, q: &str, now: u64) -> HashMap<String, f64> {
+    let mut out: HashMap<String, f64> = HashMap::new();
+    if q.is_empty() {
+        return out;
+    }
+    for (typed, chosen) in picks {
+        let closeness = if typed == q {
+            1.0
+        } else if typed.starts_with(q) {
+            PICK_TYPED_MORE
+        } else if q.starts_with(typed.as_str()) {
+            PICK_TYPED_LESS
+        } else {
+            continue;
+        };
+        for (key, p) in chosen {
+            let days = now.saturating_sub(p.last) as f64 / 86_400.0;
+            *out.entry(key.clone()).or_default() += closeness * p.count as f64 * 0.5f64.powf(days / PICK_HALF_DAYS);
+        }
+    }
+    out
+}
+
+/// What a weight lifts an item by in its own section: 277 for one fresh choice (more than the step from a match at a word's start to
+/// a match at the name's start, so one choice is enough to put the chosen one first), up to 800.
+pub(crate) fn pick_points(weight: f64) -> i32 {
+    (weight.max(0.0).ln_1p() * 400.0).min(800.0) as i32
+}
+
+/// The key of the item that would be the best match for these weights, if any is: the heaviest from [`BEST_MIN`] on.
+fn best_key(weights: &HashMap<String, f64>) -> Option<&String> {
+    weights.iter().filter(|(_, w)| **w >= BEST_MIN).max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| b.0.cmp(a.0))).map(|(k, _)| k)
+}
+
+/// What the picks say for a query as typed (read from the store).
+fn weights_for(query: &str) -> HashMap<String, f64> {
+    let q = pick_query(query);
+    with_store(|u| pick_weights(&u.picks, &q, now_secs()))
+}
+
+/// Whether the item the picks speak for most, for this query, is a file or a folder: the dock's search gets its files a moment after
+/// the rest, and Enter in that moment must wait for them (the first row is about to change).
+pub(crate) fn best_is_a_file(query: &str) -> bool {
+    best_key(&weights_for(query)).is_some_and(|k| k.starts_with("path:"))
+}
+
+/// Keeps the choice of `target` for the typed `query` (not a web search, not without a query). The use count is another matter
+/// ([`remember`]).
+pub(crate) fn remember_pick(query: &str, target: &Target) {
+    if matches!(target, Target::Web { .. }) {
+        return;
+    }
+    let key = target.key();
+    let snapshot = with_store(|u| note_pick(&mut u.picks, query, &key, now_secs()).then(|| serde_json::to_vec(&u.picks).ok()).flatten());
+    if let (Some(bytes), Some(path)) = (snapshot, picks_path()) {
         std::thread::spawn(move || {
             static WRITE: Mutex<()> = Mutex::new(());
             let _g = WRITE.lock().unwrap();
@@ -484,6 +656,8 @@ impl Target {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Section {
     Recent,
+    /// The one item the picks speak for most for this query (`merge_with`): first, whatever its kind.
+    Best,
     Apps,
     /// Windows' settings and tools: before the files, as Windows' own search has them (seven files named like the query would push
     /// the page the user wants out of sight).
@@ -549,7 +723,7 @@ fn search(query: &str, engine: WebSearch, with_bookmarks: bool, index_on: bool) 
     }
     let local = search_local(query, engine, with_bookmarks);
     let files = search_files(query, index_on);
-    Found { items: merge(local, files.items), index_building: files.index_building, index_off: files.index_off }
+    Found { items: merge(query, local, files.items), index_building: files.index_building, index_off: files.index_off }
 }
 
 /// What was opened most lately, for an empty query.
@@ -569,8 +743,7 @@ pub(crate) fn recent() -> Vec<Item> {
 /// order. The dock's search shows these on every keystroke and the files when they arrive. `query` must not be blank.
 pub(crate) fn search_local(query: &str, engine: WebSearch, with_bookmarks: bool) -> Vec<Item> {
     let q = fold(query.trim());
-    let used: HashMap<String, Use> = with_usage(|m| m.clone());
-    let lift = |t: &Target| used.get(&t.key()).map_or(0, boost);
+    let (_, lift) = lifts(query);
     let mut items = Vec::new();
     // apps: by their display name, and by the file name of their program (`cmd` finds "Komut İstemi"; see `run_names.rs`). A match on
     // the program's name ranks a little below the same kind of match on the display name.
@@ -638,8 +811,7 @@ pub(crate) struct FilesFound {
 /// main app loads. `query` must not be blank.
 pub(crate) fn search_files(query: &str, index_on: bool) -> FilesFound {
     let q = fold(query.trim());
-    let used: HashMap<String, Use> = with_usage(|m| m.clone());
-    let lift = |t: &Target| used.get(&t.key()).map_or(0, boost);
+    let (used, lift) = lifts(query);
     let mut index_building = false;
     let status = rf_win::indexer::status();
     // on in Settings but not started yet (it starts a few seconds after rustyfiles): coming
@@ -707,10 +879,40 @@ pub(crate) fn search_files(query: &str, index_on: bool) -> FilesFound {
     FilesFound { items: f, index_building, index_off }
 }
 
-/// Puts the sources' answers in the order shown: by section (apps, files, bookmarks, web), each section keeping its own ranking.
-pub(crate) fn merge(local: Vec<Item>, files: Vec<Item>) -> Vec<Item> {
+/// What was opened before (for the candidates it adds) and what use lifts an item by for this query: how often it is opened
+/// ([`boost`]) and whether it was chosen for these letters ([`pick_points`]).
+fn lifts(query: &str) -> (HashMap<String, Use>, impl Fn(&Target) -> i32) {
+    let q = pick_query(query);
+    let (used, weights) = with_store(|u| (u.map.clone(), pick_weights(&u.picks, &q, now_secs())));
+    let counts = used.clone();
+    (used, move |t: &Target| {
+        let key = t.key();
+        counts.get(&key).map_or(0, boost) + weights.get(&key).map_or(0, |w| pick_points(*w))
+    })
+}
+
+/// Puts the sources' answers in the order shown: the best match for the typed `query` first if the picks know one, then by section
+/// (apps, settings, files, bookmarks, web), each section keeping its own ranking.
+pub(crate) fn merge(query: &str, local: Vec<Item>, files: Vec<Item>) -> Vec<Item> {
+    merge_with(&weights_for(query), local, files)
+}
+
+/// [`merge`] for weights that are known ([`pick_weights`]). The item the picks speak for most (from [`BEST_MIN`] on; never the web
+/// search) leaves its section and becomes the first row, under "En iyi eşleşme".
+pub(crate) fn merge_with(weights: &HashMap<String, f64>, local: Vec<Item>, files: Vec<Item>) -> Vec<Item> {
     let mut all = local;
     all.extend(files);
+    let best = all
+        .iter()
+        .enumerate()
+        .filter(|(_, i)| !matches!(i.target, Target::Web { .. }))
+        .filter_map(|(ix, i)| weights.get(&i.target.key()).map(|w| (ix, *w, i.score)))
+        .filter(|(_, w, _)| *w >= BEST_MIN)
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.2.cmp(&b.2)).then(b.0.cmp(&a.0)))
+        .map(|(ix, _, _)| ix);
+    if let Some(ix) = best {
+        all[ix].section = Section::Best;
+    }
     all.sort_by_key(|i| i.section);
     all
 }
@@ -940,7 +1142,8 @@ impl QuickSearch {
             }
         }
         if !matches!(how, How::Preview) {
-            remember(&item);
+            let query = self.input.read(cx).value().to_string();
+            remember_for(&query, &item);
             close_later(cx);
         }
     }
@@ -968,6 +1171,7 @@ fn close_later<T>(cx: &mut Context<T>) {
 pub(crate) fn section_title(s: Section) -> &'static str {
     match s {
         Section::Recent => t!("Son kullanılanlar"),
+        Section::Best => t!("En iyi eşleşme"),
         Section::Apps => t!("Uygulamalar"),
         Section::Files => t!("Dosyalar ve klasörler"),
         Section::Settings => t!("Ayarlar"),
@@ -1210,5 +1414,157 @@ mod tests {
     fn web_search_urls() {
         assert_eq!(web_url(WebSearch::Google, "rust gpui"), "https://www.google.com/search?q=rust+gpui");
         assert_eq!(web_url(WebSearch::DuckDuckGo, "ç&="), "https://duckduckgo.com/?q=%C3%A7%26%3D");
+    }
+}
+
+#[cfg(test)]
+mod pick_tests {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    use super::{BEST_MIN, Item, MAX_PICK_QUERIES, MAX_PICKS_PER_QUERY, Pick, Picks, Section, Target, best_key, merge_with, note_pick, parse_picks, pick_points, pick_query, pick_weights, score_with};
+
+    const DAY: u64 = 86_400;
+    const NOW: u64 = 1_800_000_000;
+
+    fn app(name: &str, score: i32) -> Item {
+        Item { target: Target::App { id: format!("id-{name}"), name: name.into() }, title: name.into(), detail: String::new(), section: Section::Apps, score }
+    }
+    fn file(path: &str, score: i32) -> Item {
+        Item { target: Target::Path { path: PathBuf::from(path), dir: false }, title: path.into(), detail: String::new(), section: Section::Files, score }
+    }
+    fn web(q: &str) -> Item {
+        Item { target: Target::Web { query: q.into() }, title: q.into(), detail: String::new(), section: Section::Web, score: 0 }
+    }
+
+    #[test]
+    fn a_choice_is_kept_under_the_letters_it_was_made_with_folded_like_the_matching() {
+        let mut p = Picks::new();
+        assert!(note_pick(&mut p, "  PH ", "app:photoshop", NOW));
+        assert!(note_pick(&mut p, "ph", "app:photoshop", NOW + 5));
+        assert!(note_pick(&mut p, "Şarkı", "path:c:\\sarki.mp3", NOW));
+        assert!(!note_pick(&mut p, "   ", "app:x", NOW), "nothing typed: nothing to learn");
+        assert_eq!(p.len(), 2);
+        assert_eq!(p["ph"]["app:photoshop"], Pick { count: 2, last: NOW + 5 });
+        assert!(p.contains_key("sarki"));
+        assert_eq!(pick_query(&"x".repeat(200)).chars().count(), 48, "a sentence is not a habit");
+    }
+
+    #[test]
+    fn one_choice_puts_the_chosen_app_above_a_better_match_by_name() {
+        // "ph": Phone Link begins with it, Photoshop only has a word that does
+        let (phone, shop) = (score_with("Phone Link", "ph", true).unwrap(), score_with("Adobe Photoshop 2026", "ph", true).unwrap());
+        assert!(phone > shop);
+        let mut p = Picks::new();
+        note_pick(&mut p, "ph", "app:shop", NOW);
+        let w = pick_weights(&p, "ph", NOW);
+        assert!(shop + pick_points(w["app:shop"]) > phone, "one choice is enough");
+        assert_eq!(pick_points(0.0), 0);
+        assert!(pick_points(1.0) >= 270);
+        assert_eq!(pick_points(1_000.0), 800, "never more than a whole step of the matching and a half");
+    }
+
+    #[test]
+    fn a_choice_counts_in_full_for_its_own_letters_less_for_shorter_or_longer_ones_and_not_for_others() {
+        let mut p = Picks::new();
+        note_pick(&mut p, "pho", "app:shop", NOW);
+        let at = |q: &str| pick_weights(&p, q, NOW).get("app:shop").copied().unwrap_or(0.0);
+        assert!((at("pho") - 1.0).abs() < 1e-9);
+        assert!((at("ph") - 0.6).abs() < 1e-9, "typed more then, less now");
+        assert!((at("p") - 0.6).abs() < 1e-9);
+        assert!((at("photo") - 0.4).abs() < 1e-9, "typed less then, more now");
+        assert_eq!(at("x"), 0.0);
+        assert_eq!(at("hop"), 0.0, "not the same beginning");
+        assert!(pick_weights(&p, "", NOW).is_empty(), "no query: nothing");
+    }
+
+    #[test]
+    fn choices_add_up_and_fade_without_use() {
+        let mut p = Picks::new();
+        for i in 0..3 {
+            note_pick(&mut p, "ra", "path:c:\\rapor.xlsx", NOW + i);
+        }
+        let w = |now: u64| pick_weights(&p, "ra", now)["path:c:\\rapor.xlsx"];
+        assert!((w(NOW + 2) - 3.0).abs() < 1e-3);
+        assert!((w(NOW + 60 * DAY) - 1.5).abs() < 0.01, "half after two months");
+        assert!(w(NOW + 120 * DAY) >= BEST_MIN, "three choices are remembered for a season");
+        assert!(w(NOW + 365 * DAY) < BEST_MIN, "and not for ever");
+    }
+
+    #[test]
+    fn the_item_the_picks_speak_for_most_becomes_the_first_row_whatever_its_kind() {
+        let local = vec![app("Rapor Aracı", 840), app("Radyo", 830), web("ra")];
+        let files = vec![file("C:\\rapor.xlsx", 700), file("C:\\raf.txt", 650)];
+        // nothing learned: the sections in their order, as before
+        let plain = merge_with(&HashMap::new(), local.clone(), files.clone());
+        assert_eq!(plain.iter().map(|i| i.section).collect::<Vec<_>>(), [Section::Apps, Section::Apps, Section::Files, Section::Files, Section::Web]);
+        // the file was opened for these letters: it is the first row, under a heading of its own, and the rest keeps its order
+        let mut p = Picks::new();
+        note_pick(&mut p, "ra", "path:c:\\rapor.xlsx", NOW);
+        let got = merge_with(&pick_weights(&p, "ra", NOW), local.clone(), files.clone());
+        assert_eq!((got[0].title.as_str(), got[0].section), ("C:\\rapor.xlsx", Section::Best));
+        assert_eq!(got.iter().skip(1).map(|i| i.title.as_str()).collect::<Vec<_>>(), ["Rapor Aracı", "Radyo", "C:\\raf.txt", "ra"]);
+        // an app chosen more often for the same letters is the best match instead; there is only ever one
+        note_pick(&mut p, "ra", "app:id-Radyo", NOW);
+        note_pick(&mut p, "ra", "app:id-Radyo", NOW);
+        let got = merge_with(&pick_weights(&p, "ra", NOW), local.clone(), files.clone());
+        assert_eq!((got[0].title.as_str(), got[0].section), ("Radyo", Section::Best));
+        assert_eq!(got.iter().filter(|i| i.section == Section::Best).count(), 1);
+        assert_eq!(got.len(), 5, "nothing is lost and nothing shown twice");
+        // a weak hint is not a best match (one choice for a single letter, long ago), and what is not among the rows cannot be one
+        let mut weak = Picks::new();
+        note_pick(&mut weak, "r", "app:id-Radyo", NOW - 200 * DAY);
+        assert!(merge_with(&pick_weights(&weak, "ra", NOW), local.clone(), files.clone()).iter().all(|i| i.section != Section::Best));
+        let mut gone = Picks::new();
+        note_pick(&mut gone, "ra", "app:id-Silinmiş", NOW);
+        assert!(merge_with(&pick_weights(&gone, "ra", NOW), local, files).iter().all(|i| i.section != Section::Best));
+    }
+
+    #[test]
+    fn the_web_search_is_never_the_best_match() {
+        let mut w = HashMap::new();
+        w.insert("web:ra".to_string(), 9.0);
+        let got = merge_with(&w, vec![app("Radyo", 830), web("ra")], Vec::new());
+        assert!(got.iter().all(|i| i.section != Section::Best));
+    }
+
+    #[test]
+    fn the_best_key_is_the_heaviest_from_the_threshold_on() {
+        let mut w = HashMap::new();
+        assert_eq!(best_key(&w), None);
+        w.insert("app:a".to_string(), BEST_MIN - 0.01);
+        assert_eq!(best_key(&w), None);
+        w.insert("path:c:\\x".to_string(), 2.0);
+        w.insert("app:b".to_string(), 1.0);
+        assert_eq!(best_key(&w).map(String::as_str), Some("path:c:\\x"));
+    }
+
+    #[test]
+    fn the_list_of_choices_stays_small() {
+        let mut p = Picks::new();
+        for i in 0..20u64 {
+            note_pick(&mut p, "a", &format!("app:{i}"), NOW + i);
+        }
+        assert_eq!(p["a"].len(), MAX_PICKS_PER_QUERY);
+        assert!(p["a"].contains_key("app:19"), "the newest choice stays");
+        for i in 0..(MAX_PICK_QUERIES as u64 + 50) {
+            note_pick(&mut p, &format!("q{i}"), "app:x", NOW + 100 + i);
+        }
+        assert!(p.len() <= MAX_PICK_QUERIES);
+        assert!(p.contains_key(&format!("q{}", MAX_PICK_QUERIES + 49)), "the newest query stays");
+        assert!(!p.contains_key("a"), "the oldest went");
+    }
+
+    #[test]
+    fn a_picks_file_is_read_entry_by_entry_and_comes_back_as_it_was_written() {
+        let mut p = Picks::new();
+        note_pick(&mut p, "ph", "app:shop", NOW);
+        assert_eq!(parse_picks(&serde_json::to_vec(&p).unwrap()), p);
+        // an entry of another shape does not cost the others; rubbish is an empty list
+        let mixed = br#"{"ph":{"app:shop":{"count":2,"last":5}},"x":"not a map","y":{"k":{"count":"many"}}}"#;
+        let got = parse_picks(mixed);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got["ph"]["app:shop"], Pick { count: 2, last: 5 });
+        assert!(parse_picks(b"not json").is_empty());
     }
 }

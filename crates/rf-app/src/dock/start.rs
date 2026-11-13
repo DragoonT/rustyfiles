@@ -168,6 +168,9 @@ pub struct StartView {
     /// Whether the field shows the short placeholder of the island's row (the field stands there) and not the panel's own sentence.
     placeholder_short: bool,
     query: String,
+    /// What the user opened most for these letters before is a file or a folder (`quick_search::best_is_a_file`): Enter waits for
+    /// the files, which arrive after the other rows.
+    best_is_file: bool,
     /// The page shown when nothing is typed; the panel opens on the home page every time.
     page: Page,
     /// The keyboard cursor on the home page (a pinned tile or a recommended entry) and on the all-apps page (an app).
@@ -319,6 +322,7 @@ impl StartView {
             input,
             placeholder_short: false,
             query: String::new(),
+            best_is_file: false,
             page: Page::Home,
             spot: None,
             cursor: None,
@@ -594,6 +598,7 @@ impl StartView {
             return;
         }
         self.query = q.clone();
+        self.best_is_file = quick_search::best_is_a_file(&q);
         super::panel::set_typed(&q, cx);
         self.cursor = None;
         self.spot = None;
@@ -699,7 +704,7 @@ impl StartView {
     }
 
     fn rebuild_entries(&mut self) {
-        self.entries = search::entries(&self.local, &self.files, self.files_state);
+        self.entries = search::entries(&self.query, &self.local, &self.files, self.files_state);
         self.sel_ix = self.selection.index(&self.entries);
     }
 
@@ -712,7 +717,7 @@ impl StartView {
     }
 
     fn must_wait(&self) -> bool {
-        self.local_for != self.generation || search::enter_must_wait(&self.selection, &self.entries, self.files_state)
+        self.local_for != self.generation || search::enter_must_wait(&self.selection, &self.entries, self.files_state, self.best_is_file)
     }
 
     fn move_selection(&mut self, up: bool) {
@@ -975,6 +980,10 @@ impl StartView {
                 let engine = cx.global::<Settings>().web_search;
                 match (&item.target, how) {
                     (Target::App { id, name }, how) => {
+                        // (the app's use is counted where it is started; the choice for these letters is kept here)
+                        if matches!(how, How::Open) {
+                            quick_search::remember_pick(&self.query, &item.target);
+                        }
                         self.activate_app(AppEntry { id: id.clone(), name: name.clone() }, how, cx);
                         return;
                     }
@@ -1007,7 +1016,7 @@ impl StartView {
                         self.finish(cx);
                     }
                 }
-                quick_search::remember(&item);
+                quick_search::remember_for(&self.query, &item);
             }
         }
     }

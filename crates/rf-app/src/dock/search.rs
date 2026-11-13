@@ -47,10 +47,11 @@ impl Entry {
     }
 }
 
-/// The rows for the answers so far: the quick search's sections in its order (apps, files, bookmarks, web); where there is no main
-/// app a row that offers to start it stands where the files would be.
-pub fn entries(local: &[Item], files: &[Item], state: Files) -> Vec<Entry> {
-    let merged = merge(local.to_vec(), files.to_vec());
+/// The rows for the answers so far to the typed `query`: the best match if the user's earlier choices know one, then the quick
+/// search's sections in its order (apps, settings, files, bookmarks, web); where there is no main app a row that offers to start it
+/// stands where the files would be.
+pub fn entries(query: &str, local: &[Item], files: &[Item], state: Files) -> Vec<Entry> {
+    let merged = merge(query, local.to_vec(), files.to_vec());
     let mut out: Vec<Entry> = merged.into_iter().map(Entry::Item).collect();
     if state == Files::NoMain {
         let at = out.iter().position(|e| matches!(e, Entry::Item(i) if i.section > Section::Files)).unwrap_or(out.len());
@@ -86,11 +87,13 @@ impl Selection {
     }
 }
 
-/// Whether Enter has to wait for the files before it opens anything: the user has not moved the selection, the first row is not an
-/// app (an app is a sure thing that does not need the files to be known) and files are still on their way. Without this, Enter in
-/// the few milliseconds before the file answer arrives would open the web search for "rapor.docx".
-pub fn enter_must_wait(sel: &Selection, rows: &[Entry], files: Files) -> bool {
-    *sel == Selection::First && files == Files::Pending && !rows.get(sel.index(rows)).is_some_and(Entry::is_app)
+/// Whether Enter has to wait for the files before it opens anything: the user has not moved the selection, files are still on their
+/// way, and the first row is not an app (an app is a sure thing that does not need the files to be known) OR the best match for
+/// this query is a file (`best_is_file`: what the user opened for these letters before is about to become the first row). Without
+/// this, Enter in the few milliseconds before the file answer arrives would open the web search for "rapor.docx", or the app that
+/// stands first until the file the user always opens arrives.
+pub fn enter_must_wait(sel: &Selection, rows: &[Entry], files: Files, best_is_file: bool) -> bool {
+    *sel == Selection::First && files == Files::Pending && (best_is_file || !rows.get(sel.index(rows)).is_some_and(Entry::is_app))
 }
 
 /// A file the main app found, as a row: the name, and the folder it is in under it.
@@ -161,62 +164,62 @@ mod tests {
     fn local_rows_come_at_once_and_the_files_slot_in_between_apps_and_the_rest() {
         let local = vec![app("Notepad"), mark("https://a.example/"), web("not")];
         // before the files: the local rows alone, the web row last
-        assert_eq!(titles(&entries(&local, &[], Files::Pending)), ["Notepad", "https://a.example/", "not"]);
+        assert_eq!(titles(&entries("", &local, &[], Files::Pending)), ["Notepad", "https://a.example/", "not"]);
         // the files arrive: after the apps, before the bookmarks and the web
-        let got = entries(&local, &[file("C:\\notes.txt"), file("C:\\notebook.md")], Files::Done(Index::Ready));
+        let got = entries("", &local, &[file("C:\\notes.txt"), file("C:\\notebook.md")], Files::Done(Index::Ready));
         assert_eq!(titles(&got), ["Notepad", "C:\\notes.txt", "C:\\notebook.md", "https://a.example/", "not"]);
     }
 
     #[test]
     fn with_no_main_app_one_row_offers_to_start_it_where_the_files_would_be() {
         let local = vec![app("Notepad"), web("not")];
-        assert_eq!(titles(&entries(&local, &[], Files::NoMain)), ["Notepad", "<start main>", "not"]);
+        assert_eq!(titles(&entries("", &local, &[], Files::NoMain)), ["Notepad", "<start main>", "not"]);
         // no web row (nothing but apps): the offer is last
-        assert_eq!(titles(&entries(&[app("A")], &[], Files::NoMain)), ["A", "<start main>"]);
+        assert_eq!(titles(&entries("", &[app("A")], &[], Files::NoMain)), ["A", "<start main>"]);
         // and never when a main app has answered, or is still being asked
         for s in [Files::Idle, Files::Pending, Files::Silent, Files::Starting, Files::Done(Index::Building), Files::Done(Index::Off), Files::Done(Index::Ready)] {
-            assert!(!entries(&local, &[], s).contains(&Entry::StartMain), "{s:?}");
+            assert!(!entries("", &local, &[], s).contains(&Entry::StartMain), "{s:?}");
         }
     }
 
     #[test]
     fn the_offer_to_start_the_main_app_is_never_the_default_row() {
         // no app matched and no main app: the offer would be the first row, the web search is the one Enter opens
-        let rows = entries(&[web("rapor")], &[], Files::NoMain);
+        let rows = entries("", &[web("rapor")], &[], Files::NoMain);
         assert_eq!(titles(&rows), ["<start main>", "rapor"]);
         assert_eq!(Selection::First.index(&rows), 1);
         // but the user can move to it
         let chosen = Selection::at(&rows, 0);
         assert_eq!(chosen.index(&rows), 0);
         // Enter does not wait for files that are not coming
-        assert!(!enter_must_wait(&Selection::First, &rows, Files::NoMain));
+        assert!(!enter_must_wait(&Selection::First, &rows, Files::NoMain, false));
         // only the offer, nothing else: it is the row there is
         assert_eq!(Selection::First.index(&[Entry::StartMain]), 0);
     }
 
     #[test]
     fn the_selection_stays_on_the_first_row_until_the_user_moves_it() {
-        let a = entries(&[app("A"), web("q")], &[], Files::Pending);
+        let a = entries("", &[app("A"), web("q")], &[], Files::Pending);
         let sel = Selection::First;
         assert_eq!(sel.index(&a), 0);
         // files arrive: the first row is still the first row
-        let b = entries(&[app("A"), web("q")], &[file("C:\\q.txt")], Files::Done(Index::Ready));
+        let b = entries("", &[app("A"), web("q")], &[file("C:\\q.txt")], Files::Done(Index::Ready));
         assert_eq!(sel.index(&b), 0);
     }
 
     #[test]
     fn files_arriving_do_not_move_the_selection_from_the_row_the_user_chose() {
         let local = vec![app("A"), mark("https://b/"), web("q")];
-        let before = entries(&local, &[], Files::Pending);
+        let before = entries("", &local, &[], Files::Pending);
         // the user pressed Down twice: on the web row
         let chosen = Selection::at(&before, 2);
         assert_eq!(titles(&before)[chosen.index(&before)], "q");
         // two files arrive above it: it is now the fifth row, and still the selected one
-        let after = entries(&local, &[file("C:\\q.txt"), file("C:\\q2.txt")], Files::Done(Index::Ready));
+        let after = entries("", &local, &[file("C:\\q.txt"), file("C:\\q2.txt")], Files::Done(Index::Ready));
         assert_eq!(chosen.index(&after), 4);
         assert_eq!(titles(&after)[chosen.index(&after)], "q");
         // a chosen row that went away (the query changed) falls back to the first
-        let gone = entries(&[app("Z")], &[], Files::Pending);
+        let gone = entries("", &[app("Z")], &[], Files::Pending);
         assert_eq!(chosen.index(&gone), 0);
         // an empty list has an index 0 that nothing is at
         assert_eq!(Selection::at(&[], 3), Selection::First);
@@ -225,27 +228,39 @@ mod tests {
     #[test]
     fn a_selected_file_stays_selected_when_a_better_file_arrives_before_it() {
         let local = vec![web("q")];
-        let first = entries(&local, &[file("C:\\b.txt")], Files::Done(Index::Ready));
+        let first = entries("", &local, &[file("C:\\b.txt")], Files::Done(Index::Ready));
         let chosen = Selection::at(&first, 0);
-        let second = entries(&local, &[file("C:\\a.txt"), file("C:\\b.txt")], Files::Done(Index::Ready));
+        let second = entries("", &local, &[file("C:\\a.txt"), file("C:\\b.txt")], Files::Done(Index::Ready));
         assert_eq!(titles(&second)[chosen.index(&second)], "C:\\b.txt");
     }
 
     #[test]
     fn enter_waits_for_the_files_only_when_the_best_row_could_still_change() {
-        let apps_first = entries(&[app("Notepad"), web("note")], &[], Files::Pending);
-        let web_first = entries(&[web("rapor.docx")], &[], Files::Pending);
+        let apps_first = entries("", &[app("Notepad"), web("note")], &[], Files::Pending);
+        let web_first = entries("", &[web("rapor.docx")], &[], Files::Pending);
         // an app is a sure thing: no wait
-        assert!(!enter_must_wait(&Selection::First, &apps_first, Files::Pending));
+        assert!(!enter_must_wait(&Selection::First, &apps_first, Files::Pending, false));
         // only the web row: the files may be better
-        assert!(enter_must_wait(&Selection::First, &web_first, Files::Pending));
+        assert!(enter_must_wait(&Selection::First, &web_first, Files::Pending, false));
         // the user chose a row: it is theirs
-        assert!(!enter_must_wait(&Selection::at(&web_first, 0), &web_first, Files::Pending));
+        assert!(!enter_must_wait(&Selection::at(&web_first, 0), &web_first, Files::Pending, false));
         // the answer is in (or will never come): open now
         for s in [Files::Done(Index::Ready), Files::NoMain, Files::Silent, Files::Idle, Files::Starting] {
-            assert!(!enter_must_wait(&Selection::First, &web_first, s), "{s:?}");
+            assert!(!enter_must_wait(&Selection::First, &web_first, s, false), "{s:?}");
         }
-        assert!(enter_must_wait(&Selection::First, &[], Files::Pending), "no rows at all yet");
+        assert!(enter_must_wait(&Selection::First, &[], Files::Pending, false), "no rows at all yet");
+    }
+
+    #[test]
+    fn enter_waits_for_the_files_when_the_best_match_for_these_letters_is_a_file() {
+        // an app stands first and the files are on their way: Enter opens the app at once, unless what the user opened for these
+        // letters before is a file, which is about to become the first row
+        let rows = entries("", &[app("Rapor Aracı"), web("rap")], &[], Files::Pending);
+        assert!(!enter_must_wait(&Selection::First, &rows, Files::Pending, false));
+        assert!(enter_must_wait(&Selection::First, &rows, Files::Pending, true));
+        // the files are there, or the user chose a row: nothing to wait for
+        assert!(!enter_must_wait(&Selection::First, &rows, Files::Done(Index::Ready), true));
+        assert!(!enter_must_wait(&Selection::at(&rows, 0), &rows, Files::Pending, true));
     }
 
     #[test]
@@ -257,7 +272,7 @@ mod tests {
         assert_eq!((i.section, i.score), (Section::Files, 640));
         assert_eq!(i.target, Target::Path { path: h.path.clone(), dir: true });
         // the local rows and the piped one merge by section whatever order they arrive in
-        let rows = entries(&[web("x"), app("A")], &[i], Files::Done(Index::Ready));
+        let rows = entries("", &[web("x"), app("A")], &[i], Files::Done(Index::Ready));
         assert_eq!(titles(&rows), ["A", "Çalışma", "x"]);
     }
 
@@ -301,7 +316,7 @@ mod tests {
         }
         let t = std::time::Instant::now();
         let rows = crate::quick_search::search_local("not", crate::settings::WebSearch::Google, false);
-        let merged = entries(&rows, &[], Files::Pending);
+        let merged = entries("", &rows, &[], Files::Pending);
         eprintln!("entries: {} rows ({} us, first call incl. nothing cached)", merged.len(), t.elapsed().as_micros());
     }
 }

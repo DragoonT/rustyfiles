@@ -1819,4 +1819,5 @@ pub const EN: &[(&str, &str)] = &[
     ("Beta sürümlerini de al", "Take beta versions too"),
     ("Bu kopya bir beta sürümüdür: anahtar kapalıyken de sonraki betaları alır, kararlı sürüm çıkınca ona geçer.", "This copy is a beta version: it takes the next betas with the switch off too, and moves to the release when it is out."),
     ("Yayınlanmadan önce denenen sürümler: yenilikler erken gelir, hatalar da olabilir. Kapalıyken yalnızca kararlı sürümler indirilir.", "Versions that are tried before a release: new things arrive early, and so may bugs. With this off, only releases are downloaded."),
+    ("En iyi eşleşme", "Best match"),
 ];

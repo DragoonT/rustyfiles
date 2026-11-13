@@ -9792,5 +9792,11 @@
   "key": "Yayınlanmadan önce denenen sürümler: yenilikler erken gelir, hatalar da olabilir. Kapalıyken yalnızca kararlı sürümler indirilir.",
   "tr": "Yayınlanmadan önce denenen sürümler: yenilikler erken gelir, hatalar da olabilir. Kapalıyken yalnızca kararlı sürümler indirilir.",
   "en": "Versions that are tried before a release: new things arrive early, and so may bugs. With this off, only releases are downloaded."
+ },
+ {
+  "id": "754286b1",
+  "key": "En iyi eşleşme",
+  "tr": "En iyi eşleşme",
+  "en": "Best match"
  }
 ]
