@@ -36,6 +36,7 @@ use super::traits::{Clock, IconPixels, OwnerSend, Raw, Relay, Relayed};
 use crate::tray_wire::forward::{Method, Outcome, reply_for};
 use crate::tray_wire::notify::{BalloonKind, Nim, NotifyIconRequest};
 use crate::tray_wire::rect::{IconRectQuery, RectPacking, pack_reply};
+use crate::tray_wire::appbar::AbMessage;
 use crate::tray_wire::{DW_ICON_RECT, IconKey, TrayRequest, WireError, parse_copydata};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -196,9 +197,18 @@ impl Core {
                 bump(&c.rect_queries);
                 None
             }
-            Ok(TrayRequest::AppBar(_)) => {
-                // (the dock's own work-area handling is another increment; here the block only passes through)
+            Ok(TrayRequest::AppBar(req)) => {
+                // The block passes through untouched (it was passed on before this). Two numbers say what became of the DOCK's own
+                // toolbar messages, which land in this window while it is the first `Shell_TrayWnd`: how many came from our own
+                // process, and how many registrations (`ABM_NEW`) Explorer answered with 0. `explorer_refused` counts icon requests
+                // only and cannot show this. With Explorer's taskbar hidden by us the dock sends none (it does not register).
                 bump(&c.appbar);
+                if self.owners.owner_pid(req.hwnd_handle()) == Some(std::process::id()) {
+                    bump(&c.appbar_own);
+                }
+                if req.message == AbMessage::New && verdict == Some(false) {
+                    bump(&c.appbar_new_refused);
+                }
                 None
             }
             Ok(TrayRequest::ServiceObject(_)) => {
@@ -407,6 +417,50 @@ mod tests {
         let c = r.core.shared.counters.snapshot();
         assert_eq!((c.appbar, c.service, c.unknown_kind, c.unparsed), (1, 1, 1, 1), "the empty appbar block is a parse failure");
         assert_eq!(c.messages, 4);
+    }
+
+    fn appbar_block(message: crate::tray_wire::appbar::AbMessage, hwnd: u32) -> Vec<u8> {
+        use crate::tray_wire::appbar::{AbEdge, AppBarLayout, AppBarRequest};
+        let _ = AbEdge::Bottom;
+        AppBarRequest {
+            layout: AppBarLayout::V3,
+            abd_cb_size: 0x28,
+            hwnd,
+            callback_message: 0x8001,
+            edge: 3,
+            rect: Rect { left: 0, top: 1362, right: 2560, bottom: 1440 },
+            lparam: 0,
+            message,
+            shared_memory: 0x1234,
+            source_pid: 4242,
+            trailing_len: 0,
+        }
+        .encode()
+    }
+
+    #[test]
+    fn the_docks_own_toolbar_messages_are_passed_on_untouched_and_counted_by_what_became_of_them() {
+        use crate::tray_wire::appbar::AbMessage;
+        let r = rig(Some(200), CoreConfig::default());
+        // the dock's window belongs to this very process; a program's window to another
+        r.owners.add_window(0x77, std::process::id());
+        r.owners.add_window(0x88, std::process::id() + 1);
+        // Explorer accepts the registration and the positions
+        r.relay.set_outcome(Outcome::Delivered(1));
+        assert_eq!(r.core.on_copydata(DW_APPBAR, &appbar_block(AbMessage::New, 0x77), raw()), 1);
+        assert_eq!(r.core.on_copydata(DW_APPBAR, &appbar_block(AbMessage::SetPos, 0x77), raw()), 1);
+        assert_eq!(r.core.on_copydata(DW_APPBAR, &appbar_block(AbMessage::New, 0x88), raw()), 1);
+        // Explorer refuses a registration: the sender hears 0, and the number says so (`explorer_refused` is for icons only)
+        r.relay.set_outcome(Outcome::Delivered(0));
+        assert_eq!(r.core.on_copydata(DW_APPBAR, &appbar_block(AbMessage::New, 0x77), raw()), 0);
+        // a position that returns 0 is not a refused registration
+        assert_eq!(r.core.on_copydata(DW_APPBAR, &appbar_block(AbMessage::QueryPos, 0x77), raw()), 0);
+        // no answer at all (a timeout) says nothing about the registration
+        r.relay.set_outcome(Outcome::TimedOut);
+        assert_eq!(r.core.on_copydata(DW_APPBAR, &appbar_block(AbMessage::New, 0x77), raw()), 0);
+        let c = r.core.shared.counters.snapshot();
+        assert_eq!((c.appbar, c.appbar_own, c.appbar_new_refused, c.explorer_refused), (6, 5, 1, 0), "{c:?}");
+        assert_eq!(r.relay.relayed().len(), 6, "every one of them went to Explorer's window");
     }
 
     #[test]

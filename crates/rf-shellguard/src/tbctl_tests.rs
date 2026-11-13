@@ -1,7 +1,6 @@
 //! The controller against a pretend desktop. Each way of LOSING the taskbar, and each way of getting it back, is a named test.
 
-use crate::statefile::WorkAreaRec;
-use crate::tbctl::{Controller, Options, RESPAWN_BACKOFF_MS, RESTORE_RETRY_BASE_MS, RESTORE_RETRY_LIMIT, Status};
+use crate::tbctl::{Controller, RESPAWN_BACKOFF_MS, RESTORE_RETRY_BASE_MS, RESTORE_RETRY_LIMIT, Status};
 use crate::tbfakes::*;
 use crate::tbmodel::{GuardStatus, HideRecord, PRIMARY, Refusal, SECONDARY, Target};
 
@@ -9,7 +8,7 @@ const HOST_PID: u32 = 4242;
 const HOST_START: u64 = 133_700_000_000_000_000;
 
 fn ctl() -> Controller {
-    Controller::new(HOST_PID, HOST_START, Options { give_back_work_area: false })
+    Controller::new(HOST_PID, HOST_START)
 }
 
 fn world() -> FakeWorld {
@@ -367,82 +366,6 @@ fn the_guard_is_not_started_for_a_session_without_a_taskbar_even_when_asked_twic
     on(&mut c, &mut w);
     on(&mut c, &mut w);
     assert_eq!(w.guard_starts, 0);
-}
-
-// ---------------------------------------------------------------- the work area
-
-fn with_work(give: bool) -> (Controller, FakeWorld) {
-    let c = Controller::new(HOST_PID, HOST_START, Options { give_back_work_area: give });
-    let mut w = world();
-    w.monitors = vec![
-        crate::tbmodel::MonitorGeom { id: "A".into(), rect: [0, 0, 2560, 1440], work: [0, 0, 2560, 1392] },
-        crate::tbmodel::MonitorGeom { id: "B".into(), rect: [-1440, -200, 0, 2359], work: [-1440, -200, 0, 2311] },
-    ];
-    (c, w)
-}
-
-#[test]
-fn the_work_area_is_left_alone_unless_asked() {
-    let (mut c, mut w) = with_work(false);
-    on(&mut c, &mut w);
-    assert_eq!(w.count("work:"), 0);
-}
-
-#[test]
-fn the_strips_are_given_back_after_the_originals_are_written_and_restored_from_them() {
-    let (mut c, mut w) = with_work(true);
-    on(&mut c, &mut w);
-    assert_eq!(w.work_sets, vec![[0, 0, 2560, 1440], [-1440, -200, 0, 2359]]);
-    let first_work = w.pos("work:").unwrap();
-    // the save that wrote the originals comes after the hide pass's save and before the first change
-    let saves_before: Vec<usize> = w.calls.iter().enumerate().filter(|(_, c)| *c == "save").map(|(i, _)| i).filter(|i| *i < first_work).collect();
-    assert_eq!(saves_before.len(), 2, "{:?}", w.calls);
-    assert_eq!(
-        w.state.original_work_areas(),
-        vec![WorkAreaRec { monitor: "A".into(), rect: [0, 0, 2560, 1392] }, WorkAreaRec { monitor: "B".into(), rect: [-1440, -200, 0, 2311] }]
-    );
-    w.work_sets.clear();
-    c.quit(&mut w);
-    assert_eq!(w.work_sets, vec![[0, 0, 2560, 1392], [-1440, -200, 0, 2311]], "the user's own rectangles are back");
-    assert!(w.state.original_work_areas().is_empty() && !w.state.pending_restore());
-}
-
-#[test]
-fn a_work_area_that_cannot_be_put_back_keeps_the_record_and_the_guard() {
-    let (mut c, mut w) = with_work(true);
-    on(&mut c, &mut w);
-    w.work_fails = true;
-    c.quit(&mut w);
-    assert!(w.state.hidden_taskbar().is_some() && w.state.pending_restore());
-    assert!(!w.guard_done);
-}
-
-#[test]
-fn explorer_recomputing_the_work_area_is_answered_a_few_times_and_then_left_alone() {
-    let (mut c, mut w) = with_work(true);
-    on(&mut c, &mut w);
-    let first = w.work_sets.len();
-    assert_eq!(first, 2);
-    for round in 0..8 {
-        // Explorer takes the strips back
-        w.monitors[0].work = [0, 0, 2560, 1392];
-        w.now += 1_000;
-        c.work_area_changed(&mut w);
-        let _ = round;
-    }
-    // the first give-back used one slot of four; three more were allowed
-    assert_eq!(w.work_sets.len(), first + 3, "{:?}", w.work_sets);
-    assert!(w.lines.iter().any(|l| l.contains("too often")));
-}
-
-#[test]
-fn nothing_is_changed_when_the_work_area_does_not_end_at_the_taskbar() {
-    let (mut c, mut w) = with_work(true);
-    w.monitors[0].work = [0, 0, 2560, 1320]; // a dock band above the taskbar
-    w.monitors[1].work = [-1440, -200, 0, 2250];
-    on(&mut c, &mut w);
-    assert_eq!(w.count("work:"), 0);
-    assert!(w.state.original_work_areas().is_empty());
 }
 
 // ---------------------------------------------------------------- a flaky world

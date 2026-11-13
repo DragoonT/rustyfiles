@@ -122,8 +122,8 @@ impl LeftIsland {
     /// A right click at `at` (the window's logical px): on the island's empty glass it starts Task Manager; on the logo or the field it is
     /// theirs and does nothing here.
     fn right_click(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        // While the glass has grown into the Start panel this row is its bottom row: the account's name stands over what is the island's
-        // empty glass at rest, and a right click on it is not a request for Task Manager.
+        // While the glass has grown into the Start panel this row is its bottom row, under the panel's own content: a right click on
+        // its empty glass is not a request for Task Manager.
         if super::grow_host::island_fade(Kind::Left, cx).is_some() {
             return;
         }
@@ -135,14 +135,12 @@ impl LeftIsland {
         }
     }
 
-    /// Tells the host the width the content needs now. Not while the Start panel is grown out of this island: the grown glass, the place
-    /// of its gear and power button and the check that the island does not lie over them (`grow_host::fits`) were made for the width the
-    /// island had when the panel opened, and a weather text that came in meanwhile would widen the island's window over them. The
-    /// width is told when the growth is over (`render` asks again then).
+    /// Tells the host the width the content needs now. Also while the Start panel is grown out of this island: the row stays as it is
+    /// and the panel's field stands at the island's left edge plus a fixed offset, so a weather text that comes in meanwhile only
+    /// widens the island's window, and the host's layout works the growth out again for it like for any island (`panel::layout_applied`).
     fn report_width(&mut self, cx: &mut Context<Self>) {
         self.sync_room(cx);
-        let growing = super::grow_host::growing_from(Kind::Left, cx);
-        if let Some(w) = width_to_report(self.reported, self.width(), growing) {
+        if let Some(w) = width_to_report(self.reported, self.width()) {
             self.reported = w;
             super::host::set_width(Kind::Left, w, cx);
         }
@@ -213,10 +211,9 @@ impl LeftIsland {
     }
 }
 
-/// The width (logical px) to tell the host, if any: the content's width when it differs from the one told last, and never while a panel
-/// is growing out of the island.
-fn width_to_report(reported: f32, wanted: f32, growing: bool) -> Option<f32> {
-    (!growing && (wanted - reported).abs() > 0.5).then_some(wanted)
+/// The width (logical px) to tell the host, if any: the content's width when it differs from the one told last.
+fn width_to_report(reported: f32, wanted: f32) -> Option<f32> {
+    ((wanted - reported).abs() > 0.5).then_some(wanted)
 }
 
 fn picture_icon(p: WeatherPicture) -> L {
@@ -288,19 +285,12 @@ impl Render for LeftIsland {
             .detach();
         }
         let scale_factor = window.scale_factor();
-        // While the panel's glass has grown out of this island (grow_host.rs) the island's own glass is put away: the weather fades, the
-        // search field is the panel's now (it is not drawn here), and the island paints no fill of its own.
+        // While the panel's glass has grown out of this island (grow_host.rs) the island's own glass is put away and the island paints no
+        // fill of its own; the row itself stays exactly as it is (the logo, the weather), except that the search field is the panel's
+        // now: the island's window is never activated and cannot take keys, so the panel draws its own field in this place.
         let grown = super::grow_host::island_fade(Kind::Left, cx);
-        if grown.is_some_and(|g| g.moving) {
-            window.request_animation_frame();
-        }
         let fallback = fallback && grown.is_none();
-        // a width that was held back while the panel grew out of this island is told now (not from inside the render: after it)
-        if width_to_report(self.reported, self.width(), super::grow_host::growing_from(Kind::Left, cx)).is_some() {
-            let me = cx.entity();
-            cx.defer(move |cx| me.update(cx, |l, cx| l.report_width(cx)));
-        }
-        let (others, field_hidden) = grown.map_or((1.0, false), |g| (g.others, g.field_hidden));
+        let field_hidden = grown.is_some_and(|g| g.field_hidden);
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
         let k = super::look::dock_size(cx);
         let me = cx.entity();
@@ -332,16 +322,17 @@ impl Render for LeftIsland {
             .ml(px(plan::LOGO_GAP * k))
             .w(px(plan::SEARCH_W * k))
             .h(px(plan::SEARCH_H * k))
-            .px(px(12. * k))
-            .gap(px(8. * k))
+            .px(px(plan::FIELD_PAD_X * k))
+            .gap(px(plan::FIELD_GAP * k))
             .items_center()
             .rounded_full()
             .bg(pal.field_fill().hsla())
-            // (away: the panel's field stands in its place and the account's picture and name stand over this spot: no hand and no
-            // hover plate for a click that does nothing; it keeps its room, so the weather does not move)
-            .when(field_hidden, |d| d.opacity(0.0))
+            // (away: the panel's field stands in its place, same size, same look, with the keyboard; this one keeps its room, so the
+            // weather does not move, and takes the press for the panel's field, which lies under this window: the text cursor over it,
+            // and a press gives the keyboard to the panel's field and does not close the panel)
+            .when(field_hidden, |d| d.opacity(0.0).cursor_text().on_mouse_down(MouseButton::Left, |_, _, cx| super::panel::focus_start_field(cx)))
             .when(!field_hidden, |d| d.cursor_pointer().hover(move |s| s.bg(pressed)))
-            .child(Icon::new(L::Search).size(px(14. * k)).flex_shrink_0().text_color(secondary))
+            .child(Icon::new(L::Search).size(px(plan::FIELD_ICON * k)).flex_shrink_0().text_color(secondary))
             // what is being typed in the panel above is shown here too; the panel's own field takes the keys (this window is never
             // activated, so it cannot)
             .child(match typed {
@@ -376,7 +367,6 @@ impl Render for LeftIsland {
             };
             h_flex()
                 .ml(px(plan::WEATHER_GAP * k))
-                .when(grown.is_some(), |d| d.opacity(others))
                 .gap(px(plan::WEATHER_TEXT_GAP * k))
                 .items_center()
                 .child(Icon::new(picture_icon(plan::weather_picture(o.code, o.is_day))).size(px(plan::WEATHER_ICON * k)).flex_shrink_0().text_color(pal.text().hsla()))
@@ -395,15 +385,13 @@ impl Render for LeftIsland {
 mod tests {
     use super::{WeatherPicture, picture_icon, width_to_report};
 
-    /// A weather text that comes in while the Start panel is grown out of the island must not widen the island's window (over the gear
-    /// and the power button): the width is held back and told once the growth is over.
+    /// The width is told whenever the content needs a different one, also while the Start panel is grown out of the island: the row stays
+    /// as it is and nothing of the panel stands under the island's window any more (the gear and the power button moved to the header).
     #[test]
-    fn the_islands_width_is_not_changed_while_a_panel_is_grown_out_of_it() {
-        assert_eq!(width_to_report(330.0, 372.0, true), None, "held back while it grows");
-        assert_eq!(width_to_report(330.0, 372.0, false), Some(372.0), "told when it is over");
-        assert_eq!(width_to_report(330.0, 330.2, false), None, "a change below half a pixel is no change");
-        assert_eq!(width_to_report(372.0, 330.0, true), None);
-        assert_eq!(width_to_report(372.0, 330.0, false), Some(330.0));
+    fn the_islands_width_is_told_when_it_changes_by_half_a_pixel_or_more() {
+        assert_eq!(width_to_report(330.0, 372.0), Some(372.0));
+        assert_eq!(width_to_report(330.0, 330.2), None, "a change below half a pixel is no change");
+        assert_eq!(width_to_report(372.0, 330.0), Some(330.0));
     }
 
     #[test]

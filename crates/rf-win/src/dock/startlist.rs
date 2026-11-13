@@ -130,6 +130,21 @@ pub fn row_of_app(rows: &[Row], app: usize) -> Option<usize> {
     rows.iter().position(|r| *r == Row::App(app))
 }
 
+/// The app on the last row of the list that is fully in view, for a list scrolled `top_px` down (a positive number) in a viewport
+/// `viewport_px` high whose rows are all `row_px` high (the list is a uniform one: headers and apps are the same height). A header on
+/// that row gives the app above it. `None`: nothing measured yet (a viewport or row of no height) or no app at or above that row.
+pub fn last_visible_app(rows: &[Row], top_px: f32, viewport_px: f32, row_px: f32) -> Option<usize> {
+    if !(row_px > 0.0 && viewport_px >= row_px && top_px.is_finite() && viewport_px.is_finite()) || rows.is_empty() {
+        return None;
+    }
+    // rows [0, n) end at or above the viewport's bottom edge; a row cut by the edge is not "fully in view"
+    let n = (((top_px.max(0.0) + viewport_px) / row_px + 1e-3).floor() as usize).min(rows.len());
+    rows[..n].iter().rev().find_map(|r| match r {
+        Row::App(j) => Some(*j),
+        Row::Header(_) => None,
+    })
+}
+
 // ---------------------------------------------------------------- the keyboard
 
 /// The pinned grid's width in cells.
@@ -375,5 +390,27 @@ mod tests {
         assert_eq!(step_results(4, false, 5), 0);
         assert_eq!(step_results(2, false, 5), 3);
         assert_eq!(step_results(0, true, 0), 0);
+    }
+
+    #[test]
+    fn the_app_nearest_to_a_field_below_is_the_last_app_fully_in_view() {
+        // rows: A header, apps 0 and 1, a header, apps 2 and 3 (rows 0..6), each 40 px high, a viewport of 120 px = three rows
+        let rows = vec![Row::Header("A".into()), Row::App(0), Row::App(1), Row::Header("B".into()), Row::App(2), Row::App(3)];
+        assert_eq!(last_visible_app(&rows, 0.0, 120.0, 40.0), Some(1), "rows 0..3 are in view: the last app among them");
+        // scrolled by one row: rows 1..4 are in view, row 3 is a header, so the app above it
+        assert_eq!(last_visible_app(&rows, 40.0, 120.0, 40.0), Some(1));
+        // scrolled by half a row: row 3 is cut by the bottom edge, the last row fully in view is row 2
+        assert_eq!(last_visible_app(&rows, 20.0, 120.0, 40.0), Some(1));
+        // scrolled to the end (three rows in view: 3, 4, 5)
+        assert_eq!(last_visible_app(&rows, 120.0, 120.0, 40.0), Some(3));
+        // a viewport taller than the list shows all of it
+        assert_eq!(last_visible_app(&rows, 0.0, 1000.0, 40.0), Some(3));
+        // nothing measured, or only a header in view: nothing
+        assert_eq!(last_visible_app(&rows, 0.0, 0.0, 40.0), None);
+        assert_eq!(last_visible_app(&rows, 0.0, 120.0, 0.0), None);
+        assert_eq!(last_visible_app(&rows, 0.0, 39.0, 40.0), None, "not even one whole row");
+        assert_eq!(last_visible_app(&rows, 0.0, 40.0, 40.0), None, "only the first header fits");
+        assert_eq!(last_visible_app(&[], 0.0, 120.0, 40.0), None);
+        assert_eq!(last_visible_app(&rows, f32::NAN, 120.0, 40.0), None);
     }
 }

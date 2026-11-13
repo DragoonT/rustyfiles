@@ -22,6 +22,16 @@ pub const LOGO_GAP: f32 = 8.0;
 /// The search field.
 pub const SEARCH_W: f32 = 220.0;
 pub const SEARCH_H: f32 = 32.0;
+/// Inside the field's pill: the padding at each side, the search picture and the gap after it (left.rs draws the island's own field
+/// from these, and the Start panel's field in the grown glass's row from the same, so that the two are one look).
+pub const FIELD_PAD_X: f32 = 12.0;
+pub const FIELD_ICON: f32 = 14.0;
+pub const FIELD_GAP: f32 = 8.0;
+/// What is left of the pill for its text (a test measures the placeholders against it).
+#[cfg(test)]
+pub const SEARCH_TEXT_ROOM: f32 = SEARCH_W - 2.0 * FIELD_PAD_X - FIELD_ICON - FIELD_GAP;
+/// Where the search field's left edge is, from the island's left edge: the padding, the logo and the gap.
+pub const SEARCH_LEFT: f32 = SIDE_PAD + LOGO + LOGO_GAP;
 /// Gap between the search field and the weather.
 pub const WEATHER_GAP: f32 = 12.0;
 /// The weather picture and the gap before the temperature.
@@ -61,7 +71,7 @@ pub fn left_width(weather_text: Option<&str>) -> f32 {
 
 /// [`left_width`] with the condition line under the temperature.
 pub fn left_width_lines(temp: Option<&str>, condition: Option<&str>) -> f32 {
-    SIDE_PAD + LOGO + LOGO_GAP + SEARCH_W + temp.map_or(0.0, |t| WEATHER_GAP + weather_width_lines(t, condition)) + SIDE_PAD
+    SEARCH_LEFT + SEARCH_W + temp.map_or(0.0, |t| WEATHER_GAP + weather_width_lines(t, condition)) + SIDE_PAD
 }
 
 /// Whether the condition line may be shown on this display: with it, the middle island must still fit, whole, between the left island

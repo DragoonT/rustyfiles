@@ -25,6 +25,30 @@ pub const MAX_REASSERT: u8 = 3;
 /// How many times a failed registration is tried again after one announcement.
 pub const MAX_REGISTER_TRIES: u8 = 5;
 
+/// Explorer's taskbar window as it was when it took our registration: enough to tell a restart from a broadcast by someone else.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TrayId {
+    pub hwnd: isize,
+    pub pid: u32,
+    /// The owner's start time (FILETIME ticks).
+    pub start: u64,
+}
+
+/// Whether a `TaskbarCreated` announcement means that Explorer's taskbar is a NEW one (so our registration is gone with the old).
+///
+/// The announcement does not say who sent it. Our own tray host broadcasts it when it starts and stops, and so can any program;
+/// Explorer still holds our registration then. Answering such a broadcast with `ABM_REMOVE` and `ABM_NEW` is not harmless: every one of
+/// those messages goes through the tray host's window when it is on (the first `Shell_TrayWnd` is ours), the work area loses the band
+/// for the length of the round, and the band was lost for good in the user's trial of 2026-11-13 (the cause was not shown; the round
+/// is not needed). So the registration is kept when Explorer's taskbar window is provably the same one: we hold a registration, and
+/// the window (handle, owner, owner's start time) is the one that took it. Anything unknown counts as a restart: the old behaviour.
+pub fn announcement_is_restart(registered: bool, at_registration: Option<TrayId>, now: Option<TrayId>) -> bool {
+    match (registered, at_registration, now) {
+        (true, Some(then), Some(now)) => then != now,
+        _ => true,
+    }
+}
+
 /// The four toolbar calls. The real implementation sends them to Explorer's taskbar window (they block until it answers).
 pub trait AppBarCalls {
     /// `ABM_NEW`. False: Explorer did not take the registration.
@@ -342,6 +366,23 @@ mod tests {
         let (mut b, mut f) = (Band::new(), Fake::new());
         assert_eq!(b.apply(&mut f, Some(BAND), None), Applied::Unchanged);
         assert!(f.calls.is_empty());
+    }
+
+    #[test]
+    fn a_taskbar_announcement_from_another_program_is_not_a_restart_when_explorers_taskbar_is_the_same_one() {
+        let tray = TrayId { hwnd: 0x1001, pid: 8800, start: 7 };
+        // our own tray host broadcast it: Explorer's window is the one that took the registration
+        assert!(!announcement_is_restart(true, Some(tray), Some(tray)));
+        // a new Explorer: another process (and another window)
+        assert!(announcement_is_restart(true, Some(tray), Some(TrayId { hwnd: 0x2002, pid: 9900, start: 99 })));
+        // the same handle number, another process start (ids and handles are reused)
+        assert!(announcement_is_restart(true, Some(tray), Some(TrayId { start: 8, ..tray })));
+        assert!(announcement_is_restart(true, Some(tray), Some(TrayId { pid: 8801, ..tray })));
+        // nothing proves it is the same: the old behaviour
+        assert!(announcement_is_restart(true, None, Some(tray)));
+        assert!(announcement_is_restart(true, Some(tray), None));
+        // no registration held (suppressed while the dock owns the edge, or refused): the next apply decides
+        assert!(announcement_is_restart(false, Some(tray), Some(tray)));
     }
 
     #[test]

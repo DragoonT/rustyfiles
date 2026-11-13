@@ -4,6 +4,9 @@ Shell plan increment E1 (rows B11 to B13 of section 1.2, section 6 "the safety n
 "Windows görev çubuğunu gizle (deneysel)" / "Hide the Windows taskbar (experimental)", setting `shell_hide_taskbar`, default OFF. For a
 user who does not ask for it nothing changes: no thread, no window, no guard process, no file is written.
 
+While the hide is in force the dock also takes the bottom edge of the screen (the strip the hidden taskbar still reserved goes to the
+dock: see "The strip the taskbar reserved"). That is the behaviour of the switch itself; there is no environment variable for it.
+
 The honest lines the switch shows: experimental; Windows' taskbar and its notification-area icons are hidden while the dock runs and
 come back when it stops; the Windows key and Windows' own flyouts still open where the hidden taskbar was (turn on the Windows key switch as well); none of Windows' taskbar settings is changed; if rustyfiles stops unexpectedly a small helper
 (`rustyfiles-shellguard.exe`) brings the taskbar back within a second or two; if the helper is not running the taskbar is not hidden.
@@ -23,7 +26,8 @@ calls are listed under "What was not run".
   process-local state of Explorer's windows: it ends with the Explorer process, and a new Explorer shows its taskbar as always.
 * **The Start button window (class atom 0xC017)** of the Windows 10 taskbar is not hidden: on Windows 11 the taskbar is one XAML
   island inside `Shell_TrayWnd`; hiding the outer window hides it.
-* **The work area:** see "The strip the taskbar reserved".
+* **The work area:** the running session's, while the hide is in force: see "The strip the taskbar reserved". Never stored (no
+  `SPIF_UPDATEINIFILE`); the user's own rectangles are written down first and put back on every way out.
 
 ## The rules (all of them tested, see "Tests")
 
@@ -42,8 +46,8 @@ calls are listed under "What was not run".
 4. **The guard ending shows the taskbar.** A once-a-second look (the host's timer, only while the switch is on) notices that the guard
    process ended and shows the taskbar at once; hiding stops until a guard is confirmed again (backoff 5 s, 15 s, 60 s; forgotten
    after the guard stayed up two minutes).
-5. **Leaving restores, then tells.** Switch off or quit: windows shown, work areas put back, record and flag removed, only then the
-   guard is told (its event) and exits. "Shown" is not the answer of the show call: the call is queued in Explorer's own thread (it
+5. **Leaving restores, then tells.** Switch off or quit: windows shown, work areas put back, the dock registers its own band with
+   Explorer again, record and flag removed, only then the guard is told (its event) and exits. "Shown" is not the answer of the show call: the call is queued in Explorer's own thread (it
    must not wait for an Explorer that is hung), so `Ok` only means "asked". The host WAITS (half a second at most) until the windows
    are visible, and counts a window that did not come back as a failure. If a window cannot be shown the record stays and the guard
    is NOT told: it stays as the safety net.
@@ -129,6 +133,17 @@ The beside role existed before this increment (it showed the taskbar by class na
 | a crashed host AND a dead guard (End process tree, power cut), switch off at the next start | the one-shot stale check undoes the record | `shell::taskbar_hide::the_wiring_starts_hides_turns_off_and_looks_for_a_stale_record_once_when_the_setting_is_off`, `a_record_in_the_state_file_is_seen_whether_or_not_it_can_be_read`, `the_controllers_startup_undoes_a_record_left_by_a_crashed_host_whatever_the_setting_is` (the controller), `shell::taskbar_hide::the_stale_check_starts_the_worker_only_for_a_state_file_that_holds_a_record` (the thread and the order) |
 | the record is only partly readable | the sweep (nothing orphaned) | `a_record_that_is_only_partly_readable_is_swept_whole_so_no_recorded_window_is_orphaned` |
 | the guard's events were taken by an older guard (names reused) | refused (`ERROR_ALREADY_EXISTS`), names counted per process | `an_event_name_that_is_in_use_is_refused_not_shared`, `the_guard_counter_belongs_to_the_process_so_a_new_world_never_reuses_a_name` |
+| the hide is asked for but does not happen (Explorer busy; the call is queued) | the hide is not CONFIRMED: no work area is written down or set, the dock keeps its band; the next tick hides again | `tbedge_tests::nothing_is_set_while_the_hide_is_not_confirmed`, `a_hide_that_takes_effect_while_it_is_waited_for_is_a_confirmed_hide` |
+| the dock does not let go of its band | after 3 s it gets its band back, nothing is set, the try is made again after 5 s, 15 s, 60 s | `tbedge_tests::a_dock_that_never_lets_go_gets_its_band_back_and_is_asked_again_after_a_pause` |
+| the originals cannot be written | nothing is changed (not the dock either), tried again after the pause | `tbedge_tests::originals_that_cannot_be_written_mean_the_dock_is_not_touched_and_the_try_is_made_again_later` |
+| the dock says it let go but Explorer did not take the removal (the tray host's route) | the work area still holds the band: nothing is set, after 3 s the dock gets its band back, tried again later | `tbedge_tests::a_removal_that_explorer_did_not_take_sets_nothing_and_the_dock_gets_its_band_back` |
+| the hider starts before the dock has said what its band is | the taskbar is hidden, the edge waits for the dock's word and is then taken once with the right band | `tbedge_tests::nothing_is_taken_until_the_dock_has_said_what_its_band_is` |
+| a monitor becomes ours after the edge was taken (plugged in, its taskbar hidden by a later pass) | its work area is written down before the first change; if that fails it is not touched | `tbedge_tests::a_monitor_that_becomes_ours_after_the_edge_was_taken_is_written_down_before_its_work_area_is_set`, `a_new_monitor_whose_original_cannot_be_written_is_not_touched` |
+| resolution, scale or monitors change while hidden | at the way out the written-down rectangles are checked against the monitors as they are: worked out again from the taskbar, or left out for a monitor that has gone | `tbwork::tests::a_monitor_that_changed_resolution_gets_a_work_area_worked_out_from_its_taskbar_not_the_old_rectangle`, `tbedge_tests::a_resolution_change_while_hidden_is_not_answered_with_a_rectangle_of_the_old_screen`, `a_monitor_that_was_unplugged_while_hidden_gets_no_work_area_and_its_rectangle_lands_nowhere_else` |
+| Explorer restarts and the new taskbar cannot be hidden | no taskbar of ours is hidden: the dock gets its band back at once, the edge is taken again when a hide goes through | `tbedge_tests::a_taskbar_that_cannot_be_hidden_after_an_explorer_restart_gives_the_dock_its_band_back`, `the_same_while_the_dock_is_still_letting_go` |
+| the taskbar is at the top or a side, or an auto-hiding one is up | the bar at the top or a side: hidden, edge and work areas left alone; the auto-hiding one: the whole monitor is what is written down | `tbwork::tests::a_taskbar_at_the_top_or_a_side_is_left_alone`, `tbedge_tests::a_taskbar_on_the_left_is_hidden_but_the_edge_and_the_work_areas_are_left_alone`, `an_auto_hiding_taskbar_that_is_up_is_put_back_as_the_whole_monitor` |
+| the host crashes with the edge taken (the work area is ours) | the guard shows the taskbar and sets the written-down rectangles (the monitor less the taskbar's strip, no band of the dock's: the dock died with the host) | `tbbeside_tests::host_and_guard_together_a_crash_of_the_host_with_the_edge_taken_gives_the_users_work_areas_back` |
+| a work area that cannot be put back, or a show that never happens, at switch-off | record, edge and guard stay; retried | `tbedge_tests::work_areas_that_cannot_be_put_back_keep_the_record_the_edge_and_the_guard`, `a_show_that_never_happens_leaves_the_edge_the_dock_and_the_guard_as_they_are` |
 | **NOT answered:** the host is alive but hung (a deadlock) | nothing: the guard waits on the process handle only, there is no heartbeat. The user can still reach Task Manager (Ctrl+Shift+Esc) and end the host; the guard then restores. A heartbeat would need a poll in the guard and a decision about what "hung" means; left for a decision. | - |
 | **NOT answered:** "End process tree" on the host ends the guard (its child) too | the record stays; the next start of the host (any switch value) undoes it; by hand: the rescue command below, or restart Explorer from Task Manager | the stale-record rows above |
 | a panic in the host | the panic hook shows every hidden taskbar window of Explorer's (queued, returns at once) before unwinding; a panic inside the controller is caught, the taskbar shown, the feature stops | code in `rf_win::taskbar_hide` (`install_panic_restore`, `Ctx::guarded`); the sweep itself: `tbmodel::the_sweep_shows_only_hidden_taskbars_of_explorer` |
@@ -138,35 +153,108 @@ The beside role existed before this increment (it showed the taskbar by class na
 | the session ends | guard exits touching nothing; the host's window restores on `WM_ENDSESSION` | `the_session_ending_leaves_everything_as_it_is` |
 | the old guard hears "done" after the new record exists | exits without looking | `told_means_done_even_if_a_record_has_already_been_written_for_the_next_guard` |
 
-## The strip the taskbar reserved (the work area)
+## The strip the taskbar reserved (the work area): the dock takes the bottom edge
 
-**Not determined without running:** whether a hidden `Shell_TrayWnd` keeps its strip out of the work area. Other bars report that it
-does (the work area is Explorer's own bookkeeping of the registered toolbars, the taskbar being one; hiding its window does not
-unregister it). With the switch on the user then has the dock floating above an empty strip of the taskbar's height, and maximised
-windows stop above that strip.
+**What the first run on the user's PC determined (2026-11-13, 2560x1440 at 100 percent, Explorer running).** A hidden taskbar KEEPS its
+strip. With the taskbar hidden the primary work area was 2560x1314: 48 px for the taskbar's strip plus 78 px for the dock's own band
+above it, so the dock floated 46 px above the screen's bottom with the wallpaper showing under it. Both taskbar windows were hidden, the
+guard ran, and killing the dock brought the taskbars back in 110 ms. The user: "altta boşluk var hala"; "doğru çözümü yapalım".
 
-**What was chosen:** the least persistent way, and only on request.
+**What the switch does now.** While OUR hide is in force and CONFIRMED, the dock takes the bottom edge:
 
-* By default (`RUSTYFILES_TASKBAR_WORKAREA` not set) the work area is not touched at all. The strip stays reserved. This is the first
-  step of the first careful try.
-* With `RUSTYFILES_TASKBAR_WORKAREA=1` (second step): `SystemParametersInfo(SPI_SETWORKAREA)` WITHOUT `SPIF_UPDATEINIFILE`, i.e. the
-  RUNNING SESSION's work area, not a stored value (Explorer recomputes it whenever a toolbar changes or it restarts; nothing is
-  written to the profile). It is changed only where the geometry is unambiguous: the monitor's work area ends exactly (±1 px) where
-  the hidden taskbar begins, on any of the four edges; then it grows to the monitor's edge (`tbmodel::giveback`). When another
-  toolbar lies between (our own dock's reserved band does when `dock_reserve` is on, which is the default) nothing is changed: which
-  toolbar lies outside which cannot be told without running. So with the defaults the strip stays and the second step does nothing;
-  with `dock_reserve = false` it gives the strip back.
-* The user's own rectangles are written to `original_work_areas` (a rectangle saved by an unfinished run is kept, never overwritten by
-  an already changed one) and `pending_restore` is set BEFORE the first one is changed. They are put back on setting off, on quit,
-  by the guard on host death, and the guard's own start-up restore. Explorer taking the strip back is answered (debounced 300 ms) at
-  most four times a minute, then left alone, so the two cannot fight for ever.
-* The rectangles are PHYSICAL pixels (the host measures them on a per-monitor-aware thread). The guard has no DPI manifest, so
-  `workarea::set_work_area` makes its thread per-monitor-aware for the one call and puts it back; without that, display scaling other
-  than 100 percent would have the guard restore a work area from coordinates Windows reads as virtualised.
-* Not done: moving the dock's own band (it asks `ABM_QUERYPOS` for the whole bottom edge and Explorer takes away what toolbars hold;
-  whether a hidden taskbar still counts is exactly the unknown), and `ABM_SETSTATE` (see above).
+* the primary monitor's work area is the monitor less the dock's own band when `dock_reserve` is on, and the whole monitor when it is
+  off; on every other monitor whose taskbar we hid it is the whole monitor (`rf_shellguard::tbwork::target_for`). Session only;
+* the dock's islands are placed from the monitor's bottom edge (`rf_win::dock::system::take_edge`: the dock's band is the bottom strip
+  of the monitor, an empty one with `dock_reserve` off), the same way the keeper for a session with NO Explorer places them
+  (`set_own_band`);
+* the dock's own desktop-toolbar registration with Explorer (`dock/band.rs`) is given back and STAYS given back while the edge is ours
+  (a second band on top of ours would be a second strip), and registered again when the taskbar is shown again;
+* "the monitor less a band" is one rule for the two owners of the work area (`tbwork::monitor_less_band`; `shellhost::workarea::target`
+  calls it). The keeper for NO Explorer (`shellhost/workarea.rs`, behind `RUSTYFILES_SET_WORKAREA=1`) is unchanged and not merged with
+  this: with no shell window it is the owner, beside Explorer the hide's controller is.
 
-The probe prints what the rule WOULD do on this machine (run it before anything else).
+**Where it applies, and where it does not** (`tbwork::plan_edge`, tested). Only a monitor whose taskbar we hid, only a taskbar on the
+BOTTOM edge (Windows 11 has no other; a bar at the top or a side is left alone, and the dock keeps its own registration), and only
+where the work area there is what a hidden taskbar leaves (the monitor less its strip, within one pixel), the whole monitor (Explorer
+did not reserve the strip), or, on the primary monitor, the monitor less the strip less a band cut from the bottom (the dock's
+registration, not yet given back). Anything else means another toolbar reserves room there (a third-party bar, a sidebar): that monitor
+is left alone, the strip stays, a warning says so once, and the dock keeps its own registration if it is the primary monitor that is
+concerned. What is written down as the user's own work area is what the taskbar's strip leaves, except when the work area was read as
+the whole monitor (an auto-hiding taskbar that happens to be up reserves nothing): then the whole monitor is written down, not a
+guessed strip.
+
+**The order of the steps** (`tbctl`, the named tests are in `tbedge_tests.rs`):
+
+On the way in: guard confirmed, record written, windows hidden, the hide CONFIRMED (`wait_hidden`: the call is queued in Explorer's
+thread, so `Ok` is only "asked"), the user's own work areas written to `original_work_areas` with `pending_restore` (what the user has
+WITHOUT the dock: the monitor less the taskbar's strip, never a band of ours), the dock told to take the edge and let go of its band,
+the work areas set once the dock has let go AND the work area shows that Explorer really dropped the band (a look every 100 ms; no
+blocking wait on the host's thread, which must answer Explorer's broadcasts meanwhile), at most 3 s, else the dock gets its band back and
+the try is repeated after 5 s, 15 s, 60 s. The dock's own word ("registration removed") is only what it SENT: with the tray host on its
+messages go to Explorer through the host's window, and a removal that Explorer did not take would leave the band in the work area, so a
+work area set then would be a second strip. While the primary monitor's work area is still the monitor less the strip less a band
+(`MonitorPlan::band_held`), nothing is set. NOTHING is set, or written down, for a window that was only asked to hide, and the edge is
+not taken at all until the dock has said what its band is (`Config::band_known`; "no band" is also a word): a hider that starts before
+the dock would otherwise give the whole monitor to maximised windows over the dock and set the work area a second time when the band
+arrives.
+
+A monitor that becomes ours LATER (plugged in, its taskbar hidden by a later pass) has its own work area written down before the first
+change to it (`write_down_originals`, in front of every set; the first record of a monitor is kept). If that cannot be written nothing
+is set on it. Explorer restarting with a new taskbar that cannot be hidden (the hide is lost again) leaves no taskbar of ours hidden:
+the dock then gets its band back at once (`release_unheld_edge`) instead of floating, with no band, over a visible taskbar; the edge is
+taken again when a hide goes through.
+
+On every way out (switch off, quit, the end of the session, the guard lost, a retry of an owed restore): windows shown and confirmed
+visible, the written-down work areas put back - each checked against the monitors and taskbars as they are by then
+(`tbwork::work_restore`): a rectangle that is still what that monitor's taskbar leaves (or the whole monitor) is put back as written;
+after a resolution, scale or taskbar-size change it is worked out again as the monitor less the taskbar's strip; the rectangle of a
+monitor that has gone is left out, so that it never lands on another monitor; with no monitor listed at all the rectangles go back as
+written - then the dock registers its band with Explorer again (so Explorer computes the band's
+place from the restored area, not the other way round), then the record and the originals are removed, then the guard is told. Any step
+that fails keeps everything after it where it is and the restore is owed (retried, growing pauses). If the host dies the guard shows
+the windows and sets the written-down rectangles (checked the same way, against the monitors it reads itself on a per-monitor-aware
+thread); the dock's registration died with the host.
+
+While the edge is ours: a work area that Explorer takes back (it recomputes it when a toolbar changes, on a display change, after a
+restart) is answered after 300 ms, at most four times a minute, and then left alone so the two cannot fight for ever. The dock's
+band changing (its size, `dock_reserve`) moves the edge and the work area (`set_band`). `TaskbarCreated` that is not an Explorer restart
+(our own tray host broadcasts it when it starts and stops) no longer makes the controller forget the windows it hid; before, the taskbar
+stayed hidden and unaccounted for (`explorer_restarted` now keeps what is still the same window).
+
+**The four combinations of (taskbar hidden by us) x (tray host on)** and who sets the band:
+
+| hidden by us | tray host | the dock's band | the work area | state |
+|---|---|---|---|---|
+| no | off | the dock registers with Explorer (`ABM_*`, as always) | Explorer's | as before this increment |
+| no | on | the dock registers with Explorer; its messages land in the tray host's window (the first `Shell_TrayWnd`) and are passed on untouched; a `TaskbarCreated` of our own tray host no longer makes the dock remove and register again | Explorer's | the route is NOT verified (see below) and nothing here changes it; `appbar_own` and `appbar_new_refused` in the host's counts show what became of the dock's messages |
+| yes | off | none registered; the host owns the edge | the host's (`tbwork`) | by construction; real run: the lead |
+| yes | on | none registered; the one message that still goes through the tray host is the removal of an earlier registration, and its effect is READ from the work area, not assumed (`band_held`): a removal that did not take means nothing is set and the dock gets its band back | the host's | by construction and by the work-area check; real run: the lead (this is the combination in which the band was lost: 2560x1392 and the dock at the very bottom) |
+
+**What the tray host does with the dock's toolbar messages (read from the code).** `SHAppBarMessage` sends to the first window of class
+`Shell_TrayWnd`, which is the tray host's window while it is on (the counter `appbar` was 30 in the trial: they did arrive). The host
+passes a `dwData = 0` block to Explorer's window UNTOUCHED, before any parse of its own, and returns Explorer's answer; it does not look
+at who the sender is. By the code the dock's messages therefore reach Explorer's real tray window, and the reading "Explorer refuses
+them" is NOT supported: `explorer_refused` (11 in the trial) counts refused ICON requests only, and nothing counted what Explorer
+answered to an appbar block. What the code does show is a churn that the tray host's broadcasts caused: each start or stop of the host
+broadcasts `TaskbarCreated`, the dock took that for an Explorer restart and answered it with a new round of `ABM_NEW` / `ABM_REMOVE` /
+`ABM_NEW` / `ABM_QUERYPOS` / `ABM_SETPOS` (five messages, through the tray host, with the work area briefly without the band), and
+only that round could lose the band. `dock::system` now keeps the registration when Explorer's taskbar window is provably the same one
+(`band::announcement_is_restart`, tested); the cause of the lost band was not shown by a run, and the combination (not hidden, tray host
+on) stays unverified until the lead runs it. Two new counts, `appbar_own` (the dock's own messages that came through the tray host) and
+`appbar_new_refused` (registrations Explorer answered with 0), are there to show it.
+
+*A reading that was proposed and is NOT adopted:* that the block the dock's `SHAppBarMessage` builds is made for the tray host's own
+process (the first `Shell_TrayWnd`), so that Explorer cannot use the shared memory it names, and that the host must therefore build a
+new block for Explorer. Nothing in the code or in the trial shows it, the block carries the SENDER's process id exactly so that the
+receiver can reach back into it, and rebuilding a block blind (`SHAllocShared` and its undocumented siblings) would risk the route that
+may be working. What is done instead is route-agnostic: the host never trusts the dock's word that a registration is gone, it reads the
+work area (above). If the lead's run shows `appbar_new_refused` growing with the tray host on and the taskbar not hidden, rebuilding
+the block in the host is the next step, and it is a change to `trayhost` alone.
+
+**Cost.** Switch off (the default): nothing, no thread, no window, no file. Switch on: one extra pass over the monitors per second while
+the hide is in force (`EnumDisplayMonitors`, a few small calls), one `EnumWindows` pass per `TaskbarCreated` heard by the dock.
+
+The probe prints what the rule WOULD do on this machine with a 78 px band and with none (run it before anything else).
 
 ## Read-only probe
 
@@ -181,20 +269,22 @@ running the rule would give back both 48 px strips.
 
 | File | Role |
 |---|---|
-| `rf-shellguard/src/tbmodel.rs` | pure: window identity, `judge`, `plan_restore`, `plan_sweep`, `is_stale`, the gate `may_hide`, `giveback`, `Throttle` |
+| `rf-shellguard/src/tbmodel.rs` | pure: window identity, `judge`, `plan_restore`, `plan_sweep`, `is_stale`, the gate `may_hide`, `originals_to_save`, `Throttle` |
+| `rf-shellguard/src/tbwork.rs` | pure: the work area while our hide is in force: `monitor_less_band`, `target_for`, `plan_edge` (what is there on each monitor, what is wanted, what the user has without us, whether Explorer still holds a band of the dock's), `work_restore` (what of the written-down rectangles may be put back on the screen as it is now) |
 | `rf-shellguard/src/tbctl.rs` | pure: the host's `Controller` over the `HideWorld` trait |
-| `rf-shellguard/src/tbfakes.rs`, `tbctl_tests.rs`, `tbbeside_tests.rs` | the pretend desktop and the named tests |
+| `rf-shellguard/src/tbfakes.rs`, `tbctl_tests.rs`, `tbedge_tests.rs`, `tbbeside_tests.rs` | the pretend desktop (it models Explorer's work area and the dock's registration) and the named tests |
 | `rf-shellguard/src/beside.rs` | the guard's side: handshake, stale restore, told, restore |
 | `rf-shellguard/src/statefile.rs` | `hidden_taskbar` (get/set/clear), unknown keys survive the guard's rewrites |
 | `rf-shellguard/src/win/tbwin.rs` | THE ONLY FILE THAT HIDES OR SHOWS A REAL WINDOW (and the real list / process queries) |
 | `rf-shellguard/src/win/link.rs`, `win/workarea.rs` | the guard's end of the events; the work-area setter |
 | `rf-shellguard/tests/tb_static.rs`, `real_link.rs`, `examples/taskbar_probe.rs` | source scans; the events against events the test creates; the probe |
-| `rf-win/src/taskbar_hide.rs` | the host's thread, its hidden window (TaskbarCreated, display, work area, end of session), the real world, the panic net |
-| `rf-app/src/shell/taskbar_hide.rs` | follows the setting (`decide`: start, turn off, the one-shot stale check); three one-line hooks in `dock/host.rs` |
+| `rf-win/src/taskbar_hide.rs` | the host's thread, its hidden window (TaskbarCreated, display, work area, end of session, the 100 ms edge look), the real world, the panic net |
+| `rf-win/src/dock/system.rs`, `dock/band.rs` | the dock's side of the edge (`take_edge`, `give_back_edge`, `appbar_held`) and the rule for a `TaskbarCreated` that is not a restart |
+| `rf-app/src/shell/taskbar_hide.rs` | follows the setting (`decide`: start, turn off, the one-shot stale check) and the dock's band (`band_changed`); four one-line hooks in `dock/host.rs` |
 
 ## Tests
 
-`cargo test --offline -p rf-shellguard` (the controller, the guard, the state file, the rules, the static scans, the events),
+`cargo test --offline -p rf-shellguard` (the controller, the edge, the guard, the state file, the rules, the static scans, the events),
 `cargo test --offline -p rf-win --lib taskbar_hide` and `-p rf-app --lib shell::taskbar_hide`. No test starts the thread or the
 window, hides, shows or messages a window of Explorer's, writes the registry or changes a Windows setting; temp folders only.
 
@@ -207,14 +297,25 @@ window, hides, shows or messages a window of Explorer's, writes the registry or 
 * `tbwin::wait_visible` (the half-second look that decides whether a restore happened) and `SetThreadDpiAwarenessContext` around
   `SPI_SETWORKAREA`.
 * The guard started by the host with the real events and a real host process (`real_link.rs` runs the events alone).
-* `SPI_SETWORKAREA` (apply and restore).
+* `SPI_SETWORKAREA` (apply and restore), and the dock's side of the edge: `dock::system::take_edge` / `give_back_edge` against a real
+  `DockSystem` (the registration removed and registered again, `LayoutChanged` and the islands moving to the monitor's bottom edge),
+  `tbwin::wait_hidden`, the 100 ms edge timer of the host's thread.
+* The tray host's route for the dock's own `SHAppBarMessage` calls (not hidden, tray host on), and the effect of `announcement_is_restart`
+  against a real `TaskbarCreated` of the tray host.
+* The guard's reading of the monitors and the taskbars before it puts the work areas back (`win/workarea.rs`: `EnumDisplayMonitors`,
+  `GetMonitorInfoW`, the taskbar list, all on a per-monitor-aware thread), and the real `SPI_SETWORKAREA` with a rectangle that was worked
+  out again after a resolution change or left out for a monitor that is gone. The rule itself (`tbwork::work_restore`) is tested.
+* The release of the edge after an Explorer restart whose new taskbar cannot be hidden, with the real dock (`give_back_edge`
+  registering the band again).
 * Everything about Explorer's reaction: see the questions below.
 
 ## Questions only a run can answer (the lead's checklist)
 
 1. Does `SW_HIDE` of the outer `Shell_TrayWnd` really remove the XAML taskbar from the screen (the island has its own composition), on
    both monitors, and does it stay hidden (how often does Explorer show it again: the once-a-second look is the answer)?
-2. Does a hidden taskbar still reserve its strip (look at the probe's work area, or maximise a window)?
+2. DETERMINED by the first run (2026-11-13): a hidden taskbar still reserves its strip. What is left to see: with the switch on, the work
+   area is 2560x1362 (`dock_reserve` on, 78 px band) or 2560x1440 (off), the islands stand 10 px above the screen's bottom edge, and a
+   maximised window ends exactly where the dock's band begins.
 3. Where do Windows' own flyouts open (Start, Win+A, the clock, the volume) when their anchor is hidden? They are anchored by
    Explorer to the taskbar's position. The Windows key opens Windows' Start there unless `shell_win_key` is on; the switch's text
    says so and suggests turning that one on as well. Not determined: whether the flyouts are placed oddly or partly off-screen.
@@ -223,7 +324,7 @@ window, hides, shows or messages a window of Explorer's, writes the registry or 
 5. Win+D, Win+B, Win+T, full-screen applications, Aero Peek and hover previews of the hidden window.
 6. Does `TaskbarCreated` arrive at a window that is not shown (it should: broadcast to top-level windows) and are the follow-ups at
    0.7 s / 3.2 s enough for the secondary taskbars?
-7. With the dock's `dock_reserve` on, does the dock's band move down or stay above the empty strip? (Plan: unchanged.)
+7. DETERMINED: the band stayed above the empty strip (the strip was kept). Now: the dock sits on the bottom edge; see 2.
 8. `EVENT_OBJECT_SHOW` as a replacement for the one-second timer.
 
 ## The steps of a first careful try (for a human)
@@ -253,8 +354,9 @@ is the test. Keep Task Manager (Ctrl+Shift+Esc) open before you start.
    Also try, with the switch on, ending the host AND the guard together ("End process tree" on the host in Task Manager): the
    taskbar stays hidden and the record stays. Start the test copy again, with the switch OFF: within a second the log says it found
    a record of an earlier run, and the taskbar is back.
-9. Only if all of that was right: set `RUSTYFILES_TASKBAR_WORKAREA=1` and repeat step 5; maximise a window (does it use the strip?);
-   switch off and see that the original work area is back (the probe shows it).
+9. With the switch on (step 5) the work area is already the monitor less the dock's band: run the probe, maximise a window (it stops
+   where the dock's band begins, no strip under the dock); switch off and see that the work area is back as it was (the probe shows it)
+   and the dock is above the taskbar again. Also with `dock_reserve` off, and with the tray host switched on and off while hidden.
 10. Optional, with your OK: restart Explorer from Task Manager (Windows Explorer > Restart) with the switch on: the new taskbar is
     hidden again within a few seconds.
 11. **If anything is stuck:** `target\debug\rustyfiles-shellguard.exe --beside-guard 999999 --state-dir %TEMP%\rf-e1` (restores from the

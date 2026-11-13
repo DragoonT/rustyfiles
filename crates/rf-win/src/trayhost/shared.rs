@@ -77,6 +77,8 @@ counters!(
     local_registered,
     local_sent_by_others,
     raised,
+    appbar_own,
+    appbar_new_refused,
 );
 
 pub(crate) fn bump(c: &AtomicU64) {

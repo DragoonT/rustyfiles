@@ -5,27 +5,28 @@
 //! small round corners): its rectangle grows from the island's to the GROWN rectangle (the island's rectangle and the panel's, taken
 //! together: the panel's content on top and the island's own row at the bottom) while one corner of it, the one the island is anchored
 //! by, stays exactly where it is (the bottom left corner for the left island, the bottom right one for the right island). The
-//! corner radius eases from the island's to the panel's with the rectangle. What the island shows beside its logo (or, for the right
-//! island, not at all) fades out over the first half of the motion, the panel's content fades in over the second half, and the search
-//! field travels from its place in the island to the top of the panel.
+//! corner radius eases from the island's to the panel's with the rectangle. NOTHING of the island's row fades or moves: the whole row
+//! (the left island's logo, search field and weather; the right island's network and volume symbols, clock, bell and tray strip) stays
+//! exactly where it is and is the bottom row of the grown glass. The panel's content fades in over the second half of the motion.
 //!
 //! ONE NUMBER DRIVES IT. `s`, the position along the motion, 0 (the island) to 1 (the panel). Opening moves `s` up at 1 / 220 ms,
 //! closing moves it down at 1 / 160 ms, and a reversal at any moment simply turns the direction, so the motion is continuous in `s`
 //! and "the same motion backwards" is literally that: the glass follows `u = ease_out(s)`, so it leaves the island fast and settles
-//! gently when opening, and the way back is the same curve run the other way (it leaves the panel gently and arrives fast). The fades
-//! follow `s` itself, which is time: the island's other content is gone by the middle of the time, the panel's content is there from
-//! the middle on, and in a closing the content goes first and the glass shrinks after it.
+//! gently when opening, and the way back is the same curve run the other way (it leaves the panel gently and arrives fast). The
+//! content's fade follows `s` itself, which is time: the panel's content is there from the middle on, and in a closing the content
+//! goes first and the glass shrinks after it.
 //!
-//! WHAT IS HERE. [`Spec`] (the three rectangles, the corner that stays, the radii and the field's two places) turns an `s` into a
-//! [`Frame`]; [`Motion`] turns the clock into an `s`; [`arm_done`] decides when the clock may start (the panel's glass must be running
-//! or have had its time); [`island_fade`] says what of the island stays. [`set_frameless`] is the one call into Windows: the panel's
-//! window cuts its own corners here (its glass and its window region do), so the system's rounding and border are put away for it.
+//! WHAT IS HERE. [`Spec`] (the three rectangles, the corner that stays and the radii) turns an `s` into a [`Frame`]; [`Motion`] turns
+//! the clock into an `s`; [`arm_done`] decides when the clock may start (the panel's glass must be running or have had its time);
+//! [`Stays`] says what the panel draws in the island's row. [`set_frameless`] is the one call into Windows: the panel's window cuts
+//! its own corners here (its glass and its window region do), so the system's rounding and border are put away for it.
 //!
-//! HOW THE RIGHT ISLAND'S PANELS USE IT. `Spec::new(island, panel, Corner::BottomRight, ..)` with the right island's glass and
-//! the panel `panel::place` gives with `Side::Right`; `Stays::Row` (the whole row of the island, network, volume, clock, bell and the
-//! tray strip, stays as it is and nothing of it fades); no field (`with_field` is simply not called). Everything else, the clock, the
-//! glass, the region, the island's glass being put away while the panel stands, is the host's and does not know which island it is.
-//! The rules about WHICH panel (a press on another button of the row, whether a panel may grow on this screen) are `grow_panels`.
+//! HOW THE PANELS USE IT. The right island's: `Spec::new(island, panel, Corner::BottomRight, ..)` with the right island's glass and
+//! the panel `panel::place` gives with `Side::Right`; `Stays::Row` (the panel draws nothing in the row). The Start panel's: the left
+//! island, `Corner::BottomLeft`, `Stays::RowAndField` (the panel draws its search field in the row, where the island's field stands).
+//! Everything else, the clock, the glass, the region, the island's glass being put away while the panel stands, is the host's and
+//! does not know which island it is. The rules about WHICH panel (a press on another button of the row, whether a panel may grow on
+//! this screen) are `grow_panels`.
 
 use super::layout::Rect;
 use super::panel::Side;
@@ -35,8 +36,6 @@ use super::startpage;
 pub const OPEN_MS: u32 = 220;
 /// Closing takes this long (ms) from the panel back to the island.
 pub const CLOSE_MS: u32 = 160;
-/// The island's other content (the weather chip) is gone at this `s`.
-pub const ISLAND_FADE_END: f32 = 0.5;
 /// The panel's content starts to appear at this `s` and is whole at 1.
 pub const CONTENT_FADE_START: f32 = 0.5;
 /// The longest the clock waits for a glass the engine has ACCEPTED and is still starting (ms), before it gives the engine up and starts
@@ -46,8 +45,10 @@ pub const CONTENT_FADE_START: f32 = 0.5;
 pub const ARM_ENGINE_MAX_MS: u64 = 1000;
 
 /// What the Start panel gives up when it grows out of the left island: its own bottom row (the line above it and the 64 px row with the
-/// account, the gear and the power button). The glass's bottom row is the island's row then, and those three stand in IT
-/// (`rf-app`'s `dock/grow_row.rs`), so the glass is this much shorter than the panel was and the content above keeps the height it had.
+/// account, the gear and the power button). The glass's bottom row is the island's row then (the logo, the search field and the
+/// weather), and the account, the gear and the power button stand in a header at the TOP of the panel instead, where the panel's search
+/// field was (`rf-app`'s `dock/grow_head.rs`), so the glass is this much shorter than the panel was and the content between the header
+/// and the island's row keeps the height it had.
 pub const OWN_ROW_H: f32 = startpage::DIVIDER_H + startpage::FOOTER_H;
 
 /// The height (logical px) a panel that gives up its own bottom row is placed with, from the height it would have had with it: the
@@ -83,30 +84,21 @@ impl From<Side> for Corner {
     }
 }
 
-/// What of the island's own content stays while its glass has become the panel's.
+/// What the panel draws in the island's row while the island's glass has become the panel's. In both cases the WHOLE row stays as it is
+/// (nothing fades, nothing moves) and is the bottom row of the grown glass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stays {
-    /// Only the Windows logo (the left island): the rest of the row, the weather, fades; the search field travels to the panel.
-    Logo,
-    /// The whole row (the right island's network, volume, clock and bell): nothing fades and nothing travels.
+    /// The panel draws nothing in the row (the right island's network, volume, clock, bell and tray strip are the island's own).
     Row,
+    /// The panel draws its search field in the row, exactly where the island's own field stands (the left island: logo, field, weather).
+    /// The island does not draw its field meanwhile; the panel's is the one with the keyboard.
+    RowAndField,
 }
 
-/// What the island shows at a moment of the motion.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Fade {
-    /// The opacity of what is neither the logo nor the field (the weather chip): 1 at rest, 0 from the middle of the motion on.
-    pub others: f32,
-    /// The island's own search field is not drawn: the panel's field stands in its place and travels.
-    pub field_hidden: bool,
-}
-
-/// What the island draws while it is part of the grown glass. `has_field`: the panel has a field that travels (else nothing of the
-/// row is hidden because of it).
-pub fn island_fade(stays: Stays, frame: &Frame, has_field: bool) -> Fade {
-    match stays {
-        Stays::Logo => Fade { others: frame.island_content, field_hidden: has_field },
-        Stays::Row => Fade { others: 1.0, field_hidden: false },
+impl Stays {
+    /// The island's own search field is not drawn: the panel's field stands in its place.
+    pub fn field_is_the_panels(self) -> bool {
+        self == Stays::RowAndField
     }
 }
 
@@ -125,7 +117,7 @@ pub fn ease_out(x: f32) -> f32 {
     1.0 - (1.0 - x).powi(3)
 }
 
-/// The three rectangles of a growth (device px, screen coordinates) and how the glass and the field move between them.
+/// The three rectangles of a growth (device px, screen coordinates) and how the glass moves between them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spec {
     /// The island's glass at rest.
@@ -136,8 +128,6 @@ pub struct Spec {
     /// The corner radius of the island's glass and of the panel's, device px.
     pub radius_from: f32,
     pub radius_to: f32,
-    /// The search field in the island and in the panel (screen coordinates), when there is one that travels.
-    pub field: Option<(FRect, FRect)>,
 }
 
 /// The rectangle that holds both: what the glass is once it has grown. The panel sits above its island, so this is the panel's
@@ -154,13 +144,7 @@ fn frect(r: Rect) -> FRect {
 impl Spec {
     /// The growth of `island` into `panel` anchored by `corner`. Radii in device px.
     pub fn new(island: Rect, panel: Rect, corner: Corner, radius_from: f32, radius_to: f32) -> Spec {
-        Spec { island, grown: grown_rect(island, panel), corner, radius_from: radius_from.max(0.0), radius_to: radius_to.max(0.0), field: None }
-    }
-
-    /// The search field that travels: where it is in the island and where it ends up in the panel (screen coordinates).
-    pub fn with_field(mut self, from: FRect, to: FRect) -> Spec {
-        self.field = Some((from, to));
-        self
+        Spec { island, grown: grown_rect(island, panel), corner, radius_from: radius_from.max(0.0), radius_to: radius_to.max(0.0) }
     }
 
     /// Whether the island's anchored corner is also a corner of the grown glass (the "corner stays fixed" promise; false only when the
@@ -190,8 +174,6 @@ impl Spec {
             rect,
             radius,
             content: smoothstep(CONTENT_FADE_START, 1.0, s),
-            island_content: 1.0 - smoothstep(0.0, ISLAND_FADE_END, s),
-            field: self.field.map(|(from, to)| [lerp(from[0], to[0], u), lerp(from[1], to[1], u), lerp(from[2], to[2], u), lerp(from[3], to[3], u)]),
         }
     }
 
@@ -212,12 +194,8 @@ pub struct Frame {
     pub rect: FRect,
     /// Its corner radius, device px.
     pub radius: f32,
-    /// The opacity of the panel's content (the pages, the account row).
+    /// The opacity of the panel's content (the header, the pages).
     pub content: f32,
-    /// The opacity of what the island shows beside its logo.
-    pub island_content: f32,
-    /// The search field's rectangle, screen coordinates, when it travels.
-    pub field: Option<FRect>,
 }
 
 /// The panel's wash over its glass: how opaque it is, and whether it is the PLAIN fill (the dense one a window with no glass paints) or
@@ -557,11 +535,11 @@ mod tests {
                     let first = spec.at(0.0);
                     assert_eq!(first.rect, frect(island), "{dpi} {s:?} {side:?}");
                     assert_eq!(first.radius, spec.radius_from.min(island.height() as f32 / 2.0));
-                    assert_eq!((first.content, first.island_content), (0.0, 1.0));
+                    assert_eq!(first.content, 0.0);
                     let last = spec.at(1.0);
                     assert_eq!(last.rect, frect(spec.grown));
                     assert_eq!(last.radius, spec.radius_to);
-                    assert_eq!((last.content, last.island_content), (1.0, 0.0));
+                    assert_eq!(last.content, 1.0);
                 }
             }
         }
@@ -608,51 +586,22 @@ mod tests {
     }
 
     #[test]
-    fn the_fades_follow_time_the_island_first_the_content_in_the_second_half() {
+    fn the_content_fades_in_over_the_second_half_and_nothing_of_the_islands_row_does() {
         let (_, _, spec) = setup(1.0, 1.0, Side::Left);
-        let mut last_island = 1.0;
         let mut last_content = 0.0;
         for i in 0..=100 {
             let f = spec.at(i as f32 / 100.0);
-            assert!(f.island_content <= last_island + 1e-6 && f.content >= last_content - 1e-6);
-            last_island = f.island_content;
+            assert!(f.content >= last_content - 1e-6);
             last_content = f.content;
             if f.s <= CONTENT_FADE_START {
                 assert_eq!(f.content, 0.0, "nothing of the panel before the middle: s={}", f.s);
             }
-            if f.s >= ISLAND_FADE_END {
-                assert_eq!(f.island_content, 0.0, "nothing of the island's row after the middle: s={}", f.s);
-            }
         }
-        assert!(spec.at(0.25).island_content > 0.0 && spec.at(0.25).island_content < 1.0);
         assert!(spec.at(0.75).content > 0.0 && spec.at(0.75).content < 1.0);
-        // what stays: the logo always; the row of the right island entirely
-        let f = spec.at(0.5);
-        assert_eq!(island_fade(Stays::Logo, &f, true), Fade { others: 0.0, field_hidden: true });
-        assert_eq!(island_fade(Stays::Logo, &f, false), Fade { others: 0.0, field_hidden: false });
-        assert_eq!(island_fade(Stays::Row, &f, false), Fade { others: 1.0, field_hidden: false });
-        assert_eq!(island_fade(Stays::Row, &f, true).others, 1.0);
-    }
-
-    #[test]
-    fn the_search_field_travels_from_the_island_to_the_top_of_the_panel() {
-        let (island, panel_rect, spec) = setup(1.25, 1.0, Side::Left);
-        // the island's field (220 x 32 units after the logo) and the panel's (36 high, 28 from the sides, 24 under the top)
-        let from = [island.left as f32 + 48.0 * 1.25, island.top as f32 + 8.0 * 1.25, 220.0 * 1.25, 32.0 * 1.25];
-        let to = [panel_rect.left as f32 + 28.0 * 1.25, panel_rect.top as f32 + 24.0 * 1.25, panel_rect.width() as f32 - 56.0 * 1.25, 36.0 * 1.25];
-        let spec = spec.with_field(from, to);
-        assert_eq!(spec.at(0.0).field, Some(from));
-        assert_eq!(spec.at(1.0).field, Some(to));
-        let mut last_y = f32::MAX;
-        for i in 0..=100 {
-            let f = spec.at(i as f32 / 100.0);
-            let fr = f.field.unwrap();
-            assert!(fr[1] <= last_y + 1e-3, "it only goes up");
-            last_y = fr[1];
-            // it is always inside the glass
-            assert!(fr[0] >= f.rect[0] - 1e-3 && fr[1] >= f.rect[1] - 1e-3 && fr[0] + fr[2] <= f.rect[0] + f.rect[2] + 1e-3 && fr[1] + fr[3] <= f.rect[1] + f.rect[3] + 1e-3, "s={}: {fr:?} outside {:?}", f.s, f.rect);
-        }
-        assert_eq!(setup(1.0, 1.0, Side::Right).2.at(0.5).field, None, "the right island has no field");
+        assert_eq!(spec.at(1.0).content, 1.0);
+        // the island's row stays whole in both kinds of growth; only the left island's field is the panel's
+        assert!(Stays::RowAndField.field_is_the_panels());
+        assert!(!Stays::Row.field_is_the_panels());
     }
 
     #[test]

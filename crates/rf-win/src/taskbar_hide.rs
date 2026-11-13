@@ -6,6 +6,10 @@
 //!   another process's window can wait for that process, the guard has to be started and waited for, and none of that may happen on
 //!   the interface thread. The window exists to hear `TaskbarCreated` (Explorer made its taskbar again), `WM_DISPLAYCHANGE`,
 //!   `WM_SETTINGCHANGE` (work area) and `WM_ENDSESSION`, which are broadcast to top-level windows only.
+//! * The bottom edge (docs/design/taskbar-hide.md): once the hide is confirmed the controller tells the dock to let go of its own
+//!   desktop-toolbar band and to place itself from the monitor's bottom edge (`dock::system::take_edge`), and sets the work area of the
+//!   monitors whose taskbar it hid. The wait for the dock is NOT a blocking wait: the thread answers Explorer's broadcasts while it
+//!   lasts, so a short timer (100 ms) looks again until the dock has let go.
 //! * One timer, once a second, only while the setting is on or a restore is still owed (a restore that failed is retried by it,
 //!   whatever the setting says, and the thread does not end before it is done): look at the guard and at the windows (Explorer shows its taskbar again
 //!   now and then, and nothing was found that says so; an event hook on `EVENT_OBJECT_SHOW` is the thing to try next, after a live run).
@@ -24,8 +28,9 @@ use std::sync::{Arc, Mutex, Once};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rf_shellguard::statefile::{self, ShellStateFile};
-use rf_shellguard::tbctl::{Controller, HideWorld, Options, Status};
+use rf_shellguard::tbctl::{Controller, HideWorld, Status};
 use rf_shellguard::tbmodel::{LiveWindow, MonitorGeom, Target};
+use crate::dock::layout::Rect;
 use rf_shellguard::win::tbwin;
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, RECT, SetLastError, WPARAM};
 use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW};
@@ -83,8 +88,12 @@ pub struct Config {
     pub state_dir: PathBuf,
     /// `rustyfiles-shellguard.exe`.
     pub guard_exe: PathBuf,
-    /// Give the strip of a hidden taskbar back to programs (off unless asked for; see `tbmodel::giveback`).
-    pub give_back_work_area: bool,
+    /// The thickness of the dock's band in device px (`None`: the dock reserves none, `dock_reserve` is off), as far as it is known at
+    /// the start. It changes through [`TaskbarHider::set_band`]. Session only, never saved.
+    pub band_px: Option<i32>,
+    /// The dock has already said what its band is (`band_px` is its word, `None` included). When it has not, the bottom edge is not
+    /// taken until it does (`TaskbarHider::set_band`): no band yet is not the same as no band wanted.
+    pub band_known: bool,
 }
 
 /// Where the guard is expected: next to the running program.
@@ -138,7 +147,8 @@ unsafe extern "system" fn mon_cb(hmon: HMONITOR, _dc: HDC, _r: *mut RECT, lparam
         if GetMonitorInfoW(hmon, &mut mi.monitorInfo as *mut _ as *mut _).as_bool() {
             let name = String::from_utf16_lossy(&mi.szDevice).trim_end_matches('\0').to_string();
             let (r, w) = (mi.monitorInfo.rcMonitor, mi.monitorInfo.rcWork);
-            list.push(MonitorGeom { id: name, rect: [r.left, r.top, r.right, r.bottom], work: [w.left, w.top, w.right, w.bottom] });
+            // MONITORINFOF_PRIMARY = 1
+            list.push(MonitorGeom { id: name, rect: [r.left, r.top, r.right, r.bottom], work: [w.left, w.top, w.right, w.bottom], primary: mi.monitorInfo.dwFlags & 1 != 0 });
         }
     }
     BOOL(1)
@@ -177,6 +187,22 @@ impl HideWorld for RealWorld {
         tbwin::wait_visible(targets)
     }
 
+    fn wait_hidden(&mut self, targets: &[Target]) -> Vec<Target> {
+        tbwin::wait_hidden(targets)
+    }
+
+    fn dock_take_edge(&mut self, edge: [i32; 4]) {
+        crate::dock::system::take_edge(Rect::new(edge[0], edge[1], edge[2], edge[3]));
+    }
+
+    fn dock_edge_ready(&mut self) -> bool {
+        !crate::dock::system::appbar_held()
+    }
+
+    fn dock_give_back_edge(&mut self) {
+        crate::dock::system::give_back_edge();
+    }
+
     fn monitors(&mut self) -> Vec<MonitorGeom> {
         let mut v: Vec<MonitorGeom> = Vec::new();
         // SAFETY: `v` outlives the call. The thread is per-monitor DPI aware (see `run_thread`), so rectangles are physical pixels.
@@ -188,6 +214,10 @@ impl HideWorld for RealWorld {
 
     fn set_work_area(&mut self, rect: [i32; 4]) -> Result<(), String> {
         rf_shellguard::win::workarea::set_work_area(rect)
+    }
+
+    fn hold_work_area(&mut self, from: [i32; 4], to: [i32; 4]) -> Result<(), String> {
+        rf_shellguard::win::workarea::hold_work_area(from, to)
     }
 
     fn load_state(&mut self) -> ShellStateFile {
@@ -313,6 +343,8 @@ pub fn install_panic_restore() {
 
 enum Cmd {
     Wanted(bool),
+    /// The dock's band changed (`None`: it reserves none).
+    Band(Option<i32>),
     /// Leave (restore what is hidden, tell the guard) and end the thread.
     Stop,
     /// End the thread without leaving anything: the one-shot look at a record left by a crashed host. A restore that is still
@@ -339,6 +371,9 @@ const TIMER_TICK: usize = 1;
 const TIMER_DISPLAYS: usize = 2;
 const TIMER_WORK: usize = 3;
 const TIMER_FOLLOW: usize = 4;
+/// While the dock lets go of its band: a short look, so that the work area is set within a fraction of a second.
+const TIMER_EDGE: usize = 5;
+const EDGE_LOOK_MS: u32 = 100;
 const TICK_MS: u32 = 1_000;
 const DISPLAY_DEBOUNCE_MS: u32 = 400;
 const WORK_DEBOUNCE_MS: u32 = 300;
@@ -390,6 +425,11 @@ unsafe fn sync_timer(hwnd: HWND, ctx: &Ctx) {
         } else {
             let _ = KillTimer(Some(hwnd), TIMER_TICK);
         }
+        if !ctx.dead && ctx.ctl.edge_waiting() {
+            SetTimer(Some(hwnd), TIMER_EDGE, EDGE_LOOK_MS, None);
+        } else {
+            let _ = KillTimer(Some(hwnd), TIMER_EDGE);
+        }
     }
 }
 
@@ -416,10 +456,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             PostQuitMessage(0);
             return LRESULT(0);
         }
+        // The work-area broadcast is also delivered while THIS thread is inside its own call that sets the work area, that is while the
+        // controller holds the context: it is answered from a plain read of one field, never with a second `&mut Ctx`.
+        if msg == WM_SETTINGCHANGE {
+            if (*ptr).wanted && wp.0 == SPI_SETWORKAREA {
+                SetTimer(Some(hwnd), TIMER_WORK, WORK_DEBOUNCE_MS, None);
+            }
+            return DefWindowProcW(hwnd, msg, wp, lp);
+        }
         let ctx = &mut *ptr;
         if msg == taskbar_created_message() {
             if ctx.wanted {
                 ctx.guarded(|c, w| c.explorer_restarted(w));
+                sync_timer(hwnd, ctx);
                 ctx.follow_ups = FOLLOW_MS.len() as u8;
                 SetTimer(Some(hwnd), TIMER_FOLLOW, FOLLOW_MS[0], None);
             }
@@ -435,6 +484,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                             }
                             ctx.wanted = on && !ctx.dead;
                             ctx.guarded(|c, w| c.set_wanted(w, on));
+                            sync_timer(hwnd, ctx);
+                        }
+                        Cmd::Band(band) => {
+                            ctx.guarded(|c, w| c.set_band(w, band));
                             sync_timer(hwnd, ctx);
                         }
                         Cmd::Stop | Cmd::Finish => {
@@ -467,17 +520,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         // kills the timer when nothing is owed and nothing is wanted any more
                         sync_timer(hwnd, ctx);
                     }
+                    TIMER_EDGE => {
+                        ctx.guarded(|c, w| c.edge_tick(w));
+                        sync_timer(hwnd, ctx);
+                    }
                     TIMER_DISPLAYS => {
                         let _ = KillTimer(Some(hwnd), TIMER_DISPLAYS);
                         ctx.guarded(|c, w| c.displays_changed(w));
+                        sync_timer(hwnd, ctx);
                     }
                     TIMER_WORK => {
                         let _ = KillTimer(Some(hwnd), TIMER_WORK);
                         ctx.guarded(|c, w| c.work_area_changed(w));
+                        sync_timer(hwnd, ctx);
                     }
                     TIMER_FOLLOW => {
                         let _ = KillTimer(Some(hwnd), TIMER_FOLLOW);
                         ctx.guarded(|c, w| c.displays_changed(w));
+                        sync_timer(hwnd, ctx);
                         ctx.follow_ups = ctx.follow_ups.saturating_sub(1);
                         if ctx.follow_ups > 0 {
                             SetTimer(Some(hwnd), TIMER_FOLLOW, FOLLOW_MS[1], None);
@@ -490,12 +550,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             WM_DISPLAYCHANGE => {
                 if ctx.wanted {
                     SetTimer(Some(hwnd), TIMER_DISPLAYS, DISPLAY_DEBOUNCE_MS, None);
-                }
-                DefWindowProcW(hwnd, msg, wp, lp)
-            }
-            WM_SETTINGCHANGE => {
-                if ctx.wanted && wp.0 == SPI_SETWORKAREA {
-                    SetTimer(Some(hwnd), TIMER_WORK, WORK_DEBOUNCE_MS, None);
                 }
                 DefWindowProcW(hwnd, msg, wp, lp)
             }
@@ -571,7 +625,8 @@ impl TaskbarHider {
         install_panic_restore();
         let host_pid = std::process::id();
         let host_start = tbwin::process_start_time(host_pid).unwrap_or(0);
-        let ctl = Controller::new(host_pid, host_start, Options { give_back_work_area: cfg.give_back_work_area });
+        let ctl = Controller::new(host_pid, host_start);
+        let ctl = if cfg.band_known { ctl.with_band(cfg.band_px) } else { ctl };
         let (tx, rx) = std::sync::mpsc::channel::<Cmd>();
         let status = Arc::new(Mutex::new(Status::Off));
         let ctx = Box::new(Ctx { ctl, world: RealWorld::new(cfg), rx, status: status.clone(), wanted: false, dead: false, follow_ups: 0, stopping: false });
@@ -601,6 +656,13 @@ impl TaskbarHider {
     /// The setting. `true` starts the guard, waits for its confirmation and hides; `false` shows the taskbar again.
     pub fn set_wanted(&self, on: bool) {
         self.post(Cmd::Wanted(on));
+    }
+
+    /// The dock's band changed (its size, or `dock_reserve`): `Some(thickness in device px)`, `None` for none. While the hide is in
+    /// force the work area follows; before, it is the wish for when it comes - and the first word the dock says is what lets the
+    /// bottom edge be taken at all. Session only.
+    pub fn set_band(&self, band_px: Option<i32>) {
+        self.post(Cmd::Band(band_px));
     }
 
     /// What the last look found.
@@ -681,9 +743,9 @@ mod tests {
     fn the_guard_counter_belongs_to_the_process_so_a_new_world_never_reuses_a_name() {
         // `RealWorld::new` runs at every switch-on; the counter must not start again from 1 with it
         let a = next_guard_seq();
-        let _world = RealWorld::new(Config { state_dir: PathBuf::new(), guard_exe: PathBuf::new(), give_back_work_area: false });
+        let _world = RealWorld::new(Config { state_dir: PathBuf::new(), guard_exe: PathBuf::new(), band_px: None, band_known: false });
         let b = next_guard_seq();
-        let _another = RealWorld::new(Config { state_dir: PathBuf::new(), guard_exe: PathBuf::new(), give_back_work_area: false });
+        let _another = RealWorld::new(Config { state_dir: PathBuf::new(), guard_exe: PathBuf::new(), band_px: None, band_known: false });
         let c = next_guard_seq();
         assert!(a < b && b < c, "{a} {b} {c}");
         let (r1, d1) = event_names(4242, a);

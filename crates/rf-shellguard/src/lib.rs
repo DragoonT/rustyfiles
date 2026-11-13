@@ -7,7 +7,8 @@
 //! Tests and `--dry-run` never go through `win` (except `winro`, which only reads).
 //!
 //! Hiding Explorer's taskbar beside Explorer (plan E1) lives here too, because the host that hides it and the guard that shows it again
-//! must share the rules: `tbmodel` (what is a taskbar window, what may be acted on, the gate, the work-area rule; pure),
+//! must share the rules: `tbmodel` (what is a taskbar window, what may be acted on, the gate; pure), `tbwork` (the work area while the
+//! hide is in force: the dock takes the bottom edge; pure),
 //! `tbctl` (the host's controller over the `HideWorld` trait; pure), `tbfakes` (a pretend desktop), `win/tbwin` (the only file that
 //! hides or shows a real window). `beside` is the guard's side. docs/design/taskbar-hide.md.
 //!
@@ -30,6 +31,7 @@ pub mod sys;
 pub mod tbctl;
 pub mod tbfakes;
 pub mod tbmodel;
+pub mod tbwork;
 pub mod win;
 pub mod winro;
 
@@ -41,3 +43,5 @@ mod runner_tests;
 mod tbbeside_tests;
 #[cfg(test)]
 mod tbctl_tests;
+#[cfg(test)]
+mod tbedge_tests;

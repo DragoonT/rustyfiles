@@ -456,13 +456,18 @@ fn publish_env(scale: f32, cx: &mut App) {
 fn apply_reserve(cx: &mut App) {
     let Some(host) = cx.try_global::<Host>() else { return };
     let Some(system) = host.system.as_ref() else { return };
-    if host.prefs.reserve {
+    let band = if host.prefs.reserve {
         // the band is the dock's own height and margins: it follows the size too
         let unit = host.area().map_or(1.0, |(m, _)| rf_win::dock::size::unit(m.scale(), fitted_factor(host.prefs.size, &m)));
-        system.reserve(layout::reserved_thickness(unit));
+        let thickness = layout::reserved_thickness(unit);
+        system.reserve(thickness);
+        Some(thickness)
     } else {
         system.release();
-    }
+        None
+    };
+    // with Explorer's taskbar hidden by us the host sets the work area itself, from this band (see shell::taskbar_hide)
+    crate::shell::taskbar_hide::band_changed(band, cx);
 }
 
 fn on_system_event(ev: SystemEvent, cx: &mut App) {

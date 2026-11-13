@@ -75,8 +75,12 @@ pub struct WorkAreaKeeper {
 }
 
 /// The work area for a band of `thickness` px at the bottom of `monitor`.
+///
+/// The arithmetic is shared with the work-area rule of the taskbar hide beside Explorer (`rf_shellguard::tbwork`, which sets the same
+/// rectangle for a monitor whose taskbar we hid): two owners of the work area, one rule for "the monitor less the band".
 pub fn target(monitor: Rect, thickness: i32) -> Rect {
-    Rect { bottom: (monitor.bottom - thickness.max(1)).max(monitor.top + 1), ..monitor }
+    let [left, top, right, bottom] = rf_shellguard::tbwork::monitor_less_band([monitor.left, monitor.top, monitor.right, monitor.bottom], thickness);
+    Rect { left, top, right, bottom }
 }
 
 impl WorkAreaKeeper {

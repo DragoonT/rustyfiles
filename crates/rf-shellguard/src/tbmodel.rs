@@ -15,7 +15,8 @@
 //!   cannot be, shows every hidden taskbar window of Explorer's and so errs towards a visible taskbar.)
 //! * The record of what is about to be hidden is written BEFORE the first window is hidden (see `tbctl`).
 //! * Hiding is refused unless the guard is confirmed running (`may_hide`).
-//! * The work area is only given back when the geometry is unambiguous (`giveback`), at a limited rate.
+//! * While the hide is in force the host owns the bottom edge: the work area of a monitor whose taskbar we hid is set by the rules of
+//!   `tbwork` (only where the geometry is unambiguous), at a limited rate. Nothing is set before the hide is confirmed.
 
 use crate::statefile::WorkAreaRec;
 
@@ -263,6 +264,34 @@ pub struct MonitorGeom {
     pub id: String,
     pub rect: [i32; 4],
     pub work: [i32; 4],
+    /// The primary monitor: the one the dock sits on, and the only one that keeps a band of ours (see `tbwork`).
+    pub primary: bool,
+}
+
+/// Where a maximized window belongs after its monitor's work area went from `from` to `to` (all left, top, right, bottom), or `None`
+/// to leave it alone. A work area held without the change broadcast is not followed by the system's own fitting of maximized
+/// windows (see `win::workarea::hold_work_area`), so the host does it.
+///
+/// A maximized window overhangs the work area by its frame on every side (8 px for most, 0 for some): each edge keeps its overhang.
+/// A window that was not fitted to `from` (an earlier quiet change it missed) takes the overhang of its left and top edges for the
+/// right and bottom. Left alone: a window that is exactly the monitor (a borderless full-screen program that calls itself
+/// maximized), one whose edges fit neither reading, and one that is already where it belongs.
+pub fn refit_maximized(win: [i32; 4], monitor: [i32; 4], from: [i32; 4], to: [i32; 4]) -> Option<[i32; 4]> {
+    const FRAME: std::ops::RangeInclusive<i32> = 0..=32;
+    if win == monitor {
+        return None;
+    }
+    let over = [from[0] - win[0], from[1] - win[1], win[2] - from[2], win[3] - from[3]];
+    let new = if over.iter().all(|o| FRAME.contains(o)) {
+        [to[0] - over[0], to[1] - over[1], to[2] + over[2], to[3] + over[3]]
+    } else {
+        let (ox, oy) = (to[0] - win[0], to[1] - win[1]);
+        if !FRAME.contains(&ox) || !FRAME.contains(&oy) {
+            return None;
+        }
+        [win[0], win[1], to[2] + ox, to[3] + oy]
+    };
+    (new != win && new[2] > new[0] && new[3] > new[1]).then_some(new)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -270,52 +299,6 @@ pub struct WorkChange {
     pub id: String,
     pub from: [i32; 4],
     pub to: [i32; 4],
-}
-
-fn area(a: [i32; 4], b: [i32; 4]) -> i64 {
-    let w = (a[2].min(b[2]) - a[0].max(b[0])).max(0) as i64;
-    let h = (a[3].min(b[3]) - a[1].max(b[1])).max(0) as i64;
-    w * h
-}
-
-/// Gives the strip of a hidden taskbar back to programs, in the one case where the geometry is unambiguous: the monitor's work
-/// area ends exactly where the taskbar begins (within one pixel). Then the work area is grown to the monitor's edge.
-///
-/// When another toolbar sits between the taskbar and the work area (our own dock's band does, when it reserves one), the strip
-/// the taskbar left is not next to the work area, and which toolbar lies outside which is not something that can be told without
-/// running it: NO change is made and the strip stays reserved. (The Windows setting that would be touched is the session's work
-/// area, not a stored one: `SPI_SETWORKAREA` without the "update profile" flag.)
-pub fn giveback(monitors: &[MonitorGeom], hidden: &[[i32; 4]]) -> Vec<WorkChange> {
-    let mut out: Vec<WorkChange> = Vec::new();
-    for bar in hidden {
-        let Some(m) = monitors.iter().filter(|m| area(m.rect, *bar) > 0).max_by_key(|m| area(m.rect, *bar)) else { continue };
-        if out.iter().any(|c| c.id == m.id) {
-            continue;
-        }
-        let (mw, mh) = (m.rect[2] - m.rect[0], m.rect[3] - m.rect[1]);
-        let (bw, bh) = (bar[2] - bar[0], bar[3] - bar[1]);
-        if mw <= 0 || mh <= 0 || bw <= 0 || bh <= 0 {
-            continue;
-        }
-        let near = |a: i32, b: i32| (a - b).abs() <= 1;
-        let mut to = m.work;
-        // A bar is on an edge when it spans (nearly) the whole monitor along that edge and touches it.
-        let wide = i64::from(bw) * 10 >= i64::from(mw) * 9;
-        let tall = i64::from(bh) * 10 >= i64::from(mh) * 9;
-        if wide && near(bar[3], m.rect[3]) && bar[1] > m.rect[1] + mh / 2 && near(m.work[3], bar[1]) {
-            to[3] = m.rect[3];
-        } else if wide && near(bar[1], m.rect[1]) && bar[3] < m.rect[1] + mh / 2 && near(m.work[1], bar[3]) {
-            to[1] = m.rect[1];
-        } else if tall && near(bar[0], m.rect[0]) && bar[2] < m.rect[0] + mw / 2 && near(m.work[0], bar[2]) {
-            to[0] = m.rect[0];
-        } else if tall && near(bar[2], m.rect[2]) && bar[0] > m.rect[0] + mw / 2 && near(m.work[2], bar[0]) {
-            to[2] = m.rect[2];
-        }
-        if to != m.work {
-            out.push(WorkChange { id: m.id.clone(), from: m.work, to });
-        }
-    }
-    out
 }
 
 /// The rectangles to write to the state file before a work area is changed. A rectangle already saved by an earlier, unfinished
@@ -330,7 +313,7 @@ pub fn originals_to_save(already: &[WorkAreaRec], changes: &[WorkChange]) -> Vec
     out
 }
 
-/// At most `max` events in any `window_ms`: Explorer may recompute the work area whenever it likes, and giving it back
+/// At most `max` events in any `window_ms`: Explorer may recompute the work area whenever it likes, and setting it
 /// again every time could fight it for ever.
 #[derive(Clone, Debug)]
 pub struct Throttle {
@@ -357,6 +340,28 @@ impl Throttle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_maximized_window_follows_its_work_area_and_a_full_screen_one_is_left_alone() {
+        let mon = [0, 0, 2560, 1440];
+        let (old, new) = ([0, 0, 2560, 1392], [0, 0, 2560, 1362]);
+        // the usual 8 px frame: every edge keeps its overhang (measured: a browser at -8,-8 2576x1408 on the 1392 work area)
+        assert_eq!(refit_maximized([-8, -8, 2568, 1400], mon, old, new), Some([-8, -8, 2568, 1370]));
+        // a window without overhang
+        assert_eq!(refit_maximized([0, 0, 2560, 1392], mon, old, new), Some([0, 0, 2560, 1362]));
+        // the work area grows to the whole monitor (a second monitor whose taskbar strip is given back) and shrinks again
+        let side = [2560, -618, 4000, 1942];
+        let side_old = [2560, -618, 4000, 1894];
+        assert_eq!(refit_maximized([2552, -626, 4008, 1902], side, side_old, side), Some([2552, -626, 4008, 1950]));
+        assert_eq!(refit_maximized([2552, -626, 4008, 1950], side, side, side_old), Some([2552, -626, 4008, 1902]));
+        // it missed an earlier change (still fitted to an older, larger area): the left and top overhang decide
+        assert_eq!(refit_maximized([-8, -8, 2568, 1448], mon, old, new), Some([-8, -8, 2568, 1370]));
+        // exactly the monitor: a full-screen program, not ours to move
+        assert_eq!(refit_maximized(mon, mon, old, new), None);
+        // already there, or placed by its own rules
+        assert_eq!(refit_maximized([-8, -8, 2568, 1370], mon, new, new), None);
+        assert_eq!(refit_maximized([300, 200, 1500, 900], mon, old, new), None);
+    }
 
     fn live(handle: isize, class: &str, pid: u32, start: u64, visible: bool) -> LiveWindow {
         LiveWindow { handle, class: class.into(), pid, start, explorer: true, visible, rect: [0, 1392, 2560, 1440] }
@@ -445,56 +450,6 @@ mod tests {
         assert_eq!(may_hide(&Gate { guard: GuardStatus::Absent, ..ok }), Err(Refusal::GuardNotConfirmed));
         assert_eq!(may_hide(&Gate { guard: GuardStatus::Lost, ..ok }), Err(Refusal::GuardLost));
         assert_eq!(may_hide(&Gate { record_saved: false, ..ok }), Err(Refusal::RecordNotSaved));
-    }
-
-    fn mon(id: &str, rect: [i32; 4], work: [i32; 4]) -> MonitorGeom {
-        MonitorGeom { id: id.into(), rect, work }
-    }
-
-    #[test]
-    fn the_strip_is_given_back_when_the_work_area_ends_where_the_taskbar_begins() {
-        let m = mon("A", [0, 0, 2560, 1440], [0, 0, 2560, 1392]);
-        let c = giveback(&[m], &[[0, 1392, 2560, 1440]]);
-        assert_eq!(c, vec![WorkChange { id: "A".into(), from: [0, 0, 2560, 1392], to: [0, 0, 2560, 1440] }]);
-    }
-
-    #[test]
-    fn the_other_edges_and_a_negative_origin_work_the_same_way() {
-        // portrait monitor to the left of the primary, taskbar on top
-        let m = mon("B", [-1440, -200, 0, 2359], [-1440, -152, 0, 2359]);
-        let c = giveback(std::slice::from_ref(&m), &[[-1440, -200, 0, -152]]);
-        assert_eq!(c[0].to, [-1440, -200, 0, 2359]);
-        // taskbar on the left
-        let m = mon("C", [0, 0, 1920, 1080], [48, 0, 1920, 1080]);
-        assert_eq!(giveback(&[m], &[[0, 0, 48, 1080]])[0].to, [0, 0, 1920, 1080]);
-        // taskbar on the right
-        let m = mon("D", [0, 0, 1920, 1080], [0, 0, 1872, 1080]);
-        assert_eq!(giveback(&[m], &[[1872, 0, 1920, 1080]])[0].to, [0, 0, 1920, 1080]);
-    }
-
-    #[test]
-    fn no_change_when_another_toolbar_lies_between_the_taskbar_and_the_work_area() {
-        // our dock's band (1320..1392) reserved above the taskbar: the work area ends at 1320, not at 1392
-        let m = mon("A", [0, 0, 2560, 1440], [0, 0, 2560, 1320]);
-        assert!(giveback(&[m], &[[0, 1392, 2560, 1440]]).is_empty());
-    }
-
-    #[test]
-    fn no_change_for_a_taskbar_that_is_not_on_an_edge_or_a_monitor_that_is_not_found() {
-        let m = mon("A", [0, 0, 2560, 1440], [0, 0, 2560, 1392]);
-        assert!(giveback(std::slice::from_ref(&m), &[[100, 1392, 900, 1440]]).is_empty(), "a bar that does not span the monitor");
-        assert!(giveback(std::slice::from_ref(&m), &[[0, 600, 2560, 648]]).is_empty(), "not touching an edge");
-        assert!(giveback(&[m], &[[5000, 1392, 7560, 1440]]).is_empty(), "no monitor under it");
-        assert!(giveback(&[], &[[0, 1392, 2560, 1440]]).is_empty());
-    }
-
-    #[test]
-    fn two_monitors_are_decided_one_by_one() {
-        let a = mon("A", [0, 0, 2560, 1440], [0, 0, 2560, 1392]);
-        let b = mon("B", [-1440, -200, 0, 2359], [-1440, -200, 0, 2359]); // its taskbar is not reserving anything
-        let c = giveback(&[a, b], &[[0, 1392, 2560, 1440], [-1440, 2311, 0, 2359]]);
-        assert_eq!(c.len(), 1);
-        assert_eq!(c[0].id, "A");
     }
 
     #[test]

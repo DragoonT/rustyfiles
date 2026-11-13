@@ -6,7 +6,7 @@
 //! (the dpi times the size), the panel is placed with the monitor's dpi, as the dock does; then the glass is printed at 0, 60, 120 and 220 ms
 //! after a press on the logo (the clock started at 0), and at 0, 40, 80 and 160 ms after a press that closes the open panel.
 
-use rf_win::dock::grow::{self, Corner, Motion, Spec, Stays};
+use rf_win::dock::grow::{self, Corner, Motion, Spec};
 use rf_win::dock::hit;
 use rf_win::dock::layout::{self, Rect, Widths};
 use rf_win::dock::panel::{self, Side};
@@ -42,10 +42,9 @@ fn main() {
         for t in times {
             let s = m.s_at(t0 + t);
             let f = spec.at(s);
-            let fade = grow::island_fade(Stays::Logo, &f, true);
             println!(
-                "  +{t:>3} ms  s {s:.3}  glass x {:>6.1} y {:>6.1} w {:>6.1} h {:>6.1}  radius {:>5.1}  content {:.2}  island chip {:.2}  region {} px2",
-                f.rect[0], f.rect[1], f.rect[2], f.rect[3], f.radius, f.content, fade.others, region_area(s)
+                "  +{t:>3} ms  s {s:.3}  glass x {:>6.1} y {:>6.1} w {:>6.1} h {:>6.1}  radius {:>5.1}  content {:.2}  region {} px2",
+                f.rect[0], f.rect[1], f.rect[2], f.rect[3], f.radius, f.content, region_area(s)
             );
         }
     }

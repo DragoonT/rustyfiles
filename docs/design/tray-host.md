@@ -319,8 +319,14 @@ the real `Shell_NotifyIconGetRect` for a known rectangle, and keep the packing f
   at the first match) and raises OUR window only when it is not. It no longer walks every top-level window. `raised` counts the
   raises: a number that keeps growing means Explorer re-asserts its own place and the keeper is fighting it (a finding for the
   first try; the cost at rest is NOT measured here).
-* The dock's own `SHAppBarMessage` calls (it registers as a desktop toolbar) come from the interface thread, land in this window, and
-  are passed on by the host thread; the host thread sends nothing to the interface thread.
+* The dock's own `SHAppBarMessage` calls (it registers as a desktop toolbar) come from the dock's system thread (`dock::system`), land in
+  this window (the first `Shell_TrayWnd`), and are passed on by the host thread, untouched and before any parse; the host thread sends
+  nothing to the interface thread. Since 2026-11-13 two counts tell what became of them: `appbar_own` (blocks whose window belongs to
+  this process) and `appbar_new_refused` (registrations Explorer answered with 0; `explorer_refused` counts icon requests only). With
+  `shell_hide_taskbar` on and the hide confirmed the dock registers nothing (the host sets the work area itself, see
+  taskbar-hide.md), and a `TaskbarCreated` that this host broadcasts when it starts or stops does not make the dock remove and register
+  its band again (`dock::band::announcement_is_restart`): that round was five messages through this window with the work area briefly
+  without the band, and the band was lost in the trial of 2026-11-13 with the tray host on (the cause itself was not shown).
 * No COM is used anywhere in the tray host, so nothing goes through `rf_win::sta`. The window is made when the setting goes on
   (at the host's start or at the first settings reload with it on), which is fast (one `CreateWindowEx`); nothing is hidden-but-dirty,
   because it is never painted.

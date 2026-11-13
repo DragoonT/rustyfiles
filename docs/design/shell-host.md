@@ -54,7 +54,10 @@ logs but swallows, sends and opens nothing.
 
 A fourth switch on the same page, off: the host hides Explorer's taskbar windows while the dock runs, only with the guard
 (`rustyfiles-shellguard.exe`, beside role) confirmed running, and shows them again on off, on quit, from a panic hook, and from the
-guard if the host dies. Rules, the guard's protocol, the work-area question and the steps of a first try: `docs/design/taskbar-hide.md`.
+guard if the host dies. While the hide is in force the dock takes the bottom edge (a hidden taskbar keeps its strip): the host sets the
+work area itself and the dock does not register its own band with Explorer; no environment variable decides that (the older
+`RUSTYFILES_TASKBAR_WORKAREA` is gone). Rules, the guard's protocol, the order of the steps and the steps of a first try:
+`docs/design/taskbar-hide.md`. The keeper above for NO Explorer (`RUSTYFILES_SET_WORKAREA=1`) is a separate owner and unchanged.
 
 ## While it runs: Explorer leaving and coming back
 

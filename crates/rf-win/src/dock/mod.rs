@@ -27,6 +27,7 @@
 //! | `panel` | where a panel above an island's visible glass (not its larger window) goes, when it opens / closes / switches, who gets the keyboard back, the 120 ms easing | all of it |
 //! | `power` | the Start panel's power menu (lock, sleep, sign out, restart, shut down) and its "Emin misiniz?" step; the user's display name | the menu |
 //! | `startlist` | the app list's order (Turkish alphabet), letter headers, rows, arrow-key movement through the pinned grid and the list | all of it |
+//! | `startkeys` | where the arrows and Tab go in the Start panel when its search field is at the bottom of the grown glass (to the content, back to the field, the order of the stops) | all of it |
 //! | `startpage` | the Start panel's two pages (home, all apps), where Escape and Backspace lead, the home page's rows and pages for a height, the keyboard cursor through the grid and the recommended entries, the wheel's page turns, the panel's height for the room above the island | all of it |
 //! | `startrecent` | "Önerilenler": the recent documents Windows keeps, chosen newest first, each once, only those still there, with how long ago | the choice |
 //! | `startuser` | the account picture Windows keeps for the signed-in user (read-only), the size to try, decoded to a square | the size order, the crop |
@@ -93,6 +94,7 @@ pub mod preview;
 pub mod power;
 pub mod resample;
 pub mod startapps;
+pub mod startkeys;
 pub mod startlist;
 pub mod startpage;
 pub mod startpins;

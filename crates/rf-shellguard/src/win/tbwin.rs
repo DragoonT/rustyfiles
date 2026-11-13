@@ -144,6 +144,20 @@ pub fn wait_visible(targets: &[Target]) -> usize {
     targets.iter().filter(|t| !is_visible(t.handle)).count()
 }
 
+/// Waits (briefly, in small steps: half a second at most) until `targets` are hidden and returns the ones that still are visible.
+/// The change asked for by `set_visible` is queued in Explorer's own thread, so this is the only way to know that the hide
+/// happened; nothing else (the dock's edge, the work areas) is touched for a window that is still visible. A handle that is not a
+/// window any more counts as hidden.
+pub fn wait_hidden(targets: &[Target]) -> Vec<Target> {
+    for _ in 0..10 {
+        if targets.iter().all(|t| !is_visible(t.handle)) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    targets.iter().filter(|t| is_visible(t.handle)).cloned().collect()
+}
+
 /// Shows `targets` and waits until they are visible. `Err` names how many did not come back.
 fn show_and_verify(targets: &[Target]) -> Result<(), String> {
     let mut failed = 0;

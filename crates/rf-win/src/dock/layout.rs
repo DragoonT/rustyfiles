@@ -322,6 +322,24 @@ mod tests {
     }
 
     #[test]
+    fn the_islands_sit_on_the_monitors_bottom_edge_while_the_host_owns_it() {
+        // the host hid Explorer's taskbar (48 px strip) and took the edge: its band is the bottom strip of the monitor
+        let monitor = Rect::new(0, 0, 2560, 1440);
+        let edge = Rect::new(0, 1362, 2560, 1440);
+        // the work area still has the hidden taskbar's strip, then the host's own work area, then none at all (dock_reserve off)
+        for work in [Rect::new(0, 0, 2560, 1392), Rect::new(0, 0, 2560, 1362), Rect::new(0, 0, 2560, 1314)] {
+            assert_eq!(placement_area(work, Some(edge), monitor).bottom, 1440, "{work:?}");
+        }
+        // dock_reserve off: an empty strip at the very bottom; the work area is the monitor or still the strip's
+        let none = Rect::new(0, 1440, 2560, 1440);
+        assert_eq!(placement_area(Rect::new(0, 0, 2560, 1392), Some(none), monitor).bottom, 1440);
+        assert_eq!(placement_area(monitor, Some(none), monitor).bottom, 1440);
+        // the islands' glass then ends 10 px above the screen's bottom, as it does on a monitor with an auto-hiding taskbar
+        let i = islands(placement_area(Rect::new(0, 0, 2560, 1392), Some(edge), monitor), 1.0, W);
+        assert_eq!(i.middle.bottom, 1430);
+    }
+
+    #[test]
     fn reserved_band_is_the_dock_plus_its_margins() {
         assert_eq!(reserved_thickness(1.0), 92);
         assert_eq!(reserved_thickness(2.0), 184);

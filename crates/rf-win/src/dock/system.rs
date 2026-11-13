@@ -7,11 +7,11 @@
 //! message-only window would not get). It sends [`SystemEvent`]s to a callback on that thread; the app turns them into a re-read of
 //! [`primary_monitor`] and a re-placement of the islands. Dropping it takes the reserved band back.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::band::{AppBarCalls, Applied, Band, MAX_REGISTER_TRIES};
+use super::band::{AppBarCalls, Applied, Band, MAX_REGISTER_TRIES, TrayId, announcement_is_restart};
 use super::layout::{Rect, placement_area};
 use crate::shellhost::ShellMode;
 use crate::shellhost::watch::{Cause, ModeWatch, Seen, SystemLook};
@@ -134,6 +134,63 @@ pub fn set_own_band(band: Option<Rect>) {
     *OWN_BAND.lock().unwrap_or_else(|p| p.into_inner()) = band;
 }
 
+// ---------------------------------------------------------------- the bottom edge while the taskbar hide is in force
+//
+// With `shell_hide_taskbar` on, the host hides Explorer's taskbar and TAKES THE BOTTOM EDGE: it sets the work area itself (the monitor
+// less the dock's band) instead of leaving the hidden taskbar's strip in it (`rf_shellguard::tbwork`, `rf_win::taskbar_hide`). The dock
+// has two parts in that: its placement works from the monitor's bottom edge, and its own desktop-toolbar registration with Explorer
+// is GIVEN BACK and stays given back (a second band on top of the host's own). Both are one call here, [`take_edge`], and one back,
+// [`give_back_edge`]; the registration is registered again when the edge is given back.
+
+/// The dock's band while the host owns the bottom edge: the bottom strip of the primary monitor (empty when the dock reserves none).
+static EDGE: Mutex<Option<Rect>> = Mutex::new(None);
+/// The registration with Explorer is not to be held (the host owns the edge).
+static APPBAR_SUPPRESSED: AtomicBool = AtomicBool::new(false);
+/// Our registration with Explorer is held right now (kept by the system thread after every look).
+static APPBAR_HELD: AtomicBool = AtomicBool::new(false);
+/// The system window (0: there is none), so that the host's thread can wake it.
+static SYSTEM_WINDOW: AtomicIsize = AtomicIsize::new(0);
+
+fn edge_band() -> Option<Rect> {
+    *EDGE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+fn wake_system() {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
+    let h = SYSTEM_WINDOW.load(Ordering::SeqCst);
+    if h != 0 {
+        // SAFETY: posting to a window of this process; if it is gone the post fails and nothing happens.
+        unsafe {
+            let _ = PostMessageW(Some(HWND(h as *mut _)), WM_RESERVE, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+/// The host owns the bottom edge now: the dock's band is `band` (the bottom strip of the primary monitor), the islands are placed from
+/// the monitor's bottom edge, and the registration with Explorer is given back and stays given back. Does NOT wait: [`appbar_held`]
+/// turns false when the system thread has removed the registration. Telling it again only moves the strip.
+pub fn take_edge(band: Rect) {
+    *EDGE.lock().unwrap_or_else(|p| p.into_inner()) = Some(band);
+    APPBAR_SUPPRESSED.store(true, Ordering::SeqCst);
+    wake_system();
+}
+
+/// The host gives the edge back (the taskbar is shown again): the placement works from the work area again and the band is registered
+/// with Explorer again. Does not wait. Safe when the edge was never taken.
+pub fn give_back_edge() {
+    let was = APPBAR_SUPPRESSED.swap(false, Ordering::SeqCst);
+    let had = EDGE.lock().unwrap_or_else(|p| p.into_inner()).take().is_some();
+    if was || had {
+        wake_system();
+    }
+}
+
+/// Whether the dock holds a desktop-toolbar registration with Explorer. False also when there is no dock system in this process.
+pub fn appbar_held() -> bool {
+    APPBAR_HELD.load(Ordering::SeqCst)
+}
+
 /// The window that holds our toolbar registration right now (0: none). Read by the panic hook, which can run on any thread.
 static BAR_WINDOW: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
@@ -162,6 +219,10 @@ struct Ctx {
     last_monitor: Option<MonitorInfo>,
     ticks: u32,
     layout_pending: bool,
+    /// Explorer's taskbar window as it was when it took our registration (see [`announcement_is_restart`]).
+    tray_at_registration: Option<TrayId>,
+    /// The edge state the app was last told about, so that taking or giving back the edge is announced once.
+    edge_seen: (bool, Option<Rect>),
 }
 
 impl Ctx {
@@ -196,6 +257,8 @@ impl DockSystem {
                 last_monitor: None,
                 ticks: 0,
                 layout_pending: false,
+                tray_at_registration: None,
+                edge_seen: (false, None),
             });
             run(ctx, tx);
             let _ = end_tx.send(());
@@ -238,7 +301,7 @@ impl DockSystem {
     /// [`placement_area`]). `None` without a monitor.
     pub fn placement_area(&self) -> Option<(MonitorInfo, Rect)> {
         let m = primary_monitor()?;
-        Some((m, placement_area(m.work, self.band().or(own_band()), m.rect)))
+        Some((m, placement_area(m.work, edge_band().or(self.band()).or(own_band()), m.rect)))
     }
 
     /// The last known state of the full-screen check (kept up to date by the watch).
@@ -342,12 +405,20 @@ impl AppBarCalls for RealBar {
 /// Brings the band in line with what the app wants (see `band.rs` for the rules) and tells the app when it changed.
 unsafe fn apply_reservation(hwnd: windows::Win32::Foundation::HWND, ctx: &mut Ctx) {
     use windows::Win32::UI::WindowsAndMessaging::SetTimer;
-    let want = ctx.shared().want;
+    // While the host owns the bottom edge no band is registered (the host sets the work area itself): the wish is "none".
+    let want = if APPBAR_SUPPRESSED.load(Ordering::SeqCst) { None } else { ctx.shared().want };
     let view = primary_monitor().map(|m| (m.rect, m.work));
     let applied = ctx.band.apply(&mut RealBar { hwnd }, want, view);
+    APPBAR_HELD.store(ctx.band.registered(), Ordering::SeqCst);
+    if !ctx.band.registered() {
+        ctx.tray_at_registration = None;
+    }
     match applied {
         Applied::Set(granted) => {
             ctx.register_tries = 0;
+            if ctx.tray_at_registration.is_none() {
+                ctx.tray_at_registration = explorer_tray_id();
+            }
             ctx.shared().band = Some(granted);
             log::debug!("dock: reserved {granted:?}");
             ctx.emit(SystemEvent::LayoutChanged);
@@ -368,6 +439,14 @@ unsafe fn apply_reservation(hwnd: windows::Win32::Foundation::HWND, ctx: &mut Ct
         }
         Applied::Unchanged => {}
     }
+}
+
+/// Explorer's own taskbar window right now (the one of class `Shell_TrayWnd` that Explorer owns): handle, owner, the owner's start
+/// time. `None` when there is none or it cannot be told. A look through the list of windows, made only when an announcement or a
+/// registration needs it.
+fn explorer_tray_id() -> Option<TrayId> {
+    let live = rf_shellguard::win::tbwin::list_taskbar_windows().ok()?;
+    live.iter().find(|w| w.class == rf_shellguard::tbmodel::PRIMARY && w.explorer && w.start != 0).map(|w| TrayId { hwnd: w.handle, pid: w.pid, start: w.start })
 }
 
 /// The 2 s tick and the taskbar announcement ask the shell watch whether the shell window is another one; the app is told when it is.
@@ -408,6 +487,7 @@ fn run(ctx: Box<Ctx>, tx: std::sync::mpsc::Sender<Result<isize, String>>) {
             }
         };
         SetTimer(Some(hwnd), TIMER_POLL, POLL_MS, None);
+        SYSTEM_WINDOW.store(hwnd.0 as isize, Ordering::SeqCst);
         let _ = tx.send(Ok(hwnd.0 as isize));
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -444,7 +524,9 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
             let mut ctx = Box::from_raw(ptr);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             // (the band is given back: want None)
+            SYSTEM_WINDOW.store(0, Ordering::SeqCst);
             ctx.band.apply(&mut RealBar { hwnd }, None, None);
+            APPBAR_HELD.store(false, Ordering::SeqCst);
             ctx.shared().band = None;
             drop(ctx);
             PostQuitMessage(0);
@@ -462,11 +544,21 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
             // before, so forget it, or the new registration would be skipped as "unchanged". (Not every announcement is a restart - our
             // own tray host broadcasts it too - so `Band` gives a registration that is still held back first. BAR_WINDOW is left as it
             // is: it names the window that may hold a registration, which the panic hook gives back.)
-            ctx.band.announced();
-            ctx.register_tries = 0;
-            ctx.shared().band = None;
-            apply_reservation(hwnd, ctx);
-            schedule_layout(ctx);
+            //
+            // A broadcast that is not a restart (our own tray host sends one when it starts and stops) leaves the registration alone:
+            // Explorer's taskbar window is provably the same one (see `announcement_is_restart`).
+            let registered = ctx.band.registered();
+            let restart = announcement_is_restart(registered, ctx.tray_at_registration, if registered { explorer_tray_id() } else { None });
+            if restart {
+                ctx.band.announced();
+                ctx.tray_at_registration = None;
+                ctx.register_tries = 0;
+                ctx.shared().band = None;
+                apply_reservation(hwnd, ctx);
+                schedule_layout(ctx);
+            } else {
+                log::debug!("dock: TaskbarCreated from another program; Explorer's taskbar is the same one, the band stays");
+            }
             // (and the shell window is looked at: it is new, and the parts that depend on it - the desktop, the band - are told)
             watch_shell(ctx, Cause::Announced);
             return LRESULT(0);
@@ -474,6 +566,12 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
         match msg {
             WM_RESERVE => {
                 apply_reservation(hwnd, ctx);
+                // the host took or gave back the bottom edge: the islands are placed again (from the edge, or from the work area)
+                let edge = (APPBAR_SUPPRESSED.load(Ordering::SeqCst), edge_band());
+                if edge != ctx.edge_seen {
+                    ctx.edge_seen = edge;
+                    ctx.emit(SystemEvent::LayoutChanged);
+                }
                 LRESULT(0)
             }
             WM_BAR => {
@@ -590,6 +688,27 @@ mod tests {
         assert!(m.rect.covers(&m.work), "{m:?}");
         assert!(m.dpi >= 96 || m.dpi > 0);
         assert!(m.scale() > 0.5);
+    }
+
+    /// The statics are the process's: this is the only test that touches them. There is no system window here (the id is 0), so
+    /// nothing is posted and nothing reaches Explorer.
+    #[test]
+    fn taking_the_edge_suppresses_the_registration_and_giving_it_back_registers_again_and_is_safe_twice() {
+        assert!(!APPBAR_SUPPRESSED.load(Ordering::SeqCst) && edge_band().is_none() && !appbar_held(), "nothing is taken at the start");
+        let strip = Rect::new(0, 1362, 2560, 1440);
+        take_edge(strip);
+        assert!(APPBAR_SUPPRESSED.load(Ordering::SeqCst), "the registration is not to be held");
+        assert_eq!(edge_band(), Some(strip), "the placement works from the monitor's bottom edge");
+        // telling again only moves the strip
+        let thinner = Rect::new(0, 1348, 2560, 1440);
+        take_edge(thinner);
+        assert_eq!(edge_band(), Some(thinner));
+        give_back_edge();
+        assert!(!APPBAR_SUPPRESSED.load(Ordering::SeqCst) && edge_band().is_none());
+        give_back_edge();
+        assert!(!APPBAR_SUPPRESSED.load(Ordering::SeqCst) && edge_band().is_none(), "a second give-back changes nothing");
+        // (with no system window the held flag is simply false: the host's wait for the dock to let go ends at once)
+        assert!(!appbar_held());
     }
 
     #[test]

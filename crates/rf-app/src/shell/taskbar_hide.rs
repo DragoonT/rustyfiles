@@ -12,11 +12,16 @@
 //!   crashed with the taskbar hidden, and its guard gone too), a one-shot worker undoes it ([`Action::StaleCheck`]). Nothing is
 //!   started for a state file without one.
 //!
-//! WHAT IS CHANGED, and what is not: only the visibility of Explorer's taskbar windows. NOT the auto-hide state or any other
-//! taskbar setting (the call that sets it writes the user's taskbar settings, and that it is undone on every path could not be
-//! shown without running it), not the registry, not the work area unless `RUSTYFILES_TASKBAR_WORKAREA=1` is set (a first try is
-//! made without it; see docs/design/taskbar-hide.md).
+//! WHAT IS CHANGED, and what is not: the visibility of Explorer's taskbar windows, and - while the hide is in force and confirmed - the
+//! session's work area, because a hidden taskbar keeps its strip: the dock takes the bottom edge (the work area becomes the monitor less
+//! the dock's band, or the whole monitor with `dock_reserve` off; the dock does not register its own band with Explorer meanwhile).
+//! The work area is the running session's, never stored; the user's own rectangles are written down first and put back on every way
+//! out. NOT the auto-hide state or any other taskbar setting, not the registry. No environment variable: the switch is the switch.
+//! docs/design/taskbar-hide.md.
+//!
+//! The band's thickness comes from the dock (`dock::host::apply_reserve` calls [`band_changed`] with what it reserves, or `None`).
 
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -25,8 +30,32 @@ use rf_win::taskbar_hide::{self, Config, TaskbarHider};
 
 use crate::settings::Settings;
 
-/// Asks for the work area to be given back as well (a second step of the first careful try; see the design note).
-pub const ENV_WORK_AREA: &str = "RUSTYFILES_TASKBAR_WORKAREA";
+/// The dock's band as the dock last said it (`None` inside: it reserves none). `None` outside: the dock has not said yet.
+static BAND: Mutex<Option<Option<i32>>> = Mutex::new(None);
+
+/// Remembers the dock's band; true when it is not what was remembered before.
+fn note_band(band: Option<i32>) -> bool {
+    let mut g = BAND.lock().unwrap_or_else(|p| p.into_inner());
+    let changed = *g != Some(band);
+    *g = Some(band);
+    changed
+}
+
+/// The band to start the hider with: what the dock said (`Some`, and inside it `None` for "reserves none"), or `None` when it has not
+/// said anything yet.
+fn current_band() -> Option<Option<i32>> {
+    *BAND.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The dock reserves `band` px at the bottom of the primary monitor (device px), or none (`None`: `dock_reserve` is off). Costs a lock
+/// and a comparison when nothing changed and nothing is running; with the hide in force the work area follows.
+pub fn band_changed(band: Option<i32>, cx: &App) {
+    if note_band(band)
+        && let Some(h) = cx.try_global::<Hiding>()
+    {
+        h.hider.set_band(band);
+    }
+}
 
 struct Hiding {
     hider: TaskbarHider,
@@ -90,7 +119,7 @@ fn stale_check() {
             return;
         }
         log::warn!("taskbar hiding: the setting is off but an earlier run left a record of hidden windows; undoing it");
-        let cfg = Config { state_dir: dir, guard_exe: taskbar_hide::guard_next_to_exe(), give_back_work_area: false };
+        let cfg = Config { state_dir: dir, guard_exe: taskbar_hide::guard_next_to_exe(), band_px: None, band_known: false };
         match TaskbarHider::start(cfg) {
             Ok(hider) => hider.finish(Duration::from_secs(10)),
             Err(e) => log::warn!("taskbar hiding: the earlier run's record could not be undone: {e}"),
@@ -101,21 +130,15 @@ fn stale_check() {
     }
 }
 
-/// What the configuration says, from the environment of this process (pure apart from reading it).
-pub fn work_area_wanted(value: Option<&str>) -> bool {
-    value.is_some_and(|v| v.trim() == "1")
-}
-
 fn start(cx: &mut App) {
     let Some(state_dir) = state_dir() else {
         log::warn!("taskbar hiding: there is no folder for the state file; nothing is hidden");
         return;
     };
-    let cfg = Config {
-        state_dir,
-        guard_exe: taskbar_hide::guard_next_to_exe(),
-        give_back_work_area: work_area_wanted(std::env::var(ENV_WORK_AREA).ok().as_deref()),
-    };
+    // The bottom edge waits for the dock's word: a hider that starts before the dock has said what its band is would give the whole
+    // monitor to maximised windows over the dock and set the work area a second time when the band arrives.
+    let band = current_band();
+    let cfg = Config { state_dir, guard_exe: taskbar_hide::guard_next_to_exe(), band_px: band.flatten(), band_known: band.is_some() };
     match TaskbarHider::start(cfg) {
         Ok(hider) => {
             hider.set_wanted(true);
@@ -144,7 +167,7 @@ pub fn stop(cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, decide, work_area_wanted};
+    use super::{Action, current_band, decide, note_band};
     use crate::settings::Settings;
 
     #[test]
@@ -181,13 +204,25 @@ mod tests {
     }
 
     #[test]
-    fn the_work_area_step_is_asked_for_only_by_a_one() {
-        assert!(!work_area_wanted(None));
-        assert!(!work_area_wanted(Some("")));
-        assert!(!work_area_wanted(Some("0")));
-        assert!(!work_area_wanted(Some("true")));
-        assert!(work_area_wanted(Some("1")));
-        assert!(work_area_wanted(Some(" 1 ")));
+    fn the_work_area_follows_the_switch_and_no_environment_variable_is_read() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/shell/taskbar_hide.rs")).unwrap();
+        let code: String = text.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+        let before_tests = &code[..code.find("#[cfg(test)]").unwrap()];
+        assert!(!before_tests.contains("env::var"), "the switch is the switch: no variable decides the work area any more");
+        assert!(!before_tests.contains("RUSTYFILES_TASKBAR_WORKAREA"));
+    }
+
+    #[test]
+    fn the_docks_band_is_remembered_and_only_a_change_is_passed_on() {
+        // (one test touches the static: the tests of a binary share it)
+        assert_eq!(current_band(), None, "before the dock has said anything: unknown, which is not the same as no band");
+        assert!(note_band(Some(78)), "the first word is news");
+        assert_eq!(current_band(), Some(Some(78)));
+        assert!(!note_band(Some(78)), "the same again is not");
+        assert!(note_band(Some(92)));
+        assert!(note_band(None), "dock_reserve switched off is a change, too");
+        assert_eq!(current_band(), Some(None), "said, and it is none");
+        assert!(!note_band(None));
     }
 
     #[test]

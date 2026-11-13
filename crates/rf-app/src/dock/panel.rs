@@ -84,6 +84,8 @@ trait Hooks {
     /// Draw again: the growth out of the island started, moved to a new rectangle or ended (a view that draws only while an animation
     /// asks for frames would otherwise keep the last picture).
     fn redraw(&self, _cx: &mut App) {}
+    /// The keyboard goes to the view's text field (only the Start panel has one).
+    fn focus_field(&self, _cx: &mut App) {}
     /// The dock ends: the window goes with it.
     fn remove(&self, cx: &mut App);
 }
@@ -220,7 +222,14 @@ impl Hooks for StartHooks {
         (START_SIZE.0, room.map_or(START_SIZE.1, rf_win::dock::startpage::panel_height))
     }
     fn redraw(&self, cx: &mut App) {
-        let _ = self.handle.update(cx, |_, window, _| window.refresh());
+        // (the growth starting, moving or ending is what moves the field between the panel's top and the island's row: its placeholder follows)
+        let _ = self.handle.update(cx, |v, window, cx| {
+            v.sync_placeholder(window, cx);
+            window.refresh();
+        });
+    }
+    fn focus_field(&self, cx: &mut App) {
+        let _ = self.handle.update(cx, |v, window, cx| v.focus_search(window, cx));
     }
     fn remove(&self, cx: &mut App) {
         let _ = self.handle.update(cx, |v, window, cx| {
@@ -353,6 +362,13 @@ pub fn set_typed(text: &str, cx: &mut App) {
     if let Some(left) = left {
         left.update(cx, |_, cx| cx.notify());
     }
+}
+
+/// A press on the left island's search field while the panel's glass has grown out of it: the panel's own field stands under the
+/// island's window there, so the press cannot reach it; the keyboard goes to it from here (a field that has it already keeps it).
+pub fn focus_start_field(cx: &mut App) {
+    let Some(hooks) = panel(cx).and_then(|p| p.slot(PanelId::START)).map(|s| s.hooks.clone()) else { return };
+    hooks.focus_field(cx);
 }
 
 /// The island button's click: opens the Start panel, closes it when it is the open one.

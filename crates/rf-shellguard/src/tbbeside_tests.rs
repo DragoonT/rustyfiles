@@ -6,7 +6,7 @@ use crate::beside::{EXIT_NOT_ARMED, EXIT_NOT_CONFIRMED, run_beside, run_beside_l
 use crate::fakes::{FakeLink, World};
 use crate::statefile::WorkAreaRec;
 use crate::sys::{HostLink, PidWait};
-use crate::tbctl::{Controller, Options};
+use crate::tbctl::Controller;
 use crate::tbfakes::*;
 use crate::tbmodel::{HideRecord, PRIMARY, SECONDARY, Target};
 
@@ -276,7 +276,7 @@ fn the_session_ending_leaves_everything_as_it_is() {
 fn host_and_guard_together_a_crash_of_the_host_after_hiding_brings_the_taskbar_back() {
     let d = two_monitor_desktop();
     let mut hw = FakeWorld::new(d.clone());
-    let mut c = Controller::new(HOST_PID, HOST_START, Options { give_back_work_area: false });
+    let mut c = Controller::new(HOST_PID, HOST_START);
     c.set_wanted(&mut hw, true);
     assert_eq!(visible_handles(&d), Vec::<isize>::new());
     // the host dies here: no restore, no word to the guard. The guard sees the file the host left.
@@ -293,7 +293,7 @@ fn host_and_guard_together_a_crash_of_the_host_after_hiding_brings_the_taskbar_b
 fn host_and_guard_together_a_clean_exit_leaves_nothing_for_the_guard_to_do() {
     let d = two_monitor_desktop();
     let mut hw = FakeWorld::new(d.clone());
-    let mut c = Controller::new(HOST_PID, HOST_START, Options { give_back_work_area: false });
+    let mut c = Controller::new(HOST_PID, HOST_START);
     c.set_wanted(&mut hw, true);
     c.quit(&mut hw);
     assert!(hw.guard_done);
@@ -305,4 +305,37 @@ fn host_and_guard_together_a_clean_exit_leaves_nothing_for_the_guard_to_do() {
     let (code, _) = run(&mut gw, Some(&mut link));
     assert_eq!(code, 0);
     assert_eq!(count(&gw, "taskbar."), 0);
+}
+
+/// The host took the bottom edge (the work area is the monitor less the dock's band) and dies: the guard shows the taskbar and puts
+/// the USER'S work areas back - the monitor less the taskbar's strip, with no band of the dock's, since the dock died with the host
+/// and its registration with it. Nobody is left to take the strip away, so no phantom band stays.
+#[test]
+fn host_and_guard_together_a_crash_of_the_host_with_the_edge_taken_gives_the_users_work_areas_back() {
+    use crate::tbmodel::MonitorGeom;
+    let d = two_monitor_desktop();
+    let mut hw = FakeWorld::new(d.clone());
+    hw.monitors = vec![
+        MonitorGeom { id: "A".into(), rect: [0, 0, 2560, 1440], work: [0, 0, 2560, 1314], primary: true },
+        MonitorGeom { id: "B".into(), rect: [-1440, -200, 0, 2359], work: [-1440, -200, 0, 2311], primary: false },
+    ];
+    hw.dock_band = Some(78);
+    hw.dock_wants_band = Some(78);
+    let mut c = Controller::new(HOST_PID, HOST_START).with_band(Some(78));
+    c.set_wanted(&mut hw, true);
+    assert_eq!(hw.monitors[0].work, [0, 0, 2560, 1362], "the edge is the dock's");
+    // the host dies here: no restore, no word to the guard. The guard sees the file the host left.
+    let mut gw = world_with(&d);
+    gw.store.file = hw.state.clone();
+    gw.procs.pid_waits.extend([(0, PidWait::Timeout), (0, PidWait::Gone)]);
+    let (code, _) = run(&mut gw, None);
+    assert_eq!(code, 0);
+    assert_eq!(visible_handles(&d), vec![0x1001, 0x1002]);
+    assert_eq!(gw.workarea.restored.len(), 1);
+    assert_eq!(
+        gw.workarea.restored[0],
+        vec![WorkAreaRec { monitor: "A".into(), rect: [0, 0, 2560, 1392] }, WorkAreaRec { monitor: "B".into(), rect: [-1440, -200, 0, 2311] }]
+    );
+    assert!(gw.pos("taskbar.show_recorded").unwrap() < gw.pos("workarea.restore").unwrap());
+    assert!(!gw.store.file.pending_restore() && !gw.store.file.has_hidden_taskbar_key());
 }

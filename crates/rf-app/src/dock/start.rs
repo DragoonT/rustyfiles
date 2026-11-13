@@ -2,7 +2,9 @@
 //! most (never taller than the room above the island), on HyperGlass (`panel.rs` opens, places and closes it; this is what is inside).
 //! The numbers and the decisions are `rf_win::dock::startpage`; the drawing of the pages is `start_home.rs`.
 //!
-//! * Top: a search field (a pill) with the keyboard in it. Typing is the search from either page.
+//! * Top: a search field (a pill) with the keyboard in it. Typing is the search from either page. (While the left island's glass has
+//!   grown into the panel the field stands in the island's row at the bottom of the glass, exactly where the island's own field is, and
+//!   the top holds a header with the account, the gear and the power button instead: `start_row.rs`, `grow_head.rs`.)
 //! * Two pages, and the panel always opens on the first. HOME: "Sabitlenenler" (the user's pinned apps, six columns of tiles, three
 //!   rows, more of them on pages with dots at the grid's right edge; right click any app to pin or unpin it) with a "Tümü" button, and
 //!   "Önerilenler" (the documents opened most recently, two columns; the setting `dock_start_recommended`). ALL APPS ("Tümü" opens it,
@@ -12,11 +14,13 @@
 //!   over a pipe: `search_pipe`). Local rows appear within a frame of the keystroke; the files arrive after them without moving the row
 //!   the user is on (`search.rs`).
 //! * Bottom: the user's account picture and name, the gear (Windows' Settings) and the power button (Kilitle, Uyku, Oturumu kapat,
-//!   Yeniden başlat, Bilgisayarı kapat; the last two ask "Emin misiniz?" first, in the panel).
+//!   Yeniden başlat, Bilgisayarı kapat; the last two ask "Emin misiniz?" first, in the panel). (In the grown panel they are the header.)
 //!
 //! Keyboard: typing goes to the field wherever the pointer was last clicked; the arrows move through the grid, the recommended entries
 //! and the list (or the results), Page Up and Page Down turn the grid's pages, Tab goes field, Tümü (Geri), gear, power; Enter starts
 //! the one under the cursor, Ctrl+Enter shows it in its folder in rustyfiles, Escape steps back (query, all apps, then the panel).
+//! With the field in the island's row under the content the way to the content is Up and the way back Down, and Tab follows the order on
+//! the screen (`rf_win::dock::startkeys`). The result list reads top down with the best match first, selected and marked "Enter".
 //!
 //! Menus (right click on an app, the power button) are drawn inside this window: a separate menu window would take the activation and
 //! the panel would close under it.
@@ -36,6 +40,7 @@ use rf_win::dock::IconSource;
 use rf_win::dock::panel::{self as geo, CloseCause, PanelId};
 use rf_win::dock::power::{self, Action as PowerAction, Menu as PowerMenu, Step as PowerStep};
 use rf_win::dock::startapps;
+use rf_win::dock::startkeys::{self, FieldAt};
 use rf_win::dock::startlist::{self, Cursor, Move, Row};
 use rf_win::dock::startpage::{self as page, Page, Spot};
 use rf_win::dock::startpins::{self, Loaded, PinFile, Plan};
@@ -160,6 +165,8 @@ pub struct StartView {
 
     // the interface
     input: Entity<InputState>,
+    /// Whether the field shows the short placeholder of the island's row (the field stands there) and not the panel's own sentence.
+    placeholder_short: bool,
     query: String,
     /// The page shown when nothing is typed; the panel opens on the home page every time.
     page: Page,
@@ -267,7 +274,7 @@ fn save_pins(file: PinFile) {
 
 impl StartView {
     pub fn new(island: Rc<RefCell<IslandGlass>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("Uygulama, dosya ya da web'de ara")));
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder_for(FieldAt::Top)));
         let subs = vec![cx.subscribe_in(&input, window, |this: &mut Self, _, ev: &InputEvent, _, cx| {
             if let InputEvent::Change = ev {
                 this.on_query_changed(cx);
@@ -301,6 +308,7 @@ impl StartView {
             recs_loaded: false,
             _recs_task: None,
             input,
+            placeholder_short: false,
             query: String::new(),
             page: Page::Home,
             spot: None,
@@ -389,6 +397,25 @@ impl StartView {
         cx.notify();
     }
 
+    /// The field's placeholder follows where the field stands: in the island's row (the grown glass) it is the island's own word, which
+    /// fits the 220 unit pill; the panel's sentence does not, and was cut mid-word there. Called whenever the growth starts, moves or
+    /// ends (`panel.rs`'s redraw) and when the window is shown; nothing happens when it is already right.
+    pub fn sync_placeholder(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let short = field_at(cx) == FieldAt::Bottom;
+        if short != self.placeholder_short {
+            self.placeholder_short = short;
+            let text = placeholder_for(if short { FieldAt::Bottom } else { FieldAt::Top });
+            self.input.update(cx, |s, cx| s.set_placeholder(text, window, cx));
+        }
+    }
+
+    /// The keyboard goes to the search field (a press on the island's field, which lies over the panel's in the grown panel).
+    pub fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.open() {
+            self.focus_field(window, cx);
+        }
+    }
+
     /// The window is on the screen: the glass goes on, the keyboard goes to the field.
     pub fn on_shown(&mut self, dark: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.popup.is_none() && self.shown {
@@ -399,6 +426,7 @@ impl StartView {
             });
             self._watch = Some(glass_watch::watch(cx, |this: &mut Self| this.popup.as_mut()));
         }
+        self.sync_placeholder(window, cx);
         self.focus_field(window, cx);
         cx.notify();
     }
@@ -670,7 +698,7 @@ impl StartView {
         if n == 0 {
             return;
         }
-        let ix = startlist::step_results(self.sel_ix, up, n);
+        let ix = startkeys::results_step(self.sel_ix, up, n);
         self.selection = Selection::at(&self.entries, ix);
         self.sel_ix = ix;
         self.reveal_results = true;
@@ -1009,9 +1037,11 @@ impl StartView {
 
     // ------------------------------------------------------------------ keys
 
-    /// Tab: the field, then the page button ("Tümü" or "Geri"), then the gear, then the power button.
+    /// Tab: the field, then the page button ("Tümü" or "Geri"), then the gear, then the power button; with the field in the island's row
+    /// under the content: the gear, the power button, the page button, the field (the order on the screen).
     fn tab(&mut self, back: bool, window: &mut Window, cx: &mut Context<Self>) {
         use page::TabStop;
+        let field_at = field_at(cx);
         let at = if self.page_focus.is_focused(window) {
             TabStop::PageButton
         } else if self.settings_focus.is_focused(window) {
@@ -1021,7 +1051,7 @@ impl StartView {
         } else {
             TabStop::Field
         };
-        match page::next_tab_stop(at, back, self.page_button_drawn) {
+        match startkeys::tab_stop(field_at, at, back, self.page_button_drawn) {
             TabStop::Field => self.focus_field(window, cx),
             TabStop::PageButton => window.focus(&self.page_focus, cx),
             TabStop::Gear => window.focus(&self.settings_focus, cx),
@@ -1139,19 +1169,19 @@ impl StartView {
                 if searching {
                     self.move_selection(key == "up");
                 } else {
-                    self.move_cursor(if key == "up" { Move::Up } else { Move::Down });
+                    self.move_cursor(if key == "up" { Move::Up } else { Move::Down }, field_at(cx));
                 }
                 cx.notify();
             }
             "pagedown" | "pageup" if !searching => {
                 cx.stop_propagation();
-                self.move_cursor(if key == "pageup" { Move::PageUp } else { Move::PageDown });
+                self.move_cursor(if key == "pageup" { Move::PageUp } else { Move::PageDown }, field_at(cx));
                 cx.notify();
             }
             // left and right are the text field's, except while the cursor is in the pinned grid or the recommended entries
             "left" | "right" if !searching && self.page == Page::Home && self.spot.is_some() => {
                 cx.stop_propagation();
-                self.move_cursor(if key == "left" { Move::Left } else { Move::Right });
+                self.move_cursor(if key == "left" { Move::Left } else { Move::Right }, field_at(cx));
                 cx.notify();
             }
             // (on a button of the bottom row Enter is the button's: it is clicked by the key's release)
@@ -1164,18 +1194,19 @@ impl StartView {
     }
 
     /// The keyboard cursor after an arrow or page key: on the home page through the grid and the recommended entries (the grid's page
-    /// follows the cursor), on the all-apps page through the list.
-    fn move_cursor(&mut self, mv: Move) {
+    /// follows the cursor), on the all-apps page through the list. `field` is where the search field is: the way into the content and
+    /// back to the field follows it (`startkeys`).
+    fn move_cursor(&mut self, mv: Move, field: FieldAt) {
         match self.page {
             Page::Home => {
                 let (per, shown) = (self.layout.per_page, self.rec_shown());
-                self.spot = page::step_home(self.spot, mv, self.grid_page, per, self.pin_cells.len(), shown);
+                self.spot = startkeys::home_step(field, self.spot, mv, self.grid_page, per, self.pin_cells.len(), shown);
                 if let Some(Spot::Pin(i)) = self.spot {
                     self.grid_page = page::page_of(i, per);
                 }
             }
             Page::All => {
-                self.cursor = startlist::step(self.cursor, mv, 0, self.apps.len());
+                self.cursor = startkeys::list_step(field, self.cursor, mv, self.apps.len(), self.nearest_app_to_field());
                 if let Some(Cursor::App(j)) = self.cursor
                     && let Some(row) = startlist::row_of_app(&self.rows, j)
                 {
@@ -1183,6 +1214,15 @@ impl StartView {
                 }
             }
         }
+    }
+
+    /// The app on the last row of the all-apps list that is fully in view: where Up from a field below the list lands (`startkeys`).
+    /// Measured from the list's own scroll state as of the last frame; `None` before the list has been laid out.
+    fn nearest_app_to_field(&self) -> Option<usize> {
+        let state = self.list_scroll.0.borrow();
+        // (`last_item_size.item` is the list's own box as the last layout saw it)
+        let viewport = state.last_item_size?.item.height;
+        startlist::last_visible_app(&self.rows, -f32::from(state.base_handle.offset().y), f32::from(viewport), ROW_H)
     }
 
     /// Shows a page ("Tümü", "Geri", Escape, Backspace). The keyboard goes to the field; the all-apps list starts at its top.
@@ -1298,31 +1338,35 @@ impl Render for StartView {
             self.render_all(pal, theme, cx)
         };
         let notice = self.notice.clone();
-        // While the island's field travels to the top of the panel the layout keeps its room empty and the field is drawn at the
-        // rectangle of the moment; the rest of the panel fades in with the motion's second half (`grow_host.rs`).
-        let travelling = grown.and_then(|g| g.field.map(|r| (r, g.field_alpha)));
-        let field_in_flow = match travelling {
-            Some(_) => div().h(px(page::TOP_PAD + page::SEARCH_H)).flex_shrink_0().into_any_element(),
+        // While the island's glass has grown into the panel its row stays as it is and the panel's search field stands in it, where the
+        // island's own field stands (`grow_head.rs`, drawn below). The room at the top that the field used to take holds a header with the
+        // account, the gear and the power button, and the panel's own line and footer are not drawn: the content between the header and
+        // the island's row keeps the height it had. The header fades in with the motion's second half (`grow_host.rs`).
+        let grown_head = grown.and_then(|g| g.layout.map(|l| (l, g)));
+        let top = match grown_head {
+            Some((l, g)) => self.render_grown_head(l.head, g.content, pal, theme, cx),
             None => self.render_search_field(pal).into_any_element(),
         };
-        let travelling_field = travelling.map(|(r, alpha)| div().absolute().left(px(r[0])).top(px(r[1])).w(px(r[2])).opacity(alpha).child(self.search_pill(pal).h(px(r[3]))));
-        // While the island's glass has grown into the panel its bottom row is the glass's one bottom row (`grow_row.rs`, drawn below): the
-        // panel's own line and row are not drawn, and the content above keeps the height it had.
-        let grown_row = grown.and_then(|g| g.row.map(|r| (r, g.content)));
-        let own_row = grown_row.is_none().then(|| (div().h(px(page::DIVIDER_H)).w_full().bg(pal.separator().hsla()), self.render_footer(pal, theme, cx)));
+        let own_row = grown_head.is_none().then(|| (div().h(px(page::DIVIDER_H)).w_full().bg(pal.separator().hsla()), self.render_footer(pal, theme, cx)));
+        // (the grown panel's content stands in the rectangle `grow_head::layout` gives, 24 px under the header; the ordinary panel's
+        // follows its field in the flow, with the same 24 px between)
         let rest = v_flex()
             .flex_1()
             .min_h_0()
             .when_some(grown, |d, g| d.opacity(g.content))
-            .child(div().flex_1().min_h_0().mt(px(page::SECTION_GAP)).child(body))
+            .child(div().flex_1().min_h_0().when(grown_head.is_none(), |d| d.mt(px(page::SECTION_GAP))).child(body))
             .when_some(notice, |d, n| d.child(div().h(px(page::NOTICE_H)).flex_shrink_0().px(px(PAD)).flex().items_center().text_xs().text_color(pal.text_secondary().hsla()).truncate().child(n)))
             .when_some(own_row, |d, (line, footer)| d.child(line).child(footer));
-        let island_row = grown_row.map(|(row, content)| self.render_grown_row(row, content, pal, theme, cx));
-        let content = v_flex()
-            .size_full()
-            .when(grown.is_none(), |d| d.opacity(frame.opacity).mt(px(frame.drop_px)))
-            .child(field_in_flow)
-            .child(rest);
+        // the panel's search field in the island's row, and the hairline over the row (the right island's panels have the same)
+        let row_field = grown_head.map(|(l, g)| self.render_row_field(l, g.field_alpha, pal));
+        let row_line = grown.and_then(|g| super::grow_view::hairline(&g, pal));
+        let content = match grown_head {
+            Some((l, _)) => {
+                let [x, y, w, h] = l.content;
+                div().size_full().relative().child(top).child(rest.absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h))).into_any_element()
+            }
+            None => v_flex().size_full().when(grown.is_none(), |d| d.opacity(frame.opacity).mt(px(frame.drop_px))).child(top).child(rest).into_any_element(),
+        };
         // the plain fill: the whole window as an ordinary panel; the glass's own rectangle while it grows (the window is bigger than that)
         // (it comes in with the growth: the island's glass has none, so the first and the last frame carry no step in the tone)
         let wash = grown.map(|g| div().absolute().left(px(g.wash[0])).top(px(g.wash[1])).w(px(g.wash[2])).h(px(g.wash[3])).rounded(px(g.wash_radius)).bg(fill.opacity(g.wash_alpha)));
@@ -1341,11 +1385,27 @@ impl Render for StartView {
             // a click anywhere in the panel leaves the keyboard in the field: typing goes there wherever the click was
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| this.focus_field(window, cx)))
             .children(wash)
-            .child(div().absolute().top_0().left_0().right_0().bottom(px(extra)).child(content).children(travelling_field))
-            // (the glass's one bottom row is in the part the content leaves; the menus and their backdrops come after it, over all of it)
-            .children(island_row)
+            .child(div().absolute().top_0().left_0().right_0().bottom(px(extra)).child(content))
+            // (the island's row is in the part the content leaves; the menus and their backdrops come after it, over all of it)
+            .children(row_line)
+            .children(row_field)
             .child(div().absolute().inset_0().children(overlays))
             .into_any_element()
+    }
+}
+
+/// Where the panel's search field is now: in the island's row under the content while the glass has grown out of the island, else at
+/// the top of the panel.
+fn field_at(cx: &App) -> FieldAt {
+    startkeys::field_at(super::grow_host::field_in_row(cx))
+}
+
+/// The empty field's text: the panel's own sentence at the top; in the island's row the island's own word (that row reads "Ara" with
+/// the panel closed, and the sentence is wider than the pill's room for text).
+fn placeholder_for(field: FieldAt) -> &'static str {
+    match field {
+        FieldAt::Top => t!("Uygulama, dosya ya da web'de ara"),
+        FieldAt::Bottom => t!("Ara"),
     }
 }
 
@@ -1481,8 +1541,9 @@ impl StartView {
         // (the window is taller than the panel by the gap and the island's row while the island's glass has grown into it)
         let extra_bottom = super::grow_host::extra_bottom(cx);
         let (view_w, view_h) = (f32::from(size.width), f32::from(size.height) - extra_bottom);
-        // the power menu opens just over its button: in the panel's own bottom row, or in the island's row while the glass has grown
-        let (power_right, power_bottom) = super::grow_host::bottom_row(cx).map_or((PAD, BOTTOM_H + 6.0), |r| (r.right_margin, r.power_menu_bottom()));
+        // the power menu opens just over its button in the panel's own bottom row, or just under it in the header while the glass has grown
+        let head = super::grow_host::head_layout(cx).map(|l| l.head);
+        let power_right = head.map_or(PAD, |h| h.side);
         let item = move |id: (&'static str, usize), icon: L, label: &'static str, hot: bool| {
             h_flex()
                 .id(id)
@@ -1599,7 +1660,10 @@ impl StartView {
                     .id("start-power-menu")
                     .absolute()
                     .right(px(power_right))
-                    .bottom(px(power_bottom))
+                    .map(|d| match head {
+                        Some(h) => d.top(px(h.power_menu_top())),
+                        None => d.bottom(px(BOTTOM_H + 6.0)),
+                    })
                     .w(px(MENU_W))
                     .p(px(6.))
                     .rounded(theme::RADIUS)
@@ -1656,11 +1720,24 @@ fn power_icon(a: PowerAction) -> L {
 #[cfg(test)]
 mod tests {
     // (not `super::*`: gpui's own `test` attribute would come with it)
-    use super::{AppMenu, AppMenuItem, CELL_W, PAD, PANEL_H, PANEL_W, PowerAction, QUIET, acts, pins_path, power_icon, power_label, startpins};
+    use super::{AppMenu, AppMenuItem, CELL_W, FieldAt, PAD, PANEL_H, PANEL_W, PowerAction, QUIET, acts, pins_path, placeholder_for, power_icon, power_label, startpins};
+    use crate::t;
     use std::time::{Duration, Instant};
 
     fn menu(location: Option<&str>) -> AppMenu {
         AppMenu { app: rf_win::apps::App { name: "Paint".into(), id: "p!App".into() }, at: gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)), location: location.map(Into::into) }
+    }
+
+    /// The field in the island's row shows the word the island's own field shows (a long sentence was cut mid-word in the 220 unit pill:
+    /// 32 letters at 14 units need about 200 of the 174 units left for the text); at the top of the panel it keeps its own sentence.
+    #[test]
+    fn the_field_in_the_islands_row_has_the_islands_word_and_the_one_at_the_top_its_sentence() {
+        assert_eq!(placeholder_for(FieldAt::Bottom), t!("Ara"));
+        assert_eq!(placeholder_for(FieldAt::Top), t!("Uygulama, dosya ya da web'de ara"));
+        // the word fits the room the pill leaves for text at the widest letters the font has (14 units each), the sentence does not
+        let room = crate::dock::plan::SEARCH_TEXT_ROOM;
+        assert!(placeholder_for(FieldAt::Bottom).chars().count() as f32 * 14.0 <= room);
+        assert!(t!("Uygulama, dosya ya da web'de ara").chars().count() as f32 * 7.0 > room, "the sentence needs more than the room even at 7 units a letter");
     }
 
     #[test]

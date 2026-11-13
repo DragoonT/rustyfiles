@@ -112,7 +112,10 @@ passes it on, `MiddleIsland::row_right_click`). There is no setting; the right c
 
 The three windows are always on top, never activated by a click (they do not take the keyboard from the app you are typing in), have
 no taskbar button and are not in Alt+Tab. The VISIBLE glass of all three has its bottom edge 10 px above the bottom of the monitor's
-work area, so with the Windows taskbar visible they float just above it, and the band the desktop toolbar reserves is unchanged.
+work area, so with the Windows taskbar visible they float just above it, and the band the desktop toolbar reserves is unchanged. With
+`shell_hide_taskbar` on and the hide confirmed the dock takes the bottom edge instead: the islands are placed from the monitor's bottom
+edge (`dock::system::take_edge`), the dock's own toolbar registration is given back, and the host sets the work area itself (the monitor
+less the band, or the whole monitor with `dock_reserve` off): docs/design/taskbar-hide.md.
 They hide while a full-screen application (a game, a video) is in front on the primary monitor and come back when it leaves.
 
 Each window is BIGGER than its glass (`layout::placements`): 4 px of transparent margin on every side (where the screen ends the
@@ -470,8 +473,10 @@ typed in the panel (the island is never activated, so it cannot take keys itself
 ## The Start panel grows out of the left island (setting "Paneller adalardan büyüyerek açılsın" / Panels grow out of the islands)
 
 The user's idea: when Start is pressed the glass at the left grows and widens and IS the Start panel; when the search field is pressed it
-grows too, the field going up, selected, ready to type. **Off by default** (`dock_start_grow`; a new look is off until it has been seen on a
-screen: the person who wrote it could not show a window). Off: everything above this section is exactly as it was. NOT SEEN ON A SCREEN.
+grows too, ready to type. (First built with the field travelling to the top of the panel and the account, gear and power button in the
+island's row; the user then asked for it the other way round, see "THE ROW STAYS AS IT IS" below.) **On by default** (`dock_start_grow`, switched on at the user's own
+request, and `settings.rs` and its test say so; it was written as off until seen on a screen, which the person who wrote it could not do).
+Off: everything above this section is exactly as it was. NOT SEEN ON A SCREEN.
 
 * THE MOTION (`rf_win::dock::grow`, pure and tested at the four dock sizes and at 100, 125 and 150 %). The island's glass (a capsule)
   grows to the GROWN rectangle: the panel's rectangle taken down to the island's bottom edge, so the panel's content is on top, then the
@@ -479,9 +484,8 @@ screen: the person who wrote it could not show a window). Off: everything above 
   the left island: up and to the right; `BottomRight` for the right one: up and to the left); the logo does not move. The corner radius
   eases from the island's (24 units) to the panel's (8 px) with the rectangle. Opening takes 220 ms, closing 160 ms; the glass follows
   `u = ease_out(s)` where `s` is the position along the motion (time), so the way back is the same curve run the other way; a press during
-  the motion turns `s` round where it is (no jump, the rest of the way at the speed of the new direction). The island's weather fades out
-  over the first half of the time, the panel's content (the pages, the account row) fades in over the second half and, closing, goes
-  first; the search field travels from its place in the island to the top of the panel with the glass. With animations off (the app's
+  the motion turns `s` round where it is (no jump, the rest of the way at the speed of the new direction). Nothing of the island's row fades
+  or moves; the panel's content (the header, the pages) fades in over the second half and, closing, goes first. With animations off (the app's
   setting or Windows') the panel is whole in one frame and gone in one frame. `rf_win::dock::grow::arm_done`: the clock starts when the
   panel's glass is running (at once when the engine has none and is not working on one; after 1000 ms, `ARM_ENGINE_MAX_MS`, only as a
   net for an engine that neither runs nor fails).
@@ -499,9 +503,8 @@ screen: the person who wrote it could not show a window). Off: everything above 
   and gives the keyboard back as before. The panel's own system rounding and border are put away (`grow::set_frameless`) and given
   back when it is hidden (`finish`).
 * OPENING BY THE LOGO OR BY THE SEARCH FIELD is the same path (`panel::toggle_start`); the field in the panel has the keyboard from the
-  moment the window is shown and what is typed meanwhile stays in it; with text in it the results show as before. The panel's
-  field is drawn at the rectangle of the moment while it travels (`start.rs`: a spacer keeps its room in the layout, the field is an
-  absolutely placed child; the island's own field is not drawn meanwhile and keeps its room).
+  moment the window is shown and what is typed meanwhile stays in it; with text in it the results show as before. The panel's field is
+  drawn in the island's row, in the island's own field's place (see "THE ROW STAYS AS IT IS").
 * WHAT DRIVES THE FRAMES. `view_frame` (the panel's `render`) reads the clock, queues the glass shape and the region for that frame (one
   task of the message loop; nothing when it is the frame already sent) and says whether another frame is wanted; the island's `render` asks
   `island_fade` the same way. The frames therefore follow the display. A DEADLINE task per motion (the motion's end plus 25 ms,
@@ -522,23 +525,51 @@ screen: the person who wrote it could not show a window). Off: everything above 
   (`dock: grow skipped: ...`), and the panel opens the ordinary way, a pop-up above the island with its own 120 ms easing, as with the
   setting off. A click on another island is therefore always outside the panel and closes it, as before. Not an L-shaped glass: the
   glass engine's shape is one rectangle.
-* ONE BOTTOM ROW (`dock/grow_row.rs` pure and tested, `start_row.rs` draws it; the user's "burası böyle olmamış": the grown glass showed the
-  panel's own bottom row AND, under it, the island's row with nothing in it but the logo). While the glass is grown the bottom row of
-  the glass IS the island's row. The logo stays where it is; the account's picture and name stand where the island's search field stood
-  (padding + logo + gap, in dock units); the gear and the power button end at the right edge with the island's padding (8 units), 32 units
-  square with 16 unit pictures and the island's 4 unit gap; the picture is 28 units, the name 14; all on the logo's centre line; the line
-  is the row's top edge across the glass. The panel's own line and row are not drawn and the panel is placed 65 px shorter
-  (`grow::height_without_own_row`, `grow_host::panel_size`): the content area keeps the height it had (the page layout counts the 65 px back in,
-  `grow_host::own_row_given_up`), and the 8 px gap stays inside the glass as room under the content. The row fades in with the
-  content (second half of the opening, first part of the closing). The power menu opens just over its button (`BottomRow::power_menu_bottom`),
-  the menus' backdrops cover the whole window, so the gear is dismissed by a click while a menu is open, as before. The island's window
-  lies over the island's rectangle and takes the pointer there, so where the gear would be under it (a long weather text at the
-  largest dock size: `grow_row::buttons_clear_of_island`) the panel does not grow and keeps its own row. A right click on the island's
-  empty glass is not Task Manager's while the glass is grown (the account's name stands over it), and the island's hidden search field
-  has no hand cursor or hover plate then. The island's width is not changed while the panel is grown out of it (`left.rs`
-  `width_to_report`: a weather text that comes in meanwhile is told when the growth is over), so the check above holds for as long as the
-  panel is open. With the setting off, or where the panel
-  does not grow, the panel keeps its own bottom row, as before. NOT SEEN ON A SCREEN.
+* THE ROW STAYS AS IT IS (`dock/grow_head.rs` pure and tested, `start_row.rs` draws; the user's "başlattaki arama çubuğu olduğu yerde mi
+  kalsa? üste gitmese? kullanıcı bilgileri ve ayarlarla güç simgesi üste gitse?", which replaced the first arrangement: the field travelling
+  to the top and the account, gear and power button in the island's row). While the glass is grown the island's row is the glass's bottom
+  row EXACTLY as it is with the panel closed: the logo, the search field in its place and the weather. The weather stays, by the right
+  island's rule (its whole row stays; `Stays::RowAndField` for the left island, `Stays::Row` for the right, neither fades anything), and
+  its text can change while the panel is open: the island's width is told as always (`left.rs` no longer holds it back) and the host's
+  layout works the growth out again (`panel::layout_applied`). A hairline stands over the row across the glass (`grow_view::hairline`, the
+  right island's). THE FIELD: the island's window is never activated and cannot take keys, so while the glass runs the island does not
+  draw its field (`island_fade().field_hidden`, opacity 0, it keeps its room) and the PANEL draws its own field, the one with the keyboard,
+  in the same rectangle: same place (padding + logo + gap in from the island's left edge), same size (220 x 32 units), same fill, picture
+  and text size (14 units; `start_row.rs::render_row_field`, `grow_head::Layout::field`). Its opacity is 0 until the glass runs and 1
+  from then on, the island's field going in the same frame. The placeholder in the row is the island's own word, "Ara", which the field says
+  with the panel closed: the panel's sentence ("Uygulama, dosya ya da web'de ara") needs about 200 units and the pill leaves 174
+  (`plan::SEARCH_TEXT_ROOM`), so it was cut mid-word there; `StartView::sync_placeholder` swaps it whenever the growth starts, moves or
+  ends, and the panel's field keeps the sentence where it stands at the top. The field's pill lengths (12 / 8 / 14 units) are shared
+  constants (`plan::FIELD_PAD_X` ...) that `left.rs` and `start_row.rs` both draw from. The island's window lies over the panel's field and takes the pointer; a press
+  on it gives the keyboard to the panel's field (`panel::focus_start_field`, a text cursor over it) and does not close the panel, which
+  the island's field did while it was a button. A KNOWN LIMIT: clicking INTO the text to place the caret, double click to select a word, dragging a selection and the right
+  click's paste are not possible (the press is the island window's; the keyboard does all of it). The way to give them is to cut the
+  field out of the island window's region while the glass runs (a new `Part` that is subtracted in `hit::set_region`, set when the
+  growth starts and given back when it ends and on every layout), so that the pointer reaches the panel's field itself; it was not
+  built because it is a window call that cannot be tried without a screen and a hole left behind would make the idle island's field
+  dead. THE HEADER: the account's picture and name (left), the
+  gear and the power button (right) stand in the room at the top that the panel's own field used to take (60 px: 24 + the 36 px pill), the
+  panel's own lengths (28 px picture, 36 px buttons, 18 px pictures, 28 px from the sides, the footer's), centred above a hairline that is
+  the header's last pixel row; their menus open from there (the power menu just under its button). The panel's own line and footer are
+  not drawn and the panel is placed 65 px shorter (`grow::height_without_own_row`, `grow_host::panel_size`): the content area keeps the
+  height it had (24 px under the header down to the panel's bottom edge; the page layout counts the 65 px back in,
+  `grow_host::own_row_given_up`), and the 8 px gap stays inside the glass as room under the content. The header fades in with the content
+  (second half of the opening, first part of the closing). Nothing of the panel stands under the island's window any more, so the check
+  "the island would lie over the gear" (`buttons_clear_of_island`) is gone: a long weather text no longer stops the panel from growing.
+  A right click on the island's empty glass is not Task Manager's while the glass is grown. With the setting off, or where the panel does
+  not grow, the panel keeps its own field at the top and its own footer, as before. NOT SEEN ON A SCREEN.
+* THE KEYS WITH THE FIELD BELOW THE CONTENT (`rf_win::dock::startkeys`, pure and tested). Up from the field lands on the thing nearest to it
+  (the first tile of the last row drawn: the recommended entries, else the grid's bottom row); Down, Right and Page Down from the field
+  still land on the first thing; Down on the bottom row goes back to the field (the cursor leaves); on the all-apps page Down from the last
+  app goes back to the field and Up (Page Up) from the field lands on the app on the last row fully in view (the view measures it from
+  the list's scroll state, `startlist::last_visible_app`); Down from the field there still lands on the first app. Left and Right are
+  the field's unless the cursor is in the grid. Tab follows the screen from top to bottom: gear, power button, "Tümü" ("Geri"), field.
+  RESULTS: the list reads top down as it always did, the best match first, SELECTED (the selection pill) and marked "Enter" on its row,
+  and Enter starts it; Up and Down move the selection and wrap, so no arrow ever leaves the list for the field and the field keeps
+  Left, Right, Home and End. Chosen over a list turned upside down (best match nearest to the field) because that reverses the sections'
+  order (apps, files, bookmarks, web), which the rest of the dock and the quick search read top down, and makes Up mean "next"; this is also
+  how Windows 10's Start looked with its search box at the bottom. The strip with the key hints ("Enter: aç" ...) is directly over the
+  field.
 * THE TONE AT THE HAND-OVER. The island's own glass has no wash over it; the panel's has (28 % black, 45 % white in the light theme). The
   panel's wash is drawn with an opacity that follows the glass's growth (`Run::wash_alpha`: 0 while the glass starts and at the first
   frame, 1 at the end, 0 again when the island is home), so the first and the last frame of the motion are the island's glass and nothing
@@ -620,7 +651,8 @@ text on the Dock page is about every panel and the row is in the page's general 
 * THE ISLAND'S WIDTH CHANGES WHILE A PANEL IS GROWN (a new minute that makes the clock wider, an icon dragged between the overflow
   panel and the strip): the host's layout tells `panel::layout_applied`, which works the growth out again for the island's new rectangle
   and moves the panel's window (`panel::refit`, the same path as a panel that changes its height: the control centre gaining a card, the
-  overflow panel gaining an icon). The corner does not move, so the island does not jump. (The left island still holds its width.) The
+  overflow panel gaining an icon). The corner does not move, so the island does not jump. (The left island does the same now: its weather
+  text can change while the Start panel is open.) The
   window is moved without anything else being in front of the island's row (the island's window is raised again in the same task) and
   the glass's shape and the region are sent in that task too. The same check as the opening's (`grow_host::fits`) runs again at every
   such move: a middle island that has come to meet the glass (apps pinned or launched while the panel is open) puts the panel away at

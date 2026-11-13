@@ -137,15 +137,10 @@ impl StartView {
 
     // ------------------------------------------------------------------ the search field
 
-    /// The search field: a pill, 36 px high, with the keyboard in it.
+    /// The search field at the top of the panel: a pill, 36 px high, with the keyboard in it. (While the island's glass has grown into
+    /// the panel the field stands in the island's row instead and this room holds the header: `start_row.rs`.)
     pub(super) fn render_search_field(&mut self, pal: Palette) -> impl IntoElement {
-        div().flex_shrink_0().px(px(page::SIDE_PAD)).pt(px(page::TOP_PAD)).child(self.search_pill(pal))
-    }
-
-    /// The pill itself (the field and its picture), as wide as the room it is given: in its place at the top of the panel, or, while the
-    /// island's field travels to it (`grow_host.rs`), at the rectangle of that moment.
-    pub(super) fn search_pill(&mut self, pal: Palette) -> Div {
-        h_flex()
+        let pill = h_flex()
             .h(px(page::SEARCH_H))
             .w_full()
             .px(px(14.))
@@ -156,7 +151,8 @@ impl StartView {
             .border_1()
             .border_color(pal.separator().hsla())
             .child(Icon::new(L::Search).size(px(16.)).text_color(pal.text_secondary().hsla()))
-            .child(div().flex_1().min_w_0().text_size(px(14.)).child(Input::new(&self.input).appearance(false)))
+            .child(div().flex_1().min_w_0().text_size(px(14.)).child(Input::new(&self.input).appearance(false)));
+        div().flex_shrink_0().px(px(page::SIDE_PAD)).pt(px(page::TOP_PAD)).child(pill)
     }
 
     // ------------------------------------------------------------------ the buttons that change the page
@@ -431,8 +427,8 @@ impl StartView {
     // ------------------------------------------------------------------ the bottom row
 
     /// The bottom row: the account picture and name at the left, the gear (Windows' Settings) and the power button at the right. (While
-    /// the island's glass has grown into the panel the panel has no bottom row of its own: the same three stand in the island's row,
-    /// `start_row.rs`.)
+    /// the island's glass has grown into the panel the panel has no bottom row of its own: the island's row is the glass's, and the same
+    /// three stand in a header at the top of the panel, `start_row.rs`.)
     pub(super) fn render_footer(&mut self, pal: Palette, theme: ThemePalette, cx: &mut Context<Self>) -> impl IntoElement {
         let (settings_focus, power_focus) = (self.settings_focus.clone(), self.power_focus.clone());
         let power_on = self.power != PowerMenu::Closed;

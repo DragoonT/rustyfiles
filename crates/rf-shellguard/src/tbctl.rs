@@ -1,23 +1,36 @@
 //! The dock host's side of hiding Explorer's taskbar (shell plan E1): WHEN to hide, WHEN to show, in what order.
 //!
-//! `Controller` holds the decisions; everything it touches (windows, processes, the state file, the guard) is behind
+//! `Controller` holds the decisions; everything it touches (windows, processes, the state file, the guard, the dock) is behind
 //! [`HideWorld`], so every way of losing the taskbar is a test with a fake world (`tbfakes`). The real world is in `rf-win`
 //! (`taskbar_hide`): it runs this on a thread of its own, because a call into another process's window can wait for that process.
 //!
 //! The order that keeps the user safe, in one place:
 //! 1. the guard is started and CONFIRMED (it has the host's process handle and has read the state file);
 //! 2. the record of what is about to be hidden is written to `shell-state.json` (with `pending_restore`);
-//! 3. only then is the first window hidden;
-//! 4. leaving (setting off, quit) shows the windows, WAITS until they are visible (the show is only a queued request to another
-//!    process), puts the work area back, removes the record, and only then tells the guard.
-//! 5. a restore that did not complete is retried on the timer (with a growing pause), whatever the setting says, until it has
-//!    or until the retries are used up; the guard is the net for what is left.
+//! 3. only then is the first window hidden, and the hide is CONFIRMED (the windows are hidden, not only asked to be: the change is
+//!    queued in Explorer's own thread);
+//! 4. only after that the dock takes the bottom edge (a hidden taskbar keeps its strip, so the dock would float above an empty
+//!    strip): the user's own work areas are written down FIRST (`original_work_areas`), then the dock is told to let go of its own
+//!    desktop-toolbar band and to place itself from the monitor's bottom edge, and only when it has let go (a second band on top of
+//!    ours would be a second strip) AND the work area shows that Explorer really dropped it (the dock's own word is only what it sent,
+//!    and the route of its messages may be the tray host's) are the work areas set (`tbwork`). A monitor that becomes ours later has
+//!    its work area written down before the first change to it, too. Nothing of this happens while the hide is not confirmed, and a
+//!    hide that is lost again (Explorer restarted and the new taskbar could not be hidden) gives the dock its band back;
+//! 5. leaving (setting off, quit, the guard lost) shows the windows, WAITS until they are visible (the show is only a queued request
+//!    to another process), puts the work areas back from the written-down rectangles (checked against the monitors as they are by
+//!    then: a changed resolution or a monitor that went is not answered with a rectangle of the old screen), lets the dock register
+//!    its band with Explorer
+//!    again, removes the record, and only then tells the guard;
+//! 6. a restore that did not complete is retried on the timer (with a growing pause), whatever the setting says, until it has
+//!    or until the retries are used up; the guard is the net for what is left (it shows the windows and puts the written-down work
+//!    areas back; the dock's registration dies with the host).
 //!
 //! The guard ending while windows are hidden shows them again at once (the next tick, a second at most) and the host stops hiding
 //! until a guard is confirmed again.
 
 use crate::statefile::ShellStateFile;
 use crate::tbmodel::{self, Gate, GuardStatus, HideRecord, LiveWindow, MonitorGeom, Refusal, Target, Throttle};
+use crate::tbwork::{self, Verdict};
 
 /// How long the host waits for the guard to say it is armed.
 pub const CONFIRM_WAIT_MS: u64 = 3_000;
@@ -32,11 +45,11 @@ pub const RESTORE_RETRY_MAX_MS: u64 = 30_000;
 /// After this many retries the host stops trying; the guard, which was not told it can go, is what is left.
 pub const RESTORE_RETRY_LIMIT: u32 = 12;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Options {
-    /// Give the strip of a hidden taskbar back to programs (see `tbmodel::giveback`). Off unless asked for.
-    pub give_back_work_area: bool,
-}
+/// How long the dock may take to let go of its desktop-toolbar band (Explorer answers the removal and recomputes the work area). After
+/// that the dock gets its band back and nothing is set.
+pub const EDGE_DOCK_WAIT_MS: u64 = 3_000;
+/// Waits before the next try to take the edge after one that failed (the state file, or a dock that did not let go).
+pub const EDGE_RETRY_MS: [u64; 3] = [5_000, 15_000, 60_000];
 
 /// What the controller needs from the outside. Every method is cheap to fake; the real ones are in `rf-win`.
 pub trait HideWorld {
@@ -57,9 +70,30 @@ pub trait HideWorld {
     /// Waits a short while (half a second at most) for the windows to be visible; returns how many still are not. A window that
     /// no longer exists is not counted: there is nothing left to show.
     fn wait_visible(&mut self, targets: &[Target]) -> usize;
+    /// Waits a short while (half a second at most) for the windows that were asked to hide to be hidden; returns the ones that are
+    /// still visible. A window that no longer exists is not among them.
+    fn wait_hidden(&mut self, targets: &[Target]) -> Vec<Target>;
+    /// The monitors, with the work area each has NOW. `primary` marks the one the dock sits on.
     fn monitors(&mut self) -> Vec<MonitorGeom>;
     /// Sets the session's work area for the monitor that holds `rect` (never stored: no profile update).
     fn set_work_area(&mut self, rect: [i32; 4]) -> Result<(), String>;
+    /// Holds the work area of a monitor whose edge is ours while Explorer's taskbar is hidden: from `from` (what it has now) to `to`.
+    /// The real one sets it WITHOUT the change broadcast and fits the monitor's maximized windows itself, because Explorer answers
+    /// the broadcast by taking the rectangle back (`win::workarea::hold_work_area` has the measurement). Putting the user's own
+    /// rectangles back stays [`HideWorld::set_work_area`], with the broadcast: there Explorer is meant to work them out again.
+    fn hold_work_area(&mut self, from: [i32; 4], to: [i32; 4]) -> Result<(), String> {
+        let _ = from;
+        self.set_work_area(to)
+    }
+    /// The dock takes the bottom edge: its placement is told that its band is `edge` (the bottom strip of the primary monitor; empty
+    /// when the dock reserves nothing) and its own desktop-toolbar registration with Explorer is given back and stays given back.
+    /// Does not wait: [`HideWorld::dock_edge_ready`] says when the registration is gone. Telling it again only updates the strip.
+    fn dock_take_edge(&mut self, edge: [i32; 4]);
+    /// Has the dock let go of its desktop-toolbar registration? True also when it never had one, or there is no dock in this process.
+    fn dock_edge_ready(&mut self) -> bool;
+    /// The hide is over: the dock registers its band with Explorer again and places itself from the work area. Does not wait. Safe
+    /// to call when nothing was taken.
+    fn dock_give_back_edge(&mut self);
     fn load_state(&mut self) -> ShellStateFile;
     fn save_state(&mut self, f: &ShellStateFile) -> Result<(), String>;
     /// Is `rustyfiles-shellguard.exe` where it is expected?
@@ -85,10 +119,20 @@ pub enum Status {
     Waiting(Refusal),
 }
 
+/// Where the taking of the bottom edge stands.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Edge {
+    /// Not ours: the dock keeps its own band registration, the work areas are Explorer's.
+    Free,
+    /// The user's work areas are written down and the dock was told to let go of its band; waiting for it (a tick looks again).
+    Releasing { since_ms: u64 },
+    /// The dock let go and the work areas of the monitors whose taskbar we hid are set by the rules of `tbwork`.
+    Ours,
+}
+
 pub struct Controller {
     host_pid: u32,
     host_start: u64,
-    opts: Options,
     want: bool,
     guard: GuardStatus,
     /// Windows hidden by us in this run (handles; forgotten when Explorer restarts).
@@ -100,6 +144,20 @@ pub struct Controller {
     next_guard_try_ms: u64,
     guard_confirmed_ms: u64,
     throttle: Throttle,
+    /// The "set too often" warning was written for the present stretch of refusals (it is said once, not every second).
+    throttle_said: bool,
+    /// The dock's band thickness in device px (`None`: the dock reserves none, `dock_reserve` is off). Session only.
+    band_px: Option<i32>,
+    /// The dock has said what its band is (`band_px` is its word, `None` included). Until then the edge is not taken: a guess of "no
+    /// band" would give the whole monitor to maximised windows over the dock and cost a second set when the real band arrives.
+    band_known: bool,
+    edge: Edge,
+    /// What the dock was last told its band is.
+    dock_edge: Option<[i32; 4]>,
+    edge_failures: usize,
+    next_edge_try_ms: u64,
+    /// The "another toolbar reserves room" line was said already.
+    foreign_said: bool,
     /// The last restore did not complete: it is tried again on the timer until it does (or the retries run out).
     restore_pending: bool,
     restore_attempts: u32,
@@ -107,11 +165,10 @@ pub struct Controller {
 }
 
 impl Controller {
-    pub fn new(host_pid: u32, host_start: u64, opts: Options) -> Controller {
+    pub fn new(host_pid: u32, host_start: u64) -> Controller {
         Controller {
             host_pid,
             host_start,
-            opts,
             want: false,
             guard: GuardStatus::Absent,
             hidden: Vec::new(),
@@ -122,6 +179,14 @@ impl Controller {
             guard_confirmed_ms: 0,
             // Explorer may recompute the work area whenever it likes: give it back at most 4 times a minute.
             throttle: Throttle::new(4, 60_000),
+            throttle_said: false,
+            band_px: None,
+            band_known: false,
+            edge: Edge::Free,
+            dock_edge: None,
+            edge_failures: 0,
+            next_edge_try_ms: 0,
+            foreign_said: false,
             restore_pending: false,
             restore_attempts: 0,
             next_restore_ms: 0,
@@ -140,6 +205,31 @@ impl Controller {
 
     pub fn guard_status(&self) -> GuardStatus {
         self.guard
+    }
+
+    /// Where the taking of the bottom edge stands.
+    pub fn edge(&self) -> Edge {
+        self.edge
+    }
+
+    /// The dock was told to let go of its band and has not yet: the host asks for a quicker look than the once-a-second tick.
+    pub fn edge_waiting(&self) -> bool {
+        self.want && !self.hidden.is_empty() && matches!(self.edge, Edge::Releasing { .. })
+    }
+
+    /// The quick look while the dock is letting go: only that, no listing of windows.
+    pub fn edge_tick(&mut self, w: &mut dyn HideWorld) {
+        if self.edge_waiting() {
+            self.drive_edge(w);
+        }
+    }
+
+    /// The band the dock wants kept free at the bottom of the primary monitor, when it is known at the start (before any window is
+    /// hidden); later changes come through [`Controller::set_band`].
+    pub fn with_band(mut self, band_px: Option<i32>) -> Controller {
+        self.band_px = band_px;
+        self.band_known = true;
+        self
     }
 
     /// A restore is still owed: the timer must keep running, and the host's thread must not end, until it is done.
@@ -194,11 +284,33 @@ impl Controller {
         self.leave(w);
     }
 
-    /// Explorer made its taskbar again (`TaskbarCreated`): the handles we knew are void.
+    /// `TaskbarCreated` was heard: Explorer may have made its taskbar again, and the handles we knew may be void.
+    ///
+    /// Not every `TaskbarCreated` is an Explorer restart: our own tray host broadcasts it when it starts and stops. A window that is
+    /// still the one we hid (same handle, class, owner and start time) stays in `hidden`; forgetting it would leave the taskbar hidden
+    /// and unaccounted for, since only a VISIBLE window is ever hidden again. After a real restart the old windows are gone or
+    /// foreign (new process, new start time) and are dropped; the new taskbar is hidden by the pass that follows.
     pub fn explorer_restarted(&mut self, w: &mut dyn HideWorld) {
-        self.hidden.clear();
-        self.bars.clear();
+        if self.want
+            && !self.hidden.is_empty()
+            && let Ok(live) = w.list_taskbars()
+        {
+            self.hidden.retain(|t| tbmodel::judge(t, &live) == tbmodel::Verdict::Valid);
+            self.refresh_bars(&live);
+        }
         self.reconcile(w);
+    }
+
+    /// The dock's band changed (its size, or `dock_reserve`): while the edge is ours the work area follows.
+    pub fn set_band(&mut self, w: &mut dyn HideWorld, band_px: Option<i32>) {
+        if band_px == self.band_px && self.band_known {
+            return;
+        }
+        self.band_px = band_px;
+        self.band_known = true;
+        if self.want && !self.hidden.is_empty() {
+            self.drive_edge(w);
+        }
     }
 
     /// Monitors came or went, the work area changed: look again (a new monitor has a new secondary taskbar).
@@ -206,10 +318,11 @@ impl Controller {
         self.reconcile(w);
     }
 
-    /// The work area was changed by someone (Explorer recomputes it when a toolbar changes): give the strip back again, if asked.
+    /// The work area was changed by someone (Explorer recomputes it when a toolbar changes): while the edge is ours it is set again,
+    /// a few times a minute at most.
     pub fn work_area_changed(&mut self, w: &mut dyn HideWorld) {
         if self.want && !self.hidden.is_empty() {
-            self.give_back(w);
+            self.drive_edge(w);
         }
     }
 
@@ -296,14 +409,40 @@ impl Controller {
                 return;
             }
         };
+        self.refresh_bars(&live);
         let to_hide = tbmodel::windows_to_hide(&live);
         if to_hide.is_empty() {
             if self.hidden.is_empty() {
                 self.refusal = Some(Refusal::NothingToHide);
+                self.release_unheld_edge(w);
+            } else {
+                self.drive_edge(w);
             }
             return;
         }
         self.hide_pass(w, &live, to_hide);
+        self.release_unheld_edge(w);
+    }
+
+    /// The edge is ours but no taskbar of ours is hidden any more (Explorer restarted and its new taskbar could not be hidden, or was
+    /// not there): the strip is Explorer's again, so the dock gets its band back at once instead of floating over a visible taskbar
+    /// with no band and no hidden strip. Nothing else is put back: Explorer computed the work areas anew with the restart, and the
+    /// written-down record stays for the way out. Called after a pass that left `hidden` empty; the next pass starts from `Free`.
+    fn release_unheld_edge(&mut self, w: &mut dyn HideWorld) {
+        if !self.hidden.is_empty() || self.edge == Edge::Free {
+            return;
+        }
+        w.warn("taskbar: no taskbar of ours is hidden any more; the dock gets its band back");
+        w.dock_give_back_edge();
+        self.dock_edge = None;
+        self.edge = Edge::Free;
+        self.edge_failures = 0;
+        self.next_edge_try_ms = 0;
+    }
+
+    /// The rectangles of the taskbar windows we hid, as they are now (a monitor may have changed).
+    fn refresh_bars(&mut self, live: &[LiveWindow]) {
+        self.bars = self.hidden.iter().filter_map(|t| live.iter().find(|l| l.handle == t.handle).map(|l| l.rect)).collect();
     }
 
     fn ensure_guard(&mut self, w: &mut dyn HideWorld) -> Result<(), Refusal> {
@@ -358,57 +497,189 @@ impl Controller {
             self.refusal = Some(r);
             return;
         }
-        let mut done = 0;
+        // Asked to hide: the change is queued in Explorer's own thread, so `Ok` only means "asked".
+        let mut asked: Vec<Target> = Vec::new();
         for t in &to_hide {
             match w.hide(t) {
-                Ok(()) => {
-                    done += 1;
-                    if !self.hidden.iter().any(|h| h.handle == t.handle) {
-                        self.hidden.push(t.clone());
-                    }
-                    if let Some(l) = live.iter().find(|l| l.handle == t.handle)
-                        && !self.bars.contains(&l.rect)
-                    {
-                        self.bars.push(l.rect);
-                    }
-                }
+                Ok(()) => asked.push(t.clone()),
                 Err(e) => w.warn(&format!("taskbar: a window could not be hidden: {e}")),
             }
+        }
+        // The hide counts once it is CONFIRMED: the windows are hidden. Nothing else (the dock's edge, the work areas) is touched
+        // for a window that was only asked to hide.
+        let still_visible = if asked.is_empty() { Vec::new() } else { w.wait_hidden(&asked) };
+        let mut done = 0;
+        for t in &asked {
+            if still_visible.iter().any(|v| v.handle == t.handle) {
+                continue;
+            }
+            done += 1;
+            if !self.hidden.iter().any(|h| h.handle == t.handle) {
+                self.hidden.push(t.clone());
+            }
+            if let Some(l) = live.iter().find(|l| l.handle == t.handle)
+                && !self.bars.contains(&l.rect)
+            {
+                self.bars.push(l.rect);
+            }
+        }
+        if !still_visible.is_empty() {
+            w.warn(&format!("taskbar: {} window(s) were asked to hide but are still visible; nothing else is changed for them", still_visible.len()));
         }
         if done > 0 {
             self.refusal = None;
             w.log(&format!("taskbar: {done} Explorer taskbar window(s) hidden"));
-            if self.opts.give_back_work_area {
-                self.give_back(w);
+        }
+        if !self.hidden.is_empty() {
+            self.drive_edge(w);
+        }
+    }
+
+    /// The edge: while our hide is in force the dock takes the bottom edge (see `tbwork`). One call does whatever is due next; it is
+    /// called after every hide pass, on the timer, when the work area changes and when the dock's band changes. Nothing here runs
+    /// unless the hide is confirmed (`hidden` holds only windows that were seen hidden).
+    fn drive_edge(&mut self, w: &mut dyn HideWorld) {
+        if !self.want || self.hidden.is_empty() {
+            return;
+        }
+        let now = w.now_ms();
+        match self.edge {
+            Edge::Free => {
+                // the dock has not said what its band is: wait for its word (`set_band` drives the edge when it comes)
+                if !self.band_known || now < self.next_edge_try_ms {
+                    return;
+                }
+                let mons = w.monitors();
+                let plan = tbwork::plan_edge(&mons, &self.bars, self.band_px);
+                if !self.foreign_said && plan.monitors.iter().any(|m| m.verdict == Verdict::Foreign) {
+                    self.foreign_said = true;
+                    w.warn("taskbar: another toolbar reserves room on a monitor (or the taskbar is not at the bottom); its work area is left alone and the taskbar's strip stays there");
+                }
+                if !plan.any_ours() {
+                    return;
+                }
+                // 1. The user's own work areas are written down before anything is changed - the dock letting go of its band is a
+                //    change, too (Explorer recomputes the work area).
+                if !self.write_down_originals(w, &plan) {
+                    self.fail_edge(now);
+                    return;
+                }
+                // 2. The dock lets go of its own band and places itself from the monitor's bottom edge.
+                if plan.primary_ours()
+                    && let Some(edge) = plan.dock_edge(self.band_px)
+                {
+                    w.dock_take_edge(edge);
+                    self.dock_edge = Some(edge);
+                    self.edge = Edge::Releasing { since_ms: now };
+                    w.log("taskbar: the dock takes the bottom edge; waiting for it to let go of its own band");
+                    self.continue_release(w, now);
+                } else {
+                    // the dock is not on a monitor of ours: only other monitors are set
+                    self.edge = Edge::Ours;
+                    self.set_areas(w, now);
+                }
+            }
+            Edge::Releasing { .. } => self.continue_release(w, now),
+            Edge::Ours => self.hold_edge(w, now),
+        }
+    }
+
+    /// The dock was told to let go: when it has - and the work area shows that Explorer took the removal - the work areas are set; when
+    /// it takes too long it gets its band back and the try is made again after a pause.
+    ///
+    /// The dock's own word is not enough: it says what it SENT, and with the tray host on its messages go to Explorer through the
+    /// host's window. A removal that Explorer did not take would leave its band in the work area, and a work area set on top of it
+    /// would be a second strip. So the work area is read, too: while it still is the monitor less the strip less a band, nothing is set.
+    fn continue_release(&mut self, w: &mut dyn HideWorld, now: u64) {
+        let Edge::Releasing { since_ms } = self.edge else { return };
+        if w.dock_edge_ready() && self.explorer_dropped_band(w) {
+            self.edge = Edge::Ours;
+            self.edge_failures = 0;
+            self.set_areas(w, now);
+        } else if now.saturating_sub(since_ms) >= EDGE_DOCK_WAIT_MS {
+            w.warn("taskbar: the dock did not let go of its band in time (or Explorer still holds it); it gets it back and the edge is tried again later");
+            w.dock_give_back_edge();
+            self.dock_edge = None;
+            self.edge = Edge::Free;
+            self.fail_edge(now);
+        }
+    }
+
+    /// Does the primary monitor's work area show that Explorer holds no band of the dock's any more?
+    fn explorer_dropped_band(&mut self, w: &mut dyn HideWorld) -> bool {
+        let plan = tbwork::plan_edge(&w.monitors(), &self.bars, self.band_px);
+        !plan.primary().is_some_and(|m| m.band_held)
+    }
+
+    fn fail_edge(&mut self, now: u64) {
+        let i = self.edge_failures.min(EDGE_RETRY_MS.len() - 1);
+        self.next_edge_try_ms = now + EDGE_RETRY_MS[i];
+        self.edge_failures += 1;
+    }
+
+    /// The edge is ours: the dock's strip follows the band, and a work area that Explorer took back is set again.
+    fn hold_edge(&mut self, w: &mut dyn HideWorld, now: u64) {
+        let mons = w.monitors();
+        let plan = tbwork::plan_edge(&mons, &self.bars, self.band_px);
+        if plan.primary_ours()
+            && let Some(edge) = plan.dock_edge(self.band_px)
+            && self.dock_edge != Some(edge)
+        {
+            w.dock_take_edge(edge);
+            self.dock_edge = Some(edge);
+        }
+        self.set_changes(w, now, &plan);
+    }
+
+    /// Reads the monitors afresh (Explorer recomputed them when the dock let go) and sets what the rules want.
+    fn set_areas(&mut self, w: &mut dyn HideWorld, now: u64) {
+        let mons = w.monitors();
+        let plan = tbwork::plan_edge(&mons, &self.bars, self.band_px);
+        self.set_changes(w, now, &plan);
+    }
+
+    /// Writes the user's own work area of every monitor that is or is about to be ours into the state file (with `pending_restore`),
+    /// keeping what an earlier record holds. `false`: the file could not be written, and nothing may be changed. Nothing is written
+    /// when the file already says it (a settled edge is quiet).
+    fn write_down_originals(&mut self, w: &mut dyn HideWorld, plan: &tbwork::EdgePlan) -> bool {
+        let mut st = w.load_state();
+        let have = st.original_work_areas();
+        let originals = tbmodel::originals_to_save(&have, &plan.originals());
+        if originals == have && st.pending_restore() {
+            return true;
+        }
+        st.set_original_work_areas(&originals);
+        st.set_pending_restore(true);
+        match w.save_state(&st) {
+            Ok(()) => true,
+            Err(e) => {
+                w.warn(&format!("taskbar: the state file could not be written; the work area is left alone: {e}"));
+                false
             }
         }
     }
 
-    fn give_back(&mut self, w: &mut dyn HideWorld) {
-        if !self.opts.give_back_work_area || self.bars.is_empty() {
-            return;
-        }
-        let mons = w.monitors();
-        let changes = tbmodel::giveback(&mons, &self.bars);
+    fn set_changes(&mut self, w: &mut dyn HideWorld, now: u64, plan: &tbwork::EdgePlan) {
+        let changes = plan.changes();
         if changes.is_empty() {
             return;
         }
-        let now = w.now_ms();
+        // A monitor can become ours after the edge was taken (plugged in, its taskbar hidden by a later pass): its own work area is
+        // written down before the first change to it, like the first monitors' were.
+        if !self.write_down_originals(w, plan) {
+            return;
+        }
+        // Explorer may recompute the work area whenever it likes; answering every time could fight it for ever.
         if !self.throttle.allow(now) {
-            w.warn("taskbar: the work area was given back too often lately; left alone");
+            if !self.throttle_said {
+                self.throttle_said = true;
+                w.warn("taskbar: the work area was set too often lately; left alone");
+            }
             return;
         }
-        // The user's own rectangles are written down before the first one is changed.
-        let mut st = w.load_state();
-        let originals = tbmodel::originals_to_save(&st.original_work_areas(), &changes);
-        st.set_original_work_areas(&originals);
-        st.set_pending_restore(true);
-        if let Err(e) = w.save_state(&st) {
-            w.warn(&format!("taskbar: the state file could not be written; the work area is left alone: {e}"));
-            return;
-        }
+        self.throttle_said = false;
         for c in &changes {
-            if let Err(e) = w.set_work_area(c.to) {
+            if let Err(e) = w.hold_work_area(c.from, c.to) {
                 w.warn(&format!("taskbar: a work area could not be set: {e}"));
             }
         }
@@ -498,18 +769,35 @@ impl Controller {
         if failed > 0 {
             return Err(format!("{failed} window(s) could not be shown"));
         }
-        // Work areas next, from the rectangles written down before they were changed.
+        // Work areas next, from the rectangles written down before they were changed - checked against the monitors as they are now:
+        // the screen may have changed in between (a resolution, a scale, a monitor that went), and a rectangle of the old screen
+        // applied blindly lands on whatever monitor is nearest. The taskbars are read again, now that they are shown.
         let originals = st.original_work_areas();
         if st.pending_restore() {
+            let bars: Vec<[i32; 4]> = w.list_taskbars().unwrap_or_else(|_| live.clone()).iter().filter(|b| b.explorer && b.visible).map(|b| b.rect).collect();
+            let back = tbwork::work_restore(&originals, &w.monitors(), &bars);
+            if back.refreshed > 0 || back.dropped > 0 {
+                w.warn(&format!("taskbar: the screen changed while the taskbar was hidden; {} work area(s) worked out again, {} left to Explorer", back.refreshed, back.dropped));
+            }
             let mut bad = 0;
-            for o in &originals {
-                if w.set_work_area(o.rect).is_err() {
+            for rect in &back.put {
+                if w.set_work_area(*rect).is_err() {
                     bad += 1;
                 }
             }
             if bad > 0 {
                 return Err(format!("{bad} work area(s) could not be put back"));
             }
+        }
+        // The dock registers its band with Explorer again only now: the taskbar is shown and the user's work areas are back, so
+        // Explorer computes the band's place from them (registered earlier, the written-down rectangles would overrule it).
+        if self.edge != Edge::Free {
+            if self.dock_edge.take().is_some() {
+                w.dock_give_back_edge();
+            }
+            self.edge = Edge::Free;
+            self.edge_failures = 0;
+            self.next_edge_try_ms = 0;
         }
         let mut st = w.load_state();
         st.clear_hidden_taskbar();
