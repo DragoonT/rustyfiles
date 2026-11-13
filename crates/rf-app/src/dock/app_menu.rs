@@ -36,7 +36,7 @@ use rf_win::dock::{DockApp, ownpins};
 use super::backdrop::IslandGlass;
 use super::host;
 use super::jump_source::{self, JumpApp, Section};
-use super::look::{Env, Palette};
+use super::look::Palette;
 use super::popup_win;
 use super::{icons, plan};
 use crate::glass_watch::{self, PopupGlass};
@@ -186,7 +186,7 @@ fn open_now(req: MenuRequest, started: Instant, cx: &mut App) {
             (model::WIDTH, v.height())
         })
         .unwrap_or((model::WIDTH, 160.0));
-    let rect = place::above_icon(anchor_x, glass.top, size, scale, super::look::dock_size(cx), work);
+    let rect = place::above_icon(anchor_x, glass.top, size, scale, host::size_on(host::active(cx), cx), work);
     host_g(cx).rect = rect;
     // show, bring to the front, then glass (in this order: the engine attaches to a window that is on the screen)
     cx.spawn(async move |cx| {
@@ -238,14 +238,14 @@ fn sections_arrived(serial: u64, sections: Vec<Section>, cx: &mut App) {
     let (basis, anchor_x) = (h.basis, h.anchor_x);
     let Some(basis) = basis else { return };
     // (the room above the dock: a long jump list is cut to what fits, so that the fixed rows at the bottom are never cut off)
-    let room = place::room_above(basis.glass_top, basis.scale, super::look::dock_size(cx), basis.work);
+    let room = place::room_above(basis.glass_top, basis.scale, host::size_on(host::active(cx), cx), basis.work);
     let Ok(height) = handle.update(cx, |v, _, cx| {
         v.set_sections(sections, room, cx);
         v.height()
     }) else {
         return;
     };
-    let rect = place::above_icon(anchor_x, basis.glass_top, (model::WIDTH, height), basis.scale, super::look::dock_size(cx), basis.work);
+    let rect = place::above_icon(anchor_x, basis.glass_top, (model::WIDTH, height), basis.scale, host::size_on(host::active(cx), cx), basis.work);
     if cx.global::<MenuHost>().rect == rect {
         return;
     }
@@ -472,7 +472,7 @@ impl MenuView {
     /// Asks for the icon of every line that has one, on worker threads.
     fn load_entry_icons(&mut self, cx: &mut Context<Self>) {
         let Some(a) = self.active.as_ref() else { return };
-        let px = (16.0 * cx.global::<Env>().scale).ceil() as u32;
+        let px = (16.0 * host::env_on(host::active(cx), cx).scale).ceil() as u32;
         let wanted: Vec<(String, rf_win::dock::IconSource)> = a
             .sections
             .iter()

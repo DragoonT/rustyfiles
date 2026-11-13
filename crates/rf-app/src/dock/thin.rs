@@ -5,6 +5,13 @@
 //! Setting "Pencere büyütüldüğünde dock'u incelt" (`dock_thin_when_maximized`, on by default, a key of the running dock: off is the dock
 //! of today and costs nothing but one atomic read per task-list event and per mouse move over the dock).
 //!
+//! EACH MONITOR ON ITS OWN. With a dock on every monitor each dock has its own thin state ([`MonThin`]): it is thin while a maximised
+//! window is on ITS monitor, it grows when the pointer comes near ITS glass, and what is open counts for it only when the open panel, menu
+//! or preview is on its monitor. The windows are read once for all of them (one walk over the windows for each dock's monitor), the
+//! placement hook and the cursor look are shared. The BAND: the home dock's is the desktop toolbar's (or the primary monitor's work area
+//! while Explorer's taskbar is hidden by us); a secondary dock's, thin or full by ITS state, is told to the host that holds the taskbar
+//! hidden and reaches that monitor's work area only then (`host::apply_secondary_bands`).
+//!
 //! WHERE THE FACTS COME FROM.
 //! * A maximised window: the task list's events the dock already follows (`MiddleIsland` calls [`task_changed`] from its watch) and the
 //!   placement events of `rf_win::dock::zoomwatch` (maximise, restore, snap; started only while the setting is on). Either one asks for
@@ -36,7 +43,7 @@ use rf_win::dock::magnify::{Frame, Presence};
 use rf_win::dock::thin::{Model, Squeeze, Zone};
 use rf_win::dock::zoomwatch::{self, ZoomWatch};
 
-use super::host::{self, Kind};
+use super::host::{self, Kind, MonId};
 use super::plan::{self, DockPicture};
 use crate::settings::Settings;
 
@@ -64,21 +71,39 @@ pub fn task_changed() {
     }
 }
 
-struct ThinHost {
+/// One dock's thin state.
+struct MonThin {
+    mon: MonId,
     /// The facts (the setting, a maximised window seen, near, open) and the two rules; every sequence of them is tested in rf_win.
     model: Model,
     /// Where "near" is, from the last layout.
     zone: Option<Zone>,
     /// 1: the full dock, 0: the thin one. Starts full and settled.
     grow: Presence,
+    waker: Option<Task<()>>,
+    wake_gen: u64,
+}
+
+impl MonThin {
+    fn new(mon: MonId, enabled: bool) -> MonThin {
+        let mut grow = Presence::new(plan::hover_duration(crate::settings::animations()));
+        grow.enter(0);
+        let mut model = Model::new();
+        model.inputs.enabled = enabled;
+        MonThin { mon, model, zone: None, grow, waker: None, wake_gen: 0 }
+    }
+}
+
+struct ThinHost {
+    mons: Vec<MonThin>,
+    /// The setting is on.
+    enabled: bool,
     t0: Instant,
     watch: Option<ZoomWatch>,
     reading: bool,
     read_again: bool,
     poll_alive: bool,
     poller: Option<Task<()>>,
-    waker: Option<Task<()>>,
-    wake_gen: u64,
 }
 
 impl Global for ThinHost {}
@@ -86,6 +111,14 @@ impl Global for ThinHost {}
 impl ThinHost {
     fn now_ms(&self) -> u64 {
         self.t0.elapsed().as_millis() as u64
+    }
+
+    fn mon(&self, mon: MonId) -> Option<&MonThin> {
+        self.mons.iter().find(|m| m.mon == mon)
+    }
+
+    fn mon_mut(&mut self, mon: MonId) -> Option<&mut MonThin> {
+        self.mons.iter_mut().find(|m| m.mon == mon)
     }
 }
 
@@ -95,19 +128,24 @@ fn me(cx: &mut App) -> Option<&mut ThinHost> {
 
 // ---------------------------------------------------------------- what the middle island's view asks
 
-/// How thin the middle island is at this moment (the full dock when the feature never made it thin).
-pub fn squeeze(cx: &App) -> Squeeze {
-    cx.try_global::<ThinHost>().map_or(Squeeze::FULL, |h| Squeeze::at(h.grow.value(h.now_ms())))
+/// How thin the middle island of this dock is at this moment (the full dock when the feature never made it thin).
+pub fn squeeze(mon: MonId, cx: &App) -> Squeeze {
+    cx.try_global::<ThinHost>().and_then(|h| h.mon(mon).map(|m| Squeeze::at(m.grow.value(h.now_ms())))).unwrap_or(Squeeze::FULL)
 }
 
 /// The island is growing or shrinking: another frame is wanted.
-pub fn animating(cx: &App) -> bool {
-    cx.try_global::<ThinHost>().is_some_and(|h| !h.grow.settled(h.now_ms()))
+pub fn animating(mon: MonId, cx: &App) -> bool {
+    cx.try_global::<ThinHost>().and_then(|h| h.mon(mon).map(|m| !m.grow.settled(h.now_ms()))).unwrap_or(false)
 }
 
-/// The band the dock reserves is the thin one right now.
+/// The band the dock reserves is the thin one right now. The band is the home dock's.
 pub fn band_is_thin(cx: &App) -> bool {
-    cx.try_global::<ThinHost>().is_some_and(|h| h.model.band_thin())
+    band_is_thin_on(MonId::HOME, cx)
+}
+
+/// The band the dock on this monitor reserves is the thin one right now.
+pub fn band_is_thin_on(mon: MonId, cx: &App) -> bool {
+    cx.try_global::<ThinHost>().and_then(|h| h.mon(mon)).is_some_and(|m| m.model.band_thin())
 }
 
 /// The picture of a frame of the middle island at this squeeze: the glass lowers its top edge and keeps its bottom edge, the icons
@@ -156,12 +194,10 @@ pub fn start(cx: &mut App) {
     }
     let (tx, mut rx) = unbounded::<()>();
     *KICK.lock().unwrap_or_else(|p| p.into_inner()) = Some(tx);
-    let mut grow = Presence::new(plan::hover_duration(crate::settings::animations()));
-    grow.enter(0);
+    let mons = host::dock_monitors(cx).into_iter().map(|(id, _)| MonThin::new(id, false)).collect();
     cx.set_global(ThinHost {
-        model: Model::new(),
-        zone: None,
-        grow,
+        mons,
+        enabled: false,
         // (a clock that started long ago: the full dock is settled, not just arrived)
         t0: Instant::now().checked_sub(Duration::from_secs(5)).unwrap_or_else(Instant::now),
         watch: None,
@@ -169,8 +205,6 @@ pub fn start(cx: &mut App) {
         read_again: false,
         poll_alive: false,
         poller: None,
-        waker: None,
-        wake_gen: 0,
     });
     cx.spawn(async move |cx| {
         while rx.next().await.is_some() {
@@ -191,20 +225,43 @@ pub fn shutdown(cx: &mut App) {
     }
 }
 
+/// The docks of the host changed (a monitor's dock came or went): each dock has a thin state of its own.
+pub fn docks_changed(cx: &mut App) {
+    if !cx.has_global::<ThinHost>() {
+        return;
+    }
+    let ids: Vec<MonId> = host::dock_monitors(cx).into_iter().map(|(id, _)| id).collect();
+    let Some(h) = me(cx) else { return };
+    let enabled = h.enabled;
+    h.mons.retain(|m| ids.contains(&m.mon));
+    let have: Vec<MonId> = h.mons.iter().map(|m| m.mon).collect();
+    for id in rf_win::dock::monitors::new_ids(&have, &ids) {
+        h.mons.push(MonThin::new(id, enabled));
+    }
+    layout_applied(cx);
+    if enabled {
+        // (the new dock's monitor may have a maximised window already)
+        read_maximized(cx);
+    }
+}
+
 /// The settings were read: follow the switch.
 pub fn on_settings(cx: &mut App) {
     let want = cx.try_global::<Settings>().is_some_and(|s| s.dock_thin_when_maximized);
     let Some(h) = me(cx) else { return };
-    if h.model.inputs.enabled == want {
+    if h.enabled == want {
         return;
     }
-    h.model.inputs.enabled = want;
+    h.enabled = want;
+    for m in &mut h.mons {
+        m.model.inputs.enabled = want;
+    }
     ENABLED.store(want, Ordering::Relaxed);
     if want {
         // (the watch starts its thread and returns: the UI thread does not wait for it)
         h.watch = ZoomWatch::start(task_changed).map_err(|e| log::warn!("dock: cannot watch window placement: {e:#}")).ok();
         read_maximized(cx);
-        reevaluate(cx);
+        reevaluate_all(cx);
         return;
     }
     // off: the dock of today, at once
@@ -212,8 +269,12 @@ pub fn on_settings(cx: &mut App) {
     h.watch = None;
     h.poller = None;
     h.poll_alive = false;
-    let was_thin_band = h.model.switch_off(now);
-    reevaluate(cx);
+    let mut was_thin_band = false;
+    for m in &mut h.mons {
+        let thin_band = m.model.switch_off(now);
+        was_thin_band |= thin_band && m.mon.is_home();
+    }
+    reevaluate_all(cx);
     if was_thin_band {
         host::apply_reserve(cx);
     }
@@ -224,42 +285,48 @@ pub fn layout_applied(cx: &mut App) {
     if !cx.has_global::<ThinHost>() {
         return;
     }
-    let zone = zone_now(cx);
-    // (a rectangle that cannot be read for a moment does not take the last good zone away: the pointer resting on the dock would be
-    // judged away at the next look)
-    if let Some(h) = me(cx)
-        && zone.is_some()
-    {
-        h.zone = zone;
+    let ids: Vec<MonId> = cx.global::<ThinHost>().mons.iter().map(|m| m.mon).collect();
+    for id in ids {
+        let zone = zone_now(id, cx);
+        // (a rectangle that cannot be read for a moment does not take the last good zone away: the pointer resting on the dock would be
+        // judged away at the next look)
+        if let Some(h) = me(cx)
+            && zone.is_some()
+            && let Some(m) = h.mon_mut(id)
+        {
+            m.zone = zone;
+        }
     }
 }
 
-fn zone_now(cx: &App) -> Option<Zone> {
-    let full = host::visible_glass_rect(Kind::Middle, cx)?;
-    let (left, right) = (host::visible_glass_rect(Kind::Left, cx)?, host::visible_glass_rect(Kind::Right, cx)?);
-    let unit = host::dock_unit(cx)?;
-    let monitor = rf_win::dock::primary_monitor()?.rect;
+fn zone_now(mon: MonId, cx: &App) -> Option<Zone> {
+    let full = host::visible_glass_rect_on(mon, Kind::Middle, cx)?;
+    let (left, right) = (host::visible_glass_rect_on(mon, Kind::Left, cx)?, host::visible_glass_rect_on(mon, Kind::Right, cx)?);
+    let unit = host::dock_unit_on(mon, cx)?;
+    let monitor = host::dock_monitors(cx).into_iter().find(|(id, _)| *id == mon)?.1.rect;
     Some(rf_win::dock::thin::zone(full, left, right, monitor, unit))
 }
 
-/// The pointer is on the island (its mouse events say so): near, at once, without waiting for the next look.
-pub fn pointer_on_island(cx: &mut App) {
+/// The pointer is on this dock's island (its mouse events say so): near, at once, without waiting for the next look at the cursor.
+pub fn pointer_on_island(mon: MonId, cx: &mut App) {
     if !ENABLED.load(Ordering::Relaxed) {
         return;
     }
     let Some(h) = me(cx) else { return };
-    if h.model.inputs.enabled && h.model.inputs.maximized && !h.model.inputs.near {
-        h.model.inputs.near = true;
-        reevaluate(cx);
+    let Some(m) = h.mon_mut(mon) else { return };
+    if m.model.inputs.enabled && m.model.inputs.maximized && !m.model.inputs.near {
+        m.model.inputs.near = true;
+        reevaluate(mon, cx);
     }
 }
 
 // ---------------------------------------------------------------- the work
 
-/// A walk over the windows, off the UI thread; at most one at a time.
+/// A walk over the windows, off the UI thread; at most one at a time. One question for each dock's monitor.
 fn read_maximized(cx: &mut App) {
+    let monitors = host::dock_monitors(cx);
     let Some(h) = me(cx) else { return };
-    if !h.model.inputs.enabled {
+    if !h.enabled {
         return;
     }
     if h.reading {
@@ -269,7 +336,20 @@ fn read_maximized(cx: &mut App) {
     h.reading = true;
     cx.spawn(async move |cx| {
         loop {
-            let seen = cx.background_executor().spawn(async { rf_win::dock::primary_monitor().is_some_and(|m| zoomwatch::maximized_on(m.handle)) }).await;
+            let asked = monitors.clone();
+            let seen: Vec<(MonId, bool)> = cx
+                .background_executor()
+                .spawn(async move {
+                    asked
+                        .into_iter()
+                        .map(|(id, m)| {
+                            // (the home dock follows the primary monitor, whichever handle it has now)
+                            let handle = if id.is_home() { rf_win::dock::primary_monitor().map_or(m.handle, |p| p.handle) } else { m.handle };
+                            (id, zoomwatch::maximized_on(handle))
+                        })
+                        .collect()
+                })
+                .await;
             if !cx.update(|cx| apply_maximized(seen, cx)) {
                 break;
             }
@@ -280,31 +360,41 @@ fn read_maximized(cx: &mut App) {
 }
 
 /// The answer of a walk. True: events came meanwhile, walk again.
-fn apply_maximized(seen: bool, cx: &mut App) -> bool {
+fn apply_maximized(seen: Vec<(MonId, bool)>, cx: &mut App) -> bool {
     let Some(h) = me(cx) else { return false };
     let again = std::mem::take(&mut h.read_again);
-    if !again || !h.model.inputs.enabled {
+    if !again || !h.enabled {
         h.reading = false;
     }
-    if !h.model.inputs.enabled {
+    if !h.enabled {
         return false;
     }
-    if h.model.inputs.maximized != seen {
-        h.model.inputs.maximized = seen;
-        if !seen {
-            h.model.inputs.near = false;
+    let mut changed = Vec::new();
+    for (id, now) in seen {
+        if let Some(m) = h.mon_mut(id)
+            && m.model.inputs.maximized != now
+        {
+            m.model.inputs.maximized = now;
+            if !now {
+                m.model.inputs.near = false;
+            }
+            log::debug!("dock: a maximised window is {} on the monitor of dock {}", if now { "there" } else { "gone" }, id.0);
+            changed.push(id);
         }
-        log::debug!("dock: a maximised window is {} on the dock's monitor", if seen { "there" } else { "gone" });
+    }
+    if !changed.is_empty() {
         sync_poller(cx);
-        reevaluate(cx);
+        for id in changed {
+            reevaluate(id, cx);
+        }
     }
     again
 }
 
-/// The cursor is looked at while, and only while, the dock can be thin or its band is still the thin one (`Model::needs_polling`).
+/// The cursor is looked at while, and only while, a dock can be thin or its band is still the thin one (`Model::needs_polling`).
 fn sync_poller(cx: &mut App) {
     let Some(h) = me(cx) else { return };
-    let wanted = h.model.needs_polling();
+    let wanted = h.mons.iter().any(|m| m.model.needs_polling());
     if !wanted {
         h.poller = None;
         h.poll_alive = false;
@@ -333,21 +423,32 @@ fn sync_poller(cx: &mut App) {
 fn poll(cx: &mut App) -> Option<u64> {
     let pointer = zoomwatch::pointer();
     let open = open_anything(cx);
-    let Some(h) = me(cx) else { return None };
-    if !h.model.needs_polling() {
+    let active = host::active(cx);
+    let h = me(cx)?;
+    if !h.mons.iter().any(|m| m.model.needs_polling()) {
         h.poll_alive = false;
         return None;
     }
-    // (no zone known: neither near nor away; no cursor position, as on a locked desktop: away)
-    let inside = h.zone.map(|z| pointer.is_some_and(|(x, y, _)| z.contains(x, y)));
     let button = pointer.is_some_and(|(_, _, down)| down);
-    if h.model.observe(inside, button, open) {
-        reevaluate(cx);
+    let mut changed = Vec::new();
+    for m in &mut h.mons {
+        if !m.model.needs_polling() {
+            continue;
+        }
+        // (no zone known: neither near nor away; no cursor position, as on a locked desktop: away)
+        let inside = m.zone.map(|z| pointer.is_some_and(|(x, y, _)| z.contains(x, y)));
+        // (a panel, a menu or a preview keeps the dock it belongs to grown, and no other)
+        if m.model.observe(inside, button, open && active == m.mon) {
+            changed.push(m.mon);
+        }
     }
-    Some(next_poll(cx.try_global::<ThinHost>().is_some_and(|h| h.model.inputs.near)))
+    for id in changed {
+        reevaluate(id, cx);
+    }
+    Some(next_poll(cx.try_global::<ThinHost>().is_some_and(|h| h.mons.iter().any(|m| m.model.inputs.near))))
 }
 
-/// The time to the next look at the cursor: every frame while the pointer is at the dock, else [`POLL_MS`].
+/// The time to the next look at the cursor: every frame while the pointer is at a dock, else [`POLL_MS`].
 fn next_poll(near: bool) -> u64 {
     if near { POLL_NEAR_MS } else { POLL_MS }
 }
@@ -357,53 +458,66 @@ fn open_anything(cx: &App) -> bool {
     super::panel::is_open(cx) || super::app_menu::is_open(cx) || super::hover_preview::is_shown(cx)
 }
 
-/// Works out thin or full and the band from the facts as they are now, starts the motion if the answer changed, sets the band if its
-/// rule says so and asks for a look at the next deadline.
-fn reevaluate(cx: &mut App) {
-    let open = open_anything(cx);
+fn reevaluate_all(cx: &mut App) {
+    let ids: Vec<MonId> = cx.try_global::<ThinHost>().map(|h| h.mons.iter().map(|m| m.mon).collect()).unwrap_or_default();
+    for id in ids {
+        reevaluate(id, cx);
+    }
+}
+
+/// Works out thin or full and the band for one dock from the facts as they are now, starts the motion if the answer changed, sets the band
+/// if its rule says so (the home dock's) and asks for a look at the next deadline.
+fn reevaluate(mon: MonId, cx: &mut App) {
+    let open = open_anything(cx) && host::active(cx) == mon;
     let Some(h) = me(cx) else { return };
-    h.model.inputs.open = open;
     let now = h.now_ms();
-    let look = h.model.look(now);
+    let Some(m) = h.mon_mut(mon) else { return };
+    m.model.inputs.open = open;
+    let look = m.model.look(now);
     let mut motion = false;
-    if look.thin == h.grow.is_in() {
-        h.grow.set_duration(plan::hover_duration(crate::settings::animations()));
+    if look.thin == m.grow.is_in() {
+        m.grow.set_duration(plan::hover_duration(crate::settings::animations()));
         if look.thin {
-            h.grow.leave(now);
+            m.grow.leave(now);
         } else {
-            h.grow.enter(now);
+            m.grow.enter(now);
         }
         motion = true;
     }
     // (the band follows the window, not the pointer, and waits while a panel, a menu or a preview is open: see `Model::look`)
     let (band, wake) = (look.band, look.wake_at);
-    h.wake_gen += 1;
-    let gen_now = h.wake_gen;
+    m.wake_gen += 1;
+    let gen_now = m.wake_gen;
     let waker = wake.map(|at| {
         let wait = Duration::from_millis(at.saturating_sub(now));
         cx.spawn(async move |cx| {
             cx.background_executor().timer(wait).await;
             cx.update(|cx| {
-                if cx.try_global::<ThinHost>().is_some_and(|h| h.wake_gen == gen_now) {
-                    reevaluate(cx);
+                if cx.try_global::<ThinHost>().and_then(|h| h.mon(mon)).is_some_and(|m| m.wake_gen == gen_now) {
+                    reevaluate(mon, cx);
                 }
             });
         })
     });
-    if let Some(h) = me(cx) {
-        h.waker = waker;
+    if let Some(m) = me(cx).and_then(|h| h.mon_mut(mon)) {
+        m.waker = waker;
     }
     if motion {
         // (a view that is being updated right now must not be updated again: after the current effects)
-        cx.defer(|cx| {
-            if let Some(m) = host::middle_island(cx) {
+        cx.defer(move |cx| {
+            if let Some(m) = host::middle_island_on(mon, cx) {
                 m.update(cx, |_, cx| cx.notify());
             }
         });
     }
     if band.changed {
-        log::info!("dock: the reserved band is now the {} one", if band.thin { "thin" } else { "full" });
-        host::apply_reserve(cx);
+        log::info!("dock: the reserved band{} is now the {} one", if mon.is_home() { "" } else { " of a second monitor" }, if band.thin { "thin" } else { "full" });
+        if mon.is_home() {
+            host::apply_reserve(cx);
+        } else {
+            // (a second monitor's dock: the band is its own, and only the host that holds the taskbar hidden is told)
+            host::apply_secondary_bands(cx);
+        }
     }
 }
 

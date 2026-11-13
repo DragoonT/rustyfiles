@@ -7,6 +7,10 @@
 //!
 //! THE SYMBOLS follow the system: the volume symbol is the level in steps, muted, or no sound device; the network symbol is Ethernet,
 //! Wi-Fi in four strengths, or not connected (`sysstate.rs` keeps the sources, which call back when Windows says something changed).
+//!
+//! ON A SECONDARY MONITOR (`mon` is not the home dock) the island holds the clock and the bell only: the tray strip, the network and
+//! volume symbols and the separator after them stay on the primary monitor's, as on Windows' secondary taskbars; on a narrow monitor the
+//! bell goes too (`rf_win::dock::monitors::content`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -17,14 +21,19 @@ use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_win::dock::clock::{self, ClockLines};
+use rf_win::dock::monitors::Content;
 
 use super::backdrop::IslandGlass;
-use super::host::Kind;
+use super::host::{Kind, MonId};
 use super::look::Palette;
 use super::plan;
 
 pub struct RightIsland {
     glass: Rc<RefCell<IslandGlass>>,
+    /// The monitor whose dock this island is on.
+    mon: MonId,
+    /// What the host's layout last said this island holds (the bell may be gone on a narrow secondary monitor).
+    content: Content,
     lines: ClockLines,
     reported: f32,
     /// What the tray strip adds to the island's width (logical px; 0 without one).
@@ -35,8 +44,8 @@ pub struct RightIsland {
 }
 
 impl RightIsland {
-    pub fn new(glass: Rc<RefCell<IslandGlass>>, lines: ClockLines, cx: &mut Context<Self>) -> Self {
-        let reported = plan::right_width(&lines);
+    pub fn new(glass: Rc<RefCell<IslandGlass>>, mon: MonId, lines: ClockLines, content: Content, cx: &mut Context<Self>) -> Self {
+        let reported = if mon.is_home() { plan::right_width(&lines) } else { plan::right_width_secondary(plan::clock_width(&lines), content.bell) };
         // the clock follows the wall clock: one wake-up per minute, a moment after the minute changes
         cx.spawn(async move |this, cx| {
             loop {
@@ -48,7 +57,19 @@ impl RightIsland {
             }
         })
         .detach();
-        RightIsland { glass, lines, reported, tray_extra: 0.0, focus: None }
+        RightIsland { glass, mon, content, lines, reported, tray_extra: 0.0, focus: None }
+    }
+
+    /// The width the content needs now (logical px). The primary monitor's: the symbols, the clock and the bell, and the tray strip's
+    /// room; a secondary monitor's: the clock and, when there is room, the bell.
+    fn wanted_width(&self) -> f32 {
+        if self.mon.is_home() { plan::right_width(&self.lines) + self.tray_extra } else { plan::right_width_secondary(plan::clock_width(&self.lines), self.content.bell) }
+    }
+
+    /// The host's layout may have changed what this island holds (the bell, by the monitor's width): true when it did.
+    fn sync_content(&mut self, cx: &App) -> bool {
+        let content = super::host::content_on(self.mon, cx);
+        std::mem::replace(&mut self.content, content) != content
     }
 
     /// Reads the time and the user's formats again (a minute went by, or the system time or zone changed).
@@ -56,10 +77,10 @@ impl RightIsland {
         let lines = clock::system_lines();
         if lines != self.lines {
             self.lines = lines;
-            let w = plan::right_width(&self.lines) + self.tray_extra;
+            let w = self.wanted_width();
             if (w - self.reported).abs() > 0.5 {
                 self.reported = w;
-                super::host::set_width(Kind::Right, w, cx);
+                super::host::set_width(self.mon, Kind::Right, w, cx);
             }
             cx.notify();
         }
@@ -71,10 +92,10 @@ impl RightIsland {
             return;
         }
         self.tray_extra = extra;
-        let w = plan::right_width(&self.lines) + extra;
+        let w = self.wanted_width();
         if (w - self.reported).abs() > 0.5 {
             self.reported = w;
-            super::host::set_width(Kind::Right, w, cx);
+            super::host::set_width(self.mon, Kind::Right, w, cx);
         }
         cx.notify();
     }
@@ -82,11 +103,15 @@ impl RightIsland {
     /// A right click at `at` (the window's logical px): on the island's empty glass it starts Task Manager; on a symbol, the clock, the
     /// bell or a tray icon it is theirs and does nothing here.
     fn right_click(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        let k = super::look::dock_size(cx);
-        let [ml, mt, ..] = super::host::insets(Kind::Right, cx).margins;
+        let k = super::host::size_on(self.mon, cx);
+        let [ml, mt, ..] = super::host::insets_on(self.mon, Kind::Right, cx).margins;
         let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
-        let controls = super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra);
-        if super::empty::side_is_empty(plan::right_width(&self.lines) + self.tray_extra, &controls, point) {
+        let controls = if self.mon.is_home() {
+            super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra)
+        } else {
+            super::empty::right_controls_secondary(plan::clock_width(&self.lines), self.content.bell)
+        };
+        if super::empty::side_is_empty(self.wanted_width(), &controls, point) {
             super::actions::open_task_manager();
         }
     }
@@ -135,18 +160,18 @@ fn own_notifications(cx: &App) -> bool {
 }
 
 /// What a click on the clock does: our calendar, or Windows' notification centre and calendar (Win+N) as before.
-fn open_calendar(cx: &mut App) {
+fn open_calendar(mon: MonId, cx: &mut App) {
     if own_calendar(cx) {
-        super::panel::toggle_calendar(cx);
+        super::panel::toggle_calendar_on(mon, cx);
     } else {
         rf_win::dock::triggers::notification_center();
     }
 }
 
 /// What a click on the bell does: our notification panel, or Windows' notification centre (Win+N) as before.
-fn open_notifications(cx: &mut App) {
+fn open_notifications(mon: MonId, cx: &mut App) {
     if own_notifications(cx) {
-        super::panel::toggle_notifications(cx);
+        super::panel::toggle_notifications_on(mon, cx);
     } else {
         rf_win::dock::triggers::notification_center();
     }
@@ -171,10 +196,10 @@ fn bell_button(pal: Palette, dot: Option<Hsla>, k: f32, on_click: impl Fn(&mut A
         .on_click(move |_, _, cx| on_click(cx))
 }
 
-/// What a click on the network or the volume symbol does.
+/// What a click on the network or the volume symbol does (the symbols are the primary monitor's).
 fn open_controls(cx: &mut App) {
     if own_control_centre(cx) {
-        super::panel::toggle_control_centre(cx);
+        super::panel::toggle_control_centre_on(MonId::HOME, cx);
     } else {
         rf_win::dock::triggers::quick_settings();
     }
@@ -185,17 +210,31 @@ impl Render for RightIsland {
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
         // While a panel's glass has grown out of this island (grow_host.rs) the island's own glass is put away and the whole row stays on
         // the panel's glass: the island paints no fill of its own over it (nothing of the row fades, so no frames are asked for).
-        let fallback = fallback && super::grow_host::island_fade(Kind::Right, cx).is_none();
+        let fallback = fallback && super::grow_host::island_fade(self.mon, Kind::Right, cx).is_none();
         let (hover, pressed) = (pal.hover_fill().hsla(), pal.press_plate().hsla());
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
-        let k = super::look::dock_size(cx);
+        let k = super::host::size_on(self.mon, cx);
+        // what the layout says this island holds at this monitor's width: the width is reported again from a task, never from inside this render
+        if self.sync_content(cx) {
+            cx.spawn(async move |this, cx| {
+                let _ = this.update(cx, |me, cx| {
+                    let w = me.wanted_width();
+                    if (w - me.reported).abs() > 0.5 {
+                        me.reported = w;
+                        super::host::set_width(me.mon, Kind::Right, w, cx);
+                    }
+                });
+            })
+            .detach();
+        }
+        let (mon, home) = (self.mon, self.mon.is_home());
 
         let dot: Option<Hsla> = super::notif_state::dot_visible(cx).then(|| gpui_kit::rgb(cx.try_global::<super::look::Env>().map_or(0x0078D4, |e| e.accent)).into());
         let (network_icon, volume_icon) = (super::sysstate::network_icon(cx), super::sysstate::volume_icon(cx));
 
         let clock = v_flex()
             .id("dock-clock")
-            .ml(px(plan::RIGHT_SEP_GAP * k))
+            .ml(px(if home { plan::RIGHT_SEP_GAP } else { 0.0 } * k))
             .w(px(plan::clock_width(&self.lines) * k))
             .h(px(plan::CLOCK_H * k))
             .px(px(plan::CLOCK_PAD / 2.0 * k))
@@ -207,10 +246,10 @@ impl Render for RightIsland {
             .active(move |s| s.bg(pressed))
             .child(div().text_size(px(13. * k)).line_height(px(16. * k)).child(self.lines.time.clone()))
             .child(div().text_size(px(12. * k)).line_height(px(15. * k)).text_color(pal.text_secondary().hsla()).child(self.lines.date.clone()))
-            .on_click(move |_, _, cx| open_calendar(cx));
+            .on_click(move |_, _, cx| open_calendar(mon, cx));
 
-        // the other programs' tray icons, with a thin separator after them (nothing at all without a tray source)
-        let tray = super::tray_strip::strip_element(pal, cx);
+        // the other programs' tray icons, with a thin separator after them (nothing at all without a tray source); the primary monitor's
+        let tray = if home { super::tray_strip::strip_element(pal, cx) } else { None };
 
         // (keys are listened to, and focus tracked, only while a strip is drawn)
         let focus = tray.is_some().then(|| self.focus.get_or_insert_with(|| cx.focus_handle()).clone());
@@ -232,11 +271,14 @@ impl Render for RightIsland {
                 .px(px(plan::SIDE_PAD * k))
                 .items_center()
                 .children(tray)
-                .child(icon_button("dock-network", network_icon, pal, k, open_controls))
-                .child(div().ml(px(plan::RIGHT_GAP * k)).child(icon_button("dock-volume", volume_icon, pal, k, open_controls)))
-                .child(div().ml(px(plan::RIGHT_SEP_GAP * k)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH * k)).h(px(plan::RIGHT_SEP_HEIGHT * k)).bg(pal.separator().hsla()))
+                // (the network and volume symbols and the separator after them are the primary monitor's)
+                .when(home, |d| {
+                    d.child(icon_button("dock-network", network_icon, pal, k, open_controls))
+                        .child(div().ml(px(plan::RIGHT_GAP * k)).child(icon_button("dock-volume", volume_icon, pal, k, open_controls)))
+                        .child(div().ml(px(plan::RIGHT_SEP_GAP * k)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH * k)).h(px(plan::RIGHT_SEP_HEIGHT * k)).bg(pal.separator().hsla()))
+                })
                 .child(clock)
-                .child(div().ml(px(plan::RIGHT_GAP * k)).child(bell_button(pal, dot, k, open_notifications))),
+                .when(self.content.bell, |d| d.child(div().ml(px(plan::RIGHT_GAP * k)).child(bell_button(pal, dot, k, move |cx| open_notifications(mon, cx))))),
         )
     }
 }

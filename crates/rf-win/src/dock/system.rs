@@ -56,6 +56,11 @@ impl Drop for Aware {
     }
 }
 
+/// The calling thread per-monitor DPI aware until the returned guard is dropped (for the other files of this module).
+pub(super) fn aware_thread() -> impl Drop {
+    Aware::enter()
+}
+
 fn rect_of(r: windows::Win32::Foundation::RECT) -> Rect {
     Rect::new(r.left, r.top, r.right, r.bottom)
 }
@@ -148,6 +153,16 @@ static EDGE: Mutex<Option<Rect>> = Mutex::new(None);
 static APPBAR_SUPPRESSED: AtomicBool = AtomicBool::new(false);
 /// Our registration with Explorer is held right now (kept by the system thread after every look).
 static APPBAR_HELD: AtomicBool = AtomicBool::new(false);
+/// The host has docks on the other monitors (or is about to): the 2 s tick then also looks at every monitor's rectangle, work area and
+/// scale, so that a change of a monitor that is not the primary one (its scale, its resolution, its place) reaches the host too. Off, the
+/// tick looks at the primary monitor only, as it always did.
+static WATCH_ALL: AtomicBool = AtomicBool::new(false);
+
+/// Switches the look at every monitor on or off (the host: a dock on every monitor is wanted).
+pub fn watch_all_monitors(on: bool) {
+    WATCH_ALL.store(on, Ordering::Relaxed);
+}
+
 /// The system window (0: there is none), so that the host's thread can wake it.
 static SYSTEM_WINDOW: AtomicIsize = AtomicIsize::new(0);
 
@@ -217,6 +232,8 @@ struct Ctx {
     shell: ModeWatch,
     started: std::time::Instant,
     last_monitor: Option<MonitorInfo>,
+    /// Every monitor as the last 2 s tick saw it (only kept while [`watch_all_monitors`] is on).
+    last_all: Vec<MonitorInfo>,
     ticks: u32,
     layout_pending: bool,
     /// Explorer's taskbar window as it was when it took our registration (see [`announcement_is_restart`]).
@@ -255,6 +272,7 @@ impl DockSystem {
                 shell: ModeWatch::new(&SystemLook),
                 started: std::time::Instant::now(),
                 last_monitor: None,
+                last_all: Vec::new(),
                 ticks: 0,
                 layout_pending: false,
                 tray_at_registration: None,
@@ -645,6 +663,19 @@ unsafe extern "system" fn wndproc(hwnd: windows::Win32::Foundation::HWND, msg: u
                             if now != ctx.last_monitor && !ctx.layout_pending {
                                 ctx.last_monitor = now;
                                 schedule_layout(ctx);
+                            }
+                            // the other monitors (a DPI change of one of them is not told to this window): only with docks on them
+                            if WATCH_ALL.load(Ordering::Relaxed) {
+                                let all: Vec<MonitorInfo> = super::monitors::displays().into_iter().map(|d| d.info).collect();
+                                if all != ctx.last_all {
+                                    let first = ctx.last_all.is_empty();
+                                    ctx.last_all = all;
+                                    if !first && !ctx.layout_pending {
+                                        schedule_layout(ctx);
+                                    }
+                                }
+                            } else if !ctx.last_all.is_empty() {
+                                ctx.last_all.clear();
                             }
                         }
                     }

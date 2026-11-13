@@ -78,6 +78,7 @@ pub mod handover;
 pub mod shell_window;
 pub mod shellhost;
 pub mod sta;
+pub mod stayup;
 pub mod switcher;
 pub mod removal;
 pub mod pane_picture;
@@ -98,6 +99,7 @@ pub mod tasklist;
 pub mod toasts;
 pub mod tree_watch;
 pub mod wide;
+pub mod workfit;
 
 /// Held by tests that measure short times and by tests that load every core (the glass tests draw with the software renderer, which
 /// uses them all), so the two kinds never run at the same moment: with both in one parallel run the keyboard hook's "under one

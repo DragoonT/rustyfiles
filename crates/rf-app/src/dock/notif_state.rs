@@ -57,7 +57,18 @@ fn apply(c: DotCount, cx: &mut App) {
         s.count = c.count;
         s.right.clone()
     };
-    right.update(cx, |_, cx| cx.notify());
+    redraw_bells(right, cx);
+}
+
+/// Every dock's bell draws again (the dot is read from here by the right island of each monitor's dock, not only by the home one's).
+fn redraw_bells(home: Entity<RightIsland>, cx: &mut App) {
+    let id = home.entity_id();
+    home.update(cx, |_, cx| cx.notify());
+    for other in super::host::right_islands(cx) {
+        if other.entity_id() != id {
+            other.update(cx, |_, cx| cx.notify());
+        }
+    }
 }
 
 /// Starts or stops the worker to match the setting.
@@ -87,7 +98,7 @@ pub fn sync(cx: &mut App) {
             s.count = 0;
             s.right.clone()
         };
-        right.update(cx, |_, cx| cx.notify());
+        redraw_bells(right, cx);
     }
 }
 

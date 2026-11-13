@@ -42,12 +42,17 @@ pub const NEAR_SIDE: f32 = MIDDLE_RESERVE;
 /// run for the same time. A pointer that comes straight back grows the dock again from where the motion is; nothing else follows
 /// the pointer (the band does not), so a short visit costs a few frames.
 pub const LEAVE_MS: u64 = 0;
-/// A maximised window must have been seen this long before the dock goes thin for it: a window maximised and restored in quick
-/// succession (a snap that passes through "maximised", a program that flickers) does not make the dock shrink and grow.
-pub const SEEN_MS: u64 = 400;
-/// A maximised window must have been there this long before the band becomes the thin one (and gone this long before it becomes the full
-/// one again): a window maximised and restored in quick succession changes nothing for the other windows.
+/// A maximised window must have been seen this long before the dock goes thin for it. NONE (it was 400 ms): the dock and its band
+/// go thin the moment a window is maximized, while the system's own maximize animation still runs, so that the window arrives at its
+/// final size in one motion. With a wait the user saw the window finish maximizing, then the dock shrink, then the window grow once
+/// more into the room the dock gave up. A window that only flickers through "maximized" now makes the dock shrink and grow; the
+/// band's way back has its own wait ([`SETTLE_MS`]).
+pub const SEEN_MS: u64 = 0;
+/// A maximised window must have been GONE this long before the band becomes the full one again: a window restored and maximized in
+/// quick succession changes nothing for the other windows.
 pub const SETTLE_MS: u64 = 600;
+/// How long a maximised window must have been there before the band becomes the thin one: not at all (see [`SEEN_MS`]).
+pub const SETTLE_THIN_MS: u64 = 0;
 /// The band changes at most once in this time.
 pub const HOLD_MS: u64 = 2000;
 
@@ -261,7 +266,7 @@ impl BandSettle {
         if self.wanted == self.applied {
             return Band { thin: self.applied, changed: false, wake_at: None };
         }
-        let settled_at = self.wanted_since + SETTLE_MS;
+        let settled_at = self.wanted_since + if self.wanted { SETTLE_THIN_MS } else { SETTLE_MS };
         let allowed_at = self.last_change.map_or(0, |t| t + HOLD_MS);
         let due = settled_at.max(allowed_at);
         if now >= due && !blocked {
@@ -419,10 +424,9 @@ mod tests {
     #[test]
     fn a_maximised_window_with_the_pointer_far_makes_the_dock_thin_after_the_wait() {
         let mut f = Follower::new();
-        // a window has just been maximised: the dock is full, and thin 400 ms later (the window must have been there that long)
-        assert_eq!(f.step(1_000, on(true, false, false)), Verdict { thin: false, wake_at: Some(1_000 + SEEN_MS) });
-        assert_eq!(f.step(1_399, on(true, false, false)), Verdict { thin: false, wake_at: Some(1_400) });
-        assert_eq!(f.step(1_400, on(true, false, false)), Verdict { thin: true, wake_at: None });
+        // a window has just been maximised and the pointer is far: thin at once, while the window still grows (no wait: see SEEN_MS)
+        assert_eq!(SEEN_MS, 0);
+        assert_eq!(f.step(1_000, on(true, false, false)), Verdict { thin: true, wake_at: None });
         // and it stays thin as long as nothing changes
         assert_eq!(f.step(60_000, on(true, false, false)), Verdict { thin: true, wake_at: None });
     }
@@ -525,13 +529,13 @@ mod tests {
                 assert!(!l.thin, "grown at {now}");
             }
         }
-        // thin 400 ms after the window came (1000 + 400), grown at 5000, thin again the moment the pointer went (7000), grown while the
-        // panel is open (9000 to 10000), thin the moment it closed, full when the window is restored at 15000 (the flicker never gets
-        // thin: a window must have been there 400 ms)
-        assert_eq!(looks, [(1_400, true), (5_000, false), (7_000, true), (9_000, false), (10_000, true), (15_000, false)]);
-        // the band: thin 600 ms after the window came, full 600 ms after it was restored (the hold of 2 s is long over by then); the
-        // pointer and the panel's coming and going changed nothing, and the flicker changed nothing
-        assert_eq!(band_changes, [(1_600, true), (15_600, false)]);
+        // thin the moment the window came (1000), grown at 5000, thin again the moment the pointer went (7000), grown while the panel
+        // is open (9000 to 10000), thin the moment it closed, full when the window is restored at 15000; the flicker at the end makes
+        // the dock itself shrink and grow with the window (that costs frames only)
+        assert_eq!(looks, [(1_000, true), (5_000, false), (7_000, true), (9_000, false), (10_000, true), (15_000, false), (16_000, true), (16_200, false), (16_300, true), (16_500, false)]);
+        // the band: thin the moment the window came, full 600 ms after it was restored (the hold of 2 s is long over by then); the
+        // pointer and the panel's coming and going changed nothing, and the flicker changed nothing (the hold since the last change)
+        assert_eq!(band_changes, [(1_000, true), (15_600, false)]);
     }
 
     // ---- the band
@@ -539,41 +543,45 @@ mod tests {
     #[test]
     fn the_band_becomes_thin_after_the_settle_time_and_not_before() {
         let mut b = BandSettle::new();
-        assert_eq!(b.step(1_000, true, false), Band { thin: false, changed: false, wake_at: Some(1_000 + SETTLE_MS) });
-        assert!(!b.step(1_599, true, false).changed);
-        assert_eq!(b.step(1_600, true, false), Band { thin: true, changed: true, wake_at: None });
+        // the moment a maximised window is seen: no settle time on the way to thin (the window is still growing; see SEEN_MS)
+        assert_eq!(SETTLE_THIN_MS, 0);
+        assert_eq!(b.step(1_000, true, false), Band { thin: true, changed: true, wake_at: None });
         assert!(b.thin());
         // nothing more while the wish is the same
         assert_eq!(b.step(9_000, true, false), Band { thin: true, changed: false, wake_at: None });
+        // the way back waits: the window must have been gone for the settle time
+        assert_eq!(b.step(10_000, false, false), Band { thin: true, changed: false, wake_at: Some(10_000 + SETTLE_MS) });
+        assert!(!b.step(10_599, false, false).changed);
+        assert_eq!(b.step(10_600, false, false), Band { thin: false, changed: true, wake_at: None });
     }
 
     #[test]
     fn a_window_maximised_and_restored_in_quick_succession_changes_nothing() {
         let mut b = BandSettle::new();
-        let mut t = 0;
+        let (mut t, mut changes) = (0, 0);
         for _ in 0..20 {
             // maximised, restored 200 ms later, maximised again 100 ms after that ...
-            assert!(!b.step(t, true, false).changed);
+            changes += usize::from(b.step(t, true, false).changed);
             t += 200;
-            assert!(!b.step(t, false, false).changed);
+            changes += usize::from(b.step(t, false, false).changed);
             t += 100;
         }
-        assert!(!b.thin(), "the settle time was never reached");
+        assert_eq!(changes, 1, "thin at the first maximise; the flicker after it changes nothing (the way back never settles)");
+        assert!(b.thin());
     }
 
     #[test]
     fn the_band_changes_at_most_once_in_the_hold_time() {
         let mut b = BandSettle::new();
-        b.step(0, true, false);
-        assert!(b.step(SETTLE_MS, true, false).changed);
-        let at = SETTLE_MS;
-        // restored right after: the wish is settled at at + 600, but the hold keeps it until at + 2000
+        assert!(b.step(0, true, false).changed);
+        let at = 0;
+        // restored right after: the wish is settled at at + 100 + 600, but the hold keeps it until at + 2000
         let r = b.step(at + 100, false, false);
         assert_eq!(r, Band { thin: true, changed: false, wake_at: Some(at + HOLD_MS) });
         assert!(!b.step(at + HOLD_MS - 1, false, false).changed);
         assert_eq!(b.step(at + HOLD_MS, false, false), Band { thin: false, changed: true, wake_at: None });
-        // the next change must wait again
-        b.step(at + HOLD_MS + 10, true, false);
+        // the next change must wait again, also on the way to thin
+        assert!(!b.step(at + HOLD_MS + 10, true, false).changed);
         assert!(!b.step(at + HOLD_MS + 10 + SETTLE_MS, true, false).changed, "the hold runs from the last change");
         assert!(b.step(at + 2 * HOLD_MS, true, false).changed);
     }
@@ -581,8 +589,8 @@ mod tests {
     #[test]
     fn the_band_does_not_change_while_something_is_open_and_changes_when_it_has_closed() {
         let mut b = BandSettle::new();
-        b.step(0, true, false);
-        // settled, but a panel is open: a change of the band closes panels
+        // a panel is open: a change of the band closes panels
+        assert_eq!(b.step(0, true, true), Band { thin: false, changed: false, wake_at: None });
         assert_eq!(b.step(5_000, true, true), Band { thin: false, changed: false, wake_at: None });
         assert!(!b.step(60_000, true, true).changed);
         assert!(b.step(60_001, true, false).changed);
@@ -593,8 +601,7 @@ mod tests {
         // the pointer is an input of the Model: the dock grows and shrinks under it, and every look says the same band
         let mut m = Model::new();
         m.inputs = on(true, false, false);
-        m.look(0);
-        assert!(m.look(SETTLE_MS).band.changed);
+        assert!(m.look(0).band.changed);
         let thickness = reserved_thickness(1.0, m.band_thin());
         assert_eq!(thickness, 56);
         let mut grown = 0;
@@ -611,13 +618,12 @@ mod tests {
     #[test]
     fn switching_the_setting_off_gives_the_full_band_back_at_once() {
         let mut b = BandSettle::new();
-        b.step(0, true, false);
-        assert!(b.step(SETTLE_MS, true, false).changed);
-        assert!(b.reset(SETTLE_MS + 5), "it was thin, so the band must be set again");
+        assert!(b.step(0, true, false).changed);
+        assert!(b.reset(5), "it was thin, so the band must be set again");
         assert!(!b.thin());
-        assert!(!b.reset(SETTLE_MS + 6), "a second reset has nothing to give back");
-        // (a window maximised right after still has to settle)
-        assert!(!b.step(SETTLE_MS + 10, true, false).changed);
+        assert!(!b.reset(6), "a second reset has nothing to give back");
+        // (a window maximised right after still has to wait for the hold since the last change)
+        assert!(!b.step(10, true, false).changed);
     }
 
     #[test]
@@ -686,7 +692,7 @@ mod tests {
         w.m.inputs.maximized = true;
         w.look();
         w.run(1_000);
-        assert_eq!(w.sets, [(SETTLE_MS, true)]);
+        assert_eq!(w.sets, [(0, true)]);
         // the pointer goes to the dock, a menu opens on an icon of that window; the menu's "close window" takes the window away
         w.open = true;
         w.m.inputs.near = true;

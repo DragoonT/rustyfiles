@@ -140,6 +140,10 @@ pub struct Keys {
     pub start_grow: bool,
     /// The dock's size: the islands, the icons and everything else change with it, so the running dock must read the file again.
     pub size: super::size_pref::DockSizePref,
+    /// A dock on every monitor, and which dock shows which app: the running dock opens or closes the other monitors' docks and filters
+    /// its apps when it reads the file.
+    pub all_monitors: bool,
+    pub apps_where: crate::settings::DockAppsWhere,
     /// Which of the dock's five parts run (`parts::run_flags`), in this order: desktop cover, hiding Windows' taskbar, the Windows key,
     /// Alt+Tab, the tray host. The dock starts or stops each of them when it reads the file, so the reload must not wait for its 5 s
     /// look at the file's date. These are the RESULT of the one switch and each part's own value, so the one switch moves all five.
@@ -165,6 +169,8 @@ impl Keys {
             start_recommended: s.dock_start_recommended,
             start_grow: s.dock_start_grow,
             size: s.dock_size,
+            all_monitors: s.dock_all_monitors,
+            apps_where: s.dock_apps_where,
             shell: super::parts::run_flags(s),
         }
     }
@@ -317,7 +323,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), weather_location: false, look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, thin_when_maximized: true, start_recommended: true, start_grow: true, size: Default::default(), shell: [false; 5] }
+        Keys { reserve, city: city.into(), weather_location: false, look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, thin_when_maximized: true, start_recommended: true, start_grow: true, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, shell: [false; 5] }
     }
 
     #[test]
@@ -357,6 +363,9 @@ mod tests {
             Settings { dock_size: crate::dock::size_pref::DockSizePref::from_permille(1400), ..base.clone() },
             Settings { dock_size: crate::dock::size_pref::DockSizePref::from_permille(1050), ..base.clone() },
             Settings { dock_weather_location: true, ..base.clone() },
+            // a dock on every monitor, and which dock shows which app
+            Settings { dock_all_monitors: false, ..base.clone() },
+            Settings { dock_apps_where: crate::settings::DockAppsWhere::Window, ..base.clone() },
         ] {
             let mut told = Some(k.clone());
             assert!(needs_reload(&mut told, Keys::of(&change)), "{:?}", Keys::of(&change));

@@ -79,7 +79,7 @@ pub trait HideWorld {
     fn set_work_area(&mut self, rect: [i32; 4]) -> Result<(), String>;
     /// Holds the work area of a monitor whose edge is ours while Explorer's taskbar is hidden: from `from` (what it has now) to `to`.
     /// The real one sets it WITHOUT the change broadcast and fits the monitor's maximized windows itself, because Explorer answers
-    /// the broadcast by taking the rectangle back (`win::workarea::hold_work_area` has the measurement). Putting the user's own
+    /// the broadcast by taking the rectangle back (`win::workarea::hold_work_area` has the measurement; the fitting is the host's, `rf_win::workfit`). Putting the user's own
     /// rectangles back stays [`HideWorld::set_work_area`], with the broadcast: there Explorer is meant to work them out again.
     fn hold_work_area(&mut self, from: [i32; 4], to: [i32; 4]) -> Result<(), String> {
         let _ = from;
@@ -158,6 +158,9 @@ pub struct Controller {
     band_owed: bool,
     /// The dock's band thickness in device px (`None`: the dock reserves none, `dock_reserve` is off). Session only.
     band_px: Option<i32>,
+    /// The bands of the docks on the other monitors (monitor id, thickness in device px), as the host last said. Empty: none (the
+    /// switch for a dock on every monitor is off, or one monitor, or `dock_reserve` is off): those monitors are given whole.
+    other_bands: Vec<(String, i32)>,
     /// The dock has said what its band is (`band_px` is its word, `None` included). Until then the edge is not taken: a guess of "no
     /// band" would give the whole monitor to maximised windows over the dock and cost a second set when the real band arrives.
     band_known: bool,
@@ -194,6 +197,7 @@ impl Controller {
             throttle_said: false,
             band_owed: false,
             band_px: None,
+            other_bands: Vec::new(),
             band_known: false,
             edge: Edge::Free,
             dock_edge: None,
@@ -322,6 +326,19 @@ impl Controller {
         }
         self.band_px = band_px;
         self.band_known = true;
+        self.band_owed = true;
+        if self.want && !self.hidden.is_empty() {
+            self.drive_edge(w);
+        }
+    }
+
+    /// The docks on the other monitors changed their bands (their size, `dock_reserve`, a dock that came or went, the thin dock): while the
+    /// edge is ours the work areas of those monitors follow. A band for a monitor whose taskbar we did not hide changes nothing there.
+    pub fn set_other_bands(&mut self, w: &mut dyn HideWorld, bands: Vec<(String, i32)>) {
+        if bands == self.other_bands {
+            return;
+        }
+        self.other_bands = bands;
         self.band_owed = true;
         if self.want && !self.hidden.is_empty() {
             self.drive_edge(w);
@@ -572,7 +589,7 @@ impl Controller {
                     return;
                 }
                 let mons = w.monitors();
-                let plan = tbwork::plan_edge_held(&mons, &self.bars, self.band_px, &self.held_rects());
+                let plan = self.plan(&mons);
                 if !self.foreign_said && plan.monitors.iter().any(|m| m.verdict == Verdict::Foreign) {
                     self.foreign_said = true;
                     w.warn("taskbar: another toolbar reserves room on a monitor (or the taskbar is not at the bottom); its work area is left alone and the taskbar's strip stays there");
@@ -643,7 +660,7 @@ impl Controller {
     /// The edge is ours: the dock's strip follows the band, and a work area that Explorer took back is set again.
     fn hold_edge(&mut self, w: &mut dyn HideWorld, now: u64) {
         let mons = w.monitors();
-        let plan = tbwork::plan_edge_held(&mons, &self.bars, self.band_px, &self.held_rects());
+        let plan = self.plan(&mons);
         if plan.primary_ours()
             && let Some(edge) = plan.dock_edge(self.band_px)
             && self.dock_edge != Some(edge)
@@ -657,8 +674,14 @@ impl Controller {
     /// Reads the monitors afresh (Explorer recomputed them when the dock let go) and sets what the rules want.
     fn set_areas(&mut self, w: &mut dyn HideWorld, now: u64) {
         let mons = w.monitors();
-        let plan = tbwork::plan_edge_held(&mons, &self.bars, self.band_px, &self.held_rects());
+        let plan = self.plan(&mons);
         self.set_changes(w, now, &plan);
+    }
+
+    /// What the rules want on these monitors, from the bars we hid, the band of the dock on the primary one, the bands of the docks on
+    /// the others and the rectangles this controller set itself.
+    fn plan(&self, mons: &[MonitorGeom]) -> tbwork::EdgePlan {
+        tbwork::plan_edge_bands(mons, &self.bars, self.band_px, &self.held_rects(), &self.other_bands)
     }
 
     /// Writes the user's own work area of every monitor that is or is about to be ours into the state file (with `pending_restore`),

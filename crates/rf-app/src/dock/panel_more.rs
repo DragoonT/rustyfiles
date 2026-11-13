@@ -16,7 +16,7 @@ use super::{Hooks, PanelId, Side, Slot, host, host_global, open_hidden, panel};
 use std::time::Instant;
 use crate::dock::backdrop::IslandGlass;
 use crate::dock::cal_view::{self, CalView};
-use crate::dock::host::Kind;
+use crate::dock::host::{Kind, MonId};
 use crate::dock::notif_view::{self, NotifView};
 use gpui_kit::*;
 
@@ -164,14 +164,14 @@ pub fn init_extra(_cx: &mut App) {}
 
 // ---------------------------------------------------------------- opening
 
-/// The clock's click: opens the calendar, closes it when it is the open one.
-pub fn toggle_calendar(cx: &mut App) {
-    toggle_made(CALENDAR, cx);
+/// The clock's click on this monitor's dock: opens the calendar there, closes it when it is the open one there.
+pub fn toggle_calendar_on(mon: MonId, cx: &mut App) {
+    toggle_made(CALENDAR, mon, cx);
 }
 
-/// The bell's click: opens the notifications, closes them when they are the open panel.
-pub fn toggle_notifications(cx: &mut App) {
-    toggle_made(NOTIFICATIONS, cx);
+/// The bell's click on this monitor's dock: opens the notifications there, closes them when they are the open panel there.
+pub fn toggle_notifications_on(mon: MonId, cx: &mut App) {
+    toggle_made(NOTIFICATIONS, mon, cx);
 }
 
 /// The panels whose window is being made by a task that has not run yet: a second click before it runs must not start a second task
@@ -199,7 +199,7 @@ thread_local! {
 }
 
 /// A panel's button was clicked: opens the panel, closes it when it is the open one; the first time, the window is made first.
-pub(super) fn toggle_made(id: PanelId, cx: &mut App) {
+pub(super) fn toggle_made(id: PanelId, mon: MonId, cx: &mut App) {
     let clicked = Instant::now();
     {
         let p = host_global(cx);
@@ -207,7 +207,7 @@ pub(super) fn toggle_made(id: PanelId, cx: &mut App) {
         p.made_for_click = false;
     }
     if has_slot(id, cx) {
-        super::toggle(id, cx);
+        super::toggle(id, mon, cx);
         return;
     }
     if !MAKING.with(|m| m.borrow_mut().begin(id.0)) {
@@ -221,7 +221,7 @@ pub(super) fn toggle_made(id: PanelId, cx: &mut App) {
                 p.clicked_at = Some(clicked);
                 p.made_for_click = true;
                 log::info!("dock: panel {} window made in {:?} from the click", id.0, clicked.elapsed());
-                super::toggle(id, cx);
+                super::toggle(id, mon, cx);
             } else {
                 log::warn!("dock: cannot make the {} panel", id.0);
             }

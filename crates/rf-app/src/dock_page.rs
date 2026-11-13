@@ -18,7 +18,7 @@ use gpui_kit::*;
 
 use crate::dock::{parts, parts_status};
 use crate::dock::size_pref::DockSizePref;
-use crate::settings::{self, DockMagnify, Settings};
+use crate::settings::{self, DockAppsWhere, DockMagnify, Settings};
 use crate::settings_view::{button, card_body, dropdown, section, shell, sw, switch};
 use crate::t;
 use crate::theme::Palette;
@@ -80,6 +80,8 @@ pub(crate) enum Control {
     /// The size slider (`dock::size_slider`, which writes the field itself): the setter is what ties the entry to its field in the tests.
     Size(fn(&Settings) -> DockSizePref, #[cfg_attr(not(test), allow(dead_code))] fn(&mut Settings, DockSizePref)),
     Magnify(fn(&Settings) -> DockMagnify, fn(&mut Settings, DockMagnify)),
+    /// Which dock shows which running app (a dropdown).
+    AppsWhere(fn(&Settings) -> DockAppsWhere, fn(&mut Settings, DockAppsWhere)),
     City(fn(&Settings) -> &str, fn(&mut Settings, String)),
 }
 
@@ -176,6 +178,16 @@ pub(crate) fn entries() -> Vec<Entry> {
             Control::Size(|s| s.dock_size, |s, v| s.dock_size = v),
         ),
         e(
+            "dock-all-monitors",
+            "dock_all_monitors",
+            General,
+            dock,
+            L::Monitor,
+            t!("Dock'u her ekranda göster"),
+            Some(t!("Birden çok ekranınız varsa her ekranın altında bir dock bulunur: Başlat logosu ve arama, uygulamalar, saat ve zil. Hava durumu, tepsi simgeleri, ağ ve ses düğmeleri yalnızca ana ekrandaki dock'ta kalır. Ekran dar kalırsa önce arama alanı düğmeye dönüşür, sonra zil gider. Kapalıyken ya da tek ekranda dock yalnızca ana ekrandadır.")),
+            Control::Switch(|s| s.dock_all_monitors, |s, v| s.dock_all_monitors = v),
+        ),
+        e(
             "dock-magnify",
             "dock_magnify",
             General,
@@ -248,6 +260,16 @@ pub(crate) fn entries() -> Vec<Entry> {
             t!("Pencere büyütüldüğünde dock'u incelt"),
             Some(t!("Ekranda büyütülmüş bir pencere varken orta ada yan adalar kadar inceleşir ve pencere o kadar yer kazanır; fareyi yaklaştırınca eski boyutuna döner.")),
             Control::Switch(|s| s.dock_thin_when_maximized, |s, v| s.dock_thin_when_maximized = v),
+        ),
+        e(
+            "dock-apps-where",
+            "dock_apps_where",
+            Middle,
+            dock,
+            L::AppWindow,
+            t!("Uygulamalar hangi ekranda görünsün"),
+            Some(t!("Her ekranda hepsi: her dock sabitlenmiş uygulamaları ve çalışan tüm uygulamaları gösterir. Pencerenin olduğu ekranda: sabitlenmiş uygulamalar her dock'ta durur; sabitlenmemiş çalışan bir uygulama yalnızca penceresinin olduğu ekranın dock'unda görünür, sabitlenmiş bir uygulamanın çalışıyor işareti de yalnızca orada olur. Bir pencere başka ekrana taşınınca uygulaması, görev listesinin bir sonraki değişiminde onunla gider. Yalnızca birden çok ekranda ve \"Dock'u her ekranda göster\" açıkken bir şey değiştirir.")),
+            Control::AppsWhere(|s| s.dock_apps_where, |s, v| s.dock_apps_where = v),
         ),
         // ---- SAĞ ADA
         e(
@@ -380,6 +402,10 @@ fn note_line(p: &Palette, text: impl Into<SharedString>, warning: bool) -> Div {
     div().pl(px(50.)).pr_4().pb_3().text_xs().text_color(if warning { p.danger } else { p.text_secondary }).child(text.into())
 }
 
+fn apps_where_choices() -> Vec<(DockAppsWhere, String)> {
+    vec![(DockAppsWhere::All, t!("Her ekranda hepsi").into()), (DockAppsWhere::Window, t!("Pencerenin olduğu ekranda").into())]
+}
+
 fn magnify_choices() -> Vec<(DockMagnify, String)> {
     vec![(DockMagnify::Off, t!("Kapalı").into()), (DockMagnify::Subtle, t!("Hafif").into()), (DockMagnify::Full, t!("Tam").into())]
 }
@@ -391,6 +417,7 @@ fn live_control(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
         // (the slider is built by `dock::size_slider` and handed to `page`; with none the row shows the value)
         Control::Size(..) => inert_control(p, s, e),
         Control::Magnify(get, set) => dropdown(e.id, p, get(s), magnify_choices(), set),
+        Control::AppsWhere(get, set) => dropdown(e.id, p, get(s), apps_where_choices(), set),
         Control::City(get, set) => {
             let city = get(s).trim().to_string();
             h_flex()
@@ -449,6 +476,7 @@ fn inert_control(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
         }
         Control::Size(get, _) => label(get(s).percent_text(crate::i18n::is_tr())),
         Control::Magnify(get, _) => label(magnify_choices().into_iter().find(|(v, _)| *v == get(s)).map(|(_, l)| l).unwrap_or_default()),
+        Control::AppsWhere(get, _) => label(apps_where_choices().into_iter().find(|(v, _)| *v == get(s)).map(|(_, l)| l).unwrap_or_default()),
         Control::City(..) => v_flex().into_any_element(),
     }
 }
@@ -478,7 +506,7 @@ mod tests {
     use std::collections::HashSet;
 
     // (not `super::*`: the glob of gpui_kit up there brings a `test` of its own that would shadow `#[test]`)
-    use super::{Control, Entry, Needs, RowState, Section, city_line, entries, grouped, intro, magnify_choices, while_turkish};
+    use super::{Control, Entry, Needs, RowState, Section, apps_where_choices, city_line, entries, grouped, intro, magnify_choices, while_turkish};
     use crate::dock::parts::{self, Part};
     use crate::dock::size_pref::DockSizePref;
     use crate::settings::Settings;
@@ -572,9 +600,9 @@ mod tests {
         assert_eq!(secs, Section::ALL.to_vec(), "an empty section would be a heading with nothing under it");
         // the sections hold what the page promises
         let ids = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
-        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_magnify", "dock_start_grow"]);
+        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_all_monitors", "dock_magnify", "dock_start_grow"]);
         assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_weather_city"]);
-        assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu", "dock_thin_when_maximized"]);
+        assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu", "dock_thin_when_maximized", "dock_apps_where"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);
     }
 
@@ -642,6 +670,7 @@ mod tests {
             Control::Switch(get, set) => set(s, !get(s)),
             Control::Size(get, set) => set(s, DockSizePref::at_position((get(s).position() + 1) % 16)),
             Control::Magnify(get, set) => set(s, magnify_choices().into_iter().map(|(v, _)| v).find(|v| *v != get(s)).unwrap()),
+            Control::AppsWhere(get, set) => set(s, apps_where_choices().into_iter().map(|(v, _)| v).find(|v| *v != get(s)).unwrap()),
             Control::City(get, set) => {
                 assert_ne!(get(s), "Erzincan");
                 set(s, "Erzincan".to_string());
@@ -688,6 +717,9 @@ mod tests {
                 assert!(has(text), "{text}");
             }
             for (_, l) in magnify_choices() {
+                assert!(has(&l), "{l}");
+            }
+            for (_, l) in apps_where_choices() {
                 assert!(has(&l), "{l}");
             }
         });

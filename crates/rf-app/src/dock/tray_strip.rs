@@ -346,9 +346,9 @@ fn refresh(cx: &mut App) {
     }
     // (the strip's room is a quarter of the screen in dock units: the cells are dock units wide)
     let size = super::look::dock_size(cx);
-    let work_width = host::monitor_work(cx).map(|(scale, work)| work.width() as f32 / (scale * size).max(0.01));
+    let work_width = host::home_work(cx).map(|(scale, work)| work.width() as f32 / (scale * size).max(0.01));
     // (the hidden-icons panel is drawn at the monitor's scale, not the dock's size: its limits are the work area in those px)
-    let panel_limits = host::monitor_work(cx).map(|(scale, work)| ts::OvfLimits::for_work(work.width() as f32 / scale.max(0.01), work.height() as f32 / scale.max(0.01)));
+    let panel_limits = host::home_work(cx).map(|(scale, work)| ts::OvfLimits::for_work(work.width() as f32 / scale.max(0.01), work.height() as f32 / scale.max(0.01)));
     let retired = cx.update_global::<TrayState, _>(|st, _| {
         if let Some(l) = panel_limits {
             st.ovf = l;
@@ -440,7 +440,7 @@ fn read_order(cx: &mut App) {
 /// The right island's visible glass and the device px per dock unit (the monitor's scale times the dock's size): what the strip's cells
 /// and chevron are placed with. (The overflow panel's own cells keep the monitor's scale: see `source_rect`.)
 fn glass_and_unit(cx: &App) -> Option<(Rect, f32)> {
-    Some((host::visible_glass_rect(Kind::Right, cx)?, rf_win::dock::size::unit(host::monitor_work(cx)?.0, super::look::dock_size(cx))))
+    Some((host::visible_glass_rect_on(host::MonId::HOME, Kind::Right, cx)?, rf_win::dock::size::unit(host::home_work(cx)?.0, super::look::dock_size(cx))))
 }
 
 /// What the strip shows now, for the right island's empty-glass test (`empty.rs`): `None` without a strip.
@@ -470,7 +470,7 @@ fn source_rect(src: Source, cx: &App) -> Option<Rect> {
         Source::Chevron => st.lay.chevron.then(|| ts::chevron_rect(glass, unit, st.lay.visible.len())),
         Source::Overflow(k) => {
             // the overflow panel is a window of its own: its cells are in the monitor's scale, not the dock's size
-            let scale = host::monitor_work(cx)?.0;
+            let scale = host::home_work(cx)?.0;
             let panel = overflow_rect(cx)?;
             let n = st.lay.overflow.len();
             let limits = panel_limits(st, cx);
@@ -818,7 +818,7 @@ pub fn press(src: Source, button: PointerButton, count: usize, cx: &mut App) {
 fn poll_once(cx: &mut App) -> bool {
     let Some(st) = cx.try_global::<TrayState>() else { return false };
     let Some(mut ps) = st.press.clone() else { return false };
-    let scale = host::monitor_work(cx).map_or(1.0, |(s, _)| s);
+    let scale = host::home_work(cx).map_or(1.0, |(s, _)| s);
     let cursor = geo::cursor().unwrap_or(ps.press.at);
     let down = geo::any_button_down();
 
@@ -975,7 +975,7 @@ pub fn focus_strip(cx: &mut App) -> bool {
     if !st.lay.chevron || st.kb.is_some() || host::is_fullscreen(cx) {
         return false;
     }
-    let Some((handle, hwnd)) = host::island_window(Kind::Right, cx) else { return false };
+    let Some((handle, hwnd)) = host::home_island_window(Kind::Right, cx) else { return false };
     let Some(right) = st.right.upgrade() else { return false };
     // (the island has a focus handle once it has drawn a strip; before that there are no keys to give it)
     let Some(focus) = right.read(cx).focus_handle() else { return false };
@@ -1049,7 +1049,7 @@ fn leave_keyboard(back: GiveBack, cx: &mut App) {
         s.kb_watch = None;
     });
     sync_tip_block(cx);
-    let hwnd = host::island_window(Kind::Right, cx).map_or(0, |(_, h)| h);
+    let hwnd = host::home_island_window(Kind::Right, cx).map_or(0, |(_, h)| h);
     if back != GiveBack::No && kb.previous != 0 {
         cx.spawn(async move |cx| {
             if back == GiveBack::AfterClick {

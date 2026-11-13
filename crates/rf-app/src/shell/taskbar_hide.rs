@@ -58,6 +58,30 @@ pub fn band_changed(band: Option<i32>, cx: &App) {
     }
 }
 
+/// The bands of the docks on the other monitors as the host last said (device name, thickness in device px).
+static OTHER_BANDS: Mutex<Vec<(String, i32)>> = Mutex::new(Vec::new());
+
+/// The docks on the monitors that are not the primary one reserve these bands (an empty list: none do). Costs a lock and a comparison
+/// when nothing changed and nothing is running; with the hide in force the work areas of those monitors follow.
+pub fn other_bands_changed(bands: Vec<(String, i32)>, cx: &App) {
+    {
+        let mut g = OTHER_BANDS.lock().unwrap_or_else(|p| p.into_inner());
+        if *g == bands {
+            return;
+        }
+        g.clone_from(&bands);
+    }
+    if let Some(h) = cx.try_global::<Hiding>() {
+        h.hider.set_other_bands(bands);
+    }
+}
+
+/// Whether our hide of Explorer's taskbar is confirmed and in force: only then does the dock on another monitor have a band of its
+/// own in that monitor's work area (otherwise the monitor's taskbar, if it has one, reserves the room as ever).
+pub fn in_force(cx: &App) -> bool {
+    cx.try_global::<Hiding>().is_some_and(|h| h.hider.in_force())
+}
+
 struct Hiding {
     hider: TaskbarHider,
 }
@@ -145,6 +169,10 @@ fn start(cx: &mut App) {
     match TaskbarHider::start(cfg) {
         Ok(hider) => {
             hider.set_wanted(true);
+            let others = OTHER_BANDS.lock().unwrap_or_else(|p| p.into_inner()).clone();
+            if !others.is_empty() {
+                hider.set_other_bands(others);
+            }
             cx.set_global(Hiding { hider });
             crate::dock::parts_status::note(Part::Taskbar, None);
         }

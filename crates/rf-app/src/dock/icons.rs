@@ -6,7 +6,7 @@
 //! once), so a failure is not final: the icon is asked for again a few times, a few seconds apart.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use gpui_kit::RenderImage;
@@ -159,6 +159,42 @@ pub fn load_levels(srcs: &[IconSource], sizes: &[u32]) -> Option<Vec<rf_win::thu
     }
 }
 
+/// What a load made for one icon at one list of sizes, held by every dock that asked for exactly that while any of them still holds it.
+pub type SharedLoad = OnceLock<Option<Vec<rf_win::thumbs::Bgra>>>;
+
+/// How long the dock that made a load keeps it for the others after it has its own pictures: the island of another monitor reacts to
+/// the same window event a few milliseconds later, and its shell call would otherwise be made again.
+pub const SHARE_LINGER: Duration = Duration::from_millis(400);
+
+/// The loads in progress or lingering: the icon's key and the sizes asked for, and the load. A load nobody holds any more is gone.
+static LOADS: Mutex<Vec<((String, Vec<u32>), Weak<SharedLoad>)>> = Mutex::new(Vec::new());
+
+/// [`load_levels`] for a dock that is not alone: the docks of monitors with the same dock unit ask for the same icon at the same sizes,
+/// and the second to ask waits for the first one's load and takes its pictures (a copy) instead of asking the shell and resampling
+/// again. The second return value is the load, to be held for [`SHARE_LINGER`] after the caller is done so that a dock that asks a
+/// moment later finds it; dropped, the pictures are freed. With `shared` false (one dock) this is [`load_levels`] and nothing is kept.
+/// Worker thread only.
+pub fn load_levels_shared(key: &str, srcs: &[IconSource], sizes: &[u32], shared: bool) -> (Option<Vec<rf_win::thumbs::Bgra>>, Option<Arc<SharedLoad>>) {
+    if !shared {
+        return (load_levels(srcs, sizes), None);
+    }
+    let load = {
+        let mut loads = LOADS.lock().unwrap_or_else(|p| p.into_inner());
+        loads.retain(|(_, w)| w.strong_count() > 0);
+        match loads.iter().find(|((k, s), _)| k == key && s == sizes).and_then(|(_, w)| w.upgrade()) {
+            Some(load) => load,
+            None => {
+                let load = Arc::new(SharedLoad::new());
+                loads.push(((key.to_string(), sizes.to_vec()), Arc::downgrade(&load)));
+                load
+            }
+        }
+    };
+    // (the first caller runs the load; one that comes meanwhile waits here and gets the same answer)
+    let got = load.get_or_init(|| load_levels(srcs, sizes)).clone();
+    (got, Some(load))
+}
+
 /// The set of pictures a [`load_levels`] gave, ready to draw. UI thread.
 pub fn to_levels(bgra: Vec<rf_win::thumbs::Bgra>) -> Option<super::icon_levels::Levels> {
     let sizes: Vec<u32> = bgra.iter().map(|b| b.width).collect();
@@ -176,6 +212,29 @@ pub fn to_image(bgra: rf_win::thumbs::Bgra) -> Option<Arc<RenderImage>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn docks_that_ask_for_the_same_icon_at_the_same_sizes_share_one_load_while_one_holds_it() {
+        // (no sources: the load fails at once, without the shell or a disk; what is checked is who shares what)
+        let (a, load_a) = load_levels_shared("test-share-1", &[], &[44, 66], true);
+        let (b, load_b) = load_levels_shared("test-share-1", &[], &[44, 66], true);
+        assert!(a.is_none() && b.is_none());
+        let (load_a, load_b) = (load_a.expect("held"), load_b.expect("held"));
+        assert!(Arc::ptr_eq(&load_a, &load_b), "the second dock took the first one's load");
+        // another size list (a monitor of another scale) or another icon is another load
+        let (_, other_sizes) = load_levels_shared("test-share-1", &[], &[44, 88], true);
+        let (_, other_icon) = load_levels_shared("test-share-2", &[], &[44, 66], true);
+        assert!(!Arc::ptr_eq(&load_a, &other_sizes.as_ref().expect("held").clone()));
+        assert!(!Arc::ptr_eq(&load_a, &other_icon.as_ref().expect("held").clone()));
+        // one dock alone keeps nothing
+        let (_, alone) = load_levels_shared("test-share-1", &[], &[44, 66], false);
+        assert!(alone.is_none());
+        // a load nobody holds is gone: the list does not grow for ever
+        drop((load_a, load_b, other_sizes, other_icon));
+        let _ = load_levels_shared("test-share-3", &[], &[44], true);
+        let left = LOADS.lock().unwrap().iter().filter(|((k, _), _)| k.starts_with("test-share-1") || k.starts_with("test-share-2")).count();
+        assert_eq!(left, 0, "released loads are forgotten");
+    }
 
     #[test]
     fn an_icon_is_asked_for_once_at_a_time() {

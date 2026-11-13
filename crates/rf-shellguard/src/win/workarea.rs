@@ -11,15 +11,10 @@
 
 use std::ffi::c_void;
 
-use windows::Win32::Foundation::{HWND, LPARAM, RECT};
-use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITOR_DEFAULTTONULL, MONITORINFO, MONITORINFOEXW, MonitorFromRect, MonitorFromWindow,
-};
+use windows::Win32::Foundation::{LPARAM, RECT};
+use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext};
-use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowRect, GetWindowThreadProcessId, IsWindowVisible, IsZoomed, SPI_SETWORKAREA, SPIF_SENDCHANGE, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
-    SWP_NOOWNERZORDER, SWP_NOZORDER, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SetWindowPos, SystemParametersInfoW,
-};
+use windows::Win32::UI::WindowsAndMessaging::{SPI_SETWORKAREA, SPIF_SENDCHANGE, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW};
 use windows::core::BOOL;
 
 use crate::statefile::WorkAreaRec;
@@ -53,65 +48,22 @@ pub fn set_work_area(rect: [i32; 4]) -> Result<(), String> {
     aware(|| unsafe { SystemParametersInfoW(SPI_SETWORKAREA, 0, Some(&mut r as *mut RECT as *mut c_void), SPIF_SENDCHANGE) }).map_err(|e| e.to_string())
 }
 
-/// Holds the work area of a monitor for a host that keeps Explorer's taskbar hidden (`from`: what the monitor has now), and fits
-/// that monitor's maximized windows to it. Returns after the windows were asked (queued: a program that hangs does not hold us).
+/// Holds the work area of a monitor for a host that keeps Explorer's taskbar hidden.
 ///
 /// WITHOUT the change broadcast, unlike [`set_work_area`]. Measured on the user's PC (Windows 11 build 26300, two monitors, both
 /// taskbars hidden): set with `SPIF_SENDCHANGE`, both monitors were back at Explorer's own rectangles 290 ms later, every time (it
 /// answers the broadcast by working its taskbars' strips out again, hidden or not); set without it, both rectangles were still
-/// ours a minute later. The price, also measured: without the broadcast the maximized windows stay at their old size, so they are
-/// moved here (`tbmodel::refit_maximized`). Programs that remember the work area learn of it the next time they ask.
-pub fn hold_work_area(from: [i32; 4], to: [i32; 4]) -> Result<(), String> {
+/// ours a minute later. The price, also measured: without the broadcast the maximized windows stay at their old size. Moving them
+/// is the HOST's work (`rf_win::workfit`, with the rule `tbmodel::refit_maximized`): this crate changes no window but Explorer's
+/// taskbar (`tests/tb_static.rs`).
+pub fn hold_work_area(to: [i32; 4]) -> Result<(), String> {
     let [left, top, right, bottom] = to;
     if right <= left || bottom <= top {
         return Err("an empty rectangle".into());
     }
     let mut r = RECT { left, top, right, bottom };
-    aware(|| {
-        // SAFETY: `r` is a valid RECT for the call. Not persisted and not broadcast (no flags).
-        unsafe { SystemParametersInfoW(SPI_SETWORKAREA, 0, Some(&mut r as *mut RECT as *mut c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) }.map_err(|e| e.to_string())?;
-        let mut fit = Refit { from, to, monitor: HMONITOR::default(), monitor_rect: [0; 4], own: std::process::id() };
-        // SAFETY: plain queries; `fit` outlives EnumWindows, which calls back on this thread.
-        unsafe {
-            fit.monitor = MonitorFromRect(&RECT { left, top, right, bottom }, MONITOR_DEFAULTTONULL);
-            let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-            if fit.monitor.is_invalid() || !GetMonitorInfoW(fit.monitor, &mut mi).as_bool() {
-                return Ok(());
-            }
-            fit.monitor_rect = [mi.rcMonitor.left, mi.rcMonitor.top, mi.rcMonitor.right, mi.rcMonitor.bottom];
-            let _ = EnumWindows(Some(refit_cb), LPARAM(&mut fit as *mut Refit as isize));
-        }
-        Ok(())
-    })
-}
-
-struct Refit {
-    from: [i32; 4],
-    to: [i32; 4],
-    monitor: HMONITOR,
-    monitor_rect: [i32; 4],
-    own: u32,
-}
-
-unsafe extern "system" fn refit_cb(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    // SAFETY: lparam is the address of the `Refit` on the caller's stack, alive during EnumWindows; the calls read, and the one
-    // SetWindowPos is queued to the window's own thread. A window of a higher integrity level refuses it; that is left so.
-    unsafe {
-        let fit = &*(lparam.0 as *const Refit);
-        if !IsWindowVisible(hwnd).as_bool() || !IsZoomed(hwnd).as_bool() || MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL) != fit.monitor {
-            return true.into();
-        }
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(hwnd, Some(&mut pid));
-        let mut r = RECT::default();
-        if pid == fit.own || GetWindowRect(hwnd, &mut r).is_err() {
-            return true.into();
-        }
-        if let Some([l, t, rr, b]) = crate::tbmodel::refit_maximized([r.left, r.top, r.right, r.bottom], fit.monitor_rect, fit.from, fit.to) {
-            let _ = SetWindowPos(hwnd, None, l, t, rr - l, b - t, SWP_ASYNCWINDOWPOS | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
-        }
-        true.into()
-    }
+    // SAFETY: `r` is a valid RECT for the call. Not persisted and not broadcast (no flags).
+    aware(|| unsafe { SystemParametersInfoW(SPI_SETWORKAREA, 0, Some(&mut r as *mut RECT as *mut c_void), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) }).map_err(|e| e.to_string())
 }
 
 unsafe extern "system" fn monitor_cb(hmon: HMONITOR, _dc: HDC, _r: *mut RECT, lparam: LPARAM) -> BOOL {

@@ -125,6 +125,28 @@ impl DockMagnify {
     }
 }
 
+/// Settings -> Dock: which dock shows which running app when there is a dock on every monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DockAppsWhere {
+    /// Every dock shows the pinned apps and every running app.
+    #[default]
+    All,
+    /// The pins are on every dock; a running app that is not pinned is only on the dock of the monitor its window is on, and a pinned
+    /// app's running mark only there.
+    Window,
+}
+
+impl DockAppsWhere {
+    /// The rule `rf_win::dock::monitors` works with.
+    pub fn rule(self) -> rf_win::dock::monitors::AppsWhere {
+        match self {
+            DockAppsWhere::All => rf_win::dock::monitors::AppsWhere::Everywhere,
+            DockAppsWhere::Window => rf_win::dock::monitors::AppsWhere::WindowMonitor,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum BackdropPref {
@@ -548,6 +570,11 @@ pub struct Settings {
     pub dock_start_grow: bool,
     /// How big the whole dock is (small / medium / large / extra large; medium is the dock as it always was).
     pub dock_size: crate::dock::size_pref::DockSizePref,
+    /// A dock on every monitor, not only the primary one (on by default: the user asked for it; the dock itself is opt-in). The other
+    /// monitors' docks hold the Start logo and search, the apps, and the clock and bell. Off, or with one monitor: the single dock of before.
+    pub dock_all_monitors: bool,
+    /// With a dock on every monitor: whether every dock shows every running app, or an app only where its window is.
+    pub dock_apps_where: DockAppsWhere,
 
     // ---- The dock's parts (shell/: `rustyfiles --shell`, the dock's process). ONE switch starts them all: `dock_enabled` (Settings ->
     // Dock). These five are the parts' own values, kept in the file under their old names as TROUBLESHOOTING OVERRIDES that the page
@@ -714,6 +741,8 @@ impl Default for Settings {
             // on: the user asked for the Start panel to grow out of the island; the switch on the Dock page turns it off
             dock_start_grow: true,
             dock_size: Default::default(),
+            dock_all_monitors: true,
+            dock_apps_where: DockAppsWhere::All,
             // (the parts' own values: true, so the one switch `dock_enabled` brings them all; see `dock/parts.rs`)
             shell_desktop_cover: true,
             shell_win_key: true,

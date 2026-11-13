@@ -25,7 +25,8 @@ pub fn set(on: bool, cx: &mut App) {
         return;
     }
     cx.set_global(DropHint(on));
-    if let Some(island) = super::host::middle_island(cx) {
+    // (every monitor's dock: the drop may come to any of them)
+    for (_, island) in super::host::middle_islands(cx) {
         island.update(cx, |_, cx| cx.notify());
     }
 }

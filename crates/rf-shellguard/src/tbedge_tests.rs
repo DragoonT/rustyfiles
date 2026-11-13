@@ -704,3 +704,72 @@ fn an_auto_hiding_taskbar_that_is_up_is_put_back_as_the_whole_monitor() {
     c.quit(&mut w);
     assert_eq!(w.work_sets.iter().filter(|r| **r == A).count(), 1, "put back as the whole monitor: {:?}", w.work_sets);
 }
+
+// ---------------------------------------------------------------- a dock on the other monitors too
+
+#[test]
+fn the_dock_on_the_second_monitor_reserves_its_own_band_there_and_the_user_s_work_area_comes_back_on_the_way_out() {
+    let (mut c, mut w) = settled();
+    assert_eq!(work_b(&w), B, "before the second dock: the whole monitor, as it always was");
+    // the second monitor's dock opens with a band of 80 px
+    c.set_other_bands(&mut w, vec![("B".into(), 80)]);
+    assert_eq!(work_b(&w), [-1440, -200, 0, 2279], "the work area ends where the second dock's band begins");
+    assert_eq!(work_a(&w), [0, 0, 2560, 1362], "the primary monitor is not touched by it");
+    assert_eq!(w.dock_edge, Some([0, 1362, 2560, 1440]), "nor is the dock registered on the primary one");
+    // the written-down work area of that monitor is what the user has without us: the monitor less the taskbar's strip
+    assert!(w.state.original_work_areas().contains(&WorkAreaRec { monitor: "B".into(), rect: [-1440, -200, 0, 2311] }));
+    // the way out puts the user's own rectangles back
+    c.quit(&mut w);
+    assert_eq!(work_b(&w), [-1440, -200, 0, 2311], "{:?}", w.calls);
+    assert_eq!(work_a(&w), [0, 0, 2560, 1314]);
+    assert!(w.guard_done && w.state.original_work_areas().is_empty());
+}
+
+#[test]
+fn the_second_docks_band_follows_the_thin_dock_however_thin_and_is_given_back_when_the_dock_goes() {
+    let (mut c, mut w) = settled();
+    c.set_other_bands(&mut w, vec![("B".into(), 80)]);
+    // 56 px is thinner than the taskbar's 48 px strip would leave room for: the controller's own memory knows the rectangle is its own
+    for (i, band) in [56, 80, 56, 80, 56].into_iter().enumerate() {
+        w.now += 2_000;
+        c.set_other_bands(&mut w, vec![("B".into(), band)]);
+        assert_eq!(work_b(&w), [-1440, -200, 0, 2359 - band], "flip {i}");
+    }
+    assert!(!w.lines.iter().any(|l| l.contains("too often")), "the dock's own changes are not throttled: {:?}", w.lines);
+    // the same word again changes nothing
+    let n = w.calls.len();
+    c.set_other_bands(&mut w, vec![("B".into(), 56)]);
+    assert_eq!(w.calls.len(), n);
+    // the dock goes (the monitor was unplugged from the dock's list, or the switch went off): the whole monitor again
+    c.set_other_bands(&mut w, Vec::new());
+    assert_eq!(work_b(&w), B);
+}
+
+#[test]
+fn a_band_for_a_monitor_whose_taskbar_was_not_hidden_or_is_foreign_changes_nothing() {
+    // only the primary taskbar is ours: the second monitor's taskbar window is not among the ones hidden
+    let mut c = Controller::new(HOST_PID, HOST_START).with_band(Some(BAND));
+    let mut w = FakeWorld::new(Rc::new(RefCell::new(vec![window(0x1001, PRIMARY, [0, 1392, 2560, 1440])])));
+    w.monitors = vec![
+        MonitorGeom { id: "A".into(), rect: A, work: [0, 0, 2560, 1392 - BAND], primary: true },
+        MonitorGeom { id: "B".into(), rect: B, work: [-1440, -200, 0, 2311], primary: false },
+    ];
+    w.dock_band = Some(BAND);
+    w.dock_wants_band = Some(BAND);
+    on(&mut c, &mut w);
+    assert_eq!(c.edge(), Edge::Ours);
+    c.set_other_bands(&mut w, vec![("B".into(), 80)]);
+    assert_eq!(work_b(&w), [-1440, -200, 0, 2311], "the second monitor keeps Explorer's own taskbar strip");
+}
+
+#[test]
+fn bands_for_other_monitors_wait_for_the_edge_and_cost_nothing_when_nothing_is_hidden() {
+    let (mut c, mut w) = world(true);
+    // nothing is hidden yet: the word is kept and nothing is set
+    c.set_other_bands(&mut w, vec![("B".into(), 80)]);
+    assert_eq!((w.count("work:"), w.count("dock."), c.edge()), (0, 0, Edge::Free), "{:?}", w.calls);
+    // the edge is taken: the second monitor gets the band at once, with the first word
+    on(&mut c, &mut w);
+    assert_eq!(work_b(&w), [-1440, -200, 0, 2279]);
+    assert_eq!(work_a(&w), [0, 0, 2560, 1362]);
+}

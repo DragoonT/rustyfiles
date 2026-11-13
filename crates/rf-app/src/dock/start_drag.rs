@@ -221,8 +221,11 @@ fn window_at(at: Option<(i32, i32)>) -> Option<isize> {
 
 /// Whether a screen point is on the dock's middle island: inside its glass and the window there is the island's own.
 fn on_island(at: Option<(i32, i32)>, cx: &App) -> bool {
-    let island = host::island_window(Kind::Middle, cx).map(|(_, h)| h);
-    rules::dropped_on_island(at, host::visible_glass_rect(Kind::Middle, cx)) && rules::is_island_window(window_at(at), island)
+    // (the middle island of any monitor's dock)
+    host::dock_monitors(cx).into_iter().any(|(mon, _)| {
+        let island = host::island_window_on(mon, Kind::Middle, cx).map(|(_, h)| h);
+        rules::dropped_on_island(at, host::visible_glass_rect_on(mon, Kind::Middle, cx)) && rules::is_island_window(window_at(at), island)
+    })
 }
 
 fn copy_root() -> PathBuf {

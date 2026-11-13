@@ -16,6 +16,11 @@
 //!   "rustyfiles takvimi kullan" is off), a bell (our own notification panel, `notif_view.rs`, with a dot while there are notifications;
 //!   Win+N when "rustyfiles bildirim panelini kullan" is off). `right.rs`
 //!
+//! A DOCK ON EVERY MONITOR (setting "Dock'u her ekranda göster", on by default; see docs/design/dock.md): `host.rs` keeps a list of docks,
+//! the home dock (the primary monitor's, the one above) and one for each other monitor, found by the monitor's device name
+//! (`rf_win::dock::monitors`). A secondary dock has the logo and the search, the apps, and the clock and the bell. With one monitor, or
+//! the switch off, there is the home dock only.
+//!
 //! Each island is a window of its own (a GPUI pop-up with a transparent background) that is never activated, has no taskbar
 //! button and is always on top; `rf_win::dock` makes it so and places it. Each has HyperGlass behind it with its own corner radius
 //! (`backdrop.rs`), and paints its own translucent fill while the glass is not running (`host::island_box`).
@@ -73,6 +78,7 @@ mod start;
 mod start_button;
 mod sysstate;
 mod thin;
+mod task_feed;
 mod tone;
 mod tray_overflow;
 pub(crate) mod tray_feed;
@@ -124,5 +130,5 @@ pub fn focus_tray_strip(cx: &mut App) -> bool {
 
 /// Whether a full-screen application is in front (the islands are hidden). The keyboard layer stands down then.
 pub fn is_fullscreen(cx: &App) -> bool {
-    host::is_fullscreen(cx)
+    host::any_fullscreen(cx)
 }

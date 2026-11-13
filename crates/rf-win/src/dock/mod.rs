@@ -43,6 +43,7 @@
 //! | `size_live` | the dock's size as a slider value (%75 to %150): the range, old names and numbers, the percent text, the message the settings window sends while it is dragged, what a drag redoes and what waits for the release, the dock's once-a-frame pacing | all of it |
 //! | `size` | the dock's size setting: the four sizes (0.85, 1.0, 1.2, 1.4) and the one product, the monitor's scale times the size, that every pure layout function takes in place of the monitor's scale | all of it |
 //! | `empty_spot` | which point of an island is its empty glass (no icon, field, symbol or other control), from the layout's rectangles | all of it |
+//! | `monitors` | a dock on every monitor: the list of displays by device name, which secondary docks there are for the monitors now, what a monitor's dock holds for its width, which apps a monitor's dock shows, which monitor a panel opens on | all of it |
 //! | `taskmgr` | starting Windows' Task Manager from a right click on the empty glass: once, the shell's "open" and never "runas" | the gate |
 //! | `grow` | an island that grows into its panel: the glass's rectangle from the island's to the panel's with one corner fixed, the radius, the fades, the search field's path, the 220 / 160 ms clock that can turn at any moment | all of it |
 //! | `grow_panels` | which panel a press on a button of the right island's row leads to (close, hand over, wait), the grown rectangle of a panel or why it must open the ordinary way, where the panel's content stands in the glass | all of it |
@@ -91,6 +92,7 @@ pub mod launch;
 pub mod layout;
 pub mod magnify;
 pub mod model;
+pub mod monitors;
 pub mod ownpins;
 pub mod panel;
 pub mod pinorder;

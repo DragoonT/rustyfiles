@@ -217,7 +217,10 @@ impl HideWorld for RealWorld {
     }
 
     fn hold_work_area(&mut self, from: [i32; 4], to: [i32; 4]) -> Result<(), String> {
-        rf_shellguard::win::workarea::hold_work_area(from, to)
+        rf_shellguard::win::workarea::hold_work_area(to)?;
+        // (the thread is per-monitor DPI aware, see `run_thread`: the rectangles are physical pixels)
+        crate::workfit::maximized_windows(from, to);
+        Ok(())
     }
 
     fn load_state(&mut self) -> ShellStateFile {
@@ -345,6 +348,8 @@ enum Cmd {
     Wanted(bool),
     /// The dock's band changed (`None`: it reserves none).
     Band(Option<i32>),
+    /// The docks on the other monitors changed their bands (monitor device name, thickness in device px).
+    OtherBands(Vec<(String, i32)>),
     /// Leave (restore what is hidden, tell the guard) and end the thread.
     Stop,
     /// End the thread without leaving anything: the one-shot look at a record left by a crashed host. A restore that is still
@@ -488,6 +493,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                         }
                         Cmd::Band(band) => {
                             ctx.guarded(|c, w| c.set_band(w, band));
+                            sync_timer(hwnd, ctx);
+                        }
+                        Cmd::OtherBands(bands) => {
+                            ctx.guarded(|c, w| c.set_other_bands(w, bands));
                             sync_timer(hwnd, ctx);
                         }
                         Cmd::Stop | Cmd::Finish => {
@@ -688,6 +697,19 @@ impl TaskbarHider {
     /// bottom edge be taken at all. Session only.
     pub fn set_band(&self, band_px: Option<i32>) {
         self.post(Cmd::Band(band_px));
+    }
+
+    /// The docks on the monitors that are not the primary one changed their bands: `(the monitor's device name, thickness in device px)`
+    /// for each dock that reserves one. While the hide is in force the work area of such a monitor, if its taskbar is one of the hidden
+    /// ones, is the monitor less the band; the others are given whole, as before. The user's own work areas are written down first and
+    /// put back on every way out, like the primary monitor's. Session only.
+    pub fn set_other_bands(&self, bands: Vec<(String, i32)>) {
+        self.post(Cmd::OtherBands(bands));
+    }
+
+    /// Whether the hide is confirmed and in force (the taskbar windows are hidden, and the work areas are the edge's).
+    pub fn in_force(&self) -> bool {
+        matches!(self.status(), Status::Hidden(_))
     }
 
     /// What the last look found.

@@ -51,10 +51,18 @@ unsafe extern "system" fn island_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
     if let Some(reply) = island_reply(msg) {
         return LRESULT(reply);
     }
+    // an island is not minimized: its own menu's command is refused, and one that another program minimized comes back (`stayup.rs`)
+    if crate::stayup::is_minimize_command(msg, wp.0) {
+        return LRESULT(0);
+    }
+    if crate::stayup::was_minimized(msg, wp.0) {
+        crate::stayup::bring_back(hwnd.0 as isize);
+    }
     let Some(prev) = previous_proc(hwnd.0 as isize) else { return unsafe { DefWindowProcW(hwnd, msg, wp, lp) } };
     // the window is going: forget it (a handle may be reused by another window later)
     if msg == WM_NCDESTROY {
         PREVIOUS.lock().unwrap_or_else(|p| p.into_inner()).retain(|(h, _)| *h != hwnd.0 as isize);
+        crate::stayup::forget(hwnd.0 as isize);
     }
     // SAFETY: `prev` is the procedure `SetWindowLongPtrW(GWLP_WNDPROC)` returned for this very window
     unsafe { CallWindowProcW(std::mem::transmute::<isize, WNDPROC>(prev), hwnd, msg, wp, lp) }

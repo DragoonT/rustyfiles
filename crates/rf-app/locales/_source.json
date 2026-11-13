@@ -9612,5 +9612,41 @@
   "key": "Komut",
   "tr": "Komut",
   "en": "Command"
+ },
+ {
+  "id": "03ce689b",
+  "key": "Dock'u her ekranda göster",
+  "tr": "Dock'u her ekranda göster",
+  "en": "Show the dock on every monitor"
+ },
+ {
+  "id": "cda3815c",
+  "key": "Birden çok ekranınız varsa her ekranın altında bir dock bulunur: Başlat logosu ve arama, uygulamalar, saat ve zil. Hava durumu, tepsi simgeleri, ağ ve ses düğmeleri yalnızca ana ekrandaki dock'ta kalır. Ekran dar kalırsa önce arama alanı düğmeye dönüşür, sonra zil gider. Kapalıyken ya da tek ekranda dock yalnızca ana ekrandadır.",
+  "tr": "Birden çok ekranınız varsa her ekranın altında bir dock bulunur: Başlat logosu ve arama, uygulamalar, saat ve zil. Hava durumu, tepsi simgeleri, ağ ve ses düğmeleri yalnızca ana ekrandaki dock'ta kalır. Ekran dar kalırsa önce arama alanı düğmeye dönüşür, sonra zil gider. Kapalıyken ya da tek ekranda dock yalnızca ana ekrandadır.",
+  "en": "With more than one monitor, every monitor gets a dock at its bottom: the Start logo and search, the apps, the clock and the bell. The weather, the tray icons and the network and volume buttons stay in the dock on the main monitor. On a narrow monitor the search field becomes a button first, then the bell goes. Off, or with one monitor, the dock is on the main monitor only."
+ },
+ {
+  "id": "6f1274ed",
+  "key": "Uygulamalar hangi ekranda görünsün",
+  "tr": "Uygulamalar hangi ekranda görünsün",
+  "en": "Which monitor shows which apps"
+ },
+ {
+  "id": "2cb70287",
+  "key": "Her ekranda hepsi: her dock sabitlenmiş uygulamaları ve çalışan tüm uygulamaları gösterir. Pencerenin olduğu ekranda: sabitlenmiş uygulamalar her dock'ta durur; sabitlenmemiş çalışan bir uygulama yalnızca penceresinin olduğu ekranın dock'unda görünür, sabitlenmiş bir uygulamanın çalışıyor işareti de yalnızca orada olur. Bir pencere başka ekrana taşınınca uygulaması, görev listesinin bir sonraki değişiminde onunla gider. Yalnızca birden çok ekranda ve \"Dock'u her ekranda göster\" açıkken bir şey değiştirir.",
+  "tr": "Her ekranda hepsi: her dock sabitlenmiş uygulamaları ve çalışan tüm uygulamaları gösterir. Pencerenin olduğu ekranda: sabitlenmiş uygulamalar her dock'ta durur; sabitlenmemiş çalışan bir uygulama yalnızca penceresinin olduğu ekranın dock'unda görünür, sabitlenmiş bir uygulamanın çalışıyor işareti de yalnızca orada olur. Bir pencere başka ekrana taşınınca uygulaması, görev listesinin bir sonraki değişiminde onunla gider. Yalnızca birden çok ekranda ve \"Dock'u her ekranda göster\" açıkken bir şey değiştirir.",
+  "en": "Every app on every monitor: each dock shows the pinned apps and every running app. On the monitor the window is on: pinned apps stay on every dock; a running app that is not pinned shows only on the dock of the monitor its window is on, and a pinned app's running mark shows only there. When a window moves to another monitor its app goes with it at the next change of the task list. It only changes anything with more than one monitor and \"Show the dock on every monitor\" on."
+ },
+ {
+  "id": "ada2ba5f",
+  "key": "Her ekranda hepsi",
+  "tr": "Her ekranda hepsi",
+  "en": "Every app on every monitor"
+ },
+ {
+  "id": "26cc0e90",
+  "key": "Pencerenin olduğu ekranda",
+  "tr": "Pencerenin olduğu ekranda",
+  "en": "On the monitor the window is on"
  }
 ]

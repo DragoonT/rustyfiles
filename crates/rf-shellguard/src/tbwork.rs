@@ -6,7 +6,8 @@
 //!
 //! * the primary monitor's work area becomes the monitor less the dock's own band ([`monitor_less_band`]) when `dock_reserve` is on,
 //!   and the whole monitor when it is off;
-//! * every other monitor whose taskbar we hid becomes the whole monitor;
+//! * every other monitor whose taskbar we hid becomes the whole monitor - or the monitor less the band of the dock that stands on it,
+//!   when the dock has one there too (`plan_edge_bands`: a dock on every monitor reserves its own band on each);
 //! * the dock does NOT register its band with Explorer in the meantime (a second band on top of ours; see `rf_win::dock::system`).
 //!
 //! This is the same rule the work-area keeper for a session with NO Explorer uses (`rf_win::shellhost::workarea::target` calls
@@ -103,6 +104,12 @@ pub fn target_for(monitor: [i32; 4], primary: bool, band: Option<i32>) -> [i32; 
     }
 }
 
+/// [`target_for`] for a host with a dock on the other monitors too: a monitor that is not the primary one keeps the band of the dock on
+/// it (`other`, in device px) when it has one, and is given whole when it has none.
+pub fn target_for_monitor(monitor: [i32; 4], primary: bool, band: Option<i32>, other: Option<i32>) -> [i32; 4] {
+    if primary { target_for(monitor, true, band) } else { other.map_or(monitor, |t| monitor_less_band(monitor, t)) }
+}
+
 /// A work area that is `strip_only` with a band cut from its bottom edge: the other three edges agree and the bottom is above the
 /// strip's, but not above its middle (a band is a fraction of the screen, never the screen).
 fn band_cut(work: [i32; 4], strip_only: [i32; 4]) -> bool {
@@ -197,10 +204,18 @@ pub fn plan_edge(monitors: &[MonitorGeom], bars: &[[i32; 4]], band: Option<i32>)
 /// toolbar only by being cut deeper than the taskbar's strip, so a band THINNER than the strip (the thin dock at a small size, with
 /// small margins) was taken for another program's and never changed again.
 pub fn plan_edge_held(monitors: &[MonitorGeom], bars: &[[i32; 4]], band: Option<i32>, held: &[[i32; 4]]) -> EdgePlan {
+    plan_edge_bands(monitors, bars, band, held, &[])
+}
+
+/// [`plan_edge_held`] for a dock on every monitor: `other_bands` are the bands of the docks on the monitors that are not the primary
+/// one (monitor id, thickness in device px). A monitor with a band there is given the monitor less that band, a monitor without one the
+/// whole monitor, as before. The primary monitor is judged exactly as it was.
+pub fn plan_edge_bands(monitors: &[MonitorGeom], bars: &[[i32; 4]], band: Option<i32>, held: &[[i32; 4]], other_bands: &[(String, i32)]) -> EdgePlan {
     let mut out = Vec::with_capacity(monitors.len());
     for (i, m) in monitors.iter().enumerate() {
         let bar = bars.iter().find(|b| owner_of(monitors, b) == Some(i));
-        let target = target_for(m.rect, m.primary, band);
+        let other = other_bands.iter().find(|(id, _)| *id == m.id).map(|(_, t)| *t);
+        let target = target_for_monitor(m.rect, m.primary, band, other);
         let mut plan = MonitorPlan { id: m.id.clone(), primary: m.primary, rect: m.rect, work_now: m.work, target, user_work: m.rect, band_held: false, verdict: Verdict::NotOurs };
         if let Some(bar) = bar {
             plan.verdict = Verdict::Foreign;
@@ -313,6 +328,56 @@ mod tests {
         // every other monitor whose taskbar we hid: the whole monitor, whatever the band is
         assert_eq!(target_for([-1440, -200, 0, 2359], false, Some(78)), [-1440, -200, 0, 2359]);
         assert_eq!(target_for([-1440, -200, 0, 2359], false, None), [-1440, -200, 0, 2359]);
+    }
+
+    #[test]
+    fn a_monitor_that_is_not_the_primary_one_keeps_the_band_of_the_dock_on_it() {
+        let b = [-1440, -200, 0, 2359];
+        // a dock on it with a band of 80 px: the monitor less that band
+        assert_eq!(target_for_monitor(b, false, Some(78), Some(80)), [-1440, -200, 0, 2279]);
+        // no dock there (or the dock reserves none): the whole monitor, as before
+        assert_eq!(target_for_monitor(b, false, Some(78), None), b);
+        // the primary monitor never takes another monitor's band, and keeps its own rule
+        assert_eq!(target_for_monitor(A, true, Some(78), Some(80)), [0, 0, 2560, 1362]);
+        assert_eq!(target_for_monitor(A, true, None, Some(80)), A);
+        assert_eq!(target_for_monitor(A, true, Some(78), None), target_for(A, true, Some(78)));
+    }
+
+    #[test]
+    fn with_no_band_for_the_other_monitors_the_plan_is_the_one_of_before() {
+        let ms = [mon("A", A, [0, 0, 2560, 1314], true), mon("B", [-1440, -200, 0, 2359], [-1440, -200, 0, 2311], false)];
+        let bars = [BAR, [-1440, 2311, 0, 2359]];
+        assert_eq!(plan_edge_bands(&ms, &bars, Some(78), &[], &[]), plan_edge_held(&ms, &bars, Some(78), &[]));
+        // a band for a monitor that is not there (a dock whose monitor went) changes nothing
+        assert_eq!(plan_edge_bands(&ms, &bars, Some(78), &[], &[("C".into(), 80)]), plan_edge_held(&ms, &bars, Some(78), &[]));
+    }
+
+    #[test]
+    fn a_secondary_monitor_with_a_dock_is_set_to_the_monitor_less_the_docks_band_and_a_changed_band_is_ours_to_change() {
+        let b = [-1440, -200, 0, 2359];
+        let strip = [-1440, 2311, 0, 2359];
+        let bars = [BAR, strip];
+        let bands = [("B".to_string(), 80)];
+        // the first time: the work area is what a hidden taskbar leaves
+        let ms = [mon("A", A, [0, 0, 2560, 1362], true), mon("B", b, [-1440, -200, 0, 2311], false)];
+        let p = plan_edge_bands(&ms, &bars, Some(78), &[], &bands);
+        assert_eq!((p.monitors[1].verdict, p.monitors[1].target), (Verdict::Set, [-1440, -200, 0, 2279]));
+        assert_eq!(p.monitors[1].user_work, [-1440, -200, 0, 2311], "what the user has without the dock: the monitor less the taskbar's strip");
+        // the work area is the target: nothing to do
+        let ms = [mon("A", A, [0, 0, 2560, 1362], true), mon("B", b, [-1440, -200, 0, 2279], false)];
+        assert_eq!(plan_edge_bands(&ms, &bars, Some(78), &[], &bands).monitors[1].verdict, Verdict::AsWanted);
+        // the thin dock: a band of 56 px (thinner than the taskbar's 48 px strip is NOT needed to be told from a foreign toolbar: the host's
+        // own memory knows the rectangle it set)
+        let thin = [("B".to_string(), 56)];
+        let held = [[-1440, -200, 0, 2279]];
+        let p = plan_edge_bands(&ms, &bars, Some(78), &held, &thin);
+        assert_eq!((p.monitors[1].verdict, p.monitors[1].target), (Verdict::Set, [-1440, -200, 0, 2303]));
+        // and back to the whole monitor when the dock goes (its band is gone from the list): the memory knows the rectangle it set
+        let p = plan_edge_bands(&ms, &bars, Some(78), &held, &[]);
+        assert_eq!((p.monitors[1].verdict, p.monitors[1].target), (Verdict::Set, b));
+        // another program's toolbar on that monitor is still left alone
+        let foreign = [mon("A", A, [0, 0, 2560, 1362], true), mon("B", b, [-1300, -200, 0, 2311], false)];
+        assert_eq!(plan_edge_bands(&foreign, &bars, Some(78), &[], &bands).monitors[1].verdict, Verdict::Foreign);
     }
 
     #[test]

@@ -28,14 +28,29 @@ pub fn effective_pins() -> Vec<PinnedApp> {
     rf_win::dock::pins::read_pins()
 }
 
-/// The island, so that a change of the list shows at once instead of at the island's next look (every 20 s).
-struct Island(WeakEntity<MiddleIsland>);
+/// The middle islands (one for each monitor's dock), so that a change of the list shows at once instead of at the island's next look
+/// (every 20 s).
+#[derive(Default)]
+struct Islands(Vec<WeakEntity<MiddleIsland>>);
 
-impl Global for Island {}
+impl Global for Islands {}
 
-/// The middle island tells where it is (called once, when it is made).
+/// A middle island tells where it is (called once, when it is made). Islands that are gone are forgotten.
 pub fn register(island: WeakEntity<MiddleIsland>, cx: &mut App) {
-    cx.set_global(Island(island));
+    if !cx.has_global::<Islands>() {
+        cx.set_global(Islands::default());
+    }
+    let list = &mut cx.global_mut::<Islands>().0;
+    list.retain(|i| i.upgrade().is_some());
+    list.push(island);
+}
+
+/// Every middle island that is still there reads the pins again.
+fn reload_islands(cx: &mut App) {
+    let islands: Vec<WeakEntity<MiddleIsland>> = cx.try_global::<Islands>().map(|i| i.0.clone()).unwrap_or_default();
+    for island in islands {
+        let _ = island.update(cx, |me, cx| me.reload_pins(cx));
+    }
 }
 
 /// Pins (`pin`) or unpins an app on the dock's own list, on a worker thread; the island reads the list again when it is written.
@@ -45,11 +60,7 @@ pub fn set_pinned(app: DockApp, pin: bool, cx: &mut App) {
         match done {
             Ok(Changed::Written) => {
                 log::info!("dock: {} {} the dock's own pin list", if pin { "pinned" } else { "took off" }, if pin { "to" } else { "from" });
-                cx.update(|cx| {
-                    if let Some(island) = cx.try_global::<Island>().map(|i| i.0.clone()) {
-                        let _ = island.update(cx, |me, cx| me.reload_pins(cx));
-                    }
-                });
+                cx.update(reload_islands);
             }
             Ok(Changed::Same) => log::info!("dock: the pin list needed no change ({} for the app of the menu)", if pin { "it is already on it, or cannot be pinned" } else { "it is not on the dock's own list" }),
             Err(e) => log::warn!("dock: cannot change the pin list: {e:?}"),
@@ -71,11 +82,7 @@ pub fn set_order(placed: Vec<Placed>, before: Vec<String>, cx: &mut App) {
             Ok(Changed::Same) => log::info!("dock: the dragged order needed no change in the pin list"),
             Err(e) => log::warn!("dock: cannot write the dragged order to the pin list: {e:?}"),
         }
-        cx.update(|cx| {
-            if let Some(island) = cx.try_global::<Island>().map(|i| i.0.clone()) {
-                let _ = island.update(cx, |me, cx| me.reload_pins(cx));
-            }
-        });
+        cx.update(reload_islands);
     })
     .detach();
 }
@@ -88,11 +95,7 @@ pub fn pin_start_app(app: rf_win::apps::App, cx: &mut App) {
         match done {
             Ok(Changed::Written) => {
                 log::info!("dock: an app of the Start panel was added to the dock's own pin list");
-                cx.update(|cx| {
-                    if let Some(island) = cx.try_global::<Island>().map(|i| i.0.clone()) {
-                        let _ = island.update(cx, |me, cx| me.reload_pins(cx));
-                    }
-                });
+                cx.update(reload_islands);
             }
             Ok(Changed::Same) => log::info!("dock: the app dropped on the dock is on the pin list already, or cannot be started again"),
             Err(e) => log::warn!("dock: cannot add the dropped app to the pin list: {e:?}"),

@@ -79,7 +79,8 @@ pub(super) fn create(cx: &mut App) -> bool {
 
 /// The chevron's click: opens the overflow panel, closes it when it is the open one.
 pub fn toggle_overflow(cx: &mut App) {
-    super::more::toggle_made(OVERFLOW, cx);
+    // (the tray strip is the home dock's)
+    super::more::toggle_made(OVERFLOW, crate::dock::host::MonId::HOME, cx);
 }
 
 /// [`toggle_overflow`] for the keyboard walk in the tray strip: the foreground is the right island then (the strip took the keyboard for

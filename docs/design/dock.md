@@ -1,6 +1,6 @@
 # The dock (experimental)
 
-`rustyfiles.exe --dock` puts three floating "islands" above the bottom of the primary monitor, in the spirit of a taskbar of our
+`rustyfiles.exe --dock` puts three floating "islands" above the bottom of the primary monitor (and, with "Dock'u her ekranda göster", of every other monitor: see "A dock on every monitor"), in the spirit of a taskbar of our
 own. Version 1 is an addition to Windows' taskbar, not a replacement: Explorer keeps the desktop, the Start menu and the
 notifications, nothing is injected into anything, nothing needs administrator rights, and everything the dock did is undone when
 it exits.
@@ -365,12 +365,14 @@ side: `dock/thin.rs`.
   and then it is the dock above: the bell, the previews, the menus. It floats over the maximised window. The pointer gone and nothing
   open (`panel::is_open`, `app_menu::is_open`, `hover_preview::is_shown`): it goes thin at that moment, in ONE motion with the
   magnification going out (it waited 400 ms until a user saw the dock shrink in two steps: the bell first, then a pause, then the
-  glass; while the pointer is at the dock the cursor is read every 16 ms so that the two start within a frame). Only a window that
-  has just been maximised must have been there 400 ms (`SEEN_MS`), so a flicker through "maximised" does nothing (`Follower`). The Start panel opened by the Windows key, and any panel opened by the keyboard, is an open
+  glass; while the pointer is at the dock the cursor is read every 16 ms so that the two start within a frame). A window that has just been maximised makes the dock thin AT ONCE too (`SEEN_MS` and `SETTLE_THIN_MS` are 0), and its band with it,
+  while the system's own maximize animation still runs: with the waits there were (400 and 600 ms) the user saw the window finish
+  maximizing, then the dock shrink, then the window grow once more into the room the dock gave up. Only the band's way back to full
+  waits (600 ms after the last maximised window went, and the hold of 2 s between two changes). The Start panel opened by the Windows key, and any panel opened by the keyboard, is an open
   panel: the dock is grown while it is open (seen at the next look, 60 ms at the most).
 * THE BAND (`BandSettle`). The band the dock reserves (the application desktop toolbar, or the work area the host sets itself while it has
   hidden Explorer's taskbar: both come through `host::apply_reserve` -> `system.reserve` and `taskbar_hide::band_changed`) is the
-  thin one, 68 units (the thin glass and 10 above and below) instead of 92, while a maximised window has been there for 600 ms; so the
+  thin one, 68 units (the thin glass and 10 above and below) instead of 92, from the moment a maximised window is there (it waited 600 ms until the user asked for one motion; the numbers here are the old margins' and are 56 and 80 now); so the
   maximised window gains 24 units. It follows the WINDOW and never the pointer: the dock grown under the pointer floats over the
   window and the work area stays where it is, so nothing resizes under the user's hand. It changes at most once in 2 s (a window
   maximised and restored in quick succession changes nothing; the story test plays that), and never while a panel is open (a change
@@ -401,6 +403,93 @@ side: `dock/thin.rs`.
   while the mouse moves all the time and while a window is dragged (`cargo run -p rf-win --example zoomwatch_probe -- 30` prints the
   counts and the process's CPU; run it while moving the mouse and dragging a window). Measured without input: 15 s with one hook call and
   40 s with 22 calls (13 for whole windows, none needing a style read), 0.0 ms of CPU.
+
+## A dock on every monitor (settings "Dock'u her ekranda göster" and "Uygulamalar hangi ekranda görünsün")
+
+The user: "bir de ikinci ekrana da gelsin dock". With the switch on (`dock_all_monitors`, Dock page, GENEL; ON by default, the dock itself is
+off until asked for; a key of the running dock, so a running dock opens and closes the other monitors' docks at once) every monitor has a
+dock of its own, in the one dock process. COST when it is not used: with the switch OFF (and no secondary dock) `host::sync_docks` returns
+before it enumerates anything; with the switch ON (the default) and ONE monitor the list of monitors is read once at the start and once
+for each display-change message of the system, and no timer runs (`monitors::watch_ticks`: the 2 s look at the other monitors runs only
+while there is a secondary dock or a second monitor in the list); the list of docks holds the home dock only and every shared path below
+(`task_feed`, the icon loads) takes its one-dock branch, which keeps nothing.
+
+* THE PER-MONITOR VALUE. `host::Dock` is everything one monitor has: its monitor, its layout (`Geo`), its three windows and their glass, its
+  widths, the region of its middle window, what it holds (`Content`), whether it is hidden for a full-screen program THERE. `Host` keeps a
+  list of them; the first is the HOME dock (`MonId::HOME`), the dock the process always had: it follows the primary monitor, takes its band
+  and holds everything. The others are the secondary monitors' docks. The rest stays shared: the settings, the glass engine, the system
+  watcher, the panels' windows, the tray source, and the work on the windows: ONE watch of the task list and ONE listing of the running
+  windows serve every dock (`task_feed.rs`: the first island starts the watch, an island that is gone drops out of its listeners, a listing
+  made after the latest window event is handed to the island of the other monitor that asks for it, and each island applies only its own
+  monitor's rule to it), and ONE read of the pin list (the home island reads it every 20 s and hands it to the others). Each middle island
+  keeps its own `IconCache` and `LevelStore`, at its own monitor's pixels: the PICTURES (the GPU images) are not shared, but the LOAD is -
+  docks that ask for the same icon at the same sizes (monitors of the same dock unit) share one shell call and one resampling while any of
+  them still holds it (`icons::load_levels_shared`; it keeps its result for 400 ms after the first dock is done, so the island of the other
+  monitor, which reacts to the same window event a few milliseconds later, finds it). Monitors of another unit load their own, as they must.
+  Each island's view knows its `MonId` and asks the host with the `_on` functions (`insets_on`, `visible_glass_rect_on`, `size_on`,
+  `env_on`); the panels, the app menu and the previews are shared by all monitors (one at a time) and ask for the ACTIVE monitor
+  (`host::active`), which an island sets when it is pressed or hovered and an open panel keeps until it is gone (`host::set_active`,
+  `force_active`). A hover or a right click on another monitor's icon while a panel is open on the first: no preview opens (the pop-up
+  would be placed from the panel's monitor's numbers), and a right click is a click outside the panel, which is put away before the menu
+  opens (`host::claim_active`). The app menu and the preview take the dock's size and the icon scale of the active monitor.
+* WHICH DOCKS THERE ARE (`rf_win::dock::monitors`, pure and tested): one per monitor that is not the primary one, KNOWN BY THE MONITOR'S DEVICE
+  NAME (`\\.\DISPLAY2`), never by its handle (the handle changes whenever the display configuration is rebuilt). `reconcile` turns the list of
+  docks there are and the monitors now into closes (first, so a monitor that went does not keep a window while the next is built), places
+  again (the monitor's rectangle, work area or scale changed) and opens. A monitor that becomes the primary one loses its secondary dock and
+  the home dock moves there, as it always did; the old primary monitor gets a secondary dock. A change of a secondary monitor reaches the host
+  through `WM_DISPLAYCHANGE` and the 2 s tick of the system window, which looks at every monitor's rectangle, work area and scale only while
+  the switch is on (`system::watch_all_monitors`).
+* WHAT A SECONDARY MONITOR'S DOCK HOLDS (the product owner's choices): the same three islands. Left: the Start logo and the search field, no
+  weather. Middle: the apps. Right: the clock and the bell, no tray strip, no network and volume buttons, no separator (they stay on the
+  primary monitor's, as on Windows' secondary taskbars). On a monitor too narrow for it (`monitors::content`: the three islands with the middle
+  island at the width it wants must fit) things give way in this order: the search field becomes a button as big as the
+  logo (`Search::Button`), then the bell goes, then the middle island squeezes as it always did (`layout::islands`) - the middle island is
+  not asked to squeeze while either of the others can still give room, so the search field turns into a button as the apps fill the dock
+  (on the user's 1440 px portrait monitor at 100 %: from roughly 17 apps; the exact number depends on the clock's width). The same monitor with fewer apps loses nothing. A list of displays
+  that cannot be trusted (empty, or with no primary monitor: a display wake, a remote session attaching) changes nothing
+  (`monitors::usable`), and the docks are not closed and opened again for it.
+* WHICH APPS WHERE (`dock_apps_where`, Middle section): "Her ekranda hepsi" (default): every dock shows the pins and every running app.
+  "Pencerenin olduğu ekranda": the pins are on every dock; the running apps are filtered by the monitor each WINDOW is on
+  (`monitors::filter_groups`, asked of each window with `monitors::monitor_of_window`, on the worker thread that lists the windows, and only in
+  this mode and only with more than one dock), so an unpinned app is only on the dock whose monitor has its window, a pinned app's running mark
+  only there, and a click on it brings forward that monitor's window of the app. A minimised window counts where it will be restored. A window
+  whose monitor cannot be told counts on every dock. A window that moves to another monitor moves its app at the next change of the task list
+  (the list does not fire for a plain move: that is the specified behaviour). The Windows key opens Start on the monitor that has the pointer,
+  and a tap while Start is open closes it wherever the pointer has gone (`monitors::key_target`).
+* PANELS (`monitors::panel_target`, `panel_request`): the Start panel, the calendar and the notifications open on the monitor whose island was
+  pressed and grow out of that island (the grown glass knows its monitor, `grow_host::island_fade(mon, ..)`); one panel at a time over all
+  monitors: the same panel's button on the other monitor moves it (it shrinks into one island and grows out of the other), another panel is
+  the ordinary hand-over. The Windows key opens Start on the monitor that has the pointer (`host::monitor_at_pointer`). The control centre
+  (the network and volume buttons), the tray strip and its overflow panel are the home dock's.
+* EACH MONITOR ON ITS OWN. Its scale and size (`host::env_on`: the system's look with that monitor's scale and the size fitted to that
+  monitor's width), its icons asked for at that monitor's pixels, its pointer and magnification (the island's own state), its thin state
+  (`thin.rs` keeps a `MonThin` for each dock: thin while a maximised window is on THAT monitor, near its own glass; one walk over the windows
+  asks about each dock's monitor), its hiding for a full-screen program (the home dock's is the system watcher's; a secondary one's is looked for
+  twice a second while a secondary dock exists, `host::look_for_fullscreen`: the verdict is about the window IN FRONT, so a full-screen
+  program in the background does not hide anything and the keyboard layer stands down only for a full-screen program that has the focus).
+* THE BAND OF A SECONDARY DOCK, while our hide of Explorer's taskbar is in force (`shell_hide_taskbar`; the user's setup): the host that
+  holds the taskbar hidden also holds each secondary monitor's work area at the monitor less THAT dock's band (`dock_reserve` on), thin or
+  full by that monitor's own thin state, so a maximised window on the second monitor stops above its dock, as on the first. The pieces:
+  `host::apply_secondary_bands` works out each secondary dock's band (`thin::reserved_thickness(unit of that monitor, thin of that
+  dock)`) and tells `shell::taskbar_hide::other_bands_changed`; `TaskbarHider::set_other_bands` posts it to the hider's thread;
+  `Controller::set_other_bands` (rf-shellguard) keeps the list and drives the edge like a change of the primary band; `tbwork::
+  plan_edge_bands` gives a monitor with a band the monitor less the band, a monitor without one the whole monitor (as before), and
+  knows the rectangles it set itself (`held`) so a band thinner than the taskbar's strip is still recognised as its own. The user's own
+  work area of that monitor is written down before the first change and put back on every way out, by the code that already did it for
+  every monitor whose taskbar we hid (nothing new in the restore, and the guard process restores from the same state file). The dock's
+  islands stand on the monitor's bottom edge inside the band (`monitors::placement_area` puts the band back into the area, from the
+  bands the host told lately, only while the hide is in force). Without the hide, the monitor's own taskbar (if it has one) reserves its
+  strip and the dock stands above it inside the work area; NO band is reserved and NO desktop toolbar is registered on a second monitor,
+  so a maximised window there runs under the dock. Not done either: the band in a session with no Explorer (`shell::live`'s own work-area
+  keeper), and the glass-grown panels' field on a secondary monitor whose search is a button (the panel's field is laid out for the
+  field's width).
+* ONE MONITOR OF ANOTHER SCALE: the app menu, the previews and the dock's own islands use that monitor's scale and size; the PANELS'
+  windows (Start, calendar, notifications, control centre) are made once at the home monitor's scale, and the Start panel's avatar and
+  the notification panel's text are sized from the home scale. Mixed scales are not supported yet (the user's two monitors are both 100 %).
+* NOT SEEN ON A SCREEN (all of it): the secondary docks' windows, their glass, a panel growing out of a secondary island, a panel moving from one
+  monitor to the other, the thin dock on the second monitor, the secondary band and the work area it holds (the controller's steps are
+  tested against a pretend desktop, the real calls are not run), the window-monitor rule with real windows, a monitor plugged in or out, a
+  panel window (made at the home monitor's scale) shown on a monitor of another scale.
 
 ## Panels, Start and search
 

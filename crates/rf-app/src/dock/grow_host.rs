@@ -148,6 +148,8 @@ pub fn active_for(id: PanelId, cx: &App) -> bool {
 
 struct Grow {
     id: PanelId,
+    /// The monitor whose dock the panel grows out of.
+    mon: host::MonId,
     cfg: Cfg,
     spec: Spec,
     /// The life of the growth: its phase and its clock (pure, `rf_win::dock::grow::Run`; every decision of when is made there).
@@ -358,8 +360,10 @@ pub fn prepare(p: Prep, cx: &mut App) -> Option<Rect> {
     }
     // (a growth of another panel that was left behind gives the island its glass back first)
     release(cx);
+    let mon = host::active(cx);
     cx.set_global(GrowGlobal(Some(Grow {
         id: p.id,
+        mon,
         cfg: p.cfg,
         spec,
         run: Run::new(animate),
@@ -421,7 +425,7 @@ pub fn after_move(cx: &mut App) -> Option<impl FnOnce() + use<>> {
 /// The caller raises it (`rf_win::dock::island::raise`) outside any update of the app.
 pub fn island_to_raise(cx: &App) -> Option<isize> {
     let g = grow_ref(cx)?;
-    host::island_window(g.cfg.kind, cx).map(|(_, hwnd)| hwnd)
+    host::island_window_on(g.mon, g.cfg.kind, cx).map(|(_, hwnd)| hwnd)
 }
 
 /// Puts the island back above the panel when something has put the panel above it: the activation of a topmost window raises it over
@@ -430,7 +434,7 @@ pub fn island_to_raise(cx: &App) -> Option<isize> {
 /// it is open); the raising is a message-loop task like every window call.
 pub fn keep_island_above(cx: &App) {
     let Some(g) = grow_ref(cx) else { return };
-    let Some((_, isl)) = host::island_window(g.cfg.kind, cx) else { return };
+    let Some((_, isl)) = host::island_window_on(g.mon, g.cfg.kind, cx) else { return };
     if island::is_above(g.hwnd, isl) {
         later(cx, move || island::raise(isl));
     }
@@ -584,7 +588,7 @@ fn nudge_views(cx: &mut App) {
     // the right island (its fill is not drawn while its glass has grown) and the right island's panel that is growing
     // (deferred: the press that started this may come from the right island's own key handler, and an entity cannot be updated while it
     // is being updated)
-    if let Some(r) = host::right_island(cx) {
+    if let Some(r) = host::right_island_on(host::active(cx), cx) {
         cx.defer(move |cx| {
             r.update(cx, |_, cx| cx.notify());
         });
@@ -787,9 +791,9 @@ pub struct IslandFade {
 
 /// What the island `kind` draws now; `None` when its glass is its own (nothing grows out of it at the moment, or the panel's glass is
 /// not up yet).
-pub fn island_fade(kind: Kind, cx: &App) -> Option<IslandFade> {
+pub fn island_fade(mon: host::MonId, kind: Kind, cx: &App) -> Option<IslandFade> {
     let g = grow_ref(cx)?;
-    if g.cfg.kind != kind || g.run.phase != Phase::Running {
+    if g.cfg.kind != kind || g.mon != mon || g.run.phase != Phase::Running {
         return None;
     }
     let field_hidden = g.cfg.stays.field_is_the_panels();
@@ -833,6 +837,7 @@ mod tests {
         run.start(0);
         Grow {
             id: PanelId::START,
+            mon: crate::dock::host::MonId::HOME,
             cfg: Cfg { kind: Kind::Left, stays: Stays::RowAndField },
             spec,
             run,

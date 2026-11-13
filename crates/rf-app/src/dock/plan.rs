@@ -74,6 +74,19 @@ pub fn left_width_lines(temp: Option<&str>, condition: Option<&str>) -> f32 {
     SEARCH_LEFT + SEARCH_W + temp.map_or(0.0, |t| WEATHER_GAP + weather_width_lines(t, condition)) + SIDE_PAD
 }
 
+/// The search shrunk to a button on a narrow secondary monitor: as big as the logo, with the search picture in it.
+pub const SEARCH_BUTTON: f32 = LOGO;
+
+/// A secondary monitor's left island: the logo and the search (a field, or a button on a narrow monitor), no weather (the weather is
+/// the primary monitor's). Dock units.
+pub fn left_width_secondary(search: rf_win::dock::monitors::Search) -> f32 {
+    use rf_win::dock::monitors::Search;
+    SEARCH_LEFT + SIDE_PAD + match search {
+        Search::Field => SEARCH_W,
+        Search::Button => SEARCH_BUTTON,
+    }
+}
+
 /// Whether the condition line may be shown on this display: with it, the middle island must still fit, whole, between the left island
 /// (that wide) and the right one. "Whole" is the middle island's own width at rest (more icons, more room), and never less than
 /// [`MIN_MIDDLE_ROOM`]. All numbers are dock units: the display's width (work area over the monitor's scale times the dock's size), the
@@ -117,6 +130,12 @@ pub fn clock_width(lines: &ClockLines) -> f32 {
 /// The right island's width: padding, two buttons, a separator between gaps, the clock, the bell, padding.
 pub fn right_width(lines: &ClockLines) -> f32 {
     SIDE_PAD + BUTTON + RIGHT_GAP + BUTTON + RIGHT_SEP_GAP + SEPARATOR_WIDTH + RIGHT_SEP_GAP + clock_width(lines) + RIGHT_GAP + BUTTON + SIDE_PAD
+}
+
+/// A secondary monitor's right island: the clock and, when there is room, the bell. The tray strip, the network and the volume buttons
+/// and the separator after them stay on the primary monitor's. Dock units.
+pub fn right_width_secondary(clock_width: f32, bell: bool) -> f32 {
+    SIDE_PAD + clock_width + if bell { RIGHT_GAP + BUTTON } else { 0.0 } + SIDE_PAD
 }
 
 // ---- the middle island
@@ -280,6 +299,23 @@ pub fn initial(name: &str) -> String {
 mod tests {
     use super::*;
     use rf_win::dock::hover::slot_spans;
+
+    #[test]
+    fn a_secondary_islands_are_the_primarys_without_what_stays_on_the_primary() {
+        use rf_win::dock::monitors::Search;
+        // the left one: logo and field, no weather (the primary's is that plus the weather)
+        assert_eq!(left_width_secondary(Search::Field), left_width(None), "no weather: the same as the primary's without a weather reading");
+        // the field shrunk to a button: SEARCH_W - SEARCH_BUTTON less, and still room for the logo and the button
+        assert_eq!(left_width_secondary(Search::Field) - left_width_secondary(Search::Button), SEARCH_W - SEARCH_BUTTON);
+        assert_eq!(left_width_secondary(Search::Button), SIDE_PAD + LOGO + LOGO_GAP + SEARCH_BUTTON + SIDE_PAD);
+        // the right one: clock and bell, without the two buttons and the separator
+        let lines = ClockLines { time: "14:05".into(), date: "12.11.2026".into() };
+        let c = clock_width(&lines);
+        assert_eq!(right_width_secondary(c, true), SIDE_PAD + c + RIGHT_GAP + BUTTON + SIDE_PAD);
+        assert_eq!(right_width(&lines) - right_width_secondary(c, true), BUTTON + RIGHT_GAP + BUTTON + RIGHT_SEP_GAP + SEPARATOR_WIDTH + RIGHT_SEP_GAP);
+        // without the bell: the bell and its gap are what goes
+        assert_eq!(right_width_secondary(c, true) - right_width_secondary(c, false), RIGHT_GAP + BUTTON);
+    }
 
     /// The most device px an icon is drawn at with the strongest magnification, at this dock unit.
     fn icon_request_px(scale: f32) -> u32 {

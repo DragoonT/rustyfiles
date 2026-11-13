@@ -161,6 +161,11 @@ unsafe extern "system" fn cover_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARA
     // (the lock is held for a lookup only: a call out of here can come back in, for the same window)
     let prev = covers().iter().find(|c| c.hwnd == key).map(|c| c.prev);
     let Some(prev) = prev else { return unsafe { DefWindowProcW(hwnd, msg, wp, lp) } };
+    // the desktop is not minimized: a cover that another program minimized comes back (`stayup.rs`; its own menu's minimize command
+    // is refused below, with the other system commands)
+    if crate::stayup::was_minimized(msg, wp.0) {
+        crate::stayup::bring_back(key);
+    }
     match msg {
         WM_WINDOWPOSCHANGING => {
             let pos = lp.0 as *mut WINDOWPOS;

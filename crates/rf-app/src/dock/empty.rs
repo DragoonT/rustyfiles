@@ -18,6 +18,28 @@ pub fn left_controls() -> Vec<Box4> {
     vec![[plan::SIDE_PAD, y(plan::LOGO), plan::LOGO, plan::LOGO], [plan::SIDE_PAD + plan::LOGO + plan::LOGO_GAP, y(plan::SEARCH_H), plan::SEARCH_W, plan::SEARCH_H]]
 }
 
+/// A secondary monitor's left island's controls: the logo and the search (a field, or a button as big as the logo).
+pub fn left_controls_secondary(search: rf_win::dock::monitors::Search) -> Vec<Box4> {
+    use rf_win::dock::monitors::Search;
+    let y = |h: f32| (SIDE_HEIGHT - h) / 2.0;
+    let (w, h) = match search {
+        Search::Field => (plan::SEARCH_W, plan::SEARCH_H),
+        Search::Button => (plan::SEARCH_BUTTON, plan::SEARCH_BUTTON),
+    };
+    vec![[plan::SIDE_PAD, y(plan::LOGO), plan::LOGO, plan::LOGO], [plan::SIDE_PAD + plan::LOGO + plan::LOGO_GAP, y(h), w, h]]
+}
+
+/// A secondary monitor's right island's controls: the clock and, when there is one, the bell, in the order and at the distances
+/// `right.rs` builds them (padding, clock, gap, bell).
+pub fn right_controls_secondary(clock_width: f32, bell: bool) -> Vec<Box4> {
+    let y = |h: f32| (SIDE_HEIGHT - h) / 2.0;
+    let mut out = vec![[plan::SIDE_PAD, y(plan::CLOCK_H), clock_width, plan::CLOCK_H]];
+    if bell {
+        out.push([plan::SIDE_PAD + clock_width + plan::RIGHT_GAP, y(plan::BUTTON), plan::BUTTON, plan::BUTTON]);
+    }
+    out
+}
+
 /// What the tray strip shows in the right island: how many icon cells and whether there is a chevron.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TrayShape {
@@ -112,6 +134,31 @@ pub fn middle_icon_boxes<'a>(
 mod tests {
     use super::*;
     use rf_win::dock::clock::ClockLines;
+
+    #[test]
+    fn a_secondary_islands_controls_end_where_their_widths_do() {
+        use rf_win::dock::monitors::Search;
+        let lines = ClockLines { time: "14:05".into(), date: "12.11.2026".into() };
+        let cw = plan::clock_width(&lines);
+        for search in [Search::Field, Search::Button] {
+            let c = left_controls_secondary(search);
+            let last = c.last().unwrap();
+            assert_eq!(last[0] + last[2] + plan::SIDE_PAD, plan::left_width_secondary(search), "{search:?}");
+        }
+        for bell in [true, false] {
+            let c = right_controls_secondary(cw, bell);
+            let last = c.last().unwrap();
+            assert_eq!(last[0] + last[2] + if bell { plan::SIDE_PAD } else { plan::SIDE_PAD }, plan::right_width_secondary(cw, bell), "bell {bell}");
+        }
+        // the field's own box is the primary's, so a right click on it is the field's on every monitor
+        assert_eq!(left_controls_secondary(Search::Field), left_controls());
+        // the clock and the bell are controls; between them is empty glass
+        let w = plan::right_width_secondary(cw, true);
+        let c = right_controls_secondary(cw, true);
+        assert!(!side_is_empty(w, &c, (plan::SIDE_PAD + 10.0, 24.0)));
+        assert!(side_is_empty(w, &c, (plan::SIDE_PAD + cw + 1.0, 24.0)), "the gap between the clock and the bell");
+        assert!(!side_is_empty(w, &c, (plan::SIDE_PAD + cw + plan::RIGHT_GAP + 10.0, 24.0)), "the bell");
+    }
 
     #[test]
     fn the_left_island_has_two_controls_and_the_rest_is_empty_glass() {

@@ -36,15 +36,15 @@ use rf_win::dock::hover::Slot;
 use rf_win::dock::layout::{ICON_REST, MIDDLE_HEIGHT, RADIUS};
 use rf_win::dock::magnify::{self, Frame, Presence};
 use rf_win::dock::{DockItem, IconSource, PinnedApp, Place, hit, model};
-use rf_win::tasklist::{self, Task, TaskWatch};
+use rf_win::tasklist::Task;
 
 use super::backdrop::IslandGlass;
-use super::host::{self, Kind};
+use super::host::{self, Kind, MonId};
 use super::reorder::{self, Landing};
 use super::{app_menu, feedback, hover_preview};
 use super::icon_levels::{self, LevelStore};
 use super::icons::{self, IconCache};
-use super::look::{self, Env};
+use super::look;
 use super::plan;
 use crate::settings::Settings;
 use crate::t;
@@ -65,6 +65,8 @@ const PRESS_DIM: f32 = 0.78;
 
 pub struct MiddleIsland {
     glass: Rc<RefCell<IslandGlass>>,
+    /// The monitor whose dock this island is on: its scale and size, its apps (`rf_win::dock::monitors`) and its thin state are its own.
+    mon: MonId,
     pins: Vec<PinnedApp>,
     pins_loaded: bool,
     /// The running apps' group keys in the order they were first seen: an icon keeps its place when its app is clicked.
@@ -135,23 +137,14 @@ pub struct MiddleIsland {
     last_slots: Vec<(f32, f32)>,
     /// The look at Escape and the buttons while an icon is in the hand.
     drag_watch: Option<gpui_kit::Task<()>>,
-    _watch: Option<TaskWatch>,
 }
 
 impl MiddleIsland {
-    pub fn new(glass: Rc<RefCell<IslandGlass>>, cx: &mut Context<Self>) -> Self {
-        // task windows opening, closing or being activated: ask for a refresh (the callback runs on another thread). A window that
-        // only changes its title (a terminal, a loading page) is not news: the dock shows no titles.
+    pub fn new(glass: Rc<RefCell<IslandGlass>>, mon: MonId, cx: &mut Context<Self>) -> Self {
+        // task windows opening, closing or being activated: ask for a refresh. The watch itself is the process's one (`task_feed.rs`): a
+        // dock on every monitor does not watch the windows once for each.
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
-        let watch = tasklist::watch(move |changes| {
-            if changes.list || changes.active {
-                let _ = tx.unbounded_send(());
-                // (the thin dock asks whether a maximised window is there; one atomic read when its setting is off)
-                super::thin::task_changed();
-            }
-        })
-        .map_err(|e| log::warn!("dock: cannot watch the task windows: {e:#}"))
-        .ok();
+        super::task_feed::subscribe(tx);
         cx.spawn(async move |this, cx| {
             use futures::StreamExt;
             while rx.next().await.is_some() {
@@ -161,34 +154,37 @@ impl MiddleIsland {
             }
         })
         .detach();
-        // the taskbar's pins: read now and then again, off the UI thread
-        cx.spawn(async move |this, cx| {
-            loop {
-                let pins = cx.background_executor().spawn(async { super::own_pins::effective_pins() }).await;
-                let alive = this.update(cx, |me, cx| {
-                    if !me.pins_loaded || me.pins != pins {
-                        me.pins = pins;
-                        me.pins_loaded = true;
-                        me.refresh(cx);
+        // the taskbar's pins: read now and then again, off the UI thread - by the home dock's island only, which hands the list to the
+        // islands of the other docks (the list is the same on every monitor and is read once)
+        let (pins, pins_loaded) = if mon.is_home() {
+            cx.spawn(async move |this, cx| {
+                loop {
+                    let pins = cx.background_executor().spawn(async { super::own_pins::effective_pins() }).await;
+                    let alive = this.update(cx, |me, cx| me.take_pins(pins, cx));
+                    if alive.is_err() {
+                        break;
                     }
-                });
-                if alive.is_err() {
-                    break;
+                    cx.background_executor().timer(PINS_EVERY).await;
                 }
-                cx.background_executor().timer(PINS_EVERY).await;
-            }
-        })
-        .detach();
+            })
+            .detach();
+            (Vec::new(), false)
+        } else {
+            // (a dock opened later starts with the list the home dock has)
+            host::middle_island_on(MonId::HOME, cx).map(|home| home.read(cx).pins_shared()).unwrap_or_default()
+        };
         let mut me = MiddleIsland {
             glass,
-            pins: Vec::new(),
-            pins_loaded: false,
+            mon,
+            pins,
+            pins_loaded,
             items: Vec::new(),
             slots: Vec::new(),
             icon_srcs: Vec::new(),
             icons: IconCache::default(),
             levels: LevelStore::default(),
-            icon_scale: cx.global::<Env>().unit(),
+            // (the dock is not in the host's list yet while its islands are made: a secondary dock's unit is asked for at its first load)
+            icon_scale: if mon.is_home() { host::env_on(mon, cx).unit() } else { 0.0 },
             levels_peak: 0.0,
             icon_gen: 0,
             pointer_x: None,
@@ -215,7 +211,6 @@ impl MiddleIsland {
             right: reorder::RightGuard::default(),
             last_slots: Vec::new(),
             drag_watch: None,
-            _watch: watch,
         };
         // (the app menu tells it when the dock's own pin list changed)
         super::own_pins::register(cx.entity().downgrade(), cx);
@@ -247,8 +242,23 @@ impl MiddleIsland {
         self.refreshing = true;
         cx.spawn(async move |this, cx| {
             loop {
-                // the windows of a packaged app are given their process's package id first, so they meet the app's pin
-                let groups = cx.background_executor().spawn(async { rf_win::dock::identity::running_groups() }).await;
+                // which apps this monitor's dock shows (every app, unless apps are shown where their windows are: then only the windows
+                // on this monitor count, and the question is asked here, off the UI thread, of each window)
+                let (rule, this_monitor, shared) = this
+                    .update(cx, |me, cx| {
+                        let (rule, monitor) = host::apps_rule(me.mon, cx);
+                        (rule, monitor, host::dock_count(cx) > 1)
+                    })
+                    .unwrap_or((rf_win::dock::monitors::AppsWhere::Everywhere, 0, false));
+                // the windows of a packaged app are given their process's package id first, so they meet the app's pin; the listing is the
+                // docks' one (`task_feed.rs`), this island only applies its own monitor's rule to it
+                let groups = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let groups = super::task_feed::running_groups(shared);
+                        rf_win::dock::monitors::filter_groups(rule, this_monitor, groups, |t: &Task| rf_win::dock::monitors::monitor_of_window(t.hwnd))
+                    })
+                    .await;
                 let foreground = rf_win::dock::foreground_root();
                 let again = this.update(cx, |me, cx| {
                     me.apply(groups, foreground, cx);
@@ -313,7 +323,7 @@ impl MiddleIsland {
         let w = self.width();
         if (w - self.reported).abs() > 0.5 {
             self.reported = w;
-            super::host::set_width(Kind::Middle, w, cx);
+            super::host::set_width(self.mon, Kind::Middle, w, cx);
         }
         cx.notify();
     }
@@ -322,7 +332,7 @@ impl MiddleIsland {
     /// size slider is being dragged: the icons are asked for once, at the size the drag ends at (`Step::Icons`), and a task-list refresh
     /// in the middle of it must not ask the shell and the packages for every icon at a size that is gone by the time they arrive.
     fn scale_changed(&self, cx: &Context<Self>) -> bool {
-        (cx.global::<Env>().unit() - self.icon_scale).abs() > 0.001 && !super::host::size_drag_active(cx)
+        (host::env_on(self.mon, cx).unit() - self.icon_scale).abs() > 0.001 && !super::host::size_drag_active(cx)
     }
 
     /// The dock's size was changed in the settings: the icons are asked for again at the size the new unit draws them (the old pictures
@@ -345,7 +355,8 @@ impl MiddleIsland {
 
     /// Asks for every icon not yet asked for (and every one that failed a while ago), on worker threads.
     fn load_icons(&mut self, cx: &mut Context<Self>) {
-        let scale = cx.global::<Env>().unit();
+        let env = host::env_on(self.mon, cx);
+        let scale = env.unit();
         // the sizes the icons are kept at: the rest size, the peak of the magnification in force, the steps between
         let peak = cx.global::<Settings>().dock_magnify.strength().peak();
         if self.scale_changed(cx) || peak > self.levels_peak + 0.001 {
@@ -357,7 +368,9 @@ impl MiddleIsland {
             self.icons.mark_stale();
         }
         let gen_now = self.icon_gen;
-        let sizes = plan::icon_sizes_with_small(scale, self.levels_peak, cx.global::<Env>().scale);
+        let sizes = plan::icon_sizes_with_small(scale, self.levels_peak, env.scale);
+        // (docks of several monitors ask for the same icons: with the same sizes they share one load, see `icons::load_levels_shared`)
+        let shared = host::dock_count(cx) > 1;
         let wanted: Vec<(String, Vec<IconSource>)> = self.icon_srcs.iter().flatten().cloned().collect();
         for (key, src) in wanted {
             if !self.icons.start_loading(&key, Instant::now()) {
@@ -366,7 +379,8 @@ impl MiddleIsland {
             let sizes = sizes.clone();
             cx.spawn(async move |this, cx| {
                 let asked = src.clone();
-                let made = cx.background_executor().spawn(async move { icons::load_levels(&asked, &sizes) }).await;
+                let ask_key = key.clone();
+                let (made, kept) = cx.background_executor().spawn(async move { icons::load_levels_shared(&ask_key, &asked, &sizes, shared) }).await;
                 let retry = this.update(cx, |me, cx| {
                     // a load asked for at a unit or a peak that is not the current one (the size changed meanwhile) is dropped: the ask
                     // at the new one is on its way
@@ -384,6 +398,11 @@ impl MiddleIsland {
                     cx.notify();
                     retry
                 });
+                if kept.is_some() {
+                    // (the load stays for the other docks for a moment, then its pictures are freed)
+                    cx.background_executor().timer(icons::SHARE_LINGER).await;
+                }
+                drop(kept);
                 if matches!(retry, Ok(true)) {
                     // the shell may just not have been ready: look again after a while
                     cx.background_executor().timer(icons::RETRY_AFTER).await;
@@ -449,7 +468,7 @@ impl MiddleIsland {
     /// icon in the hand is first moved to where the button came up, so that a release well outside the dock (the moves out there are not
     /// delivered) puts it back instead of dropping it at the last place it was seen.
     fn released_at(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        let k = super::look::dock_size(cx);
+        let k = host::size_on(self.mon, cx);
         let now = self.now_ms();
         if let Some(d) = self.drag.as_mut() {
             d.moved(f32::from(at.x) / k, f32::from(at.y) / k, self.last_glass, &self.last_slots, now);
@@ -470,7 +489,7 @@ impl MiddleIsland {
 
     /// A button went down on the icon `ix`: it dips until the button is up (`released`).
     fn item_pressed(&mut self, ix: usize, at: Point<Pixels>, cx: &mut Context<Self>) {
-        let k = super::look::dock_size(cx);
+        let k = host::size_on(self.mon, cx);
         self.press_at = Some((ix, f32::from(at.x) / k, f32::from(at.y) / k));
         self.swallow_click = false;
         self.right.press(false);
@@ -480,19 +499,42 @@ impl MiddleIsland {
         }
     }
 
-    /// Reads the pins again now (the dock's own list was just changed from the app menu), off the UI thread.
+    /// Reads the pins again now (the dock's own list was just changed from the app menu), off the UI thread. The home dock's island
+    /// reads and hands the list to the others; asked of another island it does nothing.
     pub fn reload_pins(&mut self, cx: &mut Context<Self>) {
+        if !self.mon.is_home() {
+            return;
+        }
         cx.spawn(async move |this, cx| {
             let pins = cx.background_executor().spawn(async { super::own_pins::effective_pins() }).await;
-            let _ = this.update(cx, |me, cx| {
-                if !me.pins_loaded || me.pins != pins {
-                    me.pins = pins;
-                    me.pins_loaded = true;
-                    me.refresh(cx);
-                }
-            });
+            let _ = this.update(cx, |me, cx| me.take_pins(pins, cx));
         })
         .detach();
+    }
+
+    /// The pin list just read (by the home dock's island): shown, and handed to the islands of the other docks.
+    fn take_pins(&mut self, pins: Vec<PinnedApp>, cx: &mut Context<Self>) {
+        for (id, other) in host::middle_islands(cx) {
+            if id != self.mon {
+                let list = pins.clone();
+                other.update(cx, |o, cx| o.set_pins(list, cx));
+            }
+        }
+        self.set_pins(pins, cx);
+    }
+
+    /// A new pin list: the island is rebuilt when it differs from the one it has (or it has none yet).
+    fn set_pins(&mut self, pins: Vec<PinnedApp>, cx: &mut Context<Self>) {
+        if !self.pins_loaded || self.pins != pins {
+            self.pins = pins;
+            self.pins_loaded = true;
+            self.refresh(cx);
+        }
+    }
+
+    /// The pin list and whether one was read yet: what an island opened later starts with.
+    fn pins_shared(&self) -> (Vec<PinnedApp>, bool) {
+        (self.pins.clone(), self.pins_loaded)
     }
 
     /// The icon of item `ix` for a picture `logical_px` wide in a window at the monitor's scale (the preview and the menu draw it at
@@ -500,7 +542,7 @@ impl MiddleIsland {
     fn icon_for(&self, ix: usize, logical_px: f32, cx: &App) -> Option<std::sync::Arc<RenderImage>> {
         let (key, _) = self.icon_srcs.get(ix)?.as_ref()?;
         match self.levels.get(key) {
-            Some(set) => Some(set.pick(logical_px * cx.global::<Env>().scale).clone()),
+            Some(set) => Some(set.pick(logical_px * host::env_on(self.mon, cx).scale).clone()),
             None => self.icons.get(key),
         }
     }
@@ -508,8 +550,8 @@ impl MiddleIsland {
     /// The centre of item `ix` at rest, device px in screen coordinates: the rest glass's left edge plus the rest layout's distance from it.
     fn icon_anchor_x(&self, ix: usize, cx: &App) -> Option<f32> {
         let &(x, w) = self.rest_items.get(ix)?;
-        let glass = host::visible_glass_rect(Kind::Middle, cx)?;
-        Some(screen_center_x(glass.left, x, w, cx.global::<Env>().unit()))
+        let glass = host::visible_glass_rect_on(self.mon, Kind::Middle, cx)?;
+        Some(screen_center_x(glass.left, x, w, host::env_on(self.mon, cx).unit()))
     }
 
     /// The pointer came onto item `ix` (`on`) or left it: a running app's icon is what a preview belongs to.
@@ -526,6 +568,9 @@ impl MiddleIsland {
                 }
                 _ => None,
             };
+            // (the preview is placed on the monitor of the dock the pointer is on; while a panel is open on another monitor's dock the
+            // pop-ups belong to that one, and no preview opens here)
+            let info = info.filter(|_| host::claim_active(self.mon, cx));
             hover_preview::icon_hover(info, cx);
         } else if self.hover_ix == Some(ix) {
             // (a leave that arrives after the next icon's enter is not news)
@@ -544,6 +589,12 @@ impl MiddleIsland {
             return;
         }
         let (Some(DockItem::App(app)), Some(anchor_x)) = (self.items.get(ix), self.icon_anchor_x(ix, cx)) else { return };
+        // (the menu is placed on the monitor of the dock it was asked on; a panel that is open on another monitor's dock is outside this
+        // click and goes first, so the menu is not placed from that monitor's numbers)
+        if !host::claim_active(self.mon, cx) {
+            super::panel::close(rf_win::dock::panel::CloseCause::ClickOutside, cx);
+            host::force_active(self.mon, cx);
+        }
         app_menu::open(app_menu::MenuRequest { app: app.clone(), icon: self.icon_for(ix, 18.0, cx), anchor_x, glass: self.glass.clone() }, cx);
     }
 
@@ -553,7 +604,7 @@ impl MiddleIsland {
         if self.right.row_up() || self.drag.is_some() {
             return;
         }
-        let k = super::look::dock_size(cx);
+        let k = host::size_on(self.mon, cx);
         let point = (f32::from(at.x) / k, f32::from(at.y) / k);
         // the running mark under an icon is outside the icon's element (so the icon's own handler did not hear this click) but it is
         // the icon's: its menu
@@ -638,7 +689,7 @@ impl MiddleIsland {
     /// A mouse move while an icon may be picked up or is in the hand. True when the move was the drag's (the bell then stays where it was
     /// held).
     fn drag_pointer(&mut self, ev: &MouseMoveEvent, cx: &mut Context<Self>) -> bool {
-        let k = super::look::dock_size(cx);
+        let k = host::size_on(self.mon, cx);
         let (x, y) = (f32::from(ev.position.x) / k, f32::from(ev.position.y) / k);
         let left = ev.pressed_button == Some(MouseButton::Left);
         if self.drag.is_none() {
@@ -662,7 +713,7 @@ impl MiddleIsland {
         }
         let now = self.now_ms();
         // (the bell is held, but where the pointer is stays known: when the icon is let go the bell goes on from there)
-        self.pointer_x = Some((f32::from(ev.position.x) - host::insets(Kind::Middle, cx).margins[0]) / k);
+        self.pointer_x = Some((f32::from(ev.position.x) - host::insets_on(self.mon, Kind::Middle, cx).margins[0]) / k);
         if let Some(d) = self.drag.as_mut()
             && d.moved(x, y, self.last_glass, &self.last_slots, now)
         {
@@ -837,7 +888,8 @@ struct Draw {
 
 impl Render for MiddleIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let env = *cx.global::<Env>();
+        let env = host::env_on(self.mon, cx);
+        let mon = self.mon;
         // the dock's size factor: the arithmetic below is in dock units, a length is drawn as units times `k`
         let k = env.size;
         let u = move |v: f32| px(v * k);
@@ -865,11 +917,11 @@ impl Render for MiddleIsland {
             window.request_animation_frame();
         }
         // how thin the dock is at this moment (the full dock unless a maximised window made it thin: see thin.rs)
-        let sq = super::thin::squeeze(cx);
-        if super::thin::animating(cx) {
+        let sq = super::thin::squeeze(mon, cx);
+        if super::thin::animating(mon, cx) {
             window.request_animation_frame();
         }
-        let mut inset = host::insets(Kind::Middle, cx);
+        let mut inset = host::insets_on(mon, Kind::Middle, cx);
         inset.margins = inset.margins.map(|v| v / k);
         inset.growth /= k;
         let [ml, _, mr, mb] = inset.margins;
@@ -966,7 +1018,7 @@ impl Render for MiddleIsland {
         let glass_h = if k == 1.0 {
             pic.glass[3]
         } else {
-            if let Some(rest) = host::visible_glass_rect(Kind::Middle, cx) {
+            if let Some(rest) = host::visible_glass_rect_on(mon, Kind::Middle, cx) {
                 glass_px[3] = rest.height() as f32;
             }
             glass_px[3] / env.scale
@@ -975,12 +1027,12 @@ impl Render for MiddleIsland {
         let glass_h = if sq.is_full() {
             glass_h
         } else {
-            let full_px = if k == 1.0 { MIDDLE_HEIGHT * scale } else { host::visible_glass_rect(Kind::Middle, cx).map_or(MIDDLE_HEIGHT * scale, |r| r.height() as f32) };
+            let full_px = if k == 1.0 { MIDDLE_HEIGHT * scale } else { host::visible_glass_rect_on(mon, Kind::Middle, cx).map_or(MIDDLE_HEIGHT * scale, |r| r.height() as f32) };
             super::thin::fit_glass(&mut glass_px, bottom_px, &sq, scale, full_px);
             glass_px[3] / env.scale
         };
         let parts = hit::parts(glass_px, rf_win::dock::layout::px(RADIUS, scale) as f32, &boxes, (vw * scale).round() as i32, (vh * scale).round() as i32);
-        host::set_middle_frame(&self.glass, glass_px, parts, cx);
+        host::set_middle_frame(mon, &self.glass, glass_px, parts, cx);
 
         let mut cells: Vec<AnyElement> = Vec::with_capacity(self.items.len());
         // the icon in the hand is drawn last, over the others
@@ -1101,15 +1153,15 @@ impl Render for MiddleIsland {
                         // (an icon being picked up or in the hand: the bell stays where it was held)
                         if me.drag_pointer(ev, cx) {
                             // (a thin dock stays grown while an icon is carried along it)
-                            super::thin::pointer_on_island(cx);
+                            super::thin::pointer_on_island(mon, cx);
                             return;
                         }
                         let strength = cx.global::<Settings>().dock_magnify.strength();
                         // (dock units from the rest island's left edge)
-                        let k = super::look::dock_size(cx);
+                        let k = host::size_on(mon, cx);
                         // (the pointer is on the dock: a thin dock grows now, not at the next look at the cursor)
-                        super::thin::pointer_on_island(cx);
-                        me.pointer_moved((f32::from(ev.position.x) - host::insets(Kind::Middle, cx).margins[0]) / k, strength, ev.pressed_button.is_some(), cx)
+                        super::thin::pointer_on_island(mon, cx);
+                        me.pointer_moved((f32::from(ev.position.x) - host::insets_on(mon, Kind::Middle, cx).margins[0]) / k, strength, ev.pressed_button.is_some(), cx)
                     }))
                     .on_mouse_down(MouseButton::Right, cx.listener(|me, _, _, cx| me.right_down(cx)))
                     .on_mouse_up(MouseButton::Right, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.row_right_click(ev.position, cx)))

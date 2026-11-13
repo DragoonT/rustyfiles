@@ -1,6 +1,9 @@
 //! The left island: the Windows logo (opens the Start menu), the search field (opens rustyfiles' quick search) and, at its right end,
 //! the weather: for the PC's position when "Konumumu kullan" is on and Windows gives it, else for the city the user typed in Settings
 //! (the order is in `rf_win::weather_location`).
+//!
+//! ON A SECONDARY MONITOR (`mon` is not the home dock) the island has the logo and the search and no weather (that is the primary
+//! monitor's); on a narrow monitor the search field is a button as big as the logo (`rf_win::dock::monitors::content`).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -10,11 +13,12 @@ use gpui_kit::assets::IconName as L;
 use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use rf_win::dock::monitors::{Content, Search};
 use rf_win::weather::{Observation, Outcome};
 use rf_win::weather_location::LocatedWeather;
 
 use super::backdrop::IslandGlass;
-use super::host::Kind;
+use super::host::{Kind, MonId};
 use super::plan::{self, WeatherPicture};
 use super::start_button::{self, StartButton};
 use super::weather_text;
@@ -22,6 +26,10 @@ use crate::t;
 
 pub struct LeftIsland {
     glass: Rc<RefCell<IslandGlass>>,
+    /// The monitor whose dock this island is on.
+    mon: MonId,
+    /// The search shows as a field or, on a narrow secondary monitor, as a button (what the host's layout last said).
+    search: Search,
     city: String,
     /// The weather is for the PC's position (the city is the fallback).
     location: bool,
@@ -39,15 +47,17 @@ pub struct LeftIsland {
 }
 
 impl LeftIsland {
-    pub fn new(glass: Rc<RefCell<IslandGlass>>, city: &str, location: bool, cx: &mut Context<Self>) -> Self {
+    pub fn new(glass: Rc<RefCell<IslandGlass>>, mon: MonId, city: &str, location: bool, content: Content, cx: &mut Context<Self>) -> Self {
         let mut me = LeftIsland {
             glass,
+            mon,
+            search: content.search,
             city: String::new(),
             location: false,
             weather: None,
             condition_room: true,
             weather_gen: 0,
-            reported: plan::left_width(None),
+            reported: if mon.is_home() { plan::left_width(None) } else { plan::left_width_secondary(content.search) },
             button: StartButton::new(),
             t0: Instant::now(),
         };
@@ -56,6 +66,10 @@ impl LeftIsland {
     }
 
     pub fn width(&self) -> f32 {
+        if !self.mon.is_home() {
+            // (no weather here: it is the primary monitor's)
+            return plan::left_width_secondary(self.search);
+        }
         let temp = self.weather.map(|o| o.text());
         plan::left_width_lines(temp.as_deref(), self.condition_text())
     }
@@ -124,13 +138,14 @@ impl LeftIsland {
     fn right_click(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
         // While the glass has grown into the Start panel this row is its bottom row, under the panel's own content: a right click on
         // its empty glass is not a request for Task Manager.
-        if super::grow_host::island_fade(Kind::Left, cx).is_some() {
+        if super::grow_host::island_fade(self.mon, Kind::Left, cx).is_some() {
             return;
         }
-        let k = super::look::dock_size(cx);
-        let [ml, mt, ..] = super::host::insets(Kind::Left, cx).margins;
+        let k = super::host::size_on(self.mon, cx);
+        let [ml, mt, ..] = super::host::insets_on(self.mon, Kind::Left, cx).margins;
         let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
-        if super::empty::side_is_empty(self.width(), &super::empty::left_controls(), point) {
+        let controls = if self.mon.is_home() { super::empty::left_controls() } else { super::empty::left_controls_secondary(self.search) };
+        if super::empty::side_is_empty(self.width(), &controls, point) {
             super::actions::open_task_manager();
         }
     }
@@ -142,8 +157,15 @@ impl LeftIsland {
         self.sync_room(cx);
         if let Some(w) = width_to_report(self.reported, self.width()) {
             self.reported = w;
-            super::host::set_width(Kind::Left, w, cx);
+            super::host::set_width(self.mon, Kind::Left, w, cx);
         }
+    }
+
+    /// The host's layout may have changed what this island holds (the search field or a button, by the monitor's width): true when it
+    /// did, so the width has to be reported again.
+    fn sync_content(&mut self, cx: &App) -> bool {
+        let search = super::host::content_on(self.mon, cx).search;
+        std::mem::replace(&mut self.search, search) != search
     }
 
     /// The weather's source changed (or is set for the first time): the city, or the switch for the PC's position. With neither, no
@@ -265,7 +287,8 @@ fn text_14<E: Styled>(el: E, k: f32) -> E {
 
 impl Render for LeftIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let typed = super::panel::typed_text(cx);
+        // only the island whose Start panel is open shows what is typed in it (the others keep their word)
+        let typed = (super::host::active(cx) == self.mon).then(|| super::panel::typed_text(cx)).flatten();
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
         let pressed = pal.pressed_fill().hsla();
         // (a button held down on the search field: a plate stronger than the hover's, so that the press can be seen)
@@ -280,7 +303,7 @@ impl Render for LeftIsland {
         }
         // a layout that changed the display's room (a monitor, a size) may take the condition line away or give it back: the width is
         // reported again from a task, never from inside this render
-        if self.sync_room(cx) {
+        if self.sync_room(cx) | self.sync_content(cx) {
             cx.spawn(async move |this, cx| {
                 let _ = this.update(cx, |me, cx| me.report_width(cx));
             })
@@ -290,7 +313,7 @@ impl Render for LeftIsland {
         // While the panel's glass has grown out of this island (grow_host.rs) the island's own glass is put away and the island paints no
         // fill of its own; the row itself stays exactly as it is (the logo, the weather), except that the search field is the panel's
         // now: the island's window is never activated and cannot take keys, so the panel draws its own field in this place.
-        let grown = super::grow_host::island_fade(Kind::Left, cx);
+        let grown = super::grow_host::island_fade(self.mon, Kind::Left, cx);
         let fallback = fallback && grown.is_none();
         let field_hidden = grown.is_some_and(|g| g.field_hidden);
         // the panel's field widens over the weather's room while the Start panel is open: the weather fades with the glass's motion
@@ -299,8 +322,9 @@ impl Render for LeftIsland {
             window.request_animation_frame();
         }
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
-        let k = super::look::dock_size(cx);
+        let k = super::host::size_on(self.mon, cx);
         let me = cx.entity();
+        let mon = self.mon;
         let logo = div()
             .id("dock-logo")
             .relative()
@@ -316,22 +340,24 @@ impl Render for LeftIsland {
             .on_mouse_up(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_release(true, cx)))
             .on_mouse_up_out(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_release(false, cx)))
             // the user's click is the only thing that ever sends the Windows key (and only when our own Start is switched off)
-            .on_click(|_, _, cx| {
+            .on_click(move |_, _, cx| {
                 if own_start(cx) {
-                    super::panel::toggle_start(cx);
+                    super::panel::toggle_start_on(mon, cx);
                 } else {
                     rf_win::dock::triggers::start_menu();
                 }
             });
 
+        // on a narrow secondary monitor the field is a button: the search picture alone
+        let button = self.search == Search::Button;
         let search = h_flex()
             .id("dock-search")
             .ml(px(plan::LOGO_GAP * k))
-            .w(px(plan::SEARCH_W * k))
-            .h(px(plan::SEARCH_H * k))
-            .px(px(plan::FIELD_PAD_X * k))
-            .gap(px(plan::FIELD_GAP * k))
+            .w(px(if button { plan::SEARCH_BUTTON } else { plan::SEARCH_W } * k))
+            .h(px(if button { plan::SEARCH_BUTTON } else { plan::SEARCH_H } * k))
+            .when(!button, |d| d.px(px(plan::FIELD_PAD_X * k)).gap(px(plan::FIELD_GAP * k)))
             .items_center()
+            .when(button, |d| d.justify_center())
             .rounded_full()
             .bg(pal.field_fill().hsla())
             // (away: the panel's field stands in its place, same size, same look, with the keyboard; this one keeps its room, so the
@@ -342,14 +368,16 @@ impl Render for LeftIsland {
             .child(Icon::new(L::Search).size(px(plan::FIELD_ICON * k)).flex_shrink_0().text_color(secondary))
             // what is being typed in the panel above is shown here too; the panel's own field takes the keys (this window is never
             // activated, so it cannot)
-            .child(match typed {
-                Some(text) => text_14(div().flex_1().min_w_0().truncate(), k).child(text),
-                None => text_14(div(), k).text_color(secondary).child(t!("Ara")),
+            .when(!button, |d| {
+                d.child(match typed {
+                    Some(text) => text_14(div().flex_1().min_w_0().truncate(), k).child(text),
+                    None => text_14(div(), k).text_color(secondary).child(t!("Ara")),
+                })
             })
             .when(!field_hidden, |d| {
-                d.on_click(|_, _, cx| {
+                d.on_click(move |_, _, cx| {
                     if own_start(cx) {
-                        super::panel::toggle_start(cx);
+                        super::panel::toggle_start_on(mon, cx);
                     } else {
                         super::actions::open_quick_search();
                     }

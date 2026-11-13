@@ -42,7 +42,7 @@ use rf_win::dock::panel::{self as geo, CloseCause, PanelId, Side};
 use super::backdrop::IslandGlass;
 use super::control_centre::CcView;
 use super::grow_host;
-use super::host::{self, Kind};
+use super::host::{self, Kind, MonId};
 use super::left::LeftIsland;
 use super::start::StartView;
 
@@ -50,7 +50,7 @@ use super::start::StartView;
 // this module so that it can use the machinery below.
 #[path = "panel_more.rs"]
 mod more;
-pub use more::{CALENDAR, NOTIFICATIONS, init_extra, toggle_calendar, toggle_notifications};
+pub use more::{CALENDAR, NOTIFICATIONS, init_extra, toggle_calendar_on, toggle_notifications_on};
 
 // The overflow panel of the tray strip (its slot and hooks are in `tray_panel.rs`, a child module for the same reason).
 #[path = "tray_panel.rs"]
@@ -137,6 +137,10 @@ struct PanelHost {
     /// When the button that asked for the panel now opening was clicked, and whether its window had to be made for it (both for the log).
     clicked_at: Option<Instant>,
     made_for_click: bool,
+    /// The monitor the panel asked for last is to open on (the dock whose island was pressed; the Windows key: the one with the pointer).
+    /// `open_panel` makes it the active monitor of the pop-ups (`host::force_active`) and everything the panel asks about the islands
+    /// (their glass, the work area, the unit) is then about that monitor's dock.
+    want_mon: MonId,
 }
 
 impl Global for PanelHost {}
@@ -170,6 +174,7 @@ fn host_global(cx: &mut App) -> &mut PanelHost {
             right_island: None,
             clicked_at: None,
             made_for_click: false,
+            want_mon: MonId::HOME,
         });
     }
     cx.global_mut::<PanelHost>()
@@ -347,9 +352,9 @@ pub fn view(cx: &App) -> Option<Entity<StartView>> {
     panel(cx).and_then(|p| p.start.clone())
 }
 
-/// The left island's view (the growth tells it to draw again when it starts and ends).
+/// The left island's view on the active monitor (the growth tells it to draw again when it starts and ends).
 pub fn left_view(cx: &App) -> Option<Entity<LeftIsland>> {
-    panel(cx).and_then(|p| p.left.clone())
+    host::left_island_on(host::active(cx), cx).or_else(|| panel(cx).and_then(|p| p.left.clone()))
 }
 
 /// What the user has typed in the open Start panel's field, for the left island's search field to show; `None` when nothing is typed.
@@ -363,9 +368,9 @@ pub fn set_typed(text: &str, cx: &mut App) {
     if p.typed == text {
         return;
     }
-    let left = p.left.clone();
     cx.global_mut::<PanelHost>().typed = text.to_string();
-    if let Some(left) = left {
+    // (every left island draws again: the one whose panel it is shows the word)
+    for left in host::left_islands(cx) {
         left.update(cx, |_, cx| cx.notify());
     }
 }
@@ -377,9 +382,10 @@ pub fn focus_start_field(cx: &mut App) {
     hooks.focus_field(cx);
 }
 
-/// The island button's click: opens the Start panel, closes it when it is the open one.
-pub fn toggle_start(cx: &mut App) {
-    more::toggle_made(PanelId::START, cx);
+/// The island button's click on this monitor's dock: opens the Start panel there, closes it when it is the open one there (open on
+/// another monitor's dock, it moves).
+pub fn toggle_start_on(mon: MonId, cx: &mut App) {
+    more::toggle_made(PanelId::START, mon, cx);
 }
 
 /// [`toggle_start`], and says whether it ended with the Start panel opened or closed as asked. False: it was asked to open and could
@@ -388,18 +394,36 @@ pub fn toggle_start(cx: &mut App) {
 pub fn toggle_start_reported(cx: &mut App) -> bool {
     let seen = |cx: &App| panel(cx).map_or(grow_panels::Seen { open: None, waiting: None }, |p| grow_panels::Seen { open: p.open, waiting: p.after });
     let before = seen(cx);
-    toggle_start(cx);
+    // (the Windows key: Start opens on the monitor that has the pointer, but a tap while Start is open CLOSES it, wherever the pointer is)
+    let pointer = host::monitor_at_pointer(cx);
+    let open_on = before.open.is_some_and(|id| id == PanelId::START).then(|| host::active(cx));
+    toggle_start_on(rf_win::dock::monitors::key_target(open_on, pointer), cx);
     // (a tap while another panel is grown only QUEUES Start behind the one shrinking into its island: that is not "could not open")
     grow_panels::took_effect(before, seen(cx), PanelId::START)
 }
 
 /// The right island's network or volume symbol: opens the control centre, closes it when it is the open one.
-pub fn toggle_control_centre(cx: &mut App) {
-    more::toggle_made(PanelId::CONTROL_CENTRE, cx);
+pub fn toggle_control_centre_on(mon: MonId, cx: &mut App) {
+    more::toggle_made(PanelId::CONTROL_CENTRE, mon, cx);
 }
 
-fn toggle(id: PanelId, cx: &mut App) {
+/// A button of the island of this monitor's dock asked for panel `id`. One panel at a time over all monitors
+/// (`rf_win::dock::monitors::panel_request`): the same panel open on another monitor moves to this one.
+fn toggle(id: PanelId, mon: MonId, cx: &mut App) {
     let (open, waiting) = panel(cx).map_or((None, None), |p| (p.open, p.after));
+    host_global(cx).want_mon = mon;
+    let on = host::active(cx);
+    if rf_win::dock::monitors::panel_request(open.as_ref().map(|o| (o, &on)), (&id, &mon)) == rf_win::dock::monitors::PanelAction::MoveTo {
+        // out of the island it grew from and into the one pressed: it is put away (shrinking back), and opens again on the new monitor
+        host_global(cx).after = Some(id);
+        close(CloseCause::Button, cx);
+        // (nothing to put away after all: it opens now rather than wait for a window that is not going)
+        if panel(cx).is_some_and(|p| p.open.is_some()) {
+            host_global(cx).after = None;
+            open_panel(id, cx);
+        }
+        return;
+    }
     // A panel that has grown out of its island: the island's row stays, so a button of the row can be pressed while it is open. The
     // open panel shrinks into the island and the pressed one grows out of it when the first has gone (`grow_panels` says why it is not
     // one glass going from panel to panel). A panel that is leaving is still the growth's (it is no longer `open`).
@@ -454,13 +478,18 @@ fn dark_now(island: &RefCell<IslandGlass>) -> bool {
 }
 
 fn open_panel(id: PanelId, cx: &mut App) {
+    // the dock whose island asked is the one the panel sits above: everything below asks about THAT monitor
+    let want = panel(cx).map_or(MonId::HOME, |p| p.want_mon);
+    host::force_active(want, cx);
     if host::is_fullscreen(cx) {
         return;
     }
     let Some((scale, work)) = host::monitor_work(cx) else { return };
     let Some(p) = cx.try_global::<PanelHost>() else { return };
     let Some(slot) = p.slot(id) else { return };
-    let (kind, side, hwnd, island, hooks) = (slot.kind, slot.side, slot.hwnd, slot.island.clone(), slot.hooks.clone());
+    let (kind, side, hwnd, hooks) = (slot.kind, slot.side, slot.hwnd, slot.hooks.clone());
+    // the tone is the glass of the island of the active monitor (the panel's own slot remembers the home dock's)
+    let island = host::island_glass(kind, cx).unwrap_or_else(|| slot.island.clone());
     let other = p.open.filter(|o| *o != id);
     let Some(glass) = host::visible_glass_rect(kind, cx) else { return };
     let dark = dark_now(&island);
@@ -485,7 +514,7 @@ fn open_panel(id: PanelId, cx: &mut App) {
         put_away_now(o, cx);
     }
     let front = rf_win::dock::foreground_root();
-    let front_is_island = [Kind::Left, Kind::Middle, Kind::Right].into_iter().any(|k| host::island_window(k, cx).is_some_and(|(_, h)| h == front));
+    let front_is_island = host::is_island_window(front, cx);
     let serial = {
         let p = cx.global_mut::<PanelHost>();
         p.serial += 1;
@@ -604,7 +633,8 @@ fn refit(id: PanelId, size: Option<(f32, f32)>, cx: &mut App) {
         return;
     }
     let Some(slot) = p.slot(id) else { return };
-    let (kind, side, hwnd, island, hooks) = (slot.kind, slot.side, slot.hwnd, slot.island.clone(), slot.hooks.clone());
+    let (kind, side, hwnd, hooks) = (slot.kind, slot.side, slot.hwnd, slot.hooks.clone());
+    let island = host::island_glass(kind, cx).unwrap_or_else(|| slot.island.clone());
     let Some((scale, work)) = host::monitor_work(cx) else { return };
     let Some(glass) = host::visible_glass_rect(kind, cx) else { return };
     let size = size.unwrap_or_else(|| hooks.size(cx));
@@ -700,7 +730,7 @@ pub fn close(cause: CloseCause, cx: &mut App) {
     let Some(id) = p.open else { return };
     let Some(slot) = p.slot(id) else { return };
     let (hwnd, hooks) = (slot.hwnd, slot.hooks.clone());
-    let (previous, left) = (p.previous, p.left.clone());
+    let (previous, left) = (p.previous, host::left_island_on(host::active(cx), cx).or_else(|| p.left.clone()));
     // A panel that grows out of its island shrinks back into it (the clock turns; `wait` is how long the window stays). A layout that
     // changed under it or a full-screen program do not wait: the island has moved or is hidden. Else the 120 ms easing of any panel.
     let forced = matches!(cause, CloseCause::LayoutChanged | CloseCause::FullScreen);
@@ -807,7 +837,7 @@ fn start_state_changed(id: PanelId, open: bool, cx: &mut App) {
     if id != PanelId::START {
         return;
     }
-    let Some(left) = panel(cx).and_then(|p| p.left.clone()) else { return };
+    let Some(left) = host::left_island_on(host::active(cx), cx).or_else(|| panel(cx).and_then(|p| p.left.clone())) else { return };
     left.update(cx, |l, cx| l.panel_changed(open, cx));
 }
 
