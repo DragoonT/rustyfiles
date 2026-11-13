@@ -9648,5 +9648,89 @@
   "key": "Pencerenin olduğu ekranda",
   "tr": "Pencerenin olduğu ekranda",
   "en": "On the monitor the window is on"
+ },
+ {
+  "id": "8af80f09",
+  "key": "Yüklü uygulamalar",
+  "tr": "Yüklü uygulamalar",
+  "en": "Installed apps"
+ },
+ {
+  "id": "fc79c26e",
+  "key": "Güç seçenekleri",
+  "tr": "Güç seçenekleri",
+  "en": "Power options"
+ },
+ {
+  "id": "83029ff5",
+  "key": "Aygıt Yöneticisi",
+  "tr": "Aygıt Yöneticisi",
+  "en": "Device Manager"
+ },
+ {
+  "id": "262b5d77",
+  "key": "Ağ bağlantıları",
+  "tr": "Ağ bağlantıları",
+  "en": "Network connections"
+ },
+ {
+  "id": "315046aa",
+  "key": "Disk Yönetimi",
+  "tr": "Disk Yönetimi",
+  "en": "Disk Management"
+ },
+ {
+  "id": "172cd93e",
+  "key": "Bilgisayar Yönetimi",
+  "tr": "Bilgisayar Yönetimi",
+  "en": "Computer Management"
+ },
+ {
+  "id": "a82526d1",
+  "key": "Olay Görüntüleyicisi",
+  "tr": "Olay Görüntüleyicisi",
+  "en": "Event Viewer"
+ },
+ {
+  "id": "bb04ef49",
+  "key": "Hizmetler",
+  "tr": "Hizmetler",
+  "en": "Services"
+ },
+ {
+  "id": "93c562d1",
+  "key": "Terminal",
+  "tr": "Terminal",
+  "en": "Terminal"
+ },
+ {
+  "id": "0dd38456",
+  "key": "Terminal (Yönetici)",
+  "tr": "Terminal (Yönetici)",
+  "en": "Terminal (Admin)"
+ },
+ {
+  "id": "903c8a40",
+  "key": "Görev Yöneticisi",
+  "tr": "Görev Yöneticisi",
+  "en": "Task Manager"
+ },
+ {
+  "id": "f22aae5d",
+  "key": "Windows Ayarları",
+  "tr": "Windows Ayarları",
+  "en": "Windows Settings"
+ },
+ {
+  "id": "2142b9ce",
+  "key": "rustyfiles ayarları",
+  "tr": "rustyfiles ayarları",
+  "en": "rustyfiles settings"
+ },
+ {
+  "id": "dbb620a7",
+  "key": "Dosya yöneticisi",
+  "tr": "Dosya yöneticisi",
+  "en": "File manager"
  }
 ]

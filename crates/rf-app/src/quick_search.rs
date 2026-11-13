@@ -132,6 +132,7 @@ pub fn init(cx: &mut App) {
     cx.spawn(async move |cx| {
         use futures::StreamExt;
         while rx.next().await.is_some() {
+            log::info!("quick search: the hotkey was pressed");
             cx.update(toggle);
         }
     })
@@ -143,6 +144,8 @@ pub fn init(cx: &mut App) {
             .spawn(|| {
                 std::thread::sleep(Duration::from_secs(8));
                 let _ = apps();
+                // (and Windows' settings catalogue: the first search then has its rows)
+                crate::settings_rows::warm();
             })
             .ok();
     }
@@ -419,10 +422,14 @@ pub fn score(name: &str, q: &str) -> Option<i32> {
 /// `score`, and for app names also the initials of their words ("vsc" → Visual Studio Code;
 /// for page titles and file names that matched too much by chance).
 pub(crate) fn score_with(name: &str, q: &str, initials: bool) -> Option<i32> {
+    score_folded(&fold(name), q, initials)
+}
+
+/// [`score_with`] for a name that is folded already (a list of many names folds them once and compares at every keystroke).
+pub(crate) fn score_folded(n: &str, q: &str, initials: bool) -> Option<i32> {
     if q.is_empty() {
         return Some(0);
     }
-    let n = fold(name);
     let short = (40 - n.chars().count() as i32).max(0);
     if n == q {
         return Some(1000);
@@ -457,6 +464,9 @@ pub enum Target {
     Path { path: PathBuf, dir: bool },
     Url { url: String },
     Web { query: String },
+    /// A page of Windows' Settings, a setting on one, or a Control Panel task or tool (`settings_rows.rs`): how it is opened, as
+    /// `rf_win::settingscat::Launch` writes it, and its name.
+    Setting { launch: String, name: String },
 }
 
 impl Target {
@@ -466,6 +476,7 @@ impl Target {
             Target::Path { path, .. } => format!("path:{}", path.to_string_lossy().to_lowercase()),
             Target::Url { url } => format!("url:{url}"),
             Target::Web { query } => format!("web:{query}"),
+            Target::Setting { launch, name } => format!("setting:{launch}:{}", name.to_lowercase()),
         }
     }
 }
@@ -474,6 +485,9 @@ impl Target {
 pub enum Section {
     Recent,
     Apps,
+    /// Windows' settings and tools: before the files, as Windows' own search has them (seven files named like the query would push
+    /// the page the user wants out of sight).
+    Settings,
     Files,
     Bookmarks,
     Web,
@@ -584,6 +598,8 @@ pub(crate) fn search_local(query: &str, engine: WebSearch, with_bookmarks: bool)
     }
     a.sort_by_key(|i| std::cmp::Reverse(i.score));
     items.extend(a.into_iter().take(MAX_APPS));
+    // Windows' settings and tools, from Windows' own catalogue (read in the background the first time: no rows until it is there)
+    items.extend(crate::settings_rows::find(&q, &lift));
     // bookmarks
     if with_bookmarks {
         let mut b: Vec<Item> = bookmarks()
@@ -753,6 +769,8 @@ pub fn toggle(cx: &mut App) {
         .map(|d| d.id());
     // automated UI tests: shown without taking the foreground from the user
     let test = std::env::var_os("RUSTYFILES_QUICK_SEARCH_NOACTIVATE").is_some();
+    // with HyperGlass as the app's backdrop the search is on the same glass (the user asked); else Windows' acrylic as before
+    let glassy = cx.try_global::<Settings>().is_some_and(|s| s.backdrop == crate::settings::BackdropPref::Glass);
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size(px(WIDTH), px(64.))))),
         display_id,
@@ -763,7 +781,7 @@ pub fn toggle(cx: &mut App) {
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: WindowBackgroundAppearance::Blurred,
+        window_background: if glassy { WindowBackgroundAppearance::Transparent } else { WindowBackgroundAppearance::Blurred },
         ..Default::default()
     };
     match cx.open_window(opts, move |window, cx| {
@@ -774,7 +792,7 @@ pub fn toggle(cx: &mut App) {
         if !test {
             rf_win::window::bring_to_front(hwnd);
         }
-        cx.new(|cx| QuickSearch::new(images, max_h, window, cx))
+        cx.new(|cx| QuickSearch::new(images, max_h, glassy, window, cx))
     }) {
         Ok(w) => host(cx).window = Some(w),
         Err(e) => log::warn!("quick search window: {e:#}"),
@@ -798,12 +816,15 @@ pub struct QuickSearch {
     scroll: ScrollHandle,
     /// The keyboard moved the selection: bring it into view.
     reveal: bool,
+    /// The glass behind the window, when HyperGlass is the app's backdrop (`None`: Windows' acrylic).
+    glass: Option<crate::glass_watch::PopupGlass>,
+    _glass_watch: Option<Task<()>>,
     _search: Option<Task<()>>,
     _subs: Vec<Subscription>,
 }
 
 impl QuickSearch {
-    fn new(images: Entity<ImageCache>, max_h: f32, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(images: Entity<ImageCache>, max_h: f32, glassy: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("Uygulama, dosya ya da web'de ara")));
         let mut subs = vec![cx.subscribe_in(&input, window, |this: &mut Self, _, ev: &InputEvent, _, cx| {
             if let InputEvent::Change = ev {
@@ -812,11 +833,14 @@ impl QuickSearch {
         })];
         subs.push(cx.observe_window_activation(window, |_, window, cx| {
             if !window.is_window_active() {
+                log::info!("quick search: the window lost the foreground and closes");
                 cx.defer(close);
             }
         }));
         subs.push(cx.observe(&images, |_, _, cx| cx.notify()));
         input.update(cx, |s, cx| s.focus(window, cx));
+        let glass = glassy.then(|| crate::glass_watch::PopupGlass::start_panel(crate::look::window::hwnd_of(window), Palette::for_window(window).dark));
+        let glass_watch = glass.is_some().then(|| crate::glass_watch::watch(cx, |this: &mut Self| this.glass.as_mut()));
         let mut this = Self {
             input,
             images,
@@ -830,6 +854,8 @@ impl QuickSearch {
             max_h,
             scroll: ScrollHandle::new(),
             reveal: false,
+            glass,
+            _glass_watch: glass_watch,
             _search: None,
             _subs: subs,
         };
@@ -904,6 +930,14 @@ impl QuickSearch {
             }
             (Target::Url { url }, _) => open_url(url.clone()),
             (Target::Web { query }, _) => open_url(web_url(engine, query)),
+            (Target::Setting { launch: what, .. }, _) => {
+                let what = what.clone();
+                launch(move || {
+                    if let Err(e) = crate::settings_rows::open(&what) {
+                        log::warn!("quick search: a settings page could not be opened: {e:#}");
+                    }
+                });
+            }
         }
         if !matches!(how, How::Preview) {
             remember(&item);
@@ -936,6 +970,7 @@ pub(crate) fn section_title(s: Section) -> &'static str {
         Section::Recent => t!("Son kullanılanlar"),
         Section::Apps => t!("Uygulamalar"),
         Section::Files => t!("Dosyalar ve klasörler"),
+        Section::Settings => t!("Ayarlar"),
         Section::Bookmarks => t!("Yer imleri"),
         Section::Web => t!("Web"),
     }
@@ -962,6 +997,7 @@ impl QuickSearch {
             Target::Path { .. } => L::File,
             Target::Url { .. } => L::Globe,
             Target::Web { .. } => L::Search,
+            Target::Setting { .. } => L::Settings,
         };
         div()
             .size(px(28.))
@@ -1050,8 +1086,11 @@ impl Render for QuickSearch {
         if std::mem::take(&mut self.reveal) {
             self.scroll.scroll_to_item(selected_child);
         }
+        // over glass a wash, or the plain fill until the glass runs (never a see-through window with nothing behind it)
+        let fill = self.glass.as_ref().map(|g| crate::glass_watch::panel_fill(p.dark, g.fallback()));
         v_flex()
             .size_full()
+            .when_some(fill, |d, f| d.bg(f))
             .text_color(p.text)
             .capture_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
                 let m = &ev.keystroke.modifiers;

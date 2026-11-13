@@ -530,11 +530,11 @@ fn quick_search_cards(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement
         })
         .into_any_element();
     vec![
-        section(p, t!("Hızlı arama")),
+        section(p, "HyperSearch"),
         card(
             p,
             L::Search,
-            t!("Hızlı arama"),
+            "HyperSearch",
             Some(if s.run_in_background {
                 t!("Her yerden kısayolla: uygulamalar, dosyalar, klasörler, yer imleri ve web")
             } else {

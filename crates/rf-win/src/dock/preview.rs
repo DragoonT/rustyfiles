@@ -4,7 +4,7 @@
 //! The app side (`rf-app/src/dock/hover_preview.rs`) feeds the machine from the icons' hover events and carries the answers out.
 //!
 //! THE RULES (what a user sees):
-//! * the pointer rests on a RUNNING app's icon for [`DWELL_MS`] (400 ms): the preview opens;
+//! * the pointer rests on a RUNNING app's icon for [`DWELL_MS`] (80 ms: at once to the eye, so that two windows of an app are seen the moment the pointer is on it; it was 400 ms until a user asked; a pointer that only crosses the icon on its way still opens nothing): the preview opens;
 //! * while it is open, moving the pointer onto another running app's icon swaps the preview at once (no waiting);
 //! * moving from the icon into the preview keeps it open; leaving both (onto nothing, onto a gap, onto an icon that is not running)
 //!   closes it after [`GRACE_MS`], and coming back to the icon or the preview inside that time cancels the closing;
@@ -17,7 +17,7 @@
 use super::layout::{Rect, px};
 
 /// How long the pointer must rest on an icon before its preview opens.
-pub const DWELL_MS: u64 = 400;
+pub const DWELL_MS: u64 = 80;
 /// How long the preview stays after the pointer has left the icon and the preview.
 pub const GRACE_MS: u64 = 300;
 
@@ -457,14 +457,14 @@ mod tests {
     fn moving_to_another_icon_before_the_dwell_restarts_it() {
         let mut m = M::new();
         on(&mut m, 0, "a");
-        on(&mut m, 300, "b");
-        assert_eq!(m.tick(400), Output::Nothing, "a's 400 ms are not b's");
-        assert_eq!(m.tick(700), Output::Open("b"));
+        on(&mut m, DWELL_MS - 20, "b");
+        assert_eq!(m.tick(DWELL_MS), Output::Nothing, "a's wait is not b's");
+        assert_eq!(m.tick(2 * DWELL_MS - 20), Output::Open("b"));
         // the same icon again (a jitter within it) does not restart the wait
         let mut m = M::new();
         on(&mut m, 0, "a");
-        on(&mut m, 300, "a");
-        assert_eq!(m.tick(400), Output::Open("a"));
+        on(&mut m, DWELL_MS - 20, "a");
+        assert_eq!(m.tick(DWELL_MS), Output::Open("a"));
     }
 
     #[test]

@@ -337,6 +337,16 @@ impl Render for LeftIsland {
             .child(start_button::logo(frame.scale * k, scale_factor))
             .child(canvas(|_, _, _| (), move |bounds, _, window, _| pointer_probe(me, bounds, window)).absolute().size_full())
             .on_mouse_down(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_press(cx)))
+            // a right click: the button's own menu of system tools, in the Start panel (as Windows' Start button has one; ours only
+            // when the Start panel is ours)
+            // (a plain handler, NOT a listener of this view: opening the panel makes every left island draw again, and a view cannot be
+            // updated from inside its own update; the first version did that and the dock ended with a panic on the first right click)
+            .on_mouse_up(MouseButton::Right, move |_, _, cx| {
+                cx.stop_propagation();
+                if own_start(cx) {
+                    super::panel::start_system_menu_on(mon, cx);
+                }
+            })
             .on_mouse_up(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_release(true, cx)))
             .on_mouse_up_out(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_release(false, cx)))
             // the user's click is the only thing that ever sends the Windows key (and only when our own Start is switched off)

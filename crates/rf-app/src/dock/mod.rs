@@ -76,6 +76,7 @@ pub(crate) mod size_slider;
 mod search;
 mod start;
 mod start_button;
+mod sys_menu;
 mod sysstate;
 mod thin;
 mod task_feed;

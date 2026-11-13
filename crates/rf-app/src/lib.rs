@@ -62,6 +62,7 @@ mod preview_trace;
 mod properties_view;
 mod quick_search;
 mod run_names;
+mod settings_rows;
 mod search_pipe;
 mod hotkey_field;
 mod recycle_settings_view;

@@ -382,6 +382,21 @@ pub fn focus_start_field(cx: &mut App) {
     hooks.focus_field(cx);
 }
 
+/// A right click on the island's Start button: the Start panel with the button's own menu (`sys_menu.rs`) open in it. The panel is
+/// opened on this monitor's dock when it is not the open one there; a panel that is open gets the menu at once.
+pub fn start_system_menu_on(mon: MonId, cx: &mut App) {
+    let open_here = panel(cx).is_some_and(|p| p.open == Some(PanelId::START)) && host::active(cx) == mon;
+    if open_here {
+        if let Some(v) = view(cx) {
+            // (after the current effects: the click may come from a view that is being updated)
+            cx.defer(move |cx| v.update(cx, |me, cx| me.open_sys_menu(cx)));
+        }
+        return;
+    }
+    super::sys_menu::want();
+    toggle_start_on(mon, cx);
+}
+
 /// The island button's click on this monitor's dock: opens the Start panel there, closes it when it is the open one there (open on
 /// another monitor's dock, it moves).
 pub fn toggle_start_on(mon: MonId, cx: &mut App) {

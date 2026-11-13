@@ -187,6 +187,9 @@ pub struct StartView {
     app_hi: usize,
     power: PowerMenu,
     power_hi: usize,
+    /// The Start button's own menu (a right click on the logo: `sys_menu.rs`) is open, and the row the keyboard is on.
+    sys_menu: bool,
+    sys_hi: usize,
     /// When the "Emin misiniz?" question appeared (an "Evet" in the first moments is not an answer: `power::yes_counts`).
     power_since: Option<Instant>,
     /// The keyboard is on "Evet" (it starts on "Hayır").
@@ -330,6 +333,8 @@ impl StartView {
             app_hi: 0,
             power: PowerMenu::Closed,
             power_hi: 0,
+            sys_menu: false,
+            sys_hi: 0,
             power_since: None,
             confirm_yes: false,
             _grace: None,
@@ -368,6 +373,8 @@ impl StartView {
         self.notice = None;
         self.anim = Some((Instant::now(), true));
         self.app_menu = None;
+        self.sys_menu = super::sys_menu::take_wanted();
+        self.sys_hi = 0;
         self.power = PowerMenu::Closed;
         self.power_since = None;
         self.confirm_yes = false;
@@ -453,6 +460,7 @@ impl StartView {
         self.pending = None;
         self.files_req = 0;
         self.app_menu = None;
+        self.sys_menu = false;
         self.power = PowerMenu::Closed;
         cx.notify();
     }
@@ -510,6 +518,8 @@ impl StartView {
     /// Reads the app list (cached by the quick search after the first time) and the pins in the background; sorts again only when the
     /// list is a new one.
     fn load_data(&mut self, cx: &mut Context<Self>) {
+        // (Windows' settings catalogue too, so that the first search has its rows)
+        crate::settings_rows::warm();
         if self.loading {
             return;
         }
@@ -812,10 +822,62 @@ impl StartView {
         cx.notify();
     }
 
+    /// The Start button's own menu, in the open panel (a right click on the logo; `panel::start_system_menu_on`).
+    pub fn open_sys_menu(&mut self, cx: &mut Context<Self>) {
+        if !self.live() {
+            return;
+        }
+        self.app_menu = None;
+        self.power = PowerMenu::Closed;
+        self.sys_menu = true;
+        self.sys_hi = 0;
+        cx.notify();
+    }
+
+    /// A row of the Start button's menu was chosen.
+    fn sys_menu_do(&mut self, act: super::sys_menu::Act, cx: &mut Context<Self>) {
+        use super::sys_menu::Act;
+        if !self.live() {
+            return;
+        }
+        self.sys_menu = false;
+        self.quiet();
+        match act {
+            Act::Uri(uri) => {
+                super::panel_parts::open_uri(uri);
+                self.finish(cx);
+            }
+            Act::Open(file) => {
+                Self::open_in_shell(PathBuf::from(file));
+                self.finish(cx);
+            }
+            Act::TerminalAdmin => self.launch_app_as_admin(AppEntry { name: "Terminal".to_string(), id: "Microsoft.WindowsTerminal_8wekyb3d8bbwe!App".to_string() }, cx),
+            Act::TaskManager => {
+                super::actions::open_task_manager();
+                self.finish(cx);
+            }
+            Act::OwnSettings => {
+                super::actions::run_rustyfiles(super::actions::settings_args());
+                self.finish(cx);
+            }
+            Act::Files => {
+                super::actions::run_rustyfiles(Vec::new());
+                self.finish(cx);
+            }
+            // (the power menu takes this menu's place; the panel stays)
+            Act::Power => {
+                self.power_hi = 0;
+                self.set_power(PowerMenu::Open, cx);
+            }
+        }
+        cx.notify();
+    }
+
     fn open_menu(&mut self, app: AppEntry, at: Point<Pixels>, cx: &mut Context<Self>) {
         if !self.live() {
             return;
         }
+        self.sys_menu = false;
         self.power = PowerMenu::Closed;
         self.app_hi = 0;
         let id = app.id.clone();
@@ -931,6 +993,17 @@ impl StartView {
                     }
                     (Target::Web { query }, _) => {
                         Self::open_in_shell(PathBuf::from(quick_search::web_url(engine, query)));
+                        self.finish(cx);
+                    }
+                    (Target::Setting { launch, .. }, _) => {
+                        // (on the shell thread, as every start from the dock: a worker thread of its own would become an apartment
+                        // that never pumps)
+                        let launch = launch.clone();
+                        std::thread::spawn(move || {
+                            if rf_win::sta::call(Duration::from_secs(15), move || crate::settings_rows::open(&launch)).and_then(Result::ok).is_none() {
+                                log::warn!("start: a settings page could not be opened");
+                            }
+                        });
                         self.finish(cx);
                     }
                 }
@@ -1121,6 +1194,28 @@ impl StartView {
                 (PowerMenu::Confirming(_), "enter") => {
                     cx.stop_propagation();
                     self.answer_power(self.confirm_yes, cx);
+                }
+                _ => {}
+            }
+            return;
+        }
+        if self.sys_menu {
+            let rows = super::sys_menu::rows();
+            let n = rows.len();
+            match key {
+                "escape" => {
+                    self.sys_menu = false;
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+                "up" | "down" => {
+                    self.sys_hi = startlist::step_results(self.sys_hi.min(n - 1), key == "up", n);
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+                "enter" => {
+                    cx.stop_propagation();
+                    self.sys_menu_do(rows[self.sys_hi.min(n - 1)].act, cx);
                 }
                 _ => {}
             }
@@ -1480,6 +1575,7 @@ impl StartView {
                         Target::Path { path, .. } => self.picture(format!("file:{}", path.to_string_lossy().to_lowercase()), IconSource::File(path.clone()), &item.title, 28.0, pal, cx),
                         Target::Url { .. } => Icon::new(L::Globe).size(px(20.)).text_color(secondary).into_any_element(),
                         Target::Web { .. } => Icon::new(L::Search).size(px(20.)).text_color(secondary).into_any_element(),
+                        Target::Setting { .. } => Icon::new(L::Settings).size(px(20.)).text_color(secondary).into_any_element(),
                     };
                     (title, item.detail.clone(), icon)
                 }
@@ -1621,6 +1717,41 @@ impl StartView {
             out.push(col.into_any_element());
         }
 
+        // ---- the Start button's own menu, at the bottom left above the logo (it scrolls when the panel is lower than the list)
+        if self.sys_menu {
+            let rows = super::sys_menu::rows();
+            let h = super::sys_menu::height(&rows, MENU_ROW).min((view_h - 16.0).max(MENU_ROW * 3.0));
+            let hi = self.sys_hi.min(rows.len().saturating_sub(1));
+            out.push(backdrop(cx).into_any_element());
+            let mut col = v_flex().w_full();
+            for (i, row) in rows.iter().enumerate() {
+                if i > 0 && rows[i - 1].group != row.group {
+                    col = col.child(div().h(px(super::sys_menu::SEPARATOR_H)).flex().items_center().child(div().h(px(1.)).w_full().bg(border)));
+                }
+                let act = row.act;
+                col = col.child(item(("sys", i), row.icon, row.label, i == hi).on_click(cx.listener(move |this, _, _, cx| this.sys_menu_do(act, cx))));
+            }
+            out.push(
+                div()
+                    .id("start-sys-menu")
+                    .absolute()
+                    .left(px(8.))
+                    .bottom(px(extra_bottom + 8.0))
+                    .w(px(MENU_W + 12.0))
+                    .h(px(h))
+                    .p(px(6.))
+                    .rounded(theme::RADIUS)
+                    .bg(menu_fill)
+                    .border_1()
+                    .border_color(border)
+                    .shadow_lg()
+                    .occlude()
+                    .overflow_y_scroll()
+                    .child(col)
+                    .into_any_element(),
+            );
+        }
+
         // ---- the power menu, above the power button at the bottom right
         match self.power {
             PowerMenu::Closed => {}
@@ -1711,6 +1842,7 @@ impl StartView {
 fn dismiss_listener(cx: &mut Context<StartView>) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
     cx.listener(|this: &mut StartView, _: &MouseDownEvent, _, cx| {
         this.app_menu = None;
+        this.sys_menu = false;
         this.quiet();
         this.set_power(PowerMenu::Closed, cx);
         cx.stop_propagation();
