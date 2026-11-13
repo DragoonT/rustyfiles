@@ -192,10 +192,28 @@ work. Mica,
 dark mode and the system accent colour. When a game or a render saturates the GPU, drawing
 moves to the CPU and back again without a flicker.
 
-**Languages.** 46 of them, following the Windows display language (or pick one in Settings ›
-General). Translations start from the Files community's wording; Arabic, Hebrew and Persian are
-translated but wait for right-to-left text in GPUI. Corrections are welcome: each language is one
-JSON file in `crates/rf-app/locales/`.
+**Commands in the address bar.** As in Explorer: press <kbd>Ctrl</kbd>+<kbd>L</kbd>, type `cmd`,
+`powershell`, `wt` or `code .` and press <kbd>Enter</kbd>. The text is first taken as a place (a
+path, a drive, `%VAR%`, `shell:`); a folder or file of that name in the open folder always wins.
+Only when there is no such place is the first word looked up as a program, the way the Run box
+does, and started in the open folder with the rest as its arguments. Nothing is started from a
+completion, and no administrator rights are asked for. A switch under Settings › Files and folders
+› Behaviors turns it off.
+
+**Organizing.** Rules for a folder: conditions on name, extension, kind, size and age, and one
+action (move, move into a folder built from a template, rename, or the Recycle Bin). A run by hand
+shows every step in a preview and moves nothing before Apply, and a run can be undone. Nothing is
+deleted for good and nothing is overwritten. Rules that run by themselves are off by default.
+
+**Search.** Quick search (<kbd>Alt</kbd>+<kbd>Space</kbd>) finds apps, files and folders, browser
+bookmarks and Windows' settings pages. What you open often comes first, and what you chose for the
+same letters before is the first row.
+
+**Languages.** 49 of them, following the Windows display language (or pick one in Settings ›
+General). The interface is written in Turkish and English; the other languages started from the
+Files community's wording and are machine-translated from there on. Arabic, Hebrew and Persian
+are translated but wait for right-to-left text in GPUI. Corrections are welcome: each language is
+one JSON file in `crates/rf-app/locales/`.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/photos-dark.png">
@@ -211,6 +229,23 @@ for everything else. Arrow keys move through the folder while it stays open.
 It runs as its own program, `directlook.exe`, so a heavy video never weighs on the file
 manager and neither can take the other down. It works in rustyfiles, and if you turn it on,
 in Explorer and on the desktop too. Settings live under Settings › DirectLook.
+
+## Experimental: HyperGlass, the Dock and the desktop
+
+These are off by default and early. They were built and tried on one PC with two monitors, and
+some parts have had very little use. Expect rough edges, and please report what you find.
+
+- **HyperGlass** (Settings › Appearance) is a fifth backdrop: the window's background is glass that
+  bends and frosts what is behind it.
+- **The Dock** (Settings › Dock, one switch) puts three glass islands at the bottom of each monitor
+  in place of Windows' taskbar: a Start panel and search of its own, the running and pinned apps
+  with window previews, the tray icons, a control centre and a notification panel. While it is on,
+  Windows' taskbar is hidden, a tap of the Windows key opens the Dock's Start and
+  <kbd>Alt</kbd>+<kbd>Tab</kbd> opens its switcher. Switch the Dock off and Windows' own are back.
+- **The desktop** drawn by rustyfiles comes with the Dock: your wallpaper and icons, with an option
+  for rounded corners.
+
+Explorer keeps running underneath all of this; nothing of Windows is removed or replaced on disk.
 
 ## Install
 
