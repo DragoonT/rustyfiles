@@ -46,6 +46,7 @@ pub mod control;
 mod control_centre;
 // the middle island's highlight while an app from the Start panel is dragged over it
 mod drop_hint;
+mod eject_view;
 mod empty;
 mod feedback;
 mod grow_host;

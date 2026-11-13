@@ -1809,4 +1809,9 @@ pub const EN: &[(&str, &str)] = &[
     ("Windows Ayarları", "Windows Settings"),
     ("rustyfiles ayarları", "rustyfiles settings"),
     ("Dosya yöneticisi", "File manager"),
+    ("Çıkarılabilecek aygıt yok", "Nothing to remove"),
+    ("Çıkarılıyor…", "Removing…"),
+    ("Kullanımda: açık dosyaları kapatıp yeniden deneyin", "In use: close the open files and try again"),
+    ("Çıkarılabilir sürücü", "Removable drive"),
+    ("Güvenle çıkar", "Eject"),
 ];

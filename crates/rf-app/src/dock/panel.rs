@@ -56,6 +56,10 @@ pub use more::{CALENDAR, NOTIFICATIONS, init_extra, toggle_calendar_on, toggle_n
 #[path = "tray_panel.rs"]
 mod tray_panel;
 pub use tray_panel::{OVERFLOW, overflow_rect, toggle_overflow, toggle_overflow_from_keyboard};
+// The safe-removal panel (its slot and hooks are in `eject_panel.rs`, a child module for the same reason).
+#[path = "eject_panel.rs"]
+mod eject_panel;
+pub use eject_panel::{EJECT, toggle_eject};
 
 /// The Start panel's size when the screen has the room, logical px (642 x 720; `StartHooks::size` shortens it to the room above the
 /// island).

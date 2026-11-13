@@ -130,6 +130,9 @@ fn create(id: PanelId, cx: &mut App) -> bool {
     if id == super::tray_panel::OVERFLOW {
         return super::tray_panel::create(cx);
     }
+    if id == super::eject_panel::EJECT {
+        return super::eject_panel::create(cx);
+    }
     let Some((scale, _)) = host::monitor_work(cx) else { return false };
     let Some(near) = host::visible_glass_rect(Kind::Right, cx) else { return false };
     // (the tone of the clock's and the bell's panel is the right island's)

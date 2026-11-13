@@ -9732,5 +9732,35 @@
   "key": "Dosya yöneticisi",
   "tr": "Dosya yöneticisi",
   "en": "File manager"
+ },
+ {
+  "id": "5d063322",
+  "key": "Çıkarılabilecek aygıt yok",
+  "tr": "Çıkarılabilecek aygıt yok",
+  "en": "Nothing to remove"
+ },
+ {
+  "id": "aed8c7be",
+  "key": "Çıkarılıyor…",
+  "tr": "Çıkarılıyor…",
+  "en": "Removing…"
+ },
+ {
+  "id": "5c866dbc",
+  "key": "Kullanımda: açık dosyaları kapatıp yeniden deneyin",
+  "tr": "Kullanımda: açık dosyaları kapatıp yeniden deneyin",
+  "en": "In use: close the open files and try again"
+ },
+ {
+  "id": "2a3bda8d",
+  "key": "Çıkarılabilir sürücü",
+  "tr": "Çıkarılabilir sürücü",
+  "en": "Removable drive"
+ },
+ {
+  "id": "e877e80c",
+  "key": "Güvenle çıkar",
+  "tr": "Güvenle çıkar",
+  "en": "Eject"
  }
 ]
