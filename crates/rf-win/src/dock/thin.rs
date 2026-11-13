@@ -41,9 +41,17 @@ pub const SETTLE_MS: u64 = 600;
 /// The band changes at most once in this time.
 pub const HOLD_MS: u64 = 2000;
 
-/// The band's thickness in device px for the dock unit.
-pub fn reserved_thickness(unit: f32, thin: bool) -> i32 {
-    if thin { px(THIN_RESERVED_HEIGHT, unit) } else { super::layout::reserved_thickness(unit) }
+/// Windows' own taskbar, logical px of the monitor's scale: the strip a hidden taskbar still holds.
+pub const TASKBAR_STRIP: f32 = 48.0;
+
+/// The band's thickness in device px for the dock unit, on a monitor of this `scale`.
+///
+/// The thin band is never thinner than Windows' taskbar strip and two px: while the host holds the edge of a hidden taskbar, the
+/// work area is judged by that strip (`rf_shellguard::tbwork::plan_edge`), and a band no thicker than it is not recognised as ours.
+/// With the margins at 6 units the thin band is 60 units, which at the smallest dock size (0.75) is 45 px beside a 48 px strip; there
+/// the band keeps the few px more above the thin glass. At every larger size the floor does nothing.
+pub fn reserved_thickness(unit: f32, thin: bool, scale: f32) -> i32 {
+    if thin { px(THIN_RESERVED_HEIGHT, unit).max(px(TASKBAR_STRIP, scale) + 2) } else { super::layout::reserved_thickness(unit) }
 }
 
 // ---------------------------------------------------------------- the numbers between thin and full
@@ -579,15 +587,15 @@ mod tests {
         m.inputs = on(true, false, false);
         m.look(0);
         assert!(m.look(SETTLE_MS).band.changed);
-        let thickness = reserved_thickness(1.0, m.band_thin());
-        assert_eq!(thickness, 68);
+        let thickness = reserved_thickness(1.0, m.band_thin(), 1.0);
+        assert_eq!(thickness, 60);
         let mut grown = 0;
         for (t, near) in [(1_000, false), (1_500, true), (2_000, false), (2_500, true), (3_000, false), (3_500, false), (4_000, true)] {
             m.inputs.near = near;
             let l = m.look(t);
             grown += usize::from(!l.thin);
             assert_eq!(l.band, Band { thin: true, changed: false, wake_at: None }, "at {t}");
-            assert_eq!(reserved_thickness(1.0, m.band_thin()), thickness);
+            assert_eq!(reserved_thickness(1.0, m.band_thin(), 1.0), thickness);
         }
         assert!(grown >= 3, "the dock itself did follow the pointer");
     }
@@ -606,10 +614,13 @@ mod tests {
 
     #[test]
     fn the_bands_thickness_in_each_state() {
-        assert_eq!(reserved_thickness(1.0, false), 92);
-        assert_eq!(reserved_thickness(1.0, true), 68);
+        assert_eq!(reserved_thickness(1.0, false, 1.0), 84);
+        assert_eq!(reserved_thickness(1.0, true, 1.0), 60);
+        // the floor: at the smallest dock size the thin band would be 45 px beside a 48 px taskbar strip
+        assert_eq!(reserved_thickness(0.75, true, 1.0), 50);
+        assert_eq!(reserved_thickness(0.75 * 1.5, true, 1.5), 74);
         for unit in [0.85, 1.0, 1.2, 1.4, 1.25, 1.5 * 1.4, 2.0] {
-            let (full, thin) = (reserved_thickness(unit, false), reserved_thickness(unit, true));
+            let (full, thin) = (reserved_thickness(unit, false, 1.0), reserved_thickness(unit, true, 1.0));
             assert!(thin < full, "unit {unit}");
             // the window gains the difference of the two glasses (24 units), within a pixel of rounding
             let gain = (full - thin) as f32;
@@ -748,8 +759,9 @@ mod tests {
     #[test]
     fn the_work_area_follows_the_band_in_both_directions_at_every_size_and_scale_the_thin_band_included() {
         // The host-owned work area (taskbar hidden by us) judges what is there by the taskbar's strip: a band thinner than the strip
-        // would not be recognised as a band. The thin band is 68 units; at the smallest dock size (0.75) and every Windows scale it is
-        // still thicker than the taskbar's 48 px strip at that scale, so a full -> thin and a thin -> full change are both "Set".
+        // would not be recognised as a band. The thin band is 60 units, and never thinner than the strip and two px (the floor in
+        // `reserved_thickness`, which acts at the smallest dock size, 0.75): at every size and every Windows scale it is thicker than
+        // the taskbar's 48 px strip at that scale, so a full -> thin and a thin -> full change are both "Set".
         use rf_shellguard::tbmodel::MonitorGeom;
         use rf_shellguard::tbwork::{Verdict, monitor_less_band, plan_edge};
         for scale in [1.0f32, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0] {
@@ -759,7 +771,7 @@ mod tests {
             let bar = [0, h - strip, w, h];
             for factor in [0.75f32, 0.85, 1.0, 1.4, 1.5] {
                 let unit = super::super::size::unit(scale, factor);
-                let (full, thin) = (reserved_thickness(unit, false), reserved_thickness(unit, true));
+                let (full, thin) = (reserved_thickness(unit, false, scale), reserved_thickness(unit, true, scale));
                 for (from, to) in [(full, thin), (thin, full)] {
                     let m = MonitorGeom { id: "A".into(), rect: monitor, work: monitor_less_band(monitor, from), primary: true };
                     let plan = plan_edge(&[m], &[bar], Some(to));
@@ -857,16 +869,16 @@ mod tests {
         let monitor = Rect::new(0, 0, 2560, 1440);
         let i = layout::islands(monitor, 1.0, W);
         let z = zone(i.middle, i.left, i.right, monitor, 1.0);
-        let thin = thin_glass(i.middle, 1.0); // 1430 - 48 = 1382 .. 1430
-        assert_eq!((thin.top, thin.bottom), (1382, 1430));
+        let thin = thin_glass(i.middle, 1.0); // 1434 - 48 = 1386 .. 1434
+        assert_eq!((thin.top, thin.bottom), (1386, 1434));
         // inside the thin glass
         assert!(z.contains(1280, 1380));
-        // on the 10 px margin below the glass, down to the monitor's last row
+        // on the 6 px margin below the glass, down to the monitor's last row
         assert!(z.contains(1280, 1435) && z.contains(1280, 1439));
         assert!(!z.contains(1280, 1440), "the monitor ends");
-        // the band's margin above the glass (10) and the 24 above that
-        assert!(z.contains(1280, 1382 - 10) && z.contains(1280, 1382 - 34));
-        assert!(!z.contains(1280, 1382 - 35), "35 units above the glass is beyond it");
+        // the band's margin above the glass (6) and the 24 above that
+        assert!(z.contains(1280, 1386 - 6) && z.contains(1280, 1386 - 30));
+        assert!(!z.contains(1280, 1386 - 31), "31 units above the glass is beyond it");
         // to the sides: the room the glass widens into
         assert!(z.contains(thin.left - 40, 1380) && z.contains(thin.right + 39, 1380));
         assert!(!z.contains(thin.left - 41, 1380));

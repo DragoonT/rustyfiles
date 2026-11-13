@@ -379,20 +379,20 @@ mod tests {
 
     #[test]
     fn the_numbers_of_the_control_centre_at_100_percent_on_the_users_screen() {
-        // 2560 x 1440, taskbar 48: the right island (2218, 1334, 2548, 1382) for a 330 wide row; the control centre is 360 wide
+        // 2560 x 1440, taskbar 48: the right island (2218, 1338, 2548, 1386) for a 330 wide row; the control centre is 360 wide
         let (work, isl, _) = screen(2560, 1440, 1.0, 1.0, 330.0);
-        assert_eq!(isl.right, Rect::new(2218, 1334, 2548, 1382));
+        assert_eq!(isl.right, Rect::new(2218, 1338, 2548, 1386));
         let panel_rect = panel::place(isl.right, (360.0, 400.0), 1.0, Side::Right, work);
-        assert_eq!(panel_rect, Rect::new(2188, 926, 2548, 1326));
+        assert_eq!(panel_rect, Rect::new(2188, 930, 2548, 1330));
         let grown = grown_if_clear(isl.right, panel_rect, Corner::BottomRight, &[isl.left, isl.middle], 8).unwrap();
-        assert_eq!(grown, Rect::new(2188, 926, 2548, 1382), "the panel's top to the island's bottom; the island's 330 wide row stands in its bottom right");
+        assert_eq!(grown, Rect::new(2188, 930, 2548, 1386), "the panel's top to the island's bottom; the island's 330 wide row stands in its bottom right");
         let spec = Spec::new(isl.right, panel_rect, Corner::BottomRight, 24.0, 8.0);
-        assert_eq!(spec.at(0.0).rect, [2218.0, 1334.0, 330.0, 48.0]);
-        assert_eq!(spec.at(1.0).rect, [2188.0, 926.0, 360.0, 456.0]);
+        assert_eq!(spec.at(0.0).rect, [2218.0, 1338.0, 330.0, 48.0]);
+        assert_eq!(spec.at(1.0).rect, [2188.0, 930.0, 360.0, 456.0]);
         // the corner stays where it is the whole way
         for i in 0..=100 {
             let [x, y, w, h] = spec.at(i as f32 / 100.0).rect;
-            assert_eq!((x + w, y + h), (2548.0, 1382.0));
+            assert_eq!((x + w, y + h), (2548.0, 1386.0));
         }
     }
 
