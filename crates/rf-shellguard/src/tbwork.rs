@@ -189,6 +189,14 @@ impl EdgePlan {
 /// Judges every monitor. `bars` are the rectangles of the taskbars we hid (a bar belongs to the monitor it overlaps most), `band` is
 /// the dock's band thickness (`None`: the dock does not reserve one).
 pub fn plan_edge(monitors: &[MonitorGeom], bars: &[[i32; 4]], band: Option<i32>) -> EdgePlan {
+    plan_edge_held(monitors, bars, band, &[])
+}
+
+/// [`plan_edge`] for a host that remembers the work areas it set itself (`held`, one rectangle for each monitor it changed): a
+/// work area that IS one of them is the host's own, whatever it looks like. Without that memory a band is told from a foreign
+/// toolbar only by being cut deeper than the taskbar's strip, so a band THINNER than the strip (the thin dock at a small size, with
+/// small margins) was taken for another program's and never changed again.
+pub fn plan_edge_held(monitors: &[MonitorGeom], bars: &[[i32; 4]], band: Option<i32>, held: &[[i32; 4]]) -> EdgePlan {
     let mut out = Vec::with_capacity(monitors.len());
     for (i, m) in monitors.iter().enumerate() {
         let bar = bars.iter().find(|b| owner_of(monitors, b) == Some(i));
@@ -208,8 +216,9 @@ pub fn plan_edge(monitors: &[MonitorGeom], bars: &[[i32; 4]], band: Option<i32>)
                 plan.band_held = m.primary && !same(m.work, target) && band_cut(m.work, strip_only);
                 if same(m.work, target) {
                     plan.verdict = Verdict::AsWanted;
-                } else if same(m.work, strip_only) || same(m.work, m.rect) || plan.band_held {
-                    // (the last: the dock's own band is still registered with Explorer, the user's work area is the one without it)
+                } else if same(m.work, strip_only) || same(m.work, m.rect) || plan.band_held || held.iter().any(|h| same(m.work, *h)) {
+                    // (band_held: the dock's own band is still registered with Explorer, the user's work area is the one without it;
+                    // the last: a rectangle the host set itself, e.g. for a band that has changed since)
                     plan.verdict = Verdict::Set;
                 }
             }
@@ -427,6 +436,13 @@ mod tests {
     #[test]
     fn a_band_still_held_by_explorer_is_told_apart_from_the_target_that_looks_like_one() {
         // the dock's band is registered: strip and band are both taken from the work area
+        // a band thinner than the strip: unknown without the host's memory, the host's own with it
+        let thin = [0, 0, 2560, 1440 - 40];
+        assert_eq!(plan_edge(&[mon("A", A, thin, true)], &[BAR], Some(78)).monitors[0].verdict, Verdict::Foreign);
+        let p = plan_edge_held(&[mon("A", A, thin, true)], &[BAR], Some(78), &[thin]);
+        assert_eq!(p.monitors[0].verdict, Verdict::Set);
+        assert_eq!(p.monitors[0].user_work, [0, 0, 2560, 1392], "the user's own rectangle is still the monitor less the strip");
+        assert_eq!(plan_edge_held(&[mon("A", A, thin, true)], &[BAR], Some(78), &[[0, 0, 2560, 1300]]).monitors[0].verdict, Verdict::Foreign, "another rectangle is not this one");
         let p = plan_edge(&[mon("A", A, [0, 0, 2560, 1314], true)], &[BAR], Some(78));
         assert!(p.monitors[0].band_held);
         // the dock let go and Explorer recomputed: the strip alone

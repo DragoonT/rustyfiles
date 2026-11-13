@@ -913,13 +913,13 @@ mod tests {
 
     #[test]
     fn the_start_panel_numbers_at_100_percent_on_the_users_screen() {
-        // 2560 x 1440 at 100 %, taskbar 48: the left glass (12, 1338, 342, 1386), the panel (12, 610, 654, 1330); the grown glass is
+        // 2560 x 1440 at 100 %, taskbar 48: the left glass (12, 1340, 342, 1388), the panel (12, 612, 654, 1332); the grown glass is
         // the panel's top to the island's bottom
         let (island, panel_rect, spec) = setup(1.0, 1.0, Side::Left);
-        assert_eq!(island, Rect::new(12, 1338, 342, 1386));
-        assert_eq!(panel_rect, Rect::new(12, 610, 654, 1330));
-        assert_eq!(spec.grown, Rect::new(12, 610, 654, 1386));
-        assert_eq!(spec.at(1.0).rect, [12.0, 610.0, 642.0, 776.0]);
+        assert_eq!(island, Rect::new(12, 1340, 342, 1388));
+        assert_eq!(panel_rect, Rect::new(12, 612, 654, 1332));
+        assert_eq!(spec.grown, Rect::new(12, 612, 654, 1388));
+        assert_eq!(spec.at(1.0).rect, [12.0, 612.0, 642.0, 776.0]);
         assert_eq!(spec.in_window(&spec.at(0.0)), [0.0, 728.0, 330.0, 48.0]);
     }
 }

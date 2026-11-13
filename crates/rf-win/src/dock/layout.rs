@@ -45,8 +45,8 @@ impl Rect {
 
 /// Distance of every island's bottom edge from the bottom of the work area, logical px. The same room is kept above the middle island
 /// (`RESERVED_HEIGHT`), so this is both gaps a maximized window's user sees: under the dock and between the dock and the window.
-/// (10 until a user asked for less room above and below the dock.)
-pub const MARGIN_BOTTOM: f32 = 6.0;
+/// (10, then 6, until a user asked twice for less room above and below the dock.)
+pub const MARGIN_BOTTOM: f32 = 4.0;
 /// Distance of the left and the right island from the work area's left and right edge, logical px.
 pub const MARGIN_SIDE: f32 = 12.0;
 /// The least gap kept between two neighbouring islands, logical px (the middle island gives way when the screen is too narrow).
@@ -244,11 +244,11 @@ mod tests {
         // a 1920x1080 monitor with the Windows taskbar (48 px) visible: the work area ends at 1032
         let work = Rect::new(0, 0, 1920, 1032);
         let i = islands(work, 1.0, W);
-        assert_eq!(i.left, Rect::new(12, 1032 - 6 - 48, 12 + 330, 1032 - 6));
-        assert_eq!(i.right, Rect::new(1920 - 12 - 280, 1032 - 6 - 48, 1920 - 12, 1032 - 6));
-        assert_eq!(i.middle, Rect::new(660, 1032 - 6 - 72, 1260, 1032 - 6));
+        assert_eq!(i.left, Rect::new(12, 1032 - 4 - 48, 12 + 330, 1032 - 4));
+        assert_eq!(i.right, Rect::new(1920 - 12 - 280, 1032 - 4 - 48, 1920 - 12, 1032 - 4));
+        assert_eq!(i.middle, Rect::new(660, 1032 - 4 - 72, 1260, 1032 - 4));
         for r in [i.left, i.middle, i.right] {
-            assert_eq!(r.bottom, 1026, "every bottom is 6 px above the work area's bottom");
+            assert_eq!(r.bottom, 1028, "every bottom is 4 px above the work area's bottom");
         }
         assert_eq!((i.left.height(), i.middle.height(), i.right.height()), (48, 72, 48));
         // centred
@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(i.left.height(), 72);
         assert_eq!(i.middle.height(), 108);
         assert_eq!(i.right.right, 100 + 2880 - 18);
-        assert_eq!(i.middle.bottom, 50 + 1580 - 9);
+        assert_eq!(i.middle.bottom, 50 + 1580 - 6);
         assert_eq!(i.left.width(), 495);
         assert_eq!(i.middle.width(), 900);
     }
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn auto_hide_taskbar_means_the_work_area_is_the_monitor() {
         let i = islands(Rect::new(0, 0, 2560, 1440), 1.0, W);
-        assert_eq!(i.middle.bottom, 1434);
+        assert_eq!(i.middle.bottom, 1436);
     }
 
     #[test]
@@ -336,15 +336,15 @@ mod tests {
         let none = Rect::new(0, 1440, 2560, 1440);
         assert_eq!(placement_area(Rect::new(0, 0, 2560, 1392), Some(none), monitor).bottom, 1440);
         assert_eq!(placement_area(monitor, Some(none), monitor).bottom, 1440);
-        // the islands' glass then ends 6 px above the screen's bottom, as it does on a monitor with an auto-hiding taskbar
+        // the islands' glass then ends 4 px above the screen's bottom, as it does on a monitor with an auto-hiding taskbar
         let i = islands(placement_area(Rect::new(0, 0, 2560, 1392), Some(edge), monitor), 1.0, W);
-        assert_eq!(i.middle.bottom, 1434);
+        assert_eq!(i.middle.bottom, 1436);
     }
 
     #[test]
     fn reserved_band_is_the_dock_plus_its_margins() {
-        assert_eq!(reserved_thickness(1.0), 84);
-        assert_eq!(reserved_thickness(2.0), 168);
+        assert_eq!(reserved_thickness(1.0), 80);
+        assert_eq!(reserved_thickness(2.0), 160);
     }
 
     const MONITOR: Rect = Rect::new(0, 0, 1920, 1080);
@@ -380,7 +380,7 @@ mod tests {
         assert_eq!(p.right.margins(), [4, 4, 4, 4]);
         // the middle: the edge margin and 40 for the widening on each side, 12 above (growing icons), 4 below
         assert_eq!(p.middle.margins(), [44, 12, 44, 4]);
-        assert_eq!(p.middle.window, Rect::new(660 - 44, 1026 - 72 - 12, 1260 + 44, 1026 + 4));
+        assert_eq!(p.middle.window, Rect::new(660 - 44, 1028 - 72 - 12, 1260 + 44, 1028 + 4));
         // at 150 % the margins scale like everything else
         let i15 = islands(Rect::new(0, 0, 2880, 1548), 1.5, W);
         let p15 = placements(&i15, Rect::new(0, 0, 2880, 1620), 1.5, false);
@@ -397,15 +397,15 @@ mod tests {
 
     #[test]
     fn a_margin_never_reaches_past_the_monitor() {
-        // an auto-hiding taskbar: the work area is the monitor, the glass is 6 px above its bottom
+        // an auto-hiding taskbar: the work area is the monitor, the glass is 4 px above its bottom
         let monitor = Rect::new(0, 0, 2560, 1440);
         for shadow in [false, true] {
             let p = placements(&islands(monitor, 1.0, W), monitor, 1.0, shadow);
             for pl in [p.left, p.middle, p.right] {
                 assert!(monitor.covers(&pl.window), "{pl:?}");
             }
-            let want = if shadow { 6 } else { 4 };
-            assert_eq!(p.middle.margins()[3], want.min(6), "the margin below is at most the 6 px the glass floats above the screen's edge");
+            let want = if shadow { 28 } else { 4 };
+            assert_eq!(p.middle.margins()[3], want.min(4), "the margin below is at most the 4 px the glass floats above the screen's edge");
         }
         // a monitor that is not at the origin
         let second = Rect::new(-1920, 0, 0, 1080);

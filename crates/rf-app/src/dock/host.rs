@@ -465,9 +465,9 @@ pub(super) fn apply_reserve(cx: &mut App) {
     let Some(system) = host.system.as_ref() else { return };
     let band = if host.prefs.reserve {
         // the band is the dock's own height and margins: it follows the size too
-        let (unit, scale) = host.area().map_or((1.0, 1.0), |(m, _)| (rf_win::dock::size::unit(m.scale(), fitted_factor(host.prefs.size, &m)), m.scale()));
+        let unit = host.area().map_or(1.0, |(m, _)| rf_win::dock::size::unit(m.scale(), fitted_factor(host.prefs.size, &m)));
         // (the thin band while a maximised window has been there for a while: see thin.rs)
-        let thickness = rf_win::dock::thin::reserved_thickness(unit, super::thin::band_is_thin(cx), scale);
+        let thickness = rf_win::dock::thin::reserved_thickness(unit, super::thin::band_is_thin(cx));
         system.reserve(thickness);
         Some(thickness)
     } else {
@@ -1114,59 +1114,59 @@ mod tests {
     fn a_panel_is_placed_from_the_glass_and_not_from_the_larger_window_at_100_percent() {
         let (monitor, work) = (Rect::new(0, 0, 1920, 1080), Rect::new(0, 0, 1920, 1032));
         let g = geo(monitor, work, 1.0);
-        assert_eq!(g.glass(Kind::Left), Rect::new(12, 978, 342, 1026));
-        assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 974, 346, 1030), "the window is 4 px larger on every side");
+        assert_eq!(g.glass(Kind::Left), Rect::new(12, 980, 342, 1028));
+        assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 976, 346, 1032), "the window is 4 px larger on every side");
         let (start, cc) = panels(&g, work);
-        // 8 px above the glass's top edge (978), lined up with its left edge (12)
-        assert_eq!(start, Rect::new(12, 250, 654, 970));
+        // 8 px above the glass's top edge (980), lined up with its left edge (12)
+        assert_eq!(start, Rect::new(12, 252, 654, 972));
         assert_eq!(start.bottom, g.glass(Kind::Left).top - 8);
-        // 8 px above the right glass (top 978), its right edge (1908)
-        assert_eq!(g.glass(Kind::Right), Rect::new(1628, 978, 1908, 1026));
-        assert_eq!(cc, Rect::new(1548, 570, 1908, 970));
+        // 8 px above the right glass (top 980), its right edge (1908)
+        assert_eq!(g.glass(Kind::Right), Rect::new(1628, 980, 1908, 1028));
+        assert_eq!(cc, Rect::new(1548, 572, 1908, 972));
         // from the windows' rectangles the numbers would be wrong
         let wrong = panel_geo::place(g.placement(Kind::Left).window, crate::dock::panel::START_SIZE, 1.0, Side::Left, work);
         assert_ne!(wrong, start);
-        assert_eq!((wrong.left, wrong.bottom), (8, 966));
+        assert_eq!((wrong.left, wrong.bottom), (8, 968));
     }
 
     #[test]
     fn a_panel_is_placed_from_the_glass_and_not_from_the_larger_window_at_150_percent() {
         let (monitor, work) = (Rect::new(0, 0, 2880, 1620), Rect::new(0, 0, 2880, 1548));
         let g = geo(monitor, work, 1.5);
-        assert_eq!(g.glass(Kind::Left), Rect::new(18, 1467, 513, 1539));
-        assert_eq!(g.placement(Kind::Left).window, Rect::new(12, 1461, 519, 1545), "the window is 6 px (4 logical) larger on every side");
+        assert_eq!(g.glass(Kind::Left), Rect::new(18, 1470, 513, 1542));
+        assert_eq!(g.placement(Kind::Left).window, Rect::new(12, 1464, 519, 1548), "the window is 6 px (4 logical) larger on every side");
         let (start, cc) = panels(&g, work);
         // 12 px (8 logical) above the glass, 963 x 1080 (642 x 720 logical)
-        assert_eq!(start, Rect::new(18, 375, 981, 1455));
+        assert_eq!(start, Rect::new(18, 378, 981, 1458));
         assert_eq!(start.bottom, g.glass(Kind::Left).top - 12);
-        assert_eq!(g.glass(Kind::Right), Rect::new(2442, 1467, 2862, 1539));
-        assert_eq!(cc, Rect::new(2322, 855, 2862, 1455));
+        assert_eq!(g.glass(Kind::Right), Rect::new(2442, 1470, 2862, 1542));
+        assert_eq!(cc, Rect::new(2322, 858, 2862, 1458));
         assert_eq!(cc.right, g.glass(Kind::Right).right, "lined up with the glass's right edge");
         let wrong = panel_geo::place(g.placement(Kind::Right).window, (360.0, 400.0), 1.5, Side::Right, work);
         assert_ne!(wrong, cc);
     }
 
     /// A 2560 x 1440 monitor at 100 %: with the 48 px taskbar (work area 1392 high) and with an auto-hiding one (the work area is the
-    /// whole monitor, so the glass floats 6 px above the screen's edge and the window's lower margin is 4 px, not more).
+    /// whole monitor, so the glass floats 4 px above the screen's edge and the window's lower margin is 4 px, not more).
     #[test]
     fn a_panel_is_placed_from_the_glass_on_a_2560_by_1440_monitor() {
         let monitor = Rect::new(0, 0, 2560, 1440);
         let work = Rect::new(0, 0, 2560, 1392);
         let g = geo(monitor, work, 1.0);
-        assert_eq!(g.glass(Kind::Left), Rect::new(12, 1338, 342, 1386));
-        assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 1334, 346, 1390));
+        assert_eq!(g.glass(Kind::Left), Rect::new(12, 1340, 342, 1388));
+        assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 1336, 346, 1392));
         let (start, cc) = panels(&g, work);
-        // 8 px above the glass's top (1338), lined up with its left edge (12)
-        assert_eq!(start, Rect::new(12, 610, 654, 1330));
-        assert_eq!(g.glass(Kind::Right), Rect::new(2268, 1338, 2548, 1386));
-        assert_eq!(cc, Rect::new(2188, 930, 2548, 1330), "lined up with the right glass's right edge");
+        // 8 px above the glass's top (1340), lined up with its left edge (12)
+        assert_eq!(start, Rect::new(12, 612, 654, 1332));
+        assert_eq!(g.glass(Kind::Right), Rect::new(2268, 1340, 2548, 1388));
+        assert_eq!(cc, Rect::new(2188, 932, 2548, 1332), "lined up with the right glass's right edge");
 
         let g = geo(monitor, monitor, 1.0);
-        assert_eq!(g.glass(Kind::Left), Rect::new(12, 1386, 342, 1434));
-        assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 1382, 346, 1438));
+        assert_eq!(g.glass(Kind::Left), Rect::new(12, 1388, 342, 1436));
+        assert_eq!(g.placement(Kind::Left).window, Rect::new(8, 1384, 346, 1440));
         let (start, cc) = panels(&g, monitor);
-        assert_eq!(start, Rect::new(12, 658, 654, 1378));
-        assert_eq!(cc, Rect::new(2188, 978, 2548, 1378));
+        assert_eq!(start, Rect::new(12, 660, 654, 1380));
+        assert_eq!(cc, Rect::new(2188, 980, 2548, 1380));
     }
 
     /// The click on an island's own button is not "outside" the panel: the glass is what is kept, and the rest of the window (a margin that

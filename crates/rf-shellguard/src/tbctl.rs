@@ -144,6 +144,9 @@ pub struct Controller {
     next_guard_try_ms: u64,
     guard_confirmed_ms: u64,
     throttle: Throttle,
+    /// The work area this controller last set for each monitor it changed (monitor id, rectangle): a work area that is one of them
+    /// is ours (`tbwork::plan_edge_held`). Forgotten when the edge is given back and when the user's rectangles are put back.
+    held: Vec<(String, [i32; 4])>,
     /// The "set too often" warning was written for the present stretch of refusals (it is said once, not every second).
     throttle_said: bool,
     /// The dock changed its band and the work area has not followed yet. A set that follows the dock's own word is not held back by
@@ -182,6 +185,7 @@ impl Controller {
             guard_confirmed_ms: 0,
             // Explorer may recompute the work area whenever it likes: give it back at most 4 times a minute.
             throttle: Throttle::new(4, 60_000),
+            held: Vec::new(),
             throttle_said: false,
             band_owed: false,
             band_px: None,
@@ -441,6 +445,7 @@ impl Controller {
         w.dock_give_back_edge();
         self.dock_edge = None;
         self.edge = Edge::Free;
+        self.held.clear();
         self.edge_failures = 0;
         self.next_edge_try_ms = 0;
     }
@@ -555,7 +560,7 @@ impl Controller {
                     return;
                 }
                 let mons = w.monitors();
-                let plan = tbwork::plan_edge(&mons, &self.bars, self.band_px);
+                let plan = tbwork::plan_edge_held(&mons, &self.bars, self.band_px, &self.held_rects());
                 if !self.foreign_said && plan.monitors.iter().any(|m| m.verdict == Verdict::Foreign) {
                     self.foreign_said = true;
                     w.warn("taskbar: another toolbar reserves room on a monitor (or the taskbar is not at the bottom); its work area is left alone and the taskbar's strip stays there");
@@ -606,6 +611,7 @@ impl Controller {
             w.dock_give_back_edge();
             self.dock_edge = None;
             self.edge = Edge::Free;
+        self.held.clear();
             self.fail_edge(now);
         }
     }
@@ -625,7 +631,7 @@ impl Controller {
     /// The edge is ours: the dock's strip follows the band, and a work area that Explorer took back is set again.
     fn hold_edge(&mut self, w: &mut dyn HideWorld, now: u64) {
         let mons = w.monitors();
-        let plan = tbwork::plan_edge(&mons, &self.bars, self.band_px);
+        let plan = tbwork::plan_edge_held(&mons, &self.bars, self.band_px, &self.held_rects());
         if plan.primary_ours()
             && let Some(edge) = plan.dock_edge(self.band_px)
             && self.dock_edge != Some(edge)
@@ -639,7 +645,7 @@ impl Controller {
     /// Reads the monitors afresh (Explorer recomputed them when the dock let go) and sets what the rules want.
     fn set_areas(&mut self, w: &mut dyn HideWorld, now: u64) {
         let mons = w.monitors();
-        let plan = tbwork::plan_edge(&mons, &self.bars, self.band_px);
+        let plan = tbwork::plan_edge_held(&mons, &self.bars, self.band_px, &self.held_rects());
         self.set_changes(w, now, &plan);
     }
 
@@ -662,6 +668,10 @@ impl Controller {
                 false
             }
         }
+    }
+
+    fn held_rects(&self) -> Vec<[i32; 4]> {
+        self.held.iter().map(|(_, r)| *r).collect()
     }
 
     fn set_changes(&mut self, w: &mut dyn HideWorld, now: u64, plan: &tbwork::EdgePlan) {
@@ -687,8 +697,12 @@ impl Controller {
         }
         self.throttle_said = false;
         for c in &changes {
-            if let Err(e) = w.hold_work_area(c.from, c.to) {
-                w.warn(&format!("taskbar: a work area could not be set: {e}"));
+            match w.hold_work_area(c.from, c.to) {
+                Ok(()) => {
+                    self.held.retain(|(id, _)| *id != c.id);
+                    self.held.push((c.id.clone(), c.to));
+                }
+                Err(e) => w.warn(&format!("taskbar: a work area could not be set: {e}")),
             }
         }
     }
@@ -804,6 +818,7 @@ impl Controller {
                 w.dock_give_back_edge();
             }
             self.edge = Edge::Free;
+        self.held.clear();
             self.edge_failures = 0;
             self.next_edge_try_ms = 0;
         }
@@ -811,6 +826,7 @@ impl Controller {
         st.clear_hidden_taskbar();
         st.set_pending_restore(false);
         st.set_original_work_areas(&[]);
+        self.held.clear();
         if let Err(e) = w.save_state(&st) {
             w.warn(&format!("taskbar: the record could not be removed (the windows are shown): {e}"));
         }

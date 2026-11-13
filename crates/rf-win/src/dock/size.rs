@@ -119,9 +119,9 @@ mod tests {
     fn the_default_size_is_the_dock_as_it_was() {
         let work = Rect::new(0, 0, 1920, 1032);
         let i = layout::islands(work, unit(1.0, 1.0), W);
-        assert_eq!(i.left, Rect::new(12, 1032 - 6 - 48, 12 + 330, 1032 - 6));
-        assert_eq!(i.middle, Rect::new(660, 1032 - 6 - 72, 1260, 1032 - 6));
-        assert_eq!(layout::reserved_thickness(unit(1.0, 1.0)), 84);
+        assert_eq!(i.left, Rect::new(12, 1032 - 4 - 48, 12 + 330, 1032 - 4));
+        assert_eq!(i.middle, Rect::new(660, 1032 - 4 - 72, 1260, 1032 - 4));
+        assert_eq!(layout::reserved_thickness(unit(1.0, 1.0)), 80);
         let p = layout::placements(&i, Rect::new(0, 0, 1920, 1080), unit(1.0, 1.0), false);
         assert_eq!(p.middle.margins(), [44, 12, 44, 4]);
         assert_eq!(layout::growth_room(&i, unit(1.0, 1.0)), 40);

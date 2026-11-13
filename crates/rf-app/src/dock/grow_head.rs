@@ -189,11 +189,11 @@ mod tests {
 
     #[test]
     fn on_the_users_screen_at_100_percent_the_header_the_content_and_the_row_stand_so() {
-        // the left glass (12, 1338, 342, 1386); the panel, 65 px shorter than 720, 8 px above it; the grown glass (12, 675, 654, 1386)
+        // the left glass (12, 1340, 342, 1388); the panel, 65 px shorter than 720, 8 px above it; the grown glass (12, 677, 654, 1388)
         let (island, panel_rect, grown, unit) = setup(1.0, 1.0, 330.0);
-        assert_eq!(island, Rect::new(12, 1338, 342, 1386));
-        assert_eq!(grown, Rect::new(12, 675, 654, 1386));
-        assert_eq!(panel_rect, Rect::new(12, 675, 654, 1330));
+        assert_eq!(island, Rect::new(12, 1340, 342, 1388));
+        assert_eq!(grown, Rect::new(12, 677, 654, 1388));
+        assert_eq!(panel_rect, Rect::new(12, 677, 654, 1332));
         let l = layout(island, panel_rect, grown, unit, 1.0);
         assert_eq!(l.head.width, 642.0);
         assert_eq!((l.head.height, l.head.line_y, l.head.centre), (60.0, 59.0, 29.5));

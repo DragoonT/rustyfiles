@@ -111,7 +111,7 @@ passes it on, `MiddleIsland::row_right_click`). There is no setting; the right c
 ## Windows, margins and the pointer
 
 The three windows are always on top, never activated by a click (they do not take the keyboard from the app you are typing in), have
-no taskbar button and are not in Alt+Tab. The VISIBLE glass of all three has its bottom edge 6 px (10 until a user asked for less room above and below the dock; the band keeps the same 6 above the middle island) above the bottom of the monitor's
+no taskbar button and are not in Alt+Tab. The VISIBLE glass of all three has its bottom edge 4 px (10, then 6, until a user asked twice for less room above and below the dock; the band keeps the same 4 above the middle island) above the bottom of the monitor's
 work area, so with the Windows taskbar visible they float just above it, and the band the desktop toolbar reserves is unchanged. With
 `shell_hide_taskbar` on and the hide confirmed the dock takes the bottom edge instead: the islands are placed from the monitor's bottom
 edge (`dock::system::take_edge`), the dock's own toolbar registration is given back, and the host sets the work area itself (the monitor
