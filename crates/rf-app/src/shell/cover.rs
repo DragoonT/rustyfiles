@@ -22,7 +22,8 @@ use std::time::{Duration, Instant};
 use futures::StreamExt as _;
 use futures::channel::mpsc::UnboundedReceiver;
 use gpui_kit::*;
-use rf_core::desktop::cover::geometry::cover_rect;
+use rf_core::desktop::corners;
+use rf_core::desktop::cover::geometry::{TRIMMED_ROWS, cover_rect};
 use rf_core::desktop::cover::plan::{self, Debounce, Have, Op, Want};
 use rf_core::desktop::geom::Rect;
 use rf_core::desktop::grid::{Spacing, metrics_spaced};
@@ -248,6 +249,12 @@ pub fn on_settings(cx: &mut App) {
             log::warn!("cover: could not start the system icons' refresh: {e}");
         }
     }
+    // (a setting the desktop reads when it is drawn may have changed: the wallpaper's corner radius)
+    let views: Vec<_> = cx.try_global::<CoverHost>().map_or_else(Vec::new, |h| h.windows.iter().map(|w| w.view.clone()).collect());
+    for v in views {
+        v.update(cx, |_, cx| cx.notify());
+    }
+    sync_corner_patches(cx);
     let want = cx.try_global::<Settings>().is_some_and(|s| crate::dock::parts::runs(s, crate::dock::parts::Part::Desktop));
     match (want, cx.has_global::<CoverHost>()) {
         (true, false) => start(cx),
@@ -511,6 +518,20 @@ fn reconcile(cx: &mut App) {
     if let Some(host) = cx.try_global::<CoverHost>() {
         host._follower.poke(rf_win::desktop::wallwatch::Cause::Manual);
     }
+    // (a window made just now is not on the screen yet and gets its patches when it is: see `create`)
+    sync_corner_patches(cx);
+}
+
+/// The black pixels under the wallpaper's rounded bottom corners, in the pixel row the cover windows leave out
+/// (`rf_win::desktop::cornerpatch`): brought in line with the setting and with the monitors the windows were last placed for. The
+/// radius is the setting's logical px at each monitor's own scale, as the view draws it.
+fn sync_corner_patches(cx: &mut App) {
+    let radius = cx.try_global::<Settings>().map_or(0, |s| i32::from(s.desktop_corner_radius));
+    let Some(host) = cx.try_global::<CoverHost>() else { return };
+    for w in &host.windows {
+        let px = (radius as f32 * w.seen.scale_percent as f32 / 100.0).round() as i32;
+        rf_win::desktop::cornerpatch::set(w.hwnd, &corners::bottom_patches(w.seen.rect, px, TRIMMED_ROWS));
+    }
 }
 
 /// The toolkit's display for a monitor, if it reports one that matches.
@@ -574,7 +595,11 @@ fn create(infos: &[MonitorInfo], index: usize, cx: &mut App) {
             }
             Err(e) => log::error!("cover: {e:#}"),
         }
-        cx.update(|cx| view.update(cx, |v, _| v.set_window(hwnd)));
+        cx.update(|cx| {
+            view.update(cx, |v, _| v.set_window(hwnd));
+            // (the window is on the screen now: the patches under its rounded corners can stand above it)
+            sync_corner_patches(cx);
+        });
     })
     .detach();
 }
@@ -588,6 +613,7 @@ fn place_again(m: &MonitorInfo, cx: &mut App) {
             rf_win::desktop::cover::place(hwnd, rect);
         })
         .detach();
+    sync_corner_patches(cx);
 }
 
 fn remove(key: &str, cx: &mut App) {

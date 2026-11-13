@@ -46,6 +46,16 @@ impl Section {
 pub(crate) enum Control {
     /// Follow Windows / show / hide.
     Choice(fn(&Settings) -> IconChoice, fn(&mut Settings, IconChoice)),
+    /// A corner radius in logical px, one of [`RADII`].
+    Radius(fn(&Settings) -> u8, fn(&mut Settings, u8)),
+}
+
+/// The radii the wallpaper's corners can have (0: square).
+pub(crate) const RADII: [u8; 5] = [0, 8, 12, 16, 24];
+
+/// The radii as the dropdown writes them.
+pub(crate) fn radius_labels() -> Vec<(u8, String)> {
+    RADII.iter().map(|&r| (r, if r == 0 { t!("Kapalı").to_string() } else { format!("{r} px") })).collect()
 }
 
 /// One setting of the page.
@@ -111,6 +121,16 @@ pub(crate) fn entries() -> Vec<Entry> {
             t!("\"Gizle\", dosyalar dahil bütün simgeleri saklar. Masaüstüne sağ tıklayınca açılan menüde de aynı anahtar vardır; ikisinden biri gizlediyse simgeler gizlidir."),
             None,
             Control::Choice(|s| s.desktop_show_icons, |s, v| s.desktop_show_icons = v),
+        ),
+        e(
+            "desktop-corner-radius",
+            "desktop_corner_radius",
+            General,
+            L::Square,
+            t!("Duvar kâğıdının köşelerini yuvarla (deneysel)"),
+            t!("Masaüstünün duvar kâğıdı yuvarlak köşelerle çizilir; köşelerin arkası siyah kalır. Büyütülmüş bir pencere köşeyi kapatır: etki yalnızca masaüstü görünürken vardır."),
+            None,
+            Control::Radius(|s| s.desktop_corner_radius, |s, v| s.desktop_corner_radius = v),
         ),
         e(
             "desktop-icon-this-pc",
@@ -192,6 +212,7 @@ fn row(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
     // (the choices are only settings: they are saved before the desktop runs, so the row is usable with the dock off)
     let control = match e.control {
         Control::Choice(get, set) => dropdown(e.id, p, get(s), choice_labels(), set),
+        Control::Radius(get, set) => dropdown(e.id, p, get(s), radius_labels(), set),
     };
     // (the card notes its title and description for the Settings search)
     shell(p).child(card_body(p, e.icon, e.title.into(), Some(e.desc.into()), Some(control))).into_any_element()
@@ -260,7 +281,7 @@ mod tests {
         let g = grouped(&entries());
         assert_eq!(g.iter().map(|(s, _)| *s).collect::<Vec<_>>(), Section::ALL.to_vec());
         let fields = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
-        assert_eq!(fields(Section::General), ["desktop_show_icons"]);
+        assert_eq!(fields(Section::General), ["desktop_show_icons", "desktop_corner_radius"]);
         assert_eq!(
             fields(Section::Icons),
             ["desktop_icon_this_pc", "desktop_icon_user_files", "desktop_icon_network", "desktop_icon_recycle_bin", "desktop_icon_control_panel"]
@@ -273,7 +294,7 @@ mod tests {
         for e in entries() {
             let Some(kind) = e.kind else { continue };
             seen.push(kind);
-            let Control::Choice(get, set) = e.control;
+            let Control::Choice(get, set) = e.control else { panic!("{}: a system icon has a three-state choice", e.field) };
             let mut s = Settings::default();
             assert_eq!(get(&s), IconChoice::Follow, "{}: the default follows Windows", e.field);
             set(&mut s, IconChoice::Show);
@@ -296,6 +317,7 @@ mod tests {
             let mut s = Settings::default();
             match e.control {
                 Control::Choice(_, set) => set(&mut s, IconChoice::Hide),
+                Control::Radius(_, set) => set(&mut s, 12),
             }
             let after = serde_json::to_value(&s).unwrap();
             let after = after.as_object().unwrap();
@@ -311,8 +333,10 @@ mod tests {
         let d = Settings::default();
         assert!(!parts::runs(&d, parts::Part::Desktop), "experimental: off with the dock, which is off until asked for");
         for e in entries() {
-            let Control::Choice(get, _) = e.control;
-            assert_eq!(get(&d), IconChoice::Follow, "{}", e.field);
+            match e.control {
+                Control::Choice(get, _) => assert_eq!(get(&d), IconChoice::Follow, "{}", e.field),
+                Control::Radius(get, _) => assert_eq!(get(&d), 0, "{}: square corners until asked", e.field),
+            }
         }
         assert!(crate::shell::desktop::choices::from_settings(&d).is_default());
     }
@@ -337,7 +361,7 @@ mod tests {
         // the on/off of the desktop is the dock's one switch (`dock/parts.rs`); what is left here are the desktop's own choices, saved
         // before the desktop runs
         for e in entries() {
-            assert!(matches!(e.control, Control::Choice(..)), "{} is not a choice", e.field);
+            assert!(matches!(e.control, Control::Choice(..) | Control::Radius(..)), "{} is not a dropdown", e.field);
             assert_ne!(e.field, "shell_desktop_cover");
         }
         // the desktop runs with the dock and stops with it

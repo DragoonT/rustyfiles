@@ -1814,4 +1814,6 @@ pub const EN: &[(&str, &str)] = &[
     ("Kullanımda: açık dosyaları kapatıp yeniden deneyin", "In use: close the open files and try again"),
     ("Çıkarılabilir sürücü", "Removable drive"),
     ("Güvenle çıkar", "Eject"),
+    ("Duvar kâğıdının köşelerini yuvarla (deneysel)", "Round the wallpaper's corners (experimental)"),
+    ("Masaüstünün duvar kâğıdı yuvarlak köşelerle çizilir; köşelerin arkası siyah kalır. Büyütülmüş bir pencere köşeyi kapatır: etki yalnızca masaüstü görünürken vardır.", "The desktop's wallpaper is drawn with rounded corners; black shows behind them. A maximized window covers the corner: the effect is there only while the desktop is visible."),
 ];

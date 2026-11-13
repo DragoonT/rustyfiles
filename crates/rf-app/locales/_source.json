@@ -9762,5 +9762,17 @@
   "key": "Güvenle çıkar",
   "tr": "Güvenle çıkar",
   "en": "Eject"
+ },
+ {
+  "id": "e21d771f",
+  "key": "Duvar kâğıdının köşelerini yuvarla (deneysel)",
+  "tr": "Duvar kâğıdının köşelerini yuvarla (deneysel)",
+  "en": "Round the wallpaper's corners (experimental)"
+ },
+ {
+  "id": "9dbf6e1f",
+  "key": "Masaüstünün duvar kâğıdı yuvarlak köşelerle çizilir; köşelerin arkası siyah kalır. Büyütülmüş bir pencere köşeyi kapatır: etki yalnızca masaüstü görünürken vardır.",
+  "tr": "Masaüstünün duvar kâğıdı yuvarlak köşelerle çizilir; köşelerin arkası siyah kalır. Büyütülmüş bir pencere köşeyi kapatır: etki yalnızca masaüstü görünürken vardır.",
+  "en": "The desktop's wallpaper is drawn with rounded corners; black shows behind them. A maximized window covers the corner: the effect is there only while the desktop is visible."
  }
 ]

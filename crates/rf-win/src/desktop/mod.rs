@@ -23,6 +23,7 @@
 
 pub mod bare;
 pub mod binwatch;
+pub mod cornerpatch;
 pub mod cover;
 pub mod import;
 pub mod items;

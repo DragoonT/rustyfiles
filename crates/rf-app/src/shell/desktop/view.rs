@@ -571,6 +571,8 @@ impl DesktopView {
         if changed {
             self.reread_system_icons();
         }
+        // (the wallpaper's corner radius is read when the desktop is drawn)
+        cx.notify();
     }
 
     /// Reads the system icons' settings and the Recycle Bin's state again, on a thread of its own (the shell answers the second one).
@@ -1079,10 +1081,16 @@ impl Render for DesktopView {
 
         // the wallpaper, or the background colour until it is there
         let bg = self.wall_src.as_ref().map_or(Rgb(32, 32, 32), |w| w.background);
+        // Rounded corners, when the setting asks for them, with black behind them: all four, also where two monitors meet (the
+        // user's choice). The radius is in logical px, so it looks the same on every monitor's scale. The bottom pixel row is not
+        // this window's (`cover::geometry`); the black under the bottom corners there is `rf_win::desktop::cornerpatch`.
+        let radius = cx.try_global::<crate::settings::Settings>().map_or(0.0, |s| f32::from(s.desktop_corner_radius));
         let wallpaper: AnyElement = match &self.wall {
-            Some(w) => img(w.image.clone()).absolute().left(px(0.)).top(px(0.)).w(px(sw)).h(px(sh)).object_fit(ObjectFit::Fill).into_any_element(),
-            None => div().absolute().left(px(0.)).top(px(0.)).w(px(sw)).h(px(sh)).bg(rgb_of(bg)).into_any_element(),
+            Some(w) => img(w.image.clone()).absolute().left(px(0.)).top(px(0.)).w(px(sw)).h(px(sh)).object_fit(ObjectFit::Fill).rounded(px(radius)).into_any_element(),
+            None => div().absolute().left(px(0.)).top(px(0.)).w(px(sw)).h(px(sh)).bg(rgb_of(bg)).rounded(px(radius)).into_any_element(),
         };
+        // (what shows behind a rounded corner: black, as a screen's own corner would be)
+        let behind = (radius > 0.0).then(|| div().absolute().left(px(0.)).top(px(0.)).w(px(sw)).h(px(sh)).bg(gpui_kit::black()));
 
         let mut tiles: Vec<AnyElement> = Vec::new();
         let mut ghosts: Vec<AnyElement> = Vec::new();
@@ -1180,6 +1188,7 @@ impl Render for DesktopView {
             .on_drag_move::<ExternalPaths>(cx.listener(|this, ev: &DragMoveEvent<ExternalPaths>, _, cx| this.on_external_move(ev, cx)))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| this.on_external_drop_background(paths, window, cx)))
             .child(events)
+            .children(behind)
             .child(wallpaper)
             .children(tiles)
             .children(outline)

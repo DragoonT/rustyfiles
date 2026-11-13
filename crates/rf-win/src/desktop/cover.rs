@@ -394,7 +394,9 @@ pub fn reinsert_if_needed() -> bool {
     }
     let desktop = unsafe { GetShellWindow() };
     let d = (!desktop.0.is_null()).then_some(desktop.0 as isize);
-    if zorder::is_in_place(&visible_order(), &mine, d) {
+    // (a corner patch stands directly above its own cover window, so between two covers: it is not "something that came between")
+    let order: Vec<isize> = visible_order().into_iter().filter(|h| !super::cornerpatch::is_patch(*h)).collect();
+    if zorder::is_in_place(&order, &mine, d) {
         return false;
     }
     reinsert_all();

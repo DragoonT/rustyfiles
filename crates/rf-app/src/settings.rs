@@ -617,6 +617,10 @@ pub struct Settings {
     pub desktop_icon_control_panel: rf_core::desktop::virtuals::IconChoice,
     /// "Show desktop icons" as a whole: follow Windows, always show, or hide every icon (files included).
     pub desktop_show_icons: rf_core::desktop::virtuals::IconChoice,
+    /// The desktop's wallpaper is drawn with rounded corners of this radius (logical px; 0, the default: square, as it always was).
+    /// All four corners of every monitor, black behind them (`rf_core::desktop::corners` for the bottom pixel row). An experiment
+    /// the user asked for, to go with the dock's round islands.
+    pub desktop_corner_radius: u8,
 }
 
 impl Default for Settings {
@@ -758,6 +762,7 @@ impl Default for Settings {
             desktop_icon_recycle_bin: Default::default(),
             desktop_icon_control_panel: Default::default(),
             desktop_show_icons: Default::default(),
+            desktop_corner_radius: 0,
         }
     }
 }

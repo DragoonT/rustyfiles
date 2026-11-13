@@ -17,6 +17,7 @@
 //! | `import` | turning Explorer's icon positions (as read from its view) into our cells, refusing when the numbers do not fit the monitors |
 
 pub mod arrival;
+pub mod corners;
 pub mod cover;
 pub mod geom;
 pub mod grid;
