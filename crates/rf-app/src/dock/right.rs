@@ -41,7 +41,20 @@ pub struct RightIsland {
     /// The keys, once the keyboard is in the tray strip (`tray_strip::focus_strip`). Made when the island first draws a strip: without
     /// one the island tracks no focus at all, so it behaves as it did before the strip existed.
     focus: Option<FocusHandle>,
+    /// The removable drives that hold a volume now (letter, label): each has a safe-removal button of its own (the primary monitor's).
+    drives: Vec<(char, String)>,
+    /// A drive that could not be removed a moment ago (it is in use): its button is marked for a few seconds.
+    eject_failed: Option<(char, std::time::Instant)>,
+    /// The drives have been read once: the first reading also tells the host the island's width with its own buttons.
+    drives_read: bool,
 }
+
+/// The most safe-removal buttons shown (more removable drives than this are rare; the rest are removed from the file manager).
+const MOST_DRIVES: usize = 3;
+/// How often the removable drives are looked at (off the UI thread: a few system calls).
+const DRIVES_EVERY: Duration = Duration::from_secs(3);
+/// How long a failed removal is shown on its button.
+const FAILED_FOR: Duration = Duration::from_secs(4);
 
 impl RightIsland {
     pub fn new(glass: Rc<RefCell<IslandGlass>>, mon: MonId, lines: ClockLines, content: Content, cx: &mut Context<Self>) -> Self {
@@ -57,13 +70,80 @@ impl RightIsland {
             }
         })
         .detach();
-        RightIsland { glass, mon, content, lines, reported, tray_extra: 0.0, focus: None }
+        // The island's own safe-removal buttons (the user asked for them and for Windows Security beside the network and volume
+        // symbols, as ours and not as Windows' notification icons, which reach a taskbar that is not Explorer's only by luck):
+        // the removable drives are read every few seconds on a worker thread, and the island is drawn again only when they changed.
+        if mon.is_home() {
+            cx.spawn(async move |this, cx| {
+                loop {
+                    let drives = cx.background_executor().spawn(async { rf_win::volume::removable_drives() }).await;
+                    if this.update(cx, |me, cx| me.set_drives(drives, cx)).is_err() {
+                        break;
+                    }
+                    cx.background_executor().timer(DRIVES_EVERY).await;
+                }
+            })
+            .detach();
+        }
+        RightIsland { glass, mon, content, lines, reported, tray_extra: 0.0, focus: None, drives: Vec::new(), eject_failed: None, drives_read: false }
+    }
+
+    /// How many buttons of its own the island has before the network symbol: Windows Security, and one for each removable drive.
+    fn sys_buttons(&self) -> usize {
+        if self.mon.is_home() { 1 + self.drives.len().min(MOST_DRIVES) } else { 0 }
+    }
+
+    fn sys_extra(&self) -> f32 {
+        self.sys_buttons() as f32 * (plan::BUTTON + plan::RIGHT_GAP)
+    }
+
+    fn set_drives(&mut self, drives: Vec<(char, String)>, cx: &mut Context<Self>) {
+        let failed_over = self.eject_failed.is_some_and(|(_, at)| at.elapsed() >= FAILED_FOR);
+        if failed_over {
+            self.eject_failed = None;
+        }
+        if drives == self.drives && !failed_over && self.drives_read {
+            return;
+        }
+        self.drives_read = true;
+        self.drives = drives;
+        let w = self.wanted_width();
+        if (w - self.reported).abs() > 0.5 {
+            self.reported = w;
+            super::host::set_width(self.mon, Kind::Right, w, cx);
+        }
+        cx.notify();
+    }
+
+    /// The user pressed a drive's safe-removal button: the drive is ejected the way the file manager does it (the shell's own verb,
+    /// on the shell thread), and the drives are read again at once. A drive that is in use stays, and its button says so for a moment.
+    fn eject(&mut self, letter: char, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let done = cx
+                .background_executor()
+                .spawn(async move { rf_win::sta::call(Duration::from_secs(30), move || rf_win::volume::eject(letter).map_err(|e| e.to_string())) })
+                .await;
+            let failed = !matches!(done, Some(Ok(())));
+            if failed {
+                log::warn!("dock: the drive could not be removed safely: {done:?}");
+            }
+            let drives = cx.background_executor().spawn(async { rf_win::volume::removable_drives() }).await;
+            let _ = this.update(cx, |me, cx| {
+                // (the drive is still there after a removal that "worked": it is in use after all)
+                if failed || drives.iter().any(|(l, _)| *l == letter) {
+                    me.eject_failed = Some((letter, std::time::Instant::now()));
+                    cx.notify();
+                }
+                me.set_drives(drives, cx);
+            });
+        })
+        .detach();
     }
 
     /// The width the content needs now (logical px). The primary monitor's: the symbols, the clock and the bell, and the tray strip's
     /// room; a secondary monitor's: the clock and, when there is room, the bell.
     fn wanted_width(&self) -> f32 {
-        if self.mon.is_home() { plan::right_width(&self.lines) + self.tray_extra } else { plan::right_width_secondary(plan::clock_width(&self.lines), self.content.bell) }
+        if self.mon.is_home() { plan::right_width(&self.lines) + self.tray_extra + self.sys_extra() } else { plan::right_width_secondary(plan::clock_width(&self.lines), self.content.bell) }
     }
 
     /// The host's layout may have changed what this island holds (the bell, by the monitor's width): true when it did.
@@ -107,7 +187,7 @@ impl RightIsland {
         let [ml, mt, ..] = super::host::insets_on(self.mon, Kind::Right, cx).margins;
         let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
         let controls = if self.mon.is_home() {
-            super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra)
+            super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra, self.sys_buttons())
         } else {
             super::empty::right_controls_secondary(plan::clock_width(&self.lines), self.content.bell)
         };
@@ -251,6 +331,37 @@ impl Render for RightIsland {
         // the other programs' tray icons, with a thin separator after them (nothing at all without a tray source); the primary monitor's
         let tray = if home { super::tray_strip::strip_element(pal, cx) } else { None };
 
+        let failed = self.eject_failed.filter(|(_, at)| at.elapsed() < FAILED_FOR).map(|(l, _)| l);
+        let ejects: Vec<AnyElement> = if home {
+            self.drives
+                .iter()
+                .take(MOST_DRIVES)
+                .map(|(letter, _)| {
+                    let letter = *letter;
+                    let (hover, pressed) = (pal.hover_fill().hsla(), pal.press_plate().hsla());
+                    let color = if failed == Some(letter) { gpui_kit::rgb(0xE5484D).into() } else { pal.text().hsla() };
+                    div()
+                        .mr(px(plan::RIGHT_GAP * k))
+                        .child(
+                            div()
+                                .id(("dock-eject", letter as usize))
+                                .size(px(plan::BUTTON * k))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(px(8. * k))
+                                .cursor_pointer()
+                                .hover(move |s| s.bg(hover))
+                                .active(move |s| s.bg(pressed))
+                                .child(Icon::new(L::Usb).size(px(16. * k)).text_color(color))
+                                .on_click(cx.listener(move |me, _, _, cx| me.eject(letter, cx))),
+                        )
+                        .into_any_element()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         // (keys are listened to, and focus tracked, only while a strip is drawn)
         let focus = tray.is_some().then(|| self.focus.get_or_insert_with(|| cx.focus_handle()).clone());
         super::host::island_box(pal, fallback, k)
@@ -273,7 +384,9 @@ impl Render for RightIsland {
                 .children(tray)
                 // (the network and volume symbols and the separator after them are the primary monitor's)
                 .when(home, |d| {
-                    d.child(icon_button("dock-network", network_icon, pal, k, open_controls))
+                    // the island's own buttons: safe removal for each removable drive, then Windows Security
+                    d.children(ejects).child(div().mr(px(plan::RIGHT_GAP * k)).child(icon_button("dock-security", L::ShieldCheck, pal, k, |_| super::panel_parts::open_uri("windowsdefender:"))))
+                        .child(icon_button("dock-network", network_icon, pal, k, open_controls))
                         .child(div().ml(px(plan::RIGHT_GAP * k)).child(icon_button("dock-volume", volume_icon, pal, k, open_controls)))
                         .child(div().ml(px(plan::RIGHT_SEP_GAP * k)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH * k)).h(px(plan::RIGHT_SEP_HEIGHT * k)).bg(pal.separator().hsla()))
                 })

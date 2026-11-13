@@ -49,7 +49,7 @@ pub struct TrayShape {
 
 /// The right island's controls: the tray strip's cells and chevron (when there is a strip, which makes the island `tray_extra` units
 /// wider), the network and volume buttons, the clock and the bell, in the order and at the distances `right.rs` builds them.
-pub fn right_controls(clock_width: f32, tray: Option<TrayShape>, tray_extra: f32) -> Vec<Box4> {
+pub fn right_controls(clock_width: f32, tray: Option<TrayShape>, tray_extra: f32, sys: usize) -> Vec<Box4> {
     let y = |h: f32| (SIDE_HEIGHT - h) / 2.0;
     let mut out = Vec::new();
     let mut x = plan::SIDE_PAD;
@@ -62,6 +62,11 @@ pub fn right_controls(clock_width: f32, tray: Option<TrayShape>, tray_extra: f32
         }
         x += tray_extra;
     }
+    // the island's own buttons before the network symbol (safe removal for each removable drive, Windows Security): `right.rs`
+    for i in 0..sys {
+        out.push([x + i as f32 * (plan::BUTTON + plan::RIGHT_GAP), y(plan::BUTTON), plan::BUTTON, plan::BUTTON]);
+    }
+    x += sys as f32 * (plan::BUTTON + plan::RIGHT_GAP);
     let (network, volume) = (x, x + plan::BUTTON + plan::RIGHT_GAP);
     let clock = volume + plan::BUTTON + plan::RIGHT_SEP_GAP + rf_win::dock::layout::SEPARATOR_WIDTH + plan::RIGHT_SEP_GAP;
     let bell = clock + clock_width + plan::RIGHT_GAP;
@@ -189,7 +194,7 @@ mod tests {
     fn the_right_island_without_a_strip() {
         let lines = ClockLines { time: "14:05".into(), date: "12.11.2026".into() };
         let cw = plan::clock_width(&lines);
-        let c = right_controls(cw, None, 0.0);
+        let c = right_controls(cw, None, 0.0, 0);
         assert_eq!(c.len(), 4);
         let w = plan::right_width(&lines);
         // the bell ends where the content does
@@ -211,7 +216,7 @@ mod tests {
         let cw = plan::clock_width(&lines);
         let shape = TrayShape { visible: 3, chevron: true };
         let extra = ts::Layout { visible: vec![0, 1, 2], overflow: vec![], chevron: true }.extra_width();
-        let c = right_controls(cw, Some(shape), extra);
+        let c = right_controls(cw, Some(shape), extra, 0);
         assert_eq!(c.len(), 3 + 1 + 4);
         let w = plan::right_width(&lines) + extra;
         for j in 0..3 {
@@ -225,7 +230,7 @@ mod tests {
         let bell = c.last().unwrap();
         assert_eq!(bell[0] + bell[2] + plan::SIDE_PAD, w);
         // a strip with nothing in it but the chevron
-        let only = right_controls(cw, Some(TrayShape { visible: 0, chevron: true }), ts::Layout { visible: vec![], overflow: vec![0], chevron: true }.extra_width());
+        let only = right_controls(cw, Some(TrayShape { visible: 0, chevron: true }), ts::Layout { visible: vec![], overflow: vec![0], chevron: true }.extra_width(), 0);
         assert_eq!(only.len(), 1 + 4);
     }
 
@@ -287,5 +292,20 @@ mod tests {
         let big = boxes.iter().map(|b| b.icon).fold([0.0, 0.0, 0.0, 0.0], |a, b| if b[3] > a[3] { b } else { a });
         assert!(big[1] < pic.glass[1], "it stands out of the glass: {big:?}");
         assert!(!middle_is_empty(pic.glass, &boxes, (big[0] + big[2] / 2.0, big[1] + 1.0)));
+    }
+
+    /// The island's own buttons (safe removal, Windows Security) stand before the network symbol, each a button and a gap wide, and
+    /// push everything after them: the row is exactly that much wider.
+    #[test]
+    fn the_islands_own_buttons_stand_before_the_network_symbol() {
+        let cw = 64.0;
+        let (plain, with) = (right_controls(cw, None, 0.0, 0), right_controls(cw, None, 0.0, 2));
+        let step = plan::BUTTON + plan::RIGHT_GAP;
+        assert_eq!(with.len(), plain.len() + 2);
+        assert_eq!(with[0], [plan::SIDE_PAD, (SIDE_HEIGHT - plan::BUTTON) / 2.0, plan::BUTTON, plan::BUTTON]);
+        assert_eq!(with[1][0], plan::SIDE_PAD + step);
+        for (a, b) in plain.iter().zip(&with[2..]) {
+            assert_eq!([a[0] + 2.0 * step, a[1], a[2], a[3]], *b);
+        }
     }
 }

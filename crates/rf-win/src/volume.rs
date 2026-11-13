@@ -103,6 +103,25 @@ pub fn set_label(root: &Path, label: &str) -> std::io::Result<()> {
     unsafe { SetVolumeLabelW(windows::core::PCWSTR(wr.as_ptr()), label) }.map_err(|e| std::io::Error::from_raw_os_error(e.code().0 & 0xffff))
 }
 
+/// The removable drives that hold a volume now (a USB stick, a card in a reader): letter and label, in letter order. An empty card
+/// reader is left out. Blocks briefly (one call for each drive letter in use, one more for each removable one): off the UI thread.
+/// (A USB hard disk reports itself as a fixed drive and is not in this list yet.)
+pub fn removable_drives() -> Vec<(char, String)> {
+    let mask = unsafe { windows::Win32::Storage::FileSystem::GetLogicalDrives() };
+    (0..26u32)
+        .filter(|i| mask & (1 << i) != 0)
+        .filter_map(|i| {
+            let letter = (b'A' + i as u8) as char;
+            let root = format!("{letter}:\\");
+            let rw = wide(&root);
+            if unsafe { GetDriveTypeW(PCWSTR(rw.as_ptr())) } != 2 {
+                return None;
+            }
+            volume_info(Path::new(&root)).ok().map(|v| (letter, v.label))
+        })
+        .collect()
+}
+
 /// Fails when files are still open on the drive.
 pub fn eject(drive_letter: char) -> anyhow::Result<()> {
     let letter = drive_letter.to_ascii_uppercase();
