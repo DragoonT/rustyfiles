@@ -23,8 +23,9 @@
 //!   where it is, and the eye sees ONE glass growing. The panel's wash (the dark or light tint over its glass, which the island's own
 //!   glass does not have) comes in with the growth ([`ViewFrame::wash_alpha`]), so there is no step in the tone at either end. The island's window is never activated and its region stays its own rectangle: a click on the logo
 //!   reaches the logo, whatever the panel's region is.
-//! * THE ISLAND'S ROW STAYS EXACTLY AS IT IS (`Stays::RowAndField`, the Start panel): the logo, the search field in its place and the
-//!   weather, as the bottom row of the grown glass, nothing fades and nothing moves (the right island's rule: the whole row stays). The
+//! * THE ISLAND'S ROW STAYS (`Stays::RowAndField`, the Start panel): the logo and the search field in its place, as the bottom row of
+//!   the grown glass. The field WIDENS with the glass, up to the row's right padding (the user asked for it), and the weather, whose
+//!   room it takes, fades out at the start of the growth and comes back at the end of the way home (`grow_head.rs`). The
 //!   island's window is never activated, so it cannot take keys: the island does not draw its field meanwhile ([`island_fade`]) and
 //!   the PANEL draws its own search field, the one with the keyboard, in the same place at the same size ([`ViewFrame::layout`]
 //!   has the rectangle, `grow_head.rs` the numbers). A press on the field in the island's window (which lies over it and takes the
@@ -667,6 +668,9 @@ pub struct ViewFrame {
     /// The opacity of the panel's search field in the island's row: 0 while the island's own field is still the one seen, 1 from the
     /// moment the glass runs (the island's field is put away in the same frame, see [`island_fade`]).
     pub field_alpha: f32,
+    /// The glass's own progress, 0 (the island) to 1 (the grown panel): the field in the island's row widens by it
+    /// (`grow_head::Layout::field_width`).
+    pub grow: f32,
     /// The glass's rectangle and radius: what the plain fill is drawn in (over the glass, or alone when the glass is not there).
     pub wash: FRect,
     pub wash_radius: f32,
@@ -712,6 +716,7 @@ pub fn view_frame(id: PanelId, cx: &mut App) -> Option<ViewFrame> {
     let vf = ViewFrame {
         content: if running { f.content } else { 0.0 },
         field_alpha: if running { 1.0 } else { 0.0 },
+        grow: if running { f.u } else { 0.0 },
         wash: logical(f.rect),
         wash_radius: f.radius / scale,
         wash_alpha: wash.alpha,
@@ -769,10 +774,15 @@ pub fn own_row_given_up(cx: &App) -> f32 {
 
 /// What an island draws while its glass is part of the grown one: its whole row, as it is. Only its search field is not drawn when the
 /// panel draws its own in its place.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct IslandFade {
     /// The island's search field is not drawn: the panel's stands in its place (and takes the island's presses on it).
     pub field_hidden: bool,
+    /// The opacity of the island's weather: the panel's field widens over its room while the Start panel is open
+    /// (`grow_head::weather_alpha`); 1 for the islands whose row stays whole.
+    pub weather: f32,
+    /// The glass is moving: the island draws again next frame (its weather follows the motion).
+    pub moving: bool,
 }
 
 /// What the island `kind` draws now; `None` when its glass is its own (nothing grows out of it at the moment, or the panel's glass is
@@ -782,7 +792,10 @@ pub fn island_fade(kind: Kind, cx: &App) -> Option<IslandFade> {
     if g.cfg.kind != kind || g.run.phase != Phase::Running {
         return None;
     }
-    Some(IslandFade { field_hidden: g.cfg.stays.field_is_the_panels() })
+    let field_hidden = g.cfg.stays.field_is_the_panels();
+    let now = backdrop::now_ms();
+    let weather = if field_hidden { super::grow_head::weather_alpha(g.frame(now).u) } else { 1.0 };
+    Some(IslandFade { field_hidden, weather, moving: field_hidden && g.run.moving(now) })
 }
 
 #[cfg(test)]

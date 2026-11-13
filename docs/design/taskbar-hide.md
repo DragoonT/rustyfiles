@@ -217,7 +217,7 @@ thread); the dock's registration died with the host.
 
 While the edge is ours: a work area that Explorer takes back (it recomputes it when a toolbar changes, on a display change, after a
 restart) is answered after 300 ms, at most four times a minute, and then left alone so the two cannot fight for ever. The dock's
-band changing (its size, `dock_reserve`) moves the edge and the work area (`set_band`). `TaskbarCreated` that is not an Explorer restart
+band changing (its size, `dock_reserve`, the thin dock's band while a window is maximised) moves the edge and the work area (`set_band`); that set is the dock's own word, not Explorer's doing, so it is not held back by the four a minute and does not use up one of them (the thin dock changes the band at most every two seconds). `TaskbarCreated` that is not an Explorer restart
 (our own tray host broadcasts it when it starts and stops) no longer makes the controller forget the windows it hid; before, the taskbar
 stayed hidden and unaccounted for (`explorer_restarted` now keeps what is still the same window).
 

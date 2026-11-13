@@ -1753,4 +1753,6 @@ pub const EN: &[(&str, &str)] = &[
     ("{n} öğe kopyalanamadı: bunun için Windows kabuğu (Explorer) gerekiyor ve kabuk çalışmıyor. Geri kalan her şey yapıldı.", "{n} items could not be copied: that needs the Windows shell (Explorer) and no shell is running. Everything else was done."),
     ("{n} öğe taşınamadı: bunun için Windows kabuğu (Explorer) gerekiyor ve kabuk çalışmıyor. Geri kalan her şey yapıldı.", "{n} items could not be moved: that needs the Windows shell (Explorer) and no shell is running. Everything else was done."),
     ("Bazı öğeler silinemedi (kilitli, salt okunur ya da izin yok); geri kalanı silindi. Ayrıntıyı gösterecek Windows kabuğu (Explorer) çalışmıyor.", "Some items could not be deleted (locked, read-only or access denied); the rest was deleted. No Windows shell (Explorer) is running to show details."),
+    ("Pencere büyütüldüğünde dock'u incelt", "Make the dock thin when a window is maximized"),
+    ("Ekranda büyütülmüş bir pencere varken orta ada yan adalar kadar inceleşir ve pencere o kadar yer kazanır; fareyi yaklaştırınca eski boyutuna döner.", "While a window is maximized on the screen the middle island shrinks to the height of the side islands and the window gains that room; it grows back when the pointer comes near."),
 ];

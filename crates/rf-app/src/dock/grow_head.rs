@@ -80,6 +80,27 @@ pub struct Layout {
     /// lengths follow (the field's padding, picture and text are theirs times this).
     pub field: [f32; 4],
     pub field_k: f32,
+    /// The field's width when the glass is fully grown: from its place to the row's side padding at the right (the weather is put
+    /// away meanwhile, `grow_host::IslandFade::weather`). Never less than the island's own field.
+    pub field_wide: f32,
+}
+
+impl Layout {
+    /// The field's width when the glass has grown by `u` (the glass's own progress, 0 to 1): the island's own field at 0, the whole
+    /// row at 1, so the field widens with the glass and narrows with it (the user: when Start opens the search field widens too).
+    pub fn field_width(&self, u: f32) -> f32 {
+        self.field[2] + (self.field_wide - self.field[2]) * u.clamp(0.0, 1.0)
+    }
+}
+
+/// How far the kit's input stands in from its own left edge at the size the row's field uses (`Size::Size`: 8 px): the field takes
+/// it back, so the text and the caret start exactly where the island's own text starts.
+pub const INPUT_INSET: f32 = 8.0;
+
+/// The opacity of the island's weather while the glass has grown by `u`: gone by a fifth of the way (the widening field takes its
+/// room), back in the last fifth of the way home.
+pub fn weather_alpha(u: f32) -> f32 {
+    (1.0 - u / 0.2).clamp(0.0, 1.0)
 }
 
 /// The layout of the glass `grown` that has grown out of `island` for a panel whose own rectangle is `panel` (all device px, screen
@@ -93,6 +114,8 @@ pub fn layout(island: Rect, panel: Rect, grown: Rect, unit: f32, scale: f32) -> 
     let content_top = HEAD_H + page::SECTION_GAP;
     let content_bottom = ((panel.bottom - grown.top) as f32 / s).max(content_top);
     let field_h = plan::SEARCH_H * k;
+    let field_x = (island.left - grown.left) as f32 / s + plan::SEARCH_LEFT * k;
+    let field_w = plan::SEARCH_W * k;
     Layout {
         head: Head {
             width,
@@ -113,14 +136,38 @@ pub fn layout(island: Rect, panel: Rect, grown: Rect, unit: f32, scale: f32) -> 
         row_top,
         row_height,
         // (left.rs: padding, the logo, the gap, then the field, centred upright in the row)
-        field: [(island.left - grown.left) as f32 / s + plan::SEARCH_LEFT * k, row_top + (row_height - field_h) / 2.0, plan::SEARCH_W * k, field_h],
+        field: [field_x, row_top + (row_height - field_h) / 2.0, field_w, field_h],
         field_k: k,
+        field_wide: (width - field_x - plan::SIDE_PAD * k).max(field_w),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The field widens with the glass: the island's own width at the start, the row up to the side padding at the end, and the
+    /// weather is gone before the field has covered much of its room.
+    #[test]
+    fn the_field_widens_with_the_glass_and_the_weather_makes_room() {
+        for (dpi, factor) in [(1.0, 1.0), (1.0, 0.75), (1.5, 1.0), (1.0, 1.5)] {
+            let (island, panel_rect, grown, unit) = setup(dpi, factor, 330.0);
+            let l = layout(island, panel_rect, grown, unit, dpi);
+            let k = l.field_k;
+            assert_eq!(l.field_width(0.0), l.field[2], "closed: the island's own field");
+            assert!((l.field_width(1.0) - l.field_wide).abs() < 0.01);
+            assert!((l.field[0] + l.field_wide + plan::SIDE_PAD * k - grown.width() as f32 / dpi).abs() < 0.01, "open: up to the row's padding");
+            assert!(l.field_wide > l.field[2] + 100.0, "the panel is much wider than the island's field");
+            let mid = l.field_width(0.5);
+            assert!(mid > l.field[2] && mid < l.field_wide);
+            assert_eq!(l.field_width(7.0), l.field_wide);
+            assert_eq!(l.field_width(-1.0), l.field[2]);
+        }
+        assert_eq!(weather_alpha(0.0), 1.0);
+        assert_eq!(weather_alpha(0.2), 0.0);
+        assert_eq!(weather_alpha(1.0), 0.0);
+        assert!(weather_alpha(0.1) > 0.4 && weather_alpha(0.1) < 0.6);
+    }
     use rf_win::dock::grow::{self, Corner, Spec};
     use rf_win::dock::layout::{self, Widths};
     use rf_win::dock::panel::{self, Side};

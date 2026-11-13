@@ -398,6 +398,41 @@ fn the_docks_band_changing_moves_the_edge_and_keeps_the_first_originals() {
 }
 
 #[test]
+fn the_docks_own_band_changes_are_not_held_back_by_the_throttle_that_guards_against_explorer() {
+    // The thin dock changes its band when a window is maximised and restored (92 <-> 68 px, never faster than every 2 s). The work
+    // area follows every one of them, however many there are in a minute: the throttle is for Explorer taking the work area back, not
+    // for the dock's own word.
+    let (mut c, mut w) = settled();
+    for i in 0..12u32 {
+        w.now += 2_000;
+        let band = if i % 2 == 0 { 92 } else { 68 };
+        c.set_band(&mut w, Some(band));
+        assert_eq!(work_a(&w), [0, 0, 2560, 1440 - band], "flip {i} at {} ms", w.now);
+        assert_eq!(w.dock_edge, Some([0, 1440 - band, 2560, 1440]), "flip {i}");
+    }
+    assert!(!w.lines.iter().any(|l| l.contains("too often")), "{:?}", w.lines);
+}
+
+#[test]
+fn explorer_taking_the_work_area_back_is_still_throttled_after_the_docks_own_changes() {
+    let (mut c, mut w) = settled();
+    for (i, band) in [92, 68, 92, 68, 92, 68].into_iter().enumerate() {
+        w.now += 2_000;
+        c.set_band(&mut w, Some(band));
+        assert_eq!(work_a(&w)[3], 1440 - band, "{i}");
+    }
+    // now Explorer fights: the answers are limited as ever (the dock's own sets did not use up the slots)
+    let before = w.work_sets.len();
+    for _ in 0..8 {
+        w.monitors[0].work = [0, 0, 2560, 1392];
+        w.now += 1_000;
+        c.work_area_changed(&mut w);
+    }
+    assert_eq!(w.work_sets.len(), before + 3, "{:?}", w.work_sets);
+    assert!(w.lines.iter().any(|l| l.contains("too often")));
+}
+
+#[test]
 fn a_band_that_changes_before_the_hide_is_just_the_wish_when_it_comes() {
     let (mut c, mut w) = world(true);
     c.set_band(&mut w, Some(92));

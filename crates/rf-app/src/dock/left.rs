@@ -291,6 +291,11 @@ impl Render for LeftIsland {
         let grown = super::grow_host::island_fade(Kind::Left, cx);
         let fallback = fallback && grown.is_none();
         let field_hidden = grown.is_some_and(|g| g.field_hidden);
+        // the panel's field widens over the weather's room while the Start panel is open: the weather fades with the glass's motion
+        let weather_alpha = grown.map_or(1.0, |g| g.weather);
+        if grown.is_some_and(|g| g.moving) {
+            window.request_animation_frame();
+        }
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
         let k = super::look::dock_size(cx);
         let me = cx.entity();
@@ -369,6 +374,9 @@ impl Render for LeftIsland {
                 .ml(px(plan::WEATHER_GAP * k))
                 .gap(px(plan::WEATHER_TEXT_GAP * k))
                 .items_center()
+                .opacity(weather_alpha)
+                // (the panel's widened field lies under this part of the island's window: a press here is a press on that field)
+                .when(field_hidden, |d| d.cursor_text().on_mouse_down(MouseButton::Left, |_, _, cx| super::panel::focus_start_field(cx)))
                 .child(Icon::new(picture_icon(plan::weather_picture(o.code, o.is_day))).size(px(plan::WEATHER_ICON * k)).flex_shrink_0().text_color(pal.text().hsla()))
                 .child(text)
         });

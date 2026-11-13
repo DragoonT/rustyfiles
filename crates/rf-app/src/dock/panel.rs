@@ -336,6 +336,12 @@ fn panel(cx: &App) -> Option<&PanelHost> {
     cx.try_global::<PanelHost>()
 }
 
+/// Whether a panel is open, or the one that was is still on its way out (or the next one waits for it). The thin dock stays grown, and
+/// its band stays, while this is true.
+pub fn is_open(cx: &App) -> bool {
+    panel(cx).is_some_and(|p| p.open.is_some() || p.after.is_some())
+}
+
 /// The Start panel's view (the file answers from the main app are handed to it).
 pub fn view(cx: &App) -> Option<Entity<StartView>> {
     panel(cx).and_then(|p| p.start.clone())

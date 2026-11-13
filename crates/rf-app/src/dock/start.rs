@@ -404,7 +404,8 @@ impl StartView {
         let short = field_at(cx) == FieldAt::Bottom;
         if short != self.placeholder_short {
             self.placeholder_short = short;
-            let text = placeholder_for(if short { FieldAt::Bottom } else { FieldAt::Top });
+            // (in the island's row the word is drawn by the row itself, in the island's own colour and place: `render_row_field`)
+            let text = if short { "" } else { placeholder_for(FieldAt::Top) };
             self.input.update(cx, |s, cx| s.set_placeholder(text, window, cx));
         }
     }
@@ -1358,7 +1359,7 @@ impl Render for StartView {
             .when_some(notice, |d, n| d.child(div().h(px(page::NOTICE_H)).flex_shrink_0().px(px(PAD)).flex().items_center().text_xs().text_color(pal.text_secondary().hsla()).truncate().child(n)))
             .when_some(own_row, |d, (line, footer)| d.child(line).child(footer));
         // the panel's search field in the island's row, and the hairline over the row (the right island's panels have the same)
-        let row_field = grown_head.map(|(l, g)| self.render_row_field(l, g.field_alpha, pal));
+        let row_field = grown_head.map(|(l, g)| self.render_row_field(l, g.field_alpha, g.grow, pal, cx));
         let row_line = grown.and_then(|g| super::grow_view::hairline(&g, pal));
         let content = match grown_head {
             Some((l, _)) => {

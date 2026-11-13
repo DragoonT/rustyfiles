@@ -537,6 +537,9 @@ pub struct Settings {
     pub dock_hover_previews: bool,
     /// A right click on an app's icon in the dock opens the dock's own app menu (on). Off: it does nothing, as before.
     pub dock_app_menu: bool,
+    /// While a window is maximised on the dock's monitor the middle island drops to the side islands' height, the band it reserves
+    /// shrinks with it, and it grows back when the pointer comes near (on; the dock itself is opt-in). Off: the dock of before.
+    pub dock_thin_when_maximized: bool,
     /// The Start panel shows "Önerilenler" (the documents opened most recently) under the pinned apps (on). Off: the section is not
     /// drawn and the pinned grid takes its room.
     pub dock_start_recommended: bool,
@@ -691,6 +694,7 @@ impl Default for Settings {
             dock_magnify: DockMagnify::Full,
             dock_hover_previews: true,
             dock_app_menu: true,
+            dock_thin_when_maximized: true,
             dock_start_recommended: true,
             // on: the user asked for the Start panel to grow out of the island; the switch on the Dock page turns it off
             dock_start_grow: true,

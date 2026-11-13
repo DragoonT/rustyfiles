@@ -66,6 +66,7 @@ mod search;
 mod start;
 mod start_button;
 mod sysstate;
+mod thin;
 mod tone;
 mod tray_overflow;
 pub(crate) mod tray_feed;

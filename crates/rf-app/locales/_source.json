@@ -9396,5 +9396,17 @@
   "key": "Bazı öğeler silinemedi (kilitli, salt okunur ya da izin yok); geri kalanı silindi. Ayrıntıyı gösterecek Windows kabuğu (Explorer) çalışmıyor.",
   "tr": "Bazı öğeler silinemedi (kilitli, salt okunur ya da izin yok); geri kalanı silindi. Ayrıntıyı gösterecek Windows kabuğu (Explorer) çalışmıyor.",
   "en": "Some items could not be deleted (locked, read-only or access denied); the rest was deleted. No Windows shell (Explorer) is running to show details."
+ },
+ {
+  "id": "2b973089",
+  "key": "Pencere büyütüldüğünde dock'u incelt",
+  "tr": "Pencere büyütüldüğünde dock'u incelt",
+  "en": "Make the dock thin when a window is maximized"
+ },
+ {
+  "id": "45c9b6e9",
+  "key": "Ekranda büyütülmüş bir pencere varken orta ada yan adalar kadar inceleşir ve pencere o kadar yer kazanır; fareyi yaklaştırınca eski boyutuna döner.",
+  "tr": "Ekranda büyütülmüş bir pencere varken orta ada yan adalar kadar inceleşir ve pencere o kadar yer kazanır; fareyi yaklaştırınca eski boyutuna döner.",
+  "en": "While a window is maximized on the screen the middle island shrinks to the height of the side islands and the window gains that room; it grows back when the pointer comes near."
  }
 ]

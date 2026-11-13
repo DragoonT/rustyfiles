@@ -1257,6 +1257,29 @@ mod tests {
         assert!(Arc::ptr_eq(&other, &st.images[&102].1), "the others did not");
     }
 
+    /// The whole way of a drop on the chevron, as `drop_icon` makes it: the strip is empty (every icon waits in the panel), so the
+    /// chevron is the only place there is, and an icon that comes from the panel lands on the strip there.
+    #[test]
+    fn an_icon_dragged_from_the_panel_onto_the_chevron_of_an_empty_strip_comes_to_the_strip() {
+        let mut st = state(0.0);
+        let _ = st.set_snapshot(Some(tray_source::test_snapshot(0)), Some(2560.0));
+        assert!(st.lay.visible.is_empty() && st.lay.chevron);
+        let cap = ts::capacity(st.limit);
+        for (icon, want) in [(3usize, vec![3usize]), (0, vec![3, 0])] {
+            let in_overflow = st.lay.overflow.contains(&icon);
+            assert!(in_overflow);
+            let (dest, at) = ts::drop_move(&st.lay.visible, icon, in_overflow, DropTarget::Chevron, cap).unwrap();
+            assert!(st.move_icon(icon, dest, at));
+            assert_eq!(st.lay.visible, want);
+            assert!(!st.lay.overflow.contains(&icon));
+        }
+        // and an icon of the strip let go there is hidden again
+        let (dest, at) = ts::drop_move(&st.lay.visible, 3, st.lay.overflow.contains(&3), DropTarget::Chevron, cap).unwrap();
+        assert!(st.move_icon(3, dest, at));
+        assert_eq!(st.lay.visible, vec![0]);
+        assert!(st.lay.overflow.contains(&3));
+    }
+
     #[test]
     fn hiding_and_showing_an_icon_moves_it_between_the_strip_and_the_overflow() {
         let mut st = loaded(2560.0);

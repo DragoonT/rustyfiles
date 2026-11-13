@@ -132,6 +132,8 @@ pub struct Keys {
     /// The previews and the menu of the middle island's icons: read from the file when they are asked for.
     pub hover_previews: bool,
     pub app_menu: bool,
+    /// The middle island is thin while a window is maximised: the running dock starts or stops following the windows when it reads the file.
+    pub thin_when_maximized: bool,
     /// The Start panel's "Önerilenler" section: read from the settings when the panel opens.
     pub start_recommended: bool,
     /// The Start panel grows out of the left island: read from the settings when the panel opens.
@@ -158,6 +160,7 @@ impl Keys {
             own_notifications: s.dock_own_notifications,
             hover_previews: s.dock_hover_previews,
             app_menu: s.dock_app_menu,
+            thin_when_maximized: s.dock_thin_when_maximized,
             start_recommended: s.dock_start_recommended,
             start_grow: s.dock_start_grow,
             size: s.dock_size,
@@ -313,7 +316,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), weather_location: false, look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, start_recommended: true, start_grow: true, size: Default::default(), shell: [false; 5] }
+        Keys { reserve, city: city.into(), weather_location: false, look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, thin_when_maximized: true, start_recommended: true, start_grow: true, size: Default::default(), shell: [false; 5] }
     }
 
     #[test]
@@ -347,6 +350,7 @@ mod tests {
             Settings { dock_own_notifications: false, ..base.clone() },
             Settings { dock_hover_previews: false, ..base.clone() },
             Settings { dock_app_menu: false, ..base.clone() },
+            Settings { dock_thin_when_maximized: false, ..base.clone() },
             Settings { dock_start_recommended: false, ..base.clone() },
             Settings { dock_start_grow: false, ..base.clone() },
             Settings { dock_size: crate::dock::size_pref::DockSizePref::from_permille(1400), ..base.clone() },

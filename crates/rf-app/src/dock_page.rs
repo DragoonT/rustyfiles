@@ -274,6 +274,17 @@ pub(crate) fn entries() -> Vec<Entry> {
             false,
             Control::Switch(|s| s.dock_app_menu, |s, v| s.dock_app_menu = v),
         ),
+        e(
+            "dock-thin-maximized",
+            "dock_thin_when_maximized",
+            Middle,
+            dock,
+            L::PanelBottom,
+            t!("Pencere büyütüldüğünde dock'u incelt"),
+            Some(t!("Ekranda büyütülmüş bir pencere varken orta ada yan adalar kadar inceleşir ve pencere o kadar yer kazanır; fareyi yaklaştırınca eski boyutuna döner.")),
+            false,
+            Control::Switch(|s| s.dock_thin_when_maximized, |s, v| s.dock_thin_when_maximized = v),
+        ),
         // ---- SAĞ ADA
         e(
             "dock-own-cc",
@@ -600,7 +611,7 @@ mod tests {
         let ids = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
         assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_magnify", "dock_start_grow"]);
         assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_weather_city"]);
-        assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu"]);
+        assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu", "dock_thin_when_maximized"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);
         assert_eq!(ids(Section::Taskbar), ["shell_hide_taskbar"]);
         assert_eq!(ids(Section::Experimental), ["shell_win_key", "shell_own_switcher", "shell_tray_host"]);

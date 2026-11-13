@@ -45,6 +45,8 @@
 //! | `taskmgr` | starting Windows' Task Manager from a right click on the empty glass: once, the shell's "open" and never "runas" | the gate |
 //! | `grow` | an island that grows into its panel: the glass's rectangle from the island's to the panel's with one corner fixed, the radius, the fades, the search field's path, the 220 / 160 ms clock that can turn at any moment | all of it |
 //! | `grow_panels` | which panel a press on a button of the right island's row leads to (close, hand over, wait), the grown rectangle of a panel or why it must open the ordinary way, where the panel's content stands in the glass | all of it |
+//! | `thin` | the thin dock: while a maximised window is on the dock's monitor the middle island has the side islands' height, grows back near the pointer; thin or full from (setting, window, pointer, something open), the band's thickness and when it may change, "near", which windows count, the numbers between thin and full | all of it |
+//! | `zoomwatch` | the placement events that say a window was maximised or restored (only while the thin dock's setting is on) and the walk over the windows that answers "is one maximised on this monitor" | the rules are in `thin` |
 //! | `startapps` | start an app of "All apps", as administrator (the user's click), find its program (shell thread) | - |
 //!
 //! HOW THE APP USES IT (the order that works):
@@ -104,11 +106,13 @@ pub mod size;
 pub mod size_live;
 pub mod system;
 pub mod taskmgr;
+pub mod thin;
 pub mod tray_order;
 pub mod tray_strip;
 pub mod tray_tip;
 pub mod triggers;
 pub mod winops;
+pub mod zoomwatch;
 
 pub use layout::{Islands, Rect, Widths};
 pub use model::{ClickAction, DockApp, DockItem, IconSource, Launch, PinnedApp, Place};

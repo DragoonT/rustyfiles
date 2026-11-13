@@ -6,7 +6,8 @@
 //! In the header the account's picture and name stand at the left, the gear and the power button at the right, all on the header's
 //! centre line, with a hairline under it. The header comes and goes with the panel's content (`ViewFrame::content` is its opacity), and
 //! the power menu opens just under its button. The search field in the island's row is the island's own field to the pixel (same place,
-//! same size, same fill, same picture and text size); it is the one with the keyboard.
+//! same size, same fill, same picture, the same word in the same place, colour and size); it is the one with the keyboard, and it
+//! widens with the glass.
 
 use super::*;
 use crate::dock::grow_head::{Head, Layout};
@@ -121,9 +122,19 @@ impl StartView {
     /// The panel's search field in the island's row: the island's own field (`left.rs`: a pill, the search picture, the text, in dock
     /// units times the dock's size) with the panel's input in it, at the rectangle `layout.field`. `alpha` is 0 until the glass runs (the
     /// island's own field is the one seen until then).
-    pub(super) fn render_row_field(&mut self, layout: Layout, alpha: f32, pal: Palette) -> Div {
-        let [x, y, w, h] = layout.field;
+    ///
+    /// A user's report: the word and the place to type moved when the field was pressed. The kit's input stood 10 px in from its
+    /// own edge, drew its text at 14 px whatever the dock's size, and its placeholder in the theme's muted colour. So the input is
+    /// given the dock's text size, its inset is taken back, and the word is drawn here, as the island draws it, while nothing is typed
+    /// (the input's own placeholder is empty in this row, `sync_placeholder`). `grow` is the glass's progress: the field widens by it.
+    pub(super) fn render_row_field(&mut self, layout: Layout, alpha: f32, grow: f32, pal: Palette, cx: &App) -> Div {
+        let [x, y, _, h] = layout.field;
+        let w = layout.field_width(grow);
         let k = layout.field_k;
+        let secondary = pal.text_secondary().hsla();
+        let word = self.input.read(cx).value().is_empty().then(|| {
+            div().absolute().left_0().top_0().bottom_0().flex().items_center().text_size(px(14. * k)).text_color(secondary).child(placeholder_for(FieldAt::Bottom))
+        });
         h_flex()
             .absolute()
             .left(px(x))
@@ -136,7 +147,15 @@ impl StartView {
             .rounded_full()
             .bg(pal.field_fill().hsla())
             .opacity(alpha)
-            .child(Icon::new(L::Search).size(px(plan::FIELD_ICON * k)).flex_shrink_0().text_color(pal.text_secondary().hsla()))
-            .child(div().flex_1().min_w_0().text_size(px(14. * k)).child(Input::new(&self.input).appearance(false)))
+            .child(Icon::new(L::Search).size(px(plan::FIELD_ICON * k)).flex_shrink_0().text_color(secondary))
+            .child(
+                div().relative().flex_1().min_w_0().h_full().flex().items_center().children(word).child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .ml(px(-crate::dock::grow_head::INPUT_INSET))
+                        .child(gpui_kit::component::Sizable::with_size(Input::new(&self.input).appearance(false), gpui_kit::component::Size::Size(px(16. * k)))),
+                ),
+            )
     }
 }

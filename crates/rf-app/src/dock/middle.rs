@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_win::dock::hover::Slot;
-use rf_win::dock::layout::{ICON_REST, RADIUS};
+use rf_win::dock::layout::{ICON_REST, MIDDLE_HEIGHT, RADIUS};
 use rf_win::dock::magnify::{self, Frame, Presence};
 use rf_win::dock::{DockItem, IconSource, PinnedApp, Place, hit, model};
 use rf_win::tasklist::{self, Task, TaskWatch};
@@ -117,6 +117,8 @@ impl MiddleIsland {
         let watch = tasklist::watch(move |changes| {
             if changes.list || changes.active {
                 let _ = tx.unbounded_send(());
+                // (the thin dock asks whether a maximised window is there; one atomic read when its setting is off)
+                super::thin::task_changed();
             }
         })
         .map_err(|e| log::warn!("dock: cannot watch the task windows: {e:#}"))
@@ -535,6 +537,11 @@ impl Render for MiddleIsland {
             // the bell is still coming in or going out: one more frame
             window.request_animation_frame();
         }
+        // how thin the dock is at this moment (the full dock unless a maximised window made it thin: see thin.rs)
+        let sq = super::thin::squeeze(cx);
+        if super::thin::animating(cx) {
+            window.request_animation_frame();
+        }
         let mut inset = host::insets(Kind::Middle, cx);
         inset.margins = inset.margins.map(|v| v / k);
         inset.growth /= k;
@@ -551,11 +558,13 @@ impl Render for MiddleIsland {
             Some((x, h)) => (Some(x), h),
             None => (self.pointer_x, self.presence.value(now)),
         };
+        // (no bell while the dock is thin; it comes in with the growth)
+        let height = sq.bell(height);
         let frame = match pointer {
             Some(x) if height > 0.0 && strength != magnify::Strength::Off => magnify::frame(&self.slots, &rest, rest_width, x, height, strength, rest_width + 2.0 * inset.growth),
             _ => Frame::at_rest(&rest, rest_width),
         };
-        let pic = plan::picture(&frame, &self.slots, inset.margins, BASELINE);
+        let pic = super::thin::picture(&frame, &self.slots, inset.margins, BASELINE, &sq);
         self.rest_items.clone_from(&rest);
         // what a right click is judged by: the glass and the icons as they are drawn in this frame
         self.last_glass = pic.glass;
@@ -567,6 +576,8 @@ impl Render for MiddleIsland {
         let scale = env.unit();
         let boxes: Vec<[f32; 4]> = pic.out_of_glass.iter().map(|b| plan::to_device(*b, scale)).collect();
         let mut glass_px = plan::to_device(pic.glass, scale);
+        // (the glass's bottom edge, which does not move while the dock grows or shrinks)
+        let bottom_px = (pic.glass[1] + pic.glass[3]) * scale;
         // At a size other than the default the glass is as high as the layout's whole-pixel rectangle says (72 units times the factor are
         // not a whole number of device px, and the other two islands' glass is the layout's): its height never changes while the icons
         // grow. At the default size nothing is touched: the height stays 72 units times the monitor's scale, as it always was (a
@@ -579,6 +590,14 @@ impl Render for MiddleIsland {
             }
             glass_px[3] / env.scale
         };
+        // a dock that is not at its full height: the glass is as high as the thin one or between, on the same bottom edge
+        let glass_h = if sq.is_full() {
+            glass_h
+        } else {
+            let full_px = if k == 1.0 { MIDDLE_HEIGHT * scale } else { host::visible_glass_rect(Kind::Middle, cx).map_or(MIDDLE_HEIGHT * scale, |r| r.height() as f32) };
+            super::thin::fit_glass(&mut glass_px, bottom_px, &sq, scale, full_px);
+            glass_px[3] / env.scale
+        };
         let parts = hit::parts(glass_px, rf_win::dock::layout::px(RADIUS, scale) as f32, &boxes, (vw * scale).round() as i32, (vh * scale).round() as i32);
         host::set_middle_frame(&self.glass, glass_px, parts, cx);
 
@@ -588,9 +607,9 @@ impl Render for MiddleIsland {
                 DockItem::Separator => div()
                     .absolute()
                     .left(u(x))
-                    .bottom(u(mb + BASELINE + (ICON_REST - 36.0) / 2.0))
+                    .bottom(u(mb + BASELINE + (ICON_REST - 36.0) * sq.icon / 2.0))
                     .w(u(w))
-                    .h(u(36.))
+                    .h(u(36. * sq.icon))
                     .bg(pal.separator().hsla())
                     .into_any_element(),
                 DockItem::App(_) | DockItem::Place(_) => {
@@ -680,6 +699,8 @@ impl Render for MiddleIsland {
                         let strength = cx.global::<Settings>().dock_magnify.strength();
                         // (dock units from the rest island's left edge)
                         let k = super::look::dock_size(cx);
+                        // (the pointer is on the dock: a thin dock grows now, not at the next look at the cursor)
+                        super::thin::pointer_on_island(cx);
                         me.pointer_moved((f32::from(ev.position.x) - host::insets(Kind::Middle, cx).margins[0]) / k, strength, ev.pressed_button.is_some(), cx)
                     }))
                     .on_mouse_up(MouseButton::Right, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.row_right_click(ev.position, cx)))

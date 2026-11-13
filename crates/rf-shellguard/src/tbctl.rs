@@ -146,6 +146,9 @@ pub struct Controller {
     throttle: Throttle,
     /// The "set too often" warning was written for the present stretch of refusals (it is said once, not every second).
     throttle_said: bool,
+    /// The dock changed its band and the work area has not followed yet. A set that follows the dock's own word is not held back by
+    /// the throttle (which is there against Explorer taking the work area back), and does not use up one of its slots.
+    band_owed: bool,
     /// The dock's band thickness in device px (`None`: the dock reserves none, `dock_reserve` is off). Session only.
     band_px: Option<i32>,
     /// The dock has said what its band is (`band_px` is its word, `None` included). Until then the edge is not taken: a guess of "no
@@ -180,6 +183,7 @@ impl Controller {
             // Explorer may recompute the work area whenever it likes: give it back at most 4 times a minute.
             throttle: Throttle::new(4, 60_000),
             throttle_said: false,
+            band_owed: false,
             band_px: None,
             band_known: false,
             edge: Edge::Free,
@@ -308,6 +312,7 @@ impl Controller {
         }
         self.band_px = band_px;
         self.band_known = true;
+        self.band_owed = true;
         if self.want && !self.hidden.is_empty() {
             self.drive_edge(w);
         }
@@ -662,6 +667,7 @@ impl Controller {
     fn set_changes(&mut self, w: &mut dyn HideWorld, now: u64, plan: &tbwork::EdgePlan) {
         let changes = plan.changes();
         if changes.is_empty() {
+            self.band_owed = false;
             return;
         }
         // A monitor can become ours after the edge was taken (plugged in, its taskbar hidden by a later pass): its own work area is
@@ -669,8 +675,10 @@ impl Controller {
         if !self.write_down_originals(w, plan) {
             return;
         }
-        // Explorer may recompute the work area whenever it likes; answering every time could fight it for ever.
-        if !self.throttle.allow(now) {
+        // Explorer may recompute the work area whenever it likes; answering every time could fight it for ever. (The dock's own change
+        // of its band is not Explorer's doing: the thin dock changes it as windows are maximised and restored, never faster than
+        // every two seconds, and the work area must be the one the dock stands under at every one of them.)
+        if !std::mem::take(&mut self.band_owed) && !self.throttle.allow(now) {
             if !self.throttle_said {
                 self.throttle_said = true;
                 w.warn("taskbar: the work area was set too often lately; left alone");

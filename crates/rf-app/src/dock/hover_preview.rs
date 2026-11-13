@@ -157,6 +157,11 @@ fn preview_hover(inside: bool, cx: &mut App) {
     feed(Input::Preview(inside), cx);
 }
 
+/// A preview is on the screen (the thin dock stays grown while it is).
+pub fn is_shown(cx: &App) -> bool {
+    cx.try_global::<PreviewHost>().is_some_and(|h| h.shown)
+}
+
 /// The toolkit's id of the window, when it has been made.
 pub fn window_ids(cx: &App) -> Vec<WindowId> {
     cx.try_global::<PreviewHost>().and_then(|h| h.made.as_ref().map(|m| m.handle.window_id())).into_iter().collect()

@@ -260,6 +260,11 @@ pub fn right_island(cx: &App) -> Option<Entity<RightIsland>> {
     cx.try_global::<Host>()?.right.clone()
 }
 
+/// The middle island's view (the thin dock tells it to draw again when it starts to grow or shrink).
+pub(super) fn middle_island(cx: &App) -> Option<Entity<MiddleIsland>> {
+    cx.try_global::<Host>()?.middle.clone()
+}
+
 /// Whether a full-screen application is in front (the islands are hidden).
 pub fn is_fullscreen(cx: &App) -> bool {
     cx.try_global::<Host>().is_some_and(|h| h.fullscreen)
@@ -383,6 +388,8 @@ pub fn request_layout(cx: &mut App) {
     cx.refresh_windows();
     // a panel grown out of an island works its glass out again for the island's new rectangle (nothing when none is grown)
     super::panel::layout_applied(cx);
+    // where the thin dock's "near" is follows the rectangles
+    super::thin::layout_applied(cx);
 }
 
 /// The middle island's frame of the animation: where its glass is inside its window (device px) and which parts of the window take the
@@ -453,13 +460,14 @@ fn publish_env(scale: f32, cx: &mut App) {
     }
 }
 
-fn apply_reserve(cx: &mut App) {
+pub(super) fn apply_reserve(cx: &mut App) {
     let Some(host) = cx.try_global::<Host>() else { return };
     let Some(system) = host.system.as_ref() else { return };
     let band = if host.prefs.reserve {
         // the band is the dock's own height and margins: it follows the size too
         let unit = host.area().map_or(1.0, |(m, _)| rf_win::dock::size::unit(m.scale(), fitted_factor(host.prefs.size, &m)));
-        let thickness = layout::reserved_thickness(unit);
+        // (the thin band while a maximised window has been there for a while: see thin.rs)
+        let thickness = rf_win::dock::thin::reserved_thickness(unit, super::thin::band_is_thin(cx));
         system.reserve(thickness);
         Some(thickness)
     } else {
@@ -595,6 +603,8 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     crate::shell::trayhost::on_settings(cx);
     // Explorer's taskbar follows its switch (see shell::taskbar_hide)
     crate::shell::taskbar_hide::on_settings(cx);
+    // the thin dock follows its switch (see thin.rs)
+    super::thin::on_settings(cx);
     cx.refresh_windows();
 }
 
@@ -684,6 +694,7 @@ pub fn shutdown(cx: &mut App) {
     crate::shell::trayhost::stop(cx);
     // the desktop cover goes next: its windows close and Explorer's desktop is simply visible again
     crate::shell::cover::stop(cx);
+    super::thin::shutdown(cx);
     super::panel::shutdown(cx);
     for p in &host.placed {
         p.glass.borrow_mut().release();
@@ -874,6 +885,8 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         apply_visibility(cx);
     }
     apply_reserve(cx);
+    // the thin dock (the setting's switch; nothing runs when it is off)
+    super::thin::start(cx);
     // The other programs' tray icons (nothing at all without a tray source: see tray_source.rs). After the setup job above has been queued:
     // the strip asks for a wider right island at once, and that placement must come after the first one, which was worked out for the
     // island without a strip and would otherwise be the last word.

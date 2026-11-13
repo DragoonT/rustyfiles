@@ -332,6 +332,73 @@ later, and the capture session closing about 10 s after the first report, so abo
 scratchpad of this track holds 10 launches of the two test copies (6 on Desktop Duplication, 2 on the session, 1 cover diagnosis, 1
 picture): the whole budget. The review that followed made no launch.
 
+## The thin dock (setting "Pencere büyütüldüğünde dock'u incelt" / Make the dock thin when a window is maximized)
+
+The user's words: when any other window fills the screen, the dock drops to the thinness of the parts at its left and right, grows
+back when the mouse comes near; the point is to free room on the screen. `dock_thin_when_maximized`, Settings, Dock page, ORTA ADA;
+ON by default (the dock itself is off until asked for); a key of the running dock (`control::Keys::thin_when_maximized`), so a switch
+reaches it at once. Off is the dock of the rest of this page, bit for bit (`thin::picture` returns `plan::picture` for the full
+squeeze; the tests say so). Pure rules and their tests: `rf_win::dock::thin`; the windows' facts: `rf_win::dock::zoomwatch`; the dock's
+side: `dock/thin.rs`.
+
+* WHAT "THIN" IS. The middle island's glass is `SIDE_HEIGHT` high (48 units, the left and right islands' glass; the same number of
+  device px at every scale and size, `glass_height_px`), on the same line (all three bottoms stay 10 units above the work area's
+  bottom). Its icons are 30 units instead of 44 and keep their CENTRES, so the island is as wide as it was and nothing beside it moves;
+  the running marks stay 7 units under the icons' feet, which stand 12 units above the glass's bottom, as at full size (the foot 12 +
+  the icon 30 leaves 6 over its head). The magnification's bell is nothing while thin. The island's WINDOW never changes (it was
+  always big enough for the full glass and the icons growing out of it): only the glass in it and the icons do, in the frames the
+  magnification already draws, and the region/shape go out through `host::set_middle_frame`. At rest nothing runs.
+* WHEN IT IS THIN. Setting on AND a maximised window the user can see is on the dock's monitor (the primary one) AND the pointer is
+  not near AND nothing of the dock is open. A "maximised window" (`thin::counts_as_maximized`): `WS_MAXIMIZE`, visible, not minimised,
+  not cloaked (another virtual desktop), on that monitor, not a window of the dock's own process, not a piece of the shell (`fullscreen::is_shell_class`), and a window the task list would
+  give a button (`tasklist::style_is_task`). A true full-screen program still hides the whole dock (`fullscreen.rs`, unchanged).
+* NEAR (`thin::zone`). The pointer is inside the thin glass's band: from 24 units above the band's top edge (the band is the glass and
+  the 10 units of margin above and below it, so 34 units above the thin glass), 40 units to each side of the thin glass (the room the
+  glass may widen into, so the whole of a widened glass is inside), down to the monitor's last row; less the two side islands'
+  glass (the Start button and the clock are not the dock). The top of the zone is 10 units above the full glass's top. A mouse button
+  held while the pointer was near keeps it near (a press that began on the dock). The pointer on the island itself is known at once
+  from its mouse events; for the part above the thin glass, which is another program's window, the cursor is read (below).
+* GROWING AND SHRINKING. Near or something open: grows at once, over the time the dock's other motions take (160 ms, smoothstep, the
+  magnification's `Presence`; at once with animations off), the icons growing in place under the pointer (centres fixed, up from
+  the same foot: every point of a thin icon is a point of the same icon during the whole growth, `a_point_on_a_thin_icon_stays_on_that_icon_all_through_the_growth`),
+  and then it is the dock above: the bell, the previews, the menus. It floats over the maximised window. The pointer gone and nothing
+  open (`panel::is_open`, `app_menu::is_open`, `hover_preview::is_shown`): 400 ms later it is thin again, the 400 ms counted from the
+  moment BOTH were over (`Follower`). The Start panel opened by the Windows key, and any panel opened by the keyboard, is an open
+  panel: the dock is grown while it is open (seen at the next look, 60 ms at the most).
+* THE BAND (`BandSettle`). The band the dock reserves (the application desktop toolbar, or the work area the host sets itself while it has
+  hidden Explorer's taskbar: both come through `host::apply_reserve` -> `system.reserve` and `taskbar_hide::band_changed`) is the
+  thin one, 68 units (the thin glass and 10 above and below) instead of 92, while a maximised window has been there for 600 ms; so the
+  maximised window gains 24 units. It follows the WINDOW and never the pointer: the dock grown under the pointer floats over the
+  window and the work area stays where it is, so nothing resizes under the user's hand. It changes at most once in 2 s (a window
+  maximised and restored in quick succession changes nothing; the story test plays that), and never while a panel is open (a change
+  of the band is a `LayoutChanged`, which closes panels; the look at what is open goes on until the change is made). With Explorer's
+  taskbar hidden by the host, the work area follows every change of the band: a set that follows the dock's own word does not count
+  against the host's limit of four sets a minute (`tbctl::Controller::band_owed`; that limit is for Explorer taking the work area
+  back, and it still applies to that). Switching the setting off gives the full band back at once. With
+  "Pencere dock'un altına girmesin" off there is no band and nothing to change; the glass still goes thin.
+* WHERE THE FACTS COME FROM. A maximised window: the task list's events the middle island already follows (it calls
+  `thin::task_changed()` from its watch) plus the placement events of `zoomwatch::ZoomWatch` (`EVENT_SYSTEM_MOVESIZEEND`,
+  `EVENT_OBJECT_LOCATIONCHANGE` filtered to a change of a top-level window's maximised bit or of the monitor of a maximised one,
+  `EVENT_OBJECT_DESTROY`), started only while the setting is on. The hook thread remembers the maximised windows and their monitors
+  (`zoomwatch::ZoomSet`) and is SEEDED with the ones that are maximised when it starts, so the restore of a browser that was already
+  maximised when the dock started (or the setting was switched on) is heard, and Win+Shift+Arrow (the bit stays, the monitor
+  changes) is heard too. Starting the watch does not wait for its thread. Either asks for ONE walk over the windows on a worker thread (`maximized_on`, about 25 us on this PC in a
+  debug build, a style read per window and the other questions only for maximised ones), one at a time, spaced 50 ms. No timer reads
+  windows. The CURSOR is the one thing that is polled: a window with a region is not told that the pointer is near it, and the part
+  above the thin glass belongs to another program. While the setting is on AND a maximised window is seen, or the band is
+  still the thin one (`Model::needs_polling`: a window can go while a menu is open, and the band's change then waits for the menu, with
+  only this look to notice that it closed), the UI thread reads the cursor and the mouse buttons every 60 ms (two system calls, 0.4 us)
+  and touches anything else only when `near` or `open` changed. With the setting off there is no timer, no hook and no thread of this
+  feature. With the setting on and no maximised window there is no timer, but the placement hook and its two threads exist (they are
+  how a maximise is heard at all).
+* COST. Off: one atomic read per task-list event (`thin::task_changed`), one per mouse move over the dock, nothing else; no hook. On,
+  no maximised window: the placement hook (see the probe's numbers below). On, a maximised window seen, dock thin and the pointer far:
+  a 60 ms look at the cursor. The growth itself costs what a pointer move over the dock costs.
+* NOT SEEN ON A SCREEN by the one who wrote it; the lead's live test is the list in the report. Not measured: the placement hook's rate
+  while the mouse moves all the time and while a window is dragged (`cargo run -p rf-win --example zoomwatch_probe -- 30` prints the
+  counts and the process's CPU; run it while moving the mouse and dragging a window). Measured without input: 15 s with one hook call and
+  40 s with 22 calls (13 for whole windows, none needing a style read), 0.0 ms of CPU.
+
 ## Panels, Start and search
 
 A panel is a borderless pop-up window of the dock process on HyperGlass that opens 8 px above an island's visible glass, lined up with
@@ -471,6 +538,12 @@ in it by then (`search_pipe::watch_idle`; a window opened in it makes it an ordi
 typed in the panel (the island is never activated, so it cannot take keys itself).
 
 ## The Start panel grows out of the left island (setting "Paneller adalardan büyüyerek açılsın" / Panels grow out of the islands)
+
+While the Start panel is open the search field in the island's row WIDENS with the glass, from the island's own 220 units to the row's
+right padding, and narrows with it on the way home; the weather, whose room it takes, fades out in the first fifth of the growth and
+comes back in the last fifth of the closing (`grow_head.rs`: `Layout::field_width`, `weather_alpha`). The field is the island's own to
+the pixel when pressed: the same word in the same place, colour and size, the caret where the word starts (the kit's input stood 10 px
+in, drew at 14 px whatever the dock's size, and used the theme's muted colour: a user saw the word and the place to type move).
 
 The user's idea: when Start is pressed the glass at the left grows and widens and IS the Start panel; when the search field is pressed it
 grows too, ready to type. (First built with the field travelling to the top of the panel and the account, gear and power button in the
@@ -1024,7 +1097,7 @@ the overflow panel's cells and a tip fall for that many icons (arithmetic only; 
 
 The dock has a page of its own in Settings, right after "Görünüm" (`dock_page.rs`). It used to be a block at the end of "Gelişmiş" called
 "Dock (deneysel)". One list of entries (`dock_page::entries`) draws the page and feeds the Settings search. Sections: GENEL (the dock,
-keep-out, size, magnification), SOL ADA (Start, recommended, weather city), ORTA ADA (previews, icon menu), SAĞ ADA (control centre,
+keep-out, size, magnification), SOL ADA (Start, recommended, weather city), ORTA ADA (previews, icon menu, thin while a window is maximised), SAĞ ADA (control centre,
 calendar, notifications), GÖREV ÇUBUĞU (hiding Windows' taskbar; the desktop cover switch is on the "Masaüstü" page, `desktop.md`), DENEYSEL
 (Windows key, Alt+Tab, tray host). Both pages carry a "Deneysel" pill in the page list and "(deneysel)" in their title. While the
 dock is off every control but the dock switch is dimmed with a line that says why; a shell switch that is still on can be turned off
@@ -1056,6 +1129,8 @@ dock is off every control but the dock switch is dimmed with a line that says wh
   an icon shows nothing.
 * **Simge sağ tık menüsü** / Right-click menu on icons. On by default (`dock_app_menu`). Off: a right click on an icon does nothing, as
   before.
+* **Pencere büyütüldüğünde dock'u incelt** / Make the dock thin when a window is maximized. On by default (`dock_thin_when_maximized`).
+  Off: the dock of before, and nothing of the feature runs. What it does: "The thin dock" above.
 * **Başlat'ta önerilenler** / Recommended in Start. On by default (`dock_start_recommended`). The Start panel's "Önerilenler" section
   (the documents opened most recently). Off: the section is not drawn, the recent shortcuts are not read, and the pinned grid takes its
   room.
@@ -1082,7 +1157,7 @@ dock is off every control but the dock switch is dimmed with a line that says wh
 
 The dock process is told to read the settings file again when any of these changes: the four switches of the panels (`dock_own_start`,
 `dock_own_control_centre`, `dock_own_calendar`, `dock_own_notifications`), the two switches of the icons' menu and previews
-(`dock_app_menu`, `dock_hover_previews`), the Start panel's recommended section (`dock_start_recommended`), the keep-out switch, the city, the size, the magnification, the animations setting, the four HyperGlass sliders and the shell's five switches
+(`dock_app_menu`, `dock_hover_previews`), the thin dock's switch (`dock_thin_when_maximized`), the Start panel's recommended section (`dock_start_recommended`), the keep-out switch, the city, the size, the magnification, the animations setting, the four HyperGlass sliders and the shell's five switches
 (`control::Keys`). The process's views read the two panel switches from the settings it loaded last, at every click.
 
 ## The process
