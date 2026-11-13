@@ -1816,4 +1816,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Güvenle çıkar", "Eject"),
     ("Duvar kâğıdının köşelerini yuvarla (deneysel)", "Round the wallpaper's corners (experimental)"),
     ("Masaüstünün duvar kâğıdı yuvarlak köşelerle çizilir; köşelerin arkası siyah kalır. Büyütülmüş bir pencere köşeyi kapatır: etki yalnızca masaüstü görünürken vardır.", "The desktop's wallpaper is drawn with rounded corners; black shows behind them. A maximized window covers the corner: the effect is there only while the desktop is visible."),
+    ("Beta sürümlerini de al", "Take beta versions too"),
+    ("Bu kopya bir beta sürümüdür: anahtar kapalıyken de sonraki betaları alır, kararlı sürüm çıkınca ona geçer.", "This copy is a beta version: it takes the next betas with the switch off too, and moves to the release when it is out."),
+    ("Yayınlanmadan önce denenen sürümler: yenilikler erken gelir, hatalar da olabilir. Kapalıyken yalnızca kararlı sürümler indirilir.", "Versions that are tried before a release: new things arrive early, and so may bugs. With this off, only releases are downloaded."),
 ];

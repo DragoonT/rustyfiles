@@ -124,8 +124,30 @@ fn fake_check() {
     set(State::Ready("9.9.9".into()));
 }
 
+/// The beta switch of the settings (About page), as the update checks read it: they run off the UI thread and cannot ask the
+/// settings themselves. Set at start and before every check.
+static BETAS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_beta_updates(on: bool) {
+    BETAS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether a version is a beta: it has a pre-release part ("0.7.0-beta.1"; build metadata after a plus does not count). Pure.
+pub fn is_beta(version: &str) -> bool {
+    version.split('+').next().unwrap_or("").contains('-')
+}
+
+/// Whether a copy looks at GitHub's PRE-RELEASES too. A beta is published as a pre-release, which the update source leaves out
+/// unless it is asked for them, so a copy on an ordinary version with the switch off never sees one and never downloads one. The
+/// switch asks for them; so does a copy that is a beta itself, or whoever installed a beta by hand would stay on it with no way on
+/// until the release. Pure.
+pub fn takes_betas(switch_on: bool, this_version: &str) -> bool {
+    switch_on || is_beta(this_version)
+}
+
 fn manager() -> Option<UpdateManager> {
-    UpdateManager::new(GithubSource::new(REPO, None, false), None, None).ok()
+    let betas = takes_betas(BETAS.load(std::sync::atomic::Ordering::Relaxed), env!("CARGO_PKG_VERSION"));
+    UpdateManager::new(GithubSource::new(REPO, None, betas), None, None).ok()
 }
 
 /// This build's version (Velopack's when installed, else the crate's). Read once.
@@ -197,7 +219,11 @@ pub fn spawn_checks(cx: &mut gpui_kit::App, changed: impl Fn(&mut gpui_kit::App)
             // a file manager stays open for days: a long gap meant releases waited a day to arrive
             // (GitHub allows 60 unauthenticated calls an hour; this is one call every two hours)
             wait = Duration::from_secs(2 * 3600);
-            let auto = cx.update(|cx| cx.global::<crate::settings::Settings>().auto_update);
+            let (auto, betas) = cx.update(|cx| {
+                let s = cx.global::<crate::settings::Settings>();
+                (s.auto_update, s.beta_updates)
+            });
+            set_beta_updates(betas);
             if !auto {
                 continue;
             }
@@ -298,7 +324,28 @@ pub fn count_start(cx: &mut gpui_kit::App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{DAY_MS, donate_answered, donate_due, star_due};
+    use super::{DAY_MS, donate_answered, donate_due, is_beta, star_due, takes_betas};
+
+    #[test]
+    fn a_beta_is_a_version_with_a_pre_release_part() {
+        assert!(is_beta("0.7.0-beta.1"));
+        assert!(is_beta("1.0.0-rc.2+build.5"));
+        assert!(!is_beta("0.6.5"));
+        assert!(!is_beta("0.7.0"));
+        assert!(!is_beta("0.7.0+with-a-hyphen-in-the-build-part"));
+        assert!(!is_beta(""));
+    }
+
+    #[test]
+    fn an_ordinary_copy_takes_betas_only_when_its_switch_is_on_and_a_beta_always_does() {
+        assert!(!takes_betas(false, "0.6.5"), "the installed copies of today: a beta is never downloaded by itself");
+        assert!(!takes_betas(false, "0.7.0"));
+        assert!(takes_betas(true, "0.7.0"));
+        assert!(takes_betas(false, "0.7.0-beta.1"), "installed by hand: the next betas and then the release");
+        assert!(takes_betas(true, "0.7.0-beta.1"));
+        // the default of the setting is off
+        assert!(!crate::settings::Settings::default().beta_updates);
+    }
 
     #[test]
     fn coffee_strip_now_and_then() {

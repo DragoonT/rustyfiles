@@ -2537,6 +2537,8 @@ fn glow(c: Hsla, alpha: f32) -> Div {
 
 /// "Check for updates": runs off the UI thread and redraws while it checks and downloads.
 pub(crate) fn check_updates_now(cx: &mut App) {
+    // (the beta switch as it is now: the check itself runs off this thread)
+    crate::installer::set_beta_updates(cx.global::<Settings>().beta_updates);
     cx.spawn(async move |cx| {
         let run = cx.background_executor().spawn(async { crate::installer::check() });
         crate::installer::redraw_while_busy(cx).await;
@@ -2572,6 +2574,17 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
             t!("Güncellemeleri kendiliğinden indir"),
             Some(t!("Arka planda denetlenir ve indirilir; bir sonraki açılışta uygulanır.")),
             sw("auto-upd", p, s.auto_update, |s, v| s.auto_update = v),
+        ),
+        card(
+            p,
+            L::Sparkles,
+            t!("Beta sürümlerini de al"),
+            Some(if crate::installer::is_beta(env!("CARGO_PKG_VERSION")) && !s.beta_updates {
+                t!("Bu kopya bir beta sürümüdür: anahtar kapalıyken de sonraki betaları alır, kararlı sürüm çıkınca ona geçer.")
+            } else {
+                t!("Yayınlanmadan önce denenen sürümler: yenilikler erken gelir, hatalar da olabilir. Kapalıyken yalnızca kararlı sürümler indirilir.")
+            }),
+            sw("beta-upd", p, s.beta_updates, |s, v| s.beta_updates = v),
         ),
         section(p, "GitHub"),
         link_row(p, "gh-star", L::Star, t!("GitHub'da yıldız ver"), Some(t!("rustyfiles işinize yarıyorsa başkalarının da bulmasına yardım eder.")), |_, _| open_url(REPO_URL)),

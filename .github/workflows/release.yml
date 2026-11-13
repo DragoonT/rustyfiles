@@ -2,6 +2,10 @@ name: Release
 
 # Push a tag like v0.1.0: builds, packs with Velopack (Setup.exe, portable zip, update
 # packages) and publishes the GitHub release that installed copies update from.
+#
+# A BETA is a tag whose version has a hyphen (v0.7.0-beta.1). It is published as a GitHub
+# PRE-RELEASE: installed copies leave pre-releases out when they look for updates (unless their
+# beta switch is on, or they are a beta themselves), so nobody is moved to a beta by itself.
 on:
   push:
     tags: ["v*"]
@@ -17,24 +21,41 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --release -p rf-app -p rf-dialog
+        # (rf-shellguard: the small program that puts Explorer's taskbar back if the dock dies; without it the dock leaves the taskbar alone)
+        run: cargo build --release -p rf-app -p rf-dialog -p rf-shellguard
       - name: Version
         id: v
         shell: pwsh
         run: |
-          "version=$('${{ github.ref_name }}'.TrimStart('v'))" | Out-File -Append $env:GITHUB_OUTPUT
+          $v = '${{ github.ref_name }}'.TrimStart('v')
+          "version=$v" | Out-File -Append $env:GITHUB_OUTPUT
+          "pre=$(if ($v.Contains('-')) { 'true' } else { 'false' })" | Out-File -Append $env:GITHUB_OUTPUT
       - name: Collect files
         shell: pwsh
         run: |
           New-Item -ItemType Directory publish | Out-Null
-          Copy-Item target/release/rustyfiles.exe, target/release/directlook.exe, target/release/rustyfiles_dialog.dll, LICENSE publish
+          Copy-Item target/release/rustyfiles.exe, target/release/directlook.exe, target/release/rustyfiles-shellguard.exe, target/release/rustyfiles_dialog.dll, LICENSE publish
       - name: Install vpk
         # same version as the velopack crate in crates/rf-app/Cargo.toml
         run: dotnet tool install -g vpk --version 1.2.161
       - name: Previous release (for delta updates)
         continue-on-error: true
-        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }}
+        # (a beta is packed against the newest release of any kind, a release against the newest release that is not a beta)
+        run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} ${{ steps.v.outputs.pre == 'true' && '--pre' || '' }}
       - name: Pack
         run: vpk pack -u rustyfiles -v ${{ steps.v.outputs.version }} -p publish -e rustyfiles.exe --packTitle rustyfiles --packAuthors "Özer Güzel" -i crates/rf-app/assets/rustyfiles.ico -s crates/rf-app/assets/splash.gif --splashProgressColor "#ff6a1a"
       - name: Publish
+        if: steps.v.outputs.pre != 'true'
         run: vpk upload github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} --publish --releaseName "rustyfiles ${{ steps.v.outputs.version }}" --tag ${{ github.ref_name }}
+      - name: Publish (beta)
+        if: steps.v.outputs.pre == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Uploaded as a DRAFT, then made public and marked pre-release in ONE call: there is no moment at which a beta is a public
+        # ordinary release that an installed copy could take.
+        run: |
+          vpk upload github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} --pre --releaseName "rustyfiles ${{ steps.v.outputs.version }}" --tag ${{ github.ref_name }}
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          gh release edit ${{ github.ref_name }} --repo ${{ github.repository }} --draft=false --prerelease
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

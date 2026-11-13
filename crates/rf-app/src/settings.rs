@@ -392,6 +392,10 @@ pub struct Settings {
     pub notify_long_ops: bool,
     /// Updates (GitHub Releases) are looked for and downloaded in the background.
     pub auto_update: bool,
+    /// Beta versions (GitHub pre-releases) are taken as updates too. Off by default: a copy never moves to a beta by itself. A copy
+    /// that IS a beta takes the next betas whatever this says (`installer::takes_betas`): whoever installed one by hand is in the
+    /// beta program until a release arrives, which is newer than its betas.
+    pub beta_updates: bool,
     /// The one-time "star it on GitHub" strip: first start (Unix ms), starts so far, and
     /// whether it was answered (starred or dismissed).
     pub first_start_ms: i64,
@@ -653,6 +657,7 @@ impl Default for Settings {
             show_perf_info: false,
             notify_long_ops: true,
             auto_update: true,
+            beta_updates: false,
             first_start_ms: 0,
             starts: 0,
             star_asked: false,

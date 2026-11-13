@@ -670,6 +670,7 @@ pub fn main() {
             dock::control::start_if_wanted(cx.global::<settings::Settings>());
         }
         // updates from GitHub Releases (installed copies only)
+        installer::set_beta_updates(cx.global::<settings::Settings>().beta_updates);
         installer::spawn_checks(cx, |cx| cx.refresh_windows());
         // DirectLook ayrı süreç: önceden başlatılır ki ilk Boşluk beklemesin (testlerde değil)
         if cx.global::<settings::Settings>().directlook_enabled && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none() && !bar_preview {
