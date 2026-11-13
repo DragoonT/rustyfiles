@@ -597,8 +597,12 @@ impl Render for PreviewView {
         let (pal, _) = host::frame_palette(&self.island, window);
         let dark = pal.mix < 0.5;
         let fill = glass_watch::panel_fill(dark, self.popup.as_ref().is_none_or(|g| g.fallback()));
-        let (card_fill, card_hot, secondary, text) = (pal.field_fill().hsla(), pal.hover_fill().hsla(), pal.text_secondary().hsla(), pal.text().hsla());
-        let letterbox = if dark { with_alpha(rgb(0x000000).into(), 0.28) } else { with_alpha(rgb(0x000000).into(), 0.10) };
+        // ONE BACKGROUND: the window's glass. A card has no fill and no outline of its own while it rests (it had both, and one window's
+        // preview read as a panel inside a panel: the user, "burada 3 farklı arkaplan var neden?"); only the card under the pointer is
+        // marked, as in Windows' own previews.
+        let (card_hot, secondary, text) = (pal.hover_fill().hsla(), pal.text_secondary().hsla(), pal.text().hsla());
+        // (the tile behind the app's large icon, for a window that has no live picture)
+        let icon_tile = if dark { with_alpha(rgb(0x000000).into(), 0.28) } else { with_alpha(rgb(0x000000).into(), 0.10) };
         let mut root = div()
             .id("hover-preview")
             .relative()
@@ -607,9 +611,6 @@ impl Render for PreviewView {
             .text_color(text)
             .text_size(px(12.))
             .on_hover(cx.listener(|_, on: &bool, _, cx| preview_hover(*on, cx)));
-        // a thin, light frame on every card (drawn as a child over the card's fill, not as a border of the card: a border would move the
-        // card's absolutely placed children in by its width)
-        let frame = if dark { with_alpha(rgb(0xFFFFFF).into(), 0.09) } else { with_alpha(rgb(0x000000).into(), 0.10) };
         for (i, card) in self.cards.iter().enumerate() {
             // every rectangle of the card comes from the layout, the same ones the live pictures are placed from
             let b = self.layout.card(i);
@@ -618,7 +619,8 @@ impl Render for PreviewView {
             let hot = self.hover == Some(i);
             let title: SharedString = if card.title.trim().is_empty() { crate::t!("(adsız)").into() } else { card.title.clone().into() };
             let win = card.win;
-            // the picture box: DWM draws the live window over it; a window with no live picture shows the app's large icon in it
+            // the picture box: DWM draws the live window in it, on the glass; a window with no live picture shows the app's large icon
+            // on a tile of its own
             let picture_box = div()
                 .absolute()
                 .left(px(b.picture_in_card[0]))
@@ -626,11 +628,10 @@ impl Render for PreviewView {
                 .w(px(b.picture_in_card[2]))
                 .h(px(b.picture_in_card[3]))
                 .rounded(px(4.))
-                .bg(letterbox)
                 .flex()
                 .items_center()
                 .justify_center()
-                .when(!live, |d| d.when_some(self.icon.clone(), |d, img| d.child(gpui_kit::img(img).size(px(48.)))));
+                .when(!live, |d| d.bg(icon_tile).when_some(self.icon.clone(), |d, img| d.child(gpui_kit::img(img).size(px(48.)))));
             // the title row: the small icon, the title, and the x on the card under the pointer (not over the picture: DWM's picture is
             // drawn over everything of ours that lies on it)
             let row = div()
@@ -673,11 +674,10 @@ impl Render for PreviewView {
                     .w(px(w))
                     .h(px(h))
                     .rounded(px(7.))
-                    .bg(if hot { card_hot } else { card_fill })
+                    .when(hot, |d| d.bg(card_hot))
                     .cursor_pointer()
                     .on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_card(i, *on, cx)))
                     .on_click(cx.listener(move |_, _, _, cx| activate_window(win, cx)))
-                    .child(div().absolute().top_0().left_0().size_full().rounded(px(7.)).border_1().border_color(frame))
                     .child(picture_box)
                     .child(row),
             );
