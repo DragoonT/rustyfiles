@@ -9,8 +9,8 @@
 //! the icons grow up from the same baseline the magnification uses.
 //!
 //! THE FIVE RULES (each is a type below):
-//! 1. [`Follower`]: thin or full from (setting, a maximised window seen, pointer near, something open). Going back to thin waits
-//!    [`LEAVE_MS`] after the pointer has left and nothing is open.
+//! 1. [`Follower`]: thin or full from (setting, a maximised window seen, pointer near, something open). It goes back to thin the
+//!    moment the pointer has left and nothing is open ([`LEAVE_MS`] is 0, see there).
 //! 2. [`BandSettle`]: the band the dock reserves is the thin one while a maximised window has been there for [`SETTLE_MS`], and it
 //!    changes at most once in [`HOLD_MS`], never while a panel is open (a change of the band closes panels). It does NOT depend on the
 //!    pointer: the dock grown under the pointer floats over the window and the work area stays where it is.
@@ -28,13 +28,23 @@ pub const THIN_ICON: f32 = 30.0;
 /// What the application desktop toolbar reserves while the dock is thin: the thin glass and the margin above and below it, as the full
 /// band is the full glass and its margins (`layout::RESERVED_HEIGHT`).
 pub const THIN_RESERVED_HEIGHT: f32 = THIN_HEIGHT + 2.0 * MARGIN_BOTTOM;
-/// How far above the thin dock's band the pointer still counts as near, dock units.
-pub const NEAR_ABOVE: f32 = 24.0;
+/// How far above the THIN glass the pointer still counts as near, dock units: the full glass (24 units higher) and the room above
+/// it that grown icons reach into (`layout::HEADROOM`). It must hold everything the island's own pointer region can hold, or the
+/// island's mouse events ("on the dock: near") and the look at the cursor ("outside the zone: away") would contradict each other
+/// over the top of a grown icon. (It was counted from the band's margin until the margin became smaller than that reach.)
+pub const NEAR_ABOVE: f32 = MIDDLE_HEIGHT - THIN_HEIGHT + super::layout::HEADROOM;
 /// How far to each side of the thin glass the pointer still counts as near: the room the grown glass may widen into, so the whole of a
 /// widened glass is inside the zone.
 pub const NEAR_SIDE: f32 = MIDDLE_RESERVE;
-/// After the pointer has left (and nothing is open) the dock waits this long before it goes thin again.
-pub const LEAVE_MS: u64 = 400;
+/// After the pointer has left (and nothing is open) the dock waits this long before it goes thin again. NONE: it was 400 ms, and the
+/// user saw the dock shrink in two steps (the magnification went out when the pointer left the icons, then a pause, then the glass
+/// went thin). With no wait the two are one motion: the bell's height is the presence times the growth (`Squeeze::bell`) and both
+/// run for the same time. A pointer that comes straight back grows the dock again from where the motion is; nothing else follows
+/// the pointer (the band does not), so a short visit costs a few frames.
+pub const LEAVE_MS: u64 = 0;
+/// A maximised window must have been seen this long before the dock goes thin for it: a window maximised and restored in quick
+/// succession (a snap that passes through "maximised", a program that flickers) does not make the dock shrink and grow.
+pub const SEEN_MS: u64 = 400;
 /// A maximised window must have been there this long before the band becomes the thin one (and gone this long before it becomes the full
 /// one again): a window maximised and restored in quick succession changes nothing for the other windows.
 pub const SETTLE_MS: u64 = 600;
@@ -128,8 +138,8 @@ pub fn zone(full: Rect, left: Rect, right: Rect, monitor: Rect, unit: f32) -> Zo
     let near = Rect {
         left: (thin.left - side).max(monitor.left),
         right: (thin.right + side).min(monitor.right),
-        // the band's own margin above the thin glass is part of the band; the 24 units come on top of it
-        top: (thin.top - px(MARGIN_BOTTOM + NEAR_ABOVE, unit)).max(monitor.top),
+        // up to the top of the room a grown icon reaches into above the full glass
+        top: (thin.top - px(NEAR_ABOVE, unit)).max(monitor.top),
         bottom: monitor.bottom,
     };
     Zone { near, left, right }
@@ -159,11 +169,13 @@ pub struct Verdict {
     pub wake_at: Option<u64>,
 }
 
-/// Remembers since when the pointer has been away, so that the dock goes thin [`LEAVE_MS`] after it left and not at once.
+/// Remembers since when the pointer has been away, so that the dock goes thin [`LEAVE_MS`] after it left (at once, as that is 0).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Follower {
     thin: bool,
     away_since: Option<u64>,
+    /// Since when a maximised window has been seen without a break.
+    seen_since: Option<u64>,
 }
 
 impl Follower {
@@ -181,8 +193,10 @@ impl Follower {
         if !i.enabled || !i.maximized {
             self.thin = false;
             self.away_since = None;
+            self.seen_since = None;
             return Verdict { thin: false, wake_at: None };
         }
+        let seen = *self.seen_since.get_or_insert(now);
         // near or something open: grown, and the wait starts again from the moment both are over
         if i.near || i.open {
             self.thin = false;
@@ -193,12 +207,14 @@ impl Follower {
             return Verdict { thin: true, wake_at: None };
         }
         let since = *self.away_since.get_or_insert(now);
-        if now.saturating_sub(since) >= LEAVE_MS {
+        // (the later of the two: the pointer has been away long enough, and the window has been there long enough)
+        let due = (since + LEAVE_MS).max(seen + SEEN_MS);
+        if now >= due {
             self.thin = true;
             self.away_since = None;
             Verdict { thin: true, wake_at: None }
         } else {
-            Verdict { thin: false, wake_at: Some(since + LEAVE_MS) }
+            Verdict { thin: false, wake_at: Some(due) }
         }
     }
 }
@@ -403,8 +419,8 @@ mod tests {
     #[test]
     fn a_maximised_window_with_the_pointer_far_makes_the_dock_thin_after_the_wait() {
         let mut f = Follower::new();
-        // a window has just been maximised: the dock is full, and thin 400 ms later
-        assert_eq!(f.step(1_000, on(true, false, false)), Verdict { thin: false, wake_at: Some(1_000 + LEAVE_MS) });
+        // a window has just been maximised: the dock is full, and thin 400 ms later (the window must have been there that long)
+        assert_eq!(f.step(1_000, on(true, false, false)), Verdict { thin: false, wake_at: Some(1_000 + SEEN_MS) });
         assert_eq!(f.step(1_399, on(true, false, false)), Verdict { thin: false, wake_at: Some(1_400) });
         assert_eq!(f.step(1_400, on(true, false, false)), Verdict { thin: true, wake_at: None });
         // and it stays thin as long as nothing changes
@@ -427,29 +443,24 @@ mod tests {
     fn it_goes_thin_again_only_400_ms_after_the_pointer_left_and_the_last_thing_closed() {
         let mut f = Follower::new();
         f.step(0, on(true, true, false));
-        // the pointer leaves at 1000: the wait runs from there
-        assert_eq!(f.step(1_000, on(true, false, false)), Verdict { thin: false, wake_at: Some(1_400) });
-        assert!(!f.step(1_399, on(true, false, false)).thin);
-        assert!(f.step(1_400, on(true, false, false)).thin);
+        // the pointer leaves at 1000: thin in that very look (one motion with the magnification going out)
+        assert_eq!(f.step(1_000, on(true, false, false)), Verdict { thin: true, wake_at: None });
         // grown again, a panel stays open after the pointer left: the wait does not run while it is open
         f.step(2_000, on(true, true, false));
         assert!(!f.step(3_000, on(true, false, true)).thin);
         assert!(!f.step(9_000, on(true, false, true)).thin, "open for a long time");
-        // it closes at 9000: 400 ms from then, not from when the pointer left
-        assert_eq!(f.step(9_000, on(true, false, false)).wake_at, Some(9_400));
-        assert!(f.step(9_400, on(true, false, false)).thin);
+        // it closes at 9000: thin then, not before
+        assert_eq!(f.step(9_000, on(true, false, false)), Verdict { thin: true, wake_at: None });
     }
 
     #[test]
     fn a_pointer_that_comes_back_during_the_wait_starts_the_wait_again() {
         let mut f = Follower::new();
         f.step(0, on(true, true, false));
-        f.step(1_000, on(true, false, false)); // left
-        f.step(1_300, on(true, true, false)); // back, 100 ms short of thin
-        // left again at 1500: 400 ms from here, not from 1000
-        assert_eq!(f.step(1_500, on(true, false, false)).wake_at, Some(1_900));
-        assert!(!f.step(1_800, on(true, false, false)).thin);
-        assert!(f.step(1_900, on(true, false, false)).thin);
+        assert!(f.step(1_000, on(true, false, false)).thin); // left
+        assert!(!f.step(1_300, on(true, true, false)).thin, "back: grown again at once");
+        // left again at 1500: thin again at once
+        assert_eq!(f.step(1_500, on(true, false, false)), Verdict { thin: true, wake_at: None });
     }
 
     #[test]
@@ -514,9 +525,10 @@ mod tests {
                 assert!(!l.thin, "grown at {now}");
             }
         }
-        // thin 400 ms after the window came (1000 + 400), grown at 5000, thin again 400 ms after 7000, grown while the panel is open
-        // (9000 to 10000), thin 400 ms after it closed, full when the window is restored at 15000 (the flicker never gets thin)
-        assert_eq!(looks, [(1_400, true), (5_000, false), (7_400, true), (9_000, false), (10_400, true), (15_000, false)]);
+        // thin 400 ms after the window came (1000 + 400), grown at 5000, thin again the moment the pointer went (7000), grown while the
+        // panel is open (9000 to 10000), thin the moment it closed, full when the window is restored at 15000 (the flicker never gets
+        // thin: a window must have been there 400 ms)
+        assert_eq!(looks, [(1_400, true), (5_000, false), (7_000, true), (9_000, false), (10_000, true), (15_000, false)]);
         // the band: thin 600 ms after the window came, full 600 ms after it was restored (the hold of 2 s is long over by then); the
         // pointer and the panel's coming and going changed nothing, and the flicker changed nothing
         assert_eq!(band_changes, [(1_600, true), (15_600, false)]);
@@ -880,9 +892,12 @@ mod tests {
         // on the 4 px margin below the glass, down to the monitor's last row
         assert!(z.contains(1280, 1437) && z.contains(1280, 1439));
         assert!(!z.contains(1280, 1440), "the monitor ends");
-        // the band's margin above the glass (4) and the 24 above that
-        assert!(z.contains(1280, 1388 - 4) && z.contains(1280, 1388 - 28));
-        assert!(!z.contains(1280, 1388 - 29), "29 units above the glass is beyond it");
+        // the full glass is 24 units higher than the thin one, and grown icons reach 12 more: all of that is near
+        assert_eq!(NEAR_ABOVE, 36.0);
+        assert!(z.contains(1280, 1388 - 24) && z.contains(1280, 1388 - 36));
+        assert!(!z.contains(1280, 1388 - 37), "37 units above the thin glass is beyond it");
+        // whatever the island's own pointer region can hold is inside the zone (the top of an icon grown out of the full glass)
+        assert!(z.contains(1280, i.middle.top - 12));
         // to the sides: the room the glass widens into
         assert!(z.contains(thin.left - 40, 1380) && z.contains(thin.right + 39, 1380));
         assert!(!z.contains(thin.left - 41, 1380));

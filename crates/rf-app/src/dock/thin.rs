@@ -1,6 +1,7 @@
 //! The thin dock, app side (the rules are `rf_win::dock::thin`, tested without a window): while a maximised window the user can see is on
 //! the dock's monitor the middle island is as high as the side islands and its band is the thin one; the pointer coming near grows it
-//! back over the window; it goes thin again 400 ms after the pointer left and nothing of the dock is open.
+//! back over the window; it goes thin again the moment the pointer has left and nothing of the dock is open (in one motion with the
+//! magnification going out: a user saw two steps when it waited 400 ms).
 //! Setting "Pencere büyütüldüğünde dock'u incelt" (`dock_thin_when_maximized`, on by default, a key of the running dock: off is the dock
 //! of today and costs nothing but one atomic read per task-list event and per mouse move over the dock).
 //!
@@ -41,6 +42,10 @@ use crate::settings::Settings;
 
 /// How often the cursor is looked at while a maximised window is seen (ms).
 const POLL_MS: u64 = 60;
+/// ... and while the dock is grown under the pointer: the look that sees the pointer leave starts the way back to thin, and it must
+/// come in the frame the magnification starts to go out, or the user sees two motions. Two system calls every frame, only for as
+/// long as the pointer is at the dock.
+const POLL_NEAR_MS: u64 = 16;
 /// Events that arrive while a walk over the windows runs make one more walk, no sooner than this after the last one.
 const READ_GAP_MS: u64 = 50;
 
@@ -310,10 +315,12 @@ fn sync_poller(cx: &mut App) {
     }
     h.poll_alive = true;
     let task = cx.spawn(async move |cx| {
+        let mut wait = POLL_MS;
         loop {
-            cx.background_executor().timer(Duration::from_millis(POLL_MS)).await;
-            if !cx.update(poll) {
-                break;
+            cx.background_executor().timer(Duration::from_millis(wait)).await;
+            match cx.update(poll) {
+                Some(next) => wait = next,
+                None => break,
             }
         }
     });
@@ -322,14 +329,14 @@ fn sync_poller(cx: &mut App) {
     }
 }
 
-/// One look at the cursor and at what is open. False: nothing more to look at.
-fn poll(cx: &mut App) -> bool {
+/// One look at the cursor and at what is open. Gives the time to the next look (ms); `None`: nothing more to look at.
+fn poll(cx: &mut App) -> Option<u64> {
     let pointer = zoomwatch::pointer();
     let open = open_anything(cx);
-    let Some(h) = me(cx) else { return false };
+    let Some(h) = me(cx) else { return None };
     if !h.model.needs_polling() {
         h.poll_alive = false;
-        return false;
+        return None;
     }
     // (no zone known: neither near nor away; no cursor position, as on a locked desktop: away)
     let inside = h.zone.map(|z| pointer.is_some_and(|(x, y, _)| z.contains(x, y)));
@@ -337,7 +344,12 @@ fn poll(cx: &mut App) -> bool {
     if h.model.observe(inside, button, open) {
         reevaluate(cx);
     }
-    true
+    Some(next_poll(cx.try_global::<ThinHost>().is_some_and(|h| h.model.inputs.near)))
+}
+
+/// The time to the next look at the cursor: every frame while the pointer is at the dock, else [`POLL_MS`].
+fn next_poll(near: bool) -> u64 {
+    if near { POLL_NEAR_MS } else { POLL_MS }
 }
 
 /// A panel, the app menu or a hover preview of the dock is open.

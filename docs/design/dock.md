@@ -352,18 +352,21 @@ side: `dock/thin.rs`.
   not near AND nothing of the dock is open. A "maximised window" (`thin::counts_as_maximized`): `WS_MAXIMIZE`, visible, not minimised,
   not cloaked (another virtual desktop), on that monitor, not a window of the dock's own process, not a piece of the shell (`fullscreen::is_shell_class`), and a window the task list would
   give a button (`tasklist::style_is_task`). A true full-screen program still hides the whole dock (`fullscreen.rs`, unchanged).
-* NEAR (`thin::zone`). The pointer is inside the thin glass's band: from 24 units above the band's top edge (the band is the glass and
-  the 10 units of margin above and below it, so 34 units above the thin glass), 40 units to each side of the thin glass (the room the
-  glass may widen into, so the whole of a widened glass is inside), down to the monitor's last row; less the two side islands'
-  glass (the Start button and the clock are not the dock). The top of the zone is 10 units above the full glass's top. A mouse button
+* NEAR (`thin::zone`). From 36 units above the thin glass (the full glass is 24 units higher and grown icons reach 12 above that:
+  everything the island's own pointer region can hold, so the island's mouse events and the look at the cursor never disagree),
+  40 units to each side of the thin glass (the room the glass may widen into, so the whole of a widened glass is inside), down to
+  the monitor's last row; less the two side islands' glass (the Start button and the clock are not the dock). The top of the zone
+  is 12 units above the full glass's top. (It was counted from the band's margin until the margin became 4 units.) A mouse button
   held while the pointer was near keeps it near (a press that began on the dock). The pointer on the island itself is known at once
   from its mouse events; for the part above the thin glass, which is another program's window, the cursor is read (below).
 * GROWING AND SHRINKING. Near or something open: grows at once, over the time the dock's other motions take (160 ms, smoothstep, the
   magnification's `Presence`; at once with animations off), the icons growing in place under the pointer (centres fixed, up from
   the same foot: every point of a thin icon is a point of the same icon during the whole growth, `a_point_on_a_thin_icon_stays_on_that_icon_all_through_the_growth`),
   and then it is the dock above: the bell, the previews, the menus. It floats over the maximised window. The pointer gone and nothing
-  open (`panel::is_open`, `app_menu::is_open`, `hover_preview::is_shown`): 400 ms later it is thin again, the 400 ms counted from the
-  moment BOTH were over (`Follower`). The Start panel opened by the Windows key, and any panel opened by the keyboard, is an open
+  open (`panel::is_open`, `app_menu::is_open`, `hover_preview::is_shown`): it goes thin at that moment, in ONE motion with the
+  magnification going out (it waited 400 ms until a user saw the dock shrink in two steps: the bell first, then a pause, then the
+  glass; while the pointer is at the dock the cursor is read every 16 ms so that the two start within a frame). Only a window that
+  has just been maximised must have been there 400 ms (`SEEN_MS`), so a flicker through "maximised" does nothing (`Follower`). The Start panel opened by the Windows key, and any panel opened by the keyboard, is an open
   panel: the dock is grown while it is open (seen at the next look, 60 ms at the most).
 * THE BAND (`BandSettle`). The band the dock reserves (the application desktop toolbar, or the work area the host sets itself while it has
   hidden Explorer's taskbar: both come through `host::apply_reserve` -> `system.reserve` and `taskbar_hide::band_changed`) is the
