@@ -418,7 +418,10 @@ pub fn toggle_start_reported(cx: &mut App) -> bool {
     let open_on = before.open.is_some_and(|id| id == PanelId::START).then(|| host::active(cx));
     toggle_start_on(rf_win::dock::monitors::key_target(open_on, pointer), cx);
     // (a tap while another panel is grown only QUEUES Start behind the one shrinking into its island: that is not "could not open")
-    grow_panels::took_effect(before, seen(cx), PanelId::START)
+    // Nor is the FIRST press after the dock started: the panel's window is made then, from the message loop, and opens as soon as it
+    // exists. Reported as a failure, it made the keyboard layer ask Windows for its own Start as well, on the first tap of the
+    // Windows key after every start of the dock (the user: "windows tuşuna basınca hala windowsun başlat menüsü açılıyor").
+    grow_panels::took_effect(before, seen(cx), PanelId::START) || more::is_making(PanelId::START)
 }
 
 /// The right island's network or volume symbol: opens the control centre, closes it when it is the open one.

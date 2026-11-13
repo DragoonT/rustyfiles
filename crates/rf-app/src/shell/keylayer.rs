@@ -181,6 +181,16 @@ pub fn handle(p: Posted, log_only: bool, shared: &Shared, a: &mut dyn Actions) {
 
 // ---------------------------------------------------------------- the real actions
 
+/// How long after a tap of the Windows key the window in front is looked at (Windows' Start needs a moment to come up).
+const AFTER_TAP_MS: u64 = 700;
+
+/// Whether a window's description (`rf_win::window::describe`: handle, program, class, title) is Windows' own Start menu or its
+/// search, which is what a tap of the Windows key opens when nothing holds it shut. Pure.
+pub fn is_windows_start(described: &str) -> bool {
+    let d = described.to_ascii_lowercase();
+    d.contains("startmenuexperiencehost.exe") || d.contains("searchhost.exe")
+}
+
 struct GpuiActions<'a> {
     cx: &'a mut App,
     shared: Arc<Shared>,
@@ -188,7 +198,22 @@ struct GpuiActions<'a> {
 
 impl Actions for GpuiActions<'_> {
     fn toggle_start(&mut self) -> bool {
-        crate::dock::toggle_start(self.cx)
+        let done = crate::dock::toggle_start(self.cx);
+        // Whether the mask key kept Windows' own Start shut cannot be seen from the hook: only from what is in front a moment later
+        // (`rf_win::winkey::mask`: "whether that holds on this Windows build is the first thing the live test looks at"). One line
+        // for each tap that was taken; another window's title is written only when it is Windows' Start.
+        self.cx
+            .spawn(async move |cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(AFTER_TAP_MS)).await;
+                let front = rf_win::window::describe(rf_win::window::foreground());
+                if is_windows_start(&front) {
+                    log::warn!("start: Windows' own Start is in front {AFTER_TAP_MS} ms after the tap ({front}): the mask key did not keep it shut");
+                } else {
+                    log::info!("start: Windows' own Start is not in front {AFTER_TAP_MS} ms after the tap");
+                }
+            })
+            .detach();
+        done
     }
 
     fn windows_start(&mut self) {
@@ -374,7 +399,7 @@ fn on_posted(p: Posted, cx: &mut App) {
 #[cfg(test)]
 mod tests {
     // (explicit names: `super::*` would bring in the toolkit's own `test` attribute, which replaces the standard one)
-    use super::{Actions, Settings, combos_wanted, handle, log_only_from, ready_line, wanted};
+    use super::{Actions, Settings, combos_wanted, handle, is_windows_start, log_only_from, ready_line, wanted};
     use rf_win::switcher::chord::{Effect, Scope};
     use rf_win::winkey::{Deliver, KeyService, Posted, Shared};
     use std::sync::Arc;
@@ -466,6 +491,15 @@ mod tests {
         assert!(!log_only_from(Some("true")));
         assert!(!log_only_from(Some("")));
         assert!(!log_only_from(None));
+    }
+
+    #[test]
+    fn windows_own_start_is_told_from_any_other_window_in_front() {
+        assert!(is_windows_start("0x1a2b StartMenuExperienceHost.exe[4120] Windows.UI.Core.CoreWindow 'Başlat'"));
+        assert!(is_windows_start("0x77 SearchHost.exe[991] Windows.UI.Core.CoreWindow 'Ara'"));
+        assert!(!is_windows_start("0x5 rustyfiles.exe[10] Zed::Window ''"));
+        assert!(!is_windows_start("0x9 chrome.exe[7] Chrome_WidgetWin_1 'start menu experience host - Google'"), "a title does not make it Start");
+        assert!(!is_windows_start("none"));
     }
 
     #[test]

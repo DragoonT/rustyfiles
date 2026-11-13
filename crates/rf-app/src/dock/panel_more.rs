@@ -195,6 +195,15 @@ impl Making {
     fn end(&mut self, id: &'static str) {
         self.0.retain(|i| *i != id);
     }
+
+    fn has(&self, id: &'static str) -> bool {
+        self.0.contains(&id)
+    }
+}
+
+/// Whether the panel's window is being made right now by a press that came a moment ago: it opens as soon as it exists.
+pub(super) fn is_making(id: PanelId) -> bool {
+    MAKING.with(|m| m.borrow().has(id.0))
 }
 
 thread_local! {
