@@ -274,7 +274,8 @@ impl Tracker {
 }
 
 /// Bumped whenever the placement maths or the scaling filter changes, so cached bitmaps made by the old code are not reused.
-pub const RENDER_VERSION: u32 = 1;
+// (2: "fill" cuts a third of a too tall picture's overflow at the top, as Explorer does: `placement::FILL_TOP`)
+pub const RENDER_VERSION: u32 = 2;
 
 /// Everything that decides how a rendered bitmap looks. Two equal keys mean the same pixels.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -555,6 +556,6 @@ mod tests {
         let t4 = key(r"D:\a.png", 10, 5, m, Rect::new(0, 0, 3840, 1080), Position::Tile, Rgb(0, 0, 0), TileAnchor::Monitor);
         assert_ne!(t1.canonical(), t2.canonical());
         assert_eq!(t3.canonical(), t4.canonical());
-        assert!(base.canonical().starts_with("rfwall1|d:\\a.png|10|5|1920x1080|4|"));
+        assert!(base.canonical().starts_with("rfwall2|d:\\a.png|10|5|1920x1080|4|"));
     }
 }

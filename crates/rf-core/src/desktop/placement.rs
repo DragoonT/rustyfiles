@@ -147,13 +147,28 @@ fn bars_around(outer: Size, inner: Rect) -> Vec<Rect> {
     .collect()
 }
 
+/// Where "fill" cuts a picture that is too TALL for its monitor: a THIRD of the overflow at the top and two thirds at the bottom, not
+/// half and half. MEASURED against Explorer's own desktop (2026-11-13, Windows 11 build 26300): a 6016 x 6016 picture on a
+/// 2560 x 1440 monitor, Explorer's picture of its desktop compared with the original at every offset. 373 px of the 1120 px overflow
+/// are cut at the top (1120 / 3 = 373.3), and sharply so (one pixel away the difference nearly doubles). A picture that is too WIDE
+/// is cut equally at both sides (the same picture on a 1440 x 2560 monitor: measured centred).
+///
+/// This code centred the height at first, which showed the picture 187 px lower than Explorer does. The user saw it as a line of
+/// wallpaper that does not fit along the bottom of the main screen: the cover window leaves its last pixel row to Explorer's desktop
+/// (`cover::geometry`), and that row only disappears when both draw the same picture in the same place.
+pub const FILL_TOP: (i64, i64) = (1, 3);
+
+/// Span (one picture across all monitors) is "fill" over the rectangle of all monitors, and is cut the same way. That it is, is an
+/// ASSUMPTION: only fill on one monitor was measured.
+const SPAN_TOP: (i64, i64) = FILL_TOP;
+
 /// The part of a `pw` x `ph` picture that covers a `tw` x `th` area when scaled by "fill" (cover): aspect kept, the overflow cut
-/// away equally on both sides.
-fn cover_crop(pw: i64, ph: i64, tw: i64, th: i64) -> Rect {
+/// away. Too wide: equally at both sides. Too tall: the share `top` of the overflow at the top, the rest at the bottom.
+fn cover_crop(pw: i64, ph: i64, tw: i64, th: i64, top: (i64, i64)) -> Rect {
     if tw * ph >= th * pw {
         // the area is relatively wider: use the full width, cut height
         let sh = mul_div_round(th, pw, tw).clamp(1, ph);
-        let y = (ph - sh) / 2;
+        let y = (ph - sh) * top.0 / top.1.max(1);
         Rect::new(0, y as i32, pw as i32, (y + sh) as i32)
     } else {
         let sw = mul_div_round(tw, ph, th).clamp(1, pw);
@@ -197,7 +212,7 @@ pub fn plan(position: Position, picture: Size, monitor: Rect, virtual_screen: Re
             let dst = Rect::new(x as i32, y as i32, (x + dw) as i32, (y + dh) as i32);
             Plan { target, src: whole_src, dst, bars: bars_around(target, dst), tile: None }
         }
-        Position::Fill => Plan { target, src: cover_crop(pw, ph, mw, mh), dst: whole_dst, bars: Vec::new(), tile: None },
+        Position::Fill => Plan { target, src: cover_crop(pw, ph, mw, mh, FILL_TOP), dst: whole_dst, bars: Vec::new(), tile: None },
         Position::Tile => {
             let origin = |anchor_at: i32, pic: i64| -> i32 {
                 let r = (anchor_at as i64).rem_euclid(pic);
@@ -215,7 +230,7 @@ pub fn plan(position: Position, picture: Size, monitor: Rect, virtual_screen: Re
                 // the monitor is not inside the virtual screen it was given: nothing sensible to cut, treat the monitor alone
                 return plan(Position::Fill, picture, monitor, virtual_screen, anchor);
             }
-            let crop = cover_crop(pw, ph, vw, vh);
+            let crop = cover_crop(pw, ph, vw, vh, SPAN_TOP);
             let (cw, ch) = (crop.width() as i64, crop.height() as i64);
             // each edge is rounded on its own, so neighbouring monitors meet without a gap or an overlap
             let edge = |rel: i32, total: i64, len: i64, start: i32| start + mul_div_round(rel as i64, len, total) as i32;
@@ -332,9 +347,15 @@ mod tests {
 
     #[test]
     fn fill_crops_the_overflow() {
+        // too tall: 2250 of the 3000 rows are shown, and a third of the 750 that are not is cut at the top (Explorer's rule)
         let p = one(Position::Fill, 4000, 3000, LANDSCAPE);
-        assert_eq!(p.src, Rect::new(0, 375, 4000, 2625));
+        assert_eq!(p.src, Rect::new(0, 250, 4000, 2500));
         assert_eq!(p.dst, Rect::new(0, 0, 1920, 1080));
+        // the measured case: the user's square picture on a 2560 x 1440 monitor. 3384 rows are shown, 877 of the other 2632 are cut
+        // at the top; on the screen that is 373 px of 1120, which is what Explorer's own desktop shows
+        let u = plan(Position::Fill, Size::new(6016, 6016), Rect::new(0, 0, 2560, 1440), Rect::new(0, 0, 2560, 1440), TileAnchor::VirtualScreen);
+        assert_eq!(u.src, Rect::new(0, 877, 6016, 4261));
+        assert_eq!((u.src.top as f64 * 2560.0 / 6016.0).round() as i32, 373);
         // the portrait monitor takes a narrow middle slice (1687.5 rounds up to 1688)
         let q = one(Position::Fill, 4000, 3000, PORTRAIT);
         assert_eq!(q.src, Rect::new(1156, 0, 2844, 3000));
