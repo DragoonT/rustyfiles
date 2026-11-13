@@ -462,10 +462,6 @@ impl LookWindow {
                     .gap_2()
                     .items_center()
                     .justify_between()
-                    .on_hover(cx.listener(|v, hovered: &bool, _, cx| {
-                        v.bar_hovered = *hovered;
-                        cx.notify();
-                    }))
                     .child(
                         h_flex()
                             .min_w_0()
@@ -607,10 +603,30 @@ impl Render for LookWindow {
             .map(|d| {
                 if overlay {
                     // içerik tüm pencereyi kaplar, çubuk üstünde
-                    // (a press on the bar's buttons is not also a press on the content under
-                    // them: the pin button paused the video)
+                    // A press on the bar is not also a press on the content under it (the pin button paused the video). The bar takes
+                    // the mouse by OCCLUDING the content, not by stopping the press: a press on the bar's drag area reaches Windows as
+                    // a press on a caption only when nobody stopped it (the toolkit answers the message itself otherwise), and with
+                    // the press stopped the window of a picture or a video could not be moved by its bar (the user's report).
+                    // The content under the bar no longer sees the pointer, so the bar's own hover keeps it shown, and starts the
+                    // hide timer again when the pointer leaves it.
                     d.child(div().absolute().inset_0().child(content)).when_some(bar, |d, bar| {
-                        d.child(div().absolute().top_0().left_0().right_0().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(bar))
+                        d.child(
+                            div()
+                                .id("look-bar-over")
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .occlude()
+                                .on_hover(cx.listener(|v, hovered: &bool, window, cx| {
+                                    v.bar_hovered = *hovered;
+                                    if !*hovered {
+                                        v.show_chrome(window, cx);
+                                    }
+                                    cx.notify();
+                                }))
+                                .child(bar),
+                        )
                     })
                 } else {
                     d.child(
