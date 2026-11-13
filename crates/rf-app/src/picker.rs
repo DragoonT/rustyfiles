@@ -89,6 +89,25 @@ pub fn begin(pipe: String, cx: &mut App) {
     .detach();
 }
 
+/// Whether the app that asked takes a folder from its Open dialog too (`rustyfiles_dialog::proto::folder_label_from`).
+fn takes_folders(req: &Request) -> bool {
+    req.mode == Mode::Open && !req.folder_label.trim().is_empty()
+}
+
+/// In an Open dialog whose app also takes a folder: the folder the OK button answers with, when it answers with one. One selected
+/// folder is it, whatever is left in the name box; with nothing selected and nothing typed it is the folder that is open (walk into
+/// the project's folder and press the button). Selected or typed files stay files. Pure.
+pub(crate) fn folder_choice(takes: bool, sel: &[(PathBuf, bool)], typed: &str, dir: Option<&Path>) -> Option<PathBuf> {
+    if !takes {
+        return None;
+    }
+    match sel {
+        [(p, true)] => Some(p.clone()),
+        [] if typed.trim().is_empty() => dir.map(Path::to_path_buf),
+        _ => None,
+    }
+}
+
 fn mode_title(mode: Mode) -> &'static str {
     match mode {
         Mode::Open => t!("Aç"),
@@ -279,6 +298,13 @@ fn resolve(dir: Option<&Path>, name: &str) -> Option<PathBuf> {
 fn sync_name(ws: &Workspace, s: &PickSession, window: &mut Window, cx: &mut App) {
     let sel = selection(ws, cx);
     let wanted: Vec<PathBuf> = sel.iter().filter(|(_, dir)| *dir == (s.req.mode == Mode::Folder)).map(|(p, _)| p.clone()).collect();
+    // An app that takes a folder too: a folder selected after a file takes the file's name out of the box, so that the box and the
+    // button ("Select Folder") do not say two things.
+    if takes_folders(&s.req) && matches!(sel.as_slice(), [(_, true)]) && !s.last_selection.borrow().is_empty() {
+        s.last_selection.borrow_mut().clear();
+        s.name.update(cx, |st, cx| st.set_value("", window, cx));
+        return;
+    }
     if wanted.is_empty() || *s.last_selection.borrow() == wanted {
         return;
     }
@@ -349,6 +375,10 @@ pub(crate) fn accept(ws: &mut Workspace, window: &mut Window, cx: &mut Context<W
             }
         }
         Mode::Open => {
+            // (an app that takes a folder as well, such as IntelliJ IDEA opening a project)
+            if let Some(folder) = folder_choice(takes_folders(&s.req), &sel, &text, dir.as_deref()) {
+                return finish(ws, vec![folder], window);
+            }
             let files: Vec<PathBuf> = sel.iter().filter(|(_, d)| !d).map(|(p, _)| p.clone()).collect();
             if !files.is_empty() && text == names_text(&files) {
                 return finish(ws, if s.req.multi { files } else { files.into_iter().take(1).collect() }, window);
@@ -425,6 +455,15 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
     let label = match s.req.mode {
         Mode::Folder => t!("Klasör:"),
         _ => t!("Dosya adı:"),
+    };
+    // the button says what it will do: the app's own words for a folder while a folder is what OK answers with
+    let ok: SharedString = {
+        let dir = ws.active_view().read(cx).current_dir();
+        let typed = s.name.read(cx).value().to_string();
+        match folder_choice(takes_folders(&s.req), &selection(ws, cx), &typed, dir.as_deref()) {
+            Some(_) => s.req.folder_label.replace('&', "").into(),
+            None => ok_label(&s.req),
+        }
     };
     // file type: a select box, like the ones in Settings
     let filter = (!s.req.filters.is_empty() && s.req.mode != Mode::Folder).then(|| {
@@ -508,7 +547,7 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
                 .child(div().flex_1().min_w_0().child(Input::new(&s.name).appearance(false).prefix(prefix))),
         )
         .children(filter)
-        .child(button("pick-ok", ok_label(&s.req), true).on_click(cx.listener(|ws, _, window, cx| accept(ws, window, cx))))
+        .child(button("pick-ok", ok, true).on_click(cx.listener(|ws, _, window, cx| accept(ws, window, cx))))
         .child(button("pick-cancel", t!("İptal").into(), false).on_click(cx.listener(|ws, _, window, _| cancel(ws, window))))
         .into_any_element()
 }
@@ -516,8 +555,28 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
 #[cfg(test)]
 mod tests {
     // not `super::*`: gpui's `test` macro would shadow the built-in one
-    use super::{names_text, parse_names, resolve};
+    use super::{folder_choice, names_text, parse_names, resolve};
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn an_app_that_takes_folders_gets_the_selected_folder_or_the_open_one() {
+        let dir = Path::new(r"C:\projeler");
+        let folder = (PathBuf::from(r"C:\projeler\uygulama"), true);
+        let file = (PathBuf::from(r"C:\projeler\pom.xml"), false);
+        // one selected folder: that folder, also with a file's name still in the box
+        assert_eq!(folder_choice(true, &[folder.clone()], "", Some(dir)), Some(folder.0.clone()));
+        assert_eq!(folder_choice(true, &[folder.clone()], "pom.xml", Some(dir)), Some(folder.0.clone()));
+        // nothing selected and nothing typed: the folder that is open
+        assert_eq!(folder_choice(true, &[], "  ", Some(dir)), Some(dir.to_path_buf()));
+        assert_eq!(folder_choice(true, &[], "", None), None, "no folder is open (a list of drives)");
+        // files stay files: a selected one, a typed one, several things selected
+        assert_eq!(folder_choice(true, &[file.clone()], "pom.xml", Some(dir)), None);
+        assert_eq!(folder_choice(true, &[], "pom.xml", Some(dir)), None);
+        assert_eq!(folder_choice(true, &[folder.clone(), file.clone()], "", Some(dir)), None);
+        // an ordinary Open dialog never answers with a folder
+        assert_eq!(folder_choice(false, &[folder], "", Some(dir)), None);
+        assert_eq!(folder_choice(false, &[], "", Some(dir)), None);
+    }
 
     #[test]
     fn names_round_trip() {

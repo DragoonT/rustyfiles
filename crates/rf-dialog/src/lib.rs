@@ -173,6 +173,8 @@ mod com {
         properties: Option<IPropertyStore>,
         /// Picked in rustyfiles (None: not shown by us, the real dialog has the answer).
         result: Option<Vec<String>>,
+        /// While the app's event sinks are asked what they do with a selection (`folder_label`): the path that is "selected".
+        probe: Option<String>,
     }
 
     #[implement(IFileOpenDialog, IFileSaveDialog, IFileDialogCustomize)]
@@ -213,7 +215,55 @@ mod com {
                 overwrite_prompt: self.save && st.options.0 & FOS_OVERWRITEPROMPT.0 != 0,
                 owner: owner.0 as isize,
                 app: exe_name(),
+                folder_label: String::new(),
             }
+        }
+    }
+
+    /// A folder and a file that every Windows has, for asking an app what its OK button says for each.
+    fn probe_paths() -> Option<(String, String)> {
+        let dir = std::path::PathBuf::from(std::env::var_os("SystemRoot").or_else(|| std::env::var_os("windir"))?);
+        let file = ["win.ini", "notepad.exe", "explorer.exe"].iter().map(|n| dir.join(n)).find(|p| p.is_file())?;
+        dir.is_dir().then(|| (dir.to_string_lossy().into_owned(), file.to_string_lossy().into_owned()))
+    }
+
+    impl Dialog_Impl {
+        /// What the app's OK button says while a FOLDER is selected, when that is something else than for a file: such an app takes
+        /// the folder as the answer (`proto::folder_label_from` says why). Asked of the app's own event sinks before the picker is
+        /// shown, as Windows' dialog asks them on every change of the selection: once with a folder "selected", once with a file.
+        /// Only selection changes are told, never a change of folder: after that one the JetBrains runtime takes a cancelled dialog
+        /// for "use the folder that was open". Empty for a Save dialog, a folder picker, and an app that listens to nothing.
+        fn folder_label(&self) -> String {
+            let (sinks, before, plain_open) = {
+                let st = self.st.borrow();
+                (st.sinks.iter().map(|(_, s)| s.clone()).collect::<Vec<IFileDialogEvents>>(), st.ok_label.clone(), !self.save && st.options.0 & FOS_PICKFOLDERS.0 == 0)
+            };
+            if !plain_open || sinks.is_empty() {
+                return String::new();
+            }
+            let Some((folder, file)) = probe_paths() else { return String::new() };
+            let Ok(me) = self.to_interface::<IFileOpenDialog>().cast::<IFileDialog>() else { return String::new() };
+            let ask = |path: &str| -> String {
+                {
+                    let mut st = self.st.borrow_mut();
+                    st.probe = Some(path.to_string());
+                    st.ok_label = String::new();
+                }
+                for s in &sinks {
+                    // (what the app answers does not matter; what it calls the button while it is asked does)
+                    let _ = unsafe { (Interface::vtable(s).OnSelectionChange)(Interface::as_raw(s), Interface::as_raw(&me)) };
+                }
+                self.st.borrow().ok_label.clone()
+            };
+            let for_folder = ask(&folder);
+            let for_file = ask(&file);
+            {
+                let mut st = self.st.borrow_mut();
+                st.probe = None;
+                // the button is left as the app names it for a file, or as it was
+                st.ok_label = if for_file.trim().is_empty() { before } else { for_file.clone() };
+            }
+            crate::proto::folder_label_from(&for_folder, &for_file)
         }
     }
 
@@ -225,7 +275,12 @@ mod com {
                 crate::log(&format!("show: Windows' dialog (customized={})", self.st.borrow().customized));
                 return unsafe { self.real.Show(Some(owner)) };
             }
-            let req = self.request(owner);
+            let folder_label = self.folder_label();
+            let mut req = self.request(owner);
+            if !folder_label.is_empty() {
+                crate::log(&format!("show: the app takes a folder too (its button says {folder_label:?} for one)"));
+            }
+            req.folder_label = folder_label;
             let has_owner = !owner.is_invalid();
             {
                 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
@@ -349,6 +404,10 @@ mod com {
         }
         fn GetCurrentSelection(&self) -> Result<IShellItem> {
             trace("GetCurrentSelection");
+            // (while the app is asked what it does with a selection: that selection)
+            if let Some(p) = self.st.borrow().probe.clone() {
+                return item_for(&p);
+            }
             if let Some(first) = self.st.borrow().result.as_ref().and_then(|r| r.first().cloned()) {
                 return item_for(&first);
             }
@@ -361,6 +420,9 @@ mod com {
         }
         fn GetFileName(&self) -> Result<PWSTR> {
             trace("GetFileName");
+            if self.st.borrow().probe.is_some() {
+                return co_string(&self.st.borrow().file_name);
+            }
             if self.st.borrow().result.is_some() {
                 crate::log("GetFileName");
                 return co_string(&self.st.borrow().file_name);

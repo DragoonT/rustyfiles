@@ -41,6 +41,24 @@ pub struct Request {
     pub owner: isize,
     /// The calling app's exe name, for the window title.
     pub app: String,
+    /// Open only: the app takes a FOLDER as the answer too, and this is what its OK button says while a folder is the choice
+    /// ("Select Folder"). Empty: files only, as an Open dialog is. See [`folder_label_from`]. (A DLL older than this field does not
+    /// send it.)
+    #[serde(default)]
+    pub folder_label: String,
+}
+
+/// Whether an app that showed an Open dialog also takes a folder from it, from what its OK button says for each kind of selection.
+///
+/// Windows' Open dialog never answers with a folder: OK on a folder goes into it. Some programs make it answer with one anyway, by
+/// hooking the dialog's window: the JetBrains runtime does (IntelliJ IDEA's "Open File or Project": a project is a folder), and it
+/// renames the OK button to "Select Folder" while a folder is selected and back to "Open" for a file. The hook cannot work on our
+/// window, but the renaming goes through the dialog object, which is ours: an app that gives the button ANOTHER label for a folder
+/// than for a file means that OK chooses that folder. The result is the folder's label, or nothing when the app makes no difference
+/// (it names the button once, or not at all). Pure.
+pub fn folder_label_from(for_folder: &str, for_file: &str) -> String {
+    let (folder, file) = (for_folder.trim(), for_file.trim());
+    if folder.is_empty() || folder == file { String::new() } else { folder.to_string() }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
@@ -112,6 +130,28 @@ pub fn first_ext(spec: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_app_takes_folders_when_its_button_says_something_else_for_a_folder() {
+        // the JetBrains runtime: "Select Folder" while a folder is selected, "Open" for a file
+        assert_eq!(folder_label_from("Select Folder", "Open"), "Select Folder");
+        assert_eq!(folder_label_from(" Klasör Seç ", "Aç"), "Klasör Seç");
+        // only the folder gets a label
+        assert_eq!(folder_label_from("Choose", ""), "Choose");
+        // no difference, or no label at all: an ordinary Open dialog
+        assert_eq!(folder_label_from("Open", "Open"), "");
+        assert_eq!(folder_label_from("", ""), "");
+        assert_eq!(folder_label_from("", "Open"), "");
+        assert_eq!(folder_label_from("Import", " Import "), "");
+    }
+
+    #[test]
+    fn a_request_from_an_older_dll_has_no_folder_label() {
+        let mut v = serde_json::to_value(Request::default()).unwrap();
+        v.as_object_mut().unwrap().remove("folder_label");
+        let r: Request = serde_json::from_value(v).unwrap();
+        assert_eq!(r.folder_label, "");
+    }
 
     #[test]
     fn round_trip() {
