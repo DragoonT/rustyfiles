@@ -203,16 +203,30 @@ pub const OVF_EMPTY_H: f32 = 48.0;
 pub struct OvfLimits {
     pub max_w: f32,
     pub max_h: f32,
+    /// The panel is at least this wide (0: as wide as its cells). It grows out of the right island's glass, which is as wide as
+    /// the island: a panel narrower than that left the grown glass empty at one side (a user's picture: two rows of four icons at
+    /// the right, nothing at the left). With this the columns are spread over the whole width.
+    pub min_w: f32,
 }
 
 impl OvfLimits {
     /// No limit: the panel is as large as its icons want (what the plain functions below use).
-    pub const UNBOUNDED: OvfLimits = OvfLimits { max_w: f32::MAX, max_h: f32::MAX };
+    pub const UNBOUNDED: OvfLimits = OvfLimits { max_w: f32::MAX, max_h: f32::MAX, min_w: 0.0 };
+
+    /// The same limits for a panel that is at least `w` wide (never more than the most it may be).
+    pub fn at_least(self, w: f32) -> OvfLimits {
+        OvfLimits { min_w: if w.is_finite() { w.clamp(0.0, self.max_w) } else { 0.0 }, ..self }
+    }
+
+    /// The width of one column: a cell, or more when the panel's least width leaves room (the cell stands in its middle).
+    fn slot(self, cols: usize) -> f32 {
+        OVF_CELL.max((self.min_w - 2.0 * OVF_PAD) / cols.max(1) as f32)
+    }
 
     /// For a monitor whose work area is `work_w` x `work_h` logical px: nine tenths of the width and three quarters of the height, so
     /// that the island, the gap above it and a margin at the top of the screen are never covered.
     pub fn for_work(work_w: f32, work_h: f32) -> OvfLimits {
-        OvfLimits { max_w: (work_w * 0.9).max(OVF_CELL + 2.0 * OVF_PAD), max_h: (work_h * 0.75).max(OVF_CELL + 2.0 * OVF_PAD) }
+        OvfLimits { max_w: (work_w * 0.9).max(OVF_CELL + 2.0 * OVF_PAD), max_h: (work_h * 0.75).max(OVF_CELL + 2.0 * OVF_PAD), min_w: 0.0 }
     }
 
     fn max_cols(self) -> usize {
@@ -269,10 +283,10 @@ pub fn ovf_size(count: usize) -> (f32, f32) {
 /// [`ovf_size`] within `limits`.
 pub fn ovf_size_in(count: usize, limits: OvfLimits) -> (f32, f32) {
     if count == 0 {
-        return (OVF_EMPTY_W, OVF_EMPTY_H + 2.0 * OVF_PAD);
+        return (OVF_EMPTY_W.max(limits.min_w), OVF_EMPTY_H + 2.0 * OVF_PAD);
     }
     let g = ovf_grid(count, limits);
-    (2.0 * OVF_PAD + g.cols as f32 * OVF_CELL, 2.0 * OVF_PAD + g.rows as f32 * OVF_CELL)
+    (2.0 * OVF_PAD + g.cols as f32 * limits.slot(g.cols), 2.0 * OVF_PAD + g.rows as f32 * OVF_CELL)
 }
 
 /// Cell `i` (x, y, w, h), logical px in the panel.
@@ -283,7 +297,46 @@ pub fn ovf_cell(count: usize, i: usize) -> [f32; 4] {
 /// [`ovf_cell`] within `limits`.
 pub fn ovf_cell_in(count: usize, i: usize, limits: OvfLimits) -> [f32; 4] {
     let cols = ovf_grid(count, limits).cols.max(1);
-    [OVF_PAD + (i % cols) as f32 * OVF_CELL, OVF_PAD + (i / cols) as f32 * OVF_CELL, OVF_CELL, OVF_CELL]
+    // (a cell stays a square; in a panel made wider than its cells each stands in the middle of its column's share)
+    let slot = limits.slot(cols);
+    [OVF_PAD + (i % cols) as f32 * slot + (slot - OVF_CELL) / 2.0, OVF_PAD + (i / cols) as f32 * OVF_CELL, OVF_CELL, OVF_CELL]
+}
+
+#[cfg(test)]
+mod ovf_width_tests {
+    use super::*;
+
+    /// A panel that must be as wide as the island it grows out of spreads its columns over that width: nothing empty at one side.
+    #[test]
+    fn a_panel_made_as_wide_as_its_island_spreads_its_columns_over_the_width() {
+        let limits = OvfLimits::for_work(2560.0, 1392.0).at_least(226.0);
+        for count in [1usize, 2, 3, 4, 8, 9, 30] {
+            let (w, h) = ovf_size_in(count, limits);
+            let g = ovf_grid(count, limits);
+            assert!(w >= 226.0 - 0.01, "{count}: {w}");
+            assert_eq!(h, 2.0 * OVF_PAD + g.rows as f32 * OVF_CELL);
+            // the first row: the room left of the first cell is the room right of the last one, and the gaps between are equal
+            let first = ovf_cell_in(count, 0, limits);
+            let last = ovf_cell_in(count, g.cols - 1, limits);
+            assert!((first[0] - (w - (last[0] + last[2]))).abs() < 0.01, "{count}: left {} right {}", first[0], w - (last[0] + last[2]));
+            assert_eq!((first[2], first[3]), (OVF_CELL, OVF_CELL), "a cell stays a square");
+            for i in 0..g.shown {
+                let [x, y, cw, ch] = ovf_cell_in(count, i, limits);
+                assert!(x >= OVF_PAD - 0.01 && x + cw <= w - OVF_PAD + 0.01 && y >= OVF_PAD && y + ch <= h - OVF_PAD + 0.01, "{count}: cell {i}");
+            }
+        }
+        // eight icons in a 226 px panel: four columns, 52.5 px each, the cells 6.25 px in from their column's edges
+        assert_eq!(ovf_grid(8, limits).cols, 4);
+        assert!((ovf_cell_in(8, 0, limits)[0] - (OVF_PAD + 6.25)).abs() < 0.01);
+        // a grid that is wider than the island by itself is as it was
+        let wide = OvfLimits::for_work(2560.0, 1392.0).at_least(100.0);
+        assert_eq!(ovf_size_in(8, wide), ovf_size_in(8, OvfLimits::for_work(2560.0, 1392.0)));
+        assert_eq!(ovf_cell_in(8, 5, wide), ovf_cell_in(8, 5, OvfLimits::for_work(2560.0, 1392.0)));
+        // the empty panel is as wide as the island too, and no limit asked is no change
+        assert_eq!(ovf_size_in(0, limits).0, OVF_EMPTY_W.max(226.0));
+        assert_eq!(ovf_size_in(0, OvfLimits::UNBOUNDED).0, OVF_EMPTY_W);
+        assert_eq!(OvfLimits::for_work(800.0, 600.0).at_least(f32::NAN).min_w, 0.0);
+    }
 }
 
 /// The cell at (`x`, `y`), logical px in the panel.

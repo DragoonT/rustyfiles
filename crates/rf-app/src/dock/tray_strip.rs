@@ -454,6 +454,13 @@ pub fn overflow_rect(cx: &App) -> Option<Rect> {
     super::panel::overflow_rect(cx)
 }
 
+/// The hidden-icons panel's limits now: what the screen allows, and at least as wide as the right island's glass, out of which the
+/// panel grows (a narrower panel left the grown glass empty at its left: a user's picture). In the monitor's logical px.
+fn panel_limits(st: &TrayState, cx: &App) -> ts::OvfLimits {
+    let island = glass_and_unit(cx).zip(host::monitor_work(cx)).map_or(0.0, |((glass, _), (scale, _))| glass.width() as f32 / scale.max(0.01));
+    st.ovf.at_least(island)
+}
+
 /// Where a source is on the screen now, device px.
 fn source_rect(src: Source, cx: &App) -> Option<Rect> {
     let st = cx.try_global::<TrayState>()?;
@@ -466,8 +473,9 @@ fn source_rect(src: Source, cx: &App) -> Option<Rect> {
             let scale = host::monitor_work(cx)?.0;
             let panel = overflow_rect(cx)?;
             let n = st.lay.overflow.len();
-            (k < ts::ovf_grid(n, st.ovf).shown).then(|| {
-                let [x, y, w, h] = ts::ovf_cell_in(n, k, st.ovf);
+            let limits = panel_limits(st, cx);
+            (k < ts::ovf_grid(n, limits).shown).then(|| {
+                let [x, y, w, h] = ts::ovf_cell_in(n, k, limits);
                 Rect::from_xywh(panel.left + device_px(x, scale), panel.top + device_px(y, scale), device_px(w, scale), device_px(h, scale))
             })
         }
@@ -665,10 +673,11 @@ pub fn overflow_data(cx: &App) -> OverflowData {
     };
     let total = st.lay.overflow.len();
     // (the frame that says "drop here" is for an icon coming from the strip)
+    let limits = panel_limits(st, cx);
     OverflowData {
-        count: ts::ovf_grid(total, st.ovf).shown,
+        count: ts::ovf_grid(total, limits).shown,
         total,
-        limits: st.ovf,
+        limits,
         dragged,
         drop_into: dragged.is_none() && st.drag.as_ref().is_some_and(|d| d.target == DropTarget::Overflow),
         hover,
@@ -685,7 +694,12 @@ pub fn empty_panel() -> ts::EmptyPanel {
 /// The panel window's size now, logical px: its grid for the icons it holds (within what the screen allows), or the empty panel's text.
 pub fn overflow_size(cx: &App) -> (f32, f32) {
     let d = overflow_data(cx);
-    if d.total == 0 { empty_panel().size } else { ts::ovf_size_in(d.total, d.limits) }
+    if d.total == 0 {
+        let (w, h) = empty_panel().size;
+        (w.max(d.limits.min_w), h)
+    } else {
+        ts::ovf_size_in(d.total, d.limits)
+    }
 }
 
 /// The picture of the overflow panel's cell `k`.
@@ -698,7 +712,7 @@ pub fn overflow_picture(k: usize, size: f32, pal: Palette, cx: &App) -> AnyEleme
 
 /// How many columns the panel has for the icons it holds now.
 pub fn overflow_cols(cx: &App) -> usize {
-    cx.try_global::<TrayState>().map_or(0, |st| ts::ovf_grid(st.lay.overflow.len(), st.ovf).cols)
+    cx.try_global::<TrayState>().map_or(0, |st| ts::ovf_grid(st.lay.overflow.len(), panel_limits(st, cx)).cols)
 }
 
 /// The key of the icon in cell `k` of the overflow panel now.

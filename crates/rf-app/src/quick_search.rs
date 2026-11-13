@@ -30,6 +30,10 @@ pub const LAUNCH_ARG: &str = "--quick-search";
 
 const WIDTH: f32 = 680.;
 const ROW_H: f32 = 46.;
+/// What a match on an app's program file name is worth less than the same match on its display name.
+const FILE_NAME_MATCH: i32 = 60;
+/// A run command's rank: under an app whose own name is exactly the query (1000), above every other app.
+const RUN_COMMAND: i32 = 990;
 /// Results per kind.
 const MAX_APPS: usize = 4;
 const MAX_FILES: usize = 7;
@@ -50,12 +54,14 @@ pub fn disable_hotkey() {
     NO_HOTKEY.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// This process registers the hotkey: the one rustyfiles (not DirectLook, not a test copy).
+/// This process registers the hotkey: the one rustyfiles (not DirectLook, not a test copy). `RUSTYFILES_QUICK_HOTKEY=1` lets a test
+/// copy hold it like the real one (a copy the user tries the next version with, while the installed app is not running); without it a
+/// test copy never takes the user's hotkey.
 fn hotkey_owner() -> bool {
+    let test_copy = std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || std::env::var_os("RUSTYFILES_INSTANCE").is_some();
     !crate::background::DIRECTLOOK_PROCESS.load(std::sync::atomic::Ordering::Relaxed)
         && !NO_HOTKEY.load(std::sync::atomic::Ordering::Relaxed)
-        && std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_none()
-        && std::env::var_os("RUSTYFILES_INSTANCE").is_none()
+        && (!test_copy || std::env::var_os("RUSTYFILES_QUICK_HOTKEY").is_some())
 }
 
 /// Apps, files and pages being started on other threads: the app does not quit under them
@@ -552,14 +558,30 @@ pub(crate) fn search_local(query: &str, engine: WebSearch, with_bookmarks: bool)
     let used: HashMap<String, Use> = with_usage(|m| m.clone());
     let lift = |t: &Target| used.get(&t.key()).map_or(0, boost);
     let mut items = Vec::new();
-    // apps
-    let mut a: Vec<Item> = apps()
+    // apps: by their display name, and by the file name of their program (`cmd` finds "Komut İstemi"; see `run_names.rs`). A match on
+    // the program's name ranks a little below the same kind of match on the display name.
+    let listed = apps();
+    let mut a: Vec<Item> = listed
         .iter()
         .filter_map(|app| {
             let t = Target::App { id: app.id.clone(), name: app.name.clone() };
-            score_with(&app.name, &q, true).map(|s| Item { score: s + lift(&t), title: app.name.clone(), detail: String::new(), section: Section::Apps, target: t })
+            let by_name = score_with(&app.name, &q, true);
+            let by_file = crate::run_names::app_file_stem(&app.id).and_then(|stem| score(&stem, &q)).map(|s| s - FILE_NAME_MATCH);
+            let s = by_name.max(by_file)?;
+            Some(Item { score: s + lift(&t), title: app.name.clone(), detail: String::new(), section: Section::Apps, target: t })
         })
         .collect();
+    // a run command, as Windows' search and the Run box have it: the query IS the name of a program (`dxdiag`, `regedit`,
+    // `services.msc`). Not offered when an app in the list is that very program (the app's own row stands for it).
+    if let Some(exe) = crate::run_names::resolve(query.trim()) {
+        let wanted = crate::run_names::stem_of(query.trim());
+        let an_app_is_it = listed.iter().any(|app| crate::run_names::app_file_stem(&app.id).is_some_and(|s| s == wanted));
+        if !an_app_is_it {
+            let folder = exe.parent().map(|d| d.display().to_string()).unwrap_or_default();
+            let t = Target::Path { path: exe.clone(), dir: false };
+            a.push(Item { score: RUN_COMMAND + lift(&t), title: file_name(&exe), detail: format!("{} · {folder}", t!("Komut")), section: Section::Apps, target: t });
+        }
+    }
     a.sort_by_key(|i| std::cmp::Reverse(i.score));
     items.extend(a.into_iter().take(MAX_APPS));
     // bookmarks

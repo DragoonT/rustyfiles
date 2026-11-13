@@ -9606,5 +9606,11 @@
   "key": "Windows'un hiçbir görev çubuğu ayarı değiştirilmez. Görev çubuğu, Dock durunca geri gelir. Dock beklenmedik biçimde ölürse küçük bir yardımcı program (rustyfiles-shellguard.exe) onu bir iki saniye içinde geri getirir; yardımcı çalışmıyorsa görev çubuğu hiç gizlenmez.",
   "tr": "Windows'un hiçbir görev çubuğu ayarı değiştirilmez. Görev çubuğu, Dock durunca geri gelir. Dock beklenmedik biçimde ölürse küçük bir yardımcı program (rustyfiles-shellguard.exe) onu bir iki saniye içinde geri getirir; yardımcı çalışmıyorsa görev çubuğu hiç gizlenmez.",
   "en": "No Windows taskbar setting is changed. The taskbar comes back when the Dock stops. If the Dock dies unexpectedly, a small helper program (rustyfiles-shellguard.exe) brings it back within a second or two; if the helper is not running, the taskbar is not hidden at all."
+ },
+ {
+  "id": "5d229a97",
+  "key": "Komut",
+  "tr": "Komut",
+  "en": "Command"
  }
 ]

@@ -66,6 +66,7 @@ pub mod recycle;
 pub mod recycle_settings;
 pub mod search;
 pub mod runcmd;
+pub mod runfind;
 pub mod shell;
 pub mod shellfolder;
 pub mod sysstatus;
