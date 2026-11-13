@@ -46,6 +46,7 @@ mod settings;
 mod settings_merge;
 mod shellless;
 pub mod shell;
+mod snip;
 mod shell_view;
 mod select_box;
 mod settings_view;
@@ -351,6 +352,8 @@ pub fn main() {
     // `--dock`: the dock (see dock/), a process of its own that lives beside the main rustyfiles. `--shell` is the same process under
     // its new name, the shell host (see shell/): the one with the desktop cover, the shell mode and the probe.
     let dock = shell::is_host_arg(std::env::args().nth(1).as_deref());
+    // `--snip`: our own screen snip and nothing else (see snip/): no window of the app, no forwarding to a running copy
+    let snip_only = snip::is_arg(std::env::args().nth(1).as_deref());
     // `--no-window`: the main app with no window, started by the dock so that its search has the file index (see search_pipe)
     let no_window = std::env::args().nth(1).as_deref() == Some(search_pipe::START_ARG);
     if bar_preview || dock {
@@ -363,7 +366,7 @@ pub fn main() {
         shell::note_host_start(&std::env::args().skip(1).collect::<Vec<_>>());
     }
     let arg = std::env::args().nth(1).map(|a| a.trim().trim_matches('"').to_string()).filter(|a| !a.is_empty());
-    let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search && !dock && !no_window);
+    let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search && !dock && !no_window && !snip_only);
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
     let arg = arg.filter(|_| !new_window);
@@ -517,7 +520,7 @@ pub fn main() {
         _ => String::new(),
     };
     // RUSTYFILES_MULTI_INSTANCE=1 skips forwarding (automated tests run several copies).
-    let multi = std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || bar_preview || dock;
+    let multi = std::env::var_os("RUSTYFILES_MULTI_INSTANCE").is_some() || bar_preview || dock || snip_only;
     // the dock is a single instance of its own group: a second `--dock` greets the first and ends; the guard lives to the end
     let dock_instance = if dock {
         match dock::acquire() {
@@ -631,6 +634,8 @@ pub fn main() {
             None if bar_preview => taskbar_preview::open(cx),
             // the dock: three islands, no main window
             None if dock => dock::run(dock_messages.take(), cx),
+            // the screen snip alone: it ends by itself when it is over
+            None if snip_only => snip::run_standalone(cx),
             // started for the quick search only: no main window (it quits when that closes,
             // unless running in the background)
             None if quick_search => quick_search::toggle(cx),
@@ -645,6 +650,11 @@ pub fn main() {
                 // a copy or move cut off last time: ask to carry it on
                 status_center::offer_resume(cx);
             }
+        }
+        if snip_only {
+            // nothing else of the app runs in this process; the snip quits it when it is over
+            cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
+            return;
         }
         if dock {
             // a side process: no updates, no DirectLook, no tray, no drive-eject handler, and no "last window closed" saving of

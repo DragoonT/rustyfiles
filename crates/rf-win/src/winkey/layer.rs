@@ -19,14 +19,14 @@
 //!    sends no mask key.
 //! 7. Stood down (or switched off) in the middle of a chord: the chord is closed and the interface is told (`Lost`) so that it closes
 //!    the switcher; the releases of what was swallowed are still swallowed.
-//! 8. Win+E and Win+D (`Shared::combos_on`, only while no Explorer is the shell): the press of E or D, with a Windows key alone down
-//!    before it, is swallowed and posted; its auto-repeats are swallowed; its release is swallowed because its press was (also after the
+//! 8. Win+E, Win+D and Win+Shift+S (`Shared::combos_on`, only while no Explorer is the shell): the press of E or D, with a Windows key
+//!    alone down before it (or of S, with Shift also down and nothing else), is swallowed and posted; its auto-repeats are swallowed; its release is swallowed because its press was (also after the
 //!    layer stood down); ONE mask key is sent for the hold, so that Windows' own Start does not open when the Windows key comes up
 //!    (the system never saw a key between the press and the release). The Windows key itself is still never swallowed.
 
 use std::sync::Arc;
 
-use super::machine::{VK_D, VK_E, VK_LWIN, VK_RWIN, WinMachine, WinOutcome};
+use super::machine::{VK_D, VK_E, VK_LWIN, VK_RWIN, VK_S, WinMachine, WinOutcome};
 use super::mask::MaskSender;
 use super::queue::Posted;
 use super::service::KeyProbe;
@@ -59,8 +59,8 @@ pub struct KeyLayer {
     /// The switcher could not be opened: Alt+Tab passes until Alt is released.
     given_up: bool,
     held: Held,
-    /// The keys of Win+E and Win+D whose press was swallowed and whose release is still to come: `[E, D]`.
-    combo_down: [bool; 2],
+    /// The keys of Win+E, Win+D and Win+Shift+S whose press was swallowed and whose release is still to come: `[E, D, S]`.
+    combo_down: [bool; 3],
     /// The mask key was sent for the current Windows-key hold because a chord of ours took a key.
     combo_masked: bool,
     /// The keyboard's own state, asked once at the press of E or D (see `on_event`); `None` in the layer's unit tests that do not need it.
@@ -78,7 +78,7 @@ impl KeyLayer {
             seq: 0,
             given_up: false,
             held: Held { lwin: win_left, rwin: win_right, ..Held::default() },
-            combo_down: [false; 2],
+            combo_down: [false; 3],
             combo_masked: false,
             probe: None,
         }
@@ -134,8 +134,11 @@ impl KeyLayer {
                 self.held.rwin = false;
                 self.shared.set_believed(self.held.tracked());
             }
-            let modifier_held = k.mods.shift() || k.mods.ctrl() || k.flags & LLKHF_ALTDOWN != 0;
-            match self.win.feed(k.vk, k.down, k.injected(), modifier_held) {
+            let alt = k.flags & LLKHF_ALTDOWN != 0;
+            let modifier_held = k.mods.shift() || k.mods.ctrl() || alt;
+            // (Win+Shift+S needs to know that Shift is the ONLY modifier held)
+            let shift_only = k.mods.shift() && !k.mods.ctrl() && !alt;
+            match self.win.feed_ex(k.vk, k.down, k.injected(), modifier_held, shift_only) {
                 WinOutcome::Tap => {
                     // the mask goes in BEFORE the release is let through; in log-only mode nothing is sent
                     self.send_mask(log_only);
@@ -242,11 +245,12 @@ impl KeyLayer {
     }
 }
 
-/// Which of the two taken keys a virtual key is: `[E, D]`.
+/// Which of the three taken keys a virtual key is: `[E, D, S]`.
 fn combo_slot(vk: u32) -> Option<usize> {
     match vk {
         VK_E => Some(0),
         VK_D => Some(1),
+        VK_S => Some(2),
         _ => None,
     }
 }
@@ -998,5 +1002,133 @@ mod tests {
         r.feed.push_raw(KEY_E, SCAN_E, 0, false);
         r.win_up(VK_LWIN);
         assert_eq!(r.posted(), vec![Posted::WinCombo(crate::winkey::machine::Combo::Explorer)]);
+    }
+
+    // ---------------------------------------------------------------- Win+Shift+S (rule 8)
+
+    const KEY_S: u32 = 0x53;
+    const SCAN_S: u32 = 0x1F;
+    const SCAN_SHIFT: u32 = 0x2A;
+
+    #[test]
+    fn win_shift_s_takes_the_s_posts_the_snip_masks_once_lets_the_shift_and_the_windows_key_pass_and_never_opens_start() {
+        use crate::winkey::machine::Combo;
+        let mut r = combo_rig(false);
+        assert!(!r.win_down(VK_LWIN));
+        assert!(!r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, true), "the Shift is never swallowed");
+        assert!(r.feed.push_raw(KEY_S, SCAN_S, 0, true), "the press of S is swallowed");
+        assert_eq!(r.mask.sent(), 1, "one mask while the Windows key is down, so Windows' Start does not open on its release");
+        assert!(r.feed.push_raw(KEY_S, SCAN_S, 0, true), "the auto-repeat is swallowed too");
+        assert!(r.feed.push_raw(KEY_S, SCAN_S, 0, false), "the release follows the press");
+        assert!(!r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, false));
+        assert!(!r.win_up(VK_LWIN), "the Windows key itself always passes");
+        assert_eq!(r.posted(), vec![Posted::WinCombo(Combo::Snip)], "one snip, and no StartTap");
+        assert_eq!(r.mask.sent(), 1);
+        // the next plain tap is a tap
+        r.win_down(VK_LWIN);
+        r.win_up(VK_LWIN);
+        assert_eq!(r.posted(), vec![Posted::StartTap]);
+    }
+
+    #[test]
+    fn shift_held_before_the_windows_key_is_the_snip_too() {
+        use crate::winkey::machine::Combo;
+        let mut r = combo_rig(false);
+        assert!(!r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, true));
+        r.win_down(VK_RWIN);
+        assert!(r.feed.push_raw(KEY_S, SCAN_S, 0, true));
+        r.feed.push_raw(KEY_S, SCAN_S, 0, false);
+        r.win_up(VK_RWIN);
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, false);
+        assert_eq!(r.posted(), vec![Posted::WinCombo(Combo::Snip)]);
+        assert_eq!(r.mask.sent(), 1);
+    }
+
+    #[test]
+    fn win_s_and_win_shift_e_and_win_ctrl_shift_s_pass_untouched() {
+        let mut r = combo_rig(false);
+        // Win+S: Windows' search
+        r.win_down(VK_LWIN);
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, 0, true));
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, 0, false));
+        r.win_up(VK_LWIN);
+        // Win+Shift+E
+        r.win_down(VK_LWIN);
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, true);
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, true));
+        assert!(!r.feed.push_raw(KEY_E, SCAN_E, 0, false));
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, false);
+        r.win_up(VK_LWIN);
+        // Win+Ctrl+Shift+S
+        r.win_down(VK_LWIN);
+        r.feed.push_raw(VK_LCONTROL, 0x1D, 0, true);
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, true);
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, 0, true));
+        r.feed.push_raw(KEY_S, SCAN_S, 0, false);
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, false);
+        r.feed.push_raw(VK_LCONTROL, 0x1D, 0, false);
+        r.win_up(VK_LWIN);
+        assert_eq!(r.mask.sent(), 0);
+        assert_eq!(r.posted(), vec![]);
+    }
+
+    #[test]
+    fn beside_explorer_win_shift_s_is_explorers_and_passes() {
+        // the chords are not ours (an Explorer shell answers them itself): no swallow, no mask, no post
+        let mut r = rig_with(true, false, false);
+        r.win_down(VK_LWIN);
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, true);
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, 0, true));
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, 0, false));
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, false);
+        r.win_up(VK_LWIN);
+        assert_eq!(r.mask.sent(), 0);
+        assert_eq!(r.posted(), vec![]);
+        // and with the Windows-key setting off altogether it is not looked at either
+        let mut off = rig_with(false, false, false);
+        off.shared.set_combos(true);
+        off.win_down(VK_LWIN);
+        off.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, true);
+        assert!(!off.feed.push_raw(KEY_S, SCAN_S, 0, true));
+        assert_eq!(off.posted(), vec![]);
+    }
+
+    #[test]
+    fn log_only_decides_the_snip_and_posts_it_but_swallows_and_sends_nothing() {
+        use crate::winkey::machine::Combo;
+        let mut r = combo_rig(true);
+        r.win_down(VK_LWIN);
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, true);
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, 0, true), "log only swallows nothing");
+        r.feed.push_raw(KEY_S, SCAN_S, 0, false);
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, false);
+        r.win_up(VK_LWIN);
+        assert_eq!(r.mask.sent(), 0);
+        assert_eq!(r.posted(), vec![Posted::WinCombo(Combo::Snip)]);
+    }
+
+    #[test]
+    fn the_release_of_a_swallowed_s_is_swallowed_even_after_the_layer_stood_down() {
+        let mut r = combo_rig(false);
+        r.win_down(VK_LWIN);
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, true);
+        assert!(r.feed.push_raw(KEY_S, SCAN_S, 0, true));
+        r.clock.set(10_000 + STALE_AFTER_MS + 10);
+        assert!(r.feed.push_raw(KEY_S, SCAN_S, 0, false), "a key that was swallowed down never comes up in the program");
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, 0, true), "while standing down the next S passes");
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, 0, false));
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, false);
+        r.win_up(VK_LWIN);
+    }
+
+    #[test]
+    fn an_injected_s_with_win_and_shift_down_is_not_the_users_chord() {
+        let mut r = combo_rig(false);
+        r.win_down(VK_LWIN);
+        r.feed.push_raw(VK_LSHIFT, SCAN_SHIFT, 0, true);
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, LLKHF_INJECTED, true));
+        assert!(!r.feed.push_raw(KEY_S, SCAN_S, LLKHF_INJECTED, false));
+        assert_eq!(r.posted(), vec![]);
+        assert_eq!(r.mask.sent(), 0);
     }
 }

@@ -177,7 +177,8 @@ itself and the real mask, `SendInput` and window opening were NOT run.
 | Win+A, Win+N, Win+B, Win+T, Win+number | control centre, notifications, tray, taskbar buttons | no | our panels and dock apps |
 | Win+X | quick menu | no | the dock's app menu (new) |
 | Win+L | lock | Windows' own (winlogon), not Explorer's | - |
-| Win+arrows, Win+Space, Win+PrtScn, Win+Shift+S, Win+V, Win+P, Win+I | snap, input language, screenshots, snipping, clipboard history, projection, settings | each is a system component or a shell part: which of them need Explorer was not checked | not built |
+| Win+Shift+S | snipping | the user: it does not work without Explorer | our own screen snip, `snip.md` (built; the overlay not yet seen on a screen) |
+| Win+arrows, Win+Space, Win+PrtScn, Win+V, Win+P, Win+I | snap, input language, screenshots, clipboard history, projection, settings | each is a system component or a shell part: which of them need Explorer was not checked | not built |
 
 ## What was run and what was not
 

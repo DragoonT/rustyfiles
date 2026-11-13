@@ -714,6 +714,7 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     v.push(section(p, t!("Kaydırma")));
     v.push(card(p, L::ChevronsUpDown, t!("Akıcı kaydırma"), None, sw("smooth", p, s.smooth_scroll, |s, v| s.smooth_scroll = v)));
     v.extend(quick_search_cards(p, s, cx));
+    v.extend(crate::snip::settings_cards(p, s));
     v
 }
 

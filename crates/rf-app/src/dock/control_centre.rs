@@ -349,6 +349,18 @@ impl CcView {
         cx.defer(|cx| super::panel::close(CloseCause::Chosen, cx));
     }
 
+    /// Puts the panel away and starts the screen snip once it is gone (the panel eases out in about 120 ms and must not be in the picture).
+    fn start_snip(&mut self, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        self.closing = true;
+        cx.defer(|cx| {
+            super::panel::close(CloseCause::Chosen, cx);
+            crate::snip::start_after(Duration::from_millis(350), cx);
+        });
+    }
+
     fn drag_to(&mut self, which: usize, fraction: f32, cx: &mut Context<Self>) {
         match which {
             SL_VOLUME => {
@@ -723,10 +735,15 @@ impl CcView {
 
     fn render_bottom(&self, look: &Look, cx: &mut Context<Self>) -> AnyElement {
         let focus = self.stop("cc-gear", 0, cx);
+        let snip_focus = self.stop("cc-snip", 0, cx);
         h_flex()
             .h(px(cc_model::BOTTOM_H))
             .flex_shrink_0()
             .justify_end()
+            .child(
+                self.round_button("cc-snip", L::Scissors, cc_model::BOTTOM_H, false, look, (Some(&snip_focus), Some(t!("Ekran alıntısı"))))
+                    .on_click(cx.listener(|this, _, _, cx| this.start_snip(cx))),
+            )
             .child(
                 self.round_button("cc-gear", L::Settings, cc_model::BOTTOM_H, false, look, (Some(&focus), Some(t!("Ayarlar"))))
                     .on_click(cx.listener(|this, _, _, cx| this.open_settings("ms-settings:", cx))),

@@ -14,10 +14,11 @@
 //! FAIL OPEN. The beat is what proves this thread is alive: when it stops (this thread stuck for a second) the hook passes every key
 //! (`rf_win::winkey::shared`). A full-screen program in front stands the layer down too (`dock::is_fullscreen`, stamped with the beat).
 //!
-//! WIN+E AND WIN+D (same switch as the Windows key, `shell_win_key`): Explorer answers these two chords, and without it they are dead.
-//! While the shell host runs with NO Explorer owning the shell window (`live::current()` is `Shell`), Win+E opens a rustyfiles window
-//! (This PC / Home) and Win+D shows the desktop (our Show Desktop, `rf_win::desktop::showdesktop`). Beside Explorer they are left to it
-//! (`combos_wanted`). The other Explorer chords stay untouched; the list is in docs/design/shell-keys.md.
+//! WIN+E, WIN+D AND WIN+SHIFT+S (same switch as the Windows key, `shell_win_key`): Explorer answers these chords, and without it they are
+//! dead. While the shell host runs with NO Explorer owning the shell window (`live::current()` is `Shell`), Win+E opens a rustyfiles
+//! window (This PC / Home), Win+D shows the desktop (our Show Desktop, `rf_win::desktop::showdesktop`) and Win+Shift+S starts our own
+//! screen snip (`crate::snip`). Beside Explorer they are left to it (`combos_wanted`). The other Explorer chords stay untouched; the
+//! list is in docs/design/shell-keys.md.
 //!
 //! LOGGING. Lines say what was DECIDED ("start: toggled", "switcher: opened"), never a key code. `RUSTYFILES_KEYS_LOG_ONLY=1` makes
 //! the layer decide and log but swallow nothing, send nothing and open nothing: the first thing to try (the log says "would ...").
@@ -52,7 +53,7 @@ pub fn wanted(s: &Settings) -> (bool, bool) {
     (s.shell_win_key, s.shell_own_switcher)
 }
 
-/// Whether Win+E and Win+D are ours: the Windows-key switch is on and Explorer is NOT the shell (`mode` is what the host last saw; `None`
+/// Whether Win+E, Win+D and Win+Shift+S are ours: the Windows-key switch is on and Explorer is NOT the shell (`mode` is what the host last saw; `None`
 /// before it has looked: left to Windows). Beside Explorer it answers them itself, and taking them would only change what they do.
 pub fn combos_wanted(win_key: bool, mode: Option<ShellMode>) -> bool {
     win_key && mode == Some(ShellMode::Shell)
@@ -63,7 +64,11 @@ pub fn ready_line(win_key: bool, own_switcher: bool, combos: bool, log_only: boo
     let mut parts: Vec<&str> = Vec::new();
     if win_key {
         parts.push("a tap of the Windows key opens our Start panel");
-        parts.push(if combos { "Win+E opens a file window and Win+D shows the desktop" } else { "Win+E and Win+D are left to Explorer" });
+        parts.push(if combos {
+            "Win+E opens a file window, Win+D shows the desktop and Win+Shift+S starts the screen snip"
+        } else {
+            "Win+E, Win+D and Win+Shift+S are left to Explorer"
+        });
     }
     if own_switcher {
         parts.push("Alt+Tab opens our switcher");
@@ -87,6 +92,8 @@ pub trait Actions {
     fn open_files_window(&mut self);
     /// Win+D: our Show Desktop (minimizes the windows, or brings them back).
     fn show_desktop(&mut self);
+    /// Win+Shift+S: our screen snip.
+    fn start_snip(&mut self);
     /// An effect of the chord, for the open switcher.
     fn apply(&mut self, effect: Effect);
     /// Closes the switcher if one is open and says whether there was one.
@@ -154,6 +161,14 @@ pub fn handle(p: Posted, log_only: bool, shared: &Shared, a: &mut dyn Actions) {
                 a.log("win+d: show desktop toggled");
             }
         }
+        Posted::WinCombo(Combo::Snip) => {
+            if log_only {
+                a.log("win+shift+s: would start the screen snip (log only)");
+            } else {
+                a.start_snip();
+                a.log("win+shift+s: screen snip started");
+            }
+        }
         Posted::Lost => {
             if !log_only && a.close_switcher() {
                 a.log("switcher: closed (the keyboard layer lost track of the chord)");
@@ -200,6 +215,10 @@ impl Actions for GpuiActions<'_> {
 
     fn show_desktop(&mut self) {
         toggle_show_desktop();
+    }
+
+    fn start_snip(&mut self) {
+        crate::snip::start(self.cx);
     }
 
     fn apply(&mut self, effect: Effect) {
@@ -364,6 +383,7 @@ mod tests {
         switcher_up: bool,
         files: u32,
         desktops: u32,
+        snips: u32,
     }
 
     impl Actions for Fake {
@@ -384,6 +404,9 @@ mod tests {
         }
         fn show_desktop(&mut self) {
             self.desktops += 1;
+        }
+        fn start_snip(&mut self) {
+            self.snips += 1;
         }
         fn apply(&mut self, effect: Effect) {
             self.applied.push(effect);
@@ -590,11 +613,20 @@ mod tests {
     }
 
     #[test]
+    fn win_shift_s_starts_the_screen_snip_and_says_so() {
+        let mut f = Fake::default();
+        handle(Posted::WinCombo(rf_win::winkey::Combo::Snip), false, &shared(), &mut f);
+        assert_eq!((f.snips, f.files, f.desktops), (1, 0, 0));
+        assert_eq!(f.lines, vec!["win+shift+s: screen snip started"]);
+    }
+
+    #[test]
     fn in_log_only_mode_the_chords_open_and_toggle_nothing() {
         let mut f = Fake::default();
         handle(Posted::WinCombo(rf_win::winkey::Combo::Explorer), true, &shared(), &mut f);
         handle(Posted::WinCombo(rf_win::winkey::Combo::Desktop), true, &shared(), &mut f);
-        assert_eq!((f.files, f.desktops), (0, 0));
+        handle(Posted::WinCombo(rf_win::winkey::Combo::Snip), true, &shared(), &mut f);
+        assert_eq!((f.files, f.desktops, f.snips), (0, 0, 0));
         assert!(f.lines.iter().all(|l| l.contains("would")), "{:?}", f.lines);
     }
 
@@ -609,8 +641,8 @@ mod tests {
 
     #[test]
     fn the_ready_line_says_what_each_key_does_and_names_no_key_code() {
-        assert_eq!(ready_line(true, false, true, false), "keys: ready - a tap of the Windows key opens our Start panel; Win+E opens a file window and Win+D shows the desktop");
-        assert_eq!(ready_line(true, true, false, false), "keys: ready - a tap of the Windows key opens our Start panel; Win+E and Win+D are left to Explorer; Alt+Tab opens our switcher");
+        assert_eq!(ready_line(true, false, true, false), "keys: ready - a tap of the Windows key opens our Start panel; Win+E opens a file window, Win+D shows the desktop and Win+Shift+S starts the screen snip");
+        assert_eq!(ready_line(true, true, false, false), "keys: ready - a tap of the Windows key opens our Start panel; Win+E, Win+D and Win+Shift+S are left to Explorer; Alt+Tab opens our switcher");
         assert_eq!(ready_line(false, true, false, true), "keys: ready - Alt+Tab opens our switcher (log only: nothing is swallowed, sent or opened)");
     }
 }

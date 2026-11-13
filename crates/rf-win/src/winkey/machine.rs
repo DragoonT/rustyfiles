@@ -13,24 +13,41 @@
 //! own-Start setting is off, and the layer's mask key comes back through the hook this way). A key that was already down when the
 //! hook came up: its release is no tap, because the press was not seen and so "nothing in between" is not known.
 //!
+//! WIN+SHIFT+S (our screen snip, `rf-app/src/snip/`) is the one chord with a modifier: the Windows key held alone (a Shift may be held
+//! before it or pressed after it, a Ctrl or an Alt may not), then S while Shift is down. Any other key in between, or a Shift that was
+//! let go before S, makes it Windows' business again. Like the other two chords it is only SAID here; the layer decides.
+//!
 //! The machine is a few booleans; feeding it allocates nothing and takes no lock.
 
 pub const VK_LWIN: u32 = 0x5B;
 pub const VK_RWIN: u32 = 0x5C;
 
-/// Win+E and Win+D, the two chords of Explorer's that the layer takes over when no Explorer is the shell (`shell_win_key`).
+/// Win+E, Win+D and Win+Shift+S, the three chords of Explorer's that the layer takes over when no Explorer is the shell
+/// (`shell_win_key`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Combo {
     /// Win+E: a file window.
     Explorer,
     /// Win+D: show the desktop.
     Desktop,
+    /// Win+Shift+S: the screen snip.
+    Snip,
 }
 
 pub const VK_E: u32 = 0x45;
 pub const VK_D: u32 = 0x44;
+pub const VK_S: u32 = 0x53;
+pub const VK_SHIFT: u32 = 0x10;
+pub const VK_LSHIFT: u32 = 0xA0;
+pub const VK_RSHIFT: u32 = 0xA1;
 
-/// The chord a letter key makes with a Windows key, if it is one of ours.
+/// Whether `vk` is one of the Shift keys.
+pub const fn is_shift(vk: u32) -> bool {
+    vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT
+}
+
+/// The chord a letter key makes with a Windows key alone, if it is one of ours (Win+Shift+S needs the Shift and is decided in
+/// [`WinMachine::feed_ex`]).
 pub const fn combo_of(vk: u32) -> Option<Combo> {
     match vk {
         VK_E => Some(Combo::Explorer),
@@ -66,16 +83,18 @@ pub struct WinMachine {
     combo_ok: bool,
     /// The key of the chord reported last and still held: its auto-repeats are not new chords.
     last_combo: Option<u32>,
+    /// Win+Shift+S is still possible: no Ctrl or Alt was held at the press, nothing but Shift keys has been pressed since.
+    snip_ok: bool,
 }
 
 impl WinMachine {
     pub const fn new() -> WinMachine {
-        WinMachine { left: false, right: false, armed: false, clean: false, combo_ok: false, last_combo: None }
+        WinMachine { left: false, right: false, armed: false, clean: false, combo_ok: false, last_combo: None, snip_ok: false }
     }
 
     /// The hook came up (or came up again) with these Windows keys already down: their releases are not taps.
     pub const fn seeded(left_down: bool, right_down: bool) -> WinMachine {
-        WinMachine { left: left_down, right: right_down, armed: false, clean: false, combo_ok: false, last_combo: None }
+        WinMachine { left: left_down, right: right_down, armed: false, clean: false, combo_ok: false, last_combo: None, snip_ok: false }
     }
 
     /// A key event while the layer is NOT looking (it stands down, or the setting is off). The machine only learns which Windows keys
@@ -95,6 +114,7 @@ impl WinMachine {
         self.clean = false;
         self.combo_ok = false;
         self.last_combo = None;
+        self.snip_ok = false;
     }
 
     /// The keyboard says no Windows key is down although this machine believed one was (a release it never saw): forget the hold, so
@@ -110,6 +130,12 @@ impl WinMachine {
     /// One key event. `injected`: a program sent it. `modifier_held`: Shift, Ctrl or Alt was down at this event (only looked at on a
     /// Windows key's press).
     pub fn feed(&mut self, vk: u32, down: bool, injected: bool, modifier_held: bool) -> WinOutcome {
+        self.feed_ex(vk, down, injected, modifier_held, false)
+    }
+
+    /// [`feed`](Self::feed) that also knows whether the held modifiers are Shift ALONE (`shift_only`: Shift is down, Ctrl and Alt are
+    /// not), which is what Win+Shift+S needs at the press of the Windows key and again at the press of S.
+    pub fn feed_ex(&mut self, vk: u32, down: bool, injected: bool, modifier_held: bool, shift_only: bool) -> WinOutcome {
         if injected {
             return WinOutcome::Nothing;
         }
@@ -133,7 +159,19 @@ impl WinMachine {
                     self.last_combo = Some(vk);
                     return WinOutcome::Combo(c);
                 }
+                if self.snip_ok && self.left != self.right {
+                    if is_shift(vk) {
+                        // (Shift after the Windows key: not a chord of E or D any more, but still possibly Win+Shift+S)
+                        self.combo_ok = false;
+                        return WinOutcome::Nothing;
+                    }
+                    if vk == VK_S && shift_only {
+                        self.last_combo = Some(vk);
+                        return WinOutcome::Combo(Combo::Snip);
+                    }
+                }
                 self.combo_ok = false;
+                self.snip_ok = false;
             }
             return WinOutcome::Nothing;
         }
@@ -153,11 +191,13 @@ impl WinMachine {
                 self.armed = true;
                 self.clean = !modifier_held;
                 self.combo_ok = !modifier_held;
+                self.snip_ok = !modifier_held || shift_only;
                 self.last_combo = None;
             } else {
                 // the second Windows key while the first is held
                 self.clean = false;
                 self.combo_ok = false;
+                self.snip_ok = false;
             }
             return WinOutcome::Nothing;
         }
@@ -174,6 +214,7 @@ impl WinMachine {
         self.armed = false;
         self.clean = false;
         self.combo_ok = false;
+        self.snip_ok = false;
         self.last_combo = None;
         if tap { WinOutcome::Tap } else { WinOutcome::Nothing }
     }
@@ -383,5 +424,128 @@ mod tests {
         assert_eq!(m.feed(KEY_E, true, false, false), WinOutcome::Nothing);
         let mut s = WinMachine::seeded(true, false);
         assert_eq!(s.feed(KEY_E, true, false, false), WinOutcome::Nothing, "a key already down when the hook came up");
+    }
+
+    // ---------------------------------------------------------------- Win+Shift+S
+
+    const KEY_S: u32 = VK_S;
+
+    /// Feeds events with the modifier state a real keyboard would show: a Shift is held from its own press to its release.
+    fn feed_snip(m: &mut WinMachine, events: &[(u32, bool)]) -> Vec<WinOutcome> {
+        let mut shift = false;
+        events
+            .iter()
+            .map(|(vk, down)| {
+                let before = shift;
+                if is_shift(*vk) {
+                    shift = *down;
+                }
+                // (the Shift's own press does not count itself as held)
+                let held = if is_shift(*vk) { before } else { shift };
+                m.feed_ex(*vk, *down, false, held, held)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn win_then_shift_then_s_is_the_snip_and_the_release_is_no_tap() {
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LWIN, true), (VK_LSHIFT, true), (KEY_S, true), (KEY_S, false), (VK_LSHIFT, false), (VK_LWIN, false)]);
+        assert_eq!(r[2], WinOutcome::Combo(Combo::Snip), "{r:?}");
+        assert_eq!(r.iter().filter(|o| **o != WinOutcome::Nothing).count(), 1, "nothing else is said, and no Start after the chord");
+        assert!(!m.any_down());
+    }
+
+    #[test]
+    fn shift_first_then_win_then_s_is_the_snip_too() {
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LSHIFT, true), (VK_RWIN, true), (KEY_S, true), (KEY_S, false)]);
+        assert_eq!(r[2], WinOutcome::Combo(Combo::Snip), "{r:?}");
+    }
+
+    #[test]
+    fn either_shift_and_either_windows_key_will_do() {
+        for (win, shift) in [(VK_LWIN, VK_LSHIFT), (VK_LWIN, VK_RSHIFT), (VK_RWIN, VK_LSHIFT), (VK_RWIN, VK_RSHIFT), (VK_LWIN, VK_SHIFT)] {
+            let mut m = WinMachine::new();
+            let r = feed_snip(&mut m, &[(win, true), (shift, true), (KEY_S, true)]);
+            assert_eq!(r[2], WinOutcome::Combo(Combo::Snip), "{win:#x} {shift:#x}");
+        }
+    }
+
+    #[test]
+    fn win_and_s_without_shift_is_windows_search_and_not_ours() {
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LWIN, true), (KEY_S, true), (KEY_S, false), (VK_LWIN, false)]);
+        assert!(r.iter().all(|o| *o == WinOutcome::Nothing), "{r:?}");
+    }
+
+    #[test]
+    fn a_shift_let_go_before_s_makes_it_windows_business() {
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LWIN, true), (VK_LSHIFT, true), (VK_LSHIFT, false), (KEY_S, true)]);
+        assert_eq!(r[3], WinOutcome::Nothing);
+    }
+
+    #[test]
+    fn another_key_or_a_ctrl_or_an_alt_anywhere_spoils_the_chord() {
+        // Win+Shift+A+S
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LWIN, true), (VK_LSHIFT, true), (A, true), (A, false), (KEY_S, true)]);
+        assert_eq!(r[4], WinOutcome::Nothing);
+        // Ctrl held when the Windows key went down: Win+Ctrl+Shift+S is not ours (the held modifiers are not Shift alone)
+        let mut m = WinMachine::new();
+        m.feed_ex(VK_LWIN, true, false, true, false);
+        assert_eq!(m.feed_ex(VK_LSHIFT, true, false, true, false), WinOutcome::Nothing);
+        assert_eq!(m.feed_ex(KEY_S, true, false, true, false), WinOutcome::Nothing);
+        // Ctrl pressed after the Windows key
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LWIN, true), (0xA2, true), (VK_LSHIFT, true), (KEY_S, true)]);
+        assert_eq!(r[3], WinOutcome::Nothing);
+        // both Windows keys
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LWIN, true), (VK_RWIN, true), (VK_LSHIFT, true), (KEY_S, true)]);
+        assert_eq!(r[3], WinOutcome::Nothing);
+        // S and Shift alone, no Windows key
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LSHIFT, true), (KEY_S, true)]);
+        assert!(r.iter().all(|o| *o == WinOutcome::Nothing));
+    }
+
+    #[test]
+    fn the_auto_repeat_of_s_is_not_a_second_snip_but_pressing_it_again_is() {
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LWIN, true), (VK_LSHIFT, true), (KEY_S, true), (KEY_S, true), (KEY_S, true), (KEY_S, false), (KEY_S, true), (KEY_S, false)]);
+        assert_eq!(r.iter().filter(|o| matches!(o, WinOutcome::Combo(Combo::Snip))).count(), 2, "{r:?}");
+        assert_eq!(r[3], WinOutcome::Nothing);
+    }
+
+    #[test]
+    fn win_shift_e_is_still_windows_business_and_win_e_is_still_ours() {
+        let mut m = WinMachine::new();
+        let r = feed_snip(&mut m, &[(VK_LWIN, true), (VK_LSHIFT, true), (KEY_E, true)]);
+        assert_eq!(r[2], WinOutcome::Nothing, "Win+Shift+E");
+        // the snip does not leave the machine in a state where the next plain Win+E is lost
+        let mut m = WinMachine::new();
+        feed_snip(&mut m, &[(VK_LWIN, true), (VK_LSHIFT, true), (KEY_S, true), (KEY_S, false), (VK_LSHIFT, false), (VK_LWIN, false)]);
+        let r = feed_snip(&mut m, &[(VK_LWIN, true), (KEY_E, true)]);
+        assert_eq!(r[1], WinOutcome::Combo(Combo::Explorer));
+    }
+
+    #[test]
+    fn a_hold_seen_only_while_the_layer_stood_down_has_no_snip() {
+        let mut m = WinMachine::new();
+        m.feed_ex(VK_LWIN, true, false, false, false);
+        m.observe_unseen(VK_LWIN, true, false);
+        assert_eq!(m.feed_ex(KEY_S, true, false, true, true), WinOutcome::Nothing);
+        let mut s = WinMachine::seeded(true, false);
+        assert_eq!(s.feed_ex(KEY_S, true, false, true, true), WinOutcome::Nothing, "a key already down when the hook came up");
+    }
+
+    #[test]
+    fn an_event_a_program_sent_is_never_the_snip() {
+        let mut m = WinMachine::new();
+        m.feed_ex(VK_LWIN, true, false, false, false);
+        m.feed_ex(VK_LSHIFT, true, false, false, false);
+        assert_eq!(m.feed_ex(KEY_S, true, true, true, true), WinOutcome::Nothing);
     }
 }

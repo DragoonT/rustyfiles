@@ -188,6 +188,10 @@ or an injected key make the hold an ordinary one. Beside Explorer the keys are l
 after five minutes. The log has `keys: ready - ...` when the layer is up or its state changes and the reason in `keys: layer off, hook removed (...)`. The table of the
 keys Explorer answers is in `shell-gaps.md`.
 
+WIN+SHIFT+S (our screen snip, `snip.md`) is the one chord with a modifier. `WinMachine::feed_ex` takes it when the Windows key was held alone (a Shift may come before it or after it; Ctrl or Alt
+anywhere in the hold makes it Windows' again), S is pressed with Shift down and nothing else, and the hold is clean. The layer then swallows S (and its repeats and release), sends the one mask key and posts
+`WinCombo(Snip)`; the Shift and the Windows key pass as always. Win+S alone, Win+Shift+E and Win+Ctrl+Shift+S are untouched. Beside Explorer the chord is Explorer's.
+
 ## Known limits
 
 * Secure-desktop input (UAC, Ctrl+Alt+Del, Win+L) never reaches the hook: Windows' own, as it should be.

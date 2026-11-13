@@ -9408,5 +9408,65 @@
   "key": "Ekranda büyütülmüş bir pencere varken orta ada yan adalar kadar inceleşir ve pencere o kadar yer kazanır; fareyi yaklaştırınca eski boyutuna döner.",
   "tr": "Ekranda büyütülmüş bir pencere varken orta ada yan adalar kadar inceleşir ve pencere o kadar yer kazanır; fareyi yaklaştırınca eski boyutuna döner.",
   "en": "While a window is maximized on the screen the middle island shrinks to the height of the side islands and the window gains that room; it grows back when the pointer comes near."
+ },
+ {
+  "id": "083433e1",
+  "key": "Ekran alıntısı",
+  "tr": "Ekran alıntısı",
+  "en": "Screen snip"
+ },
+ {
+  "id": "eba963a8",
+  "key": "Her alıntıyı Resimler içindeki Ekran Görüntüleri klasörüne kaydet",
+  "tr": "Her alıntıyı Resimler içindeki Ekran Görüntüleri klasörüne kaydet",
+  "en": "Save every snip to Pictures > Screenshots"
+ },
+ {
+  "id": "87967897",
+  "key": "Kapalıyken alıntı yalnızca panoya kopyalanır; bildirimdeki Kaydet düğmesi onu elle kaydeder. Açıkken her alıntı ayrıca Ekran alıntısı YYYY-AA-GG SSddss.png adıyla kaydedilir. Ekran alıntısı Explorer çalışmıyorken Win+Shift+S ile (Windows tuşu anahtarı açıkken), Dock'un denetim merkezindeki düğmeyle ya da rustyfiles.exe --snip ile başlar.",
+  "tr": "Kapalıyken alıntı yalnızca panoya kopyalanır; bildirimdeki Kaydet düğmesi onu elle kaydeder. Açıkken her alıntı ayrıca Ekran alıntısı YYYY-AA-GG SSddss.png adıyla kaydedilir. Ekran alıntısı Explorer çalışmıyorken Win+Shift+S ile (Windows tuşu anahtarı açıkken), Dock'un denetim merkezindeki düğmeyle ya da rustyfiles.exe --snip ile başlar.",
+  "en": "When off, a snip is only copied to the clipboard; the Save button in the notice saves it by hand. When on, every snip is also saved as Ekran alıntısı YYYY-AA-GG SSddss.png (screen snip, year-month-day hour-minute-second). The snip starts with Win+Shift+S while Explorer is not running (with the Windows key switch on), with the button in the dock's control centre, or with rustyfiles.exe --snip."
+ },
+ {
+  "id": "3ef71575",
+  "key": "Panoya kopyalandı",
+  "tr": "Panoya kopyalandı",
+  "en": "Copied to the clipboard"
+ },
+ {
+  "id": "e4313b64",
+  "key": "Panoya kopyalandı ve kaydedildi",
+  "tr": "Panoya kopyalandı ve kaydedildi",
+  "en": "Copied to the clipboard and saved"
+ },
+ {
+  "id": "bb1923a7",
+  "key": "Kaydedildi",
+  "tr": "Kaydedildi",
+  "en": "Saved"
+ },
+ {
+  "id": "0a4d7282",
+  "key": "Alıntı alınamadı",
+  "tr": "Alıntı alınamadı",
+  "en": "The snip could not be taken"
+ },
+ {
+  "id": "7d0a4d8d",
+  "key": "Kaydediliyor…",
+  "tr": "Kaydediliyor…",
+  "en": "Saving…"
+ },
+ {
+  "id": "bf35378a",
+  "key": "Dosya kaydedilemedi",
+  "tr": "Dosya kaydedilemedi",
+  "en": "The file could not be saved"
+ },
+ {
+  "id": "022433a0",
+  "key": "Bölge",
+  "tr": "Bölge",
+  "en": "Region"
  }
 ]

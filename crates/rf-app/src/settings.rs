@@ -564,6 +564,9 @@ pub struct Settings {
     /// Explorer's taskbar windows (and with them its notification icons) are hidden while the dock runs and shown again when it stops;
     /// only with rustyfiles-shellguard.exe running as the safety net (see `shell/taskbar_hide.rs`).
     pub shell_hide_taskbar: bool,
+    /// Every screen snip is also saved to Pictures\Screenshots without asking (off: it is only copied to the clipboard, and the
+    /// notice's Kaydet button saves it by hand). See `snip/`.
+    pub snip_autosave: bool,
 
     // ---- Desktop (shell/desktop/; Settings -> "Masaüstü"; experimental, it only matters while `shell_desktop_cover` is on)
     // Each system icon of the desktop (and "show desktop icons" as a whole) follows Windows' own setting by default; "show" and "hide"
@@ -704,6 +707,7 @@ impl Default for Settings {
             shell_own_switcher: false,
             shell_tray_host: false,
             shell_hide_taskbar: false,
+            snip_autosave: false,
             desktop_icon_this_pc: Default::default(),
             desktop_icon_user_files: Default::default(),
             desktop_icon_network: Default::default(),

@@ -19,7 +19,7 @@ pub enum Posted {
     /// The layer lost track of the chord (it stood down or was switched off in the middle of one, the hook was installed again, or
     /// the queue overflowed): the switcher, if one is open, is to be closed.
     Lost,
-    /// A chord of ours (Win+E, Win+D) was pressed and its key was taken.
+    /// A chord of ours (Win+E, Win+D, Win+Shift+S) was pressed and its key was taken.
     WinCombo(Combo),
 }
 
@@ -27,6 +27,7 @@ const CODE_START: u32 = 1;
 const CODE_LOST: u32 = 2;
 const CODE_COMBO_EXPLORER: u32 = 3;
 const CODE_COMBO_DESKTOP: u32 = 4;
+const CODE_COMBO_SNIP: u32 = 5;
 const CODE_CHORD: u32 = 0x10;
 
 fn effect_code(e: Effect) -> u32 {
@@ -64,6 +65,7 @@ impl Posted {
             Posted::Lost => CODE_LOST,
             Posted::WinCombo(Combo::Explorer) => CODE_COMBO_EXPLORER,
             Posted::WinCombo(Combo::Desktop) => CODE_COMBO_DESKTOP,
+            Posted::WinCombo(Combo::Snip) => CODE_COMBO_SNIP,
             Posted::Chord { effect, seq } => (u32::from(seq) << 16) | (CODE_CHORD + effect_code(effect)),
         }
     }
@@ -74,6 +76,7 @@ impl Posted {
             CODE_LOST => Some(Posted::Lost),
             CODE_COMBO_EXPLORER => Some(Posted::WinCombo(Combo::Explorer)),
             CODE_COMBO_DESKTOP => Some(Posted::WinCombo(Combo::Desktop)),
+            CODE_COMBO_SNIP => Some(Posted::WinCombo(Combo::Snip)),
             c if c >= CODE_CHORD => effect_of(c - CODE_CHORD).map(|effect| Posted::Chord { effect, seq: (v >> 16) as u16 }),
             _ => None,
         }
@@ -158,6 +161,7 @@ mod tests {
         assert_eq!(Posted::decode(Posted::Lost.encode()), Some(Posted::Lost));
         assert_eq!(Posted::decode(Posted::WinCombo(Combo::Explorer).encode()), Some(Posted::WinCombo(Combo::Explorer)));
         assert_eq!(Posted::decode(Posted::WinCombo(Combo::Desktop).encode()), Some(Posted::WinCombo(Combo::Desktop)));
+        assert_eq!(Posted::decode(Posted::WinCombo(Combo::Snip).encode()), Some(Posted::WinCombo(Combo::Snip)));
         for effect in every_effect() {
             for seq in [0u16, 1, 2, 40_000, u16::MAX] {
                 let p = Posted::Chord { effect, seq };
