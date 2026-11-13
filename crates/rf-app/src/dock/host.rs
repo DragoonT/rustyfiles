@@ -595,14 +595,20 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     {
         left.update(cx, |v, cx| v.set_weather_source(&new.city, new.location, cx));
     }
-    // the desktop cover follows its own switch (see shell::cover)
+    // The parts follow the one dock switch and their own values (`parts.rs`). The same order as at start-up, and its mirror on the way
+    // out: Explorer's taskbar is hidden LAST (after the tray window and the keyboard hook that make up for it exist) and given back
+    // FIRST (before they are taken down). The switch itself going off ends the dock process (`shutdown`); this is for a part whose own
+    // value changed while the dock runs, or several parts at once ("Hepsini aç").
+    let taskbar_first = crate::shell::taskbar_hide::goes_first(cx);
+    if taskbar_first {
+        crate::shell::taskbar_hide::on_settings(cx);
+    }
     crate::shell::cover::on_settings(cx);
-    // the keyboard layer follows its two switches (see shell::keylayer)
     crate::shell::keylayer::on_settings(cx);
-    // the tray host follows its switch (see shell::trayhost)
     crate::shell::trayhost::on_settings(cx);
-    // Explorer's taskbar follows its switch (see shell::taskbar_hide)
-    crate::shell::taskbar_hide::on_settings(cx);
+    if !taskbar_first {
+        crate::shell::taskbar_hide::on_settings(cx);
+    }
     // the thin dock follows its switch (see thin.rs)
     super::thin::on_settings(cx);
     cx.refresh_windows();
@@ -684,6 +690,8 @@ pub fn shutdown(cx: &mut App) {
         return;
     }
     let host = cx.remove_global::<Host>();
+    // the news the Settings page read about the parts goes with the dock
+    super::parts_status::stop();
     // the keyboard hook goes first of all: from here on Windows' own Start and Alt+Tab are back
     crate::shell::keylayer::stop(cx);
     // Explorer's taskbar comes back before anything else is torn down
@@ -893,14 +901,14 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     if let Some(right) = tray_right {
         super::tray_strip::start(right, cx);
     }
-    // the desktop cover, when its setting is on (see shell::cover)
+    // the parts the one switch brings (`parts.rs`): the desktop cover, the keyboard layer, the tray host, Explorer's taskbar. The tray
+    // host and the keyboard layer come before the taskbar is hidden, so that no icon and no key is lost in between.
     crate::shell::cover::on_settings(cx);
-    // the keyboard layer, when one of its settings is on (see shell::keylayer)
     crate::shell::keylayer::on_settings(cx);
-    // the tray host, when its setting is on (see shell::trayhost)
     crate::shell::trayhost::on_settings(cx);
-    // Explorer's taskbar, when its setting is on (see shell::taskbar_hide)
     crate::shell::taskbar_hide::on_settings(cx);
+    // what a part that could not start tells the Settings page
+    super::parts_status::start(cx);
     // the parts that depend on who owns the shell window (see shell::live)
     crate::shell::live::start(cx);
 

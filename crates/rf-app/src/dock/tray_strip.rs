@@ -568,6 +568,9 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
     let k = super::look::dock_size(cx);
     let ring = accent(cx);
     let (hover_bg, drop_bg) = (pal.hover_fill().hsla(), with_alpha(ring, 0.35));
+    // the cell a button is held on (until it turns into a drag, which has its own look): the press plate
+    let press_bg = pal.press_plate().hsla();
+    let pressed = st.press.as_ref().filter(|p| !p.press.dragging).map(|p| p.source);
     let n = st.lay.visible.len();
     let dragging = st.drag.as_ref().map(|d| d.key);
     let target = st.drag.as_ref().map(|d| d.target);
@@ -590,6 +593,7 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
             .border_color(if on_cursor { ring } else { transparent_black() })
             .cursor_pointer()
             .when(hot, |d| d.bg(hover_bg))
+            .when(pressed == Some(Source::Strip(j)), |d| d.bg(press_bg))
             .when(dragging == Some(key), |d| d.opacity(0.35))
             .child(picture_of(st, i, ts::ICON * k, pal));
         row = row.child(wire(cell, Source::Strip(j)));
@@ -615,6 +619,7 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
         .border_color(if chevron_cursor { ring } else { transparent_black() })
         .cursor_pointer()
         .when(chevron_hot, |d| d.bg(if target == Some(DropTarget::Chevron) { drop_bg } else { hover_bg }))
+        .when(pressed == Some(Source::Chevron), |d| d.bg(press_bg))
         .child(Icon::new(L::ChevronUp).size(px(14. * k)).text_color(pal.text_secondary().hsla()));
     row = row.child(wire(chevron, Source::Chevron));
     Some(
@@ -641,15 +646,21 @@ pub struct OverflowData {
     pub dragged: Option<usize>,
     pub drop_into: bool,
     pub hover: Option<usize>,
+    /// The cell a button is held on (not yet a drag).
+    pub pressed: Option<usize>,
 }
 
 pub fn overflow_data(cx: &App) -> OverflowData {
     let Some(st) = cx.try_global::<TrayState>() else {
-        return OverflowData { count: 0, total: 0, limits: ts::OvfLimits::UNBOUNDED, dragged: None, drop_into: false, hover: None };
+        return OverflowData { count: 0, total: 0, limits: ts::OvfLimits::UNBOUNDED, dragged: None, drop_into: false, hover: None, pressed: None };
     };
     let dragged = st.drag.as_ref().and_then(|d| st.index_of(d.key)).and_then(|i| st.lay.overflow.iter().position(|&o| o == i));
     let hover = match st.hover {
         Some(Source::Overflow(k)) if st.drag.is_none() => Some(k),
+        _ => None,
+    };
+    let pressed = match st.press.as_ref().filter(|p| !p.press.dragging).map(|p| p.source) {
+        Some(Source::Overflow(k)) => Some(k),
         _ => None,
     };
     let total = st.lay.overflow.len();
@@ -661,6 +672,7 @@ pub fn overflow_data(cx: &App) -> OverflowData {
         dragged,
         drop_into: dragged.is_none() && st.drag.as_ref().is_some_and(|d| d.target == DropTarget::Overflow),
         hover,
+        pressed,
     }
 }
 

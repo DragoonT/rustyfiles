@@ -268,6 +268,8 @@ impl Render for LeftIsland {
         let typed = super::panel::typed_text(cx);
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
         let pressed = pal.pressed_fill().hsla();
+        // (a button held down on the search field: a plate stronger than the hover's, so that the press can be seen)
+        let plate = pal.press_plate().hsla();
         let secondary = pal.text_secondary().hsla();
 
         // the Start button: the plate, the logo's size and whether more frames are needed all come from its states at this moment
@@ -336,7 +338,7 @@ impl Render for LeftIsland {
             // weather does not move, and takes the press for the panel's field, which lies under this window: the text cursor over it,
             // and a press gives the keyboard to the panel's field and does not close the panel)
             .when(field_hidden, |d| d.opacity(0.0).cursor_text().on_mouse_down(MouseButton::Left, |_, _, cx| super::panel::focus_start_field(cx)))
-            .when(!field_hidden, |d| d.cursor_pointer().hover(move |s| s.bg(pressed)))
+            .when(!field_hidden, |d| d.cursor_pointer().hover(move |s| s.bg(pressed)).active(move |s| s.bg(plate)))
             .child(Icon::new(L::Search).size(px(plan::FIELD_ICON * k)).flex_shrink_0().text_color(secondary))
             // what is being typed in the panel above is shown here too; the panel's own field takes the keys (this window is never
             // activated, so it cannot)

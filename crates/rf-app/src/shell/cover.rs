@@ -235,7 +235,8 @@ impl WallpaperReader for SystemWallpaper {
     }
 }
 
-/// The settings file was (re)read, or the host started: brings cover mode in line with `shell_desktop_cover`.
+/// The settings file was (re)read, or the host started: brings cover mode in line with the dock switch and the part's own value
+/// (`dock::parts`).
 pub fn on_settings(cx: &mut App) {
     // the choices for the system icons (Settings -> Masaüstü) are taken first, so that a desktop that starts now reads them; one that
     // is running reads its items again when they changed
@@ -247,7 +248,7 @@ pub fn on_settings(cx: &mut App) {
             log::warn!("cover: could not start the system icons' refresh: {e}");
         }
     }
-    let want = cx.try_global::<Settings>().is_some_and(|s| s.shell_desktop_cover);
+    let want = cx.try_global::<Settings>().is_some_and(|s| crate::dock::parts::runs(s, crate::dock::parts::Part::Desktop));
     match (want, cx.has_global::<CoverHost>()) {
         (true, false) => start(cx),
         (false, true) => stop(cx),
@@ -357,8 +358,10 @@ fn start(cx: &mut App) {
     });
     if let Err(e) = spawned {
         log::error!("cover: could not start the loader: {e}");
+        crate::dock::parts_status::note(crate::dock::parts::Part::Desktop, Some(crate::dock::parts::Why::NotStarted));
         return;
     }
+    crate::dock::parts_status::note(crate::dock::parts::Part::Desktop, None);
 
     let wall_tx = parking_lot::Mutex::new(tx.clone());
     let follower = Follower::start(&SystemWatch::standard(), Arc::new(SystemWallpaper), Arc::new(rf_win::desktop::wallpaper::DiskStamper), Duration::from_millis(400), move |wp, _| {
@@ -601,6 +604,7 @@ pub fn stop(cx: &mut App) {
         return;
     }
     let host = cx.remove_global::<CoverHost>();
+    crate::dock::parts_status::note(crate::dock::parts::Part::Desktop, None);
     for w in &host.windows {
         // (the view saves the layout when it goes)
         let _ = w.handle.update(cx, |_, window, _| window.remove_window());
@@ -778,14 +782,18 @@ mod tests {
     }
 
     #[test]
-    fn the_setting_is_off_by_default_and_round_trips() {
-        assert!(!Settings::default().shell_desktop_cover, "experimental: off until asked for");
-        // a settings file from before the switch has no key: off
-        assert!(!Settings::parse_lenient_pub("theme = \"dark\"\n").unwrap().shell_desktop_cover);
-        let on = Settings { shell_desktop_cover: true, ..Default::default() };
+    fn the_desktop_comes_with_the_dock_switch_unless_its_own_value_holds_it_off() {
+        use crate::dock::parts::{Part, runs};
+        // nothing runs without the one switch, and the own value defaults to true
+        assert!(!runs(&Settings::default(), Part::Desktop));
+        assert!(!runs(&Settings::parse_lenient_pub("theme = \"dark\"\n").unwrap(), Part::Desktop), "a file from before the dock: off with the dock");
+        let on = Settings { dock_enabled: true, ..Default::default() };
+        assert!(runs(&on, Part::Desktop));
         let back = Settings::parse_lenient_pub(&toml::to_string_pretty(&on).unwrap()).unwrap();
-        assert!(back.shell_desktop_cover);
-        assert!(!Settings::parse_lenient_pub("shell_desktop_cover = \"evet\"\n").unwrap().shell_desktop_cover, "a wrong value falls back to off");
+        assert!(runs(&back, Part::Desktop));
+        // a file that says false holds it off, and so does a value that cannot be read
+        assert!(!runs(&Settings::parse_lenient_pub("dock_enabled = true\nshell_desktop_cover = false\n").unwrap(), Part::Desktop));
+        assert!(!runs(&Settings::parse_lenient_pub("dock_enabled = true\nshell_desktop_cover = \"evet\"\n").unwrap(), Part::Desktop));
     }
 
     #[test]

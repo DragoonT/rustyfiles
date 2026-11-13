@@ -509,3 +509,59 @@ fn the_panic_net_and_the_timer_know_when_a_restore_is_owed() {
     c.tick(&mut w);
     assert!(!c.holds_windows() && !c.restore_pending());
 }
+
+// ---------------------------------------------------------------- what the status says while a guard is being waited for
+
+#[test]
+fn a_guard_that_is_missing_keeps_saying_so_through_the_pauses_between_looks() {
+    let (mut c, mut w) = (ctl(), world());
+    w.guard_exists = false;
+    on(&mut c, &mut w);
+    assert_eq!(c.status(), Status::Waiting(Refusal::GuardMissing));
+    // the pauses are 5, 15 and then 60 seconds; a pass inside one must not turn "not found" into "lost" (nothing was ever running)
+    for pause in RESPAWN_BACKOFF_MS {
+        w.now += pause / 2;
+        c.tick(&mut w);
+        assert_eq!(c.status(), Status::Waiting(Refusal::GuardMissing), "inside the {pause} ms pause");
+        w.now += pause;
+        c.tick(&mut w);
+        assert_eq!(c.status(), Status::Waiting(Refusal::GuardMissing), "at the look after the {pause} ms pause");
+    }
+    assert_eq!(w.count("hide:"), 0);
+    // the guard turns up: the next look after the pause starts it and the taskbar is hidden
+    w.guard_exists = true;
+    w.now += RESPAWN_BACKOFF_MS[2] + 1;
+    c.tick(&mut w);
+    assert_eq!(c.status(), Status::Hidden(2));
+}
+
+#[test]
+fn a_guard_that_did_not_confirm_keeps_saying_so_through_the_pause() {
+    let (mut c, mut w) = (ctl(), world());
+    w.guard_ready_ok = false;
+    on(&mut c, &mut w);
+    assert_eq!(c.status(), Status::Waiting(Refusal::GuardNotConfirmed));
+    w.now += RESPAWN_BACKOFF_MS[0] / 2;
+    c.tick(&mut w);
+    assert_eq!(c.status(), Status::Waiting(Refusal::GuardNotConfirmed), "inside the pause");
+}
+
+#[test]
+fn a_guard_that_ended_says_lost_through_the_pause_and_then_what_the_next_try_finds() {
+    let (mut c, mut w) = (ctl(), world());
+    on(&mut c, &mut w);
+    w.guard_running = false;
+    c.tick(&mut w);
+    assert_eq!(c.status(), Status::Waiting(Refusal::GuardLost));
+    w.now += 1_000;
+    c.tick(&mut w);
+    assert_eq!(c.status(), Status::Waiting(Refusal::GuardLost), "still the pause after the loss");
+    // the replacement cannot be found: from then on that is the reason
+    w.guard_exists = false;
+    w.now += RESPAWN_BACKOFF_MS[0];
+    c.tick(&mut w);
+    assert_eq!(c.status(), Status::Waiting(Refusal::GuardMissing));
+    w.now += 1_000;
+    c.tick(&mut w);
+    assert_eq!(c.status(), Status::Waiting(Refusal::GuardMissing), "and it stays the reason inside the next pause");
+}

@@ -96,21 +96,32 @@ pub fn open_task_manager() {
 
 /// A click on an app: start, bring forward or minimise, as `rf_win::dock::model::click_action` decides.
 pub fn click_app(app: &DockApp, foreground: isize) {
-    perform(rf_win::dock::model::click_action(&app.windows, foreground), app.launch.clone());
+    perform(rf_win::dock::model::click_action(&app.windows, foreground), app.launch.clone(), |_| {});
+}
+
+/// [`click_app`] that says how it went: `done` is called from the worker thread when the action is over, with `None` when it worked and
+/// with the sentence for the user (`shellless::start_failure_text`, the one the Start panel shows) when it failed. The dock's icon shakes
+/// on it.
+pub fn click_app_reporting(app: &DockApp, foreground: isize, done: impl FnOnce(Option<String>) + Send + 'static) {
+    perform(rf_win::dock::model::click_action(&app.windows, foreground), app.launch.clone(), done);
 }
 
 /// A middle click on an app: another instance.
 pub fn middle_click_app(app: &DockApp) {
-    perform(rf_win::dock::model::middle_click_action(), app.launch.clone());
+    perform(rf_win::dock::model::middle_click_action(), app.launch.clone(), |_| {});
 }
 
-fn perform(action: ClickAction, launch: Option<Launch>) {
+fn perform(action: ClickAction, launch: Option<Launch>, done: impl FnOnce(Option<String>) + Send + 'static) {
     // Every action talks to another program: starting it, or sending a window of it a show / minimise request. A program that
     // hangs would hold up whichever thread asks, so none of it runs on the UI thread. Any thread of this process may bring a window
     // forward: what lets it is that the process has just received the user's click, not which thread handles it.
     std::thread::spawn(move || {
-        if let Err(e) = rf_win::dock::launch::perform(action, launch.as_ref()) {
-            log::warn!("dock: {action:?} failed: {e:#}");
+        match rf_win::dock::launch::perform(action, launch.as_ref()) {
+            Ok(()) => done(None),
+            Err(e) => {
+                log::warn!("dock: {action:?} failed: {e:#}");
+                done(Some(crate::shellless::start_failure_text(&e)));
+            }
         }
     });
 }

@@ -74,6 +74,10 @@ impl Palette {
         self.pick(pressed_fill)
     }
 
+    pub fn press_plate(self) -> Tint {
+        self.pick(press_plate)
+    }
+
     pub fn separator(self) -> Tint {
         self.pick(separator)
     }
@@ -161,6 +165,13 @@ pub fn pressed_fill(dark: bool) -> Tint {
     if dark { Tint::new(0xFFFFFF, 0.16) } else { Tint::new(0x000000, 0.13) }
 }
 
+/// The plate under a control while a button is held down on it: clearly stronger than the hover plate and the pressed fill, so that a
+/// click can be seen on the island's buttons, the clock, the search field and the tray strip (the Start logo and the dock's icons have
+/// presses of their own).
+pub fn press_plate(dark: bool) -> Tint {
+    if dark { Tint::new(0xFFFFFF, 0.24) } else { Tint::new(0x000000, 0.19) }
+}
+
 /// The thin separator of the middle and the right island.
 pub fn separator(dark: bool) -> Tint {
     if dark { Tint::new(0xFFFFFF, 0.22) } else { Tint::new(0x000000, 0.20) }
@@ -174,6 +185,11 @@ pub fn running_dot(dark: bool, in_front: bool) -> Tint {
         (false, false) => Tint::new(0x000000, 0.50),
         (false, true) => Tint::new(0x000000, 0.85),
     }
+}
+
+/// The mark under an icon whose start failed: a soft red, the same on either look of the glass.
+pub fn failed_dot() -> Tint {
+    Tint::new(0xE5484D, 0.95)
 }
 
 /// The running mark's size (logical px): a dot, and a wider one for the app in front.
@@ -204,6 +220,7 @@ mod tests {
             (field_fill(true), field_fill(false)),
             (hover_fill(true), hover_fill(false)),
             (pressed_fill(true), pressed_fill(false)),
+            (press_plate(true), press_plate(false)),
             (separator(true), separator(false)),
             (running_dot(true, true), running_dot(false, true)),
             (placeholder_fill(true), placeholder_fill(false)),
@@ -229,6 +246,15 @@ mod tests {
         for dark in [true, false] {
             assert!(pressed_fill(dark).alpha > hover_fill(dark).alpha);
         }
+    }
+
+    #[test]
+    fn the_press_plate_is_stronger_than_the_hover_plate_and_the_pressed_fill() {
+        for dark in [true, false] {
+            assert!(press_plate(dark).alpha > pressed_fill(dark).alpha);
+            assert!(press_plate(dark).alpha > hover_fill(dark).alpha);
+        }
+        assert_eq!(Palette::of(true).press_plate(), press_plate(true));
     }
 
     #[test]

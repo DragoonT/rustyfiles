@@ -1,7 +1,8 @@
 # The desktop (experimental)
 
 The desktop that rustyfiles draws itself: the wallpaper and the icons of the user's Desktop folder, one window per monitor, over
-Explorer's desktop (`shell_desktop_cover`, off by default; `docs/design/shell-host.md` has the windows, the z-order and the
+Explorer's desktop (it comes with the dock's one switch, see `dock.md` "The one switch"; its own value `shell_desktop_cover` is only an
+override in the file; `docs/design/shell-host.md` has the windows, the z-order and the
 scratch-folder rules). This file says what the desktop does **now**, item by item, and what it still does not do. Source:
 `crates/rf-app/src/shell/desktop/` (the view), `crates/rf-core/src/desktop/` (the pure rules), `crates/rf-win/src/desktop/` (Win32).
 
@@ -15,7 +16,7 @@ Settings search reads.
 
 | Setting | Field | Default |
 |---|---|---|
-| Masaüstünü rustyfiles çizsin (deneysel) | `shell_desktop_cover` | off |
+| (no switch: the desktop comes with the Dock switch on the Dock page; the Masaüstü page says so in one line) | `shell_desktop_cover` (override, default true; false holds the desktop off) | with the dock |
 | Masaüstü simgelerini göster: follow Windows / show / hide | `desktop_show_icons` | follow |
 | Bu bilgisayar, Kullanıcı dosyaları, Ağ, Geri Dönüşüm Kutusu, Denetim Masası: follow Windows / show / hide each | `desktop_icon_this_pc`, `_user_files`, `_network`, `_recycle_bin`, `_control_panel` | follow |
 

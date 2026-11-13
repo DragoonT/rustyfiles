@@ -215,6 +215,9 @@ pub struct StartView {
     icons: IconCache,
     icon_scale: f32,
     _subs: Vec<Subscription>,
+
+    /// Drag and drop: a press that may become a drag, the drag itself (`start_drag.rs`).
+    drag: drag::DragState,
 }
 
 use std::cell::RefCell;
@@ -226,6 +229,9 @@ mod home;
 // The account, the gear and the power button, in the panel's own bottom row or in the island's (while the island has grown into it).
 #[path = "start_row.rs"]
 mod row;
+// Dragging: pinned apps reordered, an app onto the dock, an app or a recommended file out of the panel as a file.
+#[path = "start_drag.rs"]
+mod drag;
 
 static WRITER: startpins::OrderedWriter = startpins::OrderedWriter::new();
 
@@ -346,6 +352,7 @@ impl StartView {
             icons: IconCache::default(),
             icon_scale: 0.0,
             _subs: subs,
+            drag: drag::DragState::default(),
         };
         // (the list of apps, the pins and the user's name are read when the panel opens, `on_open`: the view is made by the first click
         // on the Start button, so there is nothing to warm up before it, and a timer started here would only read it all a second time)
@@ -373,6 +380,7 @@ impl StartView {
         self.wheel = page::WheelPager::default();
         self.list_scroll.scroll_to_item(0, ScrollStrategy::Top);
         self.pending = None;
+        self.reset_drag(cx);
         self.reset_query(window, cx);
         // what was opened since this dock started is in the file now
         quick_search::reload_usage();
@@ -434,6 +442,8 @@ impl StartView {
 
     /// The panel is being put away: ease out, stop what was running for it.
     pub fn on_close(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        // (a drag in the window is put back; one that is in the system's loop goes on: it is the system's, and its end closes the panel)
+        self.cancel_drag(cx);
         self.closing = true;
         self.anim = Some((Instant::now(), false));
         self._search = None;
@@ -450,6 +460,7 @@ impl StartView {
     /// The window is hidden: the glass comes off, the field is emptied, nothing is kept alive. The pictures of files that were found
     /// are let go (they would pile up over weeks of searches); the apps' own pictures stay.
     pub fn on_hidden(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_drag(cx);
         self.shown = false;
         self.closing = false;
         self.anim = None;
@@ -1073,6 +1084,14 @@ impl StartView {
             cx.stop_propagation();
             return;
         }
+        // a drag is going on: Escape puts everything back, and no other key does anything meanwhile
+        if self.drag_active() {
+            if key == "escape" {
+                self.cancel_drag(cx);
+            }
+            cx.stop_propagation();
+            return;
+        }
         self.notice = None;
         let footer = self.page_focus.is_focused(window) || self.settings_focus.is_focused(window) || self.power_focus.is_focused(window);
 
@@ -1374,6 +1393,9 @@ impl Render for StartView {
         // the panel's own part of the window: all of it, or, while the island's glass has grown into it, what is above the island's row
         let extra = grown.map_or(0.0, |g| g.extra_bottom);
         let overlays = self.render_overlays(pal, window, cx);
+        // an app held for a drag follows the pointer, over everything
+        let ghost = self.render_ghost(pal, cx);
+        let drag_listeners = self.drag_listeners(cx);
 
         div()
             .id("start-panel")
@@ -1391,6 +1413,8 @@ impl Render for StartView {
             .children(row_line)
             .children(row_field)
             .child(div().absolute().inset_0().children(overlays))
+            .child(drag_listeners)
+            .children(ghost)
             .into_any_element()
     }
 }

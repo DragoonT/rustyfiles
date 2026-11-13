@@ -9468,5 +9468,143 @@
   "key": "Bölge",
   "tr": "Bölge",
   "en": "Region"
+ },
+ {
+  "id": "bdbd120c",
+  "key": "masaüstü",
+  "tr": "masaüstü",
+  "en": "desktop"
+ },
+ {
+  "id": "81e77636",
+  "key": "görev çubuğunu gizleme",
+  "tr": "görev çubuğunu gizleme",
+  "en": "hiding the taskbar"
+ },
+ {
+  "id": "70ab9724",
+  "key": "Windows tuşu",
+  "tr": "Windows tuşu",
+  "en": "Windows key"
+ },
+ {
+  "id": "e1056a5c",
+  "key": "Alt+Tab",
+  "tr": "Alt+Tab",
+  "en": "Alt+Tab"
+ },
+ {
+  "id": "fc3c0cef",
+  "key": "tepsi simgeleri",
+  "tr": "tepsi simgeleri",
+  "en": "tray icons"
+ },
+ {
+  "id": "aa99ce8f",
+  "key": "Ayar dosyası şunları kapalı tutuyor, bu yüzden çalışmıyor:",
+  "tr": "Ayar dosyası şunları kapalı tutuyor, bu yüzden çalışmıyor:",
+  "en": "The settings file holds these off, so they are not running:"
+ },
+ {
+  "id": "59a78ffe",
+  "key": "rustyfiles Dock'unu kullan (deneysel)",
+  "tr": "rustyfiles Dock'unu kullan (deneysel)",
+  "en": "Use the rustyfiles Dock (experimental)"
+ },
+ {
+  "id": "54113b92",
+  "key": "Başlat, arama ve denetim merkeziyle ekranın altında üç yüzen ada.\nKendi masaüstümüz (duvar kâğıdı ve simgeler), Explorer'ınkinin üstünde.\nProgramların tepsi simgeleri Dock'ta.\nDock çalıştığı sürece Windows görev çubuğu gizlenir; Dock durunca geri gelir.\nWindows tuşu ve Alt+Tab, Windows'unkini değil rustyfiles'ınkini açar.",
+  "tr": "Başlat, arama ve denetim merkeziyle ekranın altında üç yüzen ada.\nKendi masaüstümüz (duvar kâğıdı ve simgeler), Explorer'ınkinin üstünde.\nProgramların tepsi simgeleri Dock'ta.\nDock çalıştığı sürece Windows görev çubuğu gizlenir; Dock durunca geri gelir.\nWindows tuşu ve Alt+Tab, Windows'unkini değil rustyfiles'ınkini açar.",
+  "en": "Three floating islands at the bottom of the screen, with Start, search and the control centre.\nOur own desktop (wallpaper and icons), over Explorer's.\nThe programs' tray icons are in the Dock.\nWhile the Dock runs, Windows' taskbar is hidden; it comes back when the Dock stops.\nThe Windows key and Alt+Tab open rustyfiles' Start and switcher, not Windows'."
+ },
+ {
+  "id": "1dc537af",
+  "key": "Masaüstü Dock'la birlikte gelir: açıp kapatmak için Dock sayfasındaki Dock anahtarı kullanılır. Burada yalnızca masaüstünün kendi seçimleri vardır.",
+  "tr": "Masaüstü Dock'la birlikte gelir: açıp kapatmak için Dock sayfasındaki Dock anahtarı kullanılır. Burada yalnızca masaüstünün kendi seçimleri vardır.",
+  "en": "The desktop comes with the Dock: turn it on or off with the Dock switch on the Dock page. Only the desktop's own choices are here."
+ },
+ {
+  "id": "47889b6a",
+  "key": "Hepsini aç",
+  "tr": "Hepsini aç",
+  "en": "Turn all on"
+ },
+ {
+  "id": "063918f8",
+  "key": "Görev çubuğu gizlenemedi: rustyfiles-shellguard.exe program dosyasının yanında bulunamadı.",
+  "tr": "Görev çubuğu gizlenemedi: rustyfiles-shellguard.exe program dosyasının yanında bulunamadı.",
+  "en": "The taskbar could not be hidden: rustyfiles-shellguard.exe was not found next to the program."
+ },
+ {
+  "id": "31ecc0bf",
+  "key": "Görev çubuğu gizlenemedi: yardımcı program (rustyfiles-shellguard.exe) çalıştığını bildirmedi.",
+  "tr": "Görev çubuğu gizlenemedi: yardımcı program (rustyfiles-shellguard.exe) çalıştığını bildirmedi.",
+  "en": "The taskbar could not be hidden: the helper program (rustyfiles-shellguard.exe) did not confirm that it is running."
+ },
+ {
+  "id": "783e6d3f",
+  "key": "Görev çubuğu geri getirildi: yardımcı program (rustyfiles-shellguard.exe) durdu.",
+  "tr": "Görev çubuğu geri getirildi: yardımcı program (rustyfiles-shellguard.exe) durdu.",
+  "en": "The taskbar was brought back: the helper program (rustyfiles-shellguard.exe) stopped."
+ },
+ {
+  "id": "a7859007",
+  "key": "Görev çubuğu gizlenemedi: geri getirme kaydı yazılamadığı için hiçbir şey gizlenmez.",
+  "tr": "Görev çubuğu gizlenemedi: geri getirme kaydı yazılamadığı için hiçbir şey gizlenmez.",
+  "en": "The taskbar could not be hidden: the restore record could not be written, so nothing is hidden."
+ },
+ {
+  "id": "80951c00",
+  "key": "Windows tuşu ve Alt+Tab çalışmıyor: Windows klavye kancasını vermedi.",
+  "tr": "Windows tuşu ve Alt+Tab çalışmıyor: Windows klavye kancasını vermedi.",
+  "en": "The Windows key and Alt+Tab are not working: Windows refused the keyboard hook."
+ },
+ {
+  "id": "b0662dc3",
+  "key": "Masaüstü başlatılamadı.",
+  "tr": "Masaüstü başlatılamadı.",
+  "en": "The desktop could not be started."
+ },
+ {
+  "id": "c4a8dab1",
+  "key": "Görev çubuğunu gizleme başlatılamadı.",
+  "tr": "Görev çubuğunu gizleme başlatılamadı.",
+  "en": "Hiding the taskbar could not be started."
+ },
+ {
+  "id": "8b9b4581",
+  "key": "Windows tuşu ve Alt+Tab başlatılamadı.",
+  "tr": "Windows tuşu ve Alt+Tab başlatılamadı.",
+  "en": "The Windows key and Alt+Tab could not be started."
+ },
+ {
+  "id": "f925a5dc",
+  "key": "Tepsi simgeleri toplanamıyor: tepsi penceresi kurulamadı.",
+  "tr": "Tepsi simgeleri toplanamıyor: tepsi penceresi kurulamadı.",
+  "en": "Tray icons cannot be collected: the tray window could not be set up."
+ },
+ {
+  "id": "c6655cfc",
+  "key": "Diğer parçalar çalışmaya devam ediyor.",
+  "tr": "Diğer parçalar çalışmaya devam ediyor.",
+  "en": "The other parts keep running."
+ },
+ {
+  "id": "2294e85a",
+  "key": "Dock, ekranın altındaki üç yüzen adadır: Başlat ve arama, uygulamalar, sistem simgeleri ve saat. Tek anahtarla açılır ve gereken her şeyi birlikte getirir. Deneyseldir ve varsayılan olarak kapalıdır.",
+  "tr": "Dock, ekranın altındaki üç yüzen adadır: Başlat ve arama, uygulamalar, sistem simgeleri ve saat. Tek anahtarla açılır ve gereken her şeyi birlikte getirir. Deneyseldir ve varsayılan olarak kapalıdır.",
+  "en": "The dock is three floating islands at the bottom of the screen: Start and search, apps, system icons and the clock. One switch turns it on and brings everything it needs. It is experimental and off by default."
+ },
+ {
+  "id": "a872ef8b",
+  "key": "Windows tuşu ve Alt+Tab için klavye, sistem genelinde bir kancayla dinlenir; yalnızca Windows tuşuna tek başına basmaya (ve Windows tuşuyla E ya da D'ye) ve Alt+Tab'a (açıkken Sekme, oklar, Enter, Esc ve Alt'ı bırakmaya da) bakılır, başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü ve öndeki programın menü çubuğu açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderilir. Explorer kabuk değilken Win+E bir rustyfiles penceresi açar, Win+D masaüstünü gösterir; Windows tuşlu diğer kısayollara dokunulmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.",
+  "tr": "Windows tuşu ve Alt+Tab için klavye, sistem genelinde bir kancayla dinlenir; yalnızca Windows tuşuna tek başına basmaya (ve Windows tuşuyla E ya da D'ye) ve Alt+Tab'a (açıkken Sekme, oklar, Enter, Esc ve Alt'ı bırakmaya da) bakılır, başka hiçbir tuşu saklamaz, kaydetmez ya da başka yere göndermez. Windows'un kendi Başlat menüsü ve öndeki programın menü çubuğu açılmasın diye tek bir görünmez, hiçbir şey yapmayan tuş gönderilir. Explorer kabuk değilken Win+E bir rustyfiles penceresi açar, Win+D masaüstünü gösterir; Windows tuşlu diğer kısayollara dokunulmaz. rustyfiles durursa ya da takılırsa Windows eski davranışına döner.",
+  "en": "For the Windows key and Alt+Tab the keyboard is listened to with a system-wide hook; it only looks at the Windows key pressed alone (and the Windows key with E or D) and at Alt+Tab (and, while the switcher is open, Tab, the arrows, Enter, Esc and releasing Alt), and does not keep, record or forward any other key. So that Windows' own Start menu and the foreground program's menu bar do not open, one invisible key that does nothing is sent. While Explorer is not the shell, Win+E opens a rustyfiles window and Win+D shows the desktop; other shortcuts with the Windows key are left alone. If rustyfiles stops or hangs, Windows goes back to its old behaviour."
+ },
+ {
+  "id": "b2489267",
+  "key": "Windows'un hiçbir görev çubuğu ayarı değiştirilmez. Görev çubuğu, Dock durunca geri gelir. Dock beklenmedik biçimde ölürse küçük bir yardımcı program (rustyfiles-shellguard.exe) onu bir iki saniye içinde geri getirir; yardımcı çalışmıyorsa görev çubuğu hiç gizlenmez.",
+  "tr": "Windows'un hiçbir görev çubuğu ayarı değiştirilmez. Görev çubuğu, Dock durunca geri gelir. Dock beklenmedik biçimde ölürse küçük bir yardımcı program (rustyfiles-shellguard.exe) onu bir iki saniye içinde geri getirir; yardımcı çalışmıyorsa görev çubuğu hiç gizlenmez.",
+  "en": "No Windows taskbar setting is changed. The taskbar comes back when the Dock stops. If the Dock dies unexpectedly, a small helper program (rustyfiles-shellguard.exe) brings it back within a second or two; if the helper is not running, the taskbar is not hidden at all."
  }
 ]

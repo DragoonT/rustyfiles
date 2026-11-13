@@ -185,6 +185,44 @@ impl StartView {
 
     // ------------------------------------------------------------------ the home page
 
+    /// One tile of the pinned grid: the icon, the name under it on up to two centred lines. A click starts the app (not the click that
+    /// ends a drag), a press that moves is picked up for a drag (`start_drag.rs`), a right click opens the app menu.
+    fn pin_tile(&mut self, i: usize, app: &AppEntry, pal: Palette, theme: ThemePalette, cx: &mut Context<Self>) -> Stateful<Div> {
+        let (hover, sel_fill) = (pal.hover_fill().hsla(), theme.selection);
+        let selected = self.spot == Some(Spot::Pin(i));
+        let icon = self.app_picture(app, page::TILE_ICON, pal, cx);
+        let (a1, a2, a3) = (app.clone(), app.clone(), app.clone());
+        v_flex()
+            .id(("pin", i))
+            .relative()
+            .w(px(CELL_W))
+            .h(px(page::TILE_H))
+            .flex_shrink_0()
+            .items_center()
+            .pt(px(12.))
+            .gap(px(6.))
+            .rounded(px(8.))
+            .cursor_pointer()
+            .when(selected, |d| d.bg(sel_fill).child(theme::selection_pill(&theme)))
+            .when(!selected, |d| d.hover(move |s| s.bg(hover)))
+            .child(icon)
+            // the name under the icon: up to two centred lines
+            .child(div().w_full().h(px(30.)).px(px(6.)).text_size(px(12.)).line_height(px(15.)).text_center().line_clamp(2).child(app.name.clone()))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if this.click_allowed() {
+                    this.launch_app(a1.clone(), cx)
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
+                    let origin = this.tile_origin(i);
+                    this.drag_press(drag::Picked::Pin { app: a3.clone(), slot: i }, ev.position, origin, cx)
+                }),
+            )
+            .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| this.open_menu(a2.clone(), ev.position, cx)))
+    }
+
     pub(super) fn render_home(&mut self, pal: Palette, theme: ThemePalette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if !self.apps_ready {
             let text = if self.apps_failed && !self.loading { t!("Uygulama listesi okunamadı. Yeniden denemek için paneli kapatıp açın.") } else { t!("Uygulamalar yükleniyor…") };
@@ -220,7 +258,8 @@ impl StartView {
         let range = page::page_range(self.grid_page, layout.per_page, pins);
         let shown: Vec<usize> = range.collect();
         let mut grid = v_flex().id("pins").relative().w_full().flex_shrink_0().h(px(layout.rows as f32 * page::TILE_H)).on_scroll(cx.listener(|this, ev: &ScrollEvent, _, cx| {
-            if this.layout.pages < 2 || !this.live() {
+            // (no page is turned under a tile that is held: its slots are those of the page it was picked up from)
+            if this.layout.pages < 2 || !this.live() || this.drag_active() {
                 return;
             }
             let dy = f32::from(ev.delta.pixel_delta(px(20.)).y);
@@ -238,35 +277,35 @@ impl StartView {
         if pins == 0 {
             grid = grid.child(div().h(px(44.)).flex().items_center().text_color(secondary).child(t!("Henüz sabitlenmiş uygulama yok. Bir uygulamaya sağ tıklayıp (ya da Menü tuşuna basıp) “Başlat'a sabitle”yi seçin.")));
         }
-        for row in shown.chunks(page::COLS) {
-            let mut line = h_flex().h(px(page::TILE_H)).flex_shrink_0();
-            for &i in row {
-                let Some(app) = self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned() else { continue };
-                let selected = self.spot == Some(Spot::Pin(i));
-                let icon = self.app_picture(&app, page::TILE_ICON, pal, cx);
-                let (a1, a2) = (app.clone(), app.clone());
-                line = line.child(
-                    v_flex()
-                        .id(("pin", i))
-                        .relative()
-                        .w(px(CELL_W))
-                        .h(px(page::TILE_H))
-                        .flex_shrink_0()
-                        .items_center()
-                        .pt(px(12.))
-                        .gap(px(6.))
-                        .rounded(px(8.))
-                        .cursor_pointer()
-                        .when(selected, |d| d.bg(sel_fill).child(theme::selection_pill(&theme)))
-                        .when(!selected, |d| d.hover(move |s| s.bg(hover)))
-                        .child(icon)
-                        // the name under the icon: up to two centred lines
-                        .child(div().w_full().h(px(30.)).px(px(6.)).text_size(px(12.)).line_height(px(15.)).text_center().line_clamp(2).child(app.name.clone()))
-                        .on_click(cx.listener(move |this, _, _, cx| this.launch_app(a1.clone(), cx)))
-                        .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| this.open_menu(a2.clone(), ev.position, cx))),
-                );
+        // where the pointer is on the grid is known from its bounds of the last frame (a drag judges the slots by them)
+        grid = grid.child(self.grid_probe());
+        if let Some(held) = self.held_pin() {
+            // A tile is held for a drag: the others stand at their own places, which slide when the held tile is carried over the grid
+            // (the held tile itself is drawn by the panel, following the pointer), and the cell it would land in is marked quietly.
+            let now = crate::dock::backdrop::now_ms();
+            if self.sliding(now) {
+                window.request_animation_frame();
             }
-            grid = grid.child(line);
+            if let Some((col, row)) = self.landing_cell() {
+                grid = grid.child(div().absolute().left(px(col * CELL_W)).top(px(row * page::TILE_H)).w(px(CELL_W)).h(px(page::TILE_H)).rounded(px(8.)).bg(hover));
+            }
+            for (local, &i) in shown.iter().enumerate() {
+                if i == held {
+                    continue;
+                }
+                let Some(app) = self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned() else { continue };
+                let (col, row) = self.slide_cell(local, now);
+                grid = grid.child(self.pin_tile(i, &app, pal, theme, cx).absolute().left(px(col * CELL_W)).top(px(row * page::TILE_H)));
+            }
+        } else {
+            for row in shown.chunks(page::COLS) {
+                let mut line = h_flex().h(px(page::TILE_H)).flex_shrink_0();
+                for &i in row {
+                    let Some(app) = self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned() else { continue };
+                    line = line.child(self.pin_tile(i, &app, pal, theme, cx));
+                }
+                grid = grid.child(line);
+            }
         }
         // the dots at the grid's right edge, in the padding: one for each page
         if layout.pages > 1 {
@@ -334,7 +373,20 @@ impl StartView {
                                     .child(div().text_size(px(13.)).truncate().child(entry.pick.name.clone()))
                                     .child(div().text_size(px(12.)).text_color(secondary).truncate().child(entry.line.clone())),
                             )
-                            .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| this.activate_rec(j, if ev.modifiers().control { How::ShowInFolder } else { How::Open }, cx))),
+                            .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                                if this.click_allowed() {
+                                    this.activate_rec(j, if ev.modifiers().control { How::ShowInFolder } else { How::Open }, cx)
+                                }
+                            }))
+                            // a press that moves is a real file drag (a file only: an app among the recommended has nothing to drop)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
+                                    if let Some(Source::File(path)) = this.recs.get(j).map(|e| e.pick.source.clone()) {
+                                        this.drag_press(drag::Picked::Rec { path }, ev.position, None, cx);
+                                    }
+                                }),
+                            ),
                     );
                 }
                 if pair.len() < page::REC_COLS {
@@ -388,7 +440,7 @@ impl StartView {
                             let Some(app) = this.apps.get(ai).cloned() else { return div().h(px(ROW_H)).into_any_element() };
                             let selected = this.cursor == Some(Cursor::App(ai));
                             let icon = this.app_picture(&app, 24.0, pal, cx);
-                            let (a1, a2) = (app.clone(), app.clone());
+                            let (a1, a2, a3) = (app.clone(), app.clone(), app.clone());
                             h_flex()
                                 .id(("start-app", r))
                                 .relative()
@@ -402,7 +454,13 @@ impl StartView {
                                 .when(!selected, |d| d.hover(move |s| s.bg(hover)))
                                 .child(icon)
                                 .child(div().flex_1().min_w_0().truncate().text_sm().child(app.name.clone()))
-                                .on_click(cx.listener(move |this, _, _, cx| this.launch_app(a1.clone(), cx)))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    if this.click_allowed() {
+                                        this.launch_app(a1.clone(), cx)
+                                    }
+                                }))
+                                // a press that moves picks the app up (to the dock, or out of the panel as a shortcut)
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, ev: &MouseDownEvent, _, cx| this.drag_press(drag::Picked::Listed { app: a3.clone() }, ev.position, None, cx)))
                                 .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| this.open_menu(a2.clone(), ev.position, cx)))
                                 .into_any_element()
                         }

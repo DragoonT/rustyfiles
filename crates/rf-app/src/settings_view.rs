@@ -150,6 +150,10 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Appearance => appearance(p, s, cx),
         Page::Dock => {
             let size = crate::dock::size_slider::control(p, s, cx);
+            // a part of the dock that could not start tells the page so (a look in the background; not while the search builds pages)
+            if !collecting() {
+                crate::dock::parts_status::poll(cx);
+            }
             // (the weather-from-position card is part of the page, directly under the weather city's row: `dock_page::page`)
             crate::dock_page::page(p, s, Some(size))
         }

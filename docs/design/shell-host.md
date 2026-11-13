@@ -23,9 +23,9 @@ single-instance group: a second `--shell` or `--dock` in the same Windows sessio
   policy override, the monitors with their work areas, whether `rustyfiles-shellguard.exe` is next to the exe, the host's settings
   that are on. A release build has no console: `rustyfiles.exe --shell-probe > probe.json`.
 
-## Cover mode (`shell_desktop_cover`, Settings, "Masaüstü" page; what the desktop does is in `desktop.md`)
+## Cover mode (the desktop part of the dock's one switch, `dock/parts.rs`; `shell_desktop_cover` is its override; what the desktop does is in `desktop.md`)
 
-With the switch on, the host puts OUR desktop (the view of `shell/desktop`) over Explorer's: one borderless window per monitor.
+With the dock switch on (and the desktop not held off by its own value), the host puts OUR desktop (the view of `shell/desktop`) over Explorer's: one borderless window per monitor.
 Explorer's desktop stays underneath and is visible again when the host stops.
 
 | Question | Answer |
@@ -92,4 +92,4 @@ settings file overwritten by another writer, windows hidden from screen sharing,
 ## Live test of a test copy
 
 See the report of the increment; in short: `RUSTYFILES_CONFIG_DIR=<temp>`, `RUSTYFILES_MULTI_INSTANCE=1`, `RUSTYFILES_MUTE=1`,
-`RUSTYFILES_DESKTOP_DIR=<scratch folder>`, `rustyfiles.exe --shell`, with `shell_desktop_cover = true` in the copy's settings.toml.
+`RUSTYFILES_DESKTOP_DIR=<scratch folder>`, `rustyfiles.exe --shell`, with `dock_enabled = true` in the copy's settings.toml (the desktop comes with the dock switch).

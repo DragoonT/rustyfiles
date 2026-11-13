@@ -38,6 +38,7 @@ use rf_win::switcher::hook::LowLevelHook;
 use rf_win::winkey::{Beat, Combo, Deliver, HEARTBEAT_EVERY_MS, KeyService, Posted, Shared};
 
 use super::switcher::{self, Closing, OpenRequest};
+use crate::dock::parts::Part;
 use crate::settings::Settings;
 
 /// `RUSTYFILES_KEYS_LOG_ONLY=1`: decide and log, swallow nothing, send nothing, open nothing.
@@ -50,7 +51,8 @@ pub fn log_only_from(value: Option<&str>) -> bool {
 
 /// Which of the two layers the settings ask for: (Windows key, Alt+Tab).
 pub fn wanted(s: &Settings) -> (bool, bool) {
-    (s.shell_win_key, s.shell_own_switcher)
+    // (the dock switch and each part's own value: `dock::parts`)
+    (crate::dock::parts::runs(s, Part::WinKey), crate::dock::parts::runs(s, Part::Switcher))
 }
 
 /// Whether Win+E, Win+D and Win+Shift+S are ours: the Windows-key switch is on and Explorer is NOT the shell (`mode` is what the host last saw; `None`
@@ -270,6 +272,7 @@ pub fn on_settings(cx: &mut App) {
     let (win, alt) = cx.try_global::<Settings>().map_or((false, false), wanted);
     if !win && !alt {
         stop_because(cx, "both settings are off");
+        note_hook(win, alt, true);
         return;
     }
     if !cx.has_global::<KeysHost>() {
@@ -286,8 +289,20 @@ pub fn on_settings(cx: &mut App) {
                 log::info!("{line}");
                 host.last_ready = line;
             }
+            note_hook(win, alt, true);
         }
-        Err(e) => log::warn!("keys: the keyboard layer could not start: {e:#}"),
+        Err(e) => {
+            log::warn!("keys: the keyboard layer could not start: {e:#}");
+            note_hook(win, alt, false);
+        }
+    }
+}
+
+/// Tells the Dock page whether the hook of the parts that want it could be had (one hook serves both).
+fn note_hook(win: bool, alt: bool, ok: bool) {
+    use crate::dock::parts::Why;
+    for (part, wanted) in [(Part::WinKey, win), (Part::Switcher, alt)] {
+        crate::dock::parts_status::note(part, (wanted && !ok).then_some(Why::HookRefused));
     }
 }
 
@@ -425,17 +440,22 @@ mod tests {
     }
 
     #[test]
-    fn both_settings_are_off_by_default_and_round_trip() {
+    fn both_layers_come_with_the_dock_switch_unless_their_own_values_hold_them_off() {
         let d = Settings::default();
-        assert_eq!(wanted(&d), (false, false), "experimental: off until asked for");
+        assert_eq!(wanted(&d), (false, false), "the dock is off: no hook");
         assert_eq!(wanted(&Settings::parse_lenient_pub("theme = \"dark\"\n").unwrap()), (false, false));
-        let on = Settings { shell_win_key: true, shell_own_switcher: true, ..Default::default() };
+        let on = Settings { dock_enabled: true, ..Default::default() };
+        assert_eq!(wanted(&on), (true, true));
         let text = toml::to_string(&on).unwrap();
         let back = Settings::parse_lenient_pub(&text).unwrap();
         assert_eq!(wanted(&back), (true, true));
-        assert_eq!(wanted(&Settings::parse_lenient_pub("shell_win_key = \"evet\"\nshell_own_switcher = 3\n").unwrap()), (false, false), "wrong values fall back to off");
-        let one = Settings { shell_own_switcher: true, ..Default::default() };
+        // wrong values hold the layer off (a typo must not install a keyboard hook); a false does too
+        assert_eq!(wanted(&Settings::parse_lenient_pub("dock_enabled = true\nshell_win_key = \"evet\"\nshell_own_switcher = 3\n").unwrap()), (false, false));
+        let one = Settings { dock_enabled: true, shell_win_key: false, ..Default::default() };
         assert_eq!(wanted(&one), (false, true));
+        // the file an older build saved: every part false, the dock on: no hook is installed by the update
+        let old = Settings::parse_lenient_pub("dock_enabled = true\nshell_win_key = false\nshell_own_switcher = false\n").unwrap();
+        assert_eq!(wanted(&old), (false, false));
     }
 
     #[test]

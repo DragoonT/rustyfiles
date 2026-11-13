@@ -28,6 +28,7 @@ use std::time::Duration;
 use gpui_kit::*;
 use rf_win::taskbar_hide::{self, Config, TaskbarHider};
 
+use crate::dock::parts::{self, Part};
 use crate::settings::Settings;
 
 /// The dock's band as the dock last said it (`None` inside: it reserves none). `None` outside: the dock has not said yet.
@@ -88,9 +89,10 @@ pub fn decide(want: bool, running: bool, already_looked: bool) -> Action {
     }
 }
 
-/// The settings file was (re)read, or the host started: brings hiding in line with `shell_hide_taskbar`.
+/// The settings file was (re)read, or the host started: brings hiding in line with the dock switch and the part's own value
+/// (`dock::parts`).
 pub fn on_settings(cx: &mut App) {
-    let want = cx.try_global::<Settings>().is_some_and(|s| s.shell_hide_taskbar);
+    let want = cx.try_global::<Settings>().is_some_and(|s| crate::dock::parts::runs(s, Part::Taskbar));
     match decide(want, cx.has_global::<Hiding>(), STALE_LOOKED.load(Ordering::SeqCst)) {
         Action::Start => {
             STALE_LOOKED.store(true, Ordering::SeqCst);
@@ -133,6 +135,7 @@ fn stale_check() {
 fn start(cx: &mut App) {
     let Some(state_dir) = state_dir() else {
         log::warn!("taskbar hiding: there is no folder for the state file; nothing is hidden");
+        crate::dock::parts_status::note(Part::Taskbar, Some(parts::Why::RecordNotSaved));
         return;
     };
     // The bottom edge waits for the dock's word: a hider that starts before the dock has said what its band is would give the whole
@@ -143,13 +146,36 @@ fn start(cx: &mut App) {
         Ok(hider) => {
             hider.set_wanted(true);
             cx.set_global(Hiding { hider });
+            crate::dock::parts_status::note(Part::Taskbar, None);
         }
-        Err(e) => log::warn!("taskbar hiding could not start: {e}"),
+        Err(e) => {
+            log::warn!("taskbar hiding could not start: {e}");
+            crate::dock::parts_status::note(Part::Taskbar, Some(parts::Why::NotStarted));
+        }
     }
+}
+
+/// Whether the taskbar is shown again BEFORE the other parts are brought in line with the settings: only when it is being hidden now
+/// and the settings no longer want it (the other order, hiding last, is for every other case). The rule is [`goes_first_when`].
+pub fn goes_first(cx: &App) -> bool {
+    let want = cx.try_global::<Settings>().is_some_and(|s| crate::dock::parts::runs(s, Part::Taskbar));
+    goes_first_when(cx.has_global::<Hiding>(), want)
+}
+
+/// The order rule behind [`goes_first`]: hiding goes last (after the tray window and the keyboard hook exist), showing goes first.
+pub fn goes_first_when(running: bool, want: bool) -> bool {
+    running && !want
+}
+
+/// The fault that keeps the wanted hide from being in force right now (the guard missing, not confirming, lost; the record not
+/// written), for the Dock page's line. `None` while nothing is wrong, and while the hide is not running at all.
+pub fn fault(cx: &App) -> Option<taskbar_hide::Fault> {
+    cx.try_global::<Hiding>().and_then(|h| h.hider.fault())
 }
 
 /// The setting went off: the taskbar comes back, off the interface thread.
 fn turn_off(cx: &mut App) {
+    crate::dock::parts_status::note(Part::Taskbar, None);
     let Hiding { hider } = cx.remove_global::<Hiding>();
     hider.set_wanted(false);
     std::thread::spawn(move || hider.stop(Duration::from_secs(5)));
@@ -182,6 +208,14 @@ mod tests {
     }
 
     #[test]
+    fn the_taskbar_is_shown_before_the_other_parts_go_and_hidden_after_they_are_in_place() {
+        use super::goes_first_when;
+        assert!(goes_first_when(true, false), "turning off: first");
+        assert!(!goes_first_when(false, true), "turning on: last");
+        assert!(!goes_first_when(true, true) && !goes_first_when(false, false), "no change: the order does not matter");
+    }
+
+    #[test]
     fn the_stale_check_starts_the_worker_only_for_a_state_file_that_holds_a_record() {
         // the decision itself is `rf_win::taskbar_hide::stale_record_present` (tested there against files); here it is checked that
         // the wiring uses it, and does so on a thread of its own and before anything is started
@@ -194,13 +228,16 @@ mod tests {
     }
 
     #[test]
-    fn it_is_off_by_default_and_a_wrong_value_is_off() {
-        assert!(!Settings::default().shell_hide_taskbar, "experimental: off until asked for");
-        assert!(!Settings::parse_lenient_pub("theme = \"dark\"\n").unwrap().shell_hide_taskbar);
-        assert!(!Settings::parse_lenient_pub("shell_hide_taskbar = \"evet\"\n").unwrap().shell_hide_taskbar, "a wrong value falls back to off");
-        let on = Settings { shell_hide_taskbar: true, ..Default::default() };
+    fn it_comes_with_the_dock_switch_unless_its_own_value_holds_it_off() {
+        use super::{Part, parts::runs};
+        assert!(!runs(&Settings::default(), Part::Taskbar), "the dock is off: Windows' taskbar is left alone");
+        assert!(!runs(&Settings::parse_lenient_pub("theme = \"dark\"\n").unwrap(), Part::Taskbar));
+        let on = Settings { dock_enabled: true, ..Default::default() };
+        assert!(runs(&on, Part::Taskbar));
         let back = Settings::parse_lenient_pub(&toml::to_string(&on).unwrap()).unwrap();
-        assert!(back.shell_hide_taskbar);
+        assert!(runs(&back, Part::Taskbar));
+        // the old file's false holds it off: nobody has the taskbar hidden by an update
+        assert!(!runs(&Settings::parse_lenient_pub("dock_enabled = true\nshell_hide_taskbar = false\n").unwrap(), Part::Taskbar));
     }
 
     #[test]
@@ -229,7 +266,8 @@ mod tests {
     fn the_report_names_the_setting_only_when_it_is_on() {
         use crate::shell::probe::settings_on;
         assert!(!settings_on(&Settings::default()).contains(&"shell_hide_taskbar".to_string()));
-        assert!(settings_on(&Settings { shell_hide_taskbar: true, ..Default::default() }).contains(&"shell_hide_taskbar".to_string()));
+        assert!(settings_on(&Settings { dock_enabled: true, ..Default::default() }).contains(&"shell_hide_taskbar".to_string()));
+        assert!(!settings_on(&Settings { dock_enabled: true, shell_hide_taskbar: false, ..Default::default() }).contains(&"shell_hide_taskbar".to_string()));
     }
 
     #[test]

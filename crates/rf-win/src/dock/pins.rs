@@ -507,6 +507,17 @@ fn pinned_from_link(path: &Path, name: &str, f: &LinkFacts, fate: &Fate) -> Pinn
     PinnedApp { name: name.to_string(), aumid, exe, launch, icon }
 }
 
+/// What the dock makes of a shortcut of the Start menu that an app is dragged onto the dock with (`startdrag::dock_pin_of`): the same
+/// reading a taskbar pin gets, without the fate rules (the app was listed a moment ago, so its program is there). `None` when the
+/// shortcut cannot be read or names neither a program nor a package. Blocks (COM): the shell thread.
+pub fn pinned_from_shortcut(path: &Path, name: &str) -> Option<PinnedApp> {
+    let facts = read_link(path)?;
+    if facts.target.as_os_str().is_empty() && facts.aumid.is_none() {
+        return None;
+    }
+    Some(pinned_from_link(path, name, &facts, &Fate::Alive))
+}
+
 /// Looks at every pin of the Windows taskbar, in its order, and says what the dock makes of each. Blocks (COM, the shell, the disk).
 pub fn inspect_pins(disk: &dyn Disk) -> Vec<PinReport> {
     let Some(dir) = pin_folder() else { return Vec::new() };

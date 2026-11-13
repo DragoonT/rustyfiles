@@ -142,6 +142,10 @@ pub struct Controller {
     refusal: Option<Refusal>,
     guard_failures: usize,
     next_guard_try_ms: u64,
+    /// Why the guard is not up: the failure of the last pass that really looked for it (or the guard ending). It is what the passes inside
+    /// the retry pause report, so that a guard that was never found keeps saying "not found" and does not turn into "lost" for 5, 15,
+    /// 60 seconds. `None` while a guard is confirmed or none was wanted yet.
+    guard_fault: Option<Refusal>,
     guard_confirmed_ms: u64,
     throttle: Throttle,
     /// The work area this controller last set for each monitor it changed (monitor id, rectangle): a work area that is one of them
@@ -182,6 +186,7 @@ impl Controller {
             refusal: None,
             guard_failures: 0,
             next_guard_try_ms: 0,
+            guard_fault: None,
             guard_confirmed_ms: 0,
             // Explorer may recompute the work area whenever it likes: give it back at most 4 times a minute.
             throttle: Throttle::new(4, 60_000),
@@ -279,6 +284,7 @@ impl Controller {
         if on {
             self.guard_failures = 0;
             self.next_guard_try_ms = 0;
+            self.guard_fault = None;
             self.refusal = None;
             self.reconcile(w);
         } else {
@@ -390,6 +396,7 @@ impl Controller {
             // A guard that keeps ending is not started again every second.
             let now = w.now_ms();
             self.note_guard_failure(now);
+            self.guard_fault = Some(Refusal::GuardLost);
             self.refusal = Some(Refusal::GuardLost);
         }
         // A guard that has stayed up for a good while earns a clean record.
@@ -458,25 +465,30 @@ impl Controller {
     fn ensure_guard(&mut self, w: &mut dyn HideWorld) -> Result<(), Refusal> {
         let now = w.now_ms();
         if now < self.next_guard_try_ms {
-            return Err(Refusal::GuardLost);
+            // inside the pause: the reason is still the one the last look found
+            return Err(self.guard_fault.unwrap_or(Refusal::GuardLost));
         }
         if !w.guard_exists() {
             // Looked for again only after a backoff: the file is not going to appear by itself.
             self.note_guard_failure(now);
+            self.guard_fault = Some(Refusal::GuardMissing);
             w.warn("taskbar: rustyfiles-shellguard.exe was not found; the taskbar stays");
             return Err(Refusal::GuardMissing);
         }
         if let Err(e) = w.start_guard() {
             self.note_guard_failure(now);
+            self.guard_fault = Some(Refusal::GuardNotConfirmed);
             w.warn(&format!("taskbar: the guard did not start: {e}"));
             return Err(Refusal::GuardNotConfirmed);
         }
         if !w.guard_ready(CONFIRM_WAIT_MS) {
             w.kill_guard();
             self.note_guard_failure(now);
+            self.guard_fault = Some(Refusal::GuardNotConfirmed);
             w.warn("taskbar: the guard did not confirm; the taskbar stays");
             return Err(Refusal::GuardNotConfirmed);
         }
+        self.guard_fault = None;
         self.guard = GuardStatus::Confirmed;
         self.guard_confirmed_ms = w.now_ms();
         Ok(())

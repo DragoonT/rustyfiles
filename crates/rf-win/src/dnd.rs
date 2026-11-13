@@ -12,6 +12,9 @@ use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{ILFindLastID, SHCreateDataObject, SHDoDragDrop, SHParseDisplayName};
 use windows::core::PCWSTR;
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use crate::fileops::Transfer;
 use crate::wide::wide;
 
@@ -47,6 +50,52 @@ pub fn data_object(items: &[PathBuf]) -> anyhow::Result<IDataObject> {
 /// `ui_thread` is the id of the thread that owns the window where the drag started; its input
 /// state is attached so this thread can take mouse capture while the button is still down.
 pub fn drag_out(owner: HWND, ui_thread: u32, items: &[PathBuf]) -> anyhow::Result<DROPEFFECT> {
+    drag_out_allowing(owner, ui_thread, items, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK)
+}
+
+/// [`drag_out`] for files that must not be MOVED by the target: a copy or a link only (the Start panel's recommended files and the
+/// copies of its apps' shortcuts). The target still decides between the two by its own rules.
+pub fn drag_out_copy_only(owner: HWND, ui_thread: u32, items: &[PathBuf]) -> anyhow::Result<DROPEFFECT> {
+    // The allowed-effects mask binds the OLE targets of other programs, but our own windows take a drop as a plain list of paths and ask
+    // `default_transfer`, which moves on the same drive. So the paths are also remembered here, and `default_transfer` copies them.
+    mark_copy_only(items, DRAG_LIMIT);
+    let r = drag_out_allowing(owner, ui_thread, items, DROPEFFECT_COPY | DROPEFFECT_LINK);
+    // (the drop is handled a moment after the loop ends: the paths stay marked for that, then they are let go)
+    mark_copy_only(items, AFTER_DRAG);
+    r
+}
+
+/// How long a copy-only drag may last before its paths stop being marked (a drag that never returns must not mark them for good).
+const DRAG_LIMIT: Duration = Duration::from_secs(600);
+/// How long the paths stay marked after the drag's loop has ended.
+const AFTER_DRAG: Duration = Duration::from_secs(5);
+
+/// Paths of drags that must never be moved, each with the time its mark ends.
+static COPY_ONLY: Mutex<Vec<(String, Instant)>> = Mutex::new(Vec::new());
+
+fn key(p: &Path) -> String {
+    p.to_string_lossy().to_lowercase()
+}
+
+/// Marks `items` as the subject of a copy-only drag for `for_how_long` (replacing an earlier mark of the same path).
+pub fn mark_copy_only(items: &[PathBuf], for_how_long: Duration) {
+    let now = Instant::now();
+    let Ok(mut marks) = COPY_ONLY.lock() else { return };
+    marks.retain(|(_, until)| *until > now);
+    for p in items {
+        let k = key(p);
+        marks.retain(|(m, _)| *m != k);
+        marks.push((k, now + for_how_long));
+    }
+}
+
+/// Whether every one of `sources` belongs to a copy-only drag that is going on or has just ended at `now`.
+fn copy_only_at(sources: &[PathBuf], now: Instant) -> bool {
+    let Ok(marks) = COPY_ONLY.lock() else { return false };
+    !sources.is_empty() && sources.iter().all(|s| marks.iter().any(|(m, until)| *until > now && *m == key(s)))
+}
+
+fn drag_out_allowing(owner: HWND, ui_thread: u32, items: &[PathBuf], allowed: DROPEFFECT) -> anyhow::Result<DROPEFFECT> {
     let data = data_object(items)?;
     unsafe {
         // The button may already be up (very short drags) — don't start a drag then.
@@ -56,7 +105,7 @@ pub fn drag_out(owner: HWND, ui_thread: u32, items: &[PathBuf]) -> anyhow::Resul
         }
         let me = GetCurrentThreadId();
         let attached = ui_thread != 0 && AttachThreadInput(me, ui_thread, true).as_bool();
-        let r = SHDoDragDrop(Some(owner), &data, None, DROPEFFECT_COPY | DROPEFFECT_MOVE | DROPEFFECT_LINK);
+        let r = SHDoDragDrop(Some(owner), &data, None, allowed);
         if attached {
             let _ = AttachThreadInput(me, ui_thread, false);
         }
@@ -67,6 +116,10 @@ pub fn drag_out(owner: HWND, ui_thread: u32, items: &[PathBuf]) -> anyhow::Resul
 /// Explorer's default for a plain drag: same volume → move, otherwise copy.
 /// Ctrl forces copy, Shift forces move.
 pub fn default_transfer(sources: &[PathBuf], dest_dir: &Path, ctrl: bool, shift: bool) -> Transfer {
+    // (a drag that was started copy-only, the Start panel's recommended files, is copied by our own windows as well: not even Shift moves it)
+    if copy_only_at(sources, Instant::now()) {
+        return Transfer::Copy;
+    }
     if ctrl {
         return Transfer::Copy;
     }
@@ -99,6 +152,28 @@ mod tests {
         assert!(is_invalid_drop(&src, Path::new(r"C:\a")));
         assert!(is_invalid_drop(&[PathBuf::from(r"C:\a")], Path::new(r"C:\a\sub")));
         assert!(!is_invalid_drop(&src, Path::new(r"C:\b")));
+    }
+
+
+    #[test]
+    fn a_file_dragged_copy_only_is_copied_by_our_own_windows_even_on_the_same_drive() {
+        let mine = PathBuf::from("C:/rf-copy-only-test/mine.txt");
+        let other = PathBuf::from("C:/rf-copy-only-test/other.txt");
+        let one = |p: &PathBuf, shift: bool| default_transfer(std::slice::from_ref(p), Path::new("C:/rf-copy-only-dest"), false, shift);
+        // (before the fix a same-volume drop was a Move whatever the drag allowed)
+        assert_eq!(one(&mine, false), Transfer::Move);
+        mark_copy_only(std::slice::from_ref(&mine), Duration::from_secs(60));
+        assert_eq!(one(&mine, false), Transfer::Copy);
+        assert_eq!(one(&mine, true), Transfer::Copy, "Shift does not move it");
+        assert_eq!(default_transfer(&[PathBuf::from("c:/RF-COPY-ONLY-TEST/MINE.TXT")], Path::new("C:/rf-copy-only-dest"), false, false), Transfer::Copy, "case does not matter");
+        // another file, or a list that is not all marked, keeps the ordinary rule
+        assert_eq!(one(&other, false), Transfer::Move);
+        assert_eq!(default_transfer(&[mine.clone(), other], Path::new("C:/rf-copy-only-dest"), false, false), Transfer::Move);
+        // the mark ends
+        assert!(copy_only_at(std::slice::from_ref(&mine), Instant::now()));
+        assert!(!copy_only_at(std::slice::from_ref(&mine), Instant::now() + Duration::from_secs(61)));
+        mark_copy_only(std::slice::from_ref(&mine), Duration::ZERO);
+        assert_eq!(one(&mine, false), Transfer::Move);
     }
 
     #[test]

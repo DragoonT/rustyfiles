@@ -2,23 +2,24 @@
 //! Dock page is (`dock_page.rs`): ONE list, [`entries`], that the page draws and the Settings search reads, so the two cannot drift
 //! apart, and plain data that is tested without a window.
 //!
-//! WHAT IS ON THE PAGE: the switch that puts our desktop over Explorer's, "show desktop icons", and one choice for each of the five
+//! WHAT IS ON THE PAGE: "show desktop icons", and one choice for each of the five
 //! system icons (This PC, the user's folder, Network, Recycle Bin, Control Panel): follow Windows (the default: exactly what Windows'
 //! own setting says), show, or hide. Windows' settings are only read, never written; the choices are this app's own.
+//!
+//! THE DESKTOP HAS NO SWITCH OF ITS OWN. It comes with the dock (the one switch on the Dock page, `dock/parts.rs`): a dock over
+//! Explorer's desktop is two desktops. The page says so in one line.
 //!
 //! WHAT IS NOT, AND WHY: the icon size, "align to grid", auto arrange and the sort. They are the desktop's layout (`desktop-layout.json`),
 //! which the process that draws the desktop owns and writes; this page lives in the main app, and a second writer of that file would
 //! lose what the first one wrote. They are on the desktop's own right-click menu, and the page says so.
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::h_flex;
-use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_core::desktop::virtuals::{IconChoice, VirtualKind};
 
-use crate::dock_page::{Needs, RowState};
+use crate::dock::parts::{self, Part};
 use crate::settings::Settings;
-use crate::settings_view::{card_body, dropdown, section, shell, sw, switch};
+use crate::settings_view::{card_body, dropdown, section, shell};
 use crate::t;
 use crate::theme::Palette;
 
@@ -43,7 +44,6 @@ impl Section {
 /// The control of an entry, with how it reads and writes its own field (the tests check that it touches that field and no other).
 #[derive(Clone, Copy)]
 pub(crate) enum Control {
-    Switch(fn(&Settings) -> bool, fn(&mut Settings, bool)),
     /// Follow Windows / show / hide.
     Choice(fn(&Settings) -> IconChoice, fn(&mut Settings, IconChoice)),
 }
@@ -56,7 +56,6 @@ pub(crate) struct Entry {
     #[cfg_attr(not(test), allow(dead_code))]
     pub field: &'static str,
     pub section: Section,
-    pub needs: Needs,
     pub icon: L,
     pub title: &'static str,
     pub desc: &'static str,
@@ -64,19 +63,6 @@ pub(crate) struct Entry {
     #[cfg_attr(not(test), allow(dead_code))]
     pub kind: Option<VirtualKind>,
     pub control: Control,
-}
-
-impl Entry {
-    /// Whether the control works, only turns off, or is inert with these settings (the same rules as the Dock page's).
-    pub(crate) fn state(&self, s: &Settings) -> RowState {
-        if self.needs.met(s) {
-            return RowState::Live;
-        }
-        match (self.needs, self.control) {
-            (Needs::DockOnToTurnOn, Control::Switch(get, _)) if get(s) => RowState::OffOnly,
-            _ => RowState::Inert,
-        }
-    }
 }
 
 /// The three states of a choice, as the dropdown writes them.
@@ -108,43 +94,18 @@ pub(crate) fn kept_line() -> &'static str {
     t!("rustyfiles masaüstü kapalı: seçimleriniz kaydedilir ve masaüstü açılınca uygulanır.")
 }
 
-/// The line under the cover switch while the dock is off. The Dock switch is on the Dock page, not on this one (the Dock page's own
-/// sentence says "at the top of this page", which is wrong here).
-pub(crate) fn inert_reason() -> &'static str {
-    t!("Dock kapalı: bu ayar yalnızca Dock çalışırken işe yarar. Açmak için önce Dock sayfasındaki Dock anahtarını açın.")
-}
-
-/// The line under the cover switch while it is on and the dock is off (it can only be turned off).
-pub(crate) fn off_only_reason() -> &'static str {
-    t!("Dock kapalı: bu ayar şimdi işe yaramaz ve yalnızca kapatılabilir. Yeniden açmak için önce Dock sayfasındaki Dock anahtarını açın.")
-}
-
 /// Every setting of the page, in the order of the page.
 pub(crate) fn entries() -> Vec<Entry> {
     use Section::*;
     #[allow(clippy::too_many_arguments)]
-    fn e(id: &'static str, field: &'static str, section: Section, needs: Needs, icon: L, title: &'static str, desc: &'static str, kind: Option<VirtualKind>, control: Control) -> Entry {
-        Entry { id, field, section, needs, icon, title, desc, kind, control }
+    fn e(id: &'static str, field: &'static str, section: Section, icon: L, title: &'static str, desc: &'static str, kind: Option<VirtualKind>, control: Control) -> Entry {
+        Entry { id, field, section, icon, title, desc, kind, control }
     }
-    let nothing = Needs::Nothing;
     vec![
-        e(
-            "shell-cover",
-            "shell_desktop_cover",
-            General,
-            // (it needs the shell host, which is the dock's process: switching it on needs the dock, switching it off always works)
-            Needs::DockOnToTurnOn,
-            L::Monitor,
-            t!("Masaüstünü rustyfiles çizsin (deneysel)"),
-            t!("Explorer'ın masaüstü altta durur ve dock durduğunda yeniden görünür."),
-            None,
-            Control::Switch(|s| s.shell_desktop_cover, |s, v| s.shell_desktop_cover = v),
-        ),
         e(
             "desktop-show-icons",
             "desktop_show_icons",
             General,
-            nothing,
             L::Eye,
             t!("Masaüstü simgelerini göster"),
             t!("\"Gizle\", dosyalar dahil bütün simgeleri saklar. Masaüstüne sağ tıklayınca açılan menüde de aynı anahtar vardır; ikisinden biri gizlediyse simgeler gizlidir."),
@@ -155,7 +116,6 @@ pub(crate) fn entries() -> Vec<Entry> {
             "desktop-icon-this-pc",
             "desktop_icon_this_pc",
             Icons,
-            nothing,
             L::Monitor,
             t!("Bu bilgisayar"),
             t!("Çift tıklayınca rustyfiles'ta açılır; sağ tık menüsünde Özellikler (Sistem) vardır."),
@@ -166,7 +126,6 @@ pub(crate) fn entries() -> Vec<Entry> {
             "desktop-icon-user-files",
             "desktop_icon_user_files",
             Icons,
-            nothing,
             L::User,
             t!("Kullanıcı dosyaları"),
             t!("Kullanıcı klasörünüz (Belgeler, Resimler, İndirilenler ve diğerleri)."),
@@ -177,7 +136,6 @@ pub(crate) fn entries() -> Vec<Entry> {
             "desktop-icon-network",
             "desktop_icon_network",
             Icons,
-            nothing,
             L::Network,
             t!("Ağ"),
             t!("Ağdaki bilgisayarlar ve paylaşımlar."),
@@ -188,7 +146,6 @@ pub(crate) fn entries() -> Vec<Entry> {
             "desktop-icon-recycle-bin",
             "desktop_icon_recycle_bin",
             Icons,
-            nothing,
             L::Trash,
             t!("Geri Dönüşüm Kutusu"),
             t!("Dolu ya da boş olduğunu resminden gösterir; sağ tık menüsünde kutuyu boşaltma vardır, üzerine bırakılan dosyalar geri dönüşüm kutusuna gider."),
@@ -199,7 +156,6 @@ pub(crate) fn entries() -> Vec<Entry> {
             "desktop-icon-control-panel",
             "desktop_icon_control_panel",
             Icons,
-            nothing,
             L::Settings,
             t!("Denetim Masası"),
             t!("Windows'un eski ayar sayfaları; Explorer'ın kendi penceresinde açılır."),
@@ -219,13 +175,13 @@ pub(crate) fn grouped(all: &[Entry]) -> Vec<(Section, Vec<Entry>)> {
 /// The page: the intro, the lines that say whose is whose, then the sections.
 pub(crate) fn page(p: &Palette, s: &Settings) -> Vec<AnyElement> {
     let text = |t: &'static str| div().pb_1().text_sm().text_color(p.text_secondary).child(t).into_any_element();
-    let mut out: Vec<AnyElement> = vec![text(intro()), text(whose_line()), text(layout_line())];
+    let mut out: Vec<AnyElement> = vec![text(intro()), text(parts::desktop_comes_with_the_dock()), text(whose_line()), text(layout_line())];
     for (sec, rows) in grouped(&entries()) {
         out.push(section(p, sec.title()));
         for e in rows {
             out.push(row(p, s, &e));
         }
-        if sec == Section::Icons && !s.shell_desktop_cover {
+        if sec == Section::Icons && !parts::runs(s, Part::Desktop) {
             out.push(div().pt_1().text_xs().text_color(p.text_secondary).child(kept_line()).into_any_element());
         }
     }
@@ -233,58 +189,12 @@ pub(crate) fn page(p: &Palette, s: &Settings) -> Vec<AnyElement> {
 }
 
 fn row(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
-    let state = e.state(s);
-    let control = if state == RowState::Inert { inert_control(p, s, e) } else { live_control(p, s, e) };
-    // (the card notes its title and description for the Settings search, usable or not)
-    let body = card_body(p, e.icon, e.title.into(), Some(e.desc.into()), Some(control));
-    let body = if state == RowState::Inert { body.opacity(0.55) } else { body };
-    shell(p)
-        .child(body)
-        .when(state == RowState::Inert, |d| d.child(note_line(p, inert_reason())))
-        .when(state == RowState::OffOnly, |d| d.child(note_line(p, off_only_reason())))
-        .into_any_element()
-}
-
-/// A small line under a card's text (aligned with it: past the icon).
-fn note_line(p: &Palette, text: &'static str) -> Div {
-    div().pl(px(50.)).pr_4().pb_3().text_xs().text_color(p.text_secondary).child(text)
-}
-
-fn live_control(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
-    match e.control {
-        Control::Switch(get, set) => sw(e.id, p, get(s), set),
+    // (the choices are only settings: they are saved before the desktop runs, so the row is usable with the dock off)
+    let control = match e.control {
         Control::Choice(get, set) => dropdown(e.id, p, get(s), choice_labels(), set),
-    }
-}
-
-/// What stands where the control would be while the dock is off: the current value, with nothing to click.
-fn inert_control(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
-    let label = |text: String| div().h(px(32.)).px_3().flex().items_center().rounded(crate::theme::RADIUS_SM).border_1().border_color(p.border).text_sm().child(text).into_any_element();
-    match e.control {
-        // over glass the same liquid switch as the live ones (a click does nothing); the card around it is dimmed
-        Control::Switch(get, _) if p.liquid => switch(e.id, p, get(s), |_, _| {}),
-        Control::Switch(get, _) => {
-            let on = get(s);
-            h_flex()
-                .gap_3()
-                .items_center()
-                .child(div().text_sm().text_color(p.text_secondary).child(if on { t!("Açık") } else { t!("Kapalı") }))
-                .child(
-                    h_flex()
-                        .w(px(40.))
-                        .h(px(20.))
-                        .px(px(3.))
-                        .items_center()
-                        .rounded_full()
-                        .border_1()
-                        .border_color(p.text_secondary)
-                        .when(on, |d| d.justify_end())
-                        .child(div().size(px(12.)).rounded_full().bg(p.text_secondary)),
-                )
-                .into_any_element()
-        }
-        Control::Choice(get, _) => label(choice_labels().into_iter().find(|(v, _)| *v == get(s)).map(|(_, l)| l).unwrap_or_default()),
-    }
+    };
+    // (the card notes its title and description for the Settings search)
+    shell(p).child(card_body(p, e.icon, e.title.into(), Some(e.desc.into()), Some(control))).into_any_element()
 }
 
 #[cfg(test)]
@@ -293,8 +203,9 @@ mod tests {
 
     use rf_core::desktop::virtuals::{IconChoice, VirtualKind};
 
-    use super::{Control, Entry, Section, choice_labels, entries, grouped, inert_reason, intro, kept_line, layout_line, off_only_reason, whose_line};
-    use crate::dock_page::{Needs, RowState, while_turkish};
+    use super::{Control, Entry, Section, choice_labels, entries, grouped, intro, kept_line, layout_line, whose_line};
+    use crate::dock::parts;
+    use crate::dock_page::while_turkish;
     use crate::settings::Settings;
 
     #[test]
@@ -306,15 +217,15 @@ mod tests {
         assert_eq!(fields.len(), all.len(), "a setting is on the page twice");
     }
 
-    /// The `desktop_*` fields the settings struct has, plus the cover switch, read from its source, so a setting added later without a
-    /// place on the page fails here.
+    /// The `desktop_*` fields the settings struct has, read from its source, so a setting added later without a place on the page fails
+    /// here. (The desktop's on/off is the dock's one switch: `shell_desktop_cover` is an override in the file, no control on any page.)
     fn struct_fields() -> HashSet<String> {
         include_str!("settings.rs")
             .lines()
             .filter_map(|l| {
                 let rest = l.trim_start().strip_prefix("pub ")?;
                 let name = rest.split(':').next()?.trim();
-                let ours = name.starts_with("desktop_") || name == "shell_desktop_cover";
+                let ours = name.starts_with("desktop_");
                 (ours && rest.contains(':') && !rest.contains('(')).then(|| name.to_string())
             })
             .collect()
@@ -324,7 +235,7 @@ mod tests {
     fn every_desktop_setting_is_on_the_page_and_nothing_else() {
         let on_page: HashSet<String> = entries().iter().map(|e| e.field.to_string()).collect();
         let in_struct = struct_fields();
-        assert!(in_struct.len() >= 7, "the source scan found too little: {in_struct:?}");
+        assert!(in_struct.len() >= 6, "the source scan found too little: {in_struct:?}");
         let missing: Vec<_> = in_struct.difference(&on_page).collect();
         let unknown: Vec<_> = on_page.difference(&in_struct).collect();
         assert!(missing.is_empty(), "settings with no place on the Masaüstü page: {missing:?}");
@@ -349,7 +260,7 @@ mod tests {
         let g = grouped(&entries());
         assert_eq!(g.iter().map(|(s, _)| *s).collect::<Vec<_>>(), Section::ALL.to_vec());
         let fields = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
-        assert_eq!(fields(Section::General), ["shell_desktop_cover", "desktop_show_icons"]);
+        assert_eq!(fields(Section::General), ["desktop_show_icons"]);
         assert_eq!(
             fields(Section::Icons),
             ["desktop_icon_this_pc", "desktop_icon_user_files", "desktop_icon_network", "desktop_icon_recycle_bin", "desktop_icon_control_panel"]
@@ -362,7 +273,7 @@ mod tests {
         for e in entries() {
             let Some(kind) = e.kind else { continue };
             seen.push(kind);
-            let Control::Choice(get, set) = e.control else { panic!("{} is not a choice", e.field) };
+            let Control::Choice(get, set) = e.control;
             let mut s = Settings::default();
             assert_eq!(get(&s), IconChoice::Follow, "{}: the default follows Windows", e.field);
             set(&mut s, IconChoice::Show);
@@ -384,10 +295,6 @@ mod tests {
         for e in entries() {
             let mut s = Settings::default();
             match e.control {
-                Control::Switch(get, set) => {
-                    let flipped = !get(&s);
-                    set(&mut s, flipped)
-                }
                 Control::Choice(_, set) => set(&mut s, IconChoice::Hide),
             }
             let after = serde_json::to_value(&s).unwrap();
@@ -402,11 +309,10 @@ mod tests {
     #[test]
     fn the_defaults_leave_the_desktop_as_it_is() {
         let d = Settings::default();
-        assert!(!d.shell_desktop_cover, "experimental: off until asked for");
+        assert!(!parts::runs(&d, parts::Part::Desktop), "experimental: off with the dock, which is off until asked for");
         for e in entries() {
-            if let Control::Choice(get, _) = e.control {
-                assert_eq!(get(&d), IconChoice::Follow, "{}", e.field);
-            }
+            let Control::Choice(get, _) = e.control;
+            assert_eq!(get(&d), IconChoice::Follow, "{}", e.field);
         }
         assert!(crate::shell::desktop::choices::from_settings(&d).is_default());
     }
@@ -427,38 +333,32 @@ mod tests {
     }
 
     #[test]
-    fn only_the_cover_switch_needs_the_dock_and_it_can_always_be_turned_off() {
-        let off = Settings { dock_enabled: false, ..Default::default() };
-        let on = Settings { dock_enabled: true, ..Default::default() };
+    fn the_desktop_has_no_switch_of_its_own_and_every_choice_is_a_dropdown_that_works_with_the_dock_off() {
+        // the on/off of the desktop is the dock's one switch (`dock/parts.rs`); what is left here are the desktop's own choices, saved
+        // before the desktop runs
         for e in entries() {
-            if e.field == "shell_desktop_cover" {
-                assert_eq!(e.needs, Needs::DockOnToTurnOn);
-                assert_eq!(e.state(&on), RowState::Live);
-                assert_eq!(e.state(&off), RowState::Inert);
-                let turned_on = Settings { shell_desktop_cover: true, ..Default::default() };
-                assert_eq!(e.state(&turned_on), RowState::OffOnly, "on while the dock is off: it must be possible to turn it off");
-            } else {
-                assert_eq!(e.state(&off), RowState::Live, "{} is only a setting: it is saved before the desktop is on", e.field);
-            }
+            assert!(matches!(e.control, Control::Choice(..)), "{} is not a choice", e.field);
+            assert_ne!(e.field, "shell_desktop_cover");
         }
+        // the desktop runs with the dock and stops with it
+        let on = Settings { dock_enabled: true, ..Default::default() };
+        assert!(parts::runs(&on, parts::Part::Desktop));
+        assert!(!parts::runs(&Settings { dock_enabled: false, ..on }, parts::Part::Desktop));
     }
 
     #[test]
-    fn the_experimental_one_says_so_and_every_text_has_its_english_pair() {
+    fn every_text_has_its_english_pair() {
         while_turkish(|| {
             let en: HashSet<&str> = crate::i18n_en::EN.iter().map(|(k, _)| *k).collect();
             let has = |text: &str| en.contains(text);
             for e in entries() {
-                if e.field.starts_with("shell_") {
-                    assert!(e.title.contains("(deneysel)"), "{} is experimental and must say so", e.field);
-                }
                 assert!(has(e.title), "no English for the title of {}", e.field);
                 assert!(has(e.desc), "no English for the description of {}", e.field);
             }
             for sec in Section::ALL {
                 assert!(has(sec.title()), "{sec:?}");
             }
-            for text in [intro(), whose_line(), layout_line(), kept_line(), inert_reason(), off_only_reason()] {
+            for text in [intro(), whose_line(), layout_line(), kept_line(), parts::desktop_comes_with_the_dock()] {
                 assert!(has(text), "{text}");
             }
             for (_, l) in choice_labels() {
@@ -479,15 +379,11 @@ mod tests {
     }
 
     #[test]
-    fn the_hints_of_a_dimmed_row_point_to_the_dock_page_and_not_to_the_top_of_this_one() {
+    fn the_page_says_the_desktop_comes_with_the_dock_and_where_its_switch_is() {
         while_turkish(|| {
-            for text in [inert_reason(), off_only_reason()] {
-                assert!(text.contains("Dock sayfasındaki Dock anahtarını"), "{text}");
-                assert!(!text.contains("sayfanın başındaki"), "the Dock switch is not at the top of THIS page: {text}");
-            }
-            // the cover switch is the only row that is ever dimmed on this page, and it uses these sentences
-            let dimmed: Vec<_> = entries().iter().filter(|e| e.needs.reason() != "").map(|e| e.field).collect();
-            assert_eq!(dimmed, ["shell_desktop_cover"]);
+            let line = parts::desktop_comes_with_the_dock();
+            assert!(line.contains("Dock'la birlikte gelir") && line.contains("Dock sayfasındaki Dock anahtarı"), "{line}");
+            assert!(!line.contains("sayfanın başındaki"), "the Dock switch is not at the top of THIS page: {line}");
         });
     }
 

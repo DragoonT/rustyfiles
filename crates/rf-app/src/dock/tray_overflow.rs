@@ -209,6 +209,7 @@ impl Render for OverflowView {
         tray_strip::report_rects(cx);
         let data = tray_strip::overflow_data(cx);
         let (hover, ring) = (look.pal.hover_fill().hsla(), look.accent);
+        let press_bg = look.pal.press_plate().hsla();
 
         let mut body = div().relative().size_full().opacity(frame.opacity).mt(px(frame.drop_px));
         if data.count == 0 {
@@ -247,6 +248,7 @@ impl Render for OverflowView {
                 .border_color(if self.cursor == Some(k) { ring } else { transparent_black() })
                 .cursor_pointer()
                 .when(data.hover == Some(k), |d| d.bg(hover))
+                .when(data.pressed == Some(k), |d| d.bg(press_bg))
                 .when(data.dragged == Some(k), |d| d.opacity(0.35))
                 .child(tray_strip::overflow_picture(k, ts::OVF_ICON, pal, cx));
             body = body.child(tray_strip::wire(cell, Source::Overflow(k)));

@@ -739,6 +739,70 @@ text on the Dock page is about every panel and the row is in the page's general 
   global that is not there). On: as the Start panel's, per frame one layout, one `set_options`, one region and the two views' render.
   The right island's width and the clock's tick are not held back.
 
+## Drag and drop in the Start panel
+
+The user: "ayrıca başlat penceresinde de drag drop olmalı". Nothing in the panel could be dragged. No new setting. NOT SEEN ON A SCREEN (no
+real mouse was available when it was written; the rules are tested, the gesture is not). Rules: `rf_win::dock::startdrag` (pure, tested);
+the view: `rf-app/src/dock/start_drag.rs` (a child of `start.rs`); the island's highlight: `drop_hint.rs`.
+
+* CLICK OR DRAG. A press on a pinned tile, a row of "Tümü" or a recommended entry is remembered. It becomes a drag when the pointer has
+  moved MORE than the system's drag distance (`SM_CXDRAG`/`SM_CYDRAG`, 4 px by default, divided by the window's scale) in either
+  direction; until then nothing was done and the click starts the app as before. The release after a drag is not a click
+  (`ClickGate`, forgotten at the next press).
+* THE MOUSE. GPUI holds the mouse for the window from the press on (`SetCapture`), so the moves and the release keep coming while the
+  pointer is outside the panel. They are heard with window-level capture-phase listeners in a `canvas` (the desktop's way), not with
+  element listeners. At rest: three closures that return at once and one empty canvas that remembers the pinned grid's bounds.
+* REORDER. A held pinned tile follows the pointer (a tile-sized ghost at the place it was grabbed); the other tiles stand at absolute
+  places that SLIDE to make room (`Slides`: the dock's own `magnify::ease_in_out`, 120 ms, from where each tile is drawn, at once with
+  animations off) while the tile is over a cell of the grid; the cell it would land in is marked quietly. Letting go over a cell puts the
+  pin at that slot (the pins between shift by one) and writes `start-pins.json` at once; the panel stays open. Onto itself, or anywhere in
+  the panel outside the grid: nothing changes. Pins of apps that are not installed (kept in the file, not shown) keep their places in the
+  file (`apply_move`). Slots are the cells of the page on the screen; moving a pin to another PAGE of the grid is not built, and the wheel
+  does not turn a page under a held tile.
+* ON THE DOCK. A pinned app or an app of "Tümü" let go over the dock's middle island is added to the dock's own pins
+  (`own_pins::pin_start_app`, on a worker thread: `ownpins::change` as the dock's menu uses it, the list seeded from the taskbar first if it
+  was not), at the END of the pinned part; a dock-pins shortcut copy is made in the dock's own folder, never over a file that is there. An app
+  already on the list (found by AppUserModelID, program or the program its pin starts: `PinFile::find`) is not added and nothing is said. The
+  panel closes. WHAT THE DOCK KEEPS: a packaged app is its AppUserModelID; a classic app is its Start-menu shortcut (read on the shell thread,
+  `pins::pinned_from_shortcut`), else the program the shell names for it. While the pointer is over the island the island shows the dock's
+  quiet highlight (`drop_hint`, the hover fill and a hairline over the glass, drawn under the icons: one `.children(...)` line in
+  `middle.rs`'s render; nothing at rest). "Over the island" is the layout's glass rectangle in screen px against the cursor, so a dock that
+  is thin or magnified at that moment is still judged by its full rest rectangle. NOT BUILT: dropping at a chosen place among the dock's icons.
+* OUT OF THE PANEL, AS A FILE (the existing `rf_win::dnd` drag source, run on the shell thread like the file list's, after a
+  `ReleaseCapture`). The effects allowed are COPY and LINK only (`dnd::drag_out_copy_only`): a target that honours the allowed effects (Explorer,
+  other programs' OLE targets) decides between the two. OUR OWN windows (the file list, the desktop, a folder tab) do not see the allowed
+  effects, they get the dropped paths and ask `dnd::default_transfer`, which moves on the same drive; so `drag_out_copy_only` also marks the
+  dragged paths (`dnd::mark_copy_only`, until 5 s after the drag's loop ends) and `default_transfer` copies a marked path whatever the
+  keys say. A recommended document is therefore never moved by a drop on our own windows either (an explicit "move" from a menu still
+  is the user's choice). A RECOMMENDED FILE is the real file, and the file drag starts the moment the press has moved. An APP is its Start-menu
+  shortcut (`startdrag::shortcut_of`: the `.lnk` in the all-users or the user's Programs folder whose file name, or the name the folder's
+  `desktop.ini` shows for it, is the app's name; the folders are walked once a minute with std only), and the drag carries a COPY of it made in
+  `%TEMP%\rustyfiles-start-drag\<unique>\`, so a target that moves by default (a same-drive drop in a program that ignores the allowed effects)
+  moves the copy and never takes the shortcut out of the Start menu (a move out of the all-users folder would also ask for administrator
+  rights); copies older than an hour are removed at the next drag. When the drag starts only the shortcut is LOOKED FOR (a worker thread,
+  a read); the copy is written, on a worker thread, when the pointer first leaves the panel, and the system's drag takes over the moment it
+  is ready (the pointer need not move again; the pointer already shows "allowed" while it is made). A reorder inside the panel writes nothing. A PACKAGED APP has no such file: it can go to the dock only, and the pointer
+  shows "not allowed" (`IDC_NO`) everywhere else; so does a classic app whose shortcut is not found by name. On the machine this was written
+  on, 188 of 220 classic apps (and none of 53 packaged) have a shortcut found; the other 32 are dock-only.
+* THE DOCK AFTER THE HAND-OVER. The way from the panel to the island runs over the desktop, so for a classic app the drag has already
+  become the system's by the time the pointer is over the island. The island is watched while the system's loop runs (every 50 ms, lit while
+  the pointer is over it) and a drop that ENDS over it adds the app to the dock's pins, but only when the top-level window under the pointer
+  is the island's own (`startdrag::is_island_window`, `WindowFromPoint`): the island's window takes the file drop as a copy and does nothing
+  with it, and where the island is thin or has a window region a point inside the rectangle may belong to another program, which then got
+  the shortcut and must not also get a pin. If the shell thread's job never answers, the state is freed anyway (and at the next opening). A drag that came back over the panel itself, or ended with no effect (Escape), does nothing and leaves the panel open;
+  one that was dropped somewhere closes the panel.
+* PUT BACK. Escape (and no other key does anything meanwhile), the right (or any other) mouse button, the left button found released
+  for three 50 ms looks in a row while no mouse event has been heard for 400 ms (a lost pointer; touch, pen and remote input send mouse
+  messages without setting the button the look reads, so events that keep coming decide, not the look. A finger held still for 400 ms
+  ends the drag), and the panel closing end the drag with nothing changed (the tiles
+  go back, the island's highlight goes off). The panel stays open during a drag.
+* WHAT THE TARGET DOES. rustyfiles' own file list and desktop take a dropped file as a file drop and ask `default_transfer`; for these
+  drags that is a copy (see above). The shortcut's COPY in the temp folder is a copy too, so a move of it would only move the copy.
+  Explorer's windows and other programs take COPY or LINK by the effects the drag allows.
+* COST. Off (nothing held): the three listeners and the grid's canvas per frame. A drag: a redraw per mouse move, a 50 ms look at the button,
+  for an app one directory walk of the two Start-menu folders (about 20 ms for 281 shortcuts, once a minute) on a worker thread, and, only
+  when it leaves the panel, a copy of one small file (about 2 ms) on a worker thread. The pin file is written once, on release, on a thread of its own as before.
+
 ## The control centre
 
 The network and volume glyphs of the right island open our own panel instead of Windows' quick settings. It is the same machinery as
@@ -1014,6 +1078,77 @@ the window's button if the program refuses the foreground); the x asks the windo
   screen `RUSTYFILES_PREVIEW_THUMB_ORIGIN=0` sends the client rectangles unchanged. The switcher's window (`shell/switcher/view.rs`) uses the
   same `ThumbSet` without an origin and may have the same offset if its window has the same frame: not changed here.
 
+## Feeling a click, and moving the icons by dragging them
+
+Two reports of the user: "docktaki geri bildirim az, tıkladım mı tıklamadım mı anlayamıyorum" (the dock says too little; I cannot tell
+whether I clicked) and "dockta simgelerin yerini değiştiremiyorum" (I cannot change the icons' places). Both are in the middle island
+(`middle.rs`); the rules are pure files with tests: `feedback.rs` and `reorder.rs`, and `rf_win::dock::pinorder` for the pin file.
+
+### What an icon does after a click (`feedback.rs`)
+
+The press itself (the icon drawn a little smaller and dimmer while the button is down: `PRESS_DIP`, `PRESS_DIM`) was there. After the
+release the icon answers by what the click did (`feedback::answer`, from `model::click_action` and whether a start is pending):
+
+| the app | answer | the icon |
+|---|---|---|
+| not running | start it | two soft bounces upwards (10 and 4 dock units, 780 ms, in place), and under it a mark that pulses (900 ms period, never dark) |
+| not running, a start pending | answered, NOT started a second time | one pulse (10 % bigger and back, 240 ms) |
+| running, not in front | bring its last window forward | the same single pulse |
+| in front | minimise | a dip (4 units down and back, 220 ms) |
+| a start that failed | | one shake (3 swings dying away, 360 ms), and a red mark under the icon for 1.6 s (all that is left with animations off) |
+
+The starting mark ends when the app's first window is in the task list (`MiddleIsland::apply` looks at it each time the items change),
+when the launch call fails (the icon shakes; the sentence is `shellless::start_failure_text`, the one the Start panel shows, and goes to the
+log, since the dock has no line to put text on), or after ten seconds (`feedback::start_state`: the window comes first, then a failure,
+then the clock). Feedback is kept under the app's identity (`feedback::key_of`): a pinned app keeps its pin's, so the mark finds the app
+again once it runs under another group key.
+
+Only the picture moves, as a child of the icon's cell: the cell, the running mark and the layout stay (bounces are vertical, a bounce is
+cut so that the icon never leaves the window). The window is also cut to a region (`hit.rs`: the glass and the boxes of the icons that
+stand out of it) and shows nothing outside it, so while a picture is raised, grown or moved away from its cell, its box
+(`feedback::posed_box`) joins the region; otherwise the top of a bounce of the magnified icon under the pointer, which stands above the
+glass, would be cut off flat. At rest nothing is looked up and no frame is asked for; a frame is asked for only while a
+motion or a pulsing mark is on. With animations off nothing moves and the starting mark is steady (one repaint at the time-out).
+A second click while an app is starting does not start it again (a user who sees nothing clicks twice).
+
+### The other buttons (`look::press_plate`)
+
+The search field, the network, volume, clock and bell buttons, the tray strip's cells and chevron and the cells of the hidden-icons panel
+show a plate while a button is held on them, stronger than the hover plate and than `pressed_fill` (white 24 % on dark glass, black 19 %
+on light). The buttons of the right island and the search field use the toolkit's `active` style; the tray's cells read the strip's own
+press (`TrayState::press`, until it turns into a drag, which has its own look). The Start logo has its own plate and spring.
+
+### Moving the icons by dragging (`reorder.rs`)
+
+A press on an icon that moves more than 5 dock units sideways picks the icon up; one that does not move stays a click (and then gets all
+of the above). The icon follows the pointer along the dock (a little bigger, drawn over the others), the others slide into the room
+(150 ms), and on release the icon stays where it was dropped. The magnification is held (the existing `frozen` state), the hover preview and
+the app menu do not open meanwhile, and the click that ends the drag is not a click.
+
+* a pinned app goes among the pinned apps: the dock's own pin list is rewritten (`PinFile::apply_order`: the places the shown pins held
+  are filled again in the new order, a pin whose program is gone keeps its place; the first change seeds the list from the taskbar as pin
+  and unpin do). The drop is told to the file BY POSITION among the shown pins, not by looking the apps up again, so two pins that start
+  one program (two profiles of one browser) move like any others; the island also sends the names of the pins it showed, and a file whose
+  shown pins are not those (it changed meanwhile) is left alone;
+* a running app that is not pinned goes among the running ones: the island's remembered order (`seen_order`) is rewritten. That order
+  lives in memory for the session, as it always did: nothing is written for it, and it is first-seen order again after a restart;
+* a running app dropped among the pinned ones is pinned there (if it has a way to be started again; one that has none stays among the
+  running ones);
+* the separator, the Recycle Bin and the Downloads folder keep their places and nothing goes behind them;
+* Escape, the right button, or the button let go well outside the dock (more than 40 units above or below the glass) puts everything
+  back and changes nothing; nothing is ever unpinned by dragging (unpinning stays in the icon's menu);
+* the model is changed at once and the island rebuilt from the last task list, so nothing flickers back while the file is written; if the
+  write fails the island reads the list again and the icons go back.
+
+Escape and a lost release cannot be heard as events (the dock's windows are never activated), so while an icon is in the hand a 40 ms look
+reads the key and the buttons (`rf_win::dock::dragkeys`); a button seen up twice in a row ends the drag as a cancel. A drag also ends
+(as a cancel) when the items change under it. Known limits: Escape is only read, not taken, so the program in front of the dock gets it
+too (taking it needs a keyboard hook like the screen snip's, not built for this); and a touch or pen press promoted to the mouse may not
+show as a button in that look and is cancelled after about 80 ms (the tray strip's drag reads the buttons the same way). When the
+icon is let go or put back away from the dock, the dock is told that the pointer left (the toolkit's leave event is held back while the
+pointer is captured), so the bell does not stay grown. The right button that puts an icon back does not also open a menu or Task Manager
+when it comes up (`reorder::RightGuard`).
+
 ## The tray strip and its overflow panel (shell plan increment D3)
 
 The other programs' notification icons in the right island: a row of small pictures to the LEFT of the island's own symbols, a chevron
@@ -1101,10 +1236,52 @@ the overflow panel's cells and a tip fall for that many icons (arithmetic only; 
 The dock has a page of its own in Settings, right after "Görünüm" (`dock_page.rs`). It used to be a block at the end of "Gelişmiş" called
 "Dock (deneysel)". One list of entries (`dock_page::entries`) draws the page and feeds the Settings search. Sections: GENEL (the dock,
 keep-out, size, magnification), SOL ADA (Start, recommended, weather city), ORTA ADA (previews, icon menu, thin while a window is maximised), SAĞ ADA (control centre,
-calendar, notifications), GÖREV ÇUBUĞU (hiding Windows' taskbar; the desktop cover switch is on the "Masaüstü" page, `desktop.md`), DENEYSEL
-(Windows key, Alt+Tab, tray host). Both pages carry a "Deneysel" pill in the page list and "(deneysel)" in their title. While the
-dock is off every control but the dock switch is dimmed with a line that says why; a shell switch that is still on can be turned off
-(it never needs the dock to be turned off). The shell switches reach the running dock at once, like the others.
+calendar, notifications). Both pages carry a "Deneysel" pill in the page list and "(deneysel)" in their title. While the
+dock is off every control but the dock switch is dimmed with a line that says why.
+
+### The one switch (`dock/parts.rs`, `dock/parts_status.rs`)
+
+The dock is ONE switch, "rustyfiles Dock'unu kullan (deneysel)" (`dock_enabled`), and it brings everything the dock needs: the dock with
+Start, search and the control centre; our desktop (`shell_desktop_cover`); the programs' tray icons in the dock (`shell_tray_host`);
+Windows' taskbar hidden while it runs and back when it stops (`shell_hide_taskbar`); the Windows key and Alt+Tab opening ours
+(`shell_win_key`, `shell_own_switcher`). Reason: the user, after a day of trying the parts one by one, "when one of them is missing it
+does not work properly in the end" (with the taskbar hidden and no tray host there are no tray icons; with the dock and Windows'
+taskbar two bars; without the keyboard layer the Windows key opens Windows' Start under the hidden taskbar; without our desktop the
+dock floats over Explorer's).
+
+* THE RULE (`parts::runs`): a part runs when `dock_enabled` is on AND its own value is not false. The five own values stay in the file
+  under their old names as troubleshooting overrides; the page shows no switch for them (a test keeps it so) and their DEFAULT is true.
+  `Keys::shell` in `control.rs` is `parts::run_flags`, so the one switch reaches the running dock at once.
+* OFF: none of them run. The switch going off ends the dock process (`shutdown`: the keyboard hook first of all, a few milliseconds,
+  then the taskbar and the work area, then the tray window and the desktop). For a part whose own value changes while the dock runs
+  (several at once with "Hepsini aç") `apply_reloaded` hides the taskbar LAST, after the tray window and the hook are in place, and
+  shows it FIRST (`taskbar_hide::goes_first`), the mirror of the start-up order.
+* FILES FROM BEFORE: the old defaults were false, but a file only holds `= false` when it was written whole; since the settings are
+  saved key by key (`settings_merge.rs`) an older file that had the dock turned on later holds `dock_enabled = true` and no part at all.
+  So the file cannot tell "chosen" from "old default", and nobody is given a keyboard hook or a hidden taskbar by an update: a false
+  is held off, and so is a part that a file with the dock on does not name while the file has no `dock_one_switch` marker
+  (`Settings::migrate`, fed by `parse_lenient`; the first save writes the marker together with the held values, so the hold outlives the
+  marker). While the switch is on the page shows ONE line under the switch naming the parts the file holds off (`parts::held_off_line`)
+  with the button "Hepsini aç" (`parts::clear_overrides`, which sets every own value to true and does not touch the dock switch). A file
+  with the dock off, or a new install, gives every part when the dock is turned on. A part's own value that cannot be read is a false
+  too (a typo must not install a keyboard hook); a wrong `dock_enabled` is off.
+* UNDER THE SWITCH the page prints the warnings the risky parts carried (the keyboard hook looks at the Windows key and Alt+Tab and,
+  while the switcher is open, Tab, the arrows, Enter, Esc and the Alt release, and sends one invisible key that does nothing; Win+E and
+  Win+D when Explorer is not the shell; the taskbar comes back when the dock stops, no Windows taskbar setting is changed, and the
+  guard program brings it back if the dock dies), the "never run on a PC" line (red, until the real path has been run; remove
+  `parts::untried_line` then) and, in red, a part that could not
+  start (the guard missing or not confirming or lost, the record not written, the hook refused, the tray window or a part not started),
+  each with "the other parts keep running". The dock process writes the faults it knows to `dock-parts.txt` in the settings folder
+  (words only, every 3 s, only when the set changed; no fault, no file; the writes are numbered and an overtaken one writes nothing, and
+  the file is removed when the dock ends); the page reads it on a background thread every 2 s while it is drawn (and only when a dock
+  answers on its pipe, since a dead dock leaves its last word behind). Not reported: a hook that was installed and is lost later (the
+  heartbeat handles it, the page does not say so), and the desktop only when its loader thread cannot start. The taskbar's line during
+  the guard's retry pauses (5, 15, 60 s) keeps naming the real cause (not found, not confirmed), not "lost" (`Controller::guard_fault`).
+* The Masaüstü page keeps the desktop's own choices (icons shown, the five system icons), has no on/off of its own and says in one line
+  that the desktop comes with the dock. The Settings search finds the one switch by the old names (its description names the
+  desktop, the taskbar, the tray icons, the Windows key and Alt+Tab).
+* A dock started by hand (`--dock`) with `dock_enabled` false in its settings file runs none of the parts. A TEST COPY therefore needs
+  `dock_enabled = true` in its own settings file.
 
 
 * **rustyfiles takvimini kullan** / Use rustyfiles' calendar. On by default. The clock opens the calendar panel; off: it sends Win+N
@@ -1116,8 +1293,9 @@ dock is off every control but the dock switch is dimmed with a line that says wh
 * **rustyfiles denetim merkezini kullan** / Use the rustyfiles control centre. On by default. The network and volume symbols open the
   control centre; off: they send Win+A (Windows' quick settings), as in version 1. (The symbols themselves keep showing the real state
   either way.)
-* **Dock'u göster (deneysel)** / Show the dock (experimental). Off by default. Switching it on starts the process now and at every
-  start of rustyfiles; switching it off stops it. The dock keeps running when rustyfiles' window closes: it is your taskbar.
+* **rustyfiles Dock'unu kullan (deneysel)** / Use the rustyfiles Dock (experimental). Off by default. Switching it on starts the process
+  now and at every start of rustyfiles, with all its parts (see "The one switch"); switching it off stops them and the process. The
+  dock keeps running when rustyfiles' window closes: it is your taskbar.
 * **Pencereler dock'un altına girmesin** / Keep windows from going under the dock. On by default. The dock registers as an
   application desktop toolbar at the bottom of the primary monitor (the middle island's height plus the margins), so maximised
   windows stop above it, and unregisters on exit. Off: it only floats.
@@ -1160,8 +1338,8 @@ dock is off every control but the dock switch is dimmed with a line that says wh
 
 The dock process is told to read the settings file again when any of these changes: the four switches of the panels (`dock_own_start`,
 `dock_own_control_centre`, `dock_own_calendar`, `dock_own_notifications`), the two switches of the icons' menu and previews
-(`dock_app_menu`, `dock_hover_previews`), the thin dock's switch (`dock_thin_when_maximized`), the Start panel's recommended section (`dock_start_recommended`), the keep-out switch, the city, the size, the magnification, the animations setting, the four HyperGlass sliders and the shell's five switches
-(`control::Keys`). The process's views read the two panel switches from the settings it loaded last, at every click.
+(`dock_app_menu`, `dock_hover_previews`), the thin dock's switch (`dock_thin_when_maximized`), the Start panel's recommended section (`dock_start_recommended`), the keep-out switch, the city, the size, the magnification, the animations setting, the four HyperGlass sliders and which of the five parts run
+(`control::Keys`: the one switch and the overrides, see "The one switch"). The process's views read the two panel switches from the settings it loaded last, at every click.
 
 ## The process
 

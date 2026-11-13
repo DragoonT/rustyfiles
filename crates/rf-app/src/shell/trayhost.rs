@@ -51,7 +51,8 @@ const STALL_AFTER_SECS: u64 = 15;
 
 /// Whether the settings ask for the tray host.
 pub fn wanted(s: &Settings) -> bool {
-    s.shell_tray_host
+    // (the dock switch and the part's own value: `dock::parts`)
+    crate::dock::parts::runs(s, crate::dock::parts::Part::TrayHost)
 }
 
 /// Whether the value of [`ENV_LOG_ONLY`] switches log-only mode on: exactly "1".
@@ -147,6 +148,7 @@ pub fn stop(cx: &mut App) {
     if !cx.has_global::<TrayGlobal>() {
         return;
     }
+    crate::dock::parts_status::note(crate::dock::parts::Part::TrayHost, None);
     let TrayGlobal { feed, mut host, view, log_only, quit } = cx.remove_global::<TrayGlobal>();
     drop(quit);
     // the strip stops reading the model, and is told it is gone, before the host's window goes
@@ -181,9 +183,11 @@ fn start(cx: &mut App) {
         Ok(h) => h,
         Err(e) => {
             log::warn!("tray host: could not start: {e}");
+            crate::dock::parts_status::note(crate::dock::parts::Part::TrayHost, Some(crate::dock::parts::Why::NotStarted));
             return;
         }
     };
+    crate::dock::parts_status::note(crate::dock::parts::Part::TrayHost, None);
     let view = host.view();
     let feed = tray_feed::attach(view.clone(), host.events().clone());
     let (quit, quit_rx) = crossbeam_channel::bounded::<()>(0);
@@ -229,13 +233,14 @@ mod tests {
     use rf_win::tray_wire::rect::RectPacking;
 
     #[test]
-    fn the_setting_is_off_by_default_and_round_trips() {
-        assert!(!wanted(&Settings::default()), "experimental: off until asked for");
+    fn the_tray_host_comes_with_the_dock_switch_unless_its_own_value_holds_it_off() {
+        assert!(!wanted(&Settings::default()), "the dock is off: no tray host");
         assert!(!wanted(&Settings::parse_lenient_pub("theme = \"dark\"\n").unwrap()));
-        let on = Settings { shell_tray_host: true, ..Default::default() };
+        let on = Settings { dock_enabled: true, ..Default::default() };
         let text = toml::to_string(&on).unwrap();
         assert!(wanted(&Settings::parse_lenient_pub(&text).unwrap()));
-        assert!(!wanted(&Settings::parse_lenient_pub("shell_tray_host = \"evet\"\n").unwrap()), "a wrong value falls back to off");
+        assert!(!wanted(&Settings::parse_lenient_pub("dock_enabled = true\nshell_tray_host = false\n").unwrap()), "a false in the file holds it off");
+        assert!(!wanted(&Settings::parse_lenient_pub("dock_enabled = true\nshell_tray_host = \"evet\"\n").unwrap()), "a wrong value holds the part off");
     }
 
     #[test]
@@ -276,7 +281,7 @@ mod tests {
         assert_eq!(decide(false, true), Action::Stop);
         assert_eq!(decide(true, false), Action::Start);
         assert_eq!(decide(true, true), Action::Nothing);
-        // and the setting is off unless the file says so
+        // and without the dock switch it is off
         assert!(!wanted(&Settings::default()));
     }
 

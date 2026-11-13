@@ -29,7 +29,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rf_shellguard::statefile::{self, ShellStateFile};
 use rf_shellguard::tbctl::{Controller, HideWorld, Status};
-use rf_shellguard::tbmodel::{LiveWindow, MonitorGeom, Target};
+use rf_shellguard::tbmodel::{LiveWindow, MonitorGeom, Refusal, Target};
 use crate::dock::layout::Rect;
 use rf_shellguard::win::tbwin;
 use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, ERROR_SUCCESS, GetLastError, HANDLE, HWND, LPARAM, LRESULT, RECT, SetLastError, WPARAM};
@@ -609,6 +609,31 @@ fn run_thread(ctx: Box<Ctx>, tx: Sender<Result<isize, String>>) {
     }
 }
 
+/// A fault that keeps a WANTED hide from being in force: something the user can be told about and may fix. The states that are only
+/// the situation ("Explorer does not own the shell window", "Explorer has no visible taskbar right now") are not faults.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fault {
+    /// `rustyfiles-shellguard.exe` was not found next to the program.
+    GuardMissing,
+    /// The guard was started and did not confirm in time.
+    GuardNotConfirmed,
+    /// The guard confirmed and then ended.
+    GuardLost,
+    /// The state file (the record that lets the guard undo the hide) could not be written, so nothing may be hidden.
+    RecordNotSaved,
+}
+
+/// The fault in a status, or `None` (hidden, off, or waiting for a reason that is not a fault).
+pub fn fault_of(status: Status) -> Option<Fault> {
+    match status {
+        Status::Waiting(Refusal::GuardMissing) => Some(Fault::GuardMissing),
+        Status::Waiting(Refusal::GuardNotConfirmed) => Some(Fault::GuardNotConfirmed),
+        Status::Waiting(Refusal::GuardLost) => Some(Fault::GuardLost),
+        Status::Waiting(Refusal::RecordNotSaved) => Some(Fault::RecordNotSaved),
+        Status::Waiting(Refusal::SettingOff | Refusal::NoExplorerShell | Refusal::NothingToHide) | Status::Off | Status::Hidden(_) => None,
+    }
+}
+
 /// The running feature. Dropping it stops it (the taskbar is shown again).
 pub struct TaskbarHider {
     tx: Sender<Cmd>,
@@ -668,6 +693,11 @@ impl TaskbarHider {
     /// What the last look found.
     pub fn status(&self) -> Status {
         self.status.lock().map_or(Status::Off, |s| *s)
+    }
+
+    /// The fault that keeps the wanted hide from being in force, if that is what the last look found (see [`fault_of`]).
+    pub fn fault(&self) -> Option<Fault> {
+        fault_of(self.status())
     }
 
     /// Shows the taskbar again, ends the thread and waits for it for at most `wait`. After a timeout the thread is left to finish by
@@ -792,6 +822,18 @@ mod tests {
         std::fs::write(&p, r#"{"version":1,"hidden_taskbar":"???"}"#).expect("write");
         assert!(stale_record_present(&dir), "garbled but there");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_a_fault_is_a_fault() {
+        assert_eq!(fault_of(Status::Waiting(Refusal::GuardMissing)), Some(Fault::GuardMissing));
+        assert_eq!(fault_of(Status::Waiting(Refusal::GuardNotConfirmed)), Some(Fault::GuardNotConfirmed));
+        assert_eq!(fault_of(Status::Waiting(Refusal::GuardLost)), Some(Fault::GuardLost));
+        assert_eq!(fault_of(Status::Waiting(Refusal::RecordNotSaved)), Some(Fault::RecordNotSaved));
+        // the situation is not a fault: no Explorer taskbar to hide, none visible right now, the setting off, hidden, off
+        for s in [Status::Off, Status::Hidden(2), Status::Waiting(Refusal::NoExplorerShell), Status::Waiting(Refusal::NothingToHide), Status::Waiting(Refusal::SettingOff)] {
+            assert_eq!(fault_of(s), None, "{s:?}");
+        }
     }
 
     #[test]

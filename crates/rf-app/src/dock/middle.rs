@@ -17,6 +17,10 @@
 //! for the system per frame; the icons are never loaded again for it.
 //!
 //! Left click: start the app / bring its last used window forward / minimise it when it is in front. Middle click: another instance.
+//! A click is answered by the icon (`feedback.rs`): a start bounces it and shows a pulsing mark under it until the app has a window, a
+//! window brought forward gives it a pulse, a minimise a dip, a failed start a shake. Pressing an icon and moving sideways picks it up
+//! (`reorder.rs`): it follows the pointer, the others make room, and on release the pin list (a pinned app) or the island's remembered
+//! order (a running one) is rewritten; a running app dropped among the pinned ones is pinned there.
 //! Right click on an icon: the dock's own app menu (`app_menu.rs`); on the empty glass between and around the icons: Windows' Task Manager
 //! (`empty.rs`). The pointer resting on a running app's icon: a preview of its windows
 //! (`hover_preview.rs`). Both are anchored on the icon's centre AT REST (it does not move while the icons grow). The pins are the
@@ -36,7 +40,8 @@ use rf_win::tasklist::{self, Task, TaskWatch};
 
 use super::backdrop::IslandGlass;
 use super::host::{self, Kind};
-use super::{app_menu, hover_preview};
+use super::reorder::{self, Landing};
+use super::{app_menu, feedback, hover_preview};
 use super::icon_levels::{self, LevelStore};
 use super::icons::{self, IconCache};
 use super::look::{self, Env};
@@ -106,6 +111,30 @@ pub struct MiddleIsland {
     /// "empty glass" or "an icon" by.
     last_glass: [f32; 4],
     last_icons: Vec<super::empty::IconBox>,
+    /// What the icons do after a click: the bounce of a start with its pulsing mark, the pulse of a window brought forward, the dip of a
+    /// minimise, the shake of a failed start (`feedback.rs`).
+    feedback: feedback::Feedback,
+    /// Per item: the identity its feedback is kept under (`feedback::key_of`; empty for the separator and the places). Worked out when
+    /// the items change.
+    feel_keys: Vec<String>,
+    /// The task list as the last refresh saw it, with the window in front: what the island is rebuilt from at once when a drop changes
+    /// the order.
+    last_groups: Vec<(String, Vec<Task>)>,
+    last_foreground: isize,
+    /// The item a button went down on and where (window units): it becomes a drag when the pointer moves sideways far enough.
+    press_at: Option<(usize, f32, f32)>,
+    /// The drag in progress (`reorder.rs`).
+    drag: Option<reorder::Drag>,
+    /// After a drop: the slides that carry the icons into their final slots (by the new item index), until when (ms), and over how long.
+    settle: Option<(Vec<reorder::Slide>, u64, u32)>,
+    /// The mouse-up that ends a drag also ends a "click" on the icon it was let go over: that click is not one.
+    swallow_click: bool,
+    /// The right button that cancelled a drag is not a request for a menu (see `reorder::RightGuard`).
+    right: reorder::RightGuard,
+    /// Every slot as it was drawn last (x, width; the window's units): what a drag measures the pointer against.
+    last_slots: Vec<(f32, f32)>,
+    /// The look at Escape and the buttons while an icon is in the hand.
+    drag_watch: Option<gpui_kit::Task<()>>,
     _watch: Option<TaskWatch>,
 }
 
@@ -175,12 +204,24 @@ impl MiddleIsland {
             rest_items: Vec::new(),
             last_glass: [0.0; 4],
             last_icons: Vec::new(),
+            feedback: feedback::Feedback::default(),
+            feel_keys: Vec::new(),
+            last_groups: Vec::new(),
+            last_foreground: 0,
+            press_at: None,
+            drag: None,
+            settle: None,
+            swallow_click: false,
+            right: reorder::RightGuard::default(),
+            last_slots: Vec::new(),
+            drag_watch: None,
             _watch: watch,
         };
         // (the app menu tells it when the dock's own pin list changed)
         super::own_pins::register(cx.entity().downgrade(), cx);
         // until the first refresh is done the dock shows what it always has: the separator and the two places
         me.items = model::merge(&[], Vec::new(), 0);
+        me.feel_keys = feel_keys(&me.items);
         me.slots = model::slots(&me.items);
         me.icon_srcs = icon_sources(&me.items);
         me.reported = me.width();
@@ -225,6 +266,9 @@ impl MiddleIsland {
     }
 
     fn apply(&mut self, groups: Vec<(String, Vec<Task>)>, foreground: isize, cx: &mut Context<Self>) {
+        // (kept so that a drop can rebuild the island at once, see `commit_drop`)
+        self.last_groups.clone_from(&groups);
+        self.last_foreground = foreground;
         // (the task list comes in Z order; the island's order must not follow the clicks)
         let groups = model::keep_order(&mut self.seen_order, groups);
         let items = model::merge(&self.pins, groups, foreground);
@@ -240,7 +284,28 @@ impl MiddleIsland {
             }
             return;
         }
+        // the same apps in the same places (another window came to the front, a pin was read again from its own copy): an icon in the hand,
+        // the slides after a drop and a press stay as they are; apps that came or went change the indices they go by
+        let same_shape = items.len() == self.items.len() && items.iter().zip(&self.items).all(|(a, b)| item_name(a) == item_name(b));
         self.items = items;
+        if !same_shape {
+            // (an icon in the hand is put down where it was)
+            if self.drag.take().is_some() {
+                self.drag_watch = None;
+                self.frozen = None;
+            }
+            self.settle = None;
+            self.press_at = None;
+        }
+        self.feel_keys = feel_keys(&self.items);
+        // an app that has a window now is no longer starting
+        if self.feedback.has_pending_start() {
+            for (item, key) in self.items.iter().zip(&self.feel_keys) {
+                if matches!(item, DockItem::App(a) if a.running()) {
+                    self.feedback.window_seen(key);
+                }
+            }
+        }
         self.slots = model::slots(&self.items);
         self.icon_srcs = icon_sources(&self.items);
         self.prune_icons(cx);
@@ -361,6 +426,10 @@ impl MiddleIsland {
     }
 
     fn pointer_left(&mut self, cx: &mut Context<Self>) {
+        // (an icon in the hand keeps the bell where it was held: the pointer is captured, and the drag ends with the button)
+        if self.drag.is_some() {
+            return;
+        }
         self.frozen = None;
         if self.presence.is_in() {
             let now = self.now_ms();
@@ -376,7 +445,23 @@ impl MiddleIsland {
         self.frozen = self.pointer_x.map(|x| (x, self.presence.value(now)));
     }
 
+    /// The left button came up at `at` (the window's logical px; also when that is outside the window, where the pointer was captured). An
+    /// icon in the hand is first moved to where the button came up, so that a release well outside the dock (the moves out there are not
+    /// delivered) puts it back instead of dropping it at the last place it was seen.
+    fn released_at(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let k = super::look::dock_size(cx);
+        let now = self.now_ms();
+        if let Some(d) = self.drag.as_mut() {
+            d.moved(f32::from(at.x) / k, f32::from(at.y) / k, self.last_glass, &self.last_slots, now);
+        }
+        self.released(cx);
+    }
+
     fn released(&mut self, cx: &mut Context<Self>) {
+        self.press_at = None;
+        if self.drag.is_some() {
+            self.end_drag(true, cx);
+        }
         let was_pressed = self.pressed_ix.take().is_some();
         if self.frozen.take().is_some() || was_pressed {
             cx.notify();
@@ -384,7 +469,11 @@ impl MiddleIsland {
     }
 
     /// A button went down on the icon `ix`: it dips until the button is up (`released`).
-    fn item_pressed(&mut self, ix: usize, cx: &mut Context<Self>) {
+    fn item_pressed(&mut self, ix: usize, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let k = super::look::dock_size(cx);
+        self.press_at = Some((ix, f32::from(at.x) / k, f32::from(at.y) / k));
+        self.swallow_click = false;
+        self.right.press(false);
         if self.pressed_ix != Some(ix) {
             self.pressed_ix = Some(ix);
             cx.notify();
@@ -425,6 +514,10 @@ impl MiddleIsland {
 
     /// The pointer came onto item `ix` (`on`) or left it: a running app's icon is what a preview belongs to.
     fn item_hover(&mut self, ix: usize, on: bool, cx: &mut Context<Self>) {
+        // (no preview opens over an icon in the hand)
+        if self.drag.is_some() {
+            return;
+        }
         if on {
             self.hover_ix = Some(ix);
             let info = match (self.items.get(ix), self.icon_anchor_x(ix, cx)) {
@@ -443,6 +536,10 @@ impl MiddleIsland {
 
     /// A right click on item `ix`: the app menu, for an app.
     fn right_click(&mut self, ix: usize, cx: &mut Context<Self>) {
+        // (the right button that put an icon back is not a request for its menu; the row's handler, which comes next, uses the flag up)
+        if self.right.icon_up() || self.drag.is_some() {
+            return;
+        }
         if !cx.global::<Settings>().dock_app_menu {
             return;
         }
@@ -453,6 +550,9 @@ impl MiddleIsland {
     /// A right click anywhere in the dock's window at `at` (logical px of the window): on the empty glass - not on an icon, whose own
     /// click is the app menu - it starts Task Manager.
     fn row_right_click(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.right.row_up() || self.drag.is_some() {
+            return;
+        }
         let k = super::look::dock_size(cx);
         let point = (f32::from(at.x) / k, f32::from(at.y) / k);
         // the running mark under an icon is outside the icon's element (so the icon's own handler did not hear this click) but it is
@@ -465,12 +565,202 @@ impl MiddleIsland {
     }
 
     fn click(&mut self, ix: usize, cx: &mut Context<Self>) {
+        // (the button that let an icon go is not a click on it)
+        if std::mem::take(&mut self.swallow_click) {
+            return;
+        }
         // (a click answers the question a preview asks: it goes)
         hover_preview::clicked(cx);
-        match self.items.get(ix) {
-            Some(DockItem::App(app)) => super::actions::click_app(app, rf_win::dock::foreground_root()),
-            Some(DockItem::Place(p)) => super::actions::open_place(*p),
+        match self.items.get(ix).cloned() {
+            Some(DockItem::App(app)) => self.click_app(ix, app, cx),
+            Some(DockItem::Place(p)) => super::actions::open_place(p),
             _ => {}
+        }
+    }
+
+    /// A click on an app: what it does is `model::click_action`'s, how the icon answers is `feedback::answer`'s.
+    fn click_app(&mut self, ix: usize, app: rf_win::dock::DockApp, cx: &mut Context<Self>) {
+        let foreground = rf_win::dock::foreground_root();
+        let action = model::click_action(&app.windows, foreground);
+        // (an app that is not running and cannot be started: nothing to do, as before)
+        if action == rf_win::dock::ClickAction::Start && app.launch.is_none() {
+            return;
+        }
+        let key = self.feel_keys.get(ix).cloned().unwrap_or_default();
+        let (now, animate) = (self.now_ms(), crate::settings::animations());
+        let answer = feedback::answer(action, self.feedback.start_pending(&key, now));
+        self.feedback.click(&key, answer, now, animate);
+        match answer {
+            feedback::Answer::Start => {
+                // the start tells how it went from its own thread; a failure shakes the icon
+                let (tx, rx) = futures::channel::oneshot::channel::<Option<String>>();
+                super::actions::click_app_reporting(&app, foreground, move |result| {
+                    let _ = tx.send(result);
+                });
+                let failed = key.clone();
+                cx.spawn(async move |this, cx| {
+                    if let Ok(Some(text)) = rx.await {
+                        let _ = this.update(cx, |me, cx| me.start_failed(&failed, &text, cx));
+                    }
+                })
+                .detach();
+                if !animate {
+                    // (no frames are drawn for a steady mark: one repaint when the time is up takes it away)
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(Duration::from_millis(feedback::START_TIMEOUT_MS + 100)).await;
+                        let _ = this.update(cx, |_, cx| cx.notify());
+                    })
+                    .detach();
+                }
+            }
+            feedback::Answer::StillStarting => {}
+            feedback::Answer::Raise | feedback::Answer::Minimize => super::actions::click_app(&app, foreground),
+        }
+        cx.notify();
+    }
+
+    /// The start of the app with this feedback identity failed: `text` is what the Start panel would say (`shellless`). The icon shakes.
+    fn start_failed(&mut self, key: &str, text: &str, cx: &mut Context<Self>) {
+        log::info!("dock: the start did not work: {text}");
+        let (now, animate) = (self.now_ms(), crate::settings::animations());
+        self.feedback.failed(key, now, animate);
+        // (the red mark is steady: without frames, one repaint when its time is up takes it away)
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(feedback::FAILED_HOLD_MS + 100)).await;
+            let _ = this.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
+        cx.notify();
+    }
+
+    // ---------------------------------------------------------------- dragging an icon to another place
+
+    /// A mouse move while an icon may be picked up or is in the hand. True when the move was the drag's (the bell then stays where it was
+    /// held).
+    fn drag_pointer(&mut self, ev: &MouseMoveEvent, cx: &mut Context<Self>) -> bool {
+        let k = super::look::dock_size(cx);
+        let (x, y) = (f32::from(ev.position.x) / k, f32::from(ev.position.y) / k);
+        let left = ev.pressed_button == Some(MouseButton::Left);
+        if self.drag.is_none() {
+            let Some((ix, x0, _)) = self.press_at else { return false };
+            if !left {
+                self.press_at = None;
+                return false;
+            }
+            if reorder::press_kind(x - x0) != reorder::Press::Drag {
+                return false;
+            }
+            self.begin_drag(ix, x, cx);
+            if self.drag.is_none() {
+                return false;
+            }
+        }
+        if !left {
+            // the release happened where this view did not see it
+            self.end_drag(false, cx);
+            return true;
+        }
+        let now = self.now_ms();
+        // (the bell is held, but where the pointer is stays known: when the icon is let go the bell goes on from there)
+        self.pointer_x = Some((f32::from(ev.position.x) - host::insets(Kind::Middle, cx).margins[0]) / k);
+        if let Some(d) = self.drag.as_mut()
+            && d.moved(x, y, self.last_glass, &self.last_slots, now)
+        {
+            cx.notify();
+        }
+        true
+    }
+
+    /// The icon `ix` is picked up with the pointer at `x`. An icon that cannot be moved (a place) stays a press.
+    fn begin_drag(&mut self, ix: usize, x: f32, cx: &mut Context<Self>) {
+        let dur = if crate::settings::animations() { reorder::SLIDE_MS } else { 0 };
+        let Some(drag) = reorder::Drag::begin(reorder::kinds(&self.items), ix, x, &self.last_slots, dur) else { return };
+        self.drag = Some(drag);
+        self.settle = None;
+        self.swallow_click = true;
+        self.pressed_ix = None;
+        // (no preview, and none to come)
+        self.hover_ix = None;
+        hover_preview::icon_hover(None, cx);
+        self.watch_drag(cx);
+        cx.notify();
+    }
+
+    /// While an icon is in the hand, Escape and a button that is no longer down are looked for every 40 ms: the dock's windows are never
+    /// activated, so no key reaches them, and a release that happened where the view did not see it must not leave the icon in the hand.
+    /// A button seen up twice in a row is the lost release (once may be the release whose message is just in the queue).
+    fn watch_drag(&mut self, cx: &mut Context<Self>) {
+        self.drag_watch = Some(cx.spawn(async move |this, cx| {
+            let mut up = 0u32;
+            loop {
+                cx.background_executor().timer(Duration::from_millis(40)).await;
+                let go = this.update(cx, |me, cx| {
+                    if me.drag.is_none() {
+                        return false;
+                    }
+                    up = if rf_win::dock::panel::any_button_down() { 0 } else { up + 1 };
+                    if rf_win::dock::dragkeys::escape_down() || up >= 2 {
+                        me.end_drag(false, cx);
+                        return false;
+                    }
+                    true
+                });
+                if !matches!(go, Ok(true)) {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// The icon is let go (`commit`), or put back (Escape, the right button, a lost release, an end that is not a drop).
+    fn end_drag(&mut self, commit: bool, cx: &mut Context<Self>) {
+        self.drag_watch = None;
+        let Some(drag) = self.drag.take() else { return };
+        let now = self.now_ms();
+        let pointer = drag.pointer();
+        let done = drag.finish(commit, &self.last_slots, now);
+        if done.drop != Landing::Nothing {
+            self.commit_drop(done.drop, cx);
+        }
+        // the icons play out their slides into the places they end in (arrive at once with animations off); after the drop, whose
+        // rebuild of the island clears any slides of the old indices
+        if done.dur > 0 && done.slides.iter().any(|s| s.from != 0.0) {
+            self.settle = Some((done.slides, now + u64::from(done.dur), done.dur));
+        }
+        // The pointer was captured while the icon was in the hand and the dock's leave event was held back (`pointer_left`): if it is not
+        // on the dock any more now, the bell goes out here, or the icons would stay grown around a pointer that is gone.
+        if pointer.is_some_and(|(x, y)| reorder::off_island(x, y, self.last_glass)) {
+            self.pointer_left(cx);
+        }
+        cx.notify();
+    }
+
+    /// A drop changed the order: the model is changed here and now (so that nothing flickers back while the file is written), the island is
+    /// rebuilt from the task list it last saw, and the pin file is written on a worker thread.
+    fn commit_drop(&mut self, landing: Landing, cx: &mut Context<Self>) {
+        // (what the pin file is told, worked out from the pins as they were: their names are what it checks its own list against)
+        let before: Vec<String> = self.pins.iter().map(|p| p.name.clone()).collect();
+        let placed = reorder::placed(landing, &self.items, self.pins.len());
+        if !reorder::apply_landing(landing, &self.items, &mut self.pins, &mut self.seen_order) {
+            return;
+        }
+        let groups = self.last_groups.clone();
+        let foreground = self.last_foreground;
+        self.apply(groups, foreground, cx);
+        // The order of the running apps is the island's own and lasts for the session (as it always did): only a change of the pins is
+        // written, so a drop among the running apps asks the shell and the disk for nothing.
+        if let Some(placed) = placed {
+            super::own_pins::set_order(placed, before, cx);
+        }
+    }
+
+    /// The right button went down: it puts an icon in the hand back.
+    fn right_down(&mut self, cx: &mut Context<Self>) {
+        // (every right press sets the guard afresh, so a release that never came to the dock cannot swallow a later click)
+        let carrying = self.drag.is_some();
+        self.right.press(carrying);
+        if carrying {
+            self.end_drag(false, cx);
         }
     }
 
@@ -513,6 +803,11 @@ fn icon_sources(items: &[DockItem]) -> Vec<Option<(String, Vec<IconSource>)>> {
     items.iter().map(|i| item_icons(i).and_then(|srcs| srcs.first().map(|first| (plan::icon_key(first), srcs.clone())))).collect()
 }
 
+/// The identity every item's feedback is kept under (empty for the separator and the places), in the items' order.
+fn feel_keys(items: &[DockItem]) -> Vec<String> {
+    items.iter().map(|i| if let DockItem::App(a) = i { feedback::key_of(a) } else { String::new() }).collect()
+}
+
 /// The name a placeholder takes its letter from.
 fn item_name(item: &DockItem) -> String {
     match item {
@@ -521,6 +816,23 @@ fn item_name(item: &DockItem) -> String {
         DockItem::Place(Place::Downloads) => t!("İndirilenler").to_string(),
         DockItem::Separator => String::new(),
     }
+}
+
+/// How one item is drawn in a frame (dock units, the window's coordinates): where its cell is, and how its picture is posed in it.
+#[derive(Clone, Copy)]
+struct Draw {
+    x: f32,
+    w: f32,
+    /// The icon in the hand.
+    held: bool,
+    /// The picture's shift sideways, raise, growth (a fraction of the width) and opacity.
+    dx: f32,
+    up: f32,
+    grow: f32,
+    opacity: f32,
+    /// The starting mark's phase, if the app is being started; whether the red mark of a failed start is shown.
+    mark: Option<f32>,
+    failed: bool,
 }
 
 impl Render for MiddleIsland {
@@ -535,6 +847,21 @@ impl Render for MiddleIsland {
         let now = self.now_ms();
         if !self.presence.settled(now) && self.frozen.is_none() {
             // the bell is still coming in or going out: one more frame
+            window.request_animation_frame();
+        }
+        // What the icons do after a click, and the slides of the icons making room for one in the hand. At rest all of this is empty:
+        // no frame is asked for and nothing is looked up.
+        let animate = !self.feedback.is_empty() && crate::settings::animations();
+        if !self.feedback.is_empty() {
+            self.feedback.prune(now);
+            if self.feedback.active(now, animate) {
+                window.request_animation_frame();
+            }
+        }
+        if self.settle.as_ref().is_some_and(|(_, until, _)| now >= *until) {
+            self.settle = None;
+        }
+        if self.settle.is_some() || self.drag.as_ref().is_some_and(|d| d.sliding(now)) {
             window.request_animation_frame();
         }
         // how thin the dock is at this moment (the full dock unless a maximised window made it thin: see thin.rs)
@@ -566,15 +893,69 @@ impl Render for MiddleIsland {
         };
         let pic = super::thin::picture(&frame, &self.slots, inset.margins, BASELINE, &sq);
         self.rest_items.clone_from(&rest);
+        // (what a drag measures the pointer against)
+        self.last_slots.clone_from(&pic.items);
         // what a right click is judged by: the glass and the icons as they are drawn in this frame
         self.last_glass = pic.glass;
         // (one list, reused: this runs on every frame of the magnification)
         self.last_icons.clear();
         self.last_icons.extend(super::empty::middle_icon_boxes(&self.slots, &pic, inset.margins[1], BASELINE, DOT_DROP));
 
+        // Where every item is drawn in this frame and how its picture is posed (the press, the answer to a click, being in the hand, the
+        // slides of the icons making room). This comes before the window's region is made: the region is cut to the glass and the boxes
+        // of the icons that stand out of it, and the system shows nothing outside it, so a picture that is raised, grown or moved away
+        // from its cell must be added to it or it is cut off flat at the cell's edge (`feedback::posed_box`).
+        // an icon in the hand and the icons making room for it, or the icons still sliding into their places after a drop
+        let drag = self.drag.as_ref().filter(|d| d.len() == self.items.len() && pic.items.len() == d.len());
+        let settle = self.settle.as_ref().filter(|(s, _, _)| s.len() == self.items.len());
+        // (an icon's top edge in the window is this less its size: a bounce never carries it out of the window)
+        let top_room = vh - mb - BASELINE;
+        let mut draws: Vec<Draw> = Vec::with_capacity(self.items.len());
+        let mut posed: Vec<[f32; 4]> = Vec::new();
+        for (ix, item) in self.items.iter().enumerate() {
+            let held = drag.is_some_and(|d| d.ix == ix);
+            let (slot_x, x, w) = match drag {
+                Some(d) => {
+                    let (slot_x, w) = pic.items[d.slot_of(ix)];
+                    (slot_x, if held { d.held_x(&pic.items, now) } else { d.item_x(ix, &pic.items, now) }, w)
+                }
+                None => {
+                    let (x, w) = pic.items[ix];
+                    (x, x + settle.map_or(0.0, |(s, _, dur)| s[ix].offset(now, *dur)), w)
+                }
+            };
+            let mut draw = Draw { x, w, held, dx: 0.0, grow: 0.0, up: 0.0, opacity: 1.0, mark: None, failed: false };
+            if matches!(item, DockItem::App(_) | DockItem::Place(_)) {
+                // How the picture is drawn away from its place for a moment: the press (a little smaller and dimmer while the button is
+                // down), the answer to a click (a bounce up, a pulse, a dip, a shake: `feedback.rs`) and being in the hand (a little bigger).
+                // The cell and the running mark do not move: only the picture, which at rest is drawn exactly as it always was.
+                let key = self.feel_keys.get(ix).map_or("", String::as_str);
+                let (pose, mark, failed) = if self.feedback.is_empty() || key.is_empty() {
+                    (feedback::Pose::default(), None, false)
+                } else {
+                    (self.feedback.pose(key, now), self.feedback.mark(key, now, animate), self.feedback.failed_mark(key, now))
+                };
+                let pressed = self.pressed_ix == Some(ix);
+                draw.grow = pose.grow - if pressed { PRESS_DIP } else { 0.0 } + if held { reorder::LIFT_GROW } else { 0.0 };
+                draw.up = pose.up.min((top_room - w).max(0.0));
+                draw.dx = pose.dx;
+                draw.opacity = if pressed { PRESS_DIM } else if held { reorder::LIFT_OPACITY } else { 1.0 };
+                draw.mark = mark;
+                draw.failed = failed;
+                // (an icon that is away from its place or its size and stands out of the glass: its picture is part of the region)
+                if draw.up != 0.0 || draw.grow > 0.0 || draw.dx != 0.0 || x != slot_x {
+                    let b = feedback::posed_box(x, w, top_room, draw.up, draw.dx, draw.grow);
+                    if b[1] < pic.glass[1] {
+                        posed.push(b);
+                    }
+                }
+            }
+            draws.push(draw);
+        }
+
         // the glass and the part of the window that takes the pointer follow the frame (only what moved is sent on)
         let scale = env.unit();
-        let boxes: Vec<[f32; 4]> = pic.out_of_glass.iter().map(|b| plan::to_device(*b, scale)).collect();
+        let boxes: Vec<[f32; 4]> = pic.out_of_glass.iter().chain(&posed).map(|b| plan::to_device(*b, scale)).collect();
         let mut glass_px = plan::to_device(pic.glass, scale);
         // (the glass's bottom edge, which does not move while the dock grows or shrinks)
         let bottom_px = (pic.glass[1] + pic.glass[3]) * scale;
@@ -602,7 +983,10 @@ impl Render for MiddleIsland {
         host::set_middle_frame(&self.glass, glass_px, parts, cx);
 
         let mut cells: Vec<AnyElement> = Vec::with_capacity(self.items.len());
-        for (ix, (item, &(x, w))) in self.items.iter().zip(&pic.items).enumerate() {
+        // the icon in the hand is drawn last, over the others
+        let mut held_cell: Option<AnyElement> = None;
+        for (ix, item) in self.items.iter().enumerate() {
+            let Draw { x, w, held, dx, grow, up, opacity, mark, failed } = draws[ix];
             let cell = match item {
                 DockItem::Separator => div()
                     .absolute()
@@ -634,6 +1018,13 @@ impl Render for MiddleIsland {
                         DockItem::App(a) => (a.running(), a.active),
                         _ => (false, false),
                     };
+                    // (the pose is `draws`', worked out above: the region was made from it)
+                    let picture = if grow == 0.0 && up == 0.0 && dx == 0.0 && opacity == 1.0 {
+                        picture
+                    } else {
+                        let g = grow * w;
+                        div().absolute().left(u(dx - g)).top(u(-up - g)).w(u(w + 2.0 * g)).h(u(w + 2.0 * g)).opacity(opacity).child(picture).into_any_element()
+                    };
                     div()
                         .id(("dock-item", ix))
                         .absolute()
@@ -642,23 +1033,27 @@ impl Render for MiddleIsland {
                         .w(u(w))
                         .h(u(w))
                         .cursor_pointer()
-                        // (pressed: the picture a little smaller and dimmer, in place; the cell and the running mark do not move)
-                        .child(if self.pressed_ix == Some(ix) { div().size_full().p(u(w * PRESS_DIP)).opacity(PRESS_DIM).child(picture).into_any_element() } else { picture })
-                        .when(running, |d| {
-                            let (dw, dh) = look::running_dot_size(in_front);
+                        .child(picture)
+                        // the running mark; under an app that is being started it is the starting mark, which pulses until the app has a window
+                        .when(running || mark.is_some() || failed, |d| {
+                            let wide = in_front && running;
+                            let (dw, dh) = look::running_dot_size(wide);
+                            // a start that is on its way pulses; one that failed leaves a red mark that stays a moment
+                            let (color, size) = if running {
+                                (pal.running_dot(wide).hsla(), 1.0)
+                            } else if let Some(phase) = mark {
+                                let (fade, size) = feedback::mark_look(phase);
+                                let mut c = pal.running_dot(false).hsla();
+                                c.a *= fade;
+                                (c, size)
+                            } else {
+                                (look::failed_dot().hsla(), 1.0)
+                            };
+                            let (dw, dh) = (dw * size, dh * size);
                             // the mark stays under its icon: it is the icon's child, and the icons stand on one baseline
-                            d.child(
-                                div()
-                                    .absolute()
-                                    .bottom(u(-DOT_DROP))
-                                    .left(u((w - dw) / 2.0))
-                                    .w(u(dw))
-                                    .h(u(dh))
-                                    .rounded_full()
-                                    .bg(pal.running_dot(in_front).hsla()),
-                            )
+                            d.child(div().absolute().bottom(u(-DOT_DROP)).left(u((w - dw) / 2.0)).w(u(dw)).h(u(dh)).rounded_full().bg(color))
                         })
-                        .on_mouse_down(MouseButton::Left, cx.listener(move |me, _, _, cx| me.item_pressed(ix, cx)))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |me, ev: &MouseDownEvent, _, cx| me.item_pressed(ix, ev.position, cx)))
                         .on_click(cx.listener(move |me, _, _, cx| me.click(ix, cx)))
                         .on_hover(cx.listener(move |me, on: &bool, _, cx| me.item_hover(ix, *on, cx)))
                         .on_mouse_up(MouseButton::Right, cx.listener(move |me, _, _, cx| me.right_click(ix, cx)))
@@ -666,8 +1061,13 @@ impl Render for MiddleIsland {
                         .into_any_element()
                 }
             };
-            cells.push(cell);
+            if held {
+                held_cell = Some(cell);
+            } else {
+                cells.push(cell);
+            }
         }
+        cells.extend(held_cell);
 
         // The glass paints its own fill only while the engine's glass is not running. The window is bigger than the glass, so the fill is
         // the glass's rectangle in it (`pic.glass`), not the whole view; its colours are the tone's, as on main.
@@ -686,6 +1086,8 @@ impl Render for MiddleIsland {
             .text_size(u(13.))
             .text_color(pal.text().hsla())
             .children(fill)
+            // the quiet highlight while an app dragged out of the Start panel is over the island (nothing at rest: `drop_hint.rs`)
+            .children(super::drop_hint::overlay(cx, pal, [u(pic.glass[0]), u(pic.glass[1]), u(pic.glass[2]), px(glass_h)], u(RADIUS)))
             .child(
                 // The row covers the whole window, so the pointer over an icon that has grown out of the glass is still over the dock.
                 // (What of the window the system hands to this view at all is the region, see `hit`.)
@@ -696,6 +1098,12 @@ impl Render for MiddleIsland {
                     .top(px(0.))
                     .size_full()
                     .on_mouse_move(cx.listener(move |me, ev: &MouseMoveEvent, _, cx| {
+                        // (an icon being picked up or in the hand: the bell stays where it was held)
+                        if me.drag_pointer(ev, cx) {
+                            // (a thin dock stays grown while an icon is carried along it)
+                            super::thin::pointer_on_island(cx);
+                            return;
+                        }
                         let strength = cx.global::<Settings>().dock_magnify.strength();
                         // (dock units from the rest island's left edge)
                         let k = super::look::dock_size(cx);
@@ -703,10 +1111,11 @@ impl Render for MiddleIsland {
                         super::thin::pointer_on_island(cx);
                         me.pointer_moved((f32::from(ev.position.x) - host::insets(Kind::Middle, cx).margins[0]) / k, strength, ev.pressed_button.is_some(), cx)
                     }))
+                    .on_mouse_down(MouseButton::Right, cx.listener(|me, _, _, cx| me.right_down(cx)))
                     .on_mouse_up(MouseButton::Right, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.row_right_click(ev.position, cx)))
                     .on_mouse_down(MouseButton::Left, cx.listener(|me, _, _, _| me.pressed()))
-                    .on_mouse_up(MouseButton::Left, cx.listener(|me, _, _, cx| me.released(cx)))
-                    .on_mouse_up_out(MouseButton::Left, cx.listener(|me, _, _, cx| me.released(cx)))
+                    .on_mouse_up(MouseButton::Left, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.released_at(ev.position, cx)))
+                    .on_mouse_up_out(MouseButton::Left, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.released_at(ev.position, cx)))
                     .on_hover(cx.listener(|me, hovered: &bool, _, cx| {
                         if !*hovered {
                             me.pointer_left(cx);

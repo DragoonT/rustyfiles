@@ -140,8 +140,9 @@ pub struct Keys {
     pub start_grow: bool,
     /// The dock's size: the islands, the icons and everything else change with it, so the running dock must read the file again.
     pub size: super::size_pref::DockSizePref,
-    /// The shell's five switches, in this order: desktop cover, hiding Windows' taskbar, the Windows key, Alt+Tab, the tray host. The
-    /// dock starts or stops each of them when it reads the file, so the reload must not wait for its 5 s look at the file's date.
+    /// Which of the dock's five parts run (`parts::run_flags`), in this order: desktop cover, hiding Windows' taskbar, the Windows key,
+    /// Alt+Tab, the tray host. The dock starts or stops each of them when it reads the file, so the reload must not wait for its 5 s
+    /// look at the file's date. These are the RESULT of the one switch and each part's own value, so the one switch moves all five.
     pub shell: [bool; 5],
 }
 
@@ -164,7 +165,7 @@ impl Keys {
             start_recommended: s.dock_start_recommended,
             start_grow: s.dock_start_grow,
             size: s.dock_size,
-            shell: [s.shell_desktop_cover, s.shell_hide_taskbar, s.shell_win_key, s.shell_own_switcher, s.shell_tray_host],
+            shell: super::parts::run_flags(s),
         }
     }
 }
@@ -355,13 +356,6 @@ mod tests {
             Settings { dock_start_grow: false, ..base.clone() },
             Settings { dock_size: crate::dock::size_pref::DockSizePref::from_permille(1400), ..base.clone() },
             Settings { dock_size: crate::dock::size_pref::DockSizePref::from_permille(1050), ..base.clone() },
-            // the shell's five switches (Settings, Dock): the dock applies them when it reads the file, so a switch must not wait for
-            // its look at the file's date
-            Settings { shell_desktop_cover: true, ..base.clone() },
-            Settings { shell_hide_taskbar: true, ..base.clone() },
-            Settings { shell_win_key: true, ..base.clone() },
-            Settings { shell_own_switcher: true, ..base.clone() },
-            Settings { shell_tray_host: true, ..base.clone() },
             Settings { dock_weather_location: true, ..base.clone() },
         ] {
             let mut told = Some(k.clone());
@@ -370,6 +364,37 @@ mod tests {
         // the surface wash is the app's own business: the dock has none
         let mut told = Some(k);
         assert!(!needs_reload(&mut told, Keys::of(&Settings { hg_surface: 99, ..base })));
+    }
+
+    /// The five parts follow the ONE switch and their own values: a change in what runs must reach the running dock at once, and a
+    /// change that leaves what runs as it was (an override of a part while the switch is off) need not.
+    #[test]
+    fn the_dock_reads_the_file_again_when_what_runs_changes_and_not_otherwise() {
+        use super::super::parts::Part;
+        let base = Settings { dock_enabled: true, ..Default::default() };
+        let mut told = Some(Keys::of(&base));
+        assert!(!needs_reload(&mut told, Keys::of(&base)));
+        // the switch moves all five at once
+        let mut told = Some(Keys::of(&base));
+        assert!(needs_reload(&mut told, Keys::of(&Settings { dock_enabled: false, ..base.clone() })));
+        assert_eq!(Keys::of(&Settings { dock_enabled: false, ..base.clone() }).shell, [false; 5]);
+        assert_eq!(Keys::of(&base).shell, [true; 5]);
+        // each part's own value moves its own flag while the switch is on
+        for (i, p) in Part::ALL.into_iter().enumerate() {
+            let mut s = base.clone();
+            p.set_own_value(&mut s, false);
+            let mut told = Some(Keys::of(&base));
+            assert!(needs_reload(&mut told, Keys::of(&s)), "{p:?}");
+            let mut want = [true; 5];
+            want[i] = false;
+            assert_eq!(Keys::of(&s).shell, want);
+            // with the switch off the override changes nothing that runs: no reload
+            let off = Settings { dock_enabled: false, ..Default::default() };
+            let mut off_held = off.clone();
+            p.set_own_value(&mut off_held, false);
+            let mut told = Some(Keys::of(&off));
+            assert!(!needs_reload(&mut told, Keys::of(&off_held)), "{p:?}: nothing runs either way");
+        }
     }
 
     #[test]

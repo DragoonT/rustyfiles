@@ -9,6 +9,7 @@ use std::io::Write as _;
 
 use rf_win::shellhost::probe::{self, Inputs};
 
+use crate::dock::parts::Part;
 use crate::settings::Settings;
 
 pub const ARG: &str = "--shell-probe";
@@ -20,11 +21,12 @@ pub fn settings_on(s: &Settings) -> Vec<String> {
         ("dock_reserve", s.dock_reserve),
         ("dock_own_start", s.dock_own_start),
         ("dock_own_control_centre", s.dock_own_control_centre),
-        ("shell_desktop_cover", s.shell_desktop_cover),
-        ("shell_win_key", s.shell_win_key),
-        ("shell_own_switcher", s.shell_own_switcher),
-        ("shell_tray_host", s.shell_tray_host),
-        ("shell_hide_taskbar", s.shell_hide_taskbar),
+        // (the dock's parts: on when the one switch is on and the part is not held off by its own value, `dock::parts`)
+        ("shell_desktop_cover", crate::dock::parts::runs(s, Part::Desktop)),
+        ("shell_win_key", crate::dock::parts::runs(s, Part::WinKey)),
+        ("shell_own_switcher", crate::dock::parts::runs(s, Part::Switcher)),
+        ("shell_tray_host", crate::dock::parts::runs(s, Part::TrayHost)),
+        ("shell_hide_taskbar", crate::dock::parts::runs(s, Part::Taskbar)),
     ]
     .into_iter()
     .filter(|(_, on)| *on)
@@ -57,16 +59,18 @@ mod tests {
     #[test]
     fn the_settings_that_are_on_are_named_and_the_experimental_one_is_not_by_default() {
         let on = settings_on(&Settings::default());
-        assert!(!on.contains(&"shell_desktop_cover".to_string()), "off by default");
+        assert!(!on.contains(&"shell_desktop_cover".to_string()), "off with the dock");
         assert!(!on.contains(&"dock_enabled".to_string()), "the dock is off by default too");
         assert!(on.contains(&"dock_reserve".to_string()));
-        let all = settings_on(&Settings { shell_desktop_cover: true, dock_enabled: true, ..Default::default() });
-        assert!(all.contains(&"shell_desktop_cover".to_string()) && all.contains(&"dock_enabled".to_string()));
+        let all = settings_on(&Settings { dock_enabled: true, ..Default::default() });
+        assert!(all.contains(&"shell_desktop_cover".to_string()) && all.contains(&"dock_enabled".to_string()), "the one switch brings the parts");
+        let held = settings_on(&Settings { dock_enabled: true, shell_win_key: false, ..Default::default() });
+        assert!(!held.contains(&"shell_win_key".to_string()) && held.contains(&"shell_tray_host".to_string()));
     }
 
     #[test]
     fn the_report_is_json_and_carries_what_was_asked() {
-        let text = report(&["--shell-probe".to_string(), "--mode".to_string(), "shell".to_string()], &Settings { shell_desktop_cover: true, ..Default::default() });
+        let text = report(&["--shell-probe".to_string(), "--mode".to_string(), "shell".to_string()], &Settings { dock_enabled: true, ..Default::default() });
         let j: serde_json::Value = serde_json::from_str(&text).expect("JSON");
         assert_eq!(j["requested_mode"], "shell");
         assert!(j["mode"] == "beside" || j["mode"] == "shell");

@@ -549,12 +549,16 @@ pub struct Settings {
     /// How big the whole dock is (small / medium / large / extra large; medium is the dock as it always was).
     pub dock_size: crate::dock::size_pref::DockSizePref,
 
-    // ---- Shell host (shell/: `rustyfiles --shell`, the dock's process); experimental, every switch off by default
+    // ---- The dock's parts (shell/: `rustyfiles --shell`, the dock's process). ONE switch starts them all: `dock_enabled` (Settings ->
+    // Dock). These five are the parts' own values, kept in the file under their old names as TROUBLESHOOTING OVERRIDES that the page
+    // shows no switch for: a part runs when `dock_enabled` is on AND its own value is not false (`dock/parts.rs` is the rule). Their
+    // default is true. Files written before the one switch hold `false` here (the old default was written into every saved file):
+    // a false is read as "held off", the Dock page says so in one line and "Hepsini aç" clears it.
     /// Our desktop (the wallpaper, the icons) is drawn over Explorer's, one window per monitor, while the shell host runs. Explorer's
     /// desktop stays underneath and is visible again when the host stops.
     pub shell_desktop_cover: bool,
     /// A tap of the Windows key alone opens rustyfiles' Start panel instead of Windows' (the shell host listens to the keyboard with a
-    /// system-wide hook while this or `shell_own_switcher` is on; see `shell/keylayer.rs`).
+    /// system-wide hook while this or `shell_own_switcher` runs; see `shell/keylayer.rs`).
     pub shell_win_key: bool,
     /// Alt+Tab opens rustyfiles' window switcher instead of Windows' (same hook).
     pub shell_own_switcher: bool,
@@ -567,8 +571,16 @@ pub struct Settings {
     /// Every screen snip is also saved to Pictures\Screenshots without asking (off: it is only copied to the clipboard, and the
     /// notice's Kaydet button saves it by hand). See `snip/`.
     pub snip_autosave: bool,
+    /// Set once a build with the one switch has read the file (`dock/parts.rs`, FILES FROM BEFORE). While the file does not have it and
+    /// has the dock on, the parts it does not name are held off (see [`Settings::migrate`]); the first save writes it, together with the
+    /// held values, so that the hold survives the marker.
+    pub dock_one_switch: bool,
+    /// Not in the file. The parts' own values the file did not name, when it came from before the one switch with the dock on: what
+    /// [`Settings::migrate`] turns into held-off values. Empty for every other file.
+    #[serde(skip)]
+    pub parts_unnamed_in_old_file: Vec<String>,
 
-    // ---- Desktop (shell/desktop/; Settings -> "Masaüstü"; experimental, it only matters while `shell_desktop_cover` is on)
+    // ---- Desktop (shell/desktop/; Settings -> "Masaüstü"; experimental, it only matters while the desktop part runs)
     // Each system icon of the desktop (and "show desktop icons" as a whole) follows Windows' own setting by default; "show" and "hide"
     // are this app's own choice and are never written to Windows' settings (see `rf_core::desktop::virtuals`).
     pub desktop_icon_this_pc: rf_core::desktop::virtuals::IconChoice,
@@ -702,12 +714,15 @@ impl Default for Settings {
             // on: the user asked for the Start panel to grow out of the island; the switch on the Dock page turns it off
             dock_start_grow: true,
             dock_size: Default::default(),
-            shell_desktop_cover: false,
-            shell_win_key: false,
-            shell_own_switcher: false,
-            shell_tray_host: false,
-            shell_hide_taskbar: false,
+            // (the parts' own values: true, so the one switch `dock_enabled` brings them all; see `dock/parts.rs`)
+            shell_desktop_cover: true,
+            shell_win_key: true,
+            shell_own_switcher: true,
+            shell_tray_host: true,
+            shell_hide_taskbar: true,
             snip_autosave: false,
+            dock_one_switch: false,
+            parts_unnamed_in_old_file: Vec::new(),
             desktop_icon_this_pc: Default::default(),
             desktop_icon_user_files: Default::default(),
             desktop_icon_network: Default::default(),
@@ -860,6 +875,19 @@ impl Settings {
             }
             self.adaptive_offered = true;
         }
+        // The one dock switch (`dock/parts.rs`): a file with the dock on that came from before it and does not name a part cannot be
+        // told from "the user chose this" (a save writes only what changed, so the old `false` defaults were often never written), and
+        // nobody is given a keyboard hook or a hidden taskbar by an update: the parts it does not name are held off, the Dock page
+        // says so, and "Hepsini aç" clears it. The marker makes this happen once; the first save writes it and the held values.
+        if !self.dock_one_switch {
+            for field in std::mem::take(&mut self.parts_unnamed_in_old_file) {
+                if let Some(part) = crate::dock::parts::Part::from_field(&field) {
+                    part.set_own_value(self, false);
+                }
+            }
+            self.dock_one_switch = true;
+        }
+        self.parts_unnamed_in_old_file.clear();
     }
 
     /// Field by field: a value this version doesn't understand (a newer build's theme, a
@@ -867,6 +895,12 @@ impl Settings {
     /// TOML syntax error fails.
     fn parse_lenient(text: &str) -> Result<Settings, toml::de::Error> {
         let table: toml::Table = toml::from_str(text)?;
+        // (before the loop takes the table apart) a file from before the one switch that has the dock on: which parts does it not name?
+        let unnamed: Vec<String> = if matches!(table.get("dock_enabled"), Some(toml::Value::Boolean(true))) && !table.contains_key("dock_one_switch") {
+            crate::dock::parts::Part::ALL.iter().map(|p| p.field()).filter(|f| !table.contains_key(*f)).map(str::to_string).collect()
+        } else {
+            Vec::new()
+        };
         let mut base = toml::Table::try_from(Settings::default()).unwrap_or_default();
         for (k, v) in table {
             let mut trial = base.clone();
@@ -875,9 +909,24 @@ impl Settings {
                 base = trial;
             } else {
                 log::warn!("settings: ignoring invalid value for '{k}'");
+                // A part's own value that cannot be read holds the part OFF, not on: the default of these is true, and a typo must not
+                // install a keyboard hook or hide the taskbar. The Dock page lists it among the parts the file holds off.
+                if crate::dock::parts::Part::from_field(&k).is_some() {
+                    base.insert(k, toml::Value::Boolean(false));
+                }
             }
         }
-        Ok(Settings::deserialize(toml::Value::Table(base)).unwrap_or_default())
+        let mut s = Settings::deserialize(toml::Value::Table(base)).unwrap_or_default();
+        s.parts_unnamed_in_old_file = unnamed;
+        Ok(s)
+    }
+
+    /// What `load` makes of a file's text (parsed, then brought up to date): for the tests of what an old file becomes.
+    #[cfg(test)]
+    pub(crate) fn parse_migrated(text: &str) -> Result<Settings, toml::de::Error> {
+        let mut s = Self::parse_lenient(text)?;
+        s.migrate();
+        Ok(s)
     }
 
     /// The four values the engine takes, cut to 0..=100.

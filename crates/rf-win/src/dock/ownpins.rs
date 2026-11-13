@@ -231,13 +231,19 @@ impl PinFile {
     /// The pins as the island shows them: those whose program or shortcut still exists (`exists`), in the file's order. A pin whose
     /// program is gone stays in the file (it may come back) and out of the island.
     pub fn alive(&self, exists: impl Fn(&Path) -> bool) -> Vec<PinnedApp> {
+        self.alive_indices(exists).into_iter().map(|i| self.pins[i].to_pinned()).collect()
+    }
+
+    /// The file's indices of the pins `alive` returns, in the same order: the island's n-th pinned app is the pin at the n-th index.
+    pub fn alive_indices(&self, exists: impl Fn(&Path) -> bool) -> Vec<usize> {
         self.pins
             .iter()
-            .filter(|p| match &p.launch {
+            .enumerate()
+            .filter(|(_, p)| match &p.launch {
                 LaunchRec::Link { path } | LaunchRec::Exe { path, .. } => exists(path),
                 LaunchRec::Packaged { .. } => true,
             })
-            .map(OwnPin::to_pinned)
+            .map(|(i, _)| i)
             .collect()
     }
 }

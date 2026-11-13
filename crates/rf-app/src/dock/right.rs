@@ -104,7 +104,7 @@ impl RightIsland {
 
 /// (`k` is the dock's size factor: the lengths are dock units.)
 fn icon_button(id: &'static str, icon: L, pal: Palette, k: f32, on_click: impl Fn(&mut App) + 'static) -> impl IntoElement {
-    let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
+    let (hover, pressed) = (pal.hover_fill().hsla(), pal.press_plate().hsla());
     div()
         .id(id)
         .size(px(plan::BUTTON * k))
@@ -154,7 +154,7 @@ fn open_notifications(cx: &mut App) {
 
 /// The bell, wearing a small dot in the system accent colour while there are notifications.
 fn bell_button(pal: Palette, dot: Option<Hsla>, k: f32, on_click: impl Fn(&mut App) + 'static) -> impl IntoElement {
-    let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
+    let (hover, pressed) = (pal.hover_fill().hsla(), pal.press_plate().hsla());
     div()
         .id("dock-bell")
         .relative()
@@ -186,7 +186,7 @@ impl Render for RightIsland {
         // While a panel's glass has grown out of this island (grow_host.rs) the island's own glass is put away and the whole row stays on
         // the panel's glass: the island paints no fill of its own over it (nothing of the row fades, so no frames are asked for).
         let fallback = fallback && super::grow_host::island_fade(Kind::Right, cx).is_none();
-        let (hover, pressed) = (pal.hover_fill().hsla(), pal.pressed_fill().hsla());
+        let (hover, pressed) = (pal.hover_fill().hsla(), pal.press_plate().hsla());
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
         let k = super::look::dock_size(cx);
 

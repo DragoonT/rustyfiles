@@ -32,6 +32,7 @@
 //! | `startrecent` | "Önerilenler": the recent documents Windows keeps, chosen newest first, each once, only those still there, with how long ago | the choice |
 //! | `startuser` | the account picture Windows keeps for the signed-in user (read-only), the size to try, decoded to a square | the size order, the crop |
 //! | `startpins` | the Start panel's own pinned apps file and its first seeding from the taskbar's pins | all of it |
+//! | `startdrag` | drag and drop in the Start panel: click or drag from the distance moved, which drop slot / the dock's island / elsewhere a point is over, what each kind of item may be dropped on, the order of the pins after a drop, the slide of the tiles that make room, an app's shortcut in the Start menu's folders and the copy a drag carries, an app as a pin of the dock | all of it |
 //! | `appmenu` | the app menu (right click on an icon): the jump-list sections, the fixed rows (name, pin / unpin, close), the keyboard's walk through them, the height | all of it |
 //! | `preview` | the hover previews: dwell / swap / grace timing of a pointer on running apps' icons, where a pop-up above an icon goes, the cards' grid | all of it |
 //! | `ownpins` | the dock's OWN pin list (`dock-pins.json`): seeded once from the taskbar's pins at the first pin / unpin from the dock's menu, Windows' stores never written | all of it |
@@ -74,6 +75,7 @@ pub mod appmenu;
 pub mod band;
 pub mod calendar;
 pub mod clock;
+pub mod dragkeys;
 pub mod empty_spot;
 pub mod fullscreen;
 pub mod grow;
@@ -91,11 +93,13 @@ pub mod magnify;
 pub mod model;
 pub mod ownpins;
 pub mod panel;
+pub mod pinorder;
 pub mod pins;
 pub mod preview;
 pub mod power;
 pub mod resample;
 pub mod startapps;
+pub mod startdrag;
 pub mod startkeys;
 pub mod startlist;
 pub mod startpage;
