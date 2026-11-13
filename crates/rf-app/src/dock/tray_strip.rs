@@ -538,10 +538,12 @@ fn with_alpha(mut c: Hsla, a: f32) -> Hsla {
 }
 
 /// An icon's picture at `size` logical px: its bitmap, or its first letter on a plain square until (or if) it has one.
-fn picture_of(st: &TrayState, i: usize, size: f32, pal: Palette) -> AnyElement {
+fn picture_of(st: &TrayState, i: usize, size: f32, scale: f32, pal: Palette) -> AnyElement {
     let Some(icon) = st.icons().get(i) else { return div().size(px(size)).into_any_element() };
     if let Some((_, img)) = st.images.get(&icon.key) {
-        return gpui_kit::img(img.clone()).size(px(size)).into_any_element();
+        // (at its own pixels when they are close to the place: sharp, not scaled to a blur; `ts::picture_size`)
+        let own = img.size(0).width.0.max(0) as u32;
+        return gpui_kit::img(img.clone()).size(px(ts::picture_size(size, own, scale))).into_any_element();
     }
     div()
         .size(px(size))
@@ -603,7 +605,7 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
             .when(hot, |d| d.bg(hover_bg))
             .when(pressed == Some(Source::Strip(j)), |d| d.bg(press_bg))
             .when(dragging == Some(key), |d| d.opacity(0.35))
-            .child(picture_of(st, i, ts::ICON * k, pal));
+            .child(picture_of(st, i, ts::ICON * k, host::monitor_work(cx).map_or(1.0, |(s, _)| s), pal));
         row = row.child(wire(cell, Source::Strip(j)));
     }
     // where a dragged icon would land
@@ -705,7 +707,7 @@ pub fn overflow_size(cx: &App) -> (f32, f32) {
 /// The picture of the overflow panel's cell `k`.
 pub fn overflow_picture(k: usize, size: f32, pal: Palette, cx: &App) -> AnyElement {
     match cx.try_global::<TrayState>().and_then(|st| st.lay.overflow.get(k).map(|&i| (st, i))) {
-        Some((st, i)) => picture_of(st, i, size, pal),
+        Some((st, i)) => picture_of(st, i, size, host::monitor_work(cx).map_or(1.0, |(s, _)| s), pal),
         None => div().size(px(size)).into_any_element(),
     }
 }

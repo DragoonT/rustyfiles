@@ -2677,6 +2677,8 @@ impl Workspace {
         let places = self.places.read(cx);
         let pinned = places.pinned.clone();
         let drives = places.drives.clone();
+        // (the pins and drives are read off the UI thread and are there a moment after the window: see the tags below)
+        let places_loaded = places.loaded;
         let rail = self.sidebar_rail;
         let header = |t: &'static str| {
             if rail {
@@ -2840,7 +2842,10 @@ impl Workspace {
                 col = col.child(self.sidebar_item(("sb-net", i).into(), L::Network, p.text_secondary, name, loc, active, None, p, cx));
             }
         }
-        let tag_defs = if shown("tags") { cx.global::<crate::tags::Tags>().0.defs.clone() } else { Vec::new() };
+        // The tags are known at once, the pins and drives above them a moment later: drawn before those, the coloured tag rows stood
+        // at the top of the sidebar for the first 90 ms of a cold start and then jumped down (seen frame by frame: a user's report of
+        // a red and blue flash when a folder is opened with the app closed). They wait for the places.
+        let tag_defs = if shown("tags") && places_loaded { cx.global::<crate::tags::Tags>().0.defs.clone() } else { Vec::new() };
         if !tag_defs.is_empty() {
             col = col.child(header(t!("Etiketler")));
         }

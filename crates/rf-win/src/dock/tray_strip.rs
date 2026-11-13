@@ -197,6 +197,35 @@ pub const OVF_EMPTY_W: f32 = 232.0;
 /// The height of the empty panel for the old one-line text; the real height now comes from [`ovf_empty`].
 pub const OVF_EMPTY_H: f32 = 48.0;
 
+/// The size a program's tray picture is drawn at, logical px: its own pixels when they are close to the size wanted, else the size
+/// wanted. Programs give 16 px pictures (at 100 %), and the dock's size makes the place 12 to 24 px: scaled to 13.6 px such a
+/// picture is a blur (a user's report, with a picture: "does this icon look right at all?"), drawn at its own 16 px it is as sharp
+/// as the program made it. A picture far from the size wanted (a 32 px one in a 14 px place) is still scaled.
+pub fn picture_size(wanted: f32, own_px: u32, scale: f32) -> f32 {
+    let own = own_px as f32 / if scale > 0.0 { scale } else { 1.0 };
+    if own_px > 0 && own >= wanted * 0.8 && own <= wanted * 1.25 { own } else { wanted }
+}
+
+#[cfg(test)]
+mod picture_size_tests {
+    use super::picture_size;
+
+    #[test]
+    fn a_picture_close_to_its_place_is_drawn_at_its_own_pixels() {
+        // the dock at 85 %: a 16 px picture in a 13.6 px place stays 16 px
+        assert_eq!(picture_size(13.6, 16, 1.0), 16.0);
+        // at the default size nothing changes
+        assert_eq!(picture_size(16.0, 16, 1.0), 16.0);
+        // 150 % scale: a 24 px picture is 16 logical px
+        assert_eq!(picture_size(16.0, 24, 1.5), 16.0);
+        // far from the place: scaled as before (a 32 px picture, a large dock, an unknown size)
+        assert_eq!(picture_size(13.6, 32, 1.0), 13.6);
+        assert_eq!(picture_size(24.0, 16, 1.0), 24.0);
+        assert_eq!(picture_size(16.0, 0, 1.0), 16.0);
+        assert_eq!(picture_size(16.0, 16, 0.0), 16.0);
+    }
+}
+
 /// The most room the panel may take on a screen, logical px (the panel's own scale: the monitor's, not the dock's size). It grows
 /// upwards from above the island, so what it may take of the height is limited by the island under it and a margin above.
 #[derive(Clone, Copy, Debug, PartialEq)]
