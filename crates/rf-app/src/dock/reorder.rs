@@ -245,16 +245,12 @@ pub fn fill_slots(all: &[String], subset: &[String]) -> Vec<String> {
     out
 }
 
-/// A slide: the icon is `from` dock units away from its slot at `t0` (ms on the dock's clock) and eases into it.
+/// A slide: the icon is `from` dock units away from its slot at `t0` (ms on the dock's clock) and goes into it as the dock's
+/// spring over the slide's time (`rf_win::dock::spring::curve`; a cubic ease-out until 2026-11-13).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Slide {
     pub from: f32,
     pub t0: u64,
-}
-
-fn ease_out(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t)
 }
 
 impl Slide {
@@ -264,7 +260,7 @@ impl Slide {
         if duration_ms == 0 || elapsed >= u64::from(duration_ms) {
             return 0.0;
         }
-        self.from * (1.0 - ease_out(elapsed as f32 / duration_ms as f32))
+        self.from * (1.0 - rf_win::dock::spring::curve(elapsed as f32 / duration_ms as f32))
     }
 
     /// Whether it is still moving at `now`.
@@ -707,8 +703,9 @@ mod tests {
         let end = d.finish(true, &s, NOW + 10);
         assert_eq!(end.drop, Landing::MovePinned { from: 0, to: 1 });
         assert_eq!(end.order, vec![1, 0, 2, 3, 4, 5, 6]);
-        // new item 0 is the old second icon, 10 ms into its slide from 66 to 12: it is still far from its slot
-        assert!(end.slides[0].from > 40.0 && end.slides[0].from < 46.0, "{:?}", end.slides[0]);
+        // new item 0 is the old second icon, 10 ms into its slide from 66 to 12: it is still far from its slot (a spring picks up
+        // speed: it has gone a tenth of the 54 units)
+        assert!(end.slides[0].from > 46.0 && end.slides[0].from < 51.0, "{:?}", end.slides[0]);
         // new item 1 is the dragged one, drawn at 60 and let go over the slot at 66
         assert!((end.slides[1].from + 6.0).abs() < 1e-3, "{:?}", end.slides[1]);
         // the items that did not move have nothing to slide

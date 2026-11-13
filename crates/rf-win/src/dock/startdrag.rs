@@ -20,7 +20,6 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
 use super::layout::Rect;
-use super::magnify::ease_in_out;
 use super::model::{DockApp, IconSource, Launch, PinnedApp, looks_packaged};
 use super::ownpins::{OwnPin, PinFile};
 use super::startpins::Pin;
@@ -341,7 +340,7 @@ struct Slide {
     started_ms: u64,
 }
 
-/// The tiles' places while they slide: each goes from where it is drawn to its new cell with the dock's own ease (`magnify::ease_in_out`)
+/// The tiles' places while they slide: each goes from where it is drawn to its new cell as the dock's spring (`spring::curve`)
 /// over [`SLIDE_MS`] (at once when the animations are off); a new target in the middle of a slide starts from where the tile is, so
 /// nothing jumps. At rest nothing is asked of it: `settled` is true and no frame is wanted.
 #[derive(Clone, Debug, PartialEq)]
@@ -361,7 +360,7 @@ impl Slides {
         if self.duration_ms == 0 || elapsed >= self.duration_ms as f32 {
             return s.to;
         }
-        let t = ease_in_out(elapsed / self.duration_ms as f32);
+        let t = super::spring::curve(elapsed / self.duration_ms as f32);
         (s.from.0 + (s.to.0 - s.from.0) * t, s.from.1 + (s.to.1 - s.from.1) * t)
     }
 
@@ -927,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn the_tiles_slide_with_the_docks_ease_and_a_new_target_starts_from_where_the_tile_is() {
+    fn the_tiles_slide_as_the_docks_spring_and_a_new_target_starts_from_where_the_tile_is() {
         let at = |c: usize| (c as f32, 0.0);
         let mut s = Slides::at_rest(&[at(0), at(1), at(2)], SLIDE_MS);
         assert!(s.settled(0));
@@ -937,7 +936,9 @@ mod tests {
         assert!(!s.settled(1000));
         assert_eq!(s.pos(0, 1000), at(0), "it starts where it was");
         let mid = s.pos(0, 1000 + u64::from(SLIDE_MS) / 2);
-        assert!((mid.0 - 1.0).abs() < 1e-4, "halfway of the ease is halfway: {mid:?}");
+        // (a spring: half the time is nine tenths of the way, and it never passes its cell)
+        assert!(mid.0 > 1.7 && mid.0 < 2.0, "half the time is most of the way: {mid:?}");
+        assert!((0..=SLIDE_MS).all(|t| (0.0..=2.0).contains(&s.pos(0, 1000 + u64::from(t)).0)));
         assert_eq!(s.pos(0, 1000 + u64::from(SLIDE_MS)), at(2));
         assert!(s.settled(1000 + u64::from(SLIDE_MS)));
         assert_eq!(s.pos(1, 1010), at(1), "a tile whose cell did not change does not move");

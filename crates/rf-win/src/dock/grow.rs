@@ -111,10 +111,11 @@ fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// The glass's curve along the motion: out fast, in gently (cubic).
+/// The glass's curve along the motion: the dock's spring over the motion's time (`spring::curve`): it picks up speed, is nine
+/// tenths of the way after half the time and comes to rest softly. It was a cubic ease-out until 2026-11-13, as quick, but leaving
+/// at full speed from the first frame.
 pub fn ease_out(x: f32) -> f32 {
-    let x = x.clamp(0.0, 1.0);
-    1.0 - (1.0 - x).powi(3)
+    super::spring::curve(x)
 }
 
 /// The three rectangles of a growth (device px, screen coordinates) and how the glass moves between them.
@@ -579,7 +580,10 @@ mod tests {
         let mid = spec.at(0.5);
         assert!(mid.u > 0.85);
         let (a, b) = (spec.at(0.9).u, spec.at(1.0).u);
-        assert!(b - a < 0.002, "it settles");
+        assert!(b - a < 0.004, "it settles");
+        // a spring: it picks up speed (the first twentieth of the time is under a twentieth of the way) and never passes its place
+        assert!(spec.at(0.05).u < 0.07);
+        assert!((0..=100).all(|i| spec.at(i as f32 / 100.0).u <= 1.0));
         assert_eq!(spec.at(-3.0), spec.at(0.0));
         assert_eq!(spec.at(7.0), spec.at(1.0));
         assert_eq!(spec.at(f32::NAN), spec.at(0.0), "not a number is the island");

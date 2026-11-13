@@ -171,17 +171,13 @@ pub struct Frame {
     pub done: bool,
 }
 
-fn ease_out(t: f32) -> f32 {
-    let t = t.clamp(0.0, 1.0);
-    1.0 - (1.0 - t).powi(3)
-}
-
 /// The frame `elapsed_ms` after an opening (`opening`) or a closing started. With animations off it is over at once.
 pub fn frame(elapsed_ms: u32, opening: bool, animate: bool) -> Frame {
     if !animate || elapsed_ms >= ANIM_MS {
         return Frame { opacity: if opening { 1.0 } else { 0.0 }, drop_px: if opening { 0.0 } else { RISE_PX }, done: true };
     }
-    let e = ease_out(elapsed_ms as f32 / ANIM_MS as f32);
+    // (the dock's spring over the time: it was a cubic ease-out, as quick, but leaving at full speed)
+    let e = super::spring::curve(elapsed_ms as f32 / ANIM_MS as f32);
     if opening { Frame { opacity: e, drop_px: RISE_PX * (1.0 - e), done: false } } else { Frame { opacity: 1.0 - e, drop_px: RISE_PX * e, done: false } }
 }
 

@@ -7,7 +7,7 @@
 //! icons keep standing on one baseline (the view draws them from the bottom up), push their neighbours apart so nothing overlaps, and
 //! the dock's glass widens with them, symmetrically around the island's centre.
 //!
-//! Coming in and going out are eased by [`Presence`] over `FADE_MS`: the bell's height goes from 0 to 1 and back, while the bell itself
+//! Coming in and going out are [`Presence`]'s, a spring (`FADE_MS` sets its pace): the bell's height goes from 0 to 1 and back, while the bell itself
 //! sits where the pointer last was (so it shrinks away in place when the pointer leaves). While the pointer moves inside, the
 //! presence is 1 and the sizes follow the pointer directly.
 
@@ -158,16 +158,31 @@ pub fn frame(slots: &[Slot], rest: &[(f32, f32)], rest_width: f32, pointer_x: f3
     Frame { spans, left, width }
 }
 
-/// The bell's height over time. `enter` when the pointer comes onto the dock, `leave` when it goes; the height follows with an
-/// ease in and out over `duration_ms` (0: the animations setting is off, it jumps). A change in mid flight starts from where the
-/// height is, so nothing jumps.
+/// The bell's height over time. `enter` when the pointer comes onto the dock, `leave` when it goes; the height follows as a SPRING
+/// without bounce (`spring::Spring::smooth`; `duration_ms` 0: the animations setting is off, it jumps). A change in mid flight goes
+/// on from where the height is WITH THE SPEED IT HAS: it slows, turns and comes back, where the fixed ease this was until 2026-11-13
+/// (a smoothstep over `duration_ms`) started again from a standstill at every turn. The thin dock's growth is one of these too.
+///
+/// It is still a pure function of the time: what is kept is the height and the speed at the last change of target and when that was,
+/// and the spring's closed form gives the height at any later moment (no stepping, the same on every display).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Presence {
+    /// The height and its speed (per ms) when the target was last changed.
     from: f32,
+    vel: f32,
     to: f32,
     started_ms: u64,
     duration_ms: u32,
+    /// So long after `started_ms` the height is the target's (to [`PRESENCE_EPS`]) and stays: from then on it IS the target.
+    settle_ms: u32,
 }
+
+/// The spring's own duration for a `duration_ms`: one and a half times it. `duration_ms` is the time the old ease took from end to
+/// end (160 ms); a spring of 240 ms is half way after 64 ms (the ease was after 80), nine tenths of the way after 150 (the ease after
+/// 130) and comes to rest more softly.
+pub const PRESENCE_SPRING: f32 = 1.5;
+/// The height counts as arrived when it is this close to its target (of the bell's full height: far less than a pixel).
+pub const PRESENCE_EPS: f32 = 0.001;
 
 /// Smoothstep: 0 to 1 for `t` 0 to 1, slow at both ends.
 pub fn ease_in_out(t: f32) -> f32 {
@@ -178,29 +193,43 @@ pub fn ease_in_out(t: f32) -> f32 {
 impl Presence {
     /// Away. `duration_ms` is [`FADE_MS`], or 0 when animations are off.
     pub fn new(duration_ms: u32) -> Presence {
-        Presence { from: 0.0, to: 0.0, started_ms: 0, duration_ms }
+        Presence { from: 0.0, vel: 0.0, to: 0.0, started_ms: 0, duration_ms, settle_ms: 0 }
     }
 
+    /// The animations setting changed (the same value again changes nothing): a motion under way ends where it was going.
     pub fn set_duration(&mut self, duration_ms: u32) {
-        self.duration_ms = duration_ms;
+        if self.duration_ms != duration_ms {
+            self.duration_ms = duration_ms;
+            self.settle_ms = 0;
+        }
+    }
+
+    fn spring(&self) -> super::spring::Spring {
+        super::spring::Spring::smooth(self.duration_ms as f32 * PRESENCE_SPRING)
+    }
+
+    /// The height and its speed (per ms) at `now_ms`.
+    fn state(&self, now_ms: u64) -> (f32, f32) {
+        let elapsed = now_ms.saturating_sub(self.started_ms);
+        if self.duration_ms == 0 || elapsed >= u64::from(self.settle_ms) {
+            return (self.to, 0.0);
+        }
+        let (e, v) = self.spring().at(self.from - self.to, self.vel, elapsed as f32);
+        (self.to + e, v)
     }
 
     /// The height at `now_ms`.
     pub fn value(&self, now_ms: u64) -> f32 {
-        let elapsed = now_ms.saturating_sub(self.started_ms) as f32;
-        if self.duration_ms == 0 || elapsed >= self.duration_ms as f32 {
-            return self.to;
-        }
-        self.from + (self.to - self.from) * ease_in_out(elapsed / self.duration_ms as f32)
+        self.state(now_ms).0
     }
 
     fn go(&mut self, to: f32, now_ms: u64) {
         if self.to == to {
             return;
         }
-        self.from = self.value(now_ms);
-        self.to = to;
-        self.started_ms = now_ms;
+        let (x, v) = self.state(now_ms);
+        (self.from, self.vel, self.to, self.started_ms) = (x, v, to, now_ms);
+        self.settle_ms = if self.duration_ms == 0 { 0 } else { self.spring().settle_ms(x - to, v, PRESENCE_EPS).ceil().min(10_000.0) as u32 };
     }
 
     /// The pointer is over the dock. The same call again changes nothing.
@@ -220,7 +249,7 @@ impl Presence {
 
     /// True once the height has reached its target: no more frames are needed until the pointer moves or leaves.
     pub fn settled(&self, now_ms: u64) -> bool {
-        self.duration_ms == 0 || now_ms.saturating_sub(self.started_ms) >= self.duration_ms as u64 || self.from == self.to
+        self.duration_ms == 0 || now_ms.saturating_sub(self.started_ms) >= u64::from(self.settle_ms)
     }
 
     /// True when the height is 0 and staying there: the dock is at rest and nothing needs to be drawn differently.
@@ -496,37 +525,63 @@ mod tests {
     }
 
     #[test]
-    fn presence_eases_in_and_out_and_never_jumps() {
+    fn presence_is_a_spring_that_arrives_and_never_jumps() {
         let mut p = Presence::new(FADE_MS);
         assert!(p.at_rest(0) && p.settled(0) && !p.is_in());
         assert_eq!(p.value(0), 0.0);
         p.enter(1000);
         assert!(p.is_in() && !p.settled(1050) && !p.at_rest(1050));
         assert_eq!(p.value(1000), 0.0);
-        let half = p.value(1080);
-        assert!((half - 0.5).abs() < 1e-3, "smoothstep is 0.5 half way: {half}");
-        assert!(p.value(1020) < 0.1 && p.value(1140) > 0.9, "slow at both ends");
-        assert_eq!(p.value(1160), 1.0);
-        assert!(p.settled(1160));
+        // a spring of 240 ms: it picks up speed, is half way after about a quarter of that and nearly there after it
+        assert!(p.value(1016) < 0.1, "a gentle start: {}", p.value(1016));
+        let half = p.value(1064);
+        assert!((half - 0.5).abs() < 0.03, "{half}");
+        assert!(p.value(1150) > 0.88 && p.value(1240) > 0.98);
+        // it comes to rest ON the target and asks for no more frames after that
+        assert!(!p.settled(1240) && p.settled(1400));
+        assert_eq!(p.value(1400), 1.0);
         // the same call again restarts nothing
-        p.enter(1200);
-        assert_eq!(p.value(1200), 1.0);
-        // leaving in mid flight comes back from where the height was
+        p.enter(1500);
+        assert_eq!(p.value(1500), 1.0);
+        // leaving, and coming back in mid flight: it goes on from where the height was, with the speed it had
         p.leave(2000);
-        let mid = p.value(2080);
-        p.enter(2080);
-        assert!((p.value(2080) - mid).abs() < 1e-6, "no jump when the direction changes");
-        // monotonic, within 0..1
+        let (before, mid) = (p.value(2059), p.value(2060));
+        assert!(mid < before && mid > 0.3 && mid < 0.7);
+        p.enter(2060);
+        assert!((p.value(2060) - mid).abs() < 1e-6, "no jump when the direction changes");
+        // (it was falling: a millisecond later it still falls, a little less; it does not leap up from a standstill)
+        let after = p.value(2061);
+        assert!(after < mid && mid - after < before - mid + 1e-4, "it slows before it turns: {before} {mid} {after}");
+        let lowest = (2060..2200).map(|t| p.value(t)).fold(mid, f32::min);
+        assert!(lowest < mid && lowest > 0.0, "and turns before it would have been away: {lowest}");
+        assert!(p.settled(2600) && p.value(2600) == 1.0);
+        // from rest it only rises, within 0..1, and ends on 1
         let mut q = Presence::new(FADE_MS);
         q.enter(0);
         let mut last = 0.0;
-        for t in 0..=160 {
+        for t in 0..=500 {
             let v = q.value(t);
-            assert!((0.0..=1.0).contains(&v) && v >= last);
+            assert!((0.0..=1.0).contains(&v) && v >= last, "at {t}: {v} after {last}");
             last = v;
         }
+        assert_eq!(last, 1.0);
         q.leave(500);
-        assert!(q.at_rest(700) && q.value(700) == 0.0);
+        assert!(!q.at_rest(700) && q.value(700) < 0.1, "the last of the way is soft");
+        assert!(q.at_rest(1000) && q.value(1000) == 0.0);
+    }
+
+    #[test]
+    fn a_change_of_the_animations_setting_ends_a_motion_under_way_and_the_same_value_changes_nothing() {
+        let mut p = Presence::new(FADE_MS);
+        p.enter(0);
+        let v = p.value(60);
+        p.set_duration(FADE_MS);
+        assert_eq!(p.value(60), v, "the same duration again: the motion goes on");
+        p.set_duration(0);
+        assert!(p.settled(60) && p.value(60) == 1.0, "animations off: it is where it was going");
+        p.set_duration(FADE_MS);
+        p.leave(100);
+        assert!(p.value(100) == 1.0 && !p.settled(150), "and on again: the next change is a spring from where it stands");
     }
 
     #[test]

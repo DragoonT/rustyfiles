@@ -109,6 +109,7 @@ pub mod startpins;
 pub mod startrecent;
 pub mod startuser;
 pub mod size;
+pub mod spring;
 pub mod size_live;
 pub mod system;
 pub mod taskmgr;
