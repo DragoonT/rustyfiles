@@ -223,8 +223,9 @@ fn ensure_window(island_glass: &Rc<RefCell<IslandGlass>>, cx: &mut App) -> Optio
         })
         .ok()
         .filter(|h| *h != 0)?;
-    // never activated: a tool window with no activation on a click (the same styling as the islands)
-    if let Err(e) = island::make_island(hwnd) {
+    // never activated: a tool window with no activation on a click (the same styling as the islands), and no frame: the system's round
+    // corners and shadow go around what is drawn (`island::make_popup`)
+    if let Err(e) = island::make_popup(hwnd) {
         log::warn!("tray: the tip window could not be styled: {e:#}");
     }
     host_g(cx).made = Some(Made { handle, hwnd });

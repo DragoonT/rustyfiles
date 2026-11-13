@@ -268,8 +268,9 @@ fn ensure_window(island: &Rc<RefCell<IslandGlass>>, cx: &mut App) -> Option<(Win
         v.hwnd = h;
         h
     }).ok().filter(|h| *h != 0)?;
-    // never activated: a tool window with no activation on a click (the same styling as the islands)
-    if let Err(e) = island::make_island(hwnd) {
+    // never activated: a tool window with no activation on a click (the same styling as the islands), and no frame: the system's round
+    // corners and shadow go around what is drawn (`island::make_popup`)
+    if let Err(e) = island::make_popup(hwnd) {
         log::warn!("dock: the preview window could not be styled: {e:#}");
     }
     host_g(cx).made = Some(Made { handle, hwnd });
@@ -512,8 +513,10 @@ impl PreviewView {
             self._watch = Some(glass_watch::watch(cx, |this: &mut Self| this.popup.as_mut()));
         }
         // THE SAME BOX the card is painted with (`Layout::card(i).picture`), in device px. DWM measures its destination from the window's
-        // own top left corner, and the client area of this window starts after the system's invisible frame (8 px at 100 % on the left,
-        // none at the top): the pictures were drawn that far left of their boxes. The origin is read now, with the window on the screen.
+        // own top left corner. This window has no frame (`island::make_popup`), so that is the client area's corner and the origin
+        // reads (0, 0); while it still had the system's invisible frame (8 px at 100 % on the left) the pictures were drawn that far
+        // left of their boxes. It is still read, with the window on the screen: a window whose frame came back is then only wrong in
+        // its edges, not in its pictures too.
         let origin = thumb_origin(self.hwnd);
         let boxes: Vec<(isize, bool, Rect)> =
             self.cards.iter().enumerate().map(|(i, c)| (c.win.hwnd, c.minimized, preview::to_device(self.layout.card(i).picture, self.scale))).collect();

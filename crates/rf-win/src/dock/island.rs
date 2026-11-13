@@ -9,7 +9,7 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, DefWindowProcW, GCL_STYLE, GWL_EXSTYLE, GWLP_WNDPROC, GetClassLongPtrW, GetWindowLongPtrW, HWND_TOPMOST, IsWindowVisible, SW_HIDE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetClassLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_MOUSEACTIVATE, WM_NCDESTROY, WNDPROC,
+    SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER, SetClassLongPtrW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WM_MOUSEACTIVATE, WM_NCCALCSIZE, WM_NCDESTROY, WNDPROC,
     WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
@@ -47,8 +47,24 @@ fn previous_proc(hwnd: isize) -> Option<isize> {
     PREVIOUS.lock().unwrap_or_else(|p| p.into_inner()).iter().find(|(h, _)| *h == hwnd).map(|(_, p)| *p)
 }
 
+/// The island-styled windows whose frame was put away ([`make_popup`]): the client area of each is its whole window.
+static FRAMELESS: std::sync::Mutex<Vec<isize>> = std::sync::Mutex::new(Vec::new());
+
+fn is_frameless(hwnd: isize) -> bool {
+    FRAMELESS.lock().unwrap_or_else(|p| p.into_inner()).contains(&hwnd)
+}
+
+/// The reply of a window with no frame to "how big is your client area" (`WM_NCCALCSIZE`): 0 with the rectangle left as it came, which
+/// is "all of the window". GPUI's own answer takes the system's resize frame off on three sides (8 px at 100 %).
+pub fn frameless_reply(msg: u32, frameless: bool) -> Option<isize> {
+    (frameless && msg == WM_NCCALCSIZE).then_some(0)
+}
+
 unsafe extern "system" fn island_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if let Some(reply) = island_reply(msg) {
+        return LRESULT(reply);
+    }
+    if let Some(reply) = frameless_reply(msg, msg == WM_NCCALCSIZE && is_frameless(hwnd.0 as isize)) {
         return LRESULT(reply);
     }
     // an island is not minimized: its own menu's command is refused, and one that another program minimized comes back (`stayup.rs`)
@@ -62,6 +78,7 @@ unsafe extern "system" fn island_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
     // the window is going: forget it (a handle may be reused by another window later)
     if msg == WM_NCDESTROY {
         PREVIOUS.lock().unwrap_or_else(|p| p.into_inner()).retain(|(h, _)| *h != hwnd.0 as isize);
+        FRAMELESS.lock().unwrap_or_else(|p| p.into_inner()).retain(|h| *h != hwnd.0 as isize);
         crate::stayup::forget(hwnd.0 as isize);
     }
     // SAFETY: `prev` is the procedure `SetWindowLongPtrW(GWLP_WNDPROC)` returned for this very window
@@ -122,6 +139,34 @@ pub fn make_island(hwnd: isize) -> anyhow::Result<()> {
         set(DWMWA_EXCLUDED_FROM_PEEK, 1);
         answer_mouse_activation(h);
         let _ = SetWindowPos(h, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+    Ok(())
+}
+
+/// [`make_island`] for a POP-UP that belongs to an island and has the system's round corners (the hover preview, the tray's tip): the
+/// window also loses its frame, so that its client area is the whole window.
+///
+/// WHY: an island's window keeps the system's invisible resize frame (8 px left, right and below at 100 %), and `make_island` switches
+/// DWM's non-client rendering off. With that off DWM takes the WHOLE window for the frame, invisible part included (read from a running
+/// dock: its "extended frame bounds" are the window's rectangle, where a panel that still has non-client rendering reports its client
+/// area and one pixel). An island asks for no rounding and no shadow, so nothing of that is seen. A pop-up that asks for round corners
+/// got them, and its shadow, around the outer rectangle: the picture the app draws stood square-cornered inside a see-through band
+/// with a rounded shadow around the band (seen on a user's screen over a light map, 2026-11-13). With no frame there is one rectangle:
+/// what the app draws, what the glass covers, what DWM rounds and shadows and what a DWM thumbnail's destination is measured from.
+pub fn make_popup(hwnd: isize) -> anyhow::Result<()> {
+    make_island(hwnd)?;
+    if previous_proc(hwnd).is_none() {
+        anyhow::bail!("{hwnd:#x} has no island procedure to answer for its frame");
+    }
+    {
+        let mut list = FRAMELESS.lock().unwrap_or_else(|p| p.into_inner());
+        if !list.contains(&hwnd) {
+            list.push(hwnd);
+        }
+    }
+    // (the frame is worked out again now: the window keeps its place and its outer size, the client area becomes all of it)
+    unsafe {
+        let _ = SetWindowPos(hwnd_of(hwnd), None, 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
     Ok(())
 }
@@ -213,6 +258,51 @@ mod tests {
         assert_eq!(island_reply(0x0200 /* WM_MOUSEMOVE */), None);
         assert_eq!(island_reply(0x0201 /* WM_LBUTTONDOWN */), None);
         assert_eq!(island_reply(0), None);
+    }
+
+    #[test]
+    fn only_a_frameless_window_answers_for_its_frame_and_only_that_message() {
+        assert_eq!(frameless_reply(WM_NCCALCSIZE, true), Some(0), "all of the window is client area");
+        assert_eq!(frameless_reply(WM_NCCALCSIZE, false), None, "an island keeps the frame its window gives it");
+        assert_eq!(frameless_reply(WM_MOUSEACTIVATE, true), None);
+        assert_eq!(frameless_reply(0x0005 /* WM_SIZE */, true), None);
+        assert!(!is_frameless(0) && !is_frameless(0x1234));
+        assert!(make_popup(0).is_err());
+    }
+
+    /// A REAL WINDOW, never shown: a pop-up with a title bar's style (what the toolkit makes) has a frame, and after `make_popup` its
+    /// client area is its whole window, wherever it is moved and whatever size it is given, and DWM's frame is that rectangle too.
+    #[test]
+    fn a_popup_made_from_a_framed_window_has_no_frame_left() {
+        use crate::dock::panel::{frame_insets, outer_for_client};
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
+        use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow, WINDOW_EX_STYLE, WS_CAPTION, WS_CLIPCHILDREN};
+        use windows::core::w;
+        let h = unsafe { CreateWindowExW(WINDOW_EX_STYLE(0), w!("STATIC"), w!(""), WS_CAPTION | WS_CLIPCHILDREN, 300, 200, 220, 174, None, None, None, None) }.expect("a hidden window");
+        let key = h.0 as isize;
+        let before = frame_insets(key);
+        assert!(before.iter().any(|i| *i > 0), "a window with a title bar's style has a frame: {before:?}");
+        make_popup(key).expect("the window exists");
+        assert!(is_frameless(key));
+        assert_eq!(frame_insets(key), [0; 4], "no frame left");
+        // placed by its client area, as the pop-ups are: the window is that rectangle
+        let want = Rect::from_xywh(640, 480, 204, 164);
+        let o = outer_for_client(want, frame_insets(key));
+        assert_eq!(o, want);
+        unsafe { SetWindowPos(h, None, o.left, o.top, o.width(), o.height(), SWP_NOZORDER | SWP_NOACTIVATE) }.expect("moved");
+        assert_eq!(frame_insets(key), [0; 4], "and none after a move and a new size");
+        assert_eq!(rect(key), Some(want));
+        assert_eq!(crate::dock::panel::client_origin_in_window(key), (0, 0), "a DWM picture's destination needs no shift");
+        let mut f = RECT::default();
+        if unsafe { DwmGetWindowAttribute(h, DWMWA_EXTENDED_FRAME_BOUNDS, &mut f as *mut RECT as *mut _, size_of::<RECT>() as u32) }.is_ok() {
+            assert_eq!((f.left, f.top, f.right, f.bottom), (want.left, want.top, want.right, want.bottom), "what DWM rounds and shadows is the client area");
+        }
+        // a second call changes nothing; the window's going forgets it
+        make_popup(key).expect("again");
+        assert_eq!(frame_insets(key), [0; 4]);
+        unsafe { DestroyWindow(h) }.expect("destroyed");
+        assert!(!is_frameless(key), "forgotten with the window");
     }
 
     #[test]
