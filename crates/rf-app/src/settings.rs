@@ -557,6 +557,14 @@ pub struct Settings {
     /// The dock's bell opens our own notification panel and wears a dot while there are notifications (on). Off: the old behaviour,
     /// it sends Win+N.
     pub dock_own_notifications: bool,
+    /// The order of the right island's own buttons, as keys ("eject", "security", "network", "volume"); empty: the usual order. A list
+    /// that names only some, or names a key this version does not know, is completed (`rf_win::dock::status_order`).
+    pub dock_status_order: Vec<String>,
+    /// Which of those buttons the user hid (the same keys); empty: all are shown.
+    pub dock_status_hidden: Vec<String>,
+    /// The left and the right island are as tall as the middle one (off: they are lower, as they always were). While the dock is thin
+    /// under a maximised window all three are the thin height either way.
+    pub dock_side_tall: bool,
     /// How much the dock's icons grow under the pointer (off / subtle / full).
     pub dock_magnify: DockMagnify,
     /// Resting the pointer on a running app's icon in the dock shows a preview of its windows (on; the dock itself is opt-in). Off: nothing.
@@ -742,6 +750,9 @@ impl Default for Settings {
             dock_own_control_centre: true,
             dock_own_calendar: true,
             dock_own_notifications: true,
+            dock_status_order: Vec::new(),
+            dock_status_hidden: Vec::new(),
+            dock_side_tall: false,
             dock_magnify: DockMagnify::Full,
             dock_hover_previews: true,
             dock_app_menu: true,

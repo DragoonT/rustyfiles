@@ -1631,5 +1631,13 @@
  "9ab46316": "Tag også betaversioner",
  "18892f1d": "Denne kopi er en betaversion: den tager de næste betaversioner, også når kontakten er slået fra, og skifter til udgivelsen, når den er ude.",
  "84de037b": "Versioner, der afprøves før en udgivelse: nye ting kommer tidligt, og det samme kan fejl. Når funktionen er slået fra, downloades kun udgivelser.",
- "754286b1": "Bedste match"
+ "754286b1": "Bedste match",
+ "cabf845b": "Statusikoner",
+ "1f3041d1": "Rækkefølgen af højre øs egne ikoner, og hvilke af dem der vises. Den øverste på listen står længst til venstre. Skift rækkefølgen med pilene, ved at trække en række eller ved at trække ikonet på selve docken. Ikonet for sikker fjernelse vises kun, mens et flytbart drev er tilsluttet.",
+ "6e06f194": "Sikker fjernelse",
+ "9f0f515e": "Windows Sikkerhed",
+ "2db1a682": "Lyd",
+ "1b222370": "Flyt op",
+ "26ea62eb": "Sideøer lige så høje som docken",
+ "8dd08d22": "Venstre og højre ø tegnes lige så høje som den midterste. Når det er slået fra, er de lavere. Mens docken er tynd, fordi et vindue er maksimeret, er alle tre tynde."
 }

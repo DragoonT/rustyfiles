@@ -127,9 +127,22 @@ pub fn clock_width(lines: &ClockLines) -> f32 {
     chars as f32 * CLOCK_CHAR + CLOCK_PAD
 }
 
-/// The right island's width: padding, two buttons, a separator between gaps, the clock, the bell, padding.
+/// The right island's width with its usual two buttons (network and volume): padding, two buttons, a separator between gaps, the
+/// clock, the bell, padding.
 pub fn right_width(lines: &ClockLines) -> f32 {
-    SIDE_PAD + BUTTON + RIGHT_GAP + BUTTON + RIGHT_SEP_GAP + SEPARATOR_WIDTH + RIGHT_SEP_GAP + clock_width(lines) + RIGHT_GAP + BUTTON + SIDE_PAD
+    right_width_for(lines, 2)
+}
+
+/// The right island's width with `buttons` of its own buttons before the clock (`rf_win::dock::status_order::shown`): the buttons with
+/// a gap between two of them and the separator between its gaps after them; with none there is no separator either, and the clock
+/// starts at the padding (or right after the tray strip, which ends with a separator of its own).
+pub fn right_width_for(lines: &ClockLines, buttons: usize) -> f32 {
+    SIDE_PAD + status_block(buttons) + clock_width(lines) + RIGHT_GAP + BUTTON + SIDE_PAD
+}
+
+/// What `buttons` of the island's own buttons take, with the separator and its gaps after them. Nothing for none.
+pub fn status_block(buttons: usize) -> f32 {
+    if buttons == 0 { 0.0 } else { buttons as f32 * BUTTON + (buttons - 1) as f32 * RIGHT_GAP + RIGHT_SEP_GAP + SEPARATOR_WIDTH + RIGHT_SEP_GAP }
 }
 
 /// A secondary monitor's right island: the clock and, when there is room, the bell. The tray strip, the network and the volume buttons

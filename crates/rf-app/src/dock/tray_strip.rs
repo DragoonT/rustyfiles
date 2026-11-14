@@ -440,7 +440,7 @@ fn read_order(cx: &mut App) {
 /// The right island's visible glass and the device px per dock unit (the monitor's scale times the dock's size): what the strip's cells
 /// and chevron are placed with. (The overflow panel's own cells keep the monitor's scale: see `source_rect`.)
 fn glass_and_unit(cx: &App) -> Option<(Rect, f32)> {
-    Some((host::visible_glass_rect_on(host::MonId::HOME, Kind::Right, cx)?, rf_win::dock::size::unit(host::home_work(cx)?.0, super::look::dock_size(cx))))
+    Some((host::current_glass_rect_on(host::MonId::HOME, Kind::Right, cx)?, rf_win::dock::size::unit(host::home_work(cx)?.0, super::look::dock_size(cx))))
 }
 
 /// What the strip shows now, for the right island's empty-glass test (`empty.rs`): `None` without a strip.

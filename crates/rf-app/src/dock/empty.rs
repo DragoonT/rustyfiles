@@ -48,8 +48,9 @@ pub struct TrayShape {
 }
 
 /// The right island's controls: the tray strip's cells and chevron (when there is a strip, which makes the island `tray_extra` units
-/// wider), the network and volume buttons, the clock and the bell, in the order and at the distances `right.rs` builds them.
-pub fn right_controls(clock_width: f32, tray: Option<TrayShape>, tray_extra: f32, sys: usize) -> Vec<Box4> {
+/// wider), the island's own `buttons` (network, volume, Windows Security, safe removal: as many as it shows now, whichever they are),
+/// the clock and the bell, in the order and at the distances `right.rs` builds them.
+pub fn right_controls(clock_width: f32, tray: Option<TrayShape>, tray_extra: f32, buttons: usize) -> Vec<Box4> {
     let y = |h: f32| (SIDE_HEIGHT - h) / 2.0;
     let mut out = Vec::new();
     let mut x = plan::SIDE_PAD;
@@ -62,24 +63,25 @@ pub fn right_controls(clock_width: f32, tray: Option<TrayShape>, tray_extra: f32
         }
         x += tray_extra;
     }
-    // the island's own buttons before the network symbol (safe removal for each removable drive, Windows Security): `right.rs`
-    for i in 0..sys {
+    // the island's own buttons, a gap between two of them, then (when there is any) the separator between its gaps: `right.rs`
+    for i in 0..buttons {
         out.push([x + i as f32 * (plan::BUTTON + plan::RIGHT_GAP), y(plan::BUTTON), plan::BUTTON, plan::BUTTON]);
     }
-    x += sys as f32 * (plan::BUTTON + plan::RIGHT_GAP);
-    let (network, volume) = (x, x + plan::BUTTON + plan::RIGHT_GAP);
-    let clock = volume + plan::BUTTON + plan::RIGHT_SEP_GAP + rf_win::dock::layout::SEPARATOR_WIDTH + plan::RIGHT_SEP_GAP;
+    let clock = x + plan::status_block(buttons);
     let bell = clock + clock_width + plan::RIGHT_GAP;
-    out.push([network, y(plan::BUTTON), plan::BUTTON, plan::BUTTON]);
-    out.push([volume, y(plan::BUTTON), plan::BUTTON, plan::BUTTON]);
     out.push([clock, y(plan::CLOCK_H), clock_width, plan::CLOCK_H]);
     out.push([bell, y(plan::BUTTON), plan::BUTTON, plan::BUTTON]);
     out
 }
 
-/// A side island's empty glass at `point` (dock units from its glass's top left corner)? `width` is the island's glass width.
-pub fn side_is_empty(width: f32, controls: &[Box4], point: (f32, f32)) -> bool {
-    empty_spot::is_empty([0.0, 0.0, width, SIDE_HEIGHT], RADIUS, controls, point)
+/// A side island's empty glass at `point` (dock units from its glass's top left corner)? `width` and `height` are the glass's as it
+/// is drawn now (`host::side_height_on`: the usual `SIDE_HEIGHT`, or more for the setting that makes the side islands as tall as the
+/// dock). The `controls` are worked out for the usual height; they are centred in the glass, so in a taller one they stand lower by
+/// half the difference.
+pub fn side_is_empty(width: f32, height: f32, controls: &[Box4], point: (f32, f32)) -> bool {
+    let down = (height - SIDE_HEIGHT) / 2.0;
+    let moved: Vec<Box4> = controls.iter().map(|b| [b[0], b[1] + down, b[2], b[3]]).collect();
+    empty_spot::is_empty([0.0, 0.0, width, height], RADIUS, &moved, point)
 }
 
 /// One icon of the middle island as a right click sees it: the icon's own square and, under it, the strip down to the running mark's
@@ -160,9 +162,9 @@ mod tests {
         // the clock and the bell are controls; between them is empty glass
         let w = plan::right_width_secondary(cw, true);
         let c = right_controls_secondary(cw, true);
-        assert!(!side_is_empty(w, &c, (plan::SIDE_PAD + 10.0, 24.0)));
-        assert!(side_is_empty(w, &c, (plan::SIDE_PAD + cw + 1.0, 24.0)), "the gap between the clock and the bell");
-        assert!(!side_is_empty(w, &c, (plan::SIDE_PAD + cw + plan::RIGHT_GAP + 10.0, 24.0)), "the bell");
+        assert!(!side_is_empty(w, SIDE_HEIGHT, &c, (plan::SIDE_PAD + 10.0, 24.0)));
+        assert!(side_is_empty(w, SIDE_HEIGHT, &c, (plan::SIDE_PAD + cw + 1.0, 24.0)), "the gap between the clock and the bell");
+        assert!(!side_is_empty(w, SIDE_HEIGHT, &c, (plan::SIDE_PAD + cw + plan::RIGHT_GAP + 10.0, 24.0)), "the bell");
     }
 
     #[test]
@@ -172,11 +174,11 @@ mod tests {
         assert_eq!(c.len(), 2);
         // on the logo, on the field's two ends
         for p in [(24.0, 24.0), (50.0, 24.0), (265.0, 24.0)] {
-            assert!(!side_is_empty(w, &c, p), "{p:?}");
+            assert!(!side_is_empty(w, SIDE_HEIGHT, &c, p), "{p:?}");
         }
         // between them, above the field, and the weather (shown, not a control)
         for p in [(44.0, 24.0), (150.0, 4.0), (150.0, 44.0), (w - 30.0, 24.0), (w - 5.0, 24.0)] {
-            assert!(side_is_empty(w, &c, p), "{p:?}");
+            assert!(side_is_empty(w, SIDE_HEIGHT, &c, p), "{p:?}");
         }
     }
 
@@ -194,20 +196,20 @@ mod tests {
     fn the_right_island_without_a_strip() {
         let lines = ClockLines { time: "14:05".into(), date: "12.11.2026".into() };
         let cw = plan::clock_width(&lines);
-        let c = right_controls(cw, None, 0.0, 0);
+        let c = right_controls(cw, None, 0.0, 2);
         assert_eq!(c.len(), 4);
         let w = plan::right_width(&lines);
         // the bell ends where the content does
         let bell = c[3];
         assert_eq!(bell[0] + bell[2] + plan::SIDE_PAD, w);
         // a symbol, the clock, the bell are theirs; the separator between the volume symbol and the clock, and the padding, are glass
-        assert!(!side_is_empty(w, &c, (8.0 + 16.0, 24.0)));
-        assert!(!side_is_empty(w, &c, (c[2][0] + 3.0, 24.0)));
-        assert!(!side_is_empty(w, &c, (bell[0] + 16.0, 24.0)));
+        assert!(!side_is_empty(w, SIDE_HEIGHT, &c, (8.0 + 16.0, 24.0)));
+        assert!(!side_is_empty(w, SIDE_HEIGHT, &c, (c[2][0] + 3.0, 24.0)));
+        assert!(!side_is_empty(w, SIDE_HEIGHT, &c, (bell[0] + 16.0, 24.0)));
         let sep = c[1][0] + c[1][2] + plan::RIGHT_SEP_GAP;
-        assert!(side_is_empty(w, &c, (sep + 0.5, 24.0)), "the separator is not a control");
-        assert!(side_is_empty(w, &c, (c[0][0] + c[0][2] + 1.0, 24.0)), "the gap between the two symbols");
-        assert!(side_is_empty(w, &c, (c[2][0] + 3.0, 2.0)), "above the clock's block");
+        assert!(side_is_empty(w, SIDE_HEIGHT, &c, (sep + 0.5, 24.0)), "the separator is not a control");
+        assert!(side_is_empty(w, SIDE_HEIGHT, &c, (c[0][0] + c[0][2] + 1.0, 24.0)), "the gap between the two symbols");
+        assert!(side_is_empty(w, SIDE_HEIGHT, &c, (c[2][0] + 3.0, 2.0)), "above the clock's block");
     }
 
     #[test]
@@ -216,21 +218,21 @@ mod tests {
         let cw = plan::clock_width(&lines);
         let shape = TrayShape { visible: 3, chevron: true };
         let extra = ts::Layout { visible: vec![0, 1, 2], overflow: vec![], chevron: true }.extra_width();
-        let c = right_controls(cw, Some(shape), extra, 0);
+        let c = right_controls(cw, Some(shape), extra, 2);
         assert_eq!(c.len(), 3 + 1 + 4);
         let w = plan::right_width(&lines) + extra;
         for j in 0..3 {
-            assert!(!side_is_empty(w, &c, (8.0 + j as f32 * ts::CELL + 12.0, 24.0)), "cell {j}");
+            assert!(!side_is_empty(w, SIDE_HEIGHT, &c, (8.0 + j as f32 * ts::CELL + 12.0, 24.0)), "cell {j}");
         }
-        assert!(!side_is_empty(w, &c, (8.0 + 3.0 * ts::CELL + 12.0, 24.0)), "the chevron");
+        assert!(!side_is_empty(w, SIDE_HEIGHT, &c, (8.0 + 3.0 * ts::CELL + 12.0, 24.0)), "the chevron");
         // the thin separator after the strip and its gaps are glass
-        assert!(side_is_empty(w, &c, (8.0 + 3.0 * ts::CELL + ts::CHEVRON_W + 2.0, 24.0)));
+        assert!(side_is_empty(w, SIDE_HEIGHT, &c, (8.0 + 3.0 * ts::CELL + ts::CHEVRON_W + 2.0, 24.0)));
         // the first symbol starts after the strip, its separator and gaps; the bell still ends where the content does
         assert_eq!(c[4][0], 8.0 + extra);
         let bell = c.last().unwrap();
         assert_eq!(bell[0] + bell[2] + plan::SIDE_PAD, w);
         // a strip with nothing in it but the chevron
-        let only = right_controls(cw, Some(TrayShape { visible: 0, chevron: true }), ts::Layout { visible: vec![], overflow: vec![0], chevron: true }.extra_width(), 0);
+        let only = right_controls(cw, Some(TrayShape { visible: 0, chevron: true }), ts::Layout { visible: vec![], overflow: vec![0], chevron: true }.extra_width(), 2);
         assert_eq!(only.len(), 1 + 4);
     }
 
@@ -294,18 +296,43 @@ mod tests {
         assert!(!middle_is_empty(pic.glass, &boxes, (big[0] + big[2] / 2.0, big[1] + 1.0)));
     }
 
-    /// The island's own buttons (safe removal, Windows Security) stand before the network symbol, each a button and a gap wide, and
-    /// push everything after them: the row is exactly that much wider.
+    /// The island's own buttons: each a button wide with a gap between two, then the separator between its gaps, then the clock; one
+    /// more button pushes the clock and the bell a button and a gap further. With none the clock starts at the padding.
     #[test]
-    fn the_islands_own_buttons_stand_before_the_network_symbol() {
-        let cw = 64.0;
-        let (plain, with) = (right_controls(cw, None, 0.0, 0), right_controls(cw, None, 0.0, 2));
+    fn the_islands_own_buttons_stand_before_the_clock_however_many_there_are() {
+        let lines = ClockLines { time: "14:05".into(), date: "12.11.2026".into() };
+        let cw = plan::clock_width(&lines);
         let step = plan::BUTTON + plan::RIGHT_GAP;
-        assert_eq!(with.len(), plain.len() + 2);
-        assert_eq!(with[0], [plan::SIDE_PAD, (SIDE_HEIGHT - plan::BUTTON) / 2.0, plan::BUTTON, plan::BUTTON]);
-        assert_eq!(with[1][0], plan::SIDE_PAD + step);
-        for (a, b) in plain.iter().zip(&with[2..]) {
-            assert_eq!([a[0] + 2.0 * step, a[1], a[2], a[3]], *b);
+        for n in 0..=4usize {
+            let c = right_controls(cw, None, 0.0, n);
+            assert_eq!(c.len(), n + 2, "{n} buttons, the clock, the bell");
+            for (i, b) in c[..n].iter().enumerate() {
+                assert_eq!(*b, [plan::SIDE_PAD + i as f32 * step, (SIDE_HEIGHT - plan::BUTTON) / 2.0, plan::BUTTON, plan::BUTTON]);
+            }
+            let (clock, bell) = (c[n], c[n + 1]);
+            assert_eq!(clock[0], plan::SIDE_PAD + plan::status_block(n));
+            assert_eq!(bell[0], clock[0] + cw + plan::RIGHT_GAP);
+            // the bell ends where the island's width says the content ends
+            assert_eq!(bell[0] + bell[2] + plan::SIDE_PAD, plan::right_width_for(&lines, n));
         }
+        assert_eq!(plan::status_block(0), 0.0, "no button: no separator either");
+        assert_eq!(plan::status_block(3) - plan::status_block(2), step);
+        assert_eq!(plan::right_width(&lines), plan::right_width_for(&lines, 2), "the usual two");
+    }
+
+    /// In a glass taller than the usual one the controls are centred all the same: a point that was on a control is on it half the
+    /// difference lower, and the glass above and below it is empty glass.
+    #[test]
+    fn in_a_taller_glass_the_controls_stand_lower_by_half_the_difference() {
+        let lines = ClockLines { time: "14:05".into(), date: "12.11.2026".into() };
+        let c = right_controls(plan::clock_width(&lines), None, 0.0, 2);
+        let w = plan::right_width(&lines);
+        let tall = rf_win::dock::layout::MIDDLE_HEIGHT;
+        let x = plan::SIDE_PAD + 16.0;
+        assert!(!side_is_empty(w, SIDE_HEIGHT, &c, (x, 24.0)));
+        assert!(!side_is_empty(w, tall, &c, (x, 36.0)), "the middle of the tall glass");
+        assert!(side_is_empty(w, tall, &c, (x, 12.0)), "above the button in the tall glass");
+        assert!(side_is_empty(w, tall, &c, (x, 62.0)), "below it");
+        assert!(!side_is_empty(w, tall, &c, (x, 80.0)), "outside the glass is not its empty glass");
     }
 }

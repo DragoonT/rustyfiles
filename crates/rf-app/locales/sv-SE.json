@@ -1631,5 +1631,13 @@
  "9ab46316": "Ta även betaversioner",
  "18892f1d": "Den här kopian är en betaversion: den tar emot nästa betaversioner även med reglaget av och går över till den slutliga versionen när den kommer.",
  "84de037b": "Versioner som prövas före en utgåva: nyheter kommer tidigt, och det kan buggar göra också. När det är av hämtas bara utgåvor.",
- "754286b1": "Bästa matchning"
+ "754286b1": "Bästa matchning",
+ "cabf845b": "Statusikoner",
+ "1f3041d1": "Ordningen på den högra öns egna ikoner och vilka av dem som visas. Den överst i listan står längst till vänster. Ändra ordningen med pilarna, genom att dra en rad eller genom att dra ikonen på själva Dock. Ikonen för säker borttagning visas bara medan en flyttbar enhet är ansluten.",
+ "6e06f194": "Säker borttagning",
+ "9f0f515e": "Windows-säkerhet",
+ "2db1a682": "Ljud",
+ "1b222370": "Flytta upp",
+ "26ea62eb": "Sidoöar lika höga som Dock",
+ "8dd08d22": "Den vänstra och den högra ön ritas lika höga som den mittersta. När det är av är de lägre. Medan Dock är tunn för att ett fönster är maximerat är alla tre tunna."
 }

@@ -145,7 +145,7 @@ impl LeftIsland {
         let [ml, mt, ..] = super::host::insets_on(self.mon, Kind::Left, cx).margins;
         let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
         let controls = if self.mon.is_home() { super::empty::left_controls() } else { super::empty::left_controls_secondary(self.search) };
-        if super::empty::side_is_empty(self.width(), &controls, point) {
+        if super::empty::side_is_empty(self.width(), super::host::side_height_on(self.mon, cx), &controls, point) {
             super::actions::open_task_manager();
         }
     }

@@ -333,9 +333,10 @@ pub fn pointer_on_island(mon: MonId, cx: &mut App) {
 
 // ---------------------------------------------------------------- the work
 
-/// What a walk asks: each dock, its monitor, and its middle island's full glass (what a docked window is measured against).
+/// What a walk asks: each dock, its monitor, and the full glass a docked window is measured against (`host::full_glass_span_on`: the
+/// middle island's, and the side islands' too when they are as tall as it).
 fn what_to_ask(cx: &mut App) -> Vec<(MonId, isize, Option<rf_win::dock::layout::Rect>)> {
-    host::dock_monitors(cx).into_iter().map(|(id, m)| (id, m.handle, host::visible_glass_rect_on(id, Kind::Middle, cx))).collect()
+    host::dock_monitors(cx).into_iter().map(|(id, m)| (id, m.handle, host::full_glass_span_on(id, cx))).collect()
 }
 
 /// A walk over the windows, off the UI thread; at most one at a time. One question for each dock's monitor.

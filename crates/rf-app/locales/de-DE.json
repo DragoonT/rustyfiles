@@ -1631,5 +1631,13 @@
  "9ab46316": "Auch Betaversionen verwenden",
  "18892f1d": "Diese Kopie ist eine Betaversion: Sie übernimmt die nächsten Betas auch bei ausgeschaltetem Schalter und wechselt zur Release-Version, sobald diese erscheint.",
  "84de037b": "Versionen, die vor einem Release erprobt werden: Neuerungen kommen früh, und Fehler möglicherweise auch. Ist die Option aus, werden nur Releases heruntergeladen.",
- "754286b1": "Beste Übereinstimmung"
+ "754286b1": "Beste Übereinstimmung",
+ "cabf845b": "Statussymbole",
+ "1f3041d1": "Die Reihenfolge der eigenen Symbole der rechten Insel und welche davon angezeigt werden. Das oberste in der Liste steht ganz links. Die Reihenfolge lässt sich mit den Pfeilen ändern, durch Ziehen einer Zeile oder durch Ziehen des Symbols im Dock selbst. Das Symbol zum sicheren Entfernen erscheint nur, solange ein Wechseldatenträger angeschlossen ist.",
+ "6e06f194": "Sicheres Entfernen",
+ "9f0f515e": "Windows-Sicherheit",
+ "2db1a682": "Ton",
+ "1b222370": "Nach oben",
+ "26ea62eb": "Seiteninseln so hoch wie das Dock",
+ "8dd08d22": "Die linke und die rechte Insel werden so hoch wie die mittlere gezeichnet. Ist die Option aus, sind sie niedriger. Solange das Dock schlank ist, weil ein Fenster maximiert ist, sind alle drei schlank."
 }

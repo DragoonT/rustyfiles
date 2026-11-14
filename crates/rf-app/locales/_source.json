@@ -9798,5 +9798,53 @@
   "key": "En iyi eşleşme",
   "tr": "En iyi eşleşme",
   "en": "Best match"
+ },
+ {
+  "id": "cabf845b",
+  "key": "Durum simgeleri",
+  "tr": "Durum simgeleri",
+  "en": "Status icons"
+ },
+ {
+  "id": "1f3041d1",
+  "key": "Sağ adanın kendi simgelerinin sırası ve hangilerinin görüneceği. Listede üstte olan solda durur. Sırayı oklarla, satırı sürükleyerek ya da simgeyi Dock'un üzerinde sürükleyerek değiştirebilirsiniz. Güvenli kaldırma simgesi yalnızca çıkarılabilir bir sürücü takılıyken görünür.",
+  "tr": "Sağ adanın kendi simgelerinin sırası ve hangilerinin görüneceği. Listede üstte olan solda durur. Sırayı oklarla, satırı sürükleyerek ya da simgeyi Dock'un üzerinde sürükleyerek değiştirebilirsiniz. Güvenli kaldırma simgesi yalnızca çıkarılabilir bir sürücü takılıyken görünür.",
+  "en": "The order of the right island's own icons and which of them are shown. The one at the top of the list stands leftmost. Change the order with the arrows, by dragging a row, or by dragging the icon on the Dock itself. The safe removal icon appears only while a removable drive is connected."
+ },
+ {
+  "id": "6e06f194",
+  "key": "Güvenli kaldırma",
+  "tr": "Güvenli kaldırma",
+  "en": "Safe removal"
+ },
+ {
+  "id": "9f0f515e",
+  "key": "Windows Güvenliği",
+  "tr": "Windows Güvenliği",
+  "en": "Windows Security"
+ },
+ {
+  "id": "2db1a682",
+  "key": "Ses",
+  "tr": "Ses",
+  "en": "Sound"
+ },
+ {
+  "id": "1b222370",
+  "key": "Yukarı taşı",
+  "tr": "Yukarı taşı",
+  "en": "Move up"
+ },
+ {
+  "id": "26ea62eb",
+  "key": "Yan adalar Dock kadar yüksek olsun",
+  "tr": "Yan adalar Dock kadar yüksek olsun",
+  "en": "Side islands as tall as the Dock"
+ },
+ {
+  "id": "8dd08d22",
+  "key": "Sol ve sağ ada orta adayla aynı yükseklikte çizilir. Kapalıyken daha alçaktırlar. Dock bir pencere büyütüldüğü için inceldiğinde üçü de ince olur.",
+  "tr": "Sol ve sağ ada orta adayla aynı yükseklikte çizilir. Kapalıyken daha alçaktırlar. Dock bir pencere büyütüldüğü için inceldiğinde üçü de ince olur.",
+  "en": "The left and the right island are drawn as tall as the middle one. When off they are lower. While the Dock is thin because a window is maximised, all three are thin."
  }
 ]

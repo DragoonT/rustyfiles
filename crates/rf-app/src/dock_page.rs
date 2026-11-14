@@ -178,6 +178,16 @@ pub(crate) fn entries() -> Vec<Entry> {
             Control::Size(|s| s.dock_size, |s, v| s.dock_size = v),
         ),
         e(
+            "dock-side-tall",
+            "dock_side_tall",
+            General,
+            dock,
+            L::ChevronsUpDown,
+            t!("Yan adalar Dock kadar yüksek olsun"),
+            Some(t!("Sol ve sağ ada orta adayla aynı yükseklikte çizilir. Kapalıyken daha alçaktırlar. Dock bir pencere büyütüldüğü için inceldiğinde üçü de ince olur.")),
+            Control::Switch(|s| s.dock_side_tall, |s, v| s.dock_side_tall = v),
+        ),
+        e(
             "dock-all-monitors",
             "dock_all_monitors",
             General,
@@ -341,6 +351,12 @@ pub(crate) fn page(p: &Palette, s: &Settings, size_slider: Option<AnyElement>) -
             // permission, which an entry cannot show) follows that row directly instead of standing at the end of the page
             if e.field == "dock_weather_city" {
                 out.extend(crate::dock::weather_card::cards(p, s));
+            }
+            // the right island's own buttons, their order and which are shown: a list, so a card of its own (`dock/status_card.rs`) at
+            // the end of the right island's section; dimmed and inert with its line while the Dock is off, like the entries
+            if e.field == "dock_own_notifications" {
+                let live = Needs::DockOn.met(s);
+                out.push(crate::dock::status_card::card(p, s, live).when(!live, |d| d.child(note_line(p, Needs::DockOn.reason(), false))).into_any_element());
             }
         }
     }
@@ -534,7 +550,10 @@ mod tests {
                 // (`dock_one_switch` is the marker that the one switch's migration ran: written by the program, never shown: `settings.rs`)
                 // (`dock_weather_location` is on this page too, drawn by a card of its own right after the weather city's row: `dock/weather_card.rs`,
                 // added by `page` above; it shows Windows' own permission, which an entry cannot)
-                let ours = (name.starts_with("dock_") || name.starts_with("shell_")) && name != "shell_submenu" && !overrides.contains(&name) && name != "dock_weather_location" && name != "dock_one_switch";
+                // (`dock_status_order` and `dock_status_hidden` are on this page too: the list of the right island's own buttons, a card of
+                // its own at the end of the right island's section, `dock/status_card.rs`, added by `page` above)
+                let own_cards = ["dock_weather_location", "dock_status_order", "dock_status_hidden"];
+                let ours = (name.starts_with("dock_") || name.starts_with("shell_")) && name != "shell_submenu" && !overrides.contains(&name) && !own_cards.contains(&name) && name != "dock_one_switch";
                 (ours && rest.contains(':') && !rest.contains('(')).then(|| name.to_string())
             })
             .collect()
@@ -600,7 +619,7 @@ mod tests {
         assert_eq!(secs, Section::ALL.to_vec(), "an empty section would be a heading with nothing under it");
         // the sections hold what the page promises
         let ids = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
-        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_all_monitors", "dock_magnify", "dock_start_grow"]);
+        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_side_tall", "dock_all_monitors", "dock_magnify", "dock_start_grow"]);
         assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_weather_city"]);
         assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu", "dock_thin_when_maximized", "dock_apps_where"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);

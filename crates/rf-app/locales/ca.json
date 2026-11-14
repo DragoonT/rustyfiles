@@ -1631,5 +1631,13 @@
  "9ab46316": "Rep també les versions beta",
  "18892f1d": "Aquesta còpia és una versió beta: rep les betes següents encara que l’opció estigui desactivada i passa a la versió definitiva quan surt.",
  "84de037b": "Versions que es proven abans d’una versió definitiva: les novetats arriben aviat, i els errors també. Amb això desactivat, només es baixen les versions definitives.",
- "754286b1": "Millor coincidència"
+ "754286b1": "Millor coincidència",
+ "cabf845b": "Icones d'estat",
+ "1f3041d1": "L'ordre de les icones pròpies de l'illa dreta i quines es mostren. La de dalt de la llista queda més a l'esquerra. Canvia l'ordre amb les fletxes, arrossegant una fila o arrossegant la icona al mateix Dock. La icona d'extracció segura només apareix mentre hi ha una unitat extraïble connectada.",
+ "6e06f194": "Extracció segura",
+ "9f0f515e": "Seguretat del Windows",
+ "2db1a682": "So",
+ "1b222370": "Mou amunt",
+ "26ea62eb": "Illes laterals tan altes com el Dock",
+ "8dd08d22": "L'illa esquerra i la dreta es dibuixen tan altes com la central. Si està desactivat, són més baixes. Mentre el Dock és prim perquè hi ha una finestra maximitzada, totes tres són primes."
 }

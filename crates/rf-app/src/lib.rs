@@ -338,6 +338,7 @@ pub fn main() {
     // appearing for the whole SMB timeout. Undecided after 2 s = treat as a (slow) folder.
     // `--settings=directlook`: DirectLook'un simge menüsünden "DirectLook ayarları"
     // `--settings=speed`: straight to Settings → Speed test
+    // `--settings=dock`: straight to Settings → Dock
     let settings_arg = std::env::args().nth(1).and_then(|a| a.strip_prefix("--settings=").map(str::to_string));
     let open_look_settings = settings_arg.is_some();
     // `--pick <pipe>`: an app's Open/Save dialog (rustyfiles_dialog.dll) asks for a file
@@ -606,6 +607,7 @@ pub fn main() {
                 match page.as_str() {
                     "speed" => settings_view::Page::Speed,
                     "general" => settings_view::Page::General,
+                    "dock" => settings_view::Page::Dock,
                     _ => settings_view::Page::Look,
                 },
                 cx,

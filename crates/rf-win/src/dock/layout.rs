@@ -119,9 +119,22 @@ pub struct Islands {
 /// shifted off the centre as far as needed) so that `MIN_GAP` stays between neighbours; the side ones are never squeezed. The
 /// middle island's width is never negative.
 pub fn islands(work: Rect, scale: f32, widths: Widths) -> Islands {
+    islands_with(work, scale, widths, SIDE_HEIGHT)
+}
+
+/// The side islands' height for the setting "Yan adalar Dock kadar yüksek olsun" (`side_tall`): the middle island's, or their own.
+/// It is the height of their glass AT REST with the dock at its full height; while the dock is thin a tall side island is as low as
+/// the middle one (`thin::glass_height_px`, the app lowers the glass inside the window that this height made).
+pub fn side_height(tall: bool) -> f32 {
+    if tall { MIDDLE_HEIGHT } else { SIDE_HEIGHT }
+}
+
+/// [`islands`] with side islands `side_height` units high (see [`side_height`]). Nothing else moves: the bottoms stay on one line, the
+/// widths and the gaps are the same, so a taller side island only reaches higher.
+pub fn islands_with(work: Rect, scale: f32, widths: Widths, side_height: f32) -> Islands {
     let bottom = work.bottom - px(MARGIN_BOTTOM, scale);
     let (lw, mw, rw) = (px(widths.left, scale).max(0), px(widths.middle, scale).max(0), px(widths.right, scale).max(0));
-    let (sh, mh) = (px(SIDE_HEIGHT, scale), px(MIDDLE_HEIGHT, scale));
+    let (sh, mh) = (px(side_height, scale), px(MIDDLE_HEIGHT, scale));
     let side = px(MARGIN_SIDE, scale);
     let gap = px(MIN_GAP, scale);
 
@@ -237,6 +250,22 @@ mod tests {
         assert_eq!(px(12.0, 1.5), 18);
         assert_eq!(px(72.0, 1.0), 72);
         assert_eq!(px(0.0, 3.0), 0);
+    }
+
+    /// The setting for side islands as tall as the dock: they reach as high as the middle one and nothing else moves.
+    #[test]
+    fn tall_side_islands_reach_as_high_as_the_middle_one_and_nothing_else_moves() {
+        assert_eq!((side_height(false), side_height(true)), (SIDE_HEIGHT, MIDDLE_HEIGHT));
+        for (work, scale) in [(Rect::new(0, 0, 1920, 1032), 1.0f32), (Rect::new(0, 0, 2560, 1392), 1.25), (Rect::new(-1920, 0, 0, 1040), 1.5), (Rect::new(0, 0, 1366, 728), 0.9)] {
+            let usual = islands(work, scale, W);
+            assert_eq!(islands_with(work, scale, W, side_height(false)), usual, "the usual height is the layout as it was");
+            let tall = islands_with(work, scale, W, side_height(true));
+            assert_eq!(tall.middle, usual.middle);
+            for (t, u) in [(tall.left, usual.left), (tall.right, usual.right)] {
+                assert_eq!((t.left, t.right, t.bottom), (u.left, u.right, u.bottom));
+                assert_eq!((t.top, t.height()), (tall.middle.top, tall.middle.height()), "one height, one line");
+            }
+        }
     }
 
     #[test]

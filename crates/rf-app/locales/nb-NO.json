@@ -1631,5 +1631,13 @@
  "9ab46316": "Ta imot betaversjoner også",
  "18892f1d": "Denne kopien er en betaversjon: den tar imot de neste betaene også med bryteren av, og går over til utgivelsen når den kommer.",
  "84de037b": "Versjoner som prøves før en utgivelse: nye ting kommer tidlig, og det samme kan feil. Når av, lastes bare utgivelser ned.",
- "754286b1": "Beste treff"
+ "754286b1": "Beste treff",
+ "cabf845b": "Statusikoner",
+ "1f3041d1": "Rekkefølgen på den høyre øyas egne ikoner og hvilke av dem som vises. Den øverste i listen står lengst til venstre. Endre rekkefølgen med pilene, ved å dra en rad eller ved å dra ikonet på selve Dock. Ikonet for trygg fjerning vises bare mens en flyttbar stasjon er tilkoblet.",
+ "6e06f194": "Trygg fjerning",
+ "9f0f515e": "Windows Sikkerhet",
+ "2db1a682": "Lyd",
+ "1b222370": "Flytt opp",
+ "26ea62eb": "Sideøyer like høye som Dock",
+ "8dd08d22": "Venstre og høyre øy tegnes like høye som den midtre. Når dette er av, er de lavere. Mens Dock er tynn fordi et vindu er maksimert, er alle tre tynne."
 }

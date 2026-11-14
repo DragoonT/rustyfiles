@@ -1631,5 +1631,13 @@
  "9ab46316": "Nhận cả phiên bản beta",
  "18892f1d": "Bản này là phiên bản beta: nó nhận các bản beta kế tiếp ngay cả khi tắt công tắc, và chuyển sang bản phát hành khi có.",
  "84de037b": "Các phiên bản được thử trước khi phát hành: tính năng mới đến sớm, lỗi cũng vậy. Khi tắt, chỉ tải các bản phát hành.",
- "754286b1": "Khớp nhất"
+ "754286b1": "Khớp nhất",
+ "cabf845b": "Biểu tượng trạng thái",
+ "1f3041d1": "Thứ tự các biểu tượng riêng của đảo bên phải và những biểu tượng nào được hiển thị. Biểu tượng ở đầu danh sách đứng ngoài cùng bên trái. Đổi thứ tự bằng các mũi tên, bằng cách kéo một hàng, hoặc kéo biểu tượng ngay trên Dock. Biểu tượng tháo an toàn chỉ xuất hiện khi có ổ đĩa di động được kết nối.",
+ "6e06f194": "Tháo an toàn",
+ "9f0f515e": "Bảo mật Windows",
+ "2db1a682": "Âm thanh",
+ "1b222370": "Chuyển lên",
+ "26ea62eb": "Đảo hai bên cao bằng Dock",
+ "8dd08d22": "Đảo bên trái và bên phải được vẽ cao bằng đảo ở giữa. Khi tắt, chúng thấp hơn. Trong khi Dock mỏng vì có cửa sổ được phóng to, cả ba đều mỏng."
 }

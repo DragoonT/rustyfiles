@@ -1631,5 +1631,13 @@
  "9ab46316": "Ricevi anche le versioni beta",
  "18892f1d": "Questa copia è una versione beta: riceve le prossime beta anche con l'interruttore disattivato e passa alla versione finale quando è disponibile.",
  "84de037b": "Versioni provate prima di un rilascio: le novità arrivano in anticipo, e anche i bug. Se disattivato, vengono scaricate solo le versioni finali.",
- "754286b1": "Risultato migliore"
+ "754286b1": "Risultato migliore",
+ "cabf845b": "Icone di stato",
+ "1f3041d1": "L'ordine delle icone proprie dell'isola destra e quali vengono mostrate. Quella in cima all'elenco sta più a sinistra. Cambia l'ordine con le frecce, trascinando una riga o trascinando l'icona sul Dock stesso. L'icona di rimozione sicura compare solo quando è collegata un'unità rimovibile.",
+ "6e06f194": "Rimozione sicura",
+ "9f0f515e": "Sicurezza di Windows",
+ "2db1a682": "Audio",
+ "1b222370": "Sposta su",
+ "26ea62eb": "Isole laterali alte quanto il Dock",
+ "8dd08d22": "L'isola sinistra e quella destra vengono disegnate alte quanto quella centrale. Se disattivato, sono più basse. Finché il Dock è sottile perché una finestra è ingrandita, tutte e tre sono sottili."
 }

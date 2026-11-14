@@ -108,6 +108,7 @@ pub mod startpage;
 pub mod startpins;
 pub mod startrecent;
 pub mod startuser;
+pub mod status_order;
 pub mod size;
 pub mod spring;
 pub mod size_live;

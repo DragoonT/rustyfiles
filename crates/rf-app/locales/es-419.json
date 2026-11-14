@@ -1631,5 +1631,13 @@
  "9ab46316": "Recibir también versiones beta",
  "18892f1d": "Esta copia es una versión beta: recibe las siguientes betas aunque el interruptor esté desactivado, y pasa a la versión final cuando esta se publica.",
  "84de037b": "Versiones que se prueban antes de un lanzamiento: lo nuevo llega antes, y los errores también. Con esto desactivado, solo se descargan versiones finales.",
- "754286b1": "Mejor coincidencia"
+ "754286b1": "Mejor coincidencia",
+ "cabf845b": "Íconos de estado",
+ "1f3041d1": "El orden de los íconos propios de la isla derecha y cuáles se muestran. El que está arriba en la lista queda más a la izquierda. Cambia el orden con las flechas, arrastrando una fila o arrastrando el ícono en el Dock mismo. El ícono de extracción segura aparece solo mientras hay una unidad extraíble conectada.",
+ "6e06f194": "Extracción segura",
+ "9f0f515e": "Seguridad de Windows",
+ "2db1a682": "Sonido",
+ "1b222370": "Subir",
+ "26ea62eb": "Islas laterales tan altas como el Dock",
+ "8dd08d22": "La isla izquierda y la derecha se dibujan tan altas como la central. Si está desactivado, son más bajas. Mientras el Dock está delgado porque hay una ventana maximizada, las tres son delgadas."
 }

@@ -1631,5 +1631,13 @@
  "9ab46316": "Receber também versões beta",
  "18892f1d": "Esta cópia é uma versão beta: ela recebe os próximos betas mesmo com a chave desativada e passa para a versão final quando ela sair.",
  "84de037b": "Versões testadas antes de um lançamento: novidades chegam cedo, e bugs também. Desativado, apenas versões finais são baixadas.",
- "754286b1": "Melhor correspondência"
+ "754286b1": "Melhor correspondência",
+ "cabf845b": "Ícones de status",
+ "1f3041d1": "A ordem dos ícones próprios da ilha direita e quais deles são exibidos. O que está no topo da lista fica mais à esquerda. Altere a ordem com as setas, arrastando uma linha ou arrastando o ícone no próprio Dock. O ícone de remoção segura aparece apenas enquanto uma unidade removível está conectada.",
+ "6e06f194": "Remoção segura",
+ "9f0f515e": "Segurança do Windows",
+ "2db1a682": "Som",
+ "1b222370": "Mover para cima",
+ "26ea62eb": "Ilhas laterais tão altas quanto o Dock",
+ "8dd08d22": "A ilha esquerda e a direita são desenhadas tão altas quanto a do meio. Quando desativado, elas ficam mais baixas. Enquanto o Dock está fino porque uma janela está maximizada, as três ficam finas."
 }

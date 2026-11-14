@@ -1631,5 +1631,13 @@
  "9ab46316": "Béta verziók fogadása is",
  "18892f1d": "Ez a példány béta verzió: kikapcsolt kapcsolóval is megkapja a következő bétákat, és a kiadás megjelenésekor átáll arra.",
  "84de037b": "A kiadás előtt kipróbált verziók: az újdonságok korán érkeznek, és a hibák is. Kikapcsolva csak a kiadások töltődnek le.",
- "754286b1": "Legjobb találat"
+ "754286b1": "Legjobb találat",
+ "cabf845b": "Állapotikonok",
+ "1f3041d1": "A jobb sziget saját ikonjainak sorrendje, és hogy melyikük látszik. A lista tetején lévő áll a bal szélen. A sorrend a nyilakkal, egy sor húzásával vagy az ikon magán a Dockon történő húzásával módosítható. A biztonságos eltávolítás ikonja csak akkor jelenik meg, ha cserélhető meghajtó van csatlakoztatva.",
+ "6e06f194": "Biztonságos eltávolítás",
+ "9f0f515e": "Windows-biztonság",
+ "2db1a682": "Hang",
+ "1b222370": "Feljebb",
+ "26ea62eb": "Oldalsó szigetek a Dock magasságában",
+ "8dd08d22": "A bal és a jobb sziget ugyanolyan magasra rajzolódik, mint a középső. Kikapcsolva alacsonyabbak. Amíg a Dock vékony, mert egy ablak teljes méretű, mindhárom vékony."
 }

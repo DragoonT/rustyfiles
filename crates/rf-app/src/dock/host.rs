@@ -39,6 +39,7 @@ use rf_win::dock::island;
 use rf_win::dock::layout::{self, Islands, Placement, Placements, RADIUS, Rect, Widths};
 use rf_win::dock::monitors::{self, Change, Content, Search, Wants};
 use rf_win::dock::size_live::{self, Act, File as SizeFile, Live as SizeLive, Msg as SizeMsg, Redo, Step};
+use rf_win::dock::thin::Squeeze;
 use rf_win::dock::{DockSystem, MonitorInfo, SystemEvent};
 
 use super::backdrop::{self, IslandGlass};
@@ -92,6 +93,10 @@ pub struct Prefs {
     pub all_monitors: bool,
     /// Which dock shows which running app.
     pub apps_where: crate::settings::DockAppsWhere,
+    /// The side islands are as tall as the middle one.
+    pub side_tall: bool,
+    /// The right island's own buttons: their order and the hidden ones (the island draws them from the settings; kept here to see a change).
+    pub status: [Vec<String>; 2],
 }
 
 impl Prefs {
@@ -103,6 +108,8 @@ impl Prefs {
             size: s.dock_size,
             all_monitors: s.dock_all_monitors,
             apps_where: s.dock_apps_where,
+            side_tall: s.dock_side_tall,
+            status: [s.dock_status_order.clone(), s.dock_status_hidden.clone()],
         }
     }
 }
@@ -118,6 +125,10 @@ pub struct Changes {
     pub monitors: bool,
     /// Which dock shows which app.
     pub apps: bool,
+    /// The side islands' height.
+    pub side: bool,
+    /// The right island's own buttons (order, hidden).
+    pub status: bool,
 }
 
 pub fn changes(old: &Prefs, new: &Prefs) -> Changes {
@@ -127,6 +138,8 @@ pub fn changes(old: &Prefs, new: &Prefs) -> Changes {
         size: old.size != new.size,
         monitors: old.all_monitors != new.all_monitors,
         apps: old.apps_where != new.apps_where,
+        side: old.side_tall != new.side_tall,
+        status: old.status != new.status,
     }
 }
 
@@ -204,8 +217,18 @@ impl Insets {
 
 /// The insets of an island window of the dock on this monitor, from the host's last layout (real logical px of the window; a view that
 /// lays itself out in dock units divides them by the size factor).
+///
+/// A side island's top margin is to its glass AS IT IS DRAWN NOW: a tall side island of a dock that is thin at the moment has its glass
+/// lower than at rest ([`set_side_squeeze`]), and its view is laid out in that glass.
 pub fn insets_on(mon: MonId, kind: Kind, cx: &App) -> Insets {
-    cx.try_global::<Host>().and_then(|h| h.dock(mon)).and_then(|d| d.geo).map_or_else(|| Insets::assumed(kind, size_on(mon, cx)), |g| Insets::of(&g, kind))
+    let Some((geo, drop)) = cx.try_global::<Host>().and_then(|h| h.dock(mon)).and_then(|d| d.geo.map(|g| (g, d.side_drop))) else {
+        return Insets::assumed(kind, size_on(mon, cx));
+    };
+    let mut insets = Insets::of(&geo, kind);
+    if kind != Kind::Middle {
+        insets.margins[1] += drop as f32 / geo.scale;
+    }
+    insets
 }
 
 /// ONE MONITOR'S DOCK: the value the host keeps a list of. See the top of this file.
@@ -231,6 +254,9 @@ struct Dock {
     fullscreen: bool,
     /// The region the middle window has been given last (`None`: none yet, or it must be given again).
     region: Option<Vec<hit::Part>>,
+    /// How far (device px) the side islands' glass is lowered inside their windows now ([`side_drop`]): nothing for the usual side
+    /// islands and for a dock at its full height.
+    side_drop: i32,
     /// The bands (device px) told to this monitor's work area lately, newest first (`monitors::remember_band`); empty for the home dock,
     /// whose band is the desktop toolbar's.
     told_bands: Vec<i32>,
@@ -314,7 +340,7 @@ impl Host {
     /// The layout for a dock's display as it is now.
     fn compute_geo(&self, dock: &Dock) -> Option<Geo> {
         let (mon, area) = self.area_of(dock)?;
-        Some(geo_for(&mon, area, dock.widths, fitted_factor(self.prefs.size, &mon)))
+        Some(geo_for(&mon, area, dock.widths, fitted_factor(self.prefs.size, &mon), self.prefs.side_tall))
     }
 
     /// The scale and the size factor a dock is drawn at.
@@ -351,10 +377,11 @@ impl Host {
 /// The layout for a monitor, the area the islands are placed in, the islands' widths (dock units) and the dock's size factor. Every
 /// length of the layout is a number of dock units, so the layout is given the unit (the monitor's scale times the size) where it used
 /// to be given the monitor's scale: the one place the size enters.
-fn geo_for(mon: &MonitorInfo, area: Rect, widths: Widths, size: f32) -> Geo {
+/// `side_tall`: the side islands are as tall as the middle one (the setting); the layout then gives them that height at rest.
+fn geo_for(mon: &MonitorInfo, area: Rect, widths: Widths, size: f32, side_tall: bool) -> Geo {
     let scale = mon.scale();
     let unit = rf_win::dock::size::unit(scale, size);
-    let islands = layout::islands(area, unit, widths);
+    let islands = layout::islands_with(area, unit, widths, layout::side_height(side_tall));
     Geo { scale, unit, islands, placements: layout::placements(&islands, mon.rect, unit, layout::shadow_on()), growth_px: layout::growth_room(&islands, unit), area_width: area.width() }
 }
 
@@ -388,6 +415,39 @@ pub fn visible_glass_rect(kind: Kind, cx: &App) -> Option<Rect> {
 /// [`visible_glass_rect`] for the dock on this monitor.
 pub fn visible_glass_rect_on(mon: MonId, kind: Kind, cx: &App) -> Option<Rect> {
     cx.try_global::<Host>()?.dock(mon)?.geo.map(|g| g.glass(kind))
+}
+
+/// A side island's glass as it is DRAWN NOW on this monitor's dock (device px, screen coordinates): [`visible_glass_rect_on`] with its
+/// top where a thin dock's tall side island has it at the moment. For what is placed on the island's own content (the tray strip's
+/// cells, which are centred in the glass); a panel is placed by the glass at rest, because an open panel makes the dock full.
+pub fn current_glass_rect_on(mon: MonId, kind: Kind, cx: &App) -> Option<Rect> {
+    let dock = cx.try_global::<Host>()?.dock(mon)?;
+    let glass = dock.geo?.glass(kind);
+    Some(if kind == Kind::Middle { glass } else { lowered_rect(glass, dock.side_drop) })
+}
+
+/// The glass of this monitor's dock that is FULL height, as one rectangle: what a window docked to the band's edge is measured against
+/// (`rf_win::dock::thin::docked_under`: a window that lies under it makes the dock thin, because the full glass reaches into the work
+/// area). The middle island's glass; with side islands as tall as the dock it reaches from the left island's left edge to the right
+/// island's right edge, so a window snapped beside the middle island counts too (a tall side island would lie on its lowest rows).
+pub fn full_glass_span_on(mon: MonId, cx: &App) -> Option<Rect> {
+    let host = cx.try_global::<Host>()?;
+    let geo = host.dock(mon)?.geo?;
+    Some(full_glass_span(&geo.islands, host.prefs.side_tall))
+}
+
+fn full_glass_span(islands: &Islands, side_tall: bool) -> Rect {
+    if side_tall { Rect { left: islands.left.left, right: islands.right.right, ..islands.middle } } else { islands.middle }
+}
+
+/// How high the side islands' glass is on this monitor's dock at this moment, dock units: the usual height, the middle island's with
+/// the setting for tall side islands, and between the two while such a dock goes thin or grows back.
+pub fn side_height_on(mon: MonId, cx: &App) -> f32 {
+    let Some(host) = cx.try_global::<Host>() else { return layout::SIDE_HEIGHT };
+    match host.dock(mon).and_then(|d| d.geo.map(|g| (g, d.side_drop))) {
+        Some((g, drop)) => (g.glass(Kind::Left).height() - drop) as f32 / g.unit.max(0.01),
+        None => layout::side_height(host.prefs.side_tall),
+    }
 }
 
 /// The active monitor's scale and work area (device px): what a panel is kept inside.
@@ -646,7 +706,75 @@ struct Job {
 
 /// The pieces of a window that take the pointer when nothing sticks out of the glass: the glass itself.
 fn rest_parts(pl: &Placement, unit: f32) -> Vec<hit::Part> {
-    hit::parts(pl.glass_in_window(), layout::px(RADIUS, unit) as f32, &[], pl.window.width(), pl.window.height())
+    side_parts(pl, unit, 0)
+}
+
+/// [`rest_parts`] for a side island whose glass is lowered by `drop` device px.
+fn side_parts(pl: &Placement, unit: f32, drop: i32) -> Vec<hit::Part> {
+    hit::parts(lowered(pl.glass_in_window(), drop), layout::px(RADIUS, unit) as f32, &[], pl.window.width(), pl.window.height())
+}
+
+/// A glass rectangle (x, y, w, h) with its top `drop` px lower and its bottom where it was.
+fn lowered(glass: [f32; 4], drop: i32) -> [f32; 4] {
+    let d = (drop as f32).clamp(0.0, glass[3].max(0.0));
+    [glass[0], glass[1] + d, glass[2], glass[3] - d]
+}
+
+fn lowered_rect(glass: Rect, drop: i32) -> Rect {
+    Rect { top: glass.top + drop.clamp(0, glass.height().max(0)), ..glass }
+}
+
+/// How far (device px) the side islands' glass is lowered at this moment. With the setting for side islands as tall as the dock the
+/// layout makes their glass, and the window around it, as high as the middle island's (`full_px`); while the dock is thin the middle
+/// glass is lower, and the side ones follow it pixel for pixel (`thin::glass_height_px`, the same numbers the middle island draws
+/// with), so the three are one height at every moment of the motion. Without the setting the side islands never move: nothing.
+pub fn side_drop(tall: bool, full_px: i32, unit: f32, sq: &Squeeze) -> i32 {
+    if !tall || sq.is_full() {
+        return 0;
+    }
+    let now = rf_win::dock::thin::glass_height_px(sq, unit, full_px as f32).round() as i32;
+    (full_px - now).clamp(0, full_px.max(0))
+}
+
+/// The middle island of this dock is drawn at this squeeze (called with every frame of it): side islands that are as tall as the dock
+/// get their glass, the part of their window that takes the pointer and their view's box for it. Nothing is done when the height is the
+/// one they have. Like the middle island's frame, the region and the glass go in one task from the message loop, the region first.
+pub fn set_side_squeeze(mon: MonId, sq: &Squeeze, cx: &mut App) {
+    let Some(host) = host_mut(cx) else { return };
+    let tall = host.prefs.side_tall;
+    let Some(dock) = host.dock_mut(mon) else { return };
+    let Some(geo) = dock.geo else { return };
+    let drop = side_drop(tall, geo.glass(Kind::Left).height(), geo.unit, sq);
+    if drop == dock.side_drop {
+        return;
+    }
+    dock.side_drop = drop;
+    let jobs: Vec<(isize, Rc<RefCell<IslandGlass>>, [f32; 4], Vec<hit::Part>)> = dock
+        .placed
+        .iter()
+        .filter(|p| p.kind != Kind::Middle)
+        .map(|p| {
+            let pl = geo.placement(p.kind);
+            (p.hwnd, p.glass.clone(), lowered(pl.glass_in_window(), drop), side_parts(&pl, geo.unit, drop))
+        })
+        .collect();
+    let (left, right) = (dock.left.clone(), dock.right.clone());
+    cx.spawn(async move |cx| {
+        for (hwnd, glass, shape, parts) in jobs {
+            hit::set_region(hwnd, &parts);
+            glass.borrow_mut().set_shape(shape);
+        }
+        // the views are laid out in the glass as it is now (`insets_on`): they draw again
+        cx.update(|cx| {
+            if let Some(v) = &left {
+                v.update(cx, |_, cx| cx.notify());
+            }
+            if let Some(v) = &right {
+                v.update(cx, |_, cx| cx.notify());
+            }
+        });
+    })
+    .detach();
 }
 
 /// Places the windows of every dock by the current work area, scale and widths. The rectangles are worked out now, the windows are moved
@@ -656,10 +784,12 @@ fn rest_parts(pl: &Placement, unit: f32) -> Vec<hit::Part> {
 /// last given is forgotten so that the view's next frame sets it for the new window even if its pieces came out the same.
 pub fn request_layout(cx: &mut App) {
     refresh_hide_flag(cx);
+    // (how thin each dock is right now: a tall side island's glass is placed for it, see `side_drop`)
+    let squeezes: Vec<(MonId, Squeeze)> = cx.try_global::<Host>().map(|h| h.docks.iter().map(|d| (d.id, super::thin::squeeze(d.id, cx))).collect()).unwrap_or_default();
     let Some(host) = host_mut(cx) else { return };
+    let tall = host.prefs.side_tall;
     let mut jobs: Vec<Job> = Vec::new();
-    let ids: Vec<MonId> = host.docks.iter().map(|d| d.id).collect();
-    for id in ids {
+    for (id, sq) in squeezes {
         // (what the dock holds depends on the room it has, and the layout on what it holds: the content first)
         let content = host.dock(id).map(|d| host.content_of(d));
         let Some(dock) = host.dock(id) else { continue };
@@ -669,13 +799,15 @@ pub fn request_layout(cx: &mut App) {
                 dock.content = c;
             }
             dock.geo = Some(geo);
+            let drop = side_drop(tall, geo.glass(Kind::Left).height(), geo.unit, &sq);
+            dock.side_drop = drop;
             for p in &dock.placed {
                 let pl = geo.placement(p.kind);
                 let own = p.kind != Kind::Middle;
                 if own {
-                    p.glass.borrow_mut().set_shape(pl.glass_in_window());
+                    p.glass.borrow_mut().set_shape(lowered(pl.glass_in_window(), drop));
                 }
-                jobs.push(Job { hwnd: p.hwnd, window: pl.window, parts: own.then(|| rest_parts(&pl, geo.unit)) });
+                jobs.push(Job { hwnd: p.hwnd, window: pl.window, parts: own.then(|| side_parts(&pl, geo.unit, drop)) });
             }
             dock.region = None;
         }
@@ -998,6 +1130,7 @@ fn open_dock(d: &monitors::Display, cx: &mut App) {
         content: Content { primary: false, search: Search::Field, bell: true },
         fullscreen: false,
         region: None,
+        side_drop: 0,
         told_bands: Vec::new(),
     };
     dock.content = host.content_of(&dock);
@@ -1284,6 +1417,18 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     } else if ch.apps {
         refresh_apps(cx);
     }
+    if ch.side {
+        // the side islands are as tall as the dock now, or as low as they were: the islands are placed again, and the windows are
+        // looked at again (a window beside the middle island lies under a tall side island: `full_glass_span_on`)
+        request_layout(cx);
+        super::thin::task_changed();
+    }
+    if ch.status {
+        // the right island's own buttons have another order, or one was hidden or shown: its width and its picture follow
+        for right in right_islands(cx) {
+            right.update(cx, |v, cx| v.drives_changed(cx));
+        }
+    }
     // The parts follow the one dock switch and their own values (`parts.rs`). The same order as at start-up, and its mirror on the way
     // out: Explorer's taskbar is hidden LAST (after the tray window and the keyboard hook that make up for it exist) and given back
     // FIRST (before they are taken down). The switch itself going off ends the dock process (`shutdown`); this is for a part whose own
@@ -1479,7 +1624,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 
     let lines = rf_win::dock::clock::system_lines();
     let widths = Widths { left: plan::left_width(None), middle: plan::middle_width_at_rest(2, 1), right: plan::right_width(&lines) };
-    let geo = geo_for(&monitor, area, widths, size);
+    let geo = geo_for(&monitor, area, widths, size, prefs.side_tall);
 
     let mut home = Dock {
         id: MonId::HOME,
@@ -1494,6 +1639,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         content: Content::HOME,
         fullscreen: false,
         region: None,
+        side_drop: 0,
         told_bands: Vec::new(),
     };
     let (city, locate) = (prefs.city.clone(), prefs.location);
@@ -1689,7 +1835,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Changes, Geo, Kind, MonId, Prefs, Settings, changes, file_changed, panel_is_hit, region_differs, switch_stops};
+    use super::{Changes, Geo, Kind, MonId, Prefs, Settings, changes, file_changed, lowered, lowered_rect, panel_is_hit, region_differs, side_drop, switch_stops};
     use rf_win::dock::hit::{self, Part};
     use rf_win::dock::layout::{self, Rect, Widths};
     use rf_win::dock::panel::{self as panel_geo, Side};
@@ -1725,7 +1871,7 @@ mod tests {
     }
 
     fn prefs(reserve: bool, city: &str) -> Prefs {
-        Prefs { reserve, city: city.into(), location: false, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All }
+        Prefs { reserve, city: city.into(), location: false, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, side_tall: false, status: Default::default() }
     }
 
     #[test]
@@ -1741,8 +1887,8 @@ mod tests {
     fn the_switch_for_the_position_changes_the_weather_source_like_the_city_does() {
         let base = prefs(true, "Ankara");
         let located = Prefs { location: true, ..base.clone() };
-        assert_eq!(changes(&base, &located), Changes { reserve: false, city: true, size: false, monitors: false, apps: false });
-        assert_eq!(changes(&located, &located), Changes { reserve: false, city: false, size: false, monitors: false, apps: false });
+        assert_eq!(changes(&base, &located), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false });
+        assert_eq!(changes(&located, &located), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false });
         // off by default, and the settings carry it through
         assert!(!Prefs::of(&Settings::default()).location);
         assert!(Prefs::of(&Settings { dock_weather_location: true, ..Default::default() }).location);
@@ -1751,12 +1897,12 @@ mod tests {
     #[test]
     fn only_what_changed_is_applied() {
         let base = prefs(true, "Ankara");
-        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false });
-        assert_eq!(changes(&base, &prefs(false, "Ankara")), Changes { reserve: true, city: false, size: false, monitors: false, apps: false });
-        assert_eq!(changes(&base, &prefs(true, "İzmir")), Changes { reserve: false, city: true, size: false, monitors: false, apps: false });
-        assert_eq!(changes(&base, &prefs(false, "")), Changes { reserve: true, city: true, size: false, monitors: false, apps: false });
+        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false });
+        assert_eq!(changes(&base, &prefs(false, "Ankara")), Changes { reserve: true, city: false, size: false, monitors: false, apps: false, side: false, status: false });
+        assert_eq!(changes(&base, &prefs(true, "İzmir")), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false });
+        assert_eq!(changes(&base, &prefs(false, "")), Changes { reserve: true, city: true, size: false, monitors: false, apps: false, side: false, status: false });
         let bigger = Prefs { size: crate::dock::size_pref::DockSizePref::from_permille(1200), ..base.clone() };
-        assert_eq!(changes(&base, &bigger), Changes { reserve: false, city: false, size: true, monitors: false, apps: false });
+        assert_eq!(changes(&base, &bigger), Changes { reserve: false, city: false, size: true, monitors: false, apps: false, side: false, status: false });
     }
 
     /// What a window has before the first layout is the layout's own margins, times the dock's size factor.
@@ -1783,10 +1929,81 @@ mod tests {
     fn the_switch_and_the_apps_rule_are_changes_the_running_dock_acts_on() {
         let base = prefs(true, "Ankara");
         let off = Prefs { all_monitors: false, ..base.clone() };
-        assert_eq!(changes(&base, &off), Changes { reserve: false, city: false, size: false, monitors: true, apps: false });
+        assert_eq!(changes(&base, &off), Changes { reserve: false, city: false, size: false, monitors: true, apps: false, side: false, status: false });
         let by_window = Prefs { apps_where: crate::settings::DockAppsWhere::Window, ..base.clone() };
-        assert_eq!(changes(&base, &by_window), Changes { reserve: false, city: false, size: false, monitors: false, apps: true });
-        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false });
+        assert_eq!(changes(&base, &by_window), Changes { reserve: false, city: false, size: false, monitors: false, apps: true, side: false, status: false });
+        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false });
+    }
+
+    #[test]
+    fn the_side_islands_height_and_the_right_islands_buttons_are_changes_the_running_dock_acts_on() {
+        let base = prefs(true, "Ankara");
+        let tall = Prefs { side_tall: true, ..base.clone() };
+        assert_eq!(changes(&base, &tall), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: true, status: false });
+        let reordered = Prefs { status: [vec!["volume".into()], Vec::new()], ..base.clone() };
+        assert_eq!(changes(&base, &reordered), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: true });
+        let hidden = Prefs { status: [Vec::new(), vec!["security".into()]], ..base.clone() };
+        assert!(changes(&base, &hidden).status);
+        // off and untouched by default, and the settings carry them through
+        let d = Prefs::of(&Settings::default());
+        assert!(!d.side_tall && d.status == [Vec::<String>::new(), Vec::new()]);
+        let s = Settings { dock_side_tall: true, dock_status_order: vec!["volume".into()], dock_status_hidden: vec!["eject".into()], ..Default::default() };
+        assert_eq!((Prefs::of(&s).side_tall, Prefs::of(&s).status), (true, [vec!["volume".to_string()], vec!["eject".to_string()]]));
+    }
+
+    /// Tall side islands are the middle island's height at every moment: full, thin, and at every step between, to the pixel. The usual
+    /// ones never move.
+    #[test]
+    fn tall_side_islands_are_as_low_as_the_middle_one_while_the_dock_is_thin() {
+        use rf_win::dock::thin::{self, Squeeze};
+        for unit in [1.0f32, 1.25, 1.5, 1.75, 2.0, 0.9, 1.4] {
+            let full = layout::px(layout::MIDDLE_HEIGHT, unit);
+            let thin_px = layout::px(layout::SIDE_HEIGHT, unit);
+            assert_eq!(side_drop(true, full, unit, &Squeeze::FULL), 0, "unit {unit}");
+            assert_eq!(side_drop(true, full, unit, &Squeeze::at(0.0)), full - thin_px, "the thin dock: the side islands' usual pixels, unit {unit}");
+            let mut last = side_drop(true, full, unit, &Squeeze::at(0.0));
+            for step in 1..=20 {
+                let sq = Squeeze::at(step as f32 / 20.0);
+                let drop = side_drop(true, full, unit, &sq);
+                assert!(drop <= last && drop >= 0, "growing never lowers the glass: {drop} after {last}");
+                // the same pixels the middle island's glass has (it rounds its height where it sets its region)
+                assert_eq!(full - drop, thin::glass_height_px(&sq, unit, full as f32).round() as i32);
+                last = drop;
+            }
+            assert_eq!(last, 0);
+            for g in [0.0, 0.3, 1.0] {
+                assert_eq!(side_drop(false, thin_px, unit, &Squeeze::at(g)), 0, "the usual side islands stay where they are");
+            }
+        }
+    }
+
+    /// A window snapped to a third of the screen beside the middle island does not lie under the usual dock; it does lie under a tall
+    /// side island, so with tall side islands it makes the dock thin like any window under the full glass.
+    #[test]
+    fn with_tall_side_islands_a_window_beside_the_middle_island_is_under_the_full_glass_too() {
+        use rf_win::dock::thin::docked_under;
+        let work = Rect::new(0, 0, 2560, 1392);
+        let widths = Widths { left: 330.0, middle: 600.0, right: 280.0 };
+        let usual = layout::islands(work, 1.0, widths);
+        let tall = layout::islands_with(work, 1.0, widths, layout::side_height(true));
+        let left_third = Rect::new(0, 0, 853, 1392);
+        assert!(!docked_under(left_third, work.bottom, super::full_glass_span(&usual, false), 12), "beside the usual dock: nothing lies on it");
+        assert!(docked_under(left_third, work.bottom, super::full_glass_span(&tall, true), 12), "the tall left island would lie on its lowest rows");
+        let span = super::full_glass_span(&tall, true);
+        assert_eq!((span.left, span.right, span.top, span.bottom), (tall.left.left, tall.right.right, tall.middle.top, tall.middle.bottom));
+        assert_eq!(super::full_glass_span(&tall, false), tall.middle);
+    }
+
+    #[test]
+    fn a_lowered_glass_keeps_its_bottom_edge_and_never_turns_inside_out() {
+        assert_eq!(lowered([4.0, 4.0, 300.0, 72.0], 0), [4.0, 4.0, 300.0, 72.0]);
+        assert_eq!(lowered([4.0, 4.0, 300.0, 72.0], 24), [4.0, 28.0, 300.0, 48.0]);
+        assert_eq!(lowered([4.0, 4.0, 300.0, 72.0], 500), [4.0, 76.0, 300.0, 0.0]);
+        assert_eq!(lowered([4.0, 4.0, 300.0, 72.0], -3), [4.0, 4.0, 300.0, 72.0]);
+        let r = Rect::new(10, 900, 310, 972);
+        assert_eq!(lowered_rect(r, 24), Rect::new(10, 924, 310, 972));
+        assert_eq!(lowered_rect(r, 0), r);
+        assert_eq!(lowered_rect(r, 999).top, r.bottom);
     }
 
     #[test]

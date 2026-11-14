@@ -1631,5 +1631,13 @@
  "9ab46316": "Preuzimaj i beta verzije",
  "18892f1d": "Ova je kopija beta verzija: preuzima sljedeće bete i s isključenim prekidačem te prelazi na izdanje kad izađe.",
  "84de037b": "Verzije koje se isprobavaju prije izdanja: nove stvari stižu rano, a tako i pogreške. Kad je isključeno, preuzimaju se samo izdanja.",
- "754286b1": "Najbolji rezultat"
+ "754286b1": "Najbolji rezultat",
+ "cabf845b": "Ikone stanja",
+ "1f3041d1": "Redoslijed vlastitih ikona desnog otočića i koje se od njih prikazuju. Ona na vrhu popisa stoji skroz lijevo. Redoslijed promijenite strelicama, povlačenjem retka ili povlačenjem ikone na samom Docku. Ikona sigurnog uklanjanja pojavljuje se samo dok je priključen izmjenjivi pogon.",
+ "6e06f194": "Sigurno uklanjanje",
+ "9f0f515e": "Sigurnost u sustavu Windows",
+ "2db1a682": "Zvuk",
+ "1b222370": "Pomakni gore",
+ "26ea62eb": "Bočni otočići visoki kao Dock",
+ "8dd08d22": "Lijevi i desni otočić crtaju se jednako visoki kao srednji. Kad je isključeno, niži su. Dok je Dock tanak jer je prozor maksimiziran, sva su tri tanka."
 }

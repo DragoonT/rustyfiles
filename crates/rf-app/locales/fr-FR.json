@@ -1631,5 +1631,13 @@
  "9ab46316": "Recevoir aussi les versions bêta",
  "18892f1d": "Cette copie est une version bêta : elle reçoit aussi les prochaines bêtas, même avec l'option désactivée, et passe à la version finale dès sa sortie.",
  "84de037b": "Versions testées avant une publication : les nouveautés arrivent plus tôt, et les bogues aussi. Désactivé, seules les versions finales sont téléchargées.",
- "754286b1": "Meilleur résultat"
+ "754286b1": "Meilleur résultat",
+ "cabf845b": "Icônes d'état",
+ "1f3041d1": "L'ordre des icônes propres à l'îlot de droite et celles qui sont affichées. Celle du haut de la liste se place le plus à gauche. Changez l'ordre avec les flèches, en faisant glisser une ligne ou en faisant glisser l'icône sur le Dock lui-même. L'icône de retrait en toute sécurité n'apparaît que lorsqu'un lecteur amovible est connecté.",
+ "6e06f194": "Retrait en toute sécurité",
+ "9f0f515e": "Sécurité Windows",
+ "2db1a682": "Son",
+ "1b222370": "Monter",
+ "26ea62eb": "Îlots latéraux aussi hauts que le Dock",
+ "8dd08d22": "L'îlot de gauche et celui de droite sont dessinés aussi hauts que celui du milieu. Lorsque l'option est désactivée, ils sont plus bas. Tant que le Dock est mince parce qu'une fenêtre est agrandie, les trois sont minces."
 }

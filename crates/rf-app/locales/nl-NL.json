@@ -1631,5 +1631,13 @@
  "9ab46316": "Ook bètaversies ophalen",
  "18892f1d": "Deze kopie is een bètaversie: hij haalt ook met de schakelaar uit de volgende bèta's op en gaat over op de release zodra die er is.",
  "84de037b": "Versies die vóór een release worden uitgeprobeerd: nieuwe dingen komen vroeg, en fouten ook. Als dit uit staat, worden alleen releases gedownload.",
- "754286b1": "Beste overeenkomst"
+ "754286b1": "Beste overeenkomst",
+ "cabf845b": "Statuspictogrammen",
+ "1f3041d1": "De volgorde van de eigen pictogrammen van het rechtereiland en welke ervan worden getoond. Het bovenste in de lijst staat het meest links. Wijzig de volgorde met de pijlen, door een rij te slepen of door het pictogram op de Dock zelf te slepen. Het pictogram voor veilig verwijderen verschijnt alleen zolang er een verwisselbaar station is aangesloten.",
+ "6e06f194": "Veilig verwijderen",
+ "9f0f515e": "Windows-beveiliging",
+ "2db1a682": "Geluid",
+ "1b222370": "Omhoog",
+ "26ea62eb": "Zijeilanden even hoog als de Dock",
+ "8dd08d22": "Het linker- en het rechtereiland worden even hoog getekend als het middeneiland. Als dit uit staat, zijn ze lager. Zolang de Dock dun is omdat een venster is gemaximaliseerd, zijn alle drie dun."
 }

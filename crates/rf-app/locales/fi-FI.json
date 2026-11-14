@@ -1631,5 +1631,13 @@
  "9ab46316": "Hae myös beta-versiot",
  "18892f1d": "Tämä kopio on beta-versio: se hakee seuraavat betat myös kytkimen ollessa pois päältä ja siirtyy julkaisuversioon, kun se ilmestyy.",
  "84de037b": "Versiot, joita kokeillaan ennen julkaisua: uudet ominaisuudet tulevat aikaisin, ja niin voivat virheetkin. Kun asetus on pois päältä, ladataan vain julkaisuversiot.",
- "754286b1": "Paras vastaavuus"
+ "754286b1": "Paras vastaavuus",
+ "cabf845b": "Tilakuvakkeet",
+ "1f3041d1": "Oikean saaren omien kuvakkeiden järjestys ja se, mitkä niistä näytetään. Luettelon ylin on vasemmanpuoleisin. Muuta järjestystä nuolilla, vetämällä riviä tai vetämällä kuvaketta itse Dockissa. Turvallisen poistamisen kuvake näkyy vain, kun siirrettävä asema on liitettynä.",
+ "6e06f194": "Turvallinen poistaminen",
+ "9f0f515e": "Windowsin suojaus",
+ "2db1a682": "Ääni",
+ "1b222370": "Siirrä ylös",
+ "26ea62eb": "Sivusaaret yhtä korkeiksi kuin Dock",
+ "8dd08d22": "Vasen ja oikea saari piirretään yhtä korkeiksi kuin keskisaari. Kun asetus on pois päältä, ne ovat matalampia. Kun Dock on ohut, koska ikkuna on suurennettu, kaikki kolme ovat ohuita."
 }

@@ -129,6 +129,10 @@ pub struct Keys {
     /// The clock opens our own calendar and the bell our own notification panel (else Win+N): read from the file when they open.
     pub own_calendar: bool,
     pub own_notifications: bool,
+    /// The right island's own buttons: their order and which are hidden. The island draws them from the settings it holds.
+    pub status: [Vec<String>; 2],
+    /// The side islands are as tall as the middle one: the running dock lays its islands out again.
+    pub side_tall: bool,
     /// The previews and the menu of the middle island's icons: read from the file when they are asked for.
     pub hover_previews: bool,
     pub app_menu: bool,
@@ -163,6 +167,8 @@ impl Keys {
             own_control_centre: s.dock_own_control_centre,
             own_calendar: s.dock_own_calendar,
             own_notifications: s.dock_own_notifications,
+            status: [s.dock_status_order.clone(), s.dock_status_hidden.clone()],
+            side_tall: s.dock_side_tall,
             hover_previews: s.dock_hover_previews,
             app_menu: s.dock_app_menu,
             thin_when_maximized: s.dock_thin_when_maximized,
@@ -343,7 +349,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), weather_location: false, look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, hover_previews: true, app_menu: true, thin_when_maximized: true, start_recommended: true, start_grow: true, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, shell: [false; 5] }
+        Keys { reserve, city: city.into(), weather_location: false, look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, status: Default::default(), side_tall: false, hover_previews: true, app_menu: true, thin_when_maximized: true, start_recommended: true, start_grow: true, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, shell: [false; 5] }
     }
 
     #[test]
@@ -386,6 +392,10 @@ mod tests {
             // a dock on every monitor, and which dock shows which app
             Settings { dock_all_monitors: false, ..base.clone() },
             Settings { dock_apps_where: crate::settings::DockAppsWhere::Window, ..base.clone() },
+            // the right island's own buttons (their order, a hidden one) and the side islands' height
+            Settings { dock_status_order: vec!["volume".into(), "network".into()], ..base.clone() },
+            Settings { dock_status_hidden: vec!["security".into()], ..base.clone() },
+            Settings { dock_side_tall: true, ..base.clone() },
         ] {
             let mut told = Some(k.clone());
             assert!(needs_reload(&mut told, Keys::of(&change)), "{:?}", Keys::of(&change));

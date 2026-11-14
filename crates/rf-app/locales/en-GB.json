@@ -1631,5 +1631,13 @@
  "9ab46316": "Take beta versions too",
  "18892f1d": "This copy is a beta version: it takes the next betas with the switch off too, and moves to the release when it is out.",
  "84de037b": "Versions that are tried before a release: new things arrive early, and so may bugs. With this off, only releases are downloaded.",
- "754286b1": "Best match"
+ "754286b1": "Best match",
+ "cabf845b": "Status icons",
+ "1f3041d1": "The order of the right island's own icons and which of them are shown. The one at the top of the list stands leftmost. Change the order with the arrows, by dragging a row, or by dragging the icon on the Dock itself. The safe removal icon appears only while a removable drive is connected.",
+ "6e06f194": "Safe removal",
+ "9f0f515e": "Windows Security",
+ "2db1a682": "Sound",
+ "1b222370": "Move up",
+ "26ea62eb": "Side islands as tall as the Dock",
+ "8dd08d22": "The left and the right island are drawn as tall as the middle one. When off they are lower. While the Dock is thin because a window is maximised, all three are thin."
 }

@@ -1033,6 +1033,8 @@ impl Render for MiddleIsland {
         };
         let parts = hit::parts(glass_px, rf_win::dock::layout::px(RADIUS, scale) as f32, &boxes, (vw * scale).round() as i32, (vh * scale).round() as i32);
         host::set_middle_frame(mon, &self.glass, glass_px, parts, cx);
+        // side islands that are as tall as the dock (a setting) are as low as it is while it is thin
+        host::set_side_squeeze(mon, &sq, cx);
 
         let mut cells: Vec<AnyElement> = Vec::with_capacity(self.items.len());
         // the icon in the hand is drawn last, over the others

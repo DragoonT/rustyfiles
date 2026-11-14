@@ -8,6 +8,13 @@
 //! THE SYMBOLS follow the system: the volume symbol is the level in steps, muted, or no sound device; the network symbol is Ethernet,
 //! Wi-Fi in four strengths, or not connected (`sysstate.rs` keeps the sources, which call back when Windows says something changed).
 //!
+//! THE ISLAND'S OWN BUTTONS are those two symbols, Windows Security and safe removal (while a removable drive holds a volume). Their
+//! order and which of them are shown are the user's (Settings > Dock > "Durum simgeleri"; `rf_win::dock::status_order`). A button
+//! can also be DRAGGED to another place among them, as the programs' tray icons beside them are: the press is followed by looks at
+//! the pointer (`tray_strip::step`, the same rule and the same four logical px before a press is a drag), the dragged button is drawn
+//! faint, a thin mark in the accent colour shows where it would land, and the release writes the new order to the settings. A press
+//! that never became a drag is the button's click.
+//!
 //! ON A SECONDARY MONITOR (`mon` is not the home dock) the island holds the clock and the bell only: the tray strip, the network and
 //! volume symbols and the separator after them stay on the primary monitor's, as on Windows' secondary taskbars; on a narrow monitor the
 //! bell goes too (`rf_win::dock::monitors::content`).
@@ -22,6 +29,9 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_win::dock::clock::{self, ClockLines};
 use rf_win::dock::monitors::Content;
+use rf_win::dock::panel as geo;
+use rf_win::dock::status_order::{self, Status};
+use rf_win::dock::tray_strip::{self as ts, PointerButton, Press, Step};
 
 use super::backdrop::IslandGlass;
 use super::host::{Kind, MonId};
@@ -43,7 +53,21 @@ pub struct RightIsland {
     focus: Option<FocusHandle>,
     /// The drives have been read once: the first reading also tells the host the island's width with its own buttons.
     drives_read: bool,
+    /// One of the island's own buttons is held, or dragged to another place.
+    status_press: Option<StatusPress>,
 }
+
+/// A button held on one of the island's own buttons, from the press to the release.
+struct StatusPress {
+    which: Status,
+    press: Press,
+    /// While it is dragged: where it would be put, an index into the buttons the island shows (`status_order::drop_index`); `None`
+    /// while the pointer is away from the island (a release there changes nothing).
+    target: Option<usize>,
+}
+
+/// How often the pointer is looked at while one of the island's own buttons is held (the tray strip's rate).
+const STATUS_POLL: Duration = Duration::from_millis(16);
 
 /// How often the removable drives are looked at (off the UI thread: a few system calls).
 const DRIVES_EVERY: Duration = Duration::from_secs(3);
@@ -78,21 +102,21 @@ impl RightIsland {
             })
             .detach();
         }
-        RightIsland { glass, mon, content, lines, reported, tray_extra: 0.0, focus: None, drives_read: false }
+        RightIsland { glass, mon, content, lines, reported, tray_extra: 0.0, focus: None, drives_read: false, status_press: None }
     }
 
-    /// How many buttons of its own the island has before the network symbol: Windows Security, and the safe-removal button while
-    /// there is something to remove.
-    fn sys_buttons_for(&self, removable: bool) -> usize {
-        if self.mon.is_home() { 1 + usize::from(removable) } else { 0 }
-    }
-
-    fn sys_buttons(&self, cx: &App) -> usize {
-        self.sys_buttons_for(!super::eject_view::drives(cx).is_empty())
-    }
-
-    fn sys_extra(&self, cx: &App) -> f32 {
-        self.sys_buttons(cx) as f32 * (plan::BUTTON + plan::RIGHT_GAP)
+    /// The island's own buttons to draw now, in the user's order and without the ones the user hid (the settings `dock_status_order`
+    /// and `dock_status_hidden`; `status_order::shown`). Safe removal is among them only while there is something to remove. They are
+    /// the primary monitor's: a secondary monitor's island has none.
+    fn status_buttons(&self, cx: &App) -> Vec<Status> {
+        if !self.mon.is_home() {
+            return Vec::new();
+        }
+        let removable = !super::eject_view::drives(cx).is_empty();
+        match cx.try_global::<crate::settings::Settings>() {
+            Some(s) => status_order::shown(&s.dock_status_order, &s.dock_status_hidden, removable),
+            None => status_order::shown(&[], &[], removable),
+        }
     }
 
     /// The drives were read (by this island's own look every few seconds): kept where the panel reads them too, and when they
@@ -105,7 +129,90 @@ impl RightIsland {
         }
     }
 
-    /// The removable drives changed (read here, or after a removal from the panel): the button comes or goes.
+    /// The island's own buttons on the screen (device px): the first one's left edge, the distance from one's left edge to the next
+    /// one's, a button's width, and the glass they stand in as it is drawn now.
+    fn status_geo(&self, cx: &App) -> Option<(i32, i32, i32, rf_win::dock::layout::Rect)> {
+        let glass = super::host::current_glass_rect_on(self.mon, Kind::Right, cx)?;
+        let unit = super::host::dock_unit_on(self.mon, cx)?;
+        let u = |v: f32| rf_win::dock::layout::px(v, unit);
+        Some((glass.left + u(plan::SIDE_PAD + self.tray_extra), u(plan::BUTTON + plan::RIGHT_GAP), u(plan::BUTTON), glass))
+    }
+
+    /// Where the pointer at `cursor` would put a dragged button: `None` when it is away from the island (more than the island's
+    /// height above or below it, or more than a button beside it).
+    fn status_target(&self, cursor: (i32, i32), cx: &App) -> Option<usize> {
+        let (first, step, button, glass) = self.status_geo(cx)?;
+        let near = cursor.1 >= glass.top - glass.height() && cursor.1 < glass.bottom + glass.height() && cursor.0 >= glass.left - step && cursor.0 < glass.right + step;
+        near.then(|| status_order::drop_index(self.status_buttons(cx).len(), first, step, button, cursor.0))
+    }
+
+    /// Whether the pointer at `cursor` is on this button.
+    fn status_hit(&self, which: Status, cursor: (i32, i32), cx: &App) -> bool {
+        let Some((first, step, button, glass)) = self.status_geo(cx) else { return false };
+        let Some(i) = self.status_buttons(cx).iter().position(|s| *s == which) else { return false };
+        rf_win::dock::layout::Rect::from_xywh(first + i as i32 * step, glass.top + (glass.height() - button) / 2, button, button).contains(cursor.0, cursor.1)
+    }
+
+    /// The left button went down on one of the island's own buttons: the pointer is looked at until it is up again.
+    fn status_down(&mut self, which: Status, count: usize, cx: &mut Context<Self>) {
+        // (a second button pressed while one is held is ignored)
+        if self.status_press.is_some() {
+            return;
+        }
+        let Some(at) = geo::cursor() else { return };
+        self.status_press = Some(StatusPress { which, press: Press { button: PointerButton::Left, count, at, dragging: false }, target: None });
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(STATUS_POLL).await;
+                if !this.update(cx, |me, cx| me.status_poll(cx)).unwrap_or(false) {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// One look at the held button. False when the press is over: a drag that ended on the island wrote the new order, a press that
+    /// never became a drag and ended on its button was that button's click.
+    fn status_poll(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(mut sp) = self.status_press.take() else { return false };
+        let cursor = geo::cursor().unwrap_or(sp.press.at);
+        let scale = super::host::home_work(cx).map_or(1.0, |(s, _)| s);
+        match ts::step(&mut sp.press, cursor, geo::any_button_down(), scale) {
+            Step::Idle => {
+                self.status_press = Some(sp);
+                true
+            }
+            step @ (Step::DragBegan | Step::DragMove) => {
+                let target = self.status_target(cursor, cx);
+                if step == Step::DragBegan || target != sp.target {
+                    cx.notify();
+                }
+                sp.target = target;
+                self.status_press = Some(sp);
+                true
+            }
+            Step::Released { dragged } => {
+                if dragged {
+                    let new = self.status_target(cursor, cx).and_then(|insert| {
+                        let saved = cx.try_global::<crate::settings::Settings>().map(|s| s.dock_status_order.clone()).unwrap_or_default();
+                        status_order::dropped(&saved, &self.status_buttons(cx), sp.which, insert)
+                    });
+                    if let Some(new) = new {
+                        // (this process's own change of the settings: the save writes this key on top of the file as it is now)
+                        crate::settings::update(cx, move |s| s.dock_status_order = new);
+                    }
+                } else if self.status_hit(sp.which, cursor, cx) {
+                    run_status(sp.which, cx);
+                }
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    /// The island's own buttons changed (the removable drives were read here or one was removed from the panel, or the settings gave
+    /// them another order or hid one): the island's width and its picture follow.
     pub fn drives_changed(&mut self, cx: &mut Context<Self>) {
         let w = self.wanted_width(cx);
         if (w - self.reported).abs() > 0.5 {
@@ -118,7 +225,7 @@ impl RightIsland {
     /// The width the content needs now (logical px). The primary monitor's: the symbols, the clock and the bell, and the tray strip's
     /// room; a secondary monitor's: the clock and, when there is room, the bell.
     fn wanted_width(&self, cx: &App) -> f32 {
-        if self.mon.is_home() { plan::right_width(&self.lines) + self.tray_extra + self.sys_extra(cx) } else { plan::right_width_secondary(plan::clock_width(&self.lines), self.content.bell) }
+        if self.mon.is_home() { plan::right_width_for(&self.lines, self.status_buttons(cx).len()) + self.tray_extra } else { plan::right_width_secondary(plan::clock_width(&self.lines), self.content.bell) }
     }
 
     /// The host's layout may have changed what this island holds (the bell, by the monitor's width): true when it did.
@@ -162,11 +269,11 @@ impl RightIsland {
         let [ml, mt, ..] = super::host::insets_on(self.mon, Kind::Right, cx).margins;
         let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
         let controls = if self.mon.is_home() {
-            super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra, self.sys_buttons(cx))
+            super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra, self.status_buttons(cx).len())
         } else {
             super::empty::right_controls_secondary(plan::clock_width(&self.lines), self.content.bell)
         };
-        if super::empty::side_is_empty(self.wanted_width(cx), &controls, point) {
+        if super::empty::side_is_empty(self.wanted_width(cx), super::host::side_height_on(self.mon, cx), &controls, point) {
             super::actions::open_task_manager();
         }
     }
@@ -182,8 +289,20 @@ impl RightIsland {
     }
 }
 
-/// (`k` is the dock's size factor: the lengths are dock units.)
-fn icon_button(id: &'static str, icon: L, pal: Palette, k: f32, on_click: impl Fn(&mut App) + 'static) -> impl IntoElement {
+/// What a click on one of the island's own buttons does: safe removal opens our own panel with the drives, Windows Security opens
+/// that app, the network and the volume symbol open the control centre.
+fn run_status(which: Status, cx: &mut App) {
+    match which {
+        Status::Eject => super::panel::toggle_eject(cx),
+        Status::Security => super::panel_parts::open_uri("windowsdefender:"),
+        Status::Network | Status::Volume => open_controls(cx),
+    }
+}
+
+/// One of the island's own buttons as it looks; what it does is `run_status`, started by the island when a press ends on it
+/// (`RightIsland::status_poll`), because the same press may turn into a drag. (`k` is the dock's size factor: the lengths are dock
+/// units.)
+fn icon_button(id: &'static str, icon: L, pal: Palette, k: f32) -> impl IntoElement {
     let (hover, pressed) = (pal.hover_fill().hsla(), pal.press_plate().hsla());
     div()
         .id(id)
@@ -196,7 +315,6 @@ fn icon_button(id: &'static str, icon: L, pal: Palette, k: f32, on_click: impl F
         .hover(move |s| s.bg(hover))
         .active(move |s| s.bg(pressed))
         .child(Icon::new(icon).size(px(16. * k)).text_color(pal.text().hsla()))
-        .on_click(move |_, _, cx| on_click(cx))
 }
 
 /// Whether the symbols open our own control centre (the setting "rustyfiles denetim merkezini kullan"; on by default).
@@ -287,9 +405,12 @@ impl Render for RightIsland {
         let dot: Option<Hsla> = super::notif_state::dot_visible(cx).then(|| gpui_kit::rgb(cx.try_global::<super::look::Env>().map_or(0x0078D4, |e| e.accent)).into());
         let (network_icon, volume_icon) = (super::sysstate::network_icon(cx), super::sysstate::volume_icon(cx));
 
+        // the island's own buttons, in the user's order (none on a secondary monitor's island, and none when the user hid them all)
+        let buttons = self.status_buttons(cx);
         let clock = v_flex()
             .id("dock-clock")
-            .ml(px(if home { plan::RIGHT_SEP_GAP } else { 0.0 } * k))
+            // (the gap after the separator that follows the buttons; without buttons there is no separator)
+            .ml(px(if buttons.is_empty() { 0.0 } else { plan::RIGHT_SEP_GAP } * k))
             .w(px(plan::clock_width(&self.lines) * k))
             .h(px(plan::CLOCK_H * k))
             .px(px(plan::CLOCK_PAD / 2.0 * k))
@@ -303,18 +424,46 @@ impl Render for RightIsland {
             .child(div().text_size(px(12. * k)).line_height(px(15. * k)).text_color(pal.text_secondary().hsla()).child(self.lines.date.clone()))
             .on_click(move |_, _, cx| open_calendar(mon, cx));
 
+        // The island's own buttons with a gap between two of them. One that is being dragged is faint, and a thin mark in the accent
+        // colour stands where it would land (as in the tray strip beside them).
+        let dragged = self.status_press.as_ref().filter(|p| p.press.dragging).map(|p| (p.which, p.target));
+        let status_row = (!buttons.is_empty()).then(|| {
+            let mut row = h_flex().relative().flex_shrink_0().items_center();
+            for (i, which) in buttons.iter().copied().enumerate() {
+                let button = match which {
+                    Status::Eject => icon_button("dock-eject", L::Eject, pal, k).into_any_element(),
+                    Status::Security => icon_button("dock-security", L::ShieldCheck, pal, k).into_any_element(),
+                    Status::Network => icon_button("dock-network", network_icon, pal, k).into_any_element(),
+                    Status::Volume => icon_button("dock-volume", volume_icon, pal, k).into_any_element(),
+                };
+                row = row.child(
+                    div()
+                        .ml(px(if i == 0 { 0.0 } else { plan::RIGHT_GAP } * k))
+                        .when(dragged.is_some_and(|(w, _)| w == which), |d| d.opacity(0.35))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |me, e: &MouseDownEvent, _, cx| me.status_down(which, e.click_count, cx)))
+                        .child(button),
+                );
+            }
+            if let Some((which, Some(insert))) = dragged
+                && let Some(at) = buttons.iter().position(|b| *b == which)
+                && status_order::drop_moves(at, insert)
+            {
+                let x = insert as f32 * (plan::BUTTON + plan::RIGHT_GAP) - plan::RIGHT_GAP / 2.0;
+                let accent: Hsla = gpui_kit::rgb(cx.try_global::<super::look::Env>().map_or(0x0078D4, |e| e.accent)).into();
+                row = row.child(div().absolute().left(px(x * k - 1.0)).top(px(4. * k)).w(px(2.)).h(px((plan::BUTTON - 8.) * k)).rounded_full().bg(accent));
+            }
+            row
+        });
+
         // the other programs' tray icons, with a thin separator after them (nothing at all without a tray source); the primary monitor's
         let tray = if home { super::tray_strip::strip_element(pal, cx) } else { None };
 
-        // the safe-removal button: while a removable drive holds a volume; it opens our own panel with the drives
-        let ejects: Option<AnyElement> = (home && !super::eject_view::drives(cx).is_empty())
-            .then(|| div().mr(px(plan::RIGHT_GAP * k)).child(icon_button("dock-eject", L::Eject, pal, k, super::panel::toggle_eject)).into_any_element());
         // (keys are listened to, and focus tracked, only while a strip is drawn)
         let focus = tray.is_some().then(|| self.focus.get_or_insert_with(|| cx.focus_handle()).clone());
         super::host::island_box(pal, fallback, k)
             // a right click on the glass between and around the controls: Windows' Task Manager (the controls are told from the glass
-            // by their boxes, `empty.rs::right_controls`, which mirror the row below in its order and distances: tray strip, network,
-            // volume, separator, clock, bell; change one, change both)
+            // by their boxes, `empty.rs::right_controls`, which mirror the row below in its order and distances: tray strip, the
+            // island's own buttons, separator, clock, bell; change one, change both)
             .on_mouse_up(MouseButton::Right, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.right_click(ev.position, cx)))
             .when_some(focus, |d, focus| {
                 d.track_focus(&focus).on_key_down(cx.listener(|_, ev: &KeyDownEvent, _, cx| {
@@ -329,13 +478,10 @@ impl Render for RightIsland {
                 .px(px(plan::SIDE_PAD * k))
                 .items_center()
                 .children(tray)
-                // (the network and volume symbols and the separator after them are the primary monitor's)
-                .when(home, |d| {
-                    // the island's own buttons: safe removal (while there is something to remove), then Windows Security
-                    d.children(ejects).child(div().mr(px(plan::RIGHT_GAP * k)).child(icon_button("dock-security", L::ShieldCheck, pal, k, |_| super::panel_parts::open_uri("windowsdefender:"))))
-                        .child(icon_button("dock-network", network_icon, pal, k, open_controls))
-                        .child(div().ml(px(plan::RIGHT_GAP * k)).child(icon_button("dock-volume", volume_icon, pal, k, open_controls)))
-                        .child(div().ml(px(plan::RIGHT_SEP_GAP * k)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH * k)).h(px(plan::RIGHT_SEP_HEIGHT * k)).bg(pal.separator().hsla()))
+                // the island's own buttons (`status_row` above), then the separator
+                .children(status_row)
+                .when(!buttons.is_empty(), |d| {
+                    d.child(div().ml(px(plan::RIGHT_SEP_GAP * k)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH * k)).h(px(plan::RIGHT_SEP_HEIGHT * k)).bg(pal.separator().hsla()))
                 })
                 .child(clock)
                 .when(self.content.bell, |d| d.child(div().ml(px(plan::RIGHT_GAP * k)).child(bell_button(pal, dot, k, move |cx| open_notifications(mon, cx))))),

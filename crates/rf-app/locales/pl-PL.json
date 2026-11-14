@@ -1631,5 +1631,13 @@
  "9ab46316": "Pobieraj także wersje beta",
  "18892f1d": "Ta kopia jest wersją beta: pobiera kolejne wersje beta także przy wyłączonym przełączniku i przechodzi na wersję wydaną, gdy się ukaże.",
  "84de037b": "Wersje testowane przed wydaniem: nowości przychodzą wcześniej, podobnie jak błędy. Przy wyłączonej opcji pobierane są tylko wydania.",
- "754286b1": "Najlepsze dopasowanie"
+ "754286b1": "Najlepsze dopasowanie",
+ "cabf845b": "Ikony stanu",
+ "1f3041d1": "Kolejność własnych ikon prawej wyspy i to, które z nich są pokazywane. Ta na górze listy stoi najbardziej z lewej. Kolejność zmienisz strzałkami, przeciągając wiersz albo przeciągając ikonę na samym Docku. Ikona bezpiecznego usuwania pojawia się tylko wtedy, gdy podłączony jest dysk wymienny.",
+ "6e06f194": "Bezpieczne usuwanie",
+ "9f0f515e": "Zabezpieczenia Windows",
+ "2db1a682": "Dźwięk",
+ "1b222370": "Przesuń w górę",
+ "26ea62eb": "Boczne wyspy tak wysokie jak Dock",
+ "8dd08d22": "Lewa i prawa wyspa są rysowane tak wysokie jak środkowa. Gdy opcja jest wyłączona, są niższe. Dopóki Dock jest wąski, bo okno jest zmaksymalizowane, wszystkie trzy są wąskie."
 }

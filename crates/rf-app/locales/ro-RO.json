@@ -1631,5 +1631,13 @@
  "9ab46316": "Primește și versiuni beta",
  "18892f1d": "Această copie este o versiune beta: primește următoarele beta-uri chiar și cu comutatorul dezactivat și trece la versiunea finală când aceasta apare.",
  "84de037b": "Versiuni care sunt încercate înainte de lansare: lucrurile noi sosesc devreme, la fel și erorile. Dezactivat, se descarcă doar versiunile lansate.",
- "754286b1": "Cea mai bună potrivire"
+ "754286b1": "Cea mai bună potrivire",
+ "cabf845b": "Pictograme de stare",
+ "1f3041d1": "Ordinea pictogramelor proprii ale insulei din dreapta și care dintre ele sunt afișate. Cea din capul listei stă cel mai la stânga. Schimbă ordinea cu săgețile, trăgând un rând sau trăgând pictograma chiar pe Dock. Pictograma de eliminare în siguranță apare doar cât timp este conectată o unitate amovibilă.",
+ "6e06f194": "Eliminare în siguranță",
+ "9f0f515e": "Securitate Windows",
+ "2db1a682": "Sunet",
+ "1b222370": "Mutare în sus",
+ "26ea62eb": "Insule laterale la fel de înalte ca Dock-ul",
+ "8dd08d22": "Insula din stânga și cea din dreapta sunt desenate la fel de înalte ca cea din mijloc. Când este dezactivat, sunt mai joase. Cât timp Dock-ul este subțire pentru că o fereastră este maximizată, toate trei sunt subțiri."
 }

@@ -1631,5 +1631,13 @@
  "9ab46316": "Přijímat i beta verze",
  "18892f1d": "Tato kopie je beta verze: i s vypnutým přepínačem přijímá další bety a po vydání přejde na vydanou verzi.",
  "84de037b": "Verze, které se zkoušejí před vydáním: nové věci přicházejí dříve, a tedy i chyby. Když je vypnuto, stahují se jen vydané verze.",
- "754286b1": "Nejlepší shoda"
+ "754286b1": "Nejlepší shoda",
+ "cabf845b": "Stavové ikony",
+ "1f3041d1": "Pořadí vlastních ikon pravého ostrova a to, které z nich se zobrazují. Ta nahoře v seznamu stojí nejvíce vlevo. Pořadí změníte šipkami, přetažením řádku nebo přetažením ikony přímo na Docku. Ikona bezpečného odebrání se zobrazuje jen tehdy, když je připojen vyměnitelný disk.",
+ "6e06f194": "Bezpečné odebrání",
+ "9f0f515e": "Zabezpečení Windows",
+ "2db1a682": "Zvuk",
+ "1b222370": "Posunout nahoru",
+ "26ea62eb": "Boční ostrovy stejně vysoké jako Dock",
+ "8dd08d22": "Levý a pravý ostrov se vykreslí stejně vysoké jako prostřední. Když je vypnuto, jsou nižší. Dokud je Dock tenký kvůli maximalizovanému oknu, jsou tenké všechny tři."
 }

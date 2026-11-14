@@ -1820,4 +1820,12 @@ pub const EN: &[(&str, &str)] = &[
     ("Bu kopya bir beta sürümüdür: anahtar kapalıyken de sonraki betaları alır, kararlı sürüm çıkınca ona geçer.", "This copy is a beta version: it takes the next betas with the switch off too, and moves to the release when it is out."),
     ("Yayınlanmadan önce denenen sürümler: yenilikler erken gelir, hatalar da olabilir. Kapalıyken yalnızca kararlı sürümler indirilir.", "Versions that are tried before a release: new things arrive early, and so may bugs. With this off, only releases are downloaded."),
     ("En iyi eşleşme", "Best match"),
+    ("Durum simgeleri", "Status icons"),
+    ("Sağ adanın kendi simgelerinin sırası ve hangilerinin görüneceği. Listede üstte olan solda durur. Sırayı oklarla, satırı sürükleyerek ya da simgeyi Dock'un üzerinde sürükleyerek değiştirebilirsiniz. Güvenli kaldırma simgesi yalnızca çıkarılabilir bir sürücü takılıyken görünür.", "The order of the right island's own icons and which of them are shown. The one at the top of the list stands leftmost. Change the order with the arrows, by dragging a row, or by dragging the icon on the Dock itself. The safe removal icon appears only while a removable drive is connected."),
+    ("Güvenli kaldırma", "Safe removal"),
+    ("Windows Güvenliği", "Windows Security"),
+    ("Ses", "Sound"),
+    ("Yukarı taşı", "Move up"),
+    ("Yan adalar Dock kadar yüksek olsun", "Side islands as tall as the Dock"),
+    ("Sol ve sağ ada orta adayla aynı yükseklikte çizilir. Kapalıyken daha alçaktırlar. Dock bir pencere büyütüldüğü için inceldiğinde üçü de ince olur.", "The left and the right island are drawn as tall as the middle one. When off they are lower. While the Dock is thin because a window is maximised, all three are thin."),
 ];

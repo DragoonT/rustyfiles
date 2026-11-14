@@ -1631,5 +1631,13 @@
  "9ab46316": "Saņemt arī beta versijas",
  "18892f1d": "Šī kopija ir beta versija: tā saņem nākamās beta versijas arī ar izslēgtu slēdzi un pāriet uz laidienu, kad tas ir izdots.",
  "84de037b": "Versijas, kas tiek izmēģinātas pirms laidiena: jaunumi nāk agri, tāpat kā kļūdas. Ja izslēgts, tiek lejupielādēti tikai laidieni.",
- "754286b1": "Labākā atbilstība"
+ "754286b1": "Labākā atbilstība",
+ "cabf845b": "Statusa ikonas",
+ "1f3041d1": "Labās salas pašas ikonu secība un tas, kuras no tām tiek rādītas. Tā, kas ir saraksta augšā, atrodas vistālāk pa kreisi. Mainiet secību ar bultiņām, velkot rindu vai velkot ikonu pašā Dock. Drošas noņemšanas ikona parādās tikai tad, kad ir pievienots noņemams disks.",
+ "6e06f194": "Droša noņemšana",
+ "9f0f515e": "Windows drošība",
+ "2db1a682": "Skaņa",
+ "1b222370": "Pārvietot augšup",
+ "26ea62eb": "Sānu salas tikpat augstas kā Dock",
+ "8dd08d22": "Kreisā un labā sala tiek zīmētas tikpat augstas kā vidējā. Kad izslēgts, tās ir zemākas. Kamēr Dock ir plāns, jo logs ir maksimizēts, visas trīs ir plānas."
 }

@@ -2874,8 +2874,10 @@ mod search_tests {
                     let noted = noted_on_the_dock_page(&s, &p);
                     let entries = crate::dock_page::entries();
                     // (the weather-from-position card stands right after the weather city's row, inside the page, and notes its texts too)
-                    let extra = crate::dock::weather_card::cards(&p, &s).len();
+                    // (and the card of the right island's own buttons, at the end of the right island's section: one more)
+                    let extra = crate::dock::weather_card::cards(&p, &s).len() + 1;
                     assert_eq!(noted.len(), entries.len() + extra, "one card per entry, none dropped and none twice");
+                    assert_eq!(noted.last().map(|f| f.title.as_str()), Some("Durum simgeleri"), "the buttons' card closes the page");
                     for e in &entries {
                         // searched by its own title, and by a word of its description, it is found and opens the Dock page
                         let hits = matching(noted.clone(), e.title);
