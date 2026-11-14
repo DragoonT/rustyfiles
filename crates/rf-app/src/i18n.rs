@@ -203,23 +203,38 @@ fn system_lang() -> Lang {
 // 0 = Tr, 1 = En, 2 + i = LOCALES[i] (resolved; never System).
 static ACTIVE: AtomicU16 = AtomicU16::new(0);
 
+// IN A TEST BUILD the language a test sets is its own thread's (every test runs on a thread of its own): one test goes through all
+// the languages and loads every locale file, which takes long enough that tests comparing Turkish texts on other threads failed
+// now and then in a full run (two different ones in two runs on 2026-11-14, each fine alone). A thread that set nothing reads
+// the process's value, which no test changes any more, so it stays Turkish. (The number-format words in rf-core are still one
+// value for the process.)
+#[cfg(test)]
+thread_local! {
+    static TEST_ACTIVE: std::cell::Cell<Option<u16>> = const { std::cell::Cell::new(None) };
+}
+
 /// Sets the UI language (resolving `System`) and the number-format words in rf-core.
 pub fn set(lang: Lang) {
     let l = lang.resolve();
-    ACTIVE.store(
-        match l {
-            Lang::Tr | Lang::System => 0,
-            Lang::En => 1,
-            Lang::Other(i) => 2 + i,
-        },
-        Ordering::Relaxed,
-    );
+    let code = match l {
+        Lang::Tr | Lang::System => 0,
+        Lang::En => 1,
+        Lang::Other(i) => 2 + i,
+    };
+    #[cfg(test)]
+    TEST_ACTIVE.set(Some(code));
+    #[cfg(not(test))]
+    ACTIVE.store(code, Ordering::Relaxed);
     rf_core::format::set_english(l != Lang::Tr);
 }
 
 /// The active (resolved) language.
 pub fn active() -> Lang {
-    match ACTIVE.load(Ordering::Relaxed) {
+    #[cfg(test)]
+    let code = TEST_ACTIVE.get().unwrap_or_else(|| ACTIVE.load(Ordering::Relaxed));
+    #[cfg(not(test))]
+    let code = ACTIVE.load(Ordering::Relaxed);
+    match code {
         0 => Lang::Tr,
         1 => Lang::En,
         n => Lang::Other(n - 2),
