@@ -1134,7 +1134,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Bu dosya yöneticisinin arkasında tek bir kişi ve epey kahve var. Bir fincanı da senden olursa çok sevinirim.", "Behind this file manager there's one person and a lot of coffee. I'd be really glad if one cup came from you."),
     ("Kullandığın için teşekkür ederim. Projeyi sürdürmeme yardım etmek istersen, küçük bir bağış bile çok şey ifade eder.", "Thank you for using it. If you'd like to help me keep going, even a small donation means a lot."),
     ("Kahve ısmarla", "Buy me a coffee"),
-    ("Geliştiriciye bir kahve ısmarla", "Buy the developer a coffee"),
+    ("Geliştiriciye bir kahve ısmarla", "Buy a coffee for the developer"),
     ("rustyfiles'ı tek başıma geliştiriyorum; her destek, devam etmeme yardım eder.", "I build rustyfiles on my own; every bit of support helps me keep going."),
     ("Geliştirmeye devam edebilmem için bir kahveyle destek olur musun?", "Would you support me with a coffee so I can keep building it?"),
     ("Bu bilgisayardaki hız testinde rustyfiles {files} dosyalık bir klasörü Dosya Gezgini'nden {x} kat hızlı açtı.", "In the speed test on this PC, rustyfiles opened a folder of {files} files {x}× faster than File Explorer."),

@@ -307,6 +307,9 @@ pub(crate) fn start_mark(step: &str) {
 
 pub fn main() {
     start_mark("main");
+    // Not in the installation folder: the updater renames it, and Windows refuses while it is a working directory of this process
+    // or of anything this process starts (`rf_win::ownfolder`). Before everything else, so that every child inherits the way out.
+    rf_win::ownfolder::leave();
     // `--shell-probe`: what the shell host finds, windowless and read-only, before anything else is done (see shell::probe)
     if std::env::args().nth(1).as_deref() == Some(shell::probe::ARG) {
         std::process::exit(shell::probe::run());

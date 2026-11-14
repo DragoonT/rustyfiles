@@ -44,6 +44,7 @@ pub mod listing;
 pub mod localized;
 pub mod nameindex;
 pub mod organize;
+pub mod ownfolder;
 pub mod taskbar_hide;
 pub mod taskbar_progress;
 pub mod usn;

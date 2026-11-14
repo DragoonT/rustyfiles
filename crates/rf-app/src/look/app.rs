@@ -92,6 +92,8 @@ fn handle(msg: Msg, cx: &mut App) {
 
 /// directlook.exe
 pub fn main() {
+    // (not in the installation folder: see `rf_win::ownfolder`)
+    rf_win::ownfolder::leave();
     crate::install_panic_log();
     rf_win::shell::suppress_critical_error_dialogs();
     rf_win::thumbs::keep_gdiplus_alive();

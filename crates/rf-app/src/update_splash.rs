@@ -188,7 +188,10 @@ pub fn launch() -> Option<std::process::Child> {
     let _ = std::fs::create_dir_all(&dir);
     let copy = dir.join("rustyfiles-update.exe");
     std::fs::copy(&me, &copy).ok()?;
-    std::process::Command::new(&copy).arg(ARG).env("RUSTYFILES_MULTI_INSTANCE", "1").spawn().ok()
+    // The copy's working directory is the temporary folder, said here and not inherited: a copy that stood in the installed folder
+    // kept the updater from renaming it, and the update gave up after ten tries (`rf_win::ownfolder` has the whole story; the
+    // versions 0.7.0-beta.1 to 0.7.3 did exactly that whenever the program had been started from its shortcut).
+    std::process::Command::new(&copy).arg(ARG).env("RUSTYFILES_MULTI_INSTANCE", "1").current_dir(std::env::temp_dir()).spawn().ok()
 }
 
 #[cfg(test)]
