@@ -305,12 +305,23 @@ pub fn tx(tr: &'static str, en: &'static str) -> &'static str {
 /// Translates a dynamic string that may be a known Turkish text (error messages from the
 /// lower crates, group labels, built-in tag names...). `"Klasör bulunamadı: C:\x"` is handled by
 /// translating the part before the first `": "`. Unknown strings are returned unchanged.
+/// A text that ends with a code in brackets, "<text> (kod <number>)": the text and the number.
+fn coded(s: &str) -> Option<(&str, &str)> {
+    let (head, code) = s.strip_suffix(')')?.rsplit_once(" (kod ")?;
+    (!head.is_empty() && !code.is_empty() && code.chars().all(|c| c.is_ascii_digit() || c == '-')).then_some((head, code))
+}
+
 pub fn td(s: &str) -> String {
     if is_tr() {
         return s.to_string();
     }
     if let Some(t) = lookup(s) {
         return t.to_string();
+    }
+    // "<text> (kod 87)": a text with a system code after it. The number makes the whole text one nobody listed, so it was shown in
+    // Turkish in every language (issue 23, a user of the English interface, with a picture: "Listeleme hatası (kod 87)").
+    if let Some((head, code)) = coded(s) {
+        return format!("{} ({} {code})", lookup(head).unwrap_or(head), lookup("kod").unwrap_or("code"));
     }
     if let Some((head, rest)) = s.split_once(": ") {
         if let Some(t) = lookup(head) {
@@ -425,6 +436,14 @@ mod tests {
         assert_eq!(items_selected(2), "2 items selected");
         assert_eq!(pct(53.), "53%");
         assert_eq!(td("Klasör bulunamadı: C:/x"), "Folder not found: C:/x");
+        // a text with a system code after it is translated around its number
+        assert_eq!(td("Listeleme hatası (kod 87)"), "Listing error (code 87)");
+        assert_eq!(td("Listeleme hatası (kod -5)"), "Listing error (code -5)");
+        assert_eq!(td("bilinmeyen bir metin (kod 3)"), "bilinmeyen bir metin (code 3)", "a text nobody listed keeps its words");
+        assert_eq!(td("rapor (kod yok).txt"), "rapor (kod yok).txt", "a file's name that only looks like it is left alone");
+        assert_eq!(coded("Listeleme hatası (kod 87)"), Some(("Listeleme hatası", "87")));
+        assert_eq!(coded("(kod 87)"), None);
+        assert_eq!(coded("Listeleme hatası (kod )"), None);
         assert_eq!(td("kullanıcı dosyası.txt"), "kullanıcı dosyası.txt");
         assert_eq!(rf_core::format::size(1536), "1.50 KB");
         // every locale file: readable, and a missing text falls back to English
@@ -435,6 +454,7 @@ mod tests {
             assert!(items(5).contains('5'));
         }
         set(Lang::Tr);
+        assert_eq!(td("Listeleme hatası (kod 87)"), "Listeleme hatası (kod 87)", "Turkish is the text itself");
         assert_eq!(rf_core::format::size(1536), "1,50 KB");
     }
 }

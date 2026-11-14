@@ -342,6 +342,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Dosya adı şu karakterleri içeremez: \\ / : * ? \" < > | ve nokta ile bitemez.", "A file name can't contain any of these characters: \\ / : * ? \" < > | and can't end with a period."),
     ("Geçersiz klasör adı", "Invalid folder name"),
     ("Sürücü hazır değil", "The drive is not ready"),
+    ("Listeleme hatası", "Listing error"),
+    ("kod", "code"),
     ("Ağ yolu bulunamadı", "Network path not found"),
     ("Durum Merkezi", "Status Center"),
     ("Devam eden dosya işlemleri yok", "No ongoing file operations"),
