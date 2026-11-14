@@ -254,6 +254,9 @@ pub struct Host {
     clock_width: f32,
     prefs: Prefs,
     settings_stamp: Option<SystemTime>,
+    /// The Dock's switch (`dock_enabled`) as this host last read it: a host that has seen it on stops when it reads it off
+    /// ([`switch_stops`]).
+    switch_on: bool,
     started: Instant,
     /// The size the Dock page's slider gives while it is dragged (see `rf_win::dock::size_live`): the dock follows the slider's messages
     /// and keeps the settings file from overruling it until the drag is over.
@@ -1197,6 +1200,20 @@ fn reload(cx: &mut App) {
     .detach();
 }
 
+/// Whether a host that last read the Dock's switch as `was_on` stops now that it reads `now_on`: only when the switch went from on
+/// to off under it.
+///
+/// WHY THE HOST LOOKS ITSELF (issue 18). The main app tells the host to stop over its pipe, and that word can fail to arrive: it
+/// was lost nearly every time until the pipe's send learned to wait for a busy pipe, the main app may be gone, an older main app
+/// may be the one that writes the file. A host that only obeys the message then stays for good, with the switch off and Windows'
+/// taskbar hidden, and nothing short of Task Manager ends it. The settings file is what the switch IS, and the host reads it anyway
+/// (told to, and every 5 s by itself): when it says off, the host goes.
+/// A host that was STARTED with the switch off (by hand, `rustyfiles.exe --dock`, as the dock was tried before it had a switch) is
+/// not stopped by a file that still says off: it stops once the switch has been on and goes off.
+pub fn switch_stops(was_on: bool, now_on: bool) -> bool {
+    was_on && !now_on
+}
+
 /// What a reload read: `None` is a file that could not be read or understood right now - the dock keeps what it has and looks again
 /// when the file changes next.
 fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut App) {
@@ -1206,6 +1223,14 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
         }
         return;
     };
+    // the switch first: a host that is switched off has nothing else to apply
+    let was_on = host_mut(cx).map(|h| std::mem::replace(&mut h.switch_on, fresh.dock_enabled));
+    if was_on.is_some_and(|was_on| switch_stops(was_on, fresh.dock_enabled)) {
+        log::info!("dock: the switch is off in the settings file; stopping");
+        crate::shell::exits::log_exit(crate::shell::exits::Exit::SwitchOff, "");
+        shutdown(cx);
+        return;
+    }
     let mut fresh = fresh;
     // A size slider that is being dragged (or just was) is ahead of the file: the file may hold an earlier step of the same drag.
     let size_verdict = host_mut(cx).map(|h| h.live.file(Instant::now(), fresh.dock_size.permille()));
@@ -1494,6 +1519,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         clock_width: plan::clock_width(&lines),
         prefs: prefs.clone(),
         settings_stamp: file_stamp(),
+        switch_on: cx.try_global::<Settings>().is_some_and(|s| s.dock_enabled),
         started: Instant::now(),
         live: SizeLive::new(prefs.size.permille()),
         secondary_watch: None,
@@ -1663,12 +1689,24 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Changes, Geo, Kind, MonId, Prefs, Settings, changes, file_changed, panel_is_hit, region_differs};
+    use super::{Changes, Geo, Kind, MonId, Prefs, Settings, changes, file_changed, panel_is_hit, region_differs, switch_stops};
     use rf_win::dock::hit::{self, Part};
     use rf_win::dock::layout::{self, Rect, Widths};
     use rf_win::dock::panel::{self as panel_geo, Side};
     use std::time::{Duration, UNIX_EPOCH};
 
+
+    #[test]
+    fn a_host_stops_when_the_switch_it_has_seen_on_is_off_in_the_file_and_only_then() {
+        assert!(switch_stops(true, false), "switched off under a running dock: it stops by itself (issue 18)");
+        assert!(!switch_stops(true, true), "still on");
+        assert!(!switch_stops(false, true), "switched on under a dock that was started by hand: it stays");
+        assert!(!switch_stops(false, false), "started by hand with the switch off: a file that still says off does not stop it");
+        // the settings a new profile starts with have the switch off, and one line turns it on: what the host reads at each reload
+        assert!(!Settings::default().dock_enabled);
+        assert!(Settings::parse_lenient_pub("dock_enabled = true
+").unwrap().dock_enabled);
+    }
     #[test]
     fn a_region_given_again_after_a_layout_is_sent_even_when_its_pieces_are_the_same() {
         let grown = hit::parts([44.0, 12.0, 600.0, 72.0], 24.0, &[[200.0, 4.0, 68.0, 68.0]], 700, 100);

@@ -38,6 +38,8 @@ pub enum Exit {
     AnotherHost,
     /// `stop` arrived on the pipe.
     StopMessage,
+    /// The settings file says the Dock's switch is off, and it was on while this host ran (`dock::host::switch_stops`).
+    SwitchOff,
     /// The session is ending.
     SessionEnding,
     /// The system has no monitor to put the dock on.
@@ -53,13 +55,14 @@ pub enum Exit {
 }
 
 impl Exit {
-    pub const ALL: [Exit; 8] =
-        [Exit::AnotherHost, Exit::StopMessage, Exit::SessionEnding, Exit::NoMonitor, Exit::NoIsland, Exit::IslandsClosed, Exit::Panic, Exit::RunReturned];
+    pub const ALL: [Exit; 9] =
+        [Exit::AnotherHost, Exit::StopMessage, Exit::SwitchOff, Exit::SessionEnding, Exit::NoMonitor, Exit::NoIsland, Exit::IslandsClosed, Exit::Panic, Exit::RunReturned];
 
     pub fn describe(self) -> &'static str {
         match self {
             Exit::AnotherHost => "another host of this group answered its greeting, so this one leaves to it",
             Exit::StopMessage => "a stop message arrived on the host's pipe",
+            Exit::SwitchOff => "the Dock's switch is off in the settings file",
             Exit::SessionEnding => "the session is ending",
             Exit::NoMonitor => "this session has no monitor to put the dock on",
             Exit::NoIsland => "no island window could be opened",
@@ -139,9 +142,10 @@ mod tests {
     /// Each reason is written from the place where that path ends (the source is searched, so a path cannot lose its line unnoticed).
     #[test]
     fn every_reason_is_written_where_the_process_ends() {
-        let places: [(&str, &str); 5] = [
+        let places: [(&str, &str); 6] = [
             ("AnotherHost", include_str!("../lib.rs")),
             ("StopMessage", include_str!("../dock/host.rs")),
+            ("SwitchOff", include_str!("../dock/host.rs")),
             ("NoMonitor", include_str!("../dock/host.rs")),
             ("NoIsland", include_str!("../dock/host.rs")),
             ("IslandsClosed", include_str!("../dock/host.rs")),

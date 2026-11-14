@@ -1,13 +1,13 @@
 //! Single-instance plumbing: the first process owns a named mutex and serves a named pipe;
 //! later launches forward their arguments (paths) through the pipe and exit.
 
-use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GENERIC_WRITE, GetLastError, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, GENERIC_WRITE, GetLastError, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_NONE, OPEN_EXISTING, PIPE_ACCESS_INBOUND, ReadFile, WriteFile,
 };
 use windows::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, DisconnectNamedPipe, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
-    PIPE_WAIT,
+    PIPE_WAIT, WaitNamedPipeW,
 };
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::core::PCWSTR;
@@ -118,25 +118,36 @@ pub fn acquire_app(app: &str, message: &str) -> Role {
     }
 }
 
-/// Sends `message` to the running instance of `app` (false if none answers). Never waits long:
-/// the pipe either exists right now or it doesn't.
+/// Sends `message` to the running instance of `app` (false if none answers). Never waits long: a pipe that does not exist is
+/// answered at once, and one whose every instance is taken at this moment is waited for, at most [`BUSY_TRIES`] times
+/// [`BUSY_WAIT_MS`].
 pub fn send_to(app: &str, message: &str) -> bool {
     send(&names_for(app).1, message)
 }
 
+/// How long one wait for a free instance of a busy pipe may take, and how many such waits a send makes.
+const BUSY_WAIT_MS: u32 = 200;
+const BUSY_TRIES: u32 = 5;
+
 fn send(pipe: &str, message: &str) -> bool {
     let w = wide(pipe);
     unsafe {
-        let Ok(h) = CreateFileW(
-            PCWSTR(w.as_ptr()),
-            GENERIC_WRITE.0,
-            FILE_SHARE_NONE,
-            None,
-            OPEN_EXISTING,
-            FILE_FLAGS_AND_ATTRIBUTES(0),
-            None,
-        ) else {
-            return false;
+        // A BUSY PIPE IS NOT AN ABSENT ONE. The server accepts a client on the one instance that listens and makes the next
+        // instance after that, so a message that follows another at once finds every instance taken (`ERROR_PIPE_BUSY`). That
+        // used to be read as "nobody there" and the message was dropped: the main app asks the dock "ping" and then tells it
+        // "stop", and the stop was the one that got lost (issue 18: the Dock switch went off and the dock stayed; measured with
+        // the test below, 199 of 200 such pairs lost a message). The pipe's own wait is for exactly this.
+        let mut tries = 0;
+        let h = loop {
+            match CreateFileW(PCWSTR(w.as_ptr()), GENERIC_WRITE.0, FILE_SHARE_NONE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None) {
+                Ok(h) => break h,
+                Err(e) if e.code() == ERROR_PIPE_BUSY.to_hresult() && tries < BUSY_TRIES => {
+                    tries += 1;
+                    // (returns as soon as an instance listens; an error when none came in the time, and then the next try says so)
+                    let _ = WaitNamedPipeW(PCWSTR(w.as_ptr()), BUSY_WAIT_MS);
+                }
+                Err(_) => return false,
+            }
         };
         let mut bytes = message.as_bytes().to_vec();
         bytes.push(b'\n');
@@ -161,19 +172,10 @@ pub fn serve_app(app: &str, on_message: impl Fn(String) + Send + Sync + 'static)
         .name("rf-instance-pipe".into())
         .spawn(move || {
             let w = wide(&pipe_name);
+            let make = || unsafe { CreateNamedPipeW(PCWSTR(w.as_ptr()), PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, PIPE_UNLIMITED_INSTANCES, 0, 64 * 1024, 0, None) };
+            let mut listening = make();
             loop {
-                let pipe = unsafe {
-                    CreateNamedPipeW(
-                        PCWSTR(w.as_ptr()),
-                        PIPE_ACCESS_INBOUND,
-                        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                        PIPE_UNLIMITED_INSTANCES,
-                        0,
-                        64 * 1024,
-                        0,
-                        None,
-                    )
-                };
+                let pipe = listening;
                 if pipe.is_invalid() {
                     log::warn!("single instance pipe failed");
                     return;
@@ -181,6 +183,9 @@ pub fn serve_app(app: &str, on_message: impl Fn(String) + Send + Sync + 'static)
                 unsafe {
                     let _ = ConnectNamedPipe(pipe, None);
                 }
+                // The NEXT instance is made before this client is served: while this one is read and closed there is always a pipe
+                // of this name (busy for a moment, which a sender waits out; never gone, which a sender takes for "nobody there").
+                listening = make();
                 // Read each client on its own thread so a stalled client can't block the next one.
                 let raw = pipe.0 as isize;
                 let cb = on_message.clone();
@@ -258,5 +263,40 @@ mod app_tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         assert_eq!(rx.recv_timeout(std::time::Duration::from_secs(3)).unwrap(), "merhaba");
+    }
+
+    /// Issue 18: the main app asks the dock "are you there?" and, when it is, tells it "stop" right after. The server takes one
+    /// client and only then makes the pipe for the next, so the second message found every pipe busy and was dropped: the switch
+    /// went off and the dock stayed. Every message of a quick run must arrive.
+    #[test]
+    fn messages_sent_one_right_after_the_other_all_arrive() {
+        let app = format!("rf-test-burst-{}", std::process::id());
+        let (tx, rx) = std::sync::mpsc::channel();
+        let tx = std::sync::Mutex::new(tx);
+        serve_app(&app, move |m| {
+            let _ = tx.lock().unwrap().send(m);
+        });
+        let t = std::time::Instant::now();
+        while !send_to(&app, "up") {
+            assert!(t.elapsed().as_secs() < 3, "pipe never came up");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let mut refused = 0;
+        for i in 0..200 {
+            // (a ping and a stop, as `sync_process` sends them)
+            if !send_to(&app, "ping") || !send_to(&app, &format!("stop {i}")) {
+                refused += 1;
+            }
+        }
+        assert_eq!(refused, 0, "a message that follows another at once must not be lost");
+        let mut got = 0;
+        while let Ok(m) = rx.recv_timeout(std::time::Duration::from_secs(2)) {
+            got += usize::from(m.starts_with("stop "));
+            if got == 200 {
+                break;
+            }
+        }
+        assert_eq!(got, 200);
     }
 }

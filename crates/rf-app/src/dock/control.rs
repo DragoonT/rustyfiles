@@ -233,8 +233,11 @@ pub fn sync_process(s: &Settings) {
             Err(e) => log::warn!("dock: cannot start: {e}"),
         },
         Step::Stop => {
-            if rf_win::single_instance::send_to(APP, "stop") {
+            if tell_to_stop() {
                 log::info!("dock: asked to stop");
+            } else {
+                // (it reads the settings file itself, told or not, and stops when the switch is off there: `host::switch_stops`)
+                log::warn!("dock: could not be told to stop; it stops by itself when it reads the settings");
             }
             let mut told = TOLD.lock().unwrap_or_else(|p| p.into_inner());
             told.started = None;
@@ -250,6 +253,23 @@ pub fn sync_process(s: &Settings) {
     }
 }
 
+/// Tells the dock to stop, and says it again for up to two seconds while the dock still answers and the word did not get through
+/// (issue 18: a `stop` sent right after the `ping` that found the dock was dropped by a busy pipe, and nothing said it twice).
+/// True when the word was written to the dock's pipe.
+fn tell_to_stop() -> bool {
+    for _ in 0..20 {
+        if rf_win::single_instance::send_to(APP, "stop") {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        if !is_running() {
+            // (gone meanwhile: nothing left to tell)
+            return false;
+        }
+    }
+    false
+}
+
 /// Before an update or an uninstall replaces the program files: a running dock holds `rustyfiles.exe` open (it outlives the
 /// window), so it is asked to stop and given a moment to let go. The settings switch stays as it is: the new version's start brings
 /// the dock back. Blocks up to a few seconds: call it where waiting is fine (the update's restart, the uninstall hook).
@@ -257,7 +277,7 @@ pub fn stop_for_update() {
     if disabled_by_environment() || !is_running() {
         return;
     }
-    if rf_win::single_instance::send_to(APP, "stop") {
+    if tell_to_stop() {
         log::info!("dock: asked to stop for an update");
     }
     // the process ends itself: wait for its pipe to go
