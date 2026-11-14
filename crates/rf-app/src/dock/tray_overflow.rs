@@ -2,8 +2,10 @@
 //! and closes it; `tray_panel.rs` is its slot). A small panel on HyperGlass holding the icons that did not fit the strip and the ones the
 //! user moved here, in rows of up to six, each a 20 px picture in a 40 px cell.
 //!
-//! WHAT IT DOES. A click on a cell is the click on the icon (left, right, middle, double): it goes to the program through the tray host
-//! and the panel puts itself away (a menu the program opens takes the foreground anyway). Dragging a cell out of the panel onto a gap of
+//! WHAT IT DOES. A click on a cell is the click on the icon (left, right, middle, double): it goes to the program through the tray host.
+//! After a left, middle or double click the panel puts itself away (something was chosen). After a RIGHT click it stays: the program
+//! shows its own menu, and the panel is held up while that menu is and goes with it (`panel::hold_for_menu`, `geo::menu_hold`), as
+//! Windows' own panel does. (A click from the keyboard still puts the panel away: the view has stopped listening to keys by then.) Dragging a cell out of the panel onto a gap of
 //! the strip shows the icon again; dragging an icon of the strip onto the panel or onto the chevron hides it. The drag is followed by
 //! `tray_strip.rs` (it reads the real pointer, because the toolkit's events stop at the window's edge), this view only draws the cells,
 //! the dimmed icon that is being dragged and the frame that says "drop here". A tip after 400 ms of rest, as in the strip.

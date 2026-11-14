@@ -208,7 +208,16 @@ pub fn picture_size(wanted: f32, own_px: u32, scale: f32) -> f32 {
 
 #[cfg(test)]
 mod picture_size_tests {
-    use super::picture_size;
+    use super::{ClickKind, PointerButton, asks_for_menu, picture_size, pointer_click};
+
+    #[test]
+    fn only_the_right_button_asks_for_the_programs_menu() {
+        assert!(asks_for_menu(ClickKind::Right));
+        for kind in [ClickKind::Left, ClickKind::LeftDouble, ClickKind::Middle, ClickKind::KeySelect, ClickKind::KeyContext] {
+            assert!(!asks_for_menu(kind), "{kind:?} puts the panel away");
+        }
+        assert!(asks_for_menu(pointer_click(PointerButton::Right, 1)) && asks_for_menu(pointer_click(PointerButton::Right, 2)));
+    }
 
     #[test]
     fn a_picture_close_to_its_place_is_drawn_at_its_own_pixels() {
@@ -509,6 +518,12 @@ pub fn pointer_click(button: PointerButton, click_count: usize) -> ClickKind {
         PointerButton::Right => ClickKind::Right,
         PointerButton::Middle => ClickKind::Middle,
     }
+}
+
+/// Whether a click with the pointer asks the program for its own menu (the right button). The panel of hidden icons stays up for
+/// such a click while the menu is up (`dock::panel::menu_hold`); every other click is a choice and puts the panel away.
+pub fn asks_for_menu(kind: ClickKind) -> bool {
+    kind == ClickKind::Right
 }
 
 /// How far (logical px) the pointer must go with the button held before a press on an icon is a drag and not a click.

@@ -923,10 +923,16 @@ fn finish_click(ps: &PressState, cursor: (i32, i32), cx: &mut App) {
     if !source_rect(ps.source, cx).is_some_and(|r| r.contains(cursor.0, cursor.1)) {
         return;
     }
-    deliver(icon, ts::pointer_click(ps.press.button, ps.press.count), cursor, cx);
-    // what was chosen in the panel puts the panel away (a menu the program opens takes the foreground anyway)
+    let kind = ts::pointer_click(ps.press.button, ps.press.count);
+    deliver(icon, kind, cursor, cx);
+    // What was chosen in the panel puts the panel away. A right click is not a choice yet: it asks the program for its menu, and the
+    // panel stays up while that menu is (the user: "bir ikona sağ tıklayınca ikon tepsisi kapanıyor").
     if matches!(ps.source, Source::Overflow(_)) {
-        super::panel::close(CloseCause::Chosen, cx);
+        if ts::asks_for_menu(kind) {
+            super::panel::hold_for_menu(cx);
+        } else {
+            super::panel::close(CloseCause::Chosen, cx);
+        }
     }
 }
 

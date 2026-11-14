@@ -115,6 +115,66 @@ pub fn lost_foreground(panel: isize, foreground: isize, been_front: bool, since_
     been_front || since_open_ms >= FOREGROUND_GRACE_MS
 }
 
+/// How long a panel waits for a program to put its own menu up after that menu was asked for from the panel.
+pub const MENU_WAIT_MS: u64 = 1_500;
+
+/// Where a panel stands while a program's own menu, asked for from the panel, may be up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HoldStep {
+    /// The program has not taken the foreground yet: the panel stays.
+    Waiting,
+    /// The program's menu has the foreground (this window): the panel stays.
+    Held(isize),
+    /// The menu was up and is gone (something was chosen, or it was put away): the panel closes with it, as Windows' own does.
+    MenuDone,
+    /// The hold is over (no menu came, or another window has the foreground now): the panel's usual rules apply again.
+    Over,
+}
+
+/// The panel's hold for a program's own menu, one look at a time.
+///
+/// WHY (the user: "sağ alt tepside bir ikona sağ tıklayınca ikon tepsisi kapanıyor"). A right click on an icon in the panel of hidden
+/// tray icons asks the program for its menu. The program takes the foreground to show it (a menu needs that), and a panel closes when
+/// it loses the foreground; before that the panel even put itself away at once, like after any click. Either way the tray vanished
+/// under the pointer the moment the menu was asked for. Windows' own panel stays while the menu is up and goes with it.
+///
+/// `foreground` is the root window in front (0: none for the moment), `held` the window that took the foreground for the menu (0:
+/// nobody yet), `waited_ms` how long ago the menu was asked for, `in_menu` whether that window's thread is showing a classic menu
+/// now, `seen_menu` whether it ever was since the hold began. A program that draws a menu of its own never is "in a menu": its hold
+/// ends when another window takes the foreground.
+pub fn menu_hold(panel: isize, foreground: isize, held: isize, waited_ms: u64, seen_menu: bool, in_menu: bool) -> HoldStep {
+    if held == 0 {
+        if foreground == 0 || foreground == panel {
+            return if waited_ms < MENU_WAIT_MS { HoldStep::Waiting } else { HoldStep::Over };
+        }
+        return HoldStep::Held(foreground);
+    }
+    if foreground == 0 {
+        return HoldStep::Held(held);
+    }
+    if foreground != held {
+        return HoldStep::Over;
+    }
+    if seen_menu && !in_menu { HoldStep::MenuDone } else { HoldStep::Held(held) }
+}
+
+/// Whether the thread that owns `hwnd` is showing a classic menu now (what most tray icons open on a right click).
+pub fn in_menu_mode(hwnd: isize) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GUI_INMENUMODE, GUI_POPUPMENUMODE, GUI_SYSTEMMENUMODE, GUITHREADINFO, GetGUIThreadInfo, GetWindowThreadProcessId};
+    if hwnd == 0 {
+        return false;
+    }
+    // SAFETY: plain reads; the struct's size is set as the call asks.
+    unsafe {
+        let thread = GetWindowThreadProcessId(windows::Win32::Foundation::HWND(hwnd as *mut _), None);
+        if thread == 0 {
+            return false;
+        }
+        let mut info = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+        GetGUIThreadInfo(thread, &mut info).is_ok() && (info.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_SYSTEMMENUMODE)).0 != 0
+    }
+}
+
 /// A click outside: a mouse button went down just now (it was up at the last look), at a point that is neither on the panel nor on
 /// `keep` (the panel's own island: its button toggles the panel itself, closing it here as well would reopen it at once).
 pub fn outside_click(was_down: bool, down: bool, cursor: (i32, i32), panel: Rect, keep: Rect) -> bool {
@@ -283,6 +343,31 @@ mod tests {
     /// A 1920x1080 monitor at 100 % with the 48 px Windows taskbar: the left island's glass is 330x48 at (12, 974).
     fn left_glass() -> Rect {
         Rect::from_xywh(12, 1032 - 10 - 48, 330, 48)
+    }
+
+    #[test]
+    fn a_panel_holds_for_a_programs_menu_and_goes_with_it() {
+        let (panel, menu, other) = (10, 20, 30);
+        // just asked for: the panel still has the foreground, or nothing has it for a moment
+        assert_eq!(menu_hold(panel, panel, 0, 0, false, false), HoldStep::Waiting);
+        assert_eq!(menu_hold(panel, 0, 0, 400, false, false), HoldStep::Waiting);
+        assert_eq!(menu_hold(panel, panel, 0, MENU_WAIT_MS - 1, false, false), HoldStep::Waiting);
+        // no menu came: back to the usual rules (the panel is in front, so it stays open)
+        assert_eq!(menu_hold(panel, panel, 0, MENU_WAIT_MS, false, false), HoldStep::Over);
+        // the program took the foreground for its menu: the panel stays, whatever the time
+        assert_eq!(menu_hold(panel, menu, 0, 80, false, false), HoldStep::Held(menu));
+        assert_eq!(menu_hold(panel, menu, menu, 9_000, false, true), HoldStep::Held(menu));
+        assert_eq!(menu_hold(panel, menu, menu, 9_000, true, true), HoldStep::Held(menu));
+        assert_eq!(menu_hold(panel, 0, menu, 200, true, true), HoldStep::Held(menu), "between two windows nothing is decided");
+        // the menu was up and is gone: the panel goes with it
+        assert_eq!(menu_hold(panel, menu, menu, 3_000, true, false), HoldStep::MenuDone);
+        // a program whose menu is a window of its own is never 'in a menu': it is held until the foreground moves
+        assert_eq!(menu_hold(panel, menu, menu, 3_000, false, false), HoldStep::Held(menu));
+        // the foreground moved on: to the panel again (the user came back), or to another window
+        assert_eq!(menu_hold(panel, panel, menu, 3_000, true, false), HoldStep::Over);
+        assert_eq!(menu_hold(panel, other, menu, 3_000, false, false), HoldStep::Over);
+        // a window that is no window shows no menu
+        assert!(!in_menu_mode(0) && !in_menu_mode(0x7FFF_FFF1));
     }
 
     #[test]

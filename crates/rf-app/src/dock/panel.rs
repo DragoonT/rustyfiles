@@ -132,6 +132,9 @@ struct PanelHost {
     opened_at: Instant,
     been_front: bool,
     mouse_was_down: bool,
+    /// A program's own menu was asked for from the open panel (a right click on a hidden tray icon): the panel stays while that
+    /// menu is up (`geo::menu_hold`).
+    menu_hold: Option<MenuHold>,
     watcher: Option<Task<()>>,
     /// What is typed in the Start panel's field (the left island shows it).
     typed: String,
@@ -172,6 +175,7 @@ fn host_global(cx: &mut App) -> &mut PanelHost {
             opened_at: Instant::now(),
             been_front: false,
             mouse_was_down: false,
+            menu_hold: None,
             watcher: None,
             typed: String::new(),
             left_island: None,
@@ -566,6 +570,7 @@ fn open_panel(id: PanelId, cx: &mut App) {
         p.opened_at = Instant::now();
         p.been_front = false;
         p.mouse_was_down = geo::any_button_down();
+        p.menu_hold = None;
         p.serial
     };
     start_state_changed(id, true, cx);
@@ -718,6 +723,26 @@ pub fn redraw(id: PanelId, cx: &mut App) {
     hooks.redraw(cx);
 }
 
+/// The open panel's hold for a program's own menu.
+#[derive(Clone, Copy)]
+struct MenuHold {
+    since: Instant,
+    /// The window that took the foreground for the menu (0: nobody yet).
+    held: isize,
+    /// Its thread has been seen showing a classic menu.
+    seen_menu: bool,
+}
+
+/// A program's own menu was asked for from the open panel (a right click on one of the hidden tray icons): the panel does not put
+/// itself away and does not close for the foreground the program takes; it stays while the menu is up (see `geo::menu_hold`).
+pub fn hold_for_menu(cx: &mut App) {
+    if let Some(p) = cx.try_global::<PanelHost>()
+        && p.open.is_some()
+    {
+        cx.global_mut::<PanelHost>().menu_hold = Some(MenuHold { since: Instant::now(), held: 0, seen_menu: false });
+    }
+}
+
 /// One look of the open panel at the foreground and the mouse. False when this watch is over (the panel closed or reopened).
 fn watch_once(serial: u64, cx: &mut App) -> bool {
     let Some(p) = cx.try_global::<PanelHost>() else { return false };
@@ -742,6 +767,23 @@ fn watch_once(serial: u64, cx: &mut App) -> bool {
     if outside {
         close(CloseCause::ClickOutside, cx);
         return false;
+    }
+    // A program's own menu was asked for from the panel: the panel stays while the menu is up and goes with it.
+    if let Some(h) = cx.try_global::<PanelHost>().and_then(|p| p.menu_hold) {
+        let candidate = if h.held != 0 { h.held } else { fg };
+        let in_menu = candidate != 0 && candidate != hwnd && geo::in_menu_mode(candidate);
+        match geo::menu_hold(hwnd, fg, h.held, h.since.elapsed().as_millis() as u64, h.seen_menu, in_menu) {
+            geo::HoldStep::Waiting => return true,
+            geo::HoldStep::Held(w) => {
+                cx.global_mut::<PanelHost>().menu_hold = Some(MenuHold { since: h.since, held: w, seen_menu: h.seen_menu || in_menu });
+                return true;
+            }
+            geo::HoldStep::MenuDone => {
+                close(CloseCause::Chosen, cx);
+                return false;
+            }
+            geo::HoldStep::Over => cx.global_mut::<PanelHost>().menu_hold = None,
+        }
     }
     if geo::lost_foreground(hwnd, fg, been_front || front, opened_at.elapsed().as_millis() as u64) {
         close(CloseCause::ForegroundLost, cx);
