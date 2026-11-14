@@ -22,6 +22,9 @@
 //! With the field in the island's row under the content the way to the content is Up and the way back Down, and Tab follows the order on
 //! the screen (`rf_win::dock::startkeys`). The result list reads top down with the best match first, selected and marked "Enter".
 //!
+//! Beside the result list stands the DETAIL PANE of the selected result (`start_pane.rs`): what it is, what can be done with it, an
+//! app's jump list. Tab leads into it, and Ctrl+Shift+Enter starts the selected app as administrator.
+//!
 //! Menus (right click on an app, the power button) are drawn inside this window: a separate menu window would take the activation and
 //! the panel would close under it.
 
@@ -224,6 +227,12 @@ pub struct StartView {
 
     /// Drag and drop: a press that may become a drag, the drag itself (`start_drag.rs`).
     drag: drag::DragState,
+
+    /// The detail pane (`start_pane.rs`): what is known about the selected result, the reading that is under way, and the row the
+    /// keyboard is on while it is in the pane (`None`: the keyboard is in the list).
+    detail: detail::Detail,
+    _detail: Option<Task<()>>,
+    pane_cursor: Option<usize>,
 }
 
 use std::cell::RefCell;
@@ -238,6 +247,9 @@ mod row;
 // Dragging: pinned apps reordered, an app onto the dock, an app or a recommended file out of the panel as a file.
 #[path = "start_drag.rs"]
 mod drag;
+// The detail pane beside the result list: the selected result's facts, actions and jump list.
+#[path = "start_pane.rs"]
+mod detail;
 
 static WRITER: startpins::OrderedWriter = startpins::OrderedWriter::new();
 
@@ -362,6 +374,9 @@ impl StartView {
             icon_scale: 0.0,
             _subs: subs,
             drag: drag::DragState::default(),
+            detail: detail::Detail::default(),
+            _detail: None,
+            pane_cursor: None,
         };
         // (the list of apps, the pins and the user's name are read when the panel opens, `on_open`: the view is made by the first click
         // on the Start button, so there is nothing to warm up before it, and a timer started here would only read it all a second time)
@@ -1274,6 +1289,11 @@ impl StartView {
             }
             return;
         }
+        // the detail pane's keys, while results are shown (Tab into it, its rows, Ctrl+Shift+Enter)
+        if !self.query.trim().is_empty() && !self.entries.is_empty() && self.pane_key(key, m, !footer, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if key == "tab" {
             cx.stop_propagation();
             self.tab(m.shift, window, cx);
@@ -1570,8 +1590,9 @@ impl StartView {
         let (hover, sel_fill) = (pal.hover_fill().hsla(), theme.selection);
         let (secondary, tertiary) = (pal.text_secondary().hsla(), pal.text_secondary().hsla());
         let entries = self.entries.clone();
-        // (a row's own padding is 10 px: the text lines up with the pages' content)
-        let mut list = v_flex().px(px(PAD - 10.0)).pb(px(8.));
+        // (a row's own padding is 10 px: the text lines up with the pages' content; the pane stands at the list's right, so the list
+        // keeps only a little room on that side)
+        let mut list = v_flex().pl(px(PAD - 10.0)).pr(px(8.)).pb(px(8.));
         let mut last: Option<Section> = None;
         let (mut child, mut selected_child) = (0usize, 0usize);
         for (ix, entry) in entries.iter().enumerate() {
@@ -1610,13 +1631,13 @@ impl StartView {
                     (title, item.detail.clone(), icon)
                 }
             };
-            let hint = if sel { "Enter" } else { "" };
             let app_for_menu = match entry {
                 Entry::Item(Item { target: Target::App { id, name }, .. }) => Some(AppEntry { id: id.clone(), name: name.clone() }),
                 _ => None,
             };
             let mut row = h_flex()
                 .id(("start-result", ix))
+                .group("start-result")
                 .relative()
                 .h(px(RESULT_H))
                 .px(px(10.))
@@ -1634,7 +1655,29 @@ impl StartView {
                         .child(div().text_sm().truncate().child(title))
                         .when(!detail.is_empty(), |d| d.child(div().text_xs().text_color(tertiary).truncate().child(detail))),
                 )
-                .when(!hint.is_empty(), |d| d.child(div().flex_shrink_0().text_xs().text_color(tertiary).child(hint)))
+                // The small arrow at the row's end: this row's details beside the list, without opening it (a click on the row itself
+                // opens it). It shows on the row under the pointer and stays on the selected one, pointing at the pane.
+                .child(
+                    div()
+                        .id(("start-result-more", ix))
+                        .size(px(24.))
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(px(6.))
+                        .opacity(if sel { 1.0 } else { 0.0 })
+                        .group_hover("start-result", |s| s.opacity(1.0))
+                        .when(!sel, |d| d.hover(move |s| s.bg(hover)))
+                        .child(Icon::new(L::ChevronRight).size(px(14.)).text_color(tertiary))
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            cx.stop_propagation();
+                            this.selection = Selection::at(&this.entries, ix);
+                            this.sel_ix = ix;
+                            this.pending = None;
+                            cx.notify();
+                        })),
+                )
                 .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
                     this.selection = Selection::at(&this.entries, ix);
                     this.sel_ix = ix;
@@ -1656,10 +1699,30 @@ impl StartView {
             Note::IndexOff => t!("Dosya araması kapalı: Ayarlar'da ad dizinini açın"),
             Note::MainStarting => t!("Ana uygulama başlatılıyor: dosyalar birazdan gelir"),
         });
+        // the selected result's details beside the list (`start_pane.rs`); nothing beside an empty list
+        let pane = (!entries.is_empty()).then(|| self.render_pane(pal, theme, cx));
+        let has_pane = pane.is_some();
         v_flex()
             .size_full()
             .when_some(note, |d, n| d.child(div().px(px(PAD)).pt(px(8.)).text_xs().text_color(tertiary).child(n)))
-            .child(div().id("start-results").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.results_scroll).child(list))
+            .child(
+                h_flex()
+                    .flex_1()
+                    .min_h_0()
+                    .items_start()
+                    .child(
+                        div()
+                            .id("start-results")
+                            .h_full()
+                            .when(has_pane, |d| d.w(px(rf_win::dock::startpane::LIST_W)).flex_shrink_0())
+                            .when(!has_pane, |d| d.flex_1())
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.results_scroll)
+                            .child(list),
+                    )
+                    .when_some(pane, |d, pane| d.child(div().h_full().flex_1().min_w_0().border_l_1().border_color(pal.separator().hsla()).child(pane))),
+            )
             .when(!entries.is_empty(), |d| {
                 d.child(
                     h_flex()
@@ -1672,6 +1735,7 @@ impl StartView {
                         .text_xs()
                         .text_color(tertiary)
                         .child(t!("Enter: aç"))
+                        .child(t!("Tab: eylemler"))
                         .when(can_show, |d| d.child(t!("Ctrl+Enter: klasörde göster")))
                         .child(t!("Esc: temizle")),
                 )

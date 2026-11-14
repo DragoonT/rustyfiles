@@ -9846,5 +9846,47 @@
   "key": "Sol ve sağ ada orta adayla aynı yükseklikte çizilir. Kapalıyken daha alçaktırlar. Dock bir pencere büyütüldüğü için inceldiğinde üçü de ince olur.",
   "tr": "Sol ve sağ ada orta adayla aynı yükseklikte çizilir. Kapalıyken daha alçaktırlar. Dock bir pencere büyütüldüğü için inceldiğinde üçü de ince olur.",
   "en": "The left and the right island are drawn as tall as the middle one. When off they are lower. While the Dock is thin because a window is maximised, all three are thin."
+ },
+ {
+  "id": "ed6d9558",
+  "key": "Webde ara",
+  "tr": "Webde ara",
+  "en": "Search the web"
+ },
+ {
+  "id": "f866dcd5",
+  "key": "Başlat",
+  "tr": "Başlat",
+  "en": "Start"
+ },
+ {
+  "id": "78bcadd5",
+  "key": "Tab: eylemler",
+  "tr": "Tab: eylemler",
+  "en": "Tab: actions"
+ },
+ {
+  "id": "9f34086b",
+  "key": "Uygulamayı kaldır…",
+  "tr": "Uygulamayı kaldır…",
+  "en": "Uninstall…"
+ },
+ {
+  "id": "686affc3",
+  "key": "Dock'a sabitlendi",
+  "tr": "Dock'a sabitlendi",
+  "en": "Pinned to the Dock"
+ },
+ {
+  "id": "8179e451",
+  "key": "Yol kopyalandı",
+  "tr": "Yol kopyalandı",
+  "en": "Path copied"
+ },
+ {
+  "id": "bd94ff4a",
+  "key": "Başlat'tan kaldır",
+  "tr": "Başlat'tan kaldır",
+  "en": "Unpin from Start"
  }
 ]

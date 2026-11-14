@@ -80,10 +80,15 @@ pub fn icon_for(cat: Category) -> L {
 }
 
 pub fn type_label(e: &Entry) -> String {
-    if e.is_dir() {
+    type_label_of(e.is_dir(), &e.ext)
+}
+
+/// [`type_label`] for a folder or for a file's extension (lower case, no dot).
+pub fn type_label_of(dir: bool, ext: &str) -> String {
+    if dir {
         return t!("Dosya klasörü").into();
     }
-    match &*e.ext {
+    match ext {
         "" => t!("Dosya").into(),
         "exe" => t!("Uygulama").into(),
         "lnk" => t!("Kısayol").into(),

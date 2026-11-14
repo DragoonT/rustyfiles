@@ -1639,5 +1639,12 @@
  "2db1a682": "Sonido",
  "1b222370": "Subir",
  "26ea62eb": "Islas laterales tan altas como el Dock",
- "8dd08d22": "La isla izquierda y la derecha se dibujan tan altas como la central. Si está desactivado, son más bajas. Mientras el Dock está delgado porque hay una ventana maximizada, las tres son delgadas."
+ "8dd08d22": "La isla izquierda y la derecha se dibujan tan altas como la central. Si está desactivado, son más bajas. Mientras el Dock está delgado porque hay una ventana maximizada, las tres son delgadas.",
+ "ed6d9558": "Buscar en la web",
+ "f866dcd5": "Iniciar",
+ "78bcadd5": "Tab: acciones",
+ "9f34086b": "Desinstalar…",
+ "686affc3": "Anclado al Dock",
+ "8179e451": "Ruta copiada",
+ "bd94ff4a": "Desanclar de Inicio"
 }

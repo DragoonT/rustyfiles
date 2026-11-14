@@ -51,6 +51,33 @@ pub fn launch_as_admin(app: &App) -> anyhow::Result<()> {
     crate::sta::call(START_LIMIT, move || run_as_admin(&app)).unwrap_or_else(|| anyhow::bail!("the shell did not answer in {START_LIMIT:?}"))
 }
 
+/// Starts a program file with administrator rights (a result of the search that is a program: `cmd.exe`, a tool on the path). As
+/// with an app, Windows shows its consent prompt because the user chose this.
+pub fn launch_file_as_admin(path: &std::path::Path) -> anyhow::Result<()> {
+    let path = path.to_path_buf();
+    crate::sta::call(START_LIMIT, move || run_file_as_admin(&path)).unwrap_or_else(|| anyhow::bail!("the shell did not answer in {START_LIMIT:?}"))
+}
+
+fn run_file_as_admin(path: &std::path::Path) -> anyhow::Result<()> {
+    use windows::Win32::UI::Shell::{SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW};
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows::core::{PCWSTR, w};
+    crate::shell::ensure_com();
+    let file = crate::wide::wide(path.as_os_str());
+    let dir = path.parent().map(crate::wide::wide);
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOASYNC,
+        lpVerb: w!("runas"),
+        lpFile: PCWSTR(file.as_ptr()),
+        lpDirectory: dir.as_ref().map_or(PCWSTR::null(), |d| PCWSTR(d.as_ptr())),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+    unsafe { ShellExecuteExW(&mut info)? };
+    Ok(())
+}
+
 /// Whether a failure is the user answering "No" to Windows' consent prompt (`ERROR_CANCELLED`): not an error worth a message.
 pub fn is_cancelled(e: &anyhow::Error) -> bool {
     use windows::core::HRESULT;

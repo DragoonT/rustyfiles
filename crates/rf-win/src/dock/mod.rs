@@ -105,6 +105,7 @@ pub mod startdrag;
 pub mod startkeys;
 pub mod startlist;
 pub mod startpage;
+pub mod startpane;
 pub mod startpins;
 pub mod startrecent;
 pub mod startuser;

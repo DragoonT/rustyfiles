@@ -1828,4 +1828,11 @@ pub const EN: &[(&str, &str)] = &[
     ("Yukarı taşı", "Move up"),
     ("Yan adalar Dock kadar yüksek olsun", "Side islands as tall as the Dock"),
     ("Sol ve sağ ada orta adayla aynı yükseklikte çizilir. Kapalıyken daha alçaktırlar. Dock bir pencere büyütüldüğü için inceldiğinde üçü de ince olur.", "The left and the right island are drawn as tall as the middle one. When off they are lower. While the Dock is thin because a window is maximised, all three are thin."),
+    ("Webde ara", "Search the web"),
+    ("Başlat", "Start"),
+    ("Tab: eylemler", "Tab: actions"),
+    ("Uygulamayı kaldır…", "Uninstall…"),
+    ("Dock'a sabitlendi", "Pinned to the Dock"),
+    ("Yol kopyalandı", "Path copied"),
+    ("Başlat'tan kaldır", "Unpin from Start"),
 ];

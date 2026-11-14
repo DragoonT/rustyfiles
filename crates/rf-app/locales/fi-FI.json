@@ -1639,5 +1639,12 @@
  "2db1a682": "Ääni",
  "1b222370": "Siirrä ylös",
  "26ea62eb": "Sivusaaret yhtä korkeiksi kuin Dock",
- "8dd08d22": "Vasen ja oikea saari piirretään yhtä korkeiksi kuin keskisaari. Kun asetus on pois päältä, ne ovat matalampia. Kun Dock on ohut, koska ikkuna on suurennettu, kaikki kolme ovat ohuita."
+ "8dd08d22": "Vasen ja oikea saari piirretään yhtä korkeiksi kuin keskisaari. Kun asetus on pois päältä, ne ovat matalampia. Kun Dock on ohut, koska ikkuna on suurennettu, kaikki kolme ovat ohuita.",
+ "ed6d9558": "Hae verkosta",
+ "f866dcd5": "Käynnistä",
+ "78bcadd5": "Tab: toiminnot",
+ "9f34086b": "Poista asennus…",
+ "686affc3": "Kiinnitetty Dockiin",
+ "8179e451": "Polku kopioitu",
+ "bd94ff4a": "Irrota Käynnistä-valikosta"
 }
