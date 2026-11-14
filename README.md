@@ -34,8 +34,10 @@ Free, no account, no ads. Download, double-click, done: see [Install](#install).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/projects-dark.png">
-  <img alt="rustyfiles showing a Projects folder in details view, with tabs, a breadcrumb bar and pinned folders in the sidebar" src="docs/readme/projects-light.png" width="100%">
+  <img alt="rustyfiles showing a Projects folder in details view, with tabs, a breadcrumb bar and pinned folders in the sidebar; the window is glass over the desktop's wallpaper" src="docs/readme/projects-light.png" width="100%">
 </picture>
+
+<sub>The pictures show the experimental HyperGlass backdrop (Settings › Appearance). The default backdrop is Mica, as in Explorer.</sub>
 
 ## How fast
 
@@ -217,7 +219,7 @@ one JSON file in `crates/rf-app/locales/`.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/photos-dark.png">
-  <img alt="rustyfiles showing a Photos folder in grid view with image thumbnails" src="docs/readme/photos-light.png" width="100%">
+  <img alt="rustyfiles showing a Photos folder in grid view with image thumbnails, on the HyperGlass backdrop" src="docs/readme/photos-light.png" width="100%">
 </picture>
 
 ## DirectLook
@@ -234,6 +236,8 @@ in Explorer and on the desktop too. Settings live under Settings › DirectLook.
 
 These are off by default and early. They were built and tried on one PC with two monitors, and
 some parts have had very little use. Expect rough edges, and please report what you find.
+
+<img alt="The rustyfiles Dock at the bottom of a monitor: an island with the Start button and search, an island with the pinned and running apps, and an island with the clock and notifications" src="docs/readme/dock.png" width="100%">
 
 - **HyperGlass** (Settings › Appearance) is a fifth backdrop: the window's background is glass that
   bends and frosts what is behind it.
