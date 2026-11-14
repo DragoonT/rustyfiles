@@ -745,10 +745,25 @@ impl StartView {
         self.quiet_until = Instant::now() + QUIET;
     }
 
+    /// What is started from the panel may take the foreground, whichever process ends up showing its window. Called on the user's
+    /// click or Enter, while the panel is the window in front (only then may this process give the right away).
+    ///
+    /// WHY (the user, 2026-11-14: "başlattan bir uygulamayı açınca mesela tam ekran chrome açıksa onun arkasında açılıyor sanki").
+    /// An entry of "All apps" is started by the shell's "open" of its AppsFolder item, and that verb is carried out by Explorer, not
+    /// by this process (with no Explorer running it answers "class not registered": `rf_win::apps::launch`). So the program is a child
+    /// of Explorer, which is not the process in front, and Windows' foreground lock applies to it: when the panel goes, the window
+    /// that was in front before it (a maximised browser) is in front again, and the new window opens behind it. The same holds for
+    /// an app that is running already and only shows its window, and for Windows' Settings. A program this process starts itself (the
+    /// dock's icons: a shortcut or a program file) inherits the right and never had the problem.
+    fn let_it_come_forward() {
+        rf_win::look::win::allow_any_foreground();
+    }
+
     /// Runs a start, a sign-out or the like off the UI thread and closes the panel when it went through. A failure that is reported
     /// within `OUTCOME_WAIT` keeps the panel open with `failure` said in it; a call that takes longer (a sleep returns only when the PC
     /// wakes, Windows' consent prompt waits for the user) is not waited for. Declining the consent prompt is not a failure.
     fn run_then_close(&mut self, failure: impl FnOnce(&anyhow::Error) -> String + 'static, job: impl FnOnce() -> anyhow::Result<()> + Send + 'static, cx: &mut Context<Self>) {
+        Self::let_it_come_forward();
         self.closing = true;
         self.notice = None;
         let work = cx.background_spawn(async move { job() });
@@ -801,11 +816,13 @@ impl StartView {
         if !self.live() {
             return;
         }
+        Self::let_it_come_forward();
         super::actions::run_rustyfiles(super::actions::show_in_folder_args(&path));
         self.finish(cx);
     }
 
     fn open_in_shell(path: PathBuf) {
+        Self::let_it_come_forward();
         std::thread::spawn(move || {
             // (the path is not logged: it can be a document from the user's recent files)
             if rf_win::sta::call(Duration::from_secs(15), move || rf_win::shell::open(&path)).and_then(Result::ok).is_none() {
@@ -862,10 +879,12 @@ impl StartView {
                 self.finish(cx);
             }
             Act::OwnSettings => {
+                Self::let_it_come_forward();
                 super::actions::run_rustyfiles(super::actions::settings_args());
                 self.finish(cx);
             }
             Act::Files => {
+                Self::let_it_come_forward();
                 super::actions::run_rustyfiles(Vec::new());
                 self.finish(cx);
             }
@@ -989,6 +1008,7 @@ impl StartView {
                     }
                     (Target::Path { path, .. }, How::ShowInFolder) => self.show_app_location(path.clone(), cx),
                     (Target::Path { path, dir: true }, How::Open) => {
+                        Self::let_it_come_forward();
                         super::actions::run_rustyfiles(vec![path.display().to_string()]);
                         self.finish(cx);
                     }
@@ -1008,6 +1028,7 @@ impl StartView {
                         // (on the shell thread, as every start from the dock: a worker thread of its own would become an apartment
                         // that never pumps)
                         let launch = launch.clone();
+                        Self::let_it_come_forward();
                         std::thread::spawn(move || {
                             if rf_win::sta::call(Duration::from_secs(15), move || crate::settings_rows::open(&launch)).and_then(Result::ok).is_none() {
                                 log::warn!("start: a settings page could not be opened");

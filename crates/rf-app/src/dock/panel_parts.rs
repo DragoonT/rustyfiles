@@ -59,7 +59,11 @@ pub fn round_button(id: impl Into<ElementId>, icon: L, size: f32, look: &Look, f
 }
 
 /// Opens a Windows page (`ms-settings:...`) through the shell, on the one shell thread and from a thread that may wait for it.
+/// Called on the user's click in a panel or on an island: the window that opens (Windows' Settings, Windows Security: programs this
+/// process does not start itself) is given the right to take the foreground, or it would open behind a maximised window that is in
+/// front again the moment the panel is gone (`StartView::let_it_come_forward` has the whole reason).
 pub fn open_uri(uri: &'static str) {
+    rf_win::look::win::allow_any_foreground();
     std::thread::spawn(move || {
         let ok = rf_win::sta::call(Duration::from_secs(15), move || rf_win::shell::open(Path::new(uri))).and_then(Result::ok);
         if ok.is_none() {
