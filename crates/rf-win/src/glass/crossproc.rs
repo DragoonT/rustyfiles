@@ -93,7 +93,7 @@ pub(crate) fn mark(hwnd: isize, on: bool) {
 }
 
 /// Whether the window carries the mark (any process's: the property can be read across processes).
-fn is_marked(h: HWND) -> bool {
+pub(super) fn is_marked(h: HWND) -> bool {
     unsafe { !GetPropW(h, prop!()).is_invalid() }
 }
 

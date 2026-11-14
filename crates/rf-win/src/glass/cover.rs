@@ -9,13 +9,21 @@
 //! "Certainly hide" is deliberately strict, because a wrong yes shows as a glass that is frozen while the user looks straight at it
 //! through a window that only looked opaque, and a wrong no costs only the work that was done before. A window above counts only when
 //! it is visible, not minimised, not cloaked (another virtual desktop, a suspended app), has no window region, is not click-through,
-//! and is opaque: a layered window counts only with `LWA_ALPHA` 255; a window with no redirection bitmap that is not layered (a swap
-//! chain in DirectComposition, which can be see-through anywhere: this app's own windows are such) never counts.
+//! and is opaque: a layered window counts only with `LWA_ALPHA` 255, and one of rustyfiles' own glass windows (it carries the mark
+//! of `crossproc.rs`) never counts: it is see-through by design.
 //!
-//! The doubtful one is a window that is layered at alpha 255 AND has no redirection bitmap. A Chromium browser looks like that, and so
-//! can a transparent Electron or CEF overlay (an annotation tool, a game overlay, a widget host) that fills the screen over the glass
-//! window, which is not hiding anything. It counts only when it is maximised, or has a title bar of its own and is not a tool window
-//! or one that never takes the focus (`is_solid`): the things a browser or an editor window have and an overlay does not.
+//! The doubtful one is a window with NO REDIRECTION BITMAP (a swap chain in DirectComposition, which can be see-through anywhere),
+//! layered at alpha 255 or not layered at all. Today's browsers, terminals and store apps are such windows, and so can a transparent
+//! Electron or CEF overlay be (an annotation tool, a game overlay, a widget host) that fills the screen over the glass window and
+//! hides nothing. It counts only when it is maximised, or has a title bar of its own and is not a tool window or one that never
+//! takes the focus (`is_app_window`): the things a browser or an editor window have and an overlay does not.
+//!
+//! The kind that is NOT layered counted for nothing until 2026-11-14 ("may be see-through anywhere"). That is the strict reading, and
+//! it meant that a rustyfiles window behind a maximised Chrome was taken for a window in view: its glass went on being drawn from a
+//! screen it could not be seen on (a user watching a video in the browser saw the video run in that window's glass, in the dock's
+//! preview of it), and the engine never let its capture go. What is given up: an application window that really is see-through
+//! without being layered (a terminal set to a translucent background) now hides the glass under it as far as the engine knows, and
+//! the glass seen through it stands still until that window moves away.
 //!
 //! Its rectangle is what the window manager draws (the extended frame bounds, without the invisible resize border), and for a window
 //! that is not maximised its four corners are left out, because Windows 11 rounds them.
@@ -46,11 +54,20 @@ pub(super) struct Look {
     pub layered: Option<(u8, u32)>,
     /// The window has a window region of its own.
     pub has_region: bool,
+    /// It is a glass window of rustyfiles (this process's or another's: the mark of `crossproc.rs`).
+    pub glass: bool,
+}
+
+/// The signs of a real application window: maximised, or with a title bar of its own and neither a tool window nor one that never
+/// takes the focus. What tells a browser, a terminal or an editor from an overlay made with the same toolkit.
+fn is_app_window(l: &Look, zoomed: bool) -> bool {
+    let captioned = l.style & WS_CAPTION.0 == WS_CAPTION.0;
+    zoomed || (captioned && l.ex_style & (WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) == 0)
 }
 
 /// Whether a window with this look is opaque over its whole rectangle. `zoomed`: it is maximised.
 pub(super) fn is_solid(l: &Look, zoomed: bool) -> bool {
-    if l.has_region || l.ex_style & WS_EX_TRANSPARENT.0 != 0 {
+    if l.has_region || l.glass || l.ex_style & WS_EX_TRANSPARENT.0 != 0 {
         return false;
     }
     if l.ex_style & WS_EX_LAYERED.0 != 0 {
@@ -62,13 +79,16 @@ pub(super) fn is_solid(l: &Look, zoomed: bool) -> bool {
         // Layered at 255 with no redirection bitmap is a browser, and also what a transparent overlay made with the same toolkit looks
         // like (the alpha is the window's, not its content's). Only the signs of a real application window count.
         if l.ex_style & WS_EX_NOREDIRECTIONBITMAP.0 != 0 {
-            let captioned = l.style & WS_CAPTION.0 == WS_CAPTION.0;
-            return zoomed || (captioned && l.ex_style & (WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) == 0);
+            return is_app_window(l, zoomed);
         }
         return true;
     }
-    // not layered: a window drawn by DirectComposition without a bitmap may be see-through anywhere
-    l.ex_style & WS_EX_NOREDIRECTIONBITMAP.0 == 0
+    // Not layered and drawn by DirectComposition without a bitmap: it may be see-through anywhere, and it is also what a browser, a
+    // terminal and a store app are today. The same signs decide (see the module docs for what that gives up).
+    if l.ex_style & WS_EX_NOREDIRECTIONBITMAP.0 != 0 {
+        return is_app_window(l, zoomed);
+    }
+    true
 }
 
 /// The parts of a window's rectangle that certainly hide what is under it: the whole rectangle for a window that is maximised (or covers
@@ -120,7 +140,7 @@ unsafe fn look_of(h: HWND) -> Look {
     let mut rb = RECT::default();
     // 0 (ERROR) is "no region"
     let has_region = GetWindowRgnBox(h, &mut rb) != windows::Win32::Graphics::Gdi::GDI_REGION_TYPE(0);
-    Look { style, ex_style, layered, has_region }
+    Look { style, ex_style, layered, has_region, glass: super::crossproc::is_marked(h) }
 }
 
 struct Walk<'a> {
@@ -255,7 +275,7 @@ pub(super) fn foreground() -> isize {
 mod tests {
     use super::*;
 
-    const PLAIN: Look = Look { style: 0, ex_style: 0, layered: None, has_region: false };
+    const PLAIN: Look = Look { style: 0, ex_style: 0, layered: None, has_region: false, glass: false };
 
     #[test]
     fn only_certainly_opaque_windows_count() {
@@ -277,7 +297,7 @@ mod tests {
     #[test]
     fn a_layered_window_without_a_redirection_bitmap_counts_only_with_the_signs_of_an_application_window() {
         let both = WS_EX_NOREDIRECTIONBITMAP.0 | WS_EX_LAYERED.0;
-        let ambiguous = |style: u32, extra_ex: u32| Look { style, ex_style: both | extra_ex, layered: Some((255, LWA_ALPHA.0)), has_region: false };
+        let ambiguous = |style: u32, extra_ex: u32| Look { style, ex_style: both | extra_ex, layered: Some((255, LWA_ALPHA.0)), has_region: false, glass: false };
         let caption = WS_CAPTION.0;
         // a browser window: a title bar (the browser draws over it), takes the focus, not a tool window
         assert!(is_solid(&ambiguous(caption, 0), false), "a browser, not maximised");
@@ -288,7 +308,34 @@ mod tests {
         assert!(!is_solid(&ambiguous(caption, WS_EX_NOACTIVATE.0), false), "a window that never takes the focus");
         assert!(!is_solid(&ambiguous(0x80000000, WS_EX_TOOLWINDOW.0), false), "a pop-up tool window");
         // the plain layered window is not in doubt
-        assert!(is_solid(&Look { style: 0, ex_style: WS_EX_LAYERED.0, layered: Some((255, LWA_ALPHA.0)), has_region: false }, false));
+        assert!(is_solid(&Look { style: 0, ex_style: WS_EX_LAYERED.0, layered: Some((255, LWA_ALPHA.0)), has_region: false, glass: false }, false));
+    }
+
+    /// Today's Chrome, Windows Terminal and the store apps: no redirection bitmap and NOT layered. Measured on a user's desktop
+    /// (2026-11-14): a maximised Chrome with style 17CF0000 and extended style 00200100 over a rustyfiles window whose glass went on
+    /// showing the browser's video.
+    #[test]
+    fn an_application_window_without_a_redirection_bitmap_hides_what_is_under_it_and_an_overlay_does_not() {
+        let dcomp = |style: u32, extra_ex: u32| Look { style, ex_style: WS_EX_NOREDIRECTIONBITMAP.0 | 0x100 | extra_ex, layered: None, has_region: false, glass: false };
+        assert!(is_solid(&dcomp(0x17CF_0000, 0), true), "the maximised browser of the report");
+        assert!(is_solid(&dcomp(0x14CF_0000, 0), false), "a terminal or a browser window that is not maximised: it has a title bar");
+        assert!(is_solid(&dcomp(0x9400_0000, 0), true), "maximised counts whatever its styles say");
+        // an overlay: a pop-up with no title bar, a tool window, a window that never takes the focus
+        assert!(!is_solid(&dcomp(0x9400_0000, 0), false), "a full-screen pop-up with no title bar (an input host, an overlay)");
+        assert!(!is_solid(&dcomp(0x14CF_0000, WS_EX_TOOLWINDOW.0), false));
+        assert!(!is_solid(&dcomp(0x14CF_0000, WS_EX_NOACTIVATE.0), false));
+        // with a region it has holes, whatever else it is
+        assert!(!is_solid(&Look { has_region: true, ..dcomp(0x17CF_0000, 0) }, true));
+    }
+
+    #[test]
+    fn a_glass_window_of_rustyfiles_never_hides_what_is_under_it() {
+        // (it is see-through by design: another rustyfiles window with the glass backdrop, maximised over this one)
+        let glass = Look { style: 0x14CF_0000, ex_style: WS_EX_NOREDIRECTIONBITMAP.0 | 0x100, layered: None, has_region: false, glass: true };
+        assert!(!is_solid(&glass, false));
+        assert!(!is_solid(&glass, true), "maximised too");
+        assert!(!is_solid(&Look { glass: true, ..PLAIN }, false));
+        assert!(is_solid(&Look { glass: false, ..glass }, false), "the same window without the mark is an application window");
     }
 
     #[test]

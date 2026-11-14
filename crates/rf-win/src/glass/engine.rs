@@ -297,16 +297,54 @@ enum Seen {
     Shown(WinGeo),
 }
 
-unsafe fn measure(hwnd: isize) -> Seen {
+/// What the window manager says about a window: is it cloaked, and how does the system round its corners (px at 100 %).
+#[derive(Clone, Copy, Debug)]
+struct DwmFacts {
+    at: Instant,
+    cloaked: bool,
+    round: f32,
+}
+
+/// The window manager is asked about a window at most this often. Each question is a call into another process (two changes of
+/// thread), every window was asked two of them twice a turn, and with a video on the screen the engine turned 125 times a second:
+/// with eight glass windows that alone was most of the 9 400 context switches a second measured on the engine's thread (2026-11-14).
+/// Both answers change rarely (a window is cloaked when its virtual desktop goes away; the corner preference is set when the window
+/// is made or its glass changes shape), and a command for the window asks again at once (`Engine::command`).
+const DWM_ASK_EVERY: Duration = Duration::from_millis(250);
+
+unsafe fn ask_dwm(h: HWND, now: Instant) -> DwmFacts {
+    let mut cloaked = 0u32;
+    let cloaked = DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut c_void, size_of::<u32>() as u32).is_ok() && cloaked != 0;
+    // What the system does with the corners: the attribute does not exist before Windows 11 (the call fails: square corners there).
+    let mut pref = DWMWCP_DEFAULT;
+    let round = if DwmGetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &mut pref as *mut _ as *mut c_void, size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32).is_err() || pref == DWMWCP_DONOTROUND {
+        0.0
+    } else if pref == DWMWCP_ROUNDSMALL {
+        WINDOW_RADIUS_SMALL
+    } else {
+        WINDOW_RADIUS
+    };
+    DwmFacts { at: now, cloaked, round }
+}
+
+unsafe fn measure(hwnd: isize, dwm: &mut BTreeMap<isize, DwmFacts>, now: Instant) -> Seen {
     let h = hwnd_of(hwnd);
     if !IsWindow(Some(h)).as_bool() {
+        dwm.remove(&hwnd);
         return Seen::Gone;
     }
     if !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() {
         return Seen::Hidden;
     }
-    let mut cloaked = 0u32;
-    if DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut c_void, size_of::<u32>() as u32).is_ok() && cloaked != 0 {
+    let facts = match dwm.get(&hwnd) {
+        Some(f) if now.saturating_duration_since(f.at) < DWM_ASK_EVERY => *f,
+        _ => {
+            let f = ask_dwm(h, now);
+            dwm.insert(hwnd, f);
+            f
+        }
+    };
+    if facts.cloaked {
         return Seen::Hidden;
     }
     let mut rc = RECT::default();
@@ -329,16 +367,7 @@ unsafe fn measure(hwnd: isize) -> Seen {
         && origin.y <= mi.rcMonitor.top
         && origin.x + w as i32 >= mi.rcMonitor.right
         && origin.y + ht as i32 >= mi.rcMonitor.bottom;
-    // What the system does with the corners: the attribute does not exist before Windows 11 (the call fails: square corners there).
-    let mut pref = DWMWCP_DEFAULT;
-    let round = if DwmGetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &mut pref as *mut _ as *mut c_void, size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32).is_err() || pref == DWMWCP_DONOTROUND {
-        0.0
-    } else if pref == DWMWCP_ROUNDSMALL {
-        WINDOW_RADIUS_SMALL
-    } else {
-        WINDOW_RADIUS
-    };
-    Seen::Shown(WinGeo { x: origin.x, y: origin.y, w, h: ht, dpi, square: covers || IsZoomed(h).as_bool(), round, hmon: hmon.0 as isize })
+    Seen::Shown(WinGeo { x: origin.x, y: origin.y, w, h: ht, dpi, square: covers || IsZoomed(h).as_bool(), round: facts.round, hmon: hmon.0 as isize })
 }
 
 /// What was last put on the screen for a window. A draw that would produce the same is not made.
@@ -384,6 +413,50 @@ struct Turns {
     no_frame: u32,
     /// Waits for a command that ran out of time.
     timeouts: u32,
+    /// CPU cycles of the engine thread itself in each part of a turn ([`PHASES`]): which part the time goes to. Counted only with the
+    /// statistics on.
+    cycles: [u64; PHASES.len()],
+}
+
+/// The parts of a turn the cycles are counted for: looking at the windows (where they are, what covers them, which is in front),
+/// keeping the captures in step with them, taking frames, drawing, and the housekeeping.
+const PHASES: [&str; 5] = ["look", "sync", "frames", "draw", "housekeeping"];
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    /// (declared here: the bindings have it in a module this crate does not otherwise need)
+    fn QueryThreadCycleTime(thread: *mut c_void, cycles: *mut u64) -> i32;
+}
+
+/// The CPU cycles this thread has used so far.
+fn thread_cycles() -> u64 {
+    let mut c = 0u64;
+    // SAFETY: a query about the calling thread, into a value of this function's own
+    unsafe {
+        QueryThreadCycleTime(windows::Win32::System::Threading::GetCurrentThread().0, &mut c);
+    }
+    c
+}
+
+/// Counts the cycles between two marks of a turn into [`Turns::cycles`]. Off (the statistics are off): nothing is asked or counted.
+struct Lap {
+    on: bool,
+    last: u64,
+}
+
+impl Lap {
+    fn start(on: bool) -> Lap {
+        Lap { on, last: if on { thread_cycles() } else { 0 } }
+    }
+
+    fn mark(&mut self, turns: &mut Turns, phase: usize) {
+        if !self.on {
+            return;
+        }
+        let now = thread_cycles();
+        turns.cycles[phase] += now.saturating_sub(self.last);
+        self.last = now;
+    }
 }
 
 impl Turns {
@@ -397,14 +470,16 @@ impl Turns {
         let per = |n: u32| n as f64 / secs;
         let cmds: u32 = self.commands.values().sum();
         let names: Vec<String> = self.commands.iter().map(|(k, v)| format!("{k} {:.1}", per(*v))).collect();
+        let parts: Vec<String> = PHASES.iter().zip(self.cycles).map(|(name, c)| format!("{name} {:.1}", c as f64 / secs / 1e6)).collect();
         let line = format!(
-            "glass engine thread: {:.0} turns/s, {:.1} commands/s ({}), {:.1} frame waits/s ended by a frame, {:.1} ended without one, {:.1} command waits/s ran out",
+            "glass engine thread: {:.0} turns/s, {:.1} commands/s ({}), {:.1} frame waits/s ended by a frame, {:.1} ended without one, {:.1} command waits/s ran out; million CPU cycles/s of this thread: {}",
             per(self.turns),
             per(cmds),
             if names.is_empty() { "none".to_string() } else { names.join(", ") },
             per(self.frames),
             per(self.no_frame),
             per(self.timeouts),
+            parts.join(", "),
         );
         *self = Turns { since: Some(now), ..Turns::default() };
         Some(line)
@@ -822,6 +897,8 @@ struct Engine {
     last_foreground: isize,
     last_cover_check: Instant,
     cover_due: bool,
+    /// What the window manager last said about each window (`DwmFacts`, asked at most every `DWM_ASK_EVERY`).
+    dwm: BTreeMap<isize, DwmFacts>,
     /// The foreground window's rectangle at the last look at the z order, while some glass was covered: a covering window that is
     /// dragged or resized away changes no foreground window, but it does change this.
     last_fg_rect: Option<Rc>,
@@ -900,6 +977,7 @@ impl Engine {
             last_foreground: 0,
             last_cover_check: Instant::now(),
             cover_due: true,
+            dwm: BTreeMap::new(),
             last_fg_rect: None,
             reopen: Reopen::default(),
             session_worked: false,
@@ -911,6 +989,10 @@ impl Engine {
     fn command(&mut self, c: Cmd) {
         self.last_activity = Instant::now();
         *self.turns.commands.entry(c.name()).or_default() += 1;
+        // a window that something was just said about is asked about afresh (its corners or its place may be what changed)
+        if let Cmd::Attach { hwnd, .. } | Cmd::SetOptions { hwnd, .. } | Cmd::Detach { hwnd } = &c {
+            self.dwm.remove(hwnd);
+        }
         match c {
             Cmd::Attach { hwnd, opts } => {
                 // the foreground window is watched by an event from the first glass on (see `watch.rs`)
@@ -1000,6 +1082,15 @@ impl Engine {
             // Seen glass but none in front: nothing it would notice in time needs a shorter wait (`rest.rs`). Only for a capture session,
             // whose wait also ends for a command; Desktop Duplication's cannot be interrupted, so a longer wait would delay a lens.
             rest::quiet_wait_ms(ms, self.mode == CaptureMode::Session, self.none_in_front(), self.foreign_seen)
+        } else if self.mode == CaptureMode::Session && self.none_in_front() {
+            // NOT QUIET, BUT NOTHING IN FRONT. The short wait exists to notice a glass window that MOVES (nothing says so: its place is
+            // read every turn), and a window that is neither in front nor under the pointer is not being dragged. Everything else it
+            // could be owed ends a session's wait by itself: a frame does, a command does (a shape that changes, a lens, a window that
+            // comes to the front or under the pointer), and a draw that is held back has its own deadline (`draw_wait`). Without this
+            // a video beside the dock kept the thread at 125 turns a second for as long as it played: the picture behind the dock's
+            // glass changed, so the second of quiet never came (measured 2026-11-14: 125 turns and 9 400 context switches a second,
+            // 6.5 % of a core, with 12 frames a second actually taken).
+            QUIET_WAIT_MS
         } else {
             FRAME_WAIT_MS
         }
@@ -1181,27 +1272,35 @@ impl Engine {
         }
         // The look after the wait of the last turn is still good when every window is visible and measured; only windows that are not
         // yet known or are hidden (they may have come back) need a look now.
+        let mut lap = Lap::start(self.stats_on);
         if self.wins.values().any(|w| w.geo.is_none() || !w.visible) {
             self.measure_all();
         }
         self.update_cover();
         self.update_care();
+        lap.mark(&mut self.turns, 0);
         self.sync_monitors();
         self.sync_pace();
+        lap.mark(&mut self.turns, 1);
         let waited = self.pump();
+        lap.mark(&mut self.turns, 2);
         // The window may have moved while we waited for the frame. A covered window that moved is in view (its owner moved it) and so
         // active now, while its monitor's capture may still be parked: it is resumed before anything is drawn from it, and the turn does
         // not wait (the new frame is asked for by the resume).
         let seen_before = self.active_set();
         self.measure_all();
         let appeared = !self.active_set().is_subset(&seen_before);
+        lap.mark(&mut self.turns, 0);
         if appeared {
             self.sync_monitors();
             self.sync_pace();
         }
+        lap.mark(&mut self.turns, 1);
         self.advance_lenses();
         self.draw_dirty();
+        lap.mark(&mut self.turns, 3);
         self.housekeeping();
+        lap.mark(&mut self.turns, 4);
         if self.paced() {
             return self.pace();
         }
@@ -1219,7 +1318,7 @@ impl Engine {
         let mut moved = false;
         let keys: Vec<isize> = self.wins.keys().copied().collect();
         for k in keys {
-            match unsafe { measure(k) } {
+            match unsafe { measure(k, &mut self.dwm, Instant::now()) } {
                 Seen::Gone => {
                     // The app destroyed it without a detach. Nothing to restore on the window; the state goes with it.
                     self.wins.remove(&k);
@@ -2381,13 +2480,29 @@ mod tests {
         // no glass worked for at all is not "none in front": there is nothing to wait for
         e.wins.get_mut(&1).unwrap().visible = false;
         assert!(!e.none_in_front());
-        // and recently active: the short wait, whoever is in front
+        // Recently active with NOTHING in front (a video plays beside the dock: the picture behind its glass changes all the time):
+        // the quiet wait at once. The short wait is for a window that may be dragged, and none of these can be; a frame or a command
+        // ends the wait anyway. It was the short wait until 2026-11-14, and the thread turned 125 times a second for as long as
+        // the video played.
         let mut e = idle_engine(CaptureMode::Session);
         let mut a = settled_window(1, geo_at(0, 0, 400, 300, 1));
         a.care = Care::Behind;
         e.wins.insert(1, a);
         e.last_activity = Instant::now();
+        assert_eq!(e.frame_wait_ms(), QUIET_WAIT_MS);
+        // recently active and something IS in front (the user may be dragging it): the short wait
+        let mut b = settled_window(2, geo_at(500, 0, 400, 300, 1));
+        b.care = Care::Front;
+        e.wins.insert(2, b);
+        e.last_activity = Instant::now();
         assert_eq!(e.frame_wait_ms(), FRAME_WAIT_MS);
+        // Desktop Duplication's wait cannot be ended by a command: it keeps the short wait, in front or not
+        let mut d = idle_engine(CaptureMode::Affinity);
+        let mut a = settled_window(1, geo_at(0, 0, 400, 300, 1));
+        a.care = Care::Behind;
+        d.wins.insert(1, a);
+        d.last_activity = Instant::now();
+        assert_eq!(d.frame_wait_ms(), FRAME_WAIT_MS);
     }
 
     /// A pyramid is given back only by a window nobody sees, only after the time, and a window that is seen again starts the clock over.
