@@ -639,6 +639,27 @@ impl Win {
         relook
     }
 
+    /// The glass's shape changed a moment ago: it is being animated (a dock island that widens under the pointer, or that goes thin
+    /// or grows back because a window was maximised or closed).
+    fn shape_moving(&self, now: Instant) -> bool {
+        self.shape_changed.is_some_and(|t| now.saturating_duration_since(t) < SHAPE_ACTIVE)
+    }
+
+    /// Whether a draw that is waiting may take its turn now. `rest::draw_due`, and a window whose shape is moving always may: every
+    /// shape it is sent is a frame of an animation the UI draws at the display's rate, and the glass's edge has to be where the UI's
+    /// content is.
+    ///
+    /// WHY THE SHAPE COUNTS (measured 2026-11-14 on the islands of a dock that grew back after a window closed, pictures of the screen
+    /// every 13 ms). A window that is not in front and has a new backdrop waiting is held to `BEHIND_FPS`, and its new shape waited with
+    /// it: the three islands, each with its own last draw, moved in steps of 30 to 70 ms and not together (the side islands began 60 ms
+    /// after the middle one), while the icons on them moved at the display's rate. The backdrop under an island changes whenever a
+    /// window near it is opened, closed or maximised, which is exactly when the islands change their shape. The cost is a full draw at
+    /// the display's rate for the length of the animation (about a quarter of a second), as a window that moves has it
+    /// (`geometry_changed`).
+    fn draw_due(&self, now: Instant, gap: Duration) -> bool {
+        self.shape_moving(now) || rest::draw_due(self.care, self.stale, self.last_draw.map(|t| now.saturating_duration_since(t)), gap)
+    }
+
     /// Something behind the glass or about the glass itself changed: draw again, from a new backdrop.
     fn restale(&mut self) {
         self.dirty = true;
@@ -1058,7 +1079,8 @@ impl Engine {
         let gap = rest::gap_for(rest::behind_fps());
         self.wins
             .values()
-            .filter(|w| w.active() && w.dirty)
+            // (a window whose shape is moving is not held back: `Win::draw_due`)
+            .filter(|w| w.active() && w.dirty && !w.shape_moving(now))
             .filter_map(|w| rest::draw_wait(w.care, w.stale, w.last_draw.map(|t| now.saturating_duration_since(t)), gap))
             .min()
     }
@@ -1188,7 +1210,8 @@ impl Engine {
     /// Whether a visible window's glass shape changed a moment ago (an island widening under the pointer sends a new shape for every
     /// frame of the animation, and each must be drawn about when the UI draws its scene: soon after it arrives, not at the next refresh).
     fn shape_moving(&self) -> bool {
-        self.wins.values().any(|w| w.active() && w.shape_changed.is_some_and(|t| t.elapsed() < SHAPE_ACTIVE))
+        let now = Instant::now();
+        self.wins.values().any(|w| w.active() && w.shape_moving(now))
     }
 
     /// Whether the display paces the loop: a lens moves or fades. (Not a shape: see the module docs.)
@@ -1716,7 +1739,7 @@ impl Engine {
         let now = Instant::now();
         let gap = rest::gap_for(rest::behind_fps());
         let todo: Vec<isize> =
-            self.wins.values().filter(|w| w.active() && w.dirty && rest::draw_due(w.care, w.stale, w.last_draw.map(|t| now.saturating_duration_since(t)), gap)).map(|w| w.hwnd).collect();
+            self.wins.values().filter(|w| w.active() && w.dirty && w.draw_due(now, gap)).map(|w| w.hwnd).collect();
         for k in todo {
             let Some(gfx) = self.gfx.as_ref() else { return };
             let Some(w) = self.wins.get_mut(&k) else { continue };
@@ -2553,6 +2576,35 @@ mod tests {
         assert_eq!(e.draw_wait(), None);
     }
 
+
+    /// A window that is not in front and has a new backdrop waiting is held to its own rate; while its glass's SHAPE is being animated
+    /// it is not (the islands of a dock that goes thin or grows back): every shape is a frame the UI draws at the display's rate.
+    #[test]
+    fn a_window_whose_shape_is_moving_is_not_held_back_and_is_again_once_the_shape_rests() {
+        let mut e = idle_engine(CaptureMode::Session);
+        e.last_activity = Instant::now();
+        let mut behind = settled_window(1, geo_at(0, 0, 400, 300, 1));
+        behind.care = Care::Behind;
+        behind.dirty = true;
+        behind.stale = true;
+        behind.last_draw = Some(Instant::now());
+        e.wins.insert(1, behind);
+        let gap = rest::gap_for(rest::BEHIND_FPS);
+        assert!(e.draw_wait().is_some() && !e.wins[&1].draw_due(Instant::now(), gap), "held: it drew a moment ago");
+        // a new shape arrives (the backdrop is still waiting, the last draw is still a moment ago)
+        e.command(Cmd::SetOptions { hwnd: 1, opts: GlassOptions { shape: Some([0.0, 10.0, 400.0, 40.0]), ..GlassOptions::window(true) } });
+        let w = &e.wins[&1];
+        assert!(w.dirty && w.stale && w.care == Care::Behind);
+        assert!(w.draw_due(Instant::now(), gap), "its shape is moving: drawn now");
+        assert_eq!(e.draw_wait(), None, "and the loop does not wait for its gap");
+        // the shape rests: the window is held to its own rate again
+        let w = e.wins.get_mut(&1).unwrap();
+        w.shape_changed = Some(Instant::now() - SHAPE_ACTIVE - Duration::from_millis(1));
+        w.dirty = true;
+        w.last_draw = Some(Instant::now());
+        assert!(!e.wins[&1].draw_due(Instant::now(), gap));
+        assert!(e.draw_wait().is_some());
+    }
 
     /// A window that moves or is resized is followed at the full rate whoever has the focus, and a frozen one thaws. This is what keeps
     /// a panel that grows, or a window another program drags, from getting a frost at 20 draws a second while its edge moves at 60.
