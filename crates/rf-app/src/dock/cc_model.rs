@@ -11,7 +11,7 @@ use rf_win::sysstatus::bluetooth::{BluetoothSnapshot, Power};
 use rf_win::sysstatus::inuse::InUse;
 use rf_win::sysstatus::toggles::PowerMode;
 use rf_win::sysstatus::media::{MediaSession, Timeline};
-use rf_win::sysstatus::network::{Link, NetworkGlyph, NetworkSnapshot, Reach, wifi_steps};
+use rf_win::sysstatus::network::{DnsOwner, Link, NetworkGlyph, NetworkSnapshot, Reach, dns_owner, router_page, wifi_steps};
 use rf_win::sysstatus::power::BatterySnapshot;
 use rf_win::sysstatus::wifi::{Listing, WifiSnapshot};
 
@@ -685,17 +685,69 @@ pub fn wifi_text(s: &WifiSnapshot, net: Option<&NetworkSnapshot>, w: Words) -> T
     TileText { title: "Wi-Fi".into(), subtitle, active: s.power == Power::On }
 }
 
-/// The rows of the network tile's detail: a name and what it is.
-pub fn network_rows(s: &NetworkSnapshot, w: Words) -> Vec<(String, String)> {
+/// One row of the network tile's detail: a name, what it is, and for the modem the address of its own pages (a click opens them).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NetRow {
+    pub name: String,
+    pub value: String,
+    pub open: Option<String>,
+}
+
+/// Whose the connection's name servers are, in a line: "Modem (İSS)", "Cloudflare", "Cloudflare, Modem (İSS)", or the address of
+/// one nobody here knows. The modem counts as the provider's: asked for a name, a modem asks the servers its provider gave it,
+/// unless somebody changed that in the modem itself, which this cannot see.
+pub fn dns_text(servers: &[String], gateway: Option<&str>, w: Words) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for s in servers {
+        let name = match dns_owner(s, gateway) {
+            DnsOwner::Router => (w.tr)("Modem (İSS)").to_string(),
+            DnsOwner::Known(name) => name.to_string(),
+            DnsOwner::Local => (w.tr)("Yerel ağ").to_string(),
+            DnsOwner::Other => s.clone(),
+        };
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    out.join(", ")
+}
+
+/// A link's speed as it is said: "100 Mb/sn", "1 Gb/sn", "2.5 Gb/sn".
+pub fn speed_text(mbps: u64, w: Words) -> String {
+    if mbps >= 1000 {
+        let gb = mbps as f64 / 1000.0;
+        let number = if (gb - gb.round()).abs() < 0.05 { format!("{}", gb.round() as u64) } else { format!("{gb:.1}") };
+        format!("{number} {}", (w.tr)("Gb/sn"))
+    } else {
+        format!("{mbps} {}", (w.tr)("Mb/sn"))
+    }
+}
+
+/// The rows of the network tile's detail: the state, the machine's address, the modem (with the address of its own pages when it
+/// has an IPv4 address: a click opens them), whose the name servers are, the link's speed. A thing Windows does not tell has no row.
+pub fn network_rows(s: &NetworkSnapshot, w: Words) -> Vec<NetRow> {
     let tr = w.tr;
+    let row = |name: &'static str, value: String, open: Option<String>| NetRow { name: tr(name).to_string(), value, open };
     let state = match (&s.link, s.reach) {
         (Link::Disconnected, _) => tr("Bağlı değil"),
         (_, Reach::Internet) => tr("Bağlı"),
         _ => tr("İnternet yok"),
     };
-    let mut rows = vec![(tr("Durum").to_string(), state.to_string())];
+    let mut rows = vec![row("Durum", state.to_string(), None)];
     if let Some(a) = s.address.as_ref().filter(|a| !a.trim().is_empty()) {
-        rows.push((tr("IP adresi").to_string(), a.clone()));
+        rows.push(row("IP adresi", a.clone(), None));
+    }
+    if let Some(g) = s.gateway.as_ref().filter(|g| !g.trim().is_empty()) {
+        match router_page(g) {
+            Some(page) => rows.push(row("Modem arayüzü", g.clone(), Some(page))),
+            None => rows.push(row("Ağ geçidi", g.clone(), None)),
+        }
+    }
+    if !s.dns.is_empty() {
+        rows.push(row("DNS", dns_text(&s.dns, s.gateway.as_deref(), w), None));
+    }
+    if let Some(speed) = s.speed_mbps {
+        rows.push(row("Hız", speed_text(speed, w), None));
     }
     rows
 }
@@ -876,7 +928,7 @@ mod tests {
     const EN: Words = Words { tr: tr_en, pct: |p| format!("{p}%") };
 
     fn net(link: Link, reach: Reach) -> NetworkSnapshot {
-        NetworkSnapshot { available: true, link, reach, address: None }
+        NetworkSnapshot { available: true, link, reach, ..Default::default() }
     }
 
     fn bt(power: Power, connected: &[&str]) -> BluetoothSnapshot {
@@ -1127,10 +1179,28 @@ mod tests {
         assert_eq!(detail_rows(Detail::Network, None, None, None, None, Some(&eth)), 2);
         eth.address = Some("192.168.1.20".into());
         assert_eq!(detail_rows(Detail::Network, None, None, None, None, Some(&eth)), 3);
-        assert_eq!(network_rows(&eth, TR), [("Durum".to_string(), "Bağlı".to_string()), ("IP adresi".to_string(), "192.168.1.20".to_string())]);
-        assert_eq!(network_rows(&eth, EN), [("Status".to_string(), "Connected".to_string()), ("IP address".to_string(), "192.168.1.20".to_string())]);
-        assert_eq!(network_rows(&net(Link::Ethernet, Reach::Local), EN)[0].1, "No internet");
-        assert_eq!(network_rows(&net(Link::Disconnected, Reach::None), TR)[0].1, "Bağlı değil");
+        let pairs = |s: &NetworkSnapshot, w: Words| network_rows(s, w).into_iter().map(|r| (r.name, r.value)).collect::<Vec<_>>();
+        let pair = |a: &str, b: &str| (a.to_string(), b.to_string());
+        assert_eq!(pairs(&eth, TR), [pair("Durum", "Bağlı"), pair("IP adresi", "192.168.1.20")]);
+        assert_eq!(pairs(&eth, EN), [pair("Status", "Connected"), pair("IP address", "192.168.1.20")]);
+        assert_eq!(network_rows(&net(Link::Ethernet, Reach::Local), EN)[0].value, "No internet");
+        assert_eq!(network_rows(&net(Link::Disconnected, Reach::None), TR)[0].value, "Bağlı değil");
+        // the modem (a click opens its own pages), whose the name servers are, the speed
+        eth.gateway = Some("192.168.1.1".into());
+        eth.dns = vec!["fe80::1".into(), "1.1.1.1".into(), "1.0.0.1".into(), "192.168.1.1".into()];
+        eth.speed_mbps = Some(1000);
+        assert_eq!(pairs(&eth, TR), [pair("Durum", "Bağlı"), pair("IP adresi", "192.168.1.20"), pair("Modem arayüzü", "192.168.1.1"), pair("DNS", "Modem (İSS), Cloudflare"), pair("Hız", "1 Gb/sn")]);
+        assert_eq!(pairs(&eth, EN)[2..], [pair("Router page", "192.168.1.1"), pair("DNS", "Router (ISP), Cloudflare"), pair("Speed", "1 Gbps")]);
+        let opens: Vec<Option<String>> = network_rows(&eth, TR).into_iter().map(|r| r.open).collect();
+        assert_eq!(opens, [None, None, Some("http://192.168.1.1".to_string()), None, None], "only the modem's row is a way somewhere");
+        assert_eq!(detail_rows(Detail::Network, None, None, None, None, Some(&eth)), 6);
+        // a gateway that has only an IPv6 address is told, not offered as a page
+        eth.gateway = Some("fe80::1".into());
+        assert_eq!(network_rows(&eth, TR)[2], NetRow { name: "Ağ geçidi".into(), value: "fe80::1".into(), open: None });
+        // name servers: a home one that is not the modem, one nobody knows (its number), each owner once
+        assert_eq!(dns_text(&["192.168.1.53".into(), "8.8.8.8".into(), "8.8.4.4".into(), "212.156.4.4".into()], Some("192.168.1.1"), TR), "Yerel ağ, Google, 212.156.4.4");
+        assert_eq!(dns_text(&[], None, TR), "");
+        assert_eq!([speed_text(100, TR), speed_text(1000, TR), speed_text(2500, EN), speed_text(10_000, EN), speed_text(866, EN)], ["100 Mb/sn", "1 Gb/sn", "2.5 Gbps", "10 Gbps", "866 Mbps"]);
     }
 
     #[test]

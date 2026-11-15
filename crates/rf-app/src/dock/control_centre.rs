@@ -1019,6 +1019,22 @@ impl CcView {
         window.focus(&stop, cx);
     }
 
+    /// Opens an address (the modem's own pages) with the program Windows opens such with, and puts the panel away.
+    fn open_link(&mut self, url: String, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        self.closing = true;
+        std::thread::spawn(move || {
+            let shown = url.clone();
+            let ok = rf_win::sta::call(Duration::from_secs(15), move || rf_win::shell::open(Path::new(&url))).and_then(Result::ok);
+            if ok.is_none() {
+                log::warn!("control centre: cannot open {shown}");
+            }
+        });
+        cx.defer(|cx| super::panel::close(CloseCause::Chosen, cx));
+    }
+
     /// Puts the panel away and starts the screen snip once it is gone (the panel eases out in about 120 ms and must not be in the picture).
     fn start_snip(&mut self, cx: &mut Context<Self>) {
         if !self.shown || self.closing {
@@ -1699,8 +1715,13 @@ impl CcView {
     fn detail_network(&self, look: &Look, words: Words, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
         let n = sysstate::network(cx).unwrap_or_default();
         let mut rows = Vec::new();
-        for (i, (name, value)) in cc_model::network_rows(&n, words).into_iter().enumerate() {
-            rows.push(self.detail_row(("cc-net-row", i), None, name, Some(value), None, look, None, cx));
+        for (i, r) in cc_model::network_rows(&n, words).into_iter().enumerate() {
+            // (the modem's row is a way to its own pages: a click opens them in the browser)
+            let (mark, click) = match r.open {
+                Some(page) => (Some(L::ExternalLink), Some(Rc::new(move |this: &mut Self, _: &mut Window, cx: &mut Context<Self>| this.open_link(page.clone(), cx)) as RowClick)),
+                None => (None, None),
+            };
+            rows.push(self.detail_row(("cc-net-row", i), None, r.name, Some(r.value), mark, look, click, cx));
         }
         rows.push(self.detail_link("cc-net-settings", t!("Ağ ayarları"), "ms-settings:network", look, cx));
         (self.detail_head(cc_model::network_text(&n, words).title, None, look, cx), rows)
