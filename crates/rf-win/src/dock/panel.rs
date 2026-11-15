@@ -159,7 +159,15 @@ pub enum HoldStep {
 /// nobody yet), `waited_ms` how long ago the menu was asked for, `in_menu` whether that window's thread is showing a classic menu
 /// now, `seen_menu` whether it ever was since the hold began. A program that draws a menu of its own never is "in a menu": its hold
 /// ends when another window takes the foreground.
-pub fn menu_hold(panel: isize, foreground: isize, held: isize, waited_ms: u64, seen_menu: bool, in_menu: bool) -> HoldStep {
+///
+/// `moved_to_menu`: the foreground has gone from the held window to ANOTHER window, and that window is one a program shows a menu
+/// of its own in ([`is_menu_like`]). WHY (the user, with 0.8.1, where more icons answer a right click: "tray'de bazı ikonlara
+/// tıklayınca tray kapanıyor bazılarında kapanmıyor"). A program takes the foreground with its hidden window and then shows its
+/// menu. A classic menu leaves the foreground where it is, and the panel stayed. A menu the program draws in a window of its own
+/// (not owned by the hidden one, or shown by another process of the program) takes the foreground itself: the held window had
+/// lost it, the hold ended and the panel closed under the menu. The hold now follows such a window; when that window goes, the
+/// foreground moves on to a window that is no menu, the hold ends and the panel closes with the menu, as for a classic one.
+pub fn menu_hold(panel: isize, foreground: isize, held: isize, waited_ms: u64, seen_menu: bool, in_menu: bool, moved_to_menu: bool) -> HoldStep {
     if held == 0 {
         if foreground == 0 || foreground == panel {
             return if waited_ms < MENU_WAIT_MS { HoldStep::Waiting } else { HoldStep::Over };
@@ -170,9 +178,30 @@ pub fn menu_hold(panel: isize, foreground: isize, held: isize, waited_ms: u64, s
         return HoldStep::Held(held);
     }
     if foreground != held {
-        return HoldStep::Over;
+        return if moved_to_menu && foreground != panel { HoldStep::Held(foreground) } else { HoldStep::Over };
     }
     if seen_menu && !in_menu { HoldStep::MenuDone } else { HoldStep::Held(held) }
+}
+
+/// Whether window styles are those of a window a program shows a menu or a flyout of its own in: a popup or a tool window with no
+/// title bar, and not one that asks for a taskbar button. (A program's main window has a title bar or the taskbar button.)
+pub fn menu_like_styles(style: u32, ex_style: u32) -> bool {
+    const WS_POPUP: u32 = 0x8000_0000;
+    const WS_CAPTION: u32 = 0x00C0_0000;
+    const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
+    const WS_EX_APPWINDOW: u32 = 0x0004_0000;
+    style & WS_CAPTION != WS_CAPTION && (style & WS_POPUP != 0 || ex_style & WS_EX_TOOLWINDOW != 0) && ex_style & WS_EX_APPWINDOW == 0
+}
+
+/// Whether `hwnd` is a visible window of the kind a program shows a menu of its own in (see [`menu_like_styles`]).
+pub fn is_menu_like(hwnd: isize) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, IsWindowVisible};
+    if hwnd == 0 {
+        return false;
+    }
+    let h = windows::Win32::Foundation::HWND(hwnd as *mut _);
+    // SAFETY: plain reads of a window's state; a handle that is gone gives "not visible".
+    unsafe { IsWindowVisible(h).as_bool() && menu_like_styles(GetWindowLongPtrW(h, GWL_STYLE) as u32, GetWindowLongPtrW(h, GWL_EXSTYLE) as u32) }
 }
 
 /// Whether the thread that owns `hwnd` is showing a classic menu now (what most tray icons open on a right click).
@@ -382,23 +411,36 @@ mod tests {
     fn a_panel_holds_for_a_programs_menu_and_goes_with_it() {
         let (panel, menu, other) = (10, 20, 30);
         // just asked for: the panel still has the foreground, or nothing has it for a moment
-        assert_eq!(menu_hold(panel, panel, 0, 0, false, false), HoldStep::Waiting);
-        assert_eq!(menu_hold(panel, 0, 0, 400, false, false), HoldStep::Waiting);
-        assert_eq!(menu_hold(panel, panel, 0, MENU_WAIT_MS - 1, false, false), HoldStep::Waiting);
+        assert_eq!(menu_hold(panel, panel, 0, 0, false, false, false), HoldStep::Waiting);
+        assert_eq!(menu_hold(panel, 0, 0, 400, false, false, false), HoldStep::Waiting);
+        assert_eq!(menu_hold(panel, panel, 0, MENU_WAIT_MS - 1, false, false, false), HoldStep::Waiting);
         // no menu came: back to the usual rules (the panel is in front, so it stays open)
-        assert_eq!(menu_hold(panel, panel, 0, MENU_WAIT_MS, false, false), HoldStep::Over);
+        assert_eq!(menu_hold(panel, panel, 0, MENU_WAIT_MS, false, false, false), HoldStep::Over);
         // the program took the foreground for its menu: the panel stays, whatever the time
-        assert_eq!(menu_hold(panel, menu, 0, 80, false, false), HoldStep::Held(menu));
-        assert_eq!(menu_hold(panel, menu, menu, 9_000, false, true), HoldStep::Held(menu));
-        assert_eq!(menu_hold(panel, menu, menu, 9_000, true, true), HoldStep::Held(menu));
-        assert_eq!(menu_hold(panel, 0, menu, 200, true, true), HoldStep::Held(menu), "between two windows nothing is decided");
+        assert_eq!(menu_hold(panel, menu, 0, 80, false, false, false), HoldStep::Held(menu));
+        assert_eq!(menu_hold(panel, menu, menu, 9_000, false, true, false), HoldStep::Held(menu));
+        assert_eq!(menu_hold(panel, menu, menu, 9_000, true, true, false), HoldStep::Held(menu));
+        assert_eq!(menu_hold(panel, 0, menu, 200, true, true, false), HoldStep::Held(menu), "between two windows nothing is decided");
         // the menu was up and is gone: the panel goes with it
-        assert_eq!(menu_hold(panel, menu, menu, 3_000, true, false), HoldStep::MenuDone);
+        assert_eq!(menu_hold(panel, menu, menu, 3_000, true, false, false), HoldStep::MenuDone);
         // a program whose menu is a window of its own is never 'in a menu': it is held until the foreground moves
-        assert_eq!(menu_hold(panel, menu, menu, 3_000, false, false), HoldStep::Held(menu));
+        assert_eq!(menu_hold(panel, menu, menu, 3_000, false, false, false), HoldStep::Held(menu));
         // the foreground moved on: to the panel again (the user came back), or to another window
-        assert_eq!(menu_hold(panel, panel, menu, 3_000, true, false), HoldStep::Over);
-        assert_eq!(menu_hold(panel, other, menu, 3_000, false, false), HoldStep::Over);
+        assert_eq!(menu_hold(panel, panel, menu, 3_000, true, false, false), HoldStep::Over);
+        assert_eq!(menu_hold(panel, other, menu, 3_000, false, false, false), HoldStep::Over);
+        // a program that draws its menu in a window of its own: that window takes the foreground from the hidden one, and the
+        // hold follows it; when it goes and a window that is no menu is in front, the hold is over and the panel closes
+        let own_menu = 0x77;
+        assert_eq!(menu_hold(panel, own_menu, menu, 300, false, false, true), HoldStep::Held(own_menu));
+        assert_eq!(menu_hold(panel, own_menu, own_menu, 2_000, false, false, false), HoldStep::Held(own_menu));
+        assert_eq!(menu_hold(panel, other, own_menu, 2_500, false, false, false), HoldStep::Over);
+        assert_eq!(menu_hold(panel, panel, menu, 300, false, false, true), HoldStep::Over, "the panel itself is no menu of a program");
+        // which windows are a menu's: a popup or a tool window without a title bar, never one with a taskbar button
+        let (popup, caption, tool, app) = (0x8000_0000u32, 0x00C0_0000u32, 0x80u32, 0x0004_0000u32);
+        assert!(menu_like_styles(popup, 0) && menu_like_styles(popup, tool) && menu_like_styles(0, tool));
+        assert!(!menu_like_styles(popup | caption, 0), "a title bar: a window, not a menu");
+        assert!(!menu_like_styles(0, 0), "an ordinary overlapped window");
+        assert!(!menu_like_styles(popup, app), "it asks for a taskbar button");
         // a window that is no window shows no menu
         assert!(!in_menu_mode(0) && !in_menu_mode(0x7FFF_FFF1));
     }

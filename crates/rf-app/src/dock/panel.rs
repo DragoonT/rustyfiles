@@ -740,6 +740,9 @@ struct MenuHold {
     held: isize,
     /// Its thread has been seen showing a classic menu.
     seen_menu: bool,
+    /// The window that has the foreground is, or was, a menu the program draws in a window of its own (`geo::is_menu_like`): when
+    /// the hold ends for it, that menu is gone, and the panel goes with it as after a classic menu.
+    own_menu: bool,
 }
 
 /// A program's own menu was asked for from the open panel (a right click on one of the hidden tray icons): the panel does not put
@@ -748,7 +751,7 @@ pub fn hold_for_menu(cx: &mut App) {
     if let Some(p) = cx.try_global::<PanelHost>()
         && p.open.is_some()
     {
-        cx.global_mut::<PanelHost>().menu_hold = Some(MenuHold { since: Instant::now(), held: 0, seen_menu: false });
+        cx.global_mut::<PanelHost>().menu_hold = Some(MenuHold { since: Instant::now(), held: 0, seen_menu: false, own_menu: false });
     }
 }
 
@@ -781,13 +784,21 @@ fn watch_once(serial: u64, cx: &mut App) -> bool {
     if let Some(h) = cx.try_global::<PanelHost>().and_then(|p| p.menu_hold) {
         let candidate = if h.held != 0 { h.held } else { fg };
         let in_menu = candidate != 0 && candidate != hwnd && geo::in_menu_mode(candidate);
-        match geo::menu_hold(hwnd, fg, h.held, h.since.elapsed().as_millis() as u64, h.seen_menu, in_menu) {
+        // (a program that draws its menu in a window of its own: the foreground goes to that window, and the hold follows it)
+        let moved_to_menu = h.held != 0 && fg != 0 && fg != hwnd && fg != h.held && geo::is_menu_like(fg);
+        match geo::menu_hold(hwnd, fg, h.held, h.since.elapsed().as_millis() as u64, h.seen_menu, in_menu, moved_to_menu) {
             geo::HoldStep::Waiting => return true,
             geo::HoldStep::Held(w) => {
-                cx.global_mut::<PanelHost>().menu_hold = Some(MenuHold { since: h.since, held: w, seen_menu: h.seen_menu || in_menu });
+                let own_menu = h.own_menu || geo::is_menu_like(w);
+                cx.global_mut::<PanelHost>().menu_hold = Some(MenuHold { since: h.since, held: w, seen_menu: h.seen_menu || in_menu, own_menu });
                 return true;
             }
             geo::HoldStep::MenuDone => {
+                close(CloseCause::Chosen, cx);
+                return false;
+            }
+            // (a menu the program drew in a window of its own was up, and that window has lost the foreground: the menu is gone)
+            geo::HoldStep::Over if h.own_menu => {
                 close(CloseCause::Chosen, cx);
                 return false;
             }
