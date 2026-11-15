@@ -177,6 +177,9 @@ struct LevelKey {
 
 type Wins = Rc<std::cell::RefCell<Vec<(AnyWindowHandle, LevelKey)>>>;
 
+/// How often an open pop-up menu is looked at from outside (`watch_orphan`).
+const ORPHAN_LOOK: Duration = Duration::from_millis(120);
+
 #[derive(Clone)]
 struct HostState {
     main: AnyWindowHandle,
@@ -234,6 +237,7 @@ pub fn show(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -
                 }
             })
             .detach();
+            watch_orphan(view.clone(), cx);
             return view;
         }
         log::warn!("menu: popup window failed, drawing in-window");
@@ -255,6 +259,68 @@ pub fn is_open(cx: &App) -> bool {
 pub fn current(window: &Window, cx: &App) -> Option<Entity<MenuView>> {
     let h = host(cx)?;
     (!h.popup && h.main == window.window_handle()).then_some(h.view)
+}
+
+/// The screen rectangle of a window of ours (device px); `None` when it is gone.
+fn screen_rect(w: AnyWindowHandle, cx: &mut App) -> Option<rf_win::dock::layout::Rect> {
+    let hwnd = w.update(cx, |_, window, _| crate::look::window::hwnd_of(window)).ok()?;
+    let mut r = windows::Win32::Foundation::RECT::default();
+    // SAFETY: a plain read of a window's rectangle.
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowRect(windows::Win32::Foundation::HWND(hwnd as *mut _), &mut r).ok()? };
+    Some(rf_win::dock::layout::Rect { left: r.left, top: r.top, right: r.right, bottom: r.bottom })
+}
+
+/// Whether the window in front belongs to this process.
+fn front_is_ours() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+    // SAFETY: plain reads.
+    unsafe {
+        let fg = GetForegroundWindow();
+        if fg.0.is_null() {
+            // (nothing is in front for the moment between two windows: not another program's)
+            return true;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        pid == windows::Win32::System::Threading::GetCurrentProcessId()
+    }
+}
+
+/// Watches an open pop-up menu from outside and puts it away when the usual way cannot (`geo::menu_orphaned`: a menu whose window
+/// never got the foreground is never told that it lost it). A look every [`ORPHAN_LOOK`] while this menu is the open one; nothing
+/// runs once it is closed.
+fn watch_orphan(view: Entity<MenuView>, cx: &mut App) {
+    use rf_win::dock::panel as geo;
+    let opened = Instant::now();
+    cx.spawn(async move |cx| {
+        let mut was_down = geo::any_button_down();
+        loop {
+            cx.background_executor().timer(ORPHAN_LOOK).await;
+            let go_on = cx.update(|cx| {
+                let Some(h) = host(cx).filter(|h| h.view == view && h.popup) else { return false };
+                let down = geo::any_button_down();
+                let pressed = down && !std::mem::replace(&mut was_down, down);
+                was_down = down;
+                let wins: Vec<AnyWindowHandle> = h.wins.borrow().iter().map(|w| w.0).collect();
+                // (a press counts as outside only when every window of the menu could be asked and none holds the pointer)
+                let outside = pressed
+                    && geo::cursor().is_some_and(|c| {
+                        let rects: Vec<_> = wins.iter().filter_map(|w| screen_rect(*w, cx)).collect();
+                        rects.len() == wins.len() && !rects.iter().any(|r| r.contains(c.0, c.1))
+                    });
+                if geo::menu_orphaned(outside, front_is_ours(), opened.elapsed().as_millis() as u64) {
+                    log::info!("menu: put away by its watch (it was not the window in front)");
+                    let _ = h.main.update(cx, |_, window, cx| close(window, cx));
+                    return false;
+                }
+                true
+            });
+            if !go_on {
+                break;
+            }
+        }
+    })
+    .detach();
 }
 
 /// Closes the open menu (if any) and gives focus back. `window` is the window whose handler

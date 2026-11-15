@@ -115,6 +115,23 @@ pub fn lost_foreground(panel: isize, foreground: isize, been_front: bool, since_
     been_front || since_open_ms >= FOREGROUND_GRACE_MS
 }
 
+/// How long a pop-up menu of ours may be open without being the window in front before that counts ([`menu_orphaned`]): the time
+/// Windows may take to hand it the foreground.
+pub const MENU_FRONT_GRACE_MS: u64 = 700;
+
+/// Whether a pop-up menu of ours has to be put away by its watch, because the usual way will never come.
+///
+/// A menu closes when its window stops being the active one. That only happens to a window that WAS active. A menu whose window
+/// never got the foreground (another window took it at that very moment) is never deactivated: it stayed on the screen, over
+/// everything, until the program was closed (the user, 2026-11-15, with a picture of the desktop's menu over a terminal: "ekranda
+/// şöyle bir şey açık kapanmıyor"). So an open menu is also watched from outside: it goes when a mouse button goes down outside
+/// its windows (`outside`: [`outside_click`] against every window of the menu), or when a window of ANOTHER program has been in
+/// front since it opened or for longer than the grace. `front_is_ours`: the window in front belongs to this process (the menu,
+/// its own window or another of ours: the usual way handles those).
+pub fn menu_orphaned(outside: bool, front_is_ours: bool, open_ms: u64) -> bool {
+    outside || (!front_is_ours && open_ms >= MENU_FRONT_GRACE_MS)
+}
+
 /// How long a panel waits for a program to put its own menu up after that menu was asked for from the panel.
 pub const MENU_WAIT_MS: u64 = 1_500;
 
@@ -343,6 +360,22 @@ mod tests {
     /// A 1920x1080 monitor at 100 % with the 48 px Windows taskbar: the left island's glass is 330x48 at (12, 974).
     fn left_glass() -> Rect {
         Rect::from_xywh(12, 1032 - 10 - 48, 330, 48)
+    }
+
+    #[test]
+    fn a_menu_that_never_got_the_foreground_is_put_away_by_its_watch() {
+        // the usual case: the menu is in front, nothing is pressed outside
+        assert!(!menu_orphaned(false, true, 0));
+        assert!(!menu_orphaned(false, true, 60_000), "a menu the user is reading stays as long as they like");
+        // a button went down outside its windows: it goes, whoever is in front
+        assert!(menu_orphaned(true, true, 100));
+        assert!(menu_orphaned(true, false, 100));
+        // another program is in front: for a moment that is Windows handing the foreground over
+        assert!(!menu_orphaned(false, false, 0));
+        assert!(!menu_orphaned(false, false, MENU_FRONT_GRACE_MS - 1));
+        // and after it, the menu never got the foreground (or lost it without being told): it goes
+        assert!(menu_orphaned(false, false, MENU_FRONT_GRACE_MS));
+        assert!(menu_orphaned(false, false, 3_600_000));
     }
 
     #[test]
