@@ -82,12 +82,27 @@ struct Ui {
     search: Option<Entity<gpui_kit::component::input::InputState>>,
     /// One focus handle per HyperGlass slider (made at the first draw, kept so the arrow keys have something to be focused on).
     hg_focus: Vec<FocusHandle>,
+    /// How wide the Settings pane was at its last paint, logical px (0: not painted yet). The list of pages is drawn as a strip of
+    /// icons when the pane is narrow ([`nav_is_strip`]).
+    pane_w: f32,
 }
 impl Global for Ui {}
 
+/// The pane's width under which the list of pages is a strip of icons, and the widths of the list in its two forms.
+const NAV_STRIP_BELOW: f32 = 640.0;
+const NAV_W: f32 = 232.0;
+const NAV_STRIP_W: f32 = 60.0;
+
+/// Whether the list of pages is drawn as a strip of icons: the pane is narrow, and the full list (232 px) would leave the settings
+/// themselves a column too thin to read (the user's pictures: the app's sidebar and this list took 464 px of a 736 px window, and the
+/// settings had 200). A pane that has not been measured yet gets the full list.
+pub(crate) fn nav_is_strip(pane_w: f32) -> bool {
+    pane_w > 0.0 && pane_w < NAV_STRIP_BELOW
+}
+
 fn ui(cx: &mut App) -> &mut Ui {
     if !cx.has_global::<Ui>() {
-        cx.set_global(Ui { page: Page::General, open: HashSet::new(), search: None, hg_focus: Vec::new() });
+        cx.set_global(Ui { page: Page::General, open: HashSet::new(), search: None, hg_focus: Vec::new(), pane_w: 0.0 });
     }
     cx.global_mut::<Ui>()
 }
@@ -252,24 +267,49 @@ pub(crate) fn button(id: impl Into<ElementId>, p: &Palette, label: impl Into<Sha
 
 // ---------------------------------------------------------------- layout pieces
 
+/// The narrowest a setting's words (its title and the line under it) are drawn, logical px.
+///
+/// WHY (the user, with two pictures of the General page in a narrow window: "uygulamada çok yerde responsive problemi var", "şuraya
+/// bak. böyle olur mu hiç?"). A setting's row was: picture, words, control, side by side, and the words were what gave way: the
+/// control kept its width (a list is never narrower than 180 px), so in a narrow window the words were pressed into a column one
+/// letter wide and a title stood letter under letter. Now the words never go under this width. When the row has no room for the words
+/// and the control side by side, the CONTROL goes to a line of its own under them ([`beside`]), as a form does on a narrow page.
+pub(crate) const WORDS_MIN: f32 = 120.0;
+
+/// A setting's control, placed after its words: it keeps its own width, stays at the right end, and wraps to a line of its own when
+/// the row is too narrow for both (the row is a wrapping one). It is never wider than the row.
+pub(crate) fn beside(control: AnyElement) -> Div {
+    h_flex().flex_shrink_0().max_w_full().ml_auto().child(control)
+}
+
 pub(crate) fn card_body(p: &Palette, icon: L, title: SharedString, desc: Option<SharedString>, control: Option<AnyElement>) -> Div {
     note_setting(&title, desc.as_deref());
     h_flex()
         .min_h(px(64.))
         .px_4()
         .py_3()
-        .gap_4()
+        .gap_x_4()
+        .gap_y_2()
         .items_center()
-        .child(Icon::new(icon).size(px(18.)).flex_shrink_0().text_color(p.text))
+        .flex_wrap()
         .child(
-            v_flex()
+            // (the picture and the words stay together: it is the control that wraps)
+            h_flex()
                 .flex_1()
-                .min_w_0()
-                .gap_0p5()
-                .child(div().text_sm().child(title))
-                .children(desc.map(|d| div().text_xs().text_color(p.text_secondary).child(d))),
+                .min_w(px(WORDS_MIN + 34.))
+                .gap_4()
+                .items_center()
+                .child(Icon::new(icon).size(px(18.)).flex_shrink_0().text_color(p.text))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_0p5()
+                        .child(div().text_sm().child(title))
+                        .children(desc.map(|d| div().text_xs().text_color(p.text_secondary).child(d))),
+                ),
         )
-        .children(control)
+        .children(control.map(beside))
 }
 
 pub(crate) fn shell(p: &Palette) -> Div {
@@ -325,16 +365,18 @@ fn sub(p: &Palette, title: &str, desc: Option<&str>, control: AnyElement) -> Any
         .pl(px(56.))
         .pr_4()
         .py_2()
-        .gap_4()
+        .gap_x_4()
+        .gap_y_2()
         .items_center()
+        .flex_wrap()
         .child(
             v_flex()
                 .flex_1()
-                .min_w_0()
+                .min_w(px(WORDS_MIN))
                 .child(div().text_sm().child(title.to_string()))
                 .children(desc.map(|d| div().text_xs().text_color(p.text_secondary).child(d.to_string()))),
         )
-        .child(control)
+        .child(beside(control))
         .into_any_element()
 }
 
@@ -375,18 +417,13 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
         }
     };
     let query = search.read(cx).value().trim().to_string();
+    // In a narrow pane the list of pages is a strip of icons (each with its name as a tip), so that the settings keep a readable
+    // width; the title and the search box are the full list's.
+    let strip = nav_is_strip(ui(cx).pane_w);
     // (scrolls: the 13 entries need more than the 420 px the window may be as low as)
-    let mut nav = v_flex()
-        .id("settings-nav")
-        .w(px(232.))
-        .flex_shrink_0()
-        .h_full()
-        .overflow_y_scroll()
-        .px_3()
-        .pt_5()
-        .gap_0p5()
-        .child(div().px_2().pb_3().text_xl().font_weight(FontWeight::SEMIBOLD).child(t!("Ayarlar")))
-        .child(
+    let mut nav = v_flex().id("settings-nav").w(px(if strip { NAV_STRIP_W } else { NAV_W })).flex_shrink_0().h_full().overflow_y_scroll().px_3().pt_5().gap_0p5();
+    if !strip {
+        nav = nav.child(div().px_2().pb_3().text_xl().font_weight(FontWeight::SEMIBOLD).child(t!("Ayarlar"))).child(
             h_flex()
                 .h(px(32.))
                 .mb_2()
@@ -400,6 +437,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
                 .child(Icon::new(L::Search).size(px(14.)).flex_shrink_0().text_color(p.text_secondary))
                 .child(Input::new(&search).appearance(false).cleanable(true)),
         );
+    }
     // Over glass the selected entry is a lens the engine draws behind the scene (slot 1): no fill and no accent bar, a probe that
     // reports the row's place on every paint instead. The page is only built for the active tab; the workspace names the one pane that
     // owns the lens and takes the lens out when no pane does.
@@ -410,7 +448,11 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
             h_flex()
                 .id(("set-nav", i))
                 .h(px(36.))
-                .px_3()
+                .when(!strip, |d| d.px_3())
+                .when(strip, |d| {
+                    let tip: SharedString = crate::i18n::t(label).into();
+                    d.justify_center().tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+                })
                 .gap_3()
                 .items_center()
                 .relative()
@@ -423,7 +465,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
                 .when(on && lens, |d| d.child(crate::glass::lens_probe(crate::glass::SLOT_SETTINGS, crate::glass::key_of(&i))))
                 .when(!on, |d| d.hover(|s| s.bg(p.hover)))
                 .child(Icon::new(icon).size(px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
-                .child(h_flex().gap_2().items_center().child(crate::i18n::t(label)).when(experimental(pg), |d| d.child(experimental_pill(p))))
+                .when(!strip, |d| d.child(h_flex().gap_2().items_center().child(crate::i18n::t(label)).when(experimental(pg), |d| d.child(experimental_pill(p)))))
                 .on_click({
                     let search = search.clone();
                     move |_, window, cx| {
@@ -485,6 +527,29 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
     };
     h_flex()
         .size_full()
+        .relative()
+        // (the pane's own width, measured at paint: when it crosses the limit the pane is drawn again with the other form of the list)
+        .child(
+            canvas(
+                move |bounds, _, cx| {
+                    let w = f32::from(bounds.size.width);
+                    let u = ui(cx);
+                    if (u.pane_w - w).abs() > 0.5 {
+                        let was = nav_is_strip(u.pane_w);
+                        u.pane_w = w;
+                        if nav_is_strip(w) != was {
+                            // (after this paint: a window that is being drawn does not take a request to be drawn again)
+                            cx.defer(|cx| cx.refresh_windows());
+                        }
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        )
         .child(nav)
         .child(
             div().id("settings-page").flex_1().min_w_0().h_full().overflow_y_scroll().child(
@@ -3010,6 +3075,24 @@ fn b() { z }";
 mod hyperglass_tests {
     use super::{Hg, SLIDER_W, THUMB, slider_key, slider_value_at};
     use crate::settings::Settings;
+
+    /// The list of pages gives way before the settings do: in a narrow pane it is a strip of icons, and the settings' column is
+    /// then wide enough for a setting's words and its widest control side by side or one under the other.
+    #[test]
+    fn a_narrow_pane_gets_the_strip_of_icons_and_a_readable_column() {
+        assert!(!super::nav_is_strip(0.0), "a pane that was not measured yet gets the full list");
+        assert!(super::nav_is_strip(480.0), "the narrowest window with the app's sidebar open");
+        assert!(super::nav_is_strip(super::NAV_STRIP_BELOW - 1.0));
+        assert!(!super::nav_is_strip(super::NAV_STRIP_BELOW));
+        assert!(!super::nav_is_strip(1200.0));
+        // the settings' column with the strip, in the narrowest pane the app's window allows (480): room for a list of the widest
+        // kind (320) on a line of its own inside a card's padding, and for the words at their narrowest
+        let column = 480.0 - super::NAV_STRIP_W - 48.0;
+        assert!(column - 32.0 >= 320.0, "{column}");
+        assert!(column - 32.0 >= super::WORDS_MIN + 34.0);
+        // and with the full list just above the limit the column is no narrower than that
+        assert!(super::NAV_STRIP_BELOW - super::NAV_W - 48.0 >= column - 16.0);
+    }
 
     #[test]
     fn the_thumbs_travel_maps_to_0_through_100() {
