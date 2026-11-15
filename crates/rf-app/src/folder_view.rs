@@ -2110,6 +2110,11 @@ impl FolderView {
         }
     }
 
+    /// The details list's empty strip on its right, for this list's width (see [`details_gutter`]).
+    pub(crate) fn gutter(&self) -> f32 {
+        details_gutter(f32::from(self.content_width))
+    }
+
     pub fn row_h(&self) -> Pixels {
         px(ROW_SIZES[(self.row_size as usize).min(ROW_SIZES.len() - 1)])
     }
@@ -2732,7 +2737,7 @@ impl FolderView {
     fn type_col_w(&self, cx: &App) -> Pixels {
         if self.is_search() {
             // location shares the free width with the name instead of squeezing it
-            let free = f32::from(self.content_width) - 150. - 100. - 40. - DETAILS_GUTTER;
+            let free = f32::from(self.content_width) - 150. - 100. - 40. - self.gutter();
             px((free * 0.45).clamp(160., 460.))
         } else {
             px(self.col_widths(cx)[2])
@@ -2993,7 +2998,7 @@ impl FolderView {
         };
         let w = self.col_widths(cx);
         // the property columns the user added are placed first: the fixed columns share what is left
-        let mut free = f32::from(self.content_width) - 180. - 24. - DETAILS_GUTTER - self.props_used_width(cx);
+        let mut free = f32::from(self.content_width) - 180. - 24. - self.gutter() - self.props_used_width(cx);
         let mut take = |want: bool, width: f32| -> bool {
             if want && width <= free {
                 free -= width;
@@ -3036,7 +3041,7 @@ impl FolderView {
                 used += w[7 + i];
             }
         }
-        (f32::from(self.content_width) - 180. - 24. - DETAILS_GUTTER - used).max(0.)
+        (f32::from(self.content_width) - 180. - 24. - self.gutter() - used).max(0.)
     }
 
     fn render_header(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -3106,7 +3111,7 @@ impl FolderView {
         h_flex()
             .h(px(30.))
             .pl(px(10.))
-            .pr(px(10. + DETAILS_GUTTER))
+            .pr(px(10. + self.gutter()))
             .overflow_hidden()
             .text_xs()
             .border_b_1()
@@ -3625,7 +3630,7 @@ impl FolderView {
                 .flex_1()
                 .py_1()
                 .pl(px(6.))
-                .pr(px(6. + DETAILS_GUTTER))
+                .pr(px(6. + self.gutter()))
                 .into_any_element()
         };
         let this = cx.entity();
@@ -4227,7 +4232,41 @@ const RENAME_INSET: f32 = 5.;
 /// padding were all the room there was. Explorer has such a strip by accident (its columns do not fill the width); here the name
 /// column takes what is free, so the strip is made on purpose. The rows, their hover and selection fill and the column headings all
 /// end before it; the scrollbar, when shown, lies over its outer part.
-const DETAILS_GUTTER: f32 = 24.;
+///
+/// HOW WIDE (the user, of a fixed 24 px: "bu 24px olayı büyük monitörlerde nasıl olacak peki?"): 3 % of the list's width, never
+/// under 24 px and never over 56. A fixed strip is the same few millimetres on every screen, since these are the pixels Windows'
+/// display scaling multiplies, but beside a list 1600 px wide it is a sliver, and that is where the name column has width to
+/// spare. So a narrow list (a small window, two panes, the preview pane open) keeps the 24 px it can afford and a wide one gets
+/// up to 56. Pure.
+pub(crate) fn details_gutter(list_width: f32) -> f32 {
+    (list_width * 0.03).clamp(24., 56.)
+}
+
+#[cfg(test)]
+mod gutter_tests {
+    use super::details_gutter;
+
+    #[test]
+    fn the_strip_grows_with_the_list_between_its_two_ends() {
+        assert_eq!(details_gutter(0.), 24.);
+        assert_eq!(details_gutter(740.), 24., "a 1300 px window with the sidebar and the preview pane");
+        assert_eq!(details_gutter(800.), 24.);
+        assert_eq!(details_gutter(1200.), 36.);
+        assert_eq!(details_gutter(1600.), 48., "the list of the picture in issue 25 (a 2560 px window)");
+        assert_eq!(details_gutter(1900.), 56.);
+        assert_eq!(details_gutter(4000.), 56.);
+    }
+
+    #[test]
+    fn it_never_shrinks_while_the_list_widens() {
+        let mut last = 0.;
+        for w in (0..4000).step_by(10) {
+            let g = details_gutter(w as f32);
+            assert!(g >= last, "{w}");
+            last = g;
+        }
+    }
+}
 
 pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
     // (the name test first: it costs nothing, and `exists` on a place that has to wake up holds the UI thread)

@@ -256,7 +256,7 @@ impl FolderView {
         if chosen.is_empty() {
             return Vec::new();
         }
-        let room = f32::from(self.content_width) - 180. - 24. - super::DETAILS_GUTTER;
+        let room = f32::from(self.content_width) - 180. - 24. - self.gutter();
         let n = pc::fit_count(chosen.iter().map(|c| c.width), room);
         chosen.iter().take(n).cloned().enumerate().collect()
     }
