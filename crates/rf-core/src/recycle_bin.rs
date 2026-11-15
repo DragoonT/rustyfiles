@@ -18,6 +18,78 @@ pub fn command_targets(shown: &[usize], selected: &HashSet<usize>) -> Vec<usize>
     shown.iter().copied().filter(|i| selected.contains(i)).collect()
 }
 
+/// What a click on a row makes of the selection, and the row the next Shift+click counts from: a plain click selects that row
+/// alone; Ctrl+click adds or takes away that row; Shift+click selects every shown row from the anchor to the clicked one (with Ctrl
+/// too, in addition to what is selected). A Shift+click with no anchor that is still shown is a plain click. Rows are indices into
+/// the bin's items, `shown` is what the list shows, in its order.
+///
+/// WHY (issue 28: "only one file can be selected at a time for deletion in the recycle bin"): the page knew the plain click and
+/// Ctrl+click and nothing else, so a run of files could only be picked one Ctrl+click at a time.
+pub fn click_selection(shown: &[usize], selected: &HashSet<usize>, anchor: Option<usize>, clicked: usize, ctrl: bool, shift: bool) -> (HashSet<usize>, Option<usize>) {
+    let place = |row: usize| shown.iter().position(|r| *r == row);
+    if shift && let (Some(from), Some(to)) = (anchor.and_then(place), place(clicked)) {
+        let mut out = if ctrl { selected.clone() } else { HashSet::new() };
+        out.extend(shown[from.min(to)..=from.max(to)].iter().copied());
+        return (out, anchor);
+    }
+    if ctrl {
+        let mut out = selected.clone();
+        if !out.remove(&clicked) {
+            out.insert(clicked);
+        }
+        return (out, Some(clicked));
+    }
+    (HashSet::from([clicked]), Some(clicked))
+}
+
+/// Every shown row that is not selected, for "invert selection".
+pub fn inverted(shown: &[usize], selected: &HashSet<usize>) -> HashSet<usize> {
+    shown.iter().copied().filter(|r| !selected.contains(r)).collect()
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use std::collections::HashSet;
+
+    use super::{click_selection, inverted};
+
+    fn set(rows: &[usize]) -> HashSet<usize> {
+        rows.iter().copied().collect()
+    }
+
+    /// The list shows the items in another order than they are stored (sorted, filtered): a range follows what is SHOWN.
+    const SHOWN: [usize; 6] = [7, 2, 9, 4, 0, 5];
+
+    #[test]
+    fn a_plain_click_selects_one_row_and_ctrl_adds_or_removes() {
+        assert_eq!(click_selection(&SHOWN, &set(&[7, 2]), Some(7), 9, false, false), (set(&[9]), Some(9)));
+        assert_eq!(click_selection(&SHOWN, &set(&[9]), Some(9), 4, true, false), (set(&[9, 4]), Some(4)));
+        assert_eq!(click_selection(&SHOWN, &set(&[9, 4]), Some(4), 9, true, false), (set(&[4]), Some(9)), "a second Ctrl+click takes the row away");
+    }
+
+    #[test]
+    fn shift_selects_the_shown_rows_between_the_anchor_and_the_click() {
+        assert_eq!(click_selection(&SHOWN, &set(&[2]), Some(2), 0, false, true), (set(&[2, 9, 4, 0]), Some(2)), "downwards, the anchor stays");
+        assert_eq!(click_selection(&SHOWN, &set(&[2, 9, 4, 0]), Some(2), 7, false, true), (set(&[7, 2]), Some(2)), "upwards from the same anchor: a new range");
+        assert_eq!(click_selection(&SHOWN, &set(&[5]), Some(2), 9, true, true), (set(&[5, 2, 9]), Some(2)), "with Ctrl: added to what is selected");
+        assert_eq!(click_selection(&SHOWN, &set(&[4]), Some(4), 4, false, true), (set(&[4]), Some(4)), "on the anchor itself: that row");
+    }
+
+    #[test]
+    fn shift_without_an_anchor_that_is_shown_is_a_plain_click() {
+        assert_eq!(click_selection(&SHOWN, &set(&[]), None, 4, false, true), (set(&[4]), Some(4)));
+        // the anchor was filtered away by the search box
+        assert_eq!(click_selection(&SHOWN, &set(&[]), Some(33), 4, false, true), (set(&[4]), Some(4)));
+    }
+
+    #[test]
+    fn inverting_takes_the_shown_rows_that_were_not_selected() {
+        assert_eq!(inverted(&SHOWN, &set(&[7, 9, 5])), set(&[2, 4, 0]));
+        assert_eq!(inverted(&SHOWN, &set(&[])), set(&SHOWN));
+        assert_eq!(inverted(&SHOWN, &set(&[7, 2, 9, 4, 0, 5, 88])), set(&[]), "a selected row that is not shown is not brought in");
+    }
+}
+
 /// Whether an item of the bin is a folder. The shell calls a compressed (zip) folder a folder (SFGAO_FOLDER) and marks it as a stream
 /// too (SFGAO_STREAM, "it is also a file"); a file system that is asked directly says what it is. The file system's answer wins when
 /// there is one; without it, a folder that is also a stream is a file.

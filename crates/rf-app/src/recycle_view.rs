@@ -16,7 +16,7 @@ use gpui_kit::*;
 use rf_core::format;
 use rf_win::recycle::RecycleItem;
 
-use crate::actions::{DeleteItems, DeletePermanently};
+use crate::actions::{DeleteItems, DeletePermanently, InvertSelection, SelectAll};
 use crate::fluent_menu::{self, Item, Menu, MenuIcon};
 use crate::image_cache::ImageCache;
 use crate::recycle_settings_view::{BinDialogEvent, BinSettingsDialog, Store};
@@ -37,6 +37,8 @@ pub struct RecycleView {
     order: Vec<usize>,
     /// Indices into `items`.
     selected: HashSet<usize>,
+    /// The row a Shift+click counts from (the last row clicked plainly or with Ctrl).
+    anchor: Option<usize>,
     sort: (Col, bool),
     /// The search box (made at the first draw: it needs the window).
     search: Option<Entity<InputState>>,
@@ -86,6 +88,7 @@ impl RecycleView {
             items: Vec::new(),
             order: Vec::new(),
             selected: HashSet::new(),
+            anchor: None,
             // newest deleted first, as before
             sort: (Col::Deleted, true),
             search: None,
@@ -509,14 +512,9 @@ impl Render for RecycleView {
                                     MouseButton::Left,
                                     cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                                         window.focus(&this.focus, cx);
-                                        if ev.modifiers.control {
-                                            if !this.selected.remove(&i) {
-                                                this.selected.insert(i);
-                                            }
-                                        } else {
-                                            this.selected.clear();
-                                            this.selected.insert(i);
-                                        }
+                                        // plain, Ctrl (one more or one less) and Shift (the run from the last clicked row), as in the folder list
+                                        let (selected, anchor) = rf_core::recycle_bin::click_selection(&this.order, &this.selected, this.anchor, i, ev.modifiers.control, ev.modifiers.shift);
+                                        (this.selected, this.anchor) = (selected, anchor);
                                         cx.notify();
                                     }),
                                 )
@@ -542,6 +540,15 @@ impl Render for RecycleView {
             // the folder list's own Delete / Shift+Delete bindings reach here first, because the view has the focus
             .on_action(cx.listener(|this, _: &DeleteItems, window, cx| this.delete_key(window, cx)))
             .on_action(cx.listener(|this, _: &DeletePermanently, window, cx| this.delete_key(window, cx)))
+            // Ctrl+A and "invert selection": every row that is shown (what the search box hides is left alone)
+            .on_action(cx.listener(|this, _: &SelectAll, _, cx| {
+                this.selected = this.order.iter().copied().collect();
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _: &InvertSelection, _, cx| {
+                this.selected = rf_core::recycle_bin::inverted(&this.order, &this.selected);
+                cx.notify();
+            }))
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _: &MouseDownEvent, window, cx| {
