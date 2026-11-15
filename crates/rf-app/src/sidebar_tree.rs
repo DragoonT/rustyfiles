@@ -26,9 +26,25 @@ use super::*;
 const ROW_H: f32 = 30.;
 /// Pixels of indent per level.
 const INDENT: f32 = 16.;
-/// Levels that indent: deeper rows stand at this indent, so that the name keeps room in a narrow sidebar (the row's tooltip has the
-/// whole name).
+/// Levels that indent by the whole step. Deeper rows indent by [`DEEP_INDENT`] a level, so that the name keeps room in a narrow
+/// sidebar (the row's tooltip has the whole name).
 const MAX_INDENT_LEVELS: u16 = 6;
+/// The step of a level past [`MAX_INDENT_LEVELS`].
+const DEEP_INDENT: f32 = 8.;
+/// How many levels past [`MAX_INDENT_LEVELS`] still step; rows deeper than that stand at the last indent.
+const DEEP_LEVELS: u16 = 6;
+
+/// A row's indent for its depth.
+///
+/// Until 0.8.1 every row past the sixth level stood at the SAME indent, a folder and the folders in it in one column (issue 32,
+/// with a picture beside Explorer's tree: "the indentation is just at the same level as the parent folder ... usually deeper
+/// levels"): what was in what could not be read any more. Now each level stands to the right of its parent: by the whole step for
+/// six levels and by half of it for six more. Past the twelfth level rows share an indent again: a sidebar of the usual width has
+/// some 40 px left for a name there, and a deeper indent would leave none (seen in a test copy: only the folder's icon was left).
+fn indent_of(depth: u16) -> f32 {
+    let deep = depth.saturating_sub(MAX_INDENT_LEVELS).min(DEEP_LEVELS);
+    INDENT * f32::from(depth.min(MAX_INDENT_LEVELS)) + DEEP_INDENT * f32::from(deep)
+}
 /// How long a slow listing's spinner pulses (three pulses), then it stands still: a listing that hangs (an offline share) must not
 /// keep the window drawing.
 const WAIT_PULSE_MS: u64 = 2700;
@@ -474,7 +490,7 @@ impl SidebarTree {
         // (one selected row in the whole sidebar: see `shown_elsewhere`)
         info.selected &= !self.shown_elsewhere;
         let id = row.id;
-        let pad = 8. + INDENT * f32::from(row.depth.min(MAX_INDENT_LEVELS));
+        let pad = 8. + indent_of(row.depth);
         let deep = row.depth > MAX_INDENT_LEVELS;
         if row.kind == RowKind::Error {
             let text = if info.not_found { t!("Klasör bulunamadı").to_string() } else { format!("{}: {}", t!("Açılamadı"), info.error.unwrap_or_default()) };
@@ -783,6 +799,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// A folder's children stand to the right of it at every depth a tree is opened to.
+    #[test]
+    fn every_level_is_indented_more_than_its_parent() {
+        assert_eq!((super::indent_of(0), super::indent_of(1), super::indent_of(6)), (0., 16., 96.));
+        assert_eq!((super::indent_of(7), super::indent_of(8)), (104., 112.), "past six levels: half a step each");
+        for depth in 0..12 {
+            assert!(super::indent_of(depth + 1) > super::indent_of(depth), "level {depth} and its children");
+        }
+        assert_eq!((super::indent_of(12), super::indent_of(40)), (144., 144.), "the name needs the room that is left: the indent stops growing");
     }
 
     #[test]
