@@ -137,6 +137,16 @@ impl Places {
         let mut this =
             Self { drives: Vec::new(), cloud: Vec::new(), pinned: Vec::new(), recent: Vec::new(), libraries: Vec::new(), network: Vec::new(), devices: Vec::new(), loaded: false, extras_loaded: false, _task: None };
         this.refresh(cx);
+        // the drives the user hides (Settings > Files and folders, a drive's own menu) leave and come back at once
+        let mut hidden = rf_win::drives::hidden();
+        cx.observe_global::<crate::settings::Settings>(move |p, cx| {
+            let now = rf_win::drives::hidden();
+            if now != hidden {
+                hidden = now;
+                p.refresh(cx);
+            }
+        })
+        .detach();
         // Notice drives appearing/disappearing (USB, network mappings) without any shell hooks.
         cx.spawn(async move |this, cx| {
             let mut mask = rf_win::drives::drive_mask();
@@ -209,7 +219,8 @@ impl Places {
                     })
                     .collect(),
             };
-            let drives = rf_win::list_drives();
+            // (less the drives the user hides and the ones Explorer hides)
+            let drives = rf_win::drives::visible_drives();
             let libraries = rf_win::libraries::list();
             let network = rf_win::network::network_shortcuts();
             (pinned, drives, libraries, network)

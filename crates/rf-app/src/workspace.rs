@@ -1147,7 +1147,7 @@ impl Workspace {
         // List on a worker (can stall on network/optical drives); the shell thread only shows the menu.
         let listing = cx.background_spawn(async move {
             let mut entries: Vec<(String, PathBuf)> = match &dir {
-                None => rf_win::list_drives().into_iter().map(|d| (crate::places::drive_name(&d), d.root)).collect(),
+                None => rf_win::drives::visible_drives().into_iter().map(|d| (crate::places::drive_name(&d), d.root)).collect(),
                 Some(d) => {
                     let mut v = Vec::new();
                     let _ = rf_win::list_dir(d, 4096, &|| false, &mut |b| {
@@ -2093,6 +2093,15 @@ impl Workspace {
             Item::Separator,
             Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
         ];
+        // a drive can be taken off the lists of places (it comes back from Settings > Files and folders)
+        let mut items = items;
+        if let Some(letter) = crate::settings_view::drive_letter(&path) {
+            let at = items.len() - 2;
+            items.insert(
+                at,
+                Item::action(t!("Bu sürücüyü gizle"), MenuIcon::Lucide(L::EyeOff), move |_, cx| crate::settings::update(cx, move |s| crate::settings_view::set_drive_hidden(s, letter, true))),
+            );
+        }
         let menu = crate::fluent_menu::show(Menu { quick: Vec::new(), items }, at, window, cx);
         let view = self.active_tab().downgrade();
         crate::ctx_menu::load_shell_more(menu.downgrade(), rf_win::ctxmenu::ShellTarget::One(path), view, cx);

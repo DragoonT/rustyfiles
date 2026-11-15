@@ -1463,6 +1463,12 @@ pub const EN: &[(&str, &str)] = &[
     ("Dosya düzenleyici", "File organizer"),
     ("Dosya türleri", "File types"),
     ("Vurgu rengi", "Accent color"),
+    ("Gizlenen sürücüler", "Hidden drives"),
+    ("Bu sürücüyü gizle", "Hide this drive"),
+    (
+        "Gizlediğiniz sürücü kenar çubuğunda, Ana Sayfa'da ve adres çubuğunun sürücü listesinde görünmez; adresini yazarak yine açabilirsiniz. Explorer'ın gizlediği sürücüler burada da gizlidir.",
+        "A drive you hide is not shown in the sidebar, on the Home page or in the address bar's list of drives; you can still open it by typing its address. Drives that Explorer hides are hidden here too.",
+    ),
     ("Windows'un rengi", "Windows' color"),
     ("Kendi rengim…", "My own color…"),
     ("Rengi #RRGGBB biçiminde yazın, örneğin #F7630C.", "Write the color as #RRGGBB, for example #F7630C."),

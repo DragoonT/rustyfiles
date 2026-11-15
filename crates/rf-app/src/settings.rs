@@ -399,6 +399,9 @@ pub struct Settings {
     pub pinned: Option<Vec<PathBuf>>,
     /// Folder aliases: `@name` in the address box (Files' folder aliases).
     pub folder_aliases: std::collections::BTreeMap<String, PathBuf>,
+    /// The drives that are not listed (the sidebar, the Home page, the address bar's list of drives), as letters ("V"). A drive
+    /// Explorer hides by its own policy is hidden too, without being named here (`rf_win::drives::visible_drives`).
+    pub hidden_drives: Vec<String>,
     /// The accent colour of rustyfiles as "#RRGGBB"; empty: Windows' own accent (Settings > Appearance).
     pub accent_color: String,
     /// The user's own programs for kinds of files (Settings > File types; `rf_core::openrules`): the first program of a list opens
@@ -685,6 +688,7 @@ impl Default for Settings {
             session_active: 0,
             pinned: None,
             folder_aliases: Default::default(),
+            hidden_drives: Vec::new(),
             accent_color: String::new(),
             open_rules: Vec::new(),
             run_in_background: false,
@@ -1031,6 +1035,7 @@ impl Settings {
         crate::i18n::set(self.language);
         crate::aliases::set(self.folder_aliases.clone());
         rf_win::openrules::set(self.open_rules.clone());
+        rf_win::drives::set_hidden(rf_win::drives::mask_of_letters(&self.hidden_drives));
         // (a text that is no colour is no colour: Windows' accent)
         rf_win::accent::set_override(rf_win::accent::parse_hex(&self.accent_color));
         crate::background::sync_tray(self.run_in_background);

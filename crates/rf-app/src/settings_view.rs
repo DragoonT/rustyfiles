@@ -811,6 +811,65 @@ const TINTS: [(&str, u32); 15] = [
 
 /// The background material card. While Glass is in use (chosen, or forced for this run) a note under it says what the material
 /// costs; if the engine gave up on a window, another note says why that window is on Mica.
+/// The letter of a drive's root ("V:" or "V:\"), in capitals; `None` for any other path.
+pub(crate) fn drive_letter(path: &std::path::Path) -> Option<char> {
+    let s = path.to_string_lossy();
+    let rest = s.strip_suffix(['\\', '/']).unwrap_or(&s);
+    let mut c = rest.chars();
+    match (c.next(), c.next(), c.next()) {
+        (Some(l), Some(':'), None) if l.is_ascii_alphabetic() => Some(l.to_ascii_uppercase()),
+        _ => None,
+    }
+}
+
+/// Hides a drive from the lists of places, or shows it again: the setting's letters, each once, in order.
+pub(crate) fn set_drive_hidden(s: &mut Settings, letter: char, hide: bool) {
+    let mut mask = rf_win::drives::mask_of_letters(&s.hidden_drives);
+    if let Some(bit) = rf_win::drives::letter_bit(letter) {
+        if hide { mask |= bit } else { mask &= !bit }
+    }
+    s.hidden_drives = rf_win::drives::letters_of_mask(mask).into_iter().map(String::from).collect();
+}
+
+/// Which drives are listed: a button per drive letter that is there now (and per letter the setting names, there or not), pressed
+/// in while the drive is hidden.
+fn hidden_drives_card(p: &Palette, s: &Settings) -> AnyElement {
+    let hidden = rf_win::drives::mask_of_letters(&s.hidden_drives);
+    let by_explorer = rf_win::drives::policy_hidden();
+    let present = rf_win::drives::drive_mask();
+    let mut row = h_flex().flex_wrap().gap_2().items_center().justify_end();
+    for (i, letter) in rf_win::drives::letters_of_mask(present | hidden).into_iter().enumerate() {
+        let bit = rf_win::drives::letter_bit(letter).unwrap_or(0);
+        let (off, forced) = (hidden & bit != 0, by_explorer & bit != 0);
+        row = row.child(
+            h_flex()
+                .id(("drive-hide", i))
+                .h(px(28.))
+                .px_2p5()
+                .gap_1p5()
+                .items_center()
+                .rounded(theme::RADIUS_SM)
+                .border_1()
+                .border_color(if off { p.accent } else { p.border })
+                .bg(p.hover)
+                .text_sm()
+                .when(off || forced, |d| d.text_color(p.text_secondary))
+                .cursor_pointer()
+                .hover(|d| d.bg(p.pressed))
+                .child(Icon::new(if off || forced { L::EyeOff } else { L::Eye }).size(px(14.)))
+                .child(format!("{letter}:"))
+                .on_click(move |_, _, cx| settings::update(cx, move |s| set_drive_hidden(s, letter, !off))),
+        );
+    }
+    card(
+        p,
+        L::HardDrive,
+        t!("Gizlenen sürücüler"),
+        Some(t!("Gizlediğiniz sürücü kenar çubuğunda, Ana Sayfa'da ve adres çubuğunun sürücü listesinde görünmez; adresini yazarak yine açabilirsiniz. Explorer'ın gizlediği sürücüler burada da gizlidir.")),
+        row.into_any_element(),
+    )
+}
+
 /// The colours offered for the accent (Fluent's own set): blue, purple, magenta, red, orange, yellow, green, teal, grey.
 pub(crate) const ACCENT_CHOICES: [u32; 9] = [0x0078D4, 0x8764B8, 0xE3008C, 0xE81123, 0xF7630C, 0xFFB900, 0x107C10, 0x00B7C3, 0x69797E];
 
@@ -1847,6 +1906,8 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
 
     // Files' folder aliases: "@name" in the address box
+    v.push(section(p, t!("Sürücüler")));
+    v.push(hidden_drives_card(p, s));
     v.push(section(p, t!("Klasör takma adları")));
     let aliases: Vec<(String, std::path::PathBuf)> = s.folder_aliases.iter().map(|(n, p)| (n.clone(), p.clone())).collect();
     let count = aliases.len();
@@ -3149,6 +3210,35 @@ mod hyperglass_tests {
 
     /// The list of pages gives way before the settings do: in a narrow pane it is a strip of icons, and the settings' column is
     /// then wide enough for a setting's words and its widest control side by side or one under the other.
+    #[test]
+    fn only_a_drives_root_has_a_drive_letter() {
+        use std::path::Path;
+        assert_eq!(super::drive_letter(Path::new(r"V:\")), Some('V'));
+        assert_eq!(super::drive_letter(Path::new("c:")), Some('C'));
+        assert_eq!(super::drive_letter(Path::new("D:/")), Some('D'));
+        for other in [r"C:\Users", r"\\server\share", "", "C", r"1:\", r"C:\\"] {
+            assert_eq!(super::drive_letter(Path::new(other)), None, "{other:?}");
+        }
+    }
+
+    #[test]
+    fn hiding_and_showing_a_drive_keeps_the_letters_once_and_in_order() {
+        let mut s = crate::settings::Settings::default();
+        super::set_drive_hidden(&mut s, 'v', true);
+        super::set_drive_hidden(&mut s, 'D', true);
+        super::set_drive_hidden(&mut s, 'V', true);
+        assert_eq!(s.hidden_drives, ["D", "V"]);
+        super::set_drive_hidden(&mut s, 'd', false);
+        assert_eq!(s.hidden_drives, ["V"]);
+        super::set_drive_hidden(&mut s, 'Z', false);
+        super::set_drive_hidden(&mut s, '1', true);
+        assert_eq!(s.hidden_drives, ["V"], "a drive that was not hidden, and what is no drive, change nothing");
+        // a list written by hand is cleaned the first time it is changed
+        s.hidden_drives = vec!["v:".into(), "x".into(), "V".into(), "?".into()];
+        super::set_drive_hidden(&mut s, 'A', true);
+        assert_eq!(s.hidden_drives, ["A", "V", "X"]);
+    }
+
     #[test]
     fn a_colour_of_the_users_own_is_kept_as_rrggbb_or_refused_with_words() {
         assert_eq!(super::accent_answer("f7630c"), Ok("#F7630C".to_string()));

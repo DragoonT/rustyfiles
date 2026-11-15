@@ -47,10 +47,62 @@ impl Drive {
     }
 }
 
+// ---------------------------------------------------------------- drives that are not listed
+
+/// The bit of a drive letter in a drive mask ('A' is bit 0), in either case; `None` for what is no drive letter.
+pub fn letter_bit(letter: char) -> Option<u32> {
+    let l = letter.to_ascii_uppercase();
+    l.is_ascii_uppercase().then(|| 1u32 << (l as u8 - b'A'))
+}
+
+/// The mask of the letters as the settings keep them or a user writes them: "V", "v:", "V:\\". What is no drive letter is skipped.
+pub fn mask_of_letters<S: AsRef<str>>(letters: &[S]) -> u32 {
+    letters.iter().filter_map(|s| s.as_ref().trim().chars().next().and_then(letter_bit)).fold(0, |m, b| m | b)
+}
+
+/// The letters of a mask, A to Z.
+pub fn letters_of_mask(mask: u32) -> Vec<char> {
+    (0..26u8).filter(|i| mask & (1 << i) != 0).map(|i| (b'A' + i) as char).collect()
+}
+
+/// The drives the user hides in rustyfiles (Settings > Files and folders), as a mask. One value for the process, set from the
+/// settings whenever they are applied.
+static HIDDEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn set_hidden(mask: u32) {
+    HIDDEN.store(mask, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn hidden() -> u32 {
+    HIDDEN.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The drives Explorer itself is told not to show: the `NoDrives` value of Explorer's policies, the user's and the machine's (what
+/// "Hide these specified drives in My Computer" and the tweak tools write). A drive hidden there is hidden here too.
+pub fn policy_hidden() -> u32 {
+    const KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Policies\Explorer";
+    let read = |root: &windows_registry::Key| root.open(KEY).ok().and_then(|k| k.get_u32("NoDrives").ok()).unwrap_or(0);
+    (read(windows_registry::CURRENT_USER) | read(windows_registry::LOCAL_MACHINE)) & 0x03FF_FFFF
+}
+
+/// The drives a list of places shows: all of them less the ones the user hides and the ones Explorer hides.
+///
+/// WHY (issue 23, LokeYourC3PH, with a picture of four drives of which one was a raw encrypted volume: "any encrypted volume which is
+/// not the system volume, stills shows up, even though I can hide it in the Windows Explorer ... I would like for an option where we
+/// can hide volumes in rustyfiles"). A hidden drive is only not LISTED: its address typed into the address bar opens it as before.
+/// It is also not asked for its name and its size, which is where a volume that cannot be read answers slowly or with an error.
+pub fn visible_drives() -> Vec<Drive> {
+    list_drives_except(hidden() | policy_hidden())
+}
+
 /// Lists drive letters. Volume info can stall on disconnected network / empty optical drives,
 /// so call this off the UI thread.
 pub fn list_drives() -> Vec<Drive> {
-    let mask = unsafe { GetLogicalDrives() };
+    list_drives_except(0)
+}
+
+fn list_drives_except(skip: u32) -> Vec<Drive> {
+    let mask = unsafe { GetLogicalDrives() } & !skip;
     let mut out = Vec::new();
     for i in 0..26u32 {
         if mask & (1 << i) == 0 {
@@ -97,7 +149,37 @@ pub fn list_drives() -> Vec<Drive> {
 
 #[cfg(test)]
 mod tests {
+    use super::{letter_bit, letters_of_mask, list_drives_except, mask_of_letters, policy_hidden};
+
     /// Network paths are slow without touching the network; a file on the system disk is not.
+    #[test]
+    fn hidden_drives_are_a_mask_of_their_letters() {
+        assert_eq!(letter_bit('A'), Some(1));
+        assert_eq!(letter_bit('c'), Some(4));
+        assert_eq!(letter_bit('Z'), Some(1 << 25));
+        assert_eq!(letter_bit('1'), None);
+        assert_eq!(letter_bit('ç'), None);
+        assert_eq!(mask_of_letters(&["V", "c:", " Z:\\ ", "", "9", "é"]), (1 << 21) | 4 | (1 << 25));
+        assert_eq!(mask_of_letters::<&str>(&[]), 0);
+        assert_eq!(letters_of_mask((1 << 21) | 4 | 1), ['A', 'C', 'V']);
+        assert!(letters_of_mask(0).is_empty());
+        // back and forth
+        let letters: Vec<String> = letters_of_mask(0b1010_0100).into_iter().map(String::from).collect();
+        assert_eq!(mask_of_letters(&letters), 0b1010_0100);
+    }
+
+    /// On the PC the tests run on: a drive that is hidden is not listed and not asked anything, and the others are as they were.
+    #[test]
+    fn a_hidden_drive_is_left_out_of_the_list() {
+        let all: Vec<char> = list_drives_except(0).into_iter().map(|d| d.letter).collect();
+        let Some(&first) = all.first() else { return };
+        let without: Vec<char> = list_drives_except(letter_bit(first).unwrap()).into_iter().map(|d| d.letter).collect();
+        assert_eq!(without, all[1..]);
+        assert!(list_drives_except(0x03FF_FFFF).is_empty(), "every letter hidden: nothing is listed");
+        // (reading Explorer's policy never fails: no value is no drive)
+        assert_eq!(policy_hidden() & !0x03FF_FFFF, 0);
+    }
+
     #[test]
     fn slow_places() {
         use std::path::Path;
