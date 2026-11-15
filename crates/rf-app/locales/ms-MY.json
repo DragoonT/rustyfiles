@@ -1927,5 +1927,7 @@
  "05f199a6": "Tatal di atas ikon untuk menukar kelantangan aplikasi",
  "86ac3b17": "Memutar roda tetikus di atas ikon Dock aplikasi yang berjalan hanya menaikkan atau menurunkan kelantangan aplikasi itu; tahapnya dipaparkan pada ikon seketika. Tiada yang berubah untuk aplikasi yang belum memainkan bunyi.",
  "e5ca9fdd": "Cerah",
- "3c1fb5c1": "Lihat"
+ "3c1fb5c1": "Lihat",
+ "b6b609d6": "Gunakan desktop asal Windows",
+ "b596207c": "Semasa Dock berjalan, rustyfiles tidak melukis desktop sendiri: desktop Windows, ikonnya dan mana-mana program lain yang menyusun desktop kekal seperti asal. Apabila ini dihidupkan, pilihan lain pada halaman ini tidak berfungsi."
 }

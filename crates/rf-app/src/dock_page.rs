@@ -593,8 +593,9 @@ mod tests {
         for p in Part::ALL {
             assert!(!on_page.contains(p.field()), "{p:?} must not have a switch of its own any more");
         }
-        // and the Masaüstü page has none either
-        assert!(!crate::desktop_page::entries().iter().any(|e| e.field == "shell_desktop_cover"));
+        // the one exception is on the Masaüstü page: Windows' own desktop can be kept (`dock/parts.rs`)
+        let on_desktop_page: Vec<&str> = crate::desktop_page::entries().iter().map(|e| e.field).filter(|f| Part::ALL.iter().any(|p| p.field() == *f)).collect();
+        assert_eq!(on_desktop_page, ["shell_desktop_cover"]);
         assert!(on_page.contains("dock_enabled"));
     }
 
@@ -607,7 +608,8 @@ mod tests {
         }
         for p in Part::ALL {
             assert!(!uses_field(other, p.field()), "settings_view.rs still uses {}", p.field());
-            assert!(!uses_field(include_str!("desktop_page.rs"), p.field()), "desktop_page.rs still uses {}", p.field());
+            // (the Masaüstü page has the one exception, the desktop's own switch)
+            assert!(p == Part::Desktop || !uses_field(include_str!("desktop_page.rs"), p.field()), "desktop_page.rs still uses {}", p.field());
         }
     }
 

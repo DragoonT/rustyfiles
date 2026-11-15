@@ -1927,5 +1927,7 @@
  "05f199a6": "Scroll over an icon to change the app's volume",
  "86ac3b17": "Turning the mouse wheel over a running app's Dock icon turns only that app's volume up or down; the level is shown on the icon for a moment. Nothing changes for an app that has not played any sound yet.",
  "e5ca9fdd": "Clear",
- "3c1fb5c1": "View"
+ "3c1fb5c1": "View",
+ "b6b609d6": "Use Windows' own desktop",
+ "b596207c": "While the Dock runs, rustyfiles does not draw its own desktop: Windows' desktop, its icons and any other program that arranges the desktop stay as they are. While this is on, the other choices on this page do nothing."
 }

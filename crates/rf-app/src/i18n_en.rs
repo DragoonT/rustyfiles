@@ -1515,6 +1515,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Eski yeri başka bir dosya tutuyor", "Another file is in its old place"),
     ("Dosya düzenleyici", "File organizer"),
     ("Dosya türleri", "File types"),
+    ("Windows'un kendi masaüstünü kullan", "Use Windows' own desktop"),
+    ("Dock çalışırken rustyfiles kendi masaüstünü çizmez: Windows'un masaüstü, simgeleri ve masaüstünü düzenleyen başka programlar olduğu gibi kalır. Açıkken bu sayfadaki diğer seçimler bir şey yapmaz.", "While the Dock runs, rustyfiles does not draw its own desktop: Windows' desktop, its icons and any other program that arranges the desktop stay as they are. While this is on, the other choices on this page do nothing."),
     ("Ekle", "Add"),
     ("Tüm dosyalar", "All files"),
     ("Vurgu rengi", "Accent color"),

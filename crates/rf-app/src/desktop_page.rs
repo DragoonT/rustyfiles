@@ -48,6 +48,8 @@ pub(crate) enum Control {
     Choice(fn(&Settings) -> IconChoice, fn(&mut Settings, IconChoice)),
     /// A corner radius in logical px, one of [`RADII`].
     Radius(fn(&Settings) -> u8, fn(&mut Settings, u8)),
+    /// On or off.
+    Switch(fn(&Settings) -> bool, fn(&mut Settings, bool)),
 }
 
 /// The radii the wallpaper's corners can have (0: square).
@@ -112,6 +114,19 @@ pub(crate) fn entries() -> Vec<Entry> {
         Entry { id, field, section, icon, title, desc, kind, control }
     }
     vec![
+        // The one part of the Dock that has a switch of its own (a user on Windows 10, issue 26: "I use a third-party desktop organizer
+        // software, and RustyFiles's desktop replacement causes a severe conflict with it. Could you please add a toggle"; the owner:
+        // "2. yi dediğin gibi yap"). It writes the part's own value (`dock/parts.rs`): on here means our desktop is NOT drawn.
+        e(
+            "desktop-keep-windows",
+            "shell_desktop_cover",
+            General,
+            L::Monitor,
+            t!("Windows'un kendi masaüstünü kullan"),
+            t!("Dock çalışırken rustyfiles kendi masaüstünü çizmez: Windows'un masaüstü, simgeleri ve masaüstünü düzenleyen başka programlar olduğu gibi kalır. Açıkken bu sayfadaki diğer seçimler bir şey yapmaz."),
+            None,
+            Control::Switch(|s| !s.shell_desktop_cover, |s, v| s.shell_desktop_cover = !v),
+        ),
         e(
             "desktop-show-icons",
             "desktop_show_icons",
@@ -213,6 +228,7 @@ fn row(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
     let control = match e.control {
         Control::Choice(get, set) => dropdown(e.id, p, get(s), choice_labels(), set),
         Control::Radius(get, set) => dropdown(e.id, p, get(s), radius_labels(), set),
+        Control::Switch(get, set) => crate::settings_view::sw(e.id, p, get(s), set),
     };
     // (the card notes its title and description for the Settings search)
     shell(p).child(card_body(p, e.icon, e.title.into(), Some(e.desc.into()), Some(control))).into_any_element()
@@ -239,14 +255,15 @@ mod tests {
     }
 
     /// The `desktop_*` fields the settings struct has, read from its source, so a setting added later without a place on the page fails
-    /// here. (The desktop's on/off is the dock's one switch: `shell_desktop_cover` is an override in the file, no control on any page.)
+    /// here. (The desktop's on/off is the dock's one switch; `shell_desktop_cover`, the part's own value, is this page's first entry.)
     fn struct_fields() -> HashSet<String> {
         include_str!("settings.rs")
             .lines()
             .filter_map(|l| {
                 let rest = l.trim_start().strip_prefix("pub ")?;
                 let name = rest.split(':').next()?.trim();
-                let ours = name.starts_with("desktop_");
+                // (and the desktop part's own value, which is this page's first entry)
+                let ours = name.starts_with("desktop_") || name == "shell_desktop_cover";
                 (ours && rest.contains(':') && !rest.contains('(')).then(|| name.to_string())
             })
             .collect()
@@ -281,7 +298,7 @@ mod tests {
         let g = grouped(&entries());
         assert_eq!(g.iter().map(|(s, _)| *s).collect::<Vec<_>>(), Section::ALL.to_vec());
         let fields = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
-        assert_eq!(fields(Section::General), ["desktop_show_icons", "desktop_corner_radius"]);
+        assert_eq!(fields(Section::General), ["shell_desktop_cover", "desktop_show_icons", "desktop_corner_radius"]);
         assert_eq!(
             fields(Section::Icons),
             ["desktop_icon_this_pc", "desktop_icon_user_files", "desktop_icon_network", "desktop_icon_recycle_bin", "desktop_icon_control_panel"]
@@ -318,6 +335,10 @@ mod tests {
             match e.control {
                 Control::Choice(_, set) => set(&mut s, IconChoice::Hide),
                 Control::Radius(_, set) => set(&mut s, 12),
+                Control::Switch(get, set) => {
+                    let now = get(&s);
+                    set(&mut s, !now)
+                }
             }
             let after = serde_json::to_value(&s).unwrap();
             let after = after.as_object().unwrap();
@@ -336,6 +357,7 @@ mod tests {
             match e.control {
                 Control::Choice(get, _) => assert_eq!(get(&d), IconChoice::Follow, "{}", e.field),
                 Control::Radius(get, _) => assert_eq!(get(&d), 0, "{}: square corners until asked", e.field),
+                Control::Switch(get, _) => assert!(!get(&d), "{}: our desktop comes with the dock until somebody says otherwise", e.field),
             }
         }
         assert!(crate::shell::desktop::choices::from_settings(&d).is_default());
@@ -357,17 +379,28 @@ mod tests {
     }
 
     #[test]
-    fn the_desktop_has_no_switch_of_its_own_and_every_choice_is_a_dropdown_that_works_with_the_dock_off() {
-        // the on/off of the desktop is the dock's one switch (`dock/parts.rs`); what is left here are the desktop's own choices, saved
-        // before the desktop runs
-        for e in entries() {
-            assert!(matches!(e.control, Control::Choice(..) | Control::Radius(..)), "{} is not a dropdown", e.field);
-            assert_ne!(e.field, "shell_desktop_cover");
-        }
+    fn the_desktop_comes_with_the_dock_unless_windows_own_is_kept_and_every_other_choice_is_a_dropdown() {
+        // one switch: "use Windows' own desktop". Everything else here is the desktop's own choices, saved before the desktop runs
+        let switches: Vec<Entry> = entries().into_iter().filter(|e| matches!(e.control, Control::Switch(..))).collect();
+        assert_eq!(switches.iter().map(|e| e.field).collect::<Vec<_>>(), ["shell_desktop_cover"]);
+        assert_eq!(entries()[0].field, "shell_desktop_cover", "first on the page: it decides whether the rest does anything");
         // the desktop runs with the dock and stops with it
         let on = Settings { dock_enabled: true, ..Default::default() };
         assert!(parts::runs(&on, parts::Part::Desktop));
-        assert!(!parts::runs(&Settings { dock_enabled: false, ..on }, parts::Part::Desktop));
+        assert!(!parts::runs(&Settings { dock_enabled: false, ..on.clone() }, parts::Part::Desktop));
+        // the switch ON keeps Windows' desktop: our desktop does not run though the dock does, and the other parts are untouched
+        let Control::Switch(get, set) = switches[0].control else { unreachable!() };
+        let mut kept = on.clone();
+        set(&mut kept, true);
+        assert!(get(&kept) && !kept.shell_desktop_cover);
+        assert!(!parts::runs(&kept, parts::Part::Desktop));
+        for p in [parts::Part::Taskbar, parts::Part::WinKey, parts::Part::Switcher, parts::Part::TrayHost] {
+            assert!(parts::runs(&kept, p), "{p:?}");
+        }
+        // it is a choice, not a fault: with nothing else held off the Dock page reports nothing (and so shows no "Hepsini aç")
+        assert_eq!(parts::held_off_line(&kept), None);
+        set(&mut kept, false);
+        assert!(parts::runs(&kept, parts::Part::Desktop), "and off again brings our desktop back");
     }
 
     #[test]

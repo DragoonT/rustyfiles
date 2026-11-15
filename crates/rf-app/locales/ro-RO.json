@@ -1927,5 +1927,7 @@
  "05f199a6": "Derulați peste o pictogramă pentru a schimba volumul aplicației",
  "86ac3b17": "Rotița mouse-ului deasupra pictogramei unei aplicații din Dock schimbă doar volumul acelei aplicații; nivelul se afișează o clipă pe pictogramă. Nu se schimbă nimic pentru o aplicație care nu a redat încă niciun sunet.",
  "e5ca9fdd": "Senin",
- "3c1fb5c1": "Vizualizare"
+ "3c1fb5c1": "Vizualizare",
+ "b6b609d6": "Folosește desktopul Windows",
+ "b596207c": "Cât timp Dock rulează, rustyfiles nu desenează propriul desktop: desktopul Windows, pictogramele lui și orice alt program care aranjează desktopul rămân așa cum sunt. Cât timp opțiunea este activată, celelalte opțiuni de pe această pagină nu au niciun efect."
 }

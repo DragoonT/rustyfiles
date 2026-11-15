@@ -10,6 +10,11 @@
 //! settings file under the names they always had (`shell_desktop_cover`, `shell_hide_taskbar`, `shell_win_key`, `shell_own_switcher`,
 //! `shell_tray_host`) as TROUBLESHOOTING OVERRIDES: the Dock page shows no switch for them. Their default is true.
 //!
+//! THE ONE EXCEPTION, since 2026-11-15: the desktop. Its own value has a switch on the Masaüstü page ("Windows'un kendi masaüstünü
+//! kullan"), because Windows' desktop under the dock is a thing people want on purpose (another program arranges their desktop,
+//! issue 26) and the dock works with it. A desktop that is off is therefore not reported as "held off": with nothing else held,
+//! the Dock page shows no line and no "Hepsini aç" (which, where it is shown, turns everything on, the desktop too).
+//!
 //! FILES FROM BEFORE. The old default was false, but a file only holds `= false` when it was written whole (the first run, or a build
 //! from before the settings were saved key by key); a file that existed earlier and was saved since holds `dock_enabled = true` and no
 //! part at all. So the file cannot tell "the user chose this" from "the old default", and the rule is made so that an update never
@@ -124,7 +129,8 @@ pub fn held_off(s: &Settings) -> Vec<Part> {
     Part::ALL.into_iter().filter(|p| !p.own_value(s)).collect()
 }
 
-/// "Hepsini aç": every override cleared, so every part follows the switch.
+/// "Hepsini aç": every override cleared, so every part follows the switch (the desktop too: the button is shown for a file that
+/// holds parts off from before the one switch, and one press has to give the whole dock).
 pub fn clear_overrides(s: &mut Settings) {
     for p in Part::ALL {
         p.set_own_value(s, true);
@@ -134,7 +140,8 @@ pub fn clear_overrides(s: &mut Settings) {
 /// The one line the Dock page shows when the file holds parts off, or `None` when it holds none. Shown only while the switch is on:
 /// with the dock off nothing runs either way, and the line is for the moment the user turns it on.
 pub fn held_off_line(s: &Settings) -> Option<String> {
-    let held = held_off(s);
+    // (the desktop has its own switch on the Masaüstü page: a desktop that is off is a choice, not a thing to report)
+    let held: Vec<Part> = held_off(s).into_iter().filter(|p| *p != Part::Desktop).collect();
     if !s.dock_enabled || held.is_empty() {
         return None;
     }
@@ -405,9 +412,11 @@ mod tests {
         assert_eq!(held_off(&s), Part::ALL.to_vec());
         while_turkish(|| {
             let line = held_off_line(&s).expect("the page says so");
-            for p in Part::ALL {
+            // (the desktop is not named: it has its own switch on the Masaüstü page, and "Hepsini aç" turns it on with the rest)
+            for p in Part::ALL.into_iter().filter(|p| *p != Part::Desktop) {
                 assert!(line.contains(p.label()), "{line} lacks {p:?}");
             }
+            assert!(!line.contains(Part::Desktop.label()), "{line}");
         });
     }
 

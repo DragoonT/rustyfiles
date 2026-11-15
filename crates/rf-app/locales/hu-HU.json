@@ -1927,5 +1927,7 @@
  "05f199a6": "Görgessen egy ikon fölött az alkalmazás hangerejének módosításához",
  "86ac3b17": "Ha a futó alkalmazás Dock-ikonja fölött az egérgörgőt forgatja, csak az adott alkalmazás hangereje változik; a szint egy pillanatra megjelenik az ikonon. Ha az alkalmazás még nem játszott le hangot, semmi sem változik.",
  "e5ca9fdd": "Derült",
- "3c1fb5c1": "Nézet"
+ "3c1fb5c1": "Nézet",
+ "b6b609d6": "A Windows saját asztalának használata",
+ "b596207c": "Amíg a Dock fut, a rustyfiles nem rajzol saját asztalt: a Windows asztala, az ikonjai és az asztalt rendező bármely más program változatlan marad. Amíg ez be van kapcsolva, az oldal többi beállítása nem csinál semmit."
 }

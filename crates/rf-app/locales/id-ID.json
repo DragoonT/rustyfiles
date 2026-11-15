@@ -1927,5 +1927,7 @@
  "05f199a6": "Gulir di atas ikon untuk mengubah volume aplikasi",
  "86ac3b17": "Memutar roda mouse di atas ikon Dock aplikasi yang sedang berjalan hanya menaikkan atau menurunkan volume aplikasi itu; tingkat volume ditampilkan di ikon sebentar. Tidak ada yang berubah untuk aplikasi yang belum memutar suara.",
  "e5ca9fdd": "Cerah",
- "3c1fb5c1": "Tampilan"
+ "3c1fb5c1": "Tampilan",
+ "b6b609d6": "Gunakan desktop asli Windows",
+ "b596207c": "Selama Dock berjalan, rustyfiles tidak menggambar desktop-nya sendiri: desktop Windows, ikonnya, dan program lain yang mengatur desktop tetap seperti semula. Saat ini aktif, pilihan lain di halaman ini tidak berpengaruh."
 }

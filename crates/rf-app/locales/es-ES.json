@@ -1927,5 +1927,7 @@
  "05f199a6": "Desplace la rueda sobre un icono para cambiar el volumen de la aplicación",
  "86ac3b17": "Al girar la rueda del ratón sobre el icono de una aplicación en ejecución del Dock, solo sube o baja el volumen de esa aplicación; el nivel aparece un momento en el icono. No cambia nada en una aplicación que aún no ha reproducido sonido.",
  "e5ca9fdd": "Despejado",
- "3c1fb5c1": "Ver"
+ "3c1fb5c1": "Ver",
+ "b6b609d6": "Usar el escritorio propio de Windows",
+ "b596207c": "Mientras el Dock está en funcionamiento, rustyfiles no dibuja su propio escritorio: el escritorio de Windows, sus iconos y cualquier otro programa que organice el escritorio permanecen tal como están. Mientras esté activado, las demás opciones de esta página no tienen ningún efecto."
 }

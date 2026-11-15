@@ -1927,5 +1927,7 @@
  "05f199a6": "Rull over et ikon for å endre appens volum",
  "86ac3b17": "Når du ruller musehjulet over en kjørende apps Dock-ikon, endres bare den appens volum opp eller ned; nivået vises på ikonet en stund. Ingenting endres for en app som ikke har spilt av lyd ennå.",
  "e5ca9fdd": "Klarvær",
- "3c1fb5c1": "Vis"
+ "3c1fb5c1": "Vis",
+ "b6b609d6": "Bruk Windows' eget skrivebord",
+ "b596207c": "Mens Dock kjører, tegner ikke rustyfiles sitt eget skrivebord: Windows-skrivebordet, ikonene og alle andre programmer som ordner skrivebordet, blir som de er. Når dette er slått på, har de andre valgene på denne siden ingen effekt."
 }

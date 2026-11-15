@@ -1927,5 +1927,7 @@
  "05f199a6": "Lëviz mbi një ikonë për të ndryshuar volumin e aplikacionit",
  "86ac3b17": "Rrotullimi i rrotës së miut mbi ikonën e Dock të një aplikacioni që punon ndryshon vetëm volumin e atij aplikacioni lart ose poshtë; niveli shfaqet për pak kohë në ikonë. Asgjë nuk ndryshon për një aplikacion që s'ka luajtur ende zë.",
  "e5ca9fdd": "Kthjellët",
- "3c1fb5c1": "Pamja"
+ "3c1fb5c1": "Pamja",
+ "b6b609d6": "Përdor desktopin e Windows",
+ "b596207c": "Ndërsa Dock-u funksionon, rustyfiles nuk vizaton desktopin e vet: desktopi i Windows, ikonat e tij dhe çdo program tjetër që rregullon desktopin mbeten siç janë. Kur kjo është e aktivizuar, opsionet e tjera në këtë faqe nuk bëjnë asgjë."
 }

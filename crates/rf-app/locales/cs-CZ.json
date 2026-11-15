@@ -1927,5 +1927,7 @@
  "05f199a6": "Posouváním nad ikonou změníte hlasitost aplikace",
  "86ac3b17": "Otočení kolečka myši nad ikonou spuštěné aplikace v Docku změní hlasitost jen této aplikace; úroveň se na chvíli zobrazí na ikoně. U aplikace, která dosud nepřehrála žádný zvuk, se nic nemění.",
  "e5ca9fdd": "Jasno",
- "3c1fb5c1": "Zobrazení"
+ "3c1fb5c1": "Zobrazení",
+ "b6b609d6": "Používat vlastní plochu Windows",
+ "b596207c": "Dokud je spuštěný Dock, rustyfiles nevykresluje vlastní plochu: plocha Windows, její ikony i jakýkoli jiný program, který plochu uspořádává, zůstanou beze změny. Když je tato možnost zapnutá, ostatní volby na této stránce nic nedělají."
 }

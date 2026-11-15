@@ -1927,5 +1927,7 @@
  "05f199a6": "Rulla över en ikon för att ändra appens volym",
  "86ac3b17": "När du vrider mushjulet över en körande apps Dock-ikon ändras bara den appens volym uppåt eller nedåt; nivån visas på ikonen en stund. Inget ändras för en app som inte har spelat upp något ljud än.",
  "e5ca9fdd": "Klart",
- "3c1fb5c1": "Visa"
+ "3c1fb5c1": "Visa",
+ "b6b609d6": "Använd Windows eget skrivbord",
+ "b596207c": "Medan Dock körs ritar rustyfiles inget eget skrivbord: Windows skrivbord, dess ikoner och alla andra program som ordnar skrivbordet förblir som de är. När det här är aktiverat har de andra alternativen på den här sidan ingen effekt."
 }

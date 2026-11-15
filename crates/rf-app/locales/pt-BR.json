@@ -1927,5 +1927,7 @@
  "05f199a6": "Role sobre um ícone para alterar o volume do aplicativo",
  "86ac3b17": "Girar a roda do mouse sobre o ícone de um aplicativo em execução no Dock altera apenas o volume desse aplicativo; o nível é mostrado no ícone por um momento. Nada muda para um aplicativo que ainda não reproduziu som.",
  "e5ca9fdd": "Céu limpo",
- "3c1fb5c1": "Exibir"
+ "3c1fb5c1": "Exibir",
+ "b6b609d6": "Usar a área de trabalho do Windows",
+ "b596207c": "Enquanto o Dock está em execução, o rustyfiles não desenha a própria área de trabalho: a área de trabalho do Windows, seus ícones e qualquer outro programa que organize a área de trabalho permanecem como estão. Enquanto esta opção estiver ativada, as outras opções desta página não fazem nada."
 }

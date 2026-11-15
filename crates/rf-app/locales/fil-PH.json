@@ -1927,5 +1927,7 @@
  "05f199a6": "I-scroll sa ibabaw ng icon para baguhin ang volume ng app",
  "86ac3b17": "Ang pag-ikot ng mouse wheel sa ibabaw ng icon ng tumatakbong app sa Dock ay nagpapataas o nagpapababa lang ng volume ng app na iyon; ipinapakita sa icon ang antas nang sandali. Walang nagbabago para sa app na wala pang tinutugtog na tunog.",
  "e5ca9fdd": "Maaliwalas",
- "3c1fb5c1": "Tingnan"
+ "3c1fb5c1": "Tingnan",
+ "b6b609d6": "Gamitin ang sariling desktop ng Windows",
+ "b596207c": "Habang tumatakbo ang Dock, hindi gumuguhit ng sariling desktop ang rustyfiles: mananatili ang desktop ng Windows, ang mga icon nito, at anumang ibang program na nag-aayos ng desktop. Habang naka-on ito, walang epekto ang iba pang opsyon sa page na ito."
 }

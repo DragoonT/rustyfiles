@@ -1927,5 +1927,7 @@
  "05f199a6": "Rul over et ikon for at ændre appens lydstyrke",
  "86ac3b17": "Hvis du drejer musehjulet over et kørende programs Dock-ikon, ændres kun dette programs lydstyrke op eller ned; niveauet vises på ikonet et øjeblik. Intet ændres for et program, der endnu ikke har afspillet lyd.",
  "e5ca9fdd": "Klart",
- "3c1fb5c1": "Vis"
+ "3c1fb5c1": "Vis",
+ "b6b609d6": "Brug Windows' eget skrivebord",
+ "b596207c": "Mens Dock kører, tegner rustyfiles ikke sit eget skrivebord: Windows' skrivebord, dets ikoner og alle andre programmer, der arrangerer skrivebordet, forbliver, som de er. Når dette er slået til, har de andre valg på denne side ingen virkning."
 }

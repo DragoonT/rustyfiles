@@ -1927,5 +1927,7 @@
  "05f199a6": "Ritiniet virs ikonas, lai mainītu lietotnes skaļumu",
  "86ac3b17": "Ritinot peles ritenīti virs darbojošās lietotnes Dock ikonas, mainās tikai šīs lietotnes skaļums; līmenis brīdi tiek rādīts ikonā. Lietotnei, kas vēl nav atskaņojusi skaņu, nekas nemainās.",
  "e5ca9fdd": "Skaidrs",
- "3c1fb5c1": "Skats"
+ "3c1fb5c1": "Skats",
+ "b6b609d6": "Izmantot Windows darbvirsmu",
+ "b596207c": "Kamēr darbojas Dock, rustyfiles nezīmē savu darbvirsmu: Windows darbvirsma, tās ikonas un jebkura cita programma, kas kārto darbvirsmu, paliek nemainīgas. Kamēr šī opcija ir ieslēgta, citas šīs lapas opcijas neko nedara."
 }

@@ -1927,5 +1927,7 @@
  "05f199a6": "Slinkite virš piktogramos, kad pakeistumėte programos garsumą",
  "86ac3b17": "Slenkant pelės ratuką virš veikiančios programos Dock piktogramos, keičiamas tik tos programos garsumas; lygis trumpam rodomas piktogramoje. Programai, kuri dar negrojo jokio garso, nieko nekinta.",
  "e5ca9fdd": "Giedra",
- "3c1fb5c1": "Rodinys"
+ "3c1fb5c1": "Rodinys",
+ "b6b609d6": "Naudoti Windows darbalaukį",
+ "b596207c": "Kol veikia Dock, rustyfiles nepiešia savo darbalaukio: Windows darbalaukis, jo piktogramos ir bet kuri kita darbalaukį tvarkanti programa lieka nepakitę. Kol ši parinktis įjungta, kitos šio puslapio parinktys nieko nedaro."
 }

@@ -1927,5 +1927,7 @@
  "05f199a6": "Pomičite kotačić iznad ikone za promjenu glasnoće aplikacije",
  "86ac3b17": "Pomicanje kotačića miša iznad ikone aplikacije na Docku mijenja glasnoću samo te aplikacije; razina se na trenutak prikaže na ikoni. Ništa se ne mijenja za aplikaciju koja još nije reproducirala zvuk.",
  "e5ca9fdd": "Vedro",
- "3c1fb5c1": "Prikaz"
+ "3c1fb5c1": "Prikaz",
+ "b6b609d6": "Koristi Windowsovu radnu površinu",
+ "b596207c": "Dok Dock radi, rustyfiles ne crta vlastitu radnu površinu: Windowsova radna površina, njezine ikone i svaki drugi program koji uređuje radnu površinu ostaju kakvi jesu. Dok je ovo uključeno, ostale opcije na ovoj stranici ne rade ništa."
 }

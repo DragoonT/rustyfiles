@@ -1927,5 +1927,7 @@
  "05f199a6": "Cuộn trên biểu tượng để đổi âm lượng của ứng dụng",
  "86ac3b17": "Lăn con lăn chuột trên biểu tượng ứng dụng đang chạy trên Dock sẽ chỉ tăng hoặc giảm âm lượng của ứng dụng đó; mức âm lượng hiện trên biểu tượng trong chốc lát. Không có gì thay đổi với ứng dụng chưa phát âm thanh nào.",
  "e5ca9fdd": "Trời quang",
- "3c1fb5c1": "Xem"
+ "3c1fb5c1": "Xem",
+ "b6b609d6": "Dùng màn hình nền riêng của Windows",
+ "b596207c": "Khi Dock đang chạy, rustyfiles không vẽ màn hình nền riêng: màn hình nền của Windows, các biểu tượng của nó và mọi chương trình khác sắp xếp màn hình nền được giữ nguyên. Khi bật tùy chọn này, các tùy chọn khác trên trang này không có tác dụng."
 }

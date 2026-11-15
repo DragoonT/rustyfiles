@@ -1927,5 +1927,7 @@
  "05f199a6": "Przewiń nad ikoną, aby zmienić głośność aplikacji",
  "86ac3b17": "Obracanie kółkiem myszy nad ikoną uruchomionej aplikacji w Dock zmienia głośność tylko tej aplikacji; poziom jest przez chwilę pokazywany na ikonie. Dla aplikacji, która jeszcze nie odtwarzała dźwięku, nic się nie zmienia.",
  "e5ca9fdd": "Bezchmurnie",
- "3c1fb5c1": "Widok"
+ "3c1fb5c1": "Widok",
+ "b6b609d6": "Użyj pulpitu systemu Windows",
+ "b596207c": "Gdy Dock jest uruchomiony, rustyfiles nie rysuje własnego pulpitu: pulpit systemu Windows, jego ikony i każdy inny program porządkujący pulpit pozostają bez zmian. Gdy ta opcja jest włączona, pozostałe opcje na tej stronie nie działają."
 }

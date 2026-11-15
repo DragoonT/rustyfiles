@@ -1927,5 +1927,7 @@
  "05f199a6": "Faire défiler au-dessus d’une icône pour changer le volume de l’application",
  "86ac3b17": "Tourner la molette de la souris au-dessus de l’icône du Dock d’une application en cours d’exécution ne modifie que le volume de cette application ; le niveau s’affiche un moment sur l’icône. Rien ne change pour une application qui n’a encore rien joué.",
  "e5ca9fdd": "Dégagé",
- "3c1fb5c1": "Affichage"
+ "3c1fb5c1": "Affichage",
+ "b6b609d6": "Utiliser le Bureau de Windows",
+ "b596207c": "Tant que le Dock fonctionne, rustyfiles ne dessine pas son propre bureau : le Bureau de Windows, ses icônes et tout autre programme qui organise le bureau restent tels quels. Lorsque cette option est activée, les autres choix de cette page n'ont aucun effet."
 }

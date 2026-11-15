@@ -1927,5 +1927,7 @@
  "05f199a6": "Vieritä kuvakkeen päällä muuttaaksesi sovelluksen äänenvoimakkuutta",
  "86ac3b17": "Hiiren rullalla käynnissä olevan sovelluksen Dock-kuvakkeen päällä kääntäminen muuttaa vain sen sovelluksen äänenvoimakkuutta; taso näkyy hetken kuvakkeessa. Ei muutu sovelluksella, joka ei ole vielä toistanut ääntä.",
  "e5ca9fdd": "Selkeää",
- "3c1fb5c1": "Näkymä"
+ "3c1fb5c1": "Näkymä",
+ "b6b609d6": "Käytä Windowsin omaa työpöytää",
+ "b596207c": "Kun Dock on käynnissä, rustyfiles ei piirrä omaa työpöytäänsä: Windowsin työpöytä, sen kuvakkeet ja muut työpöytää järjestävät ohjelmat pysyvät ennallaan. Kun tämä on käytössä, muut tämän sivun valinnat eivät vaikuta mihinkään."
 }

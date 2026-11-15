@@ -1927,5 +1927,7 @@
  "05f199a6": "Scrol over een pictogram om het volume van de app te wijzigen",
  "86ac3b17": "Als u het muiswiel draait over het Dock-pictogram van een draaiende app, wijzigt u alleen het volume van die app; het niveau wordt even op het pictogram getoond. Er verandert niets voor een app die nog geen geluid heeft afgespeeld.",
  "e5ca9fdd": "Helder",
- "3c1fb5c1": "Weergave"
+ "3c1fb5c1": "Weergave",
+ "b6b609d6": "Eigen bureaublad van Windows gebruiken",
+ "b596207c": "Zolang de Dock actief is, tekent rustyfiles geen eigen bureaublad: het bureaublad van Windows, de pictogrammen en elk ander programma dat het bureaublad indeelt, blijven zoals ze zijn. Als dit is ingeschakeld, hebben de andere opties op deze pagina geen effect."
 }
