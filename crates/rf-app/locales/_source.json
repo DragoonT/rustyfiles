@@ -2946,12 +2946,6 @@
   "en": "Each app opens the same folders in turn; time, CPU and memory are measured. Other apps' windows open and close during the test: don't touch the mouse or keyboard. It takes about 5–10 minutes; the test files are made the first time (~1.3 GB, in local app data)."
  },
  {
-  "id": "f52afac8",
-  "key": "Ortanca değerler (3 çalıştırma, ısınma turu sayılmaz). Süre: uygulama başlatıldığından pencere içeriği 500 ms boyunca değişmeyene dek. * işaretli değerlerde uygulama zaten çalışıyordu: işlemci pencere açıldıktan sonrasını, bellek tüm süreci gösterir.",
-  "tr": "Ortanca değerler (3 çalıştırma, ısınma turu sayılmaz). Süre: uygulama başlatıldığından pencere içeriği 500 ms boyunca değişmeyene dek. * işaretli değerlerde uygulama zaten çalışıyordu: işlemci pencere açıldıktan sonrasını, bellek tüm süreci gösterir.",
-  "en": "Medians of 3 runs (a warm-up run isn't counted). Time: from starting the app until its window stops changing for 500 ms. * The app was already running: CPU counts from when the window appeared, memory is the whole process."
- },
- {
   "id": "252ff602",
   "key": "rustyfiles ücretsiz ve tek kişinin emeği. Beğendiysen GitHub'da bir yıldız ver: başkalarının da bulmasına yardım eder.",
   "tr": "rustyfiles ücretsiz ve tek kişinin emeği. Beğendiysen GitHub'da bir yıldız ver: başkalarının da bulmasına yardım eder.",
@@ -5698,7 +5692,7 @@
   "key": "en:Light",
   "tr": "Açık",
   "en": "Light",
-  "note": "same Turkish word, this meaning"
+  "note": "the light colour theme, the opposite of Dark"
  },
  {
   "id": "53c990b2",
@@ -5759,7 +5753,7 @@
   "id": "bba08e14",
   "key": "Telefon gibi cihazlardaki öğeler burada değiştirilemez; kopyalayıp başka bir klasöre yapıştırabilirsiniz.",
   "tr": "Telefon gibi cihazlardaki öğeler burada değiştirilemez; kopyalayıp başka bir klasöre yapıştırabilirsiniz.",
-  "en": "Items on devices such as phones can't be changed here; copy them and paste them into another folder."
+  "en": "Items on devices such as phones cannot be changed here; copy them and paste into another folder."
  },
  {
   "id": "7450cc15",
@@ -5783,7 +5777,7 @@
   "id": "61ec32a9",
   "key": "Disk kullanımı hesaplanıyor…",
   "tr": "Disk kullanımı hesaplanıyor…",
-  "en": "Calculating disk usage…"
+  "en": "Working out disk usage…"
  },
  {
   "id": "9de07d77",
@@ -5813,7 +5807,7 @@
   "id": "d76b8c14",
   "key": "klasör okunamadı",
   "tr": "klasör okunamadı",
-  "en": "folders couldn't be read"
+  "en": "folders could not be read"
  },
  {
   "id": "186c7384",
@@ -9770,7 +9764,7 @@
   "en": "Round the wallpaper's corners (experimental)"
  },
  {
-  "id": "9dbf6e1f",
+  "id": "3295e63e",
   "key": "Masaüstünün duvar kâğıdı yuvarlak köşelerle çizilir; köşelerin arkası siyah kalır. Büyütülmüş bir pencere köşeyi kapatır: etki yalnızca masaüstü görünürken vardır.",
   "tr": "Masaüstünün duvar kâğıdı yuvarlak köşelerle çizilir; köşelerin arkası siyah kalır. Büyütülmüş bir pencere köşeyi kapatır: etki yalnızca masaüstü görünürken vardır.",
   "en": "The desktop's wallpaper is drawn with rounded corners; black shows behind them. A maximized window covers the corner: the effect is there only while the desktop is visible."
@@ -9888,5 +9882,1713 @@
   "key": "Başlat'tan kaldır",
   "tr": "Başlat'tan kaldır",
   "en": "Unpin from Start"
+ },
+ {
+  "id": "66b806f3",
+  "key": "Listeleme hatası",
+  "tr": "Listeleme hatası",
+  "en": "Listing error"
+ },
+ {
+  "id": "80fc57e1",
+  "key": "kod",
+  "tr": "kod",
+  "en": "code",
+  "note": "an error's number, as in \"Listing error (code 87)\""
+ },
+ {
+  "id": "952a6973",
+  "key": "Ortanca değerler (3 çalıştırma, ısınma turu sayılmaz). Süre: uygulama başlatıldığından pencere içeriği 500 ms boyunca değişmeyene dek. * işaretli değerlerde uygulama zaten çalışıyordu: işlemci pencere açıldıktan sonrasını, bellek tüm süreci gösterir. Bellek, Görev Yöneticisi'nin gösterdiği değerdir.",
+  "tr": "Ortanca değerler (3 çalıştırma, ısınma turu sayılmaz). Süre: uygulama başlatıldığından pencere içeriği 500 ms boyunca değişmeyene dek. * işaretli değerlerde uygulama zaten çalışıyordu: işlemci pencere açıldıktan sonrasını, bellek tüm süreci gösterir. Bellek, Görev Yöneticisi'nin gösterdiği değerdir.",
+  "en": "Medians of 3 runs (a warm-up run isn't counted). Time: from starting the app until its window stops changing for 500 ms. * The app was already running: CPU counts from when the window appeared, memory is the whole process. Memory is the figure Task Manager shows."
+ },
+ {
+  "id": "9ffa19a0",
+  "key": "Bu dosya başka bir bilgisayardan geldi. Windows, bilgisayarınızı korumak için onu engelleyebilir.",
+  "tr": "Bu dosya başka bir bilgisayardan geldi. Windows, bilgisayarınızı korumak için onu engelleyebilir.",
+  "en": "This file came from another computer and might be blocked to help protect this computer."
+ },
+ {
+  "id": "153504ae",
+  "key": "Engellemeyi kaldır",
+  "tr": "Engellemeyi kaldır",
+  "en": "Unblock"
+ },
+ {
+  "id": "4a536cdf",
+  "key": "Windows uygulama paketi",
+  "tr": "Windows uygulama paketi",
+  "en": "Windows app package"
+ },
+ {
+  "id": "242b5432",
+  "key": "Windows uygulama paketi grubu",
+  "tr": "Windows uygulama paketi grubu",
+  "en": "Windows app bundle"
+ },
+ {
+  "id": "11a8339b",
+  "key": "Android uygulaması",
+  "tr": "Android uygulaması",
+  "en": "Android app"
+ },
+ {
+  "id": "087162fd",
+  "key": "iOS uygulaması",
+  "tr": "iOS uygulaması",
+  "en": "iOS app"
+ },
+ {
+  "id": "04668888",
+  "key": "NuGet paketi",
+  "tr": "NuGet paketi",
+  "en": "NuGet package"
+ },
+ {
+  "id": "9f1ed230",
+  "key": "Kimlik",
+  "tr": "Kimlik",
+  "en": "ID"
+ },
+ {
+  "id": "7432c1f9",
+  "key": "Yayıncı",
+  "tr": "Yayıncı",
+  "en": "Publisher"
+ },
+ {
+  "id": "72da95ad",
+  "key": "İşlemci",
+  "tr": "İşlemci",
+  "en": "Processor"
+ },
+ {
+  "id": "ea0846ec",
+  "key": "En düşük sistem",
+  "tr": "En düşük sistem",
+  "en": "Minimum system"
+ },
+ {
+  "id": "a3979af5",
+  "key": "İzinler",
+  "tr": "İzinler",
+  "en": "Permissions"
+ },
+ {
+  "id": "dfb1d275",
+  "key": "paylaşılan kitaplık",
+  "tr": "paylaşılan kitaplık",
+  "en": "shared library"
+ },
+ {
+  "id": "4b5ae0c2",
+  "key": "nesne dosyası",
+  "tr": "nesne dosyası",
+  "en": "object file"
+ },
+ {
+  "id": "84b05827",
+  "key": "bellek dökümü",
+  "tr": "bellek dökümü",
+  "en": "core dump"
+ },
+ {
+  "id": "1aa0d451",
+  "key": "Yükleyici",
+  "tr": "Yükleyici",
+  "en": "Loader",
+  "note": "the program that loads an executable file (its ELF interpreter); not an installer, not a charger"
+ },
+ {
+  "id": "82214a2c",
+  "key": "Kitaplık adı",
+  "tr": "Kitaplık adı",
+  "en": "Library name"
+ },
+ {
+  "id": "1982d5ea",
+  "key": "Gerekli kitaplıklar",
+  "tr": "Gerekli kitaplıklar",
+  "en": "Needs",
+  "note": "a label before the list of libraries a program file needs"
+ },
+ {
+  "id": "f206f204",
+  "key": "Dosya araması kapalı: Ayarlar'da ad dizinini açın",
+  "tr": "Dosya araması kapalı: Ayarlar'da ad dizinini açın",
+  "en": "File search is off: turn on the name index in Settings"
+ },
+ {
+  "id": "e184b257",
+  "key": "Uygulama, dosya ya da web'de ara",
+  "tr": "Uygulama, dosya ya da web'de ara",
+  "en": "Search apps, files or the web"
+ },
+ {
+  "id": "011d3815",
+  "key": "Uygulamalar",
+  "tr": "Uygulamalar",
+  "en": "Apps"
+ },
+ {
+  "id": "d0cc3219",
+  "key": "Yer imleri",
+  "tr": "Yer imleri",
+  "en": "Bookmarks"
+ },
+ {
+  "id": "72645431",
+  "key": "Web",
+  "tr": "Web",
+  "en": "Web"
+ },
+ {
+  "id": "6d020bc6",
+  "key": "için webde ara",
+  "tr": "için webde ara",
+  "en": "search the web"
+ },
+ {
+  "id": "e699c8e6",
+  "key": "Ctrl+Enter: klasörde göster",
+  "tr": "Ctrl+Enter: klasörde göster",
+  "en": "Ctrl+Enter: show in folder"
+ },
+ {
+  "id": "422a5a09",
+  "key": "Dosya dizini hazırlanıyor: bazı dosyalar henüz çıkmayabilir",
+  "tr": "Dosya dizini hazırlanıyor: bazı dosyalar henüz çıkmayabilir",
+  "en": "The file index is being built: some files may not show yet"
+ },
+ {
+  "id": "7bc84c84",
+  "key": "Enter: aç",
+  "tr": "Enter: aç",
+  "en": "Enter: open"
+ },
+ {
+  "id": "33907a81",
+  "key": "Shift+Enter: önizle",
+  "tr": "Shift+Enter: önizle",
+  "en": "Shift+Enter: preview"
+ },
+ {
+  "id": "9db38819",
+  "key": "Esc: kapat",
+  "tr": "Esc: kapat",
+  "en": "Esc: close"
+ },
+ {
+  "id": "10bd2c92",
+  "key": "Bu kısayolu başka bir uygulama kullanıyor (ChatGPT, Gemini, PowerToys…): başka bir kısayol seçin",
+  "tr": "Bu kısayolu başka bir uygulama kullanıyor (ChatGPT, Gemini, PowerToys…): başka bir kısayol seçin",
+  "en": "Another app uses this shortcut (ChatGPT, Gemini, PowerToys…): choose another one"
+ },
+ {
+  "id": "2657242b",
+  "key": "Bu kısayol kullanılamıyor: Ctrl, Alt, Shift ya da Win ile bir tuş seçin",
+  "tr": "Bu kısayol kullanılamıyor: Ctrl, Alt, Shift ya da Win ile bir tuş seçin",
+  "en": "This shortcut can't be used: choose a key with Ctrl, Alt, Shift or Win"
+ },
+ {
+  "id": "cff0e606",
+  "key": "Değiştirmek için tıklayıp yeni tuşlara basın",
+  "tr": "Değiştirmek için tıklayıp yeni tuşlara basın",
+  "en": "Click and press the new keys to change it"
+ },
+ {
+  "id": "28196ea1",
+  "key": "Hızlı arama",
+  "tr": "Hızlı arama",
+  "en": "Quick search"
+ },
+ {
+  "id": "b729a34f",
+  "key": "Her yerden kısayolla: uygulamalar, dosyalar, klasörler, yer imleri ve web",
+  "tr": "Her yerden kısayolla: uygulamalar, dosyalar, klasörler, yer imleri ve web",
+  "en": "A shortcut from anywhere: apps, files, folders, bookmarks and the web"
+ },
+ {
+  "id": "4f15d849",
+  "key": "Her yerden kısayolla: uygulamalar, dosyalar, klasörler, yer imleri ve web. Pencere kapalıyken de çalışması için Gelişmiş'te arka planda çalışmayı açın",
+  "tr": "Her yerden kısayolla: uygulamalar, dosyalar, klasörler, yer imleri ve web. Pencere kapalıyken de çalışması için Gelişmiş'te arka planda çalışmayı açın",
+  "en": "A shortcut from anywhere: apps, files, folders, bookmarks and the web. To use it with no window open, turn on running in the background under Advanced"
+ },
+ {
+  "id": "58cfd5f1",
+  "key": "Web araması",
+  "tr": "Web araması",
+  "en": "Web search"
+ },
+ {
+  "id": "99214f37",
+  "key": "Chrome ve Edge yer imlerini de ara",
+  "tr": "Chrome ve Edge yer imlerini de ara",
+  "en": "Search Chrome and Edge bookmarks too"
+ },
+ {
+  "id": "7b70dc1d",
+  "key": "Yer imleri bu bilgisayarda okunur, hiçbir yere gönderilmez",
+  "tr": "Yer imleri bu bilgisayarda okunur, hiçbir yere gönderilmez",
+  "en": "Bookmarks are read on this PC and sent nowhere"
+ },
+ {
+  "id": "5e85cc54",
+  "key": "Bildirim alanında DirectLook simgesi",
+  "tr": "Bildirim alanında DirectLook simgesi",
+  "en": "DirectLook icon in the notification area"
+ },
+ {
+  "id": "633435a8",
+  "key": "rustyfiles arka planda çalışırken gösterilmez: tek simge rustyfiles'ınkidir",
+  "tr": "rustyfiles arka planda çalışırken gösterilmez: tek simge rustyfiles'ınkidir",
+  "en": "Not shown while rustyfiles runs in the background: then rustyfiles' icon is the only one"
+ },
+ {
+  "id": "535c8baa",
+  "key": "Uyumluluk",
+  "tr": "Uyumluluk",
+  "en": "Compatibility"
+ },
+ {
+  "id": "0aea8a66",
+  "key": "Güvenlik",
+  "tr": "Güvenlik",
+  "en": "Security"
+ },
+ {
+  "id": "6584538e",
+  "key": "Dijital imzalar",
+  "tr": "Dijital imzalar",
+  "en": "Digital signatures"
+ },
+ {
+  "id": "8a913e98",
+  "key": "Paylaşım",
+  "tr": "Paylaşım",
+  "en": "Sharing"
+ },
+ {
+  "id": "976431a7",
+  "key": "Özelleştir",
+  "tr": "Özelleştir",
+  "en": "Customize"
+ },
+ {
+  "id": "ac1d922f",
+  "key": "Seçilmedi",
+  "tr": "Seçilmedi",
+  "en": "Not chosen"
+ },
+ {
+  "id": "d281aad9",
+  "key": "Tümü şu türde:",
+  "tr": "Tümü şu türde:",
+  "en": "All of type"
+ },
+ {
+  "id": "a086143c",
+  "key": "Tümü klasör",
+  "tr": "Tümü klasör",
+  "en": "All folders"
+ },
+ {
+  "id": "7c7256aa",
+  "key": "Birden çok tür",
+  "tr": "Birden çok tür",
+  "en": "Multiple types"
+ },
+ {
+  "id": "36835c9d",
+  "key": "Tümü şurada:",
+  "tr": "Tümü şurada:",
+  "en": "All in"
+ },
+ {
+  "id": "19d5aa4f",
+  "key": "Windows özellikleri (önceki sürümler ve diğerleri)…",
+  "tr": "Windows özellikleri (önceki sürümler ve diğerleri)…",
+  "en": "Windows properties (previous versions and more)…"
+ },
+ {
+  "id": "72506bfc",
+  "key": "Salt okunur (yalnızca klasördeki dosyalar için geçerlidir)",
+  "tr": "Salt okunur (yalnızca klasördeki dosyalar için geçerlidir)",
+  "en": "Read-only (only applies to files in folder)"
+ },
+ {
+  "id": "21e02518",
+  "key": "Gelişmiş öznitelikler",
+  "tr": "Gelişmiş öznitelikler",
+  "en": "Advanced attributes"
+ },
+ {
+  "id": "0f760b8e",
+  "key": "Klasör arşivlenmeye hazır",
+  "tr": "Klasör arşivlenmeye hazır",
+  "en": "Folder is ready for archiving"
+ },
+ {
+  "id": "54385e42",
+  "key": "Dosya arşivlenmeye hazır",
+  "tr": "Dosya arşivlenmeye hazır",
+  "en": "File is ready for archiving"
+ },
+ {
+  "id": "c8672372",
+  "key": "Bu klasördeki dosyaların içeriğinin dizinlenmesine izin ver",
+  "tr": "Bu klasördeki dosyaların içeriğinin dizinlenmesine izin ver",
+  "en": "Allow files in this folder to have contents indexed"
+ },
+ {
+  "id": "ca8dc566",
+  "key": "Bu dosyanın içeriğinin dizinlenmesine izin ver",
+  "tr": "Bu dosyanın içeriğinin dizinlenmesine izin ver",
+  "en": "Allow this file to have contents indexed"
+ },
+ {
+  "id": "ba3cffac",
+  "key": "Disk alanından tasarruf etmek için içeriği sıkıştır",
+  "tr": "Disk alanından tasarruf etmek için içeriği sıkıştır",
+  "en": "Compress contents to save disk space"
+ },
+ {
+  "id": "74cc20b1",
+  "key": "Verileri korumak için içeriği şifrele",
+  "tr": "Verileri korumak için içeriği şifrele",
+  "en": "Encrypt contents to secure data"
+ },
+ {
+  "id": "ed2c2500",
+  "key": "Değişiklikleri alt klasörlere ve dosyalara da uygula",
+  "tr": "Değişiklikleri alt klasörlere ve dosyalara da uygula",
+  "en": "Apply changes to subfolders and files too"
+ },
+ {
+  "id": "881cfbdf",
+  "key": "Çıkarılabilir disk",
+  "tr": "Çıkarılabilir disk",
+  "en": "Removable disk"
+ },
+ {
+  "id": "612d45e4",
+  "key": "Ağ sürücüsü",
+  "tr": "Ağ sürücüsü",
+  "en": "Network drive"
+ },
+ {
+  "id": "a646a516",
+  "key": "CD/DVD sürücüsü",
+  "tr": "CD/DVD sürücüsü",
+  "en": "CD/DVD drive"
+ },
+ {
+  "id": "9fa6f077",
+  "key": "Dosya sistemi",
+  "tr": "Dosya sistemi",
+  "en": "File system"
+ },
+ {
+  "id": "64658cf6",
+  "key": "Kullanılan alan",
+  "tr": "Kullanılan alan",
+  "en": "Used space"
+ },
+ {
+  "id": "932fd358",
+  "key": "Boş alan",
+  "tr": "Boş alan",
+  "en": "Free space"
+ },
+ {
+  "id": "da6a2065",
+  "key": "Kapasite",
+  "tr": "Kapasite",
+  "en": "Capacity"
+ },
+ {
+  "id": "9d5b1bc7",
+  "key": "Dolu:",
+  "tr": "Dolu:",
+  "en": "Full:"
+ },
+ {
+  "id": "c10bb1d4",
+  "key": "Disk Temizleme…",
+  "tr": "Disk Temizleme…",
+  "en": "Disk Cleanup…"
+ },
+ {
+  "id": "da3fa04b",
+  "key": "Windows özellikleri (araçlar, donanım, kota)…",
+  "tr": "Windows özellikleri (araçlar, donanım, kota)…",
+  "en": "Windows properties (tools, hardware, quota)…"
+ },
+ {
+  "id": "a7d496ce",
+  "key": "Kabuk öğesi",
+  "tr": "Kabuk öğesi",
+  "en": "Shell item"
+ },
+ {
+  "id": "6723c3f9",
+  "key": "Hedefin simgesi",
+  "tr": "Hedefin simgesi",
+  "en": "The target's icon"
+ },
+ {
+  "id": "7959fe83",
+  "key": "Hedef türü",
+  "tr": "Hedef türü",
+  "en": "Target type"
+ },
+ {
+  "id": "97fec01e",
+  "key": "Hedef konumu",
+  "tr": "Hedef konumu",
+  "en": "Target location"
+ },
+ {
+  "id": "45013a21",
+  "key": "Kısayol tuşu",
+  "tr": "Kısayol tuşu",
+  "en": "Shortcut key"
+ },
+ {
+  "id": "3e8d3adc",
+  "key": "Normal pencere",
+  "tr": "Normal pencere",
+  "en": "Normal window"
+ },
+ {
+  "id": "bcfdd94d",
+  "key": "Simge durumunda",
+  "tr": "Simge durumunda",
+  "en": "Minimized"
+ },
+ {
+  "id": "81d087d2",
+  "key": "Ekranı kaplamış",
+  "tr": "Ekranı kaplamış",
+  "en": "Maximized"
+ },
+ {
+  "id": "f82ab724",
+  "key": "Simge",
+  "tr": "Simge",
+  "en": "Icon"
+ },
+ {
+  "id": "e1e2ec74",
+  "key": "Simge değiştir…",
+  "tr": "Simge değiştir…",
+  "en": "Change icon…"
+ },
+ {
+  "id": "d4f13ee6",
+  "key": "8 bit (256) renk",
+  "tr": "8 bit (256) renk",
+  "en": "8-bit (256) color"
+ },
+ {
+  "id": "6a1aebbd",
+  "key": "16 bit (65536) renk",
+  "tr": "16 bit (65536) renk",
+  "en": "16-bit (65536) color"
+ },
+ {
+  "id": "cea5dc3c",
+  "key": "Sistem (Gelişmiş)",
+  "tr": "Sistem (Gelişmiş)",
+  "en": "System (Enhanced)"
+ },
+ {
+  "id": "0d865495",
+  "key": "Bu ayarlar kısayolun hedefi için geçerlidir:",
+  "tr": "Bu ayarlar kısayolun hedefi için geçerlidir:",
+  "en": "These settings apply to the shortcut's target:"
+ },
+ {
+  "id": "ae53ccb5",
+  "key": "Uyumluluk modu",
+  "tr": "Uyumluluk modu",
+  "en": "Compatibility mode"
+ },
+ {
+  "id": "e16b03ad",
+  "key": "Bu programı şunun için uyumluluk modunda çalıştır:",
+  "tr": "Bu programı şunun için uyumluluk modunda çalıştır:",
+  "en": "Run this program in compatibility mode for:"
+ },
+ {
+  "id": "457b6edf",
+  "key": "Azaltılmış renk modu",
+  "tr": "Azaltılmış renk modu",
+  "en": "Reduced color mode"
+ },
+ {
+  "id": "13f89fea",
+  "key": "640 × 480 ekran çözünürlüğünde çalıştır",
+  "tr": "640 × 480 ekran çözünürlüğünde çalıştır",
+  "en": "Run in 640 × 480 screen resolution"
+ },
+ {
+  "id": "91ac405b",
+  "key": "Tam ekran iyileştirmelerini devre dışı bırak",
+  "tr": "Tam ekran iyileştirmelerini devre dışı bırak",
+  "en": "Disable fullscreen optimizations"
+ },
+ {
+  "id": "8b88b464",
+  "key": "Bu programı yönetici olarak çalıştır",
+  "tr": "Bu programı yönetici olarak çalıştır",
+  "en": "Run this program as an administrator"
+ },
+ {
+  "id": "987c9e1d",
+  "key": "Bu programı yeniden başlatma için kaydet",
+  "tr": "Bu programı yeniden başlatma için kaydet",
+  "en": "Register this program for restart"
+ },
+ {
+  "id": "7503eb16",
+  "key": "Eski görüntü ICC renk yönetimini kullan",
+  "tr": "Eski görüntü ICC renk yönetimini kullan",
+  "en": "Use legacy display ICC color management"
+ },
+ {
+  "id": "e3173846",
+  "key": "Yüksek DPI",
+  "tr": "Yüksek DPI",
+  "en": "High DPI"
+ },
+ {
+  "id": "76b12725",
+  "key": "Yüksek DPI ölçeklendirme davranışını geçersiz kıl. Ölçeklendirmeyi yapan:",
+  "tr": "Yüksek DPI ölçeklendirme davranışını geçersiz kıl. Ölçeklendirmeyi yapan:",
+  "en": "Override high DPI scaling behavior. Scaling performed by:"
+ },
+ {
+  "id": "16d18f43",
+  "key": "Ayarlar yalnızca sizin hesabınız için kaydedilir. Bu program için tüm kullanıcılara ait ayarlar da var; onları Windows özelliklerinden değiştirebilirsiniz.",
+  "tr": "Ayarlar yalnızca sizin hesabınız için kaydedilir. Bu program için tüm kullanıcılara ait ayarlar da var; onları Windows özelliklerinden değiştirebilirsiniz.",
+  "en": "Settings are saved for your account only. This program also has settings for all users; you can change those in Windows properties."
+ },
+ {
+  "id": "4ba872d2",
+  "key": "Ayarlar yalnızca sizin hesabınız için kaydedilir.",
+  "tr": "Ayarlar yalnızca sizin hesabınız için kaydedilir.",
+  "en": "Settings are saved for your account only."
+ },
+ {
+  "id": "3b434d72",
+  "key": "Nesne adı",
+  "tr": "Nesne adı",
+  "en": "Object name"
+ },
+ {
+  "id": "7b1877aa",
+  "key": "Sahip",
+  "tr": "Sahip",
+  "en": "Owner"
+ },
+ {
+  "id": "c2919761",
+  "key": "Bu öğenin izin listesi yok: herkes her şeyi yapabilir.",
+  "tr": "Bu öğenin izin listesi yok: herkes her şeyi yapabilir.",
+  "en": "This item has no permission list: everyone can do everything."
+ },
+ {
+  "id": "68ead5b1",
+  "key": "Grup veya kullanıcı adları",
+  "tr": "Grup veya kullanıcı adları",
+  "en": "Group or user names"
+ },
+ {
+  "id": "2c0d3cb6",
+  "key": "için izinler",
+  "tr": "için izinler",
+  "en": "permissions"
+ },
+ {
+  "id": "a18d115f",
+  "key": "İzin ver",
+  "tr": "İzin ver",
+  "en": "Allow"
+ },
+ {
+  "id": "03619c19",
+  "key": "Reddet",
+  "tr": "Reddet",
+  "en": "Deny"
+ },
+ {
+  "id": "662fadf1",
+  "key": "Tam denetim",
+  "tr": "Tam denetim",
+  "en": "Full control"
+ },
+ {
+  "id": "6680c760",
+  "key": "Okuma ve yürütme",
+  "tr": "Okuma ve yürütme",
+  "en": "Read & execute"
+ },
+ {
+  "id": "272aae23",
+  "key": "Klasör içeriğini listeleme",
+  "tr": "Klasör içeriğini listeleme",
+  "en": "List folder contents"
+ },
+ {
+  "id": "d1264168",
+  "key": "Okuma",
+  "tr": "Okuma",
+  "en": "Read",
+  "note": "the name of a file permission"
+ },
+ {
+  "id": "2ad9e8a5",
+  "key": "Yazma",
+  "tr": "Yazma",
+  "en": "Write",
+  "note": "the name of a file permission"
+ },
+ {
+  "id": "c044ff64",
+  "key": "Özel izinler",
+  "tr": "Özel izinler",
+  "en": "Special permissions"
+ },
+ {
+  "id": "1a01c0ff",
+  "key": "Bu öğe izinlerini üst klasörden devralmıyor.",
+  "tr": "Bu öğe izinlerini üst klasörden devralmıyor.",
+  "en": "This item does not inherit permissions from its parent folder."
+ },
+ {
+  "id": "bc0ef624",
+  "key": "İzinleri değiştirmek için Windows'un Güvenlik penceresini kullanın (yönetici izni isteyebilir).",
+  "tr": "İzinleri değiştirmek için Windows'un Güvenlik penceresini kullanın (yönetici izni isteyebilir).",
+  "en": "To change permissions, use Windows' Security window (it may ask for administrator permission)."
+ },
+ {
+  "id": "c51be9ec",
+  "key": "Windows özellikleri…",
+  "tr": "Windows özellikleri…",
+  "en": "Windows properties…"
+ },
+ {
+  "id": "c43bc80b",
+  "key": "Dosya açıklaması",
+  "tr": "Dosya açıklaması",
+  "en": "File description"
+ },
+ {
+  "id": "d06e21ea",
+  "key": "Dosya sürümü",
+  "tr": "Dosya sürümü",
+  "en": "File version"
+ },
+ {
+  "id": "bcee99cb",
+  "key": "Ürün adı",
+  "tr": "Ürün adı",
+  "en": "Product name"
+ },
+ {
+  "id": "88ac6db6",
+  "key": "Ürün sürümü",
+  "tr": "Ürün sürümü",
+  "en": "Product version"
+ },
+ {
+  "id": "c12c2569",
+  "key": "Telif hakkı",
+  "tr": "Telif hakkı",
+  "en": "Copyright"
+ },
+ {
+  "id": "ad7fe01e",
+  "key": "Ticari markalar",
+  "tr": "Ticari markalar",
+  "en": "Trademarks"
+ },
+ {
+  "id": "4cb9ea28",
+  "key": "Özgün dosya adı",
+  "tr": "Özgün dosya adı",
+  "en": "Original filename"
+ },
+ {
+  "id": "33e2c09c",
+  "key": "İç ad",
+  "tr": "İç ad",
+  "en": "Internal name"
+ },
+ {
+  "id": "e7cbedf0",
+  "key": "Mimari",
+  "tr": "Mimari",
+  "en": "Architecture"
+ },
+ {
+  "id": "503b39b2",
+  "key": "Klasör yolu",
+  "tr": "Klasör yolu",
+  "en": "Folder path"
+ },
+ {
+  "id": "828b03a0",
+  "key": "Bilgisayar",
+  "tr": "Bilgisayar",
+  "en": "Computer"
+ },
+ {
+  "id": "34140351",
+  "key": "bu bilgisayar",
+  "tr": "bu bilgisayar",
+  "en": "this PC"
+ },
+ {
+  "id": "9eea841a",
+  "key": "Bu dijital imza geçerli.",
+  "tr": "Bu dijital imza geçerli.",
+  "en": "This digital signature is OK."
+ },
+ {
+  "id": "7731e0a7",
+  "key": "Bu dijital imza geçerli değil.",
+  "tr": "Bu dijital imza geçerli değil.",
+  "en": "This digital signature is not valid."
+ },
+ {
+  "id": "87eb9ad2",
+  "key": "İmzalayan",
+  "tr": "İmzalayan",
+  "en": "Signer"
+ },
+ {
+  "id": "57d1b1a3",
+  "key": "Özet",
+  "tr": "Özet",
+  "en": "Digest",
+  "note": "the hash of a digital signature"
+ },
+ {
+  "id": "8e293538",
+  "key": "Zaman damgası",
+  "tr": "Zaman damgası",
+  "en": "Timestamp"
+ },
+ {
+  "id": "44d88459",
+  "key": "İmza ayrıntıları",
+  "tr": "İmza ayrıntıları",
+  "en": "Signature details"
+ },
+ {
+  "id": "811b094f",
+  "key": "Özet algoritması",
+  "tr": "Özet algoritması",
+  "en": "Digest algorithm"
+ },
+ {
+  "id": "ab389176",
+  "key": "İmzalanma zamanı",
+  "tr": "İmzalanma zamanı",
+  "en": "Signing time"
+ },
+ {
+  "id": "cf99315d",
+  "key": "Zaman damgası yok",
+  "tr": "Zaman damgası yok",
+  "en": "Not timestamped"
+ },
+ {
+  "id": "33f08928",
+  "key": "Ağ dosya ve klasör paylaşımı",
+  "tr": "Ağ dosya ve klasör paylaşımı",
+  "en": "Network file and folder sharing"
+ },
+ {
+  "id": "528cfa9e",
+  "key": "Paylaşılıyor",
+  "tr": "Paylaşılıyor",
+  "en": "Shared"
+ },
+ {
+  "id": "a91630ac",
+  "key": "Ağ yolu",
+  "tr": "Ağ yolu",
+  "en": "Network path"
+ },
+ {
+  "id": "a5dbeb0d",
+  "key": "Paylaşılmıyor",
+  "tr": "Paylaşılmıyor",
+  "en": "Not shared"
+ },
+ {
+  "id": "0d5cac7f",
+  "key": "Paylaşımı açmak ya da değiştirmek yönetici izni gerektirir; Windows'un Paylaşım penceresinden yapılır.",
+  "tr": "Paylaşımı açmak ya da değiştirmek yönetici izni gerektirir; Windows'un Paylaşım penceresinden yapılır.",
+  "en": "Turning sharing on or changing it needs administrator permission; it is done in Windows' Sharing window."
+ },
+ {
+  "id": "0a074868",
+  "key": "Klasör simgesi",
+  "tr": "Klasör simgesi",
+  "en": "Folder icon"
+ },
+ {
+  "id": "59365dc9",
+  "key": "Varsayılana geri yükle",
+  "tr": "Varsayılana geri yükle",
+  "en": "Restore default"
+ },
+ {
+  "id": "aa320029",
+  "key": "Simge, klasöre bir desktop.ini dosyası yazılarak ayarlanır; Dosya Gezgini de aynı simgeyi gösterir.",
+  "tr": "Simge, klasöre bir desktop.ini dosyası yazılarak ayarlanır; Dosya Gezgini de aynı simgeyi gösterir.",
+  "en": "The icon is set by writing a desktop.ini file into the folder; File Explorer shows the same icon."
+ },
+ {
+  "id": "8018d6f9",
+  "key": "imza dosyayla uyuşmuyor",
+  "tr": "imza dosyayla uyuşmuyor",
+  "en": "the signature does not match the file"
+ },
+ {
+  "id": "b756e3f7",
+  "key": "sertifikaya güvenilmiyor",
+  "tr": "sertifikaya güvenilmiyor",
+  "en": "the certificate is not trusted"
+ },
+ {
+  "id": "983b9138",
+  "key": "sertifikanın süresi dolmuş",
+  "tr": "sertifikanın süresi dolmuş",
+  "en": "the certificate has expired"
+ },
+ {
+  "id": "dbbf0094",
+  "key": "sertifika zinciri kurulamadı",
+  "tr": "sertifika zinciri kurulamadı",
+  "en": "the certificate chain could not be built"
+ },
+ {
+  "id": "9f538413",
+  "key": "sertifika açıkça engellenmiş",
+  "tr": "sertifika açıkça engellenmiş",
+  "en": "the certificate is explicitly distrusted"
+ },
+ {
+  "id": "edb462e3",
+  "key": "imza yok",
+  "tr": "imza yok",
+  "en": "no signature"
+ },
+ {
+  "id": "e75a8935",
+  "key": "sertifika iptal edilmiş",
+  "tr": "sertifika iptal edilmiş",
+  "en": "the certificate has been revoked"
+ },
+ {
+  "id": "c0ca0521",
+  "key": "sertifika kod imzalamak için geçerli değil",
+  "tr": "sertifika kod imzalamak için geçerli değil",
+  "en": "the certificate is not valid for code signing"
+ },
+ {
+  "id": "8978479c",
+  "key": "Merhaba, ben Özer. rustyfiles'ı tek başıma, boş zamanlarımda geliştiriyorum. İşine yarıyorsa bana bir kahve ısmarlar mısın?",
+  "tr": "Merhaba, ben Özer. rustyfiles'ı tek başıma, boş zamanlarımda geliştiriyorum. İşine yarıyorsa bana bir kahve ısmarlar mısın?",
+  "en": "Hi, I'm Özer. I build rustyfiles on my own, in my spare time. If it helps you, would you buy me a coffee?"
+ },
+ {
+  "id": "8219562e",
+  "key": "rustyfiles'ı şimdiye kadar {n} kez açtın; demek ki işine yarıyor. Bir kahveyle destek olursan bir sonraki özellik biraz daha çabuk gelir.",
+  "tr": "rustyfiles'ı şimdiye kadar {n} kez açtın; demek ki işine yarıyor. Bir kahveyle destek olursan bir sonraki özellik biraz daha çabuk gelir.",
+  "en": "You've opened rustyfiles {n} times so far, so it must be earning its keep. A coffee helps the next feature arrive a little sooner."
+ },
+ {
+  "id": "aa48f133",
+  "key": "rustyfiles ücretsiz, reklamsız ve açık kaynak; öyle de kalacak. Yaşaması, senin gibi kullananların küçük desteklerine bağlı.",
+  "tr": "rustyfiles ücretsiz, reklamsız ve açık kaynak; öyle de kalacak. Yaşaması, senin gibi kullananların küçük desteklerine bağlı.",
+  "en": "rustyfiles is free, ad-free and open source, and it will stay that way. It lives on small support from people like you."
+ },
+ {
+  "id": "d42a0144",
+  "key": "Bu dosya yöneticisinin arkasında tek bir kişi ve epey kahve var. Bir fincanı da senden olursa çok sevinirim.",
+  "tr": "Bu dosya yöneticisinin arkasında tek bir kişi ve epey kahve var. Bir fincanı da senden olursa çok sevinirim.",
+  "en": "Behind this file manager there's one person and a lot of coffee. I'd be really glad if one cup came from you."
+ },
+ {
+  "id": "ded91513",
+  "key": "Kullandığın için teşekkür ederim. Projeyi sürdürmeme yardım etmek istersen, küçük bir bağış bile çok şey ifade eder.",
+  "tr": "Kullandığın için teşekkür ederim. Projeyi sürdürmeme yardım etmek istersen, küçük bir bağış bile çok şey ifade eder.",
+  "en": "Thank you for using it. If you'd like to help me keep going, even a small donation means a lot."
+ },
+ {
+  "id": "8ad45055",
+  "key": "Kahve ısmarla",
+  "tr": "Kahve ısmarla",
+  "en": "Buy me a coffee"
+ },
+ {
+  "id": "d7cd82d9",
+  "key": "Geliştiriciye bir kahve ısmarla",
+  "tr": "Geliştiriciye bir kahve ısmarla",
+  "en": "Buy a coffee for the developer"
+ },
+ {
+  "id": "7f657a3a",
+  "key": "rustyfiles'ı tek başıma geliştiriyorum; her destek, devam etmeme yardım eder.",
+  "tr": "rustyfiles'ı tek başıma geliştiriyorum; her destek, devam etmeme yardım eder.",
+  "en": "I build rustyfiles on my own; every bit of support helps me keep going."
+ },
+ {
+  "id": "b96dcc2f",
+  "key": "Geliştirmeye devam edebilmem için bir kahveyle destek olur musun?",
+  "tr": "Geliştirmeye devam edebilmem için bir kahveyle destek olur musun?",
+  "en": "Would you support me with a coffee so I can keep building it?"
+ },
+ {
+  "id": "27a4fe13",
+  "key": "Bu bilgisayardaki hız testinde rustyfiles {files} dosyalık bir klasörü Dosya Gezgini'nden {x} kat hızlı açtı.",
+  "tr": "Bu bilgisayardaki hız testinde rustyfiles {files} dosyalık bir klasörü Dosya Gezgini'nden {x} kat hızlı açtı.",
+  "en": "In the speed test on this PC, rustyfiles opened a folder of {files} files {x}× faster than File Explorer."
+ },
+ {
+  "id": "73f2f739",
+  "key": "Bu bilgisayardaki hız testinde rustyfiles aynı klasörü gösterirken, Görev Yöneticisi'ne göre Dosya Gezgini'nden {x} kat daha az bellek kullandı.",
+  "tr": "Bu bilgisayardaki hız testinde rustyfiles aynı klasörü gösterirken, Görev Yöneticisi'ne göre Dosya Gezgini'nden {x} kat daha az bellek kullandı.",
+  "en": "In the speed test on this PC, showing the same folder, rustyfiles used {x}× less memory than File Explorer, as Task Manager counts it."
+ },
+ {
+  "id": "b4fb4c4a",
+  "key": "Bu bilgisayardaki hız testinde rustyfiles dosyaları Windows'tan {x} kat hızlı kopyaladı.",
+  "tr": "Bu bilgisayardaki hız testinde rustyfiles dosyaları Windows'tan {x} kat hızlı kopyaladı.",
+  "en": "In the speed test on this PC, rustyfiles copied files {x}× faster than Windows."
+ },
+ {
+  "id": "17ecb2f2",
+  "key": "Bu bilgisayardaki hız testinde rustyfiles bir ZIP arşivini Windows'tan {x} kat hızlı çıkardı.",
+  "tr": "Bu bilgisayardaki hız testinde rustyfiles bir ZIP arşivini Windows'tan {x} kat hızlı çıkardı.",
+  "en": "In the speed test on this PC, rustyfiles extracted a ZIP archive {x}× faster than Windows."
+ },
+ {
+  "id": "8449c6fa",
+  "key": "Bu bilgisayardaki hız testinde rustyfiles {entries} öğe arasında adla aramayı {ms} ms'de bitirdi.",
+  "tr": "Bu bilgisayardaki hız testinde rustyfiles {entries} öğe arasında adla aramayı {ms} ms'de bitirdi.",
+  "en": "In the speed test on this PC, rustyfiles searched {entries} items by name in {ms} ms."
+ },
+ {
+  "id": "dd32fa89",
+  "key": "Bu adda bir öğe zaten var",
+  "tr": "Bu adda bir öğe zaten var",
+  "en": "An item with this name already exists"
+ },
+ {
+  "id": "f484c49e",
+  "key": "Bu arşiv biçimi düzenlenemez",
+  "tr": "Bu arşiv biçimi düzenlenemez",
+  "en": "This archive format can't be edited"
+ },
+ {
+  "id": "082a6589",
+  "key": "Bu biçim parolayı desteklemiyor",
+  "tr": "Bu biçim parolayı desteklemiyor",
+  "en": "This format doesn't support passwords"
+ },
+ {
+  "id": "0a360dea",
+  "key": "Dosya zaten var",
+  "tr": "Dosya zaten var",
+  "en": "The file already exists"
+ },
+ {
+  "id": "042f88ba",
+  "key": "Eklenecek öğe yok",
+  "tr": "Eklenecek öğe yok",
+  "en": "Nothing to add"
+ },
+ {
+  "id": "dcf89b17",
+  "key": "Geçersiz ad",
+  "tr": "Geçersiz ad",
+  "en": "Invalid name"
+ },
+ {
+  "id": "232ecc15",
+  "key": "iptal",
+  "tr": "iptal",
+  "en": "cancelled"
+ },
+ {
+  "id": "eccc0ad8",
+  "key": "ISO çok fazla girdi içeriyor",
+  "tr": "ISO çok fazla girdi içeriyor",
+  "en": "The ISO has too many entries"
+ },
+ {
+  "id": "f5dc211d",
+  "key": "ISO klasör ağacı çok derin",
+  "tr": "ISO klasör ağacı çok derin",
+  "en": "The ISO's folder tree is too deep"
+ },
+ {
+  "id": "c4edc1a0",
+  "key": "Öğe bulunamadı",
+  "tr": "Öğe bulunamadı",
+  "en": "Item not found"
+ },
+ {
+  "id": "3a43690d",
+  "key": "Sıkıştırılacak öğe yok",
+  "tr": "Sıkıştırılacak öğe yok",
+  "en": "Nothing to compress"
+ },
+ {
+  "id": "e172cdd6",
+  "key": "Silinecek öğe yok",
+  "tr": "Silinecek öğe yok",
+  "en": "Nothing to delete"
+ },
+ {
+  "id": "b1cb7e7e",
+  "key": "yazıcı durdu",
+  "tr": "yazıcı durdu",
+  "en": "the writer stopped"
+ },
+ {
+  "id": "eafbd3df",
+  "key": "Yazma hatası",
+  "tr": "Yazma hatası",
+  "en": "Write error"
+ },
+ {
+  "id": "d25b4682",
+  "key": "Güvensiz arşiv girdisi (geçersiz ad)",
+  "tr": "Güvensiz arşiv girdisi (geçersiz ad)",
+  "en": "Unsafe archive entry (invalid name)"
+ },
+ {
+  "id": "2ece7296",
+  "key": "Güvensiz arşiv girdisi (mutlak yol)",
+  "tr": "Güvensiz arşiv girdisi (mutlak yol)",
+  "en": "Unsafe archive entry (absolute path)"
+ },
+ {
+  "id": "aa1f1110",
+  "key": "Güvensiz arşiv girdisi (yol geçişi)",
+  "tr": "Güvensiz arşiv girdisi (yol geçişi)",
+  "en": "Unsafe archive entry (path traversal)"
+ },
+ {
+  "id": "f6c33fea",
+  "key": "ISO dosyası açılamadı",
+  "tr": "ISO dosyası açılamadı",
+  "en": "Couldn't open the ISO file"
+ },
+ {
+  "id": "667f52ce",
+  "key": "ISO klasörü okunamadı",
+  "tr": "ISO klasörü okunamadı",
+  "en": "Couldn't read an ISO folder"
+ },
+ {
+  "id": "66acc357",
+  "key": "ISO okunamadı (bozuk olabilir)",
+  "tr": "ISO okunamadı (bozuk olabilir)",
+  "en": "Couldn't read the ISO (it may be damaged)"
+ },
+ {
+  "id": "8df63baf",
+  "key": "ISO okunamadı",
+  "tr": "ISO okunamadı",
+  "en": "Couldn't read the ISO"
+ },
+ {
+  "id": "797ed52f",
+  "key": "UDF okunamadı",
+  "tr": "UDF okunamadı",
+  "en": "Couldn't read the UDF file system"
+ },
+ {
+  "id": "1a9d26f5",
+  "key": "Ses ayarları",
+  "tr": "Ses ayarları",
+  "en": "Sound settings"
+ },
+ {
+  "id": "c6fa5f0c",
+  "key": "Mikrofonu aç",
+  "tr": "Mikrofonu aç",
+  "en": "Unmute microphone"
+ },
+ {
+  "id": "ec9e6ae0",
+  "key": "Mikrofonu kapat",
+  "tr": "Mikrofonu kapat",
+  "en": "Mute microphone"
+ },
+ {
+  "id": "1e43b71c",
+  "key": "Giriş aygıtları",
+  "tr": "Giriş aygıtları",
+  "en": "Input devices"
+ },
+ {
+  "id": "4b1052bb",
+  "key": "Paneli düzenle",
+  "tr": "Paneli düzenle",
+  "en": "Edit panel"
+ },
+ {
+  "id": "8f592c9e",
+  "key": "Modem arayüzü",
+  "tr": "Modem arayüzü",
+  "en": "Router page"
+ },
+ {
+  "id": "1347a587",
+  "key": "Ağ geçidi",
+  "tr": "Ağ geçidi",
+  "en": "Gateway",
+  "note": "the network's default gateway"
+ },
+ {
+  "id": "b0b5a9e2",
+  "key": "Modem (İSS)",
+  "tr": "Modem (İSS)",
+  "en": "Router (ISP)"
+ },
+ {
+  "id": "3ba5312c",
+  "key": "Yerel ağ",
+  "tr": "Yerel ağ",
+  "en": "Local network"
+ },
+ {
+  "id": "3ef80a56",
+  "key": "Hız",
+  "tr": "Hız",
+  "en": "Speed",
+  "note": "the speed of the network link"
+ },
+ {
+  "id": "78fafa90",
+  "key": "Gb/sn",
+  "tr": "Gb/sn",
+  "en": "Gbps"
+ },
+ {
+  "id": "f327d9aa",
+  "key": "Mb/sn",
+  "tr": "Mb/sn",
+  "en": "Mbps"
+ },
+ {
+  "id": "5f2069dc",
+  "key": "DNS",
+  "tr": "DNS",
+  "en": "DNS"
+ },
+ {
+  "id": "9c57adca",
+  "key": "Hoparlör",
+  "tr": "Hoparlör",
+  "en": "Speaker",
+  "note": "the sound output device (a loudspeaker), not a person"
+ },
+ {
+  "id": "ddac2748",
+  "key": "Şifre",
+  "tr": "Şifre",
+  "en": "Password"
+ },
+ {
+  "id": "3fc343f0",
+  "key": "Bağlan",
+  "tr": "Bağlan",
+  "en": "Connect"
+ },
+ {
+  "id": "f9be5cdd",
+  "key": "Şifre 8-63 karakter olmalı",
+  "tr": "Şifre 8-63 karakter olmalı",
+  "en": "The password must be 8 to 63 characters"
+ },
+ {
+  "id": "92f6b870",
+  "key": "Bağlantı kesiliyor…",
+  "tr": "Bağlantı kesiliyor…",
+  "en": "Disconnecting…"
+ },
+ {
+  "id": "2c3854fd",
+  "key": "Sonraki kaynak",
+  "tr": "Sonraki kaynak",
+  "en": "Next source"
+ },
+ {
+  "id": "da72b6e8",
+  "key": "Denetim merkezinde gösterilenler",
+  "tr": "Denetim merkezinde gösterilenler",
+  "en": "Shown in the control centre"
+ },
+ {
+  "id": "a9ffa3da",
+  "key": "Kartlar ve döşemeler",
+  "tr": "Kartlar ve döşemeler",
+  "en": "Cards and tiles"
+ },
+ {
+  "id": "9f36c1ab",
+  "key": "İşaretli olanlar panelde görünür; gizlemek ya da geri getirmek için üzerine tıklayın. Bilgisayarda olmayan bir şey (pil, Wi-Fi) zaten gösterilmez.",
+  "tr": "İşaretli olanlar panelde görünür; gizlemek ya da geri getirmek için üzerine tıklayın. Bilgisayarda olmayan bir şey (pil, Wi-Fi) zaten gösterilmez.",
+  "en": "The marked ones are shown in the panel; click one to hide it or bring it back. Something the PC does not have (a battery, Wi-Fi) is not shown anyway."
+ },
+ {
+  "id": "c79e9626",
+  "key": "Koyu tema",
+  "tr": "Koyu tema",
+  "en": "Dark mode"
+ },
+ {
+  "id": "931a71d9",
+  "key": "Uyanık tut",
+  "tr": "Uyanık tut",
+  "en": "Keep awake"
+ },
+ {
+  "id": "f1ef8ade",
+  "key": "Güç modu",
+  "tr": "Güç modu",
+  "en": "Power mode"
+ },
+ {
+  "id": "4c0bec35",
+  "key": "Gece ışığı",
+  "tr": "Gece ışığı",
+  "en": "Night light",
+  "note": "Windows' own feature of that name: use Windows' term in your language"
+ },
+ {
+  "id": "4b2e9e5c",
+  "key": "Rahatsız etmeyin",
+  "tr": "Rahatsız etmeyin",
+  "en": "Do not disturb",
+  "note": "Windows' own notification mode of that name: use Windows' term in your language"
+ },
+ {
+  "id": "73b29da1",
+  "key": "Uçak modu",
+  "tr": "Uçak modu",
+  "en": "Airplane mode"
+ },
+ {
+  "id": "3f364229",
+  "key": "Yansıt",
+  "tr": "Yansıt",
+  "en": "Project",
+  "note": "a button: show the screen on another display or a projector (Windows' Win+P); not \"a project\""
+ },
+ {
+  "id": "640593ee",
+  "key": "Yayınla",
+  "tr": "Yayınla",
+  "en": "Cast",
+  "note": "a button: send the screen to a wireless display (Windows' Win+K)"
+ },
+ {
+  "id": "197f7662",
+  "key": "Güç modu: en iyi verimlilik",
+  "tr": "Güç modu: en iyi verimlilik",
+  "en": "Power mode: best power efficiency"
+ },
+ {
+  "id": "b53fc29d",
+  "key": "Güç modu: en iyi performans",
+  "tr": "Güç modu: en iyi performans",
+  "en": "Power mode: best performance"
+ },
+ {
+  "id": "4759cdc4",
+  "key": "Güç modu: dengeli",
+  "tr": "Güç modu: dengeli",
+  "en": "Power mode: balanced"
+ },
+ {
+  "id": "66c5f1b8",
+  "key": "Hızlı düğmeler",
+  "tr": "Hızlı düğmeler",
+  "en": "Quick buttons"
+ },
+ {
+  "id": "18927142",
+  "key": "Mikrofon ve kamera kullanımı",
+  "tr": "Mikrofon ve kamera kullanımı",
+  "en": "Microphone and camera use"
+ },
+ {
+  "id": "b406499a",
+  "key": "Mikrofon",
+  "tr": "Mikrofon",
+  "en": "Microphone"
+ },
+ {
+  "id": "42c66f24",
+  "key": "IP adresi",
+  "tr": "IP adresi",
+  "en": "IP address"
+ },
+ {
+  "id": "0e040d63",
+  "key": "Wi-Fi kapalı",
+  "tr": "Wi-Fi kapalı",
+  "en": "Wi-Fi is off"
+ },
+ {
+  "id": "3d91026f",
+  "key": "Bluetooth kapalı",
+  "tr": "Bluetooth kapalı",
+  "en": "Bluetooth is off"
+ },
+ {
+  "id": "1d6287c5",
+  "key": "Ağlar aranıyor…",
+  "tr": "Ağlar aranıyor…",
+  "en": "Looking for networks…"
+ },
+ {
+  "id": "6ea3014a",
+  "key": "Ağları listelemek için Windows'ta konum izni gerekiyor",
+  "tr": "Ağları listelemek için Windows'ta konum izni gerekiyor",
+  "en": "Windows needs location access to list networks"
+ },
+ {
+  "id": "5a60372e",
+  "key": "Konum ayarları",
+  "tr": "Konum ayarları",
+  "en": "Location settings"
+ },
+ {
+  "id": "febdabc1",
+  "key": "Bağlanıyor…",
+  "tr": "Bağlanıyor…",
+  "en": "Connecting…"
+ },
+ {
+  "id": "be75af58",
+  "key": "Kayıtlı",
+  "tr": "Kayıtlı",
+  "en": "Saved",
+  "note": "said of a Wi-Fi network that Windows remembers"
+ },
+ {
+  "id": "49f30052",
+  "key": "Wi-Fi ayarları",
+  "tr": "Wi-Fi ayarları",
+  "en": "Wi-Fi settings"
+ },
+ {
+  "id": "97e529ae",
+  "key": "Bluetooth ayarları",
+  "tr": "Bluetooth ayarları",
+  "en": "Bluetooth settings"
+ },
+ {
+  "id": "5d0a0567",
+  "key": "Eşleşmiş cihaz yok",
+  "tr": "Eşleşmiş cihaz yok",
+  "en": "No paired devices"
+ },
+ {
+  "id": "46cb3b16",
+  "key": "Ağ ayarları",
+  "tr": "Ağ ayarları",
+  "en": "Network settings"
+ },
+ {
+  "id": "f7767bd5",
+  "key": "Yapıştırılıyor",
+  "tr": "Yapıştırılıyor",
+  "en": "Pasting"
+ },
+ {
+  "id": "6df2a1e2",
+  "key": "Kaynaktan okunamadı",
+  "tr": "Kaynaktan okunamadı",
+  "en": "Could not be read from the source"
+ },
+ {
+  "id": "530b5f54",
+  "key": "Dosya türleri",
+  "tr": "Dosya türleri",
+  "en": "File types"
+ },
+ {
+  "id": "9c45e5e6",
+  "key": "Ekle",
+  "tr": "Ekle",
+  "en": "Add"
+ },
+ {
+  "id": "a224c2e2",
+  "key": "Tüm dosyalar",
+  "tr": "Tüm dosyalar",
+  "en": "All files"
+ },
+ {
+  "id": "cc60c527",
+  "key": "Vurgu rengi",
+  "tr": "Vurgu rengi",
+  "en": "Accent color"
+ },
+ {
+  "id": "029f1227",
+  "key": "Gizlenen sürücüler",
+  "tr": "Gizlenen sürücüler",
+  "en": "Hidden drives"
+ },
+ {
+  "id": "728d2568",
+  "key": "Bu sürücüyü gizle",
+  "tr": "Bu sürücüyü gizle",
+  "en": "Hide this drive"
+ },
+ {
+  "id": "8e9479aa",
+  "key": "Gizlediğiniz sürücü kenar çubuğunda, Ana Sayfa'da ve adres çubuğunun sürücü listesinde görünmez; adresini yazarak yine açabilirsiniz. Explorer'ın gizlediği sürücüler burada da gizlidir.",
+  "tr": "Gizlediğiniz sürücü kenar çubuğunda, Ana Sayfa'da ve adres çubuğunun sürücü listesinde görünmez; adresini yazarak yine açabilirsiniz. Explorer'ın gizlediği sürücüler burada da gizlidir.",
+  "en": "A drive you hide is not shown in the sidebar, on the Home page or in the address bar's list of drives; you can still open it by typing its address. Drives that Explorer hides are hidden here too."
+ },
+ {
+  "id": "495a1795",
+  "key": "Windows'un rengi",
+  "tr": "Windows'un rengi",
+  "en": "Windows' color"
+ },
+ {
+  "id": "c31acb32",
+  "key": "Kendi rengim…",
+  "tr": "Kendi rengim…",
+  "en": "My own color…"
+ },
+ {
+  "id": "50202475",
+  "key": "Rengi #RRGGBB biçiminde yazın, örneğin #F7630C.",
+  "tr": "Rengi #RRGGBB biçiminde yazın, örneğin #F7630C.",
+  "en": "Write the color as #RRGGBB, for example #F7630C."
+ },
+ {
+  "id": "b4f212e4",
+  "key": "Düğmelerin, seçimin ve vurguların rengi: Windows'unki, hazır renklerden biri ya da kendi yazdığınız renk.",
+  "tr": "Düğmelerin, seçimin ve vurguların rengi: Windows'unki, hazır renklerden biri ya da kendi yazdığınız renk.",
+  "en": "The color of buttons, the selection and highlights: Windows' own, one of these, or a color you write yourself."
+ },
+ {
+  "id": "b783f0cf",
+  "key": "Dosya türlerine göre programlar",
+  "tr": "Dosya türlerine göre programlar",
+  "en": "Programs by file type"
+ },
+ {
+  "id": "cb4114f9",
+  "key": "Bir dosya türü için kendi program listenizi yapın: listedeki ilk program o türü çift tıklamada açar, hepsi sağ tık menüsündeki \"Birlikte aç\"ın başında durur. Programlar yollarıyla verilir; Windows'un tanımadığı bir program da olabilir. Bu listelere yalnızca rustyfiles uyar, Windows'un varsayılan programları değişmez.",
+  "tr": "Bir dosya türü için kendi program listenizi yapın: listedeki ilk program o türü çift tıklamada açar, hepsi sağ tık menüsündeki \"Birlikte aç\"ın başında durur. Programlar yollarıyla verilir; Windows'un tanımadığı bir program da olabilir. Bu listelere yalnızca rustyfiles uyar, Windows'un varsayılan programları değişmez.",
+  "en": "Make your own list of programs for a file type: the first program in the list opens that type on a double click, and all of them stand at the top of \"Open with\" in the right-click menu. Programs are given by their paths, so a program Windows does not know works too. Only rustyfiles follows these lists; Windows' default programs do not change."
+ },
+ {
+  "id": "f4d44539",
+  "key": "Yeni tür",
+  "tr": "Yeni tür",
+  "en": "New type"
+ },
+ {
+  "id": "27565139",
+  "key": "Henüz liste yok",
+  "tr": "Henüz liste yok",
+  "en": "No lists yet"
+ },
+ {
+  "id": "6e28ef8b",
+  "key": "Örnek: .dll için önce dnSpy, sonra Ghidra. Çift tıklama dnSpy ile açar, Ghidra \"Birlikte aç\" menüsünde bir tık ötede durur.",
+  "tr": "Örnek: .dll için önce dnSpy, sonra Ghidra. Çift tıklama dnSpy ile açar, Ghidra \"Birlikte aç\" menüsünde bir tık ötede durur.",
+  "en": "Example: for .dll, dnSpy first and Ghidra second. A double click opens with dnSpy, and Ghidra is one click away under \"Open with\"."
+ },
+ {
+  "id": "ca34f097",
+  "key": "Listeler",
+  "tr": "Listeler",
+  "en": "Lists"
+ },
+ {
+  "id": "ef07eda4",
+  "key": "Uzantıları değiştir",
+  "tr": "Uzantıları değiştir",
+  "en": "Change extensions"
+ },
+ {
+  "id": "cba3366a",
+  "key": "Yeni dosya türü",
+  "tr": "Yeni dosya türü",
+  "en": "New file type"
+ },
+ {
+  "id": "5606ac90",
+  "key": "Bu liste hangi uzantılar için? Birden çok uzantıyı virgülle ayırın.",
+  "tr": "Bu liste hangi uzantılar için? Birden çok uzantıyı virgülle ayırın.",
+  "en": "Which extensions is this list for? Separate several with commas."
+ },
+ {
+  "id": "f14a1e41",
+  "key": "Bu bir uzantı değil",
+  "tr": "Bu bir uzantı değil",
+  "en": "This is not an extension"
+ },
+ {
+  "id": "e84f38cc",
+  "key": "En az bir uzantı yazın.",
+  "tr": "En az bir uzantı yazın.",
+  "en": "Type at least one extension."
+ },
+ {
+  "id": "3fbd0b3e",
+  "key": "Bu uzantıların zaten bir listesi var",
+  "tr": "Bu uzantıların zaten bir listesi var",
+  "en": "These extensions already have a list"
+ },
+ {
+  "id": "a5a16f98",
+  "key": "Program seçin",
+  "tr": "Program seçin",
+  "en": "Choose a program"
+ },
+ {
+  "id": "e834b6ed",
+  "key": "Programın yolu",
+  "tr": "Programın yolu",
+  "en": "The program's path"
+ },
+ {
+  "id": "6a2e4fd5",
+  "key": "Programın tam yolunu yazın ya da yapıştırın.",
+  "tr": "Programın tam yolunu yazın ya da yapıştırın.",
+  "en": "Type or paste the program's full path."
+ },
+ {
+  "id": "86fd65cd",
+  "key": "Bir yol yazın.",
+  "tr": "Bir yol yazın.",
+  "en": "Type a path."
+ },
+ {
+  "id": "e8ee7d00",
+  "key": "Liste silinsin mi?",
+  "tr": "Liste silinsin mi?",
+  "en": "Delete this list?"
+ },
+ {
+  "id": "ebd4364a",
+  "key": "Bu türdeki dosyalar yeniden Windows'un varsayılan programıyla açılır.",
+  "tr": "Bu türdeki dosyalar yeniden Windows'un varsayılan programıyla açılır.",
+  "en": "Files of this type open with Windows' default program again."
+ },
+ {
+  "id": "e7126efa",
+  "key": "Henüz program yok: bir program ekleyin.",
+  "tr": "Henüz program yok: bir program ekleyin.",
+  "en": "No program yet: add one."
+ },
+ {
+  "id": "a2d2dfbd",
+  "key": "Çift tıklama",
+  "tr": "Çift tıklama",
+  "en": "Double click"
+ },
+ {
+  "id": "c794ba0b",
+  "key": "Çift tıklama Windows'un varsayılanıyla açar; programlar yalnızca \"Birlikte aç\" menüsünde durur.",
+  "tr": "Çift tıklama Windows'un varsayılanıyla açar; programlar yalnızca \"Birlikte aç\" menüsünde durur.",
+  "en": "A double click opens with Windows' default; the programs are only under \"Open with\"."
+ },
+ {
+  "id": "cb52831d",
+  "key": "çift tıklama",
+  "tr": "çift tıklama",
+  "en": "double click"
+ },
+ {
+  "id": "5048580a",
+  "key": "Listeden çıkar",
+  "tr": "Listeden çıkar",
+  "en": "Remove from the list"
+ },
+ {
+  "id": "18a4e2da",
+  "key": "Program ekle…",
+  "tr": "Program ekle…",
+  "en": "Add program…"
+ },
+ {
+  "id": "816059f9",
+  "key": "Yol yaz…",
+  "tr": "Yol yaz…",
+  "en": "Type a path…"
+ },
+ {
+  "id": "643a93b6",
+  "key": "Çift tıklamada ilk programla aç",
+  "tr": "Çift tıklamada ilk programla aç",
+  "en": "Open with the first program on a double click"
+ },
+ {
+  "id": "162d7464",
+  "key": "Giriş dili",
+  "tr": "Giriş dili",
+  "en": "Input language"
+ },
+ {
+  "id": "cfe00126",
+  "key": "Giriş dili simgesi yalnızca birden fazla klavye düzeni varken görünür.",
+  "tr": "Giriş dili simgesi yalnızca birden fazla klavye düzeni varken görünür.",
+  "en": "The input language is shown only while you have more than one keyboard layout."
+ },
+ {
+  "id": "2531c005",
+  "key": "Görevi sonlandır",
+  "tr": "Görevi sonlandır",
+  "en": "End task"
+ },
+ {
+  "id": "05f199a6",
+  "key": "Simge üzerinde kaydırarak uygulamanın sesini ayarla",
+  "tr": "Simge üzerinde kaydırarak uygulamanın sesini ayarla",
+  "en": "Scroll over an icon to change the app's volume"
+ },
+ {
+  "id": "86ac3b17",
+  "key": "Çalışan bir uygulamanın Dock simgesi üzerinde fare tekerleğini çevirmek yalnızca o uygulamanın sesini açar ya da kısar; düzey simgenin üzerinde kısa süre gösterilir. Henüz ses çalmamış bir uygulamada değişen bir şey olmaz.",
+  "tr": "Çalışan bir uygulamanın Dock simgesi üzerinde fare tekerleğini çevirmek yalnızca o uygulamanın sesini açar ya da kısar; düzey simgenin üzerinde kısa süre gösterilir. Henüz ses çalmamış bir uygulamada değişen bir şey olmaz.",
+  "en": "Turning the mouse wheel over a running app's Dock icon turns only that app's volume up or down; the level is shown on the icon for a moment. Nothing changes for an app that has not played any sound yet."
+ },
+ {
+  "id": "e5ca9fdd",
+  "key": "en:Clear",
+  "tr": "Açık",
+  "en": "Clear",
+  "note": "the weather: a clear sky; not the command that clears something away"
+ },
+ {
+  "id": "3c1fb5c1",
+  "key": "en:View",
+  "tr": "Görünüm",
+  "en": "View",
+  "note": "the name of a menu, as in Windows' own desktop menu: icon sizes and the like"
  }
 ]

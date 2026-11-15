@@ -7,6 +7,8 @@ The todo file is one JSON object:
     "locale":  the code
     "terms":   English -> the translation this locale ALREADY uses, for the short texts it has (labels, button names): the words
                to stay consistent with
+    "notes":   id -> what the text is about, for the missing texts whose English alone can be read two ways ("Clear": the weather,
+               not the command). They are the "note" of the entry in _source.json; add one there when a short text needs it
     "texts":   id -> English, for every text of _source.json the locale file does not have yet
 One entry per line, so it can be read in parts. Translations go into a file {"<id>": "<translation>", ...} and are put into the
 locale file by scripts/i18n_merge.py, which checks them.
@@ -73,7 +75,13 @@ def main():
     todo = missing(source, data)
     OUT.mkdir(parents=True, exist_ok=True)
     out = OUT / f"{code}.todo.json"
-    text = "{\n" + f' "locale": {json.dumps(code)},\n "terms": {lines(terms(source, data))},\n "texts": {lines({e["id"]: e["en"] for e in todo})}\n' + "}\n"
+    notes = {e["id"]: e["note"] for e in todo if e.get("note")}
+    text = (
+        "{\n"
+        + f' "locale": {json.dumps(code)},\n "terms": {lines(terms(source, data))},\n "notes": {lines(notes)},\n'
+        + f' "texts": {lines({e["id"]: e["en"] for e in todo})}\n'
+        + "}\n"
+    )
     json.loads(text)  # (it is what it says it is)
     out.write_text(text, encoding="utf-8", newline="\n")
     print(f"{code}: {len(todo)} texts to translate -> {out}")
