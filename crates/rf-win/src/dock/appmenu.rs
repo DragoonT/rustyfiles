@@ -25,7 +25,8 @@ pub enum Fixed {
     Unpin,
     /// Windows' own Properties of the shortcut or the program.
     Properties,
-    /// Move the app's window (the one used last) to the monitor of this number and bring it forward (`winmove`).
+    /// "Open on monitor N". A running app: its window (the one used last) is moved to the monitor of this number and brought
+    /// forward. An app with no window: it is started, and its new window is moved there when it shows (`winmove`).
     MoveToMonitor(u32),
     /// Bring the app's window inside the work area of the monitor it is on (`winmove::fitted_rect`).
     FitToScreen,
@@ -76,13 +77,20 @@ pub fn fixed_rows(can_start: bool, on_disk: bool, can_pin: bool, pinned: bool, w
     rows
 }
 
-/// The fixed rows with the rows for the app's window put in: one "open on monitor N" for every monitor the window is not on
-/// (`monitors`, none with one monitor) and "fit to the screen". They stand before the close rows, and only where there is a window
-/// (a close row is there).
+/// The fixed rows with the rows for a monitor put in. `monitors`: the numbers to offer (none with one monitor).
+/// * An app with a window (a close row is there): one "open on monitor N" for every monitor the window is not on, and "fit to the
+///   screen", before the close rows.
+/// * An app with no window that can be started: one "open on monitor N" for every monitor, after everything else: a start with a
+///   place. (The caller offers none for an app whose window could not be told from others: `winmove::program_of`.)
 pub fn with_window_rows(mut rows: Vec<Fixed>, monitors: &[u32]) -> Vec<Fixed> {
-    let Some(at) = rows.iter().position(|r| matches!(r, Fixed::CloseWindow | Fixed::CloseAll(_))) else { return rows };
-    let extra = monitors.iter().map(|n| Fixed::MoveToMonitor(*n)).chain(std::iter::once(Fixed::FitToScreen));
-    rows.splice(at..at, extra);
+    let on_monitors = monitors.iter().map(|n| Fixed::MoveToMonitor(*n));
+    match rows.iter().position(|r| matches!(r, Fixed::CloseWindow | Fixed::CloseAll(_))) {
+        Some(at) => {
+            rows.splice(at..at, on_monitors.chain(std::iter::once(Fixed::FitToScreen)));
+        }
+        None if rows.contains(&Fixed::Open) => rows.extend(on_monitors),
+        None => {}
+    }
     rows
 }
 
@@ -289,8 +297,13 @@ mod tests {
         assert_eq!(three, vec![Fixed::Open, Fixed::Pin, Fixed::MoveToMonitor(1), Fixed::MoveToMonitor(3), Fixed::FitToScreen, Fixed::CloseAll(3)]);
         // one monitor: nothing to move to, the fit row alone
         assert_eq!(with_window_rows(fixed_rows(true, false, true, true, 1, false), &[]), vec![Fixed::Open, Fixed::Unpin, Fixed::FitToScreen, Fixed::CloseWindow]);
-        // no window: no rows for one
-        assert_eq!(with_window_rows(fixed_rows(true, false, true, true, 0, false), &[2]), vec![Fixed::Open, Fixed::Unpin]);
+        // no window: where a new one is to open, after everything else, and nothing to fit
+        assert_eq!(
+            with_window_rows(fixed_rows(true, true, true, true, 0, false), &[1, 2]),
+            vec![Fixed::Open, Fixed::RunAsAdmin, Fixed::OpenLocation, Fixed::Unpin, Fixed::Properties, Fixed::MoveToMonitor(1), Fixed::MoveToMonitor(2)]
+        );
+        // an app that cannot be started and has no window: nothing
+        assert_eq!(with_window_rows(fixed_rows(false, false, false, true, 0, false), &[1, 2]), vec![Fixed::Unpin]);
     }
 
     #[test]

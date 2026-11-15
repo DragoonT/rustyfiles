@@ -9,10 +9,21 @@
 //! and the same share of the free room around it: a window in the middle of one monitor is in the middle of the other, one in a
 //! corner stays in that corner. A maximized window is maximized on the other monitor.
 //!
+//! AN APP THAT IS NOT RUNNING ("ekle bence", of starting one on a chosen monitor): nobody can tell another program where to open
+//! its window. The app is started as always, and the first window of its program that was not there before ([`new_window_of`],
+//! waited for by [`wait_for_new_window`]) is moved to the monitor. The window is seen where the program opened it for a moment
+//! and then goes over. A program whose window belongs to another program than the one that was started (a launcher, a copy that
+//! hands over to one already running, a packaged app) is not found, and its window stays where it opened.
+//!
 //! WHAT "FIT" DOES ([`fitted_rect`]): a window larger than its monitor's work area is made as large as it, and a window that hangs
 //! over an edge (or sits beyond it, after a monitor was unplugged) is moved inside. A window that is inside already stays as it is.
 
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
 use super::layout::Rect;
+use super::model::Launch;
 use super::monitors::{self, Display};
 use super::winops::WinRef;
 
@@ -78,6 +89,46 @@ pub fn fitted_rect(win: Rect, work: Rect) -> Rect {
     let x = win.left.clamp(work.left, (work.right - w).max(work.left));
     let y = win.top.clamp(work.top, (work.bottom - h).max(work.top));
     Rect::new(x, y, x + w, y + h)
+}
+
+/// The program a launch starts, when that is a program on disk: the program itself, or the target of a shortcut. `None` for a
+/// packaged app and for a shortcut to something that is no program.
+pub fn program_of(launch: &Launch) -> Option<PathBuf> {
+    let is_exe = |p: &Path| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe"));
+    match launch {
+        Launch::Exe { path, .. } => is_exe(path).then(|| path.clone()),
+        Launch::Link(link) => crate::shortcut::resolve(link).ok().map(|s| s.target).filter(|t| is_exe(t)),
+        Launch::Packaged(_) => None,
+    }
+}
+
+/// The first of `tasks` (a window, its process, that process's program) that is a window of `program` and is not among `known`.
+pub fn new_window_of(tasks: &[(isize, u32, Option<PathBuf>)], known: &HashSet<isize>, program: &Path) -> Option<WinRef> {
+    let same = |p: &Path| p.as_os_str().to_string_lossy().eq_ignore_ascii_case(&program.as_os_str().to_string_lossy());
+    tasks.iter().find(|(hwnd, _, exe)| !known.contains(hwnd) && exe.as_deref().is_some_and(same)).map(|(hwnd, pid, _)| WinRef { hwnd: *hwnd, pid: *pid })
+}
+
+fn tasks_now() -> Vec<(isize, u32, Option<PathBuf>)> {
+    crate::tasklist::tasks().into_iter().map(|t| (t.hwnd, t.pid, t.exe)).collect()
+}
+
+/// The windows there are now: taken BEFORE an app is started, to tell its new window from the ones that were there.
+pub fn known_windows() -> HashSet<isize> {
+    tasks_now().into_iter().map(|t| t.0).collect()
+}
+
+/// Waits, at most `limit`, for a window of `program` that is not among `known`, looking five times a second. For a worker thread.
+pub fn wait_for_new_window(program: &Path, known: &HashSet<isize>, limit: Duration) -> Option<WinRef> {
+    let start = Instant::now();
+    loop {
+        if let Some(w) = new_window_of(&tasks_now(), known, program) {
+            return Some(w);
+        }
+        if start.elapsed() >= limit {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 /// The window as it stands when it is neither minimized nor maximized, and whether it was maximized. It is restored for that (a
@@ -161,6 +212,21 @@ pub fn fit_to_screen(w: WinRef) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The window of an app that was just started: of its program, and not one that was there before.
+    #[test]
+    fn the_new_window_of_a_started_program_is_told_from_the_old_ones() {
+        let exe = |s: &str| Some(PathBuf::from(s));
+        let tasks = vec![(10, 1, exe(r"C:\Apps\Notes.exe")), (11, 2, exe(r"C:\Apps\Other.exe")), (12, 3, exe(r"c:\apps\notes.EXE")), (13, 4, None)];
+        let known: HashSet<isize> = [10, 11].into_iter().collect();
+        assert_eq!(new_window_of(&tasks, &known, Path::new(r"C:\Apps\Notes.exe")), Some(WinRef { hwnd: 12, pid: 3 }), "the one that was not there, whatever the case");
+        assert_eq!(new_window_of(&tasks, &known, Path::new(r"C:\Apps\Other.exe")), None, "its window was there before");
+        assert_eq!(new_window_of(&tasks, &HashSet::new(), Path::new(r"C:\Apps\None.exe")), None);
+        // what is started: a program, or a shortcut's program; never a packaged app
+        assert_eq!(program_of(&Launch::Exe { path: PathBuf::from(r"C:\Apps\Notes.exe"), args: String::new() }), Some(PathBuf::from(r"C:\Apps\Notes.exe")));
+        assert_eq!(program_of(&Launch::Exe { path: PathBuf::from(r"C:\Docs\a.pdf"), args: String::new() }), None);
+        assert_eq!(program_of(&Launch::Packaged("x!App".into())), None);
+    }
 
     #[test]
     fn a_displays_number_is_the_one_in_its_name() {

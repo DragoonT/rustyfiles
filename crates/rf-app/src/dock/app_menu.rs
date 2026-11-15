@@ -404,10 +404,13 @@ impl MenuView {
         let can_end = !winops::end_task_processes(&windows).is_empty();
         let on_disk = app.launch.as_ref().is_some_and(|l| l.file().is_some());
         let fixed = model::fixed_rows(app.launch.is_some(), on_disk, ownpins::pin_from_app(&app).is_some(), app.pinned, app.windows.len(), can_end);
-        // (the monitors the window used last is not on: two quick questions of Windows, none of which waits for the program)
-        let monitors = windows.first().map_or_else(Vec::new, |w| {
-            rf_win::dock::winmove::targets(&rf_win::dock::winmove::screens(), rf_win::dock::monitors::monitor_of_window(w.hwnd))
-        });
+        // (the monitors the window used last is not on: two quick questions of Windows, none of which waits for the program. An app
+        // with no window is offered every monitor, if it is started from a file: its new window is told by its program)
+        let monitors = match windows.first() {
+            Some(w) => rf_win::dock::winmove::targets(&rf_win::dock::winmove::screens(), rf_win::dock::monitors::monitor_of_window(w.hwnd)),
+            None if on_disk => rf_win::dock::winmove::targets(&rf_win::dock::winmove::screens(), None),
+            None => Vec::new(),
+        };
         let fixed = model::with_window_rows(fixed, &monitors);
         self.active = Some(Active { app, windows, jump, icon, display_name: None, menu: Menu::new(fixed), sections: Vec::new() });
         self.shown = true;
@@ -586,6 +589,24 @@ impl MenuView {
                             rf_win::dock::launch::activate(w.hwnd);
                         } else {
                             log::info!("dock: the window was not moved to monitor {number} (it is gone, or Windows refused)");
+                        }
+                    });
+                } else if let Some(launch) = a.app.launch.clone() {
+                    // Not running: started as always, and its new window is moved when it shows (a program cannot be told where
+                    // to open). The windows that are there now are noted first, to tell the new one.
+                    std::thread::spawn(move || {
+                        use rf_win::dock::winmove;
+                        let program = winmove::program_of(&launch);
+                        let known = winmove::known_windows();
+                        if let Err(e) = rf_win::dock::launch::start(&launch) {
+                            log::warn!("dock: starting the app for monitor {number} failed: {e:#}");
+                            return;
+                        }
+                        let found = program.and_then(|p| winmove::wait_for_new_window(&p, &known, std::time::Duration::from_secs(20)));
+                        match found {
+                            Some(w) if winmove::move_to_screen(w, number) => rf_win::dock::launch::activate(w.hwnd),
+                            Some(_) => log::info!("dock: the new window was not moved to monitor {number} (Windows refused)"),
+                            None => log::info!("dock: no new window of the started program was seen; it stays where it opened"),
                         }
                     });
                 }
