@@ -334,7 +334,6 @@ impl CcView {
         // (asked for from outside: it is there, it does not open out)
         self.detail = Some(Detail::Outputs);
         self.unfold = Unfold::open();
-        self.read_mixer(cx);
         true
     }
 
@@ -387,10 +386,10 @@ impl CcView {
             media: self.media.as_ref().is_some_and(|m| m.session.is_some()) && !hidden("media", cx),
             sound: !self.sound_sides(cx).is_empty(),
             brightness: if hidden("brightness", cx) { 0 } else { self.brightness.iter().filter(|b| b.available).count() },
-            // (the mixer's rows and their head stand in the outputs' list, after the devices)
+            // (the mixer's rows are the programs that play now)
             // (and the password's row in Wi-Fi's, while one is asked for)
             detail: self.detail_now().map(|d| {
-                let mixer = if d == Detail::Outputs && !self.mixer.is_empty() { self.mixer.len() + 1 } else { 0 };
+                let mixer = if d == Detail::Mixer { cc_model::mixer_rows(self.mixer.len()) } else { 0 };
                 let asking = usize::from(d == Detail::Wifi && self.wifi_asking.is_some());
                 (d, cc_model::detail_rows(d, audio.as_ref(), self.mic.as_ref(), wifi.as_ref(), bt.as_ref(), net.as_ref()) + mixer + asking)
             }),
@@ -411,7 +410,7 @@ impl CcView {
     fn drop_orphan_detail(&mut self, cx: &App) {
         let Some(d) = self.detail else { return };
         let owned = match d {
-            Detail::Outputs => self.sound_sides(cx).contains(&0),
+            Detail::Outputs | Detail::Mixer => self.sound_sides(cx).contains(&0),
             Detail::Inputs => self.sound_sides(cx).contains(&1),
             _ => self.tiles_now(cx).into_iter().any(|t| cc_model::detail_of(t) == Some(d)),
         };
@@ -558,7 +557,7 @@ impl CcView {
             // the one that is out folds back; one that is folding back and is pressed again turns round
             Some(d) if d == kind => self.unfold.go(!self.unfold.opening(), now, animate),
             // another tile's list is out in the same place: the list changes, the place stays
-            Some(d) if d != Detail::Outputs && kind != Detail::Outputs => {
+            Some(d) if d != Detail::Outputs && kind != Detail::Outputs && d != Detail::Mixer && kind != Detail::Mixer => {
                 self.detail = Some(kind);
                 self.unfold.go(true, now, animate);
             }
@@ -574,8 +573,8 @@ impl CcView {
         {
             live.wifi.scan();
         }
-        // and the mixer is read when the outputs open out
-        if self.is_open(Detail::Outputs) {
+        // and the mixer is read when it opens out
+        if self.is_open(Detail::Mixer) {
             self.read_mixer(cx);
         }
         self.run_unfold(cx);
@@ -803,7 +802,7 @@ impl CcView {
                 cx.background_executor().timer(IN_USE_POLL).await;
                 // (the mixer too, while the list of outputs is out: a program that began to play gets its row)
                 let Ok(shown) = this.update(cx, |me, cx| {
-                    if me.shown && me.is_open(Detail::Outputs) {
+                    if me.shown && me.is_open(Detail::Mixer) {
                         me.read_mixer(cx);
                     }
                     me.shown
@@ -975,11 +974,9 @@ impl CcView {
         }
         if self.sound_open(cx) != Some(side) {
             self.sound_swap.go(side, self.now_ms(), crate::settings::animations());
-            if self.detail.is_some_and(|d| d.upwards()) && self.unfold.opening() {
+            // (a list of devices that is out turns to the other side's devices; the mixer, which is no side's list, stays)
+            if self.detail.is_some_and(|d| d.upwards() && d != Detail::Mixer) && self.unfold.opening() {
                 self.detail = Some(if side == 0 { Detail::Outputs } else { Detail::Inputs });
-                if side == 0 {
-                    self.read_mixer(cx);
-                }
             }
             self.run_unfold(cx);
             self.refit(cx);
@@ -1423,7 +1420,10 @@ impl CcView {
         let mic = self.mic.clone().unwrap_or_default();
         // The row: each side is its round button, and the one that has the slider has it after the button. The two change places
         // by their widths (`cc_model::Swap`); what does not fit in an item's width is cut off, so a slider is seen coming and going.
-        let open_w = cc_model::open_width(sides.len(), cc_model::CARD_INNER - cc_model::HEAD - cc_model::ROW_GAP);
+        // (the row ends with the chevron of the devices, and before it the mixer's button where there is a speaker)
+        let has_mixer = sides.contains(&0);
+        let ends = if has_mixer { 2.0 } else { 1.0 } * (cc_model::HEAD + cc_model::ROW_GAP);
+        let open_w = cc_model::open_width(sides.len(), cc_model::CARD_INNER - ends);
         let slider_w = cc_model::open_slider(open_w);
         let moving = self.sound_swap.open() == open;
         let mut row = h_flex().h(px(cc_model::HEAD)).gap(px(cc_model::ROW_GAP)).items_center();
@@ -1464,7 +1464,14 @@ impl CcView {
                 .flex_shrink_0()
                 .px(px(12.))
                 .py(px(12.))
-                .child(row.child(chevron))
+                .child(
+                    row.children(has_mixer.then(|| {
+                        let stop = self.stop("cc-mixer", 0, cx);
+                        self.round_button("cc-mixer", L::AppWindow, cc_model::HEAD, self.is_open(Detail::Mixer), look, (Some(&stop), Some(t!("Uygulama sesleri"))))
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_detail(Detail::Mixer, cx)))
+                    }))
+                    .child(chevron),
+                )
                 .child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).truncate().text_xs().text_color(secondary).child(name))
                 .into_any_element(),
         )
@@ -1579,26 +1586,34 @@ impl CcView {
             let click: Option<RowClick> = (!d.default).then(|| Rc::new(move |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| this.choose_output(&id, window, cx)) as RowClick);
             rows.push(self.detail_row(("cc-device", i), d.default.then_some(L::Check), d.name.clone(), None, None, look, click, cx));
         }
-        // the mixer: every program that plays now, with a slider for its own level (Windows' volume mixer, here)
-        if !self.mixer.is_empty() {
-            rows.push(self.detail_line(t!("Uygulamalar"), look));
-            for (i, app) in self.mixer.iter().enumerate() {
-                rows.push(
-                    h_flex()
-                        .h(px(cc_model::DETAIL_ROW_H))
-                        .flex_shrink_0()
-                        .px(px(8.))
-                        .gap(px(8.))
-                        .items_center()
-                        .text_sm()
-                        .child(div().w(px(MIXER_NAME_W)).flex_shrink_0().truncate().child(app.name.clone()))
-                        .child(self.slider_of(SL_APP + i, self.mixer_level(app), MIXER_SLIDER_W, look, cx))
-                        .into_any_element(),
-                );
-            }
-        }
         rows.push(self.detail_link("cc-sound-settings", t!("Ses ayarları"), "ms-settings:sound", look, cx));
         (self.detail_head(t!("Çıkış aygıtları").to_string(), None, look, cx), rows)
+    }
+
+    /// The mixer: every program that plays now, with a slider for its own level (Windows' volume mixer, here), then Windows' own
+    /// page for it. It has a button of its own on the sound card: under the output devices, where it first stood, it was two clicks
+    /// and a scroll away (issue 22: "Is it possible to make selection of sound apps more comfortable? with one click").
+    fn detail_mixer(&self, look: &Look, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
+        let mut rows = Vec::new();
+        if self.mixer.is_empty() {
+            rows.push(self.detail_line(t!("Şu an ses çalan uygulama yok"), look));
+        }
+        for (i, app) in self.mixer.iter().enumerate() {
+            rows.push(
+                h_flex()
+                    .h(px(cc_model::DETAIL_ROW_H))
+                    .flex_shrink_0()
+                    .px(px(8.))
+                    .gap(px(8.))
+                    .items_center()
+                    .text_sm()
+                    .child(div().w(px(MIXER_NAME_W)).flex_shrink_0().truncate().child(app.name.clone()))
+                    .child(self.slider_of(SL_APP + i, self.mixer_level(app), MIXER_SLIDER_W, look, cx))
+                    .into_any_element(),
+            );
+        }
+        rows.push(self.detail_link("cc-mixer-settings", t!("Ses ayarları"), "ms-settings:apps-volume", look, cx));
+        (self.detail_head(t!("Uygulama sesleri").to_string(), None, look, cx), rows)
     }
 
     /// Wi-Fi: its switch, the networks in range (see `choose_network` for what a click does), Windows' Wi-Fi page.
@@ -1771,6 +1786,7 @@ impl CcView {
         let (head, rows) = match kind {
             Detail::Outputs => self.detail_outputs(look, cx),
             Detail::Inputs => self.detail_inputs(look, cx),
+            Detail::Mixer => self.detail_mixer(look, cx),
             Detail::Wifi => self.detail_wifi(look, cx),
             Detail::Bluetooth => self.detail_bluetooth(look, words, cx),
             Detail::Network => self.detail_network(look, words, cx),

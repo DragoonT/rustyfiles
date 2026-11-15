@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Klar",
  "3c1fb5c1": "Ansicht",
  "b6b609d6": "Windows-eigenen Desktop verwenden",
- "b596207c": "Solange das Dock läuft, zeichnet rustyfiles keinen eigenen Desktop: Der Windows-Desktop, seine Symbole und jedes andere Programm, das den Desktop anordnet, bleiben unverändert. Ist diese Option aktiviert, haben die anderen Einstellungen auf dieser Seite keine Wirkung."
+ "b596207c": "Solange das Dock läuft, zeichnet rustyfiles keinen eigenen Desktop: Der Windows-Desktop, seine Symbole und jedes andere Programm, das den Desktop anordnet, bleiben unverändert. Ist diese Option aktiviert, haben die anderen Einstellungen auf dieser Seite keine Wirkung.",
+ "e619f52d": "App-Lautstärke",
+ "1ce4994b": "Aktuell gibt keine App Ton wieder"
 }

@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Selkeää",
  "3c1fb5c1": "Näkymä",
  "b6b609d6": "Käytä Windowsin omaa työpöytää",
- "b596207c": "Kun Dock on käynnissä, rustyfiles ei piirrä omaa työpöytäänsä: Windowsin työpöytä, sen kuvakkeet ja muut työpöytää järjestävät ohjelmat pysyvät ennallaan. Kun tämä on käytössä, muut tämän sivun valinnat eivät vaikuta mihinkään."
+ "b596207c": "Kun Dock on käynnissä, rustyfiles ei piirrä omaa työpöytäänsä: Windowsin työpöytä, sen kuvakkeet ja muut työpöytää järjestävät ohjelmat pysyvät ennallaan. Kun tämä on käytössä, muut tämän sivun valinnat eivät vaikuta mihinkään.",
+ "e619f52d": "Sovellusten äänenvoimakkuus",
+ "1ce4994b": "Mikään sovellus ei toista ääntä juuri nyt"
 }

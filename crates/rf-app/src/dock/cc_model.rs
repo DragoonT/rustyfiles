@@ -103,6 +103,9 @@ pub enum Detail {
     Outputs,
     /// The input devices: opens out UPWARDS from the microphone's card.
     Inputs,
+    /// The programs that play now, each with a slider for its own level: opens out UPWARDS from the sound card, by a button of its
+    /// own (issue 22: under the output devices it was two clicks and a scroll away).
+    Mixer,
     /// A tile's own list: opens out DOWNWARDS from the tiles.
     Wifi,
     Bluetooth,
@@ -112,7 +115,7 @@ pub enum Detail {
 impl Detail {
     /// It opens out upwards, from a card under it (the others open downwards, from the tiles).
     pub fn upwards(self) -> bool {
-        matches!(self, Detail::Outputs | Detail::Inputs)
+        matches!(self, Detail::Outputs | Detail::Inputs | Detail::Mixer)
     }
 }
 
@@ -362,6 +365,8 @@ pub fn detail_rows(d: Detail, audio: Option<&AudioSnapshot>, mic: Option<&AudioS
     match d {
         Detail::Outputs => audio.map_or(0, |a| a.devices.len()) + 1,
         Detail::Inputs => mic.map_or(0, |a| a.devices.len()) + 1,
+        // (the programs' rows are the panel's own to count: `mixer_rows`)
+        Detail::Mixer => 0,
         Detail::Wifi => match wifi {
             Some(w) if w.power == Power::On && w.listing == Listing::Denied => 3,
             Some(w) if w.power == Power::On && !w.networks.is_empty() => w.networks.len() + 1,
@@ -448,6 +453,12 @@ pub fn swap_width(share: f32, open: f32) -> f32 {
 }
 
 /// The width the open item of a row of `items` has, when the row is `room` wide: what the others, as round buttons, leave it.
+/// The rows of the mixer's detail for `apps` programs that play: one each, or one line that says there is none, and the way to
+/// Windows' own page.
+pub fn mixer_rows(apps: usize) -> usize {
+    apps.max(1) + 1
+}
+
 pub fn open_width(items: usize, room: f32) -> f32 {
     room - items.saturating_sub(1) as f32 * (HEAD + ROW_GAP)
 }
@@ -1561,5 +1572,20 @@ mod tests {
         }
         let _ = sound_device_text(&AudioSnapshot::default(), EN);
         let _ = media_lines(&MediaSession { app: String::new(), title: String::new(), artist: String::new(), playing: false, can_previous: false, can_next: false, can_toggle: false, artwork: None }, EN);
+    }
+}
+
+#[cfg(test)]
+mod mixer_tests {
+    use super::{Detail, detail_rows, mixer_rows};
+
+    /// The mixer opens from the sound card like the lists of devices, and its rows are the programs that play.
+    #[test]
+    fn the_mixer_is_a_detail_of_its_own_above_the_sound_card() {
+        assert!(Detail::Mixer.upwards());
+        assert_eq!(detail_rows(Detail::Mixer, None, None, None, None, None), 0, "its rows are counted by the panel, which holds the programs");
+        assert_eq!(mixer_rows(0), 2, "nothing plays: a line that says so, and the way to Windows' page");
+        assert_eq!(mixer_rows(1), 2);
+        assert_eq!(mixer_rows(5), 6);
     }
 }

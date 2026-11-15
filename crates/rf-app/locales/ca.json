@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Serè",
  "3c1fb5c1": "Visualitza",
  "b6b609d6": "Fes servir l'escriptori propi de Windows",
- "b596207c": "Mentre el Dock s'executa, rustyfiles no dibuixa el seu propi escriptori: l'escriptori de Windows, les seves icones i qualsevol altre programa que organitzi l'escriptori es queden tal com són. Mentre estigui activat, les altres opcions d'aquesta pàgina no fan res."
+ "b596207c": "Mentre el Dock s'executa, rustyfiles no dibuixa el seu propi escriptori: l'escriptori de Windows, les seves icones i qualsevol altre programa que organitzi l'escriptori es queden tal com són. Mentre estigui activat, les altres opcions d'aquesta pàgina no fan res.",
+ "e619f52d": "Volum de les aplicacions",
+ "1ce4994b": "Cap aplicació no està reproduint so ara mateix"
 }

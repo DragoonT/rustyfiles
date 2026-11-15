@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Dégagé",
  "3c1fb5c1": "Affichage",
  "b6b609d6": "Utiliser le Bureau de Windows",
- "b596207c": "Tant que le Dock fonctionne, rustyfiles ne dessine pas son propre bureau : le Bureau de Windows, ses icônes et tout autre programme qui organise le bureau restent tels quels. Lorsque cette option est activée, les autres choix de cette page n'ont aucun effet."
+ "b596207c": "Tant que le Dock fonctionne, rustyfiles ne dessine pas son propre bureau : le Bureau de Windows, ses icônes et tout autre programme qui organise le bureau restent tels quels. Lorsque cette option est activée, les autres choix de cette page n'ont aucun effet.",
+ "e619f52d": "Volume des applications",
+ "1ce4994b": "Aucune application ne lit du son pour le moment"
 }

@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Trời quang",
  "3c1fb5c1": "Xem",
  "b6b609d6": "Dùng màn hình nền riêng của Windows",
- "b596207c": "Khi Dock đang chạy, rustyfiles không vẽ màn hình nền riêng: màn hình nền của Windows, các biểu tượng của nó và mọi chương trình khác sắp xếp màn hình nền được giữ nguyên. Khi bật tùy chọn này, các tùy chọn khác trên trang này không có tác dụng."
+ "b596207c": "Khi Dock đang chạy, rustyfiles không vẽ màn hình nền riêng: màn hình nền của Windows, các biểu tượng của nó và mọi chương trình khác sắp xếp màn hình nền được giữ nguyên. Khi bật tùy chọn này, các tùy chọn khác trên trang này không có tác dụng.",
+ "e619f52d": "Âm lượng ứng dụng",
+ "1ce4994b": "Hiện không có ứng dụng nào đang phát âm thanh"
 }

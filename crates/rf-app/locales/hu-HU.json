@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Derült",
  "3c1fb5c1": "Nézet",
  "b6b609d6": "A Windows saját asztalának használata",
- "b596207c": "Amíg a Dock fut, a rustyfiles nem rajzol saját asztalt: a Windows asztala, az ikonjai és az asztalt rendező bármely más program változatlan marad. Amíg ez be van kapcsolva, az oldal többi beállítása nem csinál semmit."
+ "b596207c": "Amíg a Dock fut, a rustyfiles nem rajzol saját asztalt: a Windows asztala, az ikonjai és az asztalt rendező bármely más program változatlan marad. Amíg ez be van kapcsolva, az oldal többi beállítása nem csinál semmit.",
+ "e619f52d": "Alkalmazások hangereje",
+ "1ce4994b": "Jelenleg egyik alkalmazás sem játszik le hangot"
 }

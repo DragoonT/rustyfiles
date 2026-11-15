@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Vedro",
  "3c1fb5c1": "Prikaz",
  "b6b609d6": "Koristi Windowsovu radnu površinu",
- "b596207c": "Dok Dock radi, rustyfiles ne crta vlastitu radnu površinu: Windowsova radna površina, njezine ikone i svaki drugi program koji uređuje radnu površinu ostaju kakvi jesu. Dok je ovo uključeno, ostale opcije na ovoj stranici ne rade ništa."
+ "b596207c": "Dok Dock radi, rustyfiles ne crta vlastitu radnu površinu: Windowsova radna površina, njezine ikone i svaki drugi program koji uređuje radnu površinu ostaju kakvi jesu. Dok je ovo uključeno, ostale opcije na ovoj stranici ne rade ništa.",
+ "e619f52d": "Glasnoća aplikacija",
+ "1ce4994b": "Trenutačno nijedna aplikacija ne reproducira zvuk"
 }

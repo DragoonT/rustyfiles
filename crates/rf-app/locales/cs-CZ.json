@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Jasno",
  "3c1fb5c1": "Zobrazení",
  "b6b609d6": "Používat vlastní plochu Windows",
- "b596207c": "Dokud je spuštěný Dock, rustyfiles nevykresluje vlastní plochu: plocha Windows, její ikony i jakýkoli jiný program, který plochu uspořádává, zůstanou beze změny. Když je tato možnost zapnutá, ostatní volby na této stránce nic nedělají."
+ "b596207c": "Dokud je spuštěný Dock, rustyfiles nevykresluje vlastní plochu: plocha Windows, její ikony i jakýkoli jiný program, který plochu uspořádává, zůstanou beze změny. Když je tato možnost zapnutá, ostatní volby na této stránce nic nedělají.",
+ "e619f52d": "Hlasitost aplikací",
+ "1ce4994b": "Žádná aplikace právě nepřehrává zvuk"
 }

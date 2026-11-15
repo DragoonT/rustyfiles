@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Cerah",
  "3c1fb5c1": "Tampilan",
  "b6b609d6": "Gunakan desktop asli Windows",
- "b596207c": "Selama Dock berjalan, rustyfiles tidak menggambar desktop-nya sendiri: desktop Windows, ikonnya, dan program lain yang mengatur desktop tetap seperti semula. Saat ini aktif, pilihan lain di halaman ini tidak berpengaruh."
+ "b596207c": "Selama Dock berjalan, rustyfiles tidak menggambar desktop-nya sendiri: desktop Windows, ikonnya, dan program lain yang mengatur desktop tetap seperti semula. Saat ini aktif, pilihan lain di halaman ini tidak berpengaruh.",
+ "e619f52d": "Volume aplikasi",
+ "1ce4994b": "Tidak ada aplikasi yang memutar suara saat ini"
 }

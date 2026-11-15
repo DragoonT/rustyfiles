@@ -1929,5 +1929,7 @@
  "e5ca9fdd": "Despejado",
  "3c1fb5c1": "Vista",
  "b6b609d6": "Usar el escritorio propio de Windows",
- "b596207c": "Mientras el Dock está en ejecución, rustyfiles no dibuja su propio escritorio: el escritorio de Windows, sus iconos y cualquier otro programa que organice el escritorio se quedan como están. Mientras esto esté activado, las demás opciones de esta página no hacen nada."
+ "b596207c": "Mientras el Dock está en ejecución, rustyfiles no dibuja su propio escritorio: el escritorio de Windows, sus iconos y cualquier otro programa que organice el escritorio se quedan como están. Mientras esto esté activado, las demás opciones de esta página no hacen nada.",
+ "e619f52d": "Volumen de aplicaciones",
+ "1ce4994b": "Ninguna aplicación está reproduciendo sonido ahora"
 }
