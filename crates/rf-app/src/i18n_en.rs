@@ -1515,6 +1515,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Eski yeri başka bir dosya tutuyor", "Another file is in its old place"),
     ("Dosya düzenleyici", "File organizer"),
     ("Dosya türleri", "File types"),
+    ("Ekle", "Add"),
+    ("Tüm dosyalar", "All files"),
     ("Vurgu rengi", "Accent color"),
     ("Gizlenen sürücüler", "Hidden drives"),
     ("Bu sürücüyü gizle", "Hide this drive"),
