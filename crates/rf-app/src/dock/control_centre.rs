@@ -2,14 +2,25 @@
 //! places and closes it; this is what is inside). About 360 logical px wide, as tall as what it shows, on HyperGlass, with the app's
 //! liquid controls. Top to bottom, in the layout of the mock-up the user liked:
 //!
-//! 1. Connectivity tiles, two to a row: the network (Wi-Fi name and strength, Ethernet, not connected), Bluetooth (off, on, or who is
-//!    connected) and, on a machine with a battery, the battery. A tile opens Windows' page for it; none of them switches anything
-//!    (see the notes in `rf_win::sysstatus`). A tile whose source is not on the machine is left out.
+//! 1. Connectivity tiles, two to a row (a last one alone takes the row): Wi-Fi and Bluetooth on a machine that has the radio, the
+//!    network that is not Wi-Fi (the cable) and, on a machine with a battery, the battery. A tile whose source is not on the
+//!    machine is left out. THE ROUND BUTTON of the Wi-Fi and the Bluetooth tile switches the radio on and off
+//!    (`rf_win::sysstatus::radio`); THE TILE opens its detail: the networks in range (a click connects to one Windows has saved or
+//!    to an open one, leaves the connected one, and sends a network that wants a new password to Windows' own page), the paired
+//!    Bluetooth devices, the cable's state and address. The battery's tile opens Windows' page.
 //! 2. "Now playing", only while the system has a media session: artwork, title, artist, the program, previous / play-pause / next.
 //! 3. Sound: a liquid slider for the master volume with a speaker at its left that mutes, the default output device's name under it,
 //!    and a chevron that lists the output devices. A click on one makes it Windows' default output
 //!    (`rf_win::sysstatus::audio::set_default_output`, which says how); the list ends with a link to Windows' sound settings. A
 //!    right click on the island's volume symbol opens the panel with this list open ([`ask_devices`]).
+//!
+//! A DETAIL TAKES THE PLACE of other cards, it does not make the panel taller (`cc_model::layout` says which and why): the
+//! outputs open out upwards from the sound card over the tiles and the media card, a tile's list downwards over the media, sound
+//! and brightness cards. One is open at a time; the button that opened it closes it. IT GROWS: the card comes out of the edge
+//! that stays (the sound card's top, the tiles' bottom) on a spring (`cc_model::Unfold`), over the cards it covers, which fade
+//! under it, and folds back the same way (the user, of a first version that changed at once: "büyümesi animasyonlu değil?? spring
+//! animasyonlu olmalı. büyümeli yani."). With the animations setting off it is there at once.
+//!
 //! 4. Brightness, only when the primary monitor answers DDC/CI.
 //! 5. A gear that opens Windows' Settings.
 //!
@@ -23,8 +34,8 @@
 //! media buttons, the brightness slider, the gear), with a ring in the accent colour while it has the focus by key. Enter and Space
 //! press a button; a slider takes the arrows (one step), Shift or the page keys (ten steps), Home and End; Escape closes the panel.
 //!
-//! WRITES. The slider's drag, the speaker, the choice of an output device, the transport buttons and the brightness slider are the
-//! user's own clicks and drags; each call is made from that event and nowhere else.
+//! WRITES. The slider's drag, the speaker, the choice of an output device, a radio's button, the choice of a network, the transport
+//! buttons and the brightness slider are the user's own clicks and drags; each call is made from that event and nowhere else.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -46,9 +57,11 @@ use rf_win::sysstatus::brightness::{self, Brightness, BrightnessSnapshot};
 use rf_win::sysstatus::media::{self, Artwork, Media, MediaSnapshot, Transport};
 use rf_win::sysstatus::network::{self, Link};
 use rf_win::sysstatus::power::{self, BatterySnapshot};
+use rf_win::sysstatus::radio::{self, Kind as RadioKind, Power as RadioPower};
+use rf_win::sysstatus::wifi::{self, Listing, WifiSnapshot};
 
 use super::backdrop::IslandGlass;
-use super::cc_model::{self, Shown, Tile, Words};
+use super::cc_model::{self, Area, Detail, Section, Shown, Tile, Unfold, Words};
 use super::look::Palette;
 use super::sysstate::{self, SysState};
 use crate::glass_watch::{self, PopupGlass};
@@ -63,9 +76,30 @@ const CARD_R: f32 = 12.0;
 /// How often the Wi-Fi bars are read again while the panel is open (Windows has no event for a signal that only changes).
 const WIFI_POLL: Duration = Duration::from_secs(5);
 
+/// A developer's switch, for a look at the panel of a machine that lacks something on a machine that has everything: the parts
+/// named in `RUSTYFILES_CC_WITHOUT` (a comma list of media, sound, brightness, wifi, bluetooth, network) are treated as not there.
+fn without(part: &str) -> bool {
+    static NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| std::env::var("RUSTYFILES_CC_WITHOUT").map(|v| v.split(',').map(|s| s.trim().to_lowercase()).collect()).unwrap_or_default()).iter().any(|p| p == part)
+}
+
+/// How long a network's row says "connecting" after it was chosen, when Windows never says it is connected.
+const JOIN_WAIT: Duration = Duration::from_secs(12);
+
+/// What a click on a tile does: opens its detail in the panel, or a page of Windows.
+#[derive(Clone, Copy)]
+enum TileAct {
+    Detail(Detail),
+    Page(&'static str),
+}
+
+/// What a click on a row of a detail does.
+type RowClick = Rc<dyn Fn(&mut CcView, &mut Window, &mut Context<CcView>)>;
+
 /// What the live sources tell the view.
 enum Ev {
     Media(MediaSnapshot),
+    Wifi(WifiSnapshot),
     Bluetooth(BluetoothSnapshot),
     Battery(BatterySnapshot),
     Brightness(BrightnessSnapshot),
@@ -74,6 +108,7 @@ enum Ev {
 /// The sources that run while the panel is open. Dropping it stops them.
 struct Live {
     media: Media,
+    wifi: wifi::Wifi,
     _bluetooth: Subscription,
     _battery: Option<Subscription>,
     brightness: Brightness,
@@ -108,6 +143,7 @@ pub struct CcView {
 
     // what the live sources last said
     media: Option<MediaSnapshot>,
+    wifi: Option<WifiSnapshot>,
     bluetooth: Option<BluetoothSnapshot>,
     battery: Option<BatterySnapshot>,
     brightness: Option<BrightnessSnapshot>,
@@ -117,7 +153,19 @@ pub struct CcView {
     _tasks: Vec<Task<()>>,
 
     // the interface
-    devices_open: bool,
+    /// The part that is opened out, or is folding back, one at a time: the outputs above the sound card, or a tile's list under
+    /// the tiles. How far it is out is `unfold`.
+    detail: Option<Detail>,
+    unfold: Unfold,
+    /// The clock `unfold` is asked with.
+    born: Instant,
+    /// Draws the frames of a detail's motion (and moves the window where the panel grows with it).
+    _unfold: Option<Task<()>>,
+    /// What the last press on a radio's button asked for, and when (`cc_model::shown_power`).
+    wifi_ask: Option<(bool, Instant)>,
+    bt_ask: Option<(bool, Instant)>,
+    /// The network the user chose to connect to, and when: its row says so until Windows has connected (or `JOIN_WAIT` is over).
+    joining: Option<(String, Instant)>,
     /// The slider being dragged right now.
     drag: Option<usize>,
     /// The volume the slider shows while the user drags it and until Windows has answered (the snapshot may lag a moment).
@@ -153,6 +201,7 @@ impl CcView {
                 this.vol_drag = None;
             }
             if this.shown {
+                this.drop_orphan_detail(cx);
                 this.refit(cx);
                 cx.notify();
             }
@@ -176,13 +225,20 @@ impl CcView {
             stops: RefCell::new(HashMap::new()),
             mute_ask: None,
             media: None,
+            wifi: None,
             bluetooth: None,
             battery: None,
             brightness: None,
             art: None,
             live: None,
             _tasks: Vec::new(),
-            devices_open: false,
+            detail: None,
+            unfold: Unfold::folded(),
+            born: Instant::now(),
+            _unfold: None,
+            wifi_ask: None,
+            bt_ask: None,
+            joining: None,
             drag: None,
             vol_drag: None,
             reported: 0.0,
@@ -196,7 +252,9 @@ impl CcView {
             return false;
         }
         cx.set_global(DevicesAsk(None));
-        self.devices_open = true;
+        // (asked for from outside: it is there, it does not open out)
+        self.detail = Some(Detail::Outputs);
+        self.unfold = Unfold::open();
         true
     }
 
@@ -207,23 +265,74 @@ impl CcView {
 
     // ------------------------------------------------------------------ what is shown
 
+    /// The tiles this machine gets now (`cc_model::tiles`).
+    fn tiles_now(&self, cx: &App) -> Vec<Tile> {
+        let net = sysstate::network(cx).filter(|_| !without("network"));
+        let wifi = self.wifi.as_ref().filter(|_| !without("wifi"));
+        let bt = self.bluetooth.as_ref().filter(|_| !without("bluetooth"));
+        cc_model::tiles(net.as_ref(), wifi, bt, self.battery.as_ref())
+    }
+
     fn shown_now(&self, cx: &App) -> Shown {
         let net = sysstate::network(cx);
         let audio = sysstate::audio(cx);
-        let tiles = cc_model::tiles(net.as_ref(), self.bluetooth.as_ref(), self.battery.as_ref()).len();
-        let sound = audio.as_ref().is_some_and(|a| a.available);
+        let tiles = self.tiles_now(cx).len();
+        let (wifi, bt) = (self.wifi_now(), self.bt_now());
         Shown {
             tiles,
-            media: self.media.as_ref().is_some_and(|m| m.session.is_some()),
-            sound,
-            devices: (self.devices_open && sound).then(|| audio.as_ref().map_or(0, |a| a.devices.len()) + 1),
-            brightness: self.brightness.is_some_and(|b| b.available),
+            media: self.media.as_ref().is_some_and(|m| m.session.is_some()) && !without("media"),
+            sound: audio.as_ref().is_some_and(|a| a.available) && !without("sound"),
+            brightness: self.brightness.is_some_and(|b| b.available) && !without("brightness"),
+            detail: self.detail_now().map(|d| (d, cc_model::detail_rows(d, audio.as_ref(), wifi.as_ref(), bt.as_ref(), net.as_ref()))),
         }
     }
 
-    /// The window's height now, logical px.
+    fn now_ms(&self) -> u64 {
+        self.born.elapsed().as_millis() as u64
+    }
+
+    /// The detail that is out or on its way (in or out): `None` once it has folded back.
+    fn detail_now(&self) -> Option<Detail> {
+        self.detail.filter(|_| self.unfold.opening() || !self.unfold.settled(self.now_ms()))
+    }
+
+    /// A detail whose owner has gone while it was out (the Bluetooth adapter was pulled, the last sound device went) goes with it:
+    /// it has no button left to fold it back with.
+    fn drop_orphan_detail(&mut self, cx: &App) {
+        let Some(d) = self.detail else { return };
+        let owned = match d {
+            Detail::Outputs => sysstate::audio(cx).is_some_and(|a| a.available) && !without("sound"),
+            _ => self.tiles_now(cx).into_iter().any(|t| cc_model::detail_of(t) == Some(d)),
+        };
+        if !owned {
+            self.detail = None;
+            self.unfold = Unfold::folded();
+            self._unfold = None;
+        }
+    }
+
+    /// That detail is open, or opening (what its button shows).
+    fn is_open(&self, d: Detail) -> bool {
+        self.detail == Some(d) && self.unfold.opening()
+    }
+
+    /// Wi-Fi as it is shown: the radio's state is what the user has just pressed for while Windows has not yet said so.
+    fn wifi_now(&self) -> Option<WifiSnapshot> {
+        let mut w = self.wifi.clone()?;
+        w.power = cc_model::shown_power(w.power, self.wifi_ask.map(|(on, at)| (on, at.elapsed().as_millis() as u64)));
+        Some(w)
+    }
+
+    /// Bluetooth as it is shown (see `wifi_now`).
+    fn bt_now(&self) -> Option<BluetoothSnapshot> {
+        let mut b = self.bluetooth.clone()?;
+        b.power = cc_model::shown_power(b.power, self.bt_ask.map(|(on, at)| (on, at.elapsed().as_millis() as u64)));
+        Some(b)
+    }
+
+    /// The window's height now, logical px (it follows a detail that has to make the panel taller while it opens out).
     pub fn height(&self, cx: &App) -> f32 {
-        cc_model::height(&self.shown_now(cx))
+        cc_model::height_at(&self.shown_now(cx), self.unfold.value(self.now_ms()))
     }
 
     /// Tells the panel when what is shown wants another height.
@@ -245,7 +354,12 @@ impl CcView {
         self.shown = true;
         self.closing = false;
         self.anim = Some((Instant::now(), true));
-        self.devices_open = false;
+        self.detail = None;
+        self.unfold = Unfold::folded();
+        self._unfold = None;
+        self.wifi_ask = None;
+        self.bt_ask = None;
+        self.joining = None;
         self.take_devices_ask(cx);
         self.drag = None;
         self.vol_drag = None;
@@ -298,7 +412,9 @@ impl CcView {
     pub fn on_close(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.closing = true;
         self.anim = Some((Instant::now(), false));
-        self.devices_open = false;
+        self.detail = None;
+        self.unfold = Unfold::folded();
+        self._unfold = None;
         self.drag = None;
         cx.notify();
     }
@@ -314,11 +430,124 @@ impl CcView {
         cx.notify();
     }
 
-    /// Starts what runs while the panel is open: the media session, Bluetooth, the battery (if there is one), the brightness, and the
-    /// 5 s look at the Wi-Fi bars.
+    /// Opens a detail out, or folds it back when it is the open one. (A detail takes the place of other cards and grows out of the
+    /// edge that stays: `cc_model::layout`.)
+    fn toggle_detail(&mut self, kind: Detail, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        let (now, animate) = (self.now_ms(), crate::settings::animations());
+        match self.detail_now() {
+            // the one that is out folds back; one that is folding back and is pressed again turns round
+            Some(d) if d == kind => self.unfold.go(!self.unfold.opening(), now, animate),
+            // another tile's list is out in the same place: the list changes, the place stays
+            Some(d) if d != Detail::Outputs && kind != Detail::Outputs => {
+                self.detail = Some(kind);
+                self.unfold.go(true, now, animate);
+            }
+            _ => {
+                self.detail = Some(kind);
+                self.unfold = Unfold::folded();
+                self.unfold.go(true, now, animate);
+            }
+        }
+        // the list of networks is asked for afresh when it is opened
+        if self.is_open(Detail::Wifi)
+            && let Some(live) = &self.live
+        {
+            live.wifi.scan();
+        }
+        self.run_unfold(cx);
+        self.refit(cx);
+        cx.notify();
+    }
+
+    /// Draws the frames of the detail's motion until it has come to rest (about 7 ms apart: every frame of a fast display), and
+    /// lets the window follow where the panel grows with the card.
+    fn run_unfold(&mut self, cx: &mut Context<Self>) {
+        self._unfold = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_millis(7)).await;
+                let Ok(done) = this.update(cx, |me, cx| {
+                    let done = me.unfold.settled(me.now_ms());
+                    if done && !me.unfold.opening() {
+                        me.detail = None;
+                    }
+                    me.refit(cx);
+                    cx.notify();
+                    done
+                }) else {
+                    break;
+                };
+                if done {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Draws again after `after` (something shown for a while is due to end: a pressed radio's state, a row's "connecting").
+    fn redraw_in(&self, after: Duration, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(after).await;
+            let _ = this.update(cx, |me, cx| {
+                me.refit(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// A press on a radio's button (the tile's round one, or the switch in its detail): asks Windows for the other state. The
+    /// button shows it at once and Windows' own word follows (`cc_model::shown_power`).
+    fn press_radio(&mut self, kind: RadioKind, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        let now = match kind {
+            RadioKind::WiFi => self.wifi_now().map(|w| w.power),
+            RadioKind::Bluetooth => self.bt_now().map(|b| b.power),
+        };
+        let Some(want) = now.and_then(radio::toggled) else { return };
+        radio::set(kind, want);
+        let ask = Some((want, Instant::now()));
+        match kind {
+            RadioKind::WiFi => self.wifi_ask = ask,
+            RadioKind::Bluetooth => self.bt_ask = ask,
+        }
+        self.redraw_in(Duration::from_millis(cc_model::RADIO_PENDING_MS + 100), cx);
+        self.refit(cx);
+        cx.notify();
+    }
+
+    /// A click on a network of the list: the connected one is left; one Windows can connect by itself (saved, or open) is
+    /// connected; one that wants a password Windows does not have goes to Windows' own Wi-Fi page.
+    fn choose_network(&mut self, ssid: &str, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        let Some(n) = self.wifi.as_ref().and_then(|w| w.networks.iter().find(|n| n.ssid == ssid)).cloned() else { return };
+        if n.connected {
+            self.joining = None;
+            wifi::disconnect();
+        } else if wifi::way_to(&n).is_some() {
+            wifi::connect(ssid);
+            self.joining = Some((ssid.to_string(), Instant::now()));
+            self.redraw_in(JOIN_WAIT + Duration::from_millis(100), cx);
+        } else {
+            return self.open_settings("ms-settings:network-wifi", cx);
+        }
+        cx.notify();
+    }
+
+    /// Starts what runs while the panel is open: the media session, Wi-Fi, Bluetooth, the battery (if there is one), the brightness,
+    /// and the 5 s look at the Wi-Fi bars.
     fn start_live(&mut self, cx: &mut Context<Self>) {
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<Ev>();
-        let (t_media, t_bt, t_bat, t_br) = (tx.clone(), tx.clone(), tx.clone(), tx);
+        let (t_media, t_wifi, t_bt, t_bat, t_br) = (tx.clone(), tx.clone(), tx.clone(), tx.clone(), tx);
+        let wifi = wifi::subscribe(move |s| {
+            let _ = t_wifi.unbounded_send(Ev::Wifi(s.clone()));
+        });
         let media = media::subscribe(move |s| {
             let _ = t_media.unbounded_send(Ev::Media(s.clone()));
         });
@@ -336,7 +565,7 @@ impl CcView {
         let brightness = brightness::open(move |b| {
             let _ = t_br.unbounded_send(Ev::Brightness(*b));
         });
-        self.live = Some(Live { media, _bluetooth: bluetooth, _battery: battery, brightness });
+        self.live = Some(Live { media, wifi, _bluetooth: bluetooth, _battery: battery, brightness });
         network::refresh();
         let events = cx.spawn(async move |this, cx| {
             while let Some(ev) = rx.next().await {
@@ -371,7 +600,22 @@ impl CcView {
                 }
                 self.media = Some(m);
             }
-            Ev::Bluetooth(b) => self.bluetooth = Some(b),
+            // (Windows has said what was pressed for: the pressed state has done its work)
+            Ev::Wifi(w) => {
+                if self.wifi_ask.is_some_and(|(on, _)| (w.power == RadioPower::On) == on) {
+                    self.wifi_ask = None;
+                }
+                if self.joining.as_ref().is_some_and(|(ssid, _)| w.connected().is_some_and(|n| n.ssid == *ssid)) {
+                    self.joining = None;
+                }
+                self.wifi = Some(w);
+            }
+            Ev::Bluetooth(b) => {
+                if self.bt_ask.is_some_and(|(on, _)| (b.power == RadioPower::On) == on) {
+                    self.bt_ask = None;
+                }
+                self.bluetooth = Some(b);
+            }
             Ev::Battery(b) => self.battery = Some(b),
             // a value the user has just dragged to is not taken back by the monitor's old answer
             // (DDC/CI misses a transfer now and then even after the retries: a monitor that answered before and does not now keeps its
@@ -382,6 +626,7 @@ impl CcView {
                 }
             }
         }
+        self.drop_orphan_detail(cx);
         self.refit(cx);
         cx.notify();
     }
@@ -487,12 +732,27 @@ impl CcView {
         div().rounded(px(CARD_R)).bg(look.pal.field_fill().hsla())
     }
 
-    fn tile(&self, id: &'static str, icon: L, text: cc_model::TileText, look: &Look, uri: &'static str, cx: &mut Context<Self>) -> AnyElement {
+    /// One tile. Its round button is the radio's switch when the tile has a radio (`radio`), else only the tile's picture; the tile
+    /// itself opens its detail or a page of Windows (`act`). Two keyboard stops when there is a switch: the tile, then the button.
+    #[allow(clippy::too_many_arguments)]
+    fn tile(&self, id: &'static str, icon: L, text: cc_model::TileText, look: &Look, act: TileAct, radio: Option<RadioKind>, cx: &mut Context<Self>) -> AnyElement {
         let pressed = look.pal.pressed_fill().hsla();
         let ring = look.accent;
+        let secondary = look.pal.text_secondary().hsla();
         let focus = self.stop(id, 0, cx);
-        // (the round button inside is the tile's picture; the tile is the one keyboard stop)
-        let button = self.round_button((id, 1usize), icon, 40.0, text.active, look, (None, None));
+        let open = matches!(act, TileAct::Detail(d) if self.is_open(d));
+        let button = match radio {
+            Some(kind) => {
+                let stop = self.stop(id, 1, cx);
+                let tip = if text.active { t!("Kapat") } else { t!("Aç") };
+                self.round_button((id, 1usize), icon, 40.0, text.active, look, (Some(&stop), Some(tip))).on_click(cx.listener(move |this, _, _, cx| {
+                    // (the press is the button's: the tile under it does not open)
+                    cx.stop_propagation();
+                    this.press_radio(kind, cx);
+                }))
+            }
+            None => self.round_button((id, 1usize), icon, 40.0, text.active, look, (None, None)),
+        };
         h_flex()
             .id(id)
             .flex_1()
@@ -503,7 +763,7 @@ impl CcView {
             .items_center()
             .rounded(px(CARD_R))
             .border_2()
-            .border_color(transparent_black())
+            .border_color(if open { ring } else { transparent_black() })
             .bg(look.pal.field_fill().hsla())
             .cursor_pointer()
             .track_focus(&focus)
@@ -515,38 +775,47 @@ impl CcView {
                     .flex_1()
                     .min_w_0()
                     .child(div().truncate().text_sm().font_weight(FontWeight::SEMIBOLD).child(text.title))
-                    .child(div().truncate().text_xs().text_color(look.pal.text_secondary().hsla()).child(text.subtitle)),
+                    .child(div().truncate().text_xs().text_color(secondary).child(text.subtitle)),
             )
-            .on_click(cx.listener(move |this, _, _, cx| this.open_settings(uri, cx)))
+            // (a tile that opens out says so, and which way it is now)
+            .when(matches!(act, TileAct::Detail(_)), |d| d.child(Icon::new(if open { L::ChevronUp } else { L::ChevronDown }).size(px(14.)).flex_shrink_0().text_color(secondary)))
+            .on_click(cx.listener(move |this, _, _, cx| match act {
+                TileAct::Detail(d) => this.toggle_detail(d, cx),
+                TileAct::Page(uri) => this.open_settings(uri, cx),
+            }))
             .into_any_element()
     }
 
     fn render_tiles(&self, look: &Look, words: Words, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let net = sysstate::network(cx);
-        let tiles = cc_model::tiles(net.as_ref(), self.bluetooth.as_ref(), self.battery.as_ref());
+        let tiles = self.tiles_now(cx);
         let mut items: Vec<AnyElement> = Vec::new();
         for t in tiles {
+            let act = cc_model::detail_of(t).map_or(TileAct::Page("ms-settings:powersleep"), TileAct::Detail);
             items.push(match t {
+                Tile::Wifi => {
+                    let w = self.wifi_now().unwrap_or_default();
+                    self.tile("cc-wifi", cc_model::wifi_icon(&w), cc_model::wifi_text(&w, net.as_ref(), words), look, act, Some(RadioKind::WiFi), cx)
+                }
                 Tile::Network => {
                     let n = net.clone().unwrap_or_default();
-                    self.tile("cc-network", cc_model::network_icon(network::glyph(&n)), cc_model::network_text(&n, words), look, "ms-settings:network", cx)
+                    self.tile("cc-network", cc_model::network_icon(network::glyph(&n)), cc_model::network_text(&n, words), look, act, None, cx)
                 }
                 Tile::Bluetooth => {
-                    let b = self.bluetooth.clone().unwrap_or_default();
-                    self.tile("cc-bluetooth", cc_model::bluetooth_icon(&b), cc_model::bluetooth_text(&b, words), look, "ms-settings:bluetooth", cx)
+                    let b = self.bt_now().unwrap_or_default();
+                    self.tile("cc-bluetooth", cc_model::bluetooth_icon(&b), cc_model::bluetooth_text(&b, words), look, act, Some(RadioKind::Bluetooth), cx)
                 }
                 Tile::Battery => {
                     let b = self.battery.unwrap_or_default();
-                    self.tile("cc-battery", cc_model::battery_icon(&b), cc_model::battery_text(&b, words), look, "ms-settings:powersleep", cx)
+                    self.tile("cc-battery", cc_model::battery_icon(&b), cc_model::battery_text(&b, words), look, act, None, cx)
                 }
             });
         }
-        // two to a row; a lone tile keeps its half
+        // two to a row; a last one alone takes the row
         let mut rows = Vec::new();
         let mut it = items.into_iter();
         while let Some(first) = it.next() {
-            let second = it.next().unwrap_or_else(|| div().flex_1().into_any_element());
-            rows.push(h_flex().gap(px(cc_model::GAP)).child(first).child(second).into_any_element());
+            rows.push(h_flex().flex_shrink_0().gap(px(cc_model::GAP)).child(first).children(it.next()).into_any_element());
         }
         rows
     }
@@ -696,15 +965,13 @@ impl CcView {
                 audio::set_muted(want);
             }));
         // (the list opens ABOVE this card, so the chevron points up while it is closed)
+        let outputs_open = self.is_open(Detail::Outputs);
         let chevron = self
-            .round_button("cc-devices", if self.devices_open { L::ChevronDown } else { L::ChevronUp }, 28.0, false, look, (Some(&devices_focus), Some(t!("Çıkış aygıtları"))))
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.devices_open = !this.devices_open;
-                this.refit(cx);
-                cx.notify();
-            }));
+            .round_button("cc-devices", if outputs_open { L::ChevronDown } else { L::ChevronUp }, 28.0, false, look, (Some(&devices_focus), Some(t!("Çıkış aygıtları"))))
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_detail(Detail::Outputs, cx)));
         Some(
             self.card(look)
+                .flex_shrink_0()
                 .px(px(12.))
                 .py(px(12.))
                 .child(h_flex().h(px(28.)).gap(px(8.)).items_center().child(mute).child(self.slider(SL_VOLUME, frac, look, cx)).child(chevron))
@@ -713,65 +980,211 @@ impl CcView {
         )
     }
 
-    /// The output devices: the one Windows plays to now with a check mark, every other as a choice (a click makes it the default
-    /// output), then Windows' own sound page. A card of its own above the sound card: opening it moves nothing that is under the
-    /// pointer.
-    fn render_devices(&self, look: &Look, cx: &mut Context<Self>) -> Option<AnyElement> {
-        if !self.devices_open {
-            return None;
-        }
-        let a = sysstate::audio(cx).filter(|a| a.available)?;
-        let secondary = look.pal.text_secondary().hsla();
+    /// A detail's head: its name, and a radio's switch at the right when it has one.
+    fn detail_head(&self, title: String, radio: Option<(RadioKind, RadioPower)>, look: &Look, cx: &mut Context<Self>) -> AnyElement {
+        let switch = radio.map(|(kind, power)| {
+            let me = cx.entity().downgrade();
+            let id: ElementId = match kind {
+                RadioKind::WiFi => "cc-wifi-switch".into(),
+                RadioKind::Bluetooth => "cc-bluetooth-switch".into(),
+            };
+            crate::liquid::switch_track(id, &look.theme, power == RadioPower::On, power == RadioPower::Disabled, move |_, cx| {
+                let _ = me.update(cx, |this, cx| this.press_radio(kind, cx));
+            })
+        });
+        h_flex()
+            .h(px(cc_model::DETAIL_HEAD_H))
+            .flex_shrink_0()
+            .px(px(8.))
+            .items_center()
+            .justify_between()
+            .child(div().truncate().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
+            .children(switch)
+            .into_any_element()
+    }
+
+    /// One row of a detail: a picture (or its empty place), a text, and at the right a quiet note and a small picture. With `click`
+    /// it is a choice (a keyboard stop, lit under the pointer); without, a line to read.
+    #[allow(clippy::too_many_arguments)]
+    fn detail_row(&self, id: (&'static str, usize), icon: Option<L>, text: String, note: Option<String>, mark: Option<L>, look: &Look, click: Option<RowClick>, cx: &mut Context<Self>) -> AnyElement {
         let (hover, pressed) = (look.pal.hover_fill().hsla(), look.pal.pressed_fill().hsla());
-        let (ring, focus) = (look.accent, self.stop("cc-sound-settings", 0, cx));
-        let mut rows = v_flex();
-        for (i, d) in a.devices.iter().enumerate() {
-            let row = h_flex()
-                .id(("cc-device", i))
-                .h(px(cc_model::DEVICE_ROW_H))
-                .px(px(8.))
-                .gap(px(8.))
-                .items_center()
-                .rounded(px(8.))
-                .border_1()
-                .border_color(transparent_black())
-                .text_sm()
-                .child(div().w(px(14.)).flex_shrink_0().when(d.default, |dv| dv.child(Icon::new(L::Check).size(px(14.)).text_color(look.pal.text().hsla()))))
-                .child(div().flex_1().min_w_0().truncate().child(d.name.clone()));
-            // the one Windows plays to now is only told; every other is a choice
-            rows = rows.child(if d.default {
-                row
-            } else {
-                let (stop, id) = (self.stop("cc-device", i, cx), d.id.clone());
+        let secondary = look.pal.text_secondary().hsla();
+        let ring = look.accent;
+        let row = h_flex()
+            .id(id)
+            .h(px(cc_model::DETAIL_ROW_H))
+            .flex_shrink_0()
+            .px(px(8.))
+            .gap(px(8.))
+            .items_center()
+            .rounded(px(8.))
+            .border_1()
+            .border_color(transparent_black())
+            .text_sm()
+            .child(div().w(px(14.)).flex_shrink_0().children(icon.map(|i| Icon::new(i).size(px(14.)).text_color(look.pal.text().hsla()))))
+            .child(div().flex_1().min_w_0().truncate().child(text))
+            .children(note.map(|n| div().flex_shrink_0().text_xs().text_color(secondary).child(n)))
+            .children(mark.map(|m| Icon::new(m).size(px(12.)).flex_shrink_0().text_color(secondary)));
+        match click {
+            Some(click) => {
+                let stop = self.stop(id.0, id.1, cx);
                 row.cursor_pointer()
                     .track_focus(&stop)
                     .focus_visible(move |s| s.border_color(ring))
                     .hover(move |s| s.bg(hover))
                     .active(move |s| s.bg(pressed))
-                    .on_click(cx.listener(move |this, _, window, cx| this.choose_output(&id, window, cx)))
-            });
+                    .on_click(cx.listener(move |this, _, window, cx| click(this, window, cx)))
+                    .into_any_element()
+            }
+            None => row.into_any_element(),
         }
-        rows = rows.child(
-            h_flex()
-                .id("cc-sound-settings")
-                .h(px(cc_model::DEVICE_ROW_H))
-                .px(px(8.))
-                .gap(px(8.))
-                .items_center()
-                .rounded(px(8.))
-                .text_sm()
-                .cursor_pointer()
-                .border_1()
-                .border_color(transparent_black())
-                .track_focus(&focus)
-                .focus_visible(move |s| s.border_color(ring))
-                .hover(move |s| s.bg(hover))
-                .active(move |s| s.bg(pressed))
-                .child(div().w(px(14.)).flex_shrink_0().child(Icon::new(L::Settings).size(px(14.)).text_color(secondary)))
-                .child(div().flex_1().min_w_0().truncate().child(t!("Ses ayarları")))
-                .on_click(cx.listener(|this, _, _, cx| this.open_settings("ms-settings:sound", cx))),
-        );
-        Some(self.card(look).flex_shrink_0().px(px(12.)).py(px(cc_model::DEVICE_CARD_PAD)).child(rows).into_any_element())
+    }
+
+    /// A line of a detail that says why there is no list (the radio is off, nothing was found).
+    fn detail_line(&self, text: &'static str, look: &Look) -> AnyElement {
+        div().h(px(cc_model::DETAIL_ROW_H)).flex_shrink_0().px(px(8.)).flex().items_center().text_sm().text_color(look.pal.text_secondary().hsla()).child(div().truncate().child(text)).into_any_element()
+    }
+
+    /// The last row of a detail: the way to Windows' own page for it.
+    fn detail_link(&self, id: &'static str, text: &'static str, uri: &'static str, look: &Look, cx: &mut Context<Self>) -> AnyElement {
+        self.detail_row((id, 0), Some(L::Settings), text.to_string(), None, None, look, Some(Rc::new(move |this, _, cx| this.open_settings(uri, cx))), cx)
+    }
+
+    /// The output devices: the one Windows plays to now with a check mark (a line to read), every other as a choice (a click makes
+    /// it the default output), then Windows' own sound page.
+    fn detail_outputs(&self, look: &Look, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
+        let devices = sysstate::audio(cx).map(|a| a.devices).unwrap_or_default();
+        let mut rows = Vec::new();
+        for (i, d) in devices.iter().enumerate() {
+            let id = d.id.clone();
+            let click: Option<RowClick> = (!d.default).then(|| Rc::new(move |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| this.choose_output(&id, window, cx)) as RowClick);
+            rows.push(self.detail_row(("cc-device", i), d.default.then_some(L::Check), d.name.clone(), None, None, look, click, cx));
+        }
+        rows.push(self.detail_link("cc-sound-settings", t!("Ses ayarları"), "ms-settings:sound", look, cx));
+        (self.detail_head(t!("Çıkış aygıtları").to_string(), None, look, cx), rows)
+    }
+
+    /// Wi-Fi: its switch, the networks in range (see `choose_network` for what a click does), Windows' Wi-Fi page.
+    fn detail_wifi(&self, look: &Look, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
+        let w = self.wifi_now().unwrap_or_default();
+        let mut rows = Vec::new();
+        match w.power {
+            RadioPower::Disabled => rows.push(self.detail_line(t!("Kullanılamıyor"), look)),
+            RadioPower::Off => rows.push(self.detail_line(t!("Wi-Fi kapalı"), look)),
+            RadioPower::On if w.listing == Listing::Denied => {
+                // (the names of the networks in range are location data to Windows: with location off it does not give them)
+                rows.push(self.detail_line(t!("Ağları listelemek için Windows'ta konum izni gerekiyor"), look));
+                rows.push(self.detail_link("cc-wifi-location", t!("Konum ayarları"), "ms-settings:privacy-location", look, cx));
+            }
+            RadioPower::On if w.networks.is_empty() => rows.push(self.detail_line(t!("Ağlar aranıyor…"), look)),
+            RadioPower::On => {
+                for (i, n) in w.networks.iter().enumerate() {
+                    let joining = self.joining.as_ref().is_some_and(|(s, at)| *s == n.ssid && at.elapsed() < JOIN_WAIT);
+                    let note = if n.connected {
+                        Some(t!("Bağlı"))
+                    } else if joining {
+                        Some(t!("Bağlanıyor…"))
+                    } else if n.known() {
+                        Some(t!("Kayıtlı"))
+                    } else {
+                        None
+                    };
+                    let ssid = n.ssid.clone();
+                    let click: RowClick = Rc::new(move |this, _, cx| this.choose_network(&ssid, cx));
+                    rows.push(self.detail_row(("cc-wifi-net", i), Some(cc_model::signal_icon(n.bars)), n.ssid.clone(), note.map(str::to_string), n.needs_password().then_some(L::Lock), look, Some(click), cx));
+                }
+            }
+        }
+        rows.push(self.detail_link("cc-wifi-settings", t!("Wi-Fi ayarları"), "ms-settings:network-wifi", look, cx));
+        (self.detail_head("Wi-Fi".to_string(), Some((RadioKind::WiFi, w.power)), look, cx), rows)
+    }
+
+    /// Bluetooth: its switch, the paired devices (which of them are connected: lines to read), Windows' Bluetooth page.
+    fn detail_bluetooth(&self, look: &Look, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
+        let b = self.bt_now().unwrap_or_default();
+        let mut rows = Vec::new();
+        match b.power {
+            RadioPower::Disabled => rows.push(self.detail_line(t!("Kullanılamıyor"), look)),
+            RadioPower::Off => rows.push(self.detail_line(t!("Bluetooth kapalı"), look)),
+            RadioPower::On if b.devices.is_empty() => rows.push(self.detail_line(t!("Eşleşmiş cihaz yok"), look)),
+            RadioPower::On => {
+                for (i, d) in b.devices.iter().enumerate() {
+                    let icon = if d.connected { L::BluetoothConnected } else { L::Bluetooth };
+                    rows.push(self.detail_row(("cc-bt-device", i), Some(icon), d.name.clone(), d.connected.then(|| t!("Bağlı").to_string()), None, look, None, cx));
+                }
+            }
+        }
+        rows.push(self.detail_link("cc-bt-settings", t!("Bluetooth ayarları"), "ms-settings:bluetooth", look, cx));
+        (self.detail_head("Bluetooth".to_string(), Some((RadioKind::Bluetooth, b.power)), look, cx), rows)
+    }
+
+    /// The connection that is not Wi-Fi (the cable): its state and the machine's address on it, Windows' network page.
+    fn detail_network(&self, look: &Look, words: Words, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
+        let n = sysstate::network(cx).unwrap_or_default();
+        let mut rows = Vec::new();
+        for (i, (name, value)) in cc_model::network_rows(&n, words).into_iter().enumerate() {
+            rows.push(self.detail_row(("cc-net-row", i), None, name, Some(value), None, look, None, cx));
+        }
+        rows.push(self.detail_link("cc-net-settings", t!("Ağ ayarları"), "ms-settings:network", look, cx));
+        (self.detail_head(cc_model::network_text(&n, words).title, None, look, cx), rows)
+    }
+
+    /// The elements of one section (a detail's card is not one of them: `render_area`).
+    fn section(&self, s: Section, look: &Look, words: Words, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        match s {
+            Section::Tiles(_) => self.render_tiles(look, words, cx),
+            Section::Media => self.render_media(look, words, cx).into_iter().collect(),
+            Section::Sound => self.render_sound(look, words, cx).into_iter().collect(),
+            Section::Brightness => self.render_brightness(look, cx).into_iter().collect(),
+            Section::Bottom => vec![self.render_bottom(look, cx)],
+            Section::Detail(..) => Vec::new(),
+        }
+    }
+
+    /// The place a detail opens out in, at `t` of its way (0 folded, 1 open, a little past either while the spring swings): the
+    /// cards it takes the place of, fading, and over them its card, growing out of the edge that stays.
+    fn render_area(&self, area: &Area, t: f32, look: &Look, words: Words, cx: &mut Context<Self>) -> AnyElement {
+        let (place_h, card_h) = (area.place(t), area.card(t));
+        // (a place that takes the place of nothing brings its gap with it as it opens: `Area::spare_gap`)
+        let mut place = div().relative().w_full().h(px(place_h)).mt(px(-area.spare_gap(t))).flex_shrink_0();
+        // (once it is fully out the cards under it are not built at all: nothing of them is seen, and nothing of them is a stop)
+        if !(self.unfold.opening() && self.unfold.settled(self.now_ms())) {
+            // The cards it takes the place of stand where they stood (measured from the edge that stays) and are seen only in the
+            // part of the place the card has not reached: the card wipes over them, the two are never drawn through each other
+            // (a card is a sheet of glass, not a lid). They fade as they go.
+            let top = if area.upwards { place_h - area.room } else { -card_h.min(place_h) };
+            let mut under = v_flex().absolute().left_0().right_0().top(px(top)).gap(px(cc_model::GAP)).opacity((1.0 - t).clamp(0.0, 1.0));
+            for s in &area.covered {
+                under = under.children(self.section(*s, look, words, cx));
+            }
+            let mut seen = div().absolute().left_0().right_0().h(px((place_h - card_h).max(0.0))).overflow_hidden();
+            seen = if area.upwards { seen.top_0() } else { seen.bottom_0() };
+            place = place.child(seen.child(under));
+        }
+        // (the card takes the pointer: what is under it is not pressed through it)
+        let mut card = div().absolute().left_0().right_0().occlude().opacity((t * 2.5).clamp(0.0, 1.0));
+        card = if area.upwards { card.bottom_0() } else { card.top_0() };
+        place.child(card.child(self.render_detail(area.kind, area.card(t), look, words, cx))).into_any_element()
+    }
+
+    /// What is opened out, as one card of `height`: its head, and its rows, which scroll when they are more than fit.
+    fn render_detail(&self, kind: Detail, height: f32, look: &Look, words: Words, cx: &mut Context<Self>) -> AnyElement {
+        let (head, rows) = match kind {
+            Detail::Outputs => self.detail_outputs(look, cx),
+            Detail::Wifi => self.detail_wifi(look, cx),
+            Detail::Bluetooth => self.detail_bluetooth(look, cx),
+            Detail::Network => self.detail_network(look, words, cx),
+        };
+        self.card(look)
+            .h(px(height))
+            .flex_shrink_0()
+            .p(px(cc_model::DETAIL_PAD))
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(head)
+            .child(v_flex().id(("cc-detail", kind as usize)).flex_1().min_h_0().overflow_y_scroll().children(rows))
+            .into_any_element()
     }
 
     fn render_brightness(&self, look: &Look, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -864,15 +1277,16 @@ impl Render for CcView {
         }
 
         let mut body = v_flex().size_full().p(px(cc_model::PAD)).gap(px(cc_model::GAP)).opacity(frame.opacity).mt(px(frame.drop_px));
-        for row in self.render_tiles(&look, words, cx) {
-            body = body.child(row);
+        let layout = cc_model::layout(&self.shown_now(cx));
+        for s in layout.before {
+            body = body.children(self.section(s, &look, words, cx));
         }
-        body = body
-            .children(self.render_media(&look, words, cx))
-            .children(self.render_devices(&look, cx))
-            .children(self.render_sound(&look, words, cx))
-            .children(self.render_brightness(&look, cx))
-            .child(self.render_bottom(&look, cx));
+        if let Some(area) = &layout.area {
+            body = body.child(self.render_area(area, self.unfold.value(self.now_ms()), &look, words, cx));
+        }
+        for s in layout.after {
+            body = body.children(self.section(s, &look, words, cx));
+        }
         div()
             .id("control-centre")
             .relative()

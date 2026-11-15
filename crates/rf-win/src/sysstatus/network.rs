@@ -10,14 +10,15 @@
 //! ONE THREAD (MTA), started by the first [`subscribe`] and kept for the life of the process: the right island shows the network
 //! symbol all the time. The WinRT handler only posts a message; the thread reads and publishes.
 //!
-//! No toggling: switching Wi-Fi off and on is `Radio.SetStateAsync`, which the research for this work did not find solid for a
-//! program with no package identity (it was not tried: it would change the user's radios). The tile opens Windows' network page.
+//! Reading only. Wi-Fi's radio, its list of networks and connecting are `super::radio` and `super::wifi`; this module is what the
+//! machine is connected through right now, for the island's symbol and the panel's network tile.
 
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::OnceLock;
 use std::time::Duration;
 
 use windows::Networking::Connectivity::{ConnectionProfile, NetworkConnectivityLevel, NetworkInformation, NetworkStatusChangedEventHandler};
+use windows::Networking::HostNameType;
 
 use super::{Hub, Subscription, init_mta};
 
@@ -52,6 +53,8 @@ pub struct NetworkSnapshot {
     pub available: bool,
     pub link: Link,
     pub reach: Reach,
+    /// The machine's IPv4 address on that connection, when Windows tells one.
+    pub address: Option<String>,
 }
 
 // ------------------------------------------------------------------ pure: the symbol
@@ -190,13 +193,28 @@ fn read() -> NetworkSnapshot {
     let profile = internet.or_else(|| {
         NetworkInformation::GetConnectionProfiles().ok().and_then(|v| v.into_iter().find(|p| level_of(p) != NetworkConnectivityLevel::None))
     });
-    let Some(profile) = profile else { return NetworkSnapshot { available: true, link: Link::Disconnected, reach: Reach::None } };
+    let Some(profile) = profile else { return NetworkSnapshot { available: true, ..Default::default() } };
     let level = level_of(&profile);
     if level == NetworkConnectivityLevel::None {
-        return NetworkSnapshot { available: true, link: Link::Disconnected, reach: Reach::None };
+        return NetworkSnapshot { available: true, ..Default::default() };
     }
     let reach = if level == NetworkConnectivityLevel::LocalAccess { Reach::Local } else { Reach::Internet };
-    NetworkSnapshot { available: true, link: link_of(&profile), reach }
+    NetworkSnapshot { available: true, link: link_of(&profile), reach, address: address_of(&profile) }
+}
+
+/// The IPv4 address the machine has on the profile's adapter.
+fn address_of(p: &ConnectionProfile) -> Option<String> {
+    let adapter = p.NetworkAdapter().ok()?.NetworkAdapterId().ok()?;
+    NetworkInformation::GetHostNames().ok()?.into_iter().find_map(|h| {
+        if h.Type().ok()? != HostNameType::Ipv4 {
+            return None;
+        }
+        let on = h.IPInformation().ok()?.NetworkAdapter().ok()?.NetworkAdapterId().ok()?;
+        if on != adapter {
+            return None;
+        }
+        h.CanonicalName().ok().map(|s| s.to_string())
+    })
 }
 
 fn level_of(p: &ConnectionProfile) -> NetworkConnectivityLevel {
@@ -233,7 +251,7 @@ mod tests {
     use super::*;
 
     fn snap(link: Link) -> NetworkSnapshot {
-        NetworkSnapshot { available: true, link, reach: Reach::Internet }
+        NetworkSnapshot { available: true, link, reach: Reach::Internet, address: None }
     }
 
     #[test]

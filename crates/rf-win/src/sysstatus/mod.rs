@@ -12,12 +12,15 @@
 //! | `audio` | Core Audio: the default output's volume, mute, name and the list of outputs | `IAudioEndpointVolumeCallback`, `IMMNotificationClient` | a thread of its own (COM MTA), from the first `subscribe`, until the process ends: the island shows it all the time |
 //! | `network` | WinRT `NetworkInformation`: Ethernet / Wi-Fi (name, bars) / not connected | `NetworkStatusChanged` (no event for a Wi-Fi signal that only gets stronger or weaker: the panel asks again every 5 s while open) | a thread of its own (MTA), for the life of the process: the island shows it all the time |
 //! | `media` | WinRT `GlobalSystemMediaTransportControlsSessionManager` | sessions, current session, playback info, media properties | a thread of its own while the panel is open |
-//! | `bluetooth` | WinRT `Radio` (on / off) and the connected devices | `Radio.StateChanged`, a `DeviceWatcher` | a thread of its own while the panel is open |
+//! | `bluetooth` | WinRT `Radio` (on / off), the paired and the connected devices | `Radio.StateChanged`, a `DeviceWatcher` | a thread of its own while the panel is open |
+//! | `wifi` | WinRT `Radio` (on / off) and the Native Wifi API: the networks in range, which is connected, which are saved | WLAN notifications (scan ended, connected, disconnected), `Radio.StateChanged` | a thread of its own while the panel is open |
+//! | `radio` | WinRT `Radio.SetStateAsync`: switches Wi-Fi or Bluetooth on and off | none (the followers above hear of it) | a thread per switch |
 //! | `power` | `GetSystemPowerStatus`: battery percent, charging | `RegisterPowerSettingNotification` (callback form, no window) | nothing of our own: Windows calls back |
 //! | `brightness` | DDC/CI of the primary monitor (`dxva2`) | none (a monitor's own buttons cannot be heard): read when the panel opens | a thread of its own while the panel is open |
 //!
 //! Nothing here changes a setting by itself: the writes (`audio::set_volume`, `audio::set_muted`, `media::Transport`,
-//! `brightness::Brightness::set`) are called only as the direct result of the user's click or drag in the panel.
+//! `brightness::Brightness::set`, `audio::set_default_output`, `radio::set`, `wifi::connect`, `wifi::disconnect`) are called only as the direct
+//! result of the user's click or drag in the panel.
 //!
 //! COM: the audio, WinRT and brightness threads are initialised as MTA (what these APIs and their callbacks want). None of them is
 //! the shell thread (`crate::sta`), and none is a single-threaded apartment that does not pump messages.
@@ -28,6 +31,8 @@ pub mod brightness;
 pub mod media;
 pub mod network;
 pub mod power;
+pub mod radio;
+pub mod wifi;
 
 use std::sync::Arc;
 

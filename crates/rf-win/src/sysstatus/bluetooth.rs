@@ -1,6 +1,6 @@
-//! Bluetooth: whether the radio is on and which devices are connected (WinRT `Radio`, and `DeviceInformation` over the connected
-//! devices' selectors). Read-only: switching the radio is `Radio.SetStateAsync`, which was not found solid for a program with no
-//! package identity, so the tile opens Windows' Bluetooth page.
+//! Bluetooth: whether the radio is on, which devices are paired and which of them are connected (WinRT `Radio`, and
+//! `DeviceInformation` over the paired and the connected devices' selectors). Reading only: the radio is switched through
+//! `super::radio` (the user's press on the tile's button), and a device is not connected or disconnected from here.
 //!
 //! RUNS only while the panel is open ([`subscribe`] starts a thread of its own, MTA; dropping the subscription ends it): the radio's
 //! `StateChanged` and a `DeviceWatcher` on the connected devices (classic and low energy) post a message, the thread reads again.
@@ -14,19 +14,29 @@ use std::time::Duration;
 
 use windows::Devices::Bluetooth::{BluetoothConnectionStatus, BluetoothDevice, BluetoothLEDevice};
 use windows::Devices::Enumeration::{DeviceInformation, DeviceWatcher};
-use windows::Devices::Radios::{Radio, RadioKind, RadioState};
+use windows::Devices::Radios::Radio;
 use windows::Foundation::TypedEventHandler;
 
 use super::{Subscription, init_mta};
 
-/// Where the radio is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum Power {
-    #[default]
-    Off,
-    On,
-    /// Turned off by a hardware switch or a policy: it cannot be turned on from here.
-    Disabled,
+pub use super::radio::Power;
+
+/// One paired device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Device {
+    pub name: String,
+    pub connected: bool,
+}
+
+/// The list of devices as it is shown: every paired device once, the connected ones first (in the order Windows gave them), the
+/// others by name. A device that is connected without being in the list of paired ones is in it all the same.
+pub fn devices_of(paired: Vec<String>, connected: &[String]) -> Vec<Device> {
+    let mut out: Vec<Device> = connected.iter().map(|n| Device { name: n.clone(), connected: true }).collect();
+    let mut rest: Vec<String> = paired.into_iter().filter(|n| !connected.contains(n)).collect();
+    rest.sort_by_key(|n| n.to_lowercase());
+    rest.dedup();
+    out.extend(rest.into_iter().map(|name| Device { name, connected: false }));
+    out
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -36,6 +46,8 @@ pub struct BluetoothSnapshot {
     pub power: Power,
     /// The names of the connected devices (in the order Windows gave them, without repeats).
     pub connected: Vec<String>,
+    /// The paired devices, the connected ones first (`devices_of`). Empty while the radio is off.
+    pub devices: Vec<Device>,
 }
 
 enum Msg {
@@ -96,18 +108,29 @@ pub fn read_once() -> BluetoothSnapshot {
 }
 
 fn radio() -> Option<Radio> {
-    let all = Radio::GetRadiosAsync().ok()?.join().ok()?;
-    all.into_iter().find(|r| r.Kind().ok() == Some(RadioKind::Bluetooth))
+    super::radio::find(super::radio::Kind::Bluetooth)
 }
 
 fn read() -> BluetoothSnapshot {
     let Some(radio) = radio() else { return BluetoothSnapshot::default() };
-    let power = match radio.State().unwrap_or(RadioState::Unknown) {
-        RadioState::On => Power::On,
-        RadioState::Disabled => Power::Disabled,
-        _ => Power::Off,
-    };
-    BluetoothSnapshot { available: true, power, connected: if power == Power::On { connected_names() } else { Vec::new() } }
+    let power = super::radio::power_of(&radio);
+    if power != Power::On {
+        return BluetoothSnapshot { available: true, power, ..Default::default() };
+    }
+    let connected = names_of(selectors());
+    let devices = devices_of(names_of(paired_selectors()), &connected);
+    BluetoothSnapshot { available: true, power, connected, devices }
+}
+
+fn paired_selectors() -> Vec<windows::core::HSTRING> {
+    let mut v = Vec::new();
+    if let Ok(s) = BluetoothDevice::GetDeviceSelectorFromPairingState(true) {
+        v.push(s);
+    }
+    if let Ok(s) = BluetoothLEDevice::GetDeviceSelectorFromPairingState(true) {
+        v.push(s);
+    }
+    v
 }
 
 fn selectors() -> Vec<windows::core::HSTRING> {
@@ -121,9 +144,10 @@ fn selectors() -> Vec<windows::core::HSTRING> {
     v
 }
 
-fn connected_names() -> Vec<String> {
+/// The names of the devices the selectors find, each once, in the order Windows gave them.
+fn names_of(selectors: Vec<windows::core::HSTRING>) -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
-    for sel in selectors() {
+    for sel in selectors {
         let Some(found) = DeviceInformation::FindAllAsyncAqsFilter(&sel).ok().and_then(|op| op.join().ok()) else { continue };
         for d in found {
             if let Ok(n) = d.Name() {
@@ -217,6 +241,15 @@ fn poke(wake: &Sender<Msg>) -> impl Fn() + Send + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_paired_devices_are_listed_once_with_the_connected_ones_first() {
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let list = devices_of(names(&["Klavye", "kulaklık", "Fare", "Hoparlör", "Fare"]), &names(&["Fare", "Kumanda"]));
+        let shown: Vec<(&str, bool)> = list.iter().map(|d| (d.name.as_str(), d.connected)).collect();
+        assert_eq!(shown, [("Fare", true), ("Kumanda", true), ("Hoparlör", false), ("Klavye", false), ("kulaklık", false)]);
+        assert!(devices_of(Vec::new(), &[]).is_empty());
+    }
 
     #[test]
     fn a_default_snapshot_is_no_radio_and_nothing_connected() {
