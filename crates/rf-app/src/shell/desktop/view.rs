@@ -1206,7 +1206,11 @@ impl Render for DesktopView {
             .flex_col()
             .text_color(p.text);
         let root = self.bind_actions(root, cx).child(area);
-        if self.cover.is_some() { root } else { root.child(self.status(&p, scaled)) }
+        let root = if self.cover.is_some() { root } else { root.child(self.status(&p, scaled)) };
+        // a dialog of ours that this window asked for (delete, open many, a rename's question or notice): the last child, over all.
+        // WHY IT IS HERE: `prompt::show` only stores the dialog; the window that asked has to draw it. The main window did, the
+        // desktop did not, so its dialogs took the keyboard and were never seen.
+        root.children(crate::prompt::current(window, cx))
     }
 }
 

@@ -127,49 +127,6 @@ fn powershell_args(dir: &Path) -> String {
     format!("-NoExit -Command \"Set-Location -LiteralPath '{}'\"", dir.to_string_lossy().replace('\'', "''"))
 }
 
-/// The window a message box of ours belongs over: the window in front when it is one of this process's (the one the user has
-/// just acted in), else `fallback`.
-///
-/// WHY (issue 30: "the native Windows confirmation dialog warning that the file might become unusable spawns behind the rustyfiles
-/// window ... Alt + Tab to find it"): the boxes are shown on the shell thread, and their owner was that thread's HIDDEN window. A
-/// message box stands in front of its owner and nowhere in particular otherwise, so Windows opened it under the program's own
-/// window, without the focus. Owned by the window the question is about, it opens over it and that window waits for the answer.
-fn box_owner(fallback: windows::Win32::Foundation::HWND) -> windows::Win32::Foundation::HWND {
-    use windows::Win32::System::Threading::GetCurrentProcessId;
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
-    unsafe {
-        let front = GetForegroundWindow();
-        let mut pid = 0u32;
-        if !front.is_invalid() && GetWindowThreadProcessId(front, Some(&mut pid)) != 0 && pid == GetCurrentProcessId() { front } else { fallback }
-    }
-}
-
-/// Yes/No warning box over the window the user is in (`owner` when that is not one of ours; call on the STA shell thread). True on
-/// "Yes".
-pub fn confirm(owner: windows::Win32::Foundation::HWND, title: &str, text: &str) -> bool {
-    use windows::Win32::UI::WindowsAndMessaging::{IDYES, MB_DEFBUTTON2, MB_ICONWARNING, MB_SETFOREGROUND, MB_YESNO, MessageBoxW};
-    let t = crate::wide::wide(title);
-    let m = crate::wide::wide(text);
-    unsafe {
-        MessageBoxW(
-            Some(box_owner(owner)),
-            windows::core::PCWSTR(m.as_ptr()),
-            windows::core::PCWSTR(t.as_ptr()),
-            MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2 | MB_SETFOREGROUND,
-        ) == IDYES
-    }
-}
-
-/// Information box over the window the user is in (see [`box_owner`]; call on the STA shell thread).
-pub fn alert(owner: windows::Win32::Foundation::HWND, title: &str, text: &str) {
-    use windows::Win32::UI::WindowsAndMessaging::{MB_ICONINFORMATION, MB_OK, MB_SETFOREGROUND, MessageBoxW};
-    let t = crate::wide::wide(title);
-    let m = crate::wide::wide(text);
-    unsafe {
-        MessageBoxW(Some(box_owner(owner)), windows::core::PCWSTR(m.as_ptr()), windows::core::PCWSTR(t.as_ptr()), MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);
-    }
-}
-
 /// `shell:Downloads`, `shell:startup`, `shell:sendto`… → file-system path (None for virtual
 /// folders like `shell:RecycleBinFolder`). Blocking (shell namespace): off the UI thread.
 pub fn resolve_shell_path(s: &str) -> Option<std::path::PathBuf> {

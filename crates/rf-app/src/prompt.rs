@@ -85,6 +85,34 @@ pub fn show_with(
     show_inner(title, message, input, false, choices, buttons, window, cx)
 }
 
+/// A plain notice with one button.
+pub fn notice(title: impl Into<SharedString>, message: String, window: &mut Window, cx: &mut App) {
+    show(title, Some(message), None, vec![Button::new(crate::t!("Tamam"), Kind::Primary, |_, _, _| Ok(()))], window, cx)
+}
+
+/// A yes/no question. The receiver gets `true` for "Evet" and `false` for "Hayır"; Escape, or a dialog put away some other way,
+/// drops the sender with the dialog, which a waiting side reads as "no" too (`rx.await.unwrap_or(false)`).
+///
+/// For questions that were Windows message boxes shown from the shell thread: those belonged to that thread's hidden window, so
+/// Windows opened them BEHIND the program's own window and without the focus (issue 30: the question about a changed file
+/// extension had to be found with Alt+Tab), and they looked like nothing else in the program.
+pub fn ask(title: impl Into<SharedString>, message: String, window: &mut Window, cx: &mut App) -> futures::channel::oneshot::Receiver<bool> {
+    let (tx, rx) = futures::channel::oneshot::channel::<bool>();
+    let tx = Rc::new(std::cell::Cell::new(Some(tx)));
+    let answer = |yes: bool| {
+        let tx = tx.clone();
+        move |_: Option<String>, _: &mut Window, _: &mut App| {
+            if let Some(tx) = tx.take() {
+                let _ = tx.send(yes);
+            }
+            Ok(())
+        }
+    };
+    let buttons = vec![Button::new(crate::t!("Evet"), Kind::Primary, answer(true)), Button::new(crate::t!("Hayır"), Kind::Normal, answer(false))];
+    show(title, Some(message), None, buttons, window, cx);
+    rx
+}
+
 /// A dialog whose text box hides what is typed (passwords).
 pub fn show_secret(title: impl Into<SharedString>, message: Option<String>, placeholder: String, buttons: Vec<Button>, window: &mut Window, cx: &mut App) {
     show_inner(title, message, Some((String::new(), placeholder)), true, Vec::new(), buttons, window, cx)
@@ -256,7 +284,8 @@ impl Render for DialogView {
                     close(window, cx);
                     cx.stop_propagation();
                 }
-                "enter" if this.input.is_none() => {
+                // (not a HELD Enter: the press that asked the question, still down, must not answer it)
+                "enter" if this.input.is_none() && !ev.is_held => {
                     this.press_primary(window, cx);
                     cx.stop_propagation();
                 }

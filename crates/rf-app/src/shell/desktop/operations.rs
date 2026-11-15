@@ -411,10 +411,6 @@ impl DesktopView {
         let typed = r.input.read(cx).value().to_string();
         let siblings: Vec<String> = self.items.iter().filter(|i| i.origin == Origin::User && i.id != r.id).map(|i| i.name.clone()).collect();
         let refs: Vec<&str> = siblings.iter().map(String::as_str).collect();
-        let alert = |text: String| {
-            let title = t!("Yeniden adlandır").to_string();
-            rf_win::sta::run(move |owner| rf_win::shell::alert(owner, &title, &text));
-        };
         match rename_check::check(&r.old, &typed, r.hidden_ext.as_deref(), &refs) {
             Check::Unchanged => {}
             Check::Refuse(problem) => {
@@ -425,26 +421,23 @@ impl DesktopView {
                     Problem::TooLong => t!("Ad çok uzun (en çok 255 karakter)."),
                     Problem::Taken => t!("Bu adda bir öğe zaten var. Başka bir ad deneyin."),
                 };
-                alert(format!("{}\n\n{why}", typed.trim()));
+                crate::prompt::notice(t!("Yeniden adlandır"), format!("{}\n\n{why}", typed.trim()), window, cx);
             }
-            Check::Rename(new_name) => self.do_rename(r, new_name, cx),
+            Check::Rename(new_name) => self.do_rename(r, new_name, window, cx),
         }
         cx.notify();
     }
 
-    fn do_rename(&mut self, r: Renaming, new_name: String, cx: &mut Context<Self>) {
+    fn do_rename(&mut self, r: Renaming, new_name: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dir) = self.backend.as_ref().and_then(|b| b.dir_of(Origin::User)) else { return };
         let warn = cx.global::<crate::settings::Settings>().warn_extension_change && rename_check::changes_extension(&r.old, &new_name, r.is_dir);
-        // Explorer-style warning when a file's extension changes
-        let confirm = warn.then(|| {
-            let (tx, rx) = oneshot::channel::<bool>();
-            let title = t!("Dosya adı uzantısı").to_string();
+        // Explorer-style warning when a file's extension changes, as a dialog of our own over the desktop
+        let confirm = if warn {
             let msg = t!("Dosya adı uzantısını değiştirirseniz dosya kullanılamaz hale gelebilir. Değiştirmek istediğinizden emin misiniz?").to_string();
-            rf_win::sta::run(move |owner| {
-                let _ = tx.send(rf_win::shell::confirm(owner, &title, &msg));
-            });
-            rx
-        });
+            Some(crate::prompt::ask(t!("Dosya adı uzantısı"), msg, window, cx))
+        } else {
+            None
+        };
         let (from, to) = (dir.join(&r.old), dir.join(&new_name));
         let (old_id, new_id) = (ItemId::user(&r.old), ItemId::user(&new_name));
         cx.spawn(async move |this, cx| {

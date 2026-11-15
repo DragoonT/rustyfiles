@@ -583,13 +583,14 @@ impl FolderView {
         };
         let old = self.entry(ei).name.to_string();
         self.set_renaming(None, None);
+        // the list has the keyboard again from here on: a dialog opened below gives it back to the list when it closes
+        window.focus(&self.focus, cx);
         // Explorer's rule, said up front instead of a shell error after the fact
         const INVALID: &[char] = &['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
         if new_name.contains(INVALID) || new_name.ends_with('.') {
             let title = crate::t!("Yeniden adlandır").to_string();
             let msg = format!("{}\n\n{}", new_name, crate::t!("Dosya adı şu karakterleri içeremez: \\ / : * ? \" < > | ve nokta ile bitemez."));
-            rf_win::sta::run(move |owner| rf_win::shell::alert(owner, &title, &msg));
-            window.focus(&self.focus, cx);
+            crate::prompt::notice(title, msg, window, cx);
             cx.notify();
             return;
         }
@@ -600,7 +601,6 @@ impl FolderView {
                 let inner = inner.to_string_lossy().replace('\\', "/");
                 crate::archive_view::rename_inside(cx, archive, inner, new_name.clone());
                 self.set_reselect(new_name);
-                window.focus(&self.focus, cx);
                 cx.notify();
                 return;
             }
@@ -613,15 +613,15 @@ impl FolderView {
                 // Explorer-style warning when a file's extension changes.
                 let ext = |n: &str| std::path::Path::new(n).extension().map(|e| e.to_string_lossy().to_lowercase());
                 let warn = cx.global::<crate::settings::Settings>().warn_extension_change;
-                let confirm_rx = (warn && !self.entry(ei).is_dir() && ext(&old).is_some() && ext(&old) != ext(&new_name)).then(|| {
-                    let (t, r) = oneshot::channel::<bool>();
-                    let title = crate::t!("Dosya adı uzantısı").to_string();
+                // (a dialog of our own, in the window: it was a Windows message box, which opened behind the window, issue 30)
+                let asks = warn && !self.entry(ei).is_dir() && ext(&old).is_some() && ext(&old) != ext(&new_name);
+                let confirm_rx = if asks {
                     let msg = crate::t!("Dosya adı uzantısını değiştirirseniz dosya kullanılamaz hale gelebilir. Değiştirmek istediğinizden emin misiniz?").to_string();
-                    rf_win::sta::run(move |owner| {
-                        let _ = t.send(rf_win::shell::confirm(owner, &title, &msg));
-                    });
-                    r
-                });
+                    Some(crate::prompt::ask(crate::t!("Dosya adı uzantısı"), msg, window, cx))
+                } else {
+                    None
+                };
+                let handle = window.window_handle();
                 let (f2, n2) = (from.clone(), new_name.clone());
                 cx.spawn(async move |this, cx| {
                     if let Some(r) = confirm_rx {
@@ -640,9 +640,8 @@ impl FolderView {
                         })
                         .await;
                     if clash {
-                        let title = crate::t!("Yeniden adlandır").to_string();
                         let msg = format!("{}\n\n{}", n2, crate::t!("Bu adda bir öğe zaten var. Başka bir ad deneyin."));
-                        rf_win::sta::run(move |owner| rf_win::shell::alert(owner, &title, &msg));
+                        let _ = handle.update(cx, |_, window, cx| crate::prompt::notice(crate::t!("Yeniden adlandır"), msg, window, cx));
                         let _ = this.update(cx, |v, _| v.clear_reselect());
                         return;
                     }
@@ -668,7 +667,6 @@ impl FolderView {
                 .detach();
             }
         }
-        window.focus(&self.focus, cx);
         cx.notify();
     }
 
