@@ -14,7 +14,7 @@ use std::sync::OnceLock;
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
-use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GetMessageW, MSG, TranslateMessage, WINEVENT_OUTOFCONTEXT};
+use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_MENUPOPUPSTART, GetMessageW, MSG, TranslateMessage, WINEVENT_OUTOFCONTEXT};
 
 use super::Cmd;
 
@@ -24,6 +24,11 @@ static HOOKED: OnceLock<bool> = OnceLock::new();
 unsafe extern "system" fn on_foreground(_hook: HWINEVENTHOOK, _event: u32, _hwnd: HWND, _id_object: i32, _id_child: i32, _thread: u32, _time: u32) {
     // runs on the watch thread: only wake the engine, which looks at who is in front itself
     super::send_if_running(Cmd::CareChanged);
+}
+
+unsafe extern "system" fn on_menu(_hook: HWINEVENTHOOK, _event: u32, _hwnd: HWND, _id_object: i32, _id_child: i32, _thread: u32, _time: u32) {
+    // a popup menu of some program opened: it may stand over a glass window (a tray menu over the dock), see `crossproc.rs`
+    super::send_if_running(Cmd::ScanNow);
 }
 
 /// Starts the watch thread once and says whether the hook is set. Not in the unit tests: they have no engine to wake.
@@ -39,6 +44,8 @@ pub(super) fn start() -> bool {
             if hook.is_invalid() {
                 return;
             }
+            // (without this one a menu is still found, by the scan's own clock, a little later)
+            let menu_hook = unsafe { SetWinEventHook(EVENT_SYSTEM_MENUPOPUPSTART, EVENT_SYSTEM_MENUPOPUPSTART, None, Some(on_menu), 0, 0, WINEVENT_OUTOFCONTEXT) };
             let mut msg = MSG::default();
             unsafe {
                 while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -46,6 +53,9 @@ pub(super) fn start() -> bool {
                     DispatchMessageW(&msg);
                 }
                 let _ = UnhookWinEvent(hook);
+                if !menu_hook.is_invalid() {
+                    let _ = UnhookWinEvent(menu_hook);
+                }
             }
         });
         let ok = spawned.is_ok() && rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or(false);

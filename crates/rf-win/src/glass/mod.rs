@@ -311,6 +311,9 @@ pub(crate) enum Cmd {
     /// Something that decides what a window is owed changed (the setting [`set_freeze_when_behind`], the foreground window, the pointer
     /// coming over a window, [`pointer_over`]): every window looks again at what it is owed.
     CareChanged,
+    /// A popup menu opened somewhere (the watch thread's event): the windows of other processes are looked at now and not at the
+    /// scan's next turn, so that the menu is out of the capture before it has stood in the glass for long.
+    ScanNow,
 }
 
 impl Cmd {
@@ -326,6 +329,7 @@ impl Cmd {
             Cmd::LookChanged => "look",
             Cmd::Freezable { .. } => "freezable",
             Cmd::CareChanged => "care",
+            Cmd::ScanNow => "scan",
         }
     }
 }

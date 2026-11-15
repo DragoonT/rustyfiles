@@ -47,7 +47,7 @@ use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, RECT};
 use windows::Win32::System::Threading::GetCurrentProcessId;
-use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetPropW, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, RemovePropW, SetPropW};
+use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GCW_ATOM, GetClassLongPtrW, GetPropW, GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible, RemovePropW, SetPropW};
 use windows::core::{BOOL, w};
 
 use super::geom::Rc;
@@ -167,30 +167,83 @@ impl Foreign {
     }
 }
 
+/// Which windows that are not this process's own a sent list carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum With {
+    /// The glass windows of our other processes and the menus of any program.
+    All,
+    /// Only the glass windows of our other processes.
+    Glass,
+    /// None of them.
+    None,
+}
+
+/// What a session was refused, remembered for its life.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct Refused {
+    /// A list with a menu of some program in it.
+    pub menus: bool,
+    /// A list with a glass window of another process of ours in it.
+    pub glass: bool,
+}
+
 /// Sends an exclusion list that may hold windows of other processes. The capture service is not documented to honour a handle that
-/// belongs to another process; when a send that carried such windows is refused, the same list is sent without them and `refused`
-/// remembers it, so a refusal costs the picture (the loop is back) but never the session: an error here would make the engine give up
-/// the session backend, which hides every glass window from screenshots and recordings. `send(with_foreign)` makes one call. An error
-/// of the send without foreign windows is returned as it is.
-pub(super) fn send_list<T, E>(refused: &mut bool, has_foreign: bool, mut send: impl FnMut(bool) -> Result<T, E>) -> Result<T, E> {
-    if !has_foreign || *refused {
-        return send(false);
+/// belongs to another process; when a send that carried such windows is refused, the list is sent again with less and `refused`
+/// remembers what was refused, so a refusal costs the picture (the loop, or a menu in the glass, is back) but never the session: an
+/// error here would make the engine give up the session backend, which hides every glass window from screenshots and recordings.
+/// The steps are apart on purpose: a menu belongs to ANY program (an elevated one too), and a list refused because of one must not
+/// take the glass windows of our own processes out with it. `send(with)` makes one call. An error of the send with none of them is
+/// returned as it is.
+pub(super) fn send_list<T, E>(refused: &mut Refused, has_glass: bool, has_menus: bool, mut send: impl FnMut(With) -> Result<T, E>) -> Result<T, E> {
+    let glass = has_glass && !refused.glass;
+    if has_menus && !refused.menus {
+        match send(With::All) {
+            Ok(v) => return Ok(v),
+            // (a list that fails with nothing foreign in it either is a broken session, not a refusal: found out below)
+            Err(_) if glass => match send(With::Glass) {
+                Ok(v) => {
+                    refused.menus = true;
+                    log::warn!("glass: the capture service refused an exclusion list with another program's menu; menus stay in the picture for this session");
+                    return Ok(v);
+                }
+                Err(_) => {
+                    let v = send(With::None)?;
+                    *refused = Refused { menus: true, glass: true };
+                    log::warn!("glass: the capture service refused an exclusion list with windows of other processes; leaving them out is off for this session");
+                    return Ok(v);
+                }
+            },
+            Err(_) => {
+                let v = send(With::None)?;
+                refused.menus = true;
+                log::warn!("glass: the capture service refused an exclusion list with another program's menu; menus stay in the picture for this session");
+                return Ok(v);
+            }
+        }
     }
-    match send(true) {
+    if !glass {
+        return send(With::None);
+    }
+    match send(With::Glass) {
         Ok(v) => Ok(v),
         Err(_) => {
-            let v = send(false)?;
-            *refused = true;
+            let v = send(With::None)?;
+            refused.glass = true;
             log::warn!("glass: the capture service refused an exclusion list with windows of other processes; leaving them out is off for this session");
             Ok(v)
         }
     }
 }
 
+/// The class of a popup menu's window (`#32768`): every program's menus have it, the tray menus that open over the dock among them.
+const MENU_CLASS_ATOM: usize = 0x8000;
+
 struct Walk<'a> {
     mine: &'a BTreeSet<isize>,
     pid: u32,
     out: Vec<Entry>,
+    /// The entries of `out` that are menus.
+    menus: BTreeSet<isize>,
 }
 
 unsafe extern "system" fn each(h: HWND, lp: LPARAM) -> BOOL {
@@ -198,14 +251,21 @@ unsafe extern "system" fn each(h: HWND, lp: LPARAM) -> BOOL {
     let key = h.0 as isize;
     let mine = w.mine.contains(&key);
     unsafe {
+        // A popup menu of ANY program, this one included, is taken like a glass window of another process: it stands in front of the
+        // glass (a tray menu over the dock's island) and nobody can register it, the menu being Windows' own window in its owner's
+        // process. Without this the glass shows the menu again, bent, around the menu (the user, 2026-11-15, with a picture of
+        // DirectLook's tray menu over the dock: "öndeki pencere arkadaki camı etkiliyor").
+        let menu = !mine && GetClassLongPtrW(h, GCW_ATOM) & 0xFFFF == MENU_CLASS_ATOM;
         // the property first: it is the cheap test that rules out nearly every window of the desktop
-        if !mine && !is_marked(h) {
+        if !mine && !menu && !is_marked(h) {
             return BOOL(1);
         }
         if !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() {
             return BOOL(1);
         }
-        if !mine {
+        if menu {
+            w.menus.insert(key);
+        } else if !mine {
             let mut pid = 0u32;
             if GetWindowThreadProcessId(h, Some(&mut pid)) == 0 || pid == w.pid {
                 // a window of this very process that carries the mark but is not one the engine holds: it is not "another process"
@@ -220,13 +280,14 @@ unsafe extern "system" fn each(h: HWND, lp: LPARAM) -> BOOL {
     BOOL(1)
 }
 
-/// The visible glass windows of this process (`mine`) and of other processes, from the top of the z order down. Reads windows only.
-pub(super) fn scan(mine: &BTreeSet<isize>) -> Vec<Entry> {
-    let mut walk = Walk { mine, pid: unsafe { GetCurrentProcessId() }, out: Vec::new() };
+/// The visible glass windows of this process (`mine`) and of other processes, and the open popup menus of any program (entries that
+/// are not `mine`, named again in the second value), from the top of the z order down. Reads windows only.
+pub(super) fn scan(mine: &BTreeSet<isize>) -> (Vec<Entry>, BTreeSet<isize>) {
+    let mut walk = Walk { mine, pid: unsafe { GetCurrentProcessId() }, out: Vec::new(), menus: BTreeSet::new() };
     unsafe {
         let _ = EnumWindows(Some(each), LPARAM(&mut walk as *mut Walk as isize));
     }
-    walk.out
+    (walk.out, walk.menus)
 }
 
 #[cfg(test)]
@@ -382,7 +443,7 @@ mod tests {
         mark(0x7fff_fff0, true);
         mark(0x7fff_fff0, false);
         assert!(!is_marked(HWND(0x7fff_fff0 as *mut _)));
-        assert!(scan(&BTreeSet::new()).iter().all(|e| !e.mine));
+        assert!(scan(&BTreeSet::new()).0.iter().all(|e| !e.mine));
     }
 
     /// A marked window that is not visible is not listed.
@@ -392,7 +453,7 @@ mod tests {
         let h = hidden_window();
         mark(h.0 as isize, true);
         let seen = scan(&BTreeSet::from([h.0 as isize]));
-        assert!(seen.iter().all(|e| e.hwnd != h.0 as isize), "a window that is not visible is not listed");
+        assert!(seen.0.iter().all(|e| e.hwnd != h.0 as isize), "a window that is not visible is not listed");
         unsafe { DestroyWindow(h).expect("destroy") };
     }
 
@@ -508,38 +569,82 @@ mod tests {
 
     #[test]
     fn a_refused_list_with_foreign_windows_is_sent_again_without_them_and_remembered() {
-        let mut refused = false;
+        let mut refused = Refused::default();
         let mut calls = vec![];
-        let r: Result<u32, &str> = send_list(&mut refused, true, |with| {
+        let r: Result<u32, &str> = send_list(&mut refused, true, false, |with| {
             calls.push(with);
-            if with { Err("refused") } else { Ok(5) }
+            if with == With::None { Ok(5) } else { Err("refused") }
         });
         assert_eq!(r, Ok(5));
-        assert_eq!(calls, vec![true, false]);
-        assert!(refused);
+        assert_eq!(calls, vec![With::Glass, With::None]);
+        assert_eq!(refused, Refused { menus: false, glass: true });
         // the next list does not try again
         let mut calls = vec![];
-        let _: Result<u32, &str> = send_list(&mut refused, true, |with| {
+        let _: Result<u32, &str> = send_list(&mut refused, true, false, |with| {
             calls.push(with);
             Ok(1)
         });
-        assert_eq!(calls, vec![false]);
+        assert_eq!(calls, vec![With::None]);
     }
 
     #[test]
     fn a_list_that_fails_without_foreign_windows_too_is_an_error_and_nothing_is_remembered() {
-        let mut refused = false;
-        let r: Result<u32, &str> = send_list(&mut refused, true, |_| Err("broken"));
+        let mut refused = Refused::default();
+        let r: Result<u32, &str> = send_list(&mut refused, true, false, |_| Err("broken"));
         assert_eq!(r, Err("broken"));
-        assert!(!refused, "a session that is broken is not a refusal of foreign windows");
+        assert_eq!(refused, Refused::default(), "a session that is broken is not a refusal of foreign windows");
+        let r: Result<u32, &str> = send_list(&mut refused, true, true, |_| Err("broken"));
+        assert_eq!(r, Err("broken"));
+        assert_eq!(refused, Refused::default(), "nor with a menu in the list");
         // a list with no foreign windows is one call
         let mut n = 0;
-        let _: Result<u32, &str> = send_list(&mut refused, false, |with| {
+        let _: Result<u32, &str> = send_list(&mut refused, false, false, |with| {
             n += 1;
-            assert!(!with);
+            assert_eq!(with, With::None);
             Ok(0)
         });
         assert_eq!(n, 1);
+    }
+
+    /// A menu belongs to any program: a list refused because of one is sent again with our own glass windows still in it.
+    #[test]
+    fn a_refused_menu_does_not_take_our_glass_windows_out_with_it() {
+        let mut refused = Refused::default();
+        let mut calls = vec![];
+        let r: Result<u32, &str> = send_list(&mut refused, true, true, |with| {
+            calls.push(with);
+            if with == With::All { Err("refused") } else { Ok(7) }
+        });
+        assert_eq!(r, Ok(7));
+        assert_eq!(calls, vec![With::All, With::Glass]);
+        assert_eq!(refused, Refused { menus: true, glass: false });
+        // from then on menus are not tried, the glass windows are
+        let mut calls = vec![];
+        let _: Result<u32, &str> = send_list(&mut refused, true, true, |with| {
+            calls.push(with);
+            Ok(1)
+        });
+        assert_eq!(calls, vec![With::Glass]);
+        // a menu alone, refused: the plain list, and only the menus are given up
+        let mut refused = Refused::default();
+        let mut calls = vec![];
+        let r: Result<u32, &str> = send_list(&mut refused, false, true, |with| {
+            calls.push(with);
+            if with == With::None { Ok(2) } else { Err("refused") }
+        });
+        assert_eq!((r, calls, refused), (Ok(2), vec![With::All, With::None], Refused { menus: true, glass: false }));
+        // everything foreign refused: both remembered, the plain list goes
+        let mut refused = Refused::default();
+        let mut calls = vec![];
+        let r: Result<u32, &str> = send_list(&mut refused, true, true, |with| {
+            calls.push(with);
+            if with == With::None { Ok(3) } else { Err("refused") }
+        });
+        assert_eq!((r, calls, refused), (Ok(3), vec![With::All, With::Glass, With::None], Refused { menus: true, glass: true }));
+        // an accepted list remembers nothing
+        let mut refused = Refused::default();
+        let _: Result<u32, &str> = send_list(&mut refused, true, true, |_| Ok(1));
+        assert_eq!(refused, Refused::default());
     }
 
     /// The session's list holds the foreign windows, each once, and a change of them is a new version to send.
@@ -552,8 +657,17 @@ mod tests {
         assert!(ex.set_foreign(&set_of(&[30, 10])));
         assert!(ex.version() > v);
         assert_eq!(ex.list(), vec![10, 30], "attached and foreign, each once");
-        assert_eq!(ex.list_for(false), vec![10]);
+        assert_eq!(ex.list_for(With::None), vec![10]);
         assert!(ex.has_foreign());
+        // a menu is in the full list only, and is a version of its own
+        let v2 = ex.version();
+        assert!(ex.set_menus(&set_of(&[77])) && ex.has_menus());
+        assert!(ex.version() > v2);
+        assert_eq!(ex.list_for(With::All), vec![10, 30, 77]);
+        assert_eq!(ex.list_for(With::Glass), vec![10, 30], "a session that was refused a menu keeps our glass windows out");
+        assert_eq!(ex.list_for(With::None), vec![10]);
+        assert!(!ex.set_menus(&set_of(&[77])), "the same menus send nothing");
+        assert!(ex.set_menus(&BTreeSet::new()) && !ex.has_menus());
         let v = ex.version();
         assert!(!ex.set_foreign(&set_of(&[30, 10])), "the same set sends nothing");
         assert_eq!(ex.version(), v);

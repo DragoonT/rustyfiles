@@ -899,6 +899,11 @@ struct Engine {
     /// The glass windows of other processes of ours that this process leaves out too (`crossproc.rs`), and when they were last looked for.
     foreign: Foreign,
     last_scan: Instant,
+    /// A menu opened: the next turn scans whatever the clock says (`Cmd::ScanNow`).
+    scan_now: bool,
+    /// The popup menus among the windows `foreign` holds (a menu is told from a glass window by its class at the scan; the set
+    /// remembers it for the time the window is held after it left the scan).
+    menus: BTreeSet<isize>,
     /// A glass window of another process of ours was seen at the last scan (above or below ours): the turn then stays as short as the scan.
     foreign_seen: bool,
     /// Why the thread woke (statistics).
@@ -987,6 +992,8 @@ impl Engine {
             excl: Exclusion::default(),
             foreign: Foreign::default(),
             last_scan: Instant::now(),
+            scan_now: false,
+            menus: BTreeSet::new(),
             foreign_seen: false,
             turns: Turns::default(),
             last_access_check: Instant::now(),
@@ -1070,6 +1077,8 @@ impl Engine {
             }
             // (the next turn looks at what every window is owed; the command itself ended the wait)
             Cmd::CareChanged => {}
+            // (the scan's own clock is set back: the next turn, which comes at once, looks)
+            Cmd::ScanNow => self.scan_now = true,
         }
     }
 
@@ -1619,7 +1628,7 @@ impl Engine {
     /// the capture the ones that lie above one of ours: two glass windows of two processes that read each other build up a flat red and
     /// blue (see `crossproc.rs`). One walk of the top-level windows, a property test per window.
     fn scan_foreign(&mut self, now: Instant) {
-        if now.saturating_duration_since(self.last_scan) < crossproc::SCAN_EVERY {
+        if !std::mem::take(&mut self.scan_now) && now.saturating_duration_since(self.last_scan) < crossproc::SCAN_EVERY {
             return;
         }
         let seen: Vec<&Win> = self.wins.values().filter(|w| w.active()).collect();
@@ -1630,11 +1639,19 @@ impl Engine {
         // the glass reads this far around itself; a window whose edge is nearer than that can show in the frost
         let margin = seen.iter().filter_map(|w| w.geo).map(|g| region_pad(g.scale())).max().unwrap_or(0) as i32;
         let mine: BTreeSet<isize> = self.wins.keys().copied().collect();
-        let order = crossproc::scan(&mine);
-        self.foreign_seen = order.iter().any(|e| !e.mine);
+        let (order, menus) = crossproc::scan(&mine);
+        // (a menu is no glass window: it does not shorten the quiet wait the way a glass window of another process does)
+        self.foreign_seen = order.iter().any(|e| !e.mine && !menus.contains(&e.hwnd));
         let wanted = crossproc::foreign_above(&order, margin);
-        if self.foreign.update(&wanted, now, wgc::is_window) && self.excl.set_foreign(self.foreign.set()) {
-            log::debug!("glass: {} glass windows of other processes are left out of the capture", self.foreign.set().len());
+        self.foreign.update(&wanted, now, wgc::is_window);
+        // the held windows, each to its list: the menus (any program's) apart from the glass windows of our other processes
+        self.menus.extend(menus);
+        self.menus.retain(|h| self.foreign.set().contains(h));
+        let glass: BTreeSet<isize> = self.foreign.set().difference(&self.menus).copied().collect();
+        let a = self.excl.set_foreign(&glass);
+        let b = self.excl.set_menus(&self.menus);
+        if a || b {
+            log::debug!("glass: left out of the capture: {} glass windows of other processes, {} menus", glass.len(), self.menus.len());
         }
     }
 
