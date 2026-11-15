@@ -25,6 +25,10 @@ pub enum Fixed {
     Unpin,
     /// Windows' own Properties of the shortcut or the program.
     Properties,
+    /// Move the app's window (the one used last) to the monitor of this number and bring it forward (`winmove`).
+    MoveToMonitor(u32),
+    /// Bring the app's window inside the work area of the monitor it is on (`winmove::fitted_rect`).
+    FitToScreen,
     /// Ask the app's one window to close.
     CloseWindow,
     /// Ask all of the app's windows (the count) to close.
@@ -69,6 +73,16 @@ pub fn fixed_rows(can_start: bool, on_disk: bool, can_pin: bool, pinned: bool, w
     if windows > 0 && can_end {
         rows.push(Fixed::EndTask);
     }
+    rows
+}
+
+/// The fixed rows with the rows for the app's window put in: one "open on monitor N" for every monitor the window is not on
+/// (`monitors`, none with one monitor) and "fit to the screen". They stand before the close rows, and only where there is a window
+/// (a close row is there).
+pub fn with_window_rows(mut rows: Vec<Fixed>, monitors: &[u32]) -> Vec<Fixed> {
+    let Some(at) = rows.iter().position(|r| matches!(r, Fixed::CloseWindow | Fixed::CloseAll(_))) else { return rows };
+    let extra = monitors.iter().map(|n| Fixed::MoveToMonitor(*n)).chain(std::iter::once(Fixed::FitToScreen));
+    rows.splice(at..at, extra);
     rows
 }
 
@@ -266,6 +280,19 @@ mod tests {
 
     /// "End task" is offered for a running app that has a process of its own to end, after the close rows, and for nothing else.
     /// An app that is started from a file gets the three rows of the file, in Windows' order; a packaged app gets none of them.
+    /// The window's rows: before the close rows, one per other monitor and "fit", and none for an app with no window.
+    #[test]
+    fn a_window_can_be_sent_to_another_monitor_and_fitted_from_the_menu() {
+        let two = with_window_rows(fixed_rows(true, false, true, true, 1, true), &[2]);
+        assert_eq!(two, vec![Fixed::Open, Fixed::Unpin, Fixed::MoveToMonitor(2), Fixed::FitToScreen, Fixed::CloseWindow, Fixed::EndTask]);
+        let three = with_window_rows(fixed_rows(true, false, true, false, 3, false), &[1, 3]);
+        assert_eq!(three, vec![Fixed::Open, Fixed::Pin, Fixed::MoveToMonitor(1), Fixed::MoveToMonitor(3), Fixed::FitToScreen, Fixed::CloseAll(3)]);
+        // one monitor: nothing to move to, the fit row alone
+        assert_eq!(with_window_rows(fixed_rows(true, false, true, true, 1, false), &[]), vec![Fixed::Open, Fixed::Unpin, Fixed::FitToScreen, Fixed::CloseWindow]);
+        // no window: no rows for one
+        assert_eq!(with_window_rows(fixed_rows(true, false, true, true, 0, false), &[2]), vec![Fixed::Open, Fixed::Unpin]);
+    }
+
     #[test]
     fn an_app_on_disk_can_be_started_as_administrator_shown_in_its_folder_and_asked_for_its_properties() {
         assert_eq!(

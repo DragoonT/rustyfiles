@@ -1931,5 +1931,7 @@
  "b6b609d6": "Użyj pulpitu systemu Windows",
  "b596207c": "Gdy Dock jest uruchomiony, rustyfiles nie rysuje własnego pulpitu: pulpit systemu Windows, jego ikony i każdy inny program porządkujący pulpit pozostają bez zmian. Gdy ta opcja jest włączona, pozostałe opcje na tej stronie nie działają.",
  "e619f52d": "Głośność aplikacji",
- "1ce4994b": "Żadna aplikacja nie odtwarza teraz dźwięku"
+ "1ce4994b": "Żadna aplikacja nie odtwarza teraz dźwięku",
+ "16622163": "Otwórz na monitorze",
+ "db7893e9": "Dopasuj do ekranu"
 }

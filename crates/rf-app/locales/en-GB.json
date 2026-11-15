@@ -1931,5 +1931,7 @@
  "b6b609d6": "Use Windows' own desktop",
  "b596207c": "While the Dock runs, rustyfiles does not draw its own desktop: Windows' desktop, its icons and any other program that arranges the desktop stay as they are. While this is on, the other choices on this page do nothing.",
  "e619f52d": "App volumes",
- "1ce4994b": "No app is playing sound right now"
+ "1ce4994b": "No app is playing sound right now",
+ "16622163": "Open on monitor",
+ "db7893e9": "Fit to screen"
 }

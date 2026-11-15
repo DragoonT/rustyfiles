@@ -1931,5 +1931,7 @@
  "b6b609d6": "Usar el escritorio propio de Windows",
  "b596207c": "Mientras el Dock está en funcionamiento, rustyfiles no dibuja su propio escritorio: el escritorio de Windows, sus iconos y cualquier otro programa que organice el escritorio permanecen tal como están. Mientras esté activado, las demás opciones de esta página no tienen ningún efecto.",
  "e619f52d": "Volumen de aplicaciones",
- "1ce4994b": "Ninguna aplicación está reproduciendo sonido ahora mismo"
+ "1ce4994b": "Ninguna aplicación está reproduciendo sonido ahora mismo",
+ "16622163": "Abrir en el monitor",
+ "db7893e9": "Ajustar a la pantalla"
 }

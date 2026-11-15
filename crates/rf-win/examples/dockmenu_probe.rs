@@ -78,7 +78,7 @@ fn main() {
                 Fixed::CloseAll(_) => close_all += 1,
                 Fixed::EndTask => end += 1,
                 // (the rows of an app's file are not counted by this probe)
-                Fixed::RunAsAdmin | Fixed::OpenLocation | Fixed::Properties => {}
+                Fixed::RunAsAdmin | Fixed::OpenLocation | Fixed::Properties | Fixed::MoveToMonitor(_) | Fixed::FitToScreen => {}
             }
         }
     }

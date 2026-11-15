@@ -11614,5 +11614,17 @@
   "key": "Şu an ses çalan uygulama yok",
   "tr": "Şu an ses çalan uygulama yok",
   "en": "No app is playing sound right now"
+ },
+ {
+  "id": "16622163",
+  "key": "Monitörde aç",
+  "tr": "Monitörde aç",
+  "en": "Open on monitor"
+ },
+ {
+  "id": "db7893e9",
+  "key": "Ekrana sığdır",
+  "tr": "Ekrana sığdır",
+  "en": "Fit to screen"
  }
 ]

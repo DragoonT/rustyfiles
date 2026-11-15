@@ -1931,5 +1931,7 @@
  "b6b609d6": "Utiliser le Bureau de Windows",
  "b596207c": "Tant que le Dock fonctionne, rustyfiles ne dessine pas son propre bureau : le Bureau de Windows, ses icônes et tout autre programme qui organise le bureau restent tels quels. Lorsque cette option est activée, les autres choix de cette page n'ont aucun effet.",
  "e619f52d": "Volume des applications",
- "1ce4994b": "Aucune application ne lit du son pour le moment"
+ "1ce4994b": "Aucune application ne lit du son pour le moment",
+ "16622163": "Ouvrir sur l'écran",
+ "db7893e9": "Ajuster à l'écran"
 }

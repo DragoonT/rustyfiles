@@ -120,6 +120,7 @@ pub mod tray_order;
 pub mod tray_strip;
 pub mod tray_tip;
 pub mod triggers;
+pub mod winmove;
 pub mod winops;
 pub mod zoomwatch;
 

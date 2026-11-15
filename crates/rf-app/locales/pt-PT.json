@@ -1931,5 +1931,7 @@
  "b6b609d6": "Utilizar o ambiente de trabalho do Windows",
  "b596207c": "Enquanto o Dock está em execução, o rustyfiles não desenha o seu próprio ambiente de trabalho: o ambiente de trabalho do Windows, os respetivos ícones e qualquer outro programa que organize o ambiente de trabalho mantêm-se como estão. Enquanto esta opção estiver ativada, as outras opções desta página não têm qualquer efeito.",
  "e619f52d": "Volume das aplicações",
- "1ce4994b": "Nenhuma aplicação está a reproduzir som neste momento"
+ "1ce4994b": "Nenhuma aplicação está a reproduzir som neste momento",
+ "16622163": "Abrir no monitor",
+ "db7893e9": "Ajustar ao ecrã"
 }

@@ -404,6 +404,11 @@ impl MenuView {
         let can_end = !winops::end_task_processes(&windows).is_empty();
         let on_disk = app.launch.as_ref().is_some_and(|l| l.file().is_some());
         let fixed = model::fixed_rows(app.launch.is_some(), on_disk, ownpins::pin_from_app(&app).is_some(), app.pinned, app.windows.len(), can_end);
+        // (the monitors the window used last is not on: two quick questions of Windows, none of which waits for the program)
+        let monitors = windows.first().map_or_else(Vec::new, |w| {
+            rf_win::dock::winmove::targets(&rf_win::dock::winmove::screens(), rf_win::dock::monitors::monitor_of_window(w.hwnd))
+        });
+        let fixed = model::with_window_rows(fixed, &monitors);
         self.active = Some(Active { app, windows, jump, icon, display_name: None, menu: Menu::new(fixed), sections: Vec::new() });
         self.shown = true;
         self.closing = false;
@@ -573,6 +578,27 @@ impl MenuView {
             }
             RowId::Fixed(Fixed::Pin) => super::own_pins::set_pinned(a.app.clone(), true, cx),
             RowId::Fixed(Fixed::Unpin) => super::own_pins::set_pinned(a.app.clone(), false, cx),
+            RowId::Fixed(Fixed::MoveToMonitor(number)) => {
+                // (the window used last, as "close window" takes it; moving sends the program messages: never on the UI thread)
+                if let Some(w) = a.windows.first().copied() {
+                    std::thread::spawn(move || {
+                        if rf_win::dock::winmove::move_to_screen(w, number) {
+                            rf_win::dock::launch::activate(w.hwnd);
+                        } else {
+                            log::info!("dock: the window was not moved to monitor {number} (it is gone, or Windows refused)");
+                        }
+                    });
+                }
+            }
+            RowId::Fixed(Fixed::FitToScreen) => {
+                if let Some(w) = a.windows.first().copied() {
+                    std::thread::spawn(move || {
+                        if rf_win::dock::winmove::fit_to_screen(w) {
+                            rf_win::dock::launch::activate(w.hwnd);
+                        }
+                    });
+                }
+            }
             RowId::Fixed(Fixed::CloseWindow) => {
                 // (the one used last: the first of the list; if it is not the window it was any more, nothing is closed)
                 if let Some(w) = a.windows.first() {
@@ -713,6 +739,8 @@ fn fixed_label(f: Fixed, app_name: &str) -> (Option<L>, String) {
         Fixed::RunAsAdmin => (Some(L::ShieldCheck), t!("Yönetici olarak çalıştır").to_string()),
         Fixed::OpenLocation => (Some(L::FolderOpen), t!("Dosya konumunu aç").to_string()),
         Fixed::Properties => (Some(L::Wrench), t!("Özellikler").to_string()),
+        Fixed::MoveToMonitor(n) => (Some(L::Monitor), format!("{}: {n}", t!("Monitörde aç"))),
+        Fixed::FitToScreen => (Some(L::Maximize2), t!("Ekrana sığdır").to_string()),
         Fixed::Pin => (Some(L::Pin), t!("Dock'a sabitle").to_string()),
         Fixed::Unpin => (Some(L::PinOff), t!("Dock'tan kaldır").to_string()),
         Fixed::CloseWindow => (Some(L::X), t!("Pencereyi kapat").to_string()),
