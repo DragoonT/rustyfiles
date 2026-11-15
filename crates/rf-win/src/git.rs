@@ -291,6 +291,80 @@ pub fn state_for_child(status: &GitStatus, dir: &Path, name: &str) -> Option<Fil
     status.dirs.get(&child).copied()
 }
 
+/// The different states the direct children of `dir` show (what [`state_for_child`] answers for them), found from the status
+/// alone and not child by child: for a list that wants to know what its status column will hold. Empty: every child is clean, or
+/// `dir` is not in the repository.
+pub fn states_in(status: &GitStatus, dir: &Path) -> Vec<FileState> {
+    let Some(rel) = rel_to(&status.root, dir) else { return Vec::new() };
+    let mut out: Vec<FileState> = Vec::new();
+    let mut add = |s: FileState| {
+        if !out.contains(&s) {
+            out.push(s);
+        }
+    };
+    // the folder is, or lies inside, an untracked or ignored folder: every child inherits that
+    for a in rel.ancestors().take_while(|a| !a.as_os_str().is_empty()) {
+        if let Some(&s @ (FileState::Untracked | FileState::Ignored)) = status.files.get(a) {
+            add(s);
+        }
+    }
+    for (p, s) in status.files.iter().chain(status.dirs.iter()) {
+        if p.parent() == Some(rel.as_path()) {
+            add(*s);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod states_in_tests {
+    use std::path::{Path, PathBuf};
+
+    use super::{FileState, GitStatus, state_for_child, states_in};
+
+    fn status() -> GitStatus {
+        let mut st = GitStatus { root: PathBuf::from(r"C:\repo"), ..Default::default() };
+        for (p, s) in [
+            (r"src\a.rs", FileState::Modified),
+            (r"src\deep\b.rs", FileState::Added),
+            ("notes", FileState::Untracked),
+            ("top.txt", FileState::Deleted),
+            (r"docs\x.md", FileState::Modified),
+        ] {
+            st.files.insert(PathBuf::from(p), s);
+        }
+        st.reindex();
+        st
+    }
+
+    #[test]
+    fn the_states_a_folders_children_show() {
+        let st = status();
+        let mut root = states_in(&st, Path::new(r"C:\repo"));
+        root.sort_by_key(|s| format!("{s:?}"));
+        // top.txt deleted, notes untracked, src and docs changed inside
+        assert_eq!(root, [FileState::Deleted, FileState::Modified, FileState::Untracked]);
+        let src = states_in(&st, Path::new(r"C:\repo\src"));
+        assert!(src.contains(&FileState::Modified), "a.rs, and the folder deep by what is in it");
+        assert_eq!(src.len(), src.iter().collect::<std::collections::HashSet<_>>().len(), "each state once");
+        for name in ["a.rs", "deep", "clean.rs"] {
+            if let Some(s) = state_for_child(&st, Path::new(r"C:\repo\src"), name) {
+                assert!(src.contains(&s), "{name}: what a row shows is among the states measured");
+            }
+        }
+    }
+
+    #[test]
+    fn inside_an_untracked_folder_every_child_is_untracked_and_a_clean_folder_has_none() {
+        let st = status();
+        assert_eq!(states_in(&st, Path::new(r"C:\repo\notes")), [FileState::Untracked]);
+        assert_eq!(states_in(&st, Path::new(r"C:\repo\notes\sub")), [FileState::Untracked]);
+        assert_eq!(state_for_child(&st, Path::new(r"C:\repo\notes\sub"), "f.txt"), Some(FileState::Untracked));
+        assert!(states_in(&st, Path::new(r"C:\repo\src\deep\none")).is_empty());
+        assert!(states_in(&st, Path::new(r"D:\elsewhere")).is_empty(), "not in the repository");
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Branches, checkout, network operations, last commit. All blocking: call off the UI thread.
 // ---------------------------------------------------------------------------------------------

@@ -115,6 +115,17 @@ impl TagStore {
         }
     }
 
+    /// The tagged items that lie directly in `dir` (not deeper), without looking at the others: for a list that wants to know what
+    /// its tag column will show. `dir` in any letter case, with or without a trailing separator.
+    pub fn tagged_in(&self, dir: &Path) -> impl Iterator<Item = &Tagged> + '_ {
+        let mut prefix = key(dir);
+        if !prefix.ends_with('\\') {
+            prefix.push('\\');
+        }
+        let n = prefix.len();
+        self.items.range(prefix.clone()..).take_while(move |(k, _)| k.starts_with(&prefix)).filter(move |(k, _)| !k[n..].contains('\\')).map(|(_, v)| v)
+    }
+
     pub fn paths_with(&self, id: u32) -> Vec<PathBuf> {
         self.items.values().filter(|v| v.tags.contains(&id)).map(|v| v.path.clone()).collect()
     }
@@ -165,6 +176,20 @@ impl TagStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tagged_items_of_one_folder() {
+        let mut s = TagStore::default();
+        let p = |x: &str| PathBuf::from(x);
+        s.toggle(&[p(r"C:\Work\a.txt"), p(r"C:\Work\Sub\deep.txt"), p(r"C:\Workshop\b.txt"), p(r"C:\work\Z.txt"), p(r"D:\Work\a.txt")], 1);
+        s.toggle(&[p(r"C:\Work\a.txt")], 3);
+        let names = |dir: &str| -> Vec<String> { s.tagged_in(Path::new(dir)).map(|t| t.path.file_name().unwrap().to_string_lossy().into_owned()).collect() };
+        assert_eq!(names(r"C:\Work"), ["a.txt", "Z.txt"], "its own items, not a subfolder's and not a folder's whose name only begins the same");
+        assert_eq!(names(r"c:\WORK\"), ["a.txt", "Z.txt"], "any letter case, a trailing separator");
+        assert_eq!(s.tagged_in(Path::new(r"C:\Work")).next().unwrap().tags, [1, 3]);
+        assert_eq!(names(r"C:\Work\Sub"), ["deep.txt"]);
+        assert!(names(r"C:\Nothing").is_empty() && names(r"E:\").is_empty());
+    }
 
     #[test]
     fn toggle_and_query() {

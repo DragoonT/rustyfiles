@@ -26,6 +26,8 @@ use crate::image_cache::ImageCache;
 use crate::places::{self, Places};
 use crate::theme::{self, Palette};
 
+/// Details columns that are as wide as what they show.
+mod auto_cols;
 /// Columns for any Windows property (the "Diğer sütunlar…" columns).
 pub(crate) mod prop_cols;
 /// Sorting by tag, by path and by sync state.
@@ -363,7 +365,12 @@ pub struct FolderView {
     /// Column resize in progress: (column, mouse x at start, width at start), live widths.
     col_drag: Option<(usize, f32, f32)>,
     col_live: Option<[f32; 11]>,
+    /// The columns dragged since the last save, one bit each: only these get a stored width (the others stay automatic).
+    col_dragged: u16,
     col_save_gen: u64,
+    /// What the automatic columns measure in this listing, and what that measurement was made for (`auto_cols.rs`).
+    auto_cols: auto_cols::AutoCols,
+    auto_key: Option<auto_cols::Key>,
     pub(crate) grid_style: GridStyle,
     content_width: Pixels,
     pub(crate) entries: Vec<Entry>,
@@ -539,7 +546,10 @@ impl FolderView {
             row_size: DEFAULT_ROW_SIZE,
             col_drag: None,
             col_live: None,
+            col_dragged: 0,
             col_save_gen: 0,
+            auto_cols: Default::default(),
+            auto_key: None,
             grid_style: GridStyle::Tiles,
             content_width: px(900.),
             entries: Vec::new(),
@@ -2970,13 +2980,14 @@ impl FolderView {
 
     // ---------- rendering ----------
 
-    /// Column widths (modified, created, type, size, tags, git, sync): the live drag, else Settings.
+    /// Column widths (modified, created, type, size, tags, git, sync): the live drag, else Settings, with every column nobody has
+    /// dragged at the width its content measures (`auto_cols.rs`).
     /// …then the commit columns (message, author, date, hash) at 7..11.
     fn col_widths(&self, cx: &App) -> [f32; 11] {
         self.col_live.unwrap_or_else(|| {
             let c = &cx.global::<crate::settings::Settings>().columns;
             let (a, b, g) = (c.widths, c.extra_widths, c.git_widths);
-            [a[0], a[1], a[2], a[3], b[0], b[1], b[2], g[0], g[1], g[2], g[3]].map(f32::from)
+            self.auto_cols.apply([a[0], a[1], a[2], a[3], b[0], b[1], b[2], g[0], g[1], g[2], g[3]].map(f32::from))
         })
     }
 
@@ -3011,7 +3022,8 @@ impl FolderView {
         let modified = take(c.modified, w[0]);
         let kind = take(c.kind, f32::from(self.type_col_w(cx)));
         let git = take(c.git && self.git.is_some(), w[5]);
-        let tags = take(c.tags && !self.is_search(), w[4]);
+        // (the tag column only where an item has a tag, as the Git column only inside a repository)
+        let tags = take(c.tags && !self.is_search() && self.auto_cols.tags_any, w[4]);
         let sync = take(cloud, w[6]);
         let created = take(c.created && !self.is_search(), w[1]);
         let repo = self.git.is_some() && !self.is_search();
@@ -3062,6 +3074,11 @@ impl FolderView {
                     MouseButton::Left,
                     cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
                         cx.stop_propagation();
+                        if ev.click_count >= 2 {
+                            // a double click on the edge gives the column its own width back (as Explorer fits a column there)
+                            this.reset_col_width(ix, cx);
+                            return;
+                        }
                         let cur = this.col_widths(cx)[ix];
                         this.col_drag = Some((ix, f32::from(ev.position.x), cur));
                     }),
@@ -3124,6 +3141,7 @@ impl FolderView {
                 let most = (w[ix] + this.spare_width(cx)).clamp(w[ix].min(600.), 600.);
                 w[ix] = (sw - (f32::from(e.event.position.x) - sx)).clamp(70., most.max(70.)).round();
                 this.col_live = Some(w);
+                this.col_dragged |= 1 << ix;
                 this.schedule_col_save(cx);
                 cx.notify();
             }))
@@ -3152,6 +3170,30 @@ impl FolderView {
             .children(self.props_header_cells(p, cx))
     }
 
+    fn store_col_width(c: &mut crate::settings::ColumnPrefs, ix: usize, width: u16) {
+        match ix {
+            0..=3 => c.widths[ix] = width,
+            4..=6 => c.extra_widths[ix - 4] = width,
+            _ => c.git_widths[(ix - 7).min(3)] = width,
+        }
+    }
+
+    /// The column at `ix` gets its stock width again, which for most columns means "as wide as its content" (`auto_cols.rs`).
+    fn reset_col_width(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.col_drag = None;
+        self.col_live = None;
+        self.col_dragged = 0;
+        self.col_save_gen += 1;
+        let d = crate::settings::ColumnPrefs::default();
+        let stock = match ix {
+            0..=3 => d.widths[ix],
+            4..=6 => d.extra_widths[ix - 4],
+            _ => d.git_widths[(ix - 7).min(3)],
+        };
+        crate::settings::update(cx, |s| Self::store_col_width(&mut s.columns, ix, stock));
+        cx.notify();
+    }
+
     /// Writes dragged column widths to Settings once the drag pauses (a save per move would
     /// rewrite settings.toml dozens of times a second).
     fn schedule_col_save(&mut self, cx: &mut Context<Self>) {
@@ -3165,10 +3207,13 @@ impl FolderView {
                 }
                 if let Some(w) = v.col_live.take() {
                     v.col_drag = None;
+                    // only the columns that were dragged: the live widths of the others are measured ones, and storing them would
+                    // end their being automatic
+                    let dragged = std::mem::take(&mut v.col_dragged);
                     crate::settings::update(cx, |s| {
-                        s.columns.widths = [w[0], w[1], w[2], w[3]].map(|x| x as u16);
-                        s.columns.extra_widths = [w[4], w[5], w[6]].map(|x| x as u16);
-                        s.columns.git_widths = [w[7], w[8], w[9], w[10]].map(|x| x as u16);
+                        for ix in (0..w.len()).filter(|ix| dragged & (1 << ix) != 0) {
+                            Self::store_col_width(&mut s.columns, ix, auto_cols::kept(ix, w[ix]));
+                        }
                     });
                 }
             });
@@ -4310,6 +4355,9 @@ impl Render for FolderView {
             });
         }
         let p = Palette::for_window(window);
+        if self.view_mode == ViewMode::Details {
+            self.refresh_auto_cols(window, cx);
+        }
         let content = match self.location() {
             Location::Home => self.render_home(&p, cx),
             Location::Settings => crate::settings_view::render(&p, window, cx, self.lens_owner),
