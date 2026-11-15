@@ -16,6 +16,9 @@ pub enum Step {
     Choose(isize),
     /// Close, and leave things as they were.
     Cancel,
+    /// This window (its handle and its process) is to be asked to close; its card is out of the session already and the switcher
+    /// stays open. The host lays the remaining cards out anew ([`Session::fit`]), or cancels when none is left.
+    Close(isize, u32),
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +88,12 @@ impl Session {
                 };
             }
             Effect::Cancel => return Step::Cancel,
+            Effect::Close => {
+                return match self.selection.index().filter(|_| !self.items.is_empty()) {
+                    Some(i) => self.close_at(i),
+                    None => Step::Nothing,
+                };
+            }
         }
         if self.selection.index() != before { Step::Redraw } else { Step::Nothing }
     }
@@ -96,6 +105,23 @@ impl Session {
         }
         self.selection.set(i);
         Step::Redraw
+    }
+
+    /// The card at `i` goes out of the session: its window is the one to ask to close (the selected card with the close key, any
+    /// card with the middle button). The selection keeps its PLACE, which is the next window now (the last one when the last card
+    /// went), so that the key pressed again closes the next one, as in Windows' own switcher.
+    pub fn close_at(&mut self, i: usize) -> Step {
+        if i >= self.items.len() {
+            return Step::Nothing;
+        }
+        let selected = self.selection.index().map(|s| if s > i { s - 1 } else { s });
+        let gone = self.items.remove(i);
+        // (the columns are the new layout's: `fit` sets them, as after `open`)
+        self.selection = Selection::opened(self.items.len(), 1, false);
+        if let Some(s) = selected.filter(|_| !self.items.is_empty()) {
+            self.selection.set(s.min(self.items.len() - 1));
+        }
+        Step::Close(gone.hwnd, gone.pid)
     }
 
     /// A card was clicked.
@@ -239,5 +265,28 @@ mod tests {
         assert_eq!(s.selected(), Some(1));
         s.apply(Effect::Move(Dir::Down));
         assert_eq!(s.selected(), Some(7), "one row down is six cards on");
+    }
+
+    /// Closing from the switcher: the card goes, the selection stays at its place (the next window), the last card's close moves
+    /// it back, and the last window of all leaves an empty session.
+    #[test]
+    fn closing_a_card_takes_it_out_and_keeps_the_selections_place() {
+        let mut s = Session::open(vec![item(1, "a"), item(2, "b"), item(3, "c")], Scope::AllWindows, false);
+        assert_eq!(s.selected(), Some(1), "a first Tab selects the window used before");
+        assert_eq!(s.apply(Effect::Close), Step::Close(2, 1));
+        assert_eq!(s.items().iter().map(|i| i.hwnd).collect::<Vec<_>>(), vec![1, 3]);
+        assert_eq!(s.selected(), Some(1), "the same place: the next window");
+        assert_eq!(s.apply(Effect::Close), Step::Close(3, 1));
+        assert_eq!(s.selected(), Some(0), "the last card went: the one before it");
+        // a middle click on a card before the selected one moves the selection with its window
+        let mut m = Session::open(vec![item(1, "a"), item(2, "b"), item(3, "c")], Scope::AllWindows, true);
+        assert_eq!(m.selected(), Some(2));
+        assert_eq!(m.close_at(0), Step::Close(1, 1));
+        assert_eq!((m.selected(), m.items()[1].hwnd), (Some(1), 3), "still on window 3");
+        assert_eq!(m.close_at(9), Step::Nothing);
+        // the last window of all
+        assert_eq!(s.apply(Effect::Close), Step::Close(1, 1));
+        assert!(s.is_empty());
+        assert_eq!(s.apply(Effect::Close), Step::Nothing);
     }
 }

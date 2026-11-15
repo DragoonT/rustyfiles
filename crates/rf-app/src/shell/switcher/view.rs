@@ -66,6 +66,8 @@ pub struct SwitcherView {
     hwnd: isize,
     session: Session,
     layout: Layout,
+    /// The work area of the monitor the switcher is on: the cards are laid out in it again when a window is closed from here.
+    work: rf_win::dock::Rect,
     /// The chord for the keys this window itself receives (the switcher opened by a command has no Alt held: `Sticky`).
     chord: Chord,
     dark: bool,
@@ -93,7 +95,8 @@ pub struct SwitcherView {
 }
 
 impl SwitcherView {
-    pub fn new(session: Session, layout: Layout, previous: isize, dark: bool, hooked: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(session: Session, layout: Layout, work: rf_win::dock::Rect, previous: isize, dark: bool, hooked: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut chord = Chord::new();
         chord.open_by_command();
         // losing the activation (the user clicked another window, an app took the foreground) puts the switcher away, once it has
@@ -116,6 +119,7 @@ impl SwitcherView {
             hwnd: crate::look::window::hwnd_of(window),
             session,
             layout,
+            work,
             chord,
             dark,
             previous,
@@ -156,15 +160,21 @@ impl SwitcherView {
         }
         self.popup = Some(PopupGlass::start_panel(self.hwnd, self.dark));
         self._watch = Some(glass_watch::watch(cx, |this: &mut Self| this.popup.as_mut()));
+        self.show_pictures();
+        window.focus(&self.focus, cx);
+        self.load_icons(cx);
+        self.start_guard(cx);
+        cx.notify();
+    }
+
+    /// The live pictures of the session's windows, at the layout's places (the registrations of an earlier set go with it).
+    fn show_pictures(&mut self) {
+        self.thumbs = None;
         let cards: Vec<(isize, bool, rf_win::dock::Rect)> =
             self.session.items().iter().enumerate().map(|(i, it)| (it.hwnd, it.no_live_picture(), self.layout.picture(i))).collect();
         let mut set = ThumbSet::new(Dwm, self.hwnd);
         self.pictures = set.show(&cards).into_iter().map(Some).collect();
         self.thumbs = Some(set);
-        window.focus(&self.focus, cx);
-        self.load_icons(cx);
-        self.start_guard(cx);
-        cx.notify();
     }
 
     /// While the window is open: a look at the foreground and the mouse every 50 ms. A click outside puts it away; a window that
@@ -261,7 +271,42 @@ impl SwitcherView {
             Step::Redraw => cx.notify(),
             Step::Choose(hwnd) => self.finish(Closing::Chosen(hwnd), cx),
             Step::Cancel => self.finish(Closing::Cancelled, cx),
+            Step::Close(hwnd, pid) => self.after_close(hwnd, pid, cx),
         }
+    }
+
+    /// The middle button on a card: that window is asked to close (issue 29: "CTRL + W closes the tab or middle click").
+    fn close_card(&mut self, i: usize, cx: &mut Context<Self>) {
+        if self.closing {
+            return;
+        }
+        if let Step::Close(hwnd, pid) = self.session.close_at(i) {
+            self.after_close(hwnd, pid, cx);
+        }
+    }
+
+    /// A card went out of the session: its window is asked to close the way its own close button asks (the program may still ask
+    /// about unsaved work, behind the switcher), and the cards that are left are laid out anew in the same window, which takes the
+    /// new layout's place and size. With no card left the switcher goes. `RUSTYFILES_SWITCHER_DRY_CLOSE` (any value) leaves the
+    /// window alone: for a look at the new layout without closing anybody's window.
+    fn after_close(&mut self, hwnd: isize, pid: u32, cx: &mut Context<Self>) {
+        if std::env::var_os("RUSTYFILES_SWITCHER_DRY_CLOSE").is_none() {
+            rf_win::dock::winops::close_window(rf_win::dock::winops::WinRef { hwnd, pid });
+        }
+        if self.session.is_empty() {
+            return self.finish(Closing::Cancelled, cx);
+        }
+        let plan = rf_win::switcher::layout::plan(self.session.items().len(), self.work, self.layout.scale);
+        self.session.fit(&plan);
+        self.layout = plan;
+        self.show_pictures();
+        // (moving a window sends it messages: from a task, with nothing borrowed, as at the opening)
+        let me = self.hwnd;
+        cx.spawn(async move |_, _| {
+            geo::show_at(me, plan.window);
+        })
+        .detach();
+        cx.notify();
     }
 
     fn finish(&mut self, how: Closing, cx: &mut Context<Self>) {
@@ -383,6 +428,7 @@ impl Render for SwitcherView {
                     .cursor_pointer()
                     .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, _, cx| this.hover(i, cx)))
                     .on_click(cx.listener(move |this, _, _, cx| this.click(i, cx)))
+                    .on_mouse_down(MouseButton::Middle, cx.listener(move |this, _, _, cx| this.close_card(i, cx)))
                     .child(picture_box)
                     .child(row)
                     // (the ring is a layer of its own: a border on the card would move its children, and the live pictures sit at

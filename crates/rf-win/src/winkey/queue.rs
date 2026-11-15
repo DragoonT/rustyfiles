@@ -40,6 +40,7 @@ fn effect_code(e: Effect) -> u32 {
         Effect::Move(Dir::Down) => 9,
         Effect::Choose => 10,
         Effect::Cancel => 11,
+        Effect::Close => 12,
     }
 }
 
@@ -54,6 +55,7 @@ fn effect_of(code: u32) -> Option<Effect> {
         9 => Effect::Move(Dir::Down),
         10 => Effect::Choose,
         11 => Effect::Cancel,
+        12 => Effect::Close,
         _ => return None,
     })
 }
@@ -140,7 +142,7 @@ mod tests {
     use super::*;
 
     fn every_effect() -> Vec<Effect> {
-        let mut v = vec![Effect::Choose, Effect::Cancel];
+        let mut v = vec![Effect::Choose, Effect::Cancel, Effect::Close];
         for scope in [Scope::AllWindows, Scope::ThisApp] {
             for backwards in [false, true] {
                 v.push(Effect::Open { scope, backwards });

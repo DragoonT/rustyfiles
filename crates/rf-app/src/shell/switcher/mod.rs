@@ -125,7 +125,7 @@ pub fn open(req: OpenRequest, cx: &mut App) -> bool {
         ..Default::default()
     };
     let hooked = req.hooked;
-    let opened = cx.open_window(opts, move |window, cx| cx.new(|cx| SwitcherView::new(session, plan, previous, dark, hooked, window, cx)));
+    let opened = cx.open_window(opts, move |window, cx| cx.new(|cx| SwitcherView::new(session, plan, mon.work, previous, dark, hooked, window, cx)));
     let handle = match opened {
         Ok(h) => h,
         Err(e) => {

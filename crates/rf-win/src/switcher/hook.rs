@@ -72,6 +72,8 @@ pub const VK_LCONTROL: u32 = 0xA2;
 pub const VK_RCONTROL: u32 = 0xA3;
 pub const VK_MENU: u32 = 0x12;
 pub const VK_ESCAPE: u32 = 0x1B;
+pub const VK_DELETE: u32 = 0x2E;
+pub const VK_W: u32 = 0x57;
 pub const VK_LEFT: u32 = 0x25;
 pub const VK_UP: u32 = 0x26;
 pub const VK_RIGHT: u32 = 0x27;
@@ -95,6 +97,7 @@ pub fn key_of(vk: u32, scan: u32) -> Key {
         VK_DOWN => Key::Down,
         VK_RETURN => Key::Enter,
         VK_ESCAPE => Key::Escape,
+        VK_DELETE | VK_W => Key::Close,
         VK_MENU | VK_LMENU | VK_RMENU => Key::Alt,
         _ => Key::Other,
     }
@@ -429,6 +432,7 @@ mod tests {
         assert_eq!(key_of(VK_MENU, 0x38), Key::Alt);
         assert_eq!(key_of(0x41, 0x1E), Key::Other);
         assert_eq!(key_of(VK_ESCAPE, 0x01), Key::Escape);
+        assert_eq!((key_of(VK_W, 0x11), key_of(VK_DELETE, 0x53)), (Key::Close, Key::Close));
         assert_eq!(key_of(VK_RETURN, 0x1C), Key::Enter);
         for (vk, k) in [(VK_LEFT, Key::Left), (VK_RIGHT, Key::Right), (VK_UP, Key::Up), (VK_DOWN, Key::Down)] {
             assert_eq!(key_of(vk, 0x4B), k);

@@ -30,6 +30,10 @@ pub enum Key {
     Down,
     Enter,
     Escape,
+    /// W or Delete: ask the selected window to close and stay open for the next (issue 29: "How to close apps? ... i prefer CTRL
+    /// + W closes the tab or middle click"). Delete is what Windows' own switcher takes; W is the key of "close this tab", and
+    /// Ctrl is not looked at, so with Alt held both W and Ctrl+W do it.
+    Close,
     /// Either Alt key.
     Alt,
     /// Any other key (not swallowed, not used).
@@ -98,6 +102,8 @@ pub enum Effect {
     Move(Dir),
     Choose,
     Cancel,
+    /// Ask the selected window to close; the switcher stays open.
+    Close,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -216,6 +222,7 @@ impl Chord {
                     Key::Down => Effect::Move(Dir::Down),
                     Key::Enter => Effect::Choose,
                     Key::Escape => Effect::Cancel,
+                    Key::Close => Effect::Close,
                     // Alt pressed again (auto repeat) or any other key: not ours
                     Key::Alt | Key::Other => return Reaction::NOTHING,
                 };
@@ -248,6 +255,21 @@ mod tests {
         assert_eq!(r.effect, Some(Effect::Open { scope: Scope::AllWindows, backwards: false }));
         assert!(r.swallow);
         assert!(c.is_open());
+    }
+
+    /// W (or Delete) is the switcher's only while it is open: it is swallowed, closes the selected window and leaves the switcher
+    /// up; with the switcher closed it is a letter like any other, with Alt down too.
+    #[test]
+    fn the_close_key_is_taken_only_while_the_switcher_is_open_and_does_not_end_the_chord() {
+        let mut c = Chord::new();
+        assert_eq!(c.feed(KeyInput::down(Key::Close).with_alt()), Reaction::NOTHING, "closed: Alt+W is the program's");
+        c.feed(alt_tab());
+        let r = c.feed(KeyInput::down(Key::Close).with_alt());
+        assert_eq!((r.swallow, r.effect), (true, Some(Effect::Close)));
+        assert!(c.is_open_held(), "the switcher stays for the next window");
+        assert!(c.feed(KeyInput::up(Key::Close).with_alt()).swallow, "the release follows its press");
+        assert_eq!(c.feed(KeyInput::down(Key::Close).with_alt()).effect, Some(Effect::Close), "and again");
+        assert_eq!(c.feed(KeyInput::up(Key::Alt)).effect, Some(Effect::Choose), "letting Alt go still chooses");
     }
 
     #[test]

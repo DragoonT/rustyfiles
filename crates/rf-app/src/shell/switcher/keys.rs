@@ -15,6 +15,7 @@ pub fn key_of(name: &str) -> Key {
         "down" => Key::Down,
         "enter" => Key::Enter,
         "escape" => Key::Escape,
+        "w" | "delete" => Key::Close,
         "alt" => Key::Alt,
         _ => Key::Other,
     }
@@ -38,6 +39,7 @@ mod tests {
         for (n, k) in [("left", Key::Left), ("right", Key::Right), ("up", Key::Up), ("down", Key::Down)] {
             assert_eq!(key_of(n), k);
         }
+        assert_eq!((key_of("w"), key_of("delete")), (Key::Close, Key::Close));
         assert_eq!(key_of("a"), Key::Other);
         assert_eq!(key_of(""), Key::Other);
     }
