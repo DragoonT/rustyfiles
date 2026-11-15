@@ -2732,7 +2732,7 @@ impl FolderView {
     fn type_col_w(&self, cx: &App) -> Pixels {
         if self.is_search() {
             // location shares the free width with the name instead of squeezing it
-            let free = f32::from(self.content_width) - 150. - 100. - 40.;
+            let free = f32::from(self.content_width) - 150. - 100. - 40. - DETAILS_GUTTER;
             px((free * 0.45).clamp(160., 460.))
         } else {
             px(self.col_widths(cx)[2])
@@ -2993,7 +2993,7 @@ impl FolderView {
         };
         let w = self.col_widths(cx);
         // the property columns the user added are placed first: the fixed columns share what is left
-        let mut free = f32::from(self.content_width) - 180. - 24. - self.props_used_width(cx);
+        let mut free = f32::from(self.content_width) - 180. - 24. - DETAILS_GUTTER - self.props_used_width(cx);
         let mut take = |want: bool, width: f32| -> bool {
             if want && width <= free {
                 free -= width;
@@ -3036,7 +3036,7 @@ impl FolderView {
                 used += w[7 + i];
             }
         }
-        (f32::from(self.content_width) - 180. - 24. - used).max(0.)
+        (f32::from(self.content_width) - 180. - 24. - DETAILS_GUTTER - used).max(0.)
     }
 
     fn render_header(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -3105,7 +3105,8 @@ impl FolderView {
         };
         h_flex()
             .h(px(30.))
-            .px(px(10.))
+            .pl(px(10.))
+            .pr(px(10. + DETAILS_GUTTER))
             .overflow_hidden()
             .text_xs()
             .border_b_1()
@@ -3623,7 +3624,8 @@ impl FolderView {
                 .track_scroll(&self.scroll)
                 .flex_1()
                 .py_1()
-                .px(px(6.))
+                .pl(px(6.))
+                .pr(px(6. + DETAILS_GUTTER))
                 .into_any_element()
         };
         let this = cx.entity();
@@ -4217,6 +4219,15 @@ fn empty_state(p: &Palette, icon: L, title: String, sub: &'static str) -> impl I
 /// Inline rename: how far the edit box reaches left of the name (its border plus padding), so
 /// the text inside starts exactly where the name was drawn.
 const RENAME_INSET: f32 = 5.;
+
+/// The empty strip between the rows of the details list and the list's right edge (the preview pane, the other pane, the window).
+///
+/// WHY (issue 25, with a picture of a selection box squeezed into the last pixels of the Size column): a drag that starts on a row
+/// moves the row, so a rubber band can start only where there is no row, and the rows reached the edge: 6 px of the list's own
+/// padding were all the room there was. Explorer has such a strip by accident (its columns do not fill the width); here the name
+/// column takes what is free, so the strip is made on purpose. The rows, their hover and selection fill and the column headings all
+/// end before it; the scrollbar, when shown, lies over its outer part.
+const DETAILS_GUTTER: f32 = 24.;
 
 pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
     // (the name test first: it costs nothing, and `exists` on a place that has to wake up holds the UI thread)
