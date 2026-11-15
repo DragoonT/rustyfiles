@@ -5,6 +5,7 @@
 //!
 //! Everything runs on its own thread with a hidden window; the public functions only post to it.
 
+use std::cell::Cell;
 use std::collections::VecDeque;
 use std::sync::OnceLock;
 
@@ -222,6 +223,37 @@ fn run_commands(hwnd: HWND) {
     }
 }
 
+/// The time after an "open" message in which further ones belong to the same click, beyond the system's double-click time.
+const GESTURE_SLACK_MS: u64 = 250;
+
+/// Whether an "open" message of the icon starts a gesture of the user's, or is one more message of the gesture before it.
+///
+/// WHY (issue 33: "Double-clicking the system tray ... opens the Settings window multiple times (up to 5)"). The icon acts on
+/// three messages, because which of them a tray sends depends on the tray and on the icon's version: the button-up, `NIN_SELECT`
+/// and the double click. Windows' own tray sends a version 4 icon ALL of them: a click is the button-up and then `NIN_SELECT`
+/// (two), a double click those two, the double click, and the two again (five). Each was taken as "open", and with no window open
+/// yet each opened one. One gesture is one "open": a message that comes within the double-click time (and a little) of the last
+/// one is the same gesture. `since_last_ms`: how long ago the last such message came (`None`: never).
+pub fn starts_gesture(since_last_ms: Option<u64>, double_click_ms: u64) -> bool {
+    since_last_ms.is_none_or(|ms| ms > double_click_ms + GESTURE_SLACK_MS)
+}
+
+thread_local! {
+    /// When the icon's last "open" message came (the tray thread's own).
+    static LAST_OPEN: Cell<Option<std::time::Instant>> = const { Cell::new(None) };
+}
+
+fn first_of_gesture() -> bool {
+    let double_click = u64::from(unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() });
+    LAST_OPEN.with(|last| {
+        let now = std::time::Instant::now();
+        let first = starts_gesture(last.get().map(|t| now.duration_since(t).as_millis() as u64), double_click);
+        // (every message moves the mark: a double click's five are each within reach of the one before)
+        last.set(Some(now));
+        first
+    })
+}
+
 fn fire(e: TrayEvent) {
     if let Some(t) = TRAY.get() {
         if let Some(f) = t.on_event.lock().as_ref() {
@@ -281,7 +313,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             // NOTIFYICON_VERSION_4: the event is in LOWORD(lParam)
             match (lp.0 as u32) & 0xFFFF {
                 x if x == WM_LBUTTONUP || x == NIN_SELECT || x == WM_LBUTTONDBLCLK => {
-                    if STATE.with(|s| s.borrow().0.is_some()) {
+                    if STATE.with(|s| s.borrow().0.is_some()) && first_of_gesture() {
                         fire(TrayEvent::Open);
                     }
                 }
@@ -299,5 +331,21 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wp, lp) },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// A click on the icon is two messages from Windows' tray and a double click five: one "open" each.
+    #[test]
+    fn the_messages_of_one_click_are_one_open() {
+        assert!(super::starts_gesture(None, 500), "the first ever");
+        for after in [0, 10, 120, 500, 750] {
+            assert!(!super::starts_gesture(Some(after), 500), "{after} ms after the last one: the same gesture");
+        }
+        assert!(super::starts_gesture(Some(751), 500));
+        assert!(super::starts_gesture(Some(60_000), 500));
+        // a system set to a long double-click time waits that long
+        assert!(!super::starts_gesture(Some(1000), 900) && super::starts_gesture(Some(1200), 900));
     }
 }
