@@ -54,6 +54,7 @@ use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use gpui_kit::assets::IconName as L;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -61,6 +62,7 @@ use rf_win::dock::panel::{self as geo, CloseCause, PanelId};
 use rf_win::sysstatus::Subscription;
 use rf_win::sysstatus::audio;
 use rf_win::sysstatus::bluetooth::{self, BluetoothSnapshot};
+use rf_win::sysstatus::btaudio;
 use rf_win::sysstatus::brightness::{self, BrightnessSnapshot};
 use rf_win::sysstatus::media::{self, Artwork, Media, MediaSnapshot, Transport};
 use rf_win::sysstatus::inuse::{self, InUse};
@@ -109,7 +111,9 @@ fn hidden(part: &str, cx: &App) -> bool {
 }
 
 /// How long a network's row says "connecting" after it was chosen, when Windows never says it is connected.
-const JOIN_WAIT: Duration = Duration::from_secs(12);
+const JOIN_WAIT: Duration = Duration::from_secs(16);
+/// How long a Bluetooth device's row says "connecting" or "disconnecting" after its sound was asked to.
+const BT_WAIT: Duration = Duration::from_secs(8);
 
 /// What a click on a tile does: opens its detail in the panel, or a page of Windows.
 #[derive(Clone, Copy)]
@@ -204,6 +208,13 @@ pub struct CcView {
     bt_ask: Option<(bool, Instant)>,
     /// The network the user chose to connect to, and when: its row says so until Windows has connected (or `JOIN_WAIT` is over).
     joining: Option<(String, Instant)>,
+    /// The network whose password is being asked for (a row with a field under its own), the field, and whether what was typed
+    /// last cannot be a password (too short or too long).
+    wifi_asking: Option<String>,
+    wifi_input: Option<Entity<InputState>>,
+    wifi_bad: bool,
+    /// The Bluetooth device (its address) whose sound was asked to connect (`true`) or to let go, and when.
+    bt_busy: Option<(String, bool, Instant)>,
     /// The slider being dragged right now.
     drag: Option<usize>,
     /// The volume the slider shows while the user drags it and until Windows has answered (the snapshot may lag a moment).
@@ -288,6 +299,10 @@ impl CcView {
             wifi_ask: None,
             bt_ask: None,
             joining: None,
+            wifi_asking: None,
+            wifi_input: None,
+            wifi_bad: false,
+            bt_busy: None,
             drag: None,
             vol_drag: None,
             mic_drag: None,
@@ -350,9 +365,11 @@ impl CcView {
             sound: audio.as_ref().is_some_and(|a| a.available) && !hidden("sound", cx),
             brightness: if hidden("brightness", cx) { 0 } else { self.brightness.iter().filter(|b| b.available).count() },
             // (the mixer's rows and their head stand in the outputs' list, after the devices)
+            // (and the password's row in Wi-Fi's, while one is asked for)
             detail: self.detail_now().map(|d| {
                 let mixer = if d == Detail::Outputs && !self.mixer.is_empty() { self.mixer.len() + 1 } else { 0 };
-                (d, cc_model::detail_rows(d, audio.as_ref(), self.mic.as_ref(), wifi.as_ref(), bt.as_ref(), net.as_ref()) + mixer)
+                let asking = usize::from(d == Detail::Wifi && self.wifi_asking.is_some());
+                (d, cc_model::detail_rows(d, audio.as_ref(), self.mic.as_ref(), wifi.as_ref(), bt.as_ref(), net.as_ref()) + mixer + asking)
             }),
         }
     }
@@ -431,6 +448,9 @@ impl CcView {
         self.wifi_ask = None;
         self.bt_ask = None;
         self.joining = None;
+        self.wifi_asking = None;
+        self.wifi_bad = false;
+        self.bt_busy = None;
         self.take_devices_ask(cx);
         self.drag = None;
         self.vol_drag = None;
@@ -510,6 +530,7 @@ impl CcView {
             return;
         }
         let (now, animate) = (self.now_ms(), crate::settings::animations());
+        self.wifi_asking = None;
         match self.detail_now() {
             // the one that is out folds back; one that is folding back and is pressed again turns round
             Some(d) if d == kind => self.unfold.go(!self.unfold.opening(), now, animate),
@@ -607,22 +628,95 @@ impl CcView {
     }
 
     /// A click on a network of the list: the connected one is left; one Windows can connect by itself (saved, or open) is
-    /// connected; one that wants a password Windows does not have goes to Windows' own Wi-Fi page.
-    fn choose_network(&mut self, ssid: &str, cx: &mut Context<Self>) {
+    /// connected; one that wants a password gets a field under its row when it is a home network (`Network::takes_typed_password`),
+    /// and goes to Windows' own Wi-Fi page when it is another kind.
+    fn choose_network(&mut self, ssid: &str, window: &mut Window, cx: &mut Context<Self>) {
         if !self.shown || self.closing {
             return;
         }
         let Some(n) = self.wifi.as_ref().and_then(|w| w.networks.iter().find(|n| n.ssid == ssid)).cloned() else { return };
         if n.connected {
             self.joining = None;
+            self.wifi_asking = None;
             wifi::disconnect();
         } else if wifi::way_to(&n).is_some() {
             wifi::connect(ssid);
+            self.wifi_asking = None;
             self.joining = Some((ssid.to_string(), Instant::now()));
             self.redraw_in(JOIN_WAIT + Duration::from_millis(100), cx);
+        } else if n.takes_typed_password() {
+            // (pressed again: the field goes)
+            if self.wifi_asking.as_deref() == Some(ssid) {
+                self.wifi_asking = None;
+            } else {
+                let input = match &self.wifi_input {
+                    Some(input) => input.clone(),
+                    None => {
+                        let input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("Şifre")).masked(true));
+                        self._subs.push(cx.subscribe_in(&input, window, |this: &mut Self, _, ev: &InputEvent, window, cx| match ev {
+                            InputEvent::PressEnter { .. } => this.submit_wifi_password(window, cx),
+                            InputEvent::Change => {
+                                if this.wifi_bad {
+                                    this.wifi_bad = false;
+                                    cx.notify();
+                                }
+                            }
+                            _ => {}
+                        }));
+                        self.wifi_input = Some(input.clone());
+                        input
+                    }
+                };
+                input.update(cx, |s, cx| {
+                    s.set_value("", window, cx);
+                    s.focus(window, cx);
+                });
+                self.wifi_asking = Some(ssid.to_string());
+                self.wifi_bad = false;
+            }
+            self.refit(cx);
         } else {
             return self.open_settings("ms-settings:network-wifi", cx);
         }
+        cx.notify();
+    }
+
+    /// Enter in the password's field, or its button: Windows is asked to connect with what was typed (`wifi::connect_with_password`
+    /// says what happens to a wrong one). Something that cannot be a password stays in the field, marked.
+    fn submit_wifi_password(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        let (Some(ssid), Some(input)) = (self.wifi_asking.clone(), self.wifi_input.clone()) else { return };
+        let password = input.read(cx).value().to_string();
+        if !wifi::valid_password(&password) {
+            self.wifi_bad = true;
+            return cx.notify();
+        }
+        wifi::connect_with_password(&ssid, &password);
+        input.update(cx, |s, cx| s.set_value("", window, cx));
+        self.wifi_asking = None;
+        self.joining = Some((ssid, Instant::now()));
+        self.redraw_in(JOIN_WAIT + Duration::from_millis(100), cx);
+        window.focus(&self.focus, cx);
+        self.refit(cx);
+        cx.notify();
+    }
+
+    /// A click on a headset or a speaker of the Bluetooth list: its sound is connected, or let go (`btaudio::set_connected`).
+    fn choose_bt(&mut self, address: &str, connected: bool, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        let (address, connect) = (address.to_string(), !connected);
+        let asked = address.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = btaudio::set_connected(&asked, connect) {
+                log::warn!("control centre: the Bluetooth device's sound was not {}: {e}", if connect { "connected" } else { "let go" });
+            }
+        });
+        self.bt_busy = Some((address, connect, Instant::now()));
+        self.redraw_in(BT_WAIT + Duration::from_millis(100), cx);
         cx.notify();
     }
 
@@ -1308,7 +1402,7 @@ impl CcView {
         let (mute_focus, list_focus) = (self.stop("cc-mic-mute", 0, cx), self.stop("cc-inputs", 0, cx));
         let mute = self
             .round_button("cc-mic-mute", if a.muted { L::MicOff } else { L::Mic }, 28.0, false, look, (Some(&mute_focus), Some(if a.muted { t!("Mikrofonu aç") } else { t!("Mikrofonu kapat") })))
-            .on_click(cx.listener(|this, _, _, cx| {
+            .on_click(cx.listener(|this, _, _, _| {
                 // (as the speaker's: the state this click flips is the one the previous click asked for while Windows has not answered)
                 let muted = this.mic.as_ref().is_some_and(|a| a.muted);
                 let pending = this.mic_mute_ask.map(|(v, at)| (v, at.elapsed().as_millis() as u64));
@@ -1473,8 +1567,12 @@ impl CcView {
                         None
                     };
                     let ssid = n.ssid.clone();
-                    let click: RowClick = Rc::new(move |this, _, cx| this.choose_network(&ssid, cx));
+                    let click: RowClick = Rc::new(move |this, window, cx| this.choose_network(&ssid, window, cx));
                     rows.push(self.detail_row(("cc-wifi-net", i), Some(cc_model::signal_icon(n.bars)), n.ssid.clone(), note.map(str::to_string), n.needs_password().then_some(L::Lock), look, Some(click), cx));
+                    // the network whose password is asked for: the field, right under its row
+                    if self.wifi_asking.as_deref() == Some(n.ssid.as_str()) {
+                        rows.extend(self.wifi_password_row(look, cx));
+                    }
                 }
             }
         }
@@ -1482,8 +1580,42 @@ impl CcView {
         (self.detail_head("Wi-Fi".to_string(), Some((RadioKind::WiFi, w.power)), look, cx), rows)
     }
 
-    /// Bluetooth: its switch, the paired devices (which of them are connected: lines to read), Windows' Bluetooth page.
-    fn detail_bluetooth(&self, look: &Look, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
+    /// The row with the field for a network's password, and the button that connects with it.
+    fn wifi_password_row(&self, look: &Look, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let input = self.wifi_input.as_ref()?;
+        let stop = self.stop("cc-wifi-join", 0, cx);
+        let (tip, mark) = if self.wifi_bad { (t!("Şifre 8-63 karakter olmalı"), gpui_kit::rgb(0xE81123).into()) } else { (t!("Bağlan"), transparent_black()) };
+        Some(
+            h_flex()
+                .h(px(cc_model::DETAIL_ROW_H))
+                .flex_shrink_0()
+                .pl(px(30.))
+                .pr(px(4.))
+                .gap(px(6.))
+                .items_center()
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .h(px(26.))
+                        .px(px(8.))
+                        .flex()
+                        .items_center()
+                        .rounded(px(8.))
+                        .border_1()
+                        .border_color(mark)
+                        .bg(look.pal.hover_fill().hsla())
+                        .text_sm()
+                        .child(Input::new(input).appearance(false)),
+                )
+                .child(self.round_button("cc-wifi-join", L::ArrowRight, 26.0, true, look, (Some(&stop), Some(tip))).on_click(cx.listener(|this, _, window, cx| this.submit_wifi_password(window, cx))))
+                .into_any_element(),
+        )
+    }
+
+    /// Bluetooth: its switch, the paired devices (which are connected, the battery of the ones that report one; a headset or a
+    /// speaker is a choice: a click connects its sound or lets it go), Windows' Bluetooth page.
+    fn detail_bluetooth(&self, look: &Look, words: Words, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
         let b = self.bt_now().unwrap_or_default();
         let mut rows = Vec::new();
         match b.power {
@@ -1492,8 +1624,26 @@ impl CcView {
             RadioPower::On if b.devices.is_empty() => rows.push(self.detail_line(t!("Eşleşmiş cihaz yok"), look)),
             RadioPower::On => {
                 for (i, d) in b.devices.iter().enumerate() {
-                    let icon = if d.connected { L::BluetoothConnected } else { L::Bluetooth };
-                    rows.push(self.detail_row(("cc-bt-device", i), Some(icon), d.name.clone(), d.connected.then(|| t!("Bağlı").to_string()), None, look, None, cx));
+                    let icon = if d.audio {
+                        L::Headphones
+                    } else if d.connected {
+                        L::BluetoothConnected
+                    } else {
+                        L::Bluetooth
+                    };
+                    // what was asked of its sound a moment ago, while Bluetooth has not yet said so
+                    let busy = self.bt_busy.as_ref().filter(|(a, connect, at)| d.address.as_deref() == Some(a.as_str()) && at.elapsed() < BT_WAIT && *connect != d.connected).map(|(_, connect, _)| *connect);
+                    let state = match busy {
+                        Some(true) => Some(t!("Bağlanıyor…")),
+                        Some(false) => Some(t!("Bağlantı kesiliyor…")),
+                        None => d.connected.then_some(t!("Bağlı")),
+                    };
+                    let note: Vec<String> = d.battery.map(|level| (words.pct)(level)).into_iter().chain(state.map(str::to_string)).collect();
+                    let click: Option<RowClick> = d.address.clone().filter(|_| d.audio).map(|address| {
+                        let connected = d.connected;
+                        Rc::new(move |this: &mut Self, _: &mut Window, cx: &mut Context<Self>| this.choose_bt(&address, connected, cx)) as RowClick
+                    });
+                    rows.push(self.detail_row(("cc-bt-device", i), Some(icon), d.name.clone(), (!note.is_empty()).then(|| note.join(" · ")), None, look, click, cx));
                 }
             }
         }
@@ -1559,7 +1709,7 @@ impl CcView {
             Detail::Outputs => self.detail_outputs(look, cx),
             Detail::Inputs => self.detail_inputs(look, cx),
             Detail::Wifi => self.detail_wifi(look, cx),
-            Detail::Bluetooth => self.detail_bluetooth(look, cx),
+            Detail::Bluetooth => self.detail_bluetooth(look, words, cx),
             Detail::Network => self.detail_network(look, words, cx),
         };
         self.card(look)

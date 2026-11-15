@@ -16,9 +16,12 @@
 //! WRITES, each the user's click and nothing else: the radio (`radio::set`), [`connect`], [`disconnect`].
 //!
 //! CONNECTING. A network Windows has saved is connected with its saved profile. An open network is connected as it is. A network
-//! that wants a password Windows does not have is NOT connected from here ([`Network::needs_password`]): the panel sends the user
-//! to Windows' own Wi-Fi page for it. (Making a profile with a password of the user's is the missing piece; it needs a place to
-//! type in the panel.)
+//! that wants a password Windows does not have ([`Network::needs_password`]) is connected with the password the user types in the
+//! panel ([`connect_with_password`]) when it is a home network of the two kinds in use today (WPA2 and WPA3 "personal": [`Auth`]):
+//! a profile is made for it as Windows' own flyout makes one (saved, connecting by itself from then on), Windows is asked to
+//! connect, and when it has not connected after a while (the password was wrong) the profile is taken away again, so that no
+//! network with a wrong password stays saved. Any other kind (a company's network with a sign-in, the old WEP and WPA) goes to
+//! Windows' own Wi-Fi page.
 
 use std::ffi::c_void;
 use std::sync::Mutex;
@@ -29,7 +32,7 @@ use windows::Devices::Radios::Radio;
 use windows::Foundation::TypedEventHandler;
 use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, HANDLE};
 use windows::Win32::NetworkManagement::WiFi::{
-    DOT11_SSID, L2_NOTIFICATION_DATA, WLAN_AVAILABLE_NETWORK, WLAN_AVAILABLE_NETWORK_CONNECTED, WLAN_AVAILABLE_NETWORK_HAS_PROFILE, WLAN_AVAILABLE_NETWORK_LIST, WLAN_CONNECTION_PARAMETERS,
+    DOT11_AUTH_ALGO_RSNA_PSK, DOT11_AUTH_ALGO_WPA3_SAE, DOT11_SSID, WLAN_PROFILE_USER, WlanDeleteProfile, WlanSetProfile, L2_NOTIFICATION_DATA, WLAN_AVAILABLE_NETWORK, WLAN_AVAILABLE_NETWORK_CONNECTED, WLAN_AVAILABLE_NETWORK_HAS_PROFILE, WLAN_AVAILABLE_NETWORK_LIST, WLAN_CONNECTION_PARAMETERS,
     WLAN_INTERFACE_INFO, WLAN_INTERFACE_INFO_LIST, WLAN_NOTIFICATION_SOURCE_ACM, WLAN_NOTIFICATION_SOURCE_MSM, WLAN_NOTIFICATION_SOURCE_NONE, WlanCloseHandle, WlanConnect, WlanDisconnect,
     WlanEnumInterfaces, WlanFreeMemory, WlanGetAvailableNetworkList, WlanOpenHandle, WlanRegisterNotification, WlanScan, dot11_BSS_type_infrastructure, wlan_connection_mode_discovery_unsecure,
     wlan_connection_mode_profile, wlan_interface_state_connected,
@@ -38,6 +41,18 @@ use windows::core::{GUID, PCWSTR};
 
 use super::init_mta;
 use super::radio::{self, Kind, Power};
+
+/// How a secured network lets a device in, as far as connecting from here goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Auth {
+    /// WPA2 with a password ("personal").
+    Wpa2,
+    /// WPA3 with a password ("personal").
+    Wpa3,
+    /// Anything else: none, a sign-in (a company's network), the old kinds. Not connected with a typed password from here.
+    #[default]
+    Other,
+}
 
 /// One network in range.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,6 +64,7 @@ pub struct Network {
     /// The name of the profile Windows has saved for it, when it has one.
     pub profile: Option<String>,
     pub connected: bool,
+    pub auth: Auth,
 }
 
 impl Network {
@@ -57,9 +73,14 @@ impl Network {
         self.profile.is_some()
     }
 
-    /// It wants a password that Windows does not have: not connected from here (see the module docs).
+    /// It wants a password that Windows does not have.
     pub fn needs_password(&self) -> bool {
         self.secured && self.profile.is_none()
+    }
+
+    /// The password can be typed in the panel: a home network of today's two kinds (see the module docs).
+    pub fn takes_typed_password(&self) -> bool {
+        self.needs_password() && self.auth != Auth::Other
     }
 }
 
@@ -116,6 +137,9 @@ pub fn merged(raw: Vec<Network>) -> Vec<Network> {
                 o.connected |= n.connected;
                 if o.profile.is_none() {
                     o.profile = n.profile;
+                }
+                if o.auth == Auth::Other {
+                    o.auth = n.auth;
                 }
             }
             None => out.push(n),
@@ -184,6 +208,13 @@ impl Wlan {
                         secured: n.bSecurityEnabled.as_bool(),
                         profile: (n.dwFlags & WLAN_AVAILABLE_NETWORK_HAS_PROFILE != 0 && !profile.is_empty()).then_some(profile),
                         connected: n.dwFlags & WLAN_AVAILABLE_NETWORK_CONNECTED != 0,
+                        auth: if n.dot11DefaultAuthAlgorithm == DOT11_AUTH_ALGO_RSNA_PSK {
+                            Auth::Wpa2
+                        } else if n.dot11DefaultAuthAlgorithm == DOT11_AUTH_ALGO_WPA3_SAE {
+                            Auth::Wpa3
+                        } else {
+                            Auth::Other
+                        },
                     }
                 })
                 .collect()
@@ -399,6 +430,91 @@ fn connect_blocking(ssid: &str) -> Result<(), String> {
     if code == 0 { Ok(()) } else { Err(format!("Windows refused the connection ({code})")) }
 }
 
+// ------------------------------------------------------------------ a password the user types
+
+/// A password a home network can have: 8 to 63 characters.
+pub fn valid_password(password: &str) -> bool {
+    (8..=63).contains(&password.chars().count())
+}
+
+fn xml_text(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+}
+
+/// The profile Windows keeps for a home network: its name, how it lets a device in, the password. As Windows' own flyout writes
+/// it for a network the user ticked "connect automatically" on. `None` for a kind of network this does not connect.
+pub fn profile_xml(ssid: &str, auth: Auth, password: &str) -> Option<String> {
+    let authentication = match auth {
+        Auth::Wpa2 => "WPA2PSK",
+        Auth::Wpa3 => "WPA3SAE",
+        Auth::Other => return None,
+    };
+    let hex: String = ssid.bytes().map(|b| format!("{b:02X}")).collect();
+    let (name, key) = (xml_text(ssid), xml_text(password));
+    Some(format!(
+        "<?xml version=\"1.0\"?><WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\"><name>{name}</name><SSIDConfig><SSID><hex>{hex}</hex><name>{name}</name></SSID></SSIDConfig>\
+<connectionType>ESS</connectionType><connectionMode>auto</connectionMode><MSM><security><authEncryption><authentication>{authentication}</authentication><encryption>AES</encryption>\
+<useOneX>false</useOneX></authEncryption><sharedKey><keyType>passPhrase</keyType><protected>false</protected><keyMaterial>{key}</keyMaterial></sharedKey></security></MSM></WLANProfile>"
+    ))
+}
+
+/// How long Windows is given to connect with a typed password before its profile is taken away again.
+const JOIN_WAIT: Duration = Duration::from_secs(15);
+
+fn connect_with_password_blocking(ssid: &str, password: &str) -> Result<(), String> {
+    let wlan = Wlan::open().ok_or("the Wi-Fi service did not answer")?;
+    let guid = wlan.interface().ok_or("no Wi-Fi interface")?;
+    let list = merged(wlan.networks(&guid).map_err(|c| format!("no list of networks ({c})"))?);
+    let network = list.iter().find(|n| n.ssid == ssid).ok_or("the network is not in range any more")?;
+    let xml = profile_xml(ssid, network.auth, password).ok_or("this kind of network is not connected from here")?;
+    let (xml_w, name_w) = (crate::wide::wide(&xml), crate::wide::wide(ssid));
+    let set = |flags: u32| {
+        let mut reason = 0u32;
+        (unsafe { WlanSetProfile(wlan.0, &guid, flags, PCWSTR(xml_w.as_ptr()), PCWSTR::null(), true, None, &mut reason) }, reason)
+    };
+    // (for every user of the PC, as Windows' own flyout saves a network; for this user alone where that is not allowed)
+    let (mut code, mut reason) = set(0);
+    if code == ERROR_ACCESS_DENIED.0 {
+        (code, reason) = set(WLAN_PROFILE_USER);
+    }
+    if code != 0 {
+        return Err(format!("Windows did not take the network's profile ({code}, reason {reason})"));
+    }
+    let forget = || unsafe {
+        WlanDeleteProfile(wlan.0, &guid, PCWSTR(name_w.as_ptr()), None);
+    };
+    let p = WLAN_CONNECTION_PARAMETERS {
+        wlanConnectionMode: wlan_connection_mode_profile,
+        strProfile: PCWSTR(name_w.as_ptr()),
+        pDot11Ssid: std::ptr::null_mut(),
+        pDesiredBssidList: std::ptr::null_mut(),
+        dot11BssType: dot11_BSS_type_infrastructure,
+        dwFlags: 0,
+    };
+    let code = unsafe { WlanConnect(wlan.0, &guid, &p, None) };
+    if code != 0 {
+        forget();
+        return Err(format!("Windows refused the connection ({code})"));
+    }
+    // connected within the wait: the network stays saved. Not connected (the password was wrong, the network went): it does not.
+    let until = std::time::Instant::now() + JOIN_WAIT;
+    while std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(700));
+        if wlan.networks(&guid).is_ok_and(|raw| merged(raw).iter().any(|n| n.ssid == ssid && n.connected)) {
+            return Ok(());
+        }
+    }
+    forget();
+    Err("not connected with that password; the network was not saved".to_string())
+}
+
+/// The user typed a network's password in the panel: see the module docs. Returns at once; the list that follows tells whether it
+/// is connected.
+pub fn connect_with_password(ssid: &str, password: &str) {
+    let (ssid, password) = (ssid.to_string(), password.to_string());
+    on_a_thread("connect with a password", move || connect_with_password_blocking(&ssid, &password));
+}
+
 fn on_a_thread(what: &'static str, work: impl FnOnce() -> Result<(), String> + Send + 'static) {
     let spawned = std::thread::Builder::new().name("rf-wifi-do".into()).spawn(move || {
         if let Err(e) = work() {
@@ -432,7 +548,33 @@ mod tests {
     use super::*;
 
     fn net(ssid: &str, bars: u8, secured: bool, profile: Option<&str>, connected: bool) -> Network {
-        Network { ssid: ssid.into(), bars, secured, profile: profile.map(str::to_string), connected }
+        Network { ssid: ssid.into(), bars, secured, profile: profile.map(str::to_string), connected, auth: if secured { Auth::Wpa2 } else { Auth::Other } }
+    }
+
+    #[test]
+    fn a_home_networks_profile_is_written_as_windows_writes_one() {
+        let xml = profile_xml("Ev Ağı", Auth::Wpa2, "gizli-şifre-1").unwrap();
+        assert!(xml.starts_with("<?xml version=\"1.0\"?><WLANProfile xmlns=\"http://www.microsoft.com/networking/WLAN/profile/v1\">"));
+        assert!(xml.contains("<name>Ev Ağı</name><SSIDConfig><SSID><hex>45762041C49FC4B1</hex><name>Ev Ağı</name></SSID></SSIDConfig>"), "{xml}");
+        assert!(xml.contains("<connectionType>ESS</connectionType><connectionMode>auto</connectionMode>"));
+        assert!(xml.contains("<authentication>WPA2PSK</authentication><encryption>AES</encryption><useOneX>false</useOneX>"));
+        assert!(xml.contains("<keyType>passPhrase</keyType><protected>false</protected><keyMaterial>gizli-şifre-1</keyMaterial>"));
+        assert!(xml.ends_with("</WLANProfile>") && !xml.contains('\n'));
+        assert!(profile_xml("Ev", Auth::Wpa3, "12345678").unwrap().contains("<authentication>WPA3SAE</authentication>"));
+        assert_eq!(profile_xml("İş", Auth::Other, "12345678"), None);
+        // what XML reads as its own is written as text
+        let odd = profile_xml("A&B <ev>", Auth::Wpa2, "p<a>&\"s's").unwrap();
+        assert!(odd.contains("<name>A&amp;B &lt;ev&gt;</name>") && odd.contains("<keyMaterial>p&lt;a&gt;&amp;&quot;s&apos;s</keyMaterial>"), "{odd}");
+        assert!(odd.contains("<hex>41264220 3C65763E".replace(' ', "").as_str()));
+        // a password of a home network is 8 to 63 characters
+        assert!(!valid_password("1234567") && valid_password("12345678") && valid_password(&"a".repeat(63)) && !valid_password(&"a".repeat(64)));
+        assert!(valid_password("şifreşif"), "counted in characters, not bytes");
+        // which networks take a typed password
+        let home = Network { auth: Auth::Wpa3, ..net("Komşu", 5, true, None, false) };
+        let work = Network { auth: Auth::Other, ..net("İş", 5, true, None, false) };
+        assert!(home.takes_typed_password() && !work.takes_typed_password());
+        assert!(!net("Ev", 4, true, Some("Ev"), false).takes_typed_password(), "a saved one needs none");
+        assert!(!net("Kafe", 2, false, None, false).takes_typed_password());
     }
 
     #[test]
@@ -471,6 +613,9 @@ mod tests {
         let names: Vec<&str> = list.iter().map(|n| n.ssid.as_str()).collect();
         assert_eq!(names, ["Ev", "İş", "Komşu", "avlu", "Kafe"]);
         assert_eq!(list[0], net("Ev", 4, true, Some("Ev"), true), "the best signal, the first profile, connected");
+        // the kind of a network is taken from the entry that tells it
+        let kinds = merged(vec![Network { auth: Auth::Other, ..net("Ev", 3, true, None, false) }, Network { auth: Auth::Wpa3, ..net("Ev", 2, true, None, false) }]);
+        assert_eq!(kinds[0].auth, Auth::Wpa3);
         assert!(merged(Vec::new()).is_empty());
         // the snapshot's connected network is the list's
         let snap = WifiSnapshot { available: true, power: Power::On, networks: list, listing: Listing::Ok };

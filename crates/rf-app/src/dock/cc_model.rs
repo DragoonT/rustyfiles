@@ -817,7 +817,7 @@ mod tests {
     }
 
     fn wifi(power: Power, nets: &[(&str, u8, bool)]) -> WifiSnapshot {
-        let networks = nets.iter().map(|(ssid, bars, connected)| rf_win::sysstatus::wifi::Network { ssid: ssid.to_string(), bars: *bars, secured: true, profile: None, connected: *connected }).collect();
+        let networks = nets.iter().map(|(ssid, bars, connected)| rf_win::sysstatus::wifi::Network { ssid: ssid.to_string(), bars: *bars, secured: true, profile: None, connected: *connected, auth: rf_win::sysstatus::wifi::Auth::Wpa2 }).collect();
         WifiSnapshot { available: true, power, networks, listing: Listing::Ok }
     }
 

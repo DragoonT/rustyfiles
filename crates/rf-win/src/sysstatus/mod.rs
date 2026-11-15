@@ -15,12 +15,16 @@
 //! | `bluetooth` | WinRT `Radio` (on / off), the paired and the connected devices | `Radio.StateChanged`, a `DeviceWatcher` | a thread of its own while the panel is open |
 //! | `wifi` | WinRT `Radio` (on / off) and the Native Wifi API: the networks in range, which is connected, which are saved | WLAN notifications (scan ended, connected, disconnected), `Radio.StateChanged` | a thread of its own while the panel is open |
 //! | `radio` | WinRT `Radio.SetStateAsync`: switches Wi-Fi or Bluetooth on and off | none (the followers above hear of it) | a thread per switch |
+//! | `toggles` | Windows' dark mode (two registry values and the broadcast), keep awake (`SetThreadExecutionState`), the power mode (the plan's overlay) | none: read when the panel opens | a thread per switch; one that holds the PC awake while asked |
+//! | `inuse` | the user's consent store: which programs use the microphone or the camera now | none: read when the panel opens and every few seconds while it is open | nothing of its own |
+//! | `btaudio` | SetupAPI: a Bluetooth device's battery level; kernel streaming: the request that connects or lets go a headset's sound | none | nothing of its own (called from `bluetooth`'s thread, and a thread per request) |
 //! | `power` | `GetSystemPowerStatus`: battery percent, charging | `RegisterPowerSettingNotification` (callback form, no window) | nothing of our own: Windows calls back |
 //! | `brightness` | DDC/CI of the primary monitor (`dxva2`) | none (a monitor's own buttons cannot be heard): read when the panel opens | a thread of its own while the panel is open |
 //!
 //! Nothing here changes a setting by itself: the writes (`audio::set_volume`, `audio::set_muted`, `media::Transport`,
-//! `brightness::Brightness::set`, `audio::set_default_output`, `radio::set`, `wifi::connect`, `wifi::disconnect`) are called only as the direct
-//! result of the user's click or drag in the panel.
+//! `brightness::Screens::set`, `audio::set_default_output`, the microphone's three, `radio::set`, `wifi::connect`, `wifi::connect_with_password`,
+//! `wifi::disconnect`, `toggles::set_dark`, `toggles::set_awake`, `toggles::set_power_mode`, `btaudio::set_connected`, `appvolume::set_mixer_level`)
+//! are called only as the direct result of the user's click or drag in the panel.
 //!
 //! COM: the audio, WinRT and brightness threads are initialised as MTA (what these APIs and their callbacks want). None of them is
 //! the shell thread (`crate::sta`), and none is a single-threaded apartment that does not pump messages.
@@ -28,6 +32,7 @@
 pub mod audio;
 pub mod bluetooth;
 pub mod brightness;
+pub mod btaudio;
 pub mod media;
 pub mod network;
 pub mod inuse;

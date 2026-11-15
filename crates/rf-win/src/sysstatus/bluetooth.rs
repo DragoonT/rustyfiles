@@ -22,20 +22,55 @@ use super::{Subscription, init_mta};
 pub use super::radio::Power;
 
 /// One paired device.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Device {
     pub name: String,
     pub connected: bool,
+    /// Its address (twelve hex digits), when Windows' id for it carries one: what its battery and its sound are found by.
+    pub address: Option<String>,
+    /// Its battery in percent, when it reports one.
+    pub battery: Option<u8>,
+    /// It has sound here (a headset, a speaker): its sound can be connected and let go (`btaudio::set_connected`).
+    pub audio: bool,
+}
+
+/// The devices with what is known of each by its address: the battery it reports, whether it has sound.
+///
+/// ONE ROW FOR ONE DEVICE. A phone (and many a headset) is listed twice by Windows, once as a classic device and once as a low
+/// energy one, with two names and the same address (seen on the development PC: "OzerO iPhone", not connected, and "4", connected,
+/// both with the phone's battery). Two entries of one address are one device: connected if either is, under the longer of the two
+/// names (the short one is what the low energy side happens to call itself), where the first of them stood.
+pub fn with_details(mut devices: Vec<Device>, addresses: &[(String, String)], batteries: &[(String, u8)], audio: &[String]) -> Vec<Device> {
+    for d in &mut devices {
+        d.address = addresses.iter().find(|(name, _)| *name == d.name).map(|(_, a)| a.clone());
+        if let Some(a) = &d.address {
+            d.battery = batteries.iter().find(|(b, _)| b == a).map(|(_, level)| *level);
+            d.audio = audio.contains(a);
+        }
+    }
+    let mut out: Vec<Device> = Vec::new();
+    for d in devices {
+        match out.iter_mut().find(|o| o.address.is_some() && o.address == d.address) {
+            Some(first) => {
+                first.connected |= d.connected;
+                if d.name.chars().count() > first.name.chars().count() {
+                    first.name = d.name;
+                }
+            }
+            None => out.push(d),
+        }
+    }
+    out
 }
 
 /// The list of devices as it is shown: every paired device once, the connected ones first (in the order Windows gave them), the
 /// others by name. A device that is connected without being in the list of paired ones is in it all the same.
 pub fn devices_of(paired: Vec<String>, connected: &[String]) -> Vec<Device> {
-    let mut out: Vec<Device> = connected.iter().map(|n| Device { name: n.clone(), connected: true }).collect();
+    let mut out: Vec<Device> = connected.iter().map(|n| Device { name: n.clone(), connected: true, ..Default::default() }).collect();
     let mut rest: Vec<String> = paired.into_iter().filter(|n| !connected.contains(n)).collect();
     rest.sort_by_key(|n| n.to_lowercase());
     rest.dedup();
-    out.extend(rest.into_iter().map(|name| Device { name, connected: false }));
+    out.extend(rest.into_iter().map(|name| Device { name, ..Default::default() }));
     out
 }
 
@@ -117,8 +152,12 @@ fn read() -> BluetoothSnapshot {
     if power != Power::On {
         return BluetoothSnapshot { available: true, power, ..Default::default() };
     }
-    let connected = names_of(selectors());
-    let devices = devices_of(names_of(paired_selectors()), &connected);
+    let (connected, mut addresses) = found(selectors());
+    let (paired, more) = found(paired_selectors());
+    addresses.extend(more);
+    let devices = with_details(devices_of(paired, &connected), &addresses, &super::btaudio::battery_levels(), &super::btaudio::audio_addresses());
+    // (the names the tile tells are the rows' own: a device listed twice is told once, by the name its row has)
+    let connected = devices.iter().filter(|d| d.connected).map(|d| d.name.clone()).collect();
     BluetoothSnapshot { available: true, power, connected, devices }
 }
 
@@ -144,21 +183,28 @@ fn selectors() -> Vec<windows::core::HSTRING> {
     v
 }
 
-/// The names of the devices the selectors find, each once, in the order Windows gave them.
-fn names_of(selectors: Vec<windows::core::HSTRING>) -> Vec<String> {
-    let mut names: Vec<String> = Vec::new();
+/// The devices the selectors find: their names, each once, in the order Windows gave them; and (name, address) for every one
+/// whose id carries an address.
+fn found(selectors: Vec<windows::core::HSTRING>) -> (Vec<String>, Vec<(String, String)>) {
+    let (mut names, mut addresses): (Vec<String>, Vec<(String, String)>) = (Vec::new(), Vec::new());
     for sel in selectors {
         let Some(found) = DeviceInformation::FindAllAsyncAqsFilter(&sel).ok().and_then(|op| op.join().ok()) else { continue };
         for d in found {
             if let Ok(n) = d.Name() {
                 let n = n.to_string();
-                if !n.trim().is_empty() && !names.contains(&n) {
+                if n.trim().is_empty() {
+                    continue;
+                }
+                if let Some(a) = d.Id().ok().and_then(|id| super::btaudio::address_of_winrt_id(&id.to_string())) {
+                    addresses.push((n.clone(), a));
+                }
+                if !names.contains(&n) {
                     names.push(n);
                 }
             }
         }
     }
-    names
+    (names, addresses)
 }
 
 /// The handlers that make the thread read again, and what is needed to take them off.
@@ -241,6 +287,25 @@ fn poke(wake: &Sender<Msg>) -> impl Fn() + Send + 'static {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_device_gets_its_battery_and_its_sound_by_its_address() {
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let list = devices_of(names(&["Kulaklık", "Fare", "Klavye"]), &names(&["Fare"]));
+        let addresses = vec![("Fare".to_string(), "F00DCAFE0001".to_string()), ("Kulaklık".to_string(), "94DB56ABCDEF".to_string())];
+        let out = with_details(list, &addresses, &[("F00DCAFE0001".to_string(), 49)], &["94DB56ABCDEF".to_string()]);
+        let shown: Vec<(&str, Option<u8>, bool, bool)> = out.iter().map(|d| (d.name.as_str(), d.battery, d.audio, d.address.is_some())).collect();
+        assert_eq!(shown, [("Fare", Some(49), false, true), ("Klavye", None, false, false), ("Kulaklık", None, true, true)]);
+        // a phone that Windows lists twice (classic and low energy, one address): one row, connected, under its longer name
+        let twice = devices_of(names(&["OzerO iPhone", "Klavye"]), &names(&["4"]));
+        let phone = vec![("4".to_string(), "AABBCCDDEEFF".to_string()), ("OzerO iPhone".to_string(), "AABBCCDDEEFF".to_string())];
+        let out = with_details(twice, &phone, &[("AABBCCDDEEFF".to_string(), 49)], &[]);
+        let shown: Vec<(&str, bool, Option<u8>)> = out.iter().map(|d| (d.name.as_str(), d.connected, d.battery)).collect();
+        assert_eq!(shown, [("OzerO iPhone", true, Some(49)), ("Klavye", false, None)]);
+        // two devices without an address are two devices, whatever their names
+        let none = with_details(devices_of(names(&["a", "b"]), &[]), &[], &[], &[]);
+        assert_eq!(none.len(), 2);
+    }
 
     #[test]
     fn the_paired_devices_are_listed_once_with_the_connected_ones_first() {
