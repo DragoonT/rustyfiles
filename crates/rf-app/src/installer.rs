@@ -182,8 +182,8 @@ pub fn version() -> String {
     V.get_or_init(|| manager().map(|m| m.get_current_version_as_string()).unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())).clone()
 }
 
-/// Whether the difference packages between the installed version and the newest one are worth taking instead of the full package:
-/// only while together they are at most two thirds of it. Pure.
+/// Whether the difference packages between the installed version and the newest one are less to download than the full package.
+/// Pure.
 ///
 /// WHY WE DECIDE IT: Velopack does not (read in 1.2.161 and 1.3.39: `MaximumDeltasBeforeFallback` is set and never used). It chains
 /// EVERY delta the feed lists between the two versions and turns to the full package only when patching fails. A copy updates
@@ -191,12 +191,10 @@ pub fn version() -> String {
 /// releases up to 0.8.0: a delta is about 10 MB whatever the release changed, the full package 39 MB, so three releases behind was
 /// 31 MB of deltas, four 41 MB (more than the full package), seven 79 MB. And the feed lists only the ten newest releases: a copy
 /// older than those would download the whole chain, fail to patch (the first delta is not made from its version) and then download
-/// the full package as well. Two thirds, not "smaller": the deltas are also patched into a full package on the user's PC, which
-/// takes time a small saving is not worth.
+/// the full package as well. With this rule nobody downloads more than the full package, and nobody more than before.
 pub fn deltas_are_the_smaller_download(deltas: &[u64], full: u64) -> bool {
     let sum = deltas.iter().fold(0u64, |all, one| all.saturating_add(*one));
-    // (in a wider type: three times a size must not wrap)
-    !deltas.is_empty() && full > 0 && u128::from(sum) * 3 <= u128::from(full) * 2
+    !deltas.is_empty() && sum < full
 }
 
 /// Looks for an update and downloads it. Blocking: call off the UI thread.
@@ -445,12 +443,12 @@ mod delta_tests {
 
     /// With the sizes of our own releases (0.7.2 to 0.8.0: deltas of 10.0, 9.6, 9.7, 10.0 and 11.5 MB, a full package of 38.8 MB).
     #[test]
-    fn deltas_are_taken_only_while_they_are_clearly_less_to_download() {
+    fn deltas_are_taken_only_while_they_are_less_to_download() {
         let full = 388 * MB / 10;
         let chain = [115 * MB / 10, 100 * MB / 10, 97 * MB / 10, 96 * MB / 10, 100 * MB / 10];
         assert!(deltas_are_the_smaller_download(&chain[..1], full), "one release behind: 11.5 MB");
         assert!(deltas_are_the_smaller_download(&chain[..2], full), "two behind: 21.5 MB");
-        assert!(!deltas_are_the_smaller_download(&chain[..3], full), "three behind: 31.2 MB saves too little");
+        assert!(deltas_are_the_smaller_download(&chain[..3], full), "three behind: 31.2 MB");
         assert!(!deltas_are_the_smaller_download(&chain[..4], full), "four behind: 40.8 MB is more than the full package");
         assert!(!deltas_are_the_smaller_download(&chain, full));
     }
@@ -461,6 +459,7 @@ mod delta_tests {
         assert!(!deltas_are_the_smaller_download(&[5 * MB], 0), "a feed that does not tell the full package's size");
         assert!(deltas_are_the_smaller_download(&[0], 40 * MB), "a delta of unknown size is still tried: Velopack falls back by itself");
         assert!(!deltas_are_the_smaller_download(&[u64::MAX, 1], u64::MAX), "no overflow");
+        assert!(!deltas_are_the_smaller_download(&[40 * MB], 40 * MB), "the same size: the full package, which needs no patching");
     }
 }
 
