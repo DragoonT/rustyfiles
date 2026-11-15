@@ -349,20 +349,28 @@ impl FolderView {
             return;
         }
         cx.spawn(async move |this, cx| {
-            if let Ok(Some((paths, kind))) = rx.await {
-                let _ = cx.update(|cx| {
-                    let here = dir.clone();
-                    crate::status_center::transfer_then(cx, kind, paths, dir, move |arrived, cx| {
-                        // select what arrived, if this view still shows that folder
-                        let names: Vec<String> = arrived.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
-                        let _ = this.update(cx, |v, cx| {
-                            if v.current_dir().as_deref() == Some(here.as_path()) {
-                                v.select_when_listed(names, cx);
-                            }
-                        });
-                    });
-                });
+            let clip = rx.await.ok().flatten();
+            // No files with paths: files that live only in the program that copied them (a remote desktop session, a tool that
+            // carries the clipboard between PCs) are pasted from that program's own data (`rf_win::vfiles`).
+            if clip.is_none() && !rf_win::vfiles::clipboard_has() {
+                return;
             }
+            let _ = cx.update(|cx| {
+                let here = dir.clone();
+                let select = move |arrived: Vec<PathBuf>, cx: &mut App| {
+                    // select what arrived, if this view still shows that folder
+                    let names: Vec<String> = arrived.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
+                    let _ = this.update(cx, |v, cx| {
+                        if v.current_dir().as_deref() == Some(here.as_path()) {
+                            v.select_when_listed(names, cx);
+                        }
+                    });
+                };
+                match clip {
+                    Some((paths, kind)) => crate::status_center::transfer_then(cx, kind, paths, dir, select),
+                    None => crate::status_center::paste_virtual(cx, dir, select),
+                }
+            });
         })
         .detach();
     }
@@ -676,7 +684,7 @@ impl FolderView {
             vec![
                 item(MENU_NEW_FOLDER, t!("Yeni klasör\tCtrl+Shift+N")),
                 item(MENU_NEW_TEXT, t!("Yeni metin belgesi")),
-                ExtraItem { id: MENU_PASTE, label: t!("Yapıştır\tCtrl+V").into(), enabled: rf_win::clipboard::has_files() },
+                ExtraItem { id: MENU_PASTE, label: t!("Yapıştır\tCtrl+V").into(), enabled: rf_win::clipboard::can_paste() },
                 item(MENU_TERMINAL, t!("Terminalde aç")),
                 item(MENU_COPY_PATH, t!("Yolu kopyala")),
             ]
@@ -751,6 +759,8 @@ impl FolderView {
                 MenuOutcome::Custom(MENU_PASTE) => {
                     if let Some((paths, kind)) = clip {
                         crate::status_center::transfer(cx, kind, paths, paste_dir_ui.clone());
+                    } else if rf_win::vfiles::clipboard_has() {
+                        crate::status_center::paste_virtual(cx, paste_dir_ui.clone(), |_, _| {});
                     }
                 }
                 MenuOutcome::Rename => {

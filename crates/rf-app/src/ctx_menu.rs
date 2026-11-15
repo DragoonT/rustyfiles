@@ -140,7 +140,7 @@ impl FolderView {
     }
 
     fn quick_clipboard(&self, me: &Me, with_items: bool) -> Vec<Quick> {
-        let paste_ok = rf_win::clipboard::has_files();
+        let paste_ok = rf_win::clipboard::can_paste();
         if !with_items {
             return vec![
                 Quick::new(L::ClipboardPaste, t!("Yapıştır  (Ctrl+V)"), paste_ok, act(me, |v, w, cx| v.paste(w, cx))),

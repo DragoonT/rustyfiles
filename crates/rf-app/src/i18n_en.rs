@@ -1328,6 +1328,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Çıkış aygıtları", "Output devices"),
     ("Çıkışı değiştir: Ses ayarları", "Change output: Sound settings"),
     ("Ses ayarları", "Sound settings"),
+    ("Yapıştırılıyor", "Pasting"),
+    ("Kaynaktan okunamadı", "Could not be read from the source"),
     ("Klasörü düzenle", "Organize folder"),
     ("Uzantı", "Extension"),
     ("şunu içerir", "contains"),

@@ -2385,7 +2385,7 @@ impl Workspace {
         let writable_sel = has_sel && !matches!(tab.location(), Location::Shell { .. });
         let preview_open = self.preview_open;
         let filter_on = self.filter_bar;
-        let paste_ok = in_folder && rf_win::clipboard::has_files();
+        let paste_ok = in_folder && rf_win::clipboard::can_paste();
 
         let cmd = |id: &'static str, icon: L, tip: &'static str, enabled: bool, cx: &mut Context<Self>, run: fn(&mut Self, &mut Window, &mut Context<Self>)| {
             div()

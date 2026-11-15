@@ -238,11 +238,15 @@ impl DesktopView {
             let _ = tx.send(rf_win::clipboard::get_files(owner).map_err(|e| log::warn!("desktop paste: {e:#}")).ok().flatten());
         });
         cx.spawn(async move |this, cx| {
-            if let Ok(Some((paths, kind))) = rx.await {
-                cx.update(|cx| {
-                    crate::status_center::transfer_then(cx, kind, paths, dir, move |arrived, cx| select_arrived(&this, arrived, at, cx));
-                });
+            let clip = rx.await.ok().flatten();
+            // (no files with paths: another program's virtual files, see `rf_win::vfiles`)
+            if clip.is_none() && !rf_win::vfiles::clipboard_has() {
+                return;
             }
+            cx.update(|cx| match clip {
+                Some((paths, kind)) => crate::status_center::transfer_then(cx, kind, paths, dir, move |arrived, cx| select_arrived(&this, arrived, at, cx)),
+                None => crate::status_center::paste_virtual(cx, dir, move |arrived, cx| select_arrived(&this, arrived, at, cx)),
+            });
         })
         .detach();
     }

@@ -772,6 +772,48 @@ pub fn transfer_then(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathB
     transfer_inner(cx, kind, sources, dest, true, Some(Box::new(after)));
 }
 
+/// Pastes the clipboard's VIRTUAL files into `dest`: files that exist only in the program that copied them, which hands their bytes
+/// over while they are written (`rf_win::vfiles`, which says what is written and what never is). A tracked operation like a copy:
+/// its progress is in bytes when the source told the sizes and in files when it did not, and it can be cancelled. Then `after` on
+/// the UI thread with the top-level items that arrived. Not into an archive.
+pub fn paste_virtual(cx: &mut App, dest: std::path::PathBuf, after: impl FnOnce(Vec<std::path::PathBuf>, &mut App) + 'static) {
+    if crate::archive_view::split(&dest).is_some() {
+        return;
+    }
+    let title = format!("{}: {}", t!("Yapıştırılıyor"), short(&dest));
+    let unread = t!("Kaynaktan okunamadı").to_string();
+    let arrived = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let out = arrived.clone();
+    start_with(
+        cx,
+        title,
+        move |t| {
+            let got = rf_win::vfiles::paste_clipboard(
+                &dest,
+                &mut |p| {
+                    let current = p.current.map(str::to_string);
+                    if p.bytes.1 > 0 {
+                        t.bytes.set(p.bytes.0, p.bytes.1);
+                        (t.on_progress)(1000, (u128::from(p.bytes.0.min(p.bytes.1)) * 1000 / u128::from(p.bytes.1)) as u32, current);
+                    } else {
+                        (t.on_progress)(p.files.1.max(1) as u32, p.files.0 as u32, current);
+                    }
+                },
+                &t.cancel,
+            )?;
+            *out.lock().unwrap() = got.arrived;
+            if got.failed > 0 {
+                anyhow::bail!("{unread} ({}): {}", got.failed, got.first_error.unwrap_or_default());
+            }
+            Ok(!got.cancelled)
+        },
+        Some(Box::new(move |_, cx| {
+            let list = std::mem::take(&mut *arrived.lock().unwrap());
+            after(list, cx)
+        })),
+    );
+}
+
 /// `record = false` for undo/redo replays (they must not land on the undo stack again).
 pub fn transfer_ex(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, record: bool) {
     transfer_inner(cx, kind, sources, dest, record, None);

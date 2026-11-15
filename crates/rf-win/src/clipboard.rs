@@ -98,6 +98,12 @@ pub fn has_files() -> bool {
     unsafe { IsClipboardFormatAvailable(CF_HDROP.0 as u32).is_ok() }
 }
 
+/// Is there something Paste can bring into a folder: files with paths, or files that live only in another program (a remote
+/// desktop session, a tool that carries the clipboard between PCs: `crate::vfiles`)?
+pub fn can_paste() -> bool {
+    has_files() || crate::vfiles::clipboard_has()
+}
+
 /// Reads files + intended operation (cut → Move) from the clipboard.
 pub fn get_files(owner: HWND) -> anyhow::Result<Option<(Vec<PathBuf>, Transfer)>> {
     if !has_files() {

@@ -11,6 +11,7 @@ pub mod apps_direct;
 pub mod bench;
 pub mod cert;
 pub mod clipboard;
+pub mod vfiles;
 pub mod complete;
 pub mod ctxmenu;
 pub mod default_fm;
