@@ -138,7 +138,9 @@ pub fn dock_size(cx: &App) -> f32 {
 /// The island's own fill, painted only while the glass is not running (starting, failed): dark 0x1C1C1E at 72 %, light 0xF5F5F7 at
 /// 78 %, so the dock is never invisible.
 pub fn fallback_fill(dark: bool) -> Tint {
-    if dark { Tint::new(0x1C1C1E, 0.72) } else { Tint::new(0xF5F5F7, 0.78) }
+    // (on a Windows without materials this fill is the island's look for good, and it is opaque there: `dock/backdrop.rs`)
+    let plain = !crate::settings::materials_available();
+    if dark { Tint::new(0x1C1C1E, if plain { 1.0 } else { 0.72 }) } else { Tint::new(0xF5F5F7, if plain { 1.0 } else { 0.78 }) }
 }
 
 pub fn text(dark: bool) -> Tint {

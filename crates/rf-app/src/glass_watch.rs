@@ -108,7 +108,8 @@ pub fn panel_fill(dark: bool, fallback: bool) -> gpui_kit::Hsla {
         (false, false) => (0xFFFFFF, 0.45),
     };
     let mut c: gpui_kit::Hsla = gpui_kit::rgb(rgb).into();
-    c.a = a;
+    // where Windows has no materials the plain panel is all there ever is, with nothing blurred behind it: opaque, so that it reads
+    c.a = if fallback && !crate::settings::materials_available() { 1.0 } else { a };
     c
 }
 
@@ -161,7 +162,8 @@ impl PopupGlass {
 
     fn start_with_options(hwnd: isize, dark: bool, round: bool, shaped: Option<rf_win::glass::GlassOptions>) -> PopupGlass {
         let mut g = PopupGlass { hwnd, machine: Machine::default(), started: Instant::now(), attached: false, gave_up: false };
-        if hwnd == 0 {
+        // (no glass at all on a Windows without materials: the popup is its plain fill, see `dock/backdrop.rs`)
+        if hwnd == 0 || !crate::settings::materials_available() {
             g.machine.attach_failed(0);
             g.gave_up = true;
             return g;

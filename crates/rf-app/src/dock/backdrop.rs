@@ -170,7 +170,10 @@ impl IslandGlass {
     }
 
     fn attach(&mut self, now_ms: u64) {
-        if self.hwnd == 0 {
+        // No glass on a Windows without materials (before Windows 11 22H2, `settings::materials_available`): the island paints its own
+        // fill, opaque there (`look::fallback_fill`). On Windows 10 the glass has to read the screen by Desktop Duplication, and the
+        // first report from there (issue 26) was islands that went black now and then; the windows and menus are plain there already.
+        if self.hwnd == 0 || !crate::settings::materials_available() {
             self.machine.attach_failed(now_ms);
             return;
         }
