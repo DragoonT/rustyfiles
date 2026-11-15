@@ -49,10 +49,14 @@ fn hexa(c: u32, a: f32) -> Hsla {
     h
 }
 
-/// The user's Windows accent palette, read once.
+/// The accent palette the app wears: the colour the user chose for rustyfiles (Settings > Appearance), else the user's Windows
+/// accent palette, which is read once.
 fn system_accent() -> Option<rf_win::accent::AccentPalette> {
-    static P: std::sync::OnceLock<Option<rf_win::accent::AccentPalette>> = std::sync::OnceLock::new();
-    *P.get_or_init(rf_win::accent::palette)
+    static WINDOWS: std::sync::OnceLock<Option<rf_win::accent::AccentPalette>> = std::sync::OnceLock::new();
+    match rf_win::accent::override_color() {
+        Some(c) => Some(rf_win::accent::from_color(c)),
+        None => *WINDOWS.get_or_init(rf_win::accent::system_palette),
+    }
 }
 
 impl Palette {

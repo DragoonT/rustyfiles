@@ -399,6 +399,8 @@ pub struct Settings {
     pub pinned: Option<Vec<PathBuf>>,
     /// Folder aliases: `@name` in the address box (Files' folder aliases).
     pub folder_aliases: std::collections::BTreeMap<String, PathBuf>,
+    /// The accent colour of rustyfiles as "#RRGGBB"; empty: Windows' own accent (Settings > Appearance).
+    pub accent_color: String,
     /// The user's own programs for kinds of files (Settings > File types; `rf_core::openrules`): the first program of a list opens
     /// such a file on a double click, all of them stand first under "Open with". Only rustyfiles follows them.
     pub open_rules: Vec<rf_core::openrules::OpenRule>,
@@ -683,6 +685,7 @@ impl Default for Settings {
             session_active: 0,
             pinned: None,
             folder_aliases: Default::default(),
+            accent_color: String::new(),
             open_rules: Vec::new(),
             run_in_background: false,
             show_perf_info: false,
@@ -1028,6 +1031,8 @@ impl Settings {
         crate::i18n::set(self.language);
         crate::aliases::set(self.folder_aliases.clone());
         rf_win::openrules::set(self.open_rules.clone());
+        // (a text that is no colour is no colour: Windows' accent)
+        rf_win::accent::set_override(rf_win::accent::parse_hex(&self.accent_color));
         crate::background::sync_tray(self.run_in_background);
         crate::quick_search::sync(self);
         rf_core::format::set_date_style(match self.date_format {
@@ -1483,6 +1488,10 @@ dock_own_notifications = 3
         assert_eq!(Settings::default().dock_magnify, DockMagnify::Full);
         // the user's own programs for a kind of file: none at first, and a list comes back from the file as it was written
         assert!(Settings::default().open_rules.is_empty());
+        // the accent: Windows' own until the user writes a colour, and a text that is no colour is none
+        assert!(Settings::default().accent_color.is_empty());
+        assert_eq!(Settings::parse_lenient("accent_color = '#F7630C'\n").unwrap().accent_color, "#F7630C");
+        assert_eq!(rf_win::accent::parse_hex(&Settings::parse_lenient("accent_color = 'turuncu'\n").unwrap().accent_color), None);
         let rule = rf_core::openrules::OpenRule { exts: vec!["dll".into(), "sys".into()], programs: vec![r"C:\Araçlar\dnSpy.exe".into()], double_click: false };
         let text = toml::to_string_pretty(&Settings { open_rules: vec![rule.clone()], ..Default::default() }).unwrap();
         assert!(text.contains("[[open_rules]]"), "{text}");

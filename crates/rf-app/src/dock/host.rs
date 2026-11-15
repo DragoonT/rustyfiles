@@ -1445,6 +1445,13 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     fresh.apply_side_effects();
     let new = Prefs::of(&fresh);
     cx.set_global(fresh);
+    // the accent the user chose for rustyfiles is the dock's too: its colours are read again when it changed
+    if let Some(env) = cx.try_global::<Env>()
+        && env.accent != rf_win::accent::color()
+    {
+        let scale = env.scale;
+        publish_env(scale, cx);
+    }
     // the bell's dot follows its setting
     super::notif_state::sync(cx);
     let Some(host) = host_mut(cx) else { return };

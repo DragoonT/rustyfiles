@@ -1462,6 +1462,14 @@ pub const EN: &[(&str, &str)] = &[
     ("Eski yeri başka bir dosya tutuyor", "Another file is in its old place"),
     ("Dosya düzenleyici", "File organizer"),
     ("Dosya türleri", "File types"),
+    ("Vurgu rengi", "Accent color"),
+    ("Windows'un rengi", "Windows' color"),
+    ("Kendi rengim…", "My own color…"),
+    ("Rengi #RRGGBB biçiminde yazın, örneğin #F7630C.", "Write the color as #RRGGBB, for example #F7630C."),
+    (
+        "Düğmelerin, seçimin ve vurguların rengi: Windows'unki, hazır renklerden biri ya da kendi yazdığınız renk.",
+        "The color of buttons, the selection and highlights: Windows' own, one of these, or a color you write yourself.",
+    ),
     ("Dosya türlerine göre programlar", "Programs by file type"),
     (
         "Bir dosya türü için kendi program listenizi yapın: listedeki ilk program o türü çift tıklamada açar, hepsi sağ tık menüsündeki \"Birlikte aç\"ın başında durur. Programlar yollarıyla verilir; Windows'un tanımadığı bir program da olabilir. Bu listelere yalnızca rustyfiles uyar, Windows'un varsayılan programları değişmez.",

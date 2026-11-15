@@ -33,11 +33,76 @@ pub fn parse_palette(raw: &[u8]) -> Option<AccentPalette> {
     Some(AccentPalette { shades })
 }
 
-/// Reads the palette from HKCU; `None` if unavailable (then use Fluent's default blue).
-pub fn palette() -> Option<AccentPalette> {
+/// Windows' own palette, read from HKCU; `None` if unavailable (then use Fluent's default blue).
+pub fn system_palette() -> Option<AccentPalette> {
     let key = windows_registry::CURRENT_USER.open(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent").ok()?;
     let raw = key.get_value("AccentPalette").ok()?;
     parse_palette(&raw)
+}
+
+/// The colour the user chose for rustyfiles in place of Windows' accent (`NO_OVERRIDE`: none). One value for the process, set from the
+/// settings whenever they are applied.
+static OVERRIDE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(NO_OVERRIDE);
+const NO_OVERRIDE: u32 = u32::MAX;
+
+/// Sets or clears the user's own accent colour (0xRRGGBB).
+///
+/// WHY (a user on Threads, 2026-11-15: "could u also add an option to change the orange accent"). The accent was Windows' and nothing
+/// else: whoever did not want that colour in a file manager had to change it for the whole system.
+pub fn set_override(color: Option<u32>) {
+    OVERRIDE.store(color.map_or(NO_OVERRIDE, |c| c & 0xFF_FFFF), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The user's own accent colour, when they chose one.
+pub fn override_color() -> Option<u32> {
+    let c = OVERRIDE.load(std::sync::atomic::Ordering::Relaxed);
+    (c != NO_OVERRIDE).then_some(c)
+}
+
+/// The palette the app wears: the user's own colour with shades made from it, else Windows' palette.
+pub fn palette() -> Option<AccentPalette> {
+    match override_color() {
+        Some(c) => Some(from_color(c)),
+        None => system_palette(),
+    }
+}
+
+fn mix(a: u32, b: u32, t: f32) -> u32 {
+    let ch = |shift: u32| {
+        let (x, y) = (((a >> shift) & 0xFF) as f32, ((b >> shift) & 0xFF) as f32);
+        ((x + (y - x) * t).round() as u32).min(255) << shift
+    };
+    ch(16) | ch(8) | ch(0)
+}
+
+/// A palette made from one colour: three lighter shades (towards white) and three darker ones (towards black), the colour itself
+/// in the middle, as Windows' own palette is laid out.
+pub fn from_color(base: u32) -> AccentPalette {
+    let base = base & 0xFF_FFFF;
+    AccentPalette {
+        shades: [mix(base, 0xFF_FFFF, 0.54), mix(base, 0xFF_FFFF, 0.36), mix(base, 0xFF_FFFF, 0.18), base, mix(base, 0, 0.15), mix(base, 0, 0.30), mix(base, 0, 0.45)],
+    }
+}
+
+/// A colour as the user writes it: "#1A2B3C", "1a2b3c", or the short "#abc". `None` for anything else.
+pub fn parse_hex(text: &str) -> Option<u32> {
+    let t = text.trim().trim_start_matches('#');
+    if !t.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    match t.len() {
+        6 => u32::from_str_radix(t, 16).ok(),
+        3 => {
+            let d: Vec<u32> = t.chars().filter_map(|c| c.to_digit(16)).collect();
+            Some((d[0] * 17) << 16 | (d[1] * 17) << 8 | d[2] * 17)
+        }
+        _ => None,
+    }
+}
+
+/// A colour as it is kept in the settings: "#RRGGBB".
+pub fn to_hex(color: u32) -> String {
+    format!("#{:06X}", color & 0xFF_FFFF)
 }
 
 /// Fluent's default blue, for a machine whose accent cannot be read.
@@ -72,6 +137,48 @@ pub fn apps_use_dark() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_colour_is_read_as_the_user_writes_it() {
+        assert_eq!(parse_hex("#1A2B3C"), Some(0x1A2B3C));
+        assert_eq!(parse_hex("  1a2b3c "), Some(0x1A2B3C));
+        assert_eq!(parse_hex("#abc"), Some(0xAABBCC));
+        assert_eq!(parse_hex("#000000"), Some(0));
+        for bad in ["", "#", "#12345", "#1234567", "turuncu", "#GGGGGG", "12 34 56"] {
+            assert_eq!(parse_hex(bad), None, "{bad:?}");
+        }
+        assert_eq!(to_hex(0x1A2B3C), "#1A2B3C");
+        assert_eq!(to_hex(0xFF_0000_0A), "#00000A", "only the colour's three bytes");
+        assert_eq!(parse_hex(&to_hex(0xF7630C)), Some(0xF7630C));
+    }
+
+    #[test]
+    fn a_palette_made_from_one_colour_has_it_in_the_middle_lighter_before_and_darker_after() {
+        let p = from_color(0xF7630C);
+        assert_eq!(p.base(), 0xF7630C);
+        let light = |c: u32| ((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF);
+        for w in p.shades.windows(2) {
+            assert!(light(w[0]) > light(w[1]), "{:06X} is not lighter than {:06X}", w[0], w[1]);
+        }
+        // the ends are still colours, not white and black
+        assert!(p.shades[0] != 0xFF_FFFF && p.shades[6] != 0);
+        // white and black have nowhere to go on one side, and stay themselves in the middle
+        assert_eq!(from_color(0xFF_FFFF).light2(), 0xFF_FFFF);
+        assert_eq!(from_color(0).dark1(), 0);
+    }
+
+    /// The user's own colour takes the place of Windows' everywhere the palette is asked for, and goes when it is cleared. (One
+    /// test for the one value of the process.)
+    #[test]
+    fn the_users_own_colour_takes_the_place_of_windows_accent_until_it_is_cleared() {
+        set_override(Some(0x107C10));
+        assert_eq!(override_color(), Some(0x107C10));
+        assert_eq!(color(), 0x107C10);
+        assert_eq!(palette(), Some(from_color(0x107C10)));
+        set_override(None);
+        assert_eq!(override_color(), None);
+        assert_eq!(palette(), system_palette());
+    }
 
     #[test]
     fn the_theme_value_means_dark_only_when_it_is_zero() {

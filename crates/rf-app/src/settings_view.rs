@@ -811,6 +811,76 @@ const TINTS: [(&str, u32); 15] = [
 
 /// The background material card. While Glass is in use (chosen, or forced for this run) a note under it says what the material
 /// costs; if the engine gave up on a window, another note says why that window is on Mica.
+/// The colours offered for the accent (Fluent's own set): blue, purple, magenta, red, orange, yellow, green, teal, grey.
+pub(crate) const ACCENT_CHOICES: [u32; 9] = [0x0078D4, 0x8764B8, 0xE3008C, 0xE81123, 0xF7630C, 0xFFB900, 0x107C10, 0x00B7C3, 0x69797E];
+
+/// What the accent setting holds after the user wrote a colour of their own: the colour as it is kept, or what to tell them.
+pub(crate) fn accent_answer(text: &str) -> Result<String, String> {
+    rf_win::accent::parse_hex(text).map(rf_win::accent::to_hex).ok_or_else(|| t!("Rengi #RRGGBB biçiminde yazın, örneğin #F7630C.").to_string())
+}
+
+/// The accent colour: Windows' own, one of a few, or any colour written as #RRGGBB.
+fn accent_card(p: &Palette, s: &Settings) -> AnyElement {
+    let current = rf_win::accent::parse_hex(&s.accent_color);
+    let chip = |id: &'static str, label: &'static str, on: bool, p: &Palette| {
+        div()
+            .id(id)
+            .h(px(28.))
+            .px_3()
+            .flex()
+            .items_center()
+            .rounded(theme::RADIUS_SM)
+            .border_1()
+            .border_color(if on { p.accent } else { p.border })
+            .bg(p.hover)
+            .text_sm()
+            .cursor_pointer()
+            .hover(|d| d.bg(p.pressed))
+            .child(label)
+    };
+    let mut row = h_flex().flex_wrap().gap_2().items_center().justify_end().child(chip("accent-windows", t!("Windows'un rengi"), current.is_none(), p).on_click(|_, _, cx| settings::update(cx, |s| s.accent_color.clear())));
+    for (i, c) in ACCENT_CHOICES.into_iter().enumerate() {
+        let on = current == Some(c);
+        row = row.child(
+            div()
+                .id(("accent-choice", i))
+                .size(px(24.))
+                .rounded_full()
+                .bg(gpui_kit::rgb(c))
+                .border_2()
+                .border_color(if on { p.text } else { gpui_kit::transparent_black() })
+                .cursor_pointer()
+                .on_click(move |_, _, cx| settings::update(cx, move |s| s.accent_color = rf_win::accent::to_hex(c))),
+        );
+    }
+    let custom = current.is_some_and(|c| !ACCENT_CHOICES.contains(&c));
+    let shown = s.accent_color.clone();
+    row = row.child(chip("accent-own", t!("Kendi rengim…"), custom, p).on_click(move |_, window, cx| {
+        crate::prompt::show(
+            t!("Vurgu rengi"),
+            Some(t!("Rengi #RRGGBB biçiminde yazın, örneğin #F7630C.").to_string()),
+            Some((shown.clone(), "#F7630C".to_string())),
+            vec![
+                crate::prompt::Button::new(t!("Kaydet"), crate::prompt::Kind::Primary, |text, _, cx| {
+                    let color = accent_answer(&text.unwrap_or_default())?;
+                    settings::update(cx, move |s| s.accent_color = color);
+                    Ok(())
+                }),
+                crate::prompt::Button::cancel(),
+            ],
+            window,
+            cx,
+        );
+    }));
+    card(
+        p,
+        L::Palette,
+        t!("Vurgu rengi"),
+        Some(t!("Düğmelerin, seçimin ve vurguların rengi: Windows'unki, hazır renklerden biri ya da kendi yazdığınız renk.")),
+        row.into_any_element(),
+    )
+}
+
 fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
     let control = dropdown(
         "backdrop",
@@ -1199,6 +1269,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             ),
         ),
         backdrop_card(p, s),
+        accent_card(p, s),
         card(
             p,
             L::Activity,
@@ -3078,6 +3149,18 @@ mod hyperglass_tests {
 
     /// The list of pages gives way before the settings do: in a narrow pane it is a strip of icons, and the settings' column is
     /// then wide enough for a setting's words and its widest control side by side or one under the other.
+    #[test]
+    fn a_colour_of_the_users_own_is_kept_as_rrggbb_or_refused_with_words() {
+        assert_eq!(super::accent_answer("f7630c"), Ok("#F7630C".to_string()));
+        assert_eq!(super::accent_answer(" #abc "), Ok("#AABBCC".to_string()));
+        assert!(super::accent_answer("turuncu").is_err());
+        assert!(super::accent_answer("").is_err());
+        // every colour that is offered is a colour, and none is offered twice
+        let unique: std::collections::HashSet<u32> = super::ACCENT_CHOICES.into_iter().collect();
+        assert_eq!(unique.len(), super::ACCENT_CHOICES.len());
+        assert!(super::ACCENT_CHOICES.iter().all(|c| *c <= 0xFF_FFFF));
+    }
+
     #[test]
     fn a_narrow_pane_gets_the_strip_of_icons_and_a_readable_column() {
         assert!(!super::nav_is_strip(0.0), "a pane that was not measured yet gets the full list");
