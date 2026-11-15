@@ -105,6 +105,12 @@ pub struct TrayIcon {
     /// `uCallbackMessage`, once `NIF_MESSAGE` was seen. Without it nothing can be sent to the owner.
     pub callback: Option<u32>,
     pub version: IconVersion,
+    /// False while `version` is not known to be the program's. Explorer holds such an icon from before the host knew it (a first add
+    /// that Explorer refused because it has the icon, or an icon taken from a modify) with the version its program set there, which
+    /// nothing can ask for; `version` is 0 then, a guess. True again once a `NIM_SETVERSION` for it is seen, or the icon starts a
+    /// new life with an add that Explorer accepts. The click engine sends an icon of unknown version the messages of every version
+    /// (`tray_wire::click::callbacks_unknown`).
+    pub version_known: bool,
     pub tip: String,
     /// `dwState` merged under the masks seen so far.
     pub state: u32,
@@ -315,6 +321,7 @@ impl TrayModel {
                             uid: d.uid,
                             callback: None,
                             version: IconVersion::V0,
+                            version_known: true,
                             tip: String::new(),
                             state: 0,
                             image: None,
@@ -332,17 +339,29 @@ impl TrayModel {
                 // (Windows forgets a version at every add, so a version seen before an add is stale; an adopted icon was never added
                 // here and takes the one its program set earlier, if we saw it)
                 let remembered = self.pending_versions.remove(&key);
-                if adopting && let Some(v) = remembered {
-                    self.icons[at].version = v;
+                // An icon that is new to the model and that Explorer has had all along: taken from a modify, or added by its program
+                // again (what the start broadcast asks for) and refused by Explorer, which keeps its icon AND the version the program
+                // set there. That version is the one seen earlier, if one was; else it is not known (issue 22: "i can't right click
+                // on tray icons": a version 4 program got the messages of version 0, with no WM_CONTEXTMENU among them).
+                let explorers_own = adopting || (fresh && explorer_accepted == Some(false));
+                if explorers_own {
+                    match remembered {
+                        Some(v) => self.icons[at].version = v,
+                        None => self.icons[at].version_known = false,
+                    }
                 }
                 let version_guessed = adopting && remembered.is_none();
                 if !fresh {
                     // a program that adds again starts a new life for the icon: Windows forgets the version at every add and the
                     // program sends `NIM_SETVERSION` again. Not when Explorer refused the add: it kept the icon and its version.
                     let icon = &mut self.icons[at];
-                    if icon.version != IconVersion::V0 && explorer_accepted != Some(false) {
-                        icon.version = IconVersion::V0;
-                        changes.set(Changes::VERSION);
+                    if explorer_accepted != Some(false) {
+                        if icon.version != IconVersion::V0 {
+                            icon.version = IconVersion::V0;
+                            changes.set(Changes::VERSION);
+                        }
+                        // (and the 0 is the version now, not a guess)
+                        icon.version_known = true;
                     }
                     if icon.hwnd != d.hwnd || icon.uid != d.uid {
                         icon.hwnd = d.hwnd;
@@ -416,6 +435,7 @@ impl TrayModel {
                     return outcome(false, ApplyNote::VersionRefused, vec![], None);
                 };
                 let mut events = Vec::new();
+                self.icons[at].version_known = true;
                 if self.icons[at].version != v {
                     self.icons[at].version = v;
                     let g = self.bump();

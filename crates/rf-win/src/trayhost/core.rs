@@ -47,6 +47,10 @@ pub struct CoreConfig {
     /// are passed on to Explorer like everything else. The packing is UNVERIFIED (two sources disagree, probe P6 settles it), and a
     /// wrong answer would put a program's flyout in the wrong place, which is worse than Explorer's answer.
     pub rect_packing: Option<RectPacking>,
+    /// For a comparison run only (`RUSTYFILES_TRAY_ANSWER_AS_EXPLORER=1`): pass Explorer's NO to a first add back to the program,
+    /// as the host did until 0.8.0. See `on_copydata` for why the host answers yes; the counter `set_versions` of two runs, one
+    /// with this and one without, shows how many running programs set their icon's version only after an add that worked.
+    pub answer_first_add_as_explorer: bool,
 }
 
 pub struct Core {
@@ -63,6 +67,15 @@ pub struct Core {
 /// How many requests about unknown icons are described in the log in one run: enough to name every owner of a first run (it counted
 /// 7), few enough that a program that keeps deleting an icon it never added cannot fill the log.
 pub const UNKNOWN_LINES: u32 = 40;
+
+/// What the own step (step 3) says about an icon request.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Own {
+    /// What a tray would answer the sender (used when there was nobody to pass the message to).
+    answer: bool,
+    /// The request was an add and the icon was new to the model.
+    new_icon: bool,
+}
 
 impl Core {
     pub fn new(shared: Arc<Shared>, cfg: CoreConfig, relay: Box<dyn Relay>, pixels: Box<dyn IconPixels>, owners: Arc<dyn OwnerSend>, clock: Box<dyn Clock>) -> Core {
@@ -113,8 +126,15 @@ impl Core {
         // Step 3: our own handling. The sender is still waiting for our return, so its picture is still there.
         let own = self.guarded(|| self.own_step(early_parse.unwrap_or_else(|| parse_copydata(dw_data, bytes)), verdict)).flatten();
         match relayed {
+            // The one answer of Explorer's that is not passed back: its NO to an add of an icon it already has, when that icon is
+            // NEW to us. The start broadcast makes every running program add its icon again; for the program that add is the first
+            // one at this tray, and it worked (the model took the icon). Told "no", a program stops there, and many set the icon's
+            // version only after an add that worked (Qt: `NIM_SETVERSION` follows a successful `NIM_ADD`): the version stayed
+            // unknown here, the icon got the messages of version 0, and its menu never opened (issue 22). Told "yes", the program
+            // goes on to `NIM_SETVERSION`, which Explorer accepts for the icon it holds, and both lists agree.
+            Relayed::Done(Outcome::Delivered(0)) if own.is_some_and(|o| o.new_icon) && !self.cfg.answer_first_add_as_explorer => 1,
             Relayed::Done(outcome) => reply_for(outcome),
-            Relayed::NoTarget => isize::from(own.unwrap_or(false)),
+            Relayed::NoTarget => isize::from(own.is_some_and(|o| o.answer)),
         }
     }
 
@@ -174,7 +194,7 @@ impl Core {
     // ---------------------------------------------------------------- own handling
 
     /// Step 3. Returns the answer a tray would give (used only when there was nobody to pass the message to).
-    fn own_step(&self, parsed: Result<TrayRequest, WireError>, verdict: Option<bool>) -> Option<bool> {
+    fn own_step(&self, parsed: Result<TrayRequest, WireError>, verdict: Option<bool>) -> Option<Own> {
         let c = &self.shared.counters;
         match parsed {
             Err(WireError::UnknownKind(_)) => {
@@ -190,7 +210,7 @@ impl Core {
                 if verdict == Some(false) {
                     bump(&c.explorer_refused);
                 }
-                Some(if self.cfg.log_only { self.count_step(&req) } else { self.model_step(&req, verdict) })
+                Some(if self.cfg.log_only { Own { answer: self.count_step(&req), new_icon: false } } else { self.model_step(&req, verdict) })
             }
             Ok(TrayRequest::IconRect(_)) => {
                 // (not answered here: no packing is set, the icon is unknown to the interface, or the rectangle does not fit)
@@ -256,9 +276,9 @@ impl Core {
     ///   keeps the icon's version (Explorer kept it too; see `TrayModel::apply`).
     ///
     /// With no verdict (nobody to ask, or no answer in time) every request is applied.
-    fn model_step(&self, req: &NotifyIconRequest, verdict: Option<bool>) -> bool {
+    fn model_step(&self, req: &NotifyIconRequest, verdict: Option<bool>) -> Own {
         if verdict == Some(false) && matches!(req.message, Nim::Modify | Nim::SetVersion) {
-            return false;
+            return Own::default();
         }
         let prep = self.prepare(req, verdict);
         let out = self.shared.apply(req, prep);
@@ -269,7 +289,11 @@ impl Core {
         if out.events.iter().any(|e| matches!(e, super::model::TrayEvent::Balloon(_))) {
             bump(&self.shared.counters.balloons);
         }
-        out.answer
+        let new_icon = req.message == Nim::Add && out.note == ApplyNote::Added;
+        if new_icon && verdict == Some(false) {
+            bump(&self.shared.counters.first_add_refused);
+        }
+        Own { answer: out.answer, new_icon }
     }
 
     /// One log line for a request about an icon the host never saw added, so that a run says WHOSE icons are missing (the counters
@@ -612,6 +636,32 @@ mod tests {
         block(&req(Nim::Modify, d))
     }
 
+    /// What the start broadcast leads to for a program that was running before the dock: it adds its icon again, Explorer has it
+    /// and says no. The program must hear YES (it goes on to set the version only then), and only for that first add.
+    #[test]
+    fn a_first_add_that_explorer_refuses_is_answered_yes_and_a_repeated_one_is_not() {
+        let r = rig(Some(200), CoreConfig::default());
+        r.relay.set_outcome(Outcome::Delivered(0));
+        let add = icon_block(Nim::Add, 0x10, 1, nif::MESSAGE | nif::TIP, 0);
+        assert_eq!(r.core.on_copydata(DW_NOTIFY_ICON, &add, raw()), 1, "new to us: the add worked at this tray");
+        assert!(!r.core.shared.snapshot().icons[0].version_known, "Explorer holds a version we never saw");
+        assert_eq!(r.core.shared.counters.snapshot().first_add_refused, 1);
+        // (the comparison run of `CoreConfig::answer_first_add_as_explorer` hears Explorer's no, as every run did until 0.8.0)
+        let old = rig(Some(200), CoreConfig { answer_first_add_as_explorer: true, ..Default::default() });
+        old.relay.set_outcome(Outcome::Delivered(0));
+        assert_eq!(old.core.on_copydata(DW_NOTIFY_ICON, &add, raw()), 0);
+        assert_eq!(r.core.on_copydata(DW_NOTIFY_ICON, &add, raw()), 0, "the model holds it now: Explorer's answer goes back");
+        // a modify that Explorer refuses is still refused
+        assert_eq!(r.core.on_copydata(DW_NOTIFY_ICON, &icon_block(Nim::Modify, 0x10, 1, nif::TIP, 0), raw()), 0);
+        // the program, told yes, sets its version: Explorer accepts that for the icon it holds
+        r.relay.set_outcome(Outcome::Delivered(1));
+        let mut v = data(0x10, 1, 0);
+        v.timeout_or_version = 4;
+        assert_eq!(r.core.on_copydata(DW_NOTIFY_ICON, &block(&req(Nim::SetVersion, v)), raw()), 1);
+        let icon = r.core.shared.snapshot().icons[0].clone();
+        assert!(icon.version_known && icon.version.raw() == 4);
+    }
+
     #[test]
     fn a_full_modify_for_an_icon_the_host_never_saw_is_adopted_when_explorer_accepted_it() {
         let r = rig(Some(200), CoreConfig::default());
@@ -846,7 +896,7 @@ mod tests {
 
     #[test]
     fn log_only_reads_no_pixels_keeps_no_text_and_still_forwards() {
-        let r = rig(Some(200), CoreConfig { log_only: true, rect_packing: Some(RectPacking::Axes) });
+        let r = rig(Some(200), CoreConfig { log_only: true, rect_packing: Some(RectPacking::Axes), ..Default::default() });
         r.pixels.set(0x77, 16, 16, 1);
         let mut d = data(1, 1, nif::MESSAGE | nif::ICON | nif::TIP | nif::INFO);
         d.icon = 0x77;
@@ -872,7 +922,7 @@ mod tests {
 
     #[test]
     fn log_only_with_no_tray_window_answers_by_the_keys_seen() {
-        let r = rig(None, CoreConfig { log_only: true, rect_packing: None });
+        let r = rig(None, CoreConfig { log_only: true, rect_packing: None, ..Default::default() });
         let add = icon_block(Nim::Add, 1, 1, nif::MESSAGE, 0);
         assert_eq!(r.core.on_copydata(DW_NOTIFY_ICON, &add, raw()), 1);
         assert_eq!(r.core.on_copydata(DW_NOTIFY_ICON, &add, raw()), 0);

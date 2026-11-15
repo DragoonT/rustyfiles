@@ -11,7 +11,7 @@ use super::model::IconId;
 use super::shared::{Shared, bump};
 use super::traits::OwnerSend;
 use crate::tray_wire::Point;
-use crate::tray_wire::click::{ClickOptions, HostEvent, IconRef, anchor_for, callbacks, grants_foreground};
+use crate::tray_wire::click::{ClickOptions, HostEvent, IconRef, anchor_for, callbacks, callbacks_unknown, grants_foreground};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClickRequest {
@@ -64,9 +64,9 @@ pub fn deliver_expecting(shared: &Shared, owners: &dyn OwnerSend, req: &ClickReq
     // a copy of what is needed, under the lock; nothing is sent while it is held
     let found = {
         let st = shared.state.lock();
-        st.model.get(req.id).map(|i| (i.hwnd_handle(), i.uid, i.callback, i.version, i.owner_pid))
+        st.model.get(req.id).map(|i| (i.hwnd_handle(), i.uid, i.callback, i.version, i.version_known, i.owner_pid))
     };
-    let Some((hwnd, uid, callback, version, pid)) = found else { return ClickOutcome::UnknownIcon };
+    let Some((hwnd, uid, callback, version, version_known, pid)) = found else { return ClickOutcome::UnknownIcon };
     if expect.is_some_and(|e| e != (hwnd, pid)) {
         return ClickOutcome::OwnerChanged;
     }
@@ -83,7 +83,9 @@ pub fn deliver_expecting(shared: &Shared, owners: &dyn OwnerSend, req: &ClickReq
     }
     let anchor = anchor_for(req.event, req.cursor, req.icon_top_left);
     let mut sent = 0;
-    for cb in callbacks(IconRef { uid, version }, req.event, anchor, req.opts) {
+    // (an icon whose version Explorer holds and we never saw gets the messages of every version: see `callbacks_unknown`)
+    let list = if version_known { callbacks(IconRef { uid, version }, req.event, anchor, req.opts) } else { callbacks_unknown(uid, req.event, anchor, req.opts) };
+    for cb in list {
         if !owners.send_notify(hwnd, callback, cb.wparam, cb.lparam) {
             return ClickOutcome::Failed { sent };
         }
@@ -155,6 +157,42 @@ mod tests {
         // MAKEWPARAM(500, 600) and MAKELPARAM(event, 7)
         assert_eq!(sent[0], (0x1234, 0x8005, (600usize << 16) | 500, ((7isize) << 16) | ev::WM_RBUTTONDOWN as isize));
         assert_eq!(sent[2], (0x1234, 0x8005, (600usize << 16) | 500, ((7isize) << 16) | ev::WM_CONTEXTMENU as isize));
+    }
+
+    /// The start broadcast makes a running program add its icon again; Explorer has it and refuses. The version the program set
+    /// at Explorer is not known here, and a right click has to reach a program of any version.
+    #[test]
+    fn an_icon_explorer_had_before_us_gets_a_right_click_a_version_4_program_can_read() {
+        let (s, _rx) = Shared::new();
+        let refused = Prepared { owner: Some((77, "a.exe".into())), explorer_accepted: Some(false), ..Default::default() };
+        s.apply(&req(Nim::Add, data(0x500, 9, nif::MESSAGE)), refused);
+        let id = s.snapshot().icons[0].id;
+        let o = FakeOwners::new();
+        o.add_window(0x500, 77);
+        assert_eq!(deliver(&s, &o, &click(id, HostEvent::RightClick)), ClickOutcome::Sent(3));
+        let (anchor, v4) = ((600usize << 16) | 500, |event: u32| (9isize << 16) | event as isize);
+        // the pair a version 0 program acts on, then a version 4 WM_CONTEXTMENU with the pointer as its anchor
+        assert_eq!(
+            &o.log()[1..],
+            &[
+                format!("send {:#x} {:#x} {:#x} {:#x}", 0x500, 0x8005, 9, ev::WM_RBUTTONDOWN),
+                format!("send {:#x} {:#x} {:#x} {:#x}", 0x500, 0x8005, 9, ev::WM_RBUTTONUP),
+                format!("send {:#x} {:#x} {:#x} {:#x}", 0x500, 0x8005, anchor, v4(ev::WM_CONTEXTMENU)),
+            ]
+        );
+        // once the program says its version, it gets that version's messages and nothing else
+        let mut d = data(0x500, 9, 0);
+        d.timeout_or_version = 4;
+        s.apply(&req(Nim::SetVersion, d), Prepared { explorer_accepted: Some(true), ..Default::default() });
+        assert_eq!(deliver(&s, &o, &click(id, HostEvent::RightClick)), ClickOutcome::Sent(3));
+        assert_eq!(
+            &o.log()[5..],
+            &[
+                format!("send {:#x} {:#x} {:#x} {:#x}", 0x500, 0x8005, anchor, v4(ev::WM_RBUTTONDOWN)),
+                format!("send {:#x} {:#x} {:#x} {:#x}", 0x500, 0x8005, anchor, v4(ev::WM_RBUTTONUP)),
+                format!("send {:#x} {:#x} {:#x} {:#x}", 0x500, 0x8005, anchor, v4(ev::WM_CONTEXTMENU)),
+            ]
+        );
     }
 
     #[test]

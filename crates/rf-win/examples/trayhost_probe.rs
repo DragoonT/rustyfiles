@@ -60,7 +60,7 @@ fn run_fake(target: Option<isize>, packing: Option<RectPacking>) -> serde_json::
     owners.add_window(0x10, 4242);
     owners.set_exe(4242, "demo.exe");
     let (shared, _events) = Shared::new();
-    let core = Core::new(Arc::new(shared), CoreConfig { log_only: false, rect_packing: packing }, Box::new(relay.clone()), Box::new(pixels), Arc::new(owners), Box::new(ManualClock::default()));
+    let core = Core::new(Arc::new(shared), CoreConfig { log_only: false, rect_packing: packing, ..Default::default() }, Box::new(relay.clone()), Box::new(pixels), Arc::new(owners), Box::new(ManualClock::default()));
     let raw = Raw { msg: 0x4A, wparam: 1, lparam: 2 };
     let mut replies = Vec::new();
     let mut send = |name: &str, dw: usize, bytes: Vec<u8>| {

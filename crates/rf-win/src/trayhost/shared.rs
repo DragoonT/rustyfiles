@@ -56,6 +56,7 @@ counters!(
     modify_unknown,
     adopted,
     adopted_version_guessed,
+    first_add_refused,
     deletes,
     delete_unknown,
     set_versions,

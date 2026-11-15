@@ -34,13 +34,12 @@
 //! in its callbacks until it sends the version again (a program that re-adds does). That is the one thing adoption can get wrong, and
 //! it is counted: `adopted` for every adoption, `adopted_version_guessed` for those that started at version 0 with no version seen.
 //!
-//! WHY VERSION 0 IS STILL THE GUESS (and not "no clicks until the version is known", which would show an icon that does nothing).
-//! A version 0 packing (`wParam` = icon id, `lParam` = the mouse message) reaches a version 3 or 4 program with the mouse message in
-//! the low word of `lParam`, where it reads the event: the click lands, only the anchor point in `wParam` is wrong (the program puts
-//! its menu at the wrong place) and a program that also compares the icon id in the high word does not recognise it. The opposite
-//! guess, version 4 packing sent to a version 0 program (the kind that never listens for the taskbar announcement, i.e. the likelier
-//! owner of a missed icon), is read as no known message at all. So the wrong guess costs a misplaced menu at worst, and the other
-//! costs the click.
+//! WHAT AN ICON OF UNKNOWN VERSION IS SENT (`TrayIcon::version_known`, `tray_wire::click::callbacks_unknown`). Version 0 alone was
+//! the guess until 0.8.0, on the thought that its packing reaches a version 3 or 4 program too (the mouse message is in the low word
+//! of `lParam`). It does, but a version 0 click is button-down and button-up and nothing else, and a version 4 program opens its
+//! menu on `WM_CONTEXTMENU` and acts on a click at `NIN_SELECT`: neither was ever sent, and the icon did nothing (issue 22). Such an
+//! icon now gets the version 0 messages and then the one message a version 4 program waits for, in the version 4 packing. The same
+//! holds for an icon whose FIRST ADD here Explorer refused (it had the icon from before the host started): see `TrayModel::apply`.
 
 use super::model::{ImageUpdate, Prepared};
 use crate::tray_wire::notify::{Nim, NotifyIconRequest};

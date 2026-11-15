@@ -207,6 +207,39 @@ pub fn callbacks(icon: IconRef, ev: HostEvent, anchor: Point, opts: ClickOptions
     events_for(ev, icon.version, opts).into_iter().map(|e| pack(icon, e, anchor)).collect()
 }
 
+/// The callbacks for a host event on an icon whose VERSION THE HOST COULD NOT LEARN (`trayhost::model::TrayIcon::version_known`):
+/// its program set the version at Explorer before the host knew the icon, and nothing can ask Explorer for it.
+///
+/// WHY NOT JUST VERSION 0 (what was sent, issue 22: "i can't right click on tray icons so i can't close app in tray"). The packing
+/// of version 0 does reach a version 3 or 4 program (the event is in the low word of `lParam` either way), but a version 0 click
+/// is button-down and button-up and nothing else. A program that set version 4 opens its menu on `WM_CONTEXTMENU` and acts on a
+/// click at `NIN_SELECT`, as the documentation tells it to (Qt does exactly this), and neither was ever sent: the icon was dead.
+///
+/// WHAT IS SENT: the version 0 messages, packed for version 0, and then the ONE message a version 4 program waits for
+/// (`NIN_SELECT`, `NIN_KEYSELECT` or `WM_CONTEXTMENU`), packed for version 4. Who reads what:
+/// * a version 0 program acts on the button messages. The last message is `(uID << 16) | event` to it: no message it knows, and
+///   with `uID` 0 the bare `WM_CONTEXTMENU` / `NIN_SELECT`, which Explorer never sends to version 0 and such a program has no case for;
+/// * a version 4 program gets its last message exactly as Explorer packs it (anchor and icon id). The button messages before it
+///   carry the icon id where it reads the anchor: a program that acts on those puts its menu at the wrong place, as before;
+/// * a version 3 program acts on the button messages; the last message reaches it only when the low word of `uID` is 0 (then it
+///   is the bare event, as Explorer sends it). One that waits for `WM_CONTEXTMENU` alone under another id is not reached: sending
+///   that message in the version 3 packing as well would open a version 4 program's menu twice.
+///
+/// No program that works with Explorer gets two triggers from this: Explorer itself sends a version 3 or 4 program both the button
+/// messages and the last one.
+pub fn callbacks_unknown(uid: u32, ev: HostEvent, anchor: Point, opts: ClickOptions) -> Vec<Callback> {
+    use self::ev as e;
+    let mut out = callbacks(IconRef { uid, version: IconVersion::V0 }, ev, anchor, opts);
+    let last = match ev {
+        HostEvent::LeftClick | HostEvent::DoubleClick => Some(e::NIN_SELECT),
+        HostEvent::KeyboardSelect => Some(e::NIN_KEYSELECT),
+        HostEvent::RightClick | HostEvent::ContextMenuKey => Some(e::WM_CONTEXTMENU),
+        _ => None,
+    };
+    out.extend(last.map(|event| pack(IconRef { uid, version: IconVersion::V4 }, event, anchor)));
+    out
+}
+
 /// The anchor for a host event: keyboard events anchor at the icon's upper-left corner (the documented rule), the others at the
 /// pointer.
 pub fn anchor_for(ev: HostEvent, cursor: Point, icon_top_left: Point) -> Point {
@@ -450,6 +483,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// An icon whose version the host could not learn: what each kind of program reads out of the messages it is sent.
+    #[test]
+    fn an_icon_of_unknown_version_gets_the_version_0_messages_and_then_the_one_a_version_4_program_waits_for() {
+        let p = Point { x: 2400, y: 1380 };
+        let uid = 7;
+        let right = callbacks_unknown(uid, HostEvent::RightClick, p, OFF);
+        // a version 0 (and 3) program: wParam is the id, lParam the event; the button pair is what it acts on
+        assert_eq!(right[0], Callback { event: e::WM_RBUTTONDOWN, wparam: 7, lparam: e::WM_RBUTTONDOWN as isize });
+        assert_eq!(right[1], Callback { event: e::WM_RBUTTONUP, wparam: 7, lparam: e::WM_RBUTTONUP as isize });
+        assert_eq!(right.len(), 3);
+        // a version 4 program: the last message is its WM_CONTEXTMENU, with the anchor and its id, as Explorer packs it
+        assert_eq!(decode(V4, right[2].wparam, right[2].lparam), Decoded { event: e::WM_CONTEXTMENU, uid: 7, anchor: Some(p) });
+        // which a version 0 or 3 program reads as no message it knows
+        let as_old = decode(V0, right[2].wparam, right[2].lparam);
+        assert!(as_old.event > 0xFFFF, "(uID << 16) | event: not a mouse message, not WM_CONTEXTMENU, not a NIN_ notification");
+        // and the button pair, read by a version 4 program, still says which button (the low word of lParam)
+        assert_eq!(decode(V4, right[1].wparam, right[1].lparam).event, e::WM_RBUTTONUP);
+
+        let last = |ev| callbacks_unknown(uid, ev, p, OFF).last().map(|c| decode(V4, c.wparam, c.lparam).event);
+        assert_eq!(last(HostEvent::LeftClick), Some(e::NIN_SELECT));
+        assert_eq!(last(HostEvent::DoubleClick), Some(e::NIN_SELECT));
+        assert_eq!(last(HostEvent::KeyboardSelect), Some(e::NIN_KEYSELECT));
+        assert_eq!(last(HostEvent::ContextMenuKey), Some(e::WM_CONTEXTMENU));
+        assert_eq!(callbacks_unknown(uid, HostEvent::LeftClick, p, OFF).len(), 3, "down, up, NIN_SELECT");
+        assert_eq!(callbacks_unknown(uid, HostEvent::DoubleClick, p, OFF)[0].lparam, e::WM_LBUTTONDBLCLK as isize);
+        // everything else is what version 0 gets, and nothing more
+        for ev in [HostEvent::MiddleClick, HostEvent::HoverIn, HostEvent::HoverMove, HostEvent::HoverOut, HostEvent::BalloonShown, HostEvent::BalloonClicked] {
+            assert_eq!(callbacks_unknown(uid, ev, p, RICH), callbacks(IconRef { uid, version: V0 }, ev, p, RICH), "{ev:?}");
+        }
+        // with id 0 the last message is the bare event in lParam: what Explorer sends a version 3 program
+        let zero = callbacks_unknown(0, HostEvent::RightClick, p, OFF);
+        assert_eq!(zero[2].lparam, e::WM_CONTEXTMENU as isize);
     }
 
     #[test]

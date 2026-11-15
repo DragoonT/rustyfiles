@@ -179,7 +179,19 @@ impl OwnerSend for Win32Owners {
     }
 
     fn send_notify(&self, hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> bool {
-        unsafe { SendNotifyMessageW(hwnd_of(hwnd), msg, WPARAM(wparam), LPARAM(lparam)) }.is_ok()
+        match unsafe { SendNotifyMessageW(hwnd_of(hwnd), msg, WPARAM(wparam), LPARAM(lparam)) } {
+            Ok(()) => true,
+            Err(e) => {
+                // Said once, with Windows' reason and no name: a report of "the icon does nothing" then has a line to go by (access
+                // denied is a program that runs as administrator and does not let the message in). Once, because the pointer
+                // moving over such an icon sends a message at every move.
+                static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+                if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                    log::warn!("tray host: a message for an icon's program could not be sent (said once in a run): {e}");
+                }
+                false
+            }
+        }
     }
 }
 
@@ -708,7 +720,11 @@ fn host_thread(cfg: &TrayHostConfig, shared: Arc<Shared>, hs: &Handshake, ready:
     TASKBAR_CREATED.with(|c| c.set(tc));
     let exe = std::env::current_exe().ok().and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned())).unwrap_or_else(|| "rustyfiles.exe".into());
     let relay = RelayCore::new(Win32Finder, Win32Sender { timeout_ms: FORWARD_TIMEOUT_MS }, SelfIdentity { hwnd: 0, pid: std::process::id(), exe });
-    let core_cfg = CoreConfig { log_only: cfg.log_only, rect_packing: if cfg.log_only { None } else { cfg.rect_packing } };
+    let core_cfg = CoreConfig {
+        log_only: cfg.log_only,
+        rect_packing: if cfg.log_only { None } else { cfg.rect_packing },
+        answer_first_add_as_explorer: std::env::var("RUSTYFILES_TRAY_ANSWER_AS_EXPLORER").is_ok_and(|v| v.trim() == "1"),
+    };
     let core = Rc::new(Core::new(shared, core_cfg, Box::new(relay), Box::new(Win32Pixels), Arc::new(Win32Owners), Box::new(SystemClock)));
     // the procedure needs the core and the lifecycle BEFORE the window exists (messages arrive during creation)
     CORE.with(|c| *c.borrow_mut() = Some(core.clone()));

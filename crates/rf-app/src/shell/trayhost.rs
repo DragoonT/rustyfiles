@@ -23,7 +23,8 @@
 //! (do not ask programs to add their icons again when the host starts: no message of ours reaches any program at start, the model
 //! fills only from what programs send by themselves); `RUSTYFILES_TRAY_RECT_PACKING=axes|corners` (answer `Shell_NotifyIconGetRect`
 //! from the interface's rectangles with that packing; unset, Explorer answers those queries); `RUSTYFILES_TRAY_VISIBLE=1` (make the
-//! window visible as a click-through, almost transparent rectangle).
+//! window visible as a click-through, almost transparent rectangle); `RUSTYFILES_TRAY_ANSWER_AS_EXPLORER=1` (a comparison run: a
+//! program's first add that Explorer refuses is answered no, as until 0.8.0; see `rf_win::trayhost::core::CoreConfig`).
 
 use std::time::{Duration, Instant};
 
