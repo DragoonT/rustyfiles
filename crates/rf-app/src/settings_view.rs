@@ -3075,7 +3075,8 @@ mod search_tests {
                     let entries = crate::dock_page::entries();
                     // (the weather-from-position card stands right after the weather city's row, inside the page, and notes its texts too)
                     // (and the card of the right island's own buttons, at the end of the right island's section: one more)
-                    let extra = crate::dock::weather_card::cards(&p, &s).len() + 1;
+                    // (and the card of what our control centre shows, right under that switch: one more)
+                    let extra = crate::dock::weather_card::cards(&p, &s).len() + 2;
                     assert_eq!(noted.len(), entries.len() + extra, "one card per entry, none dropped and none twice");
                     assert_eq!(noted.last().map(|f| f.title.as_str()), Some("Durum simgeleri"), "the buttons' card closes the page");
                     for e in &entries {

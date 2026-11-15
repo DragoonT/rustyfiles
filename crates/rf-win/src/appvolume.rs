@@ -272,9 +272,109 @@ pub fn nudge(app_windows: &[isize], all_windows: &[isize], notches: i32) -> Opti
     Some(next)
 }
 
+// ------------------------------------------------------------------ the mixer: every program that plays, by name
+
+/// One program in the mixer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MixerApp {
+    /// The program's name (its file's, without ".exe"): what its row is found by again.
+    pub name: String,
+    pub level: Level,
+}
+
+/// A program's name in the mixer, from the file of the process that plays ("C:\...\chrome.exe": "chrome"); a process whose file
+/// cannot be asked (a protected one) is named by its number.
+pub fn mixer_name(exe: Option<&std::path::Path>, pid: u32) -> String {
+    exe.and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| format!("#{pid}"))
+}
+
+/// The mixer's rows from the sessions' names and levels: a program once, however many processes and sessions it plays through (a
+/// browser plays from helper processes that carry its file's name), with the level `combined` gives them; by name.
+pub fn mixer_rows(sessions: Vec<(String, Level)>) -> Vec<MixerApp> {
+    let mut by_name: Vec<(String, Vec<Level>)> = Vec::new();
+    for (name, level) in sessions {
+        match by_name.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, levels)) => levels.push(level),
+            None => by_name.push((name, vec![level])),
+        }
+    }
+    let mut out: Vec<MixerApp> = by_name.into_iter().filter_map(|(name, levels)| combined(&levels).map(|level| MixerApp { name, level })).collect();
+    out.sort_by_key(|a| a.name.to_lowercase());
+    out
+}
+
+fn named_sessions() -> Vec<(String, Session)> {
+    sessions().into_iter().map(|s| (mixer_name(crate::tasklist::process_exe_path(s.pid).as_deref(), s.pid), s)).collect()
+}
+
+/// The programs that have a sound session now (the system's own sounds are not a program's). Reads only; blocks a few ms.
+pub fn mixer() -> Vec<MixerApp> {
+    mixer_rows(named_sessions().iter().filter_map(|(name, s)| level_of(s).map(|l| (name.clone(), l))).collect())
+}
+
+fn apply_mixer_level(name: &str, volume: f32) {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+    let volume = volume.clamp(0.0, 1.0);
+    for (_, s) in named_sessions().iter().filter(|(n, _)| n == name) {
+        // SAFETY: plain setters; a session that ended meanwhile refuses, which changes nothing.
+        unsafe {
+            let _ = s.volume.SetMasterVolume(volume, std::ptr::null());
+            // (a level above nothing takes the mute off, as turning the wheel up does)
+            if volume > 0.0 {
+                let _ = s.volume.SetMute(false, std::ptr::null());
+            }
+        }
+    }
+}
+
+/// The user dragged a program's slider in the mixer: every session of that program gets the level. Returns at once: a thread of its
+/// own applies the NEWEST level asked for each program (a drag asks for one at every pixel).
+pub fn set_mixer_level(name: &str, volume: f32) {
+    static QUEUE: std::sync::OnceLock<std::sync::mpsc::Sender<(String, f32)>> = std::sync::OnceLock::new();
+    let tx = QUEUE.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<(String, f32)>();
+        let spawned = std::thread::Builder::new().name("rf-mixer".into()).spawn(move || {
+            while let Ok(first) = rx.recv() {
+                let mut latest: HashMap<String, f32> = HashMap::from([first]);
+                while let Ok((name, v)) = rx.try_recv() {
+                    latest.insert(name, v);
+                }
+                for (name, v) in latest {
+                    apply_mixer_level(&name, v);
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            log::warn!("mixer: the thread did not start: {e}");
+        }
+        tx
+    });
+    let _ = tx.send((name.to_string(), volume));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mixer_names_a_program_by_its_file_and_lists_it_once() {
+        use std::path::Path;
+        assert_eq!(mixer_name(Some(Path::new(r"C:\Program Files\Google\Chrome\Application\chrome.exe")), 7), "chrome");
+        assert_eq!(mixer_name(Some(Path::new(r"D:\Oyun\Forza Horizon.exe")), 7), "Forza Horizon");
+        assert_eq!(mixer_name(None, 4812), "#4812");
+        let l = |percent: i32, muted: bool| Level { volume: percent as f32 / 100.0, muted };
+        let rows = mixer_rows(vec![("Spotify".into(), l(80, false)), ("chrome".into(), l(40, false)), ("chrome".into(), l(40, false)), ("discord".into(), l(100, true))]);
+        let shown: Vec<(&str, i32, bool)> = rows.iter().map(|a| (a.name.as_str(), a.level.percent(), a.level.muted)).collect();
+        assert_eq!(shown, [("chrome", 40, false), ("discord", 100, true), ("Spotify", 80, false)]);
+        assert!(mixer_rows(Vec::new()).is_empty());
+    }
+
+    /// On the PC it is run on, by hand: how many programs play now (not which). Reads only.
+    #[test]
+    #[ignore = "reads the sound sessions of the PC it runs on; run by hand"]
+    fn what_this_pc_plays() {
+        println!("programs in the mixer: {}", mixer().len());
+    }
 
     fn at(percent: i32) -> Level {
         Level { volume: percent as f32 / 100.0, muted: false }

@@ -30,8 +30,10 @@ pub mod bluetooth;
 pub mod brightness;
 pub mod media;
 pub mod network;
+pub mod inuse;
 pub mod power;
 pub mod radio;
+pub mod toggles;
 pub mod wifi;
 
 use std::sync::Arc;

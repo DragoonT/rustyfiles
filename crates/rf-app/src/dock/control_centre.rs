@@ -14,6 +14,14 @@
 //!    (`rf_win::sysstatus::audio::set_default_output`, which says how); the list ends with a link to Windows' sound settings. A
 //!    right click on the island's volume symbol opens the panel with this list open ([`ask_devices`]).
 //!
+//! AND, since the user asked what the panel still lacked beside Windows' quick settings and macOS's Control Centre and then for all
+//! of it ("hepsini ekleyelim. ama isteyen orayı minimalize edebilsin de."): a line at the top that says which programs are using
+//! the microphone or the camera now (`rf_win::sysstatus::inuse`; nothing while nobody is); a row of QUICK BUTTONS under the tiles
+//! (`cc_model::Quick`: dark mode, keep awake and the power mode switch something themselves, the others open the page or panel of
+//! Windows that does); a MICROPHONE card under the sound card (level, mute, and a list of the input devices that opens out like
+//! the outputs'). EVERY PART CAN BE HIDDEN (Settings > Dock, `dock_cc_hidden`; the button with the sliders in the bottom row
+//! leads there), so the panel can be as small as one card.
+//!
 //! A DETAIL TAKES THE PLACE of other cards, it does not make the panel taller (`cc_model::layout` says which and why): the
 //! outputs open out upwards from the sound card over the tiles and the media card, a tile's list downwards over the media, sound
 //! and brightness cards. One is open at a time; the button that opened it closes it. IT GROWS: the card comes out of the edge
@@ -53,15 +61,17 @@ use rf_win::dock::panel::{self as geo, CloseCause, PanelId};
 use rf_win::sysstatus::Subscription;
 use rf_win::sysstatus::audio;
 use rf_win::sysstatus::bluetooth::{self, BluetoothSnapshot};
-use rf_win::sysstatus::brightness::{self, Brightness, BrightnessSnapshot};
+use rf_win::sysstatus::brightness::{self, BrightnessSnapshot};
 use rf_win::sysstatus::media::{self, Artwork, Media, MediaSnapshot, Transport};
+use rf_win::sysstatus::inuse::{self, InUse};
 use rf_win::sysstatus::network::{self, Link};
 use rf_win::sysstatus::power::{self, BatterySnapshot};
 use rf_win::sysstatus::radio::{self, Kind as RadioKind, Power as RadioPower};
+use rf_win::sysstatus::toggles::{self, PowerMode};
 use rf_win::sysstatus::wifi::{self, Listing, WifiSnapshot};
 
 use super::backdrop::IslandGlass;
-use super::cc_model::{self, Area, Detail, Section, Shown, Tile, Unfold, Words};
+use super::cc_model::{self, Area, Detail, Quick, QuickState, Section, Shown, Tile, Unfold, Words};
 use super::look::Palette;
 use super::sysstate::{self, SysState};
 use crate::glass_watch::{self, PopupGlass};
@@ -70,7 +80,16 @@ use crate::theme::Palette as ThemePalette;
 
 /// The two sliders' ids (for the drag).
 const SL_VOLUME: usize = 0;
-const SL_BRIGHTNESS: usize = 1;
+const SL_MIC: usize = 2;
+/// The brightness sliders: this plus the display's place in the list (the primary one is 0).
+const SL_SCREEN: usize = 50;
+/// The mixer's sliders: this plus the program's place in the list.
+const SL_APP: usize = 100;
+/// A mixer row: the program's name, then its slider.
+const MIXER_NAME_W: f32 = 104.0;
+const MIXER_SLIDER_W: f32 = 184.0;
+/// How often the line about the microphone and the camera is read again while the panel is open.
+const IN_USE_POLL: Duration = Duration::from_secs(3);
 /// The corner radius of a card, logical px (the window's own corners are the system's 8; a card sits 12 px inside them).
 const CARD_R: f32 = 12.0;
 /// How often the Wi-Fi bars are read again while the panel is open (Windows has no event for a signal that only changes).
@@ -81,6 +100,12 @@ const WIFI_POLL: Duration = Duration::from_secs(5);
 fn without(part: &str) -> bool {
     static NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     NAMES.get_or_init(|| std::env::var("RUSTYFILES_CC_WITHOUT").map(|v| v.split(',').map(|s| s.trim().to_lowercase()).collect()).unwrap_or_default()).iter().any(|p| p == part)
+}
+
+/// Whether a part of the panel is hidden: by the user (Settings > Dock: `dock_cc_hidden`, the names of `cc_model::PARTS` and of the
+/// quick buttons), or by the developer's switch above.
+fn hidden(part: &str, cx: &App) -> bool {
+    without(part) || cx.try_global::<crate::settings::Settings>().is_some_and(|s| s.dock_cc_hidden.iter().any(|h| h == part))
 }
 
 /// How long a network's row says "connecting" after it was chosen, when Windows never says it is connected.
@@ -99,19 +124,25 @@ type RowClick = Rc<dyn Fn(&mut CcView, &mut Window, &mut Context<CcView>)>;
 /// What the live sources tell the view.
 enum Ev {
     Media(MediaSnapshot),
+    Mic(audio::AudioSnapshot),
+    /// The programs that play now, with their levels (read while the list of outputs is out).
+    Mixer(Vec<rf_win::appvolume::MixerApp>),
+    /// What was read off the interface's thread: who uses the microphone and the camera, Windows' dark mode, the power mode.
+    Seen(InUse, bool, Option<PowerMode>),
     Wifi(WifiSnapshot),
     Bluetooth(BluetoothSnapshot),
     Battery(BatterySnapshot),
-    Brightness(BrightnessSnapshot),
+    Brightness(Vec<BrightnessSnapshot>),
 }
 
 /// The sources that run while the panel is open. Dropping it stops them.
 struct Live {
     media: Media,
+    _mic: Subscription,
     wifi: wifi::Wifi,
     _bluetooth: Subscription,
     _battery: Option<Subscription>,
-    brightness: Brightness,
+    brightness: brightness::Screens,
 }
 
 #[derive(Clone)]
@@ -143,10 +174,17 @@ pub struct CcView {
 
     // what the live sources last said
     media: Option<MediaSnapshot>,
+    /// The default input device (the microphone), as the sound card's snapshot is the default output's.
+    mic: Option<audio::AudioSnapshot>,
+    in_use: InUse,
+    /// Windows' dark mode and power mode as last read (a press on their buttons changes them here at once).
+    dark: bool,
+    power: Option<PowerMode>,
     wifi: Option<WifiSnapshot>,
     bluetooth: Option<BluetoothSnapshot>,
     battery: Option<BatterySnapshot>,
-    brightness: Option<BrightnessSnapshot>,
+    /// Every display's brightness, the primary one first (one that does not answer DDC/CI is there too, without a row).
+    brightness: Vec<BrightnessSnapshot>,
     /// The decoded artwork turned into a picture GPUI draws, and the number of the artwork it is from.
     art: Option<(u64, Arc<RenderImage>)>,
     live: Option<Live>,
@@ -170,6 +208,13 @@ pub struct CcView {
     drag: Option<usize>,
     /// The volume the slider shows while the user drags it and until Windows has answered (the snapshot may lag a moment).
     vol_drag: Option<f32>,
+    /// The same two for the microphone: its level while dragged, and what the last click on it asked for.
+    mic_drag: Option<f32>,
+    mic_mute_ask: Option<(bool, Instant)>,
+    /// The mixer: the programs that play now, and the level a row shows while its slider is dragged (the list is read again only
+    /// every few seconds).
+    mixer: Vec<rf_win::appvolume::MixerApp>,
+    mixer_drag: Option<(String, f32)>,
     /// The height last given to the window (logical px).
     reported: f32,
     _subs: Vec<Subscription2>,
@@ -225,10 +270,14 @@ impl CcView {
             stops: RefCell::new(HashMap::new()),
             mute_ask: None,
             media: None,
+            mic: None,
+            in_use: InUse::default(),
+            dark: false,
+            power: None,
             wifi: None,
             bluetooth: None,
             battery: None,
-            brightness: None,
+            brightness: Vec::new(),
             art: None,
             live: None,
             _tasks: Vec::new(),
@@ -241,6 +290,10 @@ impl CcView {
             joining: None,
             drag: None,
             vol_drag: None,
+            mic_drag: None,
+            mic_mute_ask: None,
+            mixer: Vec::new(),
+            mixer_drag: None,
             reported: 0.0,
             _subs: subs,
         }
@@ -255,6 +308,7 @@ impl CcView {
         // (asked for from outside: it is there, it does not open out)
         self.detail = Some(Detail::Outputs);
         self.unfold = Unfold::open();
+        self.read_mixer(cx);
         true
     }
 
@@ -267,10 +321,19 @@ impl CcView {
 
     /// The tiles this machine gets now (`cc_model::tiles`).
     fn tiles_now(&self, cx: &App) -> Vec<Tile> {
-        let net = sysstate::network(cx).filter(|_| !without("network"));
-        let wifi = self.wifi.as_ref().filter(|_| !without("wifi"));
-        let bt = self.bluetooth.as_ref().filter(|_| !without("bluetooth"));
-        cc_model::tiles(net.as_ref(), wifi, bt, self.battery.as_ref())
+        let net = sysstate::network(cx).filter(|_| !hidden("network", cx));
+        let wifi = self.wifi.as_ref().filter(|_| !hidden("wifi", cx));
+        let bt = self.bluetooth.as_ref().filter(|_| !hidden("bluetooth", cx));
+        cc_model::tiles(net.as_ref(), wifi, bt, self.battery.as_ref().filter(|_| !hidden("battery", cx)))
+    }
+
+    fn quick_state(&self) -> QuickState {
+        QuickState { dark: self.dark, awake: toggles::is_awake(), power: self.power }
+    }
+
+    /// The quick buttons the row shows now (`cc_model::quick_buttons`).
+    fn quick_now(&self, cx: &App) -> Vec<Quick> {
+        cc_model::quick_buttons(&|key| hidden(key, cx), &self.quick_state())
     }
 
     fn shown_now(&self, cx: &App) -> Shown {
@@ -279,11 +342,18 @@ impl CcView {
         let tiles = self.tiles_now(cx).len();
         let (wifi, bt) = (self.wifi_now(), self.bt_now());
         Shown {
+            in_use: self.in_use.any() && !hidden("inuse", cx),
+            quick: !self.quick_now(cx).is_empty(),
+            mic: self.mic.as_ref().is_some_and(|m| m.available) && !hidden("mic", cx),
             tiles,
-            media: self.media.as_ref().is_some_and(|m| m.session.is_some()) && !without("media"),
-            sound: audio.as_ref().is_some_and(|a| a.available) && !without("sound"),
-            brightness: self.brightness.is_some_and(|b| b.available) && !without("brightness"),
-            detail: self.detail_now().map(|d| (d, cc_model::detail_rows(d, audio.as_ref(), wifi.as_ref(), bt.as_ref(), net.as_ref()))),
+            media: self.media.as_ref().is_some_and(|m| m.session.is_some()) && !hidden("media", cx),
+            sound: audio.as_ref().is_some_and(|a| a.available) && !hidden("sound", cx),
+            brightness: if hidden("brightness", cx) { 0 } else { self.brightness.iter().filter(|b| b.available).count() },
+            // (the mixer's rows and their head stand in the outputs' list, after the devices)
+            detail: self.detail_now().map(|d| {
+                let mixer = if d == Detail::Outputs && !self.mixer.is_empty() { self.mixer.len() + 1 } else { 0 };
+                (d, cc_model::detail_rows(d, audio.as_ref(), self.mic.as_ref(), wifi.as_ref(), bt.as_ref(), net.as_ref()) + mixer)
+            }),
         }
     }
 
@@ -301,7 +371,8 @@ impl CcView {
     fn drop_orphan_detail(&mut self, cx: &App) {
         let Some(d) = self.detail else { return };
         let owned = match d {
-            Detail::Outputs => sysstate::audio(cx).is_some_and(|a| a.available) && !without("sound"),
+            Detail::Outputs => sysstate::audio(cx).is_some_and(|a| a.available) && !hidden("sound", cx),
+            Detail::Inputs => self.mic.as_ref().is_some_and(|m| m.available) && !hidden("mic", cx),
             _ => self.tiles_now(cx).into_iter().any(|t| cc_model::detail_of(t) == Some(d)),
         };
         if !owned {
@@ -364,6 +435,8 @@ impl CcView {
         self.drag = None;
         self.vol_drag = None;
         self.mute_ask = None;
+        self.mic_drag = None;
+        self.mic_mute_ask = None;
         self.reported = self.height(cx);
         self.start_live(cx);
         cx.notify();
@@ -457,9 +530,22 @@ impl CcView {
         {
             live.wifi.scan();
         }
+        // and the mixer is read when the outputs open out
+        if self.is_open(Detail::Outputs) {
+            self.read_mixer(cx);
+        }
         self.run_unfold(cx);
         self.refit(cx);
         cx.notify();
+    }
+
+    /// Reads the mixer off this thread (the audio service is asked across processes) and takes it when it has come.
+    fn read_mixer(&self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let mixer = cx.background_executor().spawn(async { rf_win::appvolume::mixer() }).await;
+            let _ = this.update(cx, |me, cx| me.apply(Ev::Mixer(mixer), cx));
+        })
+        .detach();
     }
 
     /// Draws the frames of the detail's motion until it has come to rest (about 7 ms apart: every frame of a fast display), and
@@ -544,6 +630,10 @@ impl CcView {
     /// and the 5 s look at the Wi-Fi bars.
     fn start_live(&mut self, cx: &mut Context<Self>) {
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<Ev>();
+        let t_mic = tx.clone();
+        let mic = audio::subscribe_input(move |s| {
+            let _ = t_mic.unbounded_send(Ev::Mic(s.clone()));
+        });
         let (t_media, t_wifi, t_bt, t_bat, t_br) = (tx.clone(), tx.clone(), tx.clone(), tx.clone(), tx);
         let wifi = wifi::subscribe(move |s| {
             let _ = t_wifi.unbounded_send(Ev::Wifi(s.clone()));
@@ -562,10 +652,10 @@ impl CcView {
                 let _ = t_bat.unbounded_send(Ev::Battery(b));
             })
         });
-        let brightness = brightness::open(move |b| {
-            let _ = t_br.unbounded_send(Ev::Brightness(*b));
+        let brightness = brightness::open_all(move |list| {
+            let _ = t_br.unbounded_send(Ev::Brightness(list.to_vec()));
         });
-        self.live = Some(Live { media, wifi, _bluetooth: bluetooth, _battery: battery, brightness });
+        self.live = Some(Live { media, _mic: mic, wifi, _bluetooth: bluetooth, _battery: battery, brightness });
         network::refresh();
         let events = cx.spawn(async move |this, cx| {
             while let Some(ev) = rx.next().await {
@@ -583,7 +673,47 @@ impl CcView {
                 }
             }
         });
-        self._tasks = vec![events, poll];
+        // who uses the microphone and the camera, Windows' dark mode and the power mode: read off this thread now, and the first
+        // of them again every few seconds while the panel is open
+        let seen = cx.spawn(async move |this, cx| {
+            loop {
+                let read = cx.background_executor().spawn(async { (inuse::read(), toggles::is_dark(), toggles::power_mode()) }).await;
+                if this.update(cx, |me, cx| me.apply(Ev::Seen(read.0, read.1, read.2), cx)).is_err() {
+                    break;
+                }
+                cx.background_executor().timer(IN_USE_POLL).await;
+                // (the mixer too, while the list of outputs is out: a program that began to play gets its row)
+                let Ok(shown) = this.update(cx, |me, cx| {
+                    if me.shown && me.is_open(Detail::Outputs) {
+                        me.read_mixer(cx);
+                    }
+                    me.shown
+                }) else {
+                    break;
+                };
+                if !shown {
+                    break;
+                }
+            }
+        });
+        // the track's time and its line move on while it plays: one look a second, and only then
+        let tick = cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let Ok(shown) = this.update(cx, |me, cx| {
+                    if me.shown && me.media.as_ref().is_some_and(|m| m.timeline.is_some() && m.session.as_ref().is_some_and(|s| s.playing)) {
+                        cx.notify();
+                    }
+                    me.shown
+                }) else {
+                    break;
+                };
+                if !shown {
+                    break;
+                }
+            }
+        });
+        self._tasks = vec![events, poll, seen, tick];
     }
 
     fn apply(&mut self, ev: Ev, cx: &mut Context<Self>) {
@@ -599,6 +729,24 @@ impl CcView {
                     _ => {}
                 }
                 self.media = Some(m);
+            }
+            Ev::Mic(m) => {
+                if self.drag != Some(SL_MIC) {
+                    self.mic_drag = None;
+                }
+                self.mic = Some(m);
+            }
+            Ev::Mixer(mixer) => {
+                // (a level being dragged is not taken back by an older reading)
+                if !self.drag.is_some_and(|d| d >= SL_APP) {
+                    self.mixer_drag = None;
+                    self.mixer = mixer;
+                }
+            }
+            Ev::Seen(using, dark, power) => {
+                self.in_use = using;
+                self.dark = dark;
+                self.power = power;
             }
             // (Windows has said what was pressed for: the pressed state has done its work)
             Ev::Wifi(w) => {
@@ -620,9 +768,16 @@ impl CcView {
             // a value the user has just dragged to is not taken back by the monitor's old answer
             // (DDC/CI misses a transfer now and then even after the retries: a monitor that answered before and does not now keeps its
             // row rather than losing it for one opening)
-            Ev::Brightness(b) => {
-                if self.drag != Some(SL_BRIGHTNESS) && (b.available || !self.brightness.is_some_and(|old| old.available)) {
-                    self.brightness = Some(b);
+            Ev::Brightness(list) => {
+                for (i, b) in list.into_iter().enumerate() {
+                    let old = self.brightness.get(i).copied();
+                    if self.drag != Some(SL_SCREEN + i) && (b.available || !old.is_some_and(|o| o.available)) {
+                        if i < self.brightness.len() {
+                            self.brightness[i] = b;
+                        } else {
+                            self.brightness.push(b);
+                        }
+                    }
                 }
             }
         }
@@ -641,6 +796,66 @@ impl CcView {
         self.closing = true;
         open_uri(uri);
         cx.defer(|cx| super::panel::close(CloseCause::Chosen, cx));
+    }
+
+    /// A press on a quick button: the three that switch something do it (and show it at once); the others open their page or
+    /// panel of Windows, and the panel goes.
+    fn press_quick(&mut self, q: Quick, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        match q {
+            Quick::Dark => {
+                self.dark = !self.dark;
+                toggles::set_dark(self.dark);
+            }
+            Quick::Awake => toggles::set_awake(!toggles::is_awake()),
+            Quick::Power => {
+                if let Some(next) = self.power.map(toggles::next_mode)
+                    && toggles::set_power_mode(next)
+                {
+                    self.power = Some(next);
+                }
+            }
+            // (Windows' own "project" panel is a program of Windows: started, and ours gets out of its way)
+            Quick::Project => {
+                self.closing = true;
+                std::thread::spawn(|| {
+                    if let Err(e) = std::process::Command::new("DisplaySwitch.exe").spawn() {
+                        log::warn!("control centre: Windows' project panel did not start: {e}");
+                    }
+                });
+                cx.defer(|cx| super::panel::close(CloseCause::Chosen, cx));
+                return;
+            }
+            Quick::NightLight | Quick::Focus | Quick::Airplane | Quick::Cast => {
+                if let Some(page) = q.page() {
+                    self.open_settings(page, cx);
+                }
+                return;
+            }
+        }
+        cx.notify();
+    }
+
+    /// The button with the sliders: Settings > Dock, where the panel's parts are shown and hidden. The panel goes.
+    fn open_edit(&mut self, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        self.closing = true;
+        super::actions::run_rustyfiles(vec!["--settings=dock".to_string()]);
+        cx.defer(|cx| super::panel::close(CloseCause::Chosen, cx));
+    }
+
+    /// A click on an input device of the list: it becomes Windows' default input (see `choose_output`).
+    fn choose_input(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        audio::set_default_input(id);
+        let stop = self.stop("cc-inputs", 0, cx);
+        window.focus(&stop, cx);
     }
 
     /// Puts the panel away and starts the screen snip once it is gone (the panel eases out in about 120 ms and must not be in the picture).
@@ -670,12 +885,28 @@ impl CcView {
                     }
                 }
             }
-            SL_BRIGHTNESS => {
-                if let (Some(b), Some(live)) = (self.brightness.as_mut(), self.live.as_ref()) {
+            app if app >= SL_APP => {
+                if let Some(name) = self.mixer.get(app - SL_APP).map(|a| a.name.clone()) {
+                    let level = fraction.clamp(0.0, 1.0);
+                    rf_win::appvolume::set_mixer_level(&name, level);
+                    self.mixer_drag = Some((name, level));
+                }
+            }
+            SL_MIC => {
+                let steps = self.mic.as_ref().map_or(0, |a| a.steps);
+                let v = audio::slider_to_volume(fraction, steps);
+                if self.mic_drag != Some(v) {
+                    self.mic_drag = Some(v);
+                    audio::set_input_volume(fraction);
+                }
+            }
+            screen if (SL_SCREEN..SL_APP).contains(&screen) => {
+                let index = screen - SL_SCREEN;
+                if let (Some(b), Some(live)) = (self.brightness.get_mut(index), self.live.as_ref()) {
                     let raw = b.value_at(fraction);
                     if raw != b.value {
                         b.value = raw;
-                        live.brightness.set(raw);
+                        live.brightness.set(index, raw);
                     }
                 }
             }
@@ -691,8 +922,17 @@ impl CcView {
                 let a = sysstate::audio(cx)?;
                 Some((audio::volume_to_slider(self.vol_drag.unwrap_or(a.volume)), cc_model::slider_parts(a.steps)))
             }
-            SL_BRIGHTNESS => self.brightness.filter(|b| b.available).map(|b| (b.fraction(), 20)),
+            SL_MIC => self.mic.as_ref().map(|a| (audio::volume_to_slider(self.mic_drag.unwrap_or(a.volume)), cc_model::slider_parts(a.steps))),
+            app if app >= SL_APP => self.mixer.get(app - SL_APP).map(|a| (self.mixer_level(a), 20)),
+            screen if (SL_SCREEN..SL_APP).contains(&screen) => self.brightness.get(screen - SL_SCREEN).filter(|b| b.available).map(|b| (b.fraction(), 20)),
             _ => None,
+        }
+    }
+
+    /// A click on the source's line: the card turns to the next program that plays.
+    fn next_source(&self) {
+        if let Some(live) = &self.live {
+            live.media.next_source();
         }
     }
 
@@ -821,9 +1061,38 @@ impl CcView {
     }
 
     fn render_media(&self, look: &Look, words: Words, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let s = self.media.as_ref()?.session.as_ref()?;
+        let media = self.media.as_ref()?;
+        let s = media.session.as_ref()?;
         let (app, title, artist) = cc_model::media_lines(s, words);
         let secondary = look.pal.text_secondary().hsla();
+        let now = Instant::now();
+        // more than one program plays: the first line says which this is, and a click on it turns to the next
+        let several = media.sources > 1;
+        let source = div().id("cc-source").truncate().text_xs().text_color(secondary).child(cc_model::media_source_line(&app, media.source, media.sources)).when(several, |d| {
+            let (stop, ring, hover) = (self.stop("cc-source", 0, cx), look.accent, look.pal.text().hsla());
+            d.cursor_pointer()
+                .track_focus(&stop)
+                .rounded(px(4.))
+                .border_1()
+                .border_color(transparent_black())
+                .focus_visible(move |s| s.border_color(ring))
+                .hover(move |s| s.text_color(hover))
+                .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Sonraki kaynak")).build(w, cx))
+                .on_click(cx.listener(|this, _, _, _| this.next_source()))
+        });
+        let time = media.timeline.map(|t| cc_model::media_time(&t, s.playing, now));
+        let progress = media.timeline.map(|t| {
+            let (track, fill) = (look.pal.hover_fill().hsla(), look.accent);
+            div()
+                .absolute()
+                .left(px(12.))
+                .right(px(12.))
+                .bottom(px(5.))
+                .h(px(3.))
+                .rounded_full()
+                .bg(track)
+                .child(div().h_full().w(relative(t.fraction_at(now, s.playing).clamp(0.0, 1.0))).rounded_full().bg(fill))
+        });
         let art = match &self.art {
             Some((_, img)) => gpui_kit::img(img.clone()).size(px(56.)).rounded(px(10.)).into_any_element(),
             None => div()
@@ -858,20 +1127,29 @@ impl CcView {
         };
         Some(
             self.card(look)
+                .relative()
                 .h(px(cc_model::MEDIA_H))
                 .flex()
                 .items_center()
                 .px(px(12.))
                 .gap(px(12.))
+                .children(progress)
                 .child(art)
                 .child(
                     v_flex()
                         .flex_1()
                         .min_w_0()
                         .gap(px(1.))
-                        .child(div().truncate().text_xs().text_color(secondary).child(app))
+                        .child(source)
                         .child(div().truncate().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
-                        .child(div().truncate().text_xs().text_color(secondary).child(artist)),
+                        .child(
+                            h_flex()
+                                .gap(px(6.))
+                                .text_xs()
+                                .text_color(secondary)
+                                .child(div().flex_1().min_w_0().truncate().child(artist))
+                                .children(time.map(|t| div().flex_shrink_0().child(t))),
+                        ),
                 )
                 .child(
                     h_flex()
@@ -886,19 +1164,29 @@ impl CcView {
 
     /// A liquid slider: the app's own control (`liquid::slider_parts`), driven by the pointer.
     fn slider(&self, which: usize, frac: f32, look: &Look, cx: &mut Context<Self>) -> AnyElement {
+        self.slider_of(which, frac, cc_model::SLIDER_W, look, cx)
+    }
+
+    /// The level a mixer row shows: the one being dragged to, else the program's own.
+    fn mixer_level(&self, app: &rf_win::appvolume::MixerApp) -> f32 {
+        self.mixer_drag.as_ref().filter(|(name, _)| *name == app.name).map_or(app.level.volume, |(_, v)| *v)
+    }
+
+    /// A slider `width` wide (the cards' are `SLIDER_W`; a mixer row's is narrower).
+    fn slider_of(&self, which: usize, frac: f32, width: f32, look: &Look, cx: &mut Context<Self>) -> AnyElement {
         let group: SharedString = format!("cc-slider-{which}").into();
         let dragging = self.drag == Some(which);
         let bounds = Rc::new(Cell::new(Bounds::<Pixels>::default()));
         let probe = bounds.clone();
         let (b_down, b_drag) = (bounds.clone(), bounds);
-        let (track, lane) = crate::liquid::slider_parts(which + 40, group.clone(), &look.theme, cc_model::SLIDER_W - 2.0 * crate::liquid::SL_BORDER, frac, dragging);
+        let (track, lane) = crate::liquid::slider_parts(which + 40, group.clone(), &look.theme, width - 2.0 * crate::liquid::SL_BORDER, frac, dragging);
         let focus = self.stop("cc-slider", which, cx);
         let ring = look.accent;
         div()
             .id(("cc-slider", which))
             .group(group)
             .relative()
-            .w(px(cc_model::SLIDER_W))
+            .w(px(width))
             .h(px(crate::liquid::SL_BOX_H))
             .flex_shrink_0()
             .cursor_pointer()
@@ -978,6 +1266,83 @@ impl CcView {
                 .child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).truncate().text_xs().text_color(secondary).child(cc_model::sound_device_text(&a, words)))
                 .into_any_element(),
         )
+    }
+
+    /// The line at the top while a program uses the microphone or the camera: which, and who.
+    fn render_in_use(&self, look: &Look, words: Words) -> AnyElement {
+        let icon = if self.in_use.microphone.is_empty() { L::Camera } else { L::Mic };
+        h_flex()
+            .h(px(cc_model::IN_USE_H))
+            .flex_shrink_0()
+            .px(px(6.))
+            .gap(px(6.))
+            .items_center()
+            .text_xs()
+            .text_color(look.pal.text_secondary().hsla())
+            .child(Icon::new(icon).size(px(12.)).flex_shrink_0().text_color(look.accent))
+            .child(div().truncate().child(cc_model::in_use_text(&self.in_use, words)))
+            .into_any_element()
+    }
+
+    /// The row of quick buttons: lit while the thing is on, each with its name under the pointer. Spread over the row while they
+    /// are many, side by side from the left while they are few.
+    fn render_quick(&self, look: &Look, words: Words, cx: &mut Context<Self>) -> AnyElement {
+        let (state, buttons) = (self.quick_state(), self.quick_now(cx));
+        let mut row = h_flex().h(px(cc_model::QUICK_H)).flex_shrink_0().items_center();
+        row = if buttons.len() >= 6 { row.justify_between() } else { row.gap(px(10.)) };
+        for q in buttons {
+            let stop = self.stop("cc-quick", q as usize, cx);
+            row = row.child(
+                self.round_button(("cc-quick", q as usize), q.icon(&state), cc_model::QUICK_H, q.lit(&state), look, (Some(&stop), Some(q.tip(&state, words))))
+                    .on_click(cx.listener(move |this, _, _, cx| this.press_quick(q, cx))),
+            );
+        }
+        row.into_any_element()
+    }
+
+    /// The microphone: as the sound card, for the default input device. Its chevron opens the list of inputs out.
+    fn render_mic(&self, look: &Look, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let a = self.mic.clone().filter(|a| a.available)?;
+        let secondary = look.pal.text_secondary().hsla();
+        let frac = audio::volume_to_slider(self.mic_drag.unwrap_or(a.volume));
+        let (mute_focus, list_focus) = (self.stop("cc-mic-mute", 0, cx), self.stop("cc-inputs", 0, cx));
+        let mute = self
+            .round_button("cc-mic-mute", if a.muted { L::MicOff } else { L::Mic }, 28.0, false, look, (Some(&mute_focus), Some(if a.muted { t!("Mikrofonu aç") } else { t!("Mikrofonu kapat") })))
+            .on_click(cx.listener(|this, _, _, cx| {
+                // (as the speaker's: the state this click flips is the one the previous click asked for while Windows has not answered)
+                let muted = this.mic.as_ref().is_some_and(|a| a.muted);
+                let pending = this.mic_mute_ask.map(|(v, at)| (v, at.elapsed().as_millis() as u64));
+                let want = cc_model::mute_target(muted, pending);
+                this.mic_mute_ask = Some((want, Instant::now()));
+                audio::set_input_muted(want);
+            }));
+        let open = self.is_open(Detail::Inputs);
+        let chevron = self
+            .round_button("cc-inputs", if open { L::ChevronDown } else { L::ChevronUp }, 28.0, false, look, (Some(&list_focus), Some(t!("Giriş aygıtları"))))
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_detail(Detail::Inputs, cx)));
+        let name = if a.device.trim().is_empty() { t!("Mikrofon").to_string() } else { a.device.clone() };
+        Some(
+            self.card(look)
+                .flex_shrink_0()
+                .px(px(12.))
+                .py(px(12.))
+                .child(h_flex().h(px(28.)).gap(px(8.)).items_center().child(mute).child(self.slider(SL_MIC, frac, look, cx)).child(chevron))
+                .child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).truncate().text_xs().text_color(secondary).child(name))
+                .into_any_element(),
+        )
+    }
+
+    /// The input devices: as the outputs (`detail_outputs`), for the microphone.
+    fn detail_inputs(&self, look: &Look, cx: &mut Context<Self>) -> (AnyElement, Vec<AnyElement>) {
+        let devices = self.mic.as_ref().map(|a| a.devices.clone()).unwrap_or_default();
+        let mut rows = Vec::new();
+        for (i, d) in devices.iter().enumerate() {
+            let id = d.id.clone();
+            let click: Option<RowClick> = (!d.default).then(|| Rc::new(move |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| this.choose_input(&id, window, cx)) as RowClick);
+            rows.push(self.detail_row(("cc-input", i), d.default.then_some(L::Check), d.name.clone(), None, None, look, click, cx));
+        }
+        rows.push(self.detail_link("cc-mic-settings", t!("Ses ayarları"), "ms-settings:sound", look, cx));
+        (self.detail_head(t!("Giriş aygıtları").to_string(), None, look, cx), rows)
     }
 
     /// A detail's head: its name, and a radio's switch at the right when it has one.
@@ -1060,6 +1425,24 @@ impl CcView {
             let click: Option<RowClick> = (!d.default).then(|| Rc::new(move |this: &mut Self, window: &mut Window, cx: &mut Context<Self>| this.choose_output(&id, window, cx)) as RowClick);
             rows.push(self.detail_row(("cc-device", i), d.default.then_some(L::Check), d.name.clone(), None, None, look, click, cx));
         }
+        // the mixer: every program that plays now, with a slider for its own level (Windows' volume mixer, here)
+        if !self.mixer.is_empty() {
+            rows.push(self.detail_line(t!("Uygulamalar"), look));
+            for (i, app) in self.mixer.iter().enumerate() {
+                rows.push(
+                    h_flex()
+                        .h(px(cc_model::DETAIL_ROW_H))
+                        .flex_shrink_0()
+                        .px(px(8.))
+                        .gap(px(8.))
+                        .items_center()
+                        .text_sm()
+                        .child(div().w(px(MIXER_NAME_W)).flex_shrink_0().truncate().child(app.name.clone()))
+                        .child(self.slider_of(SL_APP + i, self.mixer_level(app), MIXER_SLIDER_W, look, cx))
+                        .into_any_element(),
+                );
+            }
+        }
         rows.push(self.detail_link("cc-sound-settings", t!("Ses ayarları"), "ms-settings:sound", look, cx));
         (self.detail_head(t!("Çıkış aygıtları").to_string(), None, look, cx), rows)
     }
@@ -1132,10 +1515,13 @@ impl CcView {
     /// The elements of one section (a detail's card is not one of them: `render_area`).
     fn section(&self, s: Section, look: &Look, words: Words, cx: &mut Context<Self>) -> Vec<AnyElement> {
         match s {
+            Section::InUse => vec![self.render_in_use(look, words)],
             Section::Tiles(_) => self.render_tiles(look, words, cx),
+            Section::Quick => vec![self.render_quick(look, words, cx)],
             Section::Media => self.render_media(look, words, cx).into_iter().collect(),
             Section::Sound => self.render_sound(look, words, cx).into_iter().collect(),
-            Section::Brightness => self.render_brightness(look, cx).into_iter().collect(),
+            Section::Mic => self.render_mic(look, cx).into_iter().collect(),
+            Section::Brightness(_) => self.render_brightness(look, cx).into_iter().collect(),
             Section::Bottom => vec![self.render_bottom(look, cx)],
             Section::Detail(..) => Vec::new(),
         }
@@ -1171,6 +1557,7 @@ impl CcView {
     fn render_detail(&self, kind: Detail, height: f32, look: &Look, words: Words, cx: &mut Context<Self>) -> AnyElement {
         let (head, rows) = match kind {
             Detail::Outputs => self.detail_outputs(look, cx),
+            Detail::Inputs => self.detail_inputs(look, cx),
             Detail::Wifi => self.detail_wifi(look, cx),
             Detail::Bluetooth => self.detail_bluetooth(look, cx),
             Detail::Network => self.detail_network(look, words, cx),
@@ -1188,33 +1575,40 @@ impl CcView {
     }
 
     fn render_brightness(&self, look: &Look, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let b = self.brightness.filter(|b| b.available)?;
+        let screens: Vec<(usize, BrightnessSnapshot)> = self.brightness.iter().copied().enumerate().filter(|(_, b)| b.available).collect();
+        if screens.is_empty() {
+            return None;
+        }
         let secondary = look.pal.text_secondary().hsla();
-        Some(
-            self.card(look)
-                .px(px(12.))
-                .py(px(12.))
-                .child(
-                    h_flex()
-                        .h(px(28.))
-                        .gap(px(8.))
-                        .items_center()
-                        .child(div().size(px(28.)).flex_shrink_0().flex().items_center().justify_center().child(Icon::new(L::Sun).size(px(16.)).text_color(look.pal.text().hsla())))
-                        .child(self.slider(SL_BRIGHTNESS, b.fraction(), look, cx))
-                        .child(div().size(px(28.)).flex_shrink_0()),
-                )
-                .child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).text_xs().text_color(secondary).child(t!("Parlaklık")))
-                .into_any_element(),
-        )
+        let several = screens.len() > 1;
+        // a slider for each display that answers; with more than one, each is told by its number (the primary one is 1)
+        let mut rows = v_flex().gap(px(cc_model::BRIGHTNESS_MORE - 28.));
+        for (i, b) in screens {
+            rows = rows.child(
+                h_flex()
+                    .h(px(28.))
+                    .gap(px(8.))
+                    .items_center()
+                    .child(div().size(px(28.)).flex_shrink_0().flex().items_center().justify_center().child(Icon::new(L::Sun).size(px(16.)).text_color(look.pal.text().hsla())))
+                    .child(self.slider(SL_SCREEN + i, b.fraction(), look, cx))
+                    .child(div().size(px(28.)).flex_shrink_0().flex().items_center().justify_center().text_xs().text_color(secondary).children(several.then(|| (i + 1).to_string()))),
+            );
+        }
+        Some(self.card(look).flex_shrink_0().px(px(12.)).py(px(12.)).child(rows).child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).text_xs().text_color(secondary).child(t!("Parlaklık"))).into_any_element())
     }
 
     fn render_bottom(&self, look: &Look, cx: &mut Context<Self>) -> AnyElement {
         let focus = self.stop("cc-gear", 0, cx);
         let snip_focus = self.stop("cc-snip", 0, cx);
+        let edit_focus = self.stop("cc-edit", 0, cx);
         h_flex()
             .h(px(cc_model::BOTTOM_H))
             .flex_shrink_0()
             .justify_end()
+            .child(
+                self.round_button("cc-edit", L::SlidersHorizontal, cc_model::BOTTOM_H, false, look, (Some(&edit_focus), Some(t!("Paneli düzenle"))))
+                    .on_click(cx.listener(|this, _, _, cx| this.open_edit(cx))),
+            )
             .child(
                 self.round_button("cc-snip", L::Scissors, cc_model::BOTTOM_H, false, look, (Some(&snip_focus), Some(t!("Ekran alıntısı"))))
                     .on_click(cx.listener(|this, _, _, cx| this.start_snip(cx))),

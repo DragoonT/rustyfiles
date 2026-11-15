@@ -576,6 +576,9 @@ pub struct Settings {
     /// The dock's network and volume symbols open our own control centre (on). Off: the old behaviour, they send Win+A (Windows' quick
     /// settings).
     pub dock_own_control_centre: bool,
+    /// The parts of our control centre the user hid (Settings > Dock): names of `dock::cc_model::PARTS` (a tile, a card, the row of
+    /// quick buttons) and of single quick buttons (`Quick::key`). Empty: everything the machine has is shown.
+    pub dock_cc_hidden: Vec<String>,
     /// The dock's clock opens our own calendar panel (on). Off: the old behaviour, it sends Win+N (Windows' notification centre and calendar).
     pub dock_own_calendar: bool,
     /// The dock's bell opens our own notification panel and wears a dot while there are notifications (on). Off: the old behaviour,
@@ -778,6 +781,7 @@ impl Default for Settings {
             dock_weather_location: false,
             dock_own_start: true,
             dock_own_control_centre: true,
+            dock_cc_hidden: Vec::new(),
             dock_own_calendar: true,
             dock_own_notifications: true,
             dock_status_order: Vec::new(),

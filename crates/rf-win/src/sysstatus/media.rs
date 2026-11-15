@@ -73,8 +73,49 @@ impl PartialEq for MediaSession {
 pub struct MediaSnapshot {
     /// The session manager could be had. False: this machine has no such service (the card is left out for good).
     pub available: bool,
-    /// The session the system calls current, if any.
+    /// The session the card shows: the one the user turned to with [`Media::next_source`], else the one the system calls current.
     pub session: Option<MediaSession>,
+    /// Where the track is, when the program tells.
+    pub timeline: Option<Timeline>,
+    /// How many programs have a media session now, and which of them (from 0) the card shows.
+    pub sources: usize,
+    pub source: usize,
+}
+
+/// Where a track is: how long it is, and where it stood at `at`. It moves on from there while it plays.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Timeline {
+    pub duration_ms: u64,
+    pub position_ms: u64,
+    pub at: std::time::Instant,
+}
+
+impl Timeline {
+    /// The position at `now`, never past the end.
+    pub fn position_at(&self, now: std::time::Instant, playing: bool) -> u64 {
+        let moved = if playing { now.saturating_duration_since(self.at).as_millis() as u64 } else { 0 };
+        (self.position_ms + moved).min(self.duration_ms)
+    }
+
+    /// The share of the track that has played at `now`, 0.0 to 1.0.
+    pub fn fraction_at(&self, now: std::time::Instant, playing: bool) -> f32 {
+        if self.duration_ms == 0 { 0.0 } else { self.position_at(now, playing) as f32 / self.duration_ms as f32 }
+    }
+}
+
+/// A timeline from what a session tells, in its own units (100 ns): the track's start and end, the position, and how long ago
+/// that position was true (`age`; negative or unknown counts as now). `None` for a session that tells no length (a live stream, a
+/// program that fills nothing in).
+pub fn timeline_of(start: i64, end: i64, position: i64, age: i64, now: std::time::Instant) -> Option<Timeline> {
+    let length = end.checked_sub(start).filter(|l| *l > 0)?;
+    let at = now.checked_sub(Duration::from_nanos(age.max(0) as u64 * 100)).unwrap_or(now);
+    Some(Timeline { duration_ms: (length / 10_000) as u64, position_ms: ((position - start).clamp(0, length) / 10_000) as u64, at })
+}
+
+/// A time as a player writes it: "0:07", "3:25", "1:02:45".
+pub fn clock(ms: u64) -> String {
+    let s = ms / 1000;
+    if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60) } else { format!("{}:{:02}", s / 60, s % 60) }
 }
 
 /// What the three buttons do.
@@ -209,6 +250,8 @@ pub fn decode_artwork(bytes: &[u8], size: u32, id: u64) -> Option<Artwork> {
 enum Msg {
     Read,
     Transport(Transport),
+    /// The user turned the card to the next program that plays.
+    NextSource,
     Quit,
 }
 
@@ -224,6 +267,11 @@ impl Media {
     /// The user clicked previous, play / pause or next.
     pub fn transport(&self, t: Transport) {
         let _ = self.tx.send(Msg::Transport(t));
+    }
+
+    /// The user clicked the source's name: the card turns to the next program that has a media session (and round again).
+    pub fn next_source(&self) {
+        let _ = self.tx.send(Msg::NextSource);
     }
 }
 
@@ -257,7 +305,7 @@ pub fn subscribe(callback: impl Fn(&MediaSnapshot) + Send + Sync + 'static) -> M
                 Ok(())
             }))
             .ok();
-        let mut state = Reader { wake: wake.clone(), current: None, art: ArtState::new() };
+        let mut state = Reader { wake: wake.clone(), current: None, art: ArtState::new(), pick: None };
         let mut last: Option<MediaSnapshot> = None;
         let tell = |s: MediaSnapshot, last: &mut Option<MediaSnapshot>| {
             if last.as_ref() != Some(&s) {
@@ -273,12 +321,14 @@ pub fn subscribe(callback: impl Fn(&MediaSnapshot) + Send + Sync + 'static) -> M
                     state.send(t);
                     continue;
                 }
+                Msg::NextSource => state.turn(&mgr),
                 Msg::Read => {}
             }
             loop {
                 match rx.recv_timeout(BURST) {
                     Ok(Msg::Quit) => break 'run,
                     Ok(Msg::Transport(t)) => state.send(t),
+                    Ok(Msg::NextSource) => state.turn(&mgr),
                     Ok(Msg::Read) => continue,
                     Err(_) => break,
                 }
@@ -313,14 +363,31 @@ pub fn read_once() -> MediaSnapshot {
     init_mta();
     let Some(mgr) = manager() else { return MediaSnapshot::default() };
     let (tx, _rx) = channel::<Msg>();
-    Reader { wake: tx, current: None, art: ArtState::new() }.read(&mgr)
+    Reader { wake: tx, current: None, art: ArtState::new(), pick: None }.read(&mgr)
 }
 
 /// What the thread keeps between two readings: the session its handlers are on, and the artwork it has decoded.
 struct Reader {
     wake: Sender<Msg>,
-    current: Option<(GlobalSystemMediaTransportControlsSession, String, i64, i64)>,
+    current: Option<(GlobalSystemMediaTransportControlsSession, String, i64, i64, i64)>,
     art: ArtState,
+    /// The program (its AppUserModelID) the user turned the card to; `None`: the one the system calls current.
+    pick: Option<String>,
+}
+
+fn id_of(s: &GlobalSystemMediaTransportControlsSession) -> String {
+    s.SourceAppUserModelId().map(|s| s.to_string()).unwrap_or_default()
+}
+
+/// Which of the sessions comes after the one shown now (`shown`: its place, if it is among them), round the list.
+pub fn next_source(count: usize, shown: Option<usize>) -> Option<usize> {
+    (count > 0).then(|| shown.map_or(0, |i| (i + 1) % count))
+}
+
+/// Now, in the units of a session's timestamps (100 ns since 1601, UTC).
+fn now_ticks() -> i64 {
+    const TO_1970: i64 = 116_444_736_000_000_000;
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| TO_1970 + (d.as_nanos() / 100) as i64).unwrap_or(0)
 }
 
 /// How long after a track change that came without its picture the thumbnail is looked at again.
@@ -328,15 +395,41 @@ const ART_RETRY: Duration = Duration::from_millis(1500);
 
 impl Reader {
     /// Reads the current session, moving the handlers onto it when it is another one than before.
+    /// Every program's session, as the system lists them.
+    fn sessions(mgr: &GlobalSystemMediaTransportControlsSessionManager) -> Vec<GlobalSystemMediaTransportControlsSession> {
+        mgr.GetSessions().map(|v| v.into_iter().collect()).unwrap_or_default()
+    }
+
+    /// Turns the card to the next program that plays.
+    fn turn(&mut self, mgr: &GlobalSystemMediaTransportControlsSessionManager) {
+        let all = Self::sessions(mgr);
+        let shown = self.current.as_ref().and_then(|(_, id, ..)| all.iter().position(|s| id_of(s) == *id));
+        self.pick = next_source(all.len(), shown).and_then(|i| all.get(i)).map(id_of);
+    }
+
     fn read(&mut self, mgr: &GlobalSystemMediaTransportControlsSessionManager) -> MediaSnapshot {
-        let Ok(session) = mgr.GetCurrentSession() else {
+        let all = Self::sessions(mgr);
+        // the program the user turned to, while it still has a session; else the one the system calls current
+        let picked = self.pick.as_ref().and_then(|want| all.iter().find(|s| id_of(s) == *want).cloned());
+        if picked.is_none() {
+            self.pick = None;
+        }
+        let Some(session) = picked.or_else(|| mgr.GetCurrentSession().ok()) else {
             self.leave();
             self.art.clear();
-            return MediaSnapshot { available: true, session: None };
+            return MediaSnapshot { available: true, ..Default::default() };
         };
-        let id = session.SourceAppUserModelId().map(|s| s.to_string()).unwrap_or_default();
+        let id = id_of(&session);
+        let (sources, source) = (all.len().max(1), all.iter().position(|s| id_of(s) == id).unwrap_or(0));
         if self.current.as_ref().is_none_or(|(s, ..)| *s != session) {
             self.leave();
+            let c = self.wake.clone();
+            let t3 = session
+                .TimelinePropertiesChanged(&TypedEventHandler::new(move |_, _| {
+                    let _ = c.send(Msg::Read);
+                    Ok(())
+                }))
+                .unwrap_or(0);
             let (a, b) = (self.wake.clone(), self.wake.clone());
             let t1 = session
                 .PlaybackInfoChanged(&TypedEventHandler::new(move |_, _| {
@@ -350,7 +443,7 @@ impl Reader {
                     Ok(())
                 }))
                 .unwrap_or(0);
-            self.current = Some((session.clone(), id.clone(), t1, t2));
+            self.current = Some((session.clone(), id.clone(), t1, t2, t3));
         }
         let app = app_name(&id);
         let (playing, can_previous, can_next, can_toggle) = match session.GetPlaybackInfo() {
@@ -383,7 +476,19 @@ impl Reader {
                 }
             }
         }
-        MediaSnapshot { available: true, session: Some(MediaSession { app, title, artist, playing, can_previous, can_next, can_toggle, artwork: self.art.picture() }) }
+        let timeline = session.GetTimelineProperties().ok().and_then(|t| {
+            let ticks = |v: windows::core::Result<windows::Foundation::TimeSpan>| v.map(|d| d.Duration).unwrap_or(0);
+            let updated = t.LastUpdatedTime().map(|d| d.UniversalTime).unwrap_or(0);
+            let age = if updated > 0 { now_ticks() - updated } else { 0 };
+            timeline_of(ticks(t.StartTime()), ticks(t.EndTime()), ticks(t.Position()), age, std::time::Instant::now())
+        });
+        MediaSnapshot {
+            available: true,
+            session: Some(MediaSession { app, title, artist, playing, can_previous, can_next, can_toggle, artwork: self.art.picture() }),
+            timeline,
+            sources,
+            source,
+        }
     }
 
     fn send(&self, t: Transport) {
@@ -398,9 +503,10 @@ impl Reader {
 
     /// Takes the handlers off the session they are on.
     fn leave(&mut self) {
-        if let Some((s, _, t1, t2)) = self.current.take() {
+        if let Some((s, _, t1, t2, t3)) = self.current.take() {
             let _ = s.RemovePlaybackInfoChanged(t1);
             let _ = s.RemoveMediaPropertiesChanged(t2);
+            let _ = s.RemoveTimelinePropertiesChanged(t3);
         }
     }
 }
@@ -419,6 +525,42 @@ fn stream_bytes(r: &IRandomAccessStreamReference) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tracks_place_is_told_from_its_start_and_moves_on_while_it_plays() {
+        let now = std::time::Instant::now();
+        let s = 10_000_000i64; // one second in the session's units
+        // a 3:20 track at 1:05, told just now
+        let t = timeline_of(0, 200 * s, 65 * s, 0, now).unwrap();
+        assert_eq!((t.duration_ms, t.position_ms, t.at), (200_000, 65_000, now));
+        assert_eq!(t.position_at(now, true), 65_000);
+        assert_eq!(t.position_at(now + Duration::from_secs(10), true), 75_000);
+        assert_eq!(t.position_at(now + Duration::from_secs(10), false), 65_000, "paused: it stands");
+        assert_eq!(t.position_at(now + Duration::from_secs(1_000), true), 200_000, "never past the end");
+        assert!((t.fraction_at(now, true) - 0.325).abs() < 1e-6);
+        // told 4 s ago: it has played on since
+        let old = timeline_of(0, 200 * s, 65 * s, 4 * s, now).unwrap();
+        assert_eq!(old.position_at(now, true), 69_000);
+        // a start that is not zero; a position outside the track is cut to it
+        assert_eq!(timeline_of(5 * s, 65 * s, 20 * s, 0, now).map(|t| (t.duration_ms, t.position_ms)), Some((60_000, 15_000)));
+        assert_eq!(timeline_of(0, 60 * s, 90 * s, 0, now).map(|t| t.position_ms), Some(60_000));
+        assert_eq!(timeline_of(0, 60 * s, -3 * s, -9, now).map(|t| (t.position_ms, t.at)), Some((0, now)));
+        // no length told: no timeline
+        assert_eq!(timeline_of(0, 0, 0, 0, now), None);
+        assert_eq!(timeline_of(9 * s, 3 * s, 0, 0, now), None);
+        assert_eq!(Timeline { duration_ms: 0, position_ms: 0, at: now }.fraction_at(now, true), 0.0);
+        // as a player writes a time
+        assert_eq!([clock(0), clock(7_900), clock(205_000), clock(3_765_000)], ["0:00", "0:07", "3:25", "1:02:45"]);
+    }
+
+    #[test]
+    fn the_card_turns_to_the_next_program_and_round_again() {
+        assert_eq!(next_source(3, Some(0)), Some(1));
+        assert_eq!(next_source(3, Some(2)), Some(0));
+        assert_eq!(next_source(1, Some(0)), Some(0));
+        assert_eq!(next_source(2, None), Some(0), "the one shown is gone: the first");
+        assert_eq!(next_source(0, None), None);
+    }
 
     #[test]
     fn a_program_name_from_an_app_user_model_id() {

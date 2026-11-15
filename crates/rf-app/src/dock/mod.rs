@@ -73,6 +73,7 @@ mod popup_win;
 mod reorder;
 mod right;
 pub mod size_pref;
+pub mod cc_card;
 pub mod status_card;
 pub(crate) mod size_slider;
 mod search;

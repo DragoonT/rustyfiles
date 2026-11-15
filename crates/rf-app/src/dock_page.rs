@@ -362,6 +362,12 @@ pub(crate) fn page(p: &Palette, s: &Settings, size_slider: Option<AnyElement>) -
             if e.field == "dock_weather_city" {
                 out.extend(crate::dock::weather_card::cards(p, s));
             }
+            // what our control centre shows: a list too, so a card of its own (`dock/cc_card.rs`) right under the switch that chooses
+            // our control centre; inert while the Dock is off or Windows' own quick settings are chosen
+            if e.field == "dock_own_control_centre" {
+                let live = Needs::DockOn.met(s) && s.dock_own_control_centre;
+                out.push(crate::dock::cc_card::card(p, s, live).into_any_element());
+            }
             // the right island's own buttons, their order and which are shown: a list, so a card of its own (`dock/status_card.rs`) at
             // the end of the right island's section; dimmed and inert with its line while the Dock is off, like the entries
             if e.field == "dock_own_notifications" {
@@ -562,7 +568,8 @@ mod tests {
                 // added by `page` above; it shows Windows' own permission, which an entry cannot)
                 // (`dock_status_order` and `dock_status_hidden` are on this page too: the list of the right island's own buttons, a card of
                 // its own at the end of the right island's section, `dock/status_card.rs`, added by `page` above)
-                let own_cards = ["dock_weather_location", "dock_status_order", "dock_status_hidden"];
+                // (`dock_cc_hidden` is on this page too: what our control centre shows, a card of its own: `dock/cc_card.rs`)
+                let own_cards = ["dock_weather_location", "dock_status_order", "dock_status_hidden", "dock_cc_hidden"];
                 let ours = (name.starts_with("dock_") || name.starts_with("shell_")) && name != "shell_submenu" && !overrides.contains(&name) && !own_cards.contains(&name) && name != "dock_one_switch";
                 (ours && rest.contains(':') && !rest.contains('(')).then(|| name.to_string())
             })

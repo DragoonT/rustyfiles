@@ -8,7 +8,9 @@
 use gpui_kit::assets::IconName as L;
 use rf_win::sysstatus::audio::{AudioSnapshot, VolumeGlyph};
 use rf_win::sysstatus::bluetooth::{BluetoothSnapshot, Power};
-use rf_win::sysstatus::media::MediaSession;
+use rf_win::sysstatus::inuse::InUse;
+use rf_win::sysstatus::toggles::PowerMode;
+use rf_win::sysstatus::media::{MediaSession, Timeline};
 use rf_win::sysstatus::network::{Link, NetworkGlyph, NetworkSnapshot, Reach, wifi_steps};
 use rf_win::sysstatus::power::BatterySnapshot;
 use rf_win::sysstatus::wifi::{Listing, WifiSnapshot};
@@ -23,7 +25,15 @@ pub const TILE_H: f32 = 64.0;
 pub const MEDIA_H: f32 = 88.0;
 pub const SOUND_H: f32 = 72.0;
 pub const BRIGHTNESS_H: f32 = 72.0;
+/// Each display after the first adds a slider's row to the brightness card.
+pub const BRIGHTNESS_MORE: f32 = 34.0;
 pub const BOTTOM_H: f32 = 36.0;
+/// The microphone's card: as the sound card.
+pub const MIC_H: f32 = 72.0;
+/// The row of quick buttons: round buttons of the bottom row's size.
+pub const QUICK_H: f32 = 36.0;
+/// The line that says who is using the microphone or the camera.
+pub const IN_USE_H: f32 = 20.0;
 /// A detail (the outputs, a tile's list) is one card: this padding round it, a head (its name, and a radio's switch), rows.
 pub const DETAIL_PAD: f32 = 8.0;
 pub const DETAIL_HEAD_H: f32 = 32.0;
@@ -90,10 +100,19 @@ pub fn tiles(net: Option<&NetworkSnapshot>, wifi: Option<&WifiSnapshot>, bt: Opt
 pub enum Detail {
     /// The output devices: opens out UPWARDS from the sound card.
     Outputs,
+    /// The input devices: opens out UPWARDS from the microphone's card.
+    Inputs,
     /// A tile's own list: opens out DOWNWARDS from the tiles.
     Wifi,
     Bluetooth,
     Network,
+}
+
+impl Detail {
+    /// It opens out upwards, from a card under it (the others open downwards, from the tiles).
+    pub fn upwards(self) -> bool {
+        matches!(self, Detail::Outputs | Detail::Inputs)
+    }
 }
 
 /// The detail a tile opens (the battery's has none: it opens Windows' page).
@@ -114,26 +133,36 @@ pub fn detail_height(rows: usize) -> f32 {
 /// What decides the sections of the panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct Shown {
+    /// A program is using the microphone or the camera: the line that says so.
+    pub in_use: bool,
     pub tiles: usize,
+    /// The row of quick buttons has buttons.
+    pub quick: bool,
     /// A media session exists.
     pub media: bool,
     /// A sound device exists.
     pub sound: bool,
-    /// The monitor answered DDC/CI.
-    pub brightness: bool,
+    /// A microphone exists.
+    pub mic: bool,
+    /// How many displays answered DDC/CI: a slider for each in the one brightness card (0: no card).
+    pub brightness: usize,
     /// What is opened out, and how many rows it has; `None` while nothing is.
     pub detail: Option<(Detail, usize)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Section {
+    InUse,
     /// The tiles, two to a row: the number of rows.
     Tiles(usize),
+    Quick,
     Media,
     /// What is opened out, as one card of this height, IN THE PLACE of the sections it covers.
     Detail(Detail, f32),
     Sound,
-    Brightness,
+    Mic,
+    /// The brightness card: how many displays it has a slider for.
+    Brightness(usize),
     Bottom,
 }
 
@@ -179,33 +208,57 @@ pub struct Layout {
     pub after: Vec<Section>,
 }
 
+/// The sections a machine gets, top to bottom, without the bottom row (which is always there) and with nothing opened out: who
+/// uses the microphone, the tiles, the quick buttons, what plays, the sound, the microphone, the brightness.
+fn base(s: &Shown) -> Vec<Section> {
+    [
+        s.in_use.then_some(Section::InUse),
+        (s.tiles > 0).then(|| Section::Tiles(s.tiles.div_ceil(2))),
+        s.quick.then_some(Section::Quick),
+        s.media.then_some(Section::Media),
+        s.sound.then_some(Section::Sound),
+        s.mic.then_some(Section::Mic),
+        (s.brightness > 0).then_some(Section::Brightness(s.brightness)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
 /// The panel's layout.
 ///
 /// A DETAIL TAKES THE PLACE OF OTHER SECTIONS, it is not added to them (the user, 2026-11-15: "ses aygıtlarına tıklayınca panelin
 /// genişlemesi yerine üstteki player ethernet ve blutooth alanlarının yerine genişlesin", and of the tiles: "onlar da aynı şekilde
-/// alta doğru genişleyebilir"). The outputs open out upwards from the sound card: their card stands where the tiles and the media
-/// card were, and the sound card, which was pressed, stays where it is. A tile's list opens out downwards: its card stands where
-/// the media, sound and brightness cards were, and the tiles stay. The card is as tall as the room it takes, so the panel keeps
-/// its height; its rows scroll when they are more than fit. ONLY when that room is too small to be a list at all (nothing is
-/// playing, so little is above the sound card) is the card taller than the room: as tall as its rows want, up to
-/// `DETAIL_USABLE_ROWS` of them, and the panel grows by the difference while the card opens.
+/// alta doğru genişleyebilir"). A list of devices opens out UPWARDS from its card (the outputs from the sound card, the inputs
+/// from the microphone's): its card stands where everything above that card was, and the card that was pressed stays where it
+/// is. A tile's list opens out DOWNWARDS: its card stands where everything under the tiles was, and the tiles stay. The card is as
+/// tall as the room it takes, so the panel keeps its height; its rows scroll when they are more than fit. ONLY when that room is
+/// too small to be a list at all is the card taller than the room: as tall as its rows want, up to `DETAIL_USABLE_ROWS` of them,
+/// and the panel grows by the difference while the card opens. A detail whose owner is not there (no sound device, no tiles) is
+/// not laid out.
 pub fn layout(s: &Shown) -> Layout {
-    let tiles = (s.tiles > 0).then(|| Section::Tiles(s.tiles.div_ceil(2)));
-    let media = s.media.then_some(Section::Media);
-    let sound = s.sound.then_some(Section::Sound);
-    let brightness = s.brightness.then_some(Section::Brightness);
-    let list = |parts: &[Option<Section>]| -> Vec<Section> { parts.iter().flatten().copied().collect() };
-    let area = |kind: Detail, rows: usize, covered: Vec<Section>, upwards: bool| {
-        let room = covered.iter().map(section_height).sum::<f32>() + GAP * covered.len().saturating_sub(1) as f32;
-        Area { kind, height: room.max(detail_height(rows.min(DETAIL_USABLE_ROWS))), covered, room, upwards }
+    let mut all = base(s);
+    let owner = s.detail.and_then(|(d, rows)| {
+        let at = all.iter().position(|sec| match d {
+            Detail::Outputs => *sec == Section::Sound,
+            Detail::Inputs => *sec == Section::Mic,
+            _ => matches!(sec, Section::Tiles(_)),
+        })?;
+        Some((d, rows, at))
+    });
+    let Some((kind, rows, at)) = owner else {
+        return Layout { before: all, area: None, after: vec![Section::Bottom] };
     };
-    let (before, area, mut after) = match s.detail {
-        Some((Detail::Outputs, rows)) if s.sound => (Vec::new(), Some(area(Detail::Outputs, rows, list(&[tiles, media]), true)), list(&[sound, brightness])),
-        Some((d, rows)) if d != Detail::Outputs && s.tiles > 0 => (list(&[tiles]), Some(area(d, rows, list(&[media, sound, brightness]), false)), Vec::new()),
-        _ => (list(&[tiles, media, sound, brightness]), None, Vec::new()),
-    };
+    let upwards = kind.upwards();
+    // (upwards: everything above the owner is covered and the owner leads what stays; downwards: the owner stays above and
+    // everything under it is covered)
+    let cut = if upwards { at } else { at + 1 };
+    let tail = all.split_off(cut);
+    let (before, covered, mut after) = if upwards { (Vec::new(), all, tail) } else { (all, tail, Vec::new()) };
     after.push(Section::Bottom);
-    Layout { before, area, after }
+    let room = covered.iter().map(section_height).sum::<f32>() + GAP * covered.len().saturating_sub(1) as f32;
+    let area = Area { kind, height: room.max(detail_height(rows.min(DETAIL_USABLE_ROWS))), covered, room, upwards };
+    Layout { before, area: Some(area), after }
 }
 
 /// The sections from top to bottom with the detail fully opened out (its card as one section).
@@ -216,11 +269,14 @@ pub fn sections(s: &Shown) -> Vec<Section> {
 
 pub fn section_height(s: &Section) -> f32 {
     match s {
+        Section::InUse => IN_USE_H,
         Section::Tiles(rows) => *rows as f32 * TILE_H + rows.saturating_sub(1) as f32 * GAP,
+        Section::Quick => QUICK_H,
         Section::Media => MEDIA_H,
         Section::Detail(_, h) => *h,
         Section::Sound => SOUND_H,
-        Section::Brightness => BRIGHTNESS_H,
+        Section::Mic => MIC_H,
+        Section::Brightness(displays) => BRIGHTNESS_H + displays.saturating_sub(1) as f32 * BRIGHTNESS_MORE,
         Section::Bottom => BOTTOM_H,
     }
 }
@@ -306,9 +362,10 @@ impl Unfold {
 
 /// How many rows a detail has under its head, for what the sources say now (the view builds the same rows: a line that says why
 /// there is no list, the list, and the way to Windows' page as the last row).
-pub fn detail_rows(d: Detail, audio: Option<&AudioSnapshot>, wifi: Option<&WifiSnapshot>, bt: Option<&BluetoothSnapshot>, net: Option<&NetworkSnapshot>) -> usize {
+pub fn detail_rows(d: Detail, audio: Option<&AudioSnapshot>, mic: Option<&AudioSnapshot>, wifi: Option<&WifiSnapshot>, bt: Option<&BluetoothSnapshot>, net: Option<&NetworkSnapshot>) -> usize {
     match d {
         Detail::Outputs => audio.map_or(0, |a| a.devices.len()) + 1,
+        Detail::Inputs => mic.map_or(0, |a| a.devices.len()) + 1,
         Detail::Wifi => match wifi {
             Some(w) if w.power == Power::On && w.listing == Listing::Denied => 3,
             Some(w) if w.power == Power::On && !w.networks.is_empty() => w.networks.len() + 1,
@@ -337,6 +394,158 @@ pub fn shown_power(actual: Power, ask: Option<(bool, u64)>) -> Power {
         }
         (p, _) => p,
     }
+}
+
+// ------------------------------------------------------------------ the quick buttons, and what can be hidden
+
+/// One of the row's quick buttons. Three switch something themselves (Windows' dark mode, keeping the PC awake, the power mode);
+/// the others open the page or the panel of Windows that does (Windows has no switch a program may press for them).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Quick {
+    Dark,
+    Awake,
+    Power,
+    NightLight,
+    Focus,
+    Airplane,
+    Project,
+    Cast,
+}
+
+/// What the three switching buttons are at now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct QuickState {
+    pub dark: bool,
+    pub awake: bool,
+    /// `None`: Windows tells no power mode here, and there is no such button.
+    pub power: Option<PowerMode>,
+}
+
+impl Quick {
+    pub const ALL: [Quick; 8] = [Quick::Dark, Quick::Awake, Quick::Power, Quick::NightLight, Quick::Focus, Quick::Airplane, Quick::Project, Quick::Cast];
+
+    /// Its name in the settings' list of what is hidden.
+    pub fn key(self) -> &'static str {
+        match self {
+            Quick::Dark => "quick.dark",
+            Quick::Awake => "quick.awake",
+            Quick::Power => "quick.power",
+            Quick::NightLight => "quick.nightlight",
+            Quick::Focus => "quick.focus",
+            Quick::Airplane => "quick.airplane",
+            Quick::Project => "quick.project",
+            Quick::Cast => "quick.cast",
+        }
+    }
+
+    pub fn name(self, w: Words) -> &'static str {
+        (w.tr)(match self {
+            Quick::Dark => "Koyu tema",
+            Quick::Awake => "Uyanık tut",
+            Quick::Power => "Güç modu",
+            Quick::NightLight => "Gece ışığı",
+            Quick::Focus => "Rahatsız etmeyin",
+            Quick::Airplane => "Uçak modu",
+            Quick::Project => "Yansıt",
+            Quick::Cast => "Yayınla",
+        })
+    }
+
+    /// The page of Windows it opens; `None` for the three that switch something themselves and for "project", which is a panel of
+    /// Windows started as a program.
+    pub fn page(self) -> Option<&'static str> {
+        match self {
+            Quick::NightLight => Some("ms-settings:nightlight"),
+            Quick::Focus => Some("ms-settings:notifications"),
+            Quick::Airplane => Some("ms-settings:network-airplanemode"),
+            Quick::Cast => Some("ms-settings-connectabledevices:devicediscovery"),
+            Quick::Dark | Quick::Awake | Quick::Power | Quick::Project => None,
+        }
+    }
+
+    pub fn icon(self, s: &QuickState) -> L {
+        match self {
+            Quick::Dark => L::Moon,
+            Quick::Awake => L::Coffee,
+            Quick::Power => match s.power {
+                Some(PowerMode::Efficiency) => L::Leaf,
+                Some(PowerMode::Performance) => L::Zap,
+                _ => L::Gauge,
+            },
+            Quick::NightLight => L::Sunset,
+            Quick::Focus => L::BellOff,
+            Quick::Airplane => L::Plane,
+            Quick::Project => L::Projector,
+            Quick::Cast => L::Cast,
+        }
+    }
+
+    /// Lit: the thing is on (a power mode that is not the balanced one counts as on).
+    pub fn lit(self, s: &QuickState) -> bool {
+        match self {
+            Quick::Dark => s.dark,
+            Quick::Awake => s.awake,
+            Quick::Power => s.power.is_some_and(|m| m != PowerMode::Balanced),
+            _ => false,
+        }
+    }
+
+    /// What the button says under the pointer: its name, and for the power mode which one it is at.
+    pub fn tip(self, s: &QuickState, w: Words) -> &'static str {
+        match (self, s.power) {
+            (Quick::Power, Some(PowerMode::Efficiency)) => (w.tr)("Güç modu: en iyi verimlilik"),
+            (Quick::Power, Some(PowerMode::Performance)) => (w.tr)("Güç modu: en iyi performans"),
+            (Quick::Power, _) => (w.tr)("Güç modu: dengeli"),
+            _ => self.name(w),
+        }
+    }
+}
+
+/// The parts of the panel that can be hidden (Settings > Dock), by their names in the settings' list. The quick buttons are hidden
+/// one by one with [`Quick::key`], or all at once with "quick".
+pub const PARTS: [&str; 10] = ["wifi", "bluetooth", "network", "battery", "quick", "inuse", "media", "sound", "mic", "brightness"];
+
+pub fn part_name(key: &str, w: Words) -> &'static str {
+    (w.tr)(match key {
+        // (the two that are names, the same in every language)
+        "wifi" => return "Wi-Fi",
+        "bluetooth" => return "Bluetooth",
+        "network" => "Ağ",
+        "battery" => "Pil",
+        "quick" => "Hızlı düğmeler",
+        "inuse" => "Mikrofon ve kamera kullanımı",
+        "media" => "Şimdi çalıyor",
+        "sound" => "Ses",
+        "mic" => "Mikrofon",
+        _ => "Parlaklık",
+    })
+}
+
+/// The quick buttons the row shows: the ones that are not hidden, and the power mode's only where Windows tells one.
+pub fn quick_buttons(hidden: &dyn Fn(&str) -> bool, s: &QuickState) -> Vec<Quick> {
+    if hidden("quick") {
+        return Vec::new();
+    }
+    Quick::ALL.into_iter().filter(|q| !hidden(q.key()) && (*q != Quick::Power || s.power.is_some())).collect()
+}
+
+/// The settings' list of what is hidden with `key` hidden or shown again: each name once, the parts first and then the buttons,
+/// in their own order; a name this version does not know is kept at the end.
+pub fn with_hidden(list: &[String], key: &str, hide: bool) -> Vec<String> {
+    let order = |k: &str| PARTS.iter().position(|p| *p == k).or_else(|| Quick::ALL.iter().position(|q| q.key() == k).map(|i| PARTS.len() + i)).unwrap_or(usize::MAX);
+    let mut out: Vec<String> = list.iter().filter(|k| k.as_str() != key).cloned().collect();
+    if hide {
+        out.push(key.to_string());
+    }
+    out.sort_by_key(|k| order(k));
+    out.dedup();
+    out
+}
+
+/// The line that says who is using the microphone or the camera: "Mikrofon: chrome, Discord · Kamera: Zoom".
+pub fn in_use_text(u: &InUse, w: Words) -> String {
+    let part = |label: &str, apps: &[String]| (!apps.is_empty()).then(|| format!("{label}: {}", apps.join(", ")));
+    [part((w.tr)("Mikrofon"), &u.microphone), part((w.tr)("Kamera"), &u.camera)].into_iter().flatten().collect::<Vec<_>>().join(" · ")
 }
 
 // ------------------------------------------------------------------ words
@@ -464,6 +673,17 @@ pub fn sound_device_text(s: &AudioSnapshot, w: Words) -> String {
 pub fn media_lines(s: &MediaSession, w: Words) -> (String, String, String) {
     let app = if s.app.is_empty() { (w.tr)("Şimdi çalıyor").to_string() } else { s.app.clone() };
     if s.title.trim().is_empty() { (app.clone(), app, String::new()) } else { (app, s.title.clone(), s.artist.clone()) }
+}
+
+/// The first line of the media card: the program, and which of the programs that play it is when there are more ("Chrome · 1/2";
+/// a click on it turns the card to the next one).
+pub fn media_source_line(app: &str, source: usize, sources: usize) -> String {
+    if sources > 1 { format!("{app} · {}/{sources}", source.min(sources - 1) + 1) } else { app.to_string() }
+}
+
+/// Where the track is, as a player writes it: "1:05 / 3:20".
+pub fn media_time(t: &Timeline, playing: bool, now: std::time::Instant) -> String {
+    format!("{} / {}", rf_win::sysstatus::media::clock(t.position_at(now, playing)), rf_win::sysstatus::media::clock(t.duration_ms))
 }
 
 // ------------------------------------------------------------------ symbols
@@ -639,8 +859,8 @@ mod tests {
     #[test]
     fn the_sections_follow_what_exists_and_the_bottom_row_is_always_there() {
         assert_eq!(sections(&Shown::default()), vec![Section::Bottom]);
-        let all = Shown { tiles: 3, media: true, sound: true, brightness: true, detail: None };
-        assert_eq!(sections(&all), vec![Section::Tiles(2), Section::Media, Section::Sound, Section::Brightness, Section::Bottom]);
+        let all = Shown { tiles: 3, media: true, sound: true, brightness: 1, detail: None, ..Default::default() };
+        assert_eq!(sections(&all), vec![Section::Tiles(2), Section::Media, Section::Sound, Section::Brightness(1), Section::Bottom]);
         // tiles go two to a row
         assert_eq!(sections(&Shown { tiles: 1, ..Default::default() })[0], Section::Tiles(1));
         assert_eq!(sections(&Shown { tiles: 4, ..Default::default() })[0], Section::Tiles(2));
@@ -649,12 +869,12 @@ mod tests {
     #[test]
     fn a_detail_takes_the_place_of_what_it_opens_over_and_the_panel_keeps_its_height() {
         // the user's PC: three tiles (two rows), something playing, sound, brightness
-        let all = Shown { tiles: 3, media: true, sound: true, brightness: true, detail: None };
+        let all = Shown { tiles: 3, media: true, sound: true, brightness: 1, detail: None, ..Default::default() };
         let above = 2.0 * TILE_H + GAP + GAP + MEDIA_H;
         let below = MEDIA_H + GAP + SOUND_H + GAP + BRIGHTNESS_H;
         // THE OUTPUTS: where the tiles and the media card were; the sound card and what is under it stay
         let outputs = Shown { detail: Some((Detail::Outputs, 6)), ..all };
-        assert_eq!(sections(&outputs), vec![Section::Detail(Detail::Outputs, above), Section::Sound, Section::Brightness, Section::Bottom]);
+        assert_eq!(sections(&outputs), vec![Section::Detail(Detail::Outputs, above), Section::Sound, Section::Brightness(1), Section::Bottom]);
         assert_eq!(height(&outputs), height(&all), "the panel does not grow");
         assert!(detail_height(6) <= above, "five devices and the link fit there without scrolling");
         // a list longer than the room scrolls in the same room
@@ -666,7 +886,7 @@ mod tests {
             assert_eq!(height(&open), height(&all));
         }
         // TOO LITTLE ROOM to be a list (nothing is playing, one row of tiles): as tall as the rows want, up to the usable five
-        let quiet = Shown { tiles: 2, media: false, sound: true, brightness: true, detail: None };
+        let quiet = Shown { tiles: 2, media: false, sound: true, brightness: 1, detail: None, ..Default::default() };
         let small = Shown { detail: Some((Detail::Outputs, 6)), ..quiet };
         assert_eq!(sections(&small)[0], Section::Detail(Detail::Outputs, detail_height(DETAIL_USABLE_ROWS)));
         assert_eq!(height(&small), height(&quiet) + detail_height(DETAIL_USABLE_ROWS) - TILE_H);
@@ -674,7 +894,7 @@ mod tests {
         assert_eq!(sections(&two)[0], Section::Detail(Detail::Outputs, detail_height(2)), "a short list is as tall as it is");
         assert!(detail_height(2) > TILE_H);
         // nothing above the sound card at all: the card is added (there is nothing to take the place of)
-        let bare = Shown { tiles: 0, media: false, sound: true, brightness: false, detail: Some((Detail::Outputs, 3)) };
+        let bare = Shown { tiles: 0, media: false, sound: true, brightness: 0, detail: Some((Detail::Outputs, 3)), ..Default::default() };
         assert_eq!(sections(&bare), vec![Section::Detail(Detail::Outputs, detail_height(3)), Section::Sound, Section::Bottom]);
         // a detail whose owner is not there is not shown: no sound device, no tiles
         assert_eq!(sections(&Shown { sound: false, detail: Some((Detail::Outputs, 3)), ..all }), sections(&Shown { sound: false, ..all }));
@@ -683,15 +903,15 @@ mod tests {
 
     #[test]
     fn a_detail_grows_from_the_edge_that_stays_and_the_panel_grows_only_where_it_must() {
-        let all = Shown { tiles: 3, media: true, sound: true, brightness: true, detail: None };
-        assert_eq!(layout(&all), Layout { before: vec![Section::Tiles(2), Section::Media, Section::Sound, Section::Brightness], area: None, after: vec![Section::Bottom] });
+        let all = Shown { tiles: 3, media: true, sound: true, brightness: 1, detail: None, ..Default::default() };
+        assert_eq!(layout(&all), Layout { before: vec![Section::Tiles(2), Section::Media, Section::Sound, Section::Brightness(1)], area: None, after: vec![Section::Bottom] });
         // the outputs: upwards over the tiles and the media card, in their room; the panel is as tall all the way
         let outputs = Shown { detail: Some((Detail::Outputs, 6)), ..all };
         let l = layout(&outputs);
         let a = l.area.clone().unwrap();
         assert_eq!((a.kind, a.upwards, a.covered.clone()), (Detail::Outputs, true, vec![Section::Tiles(2), Section::Media]));
         assert_eq!(a.height, a.room);
-        assert_eq!((l.before, l.after), (vec![], vec![Section::Sound, Section::Brightness, Section::Bottom]));
+        assert_eq!((l.before, l.after), (vec![], vec![Section::Sound, Section::Brightness(1), Section::Bottom]));
         for t in [0.0, 0.3, 1.0, 1.07, -0.05] {
             assert_eq!(a.place(t), a.room, "t {t}");
             assert_eq!(height_at(&outputs, t), height(&all), "t {t}");
@@ -704,9 +924,9 @@ mod tests {
         assert_eq!(a.card(-0.03), 0.0, "folding back past nothing is nothing");
         // a tile's list: downwards over the cards under the tiles
         let a = layout(&Shown { detail: Some((Detail::Bluetooth, 3)), ..all }).area.unwrap();
-        assert_eq!((a.upwards, a.covered), (false, vec![Section::Media, Section::Sound, Section::Brightness]));
+        assert_eq!((a.upwards, a.covered), (false, vec![Section::Media, Section::Sound, Section::Brightness(1)]));
         // too little room: the place grows from the room to the card's height while it opens, and the panel with it, never past
-        let quiet = Shown { tiles: 2, media: false, sound: true, brightness: true, detail: None };
+        let quiet = Shown { tiles: 2, media: false, sound: true, brightness: 1, detail: None, ..Default::default() };
         let small = Shown { detail: Some((Detail::Outputs, 6)), ..quiet };
         let a = layout(&small).area.unwrap();
         assert_eq!((a.room, a.height), (TILE_H, detail_height(DETAIL_USABLE_ROWS)));
@@ -724,13 +944,18 @@ mod tests {
     /// panel shorter.
     #[test]
     fn a_detail_has_its_place_on_every_machine() {
-        for bits in 0u32..(1 << 5) {
-            let base = Shown { tiles: [0, 1, 2, 3][(bits & 3) as usize], media: bits & 4 != 0, sound: bits & 8 != 0, brightness: bits & 16 != 0, detail: None };
-            for d in [Detail::Outputs, Detail::Wifi, Detail::Bluetooth, Detail::Network] {
+        for bits in 0u32..(1 << 8) {
+            let on = |bit: u32| bits & (1 << bit) != 0;
+            let base = Shown { tiles: [0, 1, 2, 3][(bits & 3) as usize], media: on(2), sound: on(3), brightness: usize::from(on(4)), in_use: on(5), quick: on(6), mic: on(7), detail: None };
+            for d in [Detail::Outputs, Detail::Inputs, Detail::Wifi, Detail::Bluetooth, Detail::Network] {
                 for rows in [1usize, 2, 6, 30] {
                     let open = Shown { detail: Some((d, rows)), ..base };
                     let l = layout(&open);
-                    let owner = if d == Detail::Outputs { base.sound } else { base.tiles > 0 };
+                    let owner = match d {
+                        Detail::Outputs => base.sound,
+                        Detail::Inputs => base.mic,
+                        _ => base.tiles > 0,
+                    };
                     assert_eq!(l.area.is_some(), owner, "{open:?}");
                     assert_eq!(height_at(&open, 0.0), height(&base), "folded is the panel without it: {open:?}");
                     assert!(height(&open) >= height(&base), "{open:?}");
@@ -754,7 +979,7 @@ mod tests {
             }
         }
         // the one case with nothing to take the place of: the gap comes with the card
-        let bare = Shown { tiles: 0, media: false, sound: true, brightness: false, detail: Some((Detail::Outputs, 3)) };
+        let bare = Shown { tiles: 0, media: false, sound: true, brightness: 0, detail: Some((Detail::Outputs, 3)), ..Default::default() };
         let a = layout(&bare).area.unwrap();
         assert_eq!((a.room, a.spare_gap(0.0), a.spare_gap(0.5), a.spare_gap(1.0)), (0.0, GAP, GAP / 2.0, 0.0));
         let roomy = layout(&Shown { tiles: 2, ..bare }).area.unwrap();
@@ -804,7 +1029,7 @@ mod tests {
         // nothing but the bottom row
         assert_eq!(height(&Shown::default()), 2.0 * PAD + BOTTOM_H);
         // two tiles (one row), media, sound, brightness, bottom: 12 + 64 + 88 + 72 + 72 + 36 + 4 gaps of 10 + 12
-        let all = Shown { tiles: 2, media: true, sound: true, brightness: true, detail: None };
+        let all = Shown { tiles: 2, media: true, sound: true, brightness: 1, detail: None, ..Default::default() };
         assert_eq!(height(&all), 2.0 * PAD + TILE_H + MEDIA_H + SOUND_H + BRIGHTNESS_H + BOTTOM_H + 4.0 * GAP);
         // three tiles are two rows: one more tile height and a gap
         let three = Shown { tiles: 3, ..all };
@@ -817,27 +1042,128 @@ mod tests {
     fn a_details_rows_are_counted_from_what_the_sources_say() {
         let dev = |id: &str| rf_win::sysstatus::audio::Device { id: id.into(), name: id.into(), default: false };
         let audio = AudioSnapshot { available: true, devices: vec![dev("a"), dev("b"), dev("c")], ..Default::default() };
-        assert_eq!(detail_rows(Detail::Outputs, Some(&audio), None, None, None), 4, "the devices and the link");
+        assert_eq!(detail_rows(Detail::Outputs, Some(&audio), None, None, None, None), 4, "the devices and the link");
         // Wi-Fi: a line and the link while there is no list; the networks and the link; the location text, its link and the link
-        assert_eq!(detail_rows(Detail::Wifi, None, Some(&wifi(Power::Off, &[])), None, None), 2);
-        assert_eq!(detail_rows(Detail::Wifi, None, Some(&wifi(Power::On, &[])), None, None), 2);
-        assert_eq!(detail_rows(Detail::Wifi, None, Some(&wifi(Power::On, &[("a", 1, false), ("b", 2, false), ("c", 3, true)])), None, None), 4);
+        assert_eq!(detail_rows(Detail::Wifi, None, None, Some(&wifi(Power::Off, &[])), None, None), 2);
+        assert_eq!(detail_rows(Detail::Wifi, None, None, Some(&wifi(Power::On, &[])), None, None), 2);
+        assert_eq!(detail_rows(Detail::Wifi, None, None, Some(&wifi(Power::On, &[("a", 1, false), ("b", 2, false), ("c", 3, true)])), None, None), 4);
         let denied = WifiSnapshot { listing: Listing::Denied, ..wifi(Power::On, &[]) };
-        assert_eq!(detail_rows(Detail::Wifi, None, Some(&denied), None, None), 3);
-        assert_eq!(detail_rows(Detail::Wifi, None, None, None, None), 2);
+        assert_eq!(detail_rows(Detail::Wifi, None, None, Some(&denied), None, None), 3);
+        assert_eq!(detail_rows(Detail::Wifi, None, None, None, None, None), 2);
         // Bluetooth: the same shape
-        assert_eq!(detail_rows(Detail::Bluetooth, None, None, Some(&bt(Power::Off, &[])), None), 2);
-        assert_eq!(detail_rows(Detail::Bluetooth, None, None, Some(&bt(Power::On, &[])), None), 2);
-        assert_eq!(detail_rows(Detail::Bluetooth, None, None, Some(&bt(Power::On, &["Fare", "Klavye"])), None), 3);
+        assert_eq!(detail_rows(Detail::Bluetooth, None, None, None, Some(&bt(Power::Off, &[])), None), 2);
+        assert_eq!(detail_rows(Detail::Bluetooth, None, None, None, Some(&bt(Power::On, &[])), None), 2);
+        assert_eq!(detail_rows(Detail::Bluetooth, None, None, None, Some(&bt(Power::On, &["Fare", "Klavye"])), None), 3);
         // the cable: its state, its address when there is one, the link
         let mut eth = net(Link::Ethernet, Reach::Internet);
-        assert_eq!(detail_rows(Detail::Network, None, None, None, Some(&eth)), 2);
+        assert_eq!(detail_rows(Detail::Network, None, None, None, None, Some(&eth)), 2);
         eth.address = Some("192.168.1.20".into());
-        assert_eq!(detail_rows(Detail::Network, None, None, None, Some(&eth)), 3);
+        assert_eq!(detail_rows(Detail::Network, None, None, None, None, Some(&eth)), 3);
         assert_eq!(network_rows(&eth, TR), [("Durum".to_string(), "Bağlı".to_string()), ("IP adresi".to_string(), "192.168.1.20".to_string())]);
         assert_eq!(network_rows(&eth, EN), [("Status".to_string(), "Connected".to_string()), ("IP address".to_string(), "192.168.1.20".to_string())]);
         assert_eq!(network_rows(&net(Link::Ethernet, Reach::Local), EN)[0].1, "No internet");
         assert_eq!(network_rows(&net(Link::Disconnected, Reach::None), TR)[0].1, "Bağlı değil");
+    }
+
+    #[test]
+    fn the_new_sections_stand_in_their_order_and_a_list_of_devices_covers_all_that_is_above_its_card() {
+        let all = Shown { in_use: true, tiles: 3, quick: true, media: true, sound: true, mic: true, brightness: 1, detail: None };
+        assert_eq!(sections(&all), vec![Section::InUse, Section::Tiles(2), Section::Quick, Section::Media, Section::Sound, Section::Mic, Section::Brightness(1), Section::Bottom]);
+        assert_eq!(height(&all), 2.0 * PAD + IN_USE_H + 2.0 * TILE_H + GAP + QUICK_H + MEDIA_H + SOUND_H + MIC_H + BRIGHTNESS_H + BOTTOM_H + 7.0 * GAP);
+        // the outputs: over everything above the sound card
+        let l = layout(&Shown { detail: Some((Detail::Outputs, 6)), ..all });
+        assert_eq!(l.area.unwrap().covered, vec![Section::InUse, Section::Tiles(2), Section::Quick, Section::Media]);
+        assert_eq!(l.after, vec![Section::Sound, Section::Mic, Section::Brightness(1), Section::Bottom]);
+        // the inputs: from the microphone's card, over the sound card too
+        let l = layout(&Shown { detail: Some((Detail::Inputs, 3)), ..all });
+        let a = l.area.unwrap();
+        assert!(a.upwards);
+        assert_eq!(a.covered, vec![Section::InUse, Section::Tiles(2), Section::Quick, Section::Media, Section::Sound]);
+        assert_eq!(l.after, vec![Section::Mic, Section::Brightness(1), Section::Bottom]);
+        // a tile's list: the line above the tiles and the tiles stay, everything under them is covered
+        let l = layout(&Shown { detail: Some((Detail::Wifi, 9)), ..all });
+        assert_eq!(l.before, vec![Section::InUse, Section::Tiles(2)]);
+        assert_eq!(l.area.unwrap().covered, vec![Section::Quick, Section::Media, Section::Sound, Section::Mic, Section::Brightness(1)]);
+        assert_eq!(l.after, vec![Section::Bottom]);
+        assert!(Detail::Outputs.upwards() && Detail::Inputs.upwards() && !Detail::Wifi.upwards() && !Detail::Bluetooth.upwards() && !Detail::Network.upwards());
+    }
+
+    #[test]
+    fn the_quick_buttons_are_the_ones_not_hidden_and_say_what_they_are_at() {
+        let none = |_: &str| false;
+        let state = QuickState { dark: true, awake: false, power: Some(PowerMode::Balanced) };
+        assert_eq!(quick_buttons(&none, &state), Quick::ALL);
+        // no power mode told by Windows: no such button
+        let no_power = QuickState { power: None, ..state };
+        assert!(!quick_buttons(&none, &no_power).contains(&Quick::Power));
+        assert_eq!(quick_buttons(&none, &no_power).len(), 7);
+        // hidden one by one, or the whole row
+        let some = |k: &str| k == "quick.cast" || k == "quick.dark";
+        assert_eq!(quick_buttons(&some, &state), [Quick::Awake, Quick::Power, Quick::NightLight, Quick::Focus, Quick::Airplane, Quick::Project]);
+        assert!(quick_buttons(&|k| k == "quick", &state).is_empty());
+        // lit, symbol and words
+        assert!(Quick::Dark.lit(&state) && !Quick::Awake.lit(&state) && !Quick::Power.lit(&state) && !Quick::Cast.lit(&state));
+        let fast = QuickState { power: Some(PowerMode::Performance), awake: true, dark: false };
+        assert!(Quick::Power.lit(&fast) && Quick::Awake.lit(&fast) && !Quick::Dark.lit(&fast));
+        assert_eq!([Quick::Power.icon(&state), Quick::Power.icon(&fast), Quick::Power.icon(&QuickState { power: Some(PowerMode::Efficiency), ..state })], [L::Gauge, L::Zap, L::Leaf]);
+        assert_eq!(Quick::Power.tip(&state, TR), "Güç modu: dengeli");
+        assert_eq!(Quick::Power.tip(&fast, EN), "Power mode: best performance");
+        assert_eq!(Quick::Power.tip(&QuickState { power: Some(PowerMode::Efficiency), ..state }, EN), "Power mode: best power efficiency");
+        // every button has a name in both languages, a key of its own, and either switches something itself or opens a page
+        let mut keys = std::collections::HashSet::new();
+        for q in Quick::ALL {
+            assert!(!q.name(TR).is_empty() && !q.name(EN).is_empty() && q.name(TR) != q.name(EN), "{q:?}");
+            assert!(q.key().starts_with("quick.") && keys.insert(q.key()), "{q:?}");
+            assert_eq!(q.tip(&no_power, TR).is_empty(), false);
+        }
+        assert_eq!(Quick::ALL.iter().filter(|q| q.page().is_some()).count(), 4);
+        assert_eq!(Quick::NightLight.page(), Some("ms-settings:nightlight"));
+        // the parts that can be hidden have names in both languages too
+        for part in PARTS {
+            assert!(!part_name(part, TR).is_empty() && !part_name(part, EN).is_empty(), "{part}");
+        }
+    }
+
+    #[test]
+    fn what_is_hidden_is_kept_once_and_in_order() {
+        let list = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(with_hidden(&[], "media", true), list(&["media"]));
+        assert_eq!(with_hidden(&list(&["media"]), "wifi", true), list(&["wifi", "media"]));
+        assert_eq!(with_hidden(&list(&["wifi", "media"]), "quick.cast", true), list(&["wifi", "media", "quick.cast"]));
+        assert_eq!(with_hidden(&list(&["wifi", "media", "quick.cast"]), "quick.dark", true), list(&["wifi", "media", "quick.dark", "quick.cast"]));
+        assert_eq!(with_hidden(&list(&["wifi", "media"]), "media", true), list(&["wifi", "media"]), "hidden twice is hidden once");
+        assert_eq!(with_hidden(&list(&["wifi", "media"]), "wifi", false), list(&["media"]));
+        assert_eq!(with_hidden(&list(&["media"]), "wifi", false), list(&["media"]), "shown again when it was not hidden: nothing");
+        assert_eq!(with_hidden(&list(&["gelecek", "media", "media"]), "sound", true), list(&["media", "sound", "gelecek"]), "a name of a later version is kept");
+    }
+
+    #[test]
+    fn the_line_names_who_uses_the_microphone_and_the_camera() {
+        let u = InUse { microphone: vec!["chrome".into(), "Discord".into()], camera: vec!["Zoom".into()] };
+        assert_eq!(in_use_text(&u, TR), "Mikrofon: chrome, Discord · Kamera: Zoom");
+        assert_eq!(in_use_text(&u, EN), "Microphone: chrome, Discord · Camera: Zoom");
+        assert_eq!(in_use_text(&InUse { microphone: Vec::new(), camera: vec!["Zoom".into()] }, TR), "Kamera: Zoom");
+        assert_eq!(in_use_text(&InUse::default(), TR), "");
+    }
+
+    #[test]
+    fn the_brightness_card_has_a_slider_for_each_display_and_the_media_card_says_where_the_track_is() {
+        let one = Shown { brightness: 1, ..Default::default() };
+        assert_eq!(sections(&one), vec![Section::Brightness(1), Section::Bottom]);
+        assert_eq!(section_height(&Section::Brightness(1)), BRIGHTNESS_H);
+        assert_eq!(section_height(&Section::Brightness(2)), BRIGHTNESS_H + BRIGHTNESS_MORE);
+        assert_eq!(height(&Shown { brightness: 3, ..one }), height(&one) + 2.0 * BRIGHTNESS_MORE);
+        assert_eq!(sections(&Shown { brightness: 0, ..one }), vec![Section::Bottom]);
+        // the source's line, and the time
+        assert_eq!(media_source_line("Chrome", 0, 1), "Chrome");
+        assert_eq!(media_source_line("Chrome", 0, 2), "Chrome · 1/2");
+        assert_eq!(media_source_line("Spotify", 2, 3), "Spotify · 3/3");
+        assert_eq!(media_source_line("Spotify", 9, 3), "Spotify · 3/3", "a place past the end is the last");
+        let now = std::time::Instant::now();
+        let t = Timeline { duration_ms: 200_000, position_ms: 65_000, at: now };
+        assert_eq!(media_time(&t, true, now), "1:05 / 3:20");
+        assert_eq!(media_time(&t, true, now + std::time::Duration::from_secs(5)), "1:10 / 3:20");
+        assert_eq!(media_time(&t, false, now + std::time::Duration::from_secs(5)), "1:05 / 3:20");
     }
 
     #[test]

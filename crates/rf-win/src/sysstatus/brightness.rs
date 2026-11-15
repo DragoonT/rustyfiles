@@ -1,3 +1,7 @@
+//! EVERY DISPLAY ([`open_all`], what the control centre uses): the same for each display Windows lists, the primary one first, each
+//! on its own row of the panel. A display that does not answer has no row; the others have theirs. ([`open`] is the one display
+//! this module began with, kept for the probe and the tests.)
+//!
 //! Brightness of the primary monitor through DDC/CI (`dxva2`: `GetMonitorBrightness` / `SetMonitorBrightness`). It is the one
 //! documented way for a desktop monitor; it needs no administrator rights. A laptop's own panel does not answer DDC/CI (it is driven
 //! through WMI), which is NOT implemented here: on such a machine the call fails, [`BrightnessSnapshot::available`] is false and the
@@ -13,8 +17,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
 use windows::Win32::Devices::Display::{DestroyPhysicalMonitors, GetMonitorBrightness, GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR, PHYSICAL_MONITOR, SetMonitorBrightness};
-use windows::Win32::Foundation::POINT;
-use windows::Win32::Graphics::Gdi::{MONITOR_DEFAULTTOPRIMARY, MonitorFromPoint};
+use windows::Win32::Foundation::{LPARAM, POINT, RECT};
+use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC, HMONITOR, MONITOR_DEFAULTTOPRIMARY, MonitorFromPoint};
+use windows::core::BOOL;
 
 use super::{Shared, Subscription, init_mta};
 
@@ -137,15 +142,116 @@ fn work(rx: Receiver<Msg>, queue: Arc<Shared<u32>>, callback: impl Fn(&Brightnes
     }
 }
 
-/// The physical monitors behind the primary display, released when dropped.
+// ------------------------------------------------------------------ every display
+
+/// The open displays. Dropping it ends the thread.
+pub struct Screens {
+    /// The newest value asked for each display (by its place in the list the callback was given).
+    queue: Arc<std::sync::Mutex<Vec<Option<u32>>>>,
+    wake: std::sync::mpsc::Sender<Msg>,
+    _end: Subscription,
+}
+
+impl Screens {
+    /// The user moved the slider of display `index` to this raw value. Returns at once; the newest value of a drag is the one written.
+    pub fn set(&self, index: usize, value: u32) {
+        if let Ok(mut q) = self.queue.lock() {
+            if q.len() <= index {
+                q.resize(index + 1, None);
+            }
+            q[index] = Some(value);
+        }
+        let _ = self.wake.send(Msg::Write);
+    }
+}
+
+/// The displays in the order of the panel's rows: the primary one first, the others as Windows lists them.
+pub fn primary_first<T: PartialEq + Copy>(all: Vec<T>, primary: T) -> Vec<T> {
+    let mut out: Vec<T> = all.iter().copied().filter(|m| *m == primary).take(1).collect();
+    out.extend(all.into_iter().filter(|m| *m != primary));
+    out
+}
+
+unsafe extern "system" fn collect_display(monitor: HMONITOR, _: HDC, _: *mut RECT, list: LPARAM) -> BOOL {
+    // SAFETY: `list` is the vector `displays` passes for the time of the call
+    unsafe { (*(list.0 as *mut Vec<isize>)).push(monitor.0 as isize) };
+    BOOL(1)
+}
+
+fn displays() -> Vec<isize> {
+    let mut all: Vec<isize> = Vec::new();
+    let primary = unsafe {
+        let _ = EnumDisplayMonitors(None, None, Some(collect_display), LPARAM(&mut all as *mut Vec<isize> as isize));
+        MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY).0 as isize
+    };
+    primary_first(all, primary)
+}
+
+/// Reads every display's brightness on a thread of its own and tells `callback` once (one snapshot per display, `available: false`
+/// for one that does not answer), then keeps the displays for [`Screens::set`].
+pub fn open_all(callback: impl Fn(&[BrightnessSnapshot]) + Send + 'static) -> Screens {
+    let queue = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (tx, rx) = channel::<Msg>();
+    let q = queue.clone();
+    let spawned = std::thread::Builder::new().name("rf-brightness".into()).spawn(move || {
+        init_mta();
+        // (each display gets the tries of the first reading: `TRIES`)
+        let opened: Vec<(Option<Monitors>, BrightnessSnapshot)> = displays().into_iter().map(|d| reading_of(|| Monitors::of(HMONITOR(d as *mut _)))).collect();
+        let snaps: Vec<BrightnessSnapshot> = opened.iter().map(|(_, s)| *s).collect();
+        callback(&snaps);
+        if !snaps.iter().any(|s| s.available) {
+            return;
+        }
+        while let Ok(msg) = rx.recv() {
+            if matches!(msg, Msg::Quit) {
+                break;
+            }
+            let asked: Vec<Option<u32>> = q.lock().map(|mut q| q.iter_mut().map(Option::take).collect()).unwrap_or_default();
+            for (i, v) in asked.into_iter().enumerate() {
+                if let (Some(v), Some((Some(m), snap))) = (v, opened.get(i))
+                    && snap.available
+                {
+                    m.write(v.clamp(snap.min, snap.max));
+                }
+            }
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("brightness: the thread did not start: {e}");
+    }
+    let quit = tx.clone();
+    Screens { queue, wake: tx, _end: Subscription::new(move || { let _ = quit.send(Msg::Quit); }) }
+}
+
+/// A display and its brightness, with the tries of a first reading.
+fn reading_of(open: impl Fn() -> Option<Monitors>) -> (Option<Monitors>, BrightnessSnapshot) {
+    let mut monitors = open();
+    let mut snap = BrightnessSnapshot::default();
+    for attempt in 0..TRIES {
+        if attempt > 0 {
+            std::thread::sleep(RETRY_AFTER);
+            monitors = open();
+        }
+        snap = monitors.as_ref().and_then(|m| m.read()).unwrap_or_default();
+        if snap.available {
+            break;
+        }
+    }
+    (monitors, snap)
+}
+
+/// The physical monitors behind a display, released when dropped.
 struct Monitors {
     all: Vec<PHYSICAL_MONITOR>,
 }
 
 impl Monitors {
     fn primary() -> Option<Monitors> {
+        Monitors::of(unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) })
+    }
+
+    fn of(hmon: HMONITOR) -> Option<Monitors> {
         unsafe {
-            let hmon = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
             let mut n = 0u32;
             GetNumberOfPhysicalMonitorsFromHMONITOR(hmon, &mut n).ok()?;
             if n == 0 {
@@ -192,6 +298,27 @@ impl Drop for Monitors {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_primary_display_is_the_first_row_and_the_others_keep_their_order() {
+        assert_eq!(primary_first(vec![7, 3, 9], 3), [3, 7, 9]);
+        assert_eq!(primary_first(vec![3, 7, 9], 3), [3, 7, 9]);
+        assert_eq!(primary_first(vec![7, 9], 3), [7, 9], "a primary that is not listed adds nothing");
+        assert_eq!(primary_first(Vec::<i32>::new(), 3), Vec::<i32>::new());
+    }
+
+    /// On the PC it is run on, by hand: how many displays there are and how many answer DDC/CI. Reads only.
+    #[test]
+    #[ignore = "asks the monitors of the PC it runs on for their brightness; run by hand"]
+    fn what_this_pcs_displays_say() {
+        let (tx, rx) = channel();
+        let screens = open_all(move |list| {
+            let _ = tx.send(list.to_vec());
+        });
+        let list = rx.recv_timeout(std::time::Duration::from_secs(8)).expect("a reading");
+        drop(screens);
+        println!("displays {} answering {}", list.len(), list.iter().filter(|s| s.available).count());
+    }
 
     #[test]
     fn the_slider_and_the_monitors_range_map_both_ways() {

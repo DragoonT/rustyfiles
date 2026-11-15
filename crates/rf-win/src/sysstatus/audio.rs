@@ -14,6 +14,11 @@
 //! the callback ignores the events that carry it (the thread has already updated its picture from what the endpoint answered), so the
 //! slider does not fight the echo of its own drag.
 //!
+//! THE MICROPHONE is the same module once more: a second thread of the same kind follows the default INPUT device (its level, its
+//! mute, its name, the list of inputs) from the first [`subscribe_input`] on, and takes the same three writes
+//! ([`set_input_volume`], [`set_input_muted`], [`set_default_input`]). Everything below that says "output" holds for it with
+//! "input" ([`Flow`] is the only difference between the two threads).
+//!
 //! THE DEFAULT OUTPUT. [`set_default_output`] is the user's click on a device of the panel's list (issue 22, ElectroUndead: "When you
 //! right click volume icon - you can change default output device, you can use EarTrumpet as reference. As for these menu is not
 //! clickable"). Core Audio has NO documented call for it: Windows' own panels, and the tools that offer the same (EarTrumpet among
@@ -37,7 +42,7 @@ use windows::Win32::Foundation::PROPERTYKEY;
 use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl};
 use windows::Win32::Media::Audio::{
     AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE, DEVICE_STATE_ACTIVE, EDataFlow, ERole, IMMDevice, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl,
-    MMDeviceEnumerator, eConsole, eMultimedia, eRender,
+    MMDeviceEnumerator, eCapture, eConsole, eMultimedia, eRender,
 };
 use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, STGM_READ};
@@ -151,15 +156,40 @@ struct Engine {
     mute: Arc<Shared<bool>>,
 }
 
+/// Which side of the sound a thread follows: what plays, or what is recorded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Flow {
+    Output,
+    Input,
+}
+
+impl Flow {
+    fn data(self) -> EDataFlow {
+        match self {
+            Flow::Output => eRender,
+            Flow::Input => eCapture,
+        }
+    }
+}
+
 static ENGINE: OnceLock<Engine> = OnceLock::new();
+static INPUT: OnceLock<Engine> = OnceLock::new();
 
 fn engine() -> &'static Engine {
-    ENGINE.get_or_init(|| {
+    engine_of(Flow::Output)
+}
+
+fn engine_of(flow: Flow) -> &'static Engine {
+    let (slot, name) = match flow {
+        Flow::Output => (&ENGINE, "rf-audio"),
+        Flow::Input => (&INPUT, "rf-audio-in"),
+    };
+    slot.get_or_init(|| {
         let hub = Hub::new();
         let (tx, rx) = channel::<Msg>();
         let (volume, mute) = (Shared::new(), Shared::new());
         let (h, t, v, m) = (hub.clone(), tx.clone(), volume.clone(), mute.clone());
-        let started = std::thread::Builder::new().name("rf-audio".into()).spawn(move || run(rx, t, h, v, m));
+        let started = std::thread::Builder::new().name(name.into()).spawn(move || run(flow, rx, t, h, v, m));
         if let Err(e) = started {
             log::warn!("audio: the thread did not start: {e}");
             hub.publish(AudioSnapshot::default());
@@ -209,13 +239,56 @@ pub fn can_switch_to(s: &AudioSnapshot, id: &str) -> bool {
     !id.is_empty() && s.devices.iter().any(|d| d.id == id && !d.default)
 }
 
+// ------------------------------------------------------------------ the microphone (the same, for the default input)
+
+/// Follows the default input device (the microphone): as [`subscribe`]. Starts its thread the first time.
+pub fn subscribe_input(callback: impl Fn(&AudioSnapshot) + Send + Sync + 'static) -> Subscription {
+    engine_of(Flow::Input).hub.subscribe(callback)
+}
+
+/// The microphone's state as last read (`None` before the first reading).
+pub fn input_snapshot() -> Option<AudioSnapshot> {
+    INPUT.get().and_then(|e| e.hub.latest())
+}
+
+/// The user moved the microphone's slider: as [`set_volume`].
+pub fn set_input_volume(fraction: f32) {
+    let e = engine_of(Flow::Input);
+    let steps = e.hub.latest().map_or(0, |s| s.steps);
+    if e.volume.push(slider_to_volume(fraction, steps)) {
+        let _ = e.tx.send(Msg::Write);
+    }
+}
+
+/// The user clicked the microphone: mutes or unmutes it.
+pub fn set_input_muted(muted: bool) {
+    let e = engine_of(Flow::Input);
+    if e.mute.push(muted) {
+        let _ = e.tx.send(Msg::Write);
+    }
+}
+
+/// The user chose an input device in the panel's list: as [`set_default_output`].
+pub fn set_default_input(id: &str) {
+    let _ = engine_of(Flow::Input).tx.send(Msg::Default(id.to_string()));
+}
+
 /// Reads the state once on the calling thread (a probe; the panel follows with [`subscribe`]). Blocks.
 pub fn read_once() -> AudioSnapshot {
     init_mta();
     let Ok(en) = (unsafe { CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) }) else { return AudioSnapshot::default() };
     let (tx, _rx) = channel::<Msg>();
-    let ep = Endpoint::attach(&en, &tx);
-    build(&en, ep.as_ref())
+    let ep = Endpoint::attach(Flow::Output, &en, &tx);
+    build(Flow::Output, &en, ep.as_ref())
+}
+
+/// The microphone's state read once on the calling thread (a probe). Blocks.
+pub fn read_input_once() -> AudioSnapshot {
+    init_mta();
+    let Ok(en) = (unsafe { CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) }) else { return AudioSnapshot::default() };
+    let (tx, _rx) = channel::<Msg>();
+    let ep = Endpoint::attach(Flow::Input, &en, &tx);
+    build(Flow::Input, &en, ep.as_ref())
 }
 
 /// The default output device and what is registered on it. Dropping it takes the registration off.
@@ -227,9 +300,9 @@ struct Endpoint {
 }
 
 impl Endpoint {
-    fn attach(en: &IMMDeviceEnumerator, tx: &Sender<Msg>) -> Option<Endpoint> {
+    fn attach(flow: Flow, en: &IMMDeviceEnumerator, tx: &Sender<Msg>) -> Option<Endpoint> {
         unsafe {
-            let dev = en.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
+            let dev = en.GetDefaultAudioEndpoint(flow.data(), eConsole).ok()?;
             let volume: IAudioEndpointVolume = dev.Activate(CLSCTX_ALL, None).ok()?;
             let callback: IAudioEndpointVolumeCallback = VolumeEvents { tx: tx.clone() }.into();
             if let Err(e) = volume.RegisterControlChangeNotify(&callback) {
@@ -279,10 +352,10 @@ unsafe fn friendly_name(dev: &IMMDevice) -> Option<String> {
     }
 }
 
-fn list_devices(en: &IMMDeviceEnumerator, default_id: &str) -> Vec<Device> {
+fn list_devices(flow: Flow, en: &IMMDeviceEnumerator, default_id: &str) -> Vec<Device> {
     let mut out = Vec::new();
     unsafe {
-        let Ok(coll) = en.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) else { return out };
+        let Ok(coll) = en.EnumAudioEndpoints(flow.data(), DEVICE_STATE_ACTIVE) else { return out };
         for i in 0..coll.GetCount().unwrap_or(0) {
             let Ok(dev) = coll.Item(i) else { continue };
             let id = device_id(&dev).unwrap_or_default();
@@ -293,29 +366,29 @@ fn list_devices(en: &IMMDeviceEnumerator, default_id: &str) -> Vec<Device> {
     out
 }
 
-fn build(en: &IMMDeviceEnumerator, ep: Option<&Endpoint>) -> AudioSnapshot {
+fn build(flow: Flow, en: &IMMDeviceEnumerator, ep: Option<&Endpoint>) -> AudioSnapshot {
     match ep {
         Some(ep) => {
             let (volume, muted) = ep.level();
-            AudioSnapshot { available: true, volume, muted, steps: ep.steps(), device: ep.name.clone(), devices: list_devices(en, &ep.id) }
+            AudioSnapshot { available: true, volume, muted, steps: ep.steps(), device: ep.name.clone(), devices: list_devices(flow, en, &ep.id) }
         }
-        None => AudioSnapshot { devices: list_devices(en, ""), ..AudioSnapshot::default() },
+        None => AudioSnapshot { devices: list_devices(flow, en, ""), ..AudioSnapshot::default() },
     }
 }
 
-fn run(rx: Receiver<Msg>, tx: Sender<Msg>, hub: Hub<AudioSnapshot>, volume_q: Arc<Shared<f32>>, mute_q: Arc<Shared<bool>>) {
+fn run(flow: Flow, rx: Receiver<Msg>, tx: Sender<Msg>, hub: Hub<AudioSnapshot>, volume_q: Arc<Shared<f32>>, mute_q: Arc<Shared<bool>>) {
     init_mta();
     let Ok(en) = (unsafe { CoCreateInstance::<_, IMMDeviceEnumerator>(&MMDeviceEnumerator, None, CLSCTX_ALL) }) else {
         log::warn!("audio: no device enumerator");
         hub.publish(AudioSnapshot::default());
         return;
     };
-    let events: IMMNotificationClient = DeviceEvents { tx: tx.clone() }.into();
+    let events: IMMNotificationClient = DeviceEvents { tx: tx.clone(), flow: flow.data() }.into();
     if let Err(e) = unsafe { en.RegisterEndpointNotificationCallback(&events) } {
         log::debug!("audio: no device notifications: {e}");
     }
-    let mut ep = Endpoint::attach(&en, &tx);
-    let mut snap = build(&en, ep.as_ref());
+    let mut ep = Endpoint::attach(flow, &en, &tx);
+    let mut snap = build(flow, &en, ep.as_ref());
     hub.publish(snap.clone());
     while let Ok(msg) = rx.recv() {
         match msg {
@@ -324,8 +397,8 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>, hub: Hub<AudioSnapshot>, volume_q: Ar
                 while rx.recv_timeout(BURST).is_ok() {}
                 // (the old registration comes off first, then the new default output is attached)
                 drop(ep.take());
-                ep = Endpoint::attach(&en, &tx);
-                snap = build(&en, ep.as_ref());
+                ep = Endpoint::attach(flow, &en, &tx);
+                snap = build(flow, &en, ep.as_ref());
                 hub.publish(snap.clone());
             }
             Msg::Level { volume, muted } => {
@@ -431,6 +504,8 @@ fn make_default(id: &str) -> windows::core::Result<()> {
 #[implement(IMMNotificationClient)]
 struct DeviceEvents {
     tx: Sender<Msg>,
+    /// The side this thread follows: only its default device's change matters to it.
+    flow: EDataFlow,
 }
 
 #[allow(non_snake_case)]
@@ -448,7 +523,7 @@ impl IMMNotificationClient_Impl for DeviceEvents_Impl {
         Ok(())
     }
     fn OnDefaultDeviceChanged(&self, flow: EDataFlow, role: ERole, _id: &PCWSTR) -> windows::core::Result<()> {
-        if flow == eRender && role == eConsole {
+        if flow == self.flow && role == eConsole {
             let _ = self.tx.send(Msg::Devices);
         }
         Ok(())
@@ -502,6 +577,14 @@ mod tests {
         assert!(can_switch_to(&none, "headset"));
         // what plays, with the role this module follows as the last
         assert_eq!(OUTPUT_ROLES, [eMultimedia, eConsole]);
+    }
+
+    /// On the PC it is run on, by hand: the microphone as Windows tells it (how many inputs, never their names).
+    #[test]
+    #[ignore = "reads the input devices of the PC it runs on; run by hand"]
+    fn what_this_pc_says_about_its_microphone() {
+        let s = read_input_once();
+        println!("available {} volume {:.2} muted {} steps {} inputs {} default among them {}", s.available, s.volume, s.muted, s.steps, s.devices.len(), s.devices.iter().any(|d| d.default));
     }
 
     /// On the PC it is run on: the audio service's policy client answers for the interface, and takes, for each role, the device
