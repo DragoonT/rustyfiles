@@ -25,13 +25,14 @@ pub const TILE_H: f32 = 64.0;
 pub const MEDIA_H: f32 = 88.0;
 pub const SOUND_H: f32 = 72.0;
 pub const BRIGHTNESS_H: f32 = 72.0;
-/// Each display after the first adds a slider's row to the brightness card.
-pub const BRIGHTNESS_MORE: f32 = 34.0;
 pub const BOTTOM_H: f32 = 36.0;
-/// The microphone's card: as the sound card.
-pub const MIC_H: f32 = 72.0;
-/// The row of quick buttons: round buttons of the bottom row's size.
-pub const QUICK_H: f32 = 36.0;
+/// A round button at the head of a slider (the speaker, the microphone, a display's number): what an item of a row that opens one
+/// item at a time is while it is not the open one.
+pub const HEAD: f32 = 28.0;
+/// The gap between two things of a card's row.
+pub const ROW_GAP: f32 = 8.0;
+/// The inner width of a card (the panel less its padding and the card's own).
+pub const CARD_INNER: f32 = WIDTH - 2.0 * PAD - 24.0;
 /// The line that says who is using the microphone or the camera.
 pub const IN_USE_H: f32 = 20.0;
 /// A detail (the outputs, a tile's list) is one card: this padding round it, a head (its name, and a radio's switch), rows.
@@ -136,15 +137,11 @@ pub struct Shown {
     /// A program is using the microphone or the camera: the line that says so.
     pub in_use: bool,
     pub tiles: usize,
-    /// The row of quick buttons has buttons.
-    pub quick: bool,
     /// A media session exists.
     pub media: bool,
-    /// A sound device exists.
+    /// A sound device exists, an output or a microphone: the one sound card (they share its row: [`Swap`]).
     pub sound: bool,
-    /// A microphone exists.
-    pub mic: bool,
-    /// How many displays answered DDC/CI: a slider for each in the one brightness card (0: no card).
+    /// How many displays answer: they share the one brightness card's row (0: no card).
     pub brightness: usize,
     /// What is opened out, and how many rows it has; `None` while nothing is.
     pub detail: Option<(Detail, usize)>,
@@ -155,14 +152,14 @@ pub enum Section {
     InUse,
     /// The tiles, two to a row: the number of rows.
     Tiles(usize),
-    Quick,
     Media,
     /// What is opened out, as one card of this height, IN THE PLACE of the sections it covers.
     Detail(Detail, f32),
+    /// The speaker and the microphone, in one row.
     Sound,
-    Mic,
-    /// The brightness card: how many displays it has a slider for.
+    /// The brightness card: how many displays share its row.
     Brightness(usize),
+    /// The quick buttons and the panel's own three, in one row.
     Bottom,
 }
 
@@ -209,15 +206,19 @@ pub struct Layout {
 }
 
 /// The sections a machine gets, top to bottom, without the bottom row (which is always there) and with nothing opened out: who
-/// uses the microphone, the tiles, the quick buttons, what plays, the sound, the microphone, the brightness.
+/// uses the microphone, the tiles, what plays, the sound, the brightness.
+///
+/// ONE ROW FOR THE THINGS OF ONE KIND (the user, 2026-11-15, of the panel that had a card for the speaker, one for the microphone
+/// and a slider for each display: "mesela mikrofonla hoparlör aynı satırda olur ama hangisine tıklarsan o genişler. monitörde de
+/// aynı. hem 3-4 monitörü olan adamın yeri çok dolmaz."): the speaker and the microphone are one card, the displays are one card,
+/// and in each the one that was pressed has the slider while the others are a round button ([`Swap`]). The quick buttons stand in
+/// the bottom row, in the room beside the panel's own three ("burayı da değerlendirelim").
 fn base(s: &Shown) -> Vec<Section> {
     [
         s.in_use.then_some(Section::InUse),
         (s.tiles > 0).then(|| Section::Tiles(s.tiles.div_ceil(2))),
-        s.quick.then_some(Section::Quick),
         s.media.then_some(Section::Media),
         s.sound.then_some(Section::Sound),
-        s.mic.then_some(Section::Mic),
         (s.brightness > 0).then_some(Section::Brightness(s.brightness)),
     ]
     .into_iter()
@@ -239,11 +240,8 @@ fn base(s: &Shown) -> Vec<Section> {
 pub fn layout(s: &Shown) -> Layout {
     let mut all = base(s);
     let owner = s.detail.and_then(|(d, rows)| {
-        let at = all.iter().position(|sec| match d {
-            Detail::Outputs => *sec == Section::Sound,
-            Detail::Inputs => *sec == Section::Mic,
-            _ => matches!(sec, Section::Tiles(_)),
-        })?;
+        // (the outputs and the inputs both open out of the sound card, which has the speaker and the microphone)
+        let at = all.iter().position(|sec| if d.upwards() { *sec == Section::Sound } else { matches!(sec, Section::Tiles(_)) })?;
         Some((d, rows, at))
     });
     let Some((kind, rows, at)) = owner else {
@@ -271,12 +269,10 @@ pub fn section_height(s: &Section) -> f32 {
     match s {
         Section::InUse => IN_USE_H,
         Section::Tiles(rows) => *rows as f32 * TILE_H + rows.saturating_sub(1) as f32 * GAP,
-        Section::Quick => QUICK_H,
         Section::Media => MEDIA_H,
         Section::Detail(_, h) => *h,
         Section::Sound => SOUND_H,
-        Section::Mic => MIC_H,
-        Section::Brightness(displays) => BRIGHTNESS_H + displays.saturating_sub(1) as f32 * BRIGHTNESS_MORE,
+        Section::Brightness(_) => BRIGHTNESS_H,
         Section::Bottom => BOTTOM_H,
     }
 }
@@ -396,9 +392,85 @@ pub fn shown_power(actual: Power, ask: Option<(bool, u64)>) -> Power {
     }
 }
 
+// ------------------------------------------------------------------ a row that opens one item at a time
+
+/// Which item of a row has the slider, and the motion while another takes its place: the one that was pressed grows from a round
+/// button to the row's width while the one that was open shrinks to a button, on the spring a detail opens with.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Swap {
+    from: usize,
+    to: usize,
+    motion: Unfold,
+}
+
+impl Swap {
+    /// At rest, with item `i` open.
+    pub const fn at(i: usize) -> Swap {
+        Swap { from: i, to: i, motion: Unfold::open() }
+    }
+
+    /// The item that is open, or opening.
+    pub fn open(&self) -> usize {
+        self.to
+    }
+
+    /// Opens item `to` in the place of the open one. The same item again changes nothing.
+    pub fn go(&mut self, to: usize, now_ms: u64, animate: bool) {
+        if to == self.to {
+            return;
+        }
+        (self.from, self.to) = (self.to, to);
+        self.motion = Unfold::folded();
+        self.motion.go(true, now_ms, animate);
+    }
+
+    /// How far item `i` is opened out: 1 for the open one, 0 for the others, in between (and a little past, as a spring goes) for
+    /// the two that are changing places. The two shares always add up to 1.
+    pub fn share(&self, i: usize, now_ms: u64) -> f32 {
+        let t = self.motion.value(now_ms);
+        if i == self.to {
+            t
+        } else if i == self.from {
+            1.0 - t
+        } else {
+            0.0
+        }
+    }
+
+    pub fn settled(&self, now_ms: u64) -> bool {
+        self.motion.settled(now_ms)
+    }
+}
+
+/// The width of an item whose share is `share`: a round button when 0, `open` when 1.
+pub fn swap_width(share: f32, open: f32) -> f32 {
+    (HEAD + (open - HEAD) * share).max(0.0)
+}
+
+/// The width the open item of a row of `items` has, when the row is `room` wide: what the others, as round buttons, leave it.
+pub fn open_width(items: usize, room: f32) -> f32 {
+    room - items.saturating_sub(1) as f32 * (HEAD + ROW_GAP)
+}
+
+/// The slider's width in an open item: the item less its round button, and no wider than a card's own slider.
+pub fn open_slider(open: f32) -> f32 {
+    (open - HEAD - ROW_GAP).min(SLIDER_W)
+}
+
+/// The size of the round buttons of the bottom row and the gap between two of them, for `count` buttons in a row `room` wide: the
+/// full size while they fit, smaller and closer when the user shows more than fit.
+pub fn bottom_buttons(count: usize, room: f32) -> (f32, f32) {
+    let fits = |size: f32, gap: f32| count as f32 * size + count.saturating_sub(1) as f32 * gap <= room;
+    if fits(BOTTOM_H, 6.0) {
+        return (BOTTOM_H, 6.0);
+    }
+    let gap = 4.0;
+    (((room - count.saturating_sub(1) as f32 * gap) / count.max(1) as f32).floor().clamp(20.0, BOTTOM_H), gap)
+}
+
 // ------------------------------------------------------------------ the quick buttons, and what can be hidden
 
-/// One of the row's quick buttons. Three switch something themselves (Windows' dark mode, keeping the PC awake, the power mode);
+/// One of the quick buttons of the bottom row. Three switch something themselves (Windows' dark mode, keeping the PC awake, the power mode);
 /// the others open the page or the panel of Windows that does (Windows has no switch a program may press for them).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Quick {
@@ -521,7 +593,7 @@ pub fn part_name(key: &str, w: Words) -> &'static str {
     })
 }
 
-/// The quick buttons the row shows: the ones that are not hidden, and the power mode's only where Windows tells one.
+/// The quick buttons the bottom row shows: the ones that are not hidden, and the power mode's only where Windows tells one.
 pub fn quick_buttons(hidden: &dyn Fn(&str) -> bool, s: &QuickState) -> Vec<Quick> {
     if hidden("quick") {
         return Vec::new();
@@ -946,16 +1018,12 @@ mod tests {
     fn a_detail_has_its_place_on_every_machine() {
         for bits in 0u32..(1 << 8) {
             let on = |bit: u32| bits & (1 << bit) != 0;
-            let base = Shown { tiles: [0, 1, 2, 3][(bits & 3) as usize], media: on(2), sound: on(3), brightness: usize::from(on(4)), in_use: on(5), quick: on(6), mic: on(7), detail: None };
+            let base = Shown { tiles: [0, 1, 2, 3][(bits & 3) as usize], media: on(2), sound: on(3), brightness: [0, 1, 2, 4][((bits >> 6) & 3) as usize] * usize::from(on(4)), in_use: on(5), detail: None };
             for d in [Detail::Outputs, Detail::Inputs, Detail::Wifi, Detail::Bluetooth, Detail::Network] {
                 for rows in [1usize, 2, 6, 30] {
                     let open = Shown { detail: Some((d, rows)), ..base };
                     let l = layout(&open);
-                    let owner = match d {
-                        Detail::Outputs => base.sound,
-                        Detail::Inputs => base.mic,
-                        _ => base.tiles > 0,
-                    };
+                    let owner = if d.upwards() { base.sound } else { base.tiles > 0 };
                     assert_eq!(l.area.is_some(), owner, "{open:?}");
                     assert_eq!(height_at(&open, 0.0), height(&base), "folded is the panel without it: {open:?}");
                     assert!(height(&open) >= height(&base), "{open:?}");
@@ -1066,26 +1134,78 @@ mod tests {
     }
 
     #[test]
-    fn the_new_sections_stand_in_their_order_and_a_list_of_devices_covers_all_that_is_above_its_card() {
-        let all = Shown { in_use: true, tiles: 3, quick: true, media: true, sound: true, mic: true, brightness: 1, detail: None };
-        assert_eq!(sections(&all), vec![Section::InUse, Section::Tiles(2), Section::Quick, Section::Media, Section::Sound, Section::Mic, Section::Brightness(1), Section::Bottom]);
-        assert_eq!(height(&all), 2.0 * PAD + IN_USE_H + 2.0 * TILE_H + GAP + QUICK_H + MEDIA_H + SOUND_H + MIC_H + BRIGHTNESS_H + BOTTOM_H + 7.0 * GAP);
-        // the outputs: over everything above the sound card
-        let l = layout(&Shown { detail: Some((Detail::Outputs, 6)), ..all });
-        assert_eq!(l.area.unwrap().covered, vec![Section::InUse, Section::Tiles(2), Section::Quick, Section::Media]);
-        assert_eq!(l.after, vec![Section::Sound, Section::Mic, Section::Brightness(1), Section::Bottom]);
-        // the inputs: from the microphone's card, over the sound card too
-        let l = layout(&Shown { detail: Some((Detail::Inputs, 3)), ..all });
-        let a = l.area.unwrap();
-        assert!(a.upwards);
-        assert_eq!(a.covered, vec![Section::InUse, Section::Tiles(2), Section::Quick, Section::Media, Section::Sound]);
-        assert_eq!(l.after, vec![Section::Mic, Section::Brightness(1), Section::Bottom]);
+    fn the_sections_stand_in_their_order_and_a_list_of_devices_covers_all_that_is_above_the_sound_card() {
+        let all = Shown { in_use: true, tiles: 3, media: true, sound: true, brightness: 4, detail: None };
+        assert_eq!(sections(&all), vec![Section::InUse, Section::Tiles(2), Section::Media, Section::Sound, Section::Brightness(4), Section::Bottom]);
+        // one card for the speaker and the microphone, one for the displays however many: the panel is no taller for them
+        assert_eq!(height(&all), 2.0 * PAD + IN_USE_H + 2.0 * TILE_H + GAP + MEDIA_H + SOUND_H + BRIGHTNESS_H + BOTTOM_H + 5.0 * GAP);
+        assert_eq!(height(&Shown { brightness: 1, ..all }), height(&all));
+        // the outputs and the inputs both open out of the sound card, over everything above it
+        for d in [Detail::Outputs, Detail::Inputs] {
+            let l = layout(&Shown { detail: Some((d, 6)), ..all });
+            let a = l.area.unwrap();
+            assert!(a.upwards);
+            assert_eq!(a.covered, vec![Section::InUse, Section::Tiles(2), Section::Media]);
+            assert_eq!(l.after, vec![Section::Sound, Section::Brightness(4), Section::Bottom]);
+        }
         // a tile's list: the line above the tiles and the tiles stay, everything under them is covered
         let l = layout(&Shown { detail: Some((Detail::Wifi, 9)), ..all });
         assert_eq!(l.before, vec![Section::InUse, Section::Tiles(2)]);
-        assert_eq!(l.area.unwrap().covered, vec![Section::Quick, Section::Media, Section::Sound, Section::Mic, Section::Brightness(1)]);
+        assert_eq!(l.area.unwrap().covered, vec![Section::Media, Section::Sound, Section::Brightness(4)]);
         assert_eq!(l.after, vec![Section::Bottom]);
         assert!(Detail::Outputs.upwards() && Detail::Inputs.upwards() && !Detail::Wifi.upwards() && !Detail::Bluetooth.upwards() && !Detail::Network.upwards());
+    }
+
+    #[test]
+    fn a_row_opens_one_item_at_a_time_and_the_pressed_one_grows_as_the_open_one_shrinks() {
+        let mut s = Swap::at(0);
+        assert_eq!((s.open(), s.share(0, 0), s.share(1, 0), s.settled(0)), (0, 1.0, 0.0, true));
+        // the microphone is pressed: it grows while the speaker shrinks, and the two always fill the same room
+        s.go(1, 1_000, true);
+        assert_eq!((s.open(), s.share(0, 1_000), s.share(1, 1_000)), (1, 1.0, 0.0), "it starts where it was");
+        for at in [1_010u64, 1_060, 1_120, 1_300, 1_900] {
+            assert!((s.share(0, at) + s.share(1, at) - 1.0).abs() < 1e-5, "at {at}");
+            assert_eq!(s.share(2, at), 0.0, "an item that is not in it stays a button");
+        }
+        assert!(s.share(1, 1_100) > s.share(1, 1_030));
+        let end = (0..3_000u64).find(|i| s.settled(1_000 + i)).unwrap();
+        assert_eq!((s.share(1, 1_000 + end), s.share(0, 1_000 + end)), (1.0, 0.0));
+        // pressed again: nothing; without animations: at once
+        let same = s;
+        s.go(1, 5_000, true);
+        assert_eq!(s, same);
+        s.go(0, 5_000, false);
+        assert_eq!((s.share(0, 5_000), s.share(1, 5_000), s.settled(5_000)), (1.0, 0.0, true));
+        // the widths: a round button, the open item, what is between
+        assert_eq!(swap_width(0.0, 240.0), HEAD);
+        assert_eq!(swap_width(1.0, 240.0), 240.0);
+        assert_eq!(swap_width(0.5, 240.0), (HEAD + 240.0) / 2.0);
+        assert!(swap_width(1.05, 240.0) > 240.0 && swap_width(-0.05, 240.0) < HEAD && swap_width(-9.0, 240.0) == 0.0);
+        // the speaker and the microphone beside the list's button: the open one is as wide as a card's own slider with its button
+        let sound_room = CARD_INNER - HEAD - ROW_GAP;
+        assert_eq!(open_width(2, sound_room), CARD_INNER - 2.0 * (HEAD + ROW_GAP));
+        assert_eq!(open_slider(open_width(1, sound_room)), SLIDER_W, "one alone keeps the slider it had");
+        assert!(open_slider(open_width(2, sound_room)) < SLIDER_W);
+        // displays: two keep the full slider, each further one takes a button's room from it, and four still have a slider to drag
+        assert_eq!(open_slider(open_width(2, CARD_INNER)), SLIDER_W);
+        assert_eq!(open_slider(open_width(3, CARD_INNER)), SLIDER_W - (HEAD + ROW_GAP));
+        assert!(open_slider(open_width(4, CARD_INNER)) > 150.0);
+    }
+
+    #[test]
+    fn the_bottom_rows_buttons_are_full_size_while_they_fit_and_smaller_when_more_are_shown() {
+        let room = WIDTH - 2.0 * PAD;
+        // the panel's own three, and up to five quick buttons beside them: as they were
+        for count in [1usize, 3, 8] {
+            assert_eq!(bottom_buttons(count, room), (BOTTOM_H, 6.0), "{count}");
+        }
+        // everything shown (eight quick buttons and the three): smaller, closer, still in one row
+        let (size, gap) = bottom_buttons(11, room);
+        assert!(size < BOTTOM_H && size >= 24.0, "{size}");
+        assert!(11.0 * size + 10.0 * gap <= room);
+        // never nothing, never more than the full size
+        assert_eq!(bottom_buttons(0, room).0, BOTTOM_H);
+        assert!(bottom_buttons(40, room).0 >= 20.0);
     }
 
     #[test]
@@ -1147,12 +1267,12 @@ mod tests {
     }
 
     #[test]
-    fn the_brightness_card_has_a_slider_for_each_display_and_the_media_card_says_where_the_track_is() {
+    fn the_brightness_card_is_one_row_for_every_display_and_the_media_card_says_where_the_track_is() {
         let one = Shown { brightness: 1, ..Default::default() };
         assert_eq!(sections(&one), vec![Section::Brightness(1), Section::Bottom]);
         assert_eq!(section_height(&Section::Brightness(1)), BRIGHTNESS_H);
-        assert_eq!(section_height(&Section::Brightness(2)), BRIGHTNESS_H + BRIGHTNESS_MORE);
-        assert_eq!(height(&Shown { brightness: 3, ..one }), height(&one) + 2.0 * BRIGHTNESS_MORE);
+        assert_eq!(section_height(&Section::Brightness(4)), BRIGHTNESS_H, "the displays share one row");
+        assert_eq!(height(&Shown { brightness: 3, ..one }), height(&one));
         assert_eq!(sections(&Shown { brightness: 0, ..one }), vec![Section::Bottom]);
         // the source's line, and the time
         assert_eq!(media_source_line("Chrome", 0, 1), "Chrome");

@@ -22,6 +22,11 @@
 //! the outputs'). EVERY PART CAN BE HIDDEN (Settings > Dock, `dock_cc_hidden`; the button with the sliders in the bottom row
 //! leads there), so the panel can be as small as one card.
 //!
+//! ONE ROW FOR THE THINGS OF ONE KIND (`cc_model::base` has the user's words): the speaker and the microphone share the sound card's
+//! row, the displays share the brightness card's, and in each the one that was pressed has the slider while the others are a round
+//! button; they change places on the spring a detail opens with (`cc_model::Swap`). The quick buttons stand in the bottom row,
+//! beside the panel's own three, and get smaller when the user shows more of them than fit at full size.
+//!
 //! A DETAIL TAKES THE PLACE of other cards, it does not make the panel taller (`cc_model::layout` says which and why): the
 //! outputs open out upwards from the sound card over the tiles and the media card, a tile's list downwards over the media, sound
 //! and brightness cards. One is open at a time; the button that opened it closes it. IT GROWS: the card comes out of the edge
@@ -73,7 +78,7 @@ use rf_win::sysstatus::toggles::{self, PowerMode};
 use rf_win::sysstatus::wifi::{self, Listing, WifiSnapshot};
 
 use super::backdrop::IslandGlass;
-use super::cc_model::{self, Area, Detail, Quick, QuickState, Section, Shown, Tile, Unfold, Words};
+use super::cc_model::{self, Area, Detail, Quick, QuickState, Section, Shown, Swap, Tile, Unfold, Words};
 use super::look::Palette;
 use super::sysstate::{self, SysState};
 use crate::glass_watch::{self, PopupGlass};
@@ -199,7 +204,11 @@ pub struct CcView {
     /// the tiles. How far it is out is `unfold`.
     detail: Option<Detail>,
     unfold: Unfold,
-    /// The clock `unfold` is asked with.
+    /// Which side of the sound card has the slider (0 the speaker, 1 the microphone), and which display of the brightness card
+    /// (its place in `brightness`), with the motion while two change places.
+    sound_swap: Swap,
+    bright_swap: Swap,
+    /// The clock the motions are asked with.
     born: Instant,
     /// Draws the frames of a detail's motion (and moves the window where the panel grows with it).
     _unfold: Option<Task<()>>,
@@ -294,6 +303,8 @@ impl CcView {
             _tasks: Vec::new(),
             detail: None,
             unfold: Unfold::folded(),
+            sound_swap: Swap::at(0),
+            bright_swap: Swap::at(0),
             born: Instant::now(),
             _unfold: None,
             wifi_ask: None,
@@ -342,6 +353,20 @@ impl CcView {
         cc_model::tiles(net.as_ref(), wifi, bt, self.battery.as_ref().filter(|_| !hidden("battery", cx)))
     }
 
+    /// The sides of the sound card that are there and shown: the speaker (0), the microphone (1).
+    fn sound_sides(&self, cx: &App) -> Vec<usize> {
+        let speaker = sysstate::audio(cx).is_some_and(|a| a.available) && !hidden("sound", cx);
+        let mic = self.mic.as_ref().is_some_and(|m| m.available) && !hidden("mic", cx);
+        [speaker.then_some(0), mic.then_some(1)].into_iter().flatten().collect()
+    }
+
+    /// The side that has the slider: the one last pressed while it is there, else the one that is.
+    fn sound_open(&self, cx: &App) -> Option<usize> {
+        let sides = self.sound_sides(cx);
+        let want = self.sound_swap.open();
+        if sides.contains(&want) { Some(want) } else { sides.first().copied() }
+    }
+
     fn quick_state(&self) -> QuickState {
         QuickState { dark: self.dark, awake: toggles::is_awake(), power: self.power }
     }
@@ -358,11 +383,9 @@ impl CcView {
         let (wifi, bt) = (self.wifi_now(), self.bt_now());
         Shown {
             in_use: self.in_use.any() && !hidden("inuse", cx),
-            quick: !self.quick_now(cx).is_empty(),
-            mic: self.mic.as_ref().is_some_and(|m| m.available) && !hidden("mic", cx),
             tiles,
             media: self.media.as_ref().is_some_and(|m| m.session.is_some()) && !hidden("media", cx),
-            sound: audio.as_ref().is_some_and(|a| a.available) && !hidden("sound", cx),
+            sound: !self.sound_sides(cx).is_empty(),
             brightness: if hidden("brightness", cx) { 0 } else { self.brightness.iter().filter(|b| b.available).count() },
             // (the mixer's rows and their head stand in the outputs' list, after the devices)
             // (and the password's row in Wi-Fi's, while one is asked for)
@@ -388,8 +411,8 @@ impl CcView {
     fn drop_orphan_detail(&mut self, cx: &App) {
         let Some(d) = self.detail else { return };
         let owned = match d {
-            Detail::Outputs => sysstate::audio(cx).is_some_and(|a| a.available) && !hidden("sound", cx),
-            Detail::Inputs => self.mic.as_ref().is_some_and(|m| m.available) && !hidden("mic", cx),
+            Detail::Outputs => self.sound_sides(cx).contains(&0),
+            Detail::Inputs => self.sound_sides(cx).contains(&1),
             _ => self.tiles_now(cx).into_iter().any(|t| cc_model::detail_of(t) == Some(d)),
         };
         if !owned {
@@ -576,10 +599,12 @@ impl CcView {
             loop {
                 cx.background_executor().timer(Duration::from_millis(7)).await;
                 let Ok(done) = this.update(cx, |me, cx| {
-                    let done = me.unfold.settled(me.now_ms());
-                    if done && !me.unfold.opening() {
+                    let now = me.now_ms();
+                    if me.unfold.settled(now) && !me.unfold.opening() {
                         me.detail = None;
                     }
+                    // (the same frames draw the rows whose items are changing places)
+                    let done = me.unfold.settled(now) && me.sound_swap.settled(now) && me.bright_swap.settled(now);
                     me.refit(cx);
                     cx.notify();
                     done
@@ -942,13 +967,55 @@ impl CcView {
         cx.defer(|cx| super::panel::close(CloseCause::Chosen, cx));
     }
 
+    /// A press on the round button of a side of the sound card. The side that has the slider: its button mutes it. The other: it
+    /// takes the slider (and a list of devices that is out turns to its devices).
+    fn press_sound_head(&mut self, side: usize, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        if self.sound_open(cx) != Some(side) {
+            self.sound_swap.go(side, self.now_ms(), crate::settings::animations());
+            if self.detail.is_some_and(|d| d.upwards()) && self.unfold.opening() {
+                self.detail = Some(if side == 0 { Detail::Outputs } else { Detail::Inputs });
+                if side == 0 {
+                    self.read_mixer(cx);
+                }
+            }
+            self.run_unfold(cx);
+            self.refit(cx);
+            return cx.notify();
+        }
+        // (the state a click flips is the one the previous click asked for while Windows has not answered yet: `mute_target`)
+        if side == 0 {
+            let muted = sysstate::audio(cx).is_some_and(|a| a.muted);
+            let want = cc_model::mute_target(muted, self.mute_ask.map(|(v, at)| (v, at.elapsed().as_millis() as u64)));
+            self.mute_ask = Some((want, Instant::now()));
+            audio::set_muted(want);
+        } else {
+            let muted = self.mic.as_ref().is_some_and(|a| a.muted);
+            let want = cc_model::mute_target(muted, self.mic_mute_ask.map(|(v, at)| (v, at.elapsed().as_millis() as u64)));
+            self.mic_mute_ask = Some((want, Instant::now()));
+            audio::set_input_muted(want);
+        }
+    }
+
+    /// A press on a display's number in the brightness card: that display takes the slider.
+    fn press_screen(&mut self, index: usize, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        self.bright_swap.go(index, self.now_ms(), crate::settings::animations());
+        self.run_unfold(cx);
+        cx.notify();
+    }
+
     /// A click on an input device of the list: it becomes Windows' default input (see `choose_output`).
     fn choose_input(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         if !self.shown || self.closing {
             return;
         }
         audio::set_default_input(id);
-        let stop = self.stop("cc-inputs", 0, cx);
+        let stop = self.stop("cc-devices", 0, cx);
         window.focus(&stop, cx);
     }
 
@@ -1332,32 +1399,57 @@ impl CcView {
     }
 
     fn render_sound(&self, look: &Look, words: Words, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let a = sysstate::audio(cx).filter(|a| a.available)?;
+        let sides = self.sound_sides(cx);
+        let open = self.sound_open(cx)?;
+        let now = self.now_ms();
         let secondary = look.pal.text_secondary().hsla();
-        let frac = audio::volume_to_slider(self.vol_drag.unwrap_or(a.volume));
-        let (mute_focus, devices_focus) = (self.stop("cc-mute", 0, cx), self.stop("cc-devices", 0, cx));
-        let mute = self
-            .round_button("cc-mute", cc_model::volume_icon(audio::glyph(&a)), 28.0, false, look, (Some(&mute_focus), Some(if a.muted { t!("Sesi aç") } else { t!("Sessize al") })))
-            .on_click(cx.listener(|this, _, _, cx| {
-                // (the state this click flips is the one the previous click asked for while Windows has not answered yet)
-                let muted = sysstate::audio(cx).is_some_and(|a| a.muted);
-                let pending = this.mute_ask.map(|(v, at)| (v, at.elapsed().as_millis() as u64));
-                let want = cc_model::mute_target(muted, pending);
-                this.mute_ask = Some((want, Instant::now()));
-                audio::set_muted(want);
-            }));
-        // (the list opens ABOVE this card, so the chevron points up while it is closed)
-        let outputs_open = self.is_open(Detail::Outputs);
+        let speaker = sysstate::audio(cx).unwrap_or_default();
+        let mic = self.mic.clone().unwrap_or_default();
+        // The row: each side is its round button, and the one that has the slider has it after the button. The two change places
+        // by their widths (`cc_model::Swap`); what does not fit in an item's width is cut off, so a slider is seen coming and going.
+        let open_w = cc_model::open_width(sides.len(), cc_model::CARD_INNER - cc_model::HEAD - cc_model::ROW_GAP);
+        let slider_w = cc_model::open_slider(open_w);
+        let moving = self.sound_swap.open() == open;
+        let mut row = h_flex().h(px(cc_model::HEAD)).gap(px(cc_model::ROW_GAP)).items_center();
+        for side in sides.iter().copied() {
+            let is_open = side == open;
+            let share = if sides.len() > 1 && moving { self.sound_swap.share(side, now) } else { f32::from(u8::from(is_open)) };
+            let (id, icon, tip, frac, which) = if side == 0 {
+                let tip = if !is_open { t!("Hoparlör") } else if speaker.muted { t!("Sesi aç") } else { t!("Sessize al") };
+                ("cc-mute", cc_model::volume_icon(audio::glyph(&speaker)), tip, audio::volume_to_slider(self.vol_drag.unwrap_or(speaker.volume)), SL_VOLUME)
+            } else {
+                let tip = if !is_open { t!("Mikrofon") } else if mic.muted { t!("Mikrofonu aç") } else { t!("Mikrofonu kapat") };
+                ("cc-mic-mute", if mic.muted { L::MicOff } else { L::Mic }, tip, audio::volume_to_slider(self.mic_drag.unwrap_or(mic.volume)), SL_MIC)
+            };
+            let stop = self.stop(id, 0, cx);
+            let head = self.round_button(id, icon, cc_model::HEAD, false, look, (Some(&stop), Some(tip))).on_click(cx.listener(move |this, _, _, cx| this.press_sound_head(side, cx)));
+            let mut item = h_flex().w(px(cc_model::swap_width(share, open_w))).h_full().flex_shrink_0().gap(px(cc_model::ROW_GAP)).items_center().overflow_hidden().child(head);
+            // (a side that is only its button has no slider to stop at with the keyboard)
+            if share > 0.02 {
+                item = item.child(self.slider_of(which, frac, slider_w, look, cx));
+            }
+            row = row.child(item);
+        }
+        // the list of the devices of the side that has the slider (it opens ABOVE this card, so the chevron points up while it is closed)
+        let (detail, list_tip) = if open == 0 { (Detail::Outputs, t!("Çıkış aygıtları")) } else { (Detail::Inputs, t!("Giriş aygıtları")) };
+        let list_stop = self.stop("cc-devices", 0, cx);
         let chevron = self
-            .round_button("cc-devices", if outputs_open { L::ChevronDown } else { L::ChevronUp }, 28.0, false, look, (Some(&devices_focus), Some(t!("Çıkış aygıtları"))))
-            .on_click(cx.listener(|this, _, _, cx| this.toggle_detail(Detail::Outputs, cx)));
+            .round_button("cc-devices", if self.is_open(detail) { L::ChevronDown } else { L::ChevronUp }, cc_model::HEAD, false, look, (Some(&list_stop), Some(list_tip)))
+            .on_click(cx.listener(move |this, _, _, cx| this.toggle_detail(detail, cx)));
+        let name = if open == 0 {
+            cc_model::sound_device_text(&speaker, words)
+        } else if mic.device.trim().is_empty() {
+            t!("Mikrofon").to_string()
+        } else {
+            mic.device.clone()
+        };
         Some(
             self.card(look)
                 .flex_shrink_0()
                 .px(px(12.))
                 .py(px(12.))
-                .child(h_flex().h(px(28.)).gap(px(8.)).items_center().child(mute).child(self.slider(SL_VOLUME, frac, look, cx)).child(chevron))
-                .child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).truncate().text_xs().text_color(secondary).child(cc_model::sound_device_text(&a, words)))
+                .child(row.child(chevron))
+                .child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).truncate().text_xs().text_color(secondary).child(name))
                 .into_any_element(),
         )
     }
@@ -1376,54 +1468,6 @@ impl CcView {
             .child(Icon::new(icon).size(px(12.)).flex_shrink_0().text_color(look.accent))
             .child(div().truncate().child(cc_model::in_use_text(&self.in_use, words)))
             .into_any_element()
-    }
-
-    /// The row of quick buttons: lit while the thing is on, each with its name under the pointer. Spread over the row while they
-    /// are many, side by side from the left while they are few.
-    fn render_quick(&self, look: &Look, words: Words, cx: &mut Context<Self>) -> AnyElement {
-        let (state, buttons) = (self.quick_state(), self.quick_now(cx));
-        let mut row = h_flex().h(px(cc_model::QUICK_H)).flex_shrink_0().items_center();
-        row = if buttons.len() >= 6 { row.justify_between() } else { row.gap(px(10.)) };
-        for q in buttons {
-            let stop = self.stop("cc-quick", q as usize, cx);
-            row = row.child(
-                self.round_button(("cc-quick", q as usize), q.icon(&state), cc_model::QUICK_H, q.lit(&state), look, (Some(&stop), Some(q.tip(&state, words))))
-                    .on_click(cx.listener(move |this, _, _, cx| this.press_quick(q, cx))),
-            );
-        }
-        row.into_any_element()
-    }
-
-    /// The microphone: as the sound card, for the default input device. Its chevron opens the list of inputs out.
-    fn render_mic(&self, look: &Look, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let a = self.mic.clone().filter(|a| a.available)?;
-        let secondary = look.pal.text_secondary().hsla();
-        let frac = audio::volume_to_slider(self.mic_drag.unwrap_or(a.volume));
-        let (mute_focus, list_focus) = (self.stop("cc-mic-mute", 0, cx), self.stop("cc-inputs", 0, cx));
-        let mute = self
-            .round_button("cc-mic-mute", if a.muted { L::MicOff } else { L::Mic }, 28.0, false, look, (Some(&mute_focus), Some(if a.muted { t!("Mikrofonu aç") } else { t!("Mikrofonu kapat") })))
-            .on_click(cx.listener(|this, _, _, _| {
-                // (as the speaker's: the state this click flips is the one the previous click asked for while Windows has not answered)
-                let muted = this.mic.as_ref().is_some_and(|a| a.muted);
-                let pending = this.mic_mute_ask.map(|(v, at)| (v, at.elapsed().as_millis() as u64));
-                let want = cc_model::mute_target(muted, pending);
-                this.mic_mute_ask = Some((want, Instant::now()));
-                audio::set_input_muted(want);
-            }));
-        let open = self.is_open(Detail::Inputs);
-        let chevron = self
-            .round_button("cc-inputs", if open { L::ChevronDown } else { L::ChevronUp }, 28.0, false, look, (Some(&list_focus), Some(t!("Giriş aygıtları"))))
-            .on_click(cx.listener(|this, _, _, cx| this.toggle_detail(Detail::Inputs, cx)));
-        let name = if a.device.trim().is_empty() { t!("Mikrofon").to_string() } else { a.device.clone() };
-        Some(
-            self.card(look)
-                .flex_shrink_0()
-                .px(px(12.))
-                .py(px(12.))
-                .child(h_flex().h(px(28.)).gap(px(8.)).items_center().child(mute).child(self.slider(SL_MIC, frac, look, cx)).child(chevron))
-                .child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).truncate().text_xs().text_color(secondary).child(name))
-                .into_any_element(),
-        )
     }
 
     /// The input devices: as the outputs (`detail_outputs`), for the microphone.
@@ -1667,12 +1711,10 @@ impl CcView {
         match s {
             Section::InUse => vec![self.render_in_use(look, words)],
             Section::Tiles(_) => self.render_tiles(look, words, cx),
-            Section::Quick => vec![self.render_quick(look, words, cx)],
             Section::Media => self.render_media(look, words, cx).into_iter().collect(),
             Section::Sound => self.render_sound(look, words, cx).into_iter().collect(),
-            Section::Mic => self.render_mic(look, cx).into_iter().collect(),
             Section::Brightness(_) => self.render_brightness(look, cx).into_iter().collect(),
-            Section::Bottom => vec![self.render_bottom(look, cx)],
+            Section::Bottom => vec![self.render_bottom(look, words, cx)],
             Section::Detail(..) => Vec::new(),
         }
     }
@@ -1729,45 +1771,79 @@ impl CcView {
         if screens.is_empty() {
             return None;
         }
+        let now = self.now_ms();
         let secondary = look.pal.text_secondary().hsla();
         let several = screens.len() > 1;
-        // a slider for each display that answers; with more than one, each is told by its number (the primary one is 1)
-        let mut rows = v_flex().gap(px(cc_model::BRIGHTNESS_MORE - 28.));
+        // the display that has the slider: the one last pressed while it answers, else the first
+        let open = if screens.iter().any(|(i, _)| *i == self.bright_swap.open()) { self.bright_swap.open() } else { screens[0].0 };
+        let moving = self.bright_swap.open() == open;
+        let open_w = cc_model::open_width(screens.len(), cc_model::CARD_INNER);
+        let slider_w = cc_model::open_slider(open_w);
+        let mut row = h_flex().h(px(cc_model::HEAD)).gap(px(cc_model::ROW_GAP)).items_center();
         for (i, b) in screens {
-            rows = rows.child(
-                h_flex()
-                    .h(px(28.))
-                    .gap(px(8.))
+            let is_open = i == open;
+            let share = if several && moving { self.bright_swap.share(i, now) } else { f32::from(u8::from(is_open)) };
+            // its head: the sun for a lone display; with several, each display's number (the primary one is 1), lit on the one that
+            // has the slider, and a press on another's gives it the slider
+            let head = if several {
+                let (stop, ring) = (self.stop("cc-screen", i, cx), look.accent);
+                let (hover, pressed) = (look.pal.hover_fill().hsla(), look.pal.pressed_fill().hsla());
+                div()
+                    .id(("cc-screen", i))
+                    .size(px(cc_model::HEAD))
+                    .flex_shrink_0()
+                    .flex()
                     .items_center()
-                    .child(div().size(px(28.)).flex_shrink_0().flex().items_center().justify_center().child(Icon::new(L::Sun).size(px(16.)).text_color(look.pal.text().hsla())))
-                    .child(self.slider(SL_SCREEN + i, b.fraction(), look, cx))
-                    .child(div().size(px(28.)).flex_shrink_0().flex().items_center().justify_center().text_xs().text_color(secondary).children(several.then(|| (i + 1).to_string()))),
-            );
+                    .justify_center()
+                    .rounded_full()
+                    .border_2()
+                    .border_color(transparent_black())
+                    .cursor_pointer()
+                    .track_focus(&stop)
+                    .focus_visible(move |s| s.border_color(ring))
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .when(is_open, |d| d.bg(look.accent).text_color(look.on_accent))
+                    .when(!is_open, |d| d.bg(look.pal.field_fill().hsla()).hover(move |s| s.bg(hover)).active(move |s| s.bg(pressed)))
+                    .child((i + 1).to_string())
+                    .on_click(cx.listener(move |this, _, _, cx| this.press_screen(i, cx)))
+                    .into_any_element()
+            } else {
+                div().size(px(cc_model::HEAD)).flex_shrink_0().flex().items_center().justify_center().child(Icon::new(L::Sun).size(px(16.)).text_color(look.pal.text().hsla())).into_any_element()
+            };
+            let mut item = h_flex().w(px(cc_model::swap_width(share, open_w))).h_full().flex_shrink_0().gap(px(cc_model::ROW_GAP)).items_center().overflow_hidden().child(head);
+            if share > 0.02 {
+                item = item.child(self.slider_of(SL_SCREEN + i, b.fraction(), slider_w, look, cx));
+            }
+            row = row.child(item);
         }
-        Some(self.card(look).flex_shrink_0().px(px(12.)).py(px(12.)).child(rows).child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).text_xs().text_color(secondary).child(t!("Parlaklık"))).into_any_element())
+        Some(self.card(look).flex_shrink_0().px(px(12.)).py(px(12.)).child(row).child(div().mt(px(4.)).h(px(16.)).pl(px(4.)).text_xs().text_color(secondary).child(t!("Parlaklık"))).into_any_element())
     }
 
-    fn render_bottom(&self, look: &Look, cx: &mut Context<Self>) -> AnyElement {
-        let focus = self.stop("cc-gear", 0, cx);
-        let snip_focus = self.stop("cc-snip", 0, cx);
-        let edit_focus = self.stop("cc-edit", 0, cx);
-        h_flex()
-            .h(px(cc_model::BOTTOM_H))
-            .flex_shrink_0()
-            .justify_end()
+    /// The bottom row: the quick buttons at the left (lit while the thing is on, each with its name under the pointer), the panel's
+    /// own three at the right. All of one size, which gets smaller when the user shows more buttons than fit at the full one.
+    fn render_bottom(&self, look: &Look, words: Words, cx: &mut Context<Self>) -> AnyElement {
+        let (state, quick) = (self.quick_state(), self.quick_now(cx));
+        let (size, gap) = cc_model::bottom_buttons(quick.len() + 3, cc_model::WIDTH - 2.0 * cc_model::PAD);
+        let mut left = h_flex().gap(px(gap)).items_center();
+        for q in quick {
+            let stop = self.stop("cc-quick", q as usize, cx);
+            left = left.child(
+                self.round_button(("cc-quick", q as usize), q.icon(&state), size, q.lit(&state), look, (Some(&stop), Some(q.tip(&state, words))))
+                    .on_click(cx.listener(move |this, _, _, cx| this.press_quick(q, cx))),
+            );
+        }
+        let (focus, snip_focus, edit_focus) = (self.stop("cc-gear", 0, cx), self.stop("cc-snip", 0, cx), self.stop("cc-edit", 0, cx));
+        let right = h_flex()
+            .gap(px(gap))
+            .items_center()
             .child(
-                self.round_button("cc-edit", L::SlidersHorizontal, cc_model::BOTTOM_H, false, look, (Some(&edit_focus), Some(t!("Paneli düzenle"))))
+                self.round_button("cc-edit", L::SlidersHorizontal, size, false, look, (Some(&edit_focus), Some(t!("Paneli düzenle"))))
                     .on_click(cx.listener(|this, _, _, cx| this.open_edit(cx))),
             )
-            .child(
-                self.round_button("cc-snip", L::Scissors, cc_model::BOTTOM_H, false, look, (Some(&snip_focus), Some(t!("Ekran alıntısı"))))
-                    .on_click(cx.listener(|this, _, _, cx| this.start_snip(cx))),
-            )
-            .child(
-                self.round_button("cc-gear", L::Settings, cc_model::BOTTOM_H, false, look, (Some(&focus), Some(t!("Ayarlar"))))
-                    .on_click(cx.listener(|this, _, _, cx| this.open_settings("ms-settings:", cx))),
-            )
-            .into_any_element()
+            .child(self.round_button("cc-snip", L::Scissors, size, false, look, (Some(&snip_focus), Some(t!("Ekran alıntısı")))).on_click(cx.listener(|this, _, _, cx| this.start_snip(cx))))
+            .child(self.round_button("cc-gear", L::Settings, size, false, look, (Some(&focus), Some(t!("Ayarlar")))).on_click(cx.listener(|this, _, _, cx| this.open_settings("ms-settings:", cx))));
+        h_flex().h(px(cc_model::BOTTOM_H)).flex_shrink_0().items_center().justify_between().child(left).child(right).into_any_element()
     }
 }
 

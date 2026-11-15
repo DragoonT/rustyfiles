@@ -1,6 +1,14 @@
-//! EVERY DISPLAY ([`open_all`], what the control centre uses): the same for each display Windows lists, the primary one first, each
-//! on its own row of the panel. A display that does not answer has no row; the others have theirs. ([`open`] is the one display
-//! this module began with, kept for the probe and the tests.)
+//! EVERY DISPLAY ([`open_all`], what the control centre uses): the same for each display Windows lists, the primary one first. A
+//! display that does not answer is not in the panel; the others are. ([`open`] is the one display this module began with, kept for
+//! the probe and the tests.)
+//!
+//! WHICH DISPLAYS ANSWER (the user asked, 2026-11-15: "monitör parlaklığı ayarı sadece benim monitördemi çoğu genel monitörde mi
+//! çalışır?"). DDC/CI is a standard nearly every desktop monitor of the last fifteen years has, over DisplayPort, HDMI and DVI. It
+//! is not there when the monitor's own menu has "DDC/CI" switched off, behind some KVM switches, docks and cheap adapters that do
+//! not pass it on, on most televisions, and on a LAPTOP'S OWN PANEL, which has no such channel at all. A laptop's panel is asked
+//! the way Windows' own brightness slider asks it instead: the display driver's backlight requests on the device `\\.\LCD`
+//! ([`Lcd`]). It is the first in the list when it answers. That path is written from the documented requests and has never been
+//! run on a laptop (the development PC is a desktop, where the device does not answer and nothing is listed for it).
 //!
 //! Brightness of the primary monitor through DDC/CI (`dxva2`: `GetMonitorBrightness` / `SetMonitorBrightness`). It is the one
 //! documented way for a desktop monitor; it needs no administrator rights. A laptop's own panel does not answer DDC/CI (it is driven
@@ -16,8 +24,12 @@
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, channel};
 
+use windows::Win32::Devices::Display::{DISPLAY_BRIGHTNESS, IOCTL_VIDEO_QUERY_DISPLAY_BRIGHTNESS, IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS};
 use windows::Win32::Devices::Display::{DestroyPhysicalMonitors, GetMonitorBrightness, GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR, PHYSICAL_MONITOR, SetMonitorBrightness};
-use windows::Win32::Foundation::{LPARAM, POINT, RECT};
+use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, LPARAM, POINT, RECT};
+use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
+use windows::Win32::System::IO::DeviceIoControl;
+use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::Graphics::Gdi::{EnumDisplayMonitors, HDC, HMONITOR, MONITOR_DEFAULTTOPRIMARY, MonitorFromPoint};
 use windows::core::BOOL;
 
@@ -187,6 +199,46 @@ fn displays() -> Vec<isize> {
     primary_first(all, primary)
 }
 
+/// A laptop's own panel: its backlight, through the display driver (see the module docs). The level is a percent.
+struct Lcd(HANDLE);
+
+/// The level a panel is at: it keeps one for running on mains and one for running on the battery, and shows the one of now.
+pub fn lcd_level(on_mains: u8, on_battery: u8, mains_now: bool) -> u32 {
+    u32::from(if mains_now { on_mains } else { on_battery }.min(100))
+}
+
+impl Lcd {
+    fn open() -> Option<Lcd> {
+        unsafe { CreateFileW(windows::core::w!(r"\\.\LCD"), (GENERIC_READ | GENERIC_WRITE).0, FILE_SHARE_READ | FILE_SHARE_WRITE, None, OPEN_EXISTING, FILE_FLAGS_AND_ATTRIBUTES(0), None) }.ok().map(Lcd)
+    }
+
+    fn read(&self) -> Option<BrightnessSnapshot> {
+        let (mut levels, mut got) = (DISPLAY_BRIGHTNESS::default(), 0u32);
+        unsafe { DeviceIoControl(self.0, IOCTL_VIDEO_QUERY_DISPLAY_BRIGHTNESS, None, 0, Some(&mut levels as *mut _ as *mut _), size_of::<DISPLAY_BRIGHTNESS>() as u32, Some(&mut got), None) }.ok()?;
+        let mut power = SYSTEM_POWER_STATUS::default();
+        let mains = unsafe { GetSystemPowerStatus(&mut power) }.is_ok() && power.ACLineStatus == 1;
+        Some(BrightnessSnapshot { available: true, min: 0, value: lcd_level(levels.ucACBrightness, levels.ucDCBrightness, mains), max: 100 })
+    }
+
+    /// Sets the level for both ways of running (as Windows' own slider does).
+    fn write(&self, value: u32) {
+        const BOTH: u8 = 3;
+        let level = value.min(100) as u8;
+        let (levels, mut got) = (DISPLAY_BRIGHTNESS { ucDisplayPolicy: BOTH, ucACBrightness: level, ucDCBrightness: level }, 0u32);
+        unsafe {
+            let _ = DeviceIoControl(self.0, IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS, Some(&levels as *const _ as *const _), size_of::<DISPLAY_BRIGHTNESS>() as u32, None, 0, Some(&mut got), None);
+        }
+    }
+}
+
+impl Drop for Lcd {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
 /// Reads every display's brightness on a thread of its own and tells `callback` once (one snapshot per display, `available: false`
 /// for one that does not answer), then keeps the displays for [`Screens::set`].
 pub fn open_all(callback: impl Fn(&[BrightnessSnapshot]) + Send + 'static) -> Screens {
@@ -196,8 +248,11 @@ pub fn open_all(callback: impl Fn(&[BrightnessSnapshot]) + Send + 'static) -> Sc
     let spawned = std::thread::Builder::new().name("rf-brightness".into()).spawn(move || {
         init_mta();
         // (each display gets the tries of the first reading: `TRIES`)
+        // (a laptop's own panel first, when it answers; then the displays that are asked over DDC/CI)
+        let lcd = Lcd::open().and_then(|l| l.read().map(|s| (l, s)));
         let opened: Vec<(Option<Monitors>, BrightnessSnapshot)> = displays().into_iter().map(|d| reading_of(|| Monitors::of(HMONITOR(d as *mut _)))).collect();
-        let snaps: Vec<BrightnessSnapshot> = opened.iter().map(|(_, s)| *s).collect();
+        let snaps: Vec<BrightnessSnapshot> = lcd.iter().map(|(_, s)| *s).chain(opened.iter().map(|(_, s)| *s)).collect();
+        let first_ddc = usize::from(lcd.is_some());
         callback(&snaps);
         if !snaps.iter().any(|s| s.available) {
             return;
@@ -208,7 +263,12 @@ pub fn open_all(callback: impl Fn(&[BrightnessSnapshot]) + Send + 'static) -> Sc
             }
             let asked: Vec<Option<u32>> = q.lock().map(|mut q| q.iter_mut().map(Option::take).collect()).unwrap_or_default();
             for (i, v) in asked.into_iter().enumerate() {
-                if let (Some(v), Some((Some(m), snap))) = (v, opened.get(i))
+                let Some(v) = v else { continue };
+                if i < first_ddc {
+                    if let Some((panel, snap)) = &lcd {
+                        panel.write(v.clamp(snap.min, snap.max));
+                    }
+                } else if let Some((Some(m), snap)) = opened.get(i - first_ddc)
                     && snap.available
                 {
                     m.write(v.clamp(snap.min, snap.max));
@@ -298,6 +358,13 @@ impl Drop for Monitors {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_laptops_panel_shows_the_level_of_how_it_runs_now() {
+        assert_eq!(lcd_level(80, 40, true), 80);
+        assert_eq!(lcd_level(80, 40, false), 40);
+        assert_eq!(lcd_level(250, 0, true), 100, "a level past the top is the top");
+    }
 
     #[test]
     fn the_primary_display_is_the_first_row_and_the_others_keep_their_order() {

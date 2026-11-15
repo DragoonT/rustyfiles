@@ -1332,6 +1332,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Mikrofonu kapat", "Mute microphone"),
     ("Giriş aygıtları", "Input devices"),
     ("Paneli düzenle", "Edit panel"),
+    ("Hoparlör", "Speaker"),
     ("Şifre", "Password"),
     ("Bağlan", "Connect"),
     ("Şifre 8-63 karakter olmalı", "The password must be 8 to 63 characters"),
