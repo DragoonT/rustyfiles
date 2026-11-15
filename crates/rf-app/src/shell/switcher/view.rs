@@ -414,7 +414,30 @@ impl Render for SwitcherView {
                 .items_center()
                 .gap(px(6.))
                 .child(div().size(lg(icon_side)).flex_shrink_0().when_some(icon, |d, img| d.child(gpui_kit::img(img).size(lg(icon_side)))))
-                .child(div().flex_1().min_w_0().truncate().text_size(px(font)).child(title));
+                .child(div().flex_1().min_w_0().truncate().text_size(px(font)).child(title))
+                // The close button, in the card's upper right corner, on the selected card (which is the one under the pointer).
+                // Its room is kept on every card, so that a title does not move when the selection does.
+                .child(
+                    div()
+                        .id(("switcher-x", i))
+                        .size(lg(icon_side))
+                        .flex_shrink_0()
+                        .rounded(px(4.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .when(is_selected, |d| {
+                            d.text_color(theme.text_secondary)
+                                .hover(|s| s.bg(theme.danger).text_color(gpui_kit::white()))
+                                .child(gpui_kit::component::Icon::new(gpui_kit::assets::IconName::X).size(lg((icon_side * 7 / 10).max(8))))
+                                // (the card's own click chooses the window: the press and the click end here)
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    cx.stop_propagation();
+                                    this.close_card(i, cx);
+                                }))
+                        }),
+                );
             root = root.child(
                 div()
                     .id(("switcher-card", i))

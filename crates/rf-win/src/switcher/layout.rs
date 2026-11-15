@@ -2,8 +2,10 @@
 //! panel's rectangle and every card's rectangles out. The view draws at these positions and DWM draws the live pictures at the same
 //! ones, so there is one source for both.
 //!
-//! THE DESIGN (logical px at full size): a card is 224 x 176: a 204 x 124 box for the picture 10 px inside the card, and under it a
-//! 24 px row with the app's small icon and the title. Cards are 12 px apart and the panel keeps 24 px around them. Cards wrap into
+//! THE DESIGN (logical px at full size): a card is 224 x 176: 10 px inside the card a 24 px row with the app's small icon, the title
+//! and, on the selected card, a close button at its right end; under it a 204 x 124 box for the picture. The row is ON TOP since
+//! 0.8.3 (the user: "sağ üst köşeye çarpı da koyabilirdin bence"): a button in the card's upper right corner cannot stand over the
+//! picture, which DWM draws over everything of ours, so the corner has to be the row's, as in Windows' own switcher. Cards are 12 px apart and the panel keeps 24 px around them. Cards wrap into
 //! rows, the number of columns is the widest that fits and then evened out (12 windows are 2 rows of 6, not 10 and 2). The panel
 //! takes at most 92 % of the work area's width and 80 % of its height. Up to about 12 windows fit at full size on an ordinary
 //! monitor; more scale the CARDS down (not the gaps), in steps of 5 %, to half the full size at the least. Beyond what fits at half
@@ -127,17 +129,17 @@ impl Layout {
         Rect::from_xywh(x, y, self.card_w, self.card_h)
     }
 
-    /// The box the live picture (or the large icon) goes in, panel client coordinates.
+    /// The box the live picture (or the large icon) goes in, panel client coordinates: under the row.
     pub fn picture(&self, i: usize) -> Rect {
         let c = self.card(i);
-        Rect::from_xywh(c.left + self.inset, c.top + self.inset, c.width() - 2 * self.inset, self.thumb_h)
+        let top = c.top + self.inset + self.row_h + px(6.0 * self.factor, self.scale);
+        Rect::from_xywh(c.left + self.inset, top, c.width() - 2 * self.inset, self.thumb_h)
     }
 
-    /// The row with the small icon and the title.
+    /// The row with the small icon, the title and the close button: at the card's top.
     pub fn label(&self, i: usize) -> Rect {
         let c = self.card(i);
-        let top = c.top + self.inset + self.thumb_h + px(6.0 * self.factor, self.scale);
-        Rect::from_xywh(c.left + self.inset, top, c.width() - 2 * self.inset, self.row_h)
+        Rect::from_xywh(c.left + self.inset, c.top + self.inset, c.width() - 2 * self.inset, self.row_h)
     }
 
     /// The small icon's side, device px.
@@ -264,7 +266,7 @@ mod tests {
     #[test]
     fn the_picture_box_is_above_the_label_row() {
         let l = plan(6, FHD, 1.0);
-        assert!(l.picture(0).bottom <= l.label(0).top);
+        assert!(l.label(0).bottom <= l.picture(0).top, "the row is on top, the picture under it");
     }
 
     #[test]
