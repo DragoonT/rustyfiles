@@ -14,9 +14,20 @@
 //! the callback ignores the events that carry it (the thread has already updated its picture from what the endpoint answered), so the
 //! slider does not fight the echo of its own drag.
 //!
+//! THE DEFAULT OUTPUT. [`set_default_output`] is the user's click on a device of the panel's list (issue 22, ElectroUndead: "When you
+//! right click volume icon - you can change default output device, you can use EarTrumpet as reference. As for these menu is not
+//! clickable"). Core Audio has NO documented call for it: Windows' own panels, and the tools that offer the same (EarTrumpet among
+//! them), go through `IPolicyConfig` of the audio service's policy client, an interface Microsoft never published. It is declared
+//! here by hand ([`IPolicyConfig`]) and only its `SetDefaultEndpoint` is called, on the audio thread, for the two roles of what
+//! plays (`OUTPUT_ROLES`). Should a Windows to come drop the interface, the call fails, the log says so, and the list is what it
+//! was before this: something to read, with the link to Windows' sound page under it.
+//!
 //! After the default device changes the thread waits 150 ms for the burst to end (a Bluetooth headset's profile switch is a handful
 //! of removed / added events) and then attaches to the new default output.
 
+#![allow(non_snake_case)] // the hand-declared interface keeps the names of its COM methods
+
+use std::ffi::c_void;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -26,7 +37,7 @@ use windows::Win32::Foundation::PROPERTYKEY;
 use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioEndpointVolumeCallback, IAudioEndpointVolumeCallback_Impl};
 use windows::Win32::Media::Audio::{
     AUDIO_VOLUME_NOTIFICATION_DATA, DEVICE_STATE, DEVICE_STATE_ACTIVE, EDataFlow, ERole, IMMDevice, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl,
-    MMDeviceEnumerator, eConsole, eRender,
+    MMDeviceEnumerator, eConsole, eMultimedia, eRender,
 };
 use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
 use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree, STGM_READ};
@@ -129,6 +140,8 @@ enum Msg {
     Level { volume: f32, muted: bool },
     /// A write is waiting in a slot.
     Write,
+    /// The user chose this device (its id) as the default output.
+    Default(String),
 }
 
 struct Engine {
@@ -182,6 +195,18 @@ pub fn set_muted(muted: bool) {
     if e.mute.push(muted) {
         let _ = e.tx.send(Msg::Write);
     }
+}
+
+/// The user chose an output device in the panel's list: asks Windows to make it the default output. Returns at once; the picture
+/// that follows (`subscribe`) has the new default when Windows has changed it. An id that is not in the list, or that is the default
+/// already, is dropped.
+pub fn set_default_output(id: &str) {
+    let _ = engine().tx.send(Msg::Default(id.to_string()));
+}
+
+/// Is `id` a device the default output can be switched to: one of the list that is not the default now.
+pub fn can_switch_to(s: &AudioSnapshot, id: &str) -> bool {
+    !id.is_empty() && s.devices.iter().any(|d| d.id == id && !d.default)
 }
 
 /// Reads the state once on the calling thread (a probe; the panel follows with [`subscribe`]). Blocks.
@@ -311,6 +336,18 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>, hub: Hub<AudioSnapshot>, volume_q: Ar
                 }
             }
             Msg::Write => {}
+            Msg::Default(id) => {
+                if can_switch_to(&snap, &id) {
+                    match make_default(&id) {
+                        // The service tells of the change by itself (`OnDefaultDeviceChanged`). The picture is read again either way,
+                        // by the same path, once the burst of events has ended.
+                        Ok(()) => {
+                            let _ = tx.send(Msg::Devices);
+                        }
+                        Err(e) => log::warn!("audio: the default output was not changed: {e}"),
+                    }
+                }
+            }
         }
         // the writes the user is waiting for (also after a device change: a write that came meanwhile is not lost)
         if let (Some(ep), true) = (ep.as_ref(), snap.available) {
@@ -348,6 +385,45 @@ fn run(rx: Receiver<Msg>, tx: Sender<Msg>, hub: Hub<AudioSnapshot>, volume_q: Ar
     unsafe {
         let _ = en.UnregisterEndpointNotificationCallback(&events);
     }
+}
+
+// ------------------------------------------------------------------ the default output (an interface Microsoft did not publish)
+
+/// `IPolicyConfig` as the audio service's policy client has it since Windows 7 (the module docs say why it is here). The methods
+/// are declared in their order ONLY to put `SetDefaultEndpoint` in its slot, the eleventh after `IUnknown`'s three; none of the
+/// others is called, and the pointers of their arguments are left untyped.
+#[windows::core::interface("f8679f50-850a-41cf-9c72-430f290290c8")]
+unsafe trait IPolicyConfig: windows::core::IUnknown {
+    fn GetMixFormat(&self, id: *const u16, format: *mut *mut c_void) -> windows::core::HRESULT;
+    fn GetDeviceFormat(&self, id: *const u16, default: i32, format: *mut *mut c_void) -> windows::core::HRESULT;
+    fn ResetDeviceFormat(&self, id: *const u16) -> windows::core::HRESULT;
+    fn SetDeviceFormat(&self, id: *const u16, endpoint: *mut c_void, mix: *mut c_void) -> windows::core::HRESULT;
+    fn GetProcessingPeriod(&self, id: *const u16, default: i32, usual: *mut i64, least: *mut i64) -> windows::core::HRESULT;
+    fn SetProcessingPeriod(&self, id: *const u16, period: *mut i64) -> windows::core::HRESULT;
+    fn GetShareMode(&self, id: *const u16, mode: *mut c_void) -> windows::core::HRESULT;
+    fn SetShareMode(&self, id: *const u16, mode: *mut c_void) -> windows::core::HRESULT;
+    fn GetPropertyValue(&self, id: *const u16, key: *const PROPERTYKEY, value: *mut c_void) -> windows::core::HRESULT;
+    fn SetPropertyValue(&self, id: *const u16, key: *const PROPERTYKEY, value: *mut c_void) -> windows::core::HRESULT;
+    fn SetDefaultEndpoint(&self, id: *const u16, role: i32) -> windows::core::HRESULT;
+    fn SetEndpointVisibility(&self, id: *const u16, visible: i32) -> windows::core::HRESULT;
+}
+
+/// The class that answers for [`IPolicyConfig`] (`CPolicyConfigClient`).
+const POLICY_CONFIG_CLIENT: GUID = GUID::from_u128(0x870af99c_171d_4f9e_af0d_e63df40c2bc9);
+
+/// The roles a chosen output takes: what plays (music and films; games and the system's sounds). The device for calls is a choice
+/// of its own in Windows and is left as it is, as Windows' own volume panel leaves it. The one this module follows (`eConsole`) is
+/// the last, so that the change it is told of comes when both are done.
+const OUTPUT_ROLES: [ERole; 2] = [eMultimedia, eConsole];
+
+/// Makes the device the default output. On the calling thread, which must be in a COM apartment.
+fn make_default(id: &str) -> windows::core::Result<()> {
+    let policy: IPolicyConfig = unsafe { CoCreateInstance(&POLICY_CONFIG_CLIENT, None, CLSCTX_ALL)? };
+    let w = crate::wide::wide(id);
+    for role in OUTPUT_ROLES {
+        unsafe { policy.SetDefaultEndpoint(w.as_ptr(), role.0).ok()? };
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------------------ the callbacks (post a message, nothing else)
@@ -409,6 +485,43 @@ mod tests {
 
     fn snap(available: bool, volume: f32, muted: bool) -> AudioSnapshot {
         AudioSnapshot { available, volume, muted, ..Default::default() }
+    }
+
+    #[test]
+    fn the_default_output_is_switched_only_to_another_device_of_the_list() {
+        let dev = |id: &str, default: bool| Device { id: id.into(), name: id.to_uppercase(), default };
+        let s = AudioSnapshot { available: true, devices: vec![dev("speakers", true), dev("headset", false), dev("monitor", false)], ..Default::default() };
+        assert!(can_switch_to(&s, "headset"));
+        assert!(can_switch_to(&s, "monitor"));
+        assert!(!can_switch_to(&s, "speakers"), "the default one already is");
+        assert!(!can_switch_to(&s, "gone"), "a device of an older picture");
+        assert!(!can_switch_to(&s, ""));
+        assert!(!can_switch_to(&AudioSnapshot::default(), "headset"));
+        // no default at all (the last one was unplugged): any device of the list is a choice
+        let none = AudioSnapshot { available: false, devices: vec![dev("headset", false)], ..Default::default() };
+        assert!(can_switch_to(&none, "headset"));
+        // what plays, with the role this module follows as the last
+        assert_eq!(OUTPUT_ROLES, [eMultimedia, eConsole]);
+    }
+
+    /// On the PC it is run on: the audio service's policy client answers for the interface, and takes, for each role, the device
+    /// that role ALREADY has (so nothing changes: the same device stays the default of the same role).
+    #[test]
+    #[ignore = "talks to the audio service of the PC it runs on; run by hand"]
+    fn the_policy_client_takes_the_default_output_it_already_has() {
+        init_mta();
+        let en: IMMDeviceEnumerator = unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }.expect("a device enumerator");
+        let policy: IPolicyConfig = unsafe { CoCreateInstance(&POLICY_CONFIG_CLIENT, None, CLSCTX_ALL) }.expect("the policy client answers for IPolicyConfig");
+        for role in OUTPUT_ROLES {
+            // (a PC without a sound device has nothing to ask about)
+            let Ok(dev) = (unsafe { en.GetDefaultAudioEndpoint(eRender, role) }) else { return };
+            let id = unsafe { device_id(&dev) }.expect("the device has an id");
+            let w = crate::wide::wide(&id);
+            let hr = unsafe { policy.SetDefaultEndpoint(w.as_ptr(), role.0) };
+            assert!(hr.is_ok(), "role {}: {hr:?}", role.0);
+            let after = unsafe { en.GetDefaultAudioEndpoint(eRender, role).ok().and_then(|d| device_id(&d)) };
+            assert_eq!(after.as_deref(), Some(id.as_str()), "role {}", role.0);
+        }
     }
 
     #[test]

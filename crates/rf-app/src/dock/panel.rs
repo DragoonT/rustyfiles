@@ -433,6 +433,15 @@ pub fn toggle_control_centre_on(mon: MonId, cx: &mut App) {
     more::toggle_made(PanelId::CONTROL_CENTRE, mon, cx);
 }
 
+/// A right click on the right island's volume symbol: the control centre with its list of output devices open. One that is open
+/// opens the list where it is (it is not closed, as the left click on the symbol would); a closed one is opened.
+pub fn show_output_devices_on(mon: MonId, cx: &mut App) {
+    super::control_centre::ask_devices(cx);
+    if !panel(cx).is_some_and(|p| p.open == Some(PanelId::CONTROL_CENTRE)) {
+        more::toggle_made(PanelId::CONTROL_CENTRE, mon, cx);
+    }
+}
+
 /// A button of the island of this monitor's dock asked for panel `id`. One panel at a time over all monitors
 /// (`rf_win::dock::monitors::panel_request`): the same panel open on another monitor moves to this one.
 fn toggle(id: PanelId, mon: MonId, cx: &mut App) {

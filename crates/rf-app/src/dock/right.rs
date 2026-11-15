@@ -471,6 +471,16 @@ fn open_controls(cx: &mut App) {
     }
 }
 
+/// A right click on the volume symbol: the output devices, to choose the one Windows plays to (issue 22). Our control centre opens
+/// with its list of them open; with Windows' own quick settings in use, it is Windows' sound page.
+fn open_output_devices(cx: &mut App) {
+    if own_control_centre(cx) {
+        super::panel::show_output_devices_on(MonId::HOME, cx);
+    } else {
+        super::panel_parts::open_uri("ms-settings:sound");
+    }
+}
+
 impl Render for RightIsland {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
@@ -535,6 +545,8 @@ impl Render for RightIsland {
                         .ml(px(if i == 0 { 0.0 } else { plan::RIGHT_GAP } * k))
                         .when(dragged.is_some_and(|(w, _)| w == which), |d| d.opacity(0.35))
                         .on_mouse_down(MouseButton::Left, cx.listener(move |me, e: &MouseDownEvent, _, cx| me.status_down(which, e.click_count, cx)))
+                        // a right click on the volume symbol: the output devices, to choose from
+                        .when(which == Status::Volume, |d| d.on_mouse_up(MouseButton::Right, |_, _, cx| open_output_devices(cx)))
                         .child(button),
                 );
             }

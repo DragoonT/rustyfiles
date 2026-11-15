@@ -7,8 +7,9 @@
 //!    (see the notes in `rf_win::sysstatus`). A tile whose source is not on the machine is left out.
 //! 2. "Now playing", only while the system has a media session: artwork, title, artist, the program, previous / play-pause / next.
 //! 3. Sound: a liquid slider for the master volume with a speaker at its left that mutes, the default output device's name under it,
-//!    and a chevron that lists the output devices (read-only: switching the default device is undocumented, so the list ends with a
-//!    link to Windows' sound settings).
+//!    and a chevron that lists the output devices. A click on one makes it Windows' default output
+//!    (`rf_win::sysstatus::audio::set_default_output`, which says how); the list ends with a link to Windows' sound settings. A
+//!    right click on the island's volume symbol opens the panel with this list open ([`ask_devices`]).
 //! 4. Brightness, only when the primary monitor answers DDC/CI.
 //! 5. A gear that opens Windows' Settings.
 //!
@@ -22,8 +23,8 @@
 //! media buttons, the brightness slider, the gear), with a ring in the accent colour while it has the focus by key. Enter and Space
 //! press a button; a slider takes the arrows (one step), Shift or the page keys (ten steps), Home and End; Escape closes the panel.
 //!
-//! WRITES. The slider's drag, the speaker, the transport buttons and the brightness slider are the user's own clicks and drags; each
-//! call is made from that event and nowhere else.
+//! WRITES. The slider's drag, the speaker, the choice of an output device, the transport buttons and the brightness slider are the
+//! user's own clicks and drags; each call is made from that event and nowhere else.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -129,10 +130,25 @@ pub struct CcView {
 /// GPUI's observer handle (named apart from `rf_win::sysstatus::Subscription`).
 type Subscription2 = gpui_kit::Subscription;
 
+/// The wish for the list of output devices (a right click on the island's volume symbol), with when it was made: the control centre
+/// that opens next, or the one that is open, shows the list. A wish nobody took (the panel could not be opened) is forgotten after
+/// `DEVICES_ASK_LIFE`, so that an ordinary opening later does not come with the list.
+#[derive(Default)]
+struct DevicesAsk(Option<Instant>);
+
+impl gpui::Global for DevicesAsk {}
+
+const DEVICES_ASK_LIFE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Asks for the list of output devices: see [`DevicesAsk`]. The caller opens the control centre when it is not open.
+pub fn ask_devices(cx: &mut App) {
+    cx.set_global(DevicesAsk(Some(Instant::now())));
+}
+
 impl CcView {
     pub fn new(island: Rc<RefCell<IslandGlass>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // the sound and the network change under the open panel (the keyboard's volume keys, a cable pulled): redraw
-        let subs = vec![cx.observe_global::<SysState>(|this, cx| {
+        let mut subs = vec![cx.observe_global::<SysState>(|this, cx| {
             if this.drag != Some(SL_VOLUME) {
                 this.vol_drag = None;
             }
@@ -141,6 +157,13 @@ impl CcView {
                 cx.notify();
             }
         })];
+        // the list of output devices asked for while the panel is open (a right click on the volume symbol): it opens where it is
+        subs.push(cx.observe_global::<DevicesAsk>(|this, cx| {
+            if this.shown && !this.closing && this.take_devices_ask(cx) {
+                this.refit(cx);
+                cx.notify();
+            }
+        }));
         CcView {
             island,
             hwnd: crate::look::window::hwnd_of(window),
@@ -165,6 +188,16 @@ impl CcView {
             reported: 0.0,
             _subs: subs,
         }
+    }
+
+    /// Takes the wish for the list of output devices, when there is a fresh one: the list is open. True when it was taken.
+    fn take_devices_ask(&mut self, cx: &mut Context<Self>) -> bool {
+        if !cx.try_global::<DevicesAsk>().is_some_and(|a| a.0.is_some_and(|at| at.elapsed() < DEVICES_ASK_LIFE)) {
+            return false;
+        }
+        cx.set_global(DevicesAsk(None));
+        self.devices_open = true;
+        true
     }
 
     /// The keyboard stop `(key, i)`: made the first time it is asked for.
@@ -213,6 +246,7 @@ impl CcView {
         self.closing = false;
         self.anim = Some((Instant::now(), true));
         self.devices_open = false;
+        self.take_devices_ask(cx);
         self.drag = None;
         self.vol_drag = None;
         self.mute_ask = None;
@@ -227,8 +261,23 @@ impl CcView {
         self.shown = true;
         self.closing = false;
         self.anim = None;
+        if self.take_devices_ask(cx) {
+            self.refit(cx);
+        }
         window.focus(&self.focus, cx);
         cx.notify();
+    }
+
+    /// A click on an output device of the list: it becomes Windows' default output (what plays; the device for calls is left as it
+    /// is). The list stays open: the check mark moves when Windows has made the change.
+    fn choose_output(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.shown || self.closing {
+            return;
+        }
+        audio::set_default_output(id);
+        // (the row that was pressed is about to be the default one, which is no stop: the keyboard goes to the list's own button)
+        let stop = self.stop("cc-devices", 0, cx);
+        window.focus(&stop, cx);
     }
 
     /// The window is on the screen: the glass goes on, the keyboard goes to the panel.
@@ -664,8 +713,9 @@ impl CcView {
         )
     }
 
-    /// The output devices, read-only (the default device cannot be switched through a documented API), and the way to do it: Windows'
-    /// own sound page. A card of its own above the sound card: opening it moves nothing that is under the pointer.
+    /// The output devices: the one Windows plays to now with a check mark, every other as a choice (a click makes it the default
+    /// output), then Windows' own sound page. A card of its own above the sound card: opening it moves nothing that is under the
+    /// pointer.
     fn render_devices(&self, look: &Look, cx: &mut Context<Self>) -> Option<AnyElement> {
         if !self.devices_open {
             return None;
@@ -676,18 +726,30 @@ impl CcView {
         let (ring, focus) = (look.accent, self.stop("cc-sound-settings", 0, cx));
         let mut rows = v_flex();
         for (i, d) in a.devices.iter().enumerate() {
-            // (plain lines: they do nothing when clicked, so they do not look like choices)
-            rows = rows.child(
-                h_flex()
-                    .id(("cc-device", i))
-                    .h(px(cc_model::DEVICE_ROW_H))
-                    .px(px(8.))
-                    .gap(px(8.))
-                    .items_center()
-                    .text_sm()
-                    .child(div().w(px(14.)).flex_shrink_0().when(d.default, |dv| dv.child(Icon::new(L::Check).size(px(14.)).text_color(look.pal.text().hsla()))))
-                    .child(div().flex_1().min_w_0().truncate().child(d.name.clone())),
-            );
+            let row = h_flex()
+                .id(("cc-device", i))
+                .h(px(cc_model::DEVICE_ROW_H))
+                .px(px(8.))
+                .gap(px(8.))
+                .items_center()
+                .rounded(px(8.))
+                .border_1()
+                .border_color(transparent_black())
+                .text_sm()
+                .child(div().w(px(14.)).flex_shrink_0().when(d.default, |dv| dv.child(Icon::new(L::Check).size(px(14.)).text_color(look.pal.text().hsla()))))
+                .child(div().flex_1().min_w_0().truncate().child(d.name.clone()));
+            // the one Windows plays to now is only told; every other is a choice
+            rows = rows.child(if d.default {
+                row
+            } else {
+                let (stop, id) = (self.stop("cc-device", i, cx), d.id.clone());
+                row.cursor_pointer()
+                    .track_focus(&stop)
+                    .focus_visible(move |s| s.border_color(ring))
+                    .hover(move |s| s.bg(hover))
+                    .active(move |s| s.bg(pressed))
+                    .on_click(cx.listener(move |this, _, window, cx| this.choose_output(&id, window, cx)))
+            });
         }
         rows = rows.child(
             h_flex()
@@ -706,7 +768,7 @@ impl CcView {
                 .hover(move |s| s.bg(hover))
                 .active(move |s| s.bg(pressed))
                 .child(div().w(px(14.)).flex_shrink_0().child(Icon::new(L::Settings).size(px(14.)).text_color(secondary)))
-                .child(div().flex_1().min_w_0().truncate().child(t!("Çıkışı değiştir: Ses ayarları")))
+                .child(div().flex_1().min_w_0().truncate().child(t!("Ses ayarları")))
                 .on_click(cx.listener(|this, _, _, cx| this.open_settings("ms-settings:sound", cx))),
         );
         Some(self.card(look).flex_shrink_0().px(px(12.)).py(px(cc_model::DEVICE_CARD_PAD)).child(rows).into_any_element())

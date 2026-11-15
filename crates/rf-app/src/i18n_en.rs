@@ -1327,6 +1327,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Sessize al", "Mute"),
     ("Çıkış aygıtları", "Output devices"),
     ("Çıkışı değiştir: Ses ayarları", "Change output: Sound settings"),
+    ("Ses ayarları", "Sound settings"),
     ("Klasörü düzenle", "Organize folder"),
     ("Uzantı", "Extension"),
     ("şunu içerir", "contains"),
