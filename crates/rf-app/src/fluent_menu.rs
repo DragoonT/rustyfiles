@@ -420,7 +420,7 @@ fn open_level(view: Entity<MenuView>, level: usize, bounds: Bounds<Pixels>, focu
         is_resizable: false,
         is_minimizable: false,
         // over glass the window is see-through and the glass engine draws behind it (the view paints its own fill until it does)
-        window_background: if liquid { WindowBackgroundAppearance::Transparent } else { WindowBackgroundAppearance::Blurred },
+        window_background: theme::popup_material(liquid),
         ..Default::default()
     };
     let r = cx.open_window(opts, move |w, cx| {
@@ -498,7 +498,7 @@ impl Render for LevelView {
             window.request_animation_frame();
         }
         // over glass a wash, or the plain fill until the glass runs (never a see-through panel with nothing behind it)
-        let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback()));
+        let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback())).or_else(|| theme::popup_fill(&p));
         div()
             .size_full()
             .when_some(fill, |d, f| d.bg(f))

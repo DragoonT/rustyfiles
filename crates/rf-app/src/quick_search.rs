@@ -972,7 +972,7 @@ pub fn toggle(cx: &mut App) {
     // automated UI tests: shown without taking the foreground from the user
     let test = std::env::var_os("RUSTYFILES_QUICK_SEARCH_NOACTIVATE").is_some();
     // with HyperGlass as the app's backdrop the search is on the same glass (the user asked); else Windows' acrylic as before
-    let glassy = cx.try_global::<Settings>().is_some_and(|s| s.backdrop == crate::settings::BackdropPref::Glass);
+    let glassy = cx.try_global::<Settings>().is_some_and(|s| s.backdrop_in_use() == crate::settings::BackdropPref::Glass);
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size(px(WIDTH), px(64.))))),
         display_id,
@@ -983,7 +983,7 @@ pub fn toggle(cx: &mut App) {
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: if glassy { WindowBackgroundAppearance::Transparent } else { WindowBackgroundAppearance::Blurred },
+        window_background: crate::theme::popup_material(glassy),
         ..Default::default()
     };
     match cx.open_window(opts, move |window, cx| {
@@ -1291,7 +1291,7 @@ impl Render for QuickSearch {
             self.scroll.scroll_to_item(selected_child);
         }
         // over glass a wash, or the plain fill until the glass runs (never a see-through window with nothing behind it)
-        let fill = self.glass.as_ref().map(|g| crate::glass_watch::panel_fill(p.dark, g.fallback()));
+        let fill = self.glass.as_ref().map(|g| crate::glass_watch::panel_fill(p.dark, g.fallback())).or_else(|| crate::theme::popup_fill(&p));
         v_flex()
             .size_full()
             .when_some(fill, |d, f| d.bg(f))

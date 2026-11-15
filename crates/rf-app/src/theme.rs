@@ -153,6 +153,29 @@ impl Palette {
     }
 }
 
+/// The material a window asks Windows for: the wanted one where Windows has materials, none where it has not (`rf_win::osver`,
+/// issue 24). There the palette paints the window itself (`settings::solid_backdrop`), and asking for "none" also switches off a
+/// blur-behind that an earlier choice may have left on the window. A see-through window (glass, an overlay) stays what it is.
+pub fn window_material(wanted: WindowBackgroundAppearance) -> WindowBackgroundAppearance {
+    match wanted {
+        WindowBackgroundAppearance::Transparent | WindowBackgroundAppearance::Opaque => wanted,
+        _ if crate::settings::materials_available() => wanted,
+        _ => WindowBackgroundAppearance::Opaque,
+    }
+}
+
+/// The material of a popup (a menu, a flyout, a drop-down list): real glass when it was opened from a window that shows glass,
+/// else Windows' Acrylic, else none (and then [`popup_fill`] is its surface).
+pub fn popup_material(liquid: bool) -> WindowBackgroundAppearance {
+    if liquid { WindowBackgroundAppearance::Transparent } else { window_material(WindowBackgroundAppearance::Blurred) }
+}
+
+/// What a popup paints behind its content on a Windows that gives it no Acrylic: the plain colour Windows 11 itself uses for a
+/// flyout without transparency. `None` where the Acrylic is the surface and the popup paints nothing.
+pub fn popup_fill(p: &Palette) -> Option<Hsla> {
+    (!crate::settings::materials_available()).then(|| if p.dark { hex(0x2C2C2C) } else { hex(0xF9F9F9) })
+}
+
 /// The alpha of `window_bg` and `content_bg` over a window that shows glass, for the surface value (0..=100) of the HyperGlass
 /// settings. 50 is the veil the app shipped with (dark 0.18 / 0.22, light 0.20 / 0.35), 0 is no veil at all and 100 is the strength made
 /// for Mica (dark 0.40 / 0.45, light 0.30 / 0.50: the values in `Palette::dark` and `light`); each side of 50 is a straight line. A

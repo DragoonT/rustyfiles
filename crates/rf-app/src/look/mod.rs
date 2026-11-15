@@ -44,12 +44,12 @@ fn rect(r: [f32; 4]) -> Rect {
 }
 
 fn backdrop(s: &LookSettings) -> WindowBackgroundAppearance {
-    match s.look_backdrop {
+    crate::theme::window_material(match s.look_backdrop {
         LookBackdrop::Mica => WindowBackgroundAppearance::MicaBackdrop,
         LookBackdrop::Acrylic => WindowBackgroundAppearance::Blurred,
         LookBackdrop::Tabbed => WindowBackgroundAppearance::MicaAltBackdrop,
         LookBackdrop::None => WindowBackgroundAppearance::Opaque,
-    }
+    })
 }
 
 impl LookManager {

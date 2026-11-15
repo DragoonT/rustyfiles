@@ -841,9 +841,18 @@ pub fn animations() -> bool {
     }
 }
 
-/// "Solid" background material: the palette paints an opaque window background.
+/// "Solid" background material: the palette paints an opaque window background. Also on a Windows without materials, whatever the
+/// setting says and in every process (a side process that never loads these settings asks too).
 pub fn solid_backdrop() -> bool {
-    SOLID.load(Ordering::Relaxed)
+    SOLID.load(Ordering::Relaxed) || !materials_available()
+}
+
+/// Whether Windows gives windows a material (Mica, Mica Alt, Acrylic): from Windows 11 22H2 on (`rf_win::osver`, issue 24). Where it
+/// does not, every window is the "Solid" look and every popup paints itself: see `theme::window_material` and `theme::popup_fill`.
+/// `RUSTYFILES_NO_BACKDROP=1` answers "no" on any Windows, to look at that state on a developer's PC. Read once.
+pub fn materials_available() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("RUSTYFILES_NO_BACKDROP").is_none() && rf_win::osver::system_backdrops())
 }
 
 /// How strongly the app's own washes lie over the glass, 0..=100 (Settings > HyperGlass > Surface wash).
@@ -943,6 +952,12 @@ impl Settings {
     /// over whatever the file has become meanwhile (see `settings_merge::follow`).
     pub fn follow_file(file: toml::Table) {
         crate::settings_merge::follow(&BASELINE, file);
+    }
+
+    /// The material the windows really have: the chosen one, or "Solid" on a Windows without materials. The setting itself is left
+    /// as it is (the same file may be read on a Windows 11 later).
+    pub fn backdrop_in_use(&self) -> BackdropPref {
+        if materials_available() { self.backdrop } else { BackdropPref::Solid }
     }
 
     /// Brings settings written by older versions up to date.

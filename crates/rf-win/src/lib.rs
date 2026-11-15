@@ -47,6 +47,7 @@ pub mod listing;
 pub mod localized;
 pub mod nameindex;
 pub mod organize;
+pub mod osver;
 pub mod openrules;
 pub mod ownfolder;
 pub mod taskbar_hide;

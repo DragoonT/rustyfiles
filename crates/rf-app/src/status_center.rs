@@ -1893,7 +1893,7 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: WindowBackgroundAppearance::Blurred,
+        window_background: crate::theme::window_material(WindowBackgroundAppearance::Blurred),
         ..Default::default()
     };
     let ops = ops.clone();
@@ -1958,6 +1958,8 @@ impl Render for ScView {
         let vh = window.viewport_size().height;
         v_flex()
             .size_full()
+            // (the Acrylic window is the surface; a Windows without it gets the plain fill)
+            .when_some(crate::theme::popup_fill(&p), |d, f| d.bg(f))
             .track_focus(&self.focus)
             .text_color(p.text)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {

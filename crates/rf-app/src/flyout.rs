@@ -75,7 +75,7 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, own
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: if liquid { WindowBackgroundAppearance::Transparent } else { WindowBackgroundAppearance::Blurred },
+        window_background: crate::theme::popup_material(liquid),
         ..Default::default()
     };
     // the app window keeps its active look (Mica, caption) while the flyout has focus
@@ -145,7 +145,7 @@ impl Render for FlyoutView {
         let vh = window.viewport_size().height;
         let width = self.width;
         // over glass a wash, or the plain fill until the glass runs (never a see-through panel with nothing behind it)
-        let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback()));
+        let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback())).or_else(|| crate::theme::popup_fill(&p));
         v_flex()
             .size_full()
             .when_some(fill, |d, f| d.bg(f))

@@ -37,7 +37,7 @@ pub fn open(cx: &mut App) {
     };
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
-        window_background: WindowBackgroundAppearance::MicaBackdrop,
+        window_background: crate::theme::window_material(WindowBackgroundAppearance::MicaBackdrop),
         ..gpui_kit::component::TitleBar::window_options()
     };
     let r = gpui_kit::open_window(opts, cx, |window, cx| {

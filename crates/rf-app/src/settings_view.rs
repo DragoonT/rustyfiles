@@ -941,10 +941,9 @@ fn accent_card(p: &Palette, s: &Settings) -> AnyElement {
 }
 
 fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
-    let control = dropdown(
-        "backdrop",
-        p,
-        s.backdrop,
+    // On a Windows without materials (before Windows 11 22H2, issue 24) the windows are "Solid" whatever was chosen, and that is the
+    // one choice shown: a list of four materials that all look the same would be a lie.
+    let choices = if crate::settings::materials_available() {
         vec![
             (BackdropPref::Mica, "Mica".into()),
             (BackdropPref::MicaAlt, "Mica Alt".into()),
@@ -952,11 +951,13 @@ fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
             (BackdropPref::Solid, t!("Düz").into()),
             // a product name: only the "(experimental)" is translated
             (BackdropPref::Glass, t!("HyperGlass (deneysel)").into()),
-        ],
-        |s, v| s.backdrop = v,
-    );
+        ]
+    } else {
+        vec![(BackdropPref::Solid, t!("Düz").into())]
+    };
+    let control = dropdown("backdrop", p, s.backdrop_in_use(), choices, |s, v| s.backdrop = v);
     let mut notes: Vec<String> = Vec::new();
-    if s.backdrop == BackdropPref::Glass || crate::glass::forced() {
+    if s.backdrop_in_use() == BackdropPref::Glass || crate::glass::forced() {
         notes.push(t!("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Ekranı canlı izleyip her değişiklikte yeniden çizdiği için Mica'dan daha fazla ekran kartı ve pil kullanır.").to_string());
         // Only where the windows really are hidden from screenshots: with a capture session (Windows 11 24H2 and the border-free capture
         // permission) they are not, and the line would be untrue. Before the engine has chosen (no window has glass yet) the mode is
@@ -969,7 +970,14 @@ fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
         }
     }
     shell(p)
-        .child(card_body(p, L::Layers, t!("Arka plan malzemesi").into(), Some(t!("Mica masaüstü renginden ton alır; Mica Alt daha renklidir.").into()), Some(control)))
+        // (the line about Mica is left out where Windows has no Mica to choose)
+        .child(card_body(
+            p,
+            L::Layers,
+            t!("Arka plan malzemesi").into(),
+            crate::settings::materials_available().then(|| t!("Mica masaüstü renginden ton alır; Mica Alt daha renklidir.").into()),
+            Some(control),
+        ))
         .children(notes.into_iter().map(|n| div().pl(px(56.)).pr_4().pb_3().text_xs().text_color(p.text_secondary).child(n)))
         .into_any_element()
 }
@@ -1355,7 +1363,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ),
     ];
     // HyperGlass look, right under the backdrop card (index 1) while Glass is the material
-    if s.backdrop == BackdropPref::Glass || crate::glass::forced() {
+    if s.backdrop_in_use() == BackdropPref::Glass || crate::glass::forced() {
         v.insert(2, hyperglass_card(p, s, cx));
     }
     // tint swatches

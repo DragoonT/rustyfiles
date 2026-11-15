@@ -3446,7 +3446,7 @@ impl Render for Workspace {
         // changes: GPUI resets it on a system theme switch)
         let prefs = cx.global::<crate::settings::Settings>();
         let (backdrop, tint, bg_image, bg_opacity, show_toolbar, show_statusbar) = (
-            prefs.backdrop,
+            prefs.backdrop_in_use(),
             prefs.tint,
             prefs.background_image.clone(),
             prefs.background_opacity,
@@ -3476,7 +3476,7 @@ impl Render for Workspace {
             if was_glass {
                 self.stop_glass(window);
             }
-            window.set_background_appearance(match backdrop {
+            window.set_background_appearance(theme::window_material(match backdrop {
                 BackdropPref::Mica => WindowBackgroundAppearance::MicaBackdrop,
                 BackdropPref::MicaAlt => WindowBackgroundAppearance::MicaAltBackdrop,
                 BackdropPref::Acrylic => WindowBackgroundAppearance::Blurred,
@@ -3485,7 +3485,7 @@ impl Render for Workspace {
                 // The glass is a second DirectComposition target behind the scene, so the scene must become see-through, but only once the
                 // engine has drawn (`check_glass` does that): until then, and for good if the engine gives up, the window has Mica.
                 BackdropPref::Glass => WindowBackgroundAppearance::MicaBackdrop,
-            });
+            }));
             if backdrop == BackdropPref::Glass {
                 self.start_glass(p.dark, window, cx);
             }

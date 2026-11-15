@@ -189,7 +189,7 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
         is_resizable: false,
         is_minimizable: false,
         // over glass the window is see-through and the glass engine draws behind it (the view paints its own fill until it does)
-        window_background: if liquid { WindowBackgroundAppearance::Transparent } else { WindowBackgroundAppearance::Blurred },
+        window_background: theme::popup_material(liquid),
         ..Default::default()
     };
     let opened = cx.open_window(opts, move |w, cx| {
@@ -419,7 +419,7 @@ impl Render for SelectView {
             });
         }
         // the panel: over glass a wash (or the plain fill until the glass runs); the Acrylic list has no fill of its own
-        let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback()));
+        let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback())).or_else(|| theme::popup_fill(&p));
         v_flex()
             .size_full()
             .px(px(m.pad_x))

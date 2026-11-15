@@ -209,7 +209,7 @@ pub fn open_main_window_made(
     let options = WindowOptions {
         window_bounds: Some(bounds.unwrap_or_else(|| WindowBounds::centered(size(px(1280.), px(800.)), cx))),
         window_min_size: Some(size(px(720.), px(420.))),
-        window_background: WindowBackgroundAppearance::MicaBackdrop,
+        window_background: crate::theme::window_material(WindowBackgroundAppearance::MicaBackdrop),
         ..TitleBar::window_options()
     };
     if let Err(e) = gpui_kit::open_window(options, cx, move |window, cx| cx.new(|cx| Workspace::new(start, ipc, window, cx))) {
