@@ -14,10 +14,17 @@
 pub enum Fixed {
     /// The app's name: starts a new instance.
     Open,
+    /// Start a new instance as administrator (Windows asks for consent). Issue 29: "the most useful add Properties or insta
+    /// button - open file directory and open with admin rights", with Windows' own menu of a taskbar icon as the picture.
+    RunAsAdmin,
+    /// Open the folder the program is in, with the program selected (a shortcut's target, as its Properties page's button does).
+    OpenLocation,
     /// Pin the app to the dock.
     Pin,
     /// Take the app off the dock.
     Unpin,
+    /// Windows' own Properties of the shortcut or the program.
+    Properties,
     /// Ask the app's one window to close.
     CloseWindow,
     /// Ask all of the app's windows (the count) to close.
@@ -30,16 +37,29 @@ pub enum Fixed {
 /// pin list (the same condition for an app that is not pinned yet); `pinned`: it is on the list; `windows`: how many windows it has;
 /// `can_end`: there is a process of its own to end (`winops::end_targets`: not the shell's, not the host of every Store app).
 ///
+/// `on_disk`: the app is started from a file (a shortcut or a program, `model::Launch::file`), not a packaged app: only then are
+/// there a file to start as administrator, a folder to show and Properties to open. The order follows Windows' own menu of a
+/// taskbar icon (open, as administrator, the pin, properties), with the folder beside the two ways to start.
+///
 /// "End task" is the LAST row, under the close rows: it loses unsaved work, so it stands furthest from the pointer's way in.
-pub fn fixed_rows(can_start: bool, can_pin: bool, pinned: bool, windows: usize, can_end: bool) -> Vec<Fixed> {
+pub fn fixed_rows(can_start: bool, on_disk: bool, can_pin: bool, pinned: bool, windows: usize, can_end: bool) -> Vec<Fixed> {
     let mut rows = Vec::new();
     if can_start {
         rows.push(Fixed::Open);
+    }
+    if can_start && on_disk {
+        rows.push(Fixed::RunAsAdmin);
+    }
+    if on_disk {
+        rows.push(Fixed::OpenLocation);
     }
     if pinned {
         rows.push(Fixed::Unpin);
     } else if can_pin {
         rows.push(Fixed::Pin);
+    }
+    if on_disk {
+        rows.push(Fixed::Properties);
     }
     match windows {
         0 => {}
@@ -245,40 +265,53 @@ mod tests {
     use super::*;
 
     /// "End task" is offered for a running app that has a process of its own to end, after the close rows, and for nothing else.
+    /// An app that is started from a file gets the three rows of the file, in Windows' order; a packaged app gets none of them.
+    #[test]
+    fn an_app_on_disk_can_be_started_as_administrator_shown_in_its_folder_and_asked_for_its_properties() {
+        assert_eq!(
+            fixed_rows(true, true, true, true, 1, true),
+            vec![Fixed::Open, Fixed::RunAsAdmin, Fixed::OpenLocation, Fixed::Unpin, Fixed::Properties, Fixed::CloseWindow, Fixed::EndTask]
+        );
+        assert_eq!(fixed_rows(true, true, true, false, 0, false), vec![Fixed::Open, Fixed::RunAsAdmin, Fixed::OpenLocation, Fixed::Pin, Fixed::Properties]);
+        assert!(!fixed_rows(true, false, true, true, 2, true).iter().any(|r| matches!(r, Fixed::RunAsAdmin | Fixed::OpenLocation | Fixed::Properties)));
+        // (a file that cannot be started is still a file to show)
+        assert_eq!(fixed_rows(false, true, false, true, 0, false), vec![Fixed::OpenLocation, Fixed::Unpin, Fixed::Properties]);
+    }
+
     #[test]
     fn end_task_is_the_last_row_of_a_running_app_that_can_be_ended() {
-        assert_eq!(fixed_rows(true, true, false, 1, true), vec![Fixed::Open, Fixed::Pin, Fixed::CloseWindow, Fixed::EndTask]);
-        assert_eq!(fixed_rows(true, true, true, 3, true), vec![Fixed::Open, Fixed::Unpin, Fixed::CloseAll(3), Fixed::EndTask]);
+        assert_eq!(fixed_rows(true, false, true, false, 1, true), vec![Fixed::Open, Fixed::Pin, Fixed::CloseWindow, Fixed::EndTask]);
+        assert_eq!(fixed_rows(true, false, true, true, 3, true), vec![Fixed::Open, Fixed::Unpin, Fixed::CloseAll(3), Fixed::EndTask]);
         // not running: nothing to end, whatever the caller says
-        assert_eq!(fixed_rows(true, true, true, 0, true), vec![Fixed::Open, Fixed::Unpin]);
+        assert_eq!(fixed_rows(true, false, true, true, 0, true), vec![Fixed::Open, Fixed::Unpin]);
         // running, but its windows are the shell's or a Store app's frame with nothing inside: no such row
-        assert_eq!(fixed_rows(true, true, true, 2, false), vec![Fixed::Open, Fixed::Unpin, Fixed::CloseAll(2)]);
+        assert_eq!(fixed_rows(true, false, true, true, 2, false), vec![Fixed::Open, Fixed::Unpin, Fixed::CloseAll(2)]);
         // the keyboard reaches it like any fixed row
-        let m = Menu::new(fixed_rows(true, true, false, 1, true));
+        let m = Menu::new(fixed_rows(true, false, true, false, 1, true));
         assert_eq!(m.rows().last(), Some(&RowId::Fixed(Fixed::EndTask)));
     }
 
     #[test]
     fn a_running_app_with_one_window_gets_open_pin_and_close() {
-        assert_eq!(fixed_rows(true, true, false, 1, false), vec![Fixed::Open, Fixed::Pin, Fixed::CloseWindow]);
+        assert_eq!(fixed_rows(true, false, true, false, 1, false), vec![Fixed::Open, Fixed::Pin, Fixed::CloseWindow]);
     }
 
     #[test]
     fn a_pinned_app_offers_to_be_removed_and_several_windows_close_together() {
-        assert_eq!(fixed_rows(true, true, true, 3, false), vec![Fixed::Open, Fixed::Unpin, Fixed::CloseAll(3)]);
+        assert_eq!(fixed_rows(true, false, true, true, 3, false), vec![Fixed::Open, Fixed::Unpin, Fixed::CloseAll(3)]);
     }
 
     #[test]
     fn an_app_that_is_not_running_has_no_close_row() {
-        assert_eq!(fixed_rows(true, true, true, 0, false), vec![Fixed::Open, Fixed::Unpin]);
-        assert_eq!(fixed_rows(true, true, false, 0, false), vec![Fixed::Open, Fixed::Pin]);
+        assert_eq!(fixed_rows(true, false, true, true, 0, false), vec![Fixed::Open, Fixed::Unpin]);
+        assert_eq!(fixed_rows(true, false, true, false, 0, false), vec![Fixed::Open, Fixed::Pin]);
     }
 
     #[test]
     fn an_app_that_cannot_be_started_again_still_closes_and_a_pinned_one_can_always_be_unpinned() {
-        assert_eq!(fixed_rows(false, false, false, 2, false), vec![Fixed::CloseAll(2)]);
-        assert_eq!(fixed_rows(false, false, true, 0, false), vec![Fixed::Unpin]);
-        assert!(fixed_rows(false, false, false, 0, false).is_empty());
+        assert_eq!(fixed_rows(false, false, false, false, 2, false), vec![Fixed::CloseAll(2)]);
+        assert_eq!(fixed_rows(false, false, false, true, 0, false), vec![Fixed::Unpin]);
+        assert!(fixed_rows(false, false, false, false, 0, false).is_empty());
     }
 
     fn shapes() -> Vec<Shape> {
@@ -287,7 +320,7 @@ mod tests {
 
     #[test]
     fn the_menu_before_the_sections_arrive_is_the_fixed_part_alone() {
-        let m = Menu::new(fixed_rows(true, true, false, 1, false));
+        let m = Menu::new(fixed_rows(true, false, true, false, 1, false));
         assert_eq!(m.items(), vec![Item::Row(RowId::Fixed(Fixed::Open)), Item::Row(RowId::Fixed(Fixed::Pin)), Item::Row(RowId::Fixed(Fixed::CloseWindow))]);
         assert_eq!(m.height(), 2.0 * PAD + 3.0 * ROW_H);
         assert_eq!(m.sections(), 0);

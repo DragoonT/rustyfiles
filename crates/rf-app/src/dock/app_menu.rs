@@ -402,7 +402,8 @@ impl MenuView {
         let windows = winops::refs(&app.windows);
         // (whether there is a process of the app's own to end: a few fast questions about its windows, none of which waits for it)
         let can_end = !winops::end_task_processes(&windows).is_empty();
-        let fixed = model::fixed_rows(app.launch.is_some(), ownpins::pin_from_app(&app).is_some(), app.pinned, app.windows.len(), can_end);
+        let on_disk = app.launch.as_ref().is_some_and(|l| l.file().is_some());
+        let fixed = model::fixed_rows(app.launch.is_some(), on_disk, ownpins::pin_from_app(&app).is_some(), app.pinned, app.windows.len(), can_end);
         self.active = Some(Active { app, windows, jump, icon, display_name: None, menu: Menu::new(fixed), sections: Vec::new() });
         self.shown = true;
         self.closing = false;
@@ -542,6 +543,34 @@ impl MenuView {
                 }
             }
             RowId::Fixed(Fixed::Open) => super::actions::middle_click_app(&a.app),
+            RowId::Fixed(Fixed::RunAsAdmin) => {
+                if let Some(file) = a.app.launch.as_ref().and_then(|l| l.file()).map(|p| p.to_path_buf()) {
+                    // Windows shows its consent prompt: the user asked for it with this row. (A shortcut brings its arguments
+                    // along; a bare program is started without any.)
+                    std::thread::spawn(move || {
+                        if let Err(e) = rf_win::dock::startapps::launch_file_as_admin(&file)
+                            && !rf_win::dock::startapps::is_cancelled(&e)
+                        {
+                            log::warn!("dock: starting as administrator failed: {e:#}");
+                        }
+                    });
+                }
+            }
+            RowId::Fixed(Fixed::OpenLocation) => {
+                if let Some(file) = a.app.launch.as_ref().and_then(|l| l.file()).map(|p| p.to_path_buf()) {
+                    // (reading a shortcut asks the shell: not on the UI thread)
+                    std::thread::spawn(move || super::actions::run_rustyfiles(super::actions::show_in_folder_args(&location_of(&file))));
+                }
+            }
+            RowId::Fixed(Fixed::Properties) => {
+                if let Some(file) = a.app.launch.as_ref().and_then(|l| l.file()).map(|p| p.to_path_buf()) {
+                    std::thread::spawn(move || {
+                        if let Err(e) = rf_win::shell::properties(&file) {
+                            log::warn!("dock: the properties could not be opened: {e:#}");
+                        }
+                    });
+                }
+            }
             RowId::Fixed(Fixed::Pin) => super::own_pins::set_pinned(a.app.clone(), true, cx),
             RowId::Fixed(Fixed::Unpin) => super::own_pins::set_pinned(a.app.clone(), false, cx),
             RowId::Fixed(Fixed::CloseWindow) => {
@@ -681,6 +710,9 @@ fn fixed_label(f: Fixed, app_name: &str) -> (Option<L>, String) {
     match f {
         Fixed::Open if app_name.trim().is_empty() => (Some(L::Play), t!("Uygulamayı başlat").to_string()),
         Fixed::Open => (Some(L::Play), app_name.to_string()),
+        Fixed::RunAsAdmin => (Some(L::ShieldCheck), t!("Yönetici olarak çalıştır").to_string()),
+        Fixed::OpenLocation => (Some(L::FolderOpen), t!("Dosya konumunu aç").to_string()),
+        Fixed::Properties => (Some(L::Wrench), t!("Özellikler").to_string()),
         Fixed::Pin => (Some(L::Pin), t!("Dock'a sabitle").to_string()),
         Fixed::Unpin => (Some(L::PinOff), t!("Dock'tan kaldır").to_string()),
         Fixed::CloseWindow => (Some(L::X), t!("Pencereyi kapat").to_string()),
@@ -754,6 +786,14 @@ impl Render for MenuView {
             .child(column)
             .into_any_element()
     }
+}
+
+/// The file "open file location" shows: a shortcut's target when it has one on disk (what the button of a shortcut's Properties
+/// page opens), else the file itself.
+fn location_of(file: &std::path::Path) -> std::path::PathBuf {
+    let is_link = file.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk"));
+    let target = is_link.then(|| rf_win::shortcut::resolve(file).ok()).flatten().map(|s| s.target).filter(|t| !t.as_os_str().is_empty() && t.exists());
+    target.unwrap_or_else(|| file.to_path_buf())
 }
 
 #[cfg(test)]

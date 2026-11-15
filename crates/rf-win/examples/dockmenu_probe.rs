@@ -69,7 +69,7 @@ fn main() {
         if a.running() {
             end_lines.push(format!("   {:<28} {} window(s) -> {}", a.name.chars().take(28).collect::<String>(), a.windows.len(), if targets.is_empty() { "no row (the shell's, or a frame with nothing inside)".to_string() } else { format!("{} process(es): {targets:?}", targets.len()) }));
         }
-        for row in appmenu::fixed_rows(a.launch.is_some(), can_pin, a.pinned, a.windows.len(), !targets.is_empty()) {
+        for row in appmenu::fixed_rows(a.launch.is_some(), a.launch.as_ref().is_some_and(|l| l.file().is_some()), can_pin, a.pinned, a.windows.len(), !targets.is_empty()) {
             match row {
                 Fixed::Open => open += 1,
                 Fixed::Pin => pin += 1,
@@ -77,6 +77,8 @@ fn main() {
                 Fixed::CloseWindow => close_one += 1,
                 Fixed::CloseAll(_) => close_all += 1,
                 Fixed::EndTask => end += 1,
+                // (the rows of an app's file are not counted by this probe)
+                Fixed::RunAsAdmin | Fixed::OpenLocation | Fixed::Properties => {}
             }
         }
     }

@@ -16,6 +16,17 @@ pub enum Launch {
     Packaged(String),
 }
 
+impl Launch {
+    /// The file on disk this app is started from: the shortcut or the program. `None` for a packaged app, which has no file of its
+    /// own to show, to give properties for or to start as administrator.
+    pub fn file(&self) -> Option<&std::path::Path> {
+        match self {
+            Launch::Link(p) | Launch::Exe { path: p, .. } => Some(p),
+            Launch::Packaged(_) => None,
+        }
+    }
+}
+
 /// Where an app's icon comes from.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IconSource {
