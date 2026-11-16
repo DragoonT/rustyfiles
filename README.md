@@ -49,15 +49,16 @@ that is built into rustyfiles (Settings › Speed test): anyone can run it on th
 
 | Folder | rustyfiles | File Explorer | [Files](https://files.community) |
 |---|--:|--:|--:|
-| Empty folder | 550 ms | 961 ms | 766 ms |
-| 1,000 files | 548 ms | 2,208 ms | 2,025 ms |
-| 10,000 files | 537 ms | 2,150 ms | 1,789 ms |
-| 100,000 files | 542 ms | 2,254 ms | 3,976 ms |
-| 2,000 pictures (thumbnails) | 527 ms | 2,188 ms | 950 ms |
-| Memory after listing 10,000 files | 37 MB | 69 MB | 150 MB |
+| Empty folder | 281 ms | 1,006 ms | 813 ms |
+| 1,000 files | 284 ms | 2,214 ms | 1,893 ms |
+| 10,000 files | 286 ms | 2,221 ms | 1,053 ms |
+| 100,000 files | 281 ms | 2,318 ms | 4,069 ms |
+| 2,000 pictures (thumbnails) | 278 ms | 2,177 ms | 1,075 ms |
+| Memory after listing 10,000 files | 39 MB | 69 MB | 204 MB |
 
 Measured on one machine (Ryzen 7 9800X3D, NVMe SSD, Windows 11) on 2026-11-16, with rustyfiles
-0.8.5 and Files 4.3. rustyfiles and Explorer each started a new process. Files was already
+0.8.6 and Files 4.3 (0.8.5 took about 540 ms in the same test: its first tab played an opening
+animation that 0.8.6 no longer plays at start). rustyfiles and Explorer each started a new process. Files was already
 running in the background, so its times are not those of a cold start; it also fills its list
 in steps, and the time counts until the picture stops changing. Memory is the private working
 set, the figure Task Manager shows; for Files it is that of its running process.
@@ -159,17 +160,18 @@ the official UnRAR (decode and check every CRC, archives in the file cache):
 
 ### Copying and extracting
 
-The same speed test, our own engines against Windows' (rustyfiles 0.8.5, 2026-11-16):
+The same speed test, our own engines against Windows' (rustyfiles 0.8.6, 2026-11-16):
 
 | | Windows | rustyfiles |
 |---|--:|--:|
-| Copying 10,000 small files in 100 folders (41 MB) | 25.5 s | **1.7 s** (15×) |
-| Copying one 1 GB file | 0.40 s | 0.44 s |
-| Extracting a ZIP of 10,000 files | 32.5 s | **3.6 s** (9×) |
+| Copying 10,000 small files in 100 folders (41 MB) | 25.6 s | **1.8 s** (14×) |
+| Copying one 1 GB file | 0.61 s | 0.44 s |
+| Extracting a ZIP of 10,000 files | 32.4 s | **3.6 s** (9×) |
 
 Copying uses its own parallel engine, which spreads small files across folders because threads
 writing into one folder wait on each other. A single large file is limited by the disk, not
-the engine. Searching the test folders by name (123,000 entries) took 63 ms.
+the engine (in an earlier run Windows was the quicker of the two by a few ms). Searching the test
+folders by name (123,000 entries) took 55 ms.
 
 It also handles name conflicts itself (replace, skip or keep both, for all or per file),
 pauses and resumes, can verify every copy byte by byte, and can cap its speed.
