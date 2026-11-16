@@ -792,6 +792,11 @@ impl Workspace {
             }
             None => this.open_tab(Location::Home, window, cx),
         }
+        // The tabs a window opens WITH are simply there: the opening animation is for a tab that is opened in a window one is looking
+        // at. WHY: `open_tab` started it for the first tab too, so every new window spent its first third of a second growing its
+        // tab and sliding the "+" in (seen frame by frame, 2026-11-16: the folder is listed in the first picture, the tab strip moves
+        // for 280 ms more), and the speed test, which waits for the picture to stand still, counted that as "not open yet".
+        this.tab_anim = None;
         this
     }
 

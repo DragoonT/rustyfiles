@@ -4,6 +4,7 @@ mod actions;
 mod aliases;
 mod background;
 pub mod bench;
+mod fast_start;
 mod bench_view;
 mod donate;
 mod archive_view;
@@ -581,6 +582,8 @@ pub fn main() {
         });
     }
 
+    // (the first window on the CPU renderer or on the card: what this machine was like the last time, see `fast_start`)
+    fast_start::before_app();
     start_mark("before the app");
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
         start_mark("app running");
@@ -656,6 +659,7 @@ pub fn main() {
                 start_mark("opening the window");
                 open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx);
                 start_mark("window opened");
+                fast_start::remember(cx);
                 // a copy or move cut off last time: ask to carry it on
                 status_center::offer_resume(cx);
             }

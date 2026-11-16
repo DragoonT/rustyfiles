@@ -120,6 +120,8 @@ pub fn main() {
         let _ = tray_tx.unbounded_send(e);
     });
 
+    // (DirectLook's first window too: it reads what the main app remembered of this machine, and writes nothing)
+    crate::fast_start::before_app();
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
         gpui_kit::init(cx);
         // rustyfiles'ın ayarları: yalnız dil, tema, tarih biçimi için okunur, asla yazılmaz
