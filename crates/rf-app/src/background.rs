@@ -79,8 +79,9 @@ fn on_tray(e: rf_win::tray::TrayEvent, cx: &mut App) {
     use rf_win::tray::TrayEvent;
     match e {
         TrayEvent::Open => {
-            // bring an open window forward, or open one (restoring the last session)
-            let first = cx.windows().into_iter().next().filter(|_| crate::workspace::any_main_window(cx));
+            // bring an open main window forward (not whichever window comes first: that can be a pop-up), or open one (restoring
+            // the last session)
+            let first = crate::workspace::main_windows(cx).into_iter().next();
             match first {
                 Some(w) => {
                     let _ = w.update(cx, |_, window, _| window.activate_window());
@@ -89,7 +90,9 @@ fn on_tray(e: rf_win::tray::TrayEvent, cx: &mut App) {
             }
         }
         TrayEvent::NewWindow => crate::open_main_window(Some(rf_core::Location::Home), None, None, cx),
-        TrayEvent::Settings => crate::open_main_window(Some(rf_core::Location::Settings), None, None, cx),
+        TrayEvent::Settings => {
+            crate::workspace::show_settings(cx);
+        }
         TrayEvent::Quit => {
             QUITTING.store(true, Ordering::Relaxed);
             let windows = cx.windows();

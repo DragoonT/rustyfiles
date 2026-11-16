@@ -1056,7 +1056,7 @@ impl FolderView {
                     .flatten();
                 let _ = tx.unbounded_send(patch);
             })
-            .map_err(|e| log::warn!("watch {path:?}: {e}"))
+            .map_err(|e| watch_failed(&path, &e))
             .ok()
         });
         self.watch_gen += 1;
@@ -4209,6 +4209,18 @@ fn shown_name(e: &Entry, show_ext: bool) -> String {
         e.shown().to_string()
     } else {
         e.name[..e.stem_len()].to_string()
+    }
+}
+
+/// A folder's watcher could not be started: said in the log, on the thread that tried (never the interface's: this asks the disk).
+/// A place that is no folder has nothing to watch and nothing to warn about, it is shown with its error. One way to get there is
+/// an argument another program started us with that is no path at all (in a user's log: "Exportación rápida: C:\Users\User\"),
+/// which is shown here once Explorer has handed it back (see `run`).
+fn watch_failed(path: &std::path::Path, e: &impl std::fmt::Display) {
+    if path.is_dir() {
+        log::warn!("watch {path:?}: {e}");
+    } else {
+        log::debug!("watch {path:?}: not a folder ({e})");
     }
 }
 

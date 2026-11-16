@@ -244,13 +244,64 @@ fn update_jump_list(places: &crate::places::Places) {
         *last = Some((pins.clone(), recent.clone(), labels));
     }
     let Ok(exe) = std::env::current_exe() else { return };
+    // A run of changes is ONE write: of the last of them, a moment after it (`TURN` says which change is the last). WHY: the recent
+    // folders can change several times within a second (nine times in five seconds in a user's log), every change started a write
+    // on a thread of its own, and the writes collided ("unable to remove the file to be replaced", see `rf_win::jumplist::set`).
+    use std::sync::atomic::Ordering::Relaxed;
+    static TURN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let turn = TURN.fetch_add(1, Relaxed) + 1;
     std::thread::spawn(move || {
+        std::thread::sleep(JUMP_LIST_SETTLE);
+        if TURN.load(Relaxed) != turn {
+            return;
+        }
         let tasks = [(labels[0], rf_win::jumplist::NEW_WINDOW_ARG), (labels[1], "")];
         let cats = [(labels[2].to_string(), pins), (labels[3].to_string(), recent)];
         if let Err(e) = rf_win::jumplist::set(&exe, &tasks, &cats) {
-            log::warn!("jump list: {e:#}");
+            // (not written: the next look at the places writes it, even when nothing has changed by then)
+            if TURN.load(Relaxed) == turn {
+                *LAST.lock().unwrap() = None;
+            }
+            // one warning in a run of the app: where the list cannot be written at all (a policy), every try would add a line
+            if WARNED.swap(true, Relaxed) {
+                log::debug!("jump list: {e:#}");
+            } else {
+                log::warn!("jump list: {e:#}");
+            }
         }
     });
+}
+
+/// How long the jump list waits after a change of its content before it is written (see `update_jump_list`).
+const JUMP_LIST_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+
+/// Settings, asked for from outside a window (DirectLook's tray icon, the tray menu, a start with `--settings=<page>`): the window
+/// that has Settings open comes forward, on that tab; a new window is opened only when none has. WHY (issue 33: "... opens the
+/// Settings window multiple times (up to 5)"): every such request opened another window, so the five messages a tray sends for a
+/// double click made five windows. 0.8.2 made those five one request; with this a second request is harmless whoever sends it.
+/// Says whether the request is taken care of (see `route_ipc_shown`).
+pub fn show_settings(cx: &mut App) -> bool {
+    let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
+    for (handle, ws) in list.into_iter().rev() {
+        let Some(ws) = ws.upgrade() else { continue };
+        let tab = {
+            let w = ws.read(cx);
+            // (an Open/Save picker is another app's dialog, as in `route_ipc_shown`)
+            if w.picker.is_some() { None } else { w.tabs.iter().position(|t| matches!(t.view().read(cx).location(), Location::Settings)) }
+        };
+        let Some(tab) = tab else { continue };
+        let shown = handle
+            .update(cx, |_, window, cx| {
+                ws.update(cx, |w, cx| w.activate(tab, window, cx));
+                window.activate_window();
+            })
+            .is_ok();
+        if shown {
+            return true;
+        }
+    }
+    crate::open_main_window_made(Some(Location::Settings), None, None, cx)
 }
 
 /// Whether `path` lives on drive `letter` (`E:\…`, `\\?\E:\…`).
@@ -418,7 +469,7 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         }
         Some(crate::look::ipc::ToApp::OpenSettings) => {
             crate::settings_view::open_page(crate::settings_view::Page::Look, cx);
-            return crate::open_main_window_made(Some(Location::Settings), None, None, cx);
+            return show_settings(cx);
         }
         None => {}
     }
