@@ -612,6 +612,8 @@ impl FolderView {
                 let from = dir.join(&old);
                 let to = dir.join(&new_name);
                 self.set_reselect(new_name.clone());
+                // (the row shows the new name at once, not the old one until the watcher has seen the rename)
+                self.show_renamed(&old, &new_name);
                 // Explorer-style warning when a file's extension changes.
                 let ext = |n: &str| std::path::Path::new(n).extension().map(|e| e.to_string_lossy().to_lowercase());
                 let warn = cx.global::<crate::settings::Settings>().warn_extension_change;
@@ -628,7 +630,7 @@ impl FolderView {
                 cx.spawn(async move |this, cx| {
                     if let Some(r) = confirm_rx {
                         if !r.await.unwrap_or(false) {
-                            let _ = this.update(cx, |v, _| v.clear_reselect());
+                            let _ = this.update(cx, |v, cx| v.rename_failed(cx));
                             return;
                         }
                     }
@@ -644,7 +646,7 @@ impl FolderView {
                     if clash {
                         let msg = format!("{}\n\n{}", n2, crate::t!("Bu adda bir öğe zaten var. Başka bir ad deneyin."));
                         let _ = handle.update(cx, |_, window, cx| crate::prompt::notice(crate::t!("Yeniden adlandır"), msg, window, cx));
-                        let _ = this.update(cx, |v, _| v.clear_reselect());
+                        let _ = this.update(cx, |v, cx| v.rename_failed(cx));
                         return;
                     }
                     let (tx, rx) = oneshot::channel::<anyhow::Result<bool>>();
@@ -662,7 +664,7 @@ impl FolderView {
                                 log::warn!("rename: {e:#}");
                             }
                             // nothing to wait for
-                            let _ = this.update(cx, |v, _| v.clear_reselect());
+                            let _ = this.update(cx, |v, cx| v.rename_failed(cx));
                         }
                     }
                 })

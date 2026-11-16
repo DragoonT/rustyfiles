@@ -419,6 +419,12 @@ pub struct FolderView {
     pub focus: FocusHandle,
     /// Re-select this name after the next load (e.g. after going up a level).
     reselect: Option<String>,
+    /// A rename that is under way: the item's name on disk until now, and the name it is getting. Its row shows the NEW name from
+    /// the moment the rename box closes. WHY (the user: "isim değiştikten sonra çok kısa eski ismi gösterip sonra yeni isim oluyor
+    /// ya, o olmasın"): the rename itself is done off this thread and the list learns of it from the folder's watcher, so for a
+    /// moment the row had nothing but the entry's old name to show. Taken away when the listing no longer holds the old name
+    /// (the rename landed) or the rename did not happen.
+    renamed: Option<(Arc<str>, Arc<str>)>,
     /// Start inline rename on `reselect` once it appears (new folder flow).
     rename_after_load: bool,
     /// Items that just arrived (a paste): selected as they show up in the list, until all are
@@ -593,6 +599,7 @@ impl FolderView {
             scroll: UniformListScrollHandle::new(),
             focus: cx.focus_handle(),
             reselect: None,
+            renamed: None,
             rename_after_load: false,
             reselect_many: None,
             pending_rename: false,
@@ -987,6 +994,7 @@ impl FolderView {
         self.refresh_git(cx);
         self.renaming = None;
         self._rename_sub = None;
+        self.renamed = None;
         self.load_inner(false, cx);
         self.start_watch(cx);
         self.warm_labels(cx);
@@ -1542,6 +1550,12 @@ impl FolderView {
             if found.len() < want.len() && Instant::now() < until {
                 self.reselect_many = Some((names, until));
             }
+        }
+        // (the listing no longer holds the old name of a rename that was under way: it landed, and the rows show their own names)
+        if let Some((old, _)) = &self.renamed
+            && !self.entries.iter().any(|e| *e.name == **old)
+        {
+            self.renamed = None;
         }
         if let Some(name) = self.reselect.take() {
             if let Some(vi) = self.visible.iter().position(|&i| &*self.entries[i as usize].name == name) {
@@ -2197,6 +2211,7 @@ impl FolderView {
             GridStyle::List => px(20.),
         };
         let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
+        let renamed = self.renamed.clone();
         let drop_bg = p.selection;
         let drop_border = p.accent;
         let mut out = Vec::with_capacity(range.len());
@@ -2251,7 +2266,7 @@ impl FolderView {
                         .text_ellipsis()
                         .when(dim, |d| d.opacity(0.6))
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
-                        .child(SharedString::from(shown_name(e, show_ext)))
+                        .child(SharedString::from(row_name(e, show_ext, renamed.as_ref())))
                         .into_any_element(),
                 };
                 let facts = (style == GridStyle::Cards).then(|| {
@@ -2262,7 +2277,7 @@ impl FolderView {
                     f.push(format::datetime(e.modified_ms));
                     f
                 });
-                let name_text = SharedString::from(shown_name(e, show_ext));
+                let name_text = SharedString::from(row_name(e, show_ext, renamed.as_ref()));
                 let base = match style {
                     GridStyle::Tiles => v_flex().p_1().gap_1().items_center().child(div().size(visual_px + px(4.)).flex().items_center().justify_center().child(visual)).child(label),
                     GridStyle::Cards => h_flex()
@@ -2842,6 +2857,19 @@ impl FolderView {
         self.rename_after_load = false;
     }
 
+    /// A rename is being carried out: the row of `old` shows `new` until the listing has the new name (see `renamed`).
+    pub(crate) fn show_renamed(&mut self, old: &str, new: &str) {
+        self.renamed = Some((old.into(), new.into()));
+    }
+
+    /// A rename did not happen (the answer was no, the name was taken, the system refused): the row shows its own name again.
+    pub(crate) fn rename_failed(&mut self, cx: &mut Context<Self>) {
+        self.clear_reselect();
+        if self.renamed.take().is_some() {
+            cx.notify();
+        }
+    }
+
     /// Open/Save dialog mode: which files show (patterns like "*.txt;*.md", empty = all; none
     /// when picking a folder), and opening a file picks it.
     pub(crate) fn set_picking(&mut self, patterns: String, folders_only: bool, cx: &mut Context<Self>) {
@@ -3228,6 +3256,7 @@ impl FolderView {
         let search_mode = self.is_search();
         let prefs = cx.global::<crate::settings::Settings>();
         let show_ext = prefs.show_extensions;
+        let renamed = self.renamed.clone();
         let checkboxes = prefs.show_checkboxes;
         let hover_select = prefs.select_on_hover;
         // folders inside an archive have no size of their own to measure
@@ -3308,7 +3337,7 @@ impl FolderView {
             let is_cursor = self.cursor == Some(vi);
             let cat = icons::category(e);
             let dim = e.is_hidden() || e.is_cloud_placeholder();
-            let name: SharedString = shown_name(e, show_ext).into();
+            let name: SharedString = row_name(e, show_ext, renamed.as_ref()).into();
             let shell_icon = self
                 .parent_of(ei)
                 .map(|d| d.to_path_buf())
@@ -4183,6 +4212,26 @@ fn shown_name(e: &Entry, show_ext: bool) -> String {
     }
 }
 
+/// A name as a row shows it, for a name that is not an entry's yet (the new name of a rename under way): the whole name, or
+/// without its extension when extensions are hidden and it is a file with one.
+fn shown_new_name(name: &str, is_dir: bool, show_ext: bool) -> String {
+    if show_ext || is_dir {
+        return name.to_string();
+    }
+    match name.rfind('.') {
+        Some(dot) if dot > 0 && dot + 1 < name.len() => name[..dot].to_string(),
+        _ => name.to_string(),
+    }
+}
+
+/// The name a row shows: the entry's own, or the name it is getting while its rename is under way (`FolderView::renamed`).
+fn row_name(e: &Entry, show_ext: bool, renamed: Option<&(Arc<str>, Arc<str>)>) -> String {
+    match renamed {
+        Some((old, new)) if *e.name == **old => shown_new_name(new, e.is_dir(), show_ext),
+        _ => shown_name(e, show_ext),
+    }
+}
+
 const COL_W: Pixels = px(250.);
 
 /// A read-only column (ancestor or next folder) in the columns view.
@@ -4639,4 +4688,22 @@ fn send_index_hits(paths: &[PathBuf], tx: &mpsc::UnboundedSender<Msg>, cancel: &
         let _ = tx.unbounded_send(Msg::Hits(es, ps));
     }
     sent
+}
+
+#[cfg(test)]
+mod rename_name_tests {
+    use super::shown_new_name;
+
+    /// The name a row shows while its rename is under way is what an entry of that name would show: whole, or without its
+    /// extension when extensions are hidden (a folder and a name that is all extension keep theirs).
+    #[test]
+    fn the_new_name_of_a_rename_is_shown_as_an_entry_of_that_name_would_be() {
+        assert_eq!(shown_new_name("report.pdf", false, true), "report.pdf");
+        assert_eq!(shown_new_name("report.pdf", false, false), "report");
+        assert_eq!(shown_new_name("archive.tar.gz", false, false), "archive.tar");
+        assert_eq!(shown_new_name(".gitignore", false, false), ".gitignore");
+        assert_eq!(shown_new_name("folder.v2", true, false), "folder.v2");
+        assert_eq!(shown_new_name("noext", false, false), "noext");
+        assert_eq!(shown_new_name("ends.", false, false), "ends.");
+    }
 }
