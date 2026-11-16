@@ -43,20 +43,28 @@ Free, no account, no ads. Download, double-click, done: see [Install](#install).
 
 ### Opening a folder
 
-Time from launching the app to the folder list settling, in a new window, with the folder
-already in the OS file cache. Median of five runs.
+Time from starting the app to the folder's list standing still, in a new window, with the folder
+already in the OS file cache. Median of three runs after a warm-up, measured by the speed test
+that is built into rustyfiles (Settings › Speed test): anyone can run it on their own machine.
 
 | Folder | rustyfiles | File Explorer | [Files](https://files.community) |
 |---|--:|--:|--:|
-| 1,000 files | 93 ms | 1,113 ms | 2,640 ms |
-| 10,000 files | 110 ms | 1,065 ms | 3,053 ms |
-| 100,000 files | 168 ms | 1,186 ms | 11,342 ms |
-| Memory after listing 10,000 files | ~40 MB | ~70 MB | ~250 MB |
+| Empty folder | 550 ms | 961 ms | 766 ms |
+| 1,000 files | 548 ms | 2,208 ms | 2,025 ms |
+| 10,000 files | 537 ms | 2,150 ms | 1,789 ms |
+| 100,000 files | 542 ms | 2,254 ms | 3,976 ms |
+| 2,000 pictures (thumbnails) | 527 ms | 2,188 ms | 950 ms |
+| Memory after listing 10,000 files | 37 MB | 69 MB | 150 MB |
 
-Measured on one machine (Ryzen 7 9800X3D, NVMe SSD, Windows 11) on 2026-11-06. rustyfiles was
-already running in the background; Explorer and Files each started a new process, and Files
-loads its list incrementally, so its numbers are an upper bound. Starting rustyfiles cold
-takes 350–480 ms.
+Measured on one machine (Ryzen 7 9800X3D, NVMe SSD, Windows 11) on 2026-11-16, with rustyfiles
+0.8.5 and Files 4.3. rustyfiles and Explorer each started a new process. Files was already
+running in the background, so its times are not those of a cold start; it also fills its list
+in steps, and the time counts until the picture stops changing. Memory is the private working
+set, the figure Task Manager shows; for Files it is that of its running process.
+
+With "keep running in the background" on, a new rustyfiles window does not start a process:
+in an earlier measurement (2026-11-06, an earlier version) it showed a listed folder in
+93–168 ms.
 
 ### A 100,000-file folder that keeps changing
 
@@ -149,22 +157,26 @@ the official UnRAR (decode and check every CRC, archives in the file cache):
 | 400 MB solid | 0.95 s | **0.21 s** (4.5×) |
 | 400 MB, 520 files | 1.03 s | **0.063 s** (16×) |
 
-### Copying
+### Copying and extracting
 
-Copying uses its own parallel engine: 16 times faster than Explorer's on 520 files (381 MB),
-about 30 times on 20,000 small files. The next engine (in the coming release) spreads small
-files across folders, because threads writing into one folder wait on each other:
+The same speed test, our own engines against Windows' (rustyfiles 0.8.5, 2026-11-16):
 
-| 20,000 files of 4 KB in 200 folders, plus 20 files of 50 MB | Time |
-|---|--:|
-| Current engine | 6.8 s |
-| Next engine | **3.6 s** |
+| | Windows | rustyfiles |
+|---|--:|--:|
+| Copying 10,000 small files in 100 folders (41 MB) | 25.5 s | **1.7 s** (15×) |
+| Copying one 1 GB file | 0.40 s | 0.44 s |
+| Extracting a ZIP of 10,000 files | 32.5 s | **3.6 s** (9×) |
+
+Copying uses its own parallel engine, which spreads small files across folders because threads
+writing into one folder wait on each other. A single large file is limited by the disk, not
+the engine. Searching the test folders by name (123,000 entries) took 63 ms.
 
 It also handles name conflicts itself (replace, skip or keep both, for all or per file),
 pauses and resumes, can verify every copy byte by byte, and can cap its speed.
 
-All numbers: one machine (Ryzen 7 9800X3D, NVMe SSD, Windows 11), November 2026. The test
-scripts are in the repository (`crates/rf-win/examples/copybench.rs` for copying).
+All numbers: one machine (Ryzen 7 9800X3D, NVMe SSD, Windows 11), November 2026. Opening a
+folder, copying and extracting come from the built-in speed test (Settings › Speed test); the
+other test scripts are in the repository (`crates/rf-win/examples/copybench.rs` for copying).
 
 ## What it does
 
