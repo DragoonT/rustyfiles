@@ -3263,8 +3263,12 @@ pub fn open_in_ide(dir: PathBuf, ide: String) {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let r = if ide.is_empty() {
-            // `code` is a .cmd launcher: run it through cmd without a console window
-            std::process::Command::new("cmd").args(["/c", "code", "."]).current_dir(&dir).creation_flags(CREATE_NO_WINDOW).spawn()
+            // "automatic": the first of the editors we know that is installed (`rf_win::editors`; looked for here, on this thread)
+            match rf_win::editors::installed().first() {
+                Some(editor) => std::process::Command::new(&editor.exe).arg(&dir).spawn(),
+                // none of them: `code` on the PATH, as it always was (a .cmd launcher: through cmd, without a console window)
+                None => std::process::Command::new("cmd").args(["/c", "code", "."]).current_dir(&dir).creation_flags(CREATE_NO_WINDOW).spawn(),
+            }
         } else {
             std::process::Command::new(&ide).arg(&dir).spawn()
         };

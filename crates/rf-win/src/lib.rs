@@ -62,6 +62,7 @@ pub mod folder_custom;
 pub mod fileactions;
 pub mod fileinfo;
 pub mod journal;
+pub mod editors;
 pub mod jumplist;
 pub mod jumplists;
 pub mod wsearch;

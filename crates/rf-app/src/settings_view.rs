@@ -181,7 +181,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Actions => actions(p, cx),
         Page::Tags => tags(p, cx),
         Page::Look => look(p, s, cx),
-        Page::Dev => dev(p, s),
+        Page::Dev => dev(p, s, cx),
         Page::Advanced => advanced(p, s, cx),
         Page::Speed => crate::bench_view::page(p, cx),
         Page::Organizer => crate::organizer::page::page(p, cx),
@@ -2162,8 +2162,41 @@ fn tag_name_dialog(existing: Option<(u32, String)>, window: &mut Window, cx: &mu
     );
 }
 
-fn dev(p: &Palette, s: &Settings) -> Vec<AnyElement> {
-    let ide_label = if s.ide_path.is_empty() { t!("VS Code (otomatik)").to_string() } else { s.ide_path.clone() };
+fn dev(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
+    // The editors that are installed (`rf_win::editors`): each is a button that chooses it, and "automatic" is the first of them.
+    // The look for them asks the disk and the registry, so it runs on another thread and the page is drawn again when the list
+    // is another one; while the page is open it is repeated now and then (an editor installed meanwhile shows up).
+    static LOOKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let (editors, fresh) = rf_win::editors::peek();
+    if !fresh && !LOOKING.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        cx.spawn(async move |cx| {
+            let changed = cx.background_executor().spawn(async { rf_win::editors::refresh() }).await;
+            LOOKING.store(false, std::sync::atomic::Ordering::Relaxed);
+            if changed {
+                let _ = cx.update(|cx| cx.refresh_windows());
+            }
+        })
+        .detach();
+    }
+    let ide_label = if s.ide_path.is_empty() {
+        match editors.first() {
+            Some(editor) => format!("{}: {}", t!("Otomatik"), editor.name),
+            None => t!("VS Code (otomatik)").to_string(),
+        }
+    } else {
+        match rf_win::editors::name_of(&editors, std::path::Path::new(&s.ide_path)) {
+            // (one of the installed editors: its name says it; its path beside it broke over three lines)
+            Some(name) => name.to_string(),
+            None => s.ide_path.clone(),
+        }
+    };
+    let choices = editors.iter().enumerate().map(|(i, editor)| {
+        let exe = editor.exe.display().to_string();
+        button(("ide-editor", i), p, editor.name, move |_, cx| {
+            let exe = exe.clone();
+            settings::update(cx, move |s| s.ide_path = exe)
+        })
+    });
     vec![
         card(
             p,
@@ -2189,6 +2222,9 @@ fn dev(p: &Palette, s: &Settings) -> Vec<AnyElement> {
             Some(&ide_label),
             h_flex()
                 .gap_2()
+                .flex_wrap()
+                .justify_end()
+                .children(choices)
                 .child(button("ide-browse", p, t!("Gözat"), |window, cx| pick_into(window, cx, t!("Düzenleyici seç"), PickTarget::Ide)))
                 .child(button("ide-reset", p, t!("Otomatik"), |_, cx| settings::update(cx, |s| s.ide_path.clear())))
                 .into_any_element(),

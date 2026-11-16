@@ -133,7 +133,7 @@ fn file_pilot() -> Option<PathBuf> {
 }
 
 /// A string value from the registry.
-fn reg_string(root: windows::Win32::System::Registry::HKEY, key: &str, value: &str) -> Option<String> {
+pub(crate) fn reg_string(root: windows::Win32::System::Registry::HKEY, key: &str, value: &str) -> Option<String> {
     use windows::Win32::System::Registry::{RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RegGetValueW};
     let (k, v) = (crate::wide::wide(key), crate::wide::wide(value));
     let mut buf = vec![0u16; 1024];
