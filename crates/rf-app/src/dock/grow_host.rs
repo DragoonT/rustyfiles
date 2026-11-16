@@ -121,12 +121,20 @@ pub struct Cfg {
 /// asked here.
 pub fn config(id: PanelId, kind: Kind, cx: &App) -> Option<Cfg> {
     let s = cx.try_global::<Settings>()?;
-    if !s.dock_start_grow {
+    stays_for(id, kind, s.dock_start_grow, s.dock_own_start).map(|stays| Cfg { kind, stays })
+}
+
+/// [`config`]'s rule, with the two settings as values (`grow`: "panels grow out of their islands"; `own_start`: our own Start).
+fn stays_for(id: PanelId, kind: Kind, grow: bool, own_start: bool) -> Option<Stays> {
+    if !grow {
         return None;
     }
     match kind {
-        Kind::Left => (id == PanelId::START && s.dock_own_start).then_some(Cfg { kind, stays: Stays::RowAndField }),
-        Kind::Right => Some(Cfg { kind, stays: Stays::Row }),
+        Kind::Left => (id == PanelId::START && own_start).then_some(Stays::RowAndField),
+        // The panel of hidden tray icons does NOT grow out of the island (the user, 2026-11-16: "tray açılınca dock büyümesin
+        // bence"). It is a handful of icons, opened for a moment and often only for a right click, and the island swelling up to hold
+        // them moved the whole row for that. It opens the ordinary way: a pop-up above the island, as with the setting off.
+        Kind::Right => (id != super::panel::OVERFLOW).then_some(Stays::Row),
         Kind::Middle => None,
     }
 }
@@ -806,6 +814,20 @@ pub fn island_fade(mon: host::MonId, kind: Kind, cx: &App) -> Option<IslandFade>
 mod tests {
     // (not `super::*`: that would bring in gpui's own `test` attribute, which shadows the standard one)
     use super::{Cfg, Corner, Grow, IslandGlass, Instant, Kind, PanelId, Phase, Rc, RefCell, Rect, Run, Settings, Spec, Stays, cfg_corner, hit, panel_size, screen_rect};
+
+    /// Which panels grow: Start out of the left island, the right island's panels out of theirs, and NOT the panel of hidden tray
+    /// icons, which is a pop-up above the island whatever the setting says.
+    #[test]
+    fn the_tray_panel_never_grows_out_of_the_island() {
+        use super::stays_for;
+        let overflow = super::super::panel::OVERFLOW;
+        assert_eq!(stays_for(overflow, Kind::Right, true, true), None);
+        assert_eq!(stays_for(PanelId("control-centre"), Kind::Right, true, true), Some(Stays::Row));
+        assert_eq!(stays_for(PanelId::START, Kind::Left, true, true), Some(Stays::RowAndField));
+        assert_eq!(stays_for(PanelId::START, Kind::Left, true, false), None, "Windows' own Start does not grow");
+        assert_eq!(stays_for(PanelId("control-centre"), Kind::Right, false, true), None, "the setting is off");
+        assert_eq!(stays_for(PanelId("anything"), Kind::Middle, true, true), None);
+    }
 
     /// The right island's panels grow out of its bottom RIGHT corner, the left island's out of its bottom left one, and neither of them
     /// gives up any bottom row but the Start panel's (the right island's whole row stays as it is).
