@@ -175,6 +175,11 @@ pub struct Workspace {
     /// when the full sidebar opens over the content: painted with it, the sidebar looks like the
     /// docked one instead of a neutral grey slab over a tinted window.
     rail_peek_bg: Option<Hsla>,
+    /// The full sidebar is out over the content (the state the last frame drew), it is on its way back in, and a number that
+    /// changes with every turn (the motions are keyed by it, and a way back in that was overtaken by a new opening ends nothing).
+    rail_peek_open: bool,
+    rail_peek_closing: bool,
+    rail_peek_serial: u64,
     preview_w: f32,
     /// The preview pane at the bottom: its height, the measured row and the debounced write (idle while the pane is at the right).
     preview_dock: preview_dock::Dock,
@@ -688,6 +693,9 @@ impl Workspace {
             sidebar_rail: prefs.sidebar_rail,
             rail_peek: [false; 2],
             rail_peek_bg: None,
+            rail_peek_open: false,
+            rail_peek_closing: false,
+            rail_peek_serial: 0,
             preview_w: prefs.preview_width.clamp(PREVIEW_MIN, PREVIEW_MAX),
             preview_dock: preview_dock::Dock::new(prefs.preview_height),
             _width_save: None,
@@ -3133,6 +3141,17 @@ const TAB_MAX_W: f32 = 220.;
 const SIDEBAR_MIN: f32 = 160.;
 /// The icons-only sidebar, and the width below which a drag collapses to it.
 const RAIL_W: f32 = 56.;
+/// The full sidebar's way out of the rail: the spring's time and how far it swings past its place (a little: it is a panel, not a
+/// toy); and the time of its way back in, which has no swing.
+const RAIL_OUT_MS: u64 = 240;
+const RAIL_BOUNCE: f32 = 0.18;
+const RAIL_IN_MS: u64 = 130;
+
+/// The width of the sidebar that is coming out of the rail, for how far out it is (0: the rail's own width, 1: the full width;
+/// past 1 while the spring swings, by a few px). Never narrower than the rail.
+fn rail_peek_width(full: f32, shown: f32) -> f32 {
+    (RAIL_W + (full - RAIL_W) * shown).max(RAIL_W)
+}
 const RAIL_SNAP: f32 = 120.;
 const SIDEBAR_MAX: f32 = 420.;
 const PREVIEW_MIN: f32 = 220.;
@@ -3456,6 +3475,8 @@ impl Render for Workspace {
             self.focus_active(window, cx);
         }
         let p = Palette::for_window(window);
+        // (the Open / Save window is matte: see `Palette::matte`)
+        let p = if self.picker.is_some() { p.matte() } else { p };
         // Mica / frame follow the app's theme, not only the system one (re-applied when either
         // changes: GPUI resets it on a system theme switch)
         let prefs = cx.global::<crate::settings::Settings>();
@@ -3484,6 +3505,8 @@ impl Render for Workspace {
         }
         let backdrop = if crate::glass::forced() { BackdropPref::Glass } else { backdrop };
         let backdrop = if backdrop == BackdropPref::Glass && self.glass_failed { BackdropPref::Mica } else { backdrop };
+        // (and it asks for no glass, Acrylic or tinted Mica of its own: the palette paints it)
+        let backdrop = if self.picker.is_some() { BackdropPref::Solid } else { backdrop };
         if self.applied_backdrop != Some(backdrop) {
             let was_glass = self.applied_backdrop == Some(BackdropPref::Glass);
             self.applied_backdrop = Some(backdrop);
@@ -3592,19 +3615,45 @@ impl Render for Workspace {
             crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_SETTINGS, false);
         }
         self.assign_settings_lens(plan.settings_owner, cx);
-        let peek = (show_sidebar && self.sidebar_rail && (self.rail_peek[0] || self.rail_peek[1])).then(|| {
+        // The full sidebar over the content, while the pointer is on the rail or on it. It comes out of the rail on a SPRING and goes
+        // back in quickly (the user, of the Open window: "buraya hızlı bir animasyon ekle ... spring animasyonu olması gerektiğini
+        // unutma"): until then it was there, or not, from one frame to the next.
+        let peek_wanted = show_sidebar && self.sidebar_rail && (self.rail_peek[0] || self.rail_peek[1]);
+        if peek_wanted != self.rail_peek_open {
+            self.rail_peek_open = peek_wanted;
+            self.rail_peek_serial += 1;
+            self.rail_peek_closing = !peek_wanted && crate::settings::animations();
+            if self.rail_peek_closing {
+                let serial = self.rail_peek_serial;
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(std::time::Duration::from_millis(RAIL_IN_MS)).await;
+                    let _ = this.update(cx, |ws, cx| {
+                        // (not when it was opened again meanwhile)
+                        if ws.rail_peek_serial == serial {
+                            ws.rail_peek_closing = false;
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
+            }
+        }
+        let peek = (peek_wanted || self.rail_peek_closing).then(|| {
             self.sidebar_rail = false;
             self.set_tree_peek(true);
             let full = self.render_sidebar(&p, cx);
             self.set_tree_peek(false);
             self.sidebar_rail = true;
-            div()
+            let (full_w, opening, serial) = (self.sidebar_w, peek_wanted, self.rail_peek_serial);
+            let panel = div()
                 .id("rail-peek")
                 .absolute()
                 .top_0()
                 .left_0()
                 .h_full()
-                .w(px(self.sidebar_w))
+                .w(px(full_w))
+                // (the sidebar inside keeps its full width while the panel's own width moves: nothing in it is laid out anew)
+                .overflow_hidden()
                 .bg(self.rail_peek_bg.unwrap_or(Hsla { a: 1., ..p.content_bg }))
                 .border_r_1()
                 .border_color(p.border)
@@ -3614,7 +3663,23 @@ impl Render for Workspace {
                     this.rail_peek[1] = *h;
                     cx.notify();
                 }))
-                .child(full)
+                .child(div().h_full().w(px(full_w)).flex_shrink_0().child(full));
+            if !crate::settings::animations() {
+                return panel.into_any_element();
+            }
+            // out: a spring with a little swing past its place; in: the same curve with none, in less time
+            let (ms, bounce) = if opening { (RAIL_OUT_MS, RAIL_BOUNCE) } else { (RAIL_IN_MS, 0.0) };
+            panel
+                .with_animation(
+                    ("rail-peek-move", serial as usize),
+                    Animation::new(std::time::Duration::from_millis(ms)).with_easing(move |t| rf_win::dock::spring::curve_with(t, bounce)),
+                    move |el, t| {
+                        let shown = if opening { t } else { 1.0 - t };
+                        // (the width alone moves: the panel is matte from its first frame, nothing shows through it on the way)
+                        el.w(px(rail_peek_width(full_w, shown)))
+                    },
+                )
+                .into_any_element()
         });
         // (the status bar is the content panel's: the window less the sidebar when it is shown, and the panel's margin)
         let strip_bar_w = (surface == crate::transfer_view::Surface::Strip).then(|| (f32::from(window.viewport_size().width) - side_used - 10.0).max(0.0));
@@ -4165,5 +4230,21 @@ mod launch_tests {
         }
         // places a session can't keep come back as Home
         assert_eq!(super::session_text(&Location::Settings), "");
+    }
+}
+
+#[cfg(test)]
+mod rail_peek_tests {
+    use super::{RAIL_W, rail_peek_width};
+
+    /// The sidebar that comes out of the rail: from the rail's own width to the full one, a little past it while the spring swings,
+    /// and never narrower than the rail.
+    #[test]
+    fn the_sidebar_comes_out_of_the_rail_and_is_never_narrower_than_it() {
+        assert_eq!(rail_peek_width(240.0, 0.0), RAIL_W);
+        assert_eq!(rail_peek_width(240.0, 1.0), 240.0);
+        assert!(rail_peek_width(240.0, 1.05) > 240.0, "the swing past its place");
+        assert_eq!(rail_peek_width(240.0, -0.2), RAIL_W);
+        assert!(rail_peek_width(240.0, 0.5) > RAIL_W && rail_peek_width(240.0, 0.5) < 240.0);
     }
 }

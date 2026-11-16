@@ -153,6 +153,17 @@ impl Palette {
     }
 }
 
+impl Palette {
+    /// The palette of a window that is MATTE whatever material the user chose: its own plain colour as the window's surface, the
+    /// one the "Solid" material has. For the Open / Save window (the user, with a picture of it over a busy desktop: "aç
+    /// penceresinde ... arkaplanı da mat"): it opens over another program's window, and a see-through material showed that program
+    /// and the desktop through the file list.
+    pub fn matte(mut self) -> Self {
+        self.window_bg = if self.dark { hex(0x202020) } else { hex(0xF3F3F3) };
+        self
+    }
+}
+
 /// The material a window asks Windows for: the wanted one where Windows has materials, none where it has not (`rf_win::osver`,
 /// issue 24). There the palette paints the window itself (`settings::solid_backdrop`), and asking for "none" also switches off a
 /// blur-behind that an earlier choice may have left on the window. A see-through window (glass, an overlay) stays what it is.
