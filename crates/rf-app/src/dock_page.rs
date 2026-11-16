@@ -188,6 +188,16 @@ pub(crate) fn entries() -> Vec<Entry> {
             Control::Switch(|s| s.dock_side_tall, |s, v| s.dock_side_tall = v),
         ),
         e(
+            "dock-tray-compact",
+            "dock_tray_compact",
+            General,
+            dock,
+            L::LayoutGrid,
+            t!("Sıkışık tepsi"),
+            Some(t!("Sağ adadaki tepsi simgeleri birbirine daha yakın durur; aynı yere daha çok simge sığar.")),
+            Control::Switch(|s| s.dock_tray_compact, |s, v| s.dock_tray_compact = v),
+        ),
+        e(
             "dock-all-monitors",
             "dock_all_monitors",
             General,
@@ -638,7 +648,7 @@ mod tests {
         assert_eq!(secs, Section::ALL.to_vec(), "an empty section would be a heading with nothing under it");
         // the sections hold what the page promises
         let ids = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
-        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_side_tall", "dock_all_monitors", "dock_magnify", "dock_scroll_volume", "dock_start_grow"]);
+        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_side_tall", "dock_tray_compact", "dock_all_monitors", "dock_magnify", "dock_scroll_volume", "dock_start_grow"]);
         assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_weather_city"]);
         assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu", "dock_thin_when_maximized", "dock_apps_where"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);

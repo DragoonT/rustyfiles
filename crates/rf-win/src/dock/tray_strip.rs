@@ -18,8 +18,30 @@ use super::tray_order::Dest;
 
 /// The picture, logical px (at 100 %).
 pub const ICON: f32 = 16.0;
-/// A cell of the strip: the picture and room around it.
+/// A cell of the strip: the picture and room around it. The cell's HEIGHT always; its width unless the tray is compact.
 pub const CELL: f32 = 24.0;
+/// A cell's width in the compact tray: the 16 px picture and one px on each side (issue 34, with a picture of Windows' tray under a
+/// mod that sets "Tray icon width: 18": "Been using these mod and it makes tray compact").
+pub const CELL_COMPACT: f32 = 18.0;
+
+/// Whether the tray is compact (Settings > Dock). One strip in one process: the app sets it when it reads its settings
+/// ([`set_compact`]) and everything that places a cell asks [`cell_w`].
+static COMPACT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A cell's width for the setting.
+pub const fn cell_width_for(compact: bool) -> f32 {
+    if compact { CELL_COMPACT } else { CELL }
+}
+
+/// Sets the compact tray on or off. True when that changed something (the strip has to be laid out again).
+pub fn set_compact(on: bool) -> bool {
+    COMPACT.swap(on, std::sync::atomic::Ordering::Relaxed) != on
+}
+
+/// A cell's width now, logical px.
+pub fn cell_w() -> f32 {
+    cell_width_for(COMPACT.load(std::sync::atomic::Ordering::Relaxed))
+}
 /// The chevron's cell.
 pub const CHEVRON_W: f32 = 24.0;
 /// The most room the strip block (cells and chevron) may take, logical px.
@@ -38,7 +60,7 @@ pub fn strip_limit(work_width: f32) -> f32 {
 
 /// How many cells fit a block at most `limit` logical px wide (the chevron takes its cell first).
 pub fn capacity(limit: f32) -> usize {
-    ((limit - CHEVRON_W) / CELL).floor().max(0.0) as usize
+    ((limit - CHEVRON_W) / cell_w()).floor().max(0.0) as usize
 }
 
 /// What the strip shows: which icons are in the strip, which are in the overflow panel, whether there is a chevron.
@@ -58,7 +80,7 @@ pub struct Layout {
 impl Layout {
     /// The strip block's width, logical px: the cells and the chevron.
     pub fn block_width(&self) -> f32 {
-        self.visible.len() as f32 * CELL + if self.chevron { CHEVRON_W } else { 0.0 }
+        self.visible.len() as f32 * cell_w() + if self.chevron { CHEVRON_W } else { 0.0 }
     }
 
     /// What the strip adds to the right island's width: the block and the separator after it. Nothing without icons.
@@ -84,10 +106,10 @@ pub fn layout(all: &[usize], hidden: &[bool], limit: f32) -> Layout {
 
 /// Cell `j` of the strip, device px, screen coordinates, in an island whose visible glass is `glass`: centred in the glass's height.
 pub fn cell_rect(glass: Rect, scale: f32, j: usize) -> Rect {
-    let cell = px(CELL, scale);
-    let left = glass.left + px(SIDE_PAD, scale) + j as i32 * cell;
-    let top = glass.top + (glass.height() - cell) / 2;
-    Rect::from_xywh(left, top, cell, cell)
+    let (cell_w, cell_h) = (px(cell_w(), scale), px(CELL, scale));
+    let left = glass.left + px(SIDE_PAD, scale) + j as i32 * cell_w;
+    let top = glass.top + (glass.height() - cell_h) / 2;
+    Rect::from_xywh(left, top, cell_w, cell_h)
 }
 
 /// The chevron's cell when `visible` cells stand before it.
@@ -131,7 +153,7 @@ pub fn drop_target(g: &Geometry, cursor: (i32, i32)) -> DropTarget {
     if y < g.glass.top || y >= g.glass.bottom {
         return DropTarget::Nowhere;
     }
-    let cell = px(CELL, g.scale).max(1);
+    let cell = px(cell_w(), g.scale).max(1);
     let origin = g.glass.left + px(SIDE_PAD, g.scale);
     let end = origin + g.visible as i32 * cell;
     if x >= g.glass.left && x < end {
@@ -209,6 +231,17 @@ pub fn picture_size(wanted: f32, own_px: u32, scale: f32) -> f32 {
 #[cfg(test)]
 mod picture_size_tests {
     use super::{ClickKind, PointerButton, asks_for_menu, picture_size, pointer_click};
+
+    /// The compact tray: 18 px a cell instead of 24, the picture (16) still inside it. (The switch itself is one value for the whole
+    /// process and is not flipped here: other tests of this file lay strips out at the same time.)
+    #[test]
+    fn a_compact_cell_is_narrower_and_still_holds_the_picture() {
+        assert_eq!((super::cell_width_for(false), super::cell_width_for(true)), (super::CELL, super::CELL_COMPACT));
+        assert!(super::CELL_COMPACT >= super::ICON + 2.0 && super::CELL_COMPACT < super::CELL);
+        // (what the same room holds: a third more icons)
+        let room = 240.0 - super::CHEVRON_W;
+        assert_eq!(((room / super::CELL) as usize, (room / super::CELL_COMPACT) as usize), (9, 12));
+    }
 
     #[test]
     fn only_the_right_button_asks_for_the_programs_menu() {

@@ -1422,6 +1422,8 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
         return;
     }
     let mut fresh = fresh;
+    // (the compact tray: the strip is laid out again when the switch changed)
+    super::tray_strip::apply_compact(fresh.dock_tray_compact, cx);
     // A size slider that is being dragged (or just was) is ahead of the file: the file may hold an earlier step of the same drag.
     let size_verdict = host_mut(cx).map(|h| h.live.file(Instant::now(), fresh.dock_size.permille()));
     if let Some(SizeFile::Keep { recheck }) = size_verdict

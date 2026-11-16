@@ -11626,5 +11626,17 @@
   "key": "Ekrana sığdır",
   "tr": "Ekrana sığdır",
   "en": "Fit to screen"
+ },
+ {
+  "id": "7540225a",
+  "key": "Sıkışık tepsi",
+  "tr": "Sıkışık tepsi",
+  "en": "Compact tray"
+ },
+ {
+  "id": "ae626bdb",
+  "key": "Sağ adadaki tepsi simgeleri birbirine daha yakın durur; aynı yere daha çok simge sığar.",
+  "tr": "Sağ adadaki tepsi simgeleri birbirine daha yakın durur; aynı yere daha çok simge sığar.",
+  "en": "The tray icons of the right island stand closer together; more icons fit in the same room."
  }
 ]

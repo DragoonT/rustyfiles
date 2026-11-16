@@ -1518,6 +1518,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Uygulama sesleri", "App volumes"),
     ("Monitörde aç", "Open on monitor"),
     ("Ekrana sığdır", "Fit to screen"),
+    ("Sıkışık tepsi", "Compact tray"),
+    ("Sağ adadaki tepsi simgeleri birbirine daha yakın durur; aynı yere daha çok simge sığar.", "The tray icons of the right island stand closer together; more icons fit in the same room."),
     ("Şu an ses çalan uygulama yok", "No app is playing sound right now"),
     ("Windows'un kendi masaüstünü kullan", "Use Windows' own desktop"),
     ("Dock çalışırken rustyfiles kendi masaüstünü çizmez: Windows'un masaüstü, simgeleri ve masaüstünü düzenleyen başka programlar olduğu gibi kalır. Açıkken bu sayfadaki diğer seçimler bir şey yapmaz.", "While the Dock runs, rustyfiles does not draw its own desktop: Windows' desktop, its icons and any other program that arranges the desktop stay as they are. While this is on, the other choices on this page do nothing."),

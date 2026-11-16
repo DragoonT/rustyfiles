@@ -261,6 +261,8 @@ pub fn start(right: Entity<RightIsland>, cx: &mut App) {
     if !tray_source::available() || cx.has_global::<TrayState>() {
         return;
     }
+    // (the compact tray, before the first layout)
+    ts::set_compact(cx.try_global::<crate::settings::Settings>().is_some_and(|s| s.dock_tray_compact));
     let path = crate::settings::app_dir().map(|d| d.join(tray_order::FILE));
     let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
     let tx = Mutex::new(tx);
@@ -323,6 +325,16 @@ pub fn shutdown(cx: &mut App) {
         let pictures: Vec<Arc<RenderImage>> = st.images.into_values().map(|(_, a)| a).collect();
         retire(pictures, cx);
     }
+}
+
+/// The "compact tray" switch as the settings have it now (they were read again). When it changed, the strip is laid out again: its
+/// cells are narrower or wider, more or fewer icons fit, and the island gets its new width.
+pub fn apply_compact(on: bool, cx: &mut App) {
+    if !ts::set_compact(on) || !cx.has_global::<TrayState>() {
+        return;
+    }
+    cx.global_mut::<TrayState>().rearrange();
+    after_change(cx);
 }
 
 /// The monitor, its scale or its work area changed: the strip's room is worked out again.
@@ -592,9 +604,10 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
         let cell = div()
             .id(("tray-cell", j))
             .absolute()
-            .left(px(j as f32 * ts::CELL * k))
+            .left(px(j as f32 * ts::cell_w() * k))
             .top(px(0.))
-            .size(px(ts::CELL * k))
+            .w(px(ts::cell_w() * k))
+            .h(px(ts::CELL * k))
             .flex()
             .items_center()
             .justify_center()
@@ -610,14 +623,14 @@ pub fn strip_element(pal: Palette, cx: &App) -> Option<AnyElement> {
     }
     // where a dragged icon would land
     if let Some(DropTarget::Strip(drop_at)) = target {
-        row = row.child(div().absolute().left(px(drop_at as f32 * ts::CELL * k - 1.0)).top(px(2. * k)).w(px(2.)).h(px((ts::CELL - 4.) * k)).rounded_full().bg(ring));
+        row = row.child(div().absolute().left(px(drop_at as f32 * ts::cell_w() * k - 1.0)).top(px(2. * k)).w(px(2.)).h(px((ts::CELL - 4.) * k)).rounded_full().bg(ring));
     }
     let chevron_hot = (dragging.is_none() && st.hover == Some(Source::Chevron)) || target == Some(DropTarget::Chevron);
     let chevron_cursor = st.kb.as_ref().is_some_and(|k| k.cursor == n);
     let chevron = div()
         .id("tray-chevron")
         .absolute()
-        .left(px(n as f32 * ts::CELL * k))
+        .left(px(n as f32 * ts::cell_w() * k))
         .top(px(0.))
         .w(px(ts::CHEVRON_W * k))
         .h(px(ts::CELL * k))

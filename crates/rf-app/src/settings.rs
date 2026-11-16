@@ -592,6 +592,8 @@ pub struct Settings {
     /// The left and the right island are as tall as the middle one (off: they are lower, as they always were). While the dock is thin
     /// under a maximised window all three are the thin height either way.
     pub dock_side_tall: bool,
+    /// The tray icons of the right island stand closer together (18 px a cell instead of 24; off). Issue 34.
+    pub dock_tray_compact: bool,
     /// Turning the mouse wheel over a running app's icon in the dock turns that app's own sound level up or down (on; issue 21).
     pub dock_scroll_volume: bool,
     /// How much the dock's icons grow under the pointer (off / subtle / full).
@@ -787,6 +789,7 @@ impl Default for Settings {
             dock_status_order: Vec::new(),
             dock_status_hidden: Vec::new(),
             dock_side_tall: false,
+            dock_tray_compact: false,
             dock_scroll_volume: true,
             dock_magnify: DockMagnify::Full,
             dock_hover_previews: true,
