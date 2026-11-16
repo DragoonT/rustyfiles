@@ -183,6 +183,10 @@ pub enum TreeKey {
     Home,
     End,
     Enter,
+    /// The plus key: opens the row's folder. The cursor stays on the row (Right goes on to the first child).
+    Open,
+    /// The minus key: closes the row's folder. The cursor stays on the row (Left goes on to the parent).
+    Close,
 }
 
 #[derive(Debug, Default)]
@@ -1127,6 +1131,26 @@ impl NavTree {
                     move_to(self, &mut out, row);
                 }
             }
+            TreeKey::Open | TreeKey::Close => {
+                let Some(c) = cur else { return out };
+                let id = self.rows[c].id;
+                if self.rows[c].kind != RowKind::Node {
+                    return out;
+                }
+                let open = self.nodes[id as usize].expanded;
+                if k == TreeKey::Open && !open && self.can_expand(id) {
+                    out.loads = self.expand_node(id, now_ms, true);
+                } else if k == TreeKey::Close && open {
+                    self.collapse_node(id, now_ms, true);
+                    self.trim();
+                } else {
+                    return out;
+                }
+                self.rebuild();
+                self.cursor = Some(id);
+                out.cursor_row = self.row_index(id);
+                out.changed = true;
+            }
             TreeKey::Enter => {
                 if let Some(c) = cur
                     && self.rows[c].kind == RowKind::Node
@@ -1579,6 +1603,25 @@ mod tests {
         assert_eq!(t.rows()[row].id, under_drive);
         assert!(t.take_scroll_target().is_none(), "no jump to the other copy");
         assert!(!t.is_marked(Path::new(r"C:\Users")));
+    }
+
+    /// Plus opens the row's folder and minus closes it; the cursor stays on the row either way (issue 38).
+    #[test]
+    fn plus_opens_and_minus_closes_where_the_cursor_is() {
+        let mut t = tree();
+        let d = disk();
+        t.key(TreeKey::Down, 0);
+        t.key(TreeKey::Down, 0);
+        assert!(!t.key(TreeKey::Close, 1).changed, "minus on a closed folder does nothing");
+        let k = t.key(TreeKey::Open, 1);
+        assert_eq!((k.loads.len(), k.cursor_row), (1, Some(1)));
+        answer(&mut t, &k.loads[0], &d, 2);
+        let open_rows = t.rows().len();
+        let k = t.key(TreeKey::Open, 3);
+        assert!(!k.changed && k.cursor_row.is_none(), "plus on an open folder does nothing: it does not go to the first child");
+        let k = t.key(TreeKey::Close, 4);
+        assert_eq!((k.changed, k.cursor_row), (true, Some(1)));
+        assert!(t.rows().len() < open_rows);
     }
 
     #[test]

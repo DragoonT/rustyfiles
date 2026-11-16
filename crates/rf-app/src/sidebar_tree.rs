@@ -473,6 +473,19 @@ impl SidebarTree {
             }
             return;
         }
+        // Plus and minus open and close the folder the cursor is on, as in Explorer's tree (issue 38). With or without Shift: "+" is a
+        // shifted key on most layouts. (Tab and Escape hand the keyboard to the file list, below.)
+        let typed = ev.keystroke.key_char.as_deref();
+        let plus_minus = match (key, typed) {
+            ("+", _) | ("add", _) | (_, Some("+")) => Some(TreeKey::Open),
+            ("-", _) | ("subtract", _) | (_, Some("-")) => Some(TreeKey::Close),
+            _ => None,
+        };
+        if let Some(k) = plus_minus {
+            cx.stop_propagation();
+            self.apply_key(k, cx);
+            return;
+        }
         if m.shift {
             return;
         }
@@ -492,6 +505,10 @@ impl SidebarTree {
             _ => return,
         };
         cx.stop_propagation();
+        self.apply_key(k, cx);
+    }
+
+    fn apply_key(&mut self, k: TreeKey, cx: &mut Context<Self>) {
         let r = self.model.key(k, self.now());
         self.start_loads(r.loads, cx);
         if let Some(row) = r.cursor_row {

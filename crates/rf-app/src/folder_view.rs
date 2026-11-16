@@ -708,8 +708,21 @@ impl FolderView {
     }
 
     pub fn back(&mut self, cx: &mut Context<Self>) {
+        let from = self.location().clone();
         if self.history.back().is_some() {
+            self.select_where_i_came_from(&from, cx);
             self.load(cx);
+        }
+    }
+
+    /// After going back: the folder one came out of is selected in the folder it is in and scrolled into view, as it is after
+    /// going up, and under the same setting ("Select the previous folder when going up"). Issue 40: without it one's place in a
+    /// long folder was lost at every Back.
+    fn select_where_i_came_from(&mut self, from: &Location, cx: &mut Context<Self>) {
+        if cx.global::<crate::settings::Settings>().select_previous_on_up
+            && let Some(name) = rf_core::history::came_from(from, self.location())
+        {
+            self.reselect = Some(name);
         }
     }
 
@@ -721,8 +734,12 @@ impl FolderView {
 
     /// Jumps `n` steps through history (from the back/forward button menus).
     pub fn jump(&mut self, back: bool, n: usize, cx: &mut Context<Self>) {
+        let from = self.location().clone();
         let moved = if back { self.history.back_n(n) } else { self.history.forward_n(n) };
         if moved {
+            if back {
+                self.select_where_i_came_from(&from, cx);
+            }
             self.load(cx);
         }
     }

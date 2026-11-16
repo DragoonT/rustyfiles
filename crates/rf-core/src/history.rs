@@ -203,6 +203,18 @@ pub fn redact_credentials(s: &str) -> String {
     }
 }
 
+/// The name to select in `to` after leaving `from`: the folder one came out of, when `to` is the folder it is in. That is going
+/// up, and going BACK to the folder one came down from (issue 40: "Back navigation does not restore selection of the previously
+/// opened subfolder"). `None` when `to` is another place, or `from` has no name in it (a drive's root, a place that is no path).
+pub fn came_from(from: &Location, to: &Location) -> Option<String> {
+    let (child, parent) = (from.path()?, to.path()?);
+    let spelled = |p: &std::path::Path| p.to_string_lossy().trim_end_matches(['\\', '/']).to_ascii_lowercase();
+    if spelled(child.parent()?) != spelled(parent) {
+        return None;
+    }
+    Some(child.file_name()?.to_string_lossy().into_owned())
+}
+
 /// Browser-style back/forward history.
 #[derive(Debug, Clone)]
 pub struct History {
@@ -494,5 +506,30 @@ mod search_ms_tests {
         assert_eq!(Location::from_search_ms("search-ms:crumb=location:C:%5C"), None);
         assert_eq!(Location::from_search_ms("search-ms:query=x"), None);
         assert_eq!(Location::from_search_ms(r"C:\Users"), None);
+    }
+}
+
+#[cfg(test)]
+mod came_from_tests {
+    use super::came_from;
+    use crate::Location;
+    use std::path::PathBuf;
+
+    fn at(p: &str) -> Location {
+        Location::Path(PathBuf::from(p))
+    }
+
+    #[test]
+    fn the_folder_one_came_out_of_is_named_in_the_folder_it_is_in() {
+        assert_eq!(came_from(&at(r"C:\A\B"), &at(r"C:\A")), Some("B".to_string()));
+        assert_eq!(came_from(&at(r"C:\A\B\"), &at(r"c:\a\")), Some("B".to_string()), "however the two are spelled");
+        assert_eq!(came_from(&at(r"C:\A"), &at(r"C:\")), Some("A".to_string()), "out of a folder in a drive's root");
+        // back to another place: nothing to select
+        assert_eq!(came_from(&at(r"C:\A\B"), &at(r"C:\X")), None);
+        assert_eq!(came_from(&at(r"C:\A\B\C"), &at(r"C:\A")), None, "two levels up is not the folder it is in");
+        assert_eq!(came_from(&at(r"C:\A"), &at(r"C:\A\B")), None, "forward into a folder");
+        assert_eq!(came_from(&at(r"C:\A\B"), &Location::Home), None);
+        assert_eq!(came_from(&Location::Home, &at(r"C:\A")), None);
+        assert_eq!(came_from(&at(r"C:\"), &at(r"C:\")), None, "a drive's root has no name");
     }
 }
