@@ -114,6 +114,6 @@ mod tests {
         let mut listeners = vec![tx_live, tx_gone];
         listeners.retain(|tx| tx.unbounded_send(()).is_ok());
         assert_eq!(listeners.len(), 1);
-        assert!(rx_live.try_next().is_ok_and(|m| m.is_some()), "the live one was told");
+        assert!(rx_live.try_recv().is_ok(), "the live one was told");
     }
 }

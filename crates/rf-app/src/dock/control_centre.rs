@@ -1336,10 +1336,6 @@ impl CcView {
         )
     }
 
-    /// A liquid slider: the app's own control (`liquid::slider_parts`), driven by the pointer.
-    fn slider(&self, which: usize, frac: f32, look: &Look, cx: &mut Context<Self>) -> AnyElement {
-        self.slider_of(which, frac, cc_model::SLIDER_W, look, cx)
-    }
 
     /// The level a mixer row shows: the one being dragged to, else the program's own.
     fn mixer_level(&self, app: &rf_win::appvolume::MixerApp) -> f32 {

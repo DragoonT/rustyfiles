@@ -9,7 +9,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rf_win::bench::{App, AppKind, Machine, OpenResult};
 
@@ -284,12 +284,6 @@ fn median(mut v: Vec<f64>) -> Option<f64> {
     let n = v.len();
     // an even count averages the middle two (taking v[n / 2] of two runs took the slower one)
     Some(if n % 2 == 0 { (v[n / 2 - 1] + v[n / 2]) / 2.0 } else { v[n / 2] })
-}
-
-fn time<T>(f: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<f64> {
-    let t = Instant::now();
-    f()?;
-    Ok(t.elapsed().as_secs_f64() * 1000.0)
 }
 
 /// Our engine exactly as a paste uses it (thread count chosen for the disks).

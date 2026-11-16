@@ -156,7 +156,9 @@ pub enum Section {
     /// The tiles, two to a row: the number of rows.
     Tiles(usize),
     Media,
-    /// What is opened out, as one card of this height, IN THE PLACE of the sections it covers.
+    /// What is opened out, as one card of this height, IN THE PLACE of the sections it covers. (Made by [`sections`] alone, which
+    /// is the layout in the form the tests read; the view draws from [`layout`].)
+    #[cfg_attr(not(test), allow(dead_code))]
     Detail(Detail, f32),
     /// The speaker and the microphone, in one row.
     Sound,
@@ -262,7 +264,8 @@ pub fn layout(s: &Shown) -> Layout {
     Layout { before, area: Some(area), after }
 }
 
-/// The sections from top to bottom with the detail fully opened out (its card as one section).
+/// The sections from top to bottom with the detail fully opened out (its card as one section). The layout as the tests read it.
+#[cfg(test)]
 pub fn sections(s: &Shown) -> Vec<Section> {
     let l = layout(s);
     l.before.into_iter().chain(l.area.map(|a| Section::Detail(a.kind, a.height))).chain(l.after).collect()
@@ -280,7 +283,9 @@ pub fn section_height(s: &Section) -> f32 {
     }
 }
 
-/// The panel's height: the sections, the gaps between them and the padding round them. (The bottom row is always there.)
+/// The panel's height: the sections, the gaps between them and the padding round them. (The bottom row is always there.) The
+/// view asks [`height_at`]; this is its end, as the tests read it.
+#[cfg(test)]
 pub fn height(s: &Shown) -> f32 {
     height_at(s, 1.0)
 }
