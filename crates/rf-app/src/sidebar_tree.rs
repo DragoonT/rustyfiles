@@ -24,26 +24,71 @@ use super::*;
 
 /// Height of one tree row. Fixed, so that the rows on the screen can be worked out from the scroll position.
 const ROW_H: f32 = 30.;
-/// Pixels of indent per level.
+/// Pixels of indent per level: every level, however deep.
 const INDENT: f32 = 16.;
-/// Levels that indent by the whole step. Deeper rows indent by [`DEEP_INDENT`] a level, so that the name keeps room in a narrow
-/// sidebar (the row's tooltip has the whole name).
-const MAX_INDENT_LEVELS: u16 = 6;
-/// The step of a level past [`MAX_INDENT_LEVELS`].
-const DEEP_INDENT: f32 = 8.;
-/// How many levels past [`MAX_INDENT_LEVELS`] still step; rows deeper than that stand at the last indent.
-const DEEP_LEVELS: u16 = 6;
+/// Past this level a row's tooltip has its whole name (the deep rows are the ones whose names are cut short).
+const TOOLTIP_PAST_LEVEL: u16 = 6;
+/// The room a row's name keeps when the tree is moved sideways for the row.
+const NAME_ROOM: f32 = 96.;
+/// What stands between a row's indent and its name (the row's padding, the chevron, the icon and their gaps), and after the name.
+const ROW_LEAD: f32 = 8. + 16. + 4. + 16. + 4.;
+const ROW_TAIL: f32 = 8.;
+/// How long the tree's move sideways takes.
+const SLIDE_MS: f32 = 180.;
 
-/// A row's indent for its depth.
+/// A row's indent for its depth: a folder's children stand to the right of it at every depth.
 ///
-/// Until 0.8.1 every row past the sixth level stood at the SAME indent, a folder and the folders in it in one column (issue 32,
-/// with a picture beside Explorer's tree: "the indentation is just at the same level as the parent folder ... usually deeper
-/// levels"): what was in what could not be read any more. Now each level stands to the right of its parent: by the whole step for
-/// six levels and by half of it for six more. Past the twelfth level rows share an indent again: a sidebar of the usual width has
-/// some 40 px left for a name there, and a deeper indent would leave none (seen in a test copy: only the folder's icon was left).
+/// HISTORY (issue 32, with a picture beside Explorer's tree: "the indentation is just at the same level as the parent folder ...
+/// usually deeper levels"). Until 0.8.1 every row past the sixth level stood at the SAME indent, so that names kept room in a
+/// narrow sidebar: what was in what could not be read. 0.8.2 gave six more levels half a step each. Now every level has the whole
+/// step, and a tree too deep for the sidebar's width is moved sideways instead, as Explorer's is ([`sideways_goal`]).
 fn indent_of(depth: u16) -> f32 {
-    let deep = depth.saturating_sub(MAX_INDENT_LEVELS).min(DEEP_LEVELS);
-    INDENT * f32::from(depth.min(MAX_INDENT_LEVELS)) + DEEP_INDENT * f32::from(deep)
+    INDENT * f32::from(depth)
+}
+
+/// How far the tree stands moved to the left so that a row with this indent can be read in a tree `width` wide: its name keeps
+/// [`NAME_ROOM`] and its chevron is not cut off. The least movement from where the tree stands now (`cur`), as the scroll to a row
+/// is; where both cannot be had (a very narrow sidebar) the row's start wins. 0: not moved. A tree that is not measured yet stays.
+fn sideways_goal(cur: f32, indent: f32, width: f32) -> f32 {
+    if width <= 1.0 {
+        return cur.max(0.0);
+    }
+    let most = indent.max(0.0);
+    let least = (indent + ROW_LEAD + NAME_ROOM + ROW_TAIL - width).clamp(0.0, most);
+    cur.clamp(least, most)
+}
+
+/// The furthest the tree may stand moved: what its deepest row needs. A move by hand is held to it, and a tree whose deep branches
+/// were closed goes back to it.
+fn sideways_most(deepest: u16, width: f32) -> f32 {
+    sideways_goal(0.0, indent_of(deepest), width.max(0.0)) * f32::from(u8::from(width > 1.0))
+}
+
+/// The tree's place sideways: how far it is moved to the left, and the slide that takes it there.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Slide {
+    from: f32,
+    to: f32,
+    since: Option<Instant>,
+}
+
+impl Slide {
+    const REST: Slide = Slide { from: 0.0, to: 0.0, since: None };
+
+    /// Where the tree is now, and whether it is still on its way.
+    fn at(&self, now: Instant) -> (f32, bool) {
+        let Some(since) = self.since else { return (self.to, false) };
+        let x = now.saturating_duration_since(since).as_secs_f32() * 1000.0 / SLIDE_MS;
+        if x >= 1.0 { (self.to, false) } else { (self.from + (self.to - self.from) * rf_win::dock::spring::curve_with(x, 0.0), true) }
+    }
+
+    /// Sends it to `to`: from where it is at this moment (a slide that is turned around does not jump), or at once.
+    fn go(&mut self, to: f32, now: Instant, animated: bool) {
+        if (to - self.to).abs() < 0.5 {
+            return;
+        }
+        *self = Slide { from: self.at(now).0, to, since: animated.then_some(now) };
+    }
 }
 /// How long a slow listing's spinner pulses (three pulses), then it stands still: a listing that hangs (an offline share) must not
 /// keep the window drawing.
@@ -79,6 +124,8 @@ struct Frame {
     mark: Option<(usize, bool)>,
     focused: bool,
     now: u64,
+    /// How far the tree is moved to the left in this frame (see `sideways_goal`).
+    aside: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -98,6 +145,16 @@ pub struct SidebarTree {
     focus: FocusHandle,
     /// Where the top of the tree is in the scroll area's content, in pixels (measured at every paint).
     tree_top: Rc<Cell<f32>>,
+    /// The tree's width (measured with `tree_top`).
+    tree_w: Rc<Cell<f32>>,
+    /// How far the tree is moved to the left for a deep row (see `sideways_goal`).
+    slide: Slide,
+    /// What the tree was last moved for: the open folder's row and the keyboard's row (node and depth), and the width it had.
+    slid_marked: Option<(NodeId, u16)>,
+    slid_cursor: Option<(NodeId, u16)>,
+    slid_width: f32,
+    /// The deepest level among the rows, with the number of rows it was counted for.
+    deepest: (usize, u16),
     epoch: Instant,
     goal: Option<Goal>,
     last_roots: Vec<(PathBuf, String, RootKind)>,
@@ -194,6 +251,12 @@ impl SidebarTree {
             scroll,
             focus: cx.focus_handle(),
             tree_top: Rc::new(Cell::new(0.)),
+            tree_w: Rc::new(Cell::new(0.)),
+            slide: Slide::REST,
+            slid_marked: None,
+            slid_cursor: None,
+            slid_width: 0.,
+            deepest: (0, 0),
             epoch: Instant::now(),
             goal: None,
             last_roots: Vec::new(),
@@ -442,6 +505,60 @@ impl SidebarTree {
         }
     }
 
+    /// A sideways turn of the wheel (Shift and the wheel, a touchpad): the tree moves by hand, as far as its deepest row needs.
+    /// Says whether the turn was the tree's to take: false where no row is deep enough for the tree to move at all, and the turn
+    /// goes on to the sidebar (which takes a sideways turn as one up or down, as it always did).
+    fn slide_by(&mut self, dx: f32, cx: &mut Context<Self>) -> bool {
+        let most = sideways_most(self.deepest.1, self.tree_w.get());
+        let to = (self.slide.to + dx).clamp(0.0, most);
+        if (to - self.slide.to).abs() > 0.01 {
+            self.slide = Slide { from: to, to, since: None };
+            cx.notify();
+        }
+        most > 0.0
+    }
+
+    /// Where the tree stands sideways in this frame. It is moved when the open folder's row or the keyboard's row becomes another
+    /// one (or the sidebar another width), by the least that shows that row; never for a row that only came into view by scrolling.
+    fn sideways(&mut self, mark: Option<(usize, bool)>, focused: bool, window: &mut Window) -> f32 {
+        let width = self.tree_w.get();
+        if width <= 1.0 {
+            return 0.0; // not measured yet: the rows it would be moved for are looked at again when it is
+        }
+        let rows = self.model.rows();
+        let at_row = |i: usize| rows.get(i).map(|r| (r.id, r.depth));
+        let marked = mark.and_then(|(i, _)| at_row(i));
+        let cursor = if focused { self.model.cursor_row().and_then(at_row) } else { None };
+        if rows.len() != self.deepest.0 {
+            self.deepest = (rows.len(), rows.iter().map(|r| r.depth).max().unwrap_or(0));
+        }
+        let mut moved_for = None;
+        if (width - self.slid_width).abs() > 0.5 {
+            self.slid_width = width;
+            moved_for = cursor.or(marked);
+        }
+        if marked != self.slid_marked {
+            self.slid_marked = marked;
+            moved_for = marked.or(moved_for);
+        }
+        if cursor != self.slid_cursor {
+            self.slid_cursor = cursor;
+            moved_for = cursor.or(moved_for);
+        }
+        let (now, animated) = (Instant::now(), crate::settings::animations());
+        let most = sideways_most(self.deepest.1, width);
+        let to = match moved_for {
+            Some((_, depth)) => sideways_goal(self.slide.to, indent_of(depth), width).min(most),
+            None => self.slide.to.min(most),
+        };
+        self.slide.go(to, now, animated);
+        let (x, sliding) = self.slide.at(now);
+        if sliding {
+            window.request_animation_frame();
+        }
+        x
+    }
+
     // ---- drawing -----------------------------------------------------------------------------
 
     /// Where a menu for a row opens when it comes from the keyboard: under the row, kept inside the sidebar's visible part.
@@ -485,20 +602,24 @@ impl SidebarTree {
     }
 
     fn render_row(&self, ix: usize, row: Row, frame: &Frame, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
-        let Frame { mark, focused, now } = *frame;
+        let Frame { mark, focused, now, aside } = *frame;
         let mut info = self.model.info(&row, now);
         // (one selected row in the whole sidebar: see `shown_elsewhere`)
         info.selected &= !self.shown_elsewhere;
         let id = row.id;
-        let pad = 8. + indent_of(row.depth);
-        let deep = row.depth > MAX_INDENT_LEVELS;
+        // Moved sideways, a row keeps its box (its fill, its accent pill and its glass lens stay where they are): what is IN it starts
+        // further left, and past the row's own left edge it is cut off (`lead` below zero).
+        let lead = 8. + indent_of(row.depth) - aside;
+        let pad = lead.max(0.);
+        let cut = lead.min(0.);
+        let deep = row.depth > TOOLTIP_PAST_LEVEL;
         if row.kind == RowKind::Error {
             let text = if info.not_found { t!("Klasör bulunamadı").to_string() } else { format!("{}: {}", t!("Açılamadı"), info.error.unwrap_or_default()) };
             return h_flex()
                 .id(("tree-err", id as usize))
                 .h(px(ROW_H))
                 .w_full()
-                .pl(px(pad + 16. + 4.))
+                .pl(px((lead + 16. + 4.).max(0.)))
                 .pr_2()
                 .gap_1()
                 .items_center()
@@ -551,6 +672,7 @@ impl SidebarTree {
             .rounded(theme::RADIUS_SM)
             .text_sm()
             .relative()
+            .when(cut < 0., |d| d.overflow_hidden())
             .when(selected && lens.is_none(), |d| d.bg(p.selection).child(theme::selection_pill(p)))
             .when_some(lens, |d, (key, hwnd)| {
                 // (while the row moves with a scroll the scene paints the pill itself: the engine's lens would trail the row)
@@ -567,6 +689,7 @@ impl SidebarTree {
                     .w(px(16.))
                     .h(px(ROW_H))
                     .flex_shrink_0()
+                    .when(cut < 0., |d| d.ml(px(cut)))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -648,7 +771,9 @@ impl Render for SidebarTree {
             self.selected_in_view = in_view;
             cx.notify();
         }
-        let frame = Frame { mark: self.model.marked_row().filter(|_| !self.shown_elsewhere), focused: self.focus.is_focused(window), now };
+        let (mark, focused) = (self.model.marked_row().filter(|_| !self.shown_elsewhere), self.focus.is_focused(window));
+        let aside = self.sideways(mark, focused, window);
+        let frame = Frame { mark, focused, now, aside };
         let rows: Vec<AnyElement> = (first..last)
             .map(|ix| {
                 let row = self.model.rows()[ix];
@@ -658,11 +783,14 @@ impl Render for SidebarTree {
         let me = cx.entity();
         let scroll = self.scroll.clone();
         let top = self.tree_top.clone();
+        let wide = self.tree_w.clone();
         let probe = canvas(
             move |b, window, cx| {
                 let y = f32::from(b.origin.y - scroll.bounds().origin.y - scroll.offset().y);
-                if (top.get() - y).abs() > 0.5 {
+                let w = f32::from(b.size.width);
+                if (top.get() - y).abs() > 0.5 || (wide.get() - w).abs() > 0.5 {
                     top.set(y);
+                    wide.set(w);
                     // the rows were chosen with the old place: draw again
                     me.update(cx, |_, cx| cx.notify());
                     window.request_animation_frame();
@@ -682,6 +810,18 @@ impl Render for SidebarTree {
             .h(px(n as f32 * ROW_H))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.on_key(ev, cx)))
+            // (a sideways turn only: the turn up and down is the sidebar's)
+            .on_scroll(cx.listener(|this, ev: &ScrollEvent, _, cx| {
+                let dx = match ev.delta {
+                    ScrollDelta::Pixels(d) => f32::from(d.x),
+                    // (a line of the wheel is one level: a notch, three lines here, moved the tree 144 px at 48 a line, most of its way)
+                    ScrollDelta::Lines(l) => l.x * INDENT,
+                };
+                // (taken here, or the sidebar would scroll up or down by it as well: seen in a test copy)
+                if dx.abs() > 0.01 && this.slide_by(-dx, cx) {
+                    cx.stop_propagation();
+                }
+            }))
             .child(probe)
             .child(v_flex().absolute().top(px(first as f32 * ROW_H)).left_0().w_full().children(rows))
     }
@@ -801,15 +941,61 @@ mod tests {
         d
     }
 
-    /// A folder's children stand to the right of it at every depth a tree is opened to.
+    /// A folder's children stand to the right of it at every depth a tree is opened to, by the same step.
     #[test]
     fn every_level_is_indented_more_than_its_parent() {
-        assert_eq!((super::indent_of(0), super::indent_of(1), super::indent_of(6)), (0., 16., 96.));
-        assert_eq!((super::indent_of(7), super::indent_of(8)), (104., 112.), "past six levels: half a step each");
-        for depth in 0..12 {
-            assert!(super::indent_of(depth + 1) > super::indent_of(depth), "level {depth} and its children");
+        use super::indent_of;
+        assert_eq!((indent_of(0), indent_of(1), indent_of(6), indent_of(7), indent_of(40)), (0., 16., 96., 112., 640.));
+        for depth in 0..60 {
+            assert_eq!(indent_of(depth + 1) - indent_of(depth), super::INDENT, "level {depth} and its children");
         }
-        assert_eq!((super::indent_of(12), super::indent_of(40)), (144., 144.), "the name needs the room that is left: the indent stops growing");
+    }
+
+    /// A deep row moves the tree sideways by the least that shows it, and a shallow one brings it back by the least.
+    #[test]
+    fn a_deep_row_moves_the_tree_sideways_by_the_least_that_shows_it() {
+        use super::{NAME_ROOM, ROW_LEAD, ROW_TAIL, indent_of, sideways_goal, sideways_most};
+        let w = 240.0;
+        let need = |depth: u16| indent_of(depth) + ROW_LEAD + NAME_ROOM + ROW_TAIL - w;
+        assert_eq!(sideways_goal(0., indent_of(3), w), 0., "a shallow row: nothing moves");
+        assert_eq!((need(8), sideways_goal(0., indent_of(8), w)), (40., 40.), "by exactly what its name is short of");
+        assert_eq!(sideways_goal(60., indent_of(8), w), 60., "moved enough already: it stays");
+        assert_eq!(sideways_goal(100., indent_of(2), w), 32., "moved past a shallow row's start: back to it, no further");
+        assert_eq!(sideways_goal(100., indent_of(0), w), 0.);
+        assert_eq!(sideways_goal(0., indent_of(1), 60.), 16., "a sidebar too narrow for the name's room: the row's start wins");
+        assert_eq!(sideways_goal(12., indent_of(9), 0.), 12., "not measured yet: left as it is");
+        // by hand: as far as the deepest row needs, and not at all when no row is deep
+        assert_eq!((sideways_most(8, w), sideways_most(2, w), sideways_most(30, 0.)), (40., 0., 0.));
+        // and whatever the depth, the row it was moved for has its start in view and its name its room
+        for depth in 0..40u16 {
+            let x = sideways_goal(0., indent_of(depth), w);
+            assert!(x <= indent_of(depth), "level {depth}: the chevron is in view");
+            assert!(indent_of(depth) + ROW_LEAD + NAME_ROOM + ROW_TAIL - x <= w + 0.01, "level {depth}: the name has its room");
+        }
+    }
+
+    /// The slide starts where the tree is, ends where it was sent, and turned around in mid flight it goes on from where it is.
+    #[test]
+    fn the_slide_ends_where_it_was_sent() {
+        use super::{SLIDE_MS, Slide};
+        let t0 = std::time::Instant::now();
+        let after = |ms: f32| t0 + std::time::Duration::from_secs_f32(ms / 1000.0);
+        let mut s = Slide::REST;
+        s.go(80., t0, true);
+        assert_eq!(s.at(t0), (0., true));
+        let (mid, moving) = s.at(after(SLIDE_MS / 2.0));
+        assert!(moving && mid > 0. && mid < 80., "{mid}");
+        assert_eq!(s.at(after(SLIDE_MS)), (80., false));
+        // turned around half way: from where it is, not from an end
+        s.go(0., after(SLIDE_MS / 2.0), true);
+        assert_eq!(s.at(after(SLIDE_MS / 2.0)).0, mid);
+        assert_eq!(s.at(after(SLIDE_MS * 2.0)), (0., false));
+        // with animations off it is there at once; a target half a pixel away is the same place
+        let mut s = Slide::REST;
+        s.go(50., t0, false);
+        assert_eq!(s.at(t0), (50., false));
+        s.go(50.3, t0, true);
+        assert_eq!(s, Slide { from: 0., to: 50., since: None });
     }
 
     #[test]
