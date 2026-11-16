@@ -826,6 +826,12 @@ impl Render for SidebarTree {
             .w_full()
             .h(px(n as f32 * ROW_H))
             .track_focus(&self.focus)
+            .key_context(crate::actions::TREE_CTX)
+            // (Tab: the keyboard goes to the file list. As an action, see `actions::TREE_CTX`.)
+            .on_action(cx.listener(|_, _: &crate::actions::LeaveTree, _, cx| {
+                cx.stop_propagation();
+                cx.emit(TreeEvent::Leave);
+            }))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.on_key(ev, cx)))
             // (a sideways turn only: the turn up and down is the sidebar's)
             .on_scroll(cx.listener(|this, ev: &ScrollEvent, _, cx| {

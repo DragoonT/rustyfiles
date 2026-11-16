@@ -5,6 +5,7 @@ gpui_kit::actions!(
     [
         GoBack,
         GoForward,
+        LeaveTree,
         GoUp,
         GoHome,
         Refresh,
@@ -90,6 +91,11 @@ gpui_kit::actions!(
 );
 
 pub const FOLDER_CTX: &str = "FolderView";
+/// The folder tree's key context. Tab is bound in it (to [`LeaveTree`]) because the component library binds Tab at the window's
+/// root to "focus the next tab stop": a binding is matched before any key listener is asked, so the tree's own key handler never
+/// saw Tab, and the keyboard stayed in the tree (issue 38: "TAB seems to be buggy, mine is not going anywhere"). A binding in a
+/// context nearer to the focus wins over the root's.
+pub const TREE_CTX: &str = "FolderTree";
 
 /// User overrides from settings.toml `[keybindings]`. Invalid entries are logged and skipped.
 pub fn bind_user(cx: &mut App) {
@@ -110,6 +116,7 @@ pub fn bind_user(cx: &mut App) {
 
 pub fn bind(cx: &mut App) {
     let f = Some(FOLDER_CTX);
+    cx.bind_keys([KeyBinding::new("tab", LeaveTree, Some(TREE_CTX))]);
     cx.bind_keys([
         KeyBinding::new("alt-left", GoBack, None),
         KeyBinding::new("alt-right", GoForward, None),
