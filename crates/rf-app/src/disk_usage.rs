@@ -35,6 +35,9 @@ pub fn title(root: &std::path::Path) -> String {
 pub enum DiskEvent {
     /// Open this path's folder in a normal view with the item selected.
     ShowInFolder(PathBuf),
+    /// Open this folder in a new tab, and leave this tab on the analysis (issue 35: "investigating a large subfolder ruins your
+    /// current analysis progress because you lose the broader disk usage view and have to trigger a rescan all over again").
+    OpenInNewTab(PathBuf),
 }
 
 impl EventEmitter<DiskEvent> for DiskUsageView {}
@@ -168,6 +171,16 @@ impl DiskUsageView {
         }
     }
 
+    /// A folder of the analysis in a tab of its own: from its menu, or a middle click on its row or rectangle. A file has no tab to
+    /// open; its folder is what "show in folder" is for.
+    fn open_in_new_tab(&mut self, id: u32, cx: &mut Context<Self>) {
+        if let Some(t) = &self.tree
+            && t.is_dir(id)
+        {
+            cx.emit(DiskEvent::OpenInNewTab(t.path(id)));
+        }
+    }
+
     fn context_menu(&mut self, id: u32, window: &mut Window, cx: &mut Context<Self>) {
         let Some(t) = &self.tree else { return };
         let is_dir = t.is_dir(id);
@@ -180,6 +193,12 @@ impl DiskUsageView {
             let label = if is_dir { t!("Bu klasöre git") } else { t!("Aç") };
             items.push(Item::action(label, MenuIcon::Lucide(if is_dir { L::FolderOpen } else { L::SquareArrowOutUpRight }), move |_, cx| {
                 let _ = me.update(cx, |v, cx| v.activate(id, 2, cx));
+            }));
+        }
+        if is_dir {
+            let me = me.clone();
+            items.push(Item::action(t!("Yeni sekmede aç"), MenuIcon::Lucide(L::SquarePlus), move |_, cx| {
+                let _ = me.update(cx, |v, cx| v.open_in_new_tab(id, cx));
             }));
         }
         items.push(Item::action(t!("Klasörde göster"), MenuIcon::Lucide(L::FolderSearch), move |_, cx| {
@@ -366,6 +385,7 @@ impl Render for DiskUsageView {
                     }))
                     .on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| v.activate(id, ev.click_count(), cx)))
                     .on_mouse_down(MouseButton::Right, cx.listener(move |v, _, window, cx| v.context_menu(id, window, cx)))
+                    .on_mouse_down(MouseButton::Middle, cx.listener(move |v, _, _, cx| v.open_in_new_tab(id, cx)))
                     .child(Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, p.dark)))
                     .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(t.name(id).to_string()))
                     .child(div().w(px(76.)).flex_shrink_0().text_right().text_color(p.text_secondary).child(format::size(w)))
@@ -432,7 +452,8 @@ impl Render for DiskUsageView {
                     }
                 }))
                 .on_click(cx.listener(move |v, ev: &ClickEvent, _, cx| v.activate(id, ev.click_count(), cx)))
-                .on_mouse_down(MouseButton::Right, cx.listener(move |v, _, window, cx| v.context_menu(id, window, cx)));
+                .on_mouse_down(MouseButton::Right, cx.listener(move |v, _, window, cx| v.context_menu(id, window, cx)))
+                .on_mouse_down(MouseButton::Middle, cx.listener(move |v, _, _, cx| v.open_in_new_tab(id, cx)));
             // a folder's body sits behind its children: only its strip and the empty part take
             // clicks, which is the same folder either way
             let label_color = if is_dir { p.text } else { gpui::white() };

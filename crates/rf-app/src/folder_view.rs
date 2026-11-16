@@ -4374,6 +4374,8 @@ impl Render for FolderView {
                                     this.navigate(Location::Path(parent.to_path_buf()), cx);
                                 }
                             }
+                            // (this tab stays on the analysis: the workspace opens the folder in a tab of its own)
+                            crate::disk_usage::DiskEvent::OpenInNewTab(path) => cx.emit(FolderEvent::OpenInNewTab(Location::Path(path.clone()))),
                         })
                         .detach();
                         self.disk_usage = Some(dv.clone());
