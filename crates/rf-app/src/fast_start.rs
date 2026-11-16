@@ -46,24 +46,30 @@ pub fn before_app() {
     gpui_windows::hybrid::set_fast_start(wanted(remembered()));
 }
 
-/// A while after the start (the device exists by then, whichever way it was made): remembers how long it took, off the
-/// interface's thread.
+/// Remembers how long the card's device took, off the interface's thread. Twice: AT ONCE, which is when it is known in a start that
+/// opened on the card (the device is made before the first window), and a few seconds in, for the device the fast start makes
+/// meanwhile. WHY AT ONCE: 0.8.6 only looked after five seconds, so a run that ended sooner never remembered anything. The speed
+/// test's runs last about a second each: there the fast start never came on, and its numbers did not show it.
 pub fn remember(cx: &mut gpui_kit::App) {
     cx.spawn(async move |cx| {
-        cx.background_executor().timer(std::time::Duration::from_secs(5)).await;
-        let Some(now) = gpui_windows::hybrid::gpu_device_ms() else { return };
-        cx.background_executor()
-            .spawn(async move {
-                if worth_writing(remembered(), now)
-                    && let Some(path) = file()
-                {
-                    if let Some(dir) = path.parent() {
-                        let _ = std::fs::create_dir_all(dir);
+        for wait in [std::time::Duration::ZERO, std::time::Duration::from_secs(5)] {
+            if !wait.is_zero() {
+                cx.background_executor().timer(wait).await;
+            }
+            let Some(now) = gpui_windows::hybrid::gpu_device_ms() else { continue };
+            cx.background_executor()
+                .spawn(async move {
+                    if worth_writing(remembered(), now)
+                        && let Some(path) = file()
+                    {
+                        if let Some(dir) = path.parent() {
+                            let _ = std::fs::create_dir_all(dir);
+                        }
+                        let _ = std::fs::write(path, now.to_string());
                     }
-                    let _ = std::fs::write(path, now.to_string());
-                }
-            })
-            .await;
+                })
+                .await;
+        }
     })
     .detach();
 }
