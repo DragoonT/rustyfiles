@@ -594,10 +594,12 @@ impl FolderView {
             cx.notify();
             return;
         }
-        // inside an archive: rewrite the archive with the new name
+        // Inside an archive: rewrite the archive with the new name. An archive file ITSELF splits as its own root, with an empty
+        // inner path, and is a plain file to rename (issue 36: "after zip something, I couldn't rename the .zip", with "not found"
+        // in the Status Center: the .zip was asked to rename "" inside itself. The same mistake as issue 11's delete).
         if !new_name.is_empty() && new_name != old {
             let from_path = self.parent_of(ei).map(|d| d.join(&old));
-            if let Some((archive, inner)) = from_path.as_deref().and_then(crate::archive_view::split) {
+            if let Some((archive, inner)) = from_path.as_deref().and_then(crate::archive_view::split_inside) {
                 let inner = inner.to_string_lossy().replace('\\', "/");
                 crate::archive_view::rename_inside(cx, archive, inner, new_name.clone());
                 self.set_reselect(new_name);
