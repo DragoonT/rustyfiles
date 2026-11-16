@@ -117,19 +117,26 @@ impl BarPreview {
         let Some(g) = self.groups.get(ix) else { return };
         let Some(w) = g.windows.first() else { return };
         use windows::Win32::Foundation::HWND;
-        use windows::Win32::UI::WindowsAndMessaging::{SW_MINIMIZE, SW_RESTORE, ShowWindow};
-        let h = HWND(w.hwnd as *mut _);
-        unsafe {
-            if g.windows.iter().any(|w| w.hwnd == self.front) {
-                let _ = ShowWindow(h, SW_MINIMIZE);
-            } else {
-                if w.minimized {
-                    let _ = ShowWindow(h, SW_RESTORE);
+        use windows::Win32::UI::WindowsAndMessaging::{SW_MINIMIZE, SW_RESTORE, ShowWindowAsync};
+        let (hwnd, minimized, in_front) = (w.hwnd, w.minimized, g.windows.iter().any(|w| w.hwnd == self.front));
+        // From a task, not from inside this update, and without waiting for the window's program: one of the windows may be our own,
+        // and a size change that arrives while the app is borrowed is dropped by GPUI (see `Workspace::toggle_compact`).
+        cx.spawn(async move |this, cx| {
+            let h = HWND(hwnd as *mut _);
+            // SAFETY: plain requests to a window handle; a window that is gone makes them fail, which is not read.
+            unsafe {
+                if in_front {
+                    let _ = ShowWindowAsync(h, SW_MINIMIZE);
+                } else {
+                    if minimized {
+                        let _ = ShowWindowAsync(h, SW_RESTORE);
+                    }
+                    rf_win::window::bring_to_front(hwnd);
                 }
-                rf_win::window::bring_to_front(w.hwnd);
             }
-        }
-        self.refresh(cx);
+            let _ = this.update(cx, |v, cx| v.refresh(cx));
+        })
+        .detach();
     }
 }
 

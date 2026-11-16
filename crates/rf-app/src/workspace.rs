@@ -1491,15 +1491,25 @@ impl Workspace {
     /// and preview hidden); leaving restores the previous size, position and z-order.
     fn toggle_compact(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(hwnd) = Self::hwnd(window) else { return };
+        // The window is moved and resized from a TASK, never from inside this update. These calls deliver the new size and place at
+        // once, while the app is still borrowed, and GPUI then drops them ("handling resize ...: RefCell already borrowed" in the
+        // log): the window changes, but the content, and with it every place a click is tested against, stays at the old size
+        // until the next resize. That is one way a click on the close button could land on something else (issue 31: "after ...
+        // toggling window states ... the first click forces it to exit fullscreen / resize down"). `look/window.rs` found the same
+        // with its own window.
         if let Some(r) = self.compact.take() {
-            rf_win::window::set_min_size(hwnd, None);
-            rf_win::window::place(hwnd, r.rect);
-            if r.maximized {
-                rf_win::window::maximize(hwnd);
-            }
-            if !r.topmost {
-                let _ = rf_win::window::set_topmost(hwnd, false);
-            }
+            let (rect, maximized, topmost) = (r.rect, r.maximized, r.topmost);
+            cx.spawn(async move |_, _| {
+                rf_win::window::set_min_size(hwnd, None);
+                rf_win::window::place(hwnd, rect);
+                if maximized {
+                    rf_win::window::maximize(hwnd);
+                }
+                if !topmost {
+                    let _ = rf_win::window::set_topmost(hwnd, false);
+                }
+            })
+            .detach();
         } else {
             let Some((rect, maximized)) = rf_win::window::rect(hwnd) else { return };
             // restore to the normal (not maximized) rectangle later
@@ -1507,7 +1517,6 @@ impl Workspace {
             let topmost = rf_win::window::is_topmost(hwnd);
             let scale = window.scale_factor();
             let (w, h) = ((COMPACT_W * scale) as i32, (COMPACT_H * scale) as i32);
-            rf_win::window::set_min_size(hwnd, Some((COMPACT_MIN.0, COMPACT_MIN.1)));
             // keep the top-right corner where it was: the overlay hugs the side it came from
             let (right, top) = (rect[2], rect[1].max(0));
             let restore = normal.unwrap_or_else(|| {
@@ -1515,8 +1524,13 @@ impl Workspace {
                 let o = |v: Pixels| (f32::from(v) * scale) as i32;
                 [o(b.origin.x), o(b.origin.y), o(b.origin.x + b.size.width), o(b.origin.y + b.size.height)]
             });
-            rf_win::window::place(hwnd, [right - w, top, right, top + h]);
-            let _ = rf_win::window::set_topmost(hwnd, true);
+            let small = [right - w, top, right, top + h];
+            cx.spawn(async move |_, _| {
+                rf_win::window::set_min_size(hwnd, Some((COMPACT_MIN.0, COMPACT_MIN.1)));
+                rf_win::window::place(hwnd, small);
+                let _ = rf_win::window::set_topmost(hwnd, true);
+            })
+            .detach();
             self.compact = Some(CompactRestore { rect: restore, maximized, topmost });
         }
         cx.notify();
