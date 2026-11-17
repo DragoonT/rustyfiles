@@ -5,13 +5,27 @@ use chrono::{Local, TimeZone};
 static ENGLISH: AtomicBool = AtomicBool::new(false);
 static DECIMAL: AtomicBool = AtomicBool::new(false);
 static DATE_STYLE: AtomicU8 = AtomicU8::new(0);
+/// How the system writes a local date and time (Windows' short date and time, set by the app at start: `set_system_format`).
+/// Unset (tests, other platforms): "05.11.2026 13:45".
+static SYSTEM_FORMAT: std::sync::OnceLock<fn(&chrono::DateTime<Local>) -> Option<String>> = std::sync::OnceLock::new();
+
+/// Gives the date code the system's own way of writing a local date and time (issue 59: "Format of the creation date or last
+/// modified date should adhere to the date/time format settings defined by the OS"). Set once.
+pub fn set_system_format(f: fn(&chrono::DateTime<Local>) -> Option<String>) {
+    let _ = SYSTEM_FORMAT.set(f);
+}
+
+/// A local date and time as the system writes it, else "05.11.2026 13:45".
+fn local(dt: &chrono::DateTime<Local>) -> String {
+    SYSTEM_FORMAT.get().and_then(|f| f(dt)).unwrap_or_else(|| dt.format("%d.%m.%Y %H:%M").to_string())
+}
 
 /// How dates are shown (Settings → General → Date format).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateStyle {
     /// Recent times as "5 dakika önce", older ones as a short date.
     Relative,
-    /// "05.11.2026 13:45"
+    /// The system's short date and time (Windows' regional format), "05.11.2026 13:45" where there is none.
     Local,
     /// ISO 8601 "2026-11-05 13:45"
     Universal,
@@ -86,16 +100,16 @@ fn datetime_with(ms: i64, style: DateStyle, now: i64, en: bool) -> String {
     let chrono::LocalResult::Single(dt) = Local.timestamp_millis_opt(ms) else { return String::new() };
     match style {
         DateStyle::Universal => dt.format("%Y-%m-%d %H:%M").to_string(),
-        DateStyle::Local => dt.format("%d.%m.%Y %H:%M").to_string(),
+        DateStyle::Local => local(&dt),
         DateStyle::Relative => {
             let secs = (now - ms) / 1000;
             let (n, tr, enu) = match secs {
-                s if s < 0 => return dt.format("%d.%m.%Y %H:%M").to_string(),
+                s if s < 0 => return local(&dt),
                 s if s < 45 => return (if en { "just now" } else { "az önce" }).to_string(),
                 s if s < 3600 => (((s + 30) / 60).max(1), "dakika önce", "min ago"),
                 s if s < 86_400 => (s / 3600, "saat önce", "h ago"),
                 s if s < 7 * 86_400 => (s / 86_400, "gün önce", "d ago"),
-                _ => return dt.format("%d.%m.%Y %H:%M").to_string(),
+                _ => return local(&dt),
             };
             if en { format!("{n} {enu}") } else { format!("{n} {tr}") }
         }

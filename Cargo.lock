@@ -6256,6 +6256,7 @@ version = "0.8.7"
 dependencies = [
  "anyhow",
  "cfb",
+ "chrono",
  "crc32fast",
  "crossbeam-channel",
  "encoding_rs",
