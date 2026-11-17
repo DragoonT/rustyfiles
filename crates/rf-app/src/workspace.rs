@@ -440,6 +440,22 @@ fn step_quick_look(forward: bool, cx: &mut App) {
     }
 }
 
+/// Writes every open main window's session and placement into the settings, as closing a window does (a restart quits without
+/// closing them, and the new process opened at the place the window had at its LAST close: seen in a test copy).
+pub fn save_all_sessions(cx: &mut App) {
+    let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
+    for (handle, ws) in list {
+        let Some(ws) = ws.upgrade() else { continue };
+        if ws.read(cx).picker.is_some() {
+            continue;
+        }
+        let _ = handle.update(cx, |_, window, cx| {
+            let wb = window.window_bounds();
+            ws.update(cx, |w, cx| w.save_session(Some(wb), cx));
+        });
+    }
+}
+
 /// Selects `file` in the newest window whose current tab shows its folder (and brings that window
 /// forward); false when none does.
 fn select_in_open_folder(file: &std::path::Path, cx: &mut App) -> bool {

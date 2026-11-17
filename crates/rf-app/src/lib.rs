@@ -302,6 +302,7 @@ pub(crate) fn restart(cx: &mut App) {
         cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
         cx.update(|cx| {
             rf_win::handover::GATE.leave_now();
+            workspace::save_all_sessions(cx);
             save_and_quit(cx)
         });
     })
