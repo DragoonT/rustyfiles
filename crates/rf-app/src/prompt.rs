@@ -21,7 +21,7 @@ pub struct Button {
     pub run: OnButton,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind {
     Primary,
     Normal,
@@ -199,8 +199,11 @@ impl DialogView {
         }
     }
 
+    /// Enter: the dialog's main button, which is the `Primary` one or, in a question whose answer destroys something, the `Danger`
+    /// one. WHY (issue 42: "When using Shift + Delete ... pressing Enter does not confirm the action"): Enter looked for `Primary`
+    /// only, and the permanent delete's "Delete" is `Danger`, so Enter did nothing there. Explorer's own question takes Enter too.
     fn press_primary(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(ix) = self.buttons.iter().position(|b| b.kind == Kind::Primary) {
+        if let Some(ix) = main_button(&self.buttons.iter().map(|b| b.kind).collect::<Vec<_>>()) {
             self.press(ix, window, cx);
         }
     }
@@ -327,5 +330,23 @@ impl Render for DialogView {
                         el.opacity(t).mt(px(10. * (1. - t)))
                     }),
             )
+    }
+}
+
+/// Which button Enter presses: the first `Primary`, else the first `Danger`, else none.
+fn main_button(kinds: &[Kind]) -> Option<usize> {
+    kinds.iter().position(|k| *k == Kind::Primary).or_else(|| kinds.iter().position(|k| *k == Kind::Danger))
+}
+
+#[cfg(test)]
+mod main_button_tests {
+    use super::{Kind, main_button};
+
+    #[test]
+    fn enter_presses_the_primary_button_else_the_danger_one() {
+        assert_eq!(main_button(&[Kind::Normal, Kind::Primary]), Some(1));
+        assert_eq!(main_button(&[Kind::Danger, Kind::Normal]), Some(0), "a permanent delete: Enter confirms it (issue 42)");
+        assert_eq!(main_button(&[Kind::Danger, Kind::Primary]), Some(1), "a primary button wins over a danger one");
+        assert_eq!(main_button(&[Kind::Normal]), None);
     }
 }

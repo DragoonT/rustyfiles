@@ -411,6 +411,35 @@ pub fn parse_launch(msg: &str) -> (Location, Option<String>) {
     if m.is_empty() { (Location::Home, None) } else { (Location::Path(PathBuf::from(m)), None) }
 }
 
+/// DirectLook asked for the next or the previous item (an arrow key in its window): the list of the newest window moves its
+/// selection by one and DirectLook is sent the item now selected. Only while DirectLook was opened from our list.
+fn step_quick_look(forward: bool, cx: &mut App) {
+    if !crate::folder_view::QUICK_LOOK_OPEN.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
+    for (handle, ws) in list.into_iter().rev() {
+        let Some(ws) = ws.upgrade() else { continue };
+        if ws.read(cx).picker.is_some() {
+            continue;
+        }
+        let done = handle
+            .update(cx, |_, _, cx| {
+                let view = ws.read(cx).active_tab().clone();
+                view.update(cx, |v, cx| v.step_selection(forward, cx));
+                view.read(cx).preview_target()
+            })
+            .ok();
+        if let Some(target) = done {
+            if let Some((path, e)) = target {
+                *LOOK_FOLLOWED.lock().unwrap() = Some(path.clone());
+                crate::archive_view::look_send(path, e.size, true);
+            }
+            return;
+        }
+    }
+}
+
 /// Selects `file` in the newest window whose current tab shows its folder (and brings that window
 /// forward); false when none does.
 fn select_in_open_folder(file: &std::path::Path, cx: &mut App) -> bool {
@@ -465,6 +494,10 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         Some(crate::look::ipc::ToApp::LookClosed) => {
             crate::folder_view::QUICK_LOOK_OPEN.store(false, std::sync::atomic::Ordering::Relaxed);
             *LOOK_FOLLOWED.lock().unwrap() = None;
+            return true;
+        }
+        Some(crate::look::ipc::ToApp::Step(forward)) => {
+            step_quick_look(forward, cx);
             return true;
         }
         Some(crate::look::ipc::ToApp::OpenSettings) => {
@@ -3990,13 +4023,18 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|this, _: &GoBack, _, cx| this.with_tab(cx, |v, cx| v.back(cx))))
-            // Windows' own dialogs (credentials, reconnect at sign-in); the drive list notices
-            // the new / removed drive by itself
+            // Windows' own dialogs (credentials, reconnect at sign-in); the drive list notices the new / removed drive by itself.
+            // On a thread of their own, as every other Windows dialog here (`settings_view::pick_into`): run here, inside the
+            // action, the dialog's modal loop handed our windows their messages while the app was borrowed, and the app closed
+            // (issue 46: "Clicking on map network drive crashes and closes the explorer window").
+            .on_action(cx.listener(|_, _: &RestartApp, _, cx| crate::restart(cx)))
             .on_action(cx.listener(|_, _: &MapNetworkDrive, window, _| {
-                rf_win::network::map_drive_dialog(Self::hwnd(window).unwrap_or(0))
+                let owner = Self::hwnd(window).unwrap_or(0);
+                std::thread::spawn(move || rf_win::network::map_drive_dialog(owner));
             }))
             .on_action(cx.listener(|_, _: &DisconnectNetworkDrive, window, _| {
-                rf_win::network::disconnect_drive_dialog(Self::hwnd(window).unwrap_or(0))
+                let owner = Self::hwnd(window).unwrap_or(0);
+                std::thread::spawn(move || rf_win::network::disconnect_drive_dialog(owner));
             }))
             .on_action(cx.listener(|this, _: &GoForward, _, cx| this.with_tab(cx, |v, cx| v.forward(cx))))
             .on_action(cx.listener(|this, _: &GoUp, _, cx| this.with_tab(cx, |v, cx| v.up(cx))))

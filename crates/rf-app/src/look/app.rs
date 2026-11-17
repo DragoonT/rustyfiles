@@ -33,6 +33,14 @@ fn tray_labels() -> rf_win::tray::Labels {
     }
 }
 
+/// An arrow key: tells rustyfiles to move its selection by one (see `ToApp::Step`). Nothing happens when rustyfiles is not running
+/// or the preview was not opened from it: it then has no list to step through.
+pub(crate) fn step(forward: bool) {
+    std::thread::spawn(move || {
+        let _ = rf_win::single_instance::send_to(&rf_win::single_instance::instance_name(), &ToApp::Step(forward).encode());
+    });
+}
+
 /// Ayarlar sayfasını rustyfiles'ta açar (çalışmıyorsa başlatır).
 fn open_settings() {
     std::thread::spawn(|| {
@@ -120,8 +128,8 @@ pub fn main() {
         let _ = tray_tx.unbounded_send(e);
     });
 
-    // (DirectLook's first window too: it reads what the main app remembered of this machine, and writes nothing)
-    crate::fast_start::before_app();
+    // (DirectLook opens on the card: the fast start is for the file manager's own window only, see `fast_start::before_app`)
+    crate::fast_start::before_app(false);
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
         gpui_kit::init(cx);
         // rustyfiles'ın ayarları: yalnız dil, tema, tarih biçimi için okunur, asla yazılmaz

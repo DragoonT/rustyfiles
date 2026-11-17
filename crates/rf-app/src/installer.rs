@@ -105,6 +105,61 @@ pub enum State {
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
+
+/// The downloaded version, when a release between this one and it is marked important (see [`IMPORTANT_MARK`]).
+static IMPORTANT: Mutex<Option<String>> = Mutex::new(None);
+
+/// The mark that makes a release an important one: a line in its release notes on GitHub, an HTML comment, so nobody reading the
+/// notes sees it. WHY (the owner, 2026-11-17, the morning 0.8.6 left the dock empty: "güncelleme denetimine de önemli fix modu
+/// ekleyelim. bunun gibi önemli fixleri yayınlayınca önemli bir güncelleme olduğunu belirtsin uygulamada"): an update was always
+/// announced the same quiet way, "ready, restart", which a fix for a broken dock should not be.
+pub const IMPORTANT_MARK: &str = "<!-- rustyfiles: important -->";
+
+/// Whether the downloaded `version` brings an important fix.
+pub fn is_important(version: &str) -> bool {
+    IMPORTANT.lock().unwrap_or_else(|p| p.into_inner()).as_deref() == Some(version)
+}
+
+/// "0.8.7", "v0.8.7", "0.8.7-beta.1" as numbers (a pre-release counts as its version).
+fn version_parts(s: &str) -> Option<(u64, u64, u64)> {
+    let core = s.trim().trim_start_matches('v').split(['-', '+']).next()?;
+    let mut it = core.split('.').map(|x| x.parse::<u64>().ok());
+    Some((it.next()??, it.next()??, it.next()??))
+}
+
+/// Whether one of `releases` (tag, notes) newer than `current` and not newer than `target` carries [`IMPORTANT_MARK`]: a copy that
+/// skipped several releases is told when any of them was important.
+fn any_important(releases: &[(String, String)], current: &str, target: &str) -> bool {
+    let (Some(cur), Some(tgt)) = (version_parts(current), version_parts(target)) else { return false };
+    releases.iter().any(|(tag, notes)| version_parts(tag).is_some_and(|v| v > cur && v <= tgt) && notes.contains(IMPORTANT_MARK))
+}
+
+/// Reads the latest releases' notes from GitHub and remembers whether the update to `target` is an important one. One request, only
+/// when an update was downloaded; on any failure the update is an ordinary one. Blocking.
+fn learn_importance(target: &str) {
+    let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(8))).http_status_as_error(false).build().into();
+    let api = REPO.replace("https://github.com/", "https://api.github.com/repos/") + "/releases?per_page=15";
+    let releases: Vec<(String, String)> = agent
+        .get(api)
+        .header("User-Agent", format!("rustyfiles/{}", version()))
+        .header("Accept", "application/vnd.github+json")
+        .call()
+        .ok()
+        .filter(|r| r.status() == 200)
+        .and_then(|mut r| r.body_mut().read_to_string().ok())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .and_then(|v| v.as_array().cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| !r["draft"].as_bool().unwrap_or(false))
+        .filter_map(|r| Some((r["tag_name"].as_str()?.to_string(), r["body"].as_str().unwrap_or("").to_string())))
+        .collect();
+    let important = any_important(&releases, &version(), target);
+    if important {
+        log::info!("update: {target} is an important update");
+    }
+    *IMPORTANT.lock().unwrap_or_else(|p| p.into_inner()) = important.then(|| target.to_string());
+}
 static PENDING: Mutex<Option<UpdateInfo>> = Mutex::new(None);
 
 pub fn state() -> State {
@@ -139,6 +194,10 @@ fn fake_check() {
     for pct in (0..=100).step_by(4) {
         set(State::Downloading("9.9.9".into(), pct));
         sleep(Duration::from_millis(120));
+    }
+    // (`RUSTYFILES_FAKE_UPDATE=important`: the look of an important one)
+    if std::env::var("RUSTYFILES_FAKE_UPDATE").is_ok_and(|v| v.trim() == "important") {
+        *IMPORTANT.lock().unwrap_or_else(|p| p.into_inner()) = Some("9.9.9".into());
     }
     set(State::Ready("9.9.9".into()));
 }
@@ -207,6 +266,7 @@ pub fn check() {
         return;
     };
     if let Some(ready) = um.get_update_pending_restart() {
+        learn_importance(&ready.Version);
         set(State::Ready(ready.Version));
         return;
     }
@@ -234,6 +294,7 @@ pub fn check() {
             match result {
                 Ok(()) => {
                     *PENDING.lock().unwrap() = Some(*info);
+                    learn_importance(&v);
                     set(State::Ready(v));
                 }
                 Err(e) => set(State::Failed(e.to_string())),
@@ -476,5 +537,31 @@ mod start_apply_tests {
         for side in ["--pick", "--dock", "--shell", "--quick-search", "--no-window", "--update-splash", "--bar-preview", "--shell-probe", "--veloapp-updated", "--veloapp-obsolete"] {
             assert!(!applies_update_at_start(Some(side)), "{side}");
         }
+    }
+}
+
+#[cfg(test)]
+mod important_tests {
+    use super::{IMPORTANT_MARK, any_important, version_parts};
+
+    #[test]
+    fn versions_are_read_as_numbers() {
+        assert_eq!(version_parts("v0.8.7"), Some((0, 8, 7)));
+        assert_eq!(version_parts("0.10.0-beta.2"), Some((0, 10, 0)));
+        assert_eq!(version_parts("0.8"), None);
+        assert!(version_parts("0.10.0") > version_parts("0.9.12"), "numbers, not text");
+    }
+
+    #[test]
+    fn an_update_is_important_when_a_release_on_the_way_is_marked() {
+        let notes = |important: bool| if important { format!("## Fixed\n{IMPORTANT_MARK}\n- the dock") } else { "## Fixed\n- a typo".to_string() };
+        let rel = |tag: &str, imp: bool| (tag.to_string(), notes(imp));
+        let list = vec![rel("v0.8.9", false), rel("v0.8.8", false), rel("v0.8.7", true), rel("v0.8.6", false)];
+        assert!(any_important(&list, "0.8.6", "0.8.9"), "0.8.7 is on the way from 0.8.6 to 0.8.9");
+        assert!(any_important(&list, "0.8.6", "0.8.7"));
+        assert!(!any_important(&list, "0.8.7", "0.8.9"), "already past the important one");
+        assert!(!any_important(&list, "0.8.5", "0.8.6"), "the important one is after the target");
+        assert!(!any_important(&[rel("v0.8.7", false)], "0.8.6", "0.8.7"));
+        assert!(!any_important(&list, "x", "0.8.9"), "an unreadable version: ordinary");
     }
 }

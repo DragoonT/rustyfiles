@@ -277,6 +277,53 @@ fn save_and_quit(cx: &mut App) {
     cx.quit();
 }
 
+/// The variable a restarted rustyfiles is started with: the process id of the one that is ending (see [`restart`]).
+const AFTER_EXIT_ENV: &str = "RUSTYFILES_AFTER_EXIT";
+
+/// Restarts rustyfiles: DirectLook and the dock are asked to stop, a new rustyfiles is started that waits for this one to end, and
+/// this one quits the usual way (settings and session written). The new one opens its last session and brings the dock and
+/// DirectLook back as the settings say. WHY (the owner, 2026-11-17, after a morning where the dock came up empty: "bir de bir
+/// kısayol ekleyelim. rustyfiles'ı restart etsin"): there was no way to start everything afresh short of ending the processes by
+/// hand. Ctrl+Alt+Shift+R and the command palette.
+pub(crate) fn restart(cx: &mut App) {
+    let Ok(me) = std::env::current_exe() else { return };
+    let pid = std::process::id().to_string();
+    std::thread::spawn(move || {
+        rf_win::single_instance::send_to(&look::ipc::app_name(), &look::ipc::Msg::Quit.encode());
+        dock::control::stop_for_update();
+        // (no folder: the new process opens the last session; its working directory is never the installation folder)
+        let dir = std::env::temp_dir();
+        if let Err(e) = std::process::Command::new(&me).env(AFTER_EXIT_ENV, &pid).current_dir(dir).spawn() {
+            log::warn!("restart: the new rustyfiles did not start: {e}");
+        }
+    });
+    // (give the stops their moment, then quit; the new process waits for this one to be gone)
+    cx.spawn(async move |cx| {
+        cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
+        cx.update(|cx| {
+            rf_win::handover::GATE.leave_now();
+            save_and_quit(cx)
+        });
+    })
+    .detach();
+}
+
+/// A restarted rustyfiles: waits (up to ten seconds) for the one that started it to end, so that it does not hand its start to
+/// that one as a second launch does.
+fn wait_for_the_old_one() {
+    let Some(pid) = std::env::var(AFTER_EXIT_ENV).ok().and_then(|p| p.trim().parse::<u32>().ok()) else { return };
+    // (not inherited by what this process starts)
+    unsafe { std::env::remove_var(AFTER_EXIT_ENV) };
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    // SAFETY: a handle to wait on, closed right after
+    unsafe {
+        if let Ok(h) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+            let _ = WaitForSingleObject(h, 10_000);
+            let _ = windows::Win32::Foundation::CloseHandle(h);
+        }
+    }
+}
+
 /// `Path::is_dir` with a time limit (it can block for the SMB timeout on an offline share).
 pub(crate) fn is_dir_bounded(p: PathBuf, limit: std::time::Duration) -> Option<bool> {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -309,6 +356,7 @@ pub(crate) fn start_mark(step: &str) {
 
 pub fn main() {
     start_mark("main");
+    wait_for_the_old_one();
     // Not in the installation folder: the updater renames it, and Windows refuses while it is a working directory of this process
     // or of anything this process starts (`rf_win::ownfolder`). Before everything else, so that every child inherits the way out.
     rf_win::ownfolder::leave();
@@ -583,7 +631,7 @@ pub fn main() {
     }
 
     // (the first window on the CPU renderer or on the card: what this machine was like the last time, see `fast_start`)
-    fast_start::before_app();
+    fast_start::before_app(!dock && !bar_preview && pick.is_none() && !quick_search && !snip_only && !no_window && !open_look_settings);
     start_mark("before the app");
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
         start_mark("app running");

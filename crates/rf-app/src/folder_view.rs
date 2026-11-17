@@ -2102,6 +2102,11 @@ impl FolderView {
         self.cursor = Some(to);
     }
 
+    /// The selection moves to the next or the previous item (DirectLook's arrow keys, see `workspace::step_quick_look`).
+    pub(crate) fn step_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
+        self.move_cursor(if forward { 1 } else { -1 }, false, cx);
+    }
+
     fn move_cursor(&mut self, delta: isize, extend: bool, cx: &mut Context<Self>) {
         if self.visible.is_empty() {
             return;

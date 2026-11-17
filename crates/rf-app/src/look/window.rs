@@ -640,6 +640,16 @@ impl Render for LookWindow {
                     }
                     "f11" => window.toggle_fullscreen(),
                     "f5" => v.reload(window, cx),
+                    // The previous and the next item of the list the preview was opened from (issue 42: "the left and right arrow keys
+                    // do not work for navigating to the previous or next image"). Up and down too, as in the list itself. A viewer
+                    // that uses a key of these itself (text scrolls with up and down) has it first.
+                    "left" | "right" | "up" | "down" => {
+                        if v.viewer.on_key(k, m, window, cx) {
+                            cx.notify();
+                        } else {
+                            crate::look::app::step(matches!(k, "right" | "down"));
+                        }
+                    }
                     _ => {}
                 }
             }))

@@ -2092,6 +2092,14 @@ pub fn update_toast(p: &Palette, picker: bool) -> Option<AnyElement> {
         return None;
     }
     let ver = v.clone();
+    // an important fix (see `installer::IMPORTANT_MARK`): said so, in the danger colour, with a warning sign
+    let important = crate::installer::is_important(&v);
+    let (edge, sign) = if important { (p.danger, L::TriangleAlert) } else { (p.accent, L::RefreshCw) };
+    let (title, line) = if important {
+        (t!("Önemli güncelleme: rustyfiles {v}").replace("{v}", &v), t!("Önemli düzeltmeler içeriyor. Şimdi yeniden başlatın.").to_string())
+    } else {
+        (t!("rustyfiles {v} hazır").replace("{v}", &v), t!("Yeniden başlatınca kurulur").to_string())
+    };
     Some(
         div()
             .absolute()
@@ -2111,14 +2119,15 @@ pub fn update_toast(p: &Palette, picker: bool) -> Option<AnyElement> {
                     .rounded(theme::RADIUS)
                     .bg(p.card_bg)
                     .border_1()
-                    .border_color(p.accent)
+                    .border_color(edge)
+                    .when(important, |d| d.border_2())
                     .shadow_lg()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(Icon::new(L::RefreshCw).size(px(16.)).text_color(p.accent))
+                    .child(Icon::new(sign).size(px(16.)).text_color(edge))
                     .child(
                         v_flex()
-                            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(t!("rustyfiles {v} hazır").replace("{v}", &v)))
-                            .child(div().text_xs().text_color(p.text_secondary).child(t!("Yeniden başlatınca kurulur"))),
+                            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title))
+                            .child(div().text_xs().text_color(p.text_secondary).child(line)),
                     )
                     .child(
                         div()
