@@ -286,7 +286,7 @@ impl Preview {
                     .w_full()
                     .gap_3()
                     .items_baseline()
-                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(SharedString::from(e.name.to_string())))
+                    .child(div().text_base().font_weight(FontWeight::SEMIBOLD).child(crate::rtl::display_text(&e.name)))
                     .child(div().text_sm().text_color(p.text_secondary).child(facts.join(" · "))),
             )
             .into_any_element()
@@ -852,7 +852,7 @@ fn render_extra_sized(p: &Palette, x: &Extra, tall: bool) -> AnyElement {
                     .items_center()
                     .text_xs()
                     .child(Icon::new(if *dir { L::Folder } else { L::File }).size(px(12.)).text_color(p.text_secondary))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(name.clone()))
+                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(crate::rtl::display_text(&name)))
                     .children((!*dir).then(|| div().text_color(p.text_tertiary).child(format::size(*size))))
             });
             v_flex()
@@ -983,7 +983,7 @@ impl Render for Preview {
                 div()
                     .text_sm()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(SharedString::from(e.name.to_string())),
+                    .child(crate::rtl::display_text(&e.name)),
             );
 
         if let Some((tp, text)) = &self.text {

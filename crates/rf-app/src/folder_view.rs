@@ -826,7 +826,7 @@ impl FolderView {
                         px(16.),
                         e.link,
                     ))
-                    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(SharedString::from(e.name.to_string())))
+                    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&e.name)))
                     .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(p.text_tertiary)))
                     .on_mouse_down(
                         MouseButton::Left,
@@ -2300,6 +2300,10 @@ impl FolderView {
                 let label: AnyElement = match rename_input {
                     // the text stays where the label was: centered, the label's size
                     Some(inp) => div()
+                        .capture_key_down({
+                            let input = inp.clone();
+                            cx.listener(move |_, ev: &KeyDownEvent, _, cx| crate::rtl::handle_key_down(&input, ev, cx))
+                        })
                         .w_full()
                         .h(px(24.))
                         // the label's line is shorter than the box: center the box on it
@@ -2321,7 +2325,7 @@ impl FolderView {
                         .text_ellipsis()
                         .when(dim, |d| d.opacity(0.6))
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
-                        .child(SharedString::from(row_name(e, show_ext, renamed.as_ref())))
+                        .child(crate::rtl::display_text(&row_name(e, show_ext, renamed.as_ref())))
                         .into_any_element(),
                 };
                 let facts = (style == GridStyle::Cards).then(|| {
@@ -2332,7 +2336,7 @@ impl FolderView {
                     f.push(format::datetime(e.modified_ms));
                     f
                 });
-                let name_text = SharedString::from(row_name(e, show_ext, renamed.as_ref()));
+                let name_text = crate::rtl::display_text(&row_name(e, show_ext, renamed.as_ref()));
                 let base = match style {
                     GridStyle::Tiles => v_flex().p_1().gap_1().items_center().child(div().size(visual_px + px(4.)).flex().items_center().justify_center().child(visual)).child(label),
                     GridStyle::Cards => h_flex()
@@ -3392,7 +3396,7 @@ impl FolderView {
             let is_cursor = self.cursor == Some(vi);
             let cat = icons::category(e);
             let dim = e.is_hidden() || e.is_cloud_placeholder();
-            let name: SharedString = row_name(e, show_ext, renamed.as_ref()).into();
+            let name: SharedString = crate::rtl::display_text(&row_name(e, show_ext, renamed.as_ref())).into();
             let shell_icon = self
                 .parent_of(ei)
                 .map(|d| d.to_path_buf())
@@ -3521,6 +3525,10 @@ impl FolderView {
             let name_el: AnyElement = match rename_input {
                 // the box grows to the left (border + padding) so the text keeps its place
                 Some(inp) => div()
+                    .capture_key_down({
+                        let input = inp.clone();
+                        cx.listener(move |_, ev: &KeyDownEvent, _, cx| crate::rtl::handle_key_down(&input, ev, cx))
+                    })
                     .flex_1()
                     .h(px(24.))
                     .ml(px(-RENAME_INSET))
@@ -4023,7 +4031,7 @@ impl FolderView {
                                 v_flex()
                                     .flex_1()
                                     .min_w_0()
-                                    .child(div().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name))
+                                    .child(div().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::rtl::display_text(&name)))
                                     .child(div().text_xs().text_color(p.text_secondary).overflow_hidden().text_ellipsis().whitespace_nowrap().child(shown_target)),
                             ),
                     )
@@ -4370,7 +4378,7 @@ fn static_column(
                             .when(on, |d| d.bg(pal.hover).font_weight(FontWeight::MEDIUM))
                             .when(!on, |d| d.hover(|s| s.bg(pal.hover)).text_color(pal.text_secondary))
                             .child(Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, pal.dark)))
-                            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(SharedString::from(e.name.to_string())))
+                            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::rtl::display_text(&e.name)))
                             .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(pal.text_tertiary)))
                             .on_click(move |_, _, cx| {
                                 if is_dir {

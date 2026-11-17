@@ -36,5 +36,6 @@ pub fn all() -> Vec<Box<dyn Viewer>> {
 }
 
 pub(crate) fn file_name(p: &std::path::Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string_lossy().into_owned())
+    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string_lossy().into_owned());
+    crate::rtl::display_text(&name)
 }

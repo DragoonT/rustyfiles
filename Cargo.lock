@@ -3124,7 +3124,7 @@ dependencies = [
 [[package]]
 name = "gpui-pre-windows"
 version = "0.3.11"
-source = "git+https://github.com/gelenmedya/gpui-pre-windows?rev=5fa44c28f66a1b1027ec6f8d72fd21b114746cb7#5fa44c28f66a1b1027ec6f8d72fd21b114746cb7"
+source = "git+https://github.com/gelenmedya/gpui-pre-windows?rev=77cdc99a4883d698e29bd5fd227c4fe094fe0414#77cdc99a4883d698e29bd5fd227c4fe094fe0414"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -6171,6 +6171,8 @@ dependencies = [
  "syntect",
  "toml 0.9.12+spec-1.1.0",
  "ttf-parser",
+ "unicode-bidi",
+ "unicode-segmentation",
  "ureq",
  "velopack",
  "windows 0.62.2",
