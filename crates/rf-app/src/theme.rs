@@ -322,3 +322,14 @@ mod tests {
         assert!((w - 0.25).abs() < 1e-6 && (c - 0.425).abs() < 1e-6, "{w} {c}");
     }
 }
+
+/// The display a popup of `owner` (a menu level, a flyout, a dropdown) is opened on: the owner's own.
+///
+/// WHY IT IS NAMED (issue 47, a 1920x1080 monitor at 100% beside a 3440x1440 one at 125%): positions are logical pixels, and on
+/// Windows a monitor's logical pixels are its device pixels divided by its own scale, so the two monitors' logical ranges overlap. A
+/// popup that names no display is put on the first display whose scale makes its position land on it, and a submenu meant for the
+/// 100% monitor landed on the 125% one, a screen away and a quarter larger ("the menu breaks and shifts down"). The owner's
+/// coordinates are its display's, so that display is the one that reads them right.
+pub fn popup_display(owner: &Window, cx: &App) -> Option<DisplayId> {
+    owner.display(cx).map(|d| d.id())
+}

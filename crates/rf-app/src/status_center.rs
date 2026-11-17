@@ -1862,14 +1862,15 @@ pub fn sync_popup(ops: &Entity<Ops>, cx: &mut App) {
 
 fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option<AnyWindowHandle> {
     // anchored under the title-bar button: right edge 8 px in from the window's
-    let (origin, width, dark) = owner
-        .update(cx, |_, w, _| (w.bounds().origin, w.viewport_size().width, Palette::for_window(w).dark))
+    let (origin, width, dark, display) = owner
+        .update(cx, |_, w, cx| (w.bounds().origin, w.viewport_size().width, Palette::for_window(w).dark, crate::theme::popup_display(w, cx)))
         .ok()?;
     let top = theme::TITLEBAR_H + px(44.);
     let x = origin.x + width - px(8. + FLYOUT_W);
     let bounds = Bounds::new(point(x, origin.y + top), size(px(FLYOUT_W), px(120.)));
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
+        display_id: display,
         titlebar: None,
         focus: true,
         show: true,

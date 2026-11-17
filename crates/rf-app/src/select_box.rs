@@ -181,6 +181,7 @@ fn open(key: SharedString, field: Bounds<Pixels>, choices: Vec<Choice>, window: 
     let main = window.window_handle();
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(point(px(x), px(y)), size(px(w), px(h))))),
+        display_id: crate::theme::popup_display(window, cx),
         titlebar: None,
         focus: true,
         show: true,
