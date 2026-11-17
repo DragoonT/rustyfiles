@@ -51,6 +51,14 @@ pub fn style_is_task(has_owner: bool, ex_style: u32) -> bool {
     !has_owner && ex_style & WS_EX_TOOLWINDOW.0 == 0 && ex_style & WS_EX_NOACTIVATE.0 == 0
 }
 
+/// An untitled window of no size is a helper, not a button (Explorer skips them too). A MINIMIZED one is not: a window without a
+/// caption reports no size while it is minimized, and an untitled game window that minimizes itself when it loses focus (fullscreen
+/// games do) left the dock's running apps although Windows' taskbar kept it (issue 60: "the app's icon and its running indicator
+/// disappear from the Dock" as soon as focus moves elsewhere, "janela sem título", an untitled window).
+pub fn is_helper(title: &str, width: i32, height: i32, minimized: bool) -> bool {
+    !minimized && title.is_empty() && (width <= 0 || height <= 0)
+}
+
 fn cloaked(h: HWND) -> bool {
     let mut v: u32 = 0;
     unsafe { DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut v as *mut u32 as *mut _, 4) }.is_ok() && v != 0
@@ -115,11 +123,11 @@ fn task_of(h: HWND) -> Option<Task> {
         let mut pid = 0u32;
         GetWindowThreadProcessId(h, Some(&mut pid));
         let title = title(h);
-        // untitled, zero-size helpers are not buttons (Explorer skips them too)
-        if title.is_empty() && (r.right - r.left <= 0 || r.bottom - r.top <= 0) {
+        let minimized = IsIconic(h).as_bool();
+        if is_helper(&title, r.right - r.left, r.bottom - r.top, minimized) {
             return None;
         }
-        Some(Task { hwnd: h.0 as isize, title, pid, exe: exe_of(pid), app_id: app_id_of(h), minimized: IsIconic(h).as_bool() })
+        Some(Task { hwnd: h.0 as isize, title, pid, exe: exe_of(pid), app_id: app_id_of(h), minimized })
     }
 }
 
@@ -366,5 +374,17 @@ mod tests {
         for t in tasks() {
             assert!(t.pid != 0);
         }
+    }
+}
+
+#[cfg(test)]
+mod helper_tests {
+    use super::is_helper;
+
+    #[test]
+    fn a_minimized_untitled_window_stays_a_task() {
+        assert!(is_helper("", 0, 0, false), "an untitled window of no size: a helper");
+        assert!(!is_helper("", 0, 0, true), "the same window minimized (an untitled game that lost focus): a task");
+        assert!(!is_helper("", 800, 600, false) && !is_helper("Notes", 0, 0, false));
     }
 }

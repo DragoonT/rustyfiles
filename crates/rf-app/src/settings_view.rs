@@ -667,7 +667,7 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             p,
             L::CalendarClock,
             t!("Tarih biçimi"),
-            Some(t!("Uygulama: \"5 dakika önce\"; Sistem: 05.11.2026 13:45; Evrensel: 2026-11-05 13:45")),
+            Some(t!("Uygulama: yakın zamanlar \"5 dakika önce\", eskileri Windows'un biçiminde; Sistem: her zaman Windows'un tarih ve saat biçimi; Evrensel: 2026-11-05 13:45")),
             dropdown(
                 "datefmt",
                 p,

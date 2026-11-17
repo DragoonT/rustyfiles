@@ -2341,9 +2341,25 @@ impl Workspace {
                     ws.active_tab().clone().update(cx, |v, cx| v.paste_to(p, w, cx))
                 })),
                 Quick::new(L::TextCursorInput, t!("Yeniden adlandır  (F2)"), !root, with(|ws, p, w, cx| ws.rename_place(p, w, cx))),
+                Quick::new(
+                    L::Share2,
+                    t!("Paylaş"),
+                    true,
+                    with(|_, p, w, cx| {
+                        crate::share::open(crate::look::window::hwnd_of(w), vec![p], cx);
+                    }),
+                ),
                 Quick::new(L::Trash, t!("Sil  (Del)"), !root, with(|ws, p, w, cx| {
                     ws.active_tab().clone().update(cx, |v, cx| v.delete_paths(vec![p], false, w, cx))
                 })),
+                Quick::new(
+                    L::Wrench,
+                    t!("Özellikler  (Alt+Enter)"),
+                    true,
+                    with(|ws, p, _, cx| {
+                        crate::properties_view::open(vec![p], ws.images.clone(), cx)
+                    }),
+                ),
             ]
         };
         let menu = crate::fluent_menu::show(Menu { quick, items }, at, window, cx);

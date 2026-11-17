@@ -950,6 +950,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Boşken son kullanılanları göster", "Show recent items when empty"),
     ("Arama kutusu", "Search box"),
     ("Siyah (OLED)", "Black (OLED)"),
+    ("Uygulama: yakın zamanlar \"5 dakika önce\", eskileri Windows'un biçiminde; Sistem: her zaman Windows'un tarih ve saat biçimi; Evrensel: 2026-11-05 13:45", "Application: recent times as \"5 min ago\", older ones in Windows' format; System: always Windows' date and time format; Universal: 2026-11-05 13:45"),
     ("Simge simge büyüt", "Snap to each icon"),
     ("Büyüme farenin altındaki simgeye oturur ve bir simgeden ötekine kısa bir kaymayla geçer. Kapalıyken fareyi sürekli izler.", "The growth settles on the icon under the pointer and slides quickly from one icon to the next. Off: it follows the pointer smoothly."),
     ("Oturum", "Session"),

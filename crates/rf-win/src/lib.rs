@@ -7,6 +7,7 @@ pub mod activate;
 pub mod appvolume;
 pub mod apppkg;
 pub mod apps;
+pub mod datefmt;
 pub mod share;
 pub mod apps_direct;
 pub mod bench;

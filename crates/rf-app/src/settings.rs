@@ -1103,6 +1103,8 @@ impl Settings {
         rf_win::accent::set_override(rf_win::accent::parse_hex(&self.accent_color));
         crate::background::sync_tray(self.run_in_background);
         crate::quick_search::sync(self);
+        // (the system's own short date and time for the "System" style and older dates, issue 59; set once)
+        rf_core::format::set_system_format(rf_win::datefmt::short_date_time);
         rf_core::format::set_date_style(match self.date_format {
             DatePref::Application => rf_core::format::DateStyle::Relative,
             DatePref::System => rf_core::format::DateStyle::Local,
