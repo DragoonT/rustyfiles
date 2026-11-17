@@ -29,9 +29,10 @@ Code: the model is `crates/rf-core/src/navtree.rs` (pure, tested without a windo
   row tries again. A folder that turns out to be gone leaves the tree.
 * Click: navigates the active pane (the focus stays in the tree, as in Explorer; the folder list is not refocused). Click on the
   chevron: opens or closes only. Middle click and Ctrl+click: open the folder in a new tab (in the background, like the sidebar's
-  other rows do with the middle button). Right click: the sidebar's folder menu (`sidebar_menu`: open, new tab, new window, pin,
-  copy path, terminal, our Properties, and Windows' menu behind "more options"). Dropping files or folders on a row copies or
-  moves them into that folder with the same function the sidebar rows use (`drop_files`).
+  other rows do with the middle button). Right click: the sidebar's folder menu, with quick Cut, Copy, Paste, Rename, Share, Delete
+  and Properties actions (Cut, Rename and Delete are disabled for drive roots), plus open, new tab, new window, pin/unpin, copy path,
+  terminal and Windows' menu behind "more options". Dropping files or folders on a row copies or moves them into that folder with the
+  same function the sidebar rows use (`drop_files`).
 * Keyboard, when the tree has the focus (it gets it by a click on a row): Up / Down move the cursor, Home / End jump, Right opens
   a closed node or goes to its first child, Left closes an open node or goes to the parent, Enter navigates, Escape and Tab give
   the focus back to the file list, the menu key and Shift+F10 open the same Fluent folder menu, under the cursor row (not at the
