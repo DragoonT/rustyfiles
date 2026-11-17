@@ -755,8 +755,9 @@ impl FolderView {
     pub fn up(&mut self, cx: &mut Context<Self>) {
         let cur = self.location().clone();
         if let Some(parent) = cur.parent() {
-            // Settings → "Select the previous folder when going up"
-            if cx.global::<crate::settings::Settings>().select_previous_on_up {
+            // Settings → "Select the previous folder when going up"; in the columns layout always, as Left there walks back the way
+            // one came (issue 73: "Back (left arrow) always takes you to top of parent folder")
+            if self.view_mode == ViewMode::Columns || cx.global::<crate::settings::Settings>().select_previous_on_up {
                 self.reselect = cur.path().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
             }
             self.navigate(parent, cx);
@@ -4428,6 +4429,10 @@ fn static_column(
                             .child(Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, pal.dark)))
                             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::rtl::display_text(&e.name)))
                             .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(pal.text_tertiary)))
+                            // the press is the row's: the list's background under the columns took it as a click on nothing and
+                            // cleared the selection, which took this column away before the button came up, and the click was lost
+                            // (issue 57: "If I click on one of the folders in the second column, it disappears")
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(move |_, _, cx| {
                                 if is_dir {
                                     view.update(cx, |v, cx| v.navigate(Location::Path(target.clone()), cx));
