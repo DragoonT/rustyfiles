@@ -133,7 +133,7 @@ impl Preview {
                 .children(rows[r.clone()].iter().map(|(k, v)| prop_row(&p, k, v.clone())))
         });
         // a name too long for its line is cut with an ellipsis; its whole is in a tooltip
-        let full_name = SharedString::from(e.name.to_string());
+        let full_name = SharedString::from(crate::rtl::display_text(&e.name));
         let cut = pp::name_may_be_cut(e.name.chars().count(), if has_block { info_w } else { inner.props_w });
         let info = v_flex()
             .id("pv-wide-info")

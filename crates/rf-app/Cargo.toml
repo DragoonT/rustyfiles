@@ -49,6 +49,8 @@ raw-window-handle.workspace = true
 windows-registry = "0.6"
 chrono.workspace = true
 windows.workspace = true
+unicode-bidi = "0.3"
+unicode-segmentation = "1"
 
 [build-dependencies]
 embed-resource = "3"

@@ -679,7 +679,7 @@ impl SidebarTree {
         };
         let drop_dir = info.path.to_path_buf();
         let (drop_bg, drop_border) = (p.selection, p.accent);
-        let full_name = deep.then(|| SharedString::from(info.label.to_string()));
+        let full_name = deep.then(|| SharedString::from(crate::rtl::display_text(&info.label)));
         h_flex()
             .id(("tree-row", id as usize))
             .h(px(ROW_H))
@@ -731,7 +731,7 @@ impl SidebarTree {
                     .text_ellipsis()
                     .whitespace_nowrap()
                     .when(hidden, |d| d.opacity(0.7))
-                    .child(SharedString::from(info.label.to_string())),
+                    .child(crate::rtl::display_text(&info.label)),
             )
             .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                 window.focus(&this.focus, cx);

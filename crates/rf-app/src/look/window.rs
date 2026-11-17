@@ -583,7 +583,8 @@ impl LookWindow {
 }
 
 fn file_title(p: &std::path::Path) -> SharedString {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string_lossy().into_owned()).into()
+    let title = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string_lossy().into_owned());
+    crate::rtl::display_text(&title).into()
 }
 
 impl Render for LookWindow {

@@ -71,6 +71,7 @@ mod hotkey_field;
 mod recycle_settings_view;
 mod recycle_text;
 mod recycle_view;
+mod rtl;
 mod theme;
 mod thumb_cache;
 mod workspace;

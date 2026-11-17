@@ -351,7 +351,7 @@ impl Render for ArchiveView {
                                         .when(is_dir, |d| d.child(Icon::new(if open { L::ChevronDown } else { L::ChevronRight }).size(px(12.)))),
                                 )
                                 .child(Icon::new(icon).size(px(16.)).text_color(if is_dir { rgb(0xE8B931).into() } else { p.text_secondary }))
-                                .child(div().flex_1().min_w_0().truncate().text_color(p.text).child(name))
+                                .child(div().flex_1().min_w_0().truncate().text_color(p.text).child(crate::rtl::display_text(&name)))
                                 .child(div().w(px(90.)).flex_shrink_0().text_right().text_color(p.text_secondary).child(if is_dir {
                                     String::new()
                                 } else {

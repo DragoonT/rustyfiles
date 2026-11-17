@@ -2621,6 +2621,11 @@ impl Workspace {
                     cx.stop_propagation();
                     return;
                 }
+                if this.search_mode {
+                    crate::rtl::handle_key_down(&this.search, ev, cx);
+                } else if this.editing_address {
+                    crate::rtl::handle_key_down(&this.address, ev, cx);
+                }
                 if !this.search_mode {
                     this.address_key(ev, window, cx)
                 }
@@ -2916,7 +2921,7 @@ impl Workspace {
                     .when(last, |d| d.font_weight(FontWeight::MEDIUM))
                     .when(!last, |d| d.text_color(p.text_secondary))
                     .hover(|s| s.bg(p.hover).text_color(p.text))
-                    .child(label)
+                    .child(crate::rtl::display_text(&label))
                     .when_some(target.path().map(Path::to_path_buf), |d, dir| {
                         d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg))
                             .on_drop(move |paths: &ExternalPaths, _, cx| drop_files(paths, dir.clone(), cx))

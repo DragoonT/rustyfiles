@@ -156,7 +156,7 @@ impl Render for ShelfView {
                             v_flex()
                                 .flex_1()
                                 .min_w_0()
-                                .child(div().text_xs().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name))
+                                .child(div().text_xs().overflow_hidden().text_ellipsis().whitespace_nowrap().child(crate::rtl::display_text(&name)))
                                 .child(
                                     div()
                                         .text_xs()
@@ -164,7 +164,7 @@ impl Render for ShelfView {
                                         .overflow_hidden()
                                         .text_ellipsis()
                                         .whitespace_nowrap()
-                                        .child(parent),
+                                        .child(crate::rtl::display_text(&parent)),
                                 ),
                         )
                         .child(

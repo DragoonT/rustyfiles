@@ -228,8 +228,9 @@ same letters before is the first row.
 **Languages.** 49 of them, following the Windows display language (or pick one in Settings ›
 General). The interface is written in Turkish and English; the other languages started from the
 Files community's wording and are machine-translated from there on. Arabic, Hebrew and Persian
-are translated but wait for right-to-left text in GPUI. Corrections are welcome: each language is
-one JSON file in `crates/rf-app/locales/`.
+are translated and use right-to-left layout and shaping across file names, navigation, previews,
+DirectLook and Shelf. Text fields support bidi-aware cursor movement and selection. Corrections are
+welcome: each language is one JSON file in `crates/rf-app/locales/`.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/readme/photos-dark.png">

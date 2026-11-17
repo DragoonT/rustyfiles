@@ -378,7 +378,7 @@ impl Render for InfoView {
                 v_flex()
                     .min_w_0()
                     .gap_1p5()
-                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).text_color(p.text).truncate().child(name))
+                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).text_color(p.text).truncate().child(crate::rtl::display_text(&name)))
                     .children(lines),
             )
     }
