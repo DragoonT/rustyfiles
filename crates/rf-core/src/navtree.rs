@@ -49,6 +49,8 @@ pub struct DirItem {
     pub label: Option<String>,
     pub hidden: bool,
     pub system: bool,
+    /// Windows marks the folder as customised (read-only or system): it may have an icon of its own, which the tree shows (issue 65).
+    pub own_icon: bool,
 }
 
 /// The same visibility rules as the file list ([`crate::entry::Filter`]), for folders.
@@ -123,6 +125,7 @@ struct Node {
     load: Load,
     hidden: bool,
     system: bool,
+    own_icon: bool,
     root: Option<RootKind>,
     ver: u32,
     /// When the user closed it by hand (the follow rule leaves it closed for a while).
@@ -172,6 +175,8 @@ pub struct NodeInfo<'a> {
     pub cursor: bool,
     pub root: Option<RootKind>,
     pub hidden: bool,
+    /// The folder may have an icon of its own ([`DirItem::own_icon`]).
+    pub own_icon: bool,
     /// The failure text of an Error row (`None` for a node that did not fail).
     pub error: Option<&'a str>,
     pub not_found: bool,
@@ -332,6 +337,7 @@ impl NavTree {
             load: Load::Unloaded,
             hidden: false,
             system: false,
+            own_icon: false,
             root: None,
             ver,
             user_collapsed_ms: None,
@@ -490,6 +496,7 @@ impl NavTree {
             cursor: self.cursor == Some(row.id),
             root: n.root,
             hidden: n.hidden,
+            own_icon: n.own_icon,
             error,
             not_found,
         }
@@ -718,6 +725,7 @@ impl NavTree {
         n.label = it.label.clone();
         n.hidden = it.hidden;
         n.system = it.system;
+        n.own_icon = it.own_icon;
     }
 
     /// A folder's name changed its spelling: the paths of everything below it follow (the keys are lower case and stay).
@@ -1244,7 +1252,7 @@ mod tests {
     use super::*;
 
     fn item(name: &str) -> DirItem {
-        DirItem { name: name.into(), label: None, hidden: false, system: false }
+        DirItem { name: name.into(), label: None, hidden: false, system: false, own_icon: false }
     }
 
     fn items(names: &[&str]) -> Vec<DirItem> {

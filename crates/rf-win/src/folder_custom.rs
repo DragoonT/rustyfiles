@@ -209,7 +209,7 @@ pub fn set_folder_icon(dir: &Path, icon: Option<(&str, i32)>) -> anyhow::Result<
 }
 
 /// Expands `%NAME%` references from the process environment (unknown names stay as written).
-fn expand_env(s: &str) -> String {
+pub(crate) fn expand_env(s: &str) -> String {
     let mut out = String::new();
     let mut rest = s;
     while let Some(a) = rest.find('%') {

@@ -436,6 +436,8 @@ pub struct FolderView {
     picking: bool,
     /// A recent item of the Home page pressed with the left button, and where: moved far enough, it is dragged out (`drag_paths_out`).
     home_press: Option<(PathBuf, Point<Pixels>)>,
+    /// Ctrl and the wheel turned so far toward the next size step (a touchpad turns in small pixel steps).
+    zoom_acc: f32,
     /// The mouse went down on an item's name (set by the name label, read by the row).
     name_hit: bool,
     /// Explorer's "click the name of the selected item again": (entry, serial) armed until the
@@ -609,6 +611,7 @@ impl FolderView {
             pending_rename: false,
             picking: false,
             home_press: None,
+            zoom_acc: 0.0,
             name_hit: false,
             slow_click: None,
             slow_click_serial: 0,
@@ -917,6 +920,8 @@ impl FolderView {
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        // (a customised folder's icon may have changed without its time or attributes: ask for those again)
+        crate::image_cache::refresh_folder_icons();
         self.column_cache.clear();
         // F5 measures folder sizes afresh (deep changes don't move a folder's own date)
         if let Some(p) = self.location().path() {
@@ -2216,9 +2221,18 @@ impl FolderView {
         cx.notify();
     }
 
+    /// One size step bigger (`delta` > 0) or smaller, as Explorer's Ctrl+wheel goes: from the details list up into the grid at its
+    /// smallest, through the grid's sizes, and from the smallest grid down into the details list again.
     pub fn zoom(&mut self, delta: i32, cx: &mut Context<Self>) {
         if self.view_mode != ViewMode::Grid || self.grid_style != GridStyle::Tiles {
-            self.set_view_mode(ViewMode::Grid, cx);
+            if delta > 0 {
+                self.grid_size = 0;
+                self.set_view_mode(ViewMode::Grid, cx);
+            }
+            return;
+        }
+        if delta < 0 && self.grid_size == 0 {
+            self.set_view_mode(ViewMode::Details, cx);
             return;
         }
         let n = (self.grid_size as i32 + delta).clamp(0, GRID_SIZES.len() as i32 - 1) as u8;
@@ -3857,6 +3871,40 @@ impl FolderView {
                     )
                     .relative()
                     .children(self.render_marquee(p))
+                    // Ctrl and the wheel change the size of the items, as in Explorer (issue 62: "make sure that the mouse wheel can
+                    // adjust the size as it is done in windows explorer"); heard before the list, which would scroll instead
+                    .child({
+                        let me = cx.entity().downgrade();
+                        canvas(
+                            |_, _, _| {},
+                            move |bounds, _, window, _| {
+                                let me = me.clone();
+                                window.on_mouse_event(move |ev: &ScrollWheelEvent, phase, _, cx| {
+                                    if phase != DispatchPhase::Capture || !ev.modifiers.control || !bounds.contains(&ev.position) {
+                                        return;
+                                    }
+                                    let dy = match ev.delta {
+                                        ScrollDelta::Lines(p) => p.y * ZOOM_STEP,
+                                        ScrollDelta::Pixels(p) => f32::from(p.y),
+                                    };
+                                    let _ = me.update(cx, |v, cx| {
+                                        v.zoom_acc += dy;
+                                        while v.zoom_acc >= ZOOM_STEP {
+                                            v.zoom_acc -= ZOOM_STEP;
+                                            v.zoom(1, cx);
+                                        }
+                                        while v.zoom_acc <= -ZOOM_STEP {
+                                            v.zoom_acc += ZOOM_STEP;
+                                            v.zoom(-1, cx);
+                                        }
+                                    });
+                                    cx.stop_propagation();
+                                });
+                            },
+                        )
+                        .absolute()
+                        .size_full()
+                    })
                     .on_drag_move::<ExternalPaths>(cx.listener(|this, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
                         // (only while the pointer is over the list: every listener hears every move, and the tree's or a tab's
                         // own effect must not be overwritten by the list's)
@@ -4891,3 +4939,6 @@ pub(crate) fn drop_effect_over(dir: PathBuf) -> impl Fn(&DragMoveEvent<ExternalP
         }
     }
 }
+
+/// The wheel's travel (in pixels; one notch counts as this much) that makes one size step with Ctrl held.
+const ZOOM_STEP: f32 = 40.0;

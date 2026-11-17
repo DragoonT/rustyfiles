@@ -723,6 +723,8 @@ impl PropsView {
             }
             if let Some(icon) = &icon {
                 rf_win::folder_custom::set_folder_icon(&paths[0], icon.as_ref().map(|(f, i)| (f.as_str(), *i))).map_err(|e| named(&paths[0], &format!("{e:#}")))?;
+                // the list and the tree show the new icon, not the one they kept (issue 65)
+                crate::image_cache::refresh_folder_icons();
             }
             let mut renamed = None;
             if let Some(n) = new_name {

@@ -1798,6 +1798,8 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     // host and the keyboard layer come before the taskbar is hidden, so that no icon and no key is lost in between.
     crate::shell::cover::on_settings(cx);
     crate::shell::keylayer::on_settings(cx);
+    // (the default-file-manager registration is written by the Settings switch in another process: looked at again every few seconds)
+    crate::shell::keylayer::watch(cx, crate::shell::keylayer::Role::Dock);
     crate::shell::trayhost::on_settings(cx);
     crate::shell::taskbar_hide::on_settings(cx);
     // what a part that could not start tells the Settings page

@@ -88,6 +88,9 @@ pub struct Shared {
     alt_on: AtomicBool,
     /// Win+E and Win+D are ours (set by the interface: only while no Explorer is the shell).
     combos_on: AtomicBool,
+    /// Win+E alone is ours, beside Explorer too: rustyfiles is the default file manager, and Windows' newer Win+E starts Explorer
+    /// directly without asking the registry (issue 44). The Windows key itself is left to Windows.
+    win_e_on: AtomicBool,
     log_only: AtomicBool,
     fullscreen: AtomicBool,
     /// The clock's reading at the last heartbeat, plus one (0: never stamped).
@@ -115,6 +118,7 @@ impl Shared {
             win_on: AtomicBool::new(false),
             alt_on: AtomicBool::new(false),
             combos_on: AtomicBool::new(false),
+            win_e_on: AtomicBool::new(false),
             log_only: AtomicBool::new(log_only),
             fullscreen: AtomicBool::new(false),
             heartbeat: AtomicU64::new(0),
@@ -142,6 +146,11 @@ impl Shared {
     /// Win+E and Win+D are to be taken (they need `win_on` as well).
     pub fn set_combos(&self, on: bool) {
         self.combos_on.store(on, Ordering::Relaxed);
+    }
+
+    /// Win+E alone is to be taken ([`Shared::win_e_on`]); it needs no other switch.
+    pub fn set_win_e(&self, on: bool) {
+        self.win_e_on.store(on, Ordering::Relaxed);
     }
 
     pub fn set_waker(&self, t: Thread) {
@@ -210,6 +219,10 @@ impl Shared {
 
     pub fn combos_on(&self) -> bool {
         self.combos_on.load(Ordering::Relaxed)
+    }
+
+    pub fn win_e_on(&self) -> bool {
+        self.win_e_on.load(Ordering::Relaxed)
     }
 
     /// True when the whole layer must pass every key: the heartbeat is stale or was never made (the interface's thread is not

@@ -127,7 +127,9 @@ impl KeyLayer {
 
         // ---- the Windows key
         let mut taken = false;
-        if self.shared.win_on() && !stale {
+        // (with only Win+E wanted the Windows key is watched for that chord alone: its tap stays Windows')
+        let win_key = self.shared.win_on();
+        if (win_key || self.shared.win_e_on()) && !stale {
             // About to decide on E or D with a Windows key believed down: ask the keyboard once (a cheap read, only on these two keys).
             // If it says neither Windows key is down, the belief is stale: drop it, so the letter passes as the typing it is.
             if k.down && !k.injected() && combo_slot(k.vk).is_some() && self.win.any_down() && let Some(p) = &self.probe && !p.down(VK_LWIN) && !p.down(VK_RWIN) {
@@ -141,12 +143,12 @@ impl KeyLayer {
             // (Win+Shift+S needs to know that Shift is the ONLY modifier held)
             let shift_only = k.mods.shift() && !k.mods.ctrl() && !alt;
             match self.win.feed_ex(k.vk, k.down, k.injected(), modifier_held, shift_only) {
-                WinOutcome::Tap => {
+                WinOutcome::Tap if win_key => {
                     // the mask goes in BEFORE the release is let through; in log-only mode nothing is sent
                     self.send_mask(log_only);
                     self.shared.post(Posted::StartTap);
                 }
-                WinOutcome::Combo(c) if self.shared.combos_on() => {
+                WinOutcome::Combo(c) if (win_key && self.shared.combos_on()) || (c == super::machine::Combo::Explorer && self.shared.win_e_on()) => {
                     // one mask for the hold: the system will see the Windows key go down and up with nothing between
                     if !self.combo_masked {
                         self.combo_masked = true;
@@ -850,6 +852,31 @@ mod tests {
         r.win_up(VK_LWIN);
         assert_eq!(r.posted(), vec![Posted::StartTap]);
         assert_eq!(r.mask.sent(), 2);
+    }
+
+    /// rustyfiles is the default file manager and no other key setting is on (issue 44): Win+E alone is taken, the Windows key's tap and
+    /// the other chords stay Windows'.
+    #[test]
+    fn with_win_e_alone_only_win_e_is_taken_and_the_tap_and_win_d_stay_windows() {
+        let mut r = rig_with(false, false, false);
+        r.shared.set_win_e(true);
+        r.win_down(VK_LWIN);
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, true), "the press of E is swallowed");
+        assert!(r.feed.push_raw(KEY_E, SCAN_E, 0, false));
+        assert!(!r.win_up(VK_LWIN), "the Windows key itself passes");
+        assert_eq!(r.posted(), vec![Posted::WinCombo(crate::winkey::machine::Combo::Explorer)]);
+        assert_eq!(r.mask.sent(), 1, "masked, so Windows' Start does not open on the release");
+        // a tap alone: Windows' Start, untouched (no mask, no post)
+        r.win_down(VK_LWIN);
+        assert!(!r.win_up(VK_LWIN));
+        assert!(r.posted().is_empty(), "no StartTap");
+        assert_eq!(r.mask.sent(), 1);
+        // Win+D is Windows'
+        r.win_down(VK_LWIN);
+        assert!(!r.feed.push_raw(KEY_D, SCAN_D, 0, true), "the press of D passes");
+        r.feed.push_raw(KEY_D, SCAN_D, 0, false);
+        r.win_up(VK_LWIN);
+        assert!(r.posted().is_empty());
     }
 
     #[test]

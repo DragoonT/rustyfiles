@@ -6,6 +6,8 @@ gpui_kit::actions!(
         GoBack,
         GoForward,
         LeaveTree,
+        FocusNextPane,
+        FocusPrevPane,
         DialogNext,
         DialogPrev,
         GoUp,
@@ -124,6 +126,13 @@ pub fn bind_user(cx: &mut App) {
 pub fn bind(cx: &mut App) {
     let f = Some(FOLDER_CTX);
     cx.bind_keys([KeyBinding::new("tab", LeaveTree, Some(TREE_CTX))]);
+    // Tab and Shift+Tab walk the window's panes: the address bar, the folder tree, the file list (issue 38: "TAB does not work
+    // anywhere"). In the list's own context, nearer than the root's Tab; the tree's Shift+Tab goes up to the window's handler.
+    cx.bind_keys([
+        KeyBinding::new("tab", FocusNextPane, Some(FOLDER_CTX)),
+        KeyBinding::new("shift-tab", FocusPrevPane, Some(FOLDER_CTX)),
+        KeyBinding::new("shift-tab", FocusPrevPane, Some(TREE_CTX)),
+    ]);
     cx.bind_keys([KeyBinding::new("tab", DialogNext, Some(DIALOG_CTX)), KeyBinding::new("shift-tab", DialogPrev, Some(DIALOG_CTX))]);
     cx.bind_keys([
         KeyBinding::new("alt-left", GoBack, None),
