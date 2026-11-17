@@ -292,7 +292,7 @@ page. Requires Windows 11 on x64 (Windows 10 is untested).
 
 ### Build from source
 
-You need [Rust](https://rustup.rs) 1.95 or newer and the Visual Studio Build Tools with the
+You need [Rust](https://rustup.rs) 1.98 or newer and the Visual Studio Build Tools with the
 "Desktop development with C++" workload (one dependency, zstd, compiles C code).
 
 ```powershell
@@ -302,6 +302,14 @@ cd rustyfiles
 .\scripts\install.ps1 -Default   # also makes it the default file manager
 .\scripts\install.ps1 -Uninstall
 ```
+
+To build the Windows setup installer and its registered uninstaller, double-click
+[`build-installer.bat`](build-installer.bat) from the project root. It builds the release
+binaries and uses the Velopack CLI (installed or updated as a .NET global tool if needed).
+The setup and update packages are written under `target\installer\Releases`.
+Building and installing do not require a signing certificate. The generated installer is
+unsigned, so Windows may show a SmartScreen warning; signing public releases requires a
+trusted Authenticode certificate or an Azure Trusted Signing setup.
 
 `cargo run --release -p rf-app` starts it without installing.
 
