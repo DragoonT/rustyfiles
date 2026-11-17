@@ -522,6 +522,8 @@ impl FolderView {
                 this.filter.show_hidden = hidden;
                 this.filter.show_system = system;
                 this.filter.dot_hidden = dot;
+                // (the side columns were listed with the old rules)
+                this.column_cache.clear();
                 this.rebuild_visible();
             }
             // folders show (and sort by) size on disk or the sum of their files, as set
@@ -762,12 +764,19 @@ impl FolderView {
         if self.column_cache.len() > 48 {
             self.column_cache.clear();
         }
-        let show_hidden = self.filter.show_hidden;
+        // the list's own visibility rules: hidden, system and dot files (issue 51: "Hidden files and dotfiles can't be hidden as
+        // they can in other layouts"; the side columns only looked at the hidden attribute)
+        let shown = Filter {
+            show_hidden: self.filter.show_hidden,
+            show_system: self.filter.show_system,
+            dot_hidden: self.filter.dot_hidden,
+            ..Default::default()
+        };
         let d2 = dir.clone();
         let work = cx.background_spawn(async move {
             let mut v = Vec::new();
             let _ = rf_win::list_dir(&d2, 4096, &|| false, &mut |b| v.extend(b));
-            v.retain(|e| show_hidden || !e.is_hidden());
+            v.retain(|e| shown.accepts(e));
             let spec = SortSpec::default();
             v.sort_by(|a, b| spec.compare(a, b));
             v
@@ -1590,6 +1599,11 @@ impl FolderView {
                 self.reselect = Some(name);
             }
         }
+        // in the columns layout a folder is entered on its first item, as in yazi (issue 51: "When entering a folder, you first have
+        // to press down on the arrow keys to focus on the top entry"): Right goes on into it at once
+        if self.view_mode == ViewMode::Columns && self.cursor.is_none() && self.reselect.is_none() && !self.loading && !self.visible.is_empty() {
+            self.select_only(0);
+        }
         let _ = cx;
     }
 
@@ -1921,6 +1935,17 @@ impl FolderView {
     /// On entering a folder: its remembered layout, else the defaults from Settings (and the
     /// adaptive choice once the listing is in). With "sync layout" on the tab keeps its own.
     fn apply_folder_layout(&mut self, cx: &mut Context<Self>) {
+        let was_columns = self.view_mode == ViewMode::Columns;
+        self.apply_folder_layout_inner(cx);
+        // Columns is a way of walking the tree, not a look of one folder: it stays on from folder to folder (issue 51: going up to
+        // a shallow folder switched back to the details layout, the folder's own remembered one, and the arrow keys stopped walking).
+        // Another layout chosen from the menu leaves it, and the remembered layouts are used again from there.
+        if was_columns {
+            self.view_mode = ViewMode::Columns;
+        }
+    }
+
+    fn apply_folder_layout_inner(&mut self, cx: &mut Context<Self>) {
         let s = cx.global::<crate::settings::Settings>().clone();
         if s.sync_layout {
             return;
