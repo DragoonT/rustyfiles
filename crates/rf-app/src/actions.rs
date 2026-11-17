@@ -6,6 +6,8 @@ gpui_kit::actions!(
         GoBack,
         GoForward,
         LeaveTree,
+        DialogNext,
+        DialogPrev,
         GoUp,
         GoHome,
         Refresh,
@@ -98,6 +100,9 @@ pub const FOLDER_CTX: &str = "FolderView";
 /// saw Tab, and the keyboard stayed in the tree (issue 38: "TAB seems to be buggy, mine is not going anywhere"). A binding in a
 /// context nearer to the focus wins over the root's.
 pub const TREE_CTX: &str = "FolderTree";
+/// The question dialog's key context: Tab and Shift+Tab move between its buttons there (bound here for the same reason as the
+/// tree's Tab: the root's Tab binding would take the key first).
+pub const DIALOG_CTX: &str = "Dialog";
 
 /// User overrides from settings.toml `[keybindings]`. Invalid entries are logged and skipped.
 pub fn bind_user(cx: &mut App) {
@@ -119,6 +124,7 @@ pub fn bind_user(cx: &mut App) {
 pub fn bind(cx: &mut App) {
     let f = Some(FOLDER_CTX);
     cx.bind_keys([KeyBinding::new("tab", LeaveTree, Some(TREE_CTX))]);
+    cx.bind_keys([KeyBinding::new("tab", DialogNext, Some(DIALOG_CTX)), KeyBinding::new("shift-tab", DialogPrev, Some(DIALOG_CTX))]);
     cx.bind_keys([
         KeyBinding::new("alt-left", GoBack, None),
         KeyBinding::new("alt-right", GoForward, None),

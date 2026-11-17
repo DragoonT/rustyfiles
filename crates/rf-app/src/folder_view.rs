@@ -4836,6 +4836,7 @@ impl FolderView {
 /// the list's last word, W: onto W:, stayed).
 pub(crate) fn show_drop_effect(paths: &[PathBuf], dir: &std::path::Path) {
     let t = rf_win::dnd::default_transfer(paths, dir, false, false);
+    log::debug!("drag over {}: {t:?} ({} item(s), the first {:?})", dir.display(), paths.len(), paths.first());
     gpui_windows::dnd_hint::set(match t {
         rf_win::fileops::Transfer::Move => gpui_windows::dnd_hint::MOVE,
         rf_win::fileops::Transfer::Copy => gpui_windows::dnd_hint::COPY,
