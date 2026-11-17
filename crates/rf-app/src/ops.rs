@@ -663,7 +663,11 @@ impl FolderView {
                     match rx.await {
                         Ok(Ok(true)) => {
                             crate::undo::push(crate::undo::UndoOp::Renamed { from: from.clone(), to: to.clone() });
-                            let _ = cx.update(|cx| crate::tags::update(cx, |t| t.moved(&from, &to)));
+                            let _ = cx.update(|cx| {
+                                crate::tags::update(cx, |t| t.moved(&from, &to));
+                                // a pinned folder renamed in the list: its pin follows it
+                                crate::places::pins_follow(cx, &from, Some(&to));
+                            });
                         }
                         other => {
                             if let Ok(Err(e)) = other {

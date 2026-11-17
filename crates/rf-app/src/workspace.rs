@@ -2404,8 +2404,7 @@ impl Workspace {
     /// After a sidebar folder was renamed: its pin follows it, and so does every tab that showed it or a folder inside it.
     fn place_renamed(&mut self, from: &std::path::Path, to: &std::path::Path, cx: &mut Context<Self>) {
         let pins = self.current_pins(cx);
-        if pins.iter().any(|p| p == from) {
-            let list: Vec<PathBuf> = pins.into_iter().map(|p| if p == from { to.to_path_buf() } else { p }).collect();
+        if let Some(list) = crate::places::pins_after(&pins, from, Some(to)) {
             crate::settings::update(cx, |s| s.pinned = Some(list));
         }
         self.places.update(cx, |p, cx| p.refresh(cx));

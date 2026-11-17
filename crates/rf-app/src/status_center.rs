@@ -1177,6 +1177,10 @@ pub fn delete(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool) {
 }
 
 pub fn delete_ex(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, record: bool) {
+    // a pinned folder that is deleted leaves the sidebar (its question was answered before this)
+    for p in &paths {
+        crate::places::pins_follow(cx, p, None);
+    }
     let title = if permanent {
         format!("{} {}", t!("Kalıcı olarak siliniyor:"), crate::i18n::items(paths.len()))
     } else {
