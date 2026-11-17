@@ -235,8 +235,13 @@ impl Actions for GpuiActions<'_> {
     }
 
     fn open_files_window(&mut self) {
-        // (the program itself, as the dock's places do: the running rustyfiles takes it as a new tab, none running starts one; "This PC"
-        // is a place we show ourselves, so this never goes to Explorer)
+        // in the file manager's own process: a window of its own, at the start place; in the dock: the program itself, as the dock's
+        // places do (the running rustyfiles takes it, none running starts one; "This PC" is a place we show ourselves, so this never
+        // goes to Explorer)
+        if ROLE.get() == Some(&Role::Main) {
+            crate::open_main_window(None, None, None, self.cx);
+            return;
+        }
         crate::dock::actions::run_rustyfiles(vec!["shell:MyComputerFolder".to_string()]);
     }
 
@@ -292,33 +297,96 @@ struct KeysHost {
 
 impl Global for KeysHost {}
 
+/// Which process runs the layer: the dock (the shell host: the Windows key, Alt+Tab, and Win+E for the default file manager), or the
+/// file manager's own process, which only takes Win+E, and only while no dock runs (one of them takes it, never both).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Role {
+    Dock,
+    Main,
+}
+
+static ROLE: std::sync::OnceLock<Role> = std::sync::OnceLock::new();
+
+/// Whether this process takes Win+E alone: rustyfiles is the default file manager, and (in the file manager's process) no dock runs.
+///
+/// WHY (issue 44, and on the owner's PC too): Windows 11 26H2 and 25H2 are given a new Win+E path that starts File Explorer directly,
+/// without the registry key the default-file-manager setting writes (Directory Opus has the same trouble; their forum names a feature
+/// flag, 63202390). Catching the chord with the keyboard layer is what still works, as long as a rustyfiles process runs.
+pub fn win_e_wanted(role: Role, default_fm: bool, dock_enabled: bool) -> bool {
+    default_fm && (role == Role::Dock || !dock_enabled)
+}
+
 /// The settings file was (re)read, or the host started: brings the layer in line with the two settings. Cheap when nothing changed.
 pub fn on_settings(cx: &mut App) {
-    let (win, alt) = cx.try_global::<Settings>().map_or((false, false), wanted);
-    if !win && !alt {
+    apply(cx, Role::Dock);
+}
+
+/// The file manager's process: takes Win+E while rustyfiles is the default file manager and no dock runs, and looks again every few
+/// seconds (the Settings switch writes the registry, not the settings file). Not for test copies.
+pub fn watch_main(cx: &mut App) {
+    apply(cx, Role::Main);
+    watch(cx, Role::Main);
+}
+
+/// Looks every few seconds at what the layer depends on outside the settings file (the default-file-manager registration, which the
+/// Settings switch writes from another process) and brings the layer in line when it changed.
+pub fn watch(cx: &mut App, role: Role) {
+    cx.spawn(async move |cx| {
+        let mut last = None;
+        loop {
+            cx.background_executor().timer(Duration::from_secs(4)).await;
+            let now = cx.update(|cx| (rf_win::default_fm::is_enabled(rf_win::default_fm::CLASSES), cx.try_global::<Settings>().is_some_and(|s| s.dock_enabled)));
+            if last.is_some_and(|l| l != now) {
+                cx.update(|cx| apply(cx, role));
+            }
+            last = Some(now);
+        }
+    })
+    .detach();
+}
+
+fn apply(cx: &mut App, role: Role) {
+    let _ = ROLE.set(role);
+    let (win, alt) = match role {
+        Role::Dock => cx.try_global::<Settings>().map_or((false, false), wanted),
+        Role::Main => (false, false),
+    };
+    let dock_enabled = cx.try_global::<Settings>().is_some_and(|s| s.dock_enabled);
+    let win_e = win_e_wanted(role, rf_win::default_fm::is_enabled(rf_win::default_fm::CLASSES), dock_enabled);
+    if !win && !alt && !win_e {
         stop_because(cx, "both settings are off");
-        note_hook(win, alt, true);
+        if role == Role::Dock {
+            note_hook(win, alt, true);
+        }
         return;
     }
     if !cx.has_global::<KeysHost>() {
         start(cx);
     }
-    let combos = combos_wanted(win, super::live::current());
+    let combos = role == Role::Dock && combos_wanted(win, super::live::current());
     let host = cx.global_mut::<KeysHost>();
     host.service.set_combos(combos);
+    host.service.set_win_e(win_e);
     match host.service.set_wanted(win, alt) {
         Ok(()) => {
             // the one line that says the layer is ready and what it does now (again when that changes, e.g. Explorer came back)
-            let line = ready_line(win, alt, combos, host.log_only);
+            let mut line = ready_line(win, alt, combos, host.log_only);
+            if win_e && !combos {
+                line = if win || alt { format!("{line}; Win+E opens rustyfiles (the default file manager)") } else { "keys: ready - Win+E opens rustyfiles (the default file manager)".to_string() };
+            }
             if line != host.last_ready {
                 log::info!("{line}");
                 host.last_ready = line;
             }
-            note_hook(win, alt, true);
+            if role == Role::Dock {
+                note_hook(win, alt, true);
+            }
         }
         Err(e) => {
             log::warn!("keys: the keyboard layer could not start: {e:#}");
-            note_hook(win, alt, false);
+            if role == Role::Dock {
+                note_hook(win, alt, false);
+            }
         }
     }
 }
@@ -394,6 +462,19 @@ fn on_posted(p: Posted, cx: &mut App) {
     let Some((log_only, shared)) = cx.try_global::<KeysHost>().and_then(|h| h.service.shared().map(|s| (h.log_only, s))) else { return };
     let mut actions = GpuiActions { cx, shared: shared.clone() };
     handle(p, log_only, &shared, &mut actions);
+}
+
+#[cfg(test)]
+mod win_e_tests {
+    use super::{Role, win_e_wanted};
+
+    #[test]
+    fn win_e_is_taken_by_one_process_only_and_only_for_the_default_file_manager() {
+        assert!(!win_e_wanted(Role::Dock, false, true) && !win_e_wanted(Role::Main, false, false), "not the default file manager: never");
+        assert!(win_e_wanted(Role::Dock, true, true), "the dock runs: the dock takes it");
+        assert!(!win_e_wanted(Role::Main, true, true), "... and the file manager leaves it to the dock");
+        assert!(win_e_wanted(Role::Main, true, false), "no dock: the file manager takes it");
+    }
 }
 
 #[cfg(test)]

@@ -144,6 +144,8 @@ pub struct KeyService<F: KeyFeed> {
     gave_up_at: Option<u64>,
     /// Win+E and Win+D are to be taken (set by the host while no Explorer is the shell).
     combos: bool,
+    /// Win+E alone is wanted (see `set_win_e`).
+    win_e: bool,
     mask_failures_logged: u32,
     /// Consecutive beats at which the chord was held and the keyboard said Alt was up.
     chord_strikes: u8,
@@ -173,6 +175,7 @@ impl<F: KeyFeed> KeyService<F> {
             gave_up: false,
             gave_up_at: None,
             combos: false,
+            win_e: false,
             mask_failures_logged: 0,
             chord_strikes: 0,
         }
@@ -206,7 +209,7 @@ impl<F: KeyFeed> KeyService<F> {
     /// removes everything when both are off. An error is a hook that could not be installed; the service keeps trying at its beats
     /// (within the limits above) as long as a setting is on.
     pub fn set_wanted(&mut self, win_key: bool, own_switcher: bool) -> anyhow::Result<()> {
-        if !win_key && !own_switcher {
+        if !win_key && !own_switcher && !self.win_e {
             self.stop_because("both settings are off");
             return Ok(());
         }
@@ -219,6 +222,7 @@ impl<F: KeyFeed> KeyService<F> {
             let shared = Arc::new(Shared::new(self.clock.clone(), self.log_only));
             shared.set_wanted(win_key, own_switcher);
             shared.set_combos(self.combos);
+            shared.set_win_e(self.win_e);
             let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let dispatcher = spawn_dispatcher(shared.clone(), stop.clone(), self.deliver.clone());
             // (the first beat, so that the hook does not start out failing open for a quarter of a second)
@@ -239,6 +243,15 @@ impl<F: KeyFeed> KeyService<F> {
         self.combos = on;
         if let Some(r) = &self.running {
             r.shared.set_combos(on);
+        }
+    }
+
+    /// Win+E alone is taken (true), beside Explorer too, with no other setting needed: rustyfiles is the default file manager
+    /// (issue 44). Call before [`set_wanted`](Self::set_wanted), which starts the hook for it.
+    pub fn set_win_e(&mut self, on: bool) {
+        self.win_e = on;
+        if let Some(r) = &self.running {
+            r.shared.set_win_e(on);
         }
     }
 

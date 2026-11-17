@@ -730,6 +730,8 @@ pub fn main() {
         // (not for a picker or the quick search started on their own, not for a test copy)
         if pick.is_none() && !quick_search && !multi {
             dock::control::start_if_wanted(cx.global::<settings::Settings>());
+            // Win+E for the default file manager while no dock takes it (issue 44: Windows' newer Win+E skips the registry)
+            shell::keylayer::watch_main(cx);
         }
         // updates from GitHub Releases (installed copies only)
         installer::set_beta_updates(cx.global::<settings::Settings>().beta_updates);
