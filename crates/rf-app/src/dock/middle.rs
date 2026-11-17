@@ -708,6 +708,27 @@ impl MiddleIsland {
         }
     }
 
+    /// Files let go on an icon: an app opens them (`rf_win::dock::launch::open_files`), from a thread of their own; a running app the
+    /// dock cannot start is given them through the program of its window. Anything else (a place) takes no files.
+    fn files_dropped(&mut self, ix: usize, files: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
+        let Some(DockItem::App(app)) = self.items.get(ix).cloned() else { return };
+        if files.is_empty() {
+            return;
+        }
+        let launch = app.launch.clone().or_else(|| {
+            let exe = app.windows.first().and_then(|&w| rf_win::dock::launch::program_of_window(w))?;
+            Some(rf_win::dock::Launch::Exe { path: exe, args: String::new() })
+        });
+        let Some(launch) = launch else { return };
+        let name = app.name.clone();
+        std::thread::spawn(move || {
+            if let Err(e) = rf_win::dock::launch::open_files(&launch, &files) {
+                log::warn!("dock: {name} could not open the dropped files: {e:#}");
+            }
+        });
+        cx.notify();
+    }
+
     fn click(&mut self, ix: usize, cx: &mut Context<Self>) {
         // (the button that let an icon go is not a click on it)
         if std::mem::take(&mut self.swallow_click) {
@@ -1132,6 +1153,7 @@ impl Render for MiddleIsland {
         let mut cells: Vec<AnyElement> = Vec::with_capacity(self.items.len());
         // the icon in the hand is drawn last, over the others
         let mut held_cell: Option<AnyElement> = None;
+        let drop_fill = pal.hover_fill().hsla();
         for (ix, item) in self.items.iter().enumerate() {
             let Draw { x, w, held, dx, grow, up, opacity, mark, failed } = draws[ix];
             let cell = match item {
@@ -1230,6 +1252,10 @@ impl Render for MiddleIsland {
                         })
                         .on_mouse_down(MouseButton::Left, cx.listener(move |me, ev: &MouseDownEvent, _, cx| me.item_pressed(ix, ev.position, cx)))
                         .on_click(cx.listener(move |me, _, _, cx| me.click(ix, cx)))
+                        // files dragged from anywhere and let go on an app: the app opens them (issue 41); the icon takes the dock's
+                        // quiet highlight while they are over it
+                        .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_fill))
+                        .on_drop(cx.listener(move |me, paths: &ExternalPaths, _, cx| me.files_dropped(ix, paths.paths().to_vec(), cx)))
                         .on_hover(cx.listener(move |me, on: &bool, _, cx| me.item_hover(ix, *on, cx)))
                         .on_mouse_up(MouseButton::Right, cx.listener(move |me, _, _, cx| me.right_click(ix, cx)))
                         .on_mouse_up(MouseButton::Middle, cx.listener(move |me, _, _, _| me.middle_click(ix)))

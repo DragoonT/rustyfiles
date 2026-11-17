@@ -18,6 +18,96 @@ pub fn start(launch: &Launch) -> anyhow::Result<()> {
     }
 }
 
+/// Opens `files` with an app, as dropping them on its dock icon does (issue 41: "drag-and-drop support for files onto running
+/// applications in the Dock"). A program gets them as arguments after its own; a shortcut's program the same way, the shortcut's
+/// arguments first; a packaged app, and a shortcut that leads to one, through the activation manager's "open" for files. A
+/// shortcut whose program cannot be read (an installer's advertised shortcut) is opened by the shell with the files as its
+/// parameters.
+pub fn open_files(launch: &Launch, files: &[std::path::PathBuf]) -> anyhow::Result<()> {
+    anyhow::ensure!(!files.is_empty(), "no files");
+    let quoted = quote_all(files);
+    match launch {
+        Launch::Exe { path, args } => open_with_shell(path.as_os_str(), &after(args, &quoted), path.parent()),
+        Launch::Packaged(id) => open_packaged(id, files),
+        Launch::Link(lnk) => {
+            crate::shell::ensure_com();
+            match super::pins::read_link(lnk) {
+                Some(f) if f.target.is_file() => open_with_shell(f.target.as_os_str(), &after(&f.args, &quoted), f.target.parent()),
+                Some(f) if f.aumid.as_deref().is_some_and(|a| !a.is_empty()) => open_packaged(f.aumid.as_deref().unwrap_or_default(), files),
+                _ => open_with_shell(lnk.as_os_str(), &quoted, None),
+            }
+        }
+    }
+}
+
+/// The program behind a running window (for an app the dock has no way to start: it is given the files the same way).
+pub fn program_of_window(hwnd: isize) -> Option<std::path::PathBuf> {
+    let mut pid = 0u32;
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId(HWND(hwnd as *mut _), Some(&mut pid)) };
+    (pid != 0).then(|| crate::switcher::source::exe_of(pid)).flatten()
+}
+
+/// `first`, then `rest`, with one space between when both are there.
+fn after(first: &str, rest: &str) -> String {
+    match (first.trim(), rest) {
+        ("", r) => r.to_string(),
+        (f, "") => f.to_string(),
+        (f, r) => format!("{f} {r}"),
+    }
+}
+
+/// Paths as arguments: each in quotes. A path that ends in a backslash (a drive's root, `C:\`) gets a second one, or the closing
+/// quote would be read as a quote character (`"C:\"` is `C:"` to the program).
+fn quote_all(files: &[std::path::PathBuf]) -> String {
+    files
+        .iter()
+        .map(|f| {
+            let s = f.to_string_lossy();
+            if s.ends_with('\\') { format!("\"{s}\\\"") } else { format!("\"{s}\"") }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A packaged app's "open" for files. On a thread of its own and not waited for: the activation manager can start the app and not
+/// return (see `crate::activate`); what it answers is logged.
+fn open_packaged(aumid: &str, files: &[std::path::PathBuf]) -> anyhow::Result<()> {
+    let (aumid, files) = (aumid.to_string(), files.to_vec());
+    std::thread::Builder::new().name("dock-open-files".into()).spawn(move || {
+        if let Err(e) = activate_for_files(&aumid, &files) {
+            log::warn!("dock: {aumid} did not take the dropped files: {e:#}");
+        }
+    })?;
+    Ok(())
+}
+
+fn activate_for_files(aumid: &str, files: &[std::path::PathBuf]) -> anyhow::Result<()> {
+    use windows::Win32::System::Com::{CLSCTX_LOCAL_SERVER, CoCreateInstance};
+    use windows::Win32::UI::Shell::{
+        ApplicationActivationManager, IApplicationActivationManager, ILCreateFromPathW, ILFree, SHCreateShellItemArrayFromIDLists,
+    };
+    use windows::core::{PCWSTR, w};
+    crate::shell::ensure_com();
+    let pidls: Vec<_> = files
+        .iter()
+        .map(|f| {
+            let w = crate::wide::wide(f.as_os_str());
+            unsafe { ILCreateFromPathW(PCWSTR(w.as_ptr())) }
+        })
+        .filter(|p| !p.is_null())
+        .collect();
+    let list: Vec<_> = pidls.iter().map(|&p| p as *const _).collect();
+    let array = unsafe { SHCreateShellItemArrayFromIDLists(&list) };
+    for p in pidls {
+        unsafe { ILFree(Some(p)) };
+    }
+    let array = array?;
+    let manager: IApplicationActivationManager = unsafe { CoCreateInstance(&ApplicationActivationManager, None, CLSCTX_LOCAL_SERVER)? };
+    let id = crate::wide::wide(aumid);
+    unsafe { manager.ActivateForFile(PCWSTR(id.as_ptr()), &array, w!("open"))? };
+    Ok(())
+}
+
 fn open_with_shell(file: &std::ffi::OsStr, args: &str, dir: Option<&std::path::Path>) -> anyhow::Result<()> {
     use windows::Win32::UI::Shell::{SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW};
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -231,5 +321,19 @@ mod tests {
         eprintln!("explorer.exe is called {n:?}");
         assert_eq!(friendly_name(&IconSource::Window(5)), None);
         assert_eq!(friendly_name(&IconSource::Shell("shell:RecycleBinFolder".into())), None);
+    }
+}
+
+#[cfg(test)]
+mod open_files_tests {
+    use super::{after, quote_all};
+    use std::path::PathBuf;
+
+    #[test]
+    fn dropped_files_follow_the_programs_own_arguments_each_in_quotes() {
+        let files = [PathBuf::from(r"C:\My Files\a.txt"), PathBuf::from(r"D:\")];
+        assert_eq!(quote_all(&files), r#""C:\My Files\a.txt" "D:\\""#, "a root's backslash is doubled before the quote");
+        assert_eq!(after("--profile work", &quote_all(&files[..1])), r#"--profile work "C:\My Files\a.txt""#);
+        assert_eq!(after("  ", r#""x""#), r#""x""#);
     }
 }

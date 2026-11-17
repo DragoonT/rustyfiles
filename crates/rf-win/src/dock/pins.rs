@@ -197,7 +197,7 @@ pub struct LinkFacts {
     pub icon_index: i32,
 }
 
-fn read_link(path: &Path) -> Option<LinkFacts> {
+pub(crate) fn read_link(path: &Path) -> Option<LinkFacts> {
     use windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW;
     use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance, IPersistFile, STGM_READ};
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
