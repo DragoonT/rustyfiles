@@ -15,6 +15,9 @@ pub enum ThemePref {
     System,
     Light,
     Dark,
+    /// Pure black for OLED screens: black surfaces, white text, no see-through material (issue 45: "A true black background
+    /// (#000000). Pure white text (#FFFFFF)").
+    Black,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -77,6 +80,17 @@ pub enum DatePref {
     Universal,
 }
 
+/// A window's tabs saved under a name, to open again later in a window of their own (issue 41: "a feature to save or load sessions
+/// (similar to the Lister feature in Directory Opus)"). Written as the last session is: `session_tabs`, `session_panes`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NamedSession {
+    pub name: String,
+    pub tabs: Vec<String>,
+    pub panes: Vec<SessionPane>,
+    pub active: usize,
+}
+
 /// The second pane of a tab in the saved session (issue 20: a window split in two came back with one pane, at the left pane's
 /// folder; only the left pane of each tab was written).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,6 +150,18 @@ impl DockMagnify {
             DockMagnify::Full => Strength::Full,
         }
     }
+}
+
+/// Settings -> Dock: the left island's search, as Windows 11's taskbar offers it (issue 41: "Add an option to show/hide search bar
+/// on taskbar"). `Icon` is the button a narrow secondary monitor already gets; `Hidden` leaves the Start logo (and, on the primary
+/// monitor, the weather).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DockSearch {
+    #[default]
+    Field,
+    Icon,
+    Hidden,
 }
 
 /// Settings -> Dock: which dock shows which running app when there is a dock on every monitor.
@@ -395,6 +421,8 @@ pub struct Settings {
     /// The tabs of the last session that were split in two: the second pane of each (see [`SessionPane`]). A tab that is not named
     /// here had one pane.
     pub session_panes: Vec<SessionPane>,
+    /// Sessions saved by name (the tab strip's menu: "Save session…", "Open session").
+    pub saved_sessions: Vec<NamedSession>,
     /// User pins. `None` = the default known folders.
     pub pinned: Option<Vec<PathBuf>>,
     /// Folder aliases: `@name` in the address box (Files' folder aliases).
@@ -558,6 +586,9 @@ pub struct Settings {
     pub web_search: WebSearch,
     /// Chrome's and Edge's bookmarks are searched too (read on this PC only).
     pub quick_search_bookmarks: bool,
+    /// With nothing typed, HyperSearch lists what was opened lately; off: it shows nothing until something is typed (issue 41:
+    /// "Add an option to show/hide recent searches").
+    pub quick_search_recent: bool,
 
     // ---- Dock (dock/: `rustyfiles --dock`, a separate process; experimental)
     /// The dock runs: started with rustyfiles and when this is switched on, stopped when it is switched off.
@@ -592,6 +623,8 @@ pub struct Settings {
     /// The left and the right island are as tall as the middle one (off: they are lower, as they always were). While the dock is thin
     /// under a maximised window all three are the thin height either way.
     pub dock_side_tall: bool,
+    /// The left island's search: a field, its button only, or none (`DockSearch`).
+    pub dock_search: DockSearch,
     /// The tray icons of the right island stand closer together (18 px a cell instead of 24; off). Issue 34.
     pub dock_tray_compact: bool,
     /// Turning the mouse wheel over a running app's icon in the dock turns that app's own sound level up or down (on; issue 21).
@@ -691,6 +724,7 @@ impl Default for Settings {
             session_tabs: Vec::new(),
             session_panes: Vec::new(),
             session_active: 0,
+            saved_sessions: Vec::new(),
             pinned: None,
             folder_aliases: Default::default(),
             hidden_drives: Vec::new(),
@@ -777,6 +811,7 @@ impl Default for Settings {
             quick_search_keys: "alt-space".into(),
             web_search: WebSearch::Google,
             quick_search_bookmarks: true,
+            quick_search_recent: true,
             dock_enabled: false,
             dock_reserve: true,
             dock_weather_city: String::new(),
@@ -789,6 +824,7 @@ impl Default for Settings {
             dock_status_order: Vec::new(),
             dock_status_hidden: Vec::new(),
             dock_side_tall: false,
+            dock_search: DockSearch::Field,
             dock_tray_compact: false,
             dock_scroll_volume: true,
             dock_magnify: DockMagnify::Full,
@@ -868,6 +904,7 @@ pub fn theme_override() -> ThemePref {
     match THEME.load(Ordering::Relaxed) {
         1 => ThemePref::Light,
         2 => ThemePref::Dark,
+        3 => ThemePref::Black,
         _ => ThemePref::System,
     }
 }
@@ -1080,6 +1117,7 @@ impl Settings {
                 ThemePref::System => 0,
                 ThemePref::Light => 1,
                 ThemePref::Dark => 2,
+                ThemePref::Black => 3,
             },
             Ordering::Relaxed,
         );
@@ -1118,7 +1156,7 @@ pub fn apply_component_theme(cx: &mut App) {
     use gpui_kit::component::theme::{Theme, ThemeMode};
     match cx.global::<Settings>().theme {
         ThemePref::Light => Theme::change(ThemeMode::Light, None, cx),
-        ThemePref::Dark => Theme::change(ThemeMode::Dark, None, cx),
+        ThemePref::Dark | ThemePref::Black => Theme::change(ThemeMode::Dark, None, cx),
         ThemePref::System => Theme::sync_system_appearance(None, cx),
     }
     // The component root paints the theme background under every window; keep it clear so

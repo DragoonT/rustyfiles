@@ -479,6 +479,8 @@ impl SidebarTree {
         let plus_minus = match (key, typed) {
             ("+", _) | ("add", _) | (_, Some("+")) => Some(TreeKey::Open),
             ("-", _) | ("subtract", _) | (_, Some("-")) => Some(TreeKey::Close),
+            // (the star opens everything below, a few levels deep: `TreeKey::OpenAll`)
+            ("*", _) | ("multiply", _) | (_, Some("*")) => Some(TreeKey::OpenAll),
             _ => None,
         };
         if let Some(k) = plus_minus {

@@ -636,6 +636,13 @@ fn quick_search_cards(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement
             Some(t!("Yer imleri bu bilgisayarda okunur, hiçbir yere gönderilmez")),
             sw("qs-bookmarks", p, s.quick_search_bookmarks, |s, v| s.quick_search_bookmarks = v),
         ),
+        card(
+            p,
+            L::Clock,
+            t!("Boşken son kullanılanları göster"),
+            Some(t!("Kapalıyken HyperSearch bir şey yazılana kadar boş açılır")),
+            sw("qs-recent", p, s.quick_search_recent, |s, v| s.quick_search_recent = v),
+        ),
     ]
 }
 
@@ -1331,7 +1338,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 "theme",
                 p,
                 s.theme,
-                vec![(ThemePref::System, t!("Sistem ayarını kullan").into()), (ThemePref::Light, crate::i18n::tx("Açık", "Light").into()), (ThemePref::Dark, t!("Koyu").into())],
+                vec![(ThemePref::System, t!("Sistem ayarını kullan").into()), (ThemePref::Light, crate::i18n::tx("Açık", "Light").into()), (ThemePref::Dark, t!("Koyu").into()), (ThemePref::Black, t!("Siyah (OLED)").into())],
                 |s, v| s.theme = v,
             ),
         ),

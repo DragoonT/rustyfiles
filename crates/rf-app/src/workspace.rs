@@ -456,6 +456,26 @@ pub fn save_all_sessions(cx: &mut App) {
     }
 }
 
+/// A saved session waiting for the window that opens it (`open_named_session` -> `Workspace::new`).
+static PENDING_NAMED: std::sync::Mutex<Option<crate::settings::NamedSession>> = std::sync::Mutex::new(None);
+
+/// Opens the session saved as `name` in a new window.
+pub fn open_named_session(name: &str, cx: &mut App) {
+    let Some(session) = cx.global::<crate::settings::Settings>().saved_sessions.iter().find(|s| s.name == name).cloned() else { return };
+    *PENDING_NAMED.lock().unwrap() = Some(session);
+    crate::open_main_window(None, None, None, cx);
+    // (a window that could not open leaves nothing waiting for the next one)
+    PENDING_NAMED.lock().unwrap().take();
+}
+
+/// The saved sessions after saving `session`: one of the same name is replaced where it stood, a new name goes at the end.
+fn remember_named(list: &mut Vec<crate::settings::NamedSession>, session: crate::settings::NamedSession) {
+    match list.iter_mut().find(|s| s.name.eq_ignore_ascii_case(&session.name)) {
+        Some(old) => *old = session,
+        None => list.push(session),
+    }
+}
+
 /// Selects `file` in the newest window whose current tab shows its folder (and brings that window
 /// forward); false when none does.
 fn select_in_open_folder(file: &std::path::Path, cx: &mut App) -> bool {
@@ -820,6 +840,21 @@ impl Workspace {
             Some(loc) => {
                 let select = START_SELECT.lock().unwrap().take();
                 this.open_tab_selecting(loc, select, window, cx)
+            }
+            // a saved session asked for by name (`open_named_session`): its tabs, its split panes, its active tab
+            None if PENDING_NAMED.lock().unwrap().is_some() => {
+                let named = PENDING_NAMED.lock().unwrap().take().unwrap_or_default();
+                for t in &named.tabs {
+                    this.open_tab(session_place(t), window, cx);
+                }
+                if this.tabs.is_empty() {
+                    this.open_tab(Location::Home, window, cx);
+                }
+                for (ix, loc, active) in panes_to_restore(&named.panes, this.tabs.len()) {
+                    this.open_second_pane(ix, loc, active, window, cx);
+                }
+                let a = named.active.min(this.tabs.len() - 1);
+                this.activate(a, window, cx);
             }
             None if prefs.startup == crate::settings::StartupPref::Continue && !prefs.session_tabs.is_empty() => {
                 for t in &prefs.session_tabs {
@@ -1213,6 +1248,33 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Asks for a name and saves this window's tabs under it (`settings::NamedSession`); a name already taken is replaced.
+    fn save_named_session(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (tabs, panes) = self.session_now(cx);
+        let active = self.active;
+        let count = cx.global::<crate::settings::Settings>().saved_sessions.len();
+        let first = format!("{} {}", t!("Oturum"), count + 1);
+        crate::prompt::show(
+            t!("Oturumu kaydet"),
+            Some(t!("Bu penceredeki sekmeler bu adla kaydedilir; sekme menüsündeki Oturum aç ile yeni bir pencerede açılır.").to_string()),
+            Some((first, String::new())),
+            vec![
+                crate::prompt::Button::new(t!("Kaydet"), crate::prompt::Kind::Primary, move |text, _, cx| {
+                    let name = text.unwrap_or_default().trim().to_string();
+                    if name.is_empty() {
+                        return Err(t!("Bir ad yazın.").to_string());
+                    }
+                    let session = crate::settings::NamedSession { name: name.clone(), tabs: tabs.clone(), panes: panes.clone(), active };
+                    crate::settings::update(cx, move |s| remember_named(&mut s.saved_sessions, session));
+                    Ok(())
+                }),
+                crate::prompt::Button::cancel(),
+            ],
+            window,
+            cx,
+        );
+    }
+
     fn tab_menu(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
         use crate::fluent_menu::{Item, Menu, MenuIcon};
         let me = cx.entity().downgrade();
@@ -1250,7 +1312,33 @@ impl Workspace {
             }))
             .hint("Ctrl+Shift+T")
             .enabled(!self.closed.is_empty()),
+            Item::Separator,
+            Item::action(t!("Oturumu kaydet…"), MenuIcon::Lucide(L::Save), act(|ws, _, w, cx| ws.save_named_session(w, cx))),
         ];
+        // the saved sessions: each opens in a new window; a second list removes one
+        let saved: Vec<String> = cx.global::<crate::settings::Settings>().saved_sessions.iter().map(|s| s.name.clone()).collect();
+        let mut items = items;
+        if !saved.is_empty() {
+            let open: Vec<Item> = saved
+                .iter()
+                .map(|n| {
+                    let n = n.clone();
+                    Item::action(n.clone(), MenuIcon::None, move |_, cx| open_named_session(&n, cx))
+                })
+                .collect();
+            let remove: Vec<Item> = saved
+                .iter()
+                .map(|n| {
+                    let n = n.clone();
+                    Item::action(n.clone(), MenuIcon::None, move |_, cx| {
+                        let n = n.clone();
+                        crate::settings::update(cx, move |s| s.saved_sessions.retain(|x| x.name != n));
+                    })
+                })
+                .collect();
+            items.push(Item::sub(t!("Oturum aç"), MenuIcon::Lucide(L::FolderOpen), open));
+            items.push(Item::sub(t!("Oturumu sil"), MenuIcon::Lucide(L::Trash), remove));
+        }
         crate::fluent_menu::show(Menu { quick: Vec::new(), items }, window.mouse_position(), window, cx);
     }
 
@@ -3614,8 +3702,10 @@ impl Render for Workspace {
         }
         let backdrop = if crate::glass::forced() { BackdropPref::Glass } else { backdrop };
         let backdrop = if backdrop == BackdropPref::Glass && self.glass_failed { BackdropPref::Mica } else { backdrop };
-        // (and it asks for no glass, Acrylic or tinted Mica of its own: the palette paints it)
-        let backdrop = if self.picker.is_some() { BackdropPref::Solid } else { backdrop };
+        // (and it asks for no glass, Acrylic or tinted Mica of its own: the palette paints it; so does the pure black theme, whose
+        // black must not let anything through)
+        let black = crate::settings::theme_override() == crate::settings::ThemePref::Black;
+        let backdrop = if self.picker.is_some() || black { BackdropPref::Solid } else { backdrop };
         if self.applied_backdrop != Some(backdrop) {
             let was_glass = self.applied_backdrop == Some(BackdropPref::Glass);
             self.applied_backdrop = Some(backdrop);
@@ -4044,6 +4134,7 @@ impl Render for Workspace {
             // action, the dialog's modal loop handed our windows their messages while the app was borrowed, and the app closed
             // (issue 46: "Clicking on map network drive crashes and closes the explorer window").
             .on_action(cx.listener(|_, _: &RestartApp, _, cx| crate::restart(cx)))
+            .on_action(cx.listener(|this, _: &SaveSession, window, cx| this.save_named_session(window, cx)))
             .on_action(cx.listener(|_, _: &MapNetworkDrive, window, _| {
                 let owner = Self::hwnd(window).unwrap_or(0);
                 std::thread::spawn(move || rf_win::network::map_drive_dialog(owner));
@@ -4360,5 +4451,23 @@ mod rail_peek_tests {
         assert!(rail_peek_width(240.0, 1.05) > 240.0, "the swing past its place");
         assert_eq!(rail_peek_width(240.0, -0.2), RAIL_W);
         assert!(rail_peek_width(240.0, 0.5) > RAIL_W && rail_peek_width(240.0, 0.5) < 240.0);
+    }
+}
+
+#[cfg(test)]
+mod named_session_tests {
+    use super::remember_named;
+    use crate::settings::NamedSession;
+
+    #[test]
+    fn a_session_saved_again_under_its_name_replaces_the_old_one_in_place() {
+        let s = |name: &str, tab: &str| NamedSession { name: name.into(), tabs: vec![tab.into()], ..Default::default() };
+        let mut list = Vec::new();
+        remember_named(&mut list, s("Work", "C:\\A"));
+        remember_named(&mut list, s("Photos", "D:\\P"));
+        remember_named(&mut list, s("work", "C:\\B"));
+        assert_eq!(list.len(), 2);
+        assert_eq!((list[0].name.as_str(), list[0].tabs[0].as_str()), ("work", "C:\\B"), "same place, the new tabs");
+        assert_eq!(list[1].name, "Photos");
     }
 }

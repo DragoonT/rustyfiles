@@ -60,6 +60,7 @@ gpui_kit::actions!(
         Undo,
         MapNetworkDrive,
         RestartApp,
+        SaveSession,
         DisconnectNetworkDrive,
         NewWindow,
         ZoomIn,

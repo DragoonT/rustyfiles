@@ -82,6 +82,8 @@ pub(crate) enum Control {
     Magnify(fn(&Settings) -> DockMagnify, fn(&mut Settings, DockMagnify)),
     /// Which dock shows which running app (a dropdown).
     AppsWhere(fn(&Settings) -> DockAppsWhere, fn(&mut Settings, DockAppsWhere)),
+    /// The left island's search (a dropdown).
+    Search(fn(&Settings) -> crate::settings::DockSearch, fn(&mut Settings, crate::settings::DockSearch)),
     City(fn(&Settings) -> &str, fn(&mut Settings, String)),
 }
 
@@ -258,6 +260,16 @@ pub(crate) fn entries() -> Vec<Entry> {
             t!("Başlat'ta önerilenler"),
             Some(t!("Başlat panelinde sabitlenmiş uygulamaların altında en son açtığınız belgeler (ne zaman açıldığıyla birlikte) görünür. Kapalıyken bölüm çizilmez ve sabitlenenler o yeri kullanır.")),
             Control::Switch(|s| s.dock_start_recommended, |s, v| s.dock_start_recommended = v),
+        ),
+        e(
+            "dock-search",
+            "dock_search",
+            Left,
+            dock,
+            L::Search,
+            t!("Arama"),
+            Some(t!("Sol adadaki arama: bir kutu, yalnızca simgesi ya da hiç. Logo Başlat'ı yine açar.")),
+            Control::Search(|s| s.dock_search, |s, v| s.dock_search = v),
         ),
         e("dock-city-edit", "dock_weather_city", Left, dock, L::MapPin, t!("Hava durumu şehri"), None, Control::City(|s| s.dock_weather_city.as_str(), |s, v| s.dock_weather_city = v)),
         // ---- ORTA ADA
@@ -448,6 +460,11 @@ fn apps_where_choices() -> Vec<(DockAppsWhere, String)> {
     vec![(DockAppsWhere::All, t!("Her ekranda hepsi").into()), (DockAppsWhere::Window, t!("Pencerenin olduğu ekranda").into())]
 }
 
+fn search_choices() -> Vec<(crate::settings::DockSearch, String)> {
+    use crate::settings::DockSearch;
+    vec![(DockSearch::Field, t!("Arama kutusu").into()), (DockSearch::Icon, t!("Yalnızca simge").into()), (DockSearch::Hidden, t!("Gizle").into())]
+}
+
 fn magnify_choices() -> Vec<(DockMagnify, String)> {
     vec![(DockMagnify::Off, t!("Kapalı").into()), (DockMagnify::Subtle, t!("Hafif").into()), (DockMagnify::Full, t!("Tam").into())]
 }
@@ -460,6 +477,7 @@ fn live_control(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
         Control::Size(..) => inert_control(p, s, e),
         Control::Magnify(get, set) => dropdown(e.id, p, get(s), magnify_choices(), set),
         Control::AppsWhere(get, set) => dropdown(e.id, p, get(s), apps_where_choices(), set),
+        Control::Search(get, set) => dropdown(e.id, p, get(s), search_choices(), set),
         Control::City(get, set) => {
             let city = get(s).trim().to_string();
             h_flex()
@@ -519,6 +537,7 @@ fn inert_control(p: &Palette, s: &Settings, e: &Entry) -> AnyElement {
         Control::Size(get, _) => label(get(s).percent_text(crate::i18n::is_tr())),
         Control::Magnify(get, _) => label(magnify_choices().into_iter().find(|(v, _)| *v == get(s)).map(|(_, l)| l).unwrap_or_default()),
         Control::AppsWhere(get, _) => label(apps_where_choices().into_iter().find(|(v, _)| *v == get(s)).map(|(_, l)| l).unwrap_or_default()),
+        Control::Search(get, _) => label(search_choices().into_iter().find(|(v, _)| *v == get(s)).map(|(_, l)| l).unwrap_or_default()),
         Control::City(..) => v_flex().into_any_element(),
     }
 }
@@ -548,7 +567,7 @@ mod tests {
     use std::collections::HashSet;
 
     // (not `super::*`: the glob of gpui_kit up there brings a `test` of its own that would shadow `#[test]`)
-    use super::{Control, Entry, Needs, RowState, Section, apps_where_choices, city_line, entries, grouped, intro, magnify_choices, while_turkish};
+    use super::{Control, Entry, Needs, RowState, Section, apps_where_choices, city_line, entries, grouped, intro, magnify_choices, search_choices, while_turkish};
     use crate::dock::parts::{self, Part};
     use crate::dock::size_pref::DockSizePref;
     use crate::settings::Settings;
@@ -649,7 +668,7 @@ mod tests {
         // the sections hold what the page promises
         let ids = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
         assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_side_tall", "dock_tray_compact", "dock_all_monitors", "dock_magnify", "dock_scroll_volume", "dock_start_grow"]);
-        assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_weather_city"]);
+        assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_search", "dock_weather_city"]);
         assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu", "dock_thin_when_maximized", "dock_apps_where"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);
     }
@@ -719,6 +738,7 @@ mod tests {
             Control::Size(get, set) => set(s, DockSizePref::at_position((get(s).position() + 1) % 16)),
             Control::Magnify(get, set) => set(s, magnify_choices().into_iter().map(|(v, _)| v).find(|v| *v != get(s)).unwrap()),
             Control::AppsWhere(get, set) => set(s, apps_where_choices().into_iter().map(|(v, _)| v).find(|v| *v != get(s)).unwrap()),
+            Control::Search(get, set) => set(s, search_choices().into_iter().map(|(v, _)| v).find(|v| *v != get(s)).unwrap()),
             Control::City(get, set) => {
                 assert_ne!(get(s), "Erzincan");
                 set(s, "Erzincan".to_string());

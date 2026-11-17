@@ -92,6 +92,31 @@ impl Palette {
         }
     }
 
+    /// Pure black for OLED screens (issue 45): the dark palette with every surface black and opaque, the text white, and the lines
+    /// and fills just bright enough to be seen on black.
+    pub fn black() -> Self {
+        Self {
+            window_bg: hex(0x000000),
+            titlebar_bg: hexa(0x000000, 0.0),
+            sidebar_bg: hexa(0x000000, 0.0),
+            content_bg: hex(0x000000),
+            card_bg: hex(0x0A0A0A),
+            bar_bg: hexa(0x000000, 0.0),
+            tile_bg: hexa(0xFFFFFF, 0.04),
+            tile_hover: hexa(0xFFFFFF, 0.08),
+            border: hexa(0xFFFFFF, 0.14),
+            divider: hexa(0xFFFFFF, 0.12),
+            text: hex(0xFFFFFF),
+            text_secondary: hexa(0xFFFFFF, 0.72),
+            text_tertiary: hexa(0xFFFFFF, 0.50),
+            hover: hexa(0xFFFFFF, 0.08),
+            pressed: hexa(0xFFFFFF, 0.12),
+            selection: hexa(0xFFFFFF, 0.11),
+            tab_active: hexa(0xFFFFFF, 0.08),
+            ..Self::dark()
+        }
+    }
+
     pub fn dark() -> Self {
         let accent = system_accent().map(|a| a.light2()).unwrap_or(0x60CDFF);
         Self {
@@ -130,6 +155,7 @@ impl Palette {
         let mut p = match crate::settings::theme_override() {
             crate::settings::ThemePref::Light => Self::light(),
             crate::settings::ThemePref::Dark => Self::dark(),
+            crate::settings::ThemePref::Black => Self::black(),
             crate::settings::ThemePref::System => match window.appearance() {
                 WindowAppearance::Dark | WindowAppearance::VibrantDark => Self::dark(),
                 _ => Self::light(),
@@ -138,6 +164,10 @@ impl Palette {
         if crate::settings::solid_backdrop() {
             // "Solid" material: Windows 11's plain window color instead of Mica
             p.window_bg = if p.dark { hex(0x202020) } else { hex(0xF3F3F3) };
+        }
+        if crate::settings::theme_override() == crate::settings::ThemePref::Black {
+            // (opaque black whatever the material: no glass, no washes)
+            return p;
         }
         let hwnd = crate::look::window::hwnd_of(window);
         // one place decides the look of the controls: every control asks the palette

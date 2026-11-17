@@ -14,19 +14,21 @@ use super::plan;
 
 /// The left island's controls: the logo and the search field, centred in the island's height.
 pub fn left_controls() -> Vec<Box4> {
-    let y = |h: f32| (SIDE_HEIGHT - h) / 2.0;
-    vec![[plan::SIDE_PAD, y(plan::LOGO), plan::LOGO, plan::LOGO], [plan::SIDE_PAD + plan::LOGO + plan::LOGO_GAP, y(plan::SEARCH_H), plan::SEARCH_W, plan::SEARCH_H]]
+    left_controls_secondary(rf_win::dock::monitors::Search::Field)
 }
 
 /// A secondary monitor's left island's controls: the logo and the search (a field, or a button as big as the logo).
 pub fn left_controls_secondary(search: rf_win::dock::monitors::Search) -> Vec<Box4> {
     use rf_win::dock::monitors::Search;
     let y = |h: f32| (SIDE_HEIGHT - h) / 2.0;
-    let (w, h) = match search {
-        Search::Field => (plan::SEARCH_W, plan::SEARCH_H),
-        Search::Button => (plan::SEARCH_BUTTON, plan::SEARCH_BUTTON),
+    let logo = [plan::SIDE_PAD, y(plan::LOGO), plan::LOGO, plan::LOGO];
+    // (the search as the setting shows it: none when it is hidden, see `plan::shown_search`)
+    let (w, h) = match plan::shown_search(search) {
+        Some(Search::Field) => (plan::SEARCH_W, plan::SEARCH_H),
+        Some(Search::Button) => (plan::SEARCH_BUTTON, plan::SEARCH_BUTTON),
+        None => return vec![logo],
     };
-    vec![[plan::SIDE_PAD, y(plan::LOGO), plan::LOGO, plan::LOGO], [plan::SIDE_PAD + plan::LOGO + plan::LOGO_GAP, y(h), w, h]]
+    vec![logo, [plan::SIDE_PAD + plan::LOGO + plan::LOGO_GAP, y(h), w, h]]
 }
 
 /// A secondary monitor's right island's controls: the clock and, when there is one, the bell, in the order and at the distances

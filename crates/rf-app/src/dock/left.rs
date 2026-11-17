@@ -153,6 +153,12 @@ impl LeftIsland {
     /// Tells the host the width the content needs now. Also while the Start panel is grown out of this island: the row stays as it is
     /// and the panel's field stands at the island's left edge plus a fixed offset, so a weather text that comes in meanwhile only
     /// widens the island's window, and the host's layout works the growth out again for it like for any island (`panel::layout_applied`).
+    /// The search setting changed: the island is drawn again and tells the host its new width.
+    pub fn search_setting_changed(&mut self, cx: &mut Context<Self>) {
+        self.report_width(cx);
+        cx.notify();
+    }
+
     fn report_width(&mut self, cx: &mut Context<Self>) {
         self.sync_room(cx);
         if let Some(w) = width_to_report(self.reported, self.width()) {
@@ -358,9 +364,11 @@ impl Render for LeftIsland {
                 }
             });
 
-        // on a narrow secondary monitor the field is a button: the search picture alone
-        let button = self.search == Search::Button;
-        let search = h_flex()
+        // on a narrow secondary monitor the field is a button: the search picture alone; the setting can make it a button anywhere, or
+        // hide it (`plan::shown_search`)
+        let shown = plan::shown_search(self.search);
+        let button = shown == Some(Search::Button);
+        let search = shown.is_some().then(|| h_flex()
             .id("dock-search")
             .ml(px(plan::LOGO_GAP * k))
             .w(px(if button { plan::SEARCH_BUTTON } else { plan::SEARCH_W } * k))
@@ -392,7 +400,7 @@ impl Render for LeftIsland {
                         super::actions::open_quick_search();
                     }
                 })
-            });
+            }));
 
         // the picture at the left of the temperature and, when the display has room, the condition in words under it
         let words = self.condition_text();
@@ -425,7 +433,7 @@ impl Render for LeftIsland {
             // a right click on the glass between and around the controls: Windows' Task Manager (the controls are told from the glass
             // by their boxes, `empty.rs::left_controls`, which mirror the row below: padding, logo, gap, field; change one, change both)
             .on_mouse_up(MouseButton::Right, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.right_click(ev.position, cx)))
-            .child(h_flex().size_full().px(px(plan::SIDE_PAD * k)).items_center().child(logo).child(search).children(weather))
+            .child(h_flex().size_full().px(px(plan::SIDE_PAD * k)).items_center().child(logo).children(search).children(weather))
     }
 }
 

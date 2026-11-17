@@ -716,14 +716,20 @@ pub(crate) fn file_name(p: &Path) -> String {
 }
 
 /// Searches every source for `query` (blocks: run off the UI thread).
-fn search(query: &str, engine: WebSearch, with_bookmarks: bool, index_on: bool) -> Found {
+fn search(query: &str, engine: WebSearch, with_bookmarks: bool, index_on: bool, show_recent: bool) -> Found {
     if fold(query.trim()).is_empty() {
-        // nothing typed: what was opened most lately
-        return Found { items: recent(), index_building: false, index_off: false };
+        // nothing typed: what was opened most lately, unless the setting says to show nothing (`quick_search_recent`)
+        return Found { items: if show_recent { recent() } else { Vec::new() }, index_building: false, index_off: false };
     }
     let local = search_local(query, engine, with_bookmarks);
     let files = search_files(query, index_on);
     Found { items: merge(query, local, files.items), index_building: files.index_building, index_off: files.index_off }
+}
+
+/// Whether the app `id` is among the installed apps. An empty list (not read yet, or the read failed) keeps everything: nothing is
+/// taken away on a guess.
+fn still_installed(id: &str, installed: &[rf_win::apps::App]) -> bool {
+    installed.is_empty() || installed.iter().any(|a| a.id.eq_ignore_ascii_case(id))
 }
 
 /// What was opened most lately, for an empty query.
@@ -731,9 +737,15 @@ pub(crate) fn recent() -> Vec<Item> {
     let used: HashMap<String, Use> = with_usage(|m| m.clone());
     let mut v: Vec<&Use> = used.values().filter(|u| !matches!(u.target, Target::Web { .. })).collect();
     v.sort_by_key(|u| std::cmp::Reverse(boost(u)));
-    // a file deleted since is left out
+    // a file deleted since is left out, and so is an app that is no longer installed (the owner, 2026-11-17: "kaldırılan uygulamalar
+    // görünmeye devam ediyor ... fl studio 2025 mesela": the usage memory kept FL Studio 2025 after it was replaced by 2026)
+    let installed = apps();
     v.into_iter()
         .filter(|u| !matches!(&u.target, Target::Path { path, .. } if !path.exists()))
+        .filter(|u| match &u.target {
+            Target::App { id, .. } => still_installed(id, &installed),
+            _ => true,
+        })
         .take(8)
         .map(|u| Item { target: u.target.clone(), title: u.title.clone(), detail: u.detail.clone(), section: Section::Recent, score: 0 })
         .collect()
@@ -1070,8 +1082,8 @@ impl QuickSearch {
         let generation = self.generation;
         let query = self.input.read(cx).value().to_string();
         let s = cx.global::<Settings>();
-        let (engine, with_bookmarks, index_on) = (s.web_search, s.quick_search_bookmarks, s.name_index);
-        let work = cx.background_spawn(async move { search(&query, engine, with_bookmarks, index_on) });
+        let (engine, with_bookmarks, index_on, show_recent) = (s.web_search, s.quick_search_bookmarks, s.name_index, s.quick_search_recent);
+        let work = cx.background_spawn(async move { search(&query, engine, with_bookmarks, index_on, show_recent) });
         self._search = Some(cx.spawn(async move |this, cx| {
             let found = work.await;
             let _ = this.update(cx, |this, cx| {
@@ -1566,5 +1578,19 @@ mod pick_tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got["ph"]["app:shop"], Pick { count: 2, last: 5 });
         assert!(parse_picks(b"not json").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod installed_tests {
+    use super::still_installed;
+
+    #[test]
+    fn an_app_that_is_gone_is_not_offered_again() {
+        let app = |id: &str| rf_win::apps::App { id: id.into(), name: String::new() };
+        let list = vec![app(r"{6D809377-6AF0-444B-8957-A3773F02200E}\Image-Line\FL Studio 2026\FL64.exe")];
+        assert!(!still_installed(r"{6D809377-6AF0-444B-8957-A3773F02200E}\Image-Line\FL Studio 2025\FL64.exe", &list));
+        assert!(still_installed(r"{6d809377-6af0-444b-8957-a3773f02200e}\Image-Line\FL Studio 2026\FL64.exe", &list), "letters' case does not matter");
+        assert!(still_installed("anything", &[]), "no list yet: nothing is taken away");
     }
 }

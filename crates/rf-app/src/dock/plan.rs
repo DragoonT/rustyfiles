@@ -71,7 +71,50 @@ pub fn left_width(weather_text: Option<&str>) -> f32 {
 
 /// [`left_width`] with the condition line under the temperature.
 pub fn left_width_lines(temp: Option<&str>, condition: Option<&str>) -> f32 {
-    SEARCH_LEFT + SEARCH_W + temp.map_or(0.0, |t| WEATHER_GAP + weather_width_lines(t, condition)) + SIDE_PAD
+    left_width_with(shown_search(rf_win::dock::monitors::Search::Field), temp, condition)
+}
+
+/// The left island's width for a search shown as `search` (none: hidden): the padding, the logo, the search with its gap, the
+/// weather with its gap, the padding.
+pub fn left_width_with(search: Option<rf_win::dock::monitors::Search>, temp: Option<&str>, condition: Option<&str>) -> f32 {
+    use rf_win::dock::monitors::Search;
+    let search_part = match search {
+        Some(Search::Field) => LOGO_GAP + SEARCH_W,
+        Some(Search::Button) => LOGO_GAP + SEARCH_BUTTON,
+        None => 0.0,
+    };
+    SIDE_PAD + LOGO + search_part + temp.map_or(0.0, |t| WEATHER_GAP + weather_width_lines(t, condition)) + SIDE_PAD
+}
+
+/// The search setting as the dock process runs it (0 field, 1 icon, 2 hidden; set from the settings by the host).
+static SEARCH_MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn set_search_mode(mode: crate::settings::DockSearch) {
+    use crate::settings::DockSearch;
+    SEARCH_MODE.store(match mode { DockSearch::Field => 0, DockSearch::Icon => 1, DockSearch::Hidden => 2 }, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How the search shows on a monitor whose room allows `room` (a field, or a button on a narrow secondary monitor), with the setting.
+pub fn shown_search(room: rf_win::dock::monitors::Search) -> Option<rf_win::dock::monitors::Search> {
+    search_for(
+        match SEARCH_MODE.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => crate::settings::DockSearch::Icon,
+            2 => crate::settings::DockSearch::Hidden,
+            _ => crate::settings::DockSearch::Field,
+        },
+        room,
+    )
+}
+
+/// [`shown_search`] as a rule: the setting can only make the search smaller than the monitor's room allows.
+pub fn search_for(mode: crate::settings::DockSearch, room: rf_win::dock::monitors::Search) -> Option<rf_win::dock::monitors::Search> {
+    use crate::settings::DockSearch;
+    use rf_win::dock::monitors::Search;
+    match mode {
+        DockSearch::Field => Some(room),
+        DockSearch::Icon => Some(Search::Button),
+        DockSearch::Hidden => None,
+    }
 }
 
 /// The search shrunk to a button on a narrow secondary monitor: as big as the logo, with the search picture in it.
@@ -80,11 +123,7 @@ pub const SEARCH_BUTTON: f32 = LOGO;
 /// A secondary monitor's left island: the logo and the search (a field, or a button on a narrow monitor), no weather (the weather is
 /// the primary monitor's). Dock units.
 pub fn left_width_secondary(search: rf_win::dock::monitors::Search) -> f32 {
-    use rf_win::dock::monitors::Search;
-    SEARCH_LEFT + SIDE_PAD + match search {
-        Search::Field => SEARCH_W,
-        Search::Button => SEARCH_BUTTON,
-    }
+    left_width_with(shown_search(search), None, None)
 }
 
 /// Whether the condition line may be shown on this display: with it, the middle island must still fit, whole, between the left island
@@ -690,5 +729,28 @@ mod tests {
         assert_eq!(initial("İstanbul"), "İ");
         assert_eq!(initial(""), "?");
         assert_eq!(initial("--"), "?");
+    }
+}
+
+#[cfg(test)]
+mod search_setting_tests {
+    use super::*;
+    use crate::settings::DockSearch;
+    use rf_win::dock::monitors::Search;
+
+    /// The search setting only ever makes the search smaller than the monitor allows, and the island is as wide as what it shows.
+    #[test]
+    fn the_search_setting_shrinks_the_left_island() {
+        assert_eq!(search_for(DockSearch::Field, Search::Field), Some(Search::Field));
+        assert_eq!(search_for(DockSearch::Field, Search::Button), Some(Search::Button), "a narrow monitor keeps its button");
+        assert_eq!(search_for(DockSearch::Icon, Search::Field), Some(Search::Button));
+        assert_eq!(search_for(DockSearch::Hidden, Search::Field), None);
+        let field = left_width_with(Some(Search::Field), Some("12°"), None);
+        let icon = left_width_with(Some(Search::Button), Some("12°"), None);
+        let none = left_width_with(None, Some("12°"), None);
+        assert_eq!(field - icon, SEARCH_W - SEARCH_BUTTON);
+        assert_eq!(icon - none, LOGO_GAP + SEARCH_BUTTON);
+        assert_eq!(left_width_with(None, None, None), SIDE_PAD + LOGO + SIDE_PAD, "the logo alone");
+        assert_eq!(left_width_with(Some(Search::Field), Some("12°"), None), SEARCH_LEFT + SEARCH_W + WEATHER_GAP + weather_width_lines("12°", None) + SIDE_PAD);
     }
 }

@@ -133,6 +133,9 @@ struct Node {
     rescan_after: bool,
     /// A listing requested for this node (its current `ver`) has not been answered yet.
     inflight: bool,
+    /// How many levels the star key still opens from here (0: none). Kept while the node's listing is on its way: the listing's
+    /// answer goes on with its children (see `spread_open`).
+    open_below: u8,
 }
 
 impl Node {
@@ -187,7 +190,15 @@ pub enum TreeKey {
     Open,
     /// The minus key: closes the row's folder. The cursor stays on the row (Left goes on to the parent).
     Close,
+    /// The star key: opens the row's folder and the folders below it, [`OPEN_ALL_LEVELS`] levels deep and [`OPEN_ALL_MAX`] folders at
+    /// most (issue 38: "* to open all in the current folder downwards"). Folders are read as they are opened.
+    OpenAll,
 }
+
+/// How deep the star key opens, counting the row's own folder, and how many folders it opens at most. Explorer's star opens all of
+/// it, which on a drive's root can take minutes and fill the tree; these keep it a moment's work.
+pub const OPEN_ALL_LEVELS: u8 = 4;
+pub const OPEN_ALL_MAX: usize = 300;
 
 #[derive(Debug, Default)]
 pub struct KeyResult {
@@ -221,6 +232,8 @@ pub struct NavTree {
     row_of: Vec<u32>,
     /// Tests lower the node budget to see the freeing work on a small tree.
     budget_override: Option<usize>,
+    /// How many more folders the star key may open (it stops there on a large tree).
+    open_all_left: usize,
 }
 
 /// The key a path is compared by: lower case, backslashes, no verbatim prefix, no trailing
@@ -325,6 +338,7 @@ impl NavTree {
             seq: 0,
             rescan_after: false,
             inflight: false,
+            open_below: 0,
         };
         let id = match self.free.pop() {
             Some(id) => {
@@ -486,6 +500,44 @@ impl NavTree {
     }
 
     /// Does the node get a chevron? Folders not listed yet might have folders, so they do.
+    /// The star key's work from `id` down: each node with levels left is opened (within the budget), and once it is listed its children
+    /// get one level less. A node whose listing is still on its way keeps its levels until `apply_listing` comes back here.
+    fn spread_open(&mut self, id: NodeId, now_ms: u64) -> Vec<LoadRequest> {
+        let mut reqs = Vec::new();
+        let mut stack = vec![id];
+        while let Some(n) = stack.pop() {
+            if !self.live(n) {
+                continue;
+            }
+            let levels = self.nodes[n as usize].open_below;
+            if levels == 0 {
+                continue;
+            }
+            if !self.nodes[n as usize].expanded {
+                if self.open_all_left == 0 || !self.can_expand(n) {
+                    self.nodes[n as usize].open_below = 0;
+                    continue;
+                }
+                self.open_all_left -= 1;
+                reqs.extend(self.expand_node(n, now_ms, true));
+            }
+            if self.nodes[n as usize].load != Load::Loaded {
+                // (comes back here with the listing)
+                continue;
+            }
+            self.nodes[n as usize].open_below = 0;
+            if levels > 1 {
+                for c in self.nodes[n as usize].children.clone() {
+                    if self.visible(c) {
+                        self.nodes[c as usize].open_below = levels - 1;
+                        stack.push(c);
+                    }
+                }
+            }
+        }
+        reqs
+    }
+
     pub fn can_expand(&self, id: NodeId) -> bool {
         let n = &self.nodes[id as usize];
         match n.load {
@@ -617,6 +669,10 @@ impl NavTree {
         }
         self.nodes[id as usize].inflight = false;
         let mut reqs = Vec::new();
+        if result.is_err() {
+            // (the star key does not wait for a folder that cannot be listed)
+            self.nodes[id as usize].open_below = 0;
+        }
         match result {
             Err(ListFailure::NotFound) => match self.nodes[id as usize].parent {
                 Some(p) => {
@@ -638,6 +694,10 @@ impl NavTree {
                 self.nodes[id as usize].load = Load::Loaded;
                 if std::mem::take(&mut self.nodes[id as usize].rescan_after) {
                     reqs.push(self.request(id));
+                }
+                // (the star key was waiting for this listing: it goes on with the children)
+                if self.nodes[id as usize].open_below > 0 {
+                    reqs.extend(self.spread_open(id, now_ms));
                 }
             }
         }
@@ -1131,6 +1191,20 @@ impl NavTree {
                     move_to(self, &mut out, row);
                 }
             }
+            TreeKey::OpenAll => {
+                let Some(c) = cur else { return out };
+                let id = self.rows[c].id;
+                if self.rows[c].kind != RowKind::Node {
+                    return out;
+                }
+                self.nodes[id as usize].open_below = OPEN_ALL_LEVELS;
+                self.open_all_left = OPEN_ALL_MAX;
+                out.loads = self.spread_open(id, now_ms);
+                self.rebuild();
+                self.cursor = Some(id);
+                out.cursor_row = self.row_index(id);
+                out.changed = true;
+            }
             TreeKey::Open | TreeKey::Close => {
                 let Some(c) = cur else { return out };
                 let id = self.rows[c].id;
@@ -1603,6 +1677,29 @@ mod tests {
         assert_eq!(t.rows()[row].id, under_drive);
         assert!(t.take_scroll_target().is_none(), "no jump to the other copy");
         assert!(!t.is_marked(Path::new(r"C:\Users")));
+    }
+
+    /// The star key opens the row's folder and the folders below it as their listings come in, a few levels deep.
+    #[test]
+    fn the_star_opens_the_folders_below_as_they_are_listed() {
+        let mut t = tree();
+        let d = disk();
+        t.key(TreeKey::Down, 0);
+        t.key(TreeKey::Down, 0);
+        let k = t.key(TreeKey::OpenAll, 1);
+        assert_eq!(k.loads.len(), 1, "the row's own folder is read first");
+        let mut pending = k.loads;
+        let mut answered = 0;
+        while let Some(req) = pending.pop() {
+            answered += 1;
+            assert!(answered < 200, "it ends");
+            pending.extend(answer(&mut t, &req, &d, 2));
+        }
+        // every folder below the row that the made-up disk has, down to the levels allowed, is open
+        let open = t.nodes.iter().filter(|n| n.live && n.expanded).count();
+        assert!(open > 2, "more than the row's own folder opened: {open}");
+        let waiting: Vec<_> = t.nodes.iter().filter(|n| n.live && n.open_below > 0).map(|n| (n.path.clone(), n.open_below, n.expanded)).collect();
+        assert!(waiting.is_empty(), "nothing is left waiting: {waiting:?}");
     }
 
     /// Plus opens the row's folder and minus closes it; the cursor stays on the row either way (issue 38).

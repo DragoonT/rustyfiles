@@ -97,6 +97,8 @@ pub struct Prefs {
     pub side_tall: bool,
     /// The right island's own buttons: their order and the hidden ones (the island draws them from the settings; kept here to see a change).
     pub status: [Vec<String>; 2],
+    /// The left island's search: a field, a button, or none.
+    pub search: crate::settings::DockSearch,
 }
 
 impl Prefs {
@@ -110,6 +112,7 @@ impl Prefs {
             apps_where: s.dock_apps_where,
             side_tall: s.dock_side_tall,
             status: [s.dock_status_order.clone(), s.dock_status_hidden.clone()],
+            search: s.dock_search,
         }
     }
 }
@@ -129,6 +132,8 @@ pub struct Changes {
     pub side: bool,
     /// The right island's own buttons (order, hidden).
     pub status: bool,
+    /// The left island's search.
+    pub search: bool,
 }
 
 pub fn changes(old: &Prefs, new: &Prefs) -> Changes {
@@ -140,6 +145,7 @@ pub fn changes(old: &Prefs, new: &Prefs) -> Changes {
         apps: old.apps_where != new.apps_where,
         side: old.side_tall != new.side_tall,
         status: old.status != new.status,
+        search: old.search != new.search,
     }
 }
 
@@ -1476,6 +1482,13 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
     {
         left.update(cx, |v, cx| v.set_weather_source(&new.city, new.location, cx));
     }
+    if ch.search {
+        // every monitor's left island is drawn again and tells its new width
+        super::plan::set_search_mode(new.search);
+        for island in left_islands(cx) {
+            island.update(cx, |v, cx| v.search_setting_changed(cx));
+        }
+    }
     if ch.monitors {
         // the switch for a dock on every monitor: docks open or close now
         sync_docks(cx);
@@ -1665,6 +1678,8 @@ fn open_island<V: Render + 'static>(
 /// The dock process's start (called once, with the settings loaded, after the application is running).
 pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     let prefs = Prefs::of(cx.global::<Settings>());
+    // (before the islands are made: their widths depend on it)
+    super::plan::set_search_mode(prefs.search);
     let (tx, mut events) = futures::channel::mpsc::unbounded::<SystemEvent>();
     let system = match DockSystem::start(move |e| {
         let _ = tx.unbounded_send(e);
@@ -1952,7 +1967,7 @@ mod tests {
     }
 
     fn prefs(reserve: bool, city: &str) -> Prefs {
-        Prefs { reserve, city: city.into(), location: false, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, side_tall: false, status: Default::default() }
+        Prefs { reserve, city: city.into(), location: false, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, side_tall: false, status: Default::default(), search: Default::default() }
     }
 
     #[test]
@@ -1968,8 +1983,8 @@ mod tests {
     fn the_switch_for_the_position_changes_the_weather_source_like_the_city_does() {
         let base = prefs(true, "Ankara");
         let located = Prefs { location: true, ..base.clone() };
-        assert_eq!(changes(&base, &located), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false });
-        assert_eq!(changes(&located, &located), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false });
+        assert_eq!(changes(&base, &located), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false, search: false });
+        assert_eq!(changes(&located, &located), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false });
         // off by default, and the settings carry it through
         assert!(!Prefs::of(&Settings::default()).location);
         assert!(Prefs::of(&Settings { dock_weather_location: true, ..Default::default() }).location);
@@ -1978,12 +1993,12 @@ mod tests {
     #[test]
     fn only_what_changed_is_applied() {
         let base = prefs(true, "Ankara");
-        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false });
-        assert_eq!(changes(&base, &prefs(false, "Ankara")), Changes { reserve: true, city: false, size: false, monitors: false, apps: false, side: false, status: false });
-        assert_eq!(changes(&base, &prefs(true, "İzmir")), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false });
-        assert_eq!(changes(&base, &prefs(false, "")), Changes { reserve: true, city: true, size: false, monitors: false, apps: false, side: false, status: false });
+        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false });
+        assert_eq!(changes(&base, &prefs(false, "Ankara")), Changes { reserve: true, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false });
+        assert_eq!(changes(&base, &prefs(true, "İzmir")), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false, search: false });
+        assert_eq!(changes(&base, &prefs(false, "")), Changes { reserve: true, city: true, size: false, monitors: false, apps: false, side: false, status: false, search: false });
         let bigger = Prefs { size: crate::dock::size_pref::DockSizePref::from_permille(1200), ..base.clone() };
-        assert_eq!(changes(&base, &bigger), Changes { reserve: false, city: false, size: true, monitors: false, apps: false, side: false, status: false });
+        assert_eq!(changes(&base, &bigger), Changes { reserve: false, city: false, size: true, monitors: false, apps: false, side: false, status: false, search: false });
     }
 
     /// What a window has before the first layout is the layout's own margins, times the dock's size factor.
@@ -2010,19 +2025,19 @@ mod tests {
     fn the_switch_and_the_apps_rule_are_changes_the_running_dock_acts_on() {
         let base = prefs(true, "Ankara");
         let off = Prefs { all_monitors: false, ..base.clone() };
-        assert_eq!(changes(&base, &off), Changes { reserve: false, city: false, size: false, monitors: true, apps: false, side: false, status: false });
+        assert_eq!(changes(&base, &off), Changes { reserve: false, city: false, size: false, monitors: true, apps: false, side: false, status: false, search: false });
         let by_window = Prefs { apps_where: crate::settings::DockAppsWhere::Window, ..base.clone() };
-        assert_eq!(changes(&base, &by_window), Changes { reserve: false, city: false, size: false, monitors: false, apps: true, side: false, status: false });
-        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false });
+        assert_eq!(changes(&base, &by_window), Changes { reserve: false, city: false, size: false, monitors: false, apps: true, side: false, status: false, search: false });
+        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false });
     }
 
     #[test]
     fn the_side_islands_height_and_the_right_islands_buttons_are_changes_the_running_dock_acts_on() {
         let base = prefs(true, "Ankara");
         let tall = Prefs { side_tall: true, ..base.clone() };
-        assert_eq!(changes(&base, &tall), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: true, status: false });
+        assert_eq!(changes(&base, &tall), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: true, status: false, search: false });
         let reordered = Prefs { status: [vec!["volume".into()], Vec::new()], ..base.clone() };
-        assert_eq!(changes(&base, &reordered), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: true });
+        assert_eq!(changes(&base, &reordered), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: true, search: false });
         let hidden = Prefs { status: [Vec::new(), vec!["security".into()]], ..base.clone() };
         assert!(changes(&base, &hidden).status);
         // off and untouched by default, and the settings carry them through
