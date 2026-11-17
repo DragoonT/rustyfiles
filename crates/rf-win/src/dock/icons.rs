@@ -196,7 +196,7 @@ fn resample(src: &Bgra, dw: u32, dh: u32) -> Vec<u8> {
 }
 
 /// An icon stored in a file, at the size asked for (`PrivateExtractIconsW` picks the frame closest to it).
-fn extract_resource(file: &Path, index: i32, px: u32) -> Option<Bgra> {
+pub(crate) fn extract_resource(file: &Path, index: i32, px: u32) -> Option<Bgra> {
     use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, HICON, PrivateExtractIconsW};
     let w = crate::wide::wide(file);
     let mut buf = [0u16; 260];

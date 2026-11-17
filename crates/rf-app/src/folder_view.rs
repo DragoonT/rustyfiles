@@ -920,6 +920,8 @@ impl FolderView {
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
+        // (a customised folder's icon may have changed without its time or attributes: ask for those again)
+        crate::image_cache::refresh_folder_icons();
         self.column_cache.clear();
         // F5 measures folder sizes afresh (deep changes don't move a folder's own date)
         if let Some(p) = self.location().path() {

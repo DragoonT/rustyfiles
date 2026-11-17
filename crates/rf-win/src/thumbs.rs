@@ -98,6 +98,18 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
             return Ok(b);
         }
     }
+    // A customised folder's icon straight from the file its desktop.ini names. The shell keeps a folder's desktop.ini in this
+    // process: asked again after the icon was changed a second time, it gave the first icon back (issue 65). A file that gives no
+    // picture leaves it to the shell, as before.
+    if matches!(kind, Kind::Icon)
+        && let Some((file, index)) = crate::folder_custom::folder_icon(path)
+    {
+        let file = std::path::PathBuf::from(crate::folder_custom::expand_env(&file));
+        let file = if file.is_relative() { path.join(file) } else { file };
+        if let Some(b) = crate::dock::icons::extract_resource(&file, index, size) {
+            return Ok(b);
+        }
+    }
     keep_gdiplus_alive();
     ensure_com();
     let w = wide(path);

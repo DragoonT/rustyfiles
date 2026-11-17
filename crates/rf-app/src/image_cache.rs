@@ -61,6 +61,18 @@ fn file_picture_key(pane: bool, dir: &Path, name: &str, modified_ms: &impl Hash,
     key_of(&[&(if pane { "pane" } else { "thumb" }), &dir, &name, modified_ms, &size])
 }
 
+/// Changes when the icons of customised folders are to be asked for again (`refresh_folder_icons`).
+static FOLDER_ICON_GEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The icons of customised folders are asked for again: a folder's icon was changed in our Properties, or the user refreshed (F5).
+///
+/// WHY (issue 65: "anything changed does not get reflected in the treeview or fileview"): such an icon is kept under the folder's
+/// time and attributes, and changing the icon of a folder that already has one changes neither (the folder is read-only already,
+/// and rewriting its desktop.ini does not touch the folder's time), so the old picture stayed.
+pub fn refresh_folder_icons() {
+    FOLDER_ICON_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
 fn key_of(parts: &[&dyn HashPart]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     for p in parts {
@@ -268,7 +280,8 @@ impl ImageCache {
         let unique = own_picture(e);
         let key = if unique && e.is_dir() {
             // (with the folder's time and attributes: an icon chosen later changes one of them, and the old picture is not kept)
-            key_of(&[&"dirpath", &dir, &&*e.name, &e.modified_ms, &e.attrs, &ICON_PX])
+            let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
+            key_of(&[&"dirpath", &dir, &&*e.name, &e.modified_ms, &e.attrs, &ICON_PX, &generation])
         } else if e.is_dir() {
             key_of(&[&"dir", &ICON_PX])
         } else if unique {

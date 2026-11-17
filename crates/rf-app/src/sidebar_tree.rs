@@ -140,6 +140,8 @@ struct Goal {
 pub struct SidebarTree {
     model: NavTree,
     places: Entity<Places>,
+    /// The window's icons: a customised folder's own icon on its row.
+    images: Entity<crate::image_cache::ImageCache>,
     /// The sidebar's scroll area: the tree is part of its content and scrolls with it.
     scroll: ScrollHandle,
     focus: FocusHandle,
@@ -221,7 +223,13 @@ fn read_changes(dir: &Path, names: Vec<String>) -> Result<Vec<Change>, ListError
 }
 
 fn dir_item(e: &rf_core::Entry) -> DirItem {
-    DirItem { name: e.name.to_string(), label: e.label.as_deref().map(str::to_string), hidden: e.is_hidden(), system: e.is_system() }
+    DirItem {
+        name: e.name.to_string(),
+        label: e.label.as_deref().map(str::to_string),
+        hidden: e.is_hidden(),
+        system: e.is_system(),
+        own_icon: rf_win::thumbs::folder_has_own_icon(e.attrs),
+    }
 }
 
 fn root_kind(k: DriveKind) -> RootKind {
@@ -234,7 +242,7 @@ fn root_kind(k: DriveKind) -> RootKind {
 }
 
 impl SidebarTree {
-    fn new(places: Entity<Places>, scroll: ScrollHandle, cx: &mut Context<Self>) -> Self {
+    fn new(places: Entity<Places>, images: Entity<crate::image_cache::ImageCache>, scroll: ScrollHandle, cx: &mut Context<Self>) -> Self {
         let (tx, mut rx) = mpsc::unbounded::<Msg>();
         let task = cx.spawn(async move |this, cx| {
             while let Some(msg) = rx.next().await {
@@ -248,6 +256,7 @@ impl SidebarTree {
         let mut this = Self {
             model: NavTree::new(),
             places,
+            images,
             scroll,
             focus: cx.focus_handle(),
             tree_top: Rc::new(Cell::new(0.)),
@@ -657,6 +666,14 @@ impl SidebarTree {
         let covers = !selected && mark == Some((ix, false));
         let cursor = info.cursor && focused;
         let (expanded, can_expand, root, hidden, slow) = (info.expanded, info.can_expand, info.root, info.hidden, info.slow);
+        // a customised folder (not a root) shows the icon Windows gives it, as the file list does (issue 65)
+        let own_icon = (info.own_icon && root.is_none())
+            .then(|| {
+                let (dir, name) = (info.path.parent()?.to_path_buf(), info.path.file_name()?.to_string_lossy().into_owned());
+                let e = rf_core::Entry::new(&name, rf_core::EntryKind::Dir, 0, 0, 0, 0x10 | 0x1);
+                self.images.update(cx, |c, cx| c.icon(&dir, &e, cx))
+            })
+            .flatten();
         let icon_color = match root {
             Some(RootKind::Profile) => p.accent,
             Some(_) => p.text_secondary,
@@ -722,7 +739,10 @@ impl SidebarTree {
                         this.toggle(id, cx);
                     })),
             )
-            .child(Icon::new(Self::row_icon(root, expanded)).size(px(16.)).text_color(icon_color).flex_shrink_0())
+            .child(match own_icon {
+                Some(picture) => img(picture).size(px(16.)).flex_shrink_0().into_any_element(),
+                None => Icon::new(Self::row_icon(root, expanded)).size(px(16.)).text_color(icon_color).flex_shrink_0().into_any_element(),
+            })
             .child(
                 div()
                     .flex_1()
@@ -870,7 +890,8 @@ impl Workspace {
             return;
         }
         let (places, scroll) = (self.places.clone(), self.side_tree.scroll.clone());
-        let view = cx.new(|cx| SidebarTree::new(places, scroll, cx));
+        let images = self.images.clone();
+        let view = cx.new(|cx| SidebarTree::new(places, images, scroll, cx));
         let sub = cx.subscribe_in(&view, window, |this, _, ev: &TreeEvent, window, cx| this.on_tree_event(ev, window, cx));
         self.side_tree.view = Some(view);
         self.side_tree.sub = Some(sub);
