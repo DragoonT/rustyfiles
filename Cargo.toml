@@ -192,5 +192,5 @@ codegen-units = 16
 incremental = true
 
 [patch.crates-io]
-# our fork of GPUI's Windows layer (GPU/CPU hot-swap renderer), see its FORK.md
-gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
+# upstream GPUI Windows fork with the RTL glyph fix
+gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "77cdc99a4883d698e29bd5fd227c4fe094fe0414" }
