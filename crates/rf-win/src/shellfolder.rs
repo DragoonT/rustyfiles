@@ -69,10 +69,80 @@ fn filetime_ms(ft: FILETIME) -> i64 {
     (t / 10_000) as i64 - 11_644_473_600_000
 }
 
+/// The shell item a parsing name stands for. By the name first; when the shell does not take its own name back, by walking down
+/// from the nearest folder above it that it does take.
+///
+/// WHY THE WALK (issue 49, a Pixel 8 Pro over USB): the phone listed "Internal shared storage", and opening it said "The parameter
+/// is incorrect (0x80070057)". The storage's name is the one the shell handed out for it (`SIGDN_DESKTOPABSOLUTEPARSING`), but the
+/// portable-device folder does not parse it back. Its parent (the phone) parses, and the storage is among the parent's children
+/// under that very name, so it is found there. (Not seen here: no phone on this PC. The walk is the reading of the report.)
 fn bind(parsing: &str) -> anyhow::Result<IShellItem> {
     ensure_com();
-    let w = wide(parsing.trim());
-    Ok(unsafe { SHCreateItemFromParsingName(PCWSTR(w.as_ptr()), None)? })
+    let target = parsing.trim();
+    match by_name(target) {
+        Ok(item) => Ok(item),
+        Err(e) => walk_to(target).ok_or_else(|| anyhow::Error::from(e)),
+    }
+}
+
+fn by_name(parsing: &str) -> windows::core::Result<IShellItem> {
+    let w = wide(parsing);
+    unsafe { SHCreateItemFromParsingName(PCWSTR(w.as_ptr()), None) }
+}
+
+/// Finds `target` from the nearest folder above it that binds by name, one level at a time: at each level the child whose name is
+/// `target` or lies above it. `None` when no folder above binds or a level has no such child.
+fn walk_to(target: &str) -> Option<IShellItem> {
+    // the nearest folder above that binds (a device path has backslashes of its own: `\\?\usb#...`, skipped)
+    let mut cut = target.len();
+    let mut found = None;
+    for _ in 0..12 {
+        cut = target[..cut].rfind('\\')?;
+        let above = &target[..cut];
+        if above.len() < 3 || above.ends_with('\\') || above.ends_with('?') {
+            continue;
+        }
+        if let Ok(item) = by_name(above) {
+            found = Some(item);
+            break;
+        }
+    }
+    let mut item = found?;
+    for _ in 0..64 {
+        let here = display(&item, SIGDN_DESKTOPABSOLUTEPARSING)?;
+        if here.eq_ignore_ascii_case(target) {
+            return Some(item);
+        }
+        item = child_toward(&item, target)?;
+    }
+    None
+}
+
+/// The child of `item` that is `target` or one of the folders above it (by their parsing names, ignoring the case of letters).
+fn child_toward(item: &IShellItem, target: &str) -> Option<IShellItem> {
+    let en: IEnumShellItems = unsafe { item.BindToHandler(None, &BHID_EnumItems).ok()? };
+    loop {
+        let mut buf: [Option<IShellItem>; 32] = Default::default();
+        let mut got = 0u32;
+        let _ = unsafe { en.Next(&mut buf, Some(&mut got)) };
+        if got == 0 {
+            return None;
+        }
+        for c in buf.into_iter().take(got as usize).flatten() {
+            if display(&c, SIGDN_DESKTOPABSOLUTEPARSING).is_some_and(|name| leads_to(&name, target)) {
+                return Some(c);
+            }
+        }
+        if got < 32 {
+            return None;
+        }
+    }
+}
+
+/// Whether the parsing name `name` is `target` or a folder above it.
+fn leads_to(name: &str, target: &str) -> bool {
+    let (n, t) = (name.to_lowercase(), target.to_lowercase());
+    t == n || t.strip_prefix(&n).is_some_and(|rest| rest.starts_with('\\'))
 }
 
 fn child_of(item: &IShellItem) -> Option<ShellChild> {
@@ -121,8 +191,9 @@ fn enumerate(item: &IShellItem, cancel: &dyn Fn() -> bool, on_batch: &mut dyn Fn
 /// (a slow device shows its first items while the rest is still coming). Stops early when
 /// `cancel` turns true. Returns the number of items.
 pub fn list(parsing: &str, cancel: &dyn Fn() -> bool, on_batch: &mut dyn FnMut(Vec<ShellChild>)) -> anyhow::Result<usize> {
-    let item = bind(parsing)?;
-    enumerate(&item, cancel, on_batch)
+    // (which of the two steps failed goes to the log: a report's screenshot shows only the shell's message, issue 49)
+    let item = bind(parsing).inspect_err(|e| log::warn!("shell folder: could not open {parsing}: {e:#}"))?;
+    enumerate(&item, cancel, on_batch).inspect_err(|e| log::warn!("shell folder: could not list {parsing}: {e:#}"))
 }
 
 /// The shell's name for a folder (what an address bar would show).
@@ -332,5 +403,35 @@ mod tests {
     fn last_segment_of_parsing_names() {
         assert_eq!(last_segment(r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\Foo"), "Foo");
         assert_eq!(last_segment("Foo"), "Foo");
+    }
+}
+
+#[cfg(test)]
+mod walk_tests {
+    use super::leads_to;
+
+    #[test]
+    fn a_child_leads_to_the_target_when_it_is_the_target_or_a_folder_above_it() {
+        let phone = r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\\?\usb#vid_18d1&pid_4ee1#3a1#{6ac27878-a6fa-4155-ba85-f98f491d4f33}";
+        let storage = format!(r"{phone}\SID-{{10001,,118648832000}}");
+        let dcim = format!(r"{storage}\{{0000000A-0004-0000-0000-000000000000}}");
+        assert!(leads_to(&storage, &storage));
+        assert!(leads_to(&storage, &dcim), "the storage lies above DCIM");
+        assert!(leads_to(&storage.to_uppercase(), &dcim), "letters' case does not matter");
+        assert!(!leads_to(&format!(r"{phone}\SID-{{10001,,1}}"), &dcim), "another storage, whose name starts the same, does not");
+        assert!(!leads_to(&dcim, &storage), "below the target is not toward it");
+    }
+
+    /// The walk finds a real folder by its parsing name from the folder above it (here a file-system folder, which binds by name
+    /// anyway: what is tested is the walk itself).
+    #[test]
+    fn the_walk_reaches_a_folder_from_the_one_above_it() {
+        let dir = std::env::temp_dir().join(format!("rf-walk-test-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("inner")).unwrap();
+        let target = dir.join("inner").to_string_lossy().into_owned();
+        super::ensure_com();
+        let found = super::walk_to(&target).and_then(|i| super::display(&i, super::SIGDN_DESKTOPABSOLUTEPARSING));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(found.map(|s| s.to_lowercase()), Some(target.to_lowercase()));
     }
 }

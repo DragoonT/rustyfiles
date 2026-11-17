@@ -37,6 +37,10 @@ pub struct Entry {
     /// The name Explorer shows for a folder with a localized name (desktop.ini
     /// `LocalizedResourceName`: Downloads → "İndirilenler"). The real name stays in `name`.
     pub label: Option<Arc<str>>,
+    /// A symbolic link or a junction: the item stands for another place (issue 50: "it does not highlight them like regular Windows
+    /// File Explorer, this misleads the user into thinking the folders/files are not in place"). The list marks it with Explorer's
+    /// arrow. Other reparse points (cloud placeholders, deduplicated files) are not links. Set by the folder listing.
+    pub link: bool,
 }
 
 impl Entry {
@@ -45,7 +49,7 @@ impl Entry {
             Some(i) if kind == EntryKind::File && i > 0 && i + 1 < name.len() => shared_ext(&name[i + 1..]),
             _ => shared_ext(""),
         };
-        Self { name: name.into(), ext, kind, size, modified_ms, created_ms, attrs, label: None }
+        Self { name: name.into(), ext, kind, size, modified_ms, created_ms, attrs, label: None, link: false }
     }
 
     /// The name to show (and sort and type-select by): the localized one when there is one.

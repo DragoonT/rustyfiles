@@ -157,7 +157,7 @@ impl FolderView {
                 act(me, |v, w, cx| if v.selected_is_single_dir() { v.paste_into_selected(w, cx) } else { v.paste(w, cx) }),
             ),
             Quick::new(L::TextCursorInput, t!("Yeniden adlandır  (F2)"), true, act(me, |v, w, cx| v.rename_selection(w, cx))),
-            Quick::new(L::Share2, t!("Paylaş"), true, act(me, |v, _, _| v.share())),
+            Quick::new(L::Share2, t!("Paylaş"), true, act(me, |v, w, cx| v.share(w, cx))),
             Quick::new(L::Trash, t!("Sil  (Del)"), true, act(me, |v, w, cx| v.delete_selected(false, w, cx))),
             Quick::new(L::Wrench, t!("Özellikler  (Alt+Enter)"), true, act(me, |v, _, cx| v.properties(cx))),
         ]
@@ -434,17 +434,9 @@ impl FolderView {
         }
     }
 
-    /// Windows' share sheet for the selection.
-    pub(crate) fn share(&self) {
-        let items = self.selection_paths();
-        if items.is_empty() {
-            return;
-        }
-        rf_win::sta::run(move |owner| {
-            if let Err(e) = rf_win::ctxmenu::invoke_verb(owner, &ShellTarget::Items(items), "Windows.ModernShare", cursor()) {
-                log::warn!("share: {e:#}");
-            }
-        });
+    /// Windows' share sheet for the selection, over this window (`rf_win::share`: the context menu's verb failed, issue 48).
+    pub(crate) fn share(&self, window: &Window, cx: &mut App) {
+        crate::share::open(crate::look::window::hwnd_of(window), self.selection_paths(), cx);
     }
 
     /// Properties of the current folder (background menu).

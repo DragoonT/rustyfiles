@@ -806,10 +806,14 @@ impl FolderView {
                     .relative()
                     .when(selected, |d| d.bg(p.selection).child(theme::selection_pill(&p)))
                     .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
-                    .child(match &shell_icon {
-                        Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
-                        None => Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, p.dark)).into_any_element(),
-                    })
+                    .child(link_marked(
+                        match &shell_icon {
+                            Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
+                            None => Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, p.dark)).into_any_element(),
+                        },
+                        px(16.),
+                        e.link,
+                    ))
                     .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(SharedString::from(e.name.to_string())))
                     .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(p.text_tertiary)))
                     .on_mouse_down(
@@ -2263,6 +2267,7 @@ impl FolderView {
                         .text_color(theme::kind_color(cat, p.dark))
                         .into_any_element(),
                 };
+                let visual = link_marked(visual, visual_px, e.link);
                 let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
                 let label: AnyElement = match rename_input {
                     // the text stays where the label was: centered, the label's size
@@ -3590,14 +3595,18 @@ impl FolderView {
                                     ),
                             )
                         })
-                        .child(match &shell_icon {
-                            Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
-                            None => Icon::new(icons::icon_for(cat))
-                                .size(px(16.))
-                                .flex_shrink_0()
-                                .text_color(theme::kind_color(cat, p.dark))
-                                .into_any_element(),
-                        })
+                        .child(link_marked(
+                            match &shell_icon {
+                                Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
+                                None => Icon::new(icons::icon_for(cat))
+                                    .size(px(16.))
+                                    .flex_shrink_0()
+                                    .text_color(theme::kind_color(cat, p.dark))
+                                    .into_any_element(),
+                            },
+                            px(16.),
+                            e.link,
+                        ))
                         .child(name_el)
                         // encrypted: an archive member that needs a password, or an EFS file
                         .children((e.attrs & rf_core::attrs::ENCRYPTED != 0).then(|| Icon::new(L::Lock).size(px(12.)).flex_shrink_0().text_color(p.text_secondary)))
@@ -4740,4 +4749,38 @@ mod rename_name_tests {
         assert_eq!(shown_new_name("noext", false, false), "noext");
         assert_eq!(shown_new_name("ends.", false, false), "ends.");
     }
+}
+
+/// An item's icon with Explorer's link arrow at its lower left when the item is a symbolic link or a junction (issue 50): a small
+/// light square with a blue arrow, as Explorer draws it, so it reads the same in a light and a dark list. The icon keeps its place
+/// and size; a plain item's icon is returned as it is.
+fn link_marked(icon: AnyElement, size: Pixels, link: bool) -> AnyElement {
+    if !link {
+        return icon;
+    }
+    let s = (size * 0.3).max(px(8.)).min(px(22.));
+    div()
+        .relative()
+        .flex_shrink_0()
+        .size(size)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(icon)
+        .child(
+            div()
+                .absolute()
+                .left(px(-1.))
+                .bottom(px(-1.))
+                .size(s)
+                .rounded(px(2.))
+                .bg(gpui::rgb(0xFFFFFF))
+                .border_1()
+                .border_color(gpui::rgba(0x0000_0040))
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(Icon::new(L::ArrowUpRight).size(s * 0.85).text_color(gpui::rgb(0x1A73E8))),
+        )
+        .into_any_element()
 }

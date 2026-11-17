@@ -2681,7 +2681,7 @@ impl Workspace {
             .children(on("rename").then(|| {
                 cmd("cb-rename", L::TextCursorInput, "Yeniden adlandır  (F2)", writable_sel, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.rename_selection(w, cx)))
             }))
-            .children(on("share").then(|| cmd("cb-share", L::Share2, "Paylaş", writable_sel, cx, |this, _, cx| this.with_tab(cx, |v, _| v.share()))))
+            .children(on("share").then(|| cmd("cb-share", L::Share2, "Paylaş", writable_sel, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.share(w, cx)))))
             .children(on("delete").then(|| {
                 cmd("cb-delete", L::Trash, "Sil  (Del)", writable_sel, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.delete_selected(false, w, cx)))
             }))
@@ -3086,6 +3086,17 @@ impl Workspace {
                 p,
                 cx,
             ));
+        }
+        // phones and cameras under This PC (issue 49: "The phone also doesn't show up as a location in sidebar"); they are no roots of
+        // the folder tree, so they are listed with the tree on too
+        let devices = if shown("drives") { self.places.read(cx).devices.clone() } else { Vec::new() };
+        if !devices.is_empty() {
+            col = col.child(header(t!("Cihazlar")));
+            for (i, d) in devices.into_iter().enumerate() {
+                let loc = Location::Shell { parsing: d.parsing.clone(), name: d.name.clone() };
+                let active = cur == loc;
+                col = col.child(self.sidebar_item(("sb-dev", i).into(), L::Usb, p.text_secondary, d.name.clone(), loc, active, None, p, cx));
+            }
         }
         let cloud = self.places.read(cx).cloud.clone();
         if !cloud.is_empty() && shown("cloud") {

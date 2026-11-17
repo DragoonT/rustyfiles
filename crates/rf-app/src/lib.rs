@@ -52,6 +52,7 @@ mod snip;
 mod shell_view;
 mod select_box;
 mod settings_view;
+mod share;
 mod taskbar_preview;
 mod update_splash;
 mod shelf_view;

@@ -160,19 +160,56 @@ pub(crate) fn to_entry(d: &WIN32_FIND_DATAW) -> Option<Entry> {
     let kind = if a & attrs::DIRECTORY != 0 { EntryKind::Dir } else { EntryKind::File };
     let size = ((d.nFileSizeHigh as u64) << 32) | d.nFileSizeLow as u64;
     let ft = |f: windows::Win32::Foundation::FILETIME| ((f.dwHighDateTime as u64) << 32) | f.dwLowDateTime as u64;
-    Some(Entry::new(
+    let mut e = Entry::new(
         &name,
         kind,
         if kind == EntryKind::Dir { 0 } else { size },
         filetime_to_unix_ms(ft(d.ftLastWriteTime)),
         filetime_to_unix_ms(ft(d.ftCreationTime)),
         a,
-    ))
+    );
+    // (the find data carries a reparse point's tag in `dwReserved0`)
+    e.link = a & attrs::REPARSE_POINT != 0 && is_link_tag(d.dwReserved0);
+    Some(e)
+}
+
+/// The reparse tags of a symbolic link and of a junction (or a volume mount point): the ones Explorer marks with its arrow.
+fn is_link_tag(tag: u32) -> bool {
+    const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA000_0003;
+    const IO_REPARSE_TAG_SYMLINK: u32 = 0xA000_000C;
+    matches!(tag, IO_REPARSE_TAG_MOUNT_POINT | IO_REPARSE_TAG_SYMLINK)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A junction is listed as a link; the plain folder beside it is not (issue 50). A junction needs no rights to make, unlike a
+    /// symbolic link.
+    #[test]
+    fn a_junction_is_listed_as_a_link() {
+        let dir = std::env::temp_dir().join(format!("rf-link-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("real")).unwrap();
+        let made = std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(dir.join("joined"))
+            .arg(dir.join("real"))
+            .output()
+            .is_ok_and(|o| o.status.success());
+        if !made {
+            let _ = std::fs::remove_dir_all(&dir);
+            eprintln!("mklink /J did not run here: skipped");
+            return;
+        }
+        let mut seen = Vec::new();
+        list_dir(&dir, 100, &|| false, &mut |b| seen.extend(b)).unwrap();
+        let link_of = |n: &str| seen.iter().find(|e| &*e.name == n).map(|e| e.link);
+        assert_eq!((link_of("joined"), link_of("real")), (Some(true), Some(false)));
+        assert!(!is_link_tag(0x9000_601A), "a cloud placeholder's tag is not a link");
+        let _ = std::fs::remove_dir(dir.join("joined"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn lists_temp_dir() {

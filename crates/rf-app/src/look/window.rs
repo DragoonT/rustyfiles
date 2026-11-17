@@ -397,18 +397,9 @@ impl LookWindow {
         });
     }
 
-    fn share(&self) {
-        let p = self.path.clone();
-        rf_win::sta::run(move |owner| {
-            let mut pt = windows::Win32::Foundation::POINT::default();
-            unsafe {
-                let _ = windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut pt);
-            }
-            let target = rf_win::ctxmenu::ShellTarget::Items(vec![p]);
-            if let Err(e) = rf_win::ctxmenu::invoke_verb(owner, &target, "Windows.ModernShare", (pt.x, pt.y)) {
-                log::warn!("look share: {e:#}");
-            }
-        });
+    /// Windows' share sheet for the shown file, over DirectLook's window (`rf_win::share`, issue 48).
+    fn share(&self, window: &Window, cx: &mut App) {
+        crate::share::open(hwnd_of(window), vec![self.path.clone()], cx);
     }
 
     fn open_with(&self) {
@@ -474,7 +465,7 @@ impl LookWindow {
                 let on = !v.topmost;
                 v.set_topmost(on, cx);
             })))
-            .child(self.button("look-share", L::Share, t!("Paylaş").into(), false, p).on_click(cx.listener(|v, _, _, _| v.share())))
+            .child(self.button("look-share", L::Share, t!("Paylaş").into(), false, p).on_click(cx.listener(|v, _, window, cx| v.share(window, cx))))
             .child(
                 self.button("look-openwith", L::SquareArrowOutUpRight, t!("Birlikte aç").into(), false, p)
                     .on_click(cx.listener(|v, _, _, _| v.open_with())),

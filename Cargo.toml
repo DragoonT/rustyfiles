@@ -126,6 +126,9 @@ windows = { version = "0.62", features = [
     "UI_Notifications",
     "UI_Notifications_Management",
     "ApplicationModel",
+    # the share sheet for our windows (rf-win share.rs, issue 48)
+    "ApplicationModel_DataTransfer",
+    "Storage_Search",
     "Networking_Connectivity",
     "Devices_Radios",
     # the dock's weather from the PC's approximate position (rf-win weather_location.rs)
