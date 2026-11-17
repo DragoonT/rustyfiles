@@ -2317,9 +2317,108 @@ impl Workspace {
                 Item::action(t!("Bu sürücüyü gizle"), MenuIcon::Lucide(L::EyeOff), move |_, cx| crate::settings::update(cx, move |s| crate::settings_view::set_drive_hidden(s, letter, true))),
             );
         }
-        let menu = crate::fluent_menu::show(Menu { quick: Vec::new(), items }, at, window, cx);
+        // the row of quick buttons the file list's menu has (issue 53: "Can't do basic functions like copy, cut, delete, rename for
+        // the folders at the left pane"). A drive's root can be pasted into, not cut, renamed or deleted.
+        let root = path.parent().is_none();
+        let quick = {
+            use crate::fluent_menu::Quick;
+            let clip = |kind: rf_win::fileops::Transfer| {
+                let p = path.clone();
+                move |_: &mut Window, _: &mut App| {
+                    let p = p.clone();
+                    rf_win::sta::run(move |owner| {
+                        if let Err(e) = rf_win::clipboard::set_files(owner, &[p], kind) {
+                            log::warn!("clipboard: {e:#}");
+                        }
+                    });
+                }
+            };
+            vec![
+                Quick::new(L::Scissors, t!("Kes  (Ctrl+X)"), !root, clip(rf_win::fileops::Transfer::Move)),
+                Quick::new(L::Copy, t!("Kopyala  (Ctrl+C)"), true, clip(rf_win::fileops::Transfer::Copy)),
+                Quick::new(L::ClipboardPaste, t!("Yapıştır  (Ctrl+V)"), rf_win::clipboard::can_paste(), with(|ws, p, w, cx| {
+                    ws.active_tab().clone().update(cx, |v, cx| v.paste_to(p, w, cx))
+                })),
+                Quick::new(L::TextCursorInput, t!("Yeniden adlandır  (F2)"), !root, with(|ws, p, w, cx| ws.rename_place(p, w, cx))),
+                Quick::new(L::Trash, t!("Sil  (Del)"), !root, with(|ws, p, w, cx| {
+                    ws.active_tab().clone().update(cx, |v, cx| v.delete_paths(vec![p], false, w, cx))
+                })),
+            ]
+        };
+        let menu = crate::fluent_menu::show(Menu { quick, items }, at, window, cx);
         let view = self.active_tab().downgrade();
         crate::ctx_menu::load_shell_more(menu.downgrade(), rf_win::ctxmenu::ShellTarget::One(path), view, cx);
+    }
+
+    /// Renames a folder of the sidebar or the folder tree (its menu's Rename, issue 53): asks the new name, renames it off the
+    /// interface's thread, and keeps what pointed at it (a pin, its tags, a tab inside it) pointing at it.
+    fn rename_place(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(old) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else { return };
+        let me = cx.entity().downgrade();
+        crate::prompt::show(
+            t!("Yeniden adlandır"),
+            None,
+            Some((old.clone(), String::new())),
+            vec![
+                crate::prompt::Button::new(t!("Yeniden adlandır"), crate::prompt::Kind::Primary, move |text, _, cx| {
+                    let name = text.unwrap_or_default().trim().to_string();
+                    const INVALID: &[char] = &['\\', '/', ':', '*', '?', '"', '<', '>', '|'];
+                    if name.is_empty() || name.contains(INVALID) || name.ends_with('.') {
+                        return Err(t!("Dosya adı şu karakterleri içeremez: \\ / : * ? \" < > | ve nokta ile bitemez.").to_string());
+                    }
+                    if name == old {
+                        return Ok(());
+                    }
+                    let to = path.with_file_name(&name);
+                    let case_only = name.to_lowercase() == old.to_lowercase();
+                    if !case_only && std::fs::symlink_metadata(&to).is_ok() {
+                        return Err(t!("Bu adda bir öğe zaten var. Başka bir ad deneyin.").to_string());
+                    }
+                    let (from, me) = (path.clone(), me.clone());
+                    let done = cx.background_spawn({
+                        let (from, name) = (from.clone(), name.clone());
+                        async move { rf_win::fileops::rename(&from, &name) }
+                    });
+                    cx.spawn(async move |cx| match done.await {
+                        Ok(true) => {
+                            let _ = cx.update(|cx| {
+                                crate::undo::push(crate::undo::UndoOp::Renamed { from: from.clone(), to: to.clone() });
+                                crate::tags::update(cx, |t| t.moved(&from, &to));
+                                let _ = me.update(cx, |ws, cx| ws.place_renamed(&from, &to, cx));
+                            });
+                        }
+                        Ok(false) => {}
+                        Err(e) => log::warn!("rename: {e:#}"),
+                    })
+                    .detach();
+                    Ok(())
+                }),
+                crate::prompt::Button::cancel(),
+            ],
+            window,
+            cx,
+        );
+    }
+
+    /// After a sidebar folder was renamed: its pin follows it, and so does every tab that showed it or a folder inside it.
+    fn place_renamed(&mut self, from: &std::path::Path, to: &std::path::Path, cx: &mut Context<Self>) {
+        let pins = self.current_pins(cx);
+        if pins.iter().any(|p| p == from) {
+            let list: Vec<PathBuf> = pins.into_iter().map(|p| if p == from { to.to_path_buf() } else { p }).collect();
+            crate::settings::update(cx, |s| s.pinned = Some(list));
+        }
+        self.places.update(cx, |p, cx| p.refresh(cx));
+        for t in &self.tabs {
+            for v in std::iter::once(&t.left).chain(t.right.as_ref()) {
+                let moved = match v.read(cx).location() {
+                    Location::Path(p) => p.strip_prefix(from).ok().map(|rest| to.join(rest)),
+                    _ => None,
+                };
+                if let Some(now) = moved {
+                    v.update(cx, |v, cx| v.navigate(Location::Path(now), cx));
+                }
+            }
+        }
     }
 
     /// Folders dropped on the sidebar's pin area get pinned (files are ignored, as in Explorer).

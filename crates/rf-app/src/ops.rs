@@ -1,4 +1,4 @@
-//! File operations, clipboard, inline rename and the native context menu for a FolderView.
+﻿//! File operations, clipboard, inline rename and the native context menu for a FolderView.
 //! Everything that can block runs on worker threads or the shell STA thread.
 
 use crate::t;
@@ -323,7 +323,7 @@ impl FolderView {
         .detach();
     }
 
-    fn paste_to(&mut self, dir: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn paste_to(&mut self, dir: PathBuf, _window: &mut Window, cx: &mut Context<Self>) {
         // GetClipboardData can block on a slow source app (delayed rendering).
         let (tx, rx) = oneshot::channel();
         rf_win::sta::run(move |owner| {
@@ -377,11 +377,17 @@ impl FolderView {
 
     /// Deletes the selection, asking first per Settings → "Confirm before deleting".
     pub fn delete_selected(&mut self, permanent: bool, window: &mut Window, cx: &mut Context<Self>) {
-        use crate::settings::DeletePref;
         if self.shell_read_only(cx) {
             return;
         }
         let paths = self.selection_paths();
+        self.delete_paths(paths, permanent, window, cx);
+    }
+
+    /// Deletes `paths` the way the selection is deleted (the same question first, the same Status Center work). The sidebar's
+    /// folder menu uses it for the folder it was opened on (issue 53).
+    pub fn delete_paths(&mut self, paths: Vec<PathBuf>, permanent: bool, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::settings::DeletePref;
         if paths.is_empty() {
             return;
         }
