@@ -162,6 +162,8 @@ struct PopupState {
     anchor: Point<Pixels>,
     /// The display the menu must stay on.
     area: Bounds<Pixels>,
+    /// That display, named to every level window (`theme::popup_display`, issue 47).
+    display: Option<DisplayId>,
     /// Open level windows with the layout key they were built for (shared with `Host`, so
     /// closing never has to read the view, which may be the one being updated).
     wins: Wins,
@@ -225,8 +227,9 @@ pub fn show(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -
     if std::env::var_os("RF_INWINDOW_MENU").is_none() {
         let anchor = window.bounds().origin + pos;
         let area = window.display(cx).map(|d| d.bounds()).unwrap_or_else(|| window.bounds());
+        let display = crate::theme::popup_display(window, cx);
         let wins: Wins = Default::default();
-        view.update(cx, |m, _| m.popup = Some(PopupState { anchor, area, wins: wins.clone() }));
+        view.update(cx, |m, _| m.popup = Some(PopupState { anchor, area, display, wins: wins.clone() }));
         cx.set_global(Host(Some(HostState { main, view: view.clone(), restore: restore.clone(), popup: true, wins })));
         gpui_windows::KEEP_ACTIVE_LOOK.store(true, std::sync::atomic::Ordering::Relaxed);
         if sync_popups(&view, cx) {
@@ -367,9 +370,10 @@ fn run_in_main(run: Run, window: &mut Window, cx: &mut App) {
 /// Opens / rebuilds / closes level windows to match the menu state. False if the root popup
 /// could not be created.
 fn sync_popups(view: &Entity<MenuView>, cx: &mut App) -> bool {
-    let (wanted, have, dark, liquid) = {
+    let (wanted, have, dark, liquid, display) = {
         let m = view.read(cx);
         let Some(pp) = &m.popup else { return false };
+        let display = pp.display;
         let rects = m.layout(pp.area, pp.anchor);
         let wanted: Vec<LevelKey> = rects
             .iter()
@@ -377,7 +381,7 @@ fn sync_popups(view: &Entity<MenuView>, cx: &mut App) -> bool {
             .map(|(lv, r)| LevelKey { root_gen: m.root_gen, path: m.open[..lv].to_vec(), bounds: *r })
             .collect();
         let have: Vec<(AnyWindowHandle, LevelKey)> = pp.wins.borrow().clone();
-        (wanted, have, matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark), m.liquid)
+        (wanted, have, matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark), m.liquid, display)
     };
     let dark = match crate::settings::theme_override() {
         crate::settings::ThemePref::Light => false,
@@ -389,7 +393,7 @@ fn sync_popups(view: &Entity<MenuView>, cx: &mut App) -> bool {
     // open the new ones first (so focus moves to a menu window, never to nothing), then drop
     // the stale ones
     for (lv, key) in wanted.iter().enumerate().skip(keep) {
-        match open_level(view.clone(), lv, key.bounds, lv == 0, dark, liquid, cx) {
+        match open_level(view.clone(), lv, key.bounds, lv == 0, dark, liquid, display, cx) {
             Some(h) => wins.push((h, key.clone())),
             None if lv == 0 => return false,
             None => break,
@@ -409,9 +413,20 @@ fn sync_popups(view: &Entity<MenuView>, cx: &mut App) -> bool {
     true
 }
 
-fn open_level(view: Entity<MenuView>, level: usize, bounds: Bounds<Pixels>, focus: bool, dark: bool, liquid: bool, cx: &mut App) -> Option<AnyWindowHandle> {
+#[allow(clippy::too_many_arguments)]
+fn open_level(
+    view: Entity<MenuView>,
+    level: usize,
+    bounds: Bounds<Pixels>,
+    focus: bool,
+    dark: bool,
+    liquid: bool,
+    display: Option<DisplayId>,
+    cx: &mut App,
+) -> Option<AnyWindowHandle> {
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
+        display_id: display,
         titlebar: None,
         focus,
         show: true,

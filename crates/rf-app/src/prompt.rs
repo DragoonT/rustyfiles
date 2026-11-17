@@ -54,6 +54,10 @@ pub struct DialogView {
     choices: Vec<Choice>,
     buttons: Vec<Button>,
     focus: FocusHandle,
+    /// The button the keyboard is on: it carries a ring, Enter and Space press it, Tab, Shift+Tab and the arrows move it (the
+    /// owner, 2026-11-17: "hangi butonun seçili olduğu belli olsun. ok tuşlarıyla ya da tabla değişebilsin"). It starts on the
+    /// main button (`main_button`); in a dialog with a text box it starts nowhere, and Tab leaves the box for the buttons.
+    keyed: Option<usize>,
     _sub: Option<Subscription>,
 }
 
@@ -149,6 +153,7 @@ fn show_inner(
                 }
             })
         });
+        let keyed = if input.is_some() { None } else { main_button(&buttons.iter().map(|b| b.kind).collect::<Vec<_>>()).or(Some(0)) };
         DialogView {
             title: title.into(),
             message: message.map(Into::into),
@@ -157,6 +162,7 @@ fn show_inner(
             choices,
             buttons,
             focus: cx.focus_handle(),
+            keyed,
             _sub: sub,
         }
     });
@@ -199,6 +205,18 @@ impl DialogView {
         }
     }
 
+    /// Moves the keyboard to the next (`step` 1) or the previous (-1) button, round. From the text box it goes to the first or the
+    /// last button, and the box gives up the keyboard.
+    fn step(&mut self, step: isize, window: &mut Window, cx: &mut Context<Self>) {
+        let n = self.buttons.len();
+        if n == 0 {
+            return;
+        }
+        self.keyed = Some(next_button(self.keyed, step, n));
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
     /// Enter: the dialog's main button, which is the `Primary` one or, in a question whose answer destroys something, the `Danger`
     /// one. WHY (issue 42: "When using Shift + Delete ... pressing Enter does not confirm the action"): Enter looked for `Primary`
     /// only, and the permanent delete's "Delete" is `Danger`, so Enter did nothing there. Explorer's own question takes Enter too.
@@ -219,9 +237,12 @@ impl Render for DialogView {
                 Kind::Danger => (p.danger, p.accent_text),
                 Kind::Normal => (p.hover, p.text),
             };
+            let keyed = self.keyed == Some(ix);
             buttons = buttons.child(
                 div()
                     .id(("dlg-btn", ix))
+                    // the keyboard's button: a ring in the text's colour around it, outside its own fill
+                    .when(keyed, |d| d.border_2().border_color(p.text))
                     .min_w(px(96.))
                     .h(px(32.))
                     .px_4()
@@ -232,7 +253,7 @@ impl Render for DialogView {
                     .text_sm()
                     .bg(bg)
                     .text_color(fg)
-                    .when(b.kind == Kind::Normal, |d| d.border_1().border_color(p.border))
+                    .when(b.kind == Kind::Normal && !keyed, |d| d.border_1().border_color(p.border))
                     .hover(|s| s.opacity(0.9))
                     .active(|s| s.opacity(0.8))
                     .child(b.label.clone())
@@ -281,18 +302,37 @@ impl Render for DialogView {
             .justify_center()
             .bg(hsla(0., 0., 0., 0.35))
             .track_focus(&self.focus)
+            .key_context(crate::actions::DIALOG_CTX)
+            .on_action(cx.listener(|this, _: &crate::actions::DialogNext, window, cx| this.step(1, window, cx)))
+            .on_action(cx.listener(|this, _: &crate::actions::DialogPrev, window, cx| this.step(-1, window, cx)))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| match ev.keystroke.key.as_str() {
-                "escape" => {
-                    close(window, cx);
-                    cx.stop_propagation();
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                // (the text box keeps its own keys while it has the keyboard)
+                let in_box = this.input.as_ref().is_some_and(|i| i.read(cx).focus_handle(cx).is_focused(window));
+                match ev.keystroke.key.as_str() {
+                    "escape" => {
+                        close(window, cx);
+                        cx.stop_propagation();
+                    }
+                    "left" | "up" if !in_box => {
+                        this.step(-1, window, cx);
+                        cx.stop_propagation();
+                    }
+                    "right" | "down" if !in_box => {
+                        this.step(1, window, cx);
+                        cx.stop_propagation();
+                    }
+                    // (not a HELD Enter: the press that asked the question, still down, must not answer it)
+                    "enter" | "space" if !in_box && !ev.is_held => {
+                        match this.keyed {
+                            Some(ix) => this.press(ix, window, cx),
+                            None if ev.keystroke.key == "enter" => this.press_primary(window, cx),
+                            None => {}
+                        }
+                        cx.stop_propagation();
+                    }
+                    _ => {}
                 }
-                // (not a HELD Enter: the press that asked the question, still down, must not answer it)
-                "enter" if this.input.is_none() && !ev.is_held => {
-                    this.press_primary(window, cx);
-                    cx.stop_propagation();
-                }
-                _ => {}
             }))
             .child(
                 v_flex()
@@ -333,6 +373,15 @@ impl Render for DialogView {
     }
 }
 
+/// The button after `from` going `step` (round); from none: the first going forward, the last going back.
+fn next_button(from: Option<usize>, step: isize, n: usize) -> usize {
+    match from {
+        None if step >= 0 => 0,
+        None => n - 1,
+        Some(i) => (i as isize + step).rem_euclid(n as isize) as usize,
+    }
+}
+
 /// Which button Enter presses: the first `Primary`, else the first `Danger`, else none.
 fn main_button(kinds: &[Kind]) -> Option<usize> {
     kinds.iter().position(|k| *k == Kind::Primary).or_else(|| kinds.iter().position(|k| *k == Kind::Danger))
@@ -341,6 +390,13 @@ fn main_button(kinds: &[Kind]) -> Option<usize> {
 #[cfg(test)]
 mod main_button_tests {
     use super::{Kind, main_button};
+
+    #[test]
+    fn the_keyboard_goes_round_the_buttons() {
+        use super::next_button;
+        assert_eq!((next_button(Some(0), 1, 2), next_button(Some(1), 1, 2)), (1, 0));
+        assert_eq!((next_button(Some(0), -1, 2), next_button(None, 1, 3), next_button(None, -1, 3)), (1, 0, 2));
+    }
 
     #[test]
     fn enter_presses_the_primary_button_else_the_danger_one() {

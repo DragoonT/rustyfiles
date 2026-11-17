@@ -139,10 +139,14 @@ impl Places {
         this.refresh(cx);
         // the drives the user hides (Settings > Files and folders, a drive's own menu) leave and come back at once
         let mut hidden = rf_win::drives::hidden();
+        // and the pins, when they change anywhere (a pinned folder deleted or renamed: `pins_follow`)
+        let mut pins = cx.global::<crate::settings::Settings>().pinned.clone();
         cx.observe_global::<crate::settings::Settings>(move |p, cx| {
             let now = rf_win::drives::hidden();
-            if now != hidden {
+            let now_pins = cx.global::<crate::settings::Settings>().pinned.clone();
+            if now != hidden || now_pins != pins {
                 hidden = now;
+                pins = now_pins;
                 p.refresh(cx);
             }
         })
@@ -279,5 +283,53 @@ pub fn drive_icon(d: &Drive) -> L {
         DriveKind::Network => L::Network,
         DriveKind::Optical => L::Disc3,
         _ => L::HardDrive,
+    }
+}
+
+/// The user's pins after `from` was deleted (`to` None) or moved or renamed to `to`: a pin on `from` or inside it goes, or follows it.
+/// `None` when no pin is touched.
+///
+/// WHY (the owner, trying 0.8.8's sidebar menu on 2026-11-17: "sidebarda siliyorum. dosya siliniyor ama sidebarda görünmeye devam
+/// ediyor"): the pins are a list in the settings, and deleting or renaming the folder did not touch it.
+pub fn pins_after(pins: &[std::path::PathBuf], from: &std::path::Path, to: Option<&std::path::Path>) -> Option<Vec<std::path::PathBuf>> {
+    let touched = |p: &std::path::PathBuf| p.starts_with(from);
+    if !pins.iter().any(touched) {
+        return None;
+    }
+    Some(
+        pins.iter()
+            .filter_map(|p| match (p.strip_prefix(from), to) {
+                (Ok(_), None) => None,
+                (Ok(rest), Some(to)) => Some(if rest.as_os_str().is_empty() { to.to_path_buf() } else { to.join(rest) }),
+                (Err(_), _) => Some(p.clone()),
+            })
+            .collect(),
+    )
+}
+
+/// Applies [`pins_after`] to the user's own pin list (the default pins, when the user never changed them, are the known folders and
+/// stay as they are).
+pub fn pins_follow(cx: &mut App, from: &std::path::Path, to: Option<&std::path::Path>) {
+    let Some(list) = cx.global::<crate::settings::Settings>().pinned.clone() else { return };
+    if let Some(next) = pins_after(&list, from, to) {
+        crate::settings::update(cx, move |s| s.pinned = Some(next));
+    }
+}
+
+#[cfg(test)]
+mod pins_follow_tests {
+    use super::pins_after;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_pin_goes_with_its_folder_or_follows_it() {
+        let pins = vec![PathBuf::from(r"C:\a\Work"), PathBuf::from(r"C:\a\Work\inner"), PathBuf::from(r"D:\Photos")];
+        assert_eq!(pins_after(&pins, Path::new(r"C:\a\Work"), None), Some(vec![PathBuf::from(r"D:\Photos")]), "deleted: it and what was inside go");
+        assert_eq!(
+            pins_after(&pins, Path::new(r"C:\a\Work"), Some(Path::new(r"C:\a\Job"))),
+            Some(vec![PathBuf::from(r"C:\a\Job"), PathBuf::from(r"C:\a\Job\inner"), PathBuf::from(r"D:\Photos")])
+        );
+        assert_eq!(pins_after(&pins, Path::new(r"C:\a\Wor"), None), None, "a name that only starts the same is another folder");
+        assert_eq!(pins_after(&pins, Path::new(r"E:\x"), None), None);
     }
 }

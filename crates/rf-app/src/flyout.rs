@@ -62,12 +62,18 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, own
     close(cx);
     let vw = f32::from(owner.viewport_size().width);
     let x = f32::from(pos.x).min(vw - width - 8.).max(8.);
-    let origin = owner.bounds().origin + point(px(x), pos.y);
+    let mut origin = owner.bounds().origin + point(px(x), pos.y);
+    // and inside the owner's display: a window that reaches over onto the next monitor must not take its flyout there (issue 47)
+    if let Some(area) = owner.display(cx).map(|d| d.bounds()) {
+        let right = area.origin.x + area.size.width - px(width + 8.);
+        origin.x = origin.x.min(right).max(area.origin.x + px(8.));
+    }
     let dark = Palette::for_window(owner).dark;
     // opened from a window that shows glass (or from a popup that does): on real glass, not Windows' acrylic
     let liquid = crate::glass::liquid(crate::look::window::hwnd_of(owner));
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size(px(width), px(80.))))),
+        display_id: crate::theme::popup_display(owner, cx),
         titlebar: None,
         focus: true,
         show: true,

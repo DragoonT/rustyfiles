@@ -950,6 +950,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Boşken son kullanılanları göster", "Show recent items when empty"),
     ("Arama kutusu", "Search box"),
     ("Siyah (OLED)", "Black (OLED)"),
+    ("Simge simge büyüt", "Snap to each icon"),
+    ("Büyüme farenin altındaki simgeye oturur ve bir simgeden ötekine kısa bir kaymayla geçer. Kapalıyken fareyi sürekli izler.", "The growth settles on the icon under the pointer and slides quickly from one icon to the next. Off: it follows the pointer smoothly."),
     ("Oturum", "Session"),
     ("Oturumu kaydet", "Save session"),
     ("Oturumu kaydet…", "Save session…"),

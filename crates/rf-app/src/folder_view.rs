@@ -434,6 +434,8 @@ pub struct FolderView {
     pending_rename: bool,
     /// Shown by the Open/Save dialog: opening a file picks it instead.
     picking: bool,
+    /// A recent item of the Home page pressed with the left button, and where: moved far enough, it is dragged out (`drag_paths_out`).
+    home_press: Option<(PathBuf, Point<Pixels>)>,
     /// The mouse went down on an item's name (set by the name label, read by the row).
     name_hit: bool,
     /// Explorer's "click the name of the selected item again": (entry, serial) armed until the
@@ -606,6 +608,7 @@ impl FolderView {
             reselect_many: None,
             pending_rename: false,
             picking: false,
+            home_press: None,
             name_hit: false,
             slow_click: None,
             slow_click_serial: 0,
@@ -3855,13 +3858,12 @@ impl FolderView {
                     .relative()
                     .children(self.render_marquee(p))
                     .on_drag_move::<ExternalPaths>(cx.listener(|this, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
-                        if let Some(dir) = this.current_dir() {
-                            let paths: Vec<PathBuf> = ev.drag(cx).paths().to_vec();
-                            let t = rf_win::dnd::default_transfer(&paths, &dir, false, false);
-                            gpui_windows::dnd_hint::set(match t {
-                                rf_win::fileops::Transfer::Move => gpui_windows::dnd_hint::MOVE,
-                                rf_win::fileops::Transfer::Copy => gpui_windows::dnd_hint::COPY,
-                            });
+                        // (only while the pointer is over the list: every listener hears every move, and the tree's or a tab's
+                        // own effect must not be overwritten by the list's)
+                        if ev.bounds.contains(&ev.event.position)
+                            && let Some(dir) = this.current_dir()
+                        {
+                            show_drop_effect(ev.drag(cx).paths(), &dir);
                         }
                     }))
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
@@ -4072,9 +4074,38 @@ impl FolderView {
                             .child(parent),
                     )
                     .child(div().w(px(130.)).flex_shrink_0().text_color(p.text_secondary).child(format::datetime(r.used_ms)))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    // dragged out like a row of the list (the owner: "son kullanılanlarda ... drag drop ta olmuyor")
+                    .on_mouse_down(MouseButton::Left, {
+                        let target = target.clone();
+                        cx.listener(move |this, ev: &MouseDownEvent, _, _| this.home_press = Some((target.clone(), ev.position)))
+                    })
+                    .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, _| {
+                        let Some((path, at)) = this.home_press.as_ref() else { return };
+                        if ev.pressed_button != Some(MouseButton::Left) {
+                            this.home_press = None;
+                            return;
+                        }
+                        let (dx, dy) = (f32::from(ev.position.x - at.x), f32::from(ev.position.y - at.y));
+                        if dx * dx + dy * dy > 36.0 {
+                            let path = path.clone();
+                            this.home_press = None;
+                            crate::ops::drag_paths_out(vec![path]);
+                        }
+                    }))
+                    .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                        this.home_press = None;
                         if is_dir {
                             this.navigate(Location::Path(target.clone()), cx);
+                        } else if this.picking {
+                            // the Open dialog (the owner: "aç penceresinde ana sayfada son kullanılanlarda dosya seçilemiyor. direkt
+                            // açıyor"): a click shows the file selected in its folder, as a click in the list selects it; a double
+                            // click picks it, as in the list
+                            if ev.click_count() >= 2 {
+                                cx.emit(FolderEvent::Picked(vec![target.clone()]));
+                            } else if let (Some(dir), Some(name)) = (target.parent(), target.file_name()) {
+                                this.set_reselect(name.to_string_lossy().into_owned());
+                                this.navigate(Location::Path(dir.to_path_buf()), cx);
+                            }
                         } else {
                             open_in_background(target.clone(), cx);
                         }
@@ -4816,4 +4847,47 @@ fn link_marked(icon: AnyElement, size: Pixels, link: bool) -> AnyElement {
                 .child(Icon::new(L::ArrowUpRight).size(s * 0.85).text_color(gpui::rgb(0x1A73E8))),
         )
         .into_any_element()
+}
+
+impl FolderView {
+    /// Every shown item selected (the toolbar's "…" menu; Ctrl+A does the same through its action).
+    pub(crate) fn select_all_items(&mut self, cx: &mut Context<Self>) {
+        self.selected = self.visible.iter().copied().collect();
+        cx.notify();
+    }
+
+    /// Nothing selected; the cursor stays where it is.
+    pub(crate) fn select_no_items(&mut self, cx: &mut Context<Self>) {
+        self.selected.clear();
+        cx.notify();
+    }
+
+    /// The shown items that were not selected become the selection.
+    pub(crate) fn invert_selected_items(&mut self, cx: &mut Context<Self>) {
+        let next: HashSet<u32> = self.visible.iter().copied().filter(|i| !self.selected.contains(i)).collect();
+        self.selected = next;
+        cx.notify();
+    }
+}
+
+/// Tells Windows which effect to show under the pointer ("Move to", "Copy to") for files dragged over a drop target whose folder is
+/// `dir`: what the drop will do there (`rf_win::dnd::default_transfer`: the same drive moves, another drive copies). Every drop target
+/// says it for its own folder (issue 54: dragging from W: onto the tree's D: row said "Move" and copied: the tree said nothing, and
+/// the list's last word, W: onto W:, stayed).
+pub(crate) fn show_drop_effect(paths: &[PathBuf], dir: &std::path::Path) {
+    let t = rf_win::dnd::default_transfer(paths, dir, false, false);
+    log::debug!("drag over {}: {t:?} ({} item(s), the first {:?})", dir.display(), paths.len(), paths.first());
+    gpui_windows::dnd_hint::set(match t {
+        rf_win::fileops::Transfer::Move => gpui_windows::dnd_hint::MOVE,
+        rf_win::fileops::Transfer::Copy => gpui_windows::dnd_hint::COPY,
+    });
+}
+
+/// [`show_drop_effect`] as a drag-move listener of a drop target, for the moves over it.
+pub(crate) fn drop_effect_over(dir: PathBuf) -> impl Fn(&DragMoveEvent<ExternalPaths>, &mut Window, &mut App) + 'static {
+    move |ev, _, cx| {
+        if ev.bounds.contains(&ev.event.position) {
+            show_drop_effect(ev.drag(cx).paths(), &dir);
+        }
+    }
 }

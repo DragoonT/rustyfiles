@@ -120,6 +120,10 @@ pub struct MiddleIsland {
     /// Where the pointer last was over the dock (logical px from the REST island's left edge); `None` before it first came. It stays
     /// where it was when the pointer leaves, so the bell shrinks away in place.
     pointer_x: Option<f32>,
+    /// Where the bell stands when it snaps to the icons (`dock_magnify_snap`), and the x the last frame was drawn with (a press
+    /// holds that one).
+    snap: magnify::Glide,
+    bell_x: Option<f32>,
     /// The height of the bell over time (0 away, 1 over the dock).
     presence: Presence,
     /// Clock of the animation.
@@ -226,6 +230,8 @@ impl MiddleIsland {
             levels_peak: 0.0,
             icon_gen: 0,
             pointer_x: None,
+            snap: magnify::Glide::default(),
+            bell_x: None,
             presence: Presence::new(plan::hover_duration(crate::settings::animations())),
             t0: Instant::now(),
             reported: 0.0,
@@ -502,7 +508,7 @@ impl MiddleIsland {
     /// A button went down on the dock: the icons stand still until it is up.
     fn pressed(&mut self) {
         let now = self.now_ms();
-        self.frozen = self.pointer_x.map(|x| (x, self.presence.value(now)));
+        self.frozen = self.bell_x.or(self.pointer_x).map(|x| (x, self.presence.value(now)));
     }
 
     /// The left button came up at `at` (the window's logical px; also when that is outside the window, where the pointer was captured). An
@@ -1051,6 +1057,26 @@ impl Render for MiddleIsland {
             Some((x, h)) => (Some(x), h),
             None => (self.pointer_x, self.presence.value(now)),
         };
+        // snapping to the icons: the bell stands on the nearest icon's centre and slides to the next one (`magnify::Glide`); once the
+        // bell has gone, it forgets where it stood, so the next time it comes in where the pointer does
+        let snap_on = cx.global::<Settings>().dock_magnify_snap;
+        if !self.presence.is_in() && self.presence.settled(now) {
+            self.snap.reset();
+        }
+        let pointer = match (pointer, self.frozen.is_none() && snap_on) {
+            (Some(x), true) => {
+                if let Some(target) = magnify::snap_target(&self.slots, &rest, x) {
+                    let pace = if crate::settings::animations() { magnify::SNAP_MS } else { 0 };
+                    self.snap.aim(target, now, pace);
+                }
+                if self.snap.moving(now) {
+                    window.request_animation_frame();
+                }
+                Some(if self.snap.is_set() { self.snap.value(now) } else { x })
+            }
+            (p, _) => p,
+        };
+        self.bell_x = pointer;
         // (no bell while the dock is thin; it comes in with the growth)
         let height = sq.bell(height);
         let frame = match pointer {

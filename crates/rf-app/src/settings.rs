@@ -631,6 +631,9 @@ pub struct Settings {
     pub dock_scroll_volume: bool,
     /// How much the dock's icons grow under the pointer (off / subtle / full).
     pub dock_magnify: DockMagnify,
+    /// The growth snaps to the icon under the pointer and slides from icon to icon (`magnify::Glide`); off: it follows the pointer
+    /// smoothly, as the Mac's does. On by default (the owner, 2026-11-17: "ikon ikon daha clicky hissettirebilir mi").
+    pub dock_magnify_snap: bool,
     /// Resting the pointer on a running app's icon in the dock shows a preview of its windows (on; the dock itself is opt-in). Off: nothing.
     pub dock_hover_previews: bool,
     /// A right click on an app's icon in the dock opens the dock's own app menu (on). Off: it does nothing, as before.
@@ -828,6 +831,7 @@ impl Default for Settings {
             dock_tray_compact: false,
             dock_scroll_volume: true,
             dock_magnify: DockMagnify::Full,
+            dock_magnify_snap: true,
             dock_hover_previews: true,
             dock_app_menu: true,
             dock_thin_when_maximized: true,
