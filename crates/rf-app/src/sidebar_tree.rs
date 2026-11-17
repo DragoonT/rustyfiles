@@ -759,6 +759,7 @@ impl SidebarTree {
             )
             // files and folders dropped here go into this folder, exactly as on any other sidebar row
             .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_1().border_color(drop_border))
+            .on_drag_move::<ExternalPaths>(crate::folder_view::drop_effect_over(drop_dir.clone()))
             .on_drop(move |paths: &ExternalPaths, _, cx| drop_files(paths, drop_dir.clone(), cx))
             .into_any_element()
     }

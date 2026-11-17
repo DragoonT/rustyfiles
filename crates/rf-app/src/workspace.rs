@@ -2077,6 +2077,7 @@ impl Workspace {
                     .on_drop(cx.listener(move |this, d: &TabDrag, window, cx| this.move_tab(d.ix, i, window, cx)))
                     .when_some(tab_dir, |d, dir| {
                         d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg))
+                            .on_drag_move::<ExternalPaths>(crate::folder_view::drop_effect_over(dir.clone()))
                             .on_drop(move |paths: &ExternalPaths, _, cx| drop_files(paths, dir.clone(), cx))
                     });
             tabs = match anim {
@@ -2792,6 +2793,8 @@ impl Workspace {
             .children(extra("terminal").then(|| cmd("cb-terminal", L::SquareTerminal, "Terminalde aç  (Ctrl+Shift+`)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(OpenTerminal), cx))))
             .children(extra("hidden").then(|| cmd("cb-hidden", L::Eye, "Gizli öğeleri göster/gizle  (Ctrl+H)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(ToggleHidden), cx))))
             .children(extra("refresh").then(|| cmd("cb-refresh", L::RotateCw, "Yenile  (F5)", true, cx, |_, w, cx| w.dispatch_action(Box::new(Refresh), cx))))
+            // undo, the selection commands, properties, Settings (issue 55, Explorer's "See more")
+            .children(on("more").then(|| drop("cb-more", L::Ellipsis, None, "Diğer", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::More)))
             .child(div().flex_1())
             .children(on("filter").then(|| {
                 div()
@@ -2919,6 +2922,7 @@ impl Workspace {
                     .child(label)
                     .when_some(target.path().map(Path::to_path_buf), |d, dir| {
                         d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg))
+                            .on_drag_move::<ExternalPaths>(crate::folder_view::drop_effect_over(dir.clone()))
                             .on_drop(move |paths: &ExternalPaths, _, cx| drop_files(paths, dir.clone(), cx))
                     })
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -3040,6 +3044,7 @@ impl Workspace {
             )
             .when_some(drop_dir, |d, dir| {
                 d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_1().border_color(drop_border))
+                    .on_drag_move::<ExternalPaths>(crate::folder_view::drop_effect_over(dir.clone()))
                     .on_drop(move |paths: &ExternalPaths, _, cx| drop_files(paths, dir.clone(), cx))
             })
     }

@@ -3847,13 +3847,12 @@ impl FolderView {
                     .relative()
                     .children(self.render_marquee(p))
                     .on_drag_move::<ExternalPaths>(cx.listener(|this, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
-                        if let Some(dir) = this.current_dir() {
-                            let paths: Vec<PathBuf> = ev.drag(cx).paths().to_vec();
-                            let t = rf_win::dnd::default_transfer(&paths, &dir, false, false);
-                            gpui_windows::dnd_hint::set(match t {
-                                rf_win::fileops::Transfer::Move => gpui_windows::dnd_hint::MOVE,
-                                rf_win::fileops::Transfer::Copy => gpui_windows::dnd_hint::COPY,
-                            });
+                        // (only while the pointer is over the list: every listener hears every move, and the tree's or a tab's
+                        // own effect must not be overwritten by the list's)
+                        if ev.bounds.contains(&ev.event.position)
+                            && let Some(dir) = this.current_dir()
+                        {
+                            show_drop_effect(ev.drag(cx).paths(), &dir);
                         }
                     }))
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
@@ -4808,4 +4807,46 @@ fn link_marked(icon: AnyElement, size: Pixels, link: bool) -> AnyElement {
                 .child(Icon::new(L::ArrowUpRight).size(s * 0.85).text_color(gpui::rgb(0x1A73E8))),
         )
         .into_any_element()
+}
+
+impl FolderView {
+    /// Every shown item selected (the toolbar's "…" menu; Ctrl+A does the same through its action).
+    pub(crate) fn select_all_items(&mut self, cx: &mut Context<Self>) {
+        self.selected = self.visible.iter().copied().collect();
+        cx.notify();
+    }
+
+    /// Nothing selected; the cursor stays where it is.
+    pub(crate) fn select_no_items(&mut self, cx: &mut Context<Self>) {
+        self.selected.clear();
+        cx.notify();
+    }
+
+    /// The shown items that were not selected become the selection.
+    pub(crate) fn invert_selected_items(&mut self, cx: &mut Context<Self>) {
+        let next: HashSet<u32> = self.visible.iter().copied().filter(|i| !self.selected.contains(i)).collect();
+        self.selected = next;
+        cx.notify();
+    }
+}
+
+/// Tells Windows which effect to show under the pointer ("Move to", "Copy to") for files dragged over a drop target whose folder is
+/// `dir`: what the drop will do there (`rf_win::dnd::default_transfer`: the same drive moves, another drive copies). Every drop target
+/// says it for its own folder (issue 54: dragging from W: onto the tree's D: row said "Move" and copied: the tree said nothing, and
+/// the list's last word, W: onto W:, stayed).
+pub(crate) fn show_drop_effect(paths: &[PathBuf], dir: &std::path::Path) {
+    let t = rf_win::dnd::default_transfer(paths, dir, false, false);
+    gpui_windows::dnd_hint::set(match t {
+        rf_win::fileops::Transfer::Move => gpui_windows::dnd_hint::MOVE,
+        rf_win::fileops::Transfer::Copy => gpui_windows::dnd_hint::COPY,
+    });
+}
+
+/// [`show_drop_effect`] as a drag-move listener of a drop target, for the moves over it.
+pub(crate) fn drop_effect_over(dir: PathBuf) -> impl Fn(&DragMoveEvent<ExternalPaths>, &mut Window, &mut App) + 'static {
+    move |ev, _, cx| {
+        if ev.bounds.contains(&ev.event.position) {
+            show_drop_effect(ev.drag(cx).paths(), &dir);
+        }
+    }
 }

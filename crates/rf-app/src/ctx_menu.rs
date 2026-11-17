@@ -387,6 +387,14 @@ impl FolderView {
         v.push(Item::sub(t!("Gruplandır"), icon(L::ListTree), group_menu));
         v.push(Item::action(t!("Yenile"), icon(L::RotateCw), act(me, |v, _, cx| v.refresh(cx))).hint("Ctrl+R"));
         v.push(Item::Separator);
+        // what Ctrl+Z and Ctrl+Y would do, when there is something (issue 55: Explorer's "Undo Delete")
+        let (undo, redo) = crate::undo::next_labels();
+        if undo.is_some() {
+            v.push(Item::action(undo_text(undo), icon(L::Undo2), |_, cx| crate::undo::undo(cx)).hint("Ctrl+Z"));
+        }
+        if redo.is_some() {
+            v.push(Item::action(redo_text(redo), icon(L::Redo2), |_, cx| crate::undo::redo(cx)).hint("Ctrl+Y"));
+        }
         let fallback = Rc::new(own_new_items(me));
         v.push(Item::Sub { label: t!("Yeni").into(), icon: icon(L::CirclePlus), items: Sub::Pending { key: "new", fallback: Some(fallback) } });
         v.push(Item::action(t!("Kısayol yapıştır"), icon(L::ClipboardPaste), act(me, |v, w, cx| v.paste_shortcuts(w, cx))).enabled(rf_win::clipboard::has_files()));
@@ -443,6 +451,21 @@ impl FolderView {
     pub(crate) fn folder_properties(&self, cx: &mut App) {
         let Some(dir) = self.current_dir() else { return };
         crate::properties_view::open(vec![dir], self.images.clone(), cx);
+    }
+}
+
+/// "Geri al: Silme", or plain "Geri al" when there is nothing to undo.
+fn undo_text(what: Option<&str>) -> String {
+    match what {
+        Some(w) => format!("{}: {w}", t!("Geri al")),
+        None => t!("Geri al").to_string(),
+    }
+}
+
+fn redo_text(what: Option<&str>) -> String {
+    match what {
+        Some(w) => format!("{}: {w}", t!("Yinele")),
+        None => t!("Yinele").to_string(),
     }
 }
 
@@ -540,6 +563,9 @@ fn group_items(me: &Me, group: GroupBy) -> Vec<Item> {
 pub enum BarMenu {
     New,
     Sort,
+    /// The "…" button: undo and redo, the selection commands, the folder's properties, Settings (issue 55: as Explorer's "See more"
+    /// menu has them).
+    More,
     /// Layout + view toggles; the flags are workspace state shown as check marks.
     View { dual: bool, shelf: bool },
 }
@@ -569,6 +595,21 @@ impl FolderView {
                 })
                 .detach();
                 return;
+            }
+            BarMenu::More => {
+                let (undo, redo) = crate::undo::next_labels();
+                let none = self.selected.is_empty();
+                vec![
+                    Item::action(undo_text(undo), icon(L::Undo2), move |_, cx| crate::undo::undo(cx)).hint("Ctrl+Z").enabled(undo.is_some()),
+                    Item::action(redo_text(redo), icon(L::Redo2), move |_, cx| crate::undo::redo(cx)).hint("Ctrl+Y").enabled(redo.is_some()),
+                    Item::Separator,
+                    Item::action(t!("Tümünü seç"), icon(L::SquareCheck), act(&me, |v, _, cx| v.select_all_items(cx))).hint("Ctrl+A"),
+                    Item::action(t!("Hiçbirini seçme"), icon(L::Square), act(&me, |v, _, cx| v.select_no_items(cx))).enabled(!none),
+                    Item::action(t!("Seçimi tersine çevir"), icon(L::ArrowLeftRight), act(&me, |v, _, cx| v.invert_selected_items(cx))),
+                    Item::Separator,
+                    Item::action(t!("Özellikler"), icon(L::Wrench), act(&me, |v, _, cx| v.folder_properties(cx))),
+                    Item::action(t!("Ayarlar"), icon(L::Settings), |w, cx| w.dispatch_action(Box::new(crate::actions::GoSettings), cx)).hint("Ctrl+,"),
+                ]
             }
             BarMenu::Sort => {
                 // Files' layout: Sort ▸ / Group ▸, then the folder/file order; these apply to
