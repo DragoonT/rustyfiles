@@ -988,6 +988,36 @@ impl Workspace {
         self.tabs[self.active].view()
     }
 
+    /// Tab (`forward`) and Shift+Tab: the keyboard goes round the window's panes, the address bar, the folder tree (when it is on
+    /// screen) and the file list, as Explorer's Tab does (issue 38: "TAB does not work anywhere"). A rename in the list keeps it.
+    fn cycle_focus(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.active_tab().read(cx).renaming.is_some() {
+            return;
+        }
+        let tree = self.tree_focus(cx);
+        let here = if self.editing_address {
+            Pane::Address
+        } else if tree.as_ref().is_some_and(|f| f.is_focused(window)) {
+            Pane::Tree
+        } else {
+            Pane::List
+        };
+        match next_pane(here, forward, tree.is_some()) {
+            Pane::Address => self.begin_address_edit(window, cx),
+            to => {
+                if self.editing_address {
+                    self.editing_address = false;
+                    self.clear_suggestions();
+                }
+                match (to, tree) {
+                    (Pane::Tree, Some(f)) => window.focus(&f, cx),
+                    _ => self.focus_active(window, cx),
+                }
+                cx.notify();
+            }
+        }
+    }
+
     fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
         let fh = self.active_tab().read(cx).focus.clone();
         window.focus(&fh, cx);
@@ -1794,6 +1824,11 @@ impl Workspace {
     /// Tab (arrives as the input's unhandled `IndentInline`): takes the highlighted (or first)
     /// completion into the text and lists its children.
     fn accept_suggestion(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.editing_address && self.addr_suggest.is_empty() {
+            // no suggestion to take: Tab goes on to the next pane, as it does from the list (issue 38)
+            self.cycle_focus(true, window, cx);
+            return;
+        }
         if !self.editing_address || self.addr_suggest.is_empty() {
             cx.propagate();
             return;
@@ -2647,6 +2682,13 @@ impl Workspace {
                 }
             }))
             .on_action(cx.listener(|this, _: &gpui_kit::component::input::IndentInline, window, cx| this.accept_suggestion(window, cx)))
+            .on_action(cx.listener(|this, _: &gpui_kit::component::input::OutdentInline, window, cx| {
+                if this.editing_address {
+                    this.cycle_focus(false, window, cx);
+                } else {
+                    cx.propagate();
+                }
+            }))
             .when(searching, |d| d.child(Icon::new(L::Search).size(px(14.)).text_color(p.text_secondary)))
             .child(div().flex_1().min_w_0().overflow_hidden().child(field))
             .children(suggestions)
@@ -4310,6 +4352,8 @@ impl Render for Workspace {
                 }
             }))
             .on_action(cx.listener(|this, _: &FocusAddress, window, cx| this.begin_address_edit(window, cx)))
+            .on_action(cx.listener(|this, _: &FocusNextPane, window, cx| this.cycle_focus(true, window, cx)))
+            .on_action(cx.listener(|this, _: &FocusPrevPane, window, cx| this.cycle_focus(false, window, cx)))
             .on_action(cx.listener(|this, _: &TogglePreview, _, cx| {
                 this.toggle_preview(cx);
             }))
@@ -4586,6 +4630,38 @@ mod rail_peek_tests {
         assert!(rail_peek_width(240.0, 1.05) > 240.0, "the swing past its place");
         assert_eq!(rail_peek_width(240.0, -0.2), RAIL_W);
         assert!(rail_peek_width(240.0, 0.5) > RAIL_W && rail_peek_width(240.0, 0.5) < 240.0);
+    }
+}
+
+/// The stops of Tab in a window, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Pane {
+    Address,
+    Tree,
+    List,
+}
+
+/// The pane after `here` (`forward`) or before it, round; the tree is skipped when it is not on screen.
+fn next_pane(here: Pane, forward: bool, tree: bool) -> Pane {
+    let order: Vec<Pane> = [Pane::Address, Pane::Tree, Pane::List].into_iter().filter(|p| *p != Pane::Tree || tree).collect();
+    let i = order.iter().position(|p| *p == here).unwrap_or(order.len() - 1);
+    let n = order.len();
+    order[if forward { (i + 1) % n } else { (i + n - 1) % n }]
+}
+
+#[cfg(test)]
+mod pane_tests {
+    use super::{Pane, next_pane};
+
+    #[test]
+    fn tab_goes_round_the_address_bar_the_tree_and_the_list() {
+        assert_eq!(next_pane(Pane::List, true, true), Pane::Address);
+        assert_eq!(next_pane(Pane::Address, true, true), Pane::Tree);
+        assert_eq!(next_pane(Pane::Tree, true, true), Pane::List);
+        assert_eq!(next_pane(Pane::List, false, true), Pane::Tree);
+        assert_eq!(next_pane(Pane::Address, false, true), Pane::List);
+        assert_eq!(next_pane(Pane::Address, true, false), Pane::List, "no tree on screen: it is skipped");
+        assert_eq!(next_pane(Pane::List, false, false), Pane::Address);
     }
 }
 

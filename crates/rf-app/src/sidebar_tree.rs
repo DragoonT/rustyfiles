@@ -882,6 +882,11 @@ impl Workspace {
         !rail && self.side_tree.view.is_some() && !self.side_tree.in_peek
     }
 
+    /// The folder tree's focus, when the tree is on screen (the setting is on, the sidebar is open and not the rail): a stop of Tab.
+    pub(super) fn tree_focus(&self, cx: &App) -> Option<FocusHandle> {
+        (self.sidebar_open && self.shows_tree(self.sidebar_rail)).then(|| self.side_tree.view.as_ref().map(|v| v.read(cx).focus.clone())).flatten()
+    }
+
     pub(super) fn set_tree_peek(&mut self, peek: bool) {
         self.side_tree.in_peek = peek;
     }
