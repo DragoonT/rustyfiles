@@ -226,7 +226,7 @@ pub(crate) fn entries() -> Vec<Entry> {
             dock,
             L::Magnet,
             t!("Simge simge büyüt"),
-            Some(t!("Büyüme farenin altındaki simgeye oturur ve bir simgeden ötekine kısa bir kaymayla geçer. Kapalıyken fareyi sürekli izler.")),
+            Some(t!("Farenin altındaki simge hemen büyür, yanındakiler simge simge birkaç milisaniye arayla izler. Kapalıyken hepsi birlikte büyür.")),
             Control::Switch(|s| s.dock_magnify_snap, |s, v| s.dock_magnify_snap = v),
         ),
         e(

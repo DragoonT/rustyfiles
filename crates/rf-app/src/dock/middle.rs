@@ -122,7 +122,7 @@ pub struct MiddleIsland {
     pointer_x: Option<f32>,
     /// Where the bell stands when it snaps to the icons (`dock_magnify_snap`), and the x the last frame was drawn with (a press
     /// holds that one).
-    snap: magnify::Glide,
+    trail: magnify::Trail,
     bell_x: Option<f32>,
     /// The height of the bell over time (0 away, 1 over the dock).
     presence: Presence,
@@ -230,7 +230,7 @@ impl MiddleIsland {
             levels_peak: 0.0,
             icon_gen: 0,
             pointer_x: None,
-            snap: magnify::Glide::default(),
+            trail: magnify::Trail::default(),
             bell_x: None,
             presence: Presence::new(plan::hover_duration(crate::settings::animations())),
             t0: Instant::now(),
@@ -480,6 +480,8 @@ impl MiddleIsland {
         let entering = !self.presence.is_in();
         let delta = self.pointer_x.map_or(f32::INFINITY, |old| (old - x).abs());
         self.pointer_x = Some(x);
+        // (where it was over the last moments: the icons that follow one by one look back along it)
+        self.trail.push(now, x);
         if entering {
             // the setting is looked at when the bell starts, not on every mouse event (it is a system call)
             self.presence.set_duration(plan::hover_duration(crate::settings::animations()));
@@ -1057,31 +1059,44 @@ impl Render for MiddleIsland {
             Some((x, h)) => (Some(x), h),
             None => (self.pointer_x, self.presence.value(now)),
         };
-        // snapping to the icons: the bell stands on the nearest icon's centre and slides to the next one (`magnify::Glide`); once the
-        // bell has gone, it forgets where it stood, so the next time it comes in where the pointer does
-        let snap_on = cx.global::<Settings>().dock_magnify_snap;
-        if !self.presence.is_in() && self.presence.settled(now) {
-            self.snap.reset();
-        }
-        let pointer = match (pointer, self.frozen.is_none() && snap_on) {
-            (Some(x), true) => {
-                if let Some(target) = magnify::snap_target(&self.slots, &rest, x) {
-                    let pace = if crate::settings::animations() { magnify::SNAP_MS } else { 0 };
-                    self.snap.aim(target, now, pace);
-                }
-                if self.snap.moving(now) {
+        // "one by one" (`dock_magnify_snap`): the icon under the pointer follows it at once, each one further away a little later
+        // (`magnify::frame_staggered`, looking back along the pointer's trail); a pressed button holds the plain frame it went down with
+        let one_by_one = cx.global::<Settings>().dock_magnify_snap && self.frozen.is_none() && crate::settings::animations();
+        self.bell_x = pointer;
+        let presence = self.presence;
+        let frame = match pointer {
+            Some(_) if one_by_one && strength != magnify::Strength::Off && self.trail.last_ms().is_some() => {
+                // the farthest icon looks back this far: frames go on until it has caught up
+                let reach = magnify::STAGGER_MS * self.slots.len() as u64;
+                if self.trail.last_ms().is_some_and(|t| now < t + reach) || !presence.settled(now.saturating_sub(reach)) {
                     window.request_animation_frame();
                 }
-                Some(if self.snap.is_set() { self.snap.value(now) } else { x })
+                let f = magnify::frame_staggered(
+                    &self.slots,
+                    &rest,
+                    rest_width,
+                    now,
+                    &self.trail,
+                    |t| sq.bell(presence.value(t)),
+                    strength,
+                    rest_width + 2.0 * inset.growth,
+                    magnify::STAGGER_MS,
+                );
+                if !presence.is_in() && presence.settled(now.saturating_sub(reach)) {
+                    self.trail.clear();
+                }
+                f
             }
-            (p, _) => p,
-        };
-        self.bell_x = pointer;
-        // (no bell while the dock is thin; it comes in with the growth)
-        let height = sq.bell(height);
-        let frame = match pointer {
-            Some(x) if height > 0.0 && strength != magnify::Strength::Off => magnify::frame(&self.slots, &rest, rest_width, x, height, strength, rest_width + 2.0 * inset.growth),
-            _ => Frame::at_rest(&rest, rest_width),
+            _ => {
+                // (no bell while the dock is thin; it comes in with the growth)
+                let height = sq.bell(height);
+                match pointer {
+                    Some(x) if height > 0.0 && strength != magnify::Strength::Off => {
+                        magnify::frame(&self.slots, &rest, rest_width, x, height, strength, rest_width + 2.0 * inset.growth)
+                    }
+                    _ => Frame::at_rest(&rest, rest_width),
+                }
+            }
         };
         let pic = super::thin::picture(&frame, &self.slots, inset.margins, BASELINE, &sq);
         self.rest_items.clone_from(&rest);

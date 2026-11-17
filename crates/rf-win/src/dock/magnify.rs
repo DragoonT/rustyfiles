@@ -147,79 +147,104 @@ pub fn frame(slots: &[Slot], rest: &[(f32, f32)], rest_width: f32, pointer_x: f3
         .filter(|(s, _)| **s == Slot::Icon)
         .map(|(_, &(x, w))| w * factor(pointer_x - (x + w / 2.0), strength, presence))
         .collect();
+    frame_with_sizes(slots, rest, rest_width, &sizes, max_width)
+}
+
+/// The glass and the items for these icon sizes (one per icon): the rest width plus what the icons grew, within `max_width`, centred.
+fn frame_with_sizes(slots: &[Slot], rest: &[(f32, f32)], rest_width: f32, sizes: &[f32], max_width: f32) -> Frame {
     let max_width = max_width.max(rest_width);
     // The glass widens by what the icons grew, on top of the rest width: the rest layout may already have tighter gaps or smaller icons
     // than the usual (a narrow screen), and the widening must start from that, not from the width the usual gaps would give, or the
     // glass would jump the moment the bell begins.
-    let grown: f32 = slots.iter().zip(rest).filter(|(s, _)| **s == Slot::Icon).map(|(_, &(_, w))| w).zip(&sizes).map(|(rest_w, &now)| now - rest_w).sum();
+    let grown: f32 = slots.iter().zip(rest).filter(|(s, _)| **s == Slot::Icon).map(|(_, &(_, w))| w).zip(sizes).map(|(rest_w, &now)| now - rest_w).sum();
     let width = (rest_width + grown.max(0.0)).clamp(rest_width, max_width);
     let left = (rest_width - width) / 2.0;
-    let spans = fit(slots, &sizes, width).into_iter().map(|(x, w)| (x + left, w)).collect();
+    let spans = fit(slots, sizes, width).into_iter().map(|(x, w)| (x + left, w)).collect();
     Frame { spans, left, width }
 }
 
-/// How long the bell takes to slide from one icon to the next when it snaps to the icons ([`Glide`]).
-pub const SNAP_MS: u32 = 90;
+/// How much later each icon follows the pointer than its neighbour nearer to it, when the icons follow "one by one"
+/// (`dock_magnify_snap`): the icon under the pointer at once, its neighbours this much later, the next ones twice as much (the owner,
+/// 2026-11-17: "hover olanın yanlarındakiler simge simge her biri örnek +10 delay ile gelecek").
+pub const STAGGER_MS: u64 = 10;
 
-/// The rest centre of the icon nearest to `pointer_x` (logical px from the rest island's left edge): where the bell sits when it snaps
-/// to the icons (the owner, 2026-11-17: "docktaki yakınlaştırma ikon ikon daha clicky hissettirebilir mi. çok ufak bir delay ile").
-/// `None` when the row has no icon.
-pub fn snap_target(slots: &[Slot], rest: &[(f32, f32)], pointer_x: f32) -> Option<f32> {
+/// Where the pointer was over the last moments (logical px along the dock, as for [`frame`]), so that an icon can follow where it
+/// was a little earlier. Short: only what the farthest delay reaches back is kept.
+#[derive(Clone, Debug, Default)]
+pub struct Trail {
+    points: std::collections::VecDeque<(u64, f32)>,
+}
+
+impl Trail {
+    /// How far back the trail is kept.
+    const KEEP_MS: u64 = 250;
+
+    pub fn push(&mut self, now_ms: u64, x: f32) {
+        self.points.push_back((now_ms, x));
+        while self.points.len() > 2 && self.points.front().is_some_and(|&(t, _)| now_ms.saturating_sub(t) > Self::KEEP_MS) {
+            self.points.pop_front();
+        }
+    }
+
+    /// Where the pointer was at `t_ms`: the last point at or before it, else the oldest one kept.
+    pub fn at(&self, t_ms: u64) -> Option<f32> {
+        self.points.iter().rev().find(|&&(t, _)| t <= t_ms).or(self.points.front()).map(|&(_, x)| x)
+    }
+
+    /// The time of the latest point.
+    pub fn last_ms(&self) -> Option<u64> {
+        self.points.back().map(|&(t, _)| t)
+    }
+
+    pub fn clear(&mut self) {
+        self.points.clear();
+    }
+}
+
+/// The position among the icons (separators not counted) of the icon whose rest centre is nearest to `x`.
+pub fn nearest_icon(slots: &[Slot], rest: &[(f32, f32)], x: f32) -> Option<usize> {
     slots
         .iter()
         .zip(rest)
         .filter(|(s, _)| **s == Slot::Icon)
-        .map(|(_, &(x, w))| x + w / 2.0)
-        .min_by(|a, b| (a - pointer_x).abs().total_cmp(&(b - pointer_x).abs()))
+        .map(|(_, &(sx, w))| sx + w / 2.0)
+        .enumerate()
+        .min_by(|a, b| (a.1 - x).abs().total_cmp(&(b.1 - x).abs()))
+        .map(|(i, _)| i)
 }
 
-/// Where the bell stands when it snaps to the icons: it rests on an icon's centre, and when the pointer reaches another icon it slides
-/// there in [`SNAP_MS`] (an ease out: quick at first, settling softly), so each icon "clicks" into place. A pure function of the time,
-/// as [`Presence`] is. The first aim after [`Glide::reset`] puts it there at once (the bell grows in where the pointer came in).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Glide {
-    from: f32,
-    to: f32,
-    started_ms: u64,
-    duration_ms: u32,
-    set: bool,
-}
-
-impl Glide {
-    /// Aims at `to` (an icon's centre). The same target again changes nothing; a new one starts a slide from where it is now.
-    /// `duration_ms` 0 (animations off): it jumps.
-    pub fn aim(&mut self, to: f32, now_ms: u64, duration_ms: u32) {
-        if !self.set {
-            *self = Glide { from: to, to, started_ms: now_ms, duration_ms, set: true };
-        } else if (to - self.to).abs() > 0.01 {
-            let here = self.value(now_ms);
-            *self = Glide { from: here, to, started_ms: now_ms, duration_ms, set: true };
-        }
+/// [`frame`] with the icons following one by one: an icon `d` icons away from the one under the pointer is sized for where the pointer
+/// was and how far the bell had come `d * step_ms` earlier (`height_at` gives the bell's height at a time). The same bell, the same
+/// widths; only each icon's moment differs, so the wave spreads from the pointer outwards when it comes, moves and goes.
+#[allow(clippy::too_many_arguments)]
+pub fn frame_staggered(
+    slots: &[Slot],
+    rest: &[(f32, f32)],
+    rest_width: f32,
+    now_ms: u64,
+    trail: &Trail,
+    height_at: impl Fn(u64) -> f32,
+    strength: Strength,
+    max_width: f32,
+    step_ms: u64,
+) -> Frame {
+    let Some(x_now) = trail.at(now_ms) else { return Frame::at_rest(rest, rest_width) };
+    if slots.is_empty() || rest.len() != slots.len() {
+        return Frame::at_rest(rest, rest_width);
     }
-
-    /// Where it stands at `now_ms`.
-    pub fn value(&self, now_ms: u64) -> f32 {
-        if self.duration_ms == 0 {
-            return self.to;
-        }
-        let t = (now_ms.saturating_sub(self.started_ms) as f32 / self.duration_ms as f32).clamp(0.0, 1.0);
-        let e = 1.0 - (1.0 - t).powi(3);
-        self.from + (self.to - self.from) * e
-    }
-
-    /// Still sliding at `now_ms` (one more frame is wanted).
-    pub fn moving(&self, now_ms: u64) -> bool {
-        self.set && self.duration_ms > 0 && (self.to - self.from).abs() > 0.01 && now_ms < self.started_ms + u64::from(self.duration_ms)
-    }
-
-    /// Forgets where it stood: the next aim is taken at once.
-    pub fn reset(&mut self) {
-        self.set = false;
-    }
-
-    pub fn is_set(&self) -> bool {
-        self.set
-    }
+    let under = nearest_icon(slots, rest, x_now).unwrap_or(0);
+    let sizes: Vec<f32> = slots
+        .iter()
+        .zip(rest)
+        .filter(|(s, _)| **s == Slot::Icon)
+        .enumerate()
+        .map(|(i, (_, &(sx, w)))| {
+            let t = now_ms.saturating_sub(step_ms * i.abs_diff(under) as u64);
+            let x = trail.at(t).unwrap_or(x_now);
+            w * factor(x - (sx + w / 2.0), strength, height_at(t))
+        })
+        .collect();
+    frame_with_sizes(slots, rest, rest_width, &sizes, max_width)
 }
 
 /// The bell's height over time. `enter` when the pointer comes onto the dock, `leave` when it goes; the height follows as a SPRING
@@ -674,35 +699,39 @@ mod tests {
 }
 
 #[cfg(test)]
-mod snap_tests {
-    use super::{Glide, SNAP_MS, snap_target};
+mod stagger_tests {
+    use super::{Strength, Trail, frame, frame_staggered, nearest_icon};
     use crate::dock::hover::Slot;
 
-    #[test]
-    fn the_bell_snaps_to_the_nearest_icon_and_slides_between_icons() {
-        let slots = [Slot::Icon, Slot::Separator, Slot::Icon];
-        let rest = [(10.0, 44.0), (60.0, 2.0), (70.0, 44.0)];
-        assert_eq!(snap_target(&slots, &rest, 20.0), Some(32.0));
-        assert_eq!(snap_target(&slots, &rest, 63.0), Some(92.0), "past the middle between two icons: the right one (the separator is never a target)");
-        assert_eq!(snap_target(&[], &[], 5.0), None);
+    fn row() -> (Vec<Slot>, Vec<(f32, f32)>) {
+        (vec![Slot::Icon; 5], (0..5).map(|i| (10.0 + i as f32 * 54.0, 44.0)).collect())
+    }
 
-        let mut g = Glide::default();
-        g.aim(32.0, 1000, SNAP_MS);
-        assert_eq!(g.value(1000), 32.0, "the first aim is taken at once");
-        assert!(!g.moving(1000));
-        g.aim(92.0, 2000, SNAP_MS);
-        let mid = g.value(2000 + u64::from(SNAP_MS) / 2);
-        assert!(mid > 62.0 && mid < 92.0, "half way it is past the middle (an ease out): {mid}");
-        assert!(g.moving(2010) && !g.moving(2000 + u64::from(SNAP_MS)));
-        assert_eq!(g.value(2000 + u64::from(SNAP_MS)), 92.0);
-        g.aim(92.0, 2100, SNAP_MS);
-        assert!(!g.moving(2100), "the same target again starts nothing");
-        g.reset();
-        g.aim(10.0, 3000, SNAP_MS);
-        assert_eq!(g.value(3000), 10.0);
-        let mut off = Glide::default();
-        off.aim(1.0, 0, 0);
-        off.aim(50.0, 5, 0);
-        assert_eq!(off.value(5), 50.0, "animations off: it jumps");
+    #[test]
+    fn the_icon_under_the_pointer_is_first_and_its_neighbours_follow_one_by_one() {
+        let (slots, rest) = row();
+        assert_eq!(nearest_icon(&slots, &rest, 140.0), Some(2));
+        // the pointer has just come over the middle icon (the bell rose from 0 at 1000 ms to full at 1020 ms)
+        let mut trail = Trail::default();
+        trail.push(1000, 140.0);
+        let height = |t: u64| ((t.saturating_sub(1000)) as f32 / 20.0).clamp(0.0, 1.0);
+        let f = frame_staggered(&slots, &rest, 280.0, 1010, &trail, height, Strength::Full, 2000.0, 10);
+        let w: Vec<f32> = f.spans.iter().map(|s| s.1).collect();
+        assert!(w[2] > w[1] && w[1] > 44.0 - 0.01, "the middle has grown more than its neighbour: {w:?}");
+        assert!((w[0] - 44.0).abs() < 0.01, "two icons away: not yet (20 ms back the bell was 0): {w:?}");
+        // settled: the same as the plain frame
+        let s = frame_staggered(&slots, &rest, 280.0, 2000, &trail, |_| 1.0, Strength::Full, 2000.0, 10);
+        assert_eq!(s, frame(&slots, &rest, 280.0, 140.0, 1.0, Strength::Full, 2000.0));
+    }
+
+    #[test]
+    fn the_trail_answers_where_the_pointer_was() {
+        let mut t = Trail::default();
+        t.push(100, 10.0);
+        t.push(110, 20.0);
+        t.push(120, 30.0);
+        assert_eq!((t.at(125), t.at(115), t.at(100), t.at(50)), (Some(30.0), Some(20.0), Some(10.0), Some(10.0)));
+        t.push(1000, 99.0);
+        assert_eq!(t.at(1000), Some(99.0), "old points go, the newest stays");
     }
 }
