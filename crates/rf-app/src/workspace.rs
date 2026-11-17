@@ -3393,7 +3393,9 @@ impl Workspace {
                 left = left.child(div().text_color(p.text).child(s));
             }
             if loading {
-                left = left.child(t!("Yükleniyor…"));
+                // a search says which step it is on (issue 67)
+                let text = tab.search_stage.map_or_else(|| t!("Yükleniyor…").to_string(), |s| s.text().to_string());
+                left = left.child(text);
                 busy = true;
             }
             // values being read for a sort or grouping by a property column
