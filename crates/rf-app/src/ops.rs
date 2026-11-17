@@ -841,7 +841,13 @@ impl FolderView {
 
     /// Starts an OLE drag of the selection (to Explorer, the desktop, another tab…).
     pub fn start_drag_out(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        let items = self.selection_paths();
+        drag_paths_out(self.selection_paths());
+    }
+}
+
+/// An OLE drag of `items` out of the window (the selection, or a recent item of the Home page).
+pub(crate) fn drag_paths_out(items: Vec<PathBuf>) {
+    {
         if items.is_empty() {
             return;
         }
@@ -855,7 +861,9 @@ impl FolderView {
             }
         });
     }
+}
 
+impl FolderView {
     /// Files dropped onto `dest` (a folder row or the current folder background).
     pub fn drop_into(&mut self, dest: PathBuf, paths: &ExternalPaths, cx: &mut Context<Self>) {
         let sources: Vec<PathBuf> = paths.paths().to_vec();

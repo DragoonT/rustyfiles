@@ -434,6 +434,8 @@ pub struct FolderView {
     pending_rename: bool,
     /// Shown by the Open/Save dialog: opening a file picks it instead.
     picking: bool,
+    /// A recent item of the Home page pressed with the left button, and where: moved far enough, it is dragged out (`drag_paths_out`).
+    home_press: Option<(PathBuf, Point<Pixels>)>,
     /// The mouse went down on an item's name (set by the name label, read by the row).
     name_hit: bool,
     /// Explorer's "click the name of the selected item again": (entry, serial) armed until the
@@ -606,6 +608,7 @@ impl FolderView {
             reselect_many: None,
             pending_rename: false,
             picking: false,
+            home_press: None,
             name_hit: false,
             slow_click: None,
             slow_click_serial: 0,
@@ -4063,9 +4066,38 @@ impl FolderView {
                             .child(parent),
                     )
                     .child(div().w(px(130.)).flex_shrink_0().text_color(p.text_secondary).child(format::datetime(r.used_ms)))
-                    .on_click(cx.listener(move |this, _, _, cx| {
+                    // dragged out like a row of the list (the owner: "son kullanılanlarda ... drag drop ta olmuyor")
+                    .on_mouse_down(MouseButton::Left, {
+                        let target = target.clone();
+                        cx.listener(move |this, ev: &MouseDownEvent, _, _| this.home_press = Some((target.clone(), ev.position)))
+                    })
+                    .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, _| {
+                        let Some((path, at)) = this.home_press.as_ref() else { return };
+                        if ev.pressed_button != Some(MouseButton::Left) {
+                            this.home_press = None;
+                            return;
+                        }
+                        let (dx, dy) = (f32::from(ev.position.x - at.x), f32::from(ev.position.y - at.y));
+                        if dx * dx + dy * dy > 36.0 {
+                            let path = path.clone();
+                            this.home_press = None;
+                            crate::ops::drag_paths_out(vec![path]);
+                        }
+                    }))
+                    .on_click(cx.listener(move |this, ev: &ClickEvent, _, cx| {
+                        this.home_press = None;
                         if is_dir {
                             this.navigate(Location::Path(target.clone()), cx);
+                        } else if this.picking {
+                            // the Open dialog (the owner: "aç penceresinde ana sayfada son kullanılanlarda dosya seçilemiyor. direkt
+                            // açıyor"): a click shows the file selected in its folder, as a click in the list selects it; a double
+                            // click picks it, as in the list
+                            if ev.click_count() >= 2 {
+                                cx.emit(FolderEvent::Picked(vec![target.clone()]));
+                            } else if let (Some(dir), Some(name)) = (target.parent(), target.file_name()) {
+                                this.set_reselect(name.to_string_lossy().into_owned());
+                                this.navigate(Location::Path(dir.to_path_buf()), cx);
+                            }
                         } else {
                             open_in_background(target.clone(), cx);
                         }
