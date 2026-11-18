@@ -405,7 +405,7 @@ fn link_row(p: &Palette, id: &'static str, icon: L, title: &str, desc: Option<&s
 // ---------------------------------------------------------------- page
 
 /// `lens_owner`: this page owns the window's settings lens (see `FolderView::lens_owner`); only then is the selected entry glass.
-pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) -> AnyElement {
+pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, scroll: &ScrollHandle) -> AnyElement {
     use gpui_kit::component::input::{Input, InputState};
     let page = ui(cx).page;
     let s = cx.global::<Settings>().clone();
@@ -559,7 +559,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
         )
         .child(nav)
         .child(
-            div().id("settings-page").flex_1().min_w_0().h_full().overflow_y_scroll().child(
+            div().id("settings-page").flex_1().min_w_0().h_full().overflow_y_scroll().track_scroll(scroll).child(
                 v_flex()
                     .w_full()
                     .max_w(px(980.))

@@ -445,6 +445,8 @@ pub struct FolderView {
     load_started: Instant,
     _load_task: Option<Task<()>>,
     scroll: UniformListScrollHandle,
+    // Inactive tabs leave the element tree, but their settings scroll position lives with the pane.
+    settings_scroll: ScrollHandle,
     pub focus: FocusHandle,
     /// Re-select this name after the next load (e.g. after going up a level).
     reselect: Option<String>,
@@ -633,6 +635,7 @@ impl FolderView {
             load_started: Instant::now(),
             _load_task: None,
             scroll: UniformListScrollHandle::new(),
+            settings_scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             reselect: None,
             renamed: None,
@@ -4651,7 +4654,7 @@ impl Render for FolderView {
         }
         let content = match self.location() {
             Location::Home => self.render_home(&p, cx),
-            Location::Settings => crate::settings_view::render(&p, window, cx, self.lens_owner),
+            Location::Settings => crate::settings_view::render(&p, window, cx, self.lens_owner, &self.settings_scroll),
             Location::DiskUsage(root) => {
                 let root = root.clone();
                 let dv = match &self.disk_usage {
