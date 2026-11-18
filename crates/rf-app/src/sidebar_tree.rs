@@ -170,8 +170,6 @@ pub struct SidebarTree {
     /// The selected row was among the rows built at the last paint (the rows are virtualised: a selected row that is scrolled far
     /// out of view is not built, carries no probe, and must not hold the lens, which would stay where it last was).
     selected_in_view: bool,
-    /// The user's profile folder, asked once (the first root).
-    home: Option<PathBuf>,
     /// The open folder and the follow setting the model was last told about.
     followed: Option<(Option<PathBuf>, bool)>,
     watchers: HashMap<String, DirWatch>,
@@ -254,6 +252,7 @@ impl SidebarTree {
         // drives come and go: the roots follow the sidebar's own list of places
         let sub = cx.observe(&places, |t, _, cx| t.refresh_roots(cx));
         let tags_sub = cx.observe_global::<crate::tags::Tags>(|_, cx| cx.notify());
+        let theme_sub = cx.observe_global::<crate::settings::Settings>(|_, cx| cx.notify());
         let mut this = Self {
             model: NavTree::new(),
             places,
@@ -273,14 +272,13 @@ impl SidebarTree {
             shown_elsewhere: false,
             lens: None,
             selected_in_view: true,
-            home: dirs::home_dir(),
             followed: None,
             watchers: HashMap::new(),
             pending_watch: HashSet::new(),
             wanted: HashSet::new(),
             tx,
             _rx_task: task,
-            _subs: vec![sub, tags_sub],
+            _subs: vec![sub, tags_sub, theme_sub],
         };
         this.refresh_roots(cx);
         this
@@ -290,16 +288,13 @@ impl SidebarTree {
         self.epoch.elapsed().as_millis() as u64
     }
 
-    /// The profile folder first, then the drives, as the sidebar's places have them.
+    /// The drives, as the sidebar's places have them.
     fn refresh_roots(&mut self, cx: &mut Context<Self>) {
         let places = self.places.read(cx);
         if !places.loaded {
             return;
         }
         let mut specs = Vec::new();
-        if let Some(home) = self.home.clone() {
-            specs.push(RootSpec { label: rf_core::history::display_name(&home), path: home, kind: RootKind::Profile });
-        }
         for d in &places.drives {
             specs.push(RootSpec { path: d.root.clone(), label: crate::places::drive_name(d), kind: root_kind(d.kind) });
         }
@@ -676,6 +671,15 @@ impl SidebarTree {
             })
             .flatten();
         let tag_dot = info.path.parent().and_then(|_| crate::tags::first_color(info.path, cx));
+        let root_drive_icon = (cx.global::<crate::settings::Settings>().windows_file_explorer_theme
+            && matches!(root, Some(RootKind::Fixed | RootKind::Removable | RootKind::Network | RootKind::Optical)))
+        .then(|| {
+            self.images.update(cx, |images, cx| {
+                images.shell_icon(&info.path.to_string_lossy(), 16, cx)
+            })
+        })
+        .flatten();
+        let windows_home = cx.global::<crate::settings::Settings>().windows_file_explorer_theme && root == Some(RootKind::Profile);
         let icon_color = match root {
             Some(RootKind::Profile) => p.accent,
             Some(_) => p.text_secondary,
@@ -746,9 +750,13 @@ impl SidebarTree {
                     .relative()
                     .size(px(16.))
                     .flex_shrink_0()
-                    .child(match own_icon {
+                    .child(match own_icon.or(root_drive_icon) {
                         Some(picture) => img(picture).size(px(16.)).into_any_element(),
-                        None => Icon::new(Self::row_icon(root, expanded)).size(px(16.)).text_color(icon_color).into_any_element(),
+                        None if windows_home => crate::icons::windows_home_icon(px(16.)),
+                        None => Icon::new(Self::row_icon(root, expanded))
+                            .size(px(16.))
+                            .text_color(icon_color)
+                            .into_any_element(),
                     })
                     .when_some(tag_dot, |d, c| d.child(crate::tags::corner_dot(c, p.card_bg))),
             )

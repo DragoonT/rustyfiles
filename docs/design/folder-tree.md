@@ -13,8 +13,7 @@ Code: the model is `crates/rf-core/src/navtree.rs` (pure, tested without a windo
   has "Kenar çubuğu"). While the tree is on, a right click on the sidebar's own ground (the section headers, gaps and rows
   that have no menu of their own; rows that have one keep it) offers the two switches. With the tree off the sidebar has no
   such handler: a right click on those places does what it did before (nothing).
-* With the setting on, a "Klasörler" section sits right under the pinned folders, above the drives and the tags (moved there at the user's request). After a navigation the sidebar is scrolled to the open folder only when the pointer is not over the sidebar: a click on a pinned folder must not scroll the row away from under the pointer. Its roots are the user's profile
-  folder first, then the drives (the same list the sidebar's "Sürücüler" section uses, so a USB stick appears and goes with it).
+* With the setting on, a "Klasörler" section sits right under the pinned folders, above the drives and the tags (moved there at the user's request). After a navigation the sidebar is scrolled to the open folder only when the pointer is not over the sidebar: a click on a pinned folder must not scroll the row away from under the pointer. Its roots are the drives (the same list the sidebar's "Sürücüler" section uses, so a USB stick appears and goes with it); the profile folder appears in its normal place in that tree, not as a duplicate root.
 * Every folder row has a chevron (12 px, the size the rest of the app uses), a 16 px icon like the sidebar's rows, and the name
   (the localized name when Explorer has one: "İndirilenler"). Indent is 16 px a level, up to 6 levels; deeper rows stand at that
   indent (the name would have no room in a narrow sidebar) and show the whole name as a tooltip. The selected row is drawn as the sidebar
@@ -55,8 +54,8 @@ selected, opens the branch down to it, and scrolls the row into view. The rule, 
    or after the user opens that node by hand, the next navigation opens it again. So a user who tidies a branch away while
    browsing inside it is not fought, and a user who comes back to it later finds it open.
 3. A folder that is not in the listing (hidden by the settings, or not a folder) ends the walk at its parent, the same way.
-4. A navigation made by a click in the tree selects that very row and walks nowhere (the profile folder is a root **and** lies under
-   its drive; without this a click on the drive's copy would jump to the other copy).
+4. A navigation made by a click in the tree selects that very row and walks nowhere. The profile folder is not duplicated as a root,
+   so a click on it has one unambiguous row.
 5. The scroll happens once, after the walk is over, and only if the row is not comfortably in view already.
 6. With the follow setting off nothing is opened, listed or scrolled; the open folder is marked only when its row is already
    there.

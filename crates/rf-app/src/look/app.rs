@@ -87,7 +87,12 @@ fn handle(msg: Msg, cx: &mut App) {
         Msg::Reload => {
             cx.set_global(LookSettings::load());
             // rustyfiles' settings too: language, theme, and whether it has a tray icon
-            cx.set_global(crate::settings::Settings::load());
+            let settings = crate::settings::Settings::load();
+            let explorer_theme_changed = cx.global::<crate::settings::Settings>().windows_file_explorer_theme != settings.windows_file_explorer_theme;
+            cx.set_global(settings);
+            if explorer_theme_changed {
+                cx.refresh_windows();
+            }
             sync_tray(cx);
         }
         Msg::Quit => {
@@ -130,10 +135,11 @@ pub fn main() {
 
     // (DirectLook opens on the card: the fast start is for the file manager's own window only, see `fast_start::before_app`)
     crate::fast_start::before_app(false);
-    gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
+    gpui_kit::application().with_assets(crate::icons::AppAssets).run(move |cx| {
         gpui_kit::init(cx);
         // rustyfiles'ın ayarları: yalnız dil, tema, tarih biçimi için okunur, asla yazılmaz
         cx.set_global(crate::settings::Settings::load());
+        crate::icons::install_theme_resolver(cx);
         if !rf_win::encoding::user_locale_is_turkish() {
             rf_core::textload::set_locale_hint(None);
         }

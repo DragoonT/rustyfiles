@@ -151,12 +151,11 @@ pub struct Workspace {
     /// The selected row of this frame's sidebar has claimed the lens (only the first of several selected rows does). A frame that ends
     /// without a claim takes the lens out.
     sidebar_lens_claimed: std::cell::Cell<bool>,
-    /// Set by `render` around the call that builds the tab strip: the selected tab and the "+" button are glass lenses (the engine draws
-    /// them behind the scene) instead of the Fluent fill.
+    /// Set by `render` around the call that builds the tab strip: the selected tab is a glass lens (the engine draws it behind the
+    /// scene) instead of the Fluent fill.
     tab_lens: bool,
     /// This frame's strip gave the selected tab its lens / the "+" button its lens. A frame that ends without a claim takes the lens out.
     tab_lens_claimed: bool,
-    plus_lens_claimed: bool,
     /// Address-bar folder completions for the typed text, and the highlighted one.
     addr_suggest: Vec<PathBuf>,
     addr_sel: Option<usize>,
@@ -897,7 +896,6 @@ impl Workspace {
             sidebar_lens_claimed: std::cell::Cell::new(false),
             tab_lens: false,
             tab_lens_claimed: false,
-            plus_lens_claimed: false,
             addr_suggest: Vec::new(),
             addr_sel: None,
             _addr_task: None,
@@ -1207,8 +1205,8 @@ impl Workspace {
         let view = self.new_view(loc, window, cx);
         self.tabs.push(Tab { left: view.clone(), right: None, right_active: false });
         let ix = self.tabs.len() - 1;
-        // Settings → Appearance → Animations: the "+" grows into the new tab, then a new "+"
-        // slides out from behind it. Purely visual: the tab is already open and usable.
+        // Settings → Appearance → Animations: a new tab grows into the strip. Purely visual:
+        // the tab is already open and usable.
         let animate = crate::settings::animations();
         cx.set_reduce_motion(!animate);
         if animate {
@@ -1216,7 +1214,7 @@ impl Workspace {
             let serial = self.tab_anim_serial;
             self.tab_anim = Some((view, serial));
             cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(std::time::Duration::from_millis(TAB_ANIM_MS + PLUS_ANIM_MS + 100)).await;
+                cx.background_executor().timer(std::time::Duration::from_millis(TAB_ANIM_MS + 100)).await;
                 let _ = this.update(cx, |ws, cx| {
                     if ws.tab_anim.as_ref().is_some_and(|(_, s)| *s == serial) {
                         ws.tab_anim = None;
@@ -2203,8 +2201,7 @@ impl Workspace {
         });
         let mut tabs = h_flex()
             .id("tabs")
-            // content-sized, shrinks (and scrolls) only when there is not enough room, so the
-            // "+" stays right after the last tab
+            // content-sized, shrinks (and scrolls) only when there is not enough room
             .flex_shrink(1.)
             .min_w_0()
             .h_full()
@@ -2229,12 +2226,24 @@ impl Workspace {
         let (name_px, name_style) = (rems(0.875).to_pixels(window.rem_size()), window.text_style());
         let roomy = fit_names || tab_w >= 110.;
         let mut tab_claimed = false;
+        let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         for (i, tab) in self.tabs.iter().enumerate() {
-            let v = tab.view().read(cx);
-            let title = v.title(cx);
-            let icon = v.tab_icon();
-            let tab_dir = v.location().path().map(Path::to_path_buf);
-            let term_dir = tab_terminal_dir(v.location());
+            let (title, icon, location) = {
+                let view = tab.view().read(cx);
+                (view.title(cx), view.tab_icon(), view.location().clone())
+            };
+            let tab_dir = location.path().map(Path::to_path_buf);
+            let shell_tab_icon = if windows_theme && matches!(&location, Location::Path(_)) {
+                tab_dir.as_ref().and_then(|path| {
+                    self.images.update(cx, |images, cx| {
+                        images.shell_icon(&path.to_string_lossy(), 16, cx)
+                    })
+                })
+            } else {
+                None
+            };
+            let windows_home_tab = windows_theme && matches!(&location, Location::Home);
+            let term_dir = tab_terminal_dir(&location);
             let tab_w = if fit_names {
                 let name = window.text_system().layout_line(&title, name_px, &[name_style.to_run(title.len())], None).width;
                 (f32::from(name) + TAB_CHROME_W + if term_dir.is_some() { TAB_TERMINAL_W } else { 0. }).clamp(TAB_MIN_W, TAB_MAX_W)
@@ -2274,7 +2283,11 @@ impl Workspace {
                         ))
                     })
                     .when(!active, |d| d.text_color(p.text_secondary).hover(|s| s.bg(p.hover)))
-                    .child(Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }))
+                    .child(match shell_tab_icon {
+                        Some(image) => img(image).size(px(14.)).flex_shrink_0().into_any_element(),
+                        None if windows_home_tab => crate::icons::windows_home_icon(px(14.)),
+                        None => Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }).into_any_element(),
+                    })
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
                     .when_some(term_dir, |d, dir| {
                         d.child(
@@ -2358,7 +2371,7 @@ impl Workspace {
                             .on_drop(move |paths: &ExternalPaths, _, cx| drop_files(paths, dir.clone(), cx))
                     });
             tabs = match anim {
-                // grows from the "+" box (28 px) to its width and height, contents fading in
+                // grows from a compact width to its full size, contents fading in
                 Some(serial) => tabs.child(el.overflow_hidden().with_animation(
                     ("tab-open", serial),
                     Animation::new(std::time::Duration::from_millis(TAB_ANIM_MS)).with_easing(ease_out_quint()),
@@ -2368,46 +2381,56 @@ impl Workspace {
             };
         }
         self.tab_lens_claimed = tab_claimed;
-        // over glass the "+" sits in a round lens (a constant key: it never slides)
-        let plus_lens = self.tab_lens;
-        self.plus_lens_claimed = plus_lens;
-        // outside the scrolling strip: always reachable
-        let new_tab = div()
-                .id("new-tab")
-                .flex_shrink_0()
-                .ml_1()
-                .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Yeni sekme  (Ctrl+T)")).build(w, cx))
-                .size(px(28.))
-                .mb(px(2.))
+        let fluent_plus = || {
+            div()
+                .size(px(14.))
                 .flex()
                 .items_center()
                 .justify_center()
-                .when(!plus_lens, |d| d.rounded(theme::RADIUS_SM))
-                .when(plus_lens, |d| d.relative().rounded_full().child(crate::glass::lens_probe_shaped(crate::glass::SLOT_NEW_TAB, crate::glass::key_of("new-tab"), crate::glass::LensShape::Circle)))
-                // the button moves when a tab opens or closes: a plain round fill stands in for the lens meanwhile
-                .when(plus_lens && crate::glass::lens_phase(self.glass_hwnd, crate::glass::SLOT_NEW_TAB) != crate::glass::LensPhase::Rest, |d| d.bg(p.tab_active))
-                .hover(|s| s.bg(p.hover))
-                .child(Icon::new(L::Plus).size(px(14.)))
-                // the title bar arms a window move on mouse down: the slightest jitter then
-                // swallows the mouse up and the click never happens
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(|this, _, window, cx| this.open_new_tab(window, cx)));
-        // after the new tab has grown, the next "+" slides out from behind it
-        let new_tab: AnyElement = match self.tab_anim.as_ref().map(|(_, s)| *s) {
-            Some(serial) => {
-                let total = (TAB_ANIM_MS + PLUS_ANIM_MS) as f32;
-                let start = TAB_ANIM_MS as f32 / total;
-                new_tab
-                    .relative()
-                    .with_animation(("plus-in", serial), Animation::new(std::time::Duration::from_millis(TAB_ANIM_MS + PLUS_ANIM_MS)), move |el, d| {
-                        let t = ((d - start) / (1. - start)).clamp(0., 1.);
-                        let e = ease_out_quint()(t);
-                        el.left(px(-26. * (1. - e))).opacity(e)
-                    })
-                    .into_any_element()
-            }
-            None => new_tab.into_any_element(),
+                .text_size(px(14.))
+                .child("+")
+                .into_any_element()
         };
+        let new_tab_icon = if windows_theme {
+            #[cfg(target_os = "windows")]
+            {
+                crate::icons::windows_theme_icon_glyph(L::Plus)
+                    .map(|glyph| {
+                        div()
+                            .size(px(14.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .font_family("Segoe Fluent Icons")
+                            .text_size(px(14.))
+                            .child(glyph.to_string())
+                            .into_any_element()
+                    })
+                    .unwrap_or_else(fluent_plus)
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                fluent_plus()
+            }
+        } else {
+            Icon::new(L::Plus).size(px(14.)).into_any_element()
+        };
+        let new_tab = div()
+            .id("new-tab")
+            .flex_shrink_0()
+            .ml_1()
+            .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Yeni sekme  (Ctrl+T)")).build(w, cx))
+            .size(px(28.))
+            .mb(px(2.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(theme::RADIUS_SM)
+            .text_color(p.text_secondary)
+            .hover(|s| s.bg(p.hover))
+            .child(new_tab_icon)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, window, cx| this.open_new_tab(window, cx)));
 
         TitleBar::new()
             .h(theme::TITLEBAR_H)
@@ -2424,8 +2447,7 @@ impl Workspace {
                     .items_end()
                     .child(
                         // sidebar toggle in the corner (Files has the pane button here, no app name)
-                        // same size and baseline as the "+" button; centered over the Back
-                        // button below (title bar pads 12 px, the nav row 8 px)
+                        // centered over the Back button below (title bar pads 12 px, the nav row 8 px)
                         h_flex().flex_shrink_0().w(px(TITLEBAR_LEAD)).h_full().items_end().child(
                             div()
                                 .id("tab-actions")
@@ -2809,6 +2831,15 @@ impl Workspace {
         cx: &mut Context<Self>,
         f: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) -> AnyElement {
+        let windows_nav_icon = if cx.global::<crate::settings::Settings>().windows_file_explorer_theme {
+            match id {
+                "back" => Some("windows-theme/nav-back.svg"),
+                "fwd" => Some("windows-theme/nav-forward.svg"),
+                _ => None,
+            }
+        } else {
+            None
+        };
         div()
             .id(id)
             .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tooltip_text(id)).build(w, cx))
@@ -2824,7 +2855,10 @@ impl Workspace {
                     .active(|s| s.bg(p.pressed))
                     .on_click(cx.listener(move |this, _, window, cx| f(this, window, cx)))
             })
-            .child(Icon::new(icon).size(px(16.)))
+            .child(match windows_nav_icon {
+                Some(path) => Icon::default().path(path).size(px(16.)).into_any_element(),
+                None => Icon::new(icon).size(px(16.)).into_any_element(),
+            })
             .into_any_element()
     }
 
@@ -3017,8 +3051,27 @@ impl Workspace {
         // a phone's folder is read-only here: changing commands are greyed out, not refused later
         let writable_sel = has_sel && !matches!(tab.location(), Location::Shell { .. });
         let preview_open = self.preview_open;
+        let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         let filter_on = self.filter_bar;
         let paste_ok = in_folder && rf_win::clipboard::can_paste();
+        let toolbar_icon = |icon: L| {
+            #[cfg(target_os = "windows")]
+            if windows_theme {
+                if let Some(glyph) = crate::icons::windows_theme_icon_glyph(icon) {
+                    return div()
+                        .size(px(16.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .font_family("Segoe Fluent Icons")
+                        .text_size(px(16.))
+                        .child(glyph.to_string())
+                        .into_any_element();
+                }
+            }
+            Icon::new(icon).size(px(16.)).into_any_element()
+        };
+        let preview_icon = toolbar_icon(L::PanelRight);
 
         let cmd = |id: &'static str, icon: L, tip: &'static str, enabled: bool, cx: &mut Context<Self>, run: fn(&mut Self, &mut Window, &mut Context<Self>)| {
             div()
@@ -3037,7 +3090,7 @@ impl Workspace {
                         .active(|s| s.bg(p.pressed))
                         .on_click(cx.listener(move |this, _, window, cx| run(this, window, cx)))
                 })
-                .child(Icon::new(icon).size(px(16.)))
+                .child(toolbar_icon(icon))
         };
         let popups_open = self.popups_open(cx);
         let drop = |id: &'static str, icon: L, label: Option<&'static str>, tip: &'static str, enabled: bool, cx: &mut Context<Self>, which: fn(&Self, &App) -> crate::ctx_menu::BarMenu| {
@@ -3052,9 +3105,9 @@ impl Workspace {
                 .text_sm()
                 .text_color(if enabled { p.text } else { p.text_tertiary })
                 .when(!popups_open, |d| d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(crate::i18n::t(tip)).build(w, cx)))
-                .child(Icon::new(icon).size(px(16.)))
+                .child(toolbar_icon(icon))
                 .children(label.map(|l| div().child(crate::i18n::t(l))))
-                .child(Icon::new(L::ChevronDown).size(px(12.)).text_color(p.text_secondary))
+                .child(div().text_color(p.text_secondary).child(toolbar_icon(L::ChevronDown)))
                 .when(enabled, |d| {
                     d.hover(|s| s.bg(p.hover)).active(|s| s.bg(p.pressed)).on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                         let menu = which(this, cx);
@@ -3205,7 +3258,7 @@ impl Workspace {
                     .when(!filter_on, |d| d.hover(|s| s.bg(p.hover)))
                     .when(in_folder, |d| d.on_click(cx.listener(|this, _, window, cx| this.toggle_filter_bar(window, cx))))
                     .when(!in_folder, |d| d.text_color(p.text_tertiary))
-                    .child(Icon::new(L::ListFilter).size(px(16.)))
+                    .child(toolbar_icon(L::ListFilter))
             }))
             .children(on("sort").then(|| drop("cb-sort", L::ArrowUpDown, None, "Sırala ve gruplandır", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::Sort)))
             .children(on("view").then(|| {
@@ -3224,7 +3277,7 @@ impl Workspace {
                     .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Önizleme bölmesi  (Alt+P)")).build(w, cx))
                     .when(preview_open, |d| d.bg(p.selection).text_color(p.accent))
                     .when(!preview_open, |d| d.hover(|s| s.bg(p.hover)))
-                    .child(Icon::new(L::PanelRight).size(px(16.)))
+                    .child(preview_icon)
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.toggle_preview(cx);
                     }))
@@ -3252,13 +3305,18 @@ impl Workspace {
             hidden = Some(loc);
         }
         let n = crumbs.len();
+        let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         let home_icon = div()
             .id("crumb-home")
             .px_1()
             .py_0p5()
             .rounded(theme::RADIUS_SM)
             .hover(|s| s.bg(p.hover))
-            .child(Icon::new(L::House).size(px(14.)).text_color(p.text_secondary))
+            .child(if windows_theme {
+                crate::icons::windows_home_icon(px(14.))
+            } else {
+                Icon::new(L::House).size(px(14.)).text_color(p.text_secondary).into_any_element()
+            })
             .on_click(cx.listener(|this, _, window, cx| {
                 cx.stop_propagation();
                 this.navigate(Location::Home, window, cx);
@@ -3362,6 +3420,36 @@ impl Workspace {
             let b = s.as_bytes();
             (b.len() <= 3 && b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic()).then(|| (b[0] as char).to_ascii_uppercase())
         });
+        let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+        let windows_home = windows_theme && matches!(&target, Location::Home);
+        let shell_icon = if windows_theme {
+            let icon_px = if rail { 18 } else { 16 };
+            match &target {
+                Location::Home => None,
+                Location::RecycleBin => {
+                    let state = self.places.read(cx).recycle_full.map_or(0, |full| if full { 2 } else { 1 });
+                    self.images.update(cx, |images, cx| {
+                        images.shell_icon_state("::{645ff040-5081-101b-9f08-00aa002f954e}", icon_px, state, cx)
+                    })
+                }
+                _ => {
+                    let parsing = target
+                        .path()
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .or_else(|| match &target {
+                            Location::Shell { parsing, .. } => Some(parsing.clone()),
+                            _ => None,
+                        });
+                    parsing.and_then(|path| {
+                        self.images.update(cx, |images, cx| {
+                            images.shell_icon(&path, icon_px, cx)
+                        })
+                    })
+                }
+            }
+        } else {
+            None
+        };
         let tag_dot = target3.path().filter(|p| p.parent().is_some()).and_then(|p| crate::tags::first_color(p, cx));
         h_flex()
             .id(id)
@@ -3385,7 +3473,11 @@ impl Workspace {
                 div()
                     .relative()
                     .flex_shrink_0()
-                    .child(Icon::new(icon).size(px(if rail { 18. } else { 16. })).text_color(icon_color))
+                    .child(match shell_icon {
+                        Some(image) => img(image).size(px(if rail { 18. } else { 16. })).into_any_element(),
+                        None if windows_home => crate::icons::windows_home_icon(px(if rail { 18. } else { 16. })),
+                        None => Icon::new(icon).size(px(if rail { 18. } else { 16. })).text_color(icon_color).into_any_element(),
+                    })
                     .when_some(tag_dot, |d, c| d.child(crate::tags::corner_dot(c, p.card_bg)))
                     .when_some(letter, |d, l| {
                         d.child(
@@ -3838,9 +3930,8 @@ impl Workspace {
 
 /// Title bar: width of the leading corner button, tab width range.
 const TITLEBAR_LEAD: f32 = 32.;
-/// New tab: the "+" box grows to a tab, then the next "+" slides out from behind it.
+/// A newly opened tab grows into the strip.
 const TAB_ANIM_MS: u64 = 200;
-const PLUS_ANIM_MS: u64 = 160;
 /// Dragged files held over a tab this long open it (Explorer uses about the same).
 const DRAG_HOVER_MS: u64 = 500;
 const TAB_MIN_W: f32 = 72.;
@@ -4287,7 +4378,11 @@ impl Render for Workspace {
         self.plus_lens_claimed = false;
         let titlebar = self.render_titlebar(&p, window, cx);
         self.tab_lens = false;
-        let strip_frame = crate::glass::StripFrame { on_screen: true, tab_claimed: self.tab_lens_claimed, plus_claimed: self.plus_lens_claimed };
+        let strip_frame = crate::glass::StripFrame {
+            on_screen: true,
+            tab_claimed: self.tab_lens_claimed,
+            plus_claimed: self.plus_lens_claimed,
+        };
         let toolbar = self.render_toolbar(&p, cx);
         let commandbar = self.render_commandbar(&p, cx);
         let filter_strip = self.render_filter_bar(&p, window, cx);
@@ -4326,9 +4421,6 @@ impl Render for Workspace {
         }
         if let Some(fade) = plan.clear_tab {
             crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_TAB, fade);
-        }
-        if let Some(fade) = plan.clear_new_tab {
-            crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_NEW_TAB, fade);
         }
         if glass_on && !plan.settings_owner {
             crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_SETTINGS, false);

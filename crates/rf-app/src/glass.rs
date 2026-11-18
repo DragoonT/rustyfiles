@@ -88,12 +88,11 @@ pub(crate) fn keep_out_of_capture(hwnd: isize) {
 // ---------------------------------------------------------------- lenses (the selection pill of a list)
 
 /// The lens slots the app uses (the engine has `rf_win::glass::MAX_LENSES`): the sidebar's selected entry, the selected entry of the
-/// settings page's own list (both can be on screen at once: the sidebar stays beside the settings page), the selected tab of the tab
-/// strip and the round glass behind the strip's "+" button.
+/// settings page's own list (both can be on screen at once: the sidebar stays beside the settings page), and the selected tab of the
+/// tab strip.
 pub const SLOT_SIDEBAR: u8 = 0;
 pub const SLOT_SETTINGS: u8 = 1;
 pub const SLOT_TAB: u8 = 2;
-pub const SLOT_NEW_TAB: u8 = 3;
 
 /// A selection pill is at most this round (logical px); a row lower than twice this gets a capsule.
 const LENS_MAX_RADIUS: f32 = 14.0;
@@ -116,8 +115,6 @@ pub enum LensShape {
     /// strip) cuts the extra part off: the top corners are round and the bottom is flat, where the tab meets the toolbar. `radius` is the
     /// tab's corner radius in logical px.
     Tab { radius: f32 },
-    /// A circle as high as the box, centred on it (the round glass behind the "+" button).
-    Circle,
 }
 
 /// A tab's corner is at most this round (logical px); the glass never gets rounder than the tab it sits in.
@@ -145,10 +142,6 @@ pub(crate) fn shape_spec(shape: LensShape, key: u64, rect: [f32; 4], clip: [f32;
             }
             let r = radius.clamp(0.0, TAB_MAX_RADIUS).min(rect[2] / 2.0);
             ([rect[0], rect[1], rect[2], rect[3] + r], r)
-        }
-        LensShape::Circle => {
-            let d = rect[3];
-            ([rect[0] + (rect[2] - d) / 2.0, rect[1], d, d], d / 2.0)
         }
     };
     let dev = |a: [f32; 4]| [a[0] * scale, a[1] * scale, a[2] * scale, a[3] * scale];
@@ -332,7 +325,7 @@ pub fn lens_probe(slot: u8, key: u64) -> impl IntoElement {
     lens_probe_shaped(slot, key, LensShape::Row)
 }
 
-/// [`lens_probe`] for a lens that is not a list row's pill: the selected tab, the round glass of the "+" button.
+/// [`lens_probe`] for a lens that is not a list row's pill: the selected tab.
 pub fn lens_probe_shaped(slot: u8, key: u64, shape: LensShape) -> impl IntoElement {
     canvas(
         move |bounds, window, _| {
@@ -409,8 +402,6 @@ pub(crate) struct StripFrame {
     pub on_screen: bool,
     /// A tab of it took the tab lens (the selected tab, when the strip shows its tabs over glass).
     pub tab_claimed: bool,
-    /// The "+" button took its round lens.
-    pub plus_claimed: bool,
 }
 
 /// What a frame does with the window's lens slots, decided apart from the UI so it can be tested.
@@ -423,8 +414,6 @@ pub(crate) struct LensPlan {
     /// Take the selected tab's lens out: `Some(fade)`. It fades while the strip is still there (no tab selected), and goes at once when
     /// the strip is not shown.
     pub clear_tab: Option<bool>,
-    /// Take the "+" button's lens out, the same way.
-    pub clear_new_tab: Option<bool>,
 }
 
 /// `glass_on`: this window shows glass. `sidebar_on_screen`: the full sidebar is built this frame (not hidden, not the rail).
@@ -436,7 +425,6 @@ pub(crate) fn lens_plan(glass_on: bool, sidebar_on_screen: bool, sidebar_claimed
         clear_sidebar: (glass_on && !sidebar_claimed).then_some(sidebar_on_screen),
         settings_owner: glass_on && settings_focused,
         clear_tab: (glass_on && !strip.tab_claimed).then_some(strip.on_screen),
-        clear_new_tab: (glass_on && !strip.plus_claimed).then_some(strip.on_screen),
     }
 }
 
@@ -613,11 +601,11 @@ mod tests {
     fn a_frame_without_a_claim_clears_and_the_focused_pane_owns_the_settings_lens() {
         use super::{LensPlan, StripFrame, lens_plan};
         let none = StripFrame::default();
-        let both = StripFrame { on_screen: true, tab_claimed: true, plus_claimed: true };
+        let both = StripFrame { on_screen: true, tab_claimed: true };
         // sidebar on screen with a selected row, the focused pane on Settings: nothing is cleared, the pane owns the lens
         assert_eq!(
             lens_plan(true, true, true, true, both),
-            LensPlan { clear_sidebar: None, settings_owner: true, clear_tab: None, clear_new_tab: None }
+            LensPlan { clear_sidebar: None, settings_owner: true, clear_tab: None }
         );
         // no selected row but the sidebar is there: the pill fades out
         assert_eq!(lens_plan(true, true, false, false, both).clear_sidebar, Some(true));
@@ -628,7 +616,7 @@ mod tests {
         // without glass nothing is planned at all, whatever the strip did
         assert_eq!(
             lens_plan(false, true, false, true, none),
-            LensPlan { clear_sidebar: None, settings_owner: false, clear_tab: None, clear_new_tab: None }
+            LensPlan { clear_sidebar: None, settings_owner: false, clear_tab: None }
         );
     }
 
@@ -636,26 +624,23 @@ mod tests {
     fn the_tab_lenses_follow_the_strip() {
         use super::{StripFrame, lens_plan};
         let plan = |glass_on, strip| lens_plan(glass_on, true, true, false, strip);
-        // shown: the selected tab and the "+" button have their lenses, nothing is cleared
-        let shown = StripFrame { on_screen: true, tab_claimed: true, plus_claimed: true };
-        assert_eq!((plan(true, shown).clear_tab, plan(true, shown).clear_new_tab), (None, None));
-        // the strip is built but no tab is selected (a tab that cannot be drawn): the tab pill fades, the "+" stays
+        // shown: the selected tab has its lens, nothing is cleared
+        let shown = StripFrame { on_screen: true, tab_claimed: true };
+        assert_eq!(plan(true, shown).clear_tab, None);
+        // the strip is built but no tab is selected (a tab that cannot be drawn): the tab pill fades
         let no_tab = StripFrame { tab_claimed: false, ..shown };
-        assert_eq!((plan(true, no_tab).clear_tab, plan(true, no_tab).clear_new_tab), (Some(true), None));
-        // the strip is not shown this frame: both go at once, without a fade over whatever replaced it
+        assert_eq!(plan(true, no_tab).clear_tab, Some(true));
+        // the strip is not shown this frame: the tab lens goes at once, without a fade over whatever replaced it
         let hidden = StripFrame::default();
-        assert_eq!((plan(true, hidden).clear_tab, plan(true, hidden).clear_new_tab), (Some(false), Some(false)));
+        assert_eq!(plan(true, hidden).clear_tab, Some(false));
         // no glass: the lenses are not touched (the engine has none and the memory is forgotten with the glass)
-        assert_eq!((plan(false, hidden).clear_tab, plan(false, hidden).clear_new_tab), (None, None));
-        assert_eq!((plan(false, shown).clear_tab, plan(false, shown).clear_new_tab), (None, None));
-        // the tab lens and the "+" lens are decided apart
-        let only_plus = StripFrame { on_screen: true, tab_claimed: false, plus_claimed: true };
-        assert_eq!((plan(true, only_plus).clear_tab, plan(true, only_plus).clear_new_tab), (Some(true), None));
+        assert_eq!(plan(false, hidden).clear_tab, None);
+        assert_eq!(plan(false, shown).clear_tab, None);
     }
 
     #[test]
     fn the_slots_are_all_different_and_inside_the_engine() {
-        let slots = [super::SLOT_SIDEBAR, super::SLOT_SETTINGS, super::SLOT_TAB, super::SLOT_NEW_TAB];
+        let slots = [super::SLOT_SIDEBAR, super::SLOT_SETTINGS, super::SLOT_TAB];
         for (i, a) in slots.iter().enumerate() {
             assert!((*a as usize) < rf_win::glass::MAX_LENSES);
             assert!(slots[i + 1..].iter().all(|b| a != b), "slot {a} is used twice");
@@ -683,20 +668,6 @@ mod tests {
         // a radius that is not a number, or a box that cannot be drawn, gives no lens
         assert!(shape_spec(LensShape::Tab { radius: f32::NAN }, 5, [0.0, 0.0, 100.0, 32.0], strip, 1.0).is_none());
         assert!(shape_spec(LensShape::Tab { radius: 8.0 }, 5, [0.0, 0.0, 0.0, 32.0], strip, 1.0).is_none());
-    }
-
-    #[test]
-    fn the_plus_lens_is_a_circle_of_the_buttons_height_centred_on_it() {
-        use super::{LensShape, shape_spec};
-        let strip = [0.0, 0.0, 600.0, 40.0];
-        // a square 28 px button
-        let l = shape_spec(LensShape::Circle, 9, [300.0, 8.0, 28.0, 28.0], strip, 1.0).unwrap();
-        assert_eq!((l.rect, l.radius, l.clip), ([300.0, 8.0, 28.0, 28.0], 14.0, strip));
-        // a wider box: the circle keeps the height and sits in the middle
-        let l = shape_spec(LensShape::Circle, 9, [300.0, 8.0, 40.0, 28.0], strip, 2.0).unwrap();
-        assert_eq!(l.rect, [612.0, 16.0, 56.0, 56.0]);
-        assert_eq!(l.radius, 28.0, "half the (device) height: a circle");
-        assert_eq!(l.rect[2], l.rect[3]);
     }
 
     #[test]
