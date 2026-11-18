@@ -67,9 +67,10 @@ and reserved device names (CON, NUL, COM1...) get a leading `_`.
    file's bytes from `offset` to the end, then it finishes the stream. Several files go at once (the reference sends four).
 3. Client → server on the control stream: `Done` `{ "hashes": ["<blake3 hex of the whole file>", ...] }`, one per item, empty for
    folders.
-4. The receiver writes each file to `<final path>.rfpart` and, after checking the BLAKE3 of the whole `.rfpart`, renames it to its
-   final path. Then `Outcome` `{ "ok": true, "error": null }`. A file whose hash does not match is not kept (its `.rfpart` stays for
-   the next attempt) and `ok` is false.
+4. The receiver writes everything at a **staging** path: a top-level file as `<name>.rfpart`, everything inside a top-level folder
+   under `<folder>.rfpart/`. It checks the BLAKE3 of every file; when all match, each top-level item is renamed to its real name.
+   Then `Outcome` `{ "ok": true, "error": null }`. A file whose hash does not match is deleted and `ok` is false; the other parts
+   stay where they are, so sending the same items again resumes them (`resume` offsets) and sends the damaged file anew.
 
 Final paths: under the destination folder the receiver chose. A top-level name that is already taken there gets ` (2)`, ` (3)`...
 before its extension. Names are compared without regard to letter case (NTFS and APFS are case-insensitive), so two items that

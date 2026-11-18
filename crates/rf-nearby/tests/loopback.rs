@@ -210,3 +210,43 @@ fn walkdir(p: &Path) -> Vec<std::path::PathBuf> {
     }
     out
 }
+
+#[test]
+fn a_broken_transfer_goes_on_and_a_damaged_part_is_sent_again() {
+    let a = device("A", true);
+    let b = device("B", true);
+    b.nearby.set_visibility(Visibility::Everyone);
+    let src = tempfile::tempdir().unwrap();
+    let top = sample(src.path());
+    let dest = tempfile::tempdir().unwrap();
+    // an earlier transfer broke off: it left the first 5 MB of big.bin, and a wrong beginning of readme.txt
+    let stage = dest.path().join(format!("project{}", rf_nearby::PART));
+    std::fs::create_dir_all(stage.join("sub")).unwrap();
+    let big = std::fs::read(top.join("sub").join("big.bin")).unwrap();
+    std::fs::write(stage.join("sub").join("big.bin"), &big[..5 << 20]).unwrap();
+    std::fs::write(stage.join("readme.txt"), b"HELLO").unwrap();
+    let send = || a.nearby.send_to_address(addr(&b), vec![top.to_string_lossy().into()]).unwrap();
+
+    send();
+    let Ev::Offer(offer) = next(&b.events) else { panic!() };
+    b.nearby.accept(offer.id, dest.path().to_string_lossy().into());
+    let Ev::Finished(_, r) = next(&b.events) else { panic!() };
+    assert!(!r.ok, "a damaged file was kept: {r:?}");
+    let Ev::Finished(_, r) = next(&a.events) else { panic!() };
+    assert!(!r.ok);
+    // the damaged part is gone, the rest waits under its staging name, nothing looks finished
+    assert!(!stage.join("readme.txt").exists());
+    assert_eq!(std::fs::read(stage.join("sub").join("big.bin")).unwrap(), big);
+    assert!(!dest.path().join("project").exists());
+
+    send();
+    let Ev::Offer(offer) = next(&b.events) else { panic!() };
+    b.nearby.accept(offer.id, dest.path().to_string_lossy().into());
+    let Ev::Finished(_, r) = next(&b.events) else { panic!() };
+    assert!(r.ok, "{r:?}");
+    assert_eq!(r.paths, vec![dest.path().join("project").to_string_lossy().to_string()]);
+    let Ev::Finished(_, r) = next(&a.events) else { panic!() };
+    assert!(r.ok, "{r:?}");
+    same_tree(&top, &dest.path().join("project"));
+    assert!(!stage.exists());
+}

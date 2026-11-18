@@ -298,10 +298,12 @@ async fn receive(
     };
     tokio::fs::create_dir_all(&dest).await.with_context(|| format!("cannot make {}", dest.display()))?;
     let targets = targets(&dest, &items);
+    // everything is written at its staging path and takes its real name only once the whole transfer checks out
+    let stages: Vec<PathBuf> = targets.iter().map(|t| staging(&dest, t)).collect();
     let resume: Vec<u64> = items
         .iter()
-        .zip(&targets)
-        .map(|(i, t)| if !i.is_file() { 0 } else { std::fs::metadata(part(t)).map(|m| m.len()).ok().filter(|&l| l <= i.size).unwrap_or(0) })
+        .zip(&stages)
+        .map(|(i, s)| if !i.is_file() { 0 } else { std::fs::metadata(s).map(|m| m.len()).ok().filter(|&l| l <= i.size).unwrap_or(0) })
         .collect();
     proto::write_frame(ctl_send, &Answer { accept: true, reason: None, resume: resume.clone() }).await?;
 
@@ -309,21 +311,21 @@ async fn receive(
     let done = Arc::new(AtomicU64::new(resume.iter().sum()));
     let ticker = progress_ticker(inner.clone(), tid, done.clone(), total);
     let files = items.iter().filter(|i| i.is_file()).count();
-    let targets = Arc::new(targets);
+    let stages = Arc::new(stages);
     let mut tasks = Vec::new();
     for _ in 0..files {
         let mut stream = conn.accept_uni().await?;
-        let (targets, done) = (targets.clone(), done.clone());
+        let (stages, done) = (stages.clone(), done.clone());
         let sizes: Vec<u64> = items.iter().map(|i| i.size).collect();
         tasks.push(tokio::spawn(async move {
             let header: FileHeader = proto::read_frame(&mut stream).await?;
             let index = header.index as usize;
-            let target = targets.get(index).ok_or_else(|| anyhow!("no item {index}"))?;
+            let stage = stages.get(index).ok_or_else(|| anyhow!("no item {index}"))?;
             anyhow::ensure!(header.offset <= sizes[index], "offset past the end");
-            if let Some(dir) = target.parent() {
+            if let Some(dir) = stage.parent() {
                 tokio::fs::create_dir_all(dir).await?;
             }
-            let mut file = tokio::fs::OpenOptions::new().create(true).write(true).truncate(false).open(part(target)).await?;
+            let mut file = tokio::fs::OpenOptions::new().create(true).write(true).truncate(false).open(stage).await?;
             file.set_len(header.offset).await?;
             file.seek(std::io::SeekFrom::Start(header.offset)).await?;
             let mut written = header.offset;
@@ -342,33 +344,53 @@ async fn receive(
     }
     ticker.store(true, Ordering::Relaxed);
     let Done { hashes } = proto::read_frame(ctl_recv).await?;
-    // every file is checked before it takes its real name; a mismatch leaves the .rfpart for the next attempt to resume or replace
+    // every file is checked; a damaged one is thrown away, so the next attempt sends it again instead of going on from its end
     let mut failure = None;
     for (index, item) in items.iter().enumerate() {
-        let target = &targets[index];
+        let stage = &stages[index];
         if item.dir {
-            tokio::fs::create_dir_all(target).await?;
+            tokio::fs::create_dir_all(stage).await?;
             continue;
         }
         if !item.is_file() {
             continue;
         }
-        let p = part(target);
+        let p = stage.clone();
         let want = hashes.get(index).cloned().unwrap_or_default();
         let got = tokio::task::spawn_blocking(move || hash_file(&p)).await??;
         if got != want {
+            let _ = tokio::fs::remove_file(stage).await;
             failure = Some(format!("{} arrived damaged", item.path));
             continue;
         }
-        tokio::fs::rename(part(target), target).await?;
-        keep_attributes(target, item);
+        keep_attributes(stage, item);
     }
     // links last: none exists while files are written, so no file can be written through one
+    let mut tops: Vec<String> = Vec::new();
     if failure.is_none() {
         for (index, item) in items.iter().enumerate() {
             if let Some(to) = &item.link {
-                make_link(&targets[index], to, &item.path);
+                make_link(&stages[index], to, &item.path);
             }
+        }
+        // then each top-level item takes its real name (a fresh one, if something took it meanwhile)
+        let mut seen = std::collections::HashSet::new();
+        for target in targets.iter() {
+            let top = top_of(&dest, target);
+            if !seen.insert(top.clone()) {
+                continue;
+            }
+            let stage = staging(&dest, &top);
+            if std::fs::symlink_metadata(&stage).is_err() {
+                continue;
+            }
+            let name = top.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let to = dest.join(free_name(&dest, &name));
+            if let Err(e) = rename_retrying(&stage, &to).await {
+                failure = Some(format!("cannot name {}: {e}", to.display()));
+                break;
+            }
+            tops.push(to.to_string_lossy().to_string());
         }
     }
     let outcome = Outcome { ok: failure.is_none(), error: failure.clone() };
@@ -378,19 +400,6 @@ async fn receive(
     inner.listener.progress(tid, total, total);
     if let Some(f) = failure {
         bail!(f);
-    }
-    // the top-level things that arrived, each once
-    let mut tops: Vec<String> = Vec::new();
-    for (item, target) in items.iter().zip(targets.iter()) {
-        let depth = item.path.split('/').count();
-        let mut top = target.clone();
-        for _ in 1..depth {
-            top.pop();
-        }
-        let s = top.to_string_lossy().to_string();
-        if !tops.contains(&s) {
-            tops.push(s);
-        }
     }
     Ok(tops)
 }
@@ -504,6 +513,42 @@ pub fn link_stays_inside(rel: &str, to: &str) -> bool {
         }
     }
     true
+}
+
+/// Where an item is written while it arrives: a top-level file as `<name>.rfpart`, and everything of a top-level folder under
+/// `<folder>.rfpart/`. A broken transfer so leaves nothing that looks finished, and sending the same things again finds the parts
+/// at the same place (the real name is still free) and goes on from there.
+fn staging(dest: &Path, target: &Path) -> PathBuf {
+    let rel = target.strip_prefix(dest).unwrap_or(target);
+    let mut parts = rel.components();
+    let Some(top) = parts.next() else { return part(target) };
+    let mut name = top.as_os_str().to_owned();
+    name.push(PART);
+    let mut p = dest.join(name);
+    p.extend(parts);
+    p
+}
+
+/// The top-level item `target` belongs to (itself, for a top-level file).
+fn top_of(dest: &Path, target: &Path) -> PathBuf {
+    match target.strip_prefix(dest).ok().and_then(|r| r.components().next()) {
+        Some(top) => dest.join(top),
+        None => target.to_path_buf(),
+    }
+}
+
+/// A rename that tries again for a moment: on Windows a virus scanner or the indexer may still hold a just-written file.
+async fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut tries = 0;
+    loop {
+        match tokio::fs::rename(from, to).await {
+            Err(e) if tries < 10 && e.kind() == std::io::ErrorKind::PermissionDenied => {
+                tries += 1;
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            r => return r,
+        }
+    }
 }
 
 fn part(target: &Path) -> PathBuf {
