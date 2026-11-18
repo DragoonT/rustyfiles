@@ -59,9 +59,24 @@ enum SelfTest {
                     check(pb.count == 1 && TrashBin.origin(of: pb[0].from) == b.appendingPathComponent("big.bin"), "Trash remembers the origin")
                     if let t = pb.first { _ = try? TrashBin.putBack([(trashed: t.from, origin: t.to)]) }
                     check(fm.fileExists(atPath: b.appendingPathComponent("big.bin").path), "Put Back returns it")
-                    try? fm.removeItem(at: root)
-                    print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
-                    exit(failures == 0 ? 0 : 1)
+                    // 9. the organizer: pictures into Pictures/, then ⌘Z brings them back
+                    let inbox = root.appendingPathComponent("inbox")
+                    try? fm.createDirectory(at: inbox, withIntermediateDirectories: true)
+                    for n in ["one.jpg", "two.png", "note.txt"] { fm.createFile(atPath: inbox.appendingPathComponent(n).path, contents: Data("x".utf8)) }
+                    let rule = Organizer.Rule(id: 1, name: "Pictures", enabled: true, folder: inbox.path, subfolders: false, join: "all",
+                                              conditions: [.init(type: "kind", kinds: ["image"])], action: .init(type: "move_to", folder: "Pictures"), auto: false)
+                    let plan = Organizer.plan(Organizer.json([rule]), only: nil)
+                    check(plan?.steps.count == 2, "organizer plans the two pictures (\(plan?.steps.count ?? -1))")
+                    if let plan { Organizer.execute(plan, quiet: true) }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                        check(fm.fileExists(atPath: inbox.appendingPathComponent("Pictures/one.jpg").path), "organizer moved the pictures")
+                        check(fm.fileExists(atPath: inbox.appendingPathComponent("note.txt").path), "organizer left the text file")
+                        um.undo()
+                        check(fm.fileExists(atPath: inbox.appendingPathComponent("one.jpg").path), "undo puts the pictures back")
+                        try? fm.removeItem(at: root)
+                        print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
+                        exit(failures == 0 ? 0 : 1)
+                    }
                 }
             }
         }

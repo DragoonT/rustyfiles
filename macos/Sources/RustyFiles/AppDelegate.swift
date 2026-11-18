@@ -47,6 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         NSApp.mainMenu = MainMenu.make()
+        // Settings › File organizer: automatic rules watch their folders
+        if ProcessInfo.processInfo.environment["RF_NOFERRY"] == nil { Organizer.watch() }
         if controllers.isEmpty {
             // RF_START (development): a folder to open, or a file to open its folder with it selected
             let env = ProcessInfo.processInfo.environment["RF_START"]

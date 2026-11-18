@@ -71,21 +71,33 @@ extension AppSettings {
     // MARK: sidebar and Home sections
 
     enum SidebarSection: String, CaseIterable {
-        case libraries, pinned, tags, drives
+        case libraries, pinned, tree, tags, drives
 
         var title: String {
             switch self {
             case .libraries: String(localized: "Applications and Library")
             case .pinned: String(localized: "Pinned")
+            case .tree: String(localized: "Folder tree")
             case .tags: String(localized: "Tags")
             case .drives: String(localized: "Drives")
             }
         }
     }
 
-    static func showsSection(_ s: SidebarSection) -> Bool { !(d.stringArray(forKey: "sidebarHidden") ?? []).contains(s.rawValue) }
+    /// The folder tree is off unless asked for, as on Windows.
+    static func showsSection(_ s: SidebarSection) -> Bool {
+        if s == .tree { return d.bool(forKey: "sidebarTree") }
+        return !(d.stringArray(forKey: "sidebarHidden") ?? []).contains(s.rawValue)
+    }
+
+    /// The tree opens down to the folder shown.
+    static var treeFollows: Bool {
+        get { d.object(forKey: "treeFollows") == nil ? true : d.bool(forKey: "treeFollows") }
+        set { store(newValue, "treeFollows") }
+    }
 
     static func setShowsSection(_ s: SidebarSection, _ on: Bool) {
+        if s == .tree { return store(on, "sidebarTree") }
         var hidden = Set(d.stringArray(forKey: "sidebarHidden") ?? [])
         if on { hidden.remove(s.rawValue) } else { hidden.insert(s.rawValue) }
         store(Array(hidden).sorted(), "sidebarHidden")
@@ -214,6 +226,11 @@ extension SettingsContent {
         rows.append(.section(String(localized: "Sidebar sections")))
         rows += AppSettings.SidebarSection.allCases.filter { $0 != .tags || TagsSupport.ready }.map { s in
             .card(title: s.title, detail: nil, icon: nil, control: .toggle(get: { AppSettings.showsSection(s) }, set: { AppSettings.setShowsSection(s, $0) }))
+        }
+        if AppSettings.showsSection(.tree) {
+            rows.append(.card(
+                title: String(localized: "Follow the open folder"), detail: String(localized: "The folder tree opens down to the folder shown."), icon: nil,
+                control: .toggle(get: { AppSettings.treeFollows }, set: { AppSettings.treeFollows = $0 })))
         }
         rows.append(.section(String(localized: "Home sections")))
         rows += AppSettings.HomeSection.allCases.filter { $0 != .tags || TagsSupport.ready }.map { s in

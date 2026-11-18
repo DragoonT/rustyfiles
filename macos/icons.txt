@@ -107,3 +107,4 @@ gauge
 bell
 square-check
 mouse-pointer
+wand-sparkles
