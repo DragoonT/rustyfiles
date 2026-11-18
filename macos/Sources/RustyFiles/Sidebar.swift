@@ -6,7 +6,7 @@ import AppKit
 /// background of its own: the window's glass shows.
 @MainActor
 final class SidebarView: FlippedView {
-    enum Kind { case home, place, pinned, drive, tag, trash, settings, header }
+    enum Kind { case home, place, pinned, drive, tag, tree, trash, settings, header }
 
     struct Item {
         let kind: Kind
@@ -15,6 +15,63 @@ final class SidebarView: FlippedView {
         let url: URL?
         /// A tag's colour (drawn as a dot in place of the icon).
         var color: NSColor? = nil
+        /// The folder tree: how deep, and whether it has folders inside (a chevron).
+        var depth = 0
+        var expandable = false
+        var expanded = false
+    }
+
+    /// The folder tree's open folders (paths), kept across starts.
+    private var expanded: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "treeExpanded") ?? []) {
+        didSet { UserDefaults.standard.set(Array(expanded), forKey: "treeExpanded") }
+    }
+
+    func toggle(_ item: Item) {
+        guard let p = item.url?.standardizedFileURL.path else { return }
+        if expanded.contains(p) { expanded.remove(p) } else { expanded.insert(p) }
+        reload()
+    }
+
+    /// The folders inside `dir` (not hidden, not packages), by name.
+    private static func subfolders(_ dir: URL) -> [URL] {
+        let keys: [URLResourceKey] = [.isDirectoryKey, .isPackageKey, .isHiddenKey]
+        let all = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])) ?? []
+        return all.filter {
+            let v = try? $0.resourceValues(forKeys: Set(keys))
+            return v?.isDirectory == true && v?.isPackage != true
+        }
+        .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        .prefix(400).map { $0 }
+    }
+
+    private func treeItems(_ dir: URL, depth: Int, title: String? = nil, icon: String = "folder") -> [Item] {
+        let path = dir.standardizedFileURL.path
+        let open = expanded.contains(path)
+        let kids = open ? Self.subfolders(dir) : []
+        let hasKids = open ? !kids.isEmpty : true
+        var out = [Item(kind: .tree, title: title ?? FileManager.default.displayName(atPath: path), icon: icon, url: dir,
+                        depth: depth, expandable: hasKids, expanded: open)]
+        for k in kids { out += treeItems(k, depth: depth + 1) }
+        return out
+    }
+
+    /// Appearance › Follow the open folder: the tree opens down to it.
+    func follow(_ url: URL) {
+        guard AppSettings.showsSection(.tree), AppSettings.treeFollows, url.isFileURL else { return }
+        let target = url.standardizedFileURL.path
+        let roots = [FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path, "/"]
+        guard let root = roots.first(where: { target == $0 || target.hasPrefix($0 == "/" ? "/" : $0 + "/") }) else { return }
+        var add: [String] = []
+        var d = URL(fileURLWithPath: target).deletingLastPathComponent()
+        while d.path.count >= root.count, d.path.hasPrefix(root) {
+            add.append(d.standardizedFileURL.path)
+            if d.path == root || d.path == "/" { break }
+            d = d.deletingLastPathComponent()
+        }
+        let new = Set(add).subtracting(expanded)
+        guard !new.isEmpty else { return }
+        expanded.formUnion(new)
+        reload()
     }
 
     var onSelect: ((Item) -> Void)?
@@ -23,6 +80,7 @@ final class SidebarView: FlippedView {
     var onOpenInNewWindow: ((URL) -> Void)?
     var selectedURL: URL? {
         didSet {
+            if let u = selectedURL, u != oldValue { follow(u) }
             list.needsDisplay = true
             bottom.needsDisplay = true
             placeLens(animated: true)
@@ -63,7 +121,7 @@ final class SidebarView: FlippedView {
     }
 
     @objc private func settingsChanged(_ note: Notification) {
-        if ["sidebarHidden", "tagList"].contains(AppSettings.changedKey(note)) { reload() }
+        if ["sidebarHidden", "sidebarTree", "tagList"].contains(AppSettings.changedKey(note)) { reload() }
     }
 
     @available(*, unavailable)
@@ -96,6 +154,12 @@ final class SidebarView: FlippedView {
                 let icon = values?.volumeIsLocal == false ? "server" : "hard-drive"
                 items.append(Item(kind: .drive, title: values?.volumeLocalizedName ?? v.lastPathComponent, icon: icon, url: v))
             }
+        }
+        // the folder tree (Settings › Appearance › Sidebar sections)
+        if AppSettings.showsSection(.tree) {
+            items.append(Item(kind: .header, title: String(localized: "Folders"), icon: "", url: nil))
+            items += treeItems(fm.homeDirectoryForCurrentUser, depth: 0, icon: "house")
+            items += treeItems(URL(fileURLWithPath: "/"), depth: 0, title: (try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeLocalizedNameKey]).volumeLocalizedName) ?? "/", icon: "hard-drive")
         }
         // Tags (Settings › Appearance › Sidebar sections): a click lists what has the tag
         if AppSettings.showsSection(.tags), !TagStore.all.isEmpty {
@@ -257,6 +321,15 @@ final class SidebarListView: HoverView {
                     p.textSecondary.setStroke()
                     NSBezierPath(ovalIn: dot.insetBy(dx: 0.5, dy: 0.5)).stroke()
                 }
+            } else if item.kind == .tree {
+                // indented by depth; a chevron before the folders that have folders inside
+                let x = r.minX + 4 + CGFloat(item.depth) * 14
+                if item.expandable {
+                    Draw.icon(item.expanded ? "chevron-down" : "chevron-right", in: NSRect(x: x, y: r.minY, width: 12, height: r.height), size: 12, color: p.textTertiary)
+                }
+                Draw.icon(item.icon, in: NSRect(x: x + 14, y: r.minY, width: 16, height: r.height), size: 16, color: p.accent)
+                Draw.text(item.title, in: NSRect(x: x + 14 + 16 + 8, y: r.minY, width: max(r.maxX - (x + 38) - 4, 0), height: r.height), font: Metrics.textSm, color: p.text)
+                continue
             } else {
                 Draw.icon(item.icon, in: NSRect(x: r.minX + 8, y: r.minY, width: 16, height: r.height), size: 16, color: iconColor)
             }
@@ -265,8 +338,19 @@ final class SidebarListView: HoverView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard let i = index(at: convert(event.locationInWindow, from: nil)) else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        guard let i = index(at: p) else { return }
+        // the tree's chevron opens and closes; the rest of the row goes there
+        if items[i].kind == .tree, items[i].expandable, chevronRect(i).insetBy(dx: -4, dy: -6).contains(p) {
+            owner?.toggle(items[i])
+            return
+        }
         owner?.clicked(items[i])
+    }
+
+    private func chevronRect(_ i: Int) -> NSRect {
+        let r = rects()[i]
+        return NSRect(x: r.minX + 4 + CGFloat(items[i].depth) * 14, y: r.midY - 6, width: 12, height: 12)
     }
 
     /// A place that is a folder (pinned, a drive, Applications, Library) gets the Windows app's
