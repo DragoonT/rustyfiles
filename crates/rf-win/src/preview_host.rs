@@ -18,7 +18,7 @@ use windows::Win32::UI::Shell::{
     IPreviewHandlerVisuals, IShellItem, SHCreateItemFromParsingName, SHCreateStreamOnFileEx,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, HWND_TOP, RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowPos,
+    CreateWindowExW, DefWindowProcW, RegisterClassW, SW_HIDE, SWP_NOACTIVATE, SWP_SHOWWINDOW, SetWindowPos,
     ShowWindow, WINDOW_EX_STYLE, WNDCLASSW, WS_CLIPCHILDREN, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::core::{GUID, Interface, PCWSTR, w};
@@ -546,17 +546,24 @@ fn client_rect(rect: RECT) -> RECT {
     RECT { left: 0, top: 0, right: rect.right - rect.left, bottom: rect.bottom - rect.top }
 }
 
+/// Puts the host window over `rect` and shows it, WITHOUT touching the order of windows: an owned window always stands above its
+/// owner, and one raised to the top takes its owner up with it (see `crate::window::raise_above_owner`). This is called for every
+/// frame the preview pane draws; with `HWND_TOP` here, the app window came back over whatever the user had just brought forward, so
+/// a video or song could not be dragged to another app through the taskbar while it was in the preview pane (issue 75: "Without the
+/// preview pane on the right, everything works as expected"). A window already shown where it should be is left alone.
 fn position(hwnd: HWND, rect: RECT) {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowRect, IsWindowVisible, SWP_NOOWNERZORDER, SWP_NOZORDER};
     unsafe {
-        let _ = SetWindowPos(
-            hwnd,
-            Some(HWND_TOP),
-            rect.left,
-            rect.top,
-            (rect.right - rect.left).max(1),
-            (rect.bottom - rect.top).max(1),
-            SWP_NOACTIVATE | SWP_SHOWWINDOW,
-        );
+        let mut now = RECT::default();
+        let w = (rect.right - rect.left).max(1);
+        let h = (rect.bottom - rect.top).max(1);
+        if IsWindowVisible(hwnd).as_bool()
+            && GetWindowRect(hwnd, &mut now).is_ok()
+            && (now.left, now.top, now.right - now.left, now.bottom - now.top) == (rect.left, rect.top, w, h)
+        {
+            return;
+        }
+        let _ = SetWindowPos(hwnd, None, rect.left, rect.top, w, h, SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_SHOWWINDOW);
     }
 }
 
