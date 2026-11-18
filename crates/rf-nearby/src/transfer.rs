@@ -268,16 +268,28 @@ async fn receive(
         return Err(Declined.into());
     }
     // the destination: a trusted device's files go straight to the inbox when the app says so; everything else is asked
+    let mut names: Vec<String> = Vec::new();
+    for i in &items {
+        let top = i.path.split('/').next().unwrap_or_default().to_string();
+        if !names.contains(&top) {
+            names.push(top);
+        }
+    }
     let dest = if trusted && inner.cfg.auto_accept_trusted {
+        let offer = Offer {
+            id: 0,
+            transfer: tid,
+            from_id: hello.id.clone(),
+            from_name: hello.name.clone(),
+            from_os: hello.os.clone(),
+            trusted,
+            names,
+            file_count: items.iter().filter(|i| i.is_file()).count() as u64,
+            total_bytes: items.iter().map(|i| i.size).sum(),
+        };
+        inner.listener.receiving(offer);
         Some(PathBuf::from(&inner.cfg.inbox))
     } else {
-        let mut names: Vec<String> = Vec::new();
-        for i in &items {
-            let top = i.path.split('/').next().unwrap_or_default().to_string();
-            if !names.contains(&top) {
-                names.push(top);
-            }
-        }
         let offer = Offer {
             id: inner.next_id(),
             transfer: tid,

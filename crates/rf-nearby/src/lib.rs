@@ -47,6 +47,8 @@ pub struct Config {
     /// [`Visibility::Everyone`] falls back to [`Visibility::Trusted`] after this many minutes (reported with
     /// [`NearbyListener::visibility_changed`]); 0 keeps it until it is changed.
     pub everyone_minutes: u32,
+    /// Listen on 127.0.0.1 only: for tests (nothing from the network can reach it, and Windows' firewall does not ask about it).
+    pub local_only: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,6 +106,9 @@ pub enum NetStatus {
 pub trait NearbyListener: Send + Sync {
     fn peers_changed(&self, peers: Vec<Peer>);
     fn offer(&self, offer: Offer);
+    /// A trusted device's files are being taken without asking ([`Config::auto_accept_trusted`]), into the inbox: the same record
+    /// as an offer (its `id` is 0, there is nothing to answer); progress and the end follow under `offer.transfer`.
+    fn receiving(&self, offer: Offer);
     /// At most about ten times a second per transfer, and once more at the end.
     fn progress(&self, transfer: u64, done: u64, total: u64);
     fn finished(&self, transfer: u64, result: TransferResult);
@@ -141,7 +146,7 @@ impl Nearby {
         let client = tls::client_config(&me).map_err(net)?;
         let endpoint = {
             let _guard = rt.enter();
-            quinn::Endpoint::server(server, SocketAddr::from(([0, 0, 0, 0], config.port))).map_err(|e| NearbyError::Network(e.to_string()))?
+            quinn::Endpoint::server(server, SocketAddr::from((if config.local_only { [127, 0, 0, 1] } else { [0, 0, 0, 0] }, config.port))).map_err(|e| NearbyError::Network(e.to_string()))?
         };
         let inner = Arc::new(Inner {
             trust: Mutex::new(trust::TrustStore::load(&dir)),

@@ -12,6 +12,7 @@ use rf_nearby::{Config, Nearby, NearbyListener, NetStatus, Offer, Peer, Transfer
 #[derive(Debug)]
 enum Ev {
     Offer(Offer),
+    Receiving(Offer),
     Finished(u64, TransferResult),
     Code(String, String),
     Paired(#[allow(dead_code)] String, bool),
@@ -23,6 +24,9 @@ impl NearbyListener for Listener {
     fn peers_changed(&self, _: Vec<Peer>) {}
     fn offer(&self, offer: Offer) {
         let _ = self.0.lock().unwrap().send(Ev::Offer(offer));
+    }
+    fn receiving(&self, offer: Offer) {
+        let _ = self.0.lock().unwrap().send(Ev::Receiving(offer));
     }
     fn progress(&self, _: u64, done: u64, total: u64) {
         assert!(done <= total, "progress past the total: {done} / {total}");
@@ -60,6 +64,7 @@ fn device(name: &str, auto_accept_trusted: bool) -> Device {
         port: 0,
         discovery: false,
         everyone_minutes: 0,
+        local_only: true,
     };
     let nearby = Nearby::start(config, Arc::new(Listener(Mutex::new(tx)))).unwrap();
     Device { nearby, events: rx, inbox, _state: state }
@@ -173,7 +178,10 @@ fn paired_devices_show_the_same_code_and_then_trust_each_other() {
     let file = src.path().join("photo.jpg");
     std::fs::write(&file, b"jpeg").unwrap();
     a.nearby.send_to_address(addr(&b), vec![file.to_string_lossy().into()]).unwrap();
-    let Ev::Finished(_, r) = next(&b.events) else { panic!("B was asked, or did not finish") };
+    let Ev::Receiving(offer) = next(&b.events) else { panic!("B was asked") };
+    assert!(offer.trusted && offer.from_name == "A" && offer.names == ["photo.jpg"]);
+    let Ev::Finished(t, r) = next(&b.events) else { panic!("B did not finish") };
+    assert_eq!(t, offer.transfer);
     assert!(r.ok, "{r:?}");
     assert_eq!(std::fs::read(b.inbox.path().join("photo.jpg")).unwrap(), b"jpeg");
 }
