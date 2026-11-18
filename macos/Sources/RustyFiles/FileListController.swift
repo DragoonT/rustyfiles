@@ -847,9 +847,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                     }
                 }
             }
-            if FerryService.shared.isRunning {
-                m.addItem(FerryMenu.make(for: selectedURLs))
-            }
+            m.addItem(FerryMenu.make(for: selectedURLs))
             add(String(localized: "Copy as path"), nil, true) { [weak self] in
                 guard let self else { return }
                 NSPasteboard.general.clearContents()
