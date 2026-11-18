@@ -1,0 +1,86 @@
+# Nearby: the protocol
+
+How rustyfiles devices on the same network find each other and send files. The reference implementation is
+`crates/rf-nearby` (platform-free Rust, used by the Windows app and, through UniFFI, by the macOS app). Protocol version: **1**.
+
+## Discovery
+
+DNS-SD over mDNS. Every device that is visible registers:
+
+- service type `_rustyfiles._udp.local.`, instance name = the device id, host `<device id>.local.`
+- port = the UDP port of its QUIC endpoint
+- TXT records:
+
+| key | value |
+|---|---|
+| `id` | device id (see Identity) |
+| `name` | the name to show ("Özer's PC") |
+| `os` | `windows`, `macos`, `linux` |
+| `proto` | protocol version, `1` |
+| `vis` | `trusted` (lists only for its trusted devices) or `everyone` |
+
+A device with visibility "off" does not register and refuses incoming connections. A browser lists a device whose `vis` is
+`trusted` only if that device is in its own trusted list. Devices with another `proto` are ignored.
+
+## Identity
+
+Each device makes one key pair and a self-signed X.509 certificate on first start and keeps them. Its **fingerprint** is the
+SHA-256 of the certificate (DER), lower-case hex; its **device id** is the first 20 characters of the fingerprint. An id is never
+taken on trust: it is always recomputed from the certificate the peer proves in the TLS handshake.
+
+## Transport
+
+QUIC (RFC 9000) with TLS 1.3, ALPN `rustyfiles-nearby/1`. Mutual TLS: both sides present their certificate and the handshake
+signatures are verified normally; the certificates themselves are not chained to any root. What a certificate is worth is decided by
+its fingerprint (trusted list) or by the user (an offer, a pairing code).
+
+One connection per transfer or pairing. The connecting side opens one bidirectional **control stream** and speaks first. Messages
+on the control stream are **frames**: a 4-byte big-endian length, then that many bytes of UTF-8 JSON (at most 64 MiB).
+
+### Hello (client → server, first frame)
+
+```json
+{ "proto": 1, "id": "<device id>", "name": "<name>", "os": "macos",
+  "purpose": { "kind": "send", "items": [ { "path": "project/sub/big.bin", "size": 20971520, "dir": false } ] } }
+```
+
+`purpose.kind` is `send` (with `items`) or `pair`. The server closes the connection when `proto` differs or when `id` does not
+match the client certificate.
+
+`items` lists every file with its path relative to the offer, parts separated by `/`, and every **empty** folder (`dir: true`,
+`size: 0`). A receiver refuses an offer containing a path that is absolute, empty, has an empty part, `.` or `..`, a `\`, a `:`,
+or a control character.
+
+### Sending
+
+1. Server → client `Answer`: `{ "accept": true, "reason": null, "resume": [0, 1048576, ...] }`. `resume[i]` is how many bytes of
+   item `i` the receiver already holds from an earlier, broken transfer (0 for folders). A refusal is `accept: false` with a
+   `reason`; the client then reports the transfer as failed.
+2. For each file item, the client opens a **unidirectional stream**: first a frame `{ "index": i, "offset": resume[i] }`, then the
+   file's bytes from `offset` to the end, then it finishes the stream. Several files go at once (the reference sends four).
+3. Client → server on the control stream: `Done` `{ "hashes": ["<blake3 hex of the whole file>", ...] }`, one per item, empty for
+   folders.
+4. The receiver writes each file to `<final path>.rfpart` and, after checking the BLAKE3 of the whole `.rfpart`, renames it to its
+   final path. Then `Outcome` `{ "ok": true, "error": null }`. A file whose hash does not match is not kept (its `.rfpart` stays for
+   the next attempt) and `ok` is false.
+
+Final paths: under the destination folder the receiver chose. A top-level name that is already taken there gets ` (2)`, ` (3)`...
+before its extension.
+
+### Pairing
+
+After a `pair` hello, both sides compute the same six-digit code from the TLS session: 8 bytes from the RFC 5705 exporter with label
+`rustyfiles nearby pairing` and an empty context, read as a big-endian u64, modulo 1 000 000, zero-padded to six digits. Each side
+shows it and asks its user. Each side then sends `PairConfirm` `{ "ok": true|false }` on the control stream (the client on its half,
+the server on its half) and reads the other's. Only when both are `true` does each side add the other's id, name and fingerprint to
+its trusted list.
+
+## Who is asked what
+
+| visibility of the receiver | sender trusted | offer |
+|---|---|---|
+| off | either | connection refused |
+| trusted devices only | yes | taken into the inbox without asking (if the app allows), else asked |
+| trusted devices only | no | refused (`accept: false`) |
+| everyone | yes | as above |
+| everyone | no | asked; no answer in 3 minutes counts as no |
