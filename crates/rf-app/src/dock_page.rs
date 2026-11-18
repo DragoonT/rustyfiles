@@ -271,6 +271,16 @@ pub(crate) fn entries() -> Vec<Entry> {
             Some(t!("Sol adadaki arama: bir kutu, yalnızca simgesi ya da hiç. Logo Başlat'ı yine açar.")),
             Control::Search(|s| s.dock_search, |s, v| s.dock_search = v),
         ),
+        e(
+            "dock-search-hyper",
+            "dock_search_hypersearch",
+            Left,
+            dock,
+            L::Search,
+            t!("Arama HyperSearch'ü açar"),
+            Some(t!("Dock'taki arama kutusuna ya da simgesine tıklamak Başlat yerine HyperSearch'ü açar. Logo Başlat'ı yine açar.")),
+            Control::Switch(|s| s.dock_search_hypersearch, |s, v| s.dock_search_hypersearch = v),
+        ),
         e("dock-city-edit", "dock_weather_city", Left, dock, L::MapPin, t!("Hava durumu şehri"), None, Control::City(|s| s.dock_weather_city.as_str(), |s, v| s.dock_weather_city = v)),
         // ---- ORTA ADA
         e(
@@ -668,7 +678,7 @@ mod tests {
         // the sections hold what the page promises
         let ids = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
         assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_side_tall", "dock_tray_compact", "dock_all_monitors", "dock_magnify", "dock_scroll_volume", "dock_start_grow"]);
-        assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_search", "dock_weather_city"]);
+        assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_search", "dock_search_hypersearch", "dock_weather_city"]);
         assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu", "dock_thin_when_maximized", "dock_apps_where"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);
     }

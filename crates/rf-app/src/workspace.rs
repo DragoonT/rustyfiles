@@ -557,7 +557,12 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
     }
     crate::shell::desktop::open::mark("main: the line to open a place arrived");
     let (loc, select) = parse_launch(&msg);
-    let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
+    // (with "open folders from other programs in a new window" on, no window takes it as a tab: issue 77)
+    let list = if cx.global::<crate::settings::Settings>().launch_in_new_window {
+        Vec::new()
+    } else {
+        cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default()
+    };
     for (handle, ws) in list.into_iter().rev() {
         let Some(ws) = ws.upgrade() else { continue };
         // an Open/Save picker is another app's dialog: a launch never becomes one of its tabs
@@ -1230,6 +1235,30 @@ impl Workspace {
         self.activate(next.min(self.tabs.len() - 1), window, cx);
     }
 
+    /// Opens the saved session `name` in this window: its tabs (with their split panes and its active tab) take the place of the ones
+    /// that were open, which go to the closed tabs (Ctrl+Shift+T brings them back).
+    fn take_named_session(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(named) = cx.global::<crate::settings::Settings>().saved_sessions.iter().find(|s| s.name == name).cloned() else { return };
+        let old = self.tabs.len();
+        for t in &named.tabs {
+            self.open_tab(session_place(t), window, cx);
+        }
+        if self.tabs.len() == old {
+            // (a session with no tab leaves the window as it is)
+            return;
+        }
+        for (ix, loc, active) in panes_to_restore(&named.panes, self.tabs.len() - old) {
+            self.open_second_pane(old + ix, loc, active, window, cx);
+        }
+        for i in (0..old).rev() {
+            let tab = self.tabs.remove(i);
+            self.closed.push(tab.view().read(cx).location().clone());
+        }
+        self.tab_scrolled_to = None;
+        let a = named.active.min(self.tabs.len() - 1);
+        self.activate(a, window, cx);
+    }
+
     fn close_other_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let keep = self.active;
         for i in (0..self.tabs.len()).rev() {
@@ -1353,7 +1382,17 @@ impl Workspace {
                 .iter()
                 .map(|n| {
                     let n = n.clone();
-                    Item::action(n.clone(), MenuIcon::None, move |_, cx| open_named_session(&n, cx))
+                    let me = me.clone();
+                    Item::action(n.clone(), MenuIcon::None, move |w, cx| {
+                        // (in this window when the setting says so: issue 41)
+                        if cx.global::<crate::settings::Settings>().sessions_in_this_window
+                            && let Some(ws) = me.upgrade()
+                        {
+                            ws.update(cx, |ws, cx| ws.take_named_session(&n, w, cx));
+                        } else {
+                            open_named_session(&n, cx);
+                        }
+                    })
                 })
                 .collect();
             let remove: Vec<Item> = saved

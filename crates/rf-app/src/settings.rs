@@ -474,6 +474,12 @@ pub struct Settings {
     pub startup_pages: Vec<String>,
     /// Switch to tabs opened with Ctrl+click / middle click / "Open in new tab".
     pub focus_new_tab: bool,
+    /// A folder opened from outside (Win+E, the desktop, another program) gets a window of its own instead of a tab in the newest
+    /// window (issue 77). Off by default.
+    pub launch_in_new_window: bool,
+    /// A saved session opened from the tab menu takes the place of this window's tabs (they can be reopened, Ctrl+Shift+T) instead of
+    /// opening a new window (issue 41). Off by default.
+    pub sessions_in_this_window: bool,
     /// New tabs start split in two panes.
     pub dual_pane_new_tabs: bool,
     /// Dual pane side by side (true) or stacked (false).
@@ -625,6 +631,8 @@ pub struct Settings {
     pub dock_side_tall: bool,
     /// The left island's search: a field, its button only, or none (`DockSearch`).
     pub dock_search: DockSearch,
+    /// A click on the dock's search field or button opens HyperSearch instead of the Start panel (issue 41). Off by default.
+    pub dock_search_hypersearch: bool,
     /// The tray icons of the right island stand closer together (18 px a cell instead of 24; off). Issue 34.
     pub dock_tray_compact: bool,
     /// Turning the mouse wheel over a running app's icon in the dock turns that app's own sound level up or down (on; issue 21).
@@ -749,6 +757,8 @@ impl Default for Settings {
             startup: StartupPref::Continue,
             startup_pages: Vec::new(),
             focus_new_tab: false,
+            launch_in_new_window: false,
+            sessions_in_this_window: false,
             dual_pane_new_tabs: false,
             dual_pane_vertical: true,
             menu: MenuPrefs::default(),
@@ -825,6 +835,7 @@ impl Default for Settings {
             dock_status_hidden: Vec::new(),
             dock_side_tall: false,
             dock_search: DockSearch::Field,
+            dock_search_hypersearch: false,
             dock_tray_compact: false,
             dock_scroll_volume: true,
             dock_magnify: DockMagnify::Full,

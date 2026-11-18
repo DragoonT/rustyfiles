@@ -735,6 +735,20 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         cx,
     ));
     v.push(card(p, L::SquarePlus, t!("Her zaman yeni açılan sekmeye geç"), None, sw("focus-tab", p, s.focus_new_tab, |s, v| s.focus_new_tab = v)));
+    v.push(card(
+        p,
+        L::AppWindow,
+        t!("Diğer programlardan açılan klasörler yeni pencerede açılsın"),
+        Some(t!("Win+E, masaüstü ya da başka bir program bir klasör açtığında açık pencerede yeni sekme yerine yeni bir pencere açılır.")),
+        sw("launch-newwin", p, s.launch_in_new_window, |s, v| s.launch_in_new_window = v),
+    ));
+    v.push(card(
+        p,
+        L::Save,
+        t!("Kayıtlı oturumlar bu pencerede açılsın"),
+        Some(t!("Sekme menüsünden açılan oturum, yeni pencere yerine bu penceredeki sekmelerin yerini alır (kapanan sekmeler Ctrl+Shift+T ile geri gelir).")),
+        sw("session-here", p, s.sessions_in_this_window, |s, v| s.sessions_in_this_window = v),
+    ));
 
     v.push(section(p, t!("Çift bölme")));
     v.push(card(p, L::Columns2, t!("Yeni sekmeleri çift bölmeyle aç"), None, sw("dual-new", p, s.dual_pane_new_tabs, |s, v| s.dual_pane_new_tabs = v)));
