@@ -202,6 +202,18 @@ fn host(cx: &App) -> Option<HostState> {
 
 /// Opens `menu` at `pos` (window coordinates), replacing any open menu.
 pub fn show(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
+    show_ex(menu, pos, None, window, cx)
+}
+
+/// [`show`] on HyperGlass whatever the window under it shows: for the desktop, whose menus stand among the Dock's (glass) islands and
+/// menus but whose own window has no glass of the main window's kind, so they came on Windows' Acrylic (the owner, 2026-11-18:
+/// "masaüstüne sağ tıklayınca açılan kutu hyperglass değil?"). Where Windows gives no materials the menu stays plain.
+pub fn show_on_glass(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
+    let glass = crate::settings::materials_available();
+    show_ex(menu, pos, Some(glass), window, cx)
+}
+
+fn show_ex(menu: Menu, pos: Point<Pixels>, liquid: Option<bool>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
     if host(cx).is_some() {
         close(window, cx);
     }
@@ -218,7 +230,7 @@ pub fn show(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -
         hover_gen: 0,
         focus: cx.focus_handle(),
         popup: None,
-        liquid: crate::glass::liquid(crate::look::window::hwnd_of(window)),
+        liquid: liquid.unwrap_or_else(|| crate::glass::liquid(crate::look::window::hwnd_of(window))),
         glides: RefCell::new(BTreeMap::new()),
     });
 

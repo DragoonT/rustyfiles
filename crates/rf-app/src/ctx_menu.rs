@@ -266,7 +266,15 @@ impl FolderView {
                 v.push(Item::action(t!("Masaüstü arka planı yap"), icon(L::Monitor), move |_, _| {
                     let p = p.clone();
                     std::thread::spawn(move || {
-                        if let Err(e) = rf_win::fileactions::set_wallpaper(&p) {
+                        // A picture inside an archive has no file of its own: Windows was given the path inside the archive, could not
+                        // read it and left a plain colour (the owner, 2026-11-18: the background turned purple and pink). It is
+                        // extracted first, into the app's own folder (not the temp folder, which is cleaned after two days: the
+                        // background must still be there next week).
+                        let Some(real) = wallpaper_file(&p) else {
+                            log::warn!("wallpaper: the picture could not be extracted from its archive");
+                            return;
+                        };
+                        if let Err(e) = rf_win::fileactions::set_wallpaper(&real) {
                             log::warn!("wallpaper: {e:#}");
                         }
                     });
@@ -1102,4 +1110,18 @@ impl FolderView {
         })
         .detach();
     }
+}
+
+/// The file to make the desktop background of `p`: `p` itself, or for a picture inside an archive a copy of it in the app's
+/// `wallpapers` folder (one file per name, replaced when the same name is chosen again). Blocks (extraction): a worker thread.
+fn wallpaper_file(p: &std::path::Path) -> Option<std::path::PathBuf> {
+    if p.exists() || crate::archive_view::split(p).is_none() {
+        return Some(p.to_path_buf());
+    }
+    let extracted = crate::archive_view::real_copy(p)?;
+    let dir = crate::settings::app_dir()?.join("wallpapers");
+    std::fs::create_dir_all(&dir).ok()?;
+    let to = dir.join(p.file_name()?);
+    std::fs::copy(&extracted, &to).ok()?;
+    Some(to)
 }
