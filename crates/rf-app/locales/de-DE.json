@@ -2013,5 +2013,10 @@
  "77af2c39": "Geschwindigkeit wird getestet…",
  "ce1cbb7f": "Konnte nicht gemessen werden",
  "87c66ee5": "Netzwerk",
- "3026d95c": "Die Geschwindigkeit zu diesem Gerät wurde gerade getestet; in ein paar Sekunden erneut versuchen."
+ "3026d95c": "Die Geschwindigkeit zu diesem Gerät wurde gerade getestet; in ein paar Sekunden erneut versuchen.",
+ "0382ff55": "sendet dir Dateien",
+ "fd654a36": "Gespeicherte Sitzung",
+ "718edd4d": "Ein neuer Tab öffnet",
+ "40b27c00": "Ctrl+T, die Schaltfläche + und das Tab-Menü. Tab duplizieren (Ctrl+Shift+K) öffnet immer denselben Ordner.",
+ "25c0e2a2": "Der aktuelle Ordner"
 }

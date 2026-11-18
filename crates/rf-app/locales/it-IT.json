@@ -2013,5 +2013,10 @@
  "77af2c39": "verifica della velocità…",
  "ce1cbb7f": "Impossibile misurare",
  "87c66ee5": "rete",
- "3026d95c": "La velocità verso quel dispositivo è stata appena verificata; riprova tra qualche secondo."
+ "3026d95c": "La velocità verso quel dispositivo è stata appena verificata; riprova tra qualche secondo.",
+ "0382ff55": "ti sta inviando dei file",
+ "fd654a36": "Sessione salvata",
+ "718edd4d": "Si apre una nuova scheda",
+ "40b27c00": "Ctrl+T, il pulsante + e il menu delle schede. Duplica scheda (Ctrl+Shift+K) apre sempre la stessa cartella.",
+ "25c0e2a2": "La cartella corrente"
 }

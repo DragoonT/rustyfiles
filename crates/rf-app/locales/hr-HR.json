@@ -2013,5 +2013,10 @@
  "77af2c39": "testiranje brzine…",
  "ce1cbb7f": "Brzinu nije moguće izmjeriti",
  "87c66ee5": "mreža",
- "3026d95c": "Brzina do tog uređaja upravo je testirana; pokušaj ponovno za nekoliko sekundi."
+ "3026d95c": "Brzina do tog uređaja upravo je testirana; pokušaj ponovno za nekoliko sekundi.",
+ "0382ff55": "šalje vam datoteke",
+ "fd654a36": "Spremljena sesija",
+ "718edd4d": "Otvara se nova kartica",
+ "40b27c00": "Ctrl+T, gumb + i izbornik kartica. Dupliciranje kartice (Ctrl+Shift+K) uvijek otvara istu mapu.",
+ "25c0e2a2": "Trenutna mapa"
 }

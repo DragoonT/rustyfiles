@@ -2013,5 +2013,10 @@
  "77af2c39": "testing speed…",
  "ce1cbb7f": "Couldn't measure",
  "87c66ee5": "network",
- "3026d95c": "The speed to that device was just tested; try again in a few seconds."
+ "3026d95c": "The speed to that device was just tested; try again in a few seconds.",
+ "0382ff55": "is sending you files",
+ "fd654a36": "Saved session",
+ "718edd4d": "A new tab opens",
+ "40b27c00": "Ctrl+T, the + button and the tab menu. Duplicate tab (Ctrl+Shift+K) always opens the same folder.",
+ "25c0e2a2": "The current folder"
 }

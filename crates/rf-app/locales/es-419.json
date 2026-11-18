@@ -2013,5 +2013,10 @@
  "77af2c39": "probando velocidad…",
  "ce1cbb7f": "No se pudo medir",
  "87c66ee5": "red",
- "3026d95c": "Ya se probó la velocidad a ese dispositivo; inténtalo de nuevo en unos segundos."
+ "3026d95c": "Ya se probó la velocidad a ese dispositivo; inténtalo de nuevo en unos segundos.",
+ "0382ff55": "te está enviando archivos",
+ "fd654a36": "Sesión guardada",
+ "718edd4d": "Se abre una pestaña nueva",
+ "40b27c00": "Ctrl+T, el botón + y el menú de pestañas. Duplicar pestaña (Ctrl+Shift+K) siempre abre la misma carpeta.",
+ "25c0e2a2": "La carpeta actual"
 }

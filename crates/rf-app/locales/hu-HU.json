@@ -2013,5 +2013,10 @@
  "77af2c39": "sebesség tesztelése…",
  "ce1cbb7f": "Nem sikerült mérni",
  "87c66ee5": "hálózat",
- "3026d95c": "Az eszköz felé mért sebességet az imént teszteltük; próbálja újra néhány másodperc múlva."
+ "3026d95c": "Az eszköz felé mért sebességet az imént teszteltük; próbálja újra néhány másodperc múlva.",
+ "0382ff55": "fájlokat küld neked",
+ "fd654a36": "Mentett munkamenet",
+ "718edd4d": "Új lap nyílik meg",
+ "40b27c00": "Ctrl+T, a + gomb és a lapmenü. A lap duplikálása (Ctrl+Shift+K) mindig ugyanazt a mappát nyitja meg.",
+ "25c0e2a2": "Az aktuális mappa"
 }

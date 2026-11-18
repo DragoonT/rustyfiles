@@ -2013,5 +2013,10 @@
  "77af2c39": "testataan nopeutta…",
  "ce1cbb7f": "Nopeutta ei voitu mitata",
  "87c66ee5": "verkko",
- "3026d95c": "Nopeus tuohon laitteeseen testattiin juuri; yritä uudelleen muutaman sekunnin kuluttua."
+ "3026d95c": "Nopeus tuohon laitteeseen testattiin juuri; yritä uudelleen muutaman sekunnin kuluttua.",
+ "0382ff55": "lähettää sinulle tiedostoja",
+ "fd654a36": "Tallennettu istunto",
+ "718edd4d": "Uusi välilehti avautuu:",
+ "40b27c00": "Ctrl+T, +-painike ja välilehtivalikko. Monista välilehti (Ctrl+Shift+K) avaa aina saman kansion.",
+ "25c0e2a2": "Nykyinen kansio"
 }

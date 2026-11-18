@@ -2013,5 +2013,10 @@
  "77af2c39": "testando velocidade…",
  "ce1cbb7f": "Não foi possível medir",
  "87c66ee5": "rede",
- "3026d95c": "A velocidade para esse dispositivo acabou de ser testada; tente de novo em alguns segundos."
+ "3026d95c": "A velocidade para esse dispositivo acabou de ser testada; tente de novo em alguns segundos.",
+ "0382ff55": "está enviando arquivos para você",
+ "fd654a36": "Sessão salva",
+ "718edd4d": "Uma nova aba abre",
+ "40b27c00": "Ctrl+T, o botão + e o menu de abas. Duplicar aba (Ctrl+Shift+K) sempre abre a mesma pasta.",
+ "25c0e2a2": "A pasta atual"
 }

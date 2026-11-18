@@ -2013,5 +2013,10 @@
  "77af2c39": "test du débit…",
  "ce1cbb7f": "Mesure impossible",
  "87c66ee5": "réseau",
- "3026d95c": "Le débit vers cet appareil vient d'être testé ; réessayez dans quelques secondes."
+ "3026d95c": "Le débit vers cet appareil vient d'être testé ; réessayez dans quelques secondes.",
+ "0382ff55": "vous envoie des fichiers",
+ "fd654a36": "Session enregistrée",
+ "718edd4d": "Un nouvel onglet s'ouvre sur :",
+ "40b27c00": "Ctrl+T, le bouton + et le menu des onglets. Dupliquer l'onglet (Ctrl+Shift+K) ouvre toujours le même dossier.",
+ "25c0e2a2": "Le dossier actuel"
 }

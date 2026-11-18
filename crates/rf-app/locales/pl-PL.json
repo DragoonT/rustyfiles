@@ -2013,5 +2013,10 @@
  "77af2c39": "testowanie prędkości…",
  "ce1cbb7f": "Nie udało się zmierzyć",
  "87c66ee5": "sieć",
- "3026d95c": "Prędkość do tego urządzenia została właśnie sprawdzona; spróbuj ponownie za kilka sekund."
+ "3026d95c": "Prędkość do tego urządzenia została właśnie sprawdzona; spróbuj ponownie za kilka sekund.",
+ "0382ff55": "wysyła Ci pliki",
+ "fd654a36": "Zapisana sesja",
+ "718edd4d": "Nowa karta otwiera",
+ "40b27c00": "Ctrl+T, przycisk + i menu kart. Duplikowanie karty (Ctrl+Shift+K) zawsze otwiera ten sam folder.",
+ "25c0e2a2": "Bieżący folder"
 }
