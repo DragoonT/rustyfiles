@@ -517,7 +517,7 @@ pub struct FolderView {
     /// Re-renders once a load has been running for a while (shows the "loading" placeholder).
     _slow_task: Option<Task<()>>,
     /// Where a left-button press started on a row (for drag-out detection).
-    drag_origin: Option<Point<Pixels>>,
+    drag_origin: Option<RowPress>,
     /// Rubber-band selection in list-content coordinates.
     marquee: Option<Marquee>,
     /// Type-to-select buffer and when it was last extended.
@@ -866,10 +866,12 @@ impl FolderView {
                         MouseButton::Left,
                         cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
                     )
+                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, ev: &MouseUpEvent, _, cx| this.on_row_mouse_up(vi, ev, cx)))
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
+                    .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, is_dir, &p))
                     .into_any_element(),
             );
         }
@@ -2361,8 +2363,6 @@ impl FolderView {
         };
         let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
         let renamed = self.renamed.clone();
-        let drop_bg = p.selection;
-        let drop_border = p.accent;
         let mut out = Vec::with_capacity(range.len());
         for row in range {
             let mut r = h_flex().w_full().h(self.grid_row_h()).gap(GRID_GAP).items_start();
@@ -2488,18 +2488,12 @@ impl FolderView {
                         MouseButton::Left,
                         cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
                     )
+                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, ev: &MouseUpEvent, _, cx| this.on_row_mouse_up(vi, ev, cx)))
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
-                    .when(e.is_dir(), |d| {
-                        d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_1().border_color(drop_border))
-                            .on_drop(cx.listener(move |this, paths: &ExternalPaths, _, cx| {
-                                if let Some(dest) = this.drop_target_row(ei) {
-                                    this.drop_into(dest, paths, cx);
-                                }
-                            }))
-                    });
+                    .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p));
                 r = r.child(cell);
             }
             out.push(r.into_any_element());
@@ -2522,11 +2516,7 @@ impl FolderView {
         let Some(&ei) = self.visible.get(vi) else { return };
         let plain = !ev.modifiers.control && !ev.modifiers.shift;
         // Settings → "Open items with a single click"
-        let single = match cx.global::<crate::settings::Settings>().single_click {
-            crate::settings::ClickPref::Never => false,
-            crate::settings::ClickPref::Folders => self.entries[ei as usize].is_dir(),
-            crate::settings::ClickPref::Always => true,
-        };
+        let single = self.opens_on_single_click(ei, cx);
         // A second click opens only what the first click of the pair was made on (`completes_double`). Otherwise it is a click like
         // any other: it selects.
         let name = self.entries[ei as usize].name.clone();
@@ -2537,7 +2527,7 @@ impl FolderView {
             // select it)
             return;
         }
-        if plain && (double || (single && ev.click_count == 1)) {
+        if plain && double {
             self.select_only(vi);
             self.open_entry(ei, cx);
             return;
@@ -2558,13 +2548,34 @@ impl FolderView {
             // Clicking inside an existing multi-selection keeps it (so it can be dragged).
             self.cursor = Some(vi);
         }
-        self.drag_origin = Some(ev.position);
+        self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && ev.click_count == 1 });
         // Explorer: a click on the name of the item that was already the only one selected
         // renames it, once the double-click time passes without a second click or a drag
-        if plain && ev.click_count == 1 && on_name && was_only && had_focus && !was_renaming {
+        if plain && !single && ev.click_count == 1 && on_name && was_only && had_focus && !was_renaming {
             self.arm_slow_click(ei, cx);
         }
         cx.notify();
+    }
+
+    fn opens_on_single_click(&self, ei: u32, cx: &App) -> bool {
+        match cx.global::<crate::settings::Settings>().single_click {
+            crate::settings::ClickPref::Never => false,
+            crate::settings::ClickPref::Folders => self.entries[ei as usize].is_dir(),
+            crate::settings::ClickPref::Always => true,
+        }
+    }
+
+    fn on_row_mouse_up(&mut self, vi: usize, ev: &MouseUpEvent, cx: &mut Context<Self>) {
+        let Some(&ei) = self.visible.get(vi) else { return };
+        // Open on release so a single-click setting still allows the item to start a drag.
+        if self.drag_origin.as_ref().is_some_and(|press| press.open_on_release)
+            && !ev.modifiers.control && !ev.modifiers.shift
+            && completes_double(self.first_click.as_ref(), self.load_serial, Some(&self.entries[ei as usize].name))
+        {
+            self.drag_origin = None;
+            self.select_only(vi);
+            self.open_entry(ei, cx);
+        }
     }
 
     fn arm_slow_click(&mut self, ei: u32, cx: &mut Context<Self>) {
@@ -2591,12 +2602,12 @@ impl FolderView {
     }
 
     fn on_drag_motion(&mut self, ev: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(start) = self.drag_origin else { return };
+        let Some(press) = &self.drag_origin else { return };
         if ev.pressed_button != Some(MouseButton::Left) {
             self.drag_origin = None;
             return;
         }
-        let d = ev.position - start;
+        let d = ev.position - press.origin;
         if d.x.abs() + d.y.abs() > px(8.) {
             self.drag_origin = None;
             self.slow_click = None;
@@ -2774,12 +2785,6 @@ impl FolderView {
                 return;
             }
         }
-    }
-
-    fn drop_target_row(&self, ei: u32) -> Option<PathBuf> {
-        // `ei` was captured at render time; the listing may have changed since.
-        let e = self.entries.get(ei as usize)?;
-        if e.is_dir() { self.path_of(ei) } else { None }
     }
 
     pub fn selection_paths(&self) -> Vec<PathBuf> {
@@ -3405,8 +3410,6 @@ impl FolderView {
 
     fn render_rows(&mut self, range: std::ops::Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let p = Palette::for_window(window);
-        let drop_bg = p.selection;
-        let drop_border = p.accent;
         let search_mode = self.is_search();
         let prefs = cx.global::<crate::settings::Settings>();
         let show_ext = prefs.show_extensions;
@@ -3665,18 +3668,12 @@ impl FolderView {
                     MouseButton::Left,
                     cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
                 )
+                .on_mouse_up(MouseButton::Left, cx.listener(move |this, ev: &MouseUpEvent, _, cx| this.on_row_mouse_up(vi, ev, cx)))
                 .on_mouse_down(
                     MouseButton::Right,
                     cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                 )
-                .when(e.is_dir(), |d| {
-                    d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_1().border_color(drop_border))
-                        .on_drop(cx.listener(move |this, paths: &ExternalPaths, _, cx| {
-                            if let Some(dest) = this.drop_target_row(ei) {
-                                this.drop_into(dest, paths, cx);
-                            }
-                        }))
-                })
+                .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
                 .on_mouse_down(
                     MouseButton::Middle,
                     cx.listener(move |this, _: &MouseDownEvent, _, cx| {
@@ -3999,7 +3996,7 @@ impl FolderView {
                     }))
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                         if let Some(dir) = this.current_dir() {
-                            this.drop_into(dir, paths, cx);
+                            crate::workspace::drop_files(paths, dir, cx);
                         }
                     }))
                     .child(body)
@@ -4495,9 +4492,10 @@ fn static_column(
                         let on = highlight.as_deref() == Some(&*e.name);
                         let cat = icons::category(e);
                         let target = dir.join(&*e.name);
+                        let drop_path = target.clone();
                         let is_dir = e.is_dir();
                         let view = view.clone();
-                        h_flex()
+                        let row = h_flex()
                             .id(("scol", i))
                             .w_full()
                             .h(px(28.))
@@ -4521,8 +4519,8 @@ fn static_column(
                                 } else {
                                     open_in_background(target.clone(), cx);
                                 }
-                            })
-                            .into_any_element()
+                            });
+                        file_drop_target(row, drop_path, is_dir, &pal).into_any_element()
                     })
                     .collect::<Vec<_>>()
             })
@@ -4845,6 +4843,11 @@ struct FirstClick {
     name: Option<Arc<str>>,
 }
 
+struct RowPress {
+    origin: Point<Pixels>,
+    open_on_release: bool,
+}
+
 /// Whether a click that Windows counts as the second of a double click is one HERE: its first click was made in this same listing
 /// and on the same thing (the entry `name`, or the empty area for `None`).
 ///
@@ -5002,6 +5005,66 @@ impl FolderView {
         let next: HashSet<u32> = self.visible.iter().copied().filter(|i| !self.selected.contains(i)).collect();
         self.selected = next;
         cx.notify();
+    }
+}
+
+/// Use the rendered path, so a refresh during a drag cannot retarget it by shifting row indices.
+fn file_drop_target(row: Stateful<Div>, target: PathBuf, is_dir: bool, p: &Palette) -> Stateful<Div> {
+    if !is_dir && !crate::program_launch::accepts_program(&target) {
+        return row;
+    }
+    let (color, border) = (p.selection, p.accent);
+    let hover_target = target.clone();
+    row.drag_over::<ExternalPaths>(move |s, paths, _, _| {
+        if valid_item_drop(paths.paths(), &hover_target, is_dir) { s.bg(color).border_1().border_color(border) } else { s }
+    })
+    .on_drag_move::<ExternalPaths>({
+        let target = target.clone();
+        move |ev, _, cx| {
+            if !ev.bounds.contains(&ev.event.position) {
+                return;
+            }
+            if is_dir {
+                show_drop_effect(ev.drag(cx).paths(), &target);
+            } else {
+                gpui_windows::dnd_hint::set(gpui_windows::dnd_hint::COPY);
+            }
+        }
+    })
+    .on_drop(move |paths: &ExternalPaths, window, cx| {
+        if !valid_item_drop(paths.paths(), &target, is_dir) {
+            return;
+        }
+        if is_dir {
+            crate::workspace::drop_files(paths, target.clone(), cx);
+        } else {
+            crate::ops::drop_on_program(target.clone(), paths.paths().to_vec(), window, cx);
+        }
+    })
+}
+
+fn valid_item_drop(sources: &[PathBuf], target: &std::path::Path, is_dir: bool) -> bool {
+    !sources.is_empty() && if is_dir {
+        !rf_win::dnd::is_invalid_drop(sources, target)
+    } else {
+        !sources.iter().any(|p| p.as_os_str().eq_ignore_ascii_case(target.as_os_str()))
+    }
+}
+
+#[cfg(test)]
+mod file_drop_tests {
+    use super::valid_item_drop;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_child_folder_or_program_accepts_a_file_but_never_itself() {
+        let file = PathBuf::from(r"C:\files\report.txt");
+        let folder = Path::new(r"C:\files\sub");
+        let program = Path::new(r"C:\files\sign.EXE");
+        assert!(valid_item_drop(std::slice::from_ref(&file), folder, true));
+        assert!(valid_item_drop(&[file], program, false));
+        assert!(!valid_item_drop(&[folder.to_path_buf()], folder, true));
+        assert!(!valid_item_drop(&[PathBuf::from(r"c:\files\SIGN.exe")], program, false));
     }
 }
 

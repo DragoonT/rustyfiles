@@ -3690,14 +3690,14 @@ pub fn open_in_ide(dir: PathBuf, ide: String) {
     });
 }
 
-fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
+pub(crate) fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
     let sources: Vec<PathBuf> = paths.paths().to_vec();
     if sources.is_empty() || rf_win::dnd::is_invalid_drop(&sources, &dest) {
         return;
     }
     let (ctrl, shift) = unsafe {
-        use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
-        (GetKeyState(VK_CONTROL.0 as i32) < 0, GetKeyState(VK_SHIFT.0 as i32) < 0)
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_SHIFT};
+        (GetAsyncKeyState(VK_CONTROL.0 as i32) < 0, GetAsyncKeyState(VK_SHIFT.0 as i32) < 0)
     };
     let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
     crate::status_center::transfer(cx, kind, sources, dest);
