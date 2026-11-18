@@ -12167,5 +12167,41 @@
   "key": "Açık olan klasör",
   "tr": "Açık olan klasör",
   "en": "The current folder"
+ },
+ {
+  "id": "bb978821",
+  "key": "Geçmiş klasörlerde ara",
+  "tr": "Geçmiş klasörlerde ara",
+  "en": "Search past folders"
+ },
+ {
+  "id": "63facfe7",
+  "key": "Geçmiş klasörlerde ara…",
+  "tr": "Geçmiş klasörlerde ara…",
+  "en": "Search past folders…"
+ },
+ {
+  "id": "2155789d",
+  "key": "Eşleşen klasör yok",
+  "tr": "Eşleşen klasör yok",
+  "en": "No matching folders"
+ },
+ {
+  "id": "483baf12",
+  "key": "Henüz gezilen klasör yok",
+  "tr": "Henüz gezilen klasör yok",
+  "en": "No folders visited yet"
+ },
+ {
+  "id": "b2599e37",
+  "key": "Komut paletinde geçmiş klasörleri göster",
+  "tr": "Komut paletinde geçmiş klasörleri göster",
+  "en": "Show past folders in the command palette"
+ },
+ {
+  "id": "406f55f2",
+  "key": "Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.",
+  "tr": "Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.",
+  "en": "As you type, folders you went to before are listed with the commands. Ctrl+P always searches past folders only."
  }
 ]

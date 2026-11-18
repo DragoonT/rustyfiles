@@ -598,6 +598,9 @@ pub struct Settings {
     /// With nothing typed, HyperSearch lists what was opened lately; off: it shows nothing until something is typed (issue 41:
     /// "Add an option to show/hide recent searches").
     pub quick_search_recent: bool,
+    /// The command palette (Ctrl+Shift+P) lists past folders among the commands once something is typed (`folder_history`). Off:
+    /// commands only; Ctrl+P still searches past folders.
+    pub palette_folder_history: bool,
 
     // ---- Dock (dock/: `rustyfiles --dock`, a separate process; experimental)
     /// The dock runs: started with rustyfiles and when this is switched on, stopped when it is switched off.
@@ -858,6 +861,7 @@ impl Default for Settings {
             web_search: WebSearch::Google,
             quick_search_bookmarks: true,
             quick_search_recent: true,
+            palette_folder_history: true,
             dock_enabled: false,
             dock_reserve: true,
             dock_weather_city: String::new(),

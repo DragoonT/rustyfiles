@@ -1056,6 +1056,8 @@ impl FolderView {
     fn load(&mut self, cx: &mut Context<Self>) {
         // (another listing: a click made before it is not the first click of a double click in it)
         self.load_serial += 1;
+        // every folder landed on (navigating, Back/Forward, a refresh) is remembered for the palette's folder search
+        crate::folder_history::record(self.location());
         self.apply_folder_layout(cx);
         self.images.update(cx, |c, _| c.cancel_pending());
         self.git = None;
