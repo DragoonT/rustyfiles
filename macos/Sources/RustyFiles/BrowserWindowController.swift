@@ -165,7 +165,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// lenses find their places again, or go, when the material changed).
     @objc private func settingsChanged(_ note: Notification) {
         let key = AppSettings.changedKey(note)
-        if key == "material" { applyMaterial() }
+        if key == "material" || key == "theme" { applyMaterial() }
         list.apply(settingKey: key)
         func redraw(_ v: NSView) {
             v.needsDisplay = true
@@ -187,8 +187,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         guard let window, let frameView else { return }
         backdrop?.removeFromSuperview()
         backdrop = nil
+        // Black (OLED) is opaque whatever the material
+        let material: AppSettings.Material = AppSettings.theme == .black ? .solid : AppSettings.material
         let view: NSView?
-        switch AppSettings.material {
+        switch material {
         case .glass:
             let g = NSGlassEffectView()
             g.style = .regular
@@ -203,9 +205,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case .solid:
             view = nil
         }
-        let glass = AppSettings.material == .glass
-        window.isOpaque = AppSettings.material == .solid
-        window.backgroundColor = AppSettings.material == .solid ? .windowBackgroundColor : .clear
+        let glass = material == .glass
+        window.isOpaque = material == .solid
+        window.backgroundColor = material == .solid ? .windowBackgroundColor : .clear
         window.hasShadow = !glass
         if let view {
             view.frame = frameView.bounds

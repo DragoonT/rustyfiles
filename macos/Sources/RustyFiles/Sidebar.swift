@@ -57,6 +57,11 @@ final class SidebarView: FlippedView {
             center.addObserver(self, selector: #selector(volumesChanged), name: name, object: nil)
         }
         NotificationCenter.default.addObserver(self, selector: #selector(volumesChanged), name: .rfPinsChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(settingsChanged(_:)), name: .rfSettingsChanged, object: nil)
+    }
+
+    @objc private func settingsChanged(_ note: Notification) {
+        if AppSettings.changedKey(note) == "sidebarHidden" { reload() }
     }
 
     @available(*, unavailable)
@@ -68,17 +73,21 @@ final class SidebarView: FlippedView {
         let fm = FileManager.default
         var items: [Item] = [Item(kind: .home, title: String(localized: "Home"), icon: "house", url: BrowserTab.homeURL)]
         // under Home, the two folders a Mac user goes to that Finder's sidebar hides or buries
-        items.append(Item(kind: .place, title: fm.displayName(atPath: "/Applications"), icon: "app-window-mac", url: URL(fileURLWithPath: "/Applications")))
-        if let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask).first {
-            items.append(Item(kind: .place, title: String(localized: "Library"), icon: "library", url: lib))
+        if AppSettings.showsSection(.libraries) {
+            items.append(Item(kind: .place, title: fm.displayName(atPath: "/Applications"), icon: "app-window-mac", url: URL(fileURLWithPath: "/Applications")))
+            if let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask).first {
+                items.append(Item(kind: .place, title: String(localized: "Library"), icon: "library", url: lib))
+            }
         }
-        items.append(Item(kind: .header, title: String(localized: "Pinned"), icon: "", url: nil))
-        for url in Pins.load() {
-            items.append(Item(kind: .pinned, title: fm.displayName(atPath: url.path), icon: "folder", url: url))
+        if AppSettings.showsSection(.pinned) {
+            items.append(Item(kind: .header, title: String(localized: "Pinned"), icon: "", url: nil))
+            for url in Pins.load() {
+                items.append(Item(kind: .pinned, title: fm.displayName(atPath: url.path), icon: "folder", url: url))
+            }
         }
         let keys: [URLResourceKey] = [.volumeLocalizedNameKey, .volumeIsLocalKey]
         let volumes = fm.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
-        if !volumes.isEmpty {
+        if !volumes.isEmpty, AppSettings.showsSection(.drives) {
             items.append(Item(kind: .header, title: String(localized: "Drives"), icon: "", url: nil))
             for v in volumes {
                 let values = try? v.resourceValues(forKeys: Set(keys))

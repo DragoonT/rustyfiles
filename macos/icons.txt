@@ -89,3 +89,7 @@ mouse-pointer-click
 corner-left-up
 calculator
 at-sign
+move-vertical
+paint-bucket
+panel-top
+panel-bottom

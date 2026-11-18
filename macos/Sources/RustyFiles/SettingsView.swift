@@ -90,7 +90,10 @@ enum SettingsContent {
                 .card(
                     title: String(localized: "Theme"), detail: nil, icon: "sun-moon",
                     control: .choice(
-                        options: [("system", String(localized: "System")), ("light", String(localized: "Light")), ("dark", String(localized: "Dark"))],
+                        options: [
+                            ("system", String(localized: "System")), ("light", String(localized: "Light")), ("dark", String(localized: "Dark")),
+                            ("black", String(localized: "Black (OLED)")),
+                        ],
                         get: { AppSettings.theme.rawValue },
                         set: { AppSettings.theme = AppSettings.Theme(rawValue: $0) ?? .system })),
                 .card(
@@ -109,7 +112,7 @@ enum SettingsContent {
                     control: .slider(get: { AppSettings.surfaceWash }, set: { AppSettings.surfaceWash = $0 })),
             ] as [SettingsRow] : []) + [
                 .card(title: String(localized: "Accent colour"), detail: nil, icon: "paintbrush", control: .accent),
-            ]
+            ] + appearanceExtraRows()
         case .layout:
             return [
                 .card(
@@ -359,6 +362,11 @@ final class LiquidSwitch: HoverView {
 
     private func animate() {
         timer?.invalidate()
+        guard AppSettings.animations else {
+            progress = isOn ? 1 : 0
+            needsDisplay = true
+            return
+        }
         let start = progress, target: CGFloat = isOn ? 1 : 0, began = Date()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { [weak self] t in
             MainActor.assumeIsolated {
@@ -838,7 +846,7 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
     @objc private func settingsChanged(_ note: Notification) {
         // a setting can decide which rows a page has: rebuilt, unless a slider or the colour
         // panel is being dragged
-        if !["surfaceWash", "accent"].contains(AppSettings.changedKey(note)) {
+        if !["surfaceWash", "accent", "listBackground", "listImageVisibility"].contains(AppSettings.changedKey(note)) {
             let y = scroll.contentView.bounds.origin.y
             rebuild()
             layoutSubtreeIfNeeded()

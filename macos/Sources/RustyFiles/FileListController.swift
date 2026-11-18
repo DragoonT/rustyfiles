@@ -142,6 +142,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         applyViewMode()
         card.onLayout = { [weak self] in self?.layoutCard() }
+        applyScrollBars()
+        card.applyBackground()
         NotificationCenter.default.addObserver(self, selector: #selector(columnsChanged), name: NSTableView.columnDidResizeNotification, object: table)
         wireCommandBar()
     }
@@ -186,21 +188,34 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         var b = card.bounds
         // the pane takes the right of the card, under the command bar, beside the list and its
         // status bar; it never leaves the list less than 320 wide
-        let pw = previewShown ? min(previewWidth, max(card.bounds.width - 320, 0)) : 0
-        let paneShown = previewShown && pw >= PreviewPane.minWidth && settingsView == nil && homeView == nil
+        // Appearance › Show the command bar / status bar
+        let barH = AppSettings.showCommandBar ? Metrics.commandBarHeight : 0
+        let statusH = AppSettings.showStatusBar ? Metrics.statusBarHeight : 0
+        commandBar.isHidden = barH == 0 || settingsView != nil || homeView != nil
+        status.isHidden = statusH == 0 || settingsView != nil || homeView != nil
+        // the pane: at the right of the list (never leaving it under 320 wide), or under it
+        let bottom = AppSettings.previewAtBottom
+        let ph = min(max(b.height * 0.38, 160), b.height - barH - 160)
+        let pw = previewShown ? (bottom ? b.width : min(previewWidth, max(card.bounds.width - 320, 0))) : 0
+        let paneShown = previewShown && (bottom ? ph >= 120 : pw >= PreviewPane.minWidth) && settingsView == nil && homeView == nil
         previewPane.isHidden = !paneShown
-        previewHandle.isHidden = !paneShown
-        if paneShown {
-            previewPane.frame = NSRect(x: b.width - pw, y: Metrics.commandBarHeight, width: pw, height: b.height - Metrics.commandBarHeight)
-            previewHandle.frame = NSRect(x: b.width - pw - 3, y: Metrics.commandBarHeight, width: 6, height: b.height - Metrics.commandBarHeight)
+        previewHandle.isHidden = !paneShown || bottom
+        previewPane.atBottom = bottom
+        if paneShown && !bottom {
+            previewPane.frame = NSRect(x: b.width - pw, y: barH, width: pw, height: b.height - barH)
+            previewHandle.frame = NSRect(x: b.width - pw - 3, y: barH, width: 6, height: b.height - barH)
         }
         commandBar.frame = NSRect(x: 0, y: 0, width: b.width, height: Metrics.commandBarHeight)
-        if paneShown { b.size.width -= pw }
-        header.frame = NSRect(x: 0, y: Metrics.commandBarHeight, width: b.width, height: Metrics.headerHeight)
-        let top = Metrics.commandBarHeight + Metrics.headerHeight
-        status.frame = NSRect(x: 0, y: b.height - Metrics.statusBarHeight, width: b.width, height: Metrics.statusBarHeight)
-        scroll.frame = NSRect(x: 0, y: top, width: b.width, height: status.frame.minY - top)
-        tileScroll.frame = NSRect(x: 0, y: Metrics.commandBarHeight, width: b.width, height: status.frame.minY - Metrics.commandBarHeight)
+        if paneShown && !bottom { b.size.width -= pw }
+        if paneShown && bottom {
+            previewPane.frame = NSRect(x: 0, y: b.height - ph, width: b.width, height: ph)
+            b.size.height -= ph
+        }
+        header.frame = NSRect(x: 0, y: barH, width: b.width, height: Metrics.headerHeight)
+        let top = barH + Metrics.headerHeight
+        status.frame = NSRect(x: 0, y: b.height - statusH, width: b.width, height: Metrics.statusBarHeight)
+        scroll.frame = NSRect(x: 0, y: top, width: b.width, height: b.height - statusH - top)
+        tileScroll.frame = NSRect(x: 0, y: barH, width: b.width, height: b.height - statusH - barH)
         // as many columns as fit, left-aligned with 4 between them (not spread out)
         let cols = max(Int((b.width - 2 * TileMetrics.padX + TileMetrics.gap) / (TileMetrics.width + TileMetrics.gap)), 1)
         let used = CGFloat(cols) * (TileMetrics.width + TileMetrics.gap) - TileMetrics.gap
@@ -245,7 +260,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let key = (folder: folder.map(ObjectIdentifier.init), date: AppSettings.dateStyle, decimal: AppSettings.decimalSizes)
         if let m = measuredFor, m.folder == key.folder, m.date == key.date, m.decimal == key.decimal { return }
         measuredFor = key
-        func w(_ s: String, _ f: NSFont = Metrics.textSm) -> CGFloat { Draw.textWidth(s, font: f) }
+        func w(_ s: String, _ f: NSFont? = nil) -> CGFloat { Draw.textWidth(s, font: f ?? Metrics.textSm) }
         func head(_ c: ListColumn) -> CGFloat { w(c.title, Metrics.textXs) }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let day: Int64 = 86_400_000
@@ -432,6 +447,17 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             } else {
                 viewMode = AppSettings.defaultView
             }
+        case "showScrollBars":
+            applyScrollBars()
+        case "showCommandBar", "showStatusBar", "previewPosition", "toolbarHidden", "toolbarAdded":
+            commandBar.needsLayout = true
+            card.needsLayout = true
+        case "listBackground", "listImage", "listImageVisibility":
+            card.applyBackground()
+        case "fontFamily":
+            table.rowHeight = Metrics.rowHeight
+            reloadItems()
+            card.needsLayout = true
         case "dateStyle", "decimalSizes":
             applyColumnWidths()
             if folder != nil { reloadItems() }
@@ -599,6 +625,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     private func wireCommandBar() {
         let b = commandBar
+        b.newFolder.action = { [weak self] _ in self?.newFolder() }
+        b.terminal.action = { [weak self] _ in if let u = self?.url { MenuActions.openInTerminal(u) } }
+        b.hiddenItems.action = { _ in AppSettings.showHidden.toggle() }
+        b.refresh.action = { [weak self] _ in self?.onRefresh?() }
         b.new.action = { [weak self] btn in
             if self?.commandBar.trashMode == true { return self?.emptyTrash() ?? () }
             let m = NSMenu()
@@ -1615,5 +1645,16 @@ extension FileListController {
 
     func collectionView(_ collectionView: NSCollectionView, acceptDrop info: NSDraggingInfo, indexPath: IndexPath, dropOperation op: NSCollectionView.DropOperation) -> Bool {
         accept(info, into: dropTarget(row: op == .on ? indexPath.item : nil))
+    }
+}
+
+// MARK: - scroll bars
+
+extension FileListController {
+    /// Appearance › Show scroll bars.
+    func applyScrollBars() {
+        for s in [scroll, tileScroll] {
+            s.hasVerticalScroller = AppSettings.showScrollBars
+        }
     }
 }

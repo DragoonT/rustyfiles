@@ -21,10 +21,30 @@ enum Metrics {
     /// Where the window's own buttons end on the left (the Windows app has its caption buttons on the right).
     static let trafficLightsWidth: CGFloat = 78
 
-    static let textSm = NSFont.systemFont(ofSize: 14)
-    static let textSmMedium = NSFont.systemFont(ofSize: 14, weight: .medium)
-    static let textXs = NSFont.systemFont(ofSize: 12)
-    static let textXsSemibold = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    // the interface's fonts: the system's, or the family chosen in Settings › Appearance › Font
+    @MainActor static var textSm = font(14)
+    @MainActor static var textSmMedium = font(14, .medium)
+    @MainActor static var textXs = font(12)
+    @MainActor static var textXsSemibold = font(12, .semibold)
+
+    @MainActor
+    private static func font(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
+        let family = UserDefaults.standard.string(forKey: "fontFamily") ?? ""
+        let system = NSFont.systemFont(ofSize: size, weight: weight)
+        guard !family.isEmpty else { return system }
+        let traits: NSFontTraitMask = weight == .regular ? [] : [.boldFontMask]
+        let w = weight == .regular ? 5 : (weight == .medium ? 6 : 8)
+        return NSFontManager.shared.font(withFamily: family, traits: traits, weight: w, size: size) ?? system
+    }
+
+    /// The font family changed: the fonts are made again (views pick them up as they redraw).
+    @MainActor
+    static func fontsChanged() {
+        textSm = font(14)
+        textSmMedium = font(14, .medium)
+        textXs = font(12)
+        textXsSemibold = font(12, .semibold)
+    }
 
     /// The list's right gutter: `clamp(width * 0.03, 24, 56)` (folder_view.rs).
     static func gutter(listWidth: CGFloat) -> CGFloat { min(max(listWidth * 0.03, 24), 56) }

@@ -52,18 +52,22 @@ final class PreviewPane: FlippedView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Under the list (Appearance › Preview pane position): the picture at the left, the
+    /// name and properties beside it (preview_wide.rs).
+    var atBottom = false { didSet { if atBottom != oldValue { needsLayout = true; needsDisplay = true } } }
+
     override func draw(_ dirtyRect: NSRect) {
-        // the divider on the left (`border_l_1`)
+        // the divider on the side next to the list (`border_l_1`, or `border_t_1` at the bottom)
         let p = Palette.of(self)
         p.divider.setFill()
-        NSRect(x: 0, y: 0, width: 1, height: bounds.height).fill()
+        (atBottom ? NSRect(x: 0, y: 0, width: bounds.width, height: 1) : NSRect(x: 0, y: 0, width: 1, height: bounds.height)).fill()
     }
 
     override func layout() {
         super.layout()
         let p = Palette.of(self)
         visualBox.layer?.backgroundColor = p.hover.cgColor
-        scroll.frame = NSRect(x: 1, y: 0, width: bounds.width - 1, height: bounds.height)
+        scroll.frame = atBottom ? NSRect(x: 0, y: 1, width: bounds.width, height: bounds.height - 1) : NSRect(x: 1, y: 0, width: bounds.width - 1, height: bounds.height)
         emptyIcon.frame = NSRect(x: (bounds.width - 32) / 2, y: bounds.height / 2 - 40, width: 32, height: 32)
         empty.frame = NSRect(x: 12, y: bounds.height / 2, width: bounds.width - 24, height: 20)
         empty.textColor = p.textSecondary
@@ -72,6 +76,7 @@ final class PreviewPane: FlippedView {
 
     /// `p_3 gap_3`: the picture 232 high, the name, then the property rows.
     private func layoutContent() {
+        if atBottom { return layoutWide() }
         let w = scroll.contentSize.width
         let inner = w - 24
         var y: CGFloat = 12
@@ -88,6 +93,21 @@ final class PreviewPane: FlippedView {
         rows.frame = NSRect(x: 12, y: y, width: inner, height: rh)
         y += rh + 12
         content.frame = NSRect(x: 0, y: 0, width: w, height: max(y, scroll.contentSize.height))
+    }
+
+    private func layoutWide() {
+        let w = scroll.contentSize.width, h = scroll.contentSize.height
+        let side = min(h - 24, 320, w * 0.4)
+        visualBox.frame = NSRect(x: 12, y: 12, width: side, height: side)
+        quickLook?.frame = visualBox.bounds
+        iconView.frame = NSRect(x: (side - 96) / 2, y: (side - 96) / 2, width: 96, height: 96)
+        let x = 12 + side + 16, inner = w - x - 12
+        nameLabel.preferredMaxLayoutWidth = inner
+        let nh = nameLabel.sizeThatFits(NSSize(width: inner, height: 200)).height
+        nameLabel.frame = NSRect(x: x, y: 12, width: inner, height: nh)
+        let rh = layoutRows(width: inner)
+        rows.frame = NSRect(x: x, y: 12 + nh + 10, width: inner, height: rh)
+        content.frame = NSRect(x: 0, y: 0, width: w, height: max(12 + nh + 10 + rh + 12, side + 24, h))
     }
 
     /// Key 92 wide in the secondary colour, the value beside it (`prop_row`).

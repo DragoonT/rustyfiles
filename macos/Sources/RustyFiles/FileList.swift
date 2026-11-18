@@ -19,6 +19,11 @@ final class CommandBarView: FlippedView {
     let sort = IconButton(icon: "arrow-up-down", size: NSSize(width: 0, height: 32), tooltip: String(localized: "Sort"))
     let view = IconButton(icon: "layout-grid", size: NSSize(width: 0, height: 32), tooltip: String(localized: "View"))
     let preview = IconButton(icon: "panel-right", size: NSSize(width: 36, height: 32), tooltip: String(localized: "Preview pane"))
+    // optional (Settings › Appearance › Command bar buttons)
+    let newFolder = IconButton(icon: "folder-plus", size: NSSize(width: 36, height: 32), tooltip: String(localized: "New folder"))
+    let terminal = IconButton(icon: "square-terminal", size: NSSize(width: 36, height: 32), tooltip: String(localized: "Open in Terminal"))
+    let hiddenItems = IconButton(icon: "eye", size: NSSize(width: 36, height: 32), tooltip: String(localized: "Show or hide hidden items"))
+    let refresh = IconButton(icon: "rotate-cw", size: NSSize(width: 36, height: 32), tooltip: String(localized: "Refresh"))
     private let sepLeft = Divider()
     private let sepRight = Divider()
 
@@ -28,7 +33,8 @@ final class CommandBarView: FlippedView {
         new.chevron = true
         sort.chevron = true
         view.chevron = true
-        [new, sepLeft, cut, copy, paste, rename, share, delete, properties, filter, sort, view, sepRight, preview].forEach(addSubview)
+        [new, sepLeft, newFolder, cut, copy, paste, rename, share, delete, properties, terminal, hiddenItems, refresh, filter, sort, view, sepRight, preview]
+            .forEach(addSubview)
     }
 
     @available(*, unavailable)
@@ -47,36 +53,51 @@ final class CommandBarView: FlippedView {
         }
     }
 
+    private func shows(_ b: AppSettings.ToolbarButton) -> Bool { AppSettings.showsButton(b) || (b == .new && trashMode) }
+
     override func layout() {
         super.layout()
         let h = bounds.height - 1
         func place(_ v: NSView, _ x: CGFloat, _ w: CGFloat, _ height: CGFloat = 32) {
+            v.isHidden = false
             v.frame = NSRect(x: x, y: (h - height) / 2, width: w, height: height)
         }
+        subviews.forEach { $0.isHidden = true }
+        typealias T = AppSettings.ToolbarButton
         // px_2, gap_0p5; separators 1×20 with mx_1
         var x: CGFloat = 8
-        place(new, x, new.intrinsicContentSize.width)
-        x += new.frame.width + 2 + 4
-        place(sepLeft, x, 1, 20)
-        x += 1 + 4 + 2
-        for b in [cut, copy, paste, rename, share, delete, properties] {
+        if shows(.new) {
+            place(new, x, new.intrinsicContentSize.width)
+            x += new.frame.width + 2 + 4
+            place(sepLeft, x, 1, 20)
+            x += 1 + 4 + 2
+        }
+        let left: [(T, IconButton)] = [
+            (.newFolder, newFolder), (.cut, cut), (.copy, copy), (.paste, paste), (.rename, rename), (.share, share), (.delete, delete),
+            (.properties, properties), (.terminal, terminal), (.hidden, hiddenItems), (.refresh, refresh),
+        ]
+        for (k, b) in left where shows(k) {
             place(b, x, 36)
             x += 36 + 2
         }
         var r = bounds.width - 8
-        r -= 36
-        place(preview, r, 36)
-        r -= 2 + 4 + 1
-        place(sepRight, r, 1, 20)
-        r -= 4 + 2
-        for b in [view, sort] {
+        if shows(.preview) {
+            r -= 36
+            place(preview, r, 36)
+            r -= 2 + 4 + 1
+            place(sepRight, r, 1, 20)
+            r -= 4 + 2
+        }
+        for (k, b) in [(T.view, view), (.sort, sort)] where shows(k) {
             let w = b.intrinsicContentSize.width
             r -= w
             place(b, r, w)
             r -= 2
         }
-        r -= 36
-        place(filter, r, 36)
+        if shows(.filter) {
+            r -= 36
+            place(filter, r, 36)
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -446,11 +467,6 @@ final class CardView: FlippedView {
 
     override var wantsUpdateLayer: Bool { true }
 
-    override func layout() {
-        super.layout()
-        onLayout?()
-    }
-
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
@@ -464,7 +480,38 @@ final class CardView: FlippedView {
 
     override func updateLayer() {
         let p = Palette.of(self)
-        layer?.backgroundColor = p.contentBg.cgColor
+        // Appearance › Background colour: the list's own colour, at the theme's strength
+        let own = Palette.parse(AppSettings.listBackground)
+        layer?.backgroundColor = (own.map { $0.withAlphaComponent(max(p.contentBg.alphaComponent, 0.85)) } ?? p.contentBg).cgColor
         layer?.borderColor = p.border.cgColor
+    }
+
+    /// Appearance › Background picture: behind the files, filling the card, as visible as set.
+    private let picture = CALayer()
+    private var picturePath = ""
+
+    func applyBackground() {
+        needsDisplay = true
+        updateLayer()
+        let path = AppSettings.listImage
+        if picture.superlayer == nil {
+            picture.contentsGravity = .resizeAspectFill
+            picture.masksToBounds = true
+            picture.zPosition = -1
+            layer?.insertSublayer(picture, at: 0)
+        }
+        if path != picturePath {
+            picturePath = path
+            picture.contents = path.isEmpty ? nil : NSImage(contentsOfFile: path)
+        }
+        picture.opacity = Float(AppSettings.listImageVisibility) / 100
+        picture.isHidden = path.isEmpty
+        picture.frame = bounds
+    }
+
+    override func layout() {
+        super.layout()
+        picture.frame = bounds
+        onLayout?()
     }
 }

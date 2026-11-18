@@ -78,6 +78,16 @@ struct Palette {
                 tabActive: hex(0xFFFFFF, 0.70),
                 danger: hex(0xC42B1C))
         }
+        if AppSettings.theme == .black {
+            // theme.rs `Palette::black`: every surface black and opaque, lines a little brighter
+            return Palette(
+                dark: true, windowBg: hex(0x000000), contentBg: hex(0x000000), cardBg: hex(0x0A0A0A),
+                tileBg: hex(0xFFFFFF, 0.04), tileHover: hex(0xFFFFFF, 0.08), border: hex(0xFFFFFF, 0.14), divider: hex(0xFFFFFF, 0.12),
+                text: hex(0xFFFFFF), textSecondary: hex(0xFFFFFF, 0.72), textTertiary: hex(0xFFFFFF, 0.50),
+                accent: accent, accentText: hex(0x000000, 0.90), hover: hex(0xFFFFFF, 0.08), pressed: hex(0xFFFFFF, 0.12),
+                selection: hex(0xFFFFFF, 0.11), selectionBorder: accent.withAlphaComponent(0.55), tabActive: hex(0xFFFFFF, 0.08),
+                danger: hex(0xFF99A4))
+        }
         return Palette(
             dark: true,
             windowBg: hex(0x202020, windowA),
@@ -161,7 +171,7 @@ final class LensView: NSGlassEffectView {
             isHidden = true
             return
         }
-        if isHidden || !animated || self.frame.isEmpty {
+        if isHidden || !animated || self.frame.isEmpty || !AppSettings.animations {
             isHidden = false
             self.frame = frame
             return
