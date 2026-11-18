@@ -593,7 +593,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         return p
     }()
 
-    private func toggleStatusCenter() {
+    func toggleStatusCenter() {
         if statusPopover.isShown { return statusPopover.performClose(nil) }
         StatusCenter.shared.unseenFailure = false
         statusChanged()
@@ -605,6 +605,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         let sc = StatusCenter.shared
         navBar.statusCenter.icon = sc.unseenFailure ? "circle-alert" : "list-checks"
         navBar.statusCenter.tint = { p in sc.unseenFailure ? p.danger : (sc.isBusy ? p.accent : p.text) }
+        // a ring fills round the button while something runs
+        navBar.statusCenter.ring = sc.isBusy ? (sc.overallProgress ?? 0) : nil
+        navBar.statusCenter.iconSize = sc.isBusy ? 14 : 16
         navBar.statusCenter.needsDisplay = true
     }
     @objc func focusSearch(_ sender: Any?) { navBar.omnibar.mode == .filter ? navBar.omnibar.end() : navBar.omnibar.begin(.filter) }

@@ -24,6 +24,14 @@ final class StatusCenter {
         private(set) var total: UInt64 = 0
         private(set) var state: State = .running
         let cancel: (() -> Void)?
+        let started = Date()
+        private(set) var ended: Date?
+        /// Bytes a second, smoothed so the number does not jump about.
+        private(set) var speed: Double = 0
+        private var lastSample: (time: Date, done: UInt64)?
+        /// The first progress this run saw: a resumed transfer starts with bytes that were
+        /// already there, which say nothing about its speed.
+        private var firstSample: (time: Date, done: UInt64)?
 
         init(title: String, folder: URL?, cancel: (() -> Void)?) {
             self.title = title
@@ -32,14 +40,44 @@ final class StatusCenter {
         }
 
         @MainActor func update(done: UInt64, total: UInt64) {
+            let now = Date()
+            if let last = lastSample {
+                let dt = now.timeIntervalSince(last.time)
+                if dt >= 0.2, done >= last.done {
+                    let instant = Double(done - last.done) / dt
+                    speed = speed == 0 ? instant : speed * 0.75 + instant * 0.25
+                    lastSample = (now, done)
+                }
+            } else {
+                lastSample = (now, done)
+                firstSample = (now, done)
+            }
             self.done = done
             self.total = total
             StatusCenter.shared.changed()
         }
 
-        @MainActor func succeed() { state = .done; if total > 0 { done = total }; StatusCenter.shared.changed() }
-        @MainActor func cancelled() { state = .cancelled; StatusCenter.shared.changed() }
+        /// Seconds left at the current speed (nil while that can't be told).
+        var remaining: TimeInterval? {
+            guard state == .running, speed > 0, total > done else { return nil }
+            return Double(total - done) / speed
+        }
+
+        var elapsed: TimeInterval { (ended ?? Date()).timeIntervalSince(started) }
+
+        /// Bytes a second over the whole run, counting only what moved in it (nil for a run too
+        /// short to say).
+        var averageSpeed: Double? {
+            guard let first = firstSample, let end = ended ?? lastSample?.time else { return nil }
+            let seconds = end.timeIntervalSince(first.time)
+            guard seconds >= 2, done > first.done else { return nil }
+            return Double(done - first.done) / seconds
+        }
+
+        @MainActor func succeed() { state = .done; ended = Date(); if total > 0 { done = total }; StatusCenter.shared.changed() }
+        @MainActor func cancelled() { state = .cancelled; ended = Date(); StatusCenter.shared.changed() }
         @MainActor func fail(_ message: String) {
+            ended = Date()
             state = .failed(message)
             StatusCenter.shared.unseenFailure = true
             StatusCenter.shared.changed()
@@ -52,6 +90,22 @@ final class StatusCenter {
 
     var isBusy: Bool { cards.contains { $0.state == .running } }
 
+    /// How far all running operations are, together (nil: nothing measurable runs).
+    var overallProgress: Double? {
+        let running = cards.filter { $0.state == .running && $0.total > 0 }
+        let total = running.reduce(UInt64(0)) { $0 + $1.total }
+        guard total > 0 else { return nil }
+        return Double(running.reduce(UInt64(0)) { $0 + $1.done }) / Double(total)
+    }
+
+    static func duration(_ t: TimeInterval) -> String {
+        let f = DateComponentsFormatter()
+        f.unitsStyle = .abbreviated
+        f.allowedUnits = t >= 3600 ? [.hour, .minute] : (t >= 60 ? [.minute, .second] : [.second])
+        f.maximumUnitCount = 2
+        return f.string(from: max(t, 1)) ?? ""
+    }
+
     func add(title: String, folder: URL?, cancel: (() -> Void)?) -> Card {
         let c = Card(title: title, folder: folder, cancel: cancel)
         cards.insert(c, at: 0)
@@ -61,6 +115,22 @@ final class StatusCenter {
 
     func failed(title: String, message: String) {
         add(title: title, folder: nil, cancel: nil).fail(message)
+    }
+
+    /// Development aid (RF_DEMO_STATUS): a running card that moves, and a finished one.
+    static func demo() {
+        let done = shared.add(title: "Receiving with Ferry: Studio PC", folder: FileManager.default.homeDirectoryForCurrentUser, cancel: nil)
+        done.update(done: 0, total: 7_000_000_000)
+        done.succeed()
+        let running = shared.add(title: "Sending with Ferry: Studio PC", folder: nil, cancel: {})
+        var sent: UInt64 = 0
+        Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { t in
+            MainActor.assumeIsolated {
+                sent = min(sent + 12_000_000, 1_000_000_000)
+                running.update(done: sent, total: 1_000_000_000)
+                if sent >= 1_000_000_000 { t.invalidate() }
+            }
+        }
     }
 
     func clearFinished() {
@@ -100,7 +170,7 @@ final class StatusCenterView: FlippedView {
         }
         rows.forEach { $0.needsDisplay = true; $0.needsLayout = true }
         clear.isHidden = !cards.contains { $0.state != .running }
-        let h = max(CGFloat(rows.count) * 68 + 16 + 40, 120)
+        let h = max(CGFloat(rows.count) * 86 + 16 + 40, 120)
         setFrameSize(NSSize(width: 360, height: min(h, 520)))
         onResize?(frame.size)
         needsLayout = true
@@ -111,8 +181,8 @@ final class StatusCenterView: FlippedView {
         super.layout()
         var y: CGFloat = 40
         for r in rows {
-            r.frame = NSRect(x: 12, y: y, width: bounds.width - 24, height: 60)
-            y += 68
+            r.frame = NSRect(x: 12, y: y, width: bounds.width - 24, height: 78)
+            y += 86
         }
         let cw = clear.intrinsicContentSize.width
         clear.frame = NSRect(x: bounds.width - 12 - cw, y: 10, width: cw, height: 24)
@@ -178,25 +248,42 @@ final class StatusCardView: HoverView {
         path.stroke()
         let textW = bounds.width - 12 - 44
         Draw.text(card.title, in: NSRect(x: 12, y: 8, width: textW, height: 20), font: Metrics.textSm, color: p.text)
-        let detail: String
+        var first = "", second = ""
         var color = p.textSecondary
+        let speed = card.speed > 0 ? formatSize(bytes: UInt64(card.speed)) + "/s" : ""
         switch card.state {
         case .running:
             let bar = NSRect(x: 12, y: 32, width: textW, height: 4)
             Draw.roundedRect(bar, radius: 2, fill: p.pressed)
             if card.total > 0 {
-                let f = CGFloat(Double(card.done) / Double(card.total))
-                Draw.roundedRect(NSRect(x: bar.minX, y: bar.minY, width: bar.width * min(max(f, 0), 1), height: 4), radius: 2, fill: p.accent)
+                let f = Double(card.done) / Double(card.total)
+                Draw.roundedRect(NSRect(x: bar.minX, y: bar.minY, width: bar.width * CGFloat(min(max(f, 0), 1)), height: 4), radius: 2, fill: p.accent)
+                first = String(localized: "\(formatSize(bytes: card.done)) of \(formatSize(bytes: card.total))") + " · \(Int(f * 100))%"
+                // "48.3 MB/s · about 2 min left"
+                var parts: [String] = []
+                if !speed.isEmpty { parts.append(speed) }
+                if let left = card.remaining { parts.append(String(localized: "about \(StatusCenter.duration(left)) left")) }
+                second = parts.joined(separator: " · ")
+            } else {
+                first = String(localized: "Waiting for the other device…")
             }
-            detail = card.total > 0
-                ? String(localized: "\(formatSize(bytes: card.done)) of \(formatSize(bytes: card.total))") : String(localized: "Waiting…")
-        case .done: detail = card.total > 0 ? String(localized: "Done · \(formatSize(bytes: card.total))") : String(localized: "Done")
-        case .cancelled: detail = String(localized: "Stopped")
+        case .done:
+            first = card.total > 0 ? String(localized: "Done · \(formatSize(bytes: card.total))") : String(localized: "Done")
+            let avg = card.averageSpeed.map { formatSize(bytes: UInt64($0)) + "/s" } ?? ""
+            second = String(localized: "in \(StatusCenter.duration(card.elapsed))") + (avg.isEmpty ? "" : " · " + String(localized: "\(avg) on average"))
+        case .cancelled:
+            first = String(localized: "Stopped")
+            if card.total > 0 { second = String(localized: "\(formatSize(bytes: card.done)) of \(formatSize(bytes: card.total)) had arrived") }
         case .failed(let message):
-            detail = message
+            first = message
             color = p.danger
+            if card.total > 0 { second = String(localized: "\(formatSize(bytes: card.done)) of \(formatSize(bytes: card.total)) had arrived") }
         }
-        Draw.text(detail, in: NSRect(x: 12, y: card.state == .running ? 40 : 32, width: textW, height: 16), font: Metrics.textXs, color: color)
+        let y0: CGFloat = card.state == .running ? 42 : 32
+        Draw.text(first, in: NSRect(x: 12, y: y0, width: textW, height: 16), font: Metrics.textXs, color: color)
+        if !second.isEmpty {
+            Draw.text(second, in: NSRect(x: 12, y: y0 + 16, width: textW, height: 16), font: Metrics.textXs, color: p.textSecondary)
+        }
     }
 }
 
@@ -284,9 +371,11 @@ final class FerryQuestions {
         let panel = self.panel ?? makePanel()
         self.panel = panel
         view.show(first.question, more: shown.count - 1)
+        // at least 380×176, taller when the text needs it: it grows upwards from the corner
+        let height = max(176, view.neededHeight(width: 380))
         if let screen = NSScreen.main {
             let v = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: v.maxX - 380 - 16, y: v.minY + 16))
+            panel.setFrame(NSRect(x: v.maxX - 380 - 16, y: v.minY + 16, width: 380, height: height), display: true)
         }
         panel.orderFrontRegardless()
     }
@@ -317,6 +406,7 @@ final class FerryQuestions {
             backdrop = v
         }
         backdrop.frame = NSRect(x: 0, y: 0, width: 380, height: 176)
+        backdrop.autoresizingMask = [.width, .height]
         view.frame = backdrop.bounds
         view.autoresizingMask = [.width, .height]
         backdrop.addSubview(view)
@@ -362,6 +452,44 @@ final class FerryQuestionView: FlippedView {
         needsDisplay = true
     }
 
+    /// The question's text as laid out at `width`.
+    private func lines(width: CGFloat) -> (title: String, line: String, code: String?) {
+        guard let question else { return ("", "", nil) }
+        switch question {
+        case .offer(let o):
+            let what: String
+            switch o.names.count {
+            case 0: what = o.fileCount == 1 ? String(localized: "1 item") : String(localized: "\(o.fileCount) items")
+            case 1: what = o.names[0]
+            default: what = String(localized: "\(o.names[0]) and \(o.names.count - 1) items")
+            }
+            let line = "\(what) · \(formatSize(bytes: o.totalBytes))"
+                + (o.trusted ? "" : "\n" + String(localized: "Unpaired device: its name can’t be verified"))
+            return (String(localized: "\(o.fromName) wants to send you files"), line, nil)
+        case .pairing(_, let name, let c):
+            return (
+                String(localized: "Pair: \(name)"),
+                String(localized: "Make sure both devices show the same code. Paired devices can send each other files without asking."),
+                c.count == 6 ? "\(c.prefix(3)) \(c.suffix(3))" : c
+            )
+        }
+    }
+
+    private func lineHeight(_ text: String, width: CGFloat) -> CGFloat {
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byWordWrapping
+        return ceil((text as NSString).boundingRect(
+            with: NSSize(width: width, height: 1000), options: [.usesLineFragmentOrigin],
+            attributes: [.font: Metrics.textXs, .paragraphStyle: para]).height)
+    }
+
+    /// How tall the window must be to show everything: header, title, the line in full, the
+    /// code, the buttons.
+    func neededHeight(width: CGFloat) -> CGFloat {
+        let t = lines(width: width)
+        return 16 + 22 + 24 + lineHeight(t.line, width: width - 32) + (t.code != nil ? 36 : 0) + 12 + 32 + 16
+    }
+
     override func layout() {
         super.layout()
         let ys = yes.intrinsicContentSize, ns = no.intrinsicContentSize
@@ -381,33 +509,17 @@ final class FerryQuestionView: FlippedView {
             Draw.text("+\(more)", in: NSRect(x: bounds.width - 16 - 60, y: y, width: 60, height: 18), font: Metrics.textXs, color: p.textSecondary, align: .right)
         }
         y += 18 + 4
-        let title: String, line: String
-        var code: String?
-        switch question {
-        case .offer(let o):
-            title = String(localized: "\(o.fromName) wants to send you files")
-            let what: String
-            switch o.names.count {
-            case 0: what = o.fileCount == 1 ? String(localized: "1 item") : String(localized: "\(o.fileCount) items")
-            case 1: what = o.names[0]
-            default: what = String(localized: "\(o.names[0]) and \(o.names.count - 1) items")
-            }
-            line = "\(what) · \(formatSize(bytes: o.totalBytes))"
-                + (o.trusted ? "" : "\n" + String(localized: "Unpaired device: its name can’t be verified"))
-        case .pairing(_, let name, let c):
-            title = String(localized: "Pair: \(name)")
-            line = String(localized: "Make sure both devices show the same code. Paired devices can send each other files without asking.")
-            code = c.count == 6 ? "\(c.prefix(3)) \(c.suffix(3))" : c
-        }
+        let (title, line, code) = lines(width: bounds.width)
         Draw.text(title, in: NSRect(x: 16, y: y, width: bounds.width - 32, height: 20), font: NSFont.systemFont(ofSize: 14, weight: .semibold), color: p.text)
         y += 20 + 4
         let para = NSMutableParagraphStyle()
         para.lineBreakMode = .byWordWrapping
+        let lh = lineHeight(line, width: bounds.width - 32)
         (line as NSString).draw(
-            with: NSRect(x: 16, y: y, width: bounds.width - 32, height: 34), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+            with: NSRect(x: 16, y: y, width: bounds.width - 32, height: lh), options: [.usesLineFragmentOrigin],
             attributes: [.font: Metrics.textXs, .foregroundColor: p.textSecondary, .paragraphStyle: para])
         if let code {
-            Draw.text(code, in: NSRect(x: 16, y: y + 34, width: bounds.width - 32, height: 32), font: NSFont.monospacedDigitSystemFont(ofSize: 24, weight: .bold), color: p.text)
+            Draw.text(code, in: NSRect(x: 16, y: y + lh + 4, width: bounds.width - 32, height: 32), font: NSFont.monospacedDigitSystemFont(ofSize: 24, weight: .bold), color: p.text)
         }
     }
 }

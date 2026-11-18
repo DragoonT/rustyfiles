@@ -73,7 +73,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         table.focusRingType = .none
         table.allowsMultipleSelection = true
         table.allowsColumnReordering = false
-        table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        // widths are set here (automatic columns, the name takes the rest), never by the table
+        table.columnAutoresizingStyle = .noColumnAutoresizing
         table.dataSource = self
         table.delegate = self
         table.list = self
@@ -112,6 +113,14 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
         header.table = table
         header.onSort = { [weak self] col in self?.sort(by: col) }
+        header.onResize = { [weak self] col, w in
+            ColumnWidths.set(col, w)
+            self?.applyColumnWidths()
+        }
+        header.onResetWidth = { [weak self] col in
+            ColumnWidths.set(col, nil)
+            self?.applyColumnWidths()
+        }
 
         message.alignment = .center
         message.font = Metrics.textSm
@@ -149,8 +158,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
         defer { placeListLens(animated: false) }
         let gutter = Metrics.gutter(listWidth: b.width)
-        if gutter != geometry.gutter, let last = table.tableColumns.last {
-            last.width += gutter - geometry.gutter
+        if gutter != geometry.gutter {
             geometry.gutter = gutter
             header.geometry = geometry
             table.enumerateAvailableRowViews { row, _ in
@@ -159,6 +167,74 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             }
             table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<table.numberOfRows), columnIndexes: [table.tableColumns.count - 1])
         }
+        applyColumnWidths()
+    }
+
+    // MARK: column widths (folder_view/auto_cols.rs)
+
+    /// What the automatic widths were measured for; measured again when it changes.
+    private var measuredFor: (folder: ObjectIdentifier?, date: AppSettings.DateStyle, decimal: Bool)?
+    private var measured: [ListColumn: CGFloat] = [:]
+
+    /// `fit`: a column is as wide as its widest text plus some air, never less than its heading
+    /// with the sort arrow needs, between 56 and 300, padding included.
+    private static func fit(_ content: CGFloat, heading: CGFloat, air: CGFloat) -> CGFloat {
+        min(max(ceil(max(content + air, heading + 16) + 16), 56), 300)
+    }
+
+    /// Measures the automatic columns for this listing: dates and sizes from the widest forms
+    /// their formatters give, types from the kinds of items here (as on Windows).
+    private func measure() {
+        let key = (folder: folder.map(ObjectIdentifier.init), date: AppSettings.dateStyle, decimal: AppSettings.decimalSizes)
+        if let m = measuredFor, m.folder == key.folder, m.date == key.date, m.decimal == key.decimal { return }
+        measuredFor = key
+        func w(_ s: String, _ f: NSFont = Metrics.textSm) -> CGFloat { Draw.textWidth(s, font: f) }
+        func head(_ c: ListColumn) -> CGFloat { w(c.title, Metrics.textXs) }
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let day: Int64 = 86_400_000
+        let dates = [400 * day, 59 * 60_000, 23 * 3_600_000, 6 * day].map { ItemDisplay.date(now - $0, style: AppSettings.dateStyle) }
+        let dateW = dates.map { w($0) }.max() ?? 0
+        let sizes: [UInt64] = [1023, 1023 << 10, 104_752_742, 10_726_932_152, 1023 << 30]
+        var sizeW = sizes.map { w(formatSize(bytes: $0)) }.max() ?? 0
+        var types = Set<String>()
+        var hasDir = false
+        if let folder {
+            for r in 0..<min(folder.count(), 20_000) {
+                guard let item = folder.item(row: r) else { continue }
+                if item.isDir && !display.isPackage(item) { hasDir = true } else { types.insert(display.kind(item)) }
+                if types.count > 48 { break }
+            }
+        }
+        if hasDir {
+            types.insert(String(localized: "File folder"))
+            if archive == nil { sizeW = max(sizeW, w(String(localized: "Calculate size"), Metrics.textXs)) }
+        }
+        let typeW = types.map { w($0) }.max() ?? 0
+        measured = [
+            .modified: Self.fit(dateW, heading: head(.modified), air: 14),
+            .type: Self.fit(typeW, heading: head(.type), air: 14),
+            .size: Self.fit(sizeW, heading: head(.size), air: 0),
+        ]
+    }
+
+    /// Every column at its width (dragged, else measured) and the name with all that is left.
+    func applyColumnWidths() {
+        measure()
+        let avail = max(scroll.contentSize.width, 200)
+        var others: CGFloat = 0
+        for c in table.tableColumns {
+            guard let col = ListColumn(rawValue: c.identifier.rawValue), col != .name else { continue }
+            var width = ColumnWidths.get(col) ?? measured[col] ?? col.defaultWidth
+            if c == table.tableColumns.last { width += geometry.trail }
+            if abs(c.width - width) > 0.5 { c.width = width }
+            others += width
+        }
+        if let name = table.tableColumns.first {
+            let width = max(avail - others, 120 + ListGeometry.lead)
+            if abs(name.width - width) > 0.5 { name.width = width }
+        }
+        if abs(table.frame.width - avail) > 0.5 { table.setFrameSize(NSSize(width: max(avail, table.tableColumns.reduce(0) { $0 + $1.width }), height: table.frame.height)) }
+        header.needsDisplay = true
     }
 
     @objc private func columnsChanged() {
@@ -299,6 +375,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             } else {
                 viewMode = AppSettings.defaultView
             }
+        case "dateStyle", "decimalSizes":
+            applyColumnWidths()
+            if folder != nil { reloadItems() }
         default:
             // formats, thumbnails and colours: what is on screen is drawn again
             if folder != nil { reloadItems() }
@@ -318,6 +397,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         header.sortKey = sortKey
         header.ascending = ascending
         if !same { ThumbnailCache.shared.forget(under: url.path) }
+        applyColumnWidths()
         reloadItems()
         let rows = IndexSet(names.compactMap { folder.rowOf(name: $0).map(Int.init) })
         selectRows(rows, scrollToFirst: y == nil)
@@ -1017,4 +1097,21 @@ final class ClosureMenuItem: NSMenuItem {
     required init(coder: NSCoder) { fatalError() }
 
     @objc private func fire() { handler() }
+}
+
+/// Widths the user dragged columns to (the others are automatic). A double click on a
+/// column's edge forgets its width.
+@MainActor
+enum ColumnWidths {
+    private static let key = "columnWidths"
+
+    static func get(_ col: ListColumn) -> CGFloat? {
+        (UserDefaults.standard.dictionary(forKey: key)?[col.rawValue] as? Double).map { CGFloat($0) }
+    }
+
+    static func set(_ col: ListColumn, _ width: CGFloat?) {
+        var d = UserDefaults.standard.dictionary(forKey: key) ?? [:]
+        d[col.rawValue] = width.map { Double($0) }
+        UserDefaults.standard.set(d, forKey: key)
+    }
 }

@@ -194,6 +194,12 @@ final class FerryService {
         }
     }
 
+    func refresh() {
+        ferry?.refresh()
+        peers = []
+        changed()
+    }
+
     func pair(_ peer: FerryPeer) {
         do { try ferry?.pair(peerId: peer.id) } catch { problem = error.localizedDescription; changed() }
     }

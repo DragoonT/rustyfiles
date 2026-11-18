@@ -139,6 +139,10 @@ final class ListHeaderView: HoverView {
     var sortKey: ListColumn = .name { didSet { needsDisplay = true } }
     var ascending = true { didSet { needsDisplay = true } }
     var onSort: ((ListColumn) -> Void)?
+    /// A column was dragged to this width (its content width, without the list's own edge room).
+    var onResize: ((ListColumn, CGFloat) -> Void)?
+    /// A double click on a column's edge: it is automatic again.
+    var onResetWidth: ((ListColumn) -> Void)?
 
     private var resizing: (column: Int, startX: CGFloat, startWidth: CGFloat)?
 
@@ -194,6 +198,10 @@ final class ListHeaderView: HoverView {
     override func mouseDown(with event: NSEvent) {
         let pt = convert(event.locationInWindow, from: nil)
         if let i = handle(at: pt), let table {
+            if event.clickCount == 2 {
+                onResetWidth?(columns[i].0)
+                return
+            }
             resizing = (i, event.locationInWindow.x, table.tableColumns[i].width)
             return
         }
@@ -203,8 +211,10 @@ final class ListHeaderView: HoverView {
     /// Dragging a column's left edge to the left widens it; the name column gives the room.
     override func mouseDragged(with event: NSEvent) {
         guard let resizing, let table else { return }
-        let c = table.tableColumns[resizing.column]
-        c.width = max(resizing.startWidth - (event.locationInWindow.x - resizing.startX), c.minWidth)
+        let col = columns[resizing.column].0
+        let isLast = resizing.column == table.tableColumns.count - 1
+        let w = max(resizing.startWidth - (event.locationInWindow.x - resizing.startX), table.tableColumns[resizing.column].minWidth)
+        onResize?(col, w - (isLast ? geometry.trail : 0))
         needsDisplay = true
         window?.invalidateCursorRects(for: self)
     }
@@ -309,8 +319,17 @@ final class TextCellView: HoverView {
         isLink ? super.hitTest(point) : nil
     }
 
+    // a link takes the whole click (down and up) so the row is not selected by it
+    override func mouseDown(with event: NSEvent) {
+        if !isLink { super.mouseDown(with: event) }
+    }
+
     override func mouseUp(with event: NSEvent) {
         if isLink, bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
+    }
+
+    override func resetCursorRects() {
+        if isLink { addCursorRect(bounds, cursor: .pointingHand) }
     }
 }
 
@@ -345,6 +364,13 @@ final class FileTableView: NSTableView {
         (rowView(atRow: hoveredRow, makeIfNecessary: false) as? FileRowView)?.hovered = false
         hoveredRow = r
         (rowView(atRow: r, makeIfNecessary: false) as? FileRowView)?.hovered = true
+    }
+
+    /// A table hands clicks to its cells' controls only; "Calculate size" is a link drawn by
+    /// its cell, so the table is told to let it have the click.
+    override func validateProposedFirstResponder(_ responder: NSResponder, for event: NSEvent?) -> Bool {
+        if let cell = responder as? TextCellView, cell.isLink { return true }
+        return super.validateProposedFirstResponder(responder, for: event)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
