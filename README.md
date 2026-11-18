@@ -243,6 +243,31 @@ It runs as its own program, `directlook.exe`, so a heavy video never weighs on t
 manager and neither can take the other down. It works in rustyfiles, and if you turn it on,
 in Explorer and on the desktop too. Settings live under Settings › DirectLook.
 
+## Ferry
+
+Send files and folders to rustyfiles on your other computers on the same network, the way AirDrop
+does: right-click › **Send with Ferry**.
+
+<img alt="Settings › Ferry with two nearby devices, a paired Windows PC with its measured speed and a MacBook with an estimated one; a Windows notification asks whether to accept files from the MacBook, and the status bar shows a transfer at 61 percent" src="docs/readme/ferry.png" width="100%">
+
+<sub>A drawing of Settings › Ferry with invented devices, in the app's own words and layout.</sub>
+
+- Encrypted end to end (QUIC with TLS 1.3), straight from device to device: no server, no account,
+  nothing leaves your network.
+- Pair your devices the way you pair Bluetooth: both show the same six-digit code. A paired
+  device's files can arrive without asking; anything else is asked first, in a notification.
+- You choose who can see your PC: no one, your paired devices (the default), or everyone for ten
+  minutes. While Settings › Ferry is open everyone can see it, so a new device can find it.
+- A transfer that breaks off goes on from where it stopped, and every file is checked before it
+  takes its name. Received files are marked as downloaded, so SmartScreen asks before a program
+  among them runs.
+- Each device shows an estimated speed, and **Test speed** measures it both ways in a few seconds.
+- The macOS app, coming soon, speaks the same protocol, which is written down in
+  [docs/nearby-protocol.md](docs/nearby-protocol.md).
+
+Ferry is off until you turn it on in Settings › Ferry. Windows Firewall may ask about it: allow it
+for private networks.
+
 ## Experimental: HyperGlass, the Dock and the desktop
 
 These are off by default and early. They were built and tried on one PC with two monitors, and
@@ -300,7 +325,8 @@ Remove-Item -Recurse "HKCU:\Software\Classes\CLSID\{DC1C5A9C-E88A-4dde-A5A1-60F8
 ```
 
 Prefer no installer? A portable zip is on the [Releases](https://github.com/gelenmedya/rustyfiles/releases)
-page. Requires Windows 11 on x64 (Windows 10 is untested).
+page. Requires Windows 11 on x64 (Windows 10 is untested). A macOS version is coming soon, and
+Linux is planned.
 
 **Questions or ideas?** Come say hi on [Discord](https://discord.gg/K2banZ36zJ), or visit
 [rustyfiles.com](https://rustyfiles.com).
@@ -394,7 +420,8 @@ runs next to Explorer and changes nothing of Windows on disk.
 ## Status
 
 rustyfiles is young, and its author uses it every day in place of Explorer. A roadmap and
-test reports will follow in `docs/`.
+test reports will follow in `docs/`. The macOS version is on its way, built on the same core, and
+Linux comes after it.
 
 Bug reports and pull requests are welcome.
 
