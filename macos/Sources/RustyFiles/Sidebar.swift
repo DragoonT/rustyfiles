@@ -17,6 +17,8 @@ final class SidebarView: FlippedView {
 
     var onSelect: ((Item) -> Void)?
     var onEject: ((URL) -> Void)?
+    var onOpenInNewTab: ((URL) -> Void)?
+    var onOpenInNewWindow: ((URL) -> Void)?
     var selectedURL: URL? {
         didSet {
             list.needsDisplay = true
@@ -54,6 +56,7 @@ final class SidebarView: FlippedView {
         for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification, NSWorkspace.didRenameVolumeNotification] {
             center.addObserver(self, selector: #selector(volumesChanged), name: name, object: nil)
         }
+        NotificationCenter.default.addObserver(self, selector: #selector(volumesChanged), name: .rfPinsChanged, object: nil)
     }
 
     @available(*, unavailable)
@@ -105,7 +108,7 @@ final class SidebarView: FlippedView {
         lens.move(to: list.selectedRect ?? .zero, animated: animated && !inLiveResize)
     }
 
-    fileprivate func clicked(_ item: Item) { onSelect?(item) }
+    func clicked(_ item: Item) { onSelect?(item) }
 
     /// File URLs compared in their standard form; other places (Settings) as they are.
     static func norm(_ u: URL) -> URL { u.isFileURL ? u.standardizedFileURL : u }
@@ -173,18 +176,38 @@ final class SidebarListView: HoverView {
         owner?.clicked(items[i])
     }
 
-    /// A drive that can be ejected (a disk image, a USB disk, a network share) offers Eject.
+    /// A place that is a folder (pinned, a drive, Applications, Library) gets the Windows app's
+    /// sidebar menu (workspace.rs): open here / in a new tab / in a new window, pin or unpin,
+    /// copy the path, Terminal; a drive that can be ejected also offers Eject. Home, Trash and
+    /// Settings have none, as on Windows.
     override func menu(for event: NSEvent) -> NSMenu? {
-        guard let i = index(at: convert(event.locationInWindow, from: nil)), items[i].kind == .drive, let url = items[i].url else { return nil }
-        let values = try? url.resourceValues(forKeys: [.volumeIsEjectableKey, .volumeIsRemovableKey, .volumeIsLocalKey, .volumeIsInternalKey])
-        let ejectable = values?.volumeIsEjectable == true || values?.volumeIsRemovable == true || values?.volumeIsLocal == false
-            || values?.volumeIsInternal == false
-        guard ejectable else { return nil }
-        let m = NSMenu()
-        let item = ClosureMenuItem(title: String(localized: "Eject")) { [weak self] in self?.owner?.onEject?(url) }
-        item.image = Icons.named("eject")
-        m.addItem(item)
-        return m
+        guard let i = index(at: convert(event.locationInWindow, from: nil)), let url = items[i].url, url.isFileURL,
+            items[i].kind != .trash, let owner
+        else { return nil }
+        let item = items[i]
+        let b = MenuBuilder()
+        b.add(String(localized: "Open"), "square-arrow-out-up-right") { owner.clicked(item) }
+        b.add(String(localized: "Open in new tab"), "square-plus") { owner.onOpenInNewTab?(url) }
+        b.add(String(localized: "Open in new window"), "app-window") { owner.onOpenInNewWindow?(url) }
+        b.separator()
+        if item.kind != .drive {
+            let pinned = MenuActions.isPinned(url)
+            b.add(pinned ? String(localized: "Unpin from sidebar") : String(localized: "Pin to sidebar"), pinned ? "pin-off" : "pin") {
+                MenuActions.setPinned(url, !pinned)
+            }
+        }
+        b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([url]) }
+        b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(url) }
+        if item.kind == .drive {
+            let values = try? url.resourceValues(forKeys: [.volumeIsEjectableKey, .volumeIsRemovableKey, .volumeIsLocalKey, .volumeIsInternalKey])
+            let ejectable = values?.volumeIsEjectable == true || values?.volumeIsRemovable == true || values?.volumeIsLocal == false
+                || values?.volumeIsInternal == false
+            if ejectable {
+                b.separator()
+                b.add(String(localized: "Eject"), "eject") { owner.onEject?(url) }
+            }
+        }
+        return b.done()
     }
 }
 

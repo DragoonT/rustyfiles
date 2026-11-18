@@ -130,7 +130,7 @@ final class TileItem: NSCollectionViewItem {
 
 /// The grid itself, with the same keys as the list.
 @MainActor
-final class TileCollectionView: NSCollectionView {
+final class TileCollectionView: NSCollectionView, NSServicesMenuRequestor {
     weak var list: FileListController?
 
     override func keyDown(with event: NSEvent) {
@@ -157,6 +157,19 @@ final class TileCollectionView: NSCollectionView {
             delegate?.collectionView?(self, didDeselectItemsAt: old)
         }
         return list?.contextMenu()
+    }
+
+    // macOS's Services and Quick Actions (the Windows app's "Show more options") work on the
+    // selected files: the menu shows the ones that take file URLs.
+    override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?) -> Any? {
+        if sendType == .fileURL, returnType == nil, let list, !list.selectedURLs.isEmpty, list.archiveIsNil { return self }
+        return super.validRequestor(forSendType: sendType, returnType: returnType)
+    }
+
+    func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        guard let urls = list?.selectedURLs, !urls.isEmpty else { return false }
+        pboard.clearContents()
+        return pboard.writeObjects(urls as [NSURL])
     }
 
     override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }

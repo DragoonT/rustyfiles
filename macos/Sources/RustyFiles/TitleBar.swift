@@ -17,6 +17,8 @@ final class TabStripView: HoverView {
     var active = 0 { didSet { needsDisplay = true; superview?.needsLayout = true } }
     var onSelect: ((Int) -> Void)?
     var onClose: ((Int) -> Void)?
+    /// The tab menu for the tab at this index (workspace.rs `tab_menu`).
+    var menuFor: ((Int) -> NSMenu?)?
 
     private var pressedClose: Int?
 
@@ -109,6 +111,11 @@ final class TabStripView: HoverView {
         let pt = convert(event.locationInWindow, from: nil)
         if let i = pressedClose, closeRect(i).contains(pt) { onClose?(i) }
         pressedClose = nil
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard let i = tab(at: convert(event.locationInWindow, from: nil)) else { return nil }
+        return menuFor?(i)
     }
 
     /// Middle click closes a tab, as on Windows.

@@ -176,6 +176,42 @@ mod tests {
         assert_eq!(a.extract(vec!["photos/2024/a.jpg".into()], out.display().to_string()).unwrap(), 1);
         assert_eq!(std::fs::read(out.join("photos/2024/a.jpg")).unwrap(), b"12345678");
         assert!(!out.join("top.txt").exists());
+        // and back: what came out packs into a 7z that lists the same file
+        let packed = d.join("again.7z");
+        compress(vec![out.join("photos").display().to_string()], packed.display().to_string(), ArchiveFormat::SevenZ).unwrap();
+        let again = Archive::open(packed.display().to_string(), None).unwrap();
+        assert!(again.has_folder("photos/2024".into()));
         std::fs::remove_dir_all(&d).unwrap();
     }
+}
+
+/// What "Compress to" makes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ArchiveFormat {
+    Zip,
+    SevenZ,
+    Rar,
+}
+
+/// Packs `sources` into the archive `dest` (which must not exist), at the normal level as the
+/// Windows app's "Compress to ZIP / 7z / RAR" does. RAR needs RARLAB's `rar` ([`can_make_rar`]).
+/// Blocks: call it off the main thread.
+#[uniffi::export]
+pub fn compress(sources: Vec<String>, dest: String, format: ArchiveFormat) -> Result<(), ArchiveError> {
+    let sources: Vec<PathBuf> = sources.into_iter().map(PathBuf::from).collect();
+    let dest = Path::new(&dest);
+    // "Normal" in the Windows app's level choice (None / Fast / Normal / Maximum)
+    let level = 5;
+    let result = match format {
+        ArchiveFormat::Zip => rf_archive::compress(&sources, dest, rf_archive::Format::Zip, level, &mut |_| {}, &|| false),
+        ArchiveFormat::SevenZ => rf_archive::compress(&sources, dest, rf_archive::Format::SevenZ, level, &mut |_| {}, &|| false),
+        ArchiveFormat::Rar => rf_archive::compress_rar(&sources, dest, level, None, &mut |_| {}, &|| false),
+    };
+    result.map(|_| ()).map_err(ArchiveError::from_anyhow)
+}
+
+/// Whether RAR archives can be made here (RARLAB's `rar` is installed).
+#[uniffi::export]
+pub fn can_make_rar() -> bool {
+    rf_archive::rar_exe().is_some()
 }

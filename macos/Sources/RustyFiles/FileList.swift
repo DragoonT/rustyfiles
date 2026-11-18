@@ -338,7 +338,7 @@ final class TextCellView: HoverView {
 /// The list itself. Space toggles Quick Look, Enter opens, F2 renames, Backspace goes back and
 /// ⌘⌫ / Delete moves to the Trash, as in the Windows app (on a Mac keyboard).
 @MainActor
-final class FileTableView: NSTableView {
+final class FileTableView: NSTableView, NSServicesMenuRequestor {
     weak var list: FileListController?
     private(set) var hoveredRow = -1
 
@@ -378,6 +378,19 @@ final class FileTableView: NSTableView {
         if r >= 0 && !selectedRowIndexes.contains(r) { selectRowIndexes([r], byExtendingSelection: false) }
         if r < 0 { deselectAll(nil) }
         return list?.contextMenu()
+    }
+
+    // macOS's Services and Quick Actions (the Windows app's "Show more options") work on the
+    // selected files: the menu shows the ones that take file URLs.
+    override func validRequestor(forSendType sendType: NSPasteboard.PasteboardType?, returnType: NSPasteboard.PasteboardType?) -> Any? {
+        if sendType == .fileURL, returnType == nil, let list, !list.selectedURLs.isEmpty, list.archiveIsNil { return self }
+        return super.validRequestor(forSendType: sendType, returnType: returnType)
+    }
+
+    func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        guard let urls = list?.selectedURLs, !urls.isEmpty else { return false }
+        pboard.clearContents()
+        return pboard.writeObjects(urls as [NSURL])
     }
 
     // Quick Look asks the responder chain; the list is the first responder.

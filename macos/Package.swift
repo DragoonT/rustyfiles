@@ -22,6 +22,7 @@ let package = Package(
                 .unsafeFlags(["\(repoRoot)/target/mac/release/librf_mac.a"]),
                 .linkedFramework("AppKit"),
                 .linkedFramework("Quartz"),
+                .linkedFramework("CoreWLAN"),
                 .linkedFramework("CoreFoundation"),
                 .linkedLibrary("iconv"),
             ]

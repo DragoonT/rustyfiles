@@ -553,7 +553,8 @@ final class PrimaryButton: HoverView {
 }
 
 /// The "Send with Ferry" submenu (ferry.rs `send_menu`): the devices nearby (trusted ones with
-/// a shield), or "No devices nearby"; then "Ferry settings…".
+/// a shield), or "No devices nearby"; then, on the Mac, AirDrop for Apple devices without
+/// rustyfiles; then "Ferry settings…" (or "Turn on Ferry…" while it is off).
 @MainActor
 enum FerryMenu {
     static func make(for urls: [URL]) -> NSMenuItem {
@@ -561,20 +562,30 @@ enum FerryMenu {
         item.image = Icons.named("send")
         let sub = NSMenu()
         sub.autoenablesItems = false
-        let peers = FerryService.shared.peers
-        for peer in peers {
-            let i = ClosureMenuItem(title: peer.name) { FerryService.shared.send(urls, to: peer) }
-            i.image = Icons.named(peer.trusted ? "shield-check" : "monitor")
+        let running = FerryService.shared.isRunning
+        if running {
+            let peers = FerryService.shared.peers
+            for peer in peers {
+                let i = ClosureMenuItem(title: peer.name) { FerryService.shared.send(urls, to: peer) }
+                i.image = Icons.named(peer.trusted ? "shield-check" : "monitor")
+                sub.addItem(i)
+            }
+            if peers.isEmpty {
+                let none = NSMenuItem(title: String(localized: "No devices nearby"), action: nil, keyEquivalent: "")
+                none.image = Icons.named("wifi")
+                none.isEnabled = false
+                sub.addItem(none)
+            }
+            sub.addItem(.separator())
+        }
+        // Apple devices without rustyfiles: the system's own AirDrop window picks the device
+        if let airdrop = NSSharingService(named: .sendViaAirDrop), airdrop.canPerform(withItems: urls) {
+            let i = ClosureMenuItem(title: "AirDrop…") { airdrop.perform(withItems: urls) }
+            i.image = airdrop.image
             sub.addItem(i)
+            sub.addItem(.separator())
         }
-        if peers.isEmpty {
-            let none = NSMenuItem(title: String(localized: "No devices nearby"), action: nil, keyEquivalent: "")
-            none.image = Icons.named("wifi")
-            none.isEnabled = false
-            sub.addItem(none)
-        }
-        sub.addItem(.separator())
-        let settings = ClosureMenuItem(title: String(localized: "Ferry settings…")) {
+        let settings = ClosureMenuItem(title: running ? String(localized: "Ferry settings…") : String(localized: "Turn on Ferry…")) {
             (NSApp.keyWindow?.windowController as? BrowserWindowController)?.openSettings(page: .ferry)
         }
         settings.image = Icons.named("settings")
