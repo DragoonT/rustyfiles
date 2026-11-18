@@ -1580,6 +1580,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         cx,
     ));
     let (bar_hidden, bar_extra) = (s.toolbar_hidden.clone(), s.toolbar_extra.clone());
+    let commands = s.toolbar_commands.clone();
     v.push(expander(
         "toolbar-buttons",
         p,
@@ -1607,7 +1608,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 ("view", "tb-view", "Görünüm", false),
                 ("preview", "tb-preview", "Önizleme paneli", false),
             ];
-            BUTTONS
+            let mut rows: Vec<_> = BUTTONS
                 .iter()
                 .map(|&(key, id, label, optional)| {
                     let shown = if optional { bar_extra.iter().any(|k| k == key) } else { !bar_hidden.iter().any(|k| k == key) };
@@ -1627,7 +1628,18 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                         }),
                     )
                 })
-                .collect()
+                .collect();
+            rows.extend(commands.into_iter().enumerate().map(|(i, command)| {
+                sub(&pp, command.name(), Some(&command.program), crate::quick_commands::controls(i, command.clone(), &pp).into_any_element())
+            }));
+            let add = crate::i18n::tx("Komut ekle", "Add command");
+            rows.push(sub(
+                &pp,
+                crate::i18n::tx("Özel komutlar", "Custom commands"),
+                None,
+                button("add-quick-command", &pp, add, |window, cx| crate::quick_commands::edit(None, window, cx)),
+            ));
+            rows
         },
         cx,
     ));
