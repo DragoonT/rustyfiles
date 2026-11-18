@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Sizes and dates in rf-core's English wording until the interface is translated.
         setEnglish(on: true)
         AppSettings.apply()
+        FerryService.shared.startIfEnabled()
         NotificationCenter.default.addObserver(forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated {
                 Palette.invalidate()
@@ -54,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
         }
     }
+
+    func applicationWillTerminate(_ notification: Notification) { FerryService.shared.stop() }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 

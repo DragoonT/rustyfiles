@@ -30,6 +30,12 @@
 	<string>NSApplication</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Ferry finds rustyfiles on your other devices on this network, to send files to them.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_rustyfiles._udp</string>
+	</array>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 </dict>

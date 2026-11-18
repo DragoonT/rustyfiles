@@ -55,3 +55,11 @@ music
 video
 network
 usb
+send
+shield-check
+wifi
+triangle-alert
+pencil
+folder-down
+folder-open
+circle-alert

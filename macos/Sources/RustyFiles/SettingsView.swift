@@ -4,7 +4,10 @@ import AppKit
 
 /// The Settings pages the Mac version has, in the Windows app's order (settings_view.rs).
 enum SettingsPage: CaseIterable {
-    case general, appearance, layout, files, about
+    /// Marked "Experimental" in the page list, as on Windows.
+    var isExperimental: Bool { self == .ferry }
+
+    case general, appearance, layout, files, ferry, about
 
     var title: String {
         switch self {
@@ -12,6 +15,7 @@ enum SettingsPage: CaseIterable {
         case .appearance: String(localized: "Appearance")
         case .layout: String(localized: "Layout")
         case .files: String(localized: "Files and folders")
+        case .ferry: "Ferry"
         case .about: String(localized: "About")
         }
     }
@@ -22,6 +26,7 @@ enum SettingsPage: CaseIterable {
         case .appearance: "palette"
         case .layout: "layout-grid"
         case .files: "folder"
+        case .ferry: "send"
         case .about: "info"
         }
     }
@@ -49,6 +54,7 @@ enum SettingsControl {
     case accent
     case buttons([(String, () -> Void)])
     case value(String)
+    case none
 }
 
 @MainActor
@@ -133,6 +139,8 @@ enum SettingsContent {
                         get: { AppSettings.decimalSizes ? "decimal" : "binary" },
                         set: { AppSettings.decimalSizes = $0 == "decimal" })),
             ]
+        case .ferry:
+            return FerryPage.rows()
         case .about:
             let info = Bundle.main.infoDictionary
             let version = info?["CFBundleShortVersionString"] as? String ?? coreVersion()
@@ -371,7 +379,7 @@ final class LiquidSlider: HoverView {
 /// A push button (settings_view.rs `button`): 32 high, `px_4`, radius 6, hover fill and border.
 @MainActor
 final class PlainButton: HoverView {
-    let title: String
+    var title: String { didSet { invalidateIntrinsicContentSize(); needsDisplay = true } }
     var action: (() -> Void)?
     private var pressed = false { didSet { needsDisplay = true } }
 
@@ -643,6 +651,7 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
         scroll.scrollerStyle = .overlay
         [nav, scroll].forEach(addSubview)
         NotificationCenter.default.addObserver(self, selector: #selector(settingsChanged(_:)), name: .rfSettingsChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(ferryChanged), name: .rfFerryChanged, object: nil)
         rebuild()
     }
 
@@ -663,6 +672,11 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
     }
 
     private var refreshers: [() -> Void] = []
+
+    /// Ferry's devices and state are rows of its page: the page is made again.
+    @objc private func ferryChanged() {
+        if page == .ferry || !query.isEmpty { rebuild() }
+    }
 
     func show(_ p: SettingsPage) {
         page = p
@@ -750,6 +764,8 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
             return ControlRow(list.map { PlainButton($0.0, action: $0.1) })
         case .value(let text):
             return ValueLabel(text)
+        case .none:
+            return ValueLabel("")
         }
     }
 
@@ -862,6 +878,18 @@ final class SettingsNavView: HoverView {
             }
             Draw.icon(page.icon, in: NSRect(x: r.minX + 12, y: r.minY, width: 16, height: r.height), size: 16, color: isSelected ? p.accent : p.textSecondary)
             Draw.text(page.title, in: NSRect(x: r.minX + 12 + 16 + 12, y: r.minY, width: r.width - 52, height: r.height), font: Metrics.textSm, color: p.text)
+            if page.isExperimental {
+                // the "Experimental" pill: px 6, 1 px border, 10 pt secondary
+                let label = String(localized: "Experimental")
+                let font = NSFont.systemFont(ofSize: 10)
+                let w = Draw.textWidth(label, font: font) + 12
+                let x = r.minX + 12 + 16 + 12 + Draw.textWidth(page.title, font: Metrics.textSm) + 8
+                let pill = NSRect(x: x, y: r.midY - 8, width: w, height: 16)
+                let path = NSBezierPath(roundedRect: pill.insetBy(dx: 0.5, dy: 0.5), xRadius: 8, yRadius: 8)
+                p.border.setStroke()
+                path.stroke()
+                Draw.text(label, in: pill, font: font, color: p.textSecondary, align: .center)
+            }
         }
     }
 
@@ -869,5 +897,104 @@ final class SettingsNavView: HoverView {
         let pt = convert(event.locationInWindow, from: nil)
         guard let i = SettingsPage.allCases.indices.first(where: { itemRect($0).contains(pt) }) else { return }
         onSelect?(SettingsPage.allCases[i])
+    }
+}
+
+/// Settings › Ferry (ferry.rs `page`): the switch, then, while Ferry is on, who can see this
+/// Mac, its name, where received files go, taking files from trusted devices, the devices
+/// nearby and the trusted ones.
+@MainActor
+enum FerryPage {
+    static func rows() -> [SettingsRow] {
+        let svc = FerryService.shared
+        var rows: [SettingsRow] = [
+            .card(
+                title: String(localized: "Use Ferry"),
+                detail: String(localized: "rustyfiles on the same network find each other; files go encrypted straight from device to device, with no server or account. When you turn it on, macOS may ask to let rustyfiles find devices on your local network: allow it."),
+                icon: "send",
+                control: .toggle(get: { FerrySettings.enabled }, set: { FerrySettings.enabled = $0 })),
+        ]
+        guard FerrySettings.enabled else { return rows }
+        if let problem = svc.problem {
+            rows.append(.card(title: String(localized: "Can’t look for nearby devices"), detail: problem, icon: "triangle-alert", control: .none))
+        }
+        rows += [
+            .card(
+                title: String(localized: "Who can see this Mac"),
+                detail: String(localized: "Everyone lasts 10 minutes, then it goes back to trusted devices only. To take files from a device you haven’t paired with, or to pair with one, choose Everyone."),
+                icon: "eye",
+                control: .choice(
+                    options: [("off", String(localized: "No one")), ("trusted", String(localized: "Trusted devices only")), ("everyone", String(localized: "Everyone (10 minutes)"))],
+                    get: { switch FerrySettings.visibility { case .off: "off"; case .everyone: "everyone"; case .trusted: "trusted" } },
+                    set: { svc.setVisibility($0 == "off" ? .off : $0 == "everyone" ? .everyone : .trusted) })),
+            .card(
+                title: String(localized: "Device name"), detail: FerrySettings.effectiveName, icon: "pencil",
+                control: .buttons([(String(localized: "Change…"), { askName() })])),
+            .card(
+                title: String(localized: "Received files"), detail: FerrySettings.effectiveInbox.path, icon: "folder-down",
+                control: .buttons(
+                    (FerrySettings.inbox.isEmpty ? [] : [(String(localized: "Default"), { FerrySettings.inbox = "" })])
+                        + [(String(localized: "Change…"), { askInbox() })])),
+            .card(
+                title: String(localized: "Take files from trusted devices without asking"),
+                detail: String(localized: "Files from devices you paired with go straight to the Received files folder; other devices are asked about every time."),
+                icon: "shield-check",
+                control: .toggle(get: { FerrySettings.autoAcceptTrusted }, set: { FerrySettings.autoAcceptTrusted = $0 })),
+            .section(String(localized: "Nearby devices")),
+        ]
+        if svc.peers.isEmpty {
+            rows.append(.card(
+                title: String(localized: "No devices yet"),
+                detail: String(localized: "rustyfiles must be open on the other device, with Ferry on. A device you haven’t paired with is listed only while its visibility is Everyone."),
+                icon: "wifi", control: .none))
+        }
+        for peer in svc.peers {
+            let detail = osName(peer.os) + (peer.trusted ? " · " + String(localized: "Trusted") : "")
+            rows.append(.card(
+                title: peer.name, detail: detail, icon: peer.trusted ? "shield-check" : "monitor",
+                control: peer.trusted ? .none : .buttons([(String(localized: "Pair"), { svc.pair(peer) })])))
+        }
+        if !svc.trusted.isEmpty {
+            rows.append(.section(String(localized: "Trusted devices")))
+            for peer in svc.trusted {
+                rows.append(.card(title: peer.name, detail: nil, icon: "shield-check", control: .buttons([(String(localized: "Forget"), { svc.forget(peer) })])))
+            }
+        }
+        return rows
+    }
+
+    static func osName(_ os: String) -> String {
+        switch os {
+        case "windows": "Windows"
+        case "macos": "macOS"
+        case "linux": "Linux"
+        default: os
+        }
+    }
+
+    private static func askName() {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Device name")
+        alert.informativeText = String(localized: "Other devices see this Mac by this name. Leave it empty to use the computer’s name.")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = FerrySettings.name
+        field.placeholderString = Host.current().localizedName
+        alert.accessoryView = field
+        alert.addButton(withTitle: String(localized: "Save"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.window.initialFirstResponder = field
+        if alert.runModal() == .alertFirstButtonReturn {
+            FerrySettings.name = field.stringValue.trimmingCharacters(in: .whitespaces)
+        }
+    }
+
+    private static func askInbox() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.message = String(localized: "Choose the folder for received files")
+        panel.directoryURL = FerrySettings.effectiveInbox
+        if panel.runModal() == .OK, let url = panel.url { FerrySettings.inbox = url.path }
     }
 }

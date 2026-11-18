@@ -225,6 +225,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         navBar.forward.action = { [weak self] _ in self?.goForward(nil) }
         navBar.up.action = { [weak self] _ in self?.goUp(nil) }
         navBar.refresh.action = { [weak self] _ in self?.refresh(nil) }
+        navBar.statusCenter.action = { [weak self] _ in self?.toggleStatusCenter() }
+        NotificationCenter.default.addObserver(self, selector: #selector(statusChanged), name: .rfStatusCenterChanged, object: nil)
         let omni = navBar.omnibar
         omni.breadcrumb.onNavigate = { [weak self] url in self?.navigate(to: url) }
         omni.breadcrumb.onHome = { [weak self] in self?.goHome(nil) }
@@ -571,6 +573,40 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func toggleHidden(_ sender: Any?) { AppSettings.showHidden.toggle() }
     @objc func openSettings(_ sender: Any?) { navigate(to: BrowserTab.settingsURL) }
     func showSettingsPage(_ page: SettingsPage) { list.showSettings(page: page) }
+
+    func openSettings(page: SettingsPage) {
+        openSettings(nil)
+        showSettingsPage(page)
+    }
+
+    // MARK: Status Center
+
+    private lazy var statusPopover: NSPopover = {
+        let p = NSPopover()
+        p.behavior = .transient
+        let v = StatusCenterView()
+        let vc = NSViewController()
+        vc.view = v
+        v.onResize = { [weak p] size in p?.contentSize = size }
+        p.contentViewController = vc
+        p.contentSize = v.frame.size
+        return p
+    }()
+
+    private func toggleStatusCenter() {
+        if statusPopover.isShown { return statusPopover.performClose(nil) }
+        StatusCenter.shared.unseenFailure = false
+        statusChanged()
+        statusPopover.show(relativeTo: navBar.statusCenter.bounds, of: navBar.statusCenter, preferredEdge: .maxY)
+    }
+
+    /// The ☑ button: accent while something runs, ⚠ after a failure nobody has seen.
+    @objc private func statusChanged() {
+        let sc = StatusCenter.shared
+        navBar.statusCenter.icon = sc.unseenFailure ? "circle-alert" : "list-checks"
+        navBar.statusCenter.tint = { p in sc.unseenFailure ? p.danger : (sc.isBusy ? p.accent : p.text) }
+        navBar.statusCenter.needsDisplay = true
+    }
     @objc func focusSearch(_ sender: Any?) { navBar.omnibar.mode == .filter ? navBar.omnibar.end() : navBar.omnibar.begin(.filter) }
     @objc func focusAddress(_ sender: Any?) { navBar.omnibar.begin(.path) }
     @objc func newFolder(_ sender: Any?) { list.newFolder() }
