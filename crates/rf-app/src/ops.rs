@@ -902,20 +902,6 @@ pub(crate) fn drag_paths_out(items: Vec<PathBuf>) {
 }
 
 impl FolderView {
-    /// Files dropped onto `dest` (a folder row or the current folder background).
-    pub fn drop_into(&mut self, dest: PathBuf, paths: &ExternalPaths, cx: &mut Context<Self>) {
-        let sources: Vec<PathBuf> = paths.paths().to_vec();
-        if sources.is_empty() || rf_win::dnd::is_invalid_drop(&sources, &dest) {
-            return;
-        }
-        let (ctrl, shift) = unsafe {
-            use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
-            (GetKeyState(VK_CONTROL.0 as i32) < 0, GetKeyState(VK_SHIFT.0 as i32) < 0)
-        };
-        let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
-        crate::status_center::transfer(cx, kind, sources, dest);
-    }
-
     /// Second popup listing tags (● = every selected item has it); picking toggles the tag.
     pub fn tag_menu(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         let store = &cx.global::<crate::tags::Tags>().0;
@@ -1088,4 +1074,31 @@ pub(crate) fn drop_transfer(sources: &[std::path::PathBuf], dest: &std::path::Pa
     use gpui_windows::dnd_hint;
     let kind = rf_win::dnd::default_transfer(sources, dest, ctrl, shift);
     if kind == rf_win::fileops::Transfer::Move && dnd_hint::allowed() & dnd_hint::MOVE == 0 { rf_win::fileops::Transfer::Copy } else { kind }
+}
+
+pub(crate) fn drop_on_program(program: PathBuf, files: Vec<PathBuf>, window: &mut Window, cx: &mut App) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_SHIFT};
+    let ctrl = unsafe { GetAsyncKeyState(VK_CONTROL.0 as i32) < 0 } || gpui_windows::dnd_hint::allowed() & gpui_windows::dnd_hint::MOVE == 0;
+    let shift = unsafe { GetAsyncKeyState(VK_SHIFT.0 as i32) < 0 };
+    let window = window.window_handle();
+    let (tx, rx) = futures::channel::oneshot::channel();
+    // COM work must not queue behind the shell STA's own modal drag.
+    std::thread::spawn(move || {
+        let args = files.iter().map(|p| p.as_os_str().to_owned()).collect();
+        let result = crate::program_launch::launch(program, args, true, None);
+        let _ = tx.send((files, result));
+    });
+    cx.spawn(async move |cx| {
+        let Ok((files, result)) = rx.await else { return };
+        match result {
+            Ok(Some(dest)) if !rf_win::dnd::is_invalid_drop(&files, &dest) => {
+                let kind = rf_win::dnd::default_transfer(&files, &dest, ctrl, shift);
+                cx.update(|cx| crate::status_center::transfer(cx, kind, files, dest));
+            }
+            Err(err) => {
+                let _ = window.update(cx, |_, window, cx| crate::program_launch::launch_error(err, window, cx));
+            }
+            _ => {}
+        }
+    }).detach();
 }
