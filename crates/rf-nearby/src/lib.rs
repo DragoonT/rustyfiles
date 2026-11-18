@@ -27,6 +27,9 @@ use tokio::sync::oneshot;
 
 pub use transfer::PART;
 
+/// A speed estimated from the two devices' links is shown this much of what the links' rates give (15% less).
+const LINK_MARGIN: f64 = 0.85;
+
 /// Offers waiting for the user at once, from all devices together (one each).
 const MAX_WAITING_OFFERS: usize = 4;
 
@@ -668,7 +671,8 @@ impl Inner {
             && own.1 > 0
             && link.1 > 0
         {
-            let mbps = (f64::from(own.1) * a).min(f64::from(link.1) * b);
+            // (and 15% under that: the owner compared it with real transfers and found it high, 2026-11-18)
+            let mbps = (f64::from(own.1) * a).min(f64::from(link.1) * b) * LINK_MARGIN;
             return ((mbps * 1e6 / 8.0) as u64, EstimateSource::Link, rtt);
         }
         (0, EstimateSource::Unknown, rtt)

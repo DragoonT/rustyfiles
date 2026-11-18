@@ -98,7 +98,7 @@ speed test").
 
 A transfer of at least 4 MiB also gives a speed (bytes moved / time). The reference keeps the last of either per device (on disk
 for trusted devices) and, with nothing of the kind, estimates from the two `link` values: the slower of own and peer rate times
-0.5 for Wi-Fi, 0.9 for Ethernet, 0.6 otherwise, divided by 8.
+0.5 for Wi-Fi, 0.9 for Ethernet, 0.6 otherwise, divided by 8, and shown 15% lower than that (real transfers came out lower).
 
 ### Pairing
 
