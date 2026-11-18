@@ -5,7 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static var shared: AppDelegate { NSApp.delegate as! AppDelegate }
 
     /// Every open browser window. AppKit does not keep window controllers alive by itself.
-    private var controllers: [BrowserWindowController] = []
+    private(set) var controllers: [BrowserWindowController] = []
 
     /// New windows open the Home page, as on Windows.
     private var home: URL { BrowserTab.homeURL }
@@ -19,6 +19,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // RF_SELFTEST (development): copies, moves, undoes and redoes in a scratch folder, prints, quits
         if ProcessInfo.processInfo.environment["RF_SELFTEST"] != nil { return SelfTest.run() }
         // RF_DEMO_MENU=item|background (development): the list's menu opens by itself, to be looked at
+        // RF_DEMO_PREVIEW=row (development): the preview pane open on that row, not remembered
+        if let row = ProcessInfo.processInfo.environment["RF_DEMO_PREVIEW"].flatMap(Int.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoPreview(row: row) }
+        }
         if let which = ProcessInfo.processInfo.environment["RF_DEMO_MENU"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoMenu(item: which == "item") }
         }

@@ -131,7 +131,13 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         message.textColor = .secondaryLabelColor
         message.isHidden = true
 
-        [commandBar, header, scroll, tileScroll, status, message].forEach(card.addSubview)
+        [commandBar, header, scroll, tileScroll, status, message, previewPane, previewHandle].forEach(card.addSubview)
+        previewHandle.currentWidth = { [weak self] in self?.previewWidth ?? PreviewPane.defaultWidth }
+        previewHandle.onDrag = { [weak self] w in
+            self?.previewWidth = w
+            UserDefaults.standard.set(Double(w), forKey: "previewWidth")
+            self?.card.needsLayout = true
+        }
         applyViewMode()
         card.onLayout = { [weak self] in self?.layoutCard() }
         NotificationCenter.default.addObserver(self, selector: #selector(columnsChanged), name: NSTableView.columnDidResizeNotification, object: table)
@@ -140,9 +146,48 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     // MARK: layout
 
+    // MARK: preview pane
+
+    let previewPane = PreviewPane()
+    private let previewHandle = PreviewResizeHandle()
+    private var previewWidth: CGFloat = {
+        let w = UserDefaults.standard.double(forKey: "previewWidth")
+        return w > 0 ? min(max(w, PreviewPane.minWidth), PreviewPane.maxWidth) : PreviewPane.defaultWidth
+    }()
+    /// Shown in every window once turned on (⇧⌘P, the command bar's last button), as on Windows.
+    var previewShown = UserDefaults.standard.bool(forKey: "previewShown") {
+        didSet {
+            UserDefaults.standard.set(previewShown, forKey: "previewShown")
+            card.needsLayout = true
+            updatePreview()
+            updateCommands()
+        }
+    }
+
+    @objc func togglePreviewPane(_ sender: Any?) { previewShown.toggle() }
+
+    /// The pane shows the focused item: the last one clicked, else the first selected.
+    func updatePreview() {
+        guard previewShown, archive == nil, folder != nil else { return previewPane.show(nil) }
+        let row = viewMode == .details && selectedRows.contains(table.selectedRow) ? table.selectedRow : selectedRows.first
+        guard let row, let p = folder?.childPath(row: UInt32(row)) else { return previewPane.show(nil) }
+        previewPane.show(URL(fileURLWithPath: p))
+    }
+
     private func layoutCard() {
-        let b = card.bounds
+        var b = card.bounds
+        // the pane takes the right of the card, under the command bar, beside the list and its
+        // status bar; it never leaves the list less than 320 wide
+        let pw = previewShown ? min(previewWidth, max(card.bounds.width - 320, 0)) : 0
+        let paneShown = previewShown && pw >= PreviewPane.minWidth && settingsView == nil && homeView == nil
+        previewPane.isHidden = !paneShown
+        previewHandle.isHidden = !paneShown
+        if paneShown {
+            previewPane.frame = NSRect(x: b.width - pw, y: Metrics.commandBarHeight, width: pw, height: b.height - Metrics.commandBarHeight)
+            previewHandle.frame = NSRect(x: b.width - pw - 3, y: Metrics.commandBarHeight, width: 6, height: b.height - Metrics.commandBarHeight)
+        }
         commandBar.frame = NSRect(x: 0, y: 0, width: b.width, height: Metrics.commandBarHeight)
+        if paneShown { b.size.width -= pw }
         header.frame = NSRect(x: 0, y: Metrics.commandBarHeight, width: b.width, height: Metrics.headerHeight)
         let top = Metrics.commandBarHeight + Metrics.headerHeight
         status.frame = NSRect(x: 0, y: b.height - Metrics.statusBarHeight, width: b.width, height: Metrics.statusBarHeight)
@@ -157,8 +202,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             tileLayout.invalidateLayout()
         }
         message.frame = NSRect(x: 40, y: top + 40, width: b.width - 80, height: 80)
-        settingsView?.frame = b
-        homeView?.frame = b
+        settingsView?.frame = card.bounds
+        homeView?.frame = card.bounds
 
         defer { placeListLens(animated: false) }
         let gutter = Metrics.gutter(listWidth: b.width)
@@ -484,6 +529,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         updateStatus()
         updateCommands()
         refreshQuickLook()
+        updatePreview()
         onChange?()
     }
 
@@ -518,7 +564,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         commandBar.paste.isEnabled = writable && Clipboard.hasFiles
         commandBar.new.isEnabled = writable
         commandBar.properties.isEnabled = false
-        commandBar.preview.isEnabled = false
+        commandBar.preview.isEnabled = settingsView == nil && homeView == nil
+        commandBar.preview.isOn = previewShown
         commandBar.view.icon = viewMode == .details ? "list" : "layout-grid"
     }
 
@@ -537,6 +584,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         b.copy.action = { [weak self] _ in self?.copyItems() }
         b.paste.action = { [weak self] _ in self?.pasteItems() }
         b.rename.action = { [weak self] _ in self?.beginRename() }
+        b.preview.action = { [weak self] _ in self?.togglePreviewPane(nil) }
         b.delete.action = { [weak self] _ in self?.trashSelected() }
         b.share.action = { [weak self] btn in
             guard let self else { return }

@@ -75,7 +75,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private let navBar = NavBarView()
     private let sidebar = SidebarView()
     private let handle = SidebarResizeHandle()
-    private let list = FileListController()
+    let list = FileListController()
     private var tabs: [BrowserTab] = []
     private var active = 0
     private var tab: BrowserTab { tabs[active] }
@@ -645,6 +645,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func openSettings(_ sender: Any?) { navigate(to: BrowserTab.settingsURL) }
     func showSettingsPage(_ page: SettingsPage) { list.showSettings(page: page) }
 
+    /// Development aid (RF_DEMO_PREVIEW): the pane open on `row`, the setting left as it was.
+    func demoPreview(row: Int) {
+        let was = UserDefaults.standard.bool(forKey: "previewShown")
+        list.previewShown = true
+        UserDefaults.standard.set(was, forKey: "previewShown")
+        list.table.selectRowIndexes([row], byExtendingSelection: false)
+    }
+
     /// Development aid (RF_DEMO_MENU): opens the list's menu as a right-click would.
     func demoMenu(item: Bool) {
         if item { list.table.selectRowIndexes([0], byExtendingSelection: false) } else { list.table.deselectAll(nil) }
@@ -700,6 +708,12 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func showDetails(_ sender: Any?) { list.setViewMode(.details) }
     @objc func showTiles(_ sender: Any?) { list.setViewMode(.tiles) }
 
+    @objc func togglePreviewPane(_ sender: Any?) {
+        list.togglePreviewPane(nil)
+        // every window follows
+        for c in AppDelegate.shared.controllers where c !== self { c.list.previewShown = list.previewShown }
+    }
+
     @objc func toggleSidebar(_ sender: Any?) {
         sidebarShown.toggle()
         UserDefaults.standard.set(!sidebarShown, forKey: "sidebarHidden")
@@ -728,6 +742,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             return true
         case #selector(toggleHidden(_:)):
             item.state = AppSettings.showHidden ? .on : .off
+            return true
+        case #selector(togglePreviewPane(_:)):
+            item.title = list.previewShown ? String(localized: "Hide Preview") : String(localized: "Show Preview")
             return true
         case #selector(toggleSidebar(_:)):
             item.title = sidebarShown ? String(localized: "Hide Sidebar") : String(localized: "Show Sidebar")
