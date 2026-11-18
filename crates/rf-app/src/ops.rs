@@ -841,8 +841,46 @@ impl FolderView {
 
     /// Starts an OLE drag of the selection (to Explorer, the desktop, another tab…).
     pub fn start_drag_out(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
-        drag_paths_out(self.selection_paths());
+        let items = self.selection_paths();
+        // Members of an archive: Windows' own ZIP folder would hand them over as virtual files, which our windows (and many programs)
+        // cannot take, so a drop on the sidebar did nothing. Up to a size they are extracted first and dragged as real files, as WinRAR
+        // and 7-Zip do; dropping them anywhere then copies them there.
+        if items.iter().any(|p| crate::archive_view::split(p).is_some() && !p.exists()) {
+            let bytes: u64 = self.selected.iter().filter_map(|&i| self.entries.get(i as usize)).map(|e| e.size).sum();
+            if bytes <= DRAG_EXTRACT_MAX {
+                drag_archive_items_out(items);
+                return;
+            }
+        }
+        drag_paths_out(items);
     }
+}
+
+/// The most a drag out of an archive extracts before it starts (the button is held meanwhile); a larger selection is dragged the old
+/// way, through Windows' own ZIP folder.
+const DRAG_EXTRACT_MAX: u64 = 256 << 20;
+
+/// [`drag_paths_out`] for members of an archive: extracted on a thread of their own first (the window does not wait), then dragged
+/// as real files that may only be copied. A button let go before the extraction ended starts no drag (see `rf_win::dnd::drag_out`).
+pub(crate) fn drag_archive_items_out(items: Vec<PathBuf>) {
+    let ui_thread = unsafe { windows::Win32::System::Threading::GetCurrentThreadId() };
+    unsafe {
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
+    }
+    std::thread::spawn(move || {
+        let real = match crate::archive_view::extract_items(&items, &|| false, &mut |_| {}) {
+            Ok(r) => r,
+            Err(e) => {
+                log::warn!("drag: could not extract from the archive: {e:#}");
+                return;
+            }
+        };
+        rf_win::sta::run(move |owner| {
+            if let Err(e) = rf_win::dnd::drag_out_copy_only(owner, ui_thread, &real) {
+                log::warn!("drag: {e:#}");
+            }
+        });
+    });
 }
 
 /// An OLE drag of `items` out of the window (the selection, or a recent item of the Home page).

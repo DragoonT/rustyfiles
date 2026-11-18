@@ -965,6 +965,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Yalnızca simge", "Icon only"),
     ("Sol adadaki arama: bir kutu, yalnızca simgesi ya da hiç. Logo Başlat'ı yine açar.", "The left island's search: a box, its icon only, or none. The logo still opens Start."),
     ("Arama HyperSearch'ü açar", "Search opens HyperSearch"),
+    ("Arşivden çıkarılamadı", "Could not extract it from the archive"),
     ("Bu Windows sürümünde malzeme yalnızca ana pencereye uygulanır; menüler ve açılır pencereler düz kalır.", "On this version of Windows the material is for the main window only; menus and pop-ups stay plain."),
     ("Dock'taki arama kutusuna ya da simgesine tıklamak Başlat yerine HyperSearch'ü açar. Logo Başlat'ı yine açar.", "A click on the dock's search box or icon opens HyperSearch instead of Start. The logo still opens Start."),
     ("Diğer programlardan açılan klasörler yeni pencerede açılsın", "Open folders from other programs in a new window"),
