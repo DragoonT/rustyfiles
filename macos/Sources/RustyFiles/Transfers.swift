@@ -30,6 +30,7 @@ enum FileOp: Sendable {
                 try fm.trashItem(at: u, resultingItemURL: &out)
                 if let t = out as URL? { back.append((from: t, to: u)) }
             }
+            TrashBin.remember(back)
             return .moves(back)
         case .group(let ops):
             var inverses: [FileOp] = []

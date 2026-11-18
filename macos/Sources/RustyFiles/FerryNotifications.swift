@@ -46,7 +46,7 @@ final class FerryNotifications: NSObject, @preconcurrency UNUserNotificationCent
         case .offer(let o):
             content.categoryIdentifier = ID.offer
             content.title = String(localized: "\(o.fromName) wants to send you files")
-            let what = o.names.count == 1 ? o.names[0] : (o.fileCount == 1 ? String(localized: "1 item") : String(localized: "\(o.fileCount) items"))
+            let what = o.names.count == 1 ? o.names[0] : (o.fileCount == 1 ? String(localized: "1 item") : String(localized: "\(Int(o.fileCount)) items"))
             content.body = "\(what) · \(formatSize(bytes: o.totalBytes))"
                 + (o.trusted ? "" : "\n" + String(localized: "Unpaired device: its name can’t be verified"))
         case .pairing(_, let name, let code):

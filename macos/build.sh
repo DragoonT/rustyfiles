@@ -51,5 +51,8 @@ grep -v '^#' macos/icons.txt | while read -r name; do
     [ -n "$name" ] && cp "$LUCIDE/$name.svg" "$APP/Contents/Resources/icons/"
 done
 cp "$LUCIDE/../../LICENSE-LUCIDE" "$APP/Contents/Resources/icons/"
+
+# The interface in other languages (macos/Localization/<lang>.json)
+python3 macos/tools/l10n.py macos/Sources/RustyFiles macos/Localization "$APP/Contents/Resources"
 codesign --force --sign - "$APP" >/dev/null
 echo "$APP"

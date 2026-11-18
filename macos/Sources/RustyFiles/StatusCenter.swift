@@ -459,7 +459,7 @@ final class FerryQuestionView: FlippedView {
         case .offer(let o):
             let what: String
             switch o.names.count {
-            case 0: what = o.fileCount == 1 ? String(localized: "1 item") : String(localized: "\(o.fileCount) items")
+            case 0: what = o.fileCount == 1 ? String(localized: "1 item") : String(localized: "\(Int(o.fileCount)) items")
             case 1: what = o.names[0]
             default: what = String(localized: "\(o.names[0]) and \(o.names.count - 1) items")
             }

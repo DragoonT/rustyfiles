@@ -12,6 +12,28 @@ enum AppSettings {
     enum Theme: String, CaseIterable { case system, light, dark }
     enum DateStyle: String, CaseIterable { case app, system, universal }
 
+    /// The interface language: "system" follows macOS (Turkish on a Turkish Mac, else English),
+    /// or "en" / "tr". Kept as the app's own AppleLanguages, read when it starts.
+    static var language: String {
+        get {
+            guard let list = UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "")?["AppleLanguages"] as? [String],
+                let first = list.first
+            else { return "system" }
+            return first.hasPrefix("tr") ? "tr" : "en"
+        }
+        set {
+            if newValue == "system" {
+                UserDefaults.standard.removeObject(forKey: "AppleLanguages")
+            } else {
+                UserDefaults.standard.set([newValue], forKey: "AppleLanguages")
+            }
+            NotificationCenter.default.post(name: .rfSettingsChanged, object: nil, userInfo: ["key": "language"])
+        }
+    }
+
+    /// The language the interface is in now.
+    static var speaksTurkish: Bool { Bundle.main.preferredLocalizations.first == "tr" }
+
     /// What the window is made of.
     enum Material: String, CaseIterable {
         /// One sheet of Liquid Glass, with glass lenses on the selections.

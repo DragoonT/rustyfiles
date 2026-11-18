@@ -54,6 +54,11 @@ enum SelfTest {
                     check(um.undoMenuItemTitle.contains("Rename"), "Edit says what undo does (\(um.undoMenuItemTitle))")
                     um.undo()
                     check(fm.fileExists(atPath: b.appendingPathComponent("big.bin").path), "undo rename gives the old name back")
+                    // 8. the Trash remembers where things came from, and puts them back
+                    let pb = (try? FileOps.trash([b.appendingPathComponent("big.bin")])) ?? []
+                    check(pb.count == 1 && TrashBin.origin(of: pb[0].from) == b.appendingPathComponent("big.bin"), "Trash remembers the origin")
+                    if let t = pb.first { _ = try? TrashBin.putBack([(trashed: t.from, origin: t.to)]) }
+                    check(fm.fileExists(atPath: b.appendingPathComponent("big.bin").path), "Put Back returns it")
                     try? fm.removeItem(at: root)
                     print(failures == 0 ? "ALL PASSED" : "\(failures) FAILED")
                     exit(failures == 0 ? 0 : 1)
