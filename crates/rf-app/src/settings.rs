@@ -705,6 +705,29 @@ pub struct Settings {
     /// All four corners of every monitor, black behind them (`rf_core::desktop::corners` for the bottom pixel row). An experiment
     /// the user asked for, to go with the dock's round islands.
     pub desktop_corner_radius: u8,
+
+    // ---- Ferry (sending files to rustyfiles on the network's other devices; Settings -> "Ferry"; crates/rf-nearby and ferry.rs)
+    /// Ferry runs in the main process (off by default: it listens on a network port, and Windows' firewall may ask about that).
+    pub ferry_enabled: bool,
+    /// Who sees this PC: nobody, its trusted devices (the default), or everyone. "Everyone" lasts ten minutes and a start reads it as
+    /// trusted devices.
+    pub ferry_visibility: FerryVisibility,
+    /// The name the other devices show for this PC; empty: the PC's own name.
+    pub ferry_name: String,
+    /// Where received files go; empty: the Downloads folder.
+    pub ferry_inbox: String,
+    /// Files from a trusted device are taken without asking, into the folder above (on).
+    pub ferry_auto_accept_trusted: bool,
+}
+
+/// Settings -> Ferry: who sees this PC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FerryVisibility {
+    Off,
+    #[default]
+    Trusted,
+    Everyone,
 }
 
 impl Default for Settings {
@@ -864,6 +887,11 @@ impl Default for Settings {
             desktop_icon_control_panel: Default::default(),
             desktop_show_icons: Default::default(),
             desktop_corner_radius: 0,
+            ferry_enabled: false,
+            ferry_visibility: FerryVisibility::Trusted,
+            ferry_name: String::new(),
+            ferry_inbox: String::new(),
+            ferry_auto_accept_trusted: true,
         }
     }
 }
@@ -1206,6 +1234,8 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut Settings)) {
         // after the save: the dock process reads the file when it is told to reload
         crate::dock::control::sync_process(&s);
     });
+    // (Ferry follows its settings: started, stopped, started anew, or shown to others differently)
+    crate::ferry::apply(cx);
     cx.refresh_windows();
 }
 

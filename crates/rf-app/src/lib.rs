@@ -7,6 +7,7 @@ pub mod bench;
 mod fast_start;
 mod bench_view;
 mod donate;
+mod ferry;
 mod archive_view;
 mod bulk_rename;
 mod command_palette;
@@ -882,6 +883,8 @@ pub fn main() {
         // the folder organizer's watchers (only if a rule runs by itself); not in helper processes
         if primary_instance {
             organizer::init(cx);
+            // Ferry (off until the user turns it on): only the main process listens
+            ferry::init(cx);
         }
         // GPUI would quit by itself when the last window closes (QuitMode::Default on Windows):
         // that cut running copies in half and makes background mode impossible. We decide.

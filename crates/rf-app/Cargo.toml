@@ -23,6 +23,7 @@ rf-dialog = { path = "../rf-dialog" }
 # installer and auto-update (GitHub Releases)
 velopack = "=1.2.161"
 rf-archive.workspace = true
+rf-nearby.workspace = true
 rf-player.workspace = true
 rustdecoder.workspace = true
 gpui-kit.workspace = true

@@ -33,6 +33,7 @@ pub enum Page {
     Actions,
     Tags,
     Look,
+    Ferry,
     Dev,
     Advanced,
     Speed,
@@ -40,7 +41,7 @@ pub enum Page {
     About,
 }
 
-const PAGES: [(Page, L, &str); 15] = [
+const PAGES: [(Page, L, &str); 16] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
     (Page::Dock, L::PanelBottom, "Dock"),
@@ -51,6 +52,7 @@ const PAGES: [(Page, L, &str); 15] = [
     (Page::Actions, L::Keyboard, "Eylemler"),
     (Page::Tags, L::Tag, "Etiketler"),
     (Page::Look, L::Eye, "DirectLook"),
+    (Page::Ferry, L::Send, "Ferry"),
     (Page::Dev, L::SquareTerminal, "Geliştirici araçları"),
     (Page::Advanced, L::Wrench, "Gelişmiş"),
     (Page::Speed, L::Gauge, "Hız testi"),
@@ -61,7 +63,7 @@ const PAGES: [(Page, L, &str); 15] = [
 /// The pages that are experimental: marked with a small "Deneysel" pill in the page list and "(deneysel)" in their title. The mark is
 /// NOT part of the page name in [`PAGES`], so the search and the translations still know the pages as "Dock" and "Masaüstü".
 fn experimental(page: Page) -> bool {
-    matches!(page, Page::Dock | Page::Desktop)
+    matches!(page, Page::Dock | Page::Desktop | Page::Ferry)
 }
 
 /// The heading of a page: its name, and "(deneysel)" after it for an experimental page.
@@ -181,6 +183,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Actions => actions(p, cx),
         Page::Tags => tags(p, cx),
         Page::Look => look(p, s, cx),
+        Page::Ferry => crate::ferry::page(p, s, cx),
         Page::Dev => dev(p, s, cx),
         Page::Advanced => advanced(p, s, cx),
         Page::Speed => crate::bench_view::page(p, cx),
@@ -3198,10 +3201,10 @@ mod desktop_page_tests {
     }
 
     #[test]
-    fn both_experimental_pages_are_marked_and_the_mark_is_not_part_of_their_names() {
+    fn the_experimental_pages_are_marked_and_the_mark_is_not_part_of_their_names() {
         crate::dock_page::while_turkish(|| {
             let exp: Vec<Page> = PAGES.iter().map(|x| x.0).filter(|p| experimental(*p)).collect();
-            assert_eq!(exp, [Page::Dock, Page::Desktop], "exactly these two");
+            assert_eq!(exp, [Page::Dock, Page::Desktop, Page::Ferry], "exactly these");
             for (page, _, name) in PAGES {
                 let title = page_title(page, name);
                 if experimental(page) {

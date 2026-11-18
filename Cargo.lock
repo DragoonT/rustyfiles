@@ -6327,6 +6327,7 @@ dependencies = [
  "rf-archive",
  "rf-core",
  "rf-dialog",
+ "rf-nearby",
  "rf-player",
  "rf-win",
  "rustdecoder",

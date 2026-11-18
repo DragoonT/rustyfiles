@@ -371,6 +371,9 @@ impl FolderView {
             let shelf_items = items.to_vec();
             v.push(Item::action(t!("Rafa ekle"), icon(L::Inbox), act(me, move |_, _, cx| cx.emit(FolderEvent::AddToShelf(shelf_items.clone())))).hint("Ctrl+Shift+S"));
         }
+        if !in_archive && crate::ferry::running(cx) {
+            v.push(Item::sub(t!("Ferry ile gönder"), icon(L::Send), crate::ferry::menu_items(items, cx)));
+        }
         if items.len() > 1 && !self.is_search() && !in_archive {
             let b = items.to_vec();
             v.push(Item::action(t!("Toplu yeniden adlandır…"), icon(L::PencilLine), act(me, move |_, _, cx| cx.emit(FolderEvent::BulkRename(b.clone())))).hint("F2"));
