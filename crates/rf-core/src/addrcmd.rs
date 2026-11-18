@@ -292,6 +292,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn place_command_or_neither() {
         let folder = PathBuf::from(r"D:\Work");
         let exists = |p: &Path| p == Path::new(r"D:\Work") || p == Path::new(r"D:\Work\cmd") || p == Path::new(r"C:\Users\x");
@@ -348,6 +350,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn lexical_normalising() {
         let n = |s: &str| normalize_lexical(Path::new(s));
         assert_eq!(n(r"C:\a\b\.."), PathBuf::from(r"C:\a"));

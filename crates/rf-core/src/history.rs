@@ -174,11 +174,21 @@ fn unc_share_root(p: &Path) -> Option<PathBuf> {
     (!server.is_empty() && !share.is_empty() && !share.contains('\\')).then(|| PathBuf::from(format!(r"\\{server}")))
 }
 
-/// "C:\" → "C:", "C:\Users\x" → "x".
+/// "C:\" → "C:", "C:\Users\x" → "x"; on Unix "/" stays "/".
 pub fn display_name(p: &Path) -> String {
     match p.file_name() {
         Some(n) => redact_credentials(&n.to_string_lossy()),
-        None => redact_credentials(p.to_string_lossy().trim_end_matches(['\\', '/'])),
+        None => {
+            let trimmed = p.to_string_lossy();
+            let trimmed = trimmed.trim_end_matches(['\\', '/']);
+            // the Unix root has no name and nothing left once its "/" is trimmed (Windows
+            // keeps its own answers: "C:\" → "C:")
+            #[cfg(unix)]
+            if trimmed.is_empty() && !p.as_os_str().is_empty() {
+                return "/".to_string();
+            }
+            redact_credentials(trimmed)
+        }
     }
 }
 
@@ -328,6 +338,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn non_ascii_paths_do_not_panic() {
         let up = |s: &str| Location::Path(PathBuf::from(s)).parent();
         assert_eq!(up(r"C:\Öğrenci\x"), Some(Location::Path(PathBuf::from(r"C:\Öğrenci"))));
@@ -345,6 +357,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn unc_up() {
         let up = |s: &str| Location::Path(PathBuf::from(s)).parent();
         assert_eq!(up(r"\\nas\share"), Some(Location::Path(PathBuf::from(r"\\nas"))));
@@ -368,6 +382,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn parent_of_root_is_home() {
         assert_eq!(Location::Path("C:\\".into()).parent(), Some(Location::Home));
         assert_eq!(
@@ -520,6 +536,8 @@ mod came_from_tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn the_folder_one_came_out_of_is_named_in_the_folder_it_is_in() {
         assert_eq!(came_from(&at(r"C:\A\B"), &at(r"C:\A")), Some("B".to_string()));
         assert_eq!(came_from(&at(r"C:\A\B\"), &at(r"c:\a\")), Some("B".to_string()), "however the two are spelled");
@@ -531,5 +549,24 @@ mod came_from_tests {
         assert_eq!(came_from(&at(r"C:\A\B"), &Location::Home), None);
         assert_eq!(came_from(&Location::Home, &at(r"C:\A")), None);
         assert_eq!(came_from(&at(r"C:\"), &at(r"C:\")), None, "a drive's root has no name");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod unix_tests {
+    use super::*;
+
+    #[test]
+    fn going_up_on_unix() {
+        assert_eq!(Location::Path("/".into()).parent(), Some(Location::Home));
+        assert_eq!(Location::Path("/Users".into()).parent(), Some(Location::Path("/".into())));
+        assert_eq!(Location::Path("/Users/ali/Belgeler".into()).parent(), Some(Location::Path("/Users/ali".into())));
+    }
+
+    #[test]
+    fn names_on_unix() {
+        assert_eq!(display_name(Path::new("/")), "/");
+        assert_eq!(display_name(Path::new("/Users/ali/Öğrenci")), "Öğrenci");
+        assert_eq!(display_name(Path::new("/Volumes/Yedek/")), "Yedek");
     }
 }

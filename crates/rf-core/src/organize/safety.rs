@@ -226,6 +226,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn folders_that_are_refused() {
         let p = prot();
         let r = |s: &str, sub: bool| p.refuse(Path::new(s), sub);
@@ -269,6 +271,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_program_run_from_a_folder_does_not_make_the_folder_the_apps_own() {
         let p = prot();
         // only the program file itself is left alone
@@ -294,6 +298,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn from_env_has_the_windows_folders() {
         let p = ProtectedPaths::from_env();
         assert!(p.windows.is_some());

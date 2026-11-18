@@ -1,0 +1,1017 @@
+import AppKit
+import Quartz
+
+/// Details (the table) or the grid's Tiles.
+enum ViewMode: String {
+    case details, tiles
+}
+
+/// The content card and everything in it for one window. The rows live in Rust ([`Folder`]);
+/// the table and the grid ask for the ones they draw, so a huge folder costs no more than what
+/// is on screen.
+@MainActor
+final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate,
+    NSCollectionViewDataSource, NSCollectionViewDelegate,
+    @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate
+{
+    let card = CardView()
+    let commandBar = CommandBarView()
+    let header = ListHeaderView()
+    let table = FileTableView()
+    let status = StatusBarView()
+    private let scroll = NSScrollView()
+    let tiles = TileCollectionView()
+    private let tileLayout = NSCollectionViewFlowLayout()
+    private let tileScroll = NSScrollView()
+    private(set) var viewMode: ViewMode = AppSettings.defaultView
+    /// The Settings page, shown in the card in place of the folder.
+    private var settingsView: SettingsView?
+    /// The Home page, the same way.
+    private var homeView: HomeView?
+    private let message = NSTextField(wrappingLabelWithString: "")
+    private let display = ItemDisplay()
+    private var geometry = ListGeometry()
+    /// The glass lens under the selected row when exactly one row is selected; it slides from
+    /// row to row. A 30 px row gets a capsule (glass.rs `LensShape::Row`).
+    private let listLens = LensView(cornerRadius: Metrics.rowHeight / 2)
+
+    private(set) var folder: Folder?
+    private(set) var url: URL?
+    /// The archive and the folder in it, while one is shown.
+    private(set) var archive: ArchiveView?
+    var sortKey: ListColumn = AppSettings.sortKey
+    var ascending = !AppSettings.descending
+    var foldersFirst = AppSettings.foldersFirst
+    var showHidden = AppSettings.showHidden { didSet { if showHidden != oldValue { rearrange() } } }
+    var filter = "" { didSet { if filter != oldValue { rearrange() } } }
+
+    var onOpenFolder: ((URL) -> Void)?
+    var onOpenDiskImage: ((URL) -> Void)?
+    var onBack: (() -> Void)?
+    var onChange: (() -> Void)?
+    var onError: ((String) -> Void)?
+
+    /// Sizes worked out with "Calculate size", kept for the session.
+    private static var folderSizes: [String: UInt64] = [:]
+    private static var sizing: Set<String> = []
+
+    override init() {
+        super.init()
+        for col in ListColumn.allCases {
+            let c = NSTableColumn(identifier: .init(col.rawValue))
+            c.width = col.defaultWidth + (col == .name ? ListGeometry.lead : 0) + (col == .size ? geometry.trail : 0)
+            c.minWidth = col == .name ? 120 + ListGeometry.lead : 56
+            c.resizingMask = col == .name ? .autoresizingMask : .userResizingMask
+            table.addTableColumn(c)
+        }
+        table.headerView = nil
+        table.rowHeight = Metrics.rowHeight
+        table.intercellSpacing = .zero
+        table.style = .plain
+        table.backgroundColor = .clear
+        table.gridStyleMask = []
+        table.focusRingType = .none
+        table.allowsMultipleSelection = true
+        table.allowsColumnReordering = false
+        table.columnAutoresizingStyle = .firstColumnOnlyAutoresizingStyle
+        table.dataSource = self
+        table.delegate = self
+        table.list = self
+        table.target = self
+        table.doubleAction = #selector(doubleClicked(_:))
+        table.setDraggingSourceOperationMask(.copy, forLocal: false)
+
+        scroll.documentView = table
+        // under the rows (their own drawing is clear where the lens is)
+        table.addSubview(listLens, positioned: .below, relativeTo: nil)
+        listLens.isHidden = true
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+
+        tileLayout.itemSize = NSSize(width: TileMetrics.width, height: TileMetrics.rowHeight - TileMetrics.gap)
+        tileLayout.minimumInteritemSpacing = TileMetrics.gap
+        tileLayout.minimumLineSpacing = TileMetrics.gap
+        tileLayout.sectionInset = NSEdgeInsets(top: TileMetrics.padY, left: TileMetrics.padX, bottom: TileMetrics.padY, right: TileMetrics.padX)
+        tiles.collectionViewLayout = tileLayout
+        tiles.register(TileItem.self, forItemWithIdentifier: TileItem.id)
+        tiles.isSelectable = true
+        tiles.allowsMultipleSelection = true
+        tiles.allowsEmptySelection = true
+        tiles.backgroundColors = [.clear]
+        tiles.dataSource = self
+        tiles.delegate = self
+        tiles.list = self
+        tiles.setDraggingSourceOperationMask(.copy, forLocal: false)
+        tileScroll.documentView = tiles
+        tileScroll.drawsBackground = false
+        tileScroll.hasVerticalScroller = true
+        tileScroll.scrollerStyle = .overlay
+
+        header.table = table
+        header.onSort = { [weak self] col in self?.sort(by: col) }
+
+        message.alignment = .center
+        message.font = Metrics.textSm
+        message.textColor = .secondaryLabelColor
+        message.isHidden = true
+
+        [commandBar, header, scroll, tileScroll, status, message].forEach(card.addSubview)
+        applyViewMode()
+        card.onLayout = { [weak self] in self?.layoutCard() }
+        NotificationCenter.default.addObserver(self, selector: #selector(columnsChanged), name: NSTableView.columnDidResizeNotification, object: table)
+        wireCommandBar()
+    }
+
+    // MARK: layout
+
+    private func layoutCard() {
+        let b = card.bounds
+        commandBar.frame = NSRect(x: 0, y: 0, width: b.width, height: Metrics.commandBarHeight)
+        header.frame = NSRect(x: 0, y: Metrics.commandBarHeight, width: b.width, height: Metrics.headerHeight)
+        let top = Metrics.commandBarHeight + Metrics.headerHeight
+        status.frame = NSRect(x: 0, y: b.height - Metrics.statusBarHeight, width: b.width, height: Metrics.statusBarHeight)
+        scroll.frame = NSRect(x: 0, y: top, width: b.width, height: status.frame.minY - top)
+        tileScroll.frame = NSRect(x: 0, y: Metrics.commandBarHeight, width: b.width, height: status.frame.minY - Metrics.commandBarHeight)
+        // as many columns as fit, left-aligned with 4 between them (not spread out)
+        let cols = max(Int((b.width - 2 * TileMetrics.padX + TileMetrics.gap) / (TileMetrics.width + TileMetrics.gap)), 1)
+        let used = CGFloat(cols) * (TileMetrics.width + TileMetrics.gap) - TileMetrics.gap
+        let right = max(b.width - TileMetrics.padX - used, TileMetrics.padX)
+        if tileLayout.sectionInset.right != right {
+            tileLayout.sectionInset.right = right
+            tileLayout.invalidateLayout()
+        }
+        message.frame = NSRect(x: 40, y: top + 40, width: b.width - 80, height: 80)
+        settingsView?.frame = b
+        homeView?.frame = b
+
+        defer { placeListLens(animated: false) }
+        let gutter = Metrics.gutter(listWidth: b.width)
+        if gutter != geometry.gutter, let last = table.tableColumns.last {
+            last.width += gutter - geometry.gutter
+            geometry.gutter = gutter
+            header.geometry = geometry
+            table.enumerateAvailableRowViews { row, _ in
+                (row as? FileRowView)?.geometry = self.geometry
+                row.needsDisplay = true
+            }
+            table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<table.numberOfRows), columnIndexes: [table.tableColumns.count - 1])
+        }
+    }
+
+    @objc private func columnsChanged() {
+        header.needsDisplay = true
+        header.window?.invalidateCursorRects(for: header)
+    }
+
+    // MARK: view mode
+
+    func setViewMode(_ mode: ViewMode) {
+        guard mode != viewMode else { return }
+        let keep = selectedRows
+        let wasFocused = isFocused
+        viewMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: "viewMode")
+        applyViewMode()
+        reloadItems()
+        selectRows(keep, scrollToFirst: true)
+        if wasFocused { focus() }
+        selectionChanged()
+    }
+
+    private func applyViewMode() {
+        let isTiles = viewMode == .tiles
+        header.isHidden = isTiles
+        scroll.isHidden = isTiles
+        tileScroll.isHidden = !isTiles
+    }
+
+    /// The selected rows of whichever view is showing.
+    var selectedRows: IndexSet {
+        switch viewMode {
+        case .details: table.selectedRowIndexes
+        case .tiles: IndexSet(tiles.selectionIndexPaths.map(\.item))
+        }
+    }
+
+    private func selectRows(_ rows: IndexSet, scrollToFirst: Bool) {
+        switch viewMode {
+        case .details:
+            table.selectRowIndexes(rows, byExtendingSelection: false)
+            if scrollToFirst, let first = rows.first { table.scrollRowToVisible(first) }
+        case .tiles:
+            let paths = Set(rows.map { IndexPath(item: $0, section: 0) })
+            tiles.selectionIndexPaths = paths
+            if scrollToFirst, let first = rows.first {
+                tiles.scrollToItems(at: [IndexPath(item: first, section: 0)], scrollPosition: .nearestHorizontalEdge)
+            }
+        }
+    }
+
+    private func reloadItems() {
+        switch viewMode {
+        case .details: table.reloadData()
+        case .tiles: tiles.reloadData()
+        }
+    }
+
+    /// A newly opened folder starts at its first item.
+    private func scrollToTop() {
+        switch viewMode {
+        case .details:
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: -scroll.contentInsets.top))
+            scroll.reflectScrolledClipView(scroll.contentView)
+        case .tiles:
+            tiles.layoutSubtreeIfNeeded()
+            tileScroll.contentView.scroll(to: .zero)
+            tileScroll.reflectScrolledClipView(tileScroll.contentView)
+        }
+    }
+
+    private var isFocused: Bool {
+        let r = table.window?.firstResponder
+        return r === table || r === tiles
+    }
+
+    // MARK: Settings
+
+    /// The Settings page fills the card; the command bar, the list and the status line go.
+    func showSettings(page: SettingsPage? = nil) {
+        folder = nil
+        url = nil
+        homeView?.isHidden = true
+        let v = settingsView ?? SettingsView()
+        if settingsView == nil {
+            settingsView = v
+            card.addSubview(v)
+        }
+        v.frame = card.bounds
+        v.isHidden = false
+        if let page { v.show(page) }
+        [commandBar, header, scroll, tileScroll, status, message].forEach { $0.isHidden = true }
+        selectionChanged()
+    }
+
+    /// The Home page fills the card, as Settings does.
+    func showHome() {
+        folder = nil
+        url = nil
+        archive = nil
+        settingsView?.isHidden = true
+        let v = homeView ?? HomeView()
+        if homeView == nil {
+            homeView = v
+            v.onOpenFolder = { [weak self] url in self?.onOpenFolder?(url) }
+            card.addSubview(v)
+        }
+        v.frame = card.bounds
+        v.isHidden = false
+        [commandBar, header, scroll, tileScroll, status, message].forEach { $0.isHidden = true }
+        selectionChanged()
+    }
+
+    func reloadHome() { homeView?.reload() }
+
+    private func hideSettings() {
+        let pages = [settingsView as NSView?, homeView as NSView?].compactMap { $0 }.filter { !$0.isHidden }
+        guard !pages.isEmpty else { return }
+        pages.forEach { $0.isHidden = true }
+        commandBar.isHidden = false
+        status.isHidden = false
+        applyViewMode()
+    }
+
+    /// A setting changed (`key` as in AppSettings).
+    func apply(settingKey key: String) {
+        switch key {
+        case "sortKey", "descending":
+            sort(by: AppSettings.sortKey, ascending: !AppSettings.descending)
+        case "foldersFirst":
+            foldersFirst = AppSettings.foldersFirst
+            rearrange()
+        case "showHidden":
+            showHidden = AppSettings.showHidden
+        case "viewMode":
+            if settingsView?.isHidden ?? true {
+                setViewMode(AppSettings.defaultView)
+            } else {
+                viewMode = AppSettings.defaultView
+            }
+        default:
+            // formats, thumbnails and colours: what is on screen is drawn again
+            if folder != nil { reloadItems() }
+        }
+    }
+
+    // MARK: showing a folder
+
+    func show(_ folder: Folder, at url: URL, selecting names: [String], scrollTo y: CGFloat? = nil, archive: ArchiveView? = nil) {
+        let same = self.url == url
+        self.folder = folder
+        self.url = url
+        self.archive = archive
+        folder.arrange(column: sortKey.sort, ascending: ascending, foldersFirst: foldersFirst, showHidden: showHidden, filter: filter)
+        hideSettings()
+        message.isHidden = true
+        header.sortKey = sortKey
+        header.ascending = ascending
+        if !same { ThumbnailCache.shared.forget(under: url.path) }
+        reloadItems()
+        let rows = IndexSet(names.compactMap { folder.rowOf(name: $0).map(Int.init) })
+        selectRows(rows, scrollToFirst: y == nil)
+        if let y {
+            let clip = (viewMode == .details ? scroll : tileScroll).contentView
+            clip.scroll(to: NSPoint(x: 0, y: y))
+            (viewMode == .details ? scroll : tileScroll).reflectScrolledClipView(clip)
+        } else if rows.isEmpty && !same {
+            scrollToTop()
+        }
+        selectionChanged()
+    }
+
+    func show(error text: String, at url: URL) {
+        folder = nil
+        archive = nil
+        self.url = url
+        hideSettings()
+        reloadItems()
+        message.stringValue = text
+        message.isHidden = false
+        selectionChanged()
+    }
+
+    var scrollY: CGFloat { (viewMode == .details ? scroll : tileScroll).contentView.bounds.origin.y }
+
+    func focus() { table.window?.makeFirstResponder(viewMode == .details ? table : tiles) }
+
+    private func rearrange() {
+        guard let folder else { return }
+        let keep = selectedNames
+        folder.arrange(column: sortKey.sort, ascending: ascending, foldersFirst: foldersFirst, showHidden: showHidden, filter: filter)
+        reloadItems()
+        let rows = IndexSet(keep.compactMap { folder.rowOf(name: $0).map(Int.init) })
+        selectRows(rows, scrollToFirst: true)
+        selectionChanged()
+    }
+
+    func sort(by col: ListColumn, ascending asc: Bool? = nil) {
+        if let asc {
+            sortKey = col
+            ascending = asc
+        } else if col == sortKey {
+            ascending.toggle()
+        } else {
+            sortKey = col
+            ascending = col.startsAscending
+        }
+        header.sortKey = sortKey
+        header.ascending = ascending
+        rearrange()
+    }
+
+    var selectedNames: [String] {
+        guard let folder else { return [] }
+        return selectedRows.compactMap { folder.item(row: UInt32($0))?.name }
+    }
+
+    var selectedURLs: [URL] {
+        guard let folder else { return [] }
+        return selectedRows.compactMap { folder.childPath(row: UInt32($0)).map(URL.init(fileURLWithPath:)) }
+    }
+
+    /// Puts the lens under the one selected row, or hides it.
+    private func placeListLens(animated: Bool) {
+        let rows = viewMode == .details ? table.selectedRowIndexes : []
+        let lensRow = rows.count == 1 && AppSettings.isGlass ? rows.first! : -1
+        table.enumerateAvailableRowViews { view, row in (view as? FileRowView)?.onLens = row == lensRow }
+        guard lensRow >= 0, lensRow < table.numberOfRows else {
+            listLens.isHidden = true
+            return
+        }
+        let r = table.rect(ofRow: lensRow)
+        let box = NSRect(x: 6, y: r.minY, width: table.bounds.width - 6 - (6 + geometry.gutter), height: r.height)
+        listLens.move(to: box, animated: animated && !table.inLiveResize)
+    }
+
+    private func selectionChanged() {
+        placeListLens(animated: true)
+        updateStatus()
+        updateCommands()
+        refreshQuickLook()
+        onChange?()
+    }
+
+    private func updateStatus() {
+        guard let folder else {
+            status.count = ""
+            status.selection = ""
+            return
+        }
+        let n = Int(folder.count())
+        status.count = n == 1 ? String(localized: "1 item") : String(localized: "\(n) items")
+        let rows = selectedRows
+        guard !rows.isEmpty else {
+            status.selection = ""
+            return
+        }
+        var text = rows.count == 1 ? String(localized: "1 item selected") : String(localized: "\(rows.count) items selected")
+        let files = rows.compactMap { folder.item(row: UInt32($0)) }.filter { !$0.isDir }
+        if !files.isEmpty { text += "  " + formatSize(bytes: files.reduce(0) { $0 + $1.size }) }
+        status.selection = text
+    }
+
+    func updateCommands() {
+        let any = !selectedRows.isEmpty && folder != nil
+        // an archive is read only here: what is in it can be opened, copied and extracted
+        let writable = folder != nil && archive == nil
+        commandBar.cut.isEnabled = any && writable
+        commandBar.copy.isEnabled = any
+        commandBar.rename.isEnabled = selectedRows.count == 1 && writable
+        commandBar.share.isEnabled = any && writable
+        commandBar.delete.isEnabled = any && writable
+        commandBar.paste.isEnabled = writable && Clipboard.hasFiles
+        commandBar.new.isEnabled = writable
+        commandBar.properties.isEnabled = false
+        commandBar.preview.isEnabled = false
+        commandBar.view.icon = viewMode == .details ? "list" : "layout-grid"
+    }
+
+    // MARK: command bar
+
+    private func wireCommandBar() {
+        let b = commandBar
+        b.new.action = { [weak self] btn in
+            let m = NSMenu()
+            m.addItem(withTitle: String(localized: "Folder"), action: #selector(BrowserWindowController.newFolder(_:)), keyEquivalent: "")
+            m.items.first?.image = Icons.named("folder")
+            btn.pop(m)
+            _ = self
+        }
+        b.cut.action = { [weak self] _ in self?.cutItems() }
+        b.copy.action = { [weak self] _ in self?.copyItems() }
+        b.paste.action = { [weak self] _ in self?.pasteItems() }
+        b.rename.action = { [weak self] _ in self?.beginRename() }
+        b.delete.action = { [weak self] _ in self?.trashSelected() }
+        b.share.action = { [weak self] btn in
+            guard let self else { return }
+            NSSharingServicePicker(items: self.selectedURLs).show(relativeTo: btn.bounds, of: btn, preferredEdge: .minY)
+        }
+        b.sort.action = { [weak self] btn in
+            guard let self else { return }
+            let m = NSMenu()
+            for col in ListColumn.allCases {
+                let i = NSMenuItem(title: col.title, action: #selector(self.sortMenu(_:)), keyEquivalent: "")
+                i.target = self
+                i.representedObject = col.rawValue
+                i.state = col == self.sortKey ? .on : .off
+                m.addItem(i)
+            }
+            m.addItem(.separator())
+            for (title, asc) in [(String(localized: "Ascending"), true), (String(localized: "Descending"), false)] {
+                let i = NSMenuItem(title: title, action: #selector(self.sortDirection(_:)), keyEquivalent: "")
+                i.target = self
+                i.tag = asc ? 1 : 0
+                i.state = self.ascending == asc ? .on : .off
+                m.addItem(i)
+            }
+            btn.pop(m)
+        }
+        b.view.action = { [weak self] btn in
+            guard let self else { return }
+            let m = NSMenu()
+            for (mode, title, icon) in [(ViewMode.details, String(localized: "Details"), "list"), (.tiles, String(localized: "Tiles"), "layout-grid")] {
+                let i = ClosureMenuItem(title: title) { [weak self] in self?.setViewMode(mode) }
+                i.image = Icons.named(icon)
+                i.state = self.viewMode == mode ? .on : .off
+                m.addItem(i)
+            }
+            btn.pop(m)
+        }
+    }
+
+    @objc private func sortMenu(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String, let col = ListColumn(rawValue: raw) { sort(by: col, ascending: col == sortKey ? ascending : col.startsAscending) }
+    }
+
+    @objc private func sortDirection(_ sender: NSMenuItem) { sort(by: sortKey, ascending: sender.tag == 1) }
+
+    // MARK: file operations
+
+    func cutItems() {
+        Clipboard.put(selectedURLs, cut: true)
+        updateCommands()
+    }
+
+    func copyItems() {
+        if let archive {
+            return extractSelected(from: archive) { urls in Clipboard.put(urls, cut: false) }
+        }
+        Clipboard.put(selectedURLs, cut: false)
+        updateCommands()
+    }
+
+    /// The paths inside the archive of the selected rows.
+    private func selectedInner(_ archive: ArchiveView) -> [String] {
+        guard let folder else { return [] }
+        return selectedRows.compactMap { folder.item(row: UInt32($0)).map { archive.place.child($0.name) } }
+    }
+
+    /// Writes the selected members of the archive into a scratch folder, then hands their
+    /// new files to `done` (to open, preview or copy them).
+    private func extractSelected(from archive: ArchiveView, done: @escaping ([URL]) -> Void) {
+        let inner = selectedInner(archive)
+        guard !inner.isEmpty else { return }
+        let a = archive.archive
+        run {
+            let dest = ArchiveStore.scratchFolder()
+            _ = try a.extract(innerPaths: inner, dest: dest.path)
+            return inner.map { dest.appendingPathComponent($0) }
+        } done: { done($0) }
+    }
+
+    /// Extracts the selected members (or, with none selected, the whole archive) into `dest`
+    /// and opens that folder.
+    private func extractArchive(_ archive: ArchiveView, to dest: URL, onlySelected: Bool) {
+        let inner = onlySelected ? selectedInner(archive) : []
+        let a = archive.archive
+        run { _ = try a.extract(innerPaths: inner, dest: dest.path) } done: { [weak self] in self?.onOpenFolder?(dest) }
+    }
+
+    /// "Extract here" for an archive file in a folder: as on Windows, into a new folder named
+    /// after it unless everything in it is under one folder already.
+    private func extractHere(_ file: URL) {
+        let path = file.path, into = file.deletingLastPathComponent().path
+        run {
+            let target = smartExtractTarget(archive: path, into: into)
+            let a = try Archive.open(path: path, password: nil)
+            _ = try a.extractAll(dest: target[0])
+            return target[1]
+        } done: { [weak self] shown in self?.reloadSelecting([URL(fileURLWithPath: shown).lastPathComponent]) }
+    }
+
+    /// Asks where to extract, then extracts there.
+    private func chooseAndExtract(_ work: @escaping (URL) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.prompt = String(localized: "Extract")
+        guard let window = card.window else { return }
+        panel.beginSheetModal(for: window) { response in
+            if response == .OK, let url = panel.url { work(url) }
+        }
+    }
+
+    func pasteItems() {
+        guard let url, let (urls, move) = Clipboard.take() else { return }
+        run { try FileOps.paste(urls, into: url, move: move) } done: { [weak self] made in
+            self?.reloadSelecting(made.map(\.lastPathComponent))
+        }
+    }
+
+    func newFolder() {
+        guard let url else { return }
+        run { try FileOps.newFolder(in: url) } done: { [weak self] made in
+            self?.reloadSelecting([made.lastPathComponent], rename: true)
+        }
+    }
+
+    func trashSelected() {
+        let urls = selectedURLs
+        guard !urls.isEmpty else { return }
+        // the row after the last one goes away keeps the cursor near where it was
+        let next = (selectedRows.last ?? 0) + 1
+        let after = folder.flatMap { f in next < Int(f.count()) ? f.item(row: UInt32(next))?.name : nil }
+        run { try FileOps.trash(urls) } done: { [weak self] _ in self?.reloadSelecting(after.map { [$0] } ?? []) }
+    }
+
+    /// Runs `work` off the main thread; errors are shown, the result goes to `done`.
+    private func run<T: Sendable>(_ work: @escaping @Sendable () throws -> T, done: @escaping (T) -> Void) {
+        Task.detached(priority: .userInitiated) {
+            let result = Result { try work() }
+            await MainActor.run { [weak self] in
+                switch result {
+                case .success(let v): done(v)
+                case .failure(let e): self?.onError?(e.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// Asks the window to list the folder again, then selects `names` (and renames the first).
+    var onReload: (([String], Bool) -> Void)?
+
+    private func reloadSelecting(_ names: [String], rename: Bool = false) { onReload?(names, rename) }
+
+    // MARK: rename
+
+    private var renaming: (row: Int, original: String)?
+
+    /// The name field of row `row` in the view that is showing.
+    private func nameField(_ row: Int, make: Bool) -> NSTextField? {
+        switch viewMode {
+        case .details:
+            return (table.view(atColumn: 0, row: row, makeIfNecessary: make) as? NameCellView)?.textField
+        case .tiles:
+            let path = IndexPath(item: row, section: 0)
+            if make { tiles.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge) }
+            return (tiles.item(at: path) as? TileItem)?.tile.label
+        }
+    }
+
+    func beginRename() {
+        guard let folder, selectedRows.count == 1, let row = selectedRows.first,
+            let item = folder.item(row: UInt32(row))
+        else { return }
+        if viewMode == .details { table.scrollRowToVisible(row) }
+        guard let field = nameField(row, make: true) else { return }
+        renaming = (row, item.name)
+        field.isEditable = true
+        field.isSelectable = true
+        field.isBordered = true
+        field.drawsBackground = true
+        field.backgroundColor = Palette.of(table).cardBg
+        field.delegate = self
+        table.window?.makeFirstResponder(field)
+        // the name without its extension is selected, as on Windows
+        let stem = item.isDir ? item.name.count : ((item.name as NSString).deletingPathExtension as NSString).length
+        field.currentEditor()?.selectedRange = NSRange(location: 0, length: stem == 0 ? (item.name as NSString).length : stem)
+    }
+
+    private func endRename(commit: Bool) {
+        guard let (row, original) = renaming else { return }
+        renaming = nil
+        guard let field = nameField(row, make: false) else { return }
+        let newName = field.stringValue.trimmingCharacters(in: .whitespaces)
+        field.isEditable = false
+        field.isSelectable = false
+        field.isBordered = false
+        field.drawsBackground = false
+        field.delegate = nil
+        focus()
+        guard commit, !newName.isEmpty, newName != original, let url else {
+            field.stringValue = original
+            return
+        }
+        let from = url.appendingPathComponent(original)
+        run { try FileOps.rename(from, to: newName) } done: { [weak self] made in
+            self?.reloadSelecting([made.lastPathComponent])
+        }
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        switch selector {
+        case #selector(NSResponder.insertNewline(_:)):
+            endRename(commit: true)
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            endRename(commit: false)
+            return true
+        default:
+            return false
+        }
+    }
+
+    func controlTextDidEndEditing(_ note: Notification) { endRename(commit: true) }
+
+    // MARK: opening
+
+    @objc private func doubleClicked(_ sender: Any?) {
+        guard table.clickedRow >= 0 else { return }
+        openSelected()
+    }
+
+    func openSelected() {
+        guard let folder else { return }
+        let rows = selectedRows
+        var files: [URL] = []
+        for row in rows {
+            guard let item = folder.item(row: UInt32(row)), let path = folder.childPath(row: UInt32(row)) else { continue }
+            let u = URL(fileURLWithPath: path)
+            if item.isDir && !display.isPackage(item) {
+                if rows.count == 1 { onOpenFolder?(u) }
+            } else if archive == nil && rows.count == 1 && isArchive(path: path) {
+                // archives open like folders, as on Windows
+                onOpenFolder?(u)
+            } else if archive == nil && rows.count == 1 && DiskImages.isDiskImage(u) {
+                onOpenDiskImage?(u)
+            } else {
+                files.append(u)
+            }
+        }
+        guard !files.isEmpty else { return }
+        if let archive {
+            // what is in an archive is written out first, then opened
+            let fileNames = Set(files.map(\.lastPathComponent))
+            let inner = rows.compactMap { folder.item(row: UInt32($0)) }.filter { fileNames.contains($0.name) && !$0.isDir }.map { archive.place.child($0.name) }
+            let a = archive.archive
+            run {
+                let dest = ArchiveStore.scratchFolder()
+                _ = try a.extract(innerPaths: inner, dest: dest.path)
+                return inner.map { dest.appendingPathComponent($0) }
+            } done: { urls in urls.forEach { NSWorkspace.shared.open($0) } }
+            return
+        }
+        for u in files { NSWorkspace.shared.open(u) }
+    }
+
+    func contextMenu() -> NSMenu {
+        let m = NSMenu()
+        let any = !selectedRows.isEmpty
+        func add(_ title: String, _ icon: String?, _ enabled: Bool, _ handler: @escaping () -> Void) {
+            let i = ClosureMenuItem(title: title, handler: handler)
+            i.isEnabled = enabled
+            if let icon { i.image = Icons.named(icon) }
+            m.addItem(i)
+        }
+        m.autoenablesItems = false
+        if let archive {
+            if any {
+                add(String(localized: "Open"), nil, true) { [weak self] in self?.openSelected() }
+                add(String(localized: "Quick Look"), "eye", true) { [weak self] in self?.toggleQuickLook() }
+                m.addItem(.separator())
+                add(String(localized: "Copy"), "copy", true) { [weak self] in self?.copyItems() }
+                add(String(localized: "Extract to…"), "folder-output", true) { [weak self] in
+                    self?.chooseAndExtract { self?.extractArchive(archive, to: $0, onlySelected: true) }
+                }
+            } else {
+                add(String(localized: "Extract all to…"), "folder-output", true) { [weak self] in
+                    self?.chooseAndExtract { self?.extractArchive(archive, to: $0, onlySelected: false) }
+                }
+            }
+            return m
+        }
+        if any {
+            add(String(localized: "Open"), nil, true) { [weak self] in self?.openSelected() }
+            add(String(localized: "Quick Look"), "eye", true) { [weak self] in self?.toggleQuickLook() }
+            m.addItem(.separator())
+            add(String(localized: "Cut"), "scissors", true) { [weak self] in self?.cutItems() }
+            add(String(localized: "Copy"), "copy", true) { [weak self] in self?.copyItems() }
+        }
+        add(String(localized: "Paste"), "clipboard-paste", Clipboard.hasFiles && folder != nil) { [weak self] in self?.pasteItems() }
+        m.addItem(.separator())
+        if any {
+            add(String(localized: "Rename"), "text-cursor-input", selectedRows.count == 1) { [weak self] in self?.beginRename() }
+            add(String(localized: "Move to Trash"), "trash", true) { [weak self] in self?.trashSelected() }
+            // an archive file: extract it without opening it
+            if selectedRows.count == 1, let file = selectedURLs.first, isArchive(path: file.path) {
+                m.addItem(.separator())
+                add(String(localized: "Extract here"), "folder-output", true) { [weak self] in self?.extractHere(file) }
+                add(String(localized: "Extract to…"), "folder-output", true) { [weak self] in
+                    self?.chooseAndExtract { dest in
+                        self?.run {
+                            _ = try Archive.open(path: file.path, password: nil).extractAll(dest: dest.path)
+                        } done: { self?.onOpenFolder?(dest) }
+                    }
+                }
+            }
+            add(String(localized: "Copy as path"), nil, true) { [weak self] in
+                guard let self else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(self.selectedURLs.map(\.path).joined(separator: "\n"), forType: .string)
+            }
+        } else {
+            add(String(localized: "New folder"), "folder-plus", folder != nil) { [weak self] in self?.newFolder() }
+        }
+        return m
+    }
+
+    // MARK: table data
+
+    func numberOfRows(in tableView: NSTableView) -> Int { Int(folder?.count() ?? 0) }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let v = FileRowView()
+        v.geometry = geometry
+        v.onLens = AppSettings.isGlass && tableView.selectedRowIndexes.count == 1 && tableView.selectedRowIndexes.first == row
+        return v
+    }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard let folder, let tableColumn, let col = ListColumn(rawValue: tableColumn.identifier.rawValue),
+            let item = folder.item(row: UInt32(row))
+        else { return nil }
+        let isLast = tableColumn == tableView.tableColumns.last
+        if col == .name {
+            let cell = (tableView.makeView(withIdentifier: .init("name"), owner: nil) as? NameCellView) ?? {
+                let c = NameCellView()
+                c.identifier = .init("name")
+                return c
+            }()
+            cell.lead = ListGeometry.lead + 8
+            cell.textField?.stringValue = item.name
+            cell.textField?.textColor = Palette.of(tableView).text
+            cell.imageView?.image = display.icon(item, path: folder.childPath(row: UInt32(row)) ?? "")
+            cell.alphaValue = item.hidden ? 0.5 : 1
+            return cell
+        }
+        let id = NSUserInterfaceItemIdentifier(col.rawValue)
+        let cell = (tableView.makeView(withIdentifier: id, owner: nil) as? TextCellView) ?? {
+            let c = TextCellView()
+            c.identifier = id
+            return c
+        }()
+        cell.trailPad = 8 + (isLast ? geometry.trail : 0)
+        cell.alignRight = col == .size
+        cell.isLink = false
+        cell.onClick = nil
+        cell.alphaValue = item.hidden ? 0.5 : 1
+        switch col {
+        case .modified: cell.text = display.date(item.modifiedMs)
+        case .type: cell.text = display.kind(item)
+        case .size:
+            if item.isDir && archive != nil {
+                cell.text = ""
+            } else if item.isDir && !display.isPackage(item), let path = folder.childPath(row: UInt32(row)) {
+                if let size = Self.folderSizes[path] {
+                    cell.text = formatSize(bytes: size)
+                } else if Self.sizing.contains(path) {
+                    cell.text = String(localized: "Calculating…")
+                } else {
+                    cell.text = String(localized: "Calculate size")
+                    cell.isLink = true
+                    cell.onClick = { [weak self] in self?.calculateSize(path) }
+                }
+            } else {
+                cell.text = item.isDir ? "" : display.size(item)
+            }
+        case .name: break
+        }
+        return cell
+    }
+
+    private func calculateSize(_ path: String) {
+        Self.sizing.insert(path)
+        reloadSize(of: path)
+        Task.detached(priority: .utility) {
+            let size = folderSize(path: path)
+            await MainActor.run { [weak self] in
+                Self.sizing.remove(path)
+                Self.folderSizes[path] = size
+                self?.reloadSize(of: path)
+            }
+        }
+    }
+
+    private func reloadSize(of path: String) {
+        guard let folder, let url else { return }
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        guard URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL == url.standardizedFileURL,
+            let row = folder.rowOf(name: name)
+        else { return }
+        if viewMode == .details {
+            table.reloadData(forRowIndexes: [Int(row)], columnIndexes: [table.tableColumns.count - 1])
+        }
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) { selectionChanged() }
+
+    func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? {
+        guard tableColumn?.identifier.rawValue == ListColumn.name.rawValue else { return nil }
+        return folder?.item(row: UInt32(row))?.name
+    }
+
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        guard archive == nil else { return nil }
+        return folder?.childPath(row: UInt32(row)).map { URL(fileURLWithPath: $0) as NSURL }
+    }
+
+    // MARK: Quick Look
+
+    private var previewURLs: [URL] = []
+
+    func toggleQuickLook() {
+        guard let panel = QLPreviewPanel.shared() else { return }
+        if QLPreviewPanel.sharedPreviewPanelExists() && panel.isVisible {
+            panel.orderOut(nil)
+        } else {
+            panel.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    private func refreshQuickLook() {
+        if let archive {
+            previewURLs = []
+            guard QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared(), panel.isVisible, panel.dataSource === self
+            else { return }
+            let wanted = selectedInner(archive)
+            extractSelected(from: archive) { [weak self] urls in
+                guard let self, self.archive.map({ self.selectedInner($0) }) == wanted else { return }
+                self.previewURLs = urls
+                panel.reloadData()
+            }
+            return
+        }
+        previewURLs = selectedURLs
+        guard QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared(), panel.isVisible,
+            panel.dataSource === self
+        else { return }
+        panel.reloadData()
+    }
+
+    func beginQuickLook(_ panel: QLPreviewPanel) {
+        previewURLs = archive == nil ? selectedURLs : []
+        panel.dataSource = self
+        panel.delegate = self
+        if archive != nil { DispatchQueue.main.async { self.refreshQuickLook() } }
+    }
+
+    func endQuickLook(_ panel: QLPreviewPanel) {
+        panel.dataSource = nil
+        panel.delegate = nil
+    }
+
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { previewURLs.count }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
+        previewURLs[index] as NSURL
+    }
+
+    /// Arrow keys pressed while the panel is in front still move through the list.
+    func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
+        guard event.type == .keyDown else { return false }
+        (viewMode == .details ? table as NSView : tiles).keyDown(with: event)
+        return true
+    }
+
+    // MARK: keys (shared by the table and the grid)
+
+    /// Space toggles Quick Look, Enter opens, F2 renames, Backspace goes back and ⌘⌫ / Delete
+    /// moves to the Trash, as in the Windows app (on a Mac keyboard). False: not ours.
+    func handleKey(_ event: NSEvent) -> Bool {
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let chars = event.charactersIgnoringModifiers ?? ""
+        switch (chars, mods) {
+        case (" ", []): toggleQuickLook()
+        case ("\r", []), ("\u{3}", []): openSelected()
+        case (String(Character(UnicodeScalar(NSF2FunctionKey)!)), _): beginRename()
+        case ("\u{7f}", []): onBack?()
+        case ("\u{7f}", [.command]), (String(Character(UnicodeScalar(NSDeleteFunctionKey)!)), _): trashSelected()
+        default: return false
+        }
+        return true
+    }
+
+    // MARK: grid data
+
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
+        Int(folder?.count() ?? 0)
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
+        let item = collectionView.makeItem(withIdentifier: TileItem.id, for: indexPath) as! TileItem
+        guard let folder, let entry = folder.item(row: UInt32(indexPath.item)), let path = folder.childPath(row: UInt32(indexPath.item)) else {
+            return item
+        }
+        item.path = path
+        let tile = item.tile
+        tile.label.stringValue = entry.name
+        tile.label.textColor = Palette.of(collectionView).text
+        tile.alphaValue = entry.hidden ? 0.6 : 1
+        tile.isSelected = item.isSelected
+        if AppSettings.showThumbnails, let thumb = ThumbnailCache.shared.cached(path) {
+            tile.picture.image = thumb
+            tile.isThumbnail = true
+        } else {
+            tile.picture.image = display.icon(entry, path: path)
+            tile.isThumbnail = false
+            if !entry.isDir && AppSettings.showThumbnails && archive == nil {
+                let scale = collectionView.window?.backingScaleFactor ?? 2
+                ThumbnailCache.shared.request(path, scale: scale) { [weak item] image in
+                    guard let item, item.path == path else { return }
+                    item.tile.picture.image = image
+                    item.tile.isThumbnail = true
+                }
+            }
+        }
+        return item
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) { selectionChanged() }
+    func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) { selectionChanged() }
+
+    func collectionView(_ collectionView: NSCollectionView, canDragItemsAt indexPaths: Set<IndexPath>, with event: NSEvent) -> Bool { true }
+
+    func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
+        guard archive == nil else { return nil }
+        return folder?.childPath(row: UInt32(indexPath.item)).map { URL(fileURLWithPath: $0) as NSURL }
+    }
+}
+
+/// A menu item that runs a closure.
+final class ClosureMenuItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(title: String, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(fire), keyEquivalent: "")
+        target = self
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError() }
+
+    @objc private func fire() { handler() }
+}

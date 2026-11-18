@@ -229,7 +229,14 @@ impl AudioDecoder {
     /// are taken to last as long as the first one (the encoders make them so), the last by its
     /// own table of contents.
     fn opus_end(&mut self) -> Option<i64> {
-        let Kind_::Mft(MftCodec::Opus, _) = self.kind else { return None };
+        // Opus is decoded by Media Foundation, so only Windows has an Opus track to trim.
+        #[cfg(windows)]
+        let is_opus = matches!(self.kind, Kind_::Mft(MftCodec::Opus, _));
+        #[cfg(not(windows))]
+        let is_opus = false;
+        if !is_opus {
+            return None;
+        }
         if self.track.discard_padding_ns == 0 || self.track.samples.len() < 2 {
             return None;
         }

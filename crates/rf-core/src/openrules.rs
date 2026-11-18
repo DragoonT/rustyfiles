@@ -158,6 +158,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_files_extension() {
         assert_eq!(ext_of(Path::new(r"C:\a\Lib.DLL")), Some("dll".into()));
         assert_eq!(ext_of(Path::new(r"C:\a\arşiv.tar.gz")), Some("gz".into()));
@@ -202,6 +204,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_programs_path_and_name() {
         assert_eq!(clean_program(r#"  "C:\Program Files\dnSpy\dnSpy.exe"  "#), Some(r"C:\Program Files\dnSpy\dnSpy.exe".into()));
         assert_eq!(clean_program(r"C:\t\x.exe"), Some(r"C:\t\x.exe".into()));

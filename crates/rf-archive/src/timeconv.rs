@@ -1,6 +1,22 @@
 //! Time conversions. ZIP stores DOS local time (no zone), so we convert through the Windows
 //! time-zone APIs to match what Explorer shows.
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
+pub fn unix_ms(t: SystemTime) -> i64 {
+    match t.duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_millis() as i64,
+        Err(e) => -(e.duration().as_millis() as i64),
+    }
+}
+
+#[cfg(windows)]
+pub use win::*;
+#[cfg(not(windows))]
+pub use portable::*;
+
+#[cfg(windows)]
+mod win {
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
@@ -21,13 +37,6 @@ pub fn filetime_to_systemtime(ft: FILETIME) -> Option<SystemTime> {
     let ticks = ((ft.dwHighDateTime as u64) << 32) | ft.dwLowDateTime as u64;
     let since = ticks.checked_sub(EPOCH_DIFF_TICKS)?;
     Some(UNIX_EPOCH + Duration::from_nanos(since.checked_mul(100)?))
-}
-
-pub fn unix_ms(t: SystemTime) -> i64 {
-    match t.duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_millis() as i64,
-        Err(e) => -(e.duration().as_millis() as i64),
-    }
 }
 
 /// DOS local time fields -> `SystemTime` (UTC based).
@@ -61,4 +70,28 @@ pub fn systemtime_to_local_fields(t: SystemTime) -> Option<(u16, u8, u8, u8, u8,
         SystemTimeToTzSpecificLocalTime(None, &utc, &mut local).ok()?;
     }
     Some((local.wYear, local.wMonth as u8, local.wDay as u8, local.wHour as u8, local.wMinute as u8, local.wSecond as u8))
+}
+}
+
+/// Off Windows the local zone comes from the C library (TZ / /etc/localtime) through chrono.
+#[cfg(not(windows))]
+mod portable {
+    use std::time::SystemTime;
+
+    use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Timelike};
+
+    /// DOS local time fields -> `SystemTime` (UTC based). In the hour a DST change repeats,
+    /// the earlier instant wins, like Windows.
+    pub fn dos_local_to_systemtime(y: u16, mo: u8, d: u8, h: u8, mi: u8, s: u8) -> Option<SystemTime> {
+        let naive = NaiveDate::from_ymd_opt(y as i32, mo as u32, d as u32)?.and_hms_opt(h as u32, mi as u32, s as u32)?;
+        let local = Local.from_local_datetime(&naive).earliest()?;
+        Some(local.into())
+    }
+
+    /// `SystemTime` -> local (year, month, day, hour, minute, second).
+    pub fn systemtime_to_local_fields(t: SystemTime) -> Option<(u16, u8, u8, u8, u8, u8)> {
+        let l: DateTime<Local> = t.into();
+        let y = u16::try_from(l.year()).ok()?;
+        Some((y, l.month() as u8, l.day() as u8, l.hour() as u8, l.minute() as u8, l.second() as u8))
+    }
 }

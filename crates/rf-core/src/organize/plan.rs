@@ -498,6 +498,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn first_matching_enabled_rule_wins() {
         let mut off = rule(1, "kapalı", vec![ext(&["jpg"])], Action::MoveTo { folder: PathBuf::from(r"D:\x") });
         off.enabled = false;
@@ -516,6 +518,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_relative_destination_is_taken_from_the_watched_folder() {
         let r = rule(1, "r", vec![ext(&["pdf"])], Action::MoveTo { folder: PathBuf::from("Belgeler") });
         let p = run(&[r], &[file(DL, "a.pdf")], &[]);
@@ -523,6 +527,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn templates_use_the_modified_date_in_the_chosen_time_zone() {
         let r = rule(1, "r", vec![ext(&["jpg"])], Action::MoveToTemplate { template: format!(r"{PICS}\{{year}}\{{month}}\{{day}}") });
         // 23:30 UTC on the 7th is 02:30 on the 8th in Turkey (+3)
@@ -533,6 +539,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn template_kind_name_and_ext() {
         let mut r = rule(1, "r", vec![], Action::MoveToTemplate { template: r"D:\Arşiv\{kind}\{ext}\{name}".into() });
         r.conditions = vec![ext(&["jpg", "pdf"])];
@@ -551,6 +559,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn rename_by_template() {
         // (the new name must fall out of the rule's reach, or it is a loop: see below)
         let starts = |s: &str| Condition::Name { op: NameOp::StartsWith, text: s.into() };
@@ -566,6 +576,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn recycle_is_a_step_without_a_name() {
         let r = rule(1, "eski", vec![Condition::Age { field: crate::organize::rule::TimeField::Modified, cmp: Cmp::Greater, days: 30 }], Action::Recycle);
         let p = run(&[r], &[file(DL, "a.tmpl")], &[]);
@@ -574,6 +586,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn names_are_made_unique_against_the_disk_and_the_plan() {
         let r = rule(1, "r", vec![ext(&["jpg"])], to_pics());
         let facts = [file(DL, "a.jpg"), file(&format!(r"{DL}\eski"), "a.jpg"), file(DL, "b.jpg"), file(&format!(r"{DL}\eski"), "b.jpg"), file(DL, "c.jpg")];
@@ -605,6 +619,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn turkish_letters_clash_like_the_file_system_does() {
         let r = rule(1, "r", vec![], Action::MoveTo { folder: PathBuf::from(r"D:\Hedef") });
         // "ILIK.txt" and "ılık.txt" and "ilik.txt" are one name for the comparison
@@ -615,6 +631,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_file_already_in_place_makes_no_step() {
         let r = rule(1, "r", vec![ext(&["jpg"])], Action::MoveTo { folder: PathBuf::from(r"C:\Users\Ali\Downloads") });
         let p = run(&[r], &[file(DL, "a.jpg")], &[&format!(r"{DL}\a.jpg")]);
@@ -628,6 +646,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn files_outside_the_folder_and_in_subfolders() {
         let r = rule(1, "r", vec![], to_pics());
         let facts = [file(DL, "a.jpg"), file(&format!(r"{DL}\alt"), "b.jpg"), file(r"C:\Users\Ali\Documents", "c.jpg"), file(r"C:\Users\Ali\Downloads2", "d.jpg")];
@@ -640,6 +660,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn hidden_partial_and_app_files_are_never_touched() {
         let r = rule(1, "hepsi", vec![], to_pics());
         let mut hidden = file(DL, "desktop.ini");
@@ -657,6 +679,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn shortcuts_to_the_destination_stay() {
         let r = rule(1, "r", vec![], to_pics());
         let mut link = file(DL, "Resimler.lnk");
@@ -677,6 +701,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_rename_that_matches_its_own_rule_loops() {
         // IMG_1.jpg -> Foto_IMG_1.jpg still contains "img"
         let r = rule(1, "önek", vec![Condition::Name { op: NameOp::Contains, text: "img".into() }], Action::Rename { template: "Foto_{name}.{ext}".into() });
@@ -691,6 +717,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_destination_inside_the_folder_loops_only_when_it_would_be_seen_again() {
         let inside = Action::MoveTo { folder: PathBuf::from("Resimler") };
         // subfolders off: Downloads\Resimler is not looked at
@@ -726,6 +754,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_rule_in_another_folder_does_not_count_for_the_loop_check() {
         let r = rule(1, "r", vec![ext(&["jpg"])], to_pics());
         let mut other = rule(2, "resim klasörü", vec![ext(&["jpg"])], Action::MoveTo { folder: PathBuf::from(r"D:\x") });
@@ -737,6 +767,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn very_long_names_keep_their_extension_when_numbered() {
         let long = "ğ".repeat(250);
         let name = format!("{long}.jpg");
@@ -760,6 +792,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_path_that_is_too_long_is_skipped_not_made() {
         let deep = format!(r"D:\{}", "klasör\\".repeat(45));
         let r = rule(1, "r", vec![], Action::MoveTo { folder: PathBuf::from(deep) });
@@ -774,6 +808,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn trailing_dots_and_spaces_from_templates_are_trimmed() {
         // no extension: "{name}.{ext}" would end with a dot
         let r = rule(1, "r", vec![Condition::Name { op: NameOp::StartsWith, text: "read".into() }], Action::Rename { template: "yeni {name}.{ext}".into() });
@@ -792,6 +828,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn reserved_device_names_are_skipped() {
         // a file called nul.txt (it can exist through a \\?\ path) must not make a folder "nul"
         let r = rule(1, "r", vec![], Action::MoveToTemplate { template: r"D:\{name}".into() });
@@ -809,6 +847,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_file_without_a_date_cannot_go_to_a_dated_folder() {
         let r = rule(1, "r", vec![], Action::MoveToTemplate { template: r"D:\{year}".into() });
         let mut f = file(DL, "a.jpg");
@@ -822,6 +862,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn unusable_rules_are_reported_and_left_out() {
         let mut bad = rule(1, "adsız dizin", vec![], Action::MoveTo { folder: PathBuf::new() });
         bad.name = "kötü".into();
@@ -841,6 +883,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn any_join_and_kind_conditions() {
         let mut r = rule(1, "medya", vec![Condition::Kind { kinds: vec![FileKind::Image, FileKind::Video] }, Condition::Name { op: NameOp::EndsWith, text: ".zip".into() }], to_pics());
         r.join = Join::Any;
@@ -849,6 +893,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn the_live_example_shows_the_destination_without_conditions_or_loops() {
         let exists = |_: &Path| true;
         let protected = prot();
@@ -869,6 +915,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn files_are_not_sent_into_protected_places() {
         for dest in [r"C:\Windows\Temp", r"C:\Program Files\Foo", r"C:\Users\Ali\AppData\Roaming\Foo", r"C:\Users\Ali\AppData\Roaming\rustyfiles\x"] {
             let r = rule(1, "r", vec![ext(&["jpg"])], Action::MoveTo { folder: PathBuf::from(dest) });
@@ -883,6 +931,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_step_remembers_how_the_file_looked() {
         let r = rule(1, "r", vec![], to_pics());
         let mut f = file(DL, "a.jpg");
@@ -892,6 +942,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn many_files_stay_cheap() {
         let r = rule(1, "r", vec![ext(&["jpg"])], Action::MoveToTemplate { template: format!(r"{PICS}\{{year}}\{{month}}") });
         let facts: Vec<FileFact> = (0..20_000).map(|i| file(DL, &format!("foto {i}.jpg"))).collect();
