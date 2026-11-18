@@ -657,13 +657,13 @@ fn remember_search(history: &mut Vec<String>, q: &str) {
 }
 
 /// The folder a tab's terminal button would open, if the tab has one: a real disk folder,
-/// not an archive, not FTP or a network share.
+/// not an archive, not FTP or a network share. Called for every tab on every frame, so it
+/// looks at the path only and never asks the disk (a stat of a share that went away blocks
+/// the UI thread for seconds); a folder merely named like an archive goes without the button.
 pub(crate) fn tab_terminal_dir(loc: &Location) -> Option<PathBuf> {
-    loc.path()
-        .filter(|p| p.is_dir()
-            && !rf_win::ftp::is_ftp(p)
-            && rf_win::network::server_root(p).is_none())
-        .map(Path::to_path_buf)
+    let Location::Path(p) = loc else { return None };
+    (!rf_win::ftp::is_ftp(p) && rf_win::network::server_root(p).is_none() && !crate::nav_touch::may_hold_archive(p))
+        .then(|| p.clone())
 }
 
 impl Workspace {
@@ -4842,6 +4842,8 @@ mod tests {
         assert!(tab_terminal_dir(&Location::Settings).is_none());
         let dir = std::env::temp_dir();
         assert_eq!(tab_terminal_dir(&Location::Path(dir.clone())), Some(dir));
+        assert!(tab_terminal_dir(&Location::Path(PathBuf::from(r"C:\Downloads\photos.zip\2024"))).is_none());
+        assert!(tab_terminal_dir(&Location::Path(PathBuf::from("ftp://example.com/pub"))).is_none());
     }
 }
 

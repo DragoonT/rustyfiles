@@ -2531,8 +2531,12 @@ impl FolderView {
             return;
         }
         if plain && double {
-            self.select_only(vi);
-            self.open_entry(ei, cx);
+            // with "open with a single click" the first release has opened it already: a double click out of habit must not start
+            // a program twice
+            if !single {
+                self.select_only(vi);
+                self.open_entry(ei, cx);
+            }
             return;
         }
         if ev.modifiers.shift {
