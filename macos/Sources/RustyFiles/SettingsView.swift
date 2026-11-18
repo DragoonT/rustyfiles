@@ -37,11 +37,15 @@ enum SettingsPage: CaseIterable {
 enum SettingsRow {
     case section(String)
     case card(title: String, detail: String?, icon: String?, control: SettingsControl)
+    /// A card with a list under it (startup pages, folder aliases, rules…): each entry with a
+    /// Remove button, the card's own buttons at its right.
+    case list(title: String, detail: String?, icon: String?, entries: [(String, String?)], empty: String, remove: ((Int) -> Void)?, buttons: [(String, () -> Void)])
 
     var searchText: String {
         switch self {
         case .section: ""
         case .card(let title, let detail, _, _): (title + " " + (detail ?? "")).lowercased()
+        case .list(let title, let detail, _, _, _, _, _): (title + " " + (detail ?? "")).lowercased()
         }
     }
 }
@@ -80,7 +84,7 @@ enum SettingsContent {
                         get: { AppSettings.dateStyle.rawValue },
                         set: { AppSettings.dateStyle = AppSettings.DateStyle(rawValue: $0) ?? .app },
                         examples: { ItemDisplay.example(AppSettings.DateStyle(rawValue: $0) ?? .app) })),
-            ]
+            ] + startupRows() + tabRows() + menuRows()
         case .appearance:
             return [
                 .card(
@@ -136,6 +140,9 @@ enum SettingsContent {
                     icon: "eye-off",
                     control: .toggle(get: { AppSettings.showHidden }, set: { AppSettings.showHidden = $0 })),
                 .card(
+                    title: String(localized: "Show file extensions"), detail: nil, icon: "file-type",
+                    control: .toggle(get: { AppSettings.showExtensions }, set: { AppSettings.showExtensions = $0 })),
+                .card(
                     title: String(localized: "Show thumbnails"), detail: String(localized: "Pictures of the files themselves in the Tiles layout."), icon: "image",
                     control: .toggle(get: { AppSettings.showThumbnails }, set: { AppSettings.showThumbnails = $0 })),
                 .section(String(localized: "Behaviours")),
@@ -146,7 +153,7 @@ enum SettingsContent {
                         options: [("binary", String(localized: "Binary")), ("decimal", String(localized: "Decimal"))],
                         get: { AppSettings.decimalSizes ? "decimal" : "binary" },
                         set: { AppSettings.decimalSizes = $0 == "decimal" })),
-            ]
+            ] + fileBehaviourRows()
         case .ferry:
             return FerryPage.rows()
         case .about:
@@ -165,6 +172,166 @@ enum SettingsContent {
                     ])),
             ]
         }
+    }
+}
+
+// MARK: - General and Files rows
+
+extension SettingsContent {
+    static func startupRows() -> [SettingsRow] {
+        var rows: [SettingsRow] = [
+            .section(String(localized: "Startup")),
+            .card(
+                title: String(localized: "When rustyfiles starts"), detail: nil, icon: "power",
+                control: .choice(
+                    options: [
+                        ("resume", String(localized: "Continue where you left off")), ("home", String(localized: "Open a new tab")),
+                        ("pages", String(localized: "Open specific pages")),
+                    ],
+                    get: { AppSettings.startup.rawValue },
+                    set: { AppSettings.startup = AppSettings.Startup(rawValue: $0) ?? .home })),
+        ]
+        if AppSettings.startup == .pages {
+            let pages = AppSettings.startupPages
+            rows.append(.list(
+                title: String(localized: "Specific pages"), detail: nil, icon: "list",
+                entries: pages.map { p in
+                    p == BrowserTab.homeURL.absoluteString ? (String(localized: "Home"), nil) : (FileManager.default.displayName(atPath: p), p)
+                },
+                empty: String(localized: "Home opens when the list is empty."),
+                remove: { i in AppSettings.startupPages.remove(at: i) },
+                buttons: [
+                    (String(localized: "Add folder…"), {
+                        let panel = NSOpenPanel()
+                        panel.canChooseDirectories = true
+                        panel.canChooseFiles = false
+                        panel.allowsMultipleSelection = true
+                        if panel.runModal() == .OK { AppSettings.startupPages += panel.urls.map(\.path) }
+                    }),
+                    (String(localized: "Use current tabs"), {
+                        guard let w = AppDelegate.shared.frontController else { return }
+                        AppSettings.startupPages = w.tabAddresses.filter { !$0.hasPrefix("rustyfiles:settings") }
+                    }),
+                ]))
+        }
+        return rows
+    }
+
+    static func tabRows() -> [SettingsRow] {
+        [
+            .section(String(localized: "Tabs and windows")),
+            .card(
+                title: String(localized: "A new tab opens"), detail: nil, icon: "square-plus",
+                control: .choice(
+                    options: [("home", String(localized: "Home")), ("current", String(localized: "The current folder"))],
+                    get: { AppSettings.newTabOpens }, set: { AppSettings.newTabOpens = $0 })),
+            .card(
+                title: String(localized: "Always switch to a newly opened tab"), detail: nil, icon: "arrow-right-left",
+                control: .toggle(get: { AppSettings.switchToNewTab }, set: { AppSettings.switchToNewTab = $0 })),
+            .card(
+                title: String(localized: "Folders opened from other apps open in a new window"),
+                detail: String(localized: "Off: they open as a tab in the front window."), icon: "app-window",
+                control: .toggle(get: { AppSettings.externalInNewWindow }, set: { AppSettings.externalInNewWindow = $0 })),
+        ]
+    }
+
+    static func menuRows() -> [SettingsRow] {
+        [.section(String(localized: "Right-click menu"))] + AppSettings.MenuCommand.allCases.map { c in
+            .card(
+                title: c.title, detail: nil, icon: nil,
+                control: .toggle(get: { AppSettings.shows(c) }, set: { AppSettings.setShows(c, $0) }))
+        }
+    }
+
+    static func fileBehaviourRows() -> [SettingsRow] {
+        let aliases = AppSettings.folderAliases.sorted { $0.key < $1.key }
+        return [
+            .card(
+                title: String(localized: "Open items with a single click"), detail: nil, icon: "mouse-pointer-click",
+                control: .choice(
+                    options: [("never", String(localized: "Never")), ("folders", String(localized: "Folders only")), ("always", String(localized: "Always"))],
+                    get: { AppSettings.singleClick.rawValue },
+                    set: { AppSettings.singleClick = AppSettings.SingleClick(rawValue: $0) ?? .never })),
+            .card(
+                title: String(localized: "Open folders in a new tab"), detail: nil, icon: "square-plus",
+                control: .toggle(get: { AppSettings.foldersInNewTab }, set: { AppSettings.foldersInNewTab = $0 })),
+            .card(
+                title: String(localized: "Ask before deleting"), detail: nil, icon: "trash",
+                control: .choice(
+                    options: [
+                        ("never", String(localized: "Never")), ("permanent", String(localized: "Only when deleting for good")),
+                        ("always", String(localized: "Always")),
+                    ],
+                    get: { AppSettings.confirmDelete.rawValue },
+                    set: { AppSettings.confirmDelete = AppSettings.ConfirmDelete(rawValue: $0) ?? .permanent })),
+            .card(
+                title: String(localized: "Warn when an extension changes"), detail: nil, icon: "triangle-alert",
+                control: .toggle(get: { AppSettings.warnExtensionChange }, set: { AppSettings.warnExtensionChange = $0 })),
+            .card(
+                title: String(localized: "Double-click empty space to go up"), detail: nil, icon: "arrow-up",
+                control: .toggle(get: { AppSettings.doubleClickEmptyGoesUp }, set: { AppSettings.doubleClickEmptyGoesUp = $0 })),
+            .card(
+                title: String(localized: "Select the folder you came from when going up"), detail: nil, icon: "corner-left-up",
+                control: .toggle(get: { AppSettings.upSelectsPrevious }, set: { AppSettings.upSelectsPrevious = $0 })),
+            .card(
+                title: String(localized: "Run programs from the address bar"),
+                detail: String(localized: "Text that is not a place is looked for as an app (Terminal, Visual Studio Code…) or a program (code, make…) and started in the open folder."),
+                icon: "square-terminal",
+                control: .toggle(get: { AppSettings.addressCommands }, set: { AppSettings.addressCommands = $0 })),
+            .section(String(localized: "Archives")),
+            .card(
+                title: String(localized: "Open archives like folders"), detail: String(localized: "Off: archives open in the app macOS chooses for them."), icon: "archive",
+                control: .toggle(get: { AppSettings.archivesAsFolders }, set: { AppSettings.archivesAsFolders = $0 })),
+            .card(
+                title: String(localized: "Open the folder after extracting"), detail: String(localized: "The new folder opens in a new tab."), icon: "folder-output",
+                control: .toggle(get: { AppSettings.openAfterExtract }, set: { AppSettings.openAfterExtract = $0 })),
+            .section(String(localized: "Sizes")),
+            .card(
+                title: String(localized: "Calculate folder sizes"), detail: String(localized: "The Size column shows each folder’s total, worked out in the background."),
+                icon: "calculator",
+                control: .toggle(get: { AppSettings.autoFolderSizes }, set: { AppSettings.autoFolderSizes = $0 })),
+            .card(
+                title: String(localized: "Show the size on disk for folders"), detail: nil, icon: "hard-drive",
+                control: .toggle(get: { AppSettings.folderSizeOnDisk }, set: { AppSettings.folderSizeOnDisk = $0 })),
+            .section(String(localized: "Folder aliases")),
+            .list(
+                title: String(localized: "Aliases"), detail: String(localized: "Type @name in the address bar to go to the folder."), icon: "at-sign",
+                entries: aliases.map { ("@" + $0.key, $0.value) },
+                empty: String(localized: "No aliases yet"),
+                remove: { i in
+                    var a = AppSettings.folderAliases
+                    a.removeValue(forKey: aliases[i].key)
+                    AppSettings.folderAliases = a
+                },
+                buttons: [(String(localized: "Add…"), { FolderAliasPrompt.add() })]),
+        ]
+    }
+}
+
+/// Asks for a folder and a name for it.
+@MainActor
+enum FolderAliasPrompt {
+    static func add() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.prompt = String(localized: "Choose")
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Name for “\(folder.lastPathComponent)”")
+        alert.informativeText = String(localized: "You’ll type it after @ in the address bar.")
+        let field = NSTextField(string: folder.lastPathComponent.lowercased().replacingOccurrences(of: " ", with: "-"))
+        field.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: String(localized: "Add"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "@"))
+        guard !name.isEmpty else { return }
+        var a = AppSettings.folderAliases
+        a[name] = folder.path
+        AppSettings.folderAliases = a
     }
 }
 
@@ -669,8 +836,15 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
     /// Another window or the menu changed a setting: the controls show the new values and the
     /// cards redraw (the page is not rebuilt, so a slider being dragged stays in hand).
     @objc private func settingsChanged(_ note: Notification) {
-        // the material decides which rows the page has
-        if AppSettings.changedKey(note) == "material" { return rebuild() }
+        // a setting can decide which rows a page has: rebuilt, unless a slider or the colour
+        // panel is being dragged
+        if !["surfaceWash", "accent"].contains(AppSettings.changedKey(note)) {
+            let y = scroll.contentView.bounds.origin.y
+            rebuild()
+            layoutSubtreeIfNeeded()
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            return
+        }
         refreshers.forEach { $0() }
         func redraw(_ v: NSView) {
             v.needsDisplay = true
@@ -768,6 +942,10 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
                     refreshers.append(update)
                 }
                 v = card
+            case .list(let title, let detail, let icon, let entries, let empty, let remove, let buttons):
+                v = SettingsListCard(
+                    title: title, detail: detail, icon: icon, entries: entries, empty: empty, remove: remove,
+                    control: buttons.isEmpty ? nil : ControlRow(buttons.map { PlainButton($0.0, action: $0.1) }))
             }
             content.addSubview(v)
             rows.append((row, v))
@@ -819,6 +997,8 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
             let h: CGFloat
             if let card = v as? SettingsCardView {
                 h = card.height(for: width)
+            } else if let list = v as? SettingsListCard {
+                h = list.height(for: width)
             } else {
                 h = 20 + 20 + 4
             }
@@ -1068,5 +1248,87 @@ enum FerryPage {
         panel.message = String(localized: "Choose the folder for received files")
         panel.directoryURL = FerrySettings.effectiveInbox
         if panel.runModal() == .OK, let url = panel.url { FerrySettings.inbox = url.path }
+    }
+}
+
+/// A card with a list of entries under its title (settings_view.rs: startup pages, aliases…).
+@MainActor
+final class SettingsListCard: FlippedView {
+    private let head: SettingsCardView
+    private let entries: [(String, String?)]
+    private let empty: String
+    private var rowViews: [(NSTextField, NSTextField?, PlainButton?)] = []
+    private static let rowH: CGFloat = 40
+
+    init(title: String, detail: String?, icon: String?, entries: [(String, String?)], empty: String, remove: ((Int) -> Void)?, control: NSView?) {
+        head = SettingsCardView(title: title, detail: detail, icon: icon, control: control)
+        self.entries = entries
+        self.empty = empty
+        super.init(frame: .zero)
+        addSubview(head)
+        let shown = entries.isEmpty ? [(empty, nil)] : entries
+        for (i, e) in shown.enumerated() {
+            let t = NSTextField(labelWithString: e.0)
+            t.font = Metrics.textSm
+            t.lineBreakMode = .byTruncatingMiddle
+            t.textColor = entries.isEmpty ? .secondaryLabelColor : .labelColor
+            addSubview(t)
+            var sub: NSTextField?
+            if let s = e.1 {
+                let f = NSTextField(labelWithString: s)
+                f.font = Metrics.textXs
+                f.textColor = .secondaryLabelColor
+                f.lineBreakMode = .byTruncatingMiddle
+                addSubview(f)
+                sub = f
+            }
+            var button: PlainButton?
+            if let remove, !entries.isEmpty {
+                let b = PlainButton(String(localized: "Remove")) { remove(i) }
+                addSubview(b)
+                button = b
+            }
+            rowViews.append((t, sub, button))
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    func height(for width: CGFloat) -> CGFloat { head.height(for: width) + CGFloat(rowViews.count) * Self.rowH + 6 }
+
+    override func layout() {
+        super.layout()
+        let hh = head.height(for: bounds.width)
+        head.frame = NSRect(x: 0, y: 0, width: bounds.width, height: hh)
+        var y = hh
+        for (t, sub, b) in rowViews {
+            let bw = b?.intrinsicContentSize.width ?? 0
+            b?.frame = NSRect(x: bounds.width - 16 - bw, y: y + (Self.rowH - 28) / 2, width: bw, height: 28)
+            let tw = bounds.width - 16 - 52 - (bw > 0 ? bw + 16 : 0)
+            if let sub {
+                t.frame = NSRect(x: 52, y: y + 3, width: tw, height: 18)
+                sub.frame = NSRect(x: 52, y: y + 21, width: tw, height: 16)
+            } else {
+                t.frame = NSRect(x: 52, y: y + (Self.rowH - 18) / 2, width: tw, height: 18)
+            }
+            y += Self.rowH
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        // one card: the head draws its own box; the list continues it below with dividers
+        let p = Palette.of(self)
+        let hh = head.height(for: bounds.width)
+        let r = NSRect(x: 0.5, y: hh - 8, width: bounds.width - 1, height: bounds.height - hh + 8 - 0.5)
+        let path = NSBezierPath(roundedRect: r, xRadius: Metrics.radius, yRadius: Metrics.radius)
+        p.hover.setFill()
+        path.fill()
+        p.border.setStroke()
+        path.stroke()
+        p.divider.setFill()
+        for i in 0..<rowViews.count {
+            NSRect(x: 16, y: hh + CGFloat(i) * Self.rowH, width: bounds.width - 32, height: 1).fill()
+        }
     }
 }

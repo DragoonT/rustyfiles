@@ -80,6 +80,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         table.list = self
         table.target = self
         table.doubleAction = #selector(doubleClicked(_:))
+        table.action = #selector(singleClicked(_:))
         table.setDraggingSourceOperationMask([.copy, .move], forLocal: false)
         table.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
         table.registerForDraggedTypes([.fileURL])
@@ -749,6 +750,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         guard !urls.isEmpty else { return }
         // in the Trash, "delete" is for good, asked first
         if TrashBin.contains(url) { return deleteImmediately(urls) }
+        if AppSettings.confirmDelete == .always, !Self.confirmTrash(urls) { return }
         // the row after the last one goes away keeps the cursor near where it was
         let next = (selectedRows.last ?? 0) + 1
         let after = folder.flatMap { f in next < Int(f.count()) ? f.item(row: UInt32(next))?.name : nil }
@@ -799,6 +801,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if viewMode == .details { table.scrollRowToVisible(row) }
         guard let field = nameField(row, make: true) else { return }
         renaming = (row, item.name)
+        field.stringValue = item.name
         field.isEditable = true
         field.isSelectable = true
         field.isBordered = true
@@ -823,10 +826,36 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         field.delegate = nil
         focus()
         guard commit, !newName.isEmpty, newName != original, let url else {
-            field.stringValue = original
+            field.stringValue = display.name(original: original)
             return
         }
         let from = url.appendingPathComponent(original)
+        let oldExt = (original as NSString).pathExtension, newExt = (newName as NSString).pathExtension
+        let isFile = !((try? from.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false)
+        if isFile, AppSettings.warnExtensionChange, oldExt.lowercased() != newExt.lowercased() {
+            let alert = NSAlert()
+            alert.messageText = newExt.isEmpty
+                ? String(localized: "Remove the extension “.\(oldExt)”?")
+                : String(localized: "Change the extension to “.\(newExt)”?")
+            alert.informativeText = String(localized: "If you change it, the file may open in another app, or not at all.")
+            alert.addButton(withTitle: newExt.isEmpty ? String(localized: "Remove") : String(localized: "Use .\(newExt)"))
+            alert.addButton(withTitle: oldExt.isEmpty ? String(localized: "Cancel") : String(localized: "Keep .\(oldExt)"))
+            if alert.runModal() != .alertFirstButtonReturn {
+                if !oldExt.isEmpty, oldExt.lowercased() != newExt.lowercased() {
+                    // keep the old extension: the new name with it
+                    let stem = newExt.isEmpty ? newName : (newName as NSString).deletingPathExtension
+                    let kept = stem + "." + oldExt
+                    if kept != original {
+                        run { try FileOps.rename(from, to: kept) } done: { [weak self] made in
+                            FileUndo.shared.record(.moves([(from: made, to: from)]), title: String(localized: "Rename"))
+                            self?.reloadSelecting([made.lastPathComponent])
+                        }
+                    }
+                }
+                field.stringValue = display.name(original: original)
+                return
+            }
+        }
         run { try FileOps.rename(from, to: newName) } done: { [weak self] made in
             FileUndo.shared.record(.moves([(from: made, to: from)]), title: String(localized: "Rename"))
             self?.reloadSelecting([made.lastPathComponent])
@@ -851,9 +880,24 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     // MARK: opening
 
     @objc private func doubleClicked(_ sender: Any?) {
-        guard table.clickedRow >= 0 else { return }
+        guard table.clickedRow >= 0 else {
+            // Files › Double-click empty space to go up
+            if AppSettings.doubleClickEmptyGoesUp { onGoUp?() }
+            return
+        }
         openSelected()
     }
+
+    /// Files › Open items with a single click: a plain click (no ⌘ or ⇧) opens.
+    @objc private func singleClicked(_ sender: Any?) {
+        let row = table.clickedRow
+        guard row >= 0, AppSettings.singleClick != .never, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty,
+            let item = folder?.item(row: UInt32(row))
+        else { return }
+        if AppSettings.singleClick == .always || (item.isDir && !display.isPackage(item)) { openSelected() }
+    }
+
+    var onGoUp: (() -> Void)?
 
     func openSelected() {
         guard let folder else { return }
@@ -863,8 +907,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             guard let item = folder.item(row: UInt32(row)), let path = folder.childPath(row: UInt32(row)) else { continue }
             let u = URL(fileURLWithPath: path)
             if item.isDir && !display.isPackage(item) {
-                if rows.count == 1 { onOpenFolder?(u) }
-            } else if archive == nil && rows.count == 1 && isArchive(path: path) {
+                if rows.count == 1 { (AppSettings.foldersInNewTab && archive == nil ? onOpenInNewTab : onOpenFolder)?(u) }
+            } else if archive == nil && rows.count == 1 && AppSettings.archivesAsFolders && isArchive(path: path) {
                 // archives open like folders, as on Windows
                 onOpenFolder?(u)
             } else if archive == nil && rows.count == 1 && DiskImages.isDiskImage(u) {
@@ -905,8 +949,20 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// compress / extract / tags / Ferry, Terminal; macOS adds its Services at the end.
     // MARK: the Trash
 
+    /// Files › Ask before deleting › Always: asked before the Trash too.
+    static func confirmTrash(_ urls: [URL]) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = urls.count == 1
+            ? String(localized: "Move “\(urls[0].lastPathComponent)” to the Trash?")
+            : String(localized: "Move these \(urls.count) items to the Trash?")
+        alert.informativeText = String(localized: "You can put them back with ⌘Z.")
+        alert.addButton(withTitle: String(localized: "Move to Trash"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     func deleteImmediately(_ urls: [URL]) {
-        guard TrashBin.confirmDelete(urls, everything: false, in: card.window) else { return }
+        guard AppSettings.confirmDelete == .never || TrashBin.confirmDelete(urls, everything: false, in: card.window) else { return }
         run { try TrashBin.delete(urls) } done: { [weak self] in self?.reloadSelecting([]) }
     }
 
@@ -945,6 +1001,27 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         b.separator()
         b.add(String(localized: "Empty Trash…"), "trash") { [weak self] in self?.emptyTrash() }
         return b.done()
+    }
+
+    /// General › Right-click menu: the commands turned off leave the item menu.
+    private static func pruned(_ menu: NSMenu) -> NSMenu {
+        typealias C = AppSettings.MenuCommand
+        let titles: [C: [String]] = [
+            .newTab: [String(localized: "Open in new tab")], .newWindow: [String(localized: "Open in new window")],
+            .copyPath: [String(localized: "Copy item path")], .alias: [String(localized: "Make alias")],
+            .pin: [String(localized: "Pin to sidebar"), String(localized: "Unpin from sidebar")],
+            .archive: [String(localized: "Compress"), String(localized: "Extract")], .tags: [String(localized: "Tags")],
+            .ferry: [String(localized: "Send with Ferry")], .terminal: [String(localized: "Open in Terminal")],
+        ]
+        let hidden = Set(C.allCases.filter { !AppSettings.shows($0) }.flatMap { titles[$0] ?? [] })
+        for item in menu.items.reversed() where hidden.contains(item.title) { menu.removeItem(item) }
+        // no separator twice in a row, or last
+        var last: NSMenuItem?
+        for item in menu.items {
+            if item.isSeparatorItem, last?.isSeparatorItem ?? true { menu.removeItem(item) } else { last = item }
+        }
+        while menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
+        return menu
     }
 
     private func itemsMenu() -> NSMenu {
@@ -1036,13 +1113,22 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             b.separator()
             b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(u) }
         }
-        return b.done()
+        return Self.pruned(b.done())
     }
 
     /// Extract ▸ for archive files: here, smartly, to a folder of its own, to a place chosen.
     private func extractMenu(_ urls: [URL], _ m: MenuBuilder) {
         let run = { [weak self] (work: @escaping @Sendable () throws -> [String]) in
-            self?.run(work) { names in self?.reloadSelecting(names) }
+            self?.run(work) { names in
+                self?.reloadSelecting(names)
+                // Files › Open the folder after extracting
+                guard AppSettings.openAfterExtract, let dir = urls.first?.deletingLastPathComponent() else { return }
+                for n in names {
+                    let u = dir.appendingPathComponent(n)
+                    var isDir: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: u.path, isDirectory: &isDir), isDir.boolValue { self?.onOpenInNewTab?(u) }
+                }
+            }
         }
         m.add(String(localized: "Extract here"), "folder-down") {
             run {
@@ -1199,7 +1285,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                 return c
             }()
             cell.lead = ListGeometry.lead + 8
-            cell.textField?.stringValue = item.name
+            cell.textField?.stringValue = display.name(item)
             cell.textField?.textColor = Palette.of(tableView).text
             cell.imageView?.image = display.icon(item, path: folder.childPath(row: UInt32(row)) ?? "")
             cell.alphaValue = item.hidden ? 0.5 : 1
@@ -1223,10 +1309,14 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             if item.isDir && archive != nil {
                 cell.text = ""
             } else if item.isDir && !display.isPackage(item), let path = folder.childPath(row: UInt32(row)) {
-                if let size = Self.folderSizes[path] {
+                if let size = Self.folderSizes[Self.sizeKey(path)] {
                     cell.text = formatSize(bytes: size)
-                } else if Self.sizing.contains(path) {
+                } else if Self.sizing.contains(Self.sizeKey(path)) {
                     cell.text = String(localized: "Calculating…")
+                } else if AppSettings.autoFolderSizes {
+                    // Files › Calculate folder sizes: asked for as soon as the row shows
+                    cell.text = String(localized: "Calculating…")
+                    DispatchQueue.main.async { [weak self] in self?.calculateSize(path) }
                 } else {
                     cell.text = String(localized: "Calculate size")
                     cell.isLink = true
@@ -1240,17 +1330,45 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         return cell
     }
 
+    /// Sizes on disk and in bytes are kept apart.
+    private static func sizeKey(_ path: String) -> String { (AppSettings.folderSizeOnDisk ? "disk:" : "") + path }
+
+    /// Two folders are measured at a time, so a long list doesn't swamp the disk.
+    private static let sizeQueue: OperationQueue = {
+        let q = OperationQueue()
+        q.maxConcurrentOperationCount = 2
+        q.qualityOfService = .utility
+        return q
+    }()
+
     private func calculateSize(_ path: String) {
-        Self.sizing.insert(path)
+        let key = Self.sizeKey(path)
+        guard !Self.sizing.contains(key), Self.folderSizes[key] == nil else { return }
+        Self.sizing.insert(key)
         reloadSize(of: path)
-        Task.detached(priority: .utility) {
-            let size = folderSize(path: path)
-            await MainActor.run { [weak self] in
-                Self.sizing.remove(path)
-                Self.folderSizes[path] = size
-                self?.reloadSize(of: path)
+        let onDisk = AppSettings.folderSizeOnDisk
+        Self.sizeQueue.addOperation {
+            let size = onDisk ? Self.sizeOnDisk(path) : folderSize(path: path)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
+                    Self.sizing.remove(key)
+                    Self.folderSizes[key] = size
+                    self?.reloadSize(of: path)
+                }
             }
         }
+    }
+
+    /// What a folder takes on the disk (allocated blocks, clones and sparse files as they are).
+    nonisolated private static func sizeOnDisk(_ path: String) -> UInt64 {
+        let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .isDirectoryKey]
+        guard let walker = FileManager.default.enumerator(at: URL(fileURLWithPath: path), includingPropertiesForKeys: keys, options: [], errorHandler: { _, _ in true })
+        else { return 0 }
+        var total: UInt64 = 0
+        for case let u as URL in walker {
+            total += UInt64((try? u.resourceValues(forKeys: Set(keys)).totalFileAllocatedSize) ?? 0)
+        }
+        return total
     }
 
     private func reloadSize(of path: String) {
@@ -1365,7 +1483,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         item.path = path
         let tile = item.tile
-        tile.label.stringValue = entry.name
+        tile.label.stringValue = display.name(entry)
         tile.label.textColor = Palette.of(collectionView).text
         tile.alphaValue = entry.hidden ? 0.6 : 1
         tile.isSelected = item.isSelected

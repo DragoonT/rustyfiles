@@ -256,6 +256,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         list.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
         list.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
         list.onRefresh = { [weak self] in self?.refresh(nil) }
+        list.onGoUp = { [weak self] in self?.goUp(nil) }
         sidebar.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
         sidebar.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
         titleBar.strip.menuFor = { [weak self] i in self?.tabMenu(i) }
@@ -270,6 +271,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     // MARK: tabs
 
     private func refreshTabs() {
+        defer { AppDelegate.shared.saveSession() }
         titleBar.strip.tabs = tabs.map(\.info)
         titleBar.strip.active = active
         titleBar.needsLayout = true
@@ -308,8 +310,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     @objc func newTab(_ sender: Any?) {
         saveTabState()
-        // a new tab opens Home, as on Windows
-        let t = BrowserTab(url: BrowserTab.homeURL)
+        // General › A new tab opens: Home, or the folder of the tab it opens from
+        let here = tab.isPage ? BrowserTab.homeURL : tab.url
+        let t = BrowserTab(url: AppSettings.newTabOpens == "current" ? here : BrowserTab.homeURL)
         tabs.insert(t, at: active + 1)
         active += 1
         navBar.omnibar.end()
@@ -325,13 +328,32 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private var closedTabs: [URL] = []
 
     /// A new tab right after the active one, showing `url`.
-    func openTab(_ url: URL) {
+    func openTab(_ url: URL, activate: Bool? = nil) {
         saveTabState()
         let t = BrowserTab(url: url)
         tabs.insert(t, at: active + 1)
+        // General › Always switch to a newly opened tab; off: it waits behind the current one
+        guard activate ?? AppSettings.switchToNewTab else {
+            refreshTabs()
+            return
+        }
         active += 1
         navBar.omnibar.end()
         load(t)
+        refreshTabs()
+    }
+
+    /// The tabs' addresses, in order (paths, or rustyfiles:home / :settings).
+    var tabAddresses: [String] { tabs.map { Sessions.string($0.url) } }
+    var activeTab: Int { active }
+
+    /// Opens these addresses as the window's tabs (a saved session).
+    func restore(_ addresses: [String], active a: Int) {
+        let urls = addresses.compactMap(Sessions.url)
+        guard !urls.isEmpty else { return }
+        tabs = urls.map { BrowserTab(url: $0) }
+        active = min(max(a, 0), tabs.count - 1)
+        load(tab)
         refreshTabs()
     }
 
@@ -570,10 +592,20 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private func submitPath(_ text: String) {
         // "home" is the Home page, as on Windows
         if text.trimmingCharacters(in: .whitespaces).lowercased() == "home" { return goHome(nil) }
+        // "@name": a folder alias (Files › Folder aliases), "@name/sub" goes inside it
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("@") {
+            let parts = trimmed.dropFirst().split(separator: "/", maxSplits: 1).map(String.init)
+            if let first = parts.first, let target = AppSettings.folderAliases[first] ?? AppSettings.folderAliases.first(where: { $0.key.lowercased() == first.lowercased() })?.value {
+                return submitPath(parts.count > 1 ? target + "/" + parts[1] : target)
+            }
+        }
         let path = (text.trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath
         let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : tab.url.appendingPathComponent(path)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            // Files › Run programs from the address bar
+            if AppSettings.addressCommands, !tab.isPage, AddressCommand.run(text, in: tab.url) { return }
             showError(String(localized: "“\(text)” can’t be found."))
             return
         }
@@ -622,7 +654,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         if tab.isHome { return }
         let parent = tab.url.deletingLastPathComponent()
         guard parent.path != tab.url.path else { return }
-        navigate(to: parent, selecting: tab.url.lastPathComponent)
+        navigate(to: parent, selecting: AppSettings.upSelectsPrevious ? tab.url.lastPathComponent : nil)
     }
 
     @objc func goHome(_ sender: Any?) { navigate(to: BrowserTab.homeURL) }
