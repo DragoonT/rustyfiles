@@ -1532,7 +1532,6 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 .collect()
         }),
     ));
-    v.push(card(p, L::PanelTop, t!("Araç çubuğunu göster"), Some("Ctrl+Shift+B"), sw("toolbar", p, s.show_toolbar, |s, v| s.show_toolbar = v)));
     v.push(card(p, L::PanelBottom, t!("Durum çubuğunu göster"), None, sw("statusbar", p, s.show_statusbar, |s, v| s.show_statusbar = v)));
     v.push(card(p, L::PanelRight, t!("Önizleme paneli"), Some("Alt+P"), sw("preview", p, s.preview_open, |s, v| s.preview_open = v)));
     v.push(card(
@@ -1594,6 +1593,8 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     let (bar_hidden, bar_extra) = (s.toolbar_hidden.clone(), s.toolbar_extra.clone());
     let commands = s.toolbar_commands.clone();
+    // the switch and the buttons it shows stand together (issue 111)
+    v.push(card(p, L::PanelTop, t!("Araç çubuğunu göster"), Some("Ctrl+Shift+B"), sw("toolbar", p, s.show_toolbar, |s, v| s.show_toolbar = v)));
     v.push(expander(
         "toolbar-buttons",
         p,

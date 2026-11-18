@@ -2424,6 +2424,18 @@ impl FolderView {
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_1().text_xs().text_center())
                         .into_any_element(),
+                    // a right-to-left name is split into its two lines here (issue 115: wrapped by GPUI, a long Persian name came out one
+                    // letter per line)
+                    None if crate::rtl::has_rtl(&e.name) => div()
+                        .w_full()
+                        .text_xs()
+                        .text_center()
+                        .when(dim, |d| d.opacity(0.6))
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
+                        .children(rtl_grid_lines(&row_name(e, show_ext, renamed.as_ref()), tile_w - px(12.), window).into_iter().map(|line| {
+                            div().w_full().whitespace_nowrap().overflow_hidden().text_ellipsis().child(crate::rtl::display_text(&line))
+                        }))
+                        .into_any_element(),
                     None => div()
                         .w_full()
                         .text_xs()
@@ -4914,6 +4926,34 @@ struct RowPress {
 /// scrollbars (Windows 10's "Automatically hide scroll bars" off).
 pub(crate) fn scrollbar_mode() -> ScrollbarMode {
     if rf_win::scrollbars::always_shown() { ScrollbarMode::Always } else { ScrollbarMode::Scrolling }
+}
+
+/// The grid's name of a right-to-left name in at most two lines (issue 115): GPUI wraps such a run after every letter, so the name is
+/// split here, at a space, by measured width; each line is then drawn unwrapped (the last one ends in "…" when it is still too long).
+/// One line when it fits or has no space to split at.
+fn rtl_grid_lines(name: &str, avail: Pixels, window: &Window) -> Vec<String> {
+    let style = window.text_style();
+    let size = rems(0.75).to_pixels(window.rem_size());
+    let width = |s: &str| {
+        let text: SharedString = s.to_string().into();
+        let run = style.to_run(text.len());
+        window.text_system().shape_line(text, size, &[run], None).width
+    };
+    if width(name) <= avail {
+        return vec![name.to_string()];
+    }
+    let words: Vec<&str> = name.split(' ').collect();
+    let mut take = 0;
+    for i in 1..words.len() {
+        if width(&words[..i].join(" ")) > avail {
+            break;
+        }
+        take = i;
+    }
+    if take == 0 {
+        return vec![name.to_string()];
+    }
+    vec![words[..take].join(" "), words[take..].join(" ")]
 }
 
 /// How long the pointer rests on an item before "Select on hover" selects it: the system's hover time (Control Panel › Mouse;
