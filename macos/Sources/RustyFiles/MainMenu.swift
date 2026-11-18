@@ -62,6 +62,8 @@ enum MainMenu {
         m.addItem(item(String(localized: "Open"), #selector(W.openSelection(_:)), key(NSDownArrowFunctionKey)))
         m.addItem(item(String(localized: "Quick Look"), #selector(W.toggleQuickLook(_:)), "y"))
         m.addItem(.separator())
+        m.addItem(item(String(localized: "Properties"), #selector(W.showProperties(_:)), "i"))
+        m.addItem(.separator())
         m.addItem(item(String(localized: "Close Tab"), #selector(W.closeTab(_:)), "w"))
         m.addItem(item(String(localized: "Reopen Closed Tab"), #selector(W.reopenClosedTab(_:)), "t", [.command, .shift]))
         m.addItem(item(String(localized: "Close Window"), #selector(NSWindow.performClose(_:)), "w", [.command, .shift]))

@@ -166,6 +166,12 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     @objc func togglePreviewPane(_ sender: Any?) { previewShown.toggle() }
 
+    func showProperties() {
+        guard archive == nil else { return }
+        let urls = selectedURLs
+        if !urls.isEmpty { PropertiesWindow.show(urls) } else if let url { PropertiesWindow.show([url]) }
+    }
+
     /// The pane shows the focused item: the last one clicked, else the first selected.
     func updatePreview() {
         guard previewShown, archive == nil, folder != nil else { return previewPane.show(nil) }
@@ -563,7 +569,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         commandBar.delete.isEnabled = any && writable
         commandBar.paste.isEnabled = writable && Clipboard.hasFiles
         commandBar.new.isEnabled = writable
-        commandBar.properties.isEnabled = false
+        commandBar.properties.isEnabled = writable
         commandBar.preview.isEnabled = settingsView == nil && homeView == nil
         commandBar.preview.isOn = previewShown
         commandBar.view.icon = viewMode == .details ? "list" : "layout-grid"
@@ -585,6 +591,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         b.paste.action = { [weak self] _ in self?.pasteItems() }
         b.rename.action = { [weak self] _ in self?.beginRename() }
         b.preview.action = { [weak self] _ in self?.togglePreviewPane(nil) }
+        b.properties.action = { [weak self] _ in self?.showProperties() }
         b.delete.action = { [weak self] _ in self?.trashSelected() }
         b.share.action = { [weak self] btn in
             guard let self else { return }
@@ -891,6 +898,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             ("text-cursor-input", String(localized: "Rename (F2)"), items.count == 1, { [weak self] in self?.beginRename() }),
             ("share-2", String(localized: "Share"), true, { [weak self] in self?.shareSelected() }),
             ("trash", String(localized: "Move to Trash (⌘⌫)"), true, { [weak self] in self?.trashSelected() }),
+            ("wrench", String(localized: "Properties (⌘I)"), true, { PropertiesWindow.show(urls) }),
         ])
 
         b.add(String(localized: "Open"), "square-arrow-out-up-right", key: "\r", mods: []) { [weak self] in self?.openSelected() }
@@ -1011,7 +1019,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// folder's own commands, Terminal.
     private func backgroundMenu() -> NSMenu {
         let b = MenuBuilder()
-        b.quick([("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles && folder != nil, { [weak self] in self?.pasteItems() })])
+        b.quick([
+            ("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles && folder != nil, { [weak self] in self?.pasteItems() }),
+            ("wrench", String(localized: "Properties (⌘I)"), url != nil, { [weak self] in if let u = self?.url { PropertiesWindow.show([u]) } }),
+        ])
         b.sub(String(localized: "Layout"), "layout-grid") { m in
             m.add(String(localized: "Details"), "list", key: "1", checked: viewMode == .details) { [weak self] in self?.setViewMode(.details) }
             m.add(String(localized: "Tiles"), "layout-grid", key: "2", checked: viewMode == .tiles) { [weak self] in self?.setViewMode(.tiles) }

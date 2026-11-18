@@ -23,6 +23,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let row = ProcessInfo.processInfo.environment["RF_DEMO_PREVIEW"].flatMap(Int.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoPreview(row: row) }
         }
+        // RF_DEMO_PROPS=path[:page] (development): a Properties window on that path
+        if let spec = ProcessInfo.processInfo.environment["RF_DEMO_PROPS"] {
+            let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                PropertiesWindow.show([URL(fileURLWithPath: parts[0])], page: parts.count > 1 ? Int(parts[1]) ?? 0 : 0)
+            }
+        }
         if let which = ProcessInfo.processInfo.environment["RF_DEMO_MENU"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoMenu(item: which == "item") }
         }

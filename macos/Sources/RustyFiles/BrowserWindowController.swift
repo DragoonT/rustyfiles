@@ -708,6 +708,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func showDetails(_ sender: Any?) { list.setViewMode(.details) }
     @objc func showTiles(_ sender: Any?) { list.setViewMode(.tiles) }
 
+    /// Properties of the selection, or of the folder shown when nothing is selected (⌘I).
+    @objc func showProperties(_ sender: Any?) { list.showProperties() }
+
     @objc func togglePreviewPane(_ sender: Any?) {
         list.togglePreviewPane(nil)
         // every window follows
@@ -743,6 +746,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(toggleHidden(_:)):
             item.state = AppSettings.showHidden ? .on : .off
             return true
+        case #selector(showProperties(_:)): return list.archiveIsNil && list.url != nil
         case #selector(togglePreviewPane(_:)):
             item.title = list.previewShown ? String(localized: "Hide Preview") : String(localized: "Show Preview")
             return true

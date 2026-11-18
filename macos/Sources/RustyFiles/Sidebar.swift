@@ -250,6 +250,7 @@ final class SidebarListView: HoverView {
         }
         b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([url]) }
         b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(url) }
+        b.add(String(localized: "Properties"), "wrench", key: "i") { PropertiesWindow.show([url]) }
         if item.kind == .drive {
             let values = try? url.resourceValues(forKeys: [.volumeIsEjectableKey, .volumeIsRemovableKey, .volumeIsLocalKey, .volumeIsInternalKey])
             let ejectable = values?.volumeIsEjectable == true || values?.volumeIsRemovable == true || values?.volumeIsLocal == false
