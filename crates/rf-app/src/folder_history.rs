@@ -39,6 +39,10 @@ struct Store {
 static STORE: LazyLock<Mutex<Store>> = LazyLock::new(|| Mutex::new(Store::default()));
 
 fn file() -> Option<PathBuf> {
+    // tests load folders too: they must not read or write the user's own history
+    if cfg!(test) {
+        return None;
+    }
     crate::settings::local_data_dir().map(|d| d.join(FILE))
 }
 
@@ -71,7 +75,9 @@ pub fn record(loc: &Location) {
         return;
     }
     let mut st = STORE.lock();
-    touch(loaded(&mut st), p, now_ms());
+    // only the list in memory: this runs on the UI thread at every folder load, the first one during the start, so the file is read
+    // by the save below on its worker (a visit made before that merges with what the file holds)
+    touch(&mut st.visits, p, now_ms());
     if !st.save_pending {
         st.save_pending = true;
         std::thread::spawn(|| {
@@ -124,11 +130,13 @@ fn merge(a: Vec<Visit>, b: Vec<Visit>) -> Vec<Visit> {
 
 fn save() {
     let Some(path) = file() else { return };
+    // what another process wrote meanwhile is kept; the file is read before the lock is taken, so a visit never waits for the disk
+    let on_disk = read_file();
     let mut st = STORE.lock();
     st.save_pending = false;
-    // what another process wrote meanwhile is kept
-    let all = merge(st.visits.clone(), read_file());
+    let all = merge(st.visits.clone(), on_disk);
     st.visits = all.clone();
+    st.loaded = true;
     drop(st);
     let Ok(json) = serde_json::to_vec(&all) else { return };
     if let Some(dir) = path.parent() {
