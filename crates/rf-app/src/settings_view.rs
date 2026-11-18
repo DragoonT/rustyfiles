@@ -480,6 +480,10 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
                 }),
         );
     }
+    // (Ferry's page on screen shows this PC to everyone while it is: `ferry::page_seen`)
+    if query.is_empty() && page == Page::Ferry {
+        crate::ferry::page_seen(window.window_handle(), cx);
+    }
     let (title, body): (String, Vec<AnyElement>) = if query.is_empty() {
         (PAGES.iter().find(|x| x.0 == page).map(|x| page_title(x.0, crate::i18n::t(x.2))).unwrap_or_default(), build_page(page, p, &s, cx))
     } else {

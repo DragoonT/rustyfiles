@@ -52,6 +52,20 @@ pub fn place(hwnd: isize, r: [i32; 4]) {
     }
 }
 
+/// Moves/resizes the window (physical pixels) without restoring, activating or reordering it: a popup that grows to its content
+/// while another program keeps the keyboard.
+pub fn place_quietly(hwnd: isize, r: [i32; 4]) {
+    use windows::Win32::UI::WindowsAndMessaging::{SWP_NOOWNERZORDER, SWP_NOZORDER};
+    let h = HWND(hwnd as *mut _);
+    unsafe {
+        let _ = SetWindowPos(h, None, r[0], r[1], r[2] - r[0], r[3] - r[1], SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_NOACTIVATE);
+    }
+}
+
+pub fn is_minimized(hwnd: isize) -> bool {
+    unsafe { windows::Win32::UI::WindowsAndMessaging::IsIconic(HWND(hwnd as *mut _)).as_bool() }
+}
+
 pub fn maximize(hwnd: isize) {
     use windows::Win32::UI::WindowsAndMessaging::{SW_MAXIMIZE, ShowWindow};
     unsafe {

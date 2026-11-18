@@ -238,6 +238,19 @@ impl Nearby {
         }
     }
 
+    /// Looks for the devices again now and announces this one again: the list starts over and fills as they answer (for a device
+    /// that came up and was missed). Discovery otherwise runs all the time; nothing to do without it.
+    pub fn refresh(&self) {
+        self.inner.peers.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        self.inner.notify_peers();
+        if let Some(d) = self.inner.discovery.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+            && let Err(e) = d.browse_again(Arc::downgrade(&self.inner))
+        {
+            log::warn!("nearby: cannot look again: {e:#}");
+        }
+        self.inner.advertise();
+    }
+
     /// The devices seen on the network now, the trusted ones first.
     pub fn peers(&self) -> Vec<Peer> {
         self.inner.peer_list()

@@ -15,6 +15,7 @@ use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui_kit::assets::IconName as L;
 use gpui_kit::component::{Icon, h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_nearby::{Config, NearbyListener, NetStatus, Nearby, Offer, Peer, TransferResult, Visibility};
 
@@ -122,7 +123,21 @@ pub struct Ferry {
     in_toast: std::collections::HashSet<String>,
     window: Option<WindowHandle<QuestionView>>,
     events: Option<mpsc::UnboundedSender<Ev>>,
+    /// Settings > Ferry is on screen: see [`page_seen`].
+    viewing: Option<Viewing>,
 }
+
+/// Settings > Ferry on screen, in `window`, last drawn at `seen`; `restore` is the visibility to go back to when it goes.
+struct Viewing {
+    window: AnyWindowHandle,
+    seen: std::time::Instant,
+    restore: Option<FerryVisibility>,
+}
+
+/// The user picked a visibility in the list: a choice that stays when the page goes.
+static CHOSEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The page counts as gone when it was not drawn for this long (its window is redrawn every two seconds while it is open).
+const PAGE_GONE: Duration = Duration::from_secs(5);
 
 impl Global for Ferry {}
 
@@ -208,6 +223,7 @@ fn stop(cx: &mut App) {
         rf_win::toast_post::remove(crate::installer::APP_ID, &key);
     }
     f.incoming.clear();
+    f.viewing = None;
     // (the cards' workers see their channel go and end as cancelled)
     f.transfers.clear();
     let window = f.window.take();
@@ -280,6 +296,10 @@ fn on_event(ev: Ev, cx: &mut App) {
             cx.refresh_windows();
         }
         Ev::Visibility(v) => {
+            // (the ten-minute fall-back is not undone when the page goes)
+            if let Some(view) = cx.global_mut::<Ferry>().viewing.as_mut() {
+                view.restore = None;
+            }
             let vis = match v {
                 Visibility::Off => FerryVisibility::Off,
                 Visibility::Trusted => FerryVisibility::Trusted,
@@ -565,20 +585,38 @@ fn open_window(cx: &mut App) {
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: crate::theme::window_material(WindowBackgroundAppearance::Blurred),
+        // the app's own popup look: on HyperGlass when that is the backdrop (as the quick search), else Windows' acrylic
+        window_background: crate::theme::popup_material(glassy(cx)),
         ..Default::default()
     };
-    match cx.open_window(opts, |window, cx| {
+    let glass = glassy(cx);
+    match cx.open_window(opts, move |window, cx| {
         let hwnd = crate::look::window::hwnd_of(window);
         rf_win::window::set_dark_mode(hwnd, Palette::for_window(window).dark);
-        cx.new(|_| QuestionView)
+        cx.new(|cx| QuestionView::new(glass, window, cx))
     }) {
         Ok(w) => cx.global_mut::<Ferry>().window = Some(w),
         Err(e) => log::warn!("ferry: question window: {e:#}"),
     }
 }
 
-struct QuestionView;
+/// HyperGlass is the app's backdrop (and this Windows has the materials it is drawn with).
+fn glassy(cx: &App) -> bool {
+    crate::settings::materials_available() && cx.try_global::<Settings>().is_some_and(|s| s.backdrop_in_use() == crate::settings::BackdropPref::Glass)
+}
+
+struct QuestionView {
+    glass: Option<crate::glass_watch::PopupGlass>,
+    _glass_watch: Option<Task<()>>,
+}
+
+impl QuestionView {
+    fn new(glassy: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let glass = glassy.then(|| crate::glass_watch::PopupGlass::start_panel(crate::look::window::hwnd_of(window), Palette::for_window(window).dark));
+        let watch = glass.is_some().then(|| crate::glass_watch::watch(cx, |this: &mut Self| this.glass.as_mut()));
+        QuestionView { glass, _glass_watch: watch }
+    }
+}
 
 impl Render for QuestionView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -592,11 +630,12 @@ impl Render for QuestionView {
         let waiting = questions.len() - 1;
         let (title, lines, code, no, yes) = texts(&q);
         let (qn, qy) = (q.clone(), q);
-        v_flex()
-            .size_full()
+        // over glass a wash, or the plain fill until the glass runs (never a see-through window with nothing behind it)
+        let fill = self.glass.as_ref().map(|g| crate::glass_watch::panel_fill(p.dark, g.fallback())).or_else(|| crate::theme::popup_fill(&p));
+        let content = v_flex()
+            .w_full()
             .p_4()
             .gap_1()
-            .text_color(p.text)
             .child(
                 h_flex()
                     .gap_2()
@@ -605,16 +644,43 @@ impl Render for QuestionView {
                     .child(div().text_xs().text_color(p.text_secondary).child("Ferry"))
                     .children((waiting > 0).then(|| div().ml_auto().text_xs().text_color(p.text_secondary).child(format!("+{waiting}")))),
             )
-            .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).truncate().child(title))
-            .children(lines.into_iter().map(|line| div().text_xs().text_color(p.text_secondary).overflow_hidden().child(line)))
-            .children(code.map(|c| div().text_2xl().font_weight(FontWeight::BOLD).child(c)))
+            .child(div().mt_1().text_sm().font_weight(FontWeight::SEMIBOLD).whitespace_normal().child(title))
+            .children(lines.into_iter().map(|line| div().text_xs().text_color(p.text_secondary).whitespace_normal().child(line)))
+            .children(code.map(|c| div().mt_1().text_2xl().font_weight(FontWeight::BOLD).child(c)))
             .child(
                 h_flex()
-                    .mt_auto()
+                    .mt_3()
                     .gap_2()
                     .justify_end()
                     .child(crate::settings_view::button("ferry-no", &p, no, move |_, cx| answer(&qn, false, cx)))
                     .child(primary("ferry-yes", &p, yes, move |_, cx| answer(&qy, true, cx))),
+            );
+        // the window is as tall as what it says, growing upwards (its bottom stays above the taskbar)
+        let vh = window.viewport_size().height;
+        div()
+            .size_full()
+            .when_some(fill, |d, f| d.bg(f))
+            .text_color(p.text)
+            .child(
+                div().relative().w_full().child(content).child(
+                    canvas(
+                        move |b, window, _| {
+                            let h = b.size.height.ceil();
+                            if (f32::from(h) - f32::from(vh)).abs() > 1. {
+                                window.on_next_frame(move |w, _| {
+                                    let hwnd = crate::look::window::hwnd_of(w);
+                                    let new_h = (f32::from(h) * w.scale_factor()).round() as i32;
+                                    if let Some((r, _)) = rf_win::window::rect(hwnd) {
+                                        rf_win::window::place_quietly(hwnd, [r[0], r[3] - new_h, r[2], r[3]]);
+                                    }
+                                });
+                            }
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .inset_0(),
+                ),
             )
             .into_any_element()
     }
@@ -708,7 +774,10 @@ pub(crate) fn page(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 (FerryVisibility::Trusted, t!("Yalnız güvenilir cihazlar").to_string()),
                 (FerryVisibility::Everyone, t!("Herkes (10 dakika)").to_string()),
             ],
-            |s, v| s.ferry_visibility = v,
+            |s, v| {
+                s.ferry_visibility = v;
+                CHOSEN.store(true, Ordering::Relaxed);
+            },
         ),
     ));
     let name = name_of(s);
@@ -769,12 +838,28 @@ pub(crate) fn page(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
 
     v.push(section(p, t!("Yakındaki cihazlar")));
+    let everyone = s.ferry_visibility == FerryVisibility::Everyone;
+    v.push(card(
+        p,
+        L::RefreshCw,
+        t!("Cihazları yeniden ara"),
+        Some(t!("Ağdaki cihazlar kendiliğinden bulunur; yeni açılan bir cihaz görünmüyorsa yeniden arayın.")),
+        h_flex()
+            .gap_2()
+            .children((!everyone).then(|| button("ferry-everyone", p, t!("10 dakika herkese görün"), |_, cx| settings::update(cx, |s| s.ferry_visibility = FerryVisibility::Everyone))))
+            .child(button("ferry-refresh", p, t!("Yenile"), |_, cx| {
+                if let Some(n) = cx.global::<Ferry>().nearby.clone() {
+                    n.refresh();
+                }
+            }))
+            .into_any_element(),
+    ));
     if peers.is_empty() {
         v.push(card(
             p,
             L::Wifi,
             t!("Henüz cihaz yok"),
-            Some(t!("Diğer cihazda rustyfiles açık ve Ferry'si açık olmalı. Eşleşmemiş bir cihaz yalnızca görünürlüğü Herkes iken listelenir.")),
+            Some(t!("Diğer cihazda rustyfiles açık ve Ferry'si açık olmalı. İki cihaz henüz eşleşmediyse en az birinin görünürlüğü Herkes olmalı.")),
             div().into_any_element(),
         ));
     }
@@ -811,6 +896,66 @@ pub(crate) fn page(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         }
     }
     v
+}
+
+/// Settings > Ferry was drawn in `window`. While it is on screen this PC is seen by everyone, the way a Mac is while Finder's AirDrop
+/// window is open (the user asked for both platforms): the first drawing remembers the visibility and sets Everyone, and when the
+/// page has not been drawn for [`PAGE_GONE`] (left, another tab, the window closed or minimized) the remembered value comes back, if
+/// it is still Everyone. A choice in the list, or the ten-minute fall-back, is kept instead.
+pub(crate) fn page_seen(window: AnyWindowHandle, cx: &mut App) {
+    if !cx.has_global::<Ferry>() || cx.global::<Ferry>().nearby.is_none() {
+        return;
+    }
+    let vis = cx.global::<Settings>().ferry_visibility;
+    let f = cx.global_mut::<Ferry>();
+    if let Some(view) = f.viewing.as_mut() {
+        view.seen = std::time::Instant::now();
+        view.window = window;
+        if CHOSEN.swap(false, Ordering::Relaxed) {
+            view.restore = None;
+        }
+        return;
+    }
+    CHOSEN.store(false, Ordering::Relaxed);
+    let restore = (vis != FerryVisibility::Everyone).then_some(vis);
+    f.viewing = Some(Viewing { window, seen: std::time::Instant::now(), restore });
+    if restore.is_some() {
+        // (not while the page is drawn)
+        cx.defer(|cx| settings::update(cx, |s| s.ferry_visibility = FerryVisibility::Everyone));
+    }
+    // the heartbeat: the page's window is redrawn now and then, and the page that is no longer drawn is gone
+    cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor().timer(Duration::from_secs(2)).await;
+            let over = cx.update(|cx| {
+                let Some(view) = cx.has_global::<Ferry>().then(|| cx.global::<Ferry>().viewing.as_ref().map(|v| (v.window, v.seen))).flatten() else {
+                    return true;
+                };
+                let minimized = view.0.update(cx, |_, w, _| rf_win::window::is_minimized(crate::look::window::hwnd_of(w))).unwrap_or(true);
+                if minimized || view.1.elapsed() > PAGE_GONE {
+                    page_gone(cx);
+                    return true;
+                }
+                let _ = view.0.update(cx, |_, w, _| w.refresh());
+                false
+            });
+            if over {
+                break;
+            }
+        }
+    })
+    .detach();
+}
+
+fn page_gone(cx: &mut App) {
+    let Some(view) = cx.global_mut::<Ferry>().viewing.take() else { return };
+    let chosen = CHOSEN.swap(false, Ordering::Relaxed);
+    if let Some(back) = view.restore
+        && !chosen
+        && cx.global::<Settings>().ferry_visibility == FerryVisibility::Everyone
+    {
+        settings::update(cx, |s| s.ferry_visibility = back);
+    }
 }
 
 fn os_name(os: &str) -> &str {

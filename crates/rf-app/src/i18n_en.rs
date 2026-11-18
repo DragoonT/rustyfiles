@@ -2026,4 +2026,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Kod:", "Code:"),
     ("dosya gönderdi", "sent you files"),
     ("Görmek için tıklayın", "Click to see them"),
+    ("Cihazları yeniden ara", "Look for devices again"),
+    ("Ağdaki cihazlar kendiliğinden bulunur; yeni açılan bir cihaz görünmüyorsa yeniden arayın.", "Devices on the network are found by themselves; if one that just came on doesn't show up, look again."),
+    ("10 dakika herkese görün", "Show to everyone for 10 minutes"),
+    ("Diğer cihazda rustyfiles açık ve Ferry'si açık olmalı. İki cihaz henüz eşleşmediyse en az birinin görünürlüğü Herkes olmalı.", "rustyfiles must be open on the other device, with Ferry on. If the two haven't paired yet, at least one must be visible to Everyone."),
 ];

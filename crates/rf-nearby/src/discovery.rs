@@ -35,24 +35,16 @@ impl Discovery {
     pub fn start(inner: Weak<Inner>) -> anyhow::Result<Discovery> {
         let daemon = ServiceDaemon::new()?;
         let rx = daemon.browse(SERVICE)?;
-        std::thread::Builder::new().name("rf-nearby-mdns".into()).spawn(move || {
-            while let Ok(event) = rx.recv() {
-                let Some(inner) = inner.upgrade() else { break };
-                match event {
-                    ServiceEvent::ServiceResolved(info) => {
-                        if let Some(seen) = parse(&info) {
-                            inner.peer_seen(seen);
-                        }
-                    }
-                    ServiceEvent::ServiceRemoved(_, fullname) => {
-                        let id = fullname.split('.').next().unwrap_or_default().to_string();
-                        inner.peer_gone(&id);
-                    }
-                    _ => {}
-                }
-            }
-        })?;
+        listen(rx, inner)?;
         Ok(Discovery { daemon, registered: Mutex::new(None) })
+    }
+
+    /// Browses anew: the network is asked again at once (the daemon otherwise asks again only now and then). The thread of the
+    /// earlier browse ends with it.
+    pub fn browse_again(&self, inner: Weak<Inner>) -> anyhow::Result<()> {
+        let _ = self.daemon.stop_browse(SERVICE);
+        let rx = self.daemon.browse(SERVICE)?;
+        listen(rx, inner)
     }
 
     /// Advertises this device (or stops, with `vis` None). Replaces an earlier advertisement.
@@ -79,6 +71,28 @@ impl Discovery {
         let _ = self.advertise("", "", "", 0, None);
         let _ = self.daemon.shutdown();
     }
+}
+
+fn listen(rx: mdns_sd::Receiver<ServiceEvent>, inner: Weak<Inner>) -> anyhow::Result<()> {
+    std::thread::Builder::new().name("rf-nearby-mdns".into()).spawn(move || {
+        while let Ok(event) = rx.recv() {
+            let Some(inner) = inner.upgrade() else { break };
+            match event {
+                ServiceEvent::ServiceResolved(info) => {
+                    if let Some(seen) = parse(&info) {
+                        inner.peer_seen(seen);
+                    }
+                }
+                ServiceEvent::ServiceRemoved(_, fullname) => {
+                    let id = fullname.split('.').next().unwrap_or_default().to_string();
+                    inner.peer_gone(&id);
+                }
+                ServiceEvent::SearchStopped(_) => break,
+                _ => {}
+            }
+        }
+    })?;
+    Ok(())
 }
 
 fn parse(info: &ServiceInfo) -> Option<Seen> {
