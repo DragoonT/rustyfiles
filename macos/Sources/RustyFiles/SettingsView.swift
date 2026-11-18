@@ -114,27 +114,7 @@ enum SettingsContent {
                 .card(title: String(localized: "Accent colour"), detail: nil, icon: "paintbrush", control: .accent),
             ] + appearanceExtraRows()
         case .layout:
-            return [
-                .card(
-                    title: String(localized: "Default layout"), detail: nil, icon: "layout-grid",
-                    control: .choice(
-                        options: [("details", String(localized: "Details")), ("tiles", String(localized: "Tiles"))],
-                        get: { AppSettings.defaultView.rawValue },
-                        set: { AppSettings.defaultView = ViewMode(rawValue: $0) ?? .details })),
-                .section(String(localized: "Sort")),
-                .card(
-                    title: String(localized: "Sort by"), detail: nil, icon: "arrow-up-down",
-                    control: .choice(
-                        options: ListColumn.allCases.map { ($0.rawValue, $0.title) },
-                        get: { AppSettings.sortKey.rawValue },
-                        set: { AppSettings.sortKey = ListColumn(rawValue: $0) ?? .name })),
-                .card(
-                    title: String(localized: "Descending"), detail: nil, icon: "arrow-down-wide-narrow",
-                    control: .toggle(get: { AppSettings.descending }, set: { AppSettings.descending = $0 })),
-                .card(
-                    title: String(localized: "Folders first"), detail: nil, icon: "folders",
-                    control: .toggle(get: { AppSettings.foldersFirst }, set: { AppSettings.foldersFirst = $0 })),
-            ]
+            return layoutRows()
         case .files:
             return [
                 .section(String(localized: "View")),

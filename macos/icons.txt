@@ -93,3 +93,5 @@ move-vertical
 paint-bucket
 panel-top
 panel-bottom
+folder-sync
+group

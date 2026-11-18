@@ -42,6 +42,13 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var sortKey: ListColumn = AppSettings.sortKey
     var ascending = !AppSettings.descending
     var foldersFirst = AppSettings.foldersFirst
+    /// Settings › Layout › Group by (or the folder's own, when each folder keeps its layout).
+    var groupBy = AppSettings.groupBy
+    /// Each row's group header, for the first row of every group (details only).
+    private var groupTitles: [Int: String] = [:]
+    /// Tags and Git states of the folder shown, by name (filled when their columns are on).
+    private var tagsByName: [String: String] = [:]
+    private var gitByName: [String: String] = [:]
     var showHidden = AppSettings.showHidden { didSet { if showHidden != oldValue { rearrange() } } }
     var filter = "" { didSet { if filter != oldValue { rearrange() } } }
 
@@ -57,13 +64,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     override init() {
         super.init()
-        for col in ListColumn.allCases {
-            let c = NSTableColumn(identifier: .init(col.rawValue))
-            c.width = col.defaultWidth + (col == .name ? ListGeometry.lead : 0) + (col == .size ? geometry.trail : 0)
-            c.minWidth = col == .name ? 120 + ListGeometry.lead : 56
-            c.resizingMask = col == .name ? .autoresizingMask : .userResizingMask
-            table.addTableColumn(c)
-        }
+        rebuildColumns()
         table.headerView = nil
         table.rowHeight = Metrics.rowHeight
         table.intercellSpacing = .zero
@@ -117,7 +118,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         tileScroll.scrollerStyle = .overlay
 
         header.table = table
-        header.onSort = { [weak self] col in self?.sort(by: col) }
+        header.onSort = { [weak self] col in if col.sortable { self?.sort(by: col) } }
         header.onResize = { [weak self] col, w in
             ColumnWidths.set(col, w)
             self?.applyColumnWidths()
@@ -321,13 +322,17 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let keep = selectedRows
         let wasFocused = isFocused
         viewMode = mode
-        UserDefaults.standard.set(mode.rawValue, forKey: "viewMode")
+        // one layout everywhere: it becomes the default; else this folder remembers it
+        if AppSettings.syncLayout { UserDefaults.standard.set(mode.rawValue, forKey: "viewMode") }
+        rememberLayout()
         applyViewMode()
         reloadItems()
         selectRows(keep, scrollToFirst: true)
         if wasFocused { focus() }
         selectionChanged()
     }
+
+    func applyViewModeQuietly() { applyViewMode() }
 
     private func applyViewMode() {
         let isTiles = viewMode == .tiles
@@ -359,6 +364,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     private func reloadItems() {
+        computeGroups()
         switch viewMode {
         case .details: table.reloadData()
         case .tiles: tiles.reloadData()
@@ -447,6 +453,15 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             } else {
                 viewMode = AppSettings.defaultView
             }
+        case "columns":
+            rebuildColumns()
+            if let url { loadColumnData(url) }
+            applyColumnWidths()
+            reloadItems()
+        case "groupBy":
+            groupBy = AppSettings.groupBy
+            rearrange()
+            rememberLayout()
         case "showScrollBars":
             applyScrollBars()
         case "showCommandBar", "showStatusBar", "previewPosition", "toolbarHidden", "toolbarAdded":
@@ -474,8 +489,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         self.folder = folder
         self.url = url
         self.archive = archive
-        folder.arrange(column: sortKey.sort, ascending: ascending, foldersFirst: foldersFirst, showHidden: showHidden, filter: filter)
+        arrange(folder)
         hideSettings()
+        loadColumnData(url)
         message.isHidden = true
         if card.subviews.contains(privacyButton) { privacyButton.isHidden = true }
         header.sortKey = sortKey
@@ -483,6 +499,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if !same { ThumbnailCache.shared.forget(under: url.path) }
         applyColumnWidths()
         reloadItems()
+        adaptLayout(for: url)
         let rows = IndexSet(names.compactMap { folder.rowOf(name: $0).map(Int.init) })
         selectRows(rows, scrollToFirst: y == nil)
         if let y {
@@ -527,7 +544,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     private func rearrange() {
         guard let folder else { return }
         let keep = selectedNames
-        folder.arrange(column: sortKey.sort, ascending: ascending, foldersFirst: foldersFirst, showHidden: showHidden, filter: filter)
+        arrange(folder)
         reloadItems()
         let rows = IndexSet(keep.compactMap { folder.rowOf(name: $0).map(Int.init) })
         selectRows(rows, scrollToFirst: true)
@@ -547,6 +564,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         header.sortKey = sortKey
         header.ascending = ascending
         rearrange()
+        rememberLayout()
     }
 
     var selectedNames: [String] {
@@ -568,7 +586,11 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             listLens.isHidden = true
             return
         }
-        let r = table.rect(ofRow: lensRow)
+        var r = table.rect(ofRow: lensRow)
+        if groupTitles[lensRow] != nil {
+            r.origin.y += GroupMetrics.header
+            r.size.height -= GroupMetrics.header
+        }
         let box = NSRect(x: 6, y: r.minY, width: table.bounds.width - 6 - (6 + geometry.gutter), height: r.height)
         listLens.move(to: box, animated: animated && !table.inLiveResize)
     }
@@ -1299,6 +1321,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let v = FileRowView()
         v.geometry = geometry
+        v.groupTitle = groupTitles[row]
         v.onLens = AppSettings.isGlass && tableView.selectedRowIndexes.count == 1 && tableView.selectedRowIndexes.first == row
         return v
     }
@@ -1315,6 +1338,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                 return c
             }()
             cell.lead = ListGeometry.lead + 8
+            cell.topInset = groupTitles[row] == nil ? 0 : GroupMetrics.header
             cell.textField?.stringValue = display.name(item)
             cell.textField?.textColor = Palette.of(tableView).text
             cell.imageView?.image = display.icon(item, path: folder.childPath(row: UInt32(row)) ?? "")
@@ -1328,12 +1352,16 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             return c
         }()
         cell.trailPad = 8 + (isLast ? geometry.trail : 0)
+        cell.topInset = groupTitles[row] == nil ? 0 : GroupMetrics.header
         cell.alignRight = col == .size
         cell.isLink = false
         cell.onClick = nil
         cell.alphaValue = item.hidden ? 0.5 : 1
         switch col {
         case .modified: cell.text = display.date(item.modifiedMs)
+        case .created: cell.text = item.createdMs > 0 ? display.date(item.createdMs) : ""
+        case .tags: cell.text = tagsByName[item.name] ?? ""
+        case .git: cell.text = gitByName[item.name] ?? ""
         case .type: cell.text = display.kind(item)
         case .size:
             if item.isDir && archive != nil {
@@ -1407,8 +1435,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         guard URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL == url.standardizedFileURL,
             let row = folder.rowOf(name: name)
         else { return }
-        if viewMode == .details {
-            table.reloadData(forRowIndexes: [Int(row)], columnIndexes: [table.tableColumns.count - 1])
+        let col = table.column(withIdentifier: .init(ListColumn.size.rawValue))
+        if viewMode == .details, col >= 0 {
+            table.reloadData(forRowIndexes: [Int(row)], columnIndexes: [col])
         }
     }
 
@@ -1656,5 +1685,120 @@ extension FileListController {
         for s in [scroll, tileScroll] {
             s.hasVerticalScroller = AppSettings.showScrollBars
         }
+    }
+}
+
+// MARK: - layout per folder, grouping, extra columns
+
+extension FileListController {
+    /// The table's columns: Name, then those turned on (Settings › Layout › Details columns).
+    func rebuildColumns() {
+        for c in table.tableColumns { table.removeTableColumn(c) }
+        let cols = [ListColumn.name] + AppSettings.columns
+        for (i, col) in cols.enumerated() {
+            let c = NSTableColumn(identifier: .init(col.rawValue))
+            c.width = col.defaultWidth + (col == .name ? ListGeometry.lead : 0) + (i == cols.count - 1 ? geometry.trail : 0)
+            c.minWidth = col == .name ? 120 + ListGeometry.lead : 56
+            c.resizingMask = col == .name ? .autoresizingMask : .userResizingMask
+            table.addTableColumn(c)
+        }
+        header.needsDisplay = true
+    }
+
+    /// Sorts the folder; a grouping sorts by what it groups by (folders stay first only where
+    /// that keeps the groups whole).
+    func arrange(_ folder: Folder) {
+        let column = groupBy.column?.sort ?? sortKey.sort
+        let first = [.date, .name].contains(groupBy) ? false : foldersFirst
+        let asc = groupBy == .date ? false : (groupBy == .none ? ascending : (groupBy.column == sortKey ? ascending : groupBy.column?.startsAscending ?? true))
+        folder.arrange(column: column, ascending: asc, foldersFirst: first, showHidden: showHidden, filter: filter)
+        // the header marks the column the list is really sorted by
+        header.sortKey = groupBy.column ?? sortKey
+        header.ascending = asc
+    }
+
+    func computeGroups() {
+        groupTitles = [:]
+        guard groupBy != .none, viewMode == .details, let folder else { return }
+        var last: String?
+        for r in 0..<folder.count() {
+            guard let item = folder.item(row: r) else { continue }
+            let t = Grouping.title(item, by: groupBy, display: display)
+            if t != last { groupTitles[Int(r)] = t }
+            last = t
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        Metrics.rowHeight + (groupTitles[row] == nil ? 0 : GroupMetrics.header)
+    }
+
+    /// Tags and Git states for the folder, read off the main thread when their columns are on.
+    func loadColumnData(_ dir: URL) {
+        tagsByName = [:]
+        gitByName = [:]
+        guard archive == nil else { return }
+        let wantTags = AppSettings.showsColumn(.tags), wantGit = AppSettings.showsColumn(.git)
+        guard wantTags || wantGit else { return }
+        DispatchQueue.global(qos: .utility).async {
+            var tags: [String: String] = [:]
+            if wantTags {
+                let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+                for n in names {
+                    if let t = try? dir.appendingPathComponent(n).resourceValues(forKeys: [.tagNamesKey]).tagNames, !t.isEmpty {
+                        tags[n] = t.joined(separator: ", ")
+                    }
+                }
+            }
+            let git = wantGit ? (GitStatus.read(dir) ?? [:]) : [:]
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
+                    guard let self, self.url?.standardizedFileURL == dir.standardizedFileURL else { return }
+                    self.tagsByName = tags
+                    self.gitByName = git
+                    if self.viewMode == .details { self.table.reloadData() }
+                }
+            }
+        }
+    }
+
+    /// Before a folder opens: its own layout (each folder keeps its own), else the defaults.
+    func prepareLayout(for url: URL) {
+        guard !AppSettings.syncLayout else { return }
+        let l = FolderLayouts.get(url)
+        let mode = l?.view ?? AppSettings.defaultView
+        if mode != viewMode {
+            viewMode = mode
+            applyViewModeQuietly()
+        }
+        sortKey = l?.sort ?? AppSettings.sortKey
+        ascending = l?.ascending ?? !AppSettings.descending
+        groupBy = l?.group ?? AppSettings.groupBy
+    }
+
+    /// Layout › Adaptive: a folder of mostly pictures and videos shows as tiles (unless it
+    /// remembers a layout of its own).
+    func adaptLayout(for url: URL) {
+        guard AppSettings.adaptiveLayout, archive == nil, let folder,
+            AppSettings.syncLayout || FolderLayouts.get(url) == nil
+        else { return }
+        let n = min(folder.count(), 300)
+        guard n >= 4 else { return }
+        let media: Set<String> = ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tif", "tiff", "bmp", "raw", "cr2", "nef", "arw", "dng",
+                                  "mp4", "mov", "m4v", "avi", "mkv", "webm"]
+        var count = 0
+        for r in 0..<n where media.contains(folder.item(row: r)?.ext ?? "") { count += 1 }
+        let want: ViewMode = Double(count) / Double(n) >= 0.6 ? .tiles : .details
+        if want != viewMode {
+            viewMode = want
+            applyViewModeQuietly()
+            reloadItems()
+        }
+    }
+
+    /// Each folder keeps its own: the current layout is written for it.
+    func rememberLayout() {
+        guard !AppSettings.syncLayout, let url, archive == nil else { return }
+        FolderLayouts.set(url, .init(view: viewMode, sort: sortKey, ascending: ascending, group: groupBy))
     }
 }

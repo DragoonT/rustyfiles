@@ -113,7 +113,10 @@ final class CommandBarView: FlippedView {
 /// The details columns, in the Windows app's default order and widths (folder_view.rs,
 /// settings.rs): Name (flex) · Date modified 150 · Type 150 · Size 100, right-aligned.
 enum ListColumn: String, CaseIterable {
-    case name, modified, type, size
+    case name, modified, created, type, size, tags, git
+
+    /// The columns that can be turned on or off (Settings › Layout › Details columns).
+    static let optional: [ListColumn] = [.modified, .created, .type, .size, .tags, .git]
 
     var title: String {
         switch self {
@@ -121,21 +124,30 @@ enum ListColumn: String, CaseIterable {
         case .modified: String(localized: "Date modified")
         case .type: String(localized: "Type")
         case .size: String(localized: "Size")
+        case .created: String(localized: "Date created")
+        case .tags: String(localized: "Tags")
+        case .git: String(localized: "Git status")
         }
     }
 
     var defaultWidth: CGFloat {
         switch self {
         case .name: 320
-        case .modified, .type: 150
+        case .modified, .created, .type: 150
         case .size: 100
+        case .tags: 120
+        case .git: 100
         }
     }
 
+    /// Tags and Git status are shown, not sorted by.
+    var sortable: Bool { self != .tags && self != .git }
+
     var sort: SortColumn {
         switch self {
-        case .name: .name
+        case .name, .tags, .git: .name
         case .modified: .modified
+        case .created: .created
         case .type: .kind
         case .size: .size
         }
@@ -267,6 +279,9 @@ final class FileRowView: NSTableRowView {
     var onLens = false { didSet { if onLens != oldValue { needsDisplay = true } } }
     var hovered = false { didSet { if hovered != oldValue { needsDisplay = true } } }
     var isCursor = false
+    /// The first row of a group (Settings › Layout › Group by) carries the group's header
+    /// above itself, in its top `GroupMetrics.header` points.
+    var groupTitle: String? { didSet { needsDisplay = true } }
 
     override func drawBackground(in dirtyRect: NSRect) {}
     override func drawSelection(in dirtyRect: NSRect) {}
@@ -274,7 +289,15 @@ final class FileRowView: NSTableRowView {
 
     override func draw(_ dirtyRect: NSRect) {
         let p = Palette.of(self)
-        let box = NSRect(x: 6, y: bounds.minY, width: bounds.width - 6 - (6 + geometry.gutter), height: bounds.height)
+        let inset = groupTitle == nil ? 0 : GroupMetrics.header
+        if let groupTitle {
+            let r = NSRect(x: 12, y: 10, width: bounds.width - 24 - geometry.gutter, height: 18)
+            let w = Draw.textWidth(groupTitle, font: Metrics.textSmMedium)
+            Draw.text(groupTitle, in: r, font: Metrics.textSmMedium, color: p.accent)
+            p.divider.setFill()
+            NSRect(x: r.minX + w + 10, y: r.midY, width: max(r.width - w - 10, 0), height: 1).fill()
+        }
+        let box = NSRect(x: 6, y: bounds.minY + inset, width: bounds.width - 6 - (6 + geometry.gutter), height: bounds.height - inset)
         if isSelected && onLens { return }
         if isSelected {
             Draw.roundedRect(box, radius: Metrics.radiusSmall, fill: p.selection)
@@ -294,6 +317,8 @@ final class FileRowView: NSTableRowView {
 /// The name cell: 16 px icon, gap 8, the name (an editable field while renaming).
 final class NameCellView: NSTableCellView {
     var lead: CGFloat = 18
+    /// Room above for a group header.
+    var topInset: CGFloat = 0 { didSet { needsLayout = true } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -315,10 +340,13 @@ final class NameCellView: NSTableCellView {
 
     override func layout() {
         super.layout()
-        imageView?.frame = NSRect(x: lead, y: (bounds.height - 16) / 2, width: 16, height: 16)
+        // the cell is not flipped: the row is its lower part, the header room above it
+        let rowH = bounds.height - topInset
+        let base: CGFloat = isFlipped ? topInset : 0
+        imageView?.frame = NSRect(x: lead, y: base + (rowH - 16) / 2, width: 16, height: 16)
         let x = lead + 16 + 8
         let h: CGFloat = 20
-        textField?.frame = NSRect(x: x - 2, y: (bounds.height - h) / 2, width: max(bounds.width - x - 8, 0), height: h)
+        textField?.frame = NSRect(x: x - 2, y: base + (rowH - h) / 2, width: max(bounds.width - x - 8, 0), height: h)
     }
 }
 
@@ -329,12 +357,13 @@ final class TextCellView: HoverView {
     var alignRight = false
     var leadPad: CGFloat = 8
     var trailPad: CGFloat = 8
+    var topInset: CGFloat = 0 { didSet { needsDisplay = true } }
     var isLink = false { didSet { needsDisplay = true } }
     var onClick: (() -> Void)?
 
     override func draw(_ dirtyRect: NSRect) {
         let p = Palette.of(self)
-        let r = NSRect(x: leadPad, y: 0, width: max(bounds.width - leadPad - trailPad, 0), height: bounds.height)
+        let r = NSRect(x: leadPad, y: topInset, width: max(bounds.width - leadPad - trailPad, 0), height: bounds.height - topInset)
         guard isLink else {
             Draw.text(text, in: r, font: Metrics.textSm, color: p.textSecondary, align: alignRight ? .right : .left)
             return
@@ -514,4 +543,9 @@ final class CardView: FlippedView {
         picture.frame = bounds
         onLayout?()
     }
+}
+
+enum GroupMetrics {
+    /// The group header's height above a group's first row.
+    static let header: CGFloat = 36
 }

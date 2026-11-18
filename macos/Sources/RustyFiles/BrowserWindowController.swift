@@ -448,6 +448,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             if t === tab { showTab() }
             return
         }
+        if t === tab, ArchivePlace.locate(url) == nil { list.prepareLayout(for: url) }
         let (column, ascending, first, hidden) = (list.sortKey.sort, list.ascending, list.foldersFirst, list.showHidden)
         if t === tab { updateChrome() }
         Task.detached(priority: .userInitiated) {
