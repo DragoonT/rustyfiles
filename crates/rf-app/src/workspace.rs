@@ -185,6 +185,9 @@ pub struct Workspace {
     preview_dock: preview_dock::Dock,
     /// Debounced settings write after a pane resize.
     _width_save: Option<Task<()>>,
+    /// The saved session this window holds (opened from it, or saved under it): its name stands at the far left of the tabs, so the
+    /// workspace is known at a glance (a Reddit suggestion, 2026-11-18). Shown only while a session of that name is saved.
+    session_name: Option<String>,
     palette: Option<Entity<crate::command_palette::CommandPalette>>,
     bulk: Option<Entity<crate::bulk_rename::BulkRename>>,
     /// Last window title / session snapshot we pushed (avoid redundant work every frame).
@@ -824,6 +827,7 @@ impl Workspace {
             preview_w: prefs.preview_width.clamp(PREVIEW_MIN, PREVIEW_MAX),
             preview_dock: preview_dock::Dock::new(prefs.preview_height),
             _width_save: None,
+            session_name: None,
             palette: None,
             bulk: None,
             last_title: String::new(),
@@ -849,6 +853,7 @@ impl Workspace {
             // a saved session asked for by name (`open_named_session`): its tabs, its split panes, its active tab
             None if PENDING_NAMED.lock().unwrap().is_some() => {
                 let named = PENDING_NAMED.lock().unwrap().take().unwrap_or_default();
+                this.session_name = Some(named.name.clone());
                 for t in &named.tabs {
                     this.open_tab(session_place(t), window, cx);
                 }
@@ -1255,6 +1260,7 @@ impl Workspace {
             self.closed.push(tab.view().read(cx).location().clone());
         }
         self.tab_scrolled_to = None;
+        self.session_name = Some(named.name.clone());
         let a = named.active.min(self.tabs.len() - 1);
         self.activate(a, window, cx);
     }
@@ -1312,7 +1318,8 @@ impl Workspace {
         let (tabs, panes) = self.session_now(cx);
         let active = self.active;
         let count = cx.global::<crate::settings::Settings>().saved_sessions.len();
-        let first = format!("{} {}", t!("Oturum"), count + 1);
+        let first = self.session_name.clone().unwrap_or_else(|| format!("{} {}", t!("Oturum"), count + 1));
+        let me = cx.entity().downgrade();
         crate::prompt::show(
             t!("Oturumu kaydet"),
             Some(t!("Bu penceredeki sekmeler bu adla kaydedilir; sekme menüsündeki Oturum aç ile yeni bir pencerede açılır.").to_string()),
@@ -1325,6 +1332,11 @@ impl Workspace {
                     }
                     let session = crate::settings::NamedSession { name: name.clone(), tabs: tabs.clone(), panes: panes.clone(), active };
                     crate::settings::update(cx, move |s| remember_named(&mut s.saved_sessions, session));
+                    // (the window now holds that session: its name goes beside the tabs)
+                    let _ = me.update(cx, |ws, cx| {
+                        ws.session_name = Some(name.clone());
+                        cx.notify();
+                    });
                     Ok(())
                 }),
                 crate::prompt::Button::cancel(),
@@ -2040,6 +2052,28 @@ impl Workspace {
 
     fn render_titlebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let popups_open = self.popups_open(cx);
+        // the saved session this window holds, at the far left of the tabs
+        let session_label = self.session_name.clone().filter(|n| cx.global::<crate::settings::Settings>().saved_sessions.iter().any(|s| &s.name == n)).map(|name| {
+            h_flex()
+                .id("session-name")
+                .flex_shrink_0()
+                .max_w(px(180.))
+                .h(px(26.))
+                .mb(px(3.))
+                .ml_1()
+                .px_2()
+                .gap_1p5()
+                .items_center()
+                .rounded(theme::RADIUS_SM)
+                .bg(p.hover)
+                .border_1()
+                .border_color(p.border)
+                .text_xs()
+                .text_color(p.text_secondary)
+                .when(!popups_open, |d| d.tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Kayıtlı oturum")).build(w, cx)))
+                .child(Icon::new(L::Layers).size(px(13.)).text_color(p.accent))
+                .child(div().min_w_0().truncate().child(name))
+        });
         let mut tabs = h_flex()
             .id("tabs")
             // content-sized, shrinks (and scrolls) only when there is not enough room, so the
@@ -2241,6 +2275,7 @@ impl Workspace {
                                 .on_click(cx.listener(|this, _, window, cx| this.tab_actions_menu(window, cx))),
                         ),
                     )
+                    .children(session_label)
                     .child(tabs)
                     .child(new_tab),
             )
