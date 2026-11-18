@@ -514,6 +514,24 @@ pub static START_SELECT: std::sync::Mutex<Option<String>> = std::sync::Mutex::ne
 /// DirectLook'a en son gönderilen dosya (seçim değişince yalnız yenisi gider).
 static LOOK_FOLLOWED: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
+/// Whether any non-picker main browser window is currently open.
+fn has_browser_window(cx: &App) -> bool {
+    let open = cx.windows();
+    cx.try_global::<OpenWorkspaces>().is_some_and(|g| {
+        g.0.iter().any(|(h, ws)| {
+            ws.upgrade().is_some_and(|w| w.read(cx).picker.is_none())
+                && open.iter().any(|w| w.window_id() == h.window_id())
+        })
+    })
+}
+
+/// Start location for a new window opened from an IPC launch when no existing window took it:
+/// `None` restores the session (or startup pages) when no browser window is open and no target
+/// was given, so reopening the app from background mode behaves like a fresh start.
+fn launch_window_start(msg: &str, has_browser_window: bool, loc: Location) -> Option<Location> {
+    if msg.trim().is_empty() && !has_browser_window { None } else { Some(loc) }
+}
+
 pub fn route_ipc(msg: String, cx: &mut App) {
     route_ipc_shown(msg, cx);
 }
@@ -586,7 +604,8 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         }
     }
     *START_SELECT.lock().unwrap() = select;
-    let made = crate::open_main_window_made(Some(loc), None, None, cx);
+    let start = launch_window_start(&msg, has_browser_window(cx), loc);
+    let made = crate::open_main_window_made(start, None, None, cx);
     crate::shell::desktop::open::mark("main: a new window was made for the place");
     made
 }
@@ -4663,6 +4682,17 @@ mod launch_tests {
         assert_eq!(sel.as_deref(), Some("rapor ü.txt"));
         assert_eq!(parse_launch(r"C:\Windows"), (Location::Path(PathBuf::from(r"C:\Windows")), None));
         assert_eq!(parse_launch("  "), (Location::Home, None));
+    }
+
+    #[test]
+    fn empty_launch_restores_session_only_when_no_browser_window_is_open() {
+        use super::launch_window_start;
+        assert_eq!(launch_window_start("", false, Location::Home), None);
+        assert_eq!(launch_window_start("  ", false, Location::Home), None);
+        assert_eq!(launch_window_start("", true, Location::Home), Some(Location::Home));
+        let docs = Location::Path(PathBuf::from(r"C:\Docs"));
+        assert_eq!(launch_window_start(r"C:\Docs", false, docs.clone()), Some(docs.clone()));
+        assert_eq!(launch_window_start(r"C:\Docs", true, docs.clone()), Some(docs));
     }
 
     /// Issue 20: a window split in two panes at different folders came back with one pane. The second pane of a tab is kept with its
