@@ -85,14 +85,52 @@ use rf_core::Location;
 
 use crate::workspace::Workspace;
 
-/// Window placement from the last session (ignored if it is implausibly small).
-pub(crate) fn restored_bounds(cx: &App) -> Option<WindowBounds> {
-    let [x, y, w, h, max] = cx.global::<settings::Settings>().window?;
-    if w < 500. || h < 350. {
+/// Restores the window on its original display, even when displays use different scales.
+fn restored_bounds(cx: &App) -> Option<(WindowBounds, Option<DisplayId>)> {
+    let prefs = cx.global::<settings::Settings>();
+    let values @ [x, y, w, h, max] = prefs.window?;
+    if !values.iter().all(|v| v.is_finite()) || w < 500. || h < 350. {
         return None;
     }
-    let b = Bounds { origin: point(px(x), px(y)), size: size(px(w), px(h)) };
-    Some(if max > 0.5 { WindowBounds::Maximized(b) } else { WindowBounds::Windowed(b) })
+    let mut b = Bounds::new(point(px(x), px(y)), size(px(w), px(h)));
+    let display = if let Some((key, [dx, dy])) = &prefs.window_display {
+        let saved = cx.displays().into_iter().find(|d| d.uuid().is_ok_and(|id| id.to_string() == *key));
+        if let Some(d) = saved.as_ref().cloned().or_else(|| cx.primary_display()) {
+            let origin = saved.filter(|_| dx.is_finite() && dy.is_finite())
+                .map(|d| d.bounds().origin + point(px(*dx), px(*dy)));
+            b = fit_window_bounds(b.size, origin, d.visible_bounds());
+            Some(d.id())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    Some((if max > 0.5 { WindowBounds::Maximized(b) } else { WindowBounds::Windowed(b) }, display))
+}
+
+fn fit_window_bounds(size: Size<Pixels>, origin: Option<Point<Pixels>>, area: Bounds<Pixels>) -> Bounds<Pixels> {
+    let size = gpui_kit::size(size.width.min(area.size.width), size.height.min(area.size.height));
+    let center = area.center() - point(size.width / 2., size.height / 2.);
+    let origin = origin.filter(|&p| area.contains(&Bounds::new(p, size).center())).unwrap_or(center);
+    Bounds::new(origin, size)
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::fit_window_bounds;
+    use gpui_kit::{Bounds, point, px, size};
+
+    #[test]
+    fn restores_negative_coordinates_and_centers_on_the_fallback_screen() {
+        let secondary = Bounds::new(point(px(-1920.), px(0.)), size(px(1920.), px(1040.)));
+        let original = Bounds::new(point(px(-1750.), px(40.)), size(px(1000.), px(700.)));
+        assert_eq!(fit_window_bounds(original.size, Some(original.origin), secondary), original);
+        let primary = Bounds::new(point(px(0.), px(0.)), size(px(1280.), px(720.)));
+        let centered = fit_window_bounds(original.size, None, primary);
+        assert_eq!(centered.center(), primary.center());
+        assert_eq!(centered.size, original.size);
+    }
 }
 
 /// Panics are written to %APPDATA%\rustyfiles\crash.log (the app has no console in release).
@@ -303,8 +341,16 @@ pub fn open_main_window_made(
     bounds: Option<WindowBounds>,
     cx: &mut App,
 ) -> bool {
+    let (bounds, display_id) = match bounds {
+        Some(bounds) => (bounds, None),
+        None => {
+            let restored = if workspace::any_main_window(cx) { None } else { restored_bounds(cx) };
+            restored.unwrap_or_else(|| (WindowBounds::centered(size(px(1280.), px(800.)), cx), None))
+        }
+    };
     let options = WindowOptions {
-        window_bounds: Some(bounds.unwrap_or_else(|| WindowBounds::centered(size(px(1280.), px(800.)), cx))),
+        window_bounds: Some(bounds),
+        display_id,
         window_min_size: Some(size(px(720.), px(420.))),
         window_background: crate::theme::window_material(WindowBackgroundAppearance::MicaBackdrop),
         ..TitleBar::window_options()
@@ -774,7 +820,6 @@ pub fn main() {
         if let Some(d) = settings::local_data_dir() {
             rf_win::foldersize::shared_cache().persist(d.join("foldersizes.bin"));
         }
-        let bounds = restored_bounds(cx);
         match pick.clone() {
             // started only to answer a dialog: no main window
             Some(pipe) => picker::begin(pipe, cx),
@@ -802,7 +847,7 @@ pub fn main() {
                 installer::count_start(cx);
                 donate::refresh();
                 start_mark("opening the window");
-                open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, bounds, cx);
+                open_main_window(if open_look_settings { Some(Location::Settings) } else { start }, None, None, cx);
                 start_mark("window opened");
                 fast_start::remember(cx);
                 // a copy or move cut off last time: ask to carry it on
@@ -889,7 +934,10 @@ pub fn main() {
         // GPUI would quit by itself when the last window closes (QuitMode::Default on Windows):
         // that cut running copies in half and makes background mode impossible. We decide.
         cx.set_quit_mode(gpui_kit::QuitMode::Explicit);
-        cx.on_window_closed(move |cx, _| last_window::settle(cx, switcher_preview))
+        cx.on_window_closed(move |cx, id| {
+            workspace::save_closed_placement(id, cx);
+            last_window::settle(cx, switcher_preview);
+        })
         .detach();
         cx.activate(true);
     });
