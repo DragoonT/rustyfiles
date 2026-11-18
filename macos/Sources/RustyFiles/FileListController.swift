@@ -597,6 +597,12 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     private func selectionChanged() {
+        if AppSettings.selectionBoxes, viewMode == .details {
+            let sel = table.selectedRowIndexes
+            table.enumerateAvailableRowViews { _, row in
+                (self.table.view(atColumn: 0, row: row, makeIfNecessary: false) as? NameCellView)?.checked = sel.contains(row)
+            }
+        }
         placeListLens(animated: true)
         updateStatus()
         updateCommands()
@@ -1365,6 +1371,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             }()
             cell.lead = ListGeometry.lead + 8
             cell.topInset = groupTitles[row] == nil ? 0 : GroupMetrics.header
+            cell.showsBox = AppSettings.selectionBoxes
+            cell.checked = tableView.selectedRowIndexes.contains(row)
             cell.textField?.stringValue = display.name(item)
             cell.textField?.textColor = Palette.of(tableView).text
             cell.imageView?.image = display.icon(item, path: folder.childPath(row: UInt32(row)) ?? "")

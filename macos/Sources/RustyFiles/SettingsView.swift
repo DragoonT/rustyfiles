@@ -139,6 +139,12 @@ enum SettingsContent {
                     title: String(localized: "Show file extensions"), detail: nil, icon: "file-type",
                     control: .toggle(get: { AppSettings.showExtensions }, set: { AppSettings.showExtensions = $0 })),
                 .card(
+                    title: String(localized: "Show selection check boxes"), detail: nil, icon: "square-check",
+                    control: .toggle(get: { AppSettings.selectionBoxes }, set: { AppSettings.selectionBoxes = $0 })),
+                .card(
+                    title: String(localized: "Select on hover"), detail: String(localized: "Resting the pointer on an item for a moment selects it."), icon: "mouse-pointer",
+                    control: .toggle(get: { AppSettings.selectOnHover }, set: { AppSettings.selectOnHover = $0 })),
+                .card(
                     title: String(localized: "Show thumbnails"), detail: String(localized: "Pictures of the files themselves in the Tiles layout."), icon: "image",
                     control: .toggle(get: { AppSettings.showThumbnails }, set: { AppSettings.showThumbnails = $0 })),
                 .section(String(localized: "Behaviours")),

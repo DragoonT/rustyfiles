@@ -80,6 +80,18 @@ extension AppSettings {
 
     // MARK: Files › View
 
+    /// A check box before each name that adds the item to the selection or takes it away.
+    static var selectionBoxes: Bool {
+        get { flag("selectionBoxes", false) }
+        set { store(newValue, "selectionBoxes") }
+    }
+
+    /// Resting the pointer on a row selects it.
+    static var selectOnHover: Bool {
+        get { flag("selectOnHover", false) }
+        set { store(newValue, "selectOnHover") }
+    }
+
     static var showExtensions: Bool {
         get { flag("showExtensions", true) }
         set { store(newValue, "showExtensions") }

@@ -317,6 +317,10 @@ final class FileRowView: NSTableRowView {
 /// The name cell: 16 px icon, gap 8, the name (an editable field while renaming).
 final class NameCellView: NSTableCellView {
     var lead: CGFloat = 18
+    /// Files › Selection check boxes: drawn before the icon, checked when the row is selected.
+    var showsBox = false { didSet { needsLayout = true; needsDisplay = true } }
+    var checked = false { didSet { needsDisplay = true } }
+    private(set) var boxRect = NSRect.zero
     /// Room above for a group header.
     var topInset: CGFloat = 0 { didSet { needsLayout = true } }
 
@@ -338,13 +342,36 @@ final class NameCellView: NSTableCellView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    override func draw(_ dirtyRect: NSRect) {
+        guard showsBox else { return }
+        let p = Palette.of(self)
+        let r = boxRect.insetBy(dx: 2, dy: 2)
+        let path = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: 4, yRadius: 4)
+        if checked {
+            p.accent.setFill()
+            path.fill()
+            let tick = NSBezierPath()
+            tick.move(to: NSPoint(x: r.minX + 3.5, y: r.midY))
+            tick.line(to: NSPoint(x: r.minX + 6.5, y: r.minY + 3.5))
+            tick.line(to: NSPoint(x: r.maxX - 3, y: r.maxY - 4))
+            tick.lineWidth = 1.8
+            p.accentText.setStroke()
+            tick.stroke()
+        } else {
+            p.textTertiary.setStroke()
+            path.stroke()
+        }
+    }
+
     override func layout() {
         super.layout()
         // the cell is not flipped: the row is its lower part, the header room above it
         let rowH = bounds.height - topInset
         let base: CGFloat = isFlipped ? topInset : 0
-        imageView?.frame = NSRect(x: lead, y: base + (rowH - 16) / 2, width: 16, height: 16)
-        let x = lead + 16 + 8
+        let boxW: CGFloat = showsBox ? 16 + 8 : 0
+        boxRect = showsBox ? NSRect(x: lead - 2, y: base + (rowH - 16) / 2 - 2, width: 20, height: 20) : .zero
+        imageView?.frame = NSRect(x: lead + boxW, y: base + (rowH - 16) / 2, width: 16, height: 16)
+        let x = lead + boxW + 16 + 8
         let h: CGFloat = 20
         textField?.frame = NSRect(x: x - 2, y: base + (rowH - h) / 2, width: max(bounds.width - x - 8, 0), height: h)
     }
@@ -422,11 +449,37 @@ final class FileTableView: NSTableView, NSServicesMenuRequestor {
 
     override func mouseExited(with event: NSEvent) { setHovered(-1) }
 
+    private var hoverTimer: Timer?
+
     private func setHovered(_ r: Int) {
         guard r != hoveredRow else { return }
         (rowView(atRow: hoveredRow, makeIfNecessary: false) as? FileRowView)?.hovered = false
         hoveredRow = r
         (rowView(atRow: r, makeIfNecessary: false) as? FileRowView)?.hovered = true
+        // Files › Select on hover: resting on a row for half a second selects it
+        hoverTimer?.invalidate()
+        guard AppSettings.selectOnHover, r >= 0 else { return }
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.hoveredRow == r, NSEvent.pressedMouseButtons == 0, !self.selectedRowIndexes.contains(r) else { return }
+                let extend = NSEvent.modifierFlags.contains(.command)
+                self.selectRowIndexes([r], byExtendingSelection: extend)
+            }
+        }
+    }
+
+    /// Files › Selection check boxes: a click on a row's box adds it to the selection or takes
+    /// it away, leaving the rest as it is.
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let r = row(at: p)
+        if AppSettings.selectionBoxes, r >= 0, let cell = view(atColumn: 0, row: r, makeIfNecessary: false) as? NameCellView,
+            cell.boxRect.contains(cell.convert(event.locationInWindow, from: nil))
+        {
+            if selectedRowIndexes.contains(r) { deselectRow(r) } else { selectRowIndexes([r], byExtendingSelection: true) }
+            return
+        }
+        super.mouseDown(with: event)
     }
 
     /// A table hands clicks to its cells' controls only; "Calculate size" is a link drawn by

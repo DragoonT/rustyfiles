@@ -105,3 +105,5 @@ scroll-text
 database
 gauge
 bell
+square-check
+mouse-pointer
