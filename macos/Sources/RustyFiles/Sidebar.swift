@@ -118,6 +118,8 @@ final class SidebarView: FlippedView {
 @MainActor
 final class SidebarListView: HoverView {
     weak var owner: SidebarView?
+    /// The item a drag is over (drawn as a drop target).
+    private var dropIndex: Int? { didSet { if dropIndex != oldValue { needsDisplay = true } } }
     var items: [SidebarView.Item] = [] { didSet { needsDisplay = true } }
     /// The list in the scroll view has a lens under its selected item; the bottom one draws
     /// the Fluent selection (fill and pill) itself.
@@ -134,6 +136,49 @@ final class SidebarListView: HoverView {
     }
 
     var contentHeight: CGFloat { (rects().last?.maxY ?? 0) + 4 }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        registerForDraggedTypes([.fileURL])
+    }
+
+    /// Where files dropped on item `i` go (a folder, a drive), or nil (Home, Settings).
+    private func dropURL(_ i: Int) -> URL? {
+        let item = items[i]
+        guard let url = item.url, url.isFileURL, item.kind != .header else { return nil }
+        return url
+    }
+
+    private func dragOperation(_ info: NSDraggingInfo) -> NSDragOperation {
+        let pt = convert(info.draggingLocation, from: nil)
+        dropIndex = index(at: pt).flatMap { dropURL($0) != nil ? $0 : nil }
+        guard let i = dropIndex, let dest = dropURL(i) else { return [] }
+        let urls = FileListController.droppedURLs(info)
+        guard !urls.isEmpty else { return [] }
+        if items[i].kind == .trash { return .delete }
+        return FileListController.dropKind(info, urls, into: dest) == .copy ? .copy : .move
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { dragOperation(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { dragOperation(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) { dropIndex = nil }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { dropIndex = nil }
+        guard let i = dropIndex, let dest = dropURL(i) else { return false }
+        let urls = FileListController.droppedURLs(sender)
+        if items[i].kind == .trash {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let pairs = (try? FileOps.trash(urls)) ?? []
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { FileUndo.shared.record(.moves(pairs), title: String(localized: "Move to Trash")) }
+                }
+            }
+            return true
+        }
+        Transfer(FileListController.dropKind(sender, urls, into: dest), urls, into: dest).start(window: window) { _ in }
+        return true
+    }
 
     /// The selected item's box, where the lens goes.
     var selectedRect: NSRect? {
@@ -158,7 +203,14 @@ final class SidebarListView: HoverView {
             }
             // the selected item stands on the lens: no fill, no pill
             let isSelected = item.url.map { SidebarView.norm($0) == selected } ?? false
-            if isSelected && (!hasLens || !AppSettings.isGlass) {
+            if dropIndex == i {
+                // a drop target: the selection fill with an accent outline
+                Draw.roundedRect(r, radius: Metrics.radiusSmall, fill: p.selection)
+                p.accent.setStroke()
+                let ring = NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: Metrics.radiusSmall, yRadius: Metrics.radiusSmall)
+                ring.lineWidth = 1
+                ring.stroke()
+            } else if isSelected && (!hasLens || !AppSettings.isGlass) {
                 Draw.roundedRect(r, radius: Metrics.radiusSmall, fill: p.selection)
                 Draw.selectionPill(in: r, accent: p.accent)
             } else if !isSelected && hot == i {

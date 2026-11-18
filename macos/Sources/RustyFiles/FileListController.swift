@@ -80,7 +80,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         table.list = self
         table.target = self
         table.doubleAction = #selector(doubleClicked(_:))
-        table.setDraggingSourceOperationMask(.copy, forLocal: false)
+        table.setDraggingSourceOperationMask([.copy, .move], forLocal: false)
+        table.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+        table.registerForDraggedTypes([.fileURL])
 
         scroll.documentView = table
         // under the rows (their own drawing is clear where the lens is)
@@ -105,7 +107,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         tiles.dataSource = self
         tiles.delegate = self
         tiles.list = self
-        tiles.setDraggingSourceOperationMask(.copy, forLocal: false)
+        tiles.setDraggingSourceOperationMask([.copy, .move], forLocal: false)
+        tiles.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
+        tiles.registerForDraggedTypes([.fileURL])
         tileScroll.documentView = tiles
         tileScroll.drawsBackground = false
         tileScroll.hasVerticalScroller = true
@@ -647,14 +651,20 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// Pastes here, or into `target` (a folder that was right-clicked).
     func pasteItems(into target: URL? = nil) {
         guard let dest = target ?? url, let (urls, move) = Clipboard.take() else { return }
-        run { try FileOps.paste(urls, into: dest, move: move) } done: { [weak self] made in
-            self?.reloadSelecting(target == nil ? made.map(\.lastPathComponent) : [])
+        transfer(urls, into: dest, kind: move ? .move : .copy, selectHere: target == nil)
+    }
+
+    /// Copies or moves `urls` into `dest` with progress, conflicts asked, undo recorded.
+    func transfer(_ urls: [URL], into dest: URL, kind: Transfer.Kind, selectHere: Bool) {
+        Transfer(kind, urls, into: dest).start(window: card.window) { [weak self] made in
+            if selectHere { self?.reloadSelecting(made.map(\.lastPathComponent)) }
         }
     }
 
     func newFolder() {
         guard let url else { return }
         run { try FileOps.newFolder(in: url) } done: { [weak self] made in
+            FileUndo.shared.record(.trash([made]), title: String(localized: "New Folder"))
             self?.reloadSelecting([made.lastPathComponent], rename: true)
         }
     }
@@ -665,7 +675,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         // the row after the last one goes away keeps the cursor near where it was
         let next = (selectedRows.last ?? 0) + 1
         let after = folder.flatMap { f in next < Int(f.count()) ? f.item(row: UInt32(next))?.name : nil }
-        run { try FileOps.trash(urls) } done: { [weak self] _ in self?.reloadSelecting(after.map { [$0] } ?? []) }
+        run { try FileOps.trash(urls) } done: { [weak self] pairs in
+            FileUndo.shared.record(.moves(pairs), title: String(localized: "Move to Trash"))
+            self?.reloadSelecting(after.map { [$0] } ?? [])
+        }
     }
 
     /// Runs `work` off the main thread; errors are shown, the result goes to `done`.
@@ -738,6 +751,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         let from = url.appendingPathComponent(original)
         run { try FileOps.rename(from, to: newName) } done: { [weak self] made in
+            FileUndo.shared.record(.moves([(from: made, to: from)]), title: String(localized: "Rename"))
             self?.reloadSelecting([made.lastPathComponent])
         }
     }
@@ -842,11 +856,18 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
         b.add(String(localized: "Copy item path"), "clipboard-copy", key: "c", mods: [.command, .option]) { MenuActions.copyPaths(urls) }
         b.add(String(localized: "Make alias"), "link") { [weak self] in
-            self?.run { try urls.map { try FileOps.makeAlias($0) } } done: { made in self?.reloadSelecting(made.map(\.lastPathComponent)) }
+            self?.run { try urls.map { try FileOps.makeAlias($0) } } done: { made in
+                FileUndo.shared.record(.trash(made), title: String(localized: "Make Alias"))
+                self?.reloadSelecting(made.map(\.lastPathComponent))
+            }
         }
         if let dir = url {
             b.add(String(localized: "New folder with selection"), "folder-input") { [weak self] in
-                self?.run { try FileOps.newFolder(with: urls, in: dir) } done: { made in self?.reloadSelecting([made.lastPathComponent], rename: true) }
+                self?.run { try FileOps.newFolder(with: urls, in: dir) } done: { made in
+                    let back = urls.map { (from: made.appendingPathComponent($0.lastPathComponent), to: $0) }
+                    FileUndo.shared.record(.group([.moves(back), .trash([made])]), title: String(localized: "New Folder with Selection"))
+                    self?.reloadSelecting([made.lastPathComponent], rename: true)
+                }
             }
         }
         if singleDir, let u = urls.first {
@@ -878,7 +899,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                 if format == .rar && !canMakeRar() { continue }
                 m.add(String(localized: "Compress to \(title)"), "file-archive") { [weak self] in
                     let dest = FileOps.archiveName(for: urls, ext: ext)
-                    self?.run { try compress(sources: urls.map(\.path), dest: dest.path, format: format) } done: { self?.reloadSelecting([dest.lastPathComponent]) }
+                    self?.run { try compress(sources: urls.map(\.path), dest: dest.path, format: format) } done: {
+                        FileUndo.shared.record(.trash([dest]), title: String(localized: "Compress"))
+                        self?.reloadSelecting([dest.lastPathComponent])
+                    }
                 }
             }
         }
@@ -964,11 +988,17 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         b.add(String(localized: "Refresh"), "rotate-cw", key: "r") { [weak self] in self?.onRefresh?() }
         b.separator()
+        let um = FileUndo.shared.manager
+        if um.canUndo { b.add(um.undoMenuItemTitle, "undo-2", key: "z") { um.undo() } }
+        if um.canRedo { b.add(um.redoMenuItemTitle, "redo-2", key: "z", mods: [.command, .shift]) { um.redo() } }
         b.sub(String(localized: "New"), "circle-plus") { m in
             m.add(String(localized: "Folder"), "folder", key: "n", mods: [.command, .shift]) { [weak self] in self?.newFolder() }
             m.add(String(localized: "Text document"), "file-text") { [weak self] in
                 guard let dir = self?.url else { return }
-                self?.run { try FileOps.newTextDocument(in: dir) } done: { made in self?.reloadSelecting([made.lastPathComponent], rename: true) }
+                self?.run { try FileOps.newTextDocument(in: dir) } done: { made in
+                    FileUndo.shared.record(.trash([made]), title: String(localized: "New Text Document"))
+                    self?.reloadSelecting([made.lastPathComponent], rename: true)
+                }
             }
         }
         if let dir = url {
@@ -1267,5 +1297,74 @@ enum ColumnWidths {
         var d = UserDefaults.standard.dictionary(forKey: key) ?? [:]
         d[col.rawValue] = width.map { Double($0) }
         UserDefaults.standard.set(d, forKey: key)
+    }
+}
+
+// MARK: - drops
+
+extension FileListController {
+    /// The files on a drag's pasteboard.
+    static func droppedURLs(_ info: NSDraggingInfo) -> [URL] {
+        (info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+    }
+
+    /// Copy or move, as Finder decides it: ⌥ copies, ⌘ moves, else a move within a volume and a
+    /// copy across volumes.
+    static func dropKind(_ info: NSDraggingInfo, _ urls: [URL], into dest: URL) -> Transfer.Kind {
+        let mods = NSEvent.modifierFlags
+        if mods.contains(.option) { return .copy }
+        if mods.contains(.command) { return .move }
+        return Transfer.defaultKind(urls, into: dest)
+    }
+
+    /// The folder a drop lands in: the folder row under the pointer, else the folder shown.
+    fileprivate func dropTarget(row: Int?) -> URL? {
+        guard archive == nil, let folder, let url else { return nil }
+        if let row, row >= 0, let item = folder.item(row: UInt32(row)), item.isDir, !display.isPackage(item),
+            let p = folder.childPath(row: UInt32(row))
+        {
+            return URL(fileURLWithPath: p)
+        }
+        return url
+    }
+
+    fileprivate func validate(_ info: NSDraggingInfo, into dest: URL?) -> NSDragOperation {
+        guard let dest else { return [] }
+        let urls = Self.droppedURLs(info)
+        // nothing into itself, nothing back where it already is
+        let d = dest.standardizedFileURL.path
+        guard !urls.isEmpty, !urls.contains(where: { let s = $0.standardizedFileURL.path; return d == s || d.hasPrefix(s + "/") }) else { return [] }
+        if urls.allSatisfy({ $0.deletingLastPathComponent().standardizedFileURL == dest.standardizedFileURL }) && Self.dropKind(info, urls, into: dest) == .move {
+            return []
+        }
+        return Self.dropKind(info, urls, into: dest) == .copy ? .copy : .move
+    }
+
+    fileprivate func accept(_ info: NSDraggingInfo, into dest: URL?) -> Bool {
+        guard let dest, validate(info, into: dest) != [] else { return false }
+        let urls = Self.droppedURLs(info)
+        transfer(urls, into: dest, kind: Self.dropKind(info, urls, into: dest), selectHere: dest == url)
+        return true
+    }
+
+    func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation op: NSTableView.DropOperation) -> NSDragOperation {
+        let onFolder = op == .on && dropTarget(row: row) != url
+        if !onFolder { tableView.setDropRow(-1, dropOperation: .on) }
+        return validate(info, into: dropTarget(row: onFolder ? row : nil))
+    }
+
+    func tableView(_ tableView: NSTableView, acceptDrop info: NSDraggingInfo, row: Int, dropOperation op: NSTableView.DropOperation) -> Bool {
+        accept(info, into: dropTarget(row: row >= 0 && op == .on ? row : nil))
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, validateDrop info: NSDraggingInfo, proposedIndexPath path: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation op: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
+        let row = path.pointee.item
+        let onFolder = op.pointee == .on && dropTarget(row: row) != url
+        if !onFolder { op.pointee = .before }
+        return validate(info, into: dropTarget(row: onFolder ? row : nil))
+    }
+
+    func collectionView(_ collectionView: NSCollectionView, acceptDrop info: NSDraggingInfo, indexPath: IndexPath, dropOperation op: NSCollectionView.DropOperation) -> Bool {
+        accept(info, into: dropTarget(row: op == .on ? indexPath.item : nil))
     }
 }

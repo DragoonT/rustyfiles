@@ -70,6 +70,9 @@ enum MainMenu {
 
     private static func editMenu() -> NSMenu {
         let m = NSMenu(title: String(localized: "Edit"))
+        m.addItem(item(String(localized: "Undo"), Selector(("undo:")), "z"))
+        m.addItem(item(String(localized: "Redo"), Selector(("redo:")), "z", [.command, .shift]))
+        m.addItem(.separator())
         m.addItem(item(String(localized: "Cut"), #selector(W.cut(_:)), "x"))
         m.addItem(item(String(localized: "Copy"), #selector(W.copy(_:) as (W) -> (Any?) -> Void), "c"))
         m.addItem(item(String(localized: "Paste"), #selector(W.paste(_:)), "v"))

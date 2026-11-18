@@ -156,6 +156,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     func windowDidBecomeKey(_ notification: Notification) { list.updateCommands() }
 
+    /// Edit › Undo and Redo, ⌘Z and ⇧⌘Z, work on file operations (text being edited keeps its own).
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { FileUndo.shared.manager }
+
     func windowWillClose(_ notification: Notification) { onClose?(self) }
 
     /// A setting changed: the list takes what concerns it; colours redraw everywhere (and
