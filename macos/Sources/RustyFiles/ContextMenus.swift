@@ -126,9 +126,12 @@ enum MenuActions {
     static func openWithMenu(_ urls: [URL], _ b: MenuBuilder) {
         guard let first = urls.first else { return }
         let fm = FileManager.default
-        let preferred = NSWorkspace.shared.urlForApplication(toOpen: first)
+        let preferred = OpenRules.opener(for: first) ?? NSWorkspace.shared.urlForApplication(toOpen: first)
         var apps = NSWorkspace.shared.urlsForApplications(toOpen: first)
         if let preferred { apps = [preferred] + apps.filter { $0 != preferred } }
+        // Settings › File types: the list's apps first, in its order
+        let own = (OpenRules.rule(for: first)?.apps ?? []).map { URL(fileURLWithPath: $0) }
+        apps = own + apps.filter { !own.contains($0) }
         for app in apps.prefix(24) {
             var title = fm.displayName(atPath: app.path)
             if app == preferred { title += " " + String(localized: "(default)") }

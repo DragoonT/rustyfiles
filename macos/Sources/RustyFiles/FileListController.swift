@@ -983,7 +983,14 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             } done: { urls in urls.forEach { NSWorkspace.shared.open($0) } }
             return
         }
-        for u in files { NSWorkspace.shared.open(u) }
+        for u in files {
+            // Settings › File types: the user's own app for this kind of file
+            if let app = OpenRules.opener(for: u) {
+                NSWorkspace.shared.open([u], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+            } else {
+                NSWorkspace.shared.open(u)
+            }
+        }
     }
 
     // MARK: context menus (ctx_menu.rs)

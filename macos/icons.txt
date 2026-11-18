@@ -95,3 +95,4 @@ panel-top
 panel-bottom
 folder-sync
 group
+keyboard

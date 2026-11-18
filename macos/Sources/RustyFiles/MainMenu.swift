@@ -5,7 +5,8 @@ import AppKit
 /// the Mac's own where it has one, the Windows app's otherwise (F2, Backspace in the list).
 @MainActor
 enum MainMenu {
-    static func make() -> NSMenu {
+    /// `install`: also hand the Window and Help menus to AppKit (false: a copy to read).
+    static func make(install: Bool = true) -> NSMenu {
         let bar = NSMenu()
         bar.addItem(submenu(appMenu()))
         bar.addItem(submenu(fileMenu()))
@@ -14,10 +15,14 @@ enum MainMenu {
         bar.addItem(submenu(goMenu()))
         let window = windowMenu()
         bar.addItem(submenu(window))
-        NSApp.windowsMenu = window
         let help = NSMenu(title: String(localized: "Help"))
         bar.addItem(submenu(help))
-        NSApp.helpMenu = help
+        if install {
+            NSApp.windowsMenu = window
+            NSApp.helpMenu = help
+        }
+        // Settings › Keyboard shortcuts
+        Shortcuts.apply(bar)
         return bar
     }
 
