@@ -59,6 +59,20 @@ enum FerrySettings {
     static let everyoneMinutes: UInt32 = 10
 }
 
+/// The sound of files on their way in: AirDrop's own invitation sound, played from where macOS
+/// keeps it (not shipped with the app), else the system's "Glass".
+@MainActor
+enum FerrySound {
+    private static let airdrop = "/System/Library/PrivateFrameworks/Sharing.framework/Versions/A/Resources/airdrop_invite.caf"
+    private static let sound: NSSound? = NSSound(contentsOfFile: airdrop, byReference: true) ?? NSSound(named: "Glass")
+
+    static func play() {
+        guard let sound else { return }
+        sound.stop()
+        sound.play()
+    }
+}
+
 /// Ferry for the whole app: started while the setting is on, its events turned into the
 /// question window, Status Center cards and the Settings page.
 @MainActor
@@ -97,6 +111,7 @@ final class FerryService {
             problem = nil
             refreshLists()
             watchLocalNetwork()
+            becomeVisibleForPage()
         } catch {
             problem = error.localizedDescription
         }
@@ -121,9 +136,40 @@ final class FerryService {
     }
 
     func setVisibility(_ v: FerryVisibility) {
+        // a choice made by hand stays: leaving the page does not undo it
+        restoreVisibility = nil
+        apply(v)
+    }
+
+    private func apply(_ v: FerryVisibility) {
         FerrySettings.visibility = v
         ferry?.setVisibility(visibility: v)
         changed()
+    }
+
+    /// Settings › Ferry pages on screen. While one is, this Mac can be seen by everyone, as a
+    /// Mac is while Finder's AirDrop window is open; leaving puts back what was chosen before
+    /// (the ten-minute limit still applies).
+    private var pageViewers: Set<ObjectIdentifier> = []
+    private var restoreVisibility: FerryVisibility?
+
+    func settingsPage(_ viewer: AnyObject, isShowing: Bool) {
+        let id = ObjectIdentifier(viewer)
+        let wasEmpty = pageViewers.isEmpty
+        if isShowing { pageViewers.insert(id) } else { pageViewers.remove(id) }
+        if wasEmpty && !pageViewers.isEmpty {
+            becomeVisibleForPage()
+        } else if !wasEmpty && pageViewers.isEmpty, let previous = restoreVisibility {
+            restoreVisibility = nil
+            // only if it is still the page's doing (not changed since, nor timed out)
+            if FerrySettings.visibility == .everyone { apply(previous) }
+        }
+    }
+
+    private func becomeVisibleForPage() {
+        guard isRunning, !pageViewers.isEmpty, FerrySettings.visibility != .everyone else { return }
+        restoreVisibility = FerrySettings.visibility
+        apply(.everyone)
     }
 
     private func refreshLists() {
@@ -215,12 +261,16 @@ final class FerryService {
         changed()
     }
 
-    fileprivate func offer(_ o: FerryOffer) { FerryQuestions.shared.ask(.offer(o)) }
+    fileprivate func offer(_ o: FerryOffer) {
+        FerrySound.play()
+        FerryQuestions.shared.ask(.offer(o))
+    }
 
     /// Who is sending what is being received (for "<name> sent you files").
     private var senders: [UInt64: String] = [:]
 
     fileprivate func receiving(_ o: FerryOffer) {
+        FerrySound.play()
         senders[o.transfer] = o.fromName
         track(o.transfer, title: String(localized: "Receiving with Ferry: \(o.fromName)"), folder: FerrySettings.effectiveInbox)
     }
@@ -259,6 +309,7 @@ final class FerryService {
     }
 
     fileprivate func visibilityChanged(_ v: FerryVisibility) {
+        restoreVisibility = nil
         FerrySettings.visibility = v
         changed()
     }

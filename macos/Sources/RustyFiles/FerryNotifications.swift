@@ -38,7 +38,7 @@ final class FerryNotifications: NSObject, @preconcurrency UNUserNotificationCent
 
     func ask(_ q: FerryQuestions.Question, id: UUID) {
         let content = UNMutableNotificationContent()
-        content.sound = .default
+        // the AirDrop sound is played by FerrySound; a second sound would be noise
         content.userInfo = ["question": id.uuidString]
         // the question stays until it is answered (an alert, where the user lets it be one)
         content.interruptionLevel = .timeSensitive
@@ -70,7 +70,6 @@ final class FerryNotifications: NSObject, @preconcurrency UNUserNotificationCent
         content.title = String(localized: "\(name) sent you files")
         content.body = paths.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ")
         content.userInfo = ["paths": paths]
-        content.sound = .default
         center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
