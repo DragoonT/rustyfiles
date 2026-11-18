@@ -58,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else if let start = env.map(URL.init(fileURLWithPath:)) {
                 application(NSApp, open: [start])
             } else {
-                openWindow(at: home)
+                openAtStart()
             }
         }
         NSApp.activate()
@@ -81,9 +81,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) { FerryService.shared.stop() }
+    func applicationWillTerminate(_ notification: Notification) {
+        saveSession()
+        FerryService.shared.stop()
+    }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    // MARK: sessions (General › When rustyfiles starts)
+
+    private var restoring = false
+
+    /// Remembers the windows and their tabs (for "Continue where you left off"); a window that
+    /// closes while others stay leaves the session.
+    func saveSession() {
+        // development copies (RF_NOFERRY) leave the owner's session alone
+        guard !restoring, ProcessInfo.processInfo.environment["RF_NOFERRY"] == nil else { return }
+        Sessions.save(controllers.map { Sessions.Window(tabs: $0.tabAddresses, active: $0.activeTab) })
+    }
+
+    /// The first windows, as General › When rustyfiles starts says.
+    private func openAtStart() {
+        switch AppSettings.startup {
+        case .resume:
+            let windows = Sessions.last().filter { !$0.tabs.compactMap(Sessions.url).isEmpty }
+            guard !windows.isEmpty else { openWindow(at: home); return }
+            restoring = true
+            for w in windows {
+                openWindow(at: home).restore(w.tabs, active: w.active)
+            }
+            restoring = false
+            saveSession()
+        case .pages:
+            let pages = AppSettings.startupPages
+            if pages.compactMap(Sessions.url).isEmpty { openWindow(at: home) } else { openWindow(at: home).restore(pages, active: 0) }
+        case .home:
+            openWindow(at: home)
+        }
+    }
+
+    /// The window in front (or the first one).
+    var frontController: BrowserWindowController? {
+        (NSApp.keyWindow?.windowController as? BrowserWindowController) ?? (NSApp.mainWindow?.windowController as? BrowserWindowController)
+            ?? controllers.first
+    }
+
+    /// Advanced › Keep running when the last window closes.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { !AppSettings.keepRunning }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { openWindow(at: home) }
@@ -97,7 +139,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for url in urls {
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                openWindow(at: url)
+                // General › Folders opened from other apps open in a new window; off: a tab
+                if !AppSettings.externalInNewWindow, let front = frontController {
+                    front.openTab(url, activate: true)
+                    front.window?.makeKeyAndOrderFront(nil)
+                } else {
+                    openWindow(at: url)
+                }
+            } else if isArchive(path: url.path), AppSettings.archivesAsFolders {
+                // an archive sent here (Advanced › Open archives with rustyfiles) opens like a folder
+                if !AppSettings.externalInNewWindow, let front = frontController {
+                    front.openTab(url, activate: true)
+                    front.window?.makeKeyAndOrderFront(nil)
+                } else {
+                    openWindow(at: url)
+                }
             } else {
                 openWindow(at: url.deletingLastPathComponent(), selecting: url.lastPathComponent)
             }
@@ -116,7 +172,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// A controller kept alive until its window closes; the caller shows it.
     func makeController(at url: URL, selecting name: String? = nil) -> BrowserWindowController {
         let wc = BrowserWindowController(url: url, selecting: name)
-        wc.onClose = { [weak self] closed in self?.controllers.removeAll { $0 === closed } }
+        wc.onClose = { [weak self] closed in
+            guard let self else { return }
+            self.controllers.removeAll { $0 === closed }
+            // the last window closing keeps its tabs for the next start
+            if !self.controllers.isEmpty { self.saveSession() }
+        }
         controllers.append(wc)
         return wc
     }

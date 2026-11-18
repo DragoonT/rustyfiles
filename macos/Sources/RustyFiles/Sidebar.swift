@@ -6,13 +6,15 @@ import AppKit
 /// background of its own: the window's glass shows.
 @MainActor
 final class SidebarView: FlippedView {
-    enum Kind { case home, place, pinned, drive, trash, settings, header }
+    enum Kind { case home, place, pinned, drive, tag, trash, settings, header }
 
     struct Item {
         let kind: Kind
         let title: String
         let icon: String
         let url: URL?
+        /// A tag's colour (drawn as a dot in place of the icon).
+        var color: NSColor? = nil
     }
 
     var onSelect: ((Item) -> Void)?
@@ -57,6 +59,11 @@ final class SidebarView: FlippedView {
             center.addObserver(self, selector: #selector(volumesChanged), name: name, object: nil)
         }
         NotificationCenter.default.addObserver(self, selector: #selector(volumesChanged), name: .rfPinsChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(settingsChanged(_:)), name: .rfSettingsChanged, object: nil)
+    }
+
+    @objc private func settingsChanged(_ note: Notification) {
+        if ["sidebarHidden", "tagList"].contains(AppSettings.changedKey(note)) { reload() }
     }
 
     @available(*, unavailable)
@@ -68,22 +75,33 @@ final class SidebarView: FlippedView {
         let fm = FileManager.default
         var items: [Item] = [Item(kind: .home, title: String(localized: "Home"), icon: "house", url: BrowserTab.homeURL)]
         // under Home, the two folders a Mac user goes to that Finder's sidebar hides or buries
-        items.append(Item(kind: .place, title: fm.displayName(atPath: "/Applications"), icon: "app-window-mac", url: URL(fileURLWithPath: "/Applications")))
-        if let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask).first {
-            items.append(Item(kind: .place, title: String(localized: "Library"), icon: "library", url: lib))
+        if AppSettings.showsSection(.libraries) {
+            items.append(Item(kind: .place, title: fm.displayName(atPath: "/Applications"), icon: "app-window-mac", url: URL(fileURLWithPath: "/Applications")))
+            if let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask).first {
+                items.append(Item(kind: .place, title: String(localized: "Library"), icon: "library", url: lib))
+            }
         }
-        items.append(Item(kind: .header, title: String(localized: "Pinned"), icon: "", url: nil))
-        for url in Pins.load() {
-            items.append(Item(kind: .pinned, title: fm.displayName(atPath: url.path), icon: "folder", url: url))
+        if AppSettings.showsSection(.pinned) {
+            items.append(Item(kind: .header, title: String(localized: "Pinned"), icon: "", url: nil))
+            for url in Pins.load() {
+                items.append(Item(kind: .pinned, title: fm.displayName(atPath: url.path), icon: "folder", url: url))
+            }
         }
         let keys: [URLResourceKey] = [.volumeLocalizedNameKey, .volumeIsLocalKey]
         let volumes = fm.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) ?? []
-        if !volumes.isEmpty {
+        if !volumes.isEmpty, AppSettings.showsSection(.drives) {
             items.append(Item(kind: .header, title: String(localized: "Drives"), icon: "", url: nil))
             for v in volumes {
                 let values = try? v.resourceValues(forKeys: Set(keys))
                 let icon = values?.volumeIsLocal == false ? "server" : "hard-drive"
                 items.append(Item(kind: .drive, title: values?.volumeLocalizedName ?? v.lastPathComponent, icon: icon, url: v))
+            }
+        }
+        // Tags (Settings › Appearance › Sidebar sections): a click lists what has the tag
+        if AppSettings.showsSection(.tags), !TagStore.all.isEmpty {
+            items.append(Item(kind: .header, title: String(localized: "Tags"), icon: "", url: nil))
+            for t in TagStore.all {
+                items.append(Item(kind: .tag, title: t.name, icon: "tag", url: TagStore.url(t.name), color: TagStore.color(t.color)))
             }
         }
         defer { needsLayout = true }
@@ -145,6 +163,7 @@ final class SidebarListView: HoverView {
     /// Where files dropped on item `i` go (a folder, a drive), or nil (Home, Settings).
     private func dropURL(_ i: Int) -> URL? {
         let item = items[i]
+        if item.kind == .tag { return item.url }
         guard let url = item.url, url.isFileURL, item.kind != .header else { return nil }
         return url
     }
@@ -156,6 +175,7 @@ final class SidebarListView: HoverView {
         let urls = FileListController.droppedURLs(info)
         guard !urls.isEmpty else { return [] }
         if items[i].kind == .trash { return .delete }
+        if items[i].kind == .tag { return .link }
         return FileListController.dropKind(info, urls, into: dest) == .copy ? .copy : .move
     }
 
@@ -167,6 +187,16 @@ final class SidebarListView: HoverView {
         defer { dropIndex = nil }
         guard let i = dropIndex, let dest = dropURL(i) else { return false }
         let urls = FileListController.droppedURLs(sender)
+        if items[i].kind == .tag {
+            // dropped on a tag: the files get it
+            let name = items[i].title
+            for u in urls {
+                var tags = (try? u.resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []
+                if !tags.contains(name) { tags.append(name) }
+                try? (u as NSURL).setResourceValue(tags, forKey: .tagNamesKey)
+            }
+            return true
+        }
         if items[i].kind == .trash {
             DispatchQueue.global(qos: .userInitiated).async {
                 let pairs = (try? FileOps.trash(urls)) ?? []
@@ -218,7 +248,18 @@ final class SidebarListView: HoverView {
             }
             // px_2, icon 16, gap_2, text_sm
             let iconColor: NSColor = (item.kind == .home || item.kind == .place || item.kind == .pinned) ? p.accent : p.textSecondary
-            Draw.icon(item.icon, in: NSRect(x: r.minX + 8, y: r.minY, width: 16, height: r.height), size: 16, color: iconColor)
+            if item.kind == .tag {
+                let dot = NSRect(x: r.minX + 8 + 2, y: r.midY - 6, width: 12, height: 12)
+                if let c = item.color {
+                    c.setFill()
+                    NSBezierPath(ovalIn: dot).fill()
+                } else {
+                    p.textSecondary.setStroke()
+                    NSBezierPath(ovalIn: dot.insetBy(dx: 0.5, dy: 0.5)).stroke()
+                }
+            } else {
+                Draw.icon(item.icon, in: NSRect(x: r.minX + 8, y: r.minY, width: 16, height: r.height), size: 16, color: iconColor)
+            }
             Draw.text(item.title, in: NSRect(x: r.minX + 8 + 16 + 8, y: r.minY, width: r.width - 40, height: r.height), font: Metrics.textSm, color: p.text)
         }
     }

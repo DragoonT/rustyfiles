@@ -9,7 +9,8 @@ extension Notification.Name {
 /// app's settings (crates/rf-app/src/settings.rs); only the ones the Mac version acts on are here.
 @MainActor
 enum AppSettings {
-    enum Theme: String, CaseIterable { case system, light, dark }
+    /// "black": the dark palette with every surface pure black (OLED screens).
+    enum Theme: String, CaseIterable { case system, light, dark, black }
     enum DateStyle: String, CaseIterable { case app, system, universal }
 
     /// The interface language: "system" follows macOS (Turkish on a Turkish Mac, else English),
@@ -144,7 +145,7 @@ enum AppSettings {
         switch theme {
         case .system: NSApp.appearance = nil
         case .light: NSApp.appearance = NSAppearance(named: .aqua)
-        case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
+        case .dark, .black: NSApp.appearance = NSAppearance(named: .darkAqua)
         }
         setDecimalSizes(on: decimalSizes)
         Palette.invalidate()

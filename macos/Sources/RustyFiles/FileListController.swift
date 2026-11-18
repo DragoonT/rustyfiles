@@ -42,6 +42,13 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var sortKey: ListColumn = AppSettings.sortKey
     var ascending = !AppSettings.descending
     var foldersFirst = AppSettings.foldersFirst
+    /// Settings › Layout › Group by (or the folder's own, when each folder keeps its layout).
+    var groupBy = AppSettings.groupBy
+    /// Each row's group header, for the first row of every group (details only).
+    private var groupTitles: [Int: String] = [:]
+    /// Tags and Git states of the folder shown, by name (filled when their columns are on).
+    private var tagsByName: [String: String] = [:]
+    private var gitByName: [String: String] = [:]
     var showHidden = AppSettings.showHidden { didSet { if showHidden != oldValue { rearrange() } } }
     var filter = "" { didSet { if filter != oldValue { rearrange() } } }
 
@@ -57,13 +64,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     override init() {
         super.init()
-        for col in ListColumn.allCases {
-            let c = NSTableColumn(identifier: .init(col.rawValue))
-            c.width = col.defaultWidth + (col == .name ? ListGeometry.lead : 0) + (col == .size ? geometry.trail : 0)
-            c.minWidth = col == .name ? 120 + ListGeometry.lead : 56
-            c.resizingMask = col == .name ? .autoresizingMask : .userResizingMask
-            table.addTableColumn(c)
-        }
+        rebuildColumns()
         table.headerView = nil
         table.rowHeight = Metrics.rowHeight
         table.intercellSpacing = .zero
@@ -80,6 +81,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         table.list = self
         table.target = self
         table.doubleAction = #selector(doubleClicked(_:))
+        table.action = #selector(singleClicked(_:))
         table.setDraggingSourceOperationMask([.copy, .move], forLocal: false)
         table.setDraggingSourceOperationMask([.copy, .move], forLocal: true)
         table.registerForDraggedTypes([.fileURL])
@@ -116,7 +118,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         tileScroll.scrollerStyle = .overlay
 
         header.table = table
-        header.onSort = { [weak self] col in self?.sort(by: col) }
+        header.onSort = { [weak self] col in if col.sortable { self?.sort(by: col) } }
         header.onResize = { [weak self] col, w in
             ColumnWidths.set(col, w)
             self?.applyColumnWidths()
@@ -141,6 +143,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         applyViewMode()
         card.onLayout = { [weak self] in self?.layoutCard() }
+        NotificationCenter.default.addObserver(self, selector: #selector(statusCenterChanged), name: .rfStatusCenterChanged, object: nil)
+        applyScrollBars()
+        card.applyBackground()
         NotificationCenter.default.addObserver(self, selector: #selector(columnsChanged), name: NSTableView.columnDidResizeNotification, object: table)
         wireCommandBar()
     }
@@ -185,21 +190,34 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         var b = card.bounds
         // the pane takes the right of the card, under the command bar, beside the list and its
         // status bar; it never leaves the list less than 320 wide
-        let pw = previewShown ? min(previewWidth, max(card.bounds.width - 320, 0)) : 0
-        let paneShown = previewShown && pw >= PreviewPane.minWidth && settingsView == nil && homeView == nil
+        // Appearance › Show the command bar / status bar
+        let barH = AppSettings.showCommandBar ? Metrics.commandBarHeight : 0
+        let statusH = AppSettings.showStatusBar ? Metrics.statusBarHeight : 0
+        commandBar.isHidden = barH == 0 || settingsView != nil || homeView != nil
+        status.isHidden = statusH == 0 || settingsView != nil || homeView != nil
+        // the pane: at the right of the list (never leaving it under 320 wide), or under it
+        let bottom = AppSettings.previewAtBottom
+        let ph = min(max(b.height * 0.38, 160), b.height - barH - 160)
+        let pw = previewShown ? (bottom ? b.width : min(previewWidth, max(card.bounds.width - 320, 0))) : 0
+        let paneShown = previewShown && (bottom ? ph >= 120 : pw >= PreviewPane.minWidth) && settingsView == nil && homeView == nil
         previewPane.isHidden = !paneShown
-        previewHandle.isHidden = !paneShown
-        if paneShown {
-            previewPane.frame = NSRect(x: b.width - pw, y: Metrics.commandBarHeight, width: pw, height: b.height - Metrics.commandBarHeight)
-            previewHandle.frame = NSRect(x: b.width - pw - 3, y: Metrics.commandBarHeight, width: 6, height: b.height - Metrics.commandBarHeight)
+        previewHandle.isHidden = !paneShown || bottom
+        previewPane.atBottom = bottom
+        if paneShown && !bottom {
+            previewPane.frame = NSRect(x: b.width - pw, y: barH, width: pw, height: b.height - barH)
+            previewHandle.frame = NSRect(x: b.width - pw - 3, y: barH, width: 6, height: b.height - barH)
         }
         commandBar.frame = NSRect(x: 0, y: 0, width: b.width, height: Metrics.commandBarHeight)
-        if paneShown { b.size.width -= pw }
-        header.frame = NSRect(x: 0, y: Metrics.commandBarHeight, width: b.width, height: Metrics.headerHeight)
-        let top = Metrics.commandBarHeight + Metrics.headerHeight
-        status.frame = NSRect(x: 0, y: b.height - Metrics.statusBarHeight, width: b.width, height: Metrics.statusBarHeight)
-        scroll.frame = NSRect(x: 0, y: top, width: b.width, height: status.frame.minY - top)
-        tileScroll.frame = NSRect(x: 0, y: Metrics.commandBarHeight, width: b.width, height: status.frame.minY - Metrics.commandBarHeight)
+        if paneShown && !bottom { b.size.width -= pw }
+        if paneShown && bottom {
+            previewPane.frame = NSRect(x: 0, y: b.height - ph, width: b.width, height: ph)
+            b.size.height -= ph
+        }
+        header.frame = NSRect(x: 0, y: barH, width: b.width, height: Metrics.headerHeight)
+        let top = barH + Metrics.headerHeight
+        status.frame = NSRect(x: 0, y: b.height - statusH, width: b.width, height: Metrics.statusBarHeight)
+        scroll.frame = NSRect(x: 0, y: top, width: b.width, height: b.height - statusH - top)
+        tileScroll.frame = NSRect(x: 0, y: barH, width: b.width, height: b.height - statusH - barH)
         // as many columns as fit, left-aligned with 4 between them (not spread out)
         let cols = max(Int((b.width - 2 * TileMetrics.padX + TileMetrics.gap) / (TileMetrics.width + TileMetrics.gap)), 1)
         let used = CGFloat(cols) * (TileMetrics.width + TileMetrics.gap) - TileMetrics.gap
@@ -244,7 +262,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let key = (folder: folder.map(ObjectIdentifier.init), date: AppSettings.dateStyle, decimal: AppSettings.decimalSizes)
         if let m = measuredFor, m.folder == key.folder, m.date == key.date, m.decimal == key.decimal { return }
         measuredFor = key
-        func w(_ s: String, _ f: NSFont = Metrics.textSm) -> CGFloat { Draw.textWidth(s, font: f) }
+        func w(_ s: String, _ f: NSFont? = nil) -> CGFloat { Draw.textWidth(s, font: f ?? Metrics.textSm) }
         func head(_ c: ListColumn) -> CGFloat { w(c.title, Metrics.textXs) }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let day: Int64 = 86_400_000
@@ -305,13 +323,17 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let keep = selectedRows
         let wasFocused = isFocused
         viewMode = mode
-        UserDefaults.standard.set(mode.rawValue, forKey: "viewMode")
+        // one layout everywhere: it becomes the default; else this folder remembers it
+        if AppSettings.syncLayout { UserDefaults.standard.set(mode.rawValue, forKey: "viewMode") }
+        rememberLayout()
         applyViewMode()
         reloadItems()
         selectRows(keep, scrollToFirst: true)
         if wasFocused { focus() }
         selectionChanged()
     }
+
+    func applyViewModeQuietly() { applyViewMode() }
 
     private func applyViewMode() {
         let isTiles = viewMode == .tiles
@@ -343,6 +365,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     private func reloadItems() {
+        computeGroups()
         switch viewMode {
         case .details: table.reloadData()
         case .tiles: tiles.reloadData()
@@ -431,6 +454,26 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             } else {
                 viewMode = AppSettings.defaultView
             }
+        case "columns":
+            rebuildColumns()
+            if let url { loadColumnData(url) }
+            applyColumnWidths()
+            reloadItems()
+        case "groupBy":
+            groupBy = AppSettings.groupBy
+            rearrange()
+            rememberLayout()
+        case "showScrollBars":
+            applyScrollBars()
+        case "showCommandBar", "showStatusBar", "previewPosition", "toolbarHidden", "toolbarAdded":
+            commandBar.needsLayout = true
+            card.needsLayout = true
+        case "listBackground", "listImage", "listImageVisibility":
+            card.applyBackground()
+        case "fontFamily":
+            table.rowHeight = Metrics.rowHeight
+            reloadItems()
+            card.needsLayout = true
         case "dateStyle", "decimalSizes":
             applyColumnWidths()
             if folder != nil { reloadItems() }
@@ -447,8 +490,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         self.folder = folder
         self.url = url
         self.archive = archive
-        folder.arrange(column: sortKey.sort, ascending: ascending, foldersFirst: foldersFirst, showHidden: showHidden, filter: filter)
+        arrange(folder)
         hideSettings()
+        loadColumnData(url)
         message.isHidden = true
         if card.subviews.contains(privacyButton) { privacyButton.isHidden = true }
         header.sortKey = sortKey
@@ -456,6 +500,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if !same { ThumbnailCache.shared.forget(under: url.path) }
         applyColumnWidths()
         reloadItems()
+        adaptLayout(for: url)
         let rows = IndexSet(names.compactMap { folder.rowOf(name: $0).map(Int.init) })
         selectRows(rows, scrollToFirst: y == nil)
         if let y {
@@ -500,7 +545,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     private func rearrange() {
         guard let folder else { return }
         let keep = selectedNames
-        folder.arrange(column: sortKey.sort, ascending: ascending, foldersFirst: foldersFirst, showHidden: showHidden, filter: filter)
+        arrange(folder)
         reloadItems()
         let rows = IndexSet(keep.compactMap { folder.rowOf(name: $0).map(Int.init) })
         selectRows(rows, scrollToFirst: true)
@@ -520,6 +565,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         header.sortKey = sortKey
         header.ascending = ascending
         rearrange()
+        rememberLayout()
     }
 
     var selectedNames: [String] {
@@ -541,12 +587,22 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             listLens.isHidden = true
             return
         }
-        let r = table.rect(ofRow: lensRow)
+        var r = table.rect(ofRow: lensRow)
+        if groupTitles[lensRow] != nil {
+            r.origin.y += GroupMetrics.header
+            r.size.height -= GroupMetrics.header
+        }
         let box = NSRect(x: 6, y: r.minY, width: table.bounds.width - 6 - (6 + geometry.gutter), height: r.height)
         listLens.move(to: box, animated: animated && !table.inLiveResize)
     }
 
     private func selectionChanged() {
+        if AppSettings.selectionBoxes, viewMode == .details {
+            let sel = table.selectedRowIndexes
+            table.enumerateAvailableRowViews { _, row in
+                (self.table.view(atColumn: 0, row: row, makeIfNecessary: false) as? NameCellView)?.checked = sel.contains(row)
+            }
+        }
         placeListLens(animated: true)
         updateStatus()
         updateCommands()
@@ -578,15 +634,16 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let any = !selectedRows.isEmpty && folder != nil
         // an archive is read only here: what is in it can be opened, copied and extracted
         let writable = folder != nil && archive == nil
+        let here = writable && !isGathered
         commandBar.cut.isEnabled = any && writable
         commandBar.copy.isEnabled = any
         commandBar.rename.isEnabled = selectedRows.count == 1 && writable
         commandBar.share.isEnabled = any && writable
         commandBar.delete.isEnabled = any && writable
-        commandBar.paste.isEnabled = writable && Clipboard.hasFiles
+        commandBar.paste.isEnabled = here && Clipboard.hasFiles
         let inTrash = TrashBin.contains(url) && archive == nil
         commandBar.trashMode = inTrash
-        commandBar.new.isEnabled = inTrash ? (folder?.count() ?? 0) > 0 : writable
+        commandBar.new.isEnabled = inTrash ? (folder?.count() ?? 0) > 0 : here
         commandBar.share.isEnabled = any && writable && !inTrash
         commandBar.properties.isEnabled = writable
         commandBar.preview.isEnabled = settingsView == nil && homeView == nil
@@ -598,6 +655,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     private func wireCommandBar() {
         let b = commandBar
+        b.newFolder.action = { [weak self] _ in self?.newFolder() }
+        b.terminal.action = { [weak self] _ in if let u = self?.url { MenuActions.openInTerminal(u) } }
+        b.hiddenItems.action = { _ in AppSettings.showHidden.toggle() }
+        b.refresh.action = { [weak self] _ in self?.onRefresh?() }
         b.new.action = { [weak self] btn in
             if self?.commandBar.trashMode == true { return self?.emptyTrash() ?? () }
             let m = NSMenu()
@@ -749,6 +810,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         guard !urls.isEmpty else { return }
         // in the Trash, "delete" is for good, asked first
         if TrashBin.contains(url) { return deleteImmediately(urls) }
+        if AppSettings.confirmDelete == .always, !Self.confirmTrash(urls) { return }
         // the row after the last one goes away keeps the cursor near where it was
         let next = (selectedRows.last ?? 0) + 1
         let after = folder.flatMap { f in next < Int(f.count()) ? f.item(row: UInt32(next))?.name : nil }
@@ -799,6 +861,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if viewMode == .details { table.scrollRowToVisible(row) }
         guard let field = nameField(row, make: true) else { return }
         renaming = (row, item.name)
+        field.stringValue = item.name
         field.isEditable = true
         field.isSelectable = true
         field.isBordered = true
@@ -823,10 +886,36 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         field.delegate = nil
         focus()
         guard commit, !newName.isEmpty, newName != original, let url else {
-            field.stringValue = original
+            field.stringValue = display.name(original: original)
             return
         }
-        let from = url.appendingPathComponent(original)
+        let from = folder?.childPath(row: UInt32(row)).map(URL.init(fileURLWithPath:)) ?? url.appendingPathComponent(original)
+        let oldExt = (original as NSString).pathExtension, newExt = (newName as NSString).pathExtension
+        let isFile = !((try? from.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false)
+        if isFile, AppSettings.warnExtensionChange, oldExt.lowercased() != newExt.lowercased() {
+            let alert = NSAlert()
+            alert.messageText = newExt.isEmpty
+                ? String(localized: "Remove the extension “.\(oldExt)”?")
+                : String(localized: "Change the extension to “.\(newExt)”?")
+            alert.informativeText = String(localized: "If you change it, the file may open in another app, or not at all.")
+            alert.addButton(withTitle: newExt.isEmpty ? String(localized: "Remove") : String(localized: "Use .\(newExt)"))
+            alert.addButton(withTitle: oldExt.isEmpty ? String(localized: "Cancel") : String(localized: "Keep .\(oldExt)"))
+            if alert.runModal() != .alertFirstButtonReturn {
+                if !oldExt.isEmpty, oldExt.lowercased() != newExt.lowercased() {
+                    // keep the old extension: the new name with it
+                    let stem = newExt.isEmpty ? newName : (newName as NSString).deletingPathExtension
+                    let kept = stem + "." + oldExt
+                    if kept != original {
+                        run { try FileOps.rename(from, to: kept) } done: { [weak self] made in
+                            FileUndo.shared.record(.moves([(from: made, to: from)]), title: String(localized: "Rename"))
+                            self?.reloadSelecting([made.lastPathComponent])
+                        }
+                    }
+                }
+                field.stringValue = display.name(original: original)
+                return
+            }
+        }
         run { try FileOps.rename(from, to: newName) } done: { [weak self] made in
             FileUndo.shared.record(.moves([(from: made, to: from)]), title: String(localized: "Rename"))
             self?.reloadSelecting([made.lastPathComponent])
@@ -851,9 +940,24 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     // MARK: opening
 
     @objc private func doubleClicked(_ sender: Any?) {
-        guard table.clickedRow >= 0 else { return }
+        guard table.clickedRow >= 0 else {
+            // Files › Double-click empty space to go up
+            if AppSettings.doubleClickEmptyGoesUp { onGoUp?() }
+            return
+        }
         openSelected()
     }
+
+    /// Files › Open items with a single click: a plain click (no ⌘ or ⇧) opens.
+    @objc private func singleClicked(_ sender: Any?) {
+        let row = table.clickedRow
+        guard row >= 0, AppSettings.singleClick != .never, NSEvent.modifierFlags.intersection([.command, .shift]).isEmpty,
+            let item = folder?.item(row: UInt32(row))
+        else { return }
+        if AppSettings.singleClick == .always || (item.isDir && !display.isPackage(item)) { openSelected() }
+    }
+
+    var onGoUp: (() -> Void)?
 
     func openSelected() {
         guard let folder else { return }
@@ -863,8 +967,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             guard let item = folder.item(row: UInt32(row)), let path = folder.childPath(row: UInt32(row)) else { continue }
             let u = URL(fileURLWithPath: path)
             if item.isDir && !display.isPackage(item) {
-                if rows.count == 1 { onOpenFolder?(u) }
-            } else if archive == nil && rows.count == 1 && isArchive(path: path) {
+                if rows.count == 1 { (AppSettings.foldersInNewTab && archive == nil ? onOpenInNewTab : onOpenFolder)?(u) }
+            } else if archive == nil && rows.count == 1 && AppSettings.archivesAsFolders && isArchive(path: path) {
                 // archives open like folders, as on Windows
                 onOpenFolder?(u)
             } else if archive == nil && rows.count == 1 && DiskImages.isDiskImage(u) {
@@ -886,12 +990,22 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             } done: { urls in urls.forEach { NSWorkspace.shared.open($0) } }
             return
         }
-        for u in files { NSWorkspace.shared.open(u) }
+        for u in files {
+            // Settings › File types: the user's own app for this kind of file
+            if let app = OpenRules.opener(for: u) {
+                NSWorkspace.shared.open([u], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+            } else {
+                NSWorkspace.shared.open(u)
+            }
+        }
     }
 
     // MARK: context menus (ctx_menu.rs)
 
     var archiveIsNil: Bool { archive == nil }
+    /// A gathered listing (a tag's files): its items are real, but there is no folder to put
+    /// new things in.
+    var isGathered: Bool { url.map { !$0.isFileURL } ?? false }
     var onOpenInNewTab: ((URL) -> Void)?
     var onOpenInNewWindow: ((URL) -> Void)?
     var onRefresh: (() -> Void)?
@@ -905,8 +1019,20 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// compress / extract / tags / Ferry, Terminal; macOS adds its Services at the end.
     // MARK: the Trash
 
+    /// Files › Ask before deleting › Always: asked before the Trash too.
+    static func confirmTrash(_ urls: [URL]) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = urls.count == 1
+            ? String(localized: "Move “\(urls[0].lastPathComponent)” to the Trash?")
+            : String(localized: "Move these \(urls.count) items to the Trash?")
+        alert.informativeText = String(localized: "You can put them back with ⌘Z.")
+        alert.addButton(withTitle: String(localized: "Move to Trash"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+
     func deleteImmediately(_ urls: [URL]) {
-        guard TrashBin.confirmDelete(urls, everything: false, in: card.window) else { return }
+        guard AppSettings.confirmDelete == .never || TrashBin.confirmDelete(urls, everything: false, in: card.window) else { return }
         run { try TrashBin.delete(urls) } done: { [weak self] in self?.reloadSelecting([]) }
     }
 
@@ -947,6 +1073,27 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         return b.done()
     }
 
+    /// General › Right-click menu: the commands turned off leave the item menu.
+    private static func pruned(_ menu: NSMenu) -> NSMenu {
+        typealias C = AppSettings.MenuCommand
+        let titles: [C: [String]] = [
+            .newTab: [String(localized: "Open in new tab")], .newWindow: [String(localized: "Open in new window")],
+            .copyPath: [String(localized: "Copy item path")], .alias: [String(localized: "Make alias")],
+            .pin: [String(localized: "Pin to sidebar"), String(localized: "Unpin from sidebar")],
+            .archive: [String(localized: "Compress"), String(localized: "Extract")], .tags: [String(localized: "Tags")],
+            .ferry: [String(localized: "Send with Ferry")], .terminal: [String(localized: "Open in Terminal")],
+        ]
+        let hidden = Set(C.allCases.filter { !AppSettings.shows($0) }.flatMap { titles[$0] ?? [] })
+        for item in menu.items.reversed() where hidden.contains(item.title) { menu.removeItem(item) }
+        // no separator twice in a row, or last
+        var last: NSMenuItem?
+        for item in menu.items {
+            if item.isSeparatorItem, last?.isSeparatorItem ?? true { menu.removeItem(item) } else { last = item }
+        }
+        while menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
+        return menu
+    }
+
     private func itemsMenu() -> NSMenu {
         if TrashBin.contains(url) { return trashItemsMenu(selectedURLs) }
         let b = MenuBuilder()
@@ -984,7 +1131,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                 self?.reloadSelecting(made.map(\.lastPathComponent))
             }
         }
-        if let dir = url {
+        if let dir = url, dir.isFileURL {
             b.add(String(localized: "New folder with selection"), "folder-input") { [weak self] in
                 self?.run { try FileOps.newFolder(with: urls, in: dir) } done: { made in
                     let back = urls.map { (from: made.appendingPathComponent($0.lastPathComponent), to: $0) }
@@ -1035,14 +1182,33 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if singleDir, let u = urls.first {
             b.separator()
             b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(u) }
+            if Editors.offered(for: u) { b.add(String(localized: "Open in \(Editors.name)"), "code") { Editors.open([u]) } }
+            // Advanced › Show “Flatten folder”
+            if AppSettings.flattenOption {
+                b.add(String(localized: "Flatten folder"), "layers") { [weak self] in
+                    self?.run { try FileOps.flatten(u) } done: { undo in
+                        FileUndo.shared.record(undo, title: String(localized: "Flatten Folder"))
+                        self?.onRefresh?()
+                    }
+                }
+            }
         }
-        return b.done()
+        return Self.pruned(b.done())
     }
 
     /// Extract ▸ for archive files: here, smartly, to a folder of its own, to a place chosen.
     private func extractMenu(_ urls: [URL], _ m: MenuBuilder) {
         let run = { [weak self] (work: @escaping @Sendable () throws -> [String]) in
-            self?.run(work) { names in self?.reloadSelecting(names) }
+            self?.run(work) { names in
+                self?.reloadSelecting(names)
+                // Files › Open the folder after extracting
+                guard AppSettings.openAfterExtract, let dir = urls.first?.deletingLastPathComponent() else { return }
+                for n in names {
+                    let u = dir.appendingPathComponent(n)
+                    var isDir: ObjCBool = false
+                    if FileManager.default.fileExists(atPath: u.path, isDirectory: &isDir), isDir.boolValue { self?.onOpenInNewTab?(u) }
+                }
+            }
         }
         m.add(String(localized: "Extract here"), "folder-down") {
             run {
@@ -1092,7 +1258,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             return b.done()
         }
         b.quick([
-            ("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles && folder != nil, { [weak self] in self?.pasteItems() }),
+            ("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles && folder != nil && !isGathered, { [weak self] in self?.pasteItems() }),
             ("wrench", String(localized: "Properties (⌘I)"), url != nil, { [weak self] in if let u = self?.url { PropertiesWindow.show([u]) } }),
         ])
         b.sub(String(localized: "Layout"), "layout-grid") { m in
@@ -1122,17 +1288,19 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let um = FileUndo.shared.manager
         if um.canUndo { b.add(um.undoMenuItemTitle, "undo-2", key: "z") { um.undo() } }
         if um.canRedo { b.add(um.redoMenuItemTitle, "redo-2", key: "z", mods: [.command, .shift]) { um.redo() } }
-        b.sub(String(localized: "New"), "circle-plus") { m in
-            m.add(String(localized: "Folder"), "folder", key: "n", mods: [.command, .shift]) { [weak self] in self?.newFolder() }
-            m.add(String(localized: "Text document"), "file-text") { [weak self] in
-                guard let dir = self?.url else { return }
-                self?.run { try FileOps.newTextDocument(in: dir) } done: { made in
-                    FileUndo.shared.record(.trash([made]), title: String(localized: "New Text Document"))
-                    self?.reloadSelecting([made.lastPathComponent], rename: true)
+        if !isGathered {
+            b.sub(String(localized: "New"), "circle-plus") { m in
+                m.add(String(localized: "Folder"), "folder", key: "n", mods: [.command, .shift]) { [weak self] in self?.newFolder() }
+                m.add(String(localized: "Text document"), "file-text") { [weak self] in
+                    guard let dir = self?.url else { return }
+                    self?.run { try FileOps.newTextDocument(in: dir) } done: { made in
+                        FileUndo.shared.record(.trash([made]), title: String(localized: "New Text Document"))
+                        self?.reloadSelecting([made.lastPathComponent], rename: true)
+                    }
                 }
             }
         }
-        if let dir = url {
+        if let dir = url, dir.isFileURL {
             let pinned = MenuActions.isPinned(dir)
             b.add(pinned ? String(localized: "Unpin from sidebar") : String(localized: "Pin to sidebar"), pinned ? "pin-off" : "pin") {
                 MenuActions.setPinned(dir, !pinned)
@@ -1140,9 +1308,11 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([dir]) }
         }
         b.add(String(localized: "Show hidden items"), "eye", key: ".", mods: [.command, .shift], checked: showHidden) { AppSettings.showHidden.toggle() }
-        if let dir = url {
+        if let dir = url, dir.isFileURL {
             b.separator()
             b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(dir) }
+            // Developer tools › “Open in editor”
+            if Editors.offered(for: dir) { b.add(String(localized: "Open in \(Editors.name)"), "code") { Editors.open([dir]) } }
         }
         return b.done()
     }
@@ -1183,6 +1353,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let v = FileRowView()
         v.geometry = geometry
+        v.groupTitle = groupTitles[row]
         v.onLens = AppSettings.isGlass && tableView.selectedRowIndexes.count == 1 && tableView.selectedRowIndexes.first == row
         return v
     }
@@ -1199,7 +1370,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                 return c
             }()
             cell.lead = ListGeometry.lead + 8
-            cell.textField?.stringValue = item.name
+            cell.topInset = groupTitles[row] == nil ? 0 : GroupMetrics.header
+            cell.showsBox = AppSettings.selectionBoxes
+            cell.checked = tableView.selectedRowIndexes.contains(row)
+            cell.textField?.stringValue = display.name(item)
             cell.textField?.textColor = Palette.of(tableView).text
             cell.imageView?.image = display.icon(item, path: folder.childPath(row: UInt32(row)) ?? "")
             cell.alphaValue = item.hidden ? 0.5 : 1
@@ -1212,21 +1386,29 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             return c
         }()
         cell.trailPad = 8 + (isLast ? geometry.trail : 0)
+        cell.topInset = groupTitles[row] == nil ? 0 : GroupMetrics.header
         cell.alignRight = col == .size
         cell.isLink = false
         cell.onClick = nil
         cell.alphaValue = item.hidden ? 0.5 : 1
         switch col {
         case .modified: cell.text = display.date(item.modifiedMs)
+        case .created: cell.text = item.createdMs > 0 ? display.date(item.createdMs) : ""
+        case .tags: cell.text = tagsByName[item.name] ?? ""
+        case .git: cell.text = gitByName[item.name] ?? ""
         case .type: cell.text = display.kind(item)
         case .size:
             if item.isDir && archive != nil {
                 cell.text = ""
             } else if item.isDir && !display.isPackage(item), let path = folder.childPath(row: UInt32(row)) {
-                if let size = Self.folderSizes[path] {
+                if let size = Self.folderSizes[Self.sizeKey(path)] {
                     cell.text = formatSize(bytes: size)
-                } else if Self.sizing.contains(path) {
+                } else if Self.sizing.contains(Self.sizeKey(path)) {
                     cell.text = String(localized: "Calculating…")
+                } else if AppSettings.autoFolderSizes {
+                    // Files › Calculate folder sizes: asked for as soon as the row shows
+                    cell.text = String(localized: "Calculating…")
+                    DispatchQueue.main.async { [weak self] in self?.calculateSize(path) }
                 } else {
                     cell.text = String(localized: "Calculate size")
                     cell.isLink = true
@@ -1240,17 +1422,45 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         return cell
     }
 
+    /// Sizes on disk and in bytes are kept apart.
+    private static func sizeKey(_ path: String) -> String { (AppSettings.folderSizeOnDisk ? "disk:" : "") + path }
+
+    /// Two folders are measured at a time, so a long list doesn't swamp the disk.
+    private static let sizeQueue: OperationQueue = {
+        let q = OperationQueue()
+        q.maxConcurrentOperationCount = 2
+        q.qualityOfService = .utility
+        return q
+    }()
+
     private func calculateSize(_ path: String) {
-        Self.sizing.insert(path)
+        let key = Self.sizeKey(path)
+        guard !Self.sizing.contains(key), Self.folderSizes[key] == nil else { return }
+        Self.sizing.insert(key)
         reloadSize(of: path)
-        Task.detached(priority: .utility) {
-            let size = folderSize(path: path)
-            await MainActor.run { [weak self] in
-                Self.sizing.remove(path)
-                Self.folderSizes[path] = size
-                self?.reloadSize(of: path)
+        let onDisk = AppSettings.folderSizeOnDisk
+        Self.sizeQueue.addOperation {
+            let size = onDisk ? Self.sizeOnDisk(path) : folderSize(path: path)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
+                    Self.sizing.remove(key)
+                    Self.folderSizes[key] = size
+                    self?.reloadSize(of: path)
+                }
             }
         }
+    }
+
+    /// What a folder takes on the disk (allocated blocks, clones and sparse files as they are).
+    nonisolated private static func sizeOnDisk(_ path: String) -> UInt64 {
+        let keys: [URLResourceKey] = [.totalFileAllocatedSizeKey, .isDirectoryKey]
+        guard let walker = FileManager.default.enumerator(at: URL(fileURLWithPath: path), includingPropertiesForKeys: keys, options: [], errorHandler: { _, _ in true })
+        else { return 0 }
+        var total: UInt64 = 0
+        for case let u as URL in walker {
+            total += UInt64((try? u.resourceValues(forKeys: Set(keys)).totalFileAllocatedSize) ?? 0)
+        }
+        return total
     }
 
     private func reloadSize(of path: String) {
@@ -1259,8 +1469,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         guard URL(fileURLWithPath: path).deletingLastPathComponent().standardizedFileURL == url.standardizedFileURL,
             let row = folder.rowOf(name: name)
         else { return }
-        if viewMode == .details {
-            table.reloadData(forRowIndexes: [Int(row)], columnIndexes: [table.tableColumns.count - 1])
+        let col = table.column(withIdentifier: .init(ListColumn.size.rawValue))
+        if viewMode == .details, col >= 0 {
+            table.reloadData(forRowIndexes: [Int(row)], columnIndexes: [col])
         }
     }
 
@@ -1365,7 +1576,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         item.path = path
         let tile = item.tile
-        tile.label.stringValue = entry.name
+        tile.label.stringValue = display.name(entry)
         tile.label.textColor = Palette.of(collectionView).text
         tile.alphaValue = entry.hidden ? 0.6 : 1
         tile.isSelected = item.isSelected
@@ -1451,6 +1662,7 @@ extension FileListController {
     /// The folder a drop lands in: the folder row under the pointer, else the folder shown.
     fileprivate func dropTarget(row: Int?) -> URL? {
         guard archive == nil, let folder, let url else { return nil }
+        if isGathered && row == nil { return nil }
         if let row, row >= 0, let item = folder.item(row: UInt32(row)), item.isDir, !display.isPackage(item),
             let p = folder.childPath(row: UInt32(row))
         {
@@ -1497,5 +1709,206 @@ extension FileListController {
 
     func collectionView(_ collectionView: NSCollectionView, acceptDrop info: NSDraggingInfo, indexPath: IndexPath, dropOperation op: NSCollectionView.DropOperation) -> Bool {
         accept(info, into: dropTarget(row: op == .on ? indexPath.item : nil))
+    }
+}
+
+// MARK: - scroll bars
+
+extension FileListController {
+    /// Appearance › Show scroll bars.
+    func applyScrollBars() {
+        for s in [scroll, tileScroll] {
+            s.hasVerticalScroller = AppSettings.showScrollBars
+        }
+    }
+}
+
+// MARK: - layout per folder, grouping, extra columns
+
+extension FileListController {
+    /// The table's columns: Name, then those turned on (Settings › Layout › Details columns).
+    func rebuildColumns() {
+        for c in table.tableColumns { table.removeTableColumn(c) }
+        let cols = [ListColumn.name] + AppSettings.columns
+        for (i, col) in cols.enumerated() {
+            let c = NSTableColumn(identifier: .init(col.rawValue))
+            c.width = col.defaultWidth + (col == .name ? ListGeometry.lead : 0) + (i == cols.count - 1 ? geometry.trail : 0)
+            c.minWidth = col == .name ? 120 + ListGeometry.lead : 56
+            c.resizingMask = col == .name ? .autoresizingMask : .userResizingMask
+            table.addTableColumn(c)
+        }
+        header.needsDisplay = true
+    }
+
+    /// Sorts the folder; a grouping sorts by what it groups by (folders stay first only where
+    /// that keeps the groups whole).
+    func arrange(_ folder: Folder) {
+        let column = groupBy.column?.sort ?? sortKey.sort
+        let first = [.date, .name].contains(groupBy) ? false : foldersFirst
+        let asc = groupBy == .date ? false : (groupBy == .none ? ascending : (groupBy.column == sortKey ? ascending : groupBy.column?.startsAscending ?? true))
+        folder.arrange(column: column, ascending: asc, foldersFirst: first, showHidden: showHidden, filter: filter)
+        // the header marks the column the list is really sorted by
+        header.sortKey = groupBy.column ?? sortKey
+        header.ascending = asc
+    }
+
+    func computeGroups() {
+        groupTitles = [:]
+        guard groupBy != .none, viewMode == .details, let folder else { return }
+        var last: String?
+        for r in 0..<folder.count() {
+            guard let item = folder.item(row: r) else { continue }
+            let t = Grouping.title(item, by: groupBy, display: display)
+            if t != last { groupTitles[Int(r)] = t }
+            last = t
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        Metrics.rowHeight + (groupTitles[row] == nil ? 0 : GroupMetrics.header)
+    }
+
+    /// Tags and Git states for the folder, read off the main thread when their columns are on.
+    func loadColumnData(_ dir: URL) {
+        tagsByName = [:]
+        gitByName = [:]
+        guard archive == nil else { return }
+        let wantTags = AppSettings.showsColumn(.tags), wantGit = AppSettings.showsColumn(.git)
+        guard wantTags || wantGit else { return }
+        DispatchQueue.global(qos: .utility).async {
+            var tags: [String: String] = [:]
+            if wantTags {
+                let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+                for n in names {
+                    if let t = try? dir.appendingPathComponent(n).resourceValues(forKeys: [.tagNamesKey]).tagNames, !t.isEmpty {
+                        tags[n] = t.joined(separator: ", ")
+                    }
+                }
+            }
+            let git = wantGit ? (GitStatus.read(dir) ?? [:]) : [:]
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { [weak self] in
+                    guard let self, self.url?.standardizedFileURL == dir.standardizedFileURL else { return }
+                    self.tagsByName = tags
+                    self.gitByName = git
+                    if self.viewMode == .details { self.table.reloadData() }
+                }
+            }
+        }
+    }
+
+    /// Before a folder opens: its own layout (each folder keeps its own), else the defaults.
+    func prepareLayout(for url: URL) {
+        guard !AppSettings.syncLayout else { return }
+        let l = FolderLayouts.get(url)
+        let mode = l?.view ?? AppSettings.defaultView
+        if mode != viewMode {
+            viewMode = mode
+            applyViewModeQuietly()
+        }
+        sortKey = l?.sort ?? AppSettings.sortKey
+        ascending = l?.ascending ?? !AppSettings.descending
+        groupBy = l?.group ?? AppSettings.groupBy
+    }
+
+    /// Layout › Adaptive: a folder of mostly pictures and videos shows as tiles (unless it
+    /// remembers a layout of its own).
+    func adaptLayout(for url: URL) {
+        guard AppSettings.adaptiveLayout, archive == nil, let folder,
+            AppSettings.syncLayout || FolderLayouts.get(url) == nil
+        else { return }
+        let n = min(folder.count(), 300)
+        guard n >= 4 else { return }
+        let media: Set<String> = ["jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tif", "tiff", "bmp", "raw", "cr2", "nef", "arw", "dng",
+                                  "mp4", "mov", "m4v", "avi", "mkv", "webm"]
+        var count = 0
+        for r in 0..<n where media.contains(folder.item(row: r)?.ext ?? "") { count += 1 }
+        let want: ViewMode = Double(count) / Double(n) >= 0.6 ? .tiles : .details
+        if want != viewMode {
+            viewMode = want
+            applyViewModeQuietly()
+            reloadItems()
+        }
+    }
+
+    /// Each folder keeps its own: the current layout is written for it.
+    func rememberLayout() {
+        guard !AppSettings.syncLayout, let url, archive == nil else { return }
+        FolderLayouts.set(url, .init(view: viewMode, sort: sortKey, ascending: ascending, group: groupBy))
+    }
+}
+
+// MARK: - progress in the status bar
+
+extension FileListController {
+    @objc func statusCenterChanged() {
+        let running = StatusCenter.shared.cards.filter { $0.state == .running }
+        ProgressCard.shared.update(running)
+        guard AppSettings.progressPlace == "status", let card = running.first else {
+            status.progress = ""
+            status.progressFraction = nil
+            return
+        }
+        var text = card.title
+        if card.total > 0 { text += String(format: " — %d%%", Int(Double(card.done) / Double(card.total) * 100)) }
+        if card.speed > 0 { text += " · " + formatSize(bytes: UInt64(card.speed)) + "/s" }
+        if running.count > 1 { text += " (+\(running.count - 1))" }
+        status.progress = text
+        status.progressFraction = card.total > 0 ? Double(card.done) / Double(card.total) : nil
+    }
+
+
+}
+
+/// Advanced › Show progress › On a floating card: a small card at the bottom right of the
+/// front window while something is being copied.
+@MainActor
+final class ProgressCard {
+    static let shared = ProgressCard()
+    private var panel: NSPanel?
+    private let label = NSTextField(labelWithString: "")
+    private let bar = NSProgressIndicator()
+
+    func update(_ running: [StatusCenter.Card]) {
+        guard AppSettings.progressPlace == "card", let card = running.first, let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+            panel?.orderOut(nil)
+            return
+        }
+        let p = panel ?? make()
+        var text = card.title
+        if card.speed > 0 { text += "\n" + formatSize(bytes: UInt64(card.speed)) + "/s" }
+        if running.count > 1 { text += "  (+\(running.count - 1))" }
+        label.stringValue = text
+        bar.isIndeterminate = card.total == 0
+        bar.doubleValue = card.total > 0 ? Double(card.done) / Double(card.total) * 100 : 0
+        let f = window.frame
+        p.setFrameOrigin(NSPoint(x: f.maxX - p.frame.width - 20, y: f.minY + 20))
+        if !p.isVisible { p.orderFront(nil) }
+        if p.parent == nil { window.addChildWindow(p, ordered: .above) }
+    }
+
+    private func make() -> NSPanel {
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 74), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+        p.isFloatingPanel = true
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        let glass = NSGlassEffectView(frame: p.contentView!.bounds)
+        glass.cornerRadius = 14
+        glass.autoresizingMask = [.width, .height]
+        let content = NSView(frame: glass.bounds)
+        label.frame = NSRect(x: 14, y: 26, width: 272, height: 38)
+        label.font = Metrics.textXs
+        label.maximumNumberOfLines = 2
+        label.lineBreakMode = .byTruncatingMiddle
+        bar.frame = NSRect(x: 14, y: 12, width: 272, height: 8)
+        bar.style = .bar
+        bar.minValue = 0
+        bar.maxValue = 100
+        content.addSubview(label)
+        content.addSubview(bar)
+        glass.contentView = content
+        p.contentView = glass
+        panel = p
+        return p
     }
 }

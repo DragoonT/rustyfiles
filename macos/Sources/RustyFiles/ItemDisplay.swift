@@ -16,6 +16,19 @@ final class ItemDisplay {
     }
 
     /// A folder that macOS treats as one file (an app, a bundle, a Photos library).
+    /// The name as shown: without the extension when Files › Show file extensions is off
+    /// (folders keep theirs).
+    func name(_ item: FileItem) -> String {
+        guard !AppSettings.showExtensions, !item.isDir || isPackage(item) else { return item.name }
+        return name(original: item.name)
+    }
+
+    func name(original: String) -> String {
+        guard !AppSettings.showExtensions else { return original }
+        let stem = (original as NSString).deletingPathExtension
+        return stem.isEmpty ? original : stem
+    }
+
     func isPackage(_ item: FileItem) -> Bool {
         guard item.isDir else { return false }
         let e = ext(item)

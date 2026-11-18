@@ -24,10 +24,13 @@ final class BrowserTab {
     var isHome: Bool { url == Self.homeURL }
     /// A page of the app's own rather than a folder.
     var isPage: Bool { isSettings || isHome }
+    /// A tag's results (rustyfiles:tag/<name>): the files that have it, from anywhere.
+    var tagName: String? { TagStore.name(of: url) }
 
     var info: TabInfo {
         if isSettings { return TabInfo(title: String(localized: "Settings"), icon: "settings") }
         if isHome { return TabInfo(title: String(localized: "Home"), icon: "house") }
+        if let tag = tagName { return TabInfo(title: tag, icon: "tag") }
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.standardizedFileURL
         if url == home { return TabInfo(title: fm.displayName(atPath: url.path), icon: "house") }
@@ -165,7 +168,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     /// lenses find their places again, or go, when the material changed).
     @objc private func settingsChanged(_ note: Notification) {
         let key = AppSettings.changedKey(note)
-        if key == "material" { applyMaterial() }
+        if key == "material" || key == "theme" { applyMaterial() }
         list.apply(settingKey: key)
         func redraw(_ v: NSView) {
             v.needsDisplay = true
@@ -187,8 +190,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         guard let window, let frameView else { return }
         backdrop?.removeFromSuperview()
         backdrop = nil
+        // Black (OLED) is opaque whatever the material
+        let material: AppSettings.Material = AppSettings.theme == .black ? .solid : AppSettings.material
         let view: NSView?
-        switch AppSettings.material {
+        switch material {
         case .glass:
             let g = NSGlassEffectView()
             g.style = .regular
@@ -203,9 +208,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case .solid:
             view = nil
         }
-        let glass = AppSettings.material == .glass
-        window.isOpaque = AppSettings.material == .solid
-        window.backgroundColor = AppSettings.material == .solid ? .windowBackgroundColor : .clear
+        let glass = material == .glass
+        window.isOpaque = material == .solid
+        window.backgroundColor = material == .solid ? .windowBackgroundColor : .clear
         window.hasShadow = !glass
         if let view {
             view.frame = frameView.bounds
@@ -256,6 +261,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         list.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
         list.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
         list.onRefresh = { [weak self] in self?.refresh(nil) }
+        list.onGoUp = { [weak self] in self?.goUp(nil) }
         sidebar.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
         sidebar.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
         titleBar.strip.menuFor = { [weak self] i in self?.tabMenu(i) }
@@ -270,6 +276,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     // MARK: tabs
 
     private func refreshTabs() {
+        defer { AppDelegate.shared.saveSession() }
         titleBar.strip.tabs = tabs.map(\.info)
         titleBar.strip.active = active
         titleBar.needsLayout = true
@@ -308,8 +315,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     @objc func newTab(_ sender: Any?) {
         saveTabState()
-        // a new tab opens Home, as on Windows
-        let t = BrowserTab(url: BrowserTab.homeURL)
+        // General › A new tab opens: Home, or the folder of the tab it opens from
+        let here = tab.isPage ? BrowserTab.homeURL : tab.url
+        let t = BrowserTab(url: AppSettings.newTabOpens == "current" ? here : BrowserTab.homeURL)
         tabs.insert(t, at: active + 1)
         active += 1
         navBar.omnibar.end()
@@ -325,13 +333,32 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private var closedTabs: [URL] = []
 
     /// A new tab right after the active one, showing `url`.
-    func openTab(_ url: URL) {
+    func openTab(_ url: URL, activate: Bool? = nil) {
         saveTabState()
         let t = BrowserTab(url: url)
         tabs.insert(t, at: active + 1)
+        // General › Always switch to a newly opened tab; off: it waits behind the current one
+        guard activate ?? AppSettings.switchToNewTab else {
+            refreshTabs()
+            return
+        }
         active += 1
         navBar.omnibar.end()
         load(t)
+        refreshTabs()
+    }
+
+    /// The tabs' addresses, in order (paths, or rustyfiles:home / :settings).
+    var tabAddresses: [String] { tabs.map { Sessions.string($0.url) } }
+    var activeTab: Int { active }
+
+    /// Opens these addresses as the window's tabs (a saved session).
+    func restore(_ addresses: [String], active a: Int) {
+        let urls = addresses.compactMap(Sessions.url)
+        guard !urls.isEmpty else { return }
+        tabs = urls.map { BrowserTab(url: $0) }
+        active = min(max(a, 0), tabs.count - 1)
+        load(tab)
         refreshTabs()
     }
 
@@ -424,6 +451,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             if t === tab { showTab() }
             return
         }
+        if t === tab, ArchivePlace.locate(url) == nil { list.prepareLayout(for: url) }
         let (column, ascending, first, hidden) = (list.sortKey.sort, list.ascending, list.foldersFirst, list.showHidden)
         if t === tab { updateChrome() }
         Task.detached(priority: .userInitiated) {
@@ -437,7 +465,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
                 }
                 return
             }
-            let result = Result { try Folder.open(path: url.path, column: column, ascending: ascending, foldersFirst: first, showHidden: hidden) }
+            let began = Date()
+            let result: Result<Folder, Error>
+            if let tag = TagStore.name(of: url) {
+                let paths = TagStore.files(tagged: tag)
+                result = .success(Folder.gathered(label: url.absoluteString, paths: paths, column: column, ascending: ascending, foldersFirst: first, showHidden: hidden))
+            } else {
+                result = Result { try Folder.open(path: url.path, column: column, ascending: ascending, foldersFirst: first, showHidden: hidden) }
+            }
             await MainActor.run { [weak self] in
                 guard let self, t.loadID == id else { return }
                 t.archive = nil
@@ -452,6 +487,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
                 guard t === self.tab else { return }
                 if keepScroll { t.scrollY = self.list.scrollY }
                 self.showTab()
+                // Advanced › Performance in the status bar
+                let ms = Date().timeIntervalSince(began) * 1000
+                self.list.status.performance = AppSettings.performanceInfo
+                    ? String(localized: "Listed in \(String(format: "%.0f", ms)) ms") : ""
                 if self.pendingRename {
                     self.pendingRename = false
                     self.list.beginRename()
@@ -537,7 +576,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     private func watch() {
-        watcher = tab.isPage ? nil : DirectoryWatcher(url: tab.url) { [weak self] in self?.reload() }
+        watcher = tab.isPage || !tab.url.isFileURL ? nil : DirectoryWatcher(url: tab.url) { [weak self] in self?.reload() }
     }
 
     private static func describe(_ error: Error, at url: URL) -> String {
@@ -555,25 +594,37 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private func updateChrome() {
         navBar.back.isEnabled = !tab.back.isEmpty
         navBar.forward.isEnabled = !tab.forward.isEmpty
-        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.url.path != "/")
+        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.tagName != nil || tab.url.path != "/")
         if tab.isSettings {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Settings"), url: BrowserTab.settingsURL)]
         } else if tab.isHome {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Home"), url: BrowserTab.homeURL)]
+        } else if let tag = tab.tagName {
+            navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Tags"), url: BrowserTab.homeURL), BreadcrumbView.Segment(title: tag, url: tab.url)]
         } else {
             navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: tab.url)
         }
-        navBar.omnibar.currentPath = tab.isPage ? "" : tab.url.path
+        navBar.omnibar.currentPath = tab.isPage || !tab.url.isFileURL ? "" : tab.url.path
         sidebar.selectedURL = tab.url
     }
 
     private func submitPath(_ text: String) {
         // "home" is the Home page, as on Windows
         if text.trimmingCharacters(in: .whitespaces).lowercased() == "home" { return goHome(nil) }
+        // "@name": a folder alias (Files › Folder aliases), "@name/sub" goes inside it
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("@") {
+            let parts = trimmed.dropFirst().split(separator: "/", maxSplits: 1).map(String.init)
+            if let first = parts.first, let target = AppSettings.folderAliases[first] ?? AppSettings.folderAliases.first(where: { $0.key.lowercased() == first.lowercased() })?.value {
+                return submitPath(parts.count > 1 ? target + "/" + parts[1] : target)
+            }
+        }
         let path = (text.trimmingCharacters(in: .whitespaces) as NSString).expandingTildeInPath
         let url = path.hasPrefix("/") ? URL(fileURLWithPath: path) : tab.url.appendingPathComponent(path)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            // Files › Run programs from the address bar
+            if AppSettings.addressCommands, !tab.isPage, AddressCommand.run(text, in: tab.url) { return }
             showError(String(localized: "“\(text)” can’t be found."))
             return
         }
@@ -585,6 +636,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     func showError(_ text: String) {
+        Log.write(text)
         guard let window else { return }
         let alert = NSAlert()
         alert.messageText = text
@@ -620,9 +672,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         // Settings goes up to Home, as on Windows
         if tab.isSettings { return goHome(sender) }
         if tab.isHome { return }
+        if tab.tagName != nil { return goHome(sender) }
         let parent = tab.url.deletingLastPathComponent()
         guard parent.path != tab.url.path else { return }
-        navigate(to: parent, selecting: tab.url.lastPathComponent)
+        navigate(to: parent, selecting: AppSettings.upSelectsPrevious ? tab.url.lastPathComponent : nil)
     }
 
     @objc func goHome(_ sender: Any?) { navigate(to: BrowserTab.homeURL) }

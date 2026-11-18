@@ -11,6 +11,7 @@ final class HomeView: FlippedView {
     private let content = FlippedView()
     private var quick: [HomeTile] = []
     private var drives: [HomeTile] = []
+    private var tagTiles: [HomeTile] = []
     private var recent: [RecentRow] = []
     private var headers: [HomeHeader] = []
     private let clear = PlainLinkButton(String(localized: "Clear"))
@@ -32,6 +33,9 @@ final class HomeView: FlippedView {
             center.addObserver(self, selector: #selector(volumesChanged), name: name, object: nil)
         }
         NotificationCenter.default.addObserver(self, selector: #selector(volumesChanged), name: .rfPinsChanged, object: nil)
+        NotificationCenter.default.addObserver(forName: .rfSettingsChanged, object: nil, queue: .main) { [weak self] note in
+            MainActor.assumeIsolated { if ["homeHidden", "tagList"].contains(AppSettings.changedKey(note)) { self?.reload() } }
+        }
         reload()
     }
 
@@ -44,15 +48,19 @@ final class HomeView: FlippedView {
     func reload() {
         content.subviews.forEach { $0.removeFromSuperview() }
         headers = []
-        quick = Self.quickAccess().map { place in
+        quick = !AppSettings.showsHome(.quick) ? [] : Self.quickAccess().map { place in
             HomeTile(kind: .folder(icon: place.icon), title: place.title, url: place.url) { [weak self] in self?.onOpenFolder?(place.url) }
         }
-        drives = Self.volumes().map { v in
+        drives = !AppSettings.showsHome(.drives) ? [] : Self.volumes().map { v in
             HomeTile(kind: .drive(icon: v.icon, used: v.used, detail: v.detail), title: v.title, url: v.url) { [weak self] in self?.onOpenFolder?(v.url) }
+        }
+        tagTiles = !AppSettings.showsHome(.tags) ? [] : TagStore.all.map { t in
+            HomeTile(kind: .folder(icon: "tag"), title: t.name, url: TagStore.url(t.name)) { [weak self] in self?.onOpenFolder?(TagStore.url(t.name)) }
         }
         headers.append(HomeHeader(String(localized: "Quick access")))
         headers.append(HomeHeader(String(localized: "Drives")))
-        (quick + drives).forEach(content.addSubview)
+        headers.append(HomeHeader(String(localized: "Tags")))
+        (quick + drives + tagTiles).forEach(content.addSubview)
         headers.forEach(content.addSubview)
         reloadRecent()
     }
@@ -118,6 +126,7 @@ final class HomeView: FlippedView {
     /// used" date, as Finder's Recents; the Windows app reads Windows' Recent folder).
     private func reloadRecent() {
         query?.stop()
+        guard AppSettings.showsHome(.recent) else { return showRecent([]) }
         let q = NSMetadataQuery()
         let since = max(Date().addingTimeInterval(-30 * 86_400).timeIntervalSince1970, UserDefaults.standard.double(forKey: "recentClearedAt"))
         q.predicate = NSPredicate(format: "kMDItemLastUsedDate >= %@", Date(timeIntervalSince1970: since) as NSDate)
@@ -205,11 +214,23 @@ final class HomeView: FlippedView {
             let rows = (tiles.count + cols - 1) / cols
             y += CGFloat(rows) * height + CGFloat(Swift.max(rows - 1, 0)) * 12 + 16
         }
-        header(0)
-        grid(quick, min: 140, max: 220, height: 80)
-        y += 8 + 16
-        header(1)
-        grid(drives, min: 240, max: 340, height: 72)
+        headers[0].isHidden = quick.isEmpty
+        headers[1].isHidden = drives.isEmpty
+        if !quick.isEmpty {
+            header(0)
+            grid(quick, min: 140, max: 220, height: 80)
+            y += 8 + 16
+        }
+        if !drives.isEmpty {
+            header(1)
+            grid(drives, min: 240, max: 340, height: 72)
+        }
+        headers[2].isHidden = tagTiles.isEmpty
+        if !tagTiles.isEmpty {
+            y += 8 + 16
+            header(2)
+            grid(tagTiles, min: 140, max: 220, height: 56)
+        }
         if let i = headers.firstIndex(where: \.isRecent) {
             y += 8 + 16
             header(i)

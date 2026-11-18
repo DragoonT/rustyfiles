@@ -53,6 +53,12 @@ final class ThumbnailCache {
         }
     }
 
+    /// Forgets every thumbnail (Advanced › Cache › Clear).
+    func clear() {
+        images = [:]
+        failed = []
+    }
+
     /// Forgets a folder's thumbnails (its files changed).
     func forget(under dir: String) {
         let prefix = dir.hasSuffix("/") ? dir : dir + "/"

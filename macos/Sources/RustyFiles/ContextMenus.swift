@@ -126,9 +126,12 @@ enum MenuActions {
     static func openWithMenu(_ urls: [URL], _ b: MenuBuilder) {
         guard let first = urls.first else { return }
         let fm = FileManager.default
-        let preferred = NSWorkspace.shared.urlForApplication(toOpen: first)
+        let preferred = OpenRules.opener(for: first) ?? NSWorkspace.shared.urlForApplication(toOpen: first)
         var apps = NSWorkspace.shared.urlsForApplications(toOpen: first)
         if let preferred { apps = [preferred] + apps.filter { $0 != preferred } }
+        // Settings › File types: the list's apps first, in its order
+        let own = (OpenRules.rule(for: first)?.apps ?? []).map { URL(fileURLWithPath: $0) }
+        apps = own + apps.filter { !own.contains($0) }
         for app in apps.prefix(24) {
             var title = fm.displayName(atPath: app.path)
             if app == preferred { title += " " + String(localized: "(default)") }
@@ -154,10 +157,9 @@ enum MenuActions {
     /// Finder's coloured tags (their names as this Mac calls them), checked when every
     /// selected item has the tag; choosing one gives it to all or takes it from all.
     static func tagsMenu(_ urls: [URL], _ b: MenuBuilder) {
-        let names = NSWorkspace.shared.fileLabels.dropFirst()
-        let colors = NSWorkspace.shared.fileLabelColors.dropFirst()
         let current = urls.map { Set((try? $0.resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []) }
-        for (name, color) in zip(names, colors) {
+        for tag in TagStore.all {
+            let name = tag.name
             let all = !current.isEmpty && current.allSatisfy { $0.contains(name) }
             let item = b.add(name, checked: all) {
                 for u in urls {
@@ -167,8 +169,10 @@ enum MenuActions {
                     try? (u as NSURL).setResourceValue(tags, forKey: .tagNamesKey)
                 }
             }
-            item.image = dot(color)
+            item.image = TagStore.dot(TagStore.color(tag.color))
         }
+        b.separator()
+        b.add(String(localized: "Edit tags…"), "settings") { AppDelegate.shared.frontController?.openSettings(page: .tags) }
     }
 
     private static func dot(_ color: NSColor) -> NSImage {
