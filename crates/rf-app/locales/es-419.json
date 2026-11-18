@@ -1956,5 +1956,11 @@
  "59fecfec": "La búsqueda de la isla izquierda: un cuadro, solo su ícono o ninguno. El logotipo sigue abriendo Inicio.",
  "19933c6f": "Si está desactivado, HyperSearch permanece vacío hasta que se escriba algo",
  "4317c020": "Actualización importante: rustyfiles {v}",
- "20d40d60": "Incluye correcciones importantes. Reinicie ahora."
+ "20d40d60": "Incluye correcciones importantes. Reinicie ahora.",
+ "dabd936b": "Buscar abre HyperSearch",
+ "03dab241": "Un clic en el cuadro o el icono de búsqueda del Dock abre HyperSearch en lugar de Inicio. El logotipo sigue abriendo Inicio.",
+ "29358266": "Abrir las carpetas de otros programas en una ventana nueva",
+ "23e9789e": "Cuando Win+E, el escritorio u otro programa abra una carpeta, se abrirá en una ventana nueva en lugar de en una pestaña nueva de la ventana abierta.",
+ "f4191aa7": "Abrir las sesiones guardadas en esta ventana",
+ "1fdf6441": "Una sesión abierta desde el menú de pestañas reemplaza las pestañas de esta ventana en lugar de abrir una ventana nueva (las pestañas cerradas vuelven con Ctrl+Shift+T)."
 }

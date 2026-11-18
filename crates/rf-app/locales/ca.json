@@ -1956,5 +1956,11 @@
  "59fecfec": "La cerca de l’illa esquerra: un quadre, només la icona o cap. El logotip continua obrint Inici.",
  "19933c6f": "Quan està desactivat, HyperSearch es queda buit fins que s’escriu alguna cosa",
  "4317c020": "Actualització important: rustyfiles {v}",
- "20d40d60": "Inclou correccions importants. Reinicia ara."
+ "20d40d60": "Inclou correccions importants. Reinicia ara.",
+ "dabd936b": "La cerca obre HyperSearch",
+ "03dab241": "Un clic al quadre de cerca o a la icona del dock obre HyperSearch en lloc d'Inici. El logotip continua obrint Inici.",
+ "29358266": "Obre les carpetes d'altres programes en una finestra nova",
+ "23e9789e": "Quan Win+E, l'escriptori o un altre programa obre una carpeta, aquesta rep una finestra nova en lloc d'una pestanya nova a la finestra oberta.",
+ "f4191aa7": "Obre les sessions desades en aquesta finestra",
+ "1fdf6441": "Una sessió oberta des del menú de pestanyes substitueix les pestanyes d'aquesta finestra en lloc d'obrir una finestra nova (les pestanyes tancades tornen amb Ctrl+Shift+T)."
 }

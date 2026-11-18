@@ -1956,5 +1956,11 @@
  "59fecfec": "The left island's search: a box, its icon only, or none. The logo still opens Start.",
  "19933c6f": "When off, HyperSearch stays empty until something is typed",
  "4317c020": "Important update: rustyfiles {v}",
- "20d40d60": "It brings important fixes. Restart now."
+ "20d40d60": "It brings important fixes. Restart now.",
+ "dabd936b": "Search opens HyperSearch",
+ "03dab241": "A click on the dock's search box or icon opens HyperSearch instead of Start. The logo still opens Start.",
+ "29358266": "Open folders from other programs in a new window",
+ "23e9789e": "When Win+E, the desktop or another program opens a folder, it gets a new window instead of a new tab in the open window.",
+ "f4191aa7": "Open saved sessions in this window",
+ "1fdf6441": "A session opened from the tab menu replaces this window's tabs instead of opening a new window (the closed tabs come back with Ctrl+Shift+T)."
 }

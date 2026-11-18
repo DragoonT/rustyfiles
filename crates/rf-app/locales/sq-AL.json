@@ -1956,5 +1956,11 @@
  "59fecfec": "Kërkimi i ishullit të majtë: një kuti, vetëm ikona, ose asgjë. Logoja hap prapë Fillimin.",
  "19933c6f": "Kur është joaktiv, HyperSearch mbetet bosh derisa të shkruhet diçka",
  "4317c020": "Përditësim i rëndësishëm: rustyfiles {v}",
- "20d40d60": "Sjell rregullime të rëndësishme. Rinise tani."
+ "20d40d60": "Sjell rregullime të rëndësishme. Rinise tani.",
+ "dabd936b": "Kërkimi hap HyperSearch",
+ "03dab241": "Një klikim te kutia ose ikona e kërkimit të dock-ut hap HyperSearch në vend të Start. Logoja hap ende Start.",
+ "29358266": "Hap dosjet nga programe të tjera në dritare të re",
+ "23e9789e": "Kur Win+E, desktopi ose një program tjetër hap një dosje, ajo merr një dritare të re në vend të një skede të re në dritaren e hapur.",
+ "f4191aa7": "Hap sesionet e ruajtura në këtë dritare",
+ "1fdf6441": "Një sesion i hapur nga menuja e skedave zëvendëson skedat e kësaj dritareje në vend që të hapë një dritare të re (skedat e mbyllura kthehen me Ctrl+Shift+T)."
 }

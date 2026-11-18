@@ -1956,5 +1956,11 @@
  "59fecfec": "Søgningen på venstre ø: et felt, kun dets ikon eller ingen. Logoet åbner stadig Start.",
  "19933c6f": "Når den er slået fra, forbliver HyperSearch tom, indtil der skrives noget",
  "4317c020": "Vigtig opdatering: rustyfiles {v}",
- "20d40d60": "Den indeholder vigtige rettelser. Genstart nu."
+ "20d40d60": "Den indeholder vigtige rettelser. Genstart nu.",
+ "dabd936b": "Søgning åbner HyperSearch",
+ "03dab241": "Et klik på dockens søgefelt eller ikon åbner HyperSearch i stedet for Start. Logoet åbner stadig Start.",
+ "29358266": "Åbn mapper fra andre programmer i et nyt vindue",
+ "23e9789e": "Når Win+E, skrivebordet eller et andet program åbner en mappe, får den et nyt vindue i stedet for en ny fane i det åbne vindue.",
+ "f4191aa7": "Åbn gemte sessioner i dette vindue",
+ "1fdf6441": "En session, der åbnes fra fanemenuen, erstatter dette vindues faner i stedet for at åbne et nyt vindue (de lukkede faner kommer tilbage med Ctrl+Shift+T)."
 }

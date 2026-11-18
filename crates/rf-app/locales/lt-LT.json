@@ -1956,5 +1956,11 @@
  "59fecfec": "Kairės salos paieška: laukas, tik piktograma arba nieko. Logotipas vis tiek atveria Pradžią.",
  "19933c6f": "Kai išjungta, HyperSearch lieka tuščia, kol nebus įvesta kas nors",
  "4317c020": "Svarbus naujinys: rustyfiles {v}",
- "20d40d60": "Jame svarbūs pataisymai. Paleiskite iš naujo dabar."
+ "20d40d60": "Jame svarbūs pataisymai. Paleiskite iš naujo dabar.",
+ "dabd936b": "Paieška atidaro HyperSearch",
+ "03dab241": "Spustelėjus doko paieškos lauką arba piktogramą, atidaromas HyperSearch, o ne Pradžia. Logotipas vis dar atidaro Pradžią.",
+ "29358266": "Atidaryti kitų programų aplankus naujame lange",
+ "23e9789e": "Kai Win+E, darbalaukis ar kita programa atidaro aplanką, jis gaunamas naujame lange, o ne nauju skirtuku atvirame lange.",
+ "f4191aa7": "Atidaryti išsaugotas sesijas šiame lange",
+ "1fdf6441": "Sesija, atidaryta iš skirtukų meniu, pakeičia šio lango skirtukus, o ne atidaro naują langą (uždaryti skirtukai grįžta su Ctrl+Shift+T)."
 }

@@ -1956,5 +1956,11 @@
  "59fecfec": "Ang paghahanap sa kaliwang isla: isang kahon, icon lamang, o wala. Bubukas pa rin ang logo ng Start.",
  "19933c6f": "Kapag naka-off, mananatiling walang laman ang HyperSearch hangga't walang tina-type",
  "4317c020": "Mahalagang update: rustyfiles {v}",
- "20d40d60": "Naglalaman ito ng mahahalagang pag-aayos. I-restart ngayon."
+ "20d40d60": "Naglalaman ito ng mahahalagang pag-aayos. I-restart ngayon.",
+ "dabd936b": "Binubuksan ng Search ang HyperSearch",
+ "03dab241": "Ang pag-click sa kahon ng paghahanap o icon ng dock ay nagbubukas ng HyperSearch sa halip na Start. Binubuksan pa rin ng logo ang Start.",
+ "29358266": "Buksan sa bagong window ang mga folder mula sa ibang programa",
+ "23e9789e": "Kapag binubuksan ng Win+E, ng desktop, o ng ibang programa ang isang folder, bagong window ang nakukuha nito sa halip na bagong tab sa bukas na window.",
+ "f4191aa7": "Buksan ang mga naka-save na session sa window na ito",
+ "1fdf6441": "Ang session na binuksan mula sa menu ng tab ay pumapalit sa mga tab ng window na ito sa halip na magbukas ng bagong window (babalik ang mga nasarang tab gamit ang Ctrl+Shift+T)."
 }

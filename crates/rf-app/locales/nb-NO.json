@@ -1956,5 +1956,11 @@
  "59fecfec": "Søket i venstre del: en boks, bare ikonet eller ingen. Logoen åpner fortsatt Start.",
  "19933c6f": "Når av, er HyperSearch tomt til noe skrives inn",
  "4317c020": "Viktig oppdatering: rustyfiles {v}",
- "20d40d60": "Den inneholder viktige rettelser. Start på nytt nå."
+ "20d40d60": "Den inneholder viktige rettelser. Start på nytt nå.",
+ "dabd936b": "Søk åpner HyperSearch",
+ "03dab241": "Et klikk på dokkens søkefelt eller ikon åpner HyperSearch i stedet for Start. Logoen åpner fortsatt Start.",
+ "29358266": "Åpne mapper fra andre programmer i et nytt vindu",
+ "23e9789e": "Når Win+E, skrivebordet eller et annet program åpner en mappe, får den et nytt vindu i stedet for en ny fane i det åpne vinduet.",
+ "f4191aa7": "Åpne lagrede økter i dette vinduet",
+ "1fdf6441": "En økt som åpnes fra fanemenyen erstatter fanene i dette vinduet i stedet for å åpne et nytt vindu (de lukkede fanene kommer tilbake med Ctrl+Shift+T)."
 }

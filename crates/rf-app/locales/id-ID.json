@@ -1956,5 +1956,11 @@
  "59fecfec": "Pencarian di pulau kiri: kotak, hanya ikonnya, atau tidak ada. Logo tetap membuka Mulai.",
  "19933c6f": "Saat nonaktif, HyperSearch tetap kosong sampai sesuatu diketik",
  "4317c020": "Pembaruan penting: rustyfiles {v}",
- "20d40d60": "Pembaruan ini berisi perbaikan penting. Mulai ulang sekarang."
+ "20d40d60": "Pembaruan ini berisi perbaikan penting. Mulai ulang sekarang.",
+ "dabd936b": "Cari membuka HyperSearch",
+ "03dab241": "Klik pada kotak atau ikon pencarian dock akan membuka HyperSearch, bukan Mulai. Logo tetap membuka Mulai.",
+ "29358266": "Buka folder dari program lain di jendela baru",
+ "23e9789e": "Saat Win+E, desktop, atau program lain membuka folder, folder itu mendapat jendela baru, bukan tab baru di jendela yang terbuka.",
+ "f4191aa7": "Buka sesi tersimpan di jendela ini",
+ "1fdf6441": "Sesi yang dibuka dari menu tab menggantikan tab jendela ini, bukan membuka jendela baru (tab yang ditutup kembali dengan Ctrl+Shift+T)."
 }

@@ -1956,5 +1956,11 @@
  "59fecfec": "La recherche de l'île de gauche : une zone de texte, son icône seule, ou aucune. Le logo ouvre toujours Démarrer.",
  "19933c6f": "Si désactivé, HyperSearch reste vide tant que rien n'est saisi",
  "4317c020": "Mise à jour importante : rustyfiles {v}",
- "20d40d60": "Elle apporte des corrections importantes. Redémarrer maintenant."
+ "20d40d60": "Elle apporte des corrections importantes. Redémarrer maintenant.",
+ "dabd936b": "La recherche ouvre HyperSearch",
+ "03dab241": "Un clic sur la zone ou l'icône de recherche du Dock ouvre HyperSearch au lieu du menu Démarrer. Le logo ouvre toujours le menu Démarrer.",
+ "29358266": "Ouvrir les dossiers des autres programmes dans une nouvelle fenêtre",
+ "23e9789e": "Quand Win+E, le Bureau ou un autre programme ouvre un dossier, celui-ci s'ouvre dans une nouvelle fenêtre au lieu d'un nouvel onglet dans la fenêtre ouverte.",
+ "f4191aa7": "Ouvrir les sessions enregistrées dans cette fenêtre",
+ "1fdf6441": "Une session ouverte depuis le menu des onglets remplace les onglets de cette fenêtre au lieu d'ouvrir une nouvelle fenêtre (les onglets fermés reviennent avec Ctrl+Maj+T)."
 }

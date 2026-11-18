@@ -1956,5 +1956,11 @@
  "59fecfec": "A pesquisa da ilha esquerda: uma caixa, apenas o ícone ou nenhuma. O logótipo continua a abrir o Iniciar.",
  "19933c6f": "Quando desativado, o HyperSearch fica vazio até se escrever algo",
  "4317c020": "Atualização importante: rustyfiles {v}",
- "20d40d60": "Traz correções importantes. Reinicie agora."
+ "20d40d60": "Traz correções importantes. Reinicie agora.",
+ "dabd936b": "Pesquisar abre o HyperSearch",
+ "03dab241": "Um clique na caixa ou no ícone de pesquisa do dock abre o HyperSearch em vez do Início. O logótipo continua a abrir o Início.",
+ "29358266": "Abrir pastas de outros programas numa nova janela",
+ "23e9789e": "Quando o Win+E, o ambiente de trabalho ou outro programa abrir uma pasta, esta recebe uma nova janela em vez de um novo separador na janela aberta.",
+ "f4191aa7": "Abrir as sessões guardadas nesta janela",
+ "1fdf6441": "Uma sessão aberta a partir do menu de separadores substitui os separadores desta janela em vez de abrir uma nova janela (os separadores fechados voltam com Ctrl+Shift+T)."
 }

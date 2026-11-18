@@ -1956,5 +1956,11 @@
  "59fecfec": "A bal oldali sziget keresése: mezőként, csak ikonként vagy sehogy. A logó továbbra is a Start menüt nyitja meg.",
  "19933c6f": "Kikapcsolva a HyperSearch üres marad, amíg nem gépel be valamit",
  "4317c020": "Fontos frissítés: rustyfiles {v}",
- "20d40d60": "Fontos javításokat tartalmaz. Indítsa újra most."
+ "20d40d60": "Fontos javításokat tartalmaz. Indítsa újra most.",
+ "dabd936b": "A keresés a HyperSearchöt nyitja meg",
+ "03dab241": "A dokk keresőmezőjére vagy ikonjára kattintva a Start helyett a HyperSearch nyílik meg. A logó továbbra is a Startot nyitja meg.",
+ "29358266": "Más programok mappáinak megnyitása új ablakban",
+ "23e9789e": "Ha a Win+E, az asztal vagy egy másik program mappát nyit meg, az új ablakot kap a megnyitott ablak új lapja helyett.",
+ "f4191aa7": "Mentett munkamenetek megnyitása ebben az ablakban",
+ "1fdf6441": "A lapmenüből megnyitott munkamenet az ablak lapjait cseréli le új ablak helyett (a bezárt lapok a Ctrl+Shift+T billentyűkkel térnek vissza)."
 }

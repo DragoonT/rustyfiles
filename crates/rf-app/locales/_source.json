@@ -11772,5 +11772,41 @@
   "key": "Önemli düzeltmeler içeriyor. Şimdi yeniden başlatın.",
   "tr": "Önemli düzeltmeler içeriyor. Şimdi yeniden başlatın.",
   "en": "It brings important fixes. Restart now."
+ },
+ {
+  "id": "dabd936b",
+  "key": "Arama HyperSearch'ü açar",
+  "tr": "Arama HyperSearch'ü açar",
+  "en": "Search opens HyperSearch"
+ },
+ {
+  "id": "03dab241",
+  "key": "Dock'taki arama kutusuna ya da simgesine tıklamak Başlat yerine HyperSearch'ü açar. Logo Başlat'ı yine açar.",
+  "tr": "Dock'taki arama kutusuna ya da simgesine tıklamak Başlat yerine HyperSearch'ü açar. Logo Başlat'ı yine açar.",
+  "en": "A click on the dock's search box or icon opens HyperSearch instead of Start. The logo still opens Start."
+ },
+ {
+  "id": "29358266",
+  "key": "Diğer programlardan açılan klasörler yeni pencerede açılsın",
+  "tr": "Diğer programlardan açılan klasörler yeni pencerede açılsın",
+  "en": "Open folders from other programs in a new window"
+ },
+ {
+  "id": "23e9789e",
+  "key": "Win+E, masaüstü ya da başka bir program bir klasör açtığında açık pencerede yeni sekme yerine yeni bir pencere açılır.",
+  "tr": "Win+E, masaüstü ya da başka bir program bir klasör açtığında açık pencerede yeni sekme yerine yeni bir pencere açılır.",
+  "en": "When Win+E, the desktop or another program opens a folder, it gets a new window instead of a new tab in the open window."
+ },
+ {
+  "id": "f4191aa7",
+  "key": "Kayıtlı oturumlar bu pencerede açılsın",
+  "tr": "Kayıtlı oturumlar bu pencerede açılsın",
+  "en": "Open saved sessions in this window"
+ },
+ {
+  "id": "1fdf6441",
+  "key": "Sekme menüsünden açılan oturum, yeni pencere yerine bu penceredeki sekmelerin yerini alır (kapanan sekmeler Ctrl+Shift+T ile geri gelir).",
+  "tr": "Sekme menüsünden açılan oturum, yeni pencere yerine bu penceredeki sekmelerin yerini alır (kapanan sekmeler Ctrl+Shift+T ile geri gelir).",
+  "en": "A session opened from the tab menu replaces this window's tabs instead of opening a new window (the closed tabs come back with Ctrl+Shift+T)."
  }
 ]

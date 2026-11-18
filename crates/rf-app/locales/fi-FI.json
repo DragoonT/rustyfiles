@@ -1956,5 +1956,11 @@
  "59fecfec": "Vasemman saarekkeen haku: hakukenttä, pelkkä kuvake tai ei mitään. Logo avaa edelleen Käynnistä-valikon.",
  "19933c6f": "Kun pois päältä, HyperSearch pysyy tyhjänä, kunnes jotain kirjoitetaan",
  "4317c020": "Tärkeä päivitys: rustyfiles {v}",
- "20d40d60": "Se sisältää tärkeitä korjauksia. Käynnistä uudelleen nyt."
+ "20d40d60": "Se sisältää tärkeitä korjauksia. Käynnistä uudelleen nyt.",
+ "dabd936b": "Haku avaa HyperSearchin",
+ "03dab241": "Dockin hakukentän tai kuvakkeen napsautus avaa HyperSearchin Käynnistyksen sijaan. Logo avaa edelleen Käynnistyksen.",
+ "29358266": "Avaa muiden ohjelmien kansiot uudessa ikkunassa",
+ "23e9789e": "Kun Win+E, työpöytä tai toinen ohjelma avaa kansion, se avautuu uuteen ikkunaan eikä avoimen ikkunan uuteen välilehteen.",
+ "f4191aa7": "Avaa tallennetut istunnot tässä ikkunassa",
+ "1fdf6441": "Välilehtivalikosta avattu istunto korvaa tämän ikkunan välilehdet uuden ikkunan sijaan (suljetut välilehdet palautuvat painamalla Ctrl+Shift+T)."
 }

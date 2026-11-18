@@ -1956,5 +1956,11 @@
  "59fecfec": "Tìm kiếm ở đảo bên trái: một hộp, chỉ biểu tượng hoặc không có. Logo vẫn mở Menu Start.",
  "19933c6f": "Khi tắt, HyperSearch để trống cho đến khi nhập nội dung",
  "4317c020": "Bản cập nhật quan trọng: rustyfiles {v}",
- "20d40d60": "Bản này có các bản sửa lỗi quan trọng. Khởi động lại ngay."
+ "20d40d60": "Bản này có các bản sửa lỗi quan trọng. Khởi động lại ngay.",
+ "dabd936b": "Tìm kiếm mở HyperSearch",
+ "03dab241": "Nhấp vào ô hoặc biểu tượng tìm kiếm trên Dock sẽ mở HyperSearch thay vì Start. Logo vẫn mở Start.",
+ "29358266": "Mở thư mục từ chương trình khác trong cửa sổ mới",
+ "23e9789e": "Khi Win+E, màn hình nền hoặc chương trình khác mở một thư mục, thư mục sẽ được mở trong cửa sổ mới thay vì thẻ mới trong cửa sổ đang mở.",
+ "f4191aa7": "Mở phiên đã lưu trong cửa sổ này",
+ "1fdf6441": "Phiên được mở từ menu thẻ sẽ thay thế các thẻ của cửa sổ này thay vì mở cửa sổ mới (các thẻ đã đóng được khôi phục bằng Ctrl+Shift+T)."
 }

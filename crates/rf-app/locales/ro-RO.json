@@ -1956,5 +1956,11 @@
  "59fecfec": "Căutarea din insula din stânga: o casetă, doar pictograma sau niciuna. Logo-ul deschide în continuare Start.",
  "19933c6f": "Când este dezactivat, HyperSearch rămâne gol până când se scrie ceva",
  "4317c020": "Actualizare importantă: rustyfiles {v}",
- "20d40d60": "Aduce corecturi importante. Reporniți acum."
+ "20d40d60": "Aduce corecturi importante. Reporniți acum.",
+ "dabd936b": "Căutarea deschide HyperSearch",
+ "03dab241": "Un clic pe caseta sau pictograma de căutare din dock deschide HyperSearch în locul Start. Logo-ul deschide în continuare Start.",
+ "29358266": "Deschide folderele din alte programe într-o fereastră nouă",
+ "23e9789e": "Când Win+E, desktopul sau alt program deschide un folder, acesta primește o fereastră nouă în loc de o filă nouă în fereastra deschisă.",
+ "f4191aa7": "Deschide sesiunile salvate în această fereastră",
+ "1fdf6441": "O sesiune deschisă din meniul filelor înlocuiește filele acestei ferestre în loc să deschidă o fereastră nouă (filele închise revin cu Ctrl+Shift+T)."
 }

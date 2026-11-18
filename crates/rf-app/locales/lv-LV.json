@@ -1956,5 +1956,11 @@
  "59fecfec": "Kreisās salas meklēšana: lauks, tikai ikona vai nekas. Logotips joprojām atver Sākumu.",
  "19933c6f": "Ja izslēgts, HyperSearch paliek tukšs, kamēr nekas nav ierakstīts",
  "4317c020": "Svarīgs atjauninājums: rustyfiles {v}",
- "20d40d60": "Tajā ir svarīgi labojumi. Restartēt tagad."
+ "20d40d60": "Tajā ir svarīgi labojumi. Restartēt tagad.",
+ "dabd936b": "Meklēšana atver HyperSearch",
+ "03dab241": "Klikšķis uz doka meklēšanas lauka vai ikonas atver HyperSearch, nevis Sākumu. Logotips joprojām atver Sākumu.",
+ "29358266": "Atvērt mapes no citām programmām jaunā logā",
+ "23e9789e": "Kad Win+E, darbvirsma vai cita programma atver mapi, tā tiek atvērta jaunā logā, nevis jaunā cilnē atvērtajā logā.",
+ "f4191aa7": "Atvērt saglabātās sesijas šajā logā",
+ "1fdf6441": "Sesija, kas atvērta no cilņu izvēlnes, aizstāj šī loga cilnes, nevis atver jaunu logu (aizvērtās cilnes atgriežas ar Ctrl+Shift+T)."
 }

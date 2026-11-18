@@ -1956,5 +1956,11 @@
  "59fecfec": "Hledání v levém ostrůvku: pole, pouze ikona, nebo nic. Logo stále otevírá Start.",
  "19933c6f": "Je-li vypnuto, HyperSearch zůstane prázdné, dokud se nezadá text",
  "4317c020": "Důležitá aktualizace: rustyfiles {v}",
- "20d40d60": "Přináší důležité opravy. Restartujte nyní."
+ "20d40d60": "Přináší důležité opravy. Restartujte nyní.",
+ "dabd936b": "Hledání otevírá HyperSearch",
+ "03dab241": "Kliknutí na vyhledávací pole nebo ikonu v docku otevře HyperSearch místo nabídky Start. Logo stále otevírá Start.",
+ "29358266": "Otevírat složky z jiných programů v novém okně",
+ "23e9789e": "Když složku otevře Win+E, plocha nebo jiný program, dostane nové okno místo nové karty v otevřeném okně.",
+ "f4191aa7": "Otevírat uložené relace v tomto okně",
+ "1fdf6441": "Relace otevřená z nabídky karet nahradí karty tohoto okna místo otevření nového okna (zavřené karty se obnoví klávesami Ctrl+Shift+T)."
 }

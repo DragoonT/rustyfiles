@@ -1956,5 +1956,11 @@
  "59fecfec": "A pesquisa da ilha esquerda: uma caixa, somente o ícone ou nenhuma. O logotipo ainda abre o Iniciar.",
  "19933c6f": "Quando desativado, o HyperSearch fica vazio até que algo seja digitado",
  "4317c020": "Atualização importante: rustyfiles {v}",
- "20d40d60": "Traz correções importantes. Reiniciar agora."
+ "20d40d60": "Traz correções importantes. Reiniciar agora.",
+ "dabd936b": "A pesquisa abre o HyperSearch",
+ "03dab241": "Um clique na caixa ou no ícone de pesquisa do dock abre o HyperSearch em vez do Início. O logotipo ainda abre o Início.",
+ "29358266": "Abrir pastas de outros programas em uma nova janela",
+ "23e9789e": "Quando o Win+E, a área de trabalho ou outro programa abrir uma pasta, ela recebe uma nova janela em vez de uma nova guia na janela aberta.",
+ "f4191aa7": "Abrir sessões salvas nesta janela",
+ "1fdf6441": "Uma sessão aberta pelo menu de guias substitui as guias desta janela em vez de abrir uma nova janela (as guias fechadas voltam com Ctrl+Shift+T)."
 }

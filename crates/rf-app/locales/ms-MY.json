@@ -1956,5 +1956,11 @@
  "59fecfec": "Carian pulau kiri: kotak, ikon sahaja, atau tiada. Logo masih membuka Mula.",
  "19933c6f": "Apabila dimatikan, HyperSearch kekal kosong sehingga sesuatu ditaip",
  "4317c020": "Kemas kini penting: rustyfiles {v}",
- "20d40d60": "Ia membawa pembetulan penting. Mulakan semula sekarang."
+ "20d40d60": "Ia membawa pembetulan penting. Mulakan semula sekarang.",
+ "dabd936b": "Carian dibuka dalam HyperSearch",
+ "03dab241": "Klik pada kotak atau ikon carian dok akan membuka HyperSearch dan bukannya Mula. Logo masih membuka Mula.",
+ "29358266": "Buka folder dari program lain dalam tetingkap baharu",
+ "23e9789e": "Apabila Win+E, desktop atau program lain membuka folder, folder itu mendapat tetingkap baharu dan bukannya tab baharu dalam tetingkap yang sedang dibuka.",
+ "f4191aa7": "Buka sesi tersimpan dalam tetingkap ini",
+ "1fdf6441": "Sesi yang dibuka dari menu tab menggantikan tab tetingkap ini dan bukannya membuka tetingkap baharu (tab yang ditutup kembali dengan Ctrl+Shift+T)."
 }

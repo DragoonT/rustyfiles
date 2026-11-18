@@ -1956,5 +1956,11 @@
  "59fecfec": "Die Suche der linken Insel: ein Feld, nur ihr Symbol oder keine. Das Logo öffnet weiterhin Start.",
  "19933c6f": "Wenn aus, bleibt HyperSearch leer, bis etwas eingegeben wird",
  "4317c020": "Wichtiges Update: rustyfiles {v}",
- "20d40d60": "Es enthält wichtige Korrekturen. Jetzt neu starten."
+ "20d40d60": "Es enthält wichtige Korrekturen. Jetzt neu starten.",
+ "dabd936b": "Suche öffnet HyperSearch",
+ "03dab241": "Ein Klick auf das Suchfeld oder das Symbol des Docks öffnet HyperSearch statt des Startmenüs. Das Logo öffnet weiterhin das Startmenü.",
+ "29358266": "Ordner aus anderen Programmen in einem neuen Fenster öffnen",
+ "23e9789e": "Wenn Win+E, der Desktop oder ein anderes Programm einen Ordner öffnet, erhält er ein neues Fenster statt eines neuen Tabs im geöffneten Fenster.",
+ "f4191aa7": "Gespeicherte Sitzungen in diesem Fenster öffnen",
+ "1fdf6441": "Eine Sitzung, die über das Tab-Menü geöffnet wird, ersetzt die Tabs dieses Fensters, statt ein neues Fenster zu öffnen (die geschlossenen Tabs kehren mit Strg+Umschalt+T zurück)."
 }

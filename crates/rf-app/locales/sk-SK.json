@@ -1956,5 +1956,11 @@
  "59fecfec": "Vyhľadávanie na ľavom ostrove: pole, iba ikona, alebo žiadne. Logo stále otvára Štart.",
  "19933c6f": "Ak je vypnuté, HyperSearch zostane prázdny, kým sa niečo nenapíše",
  "4317c020": "Dôležitá aktualizácia: rustyfiles {v}",
- "20d40d60": "Obsahuje dôležité opravy. Reštartujte teraz."
+ "20d40d60": "Obsahuje dôležité opravy. Reštartujte teraz.",
+ "dabd936b": "Hľadanie otvára HyperSearch",
+ "03dab241": "Kliknutie na vyhľadávacie pole alebo ikonu v doku otvorí HyperSearch namiesto ponuky Začiatok. Logo stále otvára ponuku Začiatok.",
+ "29358266": "Otvárať priečinky z iných programov v novom okne",
+ "23e9789e": "Keď Win+E, plocha alebo iný program otvorí priečinok, dostane nové okno namiesto novej karty v otvorenom okne.",
+ "f4191aa7": "Otvárať uložené relácie v tomto okne",
+ "1fdf6441": "Relácia otvorená z ponuky kariet nahradí karty tohto okna namiesto otvorenia nového okna (zatvorené karty sa vrátia klávesmi Ctrl+Shift+T)."
 }

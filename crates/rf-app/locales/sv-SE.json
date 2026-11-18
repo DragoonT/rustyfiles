@@ -1956,5 +1956,11 @@
  "59fecfec": "Sökningen på den vänstra ön: en ruta, endast ikonen eller ingen. Logotypen öppnar fortfarande Start.",
  "19933c6f": "När den är av förblir HyperSearch tom tills något skrivs",
  "4317c020": "Viktig uppdatering: rustyfiles {v}",
- "20d40d60": "Den innehåller viktiga rättelser. Starta om nu."
+ "20d40d60": "Den innehåller viktiga rättelser. Starta om nu.",
+ "dabd936b": "Sök öppnar HyperSearch",
+ "03dab241": "Ett klick på dockans sökruta eller ikon öppnar HyperSearch i stället för Start. Logotypen öppnar fortfarande Start.",
+ "29358266": "Öppna mappar från andra program i ett nytt fönster",
+ "23e9789e": "När Win+E, skrivbordet eller ett annat program öppnar en mapp får den ett nytt fönster i stället för en ny flik i det öppna fönstret.",
+ "f4191aa7": "Öppna sparade sessioner i det här fönstret",
+ "1fdf6441": "En session som öppnas från flikmenyn ersätter fönstrets flikar i stället för att öppna ett nytt fönster (de stängda flikarna återkommer med Ctrl+Shift+T)."
 }

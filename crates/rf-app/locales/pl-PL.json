@@ -1956,5 +1956,11 @@
  "59fecfec": "Wyszukiwarka lewej wyspy: pole, sama ikona lub brak. Logo nadal otwiera Start.",
  "19933c6f": "Gdy wyłączone, HyperSearch pozostaje pusty, dopóki nie zostanie coś wpisane",
  "4317c020": "Ważna aktualizacja: rustyfiles {v}",
- "20d40d60": "Zawiera ważne poprawki. Uruchom ponownie teraz."
+ "20d40d60": "Zawiera ważne poprawki. Uruchom ponownie teraz.",
+ "dabd936b": "Wyszukiwanie otwiera HyperSearch",
+ "03dab241": "Kliknięcie pola lub ikony wyszukiwania w Docku otwiera HyperSearch zamiast Start. Logo nadal otwiera Start.",
+ "29358266": "Otwieraj foldery z innych programów w nowym oknie",
+ "23e9789e": "Gdy Win+E, pulpit lub inny program otworzy folder, zostanie on otwarty w nowym oknie zamiast jako nowa karta w otwartym oknie.",
+ "f4191aa7": "Otwieraj zapisane sesje w tym oknie",
+ "1fdf6441": "Sesja otwarta z menu kart zastępuje karty tego okna zamiast otwierać nowe okno (zamknięte karty wrócą po naciśnięciu Ctrl+Shift+T)."
 }

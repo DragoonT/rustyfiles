@@ -1956,5 +1956,11 @@
  "59fecfec": "Het zoeken op het linker eiland: een vak, alleen het pictogram of geen. Het logo opent nog steeds Start.",
  "19933c6f": "Uit: HyperSearch blijft leeg tot er iets wordt getypt",
  "4317c020": "Belangrijke update: rustyfiles {v}",
- "20d40d60": "Het bevat belangrijke oplossingen. Nu opnieuw starten."
+ "20d40d60": "Het bevat belangrijke oplossingen. Nu opnieuw starten.",
+ "dabd936b": "Zoeken opent HyperSearch",
+ "03dab241": "Een klik op het zoekvak of het pictogram van het dock opent HyperSearch in plaats van Start. Het logo opent nog steeds Start.",
+ "29358266": "Mappen die door andere programma's worden geopend in een nieuw venster openen",
+ "23e9789e": "Wanneer Win+E, het bureaublad of een ander programma een map opent, krijgt die een nieuw venster in plaats van een nieuw tabblad in het geopende venster.",
+ "f4191aa7": "Opgeslagen sessies in dit venster openen",
+ "1fdf6441": "Een sessie die wordt geopend via het tabbladmenu vervangt de tabbladen van dit venster in plaats van een nieuw venster te openen (de gesloten tabbladen komen terug met Ctrl+Shift+T)."
 }
