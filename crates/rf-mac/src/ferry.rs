@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use rf_nearby::{Config, NearbyListener, NetStatus, Offer, Peer, TransferResult, Visibility};
+use rf_nearby::{Config, EstimateSource, LinkKind, NearbyListener, NetStatus, Offer, Peer, SpeedResult, TransferResult, Visibility};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum FerryVisibility {
@@ -49,17 +49,99 @@ pub struct FerryConfig {
     pub local_only: bool,
 }
 
+/// A device's network link, as its app said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FerryLink {
+    Unknown,
+    Wifi,
+    Ethernet,
+    Other,
+}
+
+impl From<LinkKind> for FerryLink {
+    fn from(k: LinkKind) -> Self {
+        match k {
+            LinkKind::Unknown => FerryLink::Unknown,
+            LinkKind::Wifi => FerryLink::Wifi,
+            LinkKind::Ethernet => FerryLink::Ethernet,
+            LinkKind::Other => FerryLink::Other,
+        }
+    }
+}
+
+impl From<FerryLink> for LinkKind {
+    fn from(k: FerryLink) -> Self {
+        match k {
+            FerryLink::Unknown => LinkKind::Unknown,
+            FerryLink::Wifi => LinkKind::Wifi,
+            FerryLink::Ethernet => LinkKind::Ethernet,
+            FerryLink::Other => LinkKind::Other,
+        }
+    }
+}
+
+/// What a speed estimate comes from, best first: a speed test, the last transfer, the links.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FerryEstimate {
+    Unknown,
+    Link,
+    Transfer,
+    Measured,
+}
+
+impl From<EstimateSource> for FerryEstimate {
+    fn from(e: EstimateSource) -> Self {
+        match e {
+            EstimateSource::Unknown => FerryEstimate::Unknown,
+            EstimateSource::Link => FerryEstimate::Link,
+            EstimateSource::Transfer => FerryEstimate::Transfer,
+            EstimateSource::Measured => FerryEstimate::Measured,
+        }
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct FerryPeer {
     pub id: String,
     pub name: String,
     pub os: String,
     pub trusted: bool,
+    pub link_kind: FerryLink,
+    pub link_mbps: u32,
+    pub estimate_bps: u64,
+    pub estimate_source: FerryEstimate,
+    pub rtt_ms: u32,
 }
 
 impl From<Peer> for FerryPeer {
     fn from(p: Peer) -> Self {
-        FerryPeer { id: p.id, name: p.name, os: p.os, trusted: p.trusted }
+        FerryPeer {
+            id: p.id,
+            name: p.name,
+            os: p.os,
+            trusted: p.trusted,
+            link_kind: p.link_kind.into(),
+            link_mbps: p.link_mbps,
+            estimate_bps: p.estimate_bps,
+            estimate_source: p.estimate_source.into(),
+            rtt_ms: p.rtt_ms,
+        }
+    }
+}
+
+/// A speed test's result, seen from this device: up is from here to the other device.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FerrySpeed {
+    pub ok: bool,
+    pub up_bps: u64,
+    pub down_bps: u64,
+    pub rtt_ms: u32,
+    pub error: Option<String>,
+}
+
+impl From<SpeedResult> for FerrySpeed {
+    fn from(r: SpeedResult) -> Self {
+        FerrySpeed { ok: r.ok, up_bps: r.up_bps, down_bps: r.down_bps, rtt_ms: r.rtt_ms, error: r.error }
     }
 }
 
@@ -154,6 +236,7 @@ pub trait FerryListener: Send + Sync {
     fn paired(&self, peer: String, ok: bool);
     fn visibility_changed(&self, visibility: FerryVisibility);
     fn status(&self, status: FerryStatus);
+    fn speed_measured(&self, peer: String, result: FerrySpeed);
 }
 
 /// rf-nearby's listener, forwarding to the Swift one.
@@ -186,6 +269,9 @@ impl NearbyListener for Bridge {
     }
     fn status(&self, status: NetStatus) {
         self.0.status(status.into())
+    }
+    fn speed_measured(&self, peer: String, result: SpeedResult) {
+        self.0.speed_measured(peer, result.into())
     }
 }
 
@@ -260,6 +346,17 @@ impl Ferry {
     pub fn forget(&self, peer_id: String) -> Result<(), FerryError> {
         Ok(self.inner.forget(peer_id)?)
     }
+    /// This device's link, told again whenever it changes (it is announced to the others).
+    pub fn set_link(&self, kind: FerryLink, mbps: u32) {
+        self.inner.set_link(kind.into(), mbps)
+    }
+    /// Measures the speed to and from a device (about 5 s); the result comes through the listener.
+    pub fn measure_speed(&self, peer_id: String) -> Result<u64, FerryError> {
+        Ok(self.inner.measure_speed(peer_id)?)
+    }
+    pub fn measure_speed_address(&self, address: String, peer_id: String) -> Result<u64, FerryError> {
+        Ok(self.inner.measure_speed_address(address, peer_id)?)
+    }
     /// Forgets the devices seen, looks again and announces this device again.
     pub fn refresh(&self) {
         self.inner.refresh()
@@ -282,6 +379,7 @@ mod tests {
     enum Ev {
         Offer(FerryOffer),
         Finished(FerryResult),
+        Speed(FerrySpeed),
     }
 
     /// A Swift-side listener stand-in: what crosses the bridge, collected.
@@ -303,6 +401,9 @@ mod tests {
         fn paired(&self, _: String, _: bool) {}
         fn visibility_changed(&self, _: FerryVisibility) {}
         fn status(&self, _: FerryStatus) {}
+        fn speed_measured(&self, _: String, result: FerrySpeed) {
+            let _ = self.0.lock().unwrap().send(Ev::Speed(result));
+        }
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
@@ -347,6 +448,22 @@ mod tests {
         let Ev::Finished(result) = b_events.recv_timeout(wait).unwrap() else { panic!("expected the end") };
         assert!(result.ok, "{:?}", result.error);
         assert_eq!(std::fs::read(dest.join("hello.txt")).unwrap(), b"merhaba");
+        a.stop();
+        b.stop();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A speed test runs across the bridge and comes back with both directions measured.
+    #[test]
+    fn a_speed_test_crosses_the_bridge() {
+        let d = scratch("speed");
+        let (a, a_events) = device("A", &d.join("a"));
+        let (b, _b_events) = device("B", &d.join("b"));
+        b.set_visibility(FerryVisibility::Everyone);
+        a.measure_speed_address(format!("127.0.0.1:{}", b.port()), b.id()).unwrap();
+        let Ev::Speed(r) = a_events.recv_timeout(Duration::from_secs(30)).unwrap() else { panic!("expected a speed result") };
+        assert!(r.ok, "{:?}", r.error);
+        assert!(r.up_bps > 0 && r.down_bps > 0, "{} / {}", r.up_bps, r.down_bps);
         a.stop();
         b.stop();
         let _ = std::fs::remove_dir_all(&d);

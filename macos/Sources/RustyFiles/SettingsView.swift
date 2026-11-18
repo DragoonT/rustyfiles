@@ -985,10 +985,12 @@ enum FerryPage {
                 icon: "wifi", control: .none))
         }
         for peer in svc.peers {
-            let detail = osName(peer.os) + (peer.trusted ? " · " + String(localized: "Trusted") : "")
-            rows.append(.card(
-                title: peer.name, detail: detail, icon: peer.trusted ? "shield-check" : "monitor",
-                control: peer.trusted ? .none : .buttons([(String(localized: "Pair"), { svc.pair(peer) })])))
+            var detail = osName(peer.os) + (peer.trusted ? " · " + String(localized: "Trusted") : "")
+            if let speed = speedText(peer) { detail += " · " + speed }
+            let test = svc.measuring.contains(peer.id) ? String(localized: "Measuring…") : String(localized: "Test speed")
+            var buttons: [(String, () -> Void)] = [(test, { svc.measureSpeed(peer) })]
+            if !peer.trusted { buttons.append((String(localized: "Pair"), { svc.pair(peer) })) }
+            rows.append(.card(title: peer.name, detail: detail, icon: peer.trusted ? "shield-check" : "monitor", control: .buttons(buttons)))
         }
         if !svc.trusted.isEmpty {
             rows.append(.section(String(localized: "Trusted devices")))
@@ -997,6 +999,32 @@ enum FerryPage {
             }
         }
         return rows
+    }
+
+    /// What the device's line says about speed, best first (as on Windows): a test's result
+    /// "↑ 48 MB/s · ↓ 52 MB/s · 3 ms", a measured or transfer estimate "~48 MB/s", a link
+    /// estimate "≈ 52 MB/s (Wi-Fi)", else the round trip "12 ms".
+    static func speedText(_ peer: FerryPeer) -> String? {
+        let rate = { (bps: UInt64) in formatSize(bytes: bps) + "/s" }
+        if let r = FerryService.shared.speeds[peer.id] {
+            if !r.ok { return r.error.map { FerryService.failureText($0) } ?? String(localized: "The speed test did not finish.") }
+            return "↑ \(rate(r.upBps)) · ↓ \(rate(r.downBps))" + (r.rttMs > 0 ? " · \(r.rttMs) ms" : "")
+        }
+        if peer.estimateBps > 0 {
+            switch peer.estimateSource {
+            case .measured, .transfer: return "~" + rate(peer.estimateBps)
+            case .link:
+                let kind: String
+                switch peer.linkKind {
+                case .wifi: kind = "Wi-Fi"
+                case .ethernet: kind = "Ethernet"
+                default: kind = String(localized: "network")
+                }
+                return "≈ \(rate(peer.estimateBps)) (\(kind))"
+            case .unknown: break
+            }
+        }
+        return peer.rttMs > 0 ? "\(peer.rttMs) ms" : nil
     }
 
     static func osName(_ os: String) -> String {

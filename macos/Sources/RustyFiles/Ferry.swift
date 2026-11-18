@@ -111,6 +111,9 @@ final class FerryService {
             problem = nil
             refreshLists()
             watchLocalNetwork()
+            LinkMonitor.shared.start()
+            let (kind, mbps) = LinkMonitor.shared.current()
+            f.setLink(kind: kind, mbps: mbps)
             becomeVisibleForPage()
         } catch {
             problem = error.localizedDescription
@@ -119,6 +122,7 @@ final class FerryService {
     }
 
     func stop() {
+        LinkMonitor.shared.stop()
         ferry?.stop()
         ferry = nil
         browser?.cancel()
@@ -197,6 +201,28 @@ final class FerryService {
     func refresh() {
         ferry?.refresh()
         peers = []
+        changed()
+    }
+
+    /// Speed tests: the last result per device, and the ones running now.
+    private(set) var speeds: [String: FerrySpeed] = [:]
+    private(set) var measuring: Set<String> = []
+
+    func measureSpeed(_ peer: FerryPeer) {
+        guard let ferry, !measuring.contains(peer.id) else { return }
+        do {
+            _ = try ferry.measureSpeed(peerId: peer.id)
+            measuring.insert(peer.id)
+        } catch {
+            speeds[peer.id] = FerrySpeed(ok: false, upBps: 0, downBps: 0, rttMs: 0, error: error.localizedDescription)
+        }
+        changed()
+    }
+
+    fileprivate func speedMeasured(_ peer: String, _ r: FerrySpeed) {
+        measuring.remove(peer)
+        speeds[peer] = r
+        refreshLists()
         changed()
     }
 
@@ -338,6 +364,7 @@ final class FerryService {
         }
         if lower.contains("declined") { return String(localized: "The other device declined.") }
         if lower.contains("busy with other offers") { return String(localized: "You already have an offer waiting on that device.") }
+        if lower.contains("busy with another speed test") { return String(localized: "That device is busy with another speed test. Try again in a few seconds.") }
         if lower.contains("arrived damaged") {
             return String(localized: "A file arrived damaged. Send again: the rest picks up where it stopped.")
         }
@@ -396,4 +423,5 @@ final class FerryEvents: FerryListener, @unchecked Sendable {
     func paired(peer: String, ok: Bool) { main { $0.paired(peer, ok) } }
     func visibilityChanged(visibility: FerryVisibility) { main { $0.visibilityChanged(visibility) } }
     func status(status: FerryStatus) { main { $0.status(status) } }
+    func speedMeasured(peer: String, result: FerrySpeed) { main { $0.speedMeasured(peer, result) } }
 }
