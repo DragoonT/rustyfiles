@@ -501,6 +501,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn templates_are_checked() {
         assert!(check_template(r"C:\Users\ali\Pictures\{year}\{month}", true).is_ok());
         assert!(check_template(r"Sıralı\{kind}", true).is_ok());
@@ -521,6 +523,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn rules_are_validated() {
         let ok = Rule {
             name: "Resimler".into(),

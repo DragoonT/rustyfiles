@@ -178,6 +178,8 @@ mod tests {
     use super::*;
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn the_tagged_items_of_one_folder() {
         let mut s = TagStore::default();
         let p = |x: &str| PathBuf::from(x);
