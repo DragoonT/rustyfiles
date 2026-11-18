@@ -1277,6 +1277,14 @@ impl Workspace {
         self.activate(0, window, cx);
     }
 
+    /// A new tab asked for by the user (Ctrl+T, "+", the tab menu): Home, or the folder of the tab in front when the setting says so.
+    fn open_new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let here = (cx.global::<crate::settings::Settings>().new_tab_opens == crate::settings::NewTabOpens::Current)
+            .then(|| self.tabs.get(self.active).map(|t| t.view().read(cx).location().clone()))
+            .flatten();
+        self.open_tab(here.unwrap_or(Location::Home), window, cx);
+    }
+
     /// Closes every tab and leaves one at Home (the closed ones can be reopened, Ctrl+Shift+T).
     fn close_all_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let old = self.tabs.len();
@@ -1357,7 +1365,7 @@ impl Workspace {
         };
         let n = self.tabs.len();
         let items = vec![
-            Item::action(t!("Yeni sekme"), MenuIcon::Lucide(L::Plus), act(|ws, _, w, cx| ws.open_tab(Location::Home, w, cx))).hint("Ctrl+T"),
+            Item::action(t!("Yeni sekme"), MenuIcon::Lucide(L::Plus), act(|ws, _, w, cx| ws.open_new_tab(w, cx))).hint("Ctrl+T"),
             Item::action(t!("Sekmeyi çoğalt"), MenuIcon::Lucide(L::Copy), act(|ws, ix, w, cx| {
                 if let Some(loc) = ws.tabs.get(ix).map(|t| t.view().read(cx).location().clone()) {
                     ws.open_tab(loc, w, cx);
@@ -2222,7 +2230,7 @@ impl Workspace {
                 // the title bar arms a window move on mouse down: the slightest jitter then
                 // swallows the mouse up and the click never happens
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(|this, _, window, cx| this.open_tab(Location::Home, window, cx)));
+                .on_click(cx.listener(|this, _, window, cx| this.open_new_tab(window, cx)));
         // after the new tab has grown, the next "+" slides out from behind it
         let new_tab: AnyElement = match self.tab_anim.as_ref().map(|(_, s)| *s) {
             Some(serial) => {
@@ -4410,7 +4418,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoHome, window, cx| this.navigate(Location::Home, window, cx)))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.with_tab(cx, |v, cx| v.refresh(cx))))
             .on_action(cx.listener(|this, _: &ToggleHidden, _, cx| this.with_tab(cx, |v, cx| v.toggle_hidden(cx))))
-            .on_action(cx.listener(|this, _: &NewTab, window, cx| this.open_tab(Location::Home, window, cx)))
+            .on_action(cx.listener(|this, _: &NewTab, window, cx| this.open_new_tab(window, cx)))
             .on_action(cx.listener(|this, _: &NewWindow, window, cx| {
                 // New window at the current folder, offset from this one.
                 let loc = this.active_tab().read(cx).location().clone();

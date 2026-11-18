@@ -474,6 +474,9 @@ pub struct Settings {
     pub startup_pages: Vec<String>,
     /// Switch to tabs opened with Ctrl+click / middle click / "Open in new tab".
     pub focus_new_tab: bool,
+    /// What a new tab opens (Ctrl+T, the "+" button, the tab menu): Home (the default) or the folder of the tab in front (a Reddit
+    /// suggestion, 2026-11-18). Duplicating a tab keeps its folder either way.
+    pub new_tab_opens: NewTabOpens,
     /// A folder opened from outside (Win+E, the desktop, another program) gets a window of its own instead of a tab in the newest
     /// window (issue 77). Off by default.
     pub launch_in_new_window: bool,
@@ -720,6 +723,15 @@ pub struct Settings {
     pub ferry_auto_accept_trusted: bool,
 }
 
+/// Settings -> General: what a new tab opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum NewTabOpens {
+    #[default]
+    Home,
+    Current,
+}
+
 /// Settings -> Ferry: who sees this PC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -780,6 +792,7 @@ impl Default for Settings {
             startup: StartupPref::Continue,
             startup_pages: Vec::new(),
             focus_new_tab: false,
+            new_tab_opens: NewTabOpens::Home,
             launch_in_new_window: false,
             sessions_in_this_window: false,
             dual_pane_new_tabs: false,

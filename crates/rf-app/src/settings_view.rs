@@ -741,6 +741,19 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         },
         cx,
     ));
+    v.push(card(
+        p,
+        L::Plus,
+        t!("Yeni sekme şunu açar"),
+        Some(t!("Ctrl+T, + düğmesi ve sekme menüsü. Sekmeyi çoğalt (Ctrl+Shift+K) her zaman aynı klasörü açar.")),
+        dropdown(
+            "new-tab-opens",
+            p,
+            s.new_tab_opens,
+            vec![(crate::settings::NewTabOpens::Home, t!("Ana sayfa").to_string()), (crate::settings::NewTabOpens::Current, t!("Açık olan klasör").to_string())],
+            |s, v| s.new_tab_opens = v,
+        ),
+    ));
     v.push(card(p, L::SquarePlus, t!("Her zaman yeni açılan sekmeye geç"), None, sw("focus-tab", p, s.focus_new_tab, |s, v| s.focus_new_tab = v)));
     v.push(card(
         p,

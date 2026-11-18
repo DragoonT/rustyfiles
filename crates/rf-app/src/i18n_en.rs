@@ -2038,4 +2038,7 @@ pub const EN: &[(&str, &str)] = &[
     ("O cihazla az önce hız ölçüldü; birkaç saniye sonra yeniden deneyin.", "The speed to that device was just tested; try again in a few seconds."),
     ("dosya gönderiyor", "is sending you files"),
     ("Kayıtlı oturum", "Saved session"),
+    ("Yeni sekme şunu açar", "A new tab opens"),
+    ("Ctrl+T, + düğmesi ve sekme menüsü. Sekmeyi çoğalt (Ctrl+Shift+K) her zaman aynı klasörü açar.", "Ctrl+T, the + button and the tab menu. Duplicate tab (Ctrl+Shift+K) always opens the same folder."),
+    ("Açık olan klasör", "The current folder"),
 ];
