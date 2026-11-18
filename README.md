@@ -282,6 +282,14 @@ Settings › Advanced › Set as default file manager. You can turn it off any t
 **Uninstall** like any app, from Windows Settings › Apps. Everything rustyfiles changed goes
 back to File Explorer.
 
+**Open/Save dialogs in other apps fail or crash** after rustyfiles' files were removed without an
+uninstall (a virus scanner, a broken update)? Starting rustyfiles again fixes it. If rustyfiles no
+longer starts, this PowerShell command gives every app Windows' own dialog back:
+
+```powershell
+Remove-Item -Recurse "HKCU:\Software\Classes\CLSID\{DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7}", "HKCU:\Software\Classes\CLSID\{C0B4E2F3-BA21-4773-8DBA-335EC946EB8B}"
+```
+
 Prefer no installer? A portable zip is on the [Releases](https://github.com/gelenmedya/rustyfiles/releases)
 page. Requires Windows 11 on x64 (Windows 10 is untested).
 

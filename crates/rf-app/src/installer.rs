@@ -55,21 +55,14 @@ fn after_install_or_update() {
     if rf_win::dialogs::starts_with_windows_as("DirectLook") {
         let _ = rf_win::dialogs::set_start_with_windows_as("DirectLook", &me.with_file_name("directlook.exe"), &["--background"], true);
     }
-    if rf_win::dialog_reg::is_enabled(rf_win::dialog_reg::CLASSES) {
-        if let Some(dll) = crate::dialog_dll() {
-            rf_win::dialog_reg::point_to(&dll, rf_win::dialog_reg::CLASSES);
-        }
-    }
+    let _ = crate::dialog_registration(crate::DialogReg::Follow);
 }
 
 /// A fresh install turns on rustyfiles' Open/Save dialogs (per user, no admin rights; Settings →
 /// Advanced turns them off). Updates don't, so someone who turned them off keeps them off.
 fn dialogs_on_by_default() {
-    let classes = rf_win::dialog_reg::CLASSES;
-    if !rf_win::dialog_reg::is_enabled(classes) {
-        if let Some(dll) = crate::dialog_dll() {
-            let _ = rf_win::dialog_reg::enable(&dll, classes);
-        }
+    if !rf_win::dialog_reg::is_enabled(rf_win::dialog_reg::CLASSES) {
+        let _ = crate::dialog_registration(crate::DialogReg::Enable);
     }
 }
 

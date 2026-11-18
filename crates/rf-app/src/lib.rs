@@ -122,17 +122,100 @@ pub static DEFAULT_FM: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 /// rustyfiles answers other apps' Open/Save dialogs (registry state, read off the UI thread).
 pub static FILE_DIALOGS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The Open/Save dialog DLL to register: a copy of the one next to this exe, outside the
-/// install folder (`%LocalAppData%\rustyfiles\dialog\<build>\`). Apps keep the registered DLL
-/// loaded, and an update can't replace an install folder with a loaded DLL in it. Next to the
-/// copy, `rustyfiles-exe.txt` tells the DLL which rustyfiles to start. Older copies go once no
-/// app has them loaded.
-pub(crate) fn dialog_dll() -> Option<String> {
+/// What [`dialog_registration`] does with the Open/Save dialog registration.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DialogReg {
+    /// Leave it on or off, but while it is on, point it at this build's copy (start-up, after an update).
+    Follow,
+    /// Turn it on (a fresh install, the setting).
+    Enable,
+}
+
+/// Brings the Open/Save dialog registration in line with this build. The registered DLL is a copy of the one next to this exe,
+/// outside the install folder (`%LocalAppData%\rustyfiles\dialog\<build>\`): apps keep it loaded, and an update can't replace an
+/// install folder with a loaded DLL in it. Next to the copy, `rustyfiles-exe.txt` tells the DLL which rustyfiles to start.
+///
+/// The registration must never point at a missing DLL: every app's Open/Save dialog then fails and some apps crash (issue 82). So
+/// the copy registered now is never deleted, all of it runs under a lock every rustyfiles process takes (two builds starting
+/// together, as at an update, deleted each other's copy), and a registration of ours whose DLL is gone, with no copy to point it at
+/// instead, is removed. Returns whether the registration changed.
+pub(crate) fn dialog_registration(mode: DialogReg) -> anyhow::Result<bool> {
+    use rf_win::dialog_reg as reg;
+    let root = PathBuf::from(std::env::var_os("LOCALAPPDATA").ok_or_else(|| anyhow::anyhow!("no LOCALAPPDATA"))?).join("rustyfiles").join("dialog");
+    let _ = std::fs::create_dir_all(&root);
+    let _lock = FileLock::take(&root.join(".lock"));
+    let dll = if mode == DialogReg::Enable || reg::any_ours(reg::CLASSES) { dialog_copy(&root) } else { None };
+    let mut changed = match (mode, &dll) {
+        (DialogReg::Enable, Some(dll)) => {
+            reg::enable(dll, reg::CLASSES)?;
+            true
+        }
+        (DialogReg::Enable, None) => anyhow::bail!("{} could not be copied from next to rustyfiles.exe", reg::DLL_NAME),
+        (DialogReg::Follow, Some(dll)) => reg::point_to(dll, reg::CLASSES),
+        (DialogReg::Follow, None) => false,
+    };
+    if reg::drop_dangling(reg::CLASSES) {
+        log::warn!("file dialogs: the registered DLL is gone; Windows' own dialog is back");
+        changed = true;
+    }
+    let mut keep: Vec<PathBuf> = reg::registered_paths(reg::CLASSES).iter().filter_map(|p| std::path::Path::new(p).parent().map(PathBuf::from)).collect();
+    keep.extend(dll.as_deref().and_then(|d| std::path::Path::new(d).parent().map(PathBuf::from)));
+    delete_old_copies(&root, &keep);
+    Ok(changed)
+}
+
+/// Deletes the copies under `root` except those in `keep` (one registered now: another build may have just registered it). A copy
+/// whose DLL an app has loaded stays whole, so the loaded DLL still finds rustyfiles-exe.txt.
+fn delete_old_copies(root: &std::path::Path, keep: &[PathBuf]) {
+    let same = |a: &std::path::Path, b: &std::path::Path| a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy());
+    let Ok(rd) = std::fs::read_dir(root) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        if !p.is_dir() || keep.iter().any(|k| same(k, &p)) {
+            continue;
+        }
+        let lib = p.join(rf_win::dialog_reg::DLL_NAME);
+        if std::fs::remove_file(&lib).is_ok() || !lib.exists() {
+            let _ = std::fs::remove_dir_all(&p);
+        }
+    }
+}
+
+#[cfg(test)]
+mod dialog_copy_tests {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    #[test]
+    fn the_registered_copy_and_loaded_copies_survive_the_clean_up() {
+        let root = std::env::temp_dir().join(format!("rf-dlgcopies-{}", std::process::id()));
+        let make = |name: &str| {
+            let d = root.join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(rf_win::dialog_reg::DLL_NAME), b"x").unwrap();
+            std::fs::write(d.join("rustyfiles-exe.txt"), b"x").unwrap();
+            d
+        };
+        let (registered, old, loaded) = (make("0.8.6-a"), make("0.8.5-b"), make("0.8.4-c"));
+        std::fs::write(root.join(".lock"), b"").unwrap();
+        // (an app holding the DLL: no delete sharing)
+        let held = std::fs::OpenOptions::new().read(true).share_mode(1).open(loaded.join(rf_win::dialog_reg::DLL_NAME)).unwrap();
+        let upper = std::path::PathBuf::from(registered.to_string_lossy().to_uppercase());
+        super::delete_old_copies(&root, &[upper]);
+        assert!(registered.join(rf_win::dialog_reg::DLL_NAME).exists(), "the registered copy was deleted");
+        assert!(!old.exists());
+        assert!(loaded.join(rf_win::dialog_reg::DLL_NAME).exists() && loaded.join("rustyfiles-exe.txt").exists());
+        assert!(root.join(".lock").exists());
+        drop(held);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+/// This build's copy of the dialog DLL under `root` (made when missing), with `rustyfiles-exe.txt` beside it.
+fn dialog_copy(root: &std::path::Path) -> Option<String> {
     let exe = std::env::current_exe().ok()?;
     let src = exe.with_file_name(rf_win::dialog_reg::DLL_NAME);
     let meta = std::fs::metadata(&src).ok()?;
     let stamp = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_secs());
-    let root = PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("rustyfiles").join("dialog");
     let dir = root.join(format!("{}-{:x}-{:x}", env!("CARGO_PKG_VERSION"), meta.len(), stamp));
     let dst = dir.join(rf_win::dialog_reg::DLL_NAME);
     if !dst.exists() {
@@ -143,14 +226,24 @@ pub(crate) fn dialog_dll() -> Option<String> {
         std::fs::rename(&part, &dst).ok()?;
     }
     let _ = std::fs::write(dir.join("rustyfiles-exe.txt"), exe.display().to_string());
-    if let Ok(rd) = std::fs::read_dir(&root) {
-        for e in rd.flatten() {
-            if e.path() != dir {
-                let _ = std::fs::remove_dir_all(e.path()); // fails while an app has it loaded
-            }
-        }
-    }
     Some(dst.display().to_string())
+}
+
+/// A lock across processes: a file held open with no sharing. Waits up to three seconds for it, then goes on without it (better
+/// than never registering).
+struct FileLock(#[allow(dead_code)] Option<std::fs::File>);
+
+impl FileLock {
+    fn take(path: &std::path::Path) -> FileLock {
+        use std::os::windows::fs::OpenOptionsExt as _;
+        for _ in 0..60 {
+            if let Ok(f) = std::fs::OpenOptions::new().create(true).truncate(false).write(true).share_mode(0).open(path) {
+                return FileLock(Some(f));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        FileLock(None)
+    }
 }
 
 /// Packaged apps' file pickers run in PickerHost.exe, which can only load the registered DLL if
@@ -523,14 +616,13 @@ pub fn main() {
                 }
             }
         }
-        // Open/Save dialogs: a registration whose DLL moved is pointed here (not from tests)
+        // Open/Save dialogs: a registration of another build is pointed at this one's copy, one whose DLL is gone is removed
+        // (not from tests)
         if registers {
-            if rf_win::dialog_reg::is_enabled(rf_win::dialog_reg::CLASSES) {
-                if let Some(dll) = dialog_dll() {
-                    if rf_win::dialog_reg::point_to(&dll, rf_win::dialog_reg::CLASSES) {
-                        log::warn!("file dialogs now use {dll}");
-                    }
-                }
+            match dialog_registration(DialogReg::Follow) {
+                Ok(true) => log::warn!("file dialogs: registration updated"),
+                Ok(false) => {}
+                Err(e) => log::warn!("file dialogs: {e:#}"),
             }
         }
         FILE_DIALOGS.store(rf_win::dialog_reg::is_enabled(rf_win::dialog_reg::CLASSES), std::sync::atomic::Ordering::Relaxed);

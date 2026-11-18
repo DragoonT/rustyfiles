@@ -2679,11 +2679,7 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
             }
             std::thread::spawn(move || {
                 let classes = rf_win::dialog_reg::CLASSES;
-                let r = match (dialogs_on, crate::dialog_dll()) {
-                    (true, _) => rf_win::dialog_reg::disable(classes),
-                    (false, Some(dll)) => rf_win::dialog_reg::enable(&dll, classes),
-                    (false, None) => Ok(()),
-                };
+                let r = if dialogs_on { rf_win::dialog_reg::disable(classes) } else { crate::dialog_registration(crate::DialogReg::Enable).map(|_| ()) };
                 if let Err(e) = r {
                     log::warn!("file dialogs: {e:#}");
                 }
