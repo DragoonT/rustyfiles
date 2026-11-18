@@ -264,6 +264,15 @@ some parts have had very little use. Expect rough edges, and please report what 
 
 Explorer keeps running underneath all of this; nothing of Windows is removed or replaced on disk.
 
+### Brightness for every monitor
+
+Windows has a brightness slider only for a laptop's own screen. The Dock's control centre has one
+for **each monitor**: turn on Settings › Dock, then click the network or volume icon on the right of
+the Dock. External monitors are set over **DDC/CI**, the standard almost every desktop monitor of the
+last fifteen years speaks over DisplayPort, HDMI and DVI. If a monitor has no slider, check that
+DDC/CI is on in the monitor's own menu; some docks, KVM switches and adapters don't pass it through.
+A laptop's own screen is set the way Windows' own slider does it (not tried on a laptop yet).
+
 ## Install
 
 Installing takes three clicks and no technical knowledge:
