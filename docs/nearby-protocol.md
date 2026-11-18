@@ -88,13 +88,13 @@ After a hello with `"purpose": { "kind": "speed" }` nothing touches the disk and
 is already testing it, that tested it less than 10 seconds ago, or when two tests already run ("the device is busy with another
 speed test").
 
-1. **Up.** The client opens a unidirectional stream and writes bytes that do not compress. The server counts what arrives for
-   2 seconds from the first byte, leaving out the first 200 ms (congestion control still ramping up), then stops the stream
+1. **Up.** The client opens a unidirectional stream and writes bytes that do not compress. The server leaves the first 750 ms
+   out (congestion control and Wi-Fi's rate still ramping up), counts what arrives for 2 seconds after that, then stops the stream
    (STOP_SENDING), and writes `SpeedReport` `{ "bytes": n, "micros": t }` on the control stream. A sender stops by itself after
-   2.5 s or 512 MiB.
+   3.25 s or 512 MiB.
 2. **Down.** The server opens a unidirectional stream and writes the same way; the client counts it the same way.
 3. The client closes the connection. Up is `bytes / micros` of the report, down the client's own count; the round trip is
-   QUIC's estimate on that connection.
+   QUIC's estimate on that connection right after the answer, before the load (after it, the filled queues make it look longer).
 
 A transfer of at least 4 MiB also gives a speed (bytes moved / time). The reference keeps the last of either per device (on disk
 for trusted devices) and, with nothing of the kind, estimates from the two `link` values: the slower of own and peer rate times

@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{Context as _, anyhow, bail};
-use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
 
 use crate::proto::{self, Answer, Done, FileHeader, Hello, Item, Outcome, PairConfirm, Purpose, SpeedReport};
 use crate::{EstimateSource, Inner, Offer, SpeedResult, TransferResult, Visibility};
@@ -15,6 +14,8 @@ use crate::{EstimateSource, Inner, Offer, SpeedResult, TransferResult, Visibilit
 /// Files sent at once, each on its own stream.
 const PARALLEL: usize = 4;
 const CHUNK: usize = 1 << 20;
+/// What the sender reads and the receiver writes at a time.
+const BLOCK: usize = 4 << 20;
 /// How long the other side may take to say yes to an offer or a pairing code.
 const DECISION: Duration = Duration::from_secs(180);
 const CONNECT: Duration = Duration::from_secs(6);
@@ -155,36 +156,64 @@ async fn send_inner(inner: &Arc<Inner>, tid: u64, addrs: &[SocketAddr], peer_id:
 }
 
 /// Sends one file from `offset` on a stream of its own; returns its BLAKE3 (of the whole file).
+/// Sends one file from `offset` on a stream of its own; returns its BLAKE3 (of the whole file). The file is read and hashed on a thread
+/// of its own in big blocks, a few ahead of the network: reading it through the runtime a megabyte at a time cost a fifth of the speed.
 async fn send_file(conn: &quinn::Connection, index: u32, path: &Path, offset: u64, done: &AtomicU64) -> anyhow::Result<String> {
     let mut stream = conn.open_uni().await?;
     proto::write_frame(&mut stream, &FileHeader { index, offset }).await?;
-    let mut file = tokio::fs::File::open(path).await.with_context(|| format!("cannot open {}", path.display()))?;
-    let mut hasher = blake3::Hasher::new();
-    if offset > 0 {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(4);
+    let path = path.to_path_buf();
+    let reader = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+        use std::io::Read as _;
+        let mut file = std::fs::File::open(&path).with_context(|| format!("cannot open {}", path.display()))?;
+        let mut hasher = blake3::Hasher::new();
         // (the part the other side already has still counts in the hash)
-        let mut head = tokio::fs::File::open(path).await?.take(offset);
-        let mut buf = vec![0u8; CHUNK];
+        if offset > 0 {
+            let mut head = (&mut file).take(offset);
+            let mut buf = vec![0u8; BLOCK];
+            loop {
+                let n = head.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
+            }
+        }
         loop {
-            let n = head.read(&mut buf).await?;
+            let mut buf = vec![0u8; BLOCK];
+            let n = read_full(&mut file, &mut buf)?;
             if n == 0 {
                 break;
             }
-            hasher.update(&buf[..n]);
+            buf.truncate(n);
+            hasher.update(&buf);
+            if tx.blocking_send(buf).is_err() {
+                // (the sending side gave up: its error is the one that counts)
+                break;
+            }
         }
-        file.seek(std::io::SeekFrom::Start(offset)).await?;
+        Ok(hasher.finalize().to_hex().to_string())
+    });
+    while let Some(buf) = rx.recv().await {
+        stream.write_all(&buf).await?;
+        done.fetch_add(buf.len() as u64, Ordering::Relaxed);
     }
-    let mut buf = vec![0u8; CHUNK];
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        stream.write_all(&buf[..n]).await?;
-        done.fetch_add(n as u64, Ordering::Relaxed);
-    }
+    let hash = reader.await??;
     stream.finish()?;
-    Ok(hasher.finalize().to_hex().to_string())
+    Ok(hash)
+}
+
+/// Reads until `buf` is full or the file ends.
+fn read_full(file: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+    use std::io::Read as _;
+    let mut n = 0;
+    while n < buf.len() {
+        match file.read(&mut buf[n..])? {
+            0 => break,
+            k => n += k,
+        }
+    }
+    Ok(n)
 }
 
 /// Reports `done / total` to the listener at most ten times a second while the transfer runs; stops once the flag it returns is set.
@@ -353,22 +382,57 @@ async fn receive(
             if let Some(dir) = stage.parent() {
                 tokio::fs::create_dir_all(dir).await?;
             }
-            let mut file = tokio::fs::OpenOptions::new().create(true).write(true).truncate(false).open(stage).await?;
-            file.set_len(header.offset).await?;
-            file.seek(std::io::SeekFrom::Start(header.offset)).await?;
-            let mut written = header.offset;
+            // the file is written, and hashed as it is written, on a thread of its own (the network hands over small pieces: one
+            // trip to the runtime's file threads each cost a fifth of the speed, and hashing it all again at the end took minutes)
+            let offset = header.offset;
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(1024);
+            let path = stage.clone();
+            let writer = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+                use std::io::{Read as _, Seek as _, Write as _};
+                let mut file = std::fs::OpenOptions::new().create(true).read(true).write(true).truncate(false).open(&path)?;
+                file.set_len(offset)?;
+                let mut hasher = blake3::Hasher::new();
+                // (what an earlier attempt left counts in the hash too)
+                if offset > 0 {
+                    let mut head = (&mut file).take(offset);
+                    let mut buf = vec![0u8; BLOCK];
+                    loop {
+                        let n = head.read(&mut buf)?;
+                        if n == 0 {
+                            break;
+                        }
+                        hasher.update(&buf[..n]);
+                    }
+                }
+                file.seek(std::io::SeekFrom::Start(offset))?;
+                let mut out = std::io::BufWriter::with_capacity(BLOCK, file);
+                while let Some(piece) = rx.blocking_recv() {
+                    hasher.update(&piece);
+                    out.write_all(&piece)?;
+                }
+                out.flush()?;
+                Ok(hasher.finalize().to_hex().to_string())
+            });
+            let mut written = offset;
             while let Some(chunk) = stream.read_chunk(CHUNK, true).await? {
                 written += chunk.bytes.len() as u64;
                 anyhow::ensure!(written <= sizes[index], "more bytes than offered");
-                file.write_all(&chunk.bytes).await?;
-                done.fetch_add(chunk.bytes.len() as u64, Ordering::Relaxed);
+                let n = chunk.bytes.len() as u64;
+                if tx.send(chunk.bytes.to_vec()).await.is_err() {
+                    // (the writer stopped: its error is the one that counts)
+                    break;
+                }
+                done.fetch_add(n, Ordering::Relaxed);
             }
-            file.flush().await?;
-            anyhow::Ok(())
+            drop(tx);
+            let hash = writer.await??;
+            anyhow::Ok((index, hash))
         }));
     }
+    let mut got_hashes = std::collections::HashMap::new();
     for t in tasks {
-        t.await??;
+        let (index, hash) = t.await??;
+        got_hashes.insert(index, hash);
     }
     ticker.store(true, Ordering::Relaxed);
     let Done { hashes } = proto::read_frame(ctl_recv).await?;
@@ -383,9 +447,8 @@ async fn receive(
         if !item.is_file() {
             continue;
         }
-        let p = stage.clone();
         let want = hashes.get(index).cloned().unwrap_or_default();
-        let got = tokio::task::spawn_blocking(move || hash_file(&p)).await??;
+        let got = got_hashes.get(&index).cloned().unwrap_or_default();
         if got != want {
             let _ = tokio::fs::remove_file(stage).await;
             failure = Some(format!("{} arrived damaged", item.path));
@@ -593,28 +656,14 @@ fn suffixed(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
-fn hash_file(path: &Path) -> anyhow::Result<String> {
-    use std::io::Read as _;
-    let mut f = std::fs::File::open(path)?;
-    let mut hasher = blake3::Hasher::new();
-    let mut buf = vec![0u8; CHUNK];
-    loop {
-        let n = f.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(hasher.finalize().to_hex().to_string())
-}
-
 // ------------------------------------------------------------------------------------------------------------------------- speed test
 
 /// How long each direction of a speed test is counted (the receiving side stops the stream then) and the most a side sends.
 const SPEED_TIME: Duration = Duration::from_secs(2);
 const SPEED_MAX: u64 = 512 << 20;
-/// The start of each direction is not counted: QUIC's congestion control is still ramping up.
-const SPEED_WARMUP: Duration = Duration::from_millis(200);
+/// The start of each direction is not counted: QUIC's congestion control and Wi-Fi's rate are still ramping up. 200 ms was too short:
+/// the direction measured first came out 15-25% lower than the same direction measured second (Windows and Mac, 2026-11-18).
+const SPEED_WARMUP: Duration = Duration::from_millis(750);
 /// The same device may test this one once in this long, and only this many tests run here at once.
 pub(crate) const SPEED_SPACING: Duration = Duration::from_secs(10);
 pub(crate) const SPEED_AT_ONCE: usize = 2;
@@ -659,11 +708,12 @@ async fn speed_client(inner: &Arc<Inner>, addrs: &[SocketAddr], peer_id: &str) -
     if !answer.accept {
         bail!("{}", answer.reason.unwrap_or_else(|| "the device declined".into()));
     }
+    // the round trip before the load: after it, the queues the test filled make it look several times longer
+    let rtt = rtt_ms(&conn);
     blast(conn.open_uni().await?).await;
     let report: SpeedReport = tokio::time::timeout(SPEED_TIME * 3, proto::read_frame(&mut recv)).await.map_err(|_| anyhow!("the device did not report"))??;
     let stream = tokio::time::timeout(SPEED_TIME * 2, conn.accept_uni()).await.map_err(|_| anyhow!("the device sent nothing"))??;
     let (bytes, micros) = measure(stream).await?;
-    let rtt = rtt_ms(&conn);
     let _ = send.finish();
     conn.close(0u32.into(), b"done");
     Ok((rate(report.bytes, report.micros), rate(bytes, micros), rtt, id))
@@ -689,6 +739,7 @@ async fn speed_serve(inner: &Arc<Inner>, conn: &quinn::Connection, send: &mut qu
     }
     let r = async {
         proto::write_frame(send, &Answer { accept: true, reason: None, resume: Vec::new() }).await?;
+        inner.note_rtt(peer_id, rtt_ms(conn));
         let stream = tokio::time::timeout(SPEED_TIME * 2, conn.accept_uni()).await.map_err(|_| anyhow!("nothing came"))??;
         let (bytes, micros) = measure(stream).await?;
         proto::write_frame(send, &SpeedReport { bytes, micros }).await?;
@@ -698,7 +749,6 @@ async fn speed_serve(inner: &Arc<Inner>, conn: &quinn::Connection, send: &mut qu
     }
     .await;
     inner.end_speed_test(peer_id);
-    inner.note_rtt(peer_id, rtt_ms(conn));
     r
 }
 
@@ -714,7 +764,7 @@ async fn blast(mut s: quinn::SendStream) {
     }
     let start = std::time::Instant::now();
     let mut sent = 0u64;
-    while sent < SPEED_MAX && start.elapsed() < SPEED_TIME + Duration::from_millis(500) {
+    while sent < SPEED_MAX && start.elapsed() < SPEED_WARMUP + SPEED_TIME + Duration::from_millis(500) {
         // (an error: the other side stopped reading, its time is up)
         if s.write_all(&buf).await.is_err() {
             return;
@@ -732,7 +782,7 @@ async fn measure(mut s: quinn::RecvStream) -> anyhow::Result<(u64, u64)> {
     let mut total = 0u64;
     loop {
         let until = match first {
-            Some(f) => f + SPEED_TIME,
+            Some(f) => f + SPEED_WARMUP + SPEED_TIME,
             None => begun + SPEED_TIME * 2,
         };
         match tokio::time::timeout(until.saturating_duration_since(std::time::Instant::now()), s.read_chunk(1 << 20, false)).await {
