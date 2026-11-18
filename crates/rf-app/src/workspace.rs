@@ -2261,7 +2261,14 @@ impl Workspace {
                 return;
             }
         }
-        let w = if sidebar { w.clamp(SIDEBAR_MIN, SIDEBAR_MAX) } else { w.clamp(PREVIEW_MIN, PREVIEW_MAX) };
+        let w = if sidebar {
+            w.clamp(SIDEBAR_MIN, SIDEBAR_MAX)
+        } else {
+            // (the list keeps its minimum width beside the pane and the sidebar)
+            let side = if !self.sidebar_open { 0. } else if self.sidebar_rail { RAIL_W } else { self.sidebar_w };
+            let room = (self.viewport_w - side - rf_core::previewpane::LIST_MIN_W).max(PREVIEW_MIN);
+            w.clamp(PREVIEW_MIN, room.min(PREVIEW_MAX))
+        };
         let cur = if sidebar { &mut self.sidebar_w } else { &mut self.preview_w };
         if (*cur - w).abs() < 0.5 {
             return;
@@ -3566,7 +3573,9 @@ fn rail_peek_width(full: f32, shown: f32) -> f32 {
 const RAIL_SNAP: f32 = 120.;
 const SIDEBAR_MAX: f32 = 420.;
 const PREVIEW_MIN: f32 = 220.;
-const PREVIEW_MAX: f32 = 720.;
+/// The widest a saved preview width is taken. While it is dragged the pane may grow as far as the list keeps its own minimum width
+/// (720 px used to be the end: too narrow to read a whole PDF page, a user asked on Threads, 2026-11-18).
+const PREVIEW_MAX: f32 = 2400.;
 
 /// Drag payloads for the pane edges.
 #[derive(Clone)]
