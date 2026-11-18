@@ -64,6 +64,14 @@ enum SettingsContent {
         case .general:
             return [
                 .card(
+                    title: String(localized: "Language"),
+                    detail: String(localized: "Takes effect when rustyfiles opens again."),
+                    icon: "languages",
+                    control: .choice(
+                        options: [("system", String(localized: "System")), ("en", "English"), ("tr", "Türkçe")],
+                        get: { AppSettings.language },
+                        set: { AppSettings.language = $0 })),
+                .card(
                     title: String(localized: "Date format"),
                     detail: nil,
                     icon: "calendar",

@@ -12,7 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Sizes and dates in rf-core's English wording until the interface is translated.
-        setEnglish(on: true)
+        // sizes and dates speak the interface's language ("bayt", decimal comma)
+        setEnglish(on: !AppSettings.speaksTurkish)
         AppSettings.apply()
         // RF_NOFERRY (development): a second copy of the app must not join the network as this Mac
         if ProcessInfo.processInfo.environment["RF_NOFERRY"] == nil { FerryService.shared.startIfEnabled() }
