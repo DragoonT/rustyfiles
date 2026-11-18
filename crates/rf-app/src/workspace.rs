@@ -2169,7 +2169,7 @@ impl Workspace {
                                 .rounded(theme::RADIUS_SM)
                                 .text_color(if active { p.text_secondary } else { p.text_tertiary })
                                 .when(!active, |d| d.invisible())
-                                .when(!roomy, |d| d.hidden()) // <--- ADD THIS LINE
+                                .when(!roomy, |d| d.hidden())
                                 .group_hover("tab", |s| s.visible())
                                 .hover(|s| s.bg(p.pressed).text_color(p.text))
                                 .when(!popups_open, |d| {
