@@ -219,6 +219,61 @@ pub struct Workspace {
 pub struct OpenWorkspaces(Vec<(AnyWindowHandle, WeakEntity<Workspace>)>);
 impl Global for OpenWorkspaces {}
 
+#[derive(Clone)]
+struct MainPlacement {
+    bounds: [f32; 5],
+    display: Option<(String, [f32; 2])>,
+}
+
+impl MainPlacement {
+    fn capture(window: &Window, cx: &App) -> Option<Self> {
+        let (b, max) = match window.window_bounds() {
+            WindowBounds::Windowed(b) => (b, 0.),
+            WindowBounds::Maximized(b) | WindowBounds::Fullscreen(b) => (b, 1.),
+        };
+        if b.size.width < px(500.) || b.size.height < px(350.) {
+            return None;
+        }
+        let bounds = [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height), max];
+        let current_display = window.display(cx);
+        let display = Workspace::hwnd(window)
+            .and_then(rf_win::dock::monitors::monitor_of_window)
+            .and_then(|h| {
+                let on_monitor = |id| u64::from(id) == h as u64;
+                current_display.as_ref().filter(|d| on_monitor(d.id())).cloned()
+                    .or_else(|| cx.displays().into_iter().find(|d| on_monitor(d.id())))
+            })
+            .or(current_display)
+            .and_then(|d| {
+                let offset = b.origin - d.bounds().origin;
+                Some((d.uuid().ok()?.to_string(), [f32::from(offset.x), f32::from(offset.y)]))
+            });
+        Some(Self { bounds, display })
+    }
+
+    fn apply(self, settings: &mut crate::settings::Settings) {
+        settings.window = Some(self.bounds);
+        settings.window_display = self.display;
+    }
+}
+
+#[derive(Default)]
+struct MainPlacements(std::collections::HashMap<WindowId, MainPlacement>);
+impl Global for MainPlacements {}
+
+fn remember_placement(window: &Window, cx: &mut App) {
+    if let Some(placement) = MainPlacement::capture(window, cx) {
+        cx.default_global::<MainPlacements>().0.insert(window.window_handle().window_id(), placement);
+    }
+}
+
+pub(crate) fn save_closed_placement(id: WindowId, cx: &mut App) {
+    if let Some(placement) = cx.default_global::<MainPlacements>().0.remove(&id) {
+        cx.update_global::<crate::settings::Settings, _>(|s, _| placement.apply(s));
+        cx.global::<crate::settings::Settings>().save();
+    }
+}
+
 /// A second launch forwarded its argument: open it as a tab in the most recent live window
 /// and bring that window up; with no window left, open a new one.
 /// Taskbar jump list: "New window" / "New tab" and the pinned folders. Rewritten only when the
@@ -453,8 +508,7 @@ pub fn save_all_sessions(cx: &mut App) {
             continue;
         }
         let _ = handle.update(cx, |_, window, cx| {
-            let wb = window.window_bounds();
-            ws.update(cx, |w, cx| w.save_session(Some(wb), cx));
+            ws.update(cx, |w, cx| w.save_session(window, cx));
         });
     }
 }
@@ -767,17 +821,21 @@ impl Workspace {
             cx.notify();
         })
         .detach();
-        // the hosted preview (its own window) follows the app window when it moves
-        cx.observe_window_bounds(window, |this: &mut Self, _, cx| {
+        // Keep the latest placement while the HWND is alive. Closing the native frame can
+        // destroy it before GPUI is able to update the workspace from its should-close callback.
+        remember_placement(window, cx);
+        cx.observe_window_bounds(window, |this: &mut Self, window, cx| {
+            if this.picker.is_none() {
+                remember_placement(window, cx);
+            }
             this.preview.update(cx, |pv, _| pv.invalidate_host());
             cx.notify();
         })
         .detach();
         let ws = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
-            let wb = window.window_bounds();
             if let Some(ws) = ws.upgrade() {
-                ws.update(cx, |w, cx| w.save_session(Some(wb), cx));
+                ws.update(cx, |w, cx| w.save_session(window, cx));
             }
             true
         });
@@ -925,6 +983,7 @@ impl Workspace {
             }
         }
         self.picker = Some(session);
+        cx.default_global::<MainPlacements>().0.remove(&window.window_handle().window_id());
         // the preview pane helps picking (Windows' dialogs have one too): on by default here,
         // and the sidebar starts as a strip of icons (it opens over the list while hovered)
         self.preview_open = true;
@@ -961,25 +1020,22 @@ impl Workspace {
         cx.notify();
     }
 
-    pub fn save_session(&mut self, bounds: Option<WindowBounds>, cx: &mut Context<Self>) {
+    fn save_session(&mut self, window: &Window, cx: &mut Context<Self>) {
         if self.picker.is_some() {
             return;
         }
-        let placement = bounds.map(|wb| {
-            let (b, max) = match wb {
-                WindowBounds::Windowed(b) => (b, 0.),
-                WindowBounds::Maximized(b) | WindowBounds::Fullscreen(b) => (b, 1.),
-            };
-            [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height), max]
-        });
+        let placement = MainPlacement::capture(window, cx);
+        if let Some(placement) = &placement {
+            cx.default_global::<MainPlacements>().0.insert(window.window_handle().window_id(), placement.clone());
+        }
         let (tabs, panes) = self.session_now(cx);
         let active = self.active;
         cx.update_global::<crate::settings::Settings, _>(|s, _| {
             s.session_tabs = tabs;
             s.session_panes = panes;
             s.session_active = active;
-            if placement.is_some() {
-                s.window = placement;
+            if let Some(placement) = placement {
+                placement.apply(s);
             }
         });
         // synchronous: the process is about to exit
@@ -1238,6 +1294,7 @@ impl Workspace {
         // the active index may stay the same while the tab under it changes: re-scroll
         self.tab_scrolled_to = None;
         if self.tabs.len() <= 1 {
+            self.save_session(window, cx);
             window.remove_window();
             return;
         }

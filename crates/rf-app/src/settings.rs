@@ -467,6 +467,8 @@ pub struct Settings {
     pub keybindings: std::collections::BTreeMap<String, String>,
     /// Last window placement: [x, y, width, height, maximized (0/1)].
     pub window: Option<[f32; 5]>,
+    /// Display UUID and the normal window's origin relative to that display.
+    pub window_display: Option<(String, [f32; 2])>,
 
     // ---- General
     pub date_format: DatePref,
@@ -788,6 +790,7 @@ impl Default for Settings {
             show_extensions: true,
             keybindings: Default::default(),
             window: None,
+            window_display: None,
             date_format: DatePref::Application,
             startup: StartupPref::Continue,
             startup_pages: Vec::new(),
