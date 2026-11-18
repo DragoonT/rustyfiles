@@ -878,6 +878,9 @@ static THEME: AtomicU8 = AtomicU8::new(0);
 /// The surface value (0..=100) the palette reads on every call, cheaper than the settings struct.
 static HG_SURFACE: AtomicU8 = AtomicU8::new(HG_DEFAULT[4]);
 static SOLID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The chosen material is one a Windows without materials can still give the MAIN window (Acrylic, HyperGlass): see
+/// [`main_window_only`].
+static MAIN_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 static ANIM: AtomicU8 = AtomicU8::new(0);
 
@@ -894,7 +897,15 @@ pub fn animations() -> bool {
 /// "Solid" background material: the palette paints an opaque window background. Also on a Windows without materials, whatever the
 /// setting says and in every process (a side process that never loads these settings asks too).
 pub fn solid_backdrop() -> bool {
-    SOLID.load(Ordering::Relaxed) || !materials_available()
+    SOLID.load(Ordering::Relaxed) || (!materials_available() && !MAIN_ONLY.load(Ordering::Relaxed))
+}
+
+/// The materials a Windows without Windows 11's materials (Windows 10) still gives the MAIN window: Acrylic, as the old blur behind
+/// it, and HyperGlass, which rustyfiles draws itself. Menus and popups stay plain there, since the blur-behind of a popup covered its
+/// whole frame (issue 24). Mica is not among them: there it left the window see-through. Issue 78: a Windows 10 user found Acrylic
+/// right on their PC and asked for it and HyperGlass back.
+pub fn main_window_only(b: BackdropPref) -> bool {
+    matches!(b, BackdropPref::Acrylic | BackdropPref::Glass)
 }
 
 /// Whether Windows gives windows a material (Mica, Mica Alt, Acrylic): from Windows 11 22H2 on (`rf_win::osver`, issue 24). Where it
@@ -1008,7 +1019,7 @@ impl Settings {
     /// The material the windows really have: the chosen one, or "Solid" on a Windows without materials. The setting itself is left
     /// as it is (the same file may be read on a Windows 11 later).
     pub fn backdrop_in_use(&self) -> BackdropPref {
-        if materials_available() { self.backdrop } else { BackdropPref::Solid }
+        if materials_available() || main_window_only(self.backdrop) { self.backdrop } else { BackdropPref::Solid }
     }
 
     /// Brings settings written by older versions up to date.
@@ -1119,6 +1130,7 @@ impl Settings {
         });
         rf_core::format::set_decimal_sizes(self.decimal_sizes);
         SOLID.store(self.backdrop == BackdropPref::Solid, Ordering::Relaxed);
+        MAIN_ONLY.store(main_window_only(self.backdrop), Ordering::Relaxed);
         ANIM.store(self.animations as u8, Ordering::Relaxed);
         // HyperGlass: the engine redraws every glass window once when the look changes, and does nothing for the same look again
         HG_SURFACE.store(self.hg_surface.min(100), Ordering::Relaxed);

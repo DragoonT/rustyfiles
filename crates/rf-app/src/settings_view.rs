@@ -974,10 +974,18 @@ fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
             (BackdropPref::Glass, t!("HyperGlass (deneysel)").into()),
         ]
     } else {
-        vec![(BackdropPref::Solid, t!("Düz").into())]
+        // Windows 10: Acrylic and HyperGlass for the main window only (issue 78); Mica left the window see-through there
+        vec![
+            (BackdropPref::Solid, t!("Düz").into()),
+            (BackdropPref::Acrylic, t!("Akrilik").into()),
+            (BackdropPref::Glass, t!("HyperGlass (deneysel)").into()),
+        ]
     };
     let control = dropdown("backdrop", p, s.backdrop_in_use(), choices, |s, v| s.backdrop = v);
     let mut notes: Vec<String> = Vec::new();
+    if !crate::settings::materials_available() && s.backdrop_in_use() != BackdropPref::Solid {
+        notes.push(t!("Bu Windows sürümünde malzeme yalnızca ana pencereye uygulanır; menüler ve açılır pencereler düz kalır.").to_string());
+    }
     if s.backdrop_in_use() == BackdropPref::Glass || crate::glass::forced() {
         notes.push(t!("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Ekranı canlı izleyip her değişiklikte yeniden çizdiği için Mica'dan daha fazla ekran kartı ve pil kullanır.").to_string());
         // Only where the windows really are hidden from screenshots: with a capture session (Windows 11 24H2 and the border-free capture

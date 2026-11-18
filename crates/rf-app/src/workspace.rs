@@ -3930,7 +3930,7 @@ impl Render for Workspace {
             if was_glass {
                 self.stop_glass(window);
             }
-            window.set_background_appearance(theme::window_material(match backdrop {
+            window.set_background_appearance(theme::main_window_material(match backdrop {
                 BackdropPref::Mica => WindowBackgroundAppearance::MicaBackdrop,
                 BackdropPref::MicaAlt => WindowBackgroundAppearance::MicaAltBackdrop,
                 BackdropPref::Acrylic => WindowBackgroundAppearance::Blurred,

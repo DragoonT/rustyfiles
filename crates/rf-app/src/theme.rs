@@ -205,6 +205,15 @@ pub fn window_material(wanted: WindowBackgroundAppearance) -> WindowBackgroundAp
     }
 }
 
+/// [`window_material`] for a MAIN window: on a Windows without materials it may still have Acrylic, the old blur behind it, when that
+/// is the chosen material (`settings::main_window_only`, issue 78). Popups never ask this.
+pub fn main_window_material(wanted: WindowBackgroundAppearance) -> WindowBackgroundAppearance {
+    match wanted {
+        WindowBackgroundAppearance::Blurred if !crate::settings::materials_available() => WindowBackgroundAppearance::Blurred,
+        _ => window_material(wanted),
+    }
+}
+
 /// The material of a popup (a menu, a flyout, a drop-down list): real glass when it was opened from a window that shows glass,
 /// else Windows' Acrylic, else none (and then [`popup_fill`] is its surface).
 pub fn popup_material(liquid: bool) -> WindowBackgroundAppearance {

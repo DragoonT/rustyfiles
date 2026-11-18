@@ -665,6 +665,7 @@ pub fn main() {
                 match page.as_str() {
                     "speed" => settings_view::Page::Speed,
                     "general" => settings_view::Page::General,
+                    "appearance" => settings_view::Page::Appearance,
                     "dock" => settings_view::Page::Dock,
                     "filetypes" => settings_view::Page::FileTypes,
                     _ => settings_view::Page::Look,

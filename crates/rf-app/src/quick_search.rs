@@ -984,7 +984,9 @@ pub fn toggle(cx: &mut App) {
     // automated UI tests: shown without taking the foreground from the user
     let test = std::env::var_os("RUSTYFILES_QUICK_SEARCH_NOACTIVATE").is_some();
     // with HyperGlass as the app's backdrop the search is on the same glass (the user asked); else Windows' acrylic as before
-    let glassy = cx.try_global::<Settings>().is_some_and(|s| s.backdrop_in_use() == crate::settings::BackdropPref::Glass);
+    // (not on a Windows without materials: there only the main window takes HyperGlass, issue 78)
+    let glassy = crate::settings::materials_available()
+        && cx.try_global::<Settings>().is_some_and(|s| s.backdrop_in_use() == crate::settings::BackdropPref::Glass);
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size(px(WIDTH), px(64.))))),
         display_id,
