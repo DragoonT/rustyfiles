@@ -973,6 +973,10 @@ enum FerryPage {
                 icon: "shield-check",
                 control: .toggle(get: { FerrySettings.autoAcceptTrusted }, set: { FerrySettings.autoAcceptTrusted = $0 })),
             .section(String(localized: "Nearby devices")),
+            .card(
+                title: String(localized: "Look again"),
+                detail: String(localized: "Forgets the devices listed, looks for them again and announces this Mac again."),
+                icon: "rotate-cw", control: .buttons([(String(localized: "Refresh"), { svc.refresh() })])),
         ]
         if svc.peers.isEmpty {
             rows.append(.card(

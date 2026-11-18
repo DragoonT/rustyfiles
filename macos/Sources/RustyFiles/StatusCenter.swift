@@ -371,9 +371,11 @@ final class FerryQuestions {
         let panel = self.panel ?? makePanel()
         self.panel = panel
         view.show(first.question, more: shown.count - 1)
+        // at least 380×176, taller when the text needs it: it grows upwards from the corner
+        let height = max(176, view.neededHeight(width: 380))
         if let screen = NSScreen.main {
             let v = screen.visibleFrame
-            panel.setFrameOrigin(NSPoint(x: v.maxX - 380 - 16, y: v.minY + 16))
+            panel.setFrame(NSRect(x: v.maxX - 380 - 16, y: v.minY + 16, width: 380, height: height), display: true)
         }
         panel.orderFrontRegardless()
     }
@@ -404,6 +406,7 @@ final class FerryQuestions {
             backdrop = v
         }
         backdrop.frame = NSRect(x: 0, y: 0, width: 380, height: 176)
+        backdrop.autoresizingMask = [.width, .height]
         view.frame = backdrop.bounds
         view.autoresizingMask = [.width, .height]
         backdrop.addSubview(view)
@@ -449,6 +452,44 @@ final class FerryQuestionView: FlippedView {
         needsDisplay = true
     }
 
+    /// The question's text as laid out at `width`.
+    private func lines(width: CGFloat) -> (title: String, line: String, code: String?) {
+        guard let question else { return ("", "", nil) }
+        switch question {
+        case .offer(let o):
+            let what: String
+            switch o.names.count {
+            case 0: what = o.fileCount == 1 ? String(localized: "1 item") : String(localized: "\(o.fileCount) items")
+            case 1: what = o.names[0]
+            default: what = String(localized: "\(o.names[0]) and \(o.names.count - 1) items")
+            }
+            let line = "\(what) · \(formatSize(bytes: o.totalBytes))"
+                + (o.trusted ? "" : "\n" + String(localized: "Unpaired device: its name can’t be verified"))
+            return (String(localized: "\(o.fromName) wants to send you files"), line, nil)
+        case .pairing(_, let name, let c):
+            return (
+                String(localized: "Pair: \(name)"),
+                String(localized: "Make sure both devices show the same code. Paired devices can send each other files without asking."),
+                c.count == 6 ? "\(c.prefix(3)) \(c.suffix(3))" : c
+            )
+        }
+    }
+
+    private func lineHeight(_ text: String, width: CGFloat) -> CGFloat {
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byWordWrapping
+        return ceil((text as NSString).boundingRect(
+            with: NSSize(width: width, height: 1000), options: [.usesLineFragmentOrigin],
+            attributes: [.font: Metrics.textXs, .paragraphStyle: para]).height)
+    }
+
+    /// How tall the window must be to show everything: header, title, the line in full, the
+    /// code, the buttons.
+    func neededHeight(width: CGFloat) -> CGFloat {
+        let t = lines(width: width)
+        return 16 + 22 + 24 + lineHeight(t.line, width: width - 32) + (t.code != nil ? 36 : 0) + 12 + 32 + 16
+    }
+
     override func layout() {
         super.layout()
         let ys = yes.intrinsicContentSize, ns = no.intrinsicContentSize
@@ -468,33 +509,17 @@ final class FerryQuestionView: FlippedView {
             Draw.text("+\(more)", in: NSRect(x: bounds.width - 16 - 60, y: y, width: 60, height: 18), font: Metrics.textXs, color: p.textSecondary, align: .right)
         }
         y += 18 + 4
-        let title: String, line: String
-        var code: String?
-        switch question {
-        case .offer(let o):
-            title = String(localized: "\(o.fromName) wants to send you files")
-            let what: String
-            switch o.names.count {
-            case 0: what = o.fileCount == 1 ? String(localized: "1 item") : String(localized: "\(o.fileCount) items")
-            case 1: what = o.names[0]
-            default: what = String(localized: "\(o.names[0]) and \(o.names.count - 1) items")
-            }
-            line = "\(what) · \(formatSize(bytes: o.totalBytes))"
-                + (o.trusted ? "" : "\n" + String(localized: "Unpaired device: its name can’t be verified"))
-        case .pairing(_, let name, let c):
-            title = String(localized: "Pair: \(name)")
-            line = String(localized: "Make sure both devices show the same code. Paired devices can send each other files without asking.")
-            code = c.count == 6 ? "\(c.prefix(3)) \(c.suffix(3))" : c
-        }
+        let (title, line, code) = lines(width: bounds.width)
         Draw.text(title, in: NSRect(x: 16, y: y, width: bounds.width - 32, height: 20), font: NSFont.systemFont(ofSize: 14, weight: .semibold), color: p.text)
         y += 20 + 4
         let para = NSMutableParagraphStyle()
         para.lineBreakMode = .byWordWrapping
+        let lh = lineHeight(line, width: bounds.width - 32)
         (line as NSString).draw(
-            with: NSRect(x: 16, y: y, width: bounds.width - 32, height: 34), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+            with: NSRect(x: 16, y: y, width: bounds.width - 32, height: lh), options: [.usesLineFragmentOrigin],
             attributes: [.font: Metrics.textXs, .foregroundColor: p.textSecondary, .paragraphStyle: para])
         if let code {
-            Draw.text(code, in: NSRect(x: 16, y: y + 34, width: bounds.width - 32, height: 32), font: NSFont.monospacedDigitSystemFont(ofSize: 24, weight: .bold), color: p.text)
+            Draw.text(code, in: NSRect(x: 16, y: y + lh + 4, width: bounds.width - 32, height: 32), font: NSFont.monospacedDigitSystemFont(ofSize: 24, weight: .bold), color: p.text)
         }
     }
 }

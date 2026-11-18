@@ -260,6 +260,10 @@ impl Ferry {
     pub fn forget(&self, peer_id: String) -> Result<(), FerryError> {
         Ok(self.inner.forget(peer_id)?)
     }
+    /// Forgets the devices seen, looks again and announces this device again.
+    pub fn refresh(&self) {
+        self.inner.refresh()
+    }
     pub fn cancel(&self, transfer: u64) {
         self.inner.cancel(transfer)
     }
