@@ -62,6 +62,24 @@ pub fn place_quietly(hwnd: isize, r: [i32; 4]) {
     }
 }
 
+/// Whether the window under the mouse belongs to another top-level window than `own` (another program, or another window of ours).
+/// Both sides are compared by their top-level window, so a window that is a child of Explorer's desktop counts as itself.
+pub fn other_window_at_cursor(own: isize) -> bool {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::{GA_ROOT, GetAncestor, GetCursorPos, WindowFromPoint};
+    let mut pt = POINT::default();
+    if unsafe { GetCursorPos(&mut pt) }.is_err() {
+        return false;
+    }
+    let under = unsafe { WindowFromPoint(pt) };
+    if under.0.is_null() {
+        return false;
+    }
+    let root = unsafe { GetAncestor(under, GA_ROOT) };
+    let own_root = unsafe { GetAncestor(HWND(own as *mut _), GA_ROOT) };
+    !root.0.is_null() && root != own_root && root.0 as isize != own
+}
+
 pub fn is_minimized(hwnd: isize) -> bool {
     unsafe { windows::Win32::UI::WindowsAndMessaging::IsIconic(HWND(hwnd as *mut _)).as_bool() }
 }

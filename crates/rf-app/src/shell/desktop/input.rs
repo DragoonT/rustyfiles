@@ -280,7 +280,10 @@ impl DesktopView {
         }
         let vp = window.viewport_size();
         let outside = ev.position.x < px(0.) || ev.position.y < px(0.) || ev.position.x > vp.width || ev.position.y > vp.height;
-        if outside && d.files && !layout_only {
+        // a window over the desktop (a folder, a program, the dock) is not the desktop either: the desktop fills the screen, so the
+        // pointer never left it there, and the drop only moved the icon (a Reddit report, 2026-11-18)
+        let over_other = !outside && d.files && !layout_only && rf_win::window::other_window_at_cursor(crate::look::window::hwnd_of(window));
+        if (outside || over_other) && d.files && !layout_only {
             self.leave_window_with_the_drag(window, cx);
             return;
         }
