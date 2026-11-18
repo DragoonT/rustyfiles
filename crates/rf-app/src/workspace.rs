@@ -759,6 +759,7 @@ impl Workspace {
             cx.notify();
         })
         .detach();
+        cx.observe_global::<crate::tags::Tags>(|_, cx| cx.notify()).detach();
         // The system's light / dark switch reaches the window as an event only; nothing else redraws it. The palette and the glass's tint
         // (`set_dark`) are decided in `render`, so a window left alone would keep the old theme until the next click.
         cx.observe_window_appearance(window, |_: &mut Self, window, cx| {
@@ -2431,6 +2432,7 @@ impl Workspace {
         }
         let me = cx.entity().downgrade();
         let is_pinned = self.current_pins(cx).contains(&path);
+        let root = path.parent().is_none();
         let with = |f: fn(&mut Workspace, PathBuf, &mut Window, &mut Context<Workspace>)| {
             let (me, path) = (me.clone(), path.clone());
             move |w: &mut Window, cx: &mut App| {
@@ -2438,7 +2440,7 @@ impl Workspace {
                 let _ = me.update(cx, |ws, cx| f(ws, p, w, cx));
             }
         };
-        let items = vec![
+        let mut items = vec![
             Item::action(t!("Aç"), MenuIcon::Lucide(L::SquareArrowOutUpRight), with(|ws, p, w, cx| ws.navigate(Location::Path(p), w, cx))),
             Item::action(t!("Yeni sekmede aç"), MenuIcon::Lucide(L::SquarePlus), with(|ws, p, w, cx| {
                 let keep = ws.active;
@@ -2459,6 +2461,11 @@ impl Workspace {
             } else {
                 Item::action(t!("Kenar çubuğuna sabitle"), MenuIcon::Lucide(L::Pin), with(|ws, p, _, cx| ws.set_pinned(p, true, cx)))
             },
+        ];
+        if !root && cx.global::<crate::settings::Settings>().menu.tags && !cx.global::<crate::tags::Tags>().0.defs.is_empty() {
+            items.push(Item::sub(t!("Etiketler"), MenuIcon::Lucide(L::Tag), crate::tags::menu_items(std::slice::from_ref(&path), cx)));
+        }
+        items.extend([
             Item::action(t!("Yolu kopyala"), MenuIcon::Lucide(L::ClipboardCopy), with(|_, p, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(p.display().to_string()))
             })),
@@ -2474,9 +2481,8 @@ impl Workspace {
             .hint("Alt+Enter"),
             Item::Separator,
             Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
-        ];
+        ]);
         // a drive can be taken off the lists of places (it comes back from Settings > Files and folders)
-        let mut items = items;
         if let Some(letter) = crate::settings_view::drive_letter(&path) {
             let at = items.len() - 2;
             items.insert(
@@ -2486,7 +2492,6 @@ impl Workspace {
         }
         // the row of quick buttons the file list's menu has (issue 53: "Can't do basic functions like copy, cut, delete, rename for
         // the folders at the left pane"). A drive's root can be pasted into, not cut, renamed or deleted.
-        let root = path.parent().is_none();
         let quick = {
             use crate::fluent_menu::Quick;
             let clip = |kind: rf_win::fileops::Transfer| {
@@ -3160,6 +3165,7 @@ impl Workspace {
             let b = s.as_bytes();
             (b.len() <= 3 && b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic()).then(|| (b[0] as char).to_ascii_uppercase())
         });
+        let tag_dot = target3.path().filter(|p| p.parent().is_some()).and_then(|p| crate::tags::first_color(p, cx));
         h_flex()
             .id(id)
             .min_h(px(if rail { 36. } else { 32. }))
@@ -3183,6 +3189,7 @@ impl Workspace {
                     .relative()
                     .flex_shrink_0()
                     .child(Icon::new(icon).size(px(if rail { 18. } else { 16. })).text_color(icon_color))
+                    .when_some(tag_dot, |d, c| d.child(crate::tags::corner_dot(c, p.card_bg)))
                     .when_some(letter, |d, l| {
                         d.child(
                             div()

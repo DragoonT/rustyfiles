@@ -33,6 +33,42 @@ pub fn color(c: u32) -> Hsla {
     rgb(c).into()
 }
 
+/// Color of the first defined tag assigned to `path`, if any.
+pub fn first_color(path: &std::path::Path, cx: &App) -> Option<Hsla> {
+    cx.global::<Tags>().0.first_color(path).map(color)
+}
+
+/// Colored badge dot placed at the top-right corner of a `relative()` folder icon container.
+pub fn corner_dot(tag_color: Hsla, ring: Hsla) -> Div {
+    div()
+        .absolute()
+        .top(px(-2.))
+        .right(px(-2.))
+        .size(px(7.))
+        .rounded_full()
+        .bg(tag_color)
+        .border_1()
+        .border_color(ring)
+}
+
+/// Submenu items listing all defined tags with their colors to attribute/toggle on `paths`.
+pub fn menu_items(paths: &[PathBuf], cx: &App) -> Vec<crate::fluent_menu::Item> {
+    use crate::fluent_menu::{Item, MenuIcon};
+    let store = &cx.global::<Tags>().0;
+    store
+        .defs
+        .iter()
+        .map(|d| {
+            let all = !paths.is_empty() && paths.iter().all(|p| store.has(p, d.id));
+            let (paths, id) = (paths.to_vec(), d.id);
+            Item::action(crate::i18n::td(&d.name), MenuIcon::Dot(color(d.color)), move |_, cx| {
+                update(cx, |t| t.toggle(&paths, id));
+            })
+            .checked(all)
+        })
+        .collect()
+}
+
 /// How a tag joins the result of a tag query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Join {
