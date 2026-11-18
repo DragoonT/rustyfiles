@@ -35,12 +35,21 @@ pub fn collect(paths: &[PathBuf]) -> anyhow::Result<(Vec<Item>, Vec<Option<PathB
 }
 
 fn walk(path: &Path, rel: &str, items: &mut Vec<Item>, sources: &mut Vec<Option<PathBuf>>) -> anyhow::Result<()> {
-    let meta = std::fs::metadata(path).with_context(|| format!("cannot read {}", path.display()))?;
-    if meta.is_dir() {
+    use unicode_normalization::UnicodeNormalization as _;
+    // (names go on the wire in NFC: macOS hands out NFD, the others expect NFC)
+    let rel: String = rel.nfc().collect();
+    // (a link is sent as a link, never followed: a bundle's links must arrive as links, and following one could send half the disk)
+    let meta = std::fs::symlink_metadata(path).with_context(|| format!("cannot read {}", path.display()))?;
+    let mtime = meta.modified().ok().and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as i64);
+    if meta.file_type().is_symlink() {
+        let target = std::fs::read_link(path)?.to_string_lossy().replace('\\', "/");
+        items.push(Item { path: rel, link: Some(target), mtime, ..Default::default() });
+        sources.push(None);
+    } else if meta.is_dir() {
         let mut children: Vec<_> = std::fs::read_dir(path)?.flatten().collect();
         children.sort_by_key(|e| e.file_name());
         if children.is_empty() {
-            items.push(Item { path: rel.to_string(), size: 0, dir: true });
+            items.push(Item { path: rel.clone(), dir: true, mtime, ..Default::default() });
             sources.push(None);
         }
         for c in children {
@@ -48,10 +57,21 @@ fn walk(path: &Path, rel: &str, items: &mut Vec<Item>, sources: &mut Vec<Option<
             walk(&c.path(), &child_rel, items, sources)?;
         }
     } else {
-        items.push(Item { path: rel.to_string(), size: meta.len(), dir: false });
+        items.push(Item { path: rel, size: meta.len(), mode: mode_of(&meta), mtime, ..Default::default() });
         sources.push(Some(path.to_path_buf()));
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn mode_of(meta: &std::fs::Metadata) -> Option<u32> {
+    use std::os::unix::fs::PermissionsExt as _;
+    Some(meta.permissions().mode() & 0o7777)
+}
+
+#[cfg(not(unix))]
+fn mode_of(_: &std::fs::Metadata) -> Option<u32> {
+    None
 }
 
 pub async fn connect(inner: &Inner, addrs: &[SocketAddr]) -> anyhow::Result<quinn::Connection> {
@@ -266,7 +286,7 @@ async fn receive(
             from_os: hello.os.clone(),
             trusted,
             names,
-            file_count: items.iter().filter(|i| !i.dir).count() as u64,
+            file_count: items.iter().filter(|i| i.is_file()).count() as u64,
             total_bytes: items.iter().map(|i| i.size).sum(),
         };
         let rx = inner.ask(offer);
@@ -281,14 +301,14 @@ async fn receive(
     let resume: Vec<u64> = items
         .iter()
         .zip(&targets)
-        .map(|(i, t)| if i.dir { 0 } else { std::fs::metadata(part(t)).map(|m| m.len()).ok().filter(|&l| l <= i.size).unwrap_or(0) })
+        .map(|(i, t)| if !i.is_file() { 0 } else { std::fs::metadata(part(t)).map(|m| m.len()).ok().filter(|&l| l <= i.size).unwrap_or(0) })
         .collect();
     proto::write_frame(ctl_send, &Answer { accept: true, reason: None, resume: resume.clone() }).await?;
 
     let total: u64 = items.iter().map(|i| i.size).sum();
     let done = Arc::new(AtomicU64::new(resume.iter().sum()));
     let ticker = progress_ticker(inner.clone(), tid, done.clone(), total);
-    let files = items.iter().filter(|i| !i.dir).count();
+    let files = items.iter().filter(|i| i.is_file()).count();
     let targets = Arc::new(targets);
     let mut tasks = Vec::new();
     for _ in 0..files {
@@ -330,6 +350,9 @@ async fn receive(
             tokio::fs::create_dir_all(target).await?;
             continue;
         }
+        if !item.is_file() {
+            continue;
+        }
         let p = part(target);
         let want = hashes.get(index).cloned().unwrap_or_default();
         let got = tokio::task::spawn_blocking(move || hash_file(&p)).await??;
@@ -338,6 +361,15 @@ async fn receive(
             continue;
         }
         tokio::fs::rename(part(target), target).await?;
+        keep_attributes(target, item);
+    }
+    // links last: none exists while files are written, so no file can be written through one
+    if failure.is_none() {
+        for (index, item) in items.iter().enumerate() {
+            if let Some(to) = &item.link {
+                make_link(&targets[index], to, &item.path);
+            }
+        }
     }
     let outcome = Outcome { ok: failure.is_none(), error: failure.clone() };
     proto::write_frame(ctl_send, &outcome).await?;
@@ -363,34 +395,115 @@ async fn receive(
     Ok(tops)
 }
 
-/// Where each item goes under `dest`. A top-level name that is already taken there (by a finished file or folder, not by an
-/// unfinished `.rfpart` of the same transfer) gets " (2)", " (3)"... before its extension.
+/// Where each item goes under `dest`, each name as this platform can store it ([`proto::local_name`]). A top-level name that is
+/// already taken there (by a finished file or folder, not by an unfinished `.rfpart`) gets " (2)", " (3)"... before its extension, and
+/// so does an item whose path differs from an earlier one only in letter case (they would be one file on NTFS and APFS).
 pub fn targets(dest: &Path, items: &[Item]) -> Vec<PathBuf> {
     let mut renamed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
     items
         .iter()
         .map(|i| {
-            let parts = proto::safe_parts(&i.path).unwrap_or_default();
-            let top = parts.first().copied().unwrap_or_default().to_string();
-            let top_new = renamed.entry(top.clone()).or_insert_with(|| free_name(dest, &top)).clone();
+            let parts: Vec<String> = proto::safe_parts(&i.path).unwrap_or_default().into_iter().map(proto::local_name).collect();
+            let top = parts.first().cloned().unwrap_or_default();
+            let top_new = renamed.entry(top.to_lowercase()).or_insert_with(|| free_name(dest, &top)).clone();
             let mut p = dest.join(top_new);
             for rest in parts.iter().skip(1) {
                 p.push(rest);
+            }
+            if !taken.insert(p.to_string_lossy().to_lowercase()) {
+                // (an item whose path only differs in case from an earlier one: number its own name)
+                let name = p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                let parent = p.parent().map(Path::to_path_buf).unwrap_or_default();
+                for n in 2.. {
+                    let candidate = parent.join(numbered(&name, n));
+                    if (parts.len() > 1 || !candidate.exists()) && taken.insert(candidate.to_string_lossy().to_lowercase()) {
+                        p = candidate;
+                        break;
+                    }
+                }
             }
             p
         })
         .collect()
 }
 
-fn free_name(dest: &Path, name: &str) -> String {
-    if !dest.join(name).exists() {
-        return name.to_string();
-    }
+fn numbered(name: &str, n: u32) -> String {
     let (stem, ext) = match name.rfind('.') {
         Some(i) if i > 0 => (&name[..i], &name[i..]),
         _ => (name, ""),
     };
-    (2..).map(|n| format!("{stem} ({n}){ext}")).find(|n| !dest.join(n).exists()).unwrap_or_else(|| name.to_string())
+    format!("{stem} ({n}){ext}")
+}
+
+fn free_name(dest: &Path, name: &str) -> String {
+    if !dest.join(name).exists() {
+        return name.to_string();
+    }
+    (2..).map(|n| numbered(name, n)).find(|n| !dest.join(n).exists()).unwrap_or_else(|| name.to_string())
+}
+
+/// A received file keeps the sender's modification time and, on Unix, its permission bits. Failures are only logged.
+fn keep_attributes(target: &Path, item: &Item) {
+    if let Some(ms) = item.mtime
+        && let Ok(f) = std::fs::OpenOptions::new().write(true).open(target)
+    {
+        let when = std::time::UNIX_EPOCH + Duration::from_millis(ms.max(0) as u64);
+        if let Err(e) = f.set_modified(when) {
+            log::info!("nearby: cannot set the time of {}: {e}", target.display());
+        }
+    }
+    #[cfg(unix)]
+    if let Some(mode) = item.mode {
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(mode & 0o7777));
+    }
+}
+
+/// Makes a received symbolic link, when its target stays inside the item it came with (a bundle's own links do); one that points
+/// elsewhere, or absolutely, is left out. On Windows links are left out (making one needs a privilege most users don't have).
+fn make_link(target: &Path, to: &str, rel: &str) {
+    if !link_stays_inside(rel, to) {
+        log::warn!("nearby: the link {rel} -> {to} points outside what was sent; left out");
+        return;
+    }
+    #[cfg(unix)]
+    {
+        if let Some(dir) = target.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Err(e) = std::os::unix::fs::symlink(to, target) {
+            log::warn!("nearby: cannot make the link {}: {e}", target.display());
+        }
+    }
+    #[cfg(not(unix))]
+    log::info!("nearby: the link {rel} -> {to} was left out (links are not made on this platform); target {}", target.display());
+}
+
+/// Whether a link at `rel` (a path of the offer) pointing at `to` lands inside the top-level item it came with. A link sent on its
+/// own (at the top level) never does: its target is outside what was sent.
+pub fn link_stays_inside(rel: &str, to: &str) -> bool {
+    if to.is_empty() || to.starts_with('/') || to.contains([':', '\\']) {
+        return false;
+    }
+    let mut at: Vec<&str> = rel.split('/').collect();
+    at.pop();
+    if at.is_empty() {
+        return false;
+    }
+    for part in to.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                if at.len() <= 1 {
+                    return false;
+                }
+                at.pop();
+            }
+            p => at.push(p),
+        }
+    }
+    true
 }
 
 fn part(target: &Path) -> PathBuf {
@@ -466,15 +579,44 @@ mod tests {
         std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
         std::fs::create_dir(dir.path().join("pics")).unwrap();
         let items = vec![
-            Item { path: "a.txt".into(), size: 1, dir: false },
-            Item { path: "pics/1.jpg".into(), size: 1, dir: false },
-            Item { path: "pics/sub/2.jpg".into(), size: 1, dir: false },
-            Item { path: "new.bin".into(), size: 1, dir: false },
+            Item { path: "a.txt".into(), size: 1, ..Default::default() },
+            Item { path: "pics/1.jpg".into(), size: 1, ..Default::default() },
+            Item { path: "pics/sub/2.jpg".into(), size: 1, ..Default::default() },
+            Item { path: "new.bin".into(), size: 1, ..Default::default() },
         ];
         let t = targets(dir.path(), &items);
         assert_eq!(t[0], dir.path().join("a (2).txt"));
         assert_eq!(t[1], dir.path().join("pics (2)").join("1.jpg"));
         assert_eq!(t[2], dir.path().join("pics (2)").join("sub").join("2.jpg"));
         assert_eq!(t[3], dir.path().join("new.bin"));
+    }
+
+    #[test]
+    fn paths_that_differ_only_in_case_do_not_land_on_one_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let items = vec![
+            Item { path: "Docs/Report.txt".into(), size: 1, ..Default::default() },
+            Item { path: "Docs/report.txt".into(), size: 1, ..Default::default() },
+            Item { path: "docs/other.txt".into(), size: 1, ..Default::default() },
+        ];
+        let t = targets(dir.path(), &items);
+        assert_eq!(t[0], dir.path().join("Docs").join("Report.txt"));
+        assert_eq!(t[1], dir.path().join("Docs").join("report (2).txt"));
+        // (one top-level folder for both spellings of it)
+        assert_eq!(t[2], dir.path().join("Docs").join("other.txt"));
+        let top = vec![Item { path: "A.txt".into(), ..Default::default() }, Item { path: "a.txt".into(), ..Default::default() }];
+        let t = targets(dir.path(), &top);
+        assert_eq!(t, vec![dir.path().join("A.txt"), dir.path().join("A (2).txt")]);
+    }
+
+    #[test]
+    fn links_must_stay_inside_what_was_sent() {
+        assert!(link_stays_inside("App.app/Contents/Frameworks/Lib", "Versions/Current/Lib"));
+        assert!(link_stays_inside("App.app/Contents/x", "../Resources/y"));
+        assert!(!link_stays_inside("App.app/x", "../../etc/passwd"));
+        assert!(!link_stays_inside("App.app/x", "../Other.app"));
+        assert!(!link_stays_inside("lonely-link", "target"));
+        assert!(!link_stays_inside("App.app/x", "/etc/passwd"));
+        assert!(!link_stays_inside("App.app/x", "C:/Windows"));
     }
 }

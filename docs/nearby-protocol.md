@@ -1,6 +1,6 @@
-# Nearby: the protocol
+# Ferry: the protocol
 
-How rustyfiles devices on the same network find each other and send files. The reference implementation is
+How rustyfiles devices on the same network find each other and send files. **Ferry** is the feature's name; the code is
 `crates/rf-nearby` (platform-free Rust, used by the Windows app and, through UniFFI, by the macOS app). Protocol version: **1**.
 
 ## Discovery
@@ -41,15 +41,22 @@ on the control stream are **frames**: a 4-byte big-endian length, then that many
 
 ```json
 { "proto": 1, "id": "<device id>", "name": "<name>", "os": "macos",
-  "purpose": { "kind": "send", "items": [ { "path": "project/sub/big.bin", "size": 20971520, "dir": false } ] } }
+  "purpose": { "kind": "send", "items": [
+    { "path": "project/sub/big.bin", "size": 20971520, "dir": false, "mode": 493, "mtime": 1600000000123 },
+    { "path": "App.app/Contents/Frameworks/Lib", "size": 0, "dir": false, "link": "Versions/Current/Lib" } ] } }
 ```
 
 `purpose.kind` is `send` (with `items`) or `pair`. The server closes the connection when `proto` differs or when `id` does not
 match the client certificate.
 
-`items` lists every file with its path relative to the offer, parts separated by `/`, and every **empty** folder (`dir: true`,
-`size: 0`). A receiver refuses an offer containing a path that is absolute, empty, has an empty part, `.` or `..`, a `\`, a `:`,
-or a control character.
+`items` lists every regular file, every **empty** folder (`dir: true`, `size: 0`) and every symbolic link (`link`: its target as
+it is, no bytes sent). Paths are relative to the offer, parts separated by `/`, in Unicode **NFC**. Optional fields: `mode` (Unix
+permission bits; Windows sends none) and `mtime` (last change, milliseconds since 1970 UTC). Links are sent as links, never
+followed.
+
+A receiver refuses an offer containing a path that is absolute, empty, has an empty part, `.` or `..`, or a control character.
+Any other name is stored as the receiving platform allows: on Windows `<>:"|?*\` become `_`, trailing dots and spaces are dropped,
+and reserved device names (CON, NUL, COM1...) get a leading `_`.
 
 ### Sending
 
@@ -65,7 +72,12 @@ or a control character.
    the next attempt) and `ok` is false.
 
 Final paths: under the destination folder the receiver chose. A top-level name that is already taken there gets ` (2)`, ` (3)`...
-before its extension.
+before its extension. Names are compared without regard to letter case (NTFS and APFS are case-insensitive), so two items that
+differ only in case do not land on one file: the later one is numbered the same way.
+
+After the files: each kept file gets its `mtime` and, on Unix, its `mode`. Links are made last (so no file is ever written
+through one), and only when the target, resolved from the link's own folder, stays inside the top-level item it came with; others
+are left out. Windows makes no links.
 
 ### Pairing
 

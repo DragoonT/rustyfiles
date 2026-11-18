@@ -25,13 +25,30 @@ pub enum Purpose {
     Pair,
 }
 
-/// One entry of an offer: a file, or a folder that must exist even when empty. `path` is relative, with `/` between its parts.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+/// One entry of an offer: a file, a folder that must exist even when empty, or a symbolic link. `path` is relative, with `/` between
+/// its parts, in Unicode NFC (macOS hands out NFD; Windows and Linux expect NFC).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Item {
     pub path: String,
     pub size: u64,
     #[serde(default)]
     pub dir: bool,
+    /// Unix permission bits (an app bundle's executables need theirs); none from Windows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<u32>,
+    /// Last change, milliseconds since 1970-01-01 UTC.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtime: Option<i64>,
+    /// A symbolic link: its target, as it is (relative inside a bundle). No bytes are sent for it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+}
+
+impl Item {
+    /// A regular file: the only kind whose bytes travel.
+    pub fn is_file(&self) -> bool {
+        !self.dir && self.link.is_none()
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -85,16 +102,35 @@ pub async fn read_frame<T: for<'de> Deserialize<'de>>(recv: &mut quinn::RecvStre
     Ok(serde_json::from_slice(&buf)?)
 }
 
-/// A relative path from a peer, as the parts to join under the destination folder; `None` for anything that could leave it or name
-/// something odd on one of the platforms: an absolute path, `..`, `.`, a drive or a stream (`:`), a backslash, an empty part, a
-/// control character.
+/// A relative path from a peer, as its parts; `None` for anything that could leave the destination folder: an absolute path, an empty
+/// part, `.`, `..`, a control character. What a part may not be called on this platform is fixed afterwards ([`local_name`]).
 pub fn safe_parts(path: &str) -> Option<Vec<&str>> {
     if path.is_empty() || path.starts_with('/') {
         return None;
     }
     let parts: Vec<&str> = path.split('/').collect();
-    let bad = |p: &&str| p.is_empty() || *p == "." || *p == ".." || p.contains(['\\', ':']) || p.chars().any(char::is_control);
+    let bad = |p: &&str| p.is_empty() || *p == "." || *p == ".." || p.chars().any(char::is_control);
     if parts.iter().any(bad) { None } else { Some(parts) }
+}
+
+/// A name from a peer as this platform can store it. On Windows: `<>:"|?*\` become `_`, trailing dots and spaces go, and a reserved
+/// device name (CON, NUL, COM1...) gets a leading `_`. Elsewhere a name is kept as it is (`/` and NUL can't occur: [`safe_parts`]).
+pub fn local_name(part: &str) -> String {
+    if cfg!(windows) {
+        let mut s: String = part.chars().map(|c| if "<>:\"|?*\\".contains(c) { '_' } else { c }).collect();
+        while s.ends_with('.') || s.ends_with(' ') {
+            s.pop();
+        }
+        if s.is_empty() {
+            s.push('_');
+        }
+        let base = s.split('.').next().unwrap_or_default().to_ascii_uppercase();
+        let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || (base.len() == 4 && (base.starts_with("COM") || base.starts_with("LPT")) && base.as_bytes()[3].is_ascii_digit());
+        if reserved { format!("_{s}") } else { s }
+    } else {
+        part.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -104,14 +140,27 @@ mod tests {
     #[test]
     fn paths_that_could_leave_the_folder_are_refused() {
         assert_eq!(safe_parts("a/b.txt"), Some(vec!["a", "b.txt"]));
-        for bad in ["", "/etc/passwd", "../x", "a/../../x", "a/./b", "C:/x", "a\\b", "a//b", "x:stream", "a\u{0}b"] {
+        for bad in ["", "/etc/passwd", "../x", "a/../../x", "a/./b", "a//b", "a\u{0}b"] {
             assert_eq!(safe_parts(bad), None, "{bad:?}");
         }
     }
 
     #[test]
+    #[cfg(windows)]
+    fn names_windows_cannot_store_are_fixed() {
+        assert_eq!(local_name("a:b?.txt"), "a_b_.txt");
+        assert_eq!(local_name("back\\slash"), "back_slash");
+        assert_eq!(local_name("trailing. . "), "trailing");
+        assert_eq!(local_name("CON"), "_CON");
+        assert_eq!(local_name("nul.txt"), "_nul.txt");
+        assert_eq!(local_name("COM1.log"), "_COM1.log");
+        assert_eq!(local_name("COMPUTER.txt"), "COMPUTER.txt");
+        assert_eq!(local_name("..."), "_");
+    }
+
+    #[test]
     fn messages_keep_their_shape_on_the_wire() {
-        let h = Hello { proto: 1, id: "x".into(), name: "n".into(), os: "windows".into(), purpose: Purpose::Send { items: vec![Item { path: "a".into(), size: 3, dir: false }] } };
+        let h = Hello { proto: 1, id: "x".into(), name: "n".into(), os: "windows".into(), purpose: Purpose::Send { items: vec![Item { path: "a".into(), size: 3, ..Default::default() }] } };
         let json = serde_json::to_string(&h).unwrap();
         assert!(json.contains("\"kind\":\"send\""), "{json}");
         assert_eq!(serde_json::from_str::<Hello>(&json).unwrap(), h);

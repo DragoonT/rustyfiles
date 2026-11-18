@@ -77,6 +77,8 @@ fn sample(root: &Path) -> std::path::PathBuf {
     std::fs::create_dir_all(top.join("sub")).unwrap();
     std::fs::create_dir_all(top.join("empty")).unwrap();
     std::fs::write(top.join("readme.txt"), b"hello nearby").unwrap();
+    let when = std::time::UNIX_EPOCH + Duration::from_millis(1_600_000_000_123);
+    std::fs::File::options().write(true).open(top.join("readme.txt")).unwrap().set_modified(when).unwrap();
     let big: Vec<u8> = (0..(20u32 << 20)).map(|i| (i.wrapping_mul(2654435761) >> 24) as u8).collect();
     std::fs::write(top.join("sub").join("big.bin"), &big).unwrap();
     std::fs::write(top.join("zero.txt"), b"").unwrap();
@@ -120,6 +122,8 @@ fn an_offer_is_asked_and_the_files_arrive_whole() {
     assert!(ar.ok, "{ar:?}");
     same_tree(&top, &dest.path().join("project"));
     assert!(dest.path().join("project").join("empty").is_dir());
+    let kept = std::fs::metadata(dest.path().join("project").join("readme.txt")).unwrap().modified().unwrap();
+    assert_eq!(kept, std::time::UNIX_EPOCH + Duration::from_millis(1_600_000_000_123), "the time was not kept");
     assert_eq!(std::fs::read(dest.path().join("single.txt")).unwrap(), b"one file");
     assert_eq!(br.paths.len(), 2);
     // nothing half-received stays behind
