@@ -18,7 +18,7 @@ uniffi::setup_scaffolding!();
 
 mod archive;
 mod ferry;
-pub use archive::{Archive, ArchiveError, is_archive, smart_extract_target};
+pub use archive::{Archive, ArchiveError, ArchiveFormat, can_make_rar, compress, is_archive, smart_extract_target};
 pub use ferry::{
     Ferry, FerryConfig, FerryError, FerryEstimate, FerryLink, FerryListener, FerryOffer, FerryPeer, FerryResult, FerrySpeed, FerryStatus,
     FerryVisibility,

@@ -613,7 +613,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     /// Extracts the selected members (or, with none selected, the whole archive) into `dest`
     /// and opens that folder.
-    private func extractArchive(_ archive: ArchiveView, to dest: URL, onlySelected: Bool) {
+    func extractArchive(_ archive: ArchiveView, to dest: URL, onlySelected: Bool) {
         let inner = onlySelected ? selectedInner(archive) : []
         let a = archive.archive
         run { _ = try a.extract(innerPaths: inner, dest: dest.path) } done: { [weak self] in self?.onOpenFolder?(dest) }
@@ -632,7 +632,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     /// Asks where to extract, then extracts there.
-    private func chooseAndExtract(_ work: @escaping (URL) -> Void) {
+    func chooseAndExtract(_ work: @escaping (URL) -> Void) {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -644,10 +644,11 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
     }
 
-    func pasteItems() {
-        guard let url, let (urls, move) = Clipboard.take() else { return }
-        run { try FileOps.paste(urls, into: url, move: move) } done: { [weak self] made in
-            self?.reloadSelecting(made.map(\.lastPathComponent))
+    /// Pastes here, or into `target` (a folder that was right-clicked).
+    func pasteItems(into target: URL? = nil) {
+        guard let dest = target ?? url, let (urls, move) = Clipboard.take() else { return }
+        run { try FileOps.paste(urls, into: dest, move: move) } done: { [weak self] made in
+            self?.reloadSelecting(target == nil ? made.map(\.lastPathComponent) : [])
         }
     }
 
@@ -668,7 +669,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     /// Runs `work` off the main thread; errors are shown, the result goes to `done`.
-    private func run<T: Sendable>(_ work: @escaping @Sendable () throws -> T, done: @escaping (T) -> Void) {
+    func run<T: Sendable>(_ work: @escaping @Sendable () throws -> T, done: @escaping (T) -> Void) {
         Task.detached(priority: .userInitiated) {
             let result = Result { try work() }
             await MainActor.run { [weak self] in
@@ -797,66 +798,221 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         for u in files { NSWorkspace.shared.open(u) }
     }
 
+    // MARK: context menus (ctx_menu.rs)
+
+    var archiveIsNil: Bool { archive == nil }
+    var onOpenInNewTab: ((URL) -> Void)?
+    var onOpenInNewWindow: ((URL) -> Void)?
+    var onRefresh: (() -> Void)?
+
     func contextMenu() -> NSMenu {
-        let m = NSMenu()
-        let any = !selectedRows.isEmpty
-        func add(_ title: String, _ icon: String?, _ enabled: Bool, _ handler: @escaping () -> Void) {
-            let i = ClosureMenuItem(title: title, handler: handler)
-            i.isEnabled = enabled
-            if let icon { i.image = Icons.named(icon) }
-            m.addItem(i)
+        if let archive { return archiveMenu(archive) }
+        return selectedRows.isEmpty ? backgroundMenu() : itemsMenu()
+    }
+
+    /// Right-click on items (`items_menu`): the quick row, then open, the items' own commands,
+    /// compress / extract / tags / Ferry, Terminal; macOS adds its Services at the end.
+    private func itemsMenu() -> NSMenu {
+        let b = MenuBuilder()
+        guard let folder else { return b.done() }
+        let urls = selectedURLs
+        let items = selectedRows.compactMap { folder.item(row: UInt32($0)) }
+        let singleDir = items.count == 1 && items[0].isDir && !display.isPackage(items[0])
+        let hasFiles = !singleDir
+        let exts = urls.map { $0.pathExtension.lowercased() }
+        let allArchives = !urls.isEmpty && urls.allSatisfy { isArchive(path: $0.path) }
+
+        b.quick([
+            ("scissors", String(localized: "Cut (⌘X)"), true, { [weak self] in self?.cutItems() }),
+            ("copy", String(localized: "Copy (⌘C)"), true, { [weak self] in self?.copyItems() }),
+            ("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles, { [weak self] in self?.pasteItems(into: singleDir ? urls.first : nil) }),
+            ("text-cursor-input", String(localized: "Rename (F2)"), items.count == 1, { [weak self] in self?.beginRename() }),
+            ("share-2", String(localized: "Share"), true, { [weak self] in self?.shareSelected() }),
+            ("trash", String(localized: "Move to Trash (⌘⌫)"), true, { [weak self] in self?.trashSelected() }),
+        ])
+
+        b.add(String(localized: "Open"), "square-arrow-out-up-right", key: "\r", mods: []) { [weak self] in self?.openSelected() }
+        if singleDir, let u = urls.first {
+            b.add(String(localized: "Open in new tab"), "square-plus") { [weak self] in self?.onOpenInNewTab?(u) }
+            b.add(String(localized: "Open in new window"), "app-window") { [weak self] in self?.onOpenInNewWindow?(u) }
         }
-        m.autoenablesItems = false
-        if let archive {
-            if any {
-                add(String(localized: "Open"), nil, true) { [weak self] in self?.openSelected() }
-                add(String(localized: "Quick Look"), "eye", true) { [weak self] in self?.toggleQuickLook() }
-                m.addItem(.separator())
-                add(String(localized: "Copy"), "copy", true) { [weak self] in self?.copyItems() }
-                add(String(localized: "Extract to…"), "folder-output", true) { [weak self] in
-                    self?.chooseAndExtract { self?.extractArchive(archive, to: $0, onlySelected: true) }
-                }
-            } else {
-                add(String(localized: "Extract all to…"), "folder-output", true) { [weak self] in
-                    self?.chooseAndExtract { self?.extractArchive(archive, to: $0, onlySelected: false) }
+        if hasFiles { b.sub(String(localized: "Open with"), "layout-grid") { MenuActions.openWithMenu(urls, $0) } }
+        b.add(String(localized: "Quick Look"), "eye", key: " ", mods: []) { [weak self] in self?.toggleQuickLook() }
+        b.separator()
+
+        b.add(String(localized: "Copy item path"), "clipboard-copy", key: "c", mods: [.command, .option]) { MenuActions.copyPaths(urls) }
+        b.add(String(localized: "Make alias"), "link") { [weak self] in
+            self?.run { try urls.map { try FileOps.makeAlias($0) } } done: { made in self?.reloadSelecting(made.map(\.lastPathComponent)) }
+        }
+        if let dir = url {
+            b.add(String(localized: "New folder with selection"), "folder-input") { [weak self] in
+                self?.run { try FileOps.newFolder(with: urls, in: dir) } done: { made in self?.reloadSelecting([made.lastPathComponent], rename: true) }
+            }
+        }
+        if singleDir, let u = urls.first {
+            let pinned = MenuActions.isPinned(u)
+            b.add(pinned ? String(localized: "Unpin from sidebar") : String(localized: "Pin to sidebar"), pinned ? "pin-off" : "pin") {
+                MenuActions.setPinned(u, !pinned)
+            }
+        }
+        if exts.allSatisfy(MenuActions.rotatable.contains) {
+            b.add(String(localized: "Rotate right"), "rotate-cw") { [weak self] in
+                self?.run { try FileOps.rotate(urls, clockwise: true) } done: { ThumbnailCache.shared.forget(under: urls[0].deletingLastPathComponent().path) }
+            }
+            b.add(String(localized: "Rotate left"), "rotate-ccw") { [weak self] in
+                self?.run { try FileOps.rotate(urls, clockwise: false) } done: { ThumbnailCache.shared.forget(under: urls[0].deletingLastPathComponent().path) }
+            }
+        }
+        if urls.count == 1, MenuActions.pictures.contains(exts[0]) {
+            b.add(String(localized: "Set as desktop picture"), "monitor") { [weak self] in
+                do { try MenuActions.setDesktopPicture(urls[0]) } catch { self?.onError?(error.localizedDescription) }
+            }
+        }
+        if exts.allSatisfy(MenuActions.fonts.contains) {
+            b.add(String(localized: "Install font"), "type") { MenuActions.installFonts(urls) }
+        }
+        b.separator()
+
+        b.sub(String(localized: "Compress"), "archive") { m in
+            for (title, format, ext) in [("ZIP", ArchiveFormat.zip, "zip"), ("7z", .sevenZ, "7z"), ("RAR", .rar, "rar")] {
+                if format == .rar && !canMakeRar() { continue }
+                m.add(String(localized: "Compress to \(title)"), "file-archive") { [weak self] in
+                    let dest = FileOps.archiveName(for: urls, ext: ext)
+                    self?.run { try compress(sources: urls.map(\.path), dest: dest.path, format: format) } done: { self?.reloadSelecting([dest.lastPathComponent]) }
                 }
             }
-            return m
         }
-        if any {
-            add(String(localized: "Open"), nil, true) { [weak self] in self?.openSelected() }
-            add(String(localized: "Quick Look"), "eye", true) { [weak self] in self?.toggleQuickLook() }
-            m.addItem(.separator())
-            add(String(localized: "Cut"), "scissors", true) { [weak self] in self?.cutItems() }
-            add(String(localized: "Copy"), "copy", true) { [weak self] in self?.copyItems() }
+        if allArchives { b.sub(String(localized: "Extract"), "folder-output") { self.extractMenu(urls, $0) } }
+        b.sub(String(localized: "Tags"), "tag") { MenuActions.tagsMenu(urls, $0) }
+        b.menu.addItem(FerryMenu.make(for: urls))
+        if singleDir, let u = urls.first {
+            b.separator()
+            b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(u) }
         }
-        add(String(localized: "Paste"), "clipboard-paste", Clipboard.hasFiles && folder != nil) { [weak self] in self?.pasteItems() }
-        m.addItem(.separator())
-        if any {
-            add(String(localized: "Rename"), "text-cursor-input", selectedRows.count == 1) { [weak self] in self?.beginRename() }
-            add(String(localized: "Move to Trash"), "trash", true) { [weak self] in self?.trashSelected() }
-            // an archive file: extract it without opening it
-            if selectedRows.count == 1, let file = selectedURLs.first, isArchive(path: file.path) {
-                m.addItem(.separator())
-                add(String(localized: "Extract here"), "folder-output", true) { [weak self] in self?.extractHere(file) }
-                add(String(localized: "Extract to…"), "folder-output", true) { [weak self] in
-                    self?.chooseAndExtract { dest in
-                        self?.run {
-                            _ = try Archive.open(path: file.path, password: nil).extractAll(dest: dest.path)
-                        } done: { self?.onOpenFolder?(dest) }
-                    }
+        return b.done()
+    }
+
+    /// Extract ▸ for archive files: here, smartly, to a folder of its own, to a place chosen.
+    private func extractMenu(_ urls: [URL], _ m: MenuBuilder) {
+        let run = { [weak self] (work: @escaping @Sendable () throws -> [String]) in
+            self?.run(work) { names in self?.reloadSelecting(names) }
+        }
+        m.add(String(localized: "Extract here"), "folder-down") {
+            run {
+                try urls.map { u in
+                    _ = try Archive.open(path: u.path, password: nil).extractAll(dest: u.deletingLastPathComponent().path)
+                    return u.lastPathComponent
                 }
             }
-            m.addItem(FerryMenu.make(for: selectedURLs))
-            add(String(localized: "Copy as path"), nil, true) { [weak self] in
+        }
+        m.add(String(localized: "Extract smartly"), "zap") {
+            run {
+                try urls.map { u in
+                    let target = smartExtractTarget(archive: u.path, into: u.deletingLastPathComponent().path)
+                    _ = try Archive.open(path: u.path, password: nil).extractAll(dest: target[0])
+                    return URL(fileURLWithPath: target[1]).lastPathComponent
+                }
+            }
+        }
+        let own = urls.count == 1
+            ? String(localized: "Extract to folder: \(urls[0].deletingPathExtension().lastPathComponent)/")
+            : String(localized: "Extract each to its own folder")
+        m.add(own, "folder-input") {
+            run {
+                try urls.map { u in
+                    let dest = FileOps.unique(u.deletingPathExtension().lastPathComponent, ext: "", in: u.deletingLastPathComponent())
+                    _ = try Archive.open(path: u.path, password: nil).extractAll(dest: dest.path)
+                    return dest.lastPathComponent
+                }
+            }
+        }
+        m.add(String(localized: "Extract to…"), "folder-search") { [weak self] in
+            self?.chooseAndExtract { dest in
+                self?.run {
+                    for u in urls { _ = try Archive.open(path: u.path, password: nil).extractAll(dest: dest.path) }
+                } done: { self?.onOpenFolder?(dest) }
+            }
+        }
+    }
+
+    /// Right-click on empty space (`background_menu`): paste, layout, sort, refresh, new, the
+    /// folder's own commands, Terminal.
+    private func backgroundMenu() -> NSMenu {
+        let b = MenuBuilder()
+        b.quick([("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles && folder != nil, { [weak self] in self?.pasteItems() })])
+        b.sub(String(localized: "Layout"), "layout-grid") { m in
+            m.add(String(localized: "Details"), "list", key: "1", checked: viewMode == .details) { [weak self] in self?.setViewMode(.details) }
+            m.add(String(localized: "Tiles"), "layout-grid", key: "2", checked: viewMode == .tiles) { [weak self] in self?.setViewMode(.tiles) }
+        }
+        b.sub(String(localized: "Sort"), "arrow-up-down") { m in
+            for col in ListColumn.allCases {
+                m.add(col.title, checked: col == sortKey) { [weak self] in
+                    self?.sort(by: col, ascending: col == self?.sortKey ? self?.ascending : col.startsAscending)
+                }
+            }
+            m.separator()
+            m.add(String(localized: "Ascending"), checked: ascending) { [weak self] in
                 guard let self else { return }
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(self.selectedURLs.map(\.path).joined(separator: "\n"), forType: .string)
+                self.sort(by: self.sortKey, ascending: true)
+            }
+            m.add(String(localized: "Descending"), checked: !ascending) { [weak self] in
+                guard let self else { return }
+                self.sort(by: self.sortKey, ascending: false)
+            }
+            m.separator()
+            m.add(String(localized: "Sort folders first"), checked: foldersFirst) { AppSettings.foldersFirst.toggle() }
+        }
+        b.add(String(localized: "Refresh"), "rotate-cw", key: "r") { [weak self] in self?.onRefresh?() }
+        b.separator()
+        b.sub(String(localized: "New"), "circle-plus") { m in
+            m.add(String(localized: "Folder"), "folder", key: "n", mods: [.command, .shift]) { [weak self] in self?.newFolder() }
+            m.add(String(localized: "Text document"), "file-text") { [weak self] in
+                guard let dir = self?.url else { return }
+                self?.run { try FileOps.newTextDocument(in: dir) } done: { made in self?.reloadSelecting([made.lastPathComponent], rename: true) }
+            }
+        }
+        if let dir = url {
+            let pinned = MenuActions.isPinned(dir)
+            b.add(pinned ? String(localized: "Unpin from sidebar") : String(localized: "Pin to sidebar"), pinned ? "pin-off" : "pin") {
+                MenuActions.setPinned(dir, !pinned)
+            }
+            b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([dir]) }
+        }
+        b.add(String(localized: "Show hidden items"), "eye", key: ".", mods: [.command, .shift], checked: showHidden) { AppSettings.showHidden.toggle() }
+        if let dir = url {
+            b.separator()
+            b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(dir) }
+        }
+        return b.done()
+    }
+
+    /// Inside an archive: open, copy and extract (it is read only here).
+    private func archiveMenu(_ archive: ArchiveView) -> NSMenu {
+        let b = MenuBuilder()
+        let any = !selectedRows.isEmpty
+        if any {
+            b.quick([("copy", String(localized: "Copy (⌘C)"), true, { [weak self] in self?.copyItems() })])
+            b.add(String(localized: "Open"), "square-arrow-out-up-right", key: "\r", mods: []) { [weak self] in self?.openSelected() }
+            b.add(String(localized: "Quick Look"), "eye", key: " ", mods: []) { [weak self] in self?.toggleQuickLook() }
+            b.separator()
+            b.add(String(localized: "Extract to…"), "folder-search") { [weak self] in
+                self?.chooseAndExtract { self?.extractArchive(archive, to: $0, onlySelected: true) }
             }
         } else {
-            add(String(localized: "New folder"), "folder-plus", folder != nil) { [weak self] in self?.newFolder() }
+            b.add(String(localized: "Extract all to…"), "folder-search") { [weak self] in
+                self?.chooseAndExtract { self?.extractArchive(archive, to: $0, onlySelected: false) }
+            }
+            b.add(String(localized: "Refresh"), "rotate-cw", key: "r") { [weak self] in self?.onRefresh?() }
         }
-        return m
+        return b.done()
+    }
+
+    func shareSelected() {
+        let picker = NSSharingServicePicker(items: selectedURLs)
+        let view = viewMode == .details ? table as NSView : tiles
+        let row = selectedRows.first ?? 0
+        let rect = viewMode == .details ? table.rect(ofRow: row) : (tiles.item(at: IndexPath(item: row, section: 0))?.view.frame ?? .zero)
+        picker.show(relativeTo: rect, of: view, preferredEdge: .minY)
     }
 
     // MARK: table data

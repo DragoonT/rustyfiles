@@ -16,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppSettings.apply()
         // RF_NOFERRY (development): a second copy of the app must not join the network as this Mac
         if ProcessInfo.processInfo.environment["RF_NOFERRY"] == nil { FerryService.shared.startIfEnabled() }
+        // RF_DEMO_MENU=item|background (development): the list's menu opens by itself, to be looked at
+        if let which = ProcessInfo.processInfo.environment["RF_DEMO_MENU"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoMenu(item: which == "item") }
+        }
         if ProcessInfo.processInfo.environment["RF_DEMO_STATUS"] != nil {
             StatusCenter.demo()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in

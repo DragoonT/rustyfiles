@@ -31,6 +31,7 @@ final class HomeView: FlippedView {
         for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification, NSWorkspace.didRenameVolumeNotification] {
             center.addObserver(self, selector: #selector(volumesChanged), name: name, object: nil)
         }
+        NotificationCenter.default.addObserver(self, selector: #selector(volumesChanged), name: .rfPinsChanged, object: nil)
         reload()
     }
 

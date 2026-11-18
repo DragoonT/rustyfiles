@@ -250,6 +250,12 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         }
 
         list.onOpenFolder = { [weak self] url in self?.navigate(to: url) }
+        list.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
+        list.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
+        list.onRefresh = { [weak self] in self?.refresh(nil) }
+        sidebar.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
+        sidebar.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
+        titleBar.strip.menuFor = { [weak self] i in self?.tabMenu(i) }
         list.onOpenDiskImage = { [weak self] url in self?.openDiskImage(url) }
         list.onBack = { [weak self] in self?.goBack(nil) }
         list.onChange = { [weak self] in self?.updateChrome() }
@@ -312,6 +318,67 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     @objc func closeTab(_ sender: Any?) { closeTab(at: active) }
 
+    /// Tabs closed in this window, newest last ("Reopen closed tab", ⇧⌘T).
+    private var closedTabs: [URL] = []
+
+    /// A new tab right after the active one, showing `url`.
+    func openTab(_ url: URL) {
+        saveTabState()
+        let t = BrowserTab(url: url)
+        tabs.insert(t, at: active + 1)
+        active += 1
+        navBar.omnibar.end()
+        load(t)
+        refreshTabs()
+    }
+
+    @objc func reopenClosedTab(_ sender: Any?) {
+        guard let url = closedTabs.popLast() else { return }
+        openTab(url)
+    }
+
+    private func closeTabs(_ indices: [Int]) {
+        guard !indices.isEmpty else { return }
+        let keep = tabs.indices.filter { !indices.contains($0) }
+        guard !keep.isEmpty else { return window?.performClose(nil) ?? () }
+        saveTabState()
+        let current = tabs[active]
+        closedTabs += indices.map { tabs[$0].url }
+        tabs = keep.map { tabs[$0] }
+        active = tabs.firstIndex { $0 === current } ?? min(keep.firstIndex { $0 > indices.min()! } ?? 0, tabs.count - 1)
+        showTab()
+        refreshTabs()
+    }
+
+    /// The tab menu (workspace.rs `tab_menu`).
+    private func tabMenu(_ i: Int) -> NSMenu {
+        let b = MenuBuilder()
+        let n = tabs.count
+        b.add(String(localized: "New tab"), "plus", key: "t") { [weak self] in self?.newTab(nil) }
+        b.add(String(localized: "Duplicate tab"), "copy") { [weak self] in
+            guard let self else { return }
+            self.activate(i)
+            self.openTab(self.tabs[i].url)
+        }
+        b.add(String(localized: "Move to new window"), "app-window", enabled: n > 1) { [weak self] in
+            guard let self, self.tabs.indices.contains(i) else { return }
+            let url = self.tabs[i].url
+            self.closeTabs([i])
+            AppDelegate.shared.openWindow(at: url)
+        }
+        b.separator()
+        b.add(String(localized: "Close other tabs"), enabled: n > 1) { [weak self] in self?.closeTabs((0..<n).filter { $0 != i }) }
+        b.add(String(localized: "Close tabs to the left"), enabled: i > 0) { [weak self] in self?.closeTabs(Array(0..<i)) }
+        b.add(String(localized: "Close tabs to the right"), enabled: i < n - 1) { [weak self] in self?.closeTabs(Array((i + 1)..<n)) }
+        b.add(String(localized: "Close all tabs")) { [weak self] in self?.window?.performClose(nil) }
+        b.add(String(localized: "Close tab"), "x", key: "w") { [weak self] in self?.closeTab(at: i) }
+        b.separator()
+        b.add(String(localized: "Reopen closed tab"), "rotate-ccw", key: "t", mods: [.command, .shift], enabled: !closedTabs.isEmpty) { [weak self] in
+            self?.reopenClosedTab(nil)
+        }
+        return b.done()
+    }
+
     private func closeTab(at i: Int) {
         guard tabs.indices.contains(i) else { return }
         if tabs.count == 1 {
@@ -319,6 +386,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             return
         }
         if i == active { saveTabState() }
+        closedTabs.append(tabs[i].url)
         tabs.remove(at: i)
         if i < active || active >= tabs.count { active = max(active - 1, 0) }
         showTab()
@@ -574,6 +642,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func openSettings(_ sender: Any?) { navigate(to: BrowserTab.settingsURL) }
     func showSettingsPage(_ page: SettingsPage) { list.showSettings(page: page) }
 
+    /// Development aid (RF_DEMO_MENU): opens the list's menu as a right-click would.
+    func demoMenu(item: Bool) {
+        if item { list.table.selectRowIndexes([0], byExtendingSelection: false) } else { list.table.deselectAll(nil) }
+        let menu = list.contextMenu()
+        menu.popUp(positioning: nil, at: NSPoint(x: 300, y: item ? 20 : 200), in: list.table)
+    }
+
     func openSettings(page: SettingsPage) {
         openSettings(nil)
         showSettingsPage(page)
@@ -641,6 +716,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(paste(_:)): return Clipboard.hasFiles && list.folder != nil
         case #selector(newFolder(_:)): return list.folder != nil
         case #selector(selectNextTab(_:)), #selector(selectPreviousTab(_:)): return tabs.count > 1
+        case #selector(reopenClosedTab(_:)): return !closedTabs.isEmpty
         case #selector(showDetails(_:)):
             item.state = list.viewMode == .details ? .on : .off
             return true
