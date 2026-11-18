@@ -479,6 +479,8 @@ pub struct FolderView {
     slow_click_serial: u64,
     /// Settings → "Select on hover": the entry under the pointer and its serial, selected once the pointer has rested on it.
     hover_pick: Option<(u32, u64)>,
+    /// Serial of the last click on a file in a column right of the list's (`pick_in_column`); a later click cancels a pending one.
+    static_pick: u64,
     /// What the first click of a possible double click was made on (`completes_double`).
     first_click: Option<FirstClick>,
     /// Counts the listings shown (every `load`): a click belongs to the listing it was made in.
@@ -655,6 +657,7 @@ impl FolderView {
             slow_click: None,
             slow_click_serial: 0,
             hover_pick: None,
+            static_pick: 0,
             first_click: None,
             load_serial: 0,
             soft_pending: None,
@@ -2659,6 +2662,25 @@ impl FolderView {
         .detach();
     }
 
+    /// A click on a file in a column to the right of the list's: once the double-click time passes without a second click, that
+    /// column's folder becomes the list's and the file is selected in it. Not at once: the columns move over by one then, and the
+    /// second click of a double click (which opens the file) has to land on the same row first.
+    fn pick_in_column(&mut self, dir: PathBuf, name: String, cx: &mut Context<Self>) {
+        self.static_pick += 1;
+        let serial = self.static_pick;
+        let wait = std::time::Duration::from_millis(unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() } as u64);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |v, cx| {
+                if v.static_pick == serial {
+                    v.set_reselect(name);
+                    v.navigate(Location::Path(dir), cx);
+                }
+            });
+        })
+        .detach();
+    }
+
     fn arm_slow_click(&mut self, ei: u32, cx: &mut Context<Self>) {
         self.slow_click_serial += 1;
         let serial = self.slow_click_serial;
@@ -4594,11 +4616,18 @@ fn static_column(
                             // cleared the selection, which took this column away before the button came up, and the click was lost
                             // (issue 57: "If I click on one of the folders in the second column, it disappears")
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(move |_, _, cx| {
-                                if is_dir {
-                                    view.update(cx, |v, cx| v.navigate(Location::Path(target.clone()), cx));
-                                } else {
-                                    open_in_background(target.clone(), cx);
+                            .on_click({
+                                let (dir, name) = (dir.clone(), e.name.to_string());
+                                move |ev: &ClickEvent, _, cx| {
+                                    if is_dir {
+                                        view.update(cx, |v, cx| v.navigate(Location::Path(target.clone()), cx));
+                                    } else if ev.click_count() >= 2 {
+                                        view.update(cx, |v, _| v.static_pick += 1);
+                                        open_in_background(target.clone(), cx);
+                                    } else {
+                                        // one click selects the file, as in the list's own column (issue 118: it opened it)
+                                        view.update(cx, |v, cx| v.pick_in_column(dir.clone(), name.clone(), cx));
+                                    }
                                 }
                             });
                         file_drop_target(row, drop_path, is_dir, &pal).into_any_element()
