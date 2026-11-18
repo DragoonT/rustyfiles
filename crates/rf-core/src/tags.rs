@@ -53,7 +53,8 @@ impl Default for TagStore {
 }
 
 fn key(p: &Path) -> String {
-    p.to_string_lossy().to_lowercase()
+    let s = p.to_string_lossy().to_lowercase();
+    if s.len() > 3 { s.trim_end_matches(['\\', '/']).to_string() } else { s }
 }
 
 impl TagStore {
@@ -96,6 +97,14 @@ impl TagStore {
 
     pub fn has(&self, p: &Path, id: u32) -> bool {
         self.tags_of(p).contains(&id)
+    }
+
+    /// Color (`0xRRGGBB`) of the first defined tag assigned to `p`, if any.
+    pub fn first_color(&self, p: &Path) -> Option<u32> {
+        if self.items.is_empty() {
+            return None;
+        }
+        self.tags_of(p).iter().find_map(|id| self.def(*id)).map(|d| d.color)
     }
 
     /// Adds `id` to all paths, or removes it from all when every path already has it.
@@ -211,5 +220,22 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: TagStore = serde_json::from_str(&json).unwrap();
         assert_eq!(back.defs.len(), 7);
+    }
+
+    #[test]
+    fn folder_first_color_and_trailing_slash() {
+        let mut s = TagStore::default();
+        let folder = PathBuf::from(r"C:\Work\Sub");
+        assert_eq!(s.first_color(&folder), None);
+
+        s.toggle(&[folder.clone()], 3);
+        assert_eq!(s.first_color(&folder), Some(0xFFD60A));
+        assert_eq!(s.first_color(Path::new(r"c:\work\sub\")), Some(0xFFD60A));
+
+        s.toggle(&[folder.clone()], 5);
+        assert_eq!(s.first_color(&folder), Some(0xFFD60A));
+
+        s.toggle(&[folder.clone()], 3);
+        assert_eq!(s.first_color(&folder), Some(0x0A84FF));
     }
 }

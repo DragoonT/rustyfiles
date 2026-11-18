@@ -253,6 +253,7 @@ impl SidebarTree {
         });
         // drives come and go: the roots follow the sidebar's own list of places
         let sub = cx.observe(&places, |t, _, cx| t.refresh_roots(cx));
+        let tags_sub = cx.observe_global::<crate::tags::Tags>(|_, cx| cx.notify());
         let mut this = Self {
             model: NavTree::new(),
             places,
@@ -279,7 +280,7 @@ impl SidebarTree {
             wanted: HashSet::new(),
             tx,
             _rx_task: task,
-            _subs: vec![sub],
+            _subs: vec![sub, tags_sub],
         };
         this.refresh_roots(cx);
         this
@@ -674,6 +675,7 @@ impl SidebarTree {
                 self.images.update(cx, |c, cx| c.icon(&dir, &e, cx))
             })
             .flatten();
+        let tag_dot = info.path.parent().and_then(|_| crate::tags::first_color(info.path, cx));
         let icon_color = match root {
             Some(RootKind::Profile) => p.accent,
             Some(_) => p.text_secondary,
@@ -739,10 +741,17 @@ impl SidebarTree {
                         this.toggle(id, cx);
                     })),
             )
-            .child(match own_icon {
-                Some(picture) => img(picture).size(px(16.)).flex_shrink_0().into_any_element(),
-                None => Icon::new(Self::row_icon(root, expanded)).size(px(16.)).text_color(icon_color).flex_shrink_0().into_any_element(),
-            })
+            .child(
+                div()
+                    .relative()
+                    .size(px(16.))
+                    .flex_shrink_0()
+                    .child(match own_icon {
+                        Some(picture) => img(picture).size(px(16.)).into_any_element(),
+                        None => Icon::new(Self::row_icon(root, expanded)).size(px(16.)).text_color(icon_color).into_any_element(),
+                    })
+                    .when_some(tag_dot, |d, c| d.child(crate::tags::corner_dot(c, p.card_bg))),
+            )
             .child(
                 div()
                     .flex_1()

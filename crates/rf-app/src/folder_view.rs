@@ -544,8 +544,8 @@ impl FolderView {
             if this.group == GroupBy::Tag {
                 this.refresh_tag_snap(cx);
                 this.rebuild_visible();
-                cx.notify();
             }
+            cx.notify();
         })
         .detach();
         cx.observe_global::<crate::settings::Settings>(|this, cx| {
