@@ -1,7 +1,4 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/banner-dark.svg">
-  <img alt="rustyfiles: a file manager for Windows that never freezes. Written in Rust." src="docs/readme/banner-light.svg" width="100%">
-</picture>
+<img alt="rustyfiles: a file manager for Windows that never freezes. Written in Rust. Drawn as a rustyfiles window on a folder of 100,000 files, opened in 281 ms" src="docs/readme/cover.png" width="100%">
 
 rustyfiles is a file manager for Windows, written from scratch in Rust. It is meant to replace
 File Explorer for everyday work: tabs, dual panes, archives you open like folders, and a
@@ -406,8 +403,10 @@ Built with [windows-rs](https://github.com/microsoft/windows-rs),
 [Velopack](https://velopack.io) (install and updates), [Lucide](https://lucide.dev) icons,
 [zip](https://github.com/zip-rs/zip2), [sevenz-rust2](https://github.com/hasenbanck/sevenz-rust),
 [tar](https://github.com/alexcrichton/tar-rs), [notify](https://github.com/notify-rs/notify)
-and many more crates. The banner uses
-[Bricolage Grotesque](https://github.com/ateliertriay/bricolage) by Atelier Triay.
+and many more crates. The pictures use
+[Bricolage Grotesque](https://github.com/ateliertriay/bricolage) by Atelier Triay,
+[Instrument Sans](https://fonts.google.com/specimen/Instrument+Sans) and
+[Doto](https://fonts.google.com/specimen/Doto).
 
 ## License
 
