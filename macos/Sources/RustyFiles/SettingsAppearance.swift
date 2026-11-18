@@ -250,5 +250,5 @@ final class ColourChooser: NSObject {
 
 /// Whether the Tags sections exist yet (the sidebar's and Home's).
 enum TagsSupport {
-    static let ready = false
+    static let ready = true
 }

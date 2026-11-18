@@ -108,12 +108,14 @@ pub struct Folder {
     entries: Vec<Entry>,
     /// Rows in display order: indices into `entries`, hidden items left out unless asked for.
     order: RwLock<Vec<u32>>,
+    /// For a gathered listing (tag results): the folder each entry is in; empty otherwise.
+    homes: Vec<PathBuf>,
 }
 
 impl Folder {
     /// A listing made from entries that are not on the disk (a folder inside an archive).
     pub(crate) fn from_entries(path: PathBuf, entries: Vec<Entry>) -> Folder {
-        Folder { path, entries, order: RwLock::new(Vec::new()) }
+        Folder { path, entries, order: RwLock::new(Vec::new()), homes: Vec::new() }
     }
 }
 
@@ -126,9 +128,30 @@ impl Folder {
     ) -> Result<Arc<Self>, FsError> {
         let path = PathBuf::from(path);
         let entries = list(&path)?;
-        let folder = Folder { path, entries, order: RwLock::new(Vec::new()) };
+        let folder = Folder { path, entries, order: RwLock::new(Vec::new()), homes: Vec::new() };
         folder.arrange(column, ascending, folders_first, show_hidden, String::new());
         Ok(Arc::new(folder))
+    }
+
+    /// A listing of items from anywhere (the files with a tag, search results): each keeps
+    /// its own folder, `label` stands for the whole. Items that are gone are left out.
+    #[uniffi::constructor]
+    pub fn gathered(
+        label: String, paths: Vec<String>, column: SortColumn, ascending: bool, folders_first: bool, show_hidden: bool,
+    ) -> Arc<Self> {
+        let found: Vec<(PathBuf, Entry)> = paths
+            .par_iter()
+            .filter_map(|p| {
+                let p = PathBuf::from(p);
+                let dir = p.parent()?.to_path_buf();
+                let e = entry(&dir, p.file_name()?)?;
+                Some((dir, e))
+            })
+            .collect();
+        let (homes, entries): (Vec<PathBuf>, Vec<Entry>) = found.into_iter().unzip();
+        let folder = Folder { path: PathBuf::from(label), entries, order: RwLock::new(Vec::new()), homes };
+        folder.arrange(column, ascending, folders_first, show_hidden, String::new());
+        Arc::new(folder)
     }
 
     pub fn path(&self) -> String {
@@ -152,7 +175,8 @@ impl Folder {
 
     pub fn child_path(&self, row: u32) -> Option<String> {
         let i = *self.order.read().unwrap().get(row as usize)?;
-        Some(self.path.join(&*self.entries[i as usize].name).display().to_string())
+        let dir = self.homes.get(i as usize).unwrap_or(&self.path);
+        Some(dir.join(&*self.entries[i as usize].name).display().to_string())
     }
 
     /// The row an item with this name has now (to keep the selection across a re-sort).
@@ -314,5 +338,26 @@ mod tests {
         assert_eq!(folder_size(d.display().to_string()), 5);
         assert!(matches!(Folder::open(d.join("nope").display().to_string(), SortColumn::Name, true, false, false), Err(FsError::NotFound { .. })));
         fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn a_gathered_listing_keeps_each_items_own_folder() {
+        let a = tempfile_dir("gathered-a");
+        let b = tempfile_dir("gathered-b");
+        fs::write(a.join("one.txt"), b"1").unwrap();
+        fs::write(b.join("two.txt"), b"22").unwrap();
+        let paths = vec![a.join("one.txt").display().to_string(), b.join("two.txt").display().to_string(), "/no/such/file".into()];
+        let f = Folder::gathered("rustyfiles:tag/x".into(), paths, SortColumn::Name, true, true, false);
+        assert_eq!(f.count(), 2);
+        assert_eq!(f.child_path(0).unwrap(), a.join("one.txt").display().to_string());
+        assert_eq!(f.child_path(1).unwrap(), b.join("two.txt").display().to_string());
+        let _ = (fs::remove_dir_all(&a), fs::remove_dir_all(&b));
+    }
+
+    fn tempfile_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("rf-mac-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
     }
 }

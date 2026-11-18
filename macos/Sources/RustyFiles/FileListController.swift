@@ -627,15 +627,16 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let any = !selectedRows.isEmpty && folder != nil
         // an archive is read only here: what is in it can be opened, copied and extracted
         let writable = folder != nil && archive == nil
+        let here = writable && !isGathered
         commandBar.cut.isEnabled = any && writable
         commandBar.copy.isEnabled = any
         commandBar.rename.isEnabled = selectedRows.count == 1 && writable
         commandBar.share.isEnabled = any && writable
         commandBar.delete.isEnabled = any && writable
-        commandBar.paste.isEnabled = writable && Clipboard.hasFiles
+        commandBar.paste.isEnabled = here && Clipboard.hasFiles
         let inTrash = TrashBin.contains(url) && archive == nil
         commandBar.trashMode = inTrash
-        commandBar.new.isEnabled = inTrash ? (folder?.count() ?? 0) > 0 : writable
+        commandBar.new.isEnabled = inTrash ? (folder?.count() ?? 0) > 0 : here
         commandBar.share.isEnabled = any && writable && !inTrash
         commandBar.properties.isEnabled = writable
         commandBar.preview.isEnabled = settingsView == nil && homeView == nil
@@ -881,7 +882,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             field.stringValue = display.name(original: original)
             return
         }
-        let from = url.appendingPathComponent(original)
+        let from = folder?.childPath(row: UInt32(row)).map(URL.init(fileURLWithPath:)) ?? url.appendingPathComponent(original)
         let oldExt = (original as NSString).pathExtension, newExt = (newName as NSString).pathExtension
         let isFile = !((try? from.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false)
         if isFile, AppSettings.warnExtensionChange, oldExt.lowercased() != newExt.lowercased() {
@@ -988,6 +989,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     // MARK: context menus (ctx_menu.rs)
 
     var archiveIsNil: Bool { archive == nil }
+    /// A gathered listing (a tag's files): its items are real, but there is no folder to put
+    /// new things in.
+    var isGathered: Bool { url.map { !$0.isFileURL } ?? false }
     var onOpenInNewTab: ((URL) -> Void)?
     var onOpenInNewWindow: ((URL) -> Void)?
     var onRefresh: (() -> Void)?
@@ -1113,7 +1117,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                 self?.reloadSelecting(made.map(\.lastPathComponent))
             }
         }
-        if let dir = url {
+        if let dir = url, dir.isFileURL {
             b.add(String(localized: "New folder with selection"), "folder-input") { [weak self] in
                 self?.run { try FileOps.newFolder(with: urls, in: dir) } done: { made in
                     let back = urls.map { (from: made.appendingPathComponent($0.lastPathComponent), to: $0) }
@@ -1230,7 +1234,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             return b.done()
         }
         b.quick([
-            ("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles && folder != nil, { [weak self] in self?.pasteItems() }),
+            ("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles && folder != nil && !isGathered, { [weak self] in self?.pasteItems() }),
             ("wrench", String(localized: "Properties (⌘I)"), url != nil, { [weak self] in if let u = self?.url { PropertiesWindow.show([u]) } }),
         ])
         b.sub(String(localized: "Layout"), "layout-grid") { m in
@@ -1260,17 +1264,19 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let um = FileUndo.shared.manager
         if um.canUndo { b.add(um.undoMenuItemTitle, "undo-2", key: "z") { um.undo() } }
         if um.canRedo { b.add(um.redoMenuItemTitle, "redo-2", key: "z", mods: [.command, .shift]) { um.redo() } }
-        b.sub(String(localized: "New"), "circle-plus") { m in
-            m.add(String(localized: "Folder"), "folder", key: "n", mods: [.command, .shift]) { [weak self] in self?.newFolder() }
-            m.add(String(localized: "Text document"), "file-text") { [weak self] in
-                guard let dir = self?.url else { return }
-                self?.run { try FileOps.newTextDocument(in: dir) } done: { made in
-                    FileUndo.shared.record(.trash([made]), title: String(localized: "New Text Document"))
-                    self?.reloadSelecting([made.lastPathComponent], rename: true)
+        if !isGathered {
+            b.sub(String(localized: "New"), "circle-plus") { m in
+                m.add(String(localized: "Folder"), "folder", key: "n", mods: [.command, .shift]) { [weak self] in self?.newFolder() }
+                m.add(String(localized: "Text document"), "file-text") { [weak self] in
+                    guard let dir = self?.url else { return }
+                    self?.run { try FileOps.newTextDocument(in: dir) } done: { made in
+                        FileUndo.shared.record(.trash([made]), title: String(localized: "New Text Document"))
+                        self?.reloadSelecting([made.lastPathComponent], rename: true)
+                    }
                 }
             }
         }
-        if let dir = url {
+        if let dir = url, dir.isFileURL {
             let pinned = MenuActions.isPinned(dir)
             b.add(pinned ? String(localized: "Unpin from sidebar") : String(localized: "Pin to sidebar"), pinned ? "pin-off" : "pin") {
                 MenuActions.setPinned(dir, !pinned)
@@ -1278,7 +1284,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([dir]) }
         }
         b.add(String(localized: "Show hidden items"), "eye", key: ".", mods: [.command, .shift], checked: showHidden) { AppSettings.showHidden.toggle() }
-        if let dir = url {
+        if let dir = url, dir.isFileURL {
             b.separator()
             b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(dir) }
         }
@@ -1628,6 +1634,7 @@ extension FileListController {
     /// The folder a drop lands in: the folder row under the pointer, else the folder shown.
     fileprivate func dropTarget(row: Int?) -> URL? {
         guard archive == nil, let folder, let url else { return nil }
+        if isGathered && row == nil { return nil }
         if let row, row >= 0, let item = folder.item(row: UInt32(row)), item.isDir, !display.isPackage(item),
             let p = folder.childPath(row: UInt32(row))
         {

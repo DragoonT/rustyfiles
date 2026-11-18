@@ -7,7 +7,7 @@ enum SettingsPage: CaseIterable {
     /// Marked "Experimental" in the page list, as on Windows.
     var isExperimental: Bool { self == .ferry }
 
-    case general, appearance, layout, files, ferry, about
+    case general, appearance, layout, files, tags, ferry, about
 
     var title: String {
         switch self {
@@ -15,6 +15,7 @@ enum SettingsPage: CaseIterable {
         case .appearance: String(localized: "Appearance")
         case .layout: String(localized: "Layout")
         case .files: String(localized: "Files and folders")
+        case .tags: String(localized: "Tags")
         case .ferry: "Ferry"
         case .about: String(localized: "About")
         }
@@ -26,6 +27,7 @@ enum SettingsPage: CaseIterable {
         case .appearance: "palette"
         case .layout: "layout-grid"
         case .files: "folder"
+        case .tags: "tag"
         case .ferry: "send"
         case .about: "info"
         }
@@ -40,12 +42,15 @@ enum SettingsRow {
     /// A card with a list under it (startup pages, folder aliases, rules…): each entry with a
     /// Remove button, the card's own buttons at its right.
     case list(title: String, detail: String?, icon: String?, entries: [(String, String?)], empty: String, remove: ((Int) -> Void)?, buttons: [(String, () -> Void)])
+    /// The same with a colour dot per entry and buttons of its own on each row.
+    case table(title: String, detail: String?, icon: String?, entries: [(String, String?, NSColor?)], empty: String, rowActions: [(String, (Int) -> Void)], buttons: [(String, () -> Void)])
 
     var searchText: String {
         switch self {
         case .section: ""
         case .card(let title, let detail, _, _): (title + " " + (detail ?? "")).lowercased()
         case .list(let title, let detail, _, _, _, _, _): (title + " " + (detail ?? "")).lowercased()
+        case .table(let title, let detail, _, _, _, _, _): (title + " " + (detail ?? "")).lowercased()
         }
     }
 }
@@ -137,6 +142,8 @@ enum SettingsContent {
                         get: { AppSettings.decimalSizes ? "decimal" : "binary" },
                         set: { AppSettings.decimalSizes = $0 == "decimal" })),
             ] + fileBehaviourRows()
+        case .tags:
+            return tagRows()
         case .ferry:
             return FerryPage.rows()
         case .about:
@@ -932,7 +939,12 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
                 v = card
             case .list(let title, let detail, let icon, let entries, let empty, let remove, let buttons):
                 v = SettingsListCard(
-                    title: title, detail: detail, icon: icon, entries: entries, empty: empty, remove: remove,
+                    title: title, detail: detail, icon: icon, entries: entries.map { ($0.0, $0.1, nil) }, empty: empty,
+                    rowActions: remove.map { r in [(String(localized: "Remove"), r)] } ?? [],
+                    control: buttons.isEmpty ? nil : ControlRow(buttons.map { PlainButton($0.0, action: $0.1) }))
+            case .table(let title, let detail, let icon, let entries, let empty, let rowActions, let buttons):
+                v = SettingsListCard(
+                    title: title, detail: detail, icon: icon, entries: entries, empty: empty, rowActions: rowActions,
                     control: buttons.isEmpty ? nil : ControlRow(buttons.map { PlainButton($0.0, action: $0.1) }))
             }
             content.addSubview(v)
@@ -1243,18 +1255,21 @@ enum FerryPage {
 @MainActor
 final class SettingsListCard: FlippedView {
     private let head: SettingsCardView
-    private let entries: [(String, String?)]
+    private let entries: [(String, String?, NSColor?)]
     private let empty: String
-    private var rowViews: [(NSTextField, NSTextField?, PlainButton?)] = []
+    private var rowViews: [(NSTextField, NSTextField?, ControlRow?)] = []
+    private var dots: [NSColor?] = []
     private static let rowH: CGFloat = 40
 
-    init(title: String, detail: String?, icon: String?, entries: [(String, String?)], empty: String, remove: ((Int) -> Void)?, control: NSView?) {
+    init(title: String, detail: String?, icon: String?, entries: [(String, String?, NSColor?)], empty: String,
+         rowActions: [(String, (Int) -> Void)], control: NSView?) {
         head = SettingsCardView(title: title, detail: detail, icon: icon, control: control)
         self.entries = entries
         self.empty = empty
         super.init(frame: .zero)
         addSubview(head)
-        let shown = entries.isEmpty ? [(empty, nil)] : entries
+        let shown: [(String, String?, NSColor?)] = entries.isEmpty ? [(empty, nil, nil)] : entries
+        dots = shown.map(\.2)
         for (i, e) in shown.enumerated() {
             let t = NSTextField(labelWithString: e.0)
             t.font = Metrics.textSm
@@ -1270,13 +1285,13 @@ final class SettingsListCard: FlippedView {
                 addSubview(f)
                 sub = f
             }
-            var button: PlainButton?
-            if let remove, !entries.isEmpty {
-                let b = PlainButton(String(localized: "Remove")) { remove(i) }
+            var buttons: ControlRow?
+            if !rowActions.isEmpty, !entries.isEmpty {
+                let b = ControlRow(rowActions.map { a in PlainButton(a.0) { a.1(i) } })
                 addSubview(b)
-                button = b
+                buttons = b
             }
-            rowViews.append((t, sub, button))
+            rowViews.append((t, sub, buttons))
         }
     }
 
@@ -1317,6 +1332,11 @@ final class SettingsListCard: FlippedView {
         p.divider.setFill()
         for i in 0..<rowViews.count {
             NSRect(x: 16, y: hh + CGFloat(i) * Self.rowH, width: bounds.width - 32, height: 1).fill()
+        }
+        for (i, c) in dots.enumerated() {
+            guard let c else { continue }
+            c.setFill()
+            NSBezierPath(ovalIn: NSRect(x: 26, y: hh + CGFloat(i) * Self.rowH + (Self.rowH - 12) / 2, width: 12, height: 12)).fill()
         }
     }
 }

@@ -154,10 +154,9 @@ enum MenuActions {
     /// Finder's coloured tags (their names as this Mac calls them), checked when every
     /// selected item has the tag; choosing one gives it to all or takes it from all.
     static func tagsMenu(_ urls: [URL], _ b: MenuBuilder) {
-        let names = NSWorkspace.shared.fileLabels.dropFirst()
-        let colors = NSWorkspace.shared.fileLabelColors.dropFirst()
         let current = urls.map { Set((try? $0.resourceValues(forKeys: [.tagNamesKey]).tagNames) ?? []) }
-        for (name, color) in zip(names, colors) {
+        for tag in TagStore.all {
+            let name = tag.name
             let all = !current.isEmpty && current.allSatisfy { $0.contains(name) }
             let item = b.add(name, checked: all) {
                 for u in urls {
@@ -167,8 +166,10 @@ enum MenuActions {
                     try? (u as NSURL).setResourceValue(tags, forKey: .tagNamesKey)
                 }
             }
-            item.image = dot(color)
+            item.image = TagStore.dot(TagStore.color(tag.color))
         }
+        b.separator()
+        b.add(String(localized: "Edit tags…"), "settings") { AppDelegate.shared.frontController?.openSettings(page: .tags) }
     }
 
     private static func dot(_ color: NSColor) -> NSImage {
