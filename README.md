@@ -181,7 +181,9 @@ other test scripts are in the repository (`crates/rf-win/examples/copybench.rs` 
 
 ## What it does
 
-**Browsing.** Tabs you can drag to reorder or pull out into a new window. Dual pane. Details,
+**Browsing.** Tabs you can drag to reorder or pull out into a new window. Save a window's tabs,
+split panes included, as a named session and open it again later; its name stands beside the tabs.
+A new tab opens Home or the folder you are in (Settings › General). Dual pane. Details,
 grid and column views, grouping, a preview pane, search, colour tags, the Shelf, libraries,
 network shares and FTP. A Git status column. Folder sizes on demand: click "Calculate size";
 they are remembered across restarts and can show size on disk. "Show disk usage" on a folder or
@@ -193,7 +195,7 @@ Link) appear under Devices on the Home page; that part hasn't been tried with a 
 **Files.** Undo and redo for renames, copies, moves, deleting to the Recycle Bin and folder
 flattening. Bulk rename.
 The full Explorer context menu, drag and drop with Explorer and the desktop, and drop targets
-on tabs and pinned folders.
+on tabs and pinned folders. Send files to your other computers with [Ferry](#ferry).
 
 **Archives.** ZIP, 7z, RAR, the tar family and ISO open like folders, password-protected
 ZIP, 7z and RAR included. Add, delete and rename inside ZIP, 7z and tar. Create ZIP, 7z and tar.zst on every core. Reading is
