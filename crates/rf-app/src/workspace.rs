@@ -1655,15 +1655,26 @@ impl Workspace {
         cx.notify();
     }
 
-    fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use crate::command_palette::{CommandPalette, PaletteEvent};
+    /// The command palette (Ctrl+Shift+P), with past folders among the commands unless the setting turned that off.
+    fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let with_folders = cx.global::<crate::settings::Settings>().palette_folder_history;
+        self.toggle_palette(crate::command_palette::PaletteMode::Commands { with_folders }, window, cx)
+    }
+
+    /// Opens the palette listing what `mode` says, or closes it when it is open.
+    fn toggle_palette(&mut self, mode: crate::command_palette::PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::command_palette::{CommandPalette, PaletteEvent, PaletteMode};
         if self.palette.take().is_some() {
             self._palette_sub = None;
             self.focus_active(window, cx);
             cx.notify();
             return;
         }
-        let pal = cx.new(|cx| CommandPalette::new(window, cx));
+        let folders = match mode {
+            PaletteMode::Commands { with_folders: false } => Vec::new(),
+            _ => crate::folder_history::snapshot(),
+        };
+        let pal = cx.new(|cx| CommandPalette::new(mode, folders, window, cx));
         self._palette_sub = Some(cx.subscribe_in(&pal, window, |this, _, ev: &PaletteEvent, window, cx| {
             this.palette = None;
             this._palette_sub = None;
@@ -2920,7 +2931,7 @@ impl Workspace {
             .children(chip)
             .child(div().w(px(1.)).h(px(18.)).mx_1().bg(p.divider))
             .child(mode_btn("omni-cmd", L::SquareChevronRight, self.palette.is_some(), "Komut paleti  (Ctrl+Shift+P)", cx, |this, window, cx| {
-                this.toggle_palette(window, cx)
+                this.toggle_command_palette(window, cx)
             }))
             .child(mode_btn("omni-search", L::Search, searching, "Ara  (Ctrl+F)", cx, |this, window, cx| this.enter_search(window, cx)))
             .on_click(cx.listener(|this, _, window, cx| {
@@ -4721,7 +4732,10 @@ impl Render for Workspace {
                 this.address.update(cx, |s, cx| s.set_value("@", window, cx));
                 this.update_suggestions("@".into(), cx);
             }))
-            .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| this.toggle_palette(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| this.toggle_command_palette(window, cx)))
+            .on_action(cx.listener(|this, _: &SearchFolderHistory, window, cx| {
+                this.toggle_palette(crate::command_palette::PaletteMode::Folders, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &GoSettings, window, cx| this.navigate(Location::Settings, window, cx)))
             .on_action(cx.listener(|this, _: &GoRecycleBin, window, cx| this.navigate(Location::RecycleBin, window, cx)))
             .on_action(cx.listener(|this, _: &SwitchPane, window, cx| {

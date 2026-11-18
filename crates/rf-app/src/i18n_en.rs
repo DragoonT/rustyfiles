@@ -2043,4 +2043,10 @@ pub const EN: &[(&str, &str)] = &[
     ("Yeni sekme şunu açar", "A new tab opens"),
     ("Ctrl+T, + düğmesi ve sekme menüsü. Sekmeyi çoğalt (Ctrl+Shift+K) her zaman aynı klasörü açar.", "Ctrl+T, the + button and the tab menu. Duplicate tab (Ctrl+Shift+K) always opens the same folder."),
     ("Açık olan klasör", "The current folder"),
+    ("Geçmiş klasörlerde ara", "Search past folders"),
+    ("Geçmiş klasörlerde ara…", "Search past folders…"),
+    ("Eşleşen klasör yok", "No matching folders"),
+    ("Henüz gezilen klasör yok", "No folders visited yet"),
+    ("Komut paletinde geçmiş klasörleri göster", "Show past folders in the command palette"),
+    ("Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.", "As you type, folders you went to before are listed with the commands. Ctrl+P always searches past folders only."),
 ];

@@ -180,7 +180,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Layout => layout(p, s, cx),
         Page::Files => files(p, s, cx),
         Page::FileTypes => crate::open_rules_page::page(p, s),
-        Page::Actions => actions(p, cx),
+        Page::Actions => actions(p, s, cx),
         Page::Tags => tags(p, cx),
         Page::Look => look(p, s, cx),
         Page::Ferry => crate::ferry::page(p, s, cx),
@@ -2035,7 +2035,7 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     v
 }
 
-fn actions(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
+fn actions(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     let mut grid = div().px_4().py_3().flex().flex_wrap().gap_x_6().gap_y_0p5();
     let capturing = crate::keymap_editor::capturing(cx);
     let entries = crate::command_palette::shortcut_entries();
@@ -2121,6 +2121,13 @@ fn actions(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
         );
     }
     vec![
+        card(
+            p,
+            L::Clock,
+            t!("Komut paletinde geçmiş klasörleri göster"),
+            Some(t!("Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.")),
+            sw("palette-folders", p, s.palette_folder_history, |s, v| s.palette_folder_history = v),
+        ),
         shell(p)
             .child(card_body(
                 p,
