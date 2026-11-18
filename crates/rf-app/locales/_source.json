@@ -11638,5 +11638,139 @@
   "key": "Sağ adadaki tepsi simgeleri birbirine daha yakın durur; aynı yere daha çok simge sığar.",
   "tr": "Sağ adadaki tepsi simgeleri birbirine daha yakın durur; aynı yere daha çok simge sığar.",
   "en": "The tray icons of the right island stand closer together; more icons fit in the same room."
+ },
+ {
+  "id": "d8f517bd",
+  "key": "rustyfiles'ı yeniden başlat",
+  "tr": "rustyfiles'ı yeniden başlat",
+  "en": "Restart rustyfiles"
+ },
+ {
+  "id": "dac24e1d",
+  "key": "Boşken son kullanılanları göster",
+  "tr": "Boşken son kullanılanları göster",
+  "en": "Show recent items when empty"
+ },
+ {
+  "id": "e59d4182",
+  "key": "Arama kutusu",
+  "tr": "Arama kutusu",
+  "en": "Search box",
+  "note": "a choice for how the dock shows its search: as a text box"
+ },
+ {
+  "id": "768be356",
+  "key": "Siyah (OLED)",
+  "tr": "Siyah (OLED)",
+  "en": "Black (OLED)",
+  "note": "a colour theme: pure black background, for OLED screens"
+ },
+ {
+  "id": "4362d909",
+  "key": "Dizinde aranıyor…",
+  "tr": "Dizinde aranıyor…",
+  "en": "Searching the index…"
+ },
+ {
+  "id": "bd4e7db8",
+  "key": "Windows Search'e soruluyor…",
+  "tr": "Windows Search'e soruluyor…",
+  "en": "Asking Windows Search…"
+ },
+ {
+  "id": "b5c31a25",
+  "key": "Windows Search cevap vermedi, disk taranıyor…",
+  "tr": "Windows Search cevap vermedi, disk taranıyor…",
+  "en": "Windows Search did not answer, scanning the disk…"
+ },
+ {
+  "id": "d9440a71",
+  "key": "Disk taranıyor…",
+  "tr": "Disk taranıyor…",
+  "en": "Scanning the disk…"
+ },
+ {
+  "id": "df5cca29",
+  "key": "Uygulama: yakın zamanlar \"5 dakika önce\", eskileri Windows'un biçiminde; Sistem: her zaman Windows'un tarih ve saat biçimi; Evrensel: 2026-11-05 13:45",
+  "tr": "Uygulama: yakın zamanlar \"5 dakika önce\", eskileri Windows'un biçiminde; Sistem: her zaman Windows'un tarih ve saat biçimi; Evrensel: 2026-11-05 13:45",
+  "en": "Application: recent times as \"5 min ago\", older ones in Windows' format; System: always Windows' date and time format; Universal: 2026-11-05 13:45"
+ },
+ {
+  "id": "0df8814b",
+  "key": "Oturum",
+  "tr": "Oturum",
+  "en": "Session",
+  "note": "a saved set of tabs that can be opened again later (a heading in the tab menu), not a login session"
+ },
+ {
+  "id": "f38b2396",
+  "key": "Oturumu kaydet",
+  "tr": "Oturumu kaydet",
+  "en": "Save session",
+  "note": "a saved set of tabs (see \"Session\"): saves this window's tabs under a name"
+ },
+ {
+  "id": "32894336",
+  "key": "Oturumu kaydet…",
+  "tr": "Oturumu kaydet…",
+  "en": "Save session…",
+  "note": "a saved set of tabs (see \"Session\"): opens a box to name it"
+ },
+ {
+  "id": "63e26eeb",
+  "key": "Bu penceredeki sekmeler bu adla kaydedilir; sekme menüsündeki Oturum aç ile yeni bir pencerede açılır.",
+  "tr": "Bu penceredeki sekmeler bu adla kaydedilir; sekme menüsündeki Oturum aç ile yeni bir pencerede açılır.",
+  "en": "This window's tabs are saved under this name; Open session in the tab menu opens them in a new window."
+ },
+ {
+  "id": "b34ec580",
+  "key": "Bir ad yazın.",
+  "tr": "Bir ad yazın.",
+  "en": "Type a name."
+ },
+ {
+  "id": "8736ac6a",
+  "key": "Oturum aç",
+  "tr": "Oturum aç",
+  "en": "Open session",
+  "note": "a saved set of tabs (see \"Session\"): opens it in a new window"
+ },
+ {
+  "id": "12ca0ab2",
+  "key": "Oturumu sil",
+  "tr": "Oturumu sil",
+  "en": "Delete session",
+  "note": "a saved set of tabs (see \"Session\"): removes it from the list"
+ },
+ {
+  "id": "029b1203",
+  "key": "Yalnızca simge",
+  "tr": "Yalnızca simge",
+  "en": "Icon only",
+  "note": "a choice for how the dock shows its search: only a magnifier icon, no box"
+ },
+ {
+  "id": "59fecfec",
+  "key": "Sol adadaki arama: bir kutu, yalnızca simgesi ya da hiç. Logo Başlat'ı yine açar.",
+  "tr": "Sol adadaki arama: bir kutu, yalnızca simgesi ya da hiç. Logo Başlat'ı yine açar.",
+  "en": "The left island's search: a box, its icon only, or none. The logo still opens Start."
+ },
+ {
+  "id": "19933c6f",
+  "key": "Kapalıyken HyperSearch bir şey yazılana kadar boş açılır",
+  "tr": "Kapalıyken HyperSearch bir şey yazılana kadar boş açılır",
+  "en": "When off, HyperSearch stays empty until something is typed"
+ },
+ {
+  "id": "4317c020",
+  "key": "Önemli güncelleme: rustyfiles {v}",
+  "tr": "Önemli güncelleme: rustyfiles {v}",
+  "en": "Important update: rustyfiles {v}"
+ },
+ {
+  "id": "20d40d60",
+  "key": "Önemli düzeltmeler içeriyor. Şimdi yeniden başlatın.",
+  "tr": "Önemli düzeltmeler içeriyor. Şimdi yeniden başlatın.",
+  "en": "It brings important fixes. Restart now."
  }
 ]
