@@ -4017,6 +4017,7 @@ impl FolderView {
         let places = self.places.read(cx);
         let pinned = places.pinned.clone();
         let drives = places.drives.clone();
+        let windows_file_explorer_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         let devices = places.devices.clone();
         let network = places.network.clone();
         let (hidden, cleared) = {
@@ -4050,9 +4051,27 @@ impl FolderView {
         let mut pinned_grid = div().grid().grid_cols(tile_cols(avail, 140., 220., 12.)).gap_3();
         for (i, f) in pinned.into_iter().enumerate() {
             let path = f.path.clone();
+            let shell_icon = if windows_file_explorer_theme {
+                self.images.update(cx, |images, cx| {
+                    images.shell_icon(&path.to_string_lossy(), 28, cx)
+                })
+            } else {
+                None
+            };
+            let icon = match shell_icon {
+                Some(image) => img(image).size(px(28.)).into_any_element(),
+                None => {
+                    let icon = Icon::new(f.icon).size(px(28.));
+                    if windows_file_explorer_theme {
+                        icon.into_any_element()
+                    } else {
+                        icon.text_color(p.accent).into_any_element()
+                    }
+                }
+            };
             pinned_grid = pinned_grid.child(
                 card(("pin", i).into())
-                    .child(Icon::new(f.icon).size(px(28.)).text_color(p.accent))
+                    .child(icon)
                     .child(div().text_sm().child(crate::i18n::td(&f.title)))
                     .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(path.clone()), cx))),
             );
@@ -4062,6 +4081,24 @@ impl FolderView {
         for (i, d) in drives.into_iter().enumerate() {
             let root = d.root.clone();
             let usage_root = d.root.clone();
+            let shell_icon = if windows_file_explorer_theme {
+                self.images.update(cx, |images, cx| {
+                    images.shell_icon(&root.to_string_lossy(), 28, cx)
+                })
+            } else {
+                None
+            };
+            let icon = match shell_icon {
+                Some(image) => img(image).size(px(28.)).into_any_element(),
+                None => {
+                    let icon = Icon::new(places::drive_icon(&d)).size(px(28.));
+                    if windows_file_explorer_theme {
+                        icon.into_any_element()
+                    } else {
+                        icon.text_color(p.text_secondary).into_any_element()
+                    }
+                }
+            };
             let frac = d.used_fraction();
             let bar_color = if frac > 0.9 { p.danger } else { p.accent };
             drive_grid = drive_grid.child(
@@ -4070,7 +4107,7 @@ impl FolderView {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .child(Icon::new(places::drive_icon(&d)).size(px(28.)).text_color(p.text_secondary))
+                            .child(icon)
                             .child(
                                 v_flex()
                                     .flex_1()

@@ -729,11 +729,12 @@ pub fn main() {
     // (the first window on the CPU renderer or on the card: what this machine was like the last time, see `fast_start`)
     fast_start::before_app(!dock && !bar_preview && pick.is_none() && !quick_search && !snip_only && !no_window && !open_look_settings);
     start_mark("before the app");
-    gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
+    gpui_kit::application().with_assets(icons::AppAssets).run(move |cx| {
         start_mark("app running");
         gpui_kit::init(cx);
         ui_stall::start(cx);
         cx.set_global(settings::Settings::load());
+        icons::install_theme_resolver(cx);
         start_mark("settings loaded");
         rf_core::sort::set_turkish_collation(rf_win::encoding::user_locale_is_turkish());
         // eski kod sayfalı metinlerin tahmini: Türkçe olmayan sistemde Türkçe ipucu verilmez

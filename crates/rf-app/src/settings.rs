@@ -494,6 +494,8 @@ pub struct Settings {
     /// A scrollbar over the Details and Grid lists.
     pub show_scrollbar: bool,
     pub animations: AnimPref,
+    /// Use Windows File Explorer's icon and file-list context-menu style instead of RustyFile's original theme.
+    pub windows_file_explorer_theme: bool,
     pub backdrop: BackdropPref,
     /// Background tint color (0xRRGGBB), `None` = the backdrop as is.
     pub tint: Option<u32>,
@@ -801,6 +803,7 @@ impl Default for Settings {
             smooth_scroll: true,
             show_scrollbar: true,
             animations: AnimPref::System,
+            windows_file_explorer_theme: false,
             backdrop: BackdropPref::Mica,
             tint: None,
             background_image: None,
@@ -1238,12 +1241,17 @@ pub fn apply_component_theme(cx: &mut App) {
 
 /// Mutates the global settings, applies side effects, saves in the background and refreshes windows.
 pub fn update(cx: &mut App, f: impl FnOnce(&mut Settings)) {
+    let explorer_theme_before = cx.global::<Settings>().windows_file_explorer_theme;
     cx.update_global::<Settings, _>(|s, _| f(s));
     let s = cx.global::<Settings>().clone();
+    let explorer_theme_changed = s.windows_file_explorer_theme != explorer_theme_before;
     s.apply_side_effects();
     apply_component_theme(cx);
     std::thread::spawn(move || {
         s.save();
+        if explorer_theme_changed {
+            crate::look::ipc::send(crate::look::ipc::Msg::Reload, false);
+        }
         // after the save: the dock process reads the file when it is told to reload
         crate::dock::control::sync_process(&s);
     });
@@ -1379,6 +1387,17 @@ pub fn app_dir() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod lenient_tests {
     use super::Settings;
+
+    #[test]
+    fn windows_file_explorer_theme_defaults_off_and_round_trips() {
+        assert!(!Settings::default().windows_file_explorer_theme);
+        assert!(!Settings::parse_lenient("theme = \"dark\"\n").unwrap().windows_file_explorer_theme, "older settings files omit the new option");
+
+        let enabled = Settings { windows_file_explorer_theme: true, ..Default::default() };
+        let text = toml::to_string_pretty(&enabled).unwrap();
+        assert!(text.contains("windows_file_explorer_theme = true"));
+        assert!(Settings::parse_lenient(&text).unwrap().windows_file_explorer_theme);
+    }
 
     #[test]
     fn unknown_values_fall_back_per_field() {

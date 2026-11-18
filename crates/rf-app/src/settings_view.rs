@@ -745,7 +745,7 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         p,
         L::Plus,
         t!("Yeni sekme şunu açar"),
-        Some(t!("Ctrl+T, + düğmesi ve sekme menüsü. Sekmeyi çoğalt (Ctrl+Shift+K) her zaman aynı klasörü açar.")),
+        Some("Ctrl+T"),
         dropdown(
             "new-tab-opens",
             p,
@@ -1402,6 +1402,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 ],
                 |s, v| s.animations = v,
             ),
+        ),
+        card(
+            p,
+            L::Folder,
+            crate::i18n::tx("Windows Dosya Gezgini temasını kullan", "Use Windows File Explorer Theme"),
+            None,
+            sw("windows-file-explorer-theme", p, s.windows_file_explorer_theme, |s, v| s.windows_file_explorer_theme = v),
         ),
         card(
             p,
