@@ -106,6 +106,7 @@ pub mod winkey;
 pub mod volume;
 pub mod tasklist;
 // (not called `notify`: that is the name of a crate this one uses)
+pub mod sound;
 pub mod toast_post;
 pub mod toasts;
 pub mod tree_watch;

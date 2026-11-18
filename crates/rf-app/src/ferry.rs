@@ -275,6 +275,7 @@ fn on_event(ev: Ev, cx: &mut App) {
         Ev::Receiving(offer) => {
             let dest = inbox_of(cx.global::<Settings>());
             cx.global_mut::<Ferry>().incoming.insert(offer.transfer, offer.from_name.clone());
+            incoming_started(&offer, cx);
             track(cx, offer.transfer, format!("{}: {}", t!("Ferry ile alınıyor"), offer.from_name), Some(dest));
         }
         Ev::Progress(transfer, done, total) => {
@@ -519,6 +520,30 @@ fn on_toast(arg: &str, cx: &mut App) {
             crate::workspace::route_ipc_shown(format!("{}{rest}", crate::workspace::SELECT_PREFIX), cx);
         }
         _ => {}
+    }
+}
+
+/// A trusted device's files started coming in without a question: said in a toast, with Windows' notification sound, so the user knows
+/// (the user asked for it). Without toasts, the sound alone.
+fn incoming_started(offer: &Offer, cx: &mut App) {
+    let what = match offer.names.len() {
+        0 => crate::i18n::items(offer.file_count as usize),
+        1 => offer.names[0].clone(),
+        n => format!("{} {} {}", offer.names[0], t!("ve"), crate::i18n::items(n - 1)),
+    };
+    let line = format!("{what} · {}", rf_core::format::size(offer.total_bytes));
+    let shown = toasts_usable()
+        && cx.global::<Ferry>().events.clone().is_some_and(|tx| {
+            let title = format!("{} {}", offer.from_name, t!("dosya gönderiyor"));
+            let lines = [line.as_str()];
+            let toast = rf_win::toast_post::Toast { tag: &format!("in-{}", offer.transfer), title: &title, lines: &lines, launch: "ferry:none:", buttons: &[], stays: false };
+            rf_win::toast_post::show(crate::installer::APP_ID, &toast, move |arg| {
+                let _ = tx.unbounded_send(Ev::Toast(arg));
+            })
+            .is_ok()
+        });
+    if !shown {
+        rf_win::sound::notify();
     }
 }
 

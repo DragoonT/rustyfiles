@@ -2036,4 +2036,5 @@ pub const EN: &[(&str, &str)] = &[
     ("Ölçülemedi", "Couldn't measure"),
     ("ağ", "network"),
     ("O cihazla az önce hız ölçüldü; birkaç saniye sonra yeniden deneyin.", "The speed to that device was just tested; try again in a few seconds."),
+    ("dosya gönderiyor", "is sending you files"),
 ];
