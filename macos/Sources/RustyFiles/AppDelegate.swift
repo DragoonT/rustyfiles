@@ -14,7 +14,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Sizes and dates in rf-core's English wording until the interface is translated.
         setEnglish(on: true)
         AppSettings.apply()
-        FerryService.shared.startIfEnabled()
+        // RF_NOFERRY (development): a second copy of the app must not join the network as this Mac
+        if ProcessInfo.processInfo.environment["RF_NOFERRY"] == nil { FerryService.shared.startIfEnabled() }
+        if ProcessInfo.processInfo.environment["RF_DEMO_STATUS"] != nil {
+            StatusCenter.demo()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.controllers.first?.toggleStatusCenter()
+            }
+        }
         NotificationCenter.default.addObserver(forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated {
                 Palette.invalidate()

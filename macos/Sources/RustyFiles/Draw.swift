@@ -136,6 +136,8 @@ final class IconButton: HoverView {
     var isOn = false { didSet { needsDisplay = true; updateLens() } }
     /// Held down while its menu is open.
     var isOpen = false { didSet { needsDisplay = true } }
+    /// A progress ring round the button (0…1), as Safari's downloads button has; nil: none.
+    var ring: Double? { didSet { if ring != oldValue { needsDisplay = true } } }
     var tint: (Palette) -> NSColor = { $0.text }
     var action: ((IconButton) -> Void)?
     private var pressed = false { didSet { needsDisplay = true } }
@@ -203,6 +205,22 @@ final class IconButton: HoverView {
             // on glass, hover is the lens under the button (`updateLens`)
         }
         let color = !isEnabled ? p.textTertiary : (isOn ? p.accent : tint(p))
+        if let ring {
+            let r = min(box.width, box.height) / 2 - 2
+            let c = NSPoint(x: box.midX, y: box.midY)
+            let track = NSBezierPath()
+            track.appendArc(withCenter: c, radius: r, startAngle: 0, endAngle: 360)
+            track.lineWidth = 2
+            p.pressed.setStroke()
+            track.stroke()
+            // clockwise from the top (flipped view: angles run the other way)
+            let arc = NSBezierPath()
+            arc.appendArc(withCenter: c, radius: r, startAngle: -90, endAngle: -90 + 360 * CGFloat(min(max(ring, 0.02), 1)), clockwise: false)
+            arc.lineWidth = 2
+            arc.lineCapStyle = .round
+            p.accent.setStroke()
+            arc.stroke()
+        }
         if label == nil && !chevron {
             Draw.icon(icon, in: box, size: iconSize, color: color)
             return

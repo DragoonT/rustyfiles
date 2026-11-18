@@ -309,8 +309,17 @@ final class TextCellView: HoverView {
         isLink ? super.hitTest(point) : nil
     }
 
+    // a link takes the whole click (down and up) so the row is not selected by it
+    override func mouseDown(with event: NSEvent) {
+        if !isLink { super.mouseDown(with: event) }
+    }
+
     override func mouseUp(with event: NSEvent) {
         if isLink, bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
+    }
+
+    override func resetCursorRects() {
+        if isLink { addCursorRect(bounds, cursor: .pointingHand) }
     }
 }
 
@@ -345,6 +354,13 @@ final class FileTableView: NSTableView {
         (rowView(atRow: hoveredRow, makeIfNecessary: false) as? FileRowView)?.hovered = false
         hoveredRow = r
         (rowView(atRow: r, makeIfNecessary: false) as? FileRowView)?.hovered = true
+    }
+
+    /// A table hands clicks to its cells' controls only; "Calculate size" is a link drawn by
+    /// its cell, so the table is told to let it have the click.
+    override func validateProposedFirstResponder(_ responder: NSResponder, for event: NSEvent?) -> Bool {
+        if let cell = responder as? TextCellView, cell.isLink { return true }
+        return super.validateProposedFirstResponder(responder, for: event)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

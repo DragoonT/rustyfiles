@@ -24,6 +24,14 @@ final class StatusCenter {
         private(set) var total: UInt64 = 0
         private(set) var state: State = .running
         let cancel: (() -> Void)?
+        let started = Date()
+        private(set) var ended: Date?
+        /// Bytes a second, smoothed so the number does not jump about.
+        private(set) var speed: Double = 0
+        private var lastSample: (time: Date, done: UInt64)?
+        /// The first progress this run saw: a resumed transfer starts with bytes that were
+        /// already there, which say nothing about its speed.
+        private var firstSample: (time: Date, done: UInt64)?
 
         init(title: String, folder: URL?, cancel: (() -> Void)?) {
             self.title = title
@@ -32,14 +40,44 @@ final class StatusCenter {
         }
 
         @MainActor func update(done: UInt64, total: UInt64) {
+            let now = Date()
+            if let last = lastSample {
+                let dt = now.timeIntervalSince(last.time)
+                if dt >= 0.2, done >= last.done {
+                    let instant = Double(done - last.done) / dt
+                    speed = speed == 0 ? instant : speed * 0.75 + instant * 0.25
+                    lastSample = (now, done)
+                }
+            } else {
+                lastSample = (now, done)
+                firstSample = (now, done)
+            }
             self.done = done
             self.total = total
             StatusCenter.shared.changed()
         }
 
-        @MainActor func succeed() { state = .done; if total > 0 { done = total }; StatusCenter.shared.changed() }
-        @MainActor func cancelled() { state = .cancelled; StatusCenter.shared.changed() }
+        /// Seconds left at the current speed (nil while that can't be told).
+        var remaining: TimeInterval? {
+            guard state == .running, speed > 0, total > done else { return nil }
+            return Double(total - done) / speed
+        }
+
+        var elapsed: TimeInterval { (ended ?? Date()).timeIntervalSince(started) }
+
+        /// Bytes a second over the whole run, counting only what moved in it (nil for a run too
+        /// short to say).
+        var averageSpeed: Double? {
+            guard let first = firstSample, let end = ended ?? lastSample?.time else { return nil }
+            let seconds = end.timeIntervalSince(first.time)
+            guard seconds >= 2, done > first.done else { return nil }
+            return Double(done - first.done) / seconds
+        }
+
+        @MainActor func succeed() { state = .done; ended = Date(); if total > 0 { done = total }; StatusCenter.shared.changed() }
+        @MainActor func cancelled() { state = .cancelled; ended = Date(); StatusCenter.shared.changed() }
         @MainActor func fail(_ message: String) {
+            ended = Date()
             state = .failed(message)
             StatusCenter.shared.unseenFailure = true
             StatusCenter.shared.changed()
@@ -52,6 +90,22 @@ final class StatusCenter {
 
     var isBusy: Bool { cards.contains { $0.state == .running } }
 
+    /// How far all running operations are, together (nil: nothing measurable runs).
+    var overallProgress: Double? {
+        let running = cards.filter { $0.state == .running && $0.total > 0 }
+        let total = running.reduce(UInt64(0)) { $0 + $1.total }
+        guard total > 0 else { return nil }
+        return Double(running.reduce(UInt64(0)) { $0 + $1.done }) / Double(total)
+    }
+
+    static func duration(_ t: TimeInterval) -> String {
+        let f = DateComponentsFormatter()
+        f.unitsStyle = .abbreviated
+        f.allowedUnits = t >= 3600 ? [.hour, .minute] : (t >= 60 ? [.minute, .second] : [.second])
+        f.maximumUnitCount = 2
+        return f.string(from: max(t, 1)) ?? ""
+    }
+
     func add(title: String, folder: URL?, cancel: (() -> Void)?) -> Card {
         let c = Card(title: title, folder: folder, cancel: cancel)
         cards.insert(c, at: 0)
@@ -61,6 +115,22 @@ final class StatusCenter {
 
     func failed(title: String, message: String) {
         add(title: title, folder: nil, cancel: nil).fail(message)
+    }
+
+    /// Development aid (RF_DEMO_STATUS): a running card that moves, and a finished one.
+    static func demo() {
+        let done = shared.add(title: "Receiving with Ferry: Studio PC", folder: FileManager.default.homeDirectoryForCurrentUser, cancel: nil)
+        done.update(done: 0, total: 7_000_000_000)
+        done.succeed()
+        let running = shared.add(title: "Sending with Ferry: Studio PC", folder: nil, cancel: {})
+        var sent: UInt64 = 0
+        Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { t in
+            MainActor.assumeIsolated {
+                sent = min(sent + 12_000_000, 1_000_000_000)
+                running.update(done: sent, total: 1_000_000_000)
+                if sent >= 1_000_000_000 { t.invalidate() }
+            }
+        }
     }
 
     func clearFinished() {
@@ -100,7 +170,7 @@ final class StatusCenterView: FlippedView {
         }
         rows.forEach { $0.needsDisplay = true; $0.needsLayout = true }
         clear.isHidden = !cards.contains { $0.state != .running }
-        let h = max(CGFloat(rows.count) * 68 + 16 + 40, 120)
+        let h = max(CGFloat(rows.count) * 86 + 16 + 40, 120)
         setFrameSize(NSSize(width: 360, height: min(h, 520)))
         onResize?(frame.size)
         needsLayout = true
@@ -111,8 +181,8 @@ final class StatusCenterView: FlippedView {
         super.layout()
         var y: CGFloat = 40
         for r in rows {
-            r.frame = NSRect(x: 12, y: y, width: bounds.width - 24, height: 60)
-            y += 68
+            r.frame = NSRect(x: 12, y: y, width: bounds.width - 24, height: 78)
+            y += 86
         }
         let cw = clear.intrinsicContentSize.width
         clear.frame = NSRect(x: bounds.width - 12 - cw, y: 10, width: cw, height: 24)
@@ -178,25 +248,42 @@ final class StatusCardView: HoverView {
         path.stroke()
         let textW = bounds.width - 12 - 44
         Draw.text(card.title, in: NSRect(x: 12, y: 8, width: textW, height: 20), font: Metrics.textSm, color: p.text)
-        let detail: String
+        var first = "", second = ""
         var color = p.textSecondary
+        let speed = card.speed > 0 ? formatSize(bytes: UInt64(card.speed)) + "/s" : ""
         switch card.state {
         case .running:
             let bar = NSRect(x: 12, y: 32, width: textW, height: 4)
             Draw.roundedRect(bar, radius: 2, fill: p.pressed)
             if card.total > 0 {
-                let f = CGFloat(Double(card.done) / Double(card.total))
-                Draw.roundedRect(NSRect(x: bar.minX, y: bar.minY, width: bar.width * min(max(f, 0), 1), height: 4), radius: 2, fill: p.accent)
+                let f = Double(card.done) / Double(card.total)
+                Draw.roundedRect(NSRect(x: bar.minX, y: bar.minY, width: bar.width * CGFloat(min(max(f, 0), 1)), height: 4), radius: 2, fill: p.accent)
+                first = String(localized: "\(formatSize(bytes: card.done)) of \(formatSize(bytes: card.total))") + " · \(Int(f * 100))%"
+                // "48.3 MB/s · about 2 min left"
+                var parts: [String] = []
+                if !speed.isEmpty { parts.append(speed) }
+                if let left = card.remaining { parts.append(String(localized: "about \(StatusCenter.duration(left)) left")) }
+                second = parts.joined(separator: " · ")
+            } else {
+                first = String(localized: "Waiting for the other device…")
             }
-            detail = card.total > 0
-                ? String(localized: "\(formatSize(bytes: card.done)) of \(formatSize(bytes: card.total))") : String(localized: "Waiting…")
-        case .done: detail = card.total > 0 ? String(localized: "Done · \(formatSize(bytes: card.total))") : String(localized: "Done")
-        case .cancelled: detail = String(localized: "Stopped")
+        case .done:
+            first = card.total > 0 ? String(localized: "Done · \(formatSize(bytes: card.total))") : String(localized: "Done")
+            let avg = card.averageSpeed.map { formatSize(bytes: UInt64($0)) + "/s" } ?? ""
+            second = String(localized: "in \(StatusCenter.duration(card.elapsed))") + (avg.isEmpty ? "" : " · " + String(localized: "\(avg) on average"))
+        case .cancelled:
+            first = String(localized: "Stopped")
+            if card.total > 0 { second = String(localized: "\(formatSize(bytes: card.done)) of \(formatSize(bytes: card.total)) had arrived") }
         case .failed(let message):
-            detail = message
+            first = message
             color = p.danger
+            if card.total > 0 { second = String(localized: "\(formatSize(bytes: card.done)) of \(formatSize(bytes: card.total)) had arrived") }
         }
-        Draw.text(detail, in: NSRect(x: 12, y: card.state == .running ? 40 : 32, width: textW, height: 16), font: Metrics.textXs, color: color)
+        let y0: CGFloat = card.state == .running ? 42 : 32
+        Draw.text(first, in: NSRect(x: 12, y: y0, width: textW, height: 16), font: Metrics.textXs, color: color)
+        if !second.isEmpty {
+            Draw.text(second, in: NSRect(x: 12, y: y0 + 16, width: textW, height: 16), font: Metrics.textXs, color: p.textSecondary)
+        }
     }
 }
 
