@@ -1,4 +1,4 @@
-//! The middle island, the dock itself: the apps pinned to the Windows taskbar in the taskbar's order, then the other running apps,
+﻿//! The middle island, the dock itself: the apps pinned to the Windows taskbar in the taskbar's order, then the other running apps,
 //! a thin separator, the Recycle Bin and the Downloads folder. Icons are 44 px at rest. With the pointer over the dock they grow like
 //! the Mac's dock (`rf_win::dock::magnify`): by a smooth bell of the distance from the pointer to each icon's rest centre, up to 1.55
 //! times for the one under it (a setting: off / subtle 1.25 / full 1.55), standing on one baseline so they grow UP, over the glass's top
@@ -125,6 +125,9 @@ pub struct MiddleIsland {
     /// Files from another program are being dragged over the island: the magnification follows them (their moves come as drag moves,
     /// not as mouse moves), and it goes when the drag ends or leaves.
     drag_over: bool,
+    /// The app icon files are being held over, and the wait after which its window comes forward (as the Windows taskbar does: the
+    /// files can then be let go in the window). `None`: not over a running app.
+    drag_raise: Option<(usize, gpui_kit::Task<()>)>,
     /// The height of the bell over time (0 away, 1 over the dock).
     presence: Presence,
     /// Clock of the animation.
@@ -233,6 +236,7 @@ impl MiddleIsland {
             pointer_x: None,
             bell_x: None,
             drag_over: false,
+            drag_raise: None,
             presence: Presence::new(plan::hover_duration(crate::settings::animations())),
             t0: Instant::now(),
             reported: 0.0,
@@ -717,11 +721,50 @@ impl MiddleIsland {
 
     /// Files let go on an icon: an app opens them (`rf_win::dock::launch::open_files`), from a thread of their own; a running app the
     /// dock cannot start is given them through the program of its window. Anything else (a place) takes no files.
+    /// Files are held over the icon `ix` (`over`) or have left it. Over a running app that is not in front, its window comes forward after
+    /// `RAISE_WAIT_MS` there.
+    fn drag_over_icon(&mut self, ix: usize, over: bool, cx: &mut Context<Self>) {
+        const RAISE_WAIT_MS: u64 = 700;
+        if !over {
+            if self.drag_raise.as_ref().is_some_and(|(i, _)| *i == ix) {
+                self.drag_raise = None;
+            }
+            return;
+        }
+        if self.drag_raise.as_ref().is_some_and(|(i, _)| *i == ix) {
+            return;
+        }
+        let Some(DockItem::App(app)) = self.items.get(ix) else {
+            self.drag_raise = None;
+            return;
+        };
+        if app.windows.is_empty() {
+            self.drag_raise = None;
+            return;
+        }
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(RAISE_WAIT_MS)).await;
+            let _ = this.update(cx, |me, cx| {
+                // (still over it, and the files still in the hand)
+                if !me.drag_raise.as_ref().is_some_and(|(i, _)| *i == ix) || !cx.has_active_drag() {
+                    return;
+                }
+                let Some(DockItem::App(app)) = me.items.get(ix) else { return };
+                let foreground = rf_win::dock::foreground_root();
+                if let rf_win::dock::ClickAction::Raise(h) = model::click_action(&app.windows, foreground) {
+                    std::thread::spawn(move || rf_win::dock::launch::activate(h));
+                }
+            });
+        });
+        self.drag_raise = Some((ix, task));
+    }
+
     fn files_dropped(&mut self, ix: usize, files: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
         // (the drag is over: the magnification that followed it goes)
         if std::mem::take(&mut self.drag_over) {
             self.pointer_left(cx);
         }
+        self.drag_raise = None;
         let Some(DockItem::App(app)) = self.items.get(ix).cloned() else { return };
         if files.is_empty() {
             return;
@@ -1028,6 +1071,7 @@ impl Render for MiddleIsland {
         // (a file drag that ended or left the window without a drop on an icon: the magnification it held goes)
         if self.drag_over && !cx.has_active_drag() {
             self.drag_over = false;
+            self.drag_raise = None;
             self.pointer_left(cx);
         }
         let now = self.now_ms();
@@ -1278,6 +1322,11 @@ impl Render for MiddleIsland {
                         // files dragged from anywhere and let go on an app: the app opens them (issue 41); the icon takes the dock's
                         // quiet highlight while they are over it
                         .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_fill))
+                        // files held over a running app bring its window forward after a moment, to be let go there (the owner, trying
+                        // it: "videoyu telegrama sürükledim telegram hiç öne gelmedi")
+                        .on_drag_move::<ExternalPaths>(cx.listener(move |me, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
+                            me.drag_over_icon(ix, ev.bounds.contains(&ev.event.position), cx)
+                        }))
                         .on_drop(cx.listener(move |me, paths: &ExternalPaths, _, cx| me.files_dropped(ix, paths.paths().to_vec(), cx)))
                         .on_hover(cx.listener(move |me, on: &bool, _, cx| me.item_hover(ix, *on, cx)))
                         .on_mouse_up(MouseButton::Right, cx.listener(move |me, _, _, cx| me.right_click(ix, cx)))
