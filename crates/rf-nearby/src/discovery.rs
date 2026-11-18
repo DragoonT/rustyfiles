@@ -50,13 +50,17 @@ impl Discovery {
         listen(rx, inner)
     }
 
-    /// Advertises this device (or stops, with `vis` None). Replaces an earlier advertisement.
+    /// Advertises this device (or stops, with `vis` None). An earlier advertisement is updated in place: unregistering it first sent
+    /// a goodbye that the other devices act on a second later (RFC 6762's one-second grace), after the new announcement had arrived,
+    /// and they dropped this device from their lists at every refresh and every change of visibility (seen on Windows and Mac).
     pub fn advertise(&self, id: &str, name: &str, os: &str, port: u16, vis: Option<&str>, link: Option<&str>) -> anyhow::Result<()> {
         let mut reg = self.registered.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(full) = reg.take() {
-            let _ = self.daemon.unregister(&full);
-        }
-        let Some(vis) = vis else { return Ok(()) };
+        let Some(vis) = vis else {
+            if let Some(full) = reg.take() {
+                let _ = self.daemon.unregister(&full);
+            }
+            return Ok(());
+        };
         let mut props = HashMap::new();
         props.insert("id".to_string(), id.to_string());
         props.insert("name".to_string(), name.to_string());
