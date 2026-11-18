@@ -3699,7 +3699,7 @@ fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
         use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
         (GetKeyState(VK_CONTROL.0 as i32) < 0, GetKeyState(VK_SHIFT.0 as i32) < 0)
     };
-    let kind = rf_win::dnd::default_transfer(&sources, &dest, ctrl, shift);
+    let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
     crate::status_center::transfer(cx, kind, sources, dest);
 }
 

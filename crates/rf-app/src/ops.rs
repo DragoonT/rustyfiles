@@ -912,7 +912,7 @@ impl FolderView {
             use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
             (GetKeyState(VK_CONTROL.0 as i32) < 0, GetKeyState(VK_SHIFT.0 as i32) < 0)
         };
-        let kind = rf_win::dnd::default_transfer(&sources, &dest, ctrl, shift);
+        let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
         crate::status_center::transfer(cx, kind, sources, dest);
     }
 
@@ -1078,4 +1078,14 @@ mod tests {
         assert!(root.join("Gün1/derin/a.mp4").exists() && root.join("Gün1/a.mp4").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
+}
+
+/// Copy or move for files dropped from another program (or another of our processes): [`rf_win::dnd::default_transfer`], but a
+/// copy when the drag's source does not allow moving (an archive's files extracted for the drag, a phone, a mail's attachment).
+/// Moving them anyway took the source's own files away, and Windows refused the drop outright before the GPUI fork chose an effect
+/// the source allows: a file dragged from an archive onto the desktop did nothing (2026-11-18).
+pub(crate) fn drop_transfer(sources: &[std::path::PathBuf], dest: &std::path::Path, ctrl: bool, shift: bool) -> rf_win::fileops::Transfer {
+    use gpui_windows::dnd_hint;
+    let kind = rf_win::dnd::default_transfer(sources, dest, ctrl, shift);
+    if kind == rf_win::fileops::Transfer::Move && dnd_hint::allowed() & dnd_hint::MOVE == 0 { rf_win::fileops::Transfer::Copy } else { kind }
 }

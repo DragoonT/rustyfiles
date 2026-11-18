@@ -61,7 +61,7 @@ impl DesktopView {
     /// Desktop, copy or move (`policy::into_folder`). One answer for the pointer while dragging and for the drop itself.
     pub(super) fn drop_target_folder(&self, target: &ItemId, sources: &[PathBuf], ctrl: bool, shift: bool) -> Option<(PathBuf, Result<Transfer, Refusal>)> {
         let dest = self.path_of(target)?;
-        let default = rf_win::dnd::default_transfer(sources, &dest, ctrl, shift);
+        let default = crate::ops::drop_transfer(sources, &dest, ctrl, shift);
         let dest_public = self.public_dir().is_some_and(|p| policy::is_under(&dest, &p));
         let verdict = policy::into_folder(self.read_only(), self.under_public(sources), dest_public, default);
         Some((dest, verdict))
@@ -262,7 +262,7 @@ impl DesktopView {
             return;
         }
         let m = window.modifiers();
-        let kind = rf_win::dnd::default_transfer(&paths, &dir, m.control, m.shift);
+        let kind = crate::ops::drop_transfer(&paths, &dir, m.control, m.shift);
         let this = cx.entity().downgrade();
         crate::status_center::transfer_then(cx, kind, paths, dir, move |arrived, cx| select_arrived(&this, arrived, Some(at), cx));
     }
@@ -678,7 +678,7 @@ fn give_to_program(program: PathBuf, files: Vec<PathBuf>, rules: FolderRules, cx
             if rf_win::dnd::is_invalid_drop(&files_for_folder, &dest) {
                 return;
             }
-            let default = rf_win::dnd::default_transfer(&files_for_folder, &dest, rules.ctrl, rules.shift);
+            let default = crate::ops::drop_transfer(&files_for_folder, &dest, rules.ctrl, rules.shift);
             let dest_public = rules.public_dir.as_deref().is_some_and(|p| policy::is_under(&dest, p));
             match policy::into_folder(rules.read_only, rules.sources_public, dest_public, default) {
                 Ok(kind) => {
