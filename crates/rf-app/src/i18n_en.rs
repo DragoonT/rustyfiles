@@ -757,6 +757,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Yalnızca kalıcı silmede", "Only for permanent deletion"),
     ("Uzantı değişince uyar", "Warn when the extension changes"),
     ("Üzerine gelince seç", "Select on hover"),
+    ("Yazınca bu klasörü süz", "Typing filters this folder"),
+    ("Kapalıyken yazmak, adı o harflerle başlayan öğeyi seçer.", "When off, typing selects the item whose name starts with those letters."),
     ("Boş alana çift tıklayınca üst klasöre çık", "Double-click empty space to go up a folder"),
     ("Yukarı çıkınca önceki klasörü seç", "Select the previous folder when going up"),
     ("Boyut biçimi", "Size format"),

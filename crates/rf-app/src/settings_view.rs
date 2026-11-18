@@ -559,17 +559,30 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
         )
         .child(nav)
         .child(
-            div().id("settings-page").flex_1().min_w_0().h_full().overflow_y_scroll().track_scroll(scroll).child(
-                v_flex()
-                    .w_full()
-                    .max_w(px(980.))
-                    .px_6()
-                    .pt_5()
-                    .pb_8()
-                    .gap_2()
-                    .child(div().pb_2().text_xl().font_weight(FontWeight::SEMIBOLD).child(title))
-                    .children(body),
-            ),
+            // the page scrolls with a scrollbar over its right edge (issue 86: on Windows 10 nothing showed there was more below)
+            div()
+                .relative()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .child(
+                    div().id("settings-page").size_full().overflow_y_scroll().track_scroll(scroll).child(
+                        v_flex()
+                            .w_full()
+                            .max_w(px(980.))
+                            .px_6()
+                            .pt_5()
+                            .pb_8()
+                            .gap_2()
+                            .child(div().pb_2().text_xl().font_weight(FontWeight::SEMIBOLD).child(title))
+                            .children(body),
+                    ),
+                )
+                .child(
+                    gpui_kit::component::scroll::Scrollbar::vertical(scroll)
+                        .id("settings-scrollbar")
+                        .mode(crate::folder_view::scrollbar_mode()),
+                ),
         )
         .into_any_element()
 }
@@ -1886,6 +1899,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     v.push(card(p, L::TriangleAlert, t!("Uzantı değişince uyar"), None, sw("ext-warn", p, s.warn_extension_change, |s, v| s.warn_extension_change = v)));
     v.push(card(p, L::MousePointer, t!("Üzerine gelince seç"), None, sw("hover-sel", p, s.select_on_hover, |s, v| s.select_on_hover = v)));
+    v.push(card(
+        p,
+        L::ListFilter,
+        t!("Yazınca bu klasörü süz"),
+        Some(t!("Kapalıyken yazmak, adı o harflerle başlayan öğeyi seçer.")),
+        sw("type-filter", p, s.type_to_filter, |s, v| s.type_to_filter = v),
+    ));
     v.push(card(p, L::ArrowUp, t!("Boş alana çift tıklayınca üst klasöre çık"), None, sw("dbl-up", p, s.double_click_up, |s, v| s.double_click_up = v)));
     v.push(card(p, L::FolderUp, t!("Yukarı çıkınca önceki klasörü seç"), None, sw("prev-sel", p, s.select_previous_on_up, |s, v| s.select_previous_on_up = v)));
     v.push(card(

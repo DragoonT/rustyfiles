@@ -198,6 +198,8 @@ pub enum FolderEvent {
     NeedPassword(PathBuf, bool),
     /// Open/Save dialog: files were opened (double click, Enter): they are the answer.
     Picked(Vec<PathBuf>),
+    /// Settings → "Typing filters this folder": a letter typed in the list opens the filter bar with it (issue 106).
+    StartFilter(String),
 }
 
 /// Details columns shown right now (see `FolderView::visible_cols`).
@@ -475,6 +477,8 @@ pub struct FolderView {
     /// double-click time passes without a second click or a drag.
     slow_click: Option<(u32, u64)>,
     slow_click_serial: u64,
+    /// Settings → "Select on hover": the entry under the pointer and its serial, selected once the pointer has rested on it.
+    hover_pick: Option<(u32, u64)>,
     /// What the first click of a possible double click was made on (`completes_double`).
     first_click: Option<FirstClick>,
     /// Counts the listings shown (every `load`): a click belongs to the listing it was made in.
@@ -648,6 +652,7 @@ impl FolderView {
             name_hit: false,
             slow_click: None,
             slow_click_serial: 0,
+            hover_pick: None,
             first_click: None,
             load_serial: 0,
             soft_pending: None,
@@ -833,6 +838,7 @@ impl FolderView {
     }
 
     fn render_col_rows(&mut self, range: std::ops::Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let hover_select = cx.global::<crate::settings::Settings>().select_on_hover;
         let p = Palette::for_window(window);
         let mut out = Vec::with_capacity(range.len());
         for vi in range {
@@ -875,6 +881,8 @@ impl FolderView {
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
                     .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, is_dir, &p))
+                    // Settings → "Select files and folders on hover"
+                    .when(hover_select, |d| d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))))
                     .into_any_element(),
             );
         }
@@ -2355,6 +2363,7 @@ impl FolderView {
     }
 
     fn render_grid_rows(&mut self, range: std::ops::Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let hover_select = cx.global::<crate::settings::Settings>().select_on_hover;
         let p = Palette::for_window(window);
         let cols = self.grid_cols.max(1);
         let (tile_w, row_h, thumb_px) = (self.grid_tile_w(), self.grid_row_h(), self.grid_thumb_px());
@@ -2496,7 +2505,9 @@ impl FolderView {
                         MouseButton::Right,
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
-                    .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p));
+                    .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
+                    // Settings → "Select files and folders on hover"
+                    .when(hover_select, |d| d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))));
                 r = r.child(cell);
             }
             out.push(r.into_any_element());
@@ -2583,6 +2594,39 @@ impl FolderView {
             self.select_only(vi);
             self.open_entry(ei, cx);
         }
+    }
+
+    /// Settings → "Select on hover": the pointer came onto (or left) the item at `vi`. Like Explorer's "point to select" the item is
+    /// selected once the pointer has rested on it for the system's hover time, so passing over items on the way to another one
+    /// leaves the selection alone (issue 101: it was in the Details layout only, and at once).
+    fn hover_row(&mut self, vi: usize, on: bool, cx: &mut Context<Self>) {
+        let Some(&ei) = self.visible.get(vi) else { return };
+        if !on {
+            if self.hover_pick.is_some_and(|(e, _)| e == ei) {
+                self.hover_pick = None;
+            }
+            return;
+        }
+        self.slow_click_serial += 1;
+        let serial = self.slow_click_serial;
+        self.hover_pick = Some((ei, serial));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(hover_time()).await;
+            let _ = this.update(cx, |v, cx| {
+                if v.hover_pick != Some((ei, serial)) {
+                    return;
+                }
+                v.hover_pick = None;
+                // not while a press, a drag, a rubber band or a rename is going on, and not over a multi-selection made by hand
+                let busy = v.drag_origin.is_some() || v.marquee.is_some() || v.renaming.is_some();
+                let Some(now) = v.visible.iter().position(|&e| e == ei) else { return };
+                if !busy && !(v.selected.len() == 1 && v.selected.contains(&ei)) {
+                    v.select_only(now);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
     }
 
     fn arm_slow_click(&mut self, ei: u32, cx: &mut Context<Self>) {
@@ -2761,6 +2805,12 @@ impl FolderView {
             }
         }
         let Some(ch) = ev.keystroke.key_char.as_ref().filter(|c| !c.chars().any(|c| c.is_control())) else { return };
+        // Settings → "Typing filters this folder" (OneCommander's way, issue 106): the letters go to the filter bar instead
+        if !ch.is_empty() && cx.global::<crate::settings::Settings>().type_to_filter && self.location().path().is_some() && !self.picking {
+            cx.emit(FolderEvent::StartFilter(ch.clone()));
+            cx.stop_propagation();
+            return;
+        }
         if ch.is_empty() || self.visible.is_empty() {
             return;
         }
@@ -3823,14 +3873,7 @@ impl FolderView {
                 })
                 .children(prop_cells)
                 // Settings → "Select files and folders on hover"
-                .when(hover_select, |row| {
-                    row.on_hover(cx.listener(move |this, on: &bool, _, cx| {
-                        if *on && this.drag_origin.is_none() && this.marquee.is_none() && this.renaming.is_none() {
-                            this.select_only(vi);
-                            cx.notify();
-                        }
-                    }))
-                });
+                .when(hover_select, |row| row.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))));
             out.push(row.into_any_element());
         }
         self.props_after_rows(shown, prop_ctx.is_some(), cx);
@@ -4009,9 +4052,10 @@ impl FolderView {
                     .child(body)
                     // last child: painted over the list, so its clicks and drags come first. Shown
                     // while scrolling and fading out after, like File Explorer's on Windows 11,
-                    // so it doesn't sit over the right-aligned Size column
+                    // so it doesn't sit over the right-aligned Size column; always, when Windows is
+                    // told to keep scrollbars shown (issue 86)
                     .when(list_body && cx.global::<crate::settings::Settings>().show_scrollbar, |d| {
-                        d.child(Scrollbar::vertical(&self.scroll).id("list-scrollbar").mode(ScrollbarMode::Scrolling))
+                        d.child(Scrollbar::vertical(&self.scroll).id("list-scrollbar").mode(scrollbar_mode()))
                     }),
             )
             .into_any_element()
@@ -4864,6 +4908,21 @@ struct RowPress {
 /// then: Windows still called it a double click, so the folder there was opened too (a double click on drive C: ended inside
 /// `C:\MSI`), or, on the empty area with "double-click an empty area to go up" on, the drive was left again. Windows counts clicks by
 /// time and place alone; what was under them is ours to know.
+/// The list's and the Settings page's scrollbars: shown while scrolling, or all the time when Windows is set to always show
+/// scrollbars (Windows 10's "Automatically hide scroll bars" off).
+pub(crate) fn scrollbar_mode() -> ScrollbarMode {
+    if rf_win::scrollbars::always_shown() { ScrollbarMode::Always } else { ScrollbarMode::Scrolling }
+}
+
+/// How long the pointer rests on an item before "Select on hover" selects it: the system's hover time (Control Panel › Mouse;
+/// 400 ms out of the box), as Explorer's "point to select" waits.
+fn hover_time() -> std::time::Duration {
+    use windows::Win32::UI::WindowsAndMessaging::{SPI_GETMOUSEHOVERTIME, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW};
+    let mut ms: u32 = 0;
+    let ok = unsafe { SystemParametersInfoW(SPI_GETMOUSEHOVERTIME, 0, Some(&mut ms as *mut u32 as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) }.is_ok();
+    std::time::Duration::from_millis(if ok && ms > 0 { ms.min(5000) as u64 } else { 400 })
+}
+
 fn completes_double(first: Option<&FirstClick>, load: u64, name: Option<&str>) -> bool {
     first.is_some_and(|f| f.load == load && f.name.as_deref() == name)
 }

@@ -613,6 +613,12 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         return true;
     }
     crate::shell::desktop::open::mark("main: the line to open a place arrived");
+    // rustyfiles started again with nothing to open while it waits in the background with no window: the window it opens is a
+    // start like any other, so Settings > "On start" decides (issue 100: the tabs of "Continue where you left off" never came
+    // back, the empty line opened Home)
+    if msg.trim().is_empty() && !any_main_window(cx) {
+        return crate::open_main_window_made(None, None, None, cx);
+    }
     let (loc, select) = parse_launch(&msg);
     // (with "open folders from other programs in a new window" on, no window takes it as a tab: issue 77)
     let list = if cx.global::<crate::settings::Settings>().launch_in_new_window {
@@ -805,7 +811,7 @@ impl Workspace {
             // another window may have dragged the preview pane's height
             this.sync_preview_height(cx);
             let s = cx.global::<crate::settings::Settings>();
-            // a file dialog keeps its own preview state (shown by default)
+            // a file dialog keeps its own preview state (`picker_preview_open`)
             if this.picker.is_none() {
                 this.preview_open = s.preview_open;
                 this.sidebar_rail = s.sidebar_rail;
@@ -970,6 +976,7 @@ impl Workspace {
         let v = !self.preview_open;
         if self.picker.is_some() {
             self.preview_open = v;
+            crate::settings::update(cx, |s| s.picker_preview_open = v);
             cx.notify();
         } else {
             crate::settings::update(cx, |s| s.preview_open = v);
@@ -985,9 +992,9 @@ impl Workspace {
         }
         self.picker = Some(session);
         cx.default_global::<MainPlacements>().0.remove(&window.window_handle().window_id());
-        // the preview pane helps picking (Windows' dialogs have one too): on by default here,
-        // and the sidebar starts as a strip of icons (it opens over the list while hovered)
-        self.preview_open = true;
+        // the preview pane helps picking (Windows' dialogs have one too): on until it is closed in a dialog, which the next dialogs
+        // remember (issue 87); the sidebar starts as a strip of icons (it opens over the list while hovered)
+        self.preview_open = cx.global::<crate::settings::Settings>().picker_preview_open;
         self.sidebar_rail = true;
         // closing the window (X, Alt+F4) cancels; it is not the user's session
         let ws = cx.entity().downgrade();
@@ -1143,6 +1150,17 @@ impl Workspace {
                 cx.defer(move |cx| crate::open_main_window(Some(loc), None, Some(WindowBounds::Windowed(b)), cx));
             }
             FolderEvent::QuickLook => this.toggle_quick_look(cx),
+            FolderEvent::StartFilter(text) => {
+                // the first letter opens the bar with it; the next ones are typed into the bar, which has the focus now
+                let q = format!("{}{text}", emitter.read(cx).filter.query);
+                this.filter_bar = true;
+                this.filter_input.update(cx, |s, cx| {
+                    s.set_value(q.clone(), window, cx);
+                    s.focus(window, cx);
+                });
+                emitter.update(cx, |v, cx| v.set_query(q, cx));
+                cx.notify();
+            }
             FolderEvent::NeedPassword(archive, wrong) => {
                 let view = emitter.downgrade();
                 crate::archive_view::ask_password(archive.clone(), *wrong, window, cx, move |cx| {

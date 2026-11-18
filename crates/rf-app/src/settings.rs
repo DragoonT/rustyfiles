@@ -384,6 +384,8 @@ pub struct Settings {
     pub default_view: DefaultView,
     pub show_hidden: bool,
     pub preview_open: bool,
+    /// The preview pane of the Open/Save dialogs, kept apart from the main windows' (shown until it is closed once: issue 87).
+    pub picker_preview_open: bool,
     pub sidebar_open: bool,
     /// The sidebar as a narrow strip of icons (drag it narrow to get there).
     pub sidebar_rail: bool,
@@ -541,6 +543,9 @@ pub struct Settings {
     pub confirm_delete: DeletePref,
     pub warn_extension_change: bool,
     pub select_on_hover: bool,
+    /// Typing in a folder's list filters it by name (the filter bar opens with the letters); off: typing selects the item whose
+    /// name starts with them. Issue 106.
+    pub type_to_filter: bool,
     pub double_click_up: bool,
     pub select_previous_on_up: bool,
     pub decimal_sizes: bool,
@@ -754,6 +759,7 @@ impl Default for Settings {
             default_view: DefaultView::Adaptive,
             show_hidden: false,
             preview_open: true,
+            picker_preview_open: true,
             sidebar_open: true,
             sidebar_rail: false,
             sidebar_width: 232.,
@@ -836,6 +842,7 @@ impl Default for Settings {
             confirm_delete: DeletePref::PermanentOnly,
             warn_extension_change: true,
             select_on_hover: false,
+            type_to_filter: false,
             double_click_up: true,
             select_previous_on_up: true,
             decimal_sizes: false,
