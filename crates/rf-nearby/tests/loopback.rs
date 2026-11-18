@@ -36,6 +36,7 @@ impl NearbyListener for Listener {
     fn paired(&self, peer: String, ok: bool) {
         let _ = self.0.lock().unwrap().send(Ev::Paired(peer, ok));
     }
+    fn visibility_changed(&self, _: Visibility) {}
     fn status(&self, _: NetStatus) {}
 }
 
@@ -58,6 +59,7 @@ fn device(name: &str, auto_accept_trusted: bool) -> Device {
         auto_accept_trusted,
         port: 0,
         discovery: false,
+        everyone_minutes: 0,
     };
     let nearby = Nearby::start(config, Arc::new(Listener(Mutex::new(tx)))).unwrap();
     Device { nearby, events: rx, inbox, _state: state }

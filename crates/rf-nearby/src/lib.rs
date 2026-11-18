@@ -44,6 +44,9 @@ pub struct Config {
     pub port: u16,
     /// Advertise and browse with mDNS. Off only for tests and for a build that must not touch the network's multicast.
     pub discovery: bool,
+    /// [`Visibility::Everyone`] falls back to [`Visibility::Trusted`] after this many minutes (reported with
+    /// [`NearbyListener::visibility_changed`]); 0 keeps it until it is changed.
+    pub everyone_minutes: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +110,8 @@ pub trait NearbyListener: Send + Sync {
     /// A pairing with `peer` shows this code on both devices; answer with [`Nearby::confirm_pairing`].
     fn pairing_code(&self, peer: String, code: String);
     fn paired(&self, peer: String, ok: bool);
+    /// The visibility changed by itself ([`Config::everyone_minutes`] ran out); not called for [`Nearby::set_visibility`].
+    fn visibility_changed(&self, visibility: Visibility);
     fn status(&self, status: NetStatus);
 }
 
@@ -141,6 +146,7 @@ impl Nearby {
         let inner = Arc::new(Inner {
             trust: Mutex::new(trust::TrustStore::load(&dir)),
             vis: AtomicU8::new(Visibility::Trusted as u8),
+            vis_epoch: AtomicU64::new(0),
             peers: Mutex::new(HashMap::new()),
             offers: Mutex::new(HashMap::new()),
             pairings: Mutex::new(HashMap::new()),
@@ -205,8 +211,22 @@ impl Nearby {
     }
 
     pub fn set_visibility(&self, v: Visibility) {
+        let epoch = self.inner.vis_epoch.fetch_add(1, Ordering::Relaxed) + 1;
         self.inner.vis.store(v as u8, Ordering::Relaxed);
         self.inner.advertise();
+        let minutes = self.inner.cfg.everyone_minutes;
+        if v == Visibility::Everyone && minutes > 0 {
+            let inner = self.inner.clone();
+            self.spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(u64::from(minutes) * 60)).await;
+                // (only when nothing changed it in the meantime)
+                if inner.vis_epoch.compare_exchange(epoch, epoch + 1, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+                    inner.vis.store(Visibility::Trusted as u8, Ordering::Relaxed);
+                    inner.advertise();
+                    inner.listener.visibility_changed(Visibility::Trusted);
+                }
+            });
+        }
     }
 
     /// The devices seen on the network now, the trusted ones first.
@@ -327,6 +347,8 @@ pub(crate) struct Inner {
     pub(crate) client: quinn::ClientConfig,
     trust: Mutex<trust::TrustStore>,
     vis: AtomicU8,
+    /// Bumped by every visibility change, so a pending fall-back knows when it is out of date.
+    vis_epoch: AtomicU64,
     peers: Mutex<HashMap<String, discovery::Seen>>,
     offers: Mutex<HashMap<u64, oneshot::Sender<Option<PathBuf>>>>,
     pairings: Mutex<HashMap<String, oneshot::Sender<bool>>>,
