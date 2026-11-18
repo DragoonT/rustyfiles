@@ -31,6 +31,11 @@ pub struct SpeedMeter {
     samples: VecDeque<(f64, u64)>,
     last_done: u64,
     paused: bool,
+    /// The whole run's average: the counter and the seconds of the stretches already behind a pause, and where the running
+    /// stretch began (time, counter). Waiting does not count.
+    run_done: u64,
+    run_secs: f64,
+    stretch: Option<(f64, u64)>,
 }
 
 impl SpeedMeter {
@@ -46,7 +51,12 @@ impl SpeedMeter {
             }
             if done < ld {
                 self.samples.clear();
+                // a new phase counts from 0 again: so does the run's average
+                (self.run_done, self.run_secs, self.stretch) = (0, 0.0, None);
             }
+        }
+        if self.stretch.is_none() {
+            self.stretch = Some((t, done));
         }
         self.last_done = done;
         self.samples.push_back((t, done));
@@ -59,6 +69,12 @@ impl SpeedMeter {
 
     /// The operation waits: no rate, and the waiting time must not drag the average down later.
     pub fn pause(&mut self) {
+        if !self.paused
+            && let (Some((t0, d0)), Some(&(t1, _))) = (self.stretch.take(), self.samples.back())
+        {
+            self.run_done += self.last_done.saturating_sub(d0);
+            self.run_secs += (t1 - t0).max(0.0);
+        }
         self.paused = true;
     }
 
@@ -68,7 +84,21 @@ impl SpeedMeter {
             self.paused = false;
             self.samples.clear();
             self.samples.push_back((t, self.last_done));
+            self.stretch = Some((t, self.last_done));
         }
+    }
+
+    /// Units per second over the whole run up to `now`, the time spent paused or waiting left out: a calm number to read, where
+    /// [`rate`](Self::rate) follows the last few seconds (a Reddit comment: "the copy speed should show the average speed, not the
+    /// current speed that keeps refreshing"). `None` while paused or in the first two seconds.
+    pub fn average(&self, now: f64) -> Option<f64> {
+        if self.paused {
+            return None;
+        }
+        let (t0, d0) = self.stretch?;
+        let secs = self.run_secs + (now - t0).max(0.0);
+        let done = self.run_done + self.last_done.saturating_sub(d0);
+        (secs >= 2.0).then(|| done as f64 / secs)
     }
 
     pub fn is_paused(&self) -> bool {
@@ -236,7 +266,10 @@ impl OpStats {
         let remaining = if use_bytes { bytes.1.saturating_sub(bytes.0) } else { u64::from(units.1.saturating_sub(units.0)) };
         // no total (git, network) = no time left
         let known = if use_bytes { bytes.1 > 0 } else { units.1 > 0 };
-        Pace { speed: if use_bytes { rate } else { None }, eta_secs: if known { eta_secs(remaining, rate) } else { None } }
+        // the speed shown is the run's average (calm to read); the time left follows the last seconds, so it bends when the speed
+        // really changes (a USB stick whose cache filled up)
+        let speed = if use_bytes { self.meter.average(now).or(rate) } else { None };
+        Pace { speed, eta_secs: if known { eta_secs(remaining, rate) } else { None } }
     }
 
     pub fn bars(&self, now: f64) -> Vec<f32> {
@@ -730,6 +763,30 @@ mod tests {
     }
 
     #[test]
+    fn the_speed_shown_is_the_runs_average_and_a_pause_is_left_out() {
+        // 10 MB/s for 4 s, a 6 s pause, then 30 MB/s for 4 s: the whole run moved 160 MB in 8 s of copying
+        let mut m = SpeedMeter::default();
+        let mut t = 0.0;
+        while t < 4.0 - 1e-9 {
+            t += 0.1;
+            m.push(t, (t * 10_000_000.0) as u64);
+        }
+        m.pause();
+        assert_eq!(m.average(t + 3.0), None, "no speed while it waits");
+        t += 6.0;
+        m.resume(t);
+        let (start, base) = (t, m.last_done);
+        while t < start + 4.0 - 1e-9 {
+            t += 0.1;
+            m.push(t, base + ((t - start) * 30_000_000.0) as u64);
+        }
+        let avg = m.average(t).unwrap();
+        assert!((avg - 20_000_000.0).abs() < 1_000_000.0, "{avg}");
+        let now = m.rate(t).unwrap();
+        assert!((now - 30_000_000.0).abs() < 1_500_000.0, "the time left still follows the last seconds: {now}");
+    }
+
+    #[test]
     fn an_engine_without_bytes_gives_a_time_left_but_no_speed() {
         let mut s = OpStats::default();
         let mut t = 0.0;
@@ -790,7 +847,10 @@ mod tests {
         s.pause();
         assert_eq!(s.pace(7.0, (590, 1000), (59_000_000, 100_000_000)), Pace::default());
         s.resume(10.0);
-        assert_eq!(s.pace(10.0, (590, 1000), (59_000_000, 100_000_000)).speed, None);
+        // right after it goes on: the speed shown is the run's average so far (10 MB/s), the time left waits for new reports
+        let pace = s.pace(10.0, (590, 1000), (59_000_000, 100_000_000));
+        assert!(pace.speed.is_some_and(|v| (v - 10_000_000.0).abs() < 500_000.0), "{pace:?}");
+        assert_eq!(pace.eta_secs, None);
     }
 
     #[test]
