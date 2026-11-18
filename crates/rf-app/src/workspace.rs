@@ -613,12 +613,6 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         return true;
     }
     crate::shell::desktop::open::mark("main: the line to open a place arrived");
-    // rustyfiles started again with nothing to open while it waits in the background with no window: the window it opens is a
-    // start like any other, so Settings > "On start" decides (issue 100: the tabs of "Continue where you left off" never came
-    // back, the empty line opened Home)
-    if msg.trim().is_empty() && !any_main_window(cx) {
-        return crate::open_main_window_made(None, None, None, cx);
-    }
     let (loc, select) = parse_launch(&msg);
     // (with "open folders from other programs in a new window" on, no window takes it as a tab: issue 77)
     let list = if cx.global::<crate::settings::Settings>().launch_in_new_window {
