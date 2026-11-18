@@ -41,6 +41,8 @@ Free, no account, no ads. Download, double-click, done: see [Install](#install).
 
 ## How fast
 
+<img alt="A speed test drawn as a rustyfiles list: opening a folder of 100,000 files takes 281 ms in rustyfiles and 2,318 ms in File Explorer (8 times faster); a folder of 2,000 pictures 278 ms against 2,177 ms (8 times); copying 10,000 small files 1.8 s against 25.6 s (14 times); extracting a ZIP of 10,000 files 3.6 s against 32.4 s (9 times)" src="docs/readme/speed.png" width="100%">
+
 ### Opening a folder
 
 Time from starting the app to the folder's list standing still, in a new window, with the folder
@@ -232,10 +234,7 @@ are translated, and right-to-left names and text read right to left (thanks to @
 interface itself is not mirrored yet. Corrections are welcome: each language is
 one JSON file in `crates/rf-app/locales/`.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/photos-dark.png">
-  <img alt="rustyfiles showing a Photos folder in grid view with image thumbnails, on the HyperGlass backdrop" src="docs/readme/photos-light.png" width="100%">
-</picture>
+<img alt="rustyfiles showing a folder of Windows' wallpapers in grid view, one of them selected and shown in the preview pane on the right, on the HyperGlass backdrop" src="docs/readme/grid.png" width="100%">
 
 ## DirectLook
 
@@ -252,7 +251,9 @@ in Explorer and on the desktop too. Settings live under Settings › DirectLook.
 These are off by default and early. They were built and tried on one PC with two monitors, and
 some parts have had very little use. Expect rough edges, and please report what you find.
 
-<img alt="The rustyfiles Dock at the bottom of a monitor: an island with the Start button and search, an island with the pinned and running apps, and an island with the clock and notifications" src="docs/readme/dock.png" width="100%">
+<img alt="A desktop with the rustyfiles Dock at the bottom (three islands: Start and search, the pinned and running apps, the tray and the clock), the Dock's Start panel open on the left with pinned apps and recent files, HyperSearch in the middle with the apps found for adobe, and the control centre on the right with Wi-Fi, Bluetooth, Ethernet, the song playing, volume and brightness" src="docs/readme/shell.png" width="100%">
+
+<sub>Start, HyperSearch and the control centre, put together from three screenshots of the same desktop (they don't open all at once).</sub>
 
 - **HyperGlass** (Settings › Appearance) is a fifth backdrop: the window's background is glass that
   bends and frosts what is behind it.
@@ -355,6 +356,26 @@ Settings are stored in `%APPDATA%\rustyfiles\settings.toml`, DirectLook's in
 `directlook.toml` next to it.
 
 </details>
+
+## How it is made
+
+rustyfiles is written with AI coding tools, and that is no secret. One developer decides what gets
+built and how it should behave, tries each change on a real PC (two monitors, everyday work) and
+turns down what doesn't hold up. The AI writes much of the code; it doesn't decide what ships.
+
+What keeps that honest:
+
+- **Tests.** More than 3,000 automated tests run before every change is pushed.
+- **Measurements.** The speed numbers above come from a test built into the app (Settings ›
+  Speed test), so anyone can check them on their own machine.
+- **Reports.** Bugs come from the people who use it. Each issue gets an answer, the fix is made in
+  the open, and the person who reported it is asked to try it before it is closed.
+- **The code.** All of it is here under the MIT license, to read and to judge.
+
+Why Rust: a file manager has to stay fast with 100,000 files in a folder and must never lose
+anyone's data. Rust gives speed without a garbage collector and rules out whole classes of crashes
+before they ship. And rustyfiles is a new app written from scratch, not a rewrite of Explorer; it
+runs next to Explorer and changes nothing of Windows on disk.
 
 ## Status
 
