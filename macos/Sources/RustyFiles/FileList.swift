@@ -469,13 +469,32 @@ final class FileTableView: NSTableView, NSServicesMenuRequestor {
 final class StatusBarView: FlippedView {
     var count = "" { didSet { needsDisplay = true } }
     var selection = "" { didSet { needsDisplay = true } }
+    /// At the right: a copy's progress (Advanced › Show progress › In the status bar), and how
+    /// long the folder took to list (Advanced › Performance in the status bar).
+    var progress = "" { didSet { needsDisplay = true } }
+    var progressFraction: Double? { didSet { needsDisplay = true } }
+    var performance = "" { didSet { needsDisplay = true } }
 
     override func draw(_ dirtyRect: NSRect) {
         let p = Palette.of(self)
         p.divider.setFill()
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
         // px_3, gap_3, text_xs
-        let r = NSRect(x: 12, y: 1, width: bounds.width - 24, height: bounds.height - 1)
+        var r = NSRect(x: 12, y: 1, width: bounds.width - 24, height: bounds.height - 1)
+        let right = [progress, performance].filter { !$0.isEmpty }.joined(separator: "   ")
+        if !right.isEmpty {
+            let rw = min(Draw.textWidth(right, font: Metrics.textXs), r.width * 0.6)
+            var x = r.maxX - rw
+            if let f = progressFraction {
+                // a thin bar before the text
+                let bar = NSRect(x: x - 8 - 80, y: r.midY - 2, width: 80, height: 4)
+                Draw.roundedRect(bar, radius: 2, fill: p.hover)
+                Draw.roundedRect(NSRect(x: bar.minX, y: bar.minY, width: bar.width * CGFloat(min(max(f, 0), 1)), height: 4), radius: 2, fill: p.accent)
+                x = bar.minX
+            }
+            Draw.text(right, in: NSRect(x: r.maxX - rw, y: r.minY, width: rw, height: r.height), font: Metrics.textXs, color: p.textSecondary)
+            r.size.width = max(x - 12 - r.minX, 0)
+        }
         let w = Draw.textWidth(count, font: Metrics.textXs)
         Draw.text(count, in: NSRect(x: r.minX, y: r.minY, width: w, height: r.height), font: Metrics.textXs, color: p.textSecondary)
         if !selection.isEmpty {

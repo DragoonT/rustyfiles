@@ -124,7 +124,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ?? controllers.first
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    /// Advanced › Keep running when the last window closes.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { !AppSettings.keepRunning }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if !flag { openWindow(at: home) }
@@ -139,6 +140,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
                 // General › Folders opened from other apps open in a new window; off: a tab
+                if !AppSettings.externalInNewWindow, let front = frontController {
+                    front.openTab(url, activate: true)
+                    front.window?.makeKeyAndOrderFront(nil)
+                } else {
+                    openWindow(at: url)
+                }
+            } else if isArchive(path: url.path), AppSettings.archivesAsFolders {
+                // an archive sent here (Advanced › Open archives with rustyfiles) opens like a folder
                 if !AppSettings.externalInNewWindow, let front = frontController {
                     front.openTab(url, activate: true)
                     front.window?.makeKeyAndOrderFront(nil)

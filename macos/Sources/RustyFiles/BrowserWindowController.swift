@@ -465,6 +465,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
                 }
                 return
             }
+            let began = Date()
             let result: Result<Folder, Error>
             if let tag = TagStore.name(of: url) {
                 let paths = TagStore.files(tagged: tag)
@@ -486,6 +487,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
                 guard t === self.tab else { return }
                 if keepScroll { t.scrollY = self.list.scrollY }
                 self.showTab()
+                // Advanced › Performance in the status bar
+                let ms = Date().timeIntervalSince(began) * 1000
+                self.list.status.performance = AppSettings.performanceInfo
+                    ? String(localized: "Listed in \(String(format: "%.0f", ms)) ms") : ""
                 if self.pendingRename {
                     self.pendingRename = false
                     self.list.beginRename()
@@ -631,6 +636,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     func showError(_ text: String) {
+        Log.write(text)
         guard let window else { return }
         let alert = NSAlert()
         alert.messageText = text

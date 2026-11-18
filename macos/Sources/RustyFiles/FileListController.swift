@@ -143,6 +143,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         applyViewMode()
         card.onLayout = { [weak self] in self?.layoutCard() }
+        NotificationCenter.default.addObserver(self, selector: #selector(statusCenterChanged), name: .rfStatusCenterChanged, object: nil)
         applyScrollBars()
         card.applyBackground()
         NotificationCenter.default.addObserver(self, selector: #selector(columnsChanged), name: NSTableView.columnDidResizeNotification, object: table)
@@ -1175,6 +1176,16 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if singleDir, let u = urls.first {
             b.separator()
             b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(u) }
+            if Editors.offered(for: u) { b.add(String(localized: "Open in \(Editors.name)"), "code") { Editors.open([u]) } }
+            // Advanced › Show “Flatten folder”
+            if AppSettings.flattenOption {
+                b.add(String(localized: "Flatten folder"), "layers") { [weak self] in
+                    self?.run { try FileOps.flatten(u) } done: { undo in
+                        FileUndo.shared.record(undo, title: String(localized: "Flatten Folder"))
+                        self?.onRefresh?()
+                    }
+                }
+            }
         }
         return Self.pruned(b.done())
     }
@@ -1294,6 +1305,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if let dir = url, dir.isFileURL {
             b.separator()
             b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(dir) }
+            // Developer tools › “Open in editor”
+            if Editors.offered(for: dir) { b.add(String(localized: "Open in \(Editors.name)"), "code") { Editors.open([dir]) } }
         }
         return b.done()
     }
@@ -1814,5 +1827,80 @@ extension FileListController {
     func rememberLayout() {
         guard !AppSettings.syncLayout, let url, archive == nil else { return }
         FolderLayouts.set(url, .init(view: viewMode, sort: sortKey, ascending: ascending, group: groupBy))
+    }
+}
+
+// MARK: - progress in the status bar
+
+extension FileListController {
+    @objc func statusCenterChanged() {
+        let running = StatusCenter.shared.cards.filter { $0.state == .running }
+        ProgressCard.shared.update(running)
+        guard AppSettings.progressPlace == "status", let card = running.first else {
+            status.progress = ""
+            status.progressFraction = nil
+            return
+        }
+        var text = card.title
+        if card.total > 0 { text += String(format: " — %d%%", Int(Double(card.done) / Double(card.total) * 100)) }
+        if card.speed > 0 { text += " · " + formatSize(bytes: UInt64(card.speed)) + "/s" }
+        if running.count > 1 { text += " (+\(running.count - 1))" }
+        status.progress = text
+        status.progressFraction = card.total > 0 ? Double(card.done) / Double(card.total) : nil
+    }
+
+
+}
+
+/// Advanced › Show progress › On a floating card: a small card at the bottom right of the
+/// front window while something is being copied.
+@MainActor
+final class ProgressCard {
+    static let shared = ProgressCard()
+    private var panel: NSPanel?
+    private let label = NSTextField(labelWithString: "")
+    private let bar = NSProgressIndicator()
+
+    func update(_ running: [StatusCenter.Card]) {
+        guard AppSettings.progressPlace == "card", let card = running.first, let window = NSApp.keyWindow ?? NSApp.mainWindow else {
+            panel?.orderOut(nil)
+            return
+        }
+        let p = panel ?? make()
+        var text = card.title
+        if card.speed > 0 { text += "\n" + formatSize(bytes: UInt64(card.speed)) + "/s" }
+        if running.count > 1 { text += "  (+\(running.count - 1))" }
+        label.stringValue = text
+        bar.isIndeterminate = card.total == 0
+        bar.doubleValue = card.total > 0 ? Double(card.done) / Double(card.total) * 100 : 0
+        let f = window.frame
+        p.setFrameOrigin(NSPoint(x: f.maxX - p.frame.width - 20, y: f.minY + 20))
+        if !p.isVisible { p.orderFront(nil) }
+        if p.parent == nil { window.addChildWindow(p, ordered: .above) }
+    }
+
+    private func make() -> NSPanel {
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 300, height: 74), styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
+        p.isFloatingPanel = true
+        p.backgroundColor = .clear
+        p.hasShadow = true
+        let glass = NSGlassEffectView(frame: p.contentView!.bounds)
+        glass.cornerRadius = 14
+        glass.autoresizingMask = [.width, .height]
+        let content = NSView(frame: glass.bounds)
+        label.frame = NSRect(x: 14, y: 26, width: 272, height: 38)
+        label.font = Metrics.textXs
+        label.maximumNumberOfLines = 2
+        label.lineBreakMode = .byTruncatingMiddle
+        bar.frame = NSRect(x: 14, y: 12, width: 272, height: 8)
+        bar.style = .bar
+        bar.minValue = 0
+        bar.maxValue = 100
+        content.addSubview(label)
+        content.addSubview(bar)
+        glass.contentView = content
+        p.contentView = glass
+        panel = p
+        return p
     }
 }

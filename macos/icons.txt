@@ -96,3 +96,12 @@ panel-bottom
 folder-sync
 group
 keyboard
+code
+square-code
+layers
+activity
+file-cog
+scroll-text
+database
+gauge
+bell

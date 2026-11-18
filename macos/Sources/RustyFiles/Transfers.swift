@@ -146,6 +146,9 @@ final class Transfer: @unchecked Sendable {
             ? String(localized: "Copying \(what) to \(dest.lastPathComponent)")
             : String(localized: "Moving \(what) to \(dest.lastPathComponent)")
         let card = StatusCenter.shared.add(title: title, folder: dest) { [weak self] in self?.cancelled = true }
+        // Settings › Advanced › Copying, read once for the whole run
+        limit = Double(AppSettings.copyLimit) * 1_000_000
+        verify = AppSettings.verifyCopies
         DispatchQueue.global(qos: .userInitiated).async {
             let result = Result { try self.run(card: card, window: window) }
             DispatchQueue.main.async {
@@ -153,12 +156,15 @@ final class Transfer: @unchecked Sendable {
                     switch result {
                     case .success(let outcome):
                         if self.cancelled { card.cancelled() } else { card.succeed() }
+                        LongWork.finished(title, seconds: Date().timeIntervalSince(card.started))
                         if let undo = outcome.undo {
                             FileUndo.shared.record(undo, title: self.kind == .copy ? String(localized: "Copy") : String(localized: "Move"))
                         }
                         finished(outcome.made)
                     case .failure(let e):
                         card.fail(e.localizedDescription)
+                        Log.write(title + ": " + e.localizedDescription)
+                        LongWork.finished(title, seconds: Date().timeIntervalSince(card.started), failed: e.localizedDescription)
                     }
                 }
             }
@@ -274,9 +280,23 @@ final class Transfer: @unchecked Sendable {
     fileprivate var fileDone: UInt64 = 0
     fileprivate weak var currentCard: StatusCenter.Card?
 
+    /// Advanced › Copy speed limit (bytes a second, 0 none) and Check copies.
+    private var limit: Double = 0
+    private var verify = "off"
+    private var began = Date()
+    private var copied: UInt64 = 0
+
     fileprivate func progressed(_ bytes: UInt64) -> Bool {
-        if bytes >= fileDone { done += bytes - fileDone }
+        if bytes >= fileDone {
+            done += bytes - fileDone
+            copied += bytes - fileDone
+        }
         fileDone = bytes
+        if limit > 0 {
+            // ahead of the limit: wait until the clock catches up with the bytes
+            let due = Double(copied) / limit, now = Date().timeIntervalSince(began)
+            if due > now { usleep(useconds_t(min(due - now, 1) * 1_000_000)) }
+        }
         if let card = currentCard { report(card) }
         return !cancelled
     }
@@ -292,10 +312,46 @@ final class Transfer: @unchecked Sendable {
         copyfile_state_set(state, UInt32(COPYFILE_STATE_STATUS_CB), unsafeBitCast(transferCallback, to: UnsafeRawPointer.self))
         copyfile_state_set(state, UInt32(COPYFILE_STATE_STATUS_CTX), ctx)
         let flags = copyfile_flags_t(COPYFILE_ALL | COPYFILE_RECURSIVE | COPYFILE_CLONE | COPYFILE_NOFOLLOW_SRC)
-        let rc = copyfile(src.path, dst.path, state, flags)
+        // a limit means bytes are really written: no clone
+        let rc = copyfile(src.path, dst.path, state, limit > 0 ? flags & ~copyfile_flags_t(COPYFILE_CLONE) : flags)
         if rc != 0 && !cancelled {
             throw FileOps.Failure(message: String(localized: "“\(src.lastPathComponent)” could not be copied: \(String(cString: strerror(errno)))"))
         }
+        if !cancelled, verify != "off", !Self.same(src, dst, full: verify == "full") {
+            throw FileOps.Failure(message: String(localized: "The copy of “\(src.lastPathComponent)” does not match the original."))
+        }
+    }
+
+    /// Check copies: every file's size (and date: fast) or content (full) against the original.
+    private static func same(_ a: URL, _ b: URL, full: Bool) -> Bool {
+        let fm = FileManager.default
+        var pairs: [(URL, URL)] = [(a, b)]
+        if (try? a.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+            guard let walker = fm.enumerator(at: a, includingPropertiesForKeys: [.isDirectoryKey], options: []) else { return false }
+            pairs = []
+            let base = a.standardizedFileURL.path
+            for case let u as URL in walker where (try? u.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true {
+                let rel = String(u.standardizedFileURL.path.dropFirst(base.count))
+                pairs.append((u, URL(fileURLWithPath: b.path + rel)))
+            }
+        }
+        for (x, y) in pairs {
+            let vx = try? x.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            let vy = try? y.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+            guard let vx, let vy, vx.fileSize == vy.fileSize else { return false }
+            if full {
+                guard let hx = try? FileHandle(forReadingFrom: x), let hy = try? FileHandle(forReadingFrom: y) else { return false }
+                defer { try? hx.close(); try? hy.close() }
+                while true {
+                    let dx = (try? hx.read(upToCount: 1 << 20)) ?? Data(), dy = (try? hy.read(upToCount: 1 << 20)) ?? Data()
+                    if dx != dy { return false }
+                    if dx.isEmpty { break }
+                }
+            } else if let mx = vx.contentModificationDate, let my = vy.contentModificationDate, abs(mx.timeIntervalSince(my)) > 2 {
+                return false
+            }
+        }
+        return true
     }
 
     /// At most ten updates a second reach the card.
