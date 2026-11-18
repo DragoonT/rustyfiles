@@ -8,7 +8,7 @@ use std::sync::{Mutex, Weak};
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
-use crate::Inner;
+use crate::{Inner, LinkKind};
 
 pub const SERVICE: &str = "_rustyfiles._udp.local.";
 
@@ -23,6 +23,9 @@ pub struct Seen {
     pub vis: String,
     pub addrs: Vec<IpAddr>,
     pub port: u16,
+    /// Its network link, as its app said (`link=wifi:866`).
+    pub link_kind: LinkKind,
+    pub link_mbps: u32,
 }
 
 pub struct Discovery {
@@ -48,7 +51,7 @@ impl Discovery {
     }
 
     /// Advertises this device (or stops, with `vis` None). Replaces an earlier advertisement.
-    pub fn advertise(&self, id: &str, name: &str, os: &str, port: u16, vis: Option<&str>) -> anyhow::Result<()> {
+    pub fn advertise(&self, id: &str, name: &str, os: &str, port: u16, vis: Option<&str>, link: Option<&str>) -> anyhow::Result<()> {
         let mut reg = self.registered.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(full) = reg.take() {
             let _ = self.daemon.unregister(&full);
@@ -60,6 +63,9 @@ impl Discovery {
         props.insert("os".to_string(), os.to_string());
         props.insert("proto".to_string(), crate::proto::PROTOCOL.to_string());
         props.insert("vis".to_string(), vis.to_string());
+        if let Some(link) = link {
+            props.insert("link".to_string(), link.to_string());
+        }
         let info = ServiceInfo::new(SERVICE, id, &format!("{id}.local."), "", port, props)?.enable_addr_auto();
         let full = info.get_fullname().to_string();
         self.daemon.register(info)?;
@@ -68,7 +74,7 @@ impl Discovery {
     }
 
     pub fn shutdown(&self) {
-        let _ = self.advertise("", "", "", 0, None);
+        let _ = self.advertise("", "", "", 0, None, None);
         let _ = self.daemon.shutdown();
     }
 }
@@ -95,14 +101,40 @@ fn listen(rx: mdns_sd::Receiver<ServiceEvent>, inner: Weak<Inner>) -> anyhow::Re
     Ok(())
 }
 
+/// `wifi:866` -> (Wi-Fi, 866 Mbit/s); anything odd is unknown.
+pub fn parse_link(s: &str) -> (LinkKind, u32) {
+    let (kind, mbps) = s.split_once(':').unwrap_or((s, "0"));
+    let kind = match kind {
+        "wifi" => LinkKind::Wifi,
+        "ethernet" => LinkKind::Ethernet,
+        "other" => LinkKind::Other,
+        _ => return (LinkKind::Unknown, 0),
+    };
+    (kind, mbps.parse().unwrap_or(0))
+}
+
+/// The TXT value for a link; none when it is not known.
+pub fn link_text(kind: LinkKind, mbps: u32) -> Option<String> {
+    let k = match kind {
+        LinkKind::Wifi => "wifi",
+        LinkKind::Ethernet => "ethernet",
+        LinkKind::Other => "other",
+        LinkKind::Unknown => return None,
+    };
+    (mbps > 0).then(|| format!("{k}:{mbps}"))
+}
+
 fn parse(info: &ServiceInfo) -> Option<Seen> {
     let get = |k: &str| info.get_property_val_str(k).map(str::to_string);
     let id = get("id")?;
+    let link = get("link").map(|l| parse_link(&l)).unwrap_or_default();
     Some(Seen {
         name: get("name").unwrap_or_else(|| id.clone()),
         os: get("os").unwrap_or_default(),
         proto: get("proto").and_then(|p| p.parse().ok()).unwrap_or(0),
         vis: get("vis").unwrap_or_else(|| "everyone".into()),
+        link_kind: link.0,
+        link_mbps: link.1,
         addrs: info.get_addresses().iter().copied().collect(),
         port: info.get_port(),
         id,

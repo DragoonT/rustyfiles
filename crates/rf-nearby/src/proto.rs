@@ -23,6 +23,8 @@ pub struct Hello {
 pub enum Purpose {
     Send { items: Vec<Item> },
     Pair,
+    /// A speed test: no file, no question; see `transfer::speed_serve`.
+    Speed,
 }
 
 /// One entry of an offer: a file, a folder that must exist even when empty, or a symbolic link. `path` is relative, with `/` between
@@ -78,6 +80,13 @@ pub struct Outcome {
     pub ok: bool,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+/// A speed test: what the receiving side counted on one direction's stream, after the warm-up.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpeedReport {
+    pub bytes: u64,
+    pub micros: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

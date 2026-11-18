@@ -9,8 +9,8 @@ use std::time::Duration;
 use anyhow::{Context as _, anyhow, bail};
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
 
-use crate::proto::{self, Answer, Done, FileHeader, Hello, Item, Outcome, PairConfirm, Purpose};
-use crate::{Inner, Offer, TransferResult, Visibility};
+use crate::proto::{self, Answer, Done, FileHeader, Hello, Item, Outcome, PairConfirm, Purpose, SpeedReport};
+use crate::{EstimateSource, Inner, Offer, SpeedResult, TransferResult, Visibility};
 
 /// Files sent at once, each on its own stream.
 const PARALLEL: usize = 4;
@@ -19,7 +19,9 @@ const CHUNK: usize = 1 << 20;
 const DECISION: Duration = Duration::from_secs(180);
 const CONNECT: Duration = Duration::from_secs(6);
 /// The suffix of a file being received: renamed away only once its BLAKE3 matches.
-pub const PART: &str = ".rfpart";
+pub const PART: &str = ".ferrying";
+/// A transfer that moved less than this tells nothing about the speed.
+const SPEED_FROM_TRANSFER_MIN: u64 = 4 << 20;
 
 // ------------------------------------------------------------------------------------------------------------------------- sending
 
@@ -114,8 +116,10 @@ async fn send_inner(inner: &Arc<Inner>, tid: u64, addrs: &[SocketAddr], peer_id:
         bail!("{}", answer.reason.unwrap_or_else(|| "the device declined".into()));
     }
     let total: u64 = items.iter().map(|i| i.size).sum();
-    let done = Arc::new(AtomicU64::new(answer.resume.iter().sum::<u64>().min(total)));
+    let resumed = answer.resume.iter().sum::<u64>().min(total);
+    let done = Arc::new(AtomicU64::new(resumed));
     let ticker = progress_ticker(inner.clone(), tid, done.clone(), total);
+    let started = std::time::Instant::now();
 
     let sem = Arc::new(tokio::sync::Semaphore::new(PARALLEL));
     let mut tasks = Vec::new();
@@ -140,6 +144,10 @@ async fn send_inner(inner: &Arc<Inner>, tid: u64, addrs: &[SocketAddr], peer_id:
     proto::write_frame(&mut ctl_send, &Done { hashes }).await?;
     // (the other side checks every file before it answers: give it time for a big transfer)
     let outcome: Outcome = tokio::time::timeout(Duration::from_secs(600), proto::read_frame(&mut ctl_recv)).await.map_err(|_| anyhow!("the device did not confirm"))??;
+    let moved = total - resumed;
+    if outcome.ok && moved >= SPEED_FROM_TRANSFER_MIN {
+        inner.note_speed(&crate::identity::id_of(&fp), rate(moved, started.elapsed().as_micros() as u64), EstimateSource::Transfer, rtt_ms(&conn));
+    }
     let _ = ctl_send.finish();
     conn.close(0u32.into(), b"done");
     inner.listener.progress(tid, total, total);
@@ -233,6 +241,7 @@ pub async fn incoming(inner: Arc<Inner>, incoming: quinn::Incoming) -> anyhow::R
             Ok(())
         }
         Purpose::Pair => pair(&inner, &conn, &mut ctl_send, &mut ctl_recv, &hello.id, &hello.name, &fp).await,
+        Purpose::Speed => speed_serve(&inner, &conn, &mut ctl_send, &mut ctl_recv, &hello.id, &fp).await,
     }
 }
 
@@ -324,6 +333,7 @@ async fn receive(
         .map(|(i, s)| if !i.is_file() { 0 } else { std::fs::metadata(s).map(|m| m.len()).ok().filter(|&l| l <= i.size).unwrap_or(0) })
         .collect();
     proto::write_frame(ctl_send, &Answer { accept: true, reason: None, resume: resume.clone() }).await?;
+    let started = std::time::Instant::now();
 
     let total: u64 = items.iter().map(|i| i.size).sum();
     let done = Arc::new(AtomicU64::new(resume.iter().sum()));
@@ -413,6 +423,10 @@ async fn receive(
     }
     let outcome = Outcome { ok: failure.is_none(), error: failure.clone() };
     proto::write_frame(ctl_send, &outcome).await?;
+    let moved = total.saturating_sub(resume.iter().sum());
+    if failure.is_none() && moved >= SPEED_FROM_TRANSFER_MIN {
+        inner.note_speed(&hello.id, rate(moved, started.elapsed().as_micros() as u64), EstimateSource::Transfer, rtt_ms(conn));
+    }
     let _ = ctl_send.finish();
     let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
     inner.listener.progress(tid, total, total);
@@ -423,7 +437,7 @@ async fn receive(
 }
 
 /// Where each item goes under `dest`, each name as this platform can store it ([`proto::local_name`]). A top-level name that is
-/// already taken there (by a finished file or folder, not by an unfinished `.rfpart`) gets " (2)", " (3)"... before its extension, and
+/// already taken there (by a finished file or folder, not by an unfinished `.ferrying`) gets " (2)", " (3)"... before its extension, and
 /// so does an item whose path differs from an earlier one only in letter case (they would be one file on NTFS and APFS).
 pub fn targets(dest: &Path, items: &[Item]) -> Vec<PathBuf> {
     let mut renamed: std::collections::HashMap<String, String> = std::collections::HashMap::new();
@@ -533,8 +547,8 @@ pub fn link_stays_inside(rel: &str, to: &str) -> bool {
     true
 }
 
-/// Where an item is written while it arrives: a top-level file as `<name>.rfpart`, and everything of a top-level folder under
-/// `<folder>.rfpart/`. A broken transfer so leaves nothing that looks finished, and sending the same things again finds the parts
+/// Where an item is written while it arrives: a top-level file as `<name>.ferrying`, and everything of a top-level folder under
+/// `<folder>.ferrying/`. A broken transfer so leaves nothing that looks finished, and sending the same things again finds the parts
 /// at the same place (the real name is still free) and goes on from there.
 fn staging(dest: &Path, target: &Path) -> PathBuf {
     let rel = target.strip_prefix(dest).unwrap_or(target);
@@ -570,8 +584,12 @@ async fn rename_retrying(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 fn part(target: &Path) -> PathBuf {
-    let mut s = target.as_os_str().to_owned();
-    s.push(PART);
+    suffixed(target, PART)
+}
+
+fn suffixed(path: &Path, suffix: &str) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(suffix);
     PathBuf::from(s)
 }
 
@@ -588,6 +606,158 @@ fn hash_file(path: &Path) -> anyhow::Result<String> {
         hasher.update(&buf[..n]);
     }
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+// ------------------------------------------------------------------------------------------------------------------------- speed test
+
+/// How long each direction of a speed test is counted (the receiving side stops the stream then) and the most a side sends.
+const SPEED_TIME: Duration = Duration::from_secs(2);
+const SPEED_MAX: u64 = 512 << 20;
+/// The start of each direction is not counted: QUIC's congestion control is still ramping up.
+const SPEED_WARMUP: Duration = Duration::from_millis(200);
+/// The same device may test this one once in this long, and only this many tests run here at once.
+pub(crate) const SPEED_SPACING: Duration = Duration::from_secs(10);
+pub(crate) const SPEED_AT_ONCE: usize = 2;
+
+fn rate(bytes: u64, micros: u64) -> u64 {
+    if micros == 0 { 0 } else { (u128::from(bytes) * 1_000_000 / u128::from(micros)) as u64 }
+}
+
+fn rtt_ms(conn: &quinn::Connection) -> u32 {
+    conn.rtt().as_millis().min(u128::from(u32::MAX)) as u32
+}
+
+/// Runs a speed test with a device: up (this side sends, the other counts and reports), then down (the other side sends, this
+/// one counts).
+pub async fn speed_test(inner: Arc<Inner>, addrs: Vec<SocketAddr>, peer_id: String) -> SpeedResult {
+    if !inner.begin_measuring(&peer_id) {
+        return SpeedResult { error: Some("a speed test with the device is running".into()), ..Default::default() };
+    }
+    let r = speed_client(&inner, &addrs, &peer_id).await;
+    inner.end_measuring(&peer_id);
+    match r {
+        Ok((up, down, rtt, id)) => {
+            inner.note_speed(&id, up.min(down), EstimateSource::Measured, rtt);
+            SpeedResult { ok: true, up_bps: up, down_bps: down, rtt_ms: rtt, error: None }
+        }
+        Err(e) => {
+            log::info!("nearby: speed test with {peer_id}: {e:#}");
+            SpeedResult { ok: false, error: Some(format!("{e:#}")), ..Default::default() }
+        }
+    }
+}
+
+async fn speed_client(inner: &Arc<Inner>, addrs: &[SocketAddr], peer_id: &str) -> anyhow::Result<(u64, u64, u32, String)> {
+    let conn = connect(inner, addrs).await?;
+    let fp = crate::tls::peer_fingerprint(&conn).ok_or_else(|| anyhow!("the device showed no certificate"))?;
+    let id = crate::identity::id_of(&fp);
+    anyhow::ensure!(peer_id.is_empty() || id == peer_id, "another device answered at that address");
+    let (mut send, mut recv) = conn.open_bi().await?;
+    let hello = Hello { proto: proto::PROTOCOL, id: inner.me.id.clone(), name: inner.cfg.name.clone(), os: inner.cfg.os.clone(), purpose: Purpose::Speed };
+    proto::write_frame(&mut send, &hello).await?;
+    let answer: Answer = tokio::time::timeout(CONNECT, proto::read_frame(&mut recv)).await.map_err(|_| anyhow!("no answer from the device"))??;
+    if !answer.accept {
+        bail!("{}", answer.reason.unwrap_or_else(|| "the device declined".into()));
+    }
+    blast(conn.open_uni().await?).await;
+    let report: SpeedReport = tokio::time::timeout(SPEED_TIME * 3, proto::read_frame(&mut recv)).await.map_err(|_| anyhow!("the device did not report"))??;
+    let stream = tokio::time::timeout(SPEED_TIME * 2, conn.accept_uni()).await.map_err(|_| anyhow!("the device sent nothing"))??;
+    let (bytes, micros) = measure(stream).await?;
+    let rtt = rtt_ms(&conn);
+    let _ = send.finish();
+    conn.close(0u32.into(), b"done");
+    Ok((rate(report.bytes, report.micros), rate(bytes, micros), rtt, id))
+}
+
+/// The other side of a speed test: nothing is written to disk and nothing is asked; it is taken from the devices this one's
+/// visibility admits, a few at a time.
+async fn speed_serve(inner: &Arc<Inner>, conn: &quinn::Connection, send: &mut quinn::SendStream, recv: &mut quinn::RecvStream, peer_id: &str, fp: &str) -> anyhow::Result<()> {
+    let _ = recv;
+    let reason = if inner.visibility() == Visibility::Trusted && !inner.trusts(fp) {
+        Some("the device only takes files from its trusted devices")
+    } else if !inner.begin_speed_test(peer_id) {
+        Some("the device is busy with another speed test")
+    } else {
+        None
+    };
+    if let Some(reason) = reason {
+        proto::write_frame(send, &Answer { accept: false, reason: Some(reason.to_string()), resume: Vec::new() }).await?;
+        // (the answer must arrive before the connection goes: the other side closes it once it has read it)
+        let _ = send.finish();
+        let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
+        return Ok(());
+    }
+    let r = async {
+        proto::write_frame(send, &Answer { accept: true, reason: None, resume: Vec::new() }).await?;
+        let stream = tokio::time::timeout(SPEED_TIME * 2, conn.accept_uni()).await.map_err(|_| anyhow!("nothing came"))??;
+        let (bytes, micros) = measure(stream).await?;
+        proto::write_frame(send, &SpeedReport { bytes, micros }).await?;
+        blast(conn.open_uni().await?).await;
+        let _ = tokio::time::timeout(SPEED_TIME * 3, conn.closed()).await;
+        anyhow::Ok(())
+    }
+    .await;
+    inner.end_speed_test(peer_id);
+    inner.note_rtt(peer_id, rtt_ms(conn));
+    r
+}
+
+/// Sends bytes that do not compress until the other side stops reading, or for a little longer than it counts, or `SPEED_MAX`.
+async fn blast(mut s: quinn::SendStream) {
+    let mut buf = vec![0u8; 64 << 10];
+    let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+    for b in buf.chunks_mut(8) {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        b.copy_from_slice(&x.to_le_bytes()[..b.len()]);
+    }
+    let start = std::time::Instant::now();
+    let mut sent = 0u64;
+    while sent < SPEED_MAX && start.elapsed() < SPEED_TIME + Duration::from_millis(500) {
+        // (an error: the other side stopped reading, its time is up)
+        if s.write_all(&buf).await.is_err() {
+            return;
+        }
+        sent += buf.len() as u64;
+    }
+    let _ = s.finish();
+}
+
+/// Counts what arrives on a stream for `SPEED_TIME` from its first byte (then stops it), leaving out the warm-up: (bytes, µs).
+async fn measure(mut s: quinn::RecvStream) -> anyhow::Result<(u64, u64)> {
+    let begun = std::time::Instant::now();
+    let mut first: Option<std::time::Instant> = None;
+    let mut warm: Option<(std::time::Instant, u64)> = None;
+    let mut total = 0u64;
+    loop {
+        let until = match first {
+            Some(f) => f + SPEED_TIME,
+            None => begun + SPEED_TIME * 2,
+        };
+        match tokio::time::timeout(until.saturating_duration_since(std::time::Instant::now()), s.read_chunk(1 << 20, false)).await {
+            Ok(Ok(Some(c))) => {
+                let now = std::time::Instant::now();
+                let f = *first.get_or_insert(now);
+                total += c.bytes.len() as u64;
+                if warm.is_none() && now.duration_since(f) >= SPEED_WARMUP {
+                    warm = Some((now, total));
+                }
+            }
+            Ok(Ok(None)) => break,
+            Ok(Err(e)) => return Err(e.into()),
+            Err(_) => {
+                let _ = s.stop(0u32.into());
+                break;
+            }
+        }
+    }
+    let end = std::time::Instant::now();
+    let Some(f) = first else { bail!("nothing arrived") };
+    Ok(match warm {
+        Some((t, b)) if total > b && end > t => (total - b, end.duration_since(t).as_micros() as u64),
+        _ => (total, end.duration_since(f).as_micros().max(1) as u64),
+    })
 }
 
 // ------------------------------------------------------------------------------------------------------------------------- pairing

@@ -64,12 +64,50 @@ pub enum Visibility {
     Everyone,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Peer {
     pub id: String,
     pub name: String,
     pub os: String,
     pub trusted: bool,
+    /// Its network link, as its app said.
+    pub link_kind: LinkKind,
+    pub link_mbps: u32,
+    /// What a transfer with it may reach, bytes a second (0: nothing to go by); `estimate_source` says from what.
+    pub estimate_bps: u64,
+    pub estimate_source: EstimateSource,
+    /// The round trip seen on the last connection with it, ms (0: none yet).
+    pub rtt_ms: u32,
+}
+
+/// A device's network link, as its app tells the crate ([`Nearby::set_link`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LinkKind {
+    #[default]
+    Unknown,
+    Wifi,
+    Ethernet,
+    Other,
+}
+
+/// Where a speed estimate comes from, best first: a speed test, the last transfer, the two devices' links.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EstimateSource {
+    #[default]
+    Unknown,
+    Link,
+    Transfer,
+    Measured,
+}
+
+/// A speed test's result ([`Nearby::measure_speed`]), seen from this device: up is from this device to the other one.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SpeedResult {
+    pub ok: bool,
+    pub up_bps: u64,
+    pub down_bps: u64,
+    pub rtt_ms: u32,
+    pub error: Option<String>,
 }
 
 /// An offer of files from another device, waiting for [`Nearby::accept`] or [`Nearby::reject`].
@@ -120,6 +158,8 @@ pub trait NearbyListener: Send + Sync {
     fn paired(&self, peer: String, ok: bool);
     /// The visibility changed by itself ([`Config::everyone_minutes`] ran out); not called for [`Nearby::set_visibility`].
     fn visibility_changed(&self, visibility: Visibility);
+    /// A speed test with `peer` ended ([`Nearby::measure_speed`]); `peers_changed` follows with the new estimate.
+    fn speed_measured(&self, peer: String, result: SpeedResult);
     fn status(&self, status: NetStatus);
 }
 
@@ -159,6 +199,10 @@ impl Nearby {
             offers: Mutex::new(HashMap::new()),
             pairings: Mutex::new(HashMap::new()),
             asking: Mutex::new(HashSet::new()),
+            link: Mutex::new((LinkKind::Unknown, 0)),
+            known: Mutex::new(HashMap::new()),
+            measuring: Mutex::new(HashSet::new()),
+            speed_tests: Mutex::new(SpeedTests::default()),
             conns: Mutex::new(HashMap::new()),
             cancelled: Mutex::new(HashSet::new()),
             next: AtomicU64::new(1),
@@ -259,7 +303,21 @@ impl Nearby {
     /// The paired devices, seen or not.
     pub fn trusted(&self) -> Vec<Peer> {
         let t = self.inner.trust.lock().unwrap_or_else(|e| e.into_inner());
-        t.devices().iter().map(|d| Peer { id: d.id.clone(), name: d.name.clone(), os: String::new(), trusted: true }).collect()
+        t.devices()
+            .iter()
+            .map(|d| Peer {
+                id: d.id.clone(),
+                name: d.name.clone(),
+                trusted: true,
+                estimate_bps: d.speed_bps,
+                estimate_source: match (d.speed_bps, d.speed_measured) {
+                    (0, _) => EstimateSource::Unknown,
+                    (_, true) => EstimateSource::Measured,
+                    (_, false) => EstimateSource::Transfer,
+                },
+                ..Default::default()
+            })
+            .collect()
     }
 
     /// Sends files and folders to a device seen on the network. Returns the transfer id at once; the rest comes to the listener.
@@ -302,6 +360,49 @@ impl Nearby {
         let inner = self.inner.clone();
         self.spawn(transfer::pair_with(inner, addrs, peer_id, name));
         Ok(())
+    }
+
+    /// Tells the crate this device's network link and its rate (Mbit/s): the other devices use it for a first speed estimate before
+    /// anything was measured or sent. Call it again when the network or the rate changes: it is announced again only when the kind
+    /// changes or the rate moves by more than a fifth (a Wi-Fi rate drifts all the time).
+    pub fn set_link(&self, kind: LinkKind, mbps: u32) {
+        let moved = {
+            let mut l = self.inner.link.lock().unwrap_or_else(|e| e.into_inner());
+            let (k0, m0) = *l;
+            let moved = k0 != kind || (m0 == 0) != (mbps == 0) || (f64::from(m0) - f64::from(mbps)).abs() > f64::from(m0) * 0.2;
+            if moved {
+                *l = (kind, mbps);
+            }
+            moved
+        };
+        if moved {
+            self.inner.advertise();
+            self.inner.notify_peers();
+        }
+    }
+
+    /// Measures the speed to a device seen on the network, both ways (about five seconds; nothing is written, nothing is asked
+    /// there). The result comes to [`NearbyListener::speed_measured`]. Returns the test's id.
+    pub fn measure_speed(&self, peer_id: String) -> Result<u64, NearbyError> {
+        let addrs = self.inner.addrs_of(&peer_id).ok_or_else(|| NearbyError::UnknownPeer(peer_id.clone()))?;
+        Ok(self.spawn_speed(addrs, peer_id))
+    }
+
+    /// [`measure_speed`](Self::measure_speed) to a device at an address (`host:port`).
+    pub fn measure_speed_address(&self, address: String, peer_id: String) -> Result<u64, NearbyError> {
+        let addr: SocketAddr = address.parse().map_err(|_| NearbyError::UnknownPeer(address.clone()))?;
+        Ok(self.spawn_speed(vec![addr], peer_id))
+    }
+
+    fn spawn_speed(&self, addrs: Vec<SocketAddr>, peer_id: String) -> u64 {
+        let id = self.inner.next_id();
+        let inner = self.inner.clone();
+        self.spawn(async move {
+            let result = transfer::speed_test(inner.clone(), addrs, peer_id.clone()).await;
+            inner.listener.speed_measured(peer_id, result);
+            inner.notify_peers();
+        });
+        id
     }
 
     /// [`pair`](Self::pair) with a device at an address (`host:port`).
@@ -360,6 +461,20 @@ impl Drop for Nearby {
     }
 }
 
+/// What was seen with a device in this run.
+#[derive(Clone, Copy)]
+pub(crate) struct Known {
+    bps: u64,
+    source: EstimateSource,
+    rtt_ms: u32,
+}
+
+#[derive(Default)]
+pub(crate) struct SpeedTests {
+    running: HashSet<String>,
+    last: HashMap<String, std::time::Instant>,
+}
+
 /// The state the runtime's tasks share.
 pub(crate) struct Inner {
     pub(crate) cfg: Config,
@@ -377,6 +492,14 @@ pub(crate) struct Inner {
     /// The devices with an offer waiting for the user: one at a time each, and a few in all, so a device that floods offers is
     /// turned away instead of filling the screen with questions.
     asking: Mutex<HashSet<String>>,
+    /// This device's link ([`Nearby::set_link`]).
+    link: Mutex<(LinkKind, u32)>,
+    /// What was seen with each device in this run: speed and round trip.
+    known: Mutex<HashMap<String, Known>>,
+    /// The devices this one is testing the speed to now (one test each).
+    measuring: Mutex<HashSet<String>>,
+    /// The tests other devices run against this one.
+    speed_tests: Mutex<SpeedTests>,
     conns: Mutex<HashMap<u64, quinn::Connection>>,
     cancelled: Mutex<HashSet<u64>>,
     next: AtomicU64,
@@ -403,8 +526,10 @@ impl Inner {
             Visibility::Everyone => Some("everyone"),
         };
         let port = self.endpoint.local_addr().map(|a| a.port()).unwrap_or(0);
+        let (kind, mbps) = *self.link.lock().unwrap_or_else(|e| e.into_inner());
+        let link = discovery::link_text(kind, mbps);
         if let Some(d) = self.discovery.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
-            && let Err(e) = d.advertise(&self.me.id, &self.cfg.name, &self.cfg.os, port, vis)
+            && let Err(e) = d.advertise(&self.me.id, &self.cfg.name, &self.cfg.os, port, vis, link.as_deref())
         {
             log::warn!("nearby: cannot advertise: {e:#}");
         }
@@ -416,7 +541,7 @@ impl Inner {
 
     pub(crate) fn trust_device(&self, id: &str, name: &str, fingerprint: &str) {
         let name = if name.is_empty() { self.peers.lock().unwrap_or_else(|e| e.into_inner()).get(id).map(|s| s.name.clone()).unwrap_or_else(|| id.to_string()) } else { name.to_string() };
-        let device = trust::TrustedDevice { id: id.to_string(), name, fingerprint: fingerprint.to_string() };
+        let device = trust::TrustedDevice { id: id.to_string(), name, fingerprint: fingerprint.to_string(), ..Default::default() };
         if let Err(e) = self.trust.lock().unwrap_or_else(|e| e.into_inner()).add(device) {
             log::warn!("nearby: cannot keep the trusted device: {e}");
         }
@@ -496,12 +621,98 @@ impl Inner {
         let peers = self.peers.lock().unwrap_or_else(|e| e.into_inner());
         let mut list: Vec<Peer> = peers
             .values()
-            .map(|s| Peer { id: s.id.clone(), name: s.name.clone(), os: s.os.clone(), trusted: trust.is_trusted_id(&s.id) })
+            .map(|s| {
+                let (estimate_bps, estimate_source, rtt_ms) = self.estimate(&s.id, (s.link_kind, s.link_mbps), &trust);
+                Peer {
+                    id: s.id.clone(),
+                    name: s.name.clone(),
+                    os: s.os.clone(),
+                    trusted: trust.is_trusted_id(&s.id),
+                    link_kind: s.link_kind,
+                    link_mbps: s.link_mbps,
+                    estimate_bps,
+                    estimate_source,
+                    rtt_ms,
+                }
+            })
             // (a device that shows itself to its trusted devices only is listed by those alone)
             .filter(|p| p.trusted || peers.get(&p.id).is_some_and(|s| s.vis != "trusted"))
             .collect();
         list.sort_by(|a, b| b.trusted.cmp(&a.trusted).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
         list
+    }
+
+    /// A device's speed estimate: this run's speed test or transfer, else the one kept for a trusted device, else the slower of the
+    /// two links at what such a link gives in practice (Wi-Fi about half its rate, Ethernet nine tenths).
+    fn estimate(&self, id: &str, link: (LinkKind, u32), trust: &trust::TrustStore) -> (u64, EstimateSource, u32) {
+        let known = self.known.lock().unwrap_or_else(|e| e.into_inner()).get(id).copied();
+        let rtt = known.map(|k| k.rtt_ms).unwrap_or(0);
+        if let Some(k) = known
+            && k.bps > 0
+        {
+            return (k.bps, k.source, rtt);
+        }
+        if let Some(d) = trust.devices().iter().find(|d| d.id == id)
+            && d.speed_bps > 0
+        {
+            return (d.speed_bps, if d.speed_measured { EstimateSource::Measured } else { EstimateSource::Transfer }, rtt);
+        }
+        let own = *self.link.lock().unwrap_or_else(|e| e.into_inner());
+        let eff = |k: LinkKind| match k {
+            LinkKind::Wifi => Some(0.5),
+            LinkKind::Ethernet => Some(0.9),
+            LinkKind::Other => Some(0.6),
+            LinkKind::Unknown => None,
+        };
+        if let (Some(a), Some(b)) = (eff(own.0), eff(link.0))
+            && own.1 > 0
+            && link.1 > 0
+        {
+            let mbps = (f64::from(own.1) * a).min(f64::from(link.1) * b);
+            return ((mbps * 1e6 / 8.0) as u64, EstimateSource::Link, rtt);
+        }
+        (0, EstimateSource::Unknown, rtt)
+    }
+
+    /// A speed seen with a device (a test, or a transfer that moved enough to tell); kept for a trusted device.
+    pub(crate) fn note_speed(&self, id: &str, bps: u64, source: EstimateSource, rtt_ms: u32) {
+        if bps == 0 {
+            return;
+        }
+        // (one lock at a time: `peer_list` takes the trust store before this map)
+        self.known.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string(), Known { bps, source, rtt_ms });
+        if let Err(e) = self.trust.lock().unwrap_or_else(|e| e.into_inner()).set_speed(id, bps, source == EstimateSource::Measured) {
+            log::warn!("nearby: cannot keep a speed: {e}");
+        }
+        self.notify_peers();
+    }
+
+    /// A round trip seen with a device, when nothing else was learnt.
+    pub(crate) fn note_rtt(&self, id: &str, rtt_ms: u32) {
+        let mut known = self.known.lock().unwrap_or_else(|e| e.into_inner());
+        known.entry(id.to_string()).or_insert(Known { bps: 0, source: EstimateSource::Unknown, rtt_ms }).rtt_ms = rtt_ms;
+    }
+
+    pub(crate) fn begin_measuring(&self, peer: &str) -> bool {
+        self.measuring.lock().unwrap_or_else(|e| e.into_inner()).insert(peer.to_string())
+    }
+
+    pub(crate) fn end_measuring(&self, peer: &str) {
+        self.measuring.lock().unwrap_or_else(|e| e.into_inner()).remove(peer);
+    }
+
+    /// Takes a place for a speed test `peer` runs against this device: one at a time each, one every few seconds each, a few at once.
+    pub(crate) fn begin_speed_test(&self, peer: &str) -> bool {
+        let mut t = self.speed_tests.lock().unwrap_or_else(|e| e.into_inner());
+        if t.running.contains(peer) || t.running.len() >= transfer::SPEED_AT_ONCE || t.last.get(peer).is_some_and(|at| at.elapsed() < transfer::SPEED_SPACING) {
+            return false;
+        }
+        t.last.insert(peer.to_string(), std::time::Instant::now());
+        t.running.insert(peer.to_string())
+    }
+
+    pub(crate) fn end_speed_test(&self, peer: &str) {
+        self.speed_tests.lock().unwrap_or_else(|e| e.into_inner()).running.remove(peer);
     }
 
     fn notify_peers(&self) {

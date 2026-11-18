@@ -17,7 +17,7 @@ use gpui_kit::assets::IconName as L;
 use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use rf_nearby::{Config, NearbyListener, NetStatus, Nearby, Offer, Peer, TransferResult, Visibility};
+use rf_nearby::{Config, EstimateSource, LinkKind, NearbyListener, NetStatus, Nearby, Offer, Peer, SpeedResult, TransferResult, Visibility};
 
 use crate::fluent_menu::{Item, MenuIcon};
 use crate::settings::{self, FerryVisibility, Settings};
@@ -44,6 +44,7 @@ enum Ev {
     Status(NetStatus),
     /// A click on one of our toasts: its argument (`ferry:yes:<key>`, `ferry:no:<key>`, `ferry:show:<key>`, `ferry:open:<path>`).
     Toast(String),
+    Speed(String, SpeedResult),
 }
 
 struct Listener(mpsc::UnboundedSender<Ev>);
@@ -69,6 +70,9 @@ impl NearbyListener for Listener {
     }
     fn paired(&self, peer: String, _ok: bool) {
         let _ = self.0.unbounded_send(Ev::Paired(peer));
+    }
+    fn speed_measured(&self, peer: String, result: SpeedResult) {
+        let _ = self.0.unbounded_send(Ev::Speed(peer, result));
     }
     fn visibility_changed(&self, visibility: Visibility) {
         let _ = self.0.unbounded_send(Ev::Visibility(visibility));
@@ -125,6 +129,9 @@ pub struct Ferry {
     events: Option<mpsc::UnboundedSender<Ev>>,
     /// Settings > Ferry is on screen: see [`page_seen`].
     viewing: Option<Viewing>,
+    /// The speed tests running now (by device), and the last result with each device in this run.
+    measuring: std::collections::HashSet<String>,
+    speeds: HashMap<String, SpeedResult>,
 }
 
 /// Settings > Ferry on screen, in `window`, last drawn at `seen`; `restore` is the visibility to go back to when it goes.
@@ -205,6 +212,7 @@ fn start(w: Started, cx: &mut App) {
         Ok(n) => {
             f.nearby = Some(n);
             f.problem = None;
+            watch_link(cx);
         }
         Err(e) => {
             log::warn!("ferry: cannot start: {e}");
@@ -286,6 +294,12 @@ fn on_event(ev: Ev, cx: &mut App) {
             }
         }
         Ev::Toast(arg) => on_toast(&arg, cx),
+        Ev::Speed(peer, result) => {
+            let f = cx.global_mut::<Ferry>();
+            f.measuring.remove(&peer);
+            f.speeds.insert(peer, result);
+            cx.refresh_windows();
+        }
         Ev::Code(peer, code) => {
             let f = cx.global::<Ferry>();
             let name = f.peers.iter().find(|p| p.id == peer).map(|p| p.name.clone()).unwrap_or_else(|| peer.clone());
@@ -365,6 +379,8 @@ fn failure_text(error: Option<&str>) -> String {
         t!("Karşı taraf reddetti.").to_string()
     } else if has("did not answer") || has("no answer") || has("timed out") {
         t!("Cihaz yanıt vermedi.").to_string()
+    } else if has("busy with another speed test") {
+        t!("O cihazla az önce hız ölçüldü; birkaç saniye sonra yeniden deneyin.").to_string()
     } else if has("busy with other offers") {
         t!("O cihazda yanıt bekleyen bir teklifiniz zaten var.").to_string()
     } else if has("arrived damaged") {
@@ -864,13 +880,23 @@ pub(crate) fn page(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ));
     }
     for (i, peer) in peers.iter().enumerate() {
-        let desc = if peer.trusted { format!("{} · {}", os_name(&peer.os), t!("Güvenilir")) } else { os_name(&peer.os).to_string() };
-        let control = if peer.trusted {
-            div().into_any_element()
-        } else {
-            let id = peer.id.clone();
-            button(("ferry-pair", i), p, t!("Eşleştir"), move |_, cx| pair(id.clone(), cx))
-        };
+        let (measuring, last) = cx.try_global::<Ferry>().map(|f| (f.measuring.contains(&peer.id), f.speeds.get(&peer.id).cloned())).unwrap_or_default();
+        let mut desc = os_name(&peer.os).to_string();
+        if peer.trusted {
+            desc = format!("{desc} · {}", t!("Güvenilir"));
+        }
+        if let Some(speed) = speed_text(peer, measuring, last.as_ref()) {
+            desc = format!("{desc} · {speed}");
+        }
+        let id = peer.id.clone();
+        let control = h_flex()
+            .gap_2()
+            .child(button(("ferry-speed", i), p, if measuring { t!("Ölçülüyor…") } else { t!("Hızı ölç") }, move |_, cx| measure(id.clone(), cx)))
+            .children((!peer.trusted).then(|| {
+                let id = peer.id.clone();
+                button(("ferry-pair", i), p, t!("Eşleştir"), move |_, cx| pair(id.clone(), cx))
+            }))
+            .into_any_element();
         v.push(card(p, if peer.trusted { L::ShieldCheck } else { L::Monitor }, &peer.name, Some(desc.as_str()), control));
     }
 
@@ -965,6 +991,74 @@ fn os_name(os: &str) -> &str {
         "linux" => "Linux",
         other => other,
     }
+}
+
+/// The speed part of a device's line: the test running, its result, or the estimate (measured or from a transfer: "~48 MB/s"; from
+/// the two links: "≈ 52 MB/s (Wi-Fi)"), else the round trip.
+fn speed_text(peer: &Peer, measuring: bool, last: Option<&SpeedResult>) -> Option<String> {
+    let per_s = |bps: u64| format!("{}/s", rf_core::format::size(bps));
+    if measuring {
+        return Some(t!("hız ölçülüyor…").to_string());
+    }
+    match last {
+        Some(r) if r.ok => return Some(format!("↑ {} · ↓ {} · {} ms", per_s(r.up_bps), per_s(r.down_bps), r.rtt_ms)),
+        Some(r) => return Some(format!("{}: {}", t!("Ölçülemedi"), failure_text(r.error.as_deref()))),
+        None => {}
+    }
+    match peer.estimate_source {
+        EstimateSource::Measured | EstimateSource::Transfer => Some(format!("~{}", per_s(peer.estimate_bps))),
+        EstimateSource::Link => {
+            let link = match peer.link_kind {
+                LinkKind::Wifi => "Wi-Fi",
+                LinkKind::Ethernet => "Ethernet",
+                _ => t!("ağ"),
+            };
+            Some(format!("≈ {} ({link})", per_s(peer.estimate_bps)))
+        }
+        EstimateSource::Unknown => (peer.rtt_ms > 0).then(|| format!("{} ms", peer.rtt_ms)),
+    }
+}
+
+fn measure(peer_id: String, cx: &mut App) {
+    let Some(n) = cx.global::<Ferry>().nearby.clone() else { return };
+    if cx.global::<Ferry>().measuring.contains(&peer_id) {
+        return;
+    }
+    match n.measure_speed(peer_id.clone()) {
+        Ok(_) => {
+            let f = cx.global_mut::<Ferry>();
+            f.speeds.remove(&peer_id);
+            f.measuring.insert(peer_id);
+            cx.refresh_windows();
+        }
+        Err(e) => log::warn!("ferry: cannot measure: {e}"),
+    }
+}
+
+/// Tells the crate this PC's network link and keeps telling it while Ferry runs (a Wi-Fi rate drifts; the crate announces a real
+/// change only). Read every 30 seconds, off the UI thread: one routing-table look and one interface row.
+fn watch_link(cx: &mut App) {
+    cx.spawn(async move |cx| {
+        loop {
+            let link = cx.background_executor().spawn(async { rf_win::network::lan_link() }).await;
+            let running = cx.update(|cx| {
+                let Some(n) = cx.has_global::<Ferry>().then(|| cx.global::<Ferry>().nearby.clone()).flatten() else { return false };
+                let (kind, mbps) = match link {
+                    Some((rf_win::network::LinkType::Wifi, m)) => (LinkKind::Wifi, m),
+                    Some((rf_win::network::LinkType::Ethernet, m)) => (LinkKind::Ethernet, m),
+                    Some((rf_win::network::LinkType::Other, m)) => (LinkKind::Other, m),
+                    None => (LinkKind::Unknown, 0),
+                };
+                n.set_link(kind, mbps);
+                true
+            });
+            if !running {
+                break;
+            }
+            cx.background_executor().timer(Duration::from_secs(30)).await;
+        }
+    })
+    .detach();
 }
 
 fn pair(peer_id: String, cx: &mut App) {

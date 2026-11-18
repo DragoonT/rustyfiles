@@ -135,3 +135,32 @@ pub fn disconnect_drive_dialog(owner: isize) {
         let _ = WNetDisconnectDialog(Some(HWND(owner as *mut _)), RESOURCETYPE_DISK.0);
     }
 }
+
+
+/// What a network link is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkType {
+    Wifi,
+    Ethernet,
+    Other,
+}
+
+/// The link this machine reaches the network over: its kind and rate in Mbit/s (Wi-Fi's current transmit rate, Ethernet's link
+/// speed). The interface is the routing table's best one toward an outside address; nothing is sent. None without a route or a rate.
+pub fn lan_link() -> Option<(LinkType, u32)> {
+    use windows::Win32::NetworkManagement::IpHelper::{GetBestInterface, GetIfEntry2, MIB_IF_ROW2};
+    let mut index = 0u32;
+    if unsafe { GetBestInterface(u32::from_ne_bytes([8, 8, 8, 8]), &mut index) } != 0 {
+        return None;
+    }
+    let mut row = MIB_IF_ROW2 { InterfaceIndex: index, ..Default::default() };
+    unsafe { GetIfEntry2(&mut row) }.ok().ok()?;
+    // IF_TYPE_IEEE80211, IF_TYPE_ETHERNET_CSMACD
+    let kind = match row.Type {
+        71 => LinkType::Wifi,
+        6 => LinkType::Ethernet,
+        _ => LinkType::Other,
+    };
+    let bps = row.TransmitLinkSpeed;
+    (bps != u64::MAX && bps >= 1_000_000).then(|| (kind, (bps / 1_000_000).min(u64::from(u32::MAX)) as u32))
+}

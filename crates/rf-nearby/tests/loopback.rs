@@ -7,12 +7,13 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use rf_nearby::{Config, Nearby, NearbyListener, NetStatus, Offer, Peer, TransferResult, Visibility};
+use rf_nearby::{Config, Nearby, NearbyListener, NetStatus, Offer, Peer, SpeedResult, TransferResult, Visibility};
 
 #[derive(Debug)]
 enum Ev {
     Offer(Offer),
     Receiving(Offer),
+    Speed(String, SpeedResult),
     Finished(u64, TransferResult),
     Code(String, String),
     Paired(#[allow(dead_code)] String, bool),
@@ -41,6 +42,9 @@ impl NearbyListener for Listener {
         let _ = self.0.lock().unwrap().send(Ev::Paired(peer, ok));
     }
     fn visibility_changed(&self, _: Visibility) {}
+    fn speed_measured(&self, peer: String, result: SpeedResult) {
+        let _ = self.0.lock().unwrap().send(Ev::Speed(peer, result));
+    }
     fn status(&self, _: NetStatus) {}
 }
 
@@ -282,4 +286,28 @@ fn a_device_cannot_pile_up_offers() {
     let Ev::Finished(..) = next(&a.events) else { panic!() };
     a.nearby.send_to_address(addr(&b), vec![file.to_string_lossy().into()]).unwrap();
     assert!(matches!(next(&b.events), Ev::Offer(_)));
+}
+
+#[test]
+fn a_speed_test_measures_both_ways_and_is_not_repeated_at_once() {
+    let a = device("A", true);
+    let b = device("B", true);
+    // B shows itself to trusted devices only: a stranger's test is turned away
+    a.nearby.measure_speed_address(addr(&b), b.nearby.id()).unwrap();
+    let Ev::Speed(peer, r) = next(&a.events) else { panic!() };
+    assert_eq!(peer, b.nearby.id());
+    assert!(!r.ok && r.error.as_deref().is_some_and(|e| e.contains("trusted")), "{r:?}");
+
+    b.nearby.set_visibility(Visibility::Everyone);
+    a.nearby.measure_speed_address(addr(&b), b.nearby.id()).unwrap();
+    let Ev::Speed(_, r) = next(&a.events) else { panic!() };
+    assert!(r.ok, "{r:?}");
+    assert!(r.up_bps > 1_000_000 && r.down_bps > 1_000_000, "{r:?}");
+    // B was asked nothing and wrote nothing
+    assert!(b.events.recv_timeout(Duration::from_millis(200)).is_err());
+    assert!(std::fs::read_dir(b.inbox.path()).unwrap().next().is_none());
+    // the same device again at once: busy
+    a.nearby.measure_speed_address(addr(&b), b.nearby.id()).unwrap();
+    let Ev::Speed(_, r) = next(&a.events) else { panic!() };
+    assert!(!r.ok && r.error.as_deref().is_some_and(|e| e.contains("busy")), "{r:?}");
 }

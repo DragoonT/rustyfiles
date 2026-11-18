@@ -7,11 +7,17 @@ use serde::{Deserialize, Serialize};
 
 const FILE: &str = "trusted.json";
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrustedDevice {
     pub id: String,
     pub name: String,
     pub fingerprint: String,
+    /// The last speed measured with it, or of the last transfer with it (bytes a second; 0: none yet).
+    #[serde(default)]
+    pub speed_bps: u64,
+    /// `speed_bps` came from a speed test (else from a transfer).
+    #[serde(default)]
+    pub speed_measured: bool,
 }
 
 pub struct TrustStore {
@@ -46,6 +52,14 @@ impl TrustStore {
         self.save()
     }
 
+    /// Keeps the speed seen with a trusted device. Nothing for a device that is not trusted.
+    pub fn set_speed(&mut self, id: &str, bps: u64, measured: bool) -> std::io::Result<()> {
+        let Some(d) = self.devices.iter_mut().find(|d| d.id == id) else { return Ok(()) };
+        d.speed_bps = bps;
+        d.speed_measured = measured;
+        self.save()
+    }
+
     /// Forgets a device by id. False when it was not there.
     pub fn remove(&mut self, id: &str) -> std::io::Result<bool> {
         let before = self.devices.len();
@@ -74,7 +88,7 @@ mod tests {
     fn trusted_devices_are_kept_and_forgotten() {
         let dir = tempfile::tempdir().unwrap();
         let mut s = TrustStore::load(dir.path());
-        s.add(TrustedDevice { id: "a1".into(), name: "Desk".into(), fingerprint: "ff".into() }).unwrap();
+        s.add(TrustedDevice { id: "a1".into(), name: "Desk".into(), fingerprint: "ff".into(), ..Default::default() }).unwrap();
         let s2 = TrustStore::load(dir.path());
         assert!(s2.trusts("ff") && s2.is_trusted_id("a1"));
         assert!(s.remove("a1").unwrap());

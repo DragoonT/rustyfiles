@@ -18,6 +18,7 @@ DNS-SD over mDNS. Every device that is visible registers:
 | `os` | `windows`, `macos`, `linux` |
 | `proto` | protocol version, `1` |
 | `vis` | `trusted` (lists only for its trusted devices) or `everyone` |
+| `link` | optional: its network link and rate in Mbit/s, `wifi:866`, `ethernet:1000`, `other:100` (for a first speed estimate) |
 
 A device with visibility "off" does not register and refuses incoming connections. A browser lists a device whose `vis` is
 `trusted` only if that device is in its own trusted list. Devices with another `proto` are ignored.
@@ -67,8 +68,8 @@ and reserved device names (CON, NUL, COM1...) get a leading `_`.
    file's bytes from `offset` to the end, then it finishes the stream. Several files go at once (the reference sends four).
 3. Client → server on the control stream: `Done` `{ "hashes": ["<blake3 hex of the whole file>", ...] }`, one per item, empty for
    folders.
-4. The receiver writes everything at a **staging** path: a top-level file as `<name>.rfpart`, everything inside a top-level folder
-   under `<folder>.rfpart/`. It checks the BLAKE3 of every file; when all match, each top-level item is renamed to its real name.
+4. The receiver writes everything at a **staging** path: a top-level file as `<name>.ferrying`, everything inside a top-level
+   folder under `<folder>.ferrying/` ("still on its way"). It checks the BLAKE3 of every file; when all match, each top-level item is renamed to its real name.
    Then `Outcome` `{ "ok": true, "error": null }`. A file whose hash does not match is deleted and `ok` is false; the other parts
    stay where they are, so sending the same items again resumes them (`resume` offsets) and sends the damaged file anew.
 
@@ -79,6 +80,25 @@ differ only in case do not land on one file: the later one is numbered the same 
 After the files: each kept file gets its `mtime` and, on Unix, its `mode`. Links are made last (so no file is ever written
 through one), and only when the target, resolved from the link's own folder, stays inside the top-level item it came with; others
 are left out. Windows makes no links.
+
+### Speed test
+
+After a hello with `"purpose": { "kind": "speed" }` nothing touches the disk and nothing is asked. The server answers `Answer`
+(`accept`, `reason`; `resume` empty): it refuses a device its visibility does not admit (trusted devices only), and a device that
+is already testing it, that tested it less than 10 seconds ago, or when two tests already run ("the device is busy with another
+speed test").
+
+1. **Up.** The client opens a unidirectional stream and writes bytes that do not compress. The server counts what arrives for
+   2 seconds from the first byte, leaving out the first 200 ms (congestion control still ramping up), then stops the stream
+   (STOP_SENDING), and writes `SpeedReport` `{ "bytes": n, "micros": t }` on the control stream. A sender stops by itself after
+   2.5 s or 512 MiB.
+2. **Down.** The server opens a unidirectional stream and writes the same way; the client counts it the same way.
+3. The client closes the connection. Up is `bytes / micros` of the report, down the client's own count; the round trip is
+   QUIC's estimate on that connection.
+
+A transfer of at least 4 MiB also gives a speed (bytes moved / time). The reference keeps the last of either per device (on disk
+for trusted devices) and, with nothing of the kind, estimates from the two `link` values: the slower of own and peer rate times
+0.5 for Wi-Fi, 0.9 for Ethernet, 0.6 otherwise, divided by 8.
 
 ### Pairing
 
@@ -100,4 +120,5 @@ its trusted list.
 
 A receiver asks about one offer per device at a time and about four at most in all; an offer beyond that is refused with
 `accept: false` and the reason "the device is busy with other offers". Clients match the reasons by these words, so they do not
-change: "only takes files from its trusted devices", "declined", "busy with other offers", "arrived damaged".
+change: "only takes files from its trusted devices", "declined", "busy with other offers", "busy with another speed test",
+"arrived damaged".
