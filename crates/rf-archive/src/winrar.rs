@@ -1,35 +1,43 @@
-//! RAR creation through an installed WinRAR.
+//! RAR creation through an installed WinRAR (Windows) or RARLAB's `rar` (macOS, Linux).
 //!
 //! RAR is a proprietary format: the encoder only exists inside WinRAR's console tool
-//! `Rar.exe`. Without WinRAR installed there is no RAR creation ([`rar_exe`] returns `None`).
+//! `Rar.exe` (on other systems the same tool ships as `rar`). Without it there is no RAR
+//! creation ([`rar_exe`] returns `None`).
 //!
 //! Security note: the password is handed to `Rar.exe` as a `-hp<password>` argument (the only
 //! non-interactive way it offers), so it is visible in the process list of the same user
 //! session while the child runs. The child is never started through a shell.
 
 use std::ffi::OsString;
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+#[cfg(windows)]
 use windows::Win32::Foundation::ERROR_SUCCESS;
+#[cfg(windows)]
 use windows::Win32::System::Registry::{
     HKEY, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, KEY_WOW64_32KEY, KEY_WOW64_64KEY, REG_SAM_FLAGS, RegCloseKey,
     RegOpenKeyExW, RegQueryValueExW,
 };
+#[cfg(windows)]
 use windows::core::PCWSTR;
 
 use super::{Cancelled, CompressCtx, CompressStats, Progress, collect};
 
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+#[cfg(windows)]
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 /// Reads a `REG_SZ` / `REG_EXPAND_SZ` value under HKLM (`None` name = the key's default value).
+#[cfg(windows)]
 fn reg_string(subkey: &str, value: Option<&str>, view: REG_SAM_FLAGS) -> Option<String> {
     unsafe {
         let sub = wide(subkey);
@@ -63,6 +71,7 @@ fn reg_string(subkey: &str, value: Option<&str>, view: REG_SAM_FLAGS) -> Option<
 }
 
 /// `Rar.exe` candidates in lookup order (existence is checked by the caller).
+#[cfg(windows)]
 fn candidates() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     let mut push_exe = |exe: Option<String>| {
@@ -81,6 +90,20 @@ fn candidates() -> Vec<PathBuf> {
         }
     }
     dirs.into_iter().map(|d| d.join("Rar.exe")).collect()
+}
+
+/// `rar` candidates in lookup order: `PATH`, then where Homebrew and the RARLAB tarball put it
+/// (a GUI app's `PATH` is only `/usr/bin:/bin:/usr/sbin:/sbin`, so those are listed by hand).
+#[cfg(not(windows))]
+fn candidates() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    for d in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/local/rar", "/opt/local/bin"] {
+        dirs.push(PathBuf::from(d));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        dirs.push(Path::new(&home).join("bin"));
+    }
+    dirs.into_iter().map(|d| d.join("rar")).collect()
 }
 
 /// Path of WinRAR's `Rar.exe`, or `None` when WinRAR is not installed (RAR creation is then
@@ -171,12 +194,11 @@ fn run_rar(
     };
     ctx.emit(true);
 
-    let mut child = Command::new(exe)
-        .args(rar_args(sources, dest, level, password))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
+    let mut cmd = Command::new(exe);
+    cmd.args(rar_args(sources, dest, level, password)).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = cmd
         .spawn()
         .context("Rar.exe başlatılamadı")?;
     let status = loop {

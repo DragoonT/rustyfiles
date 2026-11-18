@@ -5298,6 +5298,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "oem_cp"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8c7959d3349f484aec36462f98226983578bf7d33f9b034c32967489c7000e1f"
+dependencies = [
+ "phf 0.11.3",
+]
+
+[[package]]
 name = "oid-registry"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6350,6 +6359,7 @@ version = "0.8.9"
 dependencies = [
  "anyhow",
  "bzip2",
+ "chrono",
  "crc32fast",
  "flate2",
  "hadris-fs",
@@ -6358,6 +6368,7 @@ dependencies = [
  "hadris-storage",
  "hadris-udf",
  "lzma-rust2 0.25.0",
+ "oem_cp",
  "rarchive",
  "sevenz-rust2",
  "tar",
