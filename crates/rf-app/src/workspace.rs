@@ -602,6 +602,16 @@ fn remember_search(history: &mut Vec<String>, q: &str) {
     history.truncate(10);
 }
 
+/// The folder a tab's terminal button would open, if the tab has one: a real disk folder,
+/// not an archive, not FTP or a network share.
+pub(crate) fn tab_terminal_dir(loc: &Location) -> Option<PathBuf> {
+    loc.path()
+        .filter(|p| p.is_dir()
+            && !rf_win::ftp::is_ftp(p)
+            && rf_win::network::server_root(p).is_none())
+        .map(Path::to_path_buf)
+}
+
 impl Workspace {
     pub fn new(
         start: Option<Location>,
@@ -2111,6 +2121,7 @@ impl Workspace {
             let title = v.title(cx);
             let icon = v.tab_icon();
             let tab_dir = v.location().path().map(Path::to_path_buf);
+            let term_dir = tab_terminal_dir(v.location());
             let active = i == self.active;
             let drag = TabDrag { ix: i, title: title.clone().into() };
             let accent = p.accent;
@@ -2146,6 +2157,37 @@ impl Workspace {
                     .when(!active, |d| d.text_color(p.text_secondary).hover(|s| s.bg(p.hover)))
                     .child(Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }))
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
+                    .when_some(term_dir, |d, dir| {
+                        d.child(
+                            div()
+                                .id(("tab-term", i))
+                                .size(px(22.))
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(theme::RADIUS_SM)
+                                .text_color(if active { p.text_secondary } else { p.text_tertiary })
+                                .when(!active, |d| d.invisible())
+                                .when(!roomy, |d| d.hidden()) // <--- ADD THIS LINE
+                                .group_hover("tab", |s| s.visible())
+                                .hover(|s| s.bg(p.pressed).text_color(p.text))
+                                .when(!popups_open, |d| {
+                                    d.tooltip(|w, cx| {
+                                        gpui_kit::component::tooltip::Tooltip::new(t!("Terminalde aç")).build(w, cx)
+                                    })
+                                })
+                                .child(Icon::new(L::SquareTerminal).size(px(12.)))
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(move |_this, _, _, cx| {
+                                    let dir = dir.clone();
+                                    cx.background_spawn(async move {
+                                        let _ = rf_win::shell::open_terminal(&dir);
+                                    })
+                                    .detach();
+                                })),
+                        )
+                    })
                     .child(
                         div()
                             .id(("tab-close", i))
@@ -4632,6 +4674,7 @@ impl Render for Workspace {
 #[cfg(test)]
 mod tests {
     use super::{breadcrumbs, parse_location};
+    use crate::workspace::tab_terminal_dir;
     use rf_core::Location;
     use std::path::{Path, PathBuf};
 
@@ -4647,6 +4690,14 @@ mod tests {
         assert_ne!(users, "");
         assert_eq!(c[0].1, Location::Path(PathBuf::from(r"C:\")));
         assert_eq!(parse_location("d:"), Some(Location::Path(PathBuf::from(r"d:\"))));
+    }
+
+    #[test]
+    fn the_terminal_button_is_only_for_real_folders() {
+        assert!(tab_terminal_dir(&Location::Home).is_none());
+        assert!(tab_terminal_dir(&Location::Settings).is_none());
+        let dir = std::env::temp_dir();
+        assert_eq!(tab_terminal_dir(&Location::Path(dir.clone())), Some(dir));
     }
 }
 
