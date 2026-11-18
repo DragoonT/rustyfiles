@@ -16,6 +16,7 @@ use rf_core::sort::{SortDir, SortKey, SortSpec};
 
 uniffi::setup_scaffolding!();
 
+mod organize;
 mod archive;
 mod ferry;
 pub use archive::{Archive, ArchiveError, ArchiveFormat, can_make_rar, compress, is_archive, smart_extract_target};
@@ -211,6 +212,7 @@ impl Folder {
 #[uniffi::export]
 pub fn set_english(on: bool) {
     rf_core::format::set_english(on);
+    organize::set_english(on);
 }
 
 /// Sizes in powers of 1000 ("1.02 MB" for 1,020,000 bytes) instead of 1024 (Settings › Files and

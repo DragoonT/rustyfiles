@@ -1,0 +1,12 @@
+/Users/ozerguzel/Documents/yazilim/rustyfiles/crates/rf-mac/target/debug/build/spin/b43d8e455d1f2dc9/out/spin-b43d8e455d1f2dc9.d: /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/lib.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/barrier.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/lazy.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/mutex.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/mutex/spin.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/once.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/relax.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/rwlock.rs
+
+/Users/ozerguzel/Documents/yazilim/rustyfiles/crates/rf-mac/target/debug/build/spin/b43d8e455d1f2dc9/out/libspin-b43d8e455d1f2dc9.rmeta: /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/lib.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/barrier.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/lazy.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/mutex.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/mutex/spin.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/once.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/relax.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/rwlock.rs
+
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/lib.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/barrier.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/lazy.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/mutex.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/mutex/spin.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/once.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/relax.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/spin-0.9.9/src/rwlock.rs:

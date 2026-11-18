@@ -1,0 +1,10 @@
+/Users/ozerguzel/Documents/yazilim/rustyfiles/crates/rf-mac/target/debug/build/mdns-sd/d300b19e03ad8f9a/out/mdns_sd-d300b19e03ad8f9a.d: /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/lib.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/dns_cache.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/dns_parser.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/error.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/service_daemon.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/service_info.rs
+
+/Users/ozerguzel/Documents/yazilim/rustyfiles/crates/rf-mac/target/debug/build/mdns-sd/d300b19e03ad8f9a/out/libmdns_sd-d300b19e03ad8f9a.rmeta: /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/lib.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/dns_cache.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/dns_parser.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/error.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/service_daemon.rs /Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/service_info.rs
+
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/lib.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/dns_cache.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/dns_parser.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/error.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/service_daemon.rs:
+/Users/ozerguzel/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/mdns-sd-0.13.11/src/service_info.rs:
