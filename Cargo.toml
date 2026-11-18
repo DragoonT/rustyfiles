@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/rf-core", "crates/rf-win", "crates/rf-app", "crates/rf-nearby", "crates/rf-archive", "crates/rf-dialog", "crates/rf-shellguard", "crates/rf-player", "crates/rustdecoder", "tools/gpustress"]
+# The macOS app (Swift in macos/, its Rust bridge in crates/rf-mac) is built on the Mac only, as a workspace of its own.
+exclude = ["crates/rf-mac", "macos"]
 
 [workspace.package]
 version = "0.8.9"
