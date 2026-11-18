@@ -62,6 +62,8 @@ enum MainMenu {
         m.addItem(item(String(localized: "Open"), #selector(W.openSelection(_:)), key(NSDownArrowFunctionKey)))
         m.addItem(item(String(localized: "Quick Look"), #selector(W.toggleQuickLook(_:)), "y"))
         m.addItem(.separator())
+        m.addItem(item(String(localized: "Properties"), #selector(W.showProperties(_:)), "i"))
+        m.addItem(.separator())
         m.addItem(item(String(localized: "Close Tab"), #selector(W.closeTab(_:)), "w"))
         m.addItem(item(String(localized: "Reopen Closed Tab"), #selector(W.reopenClosedTab(_:)), "t", [.command, .shift]))
         m.addItem(item(String(localized: "Close Window"), #selector(NSWindow.performClose(_:)), "w", [.command, .shift]))
@@ -70,6 +72,9 @@ enum MainMenu {
 
     private static func editMenu() -> NSMenu {
         let m = NSMenu(title: String(localized: "Edit"))
+        m.addItem(item(String(localized: "Undo"), Selector(("undo:")), "z"))
+        m.addItem(item(String(localized: "Redo"), Selector(("redo:")), "z", [.command, .shift]))
+        m.addItem(.separator())
         m.addItem(item(String(localized: "Cut"), #selector(W.cut(_:)), "x"))
         m.addItem(item(String(localized: "Copy"), #selector(W.copy(_:) as (W) -> (Any?) -> Void), "c"))
         m.addItem(item(String(localized: "Paste"), #selector(W.paste(_:)), "v"))
@@ -92,6 +97,7 @@ enum MainMenu {
         m.addItem(item(String(localized: "Refresh"), #selector(W.refresh(_:)), "r"))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Hide Sidebar"), #selector(W.toggleSidebar(_:)), "s", [.command, .control]))
+        m.addItem(item(String(localized: "Show Preview"), #selector(W.togglePreviewPane(_:)), "p", [.command, .shift]))
         return m
     }
 

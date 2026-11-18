@@ -57,12 +57,13 @@ enum FileOps {
         return made
     }
 
-    static func trash(_ urls: [URL]) throws -> [URL] {
-        var out: [URL] = []
+    /// Moves `urls` to the Trash; returns (where each went, where it was) for the undo.
+    static func trash(_ urls: [URL]) throws -> [(from: URL, to: URL)] {
+        var out: [(from: URL, to: URL)] = []
         for u in urls {
             var result: NSURL?
             try FileManager.default.trashItem(at: u, resultingItemURL: &result)
-            if let r = result as URL? { out.append(r) }
+            if let r = result as URL? { out.append((from: r, to: u)) }
         }
         return out
     }
