@@ -7,7 +7,7 @@ enum SettingsPage: CaseIterable {
     /// Marked "Experimental" in the page list, as on Windows.
     var isExperimental: Bool { self == .ferry }
 
-    case general, appearance, layout, files, fileTypes, actions, tags, ferry, dev, advanced, about
+    case general, appearance, layout, files, fileTypes, actions, tags, ferry, dev, advanced, speed, about
 
     var title: String {
         switch self {
@@ -20,6 +20,7 @@ enum SettingsPage: CaseIterable {
         case .actions: String(localized: "Keyboard shortcuts")
         case .dev: String(localized: "Developer tools")
         case .advanced: String(localized: "Advanced")
+        case .speed: String(localized: "Speed test")
         case .ferry: "Ferry"
         case .about: String(localized: "About")
         }
@@ -36,6 +37,7 @@ enum SettingsPage: CaseIterable {
         case .actions: "keyboard"
         case .dev: "square-terminal"
         case .advanced: "wrench"
+        case .speed: "gauge"
         case .ferry: "send"
         case .about: "info"
         }
@@ -166,6 +168,8 @@ enum SettingsContent {
             return devRows()
         case .advanced:
             return advancedRows()
+        case .speed:
+            return speedRows()
         case .ferry:
             return FerryPage.rows()
         case .about:

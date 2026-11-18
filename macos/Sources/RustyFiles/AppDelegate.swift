@@ -71,7 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// settled, then quits (for checking the layout without screen-recording permission;
     /// glass and vibrancy are not drawn this way).
     private func snapshotAndQuit(to path: String) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        // RF_SNAPSHOT_DELAY (seconds) waits longer, RF_DEMO_SPEED runs the speed test first
+        if ProcessInfo.processInfo.environment["RF_DEMO_SPEED"] != nil { SpeedTest.shared.run() }
+        let delay = Double(ProcessInfo.processInfo.environment["RF_SNAPSHOT_DELAY"] ?? "") ?? 2
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let view = self?.controllers.first?.window?.contentView?.superview,
                 let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
             else { exit(1) }
