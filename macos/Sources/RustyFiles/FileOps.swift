@@ -65,6 +65,7 @@ enum FileOps {
             try FileManager.default.trashItem(at: u, resultingItemURL: &result)
             if let r = result as URL? { out.append((from: r, to: u)) }
         }
+        TrashBin.remember(out)
         return out
     }
 

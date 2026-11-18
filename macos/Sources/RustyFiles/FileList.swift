@@ -34,6 +34,19 @@ final class CommandBarView: FlippedView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
+    /// In the Trash the first button empties it (the Recycle Bin's "Empty Recycle Bin"), and
+    /// Delete deletes for good.
+    var trashMode = false {
+        didSet {
+            guard trashMode != oldValue else { return }
+            new.label = trashMode ? String(localized: "Empty Trash") : String(localized: "New")
+            new.icon = trashMode ? "eraser" : "circle-plus"
+            new.chevron = !trashMode
+            delete.toolTip = trashMode ? String(localized: "Delete immediately") : String(localized: "Delete")
+            needsLayout = true
+        }
+    }
+
     override func layout() {
         super.layout()
         let h = bounds.height - 1

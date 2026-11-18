@@ -130,6 +130,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         message.font = Metrics.textSm
         message.textColor = .secondaryLabelColor
         message.isHidden = true
+        if card.subviews.contains(privacyButton) { privacyButton.isHidden = true }
 
         [commandBar, header, scroll, tileScroll, status, message, previewPane, previewHandle].forEach(card.addSubview)
         previewHandle.currentWidth = { [weak self] in self?.previewWidth ?? PreviewPane.defaultWidth }
@@ -449,6 +450,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         folder.arrange(column: sortKey.sort, ascending: ascending, foldersFirst: foldersFirst, showHidden: showHidden, filter: filter)
         hideSettings()
         message.isHidden = true
+        if card.subviews.contains(privacyButton) { privacyButton.isHidden = true }
         header.sortKey = sortKey
         header.ascending = ascending
         if !same { ThumbnailCache.shared.forget(under: url.path) }
@@ -466,7 +468,21 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         selectionChanged()
     }
 
+    /// Under the message when the folder couldn't be read for want of permission.
+    private lazy var privacyButton: NSButton = {
+        let b = ClosureButton(title: String(localized: "Open Privacy Settings")) { TrashBin.openPrivacySettings() }
+        b.bezelStyle = .push
+        b.isHidden = true
+        card.addSubview(b)
+        return b
+    }()
+
     func show(error text: String, at url: URL) {
+        defer {
+            privacyButton.isHidden = !text.contains("Full Disk Access")
+            privacyButton.sizeToFit()
+            privacyButton.frame.origin = NSPoint(x: (card.bounds.width - privacyButton.frame.width) / 2, y: message.frame.maxY + 8)
+        }
         folder = nil
         archive = nil
         self.url = url
@@ -568,7 +584,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         commandBar.share.isEnabled = any && writable
         commandBar.delete.isEnabled = any && writable
         commandBar.paste.isEnabled = writable && Clipboard.hasFiles
-        commandBar.new.isEnabled = writable
+        let inTrash = TrashBin.contains(url) && archive == nil
+        commandBar.trashMode = inTrash
+        commandBar.new.isEnabled = inTrash ? (folder?.count() ?? 0) > 0 : writable
+        commandBar.share.isEnabled = any && writable && !inTrash
         commandBar.properties.isEnabled = writable
         commandBar.preview.isEnabled = settingsView == nil && homeView == nil
         commandBar.preview.isOn = previewShown
@@ -580,6 +599,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     private func wireCommandBar() {
         let b = commandBar
         b.new.action = { [weak self] btn in
+            if self?.commandBar.trashMode == true { return self?.emptyTrash() ?? () }
             let m = NSMenu()
             m.addItem(withTitle: String(localized: "Folder"), action: #selector(BrowserWindowController.newFolder(_:)), keyEquivalent: "")
             m.items.first?.image = Icons.named("folder")
@@ -727,6 +747,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     func trashSelected() {
         let urls = selectedURLs
         guard !urls.isEmpty else { return }
+        // in the Trash, "delete" is for good, asked first
+        if TrashBin.contains(url) { return deleteImmediately(urls) }
         // the row after the last one goes away keeps the cursor near where it was
         let next = (selectedRows.last ?? 0) + 1
         let after = folder.flatMap { f in next < Int(f.count()) ? f.item(row: UInt32(next))?.name : nil }
@@ -881,7 +903,52 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     /// Right-click on items (`items_menu`): the quick row, then open, the items' own commands,
     /// compress / extract / tags / Ferry, Terminal; macOS adds its Services at the end.
+    // MARK: the Trash
+
+    func deleteImmediately(_ urls: [URL]) {
+        guard TrashBin.confirmDelete(urls, everything: false, in: card.window) else { return }
+        run { try TrashBin.delete(urls) } done: { [weak self] in self?.reloadSelecting([]) }
+    }
+
+    func emptyTrash() {
+        let all = TrashBin.everything()
+        guard !all.isEmpty, TrashBin.confirmDelete(all, everything: true, in: card.window) else { return }
+        run { try TrashBin.delete(all) } done: { [weak self] in self?.reloadSelecting([]) }
+    }
+
+    func putBack(_ urls: [URL]) {
+        let pairs = urls.compactMap { u in TrashBin.origin(of: u).map { (trashed: u, origin: $0) } }
+        guard !pairs.isEmpty else { return }
+        run { try TrashBin.putBack(pairs) } done: { done in
+            FileUndo.shared.record(.moves(done), title: String(localized: "Put Back"))
+        }
+    }
+
+    /// Right-click in the Trash: put back, delete for good, Quick Look, properties.
+    private func trashItemsMenu(_ urls: [URL]) -> NSMenu {
+        let b = MenuBuilder()
+        let known = urls.filter { TrashBin.origin(of: $0) != nil }
+        b.quick([
+            ("copy", String(localized: "Copy (⌘C)"), true, { [weak self] in self?.copyItems() }),
+            ("eraser", String(localized: "Delete immediately (⌘⌫)"), true, { [weak self] in self?.deleteImmediately(urls) }),
+            ("wrench", String(localized: "Properties (⌘I)"), true, { PropertiesWindow.show(urls) }),
+        ])
+        let back = b.add(String(localized: "Put Back"), "undo-2", enabled: !known.isEmpty) { [weak self] in self?.putBack(known) }
+        if known.count == 1, let o = TrashBin.origin(of: known[0]) {
+            back.title = String(localized: "Put Back to “\(o.deletingLastPathComponent().lastPathComponent)”")
+        }
+        if known.isEmpty { back.toolTip = String(localized: "Moved to the Trash outside rustyfiles: Finder can put it back.") }
+        b.add(String(localized: "Delete Immediately…"), "eraser") { [weak self] in self?.deleteImmediately(urls) }
+        b.separator()
+        b.add(String(localized: "Quick Look"), "eye", key: " ", mods: []) { [weak self] in self?.toggleQuickLook() }
+        b.add(String(localized: "Open"), "square-arrow-out-up-right") { [weak self] in self?.openSelected() }
+        b.separator()
+        b.add(String(localized: "Empty Trash…"), "trash") { [weak self] in self?.emptyTrash() }
+        return b.done()
+    }
+
     private func itemsMenu() -> NSMenu {
+        if TrashBin.contains(url) { return trashItemsMenu(selectedURLs) }
         let b = MenuBuilder()
         guard let folder else { return b.done() }
         let urls = selectedURLs
@@ -1019,6 +1086,11 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// folder's own commands, Terminal.
     private func backgroundMenu() -> NSMenu {
         let b = MenuBuilder()
+        if TrashBin.contains(url) {
+            b.add(String(localized: "Empty Trash…"), "trash", enabled: folder.map { $0.count() > 0 } ?? false) { [weak self] in self?.emptyTrash() }
+            b.add(String(localized: "Refresh"), "rotate-cw", key: "r") { [weak self] in self?.onRefresh?() }
+            return b.done()
+        }
         b.quick([
             ("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles && folder != nil, { [weak self] in self?.pasteItems() }),
             ("wrench", String(localized: "Properties (⌘I)"), url != nil, { [weak self] in if let u = self?.url { PropertiesWindow.show([u]) } }),
