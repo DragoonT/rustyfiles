@@ -1,7 +1,4 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/banner-dark.svg">
-  <img alt="rustyfiles: a file manager for Windows that never freezes. Written in Rust." src="docs/readme/banner-light.svg" width="100%">
-</picture>
+<img alt="rustyfiles: a file manager for Windows that never freezes. Written in Rust. Drawn as a rustyfiles window on a folder of 100,000 files, opened in 281 ms" src="docs/readme/cover.png" width="100%">
 
 rustyfiles is a file manager for Windows, written from scratch in Rust. It is meant to replace
 File Explorer for everyday work: tabs, dual panes, archives you open like folders, and a
@@ -40,6 +37,8 @@ Free, no account, no ads. Download, double-click, done: see [Install](#install).
 <sub>The pictures show the experimental HyperGlass backdrop (Settings › Appearance). The default backdrop is Mica, as in Explorer.</sub>
 
 ## How fast
+
+<img alt="A speed test drawn as a rustyfiles list: opening a folder of 100,000 files takes 281 ms in rustyfiles and 2,318 ms in File Explorer (8 times faster); a folder of 2,000 pictures 278 ms against 2,177 ms (8 times); copying 10,000 small files 1.8 s against 25.6 s (14 times); extracting a ZIP of 10,000 files 3.6 s against 32.4 s (9 times)" src="docs/readme/speed.png" width="100%">
 
 ### Opening a folder
 
@@ -182,7 +181,9 @@ other test scripts are in the repository (`crates/rf-win/examples/copybench.rs` 
 
 ## What it does
 
-**Browsing.** Tabs you can drag to reorder or pull out into a new window. Dual pane. Details,
+**Browsing.** Tabs you can drag to reorder or pull out into a new window. Save a window's tabs,
+split panes included, as a named session and open it again later; its name stands beside the tabs.
+A new tab opens Home or the folder you are in (Settings › General). Dual pane. Details,
 grid and column views, grouping, a preview pane, search, colour tags, the Shelf, libraries,
 network shares and FTP. A Git status column. Folder sizes on demand: click "Calculate size";
 they are remembered across restarts and can show size on disk. "Show disk usage" on a folder or
@@ -194,7 +195,7 @@ Link) appear under Devices on the Home page; that part hasn't been tried with a 
 **Files.** Undo and redo for renames, copies, moves, deleting to the Recycle Bin and folder
 flattening. Bulk rename.
 The full Explorer context menu, drag and drop with Explorer and the desktop, and drop targets
-on tabs and pinned folders.
+on tabs and pinned folders. Send files to your other computers with [Ferry](#ferry).
 
 **Archives.** ZIP, 7z, RAR, the tar family and ISO open like folders, password-protected
 ZIP, 7z and RAR included. Add, delete and rename inside ZIP, 7z and tar. Create ZIP, 7z and tar.zst on every core. Reading is
@@ -232,10 +233,7 @@ are translated, and right-to-left names and text read right to left (thanks to @
 interface itself is not mirrored yet. Corrections are welcome: each language is
 one JSON file in `crates/rf-app/locales/`.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/readme/photos-dark.png">
-  <img alt="rustyfiles showing a Photos folder in grid view with image thumbnails, on the HyperGlass backdrop" src="docs/readme/photos-light.png" width="100%">
-</picture>
+<img alt="rustyfiles showing a folder of Windows' wallpapers in grid view, one of them selected and shown in the preview pane on the right, on the HyperGlass backdrop" src="docs/readme/grid.png" width="100%">
 
 ## DirectLook
 
@@ -247,12 +245,39 @@ It runs as its own program, `directlook.exe`, so a heavy video never weighs on t
 manager and neither can take the other down. It works in rustyfiles, and if you turn it on,
 in Explorer and on the desktop too. Settings live under Settings › DirectLook.
 
+## Ferry
+
+Send files and folders to rustyfiles on your other computers on the same network, the way AirDrop
+does: right-click › **Send with Ferry**.
+
+<img alt="Settings › Ferry with two nearby devices, a paired Windows PC with its measured speed and a MacBook with an estimated one; a Windows notification asks whether to accept files from the MacBook, and the status bar shows a transfer at 61 percent" src="docs/readme/ferry.png" width="100%">
+
+<sub>A drawing of Settings › Ferry with invented devices, in the app's own words and layout.</sub>
+
+- Encrypted end to end (QUIC with TLS 1.3), straight from device to device: no server, no account,
+  nothing leaves your network.
+- Pair your devices the way you pair Bluetooth: both show the same six-digit code. A paired
+  device's files can arrive without asking; anything else is asked first, in a notification.
+- You choose who can see your PC: no one, your paired devices (the default), or everyone for ten
+  minutes. While Settings › Ferry is open everyone can see it, so a new device can find it.
+- A transfer that breaks off goes on from where it stopped, and every file is checked before it
+  takes its name. Received files are marked as downloaded, so SmartScreen asks before a program
+  among them runs.
+- Each device shows an estimated speed, and **Test speed** measures it both ways in a few seconds.
+- The macOS app, coming soon, speaks the same protocol, which is written down in
+  [docs/nearby-protocol.md](docs/nearby-protocol.md).
+
+Ferry is off until you turn it on in Settings › Ferry. Windows Firewall may ask about it: allow it
+for private networks.
+
 ## Experimental: HyperGlass, the Dock and the desktop
 
 These are off by default and early. They were built and tried on one PC with two monitors, and
 some parts have had very little use. Expect rough edges, and please report what you find.
 
-<img alt="The rustyfiles Dock at the bottom of a monitor: an island with the Start button and search, an island with the pinned and running apps, and an island with the clock and notifications" src="docs/readme/dock.png" width="100%">
+<img alt="A desktop with the rustyfiles Dock at the bottom (three islands: Start and search, the pinned and running apps, the tray and the clock), the Dock's Start panel open on the left with pinned apps and recent files, HyperSearch in the middle with the apps found for adobe, and the control centre on the right with Wi-Fi, Bluetooth, Ethernet, the song playing, volume and brightness" src="docs/readme/shell.png" width="100%">
+
+<sub>Start, HyperSearch and the control centre, put together from three screenshots of the same desktop (they don't open all at once).</sub>
 
 - **HyperGlass** (Settings › Appearance) is a fifth backdrop: the window's background is glass that
   bends and frosts what is behind it.
@@ -265,6 +290,15 @@ some parts have had very little use. Expect rough edges, and please report what 
   for rounded corners.
 
 Explorer keeps running underneath all of this; nothing of Windows is removed or replaced on disk.
+
+### Brightness for every monitor
+
+Windows has a brightness slider only for a laptop's own screen. The Dock's control centre has one
+for **each monitor**: turn on Settings › Dock, then click the network or volume icon on the right of
+the Dock. External monitors are set over **DDC/CI**, the standard almost every desktop monitor of the
+last fifteen years speaks over DisplayPort, HDMI and DVI. If a monitor has no slider, check that
+DDC/CI is on in the monitor's own menu; some docks, KVM switches and adapters don't pass it through.
+A laptop's own screen is set the way Windows' own slider does it (not tried on a laptop yet).
 
 ## Install
 
@@ -284,8 +318,17 @@ Settings › Advanced › Set as default file manager. You can turn it off any t
 **Uninstall** like any app, from Windows Settings › Apps. Everything rustyfiles changed goes
 back to File Explorer.
 
+**Open/Save dialogs in other apps fail or crash** after rustyfiles' files were removed without an
+uninstall (a virus scanner, a broken update)? Starting rustyfiles again fixes it. If rustyfiles no
+longer starts, this PowerShell command gives every app Windows' own dialog back:
+
+```powershell
+Remove-Item -Recurse "HKCU:\Software\Classes\CLSID\{DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7}", "HKCU:\Software\Classes\CLSID\{C0B4E2F3-BA21-4773-8DBA-335EC946EB8B}"
+```
+
 Prefer no installer? A portable zip is on the [Releases](https://github.com/gelenmedya/rustyfiles/releases)
-page. Requires Windows 11 on x64 (Windows 10 is untested).
+page. Requires Windows 11 on x64 (Windows 10 is untested). A macOS version is coming soon, and
+Linux is planned.
 
 **Questions or ideas?** Come say hi on [Discord](https://discord.gg/K2banZ36zJ), or visit
 [rustyfiles.com](https://rustyfiles.com).
@@ -364,10 +407,31 @@ Settings are stored in `%APPDATA%\rustyfiles\settings.toml`, DirectLook's in
 
 </details>
 
+## How it is made
+
+rustyfiles is written with AI coding tools, and that is no secret. One developer decides what gets
+built and how it should behave, tries each change on a real PC (two monitors, everyday work) and
+turns down what doesn't hold up. The AI writes much of the code; it doesn't decide what ships.
+
+What keeps that honest:
+
+- **Tests.** More than 3,000 automated tests run before every change is pushed.
+- **Measurements.** The speed numbers above come from a test built into the app (Settings ›
+  Speed test), so anyone can check them on their own machine.
+- **Reports.** Bugs come from the people who use it. Each issue gets an answer, the fix is made in
+  the open, and the person who reported it is asked to try it before it is closed.
+- **The code.** All of it is here under the MIT license, to read and to judge.
+
+Why Rust: a file manager has to stay fast with 100,000 files in a folder and must never lose
+anyone's data. Rust gives speed without a garbage collector and rules out whole classes of crashes
+before they ship. And rustyfiles is a new app written from scratch, not a rewrite of Explorer; it
+runs next to Explorer and changes nothing of Windows on disk.
+
 ## Status
 
 rustyfiles is young, and its author uses it every day in place of Explorer. A roadmap and
-test reports will follow in `docs/`.
+test reports will follow in `docs/`. The macOS version is on its way, built on the same core, and
+Linux comes after it.
 
 Bug reports and pull requests are welcome.
 
@@ -393,8 +457,10 @@ Built with [windows-rs](https://github.com/microsoft/windows-rs),
 [Velopack](https://velopack.io) (install and updates), [Lucide](https://lucide.dev) icons,
 [zip](https://github.com/zip-rs/zip2), [sevenz-rust2](https://github.com/hasenbanck/sevenz-rust),
 [tar](https://github.com/alexcrichton/tar-rs), [notify](https://github.com/notify-rs/notify)
-and many more crates. The banner uses
-[Bricolage Grotesque](https://github.com/ateliertriay/bricolage) by Atelier Triay.
+and many more crates. The pictures use
+[Bricolage Grotesque](https://github.com/ateliertriay/bricolage) by Atelier Triay,
+[Instrument Sans](https://fonts.google.com/specimen/Instrument+Sans) and
+[Doto](https://fonts.google.com/specimen/Doto).
 
 ## License
 

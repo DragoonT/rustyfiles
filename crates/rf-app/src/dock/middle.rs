@@ -1,4 +1,4 @@
-//! The middle island, the dock itself: the apps pinned to the Windows taskbar in the taskbar's order, then the other running apps,
+﻿//! The middle island, the dock itself: the apps pinned to the Windows taskbar in the taskbar's order, then the other running apps,
 //! a thin separator, the Recycle Bin and the Downloads folder. Icons are 44 px at rest. With the pointer over the dock they grow like
 //! the Mac's dock (`rf_win::dock::magnify`): by a smooth bell of the distance from the pointer to each icon's rest centre, up to 1.55
 //! times for the one under it (a setting: off / subtle 1.25 / full 1.55), standing on one baseline so they grow UP, over the glass's top
@@ -120,10 +120,14 @@ pub struct MiddleIsland {
     /// Where the pointer last was over the dock (logical px from the REST island's left edge); `None` before it first came. It stays
     /// where it was when the pointer leaves, so the bell shrinks away in place.
     pointer_x: Option<f32>,
-    /// Where the bell stands when it snaps to the icons (`dock_magnify_snap`), and the x the last frame was drawn with (a press
-    /// holds that one).
-    snap: magnify::Glide,
+    /// The x the last frame was drawn with (a press holds that one).
     bell_x: Option<f32>,
+    /// Files from another program are being dragged over the island: the magnification follows them (their moves come as drag moves,
+    /// not as mouse moves), and it goes when the drag ends or leaves.
+    drag_over: bool,
+    /// The app icon files are being held over, and the wait after which its window comes forward (as the Windows taskbar does: the
+    /// files can then be let go in the window). `None`: not over a running app.
+    drag_raise: Option<(usize, gpui_kit::Task<()>)>,
     /// The height of the bell over time (0 away, 1 over the dock).
     presence: Presence,
     /// Clock of the animation.
@@ -230,8 +234,9 @@ impl MiddleIsland {
             levels_peak: 0.0,
             icon_gen: 0,
             pointer_x: None,
-            snap: magnify::Glide::default(),
             bell_x: None,
+            drag_over: false,
+            drag_raise: None,
             presence: Presence::new(plan::hover_duration(crate::settings::animations())),
             t0: Instant::now(),
             reported: 0.0,
@@ -716,7 +721,50 @@ impl MiddleIsland {
 
     /// Files let go on an icon: an app opens them (`rf_win::dock::launch::open_files`), from a thread of their own; a running app the
     /// dock cannot start is given them through the program of its window. Anything else (a place) takes no files.
+    /// Files are held over the icon `ix` (`over`) or have left it. Over a running app that is not in front, its window comes forward after
+    /// `RAISE_WAIT_MS` there.
+    fn drag_over_icon(&mut self, ix: usize, over: bool, cx: &mut Context<Self>) {
+        const RAISE_WAIT_MS: u64 = 700;
+        if !over {
+            if self.drag_raise.as_ref().is_some_and(|(i, _)| *i == ix) {
+                self.drag_raise = None;
+            }
+            return;
+        }
+        if self.drag_raise.as_ref().is_some_and(|(i, _)| *i == ix) {
+            return;
+        }
+        let Some(DockItem::App(app)) = self.items.get(ix) else {
+            self.drag_raise = None;
+            return;
+        };
+        if app.windows.is_empty() {
+            self.drag_raise = None;
+            return;
+        }
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(RAISE_WAIT_MS)).await;
+            let _ = this.update(cx, |me, cx| {
+                // (still over it, and the files still in the hand)
+                if !me.drag_raise.as_ref().is_some_and(|(i, _)| *i == ix) || !cx.has_active_drag() {
+                    return;
+                }
+                let Some(DockItem::App(app)) = me.items.get(ix) else { return };
+                let foreground = rf_win::dock::foreground_root();
+                if let rf_win::dock::ClickAction::Raise(h) = model::click_action(&app.windows, foreground) {
+                    std::thread::spawn(move || rf_win::dock::launch::activate(h));
+                }
+            });
+        });
+        self.drag_raise = Some((ix, task));
+    }
+
     fn files_dropped(&mut self, ix: usize, files: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
+        // (the drag is over: the magnification that followed it goes)
+        if std::mem::take(&mut self.drag_over) {
+            self.pointer_left(cx);
+        }
+        self.drag_raise = None;
         let Some(DockItem::App(app)) = self.items.get(ix).cloned() else { return };
         if files.is_empty() {
             return;
@@ -832,11 +880,13 @@ impl MiddleIsland {
             return true;
         }
         let now = self.now_ms();
-        // (the bell is held, but where the pointer is stays known: when the icon is let go the bell goes on from there)
-        self.pointer_x = Some((f32::from(ev.position.x) - host::insets_on(self.mon, Kind::Middle, cx).margins[0]) / k);
-        if let Some(d) = self.drag.as_mut()
-            && d.moved(x, y, self.last_glass, &self.last_slots, now)
-        {
+        // the magnification follows the icon in the hand as it follows the pointer (the owner: "docktaki ikonlarıda drag drop ile
+        // yerlerini değiştirirken olsun büyüme"); it was held where the button went down
+        let bx = (f32::from(ev.position.x) - host::insets_on(self.mon, Kind::Middle, cx).margins[0]) / k;
+        let bell_moved = self.pointer_x.is_none_or(|old| (old - bx).abs() > 0.25);
+        self.pointer_x = Some(bx);
+        let slid = self.drag.as_mut().is_some_and(|d| d.moved(x, y, self.last_glass, &self.last_slots, now));
+        if slid || bell_moved {
             cx.notify();
         }
         true
@@ -847,6 +897,8 @@ impl MiddleIsland {
         let dur = if crate::settings::animations() { reorder::SLIDE_MS } else { 0 };
         let Some(drag) = reorder::Drag::begin(reorder::kinds(&self.items), ix, x, &self.last_slots, dur) else { return };
         self.drag = Some(drag);
+        // (the bell no longer stays where the button went down: it follows the icon in the hand)
+        self.frozen = None;
         self.settle = None;
         self.swallow_click = true;
         self.pressed_ix = None;
@@ -1016,6 +1068,12 @@ impl Render for MiddleIsland {
         // the palette follows the tone (what is behind the glass), the fill below it is the island's own while the glass is not running
         let (pal, fallback) = super::host::frame_palette(&self.glass, window);
         let strength = cx.global::<Settings>().dock_magnify.strength();
+        // (a file drag that ended or left the window without a drop on an icon: the magnification it held goes)
+        if self.drag_over && !cx.has_active_drag() {
+            self.drag_over = false;
+            self.drag_raise = None;
+            self.pointer_left(cx);
+        }
         let now = self.now_ms();
         if !self.presence.settled(now) && self.frozen.is_none() {
             // the bell is still coming in or going out: one more frame
@@ -1057,30 +1115,13 @@ impl Render for MiddleIsland {
             Some((x, h)) => (Some(x), h),
             None => (self.pointer_x, self.presence.value(now)),
         };
-        // snapping to the icons: the bell stands on the nearest icon's centre and slides to the next one (`magnify::Glide`); once the
-        // bell has gone, it forgets where it stood, so the next time it comes in where the pointer does
-        let snap_on = cx.global::<Settings>().dock_magnify_snap;
-        if !self.presence.is_in() && self.presence.settled(now) {
-            self.snap.reset();
-        }
-        let pointer = match (pointer, self.frozen.is_none() && snap_on) {
-            (Some(x), true) => {
-                if let Some(target) = magnify::snap_target(&self.slots, &rest, x) {
-                    let pace = if crate::settings::animations() { magnify::SNAP_MS } else { 0 };
-                    self.snap.aim(target, now, pace);
-                }
-                if self.snap.moving(now) {
-                    window.request_animation_frame();
-                }
-                Some(if self.snap.is_set() { self.snap.value(now) } else { x })
-            }
-            (p, _) => p,
-        };
         self.bell_x = pointer;
         // (no bell while the dock is thin; it comes in with the growth)
         let height = sq.bell(height);
         let frame = match pointer {
-            Some(x) if height > 0.0 && strength != magnify::Strength::Off => magnify::frame(&self.slots, &rest, rest_width, x, height, strength, rest_width + 2.0 * inset.growth),
+            Some(x) if height > 0.0 && strength != magnify::Strength::Off => {
+                magnify::frame(&self.slots, &rest, rest_width, x, height, strength, rest_width + 2.0 * inset.growth)
+            }
             _ => Frame::at_rest(&rest, rest_width),
         };
         let pic = super::thin::picture(&frame, &self.slots, inset.margins, BASELINE, &sq);
@@ -1281,6 +1322,11 @@ impl Render for MiddleIsland {
                         // files dragged from anywhere and let go on an app: the app opens them (issue 41); the icon takes the dock's
                         // quiet highlight while they are over it
                         .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_fill))
+                        // files held over a running app bring its window forward after a moment, to be let go there (the owner, trying
+                        // it: "videoyu telegrama sürükledim telegram hiç öne gelmedi")
+                        .on_drag_move::<ExternalPaths>(cx.listener(move |me, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
+                            me.drag_over_icon(ix, ev.bounds.contains(&ev.event.position), cx)
+                        }))
                         .on_drop(cx.listener(move |me, paths: &ExternalPaths, _, cx| me.files_dropped(ix, paths.paths().to_vec(), cx)))
                         .on_hover(cx.listener(move |me, on: &bool, _, cx| me.item_hover(ix, *on, cx)))
                         .on_mouse_up(MouseButton::Right, cx.listener(move |me, _, _, cx| me.right_click(ix, cx)))
@@ -1348,6 +1394,21 @@ impl Render for MiddleIsland {
                         if !*hovered {
                             me.pointer_left(cx);
                         }
+                    }))
+                    // files dragged over the dock: the icons grow under them as under the pointer (the owner: "sürükleme yaparken
+                    // büyüme animasyonu devam etsin")
+                    .on_drag_move::<ExternalPaths>(cx.listener(move |me, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
+                        if !ev.bounds.contains(&ev.event.position) {
+                            if std::mem::take(&mut me.drag_over) {
+                                me.pointer_left(cx);
+                            }
+                            return;
+                        }
+                        me.drag_over = true;
+                        let strength = cx.global::<Settings>().dock_magnify.strength();
+                        let k = host::size_on(mon, cx);
+                        super::thin::pointer_on_island(mon, cx);
+                        me.pointer_moved((f32::from(ev.event.position.x) - host::insets_on(mon, Kind::Middle, cx).margins[0]) / k, strength, false, cx)
                     }))
                     .children(cells),
             )

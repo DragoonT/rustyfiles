@@ -185,6 +185,9 @@ pub struct Workspace {
     preview_dock: preview_dock::Dock,
     /// Debounced settings write after a pane resize.
     _width_save: Option<Task<()>>,
+    /// The saved session this window holds (opened from it, or saved under it): its name stands at the far left of the tabs, so the
+    /// workspace is known at a glance (a Reddit suggestion, 2026-11-18). Shown only while a session of that name is saved.
+    session_name: Option<String>,
     palette: Option<Entity<crate::command_palette::CommandPalette>>,
     bulk: Option<Entity<crate::bulk_rename::BulkRename>>,
     /// Last window title / session snapshot we pushed (avoid redundant work every frame).
@@ -557,7 +560,12 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
     }
     crate::shell::desktop::open::mark("main: the line to open a place arrived");
     let (loc, select) = parse_launch(&msg);
-    let list = cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default();
+    // (with "open folders from other programs in a new window" on, no window takes it as a tab: issue 77)
+    let list = if cx.global::<crate::settings::Settings>().launch_in_new_window {
+        Vec::new()
+    } else {
+        cx.try_global::<OpenWorkspaces>().map(|g| g.0.clone()).unwrap_or_default()
+    };
     for (handle, ws) in list.into_iter().rev() {
         let Some(ws) = ws.upgrade() else { continue };
         // an Open/Save picker is another app's dialog: a launch never becomes one of its tabs
@@ -819,6 +827,7 @@ impl Workspace {
             preview_w: prefs.preview_width.clamp(PREVIEW_MIN, PREVIEW_MAX),
             preview_dock: preview_dock::Dock::new(prefs.preview_height),
             _width_save: None,
+            session_name: None,
             palette: None,
             bulk: None,
             last_title: String::new(),
@@ -844,6 +853,7 @@ impl Workspace {
             // a saved session asked for by name (`open_named_session`): its tabs, its split panes, its active tab
             None if PENDING_NAMED.lock().unwrap().is_some() => {
                 let named = PENDING_NAMED.lock().unwrap().take().unwrap_or_default();
+                this.session_name = Some(named.name.clone());
                 for t in &named.tabs {
                     this.open_tab(session_place(t), window, cx);
                 }
@@ -1230,6 +1240,31 @@ impl Workspace {
         self.activate(next.min(self.tabs.len() - 1), window, cx);
     }
 
+    /// Opens the saved session `name` in this window: its tabs (with their split panes and its active tab) take the place of the ones
+    /// that were open, which go to the closed tabs (Ctrl+Shift+T brings them back).
+    fn take_named_session(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(named) = cx.global::<crate::settings::Settings>().saved_sessions.iter().find(|s| s.name == name).cloned() else { return };
+        let old = self.tabs.len();
+        for t in &named.tabs {
+            self.open_tab(session_place(t), window, cx);
+        }
+        if self.tabs.len() == old {
+            // (a session with no tab leaves the window as it is)
+            return;
+        }
+        for (ix, loc, active) in panes_to_restore(&named.panes, self.tabs.len() - old) {
+            self.open_second_pane(old + ix, loc, active, window, cx);
+        }
+        for i in (0..old).rev() {
+            let tab = self.tabs.remove(i);
+            self.closed.push(tab.view().read(cx).location().clone());
+        }
+        self.tab_scrolled_to = None;
+        self.session_name = Some(named.name.clone());
+        let a = named.active.min(self.tabs.len() - 1);
+        self.activate(a, window, cx);
+    }
+
     fn close_other_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let keep = self.active;
         for i in (0..self.tabs.len()).rev() {
@@ -1240,6 +1275,14 @@ impl Workspace {
         }
         self.tab_scrolled_to = None;
         self.activate(0, window, cx);
+    }
+
+    /// A new tab asked for by the user (Ctrl+T, "+", the tab menu): Home, or the folder of the tab in front when the setting says so.
+    fn open_new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let here = (cx.global::<crate::settings::Settings>().new_tab_opens == crate::settings::NewTabOpens::Current)
+            .then(|| self.tabs.get(self.active).map(|t| t.view().read(cx).location().clone()))
+            .flatten();
+        self.open_tab(here.unwrap_or(Location::Home), window, cx);
     }
 
     /// Closes every tab and leaves one at Home (the closed ones can be reopened, Ctrl+Shift+T).
@@ -1283,7 +1326,8 @@ impl Workspace {
         let (tabs, panes) = self.session_now(cx);
         let active = self.active;
         let count = cx.global::<crate::settings::Settings>().saved_sessions.len();
-        let first = format!("{} {}", t!("Oturum"), count + 1);
+        let first = self.session_name.clone().unwrap_or_else(|| format!("{} {}", t!("Oturum"), count + 1));
+        let me = cx.entity().downgrade();
         crate::prompt::show(
             t!("Oturumu kaydet"),
             Some(t!("Bu penceredeki sekmeler bu adla kaydedilir; sekme menüsündeki Oturum aç ile yeni bir pencerede açılır.").to_string()),
@@ -1296,6 +1340,11 @@ impl Workspace {
                     }
                     let session = crate::settings::NamedSession { name: name.clone(), tabs: tabs.clone(), panes: panes.clone(), active };
                     crate::settings::update(cx, move |s| remember_named(&mut s.saved_sessions, session));
+                    // (the window now holds that session: its name goes beside the tabs)
+                    let _ = me.update(cx, |ws, cx| {
+                        ws.session_name = Some(name.clone());
+                        cx.notify();
+                    });
                     Ok(())
                 }),
                 crate::prompt::Button::cancel(),
@@ -1316,7 +1365,7 @@ impl Workspace {
         };
         let n = self.tabs.len();
         let items = vec![
-            Item::action(t!("Yeni sekme"), MenuIcon::Lucide(L::Plus), act(|ws, _, w, cx| ws.open_tab(Location::Home, w, cx))).hint("Ctrl+T"),
+            Item::action(t!("Yeni sekme"), MenuIcon::Lucide(L::Plus), act(|ws, _, w, cx| ws.open_new_tab(w, cx))).hint("Ctrl+T"),
             Item::action(t!("Sekmeyi çoğalt"), MenuIcon::Lucide(L::Copy), act(|ws, ix, w, cx| {
                 if let Some(loc) = ws.tabs.get(ix).map(|t| t.view().read(cx).location().clone()) {
                     ws.open_tab(loc, w, cx);
@@ -1353,7 +1402,17 @@ impl Workspace {
                 .iter()
                 .map(|n| {
                     let n = n.clone();
-                    Item::action(n.clone(), MenuIcon::None, move |_, cx| open_named_session(&n, cx))
+                    let me = me.clone();
+                    Item::action(n.clone(), MenuIcon::None, move |w, cx| {
+                        // (in this window when the setting says so: issue 41)
+                        if cx.global::<crate::settings::Settings>().sessions_in_this_window
+                            && let Some(ws) = me.upgrade()
+                        {
+                            ws.update(cx, |ws, cx| ws.take_named_session(&n, w, cx));
+                        } else {
+                            open_named_session(&n, cx);
+                        }
+                    })
                 })
                 .collect();
             let remove: Vec<Item> = saved
@@ -2001,6 +2060,28 @@ impl Workspace {
 
     fn render_titlebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let popups_open = self.popups_open(cx);
+        // the saved session this window holds, at the far left of the tabs
+        let session_label = self.session_name.clone().filter(|n| cx.global::<crate::settings::Settings>().saved_sessions.iter().any(|s| &s.name == n)).map(|name| {
+            h_flex()
+                .id("session-name")
+                .flex_shrink_0()
+                .max_w(px(180.))
+                .h(px(26.))
+                .mb(px(3.))
+                .ml_1()
+                .px_2()
+                .gap_1p5()
+                .items_center()
+                .rounded(theme::RADIUS_SM)
+                .bg(p.hover)
+                .border_1()
+                .border_color(p.border)
+                .text_xs()
+                .text_color(p.text_secondary)
+                .when(!popups_open, |d| d.tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Kayıtlı oturum")).build(w, cx)))
+                .child(Icon::new(L::Layers).size(px(13.)).text_color(p.accent))
+                .child(div().min_w_0().truncate().child(name))
+        });
         let mut tabs = h_flex()
             .id("tabs")
             // content-sized, shrinks (and scrolls) only when there is not enough room, so the
@@ -2149,7 +2230,7 @@ impl Workspace {
                 // the title bar arms a window move on mouse down: the slightest jitter then
                 // swallows the mouse up and the click never happens
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(|this, _, window, cx| this.open_tab(Location::Home, window, cx)));
+                .on_click(cx.listener(|this, _, window, cx| this.open_new_tab(window, cx)));
         // after the new tab has grown, the next "+" slides out from behind it
         let new_tab: AnyElement = match self.tab_anim.as_ref().map(|(_, s)| *s) {
             Some(serial) => {
@@ -2202,6 +2283,7 @@ impl Workspace {
                                 .on_click(cx.listener(|this, _, window, cx| this.tab_actions_menu(window, cx))),
                         ),
                     )
+                    .children(session_label)
                     .child(tabs)
                     .child(new_tab),
             )
@@ -2222,7 +2304,14 @@ impl Workspace {
                 return;
             }
         }
-        let w = if sidebar { w.clamp(SIDEBAR_MIN, SIDEBAR_MAX) } else { w.clamp(PREVIEW_MIN, PREVIEW_MAX) };
+        let w = if sidebar {
+            w.clamp(SIDEBAR_MIN, SIDEBAR_MAX)
+        } else {
+            // (the list keeps its minimum width beside the pane and the sidebar)
+            let side = if !self.sidebar_open { 0. } else if self.sidebar_rail { RAIL_W } else { self.sidebar_w };
+            let room = (self.viewport_w - side - rf_core::previewpane::LIST_MIN_W).max(PREVIEW_MIN);
+            w.clamp(PREVIEW_MIN, room.min(PREVIEW_MAX))
+        };
         let cur = if sidebar { &mut self.sidebar_w } else { &mut self.preview_w };
         if (*cur - w).abs() < 0.5 {
             return;
@@ -3393,7 +3482,9 @@ impl Workspace {
                 left = left.child(div().text_color(p.text).child(s));
             }
             if loading {
-                left = left.child(t!("Yükleniyor…"));
+                // a search says which step it is on (issue 67)
+                let text = tab.search_stage.map_or_else(|| t!("Yükleniyor…").to_string(), |s| s.text().to_string());
+                left = left.child(text);
                 busy = true;
             }
             // values being read for a sort or grouping by a property column
@@ -3525,7 +3616,9 @@ fn rail_peek_width(full: f32, shown: f32) -> f32 {
 const RAIL_SNAP: f32 = 120.;
 const SIDEBAR_MAX: f32 = 420.;
 const PREVIEW_MIN: f32 = 220.;
-const PREVIEW_MAX: f32 = 720.;
+/// The widest a saved preview width is taken. While it is dragged the pane may grow as far as the list keeps its own minimum width
+/// (720 px used to be the end: too narrow to read a whole PDF page, a user asked on Threads, 2026-11-18).
+const PREVIEW_MAX: f32 = 2400.;
 
 /// Drag payloads for the pane edges.
 #[derive(Clone)]
@@ -3606,7 +3699,7 @@ fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
         use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
         (GetKeyState(VK_CONTROL.0 as i32) < 0, GetKeyState(VK_SHIFT.0 as i32) < 0)
     };
-    let kind = rf_win::dnd::default_transfer(&sources, &dest, ctrl, shift);
+    let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
     crate::status_center::transfer(cx, kind, sources, dest);
 }
 
@@ -3889,7 +3982,7 @@ impl Render for Workspace {
             if was_glass {
                 self.stop_glass(window);
             }
-            window.set_background_appearance(theme::window_material(match backdrop {
+            window.set_background_appearance(theme::main_window_material(match backdrop {
                 BackdropPref::Mica => WindowBackgroundAppearance::MicaBackdrop,
                 BackdropPref::MicaAlt => WindowBackgroundAppearance::MicaAltBackdrop,
                 BackdropPref::Acrylic => WindowBackgroundAppearance::Blurred,
@@ -4325,7 +4418,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &GoHome, window, cx| this.navigate(Location::Home, window, cx)))
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.with_tab(cx, |v, cx| v.refresh(cx))))
             .on_action(cx.listener(|this, _: &ToggleHidden, _, cx| this.with_tab(cx, |v, cx| v.toggle_hidden(cx))))
-            .on_action(cx.listener(|this, _: &NewTab, window, cx| this.open_tab(Location::Home, window, cx)))
+            .on_action(cx.listener(|this, _: &NewTab, window, cx| this.open_new_tab(window, cx)))
             .on_action(cx.listener(|this, _: &NewWindow, window, cx| {
                 // New window at the current folder, offset from this one.
                 let loc = this.active_tab().read(cx).location().clone();

@@ -474,6 +474,15 @@ pub struct Settings {
     pub startup_pages: Vec<String>,
     /// Switch to tabs opened with Ctrl+click / middle click / "Open in new tab".
     pub focus_new_tab: bool,
+    /// What a new tab opens (Ctrl+T, the "+" button, the tab menu): Home (the default) or the folder of the tab in front (a Reddit
+    /// suggestion, 2026-11-18). Duplicating a tab keeps its folder either way.
+    pub new_tab_opens: NewTabOpens,
+    /// A folder opened from outside (Win+E, the desktop, another program) gets a window of its own instead of a tab in the newest
+    /// window (issue 77). Off by default.
+    pub launch_in_new_window: bool,
+    /// A saved session opened from the tab menu takes the place of this window's tabs (they can be reopened, Ctrl+Shift+T) instead of
+    /// opening a new window (issue 41). Off by default.
+    pub sessions_in_this_window: bool,
     /// New tabs start split in two panes.
     pub dual_pane_new_tabs: bool,
     /// Dual pane side by side (true) or stacked (false).
@@ -625,15 +634,14 @@ pub struct Settings {
     pub dock_side_tall: bool,
     /// The left island's search: a field, its button only, or none (`DockSearch`).
     pub dock_search: DockSearch,
+    /// A click on the dock's search field or button opens HyperSearch instead of the Start panel (issue 41). Off by default.
+    pub dock_search_hypersearch: bool,
     /// The tray icons of the right island stand closer together (18 px a cell instead of 24; off). Issue 34.
     pub dock_tray_compact: bool,
     /// Turning the mouse wheel over a running app's icon in the dock turns that app's own sound level up or down (on; issue 21).
     pub dock_scroll_volume: bool,
     /// How much the dock's icons grow under the pointer (off / subtle / full).
     pub dock_magnify: DockMagnify,
-    /// The growth snaps to the icon under the pointer and slides from icon to icon (`magnify::Glide`); off: it follows the pointer
-    /// smoothly, as the Mac's does. On by default (the owner, 2026-11-17: "ikon ikon daha clicky hissettirebilir mi").
-    pub dock_magnify_snap: bool,
     /// Resting the pointer on a running app's icon in the dock shows a preview of its windows (on; the dock itself is opt-in). Off: nothing.
     pub dock_hover_previews: bool,
     /// A right click on an app's icon in the dock opens the dock's own app menu (on). Off: it does nothing, as before.
@@ -700,6 +708,38 @@ pub struct Settings {
     /// All four corners of every monitor, black behind them (`rf_core::desktop::corners` for the bottom pixel row). An experiment
     /// the user asked for, to go with the dock's round islands.
     pub desktop_corner_radius: u8,
+
+    // ---- Ferry (sending files to rustyfiles on the network's other devices; Settings -> "Ferry"; crates/rf-nearby and ferry.rs)
+    /// Ferry runs in the main process (off by default: it listens on a network port, and Windows' firewall may ask about that).
+    pub ferry_enabled: bool,
+    /// Who sees this PC: nobody, its trusted devices (the default), or everyone. "Everyone" lasts ten minutes and a start reads it as
+    /// trusted devices.
+    pub ferry_visibility: FerryVisibility,
+    /// The name the other devices show for this PC; empty: the PC's own name.
+    pub ferry_name: String,
+    /// Where received files go; empty: the Downloads folder.
+    pub ferry_inbox: String,
+    /// Files from a trusted device are taken without asking, into the folder above (on).
+    pub ferry_auto_accept_trusted: bool,
+}
+
+/// Settings -> General: what a new tab opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum NewTabOpens {
+    #[default]
+    Home,
+    Current,
+}
+
+/// Settings -> Ferry: who sees this PC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum FerryVisibility {
+    Off,
+    #[default]
+    Trusted,
+    Everyone,
 }
 
 impl Default for Settings {
@@ -752,6 +792,9 @@ impl Default for Settings {
             startup: StartupPref::Continue,
             startup_pages: Vec::new(),
             focus_new_tab: false,
+            new_tab_opens: NewTabOpens::Home,
+            launch_in_new_window: false,
+            sessions_in_this_window: false,
             dual_pane_new_tabs: false,
             dual_pane_vertical: true,
             menu: MenuPrefs::default(),
@@ -828,10 +871,10 @@ impl Default for Settings {
             dock_status_hidden: Vec::new(),
             dock_side_tall: false,
             dock_search: DockSearch::Field,
+            dock_search_hypersearch: false,
             dock_tray_compact: false,
             dock_scroll_volume: true,
             dock_magnify: DockMagnify::Full,
-            dock_magnify_snap: true,
             dock_hover_previews: true,
             dock_app_menu: true,
             dock_thin_when_maximized: true,
@@ -857,6 +900,11 @@ impl Default for Settings {
             desktop_icon_control_panel: Default::default(),
             desktop_show_icons: Default::default(),
             desktop_corner_radius: 0,
+            ferry_enabled: false,
+            ferry_visibility: FerryVisibility::Trusted,
+            ferry_name: String::new(),
+            ferry_inbox: String::new(),
+            ferry_auto_accept_trusted: true,
         }
     }
 }
@@ -871,6 +919,9 @@ static THEME: AtomicU8 = AtomicU8::new(0);
 /// The surface value (0..=100) the palette reads on every call, cheaper than the settings struct.
 static HG_SURFACE: AtomicU8 = AtomicU8::new(HG_DEFAULT[4]);
 static SOLID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The chosen material is one a Windows without materials can still give the MAIN window (Acrylic, HyperGlass): see
+/// [`main_window_only`].
+static MAIN_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 static ANIM: AtomicU8 = AtomicU8::new(0);
 
@@ -887,7 +938,15 @@ pub fn animations() -> bool {
 /// "Solid" background material: the palette paints an opaque window background. Also on a Windows without materials, whatever the
 /// setting says and in every process (a side process that never loads these settings asks too).
 pub fn solid_backdrop() -> bool {
-    SOLID.load(Ordering::Relaxed) || !materials_available()
+    SOLID.load(Ordering::Relaxed) || (!materials_available() && !MAIN_ONLY.load(Ordering::Relaxed))
+}
+
+/// The materials a Windows without Windows 11's materials (Windows 10) still gives the MAIN window: Acrylic, as the old blur behind
+/// it, and HyperGlass, which rustyfiles draws itself. Menus and popups stay plain there, since the blur-behind of a popup covered its
+/// whole frame (issue 24). Mica is not among them: there it left the window see-through. Issue 78: a Windows 10 user found Acrylic
+/// right on their PC and asked for it and HyperGlass back.
+pub fn main_window_only(b: BackdropPref) -> bool {
+    matches!(b, BackdropPref::Acrylic | BackdropPref::Glass)
 }
 
 /// Whether Windows gives windows a material (Mica, Mica Alt, Acrylic): from Windows 11 22H2 on (`rf_win::osver`, issue 24). Where it
@@ -1001,7 +1060,7 @@ impl Settings {
     /// The material the windows really have: the chosen one, or "Solid" on a Windows without materials. The setting itself is left
     /// as it is (the same file may be read on a Windows 11 later).
     pub fn backdrop_in_use(&self) -> BackdropPref {
-        if materials_available() { self.backdrop } else { BackdropPref::Solid }
+        if materials_available() || main_window_only(self.backdrop) { self.backdrop } else { BackdropPref::Solid }
     }
 
     /// Brings settings written by older versions up to date.
@@ -1112,6 +1171,7 @@ impl Settings {
         });
         rf_core::format::set_decimal_sizes(self.decimal_sizes);
         SOLID.store(self.backdrop == BackdropPref::Solid, Ordering::Relaxed);
+        MAIN_ONLY.store(main_window_only(self.backdrop), Ordering::Relaxed);
         ANIM.store(self.animations as u8, Ordering::Relaxed);
         // HyperGlass: the engine redraws every glass window once when the look changes, and does nothing for the same look again
         HG_SURFACE.store(self.hg_surface.min(100), Ordering::Relaxed);
@@ -1187,6 +1247,8 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut Settings)) {
         // after the save: the dock process reads the file when it is told to reload
         crate::dock::control::sync_process(&s);
     });
+    // (Ferry follows its settings: started, stopped, started anew, or shown to others differently)
+    crate::ferry::apply(cx);
     cx.refresh_windows();
 }
 

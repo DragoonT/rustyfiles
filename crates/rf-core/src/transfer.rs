@@ -302,8 +302,9 @@ const BASE_W: f32 = 96.0 + 8.0 + 36.0;
 const BUTTONS_W: f32 = 56.0;
 const CHIP_W: f32 = 34.0;
 const TEXT_W: f32 = 150.0;
-const SPEED_W: f32 = 72.0;
-const ETA_W: f32 = 84.0;
+/// The strip's speed and remaining-time boxes: always this wide, so the numbers changing every moment do not push the rest around.
+pub const SPEED_W: f32 = 72.0;
+pub const ETA_W: f32 = 84.0;
 const GAP_W: f32 = 10.0;
 
 /// What fits in `avail` pixels. It gives way from the end: the time left first, then the speed,

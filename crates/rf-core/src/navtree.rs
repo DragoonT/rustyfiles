@@ -1432,6 +1432,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn following_opens_the_branch_one_listing_at_a_time_and_marks_the_folder() {
         let mut t = tree();
         let d = disk();
@@ -1458,6 +1460,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn following_a_drive_branch_opens_each_level_and_keeps_siblings_closed() {
         let mut t = tree();
         follow_all(&mut t, r"C:\Windows\System32", 0);
@@ -1495,6 +1499,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_folder_hidden_by_the_settings_ends_the_walk_at_its_parent() {
         let mut t = tree();
         let mut d = disk();
@@ -1531,6 +1537,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_folder_made_removed_or_renamed_inside_an_open_node_shows_up_and_goes() {
         let mut t = tree();
         follow_all(&mut t, r"C:\Users\ali\Documents\a", 0);
@@ -1581,6 +1589,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn only_open_nodes_are_watched_the_open_folders_branch_first_and_never_more_than_the_cap() {
         let mut t = tree();
         assert!(t.watch_set().is_empty(), "nothing open, nothing watched");
@@ -1632,6 +1642,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn reopening_a_branch_lists_it_and_the_open_folders_below_it_again() {
         let mut t = tree();
         follow_all(&mut t, r"C:\Windows\System32", 0);
@@ -1668,6 +1680,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_click_selects_that_very_row_even_when_the_folder_stands_in_the_tree_twice() {
         let mut t = tree();
         let c = id_of(&t, r"C:\");
@@ -1689,6 +1703,7 @@ mod tests {
 
     /// The star key opens the row's folder and the folders below it as their listings come in, a few levels deep.
     #[test]
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn the_star_opens_the_folders_below_as_they_are_listed() {
         let mut t = tree();
         let d = disk();
@@ -1730,6 +1745,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn the_keyboard_walks_opens_closes_and_navigates() {
         let mut t = tree();
         let d = disk();
@@ -1861,6 +1878,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn closed_branches_are_freed_above_the_budget_but_never_the_open_folders_branch() {
         let mut t = NavTree::new();
         t.budget_override = Some(20);
@@ -1901,6 +1920,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_case_only_rename_gives_what_is_open_below_it_the_new_spelling() {
         let mut t = tree();
         follow_all(&mut t, r"C:\Users\ali\Documents\a", 0);
@@ -1912,6 +1933,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn a_link_that_leads_back_up_cannot_make_the_walk_or_the_watches_loop() {
         let mut t = NavTree::new();
         t.set_roots(vec![root(r"C:\", "C", RootKind::Fixed)], 0);

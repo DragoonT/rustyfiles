@@ -163,6 +163,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn the_starter_rule_reads_like_the_example() {
         let r = rule(
             vec![Condition::Extension { list: vec!["jpg".into(), ".PNG".into()] }],
@@ -230,6 +232,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn paths_outside_the_home_are_shown_whole() {
         let home = PathBuf::from(r"C:\Users\Ali");
         assert_eq!(show_path(Path::new(r"D:\x"), Some(&home)), r"D:\x");

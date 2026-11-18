@@ -878,7 +878,7 @@ impl StartView {
             return;
         }
         self.sys_menu = false;
-        self.quiet();
+        // (the quiet time comes after the row's work, as in `app_menu_do`: "Terminal as administrator" checks `live()` itself)
         match act {
             Act::Uri(uri) => {
                 super::panel_parts::open_uri(uri);
@@ -909,6 +909,7 @@ impl StartView {
                 self.set_power(PowerMenu::Open, cx);
             }
         }
+        self.quiet();
         cx.notify();
     }
 
@@ -943,7 +944,9 @@ impl StartView {
             return;
         }
         let Some(m) = self.app_menu.take() else { return };
-        self.quiet();
+        // The quiet time starts AFTER the row's work: each of these checks `live()` itself, and with the quiet time set first that
+        // check said no, so the menu's rows did nothing at all (issue 76: "when I try to pin an application in the start menu,
+        // nothing happens").
         match item {
             AppMenuItem::Pin => self.toggle_pin(&m.app, cx),
             AppMenuItem::Admin => self.launch_app_as_admin(m.app, cx),
@@ -953,6 +956,7 @@ impl StartView {
                 }
             }
         }
+        self.quiet();
         cx.notify();
     }
 

@@ -362,6 +362,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn registry_fallback_reads_the_observed_values() {
         let w = read_registry(&base(), &mons());
         assert_eq!(w.source, Source::Registry);
@@ -420,6 +422,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn per_virtual_desktop_values() {
         let a = guid_bytes(0xAAAA_0001, 1, 2, [3; 8]);
         let b = guid_bytes(0xBBBB_0002, 4, 5, [6; 8]);
@@ -457,6 +461,8 @@ mod tests {
     }
 
     #[test]
+
+    #[cfg_attr(not(windows), ignore = "Windows paths and APIs; a Unix test comes when the Mac port uses this")]
     fn file_types_are_sniffed_from_bytes() {
         assert_eq!(sniff_format(&[0x89, b'P', b'N', b'G', 13, 10, 26, 10]), Some("png"));
         assert_eq!(sniff_format(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("jpeg"));

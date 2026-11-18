@@ -121,7 +121,15 @@ impl Render for ShelfView {
                 .text_xs()
                 .text_center()
                 .text_color(p.text_tertiary)
-                .child(crate::t!("Öğeleri sağ tık → \"Rafa ekle\" (Ctrl+Shift+S) ile buraya toplayın, sonra hepsini istediğiniz klasöre kopyalayın veya taşıyın."))
+                // (in a box as wide as the panel: as a bare child of the centring flex row the line kept its full length and ran out of
+                // the panel on both sides, issue 81)
+                .child(
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .whitespace_normal()
+                        .child(crate::t!("Öğeleri sağ tık → \"Rafa ekle\" (Ctrl+Shift+S) ile buraya toplayın, sonra hepsini istediğiniz klasöre kopyalayın veya taşıyın.")),
+                )
                 .into_any_element()
         } else {
             let mut list = v_flex().id("shelf-list").flex_1().overflow_y_scroll().gap_0p5();

@@ -224,7 +224,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join(FILE);
         let taskbar = || Some(["A", "B", "C"].iter().map(|n| pin_from_app(&app(n, true)).unwrap().to_pinned()).collect::<Vec<_>>());
-        let order = |path: &std::path::Path| effective(path, |_| true).unwrap().into_iter().map(|p| p.name).collect::<Vec<_>>();
+        let order = |path: &std::path::Path| match effective(path, |_| true) { crate::dock::ownpins::Effective::Own(v) => v, other => panic!("{other:?}") }.into_iter().map(|p| p.name).collect::<Vec<_>>();
 
         // the first change seeds the file from the taskbar and puts C in front
         let first = existing(&[2, 0, 1]);

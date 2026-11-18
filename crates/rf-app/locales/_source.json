@@ -243,7 +243,8 @@
   "id": "c0ab3205",
   "key": "Yenile",
   "tr": "Yenile",
-  "en": "Refresh"
+  "en": "Refresh",
+  "note": "a button: look for devices on the network again"
  },
  {
   "id": "021302a8",
@@ -4005,7 +4006,8 @@
   "id": "9a5d6be5",
   "key": "Varsayılan",
   "tr": "Varsayılan",
-  "en": "Default"
+  "en": "Default",
+  "note": "a button: go back to the default folder"
  },
  {
   "id": "057c4528",
@@ -5463,7 +5465,8 @@
   "id": "4849cec4",
   "key": "ve",
   "tr": "ve",
-  "en": "and"
+  "en": "and",
+  "note": "the word 'and' joining a file name and a count, as in 'photo.jpg and 3 items'"
  },
  {
   "id": "356eb895",
@@ -10520,7 +10523,8 @@
   "id": "03619c19",
   "key": "Reddet",
   "tr": "Reddet",
-  "en": "Deny"
+  "en": "Deny",
+  "note": "a button: decline files another device offers"
  },
  {
   "id": "662fadf1",
@@ -11638,5 +11642,530 @@
   "key": "Sağ adadaki tepsi simgeleri birbirine daha yakın durur; aynı yere daha çok simge sığar.",
   "tr": "Sağ adadaki tepsi simgeleri birbirine daha yakın durur; aynı yere daha çok simge sığar.",
   "en": "The tray icons of the right island stand closer together; more icons fit in the same room."
+ },
+ {
+  "id": "d8f517bd",
+  "key": "rustyfiles'ı yeniden başlat",
+  "tr": "rustyfiles'ı yeniden başlat",
+  "en": "Restart rustyfiles"
+ },
+ {
+  "id": "dac24e1d",
+  "key": "Boşken son kullanılanları göster",
+  "tr": "Boşken son kullanılanları göster",
+  "en": "Show recent items when empty"
+ },
+ {
+  "id": "e59d4182",
+  "key": "Arama kutusu",
+  "tr": "Arama kutusu",
+  "en": "Search box",
+  "note": "a choice for how the dock shows its search: as a text box"
+ },
+ {
+  "id": "768be356",
+  "key": "Siyah (OLED)",
+  "tr": "Siyah (OLED)",
+  "en": "Black (OLED)",
+  "note": "a colour theme: pure black background, for OLED screens"
+ },
+ {
+  "id": "4362d909",
+  "key": "Dizinde aranıyor…",
+  "tr": "Dizinde aranıyor…",
+  "en": "Searching the index…"
+ },
+ {
+  "id": "bd4e7db8",
+  "key": "Windows Search'e soruluyor…",
+  "tr": "Windows Search'e soruluyor…",
+  "en": "Asking Windows Search…"
+ },
+ {
+  "id": "b5c31a25",
+  "key": "Windows Search cevap vermedi, disk taranıyor…",
+  "tr": "Windows Search cevap vermedi, disk taranıyor…",
+  "en": "Windows Search did not answer, scanning the disk…"
+ },
+ {
+  "id": "d9440a71",
+  "key": "Disk taranıyor…",
+  "tr": "Disk taranıyor…",
+  "en": "Scanning the disk…"
+ },
+ {
+  "id": "df5cca29",
+  "key": "Uygulama: yakın zamanlar \"5 dakika önce\", eskileri Windows'un biçiminde; Sistem: her zaman Windows'un tarih ve saat biçimi; Evrensel: 2026-11-05 13:45",
+  "tr": "Uygulama: yakın zamanlar \"5 dakika önce\", eskileri Windows'un biçiminde; Sistem: her zaman Windows'un tarih ve saat biçimi; Evrensel: 2026-11-05 13:45",
+  "en": "Application: recent times as \"5 min ago\", older ones in Windows' format; System: always Windows' date and time format; Universal: 2026-11-05 13:45"
+ },
+ {
+  "id": "0df8814b",
+  "key": "Oturum",
+  "tr": "Oturum",
+  "en": "Session",
+  "note": "a saved set of tabs that can be opened again later (a heading in the tab menu), not a login session"
+ },
+ {
+  "id": "f38b2396",
+  "key": "Oturumu kaydet",
+  "tr": "Oturumu kaydet",
+  "en": "Save session",
+  "note": "a saved set of tabs (see \"Session\"): saves this window's tabs under a name"
+ },
+ {
+  "id": "32894336",
+  "key": "Oturumu kaydet…",
+  "tr": "Oturumu kaydet…",
+  "en": "Save session…",
+  "note": "a saved set of tabs (see \"Session\"): opens a box to name it"
+ },
+ {
+  "id": "63e26eeb",
+  "key": "Bu penceredeki sekmeler bu adla kaydedilir; sekme menüsündeki Oturum aç ile yeni bir pencerede açılır.",
+  "tr": "Bu penceredeki sekmeler bu adla kaydedilir; sekme menüsündeki Oturum aç ile yeni bir pencerede açılır.",
+  "en": "This window's tabs are saved under this name; Open session in the tab menu opens them in a new window."
+ },
+ {
+  "id": "b34ec580",
+  "key": "Bir ad yazın.",
+  "tr": "Bir ad yazın.",
+  "en": "Type a name."
+ },
+ {
+  "id": "8736ac6a",
+  "key": "Oturum aç",
+  "tr": "Oturum aç",
+  "en": "Open session",
+  "note": "a saved set of tabs (see \"Session\"): opens it in a new window"
+ },
+ {
+  "id": "12ca0ab2",
+  "key": "Oturumu sil",
+  "tr": "Oturumu sil",
+  "en": "Delete session",
+  "note": "a saved set of tabs (see \"Session\"): removes it from the list"
+ },
+ {
+  "id": "029b1203",
+  "key": "Yalnızca simge",
+  "tr": "Yalnızca simge",
+  "en": "Icon only",
+  "note": "a choice for how the dock shows its search: only a magnifier icon, no box"
+ },
+ {
+  "id": "59fecfec",
+  "key": "Sol adadaki arama: bir kutu, yalnızca simgesi ya da hiç. Logo Başlat'ı yine açar.",
+  "tr": "Sol adadaki arama: bir kutu, yalnızca simgesi ya da hiç. Logo Başlat'ı yine açar.",
+  "en": "The left island's search: a box, its icon only, or none. The logo still opens Start."
+ },
+ {
+  "id": "19933c6f",
+  "key": "Kapalıyken HyperSearch bir şey yazılana kadar boş açılır",
+  "tr": "Kapalıyken HyperSearch bir şey yazılana kadar boş açılır",
+  "en": "When off, HyperSearch stays empty until something is typed"
+ },
+ {
+  "id": "4317c020",
+  "key": "Önemli güncelleme: rustyfiles {v}",
+  "tr": "Önemli güncelleme: rustyfiles {v}",
+  "en": "Important update: rustyfiles {v}"
+ },
+ {
+  "id": "20d40d60",
+  "key": "Önemli düzeltmeler içeriyor. Şimdi yeniden başlatın.",
+  "tr": "Önemli düzeltmeler içeriyor. Şimdi yeniden başlatın.",
+  "en": "It brings important fixes. Restart now."
+ },
+ {
+  "id": "dabd936b",
+  "key": "Arama HyperSearch'ü açar",
+  "tr": "Arama HyperSearch'ü açar",
+  "en": "Search opens HyperSearch"
+ },
+ {
+  "id": "03dab241",
+  "key": "Dock'taki arama kutusuna ya da simgesine tıklamak Başlat yerine HyperSearch'ü açar. Logo Başlat'ı yine açar.",
+  "tr": "Dock'taki arama kutusuna ya da simgesine tıklamak Başlat yerine HyperSearch'ü açar. Logo Başlat'ı yine açar.",
+  "en": "A click on the dock's search box or icon opens HyperSearch instead of Start. The logo still opens Start."
+ },
+ {
+  "id": "29358266",
+  "key": "Diğer programlardan açılan klasörler yeni pencerede açılsın",
+  "tr": "Diğer programlardan açılan klasörler yeni pencerede açılsın",
+  "en": "Open folders from other programs in a new window"
+ },
+ {
+  "id": "23e9789e",
+  "key": "Win+E, masaüstü ya da başka bir program bir klasör açtığında açık pencerede yeni sekme yerine yeni bir pencere açılır.",
+  "tr": "Win+E, masaüstü ya da başka bir program bir klasör açtığında açık pencerede yeni sekme yerine yeni bir pencere açılır.",
+  "en": "When Win+E, the desktop or another program opens a folder, it gets a new window instead of a new tab in the open window."
+ },
+ {
+  "id": "f4191aa7",
+  "key": "Kayıtlı oturumlar bu pencerede açılsın",
+  "tr": "Kayıtlı oturumlar bu pencerede açılsın",
+  "en": "Open saved sessions in this window"
+ },
+ {
+  "id": "1fdf6441",
+  "key": "Sekme menüsünden açılan oturum, yeni pencere yerine bu penceredeki sekmelerin yerini alır (kapanan sekmeler Ctrl+Shift+T ile geri gelir).",
+  "tr": "Sekme menüsünden açılan oturum, yeni pencere yerine bu penceredeki sekmelerin yerini alır (kapanan sekmeler Ctrl+Shift+T ile geri gelir).",
+  "en": "A session opened from the tab menu replaces this window's tabs instead of opening a new window (the closed tabs come back with Ctrl+Shift+T)."
+ },
+ {
+  "id": "1f9abf3e",
+  "key": "Arşivden çıkarılamadı",
+  "tr": "Arşivden çıkarılamadı",
+  "en": "Could not extract it from the archive"
+ },
+ {
+  "id": "b390b9a1",
+  "key": "Bu Windows sürümünde malzeme yalnızca ana pencereye uygulanır; menüler ve açılır pencereler düz kalır.",
+  "tr": "Bu Windows sürümünde malzeme yalnızca ana pencereye uygulanır; menüler ve açılır pencereler düz kalır.",
+  "en": "On this version of Windows the material is for the main window only; menus and pop-ups stay plain."
+ },
+ {
+  "id": "a7729d22",
+  "key": "Ferry ile alınıyor",
+  "tr": "Ferry ile alınıyor",
+  "en": "Receiving with Ferry",
+  "note": "a progress title; 'Ferry' is the feature's name and stays as it is"
+ },
+ {
+  "id": "93f617e4",
+  "key": "Ferry ile gönderiliyor",
+  "tr": "Ferry ile gönderiliyor",
+  "en": "Sending with Ferry",
+  "note": "a progress title; 'Ferry' is the feature's name and stays as it is"
+ },
+ {
+  "id": "4cc97246",
+  "key": "Ferry ile gönder",
+  "tr": "Ferry ile gönder",
+  "en": "Send with Ferry",
+  "note": "menu item; 'Ferry' is the feature's name and stays as it is"
+ },
+ {
+  "id": "fc061e36",
+  "key": "O cihaz yalnızca güvenilir cihazlarından dosya alıyor. Önce eşleştirin.",
+  "tr": "O cihaz yalnızca güvenilir cihazlarından dosya alıyor. Önce eşleştirin.",
+  "en": "That device only takes files from its trusted devices. Pair with it first."
+ },
+ {
+  "id": "042f5fe1",
+  "key": "Karşı taraf reddetti.",
+  "tr": "Karşı taraf reddetti.",
+  "en": "The other device declined."
+ },
+ {
+  "id": "3807d101",
+  "key": "Cihaz yanıt vermedi.",
+  "tr": "Cihaz yanıt vermedi.",
+  "en": "The device did not answer."
+ },
+ {
+  "id": "e9f27745",
+  "key": "Bir dosya bozuk geldi. Yeniden gönderin: kalan kısım kaldığı yerden gelir.",
+  "tr": "Bir dosya bozuk geldi. Yeniden gönderin: kalan kısım kaldığı yerden gelir.",
+  "en": "A file arrived damaged. Send again: the rest picks up where it stopped."
+ },
+ {
+  "id": "a4bdd8ed",
+  "key": "Aktarım yarıda kaldı.",
+  "tr": "Aktarım yarıda kaldı.",
+  "en": "The transfer stopped partway."
+ },
+ {
+  "id": "c24c9952",
+  "key": "dosya göndermek istiyor",
+  "tr": "dosya göndermek istiyor",
+  "en": "wants to send you files"
+ },
+ {
+  "id": "569c9389",
+  "key": "Kabul et",
+  "tr": "Kabul et",
+  "en": "Accept",
+  "note": "a button: accept files another device offers"
+ },
+ {
+  "id": "37adb9f6",
+  "key": "Eşleştir",
+  "tr": "Eşleştir",
+  "en": "Pair",
+  "note": "a button: pair with another device (like Bluetooth pairing), not 'match'"
+ },
+ {
+  "id": "2de4c016",
+  "key": "İki cihazda da aynı kodun göründüğünden emin olun. Eşleşen cihazlar birbirine sormadan dosya gönderebilir.",
+  "tr": "İki cihazda da aynı kodun göründüğünden emin olun. Eşleşen cihazlar birbirine sormadan dosya gönderebilir.",
+  "en": "Make sure both devices show the same code. Paired devices can send each other files without asking."
+ },
+ {
+  "id": "30d23dc2",
+  "key": "Yakında cihaz yok",
+  "tr": "Yakında cihaz yok",
+  "en": "No devices nearby"
+ },
+ {
+  "id": "b78f4720",
+  "key": "Ferry ayarları…",
+  "tr": "Ferry ayarları…",
+  "en": "Ferry settings…",
+  "note": "menu item; 'Ferry' is the feature's name and stays as it is"
+ },
+ {
+  "id": "9b090a49",
+  "key": "Ferry'yi kullan",
+  "tr": "Ferry'yi kullan",
+  "en": "Use Ferry",
+  "note": "a switch; 'Ferry' is the feature's name and stays as it is"
+ },
+ {
+  "id": "067fc2a0",
+  "key": "Aynı ağdaki rustyfiles'lar birbirini bulur; dosyalar şifreli olarak doğrudan cihazdan cihaza gider, sunucu ya da hesap yok. Açınca Windows Güvenlik Duvarı rustyfiles'ın ağı kullanmasına izin vermenizi isteyebilir: özel ağlar için izin verin.",
+  "tr": "Aynı ağdaki rustyfiles'lar birbirini bulur; dosyalar şifreli olarak doğrudan cihazdan cihaza gider, sunucu ya da hesap yok. Açınca Windows Güvenlik Duvarı rustyfiles'ın ağı kullanmasına izin vermenizi isteyebilir: özel ağlar için izin verin.",
+  "en": "rustyfiles on the same network find each other; files go encrypted straight from device to device, with no server or account. When you turn it on, Windows Firewall may ask you to let rustyfiles use the network: allow it for private networks."
+ },
+ {
+  "id": "0504d607",
+  "key": "Yakındaki cihazlar aranamıyor",
+  "tr": "Yakındaki cihazlar aranamıyor",
+  "en": "Can't look for nearby devices"
+ },
+ {
+  "id": "b256768b",
+  "key": "Bu bilgisayarı kimler görebilir",
+  "tr": "Bu bilgisayarı kimler görebilir",
+  "en": "Who can see this PC"
+ },
+ {
+  "id": "1602474a",
+  "key": "Herkes seçeneği 10 dakika sürer, sonra yalnız güvenilir cihazlara döner. Eşleşmemiş bir cihazdan dosya almak ya da onunla eşleşmek için Herkes seçili olmalı.",
+  "tr": "Herkes seçeneği 10 dakika sürer, sonra yalnız güvenilir cihazlara döner. Eşleşmemiş bir cihazdan dosya almak ya da onunla eşleşmek için Herkes seçili olmalı.",
+  "en": "Everyone lasts 10 minutes, then it goes back to trusted devices only. To take files from a device you haven't paired with, or to pair with one, choose Everyone."
+ },
+ {
+  "id": "f950a0a7",
+  "key": "Hiç kimse",
+  "tr": "Hiç kimse",
+  "en": "No one",
+  "note": "visibility choice: no device on the network can see this computer"
+ },
+ {
+  "id": "83649501",
+  "key": "Yalnız güvenilir cihazlar",
+  "tr": "Yalnız güvenilir cihazlar",
+  "en": "Trusted devices only"
+ },
+ {
+  "id": "11f9cfba",
+  "key": "Herkes (10 dakika)",
+  "tr": "Herkes (10 dakika)",
+  "en": "Everyone (10 minutes)",
+  "note": "visibility choice: every device on the network can see this computer, for 10 minutes"
+ },
+ {
+  "id": "d95775ca",
+  "key": "Cihaz adı",
+  "tr": "Cihaz adı",
+  "en": "Device name"
+ },
+ {
+  "id": "0e9713e0",
+  "key": "Diğer cihazlar bu bilgisayarı bu adla görür. Boş bırakırsanız bilgisayarın adı kullanılır.",
+  "tr": "Diğer cihazlar bu bilgisayarı bu adla görür. Boş bırakırsanız bilgisayarın adı kullanılır.",
+  "en": "Other devices see this PC by this name. Leave it empty to use the computer's name."
+ },
+ {
+  "id": "fa4a75c3",
+  "key": "Gelen dosyalar",
+  "tr": "Gelen dosyalar",
+  "en": "Received files",
+  "note": "the folder where files received from other devices are saved"
+ },
+ {
+  "id": "2ebe6243",
+  "key": "Gelen dosyaların klasörünü seçin",
+  "tr": "Gelen dosyaların klasörünü seçin",
+  "en": "Choose the folder for received files"
+ },
+ {
+  "id": "f2ad9bf3",
+  "key": "Güvenilir cihazlardan sormadan al",
+  "tr": "Güvenilir cihazlardan sormadan al",
+  "en": "Take files from trusted devices without asking"
+ },
+ {
+  "id": "1236e674",
+  "key": "Eşleştirdiğiniz cihazların gönderdikleri doğrudan Gelen dosyalar klasörüne iner; diğer cihazlar her seferinde sorulur.",
+  "tr": "Eşleştirdiğiniz cihazların gönderdikleri doğrudan Gelen dosyalar klasörüne iner; diğer cihazlar her seferinde sorulur.",
+  "en": "Files from devices you paired with go straight to the Received files folder; other devices are asked about every time."
+ },
+ {
+  "id": "065bb6aa",
+  "key": "Yakındaki cihazlar",
+  "tr": "Yakındaki cihazlar",
+  "en": "Nearby devices"
+ },
+ {
+  "id": "20cff639",
+  "key": "Henüz cihaz yok",
+  "tr": "Henüz cihaz yok",
+  "en": "No devices yet"
+ },
+ {
+  "id": "48a5bed4",
+  "key": "Diğer cihazda rustyfiles açık ve Ferry'si açık olmalı. Eşleşmemiş bir cihaz yalnızca görünürlüğü Herkes iken listelenir.",
+  "tr": "Diğer cihazda rustyfiles açık ve Ferry'si açık olmalı. Eşleşmemiş bir cihaz yalnızca görünürlüğü Herkes iken listelenir.",
+  "en": "rustyfiles must be open on the other device, with Ferry on. A device you haven't paired with is listed only while its visibility is Everyone."
+ },
+ {
+  "id": "6c403ff8",
+  "key": "Güvenilir",
+  "tr": "Güvenilir",
+  "en": "Trusted",
+  "note": "a device label: this device is trusted (paired)"
+ },
+ {
+  "id": "a492319a",
+  "key": "Güvenilir cihazlar",
+  "tr": "Güvenilir cihazlar",
+  "en": "Trusted devices",
+  "note": "the list of devices paired with this one"
+ },
+ {
+  "id": "68d86bcb",
+  "key": "Unut",
+  "tr": "Unut",
+  "en": "Forget",
+  "note": "a button: forget (unpair) a trusted device"
+ },
+ {
+  "id": "0a8ba63b",
+  "key": "O cihazda yanıt bekleyen bir teklifiniz zaten var.",
+  "tr": "O cihazda yanıt bekleyen bir teklifiniz zaten var.",
+  "en": "You already have an offer waiting on that device."
+ },
+ {
+  "id": "e655d9bd",
+  "key": "Eşleşmemiş cihaz: adı doğrulanamaz",
+  "tr": "Eşleşmemiş cihaz: adı doğrulanamaz",
+  "en": "Unpaired device: its name can't be verified"
+ },
+ {
+  "id": "cf1eae61",
+  "key": "Kod:",
+  "tr": "Kod:",
+  "en": "Code:",
+  "note": "label before a six-digit pairing code shown on both devices"
+ },
+ {
+  "id": "dc801c91",
+  "key": "dosya gönderdi",
+  "tr": "dosya gönderdi",
+  "en": "sent you files"
+ },
+ {
+  "id": "633195f9",
+  "key": "Görmek için tıklayın",
+  "tr": "Görmek için tıklayın",
+  "en": "Click to see them"
+ },
+ {
+  "id": "43ce1f24",
+  "key": "Cihazları yeniden ara",
+  "tr": "Cihazları yeniden ara",
+  "en": "Look for devices again"
+ },
+ {
+  "id": "2aec6260",
+  "key": "Ağdaki cihazlar kendiliğinden bulunur; yeni açılan bir cihaz görünmüyorsa yeniden arayın.",
+  "tr": "Ağdaki cihazlar kendiliğinden bulunur; yeni açılan bir cihaz görünmüyorsa yeniden arayın.",
+  "en": "Devices on the network are found by themselves; if one that just came on doesn't show up, look again."
+ },
+ {
+  "id": "3717d319",
+  "key": "10 dakika herkese görün",
+  "tr": "10 dakika herkese görün",
+  "en": "Show to everyone for 10 minutes"
+ },
+ {
+  "id": "d073f7af",
+  "key": "Diğer cihazda rustyfiles açık ve Ferry'si açık olmalı. İki cihaz henüz eşleşmediyse en az birinin görünürlüğü Herkes olmalı.",
+  "tr": "Diğer cihazda rustyfiles açık ve Ferry'si açık olmalı. İki cihaz henüz eşleşmediyse en az birinin görünürlüğü Herkes olmalı.",
+  "en": "rustyfiles must be open on the other device, with Ferry on. If the two haven't paired yet, at least one must be visible to Everyone."
+ },
+ {
+  "id": "e2e00af6",
+  "key": "Ölçülüyor…",
+  "tr": "Ölçülüyor…",
+  "en": "Measuring…",
+  "note": "a button label while a network speed test runs"
+ },
+ {
+  "id": "e3d34600",
+  "key": "Hızı ölç",
+  "tr": "Hızı ölç",
+  "en": "Test speed",
+  "note": "a button: measure the network speed to another device"
+ },
+ {
+  "id": "77af2c39",
+  "key": "hız ölçülüyor…",
+  "tr": "hız ölçülüyor…",
+  "en": "testing speed…",
+  "note": "status text while a network speed test runs"
+ },
+ {
+  "id": "ce1cbb7f",
+  "key": "Ölçülemedi",
+  "tr": "Ölçülemedi",
+  "en": "Couldn't measure",
+  "note": "the speed test failed (followed by the reason)"
+ },
+ {
+  "id": "87c66ee5",
+  "key": "ağ",
+  "tr": "ağ",
+  "en": "network",
+  "note": "a network (in 'about 52 MB/s (network)'), the kind of a device's network link"
+ },
+ {
+  "id": "3026d95c",
+  "key": "O cihazla az önce hız ölçüldü; birkaç saniye sonra yeniden deneyin.",
+  "tr": "O cihazla az önce hız ölçüldü; birkaç saniye sonra yeniden deneyin.",
+  "en": "The speed to that device was just tested; try again in a few seconds."
+ },
+ {
+  "id": "0382ff55",
+  "key": "dosya gönderiyor",
+  "tr": "dosya gönderiyor",
+  "en": "is sending you files"
+ },
+ {
+  "id": "fd654a36",
+  "key": "Kayıtlı oturum",
+  "tr": "Kayıtlı oturum",
+  "en": "Saved session"
+ },
+ {
+  "id": "718edd4d",
+  "key": "Yeni sekme şunu açar",
+  "tr": "Yeni sekme şunu açar",
+  "en": "A new tab opens"
+ },
+ {
+  "id": "40b27c00",
+  "key": "Ctrl+T, + düğmesi ve sekme menüsü. Sekmeyi çoğalt (Ctrl+Shift+K) her zaman aynı klasörü açar.",
+  "tr": "Ctrl+T, + düğmesi ve sekme menüsü. Sekmeyi çoğalt (Ctrl+Shift+K) her zaman aynı klasörü açar.",
+  "en": "Ctrl+T, the + button and the tab menu. Duplicate tab (Ctrl+Shift+K) always opens the same folder."
+ },
+ {
+  "id": "25c0e2a2",
+  "key": "Açık olan klasör",
+  "tr": "Açık olan klasör",
+  "en": "The current folder"
  }
 ]

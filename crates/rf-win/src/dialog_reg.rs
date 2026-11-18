@@ -42,6 +42,23 @@ pub fn disable(classes_root: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The DLL paths the two classes are registered with now (ours or someone else's).
+pub fn registered_paths(classes_root: &str) -> Vec<String> {
+    CLSIDS.iter().filter_map(|c| registered(classes_root, c)).collect()
+}
+
+/// Whether either class is registered with our DLL (working or not).
+pub fn any_ours(classes_root: &str) -> bool {
+    CLSIDS.iter().any(|c| registered(classes_root, c).is_some_and(|p| ours(&p)))
+}
+
+/// Removes a registration of ours whose DLL no longer exists: on it every app's Open/Save dialog fails, and some apps crash
+/// (issue 82). Windows' own dialog comes back. True when it removed one.
+pub fn drop_dangling(classes_root: &str) -> bool {
+    let dangling = CLSIDS.iter().any(|c| registered(classes_root, c).is_some_and(|p| ours(&p) && !std::path::Path::new(&p).exists()));
+    dangling && disable(classes_root).is_ok()
+}
+
 pub fn is_enabled(classes_root: &str) -> bool {
     CLSIDS.iter().all(|c| registered(classes_root, c).is_some_and(|p| ours(&p)))
 }
@@ -84,6 +101,13 @@ mod tests {
         assert!(heal(&moved, &root));
         assert_eq!(registered(&root, CLSIDS[0]).as_deref(), Some(moved.as_str()));
         assert!(!heal(&moved, &root));
+        // the DLL vanished (a virus scanner, a broken update): the registration goes rather than breaking every app's dialog
+        assert!(!drop_dangling(&root));
+        std::fs::remove_file(&moved).unwrap();
+        assert!(drop_dangling(&root));
+        assert!(!any_ours(&root) && registered_paths(&root).is_empty());
+        std::fs::write(&moved, b"x").unwrap();
+        enable(&moved, &root).unwrap();
         disable(&root).unwrap();
         assert!(!is_enabled(&root));
         // someone else's server stays

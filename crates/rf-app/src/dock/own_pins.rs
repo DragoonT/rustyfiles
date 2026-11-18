@@ -22,10 +22,26 @@ pub fn path() -> Option<PathBuf> {
 /// The pins the island shows: the dock's own list when it is in force, else the Windows taskbar's. Blocks (disk, the shell): a worker
 /// thread.
 pub fn effective_pins() -> Vec<PinnedApp> {
-    if let Some(own) = path().and_then(|p| ownpins::effective(&p, |f| f.exists())) {
-        return own;
+    // the list the island showed last; it stays while the file cannot be read for a moment
+    static LAST_OWN: std::sync::Mutex<Option<Vec<PinnedApp>>> = std::sync::Mutex::new(None);
+    let Some(p) = path() else { return rf_win::dock::pins::read_pins() };
+    // (a pinned app that updated itself into a new version folder is followed there first, or it would drop off the island)
+    ownpins::heal(&p);
+    let mut last = LAST_OWN.lock().unwrap_or_else(|e| e.into_inner());
+    match ownpins::effective(&p, |f| f.exists()) {
+        ownpins::Effective::Own(own) => {
+            *last = Some(own.clone());
+            own
+        }
+        ownpins::Effective::Unreadable => {
+            log::warn!("dock: {} could not be read; the pins shown before stay", p.display());
+            last.clone().unwrap_or_else(rf_win::dock::pins::read_pins)
+        }
+        ownpins::Effective::Taskbar => {
+            *last = None;
+            rf_win::dock::pins::read_pins()
+        }
     }
-    rf_win::dock::pins::read_pins()
 }
 
 /// The middle islands (one for each monitor's dock), so that a change of the list shows at once instead of at the island's next look

@@ -394,7 +394,8 @@ impl Render for LeftIsland {
             })
             .when(!field_hidden, |d| {
                 d.on_click(move |_, _, cx| {
-                    if own_start(cx) {
+                    // (HyperSearch when the setting says so: issue 41)
+                    if own_start(cx) && !cx.global::<crate::settings::Settings>().dock_search_hypersearch {
                         super::panel::toggle_start_on(mon, cx);
                     } else {
                         super::actions::open_quick_search();

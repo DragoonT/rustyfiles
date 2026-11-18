@@ -1,0 +1,25 @@
+[package]
+name = "rf-nearby"
+description = "Send files to rustyfiles on other devices in the same network: discovery (mDNS), pairing and transfer (QUIC). Platform-free: Windows, macOS, Linux."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "fs", "io-util", "macros"] }
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
+mdns-sd = "0.13"
+blake3 = "1"
+unicode-normalization = "0.1"
+ring = "0.17"
+
+[dev-dependencies]
+tempfile = "3"

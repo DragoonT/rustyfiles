@@ -22,8 +22,14 @@ hadris-fs.workspace = true
 hadris-io.workspace = true
 hadris-udf.workspace = true
 hadris-storage.workspace = true
+chrono.workspace = true
 
+[target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_System_Time", "Win32_Globalization", "Win32_System_Registry", "Win32_Foundation"] }
+
+[target.'cfg(not(windows))'.dependencies]
+# OEM code pages (CP437, CP857, ...) for ZIP names without the UTF-8 flag
+oem_cp = "2"
 
 [dev-dependencies]
 crc32fast.workspace = true

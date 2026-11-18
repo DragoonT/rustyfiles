@@ -372,6 +372,8 @@ fn apply(cx: &mut App, role: Role) {
             // the one line that says the layer is ready and what it does now (again when that changes, e.g. Explorer came back)
             let mut line = ready_line(win, alt, combos, host.log_only);
             if win_e && !combos {
+                // (with Win+E taken for the default file manager, only the other two chords are left to Explorer)
+                line = line.replace("Win+E, Win+D and Win+Shift+S are left to Explorer", "Win+D and Win+Shift+S are left to Explorer");
                 line = if win || alt { format!("{line}; Win+E opens rustyfiles (the default file manager)") } else { "keys: ready - Win+E opens rustyfiles (the default file manager)".to_string() };
             }
             if line != host.last_ready {

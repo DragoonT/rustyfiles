@@ -563,17 +563,26 @@ fn walk<'s>(sc: &rayon::Scope<'s>, b: &'s Build<'s>, dir: PathBuf, id: u32) {
     b.chunks.lock().unwrap().push(Chunk { base, parent: id, ids, flags, frns });
 }
 
-fn pool() -> rayon::ThreadPool {
+/// The threads of a walk. On a disk with a seek penalty (`spinning`) ONE thread, in Windows' background mode (low I/O priority): the
+/// head reads one folder after another instead of jumping between the folders of 4 to 8 threads, and anything else the user does on
+/// that disk goes first. WHY (reported on Reddit after 0.8.8: "After launching it for the first time, all my mechanical hard disks were
+/// going crazy! I could hear them so very loud"). An SSD keeps the parallel walk at below-normal priority.
+fn pool(spinning: bool) -> rayon::ThreadPool {
+    let threads = if spinning { 1 } else { std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(4, 8) };
     rayon::ThreadPoolBuilder::new()
-        .num_threads(std::thread::available_parallelism().map_or(4, |n| n.get()).clamp(4, 8))
+        .num_threads(threads)
         .thread_name(|i| format!("rf-index-{i}"))
-        .start_handler(|_| unsafe {
-            use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};
-            let _ = SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+        .start_handler(move |_| unsafe {
+            use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN, THREAD_PRIORITY_BELOW_NORMAL};
+            let _ = SetThreadPriority(GetCurrentThread(), if spinning { THREAD_MODE_BACKGROUND_BEGIN } else { THREAD_PRIORITY_BELOW_NORMAL });
         })
         .build()
         .expect("index thread pool")
 }
+
+/// Walks of disks with a seek penalty go one at a time: two spinning disks walked at once are twice the noise, and two volumes of one
+/// disk would make its head jump between them.
+static SPINNING_WALK: Mutex<()> = Mutex::new(());
 
 impl Index {
     pub fn root(&self) -> &Path {
@@ -633,7 +642,12 @@ impl Index {
         table.intern(b"");
         let names = Mutex::new(table);
         let b = Build { next: &next, chunks: &chunks, names: &names, cancel };
-        pool().scope(|sc| walk(sc, &b, root.to_path_buf(), 0));
+        let spinning = crate::drives::seek_penalty(root) == Some(true);
+        let _one_at_a_time = spinning.then(|| SPINNING_WALK.lock().unwrap_or_else(|e| e.into_inner()));
+        if spinning {
+            log::info!("index: {} is a spinning disk: walked by one thread at background priority", root.display());
+        }
+        pool(spinning).scope(|sc| walk(sc, &b, root.to_path_buf(), 0));
         let total = next.load(Ordering::Relaxed) as usize;
         let mut chunks = chunks.into_inner().unwrap();
         chunks.sort_unstable_by_key(|c| c.base);

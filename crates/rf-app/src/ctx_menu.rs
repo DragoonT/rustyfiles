@@ -169,6 +169,10 @@ impl FolderView {
         let target_dir = if single_dir { items[0].clone() } else { dir.to_path_buf() };
         let prefs = cx.global::<crate::settings::Settings>();
         let (mp, show_flatten) = (prefs.menu.clone(), prefs.show_flatten);
+        // Members of an archive (ZIP, 7z, RAR... opened like a folder) have no file of their own: the rows that need one are left out
+        // (a shortcut, running as administrator, compressing, tags, the Shelf, the terminal...), and the few that make sense take an
+        // extracted copy first (the desktop background, installing a font). Copying out, dragging out, renaming and deleting inside work.
+        let in_archive = items.iter().any(|p| crate::archive_view::split(p).is_some() && !p.exists());
         let mut v: Vec<Item> = Vec::new();
 
         v.push(Item::action(t!("Aç"), icon(L::SquareArrowOutUpRight), act(me, |v, _, cx| v.open_selected(cx))).hint("Enter"));
@@ -207,11 +211,11 @@ impl FolderView {
         if mp.copy_path {
             v.push(Item::action(t!("Öğe yolunu kopyala"), icon(L::ClipboardCopy), act(me, |v, _, cx| v.copy_path(cx))).hint("Ctrl+Shift+C"));
         }
-        if mp.create_shortcut {
+        if mp.create_shortcut && !in_archive {
             let link_items = items.to_vec();
             v.push(Item::action(t!("Kısayol oluştur"), icon(L::Link), move |_, _| create_shortcuts(link_items.clone())));
         }
-        if !self.is_search() {
+        if !self.is_search() && !in_archive {
             let sel = items.to_vec();
             v.push(Item::action(t!("Seçimle klasör oluştur"), icon(L::FolderInput), act(me, move |v, _, cx| v.folder_with_selection(sel.clone(), cx))));
         }
@@ -251,7 +255,7 @@ impl FolderView {
                 .checked(out),
             );
         }
-        if single_dir && show_flatten {
+        if single_dir && show_flatten && !in_archive {
             let d = target_dir.clone();
             v.push(Item::action(t!("Klasörü düzleştir"), icon(L::FolderTree), act(me, move |v, w, cx| v.flatten_folder(d.clone(), w, cx))));
         }
@@ -266,12 +270,20 @@ impl FolderView {
                 v.push(Item::action(t!("Masaüstü arka planı yap"), icon(L::Monitor), move |_, _| {
                     let p = p.clone();
                     std::thread::spawn(move || {
-                        if let Err(e) = rf_win::fileactions::set_wallpaper(&p) {
+                        // A picture inside an archive has no file of its own: Windows was given the path inside the archive, could not
+                        // read it and left a plain colour (the owner, 2026-11-18: the background turned purple and pink). It is
+                        // extracted first, into the app's own folder (not the temp folder, which is cleaned after two days: the
+                        // background must still be there next week).
+                        let Some(real) = wallpaper_file(&p) else {
+                            log::warn!("wallpaper: the picture could not be extracted from its archive");
+                            return;
+                        };
+                        if let Err(e) = rf_win::fileactions::set_wallpaper(&real) {
                             log::warn!("wallpaper: {e:#}");
                         }
                     });
                 }));
-            } else if rf_win::fileactions::is_runnable(&p) {
+            } else if rf_win::fileactions::is_runnable(&p) && !in_archive {
                 v.push(Item::action(t!("Yönetici olarak çalıştır"), icon(L::ShieldCheck), move |_, _| {
                     let p = p.clone();
                     rf_win::sta::run(move |owner| {
@@ -289,7 +301,10 @@ impl FolderView {
                 let title = format!("{} {}", t!("Yazı tipi yükleniyor:"), crate::i18n::items(fonts.len()));
                 crate::status_center::start_with(cx, title, move |_| {
                     for f in &fonts {
-                        rf_win::fileactions::install_font_for_user(f)?;
+                        // (a font inside an archive is installed from a copy extracted first)
+                        let real = if f.exists() { Some(f.clone()) } else { crate::archive_view::real_copy(f) };
+                        let real = real.ok_or_else(|| anyhow::anyhow!("{}", t!("Arşivden çıkarılamadı")))?;
+                        rf_win::fileactions::install_font_for_user(&real)?;
                     }
                     Ok(true)
                 }, None);
@@ -302,7 +317,7 @@ impl FolderView {
         let zip_items = items.to_vec();
         let z7_items = items.to_vec();
         let dlg_items = items.to_vec();
-        if mp.compress {
+        if mp.compress && !in_archive {
             v.push(Item::sub(
                 t!("Sıkıştır"),
                 icon(L::Archive),
@@ -349,30 +364,38 @@ impl FolderView {
                 ],
             ));
         }
-        if mp.tags {
+        if mp.tags && !in_archive {
             v.push(Item::sub(t!("Etiketler"), icon(L::Tag), tag_items(me, items, cx)));
         }
-        if mp.shelf {
+        if mp.shelf && !in_archive {
             let shelf_items = items.to_vec();
             v.push(Item::action(t!("Rafa ekle"), icon(L::Inbox), act(me, move |_, _, cx| cx.emit(FolderEvent::AddToShelf(shelf_items.clone())))).hint("Ctrl+Shift+S"));
         }
-        if items.len() > 1 && !self.is_search() {
+        if !in_archive && crate::ferry::running(cx) {
+            v.push(Item::sub(t!("Ferry ile gönder"), icon(L::Send), crate::ferry::menu_items(items, cx)));
+        }
+        if items.len() > 1 && !self.is_search() && !in_archive {
             let b = items.to_vec();
             v.push(Item::action(t!("Toplu yeniden adlandır…"), icon(L::PencilLine), act(me, move |_, _, cx| cx.emit(FolderEvent::BulkRename(b.clone())))).hint("F2"));
         }
-        if self.dual {
+        if self.dual && !in_archive {
             let (c, m) = (items.to_vec(), items.to_vec());
             v.push(Item::action(t!("Diğer panele kopyala"), icon(L::CopyPlus), act(me, move |_, _, cx| cx.emit(FolderEvent::ToOtherPane(Transfer::Copy, c.clone())))));
             v.push(Item::action(t!("Diğer panele taşı"), icon(L::MoveRight), act(me, move |_, _, cx| cx.emit(FolderEvent::ToOtherPane(Transfer::Move, m.clone())))));
         }
-        if single_dir && mp.terminal {
+        if single_dir && mp.terminal && !in_archive {
             v.push(Item::Separator);
             let d = target_dir.clone();
             v.push(Item::action(t!("Terminalde aç"), icon(L::SquareTerminal), move |_, _| open_terminal(d.clone())).hint("Ctrl+Shift+`"));
         }
         v.push(Item::Separator);
         v.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } });
-        Menu { quick: self.quick_clipboard(me, true), items: v }
+        let mut quick = self.quick_clipboard(me, true);
+        if in_archive {
+            // (Windows' share sheet needs real files)
+            quick.retain(|q| q.icon != L::Share2);
+        }
+        Menu { quick, items: v }
     }
 
     fn background_menu(&self, me: &Me, dir: &std::path::Path, cx: &mut Context<Self>) -> Menu {
@@ -397,7 +420,10 @@ impl FolderView {
         }
         let fallback = Rc::new(own_new_items(me));
         v.push(Item::Sub { label: t!("Yeni").into(), icon: icon(L::CirclePlus), items: Sub::Pending { key: "new", fallback: Some(fallback) } });
-        v.push(Item::action(t!("Kısayol yapıştır"), icon(L::ClipboardPaste), act(me, |v, w, cx| v.paste_shortcuts(w, cx))).enabled(rf_win::clipboard::has_files()));
+        let in_archive = crate::archive_view::split(dir).is_some() && !dir.exists();
+        if !in_archive {
+            v.push(Item::action(t!("Kısayol yapıştır"), icon(L::ClipboardPaste), act(me, |v, w, cx| v.paste_shortcuts(w, cx))).enabled(rf_win::clipboard::has_files()));
+        }
         let d = dir.to_path_buf();
         v.push(Item::action(t!("Kenar çubuğuna sabitle"), icon(L::Pin), act(me, move |v, _, cx| v.pin(d.clone(), cx))));
         v.push(Item::action(t!("Yolu kopyala"), icon(L::ClipboardCopy), act(me, |v, _, cx| v.copy_path(cx))));
@@ -410,8 +436,10 @@ impl FolderView {
         let show_hidden = self.filter.show_hidden;
         v.push(Item::action(t!("Gizli öğeleri göster"), icon(L::Eye), act(me, |v, _, cx| v.toggle_hidden(cx))).checked(show_hidden).hint("Ctrl+H"));
         v.push(Item::Separator);
-        let d = dir.to_path_buf();
-        v.push(Item::action(t!("Terminalde aç"), icon(L::SquareTerminal), move |_, _| open_terminal(d.clone())).hint("Ctrl+Shift+`"));
+        if !in_archive {
+            let d = dir.to_path_buf();
+            v.push(Item::action(t!("Terminalde aç"), icon(L::SquareTerminal), move |_, _| open_terminal(d.clone())).hint("Ctrl+Shift+`"));
+        }
         // the folder organizer: only where the folder has rules
         if !self.is_search() && crate::organizer::has_rules_for(dir, cx) {
             let d = dir.to_path_buf();
@@ -1102,4 +1130,18 @@ impl FolderView {
         })
         .detach();
     }
+}
+
+/// The file to make the desktop background of `p`: `p` itself, or for a picture inside an archive a copy of it in the app's
+/// `wallpapers` folder (one file per name, replaced when the same name is chosen again). Blocks (extraction): a worker thread.
+fn wallpaper_file(p: &std::path::Path) -> Option<std::path::PathBuf> {
+    if p.exists() || crate::archive_view::split(p).is_none() {
+        return Some(p.to_path_buf());
+    }
+    let extracted = crate::archive_view::real_copy(p)?;
+    let dir = crate::settings::app_dir()?.join("wallpapers");
+    std::fs::create_dir_all(&dir).ok()?;
+    let to = dir.join(p.file_name()?);
+    std::fs::copy(&extracted, &to).ok()?;
+    Some(to)
 }

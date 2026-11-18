@@ -277,19 +277,45 @@ pub enum Loaded {
     Found(PinFile),
 }
 
+/// Reads the file. A read that fails for another reason than "there is none" (another program holding the file for a moment: a virus
+/// scanner, a backup) is tried again a few times before the file is called unreadable: an unreadable file makes the island show the
+/// taskbar's pins, and a pin or unpin made then sets the user's own list aside.
 pub fn load_checked(path: &Path) -> Loaded {
-    match std::fs::read_to_string(path) {
-        Ok(text) => PinFile::parse(&text).map_or(Loaded::Unreadable, Loaded::Found),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Loaded::Absent,
-        Err(_) => Loaded::Unreadable,
+    let mut last = Loaded::Unreadable;
+    for attempt in 0..4 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(40));
+        }
+        last = match std::fs::read_to_string(path) {
+            Ok(text) => PinFile::parse(&text).map_or(Loaded::Unreadable, Loaded::Found),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Loaded::Absent,
+            Err(_) => Loaded::Unreadable,
+        };
+        if last != Loaded::Unreadable {
+            return last;
+        }
     }
+    last
 }
 
-/// The user's own list, if there is one that is in force: a seeded file, as the island shows it. `None`: follow the taskbar.
-pub fn effective(path: &Path, exists: impl Fn(&Path) -> bool) -> Option<Vec<PinnedApp>> {
+/// Which list the island shows.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Effective {
+    /// The user's own list (a seeded file), as the island shows it.
+    Own(Vec<PinnedApp>),
+    /// There is no list of the dock's own: the taskbar's pins.
+    Taskbar,
+    /// The file is there and could not be read: whatever the island showed before stays (it must not turn into the taskbar's pins:
+    /// the user would take their own pins for gone and pin them again, which sets their list aside).
+    Unreadable,
+}
+
+/// The user's own list, if there is one that is in force (see [`Effective`]).
+pub fn effective(path: &Path, exists: impl Fn(&Path) -> bool) -> Effective {
     match load_checked(path) {
-        Loaded::Found(f) if f.seeded => Some(f.alive(exists)),
-        _ => None,
+        Loaded::Found(f) if f.seeded => Effective::Own(f.alive(exists)),
+        Loaded::Unreadable => Effective::Unreadable,
+        _ => Effective::Taskbar,
     }
 }
 
@@ -320,6 +346,81 @@ pub fn save(path: &Path, file: &PinFile) -> std::io::Result<()> {
     std::fs::rename(&tmp, path).inspect_err(|_| {
         let _ = std::fs::remove_file(&tmp);
     })
+}
+
+/// Where a program that is gone from `path` lives now, when it was in a folder named for its version and a newer folder beside it
+/// has the same program: `...\Discord\app-1.0.9120\Discord.exe` after an update is `...\Discord\app-1.0.9130\Discord.exe`. The newest
+/// such folder wins (its numbers compared as numbers). `None`: not a versioned folder, or no other version has the program.
+///
+/// WHY (reported on Reddit after 0.8.7: "Twice now, apps I pinned to the Dock have disappeared, and I had to re-add them"): a pin made
+/// from a running app keeps the program's path, and apps that update themselves (Discord, Slack, Teams and the like) move to a new
+/// version folder; the island leaves out a pin whose program is gone (`alive`), so the pin vanished at the app's next update.
+pub fn relocated(path: &Path, list_dirs: impl Fn(&Path) -> Vec<PathBuf>, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    let file = path.file_name()?;
+    let folder = path.parent()?;
+    let base = folder.parent()?;
+    let name = folder.file_name()?.to_string_lossy().to_string();
+    let stem = version_stem(&name)?;
+    list_dirs(base)
+        .into_iter()
+        .filter(|d| d.as_path() != folder)
+        .filter(|d| d.file_name().is_some_and(|n| version_stem(&n.to_string_lossy()).as_deref() == Some(stem.as_str())))
+        .map(|d| d.join(file))
+        .filter(|f| exists(f))
+        .max_by(|a, b| version_key(a).cmp(&version_key(b)))
+}
+
+/// The part of a folder name before its version ("app-" of "app-1.0.9120", "" of "1.2.3"), when the name has a version in it.
+fn version_stem(name: &str) -> Option<String> {
+    let at = name.find(|c: char| c.is_ascii_digit())?;
+    let rest = &name[at..];
+    rest.contains('.').then(|| name[..at].to_lowercase())
+}
+
+/// The numbers of the version folder a program is in, for comparing ("app-1.0.10" is newer than "app-1.0.9").
+fn version_key(program: &Path) -> Vec<u64> {
+    let name = program.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    name.split(|c: char| !c.is_ascii_digit()).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect()
+}
+
+/// Points the pins whose program moved to a newer version folder ([`relocated`]) at it: the program it starts, the program a running
+/// window is matched by, and the icon's file when it was the program. Writes the file when something moved (whole, as [`save`] does,
+/// under the change lock). Blocks (disk): a worker thread. Returns how many pins were moved.
+pub fn heal(path: &Path) -> usize {
+    let _guard = LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let Loaded::Found(mut file) = load_checked(path) else { return 0 };
+    let list_dirs = |d: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(d).map(|r| r.flatten().filter(|e| e.path().is_dir()).map(|e| e.path()).collect()).unwrap_or_default()
+    };
+    let mut moved = 0;
+    for pin in &mut file.pins {
+        let LaunchRec::Exe { path: old, .. } = &pin.launch else { continue };
+        if old.exists() {
+            continue;
+        }
+        let Some(new) = relocated(old, list_dirs, |f| f.exists()) else { continue };
+        let old = old.clone();
+        if let LaunchRec::Exe { path, .. } = &mut pin.launch {
+            *path = new.clone();
+        }
+        let old_lower = old.to_string_lossy().to_lowercase();
+        if pin.exe.as_deref() == Some(old_lower.as_str()) {
+            pin.exe = Some(new.to_string_lossy().to_lowercase());
+        }
+        match &mut pin.icon {
+            IconRec::File { path } if *path == old => *path = new.clone(),
+            IconRec::Resource { file, .. } if *file == old => *file = new.clone(),
+            _ => {}
+        }
+        log::info!("dock: the pin of {} moved to {} (the app updated itself)", pin.name, new.display());
+        moved += 1;
+    }
+    if moved > 0
+        && let Err(e) = save(path, &file)
+    {
+        log::warn!("dock: the moved pins could not be written: {e}");
+    }
+    moved
 }
 
 /// Why a change was not made.
@@ -404,6 +505,13 @@ pub fn change(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn own(e: Effective) -> Vec<PinnedApp> {
+        match e {
+            Effective::Own(v) => v,
+            other => panic!("not the dock's own list: {other:?}"),
+        }
+    }
 
     fn pinned(name: &str, aumid: Option<&str>, exe: Option<&str>) -> PinnedApp {
         PinnedApp {
@@ -586,17 +694,17 @@ mod tests {
     fn the_island_follows_the_taskbar_until_the_file_is_seeded() {
         let dir = tmp("effective");
         let path = dir.join(FILE);
-        assert_eq!(effective(&path, |_| true), None, "no file");
+        assert_eq!(effective(&path, |_| true), Effective::Taskbar, "no file");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(&path, "{ broken").unwrap();
-        assert_eq!(effective(&path, |_| true), None, "an unreadable file is not the list");
+        assert_eq!(effective(&path, |_| true), Effective::Unreadable, "an unreadable file is not the list, nor the taskbar's");
         let mut f = PinFile::default();
         f.pins.push(OwnPin::from_pinned(&pinned("A", None, Some("a.exe"))));
         save(&path, &f).unwrap();
-        assert_eq!(effective(&path, |_| true), None, "a file that was never seeded is not in force");
+        assert_eq!(effective(&path, |_| true), Effective::Taskbar, "a file that was never seeded is not in force");
         f.seeded = true;
         save(&path, &f).unwrap();
-        assert_eq!(effective(&path, |_| true).unwrap().len(), 1);
+        assert_eq!(own(effective(&path, |_| true)).len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -617,7 +725,7 @@ mod tests {
         // the second change does not ask the taskbar again
         let out = change(&path, || panic!("seeded already"), |p| p, |f| f.unpin(&dock_app("A", "a.exe", None, true)));
         assert_eq!(out, Ok(Changed::Written));
-        assert_eq!(effective(&path, |_| true).unwrap().len(), 2);
+        assert_eq!(own(effective(&path, |_| true)).len(), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -640,7 +748,7 @@ mod tests {
         assert_eq!(out, Ok(Changed::Written));
         let kept = std::fs::read_to_string(dir.join(format!("{FILE}.broken"))).unwrap();
         assert!(kept.contains("damaged"), "the old file is still there, under another name");
-        assert!(effective(&path, |_| true).unwrap().is_empty());
+        assert!(own(effective(&path, |_| true)).is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -693,7 +801,7 @@ mod tests {
         );
         assert_eq!(out, Ok(Changed::Written));
         assert_eq!(*asked.borrow(), vec!["B".to_string()], "only the pin that stays is copied");
-        let shown = effective(&path, |_| true).unwrap();
+        let shown = own(effective(&path, |_| true));
         assert_eq!(shown.len(), 1);
         assert_eq!(shown[0].launch, Launch::Link(PathBuf::from(r"D:\cfg\dock-pins\B.lnk")));
         // a later change does not copy again
@@ -717,5 +825,55 @@ mod tests {
         let names: Vec<String> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
         assert_eq!(names, vec![FILE.to_string()]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod relocate_tests {
+    use super::relocated;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_program_that_moved_to_a_newer_version_folder_is_found_there() {
+        let base = Path::new(r"C:\Users\u\AppData\Local\Discord");
+        let dirs = vec![base.join("app-1.0.9120"), base.join("app-1.0.9130"), base.join("app-1.0.10"), base.join("packages")];
+        let have = |f: &Path| f.ends_with("Discord.exe") && !f.starts_with(base.join("app-1.0.9120"));
+        let found = relocated(&base.join(r"app-1.0.9120\Discord.exe"), |_| dirs.clone(), have);
+        assert_eq!(found, Some(base.join(r"app-1.0.9130\Discord.exe")), "the newest, numbers compared as numbers");
+        // not a versioned folder: nothing is guessed
+        let plain = Path::new(r"C:\Program Files\App\bin\app.exe");
+        assert_eq!(relocated(plain, |_| vec![PathBuf::from(r"C:\Program Files\App\bin2")], |_| true), None);
+        // another kind of folder beside it is not taken for a version of it
+        let other = vec![base.join("packages"), base.join("tools-2.0")];
+        assert_eq!(relocated(&base.join(r"app-1.0.9120\Discord.exe"), |_| other.clone(), |_| true), None);
+    }
+
+    #[test]
+    fn heal_points_a_pin_at_the_new_version_and_writes_the_file() {
+        use super::{IconRec, LaunchRec, OwnPin, PinFile, heal, load_checked, save, Loaded};
+        let root = std::env::temp_dir().join(format!("rf-heal-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let new_dir = root.join("App").join("app-2.0.1");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        std::fs::create_dir_all(root.join("App").join("app-2.0.0")).unwrap();
+        std::fs::write(new_dir.join("App.exe"), b"").unwrap();
+        let old = root.join("App").join("app-1.9.0").join("App.exe");
+        let pin = OwnPin {
+            name: "App".into(),
+            aumid: None,
+            exe: Some(old.to_string_lossy().to_lowercase()),
+            launch: LaunchRec::Exe { path: old.clone(), args: String::new() },
+            icon: IconRec::File { path: old.clone() },
+        };
+        let file_path = root.join("dock-pins.json");
+        save(&file_path, &PinFile { version: 1, seeded: true, pins: vec![pin] }).unwrap();
+        assert_eq!(heal(&file_path), 1);
+        let Loaded::Found(f) = load_checked(&file_path) else { panic!("the file is gone") };
+        let want = new_dir.join("App.exe");
+        assert_eq!(f.pins[0].launch, LaunchRec::Exe { path: want.clone(), args: String::new() });
+        assert_eq!(f.pins[0].exe, Some(want.to_string_lossy().to_lowercase()));
+        assert_eq!(f.pins[0].icon, IconRec::File { path: want });
+        assert_eq!(heal(&file_path), 0, "nothing more to move");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

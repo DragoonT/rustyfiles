@@ -1,9 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/rf-core", "crates/rf-win", "crates/rf-app", "crates/rf-archive", "crates/rf-dialog", "crates/rf-shellguard", "crates/rf-player", "crates/rustdecoder", "tools/gpustress"]
+members = ["crates/rf-core", "crates/rf-win", "crates/rf-app", "crates/rf-nearby", "crates/rf-archive", "crates/rf-dialog", "crates/rf-shellguard", "crates/rf-player", "crates/rustdecoder", "tools/gpustress"]
+# The macOS app (Swift in macos/, its Rust bridge in crates/rf-mac) is built on the Mac only, as a workspace of its own.
+exclude = ["crates/rf-mac", "macos"]
 
 [workspace.package]
-version = "0.8.8"
+version = "0.9.0"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -12,6 +14,7 @@ publish = false
 rf-core = { path = "crates/rf-core" }
 rf-win = { path = "crates/rf-win" }
 rf-player = { path = "crates/rf-player" }
+rf-nearby = { path = "crates/rf-nearby" }
 rustdecoder = { path = "crates/rustdecoder" }
 # FilmCraft (MIT OR Apache-2.0): saf Rust kapsayıcı ve kodek çözücüleri, sabit commit.
 filmcraft-media = { git = "https://github.com/storytold/filmcraft", rev = "c2f65871e998cca4700a74dbcf9348cab51fb06b" }
@@ -125,6 +128,8 @@ windows = { version = "0.62", features = [
     # the dock's notification panel: UserNotificationListener (the list other apps have posted, read-only polling) and the app behind each
     "UI_Notifications",
     "UI_Notifications_Management",
+    # our own toasts (Ferry's questions and arrivals: rf-win toast_post.rs)
+    "Data_Xml_Dom",
     "ApplicationModel",
     # the share sheet for our windows (rf-win share.rs, issue 48)
     "ApplicationModel_DataTransfer",
@@ -192,5 +197,5 @@ codegen-units = 16
 incremental = true
 
 [patch.crates-io]
-# upstream GPUI Windows fork with the RTL glyph fix
-gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "77cdc99a4883d698e29bd5fd227c4fe094fe0414" }
+# our fork of GPUI's Windows layer (GPU/CPU hot-swap renderer), see its FORK.md
+gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "829ada25c2c7611af2da44029db9f58672d9ec13" }

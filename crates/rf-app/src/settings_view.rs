@@ -33,6 +33,7 @@ pub enum Page {
     Actions,
     Tags,
     Look,
+    Ferry,
     Dev,
     Advanced,
     Speed,
@@ -40,7 +41,7 @@ pub enum Page {
     About,
 }
 
-const PAGES: [(Page, L, &str); 15] = [
+const PAGES: [(Page, L, &str); 16] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
     (Page::Dock, L::PanelBottom, "Dock"),
@@ -51,6 +52,7 @@ const PAGES: [(Page, L, &str); 15] = [
     (Page::Actions, L::Keyboard, "Eylemler"),
     (Page::Tags, L::Tag, "Etiketler"),
     (Page::Look, L::Eye, "DirectLook"),
+    (Page::Ferry, L::Send, "Ferry"),
     (Page::Dev, L::SquareTerminal, "Geliştirici araçları"),
     (Page::Advanced, L::Wrench, "Gelişmiş"),
     (Page::Speed, L::Gauge, "Hız testi"),
@@ -61,7 +63,7 @@ const PAGES: [(Page, L, &str); 15] = [
 /// The pages that are experimental: marked with a small "Deneysel" pill in the page list and "(deneysel)" in their title. The mark is
 /// NOT part of the page name in [`PAGES`], so the search and the translations still know the pages as "Dock" and "Masaüstü".
 fn experimental(page: Page) -> bool {
-    matches!(page, Page::Dock | Page::Desktop)
+    matches!(page, Page::Dock | Page::Desktop | Page::Ferry)
 }
 
 /// The heading of a page: its name, and "(deneysel)" after it for an experimental page.
@@ -181,6 +183,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Actions => actions(p, cx),
         Page::Tags => tags(p, cx),
         Page::Look => look(p, s, cx),
+        Page::Ferry => crate::ferry::page(p, s, cx),
         Page::Dev => dev(p, s, cx),
         Page::Advanced => advanced(p, s, cx),
         Page::Speed => crate::bench_view::page(p, cx),
@@ -477,6 +480,10 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
                 }),
         );
     }
+    // (Ferry's page on screen shows this PC to everyone while it is: `ferry::page_seen`)
+    if query.is_empty() && page == Page::Ferry {
+        crate::ferry::page_seen(window.window_handle(), cx);
+    }
     let (title, body): (String, Vec<AnyElement>) = if query.is_empty() {
         (PAGES.iter().find(|x| x.0 == page).map(|x| page_title(x.0, crate::i18n::t(x.2))).unwrap_or_default(), build_page(page, p, &s, cx))
     } else {
@@ -734,7 +741,34 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         },
         cx,
     ));
+    v.push(card(
+        p,
+        L::Plus,
+        t!("Yeni sekme şunu açar"),
+        Some(t!("Ctrl+T, + düğmesi ve sekme menüsü. Sekmeyi çoğalt (Ctrl+Shift+K) her zaman aynı klasörü açar.")),
+        dropdown(
+            "new-tab-opens",
+            p,
+            s.new_tab_opens,
+            vec![(crate::settings::NewTabOpens::Home, t!("Ana sayfa").to_string()), (crate::settings::NewTabOpens::Current, t!("Açık olan klasör").to_string())],
+            |s, v| s.new_tab_opens = v,
+        ),
+    ));
     v.push(card(p, L::SquarePlus, t!("Her zaman yeni açılan sekmeye geç"), None, sw("focus-tab", p, s.focus_new_tab, |s, v| s.focus_new_tab = v)));
+    v.push(card(
+        p,
+        L::AppWindow,
+        t!("Diğer programlardan açılan klasörler yeni pencerede açılsın"),
+        Some(t!("Win+E, masaüstü ya da başka bir program bir klasör açtığında açık pencerede yeni sekme yerine yeni bir pencere açılır.")),
+        sw("launch-newwin", p, s.launch_in_new_window, |s, v| s.launch_in_new_window = v),
+    ));
+    v.push(card(
+        p,
+        L::Save,
+        t!("Kayıtlı oturumlar bu pencerede açılsın"),
+        Some(t!("Sekme menüsünden açılan oturum, yeni pencere yerine bu penceredeki sekmelerin yerini alır (kapanan sekmeler Ctrl+Shift+T ile geri gelir).")),
+        sw("session-here", p, s.sessions_in_this_window, |s, v| s.sessions_in_this_window = v),
+    ));
 
     v.push(section(p, t!("Çift bölme")));
     v.push(card(p, L::Columns2, t!("Yeni sekmeleri çift bölmeyle aç"), None, sw("dual-new", p, s.dual_pane_new_tabs, |s, v| s.dual_pane_new_tabs = v)));
@@ -960,10 +994,18 @@ fn backdrop_card(p: &Palette, s: &Settings) -> AnyElement {
             (BackdropPref::Glass, t!("HyperGlass (deneysel)").into()),
         ]
     } else {
-        vec![(BackdropPref::Solid, t!("Düz").into())]
+        // Windows 10: Acrylic and HyperGlass for the main window only (issue 78); Mica left the window see-through there
+        vec![
+            (BackdropPref::Solid, t!("Düz").into()),
+            (BackdropPref::Acrylic, t!("Akrilik").into()),
+            (BackdropPref::Glass, t!("HyperGlass (deneysel)").into()),
+        ]
     };
     let control = dropdown("backdrop", p, s.backdrop_in_use(), choices, |s, v| s.backdrop = v);
     let mut notes: Vec<String> = Vec::new();
+    if !crate::settings::materials_available() && s.backdrop_in_use() != BackdropPref::Solid {
+        notes.push(t!("Bu Windows sürümünde malzeme yalnızca ana pencereye uygulanır; menüler ve açılır pencereler düz kalır.").to_string());
+    }
     if s.backdrop_in_use() == BackdropPref::Glass || crate::glass::forced() {
         notes.push(t!("Pencerenin arkasındaki görüntüyü gerçek cam gibi büker ve buzlar. Ekranı canlı izleyip her değişiklikte yeniden çizdiği için Mica'dan daha fazla ekran kartı ve pil kullanır.").to_string());
         // Only where the windows really are hidden from screenshots: with a capture session (Windows 11 24H2 and the border-free capture
@@ -2657,11 +2699,7 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
             }
             std::thread::spawn(move || {
                 let classes = rf_win::dialog_reg::CLASSES;
-                let r = match (dialogs_on, crate::dialog_dll()) {
-                    (true, _) => rf_win::dialog_reg::disable(classes),
-                    (false, Some(dll)) => rf_win::dialog_reg::enable(&dll, classes),
-                    (false, None) => Ok(()),
-                };
+                let r = if dialogs_on { rf_win::dialog_reg::disable(classes) } else { crate::dialog_registration(crate::DialogReg::Enable).map(|_| ()) };
                 if let Err(e) = r {
                     log::warn!("file dialogs: {e:#}");
                 }
@@ -3180,10 +3218,10 @@ mod desktop_page_tests {
     }
 
     #[test]
-    fn both_experimental_pages_are_marked_and_the_mark_is_not_part_of_their_names() {
+    fn the_experimental_pages_are_marked_and_the_mark_is_not_part_of_their_names() {
         crate::dock_page::while_turkish(|| {
             let exp: Vec<Page> = PAGES.iter().map(|x| x.0).filter(|p| experimental(*p)).collect();
-            assert_eq!(exp, [Page::Dock, Page::Desktop], "exactly these two");
+            assert_eq!(exp, [Page::Dock, Page::Desktop, Page::Ferry], "exactly these");
             for (page, _, name) in PAGES {
                 let title = page_title(page, name);
                 if experimental(page) {

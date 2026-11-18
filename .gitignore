@@ -5,3 +5,8 @@
 /notes/
 /rustyfilescom/
 /sync-upstream.bat
+/macos/.build/
+/macos/build/
+/macos/Sources/RustyFiles/Generated/
+/macos/Sources/rf_macFFI/include/
+/crates/rf-mac/target/

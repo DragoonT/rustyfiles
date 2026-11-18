@@ -111,7 +111,7 @@ impl DesktopView {
             Quick::new(L::TextCursorInput, t!("Yeniden adlandır  (F2)"), q.rename, act(&me, |v, w, cx| v.begin_rename(w, cx))),
             Quick::new(L::Trash, t!("Sil  (Del)"), q.delete, act(&me, |v, w, cx| v.delete_selection(false, w, cx))),
         ];
-        let view = fluent_menu::show(Menu { quick, items }, window.mouse_position(), window, cx);
+        let view = fluent_menu::show_on_glass(Menu { quick, items }, window.mouse_position(), window, cx);
 
         // the shell's own commands for the selection: one origin only (they must share a parent folder)
         let first = ids.first().and_then(|i| self.item(i)).cloned();
@@ -228,7 +228,7 @@ impl DesktopView {
             })
             .collect();
         // Windows 11's desktop menu has no paste button above it: the menu is only its rows
-        let view = fluent_menu::show(Menu { quick: Vec::new(), items }, window.mouse_position(), window, cx);
+        let view = fluent_menu::show_on_glass(Menu { quick: Vec::new(), items }, window.mouse_position(), window, cx);
         let own = more_prefix(&ctx);
         match self.backend.as_ref().and_then(|b| b.target_dir()).filter(|_| !read_only) {
             Some(dir) => self.load_shell(view.downgrade(), ShellTarget::Background(dir), true, own, cx),

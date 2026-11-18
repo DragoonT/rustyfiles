@@ -144,7 +144,36 @@ pub fn tasks() -> Vec<Task> {
     unsafe {
         let _ = EnumWindows(Some(each), LPARAM(&mut out as *mut Vec<Task> as isize));
     }
+    // The windows seen before, and the one in front, that the enumeration did not give: still tasks while they pass the same rules.
+    // WHY (issue 60): a game behind Easy Anti-Cheat showed in the dock only while it had the focus, and left it about a minute after;
+    // its reporter found that EnumWindows from another program does not return the game's window at all, though it is on screen and
+    // Windows' taskbar keeps it (the taskbar keeps the windows it was told about). Now a window met once (in front) is kept for as
+    // long as it exists and is a task.
+    let mut known = KNOWN.lock().unwrap_or_else(|e| e.into_inner());
+    let front = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() }.0 as isize;
+    let mut asked: Vec<isize> = known.clone();
+    if front != 0 {
+        asked.push(front);
+    }
+    let out = with_known(out, &asked, |h| task_of(HWND(h as *mut _)));
+    *known = out.iter().map(|t| t.hwnd).collect();
     out
+}
+
+/// The windows the last listing gave (with those kept by [`with_known`]).
+static KNOWN: std::sync::Mutex<Vec<isize>> = std::sync::Mutex::new(Vec::new());
+
+/// `listed`, then each of `known` it lacks that `check` still finds a task (in `known`'s order, no window twice).
+fn with_known(mut listed: Vec<Task>, known: &[isize], check: impl Fn(isize) -> Option<Task>) -> Vec<Task> {
+    for &h in known {
+        if listed.iter().any(|t| t.hwnd == h) {
+            continue;
+        }
+        if let Some(t) = check(h) {
+            listed.push(t);
+        }
+    }
+    listed
 }
 
 /// Tasks grouped like taskbar buttons: (group key, its windows), in order of first appearance.
@@ -386,5 +415,22 @@ mod helper_tests {
         assert!(is_helper("", 0, 0, false), "an untitled window of no size: a helper");
         assert!(!is_helper("", 0, 0, true), "the same window minimized (an untitled game that lost focus): a task");
         assert!(!is_helper("", 800, 600, false) && !is_helper("Notes", 0, 0, false));
+    }
+}
+
+#[cfg(test)]
+mod known_tests {
+    use super::{Task, with_known};
+
+    fn task(h: isize) -> Task {
+        Task { hwnd: h, title: format!("w{h}"), pid: 1, exe: None, app_id: None, minimized: false }
+    }
+
+    #[test]
+    fn a_window_the_enumeration_misses_is_kept_while_it_is_still_a_task() {
+        let listed = vec![task(1), task(2)];
+        // 3 was seen before and is still a task; 4 is gone; 2 is listed already
+        let out = with_known(listed, &[2, 3, 4], |h| (h != 4).then(|| task(h)));
+        assert_eq!(out.iter().map(|t| t.hwnd).collect::<Vec<_>>(), vec![1, 2, 3]);
     }
 }
