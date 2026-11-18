@@ -80,6 +80,7 @@ final class FerryService {
 
     func startIfEnabled() {
         guard FerrySettings.enabled, ferry == nil else { return }
+        FerryNotifications.shared.setUp()
         // Everyone does not outlive the app, as on Windows
         if FerrySettings.visibility == .everyone { FerrySettings.visibility = .trusted }
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -158,6 +159,7 @@ final class FerryService {
     }
 
     func accept(_ offer: FerryOffer) {
+        senders[offer.transfer] = offer.fromName
         let inbox = FerrySettings.effectiveInbox
         ferry?.accept(offerId: offer.id, destDir: inbox.path)
         track(offer.transfer, title: String(localized: "Receiving with Ferry: \(offer.fromName)"), folder: inbox)
@@ -194,8 +196,14 @@ final class FerryService {
     /// that came this way before it first runs.
     nonisolated private static func quarantine(_ paths: [String]) {
         let value = String(format: "0081;%08x;rustyfiles;", Int(Date().timeIntervalSince1970))
+        func mark(_ path: String) {
+            _ = value.withCString { setxattr(path, "com.apple.quarantine", $0, strlen($0), 0, XATTR_NOFOLLOW) }
+        }
         for path in paths {
-            _ = value.withCString { setxattr(path, "com.apple.quarantine", $0, strlen($0), 0, 0) }
+            mark(path)
+            // everything inside a received folder too, as the Windows app marks each file
+            guard let walker = FileManager.default.enumerator(atPath: path) else { continue }
+            for case let rel as String in walker { mark((path as NSString).appendingPathComponent(rel)) }
         }
     }
 
@@ -209,7 +217,11 @@ final class FerryService {
 
     fileprivate func offer(_ o: FerryOffer) { FerryQuestions.shared.ask(.offer(o)) }
 
+    /// Who is sending what is being received (for "<name> sent you files").
+    private var senders: [UInt64: String] = [:]
+
     fileprivate func receiving(_ o: FerryOffer) {
+        senders[o.transfer] = o.fromName
         track(o.transfer, title: String(localized: "Receiving with Ferry: \(o.fromName)"), folder: FerrySettings.effectiveInbox)
     }
 
@@ -218,7 +230,12 @@ final class FerryService {
     }
 
     fileprivate func finished(_ transfer: UInt64, _ r: FerryResult) {
-        if !r.paths.isEmpty { Self.quarantine(r.paths) }
+        if !r.paths.isEmpty {
+            let paths = r.paths
+            DispatchQueue.global(qos: .utility).async { Self.quarantine(paths) }
+            if r.ok, let from = senders[transfer] { FerryNotifications.shared.arrived(from: from, paths: paths) }
+        }
+        senders[transfer] = nil
         if let card = cards[transfer] {
             if r.ok {
                 card.succeed()
@@ -257,14 +274,18 @@ final class FerryService {
     /// The crate's error, as the Windows app words it (ferry.rs `failure_text`).
     static func failureText(_ error: String?) -> String {
         guard let e = error, !e.isEmpty else { return String(localized: "The transfer stopped partway.") }
+        // the reasons' words are fixed by the protocol (docs/nearby-protocol.md)
         let lower = e.lowercased()
-        if lower.contains("trusted") { return String(localized: "That device only takes files from its trusted devices. Pair with it first.") }
-        if lower.contains("declin") || lower.contains("reject") { return String(localized: "The other device declined.") }
+        if lower.contains("only takes files from its trusted devices") {
+            return String(localized: "That device only takes files from its trusted devices. Pair with it first.")
+        }
+        if lower.contains("declined") { return String(localized: "The other device declined.") }
+        if lower.contains("busy with other offers") { return String(localized: "You already have an offer waiting on that device.") }
+        if lower.contains("arrived damaged") {
+            return String(localized: "A file arrived damaged. Send again: the rest picks up where it stopped.")
+        }
         if lower.contains("timed out") || lower.contains("did not answer") || lower.contains("timeout") {
             return String(localized: "The device did not answer.")
-        }
-        if lower.contains("blake3") || lower.contains("damaged") || lower.contains("checksum") {
-            return String(localized: "A file arrived damaged. Send again: the rest picks up where it stopped.")
         }
         return e
     }

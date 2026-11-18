@@ -215,51 +215,75 @@ final class FerryQuestions {
     private struct Item {
         let id = UUID()
         let question: Question
+        /// Shown in the window (asked there, or moved there from its notification).
+        var inWindow: Bool
     }
 
     private var queue: [Item] = []
     private var panel: NSPanel?
     private let view = FerryQuestionView()
 
+    /// Asks as a notification with the two answers as its buttons, as the Windows app asks in
+    /// a toast; where notifications are not allowed, in the window.
     func ask(_ q: Question) {
-        let item = Item(question: q)
+        let viaNotification = FerryNotifications.shared.allowed
+        let item = Item(question: q, inWindow: !viaNotification)
         queue.append(item)
+        if viaNotification { FerryNotifications.shared.ask(q, id: item.id) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 185) { [weak self] in
             MainActor.assumeIsolated { self?.remove(item.id) }
         }
         sync()
     }
 
-    func drop(pairingWith peer: String) {
-        queue.removeAll {
-            if case .pairing(let p, _, _) = $0.question { return p == peer }
-            return false
-        }
+    /// Answered on its notification.
+    func answer(_ id: UUID, _ yes: Bool) {
+        guard let item = queue.first(where: { $0.id == id }) else { return }
+        reply(item.question, yes)
+        remove(id)
+    }
+
+    /// The notification's body was clicked: the question moves into the window.
+    func moveToWindow(_ id: UUID) {
+        guard let i = queue.firstIndex(where: { $0.id == id }) else { return }
+        queue[i].inWindow = true
         sync()
+    }
+
+    private func reply(_ q: Question, _ yes: Bool) {
+        switch q {
+        case .offer(let o): yes ? FerryService.shared.accept(o) : FerryService.shared.reject(o)
+        case .pairing(let peer, _, _): FerryService.shared.confirmPairing(peer, yes)
+        }
+    }
+
+    func drop(pairingWith peer: String) {
+        for item in queue {
+            if case .pairing(let p, _, _) = item.question, p == peer { remove(item.id) }
+        }
     }
 
     private func remove(_ id: UUID) {
         queue.removeAll { $0.id == id }
+        FerryNotifications.shared.withdraw(id)
         sync()
     }
 
-    private func answer(_ yes: Bool) {
-        guard let first = queue.first else { return }
-        switch first.question {
-        case .offer(let o): yes ? FerryService.shared.accept(o) : FerryService.shared.reject(o)
-        case .pairing(let peer, _, _): FerryService.shared.confirmPairing(peer, yes)
-        }
+    private func answerInWindow(_ yes: Bool) {
+        guard let first = queue.first(where: \.inWindow) else { return }
+        reply(first.question, yes)
         remove(first.id)
     }
 
     private func sync() {
-        guard let first = queue.first else {
+        let shown = queue.filter(\.inWindow)
+        guard let first = shown.first else {
             panel?.orderOut(nil)
             return
         }
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        view.show(first.question, more: queue.count - 1)
+        view.show(first.question, more: shown.count - 1)
         if let screen = NSScreen.main {
             let v = screen.visibleFrame
             panel.setFrameOrigin(NSPoint(x: v.maxX - 380 - 16, y: v.minY + 16))
@@ -297,7 +321,7 @@ final class FerryQuestions {
         view.autoresizingMask = [.width, .height]
         backdrop.addSubview(view)
         p.contentView = backdrop
-        view.onAnswer = { [weak self] yes in self?.answer(yes) }
+        view.onAnswer = { [weak self] yes in self?.answerInWindow(yes) }
         return p
     }
 }
@@ -369,6 +393,7 @@ final class FerryQuestionView: FlippedView {
             default: what = String(localized: "\(o.names[0]) and \(o.names.count - 1) items")
             }
             line = "\(what) · \(formatSize(bytes: o.totalBytes))"
+                + (o.trusted ? "" : "\n" + String(localized: "Unpaired device: its name can’t be verified"))
         case .pairing(_, let name, let c):
             title = String(localized: "Pair: \(name)")
             line = String(localized: "Make sure both devices show the same code. Paired devices can send each other files without asking.")
