@@ -507,6 +507,8 @@ pub struct FolderView {
     folder_sizes: std::collections::HashMap<PathBuf, DirSize>,
     /// Settings → Layout → "Adaptive": decide details/grid once this folder's listing is in.
     adaptive_pending: bool,
+    /// The view's first folder has been given its layout (with "sync layout" on, only that first one takes the shared layout).
+    layout_seeded: bool,
     /// Requested this frame; started together as one batch.
     size_queue: Vec<PathBuf>,
     size_batches: Vec<(Arc<rf_win::foldersize::SizeBatch>, Vec<PathBuf>)>,
@@ -673,6 +675,7 @@ impl FolderView {
             column_pending: HashSet::new(),
             folder_sizes: Default::default(),
             adaptive_pending: false,
+            layout_seeded: false,
             size_queue: Default::default(),
             size_batches: Default::default(),
             size_polling: false,
@@ -2027,7 +2030,11 @@ impl FolderView {
     /// Per-folder memory: the user changed the view, sort or grouping of this folder.
     fn remember_layout(&mut self, cx: &mut Context<Self>) {
         self.adaptive_pending = false;
+        // "the same layout in all folders": one layout, kept for every new tab and the next start (Threads report: the size went back
+        // to the second step after a restart; nothing was saved at all)
         if cx.global::<crate::settings::Settings>().sync_layout {
+            let l = self.layout_now();
+            crate::layouts::set(std::path::Path::new(SHARED_LAYOUT), l, cx);
             return;
         }
         if let Location::Path(p) = self.location().clone() {
@@ -2051,7 +2058,12 @@ impl FolderView {
 
     fn apply_folder_layout_inner(&mut self, cx: &mut Context<Self>) {
         let s = cx.global::<crate::settings::Settings>().clone();
+        let first = !std::mem::replace(&mut self.layout_seeded, true);
         if s.sync_layout {
+            // the tab keeps its own from folder to folder; a new tab (and every tab at a start) begins with the shared one
+            if first && let Some(l) = crate::layouts::get(std::path::Path::new(SHARED_LAYOUT), cx) {
+                self.apply_layout_values(l, false, cx);
+            }
             return;
         }
         let Location::Path(p) = self.location().clone() else { return };
@@ -2093,6 +2105,10 @@ impl FolderView {
                 s.default_view == crate::settings::DefaultView::Adaptive,
             ),
         };
+        self.apply_layout_values(l, adaptive, cx);
+    }
+
+    fn apply_layout_values(&mut self, l: crate::layouts::FolderLayout, adaptive: bool, cx: &mut Context<Self>) {
         self.view_mode = match l.view {
             1 | 3 | 4 => ViewMode::Grid,
             2 => ViewMode::Columns,
@@ -4955,6 +4971,9 @@ fn rtl_grid_lines(name: &str, avail: Pixels, window: &Window) -> Vec<String> {
     }
     vec![words[..take].join(" "), words[take..].join(" ")]
 }
+
+/// The key in the layouts file under which "the same layout in all folders" keeps its one layout (`<` cannot start a real path).
+const SHARED_LAYOUT: &str = "<all folders>";
 
 /// How long the pointer rests on an item before "Select on hover" selects it: the system's hover time (Control Panel › Mouse;
 /// 400 ms out of the box), as Explorer's "point to select" waits.
