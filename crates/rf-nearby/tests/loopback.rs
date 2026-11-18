@@ -260,3 +260,26 @@ fn a_broken_transfer_goes_on_and_a_damaged_part_is_sent_again() {
     same_tree(&top, &dest.path().join("project"));
     assert!(!stage.exists());
 }
+
+#[test]
+fn a_device_cannot_pile_up_offers() {
+    let a = device("A", true);
+    let b = device("B", true);
+    b.nearby.set_visibility(Visibility::Everyone);
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("x.txt");
+    std::fs::write(&file, b"x").unwrap();
+    a.nearby.send_to_address(addr(&b), vec![file.to_string_lossy().into()]).unwrap();
+    let Ev::Offer(first) = next(&b.events) else { panic!() };
+    // a second offer while the first waits: turned away without asking
+    let second = a.nearby.send_to_address(addr(&b), vec![file.to_string_lossy().into()]).unwrap();
+    let Ev::Finished(t, r) = next(&a.events) else { panic!() };
+    assert_eq!(t, second);
+    assert!(!r.ok, "{r:?}");
+    assert!(b.events.recv_timeout(Duration::from_millis(300)).is_err(), "B was asked twice");
+    // once the first is answered, the device may offer again
+    b.nearby.reject(first.id);
+    let Ev::Finished(..) = next(&a.events) else { panic!() };
+    a.nearby.send_to_address(addr(&b), vec![file.to_string_lossy().into()]).unwrap();
+    assert!(matches!(next(&b.events), Ev::Offer(_)));
+}

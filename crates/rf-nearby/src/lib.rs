@@ -27,6 +27,9 @@ use tokio::sync::oneshot;
 
 pub use transfer::PART;
 
+/// Offers waiting for the user at once, from all devices together (one each).
+const MAX_WAITING_OFFERS: usize = 4;
+
 /// What the app tells the crate once, at start.
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -155,6 +158,7 @@ impl Nearby {
             peers: Mutex::new(HashMap::new()),
             offers: Mutex::new(HashMap::new()),
             pairings: Mutex::new(HashMap::new()),
+            asking: Mutex::new(HashSet::new()),
             conns: Mutex::new(HashMap::new()),
             cancelled: Mutex::new(HashSet::new()),
             next: AtomicU64::new(1),
@@ -357,6 +361,9 @@ pub(crate) struct Inner {
     peers: Mutex<HashMap<String, discovery::Seen>>,
     offers: Mutex<HashMap<u64, oneshot::Sender<Option<PathBuf>>>>,
     pairings: Mutex<HashMap<String, oneshot::Sender<bool>>>,
+    /// The devices with an offer waiting for the user: one at a time each, and a few in all, so a device that floods offers is
+    /// turned away instead of filling the screen with questions.
+    asking: Mutex<HashSet<String>>,
     conns: Mutex<HashMap<u64, quinn::Connection>>,
     cancelled: Mutex<HashSet<u64>>,
     next: AtomicU64,
@@ -415,6 +422,19 @@ impl Inner {
         if let Some(tx) = self.offers.lock().unwrap_or_else(|e| e.into_inner()).remove(&offer_id) {
             let _ = tx.send(dest);
         }
+    }
+
+    /// Takes a place among the offers waiting for the user, for `device`; false when it has one waiting already or too many wait.
+    pub(crate) fn begin_asking(&self, device: &str) -> bool {
+        let mut asking = self.asking.lock().unwrap_or_else(|e| e.into_inner());
+        if asking.contains(device) || asking.len() >= MAX_WAITING_OFFERS {
+            return false;
+        }
+        asking.insert(device.to_string())
+    }
+
+    pub(crate) fn end_asking(&self, device: &str) {
+        self.asking.lock().unwrap_or_else(|e| e.into_inner()).remove(device);
     }
 
     pub(crate) fn ask_pairing(&self, peer: &str) -> oneshot::Receiver<bool> {

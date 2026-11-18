@@ -141,6 +141,14 @@ fn stream_name(raw: &str) -> Option<&str> {
     (!name.is_empty()).then_some(name)
 }
 
+/// Marks a file as come from another computer (the Internet zone), as a browser marks a download: SmartScreen then asks before a
+/// program in it runs and Office opens its documents in Protected View. Ferry marks what it receives. A file system without named
+/// streams (FAT32, exFAT) cannot carry the mark: an error, which the caller may ignore.
+pub fn mark_downloaded(path: &Path, from: &str) -> std::io::Result<()> {
+    let from: String = from.chars().filter(|c| !c.is_control()).collect();
+    std::fs::write(zone_stream(path), format!("[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl={from}\r\n"))
+}
+
 /// Removes the downloaded mark (the Zone.Identifier stream), as Explorer's "Unblock" does.
 pub fn unblock(path: &Path) -> std::io::Result<()> {
     match std::fs::remove_file(zone_stream(path)) {
@@ -310,6 +318,20 @@ mod tests {
     #[test]
     fn named_streams_are_listed() {
         assert_eq!(super::stream_name(":Zone.Identifier:$DATA"), Some("Zone.Identifier"));
+    }
+
+    #[test]
+    fn a_marked_file_is_blocked_until_unblocked() {
+        let dir = std::env::temp_dir().join(format!("rf-motw-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("got.exe");
+        std::fs::write(&f, b"MZ").unwrap();
+        assert!(!super::zone_blocked(&f));
+        super::mark_downloaded(&f, "ferry://Mac\u{0}").unwrap();
+        assert!(super::zone_blocked(&f));
+        super::unblock(&f).unwrap();
+        assert!(!super::zone_blocked(&f));
+        let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(super::stream_name("::$DATA"), None);
         let f = std::env::temp_dir().join(format!("rf-streams-{}.txt", std::process::id()));
         std::fs::write(&f, b"content").unwrap();

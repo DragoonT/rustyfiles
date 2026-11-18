@@ -2021,4 +2021,9 @@ pub const EN: &[(&str, &str)] = &[
     ("Güvenilir", "Trusted"),
     ("Güvenilir cihazlar", "Trusted devices"),
     ("Unut", "Forget"),
+    ("O cihazda yanıt bekleyen bir teklifiniz zaten var.", "You already have an offer waiting on that device."),
+    ("Eşleşmemiş cihaz: adı doğrulanamaz", "Unpaired device: its name can't be verified"),
+    ("Kod:", "Code:"),
+    ("dosya gönderdi", "sent you files"),
+    ("Görmek için tıklayın", "Click to see them"),
 ];

@@ -301,8 +301,14 @@ async fn receive(
             file_count: items.iter().filter(|i| i.is_file()).count() as u64,
             total_bytes: items.iter().map(|i| i.size).sum(),
         };
+        if !inner.begin_asking(&hello.id) {
+            proto::write_frame(ctl_send, &decline("the device is busy with other offers")).await?;
+            return Err(Declined.into());
+        }
         let rx = inner.ask(offer);
-        tokio::time::timeout(DECISION, rx).await.ok().and_then(|r| r.ok()).flatten()
+        let answer = tokio::time::timeout(DECISION, rx).await.ok().and_then(|r| r.ok()).flatten();
+        inner.end_asking(&hello.id);
+        answer
     };
     let Some(dest) = dest else {
         proto::write_frame(ctl_send, &decline("declined")).await?;

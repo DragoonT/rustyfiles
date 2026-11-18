@@ -97,3 +97,7 @@ its trusted list.
 | trusted devices only | no | refused (`accept: false`) |
 | everyone | yes | as above |
 | everyone | no | asked; no answer in 3 minutes counts as no |
+
+A receiver asks about one offer per device at a time and about four at most in all; an offer beyond that is refused with
+`accept: false` and the reason "the device is busy with other offers". Clients match the reasons by these words, so they do not
+change: "only takes files from its trusted devices", "declined", "busy with other offers", "arrived damaged".

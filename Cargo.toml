@@ -128,6 +128,8 @@ windows = { version = "0.62", features = [
     # the dock's notification panel: UserNotificationListener (the list other apps have posted, read-only polling) and the app behind each
     "UI_Notifications",
     "UI_Notifications_Management",
+    # our own toasts (Ferry's questions and arrivals: rf-win toast_post.rs)
+    "Data_Xml_Dom",
     "ApplicationModel",
     # the share sheet for our windows (rf-win share.rs, issue 48)
     "ApplicationModel_DataTransfer",

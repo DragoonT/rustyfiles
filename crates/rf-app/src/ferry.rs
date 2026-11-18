@@ -41,6 +41,8 @@ enum Ev {
     Paired(String),
     Visibility(Visibility),
     Status(NetStatus),
+    /// A click on one of our toasts: its argument (`ferry:yes:<key>`, `ferry:no:<key>`, `ferry:show:<key>`, `ferry:open:<path>`).
+    Toast(String),
 }
 
 struct Listener(mpsc::UnboundedSender<Ev>);
@@ -113,7 +115,11 @@ pub struct Ferry {
     /// Why discovery or the whole service could not start, for the Settings page.
     problem: Option<String>,
     transfers: HashMap<u64, std::sync::mpsc::Sender<Step>>,
+    /// The transfers coming in, with the name of the device they come from (for the toast when they arrive).
+    incoming: HashMap<u64, String>,
     questions: Vec<Question>,
+    /// The questions asked in a toast (by key); the others are asked in the window.
+    in_toast: std::collections::HashSet<String>,
     window: Option<WindowHandle<QuestionView>>,
     events: Option<mpsc::UnboundedSender<Ev>>,
 }
@@ -198,6 +204,10 @@ fn stop(cx: &mut App) {
     f.peers.clear();
     f.problem = None;
     f.questions.clear();
+    for key in f.in_toast.drain() {
+        rf_win::toast_post::remove(crate::installer::APP_ID, &key);
+    }
+    f.incoming.clear();
     // (the cards' workers see their channel go and end as cancelled)
     f.transfers.clear();
     let window = f.window.take();
@@ -240,6 +250,7 @@ fn on_event(ev: Ev, cx: &mut App) {
         Ev::Offer(offer) => ask(Question::Offer(offer), cx),
         Ev::Receiving(offer) => {
             let dest = inbox_of(cx.global::<Settings>());
+            cx.global_mut::<Ferry>().incoming.insert(offer.transfer, offer.from_name.clone());
             track(cx, offer.transfer, format!("{}: {}", t!("Ferry ile alınıyor"), offer.from_name), Some(dest));
         }
         Ev::Progress(transfer, done, total) => {
@@ -248,18 +259,24 @@ fn on_event(ev: Ev, cx: &mut App) {
             }
         }
         Ev::Finished(transfer, result) => {
+            let from = cx.global_mut::<Ferry>().incoming.remove(&transfer);
+            if let Some(from) = from
+                && result.ok
+            {
+                arrived(transfer, from, result.paths.clone(), cx);
+            }
             if let Some(tx) = cx.global_mut::<Ferry>().transfers.remove(&transfer) {
                 let _ = tx.send(Step::End(result));
             }
         }
+        Ev::Toast(arg) => on_toast(&arg, cx),
         Ev::Code(peer, code) => {
             let f = cx.global::<Ferry>();
             let name = f.peers.iter().find(|p| p.id == peer).map(|p| p.name.clone()).unwrap_or_else(|| peer.clone());
             ask(Question::Pair { peer, name, code }, cx);
         }
         Ev::Paired(peer) => {
-            cx.global_mut::<Ferry>().questions.retain(|q| !matches!(q, Question::Pair { peer: p, .. } if *p == peer));
-            sync_window(cx);
+            forget_question(&Question::Pair { peer, name: String::new(), code: String::new() }.key(), cx);
             cx.refresh_windows();
         }
         Ev::Visibility(v) => {
@@ -328,6 +345,8 @@ fn failure_text(error: Option<&str>) -> String {
         t!("Karşı taraf reddetti.").to_string()
     } else if has("did not answer") || has("no answer") || has("timed out") {
         t!("Cihaz yanıt vermedi.").to_string()
+    } else if has("busy with other offers") {
+        t!("O cihazda yanıt bekleyen bir teklifiniz zaten var.").to_string()
     } else if has("arrived damaged") {
         t!("Bir dosya bozuk geldi. Yeniden gönderin: kalan kısım kaldığı yerden gelir.").to_string()
     } else if e.is_empty() {
@@ -339,48 +358,181 @@ fn failure_text(error: Option<&str>) -> String {
 
 // ------------------------------------------------------------------------------------------------------------------ questions
 
+/// Asks: in a toast with the answers as its buttons (the installed app), else in the window.
 fn ask(q: Question, cx: &mut App) {
     let key = q.key();
+    let toasted = toast_question(&q, cx);
     let f = cx.global_mut::<Ferry>();
     f.questions.retain(|x| x.key() != key);
     f.questions.push(q);
+    if toasted {
+        f.in_toast.insert(key.clone());
+    }
     sync_window(cx);
     // the other side stops waiting after three minutes: the question goes with it
     cx.spawn(async move |cx| {
         cx.background_executor().timer(QUESTION_LIFE).await;
-        let _ = cx.update(|cx| {
-            if cx.has_global::<Ferry>() {
-                cx.global_mut::<Ferry>().questions.retain(|x| x.key() != key);
-            }
-            sync_window(cx);
-        });
+        cx.update(|cx| forget_question(&key, cx));
     })
     .detach();
 }
 
 fn answer(q: &Question, yes: bool, cx: &mut App) {
-    let key = q.key();
+    forget_question(&q.key(), cx);
+    let Some(n) = cx.global::<Ferry>().nearby.clone() else { return };
+    match q {
+        Question::Offer(o) if yes => {
+            let dest = inbox_of(cx.global::<Settings>());
+            n.accept(o.id, dest.to_string_lossy().into_owned());
+            cx.global_mut::<Ferry>().incoming.insert(o.transfer, o.from_name.clone());
+            track(cx, o.transfer, format!("{}: {}", t!("Ferry ile alınıyor"), o.from_name), Some(dest));
+        }
+        Question::Offer(o) => n.reject(o.id),
+        Question::Pair { peer, .. } => n.confirm_pairing(peer.clone(), yes),
+    }
+}
+
+/// A question is no longer asked (answered, given up, or out of time): out of the window, and its toast taken away.
+fn forget_question(key: &str, cx: &mut App) {
+    if !cx.has_global::<Ferry>() {
+        return;
+    }
     let f = cx.global_mut::<Ferry>();
     f.questions.retain(|x| x.key() != key);
-    let nearby = f.nearby.clone();
-    if let Some(n) = nearby {
-        match q {
-            Question::Offer(o) if yes => {
-                let dest = inbox_of(cx.global::<Settings>());
-                n.accept(o.id, dest.to_string_lossy().into_owned());
-                track(cx, o.transfer, format!("{}: {}", t!("Ferry ile alınıyor"), o.from_name), Some(dest));
-            }
-            Question::Offer(o) => n.reject(o.id),
-            Question::Pair { peer, .. } => n.confirm_pairing(peer.clone(), yes),
-        }
+    if f.in_toast.remove(key) {
+        rf_win::toast_post::remove(crate::installer::APP_ID, key);
     }
     sync_window(cx);
 }
 
-/// The question window: open while there is a question, closed when there is none, redrawn when they change.
+/// What a question says: its title, its lines, a pairing's code, and its two answers.
+fn texts(q: &Question) -> (String, Vec<String>, Option<String>, &'static str, &'static str) {
+    match q {
+        Question::Offer(o) => {
+            // "photo.jpg", or "photo.jpg and 3 items" (the top-level names: a folder counts once)
+            let what = match o.names.len() {
+                0 => crate::i18n::items(o.file_count as usize),
+                1 => o.names[0].clone(),
+                n => format!("{} {} {}", o.names[0], t!("ve"), crate::i18n::items(n - 1)),
+            };
+            let mut lines = vec![format!("{} · {}", what, rf_core::format::size(o.total_bytes))];
+            // (a device that was never paired can call itself anything)
+            if !o.trusted {
+                lines.push(t!("Eşleşmemiş cihaz: adı doğrulanamaz").to_string());
+            }
+            (format!("{} {}", o.from_name, t!("dosya göndermek istiyor")), lines, None, t!("Reddet"), t!("Kabul et"))
+        }
+        Question::Pair { name, code, .. } => (
+            format!("{}: {name}", t!("Eşleştir")),
+            vec![t!("İki cihazda da aynı kodun göründüğünden emin olun. Eşleşen cihazlar birbirine sormadan dosya gönderebilir.").to_string()],
+            Some(format!("{} {}", &code[..3.min(code.len())], &code[3.min(code.len())..])),
+            t!("İptal"),
+            t!("Eşleştir"),
+        ),
+    }
+}
+
+/// Windows shows our toasts only for the installed app: its Start menu shortcut carries the AppUserModelID. A build from the source
+/// tree or the portable zip has none, and a toast would vanish without a word: those ask in the window.
+fn toasts_usable() -> bool {
+    dirs::data_dir().is_some_and(|d| d.join(r"Microsoft\Windows\Start Menu\Programs\rustyfiles.lnk").exists())
+}
+
+fn toast_question(q: &Question, cx: &App) -> bool {
+    if !toasts_usable() {
+        return false;
+    }
+    let Some(tx) = cx.global::<Ferry>().events.clone() else { return false };
+    let key = q.key();
+    let (title, lines, code, no, yes) = texts(q);
+    let mut all: Vec<String> = code.map(|c| format!("{} {c}", t!("Kod:"))).into_iter().collect();
+    all.extend(lines);
+    let refs: Vec<&str> = all.iter().map(String::as_str).collect();
+    let buttons = [
+        rf_win::toast_post::Button { label: no.to_string(), argument: format!("ferry:no:{key}") },
+        rf_win::toast_post::Button { label: yes.to_string(), argument: format!("ferry:yes:{key}") },
+    ];
+    let toast = rf_win::toast_post::Toast { tag: &key, title: &title, lines: &refs, launch: &format!("ferry:show:{key}"), buttons: &buttons, stays: true };
+    match rf_win::toast_post::show(crate::installer::APP_ID, &toast, move |arg| {
+        let _ = tx.unbounded_send(Ev::Toast(arg));
+    }) {
+        Ok(()) => true,
+        Err(e) => {
+            log::info!("ferry: no toast ({e}); asking in the window");
+            false
+        }
+    }
+}
+
+fn on_toast(arg: &str, cx: &mut App) {
+    let mut parts = arg.splitn(3, ':');
+    let (Some("ferry"), Some(kind), Some(rest)) = (parts.next(), parts.next(), parts.next()) else { return };
+    match kind {
+        "yes" | "no" => {
+            let q = cx.global::<Ferry>().questions.iter().find(|q| q.key() == rest).cloned();
+            if let Some(q) = q {
+                answer(&q, kind == "yes", cx);
+            }
+        }
+        // a click on the question's toast itself: it goes away, so the question moves to the window
+        "show" => {
+            cx.global_mut::<Ferry>().in_toast.remove(rest);
+            sync_window(cx);
+        }
+        "open" => {
+            crate::workspace::route_ipc_shown(format!("{}{rest}", crate::workspace::SELECT_PREFIX), cx);
+        }
+        _ => {}
+    }
+}
+
+/// Files came in: each is marked as come from another computer (SmartScreen asks before a program among them runs), and the installed
+/// app says so in a toast that opens them.
+fn arrived(transfer: u64, from: String, paths: Vec<String>, cx: &mut App) {
+    let referrer = format!("ferry://{from}");
+    let marked = paths.clone();
+    std::thread::spawn(move || {
+        for p in &marked {
+            mark_tree(std::path::Path::new(p), &referrer);
+        }
+    });
+    let Some(first) = paths.first().cloned() else { return };
+    if !toasts_usable() {
+        return;
+    }
+    let Some(tx) = cx.global::<Ferry>().events.clone() else { return };
+    let name = std::path::Path::new(&first).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let what = if paths.len() == 1 { name } else { format!("{name} {} {}", t!("ve"), crate::i18n::items(paths.len() - 1)) };
+    let title = format!("{from} {}", t!("dosya gönderdi"));
+    let lines = [what.as_str(), t!("Görmek için tıklayın")];
+    let toast = rf_win::toast_post::Toast { tag: &format!("got-{transfer}"), title: &title, lines: &lines, launch: &format!("ferry:open:{first}"), buttons: &[], stays: false };
+    if let Err(e) = rf_win::toast_post::show(crate::installer::APP_ID, &toast, move |arg| {
+        let _ = tx.unbounded_send(Ev::Toast(arg));
+    }) {
+        log::info!("ferry: no toast for an arrival: {e}");
+    }
+}
+
+/// Marks a received file, or every file in a received folder (links are not followed).
+fn mark_tree(path: &std::path::Path, from: &str) {
+    let Ok(meta) = std::fs::symlink_metadata(path) else { return };
+    if meta.is_dir() {
+        if let Ok(rd) = std::fs::read_dir(path) {
+            for e in rd.flatten() {
+                mark_tree(&e.path(), from);
+            }
+        }
+    } else if meta.is_file()
+        && let Err(e) = rf_win::fileinfo::mark_downloaded(path, from)
+    {
+        log::info!("ferry: cannot mark {}: {e}", path.display());
+    }
+}
+
+/// The question window: open while a question is asked in it (not in a toast), closed when none is, redrawn when they change.
 fn sync_window(cx: &mut App) {
     let Some(f) = cx.try_global::<Ferry>() else { return };
-    let empty = f.questions.is_empty();
+    let empty = f.questions.iter().all(|q| f.in_toast.contains(&q.key()));
     let window = f.window;
     match (empty, window) {
         (true, Some(w)) => {
@@ -431,33 +583,14 @@ struct QuestionView;
 impl Render for QuestionView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = Palette::for_window(window);
-        let questions = cx.try_global::<Ferry>().map(|f| f.questions.clone()).unwrap_or_default();
+        // (the questions asked in a toast are not asked here too)
+        let questions: Vec<Question> = cx
+            .try_global::<Ferry>()
+            .map(|f| f.questions.iter().filter(|q| !f.in_toast.contains(&q.key())).cloned().collect())
+            .unwrap_or_default();
         let Some(q) = questions.first().cloned() else { return div().into_any_element() };
         let waiting = questions.len() - 1;
-        let (title, line, code, no, yes) = match &q {
-            Question::Offer(o) => {
-                // "photo.jpg", or "photo.jpg and 3 items" (the top-level names: a folder counts once)
-                let what = match o.names.len() {
-                    0 => crate::i18n::items(o.file_count as usize),
-                    1 => o.names[0].clone(),
-                    n => format!("{} {} {}", o.names[0], t!("ve"), crate::i18n::items(n - 1)),
-                };
-                (
-                    format!("{} {}", o.from_name, t!("dosya göndermek istiyor")),
-                    format!("{} · {}", what, rf_core::format::size(o.total_bytes)),
-                    None,
-                    t!("Reddet"),
-                    t!("Kabul et"),
-                )
-            }
-            Question::Pair { name, code, .. } => (
-                format!("{}: {name}", t!("Eşleştir")),
-                t!("İki cihazda da aynı kodun göründüğünden emin olun. Eşleşen cihazlar birbirine sormadan dosya gönderebilir.").to_string(),
-                Some(format!("{} {}", &code[..3.min(code.len())], &code[3.min(code.len())..])),
-                t!("İptal"),
-                t!("Eşleştir"),
-            ),
-        };
+        let (title, lines, code, no, yes) = texts(&q);
         let (qn, qy) = (q.clone(), q);
         v_flex()
             .size_full()
@@ -473,7 +606,7 @@ impl Render for QuestionView {
                     .children((waiting > 0).then(|| div().ml_auto().text_xs().text_color(p.text_secondary).child(format!("+{waiting}")))),
             )
             .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).truncate().child(title))
-            .child(div().text_xs().text_color(p.text_secondary).overflow_hidden().child(line))
+            .children(lines.into_iter().map(|line| div().text_xs().text_color(p.text_secondary).overflow_hidden().child(line)))
             .children(code.map(|c| div().text_2xl().font_weight(FontWeight::BOLD).child(c)))
             .child(
                 h_flex()
@@ -693,5 +826,53 @@ fn pair(peer_id: String, cx: &mut App) {
     let Some(n) = cx.global::<Ferry>().nearby.clone() else { return };
     if let Err(e) = n.pair(peer_id) {
         log::warn!("ferry: cannot pair: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // (not `super::*`: gpui's own `test` attribute would come in with it)
+    use super::{Question, failure_text, texts};
+    use rf_nearby::Offer;
+
+    fn offer(trusted: bool, names: &[&str]) -> Offer {
+        Offer {
+            id: 7,
+            transfer: 8,
+            from_id: "abc".into(),
+            from_name: "Mac".into(),
+            from_os: "macos".into(),
+            trusted,
+            names: names.iter().map(|n| n.to_string()).collect(),
+            file_count: 3,
+            total_bytes: 2048,
+        }
+    }
+
+    #[test]
+    fn an_unpaired_device_is_said_to_be_unverified() {
+        let (_, lines, code, _, _) = texts(&Question::Offer(offer(false, &["photo.jpg"])));
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].starts_with("photo.jpg"));
+        assert!(code.is_none());
+        let (_, lines, _, _, _) = texts(&Question::Offer(offer(true, &["photo.jpg", "docs"])));
+        assert_eq!(lines.len(), 1, "a paired device needs no warning: {lines:?}");
+        assert!(lines[0].starts_with("photo.jpg "), "{lines:?}");
+    }
+
+    #[test]
+    fn a_pairing_shows_its_code_in_two_halves() {
+        let q = Question::Pair { peer: "p".into(), name: "Mac".into(), code: "012345".into() };
+        let (_, _, code, _, _) = texts(&q);
+        assert_eq!(code.as_deref(), Some("012 345"));
+        assert_eq!(q.key(), "pair-p");
+    }
+
+    #[test]
+    fn crate_reasons_get_interface_words() {
+        for reason in ["the device is busy with other offers", "the device only takes files from its trusted devices", "declined", "x did not answer"] {
+            assert_ne!(failure_text(Some(reason)), reason, "{reason}");
+        }
+        assert_eq!(failure_text(Some("something new")), "something new");
     }
 }
