@@ -65,6 +65,7 @@ mod preview;
 mod preview_trace;
 mod program_launch;
 mod properties_view;
+mod quick_commands;
 mod quick_search;
 mod run_names;
 mod settings_rows;

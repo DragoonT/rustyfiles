@@ -693,6 +693,7 @@ impl Workspace {
         }
         let places = cx.new(Places::new);
         let images = cx.new(ImageCache::new);
+        cx.observe(&images, |_, _, cx| cx.notify()).detach();
         let ops = cx.global::<crate::status_center::OpsGlobal>().0.clone();
         cx.observe(&ops, |_, _, cx| cx.notify()).detach();
         let preview = {
@@ -2947,6 +2948,8 @@ impl Workspace {
     /// Command bar above the file list (Files' toolbar): create, clipboard and item commands on
     /// the left; sort, view and the preview pane on the right.
     fn render_commandbar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        use crate::fluent_menu::{Item, Menu, MenuIcon};
+
         let tab = self.active_tab().read(cx);
         let in_folder = tab.location().path().is_some();
         let (sel, _, _) = tab.selection_summary();
@@ -3003,12 +3006,32 @@ impl Workspace {
         };
         let sep = || div().w(px(1.)).h(px(20.)).mx_1().bg(p.divider);
         // which buttons the user wants (Settings > Appearance > Toolbar buttons)
-        let (hidden, extras) = {
+        let (hidden, extras, commands) = {
             let st = cx.global::<crate::settings::Settings>();
-            (st.toolbar_hidden.clone(), st.toolbar_extra.clone())
+            (st.toolbar_hidden.clone(), st.toolbar_extra.clone(), st.toolbar_commands.clone())
         };
         let on = |k: &str| !hidden.iter().any(|h| h == k);
         let extra = |k: &str| extras.iter().any(|h| h == k);
+        let mut inline_commands = Vec::new();
+        let mut menu_commands = Vec::new();
+        for (i, command) in commands.into_iter().enumerate() {
+            let picture = command.icon_path()
+                .and_then(|path| self.images.update(cx, |cache, cx| cache.shell_icon(&path, 32, cx)));
+            if command.in_menu {
+                let label = command.menu_label().to_owned();
+                let icon = picture.map_or(MenuIcon::Lucide(L::SquareTerminal), MenuIcon::Image);
+                let view = self.active_tab().downgrade();
+                menu_commands.push(Item::action(label, icon, move |window, cx| {
+                    if let Some(view) = view.upgrade() {
+                        let view = view.read(cx);
+                        crate::quick_commands::run(command.clone(), view.current_dir(), view.selection_paths(), window, cx);
+                    }
+                }));
+            } else {
+                inline_commands.push((i, command, picture));
+            }
+        }
+        let menu_name = crate::i18n::tx("Özel komutlar", "Custom commands");
 
         h_flex()
             .h(px(44.))
@@ -3050,6 +3073,63 @@ impl Workspace {
             .children(extra("refresh").then(|| cmd("cb-refresh", L::RotateCw, "Yenile  (F5)", true, cx, |_, w, cx| w.dispatch_action(Box::new(Refresh), cx))))
             // undo, the selection commands, properties, Settings (issue 55, Explorer's "See more")
             .children(on("more").then(|| drop("cb-more", L::Ellipsis, None, "Diğer", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::More)))
+            .children((!inline_commands.is_empty() || !menu_commands.is_empty()).then(sep))
+            .when(!inline_commands.is_empty(), |d| {
+                d.child(
+                    h_flex().id("cb-quick-commands").min_w_0().overflow_x_scroll().gap_1().children(
+                        inline_commands.into_iter().map(|(i, command, picture)| {
+                            let tip = command.tooltip_text().to_owned();
+                            let label = command.button_label().map(str::to_owned);
+                            let icon = if let Some(picture) = picture {
+                                img(picture).size(px(18.)).object_fit(ObjectFit::Contain).flex_shrink_0().into_any_element()
+                            } else {
+                                Icon::new(L::SquareTerminal).size(px(18.)).flex_shrink_0().into_any_element()
+                            };
+                            div()
+                                .id(("cb-command", i))
+                                .role(Role::Button)
+                                .aria_label(tip.clone())
+                                .h(px(32.))
+                                .max_w(px(160.))
+                                .flex_shrink_0()
+                                .px_2()
+                                .flex()
+                                .items_center()
+                                .gap_1p5()
+                                .rounded(theme::RADIUS_SM)
+                                .text_sm()
+                                .tab_index(0)
+                                .cursor_pointer()
+                                .hover(|s| s.bg(p.hover))
+                                .active(|s| s.bg(p.pressed))
+                                .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+                                .when(label.is_none(), |d| d.w(px(36.)).justify_center())
+                                .child(icon)
+                                .children(label.map(|label| div().truncate().child(label)))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let view = this.active_tab().read(cx);
+                                    crate::quick_commands::run(command.clone(), view.current_dir(), view.selection_paths(), window, cx);
+                                }))
+                        }),
+                    ),
+                )
+            })
+            .when(!menu_commands.is_empty(), |d| {
+                d.child(
+                    h_flex().id("cb-quick-menu")
+                        .role(Role::Button).aria_label(menu_name)
+                        .h(px(32.)).px_2().gap_1().flex_shrink_0().items_center()
+                        .rounded(theme::RADIUS_SM).tab_index(0).cursor_pointer()
+                        .hover(|s| s.bg(p.hover)).active(|s| s.bg(p.pressed))
+                        .when(!popups_open, |d| d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(menu_name).build(w, cx)))
+                        .child(Icon::new(L::Layers).size(px(16.)))
+                        .child(Icon::new(L::ChevronDown).size(px(12.)).text_color(p.text_secondary))
+                        .on_click(move |ev, window, cx| {
+                            let pos = point(ev.position().x - px(14.), theme::TITLEBAR_H + px(48. + 46.));
+                            crate::fluent_menu::show(Menu { quick: Vec::new(), items: menu_commands.clone() }, pos, window, cx);
+                        }),
+                )
+            })
             .child(div().flex_1())
             .children(on("filter").then(|| {
                 div()

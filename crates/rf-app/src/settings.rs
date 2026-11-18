@@ -406,6 +406,8 @@ pub struct Settings {
     /// Buttons of the command bar that are off unless asked for ("newfolder", "terminal",
     /// "hidden", "refresh").
     pub toolbar_extra: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub toolbar_commands: Vec<crate::quick_commands::QuickCommand>,
     pub preview_width: f32,
     /// Where the preview pane sits: at the right of the list (the default) or under it. The key is written only for "bottom".
     #[serde(skip_serializing_if = "rf_core::previewpane::PreviewPos::is_right")]
@@ -761,6 +763,7 @@ impl Default for Settings {
             search_history: Vec::new(),
             toolbar_hidden: Vec::new(),
             toolbar_extra: Vec::new(),
+            toolbar_commands: Vec::new(),
             preview_width: 300.,
             preview_position: rf_core::previewpane::PreviewPos::Right,
             preview_height: rf_core::previewpane::BOTTOM_DEFAULT_H,
