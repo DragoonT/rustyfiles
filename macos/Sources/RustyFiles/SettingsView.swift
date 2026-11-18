@@ -679,6 +679,7 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
     }
 
     func show(_ p: SettingsPage) {
+        defer { reportFerryPage() }
         page = p
         nav.selected = p
         search.stringValue = ""
@@ -687,10 +688,41 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
         scroll.contentView.scroll(to: .zero)
     }
 
+    /// Whether the Ferry page is what this view shows right now (in a window, not hidden).
+    private func reportFerryPage() {
+        let showing = window != nil && !isHiddenOrHasHiddenAncestor && page == .ferry && query.isEmpty
+        FerryService.shared.settingsPage(self, isShowing: showing)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        reportFerryPage()
+        // a window closed with the page open puts the visibility back too
+        if let window {
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    FerryService.shared.settingsPage(self, isShowing: false)
+                }
+            }
+        }
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        reportFerryPage()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        reportFerryPage()
+    }
+
     func controlTextDidChange(_ note: Notification) {
         query = search.stringValue.trimmingCharacters(in: .whitespaces).lowercased()
         nav.selected = query.isEmpty ? page : nil
         rebuild()
+        reportFerryPage()
     }
 
     override func layout() {
