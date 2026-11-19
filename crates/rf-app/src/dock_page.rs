@@ -190,6 +190,26 @@ pub(crate) fn entries() -> Vec<Entry> {
             Control::Switch(|s| s.dock_side_tall, |s, v| s.dock_side_tall = v),
         ),
         e(
+            "dock-autohide",
+            "dock_autohide",
+            General,
+            dock,
+            L::ArrowDownToLine,
+            t!("Dock'u otomatik gizle"),
+            Some(t!("Dock ekranın altında saklanır, imleç alt kenara gelince çıkar ve imleç ayrılınca yeniden saklanır. Açıkken pencereler için yer ayırmaz.")),
+            Control::Switch(|s| s.dock_autohide, |s, v| s.dock_autohide = v),
+        ),
+        e(
+            "dock-opaque",
+            "dock_opaque",
+            General,
+            dock,
+            L::Square,
+            t!("Düz arka plan"),
+            Some(t!("Adalar cam yerine düz, opak bir zeminle çizilir: hareketli bir duvar kâğıdında ya da pencerelerin önünde simgeler daha kolay seçilir.")),
+            Control::Switch(|s| s.dock_opaque, |s, v| s.dock_opaque = v),
+        ),
+        e(
             "dock-tray-compact",
             "dock_tray_compact",
             General,
@@ -677,7 +697,7 @@ mod tests {
         assert_eq!(secs, Section::ALL.to_vec(), "an empty section would be a heading with nothing under it");
         // the sections hold what the page promises
         let ids = |sec: Section| g.iter().find(|(s, _)| *s == sec).map(|(_, v)| v.iter().map(|e| e.field).collect::<Vec<_>>()).unwrap();
-        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_side_tall", "dock_tray_compact", "dock_all_monitors", "dock_magnify", "dock_scroll_volume", "dock_start_grow"]);
+        assert_eq!(ids(Section::General), ["dock_enabled", "dock_reserve", "dock_size", "dock_side_tall", "dock_autohide", "dock_opaque", "dock_tray_compact", "dock_all_monitors", "dock_magnify", "dock_scroll_volume", "dock_start_grow"]);
         assert_eq!(ids(Section::Left), ["dock_own_start", "dock_start_recommended", "dock_search", "dock_search_hypersearch", "dock_weather_city"]);
         assert_eq!(ids(Section::Middle), ["dock_hover_previews", "dock_app_menu", "dock_thin_when_maximized", "dock_apps_where"]);
         assert_eq!(ids(Section::Right), ["dock_own_control_centre", "dock_own_calendar", "dock_own_notifications"]);

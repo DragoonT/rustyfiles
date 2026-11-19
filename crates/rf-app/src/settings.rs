@@ -648,6 +648,11 @@ pub struct Settings {
     /// The left and the right island are as tall as the middle one (off: they are lower, as they always were). While the dock is thin
     /// under a maximised window all three are the thin height either way.
     pub dock_side_tall: bool,
+    /// The dock hides at the bottom of the screen and comes up when the pointer reaches the edge (off; issue 112). It reserves no
+    /// band then: windows use the whole screen.
+    pub dock_autohide: bool,
+    /// The dock's islands on a solid fill instead of the glass (off; issue 113).
+    pub dock_opaque: bool,
     /// The left island's search: a field, its button only, or none (`DockSearch`).
     pub dock_search: DockSearch,
     /// A click on the dock's search field or button opens HyperSearch instead of the Start panel (issue 41). Off by default.
@@ -893,6 +898,8 @@ impl Default for Settings {
             dock_status_order: Vec::new(),
             dock_status_hidden: Vec::new(),
             dock_side_tall: false,
+            dock_autohide: false,
+            dock_opaque: false,
             dock_search: DockSearch::Field,
             dock_search_hypersearch: false,
             dock_tray_compact: false,

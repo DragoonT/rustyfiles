@@ -59,11 +59,14 @@ pub struct IslandGlass {
     /// The island's glass is put away while a panel's glass, grown out of it, stands in its place (`grow_host.rs`): the engine is given
     /// no shape (it draws nothing), the shape the layout wants is only remembered, and the tone stays as it was.
     hidden: bool,
+    /// The dock's "solid background" (`look::plain`): no glass at all, the island paints its own opaque fill. Apart from `hidden`, which
+    /// the magnification switches on and off.
+    plain: bool,
 }
 
 impl IslandGlass {
     pub fn new() -> IslandGlass {
-        IslandGlass { hwnd: 0, machine: Machine::default(), tone: Tone::new(true), scale: 1.0, shape: NO_SHAPE, sent_dark: true, attached: false, hidden: false }
+        IslandGlass { hwnd: 0, machine: Machine::default(), tone: Tone::new(true), scale: 1.0, shape: NO_SHAPE, sent_dark: true, attached: false, hidden: false, plain: super::look::plain() }
     }
 
     /// Puts the glass away (`true`) or back: the engine is told at once, and only when something differs. The remembered shape is
@@ -78,6 +81,21 @@ impl IslandGlass {
         }
     }
 
+    /// The "solid background" switch for this island: the engine draws nothing and the island its own opaque fill (`fallback`).
+    pub fn set_plain(&mut self, plain: bool) {
+        if plain == self.plain {
+            return;
+        }
+        self.plain = plain;
+        if self.attached {
+            rf_win::glass::set_options(self.hwnd, self.engine_options());
+        }
+    }
+
+    pub fn plain(&self) -> bool {
+        self.plain
+    }
+
     /// The window handle (0 before [`IslandGlass::start`]).
     pub fn hwnd(&self) -> isize {
         self.hwnd
@@ -87,7 +105,7 @@ impl IslandGlass {
     /// tint (`poll_tone`, `sync`) and the shape (`set_shape`) change the SAME options value: every change of one is sent with the
     /// current value of the other, so neither can undo the other.
     fn engine_options(&self) -> GlassOptions {
-        options(self.sent_dark, self.scale, if self.hidden { NO_SHAPE } else { self.shape })
+        options(self.sent_dark, self.scale, if self.hidden || self.plain { NO_SHAPE } else { self.shape })
     }
 
     /// Where the glass is in the window (device px: x, y, w, h). Before the glass runs this is only remembered (it is what the glass
@@ -99,7 +117,7 @@ impl IslandGlass {
             return;
         }
         self.shape = shape;
-        if self.attached && !self.hidden {
+        if self.attached && !self.hidden && !self.plain {
             rf_win::glass::set_options(self.hwnd, self.engine_options());
         }
     }
