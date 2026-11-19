@@ -58,6 +58,8 @@ pub struct RightIsland {
     /// The input language of the window in front and how many keyboard layouts the user has (`rf_win::inputlang`; the primary
     /// monitor's island reads it). The button is there with two layouts or more.
     lang: rf_win::inputlang::Current,
+    /// A part of a wheel notch turned over the volume symbol and not used yet (a touchpad turns in small parts).
+    vol_rest: f32,
 }
 
 /// A button held on one of the island's own buttons, from the press to the release.
@@ -139,7 +141,7 @@ impl RightIsland {
             })
             .detach();
         }
-        RightIsland { glass, mon, content, lines, reported, tray_extra: 0.0, focus: None, drives_read: false, status_press: None, lang: Default::default() }
+        RightIsland { glass, mon, content, lines, reported, tray_extra: 0.0, focus: None, drives_read: false, status_press: None, lang: Default::default(), vol_rest: 0.0 }
     }
 
     /// The input language was read: the button follows it. A reading without a window in front keeps the name that was shown.
@@ -462,6 +464,29 @@ fn bell_button(pal: Palette, dot: Option<Hsla>, k: f32, on_click: impl Fn(&mut A
         .on_click(move |_, _, cx| on_click(cx))
 }
 
+impl RightIsland {
+    /// The wheel was turned over the volume symbol: the system's volume goes 2 % up or down a notch, as over Windows' own symbol (issue
+    /// 136). Muting is not touched (Windows does not either).
+    fn volume_scrolled(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        let lines = match ev.delta {
+            ScrollDelta::Lines(p) => if p.y != 0.0 { p.y } else { p.x },
+            ScrollDelta::Pixels(p) => f32::from(p.y) / 16.0,
+        };
+        let notches = rf_win::appvolume::take_notches(&mut self.vol_rest, rf_win::appvolume::notches_of_lines(lines, rf_win::appvolume::wheel_lines()));
+        let Some(now) = rf_win::sysstatus::audio::snapshot().filter(|s| s.available) else { return };
+        if notches == 0 {
+            return;
+        }
+        rf_win::sysstatus::audio::set_volume(volume_after_notches(now.volume, notches));
+        cx.stop_propagation();
+    }
+}
+
+/// The volume after `notches` wheel notches from `volume` (0.0 to 1.0): 2 % a notch, as Windows' own symbol does.
+fn volume_after_notches(volume: f32, notches: i32) -> f32 {
+    ((volume * 50.0).round() + notches as f32).clamp(0.0, 50.0) / 50.0
+}
+
 /// What a click on the network or the volume symbol does (the symbols are the primary monitor's).
 fn open_controls(cx: &mut App) {
     if own_control_centre(cx) {
@@ -547,6 +572,8 @@ impl Render for RightIsland {
                         .on_mouse_down(MouseButton::Left, cx.listener(move |me, e: &MouseDownEvent, _, cx| me.status_down(which, e.click_count, cx)))
                         // a right click on the volume symbol: the output devices, to choose from
                         .when(which == Status::Volume, |d| d.on_mouse_up(MouseButton::Right, |_, _, cx| open_output_devices(cx)))
+                        // the wheel over it: the system's volume, as over Windows' own symbol (issue 136)
+                        .when(which == Status::Volume, |d| d.on_scroll_wheel(cx.listener(|me, ev: &ScrollWheelEvent, _, cx| me.volume_scrolled(ev, cx))))
                         .child(button),
                 );
             }
@@ -592,5 +619,18 @@ impl Render for RightIsland {
                 .child(clock)
                 .when(self.content.bell, |d| d.child(div().ml(px(plan::RIGHT_GAP * k)).child(bell_button(pal, dot, k, move |cx| open_notifications(mon, cx))))),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_wheel_notch_over_the_volume_symbol_is_two_percent() {
+        assert_eq!(super::volume_after_notches(0.40, 1), 0.42);
+        assert_eq!(super::volume_after_notches(0.40, -3), 0.34);
+        assert_eq!(super::volume_after_notches(0.99, 2), 1.0);
+        assert_eq!(super::volume_after_notches(0.01, -1), 0.0);
+        // a level between steps comes to the nearest step first
+        assert_eq!(super::volume_after_notches(0.411, 1), 0.44, "0.411 is taken as the step 0.42, one notch up");
     }
 }
