@@ -2175,7 +2175,7 @@ impl Workspace {
         crate::fluent_menu::is_open(cx) || crate::flyout::is_open(cx) || self.ops.read(cx).open
     }
 
-    fn render_titlebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_titlebar(&mut self, p: &Palette, window: &Window, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let popups_open = self.popups_open(cx);
         // the saved session this window holds, at the far left of the tabs
         let session_label = self.session_name.clone().filter(|n| cx.global::<crate::settings::Settings>().saved_sessions.iter().any(|s| &s.name == n)).map(|name| {
@@ -2220,7 +2220,11 @@ impl Workspace {
         let strip = (self.viewport_w - 150. - TITLEBAR_LEAD - 40.).max(120.);
         let n = self.tabs.len().max(1) as f32;
         let tab_w = ((strip - 4.) / n - 4.).clamp(TAB_MIN_W, TAB_MAX_W);
-        let roomy = tab_w >= 110.;
+        // Settings > Appearance > "Tabs as wide as their names" (issue 119): each tab its measured name plus its icon and buttons, within
+        // the same limits; the buttons are in that width, so they always show
+        let fit_names = cx.global::<crate::settings::Settings>().tabs_fit_names;
+        let (name_px, name_style) = (rems(0.875).to_pixels(window.rem_size()), window.text_style());
+        let roomy = fit_names || tab_w >= 110.;
         let mut tab_claimed = false;
         let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         for (i, tab) in self.tabs.iter().enumerate() {
@@ -2240,6 +2244,12 @@ impl Workspace {
             };
             let windows_home_tab = windows_theme && matches!(&location, Location::Home);
             let term_dir = tab_terminal_dir(&location);
+            let tab_w = if fit_names {
+                let name = window.text_system().layout_line(&title, name_px, &[name_style.to_run(title.len())], None).width;
+                (f32::from(name) + TAB_CHROME_W + if term_dir.is_some() { TAB_TERMINAL_W } else { 0. }).clamp(TAB_MIN_W, TAB_MAX_W)
+            } else {
+                tab_w
+            };
             let active = i == self.active;
             let drag = TabDrag { ix: i, title: title.clone().into() };
             let accent = p.accent;
@@ -3926,6 +3936,10 @@ const TAB_ANIM_MS: u64 = 200;
 const DRAG_HOVER_MS: u64 = 500;
 const TAB_MIN_W: f32 = 72.;
 const TAB_MAX_W: f32 = 220.;
+/// A tab's width besides its name: the padding, the icon and its gap, the close button and its gap.
+const TAB_CHROME_W: f32 = 12. + 14. + 8. + 8. + 22. + 4. + 2.;
+/// The terminal button and its gap, on a tab that has one.
+const TAB_TERMINAL_W: f32 = 22. + 8.;
 const SIDEBAR_MIN: f32 = 160.;
 /// The icons-only sidebar, and the width below which a drag collapses to it.
 const RAIL_W: f32 = 56.;
@@ -4361,7 +4375,7 @@ impl Render for Workspace {
         let glass_on = self.glass_shown && self.glass_hwnd != 0;
         self.tab_lens = glass_on;
         self.tab_lens_claimed = false;
-        let titlebar = self.render_titlebar(&p, cx);
+        let titlebar = self.render_titlebar(&p, window, cx);
         self.tab_lens = false;
         let strip_frame = crate::glass::StripFrame { on_screen: true, tab_claimed: self.tab_lens_claimed };
         let toolbar = self.render_toolbar(&p, cx);

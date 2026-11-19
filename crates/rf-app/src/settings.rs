@@ -545,6 +545,8 @@ pub struct Settings {
     pub confirm_delete: DeletePref,
     pub warn_extension_change: bool,
     pub select_on_hover: bool,
+    /// Each tab as wide as its name (within the usual limits) instead of all tabs equally wide. Issue 119.
+    pub tabs_fit_names: bool,
     /// Typing in a folder's list filters it by name (the filter bar opens with the letters); off: typing selects the item whose
     /// name starts with them. Issue 106.
     pub type_to_filter: bool,
@@ -850,6 +852,7 @@ impl Default for Settings {
             confirm_delete: DeletePref::PermanentOnly,
             warn_extension_change: true,
             select_on_hover: false,
+            tabs_fit_names: false,
             type_to_filter: false,
             double_click_up: true,
             select_previous_on_up: true,

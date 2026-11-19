@@ -365,6 +365,28 @@ mod tests {
     use windows::Win32::System::Com::IServiceProvider;
     use windows::Win32::UI::Shell::{IFolderView, SWFO_NEEDDISPATCH};
 
+    /// Manual: how the shell names the Desktop folder and the parent of a file on it (issue 97).
+    /// `RF_DESKTOP_FILE=<a file on the desktop> cargo test -p rf-win --lib shell_window::tests::desktop_pidls -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn desktop_pidls() {
+        use windows::Win32::UI::Shell::{ILClone, ILIsEqual, ILRemoveLastID};
+        let file = PathBuf::from(std::env::var("RF_DESKTOP_FILE").unwrap());
+        let dir = file.parent().unwrap().to_path_buf();
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let parse = |p: &Path| {
+                let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+                SHParseDisplayName(&HSTRING::from(p.as_os_str()), None, &mut pidl, 0, None).unwrap();
+                pidl
+            };
+            let (f, d) = (parse(&file), parse(&dir));
+            let parent = ILClone(f);
+            let _ = ILRemoveLastID(Some(parent));
+            println!("file pidl {} bytes, its parent {} bytes, the folder {} bytes, parent == folder: {}", ILGetSize(Some(f)), ILGetSize(Some(parent)), ILGetSize(Some(d)), ILIsEqual(parent, d).as_bool());
+        }
+    }
+
     /// Plays the shell's part of "open and select": finds our registered window for a folder the
     /// way SHOpenFolderAndSelectItems does and asks it to select a file; the waiting side gets
     /// the file's path.
