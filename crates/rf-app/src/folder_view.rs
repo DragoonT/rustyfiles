@@ -4654,7 +4654,16 @@ fn static_column(
             .into_any_element()
         }
     };
-    div().w(COL_W).flex_shrink_0().h_full().border_r_1().border_color(p.divider).child(body)
+    div()
+        .w(COL_W)
+        .flex_shrink_0()
+        .h_full()
+        .border_r_1()
+        .border_color(p.divider)
+        // a press on the column's empty space is not the list's: the list's background took it as a click on nothing, cleared the
+        // selection, and the column of the selected folder went away under the pointer (issue 140)
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(body)
 }
 
 const GRID_GAP: Pixels = px(4.);
