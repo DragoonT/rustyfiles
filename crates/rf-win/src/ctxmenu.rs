@@ -2,13 +2,17 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context as _;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::System::Com::CoTaskMemFree;
+use windows::Win32::System::Com::{CLSCTX_ALL, CoCreateInstance, CoTaskMemFree};
+use windows::Win32::System::SystemServices::{SFGAO_FILESYSTEM, SFGAO_FOLDER};
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
 use windows::Win32::UI::Shell::{
     CMF_CANRENAME, CMF_EXPLORE, CMF_EXTENDEDVERBS, CMF_NORMAL, CMIC_MASK_PTINVOKE,
-    CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX, GCS_VERBW, IContextMenu, IContextMenu2, IContextMenu3, ILFindLastID,
-    IShellFolder, SHBindToObject, SHParseDisplayName,
+    CMINVOKECOMMANDINFO, CMINVOKECOMMANDINFOEX, GCS_VERBW, IContextMenu, IContextMenu2,
+    IContextMenu3, IExplorerCommand, ILFindLastID, IShellFolder, IShellItem, IShellItemArray,
+    SHBindToObject, SHCreateItemFromParsingName, SHCreateShellItemArrayFromShellItem,
+    SHParseDisplayName,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreatePopupMenu, DestroyMenu, InsertMenuW, MF_BYPOSITION, MF_GRAYED, MF_SEPARATOR, MF_STRING, PostMessageW, SW_SHOWNORMAL, SetForegroundWindow, TPM_RETURNCMD, TPM_RIGHTBUTTON,
@@ -19,6 +23,8 @@ use windows::core::{Interface, PCSTR, PCWSTR, PSTR};
 use crate::sta::MENU_HOOK;
 
 const CMIC_MASK_UNICODE: u32 = 0x4000;
+const CHANGE_FOLDER_ICON_CLSID: windows::core::GUID =
+    windows::core::GUID::from_u128(0x7d8968e1_5467_4d54_a264_c388dc507211);
 use crate::wide::wide;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -264,6 +270,33 @@ pub fn invoke_verb(owner: HWND, target: &ShellTarget, verb: &str, screen: (i32, 
         let _ = DestroyMenu(hmenu);
         r.map_err(Into::into)
     }
+}
+
+/// Invokes Folder Icon Changer's registered packaged command for one filesystem directory.
+/// Call on the Shell STA thread.
+pub fn invoke_change_folder_icon(path: &Path) -> anyhow::Result<()> {
+    anyhow::ensure!(path.is_absolute(), "folder path is not absolute");
+    let parsing_name = wide(path);
+    unsafe {
+        let item: IShellItem = SHCreateItemFromParsingName(PCWSTR(parsing_name.as_ptr()), None)
+            .context("resolve folder")?;
+        let attributes = item
+            .GetAttributes(SFGAO_FILESYSTEM | SFGAO_FOLDER)
+            .context("inspect folder attributes")?;
+        anyhow::ensure!(
+            attributes.contains(SFGAO_FILESYSTEM | SFGAO_FOLDER),
+            "selection is not a filesystem folder"
+        );
+        let items: IShellItemArray =
+            SHCreateShellItemArrayFromShellItem(&item).context("create Shell selection")?;
+        let command: IExplorerCommand =
+            CoCreateInstance(&CHANGE_FOLDER_ICON_CLSID, None, CLSCTX_ALL)
+                .context("activate Change Folder Icon command")?;
+        command
+            .Invoke(&items, None)
+            .context("invoke Change Folder Icon command")?;
+    }
+    Ok(())
 }
 
 fn verb_of(cm: &IContextMenu, offset: usize) -> String {

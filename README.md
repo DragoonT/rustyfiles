@@ -195,7 +195,12 @@ Link) appear under Devices on the Home page; that part hasn't been tried with a 
 **Files.** Undo and redo for renames, copies, moves, deleting to the Recycle Bin and folder
 flattening. Bulk rename.
 The full Explorer context menu, drag and drop with Explorer and the desktop, and drop targets
-on tabs and pinned folders. Send files to your other computers with [Ferry](#ferry).
+on tabs and pinned folders. For one selected filesystem folder, the custom context menu also
+offers **Change Folder Icon** by invoking the installed Folder Icon Changer's registered
+`IExplorerCommand` COM implementation (CLSID
+`7D8968E1-5467-4D54-A264-C388DC507211`). It is not offered for archive or FTP paths; Rustyfiles
+does not implement icon changes itself. If COM activation or invocation fails, the error is
+written to the app log. Send files to your other computers with [Ferry](#ferry).
 
 **Archives.** ZIP, 7z, RAR, the tar family and ISO open like folders, password-protected
 ZIP, 7z and RAR included. Add, delete and rename inside ZIP, 7z and tar. Create ZIP, 7z and tar.zst on every core. Reading is
