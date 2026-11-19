@@ -99,6 +99,10 @@ pub struct Prefs {
     pub status: [Vec<String>; 2],
     /// The left island's search: a field, a button, or none.
     pub search: crate::settings::DockSearch,
+    /// The dock hides at the bottom edge until the pointer reaches it.
+    pub autohide: bool,
+    /// The islands on a solid fill, without glass.
+    pub opaque: bool,
 }
 
 impl Prefs {
@@ -113,7 +117,14 @@ impl Prefs {
             side_tall: s.dock_side_tall,
             status: [s.dock_status_order.clone(), s.dock_status_hidden.clone()],
             search: s.dock_search,
+            autohide: s.dock_autohide,
+            opaque: s.dock_opaque,
         }
+    }
+
+    /// Whether the dock keeps windows from going under it: never while it hides itself (it comes up over them).
+    pub fn reserves(&self) -> bool {
+        self.reserve && !self.autohide
     }
 }
 
@@ -134,6 +145,8 @@ pub struct Changes {
     pub status: bool,
     /// The left island's search.
     pub search: bool,
+    pub autohide: bool,
+    pub opaque: bool,
 }
 
 pub fn changes(old: &Prefs, new: &Prefs) -> Changes {
@@ -146,6 +159,8 @@ pub fn changes(old: &Prefs, new: &Prefs) -> Changes {
         side: old.side_tall != new.side_tall,
         status: old.status != new.status,
         search: old.search != new.search,
+        autohide: old.autohide != new.autohide,
+        opaque: old.opaque != new.opaque,
     }
 }
 
@@ -269,6 +284,10 @@ struct Dock {
     /// The bands (device px) told to this monitor's work area lately, newest first (`monitors::remember_band`); empty for the home dock,
     /// whose band is the desktop toolbar's.
     told_bands: Vec<i32>,
+    /// Auto-hide: the islands are away below the screen's edge ([`autohide_step`]).
+    tucked: bool,
+    /// Auto-hide: when the pointer was last over the dock (or a panel of it was open).
+    inside_at: Option<Instant>,
 }
 
 impl Dock {
@@ -298,6 +317,8 @@ pub struct Host {
     live: SizeLive,
     /// Looks for a full-screen program on the secondary monitors; there only while one exists.
     secondary_watch: Option<Task<()>>,
+    /// Auto-hide: watches the pointer at the screen's bottom edge; there only while the setting is on.
+    autohide_watch: Option<Task<()>>,
     /// The primary monitor as the last layout saw it: a layout event that comes from another monitor's change does not move the home
     /// dock, and a panel open on the home dock stays where it is for it.
     last_primary: Option<MonitorInfo>,
@@ -654,7 +675,8 @@ pub fn frame_palette(glass: &RefCell<IslandGlass>, window: &mut Window) -> (Pale
     let now = backdrop::now_ms();
     let (pal, settled, fallback) = {
         let g = glass.borrow();
-        (g.palette(now), g.tone_settled(now), g.fallback())
+        // (a solid island paints its own fill like one whose glass is not running)
+        (g.palette(now), g.tone_settled(now), g.fallback() || g.plain())
     };
     if !settled {
         window.request_animation_frame();
@@ -877,7 +899,7 @@ fn region_differs(last: Option<&[hit::Part]>, parts: &[hit::Part]) -> bool {
 fn apply_visibility(mon: MonId, cx: &mut App) {
     let Some(host) = cx.try_global::<Host>() else { return };
     let Some(dock) = host.dock(mon) else { return };
-    let visible = !dock.fullscreen;
+    let visible = !dock.fullscreen && !dock.tucked;
     let hwnds: Vec<isize> = dock.placed.iter().map(|p| p.hwnd).collect();
     let panel_here = host.active_dock().id == mon;
     on_message_loop(cx, move || {
@@ -927,7 +949,7 @@ pub(super) fn apply_secondary_bands(cx: &mut App) {
     refresh_hide_flag(cx);
     let list: Vec<(String, i32)> = {
         let Some(host) = cx.try_global::<Host>() else { return };
-        if !host.prefs.reserve {
+        if !host.prefs.reserves() {
             Vec::new()
         } else {
             host.docks
@@ -966,7 +988,7 @@ fn refresh_hide_flag(cx: &mut App) {
 fn apply_home_reserve(cx: &mut App) {
     let Some(host) = cx.try_global::<Host>() else { return };
     let Some(system) = host.system.as_ref() else { return };
-    let band = if host.prefs.reserve {
+    let band = if host.prefs.reserves() {
         // the band is the dock's own height and margins: it follows the size too
         let unit = host.area().map_or(1.0, |(m, _)| rf_win::dock::size::unit(m.scale(), fitted_factor(host.prefs.size, &m)));
         // (the thin band while the thin dock's setting is on, whatever the windows do: see thin.rs)
@@ -1094,6 +1116,7 @@ fn sync_docks(cx: &mut App) -> Vec<MonId> {
         }
     }
     sync_secondary_watch(cx);
+    sync_autohide(cx);
     super::thin::docks_changed(cx);
     // the bands of the docks on the other monitors: one more, one fewer, or another scale
     apply_secondary_bands(cx);
@@ -1139,6 +1162,8 @@ fn open_dock(d: &monitors::Display, cx: &mut App) {
         content: Content { primary: false, search: Search::Field, bell: true },
         fullscreen: false,
         peek_until: None,
+        tucked: false,
+        inside_at: None,
         region: None,
         side_drop: 0,
         told_bands: Vec::new(),
@@ -1302,6 +1327,129 @@ const PEEK_FOR: Duration = Duration::from_millis(1500);
 
 /// Whether a dock is hidden for a full-screen program: when one is in front (`told`), unless the dock was just brought up over it
 /// for the Start panel (`peek_until` still ahead of `now`).
+/// Auto-hide: how long the pointer may be away from the dock before it goes down.
+const AUTOHIDE_AFTER: Duration = Duration::from_millis(900);
+/// Auto-hide: how often the pointer is looked at (only while the setting is on).
+const AUTOHIDE_EVERY: Duration = Duration::from_millis(80);
+
+/// Auto-hide (Settings > Dock, issue 112): the watch runs only while the setting is on. Turned on, the docks stay up until the pointer
+/// has been away from them for [`AUTOHIDE_AFTER`]; turned off, every dock comes back up.
+fn sync_autohide(cx: &mut App) {
+    let Some(host) = cx.try_global::<Host>() else { return };
+    let want = host.prefs.autohide;
+    if want == host.autohide_watch.is_some() {
+        return;
+    }
+    if !want {
+        let tucked: Vec<MonId> = host.docks.iter().filter(|d| d.tucked).map(|d| d.id).collect();
+        if let Some(h) = host_mut(cx) {
+            h.autohide_watch = None;
+            for d in &mut h.docks {
+                d.tucked = false;
+                d.inside_at = None;
+            }
+        }
+        for id in tucked {
+            apply_visibility(id, cx);
+        }
+        return;
+    }
+    let now = Instant::now();
+    if let Some(h) = host_mut(cx) {
+        for d in &mut h.docks {
+            d.inside_at = Some(now);
+        }
+    }
+    let task = cx.spawn(async move |cx| {
+        loop {
+            cx.background_executor().timer(AUTOHIDE_EVERY).await;
+            if !cx.update(autohide_step) {
+                break;
+            }
+        }
+    });
+    if let Some(h) = host_mut(cx) {
+        h.autohide_watch = Some(task);
+    }
+}
+
+/// What auto-hide does with one dock: `Some(true)` puts it away, `Some(false)` brings it up, `None` leaves it as it is. `at_edge`: the
+/// pointer touches its monitor's bottom edge; `near`: the pointer is over the dock's band; `kept`: a panel, the app menu or a preview of
+/// this dock is open; `away_since`: since when the pointer has been away from it.
+fn autohide_decision(tucked: bool, at_edge: bool, near: bool, kept: bool, away_since: Instant, now: Instant) -> Option<bool> {
+    if tucked {
+        return (at_edge || kept).then_some(false);
+    }
+    if near || kept {
+        return None;
+    }
+    (now.duration_since(away_since) >= AUTOHIDE_AFTER).then_some(true)
+}
+
+/// The pointer's place on the screen in device px.
+fn cursor_px() -> Option<(i32, i32)> {
+    let mut p = windows::Win32::Foundation::POINT::default();
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut p) }.ok()?;
+    Some((p.x, p.y))
+}
+
+/// One look at the pointer for auto-hide (see [`autohide_decision`]). False when the watch is to stop.
+fn autohide_step(cx: &mut App) -> bool {
+    let Some(host) = cx.try_global::<Host>() else { return false };
+    if !host.prefs.autohide {
+        return false;
+    }
+    let Some((x, y)) = cursor_px() else { return true };
+    let active = host.active_dock().id;
+    let busy = super::panel::is_open(cx) || super::app_menu::is_open(cx);
+    let looks: Vec<(MonId, rf_win::dock::layout::Rect, i32)> = host
+        .docks
+        .iter()
+        .map(|d| {
+            let unit = host.scale_size_of(d).map_or(1.0, |(s, z)| rf_win::dock::size::unit(s, z));
+            let rect = host.area_of(d).map_or(d.monitor.rect, |(m, _)| m.rect);
+            (d.id, rect, rf_win::dock::thin::reserved_thickness(unit, false))
+        })
+        .collect();
+    let now = Instant::now();
+    let mut changed = Vec::new();
+    let Some(h) = host_mut(cx) else { return false };
+    for (id, r, band) in looks {
+        let Some(d) = h.docks.iter_mut().find(|d| d.id == id) else { continue };
+        let in_x = x >= r.left && x < r.right;
+        let (at_edge, near, kept) = (in_x && y >= r.bottom - 2, in_x && y >= r.bottom - band - 16, busy && id == active);
+        if !d.tucked && (near || kept) {
+            d.inside_at = Some(now);
+        }
+        match autohide_decision(d.tucked, at_edge, near, kept, *d.inside_at.get_or_insert(now), now) {
+            Some(down) => {
+                d.tucked = down;
+                d.inside_at = Some(now);
+                changed.push(id);
+            }
+            None => {}
+        }
+    }
+    for id in changed {
+        apply_visibility(id, cx);
+    }
+    true
+}
+
+/// The "solid background" switch changed (issue 113): every island's glass goes away or comes back, and the islands paint again.
+fn apply_opaque(cx: &mut App) {
+    let Some(host) = cx.try_global::<Host>() else { return };
+    let on = host.prefs.opaque;
+    super::look::set_plain(on);
+    let glasses: Vec<Rc<RefCell<IslandGlass>>> = host.docks.iter().flat_map(|d| d.placed.iter().map(|p| p.glass.clone())).collect();
+    on_message_loop(cx, move || {
+        for g in glasses {
+            g.borrow_mut().set_plain(on);
+        }
+    });
+    cx.refresh_windows();
+}
+
 fn hidden_for_fullscreen(told: bool, peek_until: Option<Instant>, now: Instant) -> bool {
     told && !peek_until.is_some_and(|until| now < until)
 }
@@ -1474,8 +1622,14 @@ fn apply_reloaded(fresh: Option<Settings>, stamp: Option<SystemTime>, cx: &mut A
         // the sizes agree but the end-of-drag work was never done (its timers were lost)
         perform(size_live::AT_REST, cx);
     }
-    if ch.reserve && !ch.size {
+    if (ch.reserve || ch.autohide) && !ch.size {
         apply_reserve(cx);
+    }
+    if ch.autohide {
+        sync_autohide(cx);
+    }
+    if ch.opaque {
+        apply_opaque(cx);
     }
     if ch.city
         && let Some(left) = left
@@ -1678,6 +1832,8 @@ fn open_island<V: Render + 'static>(
 /// The dock process's start (called once, with the settings loaded, after the application is running).
 pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     let prefs = Prefs::of(cx.global::<Settings>());
+    // (before the islands are made: each glass takes the switch when it is made)
+    super::look::set_plain(prefs.opaque);
     // (before the islands are made: their widths depend on it)
     super::plan::set_search_mode(prefs.search);
     let (tx, mut events) = futures::channel::mpsc::unbounded::<SystemEvent>();
@@ -1720,6 +1876,8 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         content: Content::HOME,
         fullscreen: false,
         peek_until: None,
+        tucked: false,
+        inside_at: None,
         region: None,
         side_drop: 0,
         told_bands: Vec::new(),
@@ -1751,6 +1909,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         started: Instant::now(),
         live: SizeLive::new(prefs.size.permille()),
         secondary_watch: None,
+        autohide_watch: None,
         last_primary: rf_win::dock::primary_monitor(),
         hide_in_force: false,
     };
@@ -1786,6 +1945,8 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
         apply_visibility(MonId::HOME, cx);
     }
     apply_reserve(cx);
+    // auto-hide's watch (nothing runs while the setting is off)
+    sync_autohide(cx);
     // the thin dock (the setting's switch; nothing runs when it is off)
     super::thin::start(cx);
     // The other programs' tray icons (nothing at all without a tray source: see tray_source.rs). After the setup job above has been queued:
@@ -1969,7 +2130,28 @@ mod tests {
     }
 
     fn prefs(reserve: bool, city: &str) -> Prefs {
-        Prefs { reserve, city: city.into(), location: false, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, side_tall: false, status: Default::default(), search: Default::default() }
+        Prefs { reserve, city: city.into(), location: false, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, side_tall: false, status: Default::default(), search: Default::default(), autohide: false, opaque: false }
+    }
+
+    #[test]
+    fn auto_hide_comes_up_at_the_edge_and_goes_down_after_the_pointer_left() {
+        use super::{AUTOHIDE_AFTER, autohide_decision};
+        use std::time::Instant;
+        let t0 = Instant::now();
+        // away below the edge: the bottom edge or an open panel brings it up, anything else leaves it away
+        assert_eq!(autohide_decision(true, true, true, false, t0, t0), Some(false));
+        assert_eq!(autohide_decision(true, false, false, true, t0, t0), Some(false), "the Start panel opened by the Windows key");
+        assert_eq!(autohide_decision(true, false, true, false, t0, t0 + AUTOHIDE_AFTER * 3), None, "over the band, not at the edge");
+        // up: stays while the pointer is over it or a panel is open, goes down once the pointer has been away long enough
+        assert_eq!(autohide_decision(false, false, true, false, t0, t0 + AUTOHIDE_AFTER * 3), None);
+        assert_eq!(autohide_decision(false, false, false, true, t0, t0 + AUTOHIDE_AFTER * 3), None);
+        assert_eq!(autohide_decision(false, false, false, false, t0, t0 + AUTOHIDE_AFTER / 2), None);
+        assert_eq!(autohide_decision(false, false, false, false, t0, t0 + AUTOHIDE_AFTER), Some(true));
+        // and with the setting on it reserves no band
+        let mut p = prefs(true, "");
+        assert!(p.reserves());
+        p.autohide = true;
+        assert!(!p.reserves());
     }
 
     #[test]
@@ -1985,8 +2167,8 @@ mod tests {
     fn the_switch_for_the_position_changes_the_weather_source_like_the_city_does() {
         let base = prefs(true, "Ankara");
         let located = Prefs { location: true, ..base.clone() };
-        assert_eq!(changes(&base, &located), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false, search: false });
-        assert_eq!(changes(&located, &located), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false });
+        assert_eq!(changes(&base, &located), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false, search: false, autohide: false, opaque: false });
+        assert_eq!(changes(&located, &located), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false, autohide: false, opaque: false });
         // off by default, and the settings carry it through
         assert!(!Prefs::of(&Settings::default()).location);
         assert!(Prefs::of(&Settings { dock_weather_location: true, ..Default::default() }).location);
@@ -1995,12 +2177,12 @@ mod tests {
     #[test]
     fn only_what_changed_is_applied() {
         let base = prefs(true, "Ankara");
-        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false });
-        assert_eq!(changes(&base, &prefs(false, "Ankara")), Changes { reserve: true, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false });
-        assert_eq!(changes(&base, &prefs(true, "İzmir")), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false, search: false });
-        assert_eq!(changes(&base, &prefs(false, "")), Changes { reserve: true, city: true, size: false, monitors: false, apps: false, side: false, status: false, search: false });
+        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false, autohide: false, opaque: false });
+        assert_eq!(changes(&base, &prefs(false, "Ankara")), Changes { reserve: true, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false, autohide: false, opaque: false });
+        assert_eq!(changes(&base, &prefs(true, "İzmir")), Changes { reserve: false, city: true, size: false, monitors: false, apps: false, side: false, status: false, search: false, autohide: false, opaque: false });
+        assert_eq!(changes(&base, &prefs(false, "")), Changes { reserve: true, city: true, size: false, monitors: false, apps: false, side: false, status: false, search: false, autohide: false, opaque: false });
         let bigger = Prefs { size: crate::dock::size_pref::DockSizePref::from_permille(1200), ..base.clone() };
-        assert_eq!(changes(&base, &bigger), Changes { reserve: false, city: false, size: true, monitors: false, apps: false, side: false, status: false, search: false });
+        assert_eq!(changes(&base, &bigger), Changes { reserve: false, city: false, size: true, monitors: false, apps: false, side: false, status: false, search: false, autohide: false, opaque: false });
     }
 
     /// What a window has before the first layout is the layout's own margins, times the dock's size factor.
@@ -2027,19 +2209,19 @@ mod tests {
     fn the_switch_and_the_apps_rule_are_changes_the_running_dock_acts_on() {
         let base = prefs(true, "Ankara");
         let off = Prefs { all_monitors: false, ..base.clone() };
-        assert_eq!(changes(&base, &off), Changes { reserve: false, city: false, size: false, monitors: true, apps: false, side: false, status: false, search: false });
+        assert_eq!(changes(&base, &off), Changes { reserve: false, city: false, size: false, monitors: true, apps: false, side: false, status: false, search: false, autohide: false, opaque: false });
         let by_window = Prefs { apps_where: crate::settings::DockAppsWhere::Window, ..base.clone() };
-        assert_eq!(changes(&base, &by_window), Changes { reserve: false, city: false, size: false, monitors: false, apps: true, side: false, status: false, search: false });
-        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false });
+        assert_eq!(changes(&base, &by_window), Changes { reserve: false, city: false, size: false, monitors: false, apps: true, side: false, status: false, search: false, autohide: false, opaque: false });
+        assert_eq!(changes(&base, &base), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: false, search: false, autohide: false, opaque: false });
     }
 
     #[test]
     fn the_side_islands_height_and_the_right_islands_buttons_are_changes_the_running_dock_acts_on() {
         let base = prefs(true, "Ankara");
         let tall = Prefs { side_tall: true, ..base.clone() };
-        assert_eq!(changes(&base, &tall), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: true, status: false, search: false });
+        assert_eq!(changes(&base, &tall), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: true, status: false, search: false, autohide: false, opaque: false });
         let reordered = Prefs { status: [vec!["volume".into()], Vec::new()], ..base.clone() };
-        assert_eq!(changes(&base, &reordered), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: true, search: false });
+        assert_eq!(changes(&base, &reordered), Changes { reserve: false, city: false, size: false, monitors: false, apps: false, side: false, status: true, search: false, autohide: false, opaque: false });
         let hidden = Prefs { status: [Vec::new(), vec!["security".into()]], ..base.clone() };
         assert!(changes(&base, &hidden).status);
         // off and untouched by default, and the settings carry them through
