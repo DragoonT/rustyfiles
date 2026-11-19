@@ -47,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         NSApp.mainMenu = MainMenu.make()
+        DefaultFileManager.listenForReveal()
         // Settings › File organizer: automatic rules watch their folders
         if ProcessInfo.processInfo.environment["RF_NOFERRY"] == nil { Organizer.watch() }
         if controllers.isEmpty {

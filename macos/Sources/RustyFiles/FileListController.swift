@@ -663,7 +663,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             if self?.commandBar.trashMode == true { return self?.emptyTrash() ?? () }
             let m = NSMenu()
             m.addItem(withTitle: String(localized: "Folder"), action: #selector(BrowserWindowController.newFolder(_:)), keyEquivalent: "")
-            m.items.first?.image = Icons.named("folder")
+            m.items.first?.image = Icons.menu("folder")
             btn.pop(m)
             _ = self
         }
@@ -703,7 +703,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             let m = NSMenu()
             for (mode, title, icon) in [(ViewMode.details, String(localized: "Details"), "list"), (.tiles, String(localized: "Tiles"), "layout-grid")] {
                 let i = ClosureMenuItem(title: title) { [weak self] in self?.setViewMode(mode) }
-                i.image = Icons.named(icon)
+                i.image = Icons.menu(icon)
                 i.state = self.viewMode == mode ? .on : .off
                 m.addItem(i)
             }
