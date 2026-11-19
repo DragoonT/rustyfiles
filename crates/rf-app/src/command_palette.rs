@@ -1,4 +1,5 @@
-//! Command palette (Ctrl+Shift+P / F1): fuzzy-filter every command, or type a path to jump.
+//! Command palette (Ctrl+Shift+P / F1): fuzzy-filter every command and the folders visited before (`folder_history`, unless
+//! `palette_folder_history` is off), or type a path to jump. Opened by Ctrl+P (`SearchFolderHistory`) it lists past folders only.
 
 use std::path::PathBuf;
 
@@ -61,6 +62,7 @@ fn commands() -> Vec<Cmd> {
         cmd!("Her zaman üstte", "", L::Pin, ToggleAlwaysOnTop),
         cmd!("Kompakt görünüm", "", L::PictureInPicture2, ToggleCompactOverlay),
         cmd!("Klasör takma adına git", "@", L::AtSign, GoToFolderAlias),
+        cmd!("Geçmiş klasörlerde ara", "Ctrl+P", L::Clock, SearchFolderHistory),
         cmd!("Sağa döndür", "", L::RotateCw, RotateRight),
         cmd!("Sola döndür", "", L::RotateCcw, RotateLeft),
         cmd!("Simgeleri küçült", "Ctrl+-", L::ZoomOut, ZoomOut),
@@ -121,17 +123,43 @@ pub enum PaletteEvent {
 
 impl EventEmitter<PaletteEvent> for CommandPalette {}
 
+/// What the palette lists.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PaletteMode {
+    /// Commands, and past folders once something is typed (when the setting allows).
+    Commands { with_folders: bool },
+    /// Past folders only (Ctrl+P).
+    Folders,
+}
+
+/// One row under the typed path's row.
+#[derive(Clone, Debug, PartialEq)]
+enum Row {
+    /// An index into `cmds`.
+    Cmd(usize),
+    Folder(PathBuf),
+}
+
+/// How many rows are listed under the typed path's row.
+const VISIBLE: usize = 12;
+/// At most this many past folders among the commands (the folder-only mode lists [`VISIBLE`]).
+const FOLDERS_AMONG_COMMANDS: usize = 5;
+
 pub struct CommandPalette {
     input: Entity<InputState>,
+    mode: PaletteMode,
     cmds: Vec<Cmd>,
-    /// Indices into `cmds` matching the query (plus an optional path row at the top).
-    filtered: Vec<usize>,
+    folders: Vec<crate::folder_history::Visit>,
+    /// What matches the query, best first (plus an optional path row at the top).
+    filtered: Vec<Row>,
     path: Option<PathBuf>,
     selected: usize,
     _sub: Subscription,
 }
 
-fn score(label: &str, q: &str) -> Option<i32> {
+/// How well `label` matches the lowercase query `q`: a substring (earlier is better), else its letters in order (fewer gaps is
+/// better); `None` when it does not match.
+pub(crate) fn score(label: &str, q: &str) -> Option<i32> {
     if q.is_empty() {
         return Some(0);
     }
@@ -164,33 +192,70 @@ fn as_path(q: &str) -> Option<PathBuf> {
     looks.then(|| PathBuf::from(t))
 }
 
+/// The rows matching `query`, best first. Commands: every one while nothing is typed; past folders join them once something is
+/// typed (at most [`FOLDERS_AMONG_COMMANDS`], a command first when both match as well). Folder mode: past folders only.
+fn filter(mode: PaletteMode, cmds: &[Cmd], folders: &[crate::folder_history::Visit], query: &str) -> Vec<Row> {
+    let q = query.trim().to_lowercase();
+    let cmds = if mode == PaletteMode::Folders { &[][..] } else { cmds };
+    let mut by_cmd: Vec<(i32, usize)> = cmds.iter().enumerate().filter_map(|(i, c)| score(c.label, &q).map(|s| (s, i))).collect();
+    by_cmd.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    let by_folder: Vec<(i32, PathBuf)> = match mode {
+        PaletteMode::Commands { with_folders: true } if !q.is_empty() => {
+            crate::folder_history::rank(folders, &q).into_iter().take(FOLDERS_AMONG_COMMANDS).map(|(s, v)| (s, v.path.clone())).collect()
+        }
+        PaletteMode::Commands { .. } => Vec::new(),
+        PaletteMode::Folders => crate::folder_history::rank(folders, &q).into_iter().map(|(s, v)| (s, v.path.clone())).collect(),
+    };
+    // both lists are best first: merge them by how well they match
+    let mut out = Vec::with_capacity(by_cmd.len() + by_folder.len());
+    let (mut c, mut f) = (by_cmd.into_iter().peekable(), by_folder.into_iter().peekable());
+    loop {
+        let take_cmd = match (c.peek(), f.peek()) {
+            (Some(a), Some(b)) => a.0 >= b.0,
+            (Some(_), None) => true,
+            (None, Some(_)) => false,
+            (None, None) => break,
+        };
+        if take_cmd {
+            out.extend(c.next().map(|(_, i)| Row::Cmd(i)));
+        } else {
+            out.extend(f.next().map(|(_, p)| Row::Folder(p)));
+        }
+    }
+    out
+}
+
 impl CommandPalette {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder(crate::t!("Komut ara veya yol yaz…")));
+    /// `folders`: the remembered folders, most recent first (`folder_history::snapshot`); unused when the mode lists none.
+    pub fn new(mode: PaletteMode, folders: Vec<crate::folder_history::Visit>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let hint = match mode {
+            PaletteMode::Commands { .. } => crate::t!("Komut ara veya yol yaz…"),
+            PaletteMode::Folders => crate::t!("Geçmiş klasörlerde ara…"),
+        };
+        let input = cx.new(|cx| InputState::new(window, cx).placeholder(hint));
         let sub = cx.subscribe_in(&input, window, |this, _, ev: &InputEvent, _, cx| match ev {
             InputEvent::Change => this.refilter(cx),
             InputEvent::PressEnter { .. } => this.run_selected(cx),
             _ => {}
         });
         input.update(cx, |s, cx| s.focus(window, cx));
-        let mut this = Self { input, cmds: commands(), filtered: Vec::new(), path: None, selected: 0, _sub: sub };
+        let cmds = if mode == PaletteMode::Folders { Vec::new() } else { commands() };
+        let mut this = Self { input, mode, cmds, folders, filtered: Vec::new(), path: None, selected: 0, _sub: sub };
         this.refilter(cx);
         this
     }
 
     fn refilter(&mut self, cx: &mut Context<Self>) {
-        let q = self.input.read(cx).value().to_lowercase();
-        self.path = as_path(&q).map(|_| PathBuf::from(self.input.read(cx).value().trim().trim_matches('"')));
-        let mut v: Vec<(i32, usize)> =
-            self.cmds.iter().enumerate().filter_map(|(i, c)| score(c.label, q.trim()).map(|s| (s, i))).collect();
-        v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        self.filtered = v.into_iter().map(|(_, i)| i).collect();
+        let raw = self.input.read(cx).value().to_string();
+        self.path = as_path(&raw).map(|_| PathBuf::from(raw.trim().trim_matches('"')));
+        self.filtered = filter(self.mode, &self.cmds, &self.folders, &raw);
         self.selected = 0;
         cx.notify();
     }
 
+    /// The rows drawn (and walked by Up/Down): the path row and at most [`VISIBLE`] others.
     fn rows(&self) -> usize {
-        self.filtered.len() + usize::from(self.path.is_some())
+        self.filtered.len().min(VISIBLE) + usize::from(self.path.is_some())
     }
 
     fn run_selected(&mut self, cx: &mut Context<Self>) {
@@ -202,12 +267,14 @@ impl CommandPalette {
             }
             ix -= 1;
         }
-        if let Some(&ci) = self.filtered.get(ix) {
-            cx.emit(PaletteEvent::Run((self.cmds[ci].action)()));
+        match self.filtered.get(ix) {
+            Some(Row::Cmd(ci)) => cx.emit(PaletteEvent::Run((self.cmds[*ci].action)())),
+            Some(Row::Folder(p)) => cx.emit(PaletteEvent::Navigate(p.clone())),
+            None => {}
         }
     }
 
-    fn row(&self, ix: usize, icon: L, label: String, keys: &'static str, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn row(&self, ix: usize, icon: L, label: String, keys: SharedString, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
         let sel = ix == self.selected;
         h_flex()
             .id(("pal", ix))
@@ -220,8 +287,21 @@ impl CommandPalette {
             .when(sel, |d| d.bg(p.selection))
             .when(!sel, |d| d.hover(|s| s.bg(p.hover)))
             .child(Icon::new(icon).size(px(16.)).text_color(if sel { p.accent } else { p.text_secondary }))
-            .child(div().flex_1().child(label))
-            .when(!keys.is_empty(), |d| d.child(div().text_xs().text_color(p.text_tertiary).child(keys)))
+            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(label))
+            // (a folder's full path here can be long: it gives way first)
+            .when(!keys.is_empty(), |d| {
+                d.child(
+                    div()
+                        .max_w(px(320.))
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .text_xs()
+                        .text_color(p.text_tertiary)
+                        .child(keys),
+                )
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.selected = ix;
                 this.run_selected(cx);
@@ -236,13 +316,22 @@ impl Render for CommandPalette {
         let mut list = v_flex().gap_0p5();
         let mut ix = 0;
         if let Some(path) = self.path.clone() {
-            list = list.child(self.row(ix, L::FolderOpen, format!("{} {}", crate::t!("Git:"), path.display()), "Enter", &p, cx));
+            list = list.child(self.row(ix, L::FolderOpen, format!("{} {}", crate::t!("Git:"), path.display()), "Enter".into(), &p, cx));
             ix += 1;
         }
-        let visible: Vec<usize> = self.filtered.iter().copied().take(12).collect();
-        for ci in visible {
-            let c = &self.cmds[ci];
-            let (icon, label, keys) = (c.icon, c.label.to_string(), c.keys);
+        let visible: Vec<Row> = self.filtered.iter().take(VISIBLE).cloned().collect();
+        for r in visible {
+            let (icon, label, keys): (L, String, SharedString) = match r {
+                Row::Cmd(ci) => {
+                    let c = &self.cmds[ci];
+                    (c.icon, c.label.to_string(), c.keys.into())
+                }
+                Row::Folder(path) => (
+                    L::Folder,
+                    rf_core::history::display_name(&path),
+                    path.to_string_lossy().into_owned().into(),
+                ),
+            };
             list = list.child(self.row(ix, icon, label, keys, &p, cx));
             ix += 1;
         }
@@ -275,12 +364,12 @@ impl Render for CommandPalette {
                         let n = this.rows();
                         match ev.keystroke.key.as_str() {
                             "down" if n > 0 => {
-                                this.selected = (this.selected + 1) % n.min(13);
+                                this.selected = (this.selected + 1) % n;
                                 cx.stop_propagation();
                                 cx.notify();
                             }
                             "up" if n > 0 => {
-                                this.selected = (this.selected + n.min(13) - 1) % n.min(13);
+                                this.selected = (this.selected + n - 1) % n;
                                 cx.stop_propagation();
                                 cx.notify();
                             }
@@ -302,12 +391,21 @@ impl Render for CommandPalette {
                             .child(
                                 Input::new(&self.input)
                                     .appearance(false)
-                                    .prefix(Icon::new(L::Command).size(px(14.)).text_color(p.text_secondary)),
+                                    .prefix(
+                                        Icon::new(if self.mode == PaletteMode::Folders { L::Clock } else { L::Command })
+                                            .size(px(14.))
+                                            .text_color(p.text_secondary),
+                                    ),
                             ),
                     )
                     .child(list)
                     .when(self.rows() == 0, |d| {
-                        d.child(div().p_3().text_sm().text_color(p.text_secondary).child(crate::t!("Eşleşen komut yok")))
+                        let none = match self.mode {
+                            PaletteMode::Commands { .. } => crate::t!("Eşleşen komut yok"),
+                            PaletteMode::Folders if self.folders.is_empty() => crate::t!("Henüz gezilen klasör yok"),
+                            PaletteMode::Folders => crate::t!("Eşleşen klasör yok"),
+                        };
+                        d.child(div().p_3().text_sm().text_color(p.text_secondary).child(none))
                     }),
             )
     }
@@ -315,8 +413,39 @@ impl Render for CommandPalette {
 
 #[cfg(test)]
 mod tests {
-    use super::{as_path, score};
+    use super::{PaletteMode, Row, as_path, commands, filter, score};
+    use crate::folder_history::Visit;
     use std::path::PathBuf;
+
+    fn visits() -> Vec<Visit> {
+        [r"D:\Projeler\rustyfiles", r"C:\Users\me\Downloads", r"C:\Windows"]
+            .iter()
+            .enumerate()
+            .map(|(i, p)| Visit { path: PathBuf::from(p), last_ms: 10 - i as i64, count: 1 })
+            .collect()
+    }
+
+    fn folders(rows: &[Row]) -> Vec<String> {
+        rows.iter().filter_map(|r| if let Row::Folder(p) = r { Some(p.to_string_lossy().into_owned()) } else { None }).collect()
+    }
+
+    #[test]
+    fn folders_join_the_commands_only_once_typed_and_only_when_allowed() {
+        let (cmds, v) = (commands(), visits());
+        let on = PaletteMode::Commands { with_folders: true };
+        assert!(folders(&filter(on, &cmds, &v, "")).is_empty(), "nothing typed: the commands as before");
+        assert_eq!(folders(&filter(on, &cmds, &v, "downl")), [r"C:\Users\me\Downloads"]);
+        assert!(folders(&filter(PaletteMode::Commands { with_folders: false }, &cmds, &v, "downl")).is_empty());
+    }
+
+    #[test]
+    fn folder_mode_lists_past_folders_only_most_recent_first() {
+        let (cmds, v) = (commands(), visits());
+        let all = filter(PaletteMode::Folders, &cmds, &v, "");
+        assert_eq!(folders(&all), [r"D:\Projeler\rustyfiles", r"C:\Users\me\Downloads", r"C:\Windows"]);
+        assert_eq!(all.len(), 3, "no commands");
+        assert_eq!(folders(&filter(PaletteMode::Folders, &cmds, &v, "rusty")), [r"D:\Projeler\rustyfiles"]);
+    }
 
     #[test]
     fn fuzzy() {

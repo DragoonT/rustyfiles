@@ -198,6 +198,8 @@ pub enum FolderEvent {
     NeedPassword(PathBuf, bool),
     /// Open/Save dialog: files were opened (double click, Enter): they are the answer.
     Picked(Vec<PathBuf>),
+    /// Settings → "Typing filters this folder": a letter typed in the list opens the filter bar with it (issue 106).
+    StartFilter(String),
 }
 
 /// Details columns shown right now (see `FolderView::visible_cols`).
@@ -445,6 +447,8 @@ pub struct FolderView {
     load_started: Instant,
     _load_task: Option<Task<()>>,
     scroll: UniformListScrollHandle,
+    // Inactive tabs leave the element tree, but their settings scroll position lives with the pane.
+    settings_scroll: ScrollHandle,
     pub focus: FocusHandle,
     /// Re-select this name after the next load (e.g. after going up a level).
     reselect: Option<String>,
@@ -473,6 +477,10 @@ pub struct FolderView {
     /// double-click time passes without a second click or a drag.
     slow_click: Option<(u32, u64)>,
     slow_click_serial: u64,
+    /// Settings → "Select on hover": the entry under the pointer and its serial, selected once the pointer has rested on it.
+    hover_pick: Option<(u32, u64)>,
+    /// Serial of the last click on a file in a column right of the list's (`pick_in_column`); a later click cancels a pending one.
+    static_pick: u64,
     /// What the first click of a possible double click was made on (`completes_double`).
     first_click: Option<FirstClick>,
     /// Counts the listings shown (every `load`): a click belongs to the listing it was made in.
@@ -501,6 +509,8 @@ pub struct FolderView {
     folder_sizes: std::collections::HashMap<PathBuf, DirSize>,
     /// Settings → Layout → "Adaptive": decide details/grid once this folder's listing is in.
     adaptive_pending: bool,
+    /// The view's first folder has been given its layout (with "sync layout" on, only that first one takes the shared layout).
+    layout_seeded: bool,
     /// Requested this frame; started together as one batch.
     size_queue: Vec<PathBuf>,
     size_batches: Vec<(Arc<rf_win::foldersize::SizeBatch>, Vec<PathBuf>)>,
@@ -517,7 +527,7 @@ pub struct FolderView {
     /// Re-renders once a load has been running for a while (shows the "loading" placeholder).
     _slow_task: Option<Task<()>>,
     /// Where a left-button press started on a row (for drag-out detection).
-    drag_origin: Option<Point<Pixels>>,
+    drag_origin: Option<RowPress>,
     /// Rubber-band selection in list-content coordinates.
     marquee: Option<Marquee>,
     /// Type-to-select buffer and when it was last extended.
@@ -544,8 +554,8 @@ impl FolderView {
             if this.group == GroupBy::Tag {
                 this.refresh_tag_snap(cx);
                 this.rebuild_visible();
-                cx.notify();
             }
+            cx.notify();
         })
         .detach();
         cx.observe_global::<crate::settings::Settings>(|this, cx| {
@@ -633,6 +643,7 @@ impl FolderView {
             load_started: Instant::now(),
             _load_task: None,
             scroll: UniformListScrollHandle::new(),
+            settings_scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             reselect: None,
             renamed: None,
@@ -645,6 +656,8 @@ impl FolderView {
             name_hit: false,
             slow_click: None,
             slow_click_serial: 0,
+            hover_pick: None,
+            static_pick: 0,
             first_click: None,
             load_serial: 0,
             soft_pending: None,
@@ -665,6 +678,7 @@ impl FolderView {
             column_pending: HashSet::new(),
             folder_sizes: Default::default(),
             adaptive_pending: false,
+            layout_seeded: false,
             size_queue: Default::default(),
             size_batches: Default::default(),
             size_polling: false,
@@ -830,6 +844,7 @@ impl FolderView {
     }
 
     fn render_col_rows(&mut self, range: std::ops::Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let hover_select = cx.global::<crate::settings::Settings>().select_on_hover;
         let p = Palette::for_window(window);
         let mut out = Vec::with_capacity(range.len());
         for vi in range {
@@ -866,10 +881,14 @@ impl FolderView {
                         MouseButton::Left,
                         cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
                     )
+                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, ev: &MouseUpEvent, _, cx| this.on_row_mouse_up(vi, ev, cx)))
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
+                    .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, is_dir, &p))
+                    // Settings → "Select files and folders on hover"
+                    .when(hover_select, |d| d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))))
                     .into_any_element(),
             );
         }
@@ -1056,6 +1075,8 @@ impl FolderView {
     fn load(&mut self, cx: &mut Context<Self>) {
         // (another listing: a click made before it is not the first click of a double click in it)
         self.load_serial += 1;
+        // every folder landed on (navigating, Back/Forward, a refresh) is remembered for the palette's folder search
+        crate::folder_history::record(self.location());
         self.apply_folder_layout(cx);
         self.images.update(cx, |c, _| c.cancel_pending());
         self.git = None;
@@ -2012,7 +2033,11 @@ impl FolderView {
     /// Per-folder memory: the user changed the view, sort or grouping of this folder.
     fn remember_layout(&mut self, cx: &mut Context<Self>) {
         self.adaptive_pending = false;
+        // "the same layout in all folders": one layout, kept for every new tab and the next start (Threads report: the size went back
+        // to the second step after a restart; nothing was saved at all)
         if cx.global::<crate::settings::Settings>().sync_layout {
+            let l = self.layout_now();
+            crate::layouts::set(std::path::Path::new(SHARED_LAYOUT), l, cx);
             return;
         }
         if let Location::Path(p) = self.location().clone() {
@@ -2036,7 +2061,12 @@ impl FolderView {
 
     fn apply_folder_layout_inner(&mut self, cx: &mut Context<Self>) {
         let s = cx.global::<crate::settings::Settings>().clone();
+        let first = !std::mem::replace(&mut self.layout_seeded, true);
         if s.sync_layout {
+            // the tab keeps its own from folder to folder; a new tab (and every tab at a start) begins with the shared one
+            if first && let Some(l) = crate::layouts::get(std::path::Path::new(SHARED_LAYOUT), cx) {
+                self.apply_layout_values(l, false, cx);
+            }
             return;
         }
         let Location::Path(p) = self.location().clone() else { return };
@@ -2078,6 +2108,10 @@ impl FolderView {
                 s.default_view == crate::settings::DefaultView::Adaptive,
             ),
         };
+        self.apply_layout_values(l, adaptive, cx);
+    }
+
+    fn apply_layout_values(&mut self, l: crate::layouts::FolderLayout, adaptive: bool, cx: &mut Context<Self>) {
         self.view_mode = match l.view {
             1 | 3 | 4 => ViewMode::Grid,
             2 => ViewMode::Columns,
@@ -2350,6 +2384,7 @@ impl FolderView {
     }
 
     fn render_grid_rows(&mut self, range: std::ops::Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let hover_select = cx.global::<crate::settings::Settings>().select_on_hover;
         let p = Palette::for_window(window);
         let cols = self.grid_cols.max(1);
         let (tile_w, row_h, thumb_px) = (self.grid_tile_w(), self.grid_row_h(), self.grid_thumb_px());
@@ -2361,8 +2396,6 @@ impl FolderView {
         };
         let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
         let renamed = self.renamed.clone();
-        let drop_bg = p.selection;
-        let drop_border = p.accent;
         let mut out = Vec::with_capacity(range.len());
         for row in range {
             let mut r = h_flex().w_full().h(self.grid_row_h()).gap(GRID_GAP).items_start();
@@ -2409,6 +2442,18 @@ impl FolderView {
                         .border_color(p.accent)
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_1().text_xs().text_center())
+                        .into_any_element(),
+                    // a right-to-left name is split into its two lines here (issue 115: wrapped by GPUI, a long Persian name came out one
+                    // letter per line)
+                    None if crate::rtl::has_rtl(&e.name) => div()
+                        .w_full()
+                        .text_xs()
+                        .text_center()
+                        .when(dim, |d| d.opacity(0.6))
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
+                        .children(rtl_grid_lines(&row_name(e, show_ext, renamed.as_ref()), tile_w - px(12.), window).into_iter().map(|line| {
+                            div().w_full().whitespace_nowrap().overflow_hidden().text_ellipsis().child(crate::rtl::display_text(&line))
+                        }))
                         .into_any_element(),
                     None => div()
                         .w_full()
@@ -2488,18 +2533,14 @@ impl FolderView {
                         MouseButton::Left,
                         cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
                     )
+                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, ev: &MouseUpEvent, _, cx| this.on_row_mouse_up(vi, ev, cx)))
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
-                    .when(e.is_dir(), |d| {
-                        d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_1().border_color(drop_border))
-                            .on_drop(cx.listener(move |this, paths: &ExternalPaths, _, cx| {
-                                if let Some(dest) = this.drop_target_row(ei) {
-                                    this.drop_into(dest, paths, cx);
-                                }
-                            }))
-                    });
+                    .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
+                    // Settings → "Select files and folders on hover"
+                    .when(hover_select, |d| d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))));
                 r = r.child(cell);
             }
             out.push(r.into_any_element());
@@ -2522,11 +2563,7 @@ impl FolderView {
         let Some(&ei) = self.visible.get(vi) else { return };
         let plain = !ev.modifiers.control && !ev.modifiers.shift;
         // Settings → "Open items with a single click"
-        let single = match cx.global::<crate::settings::Settings>().single_click {
-            crate::settings::ClickPref::Never => false,
-            crate::settings::ClickPref::Folders => self.entries[ei as usize].is_dir(),
-            crate::settings::ClickPref::Always => true,
-        };
+        let single = self.opens_on_single_click(ei, cx);
         // A second click opens only what the first click of the pair was made on (`completes_double`). Otherwise it is a click like
         // any other: it selects.
         let name = self.entries[ei as usize].name.clone();
@@ -2537,9 +2574,13 @@ impl FolderView {
             // select it)
             return;
         }
-        if plain && (double || (single && ev.click_count == 1)) {
-            self.select_only(vi);
-            self.open_entry(ei, cx);
+        if plain && double {
+            // with "open with a single click" the first release has opened it already: a double click out of habit must not start
+            // a program twice
+            if !single {
+                self.select_only(vi);
+                self.open_entry(ei, cx);
+            }
             return;
         }
         if ev.modifiers.shift {
@@ -2558,13 +2599,86 @@ impl FolderView {
             // Clicking inside an existing multi-selection keeps it (so it can be dragged).
             self.cursor = Some(vi);
         }
-        self.drag_origin = Some(ev.position);
+        self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && ev.click_count == 1 });
         // Explorer: a click on the name of the item that was already the only one selected
         // renames it, once the double-click time passes without a second click or a drag
-        if plain && ev.click_count == 1 && on_name && was_only && had_focus && !was_renaming {
+        if plain && !single && ev.click_count == 1 && on_name && was_only && had_focus && !was_renaming {
             self.arm_slow_click(ei, cx);
         }
         cx.notify();
+    }
+
+    fn opens_on_single_click(&self, ei: u32, cx: &App) -> bool {
+        match cx.global::<crate::settings::Settings>().single_click {
+            crate::settings::ClickPref::Never => false,
+            crate::settings::ClickPref::Folders => self.entries[ei as usize].is_dir(),
+            crate::settings::ClickPref::Always => true,
+        }
+    }
+
+    fn on_row_mouse_up(&mut self, vi: usize, ev: &MouseUpEvent, cx: &mut Context<Self>) {
+        let Some(&ei) = self.visible.get(vi) else { return };
+        // Open on release so a single-click setting still allows the item to start a drag.
+        if self.drag_origin.as_ref().is_some_and(|press| press.open_on_release)
+            && !ev.modifiers.control && !ev.modifiers.shift
+            && completes_double(self.first_click.as_ref(), self.load_serial, Some(&self.entries[ei as usize].name))
+        {
+            self.drag_origin = None;
+            self.select_only(vi);
+            self.open_entry(ei, cx);
+        }
+    }
+
+    /// Settings → "Select on hover": the pointer came onto (or left) the item at `vi`. Like Explorer's "point to select" the item is
+    /// selected once the pointer has rested on it for the system's hover time, so passing over items on the way to another one
+    /// leaves the selection alone (issue 101: it was in the Details layout only, and at once).
+    fn hover_row(&mut self, vi: usize, on: bool, cx: &mut Context<Self>) {
+        let Some(&ei) = self.visible.get(vi) else { return };
+        if !on {
+            if self.hover_pick.is_some_and(|(e, _)| e == ei) {
+                self.hover_pick = None;
+            }
+            return;
+        }
+        self.slow_click_serial += 1;
+        let serial = self.slow_click_serial;
+        self.hover_pick = Some((ei, serial));
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(hover_time()).await;
+            let _ = this.update(cx, |v, cx| {
+                if v.hover_pick != Some((ei, serial)) {
+                    return;
+                }
+                v.hover_pick = None;
+                // not while a press, a drag, a rubber band or a rename is going on, and not over a multi-selection made by hand
+                let busy = v.drag_origin.is_some() || v.marquee.is_some() || v.renaming.is_some();
+                let Some(now) = v.visible.iter().position(|&e| e == ei) else { return };
+                if !busy && !(v.selected.len() == 1 && v.selected.contains(&ei)) {
+                    v.select_only(now);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// A click on a file in a column to the right of the list's: once the double-click time passes without a second click, that
+    /// column's folder becomes the list's and the file is selected in it. Not at once: the columns move over by one then, and the
+    /// second click of a double click (which opens the file) has to land on the same row first.
+    fn pick_in_column(&mut self, dir: PathBuf, name: String, cx: &mut Context<Self>) {
+        self.static_pick += 1;
+        let serial = self.static_pick;
+        let wait = std::time::Duration::from_millis(unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime() } as u64);
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(wait).await;
+            let _ = this.update(cx, |v, cx| {
+                if v.static_pick == serial {
+                    v.set_reselect(name);
+                    v.navigate(Location::Path(dir), cx);
+                }
+            });
+        })
+        .detach();
     }
 
     fn arm_slow_click(&mut self, ei: u32, cx: &mut Context<Self>) {
@@ -2591,12 +2705,12 @@ impl FolderView {
     }
 
     fn on_drag_motion(&mut self, ev: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(start) = self.drag_origin else { return };
+        let Some(press) = &self.drag_origin else { return };
         if ev.pressed_button != Some(MouseButton::Left) {
             self.drag_origin = None;
             return;
         }
-        let d = ev.position - start;
+        let d = ev.position - press.origin;
         if d.x.abs() + d.y.abs() > px(8.) {
             self.drag_origin = None;
             self.slow_click = None;
@@ -2743,6 +2857,12 @@ impl FolderView {
             }
         }
         let Some(ch) = ev.keystroke.key_char.as_ref().filter(|c| !c.chars().any(|c| c.is_control())) else { return };
+        // Settings → "Typing filters this folder" (OneCommander's way, issue 106): the letters go to the filter bar instead
+        if !ch.is_empty() && cx.global::<crate::settings::Settings>().type_to_filter && self.location().path().is_some() && !self.picking {
+            cx.emit(FolderEvent::StartFilter(ch.clone()));
+            cx.stop_propagation();
+            return;
+        }
         if ch.is_empty() || self.visible.is_empty() {
             return;
         }
@@ -2774,12 +2894,6 @@ impl FolderView {
                 return;
             }
         }
-    }
-
-    fn drop_target_row(&self, ei: u32) -> Option<PathBuf> {
-        // `ei` was captured at render time; the listing may have changed since.
-        let e = self.entries.get(ei as usize)?;
-        if e.is_dir() { self.path_of(ei) } else { None }
     }
 
     pub fn selection_paths(&self) -> Vec<PathBuf> {
@@ -3405,8 +3519,6 @@ impl FolderView {
 
     fn render_rows(&mut self, range: std::ops::Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let p = Palette::for_window(window);
-        let drop_bg = p.selection;
-        let drop_border = p.accent;
         let search_mode = self.is_search();
         let prefs = cx.global::<crate::settings::Settings>();
         let show_ext = prefs.show_extensions;
@@ -3665,18 +3777,12 @@ impl FolderView {
                     MouseButton::Left,
                     cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
                 )
+                .on_mouse_up(MouseButton::Left, cx.listener(move |this, ev: &MouseUpEvent, _, cx| this.on_row_mouse_up(vi, ev, cx)))
                 .on_mouse_down(
                     MouseButton::Right,
                     cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                 )
-                .when(e.is_dir(), |d| {
-                    d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_1().border_color(drop_border))
-                        .on_drop(cx.listener(move |this, paths: &ExternalPaths, _, cx| {
-                            if let Some(dest) = this.drop_target_row(ei) {
-                                this.drop_into(dest, paths, cx);
-                            }
-                        }))
-                })
+                .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
                 .on_mouse_down(
                     MouseButton::Middle,
                     cx.listener(move |this, _: &MouseDownEvent, _, cx| {
@@ -3819,14 +3925,7 @@ impl FolderView {
                 })
                 .children(prop_cells)
                 // Settings → "Select files and folders on hover"
-                .when(hover_select, |row| {
-                    row.on_hover(cx.listener(move |this, on: &bool, _, cx| {
-                        if *on && this.drag_origin.is_none() && this.marquee.is_none() && this.renaming.is_none() {
-                            this.select_only(vi);
-                            cx.notify();
-                        }
-                    }))
-                });
+                .when(hover_select, |row| row.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))));
             out.push(row.into_any_element());
         }
         self.props_after_rows(shown, prop_ctx.is_some(), cx);
@@ -3999,15 +4098,16 @@ impl FolderView {
                     }))
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| {
                         if let Some(dir) = this.current_dir() {
-                            this.drop_into(dir, paths, cx);
+                            crate::workspace::drop_files(paths, dir, cx);
                         }
                     }))
                     .child(body)
                     // last child: painted over the list, so its clicks and drags come first. Shown
                     // while scrolling and fading out after, like File Explorer's on Windows 11,
-                    // so it doesn't sit over the right-aligned Size column
+                    // so it doesn't sit over the right-aligned Size column; always, when Windows is
+                    // told to keep scrollbars shown (issue 86)
                     .when(list_body && cx.global::<crate::settings::Settings>().show_scrollbar, |d| {
-                        d.child(Scrollbar::vertical(&self.scroll).id("list-scrollbar").mode(ScrollbarMode::Scrolling))
+                        d.child(Scrollbar::vertical(&self.scroll).id("list-scrollbar").mode(scrollbar_mode()))
                     }),
             )
             .into_any_element()
@@ -4532,9 +4632,10 @@ fn static_column(
                         let on = highlight.as_deref() == Some(&*e.name);
                         let cat = icons::category(e);
                         let target = dir.join(&*e.name);
+                        let drop_path = target.clone();
                         let is_dir = e.is_dir();
                         let view = view.clone();
-                        h_flex()
+                        let row = h_flex()
                             .id(("scol", i))
                             .w_full()
                             .h(px(28.))
@@ -4552,14 +4653,21 @@ fn static_column(
                             // cleared the selection, which took this column away before the button came up, and the click was lost
                             // (issue 57: "If I click on one of the folders in the second column, it disappears")
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .on_click(move |_, _, cx| {
-                                if is_dir {
-                                    view.update(cx, |v, cx| v.navigate(Location::Path(target.clone()), cx));
-                                } else {
-                                    open_in_background(target.clone(), cx);
+                            .on_click({
+                                let (dir, name) = (dir.clone(), e.name.to_string());
+                                move |ev: &ClickEvent, _, cx| {
+                                    if is_dir {
+                                        view.update(cx, |v, cx| v.navigate(Location::Path(target.clone()), cx));
+                                    } else if ev.click_count() >= 2 {
+                                        view.update(cx, |v, _| v.static_pick += 1);
+                                        open_in_background(target.clone(), cx);
+                                    } else {
+                                        // one click selects the file, as in the list's own column (issue 118: it opened it)
+                                        view.update(cx, |v, cx| v.pick_in_column(dir.clone(), name.clone(), cx));
+                                    }
                                 }
-                            })
-                            .into_any_element()
+                            });
+                        file_drop_target(row, drop_path, is_dir, &pal).into_any_element()
                     })
                     .collect::<Vec<_>>()
             })
@@ -4688,7 +4796,7 @@ impl Render for FolderView {
         }
         let content = match self.location() {
             Location::Home => self.render_home(&p, cx),
-            Location::Settings => crate::settings_view::render(&p, window, cx, self.lens_owner),
+            Location::Settings => crate::settings_view::render(&p, window, cx, self.lens_owner, &self.settings_scroll),
             Location::DiskUsage(root) => {
                 let root = root.clone();
                 let dv = match &self.disk_usage {
@@ -4882,6 +4990,11 @@ struct FirstClick {
     name: Option<Arc<str>>,
 }
 
+struct RowPress {
+    origin: Point<Pixels>,
+    open_on_release: bool,
+}
+
 /// Whether a click that Windows counts as the second of a double click is one HERE: its first click was made in this same listing
 /// and on the same thing (the entry `name`, or the empty area for `None`).
 ///
@@ -4891,6 +5004,52 @@ struct FirstClick {
 /// then: Windows still called it a double click, so the folder there was opened too (a double click on drive C: ended inside
 /// `C:\MSI`), or, on the empty area with "double-click an empty area to go up" on, the drive was left again. Windows counts clicks by
 /// time and place alone; what was under them is ours to know.
+/// The list's and the Settings page's scrollbars: shown while scrolling, or all the time when Windows is set to always show
+/// scrollbars (Windows 10's "Automatically hide scroll bars" off).
+pub(crate) fn scrollbar_mode() -> ScrollbarMode {
+    if rf_win::scrollbars::always_shown() { ScrollbarMode::Always } else { ScrollbarMode::Scrolling }
+}
+
+/// The grid's name of a right-to-left name in at most two lines (issue 115): GPUI wraps such a run after every letter, so the name is
+/// split here, at a space, by measured width; each line is then drawn unwrapped (the last one ends in "…" when it is still too long).
+/// One line when it fits or has no space to split at.
+fn rtl_grid_lines(name: &str, avail: Pixels, window: &Window) -> Vec<String> {
+    let style = window.text_style();
+    let size = rems(0.75).to_pixels(window.rem_size());
+    let width = |s: &str| {
+        let text: SharedString = s.to_string().into();
+        let run = style.to_run(text.len());
+        window.text_system().shape_line(text, size, &[run], None).width
+    };
+    if width(name) <= avail {
+        return vec![name.to_string()];
+    }
+    let words: Vec<&str> = name.split(' ').collect();
+    let mut take = 0;
+    for i in 1..words.len() {
+        if width(&words[..i].join(" ")) > avail {
+            break;
+        }
+        take = i;
+    }
+    if take == 0 {
+        return vec![name.to_string()];
+    }
+    vec![words[..take].join(" "), words[take..].join(" ")]
+}
+
+/// The key in the layouts file under which "the same layout in all folders" keeps its one layout (`<` cannot start a real path).
+const SHARED_LAYOUT: &str = "<all folders>";
+
+/// How long the pointer rests on an item before "Select on hover" selects it: the system's hover time (Control Panel › Mouse;
+/// 400 ms out of the box), as Explorer's "point to select" waits.
+fn hover_time() -> std::time::Duration {
+    use windows::Win32::UI::WindowsAndMessaging::{SPI_GETMOUSEHOVERTIME, SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW};
+    let mut ms: u32 = 0;
+    let ok = unsafe { SystemParametersInfoW(SPI_GETMOUSEHOVERTIME, 0, Some(&mut ms as *mut u32 as *mut _), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0)) }.is_ok();
+    std::time::Duration::from_millis(if ok && ms > 0 { ms.min(5000) as u64 } else { 400 })
+}
+
 fn completes_double(first: Option<&FirstClick>, load: u64, name: Option<&str>) -> bool {
     first.is_some_and(|f| f.load == load && f.name.as_deref() == name)
 }
@@ -5039,6 +5198,66 @@ impl FolderView {
         let next: HashSet<u32> = self.visible.iter().copied().filter(|i| !self.selected.contains(i)).collect();
         self.selected = next;
         cx.notify();
+    }
+}
+
+/// Use the rendered path, so a refresh during a drag cannot retarget it by shifting row indices.
+fn file_drop_target(row: Stateful<Div>, target: PathBuf, is_dir: bool, p: &Palette) -> Stateful<Div> {
+    if !is_dir && !crate::program_launch::accepts_program(&target) {
+        return row;
+    }
+    let (color, border) = (p.selection, p.accent);
+    let hover_target = target.clone();
+    row.drag_over::<ExternalPaths>(move |s, paths, _, _| {
+        if valid_item_drop(paths.paths(), &hover_target, is_dir) { s.bg(color).border_1().border_color(border) } else { s }
+    })
+    .on_drag_move::<ExternalPaths>({
+        let target = target.clone();
+        move |ev, _, cx| {
+            if !ev.bounds.contains(&ev.event.position) {
+                return;
+            }
+            if is_dir {
+                show_drop_effect(ev.drag(cx).paths(), &target);
+            } else {
+                gpui_windows::dnd_hint::set(gpui_windows::dnd_hint::COPY);
+            }
+        }
+    })
+    .on_drop(move |paths: &ExternalPaths, window, cx| {
+        if !valid_item_drop(paths.paths(), &target, is_dir) {
+            return;
+        }
+        if is_dir {
+            crate::workspace::drop_files(paths, target.clone(), cx);
+        } else {
+            crate::ops::drop_on_program(target.clone(), paths.paths().to_vec(), window, cx);
+        }
+    })
+}
+
+fn valid_item_drop(sources: &[PathBuf], target: &std::path::Path, is_dir: bool) -> bool {
+    !sources.is_empty() && if is_dir {
+        !rf_win::dnd::is_invalid_drop(sources, target)
+    } else {
+        !sources.iter().any(|p| p.as_os_str().eq_ignore_ascii_case(target.as_os_str()))
+    }
+}
+
+#[cfg(test)]
+mod file_drop_tests {
+    use super::valid_item_drop;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn a_child_folder_or_program_accepts_a_file_but_never_itself() {
+        let file = PathBuf::from(r"C:\files\report.txt");
+        let folder = Path::new(r"C:\files\sub");
+        let program = Path::new(r"C:\files\sign.EXE");
+        assert!(valid_item_drop(std::slice::from_ref(&file), folder, true));
+        assert!(valid_item_drop(&[file], program, false));
+        assert!(!valid_item_drop(&[folder.to_path_buf()], folder, true));
+        assert!(!valid_item_drop(&[PathBuf::from(r"c:\files\SIGN.exe")], program, false));
     }
 }
 

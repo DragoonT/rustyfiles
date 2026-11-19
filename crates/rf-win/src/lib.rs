@@ -81,6 +81,7 @@ pub mod shell;
 pub mod shellfolder;
 pub mod sysstatus;
 pub mod shortcut;
+pub mod scrollbars;
 pub mod startup;
 pub mod single_instance;
 pub mod snip;

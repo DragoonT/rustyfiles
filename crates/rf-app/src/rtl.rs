@@ -64,7 +64,7 @@ fn first_strong_is_rtl(text: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn has_rtl(text: &str) -> bool {
+pub fn has_rtl(text: &str) -> bool {
     text.chars()
         .any(|c| matches!(bidi_class(c), BidiClass::R | BidiClass::AL))
 }

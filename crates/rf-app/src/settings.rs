@@ -384,6 +384,8 @@ pub struct Settings {
     pub default_view: DefaultView,
     pub show_hidden: bool,
     pub preview_open: bool,
+    /// The preview pane of the Open/Save dialogs, kept apart from the main windows' (shown until it is closed once: issue 87).
+    pub picker_preview_open: bool,
     pub sidebar_open: bool,
     /// The sidebar as a narrow strip of icons (drag it narrow to get there).
     pub sidebar_rail: bool,
@@ -406,6 +408,8 @@ pub struct Settings {
     /// Buttons of the command bar that are off unless asked for ("newfolder", "terminal",
     /// "hidden", "refresh").
     pub toolbar_extra: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub toolbar_commands: Vec<crate::quick_commands::QuickCommand>,
     pub preview_width: f32,
     /// Where the preview pane sits: at the right of the list (the default) or under it. The key is written only for "bottom".
     #[serde(skip_serializing_if = "rf_core::previewpane::PreviewPos::is_right")]
@@ -467,6 +471,8 @@ pub struct Settings {
     pub keybindings: std::collections::BTreeMap<String, String>,
     /// Last window placement: [x, y, width, height, maximized (0/1)].
     pub window: Option<[f32; 5]>,
+    /// Display UUID and the normal window's origin relative to that display.
+    pub window_display: Option<(String, [f32; 2])>,
 
     // ---- General
     pub date_format: DatePref,
@@ -539,6 +545,9 @@ pub struct Settings {
     pub confirm_delete: DeletePref,
     pub warn_extension_change: bool,
     pub select_on_hover: bool,
+    /// Typing in a folder's list filters it by name (the filter bar opens with the letters); off: typing selects the item whose
+    /// name starts with them. Issue 106.
+    pub type_to_filter: bool,
     pub double_click_up: bool,
     pub select_previous_on_up: bool,
     pub decimal_sizes: bool,
@@ -588,6 +597,8 @@ pub struct Settings {
     // ---- DirectLook (Hızlı Bakış, ayrı program): ayarları kendi dosyasında (`look::config`)
     /// DirectLook kullanılsın mı (kapalıyken rustyfiles onu başlatmaz, Boşluk bir şey yapmaz).
     pub directlook_enabled: bool,
+    /// Space hands the file to QuickLook (QL-Win) instead of DirectLook (`quicklook`).
+    pub space_quicklook: bool,
 
     // ---- Quick search (quick_search.rs)
     /// A global shortcut opens the quick search: apps, files, bookmarks, the web.
@@ -600,6 +611,9 @@ pub struct Settings {
     /// With nothing typed, HyperSearch lists what was opened lately; off: it shows nothing until something is typed (issue 41:
     /// "Add an option to show/hide recent searches").
     pub quick_search_recent: bool,
+    /// The command palette (Ctrl+Shift+P) lists past folders among the commands once something is typed (`folder_history`). Off:
+    /// commands only; Ctrl+P still searches past folders.
+    pub palette_folder_history: bool,
 
     // ---- Dock (dock/: `rustyfiles --dock`, a separate process; experimental)
     /// The dock runs: started with rustyfiles and when this is switched on, stopped when it is switched off.
@@ -752,6 +766,7 @@ impl Default for Settings {
             default_view: DefaultView::Adaptive,
             show_hidden: false,
             preview_open: true,
+            picker_preview_open: true,
             sidebar_open: true,
             sidebar_rail: false,
             sidebar_width: 232.,
@@ -761,6 +776,7 @@ impl Default for Settings {
             search_history: Vec::new(),
             toolbar_hidden: Vec::new(),
             toolbar_extra: Vec::new(),
+            toolbar_commands: Vec::new(),
             preview_width: 300.,
             preview_position: rf_core::previewpane::PreviewPos::Right,
             preview_height: rf_core::previewpane::BOTTOM_DEFAULT_H,
@@ -790,6 +806,7 @@ impl Default for Settings {
             show_extensions: true,
             keybindings: Default::default(),
             window: None,
+            window_display: None,
             date_format: DatePref::Application,
             startup: StartupPref::Continue,
             startup_pages: Vec::new(),
@@ -833,6 +850,7 @@ impl Default for Settings {
             confirm_delete: DeletePref::PermanentOnly,
             warn_extension_change: true,
             select_on_hover: false,
+            type_to_filter: false,
             double_click_up: true,
             select_previous_on_up: true,
             decimal_sizes: false,
@@ -855,12 +873,14 @@ impl Default for Settings {
             ide_button: IdePref::GitRepos,
             ide_path: String::new(),
             show_flatten: false,
+            space_quicklook: false,
             directlook_enabled: true,
             quick_search: true,
             quick_search_keys: "alt-space".into(),
             web_search: WebSearch::Google,
             quick_search_bookmarks: true,
             quick_search_recent: true,
+            palette_folder_history: true,
             dock_enabled: false,
             dock_reserve: true,
             dock_weather_city: String::new(),

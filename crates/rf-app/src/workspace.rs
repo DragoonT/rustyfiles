@@ -218,6 +218,61 @@ pub struct Workspace {
 pub struct OpenWorkspaces(Vec<(AnyWindowHandle, WeakEntity<Workspace>)>);
 impl Global for OpenWorkspaces {}
 
+#[derive(Clone)]
+struct MainPlacement {
+    bounds: [f32; 5],
+    display: Option<(String, [f32; 2])>,
+}
+
+impl MainPlacement {
+    fn capture(window: &Window, cx: &App) -> Option<Self> {
+        let (b, max) = match window.window_bounds() {
+            WindowBounds::Windowed(b) => (b, 0.),
+            WindowBounds::Maximized(b) | WindowBounds::Fullscreen(b) => (b, 1.),
+        };
+        if b.size.width < px(500.) || b.size.height < px(350.) {
+            return None;
+        }
+        let bounds = [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height), max];
+        let current_display = window.display(cx);
+        let display = Workspace::hwnd(window)
+            .and_then(rf_win::dock::monitors::monitor_of_window)
+            .and_then(|h| {
+                let on_monitor = |id| u64::from(id) == h as u64;
+                current_display.as_ref().filter(|d| on_monitor(d.id())).cloned()
+                    .or_else(|| cx.displays().into_iter().find(|d| on_monitor(d.id())))
+            })
+            .or(current_display)
+            .and_then(|d| {
+                let offset = b.origin - d.bounds().origin;
+                Some((d.uuid().ok()?.to_string(), [f32::from(offset.x), f32::from(offset.y)]))
+            });
+        Some(Self { bounds, display })
+    }
+
+    fn apply(self, settings: &mut crate::settings::Settings) {
+        settings.window = Some(self.bounds);
+        settings.window_display = self.display;
+    }
+}
+
+#[derive(Default)]
+struct MainPlacements(std::collections::HashMap<WindowId, MainPlacement>);
+impl Global for MainPlacements {}
+
+fn remember_placement(window: &Window, cx: &mut App) {
+    if let Some(placement) = MainPlacement::capture(window, cx) {
+        cx.default_global::<MainPlacements>().0.insert(window.window_handle().window_id(), placement);
+    }
+}
+
+pub(crate) fn save_closed_placement(id: WindowId, cx: &mut App) {
+    if let Some(placement) = cx.default_global::<MainPlacements>().0.remove(&id) {
+        cx.update_global::<crate::settings::Settings, _>(|s, _| placement.apply(s));
+        cx.global::<crate::settings::Settings>().save();
+    }
+}
+
 /// A second launch forwarded its argument: open it as a tab in the most recent live window
 /// and bring that window up; with no window left, open a new one.
 /// Taskbar jump list: "New window" / "New tab" and the pinned folders. Rewritten only when the
@@ -452,8 +507,7 @@ pub fn save_all_sessions(cx: &mut App) {
             continue;
         }
         let _ = handle.update(cx, |_, window, cx| {
-            let wb = window.window_bounds();
-            ws.update(cx, |w, cx| w.save_session(Some(wb), cx));
+            ws.update(cx, |w, cx| w.save_session(window, cx));
         });
     }
 }
@@ -512,6 +566,24 @@ pub static START_SELECT: std::sync::Mutex<Option<String>> = std::sync::Mutex::ne
 
 /// DirectLook'a en son gönderilen dosya (seçim değişince yalnız yenisi gider).
 static LOOK_FOLLOWED: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Whether any non-picker main browser window is currently open.
+fn has_browser_window(cx: &App) -> bool {
+    let open = cx.windows();
+    cx.try_global::<OpenWorkspaces>().is_some_and(|g| {
+        g.0.iter().any(|(h, ws)| {
+            ws.upgrade().is_some_and(|w| w.read(cx).picker.is_none())
+                && open.iter().any(|w| w.window_id() == h.window_id())
+        })
+    })
+}
+
+/// Start location for a new window opened from an IPC launch when no existing window took it:
+/// `None` restores the session (or startup pages) when no browser window is open and no target
+/// was given, so reopening the app from background mode behaves like a fresh start.
+fn launch_window_start(msg: &str, has_browser_window: bool, loc: Location) -> Option<Location> {
+    if msg.trim().is_empty() && !has_browser_window { None } else { Some(loc) }
+}
 
 pub fn route_ipc(msg: String, cx: &mut App) {
     route_ipc_shown(msg, cx);
@@ -585,7 +657,8 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         }
     }
     *START_SELECT.lock().unwrap() = select;
-    let made = crate::open_main_window_made(Some(loc), None, None, cx);
+    let start = launch_window_start(&msg, has_browser_window(cx), loc);
+    let made = crate::open_main_window_made(start, None, None, cx);
     crate::shell::desktop::open::mark("main: a new window was made for the place");
     made
 }
@@ -599,6 +672,16 @@ fn remember_search(history: &mut Vec<String>, q: &str) {
     history.retain(|h| !h.eq_ignore_ascii_case(q) && rf_core::entry::fold_case(h) != rf_core::entry::fold_case(q));
     history.insert(0, q.to_string());
     history.truncate(10);
+}
+
+/// The folder a tab's terminal button would open, if the tab has one: a real disk folder,
+/// not an archive, not FTP or a network share. Called for every tab on every frame, so it
+/// looks at the path only and never asks the disk (a stat of a share that went away blocks
+/// the UI thread for seconds); a folder merely named like an archive goes without the button.
+pub(crate) fn tab_terminal_dir(loc: &Location) -> Option<PathBuf> {
+    let Location::Path(p) = loc else { return None };
+    (!rf_win::ftp::is_ftp(p) && rf_win::network::server_root(p).is_none() && !crate::nav_touch::may_hold_archive(p))
+        .then(|| p.clone())
 }
 
 impl Workspace {
@@ -628,6 +711,7 @@ impl Workspace {
         }
         let places = cx.new(Places::new);
         let images = cx.new(ImageCache::new);
+        cx.observe(&images, |_, _, cx| cx.notify()).detach();
         let ops = cx.global::<crate::status_center::OpsGlobal>().0.clone();
         cx.observe(&ops, |_, _, cx| cx.notify()).detach();
         let preview = {
@@ -739,7 +823,7 @@ impl Workspace {
             // another window may have dragged the preview pane's height
             this.sync_preview_height(cx);
             let s = cx.global::<crate::settings::Settings>();
-            // a file dialog keeps its own preview state (shown by default)
+            // a file dialog keeps its own preview state (`picker_preview_open`)
             if this.picker.is_none() {
                 this.preview_open = s.preview_open;
                 this.sidebar_rail = s.sidebar_rail;
@@ -748,6 +832,7 @@ impl Workspace {
             cx.notify();
         })
         .detach();
+        cx.observe_global::<crate::tags::Tags>(|_, cx| cx.notify()).detach();
         // The system's light / dark switch reaches the window as an event only; nothing else redraws it. The palette and the glass's tint
         // (`set_dark`) are decided in `render`, so a window left alone would keep the old theme until the next click.
         cx.observe_window_appearance(window, |_: &mut Self, window, cx| {
@@ -755,17 +840,21 @@ impl Workspace {
             cx.notify();
         })
         .detach();
-        // the hosted preview (its own window) follows the app window when it moves
-        cx.observe_window_bounds(window, |this: &mut Self, _, cx| {
+        // Keep the latest placement while the HWND is alive. Closing the native frame can
+        // destroy it before GPUI is able to update the workspace from its should-close callback.
+        remember_placement(window, cx);
+        cx.observe_window_bounds(window, |this: &mut Self, window, cx| {
+            if this.picker.is_none() {
+                remember_placement(window, cx);
+            }
             this.preview.update(cx, |pv, _| pv.invalidate_host());
             cx.notify();
         })
         .detach();
         let ws = cx.entity().downgrade();
         window.on_window_should_close(cx, move |window, cx| {
-            let wb = window.window_bounds();
             if let Some(ws) = ws.upgrade() {
-                ws.update(cx, |w, cx| w.save_session(Some(wb), cx));
+                ws.update(cx, |w, cx| w.save_session(window, cx));
             }
             true
         });
@@ -898,6 +987,7 @@ impl Workspace {
         let v = !self.preview_open;
         if self.picker.is_some() {
             self.preview_open = v;
+            crate::settings::update(cx, |s| s.picker_preview_open = v);
             cx.notify();
         } else {
             crate::settings::update(cx, |s| s.preview_open = v);
@@ -912,9 +1002,10 @@ impl Workspace {
             }
         }
         self.picker = Some(session);
-        // the preview pane helps picking (Windows' dialogs have one too): on by default here,
-        // and the sidebar starts as a strip of icons (it opens over the list while hovered)
-        self.preview_open = true;
+        cx.default_global::<MainPlacements>().0.remove(&window.window_handle().window_id());
+        // the preview pane helps picking (Windows' dialogs have one too): on until it is closed in a dialog, which the next dialogs
+        // remember (issue 87); the sidebar starts as a strip of icons (it opens over the list while hovered)
+        self.preview_open = cx.global::<crate::settings::Settings>().picker_preview_open;
         self.sidebar_rail = true;
         // closing the window (X, Alt+F4) cancels; it is not the user's session
         let ws = cx.entity().downgrade();
@@ -948,25 +1039,22 @@ impl Workspace {
         cx.notify();
     }
 
-    pub fn save_session(&mut self, bounds: Option<WindowBounds>, cx: &mut Context<Self>) {
+    fn save_session(&mut self, window: &Window, cx: &mut Context<Self>) {
         if self.picker.is_some() {
             return;
         }
-        let placement = bounds.map(|wb| {
-            let (b, max) = match wb {
-                WindowBounds::Windowed(b) => (b, 0.),
-                WindowBounds::Maximized(b) | WindowBounds::Fullscreen(b) => (b, 1.),
-            };
-            [f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height), max]
-        });
+        let placement = MainPlacement::capture(window, cx);
+        if let Some(placement) = &placement {
+            cx.default_global::<MainPlacements>().0.insert(window.window_handle().window_id(), placement.clone());
+        }
         let (tabs, panes) = self.session_now(cx);
         let active = self.active;
         cx.update_global::<crate::settings::Settings, _>(|s, _| {
             s.session_tabs = tabs;
             s.session_panes = panes;
             s.session_active = active;
-            if placement.is_some() {
-                s.window = placement;
+            if let Some(placement) = placement {
+                placement.apply(s);
             }
         });
         // synchronous: the process is about to exit
@@ -1073,6 +1161,17 @@ impl Workspace {
                 cx.defer(move |cx| crate::open_main_window(Some(loc), None, Some(WindowBounds::Windowed(b)), cx));
             }
             FolderEvent::QuickLook => this.toggle_quick_look(cx),
+            FolderEvent::StartFilter(text) => {
+                // the first letter opens the bar with it; the next ones are typed into the bar, which has the focus now
+                let q = format!("{}{text}", emitter.read(cx).filter.query);
+                this.filter_bar = true;
+                this.filter_input.update(cx, |s, cx| {
+                    s.set_value(q.clone(), window, cx);
+                    s.focus(window, cx);
+                });
+                emitter.update(cx, |v, cx| v.set_query(q, cx));
+                cx.notify();
+            }
             FolderEvent::NeedPassword(archive, wrong) => {
                 let view = emitter.downgrade();
                 crate::archive_view::ask_password(archive.clone(), *wrong, window, cx, move |cx| {
@@ -1225,6 +1324,7 @@ impl Workspace {
         // the active index may stay the same while the tab under it changes: re-scroll
         self.tab_scrolled_to = None;
         if self.tabs.len() <= 1 {
+            self.save_session(window, cx);
             window.remove_window();
             return;
         }
@@ -1483,6 +1583,14 @@ impl Workspace {
     /// Boşluk: DirectLook'a (ayrı süreç) aç/kapat iletisi. DirectLook kapalıyken bir şey yapmaz.
     fn toggle_quick_look(&mut self, cx: &mut Context<Self>) {
         use std::sync::atomic::Ordering;
+        // Settings › DirectLook › "Space opens QuickLook": the file goes to QuickLook (a file inside an archive has no path it can open)
+        if cx.global::<crate::settings::Settings>().space_quicklook {
+            match self.active_tab().read(cx).preview_target() {
+                Some((path, _)) if crate::archive_view::split_inside(&path).is_none() => crate::quicklook::space(path),
+                target => log::info!("quicklook: Space with nothing QuickLook can open ({:?})", target.map(|(p, _)| p)),
+            }
+            return;
+        }
         if !cx.global::<crate::settings::Settings>().directlook_enabled {
             return;
         }
@@ -1553,15 +1661,26 @@ impl Workspace {
         cx.notify();
     }
 
-    fn toggle_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use crate::command_palette::{CommandPalette, PaletteEvent};
+    /// The command palette (Ctrl+Shift+P), with past folders among the commands unless the setting turned that off.
+    fn toggle_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let with_folders = cx.global::<crate::settings::Settings>().palette_folder_history;
+        self.toggle_palette(crate::command_palette::PaletteMode::Commands { with_folders }, window, cx)
+    }
+
+    /// Opens the palette listing what `mode` says, or closes it when it is open.
+    fn toggle_palette(&mut self, mode: crate::command_palette::PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::command_palette::{CommandPalette, PaletteEvent, PaletteMode};
         if self.palette.take().is_some() {
             self._palette_sub = None;
             self.focus_active(window, cx);
             cx.notify();
             return;
         }
-        let pal = cx.new(|cx| CommandPalette::new(window, cx));
+        let folders = match mode {
+            PaletteMode::Commands { with_folders: false } => Vec::new(),
+            _ => crate::folder_history::snapshot(),
+        };
+        let pal = cx.new(|cx| CommandPalette::new(mode, folders, window, cx));
         self._palette_sub = Some(cx.subscribe_in(&pal, window, |this, _, ev: &PaletteEvent, window, cx| {
             this.palette = None;
             this._palette_sub = None;
@@ -2105,10 +2224,10 @@ impl Workspace {
         let mut tab_claimed = false;
         let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         for (i, tab) in self.tabs.iter().enumerate() {
-            let (title, icon, location) = {
-                let view = tab.view().read(cx);
-                (view.title(cx), view.tab_icon(), view.location().clone())
-            };
+            let view = tab.view().read(cx);
+            let title = view.title(cx);
+            let icon = view.tab_icon();
+            let location = view.location().clone();
             let tab_dir = location.path().map(Path::to_path_buf);
             let shell_tab_icon = if windows_theme && matches!(&location, Location::Path(_)) {
                 tab_dir.as_ref().and_then(|path| {
@@ -2120,6 +2239,7 @@ impl Workspace {
                 None
             };
             let windows_home_tab = windows_theme && matches!(&location, Location::Home);
+            let term_dir = tab_terminal_dir(&location);
             let active = i == self.active;
             let drag = TabDrag { ix: i, title: title.clone().into() };
             let accent = p.accent;
@@ -2159,6 +2279,37 @@ impl Workspace {
                         None => Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }).into_any_element(),
                     })
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
+                    .when_some(term_dir, |d, dir| {
+                        d.child(
+                            div()
+                                .id(("tab-term", i))
+                                .size(px(22.))
+                                .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(theme::RADIUS_SM)
+                                .text_color(if active { p.text_secondary } else { p.text_tertiary })
+                                .when(!active, |d| d.invisible())
+                                .when(!roomy, |d| d.hidden())
+                                .group_hover("tab", |s| s.visible())
+                                .hover(|s| s.bg(p.pressed).text_color(p.text))
+                                .when(!popups_open, |d| {
+                                    d.tooltip(|w, cx| {
+                                        gpui_kit::component::tooltip::Tooltip::new(t!("Terminalde aç")).build(w, cx)
+                                    })
+                                })
+                                .child(Icon::new(L::SquareTerminal).size(px(12.)))
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                .on_click(cx.listener(move |_this, _, _, cx| {
+                                    let dir = dir.clone();
+                                    cx.background_spawn(async move {
+                                        let _ = rf_win::shell::open_terminal(&dir);
+                                    })
+                                    .detach();
+                                })),
+                        )
+                    })
                     .child(
                         div()
                             .id(("tab-close", i))
@@ -2411,6 +2562,7 @@ impl Workspace {
         }
         let me = cx.entity().downgrade();
         let is_pinned = self.current_pins(cx).contains(&path);
+        let root = path.parent().is_none();
         let with = |f: fn(&mut Workspace, PathBuf, &mut Window, &mut Context<Workspace>)| {
             let (me, path) = (me.clone(), path.clone());
             move |w: &mut Window, cx: &mut App| {
@@ -2418,7 +2570,7 @@ impl Workspace {
                 let _ = me.update(cx, |ws, cx| f(ws, p, w, cx));
             }
         };
-        let items = vec![
+        let mut items = vec![
             Item::action(t!("Aç"), MenuIcon::Lucide(L::SquareArrowOutUpRight), with(|ws, p, w, cx| ws.navigate(Location::Path(p), w, cx))),
             Item::action(t!("Yeni sekmede aç"), MenuIcon::Lucide(L::SquarePlus), with(|ws, p, w, cx| {
                 let keep = ws.active;
@@ -2439,6 +2591,11 @@ impl Workspace {
             } else {
                 Item::action(t!("Kenar çubuğuna sabitle"), MenuIcon::Lucide(L::Pin), with(|ws, p, _, cx| ws.set_pinned(p, true, cx)))
             },
+        ];
+        if !root && cx.global::<crate::settings::Settings>().menu.tags && !cx.global::<crate::tags::Tags>().0.defs.is_empty() {
+            items.push(Item::sub(t!("Etiketler"), MenuIcon::Lucide(L::Tag), crate::tags::menu_items(std::slice::from_ref(&path), cx)));
+        }
+        items.extend([
             Item::action(t!("Yolu kopyala"), MenuIcon::Lucide(L::ClipboardCopy), with(|_, p, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(p.display().to_string()))
             })),
@@ -2454,9 +2611,8 @@ impl Workspace {
             .hint("Alt+Enter"),
             Item::Separator,
             Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
-        ];
+        ]);
         // a drive can be taken off the lists of places (it comes back from Settings > Files and folders)
-        let mut items = items;
         if let Some(letter) = crate::settings_view::drive_letter(&path) {
             let at = items.len() - 2;
             items.insert(
@@ -2466,7 +2622,6 @@ impl Workspace {
         }
         // the row of quick buttons the file list's menu has (issue 53: "Can't do basic functions like copy, cut, delete, rename for
         // the folders at the left pane"). A drive's root can be pasted into, not cut, renamed or deleted.
-        let root = path.parent().is_none();
         let quick = {
             use crate::fluent_menu::Quick;
             let clip = |kind: rf_win::fileops::Transfer| {
@@ -2818,7 +2973,7 @@ impl Workspace {
             .children(chip)
             .child(div().w(px(1.)).h(px(18.)).mx_1().bg(p.divider))
             .child(mode_btn("omni-cmd", L::SquareChevronRight, self.palette.is_some(), "Komut paleti  (Ctrl+Shift+P)", cx, |this, window, cx| {
-                this.toggle_palette(window, cx)
+                this.toggle_command_palette(window, cx)
             }))
             .child(mode_btn("omni-search", L::Search, searching, "Ara  (Ctrl+F)", cx, |this, window, cx| this.enter_search(window, cx)))
             .on_click(cx.listener(|this, _, window, cx| {
@@ -2877,6 +3032,8 @@ impl Workspace {
     /// Command bar above the file list (Files' toolbar): create, clipboard and item commands on
     /// the left; sort, view and the preview pane on the right.
     fn render_commandbar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        use crate::fluent_menu::{Item, Menu, MenuIcon};
+
         let tab = self.active_tab().read(cx);
         let in_folder = tab.location().path().is_some();
         let (sel, _, _) = tab.selection_summary();
@@ -2952,12 +3109,32 @@ impl Workspace {
         };
         let sep = || div().w(px(1.)).h(px(20.)).mx_1().bg(p.divider);
         // which buttons the user wants (Settings > Appearance > Toolbar buttons)
-        let (hidden, extras) = {
+        let (hidden, extras, commands) = {
             let st = cx.global::<crate::settings::Settings>();
-            (st.toolbar_hidden.clone(), st.toolbar_extra.clone())
+            (st.toolbar_hidden.clone(), st.toolbar_extra.clone(), st.toolbar_commands.clone())
         };
         let on = |k: &str| !hidden.iter().any(|h| h == k);
         let extra = |k: &str| extras.iter().any(|h| h == k);
+        let mut inline_commands = Vec::new();
+        let mut menu_commands = Vec::new();
+        for (i, command) in commands.into_iter().enumerate() {
+            let picture = command.icon_path()
+                .and_then(|path| self.images.update(cx, |cache, cx| cache.shell_icon(&path, 32, cx)));
+            if command.in_menu {
+                let label = command.menu_label().to_owned();
+                let icon = picture.map_or(MenuIcon::Lucide(L::SquareTerminal), MenuIcon::Image);
+                let view = self.active_tab().downgrade();
+                menu_commands.push(Item::action(label, icon, move |window, cx| {
+                    if let Some(view) = view.upgrade() {
+                        let view = view.read(cx);
+                        crate::quick_commands::run(command.clone(), view.current_dir(), view.selection_paths(), window, cx);
+                    }
+                }));
+            } else {
+                inline_commands.push((i, command, picture));
+            }
+        }
+        let menu_name = crate::i18n::tx("Özel komutlar", "Custom commands");
 
         h_flex()
             .h(px(44.))
@@ -2999,6 +3176,63 @@ impl Workspace {
             .children(extra("refresh").then(|| cmd("cb-refresh", L::RotateCw, "Yenile  (F5)", true, cx, |_, w, cx| w.dispatch_action(Box::new(Refresh), cx))))
             // undo, the selection commands, properties, Settings (issue 55, Explorer's "See more")
             .children(on("more").then(|| drop("cb-more", L::Ellipsis, None, "Diğer", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::More)))
+            .children((!inline_commands.is_empty() || !menu_commands.is_empty()).then(sep))
+            .when(!inline_commands.is_empty(), |d| {
+                d.child(
+                    h_flex().id("cb-quick-commands").min_w_0().overflow_x_scroll().gap_1().children(
+                        inline_commands.into_iter().map(|(i, command, picture)| {
+                            let tip = command.tooltip_text().to_owned();
+                            let label = command.button_label().map(str::to_owned);
+                            let icon = if let Some(picture) = picture {
+                                img(picture).size(px(18.)).object_fit(ObjectFit::Contain).flex_shrink_0().into_any_element()
+                            } else {
+                                Icon::new(L::SquareTerminal).size(px(18.)).flex_shrink_0().into_any_element()
+                            };
+                            div()
+                                .id(("cb-command", i))
+                                .role(Role::Button)
+                                .aria_label(tip.clone())
+                                .h(px(32.))
+                                .max_w(px(160.))
+                                .flex_shrink_0()
+                                .px_2()
+                                .flex()
+                                .items_center()
+                                .gap_1p5()
+                                .rounded(theme::RADIUS_SM)
+                                .text_sm()
+                                .tab_index(0)
+                                .cursor_pointer()
+                                .hover(|s| s.bg(p.hover))
+                                .active(|s| s.bg(p.pressed))
+                                .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+                                .when(label.is_none(), |d| d.w(px(36.)).justify_center())
+                                .child(icon)
+                                .children(label.map(|label| div().truncate().child(label)))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    let view = this.active_tab().read(cx);
+                                    crate::quick_commands::run(command.clone(), view.current_dir(), view.selection_paths(), window, cx);
+                                }))
+                        }),
+                    ),
+                )
+            })
+            .when(!menu_commands.is_empty(), |d| {
+                d.child(
+                    h_flex().id("cb-quick-menu")
+                        .role(Role::Button).aria_label(menu_name)
+                        .h(px(32.)).px_2().gap_1().flex_shrink_0().items_center()
+                        .rounded(theme::RADIUS_SM).tab_index(0).cursor_pointer()
+                        .hover(|s| s.bg(p.hover)).active(|s| s.bg(p.pressed))
+                        .when(!popups_open, |d| d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(menu_name).build(w, cx)))
+                        .child(Icon::new(L::Layers).size(px(16.)))
+                        .child(Icon::new(L::ChevronDown).size(px(12.)).text_color(p.text_secondary))
+                        .on_click(move |ev, window, cx| {
+                            let pos = point(ev.position().x - px(14.), theme::TITLEBAR_H + px(48. + 46.));
+                            crate::fluent_menu::show(Menu { quick: Vec::new(), items: menu_commands.clone() }, pos, window, cx);
+                        }),
+                )
+            })
             .child(div().flex_1())
             .children(on("filter").then(|| {
                 div()
@@ -3206,6 +3440,7 @@ impl Workspace {
         } else {
             None
         };
+        let tag_dot = target3.path().filter(|p| p.parent().is_some()).and_then(|p| crate::tags::first_color(p, cx));
         h_flex()
             .id(id)
             .min_h(px(if rail { 36. } else { 32. }))
@@ -3233,6 +3468,7 @@ impl Workspace {
                         None if windows_home => crate::icons::windows_home_icon(px(if rail { 18. } else { 16. })),
                         None => Icon::new(icon).size(px(if rail { 18. } else { 16. })).text_color(icon_color).into_any_element(),
                     })
+                    .when_some(tag_dot, |d, c| d.child(crate::tags::corner_dot(c, p.card_bg)))
                     .when_some(letter, |d, l| {
                         d.child(
                             div()
@@ -3781,14 +4017,14 @@ pub fn open_in_ide(dir: PathBuf, ide: String) {
     });
 }
 
-fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
+pub(crate) fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
     let sources: Vec<PathBuf> = paths.paths().to_vec();
     if sources.is_empty() || rf_win::dnd::is_invalid_drop(&sources, &dest) {
         return;
     }
     let (ctrl, shift) = unsafe {
-        use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
-        (GetKeyState(VK_CONTROL.0 as i32) < 0, GetKeyState(VK_SHIFT.0 as i32) < 0)
+        use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_SHIFT};
+        (GetAsyncKeyState(VK_CONTROL.0 as i32) < 0, GetAsyncKeyState(VK_SHIFT.0 as i32) < 0)
     };
     let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
     crate::status_center::transfer(cx, kind, sources, dest);
@@ -4391,6 +4627,13 @@ impl Render for Workspace {
         let overlay_open = crate::prompt::current(window, cx).is_some() || crate::conflict_dialog::current(window, cx).is_some() || self.ops.read(cx).open || self.palette.is_some() || self.bulk.is_some() || crate::organizer::is_open(window, cx) || crate::prop_chooser::is_open(window, cx);
         let covered = !pane_shown || overlay_open || self.quick_look.is_some();
         self.preview.update(cx, |pv, _| pv.set_occluded(covered));
+        // an open QuickLook preview follows the focused item too (`quicklook::selection_is` sends only what changed)
+        if cx.global::<crate::settings::Settings>().space_quicklook
+            && window.is_window_active()
+            && let Some((path, _)) = self.active_tab().read(cx).preview_target()
+        {
+            crate::quicklook::selection_is(&path);
+        }
         // Hızlı Bakış penceresi uygulamadan açıldıysa odaktaki öğeyi izler (oklar burada çalışır)
         let look_open = crate::folder_view::QUICK_LOOK_OPEN.load(std::sync::atomic::Ordering::Relaxed);
         if look_open && window.is_window_active() {
@@ -4591,7 +4834,10 @@ impl Render for Workspace {
                 this.address.update(cx, |s, cx| s.set_value("@", window, cx));
                 this.update_suggestions("@".into(), cx);
             }))
-            .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| this.toggle_palette(window, cx)))
+            .on_action(cx.listener(|this, _: &ToggleCommandPalette, window, cx| this.toggle_command_palette(window, cx)))
+            .on_action(cx.listener(|this, _: &SearchFolderHistory, window, cx| {
+                this.toggle_palette(crate::command_palette::PaletteMode::Folders, window, cx)
+            }))
             .on_action(cx.listener(|this, _: &GoSettings, window, cx| this.navigate(Location::Settings, window, cx)))
             .on_action(cx.listener(|this, _: &GoRecycleBin, window, cx| this.navigate(Location::RecycleBin, window, cx)))
             .on_action(cx.listener(|this, _: &SwitchPane, window, cx| {
@@ -4719,6 +4965,7 @@ impl Render for Workspace {
 #[cfg(test)]
 mod tests {
     use super::{breadcrumbs, parse_location};
+    use crate::workspace::tab_terminal_dir;
     use rf_core::Location;
     use std::path::{Path, PathBuf};
 
@@ -4735,6 +4982,16 @@ mod tests {
         assert_eq!(c[0].1, Location::Path(PathBuf::from(r"C:\")));
         assert_eq!(parse_location("d:"), Some(Location::Path(PathBuf::from(r"d:\"))));
     }
+
+    #[test]
+    fn the_terminal_button_is_only_for_real_folders() {
+        assert!(tab_terminal_dir(&Location::Home).is_none());
+        assert!(tab_terminal_dir(&Location::Settings).is_none());
+        let dir = std::env::temp_dir();
+        assert_eq!(tab_terminal_dir(&Location::Path(dir.clone())), Some(dir));
+        assert!(tab_terminal_dir(&Location::Path(PathBuf::from(r"C:\Downloads\photos.zip\2024"))).is_none());
+        assert!(tab_terminal_dir(&Location::Path(PathBuf::from("ftp://example.com/pub"))).is_none());
+    }
 }
 
 #[cfg(test)]
@@ -4750,6 +5007,17 @@ mod launch_tests {
         assert_eq!(sel.as_deref(), Some("rapor ü.txt"));
         assert_eq!(parse_launch(r"C:\Windows"), (Location::Path(PathBuf::from(r"C:\Windows")), None));
         assert_eq!(parse_launch("  "), (Location::Home, None));
+    }
+
+    #[test]
+    fn empty_launch_restores_session_only_when_no_browser_window_is_open() {
+        use super::launch_window_start;
+        assert_eq!(launch_window_start("", false, Location::Home), None);
+        assert_eq!(launch_window_start("  ", false, Location::Home), None);
+        assert_eq!(launch_window_start("", true, Location::Home), Some(Location::Home));
+        let docs = Location::Path(PathBuf::from(r"C:\Docs"));
+        assert_eq!(launch_window_start(r"C:\Docs", false, docs.clone()), Some(docs.clone()));
+        assert_eq!(launch_window_start(r"C:\Docs", true, docs.clone()), Some(docs));
     }
 
     /// Issue 20: a window split in two panes at different folders came back with one pane. The second pane of a tab is kept with its

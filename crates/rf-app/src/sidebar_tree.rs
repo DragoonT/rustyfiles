@@ -252,6 +252,7 @@ impl SidebarTree {
         // drives come and go: the roots follow the sidebar's own list of places
         let sub = cx.observe(&places, |t, _, cx| t.refresh_roots(cx));
         let theme_sub = cx.observe_global::<crate::settings::Settings>(|_, cx| cx.notify());
+        let tags_sub = cx.observe_global::<crate::tags::Tags>(|_, cx| cx.notify());
         let mut this = Self {
             model: NavTree::new(),
             places,
@@ -277,7 +278,7 @@ impl SidebarTree {
             wanted: HashSet::new(),
             tx,
             _rx_task: task,
-            _subs: vec![sub, theme_sub],
+            _subs: vec![sub, theme_sub, tags_sub],
         };
         this.refresh_roots(cx);
         this
@@ -678,6 +679,7 @@ impl SidebarTree {
         })
         .flatten();
         let windows_home = cx.global::<crate::settings::Settings>().windows_file_explorer_theme && root == Some(RootKind::Profile);
+        let tag_dot = info.path.parent().and_then(|_| crate::tags::first_color(info.path, cx));
         let icon_color = match root {
             Some(RootKind::Profile) => p.accent,
             Some(_) => p.text_secondary,
@@ -743,11 +745,18 @@ impl SidebarTree {
                         this.toggle(id, cx);
                     })),
             )
-            .child(match own_icon.or(root_drive_icon) {
-                Some(picture) => img(picture).size(px(16.)).flex_shrink_0().into_any_element(),
-                None if windows_home => crate::icons::windows_home_icon(px(16.)),
-                None => Icon::new(Self::row_icon(root, expanded)).size(px(16.)).text_color(icon_color).flex_shrink_0().into_any_element(),
-            })
+            .child(
+                div()
+                    .relative()
+                    .size(px(16.))
+                    .flex_shrink_0()
+                    .child(match own_icon.or(root_drive_icon) {
+                        Some(picture) => img(picture).size(px(16.)).flex_shrink_0().into_any_element(),
+                        None if windows_home => crate::icons::windows_home_icon(px(16.)),
+                        None => Icon::new(Self::row_icon(root, expanded)).size(px(16.)).text_color(icon_color).into_any_element(),
+                    })
+                    .when_some(tag_dot, |d, c| d.child(crate::tags::corner_dot(c, p.card_bg))),
+            )
             .child(
                 div()
                     .flex_1()

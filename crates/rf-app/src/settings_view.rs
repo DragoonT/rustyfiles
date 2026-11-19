@@ -180,7 +180,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Layout => layout(p, s, cx),
         Page::Files => files(p, s, cx),
         Page::FileTypes => crate::open_rules_page::page(p, s),
-        Page::Actions => actions(p, cx),
+        Page::Actions => actions(p, s, cx),
         Page::Tags => tags(p, cx),
         Page::Look => look(p, s, cx),
         Page::Ferry => crate::ferry::page(p, s, cx),
@@ -405,7 +405,7 @@ fn link_row(p: &Palette, id: &'static str, icon: L, title: &str, desc: Option<&s
 // ---------------------------------------------------------------- page
 
 /// `lens_owner`: this page owns the window's settings lens (see `FolderView::lens_owner`); only then is the selected entry glass.
-pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) -> AnyElement {
+pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, scroll: &ScrollHandle) -> AnyElement {
     use gpui_kit::component::input::{Input, InputState};
     let page = ui(cx).page;
     let s = cx.global::<Settings>().clone();
@@ -559,17 +559,30 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool) 
         )
         .child(nav)
         .child(
-            div().id("settings-page").flex_1().min_w_0().h_full().overflow_y_scroll().child(
-                v_flex()
-                    .w_full()
-                    .max_w(px(980.))
-                    .px_6()
-                    .pt_5()
-                    .pb_8()
-                    .gap_2()
-                    .child(div().pb_2().text_xl().font_weight(FontWeight::SEMIBOLD).child(title))
-                    .children(body),
-            ),
+            // the page scrolls with a scrollbar over its right edge (issue 86: on Windows 10 nothing showed there was more below)
+            div()
+                .relative()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .child(
+                    div().id("settings-page").size_full().overflow_y_scroll().track_scroll(scroll).child(
+                        v_flex()
+                            .w_full()
+                            .max_w(px(980.))
+                            .px_6()
+                            .pt_5()
+                            .pb_8()
+                            .gap_2()
+                            .child(div().pb_2().text_xl().font_weight(FontWeight::SEMIBOLD).child(title))
+                            .children(body),
+                    ),
+                )
+                .child(
+                    gpui_kit::component::scroll::Scrollbar::vertical(scroll)
+                        .id("settings-scrollbar")
+                        .mode(crate::folder_view::scrollbar_mode()),
+                ),
         )
         .into_any_element()
 }
@@ -1526,7 +1539,6 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 .collect()
         }),
     ));
-    v.push(card(p, L::PanelTop, t!("Araç çubuğunu göster"), Some("Ctrl+Shift+B"), sw("toolbar", p, s.show_toolbar, |s, v| s.show_toolbar = v)));
     v.push(card(p, L::PanelBottom, t!("Durum çubuğunu göster"), None, sw("statusbar", p, s.show_statusbar, |s, v| s.show_statusbar = v)));
     v.push(card(p, L::PanelRight, t!("Önizleme paneli"), Some("Alt+P"), sw("preview", p, s.preview_open, |s, v| s.preview_open = v)));
     v.push(card(
@@ -1587,6 +1599,9 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         cx,
     ));
     let (bar_hidden, bar_extra) = (s.toolbar_hidden.clone(), s.toolbar_extra.clone());
+    let commands = s.toolbar_commands.clone();
+    // the switch and the buttons it shows stand together (issue 111)
+    v.push(card(p, L::PanelTop, t!("Araç çubuğunu göster"), Some("Ctrl+Shift+B"), sw("toolbar", p, s.show_toolbar, |s, v| s.show_toolbar = v)));
     v.push(expander(
         "toolbar-buttons",
         p,
@@ -1614,7 +1629,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 ("view", "tb-view", "Görünüm", false),
                 ("preview", "tb-preview", "Önizleme paneli", false),
             ];
-            BUTTONS
+            let mut rows: Vec<_> = BUTTONS
                 .iter()
                 .map(|&(key, id, label, optional)| {
                     let shown = if optional { bar_extra.iter().any(|k| k == key) } else { !bar_hidden.iter().any(|k| k == key) };
@@ -1634,7 +1649,18 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                         }),
                     )
                 })
-                .collect()
+                .collect();
+            rows.extend(commands.into_iter().enumerate().map(|(i, command)| {
+                sub(&pp, command.name(), Some(&command.program), crate::quick_commands::controls(i, command.clone(), &pp).into_any_element())
+            }));
+            let add = crate::i18n::tx("Komut ekle", "Add command");
+            rows.push(sub(
+                &pp,
+                crate::i18n::tx("Özel komutlar", "Custom commands"),
+                None,
+                button("add-quick-command", &pp, add, |window, cx| crate::quick_commands::edit(None, window, cx)),
+            ));
+            rows
         },
         cx,
     ));
@@ -1881,6 +1907,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     v.push(card(p, L::TriangleAlert, t!("Uzantı değişince uyar"), None, sw("ext-warn", p, s.warn_extension_change, |s, v| s.warn_extension_change = v)));
     v.push(card(p, L::MousePointer, t!("Üzerine gelince seç"), None, sw("hover-sel", p, s.select_on_hover, |s, v| s.select_on_hover = v)));
+    v.push(card(
+        p,
+        L::ListFilter,
+        t!("Yazınca bu klasörü süz"),
+        Some(t!("Kapalıyken yazmak, adı o harflerle başlayan öğeyi seçer.")),
+        sw("type-filter", p, s.type_to_filter, |s, v| s.type_to_filter = v),
+    ));
     v.push(card(p, L::ArrowUp, t!("Boş alana çift tıklayınca üst klasöre çık"), None, sw("dbl-up", p, s.double_click_up, |s, v| s.double_click_up = v)));
     v.push(card(p, L::FolderUp, t!("Yukarı çıkınca önceki klasörü seç"), None, sw("prev-sel", p, s.select_previous_on_up, |s, v| s.select_previous_on_up = v)));
     v.push(card(
@@ -2010,7 +2043,7 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     v
 }
 
-fn actions(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
+fn actions(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     let mut grid = div().px_4().py_3().flex().flex_wrap().gap_x_6().gap_y_0p5();
     let capturing = crate::keymap_editor::capturing(cx);
     let entries = crate::command_palette::shortcut_entries();
@@ -2096,6 +2129,13 @@ fn actions(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
         );
     }
     vec![
+        card(
+            p,
+            L::Clock,
+            t!("Komut paletinde geçmiş klasörleri göster"),
+            Some(t!("Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.")),
+            sw("palette-folders", p, s.palette_folder_history, |s, v| s.palette_folder_history = v),
+        ),
         shell(p)
             .child(card_body(
                 p,
@@ -2328,6 +2368,19 @@ fn look(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             }
         }),
     )];
+    // QuickLook instead (asked on Discord): shown with DirectLook off too, as that is how it is meant to be used
+    let ql = s.space_quicklook;
+    v.push(card(
+        p,
+        L::ScanEye,
+        t!("Boşluk QuickLook'u açsın"),
+        Some(if crate::quicklook::installed() {
+            t!("Dosyalar QuickLook'a gönderilir ve açık önizleme seçimi izler. DirectLook'u yukarıdan kapatabilirsiniz.")
+        } else {
+            t!("QuickLook kurulu değil: Microsoft Store'dan ya da GitHub'dan (QL-Win/QuickLook) kurulabilir.")
+        }),
+        switch("space-ql", p, ql, move |_, cx| settings::update(cx, |s| s.space_quicklook = !ql)),
+    ));
     if !enabled {
         return v;
     }

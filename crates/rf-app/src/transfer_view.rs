@@ -380,8 +380,14 @@ pub(crate) fn strip(ops: &Entity<Ops>, p: &Palette, avail: f32, cx: &App) -> Opt
             let ops = ops.clone();
             icon_button(("strip-cancel", id as usize), p, L::X, t!("İptal"), move |_, cx| ops.update(cx, |o, cx| o.cancel_op(id, cx)))
         };
+        // the copy stands still until this is answered: an accent-tinted bar, not a status line like the others (issue 95: the
+        // question went unseen and the copy "would not begin")
         return Some(
             frame
+                .bg(p.accent.opacity(0.14))
+                .border_1()
+                .border_color(p.accent.opacity(0.45))
+                .rounded(theme::RADIUS_SM)
                 .child(
                     main()
                         .child(Icon::new(L::CircleAlert).size(px(14.)).text_color(p.accent))
