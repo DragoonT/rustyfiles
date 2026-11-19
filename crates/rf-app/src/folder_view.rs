@@ -3737,7 +3737,8 @@ impl FolderView {
                         cx.listener(move |_, ev: &KeyDownEvent, _, cx| crate::rtl::handle_key_down(&input, ev, cx))
                     })
                     .flex_1()
-                    .h(px(24.))
+                    // (as tall as the row at the tightest size)
+                    .h(row_h.min(px(24.)))
                     .ml(px(-RENAME_INSET))
                     .px(px(RENAME_INSET - 1.))
                     .rounded(px(4.))
@@ -4647,8 +4648,8 @@ const GRID_GAP: Pixels = px(4.);
 /// Grid sizes (Ctrl+= / Ctrl+-): tile width, row height, thumbnail pixels.
 const GRID_SIZES: [(f32, f32, u32); 5] = [(76., 94., 64), (92., 112., 80), (124., 150., 128), (172., 204., 192), (236., 276., 272)];
 const DEFAULT_GRID_SIZE: u8 = 2;
-/// Details row heights for the "Size" slider (30 = the classic one).
-const ROW_SIZES: [f32; 5] = [26., 30., 36., 44., 52.];
+/// Details row heights for the "Size" slider (30 = the classic one; 22 = as tight as File Explorer's compact rows, asked for on Threads).
+const ROW_SIZES: [f32; 5] = [22., 30., 36., 44., 52.];
 const DEFAULT_ROW_SIZE: u8 = 1;
 
 const SLOW_LOAD: std::time::Duration = std::time::Duration::from_millis(400);
