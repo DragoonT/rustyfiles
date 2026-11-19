@@ -389,6 +389,9 @@ pub const EN: &[(&str, &str)] = &[
     // git
     ("Çek (pull)", "Pull"),
     ("Gönder (push)", "Push"),
+    ("Gönder", "Send to"),
+    ("Sekmelerde terminal düğmesi", "Terminal button on tabs"),
+    ("Her klasör sekmesinde, o klasörde bir terminal açan düğme.", "A button on each folder's tab that opens a terminal in that folder."),
     ("Eşitle", "Sync"),
     ("Uzak depodan getir (fetch)", "Fetch"),
     ("Çek / Gönder / Eşitle", "Pull / Push / Sync"),

@@ -2226,6 +2226,8 @@ impl Workspace {
         // Settings > Appearance > "Tabs as wide as their names" (issue 119): each tab its measured name plus its icon and buttons, within
         // the same limits; the buttons are in that width, so they always show
         let fit_names = cx.global::<crate::settings::Settings>().tabs_fit_names;
+        // Settings > Appearance > "Terminal button on tabs" (issue 119: off, nothing is in the way of a click on a narrow tab)
+        let tab_terminal = cx.global::<crate::settings::Settings>().tab_terminal_button;
         let (name_px, name_style) = (rems(0.875).to_pixels(window.rem_size()), window.text_style());
         let roomy = fit_names || tab_w >= 110.;
         let mut tab_claimed = false;
@@ -2234,7 +2236,7 @@ impl Workspace {
             let title = v.title(cx);
             let icon = v.tab_icon();
             let tab_dir = v.location().path().map(Path::to_path_buf);
-            let term_dir = tab_terminal_dir(v.location());
+            let term_dir = tab_terminal.then(|| tab_terminal_dir(v.location())).flatten();
             let tab_w = if fit_names {
                 let name = window.text_system().layout_line(&title, name_px, &[name_style.to_run(title.len())], None).width;
                 (f32::from(name) + TAB_CHROME_W + if term_dir.is_some() { TAB_TERMINAL_W } else { 0. }).clamp(TAB_MIN_W, TAB_MAX_W)

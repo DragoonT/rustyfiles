@@ -3065,6 +3065,19 @@ impl FolderView {
         self.places.read(cx).pinned.iter().map(|p| p.path.clone()).collect()
     }
 
+    /// The drives "Send to" lists after the SendTo folder's entries, as Explorer's does: the removable and the network ones (root,
+    /// name, icon).
+    pub(crate) fn send_to_drives(&self, cx: &App) -> Vec<(PathBuf, String, gpui_kit::assets::IconName)> {
+        use rf_win::drives::DriveKind;
+        self.places
+            .read(cx)
+            .drives
+            .iter()
+            .filter(|d| matches!(d.kind, DriveKind::Removable | DriveKind::Network))
+            .map(|d| (d.root.clone(), places::drive_name(d), places::drive_icon(d)))
+            .collect()
+    }
+
     pub(crate) fn refresh_places(&self, cx: &mut Context<Self>) {
         self.places.update(cx, |p, cx| p.refresh(cx));
     }

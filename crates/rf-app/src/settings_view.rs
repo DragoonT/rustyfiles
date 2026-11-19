@@ -811,7 +811,7 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         None,
         move || {
             type Set = fn(&mut Settings, bool);
-            let rows: [(&str, bool, Set); 9] = [
+            let rows: [(&str, bool, Set); 10] = [
                 (t!("Yeni sekmede aç"), m.open_in_new_tab, |s, v| s.menu.open_in_new_tab = v),
                 (t!("Yeni pencerede aç"), m.open_in_new_window, |s, v| s.menu.open_in_new_window = v),
                 (t!("Öğe yolunu kopyala"), m.copy_path, |s, v| s.menu.copy_path = v),
@@ -821,6 +821,7 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 (t!("Etiketler"), m.tags, |s, v| s.menu.tags = v),
                 (t!("Rafa ekle"), m.shelf, |s, v| s.menu.shelf = v),
                 (t!("Terminalde aç"), m.terminal, |s, v| s.menu.terminal = v),
+                (t!("Gönder"), m.send_to, |s, v| s.menu.send_to = v),
             ];
             rows.into_iter()
                 .enumerate()
@@ -1405,6 +1406,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             t!("Sekmeler adları kadar geniş"),
             Some(t!("Kapalıyken bütün sekmeler eşit genişlikte. Açıkken her sekme adına göre genişler, en az 72 ve en çok 220 piksel.")),
             sw("tabs-fit", p, s.tabs_fit_names, |s, v| s.tabs_fit_names = v),
+        ),
+        card(
+            p,
+            L::SquareTerminal,
+            t!("Sekmelerde terminal düğmesi"),
+            Some(t!("Her klasör sekmesinde, o klasörde bir terminal açan düğme.")),
+            sw("tab-terminal", p, s.tab_terminal_button, |s, v| s.tab_terminal_button = v),
         ),
         card(
             p,
