@@ -59,3 +59,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release edit ${{ github.ref_name }} --repo ${{ github.repository }} --draft=false --prerelease
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  winget:
+    # Each release (never a beta) goes to winget too: the action opens the update pull request in microsoft/winget-pkgs from the
+    # gelenmedya fork, with the new Setup.exe. It needs the WINGET_TOKEN secret (a classic token with the public_repo scope); without
+    # it this job does nothing. The first version (0.9.0) was submitted by hand.
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    env:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+    steps:
+      - name: Update the winget package
+        if: ${{ env.WINGET_TOKEN != '' }}
+        # v2, pinned to its commit
+        uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54
+        with:
+          identifier: gelenmedya.rustyfiles
+          installers-regex: 'Setup\.exe$'
+          release-tag: ${{ github.ref_name }}
+          token: ${{ secrets.WINGET_TOKEN }}
