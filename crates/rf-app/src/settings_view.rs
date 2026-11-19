@@ -2361,6 +2361,19 @@ fn look(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             }
         }),
     )];
+    // QuickLook instead (asked on Discord): shown with DirectLook off too, as that is how it is meant to be used
+    let ql = s.space_quicklook;
+    v.push(card(
+        p,
+        L::ScanEye,
+        t!("Boşluk QuickLook'u açsın"),
+        Some(if crate::quicklook::installed() {
+            t!("Dosyalar QuickLook'a gönderilir ve açık önizleme seçimi izler. DirectLook'u yukarıdan kapatabilirsiniz.")
+        } else {
+            t!("QuickLook kurulu değil: Microsoft Store'dan ya da GitHub'dan (QL-Win/QuickLook) kurulabilir.")
+        }),
+        switch("space-ql", p, ql, move |_, cx| settings::update(cx, |s| s.space_quicklook = !ql)),
+    ));
     if !enabled {
         return v;
     }

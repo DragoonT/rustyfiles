@@ -595,6 +595,8 @@ pub struct Settings {
     // ---- DirectLook (Hızlı Bakış, ayrı program): ayarları kendi dosyasında (`look::config`)
     /// DirectLook kullanılsın mı (kapalıyken rustyfiles onu başlatmaz, Boşluk bir şey yapmaz).
     pub directlook_enabled: bool,
+    /// Space hands the file to QuickLook (QL-Win) instead of DirectLook (`quicklook`).
+    pub space_quicklook: bool,
 
     // ---- Quick search (quick_search.rs)
     /// A global shortcut opens the quick search: apps, files, bookmarks, the web.
@@ -868,6 +870,7 @@ impl Default for Settings {
             ide_button: IdePref::GitRepos,
             ide_path: String::new(),
             show_flatten: false,
+            space_quicklook: false,
             directlook_enabled: true,
             quick_search: true,
             quick_search_keys: "alt-space".into(),

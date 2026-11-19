@@ -68,6 +68,7 @@ mod program_launch;
 mod properties_view;
 mod quick_commands;
 mod quick_search;
+mod quicklook;
 mod run_names;
 mod settings_rows;
 mod search_pipe;

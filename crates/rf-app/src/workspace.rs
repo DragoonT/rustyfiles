@@ -1585,6 +1585,14 @@ impl Workspace {
     /// Boşluk: DirectLook'a (ayrı süreç) aç/kapat iletisi. DirectLook kapalıyken bir şey yapmaz.
     fn toggle_quick_look(&mut self, cx: &mut Context<Self>) {
         use std::sync::atomic::Ordering;
+        // Settings › DirectLook › "Space opens QuickLook": the file goes to QuickLook (a file inside an archive has no path it can open)
+        if cx.global::<crate::settings::Settings>().space_quicklook {
+            match self.active_tab().read(cx).preview_target() {
+                Some((path, _)) if crate::archive_view::split_inside(&path).is_none() => crate::quicklook::space(path),
+                target => log::info!("quicklook: Space with nothing QuickLook can open ({:?})", target.map(|(p, _)| p)),
+            }
+            return;
+        }
         if !cx.global::<crate::settings::Settings>().directlook_enabled {
             return;
         }
@@ -4532,6 +4540,13 @@ impl Render for Workspace {
         let overlay_open = crate::prompt::current(window, cx).is_some() || crate::conflict_dialog::current(window, cx).is_some() || self.ops.read(cx).open || self.palette.is_some() || self.bulk.is_some() || crate::organizer::is_open(window, cx) || crate::prop_chooser::is_open(window, cx);
         let covered = !pane_shown || overlay_open || self.quick_look.is_some();
         self.preview.update(cx, |pv, _| pv.set_occluded(covered));
+        // an open QuickLook preview follows the focused item too (`quicklook::selection_is` sends only what changed)
+        if cx.global::<crate::settings::Settings>().space_quicklook
+            && window.is_window_active()
+            && let Some((path, _)) = self.active_tab().read(cx).preview_target()
+        {
+            crate::quicklook::selection_is(&path);
+        }
         // Hızlı Bakış penceresi uygulamadan açıldıysa odaktaki öğeyi izler (oklar burada çalışır)
         let look_open = crate::folder_view::QUICK_LOOK_OPEN.load(std::sync::atomic::Ordering::Relaxed);
         if look_open && window.is_window_active() {
