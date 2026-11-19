@@ -12172,7 +12172,8 @@
   "id": "bb978821",
   "key": "Geçmiş klasörlerde ara",
   "tr": "Geçmiş klasörlerde ara",
-  "en": "Search past folders"
+  "en": "Search past folders",
+  "note": "A command: find a folder among the folders visited before."
  },
  {
   "id": "63facfe7",
@@ -12203,5 +12204,238 @@
   "key": "Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.",
   "tr": "Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.",
   "en": "As you type, folders you went to before are listed with the commands. Ctrl+P always searches past folders only."
+ },
+ {
+  "id": "0b29da65",
+  "key": "Dock'u otomatik gizle",
+  "tr": "Dock'u otomatik gizle",
+  "en": "Hide the dock automatically",
+  "note": "A switch in Settings > Dock: the dock hides itself and comes up when the pointer reaches the screen's bottom edge (like the Windows taskbar's auto-hide)."
+ },
+ {
+  "id": "4ce6c2e0",
+  "key": "Dock ekranın altında saklanır, imleç alt kenara gelince çıkar ve imleç ayrılınca yeniden saklanır. Açıkken pencereler için yer ayırmaz.",
+  "tr": "Dock ekranın altında saklanır, imleç alt kenara gelince çıkar ve imleç ayrılınca yeniden saklanır. Açıkken pencereler için yer ayırmaz.",
+  "en": "The dock waits below the bottom of the screen, comes up when the pointer reaches the bottom edge and goes away again when the pointer leaves it. While on, it reserves no room for windows."
+ },
+ {
+  "id": "ef865654",
+  "key": "Düz arka plan",
+  "tr": "Düz arka plan",
+  "en": "Solid background",
+  "note": "A switch in Settings > Dock: the dock is painted with a solid, opaque colour instead of glass. \"Background\" is the look behind its icons."
+ },
+ {
+  "id": "7a4a3b5f",
+  "key": "Adalar cam yerine düz, opak bir zeminle çizilir: hareketli bir duvar kâğıdında ya da pencerelerin önünde simgeler daha kolay seçilir.",
+  "tr": "Adalar cam yerine düz, opak bir zeminle çizilir: hareketli bir duvar kâğıdında ya da pencerelerin önünde simgeler daha kolay seçilir.",
+  "en": "The islands are drawn on a solid, opaque fill instead of glass: icons stand out better over a busy wallpaper or windows."
+ },
+ {
+  "id": "d40ed9c8",
+  "key": "Sekmeler adları kadar geniş",
+  "tr": "Sekmeler adları kadar geniş",
+  "en": "Tabs as wide as their names"
+ },
+ {
+  "id": "46e90d38",
+  "key": "Kapalıyken bütün sekmeler eşit genişlikte. Açıkken her sekme adına göre genişler, en az 72 ve en çok 220 piksel.",
+  "tr": "Kapalıyken bütün sekmeler eşit genişlikte. Açıkken her sekme adına göre genişler, en az 72 ve en çok 220 piksel.",
+  "en": "When off, all tabs are equally wide. When on, each tab fits its name, from 72 to 220 pixels."
+ },
+ {
+  "id": "3a195863",
+  "key": "Boşluk QuickLook'u açsın",
+  "tr": "Boşluk QuickLook'u açsın",
+  "en": "Space opens QuickLook"
+ },
+ {
+  "id": "34c59476",
+  "key": "Dosyalar QuickLook'a gönderilir ve açık önizleme seçimi izler. DirectLook'u yukarıdan kapatabilirsiniz.",
+  "tr": "Dosyalar QuickLook'a gönderilir ve açık önizleme seçimi izler. DirectLook'u yukarıdan kapatabilirsiniz.",
+  "en": "Files go to QuickLook, and an open preview follows the selection. You can turn DirectLook off above."
+ },
+ {
+  "id": "5a259a23",
+  "key": "QuickLook kurulu değil: Microsoft Store'dan ya da GitHub'dan (QL-Win/QuickLook) kurulabilir.",
+  "tr": "QuickLook kurulu değil: Microsoft Store'dan ya da GitHub'dan (QL-Win/QuickLook) kurulabilir.",
+  "en": "QuickLook is not installed: get it from the Microsoft Store or GitHub (QL-Win/QuickLook)."
+ },
+ {
+  "id": "d0639fc8",
+  "key": "Yazınca bu klasörü süz",
+  "tr": "Yazınca bu klasörü süz",
+  "en": "Typing filters this folder"
+ },
+ {
+  "id": "00dcd10d",
+  "key": "Kapalıyken yazmak, adı o harflerle başlayan öğeyi seçer.",
+  "tr": "Kapalıyken yazmak, adı o harflerle başlayan öğeyi seçer.",
+  "en": "When off, typing selects the item whose name starts with those letters."
+ },
+ {
+  "id": "d335eead",
+  "key": "en:Program not found.",
+  "tr": "Program bulunamadı.",
+  "en": "Program not found."
+ },
+ {
+  "id": "49bdee2e",
+  "key": "en:Pass these arguments directly to a .bat or .cmd file.",
+  "tr": "Bu bağımsız değişkenleri doğrudan bir .bat veya .cmd dosyasına verin.",
+  "en": "Pass these arguments directly to a .bat or .cmd file."
+ },
+ {
+  "id": "bf4cd65f",
+  "key": "en:Use PowerShell -File to pass file paths.",
+  "tr": "Dosya yollarını geçirmek için PowerShell -File kullanın.",
+  "en": "Use PowerShell -File to pass file paths."
+ },
+ {
+  "id": "4cd39a83",
+  "key": "en:Could not start the program",
+  "tr": "Program başlatılamadı",
+  "en": "Could not start the program"
+ },
+ {
+  "id": "7fc17a7b",
+  "key": "en:Open a folder first.",
+  "tr": "Önce bir klasör açın.",
+  "en": "Open a folder first."
+ },
+ {
+  "id": "9ca6ad4d",
+  "key": "en:Select files first.",
+  "tr": "Önce dosyaları seçin.",
+  "en": "Select files first."
+ },
+ {
+  "id": "d403b65a",
+  "key": "en:Button label",
+  "tr": "Düğme adı",
+  "en": "Button label",
+  "note": "Placeholder of a text field: the text written on a toolbar button."
+ },
+ {
+  "id": "791f2aac",
+  "key": "en:Button or program name",
+  "tr": "Düğme veya program adı",
+  "en": "Button or program name"
+ },
+ {
+  "id": "6d8aac77",
+  "key": "en:Use the program's icon",
+  "tr": "Program simgesini kullan",
+  "en": "Use the program's icon"
+ },
+ {
+  "id": "1e167f5a",
+  "key": "en:Browse…",
+  "tr": "Gözat…",
+  "en": "Browse…",
+  "note": "A button: pick an icon file from the disk."
+ },
+ {
+  "id": "dd05639e",
+  "key": "en:Toolbar command",
+  "tr": "Araç çubuğu komutu",
+  "en": "Toolbar command",
+  "note": "Title of a dialog: one user-made toolbar button that starts a program."
+ },
+ {
+  "id": "606f55c9",
+  "key": "en:Button label (optional)",
+  "tr": "Düğme adı (isteğe bağlı)",
+  "en": "Button label (optional)"
+ },
+ {
+  "id": "0a0e5786",
+  "key": "en:Tooltip (optional)",
+  "tr": "Araç ipucu (isteğe bağlı)",
+  "en": "Tooltip (optional)"
+ },
+ {
+  "id": "eef1a26b",
+  "key": "en:Program path or name on PATH",
+  "tr": "Program yolu veya PATH üzerindeki adı",
+  "en": "Program path or name on PATH"
+ },
+ {
+  "id": "bad5c43b",
+  "key": "en:Arguments (optional)",
+  "tr": "Bağımsız değişkenler (isteğe bağlı)",
+  "en": "Arguments (optional)",
+  "note": "Command-line arguments given to the program."
+ },
+ {
+  "id": "e0a0faec",
+  "key": "en:{folder} passes the current folder. {selection} passes each selected path as a separate argument.",
+  "tr": "{folder} açık klasörü, {selection} seçilen her yolu ayrı bir bağımsız değişken olarak ekler.",
+  "en": "{folder} passes the current folder. {selection} passes each selected path as a separate argument."
+ },
+ {
+  "id": "d9ff91ec",
+  "key": "en:Icon (optional)",
+  "tr": "Simge (isteğe bağlı)",
+  "en": "Icon (optional)"
+ },
+ {
+  "id": "77bedd6f",
+  "key": "en:Show in menu",
+  "tr": "Açılır menüde göster",
+  "en": "Show in menu",
+  "note": "A checkbox for a custom toolbar command: list it in the toolbar's drop-down menu instead of giving it its own button."
+ },
+ {
+  "id": "39005a35",
+  "key": "en:Enter a program name or absolute path.",
+  "tr": "Programın adını veya tam yolunu girin.",
+  "en": "Enter a program name or absolute path."
+ },
+ {
+  "id": "0a93b526",
+  "key": "en:Enter the full path to an icon file.",
+  "tr": "Simge dosyasının tam yolunu girin.",
+  "en": "Enter the full path to an icon file."
+ },
+ {
+  "id": "e88ba4b1",
+  "key": "en:Choose an icon",
+  "tr": "Simge seçin",
+  "en": "Choose an icon"
+ },
+ {
+  "id": "2b25df0a",
+  "key": "en:Icon files",
+  "tr": "Simge dosyaları",
+  "en": "Icon files",
+  "note": "A file-type filter in an Open dialog: icon files (.ico, .png, .exe, .lnk)."
+ },
+ {
+  "id": "60fc6ab4",
+  "key": "en:Edit",
+  "tr": "Düzenle",
+  "en": "Edit",
+  "note": "A button beside one of the user's own toolbar commands in Settings: change (edit) that command."
+ },
+ {
+  "id": "45e1c5b8",
+  "key": "en:Remove",
+  "tr": "Kaldır",
+  "en": "Remove",
+  "note": "A button beside one of the user's own toolbar commands in Settings: take that command off the toolbar."
+ },
+ {
+  "id": "d255de46",
+  "key": "en:Add command",
+  "tr": "Komut ekle",
+  "en": "Add command"
+ },
+ {
+  "id": "0675a937",
+  "key": "en:Custom commands",
+  "tr": "Özel komutlar",
+  "en": "Custom commands",
+  "note": "A settings row and a toolbar menu: the user's own toolbar buttons that start programs."
  }
 ]
