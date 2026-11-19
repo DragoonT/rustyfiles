@@ -2,10 +2,13 @@
 //! Native shell icons/thumbnails come later via rf-win; this is the instant, zero-I/O fallback.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 
 use crate::t;
 use gpui_kit::assets::IconName as L;
 use gpui_kit::component::Icon;
+use gpui_kit::RenderImage;
 use gpui_kit::{
     App, AnyElement, AssetSource, IntoElement, ParentElement, Pixels, SharedString, Styled, div, rgb,
 };
@@ -305,6 +308,55 @@ const WINDOWS_THEME_ASSETS: &[(&str, &[u8])] = &[
         include_bytes!("../assets/windows-theme/warning.svg"),
     ),
 ];
+
+const WINDOWS_THEME_ACTION_IMAGES: &[(&str, &[u8])] = &[
+    (
+        "menu-undo.png",
+        include_bytes!("../assets/windows-theme/menu-undo.png"),
+    ),
+    (
+        "menu-redo.png",
+        include_bytes!("../assets/windows-theme/menu-redo.png"),
+    ),
+    (
+        "menu-select-all.png",
+        include_bytes!("../assets/windows-theme/menu-select-all.png"),
+    ),
+    (
+        "menu-select-none.png",
+        include_bytes!("../assets/windows-theme/menu-select-none.png"),
+    ),
+    (
+        "menu-invert-selection.png",
+        include_bytes!("../assets/windows-theme/menu-invert-selection.png"),
+    ),
+    (
+        "menu-settings.png",
+        include_bytes!("../assets/windows-theme/menu-settings.png"),
+    ),
+];
+
+static WINDOWS_THEME_ACTION_IMAGE_CACHE: OnceLock<HashMap<&'static str, Arc<RenderImage>>> =
+    OnceLock::new();
+
+pub fn windows_theme_action_image(name: &'static str) -> Option<Arc<RenderImage>> {
+    let images = WINDOWS_THEME_ACTION_IMAGE_CACHE.get_or_init(|| {
+        WINDOWS_THEME_ACTION_IMAGES
+            .iter()
+            .filter_map(|(name, bytes)| match image::load_from_memory(bytes) {
+                Ok(image) => Some((
+                    *name,
+                    Arc::new(RenderImage::new(vec![image::Frame::new(image.to_rgba8())])),
+                )),
+                Err(error) => {
+                    log::warn!("could not decode Windows theme icon {name}: {error}");
+                    None
+                }
+            })
+            .collect()
+    });
+    images.get(name).cloned()
+}
 
 pub struct AppAssets;
 
@@ -674,6 +726,20 @@ mod windows_theme_tests {
             assert_eq!(windows_theme_context_glyph(asset), Some(glyph), "{asset}");
         }
         assert_eq!(windows_theme_context_glyph("windows-theme/context-compress.svg"), None);
+    }
+
+    #[test]
+    fn windows_theme_custom_action_images_are_available() {
+        for name in [
+            "menu-undo.png",
+            "menu-redo.png",
+            "menu-select-all.png",
+            "menu-select-none.png",
+            "menu-invert-selection.png",
+            "menu-settings.png",
+        ] {
+            assert!(super::windows_theme_action_image(name).is_some(), "{name}");
+        }
     }
 
     #[test]

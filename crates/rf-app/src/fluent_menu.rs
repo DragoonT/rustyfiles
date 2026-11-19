@@ -997,7 +997,10 @@ fn row_content(
         }
         MenuIcon::Tinted(l, c) => lucide_menu_icon(l, explorer_context, Some(c)),
         MenuIcon::Asset(path) => asset_icon(path),
-        MenuIcon::Image(img) => gpui_kit::img(img).size(px(16.)).into_any_element(),
+        MenuIcon::Image(img) => div()
+            .when(!enabled, |d| d.opacity(0.45))
+            .child(gpui_kit::img(img).size(px(16.)))
+            .into_any_element(),
         MenuIcon::Dot(c) => div().size(px(10.)).rounded_full().bg(c).into_any_element(),
     };
     h_flex()
