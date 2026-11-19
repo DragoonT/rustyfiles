@@ -52,6 +52,10 @@ mod com {
 
     use crate::proto::{Filter, Mode, Request};
 
+    /// How long to wait before offering a pick to the app again after its OnFileOk said S_FALSE: Firefox's input protection waits
+    /// `security.notification_enable_delay`, 500 ms out of the box, after the first folder.
+    const SECOND_OFFER_MS: u64 = 700;
+
     type DllGetClassObjectFn = unsafe extern "system" fn(*const GUID, *const GUID, *mut *mut c_void) -> HRESULT;
 
     /// Windows' own dialog class, from comdlg32.dll directly (our HKCU registration would
@@ -294,6 +298,19 @@ mod com {
                     let _ = EnableWindow(owner, false);
                 }
             }
+            // Windows' dialog tells its event sinks that its first folder is in place (OnFolderChange) as it opens. Firefox's input
+            // protection (FileDialogInputProtector) refuses any OnFileOk that comes before that, or within its delay after it, with
+            // S_FALSE: without this every pick in Firefox was refused (issue 116). Told now, before the user is asked.
+            {
+                let sinks: Vec<IFileDialogEvents> = self.st.borrow().sinks.iter().map(|(_, s)| s.clone()).collect();
+                if !sinks.is_empty()
+                    && let Ok(me) = self.to_interface::<IFileOpenDialog>().cast::<IFileDialog>()
+                {
+                    for s in &sinks {
+                        let _ = unsafe { (Interface::vtable(s).OnFolderChange)(Interface::as_raw(s), Interface::as_raw(&me)) };
+                    }
+                }
+            }
             let answer = crate::ipc::pick(&req, owner);
             if has_owner {
                 unsafe {
@@ -323,7 +340,15 @@ mod com {
             let me: IFileDialog = self.to_interface::<IFileOpenDialog>().cast()?;
             let sinks: Vec<IFileDialogEvents> = self.st.borrow().sinks.iter().map(|(_, s)| s.clone()).collect();
             for s in sinks {
-                let hr = unsafe { (Interface::vtable(&s).OnFileOk)(Interface::as_raw(&s), Interface::as_raw(&me)) };
+                let ok = || unsafe { (Interface::vtable(&s).OnFileOk)(Interface::as_raw(&s), Interface::as_raw(&me)) };
+                let mut hr = ok();
+                if hr == S_FALSE {
+                    // a guard against a click that comes too soon (Firefox's, above) says no to a pick made within its delay: our
+                    // window cannot stay open for a second try as Windows' does, so the pick is offered once more after the delay
+                    std::thread::sleep(std::time::Duration::from_millis(SECOND_OFFER_MS));
+                    hr = ok();
+                    crate::log(&format!("show: OnFileOk said S_FALSE, offered again after {SECOND_OFFER_MS} ms: {}", if hr == S_FALSE { "refused" } else { "taken" }));
+                }
                 if hr == S_FALSE {
                     crate::log("show: the app refused the choice in OnFileOk (S_FALSE)");
                     self.st.borrow_mut().result = None;
