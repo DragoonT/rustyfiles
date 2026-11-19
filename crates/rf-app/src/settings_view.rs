@@ -1401,6 +1401,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         accent_card(p, s),
         card(
             p,
+            L::AppWindow,
+            t!("Sekmeler adları kadar geniş"),
+            Some(t!("Kapalıyken bütün sekmeler eşit genişlikte. Açıkken her sekme adına göre genişler, en az 72 ve en çok 220 piksel.")),
+            sw("tabs-fit", p, s.tabs_fit_names, |s, v| s.tabs_fit_names = v),
+        ),
+        card(
+            p,
             L::Activity,
             t!("Animasyonlar"),
             Some(t!("Sekme açılırken ve kapanırken kısa geçişler. Hiçbir işi geciktirmez.")),

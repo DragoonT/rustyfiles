@@ -757,6 +757,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Yalnızca kalıcı silmede", "Only for permanent deletion"),
     ("Uzantı değişince uyar", "Warn when the extension changes"),
     ("Üzerine gelince seç", "Select on hover"),
+    ("Sekmeler adları kadar geniş", "Tabs as wide as their names"),
+    ("Kapalıyken bütün sekmeler eşit genişlikte. Açıkken her sekme adına göre genişler, en az 72 ve en çok 220 piksel.", "When off, all tabs are equally wide. When on, each tab fits its name, from 72 to 220 pixels."),
     ("Boşluk QuickLook'u açsın", "Space opens QuickLook"),
     ("Dosyalar QuickLook'a gönderilir ve açık önizleme seçimi izler. DirectLook'u yukarıdan kapatabilirsiniz.", "Files go to QuickLook, and an open preview follows the selection. You can turn DirectLook off above."),
     ("QuickLook kurulu değil: Microsoft Store'dan ya da GitHub'dan (QL-Win/QuickLook) kurulabilir.", "QuickLook is not installed: get it from the Microsoft Store or GitHub (QL-Win/QuickLook)."),
