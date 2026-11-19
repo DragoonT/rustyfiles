@@ -428,6 +428,10 @@ mod walk_tests {
     fn the_walk_reaches_a_folder_from_the_one_above_it() {
         let dir = std::env::temp_dir().join(format!("rf-walk-test-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("inner")).unwrap();
+        // the long form of the path: TEMP can come in 8.3 names (GitHub's runners: C:\Users\RUNNER~1), and the shell's parsing names
+        // are the long ones, so the walk would look for a "RUNNER~1" it never meets
+        let long = std::fs::canonicalize(&dir).unwrap();
+        let dir = std::path::PathBuf::from(long.to_string_lossy().trim_start_matches(r"\\?\"));
         let target = dir.join("inner").to_string_lossy().into_owned();
         super::ensure_com();
         let found = super::walk_to(&target).and_then(|i| super::display(&i, super::SIGDN_DESKTOPABSOLUTEPARSING));
