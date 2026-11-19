@@ -4383,13 +4383,11 @@ impl Render for Workspace {
         let glass_on = self.glass_shown && self.glass_hwnd != 0;
         self.tab_lens = glass_on;
         self.tab_lens_claimed = false;
-        self.plus_lens_claimed = false;
         let titlebar = self.render_titlebar(&p, window, cx);
         self.tab_lens = false;
         let strip_frame = crate::glass::StripFrame {
             on_screen: true,
             tab_claimed: self.tab_lens_claimed,
-            plus_claimed: self.plus_lens_claimed,
         };
         let toolbar = self.render_toolbar(&p, cx);
         let commandbar = self.render_commandbar(&p, cx);
