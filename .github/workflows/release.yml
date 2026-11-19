@@ -70,8 +70,20 @@ jobs:
     env:
       WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
     steps:
-      - name: Update the winget package
+      # The action can only update a package winget already has: until the first version is merged it would fail every release
+      - name: Is the package in winget yet
+        id: known
         if: ${{ env.WINGET_TOKEN != '' }}
+        shell: bash
+        run: |
+          if curl -fsS -o /dev/null -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/g/gelenmedya/rustyfiles; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::gelenmedya.rustyfiles is not in winget-pkgs yet (its first version waits for review): nothing to update"
+            echo "yes=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Update the winget package
+        if: ${{ env.WINGET_TOKEN != '' && steps.known.outputs.yes == 'true' }}
         # v2, pinned to its commit
         uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54
         with:
