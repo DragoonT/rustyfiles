@@ -312,6 +312,13 @@ Installing takes three clicks and no technical knowledge:
 No administrator password, nothing to configure. Updates download quietly in the background and
 apply the next time you open rustyfiles.
 
+**With [Scoop](https://scoop.sh):**
+
+```powershell
+scoop bucket add rustyfiles https://github.com/gelenmedya/scoop-rustyfiles
+scoop install rustyfiles/rustyfiles
+```
+
 **Want folders and <kbd>Win</kbd>+<kbd>E</kbd> to open in rustyfiles?** Turn on
 Settings › Advanced › Set as default file manager. You can turn it off any time.
 
