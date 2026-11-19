@@ -9,6 +9,9 @@ folders, drives, tabs, and Recycle Bin states. Common toolbar and context-menu a
 Windows 11 Segoe Fluent Icons; context menus also use the Explorer-style presentation. The
 tab strip's new-tab control is a plain plus sign.
 
-The theme is selected through the existing icon resolver. It does not replace the original
-icon definitions or bundle the user's separate ICO collection; turning the switch off
-restores RustyFile's original icon selection.
+The command-bar More menu uses the Explorer-style popup presentation, matching the file
+right-click menu. With the theme on, it uses the provided artwork for Undo, Redo, Select
+All, Select None, Invert Selection, and Settings, alongside the existing Properties icon.
+The provided Settings artwork is also used by the bottom-left sidebar button and the
+Settings tab. The theme does not replace the original icon definitions or bundle the
+user's entire separate ICO collection; turning the switch off restores the original icons.

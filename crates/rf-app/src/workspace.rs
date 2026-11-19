@@ -2232,6 +2232,9 @@ impl Workspace {
             let title = view.title(cx);
             let icon = view.tab_icon();
             let location = view.location().clone();
+            let settings_tab_icon = (windows_theme && matches!(&location, Location::Settings))
+                .then(|| crate::icons::windows_theme_action_image("menu-settings.png"))
+                .flatten();
             let tab_dir = location.path().map(Path::to_path_buf);
             let shell_tab_icon = if windows_theme && matches!(&location, Location::Path(_)) {
                 tab_dir.as_ref().and_then(|path| {
@@ -2283,10 +2286,12 @@ impl Workspace {
                         ))
                     })
                     .when(!active, |d| d.text_color(p.text_secondary).hover(|s| s.bg(p.hover)))
-                    .child(match shell_tab_icon {
-                        Some(image) => img(image).size(px(14.)).flex_shrink_0().into_any_element(),
-                        None if windows_home_tab => crate::icons::windows_home_icon(px(14.)),
-                        None => Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }).into_any_element(),
+                    .child(match (settings_tab_icon, shell_tab_icon) {
+                        (Some(image), _) | (None, Some(image)) => {
+                            img(image).size(px(14.)).flex_shrink_0().into_any_element()
+                        }
+                        (None, None) if windows_home_tab => crate::icons::windows_home_icon(px(14.)),
+                        (None, None) => Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }).into_any_element(),
                     })
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
                     .when_some(term_dir, |d, dir| {
@@ -3422,6 +3427,9 @@ impl Workspace {
         });
         let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         let windows_home = windows_theme && matches!(&target, Location::Home);
+        let settings_image = (windows_theme && matches!(&target, Location::Settings))
+            .then(|| crate::icons::windows_theme_action_image("menu-settings.png"))
+            .flatten();
         let shell_icon = if windows_theme {
             let icon_px = if rail { 18 } else { 16 };
             match &target {
@@ -3473,7 +3481,7 @@ impl Workspace {
                 div()
                     .relative()
                     .flex_shrink_0()
-                    .child(match shell_icon {
+                    .child(match settings_image.or(shell_icon) {
                         Some(image) => img(image).size(px(if rail { 18. } else { 16. })).into_any_element(),
                         None if windows_home => crate::icons::windows_home_icon(px(if rail { 18. } else { 16. })),
                         None => Icon::new(icon).size(px(if rail { 18. } else { 16. })).text_color(icon_color).into_any_element(),
