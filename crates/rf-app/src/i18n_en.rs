@@ -390,6 +390,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Çek (pull)", "Pull"),
     ("Gönder (push)", "Push"),
     ("Gönder", "Send to"),
+    ("Hazırda beklet", "Hibernate"),
     ("Sekmelerde terminal düğmesi", "Terminal button on tabs"),
     ("Her klasör sekmesinde, o klasörde bir terminal açan düğme.", "A button on each folder's tab that opens a terminal in that folder."),
     ("Eşitle", "Sync"),
