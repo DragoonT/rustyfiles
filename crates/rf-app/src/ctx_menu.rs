@@ -475,6 +475,10 @@ impl FolderView {
         if !in_archive {
             v.push(Item::action(t!("Kısayol yapıştır"), icon(L::ClipboardPaste), act(me, |v, w, cx| v.paste_shortcuts(w, cx))).enabled(rf_win::clipboard::has_files()));
         }
+        // HyperDownload installed: a link downloaded into this folder (it was only in the command palette)
+        if !in_archive && !rf_win::ftp::is_ftp(dir) && crate::addons::installed(crate::hyperdownload::ID).is_some() {
+            v.push(Item::action(t!("Bağlantıdan indir…"), icon(L::Download), act(me, |v, w, cx| v.download_from_link(w, cx))));
+        }
         let d = dir.to_path_buf();
         v.push(Item::action(t!("Kenar çubuğuna sabitle"), icon(L::Pin), act(me, move |v, _, cx| v.pin(d.clone(), cx))));
         v.push(Item::action(t!("Yolu kopyala"), icon(L::ClipboardCopy), act(me, |v, _, cx| v.copy_path(cx))));
