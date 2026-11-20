@@ -2079,5 +2079,7 @@
  "ee0eb92e": "Fermé",
  "38d8fe5e": "Aucun onglet correspondant",
  "9ed0e8eb": "Zone de notification sur deux lignes",
- "03429b74": "Les icônes de la zone de notification de l’îlot droit gardent leur taille habituelle et se placent sur deux lignes : deux fois plus d’icônes tiennent dans la même largeur."
+ "03429b74": "Les icônes de la zone de notification de l’îlot droit gardent leur taille habituelle et se placent sur deux lignes : deux fois plus d’icônes tiennent dans la même largeur.",
+ "f19b9d2a": "Noms sous les icônes",
+ "985e4d39": "L’îlot central affiche le nom de chaque application sous son icône."
 }

@@ -137,6 +137,9 @@ pub struct Keys {
     pub tray_compact: bool,
     /// The tray in two rows: the same.
     pub tray_two_rows: bool,
+    /// The "Show desktop" strip and the names under the icons: the islands are drawn again.
+    pub show_desktop: bool,
+    pub labels: bool,
     /// The previews and the menu of the middle island's icons: read from the file when they are asked for.
     pub hover_previews: bool,
     pub app_menu: bool,
@@ -175,6 +178,8 @@ impl Keys {
             side_tall: s.dock_side_tall,
             tray_compact: s.dock_tray_compact,
             tray_two_rows: s.dock_tray_two_rows,
+            show_desktop: s.dock_show_desktop,
+            labels: s.dock_labels,
             hover_previews: s.dock_hover_previews,
             app_menu: s.dock_app_menu,
             thin_when_maximized: s.dock_thin_when_maximized,
@@ -355,7 +360,7 @@ mod tests {
     }
 
     fn keys(reserve: bool, city: &str) -> Keys {
-        Keys { reserve, city: city.into(), weather_location: false, look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, status: Default::default(), side_tall: false, tray_compact: false, tray_two_rows: false, hover_previews: true, app_menu: true, thin_when_maximized: true, start_recommended: true, start_grow: true, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, shell: [false; 5] }
+        Keys { reserve, city: city.into(), weather_location: false, look: [52, 50, 67, 62], magnify: crate::settings::DockMagnify::Full, animations: crate::settings::AnimPref::System, own_start: true, own_control_centre: true, own_calendar: true, own_notifications: true, status: Default::default(), side_tall: false, tray_compact: false, tray_two_rows: false, show_desktop: false, labels: false, hover_previews: true, app_menu: true, thin_when_maximized: true, start_recommended: true, start_grow: true, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, shell: [false; 5] }
     }
 
     #[test]

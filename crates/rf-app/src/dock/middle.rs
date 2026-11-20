@@ -54,6 +54,8 @@ use crate::t;
 /// How far the icons' bottom edge is above the island's bottom edge (logical px): every icon, grown or not, stands on this line, so
 /// the running marks below them do not move.
 const BASELINE: f32 = 12.0;
+/// The room an app's name takes under its icon when the names are on (`Settings::dock_labels`): the icons stand this much higher.
+const LABEL_H: f32 = 13.0;
 /// The running mark's distance below the icons.
 const DOT_DROP: f32 = 7.0;
 /// A pointer move of less than this many logical px while the bell is settled does not draw a frame.
@@ -1142,7 +1144,10 @@ impl Render for MiddleIsland {
             }
             _ => Frame::at_rest(&rest, rest_width),
         };
-        let pic = super::thin::picture(&frame, &self.slots, inset.margins, BASELINE, &sq);
+        // with the names under the icons the icons stand a line higher (issue 137)
+        let labels = cx.try_global::<crate::settings::Settings>().is_some_and(|s| s.dock_labels);
+        let baseline = BASELINE + if labels { LABEL_H } else { 0.0 };
+        let pic = super::thin::picture(&frame, &self.slots, inset.margins, baseline, &sq);
         self.rest_items.clone_from(&rest);
         // (what a drag measures the pointer against)
         self.last_slots.clone_from(&pic.items);
@@ -1150,7 +1155,7 @@ impl Render for MiddleIsland {
         self.last_glass = pic.glass;
         // (one list, reused: this runs on every frame of the magnification)
         self.last_icons.clear();
-        self.last_icons.extend(super::empty::middle_icon_boxes(&self.slots, &pic, inset.margins[1], BASELINE, DOT_DROP));
+        self.last_icons.extend(super::empty::middle_icon_boxes(&self.slots, &pic, inset.margins[1], baseline, DOT_DROP + if labels { LABEL_H } else { 0.0 }));
 
         // Where every item is drawn in this frame and how its picture is posed (the press, the answer to a click, being in the hand, the
         // slides of the icons making room). This comes before the window's region is made: the region is cut to the glass and the boxes
@@ -1160,7 +1165,7 @@ impl Render for MiddleIsland {
         let drag = self.drag.as_ref().filter(|d| d.len() == self.items.len() && pic.items.len() == d.len());
         let settle = self.settle.as_ref().filter(|(s, _, _)| s.len() == self.items.len());
         // (an icon's top edge in the window is this less its size: a bounce never carries it out of the window)
-        let top_room = vh - mb - BASELINE;
+        let top_room = vh - mb - baseline;
         let mut draws: Vec<Draw> = Vec::with_capacity(self.items.len());
         let mut posed: Vec<[f32; 4]> = Vec::new();
         for (ix, item) in self.items.iter().enumerate() {
@@ -1245,7 +1250,7 @@ impl Render for MiddleIsland {
                 DockItem::Separator => div()
                     .absolute()
                     .left(u(x))
-                    .bottom(u(mb + BASELINE + (ICON_REST - 36.0) * sq.icon / 2.0))
+                    .bottom(u(mb + baseline + (ICON_REST - 36.0) * sq.icon / 2.0))
                     .w(u(w))
                     .h(u(36. * sq.icon))
                     .bg(pal.separator().hsla())
@@ -1290,7 +1295,7 @@ impl Render for MiddleIsland {
                         .id(("dock-item", ix))
                         .absolute()
                         .left(u(x))
-                        .bottom(u(mb + BASELINE))
+                        .bottom(u(mb + baseline))
                         .w(u(w))
                         .h(u(w))
                         .cursor_pointer()
@@ -1332,6 +1337,26 @@ impl Render for MiddleIsland {
                                     .border_color(gpui::hsla(0., 0., 1., 0.9)),
                             )
                         })
+                        // the app's name under it, at the icon's resting size (the name does not grow with the icon)
+                        .when(labels && !held, |d| {
+                            // (as wide as an icon and a little of the gap: two names never touch)
+                            let lw = ICON_REST + 2.0;
+                            d.child(
+                                div()
+                                    .absolute()
+                                    .top(u(w + 1.0))
+                                    .left(u((w - lw) / 2.0))
+                                    .w(u(lw))
+                                    .h(u(LABEL_H))
+                                    .flex()
+                                    .justify_center()
+                                    .text_size(u(10.0))
+                                    .line_height(u(LABEL_H))
+                                    .text_color(pal.text().hsla())
+                                    .overflow_hidden()
+                                    .child(div().min_w_0().whitespace_nowrap().overflow_hidden().text_ellipsis().child(item_name(item))),
+                            )
+                        })
                         // the running mark; under an app that is being started it is the starting mark, which pulses until the app has a window
                         .when(running || mark.is_some() || failed, |d| {
                             let wide = in_front && running;
@@ -1349,7 +1374,7 @@ impl Render for MiddleIsland {
                             };
                             let (dw, dh) = (dw * size, dh * size);
                             // the mark stays under its icon: it is the icon's child, and the icons stand on one baseline
-                            d.child(div().absolute().bottom(u(-DOT_DROP)).left(u((w - dw) / 2.0)).w(u(dw)).h(u(dh)).rounded_full().bg(color))
+                            d.child(div().absolute().bottom(u(-DOT_DROP - if labels { LABEL_H } else { 0.0 })).left(u((w - dw) / 2.0)).w(u(dw)).h(u(dh)).rounded_full().bg(color))
                         })
                         .on_mouse_down(MouseButton::Left, cx.listener(move |me, ev: &MouseDownEvent, _, cx| me.item_pressed(ix, ev.position, cx)))
                         .on_click(cx.listener(move |me, _, _, cx| me.click(ix, cx)))

@@ -681,6 +681,8 @@ pub struct Settings {
     /// A thin "Show desktop" strip at the right end of the primary monitor's right island, after the bell, as on Windows' taskbar (off;
     /// issue 127).
     pub dock_show_desktop: bool,
+    /// The app's name under each icon of the middle island (off). Issue 137: "would really like to see app names under the icon".
+    pub dock_labels: bool,
     /// The left island's search: a field, its button only, or none (`DockSearch`).
     pub dock_search: DockSearch,
     /// A click on the dock's search field or button opens HyperSearch instead of the Start panel (issue 41). Off by default.
@@ -935,6 +937,7 @@ impl Default for Settings {
             dock_autohide: false,
             dock_opaque: false,
             dock_show_desktop: false,
+            dock_labels: false,
             dock_search: DockSearch::Field,
             dock_search_hypersearch: false,
             dock_tray_compact: false,

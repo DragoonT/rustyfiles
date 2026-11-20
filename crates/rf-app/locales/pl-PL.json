@@ -2079,5 +2079,7 @@
  "ee0eb92e": "Zamknięta",
  "38d8fe5e": "Brak pasującej karty",
  "9ed0e8eb": "Zasobnik w dwóch rzędach",
- "03429b74": "Ikony zasobnika na prawej wyspie zachowują zwykły rozmiar i stoją w dwóch rzędach: w tej samej szerokości mieści się ich dwa razy więcej."
+ "03429b74": "Ikony zasobnika na prawej wyspie zachowują zwykły rozmiar i stoją w dwóch rzędach: w tej samej szerokości mieści się ich dwa razy więcej.",
+ "f19b9d2a": "Nazwy pod ikonami",
+ "985e4d39": "Środkowa wyspa pokazuje nazwę każdej aplikacji pod jej ikoną."
 }

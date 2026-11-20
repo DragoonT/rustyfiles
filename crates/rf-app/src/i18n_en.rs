@@ -399,6 +399,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Bu konumu gizle", "Hide this place"),
     ("Sekmelerde ara", "Search tabs"),
     ("Tepsi iki satırda", "Tray in two rows"),
+    ("İkonların altında adlar", "Names under the icons"),
+    ("Ortadaki adada her uygulamanın adı ikonunun altında yazar.", "The middle island shows each app's name under its icon."),
     ("Sağ adadaki tepsi simgeleri olağan boylarında, iki satır halinde dizilir; aynı genişliğe iki kat simge sığar.", "The tray icons in the right island keep their usual size and stand in two rows: twice as many fit the same width."),
     ("Sekmelerde ara…", "Search tabs…"),
     ("Kapatıldı", "Closed"),

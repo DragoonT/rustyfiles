@@ -2079,5 +2079,7 @@
  "ee0eb92e": "Closed",
  "38d8fe5e": "No matching tab",
  "9ed0e8eb": "Tray in two rows",
- "03429b74": "The tray icons in the right island keep their usual size and stand in two rows: twice as many fit the same width."
+ "03429b74": "The tray icons in the right island keep their usual size and stand in two rows: twice as many fit the same width.",
+ "f19b9d2a": "Names under the icons",
+ "985e4d39": "The middle island shows each app's name under its icon."
 }
