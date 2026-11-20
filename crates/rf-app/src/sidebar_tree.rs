@@ -205,7 +205,7 @@ impl Holder {
 fn list_folders(path: &Path) -> Result<Vec<DirItem>, ListFailure> {
     let mut out = Vec::new();
     let r = rf_win::list_dir(path, 4096, &|| false, &mut |batch| {
-        out.extend(batch.iter().filter(|e| e.is_dir()).map(dir_item));
+        out.extend(batch.iter().filter(|e| e.is_dir()).map(|e| dir_item(path, e)));
     });
     match r {
         Ok(_) => Ok(out),
@@ -221,20 +221,20 @@ fn read_changes(dir: &Path, names: Vec<String>) -> Result<Vec<Change>, ListError
         .into_iter()
         .map(|n| {
             rf_win::stat_entry(dir, &n).map(|e| match e {
-                Some(e) if e.is_dir() => Change { name: e.name.to_string(), item: Some(dir_item(&e)) },
+                Some(e) if e.is_dir() => Change { name: e.name.to_string(), item: Some(dir_item(dir, &e)) },
                 _ => Change { name: n, item: None },
             })
         })
         .collect()
 }
 
-fn dir_item(e: &rf_core::Entry) -> DirItem {
+fn dir_item(dir: &Path, e: &rf_core::Entry) -> DirItem {
     DirItem {
         name: e.name.to_string(),
         label: e.label.as_deref().map(str::to_string),
         hidden: e.is_hidden(),
         system: e.is_system(),
-        own_icon: rf_win::thumbs::folder_has_own_icon(e.attrs),
+        own_icon: crate::image_cache::folder_keeps_shell_icon(dir, e),
     }
 }
 
@@ -244,6 +244,17 @@ fn root_kind(k: DriveKind) -> RootKind {
         DriveKind::Network => RootKind::Network,
         DriveKind::Optical => RootKind::Optical,
         _ => RootKind::Fixed,
+    }
+}
+
+/// Freedesktop names for tree roots, so a drive row is a disk or a CD rather than a folder.
+fn root_icon_names(kind: RootKind) -> &'static [&'static str] {
+    match kind {
+        RootKind::Profile => &["user-home", "folder-home"],
+        RootKind::Fixed => &["drive-harddisk", "drive-harddisk-system"],
+        RootKind::Removable => &["drive-removable-media", "drive-harddisk-usb", "drive-harddisk"],
+        RootKind::Network => &["network-server", "folder-remote"],
+        RootKind::Optical => &["drive-optical", "drive-cdrom"],
     }
 }
 
@@ -701,6 +712,22 @@ impl SidebarTree {
                 self.images.update(cx, |c, cx| c.icon(&dir, &e, cx))
             })
             .flatten();
+        // A pack replaces the Lucide glyph on every row, root places included. A custom `desktop.ini` folder keeps its own picture.
+        let pack = crate::settings::icon_theme_pack();
+        let themed_icon = if info.own_icon || !matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop) {
+            None
+        } else {
+            let names = match root {
+                Some(kind) => root_icon_names(kind),
+                None => crate::icon_theme::special_folder_names(&info.path),
+            };
+            if names.is_empty() {
+                crate::icon_theme::image_for_names(&pack, &["directory", "folder"], 16)
+            } else {
+                crate::icon_theme::image_for_names(&pack, names, 16)
+            }
+        };
+        let folder_picture = themed_icon.or(own_icon);
         let tag_dot = info.path.parent().and_then(|_| crate::tags::first_color(info.path, cx));
         let root_drive_icon = (cx.global::<crate::settings::Settings>().windows_file_explorer_theme
             && matches!(root, Some(RootKind::Fixed | RootKind::Removable | RootKind::Network | RootKind::Optical)))
@@ -781,7 +808,7 @@ impl SidebarTree {
                     .relative()
                     .size(px(16.))
                     .flex_shrink_0()
-                    .child(match own_icon.or(root_drive_icon) {
+                    .child(match folder_picture.or(root_drive_icon) {
                         Some(picture) => img(picture).size(px(16.)).into_any_element(),
                         None if windows_home => crate::icons::windows_home_icon(px(16.)),
                         None => Icon::new(Self::row_icon(root, expanded))

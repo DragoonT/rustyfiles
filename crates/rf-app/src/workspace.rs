@@ -3651,6 +3651,7 @@ impl Workspace {
         extra: Option<AnyElement>,
         p: &Palette,
         cx: &mut Context<Self>,
+        theme_names: &'static [&'static str],
     ) -> impl IntoElement + use<> {
         let target2 = target.clone();
         let target3 = target.clone();
@@ -3659,6 +3660,18 @@ impl Workspace {
         let drop_border = p.accent;
         // on the rail only the icon; hovering the rail opens the full sidebar over the content
         let rail = self.sidebar_rail;
+        let icon_px = if rail { 18. } else { 16. };
+        let themed = if !matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop) {
+            None
+        } else {
+            let pack = crate::settings::icon_theme_pack();
+            let names = if !theme_names.is_empty() {
+                theme_names
+            } else {
+                target.path().map(crate::icon_theme::special_folder_names).unwrap_or_default()
+            };
+            (!names.is_empty()).then(|| crate::icon_theme::image_for_names(&pack, names, icon_px as u32)).flatten()
+        };
         // Over glass the selected row is a lens the engine draws behind the scene: no fill and no accent bar, but a probe that reports
         // the row's place on every paint (a scroll or a resize moves the lens with it). Two rows can be "selected" at once (a folder
         // that is pinned and also a library): the first gets the lens, the other keeps the Fluent selection.
@@ -3727,10 +3740,13 @@ impl Workspace {
                 div()
                     .relative()
                     .flex_shrink_0()
-                    .child(match shell_icon {
-                        Some(image) => img(image).size(px(if rail { 18. } else { 16. })).into_any_element(),
-                        None if windows_home => crate::icons::windows_home_icon(px(if rail { 18. } else { 16. })),
-                        None => Icon::new(icon).size(px(if rail { 18. } else { 16. })).text_color(icon_color).into_any_element(),
+                    .child(match themed {
+                        Some(picture) => img(picture).size(px(icon_px)).object_fit(ObjectFit::Contain).flex_shrink_0().into_any_element(),
+                        None => match shell_icon {
+                            Some(image) => img(image).size(px(icon_px)).into_any_element(),
+                            None if windows_home => crate::icons::windows_home_icon(px(icon_px)),
+                            None => Icon::new(icon).size(px(icon_px)).text_color(icon_color).into_any_element(),
+                        },
                     })
                     .when_some(tag_dot, |d, c| d.child(crate::tags::corner_dot(c, p.card_bg)))
                     .when_some(letter, |d, l| {
@@ -3882,6 +3898,7 @@ impl Workspace {
             None,
             p,
             cx,
+            &["user-home", "folder-home"],
         ));
         if !rail && explorer_look {
             head = head.child(div().mx_2().my_2().h(px(1.)).flex_shrink_0().bg(section_divider));
@@ -3905,7 +3922,7 @@ impl Workspace {
             let title = crate::i18n::td(&f.title);
             let drag = PinDrag { ix: i, path: f.path.clone(), title: title.clone().into() };
             let target_path = f.path.clone();
-            let item = self.sidebar_item(("sb-pin", i).into(), f.icon, p.accent, title, loc, active, true, None, p, cx);
+            let item = self.sidebar_item(("sb-pin", i).into(), f.icon, p.accent, title, loc, active, true, None, p, cx, &[]);
             // drag a pin onto another to reorder
             head = head.child(
                 div()
@@ -4004,6 +4021,7 @@ impl Workspace {
                 bar,
                 p,
                 cx,
+                places::drive_icon_names(d.kind),
             ));
         }
         // phones and cameras under This PC (issue 49: "The phone also doesn't show up as a location in sidebar"); they are no roots of
@@ -4014,7 +4032,7 @@ impl Workspace {
             for (i, d) in devices.into_iter().enumerate() {
                 let loc = Location::Shell { parsing: d.parsing.clone(), name: d.name.clone() };
                 let active = cur == loc;
-                col = col.child(self.sidebar_item(("sb-dev", i).into(), L::Usb, p.text_secondary, d.name.clone(), loc, active, false, None, p, cx));
+                col = col.child(self.sidebar_item(("sb-dev", i).into(), L::Usb, p.text_secondary, d.name.clone(), loc, active, false, None, p, cx, &["drive-removable-media"]));
             }
         }
         let cloud = visible_places(self.places.read(cx).cloud.clone(), &cx.global::<crate::settings::Settings>().hidden_places);
@@ -4023,7 +4041,8 @@ impl Workspace {
             for (i, c) in cloud.into_iter().enumerate() {
                 let loc = Location::Path(c.path.clone());
                 let active = cur == loc;
-                col = col.child(self.sidebar_item(("sb-cloud", i).into(), c.icon, p.accent, crate::i18n::td(&c.title), loc, active, false, None, p, cx));
+                let names: &'static [&'static str] = if c.title.starts_with("WSL:") { &["utilities-terminal", "terminal"] } else { &["folder-cloud", "folder-remote"] };
+                col = col.child(self.sidebar_item(("sb-cloud", i).into(), c.icon, p.accent, crate::i18n::td(&c.title), loc, active, false, None, p, cx, names));
             }
         }
         let libraries = self.places.read(cx).libraries.clone();
@@ -4033,7 +4052,7 @@ impl Workspace {
             for (i, l) in libraries.into_iter().enumerate() {
                 let loc = Location::Library { file: l.file.clone(), name: l.name.clone() };
                 let active = cur == loc;
-                col = col.child(self.sidebar_item(("sb-lib", i).into(), L::Library, p.accent, l.name, loc, active, false, None, p, cx));
+                col = col.child(self.sidebar_item(("sb-lib", i).into(), L::Library, p.accent, l.name, loc, active, false, None, p, cx, &["folder"]));
             }
         }
         let network = self.places.read(cx).network.clone();
@@ -4042,7 +4061,7 @@ impl Workspace {
             for (i, (name, target)) in network.into_iter().enumerate() {
                 let loc = Location::Path(target);
                 let active = cur == loc;
-                col = col.child(self.sidebar_item(("sb-net", i).into(), L::Network, p.text_secondary, name, loc, active, false, None, p, cx));
+                col = col.child(self.sidebar_item(("sb-net", i).into(), L::Network, p.text_secondary, name, loc, active, false, None, p, cx, &["folder-network", "folder-remote", "network-server"]));
             }
         }
         // The tags are known at once, the pins and drives above them a moment later: drawn before those, the coloured tag rows stood
@@ -4066,6 +4085,7 @@ impl Workspace {
                 None,
                 p,
                 cx,
+                &[],
             ));
         }
         col = col.child(div().h_2().when(explorer_look, |d| d.flex_shrink_0()));
@@ -4082,6 +4102,7 @@ impl Workspace {
                 None,
                 p,
                 cx,
+                &["folder-downloads", "user-downloads"],
             ));
         }
         col = col.child(self.sidebar_item(
@@ -4095,6 +4116,7 @@ impl Workspace {
             None,
             p,
             cx,
+            &["user-trash"],
         ));
         let settings = self.sidebar_item(
             "sb-settings".into(),
@@ -4107,6 +4129,7 @@ impl Workspace {
             None,
             p,
             cx,
+            &[],
         );
         // Files: Settings stays at the bottom of the sidebar, under a divider
         v_flex()
@@ -5401,6 +5424,13 @@ impl Render for Workspace {
                 match this.active_tab().read(cx).location().path().map(Path::to_path_buf) {
                     Some(dir) => crate::organizer::organize_folder(dir, window, cx),
                     None => crate::organizer::not_a_folder(window, cx),
+                }
+            }))
+            .on_action(cx.listener(|this, _: &OpenIconThemesFolder, window, cx| {
+                if let Some(d) = crate::settings::app_dir() {
+                    let d = d.join("icon-themes");
+                    let _ = std::fs::create_dir_all(&d);
+                    this.open_tab(Location::Path(d), window, cx);
                 }
             }))
             .on_action(cx.listener(|this, _: &OpenInIde, _, cx| {

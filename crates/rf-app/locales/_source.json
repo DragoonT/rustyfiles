@@ -13079,5 +13079,35 @@
   "key": "Sonraki masaüstü arka planı",
   "tr": "Sonraki masaüstü arka planı",
   "en": "Next desktop background"
- }
+  },
+  {
+  "id": "fcfe24ed",
+  "key": "en:default",
+  "tr": "varsayılan",
+  "en": "default"
+ },
+ {
+  "id": "09dd63bf",
+  "key": "en:Native (default)",
+  "tr": "Native (default)",
+  "en": "Native (default)"
+ },
+ {
+  "id": "e148a281",
+  "key": "en:Variant",
+  "tr": "Varyasyon",
+  "en": "Variant"
+ },
+ {
+  "id": "9f44afbc",
+  "key": "en:Icon theme",
+  "tr": "İkon teması",
+  "en": "Icon theme"
+ },
+ {
+  "id": "95cd58e6",
+  "key": "en:File and folder icons. Uses system icons; pick a Freedesktop pack from the list or open the pack folder. Variants appear below when the pack has them.",
+  "tr": "Dosya ve klasör simgeleri. Sistem simgelerini kullanır; Freedesktop paketlerini listeden seçin ya da klasörü açın. Paketin varyasyonları varsa ayrıca seçilebilir.",
+  "en": "File and folder icons. Uses system icons; pick a Freedesktop pack from the list or open the pack folder. Variants appear below when the pack has them."
+  }
 ]

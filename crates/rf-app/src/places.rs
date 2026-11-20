@@ -21,6 +21,16 @@ pub fn drive_name(d: &Drive) -> String {
     }
 }
 
+/// Freedesktop icon names for a drive, tried in order. Drives are locations, not folders.
+pub fn drive_icon_names(kind: DriveKind) -> &'static [&'static str] {
+    match kind {
+        DriveKind::Removable => &["drive-removable-media", "drive-harddisk-usb", "drive-harddisk"],
+        DriveKind::Network => &["network-server", "folder-remote"],
+        DriveKind::Optical => &["drive-optical", "drive-cdrom"],
+        DriveKind::Fixed | DriveKind::RamDisk | DriveKind::Unknown => &["drive-harddisk", "drive-harddisk-system"],
+    }
+}
+
 #[derive(Clone)]
 pub struct Pinned {
     pub title: String,

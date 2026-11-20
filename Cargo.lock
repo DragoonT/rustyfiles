@@ -6373,6 +6373,7 @@ dependencies = [
  "mail-parser",
  "parking_lot",
  "raw-window-handle",
+ "resvg 0.46.0",
  "rf-archive",
  "rf-core",
  "rf-dialog",

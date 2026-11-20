@@ -101,6 +101,7 @@ gpui_kit::actions!(
         OpenTerminalAdmin,
         OrganizeFolder,
         ToggleAllGroups,
+        OpenIconThemesFolder,
     ]
 );
 
