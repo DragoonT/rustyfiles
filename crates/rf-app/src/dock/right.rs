@@ -383,7 +383,12 @@ impl RightIsland {
             OwnTip::Status(s) => (
                 first_button + buttons.iter().position(|b| *b == s)?,
                 // (the battery says its level and what it is doing, as Windows' own does)
-                if s == Status::Battery { super::sysstate::battery_tip(cx) } else { super::status_card::name(s).to_string() },
+                match s {
+                    Status::Battery => super::sysstate::battery_tip(cx),
+                    // (the volume says its level, as Windows' own symbol does: issue 147, "the Volume % when changing the volume")
+                    Status::Volume => volume_tip(rf_win::sysstatus::audio::snapshot().filter(|a| a.available).map(|a| (a.volume, a.muted))),
+                    _ => super::status_card::name(s).to_string(),
+                },
             ),
             OwnTip::Clock => (clock_ix, rf_win::dock::clock::long_date().unwrap_or_else(|| self.lines.date.clone())),
             OwnTip::Bell => (clock_ix + 1, crate::t!("Bildirimler").to_string()),
@@ -591,7 +596,7 @@ fn bell_button(pal: Palette, dot: Option<Hsla>, k: f32, on_click: impl Fn(&mut A
 impl RightIsland {
     /// The wheel was turned over the volume symbol: the system's volume goes 2 % up or down a notch, as over Windows' own symbol (issue
     /// 136). Muting is not touched (Windows does not either).
-    fn volume_scrolled(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    fn volume_scrolled(&mut self, ev: &ScrollEvent, cx: &mut Context<Self>) {
         let lines = match ev.delta {
             ScrollDelta::Lines(p) => if p.y != 0.0 { p.y } else { p.x },
             ScrollDelta::Pixels(p) => f32::from(p.y) / 16.0,
@@ -601,8 +606,27 @@ impl RightIsland {
         if notches == 0 {
             return;
         }
-        rf_win::sysstatus::audio::set_volume(volume_after_notches(now.volume, notches));
+        let after = volume_after_notches(now.volume, notches);
+        rf_win::sysstatus::audio::set_volume(after);
         cx.stop_propagation();
+        // the tip above the symbol says the new level at once (the snapshot may not have it yet)
+        if self.tip_on == Some(OwnTip::Status(Status::Volume))
+            && let Some(mut anchor) = self.own_anchor(OwnTip::Status(Status::Volume), cx)
+        {
+            anchor.text = volume_tip(Some((after, now.muted)));
+            super::tray_tip::update(Some(anchor.clone()), cx);
+            super::tray_tip::hover(Some(anchor), cx);
+        }
+    }
+}
+
+/// The volume symbol's tip: its name and the level ("Ses: 42 %"), or that it is muted.
+fn volume_tip(level: Option<(f32, bool)>) -> String {
+    let name = super::status_card::name(Status::Volume);
+    match level {
+        Some((_, true)) => format!("{name}: {}", crate::t!("Sessiz")),
+        Some((v, false)) => format!("{name}: {} %", (v * 100.0).round() as u32),
+        None => name.to_string(),
     }
 }
 
@@ -706,7 +730,7 @@ impl Render for RightIsland {
                         // a right click on the volume symbol: the output devices, to choose from
                         .when(which == Status::Volume, |d| d.on_mouse_up(MouseButton::Right, |_, _, cx| open_output_devices(cx)))
                         // the wheel over it: the system's volume, as over Windows' own symbol (issue 136)
-                        .when(which == Status::Volume, |d| d.on_scroll_wheel(cx.listener(|me, ev: &ScrollWheelEvent, _, cx| me.volume_scrolled(ev, cx))))
+                        .when(which == Status::Volume, |d| d.on_scroll(cx.listener(|me, ev: &ScrollEvent, _, cx| me.volume_scrolled(ev, cx))))
                         .child(button),
                 );
             }
