@@ -683,6 +683,17 @@ pub fn main() {
         )
     });
 
+    // more folders on the command line (`rustyfiles.exe "C:\My Pictures" "D:\My Videos"`): each one a tab of the same window, after the
+    // first (issue 125). Only plain folders, after a first argument that was one too.
+    let more_folders: Vec<String> = if matches!(start, Some(Location::Path(_))) && select.is_none() {
+        std::env::args()
+            .skip(2)
+            .map(|a| a.trim().trim_matches('"').to_string())
+            .filter(|a| !a.is_empty() && !a.starts_with("--") && is_dir_bounded(PathBuf::from(a), std::time::Duration::from_secs(2)) == Some(true))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // "Show in folder" from other apps (SHOpenFolderAndSelectItems: Telegram, browsers) while we
     // are the default file manager: Windows opens the folder through our verb and names the
     // file afterwards, to a window it finds in its window list (see rf_win::shell_window). The
@@ -751,6 +762,9 @@ pub fn main() {
                 if let Some(msg) = shell_select.and_then(shell_selected) {
                     rf_win::handover::send_followup(&msg);
                 }
+                for folder in &more_folders {
+                    rf_win::handover::send_followup(folder);
+                }
                 return;
             }
             rf_win::single_instance::Role::Primary(guard) => Some(guard),
@@ -760,6 +774,10 @@ pub fn main() {
     let (ipc_tx, ipc_rx) = futures::channel::mpsc::unbounded::<String>();
     // second launches: each comes with the acknowledgement it waits for (the other senders of ipc_tx need none)
     let (launch_tx, launch_rx) = futures::channel::mpsc::unbounded::<(String, rf_win::handover::Ack)>();
+    // (this process is the first: its own extra folders open as tabs once the window is there, like second launches do)
+    for folder in more_folders {
+        let _ = ipc_tx.unbounded_send(folder);
+    }
     if let Some(rx) = shell_select {
         let tx = ipc_tx.clone();
         std::thread::spawn(move || {
