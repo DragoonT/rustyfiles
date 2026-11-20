@@ -87,6 +87,7 @@ enum MainMenu {
         m.addItem(.separator())
         m.addItem(item(String(localized: "Rename"), #selector(W.rename(_:)), key(NSF2FunctionKey), []))
         m.addItem(item(String(localized: "Move to Trash"), #selector(W.moveToTrash(_:)), key(NSBackspaceCharacter), .command))
+        m.addItem(item(String(localized: "Add to Shelf"), #selector(W.addToShelf(_:)), "s", [.command, .shift]))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Filter"), #selector(W.focusSearch(_:)), "f"))
         m.addItem(item(String(localized: "Go to Path"), #selector(W.focusAddress(_:)), "l"))
@@ -105,6 +106,7 @@ enum MainMenu {
         m.addItem(.separator())
         m.addItem(item(String(localized: "Hide Sidebar"), #selector(W.toggleSidebar(_:)), "s", [.command, .control]))
         m.addItem(item(String(localized: "Show Preview"), #selector(W.togglePreviewPane(_:)), "p", [.command, .shift]))
+        m.addItem(item(String(localized: "Show Shelf"), #selector(W.toggleShelf(_:)), "s", [.command, .option]))
         return m
     }
 

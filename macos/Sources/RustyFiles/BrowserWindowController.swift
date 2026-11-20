@@ -307,6 +307,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         list.onGoUp = { [weak self] in self?.goUp(nil) }
         sidebar.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
         sidebar.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
+        list.shelfPane.onTransfer = { [weak self] kind, urls in
+            guard let self, let dest = self.list.url, dest.isFileURL, !urls.isEmpty else { return }
+            Transfer(kind, urls, into: dest).start(window: self.window) { _ in
+                // moved items have left their places: the shelf is done with them
+                if kind == .move { ShelfStore.clear() }
+            }
+        }
+        list.shelfPane.onReveal = { [weak self] url in self?.navigate(to: url.deletingLastPathComponent(), selecting: url.lastPathComponent) }
         sidebar.onDiskUsage = { [weak self] url in self?.navigate(to: BrowserTab.diskUsageURL(url)) }
         list.onDiskUsage = { [weak self] url in self?.navigate(to: BrowserTab.diskUsageURL(url)) }
         titleBar.strip.menuFor = { [weak self] i in self?.tabMenu(i) }
@@ -412,6 +420,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     // MARK: command palette (command_palette.rs)
+
+    @objc func toggleShelf(_ sender: Any?) { list.shelfShown.toggle() }
+    @objc func addToShelf(_ sender: Any?) { list.addToShelf() }
 
     /// Go › Disk Usage: where the space under the open folder goes (or the home folder's).
     @objc func showDiskUsage(_ sender: Any?) {
@@ -942,7 +953,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(openSelection(_:)), #selector(cut(_:)), #selector(BrowserWindowController.copy(_:) as (BrowserWindowController) -> (Any?) -> Void), #selector(moveToTrash(_:)),
             #selector(toggleQuickLook(_:)):
             return selected
-        case #selector(rename(_:)): return list.selectedNames.count == 1
+        case #selector(rename(_:)): return !list.selectedNames.isEmpty && list.archiveIsNil
+        case #selector(addToShelf(_:)): return selected && list.archiveIsNil
+        case #selector(toggleShelf(_:)):
+            item.title = list.shelfShown ? String(localized: "Hide Shelf") : String(localized: "Show Shelf")
+            return true
         case #selector(paste(_:)): return Clipboard.hasFiles && list.folder != nil
         case #selector(newFolder(_:)): return list.folder != nil
         case #selector(selectNextTab(_:)), #selector(selectPreviousTab(_:)): return tabs.count > 1

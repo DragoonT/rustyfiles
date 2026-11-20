@@ -34,6 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let which = ProcessInfo.processInfo.environment["RF_DEMO_MENU"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoMenu(item: which == "item") }
         }
+        // RF_DEMO_SHELF (development): the shelf pane open
+        if ProcessInfo.processInfo.environment["RF_DEMO_SHELF"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.controllers.first?.toggleShelf(nil) }
+        }
         // RF_DEMO_BULK=folder (development): bulk rename for the files in that folder
         if let dir = ProcessInfo.processInfo.environment["RF_DEMO_BULK"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in

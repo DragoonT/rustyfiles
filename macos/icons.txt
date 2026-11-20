@@ -116,3 +116,4 @@ cloud
 pencil-line
 chart-pie
 files
+archive-restore

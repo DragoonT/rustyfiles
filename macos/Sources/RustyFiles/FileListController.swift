@@ -137,7 +137,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         message.isHidden = true
         if card.subviews.contains(privacyButton) { privacyButton.isHidden = true }
 
-        [commandBar, header, scroll, tileScroll, status, message, previewPane, previewHandle].forEach(card.addSubview)
+        [commandBar, header, scroll, tileScroll, status, message, previewPane, previewHandle, shelfPane].forEach(card.addSubview)
+        shelfPane.isHidden = true
+        shelfPane.onClose = { [weak self] in self?.shelfShown = false }
         previewHandle.currentWidth = { [weak self] in self?.previewWidth ?? PreviewPane.defaultWidth }
         previewHandle.onDrag = { [weak self] w in
             self?.previewWidth = w
@@ -158,6 +160,15 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     // MARK: preview pane
 
     let previewPane = PreviewPane()
+    /// The shelf pane (shelf_view.rs), at the right of the list, left of the preview pane.
+    let shelfPane = ShelfPane()
+    var shelfShown = false {
+        didSet {
+            guard shelfShown != oldValue else { return }
+            if shelfShown { ShelfStore.prune() }
+            card.needsLayout = true
+        }
+    }
     private let previewHandle = PreviewResizeHandle()
     private var previewWidth: CGFloat = {
         let w = UserDefaults.standard.double(forKey: "previewWidth")
@@ -215,6 +226,13 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if paneShown && bottom {
             previewPane.frame = NSRect(x: 0, y: b.height - ph, width: b.width, height: ph)
             b.size.height -= ph
+        }
+        // the shelf: 260 wide between the list and the preview pane (workspace.rs)
+        let shelfW: CGFloat = shelfShown && !pageShown && b.width > 260 + 320 ? 260 : 0
+        shelfPane.isHidden = shelfW == 0
+        if shelfW > 0 {
+            shelfPane.frame = NSRect(x: b.width - shelfW, y: barH, width: shelfW, height: b.height - barH)
+            b.size.width -= shelfW
         }
         header.frame = NSRect(x: 0, y: barH, width: b.width, height: Metrics.headerHeight)
         let top = barH + Metrics.headerHeight
@@ -876,6 +894,12 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     private func reloadSelecting(_ names: [String], rename: Bool = false) { onReload?(names, rename) }
 
+    /// Adds the selected items to the shelf, and shows it.
+    func addToShelf() {
+        guard archive == nil, ShelfStore.add(selectedURLs) > 0 || !selectedURLs.isEmpty else { return }
+        shelfShown = true
+    }
+
     /// Bulk rename for the selected items (those in the folder of the first one).
     func bulkRename() {
         let urls = selectedURLs
@@ -1197,6 +1221,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             b.add(String(localized: "Bulk rename…"), "pencil-line", key: String(Character(UnicodeScalar(NSF2FunctionKey)!)), mods: []) { [weak self] in self?.bulkRename() }
         }
         b.add(String(localized: "Copy item path"), "clipboard-copy", key: "c", mods: [.command, .option]) { MenuActions.copyPaths(urls) }
+        if archive == nil { b.add(String(localized: "Add to shelf"), "archive-restore", key: "s", mods: [.command, .shift]) { [weak self] in self?.addToShelf() } }
         b.add(String(localized: "Make alias"), "link") { [weak self] in
             self?.run { try urls.map { try FileOps.makeAlias($0) } } done: { made in
                 FileUndo.shared.record(.trash(made), title: String(localized: "Make Alias"))

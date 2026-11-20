@@ -755,5 +755,14 @@
 "%@ smaller files": "%@ küçük dosya",
 "Looking through… %@ items, %@": "Taranıyor… %@ öğe, %@",
 "%@ in %@ files · %@": "%2$@ dosyada %1$@ · %3$@",
-"Disk Usage": "Disk Kullanımı"
+"Disk Usage": "Disk Kullanımı",
+"Shelf": "Raf",
+"Copy here": "Buraya kopyala",
+"Move here": "Buraya taşı",
+"Collect items here with “Add to shelf” in their menu (⇧⌘S), or by dropping them here; then copy or move them all into the folder you are in.": "Öğeleri menülerindeki “Rafa ekle” (⇧⌘S) ile ya da buraya bırakarak toplayın; sonra hepsini bulunduğunuz klasöre kopyalayın veya taşıyın.",
+"Remove from shelf": "Raftan kaldır",
+"Add to shelf": "Rafa ekle",
+"Add to Shelf": "Rafa Ekle",
+"Show Shelf": "Rafı Göster",
+"Hide Shelf": "Rafı Gizle"
 }
