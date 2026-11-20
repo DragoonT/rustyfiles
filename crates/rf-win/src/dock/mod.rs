@@ -73,6 +73,7 @@
 //! Everything that blocks (COM, the shell, the disk, other programs' windows) is documented as such and meant for a worker thread.
 
 pub mod appmenu;
+pub mod attention;
 pub mod band;
 pub mod calendar;
 pub mod clock;

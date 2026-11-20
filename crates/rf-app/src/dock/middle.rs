@@ -183,6 +183,8 @@ pub struct MiddleIsland {
     last_slots: Vec<(f32, f32)>,
     /// The look at Escape and the buttons while an icon is in the hand.
     drag_watch: Option<gpui_kit::Task<()>>,
+    /// The apps (keys) that have a window asking for attention: their icon carries a dot (`rf_win::dock::attention`).
+    wanting: Vec<String>,
 }
 
 impl MiddleIsland {
@@ -263,6 +265,7 @@ impl MiddleIsland {
             right: reorder::RightGuard::default(),
             last_slots: Vec::new(),
             drag_watch: None,
+            wanting: Vec::new(),
         };
         // (the app menu tells it when the dock's own pin list changed)
         super::own_pins::register(cx.entity().downgrade(), cx);
@@ -334,6 +337,13 @@ impl MiddleIsland {
         // (the task list comes in Z order; the island's order must not follow the clicks)
         let groups = model::keep_order(&mut self.seen_order, groups);
         let items = model::merge(&self.pins, groups, foreground);
+        let wanting = wanting_attention(&items);
+        let attention_changed = wanting != self.wanting;
+        self.wanting = wanting;
+        if attention_changed && items == self.items {
+            cx.notify();
+            return;
+        }
         if items == self.items {
             // Most task-list events change nothing the island shows (a window that only moved, was shown again, took the focus within
             // the same app: 26 of 28 refreshes in a minute of ordinary use). Every `notify` asks for a frame, and a frame keeps the
@@ -1254,6 +1264,8 @@ impl Render for MiddleIsland {
                         DockItem::App(a) => (a.running(), a.active),
                         _ => (false, false),
                     };
+                    // an app whose window asks for attention (Discord on a message): a dot at the icon's top right, inside its box
+                    let wants = matches!(item, DockItem::App(a) if self.wanting.contains(&a.key));
                     // the app's sound level, while the wheel has just been turned over this icon
                     let hud = match (item, &self.vol_hud) {
                         (DockItem::App(a), Some(h)) if h.key == a.key => Some(vol_hud_look(h.level)),
@@ -1296,6 +1308,20 @@ impl Render for MiddleIsland {
                                     .child(Icon::new(glyph).size(u(w * 0.34)).text_color(ink))
                                     .child(div().text_size(u(w * 0.25)).line_height(u(w * 0.30)).font_weight(gpui::FontWeight::SEMIBOLD).text_color(ink).child(text))
                                     .child(div().mt(u(w * 0.03)).w(u(bar)).h(u(w * 0.05)).rounded_full().bg(track).child(div().h_full().w(u(bar * fill)).rounded_full().bg(ink))),
+                            )
+                        })
+                        .when(wants, |d| {
+                            let r = (w * 0.26).clamp(7.0, 14.0);
+                            d.child(
+                                div()
+                                    .absolute()
+                                    .top(u(0.0))
+                                    .right(u(0.0))
+                                    .size(u(r))
+                                    .rounded_full()
+                                    .bg(look::attention_dot().hsla())
+                                    .border(u((r * 0.14).max(1.0)))
+                                    .border_color(gpui::hsla(0., 0., 1., 0.9)),
                             )
                         })
                         // the running mark; under an app that is being started it is the starting mark, which pulses until the app has a window
@@ -1413,6 +1439,17 @@ impl Render for MiddleIsland {
                     .children(cells),
             )
     }
+}
+
+/// The keys of the apps that have a window asking for attention.
+fn wanting_attention(items: &[DockItem]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|i| match i {
+            DockItem::App(a) if a.windows.iter().any(|h| rf_win::dock::attention::wants(*h)) => Some(a.key.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]

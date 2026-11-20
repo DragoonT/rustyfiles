@@ -206,6 +206,11 @@ pub fn failed_dot() -> Tint {
     Tint::new(0xE5484D, 0.95)
 }
 
+/// The dot on an app whose window asks for attention: the red of a notification badge, in either theme.
+pub fn attention_dot() -> Tint {
+    Tint::new(0xE5484D, 1.0)
+}
+
 /// The running mark's size (logical px): a dot, and a wider one for the app in front.
 pub fn running_dot_size(in_front: bool) -> (f32, f32) {
     if in_front { (14.0, 4.0) } else { (4.0, 4.0) }
