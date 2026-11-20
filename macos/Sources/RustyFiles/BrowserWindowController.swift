@@ -13,6 +13,10 @@ final class BrowserTab {
     var selection: [String] = []
     var scrollY: CGFloat?
     var loadID = 0
+    /// A search's walk and what it has found so far.
+    var search: SearchJob?
+    var searchHits: [String] = []
+    var searchDone = false
 
     init(url: URL) { self.url = url.standardizedFileURL }
 
@@ -27,10 +31,28 @@ final class BrowserTab {
     /// A tag's results (rustyfiles:tag/<name>): the files that have it, from anywhere.
     var tagName: String? { TagStore.name(of: url) }
 
+    /// A search (rustyfiles:search?root=…&q=…, Location::Search on Windows): names matching
+    /// `query` in `root` and every folder under it.
+    static func searchURL(root: URL, query: String) -> URL {
+        var c = URLComponents()
+        c.scheme = "rustyfiles"
+        c.path = "search"
+        c.queryItems = [URLQueryItem(name: "root", value: root.path), URLQueryItem(name: "q", value: query)]
+        return c.url!
+    }
+
+    var searchSpec: (root: URL, query: String)? {
+        guard url.scheme == "rustyfiles", let c = URLComponents(url: url, resolvingAgainstBaseURL: false), c.path == "search",
+            let root = c.queryItems?.first(where: { $0.name == "root" })?.value, let q = c.queryItems?.first(where: { $0.name == "q" })?.value
+        else { return nil }
+        return (URL(fileURLWithPath: root), q)
+    }
+
     var info: TabInfo {
         if isSettings { return TabInfo(title: String(localized: "Settings"), icon: "settings") }
         if isHome { return TabInfo(title: String(localized: "Home"), icon: "house") }
         if let tag = tagName { return TabInfo(title: tag, icon: "tag") }
+        if let s = searchSpec { return TabInfo(title: "“\(s.query)”", icon: "search") }
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.standardizedFileURL
         if url == home { return TabInfo(title: fm.displayName(atPath: url.path), icon: "house") }
@@ -239,6 +261,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         omni.breadcrumb.onNavigate = { [weak self] url in self?.navigate(to: url) }
         omni.breadcrumb.onHome = { [weak self] in self?.goHome(nil) }
         omni.onSubmitPath = { [weak self] text in self?.submitPath(text) }
+        omni.onSearch = { [weak self] text in self?.runSearch(text) }
         omni.onFilter = { [weak self] text in
             self?.list.filter = text
             self?.list.commandBar.filter.isOn = !text.isEmpty
@@ -483,6 +506,11 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             if t === tab { showTab() }
             return
         }
+        if t.searchSpec == nil { t.search?.cancel(); t.search = nil }
+        if let spec = t.searchSpec {
+            if t === tab { updateChrome() }
+            return startSearch(t, spec, id: id)
+        }
         if t === tab, ArchivePlace.locate(url) == nil { list.prepareLayout(for: url) }
         let (column, ascending, first, hidden) = (list.sortKey.sort, list.ascending, list.foldersFirst, list.showHidden)
         if t === tab { updateChrome() }
@@ -533,6 +561,62 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     private var pendingRename = false
+
+    // MARK: search (Location::Search)
+
+    /// Searches from the filter box: Enter looks through the folder and every folder under it.
+    func runSearch(_ query: String) {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return }
+        let root = tab.searchSpec?.root ?? (tab.url.isFileURL ? tab.url : FileManager.default.homeDirectoryForCurrentUser)
+        navigate(to: BrowserTab.searchURL(root: root, query: q))
+    }
+
+    /// Starts the walk and shows what it finds as it finds it (four times a second).
+    private func startSearch(_ t: BrowserTab, _ spec: (root: URL, query: String), id: Int) {
+        t.search?.cancel()
+        t.searchHits = []
+        t.searchDone = false
+        let job = SearchJob.start(root: spec.root.path, query: spec.query, includeHidden: list.showHidden)
+        t.search = job
+        if t.folder == nil || t.searchHits.isEmpty {
+            t.folder = Folder.gathered(label: t.url.absoluteString, paths: [], column: list.sortKey.sort, ascending: list.ascending, foldersFirst: list.foldersFirst, showHidden: list.showHidden)
+            t.error = nil
+            if t === tab { showTab() }
+        }
+        pollSearch(t, id: id, shown: 0)
+    }
+
+    private func pollSearch(_ t: BrowserTab, id: Int, shown: Int) {
+        guard t.loadID == id, let job = t.search else { return }
+        let fresh = job.take()
+        let done = job.isDone()
+        t.searchHits += fresh
+        let count = t.searchHits.count
+        if t === tab {
+            list.status.performance = done
+                ? String(localized: "Search finished · \(count.formatted()) found")
+                : String(localized: "Searching… \(count.formatted()) found in \(Int(job.foldersSeen()).formatted()) folders")
+        }
+        if count != shown || done {
+            let paths = t.searchHits, label = t.url.absoluteString
+            let (column, ascending, first, hidden) = (list.sortKey.sort, list.ascending, list.foldersFirst, list.showHidden)
+            Task.detached(priority: .userInitiated) {
+                let f = Folder.gathered(label: label, paths: paths, column: column, ascending: ascending, foldersFirst: first, showHidden: hidden)
+                await MainActor.run { [weak self] in
+                    guard let self, t.loadID == id else { return }
+                    if t === self.tab { self.saveTabState() }
+                    t.folder = f
+                    t.searchDone = done
+                    if t === self.tab {
+                        self.list.show(f, at: t.url, selecting: t.selection, scrollTo: t.scrollY, archive: nil)
+                    }
+                }
+            }
+        }
+        guard !done else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.pollSearch(t, id: id, shown: count) }
+    }
 
     /// The archive is listed (or not): show the folder in it, or ask for its password.
     private func finishArchiveLoad(_ t: BrowserTab, place: ArchivePlace, opened: Result<Archive, Error>, triedPassword: Bool) {
@@ -627,13 +711,16 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private func updateChrome() {
         navBar.back.isEnabled = !tab.back.isEmpty
         navBar.forward.isEnabled = !tab.forward.isEmpty
-        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.tagName != nil || tab.url.path != "/")
+        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.tagName != nil || tab.searchSpec != nil || tab.url.path != "/")
         if tab.isSettings {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Settings"), url: BrowserTab.settingsURL)]
         } else if tab.isHome {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Home"), url: BrowserTab.homeURL)]
         } else if let tag = tab.tagName {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Tags"), url: BrowserTab.homeURL), BreadcrumbView.Segment(title: tag, url: tab.url)]
+        } else if let s = tab.searchSpec {
+            // the folder searched, then the search
+            navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: s.root) + [BreadcrumbView.Segment(title: String(localized: "Search: “\(s.query)”"), url: tab.url)]
         } else {
             navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: tab.url)
         }
@@ -706,6 +793,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         if tab.isSettings { return goHome(sender) }
         if tab.isHome { return }
         if tab.tagName != nil { return goHome(sender) }
+        // a search goes up to the folder it searched
+        if let s = tab.searchSpec { return navigate(to: s.root) }
         let parent = tab.url.deletingLastPathComponent()
         guard parent.path != tab.url.path else { return }
         navigate(to: parent, selecting: AppSettings.upSelectsPrevious ? tab.url.lastPathComponent : nil)

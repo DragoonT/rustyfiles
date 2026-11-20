@@ -67,6 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 wc.openSettings(nil)
                 let page = env.split(separator: ":").dropFirst().first.map(String.init) ?? ""
                 if let p = SettingsPage.allCases.first(where: { "\($0)" == page }) { wc.showSettingsPage(p) }
+            } else if let env, env.hasPrefix("search:") {
+                // RF_START=search:<folder>:<query>
+                let parts = env.split(separator: ":", maxSplits: 2).map(String.init)
+                openWindow(at: BrowserTab.searchURL(root: URL(fileURLWithPath: parts[1]), query: parts.count > 2 ? parts[2] : ""))
             } else if let start = env.map(URL.init(fileURLWithPath:)) {
                 application(NSApp, open: [start])
             } else {

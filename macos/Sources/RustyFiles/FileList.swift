@@ -114,6 +114,8 @@ final class CommandBarView: FlippedView {
 /// settings.rs): Name (flex) · Date modified 150 · Type 150 · Size 100, right-aligned.
 enum ListColumn: String, CaseIterable {
     case name, modified, created, type, size, tags, git
+    /// Where each item is: only in listings gathered from many folders (a search, a tag).
+    case folder
 
     /// The columns that can be turned on or off (Settings › Layout › Details columns).
     static let optional: [ListColumn] = [.modified, .created, .type, .size, .tags, .git]
@@ -127,6 +129,7 @@ enum ListColumn: String, CaseIterable {
         case .created: String(localized: "Date created")
         case .tags: String(localized: "Tags")
         case .git: String(localized: "Git status")
+        case .folder: String(localized: "Folder")
         }
     }
 
@@ -137,15 +140,16 @@ enum ListColumn: String, CaseIterable {
         case .size: 100
         case .tags: 120
         case .git: 100
+        case .folder: 240
         }
     }
 
     /// Tags and Git status are shown, not sorted by.
-    var sortable: Bool { self != .tags && self != .git }
+    var sortable: Bool { self != .tags && self != .git && self != .folder }
 
     var sort: SortColumn {
         switch self {
-        case .name, .tags, .git: .name
+        case .name, .tags, .git, .folder: .name
         case .modified: .modified
         case .created: .created
         case .type: .kind

@@ -177,6 +177,8 @@ final class OmnibarView: FlippedView, NSTextFieldDelegate {
     var currentPath = ""
     var onSubmitPath: ((String) -> Void)?
     var onFilter: ((String) -> Void)?
+    /// Enter in the filter: the folder and every folder under it are searched.
+    var onSearch: ((String) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -248,7 +250,7 @@ final class OmnibarView: FlippedView, NSTextFieldDelegate {
             field.placeholderString = nil
             field.stringValue = currentPath
         } else {
-            field.placeholderString = String(localized: "Filter by name")
+            field.placeholderString = String(localized: "Filter by name · Enter searches subfolders")
             field.stringValue = ""
         }
         window?.makeFirstResponder(field)
@@ -279,8 +281,14 @@ final class OmnibarView: FlippedView, NSTextFieldDelegate {
                 end()
                 onSubmitPath?(text)
             } else {
-                // Enter in the filter moves into the list, keeping the filter.
-                window?.makeFirstResponder(nil)
+                // Enter in the filter searches the subfolders too (Location::Search)
+                let text = field.stringValue
+                guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    window?.makeFirstResponder(nil)
+                    return true
+                }
+                end()
+                onSearch?(text)
             }
             return true
         case #selector(NSResponder.cancelOperation(_:)):
