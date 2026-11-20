@@ -307,7 +307,8 @@ final class FileRowView: NSTableRowView {
                 path.lineWidth = 1
                 path.stroke()
             }
-            Draw.selectionPill(in: box, accent: p.accent)
+            // a group's header row starts a new block: its pill does not join the row above
+            Draw.selectionPill(in: box, accent: p.accent, above: isPreviousRowSelected && groupTitle == nil, below: isNextRowSelected)
         } else if hovered {
             Draw.roundedRect(box, radius: Metrics.radiusSmall, fill: p.hover)
         }
@@ -435,6 +436,17 @@ final class FileTableView: NSTableView, NSServicesMenuRequestor {
     override func keyDown(with event: NSEvent) {
         if list?.handleKey(event) == true { return }
         super.keyDown(with: event)
+    }
+
+    /// The keyboard came to the list with Tab (issue 38): the selected item is brought into
+    /// view; with nothing selected the first one is selected, so the move can be seen.
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok, NSApp.currentEvent?.type == .keyDown, numberOfRows > 0 {
+            if selectedRow < 0 { selectRowIndexes([0], byExtendingSelection: false) }
+            scrollRowToVisible(selectedRow)
+        }
+        return ok
     }
 
     override func updateTrackingAreas() {
