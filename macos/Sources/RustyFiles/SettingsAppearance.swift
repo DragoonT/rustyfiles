@@ -90,10 +90,11 @@ extension AppSettings {
     // MARK: sidebar and Home sections
 
     enum SidebarSection: String, CaseIterable {
-        case libraries, pinned, tree, tags, drives
+        case libraries, pinned, cloud, tree, tags, drives
 
         var title: String {
             switch self {
+            case .cloud: String(localized: "Cloud")
             case .libraries: String(localized: "Applications and Library")
             case .pinned: String(localized: "Pinned")
             case .tree: String(localized: "Folder tree")
@@ -114,6 +115,14 @@ extension AppSettings {
         get { d.object(forKey: "treeFollows") == nil ? true : d.bool(forKey: "treeFollows") }
         set { store(newValue, "treeFollows") }
     }
+
+    /// Places hidden one by one from the sidebar ("Hide this place"): their paths.
+    static var hiddenPlaces: [String] {
+        get { d.stringArray(forKey: "hiddenPlaces") ?? [] }
+        set { store(newValue.isEmpty ? nil : newValue, "hiddenPlaces") }
+    }
+
+    static func hidesPlace(_ url: URL) -> Bool { hiddenPlaces.contains(url.standardizedFileURL.path) }
 
     static func setShowsSection(_ s: SidebarSection, _ on: Bool) {
         if s == .tree { return store(on, "sidebarTree") }
@@ -253,6 +262,13 @@ extension SettingsContent {
         rows.append(.section(String(localized: "Sidebar sections")))
         rows += AppSettings.SidebarSection.allCases.filter { $0 != .tags || TagsSupport.ready }.map { s in
             .card(title: s.title, detail: nil, icon: nil, control: .toggle(get: { AppSettings.showsSection(s) }, set: { AppSettings.setShowsSection(s, $0) }))
+        }
+        let hidden = AppSettings.hiddenPlaces
+        if !hidden.isEmpty {
+            rows.append(.list(
+                title: String(localized: "Hidden places"), detail: String(localized: "Places you hid from the sidebar one by one. Remove one from this list to bring it back."), icon: "eye-off",
+                entries: hidden.map { (FileManager.default.displayName(atPath: $0), $0) }, empty: "",
+                remove: { i in AppSettings.hiddenPlaces.remove(at: i) }, buttons: []))
         }
         if AppSettings.showsSection(.tree) {
             rows.append(.card(
