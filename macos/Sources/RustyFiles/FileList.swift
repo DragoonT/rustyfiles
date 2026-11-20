@@ -543,6 +543,15 @@ final class StatusBarView: FlippedView {
     var progress = "" { didSet { needsDisplay = true } }
     var progressFraction: Double? { didSet { needsDisplay = true } }
     var performance = "" { didSet { needsDisplay = true } }
+    /// The folder's Git branch, ahead / behind (git_ui.rs): a button at the right.
+    var git: GitRepo.Info? { didSet { if git != oldValue { needsDisplay = true } } }
+    var onGit: ((GitRepo.Info, NSView, NSRect) -> Void)?
+    private var gitRect: NSRect = .zero
+
+    override func mouseUp(with event: NSEvent) {
+        let pt = convert(event.locationInWindow, from: nil)
+        if let git, gitRect.contains(pt) { onGit?(git, self, gitRect) }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         let p = Palette.of(self)
@@ -550,6 +559,19 @@ final class StatusBarView: FlippedView {
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
         // px_3, gap_3, text_xs
         var r = NSRect(x: 12, y: 1, width: bounds.width - 24, height: bounds.height - 1)
+        gitRect = .zero
+        if let git {
+            var text = git.branch
+            if git.ahead > 0 { text += "  ↑\(git.ahead)" }
+            if git.behind > 0 { text += "  ↓\(git.behind)" }
+            let tw = min(Draw.textWidth(text, font: Metrics.textXs), 220)
+            let w = 16 + 6 + tw + 12
+            gitRect = NSRect(x: r.maxX - w, y: r.midY - 11, width: w, height: 22)
+            Draw.roundedRect(gitRect, radius: Metrics.radiusSmall, fill: p.hover)
+            Draw.icon("git-branch", in: NSRect(x: gitRect.minX + 6, y: gitRect.minY, width: 14, height: gitRect.height), size: 13, color: p.textSecondary)
+            Draw.text(text, in: NSRect(x: gitRect.minX + 6 + 16, y: gitRect.minY, width: tw, height: gitRect.height), font: Metrics.textXs, color: p.text)
+            r.size.width = max(gitRect.minX - 12 - r.minX, 0)
+        }
         let right = [progress, performance].filter { !$0.isEmpty }.joined(separator: "   ")
         if !right.isEmpty {
             let rw = min(Draw.textWidth(right, font: Metrics.textXs), r.width * 0.6)

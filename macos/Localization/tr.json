@@ -772,5 +772,15 @@
 "Tile size": "Döşeme boyutu",
 "Hidden items": "Gizli öğeler",
 "File extensions": "Dosya uzantıları",
-"Adaptive layout": "Uyarlanabilir görünüm"
+"Adaptive layout": "Uyarlanabilir görünüm",
+"detached": "ayrık",
+"Fetch": "Fetch",
+"Pull": "Pull",
+"Push": "Push",
+"Sync": "Eşitle",
+"Switch branch": "Dal değiştir",
+"New branch…": "Yeni dal…",
+"New branch": "Yeni dal",
+"It starts from “%@” and becomes the current one.": "“%@” dalından başlar ve geçerli dal olur.",
+"git %@ failed": "git %@ başarısız oldu"
 }

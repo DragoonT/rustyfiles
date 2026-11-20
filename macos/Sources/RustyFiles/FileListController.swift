@@ -181,6 +181,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         shelfPane.isHidden = true
         shelfPane.onClose = { [weak self] in self?.shelfShown = false }
+        status.onGit = { [weak self] info, view, rect in
+            guard let self else { return }
+            self.gitMenu(info).popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.minY - 4), in: view)
+        }
         previewHandle.currentWidth = { [weak self] in self?.previewWidth ?? PreviewPane.defaultWidth }
         previewHandle.onDrag = { [weak self] w in
             self?.previewWidth = w
@@ -680,6 +684,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         reloadItems()
         adaptLayout(for: url)
         updateMillerColumns()
+        if !same { refreshGit() }
         let rows = IndexSet(names.compactMap { folder.rowOf(name: $0).map(Int.init) })
         selectRows(rows, scrollToFirst: y == nil)
         if let y {
