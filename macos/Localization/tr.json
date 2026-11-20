@@ -694,5 +694,9 @@
 "Create archive…": "Arşiv oluştur…",
 "Compress in one click": "Tek tıkla sıkıştır",
 "The right-click menu’s Compress makes this format at once; the other formats and “Create archive…” stay below it.": "Sağ tık menüsündeki Sıkıştır bu biçimi hemen oluşturur; diğer biçimler ve “Arşiv oluştur…” altında kalır.",
-"Off: only the menu": "Kapalı: yalnızca menü"
+"Off: only the menu": "Kapalı: yalnızca menü",
+"Text size": "Yazı boyutu",
+"Smaller text fits more on a small screen.": "Küçük yazı, küçük ekrana daha çok şey sığdırır.",
+"Small": "Küçük",
+"Large": "Büyük"
 }

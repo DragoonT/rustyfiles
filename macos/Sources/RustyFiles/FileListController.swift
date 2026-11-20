@@ -470,7 +470,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             card.needsLayout = true
         case "listBackground", "listImage", "listImageVisibility":
             card.applyBackground()
-        case "fontFamily":
+        case "fontFamily", "textPercent":
             table.rowHeight = Metrics.rowHeight
             reloadItems()
             card.needsLayout = true
