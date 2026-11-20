@@ -716,5 +716,9 @@
 "Cloud": "Bulut",
 "Hidden places": "Gizlenen konumlar",
 "Places you hid from the sidebar one by one. Remove one from this list to bring it back.": "Kenar çubuğunda tek tek gizlediğiniz konumlar. Birini bu listeden kaldırınca yeniden görünür.",
-"Hide this place": "Bu konumu gizle"
+"Hide this place": "Bu konumu gizle",
+"Search finished · %@ found": "Arama bitti · %@ bulundu",
+"Searching… %@ found in %@ folders": "Aranıyor… %2$@ klasörde %1$@ bulundu",
+"Search: “%@”": "Arama: “%@”",
+"Filter by name · Enter searches subfolders": "Ada göre süz · Enter alt klasörlerde arar"
 }

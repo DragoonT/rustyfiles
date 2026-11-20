@@ -492,6 +492,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         self.folder = folder
         self.url = url
         self.archive = archive
+        if isGathered != columnsGathered { rebuildColumns() }
         arrange(folder)
         hideSettings()
         loadColumnData(url)
@@ -683,7 +684,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         b.sort.action = { [weak self] btn in
             guard let self else { return }
             let m = NSMenu()
-            for col in ListColumn.allCases {
+            for col in ListColumn.allCases.filter(\.sortable) {
                 let i = NSMenuItem(title: col.title, action: #selector(self.sortMenu(_:)), keyEquivalent: "")
                 i.target = self
                 i.representedObject = col.rawValue
@@ -973,6 +974,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     var onGoUp: (() -> Void)?
+    /// Whether the columns were made for a gathered listing (with the Folder column).
+    var columnsGathered = false
 
     func openSelected() {
         guard let folder else { return }
@@ -1292,7 +1295,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             m.add(String(localized: "Tiles"), "layout-grid", key: "2", checked: viewMode == .tiles) { [weak self] in self?.setViewMode(.tiles) }
         }
         b.sub(String(localized: "Sort"), "arrow-up-down") { m in
-            for col in ListColumn.allCases {
+            for col in ListColumn.allCases.filter(\.sortable) {
                 m.add(col.title, checked: col == sortKey) { [weak self] in
                     self?.sort(by: col, ascending: col == self?.sortKey ? self?.ascending : col.startsAscending)
                 }
@@ -1421,6 +1424,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         case .created: cell.text = item.createdMs > 0 ? display.date(item.createdMs) : ""
         case .tags: cell.text = tagsByName[item.name] ?? ""
         case .git: cell.text = gitByName[item.name] ?? ""
+        case .folder:
+            let dir = folder.childPath(row: UInt32(row)).map { ($0 as NSString).deletingLastPathComponent } ?? ""
+            cell.text = (dir as NSString).abbreviatingWithTildeInPath
         case .type: cell.text = display.kind(item)
         case .size:
             if item.isDir && archive != nil {
@@ -1754,7 +1760,8 @@ extension FileListController {
     /// The table's columns: Name, then those turned on (Settings › Layout › Details columns).
     func rebuildColumns() {
         for c in table.tableColumns { table.removeTableColumn(c) }
-        let cols = [ListColumn.name] + AppSettings.columns
+        columnsGathered = isGathered
+        let cols = [ListColumn.name] + (isGathered ? [.folder] : []) + AppSettings.columns
         for (i, col) in cols.enumerated() {
             let c = NSTableColumn(identifier: .init(col.rawValue))
             c.width = col.defaultWidth + (col == .name ? ListGeometry.lead : 0) + (i == cols.count - 1 ? geometry.trail : 0)

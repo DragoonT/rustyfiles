@@ -67,6 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 wc.openSettings(nil)
                 let page = env.split(separator: ":").dropFirst().first.map(String.init) ?? ""
                 if let p = SettingsPage.allCases.first(where: { "\($0)" == page }) { wc.showSettingsPage(p) }
+            } else if let env, env.hasPrefix("search:") {
+                // RF_START=search:<folder>:<query>
+                let parts = env.split(separator: ":", maxSplits: 2).map(String.init)
+                openWindow(at: BrowserTab.searchURL(root: URL(fileURLWithPath: parts[1]), query: parts.count > 2 ? parts[2] : ""))
             } else if let start = env.map(URL.init(fileURLWithPath:)) {
                 application(NSApp, open: [start])
             } else {
@@ -154,26 +158,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Folders dropped on the Dock icon or opened with `open -a rustyfiles <folder>`.
     func application(_ application: NSApplication, open urls: [URL]) {
+        // several folders at once (a selection opened from Finder, `open -a rustyfiles a b`)
+        // open as tabs of one window, as the Windows app does with its command line (125);
+        // ones that are gone are passed over
+        var target: BrowserWindowController?
         for url in urls {
             var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                // General › Folders opened from other apps open in a new window; off: a tab
-                if !AppSettings.externalInNewWindow, let front = frontController {
-                    front.openTab(url, activate: true)
-                    front.window?.makeKeyAndOrderFront(nil)
-                } else {
-                    openWindow(at: url)
-                }
-            } else if isArchive(path: url.path), AppSettings.archivesAsFolders {
-                // an archive sent here (Advanced › Open archives with rustyfiles) opens like a folder
-                if !AppSettings.externalInNewWindow, let front = frontController {
-                    front.openTab(url, activate: true)
-                    front.window?.makeKeyAndOrderFront(nil)
-                } else {
-                    openWindow(at: url)
-                }
-            } else {
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
+            let asFolder = isDir.boolValue || (isArchive(path: url.path) && AppSettings.archivesAsFolders)
+            guard asFolder else {
                 openWindow(at: url.deletingLastPathComponent(), selecting: url.lastPathComponent)
+                continue
+            }
+            if let t = target {
+                t.openTab(url, activate: true)
+            } else if !AppSettings.externalInNewWindow, let front = frontController {
+                // General › Folders opened from other apps open in a new window; off: a tab
+                front.openTab(url, activate: true)
+                front.window?.makeKeyAndOrderFront(nil)
+                target = front
+            } else {
+                target = openWindow(at: url)
             }
         }
     }
