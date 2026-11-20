@@ -628,6 +628,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             rearrange()
         case "showHidden":
             showHidden = AppSettings.showHidden
+        case "showSystemFiles":
+            setShowSystemFiles(show: AppSettings.showSystemFiles)
+            rearrange()
         case "viewMode":
             if settingsView?.isHidden ?? true {
                 setViewMode(AppSettings.defaultView)

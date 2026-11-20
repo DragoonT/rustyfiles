@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var home: URL { BrowserTab.homeURL }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setShowSystemFiles(show: AppSettings.showSystemFiles)
         // Sizes and dates in rf-core's English wording until the interface is translated.
         // sizes and dates speak the interface's language ("bayt", decimal comma)
         setEnglish(on: !AppSettings.speaksTurkish)

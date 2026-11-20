@@ -126,3 +126,4 @@ refresh-ccw
 refresh-cw
 arrow-down-to-line
 arrow-up-from-line
+shield

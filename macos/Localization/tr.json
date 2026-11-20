@@ -784,5 +784,7 @@
 "It starts from “%@” and becomes the current one.": "“%@” dalından başlar ve geçerli dal olur.",
 "git %@ failed": "git %@ başarısız oldu",
 "Dual Pane": "Çift Panel",
-"Dual pane": "Çift panel"
+"Dual pane": "Çift panel",
+"Show macOS system files": "macOS sistem dosyalarını göster",
+"Files like .DS_Store and .localized, which macOS keeps for itself; shown only with hidden items.": "macOS'un kendisi için tuttuğu .DS_Store, .localized gibi dosyalar; yalnızca gizli öğelerle birlikte gösterilir."
 }
