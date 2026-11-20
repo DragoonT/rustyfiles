@@ -117,6 +117,7 @@ pub mod size_live;
 pub mod system;
 pub mod taskmgr;
 pub mod thin;
+pub mod toastpos;
 pub mod tray_order;
 pub mod tray_strip;
 pub mod tray_tip;
