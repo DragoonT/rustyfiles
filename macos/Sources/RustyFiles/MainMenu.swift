@@ -102,6 +102,7 @@ enum MainMenu {
         m.addItem(item(String(localized: "Tiles"), #selector(W.showTiles(_:)), "2"))
         m.addItem(item(String(localized: "Cards"), #selector(W.showCards(_:)), "3"))
         m.addItem(item(String(localized: "List"), #selector(W.showListStyle(_:)), "4"))
+        m.addItem(item(String(localized: "Columns"), #selector(W.showColumns(_:)), "5"))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Show Hidden Files"), #selector(W.toggleHidden(_:)), ".", [.command, .shift]))
         m.addItem(item(String(localized: "Refresh"), #selector(W.refresh(_:)), "r"))

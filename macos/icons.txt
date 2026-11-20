@@ -119,3 +119,4 @@ files
 archive-restore
 layout-list
 rows-3
+columns-3

@@ -301,6 +301,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
 
         list.onOpenFolder = { [weak self] url in self?.navigate(to: url) }
         list.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
+        list.onReveal = { [weak self] url in self?.navigate(to: url.deletingLastPathComponent(), selecting: url.lastPathComponent) }
         list.onShowInFolder = { [weak self] url in self?.openTab(url.deletingLastPathComponent(), activate: true, selecting: url.lastPathComponent) }
         list.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
         list.onRefresh = { [weak self] in self?.refresh(nil) }
@@ -930,6 +931,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func showTiles(_ sender: Any?) { list.setViewMode(.tiles) }
     @objc func showCards(_ sender: Any?) { list.setViewMode(.cards) }
     @objc func showListStyle(_ sender: Any?) { list.setViewMode(.list) }
+    @objc func showColumns(_ sender: Any?) { list.setViewMode(.columns) }
 
     /// Properties of the selection, or of the folder shown when nothing is selected (⌘I).
     @objc func showProperties(_ sender: Any?) { list.showProperties() }
@@ -975,6 +977,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             return true
         case #selector(showListStyle(_:)):
             item.state = list.viewMode == .list ? .on : .off
+            return true
+        case #selector(showColumns(_:)):
+            item.state = list.viewMode == .columns ? .on : .off
             return true
         case #selector(toggleHidden(_:)):
             item.state = AppSettings.showHidden ? .on : .off

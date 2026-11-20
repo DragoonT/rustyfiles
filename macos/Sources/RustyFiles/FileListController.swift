@@ -5,9 +5,9 @@ import Quartz
 /// Cards (wide, with type, size and date beside the picture) and List (a small icon and the
 /// name, many to a row).
 enum ViewMode: String, CaseIterable {
-    case details, tiles, cards, list
+    case details, tiles, cards, list, columns
 
-    var isGrid: Bool { self != .details }
+    var isGrid: Bool { self == .tiles || self == .cards || self == .list }
 
     var title: String {
         switch self {
@@ -15,6 +15,7 @@ enum ViewMode: String, CaseIterable {
         case .tiles: String(localized: "Tiles")
         case .cards: String(localized: "Cards")
         case .list: String(localized: "List")
+        case .columns: String(localized: "Columns")
         }
     }
 
@@ -24,6 +25,7 @@ enum ViewMode: String, CaseIterable {
         case .tiles: "layout-grid"
         case .cards: "layout-list"
         case .list: "rows-3"
+        case .columns: "columns-3"
         }
     }
 
@@ -170,6 +172,13 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if card.subviews.contains(privacyButton) { privacyButton.isHidden = true }
 
         [commandBar, header, scroll, tileScroll, status, message, previewPane, previewHandle, shelfPane].forEach(card.addSubview)
+        for col in millerLeft + [millerNext] {
+            col.isHidden = true
+            col.icon = { [weak self] item, path in self?.display.icon(item, path: path) ?? NSImage() }
+            col.onOpenFolder = { [weak self] u in self?.onOpenFolder?(u) }
+            col.onPick = { [weak self] u in self?.onReveal?(u) }
+            card.addSubview(col)
+        }
         shelfPane.isHidden = true
         shelfPane.onClose = { [weak self] in self?.shelfShown = false }
         previewHandle.currentWidth = { [weak self] in self?.previewWidth ?? PreviewPane.defaultWidth }
@@ -192,6 +201,54 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     // MARK: preview pane
 
     let previewPane = PreviewPane()
+    /// Columns: the two parents at the left (farthest first) and the selected folder's column.
+    let millerLeft = [MillerColumn(), MillerColumn()]
+    let millerNext = MillerColumn()
+
+    /// The open folder's parents and the selected folder, in the side columns.
+    func updateMillerColumns() {
+        guard viewMode == .columns, let url, url.isFileURL, archive == nil else {
+            (millerLeft + [millerNext]).forEach { $0.show(nil, showHidden: showHidden) }
+            return
+        }
+        var chain: [(URL, String)] = []
+        var child = url
+        for _ in 0..<2 {
+            let parent = child.deletingLastPathComponent()
+            guard parent.path != child.path else { break }
+            chain.insert((parent, child.lastPathComponent), at: 0)
+            child = parent
+        }
+        for (i, col) in millerLeft.enumerated() {
+            let k = i - (millerLeft.count - chain.count)
+            if k >= 0 {
+                col.show(chain[k].0, showHidden: showHidden)
+                col.marked = chain[k].1
+            } else {
+                col.show(nil, showHidden: showHidden)
+            }
+        }
+        updateMillerNext()
+        card.needsLayout = true
+    }
+
+    private func updateMillerNext() {
+        guard viewMode == .columns else { return }
+        var next: URL?
+        if selectedRows.count == 1, let row = selectedRows.first, let item = folder?.item(row: UInt32(row)), item.isDir, !display.isPackage(item),
+            let p = folder?.childPath(row: UInt32(row))
+        {
+            next = URL(fileURLWithPath: p)
+        }
+        if next != millerNext.dir {
+            millerNext.show(next, showHidden: showHidden)
+            card.needsLayout = true
+        }
+    }
+
+    /// A file picked in a side column: its folder, with it selected.
+    var onReveal: ((URL) -> Void)?
+
     /// The shelf pane (shelf_view.rs), at the right of the list, left of the preview pane.
     let shelfPane = ShelfPane()
     var shelfShown = false {
@@ -270,6 +327,25 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let top = barH + Metrics.headerHeight
         status.frame = NSRect(x: 0, y: b.height - statusH, width: b.width, height: Metrics.statusBarHeight)
         scroll.frame = NSRect(x: 0, y: top, width: b.width, height: b.height - statusH - top)
+        if viewMode == .columns && !pageShown {
+            // the parents that fit at the left, the open folder's column, then the next one
+            let w = ColumnMetrics.width, h = b.height - statusH - barH
+            let next = millerNext.dir != nil
+            let fit = max(min(millerLeft.filter { $0.dir != nil }.count, Int((b.width - w * (next ? 2 : 1)) / w)), 0)
+            var x: CGFloat = 0
+            for (i, col) in millerLeft.enumerated() {
+                let shown = col.dir != nil && i >= millerLeft.count - fit
+                col.isHidden = !shown
+                if shown {
+                    col.frame = NSRect(x: x, y: barH, width: w, height: h)
+                    x += w
+                }
+            }
+            scroll.frame = NSRect(x: x, y: barH, width: w, height: h)
+            x += w
+            millerNext.isHidden = !next
+            millerNext.frame = NSRect(x: x, y: barH, width: max(w, b.width - x), height: h)
+        }
         tileScroll.frame = NSRect(x: 0, y: barH, width: b.width, height: b.height - statusH - barH)
         // as many columns as fit, left-aligned with 4 between them (not spread out)
         let cellW = viewMode.cellSize.width
@@ -352,7 +428,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let avail = max(scroll.contentSize.width, 200)
         var others: CGFloat = 0
         for c in table.tableColumns {
-            guard let col = ListColumn(rawValue: c.identifier.rawValue), col != .name else { continue }
+            guard let col = ListColumn(rawValue: c.identifier.rawValue), col != .name, !c.isHidden else { continue }
             var width = ColumnWidths.get(col) ?? measured[col] ?? col.defaultWidth
             if c == table.tableColumns.last { width += geometry.trail }
             if abs(c.width - width) > 0.5 { c.width = width }
@@ -392,9 +468,15 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     private func applyViewMode() {
         let isTiles = viewMode.isGrid
-        header.isHidden = isTiles
+        let columns = viewMode == .columns
+        header.isHidden = isTiles || columns
         scroll.isHidden = isTiles
         tileScroll.isHidden = !isTiles
+        // Columns: the list is the open folder's column, its name only, beside the others
+        for c in table.tableColumns where c.identifier.rawValue != ListColumn.name.rawValue { c.isHidden = columns }
+        (millerLeft + [millerNext]).forEach { $0.isHidden = !columns }
+        if columns { updateMillerColumns() }
+        card.needsLayout = true
         // the grid's cells take the style's size
         let size = viewMode.cellSize
         if tileLayout.itemSize != size {
@@ -407,14 +489,14 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// The selected rows of whichever view is showing.
     var selectedRows: IndexSet {
         switch viewMode {
-        case .details: table.selectedRowIndexes
+        case .details, .columns: table.selectedRowIndexes
         case .tiles, .cards, .list: IndexSet(tiles.selectionIndexPaths.map(\.item))
         }
     }
 
     private func selectRows(_ rows: IndexSet, scrollToFirst: Bool) {
         switch viewMode {
-        case .details:
+        case .details, .columns:
             table.selectRowIndexes(rows, byExtendingSelection: false)
             if scrollToFirst, let first = rows.first { table.scrollRowToVisible(first) }
         case .tiles, .cards, .list:
@@ -429,7 +511,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     private func reloadItems() {
         computeGroups()
         switch viewMode {
-        case .details: table.reloadData()
+        case .details, .columns: table.reloadData()
         case .tiles, .cards, .list: tiles.reloadData()
         }
     }
@@ -437,7 +519,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// A newly opened folder starts at its first item.
     private func scrollToTop() {
         switch viewMode {
-        case .details:
+        case .details, .columns:
             scroll.contentView.scroll(to: NSPoint(x: 0, y: -scroll.contentInsets.top))
             scroll.reflectScrolledClipView(scroll.contentView)
         case .tiles, .cards, .list:
@@ -597,6 +679,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         applyColumnWidths()
         reloadItems()
         adaptLayout(for: url)
+        updateMillerColumns()
         let rows = IndexSet(names.compactMap { folder.rowOf(name: $0).map(Int.init) })
         selectRows(rows, scrollToFirst: y == nil)
         if let y {
@@ -700,6 +783,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             }
         }
         placeListLens(animated: true)
+        updateMillerNext()
         updateStatus()
         updateCommands()
         refreshQuickLook()
@@ -969,7 +1053,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// The name field of row `row` in the view that is showing.
     private func nameField(_ row: Int, make: Bool) -> NSTextField? {
         switch viewMode {
-        case .details:
+        case .details, .columns:
             return (table.view(atColumn: 0, row: row, makeIfNecessary: make) as? NameCellView)?.textField
         case .tiles, .cards, .list:
             let path = IndexPath(item: row, section: 0)
@@ -1706,6 +1790,11 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         case ("\r", []), ("\u{3}", []): openSelected()
         case (String(Character(UnicodeScalar(NSF2FunctionKey)!)), _): beginRename()
         case ("\u{7f}", []): onBack?()
+        // Columns: → goes into the selected folder, ← back out to the parent
+        case (String(Character(UnicodeScalar(NSRightArrowFunctionKey)!)), _) where viewMode == .columns && millerNext.dir != nil:
+            onOpenFolder?(millerNext.dir!)
+        case (String(Character(UnicodeScalar(NSLeftArrowFunctionKey)!)), _) where viewMode == .columns:
+            onGoUp?()
         case ("\u{7f}", [.command]), (String(Character(UnicodeScalar(NSDeleteFunctionKey)!)), _): trashSelected()
         default: return false
         }
@@ -1893,6 +1982,7 @@ extension FileListController {
             c.width = col.defaultWidth + (col == .name ? ListGeometry.lead : 0) + (i == cols.count - 1 ? geometry.trail : 0)
             c.minWidth = col == .name ? 120 + ListGeometry.lead : 56
             c.resizingMask = col == .name ? .autoresizingMask : .userResizingMask
+            c.isHidden = col != .name && viewMode == .columns
             table.addTableColumn(c)
         }
         header.needsDisplay = true
