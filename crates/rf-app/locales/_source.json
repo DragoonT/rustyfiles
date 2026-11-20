@@ -12731,5 +12731,41 @@
   "key": "Kaynak kodu:",
   "tr": "Kaynak kodu:",
   "en": "Source code:"
+ },
+ {
+  "id": "f3ab2710",
+  "key": "Bağlantıdan indir…",
+  "tr": "Bağlantıdan indir…",
+  "en": "Download from a link…"
+ },
+ {
+  "id": "10aee4c4",
+  "key": "Bağlantıdan indir",
+  "tr": "Bağlantıdan indir",
+  "en": "Download from a link"
+ },
+ {
+  "id": "49a422fb",
+  "key": "Dosya bu klasöre indirilir:",
+  "tr": "Dosya bu klasöre indirilir:",
+  "en": "The file is downloaded into this folder:"
+ },
+ {
+  "id": "54a42be4",
+  "key": "İndir",
+  "tr": "İndir",
+  "en": "Download"
+ },
+ {
+  "id": "958d715b",
+  "key": "Bir http, https ya da magnet bağlantısı yazın",
+  "tr": "Bir http, https ya da magnet bağlantısı yazın",
+  "en": "Type an http, https or magnet link"
+ },
+ {
+  "id": "37b90abb",
+  "key": "HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz",
+  "tr": "HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz",
+  "en": "HyperDownload is not installed: you can install it from Settings › Add-ons"
  }
 ]

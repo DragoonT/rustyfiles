@@ -37,6 +37,7 @@ fn commands() -> Vec<Cmd> {
         cmd!("Kapatılan sekmeyi yeniden aç", "Ctrl+Shift+T", L::RotateCcw, ReopenClosedTab),
         cmd!("Yeni klasör", "Ctrl+Shift+N", L::FolderPlus, NewFolder),
         cmd!("Yeni metin belgesi", "", L::FilePlus, NewTextFile),
+        cmd!("Bağlantıdan indir…", "", L::Download, DownloadFromLink),
         cmd!("Yenile", "F5", L::RotateCw, Refresh),
         cmd!("Ağ sürücüsüne bağlan…", "", L::Network, MapNetworkDrive),
         cmd!("rustyfiles'ı yeniden başlat", "Ctrl+Alt+Shift+R", L::RotateCw, RestartApp),

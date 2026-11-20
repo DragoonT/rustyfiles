@@ -10,6 +10,7 @@ mod donate;
 mod ferry;
 mod addons;
 mod addons_page;
+mod hyperdownload;
 mod archive_view;
 mod bulk_rename;
 mod command_palette;

@@ -758,6 +758,31 @@ impl FolderView {
         this
     }
 
+    /// "Bağlantıdan indir…": asks for a link (one on the clipboard is filled in) and downloads it into this folder with HyperDownload.
+    pub fn download_from_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::prompt::{Button, Kind};
+        let Location::Path(dir) = self.location().clone() else { return };
+        let initial = cx.read_from_clipboard().and_then(|c| c.text()).map(|t| t.trim().to_string()).filter(|t| crate::hyperdownload::is_link(t)).unwrap_or_default();
+        crate::prompt::show(
+            crate::t!("Bağlantıdan indir"),
+            Some(format!("{} {}", crate::t!("Dosya bu klasöre indirilir:"), dir.display())),
+            Some((initial, "https://… / magnet:?…".to_string())),
+            vec![
+                Button::new(crate::t!("İndir"), Kind::Primary, move |text, _, cx| {
+                    let url = text.unwrap_or_default().trim().to_string();
+                    if !crate::hyperdownload::is_link(&url) {
+                        return Err(crate::t!("Bir http, https ya da magnet bağlantısı yazın").to_string());
+                    }
+                    crate::hyperdownload::download(url, dir.clone(), cx);
+                    Ok(())
+                }),
+                Button::cancel(),
+            ],
+            window,
+            cx,
+        );
+    }
+
     pub fn location(&self) -> &Location {
         self.history.current()
     }
@@ -5232,6 +5257,7 @@ impl Render for FolderView {
             }))
             .on_action(cx.listener(|this, _: &NewFolder, _, cx| this.create_new(true, cx)))
             .on_action(cx.listener(|this, _: &NewTextFile, _, cx| this.create_new(false, cx)))
+            .on_action(cx.listener(|this, _: &DownloadFromLink, window, cx| this.download_from_link(window, cx)))
             .on_action(cx.listener(|this, _: &CopyPath, _, cx| this.copy_path(cx)))
             .on_action(cx.listener(|this, _: &CopyPathQuoted, _, cx| this.copy_path_with(true, cx)))
             .on_action(cx.listener(|this, _: &RotateRight, window, cx| this.rotate_selection(true, window, cx)))

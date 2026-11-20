@@ -1,0 +1,300 @@
+//! rustyfiles' side of HyperDownload, the download manager add-on (`addons.rs` installs it; its own repository is
+//! `gelenmedya/hyperdownload`). The add-on is a program of its own: rustyfiles starts it when a download is asked for (`serve`,
+//! with its data in rustyfiles' local data, so a portable copy or a test copy keeps it apart), finds its port and secret in its
+//! `rpc.json`, and speaks aria2's JSON-RPC to it on 127.0.0.1. A download is a card of the Status Center, like a copy: its bytes, its
+//! speed, pause and cancel.
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use serde_json::{Value, json};
+
+pub const ID: &str = "hyperdownload";
+
+/// Where the add-on keeps its lists, its torrent session and `rpc.json`.
+fn data_dir() -> Option<PathBuf> {
+    crate::settings::local_data_dir().map(|d| d.join("hyperdownload"))
+}
+
+/// A running HyperDownload: its address and secret.
+#[derive(Clone)]
+pub struct Rpc {
+    port: u16,
+    token: String,
+}
+
+/// Why nothing can be downloaded.
+#[derive(Debug)]
+pub enum Unavailable {
+    /// The add-on is not installed (Settings > Eklentiler).
+    NotInstalled,
+    /// It was started but did not answer.
+    NoAnswer(String),
+}
+
+impl Rpc {
+    /// One JSON-RPC call; the secret goes first, as aria2 wants it.
+    pub fn call(&self, method: &str, params: Vec<Value>) -> Result<Value, String> {
+        let mut p = vec![json!(format!("token:{}", self.token))];
+        p.extend(params);
+        let body = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": p });
+        let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).http_status_as_error(false).build().into();
+        let resp = agent
+            .post(&format!("http://127.0.0.1:{}/jsonrpc", self.port))
+            .header("Content-Type", "application/json")
+            .send(body.to_string())
+            .map_err(|e| e.to_string())?;
+        let text = resp.into_body().read_to_string().map_err(|e| e.to_string())?;
+        let v: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+        match v.get("error") {
+            Some(e) => Err(e.get("message").and_then(Value::as_str).unwrap_or("error").to_string()),
+            None => Ok(v.get("result").cloned().unwrap_or(Value::Null)),
+        }
+    }
+}
+
+fn read_rpc(dir: &Path) -> Option<Rpc> {
+    let v: Value = serde_json::from_slice(&std::fs::read(dir.join("rpc.json")).ok()?).ok()?;
+    Some(Rpc { port: u16::try_from(v.get("port")?.as_u64()?).ok()?, token: v.get("token")?.as_str()?.to_string() })
+}
+
+fn answers(r: &Rpc) -> bool {
+    r.call("aria2.getVersion", vec![]).is_ok()
+}
+
+/// The running add-on, started first when it is not running. Blocking (up to ~15 s the first time): call it off the UI thread.
+pub fn connect() -> Result<Rpc, Unavailable> {
+    let dir = data_dir().ok_or(Unavailable::NoAnswer("no data folder".into()))?;
+    if let Some(r) = read_rpc(&dir).filter(answers) {
+        return Ok(r);
+    }
+    let exe = crate::addons::program(ID).ok_or(Unavailable::NotInstalled)?;
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::remove_file(dir.join("rpc.json"));
+    let downloads = dirs::download_dir().unwrap_or_else(|| dir.clone());
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.arg("serve").arg("--data").arg(&dir).arg("--downloads").arg(&downloads);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // no console window; not tied to this process (it goes on with the downloads when rustyfiles closes)
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        cmd.creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS);
+    }
+    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    // (the variables of a test copy are not handed on: the add-on has its own folders by its arguments)
+    cmd.env_remove("RUSTYFILES_CONFIG_DIR");
+    cmd.spawn().map_err(|e| Unavailable::NoAnswer(format!("{}: {e}", exe.display())))?;
+    let until = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(150));
+        if let Some(r) = read_rpc(&dir).filter(answers) {
+            return Ok(r);
+        }
+    }
+    Err(Unavailable::NoAnswer("HyperDownload did not start".into()))
+}
+
+/// What a download's status says, read from aria2's `tellStatus`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Seen {
+    pub status: String,
+    pub total: u64,
+    pub done: u64,
+    pub speed: u64,
+    pub error: String,
+    /// The file (an HTTP download's), once known.
+    pub path: Option<PathBuf>,
+}
+
+pub fn seen(v: &Value) -> Seen {
+    let num = |k: &str| v.get(k).and_then(Value::as_str).and_then(|s| s.parse().ok()).unwrap_or(0);
+    let path = v.get("files").and_then(Value::as_array).and_then(|f| f.first()).and_then(|f| f.get("path")).and_then(Value::as_str).filter(|p| !p.is_empty()).map(PathBuf::from);
+    Seen {
+        status: v.get("status").and_then(Value::as_str).unwrap_or_default().to_string(),
+        total: num("totalLength"),
+        done: num("completedLength"),
+        speed: num("downloadSpeed"),
+        error: v.get("errorMessage").and_then(Value::as_str).unwrap_or_default().to_string(),
+        path,
+    }
+}
+
+/// The name a link's download is shown under before the server has said (the URL's last part, or the magnet's name).
+pub fn label_of(url: &str) -> String {
+    if url.starts_with("magnet:") {
+        if let Some(dn) = url.split(['?', '&']).find_map(|kv| kv.strip_prefix("dn=")) {
+            return dn.replace('+', " ");
+        }
+        return "magnet".into();
+    }
+    let no_query = url.split(['?', '#']).next().unwrap_or(url);
+    no_query.rsplit('/').find(|s| !s.is_empty()).unwrap_or(url).to_string()
+}
+
+/// Whether a text is a link HyperDownload takes (http, https, magnet).
+pub fn is_link(text: &str) -> bool {
+    let t = text.trim().to_ascii_lowercase();
+    (t.starts_with("http://") || t.starts_with("https://") || t.starts_with("magnet:?")) && !t.contains(char::is_whitespace)
+}
+
+/// Downloads `url` into `dir` as a card of the Status Center. When the add-on is missing, says so and offers its page.
+pub fn download(url: String, dir: PathBuf, cx: &mut gpui_kit::App) {
+    let title = format!("{} {}", crate::t!("İndiriliyor:"), label_of(&url));
+    let shown_dir = dir.clone();
+    crate::status_center::start_with(
+        cx,
+        title,
+        move |t: Arc<rf_win::fileops::Tracker>| {
+            let rpc = match connect() {
+                Ok(r) => r,
+                Err(Unavailable::NotInstalled) => anyhow::bail!("{}", crate::t!("HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz")),
+                Err(Unavailable::NoAnswer(e)) => anyhow::bail!("{e}"),
+            };
+            let gid = rpc.call("aria2.addUri", vec![json!([url]), json!({ "dir": dir.display().to_string() })]).map_err(anyhow::Error::msg)?;
+            let gid = gid.as_str().unwrap_or_default().to_string();
+            let mut paused = false;
+            loop {
+                std::thread::sleep(Duration::from_millis(300));
+                if t.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ = rpc.call("aria2.remove", vec![json!(gid)]);
+                    let _ = rpc.call("aria2.removeDownloadResult", vec![json!(gid)]);
+                    return Ok(false);
+                }
+                let want_pause = t.paused.load(std::sync::atomic::Ordering::Relaxed);
+                if want_pause != paused {
+                    let _ = rpc.call(if want_pause { "aria2.pause" } else { "aria2.unpause" }, vec![json!(gid)]);
+                    paused = want_pause;
+                }
+                let Ok(v) = rpc.call("aria2.tellStatus", vec![json!(gid)]) else { continue };
+                let s = seen(&v);
+                t.bytes.set(s.done, s.total.max(s.done));
+                let name = s.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+                (t.on_progress)(1, 0, name);
+                match s.status.as_str() {
+                    "complete" => {
+                        let _ = rpc.call("aria2.removeDownloadResult", vec![json!(gid)]);
+                        if let Some(p) = s.path {
+                            t.results.lock().unwrap().push((PathBuf::from(&url), p));
+                        }
+                        (t.on_progress)(1, 1, None);
+                        return Ok(true);
+                    }
+                    "error" => anyhow::bail!("{}", s.error),
+                    "removed" => return Ok(false),
+                    _ => {}
+                }
+            }
+        },
+        Some(Box::new(move |_ok, cx| {
+            // (the folder the file came into shows it at once: it is watched, as after a copy)
+            let _ = (&shown_dir, cx);
+        })),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_status_is_read_from_arias_strings() {
+        let v = json!({ "status": "active", "totalLength": "1000", "completedLength": "250", "downloadSpeed": "50",
+                        "files": [{ "path": "C:\\d\\a.zip" }], "errorMessage": "" });
+        let s = seen(&v);
+        assert_eq!((s.status.as_str(), s.total, s.done, s.speed), ("active", 1000, 250, 50));
+        assert_eq!(s.path, Some(PathBuf::from("C:\\d\\a.zip")));
+        assert_eq!(seen(&json!({ "files": [{ "path": "" }] })).path, None);
+    }
+
+    #[test]
+    fn links_and_their_names() {
+        assert!(is_link("https://example.com/a.zip"));
+        assert!(is_link(" magnet:?xt=urn:btih:abc&dn=Big+Buck+Bunny "));
+        assert!(!is_link("C:\\folder"));
+        assert!(!is_link("https://a b"));
+        assert_eq!(label_of("https://example.com/files/a.zip?x=1"), "a.zip");
+        assert_eq!(label_of("magnet:?xt=urn:btih:abc&dn=Big+Buck+Bunny"), "Big Buck Bunny");
+    }
+}
+
+/// Manual, end to end: the add-on installed from a zip (`HD_TEST_ZIP`, a zip with hyperdownload.exe), started by `connect`, a file
+/// downloaded from a server of the test's own through the JSON-RPC, then the add-on asked to end.
+/// `HD_TEST_ZIP=<zip> cargo test -p rf-app --lib hyperdownload::e2e -- --ignored --nocapture`
+#[cfg(test)]
+mod e2e {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+
+    #[test]
+    #[ignore]
+    fn a_link_is_downloaded_through_the_installed_add_on() {
+        let zip = PathBuf::from(std::env::var("HD_TEST_ZIP").expect("HD_TEST_ZIP"));
+        let tmp = std::env::temp_dir().join(format!("rf-hd-e2e-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("out")).unwrap();
+        unsafe { std::env::set_var("RUSTYFILES_CONFIG_DIR", tmp.join("cfg")) };
+        // the add-on, installed as the Add-ons page does it
+        use sha2::Digest;
+        let sha: String = sha2::Sha256::digest(std::fs::read(&zip).unwrap()).iter().map(|b| format!("{b:02x}")).collect();
+        let mut info = crate::addons::AddonInfo { id: ID.into(), name: "HyperDownload".into(), version: "0.1.0".into(), license: "MIT".into(), source: String::new(), files: Default::default() };
+        info.files.insert(crate::addons::arch().into(), crate::addons::FileRef { url: zip.display().to_string(), sha256: sha, size: 0 });
+        crate::addons::install(&info, &|_, _| {}, &|| false).unwrap();
+        // a server: 3 MB with ranges
+        let body: Vec<u8> = (0..3_000_000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8).collect();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let served = std::sync::Arc::new(body.clone());
+        std::thread::spawn(move || {
+            for c in listener.incoming().flatten() {
+                let b = served.clone();
+                std::thread::spawn(move || {
+                    let mut r = BufReader::new(c.try_clone().unwrap());
+                    let (mut range, mut line) = (None, String::new());
+                    loop {
+                        line.clear();
+                        if r.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
+                            break;
+                        }
+                        if let Some(v) = line.to_ascii_lowercase().strip_prefix("range: bytes=") {
+                            let (a, z) = v.trim().split_once('-').unwrap();
+                            range = Some((a.parse::<usize>().unwrap(), z.parse::<usize>().ok()));
+                        }
+                    }
+                    let mut c = c;
+                    let n = b.len();
+                    let (a, z) = range.map_or((0, n - 1), |(a, z)| (a, z.unwrap_or(n - 1).min(n - 1)));
+                    let head = if range.is_some() {
+                        format!("HTTP/1.1 206 P\r\nContent-Length: {}\r\nContent-Range: bytes {a}-{z}/{n}\r\nConnection: close\r\n\r\n", z + 1 - a)
+                    } else {
+                        format!("HTTP/1.1 200 OK\r\nContent-Length: {n}\r\nConnection: close\r\n\r\n")
+                    };
+                    let _ = c.write_all(head.as_bytes());
+                    let _ = c.write_all(&b[a..=z]);
+                });
+            }
+        });
+        let started = Instant::now();
+        let rpc = connect().unwrap_or_else(|e| panic!("{e:?}"));
+        eprintln!("the add-on answered after {:?}", started.elapsed());
+        let gid = rpc.call("aria2.addUri", vec![json!([format!("http://127.0.0.1:{port}/e2e.bin")]), json!({ "dir": tmp.join("out").display().to_string() })]).unwrap();
+        let mut last = Seen::default();
+        for _ in 0..200 {
+            std::thread::sleep(Duration::from_millis(100));
+            last = seen(&rpc.call("aria2.tellStatus", vec![gid.clone()]).unwrap());
+            if last.status == "complete" || last.status == "error" {
+                break;
+            }
+        }
+        assert_eq!(last.status, "complete", "{last:?}");
+        assert_eq!(std::fs::read(tmp.join("out").join("e2e.bin")).unwrap(), body);
+        // a second connect finds the running one
+        assert!(connect().is_ok());
+        let _ = rpc.call("aria2.shutdown", vec![]);
+        std::thread::sleep(Duration::from_millis(800));
+        unsafe { std::env::remove_var("RUSTYFILES_CONFIG_DIR") };
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
