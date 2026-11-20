@@ -425,6 +425,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Bağlantı bu klasöre indirilsin mi?", "Download the link into this folder?"),
     ("HyperDownload ile indir", "Download with HyperDownload"),
     ("tarayıcıdan", "from the browser"),
+    ("İzle", "Watch"),
     ("En az bir dosya seçin", "Choose at least one file"),
     ("Bağlantıdan indir", "Download from a link"),
     ("Dosya bu klasöre indirilir:", "The file is downloaded into this folder:"),

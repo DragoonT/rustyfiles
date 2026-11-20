@@ -324,6 +324,26 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
     let shown_dir = dir.clone();
     // a torrent's file list is chosen in a window: the download's thread asks the window through this
     let (ask_tx, mut ask_rx) = futures::channel::mpsc::unbounded::<Ask>();
+    // a video of a torrent can be watched while it downloads: the card gets an "İzle" button (its id is known once it is made)
+    let card = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (watch_tx, mut watch_rx) = futures::channel::mpsc::unbounded::<PathBuf>();
+    {
+        let card = card.clone();
+        cx.spawn(async move |cx| {
+            use futures::StreamExt;
+            while let Some(path) = watch_rx.next().await {
+                let id = card.load(std::sync::atomic::Ordering::Relaxed);
+                let _ = cx.update(|cx| {
+                    let p = path.clone();
+                    let run: std::rc::Rc<dyn Fn(&mut gpui_kit::App)> = std::rc::Rc::new(move |_cx| {
+                        crate::look::ipc::send(crate::look::ipc::Msg::Show(p.clone(), crate::look::ShowOpts::default()), true);
+                    });
+                    crate::status_center::set_live_action(cx, id, (crate::t!("İzle").to_string(), run));
+                });
+            }
+        })
+        .detach();
+    }
     cx.spawn(async move |cx| {
         use futures::StreamExt;
         while let Some((name, files, suggested, reply)) = ask_rx.next().await {
@@ -331,7 +351,7 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
         }
     })
     .detach();
-    crate::status_center::start_with(
+    let id = crate::status_center::start_with_id(
         cx,
         title,
         move |t: Arc<rf_win::fileops::Tracker>| {
@@ -353,6 +373,7 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
             let gid = gid.as_str().unwrap_or_default().to_string();
             let mut paused = false;
             let mut asked = false;
+            let mut offered = false;
             loop {
                 std::thread::sleep(Duration::from_millis(300));
                 if t.cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -411,6 +432,20 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
                     }
                     continue;
                 }
+                // a torrent's video: offered for watching while it downloads (from the add-on's local stream)
+                if !offered && s.status == "active" && v.get("hdKind").and_then(Value::as_str) == Some("torrent") {
+                    let main = v.get("hdMainFile").and_then(Value::as_str).and_then(|m| m.parse::<usize>().ok());
+                    let file = main.and_then(|m| v["files"].as_array().and_then(|f| f.get(m - 1)).and_then(|f| f["path"].as_str()).map(str::to_string));
+                    if let (Some(m), Some(file)) = (main, file)
+                        && rf_player::can_open(Path::new(&file))
+                        && let Ok(url) = rpc.call("hd.streamUrl", vec![json!(gid), json!(m.to_string())])
+                        && let Some(url) = url.as_str()
+                    {
+                        let name = Path::new(&file).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        let _ = watch_tx.unbounded_send(crate::look::stream::path(url, &name));
+                        offered = true;
+                    }
+                }
                 match s.status.as_str() {
                     "complete" => {
                         let _ = rpc.call("aria2.removeDownloadResult", vec![json!(gid)]);
@@ -431,6 +466,7 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
             let _ = (&shown_dir, cx);
         })),
     );
+    card.store(id, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[cfg(test)]

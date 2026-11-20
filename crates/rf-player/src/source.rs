@@ -12,7 +12,7 @@ use filmcraft_time::Tick;
 pub type Planes = filmcraft_frame::PixelData;
 
 /// Akışla okunmayan biçimler en çok bu kadar bayta kadar belleğe alınır.
-const WHOLE_FILE_MAX: u64 = 64 << 20;
+pub(crate) const WHOLE_FILE_MAX: u64 = 64 << 20;
 
 #[derive(Clone, Debug)]
 pub struct Frame {
@@ -76,6 +76,10 @@ pub fn can_open(path: &Path) -> bool {
 }
 
 impl Media {
+    pub(crate) fn from_source(src: SharedSource) -> Media {
+        Media { src }
+    }
+
     pub fn info(&self) -> &MediaInfo {
         self.src.info()
     }

@@ -42,6 +42,8 @@ pub struct OpState {
     started: Instant,
     /// A button on the finished operation (the folder organizer's "Geri al"), see [`set_result`].
     action: Option<ResultAction>,
+    /// The button is there while the operation runs too ("İzle" on a video being downloaded), see [`set_live_action`].
+    live: bool,
     /// When it ended (for how long its card stays).
     ended: Option<Instant>,
     /// Speed, time left and the pace chart, fed from the progress reports.
@@ -92,6 +94,7 @@ impl OpState {
             paused,
             started: Instant::now(),
             action: None,
+            live: false,
             ended: None,
             stats: OpStats::default(),
             bytes,
@@ -446,6 +449,8 @@ pub(crate) struct OpView {
     pub open_dest: Option<std::path::PathBuf>,
     pub can_undo: bool,
     pub action: Option<ResultAction>,
+    /// The action shows while running too.
+    pub live: bool,
     pub brief: xfer::Brief,
 }
 
@@ -483,6 +488,7 @@ impl OpState {
             open_dest: self.open_dest.clone(),
             can_undo,
             action: self.action.clone(),
+            live: self.live,
             brief: xfer::Brief { running, noticed: ran_ms >= xfer::CARD_APPEAR_MS, asking: question.is_some(), failed: matches!(self.phase, OpPhase::Failed(_)), dismissed: self.dismissed },
         }
     }
@@ -742,6 +748,18 @@ pub fn set_result(cx: &mut App, id: u64, title: Option<String>, action: Option<R
                 op.title = t;
             }
             op.action = action;
+        }
+        cx.notify();
+    });
+}
+
+/// A button on a running operation that stays when it ends ("İzle": play a video while it downloads).
+pub fn set_live_action(cx: &mut App, id: u64, action: ResultAction) {
+    let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return };
+    entity.update(cx, |ops, cx| {
+        if let Some(op) = ops.ops.iter_mut().find(|o| o.id == id) {
+            op.action = Some(action);
+            op.live = true;
         }
         cx.notify();
     });
@@ -1477,7 +1495,7 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                         .children(op.current.clone().filter(|_| running).map(|c| {
                             div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(c)
                         }))
-                        .children(op.action.as_ref().filter(|_| !running).map(|(label, run)| {
+                        .children(op.action.as_ref().filter(|_| !running || op.live).map(|(label, run)| {
                             let run = run.clone();
                             div()
                                 .id(("op-act", op.id as usize))

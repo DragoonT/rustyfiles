@@ -6478,6 +6478,7 @@ dependencies = [
  "filmcraft-media",
  "filmcraft-time",
  "rayon",
+ "ureq",
  "windows 0.62.2",
 ]
 
