@@ -34,6 +34,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let which = ProcessInfo.processInfo.environment["RF_DEMO_MENU"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoMenu(item: which == "item") }
         }
+        // RF_DEMO_BULK=folder (development): bulk rename for the files in that folder
+        if let dir = ProcessInfo.processInfo.environment["RF_DEMO_BULK"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                let urls = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).sorted().map { URL(fileURLWithPath: dir).appendingPathComponent($0) }
+                BulkRenameSheet.show(urls, over: self?.controllers.first?.window) { _ in }
+            }
+        }
         // RF_DEMO_PALETTE=all|folders|tabs[:query] (development): the command palette, typed into
         if let spec = ProcessInfo.processInfo.environment["RF_DEMO_PALETTE"] {
             let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
@@ -93,13 +100,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             // a window over the first one (the command palette) is drawn instead when there is one
             let main = self?.controllers.first?.window
-            let shown = main?.childWindows?.last ?? main
+            let shown = main?.attachedSheet ?? main?.childWindows?.last ?? main
             guard let view = shown?.contentView?.superview,
                 let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
             else { exit(1) }
             view.cacheDisplay(in: view.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
-            NSApp.terminate(nil)
+            // a sheet left open would hold the quit back
+            if let sheet = main?.attachedSheet { main?.endSheet(sheet) }
+            DispatchQueue.main.async { exit(0) }
         }
     }
 

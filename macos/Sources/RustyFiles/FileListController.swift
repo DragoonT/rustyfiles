@@ -841,6 +841,15 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     private func reloadSelecting(_ names: [String], rename: Bool = false) { onReload?(names, rename) }
 
+    /// Bulk rename for the selected items (those in the folder of the first one).
+    func bulkRename() {
+        let urls = selectedURLs
+        guard urls.count > 1 else { return }
+        BulkRenameSheet.show(urls, over: table.window) { [weak self] names in
+            if !names.isEmpty { self?.reloadSelecting(names) }
+        }
+    }
+
     /// "Create archive…": the dialog, then the archive in the background.
     func createArchive(_ urls: [URL]) {
         guard let c = CreateArchiveDialog.ask(for: urls) else { return }
@@ -871,6 +880,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     func beginRename() {
+        // several items: the bulk rename (bulk_rename.rs), as F2 does on Windows
+        if selectedRows.count > 1, archive == nil { return bulkRename() }
         guard let folder, selectedRows.count == 1, let row = selectedRows.first,
             let item = folder.item(row: UInt32(row))
         else { return }
@@ -1131,7 +1142,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             ("scissors", String(localized: "Cut (⌘X)"), true, { [weak self] in self?.cutItems() }),
             ("copy", String(localized: "Copy (⌘C)"), true, { [weak self] in self?.copyItems() }),
             ("clipboard-paste", String(localized: "Paste (⌘V)"), Clipboard.hasFiles, { [weak self] in self?.pasteItems(into: singleDir ? urls.first : nil) }),
-            ("text-cursor-input", String(localized: "Rename (F2)"), items.count == 1, { [weak self] in self?.beginRename() }),
+            ("text-cursor-input", String(localized: "Rename (F2)"), items.count >= 1 && archive == nil, { [weak self] in self?.beginRename() }),
             ("share-2", String(localized: "Share"), true, { [weak self] in self?.shareSelected() }),
             ("trash", String(localized: "Move to Trash (⌘⌫)"), true, { [weak self] in self?.trashSelected() }),
             ("wrench", String(localized: "Properties (⌘I)"), true, { PropertiesWindow.show(urls) }),
@@ -1147,6 +1158,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         b.add(String(localized: "Quick Look"), "eye", key: " ", mods: []) { [weak self] in self?.toggleQuickLook() }
         b.separator()
 
+        if items.count > 1 && archive == nil {
+            b.add(String(localized: "Bulk rename…"), "pencil-line", key: String(Character(UnicodeScalar(NSF2FunctionKey)!)), mods: []) { [weak self] in self?.bulkRename() }
+        }
         b.add(String(localized: "Copy item path"), "clipboard-copy", key: "c", mods: [.command, .option]) { MenuActions.copyPaths(urls) }
         b.add(String(localized: "Make alias"), "link") { [weak self] in
             self?.run { try urls.map { try FileOps.makeAlias($0) } } done: { made in
