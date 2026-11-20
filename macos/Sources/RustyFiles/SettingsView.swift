@@ -735,6 +735,20 @@ final class SettingsCardView: FlippedView {
         if let control { addSubview(control) }
     }
 
+    /// A search result: a click outside its control opens its page there (issue 126).
+    var onOpen: (() -> Void)?
+    /// Marked for a moment after a search result was picked for it.
+    var marked = false { didSet { needsDisplay = true } }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let onOpen, event.clickCount == 1 else { return super.mouseUp(with: event) }
+        onOpen()
+    }
+
+    override func resetCursorRects() {
+        if onOpen != nil { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
@@ -768,7 +782,11 @@ final class SettingsCardView: FlippedView {
         let path = NSBezierPath(roundedRect: r, xRadius: Metrics.radius, yRadius: Metrics.radius)
         p.hover.setFill()
         path.fill()
-        p.border.setStroke()
+        if marked {
+            p.accent.withAlphaComponent(0.18).setFill()
+            path.fill()
+        }
+        (marked ? p.accent : p.border).setStroke()
         path.stroke()
         if let icon {
             Draw.icon(icon, in: NSRect(x: 16, y: 0, width: 18, height: bounds.height), size: 18, color: p.text)
@@ -965,13 +983,23 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
         rows.forEach { $0.1.removeFromSuperview() }
         rows = []
         refreshers = []
-        let source: [SettingsRow]
+        var source: [SettingsRow] = []
+        // in a search, which page each result is on (a click there opens it)
+        var pages: [SettingsPage?] = []
         if query.isEmpty {
             source = SettingsContent.rows(page)
+            pages = source.map { _ in nil }
         } else {
-            source = SettingsPage.allCases.flatMap { SettingsContent.rows($0) }.filter { $0.searchText.contains(query) }
+            for pg in SettingsPage.allCases {
+                let found = SettingsContent.rows(pg).filter { $0.searchText.contains(query) }
+                guard !found.isEmpty else { continue }
+                source.append(.section(pg.title))
+                pages.append(nil)
+                source += found
+                pages += found.map { _ in pg }
+            }
         }
-        for row in source {
+        for (row, resultPage) in zip(source, pages) {
             let v: NSView
             switch row {
             case .section(let title): v = SectionHeader(title)
@@ -983,6 +1011,7 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
                     update()
                     refreshers.append(update)
                 }
+                if let resultPage { card.onOpen = { [weak self] in self?.reveal(title, on: resultPage) } }
                 v = card
             case .list(let title, let detail, let icon, let entries, let empty, let remove, let buttons):
                 v = SettingsListCard(
@@ -1003,6 +1032,20 @@ final class SettingsView: FlippedView, NSTextFieldDelegate {
             rows.append((.section(""), none))
         }
         needsLayout = true
+    }
+
+    /// A picked search result: its page, scrolled so the setting stands near the top, marked
+    /// for a moment.
+    func reveal(_ title: String, on p: SettingsPage) {
+        window?.makeFirstResponder(nil)
+        show(p)
+        layoutSubtreeIfNeeded()
+        guard let card = rows.lazy.compactMap({ $0.1 as? SettingsCardView }).first(where: { $0.title == title }) else { return }
+        let maxY = max(content.frame.height - scroll.contentSize.height, 0)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: min(max(card.frame.minY - 24, 0), maxY)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        card.marked = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak card] in card?.marked = false }
     }
 
     private func make(_ c: SettingsControl) -> NSView {
