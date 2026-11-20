@@ -195,6 +195,12 @@ pub struct Holder {
     sub: Option<gpui_kit::Subscription>,
 }
 
+impl Holder {
+    pub(super) fn scroll_handle(&self) -> &ScrollHandle {
+        &self.scroll
+    }
+}
+
 /// The folders of a folder, on a worker thread.
 fn list_folders(path: &Path) -> Result<Vec<DirItem>, ListFailure> {
     let mut out = Vec::new();

@@ -857,7 +857,7 @@ impl Default for Settings {
             picker_size: None,
             sidebar_open: true,
             sidebar_rail: false,
-            sidebar_width: 232.,
+            sidebar_width: 366.,
             sidebar_hidden: Vec::new(),
             home_hidden: Vec::new(),
             recent_cleared_ms: 0,

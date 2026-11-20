@@ -194,6 +194,7 @@ pub struct Workspace {
     last_title: String,
     /// Tab strip scrolling (many tabs): keeps the active tab in view.
     tab_scroll: ScrollHandle,
+    sidebar_scroll_hovered: bool,
     tab_scrolled_to: Option<usize>,
     /// Tab being opened with an animation: (its view, a serial so each opening animates anew).
     tab_anim: Option<(Entity<FolderView>, u64)>,
@@ -848,6 +849,7 @@ impl Workspace {
             cx.notify();
         })
         .detach();
+        cx.observe_window_activation(window, |_: &mut Self, _, cx| cx.notify()).detach();
         // Keep the latest placement while the HWND is alive. Closing the native frame can
         // destroy it before GPUI is able to update the workspace from its should-close callback.
         remember_placement(window, cx);
@@ -929,6 +931,7 @@ impl Workspace {
             bulk: None,
             last_title: String::new(),
             tab_scroll: ScrollHandle::new(),
+            sidebar_scroll_hovered: false,
             tab_scrolled_to: None,
             tab_anim: None,
             tab_anim_serial: 0,
@@ -3069,14 +3072,13 @@ impl Workspace {
             .id("omnibar")
             .flex_1()
             .min_w(px(160.))
-            .h(px(36.))
+            .h(px(40.))
             .mx_1()
             .pl_2()
             .pr_1()
             .gap_1()
             .items_center()
-            // a capsule, like Files' Omnibar
-            .rounded_full()
+            .rounded(theme::RADIUS)
             .bg(p.content_bg)
             .border_1()
             .border_color(if focused { p.accent } else { p.border })
@@ -3120,9 +3122,10 @@ impl Workspace {
             }));
 
         h_flex()
-            .h(px(48.))
+            .h(px(60.))
+            .bg(p.address_bg)
             .px_2()
-            .gap_1()
+            .gap_4()
             .items_center()
             .child(
                 div()
@@ -3179,6 +3182,9 @@ impl Workspace {
         let writable_sel = has_sel && !matches!(tab.location(), Location::Shell { .. });
         let preview_open = self.preview_open;
         let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+        let command_width = if self.viewport_w >= 1200. { px(46.) } else { px(36.) };
+        let sort_label = (self.viewport_w >= 1200.).then_some(("Sırala", "Sort"));
+        let view_label = (self.viewport_w >= 1200.).then_some(("Görünüm", "View"));
         let filter_on = self.filter_bar;
         let paste_ok = in_folder && rf_win::clipboard::can_paste();
         let toolbar_icon = |icon: L| {
@@ -3196,7 +3202,7 @@ impl Workspace {
             div()
                 .id(id)
                 .h(px(32.))
-                .w(px(36.))
+                .w(command_width)
                 .flex_shrink_0()
                 .flex()
                 .items_center()
@@ -3212,7 +3218,7 @@ impl Workspace {
                 .child(toolbar_icon(icon))
         };
         let popups_open = self.popups_open(cx);
-        let drop = |id: &'static str, icon: L, label: Option<&'static str>, tip: &'static str, enabled: bool, cx: &mut Context<Self>, which: fn(&Self, &App) -> crate::ctx_menu::BarMenu| {
+        let drop = |id: &'static str, icon: L, label: Option<(&'static str, &'static str)>, tip: &'static str, enabled: bool, cx: &mut Context<Self>, which: fn(&Self, &App) -> crate::ctx_menu::BarMenu| {
             h_flex()
                 .id(id)
                 .h(px(32.))
@@ -3225,13 +3231,13 @@ impl Workspace {
                 .text_color(if enabled { p.text } else { p.text_tertiary })
                 .when(!popups_open, |d| d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(crate::i18n::t(tip)).build(w, cx)))
                 .child(toolbar_icon(icon))
-                .children(label.map(|l| div().child(crate::i18n::t(l))))
+                .children(label.map(|l| div().child(crate::i18n::tx(l.0, l.1))))
                 .child(div().text_color(p.text_secondary).child(toolbar_icon(L::ChevronDown)))
                 .when(enabled, |d| {
                     d.hover(|s| s.bg(p.hover)).active(|s| s.bg(p.pressed)).on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                         let menu = which(this, cx);
                         // drop down from under the button (the bar's bottom edge)
-                        let pos = point(ev.position().x - px(14.), theme::TITLEBAR_H + px(48. + 46.));
+                        let pos = point(ev.position().x - px(14.), theme::TITLEBAR_H + px(60. + 58.));
                         this.active_tab().clone().update(cx, |v, cx| v.show_bar_menu(menu, pos, window, cx));
                     }))
                 })
@@ -3264,15 +3270,18 @@ impl Workspace {
             }
         }
         let menu_name = crate::i18n::tx("Özel komutlar", "Custom commands");
+        let bar_border = if p.dark || self.glass_shown { p.divider } else { gpui_kit::rgb(0xDDE2E6).into() };
 
         h_flex()
-            .h(px(44.))
-            .px_2()
+            .h(px(58.))
+            .bg(p.toolbar_bg)
+            .px_1()
             .gap_0p5()
             .items_center()
+            .border_t_1()
             .border_b_1()
-            .border_color(p.divider)
-            .children(on("new").then(|| drop("cb-new", L::CirclePlus, Some("Yeni"), "Yeni öğe", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::New)))
+            .border_color(bar_border)
+            .children(on("new").then(|| drop("cb-new", L::CirclePlus, Some(("Yeni", "New")), "Yeni öğe", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::New)))
             .children(extra("newfolder").then(|| {
                 cmd("cb-newfolder", L::FolderPlus, "Yeni klasör  (Ctrl+Shift+N)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(NewFolder), cx))
             }))
@@ -3295,16 +3304,9 @@ impl Workspace {
             .children(on("delete").then(|| {
                 cmd("cb-delete", L::Trash, "Sil  (Del)", writable_sel, cx, |this, w, cx| this.with_tab(cx, |v, cx| v.delete_selected(false, w, cx)))
             }))
-            .children(on("props").then(|| {
-                cmd("cb-props", L::Wrench, "Özellikler  (Alt+Enter)", in_folder, cx, |this, _, cx| {
-                    this.with_tab(cx, |v, cx| if v.selection_paths().is_empty() { v.folder_properties(cx) } else { v.properties(cx) })
-                })
-            }))
             .children(extra("terminal").then(|| cmd("cb-terminal", L::SquareTerminal, "Terminalde aç  (Ctrl+Shift+`)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(OpenTerminal), cx))))
             .children(extra("hidden").then(|| cmd("cb-hidden", L::Eye, "Gizli öğeleri göster/gizle  (Ctrl+H)", in_folder, cx, |_, w, cx| w.dispatch_action(Box::new(ToggleHidden), cx))))
             .children(extra("refresh").then(|| cmd("cb-refresh", L::RotateCw, "Yenile  (F5)", true, cx, |_, w, cx| w.dispatch_action(Box::new(Refresh), cx))))
-            // undo, the selection commands, properties, Settings (issue 55, Explorer's "See more")
-            .children(on("more").then(|| drop("cb-more", L::Ellipsis, None, "Diğer", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::More)))
             .children((!inline_commands.is_empty() || !menu_commands.is_empty()).then(sep))
             .when(!inline_commands.is_empty(), |d| {
                 d.child(
@@ -3335,7 +3337,7 @@ impl Workspace {
                                 .hover(|s| s.bg(p.hover))
                                 .active(|s| s.bg(p.pressed))
                                 .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
-                                .when(label.is_none(), |d| d.w(px(36.)).justify_center())
+                                .when(label.is_none(), |d| d.w(command_width).justify_center())
                                 .child(icon)
                                 .children(label.map(|label| div().truncate().child(label)))
                                 .on_click(cx.listener(move |this, _, window, cx| {
@@ -3357,17 +3359,29 @@ impl Workspace {
                         .child(Icon::new(L::Layers).size(px(16.)))
                         .child(Icon::new(L::ChevronDown).size(px(12.)).text_color(p.text_secondary))
                         .on_click(move |ev, window, cx| {
-                            let pos = point(ev.position().x - px(14.), theme::TITLEBAR_H + px(48. + 46.));
+                            let pos = point(ev.position().x - px(14.), theme::TITLEBAR_H + px(60. + 58.));
                             crate::fluent_menu::show(Menu { quick: Vec::new(), items: menu_commands.clone() }, pos, window, cx);
                         }),
                 )
             })
+            .children(on("sort").then(sep))
+            .children(on("sort").then(|| drop("cb-sort", L::ArrowUpDown, sort_label, "Sırala ve gruplandır", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::Sort)))
+            .children(on("view").then(|| {
+                drop("cb-view", L::LayoutGrid, view_label, "Görünüm", true, cx, move |this, _| crate::ctx_menu::BarMenu::View { dual: this.tabs[this.active].right.is_some(), shelf: this.shelf_open })
+            }))
+            // undo, the selection commands, properties, Settings (issue 55, Explorer's "See more")
+            .children(on("more").then(|| drop("cb-more", L::Ellipsis, None, "Diğer", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::More)))
+            .children(on("props").then(|| {
+                cmd("cb-props", L::Wrench, "Özellikler  (Alt+Enter)", in_folder, cx, |this, _, cx| {
+                    this.with_tab(cx, |v, cx| if v.selection_paths().is_empty() { v.folder_properties(cx) } else { v.properties(cx) })
+                })
+            }))
             .child(div().flex_1())
             .children(on("filter").then(|| {
                 div()
                     .id("cb-filter")
                     .h(px(32.))
-                    .w(px(36.))
+                    .w(command_width)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -3379,16 +3393,12 @@ impl Workspace {
                     .when(!in_folder, |d| d.text_color(p.text_tertiary))
                     .child(toolbar_icon(L::ListFilter))
             }))
-            .children(on("sort").then(|| drop("cb-sort", L::ArrowUpDown, None, "Sırala ve gruplandır", in_folder, cx, |_, _| crate::ctx_menu::BarMenu::Sort)))
-            .children(on("view").then(|| {
-                drop("cb-view", L::LayoutGrid, None, "Görünüm", true, cx, move |this, _| crate::ctx_menu::BarMenu::View { dual: this.tabs[this.active].right.is_some(), shelf: this.shelf_open })
-            }))
             .children(on("preview").then(sep))
             .children(on("preview").then(|| {
                 div()
                     .id("cb-preview")
                     .h(px(32.))
-                    .w(px(36.))
+                    .w(command_width)
                     .flex()
                     .items_center()
                     .justify_center()
@@ -3517,6 +3527,7 @@ impl Workspace {
         label: String,
         target: Location,
         active: bool,
+        pin_indicator: bool,
         extra: Option<AnyElement>,
         p: &Palette,
         cx: &mut Context<Self>,
@@ -3573,10 +3584,12 @@ impl Workspace {
         let tag_dot = target3.path().filter(|p| p.parent().is_some()).and_then(|p| crate::tags::first_color(p, cx));
         h_flex()
             .id(id)
-            .min_h(px(if rail { 36. } else { 32. }))
-            .px_2()
+            .min_h(px(36.))
+            .flex_shrink_0()
+            .pl(if rail { px(8.) } else { px(24.) })
+            .pr_2()
             .py_1()
-            .gap_2()
+            .gap_1()
             .items_center()
             .when(rail, |d| d.justify_center())
             .rounded(theme::RADIUS_SM)
@@ -3632,6 +3645,9 @@ impl Workspace {
                         .children(extra),
                 )
             })
+            .when(pin_indicator && !rail, |d| {
+                d.child(Icon::new(L::Pin).size(px(16.)).text_color(p.text_tertiary).flex_shrink_0())
+            })
 
             .on_click(cx.listener(move |this, _, window, cx| this.navigate(target.clone(), window, cx)))
             .when(recycle_icon_watch, |d| {
@@ -3671,14 +3687,21 @@ impl Workspace {
         // (the pins and drives are read off the UI thread and are there a moment after the window: see the tags below)
         let places_loaded = places.loaded;
         let rail = self.sidebar_rail;
+        let section_divider = if p.dark { p.divider } else { gpui_kit::rgb(0xD1D1D1).into() };
+        let scrollbar_track = if p.dark { gpui_kit::rgb(0x303030) } else { gpui_kit::rgb(0xF0F0F0) };
+        let scrollbar_thumb = if p.dark { gpui_kit::rgb(0x606060) } else { gpui_kit::rgb(0xB8B8B8) };
+        let scrollbar_thumb_hover = if p.dark { gpui_kit::rgb(0xA0A0A0) } else { gpui_kit::rgb(0x5E5E5E) };
+        let sidebar_scroll = self.side_tree.scroll_handle().clone();
+        let sidebar_scrollable = sidebar_scroll.max_offset().y > px(0.);
         let header = |t: &'static str| {
             if rail {
-                return div().mx_2().my_2().h(px(1.)).bg(p.divider);
+                return div().mx_2().my_2().h(px(1.)).flex_shrink_0().bg(section_divider);
             }
             div()
                 .px_2()
                 .pt_3()
                 .pb_1()
+                .flex_shrink_0()
                 .text_xs()
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(p.text_tertiary)
@@ -3695,31 +3718,40 @@ impl Workspace {
             .w_full()
             .flex_1()
             .min_h_0()
-            .px_2()
-            .py_1()
+            .pl(px(2.))
+            .pr_2()
+            .py_2()
             .gap_0p5()
+            .scrollbar_width(px(20.))
             .overflow_y_scroll()
+            .track_scroll(&sidebar_scroll)
             .on_drag_move::<ExternalPaths>(cx.listener(|this, _: &DragMoveEvent<ExternalPaths>, _, cx| {
                 if !this.sidebar_ext_drag {
                     this.sidebar_ext_drag = true;
                     cx.notify();
                 }
             }));
-        col = col.child(self.sidebar_item(
+        let mut sections = v_flex().w_full().flex_shrink_0().gap_0p5();
+        sections = sections.child(self.sidebar_item(
             "sb-home".into(),
             L::House,
             p.accent,
             t!("Ana Sayfa").into(),
             Location::Home,
             cur == Location::Home,
+            false,
             None,
             p,
             cx,
         ));
+        if !rail {
+            sections = sections.child(div().mx_2().my_2().h(px(1.)).flex_shrink_0().bg(section_divider));
+        }
         // dropping folders on the header pins them
-        col = col.child(
+        sections = sections.child(
             div()
                 .id("sb-pin-header")
+                .flex_shrink_0()
                 .rounded(theme::RADIUS_SM)
                 .child(header(t!("Sabitlenenler")))
                 .drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg))
@@ -3734,11 +3766,12 @@ impl Workspace {
             let title = crate::i18n::td(&f.title);
             let drag = PinDrag { ix: i, path: f.path.clone(), title: title.clone().into() };
             let target_path = f.path.clone();
-            let item = self.sidebar_item(("sb-pin", i).into(), f.icon, p.accent, title, loc, active, None, p, cx);
+            let item = self.sidebar_item(("sb-pin", i).into(), f.icon, p.accent, title, loc, active, true, None, p, cx);
             // drag a pin onto another to reorder
-            col = col.child(
+            sections = sections.child(
                 div()
                     .id(("sb-pin-wrap", i))
+                    .flex_shrink_0()
                     .on_drag(drag, |d: &PinDrag, _, _, cx| cx.new(|_| d.clone()))
                     .drag_over::<PinDrag>(move |s, d: &PinDrag, _, _| {
                         // moving down inserts after the target, moving up before it
@@ -3749,7 +3782,7 @@ impl Workspace {
             );
         }
         if ext_drag {
-            col = col.child(
+            sections = sections.child(
                 h_flex()
                     .id("sb-pin-drop")
                     .min_h(px(32.))
@@ -3768,6 +3801,8 @@ impl Workspace {
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.pin_dropped(paths, cx))),
             );
         }
+        sections = sections.child(div().mx_2().my_2().h(px(1.)).flex_shrink_0().bg(section_divider));
+        col = col.child(sections);
         // the folder tree stands right under the pinned folders, above the drives and the tags (where the user asked for it: the
         // tree is what one works in, the drives and tags are looked at less often)
         let hidden = cx.global::<crate::settings::Settings>().sidebar_hidden.clone();
@@ -3800,6 +3835,7 @@ impl Workspace {
                 crate::places::drive_name(&d),
                 loc,
                 active,
+                false,
                 bar,
                 p,
                 cx,
@@ -3813,7 +3849,7 @@ impl Workspace {
             for (i, d) in devices.into_iter().enumerate() {
                 let loc = Location::Shell { parsing: d.parsing.clone(), name: d.name.clone() };
                 let active = cur == loc;
-                col = col.child(self.sidebar_item(("sb-dev", i).into(), L::Usb, p.text_secondary, d.name.clone(), loc, active, None, p, cx));
+                col = col.child(self.sidebar_item(("sb-dev", i).into(), L::Usb, p.text_secondary, d.name.clone(), loc, active, false, None, p, cx));
             }
         }
         let cloud = visible_places(self.places.read(cx).cloud.clone(), &cx.global::<crate::settings::Settings>().hidden_places);
@@ -3822,7 +3858,7 @@ impl Workspace {
             for (i, c) in cloud.into_iter().enumerate() {
                 let loc = Location::Path(c.path.clone());
                 let active = cur == loc;
-                col = col.child(self.sidebar_item(("sb-cloud", i).into(), c.icon, p.accent, crate::i18n::td(&c.title), loc, active, None, p, cx));
+                col = col.child(self.sidebar_item(("sb-cloud", i).into(), c.icon, p.accent, crate::i18n::td(&c.title), loc, active, false, None, p, cx));
             }
         }
         let libraries = self.places.read(cx).libraries.clone();
@@ -3832,7 +3868,7 @@ impl Workspace {
             for (i, l) in libraries.into_iter().enumerate() {
                 let loc = Location::Library { file: l.file.clone(), name: l.name.clone() };
                 let active = cur == loc;
-                col = col.child(self.sidebar_item(("sb-lib", i).into(), L::Library, p.accent, l.name, loc, active, None, p, cx));
+                col = col.child(self.sidebar_item(("sb-lib", i).into(), L::Library, p.accent, l.name, loc, active, false, None, p, cx));
             }
         }
         let network = self.places.read(cx).network.clone();
@@ -3841,7 +3877,7 @@ impl Workspace {
             for (i, (name, target)) in network.into_iter().enumerate() {
                 let loc = Location::Path(target);
                 let active = cur == loc;
-                col = col.child(self.sidebar_item(("sb-net", i).into(), L::Network, p.text_secondary, name, loc, active, None, p, cx));
+                col = col.child(self.sidebar_item(("sb-net", i).into(), L::Network, p.text_secondary, name, loc, active, false, None, p, cx));
             }
         }
         // The tags are known at once, the pins and drives above them a moment later: drawn before those, the coloured tag rows stood
@@ -3861,12 +3897,13 @@ impl Workspace {
                 crate::i18n::td(&d.name),
                 loc,
                 active,
+                false,
                 None,
                 p,
                 cx,
             ));
         }
-        col = col.child(div().h_2());
+        col = col.child(div().h_2().flex_shrink_0());
         col = col.child(self.sidebar_item(
             "sb-recycle".into(),
             L::Trash,
@@ -3874,6 +3911,7 @@ impl Workspace {
             t!("Geri Dönüşüm Kutusu").into(),
             Location::RecycleBin,
             cur == Location::RecycleBin,
+            false,
             None,
             p,
             cx,
@@ -3885,6 +3923,7 @@ impl Workspace {
             t!("Ayarlar").into(),
             Location::Settings,
             cur == Location::Settings,
+            false,
             None,
             p,
             cx,
@@ -3893,8 +3932,109 @@ impl Workspace {
         v_flex()
             .w(px(if self.sidebar_rail { RAIL_W } else { self.sidebar_w }))
             .h_full()
-            .child(col)
-            .child(div().mx_2().h(px(1.)).bg(p.divider))
+            .bg(p.sidebar_bg)
+            .child(
+                v_flex()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(col)
+                    .child(
+                        div()
+                            .id("sidebar-scrollbar-track")
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .right_0()
+                            .w(px(20.))
+                            .bg(scrollbar_track)
+                            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                if this.sidebar_scroll_hovered != *hovered {
+                                    this.sidebar_scroll_hovered = *hovered;
+                                    cx.notify();
+                                }
+                            }))
+                            .when(
+                                !sidebar_scrollable,
+                                |d| {
+                                    d.child(
+                                        div()
+                                            .absolute()
+                                            .top(px(14.))
+                                            .right(if self.sidebar_scroll_hovered { px(6.) } else { px(7.) })
+                                            .w(px(if self.sidebar_scroll_hovered { 8. } else { 6. }))
+                                            .h(relative(0.35))
+                                            .rounded_full()
+                                            .bg(if self.sidebar_scroll_hovered {
+                                                scrollbar_thumb_hover
+                                            } else {
+                                                scrollbar_thumb
+                                            }),
+                                    )
+                                },
+                            )
+                            .child(
+                                gpui_kit::component::scroll::Scrollbar::vertical(&sidebar_scroll)
+                                    .id(if rail { "sidebar-scrollbar-rail" } else { "sidebar-scrollbar" })
+                                    .mode(gpui_kit::component::scroll::ScrollbarMode::Always)
+                                    .viewport_from_layout()
+                                    .styles(|styles| {
+                                        styles
+                                            .track(|track| track.width(px(20.)).bg(scrollbar_track.into()))
+                                            .track_hover(|track| track.width(px(20.)).bg(scrollbar_track.into()))
+                                            .track_active(|track| track.width(px(20.)).bg(scrollbar_track.into()))
+                                            .thumb(|thumb| thumb.width(px(6.)).inset(px(7.)).bg(scrollbar_thumb))
+                                            .thumb_hover(|thumb| thumb.width(px(8.)).inset(px(6.)).bg(scrollbar_thumb_hover))
+                                            .thumb_active(|thumb| thumb.width(px(8.)).inset(px(6.)).bg(scrollbar_thumb_hover))
+                                    }),
+                            )
+                            .when(self.sidebar_scroll_hovered, |d| {
+                                d.child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .right_0()
+                                        .h(px(14.))
+                                        .bg(scrollbar_track),
+                                )
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .bottom_0()
+                                        .left_0()
+                                        .right_0()
+                                        .h(px(14.))
+                                        .bg(scrollbar_track),
+                                )
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .right_0()
+                                        .h(px(14.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(Icon::new(L::ChevronUp).size(px(10.)).text_color(p.text_tertiary)),
+                                )
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .bottom_0()
+                                        .left_0()
+                                        .right_0()
+                                        .h(px(14.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .child(Icon::new(L::ChevronDown).size(px(10.)).text_color(p.text_tertiary)),
+                                )
+                            }),
+                    ),
+            )
+            .child(div().mx_2().h(px(1.)).flex_shrink_0().bg(p.divider))
             .child(div().px_2().py_1().child(settings))
     }
 
@@ -5115,14 +5255,13 @@ impl Render for Workspace {
             .children(backdrop_layers)
             .child(titlebar)
             .child(toolbar)
+            .when(show_commandbar && show_toolbar, |d| d.child(commandbar))
             .child(
                 h_flex()
                     .flex_1()
                     .min_h_0()
                     .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizePreview>, _, cx| {
-                        // the content card ends 8 px (mr_2) before the row's right edge
-                        // mr_2 (8 px) + the card's 1 px border
-                        let w = f32::from(e.bounds.right() - e.event.position.x) - 9.;
+                        let w = f32::from(e.bounds.right() - e.event.position.x);
                         this.set_pane_width(false, w, cx);
                     }))
                     .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeSidebar>, _, cx| {
@@ -5135,6 +5274,8 @@ impl Render for Workspace {
                             .h_full()
                             .relative()
                             .flex_shrink_0()
+                            .border_r_1()
+                            .border_color(p.divider)
                             .child(s)
                             .child(resize_handle("sidebar-resize", ResizeSidebar, false))
                             // on the rail, hovering opens the full sidebar over the content
@@ -5163,15 +5304,10 @@ impl Render for Workspace {
                             .flex_1()
                             .min_w_0()
                             .h_full()
-                            .mr_2()
-                            .rounded(theme::RADIUS)
                             .bg(p.content_bg)
-                            .border_1()
-                            .border_color(p.border)
                             .overflow_hidden()
                             .flex()
                             .flex_col()
-                            .when(show_commandbar && show_toolbar, |d| d.child(commandbar))
                             .children(filter_strip)
                             .child(main_row)
                             // the floating card of a running operation (Settings → Aktarım ilerlemesi → Yüzen kart)
@@ -5182,9 +5318,8 @@ impl Render for Workspace {
                             .children(picker_footer),
                     ),
             )
-            .child(div().h(px(8.)))
             // Last children = painted on top.
-            .children(crate::status_center::render_flyout(&self.ops, &p, theme::TITLEBAR_H + px(44.), cx))
+            .children(crate::status_center::render_flyout(&self.ops, &p, theme::TITLEBAR_H + px(60.), cx))
             .children(crate::status_center::update_toast(&p, self.picker.is_some()))
             .children(quick_look_layer)
             .children(self.palette.clone())

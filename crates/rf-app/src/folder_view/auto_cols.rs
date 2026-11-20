@@ -34,6 +34,8 @@ use crate::t;
 /// The width of a column until somebody drags it: modified, created, type, size, tags, git, sync, in the order of
 /// `FolderView::col_widths`. They are `ColumnPrefs::default()`'s (a test holds the two together).
 pub(super) const STOCK_W: [f32; 7] = [150., 150., 150., 100., 130., 120., 150.];
+/// Minimum automatic widths for the columns shown in Explorer's Details layout.
+const EXPLORER_MIN: [f32; 4] = [168., 168., 132., 90.];
 /// The columns measured here. The sync column (an icon and a state that few folders have) keeps its stored width.
 const MEASURED: [bool; 7] = [true, true, true, true, true, true, false];
 
@@ -207,10 +209,10 @@ impl FolderView {
 
         self.auto_cols = AutoCols {
             w: [
-                Some(fit(date_w, heading(t!("Değiştirme tarihi")), AIR)),
-                Some(fit(date_w, heading(t!("Oluşturma tarihi")), AIR)),
-                (!types.is_empty()).then(|| fit(type_w, heading(t!("Tür")), AIR)),
-                Some(fit(size_w, heading(t!("Boyut")), 0.)),
+                Some(fit(date_w, heading(t!("Değiştirme tarihi")), AIR).max(EXPLORER_MIN[0])),
+                Some(fit(date_w, heading(t!("Oluşturma tarihi")), AIR).max(EXPLORER_MIN[1])),
+                (!types.is_empty()).then(|| fit(type_w, heading(t!("Tür")), AIR).max(EXPLORER_MIN[2])),
+                Some(fit(size_w, heading(t!("Boyut")), 0.).max(EXPLORER_MIN[3])),
                 (!tagged.is_empty()).then(|| fit(tag_w, heading(t!("Dosya etiketi")), AIR)),
                 (key.git != 0).then(|| fit(git_w, heading(t!("Git durumu")), AIR)),
                 None,
