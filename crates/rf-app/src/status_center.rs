@@ -42,6 +42,8 @@ pub struct OpState {
     started: Instant,
     /// A button on the finished operation (the folder organizer's "Geri al"), see [`set_result`].
     action: Option<ResultAction>,
+    /// The button is there while the operation runs too ("İzle" on a video being downloaded), see [`set_live_action`].
+    live: bool,
     /// When it ended (for how long its card stays).
     ended: Option<Instant>,
     /// Speed, time left and the pace chart, fed from the progress reports.
@@ -92,6 +94,7 @@ impl OpState {
             paused,
             started: Instant::now(),
             action: None,
+            live: false,
             ended: None,
             stats: OpStats::default(),
             bytes,
@@ -446,6 +449,8 @@ pub(crate) struct OpView {
     pub open_dest: Option<std::path::PathBuf>,
     pub can_undo: bool,
     pub action: Option<ResultAction>,
+    /// The action shows while running too.
+    pub live: bool,
     pub brief: xfer::Brief,
 }
 
@@ -483,6 +488,7 @@ impl OpState {
             open_dest: self.open_dest.clone(),
             can_undo,
             action: self.action.clone(),
+            live: self.live,
             brief: xfer::Brief { running, noticed: ran_ms >= xfer::CARD_APPEAR_MS, asking: question.is_some(), failed: matches!(self.phase, OpPhase::Failed(_)), dismissed: self.dismissed },
         }
     }
@@ -742,6 +748,18 @@ pub fn set_result(cx: &mut App, id: u64, title: Option<String>, action: Option<R
                 op.title = t;
             }
             op.action = action;
+        }
+        cx.notify();
+    });
+}
+
+/// A button on a running operation that stays when it ends ("İzle": play a video while it downloads).
+pub fn set_live_action(cx: &mut App, id: u64, action: ResultAction) {
+    let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return };
+    entity.update(cx, |ops, cx| {
+        if let Some(op) = ops.ops.iter_mut().find(|o| o.id == id) {
+            op.action = Some(action);
+            op.live = true;
         }
         cx.notify();
     });
@@ -1477,7 +1495,7 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                         .children(op.current.clone().filter(|_| running).map(|c| {
                             div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(c)
                         }))
-                        .children(op.action.as_ref().filter(|_| !running).map(|(label, run)| {
+                        .children(op.action.as_ref().filter(|_| !running || op.live).map(|(label, run)| {
                             let run = run.clone();
                             div()
                                 .id(("op-act", op.id as usize))
@@ -1866,6 +1884,7 @@ pub fn sync_popup(ops: &Entity<Ops>, cx: &mut App) {
 
 fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option<AnyWindowHandle> {
     // anchored under the title-bar button: right edge 8 px in from the window's
+    let explorer_style = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
     let (origin, width, dark, display) = owner
         .update(cx, |_, w, cx| (w.bounds().origin, w.viewport_size().width, Palette::for_window(w).dark, crate::theme::popup_display(w, cx)))
         .ok()?;
@@ -1882,7 +1901,11 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: crate::theme::window_material(WindowBackgroundAppearance::Blurred),
+        window_background: if explorer_style {
+            WindowBackgroundAppearance::Opaque
+        } else {
+            crate::theme::window_material(WindowBackgroundAppearance::Blurred)
+        },
         ..Default::default()
     };
     let ops = ops.clone();
@@ -1894,7 +1917,7 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
                 crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
-        cx.new(|cx| ScView::new(ops, w, cx))
+        cx.new(|cx| ScView::new(ops, explorer_style, w, cx))
     });
     match r {
         Ok(h) => Some(h.into()),
@@ -1908,12 +1931,13 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
 /// The Status Center in its own Acrylic window; sizes itself to its content.
 struct ScView {
     ops: Entity<Ops>,
+    explorer_style: bool,
     focus: FocusHandle,
     _subs: Vec<Subscription>,
 }
 
 impl ScView {
-    fn new(ops: Entity<Ops>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(ops: Entity<Ops>, explorer_style: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let subs = vec![
             cx.observe(&ops, |_, _, cx| cx.notify()),
             // clicking anywhere else closes it, like a Windows 11 flyout
@@ -1935,7 +1959,7 @@ impl ScView {
         ];
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        Self { ops, focus, _subs: subs }
+        Self { ops, explorer_style, focus, _subs: subs }
     }
 }
 
@@ -1948,7 +1972,8 @@ impl Render for ScView {
         v_flex()
             .size_full()
             // (the Acrylic window is the surface; a Windows without it gets the plain fill)
-            .when_some(crate::theme::popup_fill(&p), |d, f| d.bg(f))
+            .when(self.explorer_style, |d| d.rounded(theme::RADIUS).bg(p.card_bg).border_1().border_color(p.border).shadow_lg())
+            .when(!self.explorer_style, |d| d.when_some(crate::theme::popup_fill(&p), |d, f| d.bg(f)))
             .track_focus(&self.focus)
             .text_color(p.text)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {

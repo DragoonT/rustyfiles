@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{Icon, h_flex, v_flex};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use gpui_windows::hybrid;
@@ -35,13 +35,14 @@ pub enum Page {
     Look,
     Ferry,
     Search,
+    Addons,
     Advanced,
     Speed,
     Organizer,
     About,
 }
 
-const PAGES: [(Page, L, &str); 16] = [
+const PAGES: [(Page, L, &str); 17] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
     (Page::Dock, L::PanelBottom, "Dock"),
@@ -54,6 +55,7 @@ const PAGES: [(Page, L, &str); 16] = [
     (Page::Look, L::Eye, "DirectLook"),
     (Page::Search, L::Search, "HyperSearch"),
     (Page::Ferry, L::Send, "Ferry"),
+    (Page::Addons, L::Package, "Eklentiler"),
     (Page::Advanced, L::Wrench, "Gelişmiş"),
     (Page::Speed, L::Gauge, "Hız testi"),
     (Page::Organizer, L::WandSparkles, "Dosya düzenleyici"),
@@ -224,6 +226,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Look => look(p, s, cx),
         Page::Ferry => crate::ferry::page(p, s, cx),
         Page::Search => quick_search_cards(p, s, cx),
+        Page::Addons => crate::addons_page::page(p, cx),
         // the developer tools are a part of Gelişmiş (they had a page of their own)
         Page::Advanced => {
             let mut v = advanced(p, s, cx);
@@ -348,7 +351,7 @@ pub(crate) fn card_body(p: &Palette, icon: L, title: SharedString, desc: Option<
                 .min_w(px(WORDS_MIN + 34.))
                 .gap_4()
                 .items_center()
-                .child(Icon::new(icon).size(px(18.)).flex_shrink_0().text_color(p.text))
+                .child(crate::icons::original_icon(icon, px(18.)).flex_shrink_0().text_color(p.text))
                 .child(
                     v_flex()
                         .flex_1()
@@ -384,7 +387,7 @@ fn expander(key: &'static str, p: &Palette, icon: L, title: &str, desc: Option<&
         .justify_center()
         .rounded(theme::RADIUS_SM)
         .hover(|s| s.bg(p.pressed))
-        .child(Icon::new(if open { L::ChevronUp } else { L::ChevronDown }).size(px(14.)))
+        .child(crate::icons::original_icon(if open { L::ChevronUp } else { L::ChevronDown }, px(14.)))
         .on_click(move |_, window, cx| {
             let u = ui(cx);
             if !u.open.remove(key) {
@@ -444,7 +447,7 @@ fn link_row(p: &Palette, id: &'static str, icon: L, title: &str, desc: Option<&s
             icon,
             title.to_string().into(),
             desc.map(|d| d.to_string().into()),
-            Some(Icon::new(L::SquareArrowOutUpRight).size(px(14.)).text_color(p.text_secondary).into_any_element()),
+            Some(crate::icons::original_icon(L::SquareArrowOutUpRight, px(14.)).text_color(p.text_secondary).into_any_element()),
         ))
         .into_any_element()
 }
@@ -485,7 +488,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
                 .bg(p.hover)
                 .border_1()
                 .border_color(p.border)
-                .child(Icon::new(L::Search).size(px(14.)).flex_shrink_0().text_color(p.text_secondary))
+                .child(crate::icons::original_icon(L::Search, px(14.)).flex_shrink_0().text_color(p.text_secondary))
                 .child(Input::new(&search).appearance(false).cleanable(true)),
         );
     }
@@ -515,7 +518,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
                 })
                 .when(on && lens, |d| d.child(crate::glass::lens_probe(crate::glass::SLOT_SETTINGS, crate::glass::key_of(&i))))
                 .when(!on, |d| d.hover(|s| s.bg(p.hover)))
-                .child(Icon::new(icon).size(px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
+                .child(crate::icons::original_icon(icon, px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
                 .when(!strip, |d| d.child(h_flex().gap_2().items_center().child(crate::i18n::t(label)).when(experimental(pg), |d| d.child(experimental_pill(p)))))
                 .on_click({
                     let search = search.clone();
@@ -584,7 +587,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
                                     .children(f.desc.map(|d| div().text_xs().text_color(p.text_secondary).child(d))),
                             )
                             .child(div().flex_shrink_0().text_xs().text_color(p.text_secondary).child(page_label))
-                            .child(Icon::new(L::ChevronRight).size(px(14.)).flex_shrink_0().text_color(p.text_secondary)),
+                            .child(crate::icons::original_icon(L::ChevronRight, px(14.)).flex_shrink_0().text_color(p.text_secondary)),
                     )
                     .into_any_element(),
             );
@@ -816,7 +819,7 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         p,
         L::Plus,
         t!("Yeni sekme şunu açar"),
-        Some("Ctrl+T"),
+        Some(t!("Ctrl+T, + düğmesi ve sekme menüsü. Sekmeyi çoğalt (Ctrl+Shift+K) her zaman aynı klasörü açar.")),
         dropdown(
             "new-tab-opens",
             p,
@@ -968,7 +971,7 @@ fn hidden_drives_card(p: &Palette, s: &Settings) -> AnyElement {
                 .when(off || forced, |d| d.text_color(p.text_secondary))
                 .cursor_pointer()
                 .hover(|d| d.bg(p.pressed))
-                .child(Icon::new(if off || forced { L::EyeOff } else { L::Eye }).size(px(14.)))
+                .child(crate::icons::original_icon(if off || forced { L::EyeOff } else { L::Eye }, px(14.)))
                 .child(format!("{letter}:"))
                 .on_click(move |_, _, cx| settings::update(cx, move |s| set_drive_hidden(s, letter, !off))),
         );
@@ -1003,7 +1006,7 @@ fn hidden_places_card(p: &Palette, s: &Settings) -> AnyElement {
                 .text_color(p.text_secondary)
                 .cursor_pointer()
                 .hover(|d| d.bg(p.pressed))
-                .child(Icon::new(L::EyeOff).size(px(14.)))
+                .child(crate::icons::original_icon(L::EyeOff, px(14.)))
                 .child(name)
                 .on_click(move |_, _, cx| {
                     let key = key.clone();
@@ -1529,7 +1532,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         card(
             p,
             L::Folder,
-            crate::i18n::tx("Windows Dosya Gezgini temasını kullan", "Use Windows File Explorer Theme"),
+            t!("Windows Dosya Gezgini görünümü"),
             None,
             sw("windows-file-explorer-theme", p, s.windows_file_explorer_theme, |s, v| s.windows_file_explorer_theme = v),
         ),
@@ -2061,6 +2064,32 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         Some(t!("ZIP, 7z ve tar dosyalarının içine çift tıklayarak girilir; içindeki dosyalar açılınca geçici bir klasöre çıkarılır")),
         sw("browse-arc", p, s.browse_archives, |s, v| s.browse_archives = v),
     ));
+    if s.browse_archives {
+        use crate::settings::ArchiveOpen as A;
+        v.push(card(
+            p,
+            L::AppWindow,
+            t!("Arşivler nerede açılsın"),
+            None,
+            dropdown("archives-open-in", p, s.archives_open_in, vec![(A::Here, t!("Aynı sekmede").to_string()), (A::NewTab, t!("Yeni sekmede").to_string()), (A::NewWindow, t!("Yeni pencerede").to_string())], |s, v| {
+                s.archives_open_in = v
+            }),
+        ));
+    }
+    {
+        use crate::settings::QuickCompress as Q;
+        let mut options = vec![(Q::Menu, t!("Yalnızca menüyü aç").to_string()), (Q::Zip, "ZIP".into()), (Q::SevenZ, "7z".into()), (Q::TarZst, "tar.zst".into()), (Q::TarGz, "tar.gz".into()), (Q::Tar, "tar".into())];
+        if crate::archive_view::winrar().is_some() || s.quick_compress == Q::Rar {
+            options.push((Q::Rar, "RAR (WinRAR)".into()));
+        }
+        v.push(card(
+            p,
+            L::Archive,
+            t!("Sıkıştır'a tıklayınca"),
+            Some(t!("Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır")),
+            dropdown("quick-compress", p, s.quick_compress, options, |s, v| s.quick_compress = v),
+        ));
+    }
     v.push(card(
         p,
         L::FolderOutput,
@@ -2117,7 +2146,7 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                     .items_center()
                     .rounded(theme::RADIUS_SM)
                     .bg(hsla_alpha(0xFCE100, 0.12))
-                    .child(Icon::new(L::CircleAlert).size(px(14.)).text_color(rgb(0xFCE100)))
+                    .child(crate::icons::original_icon(L::CircleAlert, px(14.)).text_color(rgb(0xFCE100)))
                     .child(div().text_xs().text_color(pp.text).child(t!("Büyük klasörlerde disk ve işlemci yükü artabilir; hesap arka planda yapılır, arayüz donmaz.")))
                     .into_any_element(),
             ]
@@ -3092,6 +3121,14 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
             }
         }),
         section(p, t!("Açık kaynak")),
+        link_row(
+            p,
+            "icons8-credit",
+            L::Image,
+            "Icons8",
+            Some("icons8.com"),
+            |_, _| open_url("https://icons8.com/icon/Ey9jEx96rxU0/undo"),
+        ),
         expander(
             "libs",
             p,
@@ -3240,7 +3277,7 @@ fn index_exclusions(p: &Palette, s: &Settings) -> AnyElement {
                 .pr_4()
                 .gap_3()
                 .items_center()
-                .child(Icon::new(L::FolderX).size(px(14.)).text_color(p.text_secondary))
+                .child(crate::icons::original_icon(L::FolderX, px(14.)).text_color(p.text_secondary))
                 .child(div().flex_1().min_w_0().text_sm().text_ellipsis().overflow_hidden().whitespace_nowrap().child(dir.clone()))
                 .child(
                     div()
@@ -3248,7 +3285,7 @@ fn index_exclusions(p: &Palette, s: &Settings) -> AnyElement {
                         .p_1()
                         .rounded(theme::RADIUS_SM)
                         .hover(|st| st.bg(p.pressed))
-                        .child(Icon::new(L::X).size(px(14.)).text_color(p.text_secondary))
+                        .child(crate::icons::original_icon(L::X, px(14.)).text_color(p.text_secondary))
                         .on_click(move |_, _, cx| {
                             let d = d.clone();
                             settings::update(cx, |s| s.index_excluded.retain(|e| *e != d));

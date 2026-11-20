@@ -465,12 +465,14 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             rememberLayout()
         case "showScrollBars":
             applyScrollBars()
+        case "previewDetails":
+            previewPane.needsLayout = true
         case "showCommandBar", "showStatusBar", "previewPosition", "toolbarHidden", "toolbarAdded":
             commandBar.needsLayout = true
             card.needsLayout = true
         case "listBackground", "listImage", "listImageVisibility":
             card.applyBackground()
-        case "fontFamily":
+        case "fontFamily", "textPercent":
             table.rowHeight = Metrics.rowHeight
             reloadItems()
             card.needsLayout = true
@@ -838,6 +840,19 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     private func reloadSelecting(_ names: [String], rename: Bool = false) { onReload?(names, rename) }
 
+    /// "Create archive…": the dialog, then the archive in the background.
+    func createArchive(_ urls: [URL]) {
+        guard let c = CreateArchiveDialog.ask(for: urls) else { return }
+        run {
+            try compressArchive(
+                sources: urls.map(\.path), dest: c.dest.path, format: c.format, level: c.level, password: c.password, volumeSize: c.volumeSize, dictSize: c.dictSize)
+        } done: { [weak self] made in
+            let u = URL(fileURLWithPath: made)
+            FileUndo.shared.record(.trash([u]), title: String(localized: "Compress"))
+            self?.reloadSelecting([u.lastPathComponent])
+        }
+    }
+
     // MARK: rename
 
     private var renaming: (row: Int, original: String)?
@@ -969,8 +984,12 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             if item.isDir && !display.isPackage(item) {
                 if rows.count == 1 { (AppSettings.foldersInNewTab && archive == nil ? onOpenInNewTab : onOpenFolder)?(u) }
             } else if archive == nil && rows.count == 1 && AppSettings.archivesAsFolders && isArchive(path: path) {
-                // archives open like folders, as on Windows
-                onOpenFolder?(u)
+                // archives open like folders, as on Windows: here, or in a tab or window of their own
+                switch AppSettings.archivesOpenIn {
+                case "tab": onOpenInNewTab?(u)
+                case "window": onOpenInNewWindow?(u)
+                default: onOpenFolder?(u)
+                }
             } else if archive == nil && rows.count == 1 && DiskImages.isDiskImage(u) {
                 onOpenDiskImage?(u)
             } else {
@@ -1116,7 +1135,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         ])
 
         b.add(String(localized: "Open"), "square-arrow-out-up-right", key: "\r", mods: []) { [weak self] in self?.openSelected() }
-        if singleDir, let u = urls.first {
+        let singleArchive = archive == nil && items.count == 1 && !items[0].isDir && AppSettings.archivesAsFolders && urls.first.map { isArchive(path: $0.path) } == true
+        if singleDir || singleArchive, let u = urls.first {
             b.add(String(localized: "Open in new tab"), "square-plus") { [weak self] in self?.onOpenInNewTab?(u) }
             b.add(String(localized: "Open in new window"), "app-window") { [weak self] in self?.onOpenInNewWindow?(u) }
         }
@@ -1164,16 +1184,22 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         b.separator()
 
-        b.sub(String(localized: "Compress"), "archive") { m in
-            for (title, format, ext) in [("ZIP", ArchiveFormat.zip, "zip"), ("7z", .sevenZ, "7z"), ("RAR", .rar, "rar")] {
-                if format == .rar && !canMakeRar() { continue }
-                m.add(String(localized: "Compress to \(title)"), "file-archive") { [weak self] in
-                    let dest = FileOps.archiveName(for: urls, ext: ext)
-                    self?.run { try compress(sources: urls.map(\.path), dest: dest.path, format: format) } done: {
-                        FileUndo.shared.record(.trash([dest]), title: String(localized: "Compress"))
-                        self?.reloadSelecting([dest.lastPathComponent])
-                    }
-                }
+        // a click on Compress makes the chosen format at once (Settings › Files); the submenu has the rest
+        let compressOne: (ArchiveFormat, String) -> Void = { [weak self] format, ext in
+            let dest = FileOps.archiveName(for: urls, ext: ext)
+            self?.run { try compress(sources: urls.map(\.path), dest: dest.path, format: format) } done: {
+                FileUndo.shared.record(.trash([dest]), title: String(localized: "Compress"))
+                self?.reloadSelecting([dest.lastPathComponent])
+            }
+        }
+        if let quick = ArchiveKinds.format(AppSettings.quickCompress) {
+            b.add(String(localized: "Compress to \(quick.title)"), "archive") { compressOne(quick.format, archiveExtension(format: quick.format)) }
+        }
+        b.sub(AppSettings.quickCompress == "menu" ? String(localized: "Compress") : String(localized: "Other formats"), "file-archive") { m in
+            m.add(String(localized: "Create archive…"), "archive") { [weak self] in self?.createArchive(urls) }
+            m.separator()
+            for kind in ArchiveKinds.offered {
+                m.add(String(localized: "Compress to \(kind.title)"), "file-archive") { compressOne(kind.format, archiveExtension(format: kind.format)) }
             }
         }
         if allArchives { b.sub(String(localized: "Extract"), "folder-output") { self.extractMenu(urls, $0) } }

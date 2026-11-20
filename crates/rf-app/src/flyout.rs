@@ -49,7 +49,7 @@ pub fn close(cx: &mut App) {
 
 /// Opens (or, when the same one is open, closes) the flyout `key` under `pos` (owner window
 /// coordinates, the flyout's top-left), `width` logical pixels wide.
-pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, owner: &mut Window, cx: &mut App) {
+pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, explorer_style: bool, owner: &mut Window, cx: &mut App) {
     let h = host(cx);
     if h.window.is_some() && h.key == key {
         close(cx);
@@ -70,7 +70,7 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, own
     }
     let dark = Palette::for_window(owner).dark;
     // opened from a window that shows glass (or from a popup that does): on real glass, not Windows' acrylic
-    let liquid = crate::glass::liquid(crate::look::window::hwnd_of(owner));
+    let liquid = !explorer_style && crate::glass::liquid(crate::look::window::hwnd_of(owner));
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::new(origin, size(px(width), px(80.))))),
         display_id: crate::theme::popup_display(owner, cx),
@@ -81,7 +81,7 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, own
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: crate::theme::popup_material(liquid),
+        window_background: if explorer_style { WindowBackgroundAppearance::Opaque } else { crate::theme::popup_material(liquid) },
         ..Default::default()
     };
     // the app window keeps its active look (Mica, caption) while the flyout has focus
@@ -94,7 +94,7 @@ pub fn toggle(key: &'static str, pos: Point<Pixels>, width: f32, body: Body, own
                 crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
-        cx.new(|cx| FlyoutView::new(key, width, body, liquid.then_some(dark), w, cx))
+        cx.new(|cx| FlyoutView::new(key, width, body, liquid.then_some(dark), explorer_style, w, cx))
     });
     match r {
         Ok(w) => {
@@ -113,6 +113,7 @@ struct FlyoutView {
     key: &'static str,
     width: f32,
     body: Body,
+    explorer_style: bool,
     focus: FocusHandle,
     /// The glass behind the flyout, in the liquid look.
     glass: Option<PopupGlass>,
@@ -122,7 +123,15 @@ struct FlyoutView {
 
 impl FlyoutView {
     /// `liquid`: `Some(dark)` to sit on glass, `None` for the Acrylic flyout.
-    fn new(key: &'static str, width: f32, body: Body, liquid: Option<bool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        key: &'static str,
+        width: f32,
+        body: Body,
+        liquid: Option<bool>,
+        explorer_style: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subs = vec![cx.observe_window_activation(window, |this: &mut Self, window, cx| {
             if window.is_window_active() {
                 return;
@@ -140,7 +149,7 @@ impl FlyoutView {
         window.focus(&focus, cx);
         let glass = liquid.map(|dark| PopupGlass::start(crate::look::window::hwnd_of(window), dark));
         let watch = glass.is_some().then(|| glass_watch::watch(cx, |this: &mut Self| this.glass.as_mut()));
-        Self { key, width, body, focus, glass, _watch: watch, _subs: subs }
+        Self { key, width, body, explorer_style, focus, glass, _watch: watch, _subs: subs }
     }
 }
 
@@ -154,7 +163,8 @@ impl Render for FlyoutView {
         let fill = self.glass.as_ref().map(|g| glass_watch::panel_fill(p.dark, g.fallback())).or_else(|| crate::theme::popup_fill(&p));
         v_flex()
             .size_full()
-            .when_some(fill, |d, f| d.bg(f))
+            .when(self.explorer_style, |d| d.rounded(crate::theme::RADIUS).bg(p.card_bg).border_1().border_color(p.border).shadow_lg())
+            .when(!self.explorer_style, |d| d.when_some(fill, |d, f| d.bg(f)))
             .track_focus(&self.focus)
             .text_color(p.text)
             .on_key_down(|ev: &KeyDownEvent, _, cx| {

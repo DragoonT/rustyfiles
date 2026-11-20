@@ -366,7 +366,7 @@ Building and installing do not require a signing certificate. The generated inst
 unsigned, so Windows may show a SmartScreen warning; signing public releases requires a
 trusted Authenticode certificate or an Azure Trusted Signing setup.
 
-`cargo run --release -p rf-app` starts it without installing.
+`cargo run --release -p rf-app --bin rustyfiles` starts it without installing.
 
 ## Keyboard
 

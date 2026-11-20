@@ -2,13 +2,10 @@
 //! Native shell icons/thumbnails come later via rf-win; this is the instant, zero-I/O fallback.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
 
 use crate::t;
 use gpui_kit::assets::IconName as L;
 use gpui_kit::component::Icon;
-use gpui_kit::RenderImage;
 use gpui_kit::{
     App, AnyElement, AssetSource, IntoElement, ParentElement, Pixels, SharedString, Styled, div, rgb,
 };
@@ -280,14 +277,6 @@ const WINDOWS_THEME_ASSETS: &[(&str, &[u8])] = &[
         include_bytes!("../assets/windows-theme/rename.svg"),
     ),
     (
-        "windows-theme/search.svg",
-        include_bytes!("../assets/windows-theme/search.svg"),
-    ),
-    (
-        "windows-theme/settings.svg",
-        include_bytes!("../assets/windows-theme/settings.svg"),
-    ),
-    (
         "windows-theme/share.svg",
         include_bytes!("../assets/windows-theme/share.svg"),
     ),
@@ -308,55 +297,6 @@ const WINDOWS_THEME_ASSETS: &[(&str, &[u8])] = &[
         include_bytes!("../assets/windows-theme/warning.svg"),
     ),
 ];
-
-const WINDOWS_THEME_ACTION_IMAGES: &[(&str, &[u8])] = &[
-    (
-        "menu-undo.png",
-        include_bytes!("../assets/windows-theme/menu-undo.png"),
-    ),
-    (
-        "menu-redo.png",
-        include_bytes!("../assets/windows-theme/menu-redo.png"),
-    ),
-    (
-        "menu-select-all.png",
-        include_bytes!("../assets/windows-theme/menu-select-all.png"),
-    ),
-    (
-        "menu-select-none.png",
-        include_bytes!("../assets/windows-theme/menu-select-none.png"),
-    ),
-    (
-        "menu-invert-selection.png",
-        include_bytes!("../assets/windows-theme/menu-invert-selection.png"),
-    ),
-    (
-        "menu-settings.png",
-        include_bytes!("../assets/windows-theme/menu-settings.png"),
-    ),
-];
-
-static WINDOWS_THEME_ACTION_IMAGE_CACHE: OnceLock<HashMap<&'static str, Arc<RenderImage>>> =
-    OnceLock::new();
-
-pub fn windows_theme_action_image(name: &'static str) -> Option<Arc<RenderImage>> {
-    let images = WINDOWS_THEME_ACTION_IMAGE_CACHE.get_or_init(|| {
-        WINDOWS_THEME_ACTION_IMAGES
-            .iter()
-            .filter_map(|(name, bytes)| match image::load_from_memory(bytes) {
-                Ok(image) => Some((
-                    *name,
-                    Arc::new(RenderImage::new(vec![image::Frame::new(image.to_rgba8())])),
-                )),
-                Err(error) => {
-                    log::warn!("could not decode Windows theme icon {name}: {error}");
-                    None
-                }
-            })
-            .collect()
-    });
-    images.get(name).cloned()
-}
 
 pub struct AppAssets;
 
@@ -386,6 +326,21 @@ pub fn install_theme_resolver(cx: &mut App) {
             .is_some_and(|s| s.windows_file_explorer_theme);
         resolved_windows_theme_path(path, enabled).map(Into::into)
     });
+}
+
+pub fn original_icon(icon: L, size: Pixels) -> Icon {
+    let path = icon.path();
+    match gpui_kit::assets::AllAssets.load(&path) {
+        Ok(Some(bytes)) => Icon::default().data(&bytes).size(size),
+        Ok(None) => {
+            log::warn!("missing original icon asset: {path}");
+            Icon::default().size(size)
+        }
+        Err(error) => {
+            log::warn!("could not load original icon asset {path}: {error:#}");
+            Icon::default().size(size)
+        }
+    }
 }
 
 pub fn windows_home_icon(size: Pixels) -> AnyElement {
@@ -430,11 +385,11 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "archive" => "file-archive",
         "arrow-down" => "down",
         "arrow-down-up" | "arrow-down-wide-narrow" | "arrow-up-down" | "chevrons-up-down" => "sort",
-        "arrow-left" | "arrow-left-right" | "undo" | "undo-2" | "redo-2" => "back",
-        "arrow-right" | "move-right" | "redo" => "forward",
+        "arrow-left" => "back",
+        "arrow-right" | "move-right" => "forward",
         "arrow-up" => "up",
         "arrow-up-right" | "external-link" | "square-arrow-out-up-right" => "external-link",
-        "app-window" | "file-type" | "maximize" | "maximize-2" | "square-terminal" => "app",
+        "app-window" | "file-type" | "maximize" | "maximize-2" => "app",
         "check" | "check-check" | "check-circle" | "check-circle-2" | "check-square"
         | "circle-check" | "square-check" => "check",
         "circle-alert" | "circle-warning" => "warning",
@@ -496,15 +451,12 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "file-plus" | "file-plus-2" => "new-file",
         "folder-plus" => "new-folder",
         "square-chevron-right" => "chevron-right",
-        "square" => "check",
         "plus" | "square-plus" | "circle-plus" | "zoom-in" => "add",
         "minus" | "zoom-out" => "minus",
         "refresh-cw" | "refresh-ccw" | "rotate-cw" | "rotate-ccw" | "rotate-cw-square" => "refresh",
         "pencil" | "pencil-line" | "file-pen-line" | "edit" | "replace" => "rename",
-        "pin" | "pin-off" | "bookmark" | "star" => "pin",
-        "search" | "search-slash" | "folder-search-2" => "search",
-        "settings" | "settings-2" | "sliders-horizontal" | "cog" | "wrench" => "settings",
-        "share" | "share-2" | "send" | "user" | "users" => "share",
+        "pin" | "pin-off" => "pin",
+        "share" | "share-2" => "share",
         "scissors" | "cut" => "cut",
         "save" => "file",
         "skip-back" => "back",
@@ -513,7 +465,6 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "upload" | "cloud-upload" => "upload",
         "download" | "cloud-download" => "download",
         "chart-pie" => "chart",
-        "info" | "info-circle" | "circle-help" => "properties",
         "triangle-alert" | "alert-triangle" | "alert-circle" => "warning",
         "x" | "circle-x" | "circle-xmark" => "close",
         _ => return None,
@@ -569,8 +520,6 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "refresh" => "windows-theme/refresh.svg",
         "removable-drive" => "windows-theme/removable-drive.svg",
         "rename" => "windows-theme/rename.svg",
-        "search" => "windows-theme/search.svg",
-        "settings" => "windows-theme/settings.svg",
         "share" => "windows-theme/share.svg",
         "sort" => "windows-theme/sort.svg",
         "up" => "windows-theme/up.svg",
@@ -621,8 +570,6 @@ pub fn windows_theme_context_glyph(path: &str) -> Option<char> {
         "windows-theme/monitor.svg" => 0xE7F4,
         "windows-theme/pin.svg" => 0xE718,
         "windows-theme/refresh.svg" => 0xE72C,
-        "windows-theme/search.svg" => 0xE721,
-        "windows-theme/settings.svg" => 0xE713,
         "windows-theme/sort.svg" => 0xE8CB,
         "windows-theme/up.svg" => 0xE74A,
         "windows-theme/warning.svg" => 0xE7BA,
@@ -630,6 +577,32 @@ pub fn windows_theme_context_glyph(path: &str) -> Option<char> {
         _ => return None,
     };
     char::from_u32(glyph)
+}
+
+fn windows_theme_font_for_build(build: u32) -> &'static str {
+    if build >= 22000 {
+        "Segoe Fluent Icons"
+    } else {
+        "Segoe MDL2 Assets"
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn windows_theme_font_family() -> &'static str {
+    windows_theme_font_for_build(rf_win::osver::build())
+}
+
+#[cfg(target_os = "windows")]
+pub fn windows_theme_glyph(glyph: char, size: Pixels) -> AnyElement {
+    div()
+        .size(size)
+        .flex()
+        .items_center()
+        .justify_center()
+        .font_family(windows_theme_font_family())
+        .text_size(size)
+        .child(glyph.to_string())
+        .into_any_element()
 }
 
 pub fn windows_theme_icon_glyph(icon: L) -> Option<char> {
@@ -654,6 +627,8 @@ pub fn windows_theme_icon_glyph(icon: L) -> Option<char> {
         "wrench" => 0xE946,
         "rotate-cw" => 0xE72C,
         "rotate-ccw" => 0xE80D,
+        "undo" | "undo-2" => 0xE7A7,
+        "redo" | "redo-2" => 0xE7A6,
         _ => return None,
     };
     char::from_u32(glyph)
@@ -689,7 +664,6 @@ mod windows_theme_tests {
             "icons/arrow-left.svg",
             "icons/arrow-right.svg",
             "icons/folder-plus.svg",
-            "icons/search.svg",
             "icons/share-2.svg",
             "icons/usb.svg",
         ] {
@@ -704,6 +678,35 @@ mod windows_theme_tests {
     fn windows_theme_keeps_unmapped_glyphs_on_the_original_asset() {
         assert_eq!(windows_theme_path("icons/git-branch.svg"), None);
         assert!(!crate::settings::Settings::default().windows_file_explorer_theme);
+    }
+
+    #[test]
+    fn windows_theme_does_not_change_the_meaning_of_unrelated_icons() {
+        for path in [
+            "icons/square.svg",
+            "icons/user.svg",
+            "icons/users.svg",
+            "icons/send.svg",
+            "icons/undo.svg",
+            "icons/undo-2.svg",
+            "icons/redo.svg",
+            "icons/redo-2.svg",
+            "icons/star.svg",
+            "icons/bookmark.svg",
+            "icons/info.svg",
+            "icons/info-circle.svg",
+            "icons/circle-help.svg",
+            "icons/arrow-left-right.svg",
+            "icons/settings.svg",
+            "icons/search.svg",
+            "icons/square-terminal.svg",
+            "icons/settings-2.svg",
+            "icons/sliders-horizontal.svg",
+            "icons/cog.svg",
+            "icons/wrench.svg",
+        ] {
+            assert_eq!(windows_theme_path(path), None, "{path}");
+        }
     }
 
     #[test]
@@ -729,17 +732,20 @@ mod windows_theme_tests {
     }
 
     #[test]
-    fn windows_theme_custom_action_images_are_available() {
-        for name in [
-            "menu-undo.png",
-            "menu-redo.png",
-            "menu-select-all.png",
-            "menu-select-none.png",
-            "menu-invert-selection.png",
-            "menu-settings.png",
-        ] {
-            assert!(super::windows_theme_action_image(name).is_some(), "{name}");
-        }
+    fn windows_theme_standard_actions_use_system_glyphs() {
+        use gpui_kit::assets::IconName as L;
+
+        assert_eq!(windows_theme_icon_glyph(L::Undo2), Some('\u{E7A7}'));
+        assert_eq!(windows_theme_icon_glyph(L::Redo2), Some('\u{E7A6}'));
+        assert_eq!(windows_theme_icon_glyph(L::Settings), None);
+        assert_eq!(windows_theme_icon_glyph(L::Search), None);
+        assert_eq!(windows_theme_icon_glyph(L::SquareTerminal), None);
+    }
+
+    #[test]
+    fn windows_10_uses_mdl2_and_windows_11_uses_fluent_icons() {
+        assert_eq!(super::windows_theme_font_for_build(19045), "Segoe MDL2 Assets");
+        assert_eq!(super::windows_theme_font_for_build(22000), "Segoe Fluent Icons");
     }
 
     #[test]

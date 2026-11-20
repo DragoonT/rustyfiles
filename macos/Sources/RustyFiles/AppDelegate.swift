@@ -34,6 +34,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let which = ProcessInfo.processInfo.environment["RF_DEMO_MENU"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoMenu(item: which == "item") }
         }
+        // RF_DEMO_PALETTE=all|folders|tabs[:query] (development): the command palette, typed into
+        if let spec = ProcessInfo.processInfo.environment["RF_DEMO_PALETTE"] {
+            let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let c = self?.controllers.first else { return }
+                CommandPalette.show(parts[0] == "tabs" ? .tabs : parts[0] == "folders" ? .folders : .all, over: c)
+                if parts.count > 1 { CommandPalette.demoType(parts[1]) }
+            }
+        }
         if ProcessInfo.processInfo.environment["RF_DEMO_STATUS"] != nil {
             StatusCenter.demo()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
@@ -78,7 +87,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["RF_DEMO_SPEED"] != nil { SpeedTest.shared.run() }
         let delay = Double(ProcessInfo.processInfo.environment["RF_SNAPSHOT_DELAY"] ?? "") ?? 2
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let view = self?.controllers.first?.window?.contentView?.superview,
+            // a window over the first one (the command palette) is drawn instead when there is one
+            let main = self?.controllers.first?.window
+            let shown = main?.childWindows?.last ?? main
+            guard let view = shown?.contentView?.superview,
                 let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
             else { exit(1) }
             view.cacheDisplay(in: view.bounds, to: rep)

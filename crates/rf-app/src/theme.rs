@@ -276,7 +276,20 @@ pub fn kind_color(cat: crate::icons::Category, dark: bool) -> Hsla {
 /// The selection marker shared by every list (sidebar, details, columns, menus): a short
 /// rounded accent bar on the left edge of a selected row. The row must be `relative()`.
 pub fn selection_pill(p: &Palette) -> Div {
-    div().absolute().left(px(0.)).top(px(8.)).bottom(px(8.)).w(px(3.)).rounded_full().bg(p.accent)
+    selection_pill_joined(p, false, false)
+}
+
+/// The pill of a selected row whose neighbour above or below is selected too: it reaches nearly to that edge, so that a run of
+/// selected rows reads as one block while each row keeps a pill of its own to count by (a small gap between them). The user,
+/// 2026-11-20: "ortadakiler birleşik gibi mi olsa ... hem bir görünür hem de sayılabilir çizgiler ile".
+pub fn selection_pill_joined(p: &Palette, above: bool, below: bool) -> Div {
+    let (top, bottom) = pill_insets(above, below);
+    div().absolute().left(px(0.)).top(px(top)).bottom(px(bottom)).w(px(3.)).rounded_full().bg(p.accent)
+}
+
+/// How far the pill stays from the row's top and bottom: 8 px on a side with no selected neighbour, 2 px towards one.
+pub fn pill_insets(above: bool, below: bool) -> (f32, f32) {
+    (if above { 2. } else { 8. }, if below { 2. } else { 8. })
 }
 
 pub const RADIUS: Pixels = px(8.);
@@ -287,6 +300,15 @@ pub const TITLEBAR_H: Pixels = px(40.);
 #[cfg(test)]
 mod tests {
     use super::{glass_bar_wash, glass_washes};
+
+    #[test]
+    fn a_run_of_selected_rows_has_long_pills_with_small_gaps_and_a_lone_row_its_short_one() {
+        assert_eq!(super::pill_insets(false, false), (8., 8.));
+        assert_eq!(super::pill_insets(true, true), (2., 2.));
+        // the gap between two pills in a run: one row's bottom and the next one's top
+        let gap = super::pill_insets(false, true).1 + super::pill_insets(true, false).0;
+        assert_eq!(gap, 4.);
+    }
 
     #[test]
     fn a_bar_over_glass_always_keeps_a_wash_of_its_own() {

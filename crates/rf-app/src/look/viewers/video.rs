@@ -66,6 +66,28 @@ struct Opened(Kind, Prepared);
 /// Opens `path`: reads the container's index (on a network drive this is the slow part) and
 /// picks the route it plays by.
 fn open_media(path: &std::path::Path) -> Opened {
+    // a file being downloaded: its local stream, through FilmCraft (the hardware routes read files only)
+    if let Some((url, name)) = crate::look::stream::parse(path) {
+        let opened = rf_player::open_stream(&url, &name);
+        let (kind, prepared) = match opened {
+            Ok(media) => match media.info().video.clone() {
+                Some(v) => {
+                    let par = if v.par.1 > 0 { v.par.0 as f32 / v.par.1 as f32 } else { 1.0 };
+                    let mut p = Prepared::new(((v.width as f32 * par).max(160.0), (v.height as f32).max(90.0)), name);
+                    p.overlay_titlebar = true;
+                    p.drag_by_body = false;
+                    (Kind::Video(media), p)
+                }
+                None => {
+                    let mut p = Prepared::new((500.0, 300.0), name);
+                    p.resizable = false;
+                    (Kind::Audio(media), p)
+                }
+            },
+            Err(e) => (Kind::Failed(format!("{e:#}")), Prepared::new((520.0, 220.0), name)),
+        };
+        return Opened(kind, prepared);
+    }
     let name = super::file_name(path);
     let opened = rf_player::open(path);
     let (kind, prepared) = match opened {

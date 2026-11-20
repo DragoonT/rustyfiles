@@ -30,6 +30,8 @@ enum Metrics {
     @MainActor
     private static func font(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
         let family = UserDefaults.standard.string(forKey: "fontFamily") ?? ""
+        // Settings › Appearance › Text size (settings.rs `text_percent`: 87, 100 or 112 %)
+        let size = (size * CGFloat(AppSettings.textPercent) / 100).rounded()
         let system = NSFont.systemFont(ofSize: size, weight: weight)
         guard !family.isEmpty else { return system }
         let traits: NSFontTraitMask = weight == .regular ? [] : [.boldFontMask]

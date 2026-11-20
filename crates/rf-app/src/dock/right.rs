@@ -169,8 +169,8 @@ impl RightIsland {
         }
         let (removable, languages) = (!super::eject_view::drives(cx).is_empty(), self.lang.layouts >= 2);
         match cx.try_global::<crate::settings::Settings>() {
-            Some(s) => status_order::shown(&s.dock_status_order, &s.dock_status_hidden, removable, languages),
-            None => status_order::shown(&[], &[], removable, languages),
+            Some(s) => status_order::shown(&s.dock_status_order, &s.dock_status_hidden, removable, languages, super::sysstate::has_battery(cx)),
+            None => status_order::shown(&[], &[], removable, languages, super::sysstate::has_battery(cx)),
         }
     }
 
@@ -380,7 +380,11 @@ impl RightIsland {
         let buttons = self.status_buttons(cx);
         let clock_ix = if self.mon.is_home() { first_button + buttons.len() } else { 0 };
         let (ix, text) = match which {
-            OwnTip::Status(s) => (first_button + buttons.iter().position(|b| *b == s)?, super::status_card::name(s).to_string()),
+            OwnTip::Status(s) => (
+                first_button + buttons.iter().position(|b| *b == s)?,
+                // (the battery says its level and what it is doing, as Windows' own does)
+                if s == Status::Battery { super::sysstate::battery_tip(cx) } else { super::status_card::name(s).to_string() },
+            ),
             OwnTip::Clock => (clock_ix, rf_win::dock::clock::long_date().unwrap_or_else(|| self.lines.date.clone())),
             OwnTip::Bell => (clock_ix + 1, crate::t!("Bildirimler").to_string()),
             OwnTip::ShowDesktop => (clock_ix + 2, crate::t!("Masaüstünü göster").to_string()),
@@ -432,7 +436,7 @@ fn run_status(which: Status, cx: &mut App) {
             }
             None => log::info!("dock: the input language was not switched (no window in front, or one layout)"),
         },
-        Status::Network | Status::Volume => open_controls(cx),
+        Status::Network | Status::Volume | Status::Battery => open_controls(cx),
     }
 }
 
@@ -687,6 +691,7 @@ impl Render for RightIsland {
                     Status::Language => lang_button(&self.lang.code, pal, k),
                     Status::Network => icon_button("dock-network", network_icon, pal, k).into_any_element(),
                     Status::Volume => icon_button("dock-volume", volume_icon, pal, k).into_any_element(),
+                    Status::Battery => icon_button("dock-battery", super::sysstate::battery_icon(cx), pal, k).into_any_element(),
                 };
                 row = row.child(
                     div()

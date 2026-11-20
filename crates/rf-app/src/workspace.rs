@@ -156,6 +156,7 @@ pub struct Workspace {
     tab_lens: bool,
     /// This frame's strip gave the selected tab its lens / the "+" button its lens. A frame that ends without a claim takes the lens out.
     tab_lens_claimed: bool,
+    plus_lens_claimed: bool,
     /// Address-bar folder completions for the typed text, and the highlighted one.
     addr_suggest: Vec<PathBuf>,
     addr_sel: Option<usize>,
@@ -631,6 +632,11 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         crate::quick_search::toggle(cx);
         return true;
     }
+    // a download the browser handed to HyperDownload: a card of the Status Center
+    if let Some(gid) = msg.trim().strip_prefix(crate::hyperdownload::FOLLOW_PREFIX) {
+        crate::hyperdownload::follow(gid.to_string(), cx);
+        return true;
+    }
     crate::shell::desktop::open::mark("main: the line to open a place arrived");
     let (loc, select) = parse_launch(&msg);
     // (with "open folders from other programs in a new window" on, no window takes it as a tab: issue 77)
@@ -899,6 +905,7 @@ impl Workspace {
             sidebar_lens_claimed: std::cell::Cell::new(false),
             tab_lens: false,
             tab_lens_claimed: false,
+            plus_lens_claimed: false,
             addr_suggest: Vec::new(),
             addr_sel: None,
             _addr_task: None,
@@ -1243,7 +1250,7 @@ impl Workspace {
             let serial = self.tab_anim_serial;
             self.tab_anim = Some((view, serial));
             cx.spawn(async move |this, cx| {
-                cx.background_executor().timer(std::time::Duration::from_millis(TAB_ANIM_MS + 100)).await;
+                cx.background_executor().timer(std::time::Duration::from_millis(TAB_ANIM_MS + PLUS_ANIM_MS + 100)).await;
                 let _ = this.update(cx, |ws, cx| {
                     if ws.tab_anim.as_ref().is_some_and(|(_, s)| *s == serial) {
                         ws.tab_anim = None;
@@ -2299,13 +2306,10 @@ impl Workspace {
         let mut tab_claimed = false;
         let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         for (i, tab) in self.tabs.iter().enumerate() {
-            let view = tab.view().read(cx);
-            let title = view.title(cx);
-            let icon = view.tab_icon();
-            let location = view.location().clone();
-            let settings_tab_icon = (windows_theme && matches!(&location, Location::Settings))
-                .then(|| crate::icons::windows_theme_action_image("menu-settings.png"))
-                .flatten();
+            let (title, icon, location) = {
+                let view = tab.view().read(cx);
+                (view.title(cx), view.tab_icon(), view.location().clone())
+            };
             let tab_dir = location.path().map(Path::to_path_buf);
             let shell_tab_icon = if windows_theme && matches!(&location, Location::Path(_)) {
                 tab_dir.as_ref().and_then(|path| {
@@ -2357,12 +2361,12 @@ impl Workspace {
                         ))
                     })
                     .when(!active, |d| d.text_color(p.text_secondary).hover(|s| s.bg(p.hover)))
-                    .child(match (settings_tab_icon, shell_tab_icon) {
-                        (Some(image), _) | (None, Some(image)) => {
+                    .child(match shell_tab_icon {
+                        Some(image) => {
                             img(image).size(px(14.)).flex_shrink_0().into_any_element()
                         }
-                        (None, None) if windows_home_tab => crate::icons::windows_home_icon(px(14.)),
-                        (None, None) => Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }).into_any_element(),
+                        None if windows_home_tab => crate::icons::windows_home_icon(px(14.)),
+                        None => Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }).into_any_element(),
                     })
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
                     .when_some(term_dir, |d, dir| {
@@ -2460,6 +2464,10 @@ impl Workspace {
             };
         }
         self.tab_lens_claimed = tab_claimed;
+        // over glass the "+" sits in a round lens (a constant key: it never slides)
+        let plus_lens = self.tab_lens;
+        self.plus_lens_claimed = plus_lens;
+        // outside the scrolling strip: always reachable
         let fluent_plus = || {
             div()
                 .size(px(14.))
@@ -2474,17 +2482,7 @@ impl Workspace {
             #[cfg(target_os = "windows")]
             {
                 crate::icons::windows_theme_icon_glyph(L::Plus)
-                    .map(|glyph| {
-                        div()
-                            .size(px(14.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .font_family("Segoe Fluent Icons")
-                            .text_size(px(14.))
-                            .child(glyph.to_string())
-                            .into_any_element()
-                    })
+                    .map(|glyph| crate::icons::windows_theme_glyph(glyph, px(14.)))
                     .unwrap_or_else(fluent_plus)
             }
             #[cfg(not(target_os = "windows"))]
@@ -2504,12 +2502,43 @@ impl Workspace {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(theme::RADIUS_SM)
+            .when(!plus_lens, |d| d.rounded(theme::RADIUS_SM))
+            .when(plus_lens, |d| {
+                d.relative().rounded_full().child(crate::glass::lens_probe_shaped(
+                    crate::glass::SLOT_NEW_TAB,
+                    crate::glass::key_of("new-tab"),
+                    crate::glass::LensShape::Circle,
+                ))
+            })
+            .when(
+                plus_lens && crate::glass::lens_phase(self.glass_hwnd, crate::glass::SLOT_NEW_TAB) != crate::glass::LensPhase::Rest,
+                |d| d.bg(p.tab_active),
+            )
             .text_color(p.text_secondary)
             .hover(|s| s.bg(p.hover))
             .child(new_tab_icon)
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, window, cx| this.open_new_tab(window, cx)));
+        // after the new tab has grown, the next "+" slides out from behind it
+        let new_tab: AnyElement = match self.tab_anim.as_ref().map(|(_, s)| *s) {
+            Some(serial) => {
+                let total = (TAB_ANIM_MS + PLUS_ANIM_MS) as f32;
+                let start = TAB_ANIM_MS as f32 / total;
+                new_tab
+                    .relative()
+                    .with_animation(
+                        ("plus-in", serial),
+                        Animation::new(std::time::Duration::from_millis(TAB_ANIM_MS + PLUS_ANIM_MS)),
+                        move |el, d| {
+                            let t = ((d - start) / (1. - start)).clamp(0., 1.);
+                            let e = ease_out_quint()(t);
+                            el.left(px(-26. * (1. - e))).opacity(e)
+                        },
+                    )
+                    .into_any_element()
+            }
+            None => new_tab.into_any_element(),
+        };
 
         TitleBar::new()
             .h(theme::TITLEBAR_H)
@@ -2540,7 +2569,10 @@ impl Workspace {
                                 .text_color(p.text_secondary)
                                 .hover(|s| s.bg(p.hover))
                                 .when(!popups_open, |d| d.tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Sekme eylemleri")).build(w, cx)))
-                                .child(Icon::new(if self.compact.is_some() { L::PictureInPicture2 } else { L::PanelLeft }).size(px(16.)))
+                                .child(crate::icons::original_icon(
+                                    if self.compact.is_some() { L::PictureInPicture2 } else { L::PanelLeft },
+                                    px(16.),
+                                ))
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                                 .on_click(cx.listener(|this, _, window, cx| this.tab_actions_menu(window, cx))),
                         ),
@@ -2699,7 +2731,7 @@ impl Workspace {
             }))
             .hint("Alt+Enter"),
             Item::Separator,
-            Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
+            Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None }, click: None },
         ]);
         // a cloud or WSL place can be taken off the sidebar on its own (it comes back from Settings > Files and folders)
         if self.places.read(cx).cloud.iter().any(|c| c.path == path) {
@@ -3153,15 +3185,7 @@ impl Workspace {
             #[cfg(target_os = "windows")]
             if windows_theme {
                 if let Some(glyph) = crate::icons::windows_theme_icon_glyph(icon) {
-                    return div()
-                        .size(px(16.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .font_family("Segoe Fluent Icons")
-                        .text_size(px(16.))
-                        .child(glyph.to_string())
-                        .into_any_element();
+                    return crate::icons::windows_theme_glyph(glyph, px(16.));
                 }
             }
             Icon::new(icon).size(px(16.)).into_any_element()
@@ -3517,9 +3541,7 @@ impl Workspace {
         });
         let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         let windows_home = windows_theme && matches!(&target, Location::Home);
-        let settings_image = (windows_theme && matches!(&target, Location::Settings))
-            .then(|| crate::icons::windows_theme_action_image("menu-settings.png"))
-            .flatten();
+        let recycle_icon_watch = windows_theme && matches!(&target, Location::RecycleBin);
         let shell_icon = if windows_theme {
             let icon_px = if rail { 18 } else { 16 };
             match &target {
@@ -3571,7 +3593,7 @@ impl Workspace {
                 div()
                     .relative()
                     .flex_shrink_0()
-                    .child(match settings_image.or(shell_icon) {
+                    .child(match shell_icon {
                         Some(image) => img(image).size(px(if rail { 18. } else { 16. })).into_any_element(),
                         None if windows_home => crate::icons::windows_home_icon(px(if rail { 18. } else { 16. })),
                         None => Icon::new(icon).size(px(if rail { 18. } else { 16. })).text_color(icon_color).into_any_element(),
@@ -3612,6 +3634,11 @@ impl Workspace {
             })
 
             .on_click(cx.listener(move |this, _, window, cx| this.navigate(target.clone(), window, cx)))
+            .when(recycle_icon_watch, |d| {
+                d.on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                    this.places.update(cx, |places, cx| places.set_recycle_icon_hovered(*hovered, cx));
+                }))
+            })
             .when_some(target3.path().map(Path::to_path_buf), |d, path| {
                 d.on_mouse_down(
                     MouseButton::Right,
@@ -4028,8 +4055,9 @@ impl Workspace {
 
 /// Title bar: width of the leading corner button, tab width range.
 const TITLEBAR_LEAD: f32 = 32.;
-/// A newly opened tab grows into the strip.
+/// New tab: the "+" box grows to a tab, then the next "+" slides out from behind it.
 const TAB_ANIM_MS: u64 = 200;
+const PLUS_ANIM_MS: u64 = 160;
 /// Dragged files held over a tab this long open it (Explorer uses about the same).
 const DRAG_HOVER_MS: u64 = 500;
 const TAB_MIN_W: f32 = 72.;
@@ -4571,9 +4599,14 @@ impl Render for Workspace {
         let glass_on = self.glass_shown && self.glass_hwnd != 0;
         self.tab_lens = glass_on;
         self.tab_lens_claimed = false;
+        self.plus_lens_claimed = false;
         let titlebar = self.render_titlebar(&p, window, cx);
         self.tab_lens = false;
-        let strip_frame = crate::glass::StripFrame { on_screen: true, tab_claimed: self.tab_lens_claimed };
+        let strip_frame = crate::glass::StripFrame {
+            on_screen: true,
+            tab_claimed: self.tab_lens_claimed,
+            plus_claimed: self.plus_lens_claimed,
+        };
         let toolbar = self.render_toolbar(&p, cx);
         let commandbar = self.render_commandbar(&p, cx);
         let filter_strip = self.render_filter_bar(&p, window, cx);
@@ -4612,6 +4645,9 @@ impl Render for Workspace {
         }
         if let Some(fade) = plan.clear_tab {
             crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_TAB, fade);
+        }
+        if let Some(fade) = plan.clear_new_tab {
+            crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_NEW_TAB, fade);
         }
         if glass_on && !plan.settings_owner {
             crate::glass::clear_lens(self.glass_hwnd, crate::glass::SLOT_SETTINGS, false);
