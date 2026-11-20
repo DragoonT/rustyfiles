@@ -89,6 +89,11 @@ pub fn start_menu() -> bool {
     send(&start_menu_steps())
 }
 
+/// Windows' own menu of system tools (what a right click on its Start button gives): Win+X.
+pub fn power_user_menu() -> bool {
+    send(&win_chord(Some(0x58)))
+}
+
 /// The user clicked the network or the volume glyph: open quick settings.
 pub fn quick_settings() -> bool {
     send(&quick_settings_steps())
