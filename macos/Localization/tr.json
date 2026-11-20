@@ -710,5 +710,7 @@
 "Search Tabs…": "Sekmelerde Ara…",
 "Folders in the command palette": "Komut paletinde klasörler",
 "⌘K also finds the folders you went to before; ⌘P lists only them.": "⌘K daha önce gittiğiniz klasörleri de bulur; ⌘P yalnızca onları listeler.",
-"Folder history": "Klasör geçmişi"
+"Folder history": "Klasör geçmişi",
+"File details in the preview pane": "Önizleme panelinde dosya bilgileri",
+"Off: the picture takes the whole pane.": "Kapalı: resim tüm paneli kaplar."
 }

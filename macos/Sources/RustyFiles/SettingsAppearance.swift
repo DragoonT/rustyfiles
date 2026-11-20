@@ -80,6 +80,13 @@ extension AppSettings {
         set { store(newValue ? "bottom" : "right", "previewPosition") }
     }
 
+    /// The preview pane shows the item's name and properties under the picture; off: only the
+    /// picture, as tall as the pane (settings.rs `preview_details`).
+    static var previewDetails: Bool {
+        get { flag("previewDetails", true) }
+        set { store(newValue, "previewDetails") }
+    }
+
     // MARK: sidebar and Home sections
 
     enum SidebarSection: String, CaseIterable {
@@ -235,6 +242,9 @@ extension SettingsContent {
                 control: .choice(
                     options: [("right", String(localized: "At the right")), ("bottom", String(localized: "At the bottom"))],
                     get: { AppSettings.previewAtBottom ? "bottom" : "right" }, set: { AppSettings.previewAtBottom = $0 == "bottom" })),
+            .card(
+                title: String(localized: "File details in the preview pane"), detail: String(localized: "Off: the picture takes the whole pane."), icon: "list",
+                control: .toggle(get: { AppSettings.previewDetails }, set: { AppSettings.previewDetails = $0 })),
             .section(String(localized: "Command bar buttons")),
         ]
         rows += AppSettings.ToolbarButton.allCases.map { b in

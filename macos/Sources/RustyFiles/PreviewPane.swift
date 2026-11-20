@@ -76,6 +76,18 @@ final class PreviewPane: FlippedView {
 
     /// `p_3 gap_3`: the picture 232 high, the name, then the property rows.
     private func layoutContent() {
+        let details = AppSettings.previewDetails
+        nameLabel.isHidden = !details
+        rows.isHidden = !details
+        if !details {
+            // only the picture, as large as the pane
+            let w = scroll.contentSize.width, h = scroll.contentSize.height
+            visualBox.frame = NSRect(x: 12, y: 12, width: w - 24, height: h - 24)
+            quickLook?.frame = visualBox.bounds
+            iconView.frame = NSRect(x: (w - 24 - 96) / 2, y: (h - 24 - 96) / 2, width: 96, height: 96)
+            content.frame = NSRect(x: 0, y: 0, width: w, height: h)
+            return
+        }
         if atBottom { return layoutWide() }
         let w = scroll.contentSize.width
         let inner = w - 24

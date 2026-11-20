@@ -465,6 +465,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             rememberLayout()
         case "showScrollBars":
             applyScrollBars()
+        case "previewDetails":
+            previewPane.needsLayout = true
         case "showCommandBar", "showStatusBar", "previewPosition", "toolbarHidden", "toolbarAdded":
             commandBar.needsLayout = true
             card.needsLayout = true
