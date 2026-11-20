@@ -12509,5 +12509,29 @@
   "key": "Kenar çubuğunda tek tek gizlediğiniz konumlar. Birine tıklayınca yeniden görünür.",
   "tr": "Kenar çubuğunda tek tek gizlediğiniz konumlar. Birine tıklayınca yeniden görünür.",
   "en": "The places you hid from the sidebar one by one. Click one to show it again."
+ },
+ {
+  "id": "9c85c4e6",
+  "key": "Sekmelerde ara",
+  "tr": "Sekmelerde ara",
+  "en": "Search tabs"
+ },
+ {
+  "id": "d61501a6",
+  "key": "Sekmelerde ara…",
+  "tr": "Sekmelerde ara…",
+  "en": "Search tabs…"
+ },
+ {
+  "id": "ee0eb92e",
+  "key": "Kapatıldı",
+  "tr": "Kapatıldı",
+  "en": "Closed"
+ },
+ {
+  "id": "38d8fe5e",
+  "key": "Eşleşen sekme yok",
+  "tr": "Eşleşen sekme yok",
+  "en": "No matching tab"
  }
 ]

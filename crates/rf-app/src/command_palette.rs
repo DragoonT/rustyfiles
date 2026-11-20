@@ -1,5 +1,6 @@
 //! Command palette (Ctrl+Shift+P / F1): fuzzy-filter every command and the folders visited before (`folder_history`, unless
-//! `palette_folder_history` is off), or type a path to jump. Opened by Ctrl+P (`SearchFolderHistory`) it lists past folders only.
+//! `palette_folder_history` is off), or type a path to jump. Opened by Ctrl+P (`SearchFolderHistory`) it lists past folders only;
+//! opened by Ctrl+Shift+A (`SearchTabs`) the window's open tabs and the ones closed recently (issue 79, as FilePilot's tab search).
 
 use std::path::PathBuf;
 
@@ -63,6 +64,7 @@ fn commands() -> Vec<Cmd> {
         cmd!("Kompakt görünüm", "", L::PictureInPicture2, ToggleCompactOverlay),
         cmd!("Klasör takma adına git", "@", L::AtSign, GoToFolderAlias),
         cmd!("Geçmiş klasörlerde ara", "Ctrl+P", L::Clock, SearchFolderHistory),
+        cmd!("Sekmelerde ara", "Ctrl+Shift+A", L::PanelTop, SearchTabs),
         cmd!("Sağa döndür", "", L::RotateCw, RotateRight),
         cmd!("Sola döndür", "", L::RotateCcw, RotateLeft),
         cmd!("Simgeleri küçült", "Ctrl+-", L::ZoomOut, ZoomOut),
@@ -119,6 +121,19 @@ pub enum PaletteEvent {
     Dismiss,
     Run(Box<dyn Action>),
     Navigate(PathBuf),
+    /// A tab of the tab search: an open one to switch to, or a closed one to open again (`TabEntry::id`).
+    Tab { closed: bool, id: usize },
+}
+
+/// One tab the tab search lists.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TabEntry {
+    pub label: String,
+    /// The tab's place, written out (its path), matched as well.
+    pub detail: String,
+    pub closed: bool,
+    /// The open tab's index in the window, or the closed one's in the window's list of closed tabs.
+    pub id: usize,
 }
 
 impl EventEmitter<PaletteEvent> for CommandPalette {}
@@ -130,6 +145,8 @@ pub enum PaletteMode {
     Commands { with_folders: bool },
     /// Past folders only (Ctrl+P).
     Folders,
+    /// The window's tabs, open and recently closed (Ctrl+Shift+A).
+    Tabs,
 }
 
 /// One row under the typed path's row.
@@ -138,6 +155,8 @@ enum Row {
     /// An index into `cmds`.
     Cmd(usize),
     Folder(PathBuf),
+    /// An index into `tabs`.
+    Tab(usize),
 }
 
 /// How many rows are listed under the typed path's row.
@@ -150,6 +169,7 @@ pub struct CommandPalette {
     mode: PaletteMode,
     cmds: Vec<Cmd>,
     folders: Vec<crate::folder_history::Visit>,
+    tabs: Vec<TabEntry>,
     /// What matches the query, best first (plus an optional path row at the top).
     filtered: Vec<Row>,
     path: Option<PathBuf>,
@@ -194,9 +214,23 @@ fn as_path(q: &str) -> Option<PathBuf> {
 
 /// The rows matching `query`, best first. Commands: every one while nothing is typed; past folders join them once something is
 /// typed (at most [`FOLDERS_AMONG_COMMANDS`], a command first when both match as well). Folder mode: past folders only.
+/// The tabs matching `q` (lower case), best first; every tab, open ones first, while nothing is typed.
+fn filter_tabs(tabs: &[TabEntry], q: &str) -> Vec<Row> {
+    let mut by: Vec<(i32, usize)> = tabs
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let s = score(&t.label, q).map(|s| s + 10).into_iter().chain(score(&t.detail, q)).max()?;
+            Some((s - if t.closed { 1 } else { 0 }, i))
+        })
+        .collect();
+    by.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    by.into_iter().map(|(_, i)| Row::Tab(i)).collect()
+}
+
 fn filter(mode: PaletteMode, cmds: &[Cmd], folders: &[crate::folder_history::Visit], query: &str) -> Vec<Row> {
     let q = query.trim().to_lowercase();
-    let cmds = if mode == PaletteMode::Folders { &[][..] } else { cmds };
+    let cmds = if matches!(mode, PaletteMode::Folders | PaletteMode::Tabs) { &[][..] } else { cmds };
     let mut by_cmd: Vec<(i32, usize)> = cmds.iter().enumerate().filter_map(|(i, c)| score(c.label, &q).map(|s| (s, i))).collect();
     by_cmd.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     let by_folder: Vec<(i32, PathBuf)> = match mode {
@@ -205,6 +239,7 @@ fn filter(mode: PaletteMode, cmds: &[Cmd], folders: &[crate::folder_history::Vis
         }
         PaletteMode::Commands { .. } => Vec::new(),
         PaletteMode::Folders => crate::folder_history::rank(folders, &q).into_iter().map(|(s, v)| (s, v.path.clone())).collect(),
+        PaletteMode::Tabs => Vec::new(),
     };
     // both lists are best first: merge them by how well they match
     let mut out = Vec::with_capacity(by_cmd.len() + by_folder.len());
@@ -227,10 +262,11 @@ fn filter(mode: PaletteMode, cmds: &[Cmd], folders: &[crate::folder_history::Vis
 
 impl CommandPalette {
     /// `folders`: the remembered folders, most recent first (`folder_history::snapshot`); unused when the mode lists none.
-    pub fn new(mode: PaletteMode, folders: Vec<crate::folder_history::Visit>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(mode: PaletteMode, folders: Vec<crate::folder_history::Visit>, tabs: Vec<TabEntry>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let hint = match mode {
             PaletteMode::Commands { .. } => crate::t!("Komut ara veya yol yaz…"),
             PaletteMode::Folders => crate::t!("Geçmiş klasörlerde ara…"),
+            PaletteMode::Tabs => crate::t!("Sekmelerde ara…"),
         };
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(hint));
         let sub = cx.subscribe_in(&input, window, |this, _, ev: &InputEvent, _, cx| match ev {
@@ -239,16 +275,17 @@ impl CommandPalette {
             _ => {}
         });
         input.update(cx, |s, cx| s.focus(window, cx));
-        let cmds = if mode == PaletteMode::Folders { Vec::new() } else { commands() };
-        let mut this = Self { input, mode, cmds, folders, filtered: Vec::new(), path: None, selected: 0, _sub: sub };
+        let cmds = if matches!(mode, PaletteMode::Folders | PaletteMode::Tabs) { Vec::new() } else { commands() };
+        let mut this = Self { input, mode, cmds, folders, tabs, filtered: Vec::new(), path: None, selected: 0, _sub: sub };
         this.refilter(cx);
         this
     }
 
     fn refilter(&mut self, cx: &mut Context<Self>) {
         let raw = self.input.read(cx).value().to_string();
-        self.path = as_path(&raw).map(|_| PathBuf::from(raw.trim().trim_matches('"')));
-        self.filtered = filter(self.mode, &self.cmds, &self.folders, &raw);
+        // (the tab search takes no typed path)
+        self.path = as_path(&raw).filter(|_| self.mode != PaletteMode::Tabs).map(|_| PathBuf::from(raw.trim().trim_matches('"')));
+        self.filtered = if self.mode == PaletteMode::Tabs { filter_tabs(&self.tabs, &raw.trim().to_lowercase()) } else { filter(self.mode, &self.cmds, &self.folders, &raw) };
         self.selected = 0;
         cx.notify();
     }
@@ -270,6 +307,10 @@ impl CommandPalette {
         match self.filtered.get(ix) {
             Some(Row::Cmd(ci)) => cx.emit(PaletteEvent::Run((self.cmds[*ci].action)())),
             Some(Row::Folder(p)) => cx.emit(PaletteEvent::Navigate(p.clone())),
+            Some(Row::Tab(ti)) => {
+                let t = &self.tabs[*ti];
+                cx.emit(PaletteEvent::Tab { closed: t.closed, id: t.id })
+            }
             None => {}
         }
     }
@@ -331,6 +372,12 @@ impl Render for CommandPalette {
                     rf_core::history::display_name(&path),
                     path.to_string_lossy().into_owned().into(),
                 ),
+                // (a closed tab says so before its place)
+                Row::Tab(ti) => {
+                    let t = &self.tabs[ti];
+                    let detail = if t.closed { format!("{} · {}", crate::t!("Kapatıldı"), t.detail) } else { t.detail.clone() };
+                    (if t.closed { L::RotateCcw } else { L::PanelTop }, t.label.clone(), detail.into())
+                }
             };
             list = list.child(self.row(ix, icon, label, keys, &p, cx));
             ix += 1;
@@ -404,6 +451,7 @@ impl Render for CommandPalette {
                             PaletteMode::Commands { .. } => crate::t!("Eşleşen komut yok"),
                             PaletteMode::Folders if self.folders.is_empty() => crate::t!("Henüz gezilen klasör yok"),
                             PaletteMode::Folders => crate::t!("Eşleşen klasör yok"),
+                            PaletteMode::Tabs => crate::t!("Eşleşen sekme yok"),
                         };
                         d.child(div().p_3().text_sm().text_color(p.text_secondary).child(none))
                     }),
@@ -414,6 +462,17 @@ impl Render for CommandPalette {
 #[cfg(test)]
 mod tests {
     use super::{PaletteMode, Row, as_path, commands, filter, score};
+
+    #[test]
+    fn the_tab_search_finds_a_tab_by_its_name_or_place_open_ones_first() {
+        use super::{TabEntry, filter_tabs};
+        let t = |label: &str, detail: &str, closed: bool, id: usize| TabEntry { label: label.into(), detail: detail.into(), closed, id };
+        let tabs = vec![t("Downloads", "C:/Users/u/Downloads", false, 0), t("Projects", "D:/Work/Projects", false, 1), t("Downloads", "E:/Old/Downloads", true, 0)];
+        assert_eq!(filter_tabs(&tabs, ""), vec![Row::Tab(0), Row::Tab(1), Row::Tab(2)], "all, open ones first");
+        assert_eq!(filter_tabs(&tabs, "down"), vec![Row::Tab(0), Row::Tab(2)], "the open one before the closed one of the same name");
+        assert_eq!(filter_tabs(&tabs, "work"), vec![Row::Tab(1)], "by its place too");
+        assert!(filter_tabs(&tabs, "zzz").is_empty());
+    }
     use crate::folder_history::Visit;
     use std::path::PathBuf;
 

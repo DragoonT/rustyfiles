@@ -1712,7 +1712,25 @@ impl Workspace {
             PaletteMode::Commands { with_folders: false } => Vec::new(),
             _ => crate::folder_history::snapshot(),
         };
-        let pal = cx.new(|cx| CommandPalette::new(mode, folders, window, cx));
+        // the tab search: this window's open tabs, then the closed ones, the last closed first
+        let tabs = if mode == PaletteMode::Tabs {
+            use crate::command_palette::TabEntry;
+            let open = self.tabs.iter().enumerate().map(|(i, t)| {
+                let v = t.view().read(cx);
+                let detail = v.location().path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                TabEntry { label: v.title(cx), detail, closed: false, id: i }
+            });
+            let closed = self.closed.iter().enumerate().rev().take(30).map(|(i, loc)| TabEntry {
+                label: loc.title(),
+                detail: loc.path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+                closed: true,
+                id: i,
+            });
+            open.chain(closed).collect()
+        } else {
+            Vec::new()
+        };
+        let pal = cx.new(|cx| CommandPalette::new(mode, folders, tabs, window, cx));
         self._palette_sub = Some(cx.subscribe_in(&pal, window, |this, _, ev: &PaletteEvent, window, cx| {
             this.palette = None;
             this._palette_sub = None;
@@ -1723,6 +1741,17 @@ impl Workspace {
                 PaletteEvent::Navigate(p) => {
                     if let Some(loc) = parse_location(&p.to_string_lossy()) {
                         this.navigate(loc, window, cx);
+                    }
+                }
+                PaletteEvent::Tab { closed: false, id } => {
+                    if *id < this.tabs.len() {
+                        this.activate(*id, window, cx);
+                    }
+                }
+                PaletteEvent::Tab { closed: true, id } => {
+                    if *id < this.closed.len() {
+                        let loc = this.closed.remove(*id);
+                        this.open_tab(loc, window, cx);
                     }
                 }
             }
@@ -4919,6 +4948,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &SearchFolderHistory, window, cx| {
                 this.toggle_palette(crate::command_palette::PaletteMode::Folders, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &SearchTabs, window, cx| this.toggle_palette(crate::command_palette::PaletteMode::Tabs, window, cx)))
             .on_action(cx.listener(|this, _: &GoSettings, window, cx| this.navigate(Location::Settings, window, cx)))
             .on_action(cx.listener(|this, _: &GoRecycleBin, window, cx| this.navigate(Location::RecycleBin, window, cx)))
             .on_action(cx.listener(|this, _: &SwitchPane, window, cx| {
