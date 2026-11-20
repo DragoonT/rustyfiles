@@ -2210,9 +2210,18 @@ impl FolderView {
             crate::layouts::set(std::path::Path::new(SHARED_LAYOUT), l, cx);
             return;
         }
-        if let Location::Path(p) = self.location().clone() {
-            let l = self.layout_now();
-            crate::layouts::set(&p, l, cx);
+        match self.location().clone() {
+            Location::Path(p) => {
+                let l = self.layout_now();
+                crate::layouts::set(&p, l, cx);
+            }
+            // every search shares one (issue 165: "Would be nice if it remembered the last time I searched I asked for the results to
+            // be sorted by date")
+            Location::Search { .. } => {
+                let l = self.layout_now();
+                crate::layouts::set(std::path::Path::new(SEARCH_LAYOUT), l, cx);
+            }
+            _ => {}
         }
     }
 
@@ -2235,6 +2244,13 @@ impl FolderView {
         if s.sync_layout {
             // the tab keeps its own from folder to folder; a new tab (and every tab at a start) begins with the shared one
             if first && let Some(l) = crate::layouts::get(std::path::Path::new(SHARED_LAYOUT), cx) {
+                self.apply_layout_values(l, false, cx);
+            }
+            return;
+        }
+        // search results: as the last search was sorted and laid out (else as the folder searched in, the tab's)
+        if matches!(self.location(), Location::Search { .. }) {
+            if let Some(l) = crate::layouts::get(std::path::Path::new(SEARCH_LAYOUT), cx) {
                 self.apply_layout_values(l, false, cx);
             }
             return;
@@ -2853,6 +2869,8 @@ impl FolderView {
 
     fn on_row_mouse_down(&mut self, vi: usize, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
+        // (a press on an item of a window that is not in front leaves it there until the press is not a drag: issue 169)
+        rf_win::press_activate::press_on_item();
         // before anything changes: was this the only selected item, in a focused, active list?
         let on_name = std::mem::take(&mut self.name_hit);
         let was_renaming = self.renaming.is_some();
@@ -5571,6 +5589,8 @@ fn cut_to_width(text: &str, avail: Pixels, width: &dyn Fn(&str) -> Pixels) -> St
 
 /// The key in the layouts file under which "the same layout in all folders" keeps its one layout (`<` cannot start a real path).
 const SHARED_LAYOUT: &str = "<all folders>";
+/// The layouts' key of the one layout all searches share.
+const SEARCH_LAYOUT: &str = "<search results>";
 
 /// How long the pointer rests on an item before "Select on hover" selects it: the system's hover time (Control Panel › Mouse;
 /// 400 ms out of the box), as Explorer's "point to select" waits.

@@ -2146,5 +2146,7 @@
  "1411699b": "Mostrar as sobreposições de ícones de outros programas",
  "27d8e0cb": "As marcas de status que programas como Google Drive, OneDrive e TortoiseGit colocam no canto dos ícones no Explorador.",
  "5546865e": "Não deixar a marca de download ao copiar para o WSL",
- "10ef9c03": "No WSL, o Windows grava um arquivo \"Zone.Identifier\" separado ao lado de um arquivo baixado da internet. Quando ativado, a cópia o exclui."
+ "10ef9c03": "No WSL, o Windows grava um arquivo \"Zone.Identifier\" separado ao lado de um arquivo baixado da internet. Quando ativado, a cópia o exclui.",
+ "31d132e2": "Mostrar o espaço das unidades em números",
+ "04339c77": "Espaço usado e total abaixo da barra de cada unidade"
 }

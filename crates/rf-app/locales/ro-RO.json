@@ -2146,5 +2146,7 @@
  "1411699b": "Afișează suprapunerile de pictograme ale altor programe",
  "27d8e0cb": "Semnele de stare pe care programe precum Google Drive, OneDrive și TortoiseGit le pun în colțul pictogramelor în Explorer.",
  "5546865e": "Nu lăsa marcajul de descărcare la copierea în WSL",
- "10ef9c03": "În WSL, Windows scrie un fișier \"Zone.Identifier\" separat lângă un fișier descărcat de pe internet. Când este activat, copierea îl șterge."
+ "10ef9c03": "În WSL, Windows scrie un fișier \"Zone.Identifier\" separat lângă un fișier descărcat de pe internet. Când este activat, copierea îl șterge.",
+ "31d132e2": "Afișează spațiul unităților în cifre",
+ "04339c77": "Spațiul folosit și total sub bara fiecărei unități"
 }

@@ -827,6 +827,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Nokta ile başlayan dosyaları göster", "Show files that start with a dot"),
     ("Kapalıyken .git, .config gibi öğeler gizli sayılır", "When off, items such as .git and .config are treated as hidden"),
     ("Küçük resimleri göster", "Show thumbnails"),
+    ("Sürücülerin doluluğunu sayıyla göster", "Show drive space in numbers"),
+    ("Her sürücünün çubuğunun altında kullanılan ve toplam alan", "Used and total space under each drive's bar"),
     ("Diğer programların simge işaretlerini göster", "Show other programs' icon overlays"),
     ("Google Drive, OneDrive, TortoiseGit gibi programların Gezgin'de simgelerin köşesine koyduğu durum işaretleri.", "The status marks programs such as Google Drive, OneDrive and TortoiseGit put in the corner of icons in Explorer."),
     ("WSL'e kopyalarken indirme işaretini bırakma", "Leave no download mark when copying into WSL"),

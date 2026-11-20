@@ -2146,5 +2146,7 @@
  "1411699b": "Symbolüberlagerungen anderer Programme anzeigen",
  "27d8e0cb": "Die Statuszeichen, die Programme wie Google Drive, OneDrive und TortoiseGit im Explorer in die Ecke von Symbolen setzen.",
  "5546865e": "Beim Kopieren nach WSL keine Download-Markierung hinterlassen",
- "10ef9c03": "In WSL schreibt Windows neben eine aus dem Internet heruntergeladene Datei eine eigene \"Zone.Identifier\"-Datei. Wenn aktiviert, löscht das Kopieren sie."
+ "10ef9c03": "In WSL schreibt Windows neben eine aus dem Internet heruntergeladene Datei eine eigene \"Zone.Identifier\"-Datei. Wenn aktiviert, löscht das Kopieren sie.",
+ "31d132e2": "Speicherplatz der Laufwerke als Zahlen anzeigen",
+ "04339c77": "Belegter und gesamter Speicherplatz unter dem Balken jedes Laufwerks"
 }

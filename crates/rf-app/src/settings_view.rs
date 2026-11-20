@@ -1683,6 +1683,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     let hidden = s.sidebar_hidden.clone();
     let libs = s.show_libraries;
+    let space = s.sidebar_drive_space;
     let (tree_on, tree_follow) = (s.sidebar_tree, s.sidebar_tree_follow);
     let pp = *p;
     v.push(expander(
@@ -1698,6 +1699,9 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 sub(&pp, t!("Sürücüler"), None, switch("sb-drives", &pp, shown("drives"), {
                     let on = shown("drives");
                     move |_, cx| settings::update(cx, |s| show_section(s, "drives", !on))
+                })),
+                sub(&pp, t!("Sürücülerin doluluğunu sayıyla göster"), Some(t!("Her sürücünün çubuğunun altında kullanılan ve toplam alan")), switch("sb-drive-space", &pp, space, move |_, cx| {
+                    settings::update(cx, |s| s.sidebar_drive_space = !space)
                 })),
                 sub(&pp, t!("Bulut ve Linux"), None, switch("sb-cloud", &pp, shown("cloud"), {
                     let on = shown("cloud");

@@ -2146,5 +2146,7 @@
  "1411699b": "Rādīt citu programmu ikonu pārklājumus",
  "27d8e0cb": "Statusa zīmes, ko tādas programmas kā Google Drive, OneDrive un TortoiseGit liek ikonu stūrī Pārlūkā.",
  "5546865e": "Kopējot uz WSL, neatstāt lejupielādes zīmi",
- "10ef9c03": "WSL vidē Windows blakus no interneta lejupielādētam failam ieraksta atsevišķu \"Zone.Identifier\" failu. Ja ieslēgts, kopēšana to izdzēš."
+ "10ef9c03": "WSL vidē Windows blakus no interneta lejupielādētam failam ieraksta atsevišķu \"Zone.Identifier\" failu. Ja ieslēgts, kopēšana to izdzēš.",
+ "31d132e2": "Rādīt disku vietu skaitļos",
+ "04339c77": "Izmantotā un kopējā vieta zem katra diska joslas"
 }

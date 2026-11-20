@@ -2146,5 +2146,7 @@
  "1411699b": "Tampilkan overlay ikon dari program lain",
  "27d8e0cb": "Tanda status yang diletakkan program seperti Google Drive, OneDrive, dan TortoiseGit di sudut ikon di Explorer.",
  "5546865e": "Jangan tinggalkan tanda unduhan saat menyalin ke WSL",
- "10ef9c03": "Di WSL, Windows menulis file \"Zone.Identifier\" terpisah di samping file yang diunduh dari internet. Jika aktif, penyalinan menghapusnya."
+ "10ef9c03": "Di WSL, Windows menulis file \"Zone.Identifier\" terpisah di samping file yang diunduh dari internet. Jika aktif, penyalinan menghapusnya.",
+ "31d132e2": "Tampilkan ruang drive dalam angka",
+ "04339c77": "Ruang terpakai dan total di bawah bilah setiap drive"
 }

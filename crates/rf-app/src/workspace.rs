@@ -711,6 +711,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // a press on a file leaves the window behind until it is not a drag, as in Explorer (issue 169)
+        rf_win::press_activate::install(crate::look::window::hwnd_of(window));
         if let Some(mut rx) = ipc {
             cx.spawn_in(window, async move |this, cx| {
                 use futures::StreamExt;
@@ -2367,6 +2369,11 @@ impl Workspace {
                     .when(!active, |d| d.text_color(p.text_secondary).hover(|s| s.bg(p.hover)))
                     .child(Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }))
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
+                    // the folder's whole path on hover (issue 162: "I am unable to see a way to see the full path on tabs")
+                    .when_some(tab_dir.clone().filter(|_| !popups_open), |d, dir| {
+                        let path = dir.display().to_string();
+                        d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(path.clone()).build(w, cx))
+                    })
                     .when_some(term_dir, |d, dir| {
                         d.child(
                             div()
@@ -3491,6 +3498,8 @@ impl Workspace {
         let tag_dot = target3.path().filter(|p| p.parent().is_some()).and_then(|p| crate::tags::first_color(p, cx));
         h_flex()
             .id(id)
+            // (a row of the scrolling sidebar never shrinks: squeezed to its least height, a drive's second line ran into the next row)
+            .flex_shrink_0()
             .min_h(px(if rail { 36. } else { 32. }))
             .px_2()
             .py_1()
@@ -3693,18 +3702,27 @@ impl Workspace {
         if !drives.is_empty() {
             col = col.child(header(t!("Sürücüler")));
         }
+        let space_numbers = cx.global::<crate::settings::Settings>().sidebar_drive_space;
         for (i, d) in drives.into_iter().enumerate() {
             let loc = Location::Path(d.root.clone());
             let active = cur == loc;
             let frac = d.used_fraction();
             let bar = (d.total > 0).then(|| {
-                div()
+                let line = div()
                     .mt(px(5.))
                     .h(px(2.))
                     .w_full()
                     .rounded_full()
                     .bg(p.pressed)
-                    .child(div().h_full().rounded_full().bg(if frac > 0.9 { p.danger } else { p.accent }).w(relative(frac)))
+                    .child(div().h_full().rounded_full().bg(if frac > 0.9 { p.danger } else { p.accent }).w(relative(frac)));
+                if !space_numbers {
+                    return line.into_any_element();
+                }
+                // (issue 167: "together with the visual size and usage bars, also numbers (example "238/500 GB")")
+                v_flex()
+                    .w_full()
+                    .child(line)
+                    .child(div().mt(px(2.)).text_xs().text_color(p.text_tertiary).whitespace_nowrap().child(drive_space_text(d.total, d.free)))
                     .into_any_element()
             });
             col = col.child(self.sidebar_item(
@@ -5285,6 +5303,11 @@ mod pane_tests {
         assert_eq!(next_pane(Pane::Address, true, false), Pane::List, "no tree on screen: it is skipped");
         assert_eq!(next_pane(Pane::List, false, false), Pane::Address);
     }
+}
+
+/// A drive's used and total space as the sidebar says it under the drive's bar: "238 GB / 500 GB".
+fn drive_space_text(total: u64, free: u64) -> String {
+    format!("{} / {}", rf_core::format::size(total.saturating_sub(free)), rf_core::format::size(total))
 }
 
 /// The cloud and WSL places that are not hidden one by one (`Settings::hidden_places`, paths compared without regard to case).

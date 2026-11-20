@@ -2146,5 +2146,7 @@
  "1411699b": "Näytä muiden ohjelmien kuvakepäällysteet",
  "27d8e0cb": "Tilamerkit, jotka ohjelmat kuten Google Drive, OneDrive ja TortoiseGit lisäävät kuvakkeiden kulmaan Resurssienhallinnassa.",
  "5546865e": "Älä jätä latausmerkintää kopioitaessa WSL:ään",
- "10ef9c03": "WSL:ssä Windows kirjoittaa internetistä ladatun tiedoston viereen erillisen \"Zone.Identifier\"-tiedoston. Kun käytössä, kopiointi poistaa sen."
+ "10ef9c03": "WSL:ssä Windows kirjoittaa internetistä ladatun tiedoston viereen erillisen \"Zone.Identifier\"-tiedoston. Kun käytössä, kopiointi poistaa sen.",
+ "31d132e2": "Näytä asemien tila numeroina",
+ "04339c77": "Käytetty ja kokonaistila kunkin aseman palkin alla"
 }

@@ -2146,5 +2146,7 @@
  "1411699b": "Tunjukkan tindihan ikon program lain",
  "27d8e0cb": "Tanda status yang diletakkan oleh program seperti Google Drive, OneDrive dan TortoiseGit di sudut ikon dalam Explorer.",
  "5546865e": "Jangan tinggalkan tanda muat turun semasa menyalin ke WSL",
- "10ef9c03": "Dalam WSL, Windows menulis fail \"Zone.Identifier\" yang berasingan di sebelah fail yang dimuat turun dari internet. Apabila dihidupkan, penyalinan memadamnya."
+ "10ef9c03": "Dalam WSL, Windows menulis fail \"Zone.Identifier\" yang berasingan di sebelah fail yang dimuat turun dari internet. Apabila dihidupkan, penyalinan memadamnya.",
+ "31d132e2": "Tunjukkan ruang pemacu dalam nombor",
+ "04339c77": "Ruang terguna dan jumlah di bawah bar setiap pemacu"
 }

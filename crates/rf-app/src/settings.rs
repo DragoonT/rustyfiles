@@ -638,6 +638,8 @@ pub struct Settings {
     /// The thumbnail cache's limit in MB (the cache is in memory); `None` = the default, 64 MB, and no key in the file.
     pub thumb_cache_mb: Option<u32>,
     pub show_libraries: bool,
+    /// Each drive in the sidebar says how much of it is used, in numbers ("238 GB / 500 GB"), under its bar. Issue 167.
+    pub sidebar_drive_space: bool,
     /// A "Klasörler" section in the sidebar: the folder tree (drives and the profile folder as roots). Off by default.
     pub sidebar_tree: bool,
     /// The tree opens the branch to the open folder, marks it and scrolls it into view after every navigation.
@@ -963,6 +965,7 @@ impl Default for Settings {
             transfer_progress: TransferProgress::StatusBar,
             thumb_cache_mb: None,
             show_libraries: false,
+            sidebar_drive_space: false,
             sidebar_tree: false,
             sidebar_tree_follow: true,
             address_commands: true,

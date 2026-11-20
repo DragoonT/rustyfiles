@@ -2146,5 +2146,7 @@
  "1411699b": "Zobrazovat překryvné ikony jiných programů",
  "27d8e0cb": "Stavové značky, které programy jako Google Drive, OneDrive a TortoiseGit přidávají do rohu ikon v Průzkumníkovi.",
  "5546865e": "Při kopírování do WSL nenechávat značku stažení",
- "10ef9c03": "Ve WSL zapisuje Windows vedle souboru staženého z internetu samostatný soubor \"Zone.Identifier\". Když je zapnuto, kopírování ho smaže."
+ "10ef9c03": "Ve WSL zapisuje Windows vedle souboru staženého z internetu samostatný soubor \"Zone.Identifier\". Když je zapnuto, kopírování ho smaže.",
+ "31d132e2": "Zobrazovat místo na discích v číslech",
+ "04339c77": "Využité a celkové místo pod pruhem každého disku"
 }

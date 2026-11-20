@@ -2146,5 +2146,7 @@
  "1411699b": "Pokazuj nakładki ikon innych programów",
  "27d8e0cb": "Znaczniki stanu, które programy takie jak Google Drive, OneDrive i TortoiseGit umieszczają w rogu ikon w Eksploratorze.",
  "5546865e": "Nie zostawiaj znacznika pobrania przy kopiowaniu do WSL",
- "10ef9c03": "W WSL system Windows zapisuje obok pliku pobranego z internetu osobny plik \"Zone.Identifier\". Gdy włączone, kopiowanie go usuwa."
+ "10ef9c03": "W WSL system Windows zapisuje obok pliku pobranego z internetu osobny plik \"Zone.Identifier\". Gdy włączone, kopiowanie go usuwa.",
+ "31d132e2": "Pokazuj miejsce na dyskach w liczbach",
+ "04339c77": "Zajęte i całkowite miejsce pod paskiem każdego dysku"
 }

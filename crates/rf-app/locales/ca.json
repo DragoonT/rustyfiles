@@ -2146,5 +2146,7 @@
  "1411699b": "Mostra les superposicions d'icones d'altres programes",
  "27d8e0cb": "Les marques d'estat que programes com Google Drive, OneDrive i TortoiseGit posen a la cantonada de les icones a l'Explorador.",
  "5546865e": "No deixis la marca de baixada en copiar a WSL",
- "10ef9c03": "A WSL, Windows escriu un fitxer \"Zone.Identifier\" separat al costat d'un fitxer baixat d'internet. Quan està activat, la còpia l'elimina."
+ "10ef9c03": "A WSL, Windows escriu un fitxer \"Zone.Identifier\" separat al costat d'un fitxer baixat d'internet. Quan està activat, la còpia l'elimina.",
+ "31d132e2": "Mostra l'espai de les unitats en xifres",
+ "04339c77": "Espai utilitzat i total sota la barra de cada unitat"
 }

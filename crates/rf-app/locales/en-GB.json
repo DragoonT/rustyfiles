@@ -2146,5 +2146,7 @@
  "1411699b": "Show other programs' icon overlays",
  "27d8e0cb": "The status marks programs such as Google Drive, OneDrive and TortoiseGit put in the corner of icons in Explorer.",
  "5546865e": "Leave no download mark when copying into WSL",
- "10ef9c03": "In WSL, Windows writes a separate \"Zone.Identifier\" file beside a file downloaded from the internet. When on, copying deletes it."
+ "10ef9c03": "In WSL, Windows writes a separate \"Zone.Identifier\" file beside a file downloaded from the internet. When on, copying deletes it.",
+ "31d132e2": "Show drive space in numbers",
+ "04339c77": "Used and total space under each drive's bar"
 }

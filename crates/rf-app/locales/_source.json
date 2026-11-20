@@ -12947,5 +12947,17 @@
   "key": "Windows, internetten inen bir dosyanın yanına WSL'de ayrı bir \"Zone.Identifier\" dosyası yazar. Açıkken kopyalama onu siler.",
   "tr": "Windows, internetten inen bir dosyanın yanına WSL'de ayrı bir \"Zone.Identifier\" dosyası yazar. Açıkken kopyalama onu siler.",
   "en": "In WSL, Windows writes a separate \"Zone.Identifier\" file beside a file downloaded from the internet. When on, copying deletes it."
+ },
+ {
+  "id": "31d132e2",
+  "key": "Sürücülerin doluluğunu sayıyla göster",
+  "tr": "Sürücülerin doluluğunu sayıyla göster",
+  "en": "Show drive space in numbers"
+ },
+ {
+  "id": "04339c77",
+  "key": "Her sürücünün çubuğunun altında kullanılan ve toplam alan",
+  "tr": "Her sürücünün çubuğunun altında kullanılan ve toplam alan",
+  "en": "Used and total space under each drive's bar"
  }
 ]

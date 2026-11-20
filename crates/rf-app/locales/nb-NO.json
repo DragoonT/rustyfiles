@@ -2146,5 +2146,7 @@
  "1411699b": "Vis andre programmers ikonoverlegg",
  "27d8e0cb": "Statusmerkene som programmer som Google Drive, OneDrive og TortoiseGit setter i hjørnet av ikoner i Filutforsker.",
  "5546865e": "Ikke etterlat nedlastingsmerke ved kopiering til WSL",
- "10ef9c03": "I WSL skriver Windows en egen \"Zone.Identifier\"-fil ved siden av en fil som er lastet ned fra Internett. Når på, sletter kopieringen den."
+ "10ef9c03": "I WSL skriver Windows en egen \"Zone.Identifier\"-fil ved siden av en fil som er lastet ned fra Internett. Når på, sletter kopieringen den.",
+ "31d132e2": "Vis diskplass i tall",
+ "04339c77": "Brukt og total plass under hver disks stolpe"
 }

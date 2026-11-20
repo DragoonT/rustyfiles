@@ -2146,5 +2146,7 @@
  "1411699b": "Vis andre programmers ikonoverlejringer",
  "27d8e0cb": "De statusmærker, som programmer som Google Drive, OneDrive og TortoiseGit sætter i hjørnet af ikoner i Stifinder.",
  "5546865e": "Efterlad intet downloadmærke ved kopiering til WSL",
- "10ef9c03": "I WSL skriver Windows en separat \"Zone.Identifier\"-fil ved siden af en fil, der er hentet fra internettet. Når slået til, sletter kopieringen den."
+ "10ef9c03": "I WSL skriver Windows en separat \"Zone.Identifier\"-fil ved siden af en fil, der er hentet fra internettet. Når slået til, sletter kopieringen den.",
+ "31d132e2": "Vis drevplads i tal",
+ "04339c77": "Brugt og samlet plads under hvert drevs bjælke"
 }

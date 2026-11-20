@@ -2146,5 +2146,7 @@
  "1411699b": "Ipakita ang mga icon overlay ng ibang program",
  "27d8e0cb": "Ang mga marka ng status na inilalagay ng mga program gaya ng Google Drive, OneDrive at TortoiseGit sa sulok ng mga icon sa Explorer.",
  "5546865e": "Huwag mag-iwan ng download mark kapag kumokopya sa WSL",
- "10ef9c03": "Sa WSL, sumusulat ang Windows ng hiwalay na \"Zone.Identifier\" na file sa tabi ng file na na-download mula sa internet. Kapag naka-on, binubura ito ng pagkopya."
+ "10ef9c03": "Sa WSL, sumusulat ang Windows ng hiwalay na \"Zone.Identifier\" na file sa tabi ng file na na-download mula sa internet. Kapag naka-on, binubura ito ng pagkopya.",
+ "31d132e2": "Ipakita ang espasyo ng drive sa mga numero",
+ "04339c77": "Nagamit at kabuuang espasyo sa ilalim ng bar ng bawat drive"
 }

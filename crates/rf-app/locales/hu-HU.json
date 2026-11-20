@@ -2146,5 +2146,7 @@
  "1411699b": "Más programok ikonátfedéseinek megjelenítése",
  "27d8e0cb": "Az állapotjelek, amelyeket olyan programok, mint a Google Drive, a OneDrive és a TortoiseGit tesznek az ikonok sarkába a Fájlkezelőben.",
  "5546865e": "Ne maradjon letöltési jelölés WSL-be másoláskor",
- "10ef9c03": "WSL-ben a Windows külön \"Zone.Identifier\" fájlt ír az internetről letöltött fájl mellé. Ha be van kapcsolva, a másolás törli."
+ "10ef9c03": "WSL-ben a Windows külön \"Zone.Identifier\" fájlt ír az internetről letöltött fájl mellé. Ha be van kapcsolva, a másolás törli.",
+ "31d132e2": "Meghajtók helyének megjelenítése számokkal",
+ "04339c77": "Foglalt és teljes hely minden meghajtó sávja alatt"
 }

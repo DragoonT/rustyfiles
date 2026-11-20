@@ -2146,5 +2146,7 @@
  "1411699b": "Visa andra programs ikonöverlägg",
  "27d8e0cb": "Statusmärkena som program som Google Drive, OneDrive och TortoiseGit sätter i hörnet av ikoner i Utforskaren.",
  "5546865e": "Lämna inget nedladdningsmärke vid kopiering till WSL",
- "10ef9c03": "I WSL skriver Windows en separat \"Zone.Identifier\"-fil bredvid en fil som hämtats från internet. När på tar kopieringen bort den."
+ "10ef9c03": "I WSL skriver Windows en separat \"Zone.Identifier\"-fil bredvid en fil som hämtats från internet. När på tar kopieringen bort den.",
+ "31d132e2": "Visa diskutrymme i siffror",
+ "04339c77": "Använt och totalt utrymme under varje enhets stapel"
 }

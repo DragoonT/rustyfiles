@@ -2146,5 +2146,7 @@
  "1411699b": "Prikaži preklapanja ikona drugih programa",
  "27d8e0cb": "Oznake stanja koje programi poput Google Drivea, OneDrivea i TortoiseGita stavljaju u kut ikona u Exploreru.",
  "5546865e": "Ne ostavljaj oznaku preuzimanja pri kopiranju u WSL",
- "10ef9c03": "U WSL-u Windows uz datoteku preuzetu s interneta zapisuje zasebnu datoteku \"Zone.Identifier\". Kad je uključeno, kopiranje je briše."
+ "10ef9c03": "U WSL-u Windows uz datoteku preuzetu s interneta zapisuje zasebnu datoteku \"Zone.Identifier\". Kad je uključeno, kopiranje je briše.",
+ "31d132e2": "Prikaži prostor pogona brojkama",
+ "04339c77": "Iskorišteni i ukupni prostor ispod trake svakog pogona"
 }
