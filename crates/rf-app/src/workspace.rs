@@ -206,6 +206,8 @@ pub struct Workspace {
     side_tree: sidebar_tree::Holder,
     /// This window answers another app's Open/Save dialog (see `picker`).
     picker: Option<std::rc::Rc<crate::picker::PickSession>>,
+    /// Counts the dialog's size changes: only the last one is kept (`set_picker`).
+    picker_size_gen: u64,
     /// Window width from the last frame (breadcrumb collapsing).
     viewport_w: f32,
     last_session: Vec<String>,
@@ -929,6 +931,7 @@ impl Workspace {
             sidebar_ext_drag: false,
             side_tree: Default::default(),
             picker: None,
+            picker_size_gen: 0,
             viewport_w: 1300.,
             last_session: Vec::new(),
             _bulk_sub: None,
@@ -1006,6 +1009,23 @@ impl Workspace {
         }
         self.picker = Some(session);
         cx.default_global::<MainPlacements>().0.remove(&window.window_handle().window_id());
+        // the dialog's size is kept once the user resized it, a moment after the last change (issue 89)
+        cx.observe_window_bounds(window, |this: &mut Self, window, cx| {
+            let s = window.bounds().size;
+            let want = [f32::from(s.width).round() as u16, f32::from(s.height).round() as u16];
+            this.picker_size_gen += 1;
+            let generation = this.picker_size_gen;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.picker_size_gen == generation && cx.global::<crate::settings::Settings>().picker_size != Some(want) {
+                        crate::settings::update(cx, |s| s.picker_size = Some(want));
+                    }
+                });
+            })
+            .detach();
+        })
+        .detach();
         // the preview pane helps picking (Windows' dialogs have one too): on until it is closed in a dialog, which the next dialogs
         // remember (issue 87); the sidebar starts as a strip of icons (it opens over the list while hovered)
         self.preview_open = cx.global::<crate::settings::Settings>().picker_preview_open;

@@ -398,6 +398,10 @@ pub struct Settings {
     pub preview_open: bool,
     /// The preview pane of the Open/Save dialogs, kept apart from the main windows' (shown until it is closed once: issue 87).
     pub picker_preview_open: bool,
+    /// The Open/Save dialog's size as the user left it (logical px), as Windows' own dialogs remember theirs. Issue 89: "the size of
+    /// the file selection window ... is too large for a standard 1920x1080 px laptop screen".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picker_size: Option<[u16; 2]>,
     pub sidebar_open: bool,
     /// The sidebar as a narrow strip of icons (drag it narrow to get there).
     pub sidebar_rail: bool,
@@ -796,6 +800,7 @@ impl Default for Settings {
             show_hidden: false,
             preview_open: true,
             picker_preview_open: true,
+            picker_size: None,
             sidebar_open: true,
             sidebar_rail: false,
             sidebar_width: 232.,
