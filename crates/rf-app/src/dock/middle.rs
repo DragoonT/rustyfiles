@@ -793,6 +793,14 @@ impl MiddleIsland {
         cx.notify();
     }
 
+    /// Win+1 .. Win+9 (issue 91): the `n`-th app of the island (pinned or running; the places and the separator do not count), as a
+    /// click on its icon: it starts, comes to the front, or goes down when it is in front, as on Windows' taskbar.
+    pub(super) fn open_app_number(&mut self, n: usize, cx: &mut Context<Self>) {
+        if let Some(ix) = nth_app(&self.items, n) {
+            self.click(ix, cx);
+        }
+    }
+
     fn click(&mut self, ix: usize, cx: &mut Context<Self>) {
         // (the button that let an icon go is not a click on it)
         if std::mem::take(&mut self.swallow_click) {
@@ -1452,9 +1460,32 @@ fn wanting_attention(items: &[DockItem]) -> Vec<String> {
         .collect()
 }
 
+/// The index of the `n`-th app among the island's items (0-based; places and separators are skipped).
+fn nth_app(items: &[DockItem], n: usize) -> Option<usize> {
+    items.iter().enumerate().filter(|(_, i)| matches!(i, DockItem::App(_))).nth(n).map(|(ix, _)| ix)
+}
+
 #[cfg(test)]
 mod tests {
+    use super::nth_app;
     use super::{BASELINE, L, vol_hud_look, DOT_DROP, DockItem, ICON_REST, MIN_MOVE, Place, Slot, Task, icon_count, item_icons, look, magnify, model, move_needs_frame, plan};
+
+    /// Win+1 .. Win+9 count the apps only, as Windows' taskbar counts its buttons.
+    #[test]
+    fn the_nth_app_skips_the_places_and_the_separator() {
+        let items = model::merge(&[], Vec::new(), 0);
+        // (an island with nothing running and nothing pinned has only the separator and the two places)
+        assert_eq!(nth_app(&items, 0), None);
+        let running = vec![
+            ("a".to_string(), vec![Task { hwnd: 1, title: "A".into(), pid: 1, exe: None, app_id: Some("a".into()), minimized: false }]),
+            ("b".to_string(), vec![Task { hwnd: 2, title: "B".into(), pid: 2, exe: None, app_id: Some("b".into()), minimized: false }]),
+        ];
+        let items = model::merge(&[], running, 0);
+        let apps: Vec<usize> = (0..3).filter_map(|n| nth_app(&items, n)).collect();
+        assert_eq!(apps.len(), 2);
+        assert!(apps.iter().all(|&ix| matches!(items[ix], DockItem::App(_))));
+        assert!(apps[0] < apps[1]);
+    }
 
     /// The level on an icon: the number the volume mixer shows, a symbol that follows it, and a bar; a muted app's bar is empty, and an
     /// app with no sound says so without a number.

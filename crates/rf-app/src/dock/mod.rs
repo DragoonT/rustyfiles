@@ -125,6 +125,13 @@ pub fn toggle_start(cx: &mut App) -> bool {
     panel::toggle_start_reported(cx)
 }
 
+/// Win+1 .. Win+9: the home dock's `n`-th app (0-based), as a click on its icon (issue 91).
+pub fn open_app_number(n: usize, cx: &mut App) {
+    if let Some(island) = host::middle_island_on(host::MonId::HOME, cx) {
+        island.update(cx, |m, cx| m.open_app_number(n, cx));
+    }
+}
+
 /// Moves the keyboard into the right island's tray strip (the arrows walk its icons, Enter and Shift+F10 click them, Escape leaves).
 /// False: there is no strip to walk (no tray source, no icons) or a full-screen program is in front. Nothing calls this by itself: a key
 /// is wired to it when the tray host is (`RUSTYFILES_TRAY_FAKE_FOCUS_MS` tries it with the made-up source).
