@@ -3951,8 +3951,101 @@ pub(crate) fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
         use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_SHIFT};
         (GetAsyncKeyState(VK_CONTROL.0 as i32) < 0, GetAsyncKeyState(VK_SHIFT.0 as i32) < 0)
     };
+    let sources = hold_archiver_drop(sources, &std::env::temp_dir());
     let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
     crate::status_center::transfer(cx, kind, sources, dest);
+}
+
+/// Archivers hand a drop the files they extracted into a folder of their own under TEMP (7-Zip `7zE…`, WinRAR `Rar$DRa…`) and delete
+/// that folder as soon as the drop returns. Our transfer starts after it (and after a "replace?" question) and found nothing: "The
+/// system cannot find the file specified" (issue 139, 131). So while the drop is still going on such files are kept in rustyfiles'
+/// own folder under TEMP, hard-linked (instant on the same volume, and the file lives on when the archiver deletes its name) or else
+/// copied, and the transfer takes them from there. Anything else is returned as it was: a user's own files are never touched.
+fn hold_archiver_drop(sources: Vec<PathBuf>, temp: &Path) -> Vec<PathBuf> {
+    // (TEMP can be written short, `C:\Users\OZERO~1\...`, by one side and long by the other: both are compared in their long form)
+    let long = |p: &Path| -> PathBuf {
+        std::fs::canonicalize(p).map_or_else(|_| p.to_path_buf(), |c| PathBuf::from(c.to_string_lossy().trim_start_matches(r"\\?\").to_string()))
+    };
+    let temp_long = long(temp);
+    let from_archiver = |p: &Path| {
+        let p_long = long(p);
+        [(p, temp), (p_long.as_path(), temp_long.as_path())].iter().any(|(p, t)| {
+            p.strip_prefix(t).ok().and_then(|rest| rest.components().next()).is_some_and(|c| {
+                let n = c.as_os_str().to_string_lossy().to_ascii_lowercase();
+                n.starts_with("7z") || n.starts_with("rar$")
+            })
+        })
+    };
+    if sources.is_empty() || !sources.iter().all(|p| from_archiver(p)) {
+        return sources;
+    }
+    let base = temp.join("rustyfiles-drops");
+    // (the drops of earlier days: whatever a transfer left there, links that cost no room, or copies)
+    if let Ok(old) = std::fs::read_dir(&base) {
+        for e in old.flatten() {
+            if e.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|a| a > std::time::Duration::from_secs(24 * 3600))) {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let here = base.join(stamp.to_string());
+    let mut held = Vec::with_capacity(sources.len());
+    for src in &sources {
+        let Some(name) = src.file_name() else { return sources };
+        let to = here.join(name);
+        if let Err(e) = keep_tree(src, &to) {
+            log::warn!("drop from an archiver: could not keep {}: {e}; the transfer takes it from where it is", src.display());
+            return sources;
+        }
+        held.push(to);
+    }
+    log::info!("drop from an archiver: {} item(s) kept in {}", held.len(), here.display());
+    held
+}
+
+/// `from` (a file or a folder) at `to`: files hard-linked, else copied; folders made and filled.
+fn keep_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    if from.is_dir() {
+        std::fs::create_dir_all(to)?;
+        for e in std::fs::read_dir(from)? {
+            let e = e?;
+            keep_tree(&e.path(), &to.join(e.file_name()))?;
+        }
+        return Ok(());
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::hard_link(from, to).or_else(|_| std::fs::copy(from, to).map(|_| ()))
+}
+
+#[cfg(test)]
+mod archiver_drop_tests {
+    use super::hold_archiver_drop;
+
+    #[test]
+    fn an_archivers_extracted_files_are_kept_after_it_deletes_them_and_other_files_are_left_alone() {
+        let temp = std::env::temp_dir().join(format!("rf-archdrop-{}", std::process::id()));
+        let seven = temp.join("7zE5A1B2C3D");
+        std::fs::create_dir_all(seven.join("folder")).unwrap();
+        std::fs::write(seven.join("doc.txt"), b"inside the archive").unwrap();
+        std::fs::write(seven.join("folder").join("deep.txt"), b"deeper").unwrap();
+        let held = hold_archiver_drop(vec![seven.join("doc.txt"), seven.join("folder")], &temp);
+        assert!(held.iter().all(|p| p.starts_with(temp.join("rustyfiles-drops"))), "{held:?}");
+        // the archiver deletes its folder when the drop returns: what the transfer will read is still there
+        std::fs::remove_dir_all(&seven).unwrap();
+        assert_eq!(std::fs::read(&held[0]).unwrap(), b"inside the archive");
+        assert_eq!(std::fs::read(held[1].join("deep.txt")).unwrap(), b"deeper");
+        // a user's own files (even under TEMP) go to the transfer as they are
+        let own = temp.join("mine").join("notes.txt");
+        std::fs::create_dir_all(own.parent().unwrap()).unwrap();
+        std::fs::write(&own, b"x").unwrap();
+        assert_eq!(hold_archiver_drop(vec![own.clone()], &temp), vec![own.clone()]);
+        // and so does a drop that mixes the two
+        assert_eq!(hold_archiver_drop(vec![own.clone(), temp.join("7zEother").join("a")], &temp).len(), 2);
+        let _ = std::fs::remove_dir_all(&temp);
+    }
 }
 
 /// Shows which device draws the window (hybrid renderer) and cycles Auto → GPU → CPU on click.
