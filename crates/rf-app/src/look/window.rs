@@ -496,16 +496,20 @@ impl LookWindow {
                     .gap_2()
                     .items_center()
                     .justify_between()
+                    // a long name gives way: it is cut with "…", and the buttons and the window's own controls keep their place
+                    .overflow_hidden()
                     .child(
                         h_flex()
+                            .flex_1()
                             .min_w_0()
+                            .overflow_hidden()
                             .gap_2()
                             .items_center()
                             .text_xs()
-                            .when(self.busy, |d| d.child(Icon::new(L::LoaderCircle).size(px(14.))))
-                            .child(div().min_w_0().truncate().child(self.title.clone())),
+                            .when(self.busy, |d| d.child(Icon::new(L::LoaderCircle).size(px(14.)).flex_shrink_0()))
+                            .child(div().flex_1().min_w_0().truncate().child(self.title.clone())),
                     )
-                    .child(buttons),
+                    .child(buttons.flex_shrink_0()),
             )
     }
 
