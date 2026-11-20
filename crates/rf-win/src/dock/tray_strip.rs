@@ -42,6 +42,61 @@ pub fn set_compact(on: bool) -> bool {
 pub fn cell_w() -> f32 {
     cell_width_for(COMPACT.load(std::sync::atomic::Ordering::Relaxed))
 }
+
+// Two rows (issue 34: "compact is too small on a wide screen", two rows at the normal size, as Windows 7's taller taskbar had): the
+// cells are filled column by column, the upper one first, and the strip is as wide as half its icons.
+
+/// A cell's height with two rows: the 16 px picture and 2 px above and below; two of them fit the island's 48 px with room.
+pub const CELL_H2: f32 = 20.0;
+static TWO_ROWS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Sets two rows on or off. True when that changed something.
+pub fn set_two_rows(on: bool) -> bool {
+    TWO_ROWS.swap(on, std::sync::atomic::Ordering::Relaxed) != on
+}
+
+/// How many rows the strip has now (1 or 2).
+pub fn rows() -> usize {
+    if TWO_ROWS.load(std::sync::atomic::Ordering::Relaxed) { 2 } else { 1 }
+}
+
+/// A cell's height for `rows`, logical px.
+pub const fn cell_height_for(rows: usize) -> f32 {
+    if rows >= 2 { CELL_H2 } else { CELL }
+}
+
+/// The strip block's height for `rows`: the rows of cells (the chevron is one ordinary cell high, centred in it).
+pub const fn strip_height_for(rows: usize) -> f32 {
+    if rows >= 2 { 2.0 * CELL_H2 } else { CELL }
+}
+
+/// The strip block's height now.
+pub fn strip_h() -> f32 {
+    strip_height_for(rows())
+}
+
+/// How many columns `n` cells take in `rows` rows.
+pub const fn cols_for(n: usize, rows: usize) -> usize {
+    let r = if rows == 0 { 1 } else { rows };
+    n.div_ceil(r)
+}
+
+/// Cell `j`'s box in the strip block (logical px from the block's top left corner): column by column, the upper cell first.
+pub fn cell_box_for(j: usize, rows: usize, cell_w: f32) -> [f32; 4] {
+    let r = rows.max(1);
+    let h = cell_height_for(r);
+    [(j / r) as f32 * cell_w, (j % r) as f32 * h, cell_w, h]
+}
+
+/// Cell `j`'s box now.
+pub fn cell_box(j: usize) -> [f32; 4] {
+    cell_box_for(j, rows(), cell_w())
+}
+
+/// Where the chevron stands in the block (logical px from its left) after `visible` cells.
+pub fn chevron_x(visible: usize) -> f32 {
+    cols_for(visible, rows()) as f32 * cell_w()
+}
 /// The chevron's cell.
 pub const CHEVRON_W: f32 = 24.0;
 /// The most room the strip block (cells and chevron) may take, logical px.
@@ -60,7 +115,7 @@ pub fn strip_limit(work_width: f32) -> f32 {
 
 /// How many cells fit a block at most `limit` logical px wide (the chevron takes its cell first).
 pub fn capacity(limit: f32) -> usize {
-    ((limit - CHEVRON_W) / cell_w()).floor().max(0.0) as usize
+    ((limit - CHEVRON_W) / cell_w()).floor().max(0.0) as usize * rows()
 }
 
 /// What the strip shows: which icons are in the strip, which are in the overflow panel, whether there is a chevron.
@@ -80,7 +135,7 @@ pub struct Layout {
 impl Layout {
     /// The strip block's width, logical px: the cells and the chevron.
     pub fn block_width(&self) -> f32 {
-        self.visible.len() as f32 * cell_w() + if self.chevron { CHEVRON_W } else { 0.0 }
+        cols_for(self.visible.len(), rows()) as f32 * cell_w() + if self.chevron { CHEVRON_W } else { 0.0 }
     }
 
     /// What the strip adds to the right island's width: the block and the separator after it. Nothing without icons.
@@ -106,16 +161,18 @@ pub fn layout(all: &[usize], hidden: &[bool], limit: f32) -> Layout {
 
 /// Cell `j` of the strip, device px, screen coordinates, in an island whose visible glass is `glass`: centred in the glass's height.
 pub fn cell_rect(glass: Rect, scale: f32, j: usize) -> Rect {
-    let (cell_w, cell_h) = (px(cell_w(), scale), px(CELL, scale));
-    let left = glass.left + px(SIDE_PAD, scale) + j as i32 * cell_w;
-    let top = glass.top + (glass.height() - cell_h) / 2;
-    Rect::from_xywh(left, top, cell_w, cell_h)
+    // (each cell rounded on its own and added up, as the strip always was)
+    let r = rows();
+    let (w, h) = (px(cell_w(), scale), px(cell_height_for(r), scale));
+    let block_top = glass.top + (glass.height() - r as i32 * h) / 2;
+    Rect::from_xywh(glass.left + px(SIDE_PAD, scale) + (j / r) as i32 * w, block_top + (j % r) as i32 * h, w, h)
 }
 
-/// The chevron's cell when `visible` cells stand before it.
+/// The chevron's cell when `visible` cells stand before it: one ordinary cell high, centred in the island.
 pub fn chevron_rect(glass: Rect, scale: f32, visible: usize) -> Rect {
-    let cell = cell_rect(glass, scale, visible);
-    Rect::from_xywh(cell.left, cell.top, px(CHEVRON_W, scale), cell.height())
+    let h = px(CELL, scale);
+    let left = glass.left + px(SIDE_PAD, scale) + cols_for(visible, rows()) as i32 * px(cell_w(), scale);
+    Rect::from_xywh(left, glass.top + (glass.height() - h) / 2, px(CHEVRON_W, scale), h)
 }
 
 /// Where a dragged icon would land.
@@ -155,9 +212,20 @@ pub fn drop_target(g: &Geometry, cursor: (i32, i32)) -> DropTarget {
     }
     let cell = px(cell_w(), g.scale).max(1);
     let origin = g.glass.left + px(SIDE_PAD, g.scale);
-    let end = origin + g.visible as i32 * cell;
+    let rows = rows();
+    let end = origin + cols_for(g.visible, rows) as i32 * cell;
     if x >= g.glass.left && x < end {
-        let raw = ((x - origin) as f32 / cell as f32 + 0.5).floor().max(0.0) as usize;
+        let raw = if rows == 1 {
+            ((x - origin) as f32 / cell as f32 + 0.5).floor().max(0.0) as usize
+        } else {
+            // two rows: the cell under the pointer (its column, and the upper or lower half of the block), before it or after it by
+            // the nearer side
+            let block_top = g.glass.top + (g.glass.height() - px(strip_h(), g.scale)) / 2;
+            let col = ((x - origin).max(0) / cell) as usize;
+            let row = usize::from(y >= block_top + px(CELL_H2, g.scale));
+            let after = (x - origin).max(0) % cell > cell / 2;
+            col * rows + row + usize::from(after)
+        };
         return DropTarget::Strip(raw.min(g.visible));
     }
     if g.chevron && x >= end && x < end + px(CHEVRON_W, g.scale) {
@@ -764,6 +832,19 @@ pub fn take_keyboard(hwnd: isize) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn two_rows_fill_column_by_column_and_take_half_the_width() {
+        assert_eq!(super::cols_for(5, 2), 3);
+        assert_eq!(super::cols_for(5, 1), 5);
+        assert_eq!(super::cell_box_for(0, 2, 24.0), [0.0, 0.0, 24.0, super::CELL_H2]);
+        assert_eq!(super::cell_box_for(1, 2, 24.0), [0.0, super::CELL_H2, 24.0, super::CELL_H2], "the second icon under the first");
+        assert_eq!(super::cell_box_for(2, 2, 24.0), [24.0, 0.0, 24.0, super::CELL_H2]);
+        assert_eq!(super::cell_box_for(3, 1, 18.0), [54.0, 0.0, 18.0, super::CELL]);
+        assert!(super::strip_height_for(2) <= crate::dock::layout::SIDE_HEIGHT, "two rows fit the island");
+        assert!(super::CELL_H2 >= super::ICON + 2.0);
+    }
+
     use super::*;
 
     fn ids(n: usize) -> Vec<usize> {

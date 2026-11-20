@@ -398,6 +398,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Önizlemede dosya bilgileri", "File details in the preview"),
     ("Bu konumu gizle", "Hide this place"),
     ("Sekmelerde ara", "Search tabs"),
+    ("Tepsi iki satırda", "Tray in two rows"),
+    ("Sağ adadaki tepsi simgeleri olağan boylarında, iki satır halinde dizilir; aynı genişliğe iki kat simge sığar.", "The tray icons in the right island keep their usual size and stand in two rows: twice as many fit the same width."),
     ("Sekmelerde ara…", "Search tabs…"),
     ("Kapatıldı", "Closed"),
     ("Eşleşen sekme yok", "No matching tab"),

@@ -687,6 +687,8 @@ pub struct Settings {
     pub dock_search_hypersearch: bool,
     /// The tray icons of the right island stand closer together (18 px a cell instead of 24; off). Issue 34.
     pub dock_tray_compact: bool,
+    /// The tray icons in two rows at their usual size (off). Issue 34: compact was too small on a wide screen.
+    pub dock_tray_two_rows: bool,
     /// Turning the mouse wheel over a running app's icon in the dock turns that app's own sound level up or down (on; issue 21).
     pub dock_scroll_volume: bool,
     /// How much the dock's icons grow under the pointer (off / subtle / full).
@@ -936,6 +938,7 @@ impl Default for Settings {
             dock_search: DockSearch::Field,
             dock_search_hypersearch: false,
             dock_tray_compact: false,
+            dock_tray_two_rows: false,
             dock_scroll_volume: true,
             dock_magnify: DockMagnify::Full,
             dock_hover_previews: true,

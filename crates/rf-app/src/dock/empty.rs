@@ -58,10 +58,12 @@ pub fn right_controls(clock_width: f32, tray: Option<TrayShape>, tray_extra: f32
     let mut x = plan::SIDE_PAD;
     if let Some(t) = tray {
         for j in 0..t.visible {
-            out.push([x + j as f32 * ts::cell_w(), y(ts::CELL), ts::cell_w(), ts::CELL]);
+            // (one or two rows: `ts::cell_box`, in a block `ts::strip_h()` high centred in the island)
+            let [bx, by, bw, bh] = ts::cell_box(j);
+            out.push([x + bx, y(ts::strip_h()) + by, bw, bh]);
         }
         if t.chevron {
-            out.push([x + t.visible as f32 * ts::cell_w(), y(ts::CELL), ts::CHEVRON_W, ts::CELL]);
+            out.push([x + ts::chevron_x(t.visible), y(ts::CELL), ts::CHEVRON_W, ts::CELL]);
         }
         x += tray_extra;
     }

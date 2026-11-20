@@ -12533,5 +12533,17 @@
   "key": "Eşleşen sekme yok",
   "tr": "Eşleşen sekme yok",
   "en": "No matching tab"
+ },
+ {
+  "id": "9ed0e8eb",
+  "key": "Tepsi iki satırda",
+  "tr": "Tepsi iki satırda",
+  "en": "Tray in two rows"
+ },
+ {
+  "id": "03429b74",
+  "key": "Sağ adadaki tepsi simgeleri olağan boylarında, iki satır halinde dizilir; aynı genişliğe iki kat simge sığar.",
+  "tr": "Sağ adadaki tepsi simgeleri olağan boylarında, iki satır halinde dizilir; aynı genişliğe iki kat simge sığar.",
+  "en": "The tray icons in the right island keep their usual size and stand in two rows: twice as many fit the same width."
  }
 ]
