@@ -70,11 +70,11 @@ impl Palette {
         Self {
             dark: false,
             window_bg: hexa(0xF3F3F3, 0.30),
-            titlebar_bg: hex(0xE8E8E8),
-            sidebar_bg: hex(0xFFFFFF),
-            content_bg: hex(0xFFFFFF),
-            address_bg: hex(0xF0F5F9),
-            toolbar_bg: hex(0xFCFDFF),
+            titlebar_bg: hexa(0xEBEBEB, 0.0),
+            sidebar_bg: hexa(0xFFFFFF, 0.0),
+            content_bg: hexa(0xFFFFFF, 0.50),
+            address_bg: hexa(0x000000, 0.0),
+            toolbar_bg: hexa(0x000000, 0.0),
             card_bg: hex(0xF9F9F9),
             bar_bg: hexa(0xF9F9F9, 0.0),
             tile_bg: hexa(0xFFFFFF, 0.70),
@@ -90,7 +90,7 @@ impl Palette {
             pressed: hexa(0x000000, 0.07),
             selection: hexa(0x000000, 0.06),
             selection_border: hexa(accent, 0.55),
-            tab_active: hex(0xF8F8F8),
+            tab_active: hexa(0xFFFFFF, 0.70),
             danger: hex(0xC42B1C),
             liquid: false,
         }
@@ -169,7 +169,16 @@ impl Palette {
                 _ => Self::light(),
             },
         };
-        if !p.dark && window.is_window_active() {
+        let explorer_look = crate::settings::windows_file_explorer_theme();
+        if explorer_look && !p.dark {
+            p.titlebar_bg = hex(0xE8E8E8);
+            p.sidebar_bg = hex(0xFFFFFF);
+            p.content_bg = hex(0xFFFFFF);
+            p.address_bg = hex(0xF0F5F9);
+            p.toolbar_bg = hex(0xFCFDFF);
+            p.tab_active = hex(0xF8F8F8);
+        }
+        if explorer_look && !p.dark && window.is_window_active() {
             p.titlebar_bg = hex(0xCCDEEC);
             p.tab_active = hex(0xF0F5F9);
         }
@@ -189,10 +198,12 @@ impl Palette {
             // At the strength made for Mica they hid two thirds of it in the dark theme (the user: too black), so the default is half
             // of that; the HyperGlass "surface wash" setting moves it either way.
             (p.window_bg.a, p.content_bg.a) = glass_washes(p.dark, crate::settings::hg_surface());
-            p.titlebar_bg.a = 0.0;
-            p.sidebar_bg.a = 0.0;
-            p.address_bg = Hsla { a: glass_bar_wash(crate::settings::hg_surface()), ..p.card_bg };
-            p.toolbar_bg = Hsla { a: glass_bar_wash(crate::settings::hg_surface()), ..p.card_bg };
+            if explorer_look {
+                p.titlebar_bg.a = 0.0;
+                p.sidebar_bg.a = 0.0;
+                p.address_bg = Hsla { a: glass_bar_wash(crate::settings::hg_surface()), ..p.card_bg };
+                p.toolbar_bg = Hsla { a: glass_bar_wash(crate::settings::hg_surface()), ..p.card_bg };
+            }
             p.bar_bg = Hsla { a: glass_bar_wash(crate::settings::hg_surface()), ..p.card_bg };
         }
         p

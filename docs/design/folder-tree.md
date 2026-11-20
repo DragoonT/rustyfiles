@@ -40,7 +40,8 @@ Code: the model is `crates/rf-core/src/navtree.rs` (pure, tested without a windo
   view (plus six above and below) are built, from the scroll position. The model keeps a flat list of rows (node and depth), so a
   tree with thousands of visible rows costs a few dozen elements per frame.
 * The sidebar, folder tree, and scrollbar share one scroll handle, so wheel scrolling, track clicks, and thumb dragging update the
-  same position. The thumb is centered in its track; on hover, the arrows at either end remain clear of it.
+  same position. The Windows File Explorer look adds the themed sidebar scrollbar; with that look off, the sidebar keeps its original
+  scrolling appearance. The themed thumb is centered in its track; on hover, the arrows at either end remain clear of it.
 * The rail (the sidebar as a strip of icons) shows no tree, and neither does the full sidebar that opens over the content while the
   pointer is on the rail.
 
