@@ -277,14 +277,6 @@ const WINDOWS_THEME_ASSETS: &[(&str, &[u8])] = &[
         include_bytes!("../assets/windows-theme/rename.svg"),
     ),
     (
-        "windows-theme/search.svg",
-        include_bytes!("../assets/windows-theme/search.svg"),
-    ),
-    (
-        "windows-theme/settings.svg",
-        include_bytes!("../assets/windows-theme/settings.svg"),
-    ),
-    (
         "windows-theme/share.svg",
         include_bytes!("../assets/windows-theme/share.svg"),
     ),
@@ -336,6 +328,21 @@ pub fn install_theme_resolver(cx: &mut App) {
     });
 }
 
+pub fn original_icon(icon: L, size: Pixels) -> Icon {
+    let path = icon.path();
+    match gpui_kit::assets::AllAssets.load(&path) {
+        Ok(Some(bytes)) => Icon::default().data(&bytes).size(size),
+        Ok(None) => {
+            log::warn!("missing original icon asset: {path}");
+            Icon::default().size(size)
+        }
+        Err(error) => {
+            log::warn!("could not load original icon asset {path}: {error:#}");
+            Icon::default().size(size)
+        }
+    }
+}
+
 pub fn windows_home_icon(size: Pixels) -> AnyElement {
     div()
         .relative()
@@ -382,7 +389,7 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "arrow-right" | "move-right" => "forward",
         "arrow-up" => "up",
         "arrow-up-right" | "external-link" | "square-arrow-out-up-right" => "external-link",
-        "app-window" | "file-type" | "maximize" | "maximize-2" | "square-terminal" => "app",
+        "app-window" | "file-type" | "maximize" | "maximize-2" => "app",
         "check" | "check-check" | "check-circle" | "check-circle-2" | "check-square"
         | "circle-check" | "square-check" => "check",
         "circle-alert" | "circle-warning" => "warning",
@@ -449,8 +456,6 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "refresh-cw" | "refresh-ccw" | "rotate-cw" | "rotate-ccw" | "rotate-cw-square" => "refresh",
         "pencil" | "pencil-line" | "file-pen-line" | "edit" | "replace" => "rename",
         "pin" | "pin-off" => "pin",
-        "search" | "search-slash" | "folder-search-2" => "search",
-        "settings" | "settings-2" | "sliders-horizontal" | "cog" | "wrench" => "settings",
         "share" | "share-2" => "share",
         "scissors" | "cut" => "cut",
         "save" => "file",
@@ -515,8 +520,6 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "refresh" => "windows-theme/refresh.svg",
         "removable-drive" => "windows-theme/removable-drive.svg",
         "rename" => "windows-theme/rename.svg",
-        "search" => "windows-theme/search.svg",
-        "settings" => "windows-theme/settings.svg",
         "share" => "windows-theme/share.svg",
         "sort" => "windows-theme/sort.svg",
         "up" => "windows-theme/up.svg",
@@ -567,8 +570,6 @@ pub fn windows_theme_context_glyph(path: &str) -> Option<char> {
         "windows-theme/monitor.svg" => 0xE7F4,
         "windows-theme/pin.svg" => 0xE718,
         "windows-theme/refresh.svg" => 0xE72C,
-        "windows-theme/search.svg" => 0xE721,
-        "windows-theme/settings.svg" => 0xE713,
         "windows-theme/sort.svg" => 0xE8CB,
         "windows-theme/up.svg" => 0xE74A,
         "windows-theme/warning.svg" => 0xE7BA,
@@ -626,7 +627,6 @@ pub fn windows_theme_icon_glyph(icon: L) -> Option<char> {
         "wrench" => 0xE946,
         "rotate-cw" => 0xE72C,
         "rotate-ccw" => 0xE80D,
-        "settings" => 0xE713,
         "undo" | "undo-2" => 0xE7A7,
         "redo" | "redo-2" => 0xE7A6,
         _ => return None,
@@ -664,7 +664,6 @@ mod windows_theme_tests {
             "icons/arrow-left.svg",
             "icons/arrow-right.svg",
             "icons/folder-plus.svg",
-            "icons/search.svg",
             "icons/share-2.svg",
             "icons/usb.svg",
         ] {
@@ -698,6 +697,13 @@ mod windows_theme_tests {
             "icons/info-circle.svg",
             "icons/circle-help.svg",
             "icons/arrow-left-right.svg",
+            "icons/settings.svg",
+            "icons/search.svg",
+            "icons/square-terminal.svg",
+            "icons/settings-2.svg",
+            "icons/sliders-horizontal.svg",
+            "icons/cog.svg",
+            "icons/wrench.svg",
         ] {
             assert_eq!(windows_theme_path(path), None, "{path}");
         }
@@ -731,7 +737,9 @@ mod windows_theme_tests {
 
         assert_eq!(windows_theme_icon_glyph(L::Undo2), Some('\u{E7A7}'));
         assert_eq!(windows_theme_icon_glyph(L::Redo2), Some('\u{E7A6}'));
-        assert_eq!(windows_theme_icon_glyph(L::Settings), Some('\u{E713}'));
+        assert_eq!(windows_theme_icon_glyph(L::Settings), None);
+        assert_eq!(windows_theme_icon_glyph(L::Search), None);
+        assert_eq!(windows_theme_icon_glyph(L::SquareTerminal), None);
     }
 
     #[test]

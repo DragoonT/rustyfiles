@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{Icon, h_flex, v_flex};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use parking_lot::Mutex;
@@ -652,7 +652,7 @@ fn button(id: impl Into<ElementId>, p: &Palette, icon: L, label: impl Into<Share
         .when(primary, |d| d.bg(p.accent).text_color(p.accent_text).hover(|s| s.opacity(0.9)))
         .when(!primary, |d| d.bg(p.hover).border_1().border_color(p.border).hover(|s| s.bg(p.pressed)))
         .active(|s| s.opacity(0.8))
-        .child(Icon::new(icon).size(px(14.)))
+        .child(crate::icons::original_icon(icon, px(14.)))
         .child(label.into())
         .on_click(move |_, window, cx| run(window, cx))
         .into_any_element()
@@ -698,7 +698,7 @@ pub fn page(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
             h_flex()
                 .gap_3()
                 .items_center()
-                .child(Icon::new(L::Gauge).size(px(22.)).text_color(p.accent))
+                .child(crate::icons::original_icon(L::Gauge, px(22.)).text_color(p.accent))
                 .child(
                     v_flex()
                         .flex_1()
@@ -789,7 +789,7 @@ fn chip(p: &Palette, id: impl Into<ElementId>, label: &str, on: bool, locked: bo
             toggle(cx);
             cx.refresh_windows();
         }))
-        .when(on, |d| d.child(Icon::new(L::Check).size(px(12.)).text_color(p.accent)))
+        .when(on, |d| d.child(crate::icons::original_icon(L::Check, px(12.)).text_color(p.accent)))
         .child(label.to_string())
         .into_any_element()
 }
@@ -1016,7 +1016,7 @@ fn star_card(p: &Palette, r: &Results) -> AnyElement {
             h_flex()
                 .gap_3()
                 .items_center()
-                .child(Icon::new(L::Star).size(px(20.)).text_color(p.accent))
+                .child(crate::icons::original_icon(L::Star, px(20.)).text_color(p.accent))
                 .child(
                     v_flex()
                         .flex_1()
@@ -1052,7 +1052,7 @@ fn share_card(p: &Palette, note_text: Option<String>) -> AnyElement {
             h_flex()
                 .gap_3()
                 .items_center()
-                .child(Icon::new(L::Share2).size(px(20.)).text_color(p.accent))
+                .child(crate::icons::original_icon(L::Share2, px(20.)).text_color(p.accent))
                 .child(
                     v_flex()
                         .flex_1()

@@ -160,6 +160,8 @@ pub struct MenuView {
     liquid: bool,
     /// File-list context menus use Explorer's opaque Fluent treatment when that theme is enabled.
     explorer_context: bool,
+    /// Some popups borrow the Explorer surface while keeping the app's original icons.
+    original_icons: bool,
     /// The highlight capsule of each level (keyed by the path of open submenus that leads to it), drawn at every paint of that level.
     glides: RefCell<BTreeMap<Vec<usize>, Glide>>,
 }
@@ -211,7 +213,7 @@ fn host(cx: &App) -> Option<HostState> {
 
 /// Opens `menu` at `pos` (window coordinates), replacing any open menu.
 pub fn show(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
-    show_ex(menu, pos, None, false, window, cx)
+    show_ex(menu, pos, None, false, false, window, cx)
 }
 
 /// Opens a file-list context menu, using the Windows Explorer presentation when its icon
@@ -219,7 +221,14 @@ pub fn show(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -
 pub fn show_context(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
     let explorer_context = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
     let liquid = explorer_context.then_some(false);
-    show_ex(menu, pos, liquid, explorer_context, window, cx)
+    show_ex(menu, pos, liquid, explorer_context, false, window, cx)
+}
+
+/// Explorer's opaque menu surface with the original app icons.
+pub fn show_context_original_icons(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
+    let explorer_context = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+    let liquid = explorer_context.then_some(false);
+    show_ex(menu, pos, liquid, explorer_context, true, window, cx)
 }
 
 /// [`show`] on HyperGlass whatever the window under it shows: for the desktop, whose menus stand among the Dock's (glass) islands and
@@ -227,10 +236,18 @@ pub fn show_context(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mu
 /// "masaüstüne sağ tıklayınca açılan kutu hyperglass değil?"). Where Windows gives no materials the menu stays plain.
 pub fn show_on_glass(menu: Menu, pos: Point<Pixels>, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
     let glass = crate::settings::materials_available();
-    show_ex(menu, pos, Some(glass), false, window, cx)
+    show_ex(menu, pos, Some(glass), false, false, window, cx)
 }
 
-fn show_ex(menu: Menu, pos: Point<Pixels>, liquid: Option<bool>, explorer_context: bool, window: &mut Window, cx: &mut App) -> Entity<MenuView> {
+fn show_ex(
+    menu: Menu,
+    pos: Point<Pixels>,
+    liquid: Option<bool>,
+    explorer_context: bool,
+    original_icons: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<MenuView> {
     if host(cx).is_some() {
         close(window, cx);
     }
@@ -249,6 +266,7 @@ fn show_ex(menu: Menu, pos: Point<Pixels>, liquid: Option<bool>, explorer_contex
         popup: None,
         liquid: liquid.unwrap_or_else(|| crate::glass::liquid(crate::look::window::hwnd_of(window))),
         explorer_context,
+        original_icons,
         glides: RefCell::new(BTreeMap::new()),
     });
 
@@ -509,7 +527,14 @@ struct LevelView {
 
 impl LevelView {
     /// `liquid`: `Some(dark)` to sit on glass, `None` for the Acrylic window.
-    fn new(menu: Entity<MenuView>, level: usize, liquid: Option<bool>, explorer_context: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        menu: Entity<MenuView>,
+        level: usize,
+        liquid: Option<bool>,
+        explorer_context: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let subs = vec![
             cx.observe(&menu, |_, _, cx| cx.notify()),
             // clicking anywhere outside the menu's windows closes it
@@ -809,7 +834,7 @@ impl MenuView {
         for (i, q) in self.quick.iter().enumerate() {
             let run = q.run.clone();
             let tip = q.tip.clone();
-            let icon = if self.explorer_context {
+            let icon = if !self.original_icons && self.explorer_context {
                 match q.icon {
                     L::TextCursorInput => L::PencilLine,
                     L::Wrench => L::Info,
@@ -818,7 +843,7 @@ impl MenuView {
             } else {
                 q.icon
             };
-            let tint = self.explorer_context.then(|| explorer_icon_color(icon, p.dark)).flatten();
+            let tint = (!self.original_icons && self.explorer_context).then(|| explorer_icon_color(icon, p.dark)).flatten();
             row = row.child(
                 div()
                     .id(("mq", i))
@@ -839,20 +864,24 @@ impl MenuView {
                     .child(if self.explorer_context {
                         q.context_asset.map_or_else(
                             || {
-                                crate::icons::windows_theme_asset_path(icon)
-                                    .map(asset_icon)
-                                    .unwrap_or_else(|| {
-                                        let icon = Icon::new(icon).size(px(16.));
-                                        match tint {
-                                            Some(color) => icon.text_color(color).into_any_element(),
-                                            None => icon.into_any_element(),
-                                        }
-                                    })
+                                if !self.original_icons {
+                                    crate::icons::windows_theme_asset_path(icon)
+                                        .map(asset_icon)
+                                        .unwrap_or_else(|| {
+                                            lucide_menu_icon(icon, true, false, tint)
+                                        })
+                                } else {
+                                    crate::icons::original_icon(q.icon, px(16.)).into_any_element()
+                                }
                             },
                             asset_icon,
                         )
                     } else {
-                        Icon::new(q.icon).size(px(16.)).into_any_element()
+                        if self.original_icons {
+                            crate::icons::original_icon(q.icon, px(16.)).into_any_element()
+                        } else {
+                            Icon::new(q.icon).size(px(16.)).into_any_element()
+                        }
                     }),
             );
             if explorer_toolbar && i + 1 < self.quick.len() {
@@ -915,7 +944,17 @@ impl MenuView {
                 let enabled = *enabled;
                 let content = if self.liquid {
                     // the tick is in the leading column and the icon keeps its place after it
-                    row_content(label.clone(), icon.clone(), hint.clone(), false, enabled, liquid::tick_slot(column, *checked), p, self.explorer_context)
+                    row_content(
+                        label.clone(),
+                        icon.clone(),
+                        hint.clone(),
+                        false,
+                        enabled,
+                        liquid::tick_slot(column, *checked),
+                        p,
+                        self.explorer_context,
+                        self.original_icons,
+                    )
                 } else {
                     row_content(
                         label.clone(),
@@ -926,6 +965,7 @@ impl MenuView {
                         liquid::TickSlot::None,
                         p,
                         self.explorer_context,
+                        self.original_icons,
                     )
                 };
                 div()
@@ -952,7 +992,17 @@ impl MenuView {
                     }
                 }))
                 .on_click(cx.listener(move |m, _, window, cx| m.activate(level, ix, window, cx)))
-                .child(row_content(label.clone(), icon.clone(), None, true, true, liquid::tick_slot(column, false), p, self.explorer_context))
+                .child(row_content(
+                    label.clone(),
+                    icon.clone(),
+                    None,
+                    true,
+                    true,
+                    liquid::tick_slot(column, false),
+                    p,
+                    self.explorer_context,
+                    self.original_icons,
+                ))
                 .into_any_element(),
         }
     }
@@ -988,14 +1038,15 @@ fn row_content(
     tick: liquid::TickSlot,
     p: &Palette,
     explorer_context: bool,
+    original_icons: bool,
 ) -> AnyElement {
     let icon_el: AnyElement = match icon {
         MenuIcon::None => div().into_any_element(),
         MenuIcon::Lucide(l) => {
-            let tint = explorer_context.then(|| explorer_icon_color(l, p.dark)).flatten();
-            lucide_menu_icon(l, explorer_context, tint)
+            let tint = (!original_icons && explorer_context).then(|| explorer_icon_color(l, p.dark)).flatten();
+            lucide_menu_icon(l, explorer_context, original_icons, tint)
         }
-        MenuIcon::Tinted(l, c) => lucide_menu_icon(l, explorer_context, Some(c)),
+        MenuIcon::Tinted(l, c) => lucide_menu_icon(l, explorer_context, original_icons, Some(c)),
         MenuIcon::Asset(path) => asset_icon(path),
         MenuIcon::Image(img) => div()
             .when(!enabled, |d| d.opacity(0.45))
@@ -1033,12 +1084,16 @@ fn asset_icon(path: &'static str) -> AnyElement {
     }
 }
 
-fn lucide_menu_icon(icon: L, explorer_context: bool, tint: Option<Hsla>) -> AnyElement {
+fn lucide_menu_icon(icon: L, explorer_context: bool, original_icons: bool, tint: Option<Hsla>) -> AnyElement {
     #[cfg(target_os = "windows")]
-    if explorer_context {
+    if explorer_context && !original_icons {
         if let Some(glyph) = crate::icons::windows_theme_icon_glyph(icon) {
             return crate::icons::windows_theme_glyph(glyph, px(16.));
         }
+    }
+
+    if original_icons {
+        return crate::icons::original_icon(icon, px(16.)).into_any_element();
     }
 
     explorer_context

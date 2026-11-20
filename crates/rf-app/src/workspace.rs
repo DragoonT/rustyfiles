@@ -2564,7 +2564,10 @@ impl Workspace {
                                 .text_color(p.text_secondary)
                                 .hover(|s| s.bg(p.hover))
                                 .when(!popups_open, |d| d.tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Sekme eylemleri")).build(w, cx)))
-                                .child(Icon::new(if self.compact.is_some() { L::PictureInPicture2 } else { L::PanelLeft }).size(px(16.)))
+                                .child(crate::icons::original_icon(
+                                    if self.compact.is_some() { L::PictureInPicture2 } else { L::PanelLeft },
+                                    px(16.),
+                                ))
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                                 .on_click(cx.listener(|this, _, window, cx| this.tab_actions_menu(window, cx))),
                         ),

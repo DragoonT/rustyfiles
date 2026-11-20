@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{Icon, h_flex, v_flex};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_core::organize::summary::show_path;
@@ -139,7 +139,7 @@ fn checkbox_box(on: bool, p: &Palette) -> Div {
         .border_1()
         .border_color(if on { p.accent } else { p.text_tertiary })
         .when(on, |d| d.bg(p.accent))
-        .when(on, |d| d.child(Icon::new(L::Check).size(px(12.)).text_color(p.accent_text)))
+        .when(on, |d| d.child(crate::icons::original_icon(L::Check, px(12.)).text_color(p.accent_text)))
 }
 
 fn button(id: &'static str, label: &'static str, primary: bool, enabled: bool, p: &Palette) -> Stateful<Div> {
@@ -214,7 +214,7 @@ impl Render for PreviewView {
             .items_center()
             .border_b_1()
             .border_color(p.divider)
-            .child(Icon::new(L::WandSparkles).size(px(18.)).text_color(p.text_secondary))
+            .child(crate::icons::original_icon(L::WandSparkles, px(18.)).text_color(p.text_secondary))
             .child(
                 v_flex()
                     .flex_1()
@@ -233,7 +233,7 @@ impl Render for PreviewView {
                     .cursor_pointer()
                     .hover(|s| s.bg(p.hover))
                     .tab_index(0)
-                    .child(Icon::new(L::X).size(px(14.)))
+                    .child(crate::icons::original_icon(L::X, px(14.)))
                     .on_click(cx.listener(|_, _, window, cx| super::close(window, cx))),
             );
 
@@ -319,7 +319,7 @@ impl Render for PreviewView {
                                             .child(div().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(name))
                                             .child(div().text_xs().text_color(p.text_tertiary).overflow_hidden().text_ellipsis().whitespace_nowrap().child(from_dir)),
                                     )
-                                    .child(Icon::new(L::ArrowRight).size(px(14.)).flex_shrink_0().text_color(p.text_tertiary))
+                                    .child(crate::icons::original_icon(L::ArrowRight, px(14.)).flex_shrink_0().text_color(p.text_tertiary))
                                     .child(
                                         v_flex()
                                             .flex_1()
@@ -330,7 +330,7 @@ impl Render for PreviewView {
                                                     .items_center()
                                                     .text_sm()
                                                     .when(recycle, |d| d.text_color(p.danger))
-                                                    .when(recycle, |d| d.child(Icon::new(L::Trash).size(px(13.))))
+                                                    .when(recycle, |d| d.child(crate::icons::original_icon(L::Trash, px(13.))))
                                                     .child(div().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(to_name)),
                                             )
                                             .child(div().text_xs().text_color(p.text_tertiary).overflow_hidden().text_ellipsis().whitespace_nowrap().child(to_dir)),
@@ -366,7 +366,7 @@ impl Render for PreviewView {
                 .bg(p.danger.opacity(0.10))
                 .text_xs()
                 .text_color(p.danger)
-                .children(note_lines.into_iter().take(5).map(|n| h_flex().gap_1().items_start().child(Icon::new(L::TriangleAlert).size(px(12.)).flex_shrink_0()).child(div().child(n))))
+                .children(note_lines.into_iter().take(5).map(|n| h_flex().gap_1().items_start().child(crate::icons::original_icon(L::TriangleAlert, px(12.)).flex_shrink_0()).child(div().child(n))))
         });
 
         let ready = matches!(self.state, State::Ready { .. });

@@ -353,7 +353,7 @@ cd rustyfiles
 .\scripts\install.ps1 -Uninstall
 ```
 
-`cargo run --release -p rf-app` starts it without installing.
+`cargo run --release -p rf-app --bin rustyfiles` starts it without installing.
 
 ## Keyboard
 

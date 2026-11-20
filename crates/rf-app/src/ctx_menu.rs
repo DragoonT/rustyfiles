@@ -709,7 +709,9 @@ pub enum BarMenu {
 impl FolderView {
     pub fn show_bar_menu(&mut self, which: BarMenu, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let me = cx.entity().downgrade();
-        let context_style = matches!(&which, BarMenu::More);
+        let explorer_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+        let layout_menu = matches!(&which, BarMenu::View { .. });
+        let context_style = matches!(&which, BarMenu::More) || (explorer_theme && layout_menu);
         let items = match which {
             BarMenu::New => {
                 let Some(dir) = self.current_dir() else { return };
@@ -834,25 +836,14 @@ impl FolderView {
             }
         };
         if context_style {
-            fluent_menu::show_context(
-                Menu {
-                    quick: Vec::new(),
-                    items,
-                },
-                pos,
-                window,
-                cx,
-            );
+            let menu = Menu { quick: Vec::new(), items };
+            if explorer_theme && layout_menu {
+                fluent_menu::show_context_original_icons(menu, pos, window, cx);
+            } else {
+                fluent_menu::show_context(menu, pos, window, cx);
+            }
         } else {
-            fluent_menu::show(
-                Menu {
-                    quick: Vec::new(),
-                    items,
-                },
-                pos,
-                window,
-                cx,
-            );
+            fluent_menu::show(Menu { quick: Vec::new(), items }, pos, window, cx);
         }
     }
 }

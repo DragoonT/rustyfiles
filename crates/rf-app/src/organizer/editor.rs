@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use gpui_kit::assets::IconName as L;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
-use gpui_kit::component::{Icon, h_flex, v_flex};
+use gpui_kit::component::{h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_core::organize::rule::parse_ext_list;
@@ -508,7 +508,7 @@ fn checkbox(id: &'static str, label: SharedString, on: bool, p: &Palette) -> Sta
                 .border_1()
                 .border_color(if on { p.accent } else { p.text_tertiary })
                 .when(on, |d| d.bg(p.accent))
-                .when(on, |d| d.child(Icon::new(L::Check).size(px(12.)).text_color(p.accent_text))),
+                .when(on, |d| d.child(crate::icons::original_icon(L::Check, px(12.)).text_color(p.accent_text))),
         )
         .child(label)
 }
@@ -720,7 +720,7 @@ impl Render for EditorView {
                             .tab_index(0)
                             .hover(|s| s.bg(p.hover))
                             .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Koşulu kaldır")).build(w, cx))
-                            .child(Icon::new(L::X).size(px(14.)))
+                            .child(crate::icons::original_icon(L::X, px(14.)))
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 if i < this.conds.len() {
                                     this.conds.remove(i);
@@ -852,7 +852,7 @@ impl Render for EditorView {
                             h_flex()
                                 .gap_2()
                                 .items_center()
-                                .child(Icon::new(L::Sparkles).size(px(14.)).flex_shrink_0().text_color(p.accent))
+                                .child(crate::icons::original_icon(L::Sparkles, px(14.)).flex_shrink_0().text_color(p.accent))
                                 .child(div().flex_shrink_0().text_color(p.text_secondary).child(e.label))
                                 .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(e.text)),
                         )
@@ -888,7 +888,7 @@ impl Render for EditorView {
             .items_center()
             .border_b_1()
             .border_color(p.divider)
-            .child(Icon::new(L::WandSparkles).size(px(18.)).text_color(p.text_secondary))
+            .child(crate::icons::original_icon(L::WandSparkles, px(18.)).text_color(p.text_secondary))
             .child(div().flex_1().text_sm().font_weight(FontWeight::SEMIBOLD).child(if self.id == 0 { t!("Yeni kural") } else { t!("Kuralı düzenle") }));
         let footer = h_flex()
             .px_6()
