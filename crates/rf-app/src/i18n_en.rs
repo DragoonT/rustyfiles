@@ -401,6 +401,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Tepsi iki satırda", "Tray in two rows"),
     ("İkonların altında adlar", "Names under the icons"),
     ("Yazı boyutu", "Text size"),
+    ("Klasörden çıkar", "Take out of the folder"),
     ("Dosya yöneticisinin pencerelerindeki yazıların boyutu", "The size of the text in the file manager's windows"),
     ("Çalışmayan sabit uygulamalar solda", "Pinned apps that aren't running on the left"),
     ("Sabitlenmiş ama açık olmayan uygulamalar sol adada başlatıcı olarak durur; ortadaki adada yalnızca çalışan uygulamalar olur.", "Pinned apps that aren't open stand in the left island as launchers; the middle island holds only the running apps."),

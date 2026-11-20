@@ -223,6 +223,15 @@ impl StartView {
             .on_mouse_down(MouseButton::Right, cx.listener(move |this, ev: &MouseDownEvent, _, cx| this.open_menu(a2.clone(), ev.position, cx)))
     }
 
+    /// Tile `i` of the pinned grid: an app's or a folder's.
+    fn grid_tile(&mut self, i: usize, pal: Palette, theme: ThemePalette, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        if let Some(f) = self.folder_at(i).cloned() {
+            return Some(self.folder_tile(i, &f, pal, theme, cx));
+        }
+        let app = self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned()?;
+        Some(self.pin_tile(i, &app, pal, theme, cx))
+    }
+
     pub(super) fn render_home(&mut self, pal: Palette, theme: ThemePalette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if !self.apps_ready {
             let text = if self.apps_failed && !self.loading { t!("Uygulama listesi okunamadı. Yeniden denemek için paneli kapatıp açın.") } else { t!("Uygulamalar yükleniyor…") };
@@ -286,23 +295,26 @@ impl StartView {
             if self.sliding(now) {
                 window.request_animation_frame();
             }
-            if let Some((col, row)) = self.landing_cell() {
+            // held on the middle of another tile: that tile is marked (the app goes into its folder); else the cell it would land in
+            if let Some((col, row)) = self.onto_cell() {
+                grid = grid.child(div().absolute().left(px(col * CELL_W + 6.0)).top(px(row * page::TILE_H + 4.0)).w(px(CELL_W - 12.0)).h(px(page::TILE_H - 8.0)).rounded(px(10.)).border_2().border_color(theme.accent).bg(hover));
+            } else if let Some((col, row)) = self.landing_cell() {
                 grid = grid.child(div().absolute().left(px(col * CELL_W)).top(px(row * page::TILE_H)).w(px(CELL_W)).h(px(page::TILE_H)).rounded(px(8.)).bg(hover));
             }
             for (local, &i) in shown.iter().enumerate() {
                 if i == held {
                     continue;
                 }
-                let Some(app) = self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned() else { continue };
                 let (col, row) = self.slide_cell(local, now);
-                grid = grid.child(self.pin_tile(i, &app, pal, theme, cx).absolute().left(px(col * CELL_W)).top(px(row * page::TILE_H)));
+                let Some(tile) = self.grid_tile(i, pal, theme, cx) else { continue };
+                grid = grid.child(tile.absolute().left(px(col * CELL_W)).top(px(row * page::TILE_H)));
             }
         } else {
             for row in shown.chunks(page::COLS) {
                 let mut line = h_flex().h(px(page::TILE_H)).flex_shrink_0();
                 for &i in row {
-                    let Some(app) = self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned() else { continue };
-                    line = line.child(self.pin_tile(i, &app, pal, theme, cx));
+                    let Some(tile) = self.grid_tile(i, pal, theme, cx) else { continue };
+                    line = line.child(tile);
                 }
                 grid = grid.child(line);
             }
@@ -397,9 +409,12 @@ impl StartView {
             block.child(div().h(px(page::HEAD_H)).flex().items_center().child(heading(t!("Önerilenler"), text))).child(col).into_any_element()
         });
 
+        // (an open folder stands over the page: the page fades out under it, so that the folder's glass shows the glass and not the tiles)
+        let folder_open = self.folder.is_some();
         v_flex()
             .size_full()
             .px(px(PAD))
+            .when(folder_open, |d| d.opacity(0.08))
             .child(h_flex().h(px(page::HEAD_H)).flex_shrink_0().items_center().justify_between().child(heading(t!("Sabitlenenler"), text)).child(self.page_button("start-all", t!("Tümü"), false, pal, theme, cx)))
             .child(grid)
             .children(recommended)

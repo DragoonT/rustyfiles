@@ -12581,5 +12581,11 @@
   "key": "Dosya yöneticisinin pencerelerindeki yazıların boyutu",
   "tr": "Dosya yöneticisinin pencerelerindeki yazıların boyutu",
   "en": "The size of the text in the file manager's windows"
+ },
+ {
+  "id": "92bc0ce7",
+  "key": "Klasörden çıkar",
+  "tr": "Klasörden çıkar",
+  "en": "Take out of the folder"
  }
 ]
