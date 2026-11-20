@@ -127,6 +127,20 @@ pub fn get_image(path: &Path, size: u32, kind: Kind) -> anyhow::Result<Bgra> {
     unsafe {
         let _ = DeleteObject(HGDIOBJ(hbmp.0));
     }
+    // A folder's preview is the folder drawn with its first pictures in it, on a transparent ground. For some folders (a hidden one,
+    // some with programs' pictures in them) the shell hands it over with no alpha at all, and it came out as a black square with the
+    // folder in it: such a folder gets its icon instead.
+    if matches!(kind, Kind::Thumbnail)
+        && r.as_ref().is_ok_and(|b| b.data.chunks_exact(4).all(|p| p[3] == 255))
+        && std::fs::metadata(path).is_ok_and(|m| m.is_dir())
+    {
+        let hbmp = unsafe { factory.GetImage(sz, SIIGBF_ICONONLY | SIIGBF_BIGGERSIZEOK)? };
+        let r = hbitmap_to_bgra(hbmp);
+        unsafe {
+            let _ = DeleteObject(HGDIOBJ(hbmp.0));
+        }
+        return r;
+    }
     r
 }
 
