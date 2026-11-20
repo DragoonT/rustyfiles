@@ -1151,7 +1151,7 @@ fn open_dock(d: &monitors::Display, cx: &mut App) {
     let Some(host) = cx.try_global::<Host>() else { return };
     let id = MonId(host.next_id);
     let lines = rf_win::dock::clock::system_lines();
-    let widths = Widths { left: plan::left_width_secondary(Search::Field), middle: plan::middle_width_at_rest(2, 1), right: plan::right_width_secondary(plan::clock_width(&lines), true) };
+    let widths = Widths { left: plan::left_width_secondary(Search::Field), middle: plan::middle_width_at_rest(2, 0), right: plan::right_width_secondary(plan::clock_width(&lines), true) };
     let mut dock = Dock {
         id,
         name: Some(d.name.clone()),
@@ -1863,7 +1863,7 @@ pub fn run(messages: Option<UnboundedReceiver<String>>, cx: &mut App) {
     cx.set_global(env);
 
     let lines = rf_win::dock::clock::system_lines();
-    let widths = Widths { left: plan::left_width(None), middle: plan::middle_width_at_rest(2, 1), right: plan::right_width(&lines) };
+    let widths = Widths { left: plan::left_width(None), middle: plan::middle_width_at_rest(2, 0), right: plan::right_width(&lines) };
     let geo = geo_for(&monitor, area, widths, size, prefs.side_tall);
 
     let mut home = Dock {
