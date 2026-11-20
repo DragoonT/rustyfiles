@@ -440,6 +440,10 @@ pub struct Settings {
     /// The drives that are not listed (the sidebar, the Home page, the address bar's list of drives), as letters ("V"). A drive
     /// Explorer hides by its own policy is hidden too, without being named here (`rf_win::drives::visible_drives`).
     pub hidden_drives: Vec<String>,
+    /// Cloud and WSL places taken off the sidebar one by one (their paths). Issue 141: "a way to hide a single entry in that section
+    /// (right click > Hide), like "Hidden drives"".
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hidden_places: Vec<String>,
     /// The accent colour of rustyfiles as "#RRGGBB"; empty: Windows' own accent (Settings > Appearance).
     pub accent_color: String,
     /// The user's own programs for kinds of files (Settings > File types; `rf_core::openrules`): the first program of a list opens
@@ -805,6 +809,7 @@ impl Default for Settings {
             pinned: None,
             folder_aliases: Default::default(),
             hidden_drives: Vec::new(),
+            hidden_places: Vec::new(),
             accent_color: String::new(),
             open_rules: Vec::new(),
             run_in_background: false,

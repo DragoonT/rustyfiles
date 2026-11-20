@@ -978,6 +978,44 @@ fn hidden_drives_card(p: &Palette, s: &Settings) -> AnyElement {
     )
 }
 
+/// The cloud and WSL places hidden from the sidebar one by one (its menu: "Hide this place"): a click shows one again.
+fn hidden_places_card(p: &Palette, s: &Settings) -> AnyElement {
+    let mut row = h_flex().flex_wrap().gap_2().items_center().justify_end();
+    for (i, path) in s.hidden_places.iter().enumerate() {
+        let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| path.clone());
+        let key = path.clone();
+        row = row.child(
+            h_flex()
+                .id(("place-hide", i))
+                .h(px(28.))
+                .px_2p5()
+                .gap_1p5()
+                .items_center()
+                .rounded(theme::RADIUS_SM)
+                .border_1()
+                .border_color(p.accent)
+                .bg(p.hover)
+                .text_sm()
+                .text_color(p.text_secondary)
+                .cursor_pointer()
+                .hover(|d| d.bg(p.pressed))
+                .child(Icon::new(L::EyeOff).size(px(14.)))
+                .child(name)
+                .on_click(move |_, _, cx| {
+                    let key = key.clone();
+                    settings::update(cx, move |s| s.hidden_places.retain(|h| *h != key))
+                }),
+        );
+    }
+    card(
+        p,
+        L::Cloud,
+        t!("Gizlenen bulut ve Linux konumları"),
+        Some(t!("Kenar çubuğunda tek tek gizlediğiniz konumlar. Birine tıklayınca yeniden görünür.")),
+        row.into_any_element(),
+    )
+}
+
 /// The colours offered for the accent (Fluent's own set): blue, purple, magenta, red, orange, yellow, green, teal, grey.
 pub(crate) const ACCENT_CHOICES: [u32; 9] = [0x0078D4, 0x8764B8, 0xE3008C, 0xE81123, 0xF7630C, 0xFFB900, 0x107C10, 0x00B7C3, 0x69797E];
 
@@ -2073,6 +2111,9 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     // Files' folder aliases: "@name" in the address box
     v.push(section(p, t!("Sürücüler")));
     v.push(hidden_drives_card(p, s));
+    if !s.hidden_places.is_empty() {
+        v.push(hidden_places_card(p, s));
+    }
     v.push(section(p, t!("Klasör takma adları")));
     let aliases: Vec<(String, std::path::PathBuf)> = s.folder_aliases.iter().map(|(n, p)| (n.clone(), p.clone())).collect();
     let count = aliases.len();

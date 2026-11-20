@@ -2070,5 +2070,8 @@
  "9022ecfc": "En tynd bjælke yderst til højre på den højre ø, efter klokken: et klik minimerer alle vinduer og viser skrivebordet, det næste klik henter dem tilbage.",
  "6f0f5329": "Vis skrivebord",
  "b6aea286": "Fildetaljer i eksempelvisningen",
- "475cf8e1": "Viser type, størrelse, datoer og placering under eksempelvisningen"
+ "475cf8e1": "Viser type, størrelse, datoer og placering under eksempelvisningen",
+ "0425f790": "Skjul denne placering",
+ "45a79fa6": "Skjulte cloud- og Linux-placeringer",
+ "8834e343": "De placeringer, du har skjult fra sidepanelet én ad gangen. Klik på én for at vise den igen."
 }

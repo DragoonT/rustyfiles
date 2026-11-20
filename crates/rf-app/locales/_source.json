@@ -12491,5 +12491,23 @@
   "key": "Önizlemenin altında türü, boyutu, tarihleri ve konumu gösterir",
   "tr": "Önizlemenin altında türü, boyutu, tarihleri ve konumu gösterir",
   "en": "Shows the type, size, dates and location under the preview"
+ },
+ {
+  "id": "0425f790",
+  "key": "Bu konumu gizle",
+  "tr": "Bu konumu gizle",
+  "en": "Hide this place"
+ },
+ {
+  "id": "45a79fa6",
+  "key": "Gizlenen bulut ve Linux konumları",
+  "tr": "Gizlenen bulut ve Linux konumları",
+  "en": "Hidden cloud and Linux places"
+ },
+ {
+  "id": "8834e343",
+  "key": "Kenar çubuğunda tek tek gizlediğiniz konumlar. Birine tıklayınca yeniden görünür.",
+  "tr": "Kenar çubuğunda tek tek gizlediğiniz konumlar. Birine tıklayınca yeniden görünür.",
+  "en": "The places you hid from the sidebar one by one. Click one to show it again."
  }
 ]

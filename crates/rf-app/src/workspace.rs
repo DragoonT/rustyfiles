@@ -2618,6 +2618,22 @@ impl Workspace {
             Item::Separator,
             Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
         ]);
+        // a cloud or WSL place can be taken off the sidebar on its own (it comes back from Settings > Files and folders)
+        if self.places.read(cx).cloud.iter().any(|c| c.path == path) {
+            let at = items.len() - 2;
+            let key = path.to_string_lossy().into_owned();
+            items.insert(
+                at,
+                Item::action(t!("Bu konumu gizle"), MenuIcon::Lucide(L::EyeOff), move |_, cx| {
+                    let key = key.clone();
+                    crate::settings::update(cx, move |s| {
+                        if !s.hidden_places.iter().any(|h| h.eq_ignore_ascii_case(&key)) {
+                            s.hidden_places.push(key);
+                        }
+                    })
+                }),
+            );
+        }
         // a drive can be taken off the lists of places (it comes back from Settings > Files and folders)
         if let Some(letter) = crate::settings_view::drive_letter(&path) {
             let at = items.len() - 2;
@@ -3617,7 +3633,7 @@ impl Workspace {
                 col = col.child(self.sidebar_item(("sb-dev", i).into(), L::Usb, p.text_secondary, d.name.clone(), loc, active, None, p, cx));
             }
         }
-        let cloud = self.places.read(cx).cloud.clone();
+        let cloud = visible_places(self.places.read(cx).cloud.clone(), &cx.global::<crate::settings::Settings>().hidden_places);
         if !cloud.is_empty() && shown("cloud") {
             col = col.child(header(t!("Bulut ve Linux")));
             for (i, c) in cloud.into_iter().enumerate() {
@@ -5151,6 +5167,11 @@ mod pane_tests {
     }
 }
 
+/// The cloud and WSL places that are not hidden one by one (`Settings::hidden_places`, paths compared without regard to case).
+pub(crate) fn visible_places(places: Vec<crate::places::Pinned>, hidden: &[String]) -> Vec<crate::places::Pinned> {
+    places.into_iter().filter(|c| !hidden.iter().any(|h| c.path.as_os_str().eq_ignore_ascii_case(std::ffi::OsStr::new(h)))).collect()
+}
+
 #[cfg(test)]
 mod named_session_tests {
     use super::remember_named;
@@ -5166,5 +5187,22 @@ mod named_session_tests {
         assert_eq!(list.len(), 2);
         assert_eq!((list[0].name.as_str(), list[0].tabs[0].as_str()), ("work", "C:\\B"), "same place, the new tabs");
         assert_eq!(list[1].name, "Photos");
+    }
+}
+
+#[cfg(test)]
+mod hidden_places_tests {
+    use super::visible_places;
+    use crate::places::Pinned;
+    use gpui_kit::assets::IconName as L;
+
+    #[test]
+    fn a_place_hidden_on_its_own_leaves_the_others() {
+        let place = |p: &str| Pinned { title: p.into(), path: p.into(), icon: L::Cloud };
+        let all = vec![place(r"C:\Users\u\OneDrive"), place(r"C:\Users\u\Proton Drive"), place(r"\wsl.localhost\Ubuntu")];
+        let shown = visible_places(all.clone(), &[r"c:\users\u\onedrive".into()]);
+        let paths: Vec<_> = shown.iter().map(|p| p.path.to_string_lossy().into_owned()).collect();
+        assert_eq!(paths, [r"C:\Users\u\Proton Drive", r"\wsl.localhost\Ubuntu"], "the case of a path does not matter");
+        assert_eq!(visible_places(all, &[]).len(), 3);
     }
 }
