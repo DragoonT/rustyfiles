@@ -35,6 +35,7 @@ pub mod fileops;
 pub mod foldersize;
 pub mod sysparams;
 pub mod overlays;
+pub mod press_activate;
 pub mod syncroots;
 pub mod git;
 pub mod glass;
