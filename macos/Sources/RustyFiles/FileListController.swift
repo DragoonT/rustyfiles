@@ -28,6 +28,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     private var settingsView: SettingsView?
     /// The Home page, the same way.
     private var homeView: HomeView?
+    private var diskView: DiskUsageView?
+    /// A page of the app's own (Settings, Home, Disk usage) fills the card.
+    private var pageShown: Bool { [settingsView as NSView?, homeView, diskView].contains { $0.map { !$0.isHidden } ?? false } }
     private let message = NSTextField(wrappingLabelWithString: "")
     private let display = ItemDisplay()
     private var geometry = ListGeometry()
@@ -193,13 +196,13 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         // Appearance › Show the command bar / status bar
         let barH = AppSettings.showCommandBar ? Metrics.commandBarHeight : 0
         let statusH = AppSettings.showStatusBar ? Metrics.statusBarHeight : 0
-        commandBar.isHidden = barH == 0 || settingsView != nil || homeView != nil
-        status.isHidden = statusH == 0 || settingsView != nil || homeView != nil
+        commandBar.isHidden = barH == 0 || pageShown
+        status.isHidden = statusH == 0 || pageShown
         // the pane: at the right of the list (never leaving it under 320 wide), or under it
         let bottom = AppSettings.previewAtBottom
         let ph = min(max(b.height * 0.38, 160), b.height - barH - 160)
         let pw = previewShown ? (bottom ? b.width : min(previewWidth, max(card.bounds.width - 320, 0))) : 0
-        let paneShown = previewShown && (bottom ? ph >= 120 : pw >= PreviewPane.minWidth) && settingsView == nil && homeView == nil
+        let paneShown = previewShown && (bottom ? ph >= 120 : pw >= PreviewPane.minWidth) && !pageShown
         previewPane.isHidden = !paneShown
         previewHandle.isHidden = !paneShown || bottom
         previewPane.atBottom = bottom
@@ -229,6 +232,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         message.frame = NSRect(x: 40, y: top + 40, width: b.width - 80, height: 80)
         settingsView?.frame = card.bounds
         homeView?.frame = card.bounds
+        diskView?.frame = card.bounds
 
         defer { placeListLens(animated: false) }
         let gutter = Metrics.gutter(listWidth: b.width)
@@ -397,6 +401,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         folder = nil
         url = nil
         homeView?.isHidden = true
+        diskView?.isHidden = true
         let v = settingsView ?? SettingsView()
         if settingsView == nil {
             settingsView = v
@@ -415,6 +420,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         url = nil
         archive = nil
         settingsView?.isHidden = true
+        diskView?.isHidden = true
         let v = homeView ?? HomeView()
         if homeView == nil {
             homeView = v
@@ -429,8 +435,37 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     func reloadHome() { homeView?.reload() }
 
+    /// The disk usage page for `root` fills the card; returns the walk (the tab keeps it).
+    func showDiskUsage(_ root: URL, scan: DiskScan?, onRescan: @escaping (DiskScan) -> Void) -> DiskScan {
+        folder = nil
+        url = nil
+        archive = nil
+        settingsView?.isHidden = true
+        homeView?.isHidden = true
+        let v = diskView ?? DiskUsageView()
+        if diskView == nil {
+            diskView = v
+            v.onShowInFolder = { [weak self] u in self?.onShowInFolder?(u) }
+            v.onOpenInNewTab = { [weak self] u in self?.onOpenInNewTab?(u) }
+            card.addSubview(v)
+        }
+        v.onRescan = onRescan
+        v.frame = card.bounds
+        v.isHidden = false
+        [commandBar, header, scroll, tileScroll, status, message].forEach { $0.isHidden = true }
+        previewPane.isHidden = true
+        previewHandle.isHidden = true
+        selectionChanged()
+        return v.show(root, scan: scan)
+    }
+
+    /// Opens an item's folder with it selected.
+    var onShowInFolder: ((URL) -> Void)?
+    /// The disk usage page for a folder.
+    var onDiskUsage: ((URL) -> Void)?
+
     private func hideSettings() {
-        let pages = [settingsView as NSView?, homeView as NSView?].compactMap { $0 }.filter { !$0.isHidden }
+        let pages = [settingsView as NSView?, homeView as NSView?, diskView as NSView?].compactMap { $0 }.filter { !$0.isHidden }
         guard !pages.isEmpty else { return }
         pages.forEach { $0.isHidden = true }
         commandBar.isHidden = false
@@ -649,7 +684,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         commandBar.new.isEnabled = inTrash ? (folder?.count() ?? 0) > 0 : here
         commandBar.share.isEnabled = any && writable && !inTrash
         commandBar.properties.isEnabled = writable
-        commandBar.preview.isEnabled = settingsView == nil && homeView == nil
+        commandBar.preview.isEnabled = !pageShown
         commandBar.preview.isOn = previewShown
         commandBar.view.icon = viewMode == .details ? "list" : "layout-grid"
     }
@@ -1225,6 +1260,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         if singleDir, let u = urls.first {
             b.separator()
             b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(u) }
+            b.add(String(localized: "Disk usage"), "chart-pie") { [weak self] in self?.onDiskUsage?(u) }
             if Editors.offered(for: u) { b.add(String(localized: "Open in \(Editors.name)"), "code") { Editors.open([u]) } }
             // Advanced › Show “Flatten folder”
             if AppSettings.flattenOption {
@@ -1349,6 +1385,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
                 MenuActions.setPinned(dir, !pinned)
             }
             b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([dir]) }
+            b.add(String(localized: "Disk usage"), "chart-pie") { [weak self] in self?.onDiskUsage?(dir) }
         }
         if let dir = url, dir.isFileURL {
             b.separator()

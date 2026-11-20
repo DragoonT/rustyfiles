@@ -114,3 +114,5 @@ command
 clock
 cloud
 pencil-line
+chart-pie
+files

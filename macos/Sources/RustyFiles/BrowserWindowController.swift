@@ -15,6 +15,8 @@ final class BrowserTab {
     var loadID = 0
     /// A search's walk and what it has found so far.
     var search: SearchJob?
+    /// The disk usage walk of a disk usage tab.
+    var disk: DiskScan?
     var searchHits: [String] = []
     var searchDone = false
 
@@ -27,7 +29,7 @@ final class BrowserTab {
     var isSettings: Bool { url == Self.settingsURL }
     var isHome: Bool { url == Self.homeURL }
     /// A page of the app's own rather than a folder.
-    var isPage: Bool { isSettings || isHome }
+    var isPage: Bool { isSettings || isHome || diskRoot != nil }
     /// A tag's results (rustyfiles:tag/<name>): the files that have it, from anywhere.
     var tagName: String? { TagStore.name(of: url) }
 
@@ -39,6 +41,22 @@ final class BrowserTab {
         c.path = "search"
         c.queryItems = [URLQueryItem(name: "root", value: root.path), URLQueryItem(name: "q", value: query)]
         return c.url!
+    }
+
+    /// Disk usage of a folder (rustyfiles:diskusage?root=…, Location::DiskUsage).
+    static func diskUsageURL(_ root: URL) -> URL {
+        var c = URLComponents()
+        c.scheme = "rustyfiles"
+        c.path = "diskusage"
+        c.queryItems = [URLQueryItem(name: "root", value: root.path)]
+        return c.url!
+    }
+
+    var diskRoot: URL? {
+        guard url.scheme == "rustyfiles", let c = URLComponents(url: url, resolvingAgainstBaseURL: false), c.path == "diskusage",
+            let root = c.queryItems?.first(where: { $0.name == "root" })?.value
+        else { return nil }
+        return URL(fileURLWithPath: root)
     }
 
     var searchSpec: (root: URL, query: String)? {
@@ -53,6 +71,7 @@ final class BrowserTab {
         if isHome { return TabInfo(title: String(localized: "Home"), icon: "house") }
         if let tag = tagName { return TabInfo(title: tag, icon: "tag") }
         if let s = searchSpec { return TabInfo(title: "“\(s.query)”", icon: "search") }
+        if let r = diskRoot { return TabInfo(title: String(localized: "Disk usage — \(FileManager.default.displayName(atPath: r.path))"), icon: "chart-pie") }
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.standardizedFileURL
         if url == home { return TabInfo(title: fm.displayName(atPath: url.path), icon: "house") }
@@ -282,11 +301,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
 
         list.onOpenFolder = { [weak self] url in self?.navigate(to: url) }
         list.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
+        list.onShowInFolder = { [weak self] url in self?.openTab(url.deletingLastPathComponent(), activate: true, selecting: url.lastPathComponent) }
         list.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
         list.onRefresh = { [weak self] in self?.refresh(nil) }
         list.onGoUp = { [weak self] in self?.goUp(nil) }
         sidebar.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
         sidebar.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
+        sidebar.onDiskUsage = { [weak self] url in self?.navigate(to: BrowserTab.diskUsageURL(url)) }
+        list.onDiskUsage = { [weak self] url in self?.navigate(to: BrowserTab.diskUsageURL(url)) }
         titleBar.strip.menuFor = { [weak self] i in self?.tabMenu(i) }
         list.onOpenDiskImage = { [weak self] url in self?.openDiskImage(url) }
         list.onBack = { [weak self] in self?.goBack(nil) }
@@ -326,6 +348,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             list.showSettings()
         } else if tab.isHome {
             list.showHome()
+        } else if let root = tab.diskRoot {
+            let t = tab
+            t.disk = list.showDiskUsage(root, scan: t.disk) { [weak t] scan in t?.disk = scan }
         } else if let folder = tab.folder {
             list.show(folder, at: tab.url, selecting: tab.selection, scrollTo: tab.scrollY, archive: tab.archive)
         } else if let error = tab.error {
@@ -356,9 +381,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private var closedTabs: [URL] = []
 
     /// A new tab right after the active one, showing `url`.
-    func openTab(_ url: URL, activate: Bool? = nil) {
+    func openTab(_ url: URL, activate: Bool? = nil, selecting name: String? = nil) {
         saveTabState()
         let t = BrowserTab(url: url)
+        if let name { t.selection = [name] }
         tabs.insert(t, at: active + 1)
         // General › Always switch to a newly opened tab; off: it waits behind the current one
         guard activate ?? AppSettings.switchToNewTab else {
@@ -386,6 +412,12 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     // MARK: command palette (command_palette.rs)
+
+    /// Go › Disk Usage: where the space under the open folder goes (or the home folder's).
+    @objc func showDiskUsage(_ sender: Any?) {
+        let root = tab.url.isFileURL ? tab.url : (tab.searchSpec?.root ?? tab.diskRoot ?? FileManager.default.homeDirectoryForCurrentUser)
+        navigate(to: BrowserTab.diskUsageURL(root))
+    }
 
     @objc func showCommandPalette(_ sender: Any?) { CommandPalette.show(.all, over: self) }
     @objc func showFolderHistory(_ sender: Any?) { CommandPalette.show(.folders, over: self) }
@@ -711,13 +743,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private func updateChrome() {
         navBar.back.isEnabled = !tab.back.isEmpty
         navBar.forward.isEnabled = !tab.forward.isEmpty
-        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.tagName != nil || tab.searchSpec != nil || tab.url.path != "/")
+        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.tagName != nil || tab.searchSpec != nil || tab.diskRoot != nil || tab.url.path != "/")
         if tab.isSettings {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Settings"), url: BrowserTab.settingsURL)]
         } else if tab.isHome {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Home"), url: BrowserTab.homeURL)]
         } else if let tag = tab.tagName {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Tags"), url: BrowserTab.homeURL), BreadcrumbView.Segment(title: tag, url: tab.url)]
+        } else if let r = tab.diskRoot {
+            navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: r) + [BreadcrumbView.Segment(title: String(localized: "Disk usage"), url: tab.url)]
         } else if let s = tab.searchSpec {
             // the folder searched, then the search
             navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: s.root) + [BreadcrumbView.Segment(title: String(localized: "Search: “\(s.query)”"), url: tab.url)]
@@ -795,6 +829,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         if tab.tagName != nil { return goHome(sender) }
         // a search goes up to the folder it searched
         if let s = tab.searchSpec { return navigate(to: s.root) }
+        if let r = tab.diskRoot { return navigate(to: r) }
         let parent = tab.url.deletingLastPathComponent()
         guard parent.path != tab.url.path else { return }
         navigate(to: parent, selecting: AppSettings.upSelectsPrevious ? tab.url.lastPathComponent : nil)

@@ -747,5 +747,13 @@
 "Old name": "Eski ad",
 "New name": "Yeni ad",
 "%@ conflicts: fix them to apply": "%@ çakışma var, düzeltmeden uygulanamaz",
-"%@ of %@ will change": "%2$@ öğeden %1$@ tanesi değişecek"
+"%@ of %@ will change": "%2$@ öğeden %1$@ tanesi değişecek",
+"Disk usage — %@": "Disk kullanımı — %@",
+"Disk usage": "Disk kullanımı",
+"Scan again": "Yeniden tara",
+"Look inside": "İçine bak",
+"%@ smaller files": "%@ küçük dosya",
+"Looking through… %@ items, %@": "Taranıyor… %@ öğe, %@",
+"%@ in %@ files · %@": "%2$@ dosyada %1$@ · %3$@",
+"Disk Usage": "Disk Kullanımı"
 }

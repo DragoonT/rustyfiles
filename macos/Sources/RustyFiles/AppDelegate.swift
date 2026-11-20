@@ -74,6 +74,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 wc.openSettings(nil)
                 let page = env.split(separator: ":").dropFirst().first.map(String.init) ?? ""
                 if let p = SettingsPage.allCases.first(where: { "\($0)" == page }) { wc.showSettingsPage(p) }
+            } else if let env, env.hasPrefix("diskusage:") {
+                // RF_START=diskusage:<folder>
+                openWindow(at: BrowserTab.diskUsageURL(URL(fileURLWithPath: String(env.dropFirst("diskusage:".count)))))
             } else if let env, env.hasPrefix("search:") {
                 // RF_START=search:<folder>:<query>
                 let parts = env.split(separator: ":", maxSplits: 2).map(String.init)
