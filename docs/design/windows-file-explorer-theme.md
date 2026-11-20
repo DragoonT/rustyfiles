@@ -11,9 +11,11 @@ Icons without a matching system glyph keep their original meaning and appearance
 menus also use the Explorer-style presentation. The tab strip keeps its glass plus button
 and its existing slide-in animation.
 
-The command-bar More menu uses the Explorer-style popup presentation, matching the file
-right-click menu. The icons do not change when the theme is off. The theme does not replace
-the original icon definitions or bundle the user's separate ICO collection; turning the
-switch off restores the original icons.
+With the look enabled, the command-bar More, Layout, New, and Sort & group menus use the
+same Explorer-style opaque popup presentation as the file right-click menu. New and
+Sort & group keep the app's original icons even when the look is enabled; icons supplied
+by Windows for New-menu templates remain as supplied. With the switch off, the existing
+menu styling and icons are unchanged. The theme does not replace the original icon
+definitions or bundle the user's separate ICO collection.
 
 Some theme artwork is adapted from Icons8. The app links to Icons8 in Settings > About.

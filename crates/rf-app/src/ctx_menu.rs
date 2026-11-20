@@ -753,12 +753,20 @@ impl FolderView {
     pub fn show_bar_menu(&mut self, which: BarMenu, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let me = cx.entity().downgrade();
         let explorer_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+        let new_menu = matches!(&which, BarMenu::New);
+        let sort_menu = matches!(&which, BarMenu::Sort);
         let layout_menu = matches!(&which, BarMenu::View { .. });
-        let context_style = matches!(&which, BarMenu::More) || (explorer_theme && layout_menu);
+        let original_icons = explorer_theme && (new_menu || sort_menu || layout_menu);
+        let context_style = matches!(&which, BarMenu::More) || original_icons;
         let items = match which {
             BarMenu::New => {
                 let Some(dir) = self.current_dir() else { return };
-                let view = fluent_menu::show(Menu { quick: Vec::new(), items: own_new_items(&me, cx) }, pos, window, cx);
+                let menu = Menu { quick: Vec::new(), items: own_new_items(&me, cx) };
+                let view = if original_icons {
+                    fluent_menu::show_context_original_icons(menu, pos, window, cx)
+                } else {
+                    fluent_menu::show_context(menu, pos, window, cx)
+                };
                 // the shell's templates (Word, Excel…) join as soon as the shell answers
                 let (tx, rx) = oneshot::channel();
                 rf_win::sta::run(move |owner| {
@@ -880,7 +888,7 @@ impl FolderView {
         };
         if context_style {
             let menu = Menu { quick: Vec::new(), items };
-            if explorer_theme && layout_menu {
+            if original_icons {
                 fluent_menu::show_context_original_icons(menu, pos, window, cx);
             } else {
                 fluent_menu::show_context(menu, pos, window, cx);
@@ -892,13 +900,13 @@ impl FolderView {
 }
 
 fn own_new_items(me: &Me, cx: &App) -> Vec<Item> {
-    let folder_icon = if cx.global::<crate::settings::Settings>().windows_file_explorer_theme {
-        MenuIcon::Asset("windows-theme/context-new-folder.svg")
-    } else {
-        MenuIcon::Tinted(L::Folder, crate::theme::kind_color(crate::icons::Category::Folder, true))
-    };
     vec![
-        Item::action(t!("Klasör"), folder_icon, act(me, |v, _, cx| v.create_new(true, cx))).hint("Ctrl+Shift+N"),
+        Item::action(
+            t!("Klasör"),
+            MenuIcon::Tinted(L::Folder, crate::theme::kind_color(crate::icons::Category::Folder, true)),
+            act(me, |v, _, cx| v.create_new(true, cx)),
+        )
+        .hint("Ctrl+Shift+N"),
         Item::action(t!("Metin belgesi"), icon(L::FileText), act(me, |v, _, cx| v.create_new(false, cx))),
     ]
 }
