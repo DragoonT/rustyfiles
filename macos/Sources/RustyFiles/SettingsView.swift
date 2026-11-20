@@ -159,6 +159,13 @@ enum SettingsContent {
                         options: [("binary", String(localized: "Binary")), ("decimal", String(localized: "Decimal"))],
                         get: { AppSettings.decimalSizes ? "decimal" : "binary" },
                         set: { AppSettings.decimalSizes = $0 == "decimal" })),
+                .card(
+                    title: String(localized: "Folders in the command palette"),
+                    detail: String(localized: "⌘K also finds the folders you went to before; ⌘P lists only them."), icon: "clock",
+                    control: .toggle(get: { AppSettings.paletteFolderHistory }, set: { AppSettings.paletteFolderHistory = $0 })),
+                .card(
+                    title: String(localized: "Folder history"), detail: nil, icon: "eraser",
+                    control: .buttons([(String(localized: "Clear"), { FolderHistory.clear() })])),
             ] + fileBehaviourRows()
         case .tags:
             return tagRows()
