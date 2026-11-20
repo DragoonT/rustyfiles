@@ -191,6 +191,59 @@ pub enum ArchiveFormat {
     Zip,
     SevenZ,
     Rar,
+    TarZst,
+    TarGz,
+    Tar,
+}
+
+impl ArchiveFormat {
+    fn core(self) -> Option<rf_archive::Format> {
+        match self {
+            ArchiveFormat::Zip => Some(rf_archive::Format::Zip),
+            ArchiveFormat::SevenZ => Some(rf_archive::Format::SevenZ),
+            ArchiveFormat::TarZst => Some(rf_archive::Format::TarZst),
+            ArchiveFormat::TarGz => Some(rf_archive::Format::TarGz),
+            ArchiveFormat::Tar => Some(rf_archive::Format::Tar),
+            ArchiveFormat::Rar => None,
+        }
+    }
+}
+
+/// The file extension an archive of this format gets ("zip", "tar.zst"…).
+#[uniffi::export]
+pub fn archive_extension(format: ArchiveFormat) -> String {
+    format.core().map_or("rar", |f| f.extension()).to_string()
+}
+
+/// Whether the format can carry a password (zip and 7z with AES-256, RAR).
+#[uniffi::export]
+pub fn archive_encrypts(format: ArchiveFormat) -> bool {
+    format.core().is_none_or(|f| f.encrypts())
+}
+
+/// "Create archive…" (ctx_menu.rs `create_archive_dialog`): any format at `level` 0-9, with a
+/// password (zip, 7z, RAR), split into parts of `volume_size` bytes (not RAR), and 7z's
+/// dictionary size. Returns the path made (the name may have been taken). Blocks.
+#[uniffi::export]
+pub fn compress_archive(
+    sources: Vec<String>,
+    dest: String,
+    format: ArchiveFormat,
+    level: u32,
+    password: Option<String>,
+    volume_size: Option<u64>,
+    dict_size: Option<u64>,
+) -> Result<String, ArchiveError> {
+    let sources: Vec<PathBuf> = sources.into_iter().map(PathBuf::from).collect();
+    let dest = Path::new(&dest);
+    let result = match format.core() {
+        Some(f) => {
+            let opts = rf_archive::CompressOptions { password, dict_size, volume_size };
+            rf_archive::compress_with(&sources, dest, f, level, &opts, &mut |_| {}, &|| false)
+        }
+        None => rf_archive::compress_rar(&sources, dest, level, password.as_deref(), &mut |_| {}, &|| false),
+    };
+    result.map(|s| s.path.display().to_string()).map_err(ArchiveError::from_anyhow)
 }
 
 /// Packs `sources` into the archive `dest` (which must not exist), at the normal level as the
@@ -202,10 +255,9 @@ pub fn compress(sources: Vec<String>, dest: String, format: ArchiveFormat) -> Re
     let dest = Path::new(&dest);
     // "Normal" in the Windows app's level choice (None / Fast / Normal / Maximum)
     let level = 5;
-    let result = match format {
-        ArchiveFormat::Zip => rf_archive::compress(&sources, dest, rf_archive::Format::Zip, level, &mut |_| {}, &|| false),
-        ArchiveFormat::SevenZ => rf_archive::compress(&sources, dest, rf_archive::Format::SevenZ, level, &mut |_| {}, &|| false),
-        ArchiveFormat::Rar => rf_archive::compress_rar(&sources, dest, level, None, &mut |_| {}, &|| false),
+    let result = match format.core() {
+        Some(f) => rf_archive::compress(&sources, dest, f, level, &mut |_| {}, &|| false),
+        None => rf_archive::compress_rar(&sources, dest, level, None, &mut |_| {}, &|| false),
     };
     result.map(|_| ()).map_err(ArchiveError::from_anyhow)
 }
@@ -214,4 +266,27 @@ pub fn compress(sources: Vec<String>, dest: String, format: ArchiveFormat) -> Re
 #[uniffi::export]
 pub fn can_make_rar() -> bool {
     rf_archive::rar_exe().is_some()
+}
+
+#[cfg(test)]
+mod create_tests {
+    use super::*;
+
+    #[test]
+    fn create_archive_makes_tar_zst_and_a_locked_zip() {
+        let d = std::env::temp_dir().join(format!("rf-mac-create-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("src")).unwrap();
+        std::fs::write(d.join("src/a.txt"), b"hello").unwrap();
+        let src = vec![d.join("src").display().to_string()];
+        assert_eq!(archive_extension(ArchiveFormat::TarZst), "tar.zst");
+        let made = compress_archive(src.clone(), d.join("x.tar.zst").display().to_string(), ArchiveFormat::TarZst, 9, None, None, None).unwrap();
+        assert!(Archive::open(made, None).unwrap().has_folder("src".into()));
+        let locked = compress_archive(src, d.join("l.zip").display().to_string(), ArchiveFormat::Zip, 5, Some("pw".into()), None, None).unwrap();
+        let a = Archive::open(locked, Some("pw".into())).unwrap();
+        let out = d.join("out");
+        assert_eq!(a.extract(vec!["src/a.txt".into()], out.display().to_string()).unwrap(), 1);
+        assert_eq!(std::fs::read(out.join("src/a.txt")).unwrap(), b"hello");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
 }
