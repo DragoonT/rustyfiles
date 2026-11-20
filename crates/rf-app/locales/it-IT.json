@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Modifica",
  "45e1c5b8": "Rimuovi",
  "d255de46": "Aggiungi comando",
- "0675a937": "Comandi personalizzati"
+ "0675a937": "Comandi personalizzati",
+ "a019461a": "Invia a",
+ "9b99d237": "Ibernazione",
+ "429e714c": "Pulsante del terminale nelle schede",
+ "647939bb": "Un pulsante nella scheda di ogni cartella che apre un terminale in quella cartella.",
+ "1a92eb40": "Striscia Mostra desktop",
+ "9022ecfc": "Una sottile striscia all’estremità destra dell’isola destra, dopo la campanella: un clic riduce a icona tutte le finestre e mostra il desktop, il clic successivo le riporta.",
+ "6f0f5329": "Mostra desktop",
+ "b6aea286": "Dettagli del file nell’anteprima",
+ "475cf8e1": "Mostra tipo, dimensione, date e posizione sotto l’anteprima",
+ "0425f790": "Nascondi questa posizione",
+ "45a79fa6": "Posizioni cloud e Linux nascoste",
+ "8834e343": "Le posizioni che hai nascosto una per una dalla barra laterale. Fai clic su una per mostrarla di nuovo.",
+ "9c85c4e6": "Cerca nelle schede",
+ "d61501a6": "Cerca nelle schede…",
+ "ee0eb92e": "Chiusa",
+ "38d8fe5e": "Nessuna scheda corrispondente"
 }

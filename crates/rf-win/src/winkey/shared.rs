@@ -91,6 +91,8 @@ pub struct Shared {
     /// Win+E alone is ours, beside Explorer too: rustyfiles is the default file manager, and Windows' newer Win+E starts Explorer
     /// directly without asking the registry (issue 44). The Windows key itself is left to Windows.
     win_e_on: AtomicBool,
+    /// Win+1 .. Win+9 are ours: the dock runs and stands in for Windows' taskbar, beside Explorer too (issue 91).
+    digits_on: AtomicBool,
     log_only: AtomicBool,
     fullscreen: AtomicBool,
     /// The clock's reading at the last heartbeat, plus one (0: never stamped).
@@ -119,6 +121,7 @@ impl Shared {
             alt_on: AtomicBool::new(false),
             combos_on: AtomicBool::new(false),
             win_e_on: AtomicBool::new(false),
+            digits_on: AtomicBool::new(false),
             log_only: AtomicBool::new(log_only),
             fullscreen: AtomicBool::new(false),
             heartbeat: AtomicU64::new(0),
@@ -223,6 +226,15 @@ impl Shared {
 
     pub fn win_e_on(&self) -> bool {
         self.win_e_on.load(Ordering::Relaxed)
+    }
+
+    pub fn digits_on(&self) -> bool {
+        self.digits_on.load(Ordering::Relaxed)
+    }
+
+    /// Win+1 .. Win+9 are to be taken ([`Shared::digits_on`]).
+    pub fn set_digits(&self, on: bool) {
+        self.digits_on.store(on, Ordering::Relaxed);
     }
 
     /// True when the whole layer must pass every key: the heartbeat is stale or was never made (the interface's thread is not

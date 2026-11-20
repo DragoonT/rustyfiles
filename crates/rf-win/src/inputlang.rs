@@ -37,19 +37,33 @@ pub fn layouts() -> Vec<isize> {
     }
 }
 
-/// The window in front and the layout its thread types in. `None` when no window is in front for the moment.
+/// The window that has the keyboard in the window in front, and the layout ITS thread types in. `None` when no window is in front for
+/// the moment.
+///
+/// WHY THE KEYBOARD'S WINDOW (issue 138: the indicator showed another language than Windows' own, and "sometimes when you click the
+/// language button, it switches language but does not update the name"). The window in front is not always the one that types: a
+/// Store app's frame (`ApplicationFrameWindow`) belongs to a thread of the frame host, and a program may type in a window of another
+/// thread. Its layout was read, and the request was posted, to the frame's thread, which neither showed nor took the real language.
+/// `GetGUIThreadInfo` names the window with the keyboard focus, as Windows' indicator follows it.
 pub fn of_foreground() -> Option<(isize, isize)> {
+    use windows::Win32::UI::WindowsAndMessaging::{GUITHREADINFO, GetGUIThreadInfo};
     unsafe {
         let fg = GetForegroundWindow();
         if fg.0.is_null() {
             return None;
         }
-        let tid = GetWindowThreadProcessId(fg, None);
-        if tid == 0 {
+        let fg_tid = GetWindowThreadProcessId(fg, None);
+        if fg_tid == 0 {
             return None;
         }
+        let mut info = GUITHREADINFO { cbSize: size_of::<GUITHREADINFO>() as u32, ..Default::default() };
+        let focus = if GetGUIThreadInfo(fg_tid, &mut info).is_ok() && !info.hwndFocus.0.is_null() { info.hwndFocus } else { fg };
+        let tid = match GetWindowThreadProcessId(focus, None) {
+            0 => fg_tid,
+            t => t,
+        };
         let hkl = GetKeyboardLayout(tid);
-        (!hkl.0.is_null()).then_some((fg.0 as isize, hkl.0 as isize))
+        (!hkl.0.is_null()).then_some((focus.0 as isize, hkl.0 as isize))
     }
 }
 
@@ -108,12 +122,14 @@ pub fn current() -> Current {
     Current { layouts, code }
 }
 
-/// Asks the window in front to type in the next layout. True when the request was posted (the window's thread then switches; a
-/// window that does not take the message stays as it is).
-pub fn switch_foreground_to_next() -> bool {
-    let Some((hwnd, layout)) = of_foreground() else { return false };
-    let Some(next) = next_layout(&layouts(), layout) else { return false };
-    unsafe { PostMessageW(Some(HWND(hwnd as *mut _)), WM_INPUTLANGCHANGEREQUEST, WPARAM(0), LPARAM(next)).is_ok() }
+/// Asks the window with the keyboard in the window in front to type in the next layout. The short name of that layout when the
+/// request was posted (the window's thread then switches; a window that does not take the message stays as it is, and the next
+/// reading shows that).
+pub fn switch_foreground_to_next() -> Option<String> {
+    let (hwnd, layout) = of_foreground()?;
+    let next = next_layout(&layouts(), layout)?;
+    unsafe { PostMessageW(Some(HWND(hwnd as *mut _)), WM_INPUTLANGCHANGEREQUEST, WPARAM(0), LPARAM(next)) }.ok()?;
+    Some(code(next))
 }
 
 #[cfg(test)]
@@ -162,5 +178,18 @@ mod tests {
         assert_eq!(now.layouts, list.len());
         assert!(now.code.chars().count() <= 3);
         assert!(now.layouts >= 2 || now.code.is_empty(), "with one layout there is nothing to show");
+    }
+}
+
+#[cfg(test)]
+mod manual {
+    /// The keyboard's window in the window in front and its language, as the dock reads them (nothing is switched).
+    #[test]
+    #[ignore]
+    fn manual_read_the_language_of_the_window_in_front() {
+        let fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() }.0 as isize;
+        let got = super::of_foreground();
+        println!("front {fg:#x}, keyboard's window and layout {got:x?}, code {:?}, layouts {}", got.map(|(_, l)| super::code(l)), super::layouts().len());
+        assert!(got.is_some_and(|(_, l)| !super::code(l).is_empty()));
     }
 }

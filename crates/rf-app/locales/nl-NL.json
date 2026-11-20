@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Bewerken",
  "45e1c5b8": "Verwijderen",
  "d255de46": "Opdracht toevoegen",
- "0675a937": "Eigen opdrachten"
+ "0675a937": "Eigen opdrachten",
+ "a019461a": "Kopiëren naar",
+ "9b99d237": "Sluimerstand",
+ "429e714c": "Terminalknop op tabbladen",
+ "647939bb": "Een knop op het tabblad van elke map die een terminal in die map opent.",
+ "1a92eb40": "Strook Bureaublad weergeven",
+ "9022ecfc": "Een smalle strook aan de rechterkant van het rechtereiland, na de bel: een klik minimaliseert alle vensters en toont het bureaublad, de volgende klik brengt ze terug.",
+ "6f0f5329": "Bureaublad weergeven",
+ "b6aea286": "Bestandsgegevens in het voorbeeld",
+ "475cf8e1": "Toont type, grootte, datums en locatie onder het voorbeeld",
+ "0425f790": "Deze locatie verbergen",
+ "45a79fa6": "Verborgen cloud- en Linux-locaties",
+ "8834e343": "De locaties die je één voor één uit de zijbalk hebt verborgen. Klik op een locatie om deze weer te tonen.",
+ "9c85c4e6": "Tabbladen doorzoeken",
+ "d61501a6": "Tabbladen doorzoeken…",
+ "ee0eb92e": "Gesloten",
+ "38d8fe5e": "Geen overeenkomend tabblad"
 }

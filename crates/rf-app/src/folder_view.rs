@@ -136,6 +136,54 @@ fn calendar_key(g: GroupBy, ms: i64) -> (u32, String) {
     }
 }
 
+/// One line of the GROUPED Grid (issue 130: "grouping is only drawn in the Details view"). The list draws lines of one height,
+/// so the grouped Grid is made of slices one group header high: a header is one slice, a row of tiles spans `grid_slices().0`
+/// of them, each slice showing its part of the row.
+#[derive(Clone, Debug, PartialEq)]
+enum GridUnit {
+    Header(SharedString, usize),
+    /// Part `part` of the row of tiles `start..start + len` (visible indices).
+    Tiles { start: usize, len: usize, part: usize },
+}
+
+/// The grouped Grid's lines from the grouped rows: each group's items in rows of `cols` tiles of `slices` slices each. Also, for
+/// every visible index, the line its row of tiles starts at.
+fn grid_units(rows: &[Row], cols: usize, slices: usize) -> (Vec<GridUnit>, Vec<usize>) {
+    let (cols, slices) = (cols.max(1), slices.max(1));
+    let (mut units, mut first_of_vi) = (Vec::new(), Vec::new());
+    let mut flush = |units: &mut Vec<GridUnit>, first_of_vi: &mut Vec<usize>, start: usize, end: usize| {
+        let mut s = start;
+        while s < end {
+            let len = cols.min(end - s);
+            let first = units.len();
+            first_of_vi.extend(std::iter::repeat_n(first, len));
+            units.extend((0..slices).map(|part| GridUnit::Tiles { start: s, len, part }));
+            s += len;
+        }
+    };
+    let mut run: Option<(usize, usize)> = None;
+    for r in rows {
+        match r {
+            Row::Header(label, n) => {
+                if let Some((a, b)) = run.take() {
+                    flush(&mut units, &mut first_of_vi, a, b);
+                }
+                units.push(GridUnit::Header(label.clone(), *n));
+            }
+            Row::Item(vi) => {
+                run = Some(match run {
+                    Some((a, _)) => (a, vi + 1),
+                    None => (*vi, vi + 1),
+                });
+            }
+        }
+    }
+    if let Some((a, b)) = run {
+        flush(&mut units, &mut first_of_vi, a, b);
+    }
+    (units, first_of_vi)
+}
+
 /// A line of the details list when grouping is on.
 #[derive(Clone)]
 enum Row {
@@ -215,6 +263,9 @@ struct Cols {
     /// commit message, author, date, hash
     commit: [bool; 4],
 }
+
+/// The Name column's index for the column drag (the other columns are 0..11, see `col_widths`).
+const NAME_COL: usize = 11;
 
 /// Drag payload of a details-header column edge.
 #[derive(Clone)]
@@ -394,6 +445,14 @@ pub struct FolderView {
     /// Column resize in progress: (column, mouse x at start, width at start), live widths.
     col_drag: Option<(usize, f32, f32)>,
     col_live: Option<[f32; 11]>,
+    /// The grouped Grid's lines and, per visible index, the line its row of tiles starts at; with what they were made for (rows,
+    /// visible items, columns, slices per row).
+    grid_units: std::rc::Rc<(Vec<GridUnit>, Vec<usize>)>,
+    grid_units_for: (usize, usize, usize, usize),
+    /// The Name column's width while a divider is dragged (`NAME_COL`), before it is saved.
+    name_live: Option<f32>,
+    /// At the start of a column drag: the Name column's width and the room left over at the right end.
+    drag_room: (f32, f32),
     /// The columns dragged since the last save, one bit each: only these get a stored width (the others stay automatic).
     col_dragged: u16,
     col_save_gen: u64,
@@ -596,6 +655,10 @@ impl FolderView {
             grid_size: DEFAULT_GRID_SIZE,
             row_size: DEFAULT_ROW_SIZE,
             col_drag: None,
+            grid_units: Default::default(),
+            grid_units_for: (0, 0, 0, 0),
+            name_live: None,
+            drag_room: (0., 0.),
             col_live: None,
             col_dragged: 0,
             col_save_gen: 0,
@@ -1942,7 +2005,7 @@ impl FolderView {
         self.row_of_vi = view.row_of_vi;
         self.visible = view.visible;
         // folded groups: their header stays, their items are not in the list
-        if !self.collapsed.is_empty() && !self.rows.is_empty() && self.view_mode == ViewMode::Details {
+        if !self.collapsed.is_empty() && !self.rows.is_empty() && matches!(self.view_mode, ViewMode::Details | ViewMode::Grid) {
             let (mut rows, mut row_of_vi, mut visible) = (Vec::with_capacity(self.rows.len()), Vec::new(), Vec::new());
             let mut hide = false;
             for r in std::mem::take(&mut self.rows) {
@@ -2185,6 +2248,64 @@ impl FolderView {
         self.view_mode == ViewMode::Details && !self.rows.is_empty()
     }
 
+    /// The Grid with group headers (`GridUnit`).
+    fn grid_grouped(&self) -> bool {
+        self.view_mode == ViewMode::Grid && !self.rows.is_empty()
+    }
+
+    /// Slices per row of tiles in the grouped Grid, and a slice's height (a group header's).
+    fn grid_slices(&self) -> (usize, Pixels) {
+        let rh = f32::from(self.grid_row_h());
+        let m = (rh / 30.).round().max(2.) as usize;
+        (m, px(rh / m as f32))
+    }
+
+    /// The grouped Grid's lines, made again when what they come from changed.
+    fn grid_units_now(&mut self) -> std::rc::Rc<(Vec<GridUnit>, Vec<usize>)> {
+        let key = (self.rows.len(), self.visible.len(), self.grid_cols.max(1), self.grid_slices().0);
+        if key != self.grid_units_for || self.grid_units.0.is_empty() {
+            self.grid_units = std::rc::Rc::new(grid_units(&self.rows, key.2, key.3));
+            self.grid_units_for = key;
+        }
+        self.grid_units.clone()
+    }
+
+    /// The list line to scroll to for visible index `vi`: in the grouped Grid the first or the last slice of its row of tiles,
+    /// whichever brings the whole row into view from where the list stands.
+    fn grid_line_of(&mut self, vi: usize) -> usize {
+        if !self.grid_grouped() {
+            return vi / self.grid_cols.max(1);
+        }
+        let units = self.grid_units_now();
+        let first = units.1.get(vi).copied().unwrap_or(0);
+        let (m, unit) = self.grid_slices();
+        let top = (-f32::from(self.scroll.0.borrow().base_handle.offset().y) / f32::from(unit)).max(0.) as usize;
+        if first < top { first } else { first + m - 1 }
+    }
+
+    /// Up or down one row of tiles in the grouped Grid: the same column of the next (previous) row, across a group header, or that
+    /// row's last tile when it is shorter.
+    fn grid_vertical(&mut self, vi: usize, down: bool) -> usize {
+        let units = self.grid_units_now();
+        let m = self.grid_slices().0;
+        let Some(&first) = units.1.get(vi) else { return vi };
+        let GridUnit::Tiles { start, .. } = units.0[first] else { return vi };
+        let col = vi - start;
+        let mut u = first as isize;
+        loop {
+            u += if down { m as isize } else { -1 };
+            match usize::try_from(u).ok().and_then(|u| units.0.get(u)) {
+                None => return vi,
+                Some(GridUnit::Header(..)) => {
+                    if down {
+                        u -= m as isize - 1;
+                    }
+                }
+                Some(GridUnit::Tiles { start, len, .. }) => return start + col.min(len - 1),
+            }
+        }
+    }
+
     /// Details-list row for a visible index (accounts for group headers).
     fn list_row(&self, vi: usize) -> usize {
         if self.grouped() { self.row_of_vi.get(vi).copied().unwrap_or(vi) } else { vi }
@@ -2254,6 +2375,26 @@ impl FolderView {
         self.cursor = Some(to);
     }
 
+    /// The keyboard came to the list with Tab (issue 38): the item it is on (else the first selected) is brought into view; with
+    /// nothing selected the first item is selected, so the move of the keyboard can be seen.
+    pub(crate) fn keyboard_entered(&mut self, cx: &mut Context<Self>) {
+        if self.visible.is_empty() || self.view_mode == ViewMode::Columns {
+            return;
+        }
+        let vi = self.cursor.filter(|&c| c < self.visible.len()).or_else(|| self.visible.iter().position(|ei| self.selected.contains(ei)));
+        let vi = match vi {
+            Some(vi) => vi,
+            None => {
+                self.select_only(0);
+                0
+            }
+        };
+        self.cursor = Some(vi);
+        let row = if self.view_mode == ViewMode::Grid { self.grid_line_of(vi) } else { self.list_row(vi) };
+        self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
     /// The selection moves to the next or the previous item (DirectLook's arrow keys, see `workspace::step_quick_look`).
     pub(crate) fn step_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
         self.move_cursor(if forward { 1 } else { -1 }, false, cx);
@@ -2272,6 +2413,8 @@ impl FolderView {
                     last
                 }
             }
+            // (in the grouped Grid a step of a row's width is a step to the row below or above, across group headers)
+            Some(c) if self.grid_grouped() && self.grid_cols > 1 && delta.unsigned_abs() == self.grid_cols => self.grid_vertical(c, delta > 0) as isize,
             Some(c) => (c as isize + delta).clamp(0, last),
         } as usize;
         if extend {
@@ -2281,7 +2424,7 @@ impl FolderView {
         } else {
             self.select_only(next);
         }
-        let row = if self.view_mode == ViewMode::Grid { next / self.grid_cols.max(1) } else { self.list_row(next) };
+        let row = if self.view_mode == ViewMode::Grid { self.grid_line_of(next) } else { self.list_row(next) };
         self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
         cx.notify();
     }
@@ -2397,10 +2540,45 @@ impl FolderView {
         let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
         let renamed = self.renamed.clone();
         let mut out = Vec::with_capacity(range.len());
+        let units = self.grid_grouped().then(|| self.grid_units_now());
+        let (_, slice_h) = self.grid_slices();
         for row in range {
+            // (start, how many, the slice of the row) in the grouped Grid; a whole row of `cols` otherwise
+            let (start, len, part) = match units.as_ref().map(|u| u.0.get(row).cloned()) {
+                None => (row * cols, cols, None),
+                Some(Some(GridUnit::Tiles { start, len, part })) => (start, len, Some(part)),
+                Some(Some(GridUnit::Header(label, n))) => {
+                    let folded = self.collapsed.contains(label.as_ref());
+                    let key = label.to_string();
+                    out.push(
+                        h_flex()
+                            .id(("ggrp", row))
+                            .w_full()
+                            .h(slice_h)
+                            .px_2()
+                            .gap_2()
+                            .items_end()
+                            .pb_1()
+                            .text_xs()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(p.text_secondary)
+                            .cursor_pointer()
+                            .hover(|s| s.text_color(p.text))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| this.toggle_group(&key, cx)))
+                            .child(Icon::new(if folded { L::ChevronRight } else { L::ChevronDown }).size(px(12.)))
+                            .child(crate::i18n::td(&label))
+                            .child(div().text_color(p.text_tertiary).child(format!("{n}")))
+                            .child(div().flex_1().mb(px(6.)).h(px(1.)).bg(p.divider))
+                            .into_any_element(),
+                    );
+                    continue;
+                }
+                Some(None) => break,
+            };
             let mut r = h_flex().w_full().h(self.grid_row_h()).gap(GRID_GAP).items_start();
-            for c in 0..cols {
-                let vi = row * cols + c;
+            for c in 0..len {
+                let vi = start + c;
                 let Some(&ei) = self.visible.get(vi) else { break };
                 let e = &self.entries[ei as usize];
                 let selected = self.selected.contains(&ei);
@@ -2543,7 +2721,19 @@ impl FolderView {
                     .when(hover_select, |d| d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))));
                 r = r.child(cell);
             }
-            out.push(r.into_any_element());
+            match part {
+                None => out.push(r.into_any_element()),
+                // one slice of the row: the row drawn whole, moved up by the slices above this one and cut to this slice
+                Some(part) => out.push(
+                    div()
+                        .id(("gslice", row))
+                        .w_full()
+                        .h(slice_h)
+                        .overflow_hidden()
+                        .child(div().relative().top(-(slice_h * part as f32)).w_full().child(r))
+                        .into_any_element(),
+                ),
+            }
         }
         out
     }
@@ -2653,7 +2843,27 @@ impl FolderView {
                 // not while a press, a drag, a rubber band or a rename is going on, and not over a multi-selection made by hand
                 let busy = v.drag_origin.is_some() || v.marquee.is_some() || v.renaming.is_some();
                 let Some(now) = v.visible.iter().position(|&e| e == ei) else { return };
-                if !busy && !(v.selected.len() == 1 && v.selected.contains(&ei)) {
+                if busy {
+                    return;
+                }
+                // with Ctrl held the item joins the selection, with Shift the selection runs from the anchor to it, as in Explorer's
+                // "point to select" (issue 101: each hover replaced the selection)
+                let (ctrl, shift) = unsafe {
+                    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
+                    (GetKeyState(VK_CONTROL.0 as i32) < 0, GetKeyState(VK_SHIFT.0 as i32) < 0)
+                };
+                if shift {
+                    let anchor = v.anchor.unwrap_or(now);
+                    v.select_range(anchor, now);
+                    v.anchor = Some(anchor);
+                    cx.notify();
+                } else if ctrl {
+                    if v.selected.insert(ei) {
+                        v.cursor = Some(now);
+                        v.anchor = Some(now);
+                        cx.notify();
+                    }
+                } else if !(v.selected.len() == 1 && v.selected.contains(&ei)) {
                     v.select_only(now);
                     cx.notify();
                 }
@@ -2770,7 +2980,24 @@ impl FolderView {
                     let cw = f32::from(self.grid_tile_w() + GRID_GAP);
                     let rh = f32::from(self.grid_row_h());
                     let cols = self.grid_cols.max(1);
-                    if y1 >= pt && x1 >= pl {
+                    if self.grid_grouped() && y1 >= pt && x1 >= pl {
+                        // lines one slice high: every row of tiles a slice of the band touches
+                        let units = self.grid_units_now();
+                        let unit = f32::from(self.grid_slices().1);
+                        let u0 = ((y0 - pt).max(0.0) / unit) as usize;
+                        let u1 = (((y1 - pt) / unit) as usize).min(units.0.len().saturating_sub(1));
+                        let c0 = ((x0 - pl).max(0.0) / cw) as usize;
+                        let c1 = (((x1 - pl) / cw) as usize).min(cols - 1);
+                        for u in u0..=u1 {
+                            if let Some(GridUnit::Tiles { start, len, .. }) = units.0.get(u) {
+                                for c in c0..=c1.min(len - 1) {
+                                    if let Some(&ei) = self.visible.get(start + c) {
+                                        sel.insert(ei);
+                                    }
+                                }
+                            }
+                        }
+                    } else if y1 >= pt && x1 >= pl {
                         let r0 = ((y0 - pt).max(0.0) / rh) as usize;
                         let r1 = ((y1 - pt) / rh) as usize;
                         let c0 = ((x0 - pl).max(0.0) / cw) as usize;
@@ -2887,7 +3114,7 @@ impl FolderView {
             let name = rf_core::entry::fold_case(self.entries[self.visible[vi] as usize].shown());
             if name.starts_with(&needle) {
                 self.select_only(vi);
-                let row = if self.view_mode == ViewMode::Grid { vi / self.grid_cols.max(1) } else { self.list_row(vi) };
+                let row = if self.view_mode == ViewMode::Grid { self.grid_line_of(vi) } else { self.list_row(vi) };
                 self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
                 cx.notify();
                 cx.stop_propagation();
@@ -3063,6 +3290,19 @@ impl FolderView {
 
     pub(crate) fn places_pinned_paths(&self, cx: &App) -> Vec<PathBuf> {
         self.places.read(cx).pinned.iter().map(|p| p.path.clone()).collect()
+    }
+
+    /// The drives "Send to" lists after the SendTo folder's entries, as Explorer's does: the removable and the network ones (root,
+    /// name, icon).
+    pub(crate) fn send_to_drives(&self, cx: &App) -> Vec<(PathBuf, String, gpui_kit::assets::IconName)> {
+        use rf_win::drives::DriveKind;
+        self.places
+            .read(cx)
+            .drives
+            .iter()
+            .filter(|d| matches!(d.kind, DriveKind::Removable | DriveKind::Network))
+            .map(|d| (d.root.clone(), places::drive_name(d), places::drive_icon(d)))
+            .collect()
     }
 
     pub(crate) fn refresh_places(&self, cx: &mut Context<Self>) {
@@ -3287,6 +3527,20 @@ impl FolderView {
         })
     }
 
+    /// The Name column's width when it has one (a divider was dragged: the columns stand from the left, the room left over is at the
+    /// right end, as in Explorer); `None` while it takes what the other columns leave.
+    fn name_fixed(&self, cx: &App) -> Option<f32> {
+        self.name_live.or_else(|| {
+            let w = cx.global::<crate::settings::Settings>().columns.name_width;
+            (w > 0).then_some(f32::from(w))
+        })
+    }
+
+    /// The width the Name column has now (what it is given, or what the other columns leave it).
+    fn name_now(&self, cx: &App) -> f32 {
+        self.name_fixed(cx).unwrap_or_else(|| 180. + self.spare_width(cx))
+    }
+
     /// Which Details columns show: the ones turned on that make sense here (git inside a
     /// repository, sync with cloud files, location in search), then as many as fit the pane
     /// in priority order — the name column keeps at least 180 px.
@@ -3305,7 +3559,7 @@ impl FolderView {
         };
         let w = self.col_widths(cx);
         // the property columns the user added are placed first: the fixed columns share what is left
-        let mut free = f32::from(self.content_width) - 180. - 24. - self.gutter() - self.props_used_width(cx);
+        let mut free = f32::from(self.content_width) - self.name_fixed(cx).unwrap_or(180.) - 24. - self.gutter() - self.props_used_width(cx);
         let mut take = |want: bool, width: f32| -> bool {
             if want && width <= free {
                 free -= width;
@@ -3349,33 +3603,50 @@ impl FolderView {
                 used += w[7 + i];
             }
         }
-        (f32::from(self.content_width) - 180. - 24. - self.gutter() - used).max(0.)
+        (f32::from(self.content_width) - self.name_fixed(cx).unwrap_or(180.) - 24. - self.gutter() - used).max(0.)
     }
 
     fn render_header(&self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let w = self.col_widths(cx);
         let search = self.is_search();
-        // drag handle on a column's left edge: dragging left widens it (the name column gives way)
+        // The drag handle on a column's RIGHT edge sizes that column and moves the ones after it, as in Explorer (issue 135: "Dragging
+        // will adjust the width of the left column, while moving the ones to the right together. Double-clicking will auto adjust the
+        // left column width"). The Name column has one too (`NAME_COL`).
+        // (inside the column, with the line at its edge: the part of a handle that reached into the next column lay under that
+        // column's header, which takes the press)
         let handle = |ix: usize, cx: &mut Context<Self>| {
             div()
                 .id(("col-resize", ix))
                 .absolute()
-                .left(px(-4.))
+                .right_0()
                 .top_0()
                 .h_full()
                 .w(px(8.))
+                .flex()
+                .justify_end()
                 .cursor_col_resize()
-                .child(div().mx_auto().w(px(1.)).h_full().bg(p.divider))
+                .child(div().w(px(1.)).h_full().bg(p.divider))
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
+                    cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
                         cx.stop_propagation();
                         if ev.click_count >= 2 {
-                            // a double click on the edge gives the column its own width back (as Explorer fits a column there)
-                            this.reset_col_width(ix, cx);
+                            // a double click on the edge fits the column to its content (as Explorer does)
+                            if ix == NAME_COL {
+                                this.fit_name_col(window, cx);
+                            } else {
+                                this.reset_col_width(ix, cx);
+                            }
                             return;
                         }
-                        let cur = this.col_widths(cx)[ix];
+                        // from the first drag on, the Name column keeps its width and the columns stand from the left: a column that
+                        // grows then pushes the ones after it instead of eating into the names
+                        let name = this.name_now(cx).round();
+                        if this.name_fixed(cx).is_none() {
+                            this.name_live = Some(name);
+                        }
+                        let cur = if ix == NAME_COL { name } else { this.col_widths(cx)[ix] };
+                        this.drag_room = (name, this.spare_width(cx));
                         this.col_drag = Some((ix, f32::from(ev.position.x), cur));
                     }),
                 )
@@ -3431,19 +3702,31 @@ impl FolderView {
             .border_color(p.divider)
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ColumnResize>, _, cx| {
                 let Some((ix, sx, sw)) = this.col_drag else { return };
-                let mut w = this.col_widths(cx);
-                // no wider than the room left: a column that no longer fits is hidden, so
-                // widening one would make it (or its neighbour) vanish under the pointer
-                let most = (w[ix] + this.spare_width(cx)).clamp(w[ix].min(600.), 600.);
-                w[ix] = (sw - (f32::from(e.event.position.x) - sx)).clamp(70., most.max(70.)).round();
-                this.col_live = Some(w);
-                this.col_dragged |= 1 << ix;
+                let dx = f32::from(e.event.position.x) - sx;
+                // no wider than the room left at the right end: a column that no longer fits is hidden, so widening one past it would
+                // make the last one vanish under the pointer
+                let (name0, spare0) = this.drag_room;
+                if ix == NAME_COL {
+                    // the Name column may take the whole width: the columns that no longer fit after it are hidden, as in a narrow
+                    // window (Explorer scrolls sideways instead; this list has no sideways scrolling)
+                    let most = f32::from(this.content_width) - 24. - this.gutter() - this.props_used_width(cx);
+                    this.name_live = Some((sw + dx).clamp(120., most.max(120.)).round());
+                } else {
+                    let mut w = this.col_widths(cx);
+                    // into the room at the right end first, then the Name column gives way, down to 180 px
+                    let most = (sw + spare0 + (name0 - 180.).max(0.)).clamp(sw.min(600.), 600.);
+                    w[ix] = (sw + dx).clamp(70., most.max(70.)).round();
+                    let past = (w[ix] - sw - spare0).max(0.);
+                    this.name_live = Some((name0 - past).max(180.).min(name0).round());
+                    this.col_live = Some(w);
+                    this.col_dragged |= 1 << ix;
+                }
                 this.schedule_col_save(cx);
                 cx.notify();
             }))
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<prop_cols::PropResize>, _, cx| this.props_drag_move(e, cx)))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, ev: &MouseDownEvent, window, cx| this.show_header_menu(ev.position, window, cx)))
-            .child(col("h-name", t!("Ad"), SortKey::Name, None, false, cx))
+            .child(col("h-name", t!("Ad"), SortKey::Name, self.name_fixed(cx).map(px), false, cx).relative().child(handle(NAME_COL, cx)))
             .children(show_tags.then(|| self.sortx_header("h-tags", t!("Dosya etiketi"), w[4], SortKey::Tag, p, cx).child(handle(4, cx))))
             .children(show_git.then(|| plain("h-git", t!("Git durumu"), w[5]).child(handle(5, cx))))
             .children(show_sync.then(|| self.sortx_header("h-sync", t!("Eşitleme durumu"), w[6], SortKey::Sync, p, cx).child(handle(6, cx))))
@@ -3464,6 +3747,8 @@ impl FolderView {
             }))
             .children(vis.size.then(|| col("h-size", t!("Boyut"), SortKey::Size, Some(px(w[3])), true, cx).relative().child(handle(3, cx))))
             .children(self.props_header_cells(p, cx))
+            // (the room left over, once the Name column has a width of its own)
+            .when(self.name_fixed(cx).is_some(), |d| d.child(div().flex_1()))
     }
 
     fn store_col_width(c: &mut crate::settings::ColumnPrefs, ix: usize, width: u16) {
@@ -3472,6 +3757,30 @@ impl FolderView {
             4..=6 => c.extra_widths[ix - 4] = width,
             _ => c.git_widths[(ix - 7).min(3)] = width,
         }
+    }
+
+    /// A double click on the Name column's right edge: as wide as the longest name shown (its icon and padding included), within the
+    /// room there is; the other columns keep their widths.
+    fn fit_name_col(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.col_drag = None;
+        let style = window.text_style();
+        let size = style.font_size.to_pixels(window.rem_size());
+        // (the longest names by their letters: measuring every one of 100 000 would hold the frame)
+        let mut names: Vec<&str> = self.visible.iter().filter_map(|&i| self.entries.get(i as usize)).map(|e| e.name.as_ref()).collect();
+        names.sort_by_key(|n| std::cmp::Reverse(n.chars().count()));
+        let widest = names
+            .iter()
+            .take(400)
+            .map(|n| f32::from(window.text_system().layout_line(n, size, &[style.to_run(n.len())], None).width))
+            .fold(0., f32::max);
+        let checkbox = if cx.global::<crate::settings::Settings>().show_checkboxes { 24. } else { 0. };
+        // icon 16 + gap 8 + the cell's padding 16, and a little air
+        let want = (widest + 16. + 8. + 16. + checkbox + 12.).round();
+        let most = self.name_now(cx) + self.spare_width(cx);
+        let w = want.clamp(120., most.max(120.));
+        self.name_live = None;
+        crate::settings::update(cx, |s| s.columns.name_width = w as u16);
+        cx.notify();
     }
 
     /// The column at `ix` gets its stock width again, which for most columns means "as wide as its content" (`auto_cols.rs`).
@@ -3500,6 +3809,10 @@ impl FolderView {
             let _ = this.update(cx, |v, cx| {
                 if v.col_save_gen != generation {
                     return;
+                }
+                if let Some(n) = v.name_live.take() {
+                    v.col_drag = None;
+                    crate::settings::update(cx, |s| s.columns.name_width = n.round().clamp(120., 4000.) as u16);
                 }
                 if let Some(w) = v.col_live.take() {
                     v.col_drag = None;
@@ -3536,6 +3849,7 @@ impl FolderView {
         let show_size = vis.size;
         let type_w = self.type_col_w(cx);
         let cw = self.col_widths(cx);
+        let name_w = self.name_fixed(cx);
         let grouped = self.grouped();
         let row_h = self.row_h();
         let (col_tags, col_git, col_sync) = (vis.tags, vis.git, vis.sync);
@@ -3797,8 +4111,10 @@ impl FolderView {
                 )
                 .child(
                     h_flex()
-                        .flex_1()
-                        .min_w(px(120.))
+                        .map(|d| match name_w {
+                            Some(w) => d.w(px(w)).flex_shrink_0(),
+                            None => d.flex_1().min_w(px(120.)),
+                        })
                         .px_2()
                         .gap_2()
                         .items_center()
@@ -3925,6 +4241,7 @@ impl FolderView {
                     row.child(cell)
                 })
                 .children(prop_cells)
+                .when(name_w.is_some(), |row| row.child(div().flex_1()))
                 // Settings → "Select files and folders on hover"
                 .when(hover_select, |row| row.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))));
             out.push(row.into_any_element());
@@ -3952,7 +4269,7 @@ impl FolderView {
             let avail = self.content_width - px(12.);
             let cols = ((avail / (self.grid_tile_w() + GRID_GAP)).floor() as usize).max(1);
             self.grid_cols = cols;
-            let rows = count.div_ceil(cols);
+            let rows = if self.grid_grouped() { self.grid_units_now().0.len() } else { count.div_ceil(cols) };
             list_body = true;
             uniform_list("grid", rows, cx.processor(|this, range, window, cx| this.render_grid_rows(range, window, cx)))
                 .track_scroll(&self.scroll)
@@ -4678,7 +4995,16 @@ fn static_column(
             .into_any_element()
         }
     };
-    div().w(COL_W).flex_shrink_0().h_full().border_r_1().border_color(p.divider).child(body)
+    div()
+        .w(COL_W)
+        .flex_shrink_0()
+        .h_full()
+        .border_r_1()
+        .border_color(p.divider)
+        // a press on the column's empty space is not the list's: the list's background took it as a click on nothing, cleared the
+        // selection, and the column of the selected folder went away under the pointer (issue 140)
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(body)
 }
 
 const GRID_GAP: Pixels = px(4.);
@@ -5013,7 +5339,9 @@ pub(crate) fn scrollbar_mode() -> ScrollbarMode {
 
 /// The grid's name of a right-to-left name in at most two lines (issue 115): GPUI wraps such a run after every letter, so the name is
 /// split here, at a space, by measured width; each line is then drawn unwrapped (the last one ends in "…" when it is still too long).
-/// One line when it fits or has no space to split at.
+/// One line when it fits or has no space to split at. A last line that is still too long is cut here too, with the "…" at the END
+/// of its text: drawn right to left, that is its LEFT side, where a right-to-left reader expects it (issue 115: the text renderer's own
+/// cut put it on the right).
 fn rtl_grid_lines(name: &str, avail: Pixels, window: &Window) -> Vec<String> {
     let style = window.text_style();
     let size = rems(0.75).to_pixels(window.rem_size());
@@ -5034,9 +5362,27 @@ fn rtl_grid_lines(name: &str, avail: Pixels, window: &Window) -> Vec<String> {
         take = i;
     }
     if take == 0 {
-        return vec![name.to_string()];
+        return vec![cut_to_width(name, avail, &width)];
     }
-    vec![words[..take].join(" "), words[take..].join(" ")]
+    vec![words[..take].join(" "), cut_to_width(&words[take..].join(" "), avail, &width)]
+}
+
+/// `text` as it is when it fits in `avail`, else shortened at its end (in reading order) to what fits with "…" after it.
+fn cut_to_width(text: &str, avail: Pixels, width: &dyn Fn(&str) -> Pixels) -> String {
+    if width(text) <= avail {
+        return text.to_string();
+    }
+    let mut chars: Vec<char> = text.chars().collect();
+    while !chars.is_empty() {
+        chars.pop();
+        // (a right-to-left mark after the "…": the text renderer lays the line out left to right, and a "…" with nothing strong
+        // after it took that direction and stood on the right; between two right-to-left letters it goes with them, to the left)
+        let cut: String = chars.iter().collect::<String>().trim_end().to_string() + "…\u{200F}";
+        if width(&cut) <= avail {
+            return cut;
+        }
+    }
+    "…".to_string()
 }
 
 /// The key in the layouts file under which "the same layout in all folders" keeps its one layout (`<` cannot start a real path).
@@ -5299,4 +5645,53 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
         let _ = tx.send(f());
     }).ok()?;
     rx.recv_timeout(limit).ok()
+}
+
+#[cfg(test)]
+mod grid_units_tests {
+    use super::{GridUnit, Row, grid_units};
+
+    fn rows(groups: &[(&str, usize)]) -> Vec<Row> {
+        let mut out = Vec::new();
+        let mut vi = 0;
+        for (label, n) in groups {
+            out.push(Row::Header((*label).to_string().into(), *n));
+            for _ in 0..*n {
+                out.push(Row::Item(vi));
+                vi += 1;
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn each_group_starts_a_row_and_a_row_spans_its_slices() {
+        // 5 items then 2, three tiles a row, two slices a row
+        let (units, first) = grid_units(&rows(&[("Today", 5), ("Earlier", 2)]), 3, 2);
+        let tiles = |start, len, part| GridUnit::Tiles { start, len, part };
+        assert_eq!(
+            units,
+            vec![
+                GridUnit::Header("Today".into(), 5),
+                tiles(0, 3, 0),
+                tiles(0, 3, 1),
+                tiles(3, 2, 0),
+                tiles(3, 2, 1),
+                GridUnit::Header("Earlier".into(), 2),
+                tiles(5, 2, 0),
+                tiles(5, 2, 1),
+            ]
+        );
+        assert_eq!(first, [1, 1, 1, 3, 3, 6, 6], "each item's row starts at its first slice");
+    }
+
+    #[test]
+    fn a_folded_group_keeps_its_header_alone() {
+        let mut r = rows(&[("A", 2)]);
+        r.push(Row::Header("Folded".to_string().into(), 4));
+        let (units, first) = grid_units(&r, 4, 3);
+        assert_eq!(units.len(), 1 + 3 + 1);
+        assert_eq!(units[4], GridUnit::Header("Folded".into(), 4));
+        assert_eq!(first, [1, 1]);
+    }
 }

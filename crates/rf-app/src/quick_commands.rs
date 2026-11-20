@@ -168,16 +168,20 @@ pub(crate) fn edit(index: Option<usize>, window: &mut Window, cx: &mut App) {
                 )))
                 .child(tx("Simge (isteğe bağlı)", "Icon (optional)"))
                 .child(h_flex().items_center().gap_2().child(div().flex_1().min_w_0().child(Input::new(&icon))).child(browse))
-                .child(gpui_kit::component::checkbox::Checkbox::new("command-in-menu")
-                    .label(tx("Açılır menüde göster", "Show in menu"))
-                    .checked(*in_menu.read(cx))
-                    .on_change(move |checked, _, cx| {
+                .child(h_flex()
+                    .w_full()
+                    .pt_1()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(div().text_sm().text_color(palette.text).child(tx("Açılır menüde göster", "Show in menu")))
+                    .child(crate::settings_view::switch("command-in-menu", &palette, *in_menu.read(cx), move |_, cx| {
                         menu_flag.update(cx, |value, cx| {
-                            *value = *checked;
+                            *value = !*value;
                             cx.notify();
                         });
                         cx.refresh_windows();
-                    }))
+                    })))
                 .children(error.read(cx).clone().map(|msg| div().text_color(rgb(0xd84949)).child(msg))))
             .on_ok(move |_, _, cx| {
                 let label = label_in.read(cx).value().trim().to_owned();

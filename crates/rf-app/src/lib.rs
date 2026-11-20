@@ -573,6 +573,26 @@ pub fn main() {
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
     let arg = arg.filter(|_| !new_window);
+    // several folders on the command line (issue 125): a first one that is gone (moved, renamed) is passed over, not handed to Explorer
+    // with its error, and the first one that is there opens instead; `first_taken` is how many arguments that used up
+    let mut first_taken = 1;
+    let arg = match arg {
+        Some(a) if std::env::args().nth(2).is_some() && !a.starts_with("::") && !a.to_ascii_lowercase().starts_with("shell:") && !a.starts_with("/") && !a.starts_with('-') && !std::path::Path::new(&a).exists() => {
+            let later = std::env::args()
+                .enumerate()
+                .skip(2)
+                .map(|(i, x)| (i, x.trim().trim_matches('"').to_string()))
+                .find(|(_, x)| !x.is_empty() && !x.starts_with("--") && is_dir_bounded(PathBuf::from(x), std::time::Duration::from_secs(2)) == Some(true));
+            match later {
+                Some((i, x)) => {
+                    first_taken = i;
+                    Some(x)
+                }
+                None => Some(a),
+            }
+        }
+        other => other,
+    };
     let mut start: Option<Location> = None;
     // Explorer's `/select,<file>`: its folder, with the file selected
     // (callers also write `/select, <file>`: the path then comes as the next argument)
@@ -683,6 +703,18 @@ pub fn main() {
         )
     });
 
+    // more folders on the command line (`rustyfiles.exe "C:\My Pictures" "D:\My Videos"`): each one a tab of the same window, after the
+    // first (issue 125). Only plain folders that are there (one that is gone is passed over without a word), after a first argument that
+    // was one too.
+    let more_folders: Vec<String> = if matches!(start, Some(Location::Path(_))) && select.is_none() {
+        std::env::args()
+            .skip(first_taken + 1)
+            .map(|a| a.trim().trim_matches('"').to_string())
+            .filter(|a| !a.is_empty() && !a.starts_with("--") && is_dir_bounded(PathBuf::from(a), std::time::Duration::from_secs(2)) == Some(true))
+            .collect()
+    } else {
+        Vec::new()
+    };
     // "Show in folder" from other apps (SHOpenFolderAndSelectItems: Telegram, browsers) while we
     // are the default file manager: Windows opens the folder through our verb and names the
     // file afterwards, to a window it finds in its window list (see rf_win::shell_window). The
@@ -751,6 +783,9 @@ pub fn main() {
                 if let Some(msg) = shell_select.and_then(shell_selected) {
                     rf_win::handover::send_followup(&msg);
                 }
+                for folder in &more_folders {
+                    rf_win::handover::send_followup(folder);
+                }
                 return;
             }
             rf_win::single_instance::Role::Primary(guard) => Some(guard),
@@ -760,6 +795,10 @@ pub fn main() {
     let (ipc_tx, ipc_rx) = futures::channel::mpsc::unbounded::<String>();
     // second launches: each comes with the acknowledgement it waits for (the other senders of ipc_tx need none)
     let (launch_tx, launch_rx) = futures::channel::mpsc::unbounded::<(String, rf_win::handover::Ack)>();
+    // (this process is the first: its own extra folders open as tabs once the window is there, like second launches do)
+    for folder in more_folders {
+        let _ = ipc_tx.unbounded_send(folder);
+    }
     if let Some(rx) = shell_select {
         let tx = ipc_tx.clone();
         std::thread::spawn(move || {
@@ -776,6 +815,8 @@ pub fn main() {
         });
     }
 
+    // a drag of files that live inside the source (a mail's attachment, a browser's image) is dropped as files (see rf_win::vfiles)
+    gpui_windows::dnd_hint::set_virtual_reader(rf_win::vfiles::drag_paths);
     // (the first window on the CPU renderer or on the card: what this machine was like the last time, see `fast_start`)
     fast_start::before_app(!dock && !bar_preview && pick.is_none() && !quick_search && !snip_only && !no_window && !open_look_settings);
     start_mark("before the app");

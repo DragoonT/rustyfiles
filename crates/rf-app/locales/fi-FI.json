@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Muokkaa",
  "45e1c5b8": "Poista",
  "d255de46": "Lisää komento",
- "0675a937": "Omat komennot"
+ "0675a937": "Omat komennot",
+ "a019461a": "Lähetä kohteeseen",
+ "9b99d237": "Horrostila",
+ "429e714c": "Pääteikkunapainike välilehdillä",
+ "647939bb": "Jokaisen kansion välilehdellä oleva painike, joka avaa pääteikkunan kyseiseen kansioon.",
+ "1a92eb40": "Näytä työpöytä -palkki",
+ "9022ecfc": "Ohut palkki oikean saarekkeen oikeassa reunassa kellon jälkeen: napsautus pienentää kaikki ikkunat ja näyttää työpöydän, seuraava tuo ne takaisin.",
+ "6f0f5329": "Näytä työpöytä",
+ "b6aea286": "Tiedoston tiedot esikatselussa",
+ "475cf8e1": "Näyttää tyypin, koon, päivämäärät ja sijainnin esikatselun alla",
+ "0425f790": "Piilota tämä sijainti",
+ "45a79fa6": "Piilotetut pilvi- ja Linux-sijainnit",
+ "8834e343": "Sijainnit, jotka olet piilottanut sivupalkista yksitellen. Näytä sijainti uudelleen napsauttamalla sitä.",
+ "9c85c4e6": "Hae välilehdistä",
+ "d61501a6": "Hae välilehdistä…",
+ "ee0eb92e": "Suljettu",
+ "38d8fe5e": "Ei vastaavaa välilehteä"
 }

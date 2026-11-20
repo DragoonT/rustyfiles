@@ -72,7 +72,8 @@ fn load_recent(limit: usize) -> Vec<Recent> {
 fn load_cloud_and_wsl() -> Vec<Pinned> {
     let mut out = Vec::new();
     let mut add = |title: String, path: PathBuf, icon: L| {
-        if path.is_dir() && !out.iter().any(|p: &Pinned| p.path == path) {
+        let same = |p: &Pinned| p.path.as_os_str().eq_ignore_ascii_case(path.as_os_str());
+        if path.is_dir() && !out.iter().any(same) {
             out.push(Pinned { title, path, icon });
         }
     };
@@ -98,6 +99,11 @@ fn load_cloud_and_wsl() -> Vec<Pinned> {
     }
     for letter in ['G', 'H'] {
         add("Google Drive".into(), PathBuf::from(format!("{letter}:\\My Drive")), L::Cloud);
+    }
+    // every other sync root Windows knows (issue 141: Proton Drive, pCloud, Nextcloud, Box, MEGA ...), as Explorer lists them; one
+    // that is already in the list above (OneDrive) stays as it is
+    for r in rf_win::syncroots::list() {
+        add(r.name, r.path, L::Cloud);
     }
     // WSL distributions registered for this user
     if let Ok(lxss) = windows_registry::CURRENT_USER.open(r"Software\Microsoft\Windows\CurrentVersion\Lxss") {

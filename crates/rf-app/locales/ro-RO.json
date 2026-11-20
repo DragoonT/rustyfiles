@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Modifică",
  "45e1c5b8": "Elimină",
  "d255de46": "Adaugă comandă",
- "0675a937": "Comenzi personalizate"
+ "0675a937": "Comenzi personalizate",
+ "a019461a": "Trimitere către",
+ "9b99d237": "Hibernare",
+ "429e714c": "Buton de terminal pe file",
+ "647939bb": "Un buton pe fila fiecărui folder care deschide un terminal în acel folder.",
+ "1a92eb40": "Banda Afișare desktop",
+ "9022ecfc": "O bandă subțire la capătul din dreapta al insulei din dreapta, după clopoțel: un clic minimizează toate ferestrele și afișează desktopul, următorul le readuce.",
+ "6f0f5329": "Afișare desktop",
+ "b6aea286": "Detaliile fișierului în previzualizare",
+ "475cf8e1": "Afișează tipul, dimensiunea, datele și locația sub previzualizare",
+ "0425f790": "Ascunde această locație",
+ "45a79fa6": "Locații cloud și Linux ascunse",
+ "8834e343": "Locațiile pe care le-ați ascuns din bara laterală una câte una. Faceți clic pe una pentru a o afișa din nou.",
+ "9c85c4e6": "Caută în file",
+ "d61501a6": "Caută în file…",
+ "ee0eb92e": "Închisă",
+ "38d8fe5e": "Nicio filă potrivită"
 }

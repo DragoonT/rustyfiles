@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Rediger",
  "45e1c5b8": "Fjern",
  "d255de46": "Tilføj kommando",
- "0675a937": "Brugerdefinerede kommandoer"
+ "0675a937": "Brugerdefinerede kommandoer",
+ "a019461a": "Send til",
+ "9b99d237": "Dvale",
+ "429e714c": "Terminalknap på faner",
+ "647939bb": "En knap på hver mappes fane, der åbner en terminal i mappen.",
+ "1a92eb40": "Bjælken Vis skrivebord",
+ "9022ecfc": "En tynd bjælke yderst til højre på den højre ø, efter klokken: et klik minimerer alle vinduer og viser skrivebordet, det næste klik henter dem tilbage.",
+ "6f0f5329": "Vis skrivebord",
+ "b6aea286": "Fildetaljer i eksempelvisningen",
+ "475cf8e1": "Viser type, størrelse, datoer og placering under eksempelvisningen",
+ "0425f790": "Skjul denne placering",
+ "45a79fa6": "Skjulte cloud- og Linux-placeringer",
+ "8834e343": "De placeringer, du har skjult fra sidepanelet én ad gangen. Klik på én for at vise den igen.",
+ "9c85c4e6": "Søg i faner",
+ "d61501a6": "Søg i faner…",
+ "ee0eb92e": "Lukket",
+ "38d8fe5e": "Ingen matchende fane"
 }

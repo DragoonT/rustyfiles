@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Edit",
  "45e1c5b8": "Remove",
  "d255de46": "Add command",
- "0675a937": "Custom commands"
+ "0675a937": "Custom commands",
+ "a019461a": "Send to",
+ "9b99d237": "Hibernate",
+ "429e714c": "Terminal button on tabs",
+ "647939bb": "A button on each folder's tab that opens a terminal in that folder.",
+ "1a92eb40": "Show desktop strip",
+ "9022ecfc": "A thin strip at the right end of the right island, after the bell: a click minimises every window and shows the desktop, the next click brings them back.",
+ "6f0f5329": "Show desktop",
+ "b6aea286": "File details in the preview",
+ "475cf8e1": "Shows the type, size, dates and location under the preview",
+ "0425f790": "Hide this place",
+ "45a79fa6": "Hidden cloud and Linux places",
+ "8834e343": "The places you hid from the sidebar one by one. Click one to show it again.",
+ "9c85c4e6": "Search tabs",
+ "d61501a6": "Search tabs…",
+ "ee0eb92e": "Closed",
+ "38d8fe5e": "No matching tab"
 }

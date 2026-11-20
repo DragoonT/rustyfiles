@@ -256,7 +256,7 @@ impl FolderView {
         if chosen.is_empty() {
             return Vec::new();
         }
-        let room = f32::from(self.content_width) - 180. - 24. - self.gutter();
+        let room = f32::from(self.content_width) - self.name_fixed(cx).unwrap_or(180.) - 24. - self.gutter();
         let n = pc::fit_count(chosen.iter().map(|c| c.width), room);
         chosen.iter().take(n).cloned().enumerate().collect()
     }
@@ -269,8 +269,8 @@ impl FolderView {
         self.props_visible(cx).iter().map(|(_, c)| f32::from(c.width)).sum()
     }
 
-    /// The header cells of the property columns: a label, an arrow when the list is sorted by it, a
-    /// handle on the left edge to resize, a click to sort.
+    /// The header cells of the property columns: a label, an arrow when the list is sorted by it, a handle on the RIGHT edge that
+    /// sizes the column and moves the ones after it (as the other columns' do, issue 135), a click to sort.
     pub(super) fn props_header_cells(&self, p: &Palette, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let vis = self.props_visible(cx);
         let mut out = Vec::with_capacity(vis.len());
@@ -303,16 +303,34 @@ impl FolderView {
                         div()
                             .id(("prop-resize", ix))
                             .absolute()
-                            .left(px(-4.))
+                            .right_0()
                             .top_0()
                             .h_full()
                             .w(px(8.))
+                            .flex()
+                            .justify_end()
                             .cursor_col_resize()
-                            .child(div().mx_auto().w(px(1.)).h_full().bg(p.divider))
+                            .child(div().w(px(1.)).h_full().bg(p.divider))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, ev: &MouseDownEvent, _, cx| {
                                     cx.stop_propagation();
+                                    if ev.click_count >= 2 {
+                                        // a double click gives the column its usual width back
+                                        this.props.drag = None;
+                                        crate::settings::update(cx, move |s| {
+                                            let mut c = ChosenColumns::from_setting(&s.columns.properties);
+                                            c.set_width(ix, pc::DEFAULT_WIDTH);
+                                            s.columns.properties = c.to_setting();
+                                        });
+                                        return;
+                                    }
+                                    // as the other columns: from the first drag the Name column keeps its width (see `render_header`)
+                                    let name = this.name_now(cx).round();
+                                    if this.name_fixed(cx).is_none() {
+                                        this.name_live = Some(name);
+                                    }
+                                    this.drag_room = (name, this.spare_width(cx));
                                     let cur = this.props_chosen(cx).get(ix).map_or(pc::DEFAULT_WIDTH, |c| c.width);
                                     this.props.drag = Some((ix, f32::from(ev.position.x), cur));
                                 }),
@@ -329,10 +347,17 @@ impl FolderView {
     pub(super) fn props_drag_move(&mut self, e: &DragMoveEvent<PropResize>, cx: &mut Context<Self>) {
         let Some((ix, sx, sw)) = self.props.drag else { return };
         let mut widths: Vec<u16> = self.props_chosen(cx).iter().map(|c| c.width).collect();
-        let Some(cur) = widths.get(ix).copied() else { return };
-        // no wider than the room left: a column that no longer fits is hidden
-        let most = (f32::from(cur) + self.spare_width(cx)).clamp(f32::from(cur).min(600.), 600.);
-        widths[ix] = (f32::from(sw) - (f32::from(e.event.position.x) - sx)).clamp(70., most.max(70.)).round() as u16;
+        if widths.get(ix).is_none() {
+            return;
+        }
+        // into the room at the right end first, then the Name column gives way, down to 180 px (as the other columns)
+        let (name0, spare0) = self.drag_room;
+        let sw = f32::from(sw);
+        let most = (sw + spare0 + (name0 - 180.).max(0.)).clamp(sw.min(600.), 600.);
+        let w = (sw + (f32::from(e.event.position.x) - sx)).clamp(70., most.max(70.)).round();
+        widths[ix] = w as u16;
+        let past = (w - sw - spare0).max(0.);
+        self.name_live = Some((name0 - past).max(180.).min(name0).round());
         self.props.live = Some(widths);
         self.props.save_gen += 1;
         let generation = self.props.save_gen;
@@ -343,6 +368,9 @@ impl FolderView {
                     return;
                 }
                 v.props.drag = None;
+                if let Some(n) = v.name_live.take() {
+                    crate::settings::update(cx, |s| s.columns.name_width = n.round().clamp(120., 4000.) as u16);
+                }
                 if let Some(widths) = v.props.live.take() {
                     crate::settings::update(cx, move |s| {
                         let mut c = ChosenColumns::from_setting(&s.columns.properties);

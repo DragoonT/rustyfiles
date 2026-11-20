@@ -12437,5 +12437,101 @@
   "tr": "Özel komutlar",
   "en": "Custom commands",
   "note": "A settings row and a toolbar menu: the user's own toolbar buttons that start programs."
+ },
+ {
+  "id": "a019461a",
+  "key": "Gönder",
+  "tr": "Gönder",
+  "en": "Send to"
+ },
+ {
+  "id": "9b99d237",
+  "key": "Hazırda beklet",
+  "tr": "Hazırda beklet",
+  "en": "Hibernate"
+ },
+ {
+  "id": "429e714c",
+  "key": "Sekmelerde terminal düğmesi",
+  "tr": "Sekmelerde terminal düğmesi",
+  "en": "Terminal button on tabs"
+ },
+ {
+  "id": "647939bb",
+  "key": "Her klasör sekmesinde, o klasörde bir terminal açan düğme.",
+  "tr": "Her klasör sekmesinde, o klasörde bir terminal açan düğme.",
+  "en": "A button on each folder's tab that opens a terminal in that folder."
+ },
+ {
+  "id": "1a92eb40",
+  "key": "Masaüstünü göster şeridi",
+  "tr": "Masaüstünü göster şeridi",
+  "en": "Show desktop strip"
+ },
+ {
+  "id": "9022ecfc",
+  "key": "Sağ adanın en sağında, zilden sonra ince bir şerit: tıklayınca bütün pencereler küçülür ve masaüstü görünür, bir daha tıklayınca geri gelir.",
+  "tr": "Sağ adanın en sağında, zilden sonra ince bir şerit: tıklayınca bütün pencereler küçülür ve masaüstü görünür, bir daha tıklayınca geri gelir.",
+  "en": "A thin strip at the right end of the right island, after the bell: a click minimizes every window and shows the desktop, the next click brings them back."
+ },
+ {
+  "id": "6f0f5329",
+  "key": "Masaüstünü göster",
+  "tr": "Masaüstünü göster",
+  "en": "Show desktop"
+ },
+ {
+  "id": "b6aea286",
+  "key": "Önizlemede dosya bilgileri",
+  "tr": "Önizlemede dosya bilgileri",
+  "en": "File details in the preview"
+ },
+ {
+  "id": "475cf8e1",
+  "key": "Önizlemenin altında türü, boyutu, tarihleri ve konumu gösterir",
+  "tr": "Önizlemenin altında türü, boyutu, tarihleri ve konumu gösterir",
+  "en": "Shows the type, size, dates and location under the preview"
+ },
+ {
+  "id": "0425f790",
+  "key": "Bu konumu gizle",
+  "tr": "Bu konumu gizle",
+  "en": "Hide this place"
+ },
+ {
+  "id": "45a79fa6",
+  "key": "Gizlenen bulut ve Linux konumları",
+  "tr": "Gizlenen bulut ve Linux konumları",
+  "en": "Hidden cloud and Linux places"
+ },
+ {
+  "id": "8834e343",
+  "key": "Kenar çubuğunda tek tek gizlediğiniz konumlar. Birine tıklayınca yeniden görünür.",
+  "tr": "Kenar çubuğunda tek tek gizlediğiniz konumlar. Birine tıklayınca yeniden görünür.",
+  "en": "The places you hid from the sidebar one by one. Click one to show it again."
+ },
+ {
+  "id": "9c85c4e6",
+  "key": "Sekmelerde ara",
+  "tr": "Sekmelerde ara",
+  "en": "Search tabs"
+ },
+ {
+  "id": "d61501a6",
+  "key": "Sekmelerde ara…",
+  "tr": "Sekmelerde ara…",
+  "en": "Search tabs…"
+ },
+ {
+  "id": "ee0eb92e",
+  "key": "Kapatıldı",
+  "tr": "Kapatıldı",
+  "en": "Closed"
+ },
+ {
+  "id": "38d8fe5e",
+  "key": "Eşleşen sekme yok",
+  "tr": "Eşleşen sekme yok",
+  "en": "No matching tab"
  }
 ]

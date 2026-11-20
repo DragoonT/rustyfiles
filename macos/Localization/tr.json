@@ -661,5 +661,9 @@
 "Rename…": "Yeniden adlandır…",
 "Colour": "Renk",
 "New tag…": "Yeni etiket…",
-"The copy of “%@” does not match the original.": "“%@” kopyası özgün dosyayla eşleşmiyor."
+"The copy of “%@” does not match the original.": "“%@” kopyası özgün dosyayla eşleşmiyor.",
+"Default file manager": "Varsayılan dosya yöneticisi",
+"rustyfiles opens the folders other apps show (“Show in Finder”) and open. The Dock, the desktop and Open / Save panels stay Finder’s.": "Diğer uygulamaların gösterdiği (“Finder’da Göster”) ve açtığı klasörler rustyfiles’ta açılıyor. Dock, masaüstü ve Aç / Kaydet pencereleri Finder’da kalır.",
+"Make other apps’ “Show in Finder” and the folders they open come to rustyfiles. The Dock, the desktop and Open / Save panels stay Finder’s.": "Diğer uygulamaların “Finder’da Göster” komutu ve açtığı klasörler rustyfiles’ta açılsın. Dock, masaüstü ve Aç / Kaydet pencereleri Finder’da kalır.",
+"Give it back to Finder": "Finder’a geri ver"
 }

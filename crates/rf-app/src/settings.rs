@@ -264,6 +264,8 @@ pub struct MenuPrefs {
     pub tags: bool,
     pub shelf: bool,
     pub terminal: bool,
+    /// Explorer's "Send to" (the SendTo folder's entries and the drives) in the first menu. Issue 117.
+    pub send_to: bool,
     /// Shell extensions under "Show more options" (off = listed at the bottom of the menu).
     pub shell_submenu: bool,
 }
@@ -280,6 +282,7 @@ impl Default for MenuPrefs {
             tags: true,
             shelf: true,
             terminal: true,
+            send_to: true,
             shell_submenu: true,
         }
     }
@@ -313,6 +316,14 @@ pub struct ColumnPrefs {
     /// then nothing of the property columns runs and the file has no such key.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<String>,
+    /// The Name column's width once a divider was dragged (issue 135: dividers work as in Explorer, the columns stand from the left
+    /// and the room left over is at the right end). 0: the Name column takes whatever the others leave, as before any drag.
+    #[serde(skip_serializing_if = "is_zero_u16")]
+    pub name_width: u16,
+}
+
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
 }
 
 impl Default for ColumnPrefs {
@@ -333,6 +344,7 @@ impl Default for ColumnPrefs {
             git_hash: false,
             git_widths: [240, 130, 140, 90],
             properties: Vec::new(),
+            name_width: 0,
         }
     }
 }
@@ -386,6 +398,10 @@ pub struct Settings {
     pub preview_open: bool,
     /// The preview pane of the Open/Save dialogs, kept apart from the main windows' (shown until it is closed once: issue 87).
     pub picker_preview_open: bool,
+    /// The Open/Save dialog's size as the user left it (logical px), as Windows' own dialogs remember theirs. Issue 89: "the size of
+    /// the file selection window ... is too large for a standard 1920x1080 px laptop screen".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picker_size: Option<[u16; 2]>,
     pub sidebar_open: bool,
     /// The sidebar as a narrow strip of icons (drag it narrow to get there).
     pub sidebar_rail: bool,
@@ -417,6 +433,9 @@ pub struct Settings {
     /// The pane's height at the bottom (drag its top edge). Written only once the user has moved it.
     #[serde(skip_serializing_if = "is_default_preview_height")]
     pub preview_height: f32,
+    /// The file's details under its preview (type, size, dates, location, the hash button). Asked for on the rustyfiles Discord: "Hope
+    /// the Properties can have an option to hide".
+    pub preview_details: bool,
     pub renderer: RendererPref,
     pub restore_session: bool,
     /// Last session's tab locations ("" = Home).
@@ -434,6 +453,10 @@ pub struct Settings {
     /// The drives that are not listed (the sidebar, the Home page, the address bar's list of drives), as letters ("V"). A drive
     /// Explorer hides by its own policy is hidden too, without being named here (`rf_win::drives::visible_drives`).
     pub hidden_drives: Vec<String>,
+    /// Cloud and WSL places taken off the sidebar one by one (their paths). Issue 141: "a way to hide a single entry in that section
+    /// (right click > Hide), like "Hidden drives"".
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hidden_places: Vec<String>,
     /// The accent colour of rustyfiles as "#RRGGBB"; empty: Windows' own accent (Settings > Appearance).
     pub accent_color: String,
     /// The user's own programs for kinds of files (Settings > File types; `rf_core::openrules`): the first program of a list opens
@@ -547,6 +570,8 @@ pub struct Settings {
     pub select_on_hover: bool,
     /// Each tab as wide as its name (within the usual limits) instead of all tabs equally wide. Issue 119.
     pub tabs_fit_names: bool,
+    /// The terminal button on each folder's tab. Issue 119: it was in the way of clicks on narrow tabs.
+    pub tab_terminal_button: bool,
     /// Typing in a folder's list filters it by name (the filter bar opens with the letters); off: typing selects the item whose
     /// name starts with them. Issue 106.
     pub type_to_filter: bool,
@@ -655,6 +680,9 @@ pub struct Settings {
     pub dock_autohide: bool,
     /// The dock's islands on a solid fill instead of the glass (off; issue 113).
     pub dock_opaque: bool,
+    /// A thin "Show desktop" strip at the right end of the primary monitor's right island, after the bell, as on Windows' taskbar (off;
+    /// issue 127).
+    pub dock_show_desktop: bool,
     /// The left island's search: a field, its button only, or none (`DockSearch`).
     pub dock_search: DockSearch,
     /// A click on the dock's search field or button opens HyperSearch instead of the Start panel (issue 41). Off by default.
@@ -774,6 +802,7 @@ impl Default for Settings {
             show_hidden: false,
             preview_open: true,
             picker_preview_open: true,
+            picker_size: None,
             sidebar_open: true,
             sidebar_rail: false,
             sidebar_width: 232.,
@@ -796,6 +825,7 @@ impl Default for Settings {
             pinned: None,
             folder_aliases: Default::default(),
             hidden_drives: Vec::new(),
+            hidden_places: Vec::new(),
             accent_color: String::new(),
             open_rules: Vec::new(),
             run_in_background: false,
@@ -858,6 +888,8 @@ impl Default for Settings {
             warn_extension_change: true,
             select_on_hover: false,
             tabs_fit_names: false,
+            tab_terminal_button: true,
+            preview_details: true,
             type_to_filter: false,
             double_click_up: true,
             select_previous_on_up: true,
@@ -903,6 +935,7 @@ impl Default for Settings {
             dock_side_tall: false,
             dock_autohide: false,
             dock_opaque: false,
+            dock_show_desktop: false,
             dock_search: DockSearch::Field,
             dock_search_hypersearch: false,
             dock_tray_compact: false,
@@ -1403,6 +1436,10 @@ pub fn local_data_dir() -> Option<std::path::PathBuf> {
     if let Some(d) = std::env::var_os("RUSTYFILES_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(std::path::PathBuf::from(d));
     }
+    // the portable copy keeps everything in its own folder (issue 71)
+    if let Some(d) = rf_win::portable::data_dir() {
+        return Some(d);
+    }
     dirs::data_local_dir().map(|d| d.join("rustyfiles"))
 }
 
@@ -1410,6 +1447,10 @@ pub fn local_data_dir() -> Option<std::path::PathBuf> {
 pub fn app_dir() -> Option<std::path::PathBuf> {
     if let Some(d) = std::env::var_os("RUSTYFILES_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(std::path::PathBuf::from(d));
+    }
+    // the portable copy: its own `data` folder (`rf_win::portable`, issue 71)
+    if let Some(d) = rf_win::portable::data_dir() {
+        return Some(d);
     }
     dirs::config_dir().map(|d| d.join("rustyfiles"))
 }
@@ -1572,8 +1613,8 @@ fn sync_name_index(on: bool, excluded: &[String]) {
             return;
         }
         // a copy with its own settings folder (tests, portable) keeps its index there too
-        let dir = match std::env::var_os("RUSTYFILES_CONFIG_DIR") {
-            Some(cfg) => std::path::PathBuf::from(cfg).join("index"),
+        let dir = match std::env::var_os("RUSTYFILES_CONFIG_DIR").map(std::path::PathBuf::from).or_else(rf_win::portable::data_dir) {
+            Some(cfg) => cfg.join("index"),
             None => std::env::var_os("LOCALAPPDATA").map_or_else(std::env::temp_dir, std::path::PathBuf::from).join("rustyfiles").join("index"),
         };
         // RUSTYFILES_INDEX_ROOTS="E:\;F:\" picks the roots (testing)

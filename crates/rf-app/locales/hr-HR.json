@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Uredi",
  "45e1c5b8": "Ukloni",
  "d255de46": "Dodaj naredbu",
- "0675a937": "Prilagođene naredbe"
+ "0675a937": "Prilagođene naredbe",
+ "a019461a": "Pošalji u",
+ "9b99d237": "Hibernacija",
+ "429e714c": "Gumb terminala na karticama",
+ "647939bb": "Gumb na kartici svake mape koji otvara terminal u toj mapi.",
+ "1a92eb40": "Traka Prikaži radnu površinu",
+ "9022ecfc": "Tanka traka na desnom kraju desnog otoka, nakon zvona: klik minimizira sve prozore i prikazuje radnu površinu, sljedeći klik ih vraća.",
+ "6f0f5329": "Prikaži radnu površinu",
+ "b6aea286": "Pojedinosti o datoteci u pretpregledu",
+ "475cf8e1": "Prikazuje vrstu, veličinu, datume i lokaciju ispod pretpregleda",
+ "0425f790": "Sakrij ovu lokaciju",
+ "45a79fa6": "Skrivene lokacije oblaka i Linuxa",
+ "8834e343": "Lokacije koje ste jednu po jednu sakrili s bočne trake. Kliknite jednu da se ponovno prikaže.",
+ "9c85c4e6": "Pretraži kartice",
+ "d61501a6": "Pretraži kartice…",
+ "ee0eb92e": "Zatvorena",
+ "38d8fe5e": "Nema odgovarajuće kartice"
 }

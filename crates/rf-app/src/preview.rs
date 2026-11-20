@@ -916,6 +916,12 @@ impl Render for Preview {
         let playable = !handler && self.playable(&path, &e);
         let video = matches!(cat, Category::Video);
         let video_on = playable && video && !self.occluded && self.player.as_ref().is_some_and(|pl| pl.path == path && pl.started);
+        // Without the file details under it the picture takes the pane's whole height, as Explorer's preview pane does (asked on the
+        // rustyfiles Discord: "full half of the screen view would make it work like Windows"); a text or an archive's list below
+        // keeps the fixed sizes.
+        let fill = !cx.global::<crate::settings::Settings>().preview_details
+            && !self.text.as_ref().is_some_and(|(tp, _)| *tp == path)
+            && !self.extra.as_ref().is_some_and(|(xp, _)| *xp == path);
         let visual_box: AnyElement = if video_on {
             // our player draws the video here (its own window, kept over this box)
             let me = cx.entity().downgrade();
@@ -942,7 +948,7 @@ impl Render for Preview {
             let hp = path.clone();
             div()
                 .w_full()
-                .h(px(420.))
+                .map(|d| if fill { d.flex_1().min_h(px(232.)) } else { d.h(px(420.)) })
                 .rounded(theme::RADIUS)
                 .bg(p.hover)
                 .child(
@@ -959,7 +965,7 @@ impl Render for Preview {
             self.hide_host();
             let thumb = self.thumb_or_hold(&dir, &e, PREVIEW_PX, cx);
             let visual: AnyElement = match thumb {
-                Some(im) => img(im).w_full().h(px(220.)).object_fit(ObjectFit::Contain).into_any_element(),
+                Some(im) => img(im).w_full().map(|i| if fill { i.h_full() } else { i.h(px(220.)) }).object_fit(ObjectFit::Contain).into_any_element(),
                 None => Icon::new(icons::icon_for(cat))
                     .size(px(96.))
                     .text_color(theme::kind_color(cat, p.dark))
@@ -967,7 +973,7 @@ impl Render for Preview {
             };
             div()
                 .w_full()
-                .h(px(232.))
+                .map(|d| if fill { d.flex_1().min_h(px(232.)) } else { d.h(px(232.)) })
                 .flex()
                 .items_center()
                 .justify_center()
@@ -1041,6 +1047,10 @@ impl Render for Preview {
                     .into_any_element(),
             )
         };
+        // (the details can be switched off: Settings, "File details in the preview")
+        if !cx.global::<crate::settings::Settings>().preview_details {
+            return col.into_any_element();
+        }
         col.child(div().w_full().h(px(1.)).bg(p.divider)).child(props).children(hash_section).into_any_element()
     }
 }

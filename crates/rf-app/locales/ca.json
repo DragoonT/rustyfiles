@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Edita",
  "45e1c5b8": "Elimina",
  "d255de46": "Afegeix una ordre",
- "0675a937": "Ordres personalitzades"
+ "0675a937": "Ordres personalitzades",
+ "a019461a": "Envia a",
+ "9b99d237": "Hiberna",
+ "429e714c": "Botó del terminal a les pestanyes",
+ "647939bb": "Un botó a la pestanya de cada carpeta que obre un terminal en aquesta carpeta.",
+ "1a92eb40": "Franja de Mostra l'escriptori",
+ "9022ecfc": "Una franja fina a l'extrem dret de l'illa dreta, després de la campana: un clic minimitza totes les finestres i mostra l'escriptori, el següent les torna.",
+ "6f0f5329": "Mostra l'escriptori",
+ "b6aea286": "Detalls del fitxer a la previsualització",
+ "475cf8e1": "Mostra el tipus, la mida, les dates i la ubicació sota la previsualització",
+ "0425f790": "Amaga aquesta ubicació",
+ "45a79fa6": "Ubicacions del núvol i de Linux amagades",
+ "8834e343": "Les ubicacions que has amagat de la barra lateral una a una. Fes-hi clic per tornar-les a mostrar.",
+ "9c85c4e6": "Cerca a les pestanyes",
+ "d61501a6": "Cerca a les pestanyes…",
+ "ee0eb92e": "Tancada",
+ "38d8fe5e": "Cap pestanya coincident"
 }

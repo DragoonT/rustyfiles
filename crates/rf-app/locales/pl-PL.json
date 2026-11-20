@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Edytuj",
  "45e1c5b8": "Usuń",
  "d255de46": "Dodaj polecenie",
- "0675a937": "Polecenia użytkownika"
+ "0675a937": "Polecenia użytkownika",
+ "a019461a": "Wyślij do",
+ "9b99d237": "Hibernacja",
+ "429e714c": "Przycisk terminala na kartach",
+ "647939bb": "Przycisk na karcie każdego folderu, który otwiera terminal w tym folderze.",
+ "1a92eb40": "Pasek Pokaż pulpit",
+ "9022ecfc": "Cienki pasek na prawym końcu prawej wyspy, za dzwonkiem: kliknięcie minimalizuje wszystkie okna i pokazuje pulpit, kolejne kliknięcie je przywraca.",
+ "6f0f5329": "Pokaż pulpit",
+ "b6aea286": "Szczegóły pliku w podglądzie",
+ "475cf8e1": "Pokazuje typ, rozmiar, daty i lokalizację pod podglądem",
+ "0425f790": "Ukryj to miejsce",
+ "45a79fa6": "Ukryte miejsca w chmurze i Linuksie",
+ "8834e343": "Miejsca ukryte pojedynczo na pasku bocznym. Kliknij jedno, aby znów je pokazać.",
+ "9c85c4e6": "Szukaj w kartach",
+ "d61501a6": "Szukaj w kartach…",
+ "ee0eb92e": "Zamknięta",
+ "38d8fe5e": "Brak pasującej karty"
 }

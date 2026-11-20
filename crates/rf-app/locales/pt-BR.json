@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Editar",
  "45e1c5b8": "Remover",
  "d255de46": "Adicionar comando",
- "0675a937": "Comandos personalizados"
+ "0675a937": "Comandos personalizados",
+ "a019461a": "Enviar para",
+ "9b99d237": "Hibernar",
+ "429e714c": "Botão de terminal nas guias",
+ "647939bb": "Um botão na guia de cada pasta que abre um terminal nessa pasta.",
+ "1a92eb40": "Faixa Mostrar área de trabalho",
+ "9022ecfc": "Uma faixa fina na extremidade direita da ilha direita, depois do sino: um clique minimiza todas as janelas e mostra a área de trabalho, o próximo as traz de volta.",
+ "6f0f5329": "Mostrar área de trabalho",
+ "b6aea286": "Detalhes do arquivo na visualização",
+ "475cf8e1": "Mostra o tipo, o tamanho, as datas e o local abaixo da visualização",
+ "0425f790": "Ocultar este local",
+ "45a79fa6": "Locais de nuvem e Linux ocultos",
+ "8834e343": "Os locais que você ocultou da barra lateral um a um. Clique em um para mostrá-lo novamente.",
+ "9c85c4e6": "Pesquisar nas abas",
+ "d61501a6": "Pesquisar nas abas…",
+ "ee0eb92e": "Fechada",
+ "38d8fe5e": "Nenhuma aba correspondente"
 }

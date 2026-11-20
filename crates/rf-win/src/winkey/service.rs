@@ -146,6 +146,8 @@ pub struct KeyService<F: KeyFeed> {
     combos: bool,
     /// Win+E alone is wanted (see `set_win_e`).
     win_e: bool,
+    /// Win+1 .. Win+9 are wanted (see `set_digits`).
+    digits: bool,
     mask_failures_logged: u32,
     /// Consecutive beats at which the chord was held and the keyboard said Alt was up.
     chord_strikes: u8,
@@ -176,6 +178,7 @@ impl<F: KeyFeed> KeyService<F> {
             gave_up_at: None,
             combos: false,
             win_e: false,
+            digits: false,
             mask_failures_logged: 0,
             chord_strikes: 0,
         }
@@ -223,6 +226,7 @@ impl<F: KeyFeed> KeyService<F> {
             shared.set_wanted(win_key, own_switcher);
             shared.set_combos(self.combos);
             shared.set_win_e(self.win_e);
+            shared.set_digits(self.digits);
             let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let dispatcher = spawn_dispatcher(shared.clone(), stop.clone(), self.deliver.clone());
             // (the first beat, so that the hook does not start out failing open for a quarter of a second)
@@ -248,6 +252,14 @@ impl<F: KeyFeed> KeyService<F> {
 
     /// Win+E alone is taken (true), beside Explorer too, with no other setting needed: rustyfiles is the default file manager
     /// (issue 44). Call before [`set_wanted`](Self::set_wanted), which starts the hook for it.
+    /// Win+1 .. Win+9 open the dock's apps (true): the dock stands in for Windows' taskbar. Works with the Windows key's layer.
+    pub fn set_digits(&mut self, on: bool) {
+        self.digits = on;
+        if let Some(r) = &self.running {
+            r.shared.set_digits(on);
+        }
+    }
+
     pub fn set_win_e(&mut self, on: bool) {
         self.win_e = on;
         if let Some(r) = &self.running {

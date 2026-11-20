@@ -2061,5 +2061,21 @@
  "60fc6ab4": "Ubah",
  "45e1c5b8": "Hapus",
  "d255de46": "Tambah perintah",
- "0675a937": "Perintah kustom"
+ "0675a937": "Perintah kustom",
+ "a019461a": "Kirim ke",
+ "9b99d237": "Hibernasi",
+ "429e714c": "Tombol terminal di tab",
+ "647939bb": "Tombol di tab setiap folder yang membuka terminal di folder tersebut.",
+ "1a92eb40": "Strip Tampilkan desktop",
+ "9022ecfc": "Strip tipis di ujung kanan pulau kanan, setelah lonceng: satu klik meminimalkan semua jendela dan menampilkan desktop, klik berikutnya mengembalikannya.",
+ "6f0f5329": "Tampilkan desktop",
+ "b6aea286": "Detail file di pratinjau",
+ "475cf8e1": "Menampilkan jenis, ukuran, tanggal, dan lokasi di bawah pratinjau",
+ "0425f790": "Sembunyikan lokasi ini",
+ "45a79fa6": "Lokasi cloud dan Linux yang disembunyikan",
+ "8834e343": "Lokasi yang Anda sembunyikan dari bilah samping satu per satu. Klik salah satunya untuk menampilkannya lagi.",
+ "9c85c4e6": "Cari tab",
+ "d61501a6": "Cari tab…",
+ "ee0eb92e": "Ditutup",
+ "38d8fe5e": "Tidak ada tab yang cocok"
 }
