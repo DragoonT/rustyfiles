@@ -2375,6 +2375,26 @@ impl FolderView {
         self.cursor = Some(to);
     }
 
+    /// The keyboard came to the list with Tab (issue 38): the item it is on (else the first selected) is brought into view; with
+    /// nothing selected the first item is selected, so the move of the keyboard can be seen.
+    pub(crate) fn keyboard_entered(&mut self, cx: &mut Context<Self>) {
+        if self.visible.is_empty() || self.view_mode == ViewMode::Columns {
+            return;
+        }
+        let vi = self.cursor.filter(|&c| c < self.visible.len()).or_else(|| self.visible.iter().position(|ei| self.selected.contains(ei)));
+        let vi = match vi {
+            Some(vi) => vi,
+            None => {
+                self.select_only(0);
+                0
+            }
+        };
+        self.cursor = Some(vi);
+        let row = if self.view_mode == ViewMode::Grid { self.grid_line_of(vi) } else { self.list_row(vi) };
+        self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+        cx.notify();
+    }
+
     /// The selection moves to the next or the previous item (DirectLook's arrow keys, see `workspace::step_quick_look`).
     pub(crate) fn step_selection(&mut self, forward: bool, cx: &mut Context<Self>) {
         self.move_cursor(if forward { 1 } else { -1 }, false, cx);

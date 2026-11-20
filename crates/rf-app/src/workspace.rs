@@ -1129,9 +1129,16 @@ impl Workspace {
                     self.editing_address = false;
                     self.clear_suggestions();
                 }
+                // (the pane the keyboard comes to shows where it is: its row in view, the first one when none was chosen; issue 38)
                 match (to, tree) {
-                    (Pane::Tree, Some(f)) => window.focus(&f, cx),
-                    _ => self.focus_active(window, cx),
+                    (Pane::Tree, Some(f)) => {
+                        window.focus(&f, cx);
+                        self.tree_keyboard_entered(cx);
+                    }
+                    _ => {
+                        self.focus_active(window, cx);
+                        self.active_tab().clone().update(cx, |v, cx| v.keyboard_entered(cx));
+                    }
                 }
                 cx.notify();
             }
