@@ -2077,5 +2077,14 @@
  "9c85c4e6": "Keresés a lapokon",
  "d61501a6": "Keresés a lapokon…",
  "ee0eb92e": "Bezárva",
- "38d8fe5e": "Nincs egyező lap"
+ "38d8fe5e": "Nincs egyező lap",
+ "9ed0e8eb": "Értesítési terület két sorban",
+ "03429b74": "A jobb sziget értesítési területének ikonjai megtartják szokásos méretüket, és két sorban állnak: ugyanakkora szélességben kétszer annyi fér el.",
+ "f19b9d2a": "Nevek az ikonok alatt",
+ "985e4d39": "A középső sziget minden alkalmazás nevét az ikonja alatt mutatja.",
+ "f65a0ac5": "A nem futó rögzített alkalmazások balra",
+ "1c0163bd": "A rögzített, de meg nem nyitott alkalmazások indítóként a bal szigeten állnak; a középső szigeten csak a futó alkalmazások vannak.",
+ "33a923e6": "Szövegméret",
+ "40d45e5e": "A szöveg mérete a fájlkezelő ablakaiban",
+ "92bc0ce7": "Kivétel a mappából"
 }

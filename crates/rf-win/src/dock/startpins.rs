@@ -25,6 +25,10 @@ pub struct Pin {
     pub id: String,
     /// The app's name when it was pinned.
     pub name: String,
+    /// The folder the pin is in (issue 88: "group icons on start menu ... the same behavior of windows"): pins with the same folder
+    /// name are one tile, where the first of them stands. A program from before folders reads the file and shows them one by one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,7 +80,7 @@ impl PinFile {
         if self.is_pinned(&app.id) {
             return false;
         }
-        self.pins.push(Pin { id: app.id.clone(), name: app.name.clone() });
+        self.pins.push(Pin { id: app.id.clone(), name: app.name.clone(), folder: None });
         true
     }
 
@@ -112,7 +116,7 @@ pub fn seed(taskbar: &[PinnedApp], apps: &[App]) -> Vec<Pin> {
         if let Some(a) = found
             && !out.iter().any(|o| same_id(&o.id, &a.id))
         {
-            out.push(Pin { id: a.id.clone(), name: a.name.clone() });
+            out.push(Pin { id: a.id.clone(), name: a.name.clone(), folder: None });
         }
         if out.len() >= SEED_MAX {
             break;
@@ -406,7 +410,7 @@ mod tests {
         let f = PinFile {
             version: 1,
             seeded: true,
-            pins: vec![Pin { id: "Microsoft.Paint_8wekyb3d8bbwe!App".into(), name: "Paint".into() }, Pin { id: r"{6D809377}\Notepad++\notepad++.exe".into(), name: "Notepad++".into() }, Pin { id: "isik".into(), name: "Işık Ayarları".into() }],
+            pins: vec![Pin { id: "Microsoft.Paint_8wekyb3d8bbwe!App".into(), name: "Paint".into(), folder: None }, Pin { id: r"{6D809377}\Notepad++\notepad++.exe".into(), name: "Notepad++".into(), folder: None }, Pin { id: "isik".into(), name: "Işık Ayarları".into(), folder: None }],
         };
         assert_eq!(PinFile::parse(&f.to_json()), Some(f));
     }

@@ -2077,5 +2077,14 @@
  "9c85c4e6": "Hledat v kartách",
  "d61501a6": "Hledat v kartách…",
  "ee0eb92e": "Zavřená",
- "38d8fe5e": "Žádná odpovídající karta"
+ "38d8fe5e": "Žádná odpovídající karta",
+ "9ed0e8eb": "Oznamovací oblast ve dvou řádcích",
+ "03429b74": "Ikony oznamovací oblasti v pravém ostrově si ponechají obvyklou velikost a stojí ve dvou řádcích: do stejné šířky se vejde dvakrát víc ikon.",
+ "f19b9d2a": "Názvy pod ikonami",
+ "985e4d39": "Prostřední ostrov zobrazuje název každé aplikace pod její ikonou.",
+ "f65a0ac5": "Připnuté aplikace, které neběží, vlevo",
+ "1c0163bd": "Připnuté, ale neotevřené aplikace stojí v levém ostrově jako spouštěče; v prostředním ostrově jsou jen běžící aplikace.",
+ "33a923e6": "Velikost textu",
+ "40d45e5e": "Velikost textu v oknech správce souborů",
+ "92bc0ce7": "Vyjmout ze složky"
 }

@@ -2077,5 +2077,14 @@
  "9c85c4e6": "Søk i faner",
  "d61501a6": "Søk i faner…",
  "ee0eb92e": "Lukket",
- "38d8fe5e": "Ingen samsvarende fane"
+ "38d8fe5e": "Ingen samsvarende fane",
+ "9ed0e8eb": "Systemstatusfelt i to rader",
+ "03429b74": "Ikonene i systemstatusfeltet på høyre øy beholder vanlig størrelse og står i to rader: dobbelt så mange får plass i samme bredde.",
+ "f19b9d2a": "Navn under ikonene",
+ "985e4d39": "Den midterste øya viser navnet på hver app under ikonet.",
+ "f65a0ac5": "Festede apper som ikke kjører, til venstre",
+ "1c0163bd": "Festede apper som ikke er åpne, står i venstre øy som startere; den midterste øya har bare appene som kjører.",
+ "33a923e6": "Tekststørrelse",
+ "40d45e5e": "Størrelsen på teksten i filbehandlerens vinduer",
+ "92bc0ce7": "Ta ut av mappen"
 }

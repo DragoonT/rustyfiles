@@ -4467,6 +4467,11 @@ impl Render for Workspace {
             static FIRST: std::sync::Once = std::sync::Once::new();
             FIRST.call_once(|| crate::start_mark("first render"));
         }
+        // the text size (Settings > Appearance, issue 89): the window's base size, which the texts are given in
+        let rem = crate::settings::rem_for(cx.global::<crate::settings::Settings>().text_percent);
+        if f32::from(window.rem_size()) != rem {
+            window.set_rem_size(px(rem));
+        }
         // Shortcuts (Ctrl+T, Ctrl+W, …) only reach elements on the focus path: with nothing
         // focused (a window opened from a desktop icon, a closed popup took focus with it) they
         // would do nothing. The current folder takes focus back.

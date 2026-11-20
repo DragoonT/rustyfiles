@@ -151,7 +151,7 @@ enum GridUnit {
 fn grid_units(rows: &[Row], cols: usize, slices: usize) -> (Vec<GridUnit>, Vec<usize>) {
     let (cols, slices) = (cols.max(1), slices.max(1));
     let (mut units, mut first_of_vi) = (Vec::new(), Vec::new());
-    let mut flush = |units: &mut Vec<GridUnit>, first_of_vi: &mut Vec<usize>, start: usize, end: usize| {
+    let flush = |units: &mut Vec<GridUnit>, first_of_vi: &mut Vec<usize>, start: usize, end: usize| {
         let mut s = start;
         while s < end {
             let len = cols.min(end - s);

@@ -2077,5 +2077,14 @@
  "9c85c4e6": "Pretraži kartice",
  "d61501a6": "Pretraži kartice…",
  "ee0eb92e": "Zatvorena",
- "38d8fe5e": "Nema odgovarajuće kartice"
+ "38d8fe5e": "Nema odgovarajuće kartice",
+ "9ed0e8eb": "Programska traka u dva reda",
+ "03429b74": "Ikone programske trake na desnom otoku zadržavaju uobičajenu veličinu i stoje u dva reda: u istu širinu stane dvostruko više ikona.",
+ "f19b9d2a": "Nazivi ispod ikona",
+ "985e4d39": "Srednji otok prikazuje naziv svake aplikacije ispod njezine ikone.",
+ "f65a0ac5": "Prikvačene aplikacije koje se ne izvode lijevo",
+ "1c0163bd": "Prikvačene, ali neotvorene aplikacije stoje na lijevom otoku kao pokretači; srednji otok sadrži samo pokrenute aplikacije.",
+ "33a923e6": "Veličina teksta",
+ "40d45e5e": "Veličina teksta u prozorima upravitelja datoteka",
+ "92bc0ce7": "Izvadi iz mape"
 }

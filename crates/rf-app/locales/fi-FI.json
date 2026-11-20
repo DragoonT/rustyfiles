@@ -2077,5 +2077,14 @@
  "9c85c4e6": "Hae välilehdistä",
  "d61501a6": "Hae välilehdistä…",
  "ee0eb92e": "Suljettu",
- "38d8fe5e": "Ei vastaavaa välilehteä"
+ "38d8fe5e": "Ei vastaavaa välilehteä",
+ "9ed0e8eb": "Ilmaisinalue kahdella rivillä",
+ "03429b74": "Oikean saaren ilmaisinalueen kuvakkeet säilyttävät tavallisen kokonsa ja asettuvat kahdelle riville: samaan leveyteen mahtuu kaksi kertaa enemmän.",
+ "f19b9d2a": "Nimet kuvakkeiden alla",
+ "985e4d39": "Keskimmäinen saari näyttää kunkin sovelluksen nimen sen kuvakkeen alla.",
+ "f65a0ac5": "Kiinnitetyt sovellukset, jotka eivät ole käynnissä, vasemmalla",
+ "1c0163bd": "Kiinnitetyt mutta avaamattomat sovellukset ovat vasemmassa saaressa käynnistiminä; keskimmäisessä saaressa ovat vain käynnissä olevat sovellukset.",
+ "33a923e6": "Tekstin koko",
+ "40d45e5e": "Tekstin koko tiedostonhallinnan ikkunoissa",
+ "92bc0ce7": "Poista kansiosta"
 }

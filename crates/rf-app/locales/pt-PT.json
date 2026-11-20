@@ -2077,5 +2077,14 @@
  "9c85c4e6": "Procurar nos separadores",
  "d61501a6": "Procurar nos separadores…",
  "ee0eb92e": "Fechado",
- "38d8fe5e": "Nenhum separador correspondente"
+ "38d8fe5e": "Nenhum separador correspondente",
+ "9ed0e8eb": "Tabuleiro em duas linhas",
+ "03429b74": "Os ícones do tabuleiro na ilha direita mantêm o tamanho habitual e ficam em duas linhas: cabem o dobro na mesma largura.",
+ "f19b9d2a": "Nomes por baixo dos ícones",
+ "985e4d39": "A ilha do meio mostra o nome de cada aplicação por baixo do respetivo ícone.",
+ "f65a0ac5": "Aplicações afixadas que não estão em execução à esquerda",
+ "1c0163bd": "As aplicações afixadas que não estão abertas ficam na ilha esquerda como iniciadores; a ilha do meio tem só as aplicações em execução.",
+ "33a923e6": "Tamanho do texto",
+ "40d45e5e": "O tamanho do texto nas janelas do gestor de ficheiros",
+ "92bc0ce7": "Retirar da pasta"
 }

@@ -795,7 +795,8 @@ fn chip(p: &Palette, id: impl Into<ElementId>, label: &str, on: bool, locked: bo
 }
 
 fn race_card(p: &Palette, r: &Results, race: OpenTest, elapsed: f64) -> AnyElement {
-    let mut tabs = h_flex().gap_1();
+    // (they go on to a second line where the page is narrow)
+    let mut tabs = h_flex().gap_1().flex_wrap();
     for (i, o) in r.open.iter().enumerate() {
         let t = o.test;
         let on = t == race;
@@ -871,45 +872,50 @@ fn race_card(p: &Palette, r: &Results, race: OpenTest, elapsed: f64) -> AnyEleme
         .into_any_element()
 }
 
+/// The details of each opening, one block per test: a row per app with its time and, beside it, what the machine paid (processor time,
+/// memory). Stacked, not a table with a column per app: the settings page is narrow, and four columns of two lines did not fit in it
+/// (the Files column was cut off and the cells broke mid-word).
 fn table_card(p: &Palette, r: &Results) -> AnyElement {
-    let apps: Vec<AppKind> = r.open.first().map(|o| o.apps.iter().map(|a| a.app).collect()).unwrap_or_default();
-    let col = || div().flex_1().min_w(px(110.));
-    let mut head = h_flex().px_4().py_2().gap_3().text_xs().text_color(p.text_secondary).child(div().w(px(150.)).flex_shrink_0().child(t!("Test")));
-    for a in &apps {
-        head = head.child(col().child(app_label(*a)));
-    }
-    let mut table = v_flex().child(head);
-    for o in &r.open {
+    let mut list = v_flex();
+    for (i, o) in r.open.iter().enumerate() {
         let best = o.apps.iter().filter_map(|a| a.median().map(|m| m.settled_ms)).fold(f64::MAX, f64::min);
-        let mut row = h_flex().px_4().py_2p5().gap_3().border_t_1().border_color(p.divider).items_start().child(div().w(px(150.)).flex_shrink_0().text_sm().child(test_label(o.test)));
+        let mut block = v_flex().px_4().py_3().gap_1p5().when(i > 0, |d| d.border_t_1().border_color(p.divider)).child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(test_label(o.test)));
         for a in &o.apps {
-            let cell = match (a.median(), &a.error) {
+            let (time, cost, winner) = match (a.median(), &a.error) {
                 (Some(m), _) => {
-                    let winner = m.settled_ms == best;
                     // Task Manager's figure; older results: private bytes, else the working set
                     let mem = if m.private_ws > 0 { mb(m.private_ws) } else if m.private > 0 { mb(m.private) } else { mb(m.ram) };
-                    v_flex()
-                        .gap_0p5()
-                        .child(
-                            div()
-                                .text_sm()
-                                .font_weight(if winner { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
-                                .text_color(if winner { p.accent } else { p.text })
-                                .child(format!("{}{}{}", ms(m.settled_ms), if m.shared { " *" } else { "" }, if m.timed_out { " ⏱" } else { "" })),
-                        )
-                        .child(div().text_xs().text_color(p.text_secondary).child(format!("{} {} · {} {}", t!("işlemci"), ms(m.cpu_ms), t!("bellek"), mem)))
-                        .into_any_element()
+                    (
+                        format!("{}{}{}", ms(m.settled_ms), if m.shared { " *" } else { "" }, if m.timed_out { " ⏱" } else { "" }),
+                        format!("{} {} · {} {}", t!("işlemci"), ms(m.cpu_ms), t!("bellek"), mem),
+                        m.settled_ms == best,
+                    )
                 }
-                (None, Some(e)) => div().text_xs().text_color(p.text_tertiary).child(format!("{} ({})", t!("ölçülemedi"), e.chars().take(60).collect::<String>())).into_any_element(),
-                _ => div().child("—").into_any_element(),
+                (None, Some(e)) => ("—".to_string(), format!("{} ({})", t!("ölçülemedi"), e.chars().take(60).collect::<String>()), false),
+                _ => ("—".to_string(), String::new(), false),
             };
-            row = row.child(col().child(cell));
+            block = block.child(
+                h_flex()
+                    .gap_3()
+                    .items_center()
+                    .child(div().w(px(112.)).flex_shrink_0().text_sm().text_color(p.text_secondary).truncate().child(app_label(a.app)))
+                    .child(
+                        div()
+                            .w(px(84.))
+                            .flex_shrink_0()
+                            .text_sm()
+                            .font_weight(if winner { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                            .text_color(if winner { p.accent } else { p.text })
+                            .child(time),
+                    )
+                    .child(div().flex_1().min_w_0().text_xs().text_color(p.text_tertiary).child(cost)),
+            );
         }
-        table = table.child(row);
+        list = list.child(block);
     }
     shell(p)
-        .child(h_flex().px_4().pt_4().pb_2().child(div().font_weight(FontWeight::SEMIBOLD).child(t!("Ayrıntılar: süre, işlemci ve bellek"))))
-        .child(table)
+        .child(h_flex().px_4().pt_4().pb_1().child(div().font_weight(FontWeight::SEMIBOLD).child(t!("Ayrıntılar: süre, işlemci ve bellek"))))
+        .child(list)
         .into_any_element()
 }
 
@@ -966,30 +972,31 @@ fn engines_card(p: &Palette, r: &Results) -> Option<AnyElement> {
     if rows.is_empty() {
         return None;
     }
+    // each row stacked: the name with the verdict at its right, then the times, then what they cost (a fixed name column squeezed the
+    // times into a column a few letters wide on the narrow settings page)
     let mut list = v_flex();
     for (i, (label, detail, verdict, usage)) in rows.into_iter().enumerate() {
         list = list.child(
-            h_flex()
+            v_flex()
                 .px_4()
-                .py_2p5()
-                .gap_3()
-                .items_center()
+                .py_3()
+                .gap_1()
                 .when(i > 0, |d| d.border_t_1().border_color(p.divider))
-                .child(div().w(px(230.)).flex_shrink_0().text_sm().child(label))
                 .child(
-                    v_flex()
-                        .flex_1()
-                        .min_w_0()
-                        .child(div().text_sm().text_color(p.text_secondary).child(detail))
-                        // what each side cost the machine, under the times
-                        .when(!usage.is_empty(), |d| d.child(div().text_xs().text_color(p.text_tertiary).child(usage))),
+                    h_flex()
+                        .gap_3()
+                        .items_center()
+                        .child(div().flex_1().min_w_0().text_sm().font_weight(FontWeight::MEDIUM).child(label))
+                        .when(!verdict.is_empty(), |d| d.child(div().flex_shrink_0().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(p.accent).child(verdict))),
                 )
-                .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).text_color(p.accent).child(verdict)),
+                .child(div().text_sm().text_color(p.text_secondary).child(detail))
+                // what each side cost the machine, under the times
+                .when(!usage.is_empty(), |d| d.child(div().text_xs().text_color(p.text_tertiary).child(usage))),
         );
     }
     Some(
         shell(p)
-            .child(h_flex().px_4().pt_4().pb_2().child(div().font_weight(FontWeight::SEMIBOLD).child(t!("rustyfiles motorları ve Windows"))))
+            .child(h_flex().px_4().pt_4().pb_1().child(div().font_weight(FontWeight::SEMIBOLD).child(t!("rustyfiles motorları ve Windows"))))
             .child(list)
             .into_any_element(),
     )
@@ -1018,7 +1025,13 @@ fn star_card(p: &Palette, r: &Results) -> AnyElement {
                         .child(div().text_sm().text_color(p.text_secondary).child(t!(
                             "rustyfiles ücretsiz ve tek kişinin emeği. Beğendiysen GitHub'da bir yıldız ver: başkalarının da bulmasına yardım eder."
                         ))),
-                )
+                ),
+        )
+        // the buttons under the words (beside them they squeezed the sentence into a narrow column)
+        .child(
+            h_flex()
+                .gap_2()
+                .flex_wrap()
                 .child(button("bench-star", p, L::Star, t!("Yıldız ver"), true, |_, cx| {
                     open_url(REPO.into());
                     settings::update(cx, |s| s.star_asked = true);

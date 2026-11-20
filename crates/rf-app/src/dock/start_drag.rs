@@ -39,6 +39,8 @@ use crate::dock::host::{self, Kind};
 const COPY_FOLDER: &str = "rustyfiles-start-drag";
 /// A copy is kept this long (a target may still be reading it a while after the drop).
 const COPIES_KEPT: Duration = Duration::from_secs(3600);
+/// How long the pointer rests on a new place before the other tiles make room there.
+const REST: Duration = Duration::from_millis(220);
 /// How often a drag looks at the left button.
 const POLL: Duration = Duration::from_millis(50);
 /// The ghost of an app taken from the list.
@@ -53,6 +55,8 @@ pub(super) enum Picked {
     Listed { app: AppEntry },
     /// A recommended file.
     Rec { path: PathBuf },
+    /// A folder tile of the pinned grid (issue 88): it moves in the grid only.
+    Folder { name: String, slot: usize },
 }
 
 impl Picked {
@@ -61,19 +65,20 @@ impl Picked {
             Picked::Pin { .. } => Item::Pinned,
             Picked::Listed { .. } => Item::Listed,
             Picked::Rec { .. } => Item::Recommended,
+            Picked::Folder { .. } => Item::Folder,
         }
     }
 
     fn app(&self) -> Option<&AppEntry> {
         match self {
             Picked::Pin { app, .. } | Picked::Listed { app } => Some(app),
-            Picked::Rec { .. } => None,
+            Picked::Rec { .. } | Picked::Folder { .. } => None,
         }
     }
 
     fn slot(&self) -> Option<usize> {
         match self {
-            Picked::Pin { slot, .. } => Some(*slot),
+            Picked::Pin { slot, .. } | Picked::Folder { slot, .. } => Some(*slot),
             _ => None,
         }
     }
@@ -113,8 +118,13 @@ struct Carry {
     picked: Picked,
     pos: Point<Pixels>,
     grab: Point<Pixels>,
-    /// The drop slot the pinned tile is held over, while it is over the grid.
+    /// The drop slot the pinned tile is held over, while it is over the grid (the others have made room there).
     over: Option<usize>,
+    /// A slot the pointer rests on that the others make room for once it has rested there a moment (so that the pointer can cross
+    /// a tile's edge on its way to its middle without the tile moving away), and since when.
+    pending: Option<(usize, Instant)>,
+    /// The tile whose middle a held app is on: let go there, the app goes into that tile's folder (issue 88).
+    onto: Option<usize>,
     /// The page of the grid that is shown: its first slot and its tile count.
     first: usize,
     count: usize,
@@ -357,7 +367,7 @@ impl StartView {
     /// it is known (a pinned tile).
     pub(super) fn drag_press(&mut self, picked: Picked, at: Point<Pixels>, tile_origin: Option<Point<Pixels>>, cx: &mut Context<Self>) {
         // (before the pins have been read a reorder would write over a list that is still to come)
-        let ready = self.live() && !self.drag_active() && (!matches!(picked, Picked::Pin { .. }) || self.pins_loaded) && self.app_menu.is_none() && self.power == PowerMenu::Closed;
+        let ready = self.live() && !self.drag_active() && (!matches!(picked, Picked::Pin { .. } | Picked::Folder { .. }) || self.pins_loaded) && self.app_menu.is_none() && self.power == PowerMenu::Closed;
         if !ready {
             self.drag.press = None;
             return;
@@ -435,6 +445,8 @@ impl StartView {
             pos: at,
             grab,
             over: None,
+            pending: None,
+            onto: None,
             first,
             count,
             slides: Slides::at_rest(&cells, duration),
@@ -481,7 +493,24 @@ impl StartView {
             self.cancel_drag(cx);
             return false;
         }
+        if let Some((slot, since)) = c.pending
+            && since.elapsed() >= REST
+        {
+            c.pending = None;
+            make_room(c, Some(slot));
+            cx.notify();
+        }
         true
+    }
+
+    /// The cell of the tile a held app would go into, in cells (where it is drawn now).
+    pub(super) fn onto_cell(&self) -> Option<(f32, f32)> {
+        let c = self.drag.carry.as_ref()?;
+        let onto = rules::local_slot(c.onto?, c.first, c.count)?;
+        let from = rules::local_slot(c.picked.slot()?, c.first, c.count)?;
+        let hole = c.over.map(|s| rules::clamped_local_slot(s, c.first, c.count));
+        let cell = *rules::cells_while_held(c.count, from, hole).get(onto)?;
+        Some(((cell % page::COLS) as f32, (cell / page::COLS) as f32))
     }
 
     /// The held thing is at `pos` (panel window coordinates): where it is, what that means, what to show.
@@ -496,18 +525,27 @@ impl StartView {
         let system_ok = c.shortcut.may_leave();
         let fb = rules::feedback(item, at, c.picked.slot(), system_ok);
 
-        // the other tiles make room for a pinned tile held over the grid
+        // the other tiles make room for a pinned tile held over the grid: at once when it leaves the grid, after a moment's rest on a
+        // new place; an app held on the middle of another tile goes into its folder there, and nothing moves meanwhile
         let over = match (item, at) {
-            (Item::Pinned, Where::Grid(slot)) => Some(slot),
+            (Item::Pinned | Item::Folder, Where::Grid(slot)) => Some(slot),
             _ => None,
         };
-        if over != c.over {
-            c.over = over;
-            if let Some(from) = c.picked.slot().and_then(|s| rules::local_slot(s, c.first, c.count)) {
-                let held_over = over.map(|s| rules::clamped_local_slot(s, c.first, c.count));
-                let cells: Vec<(f32, f32)> = rules::cells_while_held(c.count, from, held_over).into_iter().map(|cell| ((cell % page::COLS) as f32, (cell / page::COLS) as f32)).collect();
-                c.slides.retarget(&cells, crate::dock::backdrop::now_ms());
+        let middle = scene.grid.and_then(|g| g.middle_at((f32::from(pos.x), f32::from(pos.y))));
+        c.onto = match (item, middle, c.picked.slot().and_then(|s| rules::local_slot(s, c.first, c.count))) {
+            (Item::Pinned, Some(cell), Some(from)) => {
+                let hole = c.over.map(|s| rules::clamped_local_slot(s, c.first, c.count));
+                cell.checked_sub(c.first).and_then(|cell| rules::tile_in_cell(c.count, from, hole, cell)).map(|t| c.first + t)
             }
+            _ => None,
+        };
+        if c.onto.is_some() || over == c.over {
+            c.pending = None;
+        } else if over.is_none() {
+            c.pending = None;
+            make_room(c, None);
+        } else if c.pending.map(|(s, _)| s) != over {
+            c.pending = over.map(|s| (s, Instant::now()));
         }
 
         // out in the open with a shortcut to carry: the system's drag takes over (once the copy it carries has been made)
@@ -580,6 +618,11 @@ impl StartView {
         // (the release ends a drag: it is not a click on whatever lies under it)
         self.drag.click.drag_ended();
         let at = rules::where_is((f32::from(ev.position.x), f32::from(ev.position.y)), screen, &scene);
+        // on the middle of another tile: into its folder
+        if let (Some(onto), Some(from)) = (c.onto, c.picked.slot()) {
+            self.commit_group(from, onto, cx);
+            return;
+        }
         let system_ok = c.shortcut.may_leave();
         match rules::drop_for(c.picked.item(), at, c.picked.slot(), system_ok) {
             rules::Drop::Reorder { to } => {
@@ -607,8 +650,7 @@ impl StartView {
             return;
         }
         // (the same choice of pins as the grid's, `PinFile::resolve`: a slot of the grid is an index into this list)
-        let shown = rules::shown_in(&self.pins, &self.apps);
-        let perm = rules::apply_move(self.pins.pins.len(), &shown, from, to);
+        let perm = rules::apply_tile_move(self.pins.pins.len(), &self.pin_places, from, to);
         self.pins.pins = rules::permuted(&self.pins.pins, &perm);
         self.rebuild_pin_cells();
         save_pins(self.pins.clone());
@@ -727,8 +769,29 @@ impl StartView {
             let c = self.drag.carry.as_ref()?;
             (c.picked.clone(), c.pos, c.grab)
         };
-        let app = picked.app()?.clone();
         let (left, top) = (pos.x - grab.x, pos.y - grab.y);
+        if let Picked::Folder { name, slot } = &picked {
+            let apps = self.folder_at(*slot)?.apps.clone();
+            let picture = self.folder_picture(&apps, page::TILE_ICON, pal, cx);
+            return Some(
+                v_flex()
+                    .absolute()
+                    .left(left)
+                    .top(top)
+                    .w(px(CELL_W))
+                    .h(px(page::TILE_H))
+                    .items_center()
+                    .pt(px(12.))
+                    .gap(px(6.))
+                    .rounded(px(8.))
+                    .bg(pal.pressed_fill().hsla())
+                    .child(picture)
+                    .child(div().w_full().h(px(30.)).px(px(6.)).text_size(px(12.)).line_height(px(15.)).text_center().line_clamp(2).child(name.clone()))
+                    .opacity(0.95)
+                    .into_any_element(),
+            );
+        }
+        let app = picked.app()?.clone();
         let ghost = match picked {
             Picked::Pin { .. } => {
                 let icon = self.app_picture(&app, page::TILE_ICON, pal, cx);
@@ -764,6 +827,16 @@ impl StartView {
             }
         };
         Some(ghost.opacity(0.95).into_any_element())
+    }
+}
+
+/// The tiles make room for the held one at slot `over` (`None`: none, they go back to their places).
+fn make_room(c: &mut Carry, over: Option<usize>) {
+    c.over = over;
+    if let Some(from) = c.picked.slot().and_then(|s| rules::local_slot(s, c.first, c.count)) {
+        let held_over = over.map(|s| rules::clamped_local_slot(s, c.first, c.count));
+        let cells: Vec<(f32, f32)> = rules::cells_while_held(c.count, from, held_over).into_iter().map(|cell| ((cell % page::COLS) as f32, (cell / page::COLS) as f32)).collect();
+        c.slides.retarget(&cells, crate::dock::backdrop::now_ms());
     }
 }
 

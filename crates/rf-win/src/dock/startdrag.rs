@@ -103,6 +103,8 @@ pub enum Item {
     Listed,
     /// An entry of "Önerilenler" (a file).
     Recommended,
+    /// A folder of the pinned grid (issue 88): it moves in the grid and goes nowhere else.
+    Folder,
 }
 
 /// The pinned grid as it stands on the screen: the cells of the page that is shown. Panel pixels.
@@ -132,6 +134,22 @@ impl Grid {
         }
         let (col, row) = ((x / self.cell.0) as usize, (y / self.cell.1) as usize);
         Some(self.first + (row * self.cols + col).min(self.count - 1))
+    }
+
+    /// The slot of the cell whose middle the point is in (where a held app is dropped ON the tile drawn there, issue 88, and not between
+    /// tiles): the middle half across and the icon's part of the height. `None` near the edges and beyond the last tile.
+    pub fn middle_at(&self, p: (f32, f32)) -> Option<usize> {
+        if self.count == 0 || self.cols == 0 || self.cell.0 <= 0.0 || self.cell.1 <= 0.0 {
+            return None;
+        }
+        let (x, y) = (p.0 - self.origin.0, p.1 - self.origin.1);
+        if x < 0.0 || y < 0.0 {
+            return None;
+        }
+        let (col, row) = ((x / self.cell.0) as usize, (y / self.cell.1) as usize);
+        let (fx, fy) = (x / self.cell.0 - col as f32, y / self.cell.1 - row as f32);
+        let cell = row * self.cols + col;
+        (col < self.cols && row < self.rows && cell < self.count && (0.22..=0.78).contains(&fx) && (0.06..=0.66).contains(&fy)).then_some(self.first + cell)
     }
 
     /// The cell (column, row) of the tile at page position `local`, in cells.
@@ -199,7 +217,8 @@ pub fn drop_for(item: Item, at: Where, from: Option<usize>, system_ok: bool) -> 
     match (item, at) {
         // a file is a real drag from the first moment
         (Item::Recommended, _) => Drop::HandToSystem,
-        (Item::Pinned, Where::Grid(slot)) => if from == Some(slot) { Drop::Nothing } else { Drop::Reorder { to: slot } },
+        (Item::Pinned | Item::Folder, Where::Grid(slot)) => if from == Some(slot) { Drop::Nothing } else { Drop::Reorder { to: slot } },
+        (Item::Folder, Where::Island | Where::Outside) => Drop::NotAllowed,
         (Item::Listed, Where::Grid(_)) | (_, Where::Panel) => Drop::Nothing,
         (_, Where::Island) => Drop::PinToDock,
         (_, Where::Outside) => if system_ok { Drop::HandToSystem } else { Drop::NotAllowed },
@@ -269,6 +288,12 @@ pub fn cells_while_held(len: usize, from: usize, over: Option<usize>) -> Vec<usi
     cells
 }
 
+/// The tile drawn in `cell` while the tile `from` is held over slot `over` (as [`cells_while_held`]); `None` for the held tile's own
+/// cell, where nothing else stands.
+pub fn tile_in_cell(len: usize, from: usize, over: Option<usize>, cell: usize) -> Option<usize> {
+    cells_while_held(len, from, over).iter().position(|&c| c == cell).filter(|&t| t != from)
+}
+
 /// The slot of a shown pin as a position on the page that is on the screen (`first`: the first slot of the page, `count`: its tiles).
 /// `None` for a pin of another page.
 pub fn local_slot(slot: usize, first: usize, count: usize) -> Option<usize> {
@@ -309,6 +334,129 @@ pub fn apply_move(file_len: usize, shown: &[usize], from: usize, to: usize) -> V
         }
     }
     out
+}
+
+// ---------------------------------------------------------------- folders (issue 88)
+
+/// The tiles of the pinned grid: each a list of positions in the pin FILE (of shown pins), one for an app, several for a folder.
+/// A folder's tile stands where its first pin stands; the folder's other pins join it wherever they are in the file.
+pub fn tiles(pins: &[Pin], shown: &[usize]) -> Vec<Vec<usize>> {
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    let mut folder_tile: Vec<(String, usize)> = Vec::new();
+    for &p in shown {
+        match pins.get(p).and_then(|pin| pin.folder.clone()) {
+            Some(name) => match folder_tile.iter().find(|(n, _)| *n == name) {
+                Some(&(_, t)) => out[t].push(p),
+                None => {
+                    folder_tile.push((name, out.len()));
+                    out.push(vec![p]);
+                }
+            },
+            None => out.push(vec![p]),
+        }
+    }
+    out
+}
+
+/// The new order of the pin FILE after tile `from` is dropped at tile slot `to`: the shown pins take the places shown pins had, tile
+/// after tile (a folder's pins together), and a pin that is not shown stays exactly where it was. As [`apply_move`] with tiles.
+pub fn apply_tile_move(file_len: usize, tiles: &[Vec<usize>], from: usize, to: usize) -> Vec<usize> {
+    let mut out: Vec<usize> = (0..file_len).collect();
+    if from >= tiles.len() {
+        return out;
+    }
+    let order = move_to(tiles.len(), from, to);
+    let mut places: Vec<usize> = tiles.iter().flatten().copied().collect();
+    places.sort_unstable();
+    let members: Vec<usize> = order.iter().flat_map(|&t| tiles[t].iter().copied()).collect();
+    for (&place, &old) in places.iter().zip(&members) {
+        if place < file_len && old < file_len {
+            out[place] = old;
+        }
+    }
+    out
+}
+
+/// A folder name not taken by any pin: "Klasör" ("Folder"), then "Klasör 2", "Klasör 3" ... (`base` is the word in the user's language).
+pub fn fresh_folder_name(pins: &[Pin], base: &str) -> String {
+    let taken = |n: &str| pins.iter().any(|p| p.folder.as_deref() == Some(n));
+    if !taken(base) {
+        return base.to_string();
+    }
+    (2..).map(|i| format!("{base} {i}")).find(|n| !taken(n)).unwrap_or_else(|| base.to_string())
+}
+
+/// Puts the pins of tile `from` into tile `onto`'s folder (a new one named `new_name` when `onto` is a single app). Nothing happens
+/// for a tile dropped on itself or out of range, or for a folder dropped on something (a folder is moved, not nested).
+pub fn group_onto(pins: &mut Vec<Pin>, tiles: &[Vec<usize>], from: usize, onto: usize, new_name: &str) -> bool {
+    if from == onto || from >= tiles.len() || onto >= tiles.len() || tiles[from].len() != 1 {
+        return false;
+    }
+    let target = tiles[onto][0];
+    let name = match pins.get(target).and_then(|p| p.folder.clone()) {
+        Some(n) => n,
+        None => {
+            if let Some(p) = pins.get_mut(target) {
+                p.folder = Some(new_name.to_string());
+            }
+            new_name.to_string()
+        }
+    };
+    let moved = tiles[from][0];
+    if let Some(p) = pins.get_mut(moved) {
+        p.folder = Some(name);
+    }
+    // the folder stands where its first pin stands: the app joins it at its end, so the folder stays where the tile it was dropped on was
+    let last = tiles[onto].iter().copied().max().unwrap_or(target);
+    move_pin_after(pins, moved, last);
+    true
+}
+
+/// Moves the pin at `pos` to just after the pin at `after` (positions in the file before the move).
+fn move_pin_after(pins: &mut Vec<Pin>, pos: usize, after: usize) {
+    if pos >= pins.len() || after >= pins.len() || pos == after {
+        return;
+    }
+    let pin = pins.remove(pos);
+    let at = if pos < after { after } else { after + 1 };
+    pins.insert(at.min(pins.len()), pin);
+}
+
+/// Clears the folder of every pin that is the only one left in its folder (after an unpin).
+pub fn tidy_folders(pins: &mut [Pin]) {
+    let names: Vec<Option<String>> = pins.iter().map(|p| p.folder.clone()).collect();
+    for p in pins.iter_mut() {
+        if let Some(n) = &p.folder
+            && names.iter().filter(|m| m.as_deref() == Some(n.as_str())).count() < 2
+        {
+            p.folder = None;
+        }
+    }
+}
+
+/// Takes the pin at file position `pos` out of its folder: it stands right after the folder. A folder left with one pin is no folder
+/// any more.
+pub fn take_out_of_folder(pins: &mut Vec<Pin>, pos: usize) {
+    let Some(name) = pins.get_mut(pos).and_then(|p| p.folder.take()) else { return };
+    let left: Vec<usize> = pins.iter().enumerate().filter(|(_, p)| p.folder.as_deref() == Some(name.as_str())).map(|(i, _)| i).collect();
+    if let Some(&last) = left.last() {
+        move_pin_after(pins, pos, last);
+    }
+    tidy_folders(pins);
+}
+
+/// Renames a folder (a name nobody else has; an empty name keeps the old one). True when something changed.
+pub fn rename_folder(pins: &mut [Pin], old: &str, new: &str) -> bool {
+    let new = new.trim();
+    if new.is_empty() || new == old || pins.iter().any(|p| p.folder.as_deref() == Some(new)) {
+        return false;
+    }
+    let mut any = false;
+    for p in pins.iter_mut().filter(|p| p.folder.as_deref() == Some(old)) {
+        p.folder = Some(new.to_string());
+        any = true;
+    }
+    any
 }
 
 /// The pins in a new order (`perm` from [`apply_move`]). A permutation that is not one (a wrong length, a repeat) changes nothing.
@@ -652,12 +800,102 @@ pub fn localized(p: PinnedApp, dir: &Path) -> PinnedApp {
 }
 
 #[cfg(test)]
+mod folder_tests {
+    use super::*;
+
+    fn pin(id: &str, folder: Option<&str>) -> Pin {
+        Pin { id: id.into(), name: id.into(), folder: folder.map(String::from) }
+    }
+
+    #[test]
+    fn a_folders_pins_are_one_tile_where_the_first_stands() {
+        let pins = vec![pin("a", None), pin("b", Some("Work")), pin("gone", None), pin("c", None), pin("d", Some("Work"))];
+        // "gone" is not installed: not shown
+        let shown = vec![0, 1, 3, 4];
+        assert_eq!(tiles(&pins, &shown), vec![vec![0], vec![1, 4], vec![3]]);
+    }
+
+    #[test]
+    fn a_tile_moves_with_all_its_pins_and_a_hidden_pin_stays() {
+        let pins = vec![pin("a", None), pin("b", Some("Work")), pin("gone", None), pin("c", None), pin("d", Some("Work"))];
+        let t = tiles(&pins, &[0, 1, 3, 4]);
+        // the folder (tile 1) to the front
+        let moved = permuted(&pins, &apply_tile_move(pins.len(), &t, 1, 0));
+        let ids: Vec<&str> = moved.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["b", "d", "gone", "a", "c"], "the folder's pins together, the hidden pin in its place");
+    }
+
+    #[test]
+    fn dropping_an_app_on_another_makes_a_folder_and_on_a_folder_joins_it() {
+        let mut pins = vec![pin("a", None), pin("b", None), pin("c", None)];
+        let t = tiles(&pins, &[0, 1, 2]);
+        let name = fresh_folder_name(&pins, "Folder");
+        assert!(group_onto(&mut pins, &t, 2, 0, &name));
+        // c joined a's folder and stands right after a in the file
+        assert_eq!(pins.iter().map(|p| (p.id.as_str(), p.folder.as_deref())).collect::<Vec<_>>(), [("a", Some("Folder")), ("c", Some("Folder")), ("b", None)]);
+        let t = tiles(&pins, &[0, 1, 2]);
+        assert_eq!(t, vec![vec![0, 1], vec![2]]);
+        assert!(group_onto(&mut pins, &t, 1, 0, "unused"), "b joins the folder");
+        assert!(pins.iter().all(|p| p.folder.as_deref() == Some("Folder")));
+        let t = tiles(&pins, &[0, 1, 2]);
+        assert!(!group_onto(&mut pins, &t, 0, 0, "x"), "a tile on itself");
+    }
+
+    #[test]
+    fn a_folder_left_with_one_app_is_no_folder() {
+        let mut pins = vec![pin("a", Some("F")), pin("b", Some("F"))];
+        take_out_of_folder(&mut pins, 1);
+        assert!(pins.iter().all(|p| p.folder.is_none()));
+        // taken out of a folder of three: it stands after the folder
+        let mut pins = vec![pin("a", Some("F")), pin("b", Some("F")), pin("c", Some("F")), pin("d", None)];
+        take_out_of_folder(&mut pins, 0);
+        assert_eq!(pins.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["b", "c", "a", "d"]);
+        assert!(pins[2].folder.is_none() && pins[0].folder.is_some());
+        // an unpin leaves one: it is tidied
+        let mut pins = vec![pin("a", Some("F")), pin("x", None)];
+        tidy_folders(&mut pins);
+        assert!(pins[0].folder.is_none());
+    }
+
+    #[test]
+    fn the_middle_of_a_cell_is_on_the_tile_and_its_edges_are_between_tiles() {
+        let g = Grid { origin: (0.0, 0.0), cell: (100.0, 100.0), cols: 6, rows: 2, first: 6, count: 8 };
+        assert_eq!(g.middle_at((150.0, 30.0)), Some(7));
+        assert_eq!(g.middle_at((105.0, 30.0)), None, "near the left edge");
+        assert_eq!(g.middle_at((150.0, 90.0)), None, "the name, low in the tile");
+        assert_eq!(g.middle_at((350.0, 130.0)), None, "beyond the last tile (cell 9 of 8)");
+        assert_eq!(g.middle_at((150.0, 130.0)), Some(13));
+        // tile 0 held over slot 2: tiles 1 and 2 moved one cell back, the held tile's cell is empty
+        assert_eq!(tile_in_cell(4, 0, Some(2), 0), Some(1));
+        assert_eq!(tile_in_cell(4, 0, Some(2), 2), None);
+        assert_eq!(tile_in_cell(4, 0, None, 3), Some(3));
+    }
+
+    #[test]
+    fn a_folder_moves_in_the_grid_and_goes_nowhere_else() {
+        assert_eq!(drop_for(Item::Folder, Where::Grid(3), Some(1), false), Drop::Reorder { to: 3 });
+        assert_eq!(drop_for(Item::Folder, Where::Island, Some(1), true), Drop::NotAllowed);
+        assert_eq!(drop_for(Item::Folder, Where::Outside, Some(1), true), Drop::NotAllowed);
+    }
+
+    #[test]
+    fn a_new_folders_name_is_free_and_a_rename_needs_a_free_name() {
+        let mut pins = vec![pin("a", Some("Folder")), pin("b", Some("Folder")), pin("c", Some("Folder 2")), pin("d", Some("Folder 2"))];
+        assert_eq!(fresh_folder_name(&pins, "Folder"), "Folder 3");
+        assert!(!rename_folder(&mut pins, "Folder", "Folder 2"), "taken");
+        assert!(!rename_folder(&mut pins, "Folder", "  "), "empty");
+        assert!(rename_folder(&mut pins, "Folder", "Games"));
+        assert_eq!(pins[0].folder.as_deref(), Some("Games"));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::dock::model::IconSource;
 
     fn pin(id: &str) -> Pin {
-        Pin { id: id.into(), name: id.into() }
+        Pin { id: id.into(), name: id.into(), folder: None }
     }
 
     fn ids(v: &[Pin]) -> Vec<&str> {

@@ -2077,5 +2077,14 @@
  "9c85c4e6": "Caută în file",
  "d61501a6": "Caută în file…",
  "ee0eb92e": "Închisă",
- "38d8fe5e": "Nicio filă potrivită"
+ "38d8fe5e": "Nicio filă potrivită",
+ "9ed0e8eb": "Zona de notificare pe două rânduri",
+ "03429b74": "Pictogramele din zona de notificare a insulei din dreapta își păstrează mărimea obișnuită și stau pe două rânduri: în aceeași lățime încap de două ori mai multe.",
+ "f19b9d2a": "Nume sub pictograme",
+ "985e4d39": "Insula din mijloc afișează numele fiecărei aplicații sub pictograma ei.",
+ "f65a0ac5": "Aplicațiile fixate care nu rulează în stânga",
+ "1c0163bd": "Aplicațiile fixate care nu sunt deschise stau în insula din stânga ca lansatoare; insula din mijloc are doar aplicațiile care rulează.",
+ "33a923e6": "Dimensiunea textului",
+ "40d45e5e": "Dimensiunea textului în ferestrele managerului de fișiere",
+ "92bc0ce7": "Scoate din dosar"
 }

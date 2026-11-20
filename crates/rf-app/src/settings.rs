@@ -322,6 +322,15 @@ pub struct ColumnPrefs {
     pub name_width: u16,
 }
 
+fn is_hundred(v: &u16) -> bool {
+    *v == 100
+}
+
+/// The base size (rem) for a text size of `percent`, within 75 % and 125 % of the usual 16 px.
+pub fn rem_for(percent: u16) -> f32 {
+    16.0 * f32::from(percent.clamp(75, 125)) / 100.0
+}
+
 fn is_zero_u16(v: &u16) -> bool {
     *v == 0
 }
@@ -543,6 +552,10 @@ pub struct Settings {
     pub hg_freeze_behind: bool,
     /// UI font family; `None` = Segoe UI Variable / system.
     pub font: Option<String>,
+    /// The text size of the file manager's windows, percent of the usual (87, 100 or 112). Issue 89: "For lower resolution screens,
+    /// the current font size is too large". It sets the windows' base size, which the texts are measured in.
+    #[serde(skip_serializing_if = "is_hundred")]
+    pub text_percent: u16,
     pub show_toolbar: bool,
     pub show_statusbar: bool,
 
@@ -683,12 +696,19 @@ pub struct Settings {
     /// A thin "Show desktop" strip at the right end of the primary monitor's right island, after the bell, as on Windows' taskbar (off;
     /// issue 127).
     pub dock_show_desktop: bool,
+    /// The app's name under each icon of the middle island (off). Issue 137: "would really like to see app names under the icon".
+    pub dock_labels: bool,
+    /// Pinned apps that are not running stand in the left island, as launchers; the middle one holds the running apps (off). Issue 137:
+    /// "I would like to see apps pinned appearing on the left dock when they are not open".
+    pub dock_pins_left: bool,
     /// The left island's search: a field, its button only, or none (`DockSearch`).
     pub dock_search: DockSearch,
     /// A click on the dock's search field or button opens HyperSearch instead of the Start panel (issue 41). Off by default.
     pub dock_search_hypersearch: bool,
     /// The tray icons of the right island stand closer together (18 px a cell instead of 24; off). Issue 34.
     pub dock_tray_compact: bool,
+    /// The tray icons in two rows at their usual size (off). Issue 34: compact was too small on a wide screen.
+    pub dock_tray_two_rows: bool,
     /// Turning the mouse wheel over a running app's icon in the dock turns that app's own sound level up or down (on; issue 21).
     pub dock_scroll_volume: bool,
     /// How much the dock's icons grow under the pointer (off / subtle / full).
@@ -869,6 +889,7 @@ impl Default for Settings {
             hg_surface: HG_DEFAULT[4],
             hg_freeze_behind: false,
             font: None,
+            text_percent: 100,
             show_toolbar: true,
             show_statusbar: true,
             sync_layout: false,
@@ -936,9 +957,12 @@ impl Default for Settings {
             dock_autohide: false,
             dock_opaque: false,
             dock_show_desktop: false,
+            dock_labels: false,
+            dock_pins_left: false,
             dock_search: DockSearch::Field,
             dock_search_hypersearch: false,
             dock_tray_compact: false,
+            dock_tray_two_rows: false,
             dock_scroll_volume: true,
             dock_magnify: DockMagnify::Full,
             dock_hover_previews: true,
