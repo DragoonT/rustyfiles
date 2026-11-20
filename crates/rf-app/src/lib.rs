@@ -573,6 +573,26 @@ pub fn main() {
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
     let arg = arg.filter(|_| !new_window);
+    // several folders on the command line (issue 125): a first one that is gone (moved, renamed) is passed over, not handed to Explorer
+    // with its error, and the first one that is there opens instead; `first_taken` is how many arguments that used up
+    let mut first_taken = 1;
+    let arg = match arg {
+        Some(a) if std::env::args().nth(2).is_some() && !a.starts_with("::") && !a.to_ascii_lowercase().starts_with("shell:") && !a.starts_with("/") && !a.starts_with('-') && !std::path::Path::new(&a).exists() => {
+            let later = std::env::args()
+                .enumerate()
+                .skip(2)
+                .map(|(i, x)| (i, x.trim().trim_matches('"').to_string()))
+                .find(|(_, x)| !x.is_empty() && !x.starts_with("--") && is_dir_bounded(PathBuf::from(x), std::time::Duration::from_secs(2)) == Some(true));
+            match later {
+                Some((i, x)) => {
+                    first_taken = i;
+                    Some(x)
+                }
+                None => Some(a),
+            }
+        }
+        other => other,
+    };
     let mut start: Option<Location> = None;
     // Explorer's `/select,<file>`: its folder, with the file selected
     // (callers also write `/select, <file>`: the path then comes as the next argument)
@@ -684,10 +704,11 @@ pub fn main() {
     });
 
     // more folders on the command line (`rustyfiles.exe "C:\My Pictures" "D:\My Videos"`): each one a tab of the same window, after the
-    // first (issue 125). Only plain folders, after a first argument that was one too.
+    // first (issue 125). Only plain folders that are there (one that is gone is passed over without a word), after a first argument that
+    // was one too.
     let more_folders: Vec<String> = if matches!(start, Some(Location::Path(_))) && select.is_none() {
         std::env::args()
-            .skip(2)
+            .skip(first_taken + 1)
             .map(|a| a.trim().trim_matches('"').to_string())
             .filter(|a| !a.is_empty() && !a.starts_with("--") && is_dir_bounded(PathBuf::from(a), std::time::Duration::from_secs(2)) == Some(true))
             .collect()
