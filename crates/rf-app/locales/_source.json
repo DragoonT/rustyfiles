@@ -12437,5 +12437,29 @@
   "tr": "Özel komutlar",
   "en": "Custom commands",
   "note": "A settings row and a toolbar menu: the user's own toolbar buttons that start programs."
+ },
+ {
+  "id": "a019461a",
+  "key": "Gönder",
+  "tr": "Gönder",
+  "en": "Send to"
+ },
+ {
+  "id": "9b99d237",
+  "key": "Hazırda beklet",
+  "tr": "Hazırda beklet",
+  "en": "Hibernate"
+ },
+ {
+  "id": "429e714c",
+  "key": "Sekmelerde terminal düğmesi",
+  "tr": "Sekmelerde terminal düğmesi",
+  "en": "Terminal button on tabs"
+ },
+ {
+  "id": "647939bb",
+  "key": "Her klasör sekmesinde, o klasörde bir terminal açan düğme.",
+  "tr": "Her klasör sekmesinde, o klasörde bir terminal açan düğme.",
+  "en": "A button on each folder's tab that opens a terminal in that folder."
  }
 ]

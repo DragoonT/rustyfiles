@@ -2061,5 +2061,9 @@
  "60fc6ab4": "Rediger",
  "45e1c5b8": "Fjern",
  "d255de46": "Legg til kommando",
- "0675a937": "Egendefinerte kommandoer"
+ "0675a937": "Egendefinerte kommandoer",
+ "a019461a": "Send til",
+ "9b99d237": "Dvalemodus",
+ "429e714c": "Terminalknapp på faner",
+ "647939bb": "En knapp på hver mappes fane som åpner en terminal i mappen."
 }

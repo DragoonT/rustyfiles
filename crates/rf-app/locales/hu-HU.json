@@ -2061,5 +2061,9 @@
  "60fc6ab4": "Szerkesztés",
  "45e1c5b8": "Eltávolítás",
  "d255de46": "Parancs hozzáadása",
- "0675a937": "Egyéni parancsok"
+ "0675a937": "Egyéni parancsok",
+ "a019461a": "Küldés",
+ "9b99d237": "Hibernálás",
+ "429e714c": "Terminál gomb a lapokon",
+ "647939bb": "Egy gomb minden mappa lapján, amely terminált nyit az adott mappában."
 }

@@ -2061,5 +2061,9 @@
  "60fc6ab4": "Modifică",
  "45e1c5b8": "Elimină",
  "d255de46": "Adaugă comandă",
- "0675a937": "Comenzi personalizate"
+ "0675a937": "Comenzi personalizate",
+ "a019461a": "Trimitere către",
+ "9b99d237": "Hibernare",
+ "429e714c": "Buton de terminal pe file",
+ "647939bb": "Un buton pe fila fiecărui folder care deschide un terminal în acel folder."
 }

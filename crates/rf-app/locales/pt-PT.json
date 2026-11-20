@@ -2061,5 +2061,9 @@
  "60fc6ab4": "Editar",
  "45e1c5b8": "Remover",
  "d255de46": "Adicionar comando",
- "0675a937": "Comandos personalizados"
+ "0675a937": "Comandos personalizados",
+ "a019461a": "Enviar para",
+ "9b99d237": "Hibernar",
+ "429e714c": "Botão do terminal nos separadores",
+ "647939bb": "Um botão no separador de cada pasta que abre um terminal nessa pasta."
 }

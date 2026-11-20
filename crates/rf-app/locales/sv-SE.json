@@ -2061,5 +2061,9 @@
  "60fc6ab4": "Redigera",
  "45e1c5b8": "Ta bort",
  "d255de46": "Lägg till kommando",
- "0675a937": "Egna kommandon"
+ "0675a937": "Egna kommandon",
+ "a019461a": "Skicka till",
+ "9b99d237": "Viloläge",
+ "429e714c": "Terminalknapp på flikar",
+ "647939bb": "En knapp på varje mapps flik som öppnar en terminal i mappen."
 }
