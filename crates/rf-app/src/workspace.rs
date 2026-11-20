@@ -857,6 +857,7 @@ impl Workspace {
             if let Some(ws) = ws.upgrade() {
                 ws.update(cx, |w, cx| w.save_session(window, cx));
             }
+            Self::release_preview_host(window);
             true
         });
         let prefs = cx.global::<crate::settings::Settings>().clone();
@@ -1011,10 +1012,11 @@ impl Workspace {
         self.sidebar_rail = true;
         // closing the window (X, Alt+F4) cancels; it is not the user's session
         let ws = cx.entity().downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
+        window.on_window_should_close(cx, move |window, cx| {
             if let Some(ws) = ws.upgrade() {
                 ws.update(cx, |ws, _| crate::picker::answer_cancel(ws));
             }
+            Self::release_preview_host(window);
             true
         });
         cx.notify();
@@ -1327,6 +1329,7 @@ impl Workspace {
         self.tab_scrolled_to = None;
         if self.tabs.len() <= 1 {
             self.save_session(window, cx);
+            Self::release_preview_host(window);
             window.remove_window();
             return;
         }
@@ -1888,6 +1891,16 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The preview pane shows documents in a window of the shell thread that this window owns. Destroying this window would wait
+    /// for that thread to destroy it: the picker of an app's Open dialog hung on the screen with the PDF it previewed (issue 146).
+    /// So the host is let go first, whenever this window is about to close.
+    pub(crate) fn release_preview_host(window: &Window) {
+        if let Some(owner) = Self::hwnd(window) {
+            // (without waiting for the shell thread: it may be the one that is busy, see `detach_from`)
+            rf_win::preview_host::detach_from(owner);
+        }
+    }
+
     fn hwnd(window: &Window) -> Option<isize> {
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
         match HasWindowHandle::window_handle(window).ok()?.as_raw() {
@@ -2323,6 +2336,9 @@ impl Workspace {
                             .group_hover("tab", |s| s.visible())
                             .hover(|s| s.bg(p.pressed))
                             .child(Icon::new(L::X).size(px(12.)))
+                            // the press stays with the x: the tab's own press would bring the tab forward first, so closing a tab in the
+                            // back showed it for a moment (#145)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
                                 this.close_tab(i, window, cx);

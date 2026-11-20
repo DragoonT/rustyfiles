@@ -317,11 +317,13 @@ fn finish(ws: &mut Workspace, paths: Vec<PathBuf>, window: &mut Window) {
     if let Some(s) = ws.picker() {
         s.answer(Response { ok: true, paths: paths.iter().map(|p| p.to_string_lossy().into_owned()).collect(), filter_index: s.filter_ix.get() });
     }
+    Workspace::release_preview_host(window);
     window.remove_window();
 }
 
 pub(crate) fn cancel(ws: &mut Workspace, window: &mut Window) {
     answer_cancel(ws);
+    Workspace::release_preview_host(window);
     window.remove_window();
 }
 
