@@ -34,6 +34,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let which = ProcessInfo.processInfo.environment["RF_DEMO_MENU"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoMenu(item: which == "item") }
         }
+        // RF_DEMO_LAYOUT (development): the Layout flyout open
+        if ProcessInfo.processInfo.environment["RF_DEMO_LAYOUT"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let list = self?.controllers.first?.list else { return }
+                LayoutFlyout.show(from: list.commandBar.view, list: list)
+            }
+        }
         // RF_DEMO_SHELF (development): the shelf pane open
         if ProcessInfo.processInfo.environment["RF_DEMO_SHELF"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.controllers.first?.toggleShelf(nil) }
@@ -107,7 +114,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             // a window over the first one (the command palette) is drawn instead when there is one
             let main = self?.controllers.first?.window
-            let shown = main?.attachedSheet ?? main?.childWindows?.last ?? main
+            // RF_SNAPSHOT_POPOVER: the popover open over the window instead
+            let popover = ProcessInfo.processInfo.environment["RF_SNAPSHOT_POPOVER"] != nil ? NSApp.windows.first { $0.className.contains("Popover") && $0.isVisible } : nil
+            let shown = popover ?? main?.attachedSheet ?? main?.childWindows?.last ?? main
             guard let view = shown?.contentView?.superview,
                 let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
             else { exit(1) }

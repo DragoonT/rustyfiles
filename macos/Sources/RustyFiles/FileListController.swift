@@ -880,14 +880,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         b.view.action = { [weak self] btn in
             guard let self else { return }
-            let m = NSMenu()
-            for mode in ViewMode.allCases {
-                let i = ClosureMenuItem(title: mode.title) { [weak self] in self?.setViewMode(mode) }
-                i.image = Icons.menu(mode.icon)
-                i.state = self.viewMode == mode ? .on : .off
-                m.addItem(i)
-            }
-            btn.pop(m)
+            LayoutFlyout.show(from: btn, list: self)
         }
     }
 
@@ -1017,6 +1010,14 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var onReload: (([String], Bool) -> Void)?
 
     private func reloadSelecting(_ names: [String], rename: Bool = false) { onReload?(names, rename) }
+
+    /// The Layout flyout's tile size changed: the grid's cells follow.
+    func tileSizeChanged() {
+        // the pictures are asked for again at the new size
+        ThumbnailCache.shared.clear()
+        applyViewMode()
+        if viewMode == .tiles { tiles.reloadData() }
+    }
 
     /// Adds the selected items to the shelf, and shows it.
     func addToShelf() {

@@ -768,5 +768,9 @@
 "Close": "Kapat",
 "Cards": "Kartlar",
 "List": "Liste",
-"Columns": "Sütunlar"
+"Columns": "Sütunlar",
+"Tile size": "Döşeme boyutu",
+"Hidden items": "Gizli öğeler",
+"File extensions": "Dosya uzantıları",
+"Adaptive layout": "Uyarlanabilir görünüm"
 }

@@ -6,10 +6,18 @@ import QuickLookThumbnailing
 /// `GRID_SIZES[2]`): tiles 124 wide in rows 150 high with 4 between them, the picture asked
 /// for at 128 and drawn at 96, the label `text_xs`, centred, at most two lines.
 enum TileMetrics {
-    static let width: CGFloat = 124
-    static let rowHeight: CGFloat = 150
+    /// folder_view.rs `GRID_SIZES`: (tile width, row height, picture asked for), smallest first.
+    static let sizes: [(CGFloat, CGFloat, CGFloat)] = [(76, 94, 64), (92, 112, 80), (124, 150, 128), (172, 204, 192), (236, 276, 272)]
+    /// The size chosen in the Layout flyout (0…4, 2 by default).
+    static var size: Int {
+        let v = UserDefaults.standard.object(forKey: "tileSize") as? Int ?? 2
+        return min(max(v, 0), sizes.count - 1)
+    }
+    static var width: CGFloat { sizes[size].0 }
+    static var rowHeight: CGFloat { sizes[size].1 }
     static let gap: CGFloat = 4
-    static let visual: CGFloat = 96
+    /// The picture drawn: three quarters of the one asked for.
+    static var visual: CGFloat { sizes[size].2 * 0.75 }
     /// The grid's own padding (`py_2`, `px 6`).
     static let padX: CGFloat = 6
     static let padY: CGFloat = 8
