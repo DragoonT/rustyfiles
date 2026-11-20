@@ -355,6 +355,92 @@ pub fn paste_clipboard(dest: &Path, progress: &mut dyn FnMut(Progress), cancel: 
     write_all(&data, dest, progress, cancel)
 }
 
+// ------------------------------------------------------------------ drops
+
+// WHY (issue 128, a browser's image dragged to a folder; and on Discord: "When I attempt to drag from Outlook attachments into the
+// folder, it doesn't work"). Such a drag carries the same two formats as such a paste and no paths, and the window's drop target
+// took paths only. The drop target asks [`drag_paths`] instead (registered by the app with the GPUI fork's
+// `dnd_hint::set_virtual_reader`): the files are written into a folder of their own under %TEMP%\rustyfiles-drop at the drop, and
+// the drop goes on as a drop of those files, so every place that takes files (a folder, a tab, the sidebar, the dock) takes these.
+// The source's data object is only valid during the drop, so they are written then, before the drop handlers run.
+
+/// The folder the drag that is over a window now will be written into: named at its first ask, made at its drop.
+static DROP_DIR: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Where dropped virtual files are written, a folder per drop.
+pub fn drops_root() -> PathBuf {
+    std::env::temp_dir().join("rustyfiles-drop")
+}
+
+/// A drop's folder that has been there this long is removed at a later drop (a copy out of it has long finished).
+const DROP_KEEP: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+fn sweep_old_drops(root: &Path, keep: std::time::Duration) {
+    let Ok(rd) = std::fs::read_dir(root) else { return };
+    for e in rd.flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > keep);
+        if old {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
+fn new_drop_dir(root: &Path) -> PathBuf {
+    use std::sync::atomic::AtomicU32;
+    static N: AtomicU32 = AtomicU32::new(0);
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    root.join(format!("{}-{stamp}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)))
+}
+
+/// The source's list of virtual files, when it offers one.
+fn listed(data: &IDataObject) -> Option<Vec<Item>> {
+    let (group, _) = formats();
+    let list = ask(data, group, -1, TYMED_HGLOBAL.0 as u32).ok()?;
+    (list.0.tymed == TYMED_HGLOBAL.0 as u32).then(|| parse_group(&unsafe { global_bytes(list.0.u.hGlobal, None) }))
+}
+
+/// The paths of a drag of virtual files under `root`: with `fetch` false the paths its files will have (nothing is written), with
+/// `fetch` true the files are written and their real paths given. `None`: the drag lists no virtual file, or none could be written.
+pub fn drag_paths_under(data: &IDataObject, fetch: bool, root: &Path) -> Option<Vec<PathBuf>> {
+    let items = listed(data)?;
+    let mut slot = DROP_DIR.lock().unwrap_or_else(|e| e.into_inner());
+    if !fetch {
+        let dir = slot.get_or_insert_with(|| new_drop_dir(root)).clone();
+        let (_, tops) = plan(&items, &dir, &|_| false);
+        return (!tops.is_empty()).then_some(tops);
+    }
+    let dir = slot.take().unwrap_or_else(|| new_drop_dir(root));
+    drop(slot);
+    sweep_old_drops(root, DROP_KEEP);
+    std::fs::create_dir_all(&dir).ok()?;
+    let pasted = write_all(data, &dir, &mut |_| {}, &AtomicBool::new(false));
+    match pasted {
+        Ok(p) => {
+            if p.failed > 0 {
+                log::warn!("a drop of virtual files: {} could not be read ({})", p.failed, p.first_error.unwrap_or_default());
+            }
+            if p.arrived.is_empty() {
+                let _ = std::fs::remove_dir(&dir);
+                return None;
+            }
+            Some(p.arrived)
+        }
+        Err(e) => {
+            log::warn!("a drop of virtual files: {e:#}");
+            let _ = std::fs::remove_dir(&dir);
+            None
+        }
+    }
+}
+
+/// [`drag_paths_under`] the drops' folder, for the GPUI fork's drop target: `data` is the drag's `IDataObject`, borrowed.
+pub fn drag_paths(data: *mut c_void, fetch: bool) -> Option<Vec<PathBuf>> {
+    use windows::core::Interface;
+    // SAFETY: the drop target hands over its data object for the length of the call
+    let data = unsafe { IDataObject::from_raw_borrowed(&data) }?;
+    drag_paths_under(data, fetch, &drops_root())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -654,5 +740,42 @@ mod tests {
         assert!(write_all(&source(&[], Vec::new(), true), &dir, &mut |_| {}, &AtomicBool::new(false)).is_err());
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_drag_of_virtual_files_names_them_while_over_and_writes_them_at_the_drop() {
+        let root = scratch("drag");
+        // a drop's folder from long ago is swept at this drop; a recent one stays
+        let old = root.join("old");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("x"), b"x").unwrap();
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // (a folder opens only with FILE_FLAG_BACKUP_SEMANTICS)
+            let f = std::fs::OpenOptions::new().write(true).custom_flags(0x0200_0000).open(&old).unwrap();
+            f.set_modified(std::time::SystemTime::now() - DROP_KEEP * 2).unwrap();
+        }
+        let recent = root.join("recent");
+        std::fs::create_dir_all(&recent).unwrap();
+        let told: [Told; 3] = [("Teklif.pdf", Some(4), false, None), ("Teklif.pdf", Some(3), false, None), ("resim.png", Some(2), false, None)];
+        let data = source(&told, vec![Some(b"%PDF".to_vec()), Some(b"two".to_vec()), Some(b"PN".to_vec())], true);
+        let over = drag_paths_under(&data, false, &root).unwrap();
+        let names: Vec<_> = over.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+        // a mail's two attachments of one name are two files
+        assert_eq!(names, ["Teklif.pdf", "Teklif (2).pdf", "resim.png"]);
+        assert!(over.iter().all(|p| !p.exists()), "nothing is written while the drag is only over the window");
+        // asked again while over (DragEnter, then the drop's own ask): the same folder
+        assert_eq!(drag_paths_under(&data, false, &root).unwrap(), over);
+        let dropped = drag_paths_under(&data, true, &root).unwrap();
+        assert_eq!(dropped, over, "the drop's files are where the drag said they would be");
+        assert_eq!(std::fs::read(&dropped[0]).unwrap(), b"%PDF");
+        assert_eq!(std::fs::read(&dropped[1]).unwrap(), b"two");
+        assert!(!old.exists() && recent.exists());
+        // the next drag gets a folder of its own
+        let next = drag_paths_under(&data, false, &root).unwrap();
+        assert_ne!(next[0].parent(), dropped[0].parent());
+        // a drag that lists nothing is not taken
+        assert!(drag_paths_under(&source(&[], Vec::new(), true), true, &root).is_none());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

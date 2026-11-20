@@ -815,6 +815,8 @@ pub fn main() {
         });
     }
 
+    // a drag of files that live inside the source (a mail's attachment, a browser's image) is dropped as files (see rf_win::vfiles)
+    gpui_windows::dnd_hint::set_virtual_reader(rf_win::vfiles::drag_paths);
     // (the first window on the CPU renderer or on the card: what this machine was like the last time, see `fast_start`)
     fast_start::before_app(!dock && !bar_preview && pick.is_none() && !quick_search && !snip_only && !no_window && !open_look_settings);
     start_mark("before the app");
