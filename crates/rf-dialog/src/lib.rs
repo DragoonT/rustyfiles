@@ -11,6 +11,8 @@
 
 pub mod proto;
 #[cfg(windows)]
+// (in tests the picker is answered in place, see `com::tests`)
+#[cfg_attr(test, allow(dead_code))]
 mod ipc;
 
 /// One line to `%LOCALAPPDATA%/rustyfiles/dialog.log` (kept under 256 KB): which app asked,
@@ -46,6 +48,7 @@ mod com {
     use windows::Win32::UI::Shell::Common::{COMDLG_FILTERSPEC, ITEMIDLIST};
     use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyDescriptionList, IPropertyStore};
     use windows::Win32::UI::Shell::*;
+    use windows::Win32::System::Ole::IOleWindow;
     use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
     use windows::core::{GUID, HRESULT, IUnknown, Interface, PCWSTR, PWSTR, Ref, Result, implement, w};
     use windows_core::{BOOL as WBOOL, IUnknownImpl as _};
@@ -179,9 +182,11 @@ mod com {
         result: Option<Vec<String>>,
         /// While the app's event sinks are asked what they do with a selection (`folder_label`): the path that is "selected".
         probe: Option<String>,
+        /// While `Show` runs: the window that owns it, which is what the dialog's window is as far as the app can tell (`IOleWindow`).
+        showing_owner: Option<isize>,
     }
 
-    #[implement(IFileOpenDialog, IFileSaveDialog, IFileDialogCustomize)]
+    #[implement(IFileOpenDialog, IFileSaveDialog, IFileDialogCustomize, IOleWindow)]
     pub struct Dialog {
         save: bool,
         real: IFileDialog,
@@ -274,6 +279,14 @@ mod com {
     impl IModalWindow_Impl for Dialog_Impl {
         fn Show(&self, owner: HWND) -> Result<()> {
             trace("Show");
+            /// Clears `showing_owner` however Show returns.
+            struct Shown<'a>(&'a RefCell<State>);
+            impl Drop for Shown<'_> {
+                fn drop(&mut self) {
+                    self.0.borrow_mut().showing_owner = None;
+                }
+            }
+            let _shown = Shown(&self.st);
             let off = std::env::var_os("RUSTYFILES_DIALOG_OFF").is_some();
             if off || self.st.borrow().customized {
                 crate::log(&format!("show: Windows' dialog (customized={})", self.st.borrow().customized));
@@ -311,6 +324,11 @@ mod com {
                     }
                 }
             }
+            // (from here until Show returns the app may ask for the dialog's window: WPF does in OnFileOk, see `IOleWindow_Impl`)
+            self.st.borrow_mut().showing_owner = Some(owner.0 as isize);
+            #[cfg(test)]
+            let answer = tests::CANNED.with(|c| c.borrow_mut().take());
+            #[cfg(not(test))]
             let answer = crate::ipc::pick(&req, owner);
             if has_owner {
                 unsafe {
@@ -359,6 +377,26 @@ mod com {
                 }
             }
             Ok(())
+        }
+    }
+
+    // WHY (issue 116, Twitch Downloader, a WPF app: "File gets saved with default suggested name (not the chosen path/name) in root
+    // of the app"). WPF's dialog code asks for the dialog's window in OnFileOk (`(IOleWindow)dialog`, the parent of its overwrite
+    // question) before it reads the result. Our object had no IOleWindow: the cast threw, OnFileOk failed, the failure was taken as
+    // "accepted" (Chrome answers E_NOTIMPL), and WPF, which had read nothing, gave the app the name the app had put in itself, with
+    // no folder. Windows' dialog object has the interface. While rustyfiles is picking, the "dialog window" is the app's own window
+    // that owns it; otherwise Windows' dialog answers.
+    impl windows::Win32::System::Ole::IOleWindow_Impl for Dialog_Impl {
+        fn GetWindow(&self) -> Result<HWND> {
+            trace("GetWindow");
+            if let Some(h) = self.st.borrow().showing_owner {
+                return Ok(HWND(h as *mut c_void));
+            }
+            unsafe { self.real.cast::<windows::Win32::System::Ole::IOleWindow>()?.GetWindow() }
+        }
+        fn ContextSensitiveHelp(&self, enter: WBOOL) -> Result<()> {
+            trace("ContextSensitiveHelp");
+            unsafe { self.real.cast::<windows::Win32::System::Ole::IOleWindow>()?.ContextSensitiveHelp(enter.as_bool()) }
         }
     }
 
@@ -667,6 +705,75 @@ mod com {
         }
         fn SetControlItemText(&self, id: u32, item: u32, label: &PCWSTR) -> Result<()> {
             custom!(self, false, |c: IFileDialogCustomize| c.SetControlItemText(id, item, *label))
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) mod tests {
+        use super::*;
+        use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
+
+        thread_local! {
+            /// What "rustyfiles" answers the next Show with.
+            pub static CANNED: RefCell<Option<crate::proto::Response>> = const { RefCell::new(None) };
+        }
+
+        /// An app's event sink that does in OnFileOk what WPF's dialog code does: it asks for the dialog's window first, then reads
+        /// the result.
+        #[implement(IFileDialogEvents)]
+        struct WpfLike {
+            got: std::rc::Rc<RefCell<Option<(isize, String)>>>,
+        }
+
+        #[allow(non_snake_case)]
+        impl IFileDialogEvents_Impl for WpfLike_Impl {
+            fn OnFileOk(&self, pfd: Ref<IFileDialog>) -> Result<()> {
+                let d = pfd.ok()?;
+                let window = unsafe { d.cast::<IOleWindow>()?.GetWindow()? };
+                let path = unsafe { d.GetResult()?.GetDisplayName(SIGDN_DESKTOPABSOLUTEPARSING)?.to_string()? };
+                *self.got.borrow_mut() = Some((window.0 as isize, path));
+                Ok(())
+            }
+            fn OnFolderChanging(&self, _: Ref<IFileDialog>, _: Ref<IShellItem>) -> Result<()> {
+                Ok(())
+            }
+            fn OnFolderChange(&self, _: Ref<IFileDialog>) -> Result<()> {
+                Ok(())
+            }
+            fn OnSelectionChange(&self, _: Ref<IFileDialog>) -> Result<()> {
+                Ok(())
+            }
+            fn OnShareViolation(&self, _: Ref<IFileDialog>, _: Ref<IShellItem>) -> Result<FDE_SHAREVIOLATION_RESPONSE> {
+                Ok(FDESVR_DEFAULT)
+            }
+            fn OnTypeChange(&self, _: Ref<IFileDialog>) -> Result<()> {
+                Ok(())
+            }
+            fn OnOverwrite(&self, _: Ref<IFileDialog>, _: Ref<IShellItem>) -> Result<FDE_OVERWRITE_RESPONSE> {
+                Ok(FDEOR_DEFAULT)
+            }
+        }
+
+        #[test]
+        fn a_wpf_app_reads_the_picked_path_in_on_file_ok() {
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            }
+            let dialog: IFileSaveDialog = Dialog::new(true).unwrap().into();
+            let got = std::rc::Rc::new(RefCell::new(None));
+            let sink: IFileDialogEvents = WpfLike { got: got.clone() }.into();
+            unsafe {
+                dialog.Advise(&sink).unwrap();
+                dialog.SetFileName(w!("default name.mp4")).unwrap();
+            }
+            let picked = std::env::temp_dir().join("rf-dialog-wpf-test.mp4").to_string_lossy().into_owned();
+            CANNED.with(|c| *c.borrow_mut() = Some(crate::proto::Response { ok: true, paths: vec![picked.clone()], filter_index: 1 }));
+            // (no owner window: the "dialog window" is then the null window, as the app's own would be)
+            unsafe { dialog.Show(None).unwrap() };
+            let (_, path) = got.borrow().clone().expect("OnFileOk ran and read the result");
+            assert_eq!(path, picked, "the app gets the path picked in rustyfiles, not its own default name");
+            // outside Show, Windows' dialog answers (it has no window: an error, not a stale owner)
+            let _ = unsafe { dialog.cast::<IOleWindow>().unwrap().GetWindow() };
         }
     }
 
