@@ -210,6 +210,9 @@ pub struct Workspace {
     picker_size_gen: u64,
     /// Window width from the last frame (breadcrumb collapsing).
     viewport_w: f32,
+    /// The address box's width for the path as last laid out (logical px; 0 before the first layout): what the breadcrumb folds its
+    /// leading folders to fit (issue 164: a guess from the window's width folded them with room to spare).
+    crumb_room: std::rc::Rc<std::cell::Cell<f32>>,
     last_session: Vec<String>,
     _bulk_sub: Option<Subscription>,
     _palette_sub: Option<Subscription>,
@@ -938,6 +941,7 @@ impl Workspace {
             picker: None,
             picker_size_gen: 0,
             viewport_w: 1300.,
+            crumb_room: Default::default(),
             last_session: Vec::new(),
             _bulk_sub: None,
             _palette_sub: None,
@@ -3328,7 +3332,22 @@ impl Workspace {
 
     fn render_breadcrumb(&mut self, loc: &Location, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let drop_bg = p.selection;
-        let mut row = h_flex().gap_0p5().items_center().text_sm().overflow_hidden();
+        // (the row fills the box; its own width, measured as it is laid out, is the room the segments have)
+        let room = self.crumb_room.clone();
+        let mut row = h_flex().flex_1().min_w_0().relative().gap_0p5().items_center().text_sm().overflow_hidden().child(
+            canvas(
+                move |bounds, window, _| {
+                    let w = f32::from(bounds.size.width);
+                    if (room.get() - w).abs() > 1.0 {
+                        room.set(w);
+                        window.refresh();
+                    }
+                },
+                |_, _, _, _| (),
+            )
+            .absolute()
+            .size_full(),
+        );
         let crumbs: Vec<(String, Location)> = match loc {
             Location::Path(path) | Location::Search { root: path, .. } => breadcrumbs(path),
             // the shell's own name for the folder (the location may carry none)
@@ -3338,7 +3357,8 @@ impl Workspace {
         };
         // Too long for the address box: hide leading segments after the drive behind "…"
         // (the current folder must stay visible). Widths are estimated from text length.
-        let budget = self.viewport_w - 260. - 4. * 36. - 9. * 36. - 90.;
+        let measured = self.crumb_room.get();
+        let budget = if measured > 0. { measured + 30. } else { self.viewport_w - 260. - 4. * 36. - 9. * 36. - 90. };
         let est = |l: &str| l.chars().count() as f32 * 7.4 + 30.;
         let mut crumbs = crumbs;
         let mut hidden: Option<Location> = None;
