@@ -6,6 +6,7 @@ pub mod geometry;
 pub mod ipc;
 pub mod trace;
 pub mod lyrics;
+pub mod stream;
 pub mod system;
 pub mod viewer;
 pub mod viewers;

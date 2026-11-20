@@ -60,6 +60,9 @@ pub enum Item {
         label: SharedString,
         icon: MenuIcon,
         items: Sub,
+        /// What a click on the row itself does (the submenu still opens on hover and with the right arrow). "Sıkıştır" compresses
+        /// in the default format with a click (Discord: "be able to just click compress from the get-go").
+        click: Option<Run>,
     },
     Separator,
 }
@@ -69,7 +72,11 @@ impl Item {
         Item::Action { label: label.into(), icon, hint: None, enabled: true, checked: false, run: Rc::new(run) }
     }
     pub fn sub(label: impl Into<SharedString>, icon: MenuIcon, items: Vec<Item>) -> Self {
-        Item::Sub { label: label.into(), icon, items: Sub::Items(Rc::new(items)) }
+        Item::Sub { label: label.into(), icon, items: Sub::Items(Rc::new(items)), click: None }
+    }
+    /// A submenu whose row does `run` when it is clicked.
+    pub fn sub_click(label: impl Into<SharedString>, icon: MenuIcon, items: Vec<Item>, run: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        Item::Sub { label: label.into(), icon, items: Sub::Items(Rc::new(items)), click: Some(Rc::new(run)) }
     }
     pub fn hint(mut self, h: impl Into<SharedString>) -> Self {
         if let Item::Action { hint, .. } = &mut self {
@@ -721,10 +728,16 @@ impl MenuView {
     }
 
     fn activate(&mut self, level: usize, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.activate_as(level, ix, false, window, cx)
+    }
+
+    /// `open_sub`: a submenu row opens its submenu even when a click on it does something (the right arrow).
+    fn activate_as(&mut self, level: usize, ix: usize, open_sub: bool, window: &mut Window, cx: &mut Context<Self>) {
         let levels = self.levels();
         let Some(item) = levels.get(level).and_then(|l| l.get(ix)).cloned() else { return };
         match item {
             Item::Action { enabled: true, run, .. } => run_in_main(run, window, cx),
+            Item::Sub { click: Some(run), .. } if !open_sub => run_in_main(run, window, cx),
             Item::Sub { .. } => {
                 self.open.truncate(level);
                 self.open.push(ix);
@@ -801,7 +814,7 @@ impl MenuView {
                 if let Some((lv, ix)) = self.hl {
                     let is_sub = self.levels().get(lv).and_then(|l| l.get(ix)).is_some_and(|i| matches!(i, Item::Sub { .. }));
                     if is_sub {
-                        self.activate(lv, ix, window, cx);
+                        self.activate_as(lv, ix, true, window, cx);
                     }
                 }
             }

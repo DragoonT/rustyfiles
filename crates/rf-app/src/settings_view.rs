@@ -35,13 +35,14 @@ pub enum Page {
     Look,
     Ferry,
     Search,
+    Addons,
     Advanced,
     Speed,
     Organizer,
     About,
 }
 
-const PAGES: [(Page, L, &str); 16] = [
+const PAGES: [(Page, L, &str); 17] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
     (Page::Dock, L::PanelBottom, "Dock"),
@@ -54,6 +55,7 @@ const PAGES: [(Page, L, &str); 16] = [
     (Page::Look, L::Eye, "DirectLook"),
     (Page::Search, L::Search, "HyperSearch"),
     (Page::Ferry, L::Send, "Ferry"),
+    (Page::Addons, L::Package, "Eklentiler"),
     (Page::Advanced, L::Wrench, "Gelişmiş"),
     (Page::Speed, L::Gauge, "Hız testi"),
     (Page::Organizer, L::WandSparkles, "Dosya düzenleyici"),
@@ -224,6 +226,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Look => look(p, s, cx),
         Page::Ferry => crate::ferry::page(p, s, cx),
         Page::Search => quick_search_cards(p, s, cx),
+        Page::Addons => crate::addons_page::page(p, cx),
         // the developer tools are a part of Gelişmiş (they had a page of their own)
         Page::Advanced => {
             let mut v = advanced(p, s, cx);
@@ -2061,6 +2064,32 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         Some(t!("ZIP, 7z ve tar dosyalarının içine çift tıklayarak girilir; içindeki dosyalar açılınca geçici bir klasöre çıkarılır")),
         sw("browse-arc", p, s.browse_archives, |s, v| s.browse_archives = v),
     ));
+    if s.browse_archives {
+        use crate::settings::ArchiveOpen as A;
+        v.push(card(
+            p,
+            L::AppWindow,
+            t!("Arşivler nerede açılsın"),
+            None,
+            dropdown("archives-open-in", p, s.archives_open_in, vec![(A::Here, t!("Aynı sekmede").to_string()), (A::NewTab, t!("Yeni sekmede").to_string()), (A::NewWindow, t!("Yeni pencerede").to_string())], |s, v| {
+                s.archives_open_in = v
+            }),
+        ));
+    }
+    {
+        use crate::settings::QuickCompress as Q;
+        let mut options = vec![(Q::Menu, t!("Yalnızca menüyü aç").to_string()), (Q::Zip, "ZIP".into()), (Q::SevenZ, "7z".into()), (Q::TarZst, "tar.zst".into()), (Q::TarGz, "tar.gz".into()), (Q::Tar, "tar".into())];
+        if crate::archive_view::winrar().is_some() || s.quick_compress == Q::Rar {
+            options.push((Q::Rar, "RAR (WinRAR)".into()));
+        }
+        v.push(card(
+            p,
+            L::Archive,
+            t!("Sıkıştır'a tıklayınca"),
+            Some(t!("Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır")),
+            dropdown("quick-compress", p, s.quick_compress, options, |s, v| s.quick_compress = v),
+        ));
+    }
     v.push(card(
         p,
         L::FolderOutput,

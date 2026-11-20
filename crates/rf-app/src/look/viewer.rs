@@ -27,6 +27,10 @@ impl Probe {
     }
 
     pub fn read(path: &Path) -> Probe {
+        // a file being downloaded, played from HyperDownload's local stream (`crate::look::stream`)
+        if let Some((url, name)) = crate::look::stream::parse(path) {
+            return Probe { path: path.to_path_buf(), ext: Probe::ext_of(Path::new(&name)), head: rf_player::stream_head(&url, HEAD_LEN), is_dir: false, exists: true };
+        }
         let virtual_item = path.to_string_lossy().starts_with("::");
         let meta = if virtual_item { None } else { std::fs::metadata(path).ok() };
         let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());

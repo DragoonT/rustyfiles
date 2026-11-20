@@ -303,6 +303,16 @@ extension SettingsContent {
                 title: String(localized: "Open archives like folders"), detail: String(localized: "Off: archives open in the app macOS chooses for them."), icon: "archive",
                 control: .toggle(get: { AppSettings.archivesAsFolders }, set: { AppSettings.archivesAsFolders = $0 })),
             .card(
+                title: String(localized: "Compress in one click"), detail: String(localized: "The right-click menu’s Compress makes this format at once; the other formats and “Create archive…” stay below it."), icon: "file-archive",
+                control: .choice(
+                    options: [("menu", String(localized: "Off: only the menu"))] + ArchiveKinds.offered.map { ($0.key, $0.title) },
+                    get: { AppSettings.quickCompress }, set: { AppSettings.quickCompress = $0 })),
+            .card(
+                title: String(localized: "Where archives open"), detail: nil, icon: "folder-open",
+                control: .choice(
+                    options: [("here", String(localized: "In the same tab")), ("tab", String(localized: "In a new tab")), ("window", String(localized: "In a new window"))],
+                    get: { AppSettings.archivesOpenIn }, set: { AppSettings.archivesOpenIn = $0 })),
+            .card(
                 title: String(localized: "Open the folder after extracting"), detail: String(localized: "The new folder opens in a new tab."), icon: "folder-output",
                 control: .toggle(get: { AppSettings.openAfterExtract }, set: { AppSettings.openAfterExtract = $0 })),
             .section(String(localized: "Sizes")),

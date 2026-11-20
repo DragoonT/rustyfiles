@@ -12589,6 +12589,222 @@
   "en": "Take out of the folder"
  },
  {
+  "id": "533f3598",
+  "key": "Yalnızca menüyü aç",
+  "tr": "Yalnızca menüyü aç",
+  "en": "Only open the menu"
+ },
+ {
+  "id": "70fd9283",
+  "key": "Sıkıştır'a tıklayınca",
+  "tr": "Sıkıştır'a tıklayınca",
+  "en": "Clicking Compress"
+ },
+ {
+  "id": "05f2a11f",
+  "key": "Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır",
+  "tr": "Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır",
+  "en": "A click on Compress in the right-click menu compresses the selection in this format at once; the other ways open when you hover over it"
+ },
+ {
+  "id": "eb46a863",
+  "key": "Arşivler nerede açılsın",
+  "tr": "Arşivler nerede açılsın",
+  "en": "Where archives open"
+ },
+ {
+  "id": "764abb10",
+  "key": "Aynı sekmede",
+  "tr": "Aynı sekmede",
+  "en": "In the same tab"
+ },
+ {
+  "id": "504bc2be",
+  "key": "Yeni sekmede",
+  "tr": "Yeni sekmede",
+  "en": "In a new tab"
+ },
+ {
+  "id": "047f356f",
+  "key": "Yeni pencerede",
+  "tr": "Yeni pencerede",
+  "en": "In a new window"
+ },
+ {
+  "id": "dce41044",
+  "key": "{h} sa {m} dk kaldı",
+  "tr": "{h} sa {m} dk kaldı",
+  "en": "{h} h {m} min left"
+ },
+ {
+  "id": "ce195c5a",
+  "key": "Eklentiler",
+  "tr": "Eklentiler",
+  "en": "Add-ons"
+ },
+ {
+  "id": "4fc8af2d",
+  "key": "Eklentiler rustyfiles'a ayrı programlar olarak eklenir: yalnızca siz kurunca indirilir, rustyfiles'ın listesindeki parmak iziyle (SHA-256) denetlenir ve istediğiniz zaman kaldırılır.",
+  "tr": "Eklentiler rustyfiles'a ayrı programlar olarak eklenir: yalnızca siz kurunca indirilir, rustyfiles'ın listesindeki parmak iziyle (SHA-256) denetlenir ve istediğiniz zaman kaldırılır.",
+  "en": "Add-ons join rustyfiles as programs of their own: they are downloaded only when you install them, checked against the fingerprint (SHA-256) in rustyfiles' list, and can be removed at any time."
+ },
+ {
+  "id": "fb510192",
+  "key": "Eklenti listesi okunuyor…",
+  "tr": "Eklenti listesi okunuyor…",
+  "en": "Reading the list of add-ons…"
+ },
+ {
+  "id": "b40e45bd",
+  "key": "Eklenti listesi okunamadı",
+  "tr": "Eklenti listesi okunamadı",
+  "en": "The list of add-ons could not be read"
+ },
+ {
+  "id": "30cd1f85",
+  "key": "Yeniden dene",
+  "tr": "Yeniden dene",
+  "en": "Try again"
+ },
+ {
+  "id": "89288286",
+  "key": "Kullanılabilir",
+  "tr": "Kullanılabilir",
+  "en": "Available"
+ },
+ {
+  "id": "81ee8375",
+  "key": "Şu an kurulabilecek bir eklenti yok.",
+  "tr": "Şu an kurulabilecek bir eklenti yok.",
+  "en": "There are no add-ons to install right now."
+ },
+ {
+  "id": "77c5f9fb",
+  "key": "İndirme yöneticisi: bir dosyayı birçok bağlantıyla birden indirir, duraklatılıp kaldığı yerden sürdürülür; torrent ve magnet bağlantılarını da indirir",
+  "tr": "İndirme yöneticisi: bir dosyayı birçok bağlantıyla birden indirir, duraklatılıp kaldığı yerden sürdürülür; torrent ve magnet bağlantılarını da indirir",
+  "en": "Download manager: fetches a file over many connections at once, can be paused and resumed where it stopped, and downloads torrents and magnet links too"
+ },
+ {
+  "id": "16ce2cd3",
+  "key": "Kurulu:",
+  "tr": "Kurulu:",
+  "en": "Installed:"
+ },
+ {
+  "id": "a75cba32",
+  "key": "Yeni sürüm:",
+  "tr": "Yeni sürüm:",
+  "en": "New version:"
+ },
+ {
+  "id": "b6e36abe",
+  "key": "Bu işlemci için henüz bir sürümü yok.",
+  "tr": "Bu işlemci için henüz bir sürümü yok.",
+  "en": "There is no build for this processor yet."
+ },
+ {
+  "id": "37169df2",
+  "key": "İndiriliyor",
+  "tr": "İndiriliyor",
+  "en": "Downloading"
+ },
+ {
+  "id": "c622ae00",
+  "key": "Güncelle",
+  "tr": "Güncelle",
+  "en": "Update"
+ },
+ {
+  "id": "d841e9cd",
+  "key": "Kur",
+  "tr": "Kur",
+  "en": "Install"
+ },
+ {
+  "id": "3e4c9ef3",
+  "key": "Kaldırılamadı (program açık olabilir)",
+  "tr": "Kaldırılamadı (program açık olabilir)",
+  "en": "Could not be removed (the program may be running)"
+ },
+ {
+  "id": "ec8fc977",
+  "key": "Kaynak kodu:",
+  "tr": "Kaynak kodu:",
+  "en": "Source code:"
+ },
+ {
+  "id": "f3ab2710",
+  "key": "Bağlantıdan indir…",
+  "tr": "Bağlantıdan indir…",
+  "en": "Download from a link…"
+ },
+ {
+  "id": "10aee4c4",
+  "key": "Bağlantıdan indir",
+  "tr": "Bağlantıdan indir",
+  "en": "Download from a link"
+ },
+ {
+  "id": "49a422fb",
+  "key": "Dosya bu klasöre indirilir:",
+  "tr": "Dosya bu klasöre indirilir:",
+  "en": "The file is downloaded into this folder:"
+ },
+ {
+  "id": "54a42be4",
+  "key": "İndir",
+  "tr": "İndir",
+  "en": "Download"
+ },
+ {
+  "id": "958d715b",
+  "key": "Bir http, https ya da magnet bağlantısı yazın",
+  "tr": "Bir http, https ya da magnet bağlantısı yazın",
+  "en": "Type an http, https or magnet link"
+ },
+ {
+  "id": "37b90abb",
+  "key": "HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz",
+  "tr": "HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz",
+  "en": "HyperDownload is not installed: you can install it from Settings › Add-ons"
+ },
+ {
+  "id": "d01a756c",
+  "key": "İndirilecek dosyaları seçin",
+  "tr": "İndirilecek dosyaları seçin",
+  "en": "Choose the files to download"
+ },
+ {
+  "id": "f4ed319d",
+  "key": "En az bir dosya seçin",
+  "tr": "En az bir dosya seçin",
+  "en": "Choose at least one file"
+ },
+ {
+  "id": "23360499",
+  "key": "Bağlantı bu klasöre indirilsin mi?",
+  "tr": "Bağlantı bu klasöre indirilsin mi?",
+  "en": "Download the link into this folder?"
+ },
+ {
+  "id": "dcdc4ca3",
+  "key": "HyperDownload ile indir",
+  "tr": "HyperDownload ile indir",
+  "en": "Download with HyperDownload"
+ },
+ {
+  "id": "d5cb1948",
+  "key": "tarayıcıdan",
+  "tr": "tarayıcıdan",
+  "en": "from the browser"
+ },
+ {
+  "id": "57f8453e",
+  "key": "İzle",
+  "tr": "İzle",
+  "en": "Watch"
+ },
+ {
   "id": "bd479de9",
   "key": "Windows Dosya Gezgini görünümü",
   "tr": "Windows Dosya Gezgini görünümü",

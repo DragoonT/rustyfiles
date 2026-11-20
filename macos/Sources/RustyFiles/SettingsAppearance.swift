@@ -47,8 +47,20 @@ extension AppSettings {
     static var fontFamily: String {
         get { d.string(forKey: "fontFamily") ?? "" }
         set {
-            store(newValue.isEmpty ? nil : newValue, "fontFamily")
+            d.set(newValue.isEmpty ? nil : newValue, forKey: "fontFamily")
             Metrics.fontsChanged()
+            store(newValue.isEmpty ? nil : newValue, "fontFamily")
+        }
+    }
+
+    /// Settings › Appearance › Text size: the interface's text in percent of the usual (87, 100, 112).
+    static var textPercent: Int {
+        get { [87, 100, 112].contains(d.integer(forKey: "textPercent")) ? d.integer(forKey: "textPercent") : 100 }
+        set {
+            // the fonts first, so the views told below draw with them
+            d.set(newValue == 100 ? nil : newValue, forKey: "textPercent")
+            Metrics.fontsChanged()
+            store(newValue == 100 ? nil : newValue, "textPercent")
         }
     }
 
@@ -177,6 +189,11 @@ extension SettingsContent {
             .card(
                 title: String(localized: "Show scroll bars"), detail: nil, icon: "move-vertical",
                 control: .toggle(get: { AppSettings.showScrollBars }, set: { AppSettings.showScrollBars = $0 })),
+            .card(
+                title: String(localized: "Text size"), detail: String(localized: "Smaller text fits more on a small screen."), icon: "a-large-small",
+                control: .choice(
+                    options: [("87", String(localized: "Small")), ("100", String(localized: "Normal")), ("112", String(localized: "Large"))],
+                    get: { "\(AppSettings.textPercent)" }, set: { AppSettings.textPercent = Int($0) ?? 100 })),
             .card(
                 title: String(localized: "Font"), detail: nil, icon: "type",
                 control: .choice(

@@ -26,6 +26,7 @@ pub fn name(which: Status) -> &'static str {
         Status::Language => t!("Giriş dili"),
         Status::Network => t!("Ağ"),
         Status::Volume => t!("Ses"),
+        Status::Battery => t!("Pil"),
     }
 }
 
@@ -38,6 +39,7 @@ pub fn icon(which: Status) -> L {
         Status::Language => L::Languages,
         Status::Network => L::Wifi,
         Status::Volume => L::Volume2,
+        Status::Battery => L::BatteryFull,
     }
 }
 
@@ -84,7 +86,9 @@ fn arrow(id: SharedString, p: &Palette, icon: L, tip: &'static str, run: Option<
 pub(crate) fn card(p: &Palette, s: &Settings, live: bool) -> Div {
     let order = status_order::order(&s.dock_status_order);
     let last = order.len() - 1;
-    let rows = order.into_iter().enumerate().map(|(i, which)| {
+    // (the battery's row only on a machine that has a battery; the others keep their places in the whole order)
+    let battery = rf_win::sysstatus::power::read().present;
+    let rows = order.into_iter().enumerate().filter(move |(_, w)| *w != Status::Battery || battery).map(|(i, which)| {
         let shown = !status_order::is_hidden(&s.dock_status_hidden, which);
         let key = which.key();
         let step = |by: i32| -> Option<Box<dyn Fn(&mut App)>> {

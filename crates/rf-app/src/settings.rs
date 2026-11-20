@@ -252,6 +252,33 @@ pub enum IdePref {
 }
 
 /// Which of our own entries the context menu shows (Settings → General → Context menu).
+/// Where an archive opens when it is opened like a folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveOpen {
+    /// In the same tab, as a folder does.
+    #[default]
+    Here,
+    NewTab,
+    NewWindow,
+}
+
+/// The format a click on "Sıkıştır" compresses in (Discord, 2026-11-20: "a default zipping method setting in settings").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickCompress {
+    /// A click only opens the submenu, as before.
+    Menu,
+    #[default]
+    Zip,
+    SevenZ,
+    TarZst,
+    TarGz,
+    Tar,
+    /// WinRAR's format, through its Rar.exe (only when WinRAR is installed).
+    Rar,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MenuPrefs {
@@ -617,6 +644,11 @@ pub struct Settings {
     pub address_commands: bool,
     /// Double-clicking a ZIP/7z/tar opens it like a folder (read-only).
     pub browse_archives: bool,
+    /// Where an archive opened like a folder goes (Discord, 2026-11-20: "an option/toggle to make zips open separately from the
+    /// normal window").
+    pub archives_open_in: ArchiveOpen,
+    /// What a click on "Sıkıştır" in the right-click menu does: compress at once in this format, or (`Menu`) only open its submenu.
+    pub quick_compress: QuickCompress,
     /// After extracting an archive into a new folder, that folder opens in a tab.
     pub open_after_extract: bool,
     /// Search through the Windows Search index (contents, AQS) where the folder is indexed.
@@ -927,6 +959,8 @@ impl Default for Settings {
             sidebar_tree_follow: true,
             address_commands: true,
             browse_archives: true,
+            quick_compress: QuickCompress::Zip,
+            archives_open_in: ArchiveOpen::Here,
             open_after_extract: false,
             search_index: true,
             name_index: true,

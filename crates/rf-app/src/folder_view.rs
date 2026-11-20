@@ -758,6 +758,31 @@ impl FolderView {
         this
     }
 
+    /// "Bağlantıdan indir…": asks for a link (one on the clipboard is filled in) and downloads it into this folder with HyperDownload.
+    pub fn download_from_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        use crate::prompt::{Button, Kind};
+        let Location::Path(dir) = self.location().clone() else { return };
+        let initial = cx.read_from_clipboard().and_then(|c| c.text()).map(|t| t.trim().to_string()).filter(|t| crate::hyperdownload::is_link(t)).unwrap_or_default();
+        crate::prompt::show(
+            crate::t!("Bağlantıdan indir"),
+            Some(format!("{} {}", crate::t!("Dosya bu klasöre indirilir:"), dir.display())),
+            Some((initial, "https://… / magnet:?…".to_string())),
+            vec![
+                Button::new(crate::t!("İndir"), Kind::Primary, move |text, _, cx| {
+                    let url = text.unwrap_or_default().trim().to_string();
+                    if !crate::hyperdownload::is_link(&url) {
+                        return Err(crate::t!("Bir http, https ya da magnet bağlantısı yazın").to_string());
+                    }
+                    crate::hyperdownload::download(url, dir.clone(), cx);
+                    Ok(())
+                }),
+                Button::cancel(),
+            ],
+            window,
+            cx,
+        );
+    }
+
     pub fn location(&self) -> &Location {
         self.history.current()
     }
@@ -3471,7 +3496,13 @@ impl FolderView {
         let browse = !e.is_dir()
             && cx.global::<crate::settings::Settings>().browse_archives
             && crate::archive_view::is_browsable(&path);
-        if e.is_dir() || browse {
+        // an archive goes where the setting says (its own tab or window, or here as a folder)
+        let archive_to = if e.is_dir() { crate::settings::ArchiveOpen::Here } else { cx.global::<crate::settings::Settings>().archives_open_in };
+        if browse && archive_to == crate::settings::ArchiveOpen::NewWindow {
+            cx.emit(FolderEvent::OpenInNewWindow(Location::Path(path)));
+        } else if browse && archive_to == crate::settings::ArchiveOpen::NewTab {
+            cx.emit(FolderEvent::OpenInNewTab(Location::Path(path)));
+        } else if e.is_dir() || browse {
             if cx.global::<crate::settings::Settings>().open_folders_in_new_tab {
                 cx.emit(FolderEvent::OpenInNewTab(Location::Path(path)));
             } else {
@@ -3914,6 +3945,9 @@ impl FolderView {
             let calc_link = dir_path.filter(|_| dir_size.is_none());
             let e = &self.entries[ei as usize];
             let selected = self.selected.contains(&ei);
+            // (the rows next to it that are selected too: the pill joins them)
+            let sel_above = selected && vi > 0 && self.visible.get(vi - 1).is_some_and(|e| self.selected.contains(e));
+            let sel_below = selected && self.visible.get(vi + 1).is_some_and(|e| self.selected.contains(e));
             let is_cursor = self.cursor == Some(vi);
             let cat = icons::category(e);
             let dim = e.is_hidden() || e.is_cloud_placeholder();
@@ -4083,7 +4117,7 @@ impl FolderView {
                 .items_center()
                 .text_sm()
                 .relative()
-                .when(selected, |d| d.bg(p.selection).child(theme::selection_pill(&p)))
+                .when(selected, |d| d.bg(p.selection).child(theme::selection_pill_joined(&p, sel_above, sel_below)))
                 .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
                 .when(is_cursor && selected && self.selected.len() > 1, |d| {
                     d.border_1().border_color(p.selection_border)
@@ -5260,6 +5294,7 @@ impl Render for FolderView {
             }))
             .on_action(cx.listener(|this, _: &NewFolder, _, cx| this.create_new(true, cx)))
             .on_action(cx.listener(|this, _: &NewTextFile, _, cx| this.create_new(false, cx)))
+            .on_action(cx.listener(|this, _: &DownloadFromLink, window, cx| this.download_from_link(window, cx)))
             .on_action(cx.listener(|this, _: &CopyPath, _, cx| this.copy_path(cx)))
             .on_action(cx.listener(|this, _: &CopyPathQuoted, _, cx| this.copy_path_with(true, cx)))
             .on_action(cx.listener(|this, _: &RotateRight, window, cx| this.rotate_selection(true, window, cx)))
