@@ -361,11 +361,20 @@ fn run_status(which: Status, cx: &mut App) {
     match which {
         Status::Eject => super::panel::toggle_eject(cx),
         Status::Security => super::panel_parts::open_uri("windowsdefender:"),
-        Status::Language => {
-            if !rf_win::inputlang::switch_foreground_to_next() {
-                log::info!("dock: the input language was not switched (no window in front, or one layout)");
+        Status::Language => match rf_win::inputlang::switch_foreground_to_next() {
+            // the button shows the new language at once; the next reading confirms it (or shows the old one again when the window
+            // did not take the request)
+            Some(code) => {
+                if let Some(island) = super::host::right_island_on(super::host::MonId::HOME, cx) {
+                    island.update(cx, |me, cx| {
+                        let mut now = me.lang.clone();
+                        now.code = code;
+                        me.set_language(now, cx);
+                    });
+                }
             }
-        }
+            None => log::info!("dock: the input language was not switched (no window in front, or one layout)"),
+        },
         Status::Network | Status::Volume => open_controls(cx),
     }
 }
