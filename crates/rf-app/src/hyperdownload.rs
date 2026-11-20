@@ -141,9 +141,69 @@ pub fn is_link(text: &str) -> bool {
 }
 
 /// Downloads `url` into `dir` as a card of the Status Center. When the add-on is missing, says so and offers its page.
+/// A torrent's file list, sent from the download's thread to the window to be chosen from: its name, the files (path, bytes), the
+/// ones suggested, and where the answer goes (`None`: cancelled).
+type Ask = (String, Vec<(String, u64)>, Vec<usize>, std::sync::mpsc::Sender<Option<Vec<usize>>>);
+
+/// Shows the file list with check boxes in the window in front (the suggested files ticked); "İndir" sends the ticked ones.
+fn ask_files(name: String, files: Vec<(String, u64)>, suggested: Vec<usize>, reply: std::sync::mpsc::Sender<Option<Vec<usize>>>, cx: &mut gpui_kit::App) {
+    use crate::prompt::{Button, Check, Kind};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    let Some(win) = cx.active_window().or_else(|| cx.windows().first().copied()) else {
+        let _ = reply.send(Some(suggested));
+        return;
+    };
+    let cells: Vec<Rc<Cell<bool>>> = (0..files.len()).map(|i| Rc::new(Cell::new(suggested.contains(&i)))).collect();
+    let checks: Vec<Check> = files
+        .iter()
+        .zip(&cells)
+        .map(|((path, len), on)| Check { label: path.clone().into(), note: rf_core::format::size(*len).into(), on: on.clone() })
+        .collect();
+    let reply = Rc::new(RefCell::new(Some(reply)));
+    let (r1, r2) = (reply.clone(), reply.clone());
+    let picked = cells.clone();
+    let _ = win.update(cx, move |_, window, cx| {
+        crate::prompt::show_checks(
+            name,
+            Some(crate::t!("İndirilecek dosyaları seçin").to_string()),
+            checks,
+            vec![
+                Button::new(crate::t!("İndir"), Kind::Primary, move |_, _, _| {
+                    let chosen: Vec<usize> = picked.iter().enumerate().filter(|(_, c)| c.get()).map(|(i, _)| i).collect();
+                    if chosen.is_empty() {
+                        return Err(crate::t!("En az bir dosya seçin").to_string());
+                    }
+                    if let Some(tx) = r1.borrow_mut().take() {
+                        let _ = tx.send(Some(chosen));
+                    }
+                    Ok(())
+                }),
+                Button::new(crate::t!("İptal"), Kind::Normal, move |_, _, _| {
+                    if let Some(tx) = r2.borrow_mut().take() {
+                        let _ = tx.send(None);
+                    }
+                    Ok(())
+                }),
+            ],
+            window,
+            cx,
+        );
+    });
+}
+
 pub fn download(url: String, dir: PathBuf, cx: &mut gpui_kit::App) {
     let title = format!("{} {}", crate::t!("İndiriliyor:"), label_of(&url));
     let shown_dir = dir.clone();
+    // a torrent's file list is chosen in a window: the download's thread asks the window through this
+    let (ask_tx, mut ask_rx) = futures::channel::mpsc::unbounded::<Ask>();
+    cx.spawn(async move |cx| {
+        use futures::StreamExt;
+        while let Some((name, files, suggested, reply)) = ask_rx.next().await {
+            let _ = cx.update(|cx| ask_files(name, files, suggested, reply, cx));
+        }
+    })
+    .detach();
     crate::status_center::start_with(
         cx,
         title,
@@ -156,6 +216,7 @@ pub fn download(url: String, dir: PathBuf, cx: &mut gpui_kit::App) {
             let gid = rpc.call("aria2.addUri", vec![json!([url]), json!({ "dir": dir.display().to_string() })]).map_err(anyhow::Error::msg)?;
             let gid = gid.as_str().unwrap_or_default().to_string();
             let mut paused = false;
+            let mut asked = false;
             loop {
                 std::thread::sleep(Duration::from_millis(300));
                 if t.cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -171,8 +232,49 @@ pub fn download(url: String, dir: PathBuf, cx: &mut gpui_kit::App) {
                 let Ok(v) = rpc.call("aria2.tellStatus", vec![json!(gid)]) else { continue };
                 let s = seen(&v);
                 t.bytes.set(s.done, s.total.max(s.done));
-                let name = s.path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+                let name = s
+                    .path
+                    .as_ref()
+                    .filter(|_| v.get("hdKind").and_then(Value::as_str) != Some("torrent"))
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .or_else(|| v.pointer("/bittorrent/info/name").and_then(Value::as_str).map(str::to_string));
                 (t.on_progress)(1, 0, name);
+                // a torrent whose file list waits for the user's choice
+                if s.status == "waiting" && v.get("hdChoice").and_then(Value::as_bool) == Some(true) && !asked {
+                    asked = true;
+                    let choices = rpc.call("hd.choices", vec![]).unwrap_or(Value::Null);
+                    let mine = choices.as_array().and_then(|a| a.iter().find(|c| c.get("gid").and_then(Value::as_str) == Some(gid.as_str()))).cloned();
+                    if let Some(c) = mine {
+                        let n = |v: &Value| v.as_str().and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+                        let files: Vec<(String, u64)> = c["files"].as_array().map(|a| a.iter().map(|f| (f["path"].as_str().unwrap_or_default().to_string(), n(&f["length"]))).collect()).unwrap_or_default();
+                        let suggested: Vec<usize> = c["suggested"].as_array().map(|a| a.iter().map(|i| n(i) as usize).filter(|i| *i > 0).map(|i| i - 1).collect()).unwrap_or_default();
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        let name = c["name"].as_str().unwrap_or_default().to_string();
+                        let _ = ask_tx.unbounded_send((name, files, suggested, tx));
+                        let answer = loop {
+                            if t.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                                break None;
+                            }
+                            match rx.recv_timeout(Duration::from_millis(300)) {
+                                Ok(a) => break a,
+                                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                                Err(_) => break None,
+                            }
+                        };
+                        match answer {
+                            Some(files) => {
+                                let list: Vec<Value> = files.iter().map(|i| json!((i + 1).to_string())).collect();
+                                rpc.call("hd.choose", vec![json!(gid), json!(list)]).map_err(anyhow::Error::msg)?;
+                            }
+                            None => {
+                                let _ = rpc.call("aria2.remove", vec![json!(gid)]);
+                                return Ok(false);
+                            }
+                        }
+                    }
+                    continue;
+                }
                 match s.status.as_str() {
                     "complete" => {
                         let _ = rpc.call("aria2.removeDownloadResult", vec![json!(gid)]);

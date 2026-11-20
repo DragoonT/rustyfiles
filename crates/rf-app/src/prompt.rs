@@ -47,12 +47,20 @@ pub struct Choice {
     pub selected: Rc<std::cell::Cell<usize>>,
 }
 
+/// A row with a check box (a torrent's files to download): its text, a quieter note at its right (a size) and whether it is ticked.
+pub struct Check {
+    pub label: SharedString,
+    pub note: SharedString,
+    pub on: Rc<std::cell::Cell<bool>>,
+}
+
 pub struct DialogView {
     title: SharedString,
     message: Option<SharedString>,
     error: Option<SharedString>,
     input: Option<Entity<InputState>>,
     choices: Vec<Choice>,
+    checks: Vec<Check>,
     buttons: Vec<Button>,
     focus: FocusHandle,
     /// The button the keyboard is on: it carries a ring, Enter and Space press it, Tab, Shift+Tab and the arrows move it (the
@@ -90,7 +98,7 @@ pub fn show_with(
     window: &mut Window,
     cx: &mut App,
 ) {
-    show_inner(title, message, input, false, choices, buttons, window, cx)
+    show_inner(title, message, input, false, choices, Vec::new(), buttons, window, cx)
 }
 
 /// A plain notice with one button.
@@ -123,7 +131,12 @@ pub fn ask(title: impl Into<SharedString>, message: String, window: &mut Window,
 
 /// A dialog whose text box hides what is typed (passwords).
 pub fn show_secret(title: impl Into<SharedString>, message: Option<String>, placeholder: String, buttons: Vec<Button>, window: &mut Window, cx: &mut App) {
-    show_inner(title, message, Some((String::new(), placeholder)), true, Vec::new(), buttons, window, cx)
+    show_inner(title, message, Some((String::new(), placeholder)), true, Vec::new(), Vec::new(), buttons, window, cx)
+}
+
+/// A dialog with a list of check boxes (a long list scrolls).
+pub fn show_checks(title: impl Into<SharedString>, message: Option<String>, checks: Vec<Check>, buttons: Vec<Button>, window: &mut Window, cx: &mut App) {
+    show_inner(title, message, None, false, Vec::new(), checks, buttons, window, cx)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -133,6 +146,7 @@ fn show_inner(
     input: Option<(String, String)>,
     masked: bool,
     choices: Vec<Choice>,
+    checks: Vec<Check>,
     buttons: Vec<Button>,
     window: &mut Window,
     cx: &mut App,
@@ -166,6 +180,7 @@ fn show_inner(
             error: None,
             input,
             choices,
+            checks,
             buttons,
             focus: cx.focus_handle(),
             keyed,
@@ -256,6 +271,43 @@ impl DialogView {
         if let Some(ix) = main_button(&self.buttons.iter().map(|b| b.kind).collect::<Vec<_>>()) {
             self.press(ix, window, cx);
         }
+    }
+}
+
+impl DialogView {
+    /// The check boxes, in a list that scrolls past ten rows.
+    fn check_list(&self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+        let mut list = v_flex().id("dlg-checks").max_h(px(300.)).overflow_y_scroll().rounded(theme::RADIUS_SM).border_1().border_color(p.border).bg(p.content_bg);
+        for (i, c) in self.checks.iter().enumerate() {
+            let on = c.on.get();
+            let cell = c.on.clone();
+            let mark = div()
+                .size(px(16.))
+                .flex_shrink_0()
+                .rounded(px(4.))
+                .border_1()
+                .border_color(if on { p.accent } else { p.border })
+                .when(on, |d| d.bg(p.accent).flex().items_center().justify_center().child(gpui_kit::component::Icon::new(gpui_kit::assets::IconName::Check).size(px(12.)).text_color(p.accent_text)));
+            list = list.child(
+                h_flex()
+                    .id(("dlg-check", i))
+                    .h(px(30.))
+                    .px_2()
+                    .gap_2()
+                    .items_center()
+                    .flex_shrink_0()
+                    .cursor_pointer()
+                    .hover(|s| s.bg(p.hover))
+                    .child(mark)
+                    .child(div().flex_1().min_w_0().truncate().text_sm().child(c.label.clone()))
+                    .child(div().flex_shrink_0().text_xs().text_color(p.text_secondary).child(c.note.clone()))
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cell.set(!cell.get());
+                        cx.notify();
+                    })),
+            );
+        }
+        list.into_any_element()
     }
 }
 
@@ -402,7 +454,8 @@ impl Render for DialogView {
                                     .child(Input::new(i).appearance(false))
                             }))
                             .children(self.error.clone().map(|e| div().text_xs().text_color(p.danger).child(e)))
-                            .children(choice_rows),
+                            .children(choice_rows)
+                            .when(!self.checks.is_empty(), |d| d.child(self.check_list(&p, cx))),
                     )
                     .child(div().px_6().py_4().bg(p.hover).border_t_1().border_color(p.divider).child(buttons))
                     .with_animation("dialog-in", Animation::new(std::time::Duration::from_millis(160)).with_easing(ease_out_quint()), |el, t| {

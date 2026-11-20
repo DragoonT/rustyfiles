@@ -12767,5 +12767,17 @@
   "key": "HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz",
   "tr": "HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz",
   "en": "HyperDownload is not installed: you can install it from Settings › Add-ons"
+ },
+ {
+  "id": "d01a756c",
+  "key": "İndirilecek dosyaları seçin",
+  "tr": "İndirilecek dosyaları seçin",
+  "en": "Choose the files to download"
+ },
+ {
+  "id": "f4ed319d",
+  "key": "En az bir dosya seçin",
+  "tr": "En az bir dosya seçin",
+  "en": "Choose at least one file"
  }
 ]

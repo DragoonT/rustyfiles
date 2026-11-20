@@ -421,6 +421,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Kaldırılamadı (program açık olabilir)", "Could not be removed (the program may be running)"),
     ("Kaynak kodu:", "Source code:"),
     ("Bağlantıdan indir…", "Download from a link…"),
+    ("İndirilecek dosyaları seçin", "Choose the files to download"),
+    ("En az bir dosya seçin", "Choose at least one file"),
     ("Bağlantıdan indir", "Download from a link"),
     ("Dosya bu klasöre indirilir:", "The file is downloaded into this folder:"),
     ("İndir", "Download"),
