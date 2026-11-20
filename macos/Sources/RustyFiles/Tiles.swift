@@ -253,3 +253,22 @@ final class TileCollectionView: NSCollectionView, NSServicesMenuRequestor {
     override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) { list?.beginQuickLook(panel) }
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) { list?.endQuickLook(panel) }
 }
+
+/// A group's header in the grid: the title in the accent, medium, then a line (the list's
+/// group header, folder_view.rs).
+@MainActor
+final class GridGroupHeader: NSView, NSCollectionViewElement {
+    static let id = NSUserInterfaceItemIdentifier("gridGroup")
+    var title = "" { didSet { needsDisplay = true } }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let p = Palette.of(self)
+        let r = NSRect(x: 6, y: 10, width: bounds.width - 12, height: 18)
+        let w = Draw.textWidth(title, font: Metrics.textSmMedium)
+        Draw.text(title, in: r, font: Metrics.textSmMedium, color: p.accent)
+        p.divider.setFill()
+        NSRect(x: r.minX + w + 10, y: r.midY, width: max(r.width - w - 10, 0), height: 1).fill()
+    }
+}

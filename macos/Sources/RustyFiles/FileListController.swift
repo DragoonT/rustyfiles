@@ -139,6 +139,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         tileLayout.sectionInset = NSEdgeInsets(top: TileMetrics.padY, left: TileMetrics.padX, bottom: TileMetrics.padY, right: TileMetrics.padX)
         tiles.collectionViewLayout = tileLayout
         tiles.register(TileItem.self, forItemWithIdentifier: TileItem.id)
+        tiles.register(GridGroupHeader.self, forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader, withIdentifier: GridGroupHeader.id)
         tiles.isSelectable = true
         tiles.allowsMultipleSelection = true
         tiles.allowsEmptySelection = true
@@ -494,7 +495,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var selectedRows: IndexSet {
         switch viewMode {
         case .details, .columns: table.selectedRowIndexes
-        case .tiles, .cards, .list: IndexSet(tiles.selectionIndexPaths.map(\.item))
+        case .tiles, .cards, .list: IndexSet(tiles.selectionIndexPaths.map(gridRow))
         }
     }
 
@@ -504,10 +505,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             table.selectRowIndexes(rows, byExtendingSelection: false)
             if scrollToFirst, let first = rows.first { table.scrollRowToVisible(first) }
         case .tiles, .cards, .list:
-            let paths = Set(rows.map { IndexPath(item: $0, section: 0) })
+            let paths = Set(rows.map(gridPath))
             tiles.selectionIndexPaths = paths
             if scrollToFirst, let first = rows.first {
-                tiles.scrollToItems(at: [IndexPath(item: first, section: 0)], scrollPosition: .nearestHorizontalEdge)
+                tiles.scrollToItems(at: [gridPath(first)], scrollPosition: .nearestHorizontalEdge)
             }
         }
     }
@@ -1062,7 +1063,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         case .details, .columns:
             return (table.view(atColumn: 0, row: row, makeIfNecessary: make) as? NameCellView)?.textField
         case .tiles, .cards, .list:
-            let path = IndexPath(item: row, section: 0)
+            let path = gridPath(row)
             if make { tiles.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge) }
             return (tiles.item(at: path) as? TileItem)?.tile.label
         }
@@ -1178,6 +1179,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var onFocus: (() -> Void)?
     /// Whether the columns were made for a gathered listing (with the Folder column).
     var columnsGathered = false
+    /// The grid's groups: the first row of each, and its title.
+    var gridStarts: [Int] = [0]
+    var gridTitles: [String] = []
 
     func openSelected() {
         guard let folder else { return }
@@ -1580,7 +1584,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let picker = NSSharingServicePicker(items: selectedURLs)
         let view = viewMode == .details ? table as NSView : tiles
         let row = selectedRows.first ?? 0
-        let rect = viewMode == .details ? table.rect(ofRow: row) : (tiles.item(at: IndexPath(item: row, section: 0))?.view.frame ?? .zero)
+        let rect = viewMode == .details ? table.rect(ofRow: row) : (tiles.item(at: gridPath(row))?.view.frame ?? .zero)
         picker.show(relativeTo: rect, of: view, preferredEdge: .minY)
     }
 
@@ -1811,13 +1815,40 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     // MARK: grid data
 
+    func numberOfSections(in collectionView: NSCollectionView) -> Int { max(gridStarts.count, 1) }
+
     func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
-        Int(folder?.count() ?? 0)
+        let n = Int(folder?.count() ?? 0)
+        guard gridStarts.indices.contains(section) else { return section == 0 ? n : 0 }
+        let end = section + 1 < gridStarts.count ? gridStarts[section + 1] : n
+        return max(end - gridStarts[section], 0)
+    }
+
+    /// A group's header in the grid (736ae68): its title in the accent, a line after it.
+    func collectionView(_ collectionView: NSCollectionView, viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind, at indexPath: IndexPath) -> NSView {
+        let v = collectionView.makeSupplementaryView(ofKind: kind, withIdentifier: GridGroupHeader.id, for: indexPath) as! GridGroupHeader
+        v.title = gridTitles.indices.contains(indexPath.section) ? gridTitles[indexPath.section] : ""
+        return v
+    }
+
+    /// The grid's row (the folder's) for an index path, and back: with groups, each group is a
+    /// section starting at its first row.
+    func gridRow(_ p: IndexPath) -> Int { (gridStarts.indices.contains(p.section) ? gridStarts[p.section] : 0) + p.item }
+
+    func gridPath(_ row: Int) -> IndexPath {
+        var lo = 0, hi = gridStarts.count - 1
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2
+            if gridStarts[mid] <= row { lo = mid } else { hi = mid - 1 }
+        }
+        let start = gridStarts.indices.contains(lo) ? gridStarts[lo] : 0
+        return IndexPath(item: row - start, section: max(lo, 0))
     }
 
     func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
         let item = collectionView.makeItem(withIdentifier: TileItem.id, for: indexPath) as! TileItem
-        guard let folder, let entry = folder.item(row: UInt32(indexPath.item)), let path = folder.childPath(row: UInt32(indexPath.item)) else {
+        let row = gridRow(indexPath)
+        guard let folder, let entry = folder.item(row: UInt32(row)), let path = folder.childPath(row: UInt32(row)) else {
             return item
         }
         item.path = path
@@ -1859,7 +1890,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
         guard archive == nil else { return nil }
-        return folder?.childPath(row: UInt32(indexPath.item)).map { URL(fileURLWithPath: $0) as NSURL }
+        return folder?.childPath(row: UInt32(gridRow(indexPath))).map { URL(fileURLWithPath: $0) as NSURL }
     }
 }
 
@@ -1955,14 +1986,14 @@ extension FileListController {
     }
 
     func collectionView(_ collectionView: NSCollectionView, validateDrop info: NSDraggingInfo, proposedIndexPath path: AutoreleasingUnsafeMutablePointer<NSIndexPath>, dropOperation op: UnsafeMutablePointer<NSCollectionView.DropOperation>) -> NSDragOperation {
-        let row = path.pointee.item
+        let row = gridRow(path.pointee as IndexPath)
         let onFolder = op.pointee == .on && dropTarget(row: row) != url
         if !onFolder { op.pointee = .before }
         return validate(info, into: dropTarget(row: onFolder ? row : nil))
     }
 
     func collectionView(_ collectionView: NSCollectionView, acceptDrop info: NSDraggingInfo, indexPath: IndexPath, dropOperation op: NSCollectionView.DropOperation) -> Bool {
-        accept(info, into: dropTarget(row: op == .on ? indexPath.item : nil))
+        accept(info, into: dropTarget(row: op == .on ? gridRow(indexPath) : nil))
     }
 }
 
@@ -2010,13 +2041,29 @@ extension FileListController {
 
     func computeGroups() {
         groupTitles = [:]
-        guard groupBy != .none, viewMode == .details, let folder else { return }
+        gridStarts = [0]
+        gridTitles = []
+        let grid = viewMode.isGrid
+        defer {
+            // the grid's sections carry headers only when there are groups
+            let size = NSSize(width: 0, height: gridTitles.isEmpty ? 0 : GroupMetrics.header)
+            if tileLayout.headerReferenceSize != size { tileLayout.headerReferenceSize = size }
+        }
+        guard groupBy != .none, viewMode == .details || grid, let folder else { return }
         var last: String?
         for r in 0..<folder.count() {
             guard let item = folder.item(row: r) else { continue }
             let t = Grouping.title(item, by: groupBy, display: display)
             if t != last { groupTitles[Int(r)] = t }
             last = t
+        }
+        if grid {
+            let starts = groupTitles.keys.sorted()
+            if !starts.isEmpty {
+                gridStarts = starts
+                gridTitles = starts.map { groupTitles[$0] ?? "" }
+            }
+            groupTitles = [:]
         }
     }
 
