@@ -1,9 +1,41 @@
 import AppKit
 import Quartz
 
-/// Details (the table) or the grid's Tiles.
-enum ViewMode: String {
-    case details, tiles
+/// Details (the table), or the grid in one of its styles (folder_view.rs `GridStyle`): Tiles,
+/// Cards (wide, with type, size and date beside the picture) and List (a small icon and the
+/// name, many to a row).
+enum ViewMode: String, CaseIterable {
+    case details, tiles, cards, list
+
+    var isGrid: Bool { self != .details }
+
+    var title: String {
+        switch self {
+        case .details: String(localized: "Details")
+        case .tiles: String(localized: "Tiles")
+        case .cards: String(localized: "Cards")
+        case .list: String(localized: "List")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .details: "list"
+        case .tiles: "layout-grid"
+        case .cards: "layout-list"
+        case .list: "rows-3"
+        }
+    }
+
+    /// A grid cell's size (Windows: Tiles 124 × 150, Cards 300 × 84, List 240 × 32, rows
+    /// including the 4 between them).
+    var cellSize: NSSize {
+        switch self {
+        case .cards: NSSize(width: 300, height: 84 - TileMetrics.gap)
+        case .list: NSSize(width: 240, height: 32 - TileMetrics.gap)
+        default: NSSize(width: TileMetrics.width, height: TileMetrics.rowHeight - TileMetrics.gap)
+        }
+    }
 }
 
 /// The content card and everything in it for one window. The rows live in Rust ([`Folder`]);
@@ -240,8 +272,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         scroll.frame = NSRect(x: 0, y: top, width: b.width, height: b.height - statusH - top)
         tileScroll.frame = NSRect(x: 0, y: barH, width: b.width, height: b.height - statusH - barH)
         // as many columns as fit, left-aligned with 4 between them (not spread out)
-        let cols = max(Int((b.width - 2 * TileMetrics.padX + TileMetrics.gap) / (TileMetrics.width + TileMetrics.gap)), 1)
-        let used = CGFloat(cols) * (TileMetrics.width + TileMetrics.gap) - TileMetrics.gap
+        let cellW = viewMode.cellSize.width
+        let cols = max(Int((b.width - 2 * TileMetrics.padX + TileMetrics.gap) / (cellW + TileMetrics.gap)), 1)
+        let used = CGFloat(cols) * (cellW + TileMetrics.gap) - TileMetrics.gap
         let right = max(b.width - TileMetrics.padX - used, TileMetrics.padX)
         if tileLayout.sectionInset.right != right {
             tileLayout.sectionInset.right = right
@@ -358,17 +391,24 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     func applyViewModeQuietly() { applyViewMode() }
 
     private func applyViewMode() {
-        let isTiles = viewMode == .tiles
+        let isTiles = viewMode.isGrid
         header.isHidden = isTiles
         scroll.isHidden = isTiles
         tileScroll.isHidden = !isTiles
+        // the grid's cells take the style's size
+        let size = viewMode.cellSize
+        if tileLayout.itemSize != size {
+            tileLayout.itemSize = size
+            tileLayout.invalidateLayout()
+            card.needsLayout = true
+        }
     }
 
     /// The selected rows of whichever view is showing.
     var selectedRows: IndexSet {
         switch viewMode {
         case .details: table.selectedRowIndexes
-        case .tiles: IndexSet(tiles.selectionIndexPaths.map(\.item))
+        case .tiles, .cards, .list: IndexSet(tiles.selectionIndexPaths.map(\.item))
         }
     }
 
@@ -377,7 +417,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         case .details:
             table.selectRowIndexes(rows, byExtendingSelection: false)
             if scrollToFirst, let first = rows.first { table.scrollRowToVisible(first) }
-        case .tiles:
+        case .tiles, .cards, .list:
             let paths = Set(rows.map { IndexPath(item: $0, section: 0) })
             tiles.selectionIndexPaths = paths
             if scrollToFirst, let first = rows.first {
@@ -390,7 +430,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         computeGroups()
         switch viewMode {
         case .details: table.reloadData()
-        case .tiles: tiles.reloadData()
+        case .tiles, .cards, .list: tiles.reloadData()
         }
     }
 
@@ -400,7 +440,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         case .details:
             scroll.contentView.scroll(to: NSPoint(x: 0, y: -scroll.contentInsets.top))
             scroll.reflectScrolledClipView(scroll.contentView)
-        case .tiles:
+        case .tiles, .cards, .list:
             tiles.layoutSubtreeIfNeeded()
             tileScroll.contentView.scroll(to: .zero)
             tileScroll.reflectScrolledClipView(tileScroll.contentView)
@@ -757,9 +797,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         b.view.action = { [weak self] btn in
             guard let self else { return }
             let m = NSMenu()
-            for (mode, title, icon) in [(ViewMode.details, String(localized: "Details"), "list"), (.tiles, String(localized: "Tiles"), "layout-grid")] {
-                let i = ClosureMenuItem(title: title) { [weak self] in self?.setViewMode(mode) }
-                i.image = Icons.menu(icon)
+            for mode in ViewMode.allCases {
+                let i = ClosureMenuItem(title: mode.title) { [weak self] in self?.setViewMode(mode) }
+                i.image = Icons.menu(mode.icon)
                 i.state = self.viewMode == mode ? .on : .off
                 m.addItem(i)
             }
@@ -931,7 +971,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         switch viewMode {
         case .details:
             return (table.view(atColumn: 0, row: row, makeIfNecessary: make) as? NameCellView)?.textField
-        case .tiles:
+        case .tiles, .cards, .list:
             let path = IndexPath(item: row, section: 0)
             if make { tiles.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge) }
             return (tiles.item(at: path) as? TileItem)?.tile.label
@@ -1367,7 +1407,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         ])
         b.sub(String(localized: "Layout"), "layout-grid") { m in
             m.add(String(localized: "Details"), "list", key: "1", checked: viewMode == .details) { [weak self] in self?.setViewMode(.details) }
-            m.add(String(localized: "Tiles"), "layout-grid", key: "2", checked: viewMode == .tiles) { [weak self] in self?.setViewMode(.tiles) }
+            for (i, mode) in ViewMode.allCases.enumerated() where mode != .details {
+                m.add(mode.title, mode.icon, key: "\(i + 1)", checked: viewMode == mode) { [weak self] in self?.setViewMode(mode) }
+            }
         }
         b.sub(String(localized: "Sort"), "arrow-up-down") { m in
             for col in ListColumn.allCases.filter(\.sortable) {
@@ -1683,7 +1725,15 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         item.path = path
         let tile = item.tile
+        tile.style = viewMode
         tile.label.stringValue = display.name(entry)
+        if viewMode == .cards {
+            var facts = [display.kind(entry)]
+            if !entry.isDir { facts.append(display.size(entry)) }
+            facts.append(display.date(entry.modifiedMs))
+            tile.facts.stringValue = facts.joined(separator: "\n")
+            tile.facts.textColor = Palette.of(collectionView).textSecondary
+        }
         tile.label.textColor = Palette.of(collectionView).text
         tile.alphaValue = entry.hidden ? 0.6 : 1
         tile.isSelected = item.isSelected
@@ -1932,6 +1982,8 @@ extension FileListController {
         var count = 0
         for r in 0..<n where media.contains(folder.item(row: r)?.ext ?? "") { count += 1 }
         let want: ViewMode = Double(count) / Double(n) >= 0.6 ? .tiles : .details
+        // a folder the user put in another grid style keeps it
+        if want == .tiles && viewMode.isGrid { return }
         if want != viewMode {
             viewMode = want
             applyViewModeQuietly()

@@ -72,6 +72,16 @@ final class ThumbnailCache {
 final class TileView: HoverView {
     let picture = NSImageView()
     let label = NSTextField(wrappingLabelWithString: "")
+    /// Cards: the type, size and date beside the picture.
+    let facts = NSTextField(wrappingLabelWithString: "")
+    /// Tiles, Cards or List (folder_view.rs `GridStyle`).
+    var style: ViewMode = .tiles {
+        didSet {
+            guard style != oldValue else { return }
+            applyStyle()
+            needsLayout = true
+        }
+    }
     var isSelected = false { didSet { needsDisplay = true } }
     var isThumbnail = false { didSet { picture.layer?.cornerRadius = isThumbnail ? 4 : 0 } }
 
@@ -87,8 +97,35 @@ final class TileView: HoverView {
         label.lineBreakMode = .byWordWrapping
         label.cell?.truncatesLastVisibleLine = true
         label.cell?.lineBreakMode = .byWordWrapping
+        facts.font = Metrics.textXs
+        facts.maximumNumberOfLines = 3
+        facts.isHidden = true
         addSubview(picture)
         addSubview(label)
+        addSubview(facts)
+    }
+
+    private func applyStyle() {
+        switch style {
+        case .cards:
+            label.font = Metrics.textSmMedium
+            label.alignment = .left
+            label.maximumNumberOfLines = 1
+            label.cell?.lineBreakMode = .byTruncatingTail
+            facts.isHidden = false
+        case .list:
+            label.font = Metrics.textSm
+            label.alignment = .left
+            label.maximumNumberOfLines = 1
+            label.cell?.lineBreakMode = .byTruncatingTail
+            facts.isHidden = true
+        default:
+            label.font = Metrics.textXs
+            label.alignment = .center
+            label.maximumNumberOfLines = 2
+            label.cell?.lineBreakMode = .byWordWrapping
+            facts.isHidden = true
+        }
     }
 
     @available(*, unavailable)
@@ -96,6 +133,26 @@ final class TileView: HoverView {
 
     override func layout() {
         super.layout()
+        switch style {
+        case .cards:
+            // px_2 gap_3: the picture 60 (in a box of 64), the name and the facts beside it
+            let side: CGFloat = 60
+            picture.frame = NSRect(x: 8 + 2, y: (bounds.height - side) / 2, width: side, height: side)
+            let x = 8 + side + 4 + 12, w = bounds.width - x - 8
+            let lh = ceil(Metrics.textSmMedium.ascender - Metrics.textSmMedium.descender) + 2
+            let fh = min(facts.sizeThatFits(NSSize(width: w, height: 100)).height, 3 * 16)
+            let top = (bounds.height - lh - 2 - fh) / 2
+            label.frame = NSRect(x: x, y: top, width: w, height: lh)
+            facts.frame = NSRect(x: x, y: top + lh + 2, width: w, height: fh)
+            return
+        case .list:
+            // px_2 gap_2: a 20 icon and the name
+            picture.frame = NSRect(x: 8, y: (bounds.height - 20) / 2, width: 20, height: 20)
+            let lh = ceil(Metrics.textSm.ascender - Metrics.textSm.descender) + 2
+            label.frame = NSRect(x: 8 + 20 + 8, y: (bounds.height - lh) / 2, width: bounds.width - 44, height: lh)
+            return
+        default: break
+        }
         let box = TileMetrics.visual + 4
         let boxX = (bounds.width - box) / 2
         picture.frame = NSRect(x: boxX + 2, y: 4 + 2, width: TileMetrics.visual, height: TileMetrics.visual)
@@ -126,7 +183,7 @@ final class TileItem: NSCollectionViewItem {
     var tile: TileView { view as! TileView }
 
     override func loadView() {
-        view = TileView(frame: NSRect(x: 0, y: 0, width: TileMetrics.width, height: TileMetrics.rowHeight - TileMetrics.gap))
+        view = TileView(frame: NSRect(origin: .zero, size: ViewMode.tiles.cellSize))
         textField = tile.label
         imageView = tile.picture
     }

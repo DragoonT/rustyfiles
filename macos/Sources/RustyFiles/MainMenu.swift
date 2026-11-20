@@ -100,6 +100,8 @@ enum MainMenu {
         let m = NSMenu(title: String(localized: "View"))
         m.addItem(item(String(localized: "Details"), #selector(W.showDetails(_:)), "1"))
         m.addItem(item(String(localized: "Tiles"), #selector(W.showTiles(_:)), "2"))
+        m.addItem(item(String(localized: "Cards"), #selector(W.showCards(_:)), "3"))
+        m.addItem(item(String(localized: "List"), #selector(W.showListStyle(_:)), "4"))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Show Hidden Files"), #selector(W.toggleHidden(_:)), ".", [.command, .shift]))
         m.addItem(item(String(localized: "Refresh"), #selector(W.refresh(_:)), "r"))

@@ -117,3 +117,5 @@ pencil-line
 chart-pie
 files
 archive-restore
+layout-list
+rows-3

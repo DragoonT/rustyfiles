@@ -928,6 +928,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func toggleQuickLook(_ sender: Any?) { list.toggleQuickLook() }
     @objc func showDetails(_ sender: Any?) { list.setViewMode(.details) }
     @objc func showTiles(_ sender: Any?) { list.setViewMode(.tiles) }
+    @objc func showCards(_ sender: Any?) { list.setViewMode(.cards) }
+    @objc func showListStyle(_ sender: Any?) { list.setViewMode(.list) }
 
     /// Properties of the selection, or of the folder shown when nothing is selected (⌘I).
     @objc func showProperties(_ sender: Any?) { list.showProperties() }
@@ -967,6 +969,12 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             return true
         case #selector(showTiles(_:)):
             item.state = list.viewMode == .tiles ? .on : .off
+            return true
+        case #selector(showCards(_:)):
+            item.state = list.viewMode == .cards ? .on : .off
+            return true
+        case #selector(showListStyle(_:)):
+            item.state = list.viewMode == .list ? .on : .off
             return true
         case #selector(toggleHidden(_:)):
             item.state = AppSettings.showHidden ? .on : .off
