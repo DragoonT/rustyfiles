@@ -12479,5 +12479,17 @@
   "key": "Masaüstünü göster",
   "tr": "Masaüstünü göster",
   "en": "Show desktop"
+ },
+ {
+  "id": "b6aea286",
+  "key": "Önizlemede dosya bilgileri",
+  "tr": "Önizlemede dosya bilgileri",
+  "en": "File details in the preview"
+ },
+ {
+  "id": "475cf8e1",
+  "key": "Önizlemenin altında türü, boyutu, tarihleri ve konumu gösterir",
+  "tr": "Önizlemenin altında türü, boyutu, tarihleri ve konumu gösterir",
+  "en": "Shows the type, size, dates and location under the preview"
  }
 ]

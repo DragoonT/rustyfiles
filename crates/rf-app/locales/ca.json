@@ -2068,5 +2068,7 @@
  "647939bb": "Un botó a la pestanya de cada carpeta que obre un terminal en aquesta carpeta.",
  "1a92eb40": "Franja de Mostra l'escriptori",
  "9022ecfc": "Una franja fina a l'extrem dret de l'illa dreta, després de la campana: un clic minimitza totes les finestres i mostra l'escriptori, el següent les torna.",
- "6f0f5329": "Mostra l'escriptori"
+ "6f0f5329": "Mostra l'escriptori",
+ "b6aea286": "Detalls del fitxer a la previsualització",
+ "475cf8e1": "Mostra el tipus, la mida, les dates i la ubicació sota la previsualització"
 }

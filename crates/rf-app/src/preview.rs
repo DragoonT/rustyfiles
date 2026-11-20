@@ -1041,6 +1041,10 @@ impl Render for Preview {
                     .into_any_element(),
             )
         };
+        // (the details can be switched off: Settings, "File details in the preview")
+        if !cx.global::<crate::settings::Settings>().preview_details {
+            return col.into_any_element();
+        }
         col.child(div().w_full().h(px(1.)).bg(p.divider)).child(props).children(hash_section).into_any_element()
     }
 }

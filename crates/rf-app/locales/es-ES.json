@@ -2068,5 +2068,7 @@
  "647939bb": "Un botón en la pestaña de cada carpeta que abre un terminal en esa carpeta.",
  "1a92eb40": "Franja Mostrar escritorio",
  "9022ecfc": "Una franja fina en el extremo derecho de la isla derecha, tras la campana: un clic minimiza todas las ventanas y muestra el escritorio, el siguiente las devuelve.",
- "6f0f5329": "Mostrar escritorio"
+ "6f0f5329": "Mostrar escritorio",
+ "b6aea286": "Detalles del archivo en la vista previa",
+ "475cf8e1": "Muestra el tipo, el tamaño, las fechas y la ubicación debajo de la vista previa"
 }

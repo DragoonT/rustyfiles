@@ -395,6 +395,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Sağ adanın en sağında, zilden sonra ince bir şerit: tıklayınca bütün pencereler küçülür ve masaüstü görünür, bir daha tıklayınca geri gelir.", "A thin strip at the right end of the right island, after the bell: a click minimizes every window and shows the desktop, the next click brings them back."),
     ("Masaüstünü göster", "Show desktop"),
     ("Sekmelerde terminal düğmesi", "Terminal button on tabs"),
+    ("Önizlemede dosya bilgileri", "File details in the preview"),
+    ("Önizlemenin altında türü, boyutu, tarihleri ve konumu gösterir", "Shows the type, size, dates and location under the preview"),
     ("Her klasör sekmesinde, o klasörde bir terminal açan düğme.", "A button on each folder's tab that opens a terminal in that folder."),
     ("Eşitle", "Sync"),
     ("Uzak depodan getir (fetch)", "Fetch"),

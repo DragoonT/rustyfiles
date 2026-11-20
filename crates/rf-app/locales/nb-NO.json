@@ -2068,5 +2068,7 @@
  "647939bb": "En knapp på hver mappes fane som åpner en terminal i mappen.",
  "1a92eb40": "Stripen Vis skrivebord",
  "9022ecfc": "En tynn stripe helt til høyre på den høyre øya, etter klokken: et klikk minimerer alle vinduer og viser skrivebordet, neste klikk henter dem tilbake.",
- "6f0f5329": "Vis skrivebord"
+ "6f0f5329": "Vis skrivebord",
+ "b6aea286": "Fildetaljer i forhåndsvisningen",
+ "475cf8e1": "Viser type, størrelse, datoer og plassering under forhåndsvisningen"
 }

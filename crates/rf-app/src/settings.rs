@@ -420,6 +420,9 @@ pub struct Settings {
     /// The pane's height at the bottom (drag its top edge). Written only once the user has moved it.
     #[serde(skip_serializing_if = "is_default_preview_height")]
     pub preview_height: f32,
+    /// The file's details under its preview (type, size, dates, location, the hash button). Asked for on the rustyfiles Discord: "Hope
+    /// the Properties can have an option to hide".
+    pub preview_details: bool,
     pub renderer: RendererPref,
     pub restore_session: bool,
     /// Last session's tab locations ("" = Home).
@@ -864,6 +867,7 @@ impl Default for Settings {
             select_on_hover: false,
             tabs_fit_names: false,
             tab_terminal_button: true,
+            preview_details: true,
             type_to_filter: false,
             double_click_up: true,
             select_previous_on_up: true,

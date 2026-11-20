@@ -1615,6 +1615,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             |s, v| s.preview_position = v,
         ),
     ));
+    v.push(card(
+        p,
+        L::Info,
+        t!("Önizlemede dosya bilgileri"),
+        Some(t!("Önizlemenin altında türü, boyutu, tarihleri ve konumu gösterir")),
+        sw("preview-details", p, s.preview_details, |s, v| s.preview_details = v),
+    ));
     let hidden = s.sidebar_hidden.clone();
     let libs = s.show_libraries;
     let (tree_on, tree_follow) = (s.sidebar_tree, s.sidebar_tree_follow);
