@@ -4575,7 +4575,10 @@ impl Render for Workspace {
                     this.rail_peek[1] = *h;
                     cx.notify();
                 }))
-                .child(div().h_full().w(px(full_w)).flex_shrink_0().child(full));
+                .child(div().h_full().w(px(full_w)).flex_shrink_0().child(full))
+                // the rail's own handle lies under this panel while it is out: the panel's edge sizes the sidebar too, so a rail made by
+                // dragging can be dragged wide again (a user on Discord, 2026-11-20: "now seems impossible")
+                .child(resize_handle("rail-peek-resize", ResizeSidebar, false));
             if !crate::settings::animations() {
                 return panel.into_any_element();
             }

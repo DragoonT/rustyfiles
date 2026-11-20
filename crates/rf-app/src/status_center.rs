@@ -449,8 +449,6 @@ pub(crate) struct OpView {
     pub open_dest: Option<std::path::PathBuf>,
     pub can_undo: bool,
     pub action: Option<ResultAction>,
-    /// The action shows while running too.
-    pub live: bool,
     pub brief: xfer::Brief,
 }
 
@@ -488,7 +486,6 @@ impl OpState {
             open_dest: self.open_dest.clone(),
             can_undo,
             action: self.action.clone(),
-            live: self.live,
             brief: xfer::Brief { running, noticed: ran_ms >= xfer::CARD_APPEAR_MS, asking: question.is_some(), failed: matches!(self.phase, OpPhase::Failed(_)), dismissed: self.dismissed },
         }
     }

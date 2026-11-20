@@ -12803,5 +12803,29 @@
   "key": "İzle",
   "tr": "İzle",
   "en": "Watch"
+ },
+ {
+  "id": "6abaf1f8",
+  "key": "Çoğalt",
+  "tr": "Çoğalt",
+  "en": "Duplicate"
+ },
+ {
+  "id": "c46fe68c",
+  "key": "Sessiz",
+  "tr": "Sessiz",
+  "en": "Muted"
+ },
+ {
+  "id": "ae935c24",
+  "key": "Yapıştırılan metin",
+  "tr": "Yapıştırılan metin",
+  "en": "Pasted text"
+ },
+ {
+  "id": "43ac0b05",
+  "key": "Yapıştırılan resim",
+  "tr": "Yapıştırılan resim",
+  "en": "Pasted picture"
  }
 ]

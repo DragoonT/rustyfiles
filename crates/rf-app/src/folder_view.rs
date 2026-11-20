@@ -148,6 +148,16 @@ enum GridUnit {
 
 /// The grouped Grid's lines from the grouped rows: each group's items in rows of `cols` tiles of `slices` slices each. Also, for
 /// every visible index, the line its row of tiles starts at.
+/// [`FolderView::cell_hover`]'s count: the tile `vi` and over how many of its slices the pointer is told to be.
+fn grid_hover_step(now: Option<(usize, u32)>, vi: usize, on: bool) -> Option<(usize, u32)> {
+    match (on, now) {
+        (true, Some((h, n))) if h == vi => Some((vi, n + 1)),
+        (true, _) => Some((vi, 1)),
+        (false, Some((h, n))) if h == vi => (n > 1).then(|| (vi, n - 1)),
+        (false, other) => other,
+    }
+}
+
 fn grid_units(rows: &[Row], cols: usize, slices: usize) -> (Vec<GridUnit>, Vec<usize>) {
     let (cols, slices) = (cols.max(1), slices.max(1));
     let (mut units, mut first_of_vi) = (Vec::new(), Vec::new());
@@ -538,6 +548,10 @@ pub struct FolderView {
     slow_click_serial: u64,
     /// Settings → "Select on hover": the entry under the pointer and its serial, selected once the pointer has rested on it.
     hover_pick: Option<(u32, u64)>,
+    /// The grouped Grid's tile under the pointer, and over how many of its slices (`grid_slices`: a row is drawn as several slices, each
+    /// a clipped copy of the whole row, so the pointer is over one copy of a tile at a time and a hover style lit only that slice's
+    /// strip of it, issue 157). The tile's fill follows this instead.
+    grid_hover: Option<(usize, u32)>,
     /// Serial of the last click on a file in a column right of the list's (`pick_in_column`); a later click cancels a pending one.
     static_pick: u64,
     /// What the first click of a possible double click was made on (`completes_double`).
@@ -720,6 +734,7 @@ impl FolderView {
             slow_click: None,
             slow_click_serial: 0,
             hover_pick: None,
+            grid_hover: None,
             static_pick: 0,
             first_click: None,
             load_serial: 0,
@@ -2731,7 +2746,8 @@ impl FolderView {
                     // tiles: quiet fill + a thin accent outline (a pill would read as a crop)
                     .when(selected, |d| d.bg(p.selection).border_1().border_color(p.selection_border))
                     .when(!selected, |d| d.border_1().border_color(transparent_black()))
-                    .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
+                    .when(!selected && part.is_none(), |d| d.hover(|s| s.bg(p.hover)))
+                    .when(!selected && part.is_some() && self.grid_hover.is_some_and(|(h, _)| h == vi), |d| d.bg(p.hover))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
@@ -2742,8 +2758,11 @@ impl FolderView {
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
                     .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
-                    // Settings → "Select files and folders on hover"
-                    .when(hover_select, |d| d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))));
+                    // Settings → "Select files and folders on hover"; in a sliced row also the tile's fill (`grid_hover`)
+                    .when(hover_select || part.is_some(), |d| {
+                        let sliced = part.is_some();
+                        d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.cell_hover(vi, *on, sliced, hover_select, cx)))
+                    });
                 r = r.child(cell);
             }
             match part {
@@ -2847,6 +2866,32 @@ impl FolderView {
     /// Settings → "Select on hover": the pointer came onto (or left) the item at `vi`. Like Explorer's "point to select" the item is
     /// selected once the pointer has rested on it for the system's hover time, so passing over items on the way to another one
     /// leaves the selection alone (issue 101: it was in the Details layout only, and at once).
+    /// The pointer came onto (or left) a tile of the Grid. In a sliced row (the grouped Grid) it comes onto one slice's copy of the tile
+    /// after another: the tile counts as hovered while the pointer is over any of them (`grid_hover`), whatever order the copies are told
+    /// in, and "select on hover" hears only the tile's own coming and going.
+    fn cell_hover(&mut self, vi: usize, on: bool, sliced: bool, hover_select: bool, cx: &mut Context<Self>) {
+        if !sliced {
+            if hover_select {
+                self.hover_row(vi, on, cx);
+            }
+            return;
+        }
+        let before = self.grid_hover.map(|h| h.0);
+        self.grid_hover = grid_hover_step(self.grid_hover, vi, on);
+        let after = self.grid_hover.map(|h| h.0);
+        if before != after {
+            if hover_select {
+                if let Some(b) = before {
+                    self.hover_row(b, false, cx);
+                }
+                if let Some(a) = after {
+                    self.hover_row(a, true, cx);
+                }
+            }
+            cx.notify();
+        }
+    }
+
     fn hover_row(&mut self, vi: usize, on: bool, cx: &mut Context<Self>) {
         let Some(&ei) = self.visible.get(vi) else { return };
         if !on {
@@ -3510,9 +3555,29 @@ impl FolderView {
             }
         } else if self.picking {
             cx.emit(FolderEvent::Picked(vec![path]));
+        } else if is_lnk(&path) {
+            self.open_shortcut(path, cx);
         } else {
             open_in_background(path, cx);
         }
+    }
+
+    /// A `.lnk` file: one that points at a folder opens that folder here, as a folder would (a user on Discord, 2026-11-20: it opened
+    /// in Explorer); any other goes to the shell as before. The link is read off the UI thread (COM, and a target that has to wake up).
+    fn open_shortcut(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let link = path.clone();
+            let folder = cx
+                .background_executor()
+                .spawn(async move { rf_win::shortcut::resolve(&link).ok().map(|i| i.target).filter(|t| !t.as_os_str().is_empty() && t.is_dir()) })
+                .await;
+            let _ = this.update(cx, |this, cx| match folder {
+                Some(dir) if cx.global::<crate::settings::Settings>().open_folders_in_new_tab => cx.emit(FolderEvent::OpenInNewTab(Location::Path(dir))),
+                Some(dir) => this.navigate(Location::Path(dir), cx),
+                None => open_in_background(path, cx),
+            });
+        })
+        .detach();
     }
 
     pub fn open_selected(&mut self, cx: &mut Context<Self>) {
@@ -4413,7 +4478,7 @@ impl FolderView {
                             |_, _, _| {},
                             move |bounds, _, window, _| {
                                 let me = me.clone();
-                                window.on_mouse_event(move |ev: &ScrollWheelEvent, phase, _, cx| {
+                                window.on_mouse_event(move |ev: &ScrollEvent, phase, _, cx| {
                                     if phase != DispatchPhase::Capture || !ev.modifiers.control || !bounds.contains(&ev.position) {
                                         return;
                                     }
@@ -4439,6 +4504,17 @@ impl FolderView {
                         .absolute()
                         .size_full()
                     })
+                    // (the tiles move under a still pointer: the hovered tile is found again by the next move, `grid_hover`)
+                    .on_scroll(cx.listener(|this, _: &ScrollEvent, _, cx| {
+                        if this.grid_hover.take().is_some() {
+                            cx.notify();
+                        }
+                    }))
+                    .on_hover(cx.listener(|this, on: &bool, _, cx| {
+                        if !*on && this.grid_hover.take().is_some() {
+                            cx.notify();
+                        }
+                    }))
                     .on_drag_move::<ExternalPaths>(cx.listener(|this, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
                         // (only while the pointer is over the list: every listener hears every move, and the tree's or a tab's
                         // own effect must not be overwritten by the list's)
@@ -4772,7 +4848,19 @@ fn tile_cols(avail: f32, min: f32, max: f32, gap: f32) -> u16 {
 
 #[cfg(test)]
 mod tile_tests {
-    use super::tile_cols;
+    use super::{grid_hover_step, tile_cols};
+
+    #[test]
+    fn a_sliced_tile_stays_lit_whichever_order_its_slices_are_told_in() {
+        // the pointer moves from the tile's first slice to its second: told "on" before "off", or "off" before "on"
+        let one = grid_hover_step(None, 3, true);
+        assert_eq!(grid_hover_step(grid_hover_step(one, 3, true), 3, false), Some((3, 1)));
+        assert_eq!(grid_hover_step(grid_hover_step(one, 3, false), 3, true), Some((3, 1)));
+        // onto another tile: the old one's late "off" does not put the new one out
+        assert_eq!(grid_hover_step(grid_hover_step(one, 4, true), 3, false), Some((4, 1)));
+        // off its last slice: nothing lit
+        assert_eq!(grid_hover_step(one, 3, false), None);
+    }
 
     #[test]
     fn cards_stay_between_min_and_max_and_equal() {
@@ -5073,6 +5161,11 @@ mod gutter_tests {
     }
 }
 
+/// Whether `path` names a `.lnk` shortcut (by its name only).
+fn is_lnk(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk"))
+}
+
 pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
     // (the name test first: it costs nothing, and `exists` on a place that has to wake up holds the UI thread)
     if !rf_win::ftp::is_ftp(&path) && crate::nav_touch::may_hold_archive(&path) && !path.exists() && crate::archive_view::split(&path).is_some() {
@@ -5238,6 +5331,16 @@ impl Render for FolderView {
             .on_action(cx.listener(|this, _: &PasteItems, window, cx| this.paste(window, cx)))
             .on_action(cx.listener(|this, _: &PasteIntoSelected, window, cx| this.paste_into_selected(window, cx)))
             .on_action(cx.listener(|this, _: &PasteShortcut, window, cx| this.paste_shortcuts(window, cx)))
+            .on_action(cx.listener(|this, _: &DuplicateItems, _, cx| {
+                // (in the rename box the chord is AltGr+D on some keyboards, a letter: the box has it)
+                if this.renaming.is_some() {
+                    cx.propagate();
+                } else {
+                    this.duplicate_selected(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &CopyToOtherPane, _, cx| this.to_other_pane(rf_win::fileops::Transfer::Copy, cx)))
+            .on_action(cx.listener(|this, _: &MoveToOtherPane, _, cx| this.to_other_pane(rf_win::fileops::Transfer::Move, cx)))
             .on_action(cx.listener(|this, _: &DeleteItems, w, cx| {
                 if !this.bin_delete(w, cx) {
                     this.delete_selected(false, w, cx)

@@ -54,6 +54,10 @@ fn forget_pending(thumb_use: &mut HashMap<u64, (u64, usize)>, thumb_cost: &mut u
     }
 }
 
+/// The smallest picture size at which a folder shows what is in it (Explorer: from its medium icons up; the Grid's smallest tiles are
+/// 64 px and the Cards' 96 px, the lists' rows far less).
+const FOLDER_PREVIEW_MIN: u32 = 64;
+
 /// The key of a file's picture. The preview pane's picture (made by the pool's urgent lane) has a key space of its own:
 /// were it the list's key, a tile the list had already queued at the same size would answer the pane's request
 /// "pending" and the pane would wait behind the list again (no size is shared today; this keeps it so).
@@ -333,7 +337,15 @@ impl ImageCache {
     }
 
     fn thumbnail_as(&mut self, dir: &Path, e: &Entry, size: u32, urgent: bool, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
-        let wants_thumb = crate::icons::has_thumbnail(e);
+        // a folder at a large size shows what is in it, as Explorer's do (issue 158): the shell draws that picture (the folder with its
+        // first pictures in it); a folder it has none for gets the folder icon back (`rf_win::thumbs`)
+        // (not a folder with an icon of its own, nor one inside an archive or on FTP, which the shell cannot open)
+        let folder_preview = e.is_dir()
+            && size >= FOLDER_PREVIEW_MIN
+            && !own_picture(e)
+            && !rf_win::ftp::is_ftp(dir)
+            && !crate::nav_touch::may_hold_archive(dir);
+        let wants_thumb = crate::icons::has_thumbnail(e) || folder_preview;
         let per_file = wants_thumb || own_picture(e);
         let key = if per_file && e.is_dir() && !wants_thumb {
             key_of(&[&"dirpathL", &dir, &&*e.name, &e.modified_ms, &e.attrs, &size])
