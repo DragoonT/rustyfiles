@@ -2065,5 +2065,8 @@
  "a019461a": "Enviar para",
  "9b99d237": "Hibernar",
  "429e714c": "Botão do terminal nos separadores",
- "647939bb": "Um botão no separador de cada pasta que abre um terminal nessa pasta."
+ "647939bb": "Um botão no separador de cada pasta que abre um terminal nessa pasta.",
+ "1a92eb40": "Faixa Mostrar ambiente de trabalho",
+ "9022ecfc": "Uma faixa fina na extremidade direita da ilha direita, depois do sino: um clique minimiza todas as janelas e mostra o ambiente de trabalho, o seguinte trá-las de volta.",
+ "6f0f5329": "Mostrar ambiente de trabalho"
 }

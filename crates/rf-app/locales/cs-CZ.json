@@ -2065,5 +2065,8 @@
  "a019461a": "Odeslat do",
  "9b99d237": "Hibernace",
  "429e714c": "Tlačítko terminálu na kartách",
- "647939bb": "Tlačítko na kartě každé složky, které v dané složce otevře terminál."
+ "647939bb": "Tlačítko na kartě každé složky, které v dané složce otevře terminál.",
+ "1a92eb40": "Proužek Zobrazit plochu",
+ "9022ecfc": "Tenký proužek na pravém konci pravého ostrova, za zvonkem: kliknutí minimalizuje všechna okna a zobrazí plochu, další kliknutí je vrátí.",
+ "6f0f5329": "Zobrazit plochu"
 }

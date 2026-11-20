@@ -2065,5 +2065,8 @@
  "a019461a": "Send to",
  "9b99d237": "Hibernate",
  "429e714c": "Terminal button on tabs",
- "647939bb": "A button on each folder's tab that opens a terminal in that folder."
+ "647939bb": "A button on each folder's tab that opens a terminal in that folder.",
+ "1a92eb40": "Show desktop strip",
+ "9022ecfc": "A thin strip at the right end of the right island, after the bell: a click minimises every window and shows the desktop, the next click brings them back.",
+ "6f0f5329": "Show desktop"
 }

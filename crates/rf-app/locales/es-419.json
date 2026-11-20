@@ -2065,5 +2065,8 @@
  "a019461a": "Enviar a",
  "9b99d237": "Hibernar",
  "429e714c": "Botón de terminal en las pestañas",
- "647939bb": "Un botón en la pestaña de cada carpeta que abre una terminal en esa carpeta."
+ "647939bb": "Un botón en la pestaña de cada carpeta que abre una terminal en esa carpeta.",
+ "1a92eb40": "Franja Mostrar escritorio",
+ "9022ecfc": "Una franja delgada en el extremo derecho de la isla derecha, después de la campana: un clic minimiza todas las ventanas y muestra el escritorio, el siguiente las devuelve.",
+ "6f0f5329": "Mostrar escritorio"
 }

@@ -12461,5 +12461,23 @@
   "key": "Her klasör sekmesinde, o klasörde bir terminal açan düğme.",
   "tr": "Her klasör sekmesinde, o klasörde bir terminal açan düğme.",
   "en": "A button on each folder's tab that opens a terminal in that folder."
+ },
+ {
+  "id": "1a92eb40",
+  "key": "Masaüstünü göster şeridi",
+  "tr": "Masaüstünü göster şeridi",
+  "en": "Show desktop strip"
+ },
+ {
+  "id": "9022ecfc",
+  "key": "Sağ adanın en sağında, zilden sonra ince bir şerit: tıklayınca bütün pencereler küçülür ve masaüstü görünür, bir daha tıklayınca geri gelir.",
+  "tr": "Sağ adanın en sağında, zilden sonra ince bir şerit: tıklayınca bütün pencereler küçülür ve masaüstü görünür, bir daha tıklayınca geri gelir.",
+  "en": "A thin strip at the right end of the right island, after the bell: a click minimizes every window and shows the desktop, the next click brings them back."
+ },
+ {
+  "id": "6f0f5329",
+  "key": "Masaüstünü göster",
+  "tr": "Masaüstünü göster",
+  "en": "Show desktop"
  }
 ]

@@ -2065,5 +2065,8 @@
  "a019461a": "Send til",
  "9b99d237": "Dvale",
  "429e714c": "Terminalknap på faner",
- "647939bb": "En knap på hver mappes fane, der åbner en terminal i mappen."
+ "647939bb": "En knap på hver mappes fane, der åbner en terminal i mappen.",
+ "1a92eb40": "Bjælken Vis skrivebord",
+ "9022ecfc": "En tynd bjælke yderst til højre på den højre ø, efter klokken: et klik minimerer alle vinduer og viser skrivebordet, det næste klik henter dem tilbage.",
+ "6f0f5329": "Vis skrivebord"
 }

@@ -2065,5 +2065,8 @@
  "a019461a": "Lähetä kohteeseen",
  "9b99d237": "Horrostila",
  "429e714c": "Pääteikkunapainike välilehdillä",
- "647939bb": "Jokaisen kansion välilehdellä oleva painike, joka avaa pääteikkunan kyseiseen kansioon."
+ "647939bb": "Jokaisen kansion välilehdellä oleva painike, joka avaa pääteikkunan kyseiseen kansioon.",
+ "1a92eb40": "Näytä työpöytä -palkki",
+ "9022ecfc": "Ohut palkki oikean saarekkeen oikeassa reunassa kellon jälkeen: napsautus pienentää kaikki ikkunat ja näyttää työpöydän, seuraava tuo ne takaisin.",
+ "6f0f5329": "Näytä työpöytä"
 }

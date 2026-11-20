@@ -2065,5 +2065,8 @@
  "a019461a": "Invia a",
  "9b99d237": "Ibernazione",
  "429e714c": "Pulsante del terminale nelle schede",
- "647939bb": "Un pulsante nella scheda di ogni cartella che apre un terminale in quella cartella."
+ "647939bb": "Un pulsante nella scheda di ogni cartella che apre un terminale in quella cartella.",
+ "1a92eb40": "Striscia Mostra desktop",
+ "9022ecfc": "Una sottile striscia all’estremità destra dell’isola destra, dopo la campanella: un clic riduce a icona tutte le finestre e mostra il desktop, il clic successivo le riporta.",
+ "6f0f5329": "Mostra desktop"
 }

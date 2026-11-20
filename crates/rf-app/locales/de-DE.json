@@ -2065,5 +2065,8 @@
  "a019461a": "Senden an",
  "9b99d237": "Ruhezustand",
  "429e714c": "Terminal-Schaltfläche auf Registerkarten",
- "647939bb": "Eine Schaltfläche auf der Registerkarte jedes Ordners, die ein Terminal in diesem Ordner öffnet."
+ "647939bb": "Eine Schaltfläche auf der Registerkarte jedes Ordners, die ein Terminal in diesem Ordner öffnet.",
+ "1a92eb40": "Leiste „Desktop anzeigen“",
+ "9022ecfc": "Eine schmale Leiste ganz rechts an der rechten Insel, nach der Glocke: Ein Klick minimiert alle Fenster und zeigt den Desktop, der nächste holt sie zurück.",
+ "6f0f5329": "Desktop anzeigen"
 }

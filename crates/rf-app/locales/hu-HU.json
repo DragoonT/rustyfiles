@@ -2065,5 +2065,8 @@
  "a019461a": "Küldés",
  "9b99d237": "Hibernálás",
  "429e714c": "Terminál gomb a lapokon",
- "647939bb": "Egy gomb minden mappa lapján, amely terminált nyit az adott mappában."
+ "647939bb": "Egy gomb minden mappa lapján, amely terminált nyit az adott mappában.",
+ "1a92eb40": "Asztal megjelenítése sáv",
+ "9022ecfc": "Vékony sáv a jobb oldali sziget jobb szélén, a csengő után: egy kattintás minden ablakot kis méretre állít és megjeleníti az asztalt, a következő visszahozza őket.",
+ "6f0f5329": "Asztal megjelenítése"
 }

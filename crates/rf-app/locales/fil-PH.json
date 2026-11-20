@@ -2065,5 +2065,8 @@
  "a019461a": "Ipadala sa",
  "9b99d237": "I-hibernate",
  "429e714c": "Button ng terminal sa mga tab",
- "647939bb": "Isang button sa tab ng bawat folder na nagbubukas ng terminal sa folder na iyon."
+ "647939bb": "Isang button sa tab ng bawat folder na nagbubukas ng terminal sa folder na iyon.",
+ "1a92eb40": "Strip na Ipakita ang desktop",
+ "9022ecfc": "Isang manipis na strip sa dulong kanan ng kanang isla, pagkatapos ng kampana: ang isang click ay nagmi-minimize ng lahat ng window at ipinapakita ang desktop, ibinabalik sila ng susunod na click.",
+ "6f0f5329": "Ipakita ang desktop"
 }
