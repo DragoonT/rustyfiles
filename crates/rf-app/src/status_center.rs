@@ -1472,7 +1472,8 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                 .min_w_0()
                 .gap_1()
                 .child(div().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(op.title.clone()))
-                .when(running, |d| {
+                .when_some(running.then(|| crate::downloads_view::card_bar(op.id, &p)).flatten(), |d, bar| d.child(bar))
+                .when(running && crate::downloads_view::card_bar(op.id, &p).is_none(), |d| {
                     d.child(
                         div()
                             .h(px(3.))

@@ -12839,5 +12839,89 @@
   "key": "Otomatik gizleme açıkken Dock yalnızca bir pencere onun durduğu yere uzanınca saklanır; pencere küçültülünce, kapanınca ya da çekilince kendiliğinden geri gelir.",
   "tr": "Otomatik gizleme açıkken Dock yalnızca bir pencere onun durduğu yere uzanınca saklanır; pencere küçültülünce, kapanınca ya da çekilince kendiliğinden geri gelir.",
   "en": "With auto-hide on, the dock hides only when a window reaches where it stands, and comes back by itself when that window is minimised, closed or moved away."
+ },
+ {
+  "id": "6402501a",
+  "key": "Bağlantı ekle",
+  "tr": "Bağlantı ekle",
+  "en": "Add link"
+ },
+ {
+  "id": "e0e8fdd8",
+  "key": "Ayrı pencerede aç",
+  "tr": "Ayrı pencerede aç",
+  "en": "Open in a window"
+ },
+ {
+  "id": "ead038d0",
+  "key": "HyperDownload şu an çalışmıyor: bir indirme başlayınca kendiliğinden açılır.",
+  "tr": "HyperDownload şu an çalışmıyor: bir indirme başlayınca kendiliğinden açılır.",
+  "en": "HyperDownload isn't running: it starts by itself when a download begins."
+ },
+ {
+  "id": "11230b7f",
+  "key": "Şu an inen bir şey yok. Bir bağlantıyı herhangi bir klasöre yapıştırın ya da buradan ekleyin.",
+  "tr": "Şu an inen bir şey yok. Bir bağlantıyı herhangi bir klasöre yapıştırın ya da buradan ekleyin.",
+  "en": "Nothing is downloading. Paste a link into any folder, or add one here."
+ },
+ {
+  "id": "132745c7",
+  "key": "boş (İndirilenler)",
+  "tr": "boş (İndirilenler)",
+  "en": "free (Downloads)"
+ },
+ {
+  "id": "038087f4",
+  "key": "Listeyi temizle",
+  "tr": "Listeyi temizle",
+  "en": "Clear list"
+ },
+ {
+  "id": "769b9bde",
+  "key": "Bitenler",
+  "tr": "Bitenler",
+  "en": "Finished"
+ },
+ {
+  "id": "d28ed4a8",
+  "key": "Biten indirmeler burada, kapladıkları yerle birlikte listelenir.",
+  "tr": "Biten indirmeler burada, kapladıkları yerle birlikte listelenir.",
+  "en": "Finished downloads are listed here, with the space they take."
+ },
+ {
+  "id": "ba021f7c",
+  "key": "Dosyaların seçilmesi bekleniyor",
+  "tr": "Dosyaların seçilmesi bekleniyor",
+  "en": "Waiting for the files to be chosen"
+ },
+ {
+  "id": "d08a3be0",
+  "key": "eş",
+  "tr": "eş",
+  "en": "peers"
+ },
+ {
+  "id": "adcc1d2b",
+  "key": "bağlantı",
+  "tr": "bağlantı",
+  "en": "connections"
+ },
+ {
+  "id": "7ad0f9ea",
+  "key": "Sürdür",
+  "tr": "Sürdür",
+  "en": "Resume"
+ },
+ {
+  "id": "1d92c36a",
+  "key": "Silinmiş",
+  "tr": "Silinmiş",
+  "en": "Deleted"
+ },
+ {
+  "id": "3823cf7c",
+  "key": "Listeden kaldır",
+  "tr": "Listeden kaldır",
+  "en": "Remove from list"
  }
 ]

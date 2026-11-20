@@ -2128,5 +2128,19 @@
  "ae935c24": "Texto colado",
  "43ac0b05": "Imagem colada",
  "5b6b8e5c": "Ocultar só quando uma janela cobrir a dock",
- "4dde4dcd": "Com a ocultação automática ativa, a dock só se esconde quando uma janela chega ao seu lugar, e volta sozinha quando essa janela é minimizada, fechada ou afastada."
+ "4dde4dcd": "Com a ocultação automática ativa, a dock só se esconde quando uma janela chega ao seu lugar, e volta sozinha quando essa janela é minimizada, fechada ou afastada.",
+ "6402501a": "Adicionar ligação",
+ "e0e8fdd8": "Abrir numa janela",
+ "ead038d0": "O HyperDownload não está em execução: inicia-se sozinho quando uma transferência começa.",
+ "11230b7f": "Nada está a ser transferido. Cole uma ligação em qualquer pasta ou adicione aqui.",
+ "132745c7": "livres (Transferências)",
+ "038087f4": "Limpar lista",
+ "769b9bde": "Concluídas",
+ "d28ed4a8": "As transferências concluídas aparecem aqui, com o espaço que ocupam.",
+ "ba021f7c": "A aguardar a escolha dos ficheiros",
+ "d08a3be0": "pares",
+ "adcc1d2b": "ligações",
+ "7ad0f9ea": "Retomar",
+ "1d92c36a": "Eliminado",
+ "3823cf7c": "Remover da lista"
 }

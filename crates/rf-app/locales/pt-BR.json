@@ -2128,5 +2128,19 @@
  "ae935c24": "Texto colado",
  "43ac0b05": "Imagem colada",
  "5b6b8e5c": "Ocultar só quando uma janela cobrir o dock",
- "4dde4dcd": "Com a ocultação automática ativada, o dock só se esconde quando uma janela chega ao lugar dele, e volta sozinho quando essa janela é minimizada, fechada ou afastada."
+ "4dde4dcd": "Com a ocultação automática ativada, o dock só se esconde quando uma janela chega ao lugar dele, e volta sozinho quando essa janela é minimizada, fechada ou afastada.",
+ "6402501a": "Adicionar link",
+ "e0e8fdd8": "Abrir em uma janela",
+ "ead038d0": "O HyperDownload não está em execução: ele inicia sozinho quando um download começa.",
+ "11230b7f": "Nada está sendo baixado. Cole um link em qualquer pasta ou adicione aqui.",
+ "132745c7": "livres (Downloads)",
+ "038087f4": "Limpar lista",
+ "769b9bde": "Concluídos",
+ "d28ed4a8": "Os downloads concluídos aparecem aqui, com o espaço que ocupam.",
+ "ba021f7c": "Aguardando a escolha dos arquivos",
+ "d08a3be0": "pares",
+ "adcc1d2b": "conexões",
+ "7ad0f9ea": "Retomar",
+ "1d92c36a": "Excluído",
+ "3823cf7c": "Remover da lista"
 }

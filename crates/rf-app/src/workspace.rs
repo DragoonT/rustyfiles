@@ -213,6 +213,10 @@ pub struct Workspace {
     /// The address box's width for the path as last laid out (logical px; 0 before the first layout): what the breadcrumb folds its
     /// leading folders to fit (issue 164: a guess from the window's width folded them with room to spare).
     crumb_room: std::rc::Rc<std::cell::Cell<f32>>,
+    /// HyperDownload is installed: the sidebar has its row (looked at on start and when the Add-ons page changes something).
+    hd_installed: bool,
+    /// `addons::CHANGES` when `hd_installed` was looked at.
+    hd_seen: u64,
     last_session: Vec<String>,
     _bulk_sub: Option<Subscription>,
     _palette_sub: Option<Subscription>,
@@ -420,6 +424,7 @@ fn session_text(loc: &Location) -> String {
         Location::Path(p) => rf_core::history::redact_credentials(&p.to_string_lossy()),
         Location::Search { root, .. } => root.to_string_lossy().into_owned(),
         Location::RecycleBin => "shell:RecycleBinFolder".into(),
+        Location::Downloads => "rustyfiles:downloads".into(),
         Location::Shell { parsing, name } => format!("{SHELL_PREFIX}{parsing}\t{name}"),
         _ => String::new(),
     }
@@ -630,6 +635,10 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
     }
     if msg.trim() == rf_win::jumplist::NEW_WINDOW_ARG {
         return crate::open_main_window_made(Some(Location::Home), None, None, cx);
+    }
+    if msg.trim() == crate::downloads_view::LAUNCH_ARG {
+        crate::downloads_view::open_window(cx);
+        return true;
     }
     if msg.trim() == crate::quick_search::LAUNCH_ARG {
         crate::quick_search::toggle(cx);
@@ -942,6 +951,8 @@ impl Workspace {
             picker_size_gen: 0,
             viewport_w: 1300.,
             crumb_room: Default::default(),
+            hd_installed: crate::addons::installed(crate::hyperdownload::ID).is_some(),
+            hd_seen: crate::addons::CHANGES.load(std::sync::atomic::Ordering::Relaxed),
             last_session: Vec::new(),
             _bulk_sub: None,
             _palette_sub: None,
@@ -3562,6 +3573,11 @@ impl Workspace {
     }
 
     fn render_sidebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let changes = crate::addons::CHANGES.load(std::sync::atomic::Ordering::Relaxed);
+        if changes != self.hd_seen {
+            self.hd_seen = changes;
+            self.hd_installed = crate::addons::installed(crate::hyperdownload::ID).is_some();
+        }
         let cur = self.active_tab().read(cx).location().clone();
         let places = self.places.read(cx);
         let pinned = places.pinned.clone();
@@ -3765,6 +3781,20 @@ impl Workspace {
             ));
         }
         col = col.child(div().h_2());
+        // HyperDownload's page, when the add-on is installed (above the Recycle Bin)
+        if self.hd_installed {
+            col = col.child(self.sidebar_item(
+                "sb-downloads".into(),
+                L::ArrowDownToLine,
+                crate::downloads_view::ember(),
+                "HyperDownload".into(),
+                Location::Downloads,
+                cur == Location::Downloads,
+                None,
+                p,
+                cx,
+            ));
+        }
         col = col.child(self.sidebar_item(
             "sb-recycle".into(),
             L::Trash,
@@ -5201,7 +5231,7 @@ mod launch_tests {
             parsing: r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\?\usb#vid_04e8&pid_6860#r58n#{6ac27878-a6fa-4155-ba85-f98f491d4f33}".into(),
             name: "Galaxy S24".into(),
         };
-        for loc in [Location::Path(PathBuf::from(r"C:\Kullanıcılar\Özer")), Location::RecycleBin, phone] {
+        for loc in [Location::Path(PathBuf::from(r"C:\Kullanıcılar\Özer")), Location::RecycleBin, Location::Downloads, phone] {
             assert_eq!(parse_launch(&super::session_text(&loc)).0, loc);
         }
         // places a session can't keep come back as Home

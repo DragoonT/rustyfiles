@@ -2128,5 +2128,19 @@
  "ae935c24": "Liitetty teksti",
  "43ac0b05": "Liitetty kuva",
  "5b6b8e5c": "Piilota vain, kun ikkuna peittää telakan",
- "4dde4dcd": "Kun automaattinen piilotus on käytössä, telakka piiloutuu vain, kun ikkuna ulottuu sen kohdalle, ja palaa itsestään, kun ikkuna pienennetään, suljetaan tai siirretään pois."
+ "4dde4dcd": "Kun automaattinen piilotus on käytössä, telakka piiloutuu vain, kun ikkuna ulottuu sen kohdalle, ja palaa itsestään, kun ikkuna pienennetään, suljetaan tai siirretään pois.",
+ "6402501a": "Lisää linkki",
+ "e0e8fdd8": "Avaa ikkunassa",
+ "ead038d0": "HyperDownload ei ole käynnissä: se käynnistyy itsestään, kun lataus alkaa.",
+ "11230b7f": "Mitään ei ladata. Liitä linkki mihin tahansa kansioon tai lisää se tästä.",
+ "132745c7": "vapaana (Lataukset)",
+ "038087f4": "Tyhjennä luettelo",
+ "769b9bde": "Valmiit",
+ "d28ed4a8": "Valmiit lataukset näkyvät tässä viemänsä tilan kanssa.",
+ "ba021f7c": "Odotetaan tiedostojen valintaa",
+ "d08a3be0": "vertaista",
+ "adcc1d2b": "yhteyttä",
+ "7ad0f9ea": "Jatka",
+ "1d92c36a": "Poistettu",
+ "3823cf7c": "Poista luettelosta"
 }

@@ -2128,5 +2128,19 @@
  "ae935c24": "Text enganxat",
  "43ac0b05": "Imatge enganxada",
  "5b6b8e5c": "Amaga només quan una finestra cobreix el dock",
- "4dde4dcd": "Amb l'amagat automàtic actiu, el dock només s'amaga quan una finestra arriba on és, i torna sol quan aquesta finestra es minimitza, es tanca o s'aparta."
+ "4dde4dcd": "Amb l'amagat automàtic actiu, el dock només s'amaga quan una finestra arriba on és, i torna sol quan aquesta finestra es minimitza, es tanca o s'aparta.",
+ "6402501a": "Afegeix un enllaç",
+ "e0e8fdd8": "Obre en una finestra",
+ "ead038d0": "HyperDownload no s'està executant: s'inicia sol quan comença una baixada.",
+ "11230b7f": "No s'està baixant res. Enganxa un enllaç a qualsevol carpeta o afegeix-ne un aquí.",
+ "132745c7": "lliures (Baixades)",
+ "038087f4": "Esborra la llista",
+ "769b9bde": "Acabades",
+ "d28ed4a8": "Les baixades acabades es mostren aquí amb l'espai que ocupen.",
+ "ba021f7c": "S'espera que es triïn els fitxers",
+ "d08a3be0": "parells",
+ "adcc1d2b": "connexions",
+ "7ad0f9ea": "Reprèn",
+ "1d92c36a": "Suprimit",
+ "3823cf7c": "Treu de la llista"
 }

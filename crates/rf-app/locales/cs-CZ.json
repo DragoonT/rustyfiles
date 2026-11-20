@@ -2128,5 +2128,19 @@
  "ae935c24": "Vložený text",
  "43ac0b05": "Vložený obrázek",
  "5b6b8e5c": "Skrýt jen tehdy, když dok zakryje okno",
- "4dde4dcd": "Při zapnutém automatickém skrývání se dok skryje jen tehdy, když okno zasáhne na jeho místo, a sám se vrátí, když se okno minimalizuje, zavře nebo odsune."
+ "4dde4dcd": "Při zapnutém automatickém skrývání se dok skryje jen tehdy, když okno zasáhne na jeho místo, a sám se vrátí, když se okno minimalizuje, zavře nebo odsune.",
+ "6402501a": "Přidat odkaz",
+ "e0e8fdd8": "Otevřít v okně",
+ "ead038d0": "HyperDownload teď neběží: spustí se sám, když začne stahování.",
+ "11230b7f": "Nic se nestahuje. Vložte odkaz do libovolné složky nebo ho přidejte zde.",
+ "132745c7": "volno (Stažené soubory)",
+ "038087f4": "Vymazat seznam",
+ "769b9bde": "Dokončené",
+ "d28ed4a8": "Dokončená stahování jsou uvedena zde i s místem, které zabírají.",
+ "ba021f7c": "Čeká se na výběr souborů",
+ "d08a3be0": "peerů",
+ "adcc1d2b": "připojení",
+ "7ad0f9ea": "Pokračovat",
+ "1d92c36a": "Smazáno",
+ "3823cf7c": "Odebrat ze seznamu"
 }

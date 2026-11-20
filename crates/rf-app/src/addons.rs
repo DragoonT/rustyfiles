@@ -201,14 +201,20 @@ pub fn install(info: &AddonInfo, progress: &dyn Fn(u64, u64), cancelled: &dyn Fn
             }
         }
     }
+    CHANGES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     Ok(now)
 }
 
 /// Removes `id` (its folder; its own data elsewhere stays).
 pub fn remove(id: &str) -> Result<(), String> {
     let dir = dir_of(id).ok_or("no folder for add-ons")?;
-    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())
+    let r = std::fs::remove_dir_all(&dir).map_err(|e| e.to_string());
+    CHANGES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    r
 }
+
+/// Bumped when an add-on was installed, updated or removed: what shows an add-on's place (the sidebar's HyperDownload row) looks again.
+pub static CHANGES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[cfg(test)]
 mod tests {

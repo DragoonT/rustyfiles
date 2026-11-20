@@ -2128,5 +2128,19 @@
  "ae935c24": "Pasted text",
  "43ac0b05": "Pasted picture",
  "5b6b8e5c": "Hide only when a window covers the dock",
- "4dde4dcd": "With auto-hide on, the dock hides only when a window reaches where it stands, and comes back by itself when that window is minimised, closed or moved away."
+ "4dde4dcd": "With auto-hide on, the dock hides only when a window reaches where it stands, and comes back by itself when that window is minimised, closed or moved away.",
+ "6402501a": "Add link",
+ "e0e8fdd8": "Open in a window",
+ "ead038d0": "HyperDownload isn't running: it starts by itself when a download begins.",
+ "11230b7f": "Nothing is downloading. Paste a link into any folder, or add one here.",
+ "132745c7": "free (Downloads)",
+ "038087f4": "Clear list",
+ "769b9bde": "Finished",
+ "d28ed4a8": "Finished downloads are listed here, with the space they take.",
+ "ba021f7c": "Waiting for the files to be chosen",
+ "d08a3be0": "peers",
+ "adcc1d2b": "connections",
+ "7ad0f9ea": "Resume",
+ "1d92c36a": "Deleted",
+ "3823cf7c": "Remove from list"
 }

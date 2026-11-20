@@ -570,6 +570,8 @@ pub struct FolderView {
     recycle: Option<Entity<crate::recycle_view::RecycleView>>,
     /// The disk usage page of this tab (kept while the tab stays on that folder).
     disk_usage: Option<Entity<crate::disk_usage::DiskUsageView>>,
+    /// HyperDownload's page, while this view shows it.
+    downloads: Option<Entity<crate::downloads_view::DownloadsView>>,
     /// Git status of the repository containing this folder (if any).
     pub git: Option<Arc<rf_win::git::GitStatus>>,
     /// Last commit per child of the current folder (commit columns), keyed by name.
@@ -750,6 +752,7 @@ impl FolderView {
             typeahead: (String::new(), Instant::now()),
             recycle: None,
             disk_usage: None,
+            downloads: None,
             git: None,
             git_commits: None,
             column_cache: Default::default(),
@@ -775,27 +778,8 @@ impl FolderView {
 
     /// "Bağlantıdan indir…": asks for a link (one on the clipboard is filled in) and downloads it into this folder with HyperDownload.
     pub fn download_from_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use crate::prompt::{Button, Kind};
         let Location::Path(dir) = self.location().clone() else { return };
-        let initial = cx.read_from_clipboard().and_then(|c| c.text()).map(|t| t.trim().to_string()).filter(|t| crate::hyperdownload::is_link(t)).unwrap_or_default();
-        crate::prompt::show(
-            crate::t!("Bağlantıdan indir"),
-            Some(format!("{} {}", crate::t!("Dosya bu klasöre indirilir:"), dir.display())),
-            Some((initial, "https://… / magnet:?…".to_string())),
-            vec![
-                Button::new(crate::t!("İndir"), Kind::Primary, move |text, _, cx| {
-                    let url = text.unwrap_or_default().trim().to_string();
-                    if !crate::hyperdownload::is_link(&url) {
-                        return Err(crate::t!("Bir http, https ya da magnet bağlantısı yazın").to_string());
-                    }
-                    crate::hyperdownload::download(url, dir.clone(), cx);
-                    Ok(())
-                }),
-                Button::cancel(),
-            ],
-            window,
-            cx,
-        );
+        crate::hyperdownload::ask_link(dir, window, cx);
     }
 
     pub fn location(&self) -> &Location {
@@ -838,6 +822,7 @@ impl FolderView {
             Location::Library { .. } => L::Library,
             Location::Shell { .. } => L::Usb,
             Location::DiskUsage(_) => L::ChartPie,
+            Location::Downloads => L::ArrowDownToLine,
             Location::Path(p) if rf_win::network::server_root(p).is_some() => L::Server,
             // the archive itself or a folder inside it (name check only: no disk access here, not even for a `.001` name)
             Location::Path(p) if crate::archive_view::is_browsable_path_by_name(p) => L::FileArchive,
@@ -5232,6 +5217,17 @@ impl Render for FolderView {
                         })
                         .detach();
                         self.disk_usage = Some(dv.clone());
+                        dv
+                    }
+                };
+                div().size_full().child(dv).into_any_element()
+            }
+            Location::Downloads => {
+                let dv = match &self.downloads {
+                    Some(dv) => dv.clone(),
+                    None => {
+                        let dv = cx.new(|cx| crate::downloads_view::DownloadsView::new(false, cx));
+                        self.downloads = Some(dv.clone());
                         dv
                     }
                 };

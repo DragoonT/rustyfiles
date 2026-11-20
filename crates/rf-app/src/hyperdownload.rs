@@ -124,6 +124,35 @@ fn answers(r: &Rpc) -> bool {
     r.call("aria2.getVersion", vec![]).is_ok()
 }
 
+/// The running add-on, if it is running (it is not started: a page that only looks must not start it). Blocking: off the UI thread.
+pub fn running() -> Option<Rpc> {
+    read_rpc(&data_dir()?).filter(answers)
+}
+
+/// "Bağlantıdan indir…": asks for a link (one on the clipboard is filled in) and downloads it into `dir` with HyperDownload.
+pub fn ask_link(dir: PathBuf, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    use crate::prompt::{Button, Kind};
+    let initial = cx.read_from_clipboard().and_then(|c| c.text()).map(|t| t.trim().to_string()).filter(|t| is_link(t)).unwrap_or_default();
+    crate::prompt::show(
+        crate::t!("Bağlantıdan indir"),
+        Some(format!("{} {}", crate::t!("Dosya bu klasöre indirilir:"), dir.display())),
+        Some((initial, "https://… / magnet:?…".to_string())),
+        vec![
+            Button::new(crate::t!("İndir"), Kind::Primary, move |text, _, cx| {
+                let url = text.unwrap_or_default().trim().to_string();
+                if !is_link(&url) {
+                    return Err(crate::t!("Bir http, https ya da magnet bağlantısı yazın").to_string());
+                }
+                download(url, dir.clone(), cx);
+                Ok(())
+            }),
+            Button::cancel(),
+        ],
+        window,
+        cx,
+    );
+}
+
 /// The running add-on, started first when it is not running. Blocking (up to ~15 s the first time): call it off the UI thread.
 pub fn connect() -> Result<Rpc, Unavailable> {
     let dir = data_dir().ok_or(Unavailable::NoAnswer("no data folder".into()))?;
@@ -351,10 +380,12 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
         }
     })
     .detach();
+    let card_of_thread = card.clone();
     let id = crate::status_center::start_with_id(
         cx,
         title,
         move |t: Arc<rf_win::fileops::Tracker>| {
+            let card = card_of_thread;
             let rpc = match connect() {
                 Ok(r) => r,
                 Err(Unavailable::NotInstalled) => anyhow::bail!("{}", crate::t!("HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz")),
@@ -389,6 +420,12 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
                 let Ok(v) = rpc.call("aria2.tellStatus", vec![json!(gid)]) else { continue };
                 let s = seen(&v);
                 t.bytes.set(s.done, s.total.max(s.done));
+                // the card's molten bar (the connections' pieces, or a torrent's piece map)
+                let card_id = card.load(std::sync::atomic::Ordering::Relaxed);
+                if card_id != 0 {
+                    let shape = (s.status == "active" || s.status == "paused").then(|| crate::downloads_view::shape_of(&v));
+                    crate::downloads_view::set_shape(card_id, shape);
+                }
                 let name = s
                     .path
                     .as_ref()
@@ -448,6 +485,25 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
                 }
                 match s.status.as_str() {
                     "complete" => {
+                        // the Downloads page's "Finished" list (the add-on forgets it once its result is taken)
+                        let torrent = v.get("hdKind").and_then(Value::as_str) == Some("torrent");
+                        let tname = v.pointer("/bittorrent/info/name").and_then(Value::as_str).map(str::to_string);
+                        let tdir = v.get("dir").and_then(Value::as_str).map(PathBuf::from);
+                        let place = match (torrent, &tname, &tdir) {
+                            (true, Some(n), Some(d)) => Some(d.join(n)),
+                            _ => s.path.clone(),
+                        };
+                        if let Some(place) = place {
+                            let name = if torrent { tname.unwrap_or_default() } else { place.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default() };
+                            crate::hd_history::record(crate::hd_history::Entry {
+                                name,
+                                path: place,
+                                size: s.total.max(s.done),
+                                source: url.clone(),
+                                torrent,
+                                finished_ms: crate::hd_history::now_ms(),
+                            });
+                        }
                         let _ = rpc.call("aria2.removeDownloadResult", vec![json!(gid)]);
                         if let Some(p) = s.path {
                             t.results.lock().unwrap().push((PathBuf::from(&url), p));

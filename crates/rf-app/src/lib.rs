@@ -11,6 +11,8 @@ mod ferry;
 mod addons;
 mod addons_page;
 mod hyperdownload;
+mod hd_history;
+mod downloads_view;
 mod archive_view;
 mod bulk_rename;
 mod command_palette;
@@ -577,7 +579,10 @@ pub fn main() {
     let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search && !dock && !no_window && !snip_only);
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
-    let arg = arg.filter(|_| !new_window);
+    // `--downloads`: HyperDownload's window (a running rustyfiles opens it; a first start opens it beside its own window)
+    let downloads_window = arg.as_deref() == Some(downloads_view::LAUNCH_ARG);
+    // (`--hd-follow=` is not a folder either: it was handed to Explorer, which opened Documents, and the download was never shown)
+    let arg = arg.filter(|_| !new_window && !downloads_window && hd_follow.is_none());
     // several folders on the command line (issue 125): a first one that is gone (moved, renamed) is passed over, not handed to Explorer
     // with its error, and the first one that is there opens instead; `first_taken` is how many arguments that used up
     let mut first_taken = 1;
@@ -745,6 +750,7 @@ pub fn main() {
         _ if open_look_settings => look::ipc::ToApp::OpenSettings.encode(),
         _ if pick.is_some() => format!("{}{}", picker::PICK_PREFIX, pick.as_deref().unwrap_or_default()),
         _ if new_window => rf_win::jumplist::NEW_WINDOW_ARG.to_string(),
+        _ if downloads_window => downloads_view::LAUNCH_ARG.to_string(),
         _ if quick_search => quick_search::LAUNCH_ARG.to_string(),
         _ if hd_follow.is_some() => format!("{}{}", hyperdownload::FOLLOW_PREFIX, hd_follow.as_deref().unwrap_or_default()),
         _ if no_window => search_pipe::START_MSG.to_string(),
@@ -808,6 +814,9 @@ pub fn main() {
     }
     for folder in more_folders {
         let _ = ipc_tx.unbounded_send(folder);
+    }
+    if downloads_window {
+        let _ = ipc_tx.unbounded_send(downloads_view::LAUNCH_ARG.to_string());
     }
     if let Some(rx) = shell_select {
         let tx = ipc_tx.clone();
