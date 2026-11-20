@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Dublează",
  "c46fe68c": "Fără sunet",
  "ae935c24": "Text lipit",
- "43ac0b05": "Imagine lipită"
+ "43ac0b05": "Imagine lipită",
+ "5b6b8e5c": "Ascunde doar când o fereastră acoperă dockul",
+ "4dde4dcd": "Cu ascunderea automată pornită, dockul se ascunde doar când o fereastră ajunge unde stă el și revine singur când fereastra este minimizată, închisă sau mutată."
 }

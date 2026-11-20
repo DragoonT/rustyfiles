@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Kettőzés",
  "c46fe68c": "Némítva",
  "ae935c24": "Beillesztett szöveg",
- "43ac0b05": "Beillesztett kép"
+ "43ac0b05": "Beillesztett kép",
+ "5b6b8e5c": "Elrejtés csak akkor, ha egy ablak eltakarja a dokkot",
+ "4dde4dcd": "Automatikus elrejtéskor a dokk csak akkor tűnik el, ha egy ablak a helyére ér, és magától visszajön, amikor az ablakot kis méretre teszed, bezárod vagy elhúzod."
 }

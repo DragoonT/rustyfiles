@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Duplizieren",
  "c46fe68c": "Stumm",
  "ae935c24": "Eingefügter Text",
- "43ac0b05": "Eingefügtes Bild"
+ "43ac0b05": "Eingefügtes Bild",
+ "5b6b8e5c": "Nur ausblenden, wenn ein Fenster das Dock verdeckt",
+ "4dde4dcd": "Bei aktiviertem automatischem Ausblenden verschwindet das Dock nur, wenn ein Fenster bis an seinen Platz reicht, und kommt von selbst zurück, sobald dieses Fenster minimiert, geschlossen oder weggeschoben wird."
 }

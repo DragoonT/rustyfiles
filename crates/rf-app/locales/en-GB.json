@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Duplicate",
  "c46fe68c": "Muted",
  "ae935c24": "Pasted text",
- "43ac0b05": "Pasted picture"
+ "43ac0b05": "Pasted picture",
+ "5b6b8e5c": "Hide only when a window covers the dock",
+ "4dde4dcd": "With auto-hide on, the dock hides only when a window reaches where it stands, and comes back by itself when that window is minimised, closed or moved away."
 }

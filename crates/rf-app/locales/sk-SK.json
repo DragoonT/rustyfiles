@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Duplikovať",
  "c46fe68c": "Stlmené",
  "ae935c24": "Vložený text",
- "43ac0b05": "Vložený obrázok"
+ "43ac0b05": "Vložený obrázok",
+ "5b6b8e5c": "Skryť len vtedy, keď dok zakryje okno",
+ "4dde4dcd": "Pri zapnutom automatickom skrývaní sa dok skryje len vtedy, keď okno siahne na jeho miesto, a sám sa vráti, keď sa okno minimalizuje, zavrie alebo odsunie."
 }

@@ -342,6 +342,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Sessiz", "Muted"),
     ("Yapıştırılan metin", "Pasted text"),
     ("Yapıştırılan resim", "Pasted picture"),
+    ("Yalnızca bir pencere Dock'un üstüne gelince gizle", "Hide only when a window covers the dock"),
+    ("Otomatik gizleme açıkken Dock yalnızca bir pencere onun durduğu yere uzanınca saklanır; pencere küçültülünce, kapanınca ya da çekilince kendiliğinden geri gelir.", "With auto-hide on, the dock hides only when a window reaches where it stands, and comes back by itself when that window is minimised, closed or moved away."),
     ("Bu adda bir öğe zaten var. Başka bir ad deneyin.", "An item with this name already exists. Try another name."),
     ("Dosya adı şu karakterleri içeremez: \\ / : * ? \" < > | ve nokta ile bitemez.", "A file name can't contain any of these characters: \\ / : * ? \" < > | and can't end with a period."),
     ("Geçersiz klasör adı", "Invalid folder name"),

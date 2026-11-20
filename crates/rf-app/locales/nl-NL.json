@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Dupliceren",
  "c46fe68c": "Gedempt",
  "ae935c24": "Geplakte tekst",
- "43ac0b05": "Geplakte afbeelding"
+ "43ac0b05": "Geplakte afbeelding",
+ "5b6b8e5c": "Alleen verbergen als een venster het dock bedekt",
+ "4dde4dcd": "Met automatisch verbergen aan verdwijnt het dock alleen als een venster tot zijn plek reikt, en komt het vanzelf terug als dat venster wordt geminimaliseerd, gesloten of weggeschoven."
 }

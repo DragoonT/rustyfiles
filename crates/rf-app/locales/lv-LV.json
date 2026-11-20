@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Dublēt",
  "c46fe68c": "Izslēgta skaņa",
  "ae935c24": "Ielīmētais teksts",
- "43ac0b05": "Ielīmētais attēls"
+ "43ac0b05": "Ielīmētais attēls",
+ "5b6b8e5c": "Paslēpt tikai, kad logs aizsedz doku",
+ "4dde4dcd": "Ja ieslēgta automātiskā slēpšana, doks paslēpjas tikai tad, kad logs sniedzas līdz tā vietai, un pats atgriežas, kad šo logu minimizē, aizver vai pārvieto."
 }

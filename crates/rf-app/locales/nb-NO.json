@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Dupliser",
  "c46fe68c": "Dempet",
  "ae935c24": "Innlimt tekst",
- "43ac0b05": "Innlimt bilde"
+ "43ac0b05": "Innlimt bilde",
+ "5b6b8e5c": "Skjul bare når et vindu dekker dokken",
+ "4dde4dcd": "Med automatisk skjuling på skjules dokken bare når et vindu når dit den står, og den kommer tilbake av seg selv når vinduet minimeres, lukkes eller flyttes bort."
 }

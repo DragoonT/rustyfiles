@@ -721,6 +721,9 @@ pub struct Settings {
     /// The dock hides at the bottom of the screen and comes up when the pointer reaches the edge (off; issue 112). It reserves no
     /// band then: windows use the whole screen.
     pub dock_autohide: bool,
+    /// With auto-hide on: the dock hides only while a window lies where it stands, and comes back up when that window is minimised,
+    /// closed or moved away (off: it hides whenever the pointer leaves it). A user on Discord, 2026-11-20.
+    pub dock_autohide_windows: bool,
     /// The dock's islands on a solid fill instead of the glass (off; issue 113).
     pub dock_opaque: bool,
     /// A thin "Show desktop" strip at the right end of the primary monitor's right island, after the bell, as on Windows' taskbar (off;
@@ -986,6 +989,7 @@ impl Default for Settings {
             dock_status_hidden: Vec::new(),
             dock_side_tall: false,
             dock_autohide: false,
+            dock_autohide_windows: false,
             dock_opaque: false,
             dock_show_desktop: false,
             dock_labels: false,

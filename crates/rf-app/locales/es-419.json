@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Duplicar",
  "c46fe68c": "Silenciado",
  "ae935c24": "Texto pegado",
- "43ac0b05": "Imagen pegada"
+ "43ac0b05": "Imagen pegada",
+ "5b6b8e5c": "Ocultar solo cuando una ventana cubra el dock",
+ "4dde4dcd": "Con el ocultamiento automático activado, el dock solo se oculta cuando una ventana llega hasta donde está, y vuelve solo cuando esa ventana se minimiza, se cierra o se aparta."
 }

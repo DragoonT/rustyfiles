@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Dupliquer",
  "c46fe68c": "Muet",
  "ae935c24": "Texte collé",
- "43ac0b05": "Image collée"
+ "43ac0b05": "Image collée",
+ "5b6b8e5c": "Masquer seulement quand une fenêtre couvre le dock",
+ "4dde4dcd": "Avec le masquage automatique, le dock ne se cache que lorsqu'une fenêtre atteint sa place, et revient tout seul quand cette fenêtre est réduite, fermée ou déplacée."
 }

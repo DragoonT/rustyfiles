@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Duplikuj",
  "c46fe68c": "Wyciszono",
  "ae935c24": "Wklejony tekst",
- "43ac0b05": "Wklejony obraz"
+ "43ac0b05": "Wklejony obraz",
+ "5b6b8e5c": "Ukrywaj tylko, gdy okno zasłania dok",
+ "4dde4dcd": "Przy włączonym autoukrywaniu dok chowa się tylko wtedy, gdy okno sięga jego miejsca, i wraca sam, gdy to okno zostanie zminimalizowane, zamknięte lub odsunięte."
 }

@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Duplicera",
  "c46fe68c": "Ljud av",
  "ae935c24": "Inklistrad text",
- "43ac0b05": "Inklistrad bild"
+ "43ac0b05": "Inklistrad bild",
+ "5b6b8e5c": "Dölj bara när ett fönster täcker dockan",
+ "4dde4dcd": "Med automatiskt döljande på döljs dockan bara när ett fönster når dit den står, och den kommer tillbaka av sig själv när fönstret minimeras, stängs eller flyttas undan."
 }

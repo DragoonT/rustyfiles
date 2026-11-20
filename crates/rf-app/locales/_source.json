@@ -12827,5 +12827,17 @@
   "key": "Yapıştırılan resim",
   "tr": "Yapıştırılan resim",
   "en": "Pasted picture"
+ },
+ {
+  "id": "5b6b8e5c",
+  "key": "Yalnızca bir pencere Dock'un üstüne gelince gizle",
+  "tr": "Yalnızca bir pencere Dock'un üstüne gelince gizle",
+  "en": "Hide only when a window covers the dock"
+ },
+ {
+  "id": "4dde4dcd",
+  "key": "Otomatik gizleme açıkken Dock yalnızca bir pencere onun durduğu yere uzanınca saklanır; pencere küçültülünce, kapanınca ya da çekilince kendiliğinden geri gelir.",
+  "tr": "Otomatik gizleme açıkken Dock yalnızca bir pencere onun durduğu yere uzanınca saklanır; pencere küçültülünce, kapanınca ya da çekilince kendiliğinden geri gelir.",
+  "en": "With auto-hide on, the dock hides only when a window reaches where it stands, and comes back by itself when that window is minimised, closed or moved away."
  }
 ]

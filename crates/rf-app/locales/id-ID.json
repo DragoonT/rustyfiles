@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Duplikat",
  "c46fe68c": "Dibisukan",
  "ae935c24": "Teks yang ditempel",
- "43ac0b05": "Gambar yang ditempel"
+ "43ac0b05": "Gambar yang ditempel",
+ "5b6b8e5c": "Sembunyikan hanya saat jendela menutupi dock",
+ "4dde4dcd": "Dengan sembunyi otomatis aktif, dock hanya bersembunyi saat jendela mencapai tempatnya, dan kembali sendiri saat jendela itu diminimalkan, ditutup, atau dipindahkan."
 }

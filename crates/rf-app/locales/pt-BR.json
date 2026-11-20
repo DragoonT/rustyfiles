@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Duplicar",
  "c46fe68c": "Mudo",
  "ae935c24": "Texto colado",
- "43ac0b05": "Imagem colada"
+ "43ac0b05": "Imagem colada",
+ "5b6b8e5c": "Ocultar só quando uma janela cobrir o dock",
+ "4dde4dcd": "Com a ocultação automática ativada, o dock só se esconde quando uma janela chega ao lugar dele, e volta sozinho quando essa janela é minimizada, fechada ou afastada."
 }

@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Dublikuoti",
  "c46fe68c": "Nutildyta",
  "ae935c24": "Įklijuotas tekstas",
- "43ac0b05": "Įklijuotas paveikslėlis"
+ "43ac0b05": "Įklijuotas paveikslėlis",
+ "5b6b8e5c": "Slėpti tik kai langas uždengia doką",
+ "4dde4dcd": "Kai įjungtas automatinis slėpimas, dokas pasislepia tik tada, kai langas pasiekia jo vietą, ir pats grįžta, kai tas langas sumažinamas, uždaromas ar patraukiamas."
 }

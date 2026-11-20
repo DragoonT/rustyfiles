@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Duplica",
  "c46fe68c": "Silenciat",
  "ae935c24": "Text enganxat",
- "43ac0b05": "Imatge enganxada"
+ "43ac0b05": "Imatge enganxada",
+ "5b6b8e5c": "Amaga només quan una finestra cobreix el dock",
+ "4dde4dcd": "Amb l'amagat automàtic actiu, el dock només s'amaga quan una finestra arriba on és, i torna sol quan aquesta finestra es minimitza, es tanca o s'aparta."
 }

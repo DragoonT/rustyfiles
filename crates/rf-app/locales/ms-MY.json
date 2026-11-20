@@ -2126,5 +2126,7 @@
  "6abaf1f8": "Pendua",
  "c46fe68c": "Disenyapkan",
  "ae935c24": "Teks yang ditampal",
- "43ac0b05": "Gambar yang ditampal"
+ "43ac0b05": "Gambar yang ditampal",
+ "5b6b8e5c": "Sembunyi hanya apabila tetingkap menutup dok",
+ "4dde4dcd": "Apabila sembunyi automatik dihidupkan, dok hanya bersembunyi apabila tetingkap sampai ke tempatnya, dan kembali sendiri apabila tetingkap itu diminimumkan, ditutup atau dialihkan."
 }

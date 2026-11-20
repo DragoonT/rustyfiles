@@ -1378,12 +1378,14 @@ fn sync_autohide(cx: &mut App) {
 
 /// What auto-hide does with one dock: `Some(true)` puts it away, `Some(false)` brings it up, `None` leaves it as it is. `at_edge`: the
 /// pointer touches its monitor's bottom edge; `near`: the pointer is over the dock's band; `kept`: a panel, the app menu or a preview of
-/// this dock is open; `away_since`: since when the pointer has been away from it.
-fn autohide_decision(tucked: bool, at_edge: bool, near: bool, kept: bool, away_since: Instant, now: Instant) -> Option<bool> {
+/// this dock is open; `covered`: a window lies where the dock stands (always true unless the dock hides only for windows,
+/// `Settings::dock_autohide_windows`: then it stays up while nothing covers it and comes back when the last window there goes);
+/// `away_since`: since when the pointer has been away from it.
+fn autohide_decision(tucked: bool, at_edge: bool, near: bool, kept: bool, covered: bool, away_since: Instant, now: Instant) -> Option<bool> {
     if tucked {
-        return (at_edge || kept).then_some(false);
+        return (at_edge || kept || !covered).then_some(false);
     }
-    if near || kept {
+    if near || kept || !covered {
         return None;
     }
     (now.duration_since(away_since) >= AUTOHIDE_AFTER).then_some(true)
@@ -1405,26 +1407,29 @@ fn autohide_step(cx: &mut App) -> bool {
     let Some((x, y)) = cursor_px() else { return true };
     let active = host.active_dock().id;
     let busy = super::panel::is_open(cx) || super::app_menu::is_open(cx);
-    let looks: Vec<(MonId, rf_win::dock::layout::Rect, i32)> = host
+    let for_windows = cx.try_global::<Settings>().is_some_and(|s| s.dock_autohide_windows);
+    let looks: Vec<(MonId, rf_win::dock::layout::Rect, i32, bool)> = host
         .docks
         .iter()
         .map(|d| {
             let unit = host.scale_size_of(d).map_or(1.0, |(s, z)| rf_win::dock::size::unit(s, z));
             let rect = host.area_of(d).map_or(d.monitor.rect, |(m, _)| m.rect);
-            (d.id, rect, rf_win::dock::thin::reserved_thickness(unit, false))
+            // (where the islands stand when they are up: a window there covers the dock)
+            let covered = !for_windows || d.geo.as_ref().is_none_or(|g| rf_win::dock::covered::window_over(&[g.islands.left, g.islands.middle, g.islands.right]));
+            (d.id, rect, rf_win::dock::thin::reserved_thickness(unit, false), covered)
         })
         .collect();
     let now = Instant::now();
     let mut changed = Vec::new();
     let Some(h) = host_mut(cx) else { return false };
-    for (id, r, band) in looks {
+    for (id, r, band, covered) in looks {
         let Some(d) = h.docks.iter_mut().find(|d| d.id == id) else { continue };
         let in_x = x >= r.left && x < r.right;
         let (at_edge, near, kept) = (in_x && y >= r.bottom - 2, in_x && y >= r.bottom - band - 16, busy && id == active);
         if !d.tucked && (near || kept) {
             d.inside_at = Some(now);
         }
-        match autohide_decision(d.tucked, at_edge, near, kept, *d.inside_at.get_or_insert(now), now) {
+        match autohide_decision(d.tucked, at_edge, near, kept, covered, *d.inside_at.get_or_insert(now), now) {
             Some(down) => {
                 d.tucked = down;
                 d.inside_at = Some(now);
@@ -2142,14 +2147,17 @@ mod tests {
         use std::time::Instant;
         let t0 = Instant::now();
         // away below the edge: the bottom edge or an open panel brings it up, anything else leaves it away
-        assert_eq!(autohide_decision(true, true, true, false, t0, t0), Some(false));
-        assert_eq!(autohide_decision(true, false, false, true, t0, t0), Some(false), "the Start panel opened by the Windows key");
-        assert_eq!(autohide_decision(true, false, true, false, t0, t0 + AUTOHIDE_AFTER * 3), None, "over the band, not at the edge");
+        assert_eq!(autohide_decision(true, true, true, false, true, t0, t0), Some(false));
+        assert_eq!(autohide_decision(true, false, false, true, true, t0, t0), Some(false), "the Start panel opened by the Windows key");
+        assert_eq!(autohide_decision(true, false, true, false, true, t0, t0 + AUTOHIDE_AFTER * 3), None, "over the band, not at the edge");
         // up: stays while the pointer is over it or a panel is open, goes down once the pointer has been away long enough
-        assert_eq!(autohide_decision(false, false, true, false, t0, t0 + AUTOHIDE_AFTER * 3), None);
-        assert_eq!(autohide_decision(false, false, false, true, t0, t0 + AUTOHIDE_AFTER * 3), None);
-        assert_eq!(autohide_decision(false, false, false, false, t0, t0 + AUTOHIDE_AFTER / 2), None);
-        assert_eq!(autohide_decision(false, false, false, false, t0, t0 + AUTOHIDE_AFTER), Some(true));
+        assert_eq!(autohide_decision(false, false, true, false, true, t0, t0 + AUTOHIDE_AFTER * 3), None);
+        assert_eq!(autohide_decision(false, false, false, true, true, t0, t0 + AUTOHIDE_AFTER * 3), None);
+        assert_eq!(autohide_decision(false, false, false, false, true, t0, t0 + AUTOHIDE_AFTER / 2), None);
+        assert_eq!(autohide_decision(false, false, false, false, true, t0, t0 + AUTOHIDE_AFTER), Some(true));
+        // hiding only for windows: nothing over the dock keeps it up, and the last window there going brings it back
+        assert_eq!(autohide_decision(false, false, false, false, false, t0, t0 + AUTOHIDE_AFTER * 3), None, "nothing covers it");
+        assert_eq!(autohide_decision(true, false, false, false, false, t0, t0), Some(false), "the window was closed or minimised");
         // and with the setting on it reserves no band
         let mut p = prefs(true, "");
         assert!(p.reserves());
