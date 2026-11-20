@@ -96,6 +96,8 @@ struct AppMenu {
     at: Point<Pixels>,
     /// The program the app starts, once the shell has said (the item is shown only when there is one).
     location: Option<PathBuf>,
+    /// The menu of an app in the open folder (it can be taken out of it).
+    in_folder: bool,
 }
 
 /// The rows of the app menu, top to bottom.
@@ -111,11 +113,17 @@ enum AppMenuItem {
     Pin,
     Admin,
     Location,
+    /// Out of the folder it is in (issue 88).
+    OutOfFolder,
 }
 
 impl AppMenu {
     fn items(&self) -> Vec<AppMenuItem> {
-        let mut v = vec![AppMenuItem::Pin, AppMenuItem::Admin];
+        let mut v = vec![AppMenuItem::Pin];
+        if self.in_folder {
+            v.push(AppMenuItem::OutOfFolder);
+        }
+        v.push(AppMenuItem::Admin);
         if self.location.is_some() {
             v.push(AppMenuItem::Location);
         }
@@ -153,8 +161,13 @@ pub struct StartView {
     turkish: bool,
     pins: PinFile,
     pins_loaded: bool,
-    /// The pinned apps that are installed: indexes into `apps`.
+    /// The tiles of the pinned grid: the app each shows (a folder's first app), whether it is a folder (issue 88) and the positions of
+    /// its pins in the pin file.
     pin_cells: Vec<usize>,
+    pin_folders: Vec<Option<folder::PinFolder>>,
+    pin_places: Vec<Vec<usize>>,
+    /// The folder that is open over the grid.
+    folder: Option<folder::OpenFolder>,
     user: String,
     /// The account picture (None: the initial is drawn), the size it was last asked for in device px, and whether a read is running.
     avatar: Option<Arc<RenderImage>>,
@@ -193,6 +206,8 @@ pub struct StartView {
     app_hi: usize,
     power: PowerMenu,
     power_hi: usize,
+    /// The power menu's items on this PC (Hibernate where Windows offers it), read when the menu opens.
+    power_items: Vec<PowerAction>,
     /// The Start button's own menu (a right click on the logo: `sys_menu.rs`) is open, and the row the keyboard is on.
     sys_menu: bool,
     sys_hi: usize,
@@ -250,6 +265,9 @@ mod drag;
 // The detail pane beside the result list: the selected result's facts, actions and jump list.
 #[path = "start_pane.rs"]
 mod detail;
+// Folders of the pinned grid: their tiles, the open folder, grouping and taking out.
+#[path = "start_folder.rs"]
+mod folder;
 
 static WRITER: startpins::OrderedWriter = startpins::OrderedWriter::new();
 
@@ -324,6 +342,9 @@ impl StartView {
             pins: PinFile::default(),
             pins_loaded: false,
             pin_cells: Vec::new(),
+            pin_folders: Vec::new(),
+            pin_places: Vec::new(),
+            folder: None,
             user: String::new(),
             avatar: None,
             avatar_px: 0,
@@ -349,6 +370,7 @@ impl StartView {
             app_hi: 0,
             power: PowerMenu::Closed,
             power_hi: 0,
+            power_items: power::items(false),
             sys_menu: false,
             sys_hi: 0,
             power_since: None,
@@ -479,6 +501,7 @@ impl StartView {
         self.pending = None;
         self.files_req = 0;
         self.app_menu = None;
+        self.folder = None;
         self.sys_menu = false;
         self.power = PowerMenu::Closed;
         cx.notify();
@@ -596,7 +619,22 @@ impl StartView {
     }
 
     fn rebuild_pin_cells(&mut self) {
-        self.pin_cells = self.pins.resolve(&self.apps).into_iter().map(|(i, _)| i).collect();
+        // (`resolve` and `shown_in` choose the same pins in the same order: a shown pin's file position and its app go together)
+        let shown = rf_win::dock::startdrag::shown_in(&self.pins, &self.apps);
+        let app_of: std::collections::HashMap<usize, usize> = shown.iter().copied().zip(self.pins.resolve(&self.apps).into_iter().map(|(i, _)| i)).collect();
+        self.pin_places = rf_win::dock::startdrag::tiles(&self.pins.pins, &shown);
+        self.pin_cells.clear();
+        self.pin_folders.clear();
+        for tile in &self.pin_places {
+            let apps: Vec<usize> = tile.iter().filter_map(|p| app_of.get(p).copied()).collect();
+            self.pin_cells.push(apps.first().copied().unwrap_or(0));
+            let name = self.pins.pins.get(tile[0]).and_then(|p| p.folder.clone());
+            self.pin_folders.push(name.filter(|_| apps.len() > 1).map(|name| folder::PinFolder { name, apps }));
+        }
+        // (an open folder that is no folder any more, or another one now, closes)
+        if self.folder.as_ref().is_some_and(|f| self.pin_folders.get(f.tile).and_then(Option::as_ref).is_none_or(|g| g.name != f.name)) {
+            self.folder = None;
+        }
         if let Some(Spot::Pin(i)) = self.spot
             && i >= self.pin_cells.len()
         {
@@ -851,7 +889,10 @@ impl StartView {
         if !self.live() || !self.pins_loaded {
             return;
         }
-        if !self.pins.unpin(&app.id) {
+        if self.pins.unpin(&app.id) {
+            // (a folder left with one app is no folder)
+            rf_win::dock::startdrag::tidy_folders(&mut self.pins.pins);
+        } else {
             self.pins.pin(app);
         }
         self.rebuild_pin_cells();
@@ -914,6 +955,15 @@ impl StartView {
     }
 
     fn open_menu(&mut self, app: AppEntry, at: Point<Pixels>, cx: &mut Context<Self>) {
+        self.open_menu_with(app, at, false, cx);
+    }
+
+    /// The menu of an app in the open folder: it has "Klasörden çıkar".
+    fn open_menu_in_folder(&mut self, app: AppEntry, at: Point<Pixels>, cx: &mut Context<Self>) {
+        self.open_menu_with(app, at, true, cx);
+    }
+
+    fn open_menu_with(&mut self, app: AppEntry, at: Point<Pixels>, in_folder: bool, cx: &mut Context<Self>) {
         if !self.live() {
             return;
         }
@@ -922,7 +972,7 @@ impl StartView {
         self.app_hi = 0;
         let id = app.id.clone();
         let a = app.clone();
-        self.app_menu = Some(AppMenu { app, at, location: None });
+        self.app_menu = Some(AppMenu { app, at, location: None, in_folder });
         cx.spawn(async move |this, cx| {
             let loc = cx.background_executor().spawn(async move { startapps::location(&a) }).await;
             let _ = this.update(cx, |me, cx| {
@@ -950,6 +1000,7 @@ impl StartView {
         match item {
             AppMenuItem::Pin => self.toggle_pin(&m.app, cx),
             AppMenuItem::Admin => self.launch_app_as_admin(m.app, cx),
+            AppMenuItem::OutOfFolder => self.take_out_of_folder(&m.app, cx),
             AppMenuItem::Location => {
                 if let Some(p) = m.location {
                     self.show_app_location(p, cx);
@@ -973,6 +1024,9 @@ impl StartView {
         }
         match (self.page, self.spot, self.cursor) {
             (Page::Home, Some(Spot::Pin(i)), _) => {
+                if self.folder_at(i).is_some() {
+                    return None;
+                }
                 let app = self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned()?;
                 let (col, row) = (i % page::COLS, (i % self.layout.per_page.max(1)) / page::COLS);
                 let top = RESULTS_TOP + page::HEAD_H;
@@ -994,6 +1048,10 @@ impl StartView {
         }
         if self.query.trim().is_empty() {
             let app = match (self.page, self.spot, self.cursor) {
+                (Page::Home, Some(Spot::Pin(i)), _) if self.folder_at(i).is_some() => {
+                    self.open_folder(i, cx);
+                    None
+                }
                 (Page::Home, Some(Spot::Pin(i)), _) => self.pin_cells.get(i).and_then(|&a| self.apps.get(a)).cloned(),
                 (Page::Home, Some(Spot::Rec(j)), _) => {
                     self.activate_rec(j, how, cx);
@@ -1119,6 +1177,9 @@ impl StartView {
     fn set_power(&mut self, menu: PowerMenu, cx: &mut Context<Self>) {
         let before = self.power;
         self.power = menu;
+        if menu == PowerMenu::Open && before == PowerMenu::Closed {
+            self.power_items = power::items(power::hibernate_offered());
+        }
         if matches!(menu, PowerMenu::Confirming(_)) {
             if before != menu {
                 self.power_since = Some(Instant::now());
@@ -1226,13 +1287,15 @@ impl StartView {
                     cx.stop_propagation();
                 }
                 (PowerMenu::Open, "up" | "down") => {
-                    self.power_hi = startlist::step_results(self.power_hi, key == "up", PowerAction::ALL.len());
+                    self.power_hi = startlist::step_results(self.power_hi, key == "up", self.power_items.len());
                     cx.stop_propagation();
                     cx.notify();
                 }
                 (PowerMenu::Open, "enter") => {
                     cx.stop_propagation();
-                    self.choose_power(PowerAction::ALL[self.power_hi.min(PowerAction::ALL.len() - 1)], cx);
+                    if let Some(&action) = self.power_items.get(self.power_hi).or(self.power_items.last()) {
+                        self.choose_power(action, cx);
+                    }
                 }
                 // the question: the keyboard starts on "Hayır"; Enter answers what it is on
                 (PowerMenu::Confirming(_), "left" | "right" | "tab") => {
@@ -1292,6 +1355,22 @@ impl StartView {
                 _ => {}
             }
             return;
+        }
+        // an open folder: Escape closes it; its name field takes the keys while it has them; any other key closes it and does its work
+        if let Some(f) = &self.folder {
+            let naming = f.input.as_ref().is_some_and(|i| i.read(cx).focus_handle(cx).is_focused(window));
+            if key == "escape" {
+                cx.stop_propagation();
+                self.close_folder(cx);
+                if naming {
+                    self.focus_field(window, cx);
+                }
+                return;
+            }
+            if naming {
+                return;
+            }
+            self.close_folder(cx);
         }
         // the detail pane's keys, while results are shown (Tab into it, its rows, Ctrl+Shift+Enter)
         if !self.query.trim().is_empty() && !self.entries.is_empty() && self.pane_key(key, m, !footer, cx) {
@@ -1403,6 +1482,7 @@ impl StartView {
         self.spot = None;
         self.cursor = None;
         self.app_menu = None;
+        self.folder = None;
         if to == Page::All {
             self.list_scroll.scroll_to_item(0, ScrollStrategy::Top);
         }
@@ -1541,6 +1621,7 @@ impl Render for StartView {
         let wash = grown.map(|g| div().absolute().left(px(g.wash[0])).top(px(g.wash[1])).w(px(g.wash[2])).h(px(g.wash[3])).rounded(px(g.wash_radius)).bg(fill.opacity(g.wash_alpha)));
         // the panel's own part of the window: all of it, or, while the island's glass has grown into it, what is above the island's row
         let extra = grown.map_or(0.0, |g| g.extra_bottom);
+        self.ensure_folder_field(window, cx);
         let overlays = self.render_overlays(pal, window, cx);
         // an app held for a drag follows the pointer, over everything
         let ghost = self.render_ghost(pal, cx);
@@ -1781,6 +1862,9 @@ impl StartView {
         let dismiss = dismiss_listener;
         let backdrop = backdrop_of;
 
+        // ---- the open folder (under the app menu, which an app in it opens)
+        out.extend(self.render_folder(pal, view_w, view_h, cx));
+
         // ---- the app menu
         if let Some(m) = &self.app_menu {
             let pinned = self.pins.is_pinned(&m.app.id);
@@ -1809,6 +1893,7 @@ impl StartView {
                     AppMenuItem::Pin => (L::Pin, t!("Başlat'a sabitle")),
                     AppMenuItem::Admin => (L::ShieldCheck, t!("Yönetici olarak çalıştır")),
                     AppMenuItem::Location => (L::FolderOpen, t!("Dosya konumunu aç")),
+                    AppMenuItem::OutOfFolder => (L::LogOut, t!("Klasörden çıkar")),
                 };
                 col = col.child(item(("m", i), icon, label, i == hi).on_click(cx.listener(move |this, _, _, cx| this.app_menu_do(it, cx))));
             }
@@ -1926,7 +2011,7 @@ impl StartView {
                     .border_color(border)
                     .shadow_lg()
                     .occlude();
-                for (i, action) in PowerAction::ALL.into_iter().enumerate() {
+                for (i, action) in self.power_items.clone().into_iter().enumerate() {
                     col = col.child(item(("p", i), power_icon(action), power_label(action), i == self.power_hi).on_click(cx.listener(move |this, _, _, cx| this.choose_power(action, cx))));
                 }
                 out.push(col.into_any_element());
@@ -1956,6 +2041,7 @@ fn power_label(a: PowerAction) -> &'static str {
     match a {
         PowerAction::Lock => t!("Kilitle"),
         PowerAction::Sleep => t!("Uyku"),
+        PowerAction::Hibernate => t!("Hazırda beklet"),
         PowerAction::SignOut => t!("Oturumu kapat"),
         PowerAction::Restart => t!("Yeniden başlat"),
         PowerAction::Shutdown => t!("Bilgisayarı kapat"),
@@ -1966,6 +2052,7 @@ fn power_icon(a: PowerAction) -> L {
     match a {
         PowerAction::Lock => L::Lock,
         PowerAction::Sleep => L::Moon,
+        PowerAction::Hibernate => L::Snowflake,
         PowerAction::SignOut => L::LogOut,
         PowerAction::Restart => L::RotateCw,
         PowerAction::Shutdown => L::Power,
@@ -1980,7 +2067,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     fn menu(location: Option<&str>) -> AppMenu {
-        AppMenu { app: rf_win::apps::App { name: "Paint".into(), id: "p!App".into() }, at: gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)), location: location.map(Into::into) }
+        AppMenu { app: rf_win::apps::App { name: "Paint".into(), id: "p!App".into() }, at: gpui_kit::point(gpui_kit::px(0.), gpui_kit::px(0.)), location: location.map(Into::into), in_folder: false }
     }
 
     /// The field in the island's row shows the word the island's own field shows (a long sentence was cut mid-word in the 220 unit pill:
@@ -1999,6 +2086,9 @@ mod tests {
     fn the_app_menu_offers_the_folder_only_when_the_shell_found_a_program() {
         assert_eq!(menu(None).items(), [AppMenuItem::Pin, AppMenuItem::Admin]);
         assert_eq!(menu(Some(r"C:\Windows\mspaint.exe")).items(), [AppMenuItem::Pin, AppMenuItem::Admin, AppMenuItem::Location]);
+        let mut m = menu(None);
+        m.in_folder = true;
+        assert_eq!(m.items(), [AppMenuItem::Pin, AppMenuItem::OutOfFolder, AppMenuItem::Admin], "an app in a folder can be taken out");
     }
 
     #[test]

@@ -99,8 +99,15 @@ impl FolderView {
         // The user's own programs for the first selected file's type (Settings > File types): the first rows of "Open with". Their
         // icons are read on the worker, with the shell's items: never on the UI thread.
         let own: Vec<String> = if background { Vec::new() } else { items.first().map(|f| rf_win::openrules::programs_for(f)).unwrap_or_default() };
+        // "Send to" (issue 117): its entries and their icons are read on the worker too, only when the menu has the row
+        let send_to = !background && send_to_fits(&items, cx);
+        let drives = if send_to { self.send_to_drives(cx) } else { Vec::new() };
+        let send_items = items.clone();
+        // the packaged apps' commands of Windows 11's new menu (issue 107), read on the worker with their icons
+        let pkg_items = if background { vec![dir.clone()] } else { items.clone() };
         let (tx, rx) = oneshot::channel();
         rf_win::sta::run(move |owner| {
+            let packaged = packaged_commands(rf_win::pkgverbs::for_items(&pkg_items, background));
             let own: Vec<OwnProgram> = own
                 .into_iter()
                 .map(|program| {
@@ -108,11 +115,22 @@ impl FolderView {
                     (program, icon)
                 })
                 .collect();
-            let _ = tx.send((rf_win::ctxmenu::build(owner, &target, false).map_err(|e| format!("{e:#}")), own));
+            let targets: Vec<SendTarget> = if send_to {
+                rf_win::sendto::targets()
+                    .into_iter()
+                    .map(|t| {
+                        let icon = rf_win::thumbs::get_image(&t.path, 32, rf_win::thumbs::Kind::Icon).ok();
+                        (t, icon)
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let _ = tx.send((rf_win::ctxmenu::build(owner, &target, false).map_err(|e| format!("{e:#}")), own, targets, packaged));
         });
         let menu_weak = menu_view.downgrade();
         cx.spawn(async move |_, cx| {
-            let (result, own) = rx.await.unwrap_or_else(|_| (Err("cancelled".into()), Vec::new()));
+            let (result, own, targets, packaged) = rx.await.unwrap_or_else(|_| (Err("cancelled".into()), Vec::new(), Vec::new(), Vec::new()));
             let _ = cx.update(|cx| {
                 let (more, open_with, new) = match result {
                     Ok((session, shell)) => split_shell_items(&me, session, shell, background, cx),
@@ -122,12 +140,16 @@ impl FolderView {
                     }
                 };
                 let open_with = with_own_programs(&me, own, open_with);
+                let more = with_packaged(packaged, more);
                 let inline = !cx.global::<crate::settings::Settings>().menu.shell_submenu;
                 if let Some(m) = menu_weak.upgrade() {
                     m.update(cx, |m, cx| {
                         m.set_pending("more", more, cx);
                         m.set_pending("openwith", open_with, cx);
                         m.set_pending("new", new, cx);
+                        if send_to {
+                            m.set_pending("sendto", send_to_items(targets, drives, send_items), cx);
+                        }
                         // Settings: shell extensions listed in the menu itself, not in a submenu
                         if inline {
                             m.inline_pending("more", cx);
@@ -238,6 +260,10 @@ impl FolderView {
                 )
                 .hint("Ctrl+V"),
             );
+        }
+        // Explorer's "Send to" in the first menu (issue 117): its entries come with the shell's items (see `show_context_menu`)
+        if send_to_fits(items, cx) {
+            v.push(Item::Sub { label: t!("Gönder").into(), icon: icon(L::Send), items: Sub::Pending { key: "sendto", fallback: None } });
         }
         if self.is_search() && items.len() == 1 {
             let p = items[0].clone();
@@ -1066,6 +1092,111 @@ fn create_shortcuts(items: Vec<PathBuf>) {
 
 /// One of the user's own programs for a kind of file, and its icon when the shell gave one.
 type OwnProgram = (String, Option<rf_win::thumbs::Bgra>);
+
+/// A packaged app's command for the menu, with its icon read on the worker.
+struct Packaged {
+    id: usize,
+    title: String,
+    icon: Option<rf_win::thumbs::Bgra>,
+    enabled: bool,
+    sub: Vec<Packaged>,
+}
+
+/// The packaged commands with their icons (on the shell STA: the icons are files' own icons).
+fn packaged_commands(shown: Vec<rf_win::pkgverbs::Shown>) -> Vec<Packaged> {
+    shown
+        .into_iter()
+        .map(|s| Packaged {
+            id: s.id,
+            // (the menu marks no access keys: "&Open in Terminal" is "Open in Terminal")
+            title: s.title.replace("&&", "\u{1}").replace('&', "").replace('\u{1}', "&"),
+            icon: s.icon.and_then(|p| rf_win::thumbs::get_image(&p, 32, rf_win::thumbs::Kind::Icon).ok()),
+            enabled: s.enabled,
+            sub: packaged_commands(s.sub),
+        })
+        .collect()
+}
+
+fn packaged_items(cmds: Vec<Packaged>) -> Vec<Item> {
+    cmds.into_iter()
+        .map(|c| {
+            let picture = c.icon.as_ref().and_then(crate::image_cache::to_render_image).map(MenuIcon::Image).unwrap_or_else(|| icon(L::Package));
+            if c.sub.is_empty() {
+                let id = c.id;
+                Item::action(c.title, picture, move |_, _| {
+                    rf_win::sta::run(move |_| {
+                        if let Err(e) = rf_win::pkgverbs::invoke(id) {
+                            log::warn!("packaged menu command: {e:#}");
+                        }
+                    })
+                })
+                .enabled(c.enabled)
+            } else {
+                Item::sub(c.title, picture, packaged_items(c.sub))
+            }
+        })
+        .collect()
+}
+
+/// "Show more options" with the packaged apps' commands first, as Windows 11's own menu shows them (issue 107: "Edit with
+/// Notepad++", NanaZip, Terminal, ...), then the classic menu's items. They are there also when the classic part failed.
+fn with_packaged(packaged: Vec<Packaged>, rest: Pending) -> Pending {
+    if packaged.is_empty() {
+        return rest;
+    }
+    let mut items = packaged_items(packaged);
+    if let Pending::Ready(r) = &rest
+        && !r.is_empty()
+    {
+        items.push(Item::Separator);
+        items.extend(r.iter().cloned());
+    }
+    Pending::Ready(Rc::new(items))
+}
+
+/// An entry of the SendTo folder with its icon (read on the shell's worker thread).
+type SendTarget = (rf_win::sendto::Target, Option<rf_win::thumbs::Bgra>);
+
+/// The menu has "Send to" for these items: the setting is on and they are files of one folder on disk (not members of an archive, not
+/// on an FTP server: a drop needs the shell's own items of real files).
+fn send_to_fits(items: &[PathBuf], cx: &App) -> bool {
+    let Some(parent) = items.first().and_then(|p| p.parent()) else { return false };
+    cx.global::<crate::settings::Settings>().menu.send_to
+        && !rf_win::ftp::is_ftp(parent)
+        && items.iter().all(|p| p.parent() == Some(parent) && !(crate::archive_view::split(p).is_some() && !p.exists()))
+}
+
+/// The "Send to" submenu: the SendTo folder's entries, then the removable and network drives, as Explorer's menu has them. A click
+/// drops the items on the entry (a copy or a link, never a move), on the shell's worker thread.
+fn send_to_items(targets: Vec<SendTarget>, drives: Vec<(PathBuf, String, L)>, items: Vec<PathBuf>) -> Pending {
+    let send = |target: PathBuf, items: Vec<PathBuf>| {
+        move |_: &mut Window, _: &mut App| {
+            let (target, items) = (target.clone(), items.clone());
+            rf_win::sta::run(move |owner| {
+                if let Err(e) = rf_win::sendto::send(owner, &target, &items) {
+                    log::warn!("send to {}: {e:#}", target.display());
+                }
+            });
+        }
+    };
+    let mut out: Vec<Item> = targets
+        .into_iter()
+        .map(|(t, picture)| {
+            let picture = picture.as_ref().and_then(crate::image_cache::to_render_image).map(MenuIcon::Image).unwrap_or_else(|| icon(L::Send));
+            Item::action(t.name, picture, send(t.path, items.clone()))
+        })
+        .collect();
+    if !drives.is_empty() {
+        if !out.is_empty() {
+            out.push(Item::Separator);
+        }
+        out.extend(drives.into_iter().map(|(root, name, l)| Item::action(name, icon(l), send(root, items.clone()))));
+    }
+    if out.is_empty() {
+        out.push(Item::action(t!("Boş"), icon(L::Send), |_, _| {}).enabled(false));
+    }
+    Pending::Ready(Rc::new(out))
+}
 
 /// "Open with", with the user's own programs for the file's type first (in their order), then what Windows offers. Without a list
 /// for the type the submenu is Windows' alone. The programs are there also when the shell's part failed.

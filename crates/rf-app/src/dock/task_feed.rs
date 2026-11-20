@@ -49,6 +49,10 @@ pub fn subscribe(tx: UnboundedSender<()>) {
     if feed.watch.is_none() {
         // (a window that only changes its title is not news: the dock shows no titles)
         feed.watch = tasklist::watch(on_change).map_err(|e| log::warn!("dock: cannot watch the task windows: {e:#}")).ok();
+        // a window that asks for attention (or stops) is news too: its icon gets or loses its dot
+        rf_win::dock::attention::start(|| on_change(Changes { list: false, titles: false, active: true }));
+        // Windows' notification banners stand right above the dock, not where Windows' own margin puts them
+        rf_win::dock::toastpos::start();
     }
 }
 

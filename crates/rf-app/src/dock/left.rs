@@ -44,6 +44,19 @@ pub struct LeftIsland {
     /// The Start button's states and motion (`start_button.rs`), and the clock its events are timed on.
     button: StartButton,
     t0: Instant,
+    /// How many launchers stand at the island's right end: the pinned apps that are not running, with `Settings::dock_pins_left` (the
+    /// home dock's middle island holds them and tells this one, `MiddleIsland::set_left_pins`).
+    pins_n: usize,
+}
+
+/// A launcher's square, the space between two, and the space before the first (dock units).
+const PIN: f32 = plan::BUTTON;
+const PIN_GAP: f32 = 4.0;
+const PIN_START_GAP: f32 = plan::WEATHER_GAP;
+
+/// What `n` launchers add to the island's width.
+fn pins_extra(n: usize) -> f32 {
+    if n == 0 { 0.0 } else { PIN_START_GAP + n as f32 * PIN + (n - 1) as f32 * PIN_GAP }
 }
 
 impl LeftIsland {
@@ -60,6 +73,7 @@ impl LeftIsland {
             reported: if mon.is_home() { plan::left_width(None) } else { plan::left_width_secondary(content.search) },
             button: StartButton::new(),
             t0: Instant::now(),
+            pins_n: 0,
         };
         me.set_weather_source(city, location, cx);
         me
@@ -70,8 +84,29 @@ impl LeftIsland {
             // (no weather here: it is the primary monitor's)
             return plan::left_width_secondary(self.search);
         }
+        self.base_width() + pins_extra(self.pins_n)
+    }
+
+    /// The width without the launchers: the padding, the logo, the search, the weather, the padding.
+    fn base_width(&self) -> f32 {
         let temp = self.weather.map(|o| o.text());
         plan::left_width_lines(temp.as_deref(), self.condition_text())
+    }
+
+    /// The middle island has `n` launchers for this island now (issue 137): it takes its new width and draws them.
+    pub fn pins_changed(&mut self, n: usize, cx: &mut Context<Self>) {
+        if self.pins_n != n {
+            self.pins_n = n;
+            self.report_width(cx);
+        }
+        cx.notify();
+    }
+
+    /// The launchers' boxes (dock units from the glass's top left corner), after the rest of the row.
+    fn pin_boxes(&self) -> Vec<[f32; 4]> {
+        let x0 = self.base_width() - plan::SIDE_PAD + PIN_START_GAP;
+        let y = (rf_win::dock::layout::SIDE_HEIGHT - PIN) / 2.0;
+        (0..self.pins_n).map(|i| [x0 + i as f32 * (PIN + PIN_GAP), y, PIN, PIN]).collect()
     }
 
     /// The condition in words, when there is weather and the display has room for the line.
@@ -144,7 +179,13 @@ impl LeftIsland {
         let k = super::host::size_on(self.mon, cx);
         let [ml, mt, ..] = super::host::insets_on(self.mon, Kind::Left, cx).margins;
         let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
-        let controls = if self.mon.is_home() { super::empty::left_controls() } else { super::empty::left_controls_secondary(self.search) };
+        let controls = if self.mon.is_home() {
+            let mut c = super::empty::left_controls();
+            c.extend(self.pin_boxes());
+            c
+        } else {
+            super::empty::left_controls_secondary(self.search)
+        };
         if super::empty::side_is_empty(self.width(), super::host::side_height_on(self.mon, cx), &controls, point) {
             super::actions::open_task_manager();
         }
@@ -430,11 +471,50 @@ impl Render for LeftIsland {
                 .child(text)
         });
 
+        // the pinned apps that are not running, as launchers at the island's right end (issue 137): a click starts the app, a right
+        // click opens its menu, as on the middle island
+        let launchers = (self.mon.is_home() && self.pins_n > 0)
+            .then(|| super::host::middle_island_on(self.mon, cx).map(|m| m.read(cx).left_pins(24.0 * k * scale_factor)))
+            .flatten()
+            .filter(|p| !p.is_empty())
+            .map(|pins| {
+                let hover = pal.hover_fill().hsla();
+                let mut row = h_flex().ml(px(PIN_START_GAP * k)).gap(px(PIN_GAP * k)).items_center();
+                for (i, (app, picture)) in pins.into_iter().enumerate() {
+                    let glass = self.glass.clone();
+                    let (for_click, for_menu, menu_pic) = (app.clone(), app.clone(), picture.clone());
+                    let face: AnyElement = match picture {
+                        Some(im) => gpui_kit::img(im).size(px(24. * k)).into_any_element(),
+                        None => text_14(div(), k).child(plan::initial(&app.name)).into_any_element(),
+                    };
+                    row = row.child(
+                        div()
+                            .id(("dock-left-pin", i))
+                            .size(px(PIN * k))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(8. * k))
+                            .cursor_pointer()
+                            .hover(move |s| s.bg(hover))
+                            .active(move |s| s.bg(plate))
+                            .child(face)
+                            .on_click(move |_, _, _| super::actions::click_app_reporting(&for_click, rf_win::dock::foreground_root(), |_| {}))
+                            .on_mouse_up(MouseButton::Right, move |ev: &MouseUpEvent, window, cx| {
+                                cx.stop_propagation();
+                                let anchor_x = (f32::from(window.bounds().origin.x) + f32::from(ev.position.x)) * window.scale_factor();
+                                super::app_menu::open(super::app_menu::MenuRequest { app: for_menu.clone(), icon: menu_pic.clone(), anchor_x, glass: glass.clone() }, cx);
+                            }),
+                    );
+                }
+                row
+            });
+
         super::host::island_box(pal, fallback, k)
             // a right click on the glass between and around the controls: Windows' Task Manager (the controls are told from the glass
             // by their boxes, `empty.rs::left_controls`, which mirror the row below: padding, logo, gap, field; change one, change both)
             .on_mouse_up(MouseButton::Right, cx.listener(|me, ev: &MouseUpEvent, _, cx| me.right_click(ev.position, cx)))
-            .child(h_flex().size_full().px(px(plan::SIDE_PAD * k)).items_center().child(logo).children(search).children(weather))
+            .child(h_flex().size_full().px(px(plan::SIDE_PAD * k)).items_center().child(logo).children(search).children(weather).children(launchers))
     }
 }
 

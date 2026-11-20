@@ -303,6 +303,11 @@ fn trace_sink() -> Option<&'static std::path::PathBuf> {
 
 /// One step of the hand-over with its time (UTC time of day to the millisecond, so that the lines of the two processes sort, and
 /// the process's own age), when `RUSTYFILES_TRACE_HANDOVER` asks for it. The steps carry no paths.
+/// Whether `RUSTYFILES_TRACE_HANDOVER` is on (a costly step is traced only then).
+pub fn tracing() -> bool {
+    trace_sink().is_some()
+}
+
 pub fn trace(step: &str) {
     let Some(path) = trace_sink() else { return };
     use std::io::Write;

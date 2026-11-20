@@ -179,6 +179,11 @@ pub fn right_width_for(lines: &ClockLines, buttons: usize) -> f32 {
     SIDE_PAD + status_block(buttons) + clock_width(lines) + RIGHT_GAP + BUTTON + SIDE_PAD
 }
 
+/// The "Show desktop" strip at the right end of the primary monitor's right island (issue 127): its width, and what it adds to the
+/// island with the gap before it.
+pub const SHOW_DESKTOP_W: f32 = 10.0;
+pub const SHOW_DESKTOP_EXTRA: f32 = RIGHT_GAP + SHOW_DESKTOP_W;
+
 /// What `buttons` of the island's own buttons take, with the separator and its gaps after them. Nothing for none.
 pub fn status_block(buttons: usize) -> f32 {
     if buttons == 0 { 0.0 } else { buttons as f32 * BUTTON + (buttons - 1) as f32 * RIGHT_GAP + RIGHT_SEP_GAP + SEPARATOR_WIDTH + RIGHT_SEP_GAP }

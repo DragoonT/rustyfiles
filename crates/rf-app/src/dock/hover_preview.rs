@@ -659,7 +659,9 @@ impl Render for PreviewView {
                             .cursor_pointer()
                             .hover(move |s| s.bg(card_hot))
                             .child(Icon::new(L::X).size(px(12.)).text_color(secondary))
-                            .on_click(cx.listener(move |_, _, _, cx| {
+                            // the press is the x's: the card under it took the click as its own, brought the window forward and closed
+                            // the preview, and the x never got it; the window closed only at a second try (issue 132)
+                            .on_mouse_down(MouseButton::Left, cx.listener(move |_, _, _, cx| {
                                 cx.stop_propagation();
                                 close_window(win);
                             })),

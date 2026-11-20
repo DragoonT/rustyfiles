@@ -2,6 +2,7 @@
 //! questions look like the rest of rustyfiles instead of a Win32 message box. One at a time;
 //! the workspace of its window paints it on top.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -58,6 +59,9 @@ pub struct DialogView {
     /// owner, 2026-11-17: "hangi butonun seçili olduğu belli olsun. ok tuşlarıyla ya da tabla değişebilsin"). It starts on the
     /// main button (`main_button`); in a dialog with a text box it starts nowhere, and Tab leaves the box for the buttons.
     keyed: Option<usize>,
+    /// The default button (the one Enter presses) and where it was drawn last: Windows' "Snap To" puts the pointer on it (issue 148).
+    snap_ix: Option<usize>,
+    snap_at: Rc<Cell<Option<Bounds<Pixels>>>>,
     _sub: Option<Subscription>,
 }
 
@@ -153,7 +157,9 @@ fn show_inner(
                 }
             })
         });
-        let keyed = if input.is_some() { None } else { main_button(&buttons.iter().map(|b| b.kind).collect::<Vec<_>>()).or(Some(0)) };
+        let main = main_button(&buttons.iter().map(|b| b.kind).collect::<Vec<_>>());
+        let keyed = if input.is_some() { None } else { main.or(Some(0)) };
+        let snap_ix = main.or(if buttons.is_empty() { None } else { Some(0) });
         DialogView {
             title: title.into(),
             message: message.map(Into::into),
@@ -163,15 +169,41 @@ fn show_inner(
             buttons,
             focus: cx.focus_handle(),
             keyed,
+            snap_ix,
+            snap_at: Rc::new(Cell::new(None)),
             _sub: sub,
         }
     });
+    // Windows' "Snap To" (Mouse settings: "Automatically move pointer to the default button in a dialog box", issue 148): its own
+    // dialogs put the pointer on their default button, so ours do too, once the dialog has come in (its animation is 160 ms)
+    if rf_win::sysparams::snap_to_default_button() {
+        let at = view.read(cx).snap_at.clone();
+        window
+            .spawn(cx, async move |cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(220)).await;
+                let _ = cx.update(|window, _| {
+                    let (Some(b), Some(hwnd)) = (at.get(), window_hwnd(window)) else { return };
+                    let k = window.scale_factor();
+                    let c = b.center();
+                    rf_win::sysparams::put_pointer_in(hwnd, (f32::from(c.x) * k).round() as i32, (f32::from(c.y) * k).round() as i32);
+                });
+            })
+            .detach();
+    }
     match view.read(cx).input.clone() {
         Some(i) => i.update(cx, |s, cx| s.focus(window, cx)),
         None => window.focus(&view.read(cx).focus.clone(), cx),
     }
     cx.set_global(Host(Some((window.window_handle(), view, restore))));
     window.refresh();
+}
+
+fn window_hwnd(window: &Window) -> Option<isize> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
+        Ok(RawWindowHandle::Win32(h)) => Some(h.hwnd.get()),
+        _ => None,
+    }
 }
 
 pub fn current(window: &Window, cx: &App) -> Option<Entity<DialogView>> {
@@ -238,9 +270,16 @@ impl Render for DialogView {
                 Kind::Normal => (p.hover, p.text),
             };
             let keyed = self.keyed == Some(ix);
+            // (the default button's place, for "Snap To")
+            let probe = (self.snap_ix == Some(ix)).then(|| {
+                let at = self.snap_at.clone();
+                canvas(move |b, _, _| at.set(Some(b)), |_, _, _, _| {}).absolute().size_full()
+            });
             buttons = buttons.child(
                 div()
                     .id(("dlg-btn", ix))
+                    .relative()
+                    .children(probe)
                     // the keyboard's button: a ring in the text's colour around it, outside its own fill
                     .when(keyed, |d| d.border_2().border_color(p.text))
                     .min_w(px(96.))

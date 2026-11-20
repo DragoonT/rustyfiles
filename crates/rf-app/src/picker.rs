@@ -128,10 +128,37 @@ fn ok_label(req: &Request) -> SharedString {
     .into()
 }
 
-/// Roomy enough for the list and the preview side by side: 1240x780, at most 85 % of the screen.
+/// The size the user left the dialog at, else room for the list and the preview side by side: 1100x700, at most 70 % of the screen
+/// (issue 89: 1240x780 up to 85 % covered nearly all of a 1080p laptop's screen at its usual scaling).
 fn picker_size(cx: &App) -> Size<Pixels> {
     let screen = cx.primary_display().map(|d| d.bounds().size).unwrap_or(size(px(1920.), px(1080.)));
-    size(px(1240.).min(screen.width * 0.85), px(780.).min(screen.height * 0.85))
+    picker_size_for(cx.global::<crate::settings::Settings>().picker_size, screen)
+}
+
+fn picker_size_for(kept: Option<[u16; 2]>, screen: Size<Pixels>) -> Size<Pixels> {
+    match kept {
+        // (a size kept on a bigger screen still fits this one)
+        Some([w, h]) => size(px(f32::from(w)).min(screen.width * 0.95).max(px(640.)), px(f32::from(h)).min(screen.height * 0.95).max(px(400.))),
+        None => size(px(1100.).min(screen.width * 0.7), px(700.).min(screen.height * 0.7)),
+    }
+}
+
+#[cfg(test)]
+mod size_tests {
+    // (not `super::*`: GPUI's own `test` attribute would come with it)
+    use super::picker_size_for;
+    use gpui_kit::{px, size};
+
+    #[test]
+    fn the_dialog_opens_at_the_size_it_was_left_at_within_the_screen() {
+        let laptop = size(px(1280.), px(720.));
+        let first = picker_size_for(None, laptop);
+        assert!(first.width <= px(896.) && first.height <= px(504.), "at most 70 % of a 1080p laptop at 150 %: {first:?}");
+        assert_eq!(picker_size_for(None, size(px(2560.), px(1440.))), size(px(1100.), px(700.)));
+        assert_eq!(picker_size_for(Some([900, 560]), laptop), size(px(900.), px(560.)));
+        let big = picker_size_for(Some([2400, 1300]), laptop);
+        assert!(big.width <= px(1216.) && big.height <= px(684.), "{big:?}");
+    }
 }
 
 fn open_window(pipe: File, req: Request, cx: &mut App) {
@@ -317,11 +344,13 @@ fn finish(ws: &mut Workspace, paths: Vec<PathBuf>, window: &mut Window) {
     if let Some(s) = ws.picker() {
         s.answer(Response { ok: true, paths: paths.iter().map(|p| p.to_string_lossy().into_owned()).collect(), filter_index: s.filter_ix.get() });
     }
+    Workspace::release_preview_host(window);
     window.remove_window();
 }
 
 pub(crate) fn cancel(ws: &mut Workspace, window: &mut Window) {
     answer_cancel(ws);
+    Workspace::release_preview_host(window);
     window.remove_window();
 }
 

@@ -5,7 +5,7 @@ members = ["crates/rf-core", "crates/rf-win", "crates/rf-app", "crates/rf-nearby
 exclude = ["crates/rf-mac", "macos", "vendor/velopack"]
 
 [workspace.package]
-version = "0.9.1"
+version = "0.9.4"
 edition = "2024"
 license = "MIT"
 publish = false
@@ -200,4 +200,4 @@ incremental = true
 # Velopack with one change: its downloads trust the Windows certificate store (issue 121), see vendor/velopack/VENDORED.md
 velopack = { path = "vendor/velopack" }
 # our fork of GPUI's Windows layer (GPU/CPU hot-swap renderer), see its FORK.md
-gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "829ada25c2c7611af2da44029db9f58672d9ec13" }
+gpui-pre-windows = { git = "https://github.com/gelenmedya/gpui-pre-windows", rev = "4aa6e83de4758afb31a1feed42467facad2ab7a7" }

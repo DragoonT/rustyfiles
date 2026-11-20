@@ -58,6 +58,10 @@ pub struct RightIsland {
     /// The input language of the window in front and how many keyboard layouts the user has (`rf_win::inputlang`; the primary
     /// monitor's island reads it). The button is there with two layouts or more.
     lang: rf_win::inputlang::Current,
+    /// The own control the pointer rests on, for its tooltip (`own_hover`).
+    tip_on: Option<OwnTip>,
+    /// A part of a wheel notch turned over the volume symbol and not used yet (a touchpad turns in small parts).
+    vol_rest: f32,
 }
 
 /// A button held on one of the island's own buttons, from the press to the release.
@@ -139,7 +143,7 @@ impl RightIsland {
             })
             .detach();
         }
-        RightIsland { glass, mon, content, lines, reported, tray_extra: 0.0, focus: None, drives_read: false, status_press: None, lang: Default::default() }
+        RightIsland { glass, mon, content, lines, reported, tray_extra: 0.0, focus: None, drives_read: false, status_press: None, lang: Default::default(), vol_rest: 0.0, tip_on: None }
     }
 
     /// The input language was read: the button follows it. A reading without a window in front keeps the name that was shown.
@@ -276,7 +280,11 @@ impl RightIsland {
     /// The width the content needs now (logical px). The primary monitor's: the symbols, the clock and the bell, and the tray strip's
     /// room; a secondary monitor's: the clock and, when there is room, the bell.
     fn wanted_width(&self, cx: &App) -> f32 {
-        if self.mon.is_home() { plan::right_width_for(&self.lines, self.status_buttons(cx).len()) + self.tray_extra } else { plan::right_width_secondary(plan::clock_width(&self.lines), self.content.bell) }
+        if self.mon.is_home() {
+            plan::right_width_for(&self.lines, self.status_buttons(cx).len()) + self.tray_extra + if show_desktop_on(cx) { plan::SHOW_DESKTOP_EXTRA } else { 0.0 }
+        } else {
+            plan::right_width_secondary(plan::clock_width(&self.lines), self.content.bell)
+        }
     }
 
     /// The host's layout may have changed what this island holds (the bell, by the monitor's width): true when it did.
@@ -320,13 +328,75 @@ impl RightIsland {
         let [ml, mt, ..] = super::host::insets_on(self.mon, Kind::Right, cx).margins;
         let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
         let controls = if self.mon.is_home() {
-            super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra, self.status_buttons(cx).len())
+            let mut c = super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra, self.status_buttons(cx).len());
+            // the "Show desktop" strip after the bell (the last box), the island's full height
+            if show_desktop_on(cx)
+                && let Some(bell) = c.last().copied()
+            {
+                c.push([bell[0] + bell[2] + plan::RIGHT_GAP, 0.0, plan::SHOW_DESKTOP_W, super::host::side_height_on(self.mon, cx)]);
+            }
+            c
         } else {
             super::empty::right_controls_secondary(plan::clock_width(&self.lines), self.content.bell)
         };
         if super::empty::side_is_empty(self.wanted_width(cx), super::host::side_height_on(self.mon, cx), &controls, point) {
             super::actions::open_task_manager();
         }
+    }
+
+    /// The pointer rests on (`on`) or left one of the island's own controls: the tray's tooltip window shows its name above it, as
+    /// Windows' taskbar does for its symbols and its clock (issue 147: "The icons in the right dock don't show a tooltip when hovering
+    /// over them"). A toolkit tooltip cannot be used: it is drawn inside the island's window, which is cut to the island's shape.
+    fn own_hover(&mut self, which: OwnTip, on: bool, cx: &mut Context<Self>) {
+        if !on {
+            // (moving from one control to the next is a leave and then an enter: the tip is told only if nothing was entered)
+            self.tip_on = self.tip_on.filter(|t| *t != which);
+            cx.spawn(async move |this, cx| {
+                let still = this.update(cx, |me, _| me.tip_on.is_some()).unwrap_or(false);
+                if !still {
+                    let _ = cx.update(|cx| super::tray_tip::hover(None, cx));
+                }
+            })
+            .detach();
+            return;
+        }
+        self.tip_on = Some(which);
+        let anchor = self.own_anchor(which, cx);
+        super::tray_tip::hover(anchor, cx);
+    }
+
+    /// Where one of the island's own controls is on the screen (device px), with its tip's text.
+    fn own_anchor(&self, which: OwnTip, cx: &App) -> Option<super::tray_tip::Anchor> {
+        let glass = super::host::current_glass_rect_on(self.mon, Kind::Right, cx)?;
+        let unit = rf_win::dock::size::unit(super::host::home_work(cx)?.0, super::look::dock_size(cx));
+        let clock_w = plan::clock_width(&self.lines);
+        let (controls, first_button) = if self.mon.is_home() {
+            let shape = super::tray_strip::shape(cx);
+            let cells = shape.map_or(0, |s| s.visible + usize::from(s.chevron));
+            (super::empty::right_controls(clock_w, shape, self.tray_extra, self.status_buttons(cx).len()), cells)
+        } else {
+            (super::empty::right_controls_secondary(clock_w, self.content.bell), 0)
+        };
+        let buttons = self.status_buttons(cx);
+        let clock_ix = if self.mon.is_home() { first_button + buttons.len() } else { 0 };
+        let (ix, text) = match which {
+            OwnTip::Status(s) => (first_button + buttons.iter().position(|b| *b == s)?, super::status_card::name(s).to_string()),
+            OwnTip::Clock => (clock_ix, rf_win::dock::clock::long_date().unwrap_or_else(|| self.lines.date.clone())),
+            OwnTip::Bell => (clock_ix + 1, crate::t!("Bildirimler").to_string()),
+            OwnTip::ShowDesktop => (clock_ix + 2, crate::t!("Masaüstünü göster").to_string()),
+        };
+        let b = match (which, controls.get(ix).copied()) {
+            (_, Some(b)) => b,
+            // (the "Show desktop" strip is not among the controls: it stands after the bell, the island's full height)
+            (OwnTip::ShowDesktop, None) => {
+                let bell = controls.last().copied()?;
+                [bell[0] + bell[2] + plan::RIGHT_GAP, 0.0, plan::SHOW_DESKTOP_W, super::host::side_height_on(self.mon, cx)]
+            }
+            _ => return None,
+        };
+        let d = |v: f32| rf_win::dock::layout::px(v, unit);
+        let rect = rf_win::dock::layout::Rect::from_xywh(glass.left + d(b[0]), glass.top + d(b[1]), d(b[2]), d(b[3]));
+        Some(super::tray_tip::Anchor { key: which.key(), text, rect, clear_top: glass.top.min(rect.top) })
     }
 
     /// The island's glass (the tray strip's tips take its tone).
@@ -348,11 +418,20 @@ fn run_status(which: Status, cx: &mut App) {
     match which {
         Status::Eject => super::panel::toggle_eject(cx),
         Status::Security => super::panel_parts::open_uri("windowsdefender:"),
-        Status::Language => {
-            if !rf_win::inputlang::switch_foreground_to_next() {
-                log::info!("dock: the input language was not switched (no window in front, or one layout)");
+        Status::Language => match rf_win::inputlang::switch_foreground_to_next() {
+            // the button shows the new language at once; the next reading confirms it (or shows the old one again when the window
+            // did not take the request)
+            Some(code) => {
+                if let Some(island) = super::host::right_island_on(super::host::MonId::HOME, cx) {
+                    island.update(cx, |me, cx| {
+                        let mut now = me.lang.clone();
+                        now.code = code;
+                        me.set_language(now, cx);
+                    });
+                }
             }
-        }
+            None => log::info!("dock: the input language was not switched (no window in front, or one layout)"),
+        },
         Status::Network | Status::Volume => open_controls(cx),
     }
 }
@@ -443,6 +522,49 @@ fn open_notifications(mon: MonId, cx: &mut App) {
     }
 }
 
+/// The setting "Masaüstünü göster şeridi" (issue 127).
+fn show_desktop_on(cx: &App) -> bool {
+    cx.try_global::<crate::settings::Settings>().is_some_and(|s| s.dock_show_desktop)
+}
+
+/// The "Show desktop" strip: a thin bar with a hairline on its left, as at the end of Windows' taskbar. A click minimizes every window
+/// and shows the desktop, the next one brings them back (Win+D's own toggle, `shell::keylayer`).
+fn show_desktop_strip(pal: Palette, k: f32) -> impl IntoElement {
+    div()
+        .id("dock-show-desktop")
+        .ml(px(plan::RIGHT_GAP * k))
+        .w(px(plan::SHOW_DESKTOP_W * k))
+        .h(px(plan::BUTTON * k))
+        .flex_shrink_0()
+        .rounded(px(3. * k))
+        .border_l_1()
+        .border_color(pal.separator().hsla())
+        .hover(move |s| s.bg(pal.hover_fill().hsla()))
+        .on_click(|_, _, _| crate::shell::keylayer::toggle_show_desktop())
+}
+
+/// One of the island's own controls that has a tooltip (`RightIsland::own_hover`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OwnTip {
+    Status(Status),
+    Clock,
+    Bell,
+    ShowDesktop,
+}
+
+impl OwnTip {
+    /// The tip machine's key: apart from every tray icon's (theirs are hashes; the chevron's is `u64::MAX`).
+    fn key(self) -> super::tray_source::IconKey {
+        let n = match self {
+            OwnTip::Status(s) => 4 + s as u64,
+            OwnTip::Clock => 1,
+            OwnTip::Bell => 2,
+            OwnTip::ShowDesktop => 3,
+        };
+        u64::MAX - 0x100 - n
+    }
+}
+
 /// The bell, wearing a small dot in the system accent colour while there are notifications.
 fn bell_button(pal: Palette, dot: Option<Hsla>, k: f32, on_click: impl Fn(&mut App) + 'static) -> impl IntoElement {
     let (hover, pressed) = (pal.hover_fill().hsla(), pal.press_plate().hsla());
@@ -460,6 +582,29 @@ fn bell_button(pal: Palette, dot: Option<Hsla>, k: f32, on_click: impl Fn(&mut A
         .child(Icon::new(L::Bell).size(px(16. * k)).text_color(pal.text().hsla()))
         .when_some(dot, |d, color| d.child(div().absolute().top(px(7. * k)).right(px(8. * k)).size(px(8. * k)).rounded_full().bg(color)))
         .on_click(move |_, _, cx| on_click(cx))
+}
+
+impl RightIsland {
+    /// The wheel was turned over the volume symbol: the system's volume goes 2 % up or down a notch, as over Windows' own symbol (issue
+    /// 136). Muting is not touched (Windows does not either).
+    fn volume_scrolled(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        let lines = match ev.delta {
+            ScrollDelta::Lines(p) => if p.y != 0.0 { p.y } else { p.x },
+            ScrollDelta::Pixels(p) => f32::from(p.y) / 16.0,
+        };
+        let notches = rf_win::appvolume::take_notches(&mut self.vol_rest, rf_win::appvolume::notches_of_lines(lines, rf_win::appvolume::wheel_lines()));
+        let Some(now) = rf_win::sysstatus::audio::snapshot().filter(|s| s.available) else { return };
+        if notches == 0 {
+            return;
+        }
+        rf_win::sysstatus::audio::set_volume(volume_after_notches(now.volume, notches));
+        cx.stop_propagation();
+    }
+}
+
+/// The volume after `notches` wheel notches from `volume` (0.0 to 1.0): 2 % a notch, as Windows' own symbol does.
+fn volume_after_notches(volume: f32, notches: i32) -> f32 {
+    ((volume * 50.0).round() + notches as f32).clamp(0.0, 50.0) / 50.0
 }
 
 /// What a click on the network or the volume symbol does (the symbols are the primary monitor's).
@@ -491,7 +636,8 @@ impl Render for RightIsland {
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
         let k = super::host::size_on(self.mon, cx);
         // what the layout says this island holds at this monitor's width: the width is reported again from a task, never from inside this render
-        if self.sync_content(cx) {
+        // (also when a setting changed what it holds: the "Show desktop" strip)
+        if self.sync_content(cx) || (self.wanted_width(cx) - self.reported).abs() > 0.5 {
             cx.spawn(async move |this, cx| {
                 let _ = this.update(cx, |me, cx| {
                     let w = me.wanted_width(cx);
@@ -525,6 +671,8 @@ impl Render for RightIsland {
             .active(move |s| s.bg(pressed))
             .child(div().text_size(px(13. * k)).line_height(px(16. * k)).child(self.lines.time.clone()))
             .child(div().text_size(px(12. * k)).line_height(px(15. * k)).text_color(pal.text_secondary().hsla()).child(self.lines.date.clone()))
+            .on_hover(cx.listener(|me, on: &bool, _, cx| me.own_hover(OwnTip::Clock, *on, cx)))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| super::tray_tip::press(cx))
             .on_click(move |_, _, cx| open_calendar(mon, cx));
 
         // The island's own buttons with a gap between two of them. One that is being dragged is faint, and a thin mark in the accent
@@ -544,9 +692,16 @@ impl Render for RightIsland {
                     div()
                         .ml(px(if i == 0 { 0.0 } else { plan::RIGHT_GAP } * k))
                         .when(dragged.is_some_and(|(w, _)| w == which), |d| d.opacity(0.35))
-                        .on_mouse_down(MouseButton::Left, cx.listener(move |me, e: &MouseDownEvent, _, cx| me.status_down(which, e.click_count, cx)))
+                        .id(("dock-status", i))
+                        .on_hover(cx.listener(move |me, on: &bool, _, cx| me.own_hover(OwnTip::Status(which), *on, cx)))
+                        .on_mouse_down(MouseButton::Left, cx.listener(move |me, e: &MouseDownEvent, _, cx| {
+                            super::tray_tip::press(cx);
+                            me.status_down(which, e.click_count, cx)
+                        }))
                         // a right click on the volume symbol: the output devices, to choose from
                         .when(which == Status::Volume, |d| d.on_mouse_up(MouseButton::Right, |_, _, cx| open_output_devices(cx)))
+                        // the wheel over it: the system's volume, as over Windows' own symbol (issue 136)
+                        .when(which == Status::Volume, |d| d.on_scroll_wheel(cx.listener(|me, ev: &ScrollWheelEvent, _, cx| me.volume_scrolled(ev, cx))))
                         .child(button),
                 );
             }
@@ -590,7 +745,38 @@ impl Render for RightIsland {
                     d.child(div().ml(px(plan::RIGHT_SEP_GAP * k)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH * k)).h(px(plan::RIGHT_SEP_HEIGHT * k)).bg(pal.separator().hsla()))
                 })
                 .child(clock)
-                .when(self.content.bell, |d| d.child(div().ml(px(plan::RIGHT_GAP * k)).child(bell_button(pal, dot, k, move |cx| open_notifications(mon, cx))))),
+                .when(self.content.bell, |d| {
+                    d.child(
+                        div()
+                            .id("dock-bell-tip")
+                            .ml(px(plan::RIGHT_GAP * k))
+                            .on_hover(cx.listener(|me, on: &bool, _, cx| me.own_hover(OwnTip::Bell, *on, cx)))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| super::tray_tip::press(cx))
+                            .child(bell_button(pal, dot, k, move |cx| open_notifications(mon, cx))),
+                    )
+                })
+                .when(home && show_desktop_on(cx), |d| {
+                    d.child(
+                        div()
+                            .id("dock-show-desktop-tip")
+                            .on_hover(cx.listener(|me, on: &bool, _, cx| me.own_hover(OwnTip::ShowDesktop, *on, cx)))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| super::tray_tip::press(cx))
+                            .child(show_desktop_strip(pal, k)),
+                    )
+                }),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_wheel_notch_over_the_volume_symbol_is_two_percent() {
+        assert_eq!(super::volume_after_notches(0.40, 1), 0.42);
+        assert_eq!(super::volume_after_notches(0.40, -3), 0.34);
+        assert_eq!(super::volume_after_notches(0.99, 2), 1.0);
+        assert_eq!(super::volume_after_notches(0.01, -1), 0.0);
+        // a level between steps comes to the nearest step first
+        assert_eq!(super::volume_after_notches(0.411, 1), 0.44, "0.411 is taken as the step 0.42, one notch up");
     }
 }

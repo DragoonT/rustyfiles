@@ -40,6 +40,8 @@ impl Render for Splash {
             .size_full()
             .relative()
             .bg(rgb(0x0b0b0d))
+            // (a click puts it away: should the new window ever not be seen, nobody needs the Task Manager for this one)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.quit())
             .children(self.frame.clone().map(|f| img(f).size_full().object_fit(ObjectFit::Cover)))
             // how far is not known: a stretch of orange runs along the bottom
             .child(
@@ -87,9 +89,19 @@ fn play(send: impl Fn(Arc<RenderImage>) -> bool) {
     }
 }
 
-/// The installed rustyfiles.exe (the one the update replaces and restarts).
+/// The rustyfiles.exe the update replaces and restarts: the one that started this window (`--exe=`, see [`launch`]), else the
+/// installed one.
+///
+/// WHY (issue 85: "When updating the portable version ... the splash screen stays on screen and doesn't disappear"). Only the
+/// installed place was looked at; a portable copy lives in a folder of its own, so its new window was never seen, and the splash
+/// stayed until its two minutes were up.
 fn installed_exe() -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("rustyfiles").join("current").join("rustyfiles.exe"))
+    exe_from_args(std::env::args()).or_else(|| Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("rustyfiles").join("current").join("rustyfiles.exe")))
+}
+
+/// The `--exe=<path>` among the arguments.
+fn exe_from_args(args: impl IntoIterator<Item = String>) -> Option<PathBuf> {
+    args.into_iter().find_map(|a| a.strip_prefix("--exe=").map(PathBuf::from)).filter(|p| !p.as_os_str().is_empty())
 }
 
 /// Taskbar windows of the installed rustyfiles, by process.
@@ -191,11 +203,25 @@ pub fn launch() -> Option<std::process::Child> {
     // The copy's working directory is the temporary folder, said here and not inherited: a copy that stood in the installed folder
     // kept the updater from renaming it, and the update gave up after ten tries (`rf_win::ownfolder` has the whole story; the
     // versions 0.7.0-beta.1 to 0.7.3 did exactly that whenever the program had been started from its shortcut).
-    std::process::Command::new(&copy).arg(ARG).env("RUSTYFILES_MULTI_INSTANCE", "1").current_dir(std::env::temp_dir()).spawn().ok()
+    std::process::Command::new(&copy)
+        .arg(ARG)
+        // (whose new window ends the splash: this exe's own place, which is not the installed one for a portable copy)
+        .arg(format!("--exe={}", me.display()))
+        .env("RUSTYFILES_MULTI_INSTANCE", "1")
+        .current_dir(std::env::temp_dir())
+        .spawn()
+        .ok()
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_splash_waits_for_the_exe_it_was_started_for() {
+        let args = ["x.exe", "--update-splash", r"--exe=D:\Tools\rustyfiles\current\rustyfiles.exe"].map(String::from);
+        assert_eq!(super::exe_from_args(args), Some(std::path::PathBuf::from(r"D:\Tools\rustyfiles\current\rustyfiles.exe")));
+        assert_eq!(super::exe_from_args(["x.exe", "--update-splash"].map(String::from)), None);
+    }
+
     /// The animation in the exe decodes: frames at 2x, a frame rate near 30 a second.
     #[test]
     fn animation_decodes() {

@@ -32,6 +32,8 @@ pub enum Combo {
     Desktop,
     /// Win+Shift+S: the screen snip.
     Snip,
+    /// Win+1 .. Win+9: the dock's first .. ninth app (0 .. 8), as on Windows' taskbar (issue 91).
+    App(u8),
 }
 
 pub const VK_E: u32 = 0x45;
@@ -52,6 +54,7 @@ pub const fn combo_of(vk: u32) -> Option<Combo> {
     match vk {
         VK_E => Some(Combo::Explorer),
         VK_D => Some(Combo::Desktop),
+        0x31..=0x39 => Some(Combo::App((vk - 0x31) as u8)),
         _ => None,
     }
 }

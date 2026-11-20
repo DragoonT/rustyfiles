@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use crate::fileops::Transfer;
 use crate::wide::wide;
 
-struct Pidl(*mut ITEMIDLIST);
+pub(crate) struct Pidl(pub(crate) *mut ITEMIDLIST);
 impl Drop for Pidl {
     fn drop(&mut self) {
         if !self.0.is_null() {
@@ -27,7 +27,7 @@ impl Drop for Pidl {
     }
 }
 
-fn parse(path: &Path) -> anyhow::Result<Pidl> {
+pub(crate) fn parse(path: &Path) -> anyhow::Result<Pidl> {
     let w = wide(path);
     let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
     unsafe { SHParseDisplayName(PCWSTR(w.as_ptr()), None, &mut pidl, 0, None)? };

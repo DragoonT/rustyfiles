@@ -205,6 +205,8 @@ pub struct Workspace {
     side_tree: sidebar_tree::Holder,
     /// This window answers another app's Open/Save dialog (see `picker`).
     picker: Option<std::rc::Rc<crate::picker::PickSession>>,
+    /// Counts the dialog's size changes: only the last one is kept (`set_picker`).
+    picker_size_gen: u64,
     /// Window width from the last frame (breadcrumb collapsing).
     viewport_w: f32,
     last_session: Vec<String>,
@@ -856,6 +858,7 @@ impl Workspace {
             if let Some(ws) = ws.upgrade() {
                 ws.update(cx, |w, cx| w.save_session(window, cx));
             }
+            Self::release_preview_host(window);
             true
         });
         let prefs = cx.global::<crate::settings::Settings>().clone();
@@ -926,6 +929,7 @@ impl Workspace {
             sidebar_ext_drag: false,
             side_tree: Default::default(),
             picker: None,
+            picker_size_gen: 0,
             viewport_w: 1300.,
             last_session: Vec::new(),
             _bulk_sub: None,
@@ -1003,16 +1007,34 @@ impl Workspace {
         }
         self.picker = Some(session);
         cx.default_global::<MainPlacements>().0.remove(&window.window_handle().window_id());
+        // the dialog's size is kept once the user resized it, a moment after the last change (issue 89)
+        cx.observe_window_bounds(window, |this: &mut Self, window, cx| {
+            let s = window.bounds().size;
+            let want = [f32::from(s.width).round() as u16, f32::from(s.height).round() as u16];
+            this.picker_size_gen += 1;
+            let generation = this.picker_size_gen;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(600)).await;
+                let _ = this.update(cx, |this, cx| {
+                    if this.picker_size_gen == generation && cx.global::<crate::settings::Settings>().picker_size != Some(want) {
+                        crate::settings::update(cx, |s| s.picker_size = Some(want));
+                    }
+                });
+            })
+            .detach();
+        })
+        .detach();
         // the preview pane helps picking (Windows' dialogs have one too): on until it is closed in a dialog, which the next dialogs
         // remember (issue 87); the sidebar starts as a strip of icons (it opens over the list while hovered)
         self.preview_open = cx.global::<crate::settings::Settings>().picker_preview_open;
         self.sidebar_rail = true;
         // closing the window (X, Alt+F4) cancels; it is not the user's session
         let ws = cx.entity().downgrade();
-        window.on_window_should_close(cx, move |_, cx| {
+        window.on_window_should_close(cx, move |window, cx| {
             if let Some(ws) = ws.upgrade() {
                 ws.update(cx, |ws, _| crate::picker::answer_cancel(ws));
             }
+            Self::release_preview_host(window);
             true
         });
         cx.notify();
@@ -1105,9 +1127,16 @@ impl Workspace {
                     self.editing_address = false;
                     self.clear_suggestions();
                 }
+                // (the pane the keyboard comes to shows where it is: its row in view, the first one when none was chosen; issue 38)
                 match (to, tree) {
-                    (Pane::Tree, Some(f)) => window.focus(&f, cx),
-                    _ => self.focus_active(window, cx),
+                    (Pane::Tree, Some(f)) => {
+                        window.focus(&f, cx);
+                        self.tree_keyboard_entered(cx);
+                    }
+                    _ => {
+                        self.focus_active(window, cx);
+                        self.active_tab().clone().update(cx, |v, cx| v.keyboard_entered(cx));
+                    }
                 }
                 cx.notify();
             }
@@ -1325,6 +1354,7 @@ impl Workspace {
         self.tab_scrolled_to = None;
         if self.tabs.len() <= 1 {
             self.save_session(window, cx);
+            Self::release_preview_host(window);
             window.remove_window();
             return;
         }
@@ -1680,7 +1710,25 @@ impl Workspace {
             PaletteMode::Commands { with_folders: false } => Vec::new(),
             _ => crate::folder_history::snapshot(),
         };
-        let pal = cx.new(|cx| CommandPalette::new(mode, folders, window, cx));
+        // the tab search: this window's open tabs, then the closed ones, the last closed first
+        let tabs = if mode == PaletteMode::Tabs {
+            use crate::command_palette::TabEntry;
+            let open = self.tabs.iter().enumerate().map(|(i, t)| {
+                let v = t.view().read(cx);
+                let detail = v.location().path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                TabEntry { label: v.title(cx), detail, closed: false, id: i }
+            });
+            let closed = self.closed.iter().enumerate().rev().take(30).map(|(i, loc)| TabEntry {
+                label: loc.title(),
+                detail: loc.path().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+                closed: true,
+                id: i,
+            });
+            open.chain(closed).collect()
+        } else {
+            Vec::new()
+        };
+        let pal = cx.new(|cx| CommandPalette::new(mode, folders, tabs, window, cx));
         self._palette_sub = Some(cx.subscribe_in(&pal, window, |this, _, ev: &PaletteEvent, window, cx| {
             this.palette = None;
             this._palette_sub = None;
@@ -1691,6 +1739,17 @@ impl Workspace {
                 PaletteEvent::Navigate(p) => {
                     if let Some(loc) = parse_location(&p.to_string_lossy()) {
                         this.navigate(loc, window, cx);
+                    }
+                }
+                PaletteEvent::Tab { closed: false, id } => {
+                    if *id < this.tabs.len() {
+                        this.activate(*id, window, cx);
+                    }
+                }
+                PaletteEvent::Tab { closed: true, id } => {
+                    if *id < this.closed.len() {
+                        let loc = this.closed.remove(*id);
+                        this.open_tab(loc, window, cx);
                     }
                 }
             }
@@ -1884,6 +1943,16 @@ impl Workspace {
         t.left.update(cx, |v, _| v.dual = false);
         self.focus_active(window, cx);
         cx.notify();
+    }
+
+    /// The preview pane shows documents in a window of the shell thread that this window owns. Destroying this window would wait
+    /// for that thread to destroy it: the picker of an app's Open dialog hung on the screen with the PDF it previewed (issue 146).
+    /// So the host is let go first, whenever this window is about to close.
+    pub(crate) fn release_preview_host(window: &Window) {
+        if let Some(owner) = Self::hwnd(window) {
+            // (without waiting for the shell thread: it may be the one that is busy, see `detach_from`)
+            rf_win::preview_host::detach_from(owner);
+        }
     }
 
     fn hwnd(window: &Window) -> Option<isize> {
@@ -2223,6 +2292,8 @@ impl Workspace {
         // Settings > Appearance > "Tabs as wide as their names" (issue 119): each tab its measured name plus its icon and buttons, within
         // the same limits; the buttons are in that width, so they always show
         let fit_names = cx.global::<crate::settings::Settings>().tabs_fit_names;
+        // Settings > Appearance > "Terminal button on tabs" (issue 119: off, nothing is in the way of a click on a narrow tab)
+        let tab_terminal = cx.global::<crate::settings::Settings>().tab_terminal_button;
         let (name_px, name_style) = (rems(0.875).to_pixels(window.rem_size()), window.text_style());
         let roomy = fit_names || tab_w >= 110.;
         let mut tab_claimed = false;
@@ -2246,7 +2317,7 @@ impl Workspace {
                 None
             };
             let windows_home_tab = windows_theme && matches!(&location, Location::Home);
-            let term_dir = tab_terminal_dir(&location);
+            let term_dir = tab_terminal.then(|| tab_terminal_dir(&location)).flatten();
             let tab_w = if fit_names {
                 let name = window.text_system().layout_line(&title, name_px, &[name_style.to_run(title.len())], None).width;
                 (f32::from(name) + TAB_CHROME_W + if term_dir.is_some() { TAB_TERMINAL_W } else { 0. }).clamp(TAB_MIN_W, TAB_MAX_W)
@@ -2339,6 +2410,9 @@ impl Workspace {
                             .group_hover("tab", |s| s.visible())
                             .hover(|s| s.bg(p.pressed))
                             .child(Icon::new(L::X).size(px(12.)))
+                            // the press stays with the x: the tab's own press would bring the tab forward first, so closing a tab in the
+                            // back showed it for a moment (#145)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 cx.stop_propagation();
                                 this.close_tab(i, window, cx);
@@ -2627,6 +2701,22 @@ impl Workspace {
             Item::Separator,
             Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
         ]);
+        // a cloud or WSL place can be taken off the sidebar on its own (it comes back from Settings > Files and folders)
+        if self.places.read(cx).cloud.iter().any(|c| c.path == path) {
+            let at = items.len() - 2;
+            let key = path.to_string_lossy().into_owned();
+            items.insert(
+                at,
+                Item::action(t!("Bu konumu gizle"), MenuIcon::Lucide(L::EyeOff), move |_, cx| {
+                    let key = key.clone();
+                    crate::settings::update(cx, move |s| {
+                        if !s.hidden_places.iter().any(|h| h.eq_ignore_ascii_case(&key)) {
+                            s.hidden_places.push(key);
+                        }
+                    })
+                }),
+            );
+        }
         // a drive can be taken off the lists of places (it comes back from Settings > Files and folders)
         if let Some(letter) = crate::settings_view::drive_letter(&path) {
             let at = items.len() - 2;
@@ -3699,7 +3789,7 @@ impl Workspace {
                 col = col.child(self.sidebar_item(("sb-dev", i).into(), L::Usb, p.text_secondary, d.name.clone(), loc, active, None, p, cx));
             }
         }
-        let cloud = self.places.read(cx).cloud.clone();
+        let cloud = visible_places(self.places.read(cx).cloud.clone(), &cx.global::<crate::settings::Settings>().hidden_places);
         if !cloud.is_empty() && shown("cloud") {
             col = col.child(header(t!("Bulut ve Linux")));
             for (i, c) in cloud.into_iter().enumerate() {
@@ -4048,8 +4138,101 @@ pub(crate) fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
         use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_SHIFT};
         (GetAsyncKeyState(VK_CONTROL.0 as i32) < 0, GetAsyncKeyState(VK_SHIFT.0 as i32) < 0)
     };
+    let sources = hold_archiver_drop(sources, &std::env::temp_dir());
     let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
     crate::status_center::transfer(cx, kind, sources, dest);
+}
+
+/// Archivers hand a drop the files they extracted into a folder of their own under TEMP (7-Zip `7zE…`, WinRAR `Rar$DRa…`) and delete
+/// that folder as soon as the drop returns. Our transfer starts after it (and after a "replace?" question) and found nothing: "The
+/// system cannot find the file specified" (issue 139, 131). So while the drop is still going on such files are kept in rustyfiles'
+/// own folder under TEMP, hard-linked (instant on the same volume, and the file lives on when the archiver deletes its name) or else
+/// copied, and the transfer takes them from there. Anything else is returned as it was: a user's own files are never touched.
+fn hold_archiver_drop(sources: Vec<PathBuf>, temp: &Path) -> Vec<PathBuf> {
+    // (TEMP can be written short, `C:\Users\OZERO~1\...`, by one side and long by the other: both are compared in their long form)
+    let long = |p: &Path| -> PathBuf {
+        std::fs::canonicalize(p).map_or_else(|_| p.to_path_buf(), |c| PathBuf::from(c.to_string_lossy().trim_start_matches(r"\\?\").to_string()))
+    };
+    let temp_long = long(temp);
+    let from_archiver = |p: &Path| {
+        let p_long = long(p);
+        [(p, temp), (p_long.as_path(), temp_long.as_path())].iter().any(|(p, t)| {
+            p.strip_prefix(t).ok().and_then(|rest| rest.components().next()).is_some_and(|c| {
+                let n = c.as_os_str().to_string_lossy().to_ascii_lowercase();
+                n.starts_with("7z") || n.starts_with("rar$")
+            })
+        })
+    };
+    if sources.is_empty() || !sources.iter().all(|p| from_archiver(p)) {
+        return sources;
+    }
+    let base = temp.join("rustyfiles-drops");
+    // (the drops of earlier days: whatever a transfer left there, links that cost no room, or copies)
+    if let Ok(old) = std::fs::read_dir(&base) {
+        for e in old.flatten() {
+            if e.metadata().and_then(|m| m.modified()).is_ok_and(|t| t.elapsed().is_ok_and(|a| a > std::time::Duration::from_secs(24 * 3600))) {
+                let _ = std::fs::remove_dir_all(e.path());
+            }
+        }
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let here = base.join(stamp.to_string());
+    let mut held = Vec::with_capacity(sources.len());
+    for src in &sources {
+        let Some(name) = src.file_name() else { return sources };
+        let to = here.join(name);
+        if let Err(e) = keep_tree(src, &to) {
+            log::warn!("drop from an archiver: could not keep {}: {e}; the transfer takes it from where it is", src.display());
+            return sources;
+        }
+        held.push(to);
+    }
+    log::info!("drop from an archiver: {} item(s) kept in {}", held.len(), here.display());
+    held
+}
+
+/// `from` (a file or a folder) at `to`: files hard-linked, else copied; folders made and filled.
+fn keep_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+    if from.is_dir() {
+        std::fs::create_dir_all(to)?;
+        for e in std::fs::read_dir(from)? {
+            let e = e?;
+            keep_tree(&e.path(), &to.join(e.file_name()))?;
+        }
+        return Ok(());
+    }
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::hard_link(from, to).or_else(|_| std::fs::copy(from, to).map(|_| ()))
+}
+
+#[cfg(test)]
+mod archiver_drop_tests {
+    use super::hold_archiver_drop;
+
+    #[test]
+    fn an_archivers_extracted_files_are_kept_after_it_deletes_them_and_other_files_are_left_alone() {
+        let temp = std::env::temp_dir().join(format!("rf-archdrop-{}", std::process::id()));
+        let seven = temp.join("7zE5A1B2C3D");
+        std::fs::create_dir_all(seven.join("folder")).unwrap();
+        std::fs::write(seven.join("doc.txt"), b"inside the archive").unwrap();
+        std::fs::write(seven.join("folder").join("deep.txt"), b"deeper").unwrap();
+        let held = hold_archiver_drop(vec![seven.join("doc.txt"), seven.join("folder")], &temp);
+        assert!(held.iter().all(|p| p.starts_with(temp.join("rustyfiles-drops"))), "{held:?}");
+        // the archiver deletes its folder when the drop returns: what the transfer will read is still there
+        std::fs::remove_dir_all(&seven).unwrap();
+        assert_eq!(std::fs::read(&held[0]).unwrap(), b"inside the archive");
+        assert_eq!(std::fs::read(held[1].join("deep.txt")).unwrap(), b"deeper");
+        // a user's own files (even under TEMP) go to the transfer as they are
+        let own = temp.join("mine").join("notes.txt");
+        std::fs::create_dir_all(own.parent().unwrap()).unwrap();
+        std::fs::write(&own, b"x").unwrap();
+        assert_eq!(hold_archiver_drop(vec![own.clone()], &temp), vec![own.clone()]);
+        // and so does a drop that mixes the two
+        assert_eq!(hold_archiver_drop(vec![own.clone(), temp.join("7zEother").join("a")], &temp).len(), 2);
+        let _ = std::fs::remove_dir_all(&temp);
+    }
 }
 
 /// Shows which device draws the window (hybrid renderer) and cycles Auto → GPU → CPU on click.
@@ -4283,6 +4466,11 @@ impl Render for Workspace {
         {
             static FIRST: std::sync::Once = std::sync::Once::new();
             FIRST.call_once(|| crate::start_mark("first render"));
+        }
+        // the text size (Settings > Appearance, issue 89): the window's base size, which the texts are given in
+        let rem = crate::settings::rem_for(cx.global::<crate::settings::Settings>().text_percent);
+        if f32::from(window.rem_size()) != rem {
+            window.set_rem_size(px(rem));
         }
         // Shortcuts (Ctrl+T, Ctrl+W, …) only reach elements on the focus path: with nothing
         // focused (a window opened from a desktop icon, a closed popup took focus with it) they
@@ -4863,6 +5051,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &SearchFolderHistory, window, cx| {
                 this.toggle_palette(crate::command_palette::PaletteMode::Folders, window, cx)
             }))
+            .on_action(cx.listener(|this, _: &SearchTabs, window, cx| this.toggle_palette(crate::command_palette::PaletteMode::Tabs, window, cx)))
             .on_action(cx.listener(|this, _: &GoSettings, window, cx| this.navigate(Location::Settings, window, cx)))
             .on_action(cx.listener(|this, _: &GoRecycleBin, window, cx| this.navigate(Location::RecycleBin, window, cx)))
             .on_action(cx.listener(|this, _: &SwitchPane, window, cx| {
@@ -5138,6 +5327,11 @@ mod pane_tests {
     }
 }
 
+/// The cloud and WSL places that are not hidden one by one (`Settings::hidden_places`, paths compared without regard to case).
+pub(crate) fn visible_places(places: Vec<crate::places::Pinned>, hidden: &[String]) -> Vec<crate::places::Pinned> {
+    places.into_iter().filter(|c| !hidden.iter().any(|h| c.path.as_os_str().eq_ignore_ascii_case(std::ffi::OsStr::new(h)))).collect()
+}
+
 #[cfg(test)]
 mod named_session_tests {
     use super::remember_named;
@@ -5153,5 +5347,22 @@ mod named_session_tests {
         assert_eq!(list.len(), 2);
         assert_eq!((list[0].name.as_str(), list[0].tabs[0].as_str()), ("work", "C:\\B"), "same place, the new tabs");
         assert_eq!(list[1].name, "Photos");
+    }
+}
+
+#[cfg(test)]
+mod hidden_places_tests {
+    use super::visible_places;
+    use crate::places::Pinned;
+    use gpui_kit::assets::IconName as L;
+
+    #[test]
+    fn a_place_hidden_on_its_own_leaves_the_others() {
+        let place = |p: &str| Pinned { title: p.into(), path: p.into(), icon: L::Cloud };
+        let all = vec![place(r"C:\Users\u\OneDrive"), place(r"C:\Users\u\Proton Drive"), place(r"\wsl.localhost\Ubuntu")];
+        let shown = visible_places(all.clone(), &[r"c:\users\u\onedrive".into()]);
+        let paths: Vec<_> = shown.iter().map(|p| p.path.to_string_lossy().into_owned()).collect();
+        assert_eq!(paths, [r"C:\Users\u\Proton Drive", r"\wsl.localhost\Ubuntu"], "the case of a path does not matter");
+        assert_eq!(visible_places(all, &[]).len(), 3);
     }
 }

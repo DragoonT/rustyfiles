@@ -167,7 +167,11 @@ fn run(slot: Arc<Slot>, cancel: Arc<AtomicBool>) {
     // 2. what changed while the app was closed: from the change journal, else a fresh walk
     let t = Instant::now();
     // (the folders are listed with no lock held: searches use the loaded index meanwhile)
-    let caught = slot.index.read().is_some().then(|| crate::nameindex::catch_up_locked(&slot.index, &cancel));
+    // (the read guard must be gone before the catch-up: it ends by taking the write lock, and a guard kept to the end of the statement
+    // made the thread wait for itself, holding every search of the drive behind the waiting writer: the C: index of a PC whose journal
+    // still had the saved position was never searched nor saved again)
+    let loaded = slot.index.read().is_some();
+    let caught = loaded.then(|| crate::nameindex::catch_up_locked(&slot.index, &cancel));
     match caught {
         Some(Ok(n)) => {
             log::info!("indexer: {} caught up from the change journal in {:.2} s, {n} folders listed again", slot.root.display(), t.elapsed().as_secs_f32());
@@ -234,6 +238,10 @@ fn follow(slot: &Slot, cancel: &AtomicBool) {
     }
 }
 
+/// How long a search waits for an index that is being changed (a refresh swaps it in within milliseconds). Longer means something holds
+/// it far too long: the search then answers `None` (the disk is searched instead) rather than hang the search box with it.
+const SEARCH_WAIT: Duration = Duration::from_secs(2);
+
 /// Searches the index whose root holds `under`: `None` when no ready index covers it (search
 /// the disk then).
 pub fn search(pattern: &str, under: &Path, include_hidden: bool, max: usize) -> Option<Vec<PathBuf>> {
@@ -245,7 +253,7 @@ pub fn search(pattern: &str, under: &Path, include_hidden: bool, max: usize) -> 
     if slot.state.load(Ordering::Relaxed) != State::Ready as u8 {
         return None;
     }
-    let ix = slot.index.read();
+    let ix = slot.index.try_read_for(SEARCH_WAIT)?;
     ix.as_ref()?.search(pattern, Some(under), include_hidden, max)
 }
 
@@ -259,7 +267,7 @@ pub fn search_ranked(pattern: &str, under: &Path, include_hidden: bool, max: usi
     if slot.state.load(Ordering::Relaxed) != State::Ready as u8 {
         return None;
     }
-    let ix = slot.index.read();
+    let ix = slot.index.try_read_for(SEARCH_WAIT)?;
     ix.as_ref()?.search_ranked(pattern, Some(under), include_hidden, max, rank)
 }
 
@@ -329,5 +337,61 @@ fn follow_journal(slot: &Slot, cancel: &AtomicBool) {
             save(slot);
             last_save = Instant::now();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A start whose saved index can be caught up from the change journal must get through: it caught up, saved the index and went on
+    /// following the drive. (It used to wait for itself for ever.)
+    #[test]
+    fn a_start_that_catches_up_from_the_journal_saves_and_searches() {
+        let dir = std::env::temp_dir().join(format!("rf-indexer-start-{}", std::process::id()));
+        let root = dir.join("tree");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        if crate::usn::query(&root).is_none() {
+            eprintln!("no change journal on this volume, skipped");
+            return;
+        }
+        std::fs::write(root.join("sub").join("eski.txt"), b"x").unwrap();
+        let file = dir.join("tree.rfidx");
+        Index::build(&root, &AtomicBool::new(false)).save(&file).unwrap();
+        let saved_at = std::fs::metadata(&file).unwrap().modified().unwrap();
+        // a change after the save: the start catches up with it from the journal
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::write(root.join("sub").join("yeni.txt"), b"x").unwrap();
+        let slot = Arc::new(Slot {
+            root: root.clone(),
+            file: file.clone(),
+            index: RwLock::new(None),
+            state: AtomicU8::new(State::Building as u8),
+            dirty: Mutex::new(HashSet::new()),
+            changed_since_save: AtomicBool::new(false),
+            journaled: true,
+        });
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let (slot, cancel) = (slot.clone(), cancel.clone());
+            std::thread::spawn(move || run(slot, cancel));
+        }
+        let start = Instant::now();
+        loop {
+            let saved = std::fs::metadata(&file).ok().and_then(|m| m.modified().ok()).is_some_and(|m| m > saved_at);
+            let found = slot
+                .index
+                .try_read_for(Duration::from_millis(100))
+                .and_then(|g| g.as_ref().and_then(|ix| ix.search("yeni", None, false, 10)))
+                .is_some_and(|hits| !hits.is_empty());
+            if saved && found {
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_secs(20), "the start did not catch up, save and search in 20 s (saved {saved}, found {found})");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        cancel.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(1200));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -152,6 +152,15 @@ pub fn system_formats() -> ClockFormats {
     }
 }
 
+/// Today's date in the user's long form ("20 Kasım 2026 Perşembe", "Thursday, November 20, 2026"), as Windows' taskbar clock
+/// shows it in its tooltip. `None` when Windows cannot say.
+pub fn long_date() -> Option<String> {
+    use windows::Win32::Globalization::{DATE_LONGDATE, GetDateFormatEx};
+    let mut buf = [0u16; 128];
+    let n = unsafe { GetDateFormatEx(windows::core::PCWSTR::null(), DATE_LONGDATE, None, windows::core::PCWSTR::null(), Some(&mut buf), windows::core::PCWSTR::null()) };
+    (n > 1).then(|| crate::wide::from_wide(&buf)).filter(|s| !s.is_empty())
+}
+
 /// The clock as the island shows it now. The formats can change while the app runs (the user switches region settings): read
 /// them again with [`system_formats`] now and then (at every minute change is cheap) rather than keeping them for ever.
 pub fn system_lines() -> ClockLines {

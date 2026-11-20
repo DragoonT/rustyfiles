@@ -1,4 +1,5 @@
-//! The Start panel's power button: lock, sleep, sign out, restart, shut down, and the name of the user shown beside it.
+//! The Start panel's power button: lock, sleep, hibernate (where Windows offers it), sign out, restart, shut down, and the name of the
+//! user shown beside it.
 //!
 //! Nothing here runs by itself. [`perform`] makes the real call and is reached only from the user's click on the item (restart and
 //! shut down after the "Emin misiniz?" step has been answered with yes); every decision around it is in [`Menu`], which is pure and
@@ -13,20 +14,40 @@
 pub enum Action {
     Lock,
     Sleep,
+    /// Only where Windows' own power menu has it: see [`hibernate_offered`]. Issue 129.
+    Hibernate,
     SignOut,
     Restart,
     Shutdown,
 }
 
 impl Action {
-    /// The items of the menu, top to bottom.
-    pub const ALL: [Action; 5] = [Action::Lock, Action::Sleep, Action::SignOut, Action::Restart, Action::Shutdown];
+    /// Every item the menu can have, top to bottom ([`items`] leaves out what this PC does not offer).
+    pub const ALL: [Action; 6] = [Action::Lock, Action::Sleep, Action::Hibernate, Action::SignOut, Action::Restart, Action::Shutdown];
 
     /// Restart and shut down close every program: they ask first. Lock, sleep and sign out are what the user asked for with the
     /// click (a sign out asks for unsaved work through the programs themselves).
     pub fn needs_confirmation(self) -> bool {
         matches!(self, Action::Restart | Action::Shutdown)
     }
+}
+
+/// The items of the menu on this PC, top to bottom: Hibernate only when `hibernate` (see [`hibernate_offered`]).
+pub fn items(hibernate: bool) -> Vec<Action> {
+    Action::ALL.into_iter().filter(|a| hibernate || *a != Action::Hibernate).collect()
+}
+
+/// Whether Windows' own power menu shows Hibernate: the PC can hibernate (a hibernation file is there) and Control Panel's "Show in
+/// Power menu: Hibernate" is ticked (`ShowHibernateOption` under `Explorer\FlyoutMenuSettings`). Read-only, quick: asked when the menu
+/// opens.
+pub fn hibernate_offered() -> bool {
+    use windows::Win32::System::Power::{GetPwrCapabilities, SYSTEM_POWER_CAPABILITIES};
+    let mut caps = SYSTEM_POWER_CAPABILITIES::default();
+    let can = unsafe { GetPwrCapabilities(&mut caps) } && caps.SystemS4 && caps.HiberFilePresent;
+    let shown = [windows_registry::LOCAL_MACHINE, windows_registry::CURRENT_USER].iter().any(|hive| {
+        hive.open(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FlyoutMenuSettings").and_then(|k| k.get_u32("ShowHibernateOption")).is_ok_and(|v| v == 1)
+    });
+    can && shown
 }
 
 /// What the panel shows of the power button.
@@ -133,6 +154,10 @@ pub fn perform(action: Action) -> anyhow::Result<()> {
             enable_shutdown_privilege()?;
             anyhow::ensure!(unsafe { SetSuspendState(false, false, false) }, "the system refused to sleep");
         }
+        Action::Hibernate => {
+            enable_shutdown_privilege()?;
+            anyhow::ensure!(unsafe { SetSuspendState(true, false, false) }, "the system refused to hibernate");
+        }
         Action::SignOut => unsafe { ExitWindowsEx(EWX_LOGOFF, planned)? },
         Action::Restart => {
             enable_shutdown_privilege()?;
@@ -228,8 +253,12 @@ mod tests {
     }
 
     #[test]
-    fn five_items_in_the_order_of_the_menu() {
-        assert_eq!(Action::ALL, [Action::Lock, Action::Sleep, Action::SignOut, Action::Restart, Action::Shutdown]);
+    fn the_items_in_the_order_of_the_menu_hibernate_only_where_windows_offers_it() {
+        assert_eq!(items(false), [Action::Lock, Action::Sleep, Action::SignOut, Action::Restart, Action::Shutdown]);
+        assert_eq!(items(true), [Action::Lock, Action::Sleep, Action::Hibernate, Action::SignOut, Action::Restart, Action::Shutdown]);
+        assert!(!Action::Hibernate.needs_confirmation(), "Windows' own Hibernate does not ask either");
+        // read-only
+        eprintln!("hibernate offered here: {}", hibernate_offered());
     }
 
     /// Read-only: the name Windows shows for the user.

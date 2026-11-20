@@ -60,7 +60,7 @@ pub struct KeyLayer {
     given_up: bool,
     held: Held,
     /// The keys of Win+E, Win+D and Win+Shift+S whose press was swallowed and whose release is still to come: `[E, D, S]`.
-    combo_down: [bool; 3],
+    combo_down: [bool; 12],
     /// The mask key was sent for the current Windows-key hold because a chord of ours took a key.
     combo_masked: bool,
     /// The keyboard's own state, asked once at the press of E or D (see `on_event`); `None` in the layer's unit tests that do not need it.
@@ -78,7 +78,7 @@ impl KeyLayer {
             seq: 0,
             given_up: false,
             held: Held { lwin: win_left, rwin: win_right, ..Held::default() },
-            combo_down: [false; 3],
+            combo_down: [false; 12],
             combo_masked: false,
             probe: None,
         }
@@ -148,7 +148,11 @@ impl KeyLayer {
                     self.send_mask(log_only);
                     self.shared.post(Posted::StartTap);
                 }
-                WinOutcome::Combo(c) if (win_key && self.shared.combos_on()) || (c == super::machine::Combo::Explorer && self.shared.win_e_on()) => {
+                WinOutcome::Combo(c)
+                    if (win_key && self.shared.combos_on())
+                        || (c == super::machine::Combo::Explorer && self.shared.win_e_on())
+                        || (matches!(c, super::machine::Combo::App(_)) && win_key && self.shared.digits_on()) =>
+                {
                     // one mask for the hold: the system will see the Windows key go down and up with nothing between
                     if !self.combo_masked {
                         self.combo_masked = true;
@@ -255,6 +259,8 @@ fn combo_slot(vk: u32) -> Option<usize> {
         VK_E => Some(0),
         VK_D => Some(1),
         VK_S => Some(2),
+        // (Win+1 .. Win+9)
+        0x31..=0x39 => Some(3 + (vk - 0x31) as usize),
         _ => None,
     }
 }
@@ -875,6 +881,27 @@ mod tests {
         r.win_down(VK_LWIN);
         assert!(!r.feed.push_raw(KEY_D, SCAN_D, 0, true), "the press of D passes");
         r.feed.push_raw(KEY_D, SCAN_D, 0, false);
+        r.win_up(VK_LWIN);
+        assert!(r.posted().is_empty());
+    }
+
+    /// Win+1 .. Win+9 open the dock's apps when the dock stands in for the taskbar (issue 91), beside Explorer too: with the digits on,
+    /// Win+3 is taken and the release of 3 with it; with them off it is Windows'.
+    #[test]
+    fn win_and_a_digit_is_taken_only_while_the_digits_are_on() {
+        use crate::winkey::machine::Combo;
+        let (key_3, scan_3) = (0x33, 0x04);
+        let mut r = rig_with(true, false, false);
+        r.shared.set_digits(true);
+        r.win_down(VK_LWIN);
+        assert!(r.feed.push_raw(key_3, scan_3, 0, true), "the press of 3 is swallowed");
+        assert!(r.feed.push_raw(key_3, scan_3, 0, false), "and its release");
+        r.win_up(VK_LWIN);
+        assert_eq!(r.posted(), vec![Posted::WinCombo(Combo::App(2))]);
+        r.shared.set_digits(false);
+        r.win_down(VK_LWIN);
+        assert!(!r.feed.push_raw(key_3, scan_3, 0, true), "off: the press of 3 passes");
+        r.feed.push_raw(key_3, scan_3, 0, false);
         r.win_up(VK_LWIN);
         assert!(r.posted().is_empty());
     }

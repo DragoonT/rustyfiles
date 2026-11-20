@@ -103,6 +103,7 @@ impl IWebBrowser_Impl for ShellWindow_Impl {
     }
     /// The "document": this same object, which answers IServiceProvider.
     fn Document(&self) -> Result<IDispatch> {
+        crate::handover::trace("shell window: the shell asked for its document");
         self.to_interface::<IWebBrowserApp>().cast()
     }
     fn TopLevelContainer(&self) -> Result<VARIANT_BOOL> {
@@ -211,9 +212,14 @@ impl IWebBrowserApp_Impl for ShellWindow_Impl {
 
 impl IServiceProvider_Impl for ShellWindow_Impl {
     /// Whatever service is named, the view (IShellView / IFolderView are asked for).
-    fn QueryService(&self, _: *const GUID, riid: *const GUID, ppv: *mut *mut core::ffi::c_void) -> Result<()> {
+    fn QueryService(&self, service: *const GUID, riid: *const GUID, ppv: *mut *mut core::ffi::c_void) -> Result<()> {
         let unk: IUnknown = self.to_interface::<IShellView>().cast()?;
-        unsafe { unk.query(riid, ppv).ok() }
+        let r = unsafe { unk.query(riid, ppv).ok() };
+        if crate::handover::tracing() {
+            let g = |p: *const GUID| if p.is_null() { "-".to_string() } else { format!("{:?}", unsafe { *p }) };
+            crate::handover::trace(&format!("shell window: the shell asked for service {} as {}: {}", g(service), g(riid), if r.is_ok() { "given" } else { "not given" }));
+        }
+        r
     }
 }
 
@@ -257,6 +263,7 @@ impl IShellView_Impl for ShellWindow_Impl {
     /// The item to show selected: its full path goes to the waiting caller.
     fn SelectItem(&self, item: *const ITEMIDLIST, flags: u32) -> Result<()> {
         let wanted = (SVSI_SELECT.0 | SVSI_FOCUSED.0 | SVSI_ENSUREVISIBLE.0 | SVSI_EDIT.0) as u32;
+        crate::handover::trace(&format!("shell window: SelectItem, flags {flags:#x}, item {}", if item.is_null() { "none" } else { "given" }));
         if item.is_null() || flags & wanted == 0 {
             return Ok(());
         }
@@ -301,58 +308,102 @@ pub fn wait_for_select(folder: &Path, wait: Duration) -> Option<PathBuf> {
     }
 }
 
-unsafe fn register_and_wait(folder: &Path, wait: Duration) -> Option<PathBuf> {
+/// The ID lists a folder is known by. Issue 97: the shell finds a window only by the very ID list it was given, and the two ways
+/// of naming a folder give two different lists (`SHParseDisplayName`: 60 bytes for Downloads here; `ILCreateFromPathW`, which
+/// Chromium's "Show in folder" uses: 379 bytes, a plain folder 468 against 611). A window registered under one was not found by the
+/// other (`probe_lookup_by_ilcreatefrompath`), and on the reporter's Windows the shell then waited 20 s and gave up. So the window
+/// is registered under each of them.
+unsafe fn id_lists(folder: &Path) -> Vec<Vec<u8>> {
     unsafe {
-        let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-        SHParseDisplayName(&HSTRING::from(folder.as_os_str()), None, &mut pidl, 0, None).ok()?;
-        if pidl.is_null() {
-            return None;
-        }
-        let size = ILGetSize(Some(pidl));
-        let bytes = std::slice::from_raw_parts(pidl as *const u8, size as usize).to_vec();
-        let location = InitVariantFromBuffer(pidl as *const _, size);
-        CoTaskMemFree(Some(pidl as *const _));
-        let location = location.ok()?;
-
-        // never shown, never activated (as Files' launcher)
-        let hwnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, w!("STATIC"), w!("rustyfiles shell window"), WINDOW_STYLE(0), 0, 0, 0, 0, None, None, None, None).ok()?;
-        let picked = Arc::new(Mutex::new(None));
-        let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| folder.to_string_lossy().into_owned());
-        let app: IWebBrowserApp = ShellWindow { hwnd, folder: bytes, name, picked: picked.clone() }.into();
-        let registered = (|| -> Result<(IShellWindows, i32)> {
-            let windows: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL)?;
-            let empty = VARIANT::default();
-            windows.RegisterPending(GetCurrentThreadId() as i32, &location, &empty, SWC_BROWSER)?;
-            let dispatch: IDispatch = app.cast()?;
-            let cookie = windows.Register(&dispatch, hwnd.0 as isize as i32, SWC_BROWSER)?;
-            windows.OnNavigate(cookie, &location)?;
-            Ok((windows, cookie))
-        })();
-        let registered = match registered {
-            Ok(r) => Some(r),
-            Err(e) => {
-                log::warn!("shell window for {}: {e}", folder.display());
-                None
+        let name = HSTRING::from(folder.as_os_str());
+        let mut out: Vec<Vec<u8>> = Vec::new();
+        let mut take = |pidl: *mut ITEMIDLIST| {
+            if !pidl.is_null() {
+                let bytes = std::slice::from_raw_parts(pidl as *const u8, ILGetSize(Some(pidl)) as usize).to_vec();
+                CoTaskMemFree(Some(pidl as *const _));
+                if !out.contains(&bytes) {
+                    out.push(bytes);
+                }
             }
         };
-        if registered.is_some() {
-            SetTimer(Some(hwnd), 1, wait.as_millis().min(u32::MAX as u128) as u32, None);
+        let mut parsed: *mut ITEMIDLIST = std::ptr::null_mut();
+        if SHParseDisplayName(&name, None, &mut parsed, 0, None).is_ok() {
+            take(parsed);
+        }
+        take(windows::Win32::UI::Shell::ILCreateFromPathW(&name));
+        out
+    }
+}
+
+unsafe fn register_and_wait(folder: &Path, wait: Duration) -> Option<PathBuf> {
+    unsafe {
+        let lists = id_lists(folder);
+        if lists.is_empty() {
+            return None;
+        }
+        let picked = Arc::new(Mutex::new(None));
+        let name = folder.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| folder.to_string_lossy().into_owned());
+        let windows: IShellWindows = match CoCreateInstance(&ShellWindows, None, CLSCTX_ALL) {
+            Ok(w) => w,
+            Err(e) => {
+                crate::handover::trace(&format!("shell window: no window list: {e}"));
+                return None;
+            }
+        };
+        // one invisible window (never shown, never activated, as Files' launcher) and one registration for each ID list
+        let mut held: Vec<(HWND, IWebBrowserApp, Option<i32>)> = Vec::new();
+        for bytes in &lists {
+            let Ok(location) = InitVariantFromBuffer(bytes.as_ptr().cast(), bytes.len() as u32) else { continue };
+            let Ok(hwnd) = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, w!("STATIC"), w!("rustyfiles shell window"), WINDOW_STYLE(0), 0, 0, 0, 0, None, None, None, None) else { continue };
+            let app: IWebBrowserApp = ShellWindow { hwnd, folder: bytes.clone(), name: name.clone(), picked: picked.clone() }.into();
+            let registered = (|| -> Result<i32> {
+                let empty = VARIANT::default();
+                windows.RegisterPending(GetCurrentThreadId() as i32, &location, &empty, SWC_BROWSER)?;
+                let dispatch: IDispatch = app.cast()?;
+                let cookie = windows.Register(&dispatch, hwnd.0 as isize as i32, SWC_BROWSER)?;
+                windows.OnNavigate(cookie, &location)?;
+                Ok(cookie)
+            })();
+            match &registered {
+                Ok(_) => {
+                    crate::handover::trace(&format!("shell window: registered for {} (ID list of {} bytes)", folder.display(), bytes.len()));
+                    if crate::handover::tracing() {
+                        let mut found = 0i32;
+                        let empty = VARIANT::default();
+                        let seen = windows.FindWindowSW(&location, &empty, SWC_BROWSER, &mut found, windows::Win32::UI::Shell::SWFO_NEEDDISPATCH);
+                        crate::handover::trace(&format!("shell window: found again by that ID list: {}", if seen.is_ok() { "yes" } else { "no" }));
+                    }
+                }
+                Err(e) => {
+                    log::warn!("shell window for {}: {e}", folder.display());
+                    crate::handover::trace(&format!("shell window: registration for {} ({} bytes) failed: {e}", folder.display(), bytes.len()));
+                }
+            }
+            held.push((hwnd, app, registered.ok()));
+        }
+        if let Some(&(main, _, _)) = held.iter().find(|h| h.2.is_some()) {
+            SetTimer(Some(main), 1, wait.as_millis().min(u32::MAX as u128) as u32, None);
             let mut msg = MSG::default();
             while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
-                if msg.hwnd == hwnd && (msg.message == WM_TIMER || msg.message == WM_PICKED) {
+                let ours = held.iter().any(|h| h.0 == msg.hwnd);
+                if ours && (msg.message == WM_PICKED || (msg.hwnd == main && msg.message == WM_TIMER)) {
                     break;
                 }
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
-            let _ = KillTimer(Some(hwnd), 1);
+            let _ = KillTimer(Some(main), 1);
         }
-        if let Some((windows, cookie)) = registered {
-            let _ = windows.Revoke(cookie);
+        for (hwnd, app, cookie) in held {
+            if let Some(c) = cookie {
+                let _ = windows.Revoke(c);
+            }
+            let _ = DestroyWindow(hwnd);
+            drop(app);
         }
-        let _ = DestroyWindow(hwnd);
-        drop(app);
-        picked.lock().unwrap_or_else(|e| e.into_inner()).take()
+        let got = picked.lock().unwrap_or_else(|e| e.into_inner()).take();
+        crate::handover::trace(if got.is_some() { "shell window: an item to select came" } else { "shell window: no item came before the wait ended" });
+        got
     }
 }
 
@@ -392,11 +443,21 @@ mod tests {
     /// the file's path.
     #[test]
     fn the_shell_finds_the_window_and_selection_arrives() {
+        shell_select_round(false);
+    }
+
+    /// The same, the folder named as Chromium's "Show in folder" names it (issue 97).
+    #[test]
+    fn the_shell_finds_the_window_by_chromiums_id_list_too() {
+        shell_select_round(true);
+    }
+
+    fn shell_select_round(chromium: bool) {
         // IShellWindows is served by the shell: without a shell window the registration waits for ever (seen without Explorer)
-        if crate::engine_guard::not_run_without_shell("shell_window::tests::the_shell_finds_the_window_and_selection_arrives") {
+        if crate::engine_guard::not_run_without_shell("shell_window::tests::shell_select_round") {
             return;
         }
-        let dir = std::env::temp_dir().join(format!("rf-shellwin-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("rf-shellwin-{}-{chromium}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         // the shell answers with long names: where TEMP is given in its short form
         // (C:\Users\RUNNER~1\... on GitHub's runners) the folder is taken by its long name too
@@ -412,8 +473,13 @@ mod tests {
             move || unsafe {
                 let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
                 let windows: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL).unwrap();
-                let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-                SHParseDisplayName(&HSTRING::from(dir.as_os_str()), None, &mut pidl, 0, None).unwrap();
+                let pidl = if chromium {
+                    windows::Win32::UI::Shell::ILCreateFromPathW(&HSTRING::from(dir.as_os_str()))
+                } else {
+                    let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+                    SHParseDisplayName(&HSTRING::from(dir.as_os_str()), None, &mut pidl, 0, None).unwrap();
+                    pidl
+                };
                 let loc = InitVariantFromBuffer(pidl as *const _, ILGetSize(Some(pidl))).unwrap();
                 let empty = VARIANT::default();
                 let mut found = None;
@@ -432,7 +498,11 @@ mod tests {
                 let view: IShellView = sp.QueryService::<IShellView>(&IFolderView::IID).unwrap();
                 // the file's ID list relative to the folder: its last item
                 let mut fpidl: *mut ITEMIDLIST = std::ptr::null_mut();
-                SHParseDisplayName(&HSTRING::from(dir.join("rapor ü.txt").as_os_str()), None, &mut fpidl, 0, None).unwrap();
+                if chromium {
+                    fpidl = windows::Win32::UI::Shell::ILCreateFromPathW(&HSTRING::from(dir.join("rapor ü.txt").as_os_str()));
+                } else {
+                    SHParseDisplayName(&HSTRING::from(dir.join("rapor ü.txt").as_os_str()), None, &mut fpidl, 0, None).unwrap();
+                }
                 let child = windows::Win32::UI::Shell::ILFindLastID(fpidl);
                 view.SelectItem(child, (SVSI_SELECT.0 | SVSI_ENSUREVISIBLE.0 | SVSI_FOCUSED.0) as u32).unwrap();
                 CoTaskMemFree(Some(pidl as *const _));
@@ -447,5 +517,42 @@ mod tests {
         assert!(took < Duration::from_secs(5), "{took:?}");
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(got.as_deref().map(|p| p.to_string_lossy().to_lowercase()), Some(file.to_string_lossy().to_lowercase()));
+    }
+
+    /// Manual (issue 97): is our window for a folder found when the shell is given the folder the way Chromium names it
+    /// (`ILCreateFromPathW`) rather than the way we register it (`SHParseDisplayName`)? Downloads and a plain folder.
+    /// `cargo test -p rf-win --lib shell_window::tests::probe_lookup_by_ilcreatefrompath -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn probe_lookup_by_ilcreatefrompath() {
+        let plain = std::env::temp_dir().join(format!("rf-shellwin-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&plain).unwrap();
+        for dir in [PathBuf::from(std::env::var("USERPROFILE").unwrap()).join("Downloads"), plain.clone()] {
+            let d = dir.clone();
+            let waiter = std::thread::spawn(move || wait_for_select(&d, Duration::from_secs(3)));
+            let found = unsafe {
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                let windows: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL).unwrap();
+                let lookups = [("ILCreateFromPathW", windows::Win32::UI::Shell::ILCreateFromPathW(&HSTRING::from(dir.as_os_str()))), ("SHParseDisplayName", {
+                    let mut p: *mut ITEMIDLIST = std::ptr::null_mut();
+                    SHParseDisplayName(&HSTRING::from(dir.as_os_str()), None, &mut p, 0, None).unwrap();
+                    p
+                })];
+                let mut out = Vec::new();
+                std::thread::sleep(Duration::from_millis(300));
+                for (how, pidl) in lookups {
+                    let loc = InitVariantFromBuffer(pidl as *const _, ILGetSize(Some(pidl))).unwrap();
+                    let empty = VARIANT::default();
+                    let mut hwnd = 0i32;
+                    let ok = windows.FindWindowSW(&loc, &empty, SWC_BROWSER, &mut hwnd, SWFO_NEEDDISPATCH).is_ok();
+                    out.push(format!("{how} ({} bytes): {}", ILGetSize(Some(pidl)), if ok { "found" } else { "NOT found" }));
+                    CoTaskMemFree(Some(pidl as *const _));
+                }
+                out
+            };
+            let _ = waiter.join();
+            println!("{}: {}", dir.display(), found.join(", "));
+        }
+        let _ = std::fs::remove_dir_all(&plain);
     }
 }

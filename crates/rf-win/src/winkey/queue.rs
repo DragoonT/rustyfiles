@@ -28,6 +28,8 @@ const CODE_LOST: u32 = 2;
 const CODE_COMBO_EXPLORER: u32 = 3;
 const CODE_COMBO_DESKTOP: u32 = 4;
 const CODE_COMBO_SNIP: u32 = 5;
+/// Win+1 .. Win+9: this and the eight after it.
+const CODE_COMBO_APP: u32 = 6;
 const CODE_CHORD: u32 = 0x10;
 
 fn effect_code(e: Effect) -> u32 {
@@ -68,6 +70,7 @@ impl Posted {
             Posted::WinCombo(Combo::Explorer) => CODE_COMBO_EXPLORER,
             Posted::WinCombo(Combo::Desktop) => CODE_COMBO_DESKTOP,
             Posted::WinCombo(Combo::Snip) => CODE_COMBO_SNIP,
+            Posted::WinCombo(Combo::App(n)) => CODE_COMBO_APP + u32::from(n.min(8)),
             Posted::Chord { effect, seq } => (u32::from(seq) << 16) | (CODE_CHORD + effect_code(effect)),
         }
     }
@@ -79,6 +82,7 @@ impl Posted {
             CODE_COMBO_EXPLORER => Some(Posted::WinCombo(Combo::Explorer)),
             CODE_COMBO_DESKTOP => Some(Posted::WinCombo(Combo::Desktop)),
             CODE_COMBO_SNIP => Some(Posted::WinCombo(Combo::Snip)),
+            c @ CODE_COMBO_APP..=14 => Some(Posted::WinCombo(Combo::App((c - CODE_COMBO_APP) as u8))),
             c if c >= CODE_CHORD => effect_of(c - CODE_CHORD).map(|effect| Posted::Chord { effect, seq: (v >> 16) as u16 }),
             _ => None,
         }
@@ -140,6 +144,15 @@ impl Default for Queue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn win_and_a_digit_goes_through_the_queue_as_that_digit() {
+        for n in 0..9u8 {
+            let p = Posted::WinCombo(Combo::App(n));
+            assert_eq!(Posted::decode(p.encode()), Some(p));
+        }
+        assert!(Posted::WinCombo(Combo::App(8)).encode() < CODE_CHORD, "the digits stay below the chords' codes");
+    }
 
     fn every_effect() -> Vec<Effect> {
         let mut v = vec![Effect::Choose, Effect::Cancel, Effect::Close];
