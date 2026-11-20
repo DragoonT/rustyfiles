@@ -19,10 +19,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
       - name: Build
         # (rf-shellguard: the small program that puts Explorer's taskbar back if the dock dies; without it the dock leaves the taskbar alone)
         run: cargo build --release -p rf-app -p rf-dialog -p rf-shellguard
+      - name: Build (ARM64)
+        # Windows on ARM, cross-compiled on this x64 runner (ring needs clang for it; the runner image has LLVM on its PATH)
+        run: cargo build --release --target aarch64-pc-windows-msvc -p rf-app -p rf-dialog -p rf-shellguard
       - name: Version
         id: v
         shell: pwsh
@@ -35,6 +40,9 @@ jobs:
         run: |
           New-Item -ItemType Directory publish | Out-Null
           Copy-Item target/release/rustyfiles.exe, target/release/directlook.exe, target/release/rustyfiles-shellguard.exe, target/release/rustyfiles_dialog.dll, LICENSE publish
+          New-Item -ItemType Directory publish-arm64 | Out-Null
+          $a = 'target/aarch64-pc-windows-msvc/release'
+          Copy-Item "$a/rustyfiles.exe", "$a/directlook.exe", "$a/rustyfiles-shellguard.exe", "$a/rustyfiles_dialog.dll", LICENSE publish-arm64
       - name: Install vpk
         # same version as the velopack crate in crates/rf-app/Cargo.toml
         run: dotnet tool install -g vpk --version 1.2.161
@@ -44,6 +52,16 @@ jobs:
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} ${{ steps.v.outputs.pre == 'true' && '--pre' || '' }}
       - name: Pack
         run: vpk pack -u rustyfiles -v ${{ steps.v.outputs.version }} -p publish -e rustyfiles.exe --packTitle rustyfiles --packAuthors "Özer Güzel" -i crates/rf-app/assets/rustyfiles.ico -s crates/rf-app/assets/splash.gif --splashProgressColor "#ff6a1a"
+      # ARM64 is a Velopack channel of its own, win-arm64 (x64 stays on the default channel, win, that installed copies already
+      # follow). An installed copy updates from the channel it was packed with, so each architecture only ever takes its own build.
+      # Its files (rustyfiles-win-arm64-Setup.exe, releases.win-arm64.json, ...) are packed into Releases-arm64 and go into the
+      # same GitHub release as the x64 ones.
+      - name: Previous release (ARM64, for delta updates)
+        continue-on-error: true
+        # (there is none before the first release with ARM64: that one is packed without a delta)
+        run: vpk download github -c win-arm64 -o Releases-arm64 --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} ${{ steps.v.outputs.pre == 'true' && '--pre' || '' }}
+      - name: Pack (ARM64)
+        run: vpk pack -u rustyfiles -v ${{ steps.v.outputs.version }} -r win-arm64 -c win-arm64 -o Releases-arm64 -p publish-arm64 -e rustyfiles.exe --packTitle rustyfiles --packAuthors "Özer Güzel" -i crates/rf-app/assets/rustyfiles.ico -s crates/rf-app/assets/splash.gif --splashProgressColor "#ff6a1a"
       - name: Publish
         if: steps.v.outputs.pre != 'true'
         run: vpk upload github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} --publish --releaseName "rustyfiles ${{ steps.v.outputs.version }}" --tag ${{ github.ref_name }}
@@ -59,6 +77,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           gh release edit ${{ github.ref_name }} --repo ${{ github.repository }} --draft=false --prerelease
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish (ARM64)
+        # Added to the release the x64 upload made, once it is public (a beta is a pre-release by then, so it never shows as an
+        # ordinary release here either)
+        run: vpk upload github -c win-arm64 -o Releases-arm64 --merge --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} ${{ steps.v.outputs.pre == 'true' && '--pre' || '--publish' }} --releaseName "rustyfiles ${{ steps.v.outputs.version }}" --tag ${{ github.ref_name }}
 
   winget:
     # Each release (never a beta) goes to winget too: the action opens the update pull request in microsoft/winget-pkgs from the
@@ -88,6 +110,7 @@ jobs:
         uses: vedantmgoyal9/winget-releaser@b7370d4d152efdce803a26cc6ca9eee58cb2ad54
         with:
           identifier: gelenmedya.rustyfiles
-          installers-regex: 'Setup\.exe$'
+          # the x64 installer only: the winget manifest lists x64 (rustyfiles-win-arm64-Setup.exe would match a bare 'Setup\.exe$')
+          installers-regex: 'rustyfiles-win-Setup\.exe$'
           release-tag: ${{ github.ref_name }}
           token: ${{ secrets.WINGET_TOKEN }}
