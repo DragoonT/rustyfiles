@@ -2086,5 +2086,8 @@
  "1c0163bd": "Prikvačene, ali neotvorene aplikacije stoje na lijevom otoku kao pokretači; srednji otok sadrži samo pokrenute aplikacije.",
  "33a923e6": "Veličina teksta",
  "40d45e5e": "Veličina teksta u prozorima upravitelja datoteka",
- "92bc0ce7": "Izvadi iz mape"
+ "92bc0ce7": "Izvadi iz mape",
+ "533f3598": "Samo otvori izbornik",
+ "70fd9283": "Klik na Sažmi",
+ "05f2a11f": "Klik na Sažmi u izborniku desnog klika odmah sažima odabrano u ovom formatu; ostale mogućnosti otvaraju se kad pokazivač prijeđe preko"
 }

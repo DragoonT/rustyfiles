@@ -2086,5 +2086,8 @@
  "1c0163bd": "Aplicațiile fixate care nu sunt deschise stau în insula din stânga ca lansatoare; insula din mijloc are doar aplicațiile care rulează.",
  "33a923e6": "Dimensiunea textului",
  "40d45e5e": "Dimensiunea textului în ferestrele managerului de fișiere",
- "92bc0ce7": "Scoate din dosar"
+ "92bc0ce7": "Scoate din dosar",
+ "533f3598": "Doar deschide meniul",
+ "70fd9283": "Clic pe Comprimă",
+ "05f2a11f": "Un clic pe Comprimă în meniul contextual comprimă imediat selecția în acest format; celelalte opțiuni se deschid la trecerea cursorului"
 }

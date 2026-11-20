@@ -252,6 +252,22 @@ pub enum IdePref {
 }
 
 /// Which of our own entries the context menu shows (Settings → General → Context menu).
+/// The format a click on "Sıkıştır" compresses in (Discord, 2026-11-20: "a default zipping method setting in settings").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickCompress {
+    /// A click only opens the submenu, as before.
+    Menu,
+    #[default]
+    Zip,
+    SevenZ,
+    TarZst,
+    TarGz,
+    Tar,
+    /// WinRAR's format, through its Rar.exe (only when WinRAR is installed).
+    Rar,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MenuPrefs {
@@ -615,6 +631,8 @@ pub struct Settings {
     pub address_commands: bool,
     /// Double-clicking a ZIP/7z/tar opens it like a folder (read-only).
     pub browse_archives: bool,
+    /// What a click on "Sıkıştır" in the right-click menu does: compress at once in this format, or (`Menu`) only open its submenu.
+    pub quick_compress: QuickCompress,
     /// After extracting an archive into a new folder, that folder opens in a tab.
     pub open_after_extract: bool,
     /// Search through the Windows Search index (contents, AQS) where the folder is indexed.
@@ -924,6 +942,7 @@ impl Default for Settings {
             sidebar_tree_follow: true,
             address_commands: true,
             browse_archives: true,
+            quick_compress: QuickCompress::Zip,
             open_after_extract: false,
             search_index: true,
             name_index: true,

@@ -2086,5 +2086,8 @@
  "1c0163bd": "Les applications épinglées qui ne sont pas ouvertes restent dans l’îlot gauche comme lanceurs ; l’îlot central ne contient que les applications en cours.",
  "33a923e6": "Taille du texte",
  "40d45e5e": "La taille du texte dans les fenêtres du gestionnaire de fichiers",
- "92bc0ce7": "Sortir du dossier"
+ "92bc0ce7": "Sortir du dossier",
+ "533f3598": "Ouvrir seulement le menu",
+ "70fd9283": "Clic sur Compresser",
+ "05f2a11f": "Un clic sur Compresser dans le menu contextuel compresse aussitôt la sélection dans ce format ; les autres choix s'ouvrent au survol"
 }

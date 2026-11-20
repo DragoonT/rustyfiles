@@ -2086,5 +2086,8 @@
  "1c0163bd": "Fästa appar som inte är öppna står i vänstra ön som startare; den mittersta ön har bara apparna som körs.",
  "33a923e6": "Textstorlek",
  "40d45e5e": "Storleken på texten i filhanterarens fönster",
- "92bc0ce7": "Ta ut ur mappen"
+ "92bc0ce7": "Ta ut ur mappen",
+ "533f3598": "Öppna bara menyn",
+ "70fd9283": "Klick på Komprimera",
+ "05f2a11f": "Ett klick på Komprimera i snabbmenyn komprimerar markeringen i det här formatet direkt; de andra sätten öppnas när du håller pekaren över"
 }

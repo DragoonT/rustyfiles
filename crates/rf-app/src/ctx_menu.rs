@@ -218,11 +218,11 @@ impl FolderView {
             }
         }
         if has_files {
-            v.push(Item::Sub { label: t!("Şununla aç").into(), icon: icon(L::LayoutGrid), items: Sub::Pending { key: "openwith", fallback: None } });
+            v.push(Item::Sub { label: t!("Şununla aç").into(), icon: icon(L::LayoutGrid), items: Sub::Pending { key: "openwith", fallback: None }, click: None });
         }
         // Explorer's "Send to" in the first menu (issue 117): its entries come with the shell's items (see `show_context_menu`)
         if send_to_fits(items, cx) {
-            v.push(Item::Sub { label: t!("Gönder").into(), icon: icon(L::Send), items: Sub::Pending { key: "sendto", fallback: None } });
+            v.push(Item::Sub { label: t!("Gönder").into(), icon: icon(L::Send), items: Sub::Pending { key: "sendto", fallback: None }, click: None });
         }
         if self.is_search() && items.len() == 1 {
             let p = items[0].clone();
@@ -344,10 +344,9 @@ impl FolderView {
         let z7_items = items.to_vec();
         let dlg_items = items.to_vec();
         if mp.compress && !in_archive {
-            v.push(Item::sub(
-                t!("Sıkıştır"),
-                icon(L::Archive),
-                vec![
+            let quick = cx.global::<crate::settings::Settings>().quick_compress;
+            let quick_items = items.to_vec();
+            let sub_items: Vec<Item> = vec![
                     Item::action(t!("Arşiv oluştur…"), icon(L::Archive), move |w, cx| create_archive_dialog(dlg_items.clone(), w, cx)),
                     Item::Separator,
                     Item::action(t!("ZIP olarak sıkıştır"), icon(L::FileArchive), move |_, cx| compress(cx, zip_items.clone(), rf_archive::Format::Zip)),
@@ -363,8 +362,12 @@ impl FolderView {
                         }
                     })
                 }))
-                .collect(),
-            ));
+                .collect();
+            // (a click on the row compresses at once in the format chosen in Settings; hovering shows the other ways)
+            v.push(match quick_compress_format(quick) {
+                Some(f) => Item::sub_click(t!("Sıkıştır"), icon(L::Archive), sub_items, move |_, cx| quick_compress(cx, quick_items.clone(), f)),
+                None => Item::sub(t!("Sıkıştır"), icon(L::Archive), sub_items),
+            });
         }
         if mp.compress && !items.is_empty() && items.iter().all(|p| rf_archive::is_supported(p)) {
             use crate::status_center::ExtractTo;
@@ -415,7 +418,7 @@ impl FolderView {
             v.push(Item::action(t!("Terminalde aç"), icon(L::SquareTerminal), move |_, _| open_terminal(d.clone())).hint("Ctrl+Shift+`"));
         }
         v.push(Item::Separator);
-        v.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } });
+        v.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None }, click: None });
         let mut quick = self.quick_clipboard(me, true);
         if in_archive {
             // (Windows' share sheet needs real files)
@@ -445,7 +448,7 @@ impl FolderView {
             v.push(Item::action(redo_text(redo), icon(L::Redo2), |_, cx| crate::undo::redo(cx)).hint("Ctrl+Y"));
         }
         let fallback = Rc::new(own_new_items(me));
-        v.push(Item::Sub { label: t!("Yeni").into(), icon: icon(L::CirclePlus), items: Sub::Pending { key: "new", fallback: Some(fallback) } });
+        v.push(Item::Sub { label: t!("Yeni").into(), icon: icon(L::CirclePlus), items: Sub::Pending { key: "new", fallback: Some(fallback) }, click: None });
         let in_archive = crate::archive_view::split(dir).is_some() && !dir.exists();
         if !in_archive {
             v.push(Item::action(t!("Kısayol yapıştır"), icon(L::ClipboardPaste), act(me, |v, w, cx| v.paste_shortcuts(w, cx))).enabled(rf_win::clipboard::has_files()));
@@ -483,7 +486,7 @@ impl FolderView {
             v.push(Item::sub("Git", icon(L::GitBranch), git_items));
         }
         v.push(Item::Separator);
-        v.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } });
+        v.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None }, click: None });
         Menu { quick: self.quick_clipboard(me, false), items: v }
     }
 
@@ -753,6 +756,33 @@ fn archive_stem(items: &[PathBuf]) -> Option<(PathBuf, String)> {
         rf_core::history::display_name(&dir)
     };
     Some((dir, stem))
+}
+
+/// What a click on "Sıkıştır" makes: `None` when it only opens the submenu (or RAR is chosen and WinRAR is gone).
+fn quick_compress_format(q: crate::settings::QuickCompress) -> Option<Option<rf_archive::Format>> {
+    use crate::settings::QuickCompress as Q;
+    match q {
+        Q::Menu => None,
+        Q::Zip => Some(Some(rf_archive::Format::Zip)),
+        Q::SevenZ => Some(Some(rf_archive::Format::SevenZ)),
+        Q::TarZst => Some(Some(rf_archive::Format::TarZst)),
+        Q::TarGz => Some(Some(rf_archive::Format::TarGz)),
+        Q::Tar => Some(Some(rf_archive::Format::Tar)),
+        // (None inside: RAR, through WinRAR)
+        Q::Rar => crate::archive_view::winrar().is_some().then_some(None),
+    }
+}
+
+fn quick_compress(cx: &mut App, items: Vec<PathBuf>, format: Option<rf_archive::Format>) {
+    match format {
+        Some(f) => compress(cx, items, f),
+        None => {
+            if let Some((dir, stem)) = archive_stem(&items) {
+                let dest = rf_win::fileops::unique_name(&dir, &stem, ".rar");
+                crate::status_center::compress_rar(cx, items, dest, 5, None);
+            }
+        }
+    }
 }
 
 fn compress(cx: &mut App, items: Vec<PathBuf>, format: rf_archive::Format) {
@@ -1164,7 +1194,7 @@ fn to_items(me: &Me, session: u64, items: &[ShellItem], cx: &mut App) -> Vec<Ite
             }
             let icon = it.icon.as_ref().and_then(|i| fluent_menu::shell_icon(i, cx)).map(MenuIcon::Image).unwrap_or(MenuIcon::None);
             if !it.children.is_empty() {
-                return Item::Sub { label: it.label.clone().into(), icon, items: Sub::Items(Rc::new(to_items(me, session, &tidy(it.children.clone()), cx))) };
+                return Item::Sub { label: it.label.clone().into(), icon, items: Sub::Items(Rc::new(to_items(me, session, &tidy(it.children.clone()), cx))), click: None };
             }
             let (id, me) = (it.id, me.clone());
             let mut item = Item::action(it.label.clone(), icon, move |_, cx| invoke_shell(&me, session, id, cx)).enabled(it.enabled);
@@ -1225,7 +1255,7 @@ impl FolderView {
         if !background {
             menu.quick.push(Quick::new(L::Copy, t!("Kopyala  (Ctrl+C)"), true, act(&me, |v, w, cx| v.copy_to_clipboard(Transfer::Copy, w, cx))));
         }
-        menu.items.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } });
+        menu.items.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None }, click: None });
         if background {
             menu.items.push(Item::Separator);
             menu.items.push(Item::action(t!("Yenile"), icon(L::RotateCw), act(&me, |v, _, cx| v.refresh(cx))).hint("Ctrl+R"));

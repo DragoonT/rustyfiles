@@ -2672,7 +2672,7 @@ impl Workspace {
             }))
             .hint("Alt+Enter"),
             Item::Separator,
-            Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
+            Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None }, click: None },
         ]);
         // a cloud or WSL place can be taken off the sidebar on its own (it comes back from Settings > Files and folders)
         if self.places.read(cx).cloud.iter().any(|c| c.path == path) {

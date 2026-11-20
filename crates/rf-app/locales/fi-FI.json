@@ -2086,5 +2086,8 @@
  "1c0163bd": "Kiinnitetyt mutta avaamattomat sovellukset ovat vasemmassa saaressa käynnistiminä; keskimmäisessä saaressa ovat vain käynnissä olevat sovellukset.",
  "33a923e6": "Tekstin koko",
  "40d45e5e": "Tekstin koko tiedostonhallinnan ikkunoissa",
- "92bc0ce7": "Poista kansiosta"
+ "92bc0ce7": "Poista kansiosta",
+ "533f3598": "Avaa vain valikko",
+ "70fd9283": "Pakkaa-kohdan napsautus",
+ "05f2a11f": "Pakkaa-kohdan napsautus pikavalikossa pakkaa valinnan heti tähän muotoon; muut vaihtoehdot avautuvat, kun osoitin viedään sen päälle"
 }

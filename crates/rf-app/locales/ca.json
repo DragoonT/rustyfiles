@@ -2086,5 +2086,8 @@
  "1c0163bd": "Les aplicacions fixades que no estan obertes es queden a l'illa esquerra com a llançadors; l'illa central només té les que s'executen.",
  "33a923e6": "Mida del text",
  "40d45e5e": "La mida del text a les finestres del gestor de fitxers",
- "92bc0ce7": "Treu de la carpeta"
+ "92bc0ce7": "Treu de la carpeta",
+ "533f3598": "Només obre el menú",
+ "70fd9283": "En fer clic a Comprimeix",
+ "05f2a11f": "Un clic a Comprimeix al menú contextual comprimeix de seguida la selecció en aquest format; les altres opcions s'obren en passar-hi per sobre"
 }

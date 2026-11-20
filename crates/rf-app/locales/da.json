@@ -2086,5 +2086,8 @@
  "1c0163bd": "Fastgjorte apps, der ikke er åbne, står i venstre ø som startknapper; den midterste ø har kun de kørende apps.",
  "33a923e6": "Tekststørrelse",
  "40d45e5e": "Størrelsen på teksten i filhåndteringens vinduer",
- "92bc0ce7": "Tag ud af mappen"
+ "92bc0ce7": "Tag ud af mappen",
+ "533f3598": "Åbn kun menuen",
+ "70fd9283": "Når der klikkes på Komprimer",
+ "05f2a11f": "Et klik på Komprimer i højrekliksmenuen komprimerer straks det valgte i dette format; de andre muligheder åbner, når du holder musen over"
 }

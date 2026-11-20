@@ -2086,5 +2086,8 @@
  "1c0163bd": "Pinned apps that aren't open stand in the left island as launchers; the middle island holds only the running apps.",
  "33a923e6": "Text size",
  "40d45e5e": "The size of the text in the file manager's windows",
- "92bc0ce7": "Take out of the folder"
+ "92bc0ce7": "Take out of the folder",
+ "533f3598": "Only open the menu",
+ "70fd9283": "Clicking Compress",
+ "05f2a11f": "A click on Compress in the right-click menu compresses the selection in this format at once; the other ways open when you hover over it"
 }

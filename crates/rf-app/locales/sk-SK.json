@@ -2086,5 +2086,8 @@
  "1c0163bd": "Pripnuté, ale neotvorené aplikácie stoja v ľavom ostrove ako spúšťače; v prostrednom ostrove sú len spustené aplikácie.",
  "33a923e6": "Veľkosť textu",
  "40d45e5e": "Veľkosť textu v oknách správcu súborov",
- "92bc0ce7": "Vybrať z priečinka"
+ "92bc0ce7": "Vybrať z priečinka",
+ "533f3598": "Iba otvoriť ponuku",
+ "70fd9283": "Kliknutie na Komprimovať",
+ "05f2a11f": "Kliknutie na Komprimovať v kontextovej ponuke hneď skomprimuje výber v tomto formáte; ostatné možnosti sa otvoria po ukázaní myšou"
 }

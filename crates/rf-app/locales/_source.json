@@ -12587,5 +12587,23 @@
   "key": "Klasörden çıkar",
   "tr": "Klasörden çıkar",
   "en": "Take out of the folder"
+ },
+ {
+  "id": "533f3598",
+  "key": "Yalnızca menüyü aç",
+  "tr": "Yalnızca menüyü aç",
+  "en": "Only open the menu"
+ },
+ {
+  "id": "70fd9283",
+  "key": "Sıkıştır'a tıklayınca",
+  "tr": "Sıkıştır'a tıklayınca",
+  "en": "Clicking Compress"
+ },
+ {
+  "id": "05f2a11f",
+  "key": "Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır",
+  "tr": "Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır",
+  "en": "A click on Compress in the right-click menu compresses the selection in this format at once; the other ways open when you hover over it"
  }
 ]

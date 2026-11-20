@@ -2086,5 +2086,8 @@
  "1c0163bd": "A rögzített, de meg nem nyitott alkalmazások indítóként a bal szigeten állnak; a középső szigeten csak a futó alkalmazások vannak.",
  "33a923e6": "Szövegméret",
  "40d45e5e": "A szöveg mérete a fájlkezelő ablakaiban",
- "92bc0ce7": "Kivétel a mappából"
+ "92bc0ce7": "Kivétel a mappából",
+ "533f3598": "Csak a menü megnyitása",
+ "70fd9283": "Kattintás a Tömörítésre",
+ "05f2a11f": "A helyi menü Tömörítés elemére kattintva a kijelölés azonnal ebben a formátumban tömörül; a többi lehetőség rámutatáskor nyílik meg"
 }

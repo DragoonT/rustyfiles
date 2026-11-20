@@ -2054,6 +2054,20 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         Some(t!("ZIP, 7z ve tar dosyalarının içine çift tıklayarak girilir; içindeki dosyalar açılınca geçici bir klasöre çıkarılır")),
         sw("browse-arc", p, s.browse_archives, |s, v| s.browse_archives = v),
     ));
+    {
+        use crate::settings::QuickCompress as Q;
+        let mut options = vec![(Q::Menu, t!("Yalnızca menüyü aç").to_string()), (Q::Zip, "ZIP".into()), (Q::SevenZ, "7z".into()), (Q::TarZst, "tar.zst".into()), (Q::TarGz, "tar.gz".into()), (Q::Tar, "tar".into())];
+        if crate::archive_view::winrar().is_some() || s.quick_compress == Q::Rar {
+            options.push((Q::Rar, "RAR (WinRAR)".into()));
+        }
+        v.push(card(
+            p,
+            L::Archive,
+            t!("Sıkıştır'a tıklayınca"),
+            Some(t!("Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır")),
+            dropdown("quick-compress", p, s.quick_compress, options, |s, v| s.quick_compress = v),
+        ));
+    }
     v.push(card(
         p,
         L::FolderOutput,

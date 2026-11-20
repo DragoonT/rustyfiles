@@ -2086,5 +2086,8 @@
  "1c0163bd": "Las aplicaciones ancladas que no están abiertas quedan en la isla izquierda como lanzadores; la isla central solo tiene las que se ejecutan.",
  "33a923e6": "Tamaño del texto",
  "40d45e5e": "El tamaño del texto en las ventanas del gestor de archivos",
- "92bc0ce7": "Sacar de la carpeta"
+ "92bc0ce7": "Sacar de la carpeta",
+ "533f3598": "Solo abrir el menú",
+ "70fd9283": "Al hacer clic en Comprimir",
+ "05f2a11f": "Un clic en Comprimir en el menú contextual comprime la selección en este formato al momento; las demás opciones se abren al pasar el puntero"
 }

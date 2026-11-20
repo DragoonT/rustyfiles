@@ -2086,5 +2086,8 @@
  "1c0163bd": "Připnuté, ale neotevřené aplikace stojí v levém ostrově jako spouštěče; v prostředním ostrově jsou jen běžící aplikace.",
  "33a923e6": "Velikost textu",
  "40d45e5e": "Velikost textu v oknech správce souborů",
- "92bc0ce7": "Vyjmout ze složky"
+ "92bc0ce7": "Vyjmout ze složky",
+ "533f3598": "Jen otevřít nabídku",
+ "70fd9283": "Kliknutí na Komprimovat",
+ "05f2a11f": "Kliknutí na Komprimovat v místní nabídce hned zkomprimuje výběr v tomto formátu; ostatní možnosti se otevřou po najetí myší"
 }

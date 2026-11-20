@@ -2086,5 +2086,8 @@
  "1c0163bd": "Angeheftete, aber nicht geöffnete Apps stehen in der linken Insel als Starter; die mittlere Insel enthält nur die laufenden Apps.",
  "33a923e6": "Textgröße",
  "40d45e5e": "Die Größe der Texte in den Fenstern des Dateimanagers",
- "92bc0ce7": "Aus dem Ordner nehmen"
+ "92bc0ce7": "Aus dem Ordner nehmen",
+ "533f3598": "Nur das Menü öffnen",
+ "70fd9283": "Klick auf Komprimieren",
+ "05f2a11f": "Ein Klick auf Komprimieren im Kontextmenü komprimiert die Auswahl sofort in diesem Format; die anderen Möglichkeiten öffnen sich beim Darüberfahren"
 }
