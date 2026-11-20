@@ -12587,5 +12587,11 @@
   "key": "Klasörden çıkar",
   "tr": "Klasörden çıkar",
   "en": "Take out of the folder"
+ },
+ {
+  "id": "bd479de9",
+  "key": "Windows Dosya Gezgini görünümü",
+  "tr": "Windows Dosya Gezgini görünümü",
+  "en": "Windows File Explorer look"
  }
 ]

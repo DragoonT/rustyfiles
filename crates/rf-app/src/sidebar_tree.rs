@@ -170,6 +170,8 @@ pub struct SidebarTree {
     /// The selected row was among the rows built at the last paint (the rows are virtualised: a selected row that is scrolled far
     /// out of view is not built, carries no probe, and must not hold the lens, which would stay where it last was).
     selected_in_view: bool,
+    /// The user's profile folder, asked once (the first root).
+    home: Option<PathBuf>,
     /// The open folder and the follow setting the model was last told about.
     followed: Option<(Option<PathBuf>, bool)>,
     watchers: HashMap<String, DirWatch>,
@@ -272,6 +274,7 @@ impl SidebarTree {
             shown_elsewhere: false,
             lens: None,
             selected_in_view: true,
+            home: dirs::home_dir(),
             followed: None,
             watchers: HashMap::new(),
             pending_watch: HashSet::new(),
@@ -288,13 +291,16 @@ impl SidebarTree {
         self.epoch.elapsed().as_millis() as u64
     }
 
-    /// The drives, as the sidebar's places have them.
+    /// The profile folder first, then the drives, as the sidebar's places have them.
     fn refresh_roots(&mut self, cx: &mut Context<Self>) {
         let places = self.places.read(cx);
         if !places.loaded {
             return;
         }
         let mut specs = Vec::new();
+        if let Some(home) = self.home.clone() {
+            specs.push(RootSpec { label: rf_core::history::display_name(&home), path: home, kind: RootKind::Profile });
+        }
         for d in &places.drives {
             specs.push(RootSpec { path: d.root.clone(), label: crate::places::drive_name(d), kind: root_kind(d.kind) });
         }

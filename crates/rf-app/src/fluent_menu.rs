@@ -1021,7 +1021,7 @@ fn row_content(
 fn asset_icon(path: &'static str) -> AnyElement {
     #[cfg(target_os = "windows")]
     if let Some(glyph) = crate::icons::windows_theme_context_glyph(path) {
-        return fluent_glyph(glyph);
+        return crate::icons::windows_theme_glyph(glyph, px(16.));
     }
 
     match crate::icons::windows_theme_asset_bytes(path) {
@@ -1037,7 +1037,7 @@ fn lucide_menu_icon(icon: L, explorer_context: bool, tint: Option<Hsla>) -> AnyE
     #[cfg(target_os = "windows")]
     if explorer_context {
         if let Some(glyph) = crate::icons::windows_theme_icon_glyph(icon) {
-            return fluent_glyph(glyph);
+            return crate::icons::windows_theme_glyph(glyph, px(16.));
         }
     }
 
@@ -1052,19 +1052,6 @@ fn lucide_menu_icon(icon: L, explorer_context: bool, tint: Option<Hsla>) -> AnyE
                 None => icon.into_any_element(),
             }
         })
-}
-
-#[cfg(target_os = "windows")]
-fn fluent_glyph(glyph: char) -> AnyElement {
-    div()
-        .size(px(16.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .font_family("Segoe Fluent Icons")
-        .text_size(px(16.))
-        .child(glyph.to_string())
-        .into_any_element()
 }
 
 impl MenuView {

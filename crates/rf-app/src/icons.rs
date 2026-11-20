@@ -2,13 +2,10 @@
 //! Native shell icons/thumbnails come later via rf-win; this is the instant, zero-I/O fallback.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
 
 use crate::t;
 use gpui_kit::assets::IconName as L;
 use gpui_kit::component::Icon;
-use gpui_kit::RenderImage;
 use gpui_kit::{
     App, AnyElement, AssetSource, IntoElement, ParentElement, Pixels, SharedString, Styled, div, rgb,
 };
@@ -309,55 +306,6 @@ const WINDOWS_THEME_ASSETS: &[(&str, &[u8])] = &[
     ),
 ];
 
-const WINDOWS_THEME_ACTION_IMAGES: &[(&str, &[u8])] = &[
-    (
-        "menu-undo.png",
-        include_bytes!("../assets/windows-theme/menu-undo.png"),
-    ),
-    (
-        "menu-redo.png",
-        include_bytes!("../assets/windows-theme/menu-redo.png"),
-    ),
-    (
-        "menu-select-all.png",
-        include_bytes!("../assets/windows-theme/menu-select-all.png"),
-    ),
-    (
-        "menu-select-none.png",
-        include_bytes!("../assets/windows-theme/menu-select-none.png"),
-    ),
-    (
-        "menu-invert-selection.png",
-        include_bytes!("../assets/windows-theme/menu-invert-selection.png"),
-    ),
-    (
-        "menu-settings.png",
-        include_bytes!("../assets/windows-theme/menu-settings.png"),
-    ),
-];
-
-static WINDOWS_THEME_ACTION_IMAGE_CACHE: OnceLock<HashMap<&'static str, Arc<RenderImage>>> =
-    OnceLock::new();
-
-pub fn windows_theme_action_image(name: &'static str) -> Option<Arc<RenderImage>> {
-    let images = WINDOWS_THEME_ACTION_IMAGE_CACHE.get_or_init(|| {
-        WINDOWS_THEME_ACTION_IMAGES
-            .iter()
-            .filter_map(|(name, bytes)| match image::load_from_memory(bytes) {
-                Ok(image) => Some((
-                    *name,
-                    Arc::new(RenderImage::new(vec![image::Frame::new(image.to_rgba8())])),
-                )),
-                Err(error) => {
-                    log::warn!("could not decode Windows theme icon {name}: {error}");
-                    None
-                }
-            })
-            .collect()
-    });
-    images.get(name).cloned()
-}
-
 pub struct AppAssets;
 
 impl AssetSource for AppAssets {
@@ -430,8 +378,8 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "archive" => "file-archive",
         "arrow-down" => "down",
         "arrow-down-up" | "arrow-down-wide-narrow" | "arrow-up-down" | "chevrons-up-down" => "sort",
-        "arrow-left" | "arrow-left-right" | "undo" | "undo-2" | "redo-2" => "back",
-        "arrow-right" | "move-right" | "redo" => "forward",
+        "arrow-left" => "back",
+        "arrow-right" | "move-right" => "forward",
         "arrow-up" => "up",
         "arrow-up-right" | "external-link" | "square-arrow-out-up-right" => "external-link",
         "app-window" | "file-type" | "maximize" | "maximize-2" | "square-terminal" => "app",
@@ -496,15 +444,14 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "file-plus" | "file-plus-2" => "new-file",
         "folder-plus" => "new-folder",
         "square-chevron-right" => "chevron-right",
-        "square" => "check",
         "plus" | "square-plus" | "circle-plus" | "zoom-in" => "add",
         "minus" | "zoom-out" => "minus",
         "refresh-cw" | "refresh-ccw" | "rotate-cw" | "rotate-ccw" | "rotate-cw-square" => "refresh",
         "pencil" | "pencil-line" | "file-pen-line" | "edit" | "replace" => "rename",
-        "pin" | "pin-off" | "bookmark" | "star" => "pin",
+        "pin" | "pin-off" => "pin",
         "search" | "search-slash" | "folder-search-2" => "search",
         "settings" | "settings-2" | "sliders-horizontal" | "cog" | "wrench" => "settings",
-        "share" | "share-2" | "send" | "user" | "users" => "share",
+        "share" | "share-2" => "share",
         "scissors" | "cut" => "cut",
         "save" => "file",
         "skip-back" => "back",
@@ -513,7 +460,6 @@ fn windows_theme_path(path: &str) -> Option<&'static str> {
         "upload" | "cloud-upload" => "upload",
         "download" | "cloud-download" => "download",
         "chart-pie" => "chart",
-        "info" | "info-circle" | "circle-help" => "properties",
         "triangle-alert" | "alert-triangle" | "alert-circle" => "warning",
         "x" | "circle-x" | "circle-xmark" => "close",
         _ => return None,
@@ -632,6 +578,32 @@ pub fn windows_theme_context_glyph(path: &str) -> Option<char> {
     char::from_u32(glyph)
 }
 
+fn windows_theme_font_for_build(build: u32) -> &'static str {
+    if build >= 22000 {
+        "Segoe Fluent Icons"
+    } else {
+        "Segoe MDL2 Assets"
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn windows_theme_font_family() -> &'static str {
+    windows_theme_font_for_build(rf_win::osver::build())
+}
+
+#[cfg(target_os = "windows")]
+pub fn windows_theme_glyph(glyph: char, size: Pixels) -> AnyElement {
+    div()
+        .size(size)
+        .flex()
+        .items_center()
+        .justify_center()
+        .font_family(windows_theme_font_family())
+        .text_size(size)
+        .child(glyph.to_string())
+        .into_any_element()
+}
+
 pub fn windows_theme_icon_glyph(icon: L) -> Option<char> {
     let path = icon.path();
     let name = path.strip_prefix("icons/")?.strip_suffix(".svg")?;
@@ -654,6 +626,9 @@ pub fn windows_theme_icon_glyph(icon: L) -> Option<char> {
         "wrench" => 0xE946,
         "rotate-cw" => 0xE72C,
         "rotate-ccw" => 0xE80D,
+        "settings" => 0xE713,
+        "undo" | "undo-2" => 0xE7A7,
+        "redo" | "redo-2" => 0xE7A6,
         _ => return None,
     };
     char::from_u32(glyph)
@@ -707,6 +682,28 @@ mod windows_theme_tests {
     }
 
     #[test]
+    fn windows_theme_does_not_change_the_meaning_of_unrelated_icons() {
+        for path in [
+            "icons/square.svg",
+            "icons/user.svg",
+            "icons/users.svg",
+            "icons/send.svg",
+            "icons/undo.svg",
+            "icons/undo-2.svg",
+            "icons/redo.svg",
+            "icons/redo-2.svg",
+            "icons/star.svg",
+            "icons/bookmark.svg",
+            "icons/info.svg",
+            "icons/info-circle.svg",
+            "icons/circle-help.svg",
+            "icons/arrow-left-right.svg",
+        ] {
+            assert_eq!(windows_theme_path(path), None, "{path}");
+        }
+    }
+
+    #[test]
     fn windows_context_actions_use_segoe_fluent_glyphs() {
         for (asset, glyph) in [
             ("windows-theme/add.svg", '\u{E710}'),
@@ -729,17 +726,18 @@ mod windows_theme_tests {
     }
 
     #[test]
-    fn windows_theme_custom_action_images_are_available() {
-        for name in [
-            "menu-undo.png",
-            "menu-redo.png",
-            "menu-select-all.png",
-            "menu-select-none.png",
-            "menu-invert-selection.png",
-            "menu-settings.png",
-        ] {
-            assert!(super::windows_theme_action_image(name).is_some(), "{name}");
-        }
+    fn windows_theme_standard_actions_use_system_glyphs() {
+        use gpui_kit::assets::IconName as L;
+
+        assert_eq!(windows_theme_icon_glyph(L::Undo2), Some('\u{E7A7}'));
+        assert_eq!(windows_theme_icon_glyph(L::Redo2), Some('\u{E7A6}'));
+        assert_eq!(windows_theme_icon_glyph(L::Settings), Some('\u{E713}'));
+    }
+
+    #[test]
+    fn windows_10_uses_mdl2_and_windows_11_uses_fluent_icons() {
+        assert_eq!(super::windows_theme_font_for_build(19045), "Segoe MDL2 Assets");
+        assert_eq!(super::windows_theme_font_for_build(22000), "Segoe Fluent Icons");
     }
 
     #[test]

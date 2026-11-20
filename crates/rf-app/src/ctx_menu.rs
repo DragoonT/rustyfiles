@@ -742,14 +742,14 @@ impl FolderView {
                 vec![
                     Item::action(
                         undo_text(undo),
-                        explorer_action_icon("menu-undo.png", L::Undo2, explorer_theme),
+                        icon(L::Undo2),
                         move |_, cx| crate::undo::undo(cx),
                     )
                     .hint("Ctrl+Z")
                     .enabled(undo.is_some()),
                     Item::action(
                         redo_text(redo),
-                        explorer_action_icon("menu-redo.png", L::Redo2, explorer_theme),
+                        icon(L::Redo2),
                         move |_, cx| crate::undo::redo(cx),
                     )
                     .hint("Ctrl+Y")
@@ -757,23 +757,19 @@ impl FolderView {
                     Item::Separator,
                     Item::action(
                         t!("Tümünü seç"),
-                        explorer_action_icon("menu-select-all.png", L::SquareCheck, explorer_theme),
+                        icon(L::SquareCheck),
                         act(&me, |v, _, cx| v.select_all_items(cx)),
                     )
                     .hint("Ctrl+A"),
                     Item::action(
                         t!("Hiçbirini seçme"),
-                        explorer_action_icon("menu-select-none.png", L::Square, explorer_theme),
+                        icon(L::Square),
                         act(&me, |v, _, cx| v.select_no_items(cx)),
                     )
                     .enabled(!none),
                     Item::action(
                         t!("Seçimi tersine çevir"),
-                        explorer_action_icon(
-                            "menu-invert-selection.png",
-                            L::ArrowLeftRight,
-                            explorer_theme,
-                        ),
+                        icon(L::ArrowLeftRight),
                         act(&me, |v, _, cx| v.invert_selected_items(cx)),
                     ),
                     Item::Separator,
@@ -788,7 +784,7 @@ impl FolderView {
                     ),
                     Item::action(
                         t!("Ayarlar"),
-                        explorer_action_icon("menu-settings.png", L::Settings, explorer_theme),
+                        icon(L::Settings),
                         |w, cx| w.dispatch_action(Box::new(crate::actions::GoSettings), cx),
                     )
                     .hint("Ctrl+,"),
@@ -858,16 +854,6 @@ impl FolderView {
                 cx,
             );
         }
-    }
-}
-
-fn explorer_action_icon(name: &'static str, fallback: L, explorer_theme: bool) -> MenuIcon {
-    if explorer_theme {
-        crate::icons::windows_theme_action_image(name)
-            .map(MenuIcon::Image)
-            .unwrap_or_else(|| icon(fallback))
-    } else {
-        icon(fallback)
     }
 }
 
