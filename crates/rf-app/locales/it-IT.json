@@ -2083,5 +2083,7 @@
  "f19b9d2a": "Nomi sotto le icone",
  "985e4d39": "L’isola centrale mostra il nome di ogni app sotto la sua icona.",
  "f65a0ac5": "App aggiunte non in esecuzione a sinistra",
- "1c0163bd": "Le app aggiunte che non sono aperte stanno nell’isola sinistra come lanciatori; l’isola centrale contiene solo le app in esecuzione."
+ "1c0163bd": "Le app aggiunte che non sono aperte stanno nell’isola sinistra come lanciatori; l’isola centrale contiene solo le app in esecuzione.",
+ "33a923e6": "Dimensione del testo",
+ "40d45e5e": "La dimensione del testo nelle finestre del gestore file"
 }

@@ -2083,5 +2083,7 @@
  "f19b9d2a": "Names under the icons",
  "985e4d39": "The middle island shows each app's name under its icon.",
  "f65a0ac5": "Pinned apps that aren't running on the left",
- "1c0163bd": "Pinned apps that aren't open stand in the left island as launchers; the middle island holds only the running apps."
+ "1c0163bd": "Pinned apps that aren't open stand in the left island as launchers; the middle island holds only the running apps.",
+ "33a923e6": "Text size",
+ "40d45e5e": "The size of the text in the file manager's windows"
 }

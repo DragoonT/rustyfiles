@@ -2083,5 +2083,7 @@
  "f19b9d2a": "Navn under ikonene",
  "985e4d39": "Den midterste øya viser navnet på hver app under ikonet.",
  "f65a0ac5": "Festede apper som ikke kjører, til venstre",
- "1c0163bd": "Festede apper som ikke er åpne, står i venstre øy som startere; den midterste øya har bare appene som kjører."
+ "1c0163bd": "Festede apper som ikke er åpne, står i venstre øy som startere; den midterste øya har bare appene som kjører.",
+ "33a923e6": "Tekststørrelse",
+ "40d45e5e": "Størrelsen på teksten i filbehandlerens vinduer"
 }

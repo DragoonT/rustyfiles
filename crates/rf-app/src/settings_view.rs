@@ -1638,6 +1638,20 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 .collect()
         }),
     ));
+    // the text size (issue 89): smaller for a low-resolution screen, larger to read more easily
+    v.push(card(
+        p,
+        L::CaseSensitive,
+        t!("Yazı boyutu"),
+        Some(t!("Dosya yöneticisinin pencerelerindeki yazıların boyutu")),
+        dropdown(
+            "text-size",
+            p,
+            u32::from(s.text_percent),
+            vec![(87, t!("Küçük").into()), (100, t!("Normal").into()), (112, t!("Büyük").into())],
+            |s, v| s.text_percent = v as u16,
+        ),
+    ));
     v.push(card(p, L::PanelBottom, t!("Durum çubuğunu göster"), None, sw("statusbar", p, s.show_statusbar, |s, v| s.show_statusbar = v)));
     v.push(card(p, L::PanelRight, t!("Önizleme paneli"), Some("Alt+P"), sw("preview", p, s.preview_open, |s, v| s.preview_open = v)));
     v.push(card(

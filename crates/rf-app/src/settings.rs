@@ -322,6 +322,15 @@ pub struct ColumnPrefs {
     pub name_width: u16,
 }
 
+fn is_hundred(v: &u16) -> bool {
+    *v == 100
+}
+
+/// The base size (rem) for a text size of `percent`, within 75 % and 125 % of the usual 16 px.
+pub fn rem_for(percent: u16) -> f32 {
+    16.0 * f32::from(percent.clamp(75, 125)) / 100.0
+}
+
 fn is_zero_u16(v: &u16) -> bool {
     *v == 0
 }
@@ -541,6 +550,10 @@ pub struct Settings {
     pub hg_freeze_behind: bool,
     /// UI font family; `None` = Segoe UI Variable / system.
     pub font: Option<String>,
+    /// The text size of the file manager's windows, percent of the usual (87, 100 or 112). Issue 89: "For lower resolution screens,
+    /// the current font size is too large". It sets the windows' base size, which the texts are measured in.
+    #[serde(skip_serializing_if = "is_hundred")]
+    pub text_percent: u16,
     pub show_toolbar: bool,
     pub show_statusbar: bool,
 
@@ -873,6 +886,7 @@ impl Default for Settings {
             hg_surface: HG_DEFAULT[4],
             hg_freeze_behind: false,
             font: None,
+            text_percent: 100,
             show_toolbar: true,
             show_statusbar: true,
             sync_layout: false,

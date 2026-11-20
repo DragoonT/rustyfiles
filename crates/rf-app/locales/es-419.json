@@ -2083,5 +2083,7 @@
  "f19b9d2a": "Nombres debajo de los íconos",
  "985e4d39": "La isla central muestra el nombre de cada aplicación debajo de su ícono.",
  "f65a0ac5": "Apps ancladas sin ejecutar a la izquierda",
- "1c0163bd": "Las apps ancladas que no están abiertas quedan en la isla izquierda como lanzadores; la isla central solo tiene las que se ejecutan."
+ "1c0163bd": "Las apps ancladas que no están abiertas quedan en la isla izquierda como lanzadores; la isla central solo tiene las que se ejecutan.",
+ "33a923e6": "Tamaño del texto",
+ "40d45e5e": "El tamaño del texto en las ventanas del administrador de archivos"
 }

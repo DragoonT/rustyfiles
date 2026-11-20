@@ -2083,5 +2083,7 @@
  "f19b9d2a": "Namen unter den Symbolen",
  "985e4d39": "Die mittlere Insel zeigt den Namen jeder App unter ihrem Symbol.",
  "f65a0ac5": "Angeheftete Apps, die nicht laufen, links",
- "1c0163bd": "Angeheftete, aber nicht geöffnete Apps stehen in der linken Insel als Starter; die mittlere Insel enthält nur die laufenden Apps."
+ "1c0163bd": "Angeheftete, aber nicht geöffnete Apps stehen in der linken Insel als Starter; die mittlere Insel enthält nur die laufenden Apps.",
+ "33a923e6": "Textgröße",
+ "40d45e5e": "Die Größe der Texte in den Fenstern des Dateimanagers"
 }
