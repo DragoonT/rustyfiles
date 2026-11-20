@@ -852,6 +852,8 @@ pub fn main() {
                     "appearance" => settings_view::Page::Appearance,
                     "dock" => settings_view::Page::Dock,
                     "filetypes" => settings_view::Page::FileTypes,
+                    "hypersearch" => settings_view::Page::Search,
+                    "advanced" => settings_view::Page::Advanced,
                     _ => settings_view::Page::Look,
                 },
                 cx,

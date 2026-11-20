@@ -34,7 +34,7 @@ pub enum Page {
     Tags,
     Look,
     Ferry,
-    Dev,
+    Search,
     Advanced,
     Speed,
     Organizer,
@@ -52,8 +52,8 @@ const PAGES: [(Page, L, &str); 16] = [
     (Page::Actions, L::Keyboard, "Eylemler"),
     (Page::Tags, L::Tag, "Etiketler"),
     (Page::Look, L::Eye, "DirectLook"),
+    (Page::Search, L::Search, "HyperSearch"),
     (Page::Ferry, L::Send, "Ferry"),
-    (Page::Dev, L::SquareTerminal, "Geliştirici araçları"),
     (Page::Advanced, L::Wrench, "Gelişmiş"),
     (Page::Speed, L::Gauge, "Hız testi"),
     (Page::Organizer, L::WandSparkles, "Dosya düzenleyici"),
@@ -223,8 +223,14 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Tags => tags(p, cx),
         Page::Look => look(p, s, cx),
         Page::Ferry => crate::ferry::page(p, s, cx),
-        Page::Dev => dev(p, s, cx),
-        Page::Advanced => advanced(p, s, cx),
+        Page::Search => quick_search_cards(p, s, cx),
+        // the developer tools are a part of Gelişmiş (they had a page of their own)
+        Page::Advanced => {
+            let mut v = advanced(p, s, cx);
+            v.push(section(p, t!("Geliştirici araçları")));
+            v.extend(dev(p, s, cx));
+            v
+        }
         Page::Speed => crate::bench_view::page(p, cx),
         Page::Organizer => crate::organizer::page::page(p, cx),
         Page::About => about(p, cx),
@@ -671,7 +677,6 @@ fn quick_search_cards(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement
         })
         .into_any_element();
     vec![
-        section(p, "HyperSearch"),
         card(
             p,
             L::Search,
@@ -893,7 +898,6 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
 
     v.push(section(p, t!("Kaydırma")));
     v.push(card(p, L::ChevronsUpDown, t!("Akıcı kaydırma"), None, sw("smooth", p, s.smooth_scroll, |s, v| s.smooth_scroll = v)));
-    v.extend(quick_search_cards(p, s, cx));
     v.extend(crate::snip::settings_cards(p, s));
     v
 }
