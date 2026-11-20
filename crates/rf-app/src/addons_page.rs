@@ -93,7 +93,17 @@ fn install(info: AddonInfo, cx: &mut App) {
     .detach();
     cx.spawn(async move |cx| {
         let (d, c) = (done.clone(), cancel.clone());
-        let got = cx.background_spawn(async move { addons::install(&info, &|n, _| d.store(n, Ordering::Relaxed), &|| c.load(Ordering::Relaxed)).map(|_| ()) }).await;
+        let hd = info.id == crate::hyperdownload::ID;
+        let got = cx
+            .background_spawn(async move {
+                let r = addons::install(&info, &|n, _| d.store(n, Ordering::Relaxed), &|| c.load(Ordering::Relaxed)).map(|_| ());
+                // HyperDownload: the browsers learn where its host is
+                if r.is_ok() && hd {
+                    crate::hyperdownload::register_host();
+                }
+                r
+            })
+            .await;
         cx.update(|cx| {
             let st = cx.global_mut::<State>();
             st.busy.remove(&id);
@@ -107,6 +117,9 @@ fn install(info: AddonInfo, cx: &mut App) {
 }
 
 fn remove(id: String, cx: &mut App) {
+    if id == crate::hyperdownload::ID {
+        crate::hyperdownload::unregister_host();
+    }
     let got = addons::remove(&id);
     let st = state(cx);
     match got {

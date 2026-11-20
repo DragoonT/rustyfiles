@@ -632,6 +632,11 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
         crate::quick_search::toggle(cx);
         return true;
     }
+    // a download the browser handed to HyperDownload: a card of the Status Center
+    if let Some(gid) = msg.trim().strip_prefix(crate::hyperdownload::FOLLOW_PREFIX) {
+        crate::hyperdownload::follow(gid.to_string(), cx);
+        return true;
+    }
     crate::shell::desktop::open::mark("main: the line to open a place arrived");
     let (loc, select) = parse_launch(&msg);
     // (with "open folders from other programs in a new window" on, no window takes it as a tab: issue 77)

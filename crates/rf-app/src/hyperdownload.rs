@@ -12,6 +12,67 @@ use serde_json::{Value, json};
 
 pub const ID: &str = "hyperdownload";
 
+/// The message a second launch (`rustyfiles.exe --hd-follow=<gid>`, started by the add-on's browser host) sends to the running
+/// rustyfiles: show this download as a card of the Status Center.
+pub const FOLLOW_PREFIX: &str = "hd-follow:";
+
+/// The browser extension's id while it is loaded unpacked (from the key in its manifest); the stores' ids join it once it is published.
+const EXTENSION_IDS: &[&str] = &["pbnficneolckhnkmpagjimjbhjahcepa"];
+const HOST_NAME: &str = "com.gelenmedya.hyperdownload";
+
+/// Where the browsers look for native messaging hosts (current user only).
+const HOST_KEYS: &[&str] = &[
+    r"Software\Google\Chrome\NativeMessagingHosts",
+    r"Software\Microsoft\Edge\NativeMessagingHosts",
+    r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts",
+    r"Software\Chromium\NativeMessagingHosts",
+];
+
+/// After the add-on is installed (and at each start of it): the browser host's files beside the program (`host.json`: this
+/// rustyfiles' data folder, the Downloads folder and its own exe, so that the host started by a browser finds the same running
+/// program and shows its downloads here) and the browsers' registration of the host (current user's registry, its own keys only).
+pub fn register_host() {
+    let (Some(exe), Some(data)) = (crate::addons::program(ID), data_dir()) else { return };
+    let Some(dir) = exe.parent() else { return };
+    let downloads = dirs::download_dir().unwrap_or_else(|| data.clone());
+    let me = std::env::current_exe().ok();
+    let host = json!({ "data": data, "downloads": downloads, "rustyfiles": me });
+    let _ = std::fs::write(dir.join("host.json"), serde_json::to_vec_pretty(&host).unwrap_or_default());
+    let origins: Vec<String> = EXTENSION_IDS.iter().map(|id| format!("chrome-extension://{id}/")).collect();
+    let manifest = json!({ "name": HOST_NAME, "description": "HyperDownload, the download manager of rustyfiles", "path": exe, "type": "stdio", "allowed_origins": origins });
+    let manifest_path = dir.join("native-host.json");
+    if std::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap_or_default()).is_err() {
+        return;
+    }
+    // a copy with settings of its own (a test copy) never points the user's browsers at its add-on
+    if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_some_and(|d| !d.is_empty()) {
+        return;
+    }
+    for key in HOST_KEYS {
+        if let Ok(k) = windows_registry::CURRENT_USER.create(format!("{key}\\{HOST_NAME}")) {
+            let _ = k.set_string("", manifest_path.to_string_lossy().as_ref());
+        }
+    }
+}
+
+/// Before the add-on is removed: the browsers forget the host.
+pub fn unregister_host() {
+    if std::env::var_os("RUSTYFILES_CONFIG_DIR").is_some_and(|d| !d.is_empty()) {
+        return;
+    }
+    for key in HOST_KEYS {
+        if let Ok(k) = windows_registry::CURRENT_USER.open(key) {
+            let _ = k.remove_tree(HOST_NAME);
+        }
+    }
+}
+
+/// Shows a download HyperDownload already has (handed over by the browser) as a card, into the Downloads folder.
+pub fn follow(gid: String, cx: &mut gpui_kit::App) {
+    let dir = dirs::download_dir().unwrap_or_default();
+    download_source(Source::Follow(gid), dir, cx)
+}
+
 /// Where the add-on keeps its lists, its torrent session and `rpc.json`.
 fn data_dir() -> Option<PathBuf> {
     crate::settings::local_data_dir().map(|d| d.join("hyperdownload"))
@@ -70,6 +131,7 @@ pub fn connect() -> Result<Rpc, Unavailable> {
         return Ok(r);
     }
     let exe = crate::addons::program(ID).ok_or(Unavailable::NotInstalled)?;
+    register_host();
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::remove_file(dir.join("rpc.json"));
     let downloads = dirs::download_dir().unwrap_or_else(|| dir.clone());
@@ -197,6 +259,8 @@ fn ask_files(name: String, files: Vec<(String, u64)>, suggested: Vec<usize>, rep
 pub enum Source {
     Link(String),
     TorrentFile(PathBuf),
+    /// A download HyperDownload already has (one the browser extension handed it), by its GID.
+    Follow(String),
 }
 
 /// Standard base64 (with padding), as aria2's `addTorrent` takes the torrent file.
@@ -249,10 +313,12 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
     let label = match &source {
         Source::Link(u) => label_of(u),
         Source::TorrentFile(p) => p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        Source::Follow(_) => crate::t!("tarayıcıdan").to_string(),
     };
     let url = match &source {
         Source::Link(u) => u.clone(),
         Source::TorrentFile(p) => p.display().to_string(),
+        Source::Follow(g) => g.clone(),
     };
     let title = format!("{} {}", crate::t!("İndiriliyor:"), label);
     let shown_dir = dir.clone();
@@ -281,6 +347,7 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
                     let bytes = std::fs::read(p).map_err(|e| anyhow::anyhow!("{}: {e}", p.display()))?;
                     rpc.call("aria2.addTorrent", vec![json!(base64(&bytes)), json!([]), options])
                 }
+                Source::Follow(g) => Ok(json!(g)),
             }
             .map_err(anyhow::Error::msg)?;
             let gid = gid.as_str().unwrap_or_default().to_string();

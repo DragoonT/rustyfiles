@@ -12791,5 +12791,11 @@
   "key": "HyperDownload ile indir",
   "tr": "HyperDownload ile indir",
   "en": "Download with HyperDownload"
+ },
+ {
+  "id": "d5cb1948",
+  "key": "tarayıcıdan",
+  "tr": "tarayıcıdan",
+  "en": "from the browser"
  }
 ]
