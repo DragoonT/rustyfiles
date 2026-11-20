@@ -2653,7 +2653,27 @@ impl FolderView {
                 // not while a press, a drag, a rubber band or a rename is going on, and not over a multi-selection made by hand
                 let busy = v.drag_origin.is_some() || v.marquee.is_some() || v.renaming.is_some();
                 let Some(now) = v.visible.iter().position(|&e| e == ei) else { return };
-                if !busy && !(v.selected.len() == 1 && v.selected.contains(&ei)) {
+                if busy {
+                    return;
+                }
+                // with Ctrl held the item joins the selection, with Shift the selection runs from the anchor to it, as in Explorer's
+                // "point to select" (issue 101: each hover replaced the selection)
+                let (ctrl, shift) = unsafe {
+                    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT};
+                    (GetKeyState(VK_CONTROL.0 as i32) < 0, GetKeyState(VK_SHIFT.0 as i32) < 0)
+                };
+                if shift {
+                    let anchor = v.anchor.unwrap_or(now);
+                    v.select_range(anchor, now);
+                    v.anchor = Some(anchor);
+                    cx.notify();
+                } else if ctrl {
+                    if v.selected.insert(ei) {
+                        v.cursor = Some(now);
+                        v.anchor = Some(now);
+                        cx.notify();
+                    }
+                } else if !(v.selected.len() == 1 && v.selected.contains(&ei)) {
                     v.select_only(now);
                     cx.notify();
                 }
@@ -4998,7 +5018,9 @@ pub(crate) fn scrollbar_mode() -> ScrollbarMode {
 
 /// The grid's name of a right-to-left name in at most two lines (issue 115): GPUI wraps such a run after every letter, so the name is
 /// split here, at a space, by measured width; each line is then drawn unwrapped (the last one ends in "…" when it is still too long).
-/// One line when it fits or has no space to split at.
+/// One line when it fits or has no space to split at. A last line that is still too long is cut here too, with the "…" at the END
+/// of its text: drawn right to left, that is its LEFT side, where a right-to-left reader expects it (issue 115: the text renderer's own
+/// cut put it on the right).
 fn rtl_grid_lines(name: &str, avail: Pixels, window: &Window) -> Vec<String> {
     let style = window.text_style();
     let size = rems(0.75).to_pixels(window.rem_size());
@@ -5019,9 +5041,27 @@ fn rtl_grid_lines(name: &str, avail: Pixels, window: &Window) -> Vec<String> {
         take = i;
     }
     if take == 0 {
-        return vec![name.to_string()];
+        return vec![cut_to_width(name, avail, &width)];
     }
-    vec![words[..take].join(" "), words[take..].join(" ")]
+    vec![words[..take].join(" "), cut_to_width(&words[take..].join(" "), avail, &width)]
+}
+
+/// `text` as it is when it fits in `avail`, else shortened at its end (in reading order) to what fits with "…" after it.
+fn cut_to_width(text: &str, avail: Pixels, width: &dyn Fn(&str) -> Pixels) -> String {
+    if width(text) <= avail {
+        return text.to_string();
+    }
+    let mut chars: Vec<char> = text.chars().collect();
+    while !chars.is_empty() {
+        chars.pop();
+        // (a right-to-left mark after the "…": the text renderer lays the line out left to right, and a "…" with nothing strong
+        // after it took that direction and stood on the right; between two right-to-left letters it goes with them, to the left)
+        let cut: String = chars.iter().collect::<String>().trim_end().to_string() + "…\u{200F}";
+        if width(&cut) <= avail {
+            return cut;
+        }
+    }
+    "…".to_string()
 }
 
 /// The key in the layouts file under which "the same layout in all folders" keeps its one layout (`<` cannot start a real path).
