@@ -3471,7 +3471,13 @@ impl FolderView {
         let browse = !e.is_dir()
             && cx.global::<crate::settings::Settings>().browse_archives
             && crate::archive_view::is_browsable(&path);
-        if e.is_dir() || browse {
+        // an archive goes where the setting says (its own tab or window, or here as a folder)
+        let archive_to = if e.is_dir() { crate::settings::ArchiveOpen::Here } else { cx.global::<crate::settings::Settings>().archives_open_in };
+        if browse && archive_to == crate::settings::ArchiveOpen::NewWindow {
+            cx.emit(FolderEvent::OpenInNewWindow(Location::Path(path)));
+        } else if browse && archive_to == crate::settings::ArchiveOpen::NewTab {
+            cx.emit(FolderEvent::OpenInNewTab(Location::Path(path)));
+        } else if e.is_dir() || browse {
             if cx.global::<crate::settings::Settings>().open_folders_in_new_tab {
                 cx.emit(FolderEvent::OpenInNewTab(Location::Path(path)));
             } else {

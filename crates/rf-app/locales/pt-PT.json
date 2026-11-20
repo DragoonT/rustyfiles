@@ -2089,5 +2089,9 @@
  "92bc0ce7": "Retirar da pasta",
  "533f3598": "Apenas abrir o menu",
  "70fd9283": "Ao clicar em Comprimir",
- "05f2a11f": "Um clique em Comprimir no menu de contexto comprime de imediato a seleção neste formato; as outras opções abrem ao passar o ponteiro"
+ "05f2a11f": "Um clique em Comprimir no menu de contexto comprime de imediato a seleção neste formato; as outras opções abrem ao passar o ponteiro",
+ "eb46a863": "Onde os arquivos abrem",
+ "764abb10": "No mesmo separador",
+ "504bc2be": "Num novo separador",
+ "047f356f": "Numa nova janela"
 }

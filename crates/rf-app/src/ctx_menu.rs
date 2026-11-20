@@ -187,6 +187,12 @@ impl FolderView {
 
     fn items_menu(&self, me: &Me, dir: &std::path::Path, items: &[PathBuf], cx: &mut Context<Self>) -> Menu {
         let single_dir = items.len() == 1 && self.selected_is_single_dir();
+        // one archive that opens like a folder: it can open in a new tab or window too (Discord, 2026-11-20)
+        let single_archive = items.len() == 1
+            && !single_dir
+            && cx.global::<crate::settings::Settings>().browse_archives
+            && items[0].exists()
+            && crate::archive_view::is_browsable(&items[0]);
         let has_files = !self.selected_is_single_dir() || items.len() > 1;
         let target_dir = if single_dir { items[0].clone() } else { dir.to_path_buf() };
         let prefs = cx.global::<crate::settings::Settings>();
@@ -198,8 +204,9 @@ impl FolderView {
         let mut v: Vec<Item> = Vec::new();
 
         v.push(Item::action(t!("Aç"), icon(L::SquareArrowOutUpRight), act(me, |v, _, cx| v.open_selected(cx))).hint("Enter"));
-        if single_dir {
-            let (a, b) = (target_dir.clone(), target_dir.clone());
+        if single_dir || single_archive {
+            let opened = if single_archive { items[0].clone() } else { target_dir.clone() };
+            let (a, b) = (opened.clone(), opened);
             if mp.open_in_new_tab {
                 v.push(Item::action(t!("Yeni sekmede aç"), icon(L::SquarePlus), act(me, move |_, _, cx| {
                     cx.emit(FolderEvent::OpenInNewTab(Location::Path(a.clone())))

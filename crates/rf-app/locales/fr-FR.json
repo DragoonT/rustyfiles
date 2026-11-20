@@ -2089,5 +2089,9 @@
  "92bc0ce7": "Sortir du dossier",
  "533f3598": "Ouvrir seulement le menu",
  "70fd9283": "Clic sur Compresser",
- "05f2a11f": "Un clic sur Compresser dans le menu contextuel compresse aussitôt la sélection dans ce format ; les autres choix s'ouvrent au survol"
+ "05f2a11f": "Un clic sur Compresser dans le menu contextuel compresse aussitôt la sélection dans ce format ; les autres choix s'ouvrent au survol",
+ "eb46a863": "Où s'ouvrent les archives",
+ "764abb10": "Dans le même onglet",
+ "504bc2be": "Dans un nouvel onglet",
+ "047f356f": "Dans une nouvelle fenêtre"
 }

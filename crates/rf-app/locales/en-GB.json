@@ -2089,5 +2089,9 @@
  "92bc0ce7": "Take out of the folder",
  "533f3598": "Only open the menu",
  "70fd9283": "Clicking Compress",
- "05f2a11f": "A click on Compress in the right-click menu compresses the selection in this format at once; the other ways open when you hover over it"
+ "05f2a11f": "A click on Compress in the right-click menu compresses the selection in this format at once; the other ways open when you hover over it",
+ "eb46a863": "Where archives open",
+ "764abb10": "In the same tab",
+ "504bc2be": "In a new tab",
+ "047f356f": "In a new window"
 }

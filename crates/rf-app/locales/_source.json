@@ -12605,5 +12605,29 @@
   "key": "Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır",
   "tr": "Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır",
   "en": "A click on Compress in the right-click menu compresses the selection in this format at once; the other ways open when you hover over it"
+ },
+ {
+  "id": "eb46a863",
+  "key": "Arşivler nerede açılsın",
+  "tr": "Arşivler nerede açılsın",
+  "en": "Where archives open"
+ },
+ {
+  "id": "764abb10",
+  "key": "Aynı sekmede",
+  "tr": "Aynı sekmede",
+  "en": "In the same tab"
+ },
+ {
+  "id": "504bc2be",
+  "key": "Yeni sekmede",
+  "tr": "Yeni sekmede",
+  "en": "In a new tab"
+ },
+ {
+  "id": "047f356f",
+  "key": "Yeni pencerede",
+  "tr": "Yeni pencerede",
+  "en": "In a new window"
  }
 ]

@@ -2089,5 +2089,9 @@
  "92bc0ce7": "Sacar de la carpeta",
  "533f3598": "Solo abrir el menú",
  "70fd9283": "Al hacer clic en Comprimir",
- "05f2a11f": "Un clic en Comprimir en el menú contextual comprime la selección en este formato de inmediato; las demás opciones se abren al pasar el puntero"
+ "05f2a11f": "Un clic en Comprimir en el menú contextual comprime la selección en este formato de inmediato; las demás opciones se abren al pasar el puntero",
+ "eb46a863": "Dónde se abren los archivos comprimidos",
+ "764abb10": "En la misma pestaña",
+ "504bc2be": "En una pestaña nueva",
+ "047f356f": "En una ventana nueva"
 }
