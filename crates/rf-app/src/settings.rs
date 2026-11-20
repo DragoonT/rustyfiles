@@ -1428,6 +1428,10 @@ pub fn local_data_dir() -> Option<std::path::PathBuf> {
     if let Some(d) = std::env::var_os("RUSTYFILES_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(std::path::PathBuf::from(d));
     }
+    // the portable copy keeps everything in its own folder (issue 71)
+    if let Some(d) = rf_win::portable::data_dir() {
+        return Some(d);
+    }
     dirs::data_local_dir().map(|d| d.join("rustyfiles"))
 }
 
@@ -1435,6 +1439,10 @@ pub fn local_data_dir() -> Option<std::path::PathBuf> {
 pub fn app_dir() -> Option<std::path::PathBuf> {
     if let Some(d) = std::env::var_os("RUSTYFILES_CONFIG_DIR").filter(|d| !d.is_empty()) {
         return Some(std::path::PathBuf::from(d));
+    }
+    // the portable copy: its own `data` folder (`rf_win::portable`, issue 71)
+    if let Some(d) = rf_win::portable::data_dir() {
+        return Some(d);
     }
     dirs::config_dir().map(|d| d.join("rustyfiles"))
 }
@@ -1586,8 +1594,8 @@ fn sync_name_index(on: bool, excluded: &[String]) {
             return;
         }
         // a copy with its own settings folder (tests, portable) keeps its index there too
-        let dir = match std::env::var_os("RUSTYFILES_CONFIG_DIR") {
-            Some(cfg) => std::path::PathBuf::from(cfg).join("index"),
+        let dir = match std::env::var_os("RUSTYFILES_CONFIG_DIR").map(std::path::PathBuf::from).or_else(rf_win::portable::data_dir) {
+            Some(cfg) => cfg.join("index"),
             None => std::env::var_os("LOCALAPPDATA").map_or_else(std::env::temp_dir, std::path::PathBuf::from).join("rustyfiles").join("index"),
         };
         // RUSTYFILES_INDEX_ROOTS="E:\;F:\" picks the roots (testing)

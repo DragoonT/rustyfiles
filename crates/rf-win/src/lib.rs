@@ -52,6 +52,7 @@ pub mod nameindex;
 pub mod organize;
 pub mod osver;
 pub mod pkgverbs;
+pub mod portable;
 pub mod openrules;
 pub mod ownfolder;
 pub mod taskbar_hide;
