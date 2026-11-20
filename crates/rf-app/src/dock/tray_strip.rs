@@ -756,7 +756,8 @@ pub fn overflow_key_click(key: IconKey, kind: ClickKind, cx: &mut App) {
 
 /// The island's glass (the tip's tone is the island's).
 pub fn island_glass(cx: &App) -> Option<std::rc::Rc<RefCell<super::backdrop::IslandGlass>>> {
-    let right = cx.try_global::<TrayState>()?.right.upgrade()?;
+    // (without a tray host the island's own controls still have tips: the home dock's right island, issue 147)
+    let right = cx.try_global::<TrayState>().and_then(|st| st.right.upgrade()).or_else(|| host::right_island_on(host::MonId::HOME, cx))?;
     Some(right.read(cx).island_glass())
 }
 
