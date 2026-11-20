@@ -316,6 +316,14 @@ pub struct ColumnPrefs {
     /// then nothing of the property columns runs and the file has no such key.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub properties: Vec<String>,
+    /// The Name column's width once a divider was dragged (issue 135: dividers work as in Explorer, the columns stand from the left
+    /// and the room left over is at the right end). 0: the Name column takes whatever the others leave, as before any drag.
+    #[serde(skip_serializing_if = "is_zero_u16")]
+    pub name_width: u16,
+}
+
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
 }
 
 impl Default for ColumnPrefs {
@@ -336,6 +344,7 @@ impl Default for ColumnPrefs {
             git_hash: false,
             git_widths: [240, 130, 140, 90],
             properties: Vec::new(),
+            name_width: 0,
         }
     }
 }
