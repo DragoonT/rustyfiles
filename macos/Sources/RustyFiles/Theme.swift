@@ -132,6 +132,26 @@ struct Palette {
 enum Icons {
     private static var cache: [String: NSImage] = [:]
 
+    private static var menuCache: [String: NSImage] = [:]
+
+    /// The icon for a menu row: 16 pt with a light line, as macOS draws its own menu symbols
+    /// (the 24 px, 2 px Lucide drawing reads heavy at menu size).
+    static func menu(_ name: String) -> NSImage {
+        if let cached = menuCache[name] { return cached }
+        var image = NSImage(size: NSSize(width: 16, height: 16))
+        if let url = Bundle.main.url(forResource: name, withExtension: "svg", subdirectory: "icons"),
+            var svg = try? String(contentsOf: url, encoding: .utf8)
+        {
+            // drawn at 16 pt: 1.75 units of 24 is about a 1.2 px line, like the system symbols
+            svg = svg.replacingOccurrences(of: "stroke-width=\"2\"", with: "stroke-width=\"1.75\"")
+            if let img = NSImage(data: Data(svg.utf8)) { image = img }
+        }
+        image.size = NSSize(width: 16, height: 16)
+        image.isTemplate = true
+        menuCache[name] = image
+        return image
+    }
+
     static func named(_ name: String) -> NSImage {
         if let cached = cache[name] { return cached }
         let url = Bundle.main.url(forResource: name, withExtension: "svg", subdirectory: "icons")

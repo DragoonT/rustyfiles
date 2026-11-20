@@ -29,7 +29,7 @@ struct MenuBuilder {
     func add(_ title: String, _ icon: String? = nil, key: String = "", mods: NSEvent.ModifierFlags = .command, enabled: Bool = true,
              checked: Bool = false, _ action: @escaping () -> Void) -> NSMenuItem {
         let i = ClosureMenuItem(title: title, handler: action)
-        if let icon { i.image = Icons.named(icon) }
+        if let icon { i.image = Icons.menu(icon) }
         i.keyEquivalent = key
         i.keyEquivalentModifierMask = key.isEmpty ? [] : mods
         i.isEnabled = enabled
@@ -41,7 +41,7 @@ struct MenuBuilder {
     @discardableResult
     func sub(_ title: String, _ icon: String? = nil, _ fill: (MenuBuilder) -> Void) -> NSMenuItem {
         let i = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-        if let icon { i.image = Icons.named(icon) }
+        if let icon { i.image = Icons.menu(icon) }
         let b = MenuBuilder()
         fill(b)
         i.submenu = b.menu

@@ -559,7 +559,7 @@ final class PrimaryButton: HoverView {
 enum FerryMenu {
     static func make(for urls: [URL]) -> NSMenuItem {
         let item = NSMenuItem(title: String(localized: "Send with Ferry"), action: nil, keyEquivalent: "")
-        item.image = Icons.named("send")
+        item.image = Icons.menu("send")
         let sub = NSMenu()
         sub.autoenablesItems = false
         let running = FerryService.shared.isRunning
@@ -567,12 +567,12 @@ enum FerryMenu {
             let peers = FerryService.shared.peers
             for peer in peers {
                 let i = ClosureMenuItem(title: peer.name) { FerryService.shared.send(urls, to: peer) }
-                i.image = Icons.named(peer.trusted ? "shield-check" : "monitor")
+                i.image = Icons.menu(peer.trusted ? "shield-check" : "monitor")
                 sub.addItem(i)
             }
             if peers.isEmpty {
                 let none = NSMenuItem(title: String(localized: "No devices nearby"), action: nil, keyEquivalent: "")
-                none.image = Icons.named("wifi")
+                none.image = Icons.menu("wifi")
                 none.isEnabled = false
                 sub.addItem(none)
             }
@@ -588,7 +588,7 @@ enum FerryMenu {
         let settings = ClosureMenuItem(title: running ? String(localized: "Ferry settings…") : String(localized: "Turn on Ferry…")) {
             (NSApp.keyWindow?.windowController as? BrowserWindowController)?.openSettings(page: .ferry)
         }
-        settings.image = Icons.named("settings")
+        settings.image = Icons.menu("settings")
         sub.addItem(settings)
         item.submenu = sub
         return item

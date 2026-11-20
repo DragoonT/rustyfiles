@@ -152,7 +152,7 @@ final class BreadcrumbView: HoverView {
         let i = NSMenuItem(title: title, action: #selector(menuNavigate(_:)), keyEquivalent: "")
         i.target = self
         i.representedObject = url
-        i.image = Icons.named("folder")
+        i.image = Icons.menu("folder")
         return i
     }
 
