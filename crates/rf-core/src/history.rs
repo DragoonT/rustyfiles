@@ -19,6 +19,8 @@ pub enum Location {
     Shell { parsing: String, name: String },
     /// Where the space goes under a folder or drive (the disk usage view).
     DiskUsage(PathBuf),
+    /// HyperDownload's page: what is downloading and what was downloaded.
+    Downloads,
 }
 
 impl Location {
@@ -35,6 +37,8 @@ impl Location {
             "::{645ff040-5081-101b-9f08-00aa002f954e}" | "shell:recyclebinfolder" | "shell:::{645ff040-5081-101b-9f08-00aa002f954e}" => {
                 Some(Location::RecycleBin)
             }
+            // (HyperDownload's page, as a saved session names it)
+            "rustyfiles:downloads" => Some(Location::Downloads),
             _ => None,
         }
     }
@@ -95,7 +99,7 @@ impl Location {
             },
             Location::Search { root, .. } => Some(Location::Path(root.clone())),
             Location::DiskUsage(p) => Some(Location::Path(p.clone())),
-            Location::RecycleBin | Location::Settings | Location::Tag(_) | Location::Library { .. } => {
+            Location::RecycleBin | Location::Settings | Location::Tag(_) | Location::Library { .. } | Location::Downloads => {
                 Some(Location::Home)
             }
             Location::Shell { parsing, .. } => Some(shell_parent(parsing)),
@@ -114,6 +118,7 @@ impl Location {
             Location::Shell { parsing, name } if name.is_empty() => shell_last_segment(parsing).to_string(),
             Location::Shell { name, .. } => name.clone(),
             Location::DiskUsage(p) => format!("Disk kullanımı — {}", display_name(p)),
+            Location::Downloads => "HyperDownload".into(),
             Location::Path(p) => display_name(p),
         }
     }

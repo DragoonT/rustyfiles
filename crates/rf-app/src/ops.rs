@@ -353,13 +353,30 @@ impl FolderView {
             // No files with paths: files that live only in the program that copied them (a remote desktop session, a tool that
             // carries the clipboard between PCs) are pasted from that program's own data (`rf_win::vfiles`).
             if clip.is_none() && !rf_win::vfiles::clipboard_has() {
-                // a link on the clipboard, with HyperDownload installed: offered for download into this folder
                 let _ = cx.update(|cx| {
-                    let text = cx.read_from_clipboard().and_then(|c| c.text()).map(|t| t.trim().to_string());
-                    if let Some(link) = text.filter(|t| crate::hyperdownload::is_link(t))
+                    let item = cx.read_from_clipboard();
+                    let text = item.as_ref().and_then(|c| c.text());
+                    // a link on the clipboard, with HyperDownload installed: offered for download into this folder
+                    if let Some(link) = text.as_deref().map(str::trim).filter(|t| crate::hyperdownload::is_link(t))
                         && crate::addons::installed(crate::hyperdownload::ID).is_some()
                     {
-                        crate::hyperdownload::offer_pasted_link(link, dir.clone(), cx);
+                        crate::hyperdownload::offer_pasted_link(link.to_string(), dir.clone(), cx);
+                        return;
+                    }
+                    // text or a picture: a file of it here, with the rename box on it (issue 151)
+                    let image = item.as_ref().and_then(|c| {
+                        c.entries().iter().find_map(|e| match e {
+                            ClipboardEntry::Image(i) => Some(i.clone()),
+                            _ => None,
+                        })
+                    });
+                    let made = match (text.filter(|t| !t.trim().is_empty()), image) {
+                        (Some(t), _) => Some(Pasted::Text(t)),
+                        (None, Some(i)) => Some(Pasted::Image(i)),
+                        _ => None,
+                    };
+                    if let Some(made) = made {
+                        paste_as_file(made, dir.clone(), this.clone(), cx);
                     }
                 });
                 return;
@@ -382,6 +399,51 @@ impl FolderView {
             });
         })
         .detach();
+    }
+
+    /// Copies of the selected items beside them ("x - Kopya", as a paste into the same folder names them); the copy of a single item
+    /// gets the rename box at once (issue 161).
+    pub fn duplicate_selected(&mut self, cx: &mut Context<Self>) {
+        if self.shell_read_only(cx) {
+            return;
+        }
+        let Some(dir) = self.current_dir() else { return };
+        if rf_win::ftp::is_ftp(&dir) || crate::archive_view::split(&dir).is_some() {
+            return;
+        }
+        let paths = self.selection_paths();
+        if paths.is_empty() {
+            return;
+        }
+        let this = cx.entity().downgrade();
+        let here = dir.clone();
+        crate::status_center::transfer_then(cx, Transfer::Copy, paths, dir, move |arrived, cx| {
+            let mut names: Vec<String> = arrived.iter().filter_map(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).collect();
+            let _ = this.update(cx, |v, cx| {
+                if v.current_dir().as_deref() != Some(here.as_path()) {
+                    return;
+                }
+                if names.len() == 1 {
+                    v.expect_new_item(names.pop(), cx);
+                } else {
+                    v.select_when_listed(names, cx);
+                }
+            });
+        });
+    }
+
+    /// The selection into the other pane of a split tab (issue 152); nothing in a tab that is not split or inside an archive.
+    pub fn to_other_pane(&mut self, kind: Transfer, cx: &mut Context<Self>) {
+        if !self.dual || self.renaming.is_some() {
+            return;
+        }
+        if self.current_dir().is_some_and(|d| crate::archive_view::split(&d).is_some()) {
+            return;
+        }
+        let paths = self.selection_paths();
+        if !paths.is_empty() {
+            cx.emit(crate::folder_view::FolderEvent::ToOtherPane(kind, paths));
+        }
     }
 
     /// Deletes the selection, asking first per Settings → "Confirm before deleting".
@@ -871,6 +933,50 @@ const DRAG_EXTRACT_MAX: u64 = 256 << 20;
 
 /// [`drag_paths_out`] for members of an archive: extracted on a thread of their own first (the window does not wait), then dragged
 /// as real files that may only be copied. A button let go before the extraction ended starts no drag (see `rf_win::dnd::drag_out`).
+/// What the clipboard held when it had no files: text, or a picture.
+enum Pasted {
+    Text(String),
+    Image(Image),
+}
+
+/// Writes the clipboard's text or picture into `dir` as a new file ("Yapıştırılan metin.txt", "Yapıştırılan resim.png"; a picture that
+/// came as a bitmap is saved as PNG), then selects it with its rename box open, as a new file is.
+fn paste_as_file(what: Pasted, dir: PathBuf, view: WeakEntity<FolderView>, cx: &mut App) {
+    let task = cx.background_spawn(async move {
+        let (stem, ext, bytes) = match what {
+            Pasted::Text(t) => (t!("Yapıştırılan metin"), ".txt".to_string(), t.into_bytes()),
+            Pasted::Image(i) => {
+                let (ext, bytes) = match i.format {
+                    ImageFormat::Png => ("png", i.bytes.clone()),
+                    ImageFormat::Jpeg => ("jpg", i.bytes.clone()),
+                    ImageFormat::Gif => ("gif", i.bytes.clone()),
+                    ImageFormat::Svg => ("svg", i.bytes.clone()),
+                    ImageFormat::Webp => ("webp", i.bytes.clone()),
+                    // (a bitmap: PNG keeps it whole at a fraction of the size)
+                    _ => {
+                        let mut png = Vec::new();
+                        image::load_from_memory(&i.bytes)?.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+                        ("png", png)
+                    }
+                };
+                (t!("Yapıştırılan resim"), format!(".{ext}"), bytes)
+            }
+        };
+        let path = fileops::unique_name(&dir, stem, &ext);
+        std::fs::OpenOptions::new().write(true).create_new(true).open(&path).and_then(|mut f| std::io::Write::write_all(&mut f, &bytes))?;
+        anyhow::Ok(path)
+    });
+    cx.spawn(async move |cx| match task.await {
+        Ok(path) => {
+            crate::undo::push(crate::undo::UndoOp::Created { path: path.clone() });
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+            let _ = view.update(cx, |v, cx| v.expect_new_item(name, cx));
+        }
+        Err(e) => log::warn!("paste as a file: {e:#}"),
+    })
+    .detach();
+}
+
 pub(crate) fn drag_archive_items_out(items: Vec<PathBuf>) {
     let ui_thread = unsafe { windows::Win32::System::Threading::GetCurrentThreadId() };
     unsafe {

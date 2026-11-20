@@ -167,10 +167,21 @@ pub fn registered_exe(classes_root: &str) -> Option<std::path::PathBuf> {
 /// While we are the default, a registered exe that no longer exists (moved, rebuilt elsewhere,
 /// its folder cleaned) would leave Windows unable to open any folder: point it at `current`.
 /// Returns true when it re-registered.
+///
+/// Also a registration that lost its `open` verb while its `explore` verb is still ours (issue 97: on a reporter's PC `Folder\shell\open`
+/// was an empty key, so "Show in folder" from a browser went to Explorer, or to nothing, while every other folder opened here): it is
+/// written again whole.
 pub fn heal(current: &str, classes_root: &str) -> bool {
+    if !std::path::Path::new(current).exists() {
+        return false;
+    }
     match registered_exe(classes_root) {
-        Some(old) if !old.exists() && std::path::Path::new(current).exists() => enable(current, classes_root).is_ok(),
-        _ => false,
+        Some(old) if !old.exists() => enable(current, classes_root).is_ok(),
+        Some(_) => false,
+        None if verb_command(classes_root, r"Folder\shell\explore").is_some_and(|c| c.to_lowercase().contains("rustyfiles")) => {
+            enable(current, classes_root).is_ok()
+        }
+        None => false,
     }
 }
 
@@ -238,6 +249,11 @@ mod tests {
         assert!(add_archives(r"C:\x\rustyfiles.exe", &root));
         assert!(!ours(&root, ARCHIVE_VERBS[1]));
         assert!(!add_archives(r"C:\x\rustyfiles.exe", &root)); // nothing left to do
+        // the open verb lost while the explore verb is ours: written again whole (issue 97)
+        let _ = base.remove_tree(r"Folder\shell\open\command");
+        assert!(!is_enabled(&root));
+        assert!(heal(&std::env::current_exe().unwrap().display().to_string(), &root));
+        assert!(is_enabled(&root));
         disable(&root).unwrap();
         assert!(!is_enabled(&root));
         assert!(!ARCHIVE_VERBS.iter().any(|v| ours(&root, v)));

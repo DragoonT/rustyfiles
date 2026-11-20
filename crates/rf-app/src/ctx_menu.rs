@@ -306,6 +306,9 @@ impl FolderView {
             };
             v.push(Item::action(t!("Öğe yolunu kopyala"), icon, act(me, |v, _, cx| v.copy_path(cx))).hint("Ctrl+Shift+C"));
         }
+        if !in_archive {
+            v.push(Item::action(t!("Çoğalt"), icon(L::CopyPlus), act(me, |v, _, cx| v.duplicate_selected(cx))).hint("Ctrl+Alt+D"));
+        }
         if mp.create_shortcut && !in_archive {
             let link_items = items.to_vec();
             let icon = if explorer_theme {
@@ -500,8 +503,8 @@ impl FolderView {
         }
         if self.dual && !in_archive {
             let (c, m) = (items.to_vec(), items.to_vec());
-            v.push(Item::action(t!("Diğer panele kopyala"), icon(L::CopyPlus), act(me, move |_, _, cx| cx.emit(FolderEvent::ToOtherPane(Transfer::Copy, c.clone())))));
-            v.push(Item::action(t!("Diğer panele taşı"), icon(L::MoveRight), act(me, move |_, _, cx| cx.emit(FolderEvent::ToOtherPane(Transfer::Move, m.clone())))));
+            v.push(Item::action(t!("Diğer panele kopyala"), icon(L::CopyPlus), act(me, move |_, _, cx| cx.emit(FolderEvent::ToOtherPane(Transfer::Copy, c.clone())))).hint("Shift+F5"));
+            v.push(Item::action(t!("Diğer panele taşı"), icon(L::MoveRight), act(me, move |_, _, cx| cx.emit(FolderEvent::ToOtherPane(Transfer::Move, m.clone())))).hint("Shift+F6"));
         }
         if single_dir && mp.terminal && !in_archive {
             v.push(Item::Separator);
@@ -563,6 +566,10 @@ impl FolderView {
                 icon(L::ClipboardPaste)
             };
             v.push(Item::action(t!("Kısayol yapıştır"), icon, act(me, |v, w, cx| v.paste_shortcuts(w, cx))).enabled(rf_win::clipboard::has_files()));
+        }
+        // HyperDownload installed: a link downloaded into this folder (it was only in the command palette)
+        if !in_archive && !rf_win::ftp::is_ftp(dir) && crate::addons::installed(crate::hyperdownload::ID).is_some() {
+            v.push(Item::action(t!("Bağlantıdan indir…"), icon(L::Download), act(me, |v, w, cx| v.download_from_link(w, cx))));
         }
         let d = dir.to_path_buf();
         v.push(Item::action(t!("Kenar çubuğuna sabitle"), icon(L::Pin), act(me, move |v, _, cx| v.pin(d.clone(), cx))));

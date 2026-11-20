@@ -551,8 +551,55 @@ fn copy_or_resume(j: &Job, to: &Path, run: &Run) -> windows::core::Result<()> {
     copy_file(&j.src, to, j.size, run, false)
 }
 
+/// Whether a copy into a WSL distribution drops the download mark Windows writes beside it (Settings > Files & folders). Set by
+/// the app before each transfer.
+pub static DROP_WSL_ZONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether `p` is inside a WSL distribution (`\\wsl.localhost\<distro>` or `\\wsl$\<distro>`, also in the `\\?\UNC\` spelling).
+pub fn on_wsl(p: &Path) -> bool {
+    let s = p.to_string_lossy().to_lowercase();
+    let s = s.strip_prefix(r"\\?\unc\").or_else(|| s.strip_prefix(r"\\")).unwrap_or("");
+    s.starts_with(r"wsl.localhost\") || s.starts_with(r"wsl$\")
+}
+
+/// The files the download mark becomes beside `file` on a WSL drive, in both spellings.
+///
+/// WHY (a user on Discord, 2026-11-20: "Automatically delete Zone.Identifier files that Windows creates after every new file is
+/// copied into a WSL drive"): CopyFile2 brings a downloaded file's `Zone.Identifier` stream along. A WSL distribution's file system
+/// has no streams, so its file server stores the stream as a file of its own named "file:Zone.Identifier", which Windows lists with
+/// the colon as U+F03A (the private-use stand-in WSL gives characters Windows names can't have). Both spellings are tried: the
+/// stream's own (the file server maps it to that file) and the listed one.
+fn wsl_zone_files(file: &Path) -> [PathBuf; 2] {
+    let mut a = file.as_os_str().to_owned();
+    a.push(":Zone.Identifier");
+    let mut b = file.as_os_str().to_owned();
+    b.push("\u{F03A}Zone.Identifier");
+    [PathBuf::from(a), PathBuf::from(b)]
+}
+
+/// Removes the download mark's file beside a copy that landed on a WSL drive, when the setting asks for it.
+fn drop_wsl_zone(dst: &Path) {
+    if !DROP_WSL_ZONE.load(Ordering::Relaxed) || !on_wsl(dst) {
+        return;
+    }
+    for f in wsl_zone_files(dst) {
+        if std::fs::remove_file(&f).is_ok() {
+            log::info!("fastcopy: dropped the download mark beside {}", dst.display());
+            break;
+        }
+    }
+}
+
 /// One job; `Err` = leave it to the shell.
 fn run_job(j: &Job, run: &Run) -> windows::core::Result<()> {
+    let r = run_job_inner(j, run);
+    if r.is_ok() && j.op == Op::Copy {
+        drop_wsl_zone(&j.dst);
+    }
+    r
+}
+
+fn run_job_inner(j: &Job, run: &Run) -> windows::core::Result<()> {
     match j.op {
         Op::Rename => {
             let r = move_into_place(&j.src, &j.dst, j.replace);
@@ -1256,6 +1303,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn wsl_paths_and_their_download_mark_files() {
+        assert!(on_wsl(Path::new(r"\\wsl.localhost\Ubuntu\home\me\a.jpg")));
+        assert!(on_wsl(Path::new(r"\\WSL$\Ubuntu\tmp")));
+        assert!(on_wsl(Path::new(r"\\?\UNC\wsl.localhost\Debian\x")));
+        assert!(!on_wsl(Path::new(r"C:\wsl.localhost\x")));
+        assert!(!on_wsl(Path::new(r"\\nas\wsl.localhost")));
+        let [a, b] = wsl_zone_files(Path::new(r"\\wsl.localhost\Ubuntu\a.jpg"));
+        assert_eq!(a, Path::new(r"\\wsl.localhost\Ubuntu\a.jpg:Zone.Identifier"));
+        assert_eq!(b.to_string_lossy(), "\\\\wsl.localhost\\Ubuntu\\a.jpg\u{F03A}Zone.Identifier");
+    }
 
     /// The same file by two spellings is one file; two files are two.
     #[test]

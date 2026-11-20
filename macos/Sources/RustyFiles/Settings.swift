@@ -128,6 +128,12 @@ enum AppSettings {
         set { set(newValue, "showHidden") }
     }
 
+    /// The files macOS keeps for itself (.DS_Store, .localized…), shown with hidden items.
+    static var showSystemFiles: Bool {
+        get { bool("showSystemFiles", false) }
+        set { set(newValue, "showSystemFiles") }
+    }
+
     static var showThumbnails: Bool {
         get { bool("showThumbnails", true) }
         set { set(newValue, "showThumbnails") }

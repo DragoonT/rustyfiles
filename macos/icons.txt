@@ -113,3 +113,17 @@ file
 command
 clock
 cloud
+pencil-line
+chart-pie
+files
+archive-restore
+layout-list
+rows-3
+columns-3
+git-branch
+git-branch-plus
+refresh-ccw
+refresh-cw
+arrow-down-to-line
+arrow-up-from-line
+shield

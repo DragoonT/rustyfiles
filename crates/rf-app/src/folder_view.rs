@@ -148,6 +148,16 @@ enum GridUnit {
 
 /// The grouped Grid's lines from the grouped rows: each group's items in rows of `cols` tiles of `slices` slices each. Also, for
 /// every visible index, the line its row of tiles starts at.
+/// [`FolderView::cell_hover`]'s count: the tile `vi` and over how many of its slices the pointer is told to be.
+fn grid_hover_step(now: Option<(usize, u32)>, vi: usize, on: bool) -> Option<(usize, u32)> {
+    match (on, now) {
+        (true, Some((h, n))) if h == vi => Some((vi, n + 1)),
+        (true, _) => Some((vi, 1)),
+        (false, Some((h, n))) if h == vi => (n > 1).then(|| (vi, n - 1)),
+        (false, other) => other,
+    }
+}
+
 fn grid_units(rows: &[Row], cols: usize, slices: usize) -> (Vec<GridUnit>, Vec<usize>) {
     let (cols, slices) = (cols.max(1), slices.max(1));
     let (mut units, mut first_of_vi) = (Vec::new(), Vec::new());
@@ -538,6 +548,10 @@ pub struct FolderView {
     slow_click_serial: u64,
     /// Settings → "Select on hover": the entry under the pointer and its serial, selected once the pointer has rested on it.
     hover_pick: Option<(u32, u64)>,
+    /// The grouped Grid's tile under the pointer, and over how many of its slices (`grid_slices`: a row is drawn as several slices, each
+    /// a clipped copy of the whole row, so the pointer is over one copy of a tile at a time and a hover style lit only that slice's
+    /// strip of it, issue 157). The tile's fill follows this instead.
+    grid_hover: Option<(usize, u32)>,
     /// Serial of the last click on a file in a column right of the list's (`pick_in_column`); a later click cancels a pending one.
     static_pick: u64,
     /// What the first click of a possible double click was made on (`completes_double`).
@@ -556,6 +570,8 @@ pub struct FolderView {
     recycle: Option<Entity<crate::recycle_view::RecycleView>>,
     /// The disk usage page of this tab (kept while the tab stays on that folder).
     disk_usage: Option<Entity<crate::disk_usage::DiskUsageView>>,
+    /// HyperDownload's page, while this view shows it.
+    downloads: Option<Entity<crate::downloads_view::DownloadsView>>,
     /// Git status of the repository containing this folder (if any).
     pub git: Option<Arc<rf_win::git::GitStatus>>,
     /// Last commit per child of the current folder (commit columns), keyed by name.
@@ -580,6 +596,13 @@ pub struct FolderView {
     col_scrolls: std::collections::HashMap<PathBuf, UniformListScrollHandle>,
     col_scrolled: HashSet<(PathBuf, String)>,
     _git_task: Option<Task<()>>,
+    /// The overlays other programs put on the current folder's icons (Google Drive, TortoiseGit, ...; `rf_win::overlays`): item name →
+    /// picture index. Settings > "show_overlays".
+    overlays: Option<Arc<std::collections::HashMap<Arc<str>, i32>>>,
+    /// Set to stop the questions of a folder left (a slow handler's folder must not hold up the next one).
+    overlay_cancel: Arc<AtomicBool>,
+    _overlay_task: Option<Task<()>>,
+    overlay_soon: Option<Task<()>>,
     /// When git status was last asked for, and a later ask waiting (changes coming in fast).
     git_last: Option<Instant>,
     git_soon: Option<Task<()>>,
@@ -720,6 +743,7 @@ impl FolderView {
             slow_click: None,
             slow_click_serial: 0,
             hover_pick: None,
+            grid_hover: None,
             static_pick: 0,
             first_click: None,
             load_serial: 0,
@@ -735,6 +759,7 @@ impl FolderView {
             typeahead: (String::new(), Instant::now()),
             recycle: None,
             disk_usage: None,
+            downloads: None,
             git: None,
             git_commits: None,
             column_cache: Default::default(),
@@ -750,6 +775,10 @@ impl FolderView {
             col_scrolls: Default::default(),
             col_scrolled: HashSet::new(),
             _git_task: None,
+            overlays: None,
+            overlay_cancel: Arc::new(AtomicBool::new(false)),
+            _overlay_task: None,
+            overlay_soon: None,
             git_last: None,
             git_soon: None,
             _slow_task: None,
@@ -760,27 +789,8 @@ impl FolderView {
 
     /// "Bağlantıdan indir…": asks for a link (one on the clipboard is filled in) and downloads it into this folder with HyperDownload.
     pub fn download_from_link(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use crate::prompt::{Button, Kind};
         let Location::Path(dir) = self.location().clone() else { return };
-        let initial = cx.read_from_clipboard().and_then(|c| c.text()).map(|t| t.trim().to_string()).filter(|t| crate::hyperdownload::is_link(t)).unwrap_or_default();
-        crate::prompt::show(
-            crate::t!("Bağlantıdan indir"),
-            Some(format!("{} {}", crate::t!("Dosya bu klasöre indirilir:"), dir.display())),
-            Some((initial, "https://… / magnet:?…".to_string())),
-            vec![
-                Button::new(crate::t!("İndir"), Kind::Primary, move |text, _, cx| {
-                    let url = text.unwrap_or_default().trim().to_string();
-                    if !crate::hyperdownload::is_link(&url) {
-                        return Err(crate::t!("Bir http, https ya da magnet bağlantısı yazın").to_string());
-                    }
-                    crate::hyperdownload::download(url, dir.clone(), cx);
-                    Ok(())
-                }),
-                Button::cancel(),
-            ],
-            window,
-            cx,
-        );
+        crate::hyperdownload::ask_link(dir, window, cx);
     }
 
     pub fn location(&self) -> &Location {
@@ -823,6 +833,7 @@ impl FolderView {
             Location::Library { .. } => L::Library,
             Location::Shell { .. } => L::Usb,
             Location::DiskUsage(_) => L::ChartPie,
+            Location::Downloads => L::ArrowDownToLine,
             Location::Path(p) if rf_win::network::server_root(p).is_some() => L::Server,
             // the archive itself or a folder inside it (name check only: no disk access here, not even for a `.001` name)
             Location::Path(p) if crate::archive_view::is_browsable_path_by_name(p) => L::FileArchive,
@@ -941,6 +952,8 @@ impl FolderView {
             let selected = self.selected.contains(&ei);
             let cat = icons::category(e);
             let shell_icon = self.parent_of(ei).map(|d| d.to_path_buf()).and_then(|d| self.images.update(cx, |c, cx| c.icon(&d, e, cx)));
+            let overlay = self.overlay_of(ei, px(16.), cx);
+            let e = &self.entries[ei as usize];
             let is_dir = e.is_dir();
             out.push(
                 h_flex()
@@ -962,6 +975,7 @@ impl FolderView {
                         },
                         px(16.),
                         e.link,
+                        overlay,
                     ))
                     .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&e.name)))
                     .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(p.text_tertiary)))
@@ -1155,6 +1169,68 @@ impl FolderView {
         }));
     }
 
+    /// Asks for the overlays of the current folder's items in the background (`rf_win::overlays`), after a listing. Only plain folders
+    /// on a disk or a share; links are left out (rustyfiles draws their arrow itself), and a huge folder's first items only.
+    fn refresh_overlays(&mut self, cx: &mut Context<Self>) {
+        const MOST: usize = 5_000;
+        self.overlay_cancel.store(true, Ordering::Relaxed);
+        self.overlay_cancel = Arc::new(AtomicBool::new(false));
+        let dir = self.location().path().map(|p| p.to_path_buf()).filter(|d| {
+            let s = d.to_string_lossy();
+            let plain = (s.len() >= 2 && s.as_bytes()[1] == b':') || (s.starts_with(r"\\") && !s.starts_with(r"\\?\"));
+            plain && !self.is_search() && !crate::nav_touch::may_hold_archive(d)
+        });
+        let Some(dir) = dir.filter(|_| cx.global::<crate::settings::Settings>().show_overlays) else {
+            self.overlays = None;
+            return;
+        };
+        let names: Vec<String> = self.entries.iter().filter(|e| !e.link).take(MOST).map(|e| e.name.to_string()).collect();
+        let cancel = self.overlay_cancel.clone();
+        let work = cx.background_spawn(async move { rf_win::overlays::indexes(&dir, names, cancel) });
+        self._overlay_task = Some(cx.spawn(async move |this, cx| {
+            let got = work.await;
+            let _ = this.update(cx, |v, cx| {
+                let map: std::collections::HashMap<Arc<str>, i32> = got.into_iter().map(|(n, i)| (Arc::from(n), i)).collect();
+                if v.overlays.as_ref().is_none_or(|o| **o != map) {
+                    v.overlays = Some(Arc::new(map));
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// [`Self::refresh_overlays`] for changes on the disk: once things calm down for a moment (a sync program changes a file's mark
+    /// after writing it).
+    fn refresh_overlays_soon(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_soon.is_some() {
+            return;
+        }
+        self.overlay_soon = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
+            let _ = this.update(cx, |v, cx| {
+                v.overlay_soon = None;
+                v.refresh_overlays(cx);
+            });
+        }));
+    }
+
+    /// The overlay picture over item `ei`'s icon drawn `size` wide, when another program marks it.
+    fn overlay_of(&mut self, ei: u32, size: Pixels, cx: &mut Context<Self>) -> Option<Arc<gpui::RenderImage>> {
+        if !cx.global::<crate::settings::Settings>().show_overlays {
+            return None;
+        }
+        let index = {
+            let ov = self.overlays.as_ref()?;
+            // (the columns view also shows other folders' items)
+            if self.parent_of(ei)? != self.location().path()? {
+                return None;
+            }
+            *ov.get(&*self.entries.get(ei as usize)?.name)?
+        };
+        let device = ((f32::from(overlay_box(size)) * 2.0) as u32).max(32);
+        self.images.update(cx, |c, cx| c.overlay(index, device, cx))
+    }
+
     fn commit_cols_on(cx: &App) -> bool {
         let c = &cx.global::<crate::settings::Settings>().columns;
         c.git_message || c.git_author || c.git_date || c.git_hash
@@ -1170,6 +1246,10 @@ impl FolderView {
         self.git = None;
         self.git_commits = None;
         self.refresh_git(cx);
+        self.overlay_cancel.store(true, Ordering::Relaxed);
+        self.overlays = None;
+        self._overlay_task = None;
+        self.overlay_soon = None;
         self.renaming = None;
         self._rename_sub = None;
         self.renamed = None;
@@ -1753,6 +1833,7 @@ impl FolderView {
         }
         if done {
             self.resort_for_sizes(cx);
+            self.refresh_overlays(cx);
             self.apply_reselect(cx);
             // a sort by tag or path makes its ranks now that the listing is complete
             self.sortx_ensure(cx);
@@ -1912,6 +1993,7 @@ impl FolderView {
         }
         self.entries = new_entries;
         self.entries_gen += 1;
+        self.refresh_overlays_soon(cx);
         if let Some(s) = sorted {
             self.sorted_cache = Some((self.sort, self.entries_gen, Arc::new(s)));
         }
@@ -2128,9 +2210,18 @@ impl FolderView {
             crate::layouts::set(std::path::Path::new(SHARED_LAYOUT), l, cx);
             return;
         }
-        if let Location::Path(p) = self.location().clone() {
-            let l = self.layout_now();
-            crate::layouts::set(&p, l, cx);
+        match self.location().clone() {
+            Location::Path(p) => {
+                let l = self.layout_now();
+                crate::layouts::set(&p, l, cx);
+            }
+            // every search shares one (issue 165: "Would be nice if it remembered the last time I searched I asked for the results to
+            // be sorted by date")
+            Location::Search { .. } => {
+                let l = self.layout_now();
+                crate::layouts::set(std::path::Path::new(SEARCH_LAYOUT), l, cx);
+            }
+            _ => {}
         }
     }
 
@@ -2153,6 +2244,13 @@ impl FolderView {
         if s.sync_layout {
             // the tab keeps its own from folder to folder; a new tab (and every tab at a start) begins with the shared one
             if first && let Some(l) = crate::layouts::get(std::path::Path::new(SHARED_LAYOUT), cx) {
+                self.apply_layout_values(l, false, cx);
+            }
+            return;
+        }
+        // search results: as the last search was sorted and laid out (else as the folder searched in, the tab's)
+        if matches!(self.location(), Location::Search { .. }) {
+            if let Some(l) = crate::layouts::get(std::path::Path::new(SEARCH_LAYOUT), cx) {
                 self.apply_layout_values(l, false, cx);
             }
             return;
@@ -2626,7 +2724,9 @@ impl FolderView {
                         .text_color(theme::kind_color(cat, p.dark))
                         .into_any_element(),
                 };
-                let visual = link_marked(visual, visual_px, e.link);
+                let overlay = self.overlay_of(ei, visual_px, cx);
+                let e = &self.entries[ei as usize];
+                let visual = link_marked(visual, visual_px, e.link, overlay);
                 let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
                 let label: AnyElement = match rename_input {
                     // the text stays where the label was: centered, the label's size
@@ -2731,7 +2831,8 @@ impl FolderView {
                     // tiles: quiet fill + a thin accent outline (a pill would read as a crop)
                     .when(selected, |d| d.bg(p.selection).border_1().border_color(p.selection_border))
                     .when(!selected, |d| d.border_1().border_color(transparent_black()))
-                    .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
+                    .when(!selected && part.is_none(), |d| d.hover(|s| s.bg(p.hover)))
+                    .when(!selected && part.is_some() && self.grid_hover.is_some_and(|(h, _)| h == vi), |d| d.bg(p.hover))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
@@ -2742,8 +2843,11 @@ impl FolderView {
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
                     .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
-                    // Settings → "Select files and folders on hover"
-                    .when(hover_select, |d| d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))));
+                    // Settings → "Select files and folders on hover"; in a sliced row also the tile's fill (`grid_hover`)
+                    .when(hover_select || part.is_some(), |d| {
+                        let sliced = part.is_some();
+                        d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.cell_hover(vi, *on, sliced, hover_select, cx)))
+                    });
                 r = r.child(cell);
             }
             match part {
@@ -2765,6 +2869,8 @@ impl FolderView {
 
     fn on_row_mouse_down(&mut self, vi: usize, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
+        // (a press on an item of a window that is not in front leaves it there until the press is not a drag: issue 169)
+        rf_win::press_activate::press_on_item();
         // before anything changes: was this the only selected item, in a focused, active list?
         let on_name = std::mem::take(&mut self.name_hit);
         let was_renaming = self.renaming.is_some();
@@ -2847,6 +2953,32 @@ impl FolderView {
     /// Settings → "Select on hover": the pointer came onto (or left) the item at `vi`. Like Explorer's "point to select" the item is
     /// selected once the pointer has rested on it for the system's hover time, so passing over items on the way to another one
     /// leaves the selection alone (issue 101: it was in the Details layout only, and at once).
+    /// The pointer came onto (or left) a tile of the Grid. In a sliced row (the grouped Grid) it comes onto one slice's copy of the tile
+    /// after another: the tile counts as hovered while the pointer is over any of them (`grid_hover`), whatever order the copies are told
+    /// in, and "select on hover" hears only the tile's own coming and going.
+    fn cell_hover(&mut self, vi: usize, on: bool, sliced: bool, hover_select: bool, cx: &mut Context<Self>) {
+        if !sliced {
+            if hover_select {
+                self.hover_row(vi, on, cx);
+            }
+            return;
+        }
+        let before = self.grid_hover.map(|h| h.0);
+        self.grid_hover = grid_hover_step(self.grid_hover, vi, on);
+        let after = self.grid_hover.map(|h| h.0);
+        if before != after {
+            if hover_select {
+                if let Some(b) = before {
+                    self.hover_row(b, false, cx);
+                }
+                if let Some(a) = after {
+                    self.hover_row(a, true, cx);
+                }
+            }
+            cx.notify();
+        }
+    }
+
     fn hover_row(&mut self, vi: usize, on: bool, cx: &mut Context<Self>) {
         let Some(&ei) = self.visible.get(vi) else { return };
         if !on {
@@ -3510,9 +3642,29 @@ impl FolderView {
             }
         } else if self.picking {
             cx.emit(FolderEvent::Picked(vec![path]));
+        } else if is_lnk(&path) {
+            self.open_shortcut(path, cx);
         } else {
             open_in_background(path, cx);
         }
+    }
+
+    /// A `.lnk` file: one that points at a folder opens that folder here, as a folder would (a user on Discord, 2026-11-20: it opened
+    /// in Explorer); any other goes to the shell as before. The link is read off the UI thread (COM, and a target that has to wake up).
+    fn open_shortcut(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let link = path.clone();
+            let folder = cx
+                .background_executor()
+                .spawn(async move { rf_win::shortcut::resolve(&link).ok().map(|i| i.target).filter(|t| !t.as_os_str().is_empty() && t.is_dir()) })
+                .await;
+            let _ = this.update(cx, |this, cx| match folder {
+                Some(dir) if cx.global::<crate::settings::Settings>().open_folders_in_new_tab => cx.emit(FolderEvent::OpenInNewTab(Location::Path(dir))),
+                Some(dir) => this.navigate(Location::Path(dir), cx),
+                None => open_in_background(path, cx),
+            });
+        })
+        .detach();
     }
 
     pub fn open_selected(&mut self, cx: &mut Context<Self>) {
@@ -3970,6 +4122,8 @@ impl FolderView {
                 .parent_of(ei)
                 .map(|d| d.to_path_buf())
                 .and_then(|d| self.images.update(cx, |c, cx| c.icon(&d, e, cx)));
+            let overlay = self.overlay_of(ei, px(16.), cx);
+            let e = &self.entries[ei as usize];
             let git_state = self.git.as_ref().and_then(|g| rf_win::git::state_for_child(g, self.parent_of(ei)?, &e.name));
             let git_cell = col_git.then(|| {
                 let (label, color) = match git_state {
@@ -4208,6 +4362,7 @@ impl FolderView {
                             },
                             px(16.),
                             e.link,
+                            overlay,
                         ))
                         .child(name_el)
                         // encrypted: an archive member that needs a password, or an EFS file
@@ -4427,7 +4582,7 @@ impl FolderView {
                             |_, _, _| {},
                             move |bounds, _, window, _| {
                                 let me = me.clone();
-                                window.on_mouse_event(move |ev: &ScrollWheelEvent, phase, _, cx| {
+                                window.on_mouse_event(move |ev: &ScrollEvent, phase, _, cx| {
                                     if phase != DispatchPhase::Capture || !ev.modifiers.control || !bounds.contains(&ev.position) {
                                         return;
                                     }
@@ -4453,6 +4608,17 @@ impl FolderView {
                         .absolute()
                         .size_full()
                     })
+                    // (the tiles move under a still pointer: the hovered tile is found again by the next move, `grid_hover`)
+                    .on_scroll(cx.listener(|this, _: &ScrollEvent, _, cx| {
+                        if this.grid_hover.take().is_some() {
+                            cx.notify();
+                        }
+                    }))
+                    .on_hover(cx.listener(|this, on: &bool, _, cx| {
+                        if !*on && this.grid_hover.take().is_some() {
+                            cx.notify();
+                        }
+                    }))
                     .on_drag_move::<ExternalPaths>(cx.listener(|this, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
                         // (only while the pointer is over the list: every listener hears every move, and the tree's or a tab's
                         // own effect must not be overwritten by the list's)
@@ -4823,7 +4989,19 @@ fn tile_cols(avail: f32, min: f32, max: f32, gap: f32) -> u16 {
 
 #[cfg(test)]
 mod tile_tests {
-    use super::tile_cols;
+    use super::{grid_hover_step, tile_cols};
+
+    #[test]
+    fn a_sliced_tile_stays_lit_whichever_order_its_slices_are_told_in() {
+        // the pointer moves from the tile's first slice to its second: told "on" before "off", or "off" before "on"
+        let one = grid_hover_step(None, 3, true);
+        assert_eq!(grid_hover_step(grid_hover_step(one, 3, true), 3, false), Some((3, 1)));
+        assert_eq!(grid_hover_step(grid_hover_step(one, 3, false), 3, true), Some((3, 1)));
+        // onto another tile: the old one's late "off" does not put the new one out
+        assert_eq!(grid_hover_step(grid_hover_step(one, 4, true), 3, false), Some((4, 1)));
+        // off its last slice: nothing lit
+        assert_eq!(grid_hover_step(one, 3, false), None);
+    }
 
     #[test]
     fn cards_stay_between_min_and_max_and_equal() {
@@ -5124,6 +5302,11 @@ mod gutter_tests {
     }
 }
 
+/// Whether `path` names a `.lnk` shortcut (by its name only).
+fn is_lnk(path: &std::path::Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk"))
+}
+
 pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
     // (the name test first: it costs nothing, and `exists` on a place that has to wake up holds the UI thread)
     if !rf_win::ftp::is_ftp(&path) && crate::nav_touch::may_hold_archive(&path) && !path.exists() && crate::archive_view::split(&path).is_some() {
@@ -5190,6 +5373,17 @@ impl Render for FolderView {
                         })
                         .detach();
                         self.disk_usage = Some(dv.clone());
+                        dv
+                    }
+                };
+                div().size_full().child(dv).into_any_element()
+            }
+            Location::Downloads => {
+                let dv = match &self.downloads {
+                    Some(dv) => dv.clone(),
+                    None => {
+                        let dv = cx.new(|cx| crate::downloads_view::DownloadsView::new(false, cx));
+                        self.downloads = Some(dv.clone());
                         dv
                     }
                 };
@@ -5289,6 +5483,16 @@ impl Render for FolderView {
             .on_action(cx.listener(|this, _: &PasteItems, window, cx| this.paste(window, cx)))
             .on_action(cx.listener(|this, _: &PasteIntoSelected, window, cx| this.paste_into_selected(window, cx)))
             .on_action(cx.listener(|this, _: &PasteShortcut, window, cx| this.paste_shortcuts(window, cx)))
+            .on_action(cx.listener(|this, _: &DuplicateItems, _, cx| {
+                // (in the rename box the chord is AltGr+D on some keyboards, a letter: the box has it)
+                if this.renaming.is_some() {
+                    cx.propagate();
+                } else {
+                    this.duplicate_selected(cx);
+                }
+            }))
+            .on_action(cx.listener(|this, _: &CopyToOtherPane, _, cx| this.to_other_pane(rf_win::fileops::Transfer::Copy, cx)))
+            .on_action(cx.listener(|this, _: &MoveToOtherPane, _, cx| this.to_other_pane(rf_win::fileops::Transfer::Move, cx)))
             .on_action(cx.listener(|this, _: &DeleteItems, w, cx| {
                 if !this.bin_delete(w, cx) {
                     this.delete_selected(false, w, cx)
@@ -5436,6 +5640,8 @@ fn cut_to_width(text: &str, avail: Pixels, width: &dyn Fn(&str) -> Pixels) -> St
 
 /// The key in the layouts file under which "the same layout in all folders" keeps its one layout (`<` cannot start a real path).
 const SHARED_LAYOUT: &str = "<all folders>";
+/// The layouts' key of the one layout all searches share.
+const SEARCH_LAYOUT: &str = "<search results>";
 
 /// How long the pointer rests on an item before "Select on hover" selects it: the system's hover time (Control Panel › Mouse;
 /// 400 ms out of the box), as Explorer's "point to select" waits.
@@ -5545,8 +5751,15 @@ mod rename_name_tests {
 /// An item's icon with Explorer's link arrow at its lower left when the item is a symbolic link or a junction (issue 50): a small
 /// light square with a blue arrow, as Explorer draws it, so it reads the same in a light and a dark list. The icon keeps its place
 /// and size; a plain item's icon is returned as it is.
-fn link_marked(icon: AnyElement, size: Pixels, link: bool) -> AnyElement {
-    if !link {
+/// The square another program's overlay picture is drawn in, at the bottom left of an icon drawn `size` wide.
+fn overlay_box(size: Pixels) -> Pixels {
+    size.min(px(48.))
+}
+
+/// `icon` with the marks drawn over it: another program's overlay (`overlay`, icon-sized with its mark in a corner, as Explorer draws
+/// it) and the arrow of a symbolic link or junction (`link`).
+fn link_marked(icon: AnyElement, size: Pixels, link: bool, overlay: Option<Arc<gpui::RenderImage>>) -> AnyElement {
+    if !link && overlay.is_none() {
         return icon;
     }
     let s = (size * 0.3).max(px(8.)).min(px(22.));
@@ -5558,7 +5771,10 @@ fn link_marked(icon: AnyElement, size: Pixels, link: bool) -> AnyElement {
         .items_center()
         .justify_center()
         .child(icon)
-        .child(
+        // (in the corner of a big tile at most a 48 px icon's overlay: drawn the tile's size, a mark meant for a small corner covered
+        // half the folder)
+        .when_some(overlay, |d, im| d.child(img(im).absolute().left_0().bottom_0().size(overlay_box(size))))
+        .when(link, |d| d.child(
             div()
                 .absolute()
                 .left(px(-1.))
@@ -5572,7 +5788,7 @@ fn link_marked(icon: AnyElement, size: Pixels, link: bool) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .child(Icon::new(L::ArrowUpRight).size(s * 0.85).text_color(gpui::rgb(0x1A73E8))),
-        )
+        ))
         .into_any_element()
 }
 

@@ -87,6 +87,7 @@ enum MainMenu {
         m.addItem(.separator())
         m.addItem(item(String(localized: "Rename"), #selector(W.rename(_:)), key(NSF2FunctionKey), []))
         m.addItem(item(String(localized: "Move to Trash"), #selector(W.moveToTrash(_:)), key(NSBackspaceCharacter), .command))
+        m.addItem(item(String(localized: "Add to Shelf"), #selector(W.addToShelf(_:)), "s", [.command, .shift]))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Filter"), #selector(W.focusSearch(_:)), "f"))
         m.addItem(item(String(localized: "Go to Path"), #selector(W.focusAddress(_:)), "l"))
@@ -99,12 +100,17 @@ enum MainMenu {
         let m = NSMenu(title: String(localized: "View"))
         m.addItem(item(String(localized: "Details"), #selector(W.showDetails(_:)), "1"))
         m.addItem(item(String(localized: "Tiles"), #selector(W.showTiles(_:)), "2"))
+        m.addItem(item(String(localized: "Cards"), #selector(W.showCards(_:)), "3"))
+        m.addItem(item(String(localized: "List"), #selector(W.showListStyle(_:)), "4"))
+        m.addItem(item(String(localized: "Columns"), #selector(W.showColumns(_:)), "5"))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Show Hidden Files"), #selector(W.toggleHidden(_:)), ".", [.command, .shift]))
         m.addItem(item(String(localized: "Refresh"), #selector(W.refresh(_:)), "r"))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Hide Sidebar"), #selector(W.toggleSidebar(_:)), "s", [.command, .control]))
         m.addItem(item(String(localized: "Show Preview"), #selector(W.togglePreviewPane(_:)), "p", [.command, .shift]))
+        m.addItem(item(String(localized: "Show Shelf"), #selector(W.toggleShelf(_:)), "s", [.command, .option]))
+        m.addItem(item(String(localized: "Dual Pane"), #selector(W.toggleDualPane(_:)), "d", [.command, .option]))
         return m
     }
 
@@ -122,6 +128,7 @@ enum MainMenu {
         m.addItem(item(String(localized: "Applications"), #selector(W.goApplications(_:)), "a", [.command, .shift]))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Recent Folders…"), #selector(W.showFolderHistory(_:)), "p"))
+        m.addItem(item(String(localized: "Disk Usage"), #selector(W.showDiskUsage(_:)), "u", [.command, .option]))
         return m
     }
 

@@ -77,6 +77,7 @@ pub mod attention;
 pub mod band;
 pub mod calendar;
 pub mod clock;
+pub mod covered;
 pub mod dragkeys;
 pub mod empty_spot;
 pub mod fullscreen;

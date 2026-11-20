@@ -78,6 +78,7 @@ final class SidebarView: FlippedView {
     var onEject: ((URL) -> Void)?
     var onOpenInNewTab: ((URL) -> Void)?
     var onOpenInNewWindow: ((URL) -> Void)?
+    var onDiskUsage: ((URL) -> Void)?
     var selectedURL: URL? {
         didSet {
             if let u = selectedURL, u != oldValue { follow(u) }
@@ -407,6 +408,7 @@ final class SidebarListView: HoverView {
         b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([url]) }
         b.add(String(localized: "Open in Terminal"), "square-terminal") { MenuActions.openInTerminal(url) }
         b.add(String(localized: "Properties"), "wrench", key: "i") { PropertiesWindow.show([url]) }
+        b.add(String(localized: "Disk usage"), "chart-pie") { owner.onDiskUsage?(url) }
         // a cloud folder, a drive, Applications or Library can be hidden on its own (issue 141)
         if [.cloud, .drive, .place].contains(item.kind) {
             b.separator()

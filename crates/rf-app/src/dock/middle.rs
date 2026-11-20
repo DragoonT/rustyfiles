@@ -275,7 +275,7 @@ impl MiddleIsland {
         };
         // (the app menu tells it when the dock's own pin list changed)
         super::own_pins::register(cx.entity().downgrade(), cx);
-        // until the first refresh is done the dock shows what it always has: the separator and the two places
+        // until the first refresh is done the dock shows what it always has: the two places
         me.items = model::merge(&[], Vec::new(), 0);
         me.feel_keys = feel_keys(&me.items);
         me.slots = model::slots(&me.items);
@@ -345,6 +345,7 @@ impl MiddleIsland {
         let mut items = model::merge(&self.pins, groups, foreground);
         // the pinned apps that are not running go to the left island when the setting says so (the home dock's only)
         let left = if self.mon.is_home() && cx.try_global::<Settings>().is_some_and(|s| s.dock_pins_left) { take_idle_pins(&mut items) } else { Vec::new() };
+        model::drop_lone_separator(&mut items);
         self.set_left_pins(left, cx);
         let wanting = wanting_attention(&items);
         let attention_changed = wanting != self.wanting;
@@ -1654,12 +1655,12 @@ mod tests {
     }
 
     #[test]
-    fn the_dock_before_the_first_refresh_is_the_separator_and_the_two_places() {
+    fn the_dock_before_the_first_refresh_is_the_two_places() {
         let items = model::merge(&[], Vec::new(), 0);
         let slots = model::slots(&items);
-        assert_eq!(slots, vec![Slot::Separator, Slot::Icon, Slot::Icon]);
-        // and its width is the one the layout formula gives for two icons and a separator
-        assert_eq!(plan::middle_width_at_rest(2, 1), rf_win::dock::layout::middle_width(&[44.0, 44.0], 1));
+        assert_eq!(slots, vec![Slot::Icon, Slot::Icon]);
+        // and its width is the one the layout formula gives for two icons and no separator
+        assert_eq!(plan::middle_width_at_rest(2, 0), rf_win::dock::layout::middle_width(&[44.0, 44.0], 0));
     }
 
     fn task(hwnd: isize, title: &str, app: &str) -> Task {

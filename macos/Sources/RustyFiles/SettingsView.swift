@@ -138,6 +138,10 @@ enum SettingsContent {
                     icon: "eye-off",
                     control: .toggle(get: { AppSettings.showHidden }, set: { AppSettings.showHidden = $0 })),
                 .card(
+                    title: String(localized: "Show macOS system files"), detail: String(localized: "Files like .DS_Store and .localized, which macOS keeps for itself; shown only with hidden items."),
+                    icon: "shield",
+                    control: .toggle(get: { AppSettings.showSystemFiles }, set: { AppSettings.showSystemFiles = $0 })),
+                .card(
                     title: String(localized: "Show file extensions"), detail: nil, icon: "file-type",
                     control: .toggle(get: { AppSettings.showExtensions }, set: { AppSettings.showExtensions = $0 })),
                 .card(

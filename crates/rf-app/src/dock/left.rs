@@ -392,6 +392,9 @@ impl Render for LeftIsland {
                 cx.stop_propagation();
                 if own_start(cx) {
                     super::panel::start_system_menu_on(mon, cx);
+                } else {
+                    // our Start is off: Windows' own menu, as its Start button's right click gives (issue 156: it did nothing)
+                    rf_win::dock::triggers::power_user_menu();
                 }
             })
             .on_mouse_up(MouseButton::Left, cx.listener(|me, _, _, cx| me.logo_release(true, cx)))
@@ -479,7 +482,9 @@ impl Render for LeftIsland {
             .filter(|p| !p.is_empty())
             .map(|pins| {
                 let hover = pal.hover_fill().hsla();
-                let mut row = h_flex().ml(px(PIN_START_GAP * k)).gap(px(PIN_GAP * k)).items_center();
+                // (the Start panel's widened field covers them as it covers the weather: they fade with it and take no clicks meanwhile,
+                // issue 159: the field was drawn over them)
+                let mut row = h_flex().ml(px(PIN_START_GAP * k)).gap(px(PIN_GAP * k)).items_center().opacity(weather_alpha);
                 for (i, (app, picture)) in pins.into_iter().enumerate() {
                     let glass = self.glass.clone();
                     let (for_click, for_menu, menu_pic) = (app.clone(), app.clone(), picture.clone());
@@ -487,6 +492,17 @@ impl Render for LeftIsland {
                         Some(im) => gpui_kit::img(im).size(px(24. * k)).into_any_element(),
                         None => text_14(div(), k).child(plan::initial(&app.name)).into_any_element(),
                     };
+                    if field_hidden {
+                        // (under the widened field: a press is a press on that field)
+                        row = row.child(
+                            div()
+                                .id(("dock-left-pin", i))
+                                .size(px(PIN * k))
+                                .cursor_text()
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| super::panel::focus_start_field(cx)),
+                        );
+                        continue;
+                    }
                     row = row.child(
                         div()
                             .id(("dock-left-pin", i))

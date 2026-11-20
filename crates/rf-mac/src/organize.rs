@@ -19,7 +19,7 @@ pub fn set_english(on: bool) {
 }
 
 /// The engine's texts are Turkish; the Windows app's string table gives their English.
-fn tr(s: &'static str) -> String {
+pub(crate) fn tr(s: &'static str) -> String {
     if !ENGLISH.load(Ordering::Relaxed) {
         return s.to_string();
     }

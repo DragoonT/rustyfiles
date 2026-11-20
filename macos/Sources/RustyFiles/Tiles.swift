@@ -6,10 +6,18 @@ import QuickLookThumbnailing
 /// `GRID_SIZES[2]`): tiles 124 wide in rows 150 high with 4 between them, the picture asked
 /// for at 128 and drawn at 96, the label `text_xs`, centred, at most two lines.
 enum TileMetrics {
-    static let width: CGFloat = 124
-    static let rowHeight: CGFloat = 150
+    /// folder_view.rs `GRID_SIZES`: (tile width, row height, picture asked for), smallest first.
+    static let sizes: [(CGFloat, CGFloat, CGFloat)] = [(76, 94, 64), (92, 112, 80), (124, 150, 128), (172, 204, 192), (236, 276, 272)]
+    /// The size chosen in the Layout flyout (0…4, 2 by default).
+    static var size: Int {
+        let v = UserDefaults.standard.object(forKey: "tileSize") as? Int ?? 2
+        return min(max(v, 0), sizes.count - 1)
+    }
+    static var width: CGFloat { sizes[size].0 }
+    static var rowHeight: CGFloat { sizes[size].1 }
     static let gap: CGFloat = 4
-    static let visual: CGFloat = 96
+    /// The picture drawn: three quarters of the one asked for.
+    static var visual: CGFloat { sizes[size].2 * 0.75 }
     /// The grid's own padding (`py_2`, `px 6`).
     static let padX: CGFloat = 6
     static let padY: CGFloat = 8
@@ -72,6 +80,16 @@ final class ThumbnailCache {
 final class TileView: HoverView {
     let picture = NSImageView()
     let label = NSTextField(wrappingLabelWithString: "")
+    /// Cards: the type, size and date beside the picture.
+    let facts = NSTextField(wrappingLabelWithString: "")
+    /// Tiles, Cards or List (folder_view.rs `GridStyle`).
+    var style: ViewMode = .tiles {
+        didSet {
+            guard style != oldValue else { return }
+            applyStyle()
+            needsLayout = true
+        }
+    }
     var isSelected = false { didSet { needsDisplay = true } }
     var isThumbnail = false { didSet { picture.layer?.cornerRadius = isThumbnail ? 4 : 0 } }
 
@@ -87,8 +105,35 @@ final class TileView: HoverView {
         label.lineBreakMode = .byWordWrapping
         label.cell?.truncatesLastVisibleLine = true
         label.cell?.lineBreakMode = .byWordWrapping
+        facts.font = Metrics.textXs
+        facts.maximumNumberOfLines = 3
+        facts.isHidden = true
         addSubview(picture)
         addSubview(label)
+        addSubview(facts)
+    }
+
+    private func applyStyle() {
+        switch style {
+        case .cards:
+            label.font = Metrics.textSmMedium
+            label.alignment = .left
+            label.maximumNumberOfLines = 1
+            label.cell?.lineBreakMode = .byTruncatingTail
+            facts.isHidden = false
+        case .list:
+            label.font = Metrics.textSm
+            label.alignment = .left
+            label.maximumNumberOfLines = 1
+            label.cell?.lineBreakMode = .byTruncatingTail
+            facts.isHidden = true
+        default:
+            label.font = Metrics.textXs
+            label.alignment = .center
+            label.maximumNumberOfLines = 2
+            label.cell?.lineBreakMode = .byWordWrapping
+            facts.isHidden = true
+        }
     }
 
     @available(*, unavailable)
@@ -96,6 +141,26 @@ final class TileView: HoverView {
 
     override func layout() {
         super.layout()
+        switch style {
+        case .cards:
+            // px_2 gap_3: the picture 60 (in a box of 64), the name and the facts beside it
+            let side: CGFloat = 60
+            picture.frame = NSRect(x: 8 + 2, y: (bounds.height - side) / 2, width: side, height: side)
+            let x = 8 + side + 4 + 12, w = bounds.width - x - 8
+            let lh = ceil(Metrics.textSmMedium.ascender - Metrics.textSmMedium.descender) + 2
+            let fh = min(facts.sizeThatFits(NSSize(width: w, height: 100)).height, 3 * 16)
+            let top = (bounds.height - lh - 2 - fh) / 2
+            label.frame = NSRect(x: x, y: top, width: w, height: lh)
+            facts.frame = NSRect(x: x, y: top + lh + 2, width: w, height: fh)
+            return
+        case .list:
+            // px_2 gap_2: a 20 icon and the name
+            picture.frame = NSRect(x: 8, y: (bounds.height - 20) / 2, width: 20, height: 20)
+            let lh = ceil(Metrics.textSm.ascender - Metrics.textSm.descender) + 2
+            label.frame = NSRect(x: 8 + 20 + 8, y: (bounds.height - lh) / 2, width: bounds.width - 44, height: lh)
+            return
+        default: break
+        }
         let box = TileMetrics.visual + 4
         let boxX = (bounds.width - box) / 2
         picture.frame = NSRect(x: boxX + 2, y: 4 + 2, width: TileMetrics.visual, height: TileMetrics.visual)
@@ -126,7 +191,7 @@ final class TileItem: NSCollectionViewItem {
     var tile: TileView { view as! TileView }
 
     override func loadView() {
-        view = TileView(frame: NSRect(x: 0, y: 0, width: TileMetrics.width, height: TileMetrics.rowHeight - TileMetrics.gap))
+        view = TileView(frame: NSRect(origin: .zero, size: ViewMode.tiles.cellSize))
         textField = tile.label
         imageView = tile.picture
     }
@@ -138,6 +203,12 @@ final class TileItem: NSCollectionViewItem {
 @MainActor
 final class TileCollectionView: NSCollectionView, NSServicesMenuRequestor {
     weak var list: FileListController?
+
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { list?.onFocus?() }
+        return ok
+    }
 
     override func keyDown(with event: NSEvent) {
         if list?.handleKey(event) == true { return }
@@ -181,4 +252,23 @@ final class TileCollectionView: NSCollectionView, NSServicesMenuRequestor {
     override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }
     override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) { list?.beginQuickLook(panel) }
     override func endPreviewPanelControl(_ panel: QLPreviewPanel!) { list?.endQuickLook(panel) }
+}
+
+/// A group's header in the grid: the title in the accent, medium, then a line (the list's
+/// group header, folder_view.rs).
+@MainActor
+final class GridGroupHeader: NSView, NSCollectionViewElement {
+    static let id = NSUserInterfaceItemIdentifier("gridGroup")
+    var title = "" { didSet { needsDisplay = true } }
+
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let p = Palette.of(self)
+        let r = NSRect(x: 6, y: 10, width: bounds.width - 12, height: 18)
+        let w = Draw.textWidth(title, font: Metrics.textSmMedium)
+        Draw.text(title, in: r, font: Metrics.textSmMedium, color: p.accent)
+        p.divider.setFill()
+        NSRect(x: r.minX + w + 10, y: r.midY, width: max(r.width - w - 10, 0), height: 1).fill()
+    }
 }

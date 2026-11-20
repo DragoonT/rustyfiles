@@ -34,6 +34,37 @@ const SCRUB_EVERY: Duration = Duration::from_millis(80);
 /// Media Foundation and rustdecoder routes report their position with a delay).
 const SEEK_HOLD: Duration = Duration::from_millis(800);
 
+/// The music view's window (cover, tags, the waveform timeline and the transport row).
+const MUSIC_WINDOW: (f32, f32) = (580.0, 356.0);
+/// The waveform's bars.
+const WAVE_BARS: usize = 150;
+
+/// How loud the track is along its length: `n` values 0..1 (the loudest 1), from short reads spread over the file at a low sample
+/// rate. `None` for a file that cannot be read (a stream, no audio). Blocking: off the UI thread.
+fn waveform(path: &std::path::Path, n: usize) -> Option<Vec<f32>> {
+    const RATE: u32 = 4000;
+    let media = rf_player::open(path).ok()?;
+    let dur = media.duration();
+    if !(dur > 0.5) {
+        return None;
+    }
+    let total = (dur * f64::from(RATE)) as i64;
+    let step = (total / n as i64).max(1);
+    let take = (step as usize).clamp(64, RATE as usize / 2);
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let v = media.audio(i as i64 * step, take, RATE).ok()?;
+        // (the loudness of the stretch: its RMS, which follows what is heard better than the peak)
+        let rms = if v.is_empty() { 0.0 } else { (v.iter().map(|x| x * x).sum::<f32>() / v.len() as f32).sqrt() };
+        out.push(rms);
+    }
+    let max = out.iter().copied().fold(0.0f32, f32::max);
+    if max <= 0.0 {
+        return None;
+    }
+    Some(out.into_iter().map(|x| (x / max).powf(0.8)).collect())
+}
+
 /// The timeline being dragged (GPUI's drag: its moves arrive wherever the pointer goes).
 struct SeekDrag;
 
@@ -79,7 +110,7 @@ fn open_media(path: &std::path::Path) -> Opened {
                     (Kind::Video(media), p)
                 }
                 None => {
-                    let mut p = Prepared::new((500.0, 300.0), name);
+                    let mut p = Prepared::new(MUSIC_WINDOW, name);
                     p.resizable = false;
                     (Kind::Audio(media), p)
                 }
@@ -110,7 +141,7 @@ fn open_media(path: &std::path::Path) -> Opened {
                 (Kind::Video(media), p)
             }
             None => {
-                let mut p = Prepared::new((500.0, 300.0), name);
+                let mut p = Prepared::new(MUSIC_WINDOW, name);
                 p.resizable = false;
                 (Kind::Audio(media), p)
             }
@@ -256,7 +287,9 @@ pub struct MediaView {
     area: Rc<Cell<Option<Bounds<Pixels>>>>,
     meta: Vec<(&'static str, String)>,
     cover: Option<Arc<RenderImage>>,
-    images: Option<Entity<crate::image_cache::ImageCache>>,
+    /// The track's loudness along its length (0..1, [`WAVE_BARS`] of them): the music view's timeline. Empty until read (or for a
+    /// stream).
+    wave: Arc<Vec<f32>>,
     lyrics: Vec<(f64, String)>,
     opened_at: Instant,
     first_frame_logged: bool,
@@ -316,7 +349,7 @@ impl MediaView {
             area: Default::default(),
             meta: Vec::new(),
             cover: None,
-            images: None,
+            wave: Arc::new(Vec::new()),
             lyrics: Vec::new(),
             opened_at: Instant::now(),
             first_frame_logged: false,
@@ -522,10 +555,26 @@ impl MediaView {
                 cx.notify();
             });
         }));
-        // kapak: kabuk küçük resmi, paylaşılan önbellekten (kendi iş parçacıklarında, mesaj döngülü)
-        let images = crate::look::LookManager::images(cx);
-        cx.observe(&images, |_, _, cx| cx.notify()).detach();
-        self.images = Some(images);
+        // the cover: the file's own picture only (a song without one gets the view's own art, never its type's icon); and the
+        // waveform the timeline is drawn as
+        let p = self.path.clone();
+        let art = cx.background_spawn(async move {
+            let cover = rf_win::thumbs::picture_only(&p, 400);
+            let wave = waveform(&p, WAVE_BARS);
+            (cover, wave)
+        });
+        self._tasks.push(cx.spawn(async move |this, cx| {
+            let (cover, wave) = art.await;
+            let _ = this.update(cx, |v, cx| {
+                if let Some(c) = cover.as_ref().and_then(crate::image_cache::to_render_image) {
+                    v.cover = Some(c);
+                }
+                if let Some(w) = wave {
+                    v.wave = Arc::new(w);
+                }
+                cx.notify();
+            });
+        }));
     }
 
     /// Oynatma döngüsü: yeni kare varsa arka planda çevrilir; durum güncellenir.
@@ -1036,64 +1085,233 @@ impl Render for MediaView {
 impl MediaView {
     fn render_audio(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let lyric = crate::look::lyrics::line_at(&self.lyrics, self.state.position).map(str::to_string);
-        if self.cover.is_none() {
-            // (no disk access here: this runs every frame, and the file may be on a network drive)
-            if let (Some(images), Some(dir)) = (self.images.clone(), self.path.parent()) {
-                let name = super::file_name(&self.path);
-                let e = rf_core::Entry::new(&name, rf_core::EntryKind::File, 0, 0, 0, 0);
-                let dir = dir.to_path_buf();
-                // önbellek kendi dokusunu yönetir: burada bırakılmaz
-                let thumb = images.update(cx, |c, cx| c.thumbnail(&dir, &e, 256, cx));
-                if let Some(t) = thumb {
-                    return self.render_audio_with(t, window, cx, lyric);
-                }
-            }
-        }
         let cover = self.cover.clone();
         self.render_audio_inner(cover, window, cx, lyric)
     }
 
-    fn render_audio_with(&mut self, cover: Arc<RenderImage>, window: &mut Window, cx: &mut Context<Self>, lyric: Option<String>) -> AnyElement {
-        self.render_audio_inner(Some(cover), window, cx, lyric)
-    }
-
+    /// The music view: the cover (or the view's own art), the title, artist and album from the tags, the line of the lyrics being
+    /// sung, then the waveform as the timeline and the transport row under it.
     fn render_audio_inner(&mut self, cover: Option<Arc<RenderImage>>, window: &mut Window, cx: &mut Context<Self>, lyric: Option<String>) -> AnyElement {
         let p = crate::theme::Palette::for_window(window);
-        let field = |k: &str| self.meta.iter().find(|(l, _)| *l == k).map(|(_, v)| v.clone());
-        let title = field("Başlık").unwrap_or_else(|| super::file_name(&self.path));
+        // (the system's accent, as the app's selection: DirectLook's own theme colour is a neutral grey)
+        let accent = p.accent;
+        let field = |k: &str| self.meta.iter().find(|(l, _)| *l == k).map(|(_, v)| v.clone()).filter(|v| !v.trim().is_empty());
+        let title = field("Başlık").unwrap_or_else(|| {
+            // (no title tag: the file's name without its extension)
+            let n = super::file_name(&self.path);
+            std::path::Path::new(&n).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or(n)
+        });
         let artist = field("Sanatçı");
         let album = field("Albüm");
-        h_flex()
-            .size_full()
-            .p_4()
+        let art = div()
+            .size(px(132.))
+            .flex_shrink_0()
+            .rounded(px(10.))
+            .overflow_hidden()
+            .flex()
+            .items_center()
+            .justify_center()
+            .map(|d| match cover {
+                Some(c) => d.child(gpui_kit::img(c).size_full().object_fit(ObjectFit::Cover)).into_any_element(),
+                // the view's own art: the accent's tint with a note, quiet enough to sit beside any title
+                None => d
+                    .bg(accent.opacity(0.16))
+                    .border_1()
+                    .border_color(accent.opacity(0.28))
+                    .child(Icon::new(L::Music).size(px(48.)).text_color(accent))
+                    .into_any_element(),
+            });
+        let head = h_flex()
             .gap_4()
             .items_center()
-            .child(
-                div()
-                    .size(px(150.))
-                    .flex_shrink_0()
-                    .rounded(px(8.))
-                    .overflow_hidden()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(p.card_bg)
-                    .map(|d| match cover {
-                        Some(c) => d.child(gpui_kit::img(c).size_full().object_fit(ObjectFit::Cover)).into_any_element(),
-                        None => d.child(Icon::new(L::Music).size(px(56.)).text_color(p.text_secondary)).into_any_element(),
-                    }),
-            )
+            .child(art)
             .child(
                 v_flex()
                     .flex_1()
                     .min_w_0()
                     .gap_1()
-                    .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).text_color(p.text).truncate().child(title))
+                    // (a title of one long word, a file's name with no spaces, cannot wrap: it is cut with "…" on one line)
+                    .map(|d| {
+                        let t = div().text_xl().font_weight(FontWeight::SEMIBOLD).text_color(p.text).overflow_hidden();
+                        if title.contains(char::is_whitespace) { d.child(t.line_clamp(2).child(title)) } else { d.child(t.truncate().child(title)) }
+                    })
                     .when_some(artist, |d, a| d.child(div().text_sm().text_color(p.text_secondary).truncate().child(a)))
                     .when_some(album, |d, a| d.child(div().text_xs().text_color(p.text_tertiary).truncate().child(a)))
-                    .when_some(lyric, |d, l| d.child(div().pt_2().text_sm().text_color(p.text).child(l)))
-                    .child(div().pt_2().child(self.render_controls(p.dark, cx))),
+                    .when_some(lyric, |d, l| d.child(div().pt_2().text_sm().text_color(accent).child(l))),
+            );
+        v_flex().size_full().px_5().pt_4().pb_3().gap_3().child(head).child(div().flex_1()).child(self.render_music_transport(&p, accent, cx)).into_any_element()
+    }
+
+    /// Where the playback is: (playing, position, duration) from whichever route plays.
+    fn play_state(&self) -> (bool, f64, f64) {
+        if self.rd_mode {
+            self.rd_state.as_ref().map_or((false, 0.0, 0.0), |s| (s.playing, s.position, s.duration))
+        } else if self.mf {
+            self.mf_state.map_or((false, 0.0, 0.0), |s| (s.playing, s.position, s.duration))
+        } else {
+            (self.state.playing, self.state.position, self.state.duration)
+        }
+    }
+
+    /// The music view's timeline (the waveform: the played part in the accent) and its transport row: the times at the ends,
+    /// loop, back 10 s, the round play button, forward 10 s, the volume.
+    fn render_music_transport(&self, p: &crate::theme::Palette, accent: Hsla, cx: &mut Context<Self>) -> AnyElement {
+        let (playing, pos, dur) = self.play_state();
+        let reported = if dur > 0.0 { (pos / dur).clamp(0.0, 1.0) } else { 0.0 };
+        let held = self.seek_hold.filter(|(f, at)| at.elapsed() < SEEK_HOLD && (reported - f).abs() > 0.01).map(|(f, _)| f);
+        let shown = self.scrub.or(held).unwrap_or(reported);
+        let pos = if self.scrub.is_some() || held.is_some() { shown * dur } else { pos };
+        let playing = playing || self.scrub_resume;
+        let bar = self.bar.clone();
+        let rest = p.text.opacity(0.22);
+        // the waveform (or, until it is read, a thin line) with the played part in the accent
+        let line: AnyElement = if self.wave.is_empty() {
+            div().w_full().h(px(4.)).rounded_full().bg(rest).child(div().h_full().w(relative(shown as f32)).rounded_full().bg(accent)).into_any_element()
+        } else {
+            let n = self.wave.len();
+            let mut row = h_flex().size_full().items_center().gap(px(2.));
+            for (i, &a) in self.wave.iter().enumerate() {
+                let played = (i as f64 + 0.5) / n as f64 <= shown;
+                row = row.child(div().flex_1().h(relative(0.12 + 0.88 * a)).rounded_full().bg(if played { accent } else { rest }));
+            }
+            row.into_any_element()
+        };
+        let timeline = div()
+            .id("music-seek")
+            .w_full()
+            .h(px(44.))
+            .flex()
+            .items_center()
+            .cursor_pointer()
+            .child({
+                let bar = bar.clone();
+                canvas(move |b, _, _| bar.set(Some(b)), |_, _, _, _| {}).absolute().size_full()
+            })
+            .child(line)
+            .on_mouse_down(MouseButton::Left, cx.listener(move |v, ev: &MouseDownEvent, _, cx| {
+                if let Some(b) = bar.get() {
+                    v.scrub_to((f32::from(ev.position.x - b.origin.x) / f32::from(b.size.width).max(1.0)) as f64, cx);
+                }
+                cx.stop_propagation();
+            }))
+            .on_drag(SeekDrag, |_, _, _, cx| cx.new(|_| SeekGhost))
+            .on_drag_move(cx.listener(|v, ev: &DragMoveEvent<SeekDrag>, _, cx| {
+                if v.scrub.is_none() {
+                    return;
+                }
+                if ev.event.pressed_button != Some(MouseButton::Left) {
+                    v.end_scrub(cx);
+                    return;
+                }
+                let b = ev.bounds;
+                v.scrub_to((f32::from(ev.event.position.x - b.origin.x) / f32::from(b.size.width).max(1.0)) as f64, cx);
+            }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|v, _: &MouseUpEvent, _, cx| v.end_scrub(cx)))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|v, _: &MouseUpEvent, _, cx| v.end_scrub(cx)));
+        let hover = p.hover;
+        let quiet = p.text_secondary;
+        let small = move |id: &'static str, icon: L, on: bool| {
+            div()
+                .id(id)
+                .size(px(32.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded_full()
+                .cursor_pointer()
+                .when(on, |d| d.bg(accent.opacity(0.16)))
+                .hover(move |s| s.bg(hover))
+                .child(Icon::new(icon).size(px(16.)).text_color(if on { accent } else { quiet }))
+        };
+        let play = div()
+            .id("music-play")
+            .size(px(46.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_full()
+            .cursor_pointer()
+            .bg(accent)
+            .hover(|s| s.opacity(0.9))
+            .child(Icon::new(if playing { L::Pause } else { L::Play }).size(px(20.)).text_color(white()))
+            .on_click(cx.listener(|v, _, _, cx| v.toggle_play(cx)));
+        let volume = self.volume;
+        let vol_bar: Rc<Cell<Option<Bounds<Pixels>>>> = Default::default();
+        let vb = vol_bar.clone();
+        let volume_row = h_flex()
+            .gap_2()
+            .items_center()
+            .child(small("music-mute", if self.muted || volume == 0.0 { L::VolumeX } else { L::Volume2 }, self.muted).on_click(cx.listener(|v, _, _, cx| {
+                v.muted = !v.muted;
+                let m = v.muted;
+                if let Some(p) = &mut v.player {
+                    p.set_mute(m);
+                }
+                if let Some(rd) = &v.rd {
+                    rd.set_muted(m);
+                }
+                cx.notify();
+            })))
+            .child(
+                div()
+                    .id("music-volume")
+                    .relative()
+                    .w(px(84.))
+                    .h(px(20.))
+                    .flex()
+                    .items_center()
+                    .cursor_pointer()
+                    .child(canvas(move |b, _, _| vb.set(Some(b)), |_, _, _, _| {}).absolute().size_full())
+                    .child(div().w_full().h(px(4.)).rounded_full().bg(rest).child(div().h_full().w(relative(volume)).rounded_full().bg(if self.muted { p.text_tertiary } else { quiet })))
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |v, ev: &MouseDownEvent, _, cx| {
+                        if let Some(b) = vol_bar.get() {
+                            v.set_volume(f32::from(ev.position.x - b.origin.x) / f32::from(b.size.width).max(1.0), cx);
+                        }
+                        cx.stop_propagation();
+                    })),
+            );
+        v_flex()
+            .id("look-music-transport")
+            .w_full()
+            .gap_1()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(timeline)
+            .child(h_flex().text_xs().text_color(p.text_tertiary).child(clock(pos)).child(div().flex_1()).child(clock(dur)))
+            .child(
+                h_flex()
+                    .pt_1()
+                    .items_center()
+                    .child(h_flex().flex_1().child(small("music-loop", L::Repeat, self.looping).on_click(cx.listener(|v, _, _, cx| {
+                        v.looping = !v.looping;
+                        if let Some(p) = &mut v.player {
+                            p.set_loop(v.looping);
+                        }
+                        if let Some(rd) = &v.rd {
+                            rd.set_looping(v.looping);
+                        }
+                        let on = v.looping;
+                        crate::look::config::update(cx, |s| s.look_loop = on);
+                        cx.notify();
+                    }))))
+                    .child(
+                        h_flex()
+                            .gap_3()
+                            .items_center()
+                            .child(small("music-back", L::RotateCcw, false).on_click(cx.listener(|v, _, _, cx| v.jump_by(-10.0, cx))))
+                            .child(play)
+                            .child(small("music-fwd", L::RotateCw, false).on_click(cx.listener(|v, _, _, cx| v.jump_by(10.0, cx)))),
+                    )
+                    .child(h_flex().flex_1().justify_end().child(volume_row)),
             )
             .into_any_element()
+    }
+
+    /// Back or forward by `by` seconds (the music view's buttons).
+    fn jump_by(&mut self, by: f64, cx: &mut Context<Self>) {
+        let (_, pos, dur) = self.play_state();
+        if dur > 0.0 {
+            self.seek_fraction(((pos + by) / dur).clamp(0.0, 1.0));
+            cx.notify();
+        }
     }
 }

@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var home: URL { BrowserTab.homeURL }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        setShowSystemFiles(show: AppSettings.showSystemFiles)
         // Sizes and dates in rf-core's English wording until the interface is translated.
         // sizes and dates speak the interface's language ("bayt", decimal comma)
         setEnglish(on: !AppSettings.speaksTurkish)
@@ -33,6 +34,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if let which = ProcessInfo.processInfo.environment["RF_DEMO_MENU"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.controllers.first?.demoMenu(item: which == "item") }
+        }
+        // RF_DEMO_LAYOUT (development): the Layout flyout open
+        if ProcessInfo.processInfo.environment["RF_DEMO_LAYOUT"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let list = self?.controllers.first?.list else { return }
+                LayoutFlyout.show(from: list.commandBar.view, list: list)
+            }
+        }
+        // RF_DEMO_DUAL (development): the window in dual pane
+        if ProcessInfo.processInfo.environment["RF_DEMO_DUAL"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.controllers.first?.toggleDualPane(nil) }
+        }
+        // RF_DEMO_SHELF (development): the shelf pane open
+        if ProcessInfo.processInfo.environment["RF_DEMO_SHELF"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.controllers.first?.toggleShelf(nil) }
+        }
+        // RF_DEMO_BULK=folder (development): bulk rename for the files in that folder
+        if let dir = ProcessInfo.processInfo.environment["RF_DEMO_BULK"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                let urls = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).sorted().map { URL(fileURLWithPath: dir).appendingPathComponent($0) }
+                BulkRenameSheet.show(urls, over: self?.controllers.first?.window) { _ in }
+            }
         }
         // RF_DEMO_PALETTE=all|folders|tabs[:query] (development): the command palette, typed into
         if let spec = ProcessInfo.processInfo.environment["RF_DEMO_PALETTE"] {
@@ -67,6 +90,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 wc.openSettings(nil)
                 let page = env.split(separator: ":").dropFirst().first.map(String.init) ?? ""
                 if let p = SettingsPage.allCases.first(where: { "\($0)" == page }) { wc.showSettingsPage(p) }
+            } else if let env, env.hasPrefix("diskusage:") {
+                // RF_START=diskusage:<folder>
+                openWindow(at: BrowserTab.diskUsageURL(URL(fileURLWithPath: String(env.dropFirst("diskusage:".count)))))
             } else if let env, env.hasPrefix("search:") {
                 // RF_START=search:<folder>:<query>
                 let parts = env.split(separator: ":", maxSplits: 2).map(String.init)
@@ -93,13 +119,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             // a window over the first one (the command palette) is drawn instead when there is one
             let main = self?.controllers.first?.window
-            let shown = main?.childWindows?.last ?? main
+            // RF_SNAPSHOT_POPOVER: the popover open over the window instead
+            let popover = ProcessInfo.processInfo.environment["RF_SNAPSHOT_POPOVER"] != nil ? NSApp.windows.first { $0.className.contains("Popover") && $0.isVisible } : nil
+            let shown = popover ?? main?.attachedSheet ?? main?.childWindows?.last ?? main
             guard let view = shown?.contentView?.superview,
                 let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)
             else { exit(1) }
             view.cacheDisplay(in: view.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
-            NSApp.terminate(nil)
+            // a sheet left open would hold the quit back
+            if let sheet = main?.attachedSheet { main?.endSheet(sheet) }
+            DispatchQueue.main.async { exit(0) }
         }
     }
 

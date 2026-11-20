@@ -605,6 +605,9 @@ pub struct Settings {
     /// Names starting with "." count as hidden when off.
     pub show_dot_files: bool,
     pub show_thumbnails: bool,
+    /// The marks sync and version-control programs put on icons in Explorer (Google Drive, OneDrive, TortoiseGit, Dropbox), drawn
+    /// over ours. A user on Discord, 2026-11-20.
+    pub show_overlays: bool,
     pub show_checkboxes: bool,
     pub single_click: ClickPref,
     pub open_folders_in_new_tab: bool,
@@ -630,6 +633,9 @@ pub struct Settings {
     pub fast_file_ops: bool,
     /// Check copies after writing them.
     pub copy_verify: CopyVerify,
+    /// A copy into a WSL distribution leaves no "file:Zone.Identifier" file beside it (the download mark Windows writes there as a
+    /// file of its own). A user on Discord, 2026-11-20.
+    pub wsl_drop_zone: bool,
     /// Copy speed limit in MB/s (0 = none).
     pub copy_speed_limit: u32,
     /// Where a running operation's progress is shown (see [`TransferProgress`]).
@@ -637,6 +643,8 @@ pub struct Settings {
     /// The thumbnail cache's limit in MB (the cache is in memory); `None` = the default, 64 MB, and no key in the file.
     pub thumb_cache_mb: Option<u32>,
     pub show_libraries: bool,
+    /// Each drive in the sidebar says how much of it is used, in numbers ("238 GB / 500 GB"), under its bar. Issue 167.
+    pub sidebar_drive_space: bool,
     /// A "Klasörler" section in the sidebar: the folder tree (drives and the profile folder as roots). Off by default.
     pub sidebar_tree: bool,
     /// The tree opens the branch to the open folder, marks it and scrolls it into view after every navigation.
@@ -726,6 +734,9 @@ pub struct Settings {
     /// The dock hides at the bottom of the screen and comes up when the pointer reaches the edge (off; issue 112). It reserves no
     /// band then: windows use the whole screen.
     pub dock_autohide: bool,
+    /// With auto-hide on: the dock hides only while a window lies where it stands, and comes back up when that window is minimised,
+    /// closed or moved away (off: it hides whenever the pointer leaves it). A user on Discord, 2026-11-20.
+    pub dock_autohide_windows: bool,
     /// The dock's islands on a solid fill instead of the glass (off; issue 113).
     pub dock_opaque: bool,
     /// A thin "Show desktop" strip at the right end of the primary monitor's right island, after the bell, as on Windows' taskbar (off;
@@ -938,6 +949,7 @@ impl Default for Settings {
             show_system_files: false,
             show_dot_files: true,
             show_thumbnails: true,
+            show_overlays: true,
             show_checkboxes: false,
             single_click: ClickPref::Never,
             open_folders_in_new_tab: false,
@@ -955,10 +967,12 @@ impl Default for Settings {
             folder_size_on_disk: false,
             fast_file_ops: true,
             copy_verify: CopyVerify::Off,
+            wsl_drop_zone: false,
             copy_speed_limit: 0,
             transfer_progress: TransferProgress::StatusBar,
             thumb_cache_mb: None,
             show_libraries: false,
+            sidebar_drive_space: false,
             sidebar_tree: false,
             sidebar_tree_follow: true,
             address_commands: true,
@@ -993,6 +1007,7 @@ impl Default for Settings {
             dock_status_hidden: Vec::new(),
             dock_side_tall: false,
             dock_autohide: false,
+            dock_autohide_windows: false,
             dock_opaque: false,
             dock_show_desktop: false,
             dock_labels: false,

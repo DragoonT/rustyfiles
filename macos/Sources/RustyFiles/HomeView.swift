@@ -55,7 +55,17 @@ final class HomeView: FlippedView {
             HomeTile(kind: .drive(icon: v.icon, used: v.used, detail: v.detail), title: v.title, url: v.url) { [weak self] in self?.onOpenFolder?(v.url) }
         }
         tagTiles = !AppSettings.showsHome(.tags) ? [] : TagStore.all.map { t in
-            HomeTile(kind: .folder(icon: "tag"), title: t.name, url: TagStore.url(t.name)) { [weak self] in self?.onOpenFolder?(TagStore.url(t.name)) }
+            HomeTile(kind: .tag(color: TagStore.color(t.color)), title: t.name, url: TagStore.url(t.name)) { [weak self] in self?.onOpenFolder?(TagStore.url(t.name)) }
+        }
+        // how many items carry each tag (Spotlight; off the main thread)
+        for tile in tagTiles {
+            let name = tile.title
+            Task.detached(priority: .utility) {
+                let n = TagStore.files(tagged: name).count
+                await MainActor.run { [weak tile] in
+                    tile?.detail = n == 1 ? String(localized: "1 item") : String(localized: "\(n) items")
+                }
+            }
         }
         headers.append(HomeHeader(String(localized: "Quick access")))
         headers.append(HomeHeader(String(localized: "Drives")))
@@ -229,7 +239,7 @@ final class HomeView: FlippedView {
         if !tagTiles.isEmpty {
             y += 8 + 16
             header(2)
-            grid(tagTiles, min: 140, max: 220, height: 56)
+            grid(tagTiles, min: 140, max: 220, height: 64)
         }
         if let i = headers.firstIndex(where: \.isRecent) {
             y += 8 + 16
@@ -282,7 +292,12 @@ final class HomeTile: HoverView {
     enum Kind {
         case folder(icon: String)
         case drive(icon: String, used: Double?, detail: String)
+        /// A tag: its colour dot and name, how many items carry it below.
+        case tag(color: NSColor?)
     }
+
+    /// The tag's item count, once it is known.
+    var detail: String? { didSet { needsDisplay = true } }
 
     let kind: Kind
     let title: String
@@ -317,6 +332,19 @@ final class HomeTile: HoverView {
         case .folder(let icon):
             Draw.icon(icon, in: NSRect(x: inner.minX, y: inner.minY, width: 28, height: 28), size: 28, color: p.accent)
             Draw.text(title, in: NSRect(x: inner.minX, y: inner.minY + 28 + 8, width: inner.width, height: 20), font: Metrics.textSm, color: p.text)
+        case .tag(let color):
+            let dot = NSRect(x: inner.minX, y: inner.minY + 5, width: 10, height: 10)
+            if let color {
+                color.setFill()
+                NSBezierPath(ovalIn: dot).fill()
+            } else {
+                p.textTertiary.setStroke()
+                NSBezierPath(ovalIn: dot.insetBy(dx: 0.5, dy: 0.5)).stroke()
+            }
+            Draw.text(title, in: NSRect(x: inner.minX + 18, y: inner.minY, width: inner.width - 18, height: 20), font: Metrics.textSm, color: p.text)
+            if let detail {
+                Draw.text(detail, in: NSRect(x: inner.minX, y: inner.minY + 20 + 4, width: inner.width, height: 16), font: Metrics.textXs, color: p.textSecondary)
+            }
         case .drive(let icon, let used, let detail):
             Draw.icon(icon, in: NSRect(x: inner.minX, y: inner.minY, width: 28, height: inner.height), size: 28, color: p.textSecondary)
             let x = inner.minX + 28 + 12
