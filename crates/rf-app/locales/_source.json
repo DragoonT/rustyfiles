@@ -12629,5 +12629,11 @@
   "key": "Yeni pencerede",
   "tr": "Yeni pencerede",
   "en": "In a new window"
+ },
+ {
+  "id": "dce41044",
+  "key": "{h} sa {m} dk kaldı",
+  "tr": "{h} sa {m} dk kaldı",
+  "en": "{h} h {m} min left"
  }
 ]

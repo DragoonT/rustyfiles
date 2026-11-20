@@ -182,11 +182,11 @@ struct PathEntry {
     tries: u8,
 }
 
-/// The buttons of its own that the dock's right island draws (`right.rs`: `dock-network` and `dock-volume`, always; no battery or
-/// power button). A notification icon that is Windows' own indicator for one of these is left out of the strip (see
+/// The buttons of its own that the dock's right island draws (`right.rs`: `dock-network` and `dock-volume`, always; `dock-battery` on a
+/// machine with a battery, issue 149). A notification icon that is Windows' own indicator for one of these is left out of the strip (see
 /// `rf_win::trayhost::own_icons`): the dock already shows it. If the right island ever hides one of its buttons or gets a battery,
 /// this is the one place to change (a test reads `right.rs` and fails when the two disagree).
-pub const OWN_BUTTONS: OwnButtons = OwnButtons { volume: true, network: true, power: false };
+pub const OWN_BUTTONS: OwnButtons = OwnButtons { volume: true, network: true, power: true };
 
 /// The Windows directory (`C:\Windows`), where the programs of Windows itself live.
 fn windows_dir() -> String {
@@ -778,8 +778,8 @@ mod tests {
     fn the_buttons_the_feed_assumes_are_the_ones_the_right_island_draws() {
         let right = include_str!("right.rs");
         assert!(right.contains("\"dock-volume\"") && right.contains("\"dock-network\""));
-        assert!(!right.contains("dock-power") && !right.contains("dock-battery"));
-        assert_eq!(OWN_BUTTONS, OwnButtons { volume: true, network: true, power: false });
+        assert!(right.contains("\"dock-battery\""), "the battery button (issue 149)");
+        assert_eq!(OWN_BUTTONS, OwnButtons { volume: true, network: true, power: true });
     }
 
     #[test]

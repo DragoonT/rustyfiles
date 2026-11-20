@@ -404,6 +404,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Klasörden çıkar", "Take out of the folder"),
     ("Yalnızca menüyü aç", "Only open the menu"),
     ("Arşivler nerede açılsın", "Where archives open"),
+    ("{h} sa {m} dk kaldı", "{h} h {m} min left"),
     ("Aynı sekmede", "In the same tab"),
     ("Yeni sekmede", "In a new tab"),
     ("Yeni pencerede", "In a new window"),
