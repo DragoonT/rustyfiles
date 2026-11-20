@@ -362,6 +362,38 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         refreshTabs()
     }
 
+    // MARK: command palette (command_palette.rs)
+
+    @objc func showCommandPalette(_ sender: Any?) { CommandPalette.show(.all, over: self) }
+    @objc func showFolderHistory(_ sender: Any?) { CommandPalette.show(.folders, over: self) }
+    @objc func searchTabs(_ sender: Any?) { CommandPalette.show(.tabs, over: self) }
+
+    /// The open tabs of every window, then the ones closed here (most recent first), for the
+    /// palette's tab search (issue 79).
+    func paletteTabs() -> [PaletteEntry] {
+        var out: [PaletteEntry] = []
+        for c in AppDelegate.shared.controllers {
+            for (i, t) in c.tabs.enumerated() {
+                let info = t.info
+                let detail = t.url.isFileURL ? t.url.path : ""
+                out.append(PaletteEntry(title: info.title, detail: detail, icon: info.icon, hint: c === self && i == c.active ? String(localized: "Current") : "") { [weak c] in
+                    guard let c else { return }
+                    c.window?.makeKeyAndOrderFront(nil)
+                    c.activate(i)
+                })
+            }
+        }
+        for url in closedTabs.reversed() {
+            let info = BrowserTab(url: url).info
+            out.append(PaletteEntry(title: info.title, detail: url.isFileURL ? url.path : "", icon: "rotate-ccw", hint: String(localized: "Closed")) { [weak self] in
+                guard let self else { return }
+                if let i = self.closedTabs.lastIndex(of: url) { self.closedTabs.remove(at: i) }
+                self.openTab(url, activate: true)
+            })
+        }
+        return out
+    }
+
     @objc func reopenClosedTab(_ sender: Any?) {
         guard let url = closedTabs.popLast() else { return }
         openTab(url)
@@ -480,6 +512,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
                 case .success(let f):
                     t.folder = f
                     t.error = nil
+                    if url.isFileURL { FolderHistory.record(url) }
                 case .failure(let e):
                     t.folder = nil
                     t.error = Self.describe(e, at: url)

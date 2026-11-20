@@ -109,3 +109,7 @@ square-check
 mouse-pointer
 wand-sparkles
 a-large-small
+file
+command
+clock
+cloud

@@ -90,6 +90,8 @@ enum MainMenu {
         m.addItem(.separator())
         m.addItem(item(String(localized: "Filter"), #selector(W.focusSearch(_:)), "f"))
         m.addItem(item(String(localized: "Go to Path"), #selector(W.focusAddress(_:)), "l"))
+        m.addItem(.separator())
+        m.addItem(item(String(localized: "Command Palette…"), #selector(W.showCommandPalette(_:)), "k"))
         return m
     }
 
@@ -118,6 +120,8 @@ enum MainMenu {
         m.addItem(item(String(localized: "Documents"), #selector(W.goDocuments(_:)), "o", [.command, .shift]))
         m.addItem(item(String(localized: "Downloads"), #selector(W.goDownloads(_:)), "l", [.command, .option]))
         m.addItem(item(String(localized: "Applications"), #selector(W.goApplications(_:)), "a", [.command, .shift]))
+        m.addItem(.separator())
+        m.addItem(item(String(localized: "Recent Folders…"), #selector(W.showFolderHistory(_:)), "p"))
         return m
     }
 
@@ -128,6 +132,7 @@ enum MainMenu {
         m.addItem(.separator())
         m.addItem(item(String(localized: "Next Tab"), #selector(W.selectNextTab(_:)), "\t", .control))
         m.addItem(item(String(localized: "Previous Tab"), #selector(W.selectPreviousTab(_:)), "\t", [.control, .shift]))
+        m.addItem(item(String(localized: "Search Tabs…"), #selector(W.searchTabs(_:)), "\\", [.command, .shift]))
         return m
     }
 }
