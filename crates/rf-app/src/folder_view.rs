@@ -3914,6 +3914,9 @@ impl FolderView {
             let calc_link = dir_path.filter(|_| dir_size.is_none());
             let e = &self.entries[ei as usize];
             let selected = self.selected.contains(&ei);
+            // (the rows next to it that are selected too: the pill joins them)
+            let sel_above = selected && vi > 0 && self.visible.get(vi - 1).is_some_and(|e| self.selected.contains(e));
+            let sel_below = selected && self.visible.get(vi + 1).is_some_and(|e| self.selected.contains(e));
             let is_cursor = self.cursor == Some(vi);
             let cat = icons::category(e);
             let dim = e.is_hidden() || e.is_cloud_placeholder();
@@ -4083,7 +4086,7 @@ impl FolderView {
                 .items_center()
                 .text_sm()
                 .relative()
-                .when(selected, |d| d.bg(p.selection).child(theme::selection_pill(&p)))
+                .when(selected, |d| d.bg(p.selection).child(theme::selection_pill_joined(&p, sel_above, sel_below)))
                 .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
                 .when(is_cursor && selected && self.selected.len() > 1, |d| {
                     d.border_1().border_color(p.selection_border)
