@@ -12557,5 +12557,17 @@
   "key": "Ortadaki adada her uygulamanın adı ikonunun altında yazar.",
   "tr": "Ortadaki adada her uygulamanın adı ikonunun altında yazar.",
   "en": "The middle island shows each app's name under its icon."
+ },
+ {
+  "id": "f65a0ac5",
+  "key": "Çalışmayan sabit uygulamalar solda",
+  "tr": "Çalışmayan sabit uygulamalar solda",
+  "en": "Pinned apps that aren't running on the left"
+ },
+ {
+  "id": "1c0163bd",
+  "key": "Sabitlenmiş ama açık olmayan uygulamalar sol adada başlatıcı olarak durur; ortadaki adada yalnızca çalışan uygulamalar olur.",
+  "tr": "Sabitlenmiş ama açık olmayan uygulamalar sol adada başlatıcı olarak durur; ortadaki adada yalnızca çalışan uygulamalar olur.",
+  "en": "Pinned apps that aren't open stand in the left island as launchers; the middle island holds only the running apps."
  }
 ]

@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Tray in two rows",
  "03429b74": "The tray icons in the right island keep their usual size and stand in two rows: twice as many fit the same width.",
  "f19b9d2a": "Names under the icons",
- "985e4d39": "The middle island shows each app's name under its icon."
+ "985e4d39": "The middle island shows each app's name under its icon.",
+ "f65a0ac5": "Pinned apps that aren't running on the left",
+ "1c0163bd": "Pinned apps that aren't open stand in the left island as launchers; the middle island holds only the running apps."
 }

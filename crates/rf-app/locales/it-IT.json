@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Area di notifica su due righe",
  "03429b74": "Le icone dell’area di notifica nell’isola destra mantengono la loro dimensione abituale e si dispongono su due righe: nella stessa larghezza ne entrano il doppio.",
  "f19b9d2a": "Nomi sotto le icone",
- "985e4d39": "L’isola centrale mostra il nome di ogni app sotto la sua icona."
+ "985e4d39": "L’isola centrale mostra il nome di ogni app sotto la sua icona.",
+ "f65a0ac5": "App aggiunte non in esecuzione a sinistra",
+ "1c0163bd": "Le app aggiunte che non sono aperte stanno nell’isola sinistra come lanciatori; l’isola centrale contiene solo le app in esecuzione."
 }

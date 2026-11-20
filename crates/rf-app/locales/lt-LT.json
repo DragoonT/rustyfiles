@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Dėklas dviem eilutėmis",
  "03429b74": "Dešinės salos dėklo piktogramos išlaiko įprastą dydį ir išdėstomos dviem eilutėmis: į tą patį plotį telpa dvigubai daugiau.",
  "f19b9d2a": "Pavadinimai po piktogramomis",
- "985e4d39": "Vidurinė sala rodo kiekvienos programos pavadinimą po jos piktograma."
+ "985e4d39": "Vidurinė sala rodo kiekvienos programos pavadinimą po jos piktograma.",
+ "f65a0ac5": "Neveikiančios prisegtos programos kairėje",
+ "1c0163bd": "Prisegtos, bet neatidarytos programos stovi kairėje saloje kaip paleidikliai; vidurinėje saloje – tik veikiančios programos."
 }

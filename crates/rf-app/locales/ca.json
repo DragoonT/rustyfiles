@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Safata en dues files",
  "03429b74": "Les icones de la safata de l'illa dreta mantenen la mida habitual i es disposen en dues files: hi caben el doble d'icones en la mateixa amplada.",
  "f19b9d2a": "Noms sota les icones",
- "985e4d39": "L'illa central mostra el nom de cada aplicació sota la seva icona."
+ "985e4d39": "L'illa central mostra el nom de cada aplicació sota la seva icona.",
+ "f65a0ac5": "Aplicacions fixades que no s'executen a l'esquerra",
+ "1c0163bd": "Les aplicacions fixades que no estan obertes es queden a l'illa esquerra com a llançadors; l'illa central només té les que s'executen."
 }

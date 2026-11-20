@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Oznamovací oblast ve dvou řádcích",
  "03429b74": "Ikony oznamovací oblasti v pravém ostrově si ponechají obvyklou velikost a stojí ve dvou řádcích: do stejné šířky se vejde dvakrát víc ikon.",
  "f19b9d2a": "Názvy pod ikonami",
- "985e4d39": "Prostřední ostrov zobrazuje název každé aplikace pod její ikonou."
+ "985e4d39": "Prostřední ostrov zobrazuje název každé aplikace pod její ikonou.",
+ "f65a0ac5": "Připnuté aplikace, které neběží, vlevo",
+ "1c0163bd": "Připnuté, ale neotevřené aplikace stojí v levém ostrově jako spouštěče; v prostředním ostrově jsou jen běžící aplikace."
 }

@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Zone de notification sur deux lignes",
  "03429b74": "Les icônes de la zone de notification de l’îlot droit gardent leur taille habituelle et se placent sur deux lignes : deux fois plus d’icônes tiennent dans la même largeur.",
  "f19b9d2a": "Noms sous les icônes",
- "985e4d39": "L’îlot central affiche le nom de chaque application sous son icône."
+ "985e4d39": "L’îlot central affiche le nom de chaque application sous son icône.",
+ "f65a0ac5": "Applications épinglées non lancées à gauche",
+ "1c0163bd": "Les applications épinglées qui ne sont pas ouvertes restent dans l’îlot gauche comme lanceurs ; l’îlot central ne contient que les applications en cours."
 }

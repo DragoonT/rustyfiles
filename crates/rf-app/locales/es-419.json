@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Bandeja en dos filas",
  "03429b74": "Los íconos de la bandeja de la isla derecha conservan su tamaño habitual y se colocan en dos filas: caben el doble en el mismo ancho.",
  "f19b9d2a": "Nombres debajo de los íconos",
- "985e4d39": "La isla central muestra el nombre de cada aplicación debajo de su ícono."
+ "985e4d39": "La isla central muestra el nombre de cada aplicación debajo de su ícono.",
+ "f65a0ac5": "Apps ancladas sin ejecutar a la izquierda",
+ "1c0163bd": "Las apps ancladas que no están abiertas quedan en la isla izquierda como lanzadores; la isla central solo tiene las que se ejecutan."
 }

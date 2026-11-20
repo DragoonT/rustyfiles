@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Értesítési terület két sorban",
  "03429b74": "A jobb sziget értesítési területének ikonjai megtartják szokásos méretüket, és két sorban állnak: ugyanakkora szélességben kétszer annyi fér el.",
  "f19b9d2a": "Nevek az ikonok alatt",
- "985e4d39": "A középső sziget minden alkalmazás nevét az ikonja alatt mutatja."
+ "985e4d39": "A középső sziget minden alkalmazás nevét az ikonja alatt mutatja.",
+ "f65a0ac5": "A nem futó rögzített alkalmazások balra",
+ "1c0163bd": "A rögzített, de meg nem nyitott alkalmazások indítóként a bal szigeten állnak; a középső szigeten csak a futó alkalmazások vannak."
 }

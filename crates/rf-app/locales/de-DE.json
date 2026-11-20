@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Infobereich in zwei Zeilen",
  "03429b74": "Die Symbole des Infobereichs in der rechten Insel behalten ihre übliche Größe und stehen in zwei Zeilen: In dieselbe Breite passen doppelt so viele.",
  "f19b9d2a": "Namen unter den Symbolen",
- "985e4d39": "Die mittlere Insel zeigt den Namen jeder App unter ihrem Symbol."
+ "985e4d39": "Die mittlere Insel zeigt den Namen jeder App unter ihrem Symbol.",
+ "f65a0ac5": "Angeheftete Apps, die nicht laufen, links",
+ "1c0163bd": "Angeheftete, aber nicht geöffnete Apps stehen in der linken Insel als Starter; die mittlere Insel enthält nur die laufenden Apps."
 }

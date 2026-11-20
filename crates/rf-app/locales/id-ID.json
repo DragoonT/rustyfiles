@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Baki dalam dua baris",
  "03429b74": "Ikon baki di pulau kanan tetap berukuran biasa dan tersusun dalam dua baris: dua kali lebih banyak muat di lebar yang sama.",
  "f19b9d2a": "Nama di bawah ikon",
- "985e4d39": "Pulau tengah menampilkan nama setiap aplikasi di bawah ikonnya."
+ "985e4d39": "Pulau tengah menampilkan nama setiap aplikasi di bawah ikonnya.",
+ "f65a0ac5": "Aplikasi tersemat yang tidak berjalan di kiri",
+ "1c0163bd": "Aplikasi tersemat yang tidak terbuka berada di pulau kiri sebagai peluncur; pulau tengah hanya berisi aplikasi yang berjalan."
 }

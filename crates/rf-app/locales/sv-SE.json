@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Meddelandefält i två rader",
  "03429b74": "Ikonerna i meddelandefältet på höger ö behåller sin vanliga storlek och står i två rader: dubbelt så många får plats på samma bredd.",
  "f19b9d2a": "Namn under ikonerna",
- "985e4d39": "Den mittersta ön visar varje apps namn under dess ikon."
+ "985e4d39": "Den mittersta ön visar varje apps namn under dess ikon.",
+ "f65a0ac5": "Fästa appar som inte körs till vänster",
+ "1c0163bd": "Fästa appar som inte är öppna står i vänstra ön som startare; den mittersta ön har bara apparna som körs."
 }

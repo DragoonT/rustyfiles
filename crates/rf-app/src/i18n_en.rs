@@ -400,6 +400,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Sekmelerde ara", "Search tabs"),
     ("Tepsi iki satırda", "Tray in two rows"),
     ("İkonların altında adlar", "Names under the icons"),
+    ("Çalışmayan sabit uygulamalar solda", "Pinned apps that aren't running on the left"),
+    ("Sabitlenmiş ama açık olmayan uygulamalar sol adada başlatıcı olarak durur; ortadaki adada yalnızca çalışan uygulamalar olur.", "Pinned apps that aren't open stand in the left island as launchers; the middle island holds only the running apps."),
     ("Ortadaki adada her uygulamanın adı ikonunun altında yazar.", "The middle island shows each app's name under its icon."),
     ("Sağ adadaki tepsi simgeleri olağan boylarında, iki satır halinde dizilir; aynı genişliğe iki kat simge sığar.", "The tray icons in the right island keep their usual size and stand in two rows: twice as many fit the same width."),
     ("Sekmelerde ara…", "Search tabs…"),

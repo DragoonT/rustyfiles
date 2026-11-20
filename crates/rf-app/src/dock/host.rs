@@ -93,6 +93,8 @@ pub struct Prefs {
     pub all_monitors: bool,
     /// Which dock shows which running app.
     pub apps_where: crate::settings::DockAppsWhere,
+    /// The pinned apps that are not running in the left island (the middle islands sort their items again).
+    pub pins_left: bool,
     /// The side islands are as tall as the middle one.
     pub side_tall: bool,
     /// The right island's own buttons: their order and the hidden ones (the island draws them from the settings; kept here to see a change).
@@ -114,6 +116,7 @@ impl Prefs {
             size: s.dock_size,
             all_monitors: s.dock_all_monitors,
             apps_where: s.dock_apps_where,
+            pins_left: s.dock_pins_left,
             side_tall: s.dock_side_tall,
             status: [s.dock_status_order.clone(), s.dock_status_hidden.clone()],
             search: s.dock_search,
@@ -155,7 +158,7 @@ pub fn changes(old: &Prefs, new: &Prefs) -> Changes {
         city: old.city != new.city || old.location != new.location,
         size: old.size != new.size,
         monitors: old.all_monitors != new.all_monitors,
-        apps: old.apps_where != new.apps_where,
+        apps: old.apps_where != new.apps_where || old.pins_left != new.pins_left,
         side: old.side_tall != new.side_tall,
         status: old.status != new.status,
         search: old.search != new.search,
@@ -2130,7 +2133,7 @@ mod tests {
     }
 
     fn prefs(reserve: bool, city: &str) -> Prefs {
-        Prefs { reserve, city: city.into(), location: false, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, side_tall: false, status: Default::default(), search: Default::default(), autohide: false, opaque: false }
+        Prefs { reserve, city: city.into(), location: false, size: Default::default(), all_monitors: true, apps_where: crate::settings::DockAppsWhere::All, pins_left: false, side_tall: false, status: Default::default(), search: Default::default(), autohide: false, opaque: false }
     }
 
     #[test]

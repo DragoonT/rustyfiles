@@ -187,6 +187,9 @@ pub struct MiddleIsland {
     drag_watch: Option<gpui_kit::Task<()>>,
     /// The apps (keys) that have a window asking for attention: their icon carries a dot (`rf_win::dock::attention`).
     wanting: Vec<String>,
+    /// With the pinned apps that are not running in the left island (`Settings::dock_pins_left`): those apps, with their icon's key and
+    /// sources. The home dock's island holds them and loads their pictures; the left island draws them (`left.rs`).
+    left_pins: Vec<(rf_win::dock::DockApp, String, Vec<IconSource>)>,
 }
 
 impl MiddleIsland {
@@ -268,6 +271,7 @@ impl MiddleIsland {
             last_slots: Vec::new(),
             drag_watch: None,
             wanting: Vec::new(),
+            left_pins: Vec::new(),
         };
         // (the app menu tells it when the dock's own pin list changed)
         super::own_pins::register(cx.entity().downgrade(), cx);
@@ -338,7 +342,10 @@ impl MiddleIsland {
         self.last_foreground = foreground;
         // (the task list comes in Z order; the island's order must not follow the clicks)
         let groups = model::keep_order(&mut self.seen_order, groups);
-        let items = model::merge(&self.pins, groups, foreground);
+        let mut items = model::merge(&self.pins, groups, foreground);
+        // the pinned apps that are not running go to the left island when the setting says so (the home dock's only)
+        let left = if self.mon.is_home() && cx.try_global::<Settings>().is_some_and(|s| s.dock_pins_left) { take_idle_pins(&mut items) } else { Vec::new() };
+        self.set_left_pins(left, cx);
         let wanting = wanting_attention(&items);
         let attention_changed = wanting != self.wanting;
         self.wanting = wanting;
@@ -435,7 +442,9 @@ impl MiddleIsland {
         let sizes = plan::icon_sizes_with_small(scale, self.levels_peak, env.scale);
         // (docks of several monitors ask for the same icons: with the same sizes they share one load, see `icons::load_levels_shared`)
         let shared = host::dock_count(cx) > 1;
-        let wanted: Vec<(String, Vec<IconSource>)> = self.icon_srcs.iter().flatten().cloned().collect();
+        let mut wanted: Vec<(String, Vec<IconSource>)> = self.icon_srcs.iter().flatten().cloned().collect();
+        // (and the pictures of the pinned apps the left island shows)
+        wanted.extend(self.left_pins.iter().map(|(_, key, srcs)| (key.clone(), srcs.clone())));
         for (key, src) in wanted {
             if !self.icons.start_loading(&key, Instant::now()) {
                 continue;
@@ -460,6 +469,12 @@ impl MiddleIsland {
                     }
                     let retry = me.icons.finish(&key, top, Instant::now());
                     cx.notify();
+                    // a picture for the left island's launchers: it draws again
+                    if me.left_pins.iter().any(|(_, k, _)| *k == key)
+                        && let Some(left) = host::left_island_on(me.mon, cx)
+                    {
+                        left.update(cx, |_, cx| cx.notify());
+                    }
                     retry
                 });
                 if kept.is_some() {
@@ -793,6 +808,33 @@ impl MiddleIsland {
             }
         });
         cx.notify();
+    }
+
+    /// The pinned apps that are not running, for the left island (`Settings::dock_pins_left`). When the list changed, their pictures are
+    /// asked for and the left island takes its new width.
+    fn set_left_pins(&mut self, apps: Vec<rf_win::dock::DockApp>, cx: &mut Context<Self>) {
+        let same = apps.len() == self.left_pins.len() && apps.iter().zip(&self.left_pins).all(|(a, (b, _, _))| a == b);
+        if same {
+            return;
+        }
+        self.left_pins = apps
+            .into_iter()
+            .filter_map(|a| {
+                let srcs = item_icons(&DockItem::App(a.clone()))?;
+                let key = plan::icon_key(srcs.first()?);
+                Some((a, key, srcs))
+            })
+            .collect();
+        self.load_icons(cx);
+        let n = self.left_pins.len();
+        if let Some(left) = host::left_island_on(self.mon, cx) {
+            left.update(cx, |l, cx| l.pins_changed(n, cx));
+        }
+    }
+
+    /// The left island's launchers: each app with its picture at `px` (device px), when it has come.
+    pub(super) fn left_pins(&self, px: f32) -> Vec<(rf_win::dock::DockApp, Option<std::sync::Arc<RenderImage>>)> {
+        self.left_pins.iter().map(|(a, key, _)| (a.clone(), self.levels.get(key).map(|l| l.pick(px).clone()).or_else(|| self.icons.get(key)))).collect()
     }
 
     /// Win+1 .. Win+9 (issue 91): the `n`-th app of the island (pinned or running; the places and the separator do not count), as a
@@ -1490,9 +1532,36 @@ fn nth_app(items: &[DockItem], n: usize) -> Option<usize> {
     items.iter().enumerate().filter(|(_, i)| matches!(i, DockItem::App(_))).nth(n).map(|(ix, _)| ix)
 }
 
+/// Takes the pinned apps that are not running out of `items` (in their order), for the left island; the rest stay as they were.
+fn take_idle_pins(items: &mut Vec<DockItem>) -> Vec<rf_win::dock::DockApp> {
+    let mut out = Vec::new();
+    items.retain(|i| match i {
+        DockItem::App(a) if a.pinned && !a.running() => {
+            out.push(a.clone());
+            false
+        }
+        _ => true,
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::nth_app;
+    use super::take_idle_pins;
+
+    #[test]
+    fn the_pinned_apps_that_are_not_running_leave_for_the_left_island() {
+        use rf_win::dock::{IconSource, Launch, PinnedApp};
+        let pin = |id: &str| PinnedApp { name: id.into(), aumid: Some(id.into()), exe: None, launch: Launch::Packaged(id.into()), icon: IconSource::Packaged(id.into()) };
+        let pins = vec![pin("a"), pin("b")];
+        let running = vec![("b".to_string(), vec![Task { hwnd: 2, title: "B".into(), pid: 2, exe: None, app_id: Some("b".into()), minimized: false }])];
+        let mut items = model::merge(&pins, running, 0);
+        let left = take_idle_pins(&mut items);
+        assert_eq!(left.iter().map(|a| a.key.as_str()).collect::<Vec<_>>(), ["a"], "a is pinned and not running");
+        assert!(items.iter().any(|i| matches!(i, DockItem::App(a) if a.key == "b")), "b runs: it stays in the middle");
+        assert!(!items.iter().any(|i| matches!(i, DockItem::App(a) if a.key == "a")));
+    }
     use super::{BASELINE, L, vol_hud_look, DOT_DROP, DockItem, ICON_REST, MIN_MOVE, Place, Slot, Task, icon_count, item_icons, look, magnify, model, move_needs_frame, plan};
 
     /// Win+1 .. Win+9 count the apps only, as Windows' taskbar counts its buttons.

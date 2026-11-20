@@ -2081,5 +2081,7 @@
  "9ed0e8eb": "Zasobnik w dwóch rzędach",
  "03429b74": "Ikony zasobnika na prawej wyspie zachowują zwykły rozmiar i stoją w dwóch rzędach: w tej samej szerokości mieści się ich dwa razy więcej.",
  "f19b9d2a": "Nazwy pod ikonami",
- "985e4d39": "Środkowa wyspa pokazuje nazwę każdej aplikacji pod jej ikoną."
+ "985e4d39": "Środkowa wyspa pokazuje nazwę każdej aplikacji pod jej ikoną.",
+ "f65a0ac5": "Przypięte aplikacje, które nie działają, po lewej",
+ "1c0163bd": "Przypięte, ale nieotwarte aplikacje stoją na lewej wyspie jako programy uruchamiające; środkowa wyspa zawiera tylko działające aplikacje."
 }

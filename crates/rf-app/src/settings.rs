@@ -683,6 +683,9 @@ pub struct Settings {
     pub dock_show_desktop: bool,
     /// The app's name under each icon of the middle island (off). Issue 137: "would really like to see app names under the icon".
     pub dock_labels: bool,
+    /// Pinned apps that are not running stand in the left island, as launchers; the middle one holds the running apps (off). Issue 137:
+    /// "I would like to see apps pinned appearing on the left dock when they are not open".
+    pub dock_pins_left: bool,
     /// The left island's search: a field, its button only, or none (`DockSearch`).
     pub dock_search: DockSearch,
     /// A click on the dock's search field or button opens HyperSearch instead of the Start panel (issue 41). Off by default.
@@ -938,6 +941,7 @@ impl Default for Settings {
             dock_opaque: false,
             dock_show_desktop: false,
             dock_labels: false,
+            dock_pins_left: false,
             dock_search: DockSearch::Field,
             dock_search_hypersearch: false,
             dock_tray_compact: false,
