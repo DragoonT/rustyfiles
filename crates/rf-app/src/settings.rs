@@ -658,6 +658,9 @@ pub struct Settings {
     pub dock_autohide: bool,
     /// The dock's islands on a solid fill instead of the glass (off; issue 113).
     pub dock_opaque: bool,
+    /// A thin "Show desktop" strip at the right end of the primary monitor's right island, after the bell, as on Windows' taskbar (off;
+    /// issue 127).
+    pub dock_show_desktop: bool,
     /// The left island's search: a field, its button only, or none (`DockSearch`).
     pub dock_search: DockSearch,
     /// A click on the dock's search field or button opens HyperSearch instead of the Start panel (issue 41). Off by default.
@@ -906,6 +909,7 @@ impl Default for Settings {
             dock_side_tall: false,
             dock_autohide: false,
             dock_opaque: false,
+            dock_show_desktop: false,
             dock_search: DockSearch::Field,
             dock_search_hypersearch: false,
             dock_tray_compact: false,

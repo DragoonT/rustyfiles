@@ -278,7 +278,11 @@ impl RightIsland {
     /// The width the content needs now (logical px). The primary monitor's: the symbols, the clock and the bell, and the tray strip's
     /// room; a secondary monitor's: the clock and, when there is room, the bell.
     fn wanted_width(&self, cx: &App) -> f32 {
-        if self.mon.is_home() { plan::right_width_for(&self.lines, self.status_buttons(cx).len()) + self.tray_extra } else { plan::right_width_secondary(plan::clock_width(&self.lines), self.content.bell) }
+        if self.mon.is_home() {
+            plan::right_width_for(&self.lines, self.status_buttons(cx).len()) + self.tray_extra + if show_desktop_on(cx) { plan::SHOW_DESKTOP_EXTRA } else { 0.0 }
+        } else {
+            plan::right_width_secondary(plan::clock_width(&self.lines), self.content.bell)
+        }
     }
 
     /// The host's layout may have changed what this island holds (the bell, by the monitor's width): true when it did.
@@ -322,7 +326,14 @@ impl RightIsland {
         let [ml, mt, ..] = super::host::insets_on(self.mon, Kind::Right, cx).margins;
         let point = ((f32::from(at.x) - ml) / k, (f32::from(at.y) - mt) / k);
         let controls = if self.mon.is_home() {
-            super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra, self.status_buttons(cx).len())
+            let mut c = super::empty::right_controls(plan::clock_width(&self.lines), super::tray_strip::shape(cx), self.tray_extra, self.status_buttons(cx).len());
+            // the "Show desktop" strip after the bell (the last box), the island's full height
+            if show_desktop_on(cx)
+                && let Some(bell) = c.last().copied()
+            {
+                c.push([bell[0] + bell[2] + plan::RIGHT_GAP, 0.0, plan::SHOW_DESKTOP_W, super::host::side_height_on(self.mon, cx)]);
+            }
+            c
         } else {
             super::empty::right_controls_secondary(plan::clock_width(&self.lines), self.content.bell)
         };
@@ -445,6 +456,28 @@ fn open_notifications(mon: MonId, cx: &mut App) {
     }
 }
 
+/// The setting "Masaüstünü göster şeridi" (issue 127).
+fn show_desktop_on(cx: &App) -> bool {
+    cx.try_global::<crate::settings::Settings>().is_some_and(|s| s.dock_show_desktop)
+}
+
+/// The "Show desktop" strip: a thin bar with a hairline on its left, as at the end of Windows' taskbar. A click minimizes every window
+/// and shows the desktop, the next one brings them back (Win+D's own toggle, `shell::keylayer`).
+fn show_desktop_strip(pal: Palette, k: f32) -> impl IntoElement {
+    div()
+        .id("dock-show-desktop")
+        .ml(px(plan::RIGHT_GAP * k))
+        .w(px(plan::SHOW_DESKTOP_W * k))
+        .h(px(plan::BUTTON * k))
+        .flex_shrink_0()
+        .rounded(px(3. * k))
+        .border_l_1()
+        .border_color(pal.separator().hsla())
+        .hover(move |s| s.bg(pal.hover_fill().hsla()))
+        .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(crate::t!("Masaüstünü göster")).build(w, cx))
+        .on_click(|_, _, _| crate::shell::keylayer::toggle_show_desktop())
+}
+
 /// The bell, wearing a small dot in the system accent colour while there are notifications.
 fn bell_button(pal: Palette, dot: Option<Hsla>, k: f32, on_click: impl Fn(&mut App) + 'static) -> impl IntoElement {
     let (hover, pressed) = (pal.hover_fill().hsla(), pal.press_plate().hsla());
@@ -516,7 +549,8 @@ impl Render for RightIsland {
         // every length below is a dock unit (the default size's logical px) times the dock's size factor
         let k = super::host::size_on(self.mon, cx);
         // what the layout says this island holds at this monitor's width: the width is reported again from a task, never from inside this render
-        if self.sync_content(cx) {
+        // (also when a setting changed what it holds: the "Show desktop" strip)
+        if self.sync_content(cx) || (self.wanted_width(cx) - self.reported).abs() > 0.5 {
             cx.spawn(async move |this, cx| {
                 let _ = this.update(cx, |me, cx| {
                     let w = me.wanted_width(cx);
@@ -617,7 +651,8 @@ impl Render for RightIsland {
                     d.child(div().ml(px(plan::RIGHT_SEP_GAP * k)).w(px(rf_win::dock::layout::SEPARATOR_WIDTH * k)).h(px(plan::RIGHT_SEP_HEIGHT * k)).bg(pal.separator().hsla()))
                 })
                 .child(clock)
-                .when(self.content.bell, |d| d.child(div().ml(px(plan::RIGHT_GAP * k)).child(bell_button(pal, dot, k, move |cx| open_notifications(mon, cx))))),
+                .when(self.content.bell, |d| d.child(div().ml(px(plan::RIGHT_GAP * k)).child(bell_button(pal, dot, k, move |cx| open_notifications(mon, cx)))))
+                .when(home && show_desktop_on(cx), |d| d.child(show_desktop_strip(pal, k))),
         )
     }
 }

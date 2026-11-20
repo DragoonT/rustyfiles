@@ -274,7 +274,7 @@ impl Actions for GpuiActions<'_> {
 
 /// Our Show Desktop. The driver remembers which windows it minimized, so it lives as long as the process; the work is done on a thread
 /// of its own (it enumerates every window and asks each to minimize or restore, without waiting).
-fn toggle_show_desktop() {
+pub(crate) fn toggle_show_desktop() {
     use rf_win::desktop::showdesktop::{Driver, SystemOps};
     static DRIVER: parking_lot::Mutex<Option<Driver<SystemOps>>> = parking_lot::Mutex::new(None);
     let spawned = std::thread::Builder::new().name("rf-show-desktop".into()).spawn(|| {
