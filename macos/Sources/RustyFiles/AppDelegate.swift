@@ -41,6 +41,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 LayoutFlyout.show(from: list.commandBar.view, list: list)
             }
         }
+        // RF_DEMO_DUAL (development): the window in dual pane
+        if ProcessInfo.processInfo.environment["RF_DEMO_DUAL"] != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.controllers.first?.toggleDualPane(nil) }
+        }
         // RF_DEMO_SHELF (development): the shelf pane open
         if ProcessInfo.processInfo.environment["RF_DEMO_SHELF"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.controllers.first?.toggleShelf(nil) }

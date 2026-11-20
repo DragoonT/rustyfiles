@@ -1174,6 +1174,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     var onGoUp: (() -> Void)?
+    /// The list (or its grid) took the keyboard: in a dual pane, its pane becomes the active one.
+    var onFocus: (() -> Void)?
     /// Whether the columns were made for a gathered listing (with the Folder column).
     var columnsGathered = false
 

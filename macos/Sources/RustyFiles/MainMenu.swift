@@ -110,6 +110,7 @@ enum MainMenu {
         m.addItem(item(String(localized: "Hide Sidebar"), #selector(W.toggleSidebar(_:)), "s", [.command, .control]))
         m.addItem(item(String(localized: "Show Preview"), #selector(W.togglePreviewPane(_:)), "p", [.command, .shift]))
         m.addItem(item(String(localized: "Show Shelf"), #selector(W.toggleShelf(_:)), "s", [.command, .option]))
+        m.addItem(item(String(localized: "Dual Pane"), #selector(W.toggleDualPane(_:)), "d", [.command, .option]))
         return m
     }
 

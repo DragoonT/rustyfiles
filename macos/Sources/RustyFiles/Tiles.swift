@@ -204,6 +204,12 @@ final class TileItem: NSCollectionViewItem {
 final class TileCollectionView: NSCollectionView, NSServicesMenuRequestor {
     weak var list: FileListController?
 
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { list?.onFocus?() }
+        return ok
+    }
+
     override func keyDown(with event: NSEvent) {
         if list?.handleKey(event) == true { return }
         super.keyDown(with: event)

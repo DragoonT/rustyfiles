@@ -64,22 +64,8 @@ final class CommandBarView: FlippedView {
         }
         subviews.forEach { $0.isHidden = true }
         typealias T = AppSettings.ToolbarButton
-        // px_2, gap_0p5; separators 1×20 with mx_1
-        var x: CGFloat = 8
-        if shows(.new) {
-            place(new, x, new.intrinsicContentSize.width)
-            x += new.frame.width + 2 + 4
-            place(sepLeft, x, 1, 20)
-            x += 1 + 4 + 2
-        }
-        let left: [(T, IconButton)] = [
-            (.newFolder, newFolder), (.cut, cut), (.copy, copy), (.paste, paste), (.rename, rename), (.share, share), (.delete, delete),
-            (.properties, properties), (.terminal, terminal), (.hidden, hiddenItems), (.refresh, refresh),
-        ]
-        for (k, b) in left where shows(k) {
-            place(b, x, 36)
-            x += 36 + 2
-        }
+        // px_2, gap_0p5; separators 1×20 with mx_1. The right group first: the left one
+        // gives up its last buttons where the bar is too narrow for both (a dual pane).
         var r = bounds.width - 8
         if shows(.preview) {
             r -= 36
@@ -97,6 +83,22 @@ final class CommandBarView: FlippedView {
         if shows(.filter) {
             r -= 36
             place(filter, r, 36)
+        }
+        var x: CGFloat = 8
+        if shows(.new) {
+            place(new, x, new.intrinsicContentSize.width)
+            x += new.frame.width + 2 + 4
+            place(sepLeft, x, 1, 20)
+            x += 1 + 4 + 2
+        }
+        let left: [(T, IconButton)] = [
+            (.newFolder, newFolder), (.cut, cut), (.copy, copy), (.paste, paste), (.rename, rename), (.share, share), (.delete, delete),
+            (.properties, properties), (.terminal, terminal), (.hidden, hiddenItems), (.refresh, refresh),
+        ]
+        for (k, b) in left where shows(k) {
+            guard x + 36 <= r - 8 else { break }
+            place(b, x, 36)
+            x += 36 + 2
         }
     }
 
@@ -446,6 +448,7 @@ final class FileTableView: NSTableView, NSServicesMenuRequestor {
     /// view; with nothing selected the first one is selected, so the move can be seen.
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
+        if ok { list?.onFocus?() }
         if ok, NSApp.currentEvent?.type == .keyDown, numberOfRows > 0 {
             if selectedRow < 0 { selectRowIndexes([0], byExtendingSelection: false) }
             scrollRowToVisible(selectedRow)
@@ -603,6 +606,8 @@ final class StatusBarView: FlippedView {
 @MainActor
 final class CardView: FlippedView {
     var onLayout: (() -> Void)?
+    /// Dual pane: this card's pane has the keyboard.
+    var isActivePane = false { didSet { if isActivePane != oldValue { needsDisplay = true } } }
 
     override var wantsUpdateLayer: Bool { true }
 
@@ -622,7 +627,8 @@ final class CardView: FlippedView {
         // Appearance › Background colour: the list's own colour, at the theme's strength
         let own = Palette.parse(AppSettings.listBackground)
         layer?.backgroundColor = (own.map { $0.withAlphaComponent(max(p.contentBg.alphaComponent, 0.85)) } ?? p.contentBg).cgColor
-        layer?.borderColor = p.border.cgColor
+        // the pane with the keyboard, in a dual pane, has an accent edge
+        layer?.borderColor = isActivePane ? p.accent.withAlphaComponent(0.7).cgColor : p.border.cgColor
     }
 
     /// Appearance › Background picture: behind the files, filling the card, as visible as set.

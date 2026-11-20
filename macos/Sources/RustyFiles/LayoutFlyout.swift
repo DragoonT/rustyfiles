@@ -66,6 +66,8 @@ final class LayoutFlyout: NSViewController {
         stack.addArrangedSubview(toggle(String(localized: "File extensions"), on: AppSettings.showExtensions) { AppSettings.showExtensions = $0 })
         stack.addArrangedSubview(toggle(String(localized: "Adaptive layout"), on: AppSettings.adaptiveLayout) { AppSettings.adaptiveLayout = $0 })
         stack.addArrangedSubview(toggle(String(localized: "Shelf"), on: list?.shelfShown ?? false) { [weak self] in self?.list?.shelfShown = $0 })
+        let wc = list?.card.window?.windowController as? BrowserWindowController
+        stack.addArrangedSubview(toggle(String(localized: "Dual pane"), on: wc?.isDualPane ?? false) { _ in wc?.toggleDualPane(nil) })
         view = root
         refresh()
     }

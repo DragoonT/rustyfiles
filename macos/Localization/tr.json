@@ -782,5 +782,7 @@
 "New branch…": "Yeni dal…",
 "New branch": "Yeni dal",
 "It starts from “%@” and becomes the current one.": "“%@” dalından başlar ve geçerli dal olur.",
-"git %@ failed": "git %@ başarısız oldu"
+"git %@ failed": "git %@ başarısız oldu",
+"Dual Pane": "Çift Panel",
+"Dual pane": "Çift panel"
 }
