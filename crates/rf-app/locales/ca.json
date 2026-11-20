@@ -2142,5 +2142,9 @@
  "adcc1d2b": "connexions",
  "7ad0f9ea": "Reprèn",
  "1d92c36a": "Suprimit",
- "3823cf7c": "Treu de la llista"
+ "3823cf7c": "Treu de la llista",
+ "1411699b": "Mostra les superposicions d'icones d'altres programes",
+ "27d8e0cb": "Les marques d'estat que programes com Google Drive, OneDrive i TortoiseGit posen a la cantonada de les icones a l'Explorador.",
+ "5546865e": "No deixis la marca de baixada en copiar a WSL",
+ "10ef9c03": "A WSL, Windows escriu un fitxer \"Zone.Identifier\" separat al costat d'un fitxer baixat d'internet. Quan està activat, la còpia l'elimina."
 }

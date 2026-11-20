@@ -2142,5 +2142,9 @@
  "adcc1d2b": "kết nối",
  "7ad0f9ea": "Tiếp tục",
  "1d92c36a": "Đã xóa",
- "3823cf7c": "Xóa khỏi danh sách"
+ "3823cf7c": "Xóa khỏi danh sách",
+ "1411699b": "Hiện lớp phủ biểu tượng của chương trình khác",
+ "27d8e0cb": "Các dấu trạng thái mà những chương trình như Google Drive, OneDrive và TortoiseGit đặt ở góc biểu tượng trong Explorer.",
+ "5546865e": "Không để lại dấu tải xuống khi sao chép vào WSL",
+ "10ef9c03": "Trong WSL, Windows ghi một tệp \"Zone.Identifier\" riêng bên cạnh tệp được tải xuống từ internet. Khi bật, việc sao chép sẽ xóa tệp đó."
 }

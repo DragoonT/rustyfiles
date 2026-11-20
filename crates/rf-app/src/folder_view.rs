@@ -596,6 +596,13 @@ pub struct FolderView {
     col_scrolls: std::collections::HashMap<PathBuf, UniformListScrollHandle>,
     col_scrolled: HashSet<(PathBuf, String)>,
     _git_task: Option<Task<()>>,
+    /// The overlays other programs put on the current folder's icons (Google Drive, TortoiseGit, ...; `rf_win::overlays`): item name →
+    /// picture index. Settings > "show_overlays".
+    overlays: Option<Arc<std::collections::HashMap<Arc<str>, i32>>>,
+    /// Set to stop the questions of a folder left (a slow handler's folder must not hold up the next one).
+    overlay_cancel: Arc<AtomicBool>,
+    _overlay_task: Option<Task<()>>,
+    overlay_soon: Option<Task<()>>,
     /// When git status was last asked for, and a later ask waiting (changes coming in fast).
     git_last: Option<Instant>,
     git_soon: Option<Task<()>>,
@@ -768,6 +775,10 @@ impl FolderView {
             col_scrolls: Default::default(),
             col_scrolled: HashSet::new(),
             _git_task: None,
+            overlays: None,
+            overlay_cancel: Arc::new(AtomicBool::new(false)),
+            _overlay_task: None,
+            overlay_soon: None,
             git_last: None,
             git_soon: None,
             _slow_task: None,
@@ -941,6 +952,8 @@ impl FolderView {
             let selected = self.selected.contains(&ei);
             let cat = icons::category(e);
             let shell_icon = self.parent_of(ei).map(|d| d.to_path_buf()).and_then(|d| self.images.update(cx, |c, cx| c.icon(&d, e, cx)));
+            let overlay = self.overlay_of(ei, px(16.), cx);
+            let e = &self.entries[ei as usize];
             let is_dir = e.is_dir();
             out.push(
                 h_flex()
@@ -962,6 +975,7 @@ impl FolderView {
                         },
                         px(16.),
                         e.link,
+                        overlay,
                     ))
                     .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&e.name)))
                     .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(p.text_tertiary)))
@@ -1155,6 +1169,68 @@ impl FolderView {
         }));
     }
 
+    /// Asks for the overlays of the current folder's items in the background (`rf_win::overlays`), after a listing. Only plain folders
+    /// on a disk or a share; links are left out (rustyfiles draws their arrow itself), and a huge folder's first items only.
+    fn refresh_overlays(&mut self, cx: &mut Context<Self>) {
+        const MOST: usize = 5_000;
+        self.overlay_cancel.store(true, Ordering::Relaxed);
+        self.overlay_cancel = Arc::new(AtomicBool::new(false));
+        let dir = self.location().path().map(|p| p.to_path_buf()).filter(|d| {
+            let s = d.to_string_lossy();
+            let plain = (s.len() >= 2 && s.as_bytes()[1] == b':') || (s.starts_with(r"\\") && !s.starts_with(r"\\?\"));
+            plain && !self.is_search() && !crate::nav_touch::may_hold_archive(d)
+        });
+        let Some(dir) = dir.filter(|_| cx.global::<crate::settings::Settings>().show_overlays) else {
+            self.overlays = None;
+            return;
+        };
+        let names: Vec<String> = self.entries.iter().filter(|e| !e.link).take(MOST).map(|e| e.name.to_string()).collect();
+        let cancel = self.overlay_cancel.clone();
+        let work = cx.background_spawn(async move { rf_win::overlays::indexes(&dir, names, cancel) });
+        self._overlay_task = Some(cx.spawn(async move |this, cx| {
+            let got = work.await;
+            let _ = this.update(cx, |v, cx| {
+                let map: std::collections::HashMap<Arc<str>, i32> = got.into_iter().map(|(n, i)| (Arc::from(n), i)).collect();
+                if v.overlays.as_ref().is_none_or(|o| **o != map) {
+                    v.overlays = Some(Arc::new(map));
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// [`Self::refresh_overlays`] for changes on the disk: once things calm down for a moment (a sync program changes a file's mark
+    /// after writing it).
+    fn refresh_overlays_soon(&mut self, cx: &mut Context<Self>) {
+        if self.overlay_soon.is_some() {
+            return;
+        }
+        self.overlay_soon = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(1500)).await;
+            let _ = this.update(cx, |v, cx| {
+                v.overlay_soon = None;
+                v.refresh_overlays(cx);
+            });
+        }));
+    }
+
+    /// The overlay picture over item `ei`'s icon drawn `size` wide, when another program marks it.
+    fn overlay_of(&mut self, ei: u32, size: Pixels, cx: &mut Context<Self>) -> Option<Arc<gpui::RenderImage>> {
+        if !cx.global::<crate::settings::Settings>().show_overlays {
+            return None;
+        }
+        let index = {
+            let ov = self.overlays.as_ref()?;
+            // (the columns view also shows other folders' items)
+            if self.parent_of(ei)? != self.location().path()? {
+                return None;
+            }
+            *ov.get(&*self.entries.get(ei as usize)?.name)?
+        };
+        let device = ((f32::from(overlay_box(size)) * 2.0) as u32).max(32);
+        self.images.update(cx, |c, cx| c.overlay(index, device, cx))
+    }
+
     fn commit_cols_on(cx: &App) -> bool {
         let c = &cx.global::<crate::settings::Settings>().columns;
         c.git_message || c.git_author || c.git_date || c.git_hash
@@ -1170,6 +1246,10 @@ impl FolderView {
         self.git = None;
         self.git_commits = None;
         self.refresh_git(cx);
+        self.overlay_cancel.store(true, Ordering::Relaxed);
+        self.overlays = None;
+        self._overlay_task = None;
+        self.overlay_soon = None;
         self.renaming = None;
         self._rename_sub = None;
         self.renamed = None;
@@ -1753,6 +1833,7 @@ impl FolderView {
         }
         if done {
             self.resort_for_sizes(cx);
+            self.refresh_overlays(cx);
             self.apply_reselect(cx);
             // a sort by tag or path makes its ranks now that the listing is complete
             self.sortx_ensure(cx);
@@ -1912,6 +1993,7 @@ impl FolderView {
         }
         self.entries = new_entries;
         self.entries_gen += 1;
+        self.refresh_overlays_soon(cx);
         if let Some(s) = sorted {
             self.sorted_cache = Some((self.sort, self.entries_gen, Arc::new(s)));
         }
@@ -2626,7 +2708,9 @@ impl FolderView {
                         .text_color(theme::kind_color(cat, p.dark))
                         .into_any_element(),
                 };
-                let visual = link_marked(visual, visual_px, e.link);
+                let overlay = self.overlay_of(ei, visual_px, cx);
+                let e = &self.entries[ei as usize];
+                let visual = link_marked(visual, visual_px, e.link, overlay);
                 let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
                 let label: AnyElement = match rename_input {
                     // the text stays where the label was: centered, the label's size
@@ -4006,6 +4090,8 @@ impl FolderView {
                 .parent_of(ei)
                 .map(|d| d.to_path_buf())
                 .and_then(|d| self.images.update(cx, |c, cx| c.icon(&d, e, cx)));
+            let overlay = self.overlay_of(ei, px(16.), cx);
+            let e = &self.entries[ei as usize];
             let git_state = self.git.as_ref().and_then(|g| rf_win::git::state_for_child(g, self.parent_of(ei)?, &e.name));
             let git_cell = col_git.then(|| {
                 let (label, color) = match git_state {
@@ -4244,6 +4330,7 @@ impl FolderView {
                             },
                             px(16.),
                             e.link,
+                            overlay,
                         ))
                         .child(name_el)
                         // encrypted: an archive member that needs a password, or an EFS file
@@ -5593,8 +5680,15 @@ mod rename_name_tests {
 /// An item's icon with Explorer's link arrow at its lower left when the item is a symbolic link or a junction (issue 50): a small
 /// light square with a blue arrow, as Explorer draws it, so it reads the same in a light and a dark list. The icon keeps its place
 /// and size; a plain item's icon is returned as it is.
-fn link_marked(icon: AnyElement, size: Pixels, link: bool) -> AnyElement {
-    if !link {
+/// The square another program's overlay picture is drawn in, at the bottom left of an icon drawn `size` wide.
+fn overlay_box(size: Pixels) -> Pixels {
+    size.min(px(48.))
+}
+
+/// `icon` with the marks drawn over it: another program's overlay (`overlay`, icon-sized with its mark in a corner, as Explorer draws
+/// it) and the arrow of a symbolic link or junction (`link`).
+fn link_marked(icon: AnyElement, size: Pixels, link: bool, overlay: Option<Arc<gpui::RenderImage>>) -> AnyElement {
+    if !link && overlay.is_none() {
         return icon;
     }
     let s = (size * 0.3).max(px(8.)).min(px(22.));
@@ -5606,7 +5700,10 @@ fn link_marked(icon: AnyElement, size: Pixels, link: bool) -> AnyElement {
         .items_center()
         .justify_center()
         .child(icon)
-        .child(
+        // (in the corner of a big tile at most a 48 px icon's overlay: drawn the tile's size, a mark meant for a small corner covered
+        // half the folder)
+        .when_some(overlay, |d, im| d.child(img(im).absolute().left_0().bottom_0().size(overlay_box(size))))
+        .when(link, |d| d.child(
             div()
                 .absolute()
                 .left(px(-1.))
@@ -5620,7 +5717,7 @@ fn link_marked(icon: AnyElement, size: Pixels, link: bool) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .child(Icon::new(L::ArrowUpRight).size(s * 0.85).text_color(gpui::rgb(0x1A73E8))),
-        )
+        ))
         .into_any_element()
 }
 

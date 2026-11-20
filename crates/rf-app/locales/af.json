@@ -2142,5 +2142,9 @@
  "adcc1d2b": "verbindings",
  "7ad0f9ea": "Gaan voort",
  "1d92c36a": "Geskrap",
- "3823cf7c": "Verwyder van lys"
+ "3823cf7c": "Verwyder van lys",
+ "1411699b": "Wys ander programme se ikoonoorlegsels",
+ "27d8e0cb": "Die statusmerke wat programme soos Google Drive, OneDrive en TortoiseGit in Explorer in die hoek van ikone sit.",
+ "5546865e": "Laat geen aflaaimerk agter wanneer na WSL gekopieer word nie",
+ "10ef9c03": "In WSL skryf Windows 'n aparte \"Zone.Identifier\"-lêer langs 'n lêer wat van die internet afgelaai is. Wanneer aan, vee kopiëring dit uit."
 }

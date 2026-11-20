@@ -600,6 +600,9 @@ pub struct Settings {
     /// Names starting with "." count as hidden when off.
     pub show_dot_files: bool,
     pub show_thumbnails: bool,
+    /// The marks sync and version-control programs put on icons in Explorer (Google Drive, OneDrive, TortoiseGit, Dropbox), drawn
+    /// over ours. A user on Discord, 2026-11-20.
+    pub show_overlays: bool,
     pub show_checkboxes: bool,
     pub single_click: ClickPref,
     pub open_folders_in_new_tab: bool,
@@ -625,6 +628,9 @@ pub struct Settings {
     pub fast_file_ops: bool,
     /// Check copies after writing them.
     pub copy_verify: CopyVerify,
+    /// A copy into a WSL distribution leaves no "file:Zone.Identifier" file beside it (the download mark Windows writes there as a
+    /// file of its own). A user on Discord, 2026-11-20.
+    pub wsl_drop_zone: bool,
     /// Copy speed limit in MB/s (0 = none).
     pub copy_speed_limit: u32,
     /// Where a running operation's progress is shown (see [`TransferProgress`]).
@@ -934,6 +940,7 @@ impl Default for Settings {
             show_system_files: false,
             show_dot_files: true,
             show_thumbnails: true,
+            show_overlays: true,
             show_checkboxes: false,
             single_click: ClickPref::Never,
             open_folders_in_new_tab: false,
@@ -951,6 +958,7 @@ impl Default for Settings {
             folder_size_on_disk: false,
             fast_file_ops: true,
             copy_verify: CopyVerify::Off,
+            wsl_drop_zone: false,
             copy_speed_limit: 0,
             transfer_progress: TransferProgress::StatusBar,
             thumb_cache_mb: None,

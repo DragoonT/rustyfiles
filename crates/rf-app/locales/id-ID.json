@@ -2142,5 +2142,9 @@
  "adcc1d2b": "koneksi",
  "7ad0f9ea": "Lanjutkan",
  "1d92c36a": "Dihapus",
- "3823cf7c": "Hapus dari daftar"
+ "3823cf7c": "Hapus dari daftar",
+ "1411699b": "Tampilkan overlay ikon dari program lain",
+ "27d8e0cb": "Tanda status yang diletakkan program seperti Google Drive, OneDrive, dan TortoiseGit di sudut ikon di Explorer.",
+ "5546865e": "Jangan tinggalkan tanda unduhan saat menyalin ke WSL",
+ "10ef9c03": "Di WSL, Windows menulis file \"Zone.Identifier\" terpisah di samping file yang diunduh dari internet. Jika aktif, penyalinan menghapusnya."
 }

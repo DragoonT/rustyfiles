@@ -301,6 +301,27 @@ impl ImageCache {
         r
     }
 
+    /// Another program's overlay picture `index` (`rf_win::overlays`) at `px`. Few and small (one per kind of mark): kept for good.
+    pub fn overlay(&mut self, index: i32, px: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        let key = key_of(&[&"overlay", &index, &px]);
+        match self.map.get(&key) {
+            Some(Slot::Ready(im)) => return Some(im.clone()),
+            Some(_) => return None,
+            None => {}
+        }
+        self.map.insert(key, Slot::Pending);
+        let work = cx.background_spawn(async move { rf_win::overlays::picture(index, px) });
+        cx.spawn(async move |this, cx| {
+            let b = work.await;
+            let _ = this.update(cx, |c, cx| {
+                c.map.insert(key, b.as_ref().and_then(to_render_image).map_or(Slot::Failed, Slot::Ready));
+                cx.notify();
+            });
+        })
+        .detach();
+        None
+    }
+
     /// Large thumbnail (falls back to the large icon when the file has no thumbnail).
     /// The shell's picture for a parsing name (an app of "All apps": `shell:AppsFolder\<id>`).
     /// Asked as a thumbnail: inside rustyfiles the icon of a Store app comes back as the shell's

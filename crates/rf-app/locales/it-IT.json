@@ -2142,5 +2142,9 @@
  "adcc1d2b": "connessioni",
  "7ad0f9ea": "Riprendi",
  "1d92c36a": "Eliminato",
- "3823cf7c": "Rimuovi dall'elenco"
+ "3823cf7c": "Rimuovi dall'elenco",
+ "1411699b": "Mostra le sovrapposizioni delle icone di altri programmi",
+ "27d8e0cb": "I segni di stato che programmi come Google Drive, OneDrive e TortoiseGit mettono nell'angolo delle icone in Esplora file.",
+ "5546865e": "Non lasciare il segno di download quando si copia in WSL",
+ "10ef9c03": "In WSL, Windows scrive un file \"Zone.Identifier\" separato accanto a un file scaricato da Internet. Se attivo, la copia lo elimina."
 }

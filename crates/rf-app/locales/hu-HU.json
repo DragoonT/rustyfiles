@@ -2142,5 +2142,9 @@
  "adcc1d2b": "kapcsolat",
  "7ad0f9ea": "Folytatás",
  "1d92c36a": "Törölve",
- "3823cf7c": "Eltávolítás a listáról"
+ "3823cf7c": "Eltávolítás a listáról",
+ "1411699b": "Más programok ikonátfedéseinek megjelenítése",
+ "27d8e0cb": "Az állapotjelek, amelyeket olyan programok, mint a Google Drive, a OneDrive és a TortoiseGit tesznek az ikonok sarkába a Fájlkezelőben.",
+ "5546865e": "Ne maradjon letöltési jelölés WSL-be másoláskor",
+ "10ef9c03": "WSL-ben a Windows külön \"Zone.Identifier\" fájlt ír az internetről letöltött fájl mellé. Ha be van kapcsolva, a másolás törli."
 }

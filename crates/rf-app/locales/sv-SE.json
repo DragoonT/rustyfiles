@@ -2142,5 +2142,9 @@
  "adcc1d2b": "anslutningar",
  "7ad0f9ea": "Fortsätt",
  "1d92c36a": "Borttagen",
- "3823cf7c": "Ta bort från listan"
+ "3823cf7c": "Ta bort från listan",
+ "1411699b": "Visa andra programs ikonöverlägg",
+ "27d8e0cb": "Statusmärkena som program som Google Drive, OneDrive och TortoiseGit sätter i hörnet av ikoner i Utforskaren.",
+ "5546865e": "Lämna inget nedladdningsmärke vid kopiering till WSL",
+ "10ef9c03": "I WSL skriver Windows en separat \"Zone.Identifier\"-fil bredvid en fil som hämtats från internet. När på tar kopieringen bort den."
 }

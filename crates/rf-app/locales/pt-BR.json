@@ -2142,5 +2142,9 @@
  "adcc1d2b": "conexões",
  "7ad0f9ea": "Retomar",
  "1d92c36a": "Excluído",
- "3823cf7c": "Remover da lista"
+ "3823cf7c": "Remover da lista",
+ "1411699b": "Mostrar as sobreposições de ícones de outros programas",
+ "27d8e0cb": "As marcas de status que programas como Google Drive, OneDrive e TortoiseGit colocam no canto dos ícones no Explorador.",
+ "5546865e": "Não deixar a marca de download ao copiar para o WSL",
+ "10ef9c03": "No WSL, o Windows grava um arquivo \"Zone.Identifier\" separado ao lado de um arquivo baixado da internet. Quando ativado, a cópia o exclui."
 }

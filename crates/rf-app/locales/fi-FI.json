@@ -2142,5 +2142,9 @@
  "adcc1d2b": "yhteyttä",
  "7ad0f9ea": "Jatka",
  "1d92c36a": "Poistettu",
- "3823cf7c": "Poista luettelosta"
+ "3823cf7c": "Poista luettelosta",
+ "1411699b": "Näytä muiden ohjelmien kuvakepäällysteet",
+ "27d8e0cb": "Tilamerkit, jotka ohjelmat kuten Google Drive, OneDrive ja TortoiseGit lisäävät kuvakkeiden kulmaan Resurssienhallinnassa.",
+ "5546865e": "Älä jätä latausmerkintää kopioitaessa WSL:ään",
+ "10ef9c03": "WSL:ssä Windows kirjoittaa internetistä ladatun tiedoston viereen erillisen \"Zone.Identifier\"-tiedoston. Kun käytössä, kopiointi poistaa sen."
 }

@@ -2142,5 +2142,9 @@
  "adcc1d2b": "veza",
  "7ad0f9ea": "Nastavi",
  "1d92c36a": "Izbrisano",
- "3823cf7c": "Ukloni s popisa"
+ "3823cf7c": "Ukloni s popisa",
+ "1411699b": "Prikaži preklapanja ikona drugih programa",
+ "27d8e0cb": "Oznake stanja koje programi poput Google Drivea, OneDrivea i TortoiseGita stavljaju u kut ikona u Exploreru.",
+ "5546865e": "Ne ostavljaj oznaku preuzimanja pri kopiranju u WSL",
+ "10ef9c03": "U WSL-u Windows uz datoteku preuzetu s interneta zapisuje zasebnu datoteku \"Zone.Identifier\". Kad je uključeno, kopiranje je briše."
 }

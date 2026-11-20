@@ -2142,5 +2142,9 @@
  "adcc1d2b": "połączeń",
  "7ad0f9ea": "Wznów",
  "1d92c36a": "Usunięty",
- "3823cf7c": "Usuń z listy"
+ "3823cf7c": "Usuń z listy",
+ "1411699b": "Pokazuj nakładki ikon innych programów",
+ "27d8e0cb": "Znaczniki stanu, które programy takie jak Google Drive, OneDrive i TortoiseGit umieszczają w rogu ikon w Eksploratorze.",
+ "5546865e": "Nie zostawiaj znacznika pobrania przy kopiowaniu do WSL",
+ "10ef9c03": "W WSL system Windows zapisuje obok pliku pobranego z internetu osobny plik \"Zone.Identifier\". Gdy włączone, kopiowanie go usuwa."
 }

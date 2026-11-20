@@ -2142,5 +2142,9 @@
  "adcc1d2b": "tilkoblinger",
  "7ad0f9ea": "Fortsett",
  "1d92c36a": "Slettet",
- "3823cf7c": "Fjern fra listen"
+ "3823cf7c": "Fjern fra listen",
+ "1411699b": "Vis andre programmers ikonoverlegg",
+ "27d8e0cb": "Statusmerkene som programmer som Google Drive, OneDrive og TortoiseGit setter i hjørnet av ikoner i Filutforsker.",
+ "5546865e": "Ikke etterlat nedlastingsmerke ved kopiering til WSL",
+ "10ef9c03": "I WSL skriver Windows en egen \"Zone.Identifier\"-fil ved siden av en fil som er lastet ned fra Internett. Når på, sletter kopieringen den."
 }

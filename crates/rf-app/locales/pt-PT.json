@@ -2142,5 +2142,9 @@
  "adcc1d2b": "ligações",
  "7ad0f9ea": "Retomar",
  "1d92c36a": "Eliminado",
- "3823cf7c": "Remover da lista"
+ "3823cf7c": "Remover da lista",
+ "1411699b": "Mostrar as sobreposições de ícones de outros programas",
+ "27d8e0cb": "As marcas de estado que programas como o Google Drive, o OneDrive e o TortoiseGit colocam no canto dos ícones no Explorador.",
+ "5546865e": "Não deixar a marca de transferência ao copiar para o WSL",
+ "10ef9c03": "No WSL, o Windows escreve um ficheiro \"Zone.Identifier\" separado junto de um ficheiro transferido da Internet. Quando ativado, a cópia elimina-o."
 }

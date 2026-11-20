@@ -235,7 +235,7 @@ fn window_icon(hwnd: isize, px: u32) -> Option<Bgra> {
 }
 
 /// An `HICON` as straight-alpha BGRA at its own size. An icon without an alpha channel gets its transparency from its mask.
-pub(super) fn hicon_to_bgra(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Bgra> {
+pub(crate) fn hicon_to_bgra(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> Option<Bgra> {
     use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits, GetObjectW, HGDIOBJ, ReleaseDC};
     use windows::Win32::UI::WindowsAndMessaging::{GetIconInfo, ICONINFO};
     unsafe {

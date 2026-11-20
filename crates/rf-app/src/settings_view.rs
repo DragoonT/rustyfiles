@@ -1998,6 +1998,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     v.push(card(p, L::FileType, t!("Dosya uzantılarını göster"), None, sw("ext", p, s.show_extensions, |s, v| s.show_extensions = v)));
     v.push(card(p, L::Image, t!("Küçük resimleri göster"), None, sw("thumbs", p, s.show_thumbnails, |s, v| s.show_thumbnails = v)));
+    v.push(card(
+        p,
+        L::BadgeCheck,
+        t!("Diğer programların simge işaretlerini göster"),
+        Some(t!("Google Drive, OneDrive, TortoiseGit gibi programların Gezgin'de simgelerin köşesine koyduğu durum işaretleri.")),
+        sw("overlays", p, s.show_overlays, |s, v| s.show_overlays = v),
+    ));
     v.push(card(p, L::SquareCheck, t!("Seçerken onay kutularını göster"), None, sw("checkboxes", p, s.show_checkboxes, |s, v| s.show_checkboxes = v)));
 
     v.push(section(p, t!("Davranışlar")));
@@ -2824,6 +2831,13 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
             t!("Hızlı dosya işlemleri"),
             Some(t!("Kopyalama, başka sürücüye taşıma ve kalıcı silme kendi paralel motorumuzla. Kapalıyken her şey Windows'un motoruyla yapılır.")),
             sw("fast-ops", p, s.fast_file_ops, |s, v| s.fast_file_ops = v),
+        ),
+        card(
+            p,
+            L::SquareTerminal,
+            t!("WSL'e kopyalarken indirme işaretini bırakma"),
+            Some(t!("Windows, internetten inen bir dosyanın yanına WSL'de ayrı bir \"Zone.Identifier\" dosyası yazar. Açıkken kopyalama onu siler.")),
+            sw("wsl-zone", p, s.wsl_drop_zone, |s, v| s.wsl_drop_zone = v),
         ),
         card(
             p,

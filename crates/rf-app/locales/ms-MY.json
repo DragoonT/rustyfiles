@@ -2142,5 +2142,9 @@
  "adcc1d2b": "sambungan",
  "7ad0f9ea": "Sambung semula",
  "1d92c36a": "Dipadam",
- "3823cf7c": "Buang daripada senarai"
+ "3823cf7c": "Buang daripada senarai",
+ "1411699b": "Tunjukkan tindihan ikon program lain",
+ "27d8e0cb": "Tanda status yang diletakkan oleh program seperti Google Drive, OneDrive dan TortoiseGit di sudut ikon dalam Explorer.",
+ "5546865e": "Jangan tinggalkan tanda muat turun semasa menyalin ke WSL",
+ "10ef9c03": "Dalam WSL, Windows menulis fail \"Zone.Identifier\" yang berasingan di sebelah fail yang dimuat turun dari internet. Apabila dihidupkan, penyalinan memadamnya."
 }

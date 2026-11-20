@@ -2142,5 +2142,9 @@
  "adcc1d2b": "ryšių",
  "7ad0f9ea": "Tęsti",
  "1d92c36a": "Ištrinta",
- "3823cf7c": "Pašalinti iš sąrašo"
+ "3823cf7c": "Pašalinti iš sąrašo",
+ "1411699b": "Rodyti kitų programų piktogramų perdangas",
+ "27d8e0cb": "Būsenos ženklai, kuriuos tokios programos kaip Google Drive, OneDrive ir TortoiseGit deda piktogramų kampe Naršyklėje.",
+ "5546865e": "Kopijuojant į WSL nepalikti atsisiuntimo žymos",
+ "10ef9c03": "WSL aplinkoje Windows šalia iš interneto atsisiųsto failo įrašo atskirą \"Zone.Identifier\" failą. Įjungus, kopijavimas jį ištrina."
 }

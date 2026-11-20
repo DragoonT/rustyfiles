@@ -2142,5 +2142,9 @@
  "adcc1d2b": "verbindingen",
  "7ad0f9ea": "Hervatten",
  "1d92c36a": "Verwijderd",
- "3823cf7c": "Uit de lijst halen"
+ "3823cf7c": "Uit de lijst halen",
+ "1411699b": "Pictogramoverlays van andere programma's weergeven",
+ "27d8e0cb": "De statustekens die programma's als Google Drive, OneDrive en TortoiseGit in Verkenner in de hoek van pictogrammen zetten.",
+ "5546865e": "Geen downloadmarkering achterlaten bij kopiëren naar WSL",
+ "10ef9c03": "In WSL schrijft Windows een apart \"Zone.Identifier\"-bestand naast een bestand dat van internet is gedownload. Indien ingeschakeld, verwijdert het kopiëren het."
 }

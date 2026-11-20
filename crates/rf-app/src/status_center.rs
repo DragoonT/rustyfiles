@@ -855,6 +855,7 @@ fn transfer_inner(
     let title = format!("{verb}: {} → {}", crate::i18n::items(sources.len()), short(&dest));
     let s = cx.global::<crate::settings::Settings>();
     let (fast, verify, limit) = (s.fast_file_ops, s.copy_verify.engine(), u64::from(s.copy_speed_limit) << 20);
+    rf_win::fastcopy::DROP_WSL_ZONE.store(s.wsl_drop_zone, std::sync::atomic::Ordering::Relaxed);
     let arrived = Arc::new(std::sync::Mutex::new(Vec::<std::path::PathBuf>::new()));
     let landed = arrived.clone();
     let top = dest.clone();

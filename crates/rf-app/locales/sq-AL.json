@@ -2142,5 +2142,9 @@
  "adcc1d2b": "lidhje",
  "7ad0f9ea": "Vazhdo",
  "1d92c36a": "I fshirë",
- "3823cf7c": "Hiqe nga lista"
+ "3823cf7c": "Hiqe nga lista",
+ "1411699b": "Shfaq mbivendosjet e ikonave të programeve të tjera",
+ "27d8e0cb": "Shenjat e gjendjes që programe si Google Drive, OneDrive dhe TortoiseGit vendosin në cep të ikonave në Explorer.",
+ "5546865e": "Mos lër shenjën e shkarkimit kur kopjon në WSL",
+ "10ef9c03": "Në WSL, Windows shkruan një skedar të veçantë \"Zone.Identifier\" pranë një skedari të shkarkuar nga interneti. Kur është aktive, kopjimi e fshin."
 }

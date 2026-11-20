@@ -2142,5 +2142,9 @@
  "adcc1d2b": "pripojení",
  "7ad0f9ea": "Pokračovať",
  "1d92c36a": "Odstránené",
- "3823cf7c": "Odstrániť zo zoznamu"
+ "3823cf7c": "Odstrániť zo zoznamu",
+ "1411699b": "Zobrazovať prekryvné ikony iných programov",
+ "27d8e0cb": "Stavové značky, ktoré programy ako Google Drive, OneDrive a TortoiseGit pridávajú do rohu ikon v Prieskumníkovi.",
+ "5546865e": "Pri kopírovaní do WSL nenechávať značku stiahnutia",
+ "10ef9c03": "Vo WSL zapisuje Windows vedľa súboru stiahnutého z internetu samostatný súbor \"Zone.Identifier\". Keď je zapnuté, kopírovanie ho odstráni."
 }
