@@ -125,6 +125,45 @@ thread_local! {
     static COLLECT_AT: std::cell::Cell<(Page, Option<&'static str>)> = const { std::cell::Cell::new((Page::General, None)) };
 }
 
+thread_local! {
+    /// The setting a search result was picked for (issue 126): its row is marked, and the page is scrolled to it once.
+    static FIND: std::cell::RefCell<Option<FindTarget>> = const { std::cell::RefCell::new(None) };
+    /// The settings page's scroll, for that one scroll (set by every [`render`]).
+    static PAGE_SCROLL: std::cell::RefCell<Option<ScrollHandle>> = const { std::cell::RefCell::new(None) };
+}
+
+struct FindTarget {
+    title: String,
+    scrolled: bool,
+}
+
+/// How long the picked setting's row stays marked.
+const FIND_MARK_FOR: std::time::Duration = std::time::Duration::from_millis(1600);
+
+/// A setting's row as drawn: when a search result was picked for it, with a soft accent wash, and the page scrolled (at its first paint)
+/// so that the row stands near the top.
+fn found_mark(title: &str, p: &Palette, row: Div) -> Div {
+    if collecting() || !FIND.with(|f| f.borrow().as_ref().is_some_and(|t| t.title == title)) {
+        return row;
+    }
+    row.relative().rounded(theme::RADIUS).bg(p.accent.opacity(0.18)).child(
+        canvas(
+            |_, _, _| (),
+            |bounds, _, window, _| {
+                let first = FIND.with(|f| f.borrow_mut().as_mut().is_some_and(|t| !std::mem::replace(&mut t.scrolled, true)));
+                if let (true, Some(scroll)) = (first, PAGE_SCROLL.with(|s| s.borrow().clone())) {
+                    let (view, offset) = (scroll.bounds(), scroll.offset());
+                    let y = offset.y - (bounds.top() - view.top() - px(24.));
+                    scroll.set_offset(point(offset.x, y.min(px(0.))));
+                    window.refresh();
+                }
+            },
+        )
+        .absolute()
+        .size_full(),
+    )
+}
+
 fn collecting() -> bool {
     COLLECT.with(|c| c.borrow().is_some())
 }
@@ -287,7 +326,8 @@ pub(crate) fn beside(control: AnyElement) -> Div {
 
 pub(crate) fn card_body(p: &Palette, icon: L, title: SharedString, desc: Option<SharedString>, control: Option<AnyElement>) -> Div {
     note_setting(&title, desc.as_deref());
-    h_flex()
+    let marked = title.clone();
+    let row = h_flex()
         .min_h(px(64.))
         .px_4()
         .py_3()
@@ -312,7 +352,8 @@ pub(crate) fn card_body(p: &Palette, icon: L, title: SharedString, desc: Option<
                         .children(desc.map(|d| div().text_xs().text_color(p.text_secondary).child(d))),
                 ),
         )
-        .children(control.map(beside))
+        .children(control.map(beside));
+    found_mark(&marked, p, row)
 }
 
 pub(crate) fn shell(p: &Palette) -> Div {
@@ -363,7 +404,7 @@ fn expander(key: &'static str, p: &Palette, icon: L, title: &str, desc: Option<&
 /// A child row inside an expander (no icon, indented like Files).
 fn sub(p: &Palette, title: &str, desc: Option<&str>, control: AnyElement) -> AnyElement {
     note_setting(title, desc);
-    h_flex()
+    let row = h_flex()
         .min_h(px(48.))
         .pl(px(56.))
         .pr_4()
@@ -379,8 +420,8 @@ fn sub(p: &Palette, title: &str, desc: Option<&str>, control: AnyElement) -> Any
                 .child(div().text_sm().child(title.to_string()))
                 .children(desc.map(|d| div().text_xs().text_color(p.text_secondary).child(d.to_string()))),
         )
-        .child(beside(control))
-        .into_any_element()
+        .child(beside(control));
+    found_mark(title, p, row).into_any_element()
 }
 
 pub(crate) fn section(p: &Palette, title: &str) -> AnyElement {
@@ -408,6 +449,7 @@ fn link_row(p: &Palette, id: &'static str, icon: L, title: &str, desc: Option<&s
 pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, scroll: &ScrollHandle) -> AnyElement {
     use gpui_kit::component::input::{Input, InputState};
     let page = ui(cx).page;
+    PAGE_SCROLL.with(|h| *h.borrow_mut() = Some(scroll.clone()));
     let s = cx.global::<Settings>().clone();
     let search = match ui(cx).search.clone() {
         Some(e) => e,
@@ -493,7 +535,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
             rows.push(div().py_4().text_sm().text_color(p.text_secondary).child(t!("Eşleşen ayar yok")).into_any_element());
         }
         for (i, f) in found.into_iter().enumerate() {
-            let (pg, key) = (f.page, f.expander);
+            let (pg, key, target) = (f.page, f.expander, f.title.clone());
             let page_label = PAGES.iter().find(|x| x.0 == pg).map(|x| crate::i18n::t(x.2)).unwrap_or_default();
             let search = search.clone();
             rows.push(
@@ -506,6 +548,17 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
                         if let Some(k) = key {
                             ui(cx).open.insert(k);
                         }
+                        // the page opens scrolled to the setting, which is marked for a moment (issue 126)
+                        FIND.with(|f| *f.borrow_mut() = Some(FindTarget { title: target.clone(), scrolled: false }));
+                        window
+                            .spawn(cx, async move |cx| {
+                                cx.background_executor().timer(FIND_MARK_FOR).await;
+                                let _ = cx.update(|window, _| {
+                                    FIND.with(|f| *f.borrow_mut() = None);
+                                    window.refresh();
+                                });
+                            })
+                            .detach();
                         search.update(cx, |s, cx| s.set_value("", window, cx));
                         window.refresh();
                     })
