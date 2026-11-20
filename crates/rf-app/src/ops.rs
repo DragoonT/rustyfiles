@@ -353,6 +353,15 @@ impl FolderView {
             // No files with paths: files that live only in the program that copied them (a remote desktop session, a tool that
             // carries the clipboard between PCs) are pasted from that program's own data (`rf_win::vfiles`).
             if clip.is_none() && !rf_win::vfiles::clipboard_has() {
+                // a link on the clipboard, with HyperDownload installed: offered for download into this folder
+                let _ = cx.update(|cx| {
+                    let text = cx.read_from_clipboard().and_then(|c| c.text()).map(|t| t.trim().to_string());
+                    if let Some(link) = text.filter(|t| crate::hyperdownload::is_link(t))
+                        && crate::addons::installed(crate::hyperdownload::ID).is_some()
+                    {
+                        crate::hyperdownload::offer_pasted_link(link, dir.clone(), cx);
+                    }
+                });
                 return;
             }
             let _ = cx.update(|cx| {

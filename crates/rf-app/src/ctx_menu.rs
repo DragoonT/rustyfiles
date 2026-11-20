@@ -376,6 +376,18 @@ impl FolderView {
                 None => Item::sub(t!("Sıkıştır"), icon(L::Archive), sub_items),
             });
         }
+        // a .torrent file, with HyperDownload installed: downloaded next to it
+        if items.len() == 1
+            && items[0].extension().is_some_and(|e| e.eq_ignore_ascii_case("torrent"))
+            && items[0].is_file()
+            && crate::addons::installed(crate::hyperdownload::ID).is_some()
+        {
+            let file = items[0].clone();
+            v.push(Item::action(t!("HyperDownload ile indir"), icon(L::Download), move |_, cx| {
+                let dir = file.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+                crate::hyperdownload::download_torrent(file.clone(), dir, cx)
+            }));
+        }
         if mp.compress && !items.is_empty() && items.iter().all(|p| rf_archive::is_supported(p)) {
             use crate::status_center::ExtractTo;
             let list = items.to_vec();

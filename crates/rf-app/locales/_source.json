@@ -12779,5 +12779,17 @@
   "key": "En az bir dosya seçin",
   "tr": "En az bir dosya seçin",
   "en": "Choose at least one file"
+ },
+ {
+  "id": "23360499",
+  "key": "Bağlantı bu klasöre indirilsin mi?",
+  "tr": "Bağlantı bu klasöre indirilsin mi?",
+  "en": "Download the link into this folder?"
+ },
+ {
+  "id": "dcdc4ca3",
+  "key": "HyperDownload ile indir",
+  "tr": "HyperDownload ile indir",
+  "en": "Download with HyperDownload"
  }
 ]

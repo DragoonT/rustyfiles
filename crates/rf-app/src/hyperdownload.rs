@@ -192,8 +192,69 @@ fn ask_files(name: String, files: Vec<(String, u64)>, suggested: Vec<usize>, rep
     });
 }
 
+/// What is downloaded: a link (http, https, magnet) or a `.torrent` file.
+#[derive(Clone, Debug)]
+pub enum Source {
+    Link(String),
+    TorrentFile(PathBuf),
+}
+
+/// Standard base64 (with padding), as aria2's `addTorrent` takes the torrent file.
+pub fn base64(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for c in data.chunks(3) {
+        let n = (u32::from(c[0]) << 16) | (u32::from(*c.get(1).unwrap_or(&0)) << 8) | u32::from(*c.get(2).unwrap_or(&0));
+        out.push(T[(n >> 18) as usize & 63] as char);
+        out.push(T[(n >> 12) as usize & 63] as char);
+        out.push(if c.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
+        out.push(if c.len() > 2 { T[n as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
+/// A link pasted into a folder (Ctrl+V with a link and no files on the clipboard): asks whether to download it there.
+pub fn offer_pasted_link(url: String, dir: PathBuf, cx: &mut gpui_kit::App) {
+    use crate::prompt::{Button, Kind};
+    let Some(win) = cx.active_window() else { return };
+    let _ = win.update(cx, move |_, window, cx| {
+        crate::prompt::show(
+            crate::t!("Bağlantı bu klasöre indirilsin mi?"),
+            Some(url.clone()),
+            None,
+            vec![
+                Button::new(crate::t!("İndir"), Kind::Primary, move |_, _, cx| {
+                    download(url.clone(), dir.clone(), cx);
+                    Ok(())
+                }),
+                Button::cancel(),
+            ],
+            window,
+            cx,
+        );
+    });
+}
+
+/// Downloads `url` into `dir` as a card of the Status Center. When the add-on is missing, says so and offers its page.
 pub fn download(url: String, dir: PathBuf, cx: &mut gpui_kit::App) {
-    let title = format!("{} {}", crate::t!("İndiriliyor:"), label_of(&url));
+    download_source(Source::Link(url), dir, cx)
+}
+
+/// A `.torrent` file's download, into `dir`.
+pub fn download_torrent(file: PathBuf, dir: PathBuf, cx: &mut gpui_kit::App) {
+    download_source(Source::TorrentFile(file), dir, cx)
+}
+
+pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
+    let label = match &source {
+        Source::Link(u) => label_of(u),
+        Source::TorrentFile(p) => p.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+    };
+    let url = match &source {
+        Source::Link(u) => u.clone(),
+        Source::TorrentFile(p) => p.display().to_string(),
+    };
+    let title = format!("{} {}", crate::t!("İndiriliyor:"), label);
     let shown_dir = dir.clone();
     // a torrent's file list is chosen in a window: the download's thread asks the window through this
     let (ask_tx, mut ask_rx) = futures::channel::mpsc::unbounded::<Ask>();
@@ -213,7 +274,15 @@ pub fn download(url: String, dir: PathBuf, cx: &mut gpui_kit::App) {
                 Err(Unavailable::NotInstalled) => anyhow::bail!("{}", crate::t!("HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz")),
                 Err(Unavailable::NoAnswer(e)) => anyhow::bail!("{e}"),
             };
-            let gid = rpc.call("aria2.addUri", vec![json!([url]), json!({ "dir": dir.display().to_string() })]).map_err(anyhow::Error::msg)?;
+            let options = json!({ "dir": dir.display().to_string() });
+            let gid = match &source {
+                Source::Link(u) => rpc.call("aria2.addUri", vec![json!([u]), options]),
+                Source::TorrentFile(p) => {
+                    let bytes = std::fs::read(p).map_err(|e| anyhow::anyhow!("{}: {e}", p.display()))?;
+                    rpc.call("aria2.addTorrent", vec![json!(base64(&bytes)), json!([]), options])
+                }
+            }
+            .map_err(anyhow::Error::msg)?;
             let gid = gid.as_str().unwrap_or_default().to_string();
             let mut paused = false;
             let mut asked = false;
@@ -309,6 +378,16 @@ mod tests {
         assert_eq!((s.status.as_str(), s.total, s.done, s.speed), ("active", 1000, 250, 50));
         assert_eq!(s.path, Some(PathBuf::from("C:\\d\\a.zip")));
         assert_eq!(seen(&json!({ "files": [{ "path": "" }] })).path, None);
+    }
+
+    #[test]
+    fn base64_is_the_standard_one() {
+        assert_eq!(base64(b""), "");
+        assert_eq!(base64(b"f"), "Zg==");
+        assert_eq!(base64(b"fo"), "Zm8=");
+        assert_eq!(base64(b"foo"), "Zm9v");
+        assert_eq!(base64(b"foobar"), "Zm9vYmFy");
+        assert_eq!(base64(&[0xff, 0xfe, 0xfd]), "//79");
     }
 
     #[test]
