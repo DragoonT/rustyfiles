@@ -35,13 +35,14 @@ pub enum Page {
     Look,
     Ferry,
     Search,
+    Addons,
     Advanced,
     Speed,
     Organizer,
     About,
 }
 
-const PAGES: [(Page, L, &str); 16] = [
+const PAGES: [(Page, L, &str); 17] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
     (Page::Dock, L::PanelBottom, "Dock"),
@@ -54,6 +55,7 @@ const PAGES: [(Page, L, &str); 16] = [
     (Page::Look, L::Eye, "DirectLook"),
     (Page::Search, L::Search, "HyperSearch"),
     (Page::Ferry, L::Send, "Ferry"),
+    (Page::Addons, L::Package, "Eklentiler"),
     (Page::Advanced, L::Wrench, "Gelişmiş"),
     (Page::Speed, L::Gauge, "Hız testi"),
     (Page::Organizer, L::WandSparkles, "Dosya düzenleyici"),
@@ -224,6 +226,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Look => look(p, s, cx),
         Page::Ferry => crate::ferry::page(p, s, cx),
         Page::Search => quick_search_cards(p, s, cx),
+        Page::Addons => crate::addons_page::page(p, cx),
         // the developer tools are a part of Gelişmiş (they had a page of their own)
         Page::Advanced => {
             let mut v = advanced(p, s, cx);

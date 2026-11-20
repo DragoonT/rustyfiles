@@ -8,6 +8,8 @@ mod fast_start;
 mod bench_view;
 mod donate;
 mod ferry;
+mod addons;
+mod addons_page;
 mod archive_view;
 mod bulk_rename;
 mod command_palette;
@@ -854,6 +856,7 @@ pub fn main() {
                     "filetypes" => settings_view::Page::FileTypes,
                     "hypersearch" => settings_view::Page::Search,
                     "advanced" => settings_view::Page::Advanced,
+                    "addons" => settings_view::Page::Addons,
                     _ => settings_view::Page::Look,
                 },
                 cx,

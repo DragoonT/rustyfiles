@@ -12635,5 +12635,101 @@
   "key": "{h} sa {m} dk kaldı",
   "tr": "{h} sa {m} dk kaldı",
   "en": "{h} h {m} min left"
+ },
+ {
+  "id": "ce195c5a",
+  "key": "Eklentiler",
+  "tr": "Eklentiler",
+  "en": "Add-ons"
+ },
+ {
+  "id": "4fc8af2d",
+  "key": "Eklentiler rustyfiles'a ayrı programlar olarak eklenir: yalnızca siz kurunca indirilir, rustyfiles'ın listesindeki parmak iziyle (SHA-256) denetlenir ve istediğiniz zaman kaldırılır.",
+  "tr": "Eklentiler rustyfiles'a ayrı programlar olarak eklenir: yalnızca siz kurunca indirilir, rustyfiles'ın listesindeki parmak iziyle (SHA-256) denetlenir ve istediğiniz zaman kaldırılır.",
+  "en": "Add-ons join rustyfiles as programs of their own: they are downloaded only when you install them, checked against the fingerprint (SHA-256) in rustyfiles' list, and can be removed at any time."
+ },
+ {
+  "id": "fb510192",
+  "key": "Eklenti listesi okunuyor…",
+  "tr": "Eklenti listesi okunuyor…",
+  "en": "Reading the list of add-ons…"
+ },
+ {
+  "id": "b40e45bd",
+  "key": "Eklenti listesi okunamadı",
+  "tr": "Eklenti listesi okunamadı",
+  "en": "The list of add-ons could not be read"
+ },
+ {
+  "id": "30cd1f85",
+  "key": "Yeniden dene",
+  "tr": "Yeniden dene",
+  "en": "Try again"
+ },
+ {
+  "id": "89288286",
+  "key": "Kullanılabilir",
+  "tr": "Kullanılabilir",
+  "en": "Available"
+ },
+ {
+  "id": "81ee8375",
+  "key": "Şu an kurulabilecek bir eklenti yok.",
+  "tr": "Şu an kurulabilecek bir eklenti yok.",
+  "en": "There are no add-ons to install right now."
+ },
+ {
+  "id": "77c5f9fb",
+  "key": "İndirme yöneticisi: bir dosyayı birçok bağlantıyla birden indirir, duraklatılıp kaldığı yerden sürdürülür; torrent ve magnet bağlantılarını da indirir",
+  "tr": "İndirme yöneticisi: bir dosyayı birçok bağlantıyla birden indirir, duraklatılıp kaldığı yerden sürdürülür; torrent ve magnet bağlantılarını da indirir",
+  "en": "Download manager: fetches a file over many connections at once, can be paused and resumed where it stopped, and downloads torrents and magnet links too"
+ },
+ {
+  "id": "16ce2cd3",
+  "key": "Kurulu:",
+  "tr": "Kurulu:",
+  "en": "Installed:"
+ },
+ {
+  "id": "a75cba32",
+  "key": "Yeni sürüm:",
+  "tr": "Yeni sürüm:",
+  "en": "New version:"
+ },
+ {
+  "id": "b6e36abe",
+  "key": "Bu işlemci için henüz bir sürümü yok.",
+  "tr": "Bu işlemci için henüz bir sürümü yok.",
+  "en": "There is no build for this processor yet."
+ },
+ {
+  "id": "37169df2",
+  "key": "İndiriliyor",
+  "tr": "İndiriliyor",
+  "en": "Downloading"
+ },
+ {
+  "id": "c622ae00",
+  "key": "Güncelle",
+  "tr": "Güncelle",
+  "en": "Update"
+ },
+ {
+  "id": "d841e9cd",
+  "key": "Kur",
+  "tr": "Kur",
+  "en": "Install"
+ },
+ {
+  "id": "3e4c9ef3",
+  "key": "Kaldırılamadı (program açık olabilir)",
+  "tr": "Kaldırılamadı (program açık olabilir)",
+  "en": "Could not be removed (the program may be running)"
+ },
+ {
+  "id": "ec8fc977",
+  "key": "Kaynak kodu:",
+  "tr": "Kaynak kodu:",
+  "en": "Source code:"
  }
 ]
