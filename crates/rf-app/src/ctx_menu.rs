@@ -103,8 +103,11 @@ impl FolderView {
         let send_to = !background && send_to_fits(&items, cx);
         let drives = if send_to { self.send_to_drives(cx) } else { Vec::new() };
         let send_items = items.clone();
+        // the packaged apps' commands of Windows 11's new menu (issue 107), read on the worker with their icons
+        let pkg_items = if background { vec![dir.clone()] } else { items.clone() };
         let (tx, rx) = oneshot::channel();
         rf_win::sta::run(move |owner| {
+            let packaged = packaged_commands(rf_win::pkgverbs::for_items(&pkg_items, background));
             let own: Vec<OwnProgram> = own
                 .into_iter()
                 .map(|program| {
@@ -123,11 +126,11 @@ impl FolderView {
             } else {
                 Vec::new()
             };
-            let _ = tx.send((rf_win::ctxmenu::build(owner, &target, false).map_err(|e| format!("{e:#}")), own, targets));
+            let _ = tx.send((rf_win::ctxmenu::build(owner, &target, false).map_err(|e| format!("{e:#}")), own, targets, packaged));
         });
         let menu_weak = menu_view.downgrade();
         cx.spawn(async move |_, cx| {
-            let (result, own, targets) = rx.await.unwrap_or_else(|_| (Err("cancelled".into()), Vec::new(), Vec::new()));
+            let (result, own, targets, packaged) = rx.await.unwrap_or_else(|_| (Err("cancelled".into()), Vec::new(), Vec::new(), Vec::new()));
             let _ = cx.update(|cx| {
                 let (more, open_with, new) = match result {
                     Ok((session, shell)) => split_shell_items(&me, session, shell, background, cx),
@@ -137,6 +140,7 @@ impl FolderView {
                     }
                 };
                 let open_with = with_own_programs(&me, own, open_with);
+                let more = with_packaged(packaged, more);
                 let inline = !cx.global::<crate::settings::Settings>().menu.shell_submenu;
                 if let Some(m) = menu_weak.upgrade() {
                     m.update(cx, |m, cx| {
@@ -925,6 +929,67 @@ fn create_shortcuts(items: Vec<PathBuf>) {
 
 /// One of the user's own programs for a kind of file, and its icon when the shell gave one.
 type OwnProgram = (String, Option<rf_win::thumbs::Bgra>);
+
+/// A packaged app's command for the menu, with its icon read on the worker.
+struct Packaged {
+    id: usize,
+    title: String,
+    icon: Option<rf_win::thumbs::Bgra>,
+    enabled: bool,
+    sub: Vec<Packaged>,
+}
+
+/// The packaged commands with their icons (on the shell STA: the icons are files' own icons).
+fn packaged_commands(shown: Vec<rf_win::pkgverbs::Shown>) -> Vec<Packaged> {
+    shown
+        .into_iter()
+        .map(|s| Packaged {
+            id: s.id,
+            // (the menu marks no access keys: "&Open in Terminal" is "Open in Terminal")
+            title: s.title.replace("&&", "\u{1}").replace('&', "").replace('\u{1}', "&"),
+            icon: s.icon.and_then(|p| rf_win::thumbs::get_image(&p, 32, rf_win::thumbs::Kind::Icon).ok()),
+            enabled: s.enabled,
+            sub: packaged_commands(s.sub),
+        })
+        .collect()
+}
+
+fn packaged_items(cmds: Vec<Packaged>) -> Vec<Item> {
+    cmds.into_iter()
+        .map(|c| {
+            let picture = c.icon.as_ref().and_then(crate::image_cache::to_render_image).map(MenuIcon::Image).unwrap_or_else(|| icon(L::Package));
+            if c.sub.is_empty() {
+                let id = c.id;
+                Item::action(c.title, picture, move |_, _| {
+                    rf_win::sta::run(move |_| {
+                        if let Err(e) = rf_win::pkgverbs::invoke(id) {
+                            log::warn!("packaged menu command: {e:#}");
+                        }
+                    })
+                })
+                .enabled(c.enabled)
+            } else {
+                Item::sub(c.title, picture, packaged_items(c.sub))
+            }
+        })
+        .collect()
+}
+
+/// "Show more options" with the packaged apps' commands first, as Windows 11's own menu shows them (issue 107: "Edit with
+/// Notepad++", NanaZip, Terminal, ...), then the classic menu's items. They are there also when the classic part failed.
+fn with_packaged(packaged: Vec<Packaged>, rest: Pending) -> Pending {
+    if packaged.is_empty() {
+        return rest;
+    }
+    let mut items = packaged_items(packaged);
+    if let Pending::Ready(r) = &rest
+        && !r.is_empty()
+    {
+        items.push(Item::Separator);
+        items.extend(r.iter().cloned());
+    }
+    Pending::Ready(Rc::new(items))
+}
 
 /// An entry of the SendTo folder with its icon (read on the shell's worker thread).
 type SendTarget = (rf_win::sendto::Target, Option<rf_win::thumbs::Bgra>);
