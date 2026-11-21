@@ -135,17 +135,6 @@ fn attrs_of(path: &Path) -> Option<u32> {
     std::fs::symlink_metadata(path).ok().map(|m| m.file_attributes())
 }
 
-/// Attributes of a local drive directory when it has `READONLY` or `SYSTEM` set. Skips UNC/network paths
-/// so callers on the UI thread (sidebar pins, Home cards) never block on a remote share.
-pub fn local_custom_attrs(dir: &Path) -> Option<u32> {
-    let s = dir.to_str()?;
-    if s.len() < 2 || s.as_bytes()[1] != b':' {
-        return None;
-    }
-    let a = attrs_of(dir)?;
-    (a & (ATTR_READONLY | ATTR_SYSTEM) != 0).then_some(a)
-}
-
 /// Parsed custom icon entry from a folder's `desktop.ini`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FolderIcon {

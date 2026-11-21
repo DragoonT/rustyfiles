@@ -2175,4 +2175,5 @@ pub const EN: &[(&str, &str)] = &[
     ("Varyasyon", "Variant"),
     ("İkon teması", "Icon theme"),
     ("Dosya ve klasör simgeleri. Sistem simgelerini kullanır; Freedesktop paketlerini listeden seçin ya da klasörü açın. Paketin varyasyonları varsa ayrıca seçilebilir.", "File and folder icons. Uses system icons; pick a Freedesktop pack from the list or open the pack folder. Variants appear below when the pack has them."),
+    ("varsayılan", "default"),
 ];

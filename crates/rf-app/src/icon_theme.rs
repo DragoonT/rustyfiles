@@ -230,7 +230,8 @@ fn is_item_icon_dir(rel: &str, context: &str) -> bool {
 }
 
 fn parse_index(root: &Path) -> Option<Theme> {
-    let text = std::fs::read_to_string(root.join("index.theme")).ok()?;
+    let bytes = read_asset(&root.join("index.theme"))?;
+    let text = String::from_utf8(bytes).ok()?;
     let mut section = String::new();
     let mut directories = Vec::new();
     let mut scaled_directories = Vec::new();
@@ -592,11 +593,16 @@ fn is_special_parent_root(parent: &Path, roots: &[String]) -> bool {
     false
 }
 
-/// Theme icon names for Windows' known folders. Exact known-folder paths match first; localized
-/// leaf names only match direct children of a profile or OneDrive root, never nested subfolders.
-pub fn special_folder_names(path: &Path) -> &'static [&'static str] {
-    static KNOWN: OnceLock<(Vec<(String, &'static [&'static str], bool)>, Vec<String>)> = OnceLock::new();
-    let (known, roots) = KNOWN.get_or_init(|| {
+static KNOWN: OnceLock<(Vec<(String, &'static [&'static str], bool)>, Vec<String>)> = OnceLock::new();
+
+/// Load the known-folder paths once, before any row asks for an icon. Called at startup and when a
+/// pack is selected, so the COM lookups never happen on a rendered row's thread.
+pub fn prewarm_known_folders() {
+    let _ = known_paths();
+}
+
+fn known_paths() -> &'static (Vec<(String, &'static [&'static str], bool)>, Vec<String>) {
+    KNOWN.get_or_init(|| {
         use rf_win::known::KnownFolder;
         let all = [
             KnownFolder::Desktop,
@@ -623,7 +629,13 @@ pub fn special_folder_names(path: &Path) -> &'static [&'static str] {
             }
         }
         (known, roots)
-    });
+    })
+}
+
+/// Theme icon names for Windows' known folders. Exact known-folder paths match first; localized
+/// leaf names only match direct children of a profile or OneDrive root, never nested subfolders.
+pub fn special_folder_names(path: &Path) -> &'static [&'static str] {
+    let (known, roots) = known_paths();
     let full = norm_path_key(path);
     if let Some((_, names, _)) = known.iter().find(|(p, _, _)| full == *p) {
         return names;

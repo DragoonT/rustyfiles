@@ -312,7 +312,6 @@ fn icon_pack_dropdown(p: &Palette) -> AnyElement {
                 s.icon_theme = IconThemePref::Windows;
                 s.icon_theme_pack.clear();
             });
-            crate::image_cache::clear_for_pack_change(cx);
         })];
         for name in crate::icon_theme::available_packs() {
             let selected = name == current;
@@ -322,7 +321,6 @@ fn icon_pack_dropdown(p: &Palette) -> AnyElement {
                     s.icon_theme = IconThemePref::Freedesktop;
                     s.icon_theme_pack = pack.clone();
                 });
-                crate::image_cache::clear_for_pack_change(cx);
             }));
         }
         out
@@ -366,7 +364,6 @@ fn icon_variant_dropdown(p: &Palette) -> Option<AnyElement> {
                         s.icon_theme = IconThemePref::Freedesktop;
                         s.icon_theme_pack = pack.clone();
                     });
-                    crate::image_cache::clear_for_pack_change(cx);
                 })
             })
             .collect()

@@ -1470,7 +1470,6 @@ impl Settings {
             IconThemePref::Windows | IconThemePref::Legacy => 0,
         }, Ordering::Relaxed);
         *ICON_PACK.get_or_init(|| parking_lot::RwLock::new(String::new())).write() = self.icon_theme_pack.clone();
-        crate::icon_theme::refresh_packs();
         // An explicit RUSTYFILES_RENDERER env var wins (debugging).
         if std::env::var_os("RUSTYFILES_RENDERER").is_none() {
             gpui_windows::hybrid::set_mode(renderer_mode(self.renderer, crate::background::DOCK_PROCESS.load(Ordering::Relaxed)));
@@ -1527,6 +1526,8 @@ pub fn prewarm_icon_pack(cx: &mut App) {
     if s.icon_theme != IconThemePref::Freedesktop || s.icon_theme_pack.is_empty() {
         return;
     }
+    // COM known-folder lookups happen once here, before rows ask for their icon names.
+    crate::icon_theme::prewarm_known_folders();
     let pack = s.icon_theme_pack.clone();
     cx.spawn(async move |cx| {
         cx.background_executor().spawn(async move { crate::icon_theme::prewarm(&pack) }).await;
@@ -1562,6 +1563,7 @@ pub fn update(cx: &mut App, f: impl FnOnce(&mut Settings)) {
         crate::image_cache::clear_for_pack_change(cx);
     }
     if icon_pack_changed {
+        crate::icon_theme::refresh_packs();
         prewarm_icon_pack(cx);
     }
     cx.refresh_windows();

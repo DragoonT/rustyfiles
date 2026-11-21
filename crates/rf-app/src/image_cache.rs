@@ -89,6 +89,25 @@ static FOLDER_ICON_GEN: std::sync::atomic::AtomicU32 = std::sync::atomic::Atomic
 type FolderCheckKey = (PathBuf, i64, u32, u32);
 static FOLDER_CHECK_DONE: OnceLock<Mutex<HashMap<FolderCheckKey, bool>>> = OnceLock::new();
 static FOLDER_CHECK_BUSY: OnceLock<Mutex<HashSet<FolderCheckKey>>> = OnceLock::new();
+const FOLDER_CHECK_LIMIT: usize = 4096;
+
+fn remember_folder_check(key: FolderCheckKey, found: bool) {
+    let map = FOLDER_CHECK_DONE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = map.lock().unwrap();
+    if map.len() >= FOLDER_CHECK_LIMIT {
+        map.clear();
+    }
+    map.insert(key, found);
+}
+
+fn mark_folder_check_busy(key: &FolderCheckKey) -> bool {
+    let map = FOLDER_CHECK_BUSY.get_or_init(|| Mutex::new(HashSet::new()));
+    let mut map = map.lock().unwrap();
+    if map.len() >= FOLDER_CHECK_LIMIT {
+        map.clear();
+    }
+    map.insert(key.clone())
+}
 
 /// The icons of customised folders are asked for again: a folder's icon was changed in our Properties, or the user refreshed (F5).
 ///
@@ -308,6 +327,10 @@ impl ImageCache {
 
     /// Icon at an explicit pixel size (e.g. Grid/Cards/Desktop tiles when content thumbnails are off).
     pub fn icon_sized(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        // A configured theme folder outranks a pack, as it does in `thumbnail_as`.
+        if let Some(f) = crate::themes::icon_file(e.is_dir(), &e.ext, shell_own_picture(e)) {
+            return self.theme_icon(f, size, cx);
+        }
         match self.themed_picture_async(dir, e, false, size, cx) {
             PackPicture::Ready(icon) => return Some(icon),
             // A pack owns this row: wait for the worker instead of showing a shell picture first.
@@ -387,14 +410,13 @@ impl ImageCache {
         if let Some(found) = done.lock().unwrap().get(&key) {
             return *found;
         }
-        let busy = FOLDER_CHECK_BUSY.get_or_init(|| Mutex::new(HashSet::new()));
-        if busy.lock().unwrap().insert(key.clone()) {
+        if mark_folder_check_busy(&key) {
             let task = cx.background_spawn(async move { folder_path_keeps_shell_icon(&path, modified_ms, attrs) });
             let busy_key = key.clone();
             cx.spawn(async move |this, cx| {
                 let found = task.await;
                 let _ = this.update(cx, |_, cx| {
-                    FOLDER_CHECK_DONE.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(key, found);
+                    remember_folder_check(key, found);
                     FOLDER_CHECK_BUSY.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap().remove(&busy_key);
                     cx.notify();
                 });
@@ -701,14 +723,13 @@ pub(crate) fn folder_path_keeps_shell_icon(path: &Path, modified_ms: i64, attrs:
         return false;
     }
     let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
-    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, i64, u32, u32), bool>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let key = (path.to_path_buf(), modified_ms, attrs, generation);
-    if let Some(hit) = cache.lock().unwrap().get(&key) {
+    let done = FOLDER_CHECK_DONE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(hit) = done.lock().unwrap().get(&key) {
         return *hit;
     }
     let found = rf_win::folder_custom::folder_icon_info(path).is_some_and(|info| folder_icon_is_real(&info, path));
-    cache.lock().unwrap().insert(key, found);
+    remember_folder_check(key, found);
     found
 }
 
