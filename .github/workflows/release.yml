@@ -43,7 +43,7 @@ jobs:
         # (a beta is packed against the newest release of any kind, a release against the newest release that is not a beta)
         run: vpk download github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} ${{ steps.v.outputs.pre == 'true' && '--pre' || '' }}
       - name: Pack
-        run: vpk pack -u rustyfiles -v ${{ steps.v.outputs.version }} -p publish -e rustyfiles.exe -r win-x64 --packTitle rustyfiles --packAuthors "Özer Güzel" -i crates/rf-app/assets/rustyfiles.ico -s crates/rf-app/assets/splash.gif --splashProgressColor "#ff6a1a"
+        run: vpk pack -u rustyfiles -v ${{ steps.v.outputs.version }} -p publish -e rustyfiles.exe --packTitle rustyfiles --packAuthors "Özer Güzel" -i crates/rf-app/assets/rustyfiles.ico -s crates/rf-app/assets/splash.gif --splashProgressColor "#ff6a1a"
       - name: Publish
         if: steps.v.outputs.pre != 'true'
         run: vpk upload github --repoUrl https://github.com/${{ github.repository }} --token ${{ github.token }} --publish --releaseName "rustyfiles ${{ steps.v.outputs.version }}" --tag ${{ github.ref_name }}

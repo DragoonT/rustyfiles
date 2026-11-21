@@ -921,16 +921,7 @@ mod com {
             // (no owner window: the "dialog window" is then the null window, as the app's own would be)
             unsafe { dialog.Show(None).unwrap() };
             let (_, path) = got.borrow().clone().expect("OnFileOk ran and read the result");
-            let returned = std::path::Path::new(&path);
-            let selected = std::path::Path::new(&picked);
-            assert_eq!(
-                std::fs::canonicalize(returned.parent().expect("returned path has a parent"))
-                    .unwrap(),
-                std::fs::canonicalize(selected.parent().expect("selected path has a parent"))
-                    .unwrap(),
-                "the app gets the path picked in rustyfiles, not its own default name"
-            );
-            assert_eq!(returned.file_name(), selected.file_name());
+            assert_eq!(path, picked, "the app gets the path picked in rustyfiles, not its own default name");
             // outside Show, Windows' dialog answers (it has no window: an error, not a stale owner)
             let _ = unsafe { dialog.cast::<IOleWindow>().unwrap().GetWindow() };
         }
