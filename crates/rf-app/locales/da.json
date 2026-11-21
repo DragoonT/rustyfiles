@@ -2159,5 +2159,7 @@
  "c30af95d": "Udvid alle grupper",
  "5c26267c": "Skjul / udvid alle grupper",
  "438fff43": "Stifinder-vinduer, som andre programmer åbner",
- "109ffa73": "Når et program (f.eks. en downloadmanager) selv starter Stifinder, lukkes vinduet, og samme sted åbnes i rustyfiles. Virker, mens rustyfiles kører."
+ "109ffa73": "Når et program (f.eks. en downloadmanager) selv starter Stifinder, lukkes vinduet, og samme sted åbnes i rustyfiles. Virker, mens rustyfiles kører.",
+ "6fee9305": "Ydeevnetilstand",
+ "40761adf": "Dock springer sine bevægelser over og tegnes på en ensfarvet baggrund i stedet for glas: mindre arbejde, mens et spil holder grafikkortet travlt."
 }

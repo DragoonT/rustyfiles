@@ -2159,5 +2159,7 @@
  "c30af95d": "Vis alle grupper",
  "5c26267c": "Skjul / vis alle grupper",
  "438fff43": "Utforsker-vinduer som andre programmer åpner",
- "109ffa73": "Når et program (for eksempel en nedlastingsbehandler) starter Filutforsker selv, lukkes vinduet og samme sted åpnes i rustyfiles. Virker mens rustyfiles kjører."
+ "109ffa73": "Når et program (for eksempel en nedlastingsbehandler) starter Filutforsker selv, lukkes vinduet og samme sted åpnes i rustyfiles. Virker mens rustyfiles kjører.",
+ "6fee9305": "Ytelsesmodus",
+ "40761adf": "Dock hopper over bevegelsene og tegnes på en ensfarget bakgrunn i stedet for glass: mindre arbeid mens et spill holder skjermkortet opptatt."
 }

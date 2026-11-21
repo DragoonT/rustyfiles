@@ -2159,5 +2159,7 @@
  "c30af95d": "Laajenna kaikki ryhmät",
  "5c26267c": "Kutista / laajenna kaikki ryhmät",
  "438fff43": "Muiden ohjelmien avaamat Resurssienhallinnan ikkunat",
- "109ffa73": "Kun ohjelma (esimerkiksi latauksenhallinta) käynnistää Resurssienhallinnan itse, sen ikkuna suljetaan ja sama paikka avataan rustyfilesissa. Toimii, kun rustyfiles on käynnissä."
+ "109ffa73": "Kun ohjelma (esimerkiksi latauksenhallinta) käynnistää Resurssienhallinnan itse, sen ikkuna suljetaan ja sama paikka avataan rustyfilesissa. Toimii, kun rustyfiles on käynnissä.",
+ "6fee9305": "Suorituskykytila",
+ "40761adf": "Dock jättää liikkeet pois ja piirretään yhtenäiselle taustalle lasin sijaan: vähemmän työtä, kun peli kuormittaa näytönohjainta."
 }

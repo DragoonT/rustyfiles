@@ -2159,5 +2159,7 @@
  "c30af95d": "Alle groepen uitvouwen",
  "5c26267c": "Alle groepen samenvouwen / uitvouwen",
  "438fff43": "Verkenner-vensters die andere programma's openen",
- "109ffa73": "Als een programma (een downloadmanager bijvoorbeeld) zelf Verkenner start, wordt dat venster gesloten en opent dezelfde plek in rustyfiles. Werkt zolang rustyfiles draait."
+ "109ffa73": "Als een programma (een downloadmanager bijvoorbeeld) zelf Verkenner start, wordt dat venster gesloten en opent dezelfde plek in rustyfiles. Werkt zolang rustyfiles draait.",
+ "6fee9305": "Prestatiemodus",
+ "40761adf": "Het Dock slaat zijn bewegingen over en wordt op een effen vlak in plaats van glas getekend: minder werk terwijl een game de videokaart bezighoudt."
 }

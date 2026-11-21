@@ -2159,5 +2159,7 @@
  "c30af95d": "Visa alla grupper",
  "5c26267c": "Dölj / visa alla grupper",
  "438fff43": "Utforskarfönster som andra program öppnar",
- "109ffa73": "När ett program (till exempel en nedladdningshanterare) själv startar Utforskaren stängs dess fönster och samma plats öppnas i rustyfiles. Fungerar medan rustyfiles körs."
+ "109ffa73": "När ett program (till exempel en nedladdningshanterare) själv startar Utforskaren stängs dess fönster och samma plats öppnas i rustyfiles. Fungerar medan rustyfiles körs.",
+ "6fee9305": "Prestandaläge",
+ "40761adf": "Dock hoppar över sina rörelser och ritas på en enfärgad bakgrund i stället för glas: mindre arbete medan ett spel håller grafikkortet upptaget."
 }

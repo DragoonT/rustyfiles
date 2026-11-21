@@ -1027,6 +1027,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Tüm klasörler için varsayılan yap", "Make default for all folders"),
     ("Dosya uzantıları", "File extensions"),
     ("Uyarlanabilir düzen", "Adaptive layout"),
+    ("Performans kipi", "Performance mode"),
+    ("Dock hareket etmez ve cam yerine düz zeminle çizilir: bir oyun ekran kartını meşgul ederken daha az iş yapar.", "The Dock skips its motions and is drawn on a solid fill instead of glass: less work while a game keeps the graphics card busy."),
     ("Başka programların açtığı Explorer pencereleri", "Explorer windows other programs open"),
     ("Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.", "When a program (a download manager, for example) starts File Explorer itself, its window is closed and the same place opens in rustyfiles. Works while rustyfiles is running."),
     ("Tüm grupları daralt", "Collapse all groups"),

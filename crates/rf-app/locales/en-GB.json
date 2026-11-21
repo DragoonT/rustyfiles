@@ -2159,5 +2159,7 @@
  "c30af95d": "Expand all groups",
  "5c26267c": "Collapse / expand all groups",
  "438fff43": "Explorer windows other programs open",
- "109ffa73": "When a program (a download manager, for example) starts File Explorer itself, its window is closed and the same place opens in rustyfiles. Works while rustyfiles is running."
+ "109ffa73": "When a program (a download manager, for example) starts File Explorer itself, its window is closed and the same place opens in rustyfiles. Works while rustyfiles is running.",
+ "6fee9305": "Performance mode",
+ "40761adf": "The Dock skips its motions and is drawn on a solid fill instead of glass: less work while a game keeps the graphics card busy."
 }

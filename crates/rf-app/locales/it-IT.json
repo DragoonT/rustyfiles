@@ -2159,5 +2159,7 @@
  "c30af95d": "Espandi tutti i gruppi",
  "5c26267c": "Comprimi / espandi tutti i gruppi",
  "438fff43": "Finestre di Esplora risorse aperte da altri programmi",
- "109ffa73": "Quando un programma (un gestore di download, per esempio) avvia da solo Esplora file, la sua finestra viene chiusa e lo stesso percorso si apre in rustyfiles. Funziona mentre rustyfiles è in esecuzione."
+ "109ffa73": "Quando un programma (un gestore di download, per esempio) avvia da solo Esplora file, la sua finestra viene chiusa e lo stesso percorso si apre in rustyfiles. Funziona mentre rustyfiles è in esecuzione.",
+ "6fee9305": "Modalità prestazioni",
+ "40761adf": "Il Dock salta i movimenti e viene disegnato su uno sfondo pieno invece che sul vetro: meno lavoro mentre un gioco tiene occupata la scheda grafica."
 }

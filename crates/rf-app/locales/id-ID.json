@@ -2159,5 +2159,7 @@
  "c30af95d": "Bentangkan semua grup",
  "5c26267c": "Ciutkan / bentangkan semua grup",
  "438fff43": "Jendela Explorer yang dibuka program lain",
- "109ffa73": "Saat sebuah program (pengelola unduhan, misalnya) membuka File Explorer sendiri, jendelanya ditutup dan tempat yang sama dibuka di rustyfiles. Berlaku selama rustyfiles berjalan."
+ "109ffa73": "Saat sebuah program (pengelola unduhan, misalnya) membuka File Explorer sendiri, jendelanya ditutup dan tempat yang sama dibuka di rustyfiles. Berlaku selama rustyfiles berjalan.",
+ "6fee9305": "Mode performa",
+ "40761adf": "Dock melewatkan animasinya dan digambar di latar solid alih-alih kaca: lebih sedikit kerja saat game menyibukkan kartu grafis."
 }

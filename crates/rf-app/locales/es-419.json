@@ -2159,5 +2159,7 @@
  "c30af95d": "Expandir todos los grupos",
  "5c26267c": "Contraer / expandir todos los grupos",
  "438fff43": "Ventanas del Explorador que abren otros programas",
- "109ffa73": "Cuando un programa (un gestor de descargas, por ejemplo) abre el Explorador de archivos por su cuenta, su ventana se cierra y el mismo lugar se abre en rustyfiles. Funciona mientras rustyfiles está abierto."
+ "109ffa73": "Cuando un programa (un gestor de descargas, por ejemplo) abre el Explorador de archivos por su cuenta, su ventana se cierra y el mismo lugar se abre en rustyfiles. Funciona mientras rustyfiles está abierto.",
+ "6fee9305": "Modo de rendimiento",
+ "40761adf": "El Dock omite sus movimientos y se dibuja sobre un fondo sólido en lugar de vidrio: menos trabajo mientras un juego ocupa la tarjeta gráfica."
 }

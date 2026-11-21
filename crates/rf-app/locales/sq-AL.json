@@ -2159,5 +2159,7 @@
  "c30af95d": "Zgjero të gjitha grupet",
  "5c26267c": "Palos / zgjero të gjitha grupet",
  "438fff43": "Dritaret e Explorer që hapin programe të tjera",
- "109ffa73": "Kur një program (p.sh. një menaxher shkarkimesh) nis vetë File Explorer, dritarja e tij mbyllet dhe i njëjti vend hapet në rustyfiles. Vepron sa kohë që rustyfiles është në punë."
+ "109ffa73": "Kur një program (p.sh. një menaxher shkarkimesh) nis vetë File Explorer, dritarja e tij mbyllet dhe i njëjti vend hapet në rustyfiles. Vepron sa kohë që rustyfiles është në punë.",
+ "6fee9305": "Modaliteti i performancës",
+ "40761adf": "Dock kapërcen lëvizjet dhe vizatohet mbi një sfond të plotë në vend të xhamit: më pak punë ndërsa një lojë mban të zënë kartën grafike."
 }

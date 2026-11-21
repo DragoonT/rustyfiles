@@ -2159,5 +2159,7 @@
  "c30af95d": "Desplega tots els grups",
  "5c26267c": "Replega / desplega tots els grups",
  "438fff43": "Finestres de l'Explorador que obren altres programes",
- "109ffa73": "Quan un programa (un gestor de baixades, per exemple) inicia l'Explorador de fitxers pel seu compte, la finestra es tanca i el mateix lloc s'obre a rustyfiles. Funciona mentre rustyfiles s'executa."
+ "109ffa73": "Quan un programa (un gestor de baixades, per exemple) inicia l'Explorador de fitxers pel seu compte, la finestra es tanca i el mateix lloc s'obre a rustyfiles. Funciona mentre rustyfiles s'executa.",
+ "6fee9305": "Mode de rendiment",
+ "40761adf": "El Dock omet els moviments i es dibuixa sobre un fons sòlid en lloc del vidre: menys feina mentre un joc ocupa la targeta gràfica."
 }

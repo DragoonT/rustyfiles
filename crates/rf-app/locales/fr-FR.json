@@ -2159,5 +2159,7 @@
  "c30af95d": "Développer tous les groupes",
  "5c26267c": "Réduire / développer tous les groupes",
  "438fff43": "Fenêtres de l'Explorateur ouvertes par d'autres programmes",
- "109ffa73": "Quand un programme (un gestionnaire de téléchargements, par exemple) lance lui-même l'Explorateur de fichiers, sa fenêtre est fermée et le même emplacement s'ouvre dans rustyfiles. Fonctionne tant que rustyfiles est lancé."
+ "109ffa73": "Quand un programme (un gestionnaire de téléchargements, par exemple) lance lui-même l'Explorateur de fichiers, sa fenêtre est fermée et le même emplacement s'ouvre dans rustyfiles. Fonctionne tant que rustyfiles est lancé.",
+ "6fee9305": "Mode performances",
+ "40761adf": "Le Dock se passe de ses mouvements et se dessine sur un fond uni au lieu du verre : moins de travail quand un jeu occupe la carte graphique."
 }

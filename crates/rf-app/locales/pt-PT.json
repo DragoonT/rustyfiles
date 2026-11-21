@@ -2159,5 +2159,7 @@
  "c30af95d": "Expandir todos os grupos",
  "5c26267c": "Fechar / expandir todos os grupos",
  "438fff43": "Janelas do Explorador abertas por outros programas",
- "109ffa73": "Quando um programa (um gestor de transferências, por exemplo) abre o Explorador de Ficheiros por si, a janela é fechada e o mesmo local abre no rustyfiles. Funciona enquanto o rustyfiles está em execução."
+ "109ffa73": "Quando um programa (um gestor de transferências, por exemplo) abre o Explorador de Ficheiros por si, a janela é fechada e o mesmo local abre no rustyfiles. Funciona enquanto o rustyfiles está em execução.",
+ "6fee9305": "Modo de desempenho",
+ "40761adf": "O Dock dispensa os movimentos e é desenhado sobre um fundo sólido em vez de vidro: menos trabalho enquanto um jogo ocupa a placa gráfica."
 }

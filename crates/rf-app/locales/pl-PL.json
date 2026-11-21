@@ -2159,5 +2159,7 @@
  "c30af95d": "Rozwiń wszystkie grupy",
  "5c26267c": "Zwiń / rozwiń wszystkie grupy",
  "438fff43": "Okna Eksploratora otwierane przez inne programy",
- "109ffa73": "Gdy program (na przykład menedżer pobierania) sam uruchamia Eksplorator plików, jego okno jest zamykane, a to samo miejsce otwiera się w rustyfiles. Działa, gdy rustyfiles jest uruchomiony."
+ "109ffa73": "Gdy program (na przykład menedżer pobierania) sam uruchamia Eksplorator plików, jego okno jest zamykane, a to samo miejsce otwiera się w rustyfiles. Działa, gdy rustyfiles jest uruchomiony.",
+ "6fee9305": "Tryb wydajności",
+ "40761adf": "Dock pomija animacje i jest rysowany na jednolitym tle zamiast szkła: mniej pracy, gdy gra obciąża kartę graficzną."
 }

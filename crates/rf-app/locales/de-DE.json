@@ -2159,5 +2159,7 @@
  "c30af95d": "Alle Gruppen ausklappen",
  "5c26267c": "Alle Gruppen ein-/ausklappen",
  "438fff43": "Von anderen Programmen geöffnete Explorer-Fenster",
- "109ffa73": "Startet ein Programm (etwa ein Download-Manager) den Datei-Explorer selbst, wird dessen Fenster geschlossen und derselbe Ort in rustyfiles geöffnet. Gilt, solange rustyfiles läuft."
+ "109ffa73": "Startet ein Programm (etwa ein Download-Manager) den Datei-Explorer selbst, wird dessen Fenster geschlossen und derselbe Ort in rustyfiles geöffnet. Gilt, solange rustyfiles läuft.",
+ "6fee9305": "Leistungsmodus",
+ "40761adf": "Das Dock verzichtet auf Bewegungen und wird auf einer einfarbigen Fläche statt auf Glas gezeichnet: weniger Arbeit, während ein Spiel die Grafikkarte auslastet."
 }

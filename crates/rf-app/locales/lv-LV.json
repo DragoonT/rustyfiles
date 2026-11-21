@@ -2159,5 +2159,7 @@
  "c30af95d": "Izvērst visas grupas",
  "5c26267c": "Sakļaut / izvērst visas grupas",
  "438fff43": "Citu programmu atvērtie Explorer logi",
- "109ffa73": "Ja programma (piemēram, lejupielāžu pārvaldnieks) pati palaiž failu pārlūku, tā logs tiek aizvērts un tā pati vieta tiek atvērta rustyfiles. Darbojas, kamēr rustyfiles ir palaists."
+ "109ffa73": "Ja programma (piemēram, lejupielāžu pārvaldnieks) pati palaiž failu pārlūku, tā logs tiek aizvērts un tā pati vieta tiek atvērta rustyfiles. Darbojas, kamēr rustyfiles ir palaists.",
+ "6fee9305": "Veiktspējas režīms",
+ "40761adf": "Dock izlaiž kustības un tiek zīmēts uz vienkrāsaina fona stikla vietā: mazāk darba, kamēr spēle noslogo videokarti."
 }

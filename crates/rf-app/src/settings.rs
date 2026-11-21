@@ -744,6 +744,8 @@ pub struct Settings {
     pub dock_autohide_windows: bool,
     /// The dock's islands on a solid fill instead of the glass (off; issue 113).
     pub dock_opaque: bool,
+    /// The Dock without its motions and on a solid fill: less work while a game keeps the graphics card busy (issue 133).
+    pub dock_performance: bool,
     /// A thin "Show desktop" strip at the right end of the primary monitor's right island, after the bell, as on Windows' taskbar (off;
     /// issue 127).
     pub dock_show_desktop: bool,
@@ -1016,6 +1018,7 @@ impl Default for Settings {
             dock_autohide: false,
             dock_autohide_windows: false,
             dock_opaque: false,
+            dock_performance: false,
             dock_show_desktop: false,
             dock_labels: false,
             dock_pins_left: false,
@@ -1323,7 +1326,9 @@ impl Settings {
         rf_core::format::set_decimal_sizes(self.decimal_sizes);
         SOLID.store(self.backdrop == BackdropPref::Solid, Ordering::Relaxed);
         MAIN_ONLY.store(main_window_only(self.backdrop), Ordering::Relaxed);
-        ANIM.store(self.animations as u8, Ordering::Relaxed);
+        // (the Dock's performance mode: no motion in the Dock's process, whatever the app's own setting)
+        let dock_still = self.dock_performance && crate::background::DOCK_PROCESS.load(Ordering::Relaxed);
+        ANIM.store(if dock_still { AnimPref::Off as u8 } else { self.animations as u8 }, Ordering::Relaxed);
         // HyperGlass: the engine redraws every glass window once when the look changes, and does nothing for the same look again
         HG_SURFACE.store(self.hg_surface.min(100), Ordering::Relaxed);
         rf_win::glass::set_look(self.hyperglass_look());

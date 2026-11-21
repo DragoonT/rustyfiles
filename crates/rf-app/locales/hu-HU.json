@@ -2159,5 +2159,7 @@
  "c30af95d": "Összes csoport kibontása",
  "5c26267c": "Összes csoport összecsukása / kibontása",
  "438fff43": "Más programok által megnyitott Intéző-ablakok",
- "109ffa73": "Ha egy program (például egy letöltéskezelő) maga indítja el a Fájlkezelőt, annak ablaka bezárul, és ugyanaz a hely nyílik meg a rustyfilesban. Amíg a rustyfiles fut, működik."
+ "109ffa73": "Ha egy program (például egy letöltéskezelő) maga indítja el a Fájlkezelőt, annak ablaka bezárul, és ugyanaz a hely nyílik meg a rustyfilesban. Amíg a rustyfiles fut, működik.",
+ "6fee9305": "Teljesítmény mód",
+ "40761adf": "A Dock kihagyja a mozgásokat, és üveg helyett egyszínű háttérrel rajzolódik: kevesebb munka, amíg egy játék leköti a videokártyát."
 }

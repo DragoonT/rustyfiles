@@ -2159,5 +2159,7 @@
  "c30af95d": "I-expand ang lahat ng grupo",
  "5c26267c": "I-collapse / i-expand ang lahat ng grupo",
  "438fff43": "Mga window ng Explorer na binubuksan ng ibang programa",
- "109ffa73": "Kapag ang isang programa (download manager, halimbawa) ay mismong nagbukas ng File Explorer, isinasara ang window nito at binubuksan ang parehong lugar sa rustyfiles. Gumagana habang tumatakbo ang rustyfiles."
+ "109ffa73": "Kapag ang isang programa (download manager, halimbawa) ay mismong nagbukas ng File Explorer, isinasara ang window nito at binubuksan ang parehong lugar sa rustyfiles. Gumagana habang tumatakbo ang rustyfiles.",
+ "6fee9305": "Performance mode",
+ "40761adf": "Nilalaktawan ng Dock ang mga galaw nito at iginuguhit sa solidong background sa halip na salamin: mas kaunting trabaho habang pinapagod ng laro ang graphics card."
 }

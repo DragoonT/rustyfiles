@@ -2159,5 +2159,7 @@
  "c30af95d": "Rozbaliť všetky skupiny",
  "5c26267c": "Zbaliť / rozbaliť všetky skupiny",
  "438fff43": "Okná Prieskumníka otvorené inými programami",
- "109ffa73": "Keď program (napríklad správca sťahovania) sám spustí Prieskumníka, jeho okno sa zavrie a rovnaké miesto sa otvorí v rustyfiles. Funguje, kým je rustyfiles spustený."
+ "109ffa73": "Keď program (napríklad správca sťahovania) sám spustí Prieskumníka, jeho okno sa zavrie a rovnaké miesto sa otvorí v rustyfiles. Funguje, kým je rustyfiles spustený.",
+ "6fee9305": "Režim výkonu",
+ "40761adf": "Dock vynechá pohyby a kreslí sa na plnom pozadí namiesto skla: menej práce, kým hra vyťažuje grafickú kartu."
 }
