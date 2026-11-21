@@ -13079,7 +13079,7 @@
   "key": "Sonraki masaüstü arka planı",
   "tr": "Sonraki masaüstü arka planı",
   "en": "Next desktop background"
-  },
+ },
  {
   "id": "2cedf68f",
   "key": "Yerel (varsayılan)",
@@ -13109,5 +13109,41 @@
   "key": "varsayılan",
   "tr": "varsayılan",
   "en": "default"
+ },
+ {
+  "id": "dcfbc9e0",
+  "key": "Kompakt pencere",
+  "tr": "Kompakt pencere",
+  "en": "Compact window"
+ },
+ {
+  "id": "fbd43181",
+  "key": "Uygulama simgesi",
+  "tr": "Uygulama simgesi",
+  "en": "App icon"
+ },
+ {
+  "id": "e0eca68c",
+  "key": "Başlat menüsündeki, masaüstündeki ve görev çubuğuna sabitlenmiş rustyfiles kısayollarının simgesi. Güncellemelerden sonra da kalır.",
+  "tr": "Başlat menüsündeki, masaüstündeki ve görev çubuğuna sabitlenmiş rustyfiles kısayollarının simgesi. Güncellemelerden sonra da kalır.",
+  "en": "The icon of rustyfiles' shortcuts in the Start menu, on the desktop and pinned to the taskbar. It stays after updates."
+ },
+ {
+  "id": "ad4e6b1d",
+  "key": "Simge seçin",
+  "tr": "Simge seçin",
+  "en": "Choose an icon"
+ },
+ {
+  "id": "42d8bc18",
+  "key": "Simge dosyaları",
+  "tr": "Simge dosyaları",
+  "en": "Icon files"
+ },
+ {
+  "id": "38ffe584",
+  "key": "Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.",
+  "tr": "Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.",
+  "en": "The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size."
  }
 ]

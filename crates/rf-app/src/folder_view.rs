@@ -5191,7 +5191,11 @@ impl FolderView {
             }
         };
         // Pinned folders and recent files: a real `desktop.ini` icon (and every .exe/.lnk) keeps the shell's own picture.
+        // With no pack chosen Home keeps its Lucide icons, as on main.
         let item_icon = |cx: &mut Context<Self>, path: &std::path::Path, names: &[&'static str], cat: crate::icons::Category, ext: &str, is_dir: bool, size: f32| -> Option<Arc<RenderImage>> {
+            if !freedesktop || pack.is_empty() {
+                return None;
+            }
             let px = (size as u32).max(crate::image_cache::ICON_PX);
             let own = matches!(ext.to_ascii_lowercase().as_str(), "exe" | "lnk");
             let kind = if is_dir { rf_core::EntryKind::Dir } else { rf_core::EntryKind::File };
@@ -5200,15 +5204,21 @@ impl FolderView {
             let dir = path.parent().unwrap_or_else(|| std::path::Path::new(""));
             let names: Vec<&'static str> = if own { Vec::new() } else { names.to_vec() };
             let _ = cat;
-            match self.images.update(cx, |c, cx| c.themed_or_native_picture(dir, &entry, &names, px, cx)) {
+            match self.images.update(cx, |c, cx| c.themed_or_native_picture(dir, &entry, &names, px, true, cx)) {
                 crate::image_cache::PackPicture::Ready(im) => Some(im),
                 _ => None,
             }
         };
-        let home_icon = |picture: Option<Arc<RenderImage>>, fallback: L, size: f32, color: Hsla| -> AnyElement {
+        let home_icon = |picture: Option<Arc<RenderImage>>, fallback: L, size: f32, color: Option<Hsla>| -> AnyElement {
             match picture {
                 Some(pic) => img(pic).size(px(size)).object_fit(ObjectFit::Contain).into_any_element(),
-                None => Icon::new(fallback).size(px(size)).text_color(color).into_any_element(),
+                None => {
+                    let icon = Icon::new(fallback).size(px(size));
+                    match color {
+                        Some(color) => icon.text_color(color).into_any_element(),
+                        None => icon.into_any_element(),
+                    }
+                }
             }
         };
 
@@ -5229,7 +5239,7 @@ impl FolderView {
             let picture = item_icon(cx, &f.path, &names, Category::Folder, "", true, 28.);
             pinned_grid = pinned_grid.child(
                 card(("pin", i).into())
-                    .child(home_icon(picture.or(shell_icon), f.icon, 28., p.accent))
+                    .child(home_icon(picture.or(shell_icon), f.icon, 28., (!windows_file_explorer_theme).then_some(p.accent)))
                     .child(div().text_sm().child(crate::i18n::td(&f.title)))
                     .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(path.clone()), cx))),
             );
@@ -5255,7 +5265,7 @@ impl FolderView {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .child(home_icon(pack_icon(cx, places::drive_icon_names(d.kind), 28.).or(shell_icon), places::drive_icon(&d), 28., p.text_secondary))
+                            .child(home_icon(pack_icon(cx, places::drive_icon_names(d.kind), 28.).or(shell_icon), places::drive_icon(&d), 28., (!windows_file_explorer_theme).then_some(p.text_secondary)))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -5315,7 +5325,7 @@ impl FolderView {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .child(home_icon(pack_icon(cx, &["multimedia-player", "drive-removable-media"], 28.), L::Usb, 28., p.text_secondary))
+                            .child(home_icon(pack_icon(cx, &["multimedia-player", "drive-removable-media"], 28.), L::Usb, 28., Some(p.text_secondary)))
                             .child(div().flex_1().min_w_0().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(d.name)),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| this.navigate(loc.clone(), cx))),
@@ -5349,7 +5359,7 @@ impl FolderView {
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .child(home_icon(pack_icon(cx, &["folder-network", "network-workgroup"], 28.), L::Network, 28., p.text_secondary))
+                            .child(home_icon(pack_icon(cx, &["folder-network", "network-workgroup"], 28.), L::Network, 28., Some(p.text_secondary)))
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -5395,7 +5405,7 @@ impl FolderView {
                     .text_sm()
                     .hover(|s| s.bg(p.hover))
                     .cursor_pointer()
-                    .child(home_icon(picture, icons::icon_for(cat), 16., theme::kind_color(cat, p.dark)))
+                    .child(home_icon(picture, icons::icon_for(cat), 16., Some(theme::kind_color(cat, p.dark))))
                     .child(div().w(px(260.)).flex_shrink_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(shown))
                     .child(
                         div()

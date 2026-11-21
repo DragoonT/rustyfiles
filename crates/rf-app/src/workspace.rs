@@ -3685,7 +3685,7 @@ impl Workspace {
             if folder {
                 names.extend_from_slice(crate::icon_theme::FOLDER_NAMES);
             }
-            match self.images.update(cx, |c, cx| c.themed_or_native_picture(dir, &e, &names, req_px, cx)) {
+            match self.images.update(cx, |c, cx| c.themed_or_native_picture(dir, &e, &names, req_px, false, cx)) {
                 crate::image_cache::PackPicture::Ready(im) => Some(im),
                 _ => None,
             }

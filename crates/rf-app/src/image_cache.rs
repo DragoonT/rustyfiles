@@ -476,16 +476,23 @@ impl ImageCache {
 
     /// Same lookup for callers that hold a path, not an `Entry` (Home, the sidebar, the tab strip).
     /// On `Native` they get the shell's own picture instead of a Lucide fallback.
+    /// `lucide_fallback` is for Home: without a matching picture the caller draws its own glyph,
+    /// except for folders with a real custom icon and for `.exe`/`.lnk`, which keep the shell picture.
     pub fn themed_or_native_picture(
         &mut self,
         dir: &Path,
         e: &Entry,
         names: &[&'static str],
         px: u32,
+        lucide_fallback: bool,
         cx: &mut Context<Self>,
     ) -> PackPicture {
         let pack = crate::settings::icon_theme_pack();
-        if names.is_empty() || !matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop) || pack.is_empty() {
+        let freedesktop = matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop);
+        if lucide_fallback && !freedesktop {
+            return PackPicture::Native;
+        }
+        if names.is_empty() || !freedesktop || pack.is_empty() {
             return self.native_icon(dir, e, px, cx).map_or(PackPicture::Native, PackPicture::Ready);
         }
         let path = dir.join(&*e.name);
@@ -498,6 +505,7 @@ impl ImageCache {
             return self.native_icon(dir, e, px, cx).map_or(PackPicture::Native, PackPicture::Ready);
         }
         match self.pack_picture_for_names(&pack, names, px, cx) {
+            PackPicture::Native if lucide_fallback => PackPicture::Native,
             PackPicture::Native => self.native_icon(dir, e, px, cx).map_or(PackPicture::Native, PackPicture::Ready),
             other => other,
         }
