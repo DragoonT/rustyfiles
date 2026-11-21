@@ -55,3 +55,6 @@ Pictures in `.svg`, `.png` or `.ico`, named for what they stand for:
 A program's own icon (an `.exe`'s, a shortcut's) stays, unless the theme has a picture for exactly
 its extension (`exe.svg`, `lnk.svg`). Pictures and videos keep their previews. Icon packs such as
 Papirus come as SVG files that can be copied in and renamed this way.
+
+Freedesktop packs are a separate setting, `Settings › Appearance › Icon theme`. When both are set,
+this theme folder's pictures win and the pack fills what this folder does not define.

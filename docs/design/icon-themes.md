@@ -208,6 +208,10 @@ On gnome-look.org, filter by *Icon Themes* and sort by rating or downloads.
 
 ## Compatibility
 
+### Theme folders
+
+`Settings → Appearance → Theme folder` is a separate, simpler override: a folder with `icons\folder`, extension pictures and `icons\file`. The two settings can be used together. Pictures from the selected theme folder win; the Freedesktop pack supplies every icon the theme folder does not define. An empty `theme_folder` (the default) leaves the pack behavior unchanged.
+
 - Settings files without `icon_theme` or `icon_theme_pack` keep native icons.
 - Unknown `icon_theme` values deserialize to `Legacy`, which behaves like `Windows`; existing settings keep loading.
 - Updating the app does not change the appearance of existing installations.
