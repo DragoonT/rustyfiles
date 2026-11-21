@@ -516,7 +516,7 @@ impl FolderView {
         if redo.is_some() {
             v.push(Item::action(redo_text(redo), icon(L::Redo2), |_, cx| crate::undo::redo(cx)).hint("Ctrl+Y"));
         }
-        let fallback = Rc::new(own_new_items(me, cx));
+        let fallback = Rc::new(own_new_items(me));
         v.push(Item::Sub { label: t!("Yeni").into(), icon: icon(L::CirclePlus), items: Sub::Pending { key: "new", fallback: Some(fallback) }, click: None });
         let in_archive = crate::archive_view::split(dir).is_some() && !dir.exists();
         if !in_archive {
@@ -712,7 +712,7 @@ impl FolderView {
         let items = match which {
             BarMenu::New => {
                 let Some(dir) = self.current_dir() else { return };
-                let menu = Menu { quick: Vec::new(), items: own_new_items(&me, cx) };
+                let menu = Menu { quick: Vec::new(), items: own_new_items(&me) };
                 let view = if original_icons {
                     fluent_menu::show_context_original_icons(menu, pos, window, cx)
                 } else {
@@ -843,7 +843,7 @@ impl FolderView {
     }
 }
 
-fn own_new_items(me: &Me, cx: &App) -> Vec<Item> {
+fn own_new_items(me: &Me) -> Vec<Item> {
     vec![
         Item::action(
             t!("Klasör"),
@@ -1260,7 +1260,7 @@ fn split_shell_items(me: &Me, session: u64, shell: Vec<ShellItem>, background: b
                 .into_iter()
                 .filter(|c| !c.verb.eq_ignore_ascii_case("NewFolder") && !c.verb.eq_ignore_ascii_case(".txt"))
                 .collect();
-            let mut items = own_new_items(me, cx);
+            let mut items = own_new_items(me);
             let rest = to_items(me, session, &tidy(rest), cx);
             if !rest.is_empty() {
                 items.push(Item::Separator);

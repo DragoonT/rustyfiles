@@ -6,7 +6,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -60,7 +60,7 @@ fn render(v: &Entity<FolderView>, owner: AnyWindowHandle, dual: Rc<Cell<bool>>, 
             .text_xs()
             .when(on, |d| d.bg(p.accent).text_color(p.accent_text))
             .when(!on, |d| d.bg(p.hover).hover(|s| s.bg(p.pressed)))
-            .child(crate::icons::original_icon(icon, px(20.)))
+            .child(Icon::new(icon).size(px(20.)))
             .child(label.to_string())
             .on_click(move |_, window, cx| {
                 let _ = w.update(cx, |v, cx| v.set_layout(m, st, cx));
@@ -129,7 +129,7 @@ fn render(v: &Entity<FolderView>, owner: AnyWindowHandle, dual: Rc<Cell<bool>>, 
     let size_icons = h_flex().mx_4().mt_1().justify_between().text_color(if enabled { p.text_secondary } else { p.text_tertiary }).children(
         [12., 14., 16., 18., 20.]
             .into_iter()
-            .map(|s| crate::icons::original_icon(if mode == ViewMode::Details { L::Rows3 } else { L::Image }, px(s))),
+            .map(|s| Icon::new(if mode == ViewMode::Details { L::Rows3 } else { L::Image }).size(px(s))),
     );
 
     // ---- switches

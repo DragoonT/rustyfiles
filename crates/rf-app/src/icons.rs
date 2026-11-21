@@ -1,42 +1,12 @@
 //! File categorization → symbol icon (Lucide) + type label.
 //! Native shell icons/thumbnails come later via rf-win; this is the instant, zero-I/O fallback.
 
-use std::borrow::Cow;
-
 use crate::t;
 use gpui_kit::assets::IconName as L;
+#[cfg(not(target_os = "windows"))]
 use gpui_kit::component::Icon;
-use gpui_kit::{
-    AnyElement, AssetSource, IntoElement, ParentElement, Pixels, SharedString, Styled, div,
-};
+use gpui_kit::{AnyElement, IntoElement, ParentElement, Pixels, Styled, div};
 use rf_core::Entry;
-
-pub struct AppAssets;
-
-impl AssetSource for AppAssets {
-    fn load(&self, path: &str) -> anyhow::Result<Option<Cow<'static, [u8]>>> {
-        gpui_kit::assets::AllAssets.load(path)
-    }
-
-    fn list(&self, path: &str) -> anyhow::Result<Vec<SharedString>> {
-        gpui_kit::assets::AllAssets.list(path)
-    }
-}
-
-pub fn original_icon(icon: L, size: Pixels) -> Icon {
-    let path = icon.path();
-    match gpui_kit::assets::AllAssets.load(&path) {
-        Ok(Some(bytes)) => Icon::default().data(&bytes).size(size),
-        Ok(None) => {
-            log::warn!("missing original icon asset: {path}");
-            Icon::default().size(size)
-        }
-        Err(error) => {
-            log::warn!("could not load original icon asset {path}: {error:#}");
-            Icon::default().size(size)
-        }
-    }
-}
 
 pub fn windows_home_icon(size: Pixels) -> AnyElement {
     #[cfg(target_os = "windows")]

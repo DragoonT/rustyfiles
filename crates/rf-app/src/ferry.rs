@@ -14,7 +14,7 @@ use std::time::Duration;
 use futures::StreamExt as _;
 use futures::channel::mpsc;
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_nearby::{Config, EstimateSource, LinkKind, NearbyListener, NetStatus, Nearby, Offer, Peer, SpeedResult, TransferResult, Visibility};
@@ -681,7 +681,7 @@ impl Render for QuestionView {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(crate::icons::original_icon(L::Send, px(16.)).text_color(p.accent))
+                    .child(Icon::new(L::Send).size(px(16.)).text_color(p.accent))
                     .child(div().text_xs().text_color(p.text_secondary).child("Ferry"))
                     .children((waiting > 0).then(|| div().ml_auto().text_xs().text_color(p.text_secondary).child(format!("+{waiting}")))),
             )

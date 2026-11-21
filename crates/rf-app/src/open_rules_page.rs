@@ -4,7 +4,7 @@
 //! with the arrows. Only rustyfiles follows the lists; Windows' own defaults are not touched.
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_core::openrules::{self, OpenRule};
@@ -30,7 +30,7 @@ fn small_button(id: impl Into<ElementId>, icon: L, tip: &'static str, p: &Palett
         .tab_index(0)
         .hover(|s| s.bg(p.pressed))
         .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(w, cx))
-        .child(crate::icons::original_icon(icon, px(14.)))
+        .child(Icon::new(icon).size(px(14.)))
         .on_click(move |_, window, cx| run(window, cx))
         .into_any_element()
 }
@@ -169,7 +169,7 @@ fn program_row(p: &Palette, ix: usize, pi: usize, n: usize, path: &str, is_defau
         .items_center()
         .border_t_1()
         .border_color(p.border)
-        .child(crate::icons::original_icon(L::AppWindow, px(16.)).flex_shrink_0().text_color(p.text_secondary))
+        .child(Icon::new(L::AppWindow).size(px(16.)).flex_shrink_0().text_color(p.text_secondary))
         .child(
             v_flex()
                 .flex_1()

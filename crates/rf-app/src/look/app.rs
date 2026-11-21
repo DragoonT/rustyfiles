@@ -135,7 +135,7 @@ pub fn main() {
 
     // (DirectLook opens on the card: the fast start is for the file manager's own window only, see `fast_start::before_app`)
     crate::fast_start::before_app(false);
-    gpui_kit::application().with_assets(crate::icons::AppAssets).run(move |cx| {
+    gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
         gpui_kit::init(cx);
         // rustyfiles'ın ayarları: yalnız dil, tema, tarih biçimi için okunur, asla yazılmaz
         cx.set_global(crate::settings::Settings::load());

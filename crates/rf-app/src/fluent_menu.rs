@@ -864,7 +864,7 @@ impl MenuView {
                             .on_click(cx.listener(move |_, _, window, cx| run_in_main(run.clone(), window, cx)))
                     })
                     .child(if self.original_icons {
-                        crate::icons::original_icon(q.icon, px(16.)).into_any_element()
+                        Icon::new(q.icon).size(px(16.)).into_any_element()
                     } else if self.explorer_context {
                         lucide_menu_icon(icon, true, false, tint)
                     } else {
@@ -1069,7 +1069,7 @@ fn lucide_menu_icon(icon: L, explorer_context: bool, original_icons: bool, tint:
     }
 
     if original_icons {
-        return crate::icons::original_icon(icon, px(16.)).into_any_element();
+        return Icon::new(icon).size(px(16.)).into_any_element();
     }
 
     let icon = Icon::new(icon).size(px(16.));

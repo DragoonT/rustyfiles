@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use gpui_windows::hybrid;
@@ -351,7 +351,7 @@ pub(crate) fn card_body(p: &Palette, icon: L, title: SharedString, desc: Option<
                 .min_w(px(WORDS_MIN + 34.))
                 .gap_4()
                 .items_center()
-                .child(crate::icons::original_icon(icon, px(18.)).flex_shrink_0().text_color(p.text))
+                .child(Icon::new(icon).size(px(18.)).flex_shrink_0().text_color(p.text))
                 .child(
                     v_flex()
                         .flex_1()
@@ -387,7 +387,7 @@ fn expander(key: &'static str, p: &Palette, icon: L, title: &str, desc: Option<&
         .justify_center()
         .rounded(theme::RADIUS_SM)
         .hover(|s| s.bg(p.pressed))
-        .child(crate::icons::original_icon(if open { L::ChevronUp } else { L::ChevronDown }, px(14.)))
+        .child(Icon::new(if open { L::ChevronUp } else { L::ChevronDown }).size(px(14.)))
         .on_click(move |_, window, cx| {
             let u = ui(cx);
             if !u.open.remove(key) {
@@ -447,7 +447,7 @@ fn link_row(p: &Palette, id: &'static str, icon: L, title: &str, desc: Option<&s
             icon,
             title.to_string().into(),
             desc.map(|d| d.to_string().into()),
-            Some(crate::icons::original_icon(L::SquareArrowOutUpRight, px(14.)).text_color(p.text_secondary).into_any_element()),
+            Some(Icon::new(L::SquareArrowOutUpRight).size(px(14.)).text_color(p.text_secondary).into_any_element()),
         ))
         .into_any_element()
 }
@@ -488,7 +488,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
                 .bg(p.hover)
                 .border_1()
                 .border_color(p.border)
-                .child(crate::icons::original_icon(L::Search, px(14.)).flex_shrink_0().text_color(p.text_secondary))
+                .child(Icon::new(L::Search).size(px(14.)).flex_shrink_0().text_color(p.text_secondary))
                 .child(Input::new(&search).appearance(false).cleanable(true)),
         );
     }
@@ -518,7 +518,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
                 })
                 .when(on && lens, |d| d.child(crate::glass::lens_probe(crate::glass::SLOT_SETTINGS, crate::glass::key_of(&i))))
                 .when(!on, |d| d.hover(|s| s.bg(p.hover)))
-                .child(crate::icons::original_icon(icon, px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
+                .child(Icon::new(icon).size(px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
                 .when(!strip, |d| d.child(h_flex().gap_2().items_center().child(crate::i18n::t(label)).when(experimental(pg), |d| d.child(experimental_pill(p)))))
                 .on_click({
                     let search = search.clone();
@@ -587,7 +587,7 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
                                     .children(f.desc.map(|d| div().text_xs().text_color(p.text_secondary).child(d))),
                             )
                             .child(div().flex_shrink_0().text_xs().text_color(p.text_secondary).child(page_label))
-                            .child(crate::icons::original_icon(L::ChevronRight, px(14.)).flex_shrink_0().text_color(p.text_secondary)),
+                            .child(Icon::new(L::ChevronRight).size(px(14.)).flex_shrink_0().text_color(p.text_secondary)),
                     )
                     .into_any_element(),
             );
@@ -971,7 +971,7 @@ fn hidden_drives_card(p: &Palette, s: &Settings) -> AnyElement {
                 .when(off || forced, |d| d.text_color(p.text_secondary))
                 .cursor_pointer()
                 .hover(|d| d.bg(p.pressed))
-                .child(crate::icons::original_icon(if off || forced { L::EyeOff } else { L::Eye }, px(14.)))
+                .child(Icon::new(if off || forced { L::EyeOff } else { L::Eye }).size(px(14.)))
                 .child(format!("{letter}:"))
                 .on_click(move |_, _, cx| settings::update(cx, move |s| set_drive_hidden(s, letter, !off))),
         );
@@ -1006,7 +1006,7 @@ fn hidden_places_card(p: &Palette, s: &Settings) -> AnyElement {
                 .text_color(p.text_secondary)
                 .cursor_pointer()
                 .hover(|d| d.bg(p.pressed))
-                .child(crate::icons::original_icon(L::EyeOff, px(14.)))
+                .child(Icon::new(L::EyeOff).size(px(14.)))
                 .child(name)
                 .on_click(move |_, _, cx| {
                     let key = key.clone();
@@ -2195,7 +2195,7 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                     .items_center()
                     .rounded(theme::RADIUS_SM)
                     .bg(hsla_alpha(0xFCE100, 0.12))
-                    .child(crate::icons::original_icon(L::CircleAlert, px(14.)).text_color(rgb(0xFCE100)))
+                    .child(Icon::new(L::CircleAlert).size(px(14.)).text_color(rgb(0xFCE100)))
                     .child(div().text_xs().text_color(pp.text).child(t!("Büyük klasörlerde disk ve işlemci yükü artabilir; hesap arka planda yapılır, arayüz donmaz.")))
                     .into_any_element(),
             ]
@@ -3357,7 +3357,7 @@ fn index_exclusions(p: &Palette, s: &Settings) -> AnyElement {
                 .pr_4()
                 .gap_3()
                 .items_center()
-                .child(crate::icons::original_icon(L::FolderX, px(14.)).text_color(p.text_secondary))
+                .child(Icon::new(L::FolderX).size(px(14.)).text_color(p.text_secondary))
                 .child(div().flex_1().min_w_0().text_sm().text_ellipsis().overflow_hidden().whitespace_nowrap().child(dir.clone()))
                 .child(
                     div()
@@ -3365,7 +3365,7 @@ fn index_exclusions(p: &Palette, s: &Settings) -> AnyElement {
                         .p_1()
                         .rounded(theme::RADIUS_SM)
                         .hover(|st| st.bg(p.pressed))
-                        .child(crate::icons::original_icon(L::X, px(14.)).text_color(p.text_secondary))
+                        .child(Icon::new(L::X).size(px(14.)).text_color(p.text_secondary))
                         .on_click(move |_, _, cx| {
                             let d = d.clone();
                             settings::update(cx, |s| s.index_excluded.retain(|e| *e != d));

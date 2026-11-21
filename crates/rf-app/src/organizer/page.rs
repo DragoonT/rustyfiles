@@ -1,7 +1,7 @@
 //! Settings -> Düzenleyici: the master switch of the automatic runs, the list of rules.
 
 use gpui_kit::assets::IconName as L;
-use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use rf_core::organize::Rule;
@@ -28,7 +28,7 @@ fn small_button(id: (&'static str, usize), icon: L, tip: &'static str, p: &Palet
         .tab_index(0)
         .hover(|s| s.bg(p.pressed))
         .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip).build(w, cx))
-        .child(crate::icons::original_icon(icon, px(14.)))
+        .child(Icon::new(icon).size(px(14.)))
         .on_click(move |_, window, cx| run(window, cx))
         .into_any_element()
 }
@@ -44,7 +44,7 @@ fn problem_card(p: &Palette, problem: &Problem, blocked: bool) -> AnyElement {
                 .py_3()
                 .gap_4()
                 .items_center()
-                .child(crate::icons::original_icon(L::TriangleAlert, px(18.)).flex_shrink_0().text_color(p.danger))
+                .child(Icon::new(L::TriangleAlert).size(px(18.)).flex_shrink_0().text_color(p.danger))
                 .child(div().flex_1().min_w_0().text_sm().child(text))
                 .when(!blocked, |d| d.child(button("org-problem-ok", p, t!("Tamam"), |_, cx| super::dismiss_problem(cx)))),
         )
@@ -64,7 +64,7 @@ fn rule_card(p: &Palette, r: &Rule, first: bool, last: bool, refusal: Option<&'s
                 .pt_3()
                 .gap_4()
                 .items_start()
-                .child(crate::icons::original_icon(L::FolderCog, px(18.)).flex_shrink_0().mt(px(2.)).text_color(if on { p.text } else { p.text_tertiary }))
+                .child(Icon::new(L::FolderCog).size(px(18.)).flex_shrink_0().mt(px(2.)).text_color(if on { p.text } else { p.text_tertiary }))
                 .child(
                     v_flex()
                         .flex_1()
