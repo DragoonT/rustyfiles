@@ -2157,5 +2157,7 @@
  "b47392d6": "Flikar visar mappens fullständiga sökväg med mindre text i stället för namnet; det som inte får plats klipps av i slutet.",
  "d9cac923": "Dölj alla grupper",
  "c30af95d": "Visa alla grupper",
- "5c26267c": "Dölj / visa alla grupper"
+ "5c26267c": "Dölj / visa alla grupper",
+ "438fff43": "Utforskarfönster som andra program öppnar",
+ "109ffa73": "När ett program (till exempel en nedladdningshanterare) själv startar Utforskaren stängs dess fönster och samma plats öppnas i rustyfiles. Fungerar medan rustyfiles körs."
 }

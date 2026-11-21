@@ -2157,5 +2157,7 @@
  "b47392d6": "Thẻ hiển thị toàn bộ đường dẫn của thư mục bằng chữ nhỏ hơn thay cho tên; phần không vừa sẽ bị cắt ở cuối.",
  "d9cac923": "Thu gọn mọi nhóm",
  "c30af95d": "Mở rộng mọi nhóm",
- "5c26267c": "Thu gọn / mở rộng mọi nhóm"
+ "5c26267c": "Thu gọn / mở rộng mọi nhóm",
+ "438fff43": "Cửa sổ Explorer do chương trình khác mở",
+ "109ffa73": "Khi một chương trình (ví dụ trình quản lý tải xuống) tự mở File Explorer, cửa sổ đó sẽ đóng và cùng vị trí sẽ mở trong rustyfiles. Hoạt động khi rustyfiles đang chạy."
 }

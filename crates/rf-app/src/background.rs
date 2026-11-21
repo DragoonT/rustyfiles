@@ -42,6 +42,22 @@ pub fn side_process() -> bool {
     DIRECTLOOK_PROCESS.load(Ordering::Relaxed) || DOCK_PROCESS.load(Ordering::Relaxed)
 }
 
+/// Settings changed: Explorer windows that other programs open are taken over while the setting is on (issue 37). Only the file
+/// manager's own process watches (not the Dock's, DirectLook's or an Open / Save window's); a window taken over is shown by
+/// starting this program with its place, which a running copy receives.
+pub fn sync_explorer_catch(on: bool) {
+    if side_process() || std::env::args().nth(1).as_deref() == Some("--pick") {
+        return;
+    }
+    rf_win::explorer_catch::set(on, |c| {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Err(e) = std::process::Command::new(exe).args(rf_win::explorer_catch::args_for(&c)).spawn() {
+                log::warn!("explorer catch: {e}");
+            }
+        }
+    });
+}
+
 /// Settings changed: the tray icon is there exactly while background mode is on.
 pub fn sync_tray(on: bool) {
     if side_process() {

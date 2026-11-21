@@ -2157,5 +2157,7 @@
  "b47392d6": "Le schede mostrano il percorso completo della cartella in caratteri più piccoli invece del nome; ciò che non entra viene tagliato alla fine.",
  "d9cac923": "Comprimi tutti i gruppi",
  "c30af95d": "Espandi tutti i gruppi",
- "5c26267c": "Comprimi / espandi tutti i gruppi"
+ "5c26267c": "Comprimi / espandi tutti i gruppi",
+ "438fff43": "Finestre di Esplora risorse aperte da altri programmi",
+ "109ffa73": "Quando un programma (un gestore di download, per esempio) avvia da solo Esplora file, la sua finestra viene chiusa e lo stesso percorso si apre in rustyfiles. Funziona mentre rustyfiles è in esecuzione."
 }

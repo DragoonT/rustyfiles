@@ -2157,5 +2157,7 @@
  "b47392d6": "Välilehdet näyttävät kansion nimen sijaan sen koko polun pienemmällä tekstillä; mikä ei mahdu, katkaistaan lopusta.",
  "d9cac923": "Kutista kaikki ryhmät",
  "c30af95d": "Laajenna kaikki ryhmät",
- "5c26267c": "Kutista / laajenna kaikki ryhmät"
+ "5c26267c": "Kutista / laajenna kaikki ryhmät",
+ "438fff43": "Muiden ohjelmien avaamat Resurssienhallinnan ikkunat",
+ "109ffa73": "Kun ohjelma (esimerkiksi latauksenhallinta) käynnistää Resurssienhallinnan itse, sen ikkuna suljetaan ja sama paikka avataan rustyfilesissa. Toimii, kun rustyfiles on käynnissä."
 }

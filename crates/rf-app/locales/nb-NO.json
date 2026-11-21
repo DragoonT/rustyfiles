@@ -2157,5 +2157,7 @@
  "b47392d6": "Faner viser hele banen til mappen med mindre tekst i stedet for navnet; det som ikke får plass, kuttes på slutten.",
  "d9cac923": "Skjul alle grupper",
  "c30af95d": "Vis alle grupper",
- "5c26267c": "Skjul / vis alle grupper"
+ "5c26267c": "Skjul / vis alle grupper",
+ "438fff43": "Utforsker-vinduer som andre programmer åpner",
+ "109ffa73": "Når et program (for eksempel en nedlastingsbehandler) starter Filutforsker selv, lukkes vinduet og samme sted åpnes i rustyfiles. Virker mens rustyfiles kjører."
 }

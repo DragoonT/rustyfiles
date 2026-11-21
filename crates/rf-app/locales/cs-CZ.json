@@ -2157,5 +2157,7 @@
  "b47392d6": "Karty zobrazují místo názvu celou cestu ke složce menším písmem; co se nevejde, se na konci ořízne.",
  "d9cac923": "Sbalit všechny skupiny",
  "c30af95d": "Rozbalit všechny skupiny",
- "5c26267c": "Sbalit / rozbalit všechny skupiny"
+ "5c26267c": "Sbalit / rozbalit všechny skupiny",
+ "438fff43": "Okna Průzkumníka otevřená jinými programy",
+ "109ffa73": "Když program (například správce stahování) sám spustí Průzkumníka souborů, jeho okno se zavře a stejné místo se otevře v rustyfiles. Funguje, dokud rustyfiles běží."
 }

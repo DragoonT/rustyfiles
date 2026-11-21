@@ -2157,5 +2157,7 @@
  "b47392d6": "Tabs zeigen statt des Ordnernamens den vollständigen Pfad in kleinerer Schrift; was nicht passt, wird am Ende abgeschnitten.",
  "d9cac923": "Alle Gruppen einklappen",
  "c30af95d": "Alle Gruppen ausklappen",
- "5c26267c": "Alle Gruppen ein-/ausklappen"
+ "5c26267c": "Alle Gruppen ein-/ausklappen",
+ "438fff43": "Von anderen Programmen geöffnete Explorer-Fenster",
+ "109ffa73": "Startet ein Programm (etwa ein Download-Manager) den Datei-Explorer selbst, wird dessen Fenster geschlossen und derselbe Ort in rustyfiles geöffnet. Gilt, solange rustyfiles läuft."
 }

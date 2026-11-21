@@ -2157,5 +2157,7 @@
  "b47392d6": "Cilnes mapes nosaukuma vietā rāda pilnu tās ceļu mazākā tekstā; kas neietilpst, tiek nogriezts beigās.",
  "d9cac923": "Sakļaut visas grupas",
  "c30af95d": "Izvērst visas grupas",
- "5c26267c": "Sakļaut / izvērst visas grupas"
+ "5c26267c": "Sakļaut / izvērst visas grupas",
+ "438fff43": "Citu programmu atvērtie Explorer logi",
+ "109ffa73": "Ja programma (piemēram, lejupielāžu pārvaldnieks) pati palaiž failu pārlūku, tā logs tiek aizvērts un tā pati vieta tiek atvērta rustyfiles. Darbojas, kamēr rustyfiles ir palaists."
 }

@@ -13013,5 +13013,17 @@
   "key": "Tüm grupları daralt / genişlet",
   "tr": "Tüm grupları daralt / genişlet",
   "en": "Collapse / expand all groups"
+ },
+ {
+  "id": "438fff43",
+  "key": "Başka programların açtığı Explorer pencereleri",
+  "tr": "Başka programların açtığı Explorer pencereleri",
+  "en": "Explorer windows other programs open"
+ },
+ {
+  "id": "109ffa73",
+  "key": "Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.",
+  "tr": "Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.",
+  "en": "When a program (a download manager, for example) starts File Explorer itself, its window is closed and the same place opens in rustyfiles. Works while rustyfiles is running."
  }
 ]

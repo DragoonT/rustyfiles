@@ -2157,5 +2157,7 @@
  "b47392d6": "Tabbladen tonen het volledige pad van de map in kleinere tekst in plaats van de naam; wat niet past, wordt aan het eind afgekapt.",
  "d9cac923": "Alle groepen samenvouwen",
  "c30af95d": "Alle groepen uitvouwen",
- "5c26267c": "Alle groepen samenvouwen / uitvouwen"
+ "5c26267c": "Alle groepen samenvouwen / uitvouwen",
+ "438fff43": "Verkenner-vensters die andere programma's openen",
+ "109ffa73": "Als een programma (een downloadmanager bijvoorbeeld) zelf Verkenner start, wordt dat venster gesloten en opent dezelfde plek in rustyfiles. Werkt zolang rustyfiles draait."
 }

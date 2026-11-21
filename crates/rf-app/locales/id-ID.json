@@ -2157,5 +2157,7 @@
  "b47392d6": "Tab menampilkan jalur lengkap folder dengan teks lebih kecil, bukan namanya; bagian yang tidak muat dipotong di akhir.",
  "d9cac923": "Ciutkan semua grup",
  "c30af95d": "Bentangkan semua grup",
- "5c26267c": "Ciutkan / bentangkan semua grup"
+ "5c26267c": "Ciutkan / bentangkan semua grup",
+ "438fff43": "Jendela Explorer yang dibuka program lain",
+ "109ffa73": "Saat sebuah program (pengelola unduhan, misalnya) membuka File Explorer sendiri, jendelanya ditutup dan tempat yang sama dibuka di rustyfiles. Berlaku selama rustyfiles berjalan."
 }

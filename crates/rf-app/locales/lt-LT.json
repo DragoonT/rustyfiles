@@ -2157,5 +2157,7 @@
  "b47392d6": "Kortelėse vietoj aplanko pavadinimo rodomas visas jo kelias mažesniu šriftu; kas netelpa, nukerpama pabaigoje.",
  "d9cac923": "Sutraukti visas grupes",
  "c30af95d": "Išskleisti visas grupes",
- "5c26267c": "Sutraukti / išskleisti visas grupes"
+ "5c26267c": "Sutraukti / išskleisti visas grupes",
+ "438fff43": "Kitų programų atidaryti naršyklės langai",
+ "109ffa73": "Kai programa (pvz., atsisiuntimų tvarkytuvė) pati paleidžia failų naršyklę, jos langas uždaromas, o ta pati vieta atidaroma rustyfiles. Veikia, kol rustyfiles paleistas."
 }

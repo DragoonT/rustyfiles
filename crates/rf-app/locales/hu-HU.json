@@ -2157,5 +2157,7 @@
  "b47392d6": "A lapok a mappa neve helyett a teljes elérési utat mutatják kisebb betűvel; ami nem fér ki, a végén levágódik.",
  "d9cac923": "Összes csoport összecsukása",
  "c30af95d": "Összes csoport kibontása",
- "5c26267c": "Összes csoport összecsukása / kibontása"
+ "5c26267c": "Összes csoport összecsukása / kibontása",
+ "438fff43": "Más programok által megnyitott Intéző-ablakok",
+ "109ffa73": "Ha egy program (például egy letöltéskezelő) maga indítja el a Fájlkezelőt, annak ablaka bezárul, és ugyanaz a hely nyílik meg a rustyfilesban. Amíg a rustyfiles fut, működik."
 }

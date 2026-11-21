@@ -2157,5 +2157,7 @@
  "b47392d6": "Filele arată calea completă a folderului cu text mai mic în locul numelui; ce nu încape este tăiat la sfârșit.",
  "d9cac923": "Restrânge toate grupurile",
  "c30af95d": "Extinde toate grupurile",
- "5c26267c": "Restrânge / extinde toate grupurile"
+ "5c26267c": "Restrânge / extinde toate grupurile",
+ "438fff43": "Ferestre Explorer deschise de alte programe",
+ "109ffa73": "Când un program (un manager de descărcări, de exemplu) pornește singur File Explorer, fereastra lui se închide și același loc se deschide în rustyfiles. Funcționează cât timp rustyfiles rulează."
 }

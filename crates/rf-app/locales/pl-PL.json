@@ -2157,5 +2157,7 @@
  "b47392d6": "Karty pokazują zamiast nazwy folderu jego pełną ścieżkę mniejszą czcionką; to, co się nie mieści, jest ucinane na końcu.",
  "d9cac923": "Zwiń wszystkie grupy",
  "c30af95d": "Rozwiń wszystkie grupy",
- "5c26267c": "Zwiń / rozwiń wszystkie grupy"
+ "5c26267c": "Zwiń / rozwiń wszystkie grupy",
+ "438fff43": "Okna Eksploratora otwierane przez inne programy",
+ "109ffa73": "Gdy program (na przykład menedżer pobierania) sam uruchamia Eksplorator plików, jego okno jest zamykane, a to samo miejsce otwiera się w rustyfiles. Działa, gdy rustyfiles jest uruchomiony."
 }

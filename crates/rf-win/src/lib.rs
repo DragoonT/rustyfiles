@@ -47,6 +47,7 @@ pub mod known;
 pub mod libraries;
 pub mod ftp;
 pub mod keys;
+pub mod explorer_catch;
 pub mod look;
 pub mod listing;
 pub mod localized;

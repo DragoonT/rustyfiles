@@ -2157,5 +2157,7 @@
  "b47392d6": "Faner viser mappens fulde sti med mindre tekst i stedet for navnet; det, der ikke kan være, skæres af til sidst.",
  "d9cac923": "Skjul alle grupper",
  "c30af95d": "Udvid alle grupper",
- "5c26267c": "Skjul / udvid alle grupper"
+ "5c26267c": "Skjul / udvid alle grupper",
+ "438fff43": "Stifinder-vinduer, som andre programmer åbner",
+ "109ffa73": "Når et program (f.eks. en downloadmanager) selv starter Stifinder, lukkes vinduet, og samme sted åbnes i rustyfiles. Virker, mens rustyfiles kører."
 }

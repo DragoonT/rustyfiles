@@ -672,6 +672,7 @@ pub fn main() {
                 if !rf_win::default_fm::forwarded_recently(&arg) {
                     rf_win::default_fm::note_forward(&arg);
                     rf_win::handover::trace("main: handed to Explorer, this process ends");
+                    rf_win::explorer_catch::quiet_for(std::time::Duration::from_secs(5));
                     let _ = std::process::Command::new("explorer.exe").arg(&arg).spawn();
                     return;
                 }

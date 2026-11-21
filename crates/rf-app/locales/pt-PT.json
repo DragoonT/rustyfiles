@@ -2157,5 +2157,7 @@
  "b47392d6": "Os separadores mostram o caminho completo da pasta em letra mais pequena em vez do nome; o que não couber é cortado no fim.",
  "d9cac923": "Fechar todos os grupos",
  "c30af95d": "Expandir todos os grupos",
- "5c26267c": "Fechar / expandir todos os grupos"
+ "5c26267c": "Fechar / expandir todos os grupos",
+ "438fff43": "Janelas do Explorador abertas por outros programas",
+ "109ffa73": "Quando um programa (um gestor de transferências, por exemplo) abre o Explorador de Ficheiros por si, a janela é fechada e o mesmo local abre no rustyfiles. Funciona enquanto o rustyfiles está em execução."
 }

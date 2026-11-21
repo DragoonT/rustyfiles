@@ -2157,5 +2157,7 @@
  "b47392d6": "Tab menunjukkan laluan penuh folder dalam teks lebih kecil dan bukan namanya; bahagian yang tidak muat dipotong di hujung.",
  "d9cac923": "Runtuhkan semua kumpulan",
  "c30af95d": "Kembangkan semua kumpulan",
- "5c26267c": "Runtuhkan / kembangkan semua kumpulan"
+ "5c26267c": "Runtuhkan / kembangkan semua kumpulan",
+ "438fff43": "Tetingkap Explorer yang dibuka program lain",
+ "109ffa73": "Apabila program (pengurus muat turun, misalnya) memulakan File Explorer sendiri, tetingkapnya ditutup dan tempat yang sama dibuka dalam rustyfiles. Berfungsi semasa rustyfiles berjalan."
 }

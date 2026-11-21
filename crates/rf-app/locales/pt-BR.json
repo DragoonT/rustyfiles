@@ -2157,5 +2157,7 @@
  "b47392d6": "As abas mostram o caminho completo da pasta em letra menor no lugar do nome; o que não cabe é cortado no final.",
  "d9cac923": "Recolher todos os grupos",
  "c30af95d": "Expandir todos os grupos",
- "5c26267c": "Recolher / expandir todos os grupos"
+ "5c26267c": "Recolher / expandir todos os grupos",
+ "438fff43": "Janelas do Explorador abertas por outros programas",
+ "109ffa73": "Quando um programa (um gerenciador de downloads, por exemplo) abre o Explorador de Arquivos por conta própria, a janela é fechada e o mesmo local abre no rustyfiles. Funciona enquanto o rustyfiles está aberto."
 }

@@ -2157,5 +2157,7 @@
  "b47392d6": "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end.",
  "d9cac923": "Collapse all groups",
  "c30af95d": "Expand all groups",
- "5c26267c": "Collapse / expand all groups"
+ "5c26267c": "Collapse / expand all groups",
+ "438fff43": "Explorer windows other programs open",
+ "109ffa73": "When a program (a download manager, for example) starts File Explorer itself, its window is closed and the same place opens in rustyfiles. Works while rustyfiles is running."
 }

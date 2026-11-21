@@ -2922,6 +2922,13 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
                 window.refresh();
             }),
         ),
+        card(
+            p,
+            L::ExternalLink,
+            t!("Başka programların açtığı Explorer pencereleri"),
+            Some(t!("Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.")),
+            sw("catch-explorer", p, s.catch_explorer_windows, |s, v| s.catch_explorer_windows = v),
+        ),
     ];
     out.extend(archives);
     // other apps' Open / Save / folder dialogs show rustyfiles (needs rustyfiles_dialog.dll)
@@ -3150,6 +3157,7 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
         link_row(p, "open-log", L::FolderOpen, t!("Kayıt ve ayar klasörünü aç"), settings::app_dir().map(|d| d.display().to_string()).as_deref(), |_, _| {
             if let Some(d) = settings::app_dir() {
                 std::thread::spawn(move || {
+                    rf_win::explorer_catch::quiet_for(std::time::Duration::from_secs(5));
                     let _ = std::process::Command::new("explorer.exe").arg(d).spawn();
                 });
             }

@@ -2157,5 +2157,7 @@
  "b47392d6": "Skedat shfaqin shtegun e plotë të dosjes me shkrim më të vogël në vend të emrit; ajo që nuk nxë pritet në fund.",
  "d9cac923": "Palos të gjitha grupet",
  "c30af95d": "Zgjero të gjitha grupet",
- "5c26267c": "Palos / zgjero të gjitha grupet"
+ "5c26267c": "Palos / zgjero të gjitha grupet",
+ "438fff43": "Dritaret e Explorer që hapin programe të tjera",
+ "109ffa73": "Kur një program (p.sh. një menaxher shkarkimesh) nis vetë File Explorer, dritarja e tij mbyllet dhe i njëjti vend hapet në rustyfiles. Vepron sa kohë që rustyfiles është në punë."
 }
