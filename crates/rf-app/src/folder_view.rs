@@ -476,6 +476,10 @@ pub struct FolderView {
     grid_cols: usize,
     /// Rows per column of the List filled column by column (issue 170), as drawn last; 0 when the folder is not shown so.
     list_rows: usize,
+    /// The List filled column by column: each column's left edge and width as drawn last (content coordinates).
+    list_cols: Vec<(f32, f32)>,
+    /// The column widths measured from the names, and what they were measured for (see `list_column_widths`).
+    list_widths: Option<(u64, Vec<f32>)>,
     /// Index into GRID_SIZES.
     grid_size: u8,
     /// Index into ROW_SIZES (Details row height), the "Size" slider in Details.
@@ -704,6 +708,8 @@ impl FolderView {
             },
             grid_cols: 1,
             list_rows: 0,
+            list_cols: Vec::new(),
+            list_widths: None,
             grid_size: DEFAULT_GRID_SIZE,
             row_size: DEFAULT_ROW_SIZE,
             col_drag: None,
@@ -2709,8 +2715,7 @@ impl FolderView {
         let count = self.visible.len();
         let base = self.scroll.0.borrow().base_handle.clone();
         let view = base.bounds();
-        let (row_h, tile_w) = (self.grid_row_h(), self.grid_tile_w());
-        let cw = f32::from(tile_w + GRID_GAP);
+        let row_h = self.grid_row_h();
         let view_h = if view.size.height > px(1.) { f32::from(view.size.height) } else { 480. };
         let rows = (((view_h - LIST_PAD_TOP * 2.) / f32::from(row_h)).floor() as usize).max(1);
         self.list_rows = rows;
@@ -2718,25 +2723,38 @@ impl FolderView {
         if rows != before || view.size.height <= px(1.) {
             window.request_animation_frame();
         }
-        let cols = count.div_ceil(rows);
+        let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
+        let widths = self.list_column_widths(rows, show_ext, window);
+        let mut x = LIST_PAD_LEFT;
+        self.list_cols = widths
+            .iter()
+            .map(|&w| {
+                let c = (x, w);
+                x += w + f32::from(GRID_GAP);
+                c
+            })
+            .collect();
+        let total = x + LIST_PAD_LEFT;
         let off = -f32::from(base.offset().x);
         let width = if view.size.width > px(1.) { f32::from(view.size.width) } else { f32::from(self.content_width) };
-        let first = (((off - LIST_PAD_LEFT) / cw).floor().max(0.) as usize).min(cols);
-        let last = (((off + width) / cw).ceil() as usize + 1).min(cols);
-        let g = GridCellCtx {
+        let first = self.list_cols.partition_point(|&(x, w)| x + w < off);
+        let last = self.list_cols.partition_point(|&(x, _)| x <= off + width);
+        let mut g = GridCellCtx {
             hover_select: cx.global::<crate::settings::Settings>().select_on_hover,
             p: Palette::for_window(window),
-            tile_w,
+            tile_w: px(LIST_COL_MIN),
             row_h,
             thumb_px: self.grid_thumb_px(),
             style: GridStyle::List,
             visual_px: px(20.),
-            show_ext: cx.global::<crate::settings::Settings>().show_extensions,
+            show_ext,
             renamed: self.renamed.clone(),
         };
         let mut columns = Vec::with_capacity(last.saturating_sub(first));
         for c in first..last {
-            let mut col = v_flex().absolute().top(px(LIST_PAD_TOP)).left(px(LIST_PAD_LEFT + c as f32 * cw)).w(tile_w);
+            let (cx0, cw) = self.list_cols[c];
+            g.tile_w = px(cw);
+            let mut col = v_flex().absolute().top(px(LIST_PAD_TOP)).left(px(cx0)).w(px(cw));
             for vi in c * rows..((c + 1) * rows).min(count) {
                 if let Some(cell) = self.grid_cell(vi, None, &g, window, cx) {
                     col = col.child(div().h(row_h).child(cell));
@@ -2764,8 +2782,53 @@ impl FolderView {
                 cx.stop_propagation();
                 cx.notify();
             }))
-            .child(div().relative().h_full().w(px(LIST_PAD_LEFT * 2. + cols as f32 * cw)).children(columns))
+            .child(div().relative().h_full().w(px(total)).children(columns))
             .into_any_element()
+    }
+
+    /// The width of each column of the List filled column by column: as wide as its longest name (with the icon and the padding),
+    /// within limits, as Explorer's List is (issue 170: "each column could size to its contents"). A folder of more than
+    /// `LIST_MEASURE_MOST` items has columns of one width: measuring every name would hold the window up. The widths are kept for
+    /// the same names in the same order, rows per column, extension setting and text size.
+    fn list_column_widths(&mut self, rows: usize, show_ext: bool, window: &mut Window) -> Vec<f32> {
+        let count = self.visible.len();
+        let cols = count.div_ceil(rows.max(1));
+        if count > LIST_MEASURE_MOST {
+            return vec![f32::from(self.grid_tile_w()); cols];
+        }
+        let font_px = rems(0.875).to_pixels(window.rem_size());
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (self.entries_gen, rows, show_ext, f32::from(font_px).to_bits(), &self.visible).hash(&mut h);
+            self.renamed.as_ref().map(|(a, b)| (a.to_string(), b.to_string())).hash(&mut h);
+            h.finish()
+        };
+        if let Some((k, w)) = &self.list_widths
+            && *k == key
+        {
+            return w.clone();
+        }
+        let style = window.text_style();
+        let mut widths = Vec::with_capacity(cols);
+        for c in 0..cols {
+            let mut most = 0f32;
+            for vi in c * rows..((c + 1) * rows).min(count) {
+                let Some(&ei) = self.visible.get(vi) else { break };
+                let name = row_name(&self.entries[ei as usize], show_ext, self.renamed.as_ref());
+                let w = window.text_system().layout_line(&name, font_px, &[style.to_run(name.len())], None).width;
+                most = most.max(f32::from(w));
+            }
+            // icon 20, the gaps and padding around it and the name, and a little air
+            widths.push((most + LIST_CELL_CHROME).clamp(LIST_COL_MIN, LIST_COL_MAX));
+        }
+        self.list_widths = Some((key, widths.clone()));
+        widths
+    }
+
+    /// The column of the List filled column by column under content x `x` (the nearest one).
+    fn list_col_at(&self, x: f32) -> usize {
+        self.list_cols.partition_point(|&(cx0, w)| cx0 + w < x).min(self.list_cols.len().saturating_sub(1))
     }
 
     /// Scrolls the List filled column by column so that the column of the visible index `vi` is in view.
@@ -2773,9 +2836,8 @@ impl FolderView {
         let rows = self.list_rows.max(1);
         let base = self.scroll.0.borrow().base_handle.clone();
         let width = f32::from(base.bounds().size.width);
-        let cw = f32::from(self.grid_tile_w() + GRID_GAP);
-        let left = LIST_PAD_LEFT + (vi / rows) as f32 * cw;
-        let right = left + cw + LIST_PAD_LEFT;
+        let Some(&(left, cw)) = self.list_cols.get(vi / rows) else { return };
+        let right = left + cw + f32::from(GRID_GAP) + LIST_PAD_LEFT;
         let mut o = base.offset();
         let off = -f32::from(o.x);
         if left - LIST_PAD_LEFT < off {
@@ -3330,8 +3392,7 @@ impl FolderView {
                         if y1 >= pt && x1 >= pl {
                             let r0 = ((y0 - pt).max(0.0) / rh) as usize;
                             let r1 = (((y1 - pt) / rh) as usize).min(rows - 1);
-                            let c0 = ((x0 - pl).max(0.0) / cw) as usize;
-                            let c1 = ((x1 - pl) / cw) as usize;
+                            let (c0, c1) = (self.list_col_at(x0), self.list_col_at(x1));
                             for c in c0..=c1 {
                                 for r in r0..=r1.max(r0) {
                                     if let Some(&ei) = self.visible.get(c * rows + r) {
@@ -5412,6 +5473,12 @@ const GRID_GAP: Pixels = px(4.);
 /// The List filled column by column: room above its rows and left of its first column.
 const LIST_PAD_TOP: f32 = 8.;
 const LIST_PAD_LEFT: f32 = 6.;
+/// The List filled column by column: a column's narrowest and widest, what a cell adds to its name (the icon, the gaps and the
+/// padding), and the most items whose names are measured for the columns' widths.
+const LIST_COL_MIN: f32 = 140.;
+const LIST_COL_MAX: f32 = 460.;
+const LIST_CELL_CHROME: f32 = 8. + 20. + 8. + 8. + 12.;
+const LIST_MEASURE_MOST: usize = 4000;
 /// Grid sizes (Ctrl+= / Ctrl+-): tile width, row height, thumbnail pixels.
 const GRID_SIZES: [(f32, f32, u32); 5] = [(76., 94., 64), (92., 112., 80), (124., 150., 128), (172., 204., 192), (236., 276., 272)];
 const DEFAULT_GRID_SIZE: u8 = 2;
