@@ -2171,4 +2171,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Simge seçin", "Choose an icon"),
     ("Simge dosyaları", "Icon files"),
     ("Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.", "The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size."),
+    ("Yerel (varsayılan)", "Native (default)"),
+    ("Varyasyon", "Variant"),
+    ("İkon teması", "Icon theme"),
+    ("Dosya ve klasör simgeleri. Sistem simgelerini kullanır; Freedesktop paketlerini listeden seçin ya da klasörü açın. Paketin varyasyonları varsa ayrıca seçilebilir.", "File and folder icons. Uses system icons; pick a Freedesktop pack from the list or open the pack folder. Variants appear below when the pack has them."),
 ];

@@ -1,7 +1,7 @@
 //! Shared cache of shell icons and thumbnails. Misses are queued to rf-win's low-priority
 //! worker pool; rows render a symbol fallback until the real image arrives.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -16,6 +16,24 @@ enum Slot {
     Pending,
     Ready(Arc<RenderImage>),
     Failed,
+}
+
+/// Result of a freedesktop-pack lookup. `Native` hands the row back to the shell icon path;
+/// `Pending` repaints once a worker has decoded the artwork.
+#[derive(Clone)]
+pub enum PackPicture {
+    Ready(Arc<RenderImage>),
+    Pending,
+    Native,
+}
+
+/// Pack and appearance changes invalidate every pending/ready pack slot. Reuse the existing "clear cache"
+/// path: rare, and it also drops shell pictures that may have been drawn with the old icon theme.
+pub fn clear_for_pack_change(cx: &mut App) {
+    let images = crate::look::LookManager::images(cx);
+    let _ = images.update(cx, |c, cx| {
+        c.clear_all(cx);
+    });
 }
 
 pub struct ImageCache {
@@ -67,6 +85,10 @@ fn file_picture_key(pane: bool, dir: &Path, name: &str, modified_ms: &impl Hash,
 
 /// Changes when the icons of customised folders are to be asked for again (`refresh_folder_icons`).
 static FOLDER_ICON_GEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+type FolderCheckKey = (PathBuf, i64, u32, u32);
+static FOLDER_CHECK_DONE: OnceLock<Mutex<HashMap<FolderCheckKey, bool>>> = OnceLock::new();
+static FOLDER_CHECK_BUSY: OnceLock<Mutex<HashSet<FolderCheckKey>>> = OnceLock::new();
 
 /// The icons of customised folders are asked for again: a folder's icon was changed in our Properties, or the user refreshed (F5).
 ///
@@ -286,13 +308,19 @@ impl ImageCache {
 
     /// Icon at an explicit pixel size (e.g. Grid/Cards/Desktop tiles when content thumbnails are off).
     pub fn icon_sized(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
-        // A user's theme-folder picture wins over a freedesktop pack (issues 93 and 94).
+        match self.themed_picture_async(dir, e, false, size, cx) {
+            PackPicture::Ready(icon) => return Some(icon),
+            // A pack owns this row: wait for the worker instead of showing a shell picture first.
+            PackPicture::Pending => return None,
+            PackPicture::Native => {}
+        }
+        self.native_icon(dir, e, size, cx)
+    }
+
+    /// Shell (or theme-folder) icon, without any freedesktop-pack work.
+    fn native_icon(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         if let Some(f) = crate::themes::icon_file(e.is_dir(), &e.ext, shell_own_picture(e)) {
             return self.theme_icon(f, size, cx);
-        }
-        let pack = crate::settings::icon_theme_pack();
-        if let Some(icon) = themed_picture(dir, e, crate::settings::icon_theme(), &pack, false, size) {
-            return Some(icon);
         }
         let unique = shell_own_picture(e);
         let key = if unique && e.is_dir() {
@@ -314,7 +342,145 @@ impl ImageCache {
         r
     }
 
-    /// A theme folder's picture (`crate::themes`) at `px`. Few (one per kind of item): kept for good.
+    /// Resolve and decode a pack picture off the UI thread. `key` must identify the exact request
+    /// (pack, icon names/size), so a pending row waits for its own worker and repaints when it lands.
+    pub fn pack_picture(
+        &mut self,
+        key: u64,
+        work: impl FnOnce() -> PackPicture + Send + 'static,
+        cx: &mut Context<Self>,
+    ) -> PackPicture {
+        match self.map.get(&key) {
+            Some(Slot::Ready(im)) => return PackPicture::Ready(im.clone()),
+            Some(Slot::Pending) => return PackPicture::Pending,
+            Some(Slot::Failed) => return PackPicture::Native,
+            None => {}
+        }
+        self.map.insert(key, Slot::Pending);
+        let task = cx.background_spawn(async move { work() });
+        cx.spawn(async move |this, cx| {
+            let outcome = task.await;
+            let _ = this.update(cx, |c, cx| {
+                c.map.insert(
+                    key,
+                    match outcome {
+                        PackPicture::Ready(im) => Slot::Ready(im),
+                        PackPicture::Native | PackPicture::Pending => Slot::Failed,
+                    },
+                );
+                cx.notify();
+            });
+        })
+        .detach();
+        PackPicture::Pending
+    }
+
+    /// `desktop.ini` is only read on a worker. Until it lands, prefer the pack: a real custom icon flips the row back
+    /// on the redraw. The generation is part of the key, so F5/Properties re-checks.
+    fn folder_check_async(&mut self, path: PathBuf, modified_ms: i64, attrs: u32, cx: &mut Context<Self>) -> bool {
+        if !folder_has_own_icon(attrs) {
+            return false;
+        }
+        let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
+        let key: FolderCheckKey = (path.clone(), modified_ms, attrs, generation);
+        let done = FOLDER_CHECK_DONE.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Some(found) = done.lock().unwrap().get(&key) {
+            return *found;
+        }
+        let busy = FOLDER_CHECK_BUSY.get_or_init(|| Mutex::new(HashSet::new()));
+        if busy.lock().unwrap().insert(key.clone()) {
+            let task = cx.background_spawn(async move { folder_path_keeps_shell_icon(&path, modified_ms, attrs) });
+            let busy_key = key.clone();
+            cx.spawn(async move |this, cx| {
+                let found = task.await;
+                let _ = this.update(cx, |_, cx| {
+                    FOLDER_CHECK_DONE.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap().insert(key, found);
+                    FOLDER_CHECK_BUSY.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap().remove(&busy_key);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        false
+    }
+
+    /// Queue one pack lookup. Names and pack are moved to the worker; only a hashable key and an atomic
+    /// appearance flag are built here.
+    pub fn pack_picture_for_names(&mut self, pack: &str, names: &[&'static str], px: u32, cx: &mut Context<Self>) -> PackPicture {
+        if names.is_empty() {
+            return PackPicture::Native;
+        }
+        let dark = crate::settings::effective_dark();
+        let joined = names.join("\0");
+        let key = key_of(&[&"pack", &pack, &dark, &joined, &px]);
+        let pack = pack.to_string();
+        let names: Vec<String> = names.iter().map(|n| (*n).to_string()).collect();
+        self.pack_picture(key, move || {
+            let names: Vec<&str> = names.iter().map(String::as_str).collect();
+            match crate::icon_theme::image_for_names(&pack, &names, px) {
+                Some(icon) => PackPicture::Ready(icon),
+                None => PackPicture::Native,
+            }
+        }, cx)
+    }
+
+    /// Pack artwork for an entry, or `Native` when the shell owns it. Nothing reads a pack file or `desktop.ini` here.
+    fn themed_picture_async(&mut self, dir: &Path, e: &Entry, skip_thumbnail_kinds: bool, px: u32, cx: &mut Context<Self>) -> PackPicture {
+        let pack = crate::settings::icon_theme_pack();
+        if !matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop) || pack.is_empty() {
+            return PackPicture::Native;
+        }
+        if skip_thumbnail_kinds && crate::icons::has_thumbnail(e) {
+            return PackPicture::Native;
+        }
+        let path = dir.join(&*e.name);
+        let keeps_shell = if e.is_dir() {
+            self.folder_check_async(path.clone(), e.modified_ms, e.attrs, cx)
+        } else {
+            has_unique_icon(&e.ext)
+        };
+        if keeps_shell {
+            return PackPicture::Native;
+        }
+        let names: Vec<&'static str> = if e.is_dir() {
+            let mut names = crate::icon_theme::special_folder_names(&path).to_vec();
+            names.extend_from_slice(crate::icon_theme::FOLDER_NAMES);
+            names
+        } else {
+            crate::icon_theme::image_names(crate::icons::category(e), &e.ext)
+        };
+        self.pack_picture_for_names(&pack, &names, px, cx)
+    }
+
+    /// Same lookup for callers that hold a path, not an `Entry` (Home, the sidebar, the tab strip).
+    /// On `Native` they get the shell's own picture instead of a Lucide fallback.
+    pub fn themed_or_native_picture(
+        &mut self,
+        dir: &Path,
+        e: &Entry,
+        names: &[&'static str],
+        px: u32,
+        cx: &mut Context<Self>,
+    ) -> PackPicture {
+        let pack = crate::settings::icon_theme_pack();
+        if names.is_empty() || !matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop) || pack.is_empty() {
+            return self.native_icon(dir, e, px, cx).map_or(PackPicture::Native, PackPicture::Ready);
+        }
+        let path = dir.join(&*e.name);
+        let keeps_shell = if e.is_dir() {
+            self.folder_check_async(path, e.modified_ms, e.attrs, cx)
+        } else {
+            has_unique_icon(&e.ext)
+        };
+        if keeps_shell {
+            return self.native_icon(dir, e, px, cx).map_or(PackPicture::Native, PackPicture::Ready);
+        }
+        match self.pack_picture_for_names(&pack, names, px, cx) {
+            PackPicture::Native => self.native_icon(dir, e, px, cx).map_or(PackPicture::Native, PackPicture::Ready),
+            other => other,
+        }
+    }
+
     fn theme_icon(&mut self, file: std::path::PathBuf, px: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         let key = key_of(&[&"theme", &file, &px]);
         match self.map.get(&key) {
@@ -408,9 +574,10 @@ impl ImageCache {
         }
         // When a freedesktop pack is active, folders and non-thumbnail files take the pack's artwork at `size`
         // unless the user gave a folder its own custom `desktop.ini` icon; real content thumbnails still win.
-        let pack = crate::settings::icon_theme_pack();
-        if let Some(icon) = themed_picture(dir, e, crate::settings::icon_theme(), &pack, true, size) {
-            return Some(icon);
+        match self.themed_picture_async(dir, e, true, size, cx) {
+            PackPicture::Ready(icon) => return Some(icon),
+            PackPicture::Pending => return None,
+            PackPicture::Native => {}
         }
         // In native mode (or when the pack has no folder icon), a plain folder at >= 64px shows Explorer's folder preview.
         let own = shell_own_picture(e);
@@ -521,6 +688,7 @@ fn folder_icon_is_real(info: &rf_win::folder_custom::FolderIcon, folder: &Path) 
 
 /// The mark alone is not enough: `C:\Users` and `Program Files (x86)` are READONLY but have no custom picture.
 /// `desktop.ini` is parsed once per folder state; the refresh generation (F5/Properties) invalidates it.
+#[cfg(test)]
 pub(crate) fn folder_keeps_shell_icon(dir: &Path, e: &Entry) -> bool {
     if !folder_has_own_icon(e.attrs) {
         return false;
@@ -544,45 +712,10 @@ pub(crate) fn folder_path_keeps_shell_icon(path: &Path, modified_ms: i64, attrs:
     found
 }
 
-/// Cached custom-icon check for callers (Home, sidebar pins) that only hold a folder `Path` and no `Entry`.
-pub(crate) fn pinned_folder_keeps_shell_icon(path: &Path) -> bool {
-    let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
-    static PIN_CACHE: OnceLock<Mutex<HashMap<(PathBuf, u32), bool>>> = OnceLock::new();
-    let cache = PIN_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let key = (path.to_path_buf(), generation);
-    if let Some(hit) = cache.lock().unwrap().get(&key) {
-        return *hit;
-    }
-    let found = rf_win::folder_custom::local_custom_attrs(path).is_some_and(|attrs| folder_path_keeps_shell_icon(path, 0, attrs));
-    cache.lock().unwrap().insert(key, found);
-    found
-}
-
-/// Pack picture for an entry, or `None` when the shell (or a content thumbnail) owns it.
-/// `skip_thumbnail_kinds` is set on the thumbnail path: there an image's own preview must win; with thumbnails off the pack still
-/// supplies the file-kind picture.
-fn themed_picture(dir: &Path, e: &Entry, pref: crate::settings::IconThemePref, pack: &str, skip_thumbnail_kinds: bool, px: u32) -> Option<Arc<RenderImage>> {
-    if !matches!(pref, crate::settings::IconThemePref::Freedesktop) || pack.is_empty() {
-        return None;
-    }
-    // A pack owns system folders too; only a real user-chosen `desktop.ini` icon wins. Programs and shortcuts keep their shell picture.
-    let keeps_shell = if e.is_dir() { folder_keeps_shell_icon(dir, e) } else { has_unique_icon(&e.ext) };
-    if keeps_shell || (skip_thumbnail_kinds && crate::icons::has_thumbnail(e)) {
-        return None;
-    }
-    let themed = if e.is_dir() {
-        let names = crate::icon_theme::special_folder_names(&dir.join(&*e.name));
-        (!names.is_empty()).then(|| crate::icon_theme::image_for_names(pack, names, px)).flatten()
-    } else {
-        None
-    };
-    themed.or_else(|| crate::icon_theme::image(pref, pack, crate::icons::category(e), &e.ext, px))
-}
-
 #[cfg(test)]
 mod tests {
     // (not `super::*`: the toolkit's glob import brings a `test` attribute of its own that shadows the standard one)
-    use super::{cost, file_picture_key, folder_icon_is_real, folder_keeps_shell_icon, forget_pending, refresh_folder_icons, shell_own_picture, themed_picture};
+    use super::{cost, file_picture_key, folder_icon_is_real, folder_keeps_shell_icon, forget_pending, refresh_folder_icons, shell_own_picture};
     use crate::settings::IconThemePref;
 
     /// Native mode keeps per-folder keys for any READONLY/SYSTEM folder so `Music`, `Videos` and custom folders
@@ -642,8 +775,8 @@ mod tests {
         let pic = Entry::new("a.jpg", EntryKind::File, 1, 0, 0, 0x21);
         let legacy = IconThemePref::Legacy;
         let dir = Path::new(r"C:\");
-        assert!(themed_picture(dir, &doc, legacy, "", true, 16).is_none());
-        assert!(themed_picture(dir, &pic, legacy, "", false, 16).is_none());
+        assert!(crate::icon_theme::image(legacy, "", crate::icons::category(&doc), &doc.ext, 16).is_none());
+        assert!(crate::icon_theme::image(legacy, "", crate::icons::category(&pic), &pic.ext, 16).is_none());
     }
 
     /// READONLY alone means "localized name" on `C:\Users`; only a user-chosen icon must keep the shell picture.

@@ -862,6 +862,10 @@ impl Workspace {
         // The system's light / dark switch reaches the window as an event only; nothing else redraws it. The palette and the glass's tint
         // (`set_dark`) are decided in `render`, so a window left alone would keep the old theme until the next click.
         cx.observe_window_appearance(window, |_: &mut Self, window, cx| {
+            let dark = matches!(window.appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark);
+            crate::settings::system_appearance_changed(dark);
+            crate::icon_theme::refresh_packs();
+            crate::image_cache::clear_for_pack_change(cx);
             window.refresh();
             cx.notify();
         })
@@ -3664,31 +3668,34 @@ impl Workspace {
         let req_px = crate::image_cache::ICON_PX;
         let themed = if !matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop) {
             None
-        } else {
-            let pack = crate::settings::icon_theme_pack();
-            if theme_names == crate::icon_theme::FOLDER_NAMES
-                && let Some(path) = target.path()
-            {
-                if crate::image_cache::pinned_folder_keeps_shell_icon(path) {
-                    path.parent()
-                        .zip(path.file_name())
-                        .and_then(|(dir, name)| {
-                            let e = rf_core::Entry::new(&name.to_string_lossy(), rf_core::EntryKind::Dir, 0, 0, 0, 0x10 | 0x1);
-                            self.images.update(cx, |c, cx| c.icon(dir, &e, cx))
-                        })
-                } else {
-                    let special = crate::icon_theme::special_folder_names(path);
-                    let named = (!special.is_empty()).then(|| crate::icon_theme::image_for_names(&pack, special, req_px)).flatten();
-                    named.or_else(|| crate::icon_theme::image_for_names(&pack, crate::icon_theme::FOLDER_NAMES, req_px))
-                }
+        } else if let Some(path) = target.path() {
+            let dir = path.parent().unwrap_or_else(|| std::path::Path::new(""));
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let folder = theme_names == crate::icon_theme::FOLDER_NAMES;
+            let kind = if folder { rf_core::EntryKind::Dir } else { rf_core::EntryKind::File };
+            let e = rf_core::Entry::new(&name, kind, 0, 0, 0, if folder { 0x10 | 0x1 } else { 0x20 });
+            let mut names: Vec<&'static str> = if folder {
+                crate::icon_theme::special_folder_names(path).to_vec()
+            } else if theme_names.is_empty() {
+                crate::icon_theme::special_folder_names(path).to_vec()
             } else {
-                let names = if !theme_names.is_empty() {
-                    theme_names
-                } else {
-                    target.path().map(crate::icon_theme::special_folder_names).unwrap_or_default()
-                };
-                (!names.is_empty()).then(|| crate::icon_theme::image_for_names(&pack, names, req_px)).flatten()
+                theme_names.to_vec()
+            };
+            if folder {
+                names.extend_from_slice(crate::icon_theme::FOLDER_NAMES);
             }
+            match self.images.update(cx, |c, cx| c.themed_or_native_picture(dir, &e, &names, req_px, cx)) {
+                crate::image_cache::PackPicture::Ready(im) => Some(im),
+                _ => None,
+            }
+        } else if !theme_names.is_empty() {
+            let pack = crate::settings::icon_theme_pack();
+            match self.images.update(cx, |c, cx| c.pack_picture_for_names(&pack, theme_names, req_px, cx)) {
+                crate::image_cache::PackPicture::Ready(im) => Some(im),
+                _ => None,
+            }
+        } else {
+            None
         };
         // Over glass the selected row is a lens the engine draws behind the scene: no fill and no accent bar, but a probe that reports
         // the row's place on every paint (a scroll or a resize moves the lens with it). Two rows can be "selected" at once (a folder

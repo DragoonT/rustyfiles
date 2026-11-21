@@ -13080,33 +13080,27 @@
   "tr": "Sonraki masaüstü arka planı",
   "en": "Next desktop background"
   },
-  {
-  "id": "fcfe24ed",
-  "key": "en:default",
-  "tr": "varsayılan",
-  "en": "default"
- },
  {
-  "id": "09dd63bf",
-  "key": "en:Native (default)",
-  "tr": "Native (default)",
+  "id": "2cedf68f",
+  "key": "Yerel (varsayılan)",
+  "tr": "Yerel (varsayılan)",
   "en": "Native (default)"
  },
  {
-  "id": "e148a281",
-  "key": "en:Variant",
+  "id": "b9676345",
+  "key": "Varyasyon",
   "tr": "Varyasyon",
   "en": "Variant"
  },
  {
-  "id": "9f44afbc",
-  "key": "en:Icon theme",
+  "id": "0e00912e",
+  "key": "İkon teması",
   "tr": "İkon teması",
   "en": "Icon theme"
  },
  {
-  "id": "95cd58e6",
-  "key": "en:File and folder icons. Uses system icons; pick a Freedesktop pack from the list or open the pack folder. Variants appear below when the pack has them.",
+  "id": "84511fe8",
+  "key": "Dosya ve klasör simgeleri. Sistem simgelerini kullanır; Freedesktop paketlerini listeden seçin ya da klasörü açın. Paketin varyasyonları varsa ayrıca seçilebilir.",
   "tr": "Dosya ve klasör simgeleri. Sistem simgelerini kullanır; Freedesktop paketlerini listeden seçin ya da klasörü açın. Paketin varyasyonları varsa ayrıca seçilebilir.",
   "en": "File and folder icons. Uses system icons; pick a Freedesktop pack from the list or open the pack folder. Variants appear below when the pack has them."
   }

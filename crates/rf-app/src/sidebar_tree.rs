@@ -705,34 +705,27 @@ impl SidebarTree {
         let cursor = info.cursor && focused;
         let (expanded, can_expand, root, hidden, slow) = (info.expanded, info.can_expand, info.root, info.hidden, info.slow);
         let freedesktop = matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop);
-        // Native mode asks the shell for any READONLY/SYSTEM folder (`Music`, `Videos`, custom icons). With a pack active,
-        // only a real user-chosen `desktop.ini` icon beats the pack, re-evaluated across F5/Properties via `FOLDER_ICON_GEN`.
-        let wants_shell_icon = info.own_icon
-            && root.is_none()
-            && (!freedesktop || crate::image_cache::folder_path_keeps_shell_icon(info.path, 0, 0x10 | 0x1));
-        let own_icon = wants_shell_icon
-            .then(|| {
-                let (dir, name) = (info.path.parent()?.to_path_buf(), info.path.file_name()?.to_string_lossy().into_owned());
-                let e = rf_core::Entry::new(&name, rf_core::EntryKind::Dir, 0, 0, 0, 0x10 | 0x1);
-                self.images.update(cx, |c, cx| c.icon(&dir, &e, cx))
-            })
-            .flatten();
-        // A pack replaces the Lucide glyph on every row, root places included. A custom `desktop.ini` folder keeps its own picture.
-        let pack = crate::settings::icon_theme_pack();
         let req_px = crate::image_cache::ICON_PX;
-        let themed_icon = if wants_shell_icon || !freedesktop {
-            None
-        } else {
-            match root {
-                Some(kind) => crate::icon_theme::image_for_names(&pack, root_icon_names(kind), req_px),
-                None => {
-                    let names = crate::icon_theme::special_folder_names(info.path);
-                    let special = (!names.is_empty()).then(|| crate::icon_theme::image_for_names(&pack, names, req_px)).flatten();
-                    special.or_else(|| crate::icon_theme::image_for_names(&pack, crate::icon_theme::FOLDER_NAMES, req_px))
-                }
+        let (dir, name) = (info.path.parent().unwrap_or_else(|| std::path::Path::new("")), info.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+        let e = rf_core::Entry::new(&name, rf_core::EntryKind::Dir, 0, 0, 0, 0x10 | 0x1);
+        // Pack lookup (including `desktop.ini`) runs on a worker. The shell call stays the native path when no pack is active.
+        let folder_picture = if freedesktop {
+            let mut names: Vec<&'static str> = match root {
+                Some(kind) => root_icon_names(kind).to_vec(),
+                None => crate::icon_theme::special_folder_names(info.path).to_vec(),
+            };
+            if root.is_none() {
+                names.extend_from_slice(crate::icon_theme::FOLDER_NAMES);
             }
+            match self.images.update(cx, |c, cx| c.themed_or_native_picture(dir, &e, &names, req_px, cx)) {
+                crate::image_cache::PackPicture::Ready(im) => Some(im),
+                _ => None,
+            }
+        } else if info.own_icon && root.is_none() {
+            self.images.update(cx, |c, cx| c.icon(dir, &e, cx))
+        } else {
+            None
         };
-        let folder_picture = themed_icon.or(own_icon);
         let tag_dot = info.path.parent().and_then(|_| crate::tags::first_color(info.path, cx));
         let root_drive_icon = (cx.global::<crate::settings::Settings>().windows_file_explorer_theme
             && matches!(root, Some(RootKind::Fixed | RootKind::Removable | RootKind::Network | RootKind::Optical)))

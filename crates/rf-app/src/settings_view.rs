@@ -300,17 +300,19 @@ pub(crate) fn dropdown<T: Copy + PartialEq + 'static>(id: &'static str, p: &Pale
 fn icon_pack_dropdown(p: &Palette) -> AnyElement {
     let current = settings::icon_theme_pack();
     let label: SharedString = if current.is_empty() {
-        crate::i18n::tx("Native (default)", "Native (default)").into()
+        t!("Yerel (varsayılan)").into()
     } else {
         current.clone().into()
     };
     select_box("icon-theme-pack", p, label, move |_| {
-        let none_label: SharedString = crate::i18n::tx("Native (default)", "Native (default)").into();
+        crate::icon_theme::refresh_packs();
+        let none_label: SharedString = t!("Yerel (varsayılan)").into();
         let mut out = vec![Choice::new(none_label, current.is_empty(), |_, cx| {
             settings::update(cx, |s| {
                 s.icon_theme = IconThemePref::Windows;
                 s.icon_theme_pack.clear();
-            })
+            });
+            crate::image_cache::clear_for_pack_change(cx);
         })];
         for name in crate::icon_theme::available_packs() {
             let selected = name == current;
@@ -319,7 +321,8 @@ fn icon_pack_dropdown(p: &Palette) -> AnyElement {
                 settings::update(cx, |s| {
                     s.icon_theme = IconThemePref::Freedesktop;
                     s.icon_theme_pack = pack.clone();
-                })
+                });
+                crate::image_cache::clear_for_pack_change(cx);
             }));
         }
         out
@@ -349,8 +352,9 @@ fn icon_variant_dropdown(p: &Palette) -> Option<AnyElement> {
         .map(|(label, _)| label.clone())
         .unwrap_or_else(|| current.clone())
         .into();
-    let label: SharedString = format!("{}: {}", crate::i18n::tx("Varyasyon", "Variant"), selected_label).into();
+    let label: SharedString = format!("{}: {}", t!("Varyasyon"), selected_label).into();
     Some(select_box("icon-theme-variant", p, label, move |_| {
+        crate::icon_theme::refresh_packs();
         variants
             .iter()
             .map(|(label, pack)| {
@@ -361,7 +365,8 @@ fn icon_variant_dropdown(p: &Palette) -> Option<AnyElement> {
                     settings::update(cx, |s| {
                         s.icon_theme = IconThemePref::Freedesktop;
                         s.icon_theme_pack = pack.clone();
-                    })
+                    });
+                    crate::image_cache::clear_for_pack_change(cx);
                 })
             })
             .collect()
@@ -1613,8 +1618,8 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         card(
             p,
             L::Image,
-            crate::i18n::tx("İkon teması", "Icon theme").into(),
-            Some(crate::i18n::tx("Dosya ve klasör simgeleri. Sistem simgelerini kullanır; Freedesktop paketlerini listeden seçin ya da klasörü açın. Paketin varyasyonları varsa ayrıca seçilebilir.", "File and folder icons. Uses system icons; pick a Freedesktop pack from the list or open the pack folder. Variants appear below when the pack has them.").into()),
+            t!("İkon teması").into(),
+            Some(t!("Dosya ve klasör simgeleri. Sistem simgelerini kullanır; Freedesktop paketlerini listeden seçin ya da klasörü açın. Paketin varyasyonları varsa ayrıca seçilebilir.").into()),
             v_flex()
                 .gap_2()
                 .items_start()

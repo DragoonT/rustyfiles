@@ -156,7 +156,7 @@ Papirus           ← family
 └── Papirus-Light ← light variant
 ```
 
-The **Variant** dropdown appears only when more than one sibling is installed. The selected pack folder name is the stored value, so choosing `Papirus-Dark` needs no extra setting. When no explicit colour variant (such as `Papirus-Blue`) is chosen, the effective pack follows Settings → Appearance: dark appearance prefers `*-Dark` or `*-Black`, light prefers `*-Light`, and the base pack is the fallback. Switching the app theme refreshes icons without a restart.
+The **Variant** dropdown appears only when more than one sibling is installed. The selected pack folder name is the stored value, so choosing `Papirus-Dark` needs no extra setting. An explicit variant (`Papirus-Dark`, `Papirus-Light`, `Papirus-Blue`) stays put whatever the app appearance. Only the base pack follows Settings → Appearance: dark appearance prefers `*-Dark` or `*-Black`, light prefers `*-Light`, and the base pack is the fallback. Switching the app theme refreshes icons without a restart.
 
 ---
 
@@ -164,12 +164,17 @@ The **Variant** dropdown appears only when more than one sibling is installed. T
 
 | Cache | Key | Lifetime |
 |-------|-----|----------|
-| Parsed `index.theme` | pack name | process |
-| Effective pack per appearance | (pack, dark) | process |
-| Resolved icon path | (pack, names, size) | process |
-| Decoded picture | (path, size) | process |
+| Parsed `index.theme` | pack name | until settings, pack list or appearance change |
+| Effective pack per appearance | (pack, dark) | until settings, pack list or appearance change |
+| Resolved icon path | (pack, names, size) | until settings, pack list or appearance change |
+| Decoded picture | (path, size) | until settings, pack list or appearance change |
+| Pending pack picture | (pack, dark, names, size) | one repaint after the worker finishes |
+
+`settings::effective_dark()` is an atomic. The OS appearance observer and the settings page update it, so rows never read the registry. Pack lookup, `desktop.ini` parsing and SVG/PNG decoding run on background workers for every size; the UI thread only queues the work and repaints on completion. With no pack selected, list, Grid, Cards, Desktop and Home keep the native shell icon path from `main`.
 
 **Prewarming** (`settings::prewarm_icon_pack`): at startup and on pack or appearance changes, common icons are rasterized on a background executor so the first folder paint does not block the UI thread.
+
+A pack added while the app runs appears when the Settings dropdown opens. Picking a pack, a variant or a new appearance clears both the resolved paths and the picture cache. Pack artwork over 4 MiB is refused before decoding; SVG file references are refused too.
 
 **SVG → BGRA pipeline** (`crates/rf-app/src/icon_theme.rs`):
 

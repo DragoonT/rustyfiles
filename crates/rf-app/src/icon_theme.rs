@@ -1,11 +1,13 @@
 //! Selectable file-icon packs. The default (`Windows`) asks the shell as before; a freedesktop pack
 //! installed in `icon-themes/` overrides generic icons by extension or [`Category`] before the shell request is made.
 
-use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex, OnceLock}};
+use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex, OnceLock}, time::SystemTime};
 
 use gpui_kit::RenderImage;
 
-use crate::{icons::Category, settings::IconThemePref};
+use crate::icons::Category;
+#[cfg(test)]
+use crate::settings::IconThemePref;
 
 /// Rasterize SVGs at the size the row asks for: fixed-size artwork differs from `scalable`.
 fn raster_px(requested: u32) -> u32 {
@@ -47,10 +49,53 @@ static EFFECTIVE_CACHE: OnceLock<Mutex<HashMap<(String, bool), String>>> = OnceL
 /// Resolved asset path per pack, icon names and size. Without this every visible row repeats
 /// dozens of `is_file` calls over the pack's directories.
 static RESOLVED_CACHE: OnceLock<Mutex<HashMap<(String, String, u32), Option<PathBuf>>>> = OnceLock::new();
+/// Rasterized artwork. Cleared with the other caches when the pack or the OS appearance changes.
+static DECODE_CACHE: OnceLock<Mutex<HashMap<String, Option<Arc<RenderImage>>>>> = OnceLock::new();
+/// The installed-pack list is read at most once per directory change, not on every Settings render.
+static PACKS_CACHE: OnceLock<Mutex<Option<(Option<SystemTime>, Vec<String>)>>> = OnceLock::new();
+
+/// Drop everything derived from installed packs and from the app appearance. A pack added while the app runs
+/// then shows up at the next Settings render, and a light/dark switch resolves to a different variant.
+pub fn clear_caches() {
+    for clear in [
+        || {
+            if let Some(c) = THEME_CACHE.get() { c.lock().unwrap().clear(); }
+        },
+        || {
+            if let Some(c) = EFFECTIVE_CACHE.get() { c.lock().unwrap().clear(); }
+        },
+        || {
+            if let Some(c) = RESOLVED_CACHE.get() { c.lock().unwrap().clear(); }
+        },
+        || {
+            if let Some(c) = DECODE_CACHE.get() { c.lock().unwrap().clear(); }
+        },
+    ] {
+        clear();
+    }
+    if let Some(c) = PACKS_CACHE.get() {
+        *c.lock().unwrap() = None;
+    }
+}
+
+/// Rescan the pack folder. Called when the Settings dropdown opens: a pack installed while the app runs shows at once.
+pub fn refresh_packs() {
+    if let Some(c) = THEME_CACHE.get() { c.lock().unwrap().clear(); }
+    if let Some(c) = EFFECTIVE_CACHE.get() { c.lock().unwrap().clear(); }
+    if let Some(c) = RESOLVED_CACHE.get() { c.lock().unwrap().clear(); }
+    if let Some(c) = PACKS_CACHE.get() { *c.lock().unwrap() = None; }
+}
 
 /// Folder names of installed freedesktop packs. A pack is a directory with an `index.theme`.
 pub fn available_packs() -> Vec<String> {
-    available_packs_in(themes_dir())
+    let cache = PACKS_CACHE.get_or_init(|| Mutex::new(None));
+    let mut cache = cache.lock().unwrap();
+    if let Some((_, packs)) = cache.as_ref() {
+        return packs.clone();
+    }
+    let packs = available_packs_in(themes_dir());
+    *cache = Some((None, packs.clone()));
+    packs
 }
 
 fn available_packs_in(root: Option<PathBuf>) -> Vec<String> {
@@ -70,7 +115,9 @@ fn available_packs_in(root: Option<PathBuf>) -> Vec<String> {
 /// (`Papirus`, `Papirus-Dark`): the base pack is the family, the suffix is the variant. Returns
 /// `(label, pack)` pairs, base first. Families without a second installed pack return one item.
 pub fn theme_variants(pack: &str) -> Vec<(String, String)> {
-    variants_from(&effective_pack(pack), &available_packs())
+    // The raw selection is the label: resolving it through `effective_pack` would show `Dark` as selected
+    // even when the user picked `Light`, and the explicit choice could not be kept.
+    variants_from(pack, &available_packs())
 }
 
 fn variants_from(pack: &str, packs: &[String]) -> Vec<(String, String)> {
@@ -84,7 +131,7 @@ fn variants_from(pack: &str, packs: &[String]) -> Vec<(String, String)> {
         .filter(|p| p.as_str() == base || p.strip_prefix(base).is_some_and(|s| s.starts_with('-')))
         .map(|p| {
             let label = match p.strip_prefix(base).and_then(|s| s.strip_prefix('-')) {
-                None | Some("") => format!("{base} ({})", crate::i18n::tx("varsayılan", "default")),
+                None | Some("") => format!("{base} ({})", crate::t!("varsayılan")),
                 Some(suffix) => {
                     let mut chars = suffix.chars();
                     match chars.next() {
@@ -103,8 +150,8 @@ fn variants_from(pack: &str, packs: &[String]) -> Vec<(String, String)> {
     out
 }
 
-/// Pick the family member that matches the app appearance. Packs that ship `Foo-Dark` and
-/// `Foo-Light` follow Settings → Appearance; colour variants without a light/dark sibling stay put.
+/// Pick the family member that matches the app appearance. Only a base pack follows Settings → Appearance.
+/// Any explicit suffix (`Papirus-Light`, `Papirus-Dark`, `Papirus-Blue`) is a deliberate choice and stays put.
 fn appearance_pack(pack: &str, dark: bool, packs: &[String]) -> String {
     let variants = variants_from(pack, packs);
     if variants.len() < 2 {
@@ -112,8 +159,7 @@ fn appearance_pack(pack: &str, dark: bool, packs: &[String]) -> String {
     }
     let base = variants[0].1.clone();
     let suffix = |p: &str| p.strip_prefix(&base).and_then(|s| s.strip_prefix('-')).unwrap_or("").to_ascii_lowercase();
-    // A colour variant (`Papirus-Blue`) is a deliberate choice: keep it unless a matching dark sibling exists.
-    if !matches!(suffix(pack).as_str(), "" | "light" | "dark" | "black") {
+    if !suffix(pack).is_empty() {
         return pack.to_string();
     }
     let members = if dark {
@@ -341,10 +387,20 @@ fn to_bgra(buf: &mut [u8]) {
     }
 }
 
-fn raster_svg(path: &Path, px: u32) -> Option<Arc<RenderImage>> {
+/// A pack is third-party content: refuse artwork large enough to stall a worker or exhaust memory.
+const MAX_ICON_BYTES: u64 = 4 * 1024 * 1024;
+
+fn read_asset(path: &Path) -> Option<Vec<u8>> {
+    if std::fs::metadata(path).ok()?.len() > MAX_ICON_BYTES {
+        log::warn!("icon pack asset too large: {}", path.display());
+        return None;
+    }
+    std::fs::read(path).ok()
+}
+
+fn raster_svg_bytes(svg: &[u8], px: u32) -> Option<Arc<RenderImage>> {
     use resvg::{tiny_skia, usvg};
     static FONTS: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
-    let svg = std::fs::read(path).ok()?;
     let mut opt = usvg::Options::default();
     // A pack is user-installed third-party content: `<image href>` must not open local files.
     opt.image_href_resolver = usvg::ImageHrefResolver {
@@ -383,16 +439,16 @@ fn raster_svg(path: &Path, px: u32) -> Option<Arc<RenderImage>> {
 }
 
 fn decode(path: &Path, px: u32) -> Option<Arc<RenderImage>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<Arc<RenderImage>>>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = DECODE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let key = format!("{}:{px}", path.to_string_lossy());
     if let Some(hit) = cache.lock().unwrap().get(&key) {
         return hit.clone();
     }
+    let bytes = read_asset(path)?;
     let img = if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg")) {
-        raster_svg(path, px)
+        raster_svg_bytes(&bytes, px)
     } else {
-        image::open(path).ok().map(|i| {
+        image::load_from_memory(&bytes).ok().map(|i| {
             let mut buf = i.to_rgba8();
             to_bgra(buf.as_mut());
             Arc::new(RenderImage::new(vec![image::Frame::new(buf)]))
@@ -443,10 +499,13 @@ fn freedesktop_name(cat: Category, ext: &str) -> &'static str {
 /// Freedesktop folder icon names, standard `folder` first, then MIME and legacy fallbacks.
 pub const FOLDER_NAMES: &[&str] = &["folder", "inode-directory", "directory"];
 
-fn freedesktop_image(pack: &str, cat: Category, ext: &str, px: u32) -> Option<Arc<RenderImage>> {
-    let kind = freedesktop_name(cat, ext);
-    let names = if cat == Category::Folder && ext.is_empty() { FOLDER_NAMES } else { std::slice::from_ref(&kind) };
-    image_for_names(pack, names, px)
+/// Icon names to try for a file kind. Exposed so the cache can queue one background lookup per entry.
+pub fn image_names(cat: Category, ext: &str) -> Vec<&'static str> {
+    if cat == Category::Folder && ext.is_empty() {
+        FOLDER_NAMES.to_vec()
+    } else {
+        vec![freedesktop_name(cat, ext)]
+    }
 }
 
 /// Keep the resolved path once per pack, icon-name list and size: the file walk is the expensive part.
@@ -536,7 +595,7 @@ fn is_special_parent_root(parent: &Path, roots: &[String]) -> bool {
 /// Theme icon names for Windows' known folders. Exact known-folder paths match first; localized
 /// leaf names only match direct children of a profile or OneDrive root, never nested subfolders.
 pub fn special_folder_names(path: &Path) -> &'static [&'static str] {
-    static KNOWN: OnceLock<(Vec<(String, &'static [&'static str])>, Vec<String>)> = OnceLock::new();
+    static KNOWN: OnceLock<(Vec<(String, &'static [&'static str], bool)>, Vec<String>)> = OnceLock::new();
     let (known, roots) = KNOWN.get_or_init(|| {
         use rf_win::known::KnownFolder;
         let all = [
@@ -550,7 +609,7 @@ pub fn special_folder_names(path: &Path) -> &'static [&'static str] {
         ];
         let known = all
             .iter()
-            .filter_map(|k| k.path().map(|p| (norm_path_key(&p), known_folder_names(*k))))
+            .filter_map(|k| k.path().map(|p| (norm_path_key(&p), known_folder_names(*k), !matches!(k, KnownFolder::Profile))))
             .collect();
         let mut roots = Vec::new();
         if let Some(p) = KnownFolder::Profile.path() {
@@ -566,22 +625,26 @@ pub fn special_folder_names(path: &Path) -> &'static [&'static str] {
         (known, roots)
     });
     let full = norm_path_key(path);
-    if let Some((_, names)) = known.iter().find(|(p, _)| full == *p) {
+    if let Some((_, names, _)) = known.iter().find(|(p, _, _)| full == *p) {
         return names;
     }
     let Some(parent) = path.parent() else { return &[] };
     if !is_special_parent_root(parent, roots) {
         return &[];
     }
-    match path.file_name().and_then(|n| n.to_str()).map(|n| n.to_lowercase()).as_deref() {
-        Some("desktop" | "área de trabalho") => &["user-desktop", "folder-desktop"],
-        Some("downloads" | "transferências") => &["folder-downloads", "folder-download", "user-downloads"],
-        Some("documents" | "documentos") => &["folder-documents", "user-documents"],
-        Some("pictures" | "imagens") => &["folder-pictures", "folder-picture", "user-pictures"],
-        Some("music" | "música" | "musicas" | "músicas") => &["folder-music", "user-music"],
-        Some("videos" | "vídeos") => &["folder-video", "folder-videos", "user-videos"],
-        _ => &[],
-    }
+    // Direct child of a profile/OneDrive root: compare the leaf with the localized known-folder paths,
+    // not with a hard-coded language list.
+    let Some(leaf) = path.file_name().map(|n| norm_path_key(Path::new(n))) else { return &[] };
+    known
+        .iter()
+        .find(|(p, _, can_match_leaf)| {
+            *can_match_leaf
+                && Path::new(p)
+                    .file_name()
+                    .is_some_and(|n| norm_path_key(Path::new(n)) == leaf)
+        })
+        .map(|(_, names, _)| *names)
+        .unwrap_or(&[])
 }
 
 fn known_folder_names(kind: rf_win::known::KnownFolder) -> &'static [&'static str] {
@@ -597,27 +660,15 @@ fn known_folder_names(kind: rf_win::known::KnownFolder) -> &'static [&'static st
     }
 }
 
-/// A themed picture, or `None` for `Windows` and for anything the pack does not cover.
+/// Only the cache's tests need a sync entry point now: every UI surface queues pack work instead.
+#[cfg(test)]
 pub fn image(theme: IconThemePref, pack: &str, cat: Category, ext: &str, px: u32) -> Option<Arc<RenderImage>> {
     match theme {
         IconThemePref::Windows | IconThemePref::Legacy => None,
-        IconThemePref::Freedesktop => freedesktop_image(pack, cat, ext, px),
-    }
-}
-
-/// Current setting, for callers outside the icon cache (Home, sidebar) that only need a picture.
-pub fn picture_for_names(names: &[&str], px: u32) -> Option<Arc<RenderImage>> {
-    match crate::settings::icon_theme() {
-        IconThemePref::Freedesktop => image_for_names(&crate::settings::icon_theme_pack(), names, px),
-        _ => None,
-    }
-}
-
-/// Current setting, for callers that have a file kind instead of an icon name.
-pub fn picture_for_kind(cat: Category, ext: &str, px: u32) -> Option<Arc<RenderImage>> {
-    match crate::settings::icon_theme() {
-        IconThemePref::Freedesktop => freedesktop_image(&crate::settings::icon_theme_pack(), cat, ext, px),
-        _ => None,
+        IconThemePref::Freedesktop => {
+            let names = image_names(cat, ext);
+            image_for_names(pack, &names, px)
+        }
     }
 }
 
@@ -769,14 +820,15 @@ mod tests {
     }
 
     #[test]
-    fn dark_and_light_variants_follow_the_app() {
+    fn base_variant_follows_the_app_but_explicit_choices_stay() {
         let packs: Vec<String> = ["Papirus", "Papirus-Dark", "Papirus-Light", "Papirus-Blue", "KDE-Modern-Classic"]
             .iter()
             .map(|s| s.to_string())
             .collect();
         assert_eq!(appearance_pack("Papirus", true, &packs), "Papirus-Dark");
-        assert_eq!(appearance_pack("Papirus-Dark", false, &packs), "Papirus-Light");
-        assert_eq!(appearance_pack("Papirus-Light", true, &packs), "Papirus-Dark");
+        assert_eq!(appearance_pack("Papirus", false, &packs), "Papirus-Light");
+        assert_eq!(appearance_pack("Papirus-Dark", false, &packs), "Papirus-Dark");
+        assert_eq!(appearance_pack("Papirus-Light", true, &packs), "Papirus-Light");
         assert_eq!(appearance_pack("Papirus-Blue", true, &packs), "Papirus-Blue");
         assert_eq!(appearance_pack("KDE-Modern-Classic", true, &packs), "KDE-Modern-Classic");
     }
@@ -807,11 +859,28 @@ mod tests {
     }
 
     #[test]
-    fn accented_special_folder_names_fall_back_to_the_leaf() {
-        assert_eq!(special_folder_names(Path::new(r"C:\Users\x\Imagens"))[0], "folder-pictures");
-        assert_eq!(special_folder_names(Path::new(r"C:\Users\x\Música"))[0], "folder-music");
-        assert_eq!(special_folder_names(Path::new(r"C:\Users\x\Vídeos"))[0], "folder-video");
-        assert!(special_folder_names(Path::new(r"C:\Users\x\Imagens\Férias")).is_empty());
+    fn localized_known_folders_get_their_own_icon_names_without_leaking_to_subfolders() {
+        use rf_win::known::KnownFolder;
+        for (kind, expected) in [
+            (KnownFolder::Pictures, "folder-pictures"),
+            (KnownFolder::Music, "folder-music"),
+            (KnownFolder::Videos, "folder-video"),
+        ] {
+            let Some(path) = kind.path() else { continue };
+            assert_eq!(special_folder_names(&path)[0], expected, "{kind:?}");
+            let nested = path.join("Subfolder");
+            assert!(special_folder_names(&nested).is_empty(), "a folder inside {kind:?} stays plain");
+        }
+    }
+
+    #[test]
+    fn oversized_pack_artwork_is_refused() {
+        let root = temp_root("oversized-icon");
+        let path = root.join("huge.svg");
+        std::fs::write(&path, vec![b'x'; (MAX_ICON_BYTES + 1) as usize]).unwrap();
+        assert!(read_asset(&path).is_none());
+        assert!(decode(&path, 32).is_none());
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
