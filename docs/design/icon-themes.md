@@ -170,9 +170,9 @@ The **Variant** dropdown appears only when more than one sibling is installed. T
 | Decoded picture | (path, size) | until settings, pack list or appearance change |
 | Pending pack picture | (pack, dark, names, size) | one repaint after the worker finishes |
 
-`settings::effective_dark()` is an atomic. The OS appearance observer and the settings page update it, so rows never read the registry. Known-folder paths are resolved once by `prewarm_known_folders()` at startup or when a pack is selected, before rows ask for icon names. Pack lookup, `index.theme` parsing, `desktop.ini` parsing and SVG/PNG decoding run on background workers for every size; the UI thread only queues the work and repaints on completion. With no pack selected, list, Grid, Cards, Desktop and Home keep the native shell icon path from `main`.
+`settings::effective_dark()` is an atomic. The OS appearance observer and the settings page update it, so rows never read the registry. Known-folder paths are resolved once by `prewarm_known_folders()` at startup or when a pack is selected, before rows ask for icon names. Pack lookup, `index.theme` parsing, `desktop.ini` parsing and SVG/PNG decoding run on background workers for every size; row rendering only queues the work and repaints on completion. Opening the Settings dropdown scans the pack directory once per change; it does not run per row. With no pack selected, list, Grid, Cards, Desktop and Home keep the native shell icon path from `main`.
 
-**Prewarming** (`settings::prewarm_icon_pack`): at startup and on pack or appearance changes, common icons are rasterized on a background executor so the first folder paint does not block the UI thread.
+**Prewarming** (`settings::prewarm_icon_pack`): at startup and on pack, theme or appearance changes, common icons are rasterized on a background executor so the first folder paint does not block the UI thread.
 
 A pack added while the app runs appears when the Settings dropdown opens. Picking a pack, a variant or a new appearance clears both the resolved paths and the picture cache. Settings changes that do not touch appearance or packs leave those caches alone. Every pack file, including `index.theme`, is capped at 4 MiB; SVG file references are refused too.
 

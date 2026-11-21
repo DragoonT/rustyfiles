@@ -864,8 +864,9 @@ impl Workspace {
         cx.observe_window_appearance(window, |_: &mut Self, window, cx| {
             let dark = matches!(window.appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark);
             crate::settings::system_appearance_changed(dark);
-            crate::icon_theme::refresh_packs();
+            crate::icon_theme::clear_caches();
             crate::image_cache::clear_for_pack_change(cx);
+            crate::settings::prewarm_icon_pack(cx);
             window.refresh();
             cx.notify();
         })
