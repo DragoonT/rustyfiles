@@ -11,6 +11,9 @@ use velopack::sources::GithubSource;
 use velopack::{UpdateCheck, UpdateInfo, UpdateManager, VelopackApp};
 
 pub const REPO: &str = "https://github.com/gelenmedya/rustyfiles";
+/// Where updates come from. TEMPORARY: the pmrochen fork, whose releases carry the ARM64 build (win-arm64 channel); back to REPO
+/// once that is upstream.
+const UPDATE_REPO: &str = "https://github.com/pmrochen/rustyfiles";
 /// AppUserModelID of the installed app (Velopack names shortcuts "velopack.<pack id>").
 pub const APP_ID: &str = "velopack.rustyfiles";
 
@@ -131,7 +134,7 @@ fn any_important(releases: &[(String, String)], current: &str, target: &str) -> 
 /// when an update was downloaded; on any failure the update is an ordinary one. Blocking.
 fn learn_importance(target: &str) {
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(8))).http_status_as_error(false).build().into();
-    let api = REPO.replace("https://github.com/", "https://api.github.com/repos/") + "/releases?per_page=15";
+    let api = UPDATE_REPO.replace("https://github.com/", "https://api.github.com/repos/") + "/releases?per_page=15";
     let releases: Vec<(String, String)> = agent
         .get(api)
         .header("User-Agent", format!("rustyfiles/{}", version()))
@@ -218,7 +221,7 @@ pub fn takes_betas(switch_on: bool, this_version: &str) -> bool {
 
 fn manager() -> Option<UpdateManager> {
     let betas = takes_betas(BETAS.load(std::sync::atomic::Ordering::Relaxed), env!("CARGO_PKG_VERSION"));
-    UpdateManager::new(GithubSource::new(REPO, None, betas), None, None).ok()
+    UpdateManager::new(GithubSource::new(UPDATE_REPO, None, betas), None, None).ok()
 }
 
 /// This build's version (Velopack's when installed, else the crate's). Read once.
