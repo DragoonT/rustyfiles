@@ -390,6 +390,36 @@ pub(crate) fn button(id: impl Into<ElementId>, p: &Palette, label: impl Into<Sha
         .into_any_element()
 }
 
+fn icon_button(id: impl Into<ElementId>, p: &Palette, icon: L, tip: impl Into<SharedString>, run: impl Fn(&mut Window, &mut App) + 'static) -> AnyElement {
+    let tip: SharedString = tip.into();
+    let dark = p.dark;
+    let base = div()
+        .id(id)
+        .size(px(32.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .tab_index(0)
+        .active(|s| s.opacity(0.8));
+    let styled = if p.liquid {
+        base.rounded_full()
+            .bg(crate::liquid::dropdown_fill(dark, false))
+            .hover(move |s| s.bg(crate::liquid::dropdown_fill(dark, true)))
+    } else {
+        base.rounded(theme::RADIUS_SM)
+            .bg(p.hover)
+            .border_1()
+            .border_color(p.border)
+            .hover(|s| s.bg(p.pressed))
+    };
+    styled
+        .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+        .child(Icon::new(icon).size(px(16.)).text_color(p.text_secondary))
+        .on_click(move |_, window, cx| run(window, cx))
+        .into_any_element()
+}
+
 // ---------------------------------------------------------------- layout pieces
 
 /// The narrowest a setting's words (its title and the line under it) are drawn, logical px.
@@ -1585,11 +1615,16 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             L::Image,
             crate::i18n::tx("İkon teması", "Icon theme").into(),
             Some(crate::i18n::tx("Dosya ve klasör simgeleri. Sistem simgelerini kullanır; Freedesktop paketlerini listeden seçin ya da klasörü açın. Paketin varyasyonları varsa ayrıca seçilebilir.", "File and folder icons. Uses system icons; pick a Freedesktop pack from the list or open the pack folder. Variants appear below when the pack has them.").into()),
-            h_flex()
+            v_flex()
                 .gap_2()
-                .flex_wrap()
-                .child(icon_pack_dropdown(p))
-                .child(button("icon-theme-folder", p, t!("Gözat"), open_icon_themes_folder))
+                .items_start()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(icon_pack_dropdown(p))
+                        .child(icon_button("icon-theme-folder", p, L::FolderOpen, t!("Gözat"), open_icon_themes_folder)),
+                )
                 .children(icon_variant_dropdown(p))
                 .into_any_element(),
         ),

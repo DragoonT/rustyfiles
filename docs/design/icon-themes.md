@@ -2,7 +2,7 @@
 
 ## Overview
 
-Settings → Appearance → **Icon theme** replaces file and folder icons with a Freedesktop-compliant icon theme installed in `%APPDATA%\rustyfiles\icon-themes`. The default entry, **Native (default)**, leaves every icon to Windows. Installing a pack is manual: copy its folder into `icon-themes`, then pick it in the dropdown. **Browse** opens that folder in a new RustyFiles tab and leaves Settings open.
+Settings → Appearance → **Icon theme** replaces file and folder icons with a Freedesktop-compliant icon theme installed in `%APPDATA%\rustyfiles\icon-themes`. The default entry, **Native (default)**, leaves every icon to Windows. Installing a pack is manual: copy its folder into `icon-themes`, then pick it in the dropdown. The folder icon button beside the selector opens `icon-themes` in a new RustyFiles tab and leaves Settings open.
 
 > The [Freedesktop Icon Theme Specification](https://specifications.freedesktop.org/icon-theme-spec/icon-theme-spec-latest.html) is the standard on Linux and cross-desktop toolkits. Thousands of packs exist on [gnome-look.org](https://www.gnome-look.org/browse?cat=132&ord=rating), [Pling](https://www.pling.com/), and GitHub. Using the same layout on Windows gives users that ecosystem without converting artwork.
 
@@ -81,10 +81,10 @@ Type=Fixed
 |-----|---------|
 | `Name` | Human-readable pack name |
 | `Inherits` | Fallback chain, for example `hicolor` or `breeze` |
-| `Directories` | Comma-separated subdirectories under the pack root |
-| `[dirname]` section | `Size` (px), `Context`, `Type` (`Fixed` or `Scalable`) |
+| `Directories`, `ScaledDirectories` | Comma-separated subdirectories under the pack root |
+| `[dirname]` section | `Size` (px), `Scale`, `Context`, `Type` (`Fixed`, `Scalable`, `Threshold`), `MinSize`, `MaxSize`, `Threshold` |
 
-Only `Directories`, `Inherits` and each directory's `Size` drive resolution; `Name`, `Context` and `Type` are informational here.
+Symbolic subtrees (`*/symbolic*`) and UI-chrome contexts (`Actions`, `Animations`, `Status`, `Emblems`, `Emotes`, `Panel`) are excluded so toolbar glyphs such as `actions/16/directory.svg` never hijack folder icons. Small row icons are requested at `ICON_PX` (32 px) for HiDPI sharpness and so Breeze/Papirus packs resolve full-colour folder artwork instead of 16 pt monochrome panel glyphs.
 
 ---
 
@@ -92,20 +92,20 @@ Only `Directories`, `Inherits` and each directory's `Size` drive resolution; `Na
 
 ```mermaid
 flowchart TD
-    A[Request icon name at N px] --> B{pack has index.theme?}
+    A[Request candidate names at N px] --> B{pack has index.theme?}
     B -- no --> Z[return None: shell or Lucide draws it]
-    B -- yes --> C[fixed-size dirs closest to N first]
-    C --> D{SVG in dir?}
-    D -- yes --> E[rasterize with resvg at N px]
-    D -- no --> F{PNG in dir?}
-    F -- yes --> G[decode PNG at native size]
-    F -- no --> H[next dir: scalable, then inherited packs]
-    H --> B
+    B -- yes --> C[rank item dirs: Fixed/Threshold match, then Scalable in range, then closest >=24pt]
+    C --> N[for each candidate name in order]
+    N --> D{SVG or PNG in ranked dirs?}
+    D -- SVG --> E[rasterize with resvg at N px]
+    D -- PNG --> G[decode PNG to BGRA]
+    D -- no --> N2[next candidate name, then inherited packs]
+    N2 --> B
     E --> Z
     G --> Z
 ```
 
-For each directory, names are tried in order and SVG before PNG. A pack with `24x24/places/folder.svg` therefore beats `scalable/places/directory.svg` at 24 px.
+Candidate names are tried in order (`FindBestIcon`), each across ranked directories with SVG before PNG. Specific names such as `folder-downloads` in `scalable/places` therefore beat a generic `folder` fallback in an earlier fixed-size directory, and `folder` in `places/` beats `inode-directory` in `mimetypes/`.
 
 A pack is third-party content. Pack names and `Directories` entries stay inside the pack folder; a traversal entry such as `../outside` is ignored. SVG rasterization refuses `<image href>` file references, so a pack cannot read arbitrary local files through `usvg`.
 
@@ -113,19 +113,21 @@ A pack is third-party content. Pack names and `Directories` entries stay inside 
 
 | Entry | Names tried |
 |-------|-------------|
-| Folder | `directory`, then `folder` |
-| Known folder (Desktop, Downloads, Documents, Pictures, Music, Videos, profile) | shell-resolved names, then leaf-name fallback, for example `folder-pictures`, `user-pictures` |
+| Folder | `folder`, `inode-directory`, then `directory` |
+| Known folder (Desktop, Downloads, Documents, Pictures, Music, Videos, profile) | exact `KnownFolder` path, then direct children of profile / OneDrive roots by localized leaf name (never nested subfolders), falling back to `FOLDER_NAMES` |
 | Drive | `drive-harddisk`, `drive-removable-media`, `drive-optical`, `network-server`, `folder-cloud` by kind |
 | File | extension name first, then category fallback |
 
 ```rust
 // icon_theme.rs
-const FOLDER_NAMES: &[&str] = &["directory", "folder"];
+pub const FOLDER_NAMES: &[&str] = &["folder", "inode-directory", "directory"];
 ```
 
-Known folders come from `rf_win::known::KnownFolder`, so localized folder names still match. OneDrive's Pictures and Documents use the same type-based names as local folders.
+Known folders come from `rf_win::known::KnownFolder`, so localized folder names still match. OneDrive's root Pictures and Documents use the same type-based names as local folders, while subfolders inside `Downloads` or `Pictures` stay ordinary folders.
 
-`desktop.ini` only keeps the shell picture when it points to a real, present, user-chosen icon. Relative paths resolve against the folder that holds `desktop.ini`, and `%VARIABLES%` expand like Explorer does. A Windows type icon such as `imageres.dll` or `shell32.dll`, or a path that no longer exists, does not block the theme. The same rule drives file lists and the sidebar.
+When a pack is active, folders in Grid, Cards, Desktop, Properties and Info views use the pack's artwork at tile size; with `Show thumbnails` off, tiles still request icons at full tile resolution (`icon_sized`) rather than upscaling 16 px row icons. Real content thumbnails (photos, video, PDFs, design files) are untouched when `Show thumbnails` is on. In **Native (default)** mode, Explorer folder previews and per-folder `READONLY | SYSTEM` shell caching run unchanged.
+
+`desktop.ini` keeps the shell picture over an active pack only when it points to a real, present, user-chosen icon. Relative paths resolve against the folder that holds `desktop.ini`, and `%VARIABLES%` expand like Explorer does. Built-in Windows folder type icons (`LocalizedResourceName` with `imageres.dll` / `shell32.dll` / `windows.storage.dll`, or default folder resource indices) and OneDrive's automatic `OneDrive.exe` sync stamp yield to the theme, whereas user-chosen icons from Properties → Customize → Change Icon (such as `shell32.dll,127` or a custom `.ico`) win across file lists, sidebar pins, Home and the folder tree.
 
 ### Extension → Icon Name Mapping
 

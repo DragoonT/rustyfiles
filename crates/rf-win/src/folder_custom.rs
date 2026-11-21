@@ -135,20 +135,49 @@ fn attrs_of(path: &Path) -> Option<u32> {
     std::fs::symlink_metadata(path).ok().map(|m| m.file_attributes())
 }
 
-/// The folder's own icon from its desktop.ini (`[.ShellClassInfo]` `IconResource=path,index`, or `IconFile` +
-/// `IconIndex`), as (file, index); None when it uses the default. The file is as stored (may hold %env%).
-pub fn folder_icon(dir: &Path) -> Option<(String, i32)> {
+/// Attributes of a local drive directory when it has `READONLY` or `SYSTEM` set. Skips UNC/network paths
+/// so callers on the UI thread (sidebar pins, Home cards) never block on a remote share.
+pub fn local_custom_attrs(dir: &Path) -> Option<u32> {
+    let s = dir.to_str()?;
+    if s.len() < 2 || s.as_bytes()[1] != b':' {
+        return None;
+    }
+    let a = attrs_of(dir)?;
+    (a & (ATTR_READONLY | ATTR_SYSTEM) != 0).then_some(a)
+}
+
+/// Parsed custom icon entry from a folder's `desktop.ini`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderIcon {
+    pub file: String,
+    pub index: i32,
+    /// True when `[.ShellClassInfo]` carries `LocalizedResourceName` (present on Windows' built-in
+    /// known folders such as Music, Videos, Pictures and Documents).
+    pub localized: bool,
+}
+
+/// Reads the folder's icon metadata from `desktop.ini`, including whether Windows marked the folder
+/// with a `LocalizedResourceName`.
+pub fn folder_icon_info(dir: &Path) -> Option<FolderIcon> {
     let lines = read_lines(&dir.join("desktop.ini"));
+    let localized = get_key(&lines, SECTION, "LocalizedResourceName").is_some_and(|s| !s.is_empty());
     if let Some(res) = get_key(&lines, SECTION, "IconResource").filter(|s| !s.is_empty()) {
         // "path,index"; the index may be negative (a resource id) and the path may itself hold commas
-        return Some(match res.rsplit_once(',') {
+        let (file, index) = match res.rsplit_once(',') {
             Some((f, i)) if i.trim().parse::<i32>().is_ok() => (f.trim().trim_matches('"').to_string(), i.trim().parse().unwrap_or(0)),
             _ => (res.trim_matches('"').to_string(), 0),
-        });
+        };
+        return Some(FolderIcon { file, index, localized });
     }
     let file = get_key(&lines, SECTION, "IconFile").filter(|s| !s.is_empty())?;
     let index = get_key(&lines, SECTION, "IconIndex").and_then(|s| s.parse().ok()).unwrap_or(0);
-    Some((file.trim_matches('"').to_string(), index))
+    Some(FolderIcon { file: file.trim_matches('"').to_string(), index, localized })
+}
+
+/// The folder's own icon from its desktop.ini (`[.ShellClassInfo]` `IconResource=path,index`, or `IconFile` +
+/// `IconIndex`), as (file, index); None when it uses the default. The file is as stored (may hold %env%).
+pub fn folder_icon(dir: &Path) -> Option<(String, i32)> {
+    folder_icon_info(dir).map(|i| (i.file, i.index))
 }
 
 /// Sets (Some) or removes (None) the folder's icon the way Explorer does: edits desktop.ini (UTF-16LE with a
@@ -209,7 +238,7 @@ pub fn set_folder_icon(dir: &Path, icon: Option<(&str, i32)>) -> anyhow::Result<
 }
 
 /// Expands `%NAME%` references from the process environment (unknown names stay as written).
-pub(crate) fn expand_env(s: &str) -> String {
+pub fn expand_env(s: &str) -> String {
     let mut out = String::new();
     let mut rest = s;
     while let Some(a) = rest.find('%') {

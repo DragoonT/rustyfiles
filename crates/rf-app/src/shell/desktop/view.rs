@@ -811,7 +811,7 @@ impl DesktopView {
                 let e = Entry::new(&it.name, if it.is_dir { EntryKind::Dir } else { EntryKind::File }, it.size, it.modified_ms, 0, it.attrs);
                 let (thumbs, placeholder, px) = (frame.thumbs, it.cloud_placeholder, frame.icon_px);
                 // an online-only file is shown by its icon, never read for a thumbnail (that would download it)
-                self.images.update(cx, |c, cx| if thumbs && !placeholder { c.thumbnail(&dir, &e, px, cx) } else { c.icon(&dir, &e, cx) })
+                self.images.update(cx, |c, cx| if thumbs && !placeholder { c.thumbnail(&dir, &e, px, cx) } else { c.icon_sized(&dir, &e, px, cx) })
             }
         }
     }

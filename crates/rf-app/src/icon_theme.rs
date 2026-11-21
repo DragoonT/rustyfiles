@@ -12,10 +12,22 @@ fn raster_px(requested: u32) -> u32 {
     requested.max(16)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DirKind {
+    Fixed,
+    Scalable,
+    Threshold,
+}
+
+#[derive(Clone, Debug)]
 struct ThemeDir {
     rel: String,
     size: u32,
+    scale: u32,
+    min_size: u32,
+    max_size: u32,
+    threshold: u32,
+    kind: DirKind,
 }
 
 #[derive(Clone)]
@@ -142,12 +154,42 @@ fn pack_root_in(root: Option<PathBuf>, name: &str) -> Option<PathBuf> {
     root.map(|d| d.join(name)).filter(|p| p.join("index.theme").is_file())
 }
 
+#[derive(Default)]
+struct RawDirSection {
+    size: Option<u32>,
+    scale: Option<u32>,
+    min_size: Option<u32>,
+    max_size: Option<u32>,
+    threshold: Option<u32>,
+    kind: Option<DirKind>,
+    context: String,
+}
+
+/// Symbolic subtrees and UI-chrome contexts (`actions`, `status`, `panel`, ...) hold monochrome toolbar
+/// glyphs (`actions/16/directory.svg`, `places/symbolic/folder.svg`), not file-manager item icons.
+fn is_item_icon_dir(rel: &str, context: &str) -> bool {
+    if matches!(context, "actions" | "animations" | "status" | "emblems" | "emotes" | "panel" | "stock" | "intl") {
+        return false;
+    }
+    for seg in rel.split(['/', '\\']) {
+        let s = seg.to_ascii_lowercase();
+        if s == "symbolic" || s.starts_with("symbolic-") || s.ends_with("-symbolic") {
+            return false;
+        }
+        if matches!(s.as_str(), "actions" | "animations" | "status" | "emblems" | "emotes" | "panel") {
+            return false;
+        }
+    }
+    true
+}
+
 fn parse_index(root: &Path) -> Option<Theme> {
     let text = std::fs::read_to_string(root.join("index.theme")).ok()?;
     let mut section = String::new();
     let mut directories = Vec::new();
+    let mut scaled_directories = Vec::new();
     let mut inherits = Vec::new();
-    let mut sizes: HashMap<String, u32> = HashMap::new();
+    let mut sections: HashMap<String, RawDirSection> = HashMap::new();
     for line in text.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with(['#', ';']) {
@@ -161,19 +203,65 @@ fn parse_index(root: &Path) -> Option<Theme> {
         let (key, value) = (key.trim().to_ascii_lowercase(), value.trim());
         if section == "icon theme" {
             match key.as_str() {
-                "directories" => directories = split_names(value),
+                "directories" => directories.extend(split_names(value)),
+                "scaleddirectories" => scaled_directories.extend(split_names(value)),
                 "inherits" => inherits = split_names(value),
                 _ => {}
             }
-        } else if key == "size" && directories.iter().any(|d| d.eq_ignore_ascii_case(&section)) {
-            sizes.insert(section.clone(), value.parse().unwrap_or(0));
+        } else if !section.is_empty() {
+            let entry = sections.entry(section.clone()).or_default();
+            match key.as_str() {
+                "size" => entry.size = value.parse().ok(),
+                "scale" => entry.scale = value.parse().ok(),
+                "minsize" => entry.min_size = value.parse().ok(),
+                "maxsize" => entry.max_size = value.parse().ok(),
+                "threshold" => entry.threshold = value.parse().ok(),
+                "context" => entry.context = value.to_ascii_lowercase(),
+                "type" => {
+                    entry.kind = match value.to_ascii_lowercase().as_str() {
+                        "fixed" => Some(DirKind::Fixed),
+                        "scalable" => Some(DirKind::Scalable),
+                        "threshold" => Some(DirKind::Threshold),
+                        _ => None,
+                    };
+                }
+                _ => {}
+            }
         }
     }
+    let mut seen = Vec::new();
     let dirs = directories
         .into_iter()
+        .chain(scaled_directories)
         // `Directories` comes from a third-party pack: never let it point outside the pack folder.
         .filter(|rel| Path::new(rel).components().all(|c| matches!(c, std::path::Component::Normal(_))))
-        .map(|rel| ThemeDir { size: sizes.get(&rel.to_ascii_lowercase()).copied().unwrap_or(0), rel })
+        .filter(|rel| {
+            let low = rel.to_ascii_lowercase();
+            if seen.contains(&low) {
+                false
+            } else {
+                seen.push(low);
+                true
+            }
+        })
+        .filter_map(|rel| {
+            let low = rel.to_ascii_lowercase();
+            let raw = sections.get(&low);
+            let context = raw.map_or("", |r| r.context.as_str());
+            if !is_item_icon_dir(&rel, context) {
+                return None;
+            }
+            let size = raw.and_then(|r| r.size).unwrap_or(0);
+            let looks_scalable = rel.split(['/', '\\']).any(|s| s.to_ascii_lowercase().starts_with("scalable"));
+            let kind = raw
+                .and_then(|r| r.kind)
+                .unwrap_or(if looks_scalable || size == 0 { DirKind::Scalable } else { DirKind::Threshold });
+            let scale = raw.and_then(|r| r.scale).unwrap_or(1).max(1);
+            let threshold = raw.and_then(|r| r.threshold).unwrap_or(2);
+            let min_size = raw.and_then(|r| r.min_size).unwrap_or(if kind == DirKind::Scalable { 1 } else { size });
+            let max_size = raw.and_then(|r| r.max_size).unwrap_or(if kind == DirKind::Scalable { u32::MAX } else { size });
+            Some(ThemeDir { rel, size, scale, min_size, max_size, threshold, kind })
+        })
         .collect();
     Some(Theme { inherits, dirs })
 }
@@ -192,13 +280,38 @@ fn theme(pack: &str) -> Option<(PathBuf, Theme)> {
     found
 }
 
-/// Fixed-size artwork first, closest size to the row, then `scalable`, then inherited themes.
+fn dir_rank(d: &ThemeDir, px: u32) -> (u8, u32, u32) {
+    let scale_tie = u32::from(d.scale != 1);
+    // In Breeze/Papirus/KDE packs, fixed sub-24pt `places` (`16`, `16@2x`, `22`) hold monochrome panel glyphs;
+    // when rendering >= 24px, prefer full-color fixed or scalable directories and keep < 24pt only as a last resort.
+    if px >= 24 && d.kind != DirKind::Scalable && d.size > 0 && d.size < 24 {
+        return (4, d.size.abs_diff(px), scale_tie);
+    }
+    match d.kind {
+        DirKind::Fixed if d.size == px => (0, 0, scale_tie),
+        DirKind::Threshold if d.size == px => (0, 0, scale_tie),
+        DirKind::Threshold if px >= d.size.saturating_sub(d.threshold) && px <= d.size.saturating_add(d.threshold) => {
+            (1, d.size.abs_diff(px), scale_tie)
+        }
+        DirKind::Scalable if px >= d.min_size && px <= d.max_size => {
+            let nominal = if d.size == 0 { px } else { d.size };
+            (2, nominal.abs_diff(px), scale_tie)
+        }
+        DirKind::Fixed | DirKind::Threshold => (3, d.size.abs_diff(px), scale_tie),
+        DirKind::Scalable => {
+            let dist = if px < d.min_size { d.min_size - px } else { px - d.max_size };
+            (3, dist, scale_tie)
+        }
+    }
+}
+
+/// Freedesktop `FindBestIcon`: each candidate name is searched across ranked directories before falling back
+/// to the next name, then across inherited themes.
 fn find_icon(root: &Path, t: &Theme, names: &[&str], px: u32, visited: &mut Vec<String>) -> Option<PathBuf> {
-    let mut dirs: Vec<&ThemeDir> = t.dirs.iter().filter(|d| d.size > 0).collect();
-    dirs.sort_by_key(|d| d.size.abs_diff(px));
-    dirs.extend(t.dirs.iter().filter(|d| d.size == 0));
-    for d in &dirs {
-        for name in names {
+    let mut dirs: Vec<&ThemeDir> = t.dirs.iter().collect();
+    dirs.sort_by_key(|d| dir_rank(d, px));
+    for name in names {
+        for d in &dirs {
             for ext in ["svg", "png"] {
                 let path = root.join(&d.rel).join(format!("{name}.{ext}"));
                 if path.is_file() {
@@ -327,9 +440,10 @@ fn freedesktop_name(cat: Category, ext: &str) -> &'static str {
     }
 }
 
+/// Freedesktop folder icon names, standard `folder` first, then MIME and legacy fallbacks.
+pub const FOLDER_NAMES: &[&str] = &["folder", "inode-directory", "directory"];
+
 fn freedesktop_image(pack: &str, cat: Category, ext: &str, px: u32) -> Option<Arc<RenderImage>> {
-    // The freedesktop name is `folder`, but many packs ship the older `directory` artwork as well.
-    const FOLDER_NAMES: &[&str] = &["directory", "folder"];
     let kind = freedesktop_name(cat, ext);
     let names = if cat == Category::Folder && ext.is_empty() { FOLDER_NAMES } else { std::slice::from_ref(&kind) };
     image_for_names(pack, names, px)
@@ -349,7 +463,7 @@ fn cached_path(key: (String, String, u32), lookup: impl FnOnce() -> Option<PathB
 /// Icons used on the first paint of a folder, Home and the sidebar. Rasterizing them on a worker
 /// before the first list render keeps the SVG parse and tiny-skia work off the UI thread.
 const PREWARM_NAMES: &[&str] = &[
-    "directory", "folder", "user-desktop", "folder-desktop", "folder-downloads", "folder-download",
+    "folder", "inode-directory", "directory", "user-desktop", "folder-desktop", "folder-downloads", "folder-download",
     "user-downloads", "folder-documents", "user-documents", "folder-pictures", "folder-picture",
     "user-pictures", "folder-music", "user-music", "folder-video", "folder-videos", "user-videos",
     "user-home", "folder-home", "drive-harddisk", "drive-harddisk-system", "drive-removable-media",
@@ -371,7 +485,7 @@ pub fn prewarm(pack: &str) {
         return;
     }
     for name in PREWARM_NAMES {
-        for px in [16, 64] {
+        for px in [crate::image_cache::ICON_PX, 64] {
             let _ = image_for_names(pack, &[name], px);
         }
     }
@@ -390,31 +504,81 @@ pub fn image_for_names(pack: &str, names: &[&str], px: u32) -> Option<Arc<Render
     decode(&path, px)
 }
 
-/// Theme icon names for Windows' known folders. Resolved from the shell so localized folder names
-/// still match; the leaf-name fallback covers paths the shell does not report.
+fn norm_path_key(path: &Path) -> String {
+    let mut s = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    while s.len() > 3 && s.ends_with('\\') {
+        s.pop();
+    }
+    s
+}
+
+/// True when `parent` is a user profile root (`C:\Users\alice`) or a OneDrive root (`H:\OneDrive`,
+/// `C:\Users\alice\OneDrive - Org`). Leaf-name fallbacks only apply directly under these roots so
+/// ordinary project subfolders (`repo\docs`, `Downloads\Pictures`) stay plain folders.
+fn is_special_parent_root(parent: &Path, roots: &[String]) -> bool {
+    let key = norm_path_key(parent);
+    if roots.iter().any(|r| r == &key) {
+        return true;
+    }
+    // `<drive>:\users\<name>` or `<drive>:\users\<name>\onedrive...`
+    let b = key.as_bytes();
+    if b.len() > 9 && b[1] == b':' && b[2] == b'\\' {
+        if let Some(rest) = key[3..].strip_prefix("users\\") {
+            return match rest.split_once('\\') {
+                None => !rest.is_empty(),
+                Some((user, sub)) => !user.is_empty() && !sub.contains('\\') && sub.starts_with("onedrive"),
+            };
+        }
+    }
+    false
+}
+
+/// Theme icon names for Windows' known folders. Exact known-folder paths match first; localized
+/// leaf names only match direct children of a profile or OneDrive root, never nested subfolders.
 pub fn special_folder_names(path: &Path) -> &'static [&'static str] {
-    static KNOWN: OnceLock<Vec<(String, String, &'static [&'static str])>> = OnceLock::new();
-    let known = KNOWN.get_or_init(|| {
+    static KNOWN: OnceLock<(Vec<(String, &'static [&'static str])>, Vec<String>)> = OnceLock::new();
+    let (known, roots) = KNOWN.get_or_init(|| {
         use rf_win::known::KnownFolder;
-        KnownFolder::PINNED_DEFAULTS
+        let all = [
+            KnownFolder::Desktop,
+            KnownFolder::Downloads,
+            KnownFolder::Documents,
+            KnownFolder::Pictures,
+            KnownFolder::Music,
+            KnownFolder::Videos,
+            KnownFolder::Profile,
+        ];
+        let known = all
             .iter()
-            .filter_map(|k| k.path().map(|p| {
-                let p = p.to_string_lossy().to_lowercase();
-                let prefix = format!("{p}\\");
-                (p, prefix, known_folder_names(*k))
-            }))
-            .collect()
+            .filter_map(|k| k.path().map(|p| (norm_path_key(&p), known_folder_names(*k))))
+            .collect();
+        let mut roots = Vec::new();
+        if let Some(p) = KnownFolder::Profile.path() {
+            roots.push(norm_path_key(&p));
+        }
+        for var in ["USERPROFILE", "OneDrive", "OneDriveConsumer", "OneDriveCommercial"] {
+            if let Ok(val) = std::env::var(var) {
+                if !val.trim().is_empty() {
+                    roots.push(norm_path_key(Path::new(val.trim())));
+                }
+            }
+        }
+        (known, roots)
     });
-    let full = path.to_string_lossy().to_lowercase();
-    if let Some((_, _, names)) = known.iter().find(|(p, prefix, _)| full == *p || full.starts_with(prefix)) {
+    let full = norm_path_key(path);
+    if let Some((_, names)) = known.iter().find(|(p, _)| full == *p) {
         return names;
     }
-    match path.file_name().and_then(|n| n.to_str()).map(|n| n.to_ascii_lowercase()).as_deref() {
-        Some("desktop") => &["user-desktop", "folder-desktop"],
-        Some("downloads") => &["folder-downloads", "folder-download", "user-downloads"],
-        Some("documents") => &["folder-documents", "user-documents"],
+    let Some(parent) = path.parent() else { return &[] };
+    if !is_special_parent_root(parent, roots) {
+        return &[];
+    }
+    match path.file_name().and_then(|n| n.to_str()).map(|n| n.to_lowercase()).as_deref() {
+        Some("desktop" | "área de trabalho") => &["user-desktop", "folder-desktop"],
+        Some("downloads" | "transferências") => &["folder-downloads", "folder-download", "user-downloads"],
+        Some("documents" | "documentos") => &["folder-documents", "user-documents"],
         Some("pictures" | "imagens") => &["folder-pictures", "folder-picture", "user-pictures"],
-        Some("music" | "música") => &["folder-music", "user-music"],
+        Some("music" | "música" | "musicas" | "músicas") => &["folder-music", "user-music"],
         Some("videos" | "vídeos") => &["folder-video", "folder-videos", "user-videos"],
         _ => &[],
     }
@@ -506,8 +670,16 @@ mod tests {
         std::fs::remove_dir_all(root).ok();
     }
 
+    fn fixed_dir(rel: &str, size: u32) -> ThemeDir {
+        ThemeDir { rel: rel.into(), size, scale: 1, min_size: size, max_size: size, threshold: 2, kind: DirKind::Fixed }
+    }
+
+    fn scalable_dir(rel: &str, size: u32) -> ThemeDir {
+        ThemeDir { rel: rel.into(), size, scale: 1, min_size: 1, max_size: u32::MAX, threshold: 2, kind: DirKind::Scalable }
+    }
+
     #[test]
-    fn exact_size_wins_over_scalable() {
+    fn exact_size_wins_at_its_size_and_scalable_wins_at_large_sizes() {
         let root = temp_root("lookup");
         let small = root.join("16x16/mimetypes");
         let big = root.join("scalable/mimetypes");
@@ -515,12 +687,12 @@ mod tests {
         std::fs::create_dir_all(&big).unwrap();
         std::fs::write(small.join("text-x-generic.png"), b"png").unwrap();
         std::fs::write(big.join("text-x-generic.svg"), b"<svg/>").unwrap();
-        let t = Theme { inherits: Vec::new(), dirs: vec![ThemeDir { rel: "16x16/mimetypes".into(), size: 16 }, ThemeDir { rel: "scalable/mimetypes".into(), size: 0 }] };
+        let t = Theme { inherits: Vec::new(), dirs: vec![fixed_dir("16x16/mimetypes", 16), scalable_dir("scalable/mimetypes", 0)] };
         let names = vec!["text-x-generic"];
         let found = find_icon(&root, &t, &names, 16, &mut Vec::new()).unwrap();
         assert_eq!(found, small.join("text-x-generic.png"));
         let found = find_icon(&root, &t, &names, 64, &mut Vec::new()).unwrap();
-        assert_eq!(found, small.join("text-x-generic.png"));
+        assert_eq!(found, big.join("text-x-generic.svg"), "scalable artwork beats a 16px panel icon at 64px");
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -532,7 +704,7 @@ mod tests {
         std::fs::create_dir_all(&small).unwrap();
         std::fs::create_dir_all(&big).unwrap();
         std::fs::write(big.join("text-x-generic.svg"), b"<svg/>").unwrap();
-        let t = Theme { inherits: Vec::new(), dirs: vec![ThemeDir { rel: "16x16/mimetypes".into(), size: 16 }, ThemeDir { rel: "scalable/mimetypes".into(), size: 0 }] };
+        let t = Theme { inherits: Vec::new(), dirs: vec![fixed_dir("16x16/mimetypes", 16), scalable_dir("scalable/mimetypes", 0)] };
         let names = vec!["text-x-generic"];
         let found = find_icon(&root, &t, &names, 16, &mut Vec::new()).unwrap();
         assert_eq!(found, big.join("text-x-generic.svg"));
@@ -624,9 +796,13 @@ mod tests {
     }
 
     #[test]
-    fn special_folders_get_their_own_icon_names() {
+    fn special_folders_get_their_own_icon_names_without_leaking_to_subfolders() {
         assert_eq!(special_folder_names(Path::new(r"C:\Users\x\Downloads"))[0], "folder-downloads");
         assert_eq!(special_folder_names(Path::new(r"C:\Users\x\Documents"))[0], "folder-documents");
+        assert_eq!(special_folder_names(Path::new(r"C:\Users\x\OneDrive\Pictures"))[0], "folder-pictures");
+        assert!(special_folder_names(Path::new(r"C:\Users\x\Downloads\Subfolder")).is_empty(), "subfolders inside Downloads stay plain folders");
+        assert!(special_folder_names(Path::new(r"C:\Users\x\Downloads\Pictures")).is_empty(), "a nested Pictures inside Downloads stays a plain folder");
+        assert!(special_folder_names(Path::new(r"H:\Workspace\repo\Documents")).is_empty(), "project folders named Documents stay plain folders");
         assert!(special_folder_names(Path::new(r"C:\Users\x\Random")).is_empty());
     }
 
@@ -635,6 +811,7 @@ mod tests {
         assert_eq!(special_folder_names(Path::new(r"C:\Users\x\Imagens"))[0], "folder-pictures");
         assert_eq!(special_folder_names(Path::new(r"C:\Users\x\Música"))[0], "folder-music");
         assert_eq!(special_folder_names(Path::new(r"C:\Users\x\Vídeos"))[0], "folder-video");
+        assert!(special_folder_names(Path::new(r"C:\Users\x\Imagens\Férias")).is_empty());
     }
 
     #[test]
@@ -686,16 +863,41 @@ mod tests {
     #[test]
     fn icon_names_are_tried_in_order_and_svg_beats_png() {
         let root = temp_root("name-order");
-        let dir = root.join("16x16/places");
+        let dir = root.join("32x32/places");
+        let fallback_dir = root.join("32x32/mimetypes");
         std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&fallback_dir).unwrap();
         std::fs::write(dir.join("folder.svg"), b"<svg/>").unwrap();
         std::fs::write(dir.join("folder.png"), b"png").unwrap();
-        std::fs::write(dir.join("directory.png"), b"png").unwrap();
-        let t = Theme { inherits: Vec::new(), dirs: vec![ThemeDir { rel: "16x16/places".into(), size: 16 }] };
-        let found = find_icon(&root, &t, &["directory", "folder"], 16, &mut Vec::new()).unwrap();
-        assert_eq!(found, dir.join("directory.png"), "an earlier name wins");
-        let found = find_icon(&root, &t, &["folder"], 16, &mut Vec::new()).unwrap();
-        assert_eq!(found, dir.join("folder.svg"), "svg beats png for the same name");
+        std::fs::write(fallback_dir.join("inode-directory.svg"), b"<svg/>").unwrap();
+        let t = Theme { inherits: Vec::new(), dirs: vec![fixed_dir("32x32/mimetypes", 32), fixed_dir("32x32/places", 32)] };
+        let found = find_icon(&root, &t, FOLDER_NAMES, 32, &mut Vec::new()).unwrap();
+        assert_eq!(found, dir.join("folder.svg"), "`folder` in places beats `inode-directory` in an earlier mimetypes dir, and svg beats png");
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn actions_symbolic_and_panel_dirs_never_hijack_folder_icons() {
+        let root = temp_root("kora-papirus");
+        for rel in ["16x16/actions", "16x16/places", "places/symbolic", "places/scalable"] {
+            std::fs::create_dir_all(root.join(rel)).unwrap();
+        }
+        std::fs::write(root.join("16x16/actions/directory.svg"), b"<svg/>").unwrap();
+        std::fs::write(root.join("16x16/places/folder.svg"), b"<svg/>").unwrap();
+        std::fs::write(root.join("places/symbolic/folder.svg"), b"<svg/>").unwrap();
+        std::fs::write(root.join("places/scalable/folder.svg"), b"<svg/>").unwrap();
+        std::fs::write(
+            root.join("index.theme"),
+            "[Icon Theme]\nName=Test\nDirectories=16x16/actions,16x16/places,places/symbolic,places/scalable\n\n\
+             [16x16/actions]\nSize=16\nContext=Actions\nType=Fixed\n\n\
+             [16x16/places]\nSize=16\nContext=Places\nType=Fixed\n\n\
+             [places/symbolic]\nSize=16\nContext=Places\nType=Scalable\nMinSize=8\nMaxSize=512\n\n\
+             [places/scalable]\nSize=64\nContext=Places\nType=Scalable\nMinSize=8\nMaxSize=512\n",
+        )
+        .unwrap();
+        let t = parse_index(&root).unwrap();
+        let found = find_icon(&root, &t, FOLDER_NAMES, 32, &mut Vec::new()).unwrap();
+        assert_eq!(found, root.join("places/scalable/folder.svg"), "32px folder lookup skips actions, symbolic and 16pt panel glyphs");
         std::fs::remove_dir_all(root).ok();
     }
 

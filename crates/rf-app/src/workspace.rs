@@ -3661,16 +3661,34 @@ impl Workspace {
         // on the rail only the icon; hovering the rail opens the full sidebar over the content
         let rail = self.sidebar_rail;
         let icon_px = if rail { 18. } else { 16. };
+        let req_px = crate::image_cache::ICON_PX;
         let themed = if !matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop) {
             None
         } else {
             let pack = crate::settings::icon_theme_pack();
-            let names = if !theme_names.is_empty() {
-                theme_names
+            if theme_names == crate::icon_theme::FOLDER_NAMES
+                && let Some(path) = target.path()
+            {
+                if crate::image_cache::pinned_folder_keeps_shell_icon(path) {
+                    path.parent()
+                        .zip(path.file_name())
+                        .and_then(|(dir, name)| {
+                            let e = rf_core::Entry::new(&name.to_string_lossy(), rf_core::EntryKind::Dir, 0, 0, 0, 0x10 | 0x1);
+                            self.images.update(cx, |c, cx| c.icon(dir, &e, cx))
+                        })
+                } else {
+                    let special = crate::icon_theme::special_folder_names(path);
+                    let named = (!special.is_empty()).then(|| crate::icon_theme::image_for_names(&pack, special, req_px)).flatten();
+                    named.or_else(|| crate::icon_theme::image_for_names(&pack, crate::icon_theme::FOLDER_NAMES, req_px))
+                }
             } else {
-                target.path().map(crate::icon_theme::special_folder_names).unwrap_or_default()
-            };
-            (!names.is_empty()).then(|| crate::icon_theme::image_for_names(&pack, names, icon_px as u32)).flatten()
+                let names = if !theme_names.is_empty() {
+                    theme_names
+                } else {
+                    target.path().map(crate::icon_theme::special_folder_names).unwrap_or_default()
+                };
+                (!names.is_empty()).then(|| crate::icon_theme::image_for_names(&pack, names, req_px)).flatten()
+            }
         };
         // Over glass the selected row is a lens the engine draws behind the scene: no fill and no accent bar, but a probe that reports
         // the row's place on every paint (a scroll or a resize moves the lens with it). Two rows can be "selected" at once (a folder
@@ -3922,7 +3940,7 @@ impl Workspace {
             let title = crate::i18n::td(&f.title);
             let drag = PinDrag { ix: i, path: f.path.clone(), title: title.clone().into() };
             let target_path = f.path.clone();
-            let item = self.sidebar_item(("sb-pin", i).into(), f.icon, p.accent, title, loc, active, true, None, p, cx, &[]);
+            let item = self.sidebar_item(("sb-pin", i).into(), f.icon, p.accent, title, loc, active, true, None, p, cx, crate::icon_theme::FOLDER_NAMES);
             // drag a pin onto another to reorder
             head = head.child(
                 div()
@@ -4052,7 +4070,7 @@ impl Workspace {
             for (i, l) in libraries.into_iter().enumerate() {
                 let loc = Location::Library { file: l.file.clone(), name: l.name.clone() };
                 let active = cur == loc;
-                col = col.child(self.sidebar_item(("sb-lib", i).into(), L::Library, p.accent, l.name, loc, active, false, None, p, cx, &["folder"]));
+                col = col.child(self.sidebar_item(("sb-lib", i).into(), L::Library, p.accent, l.name, loc, active, false, None, p, cx, crate::icon_theme::FOLDER_NAMES));
             }
         }
         let network = self.places.read(cx).network.clone();

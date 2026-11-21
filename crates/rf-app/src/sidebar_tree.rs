@@ -205,7 +205,7 @@ impl Holder {
 fn list_folders(path: &Path) -> Result<Vec<DirItem>, ListFailure> {
     let mut out = Vec::new();
     let r = rf_win::list_dir(path, 4096, &|| false, &mut |batch| {
-        out.extend(batch.iter().filter(|e| e.is_dir()).map(|e| dir_item(path, e)));
+        out.extend(batch.iter().filter(|e| e.is_dir()).map(dir_item));
     });
     match r {
         Ok(_) => Ok(out),
@@ -221,20 +221,20 @@ fn read_changes(dir: &Path, names: Vec<String>) -> Result<Vec<Change>, ListError
         .into_iter()
         .map(|n| {
             rf_win::stat_entry(dir, &n).map(|e| match e {
-                Some(e) if e.is_dir() => Change { name: e.name.to_string(), item: Some(dir_item(dir, &e)) },
+                Some(e) if e.is_dir() => Change { name: e.name.to_string(), item: Some(dir_item(&e)) },
                 _ => Change { name: n, item: None },
             })
         })
         .collect()
 }
 
-fn dir_item(dir: &Path, e: &rf_core::Entry) -> DirItem {
+fn dir_item(e: &rf_core::Entry) -> DirItem {
     DirItem {
         name: e.name.to_string(),
         label: e.label.as_deref().map(str::to_string),
         hidden: e.is_hidden(),
         system: e.is_system(),
-        own_icon: crate::image_cache::folder_keeps_shell_icon(dir, e),
+        own_icon: rf_win::thumbs::folder_has_own_icon(e.attrs),
     }
 }
 
@@ -704,8 +704,13 @@ impl SidebarTree {
         let covers = !selected && mark == Some((ix, false));
         let cursor = info.cursor && focused;
         let (expanded, can_expand, root, hidden, slow) = (info.expanded, info.can_expand, info.root, info.hidden, info.slow);
-        // a customised folder (not a root) shows the icon Windows gives it, as the file list does (issue 65)
-        let own_icon = (info.own_icon && root.is_none())
+        let freedesktop = matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop);
+        // Native mode asks the shell for any READONLY/SYSTEM folder (`Music`, `Videos`, custom icons). With a pack active,
+        // only a real user-chosen `desktop.ini` icon beats the pack, re-evaluated across F5/Properties via `FOLDER_ICON_GEN`.
+        let wants_shell_icon = info.own_icon
+            && root.is_none()
+            && (!freedesktop || crate::image_cache::folder_path_keeps_shell_icon(info.path, 0, 0x10 | 0x1));
+        let own_icon = wants_shell_icon
             .then(|| {
                 let (dir, name) = (info.path.parent()?.to_path_buf(), info.path.file_name()?.to_string_lossy().into_owned());
                 let e = rf_core::Entry::new(&name, rf_core::EntryKind::Dir, 0, 0, 0, 0x10 | 0x1);
@@ -714,17 +719,17 @@ impl SidebarTree {
             .flatten();
         // A pack replaces the Lucide glyph on every row, root places included. A custom `desktop.ini` folder keeps its own picture.
         let pack = crate::settings::icon_theme_pack();
-        let themed_icon = if info.own_icon || !matches!(crate::settings::icon_theme(), crate::settings::IconThemePref::Freedesktop) {
+        let req_px = crate::image_cache::ICON_PX;
+        let themed_icon = if wants_shell_icon || !freedesktop {
             None
         } else {
-            let names = match root {
-                Some(kind) => root_icon_names(kind),
-                None => crate::icon_theme::special_folder_names(&info.path),
-            };
-            if names.is_empty() {
-                crate::icon_theme::image_for_names(&pack, &["directory", "folder"], 16)
-            } else {
-                crate::icon_theme::image_for_names(&pack, names, 16)
+            match root {
+                Some(kind) => crate::icon_theme::image_for_names(&pack, root_icon_names(kind), req_px),
+                None => {
+                    let names = crate::icon_theme::special_folder_names(info.path);
+                    let special = (!names.is_empty()).then(|| crate::icon_theme::image_for_names(&pack, names, req_px)).flatten();
+                    special.or_else(|| crate::icon_theme::image_for_names(&pack, crate::icon_theme::FOLDER_NAMES, req_px))
+                }
             }
         };
         let folder_picture = themed_icon.or(own_icon);

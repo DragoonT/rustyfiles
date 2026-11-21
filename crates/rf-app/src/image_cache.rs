@@ -278,32 +278,37 @@ impl ImageCache {
         });
     }
 
-    /// Small shell icon for a row. Generic types are cached per extension, plain folders once; a folder that can have an icon of its
-    /// own (`folder_has_own_icon`) is asked for it, like a program or a shortcut.
+    /// Small icon for a row (`ICON_PX`). Generic types are cached per extension, plain folders once;
+    /// a folder that can have an icon of its own (`folder_has_own_icon`) is asked per folder.
     pub fn icon(&mut self, dir: &Path, e: &Entry, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
-        let unique = own_picture(dir, e);
+        self.icon_sized(dir, e, ICON_PX, cx)
+    }
+
+    /// Icon at an explicit pixel size (e.g. Grid/Cards/Desktop tiles when content thumbnails are off).
+    pub fn icon_sized(&mut self, dir: &Path, e: &Entry, size: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         // A user's theme-folder picture wins over a freedesktop pack (issues 93 and 94).
-        if let Some(f) = crate::themes::icon_file(e.is_dir(), &e.ext, unique) {
-            return self.theme_icon(f, ICON_PX, cx);
+        if let Some(f) = crate::themes::icon_file(e.is_dir(), &e.ext, shell_own_picture(e)) {
+            return self.theme_icon(f, size, cx);
         }
         let pack = crate::settings::icon_theme_pack();
-        if let Some(icon) = themed_picture(dir, e, crate::settings::icon_theme(), &pack, false, ICON_PX) {
+        if let Some(icon) = themed_picture(dir, e, crate::settings::icon_theme(), &pack, false, size) {
             return Some(icon);
         }
+        let unique = shell_own_picture(e);
         let key = if unique && e.is_dir() {
             // (with the folder's time and attributes: an icon chosen later changes one of them, and the old picture is not kept)
             let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
-            key_of(&[&"dirpath", &dir, &&*e.name, &e.modified_ms, &e.attrs, &ICON_PX, &generation])
+            key_of(&[&"dirpath", &dir, &&*e.name, &e.modified_ms, &e.attrs, &size, &generation])
         } else if e.is_dir() {
-            key_of(&[&"dir", &ICON_PX])
+            key_of(&[&"dir", &size])
         } else if unique {
-            key_of(&[&"path", &dir, &&*e.name, &ICON_PX])
+            key_of(&[&"path", &dir, &&*e.name, &size])
         } else {
-            key_of(&[&"ext", &&*e.ext, &ICON_PX])
+            key_of(&[&"ext", &&*e.ext, &size])
         };
         let path = dir.join(&*e.name);
         // Per-file icons (exe/lnk/…) are unbounded in number: keep them in the LRU too.
-        let r = self.lookup(key, || Request::new(key, path, ICON_PX, Kind::Icon), unique);
+        let r = self.lookup(key, || Request::new(key, path, size, Kind::Icon), unique);
         self.evict_over_budget();
         self.release_evicted(cx);
         r
@@ -395,32 +400,30 @@ impl ImageCache {
     }
 
     fn thumbnail_as(&mut self, dir: &Path, e: &Entry, size: u32, urgent: bool, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
-        // the theme folder's picture for what has no content picture (a folder too: the theme's folder wins over its preview)
+        // The theme folder's picture for what has no content picture (a folder too: the theme's folder wins over its preview).
         if !crate::icons::has_thumbnail(e)
-            && let Some(f) = crate::themes::icon_file(e.is_dir(), &e.ext, own_picture(dir, e))
+            && let Some(f) = crate::themes::icon_file(e.is_dir(), &e.ext, shell_own_picture(e))
         {
             return self.theme_icon(f, size, cx);
         }
-        // a folder at a large size shows what is in it, as Explorer's do (issue 158): the shell draws that picture (the folder with its
-        // first pictures in it); a folder it has none for gets the folder icon back (`rf_win::thumbs`)
-        // (not a folder with an icon of its own, nor one inside an archive or on FTP, which the shell cannot open)
+        // When a freedesktop pack is active, folders and non-thumbnail files take the pack's artwork at `size`
+        // unless the user gave a folder its own custom `desktop.ini` icon; real content thumbnails still win.
+        let pack = crate::settings::icon_theme_pack();
+        if let Some(icon) = themed_picture(dir, e, crate::settings::icon_theme(), &pack, true, size) {
+            return Some(icon);
+        }
+        // In native mode (or when the pack has no folder icon), a plain folder at >= 64px shows Explorer's folder preview.
+        let own = shell_own_picture(e);
         let folder_preview = e.is_dir()
             && size >= FOLDER_PREVIEW_MIN
-            && !own_picture(dir, e)
+            && !own
             && !rf_win::ftp::is_ftp(dir)
             && !crate::nav_touch::may_hold_archive(dir);
         let wants_thumb = crate::icons::has_thumbnail(e) || folder_preview;
-        // A pack picture applies when no real content thumbnail is pending. Folder previews keep the shell picture: the pack has no
-        // first-pictures-in-it artwork. Without thumbnails the pack still supplies the folder/file kind icon.
-        let pack = crate::settings::icon_theme_pack();
-        if !folder_preview {
-            if let Some(icon) = themed_picture(dir, e, crate::settings::icon_theme(), &pack, true, size) {
-                return Some(icon);
-            }
-        }
-        let per_file = wants_thumb || own_picture(dir, e);
+        let per_file = wants_thumb || own;
         let key = if per_file && e.is_dir() && !wants_thumb {
-            key_of(&[&"dirpathL", &dir, &&*e.name, &e.modified_ms, &e.attrs, &size])
+            let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
+            key_of(&[&"dirpathL", &dir, &&*e.name, &e.modified_ms, &e.attrs, &size, &generation])
         } else if per_file {
             file_picture_key(urgent && wants_thumb, dir, &e.name, &e.modified_ms, size)
         } else if e.is_dir() {
@@ -463,25 +466,57 @@ impl ImageCache {
     }
 }
 
-/// Whether an entry's icon is its own and not its kind's: a program, a shortcut and the like, or a folder with a real
-/// `desktop.ini` icon. A READONLY folder with no icon (or only a Windows type icon) is not one: the theme draws it.
-fn own_picture(dir: &Path, e: &Entry) -> bool {
-    if e.is_dir() { folder_keeps_shell_icon(dir, e) } else { has_unique_icon(&e.ext) }
+/// Native shell cache policy: a program, a shortcut and the like, or any folder Windows marks as
+/// potentially customised (`READONLY | SYSTEM`) gets a per-path cache key so `Music`, `Videos` and
+/// custom folders never share or poison the plain folder slot (`"dir"` / `"dirL"`).
+fn shell_own_picture(e: &Entry) -> bool {
+    if e.is_dir() { folder_has_own_icon(e.attrs) } else { has_unique_icon(&e.ext) }
 }
 
-/// A `desktop.ini` icon that cannot give the folder a picture: a Windows type icon (Pictures, Documents,
-/// ...) the pack draws itself, or a file that no longer exists. Only a real, present user-chosen icon keeps the shell picture.
-fn folder_icon_is_real(file: &str, folder: &Path) -> bool {
-    let file = rf_win::dock::pins::expand_vars(file.trim(), |name| std::env::var(name).ok());
-    let path = PathBuf::from(file);
-    let path = if path.is_relative() { folder.join(path) } else { path };
-    let lower = path.to_string_lossy().to_ascii_lowercase().replace('\\', "/");
-    let system_dll = matches!(path.file_name().and_then(|n| n.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("imageres.dll" | "shell32.dll"));
-    let in_windows = std::env::var("SystemRoot").map(|r| {
-        let root = r.trim_end_matches(['\\', '/']).to_ascii_lowercase().replace('\\', "/");
-        lower.starts_with(&format!("{root}/"))
-    }).unwrap_or(false);
-    !system_dll && !in_windows && path.exists()
+/// Default Windows folder/known-folder icon indices in `shell32.dll` and `imageres.dll`. Any other
+/// index picked by the user via Properties → Customize → Change Icon (`shell32.dll,127`, `shell32.dll,15`)
+/// is a real user customisation and beats the icon pack.
+fn is_windows_default_folder_resource(dll_lower: &str, index: i32) -> bool {
+    match dll_lower {
+        "shell32.dll" => matches!(index, 3 | 4 | -4 | -5 | -173 | -235 | -236 | -237 | -238),
+        "imageres.dll" => matches!(
+            index,
+            -3 | -4 | -5 | -18 | -108 | -112 | -113 | -115 | -117 | -123 | -181 | -183 | -184 | -185 | -186 | -189 | -198
+        ),
+        "windows.storage.dll" => true,
+        _ => false,
+    }
+}
+
+/// Whether `info` from `desktop.ini` represents a real, present user-chosen folder icon rather than
+/// a built-in Windows folder type (`Music`, `Pictures`, ...) or OneDrive's automatic sync stamp.
+fn folder_icon_is_real(info: &rf_win::folder_custom::FolderIcon, folder: &Path) -> bool {
+    let expanded = rf_win::folder_custom::expand_env(info.file.trim());
+    if expanded.is_empty() {
+        return false;
+    }
+    let raw = PathBuf::from(&expanded);
+    let file_name = raw.file_name().and_then(|n| n.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+    if file_name == "onedrive.exe" {
+        return false;
+    }
+    let is_sys_dll = matches!(file_name.as_str(), "imageres.dll" | "shell32.dll" | "windows.storage.dll");
+    if is_sys_dll && (info.localized || is_windows_default_folder_resource(&file_name, info.index)) {
+        return false;
+    }
+    let resolved = if raw.is_relative() {
+        let local = folder.join(&raw);
+        if local.exists() {
+            local
+        } else if !expanded.contains(['\\', '/']) {
+            std::env::var("SystemRoot").map(|r| PathBuf::from(r).join("System32").join(&raw)).unwrap_or(local)
+        } else {
+            local
+        }
+    } else {
+        raw
+    };
+    resolved.exists()
 }
 
 /// The mark alone is not enough: `C:\Users` and `Program Files (x86)` are READONLY but have no custom picture.
@@ -490,15 +525,35 @@ pub(crate) fn folder_keeps_shell_icon(dir: &Path, e: &Entry) -> bool {
     if !folder_has_own_icon(e.attrs) {
         return false;
     }
-    let path = dir.join(&*e.name);
+    folder_path_keeps_shell_icon(&dir.join(&*e.name), e.modified_ms, e.attrs)
+}
+
+pub(crate) fn folder_path_keeps_shell_icon(path: &Path, modified_ms: i64, attrs: u32) -> bool {
+    if !folder_has_own_icon(attrs) {
+        return false;
+    }
     let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
     static CACHE: OnceLock<Mutex<HashMap<(PathBuf, i64, u32, u32), bool>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let key = (path.clone(), e.modified_ms, e.attrs, generation);
+    let key = (path.to_path_buf(), modified_ms, attrs, generation);
     if let Some(hit) = cache.lock().unwrap().get(&key) {
         return *hit;
     }
-    let found = rf_win::folder_custom::folder_icon(&path).is_some_and(|(file, _)| folder_icon_is_real(&file, &path));
+    let found = rf_win::folder_custom::folder_icon_info(path).is_some_and(|info| folder_icon_is_real(&info, path));
+    cache.lock().unwrap().insert(key, found);
+    found
+}
+
+/// Cached custom-icon check for callers (Home, sidebar pins) that only hold a folder `Path` and no `Entry`.
+pub(crate) fn pinned_folder_keeps_shell_icon(path: &Path) -> bool {
+    let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
+    static PIN_CACHE: OnceLock<Mutex<HashMap<(PathBuf, u32), bool>>> = OnceLock::new();
+    let cache = PIN_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = (path.to_path_buf(), generation);
+    if let Some(hit) = cache.lock().unwrap().get(&key) {
+        return *hit;
+    }
+    let found = rf_win::folder_custom::local_custom_attrs(path).is_some_and(|attrs| folder_path_keeps_shell_icon(path, 0, attrs));
     cache.lock().unwrap().insert(key, found);
     found
 }
@@ -507,8 +562,12 @@ pub(crate) fn folder_keeps_shell_icon(dir: &Path, e: &Entry) -> bool {
 /// `skip_thumbnail_kinds` is set on the thumbnail path: there an image's own preview must win; with thumbnails off the pack still
 /// supplies the file-kind picture.
 fn themed_picture(dir: &Path, e: &Entry, pref: crate::settings::IconThemePref, pack: &str, skip_thumbnail_kinds: bool, px: u32) -> Option<Arc<RenderImage>> {
-    // A pack owns system folders too; only a real `desktop.ini` icon wins. Programs and shortcuts keep their shell picture.
-    if own_picture(dir, e) || (skip_thumbnail_kinds && crate::icons::has_thumbnail(e)) {
+    if !matches!(pref, crate::settings::IconThemePref::Freedesktop) || pack.is_empty() {
+        return None;
+    }
+    // A pack owns system folders too; only a real user-chosen `desktop.ini` icon wins. Programs and shortcuts keep their shell picture.
+    let keeps_shell = if e.is_dir() { folder_keeps_shell_icon(dir, e) } else { has_unique_icon(&e.ext) };
+    if keeps_shell || (skip_thumbnail_kinds && crate::icons::has_thumbnail(e)) {
         return None;
     }
     let themed = if e.is_dir() {
@@ -523,22 +582,21 @@ fn themed_picture(dir: &Path, e: &Entry, pref: crate::settings::IconThemePref, p
 #[cfg(test)]
 mod tests {
     // (not `super::*`: the toolkit's glob import brings a `test` attribute of its own that shadows the standard one)
-    use super::{cost, file_picture_key, folder_keeps_shell_icon, forget_pending, own_picture, refresh_folder_icons, themed_picture};
+    use super::{cost, file_picture_key, folder_icon_is_real, folder_keeps_shell_icon, forget_pending, refresh_folder_icons, shell_own_picture, themed_picture};
     use crate::settings::IconThemePref;
 
-    /// A plain folder shares the folders' one picture; a folder Windows marks as customised (read-only or system) is asked for its
-    /// own, as a program is; a document is not.
+    /// Native mode keeps per-folder keys for any READONLY/SYSTEM folder so `Music`, `Videos` and custom folders
+    /// never share or poison the plain folder slot (`"dir"` / `"dirL"`).
     #[test]
     fn a_customised_folder_and_a_program_have_pictures_of_their_own() {
         use rf_core::{Entry, EntryKind};
         let dir = |attrs: u32| Entry::new("klasör", EntryKind::Dir, 0, 0, 0, 0x10 | attrs);
-        let here = Path::new(r"C:\");
-        assert!(!own_picture(here, &dir(0)), "a plain folder");
-        assert!(!own_picture(here, &dir(0x2)), "a hidden folder is not a customised one");
-        assert!(!own_picture(here, &dir(0x1)), "read-only alone has no icon");
-        assert!(!own_picture(here, &dir(0x4)), "a system folder has no icon of its own");
-        assert!(own_picture(here, &Entry::new("a.exe", EntryKind::File, 1, 0, 0, 0x20)));
-        assert!(!own_picture(here, &Entry::new("a.txt", EntryKind::File, 1, 0, 0, 0x21)), "a read-only document is still its kind's picture");
+        assert!(!shell_own_picture(&dir(0)), "a plain folder");
+        assert!(!shell_own_picture(&dir(0x2)), "a hidden folder is not a customised one");
+        assert!(shell_own_picture(&dir(0x1)), "read-only: how Explorer marks a folder with desktop.ini");
+        assert!(shell_own_picture(&dir(0x4)), "a system folder (Downloads, Documents)");
+        assert!(shell_own_picture(&Entry::new("a.exe", EntryKind::File, 1, 0, 0, 0x20)));
+        assert!(!shell_own_picture(&Entry::new("a.txt", EntryKind::File, 1, 0, 0, 0x21)), "a read-only document is still its kind's picture");
     }
     use std::collections::HashMap;
     use std::path::Path;
@@ -607,9 +665,10 @@ mod tests {
         assert!(folder_keeps_shell_icon(&root, &e()), "a user-chosen icon is");
     }
 
-    /// A type icon from Windows (the Pictures/Documents desktop.ini on OneDrive) is not a user's choice: a pack must be able to replace it.
+    /// Built-in Windows folder type icons and OneDrive sync markers yield to the pack, while a user-chosen
+    /// `shell32.dll` icon (Properties → Customize → Change Icon) or `.ico` file beats the pack.
     #[test]
-    fn a_windows_type_icon_does_not_keep_the_shell_picture() {
+    fn windows_type_and_onedrive_icons_yield_to_pack_while_user_shell32_icons_win() {
         use rf_core::{Entry, EntryKind};
         let root = std::env::temp_dir().join(format!("rf-icon-type-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         let folder = root.join("Pictures");
@@ -617,14 +676,28 @@ mod tests {
         let icon = root.join("my.ico");
         std::fs::write(&icon, b"ico").unwrap();
         let e = || Entry::new("Pictures", EntryKind::Dir, 0, 0, 0, 0x10 | 0x1);
-        for icon in ["%SystemRoot%\\system32\\imageres.dll,-112", "C:\\Windows\\System32\\shell32.dll,4", "imageres.dll,-113"] {
-            std::fs::write(folder.join("desktop.ini"), format!("[.ShellClassInfo]\nIconResource={icon}\n")).unwrap();
+        for sys_icon in ["%SystemRoot%\\system32\\imageres.dll,-112", "C:\\Windows\\System32\\shell32.dll,4", "imageres.dll,-113"] {
+            std::fs::write(folder.join("desktop.ini"), format!("[.ShellClassInfo]\nIconResource={sys_icon}\n")).unwrap();
             refresh_folder_icons();
-            assert!(!folder_keeps_shell_icon(&root, &e()), "{icon} is a Windows type icon");
+            assert!(!folder_keeps_shell_icon(&root, &e()), "{sys_icon} is a Windows type icon");
         }
+        std::fs::write(
+            folder.join("desktop.ini"),
+            "[.ShellClassInfo]\nLocalizedResourceName=@%SystemRoot%\\system32\\shell32.dll,-21790\nIconResource=%SystemRoot%\\system32\\imageres.dll,-108\n",
+        )
+        .unwrap();
+        refresh_folder_icons();
+        assert!(!folder_keeps_shell_icon(&root, &e()), "localized Music folder yields to the pack");
+        std::fs::write(folder.join("desktop.ini"), "[.ShellClassInfo]\nIconResource=C:\\Program Files\\Microsoft OneDrive\\OneDrive.exe,7\n").unwrap();
+        refresh_folder_icons();
+        assert!(!folder_keeps_shell_icon(&root, &e()), "OneDrive sync stamp yields to the pack");
+        // User-chosen shell32.dll icon (no LocalizedResourceName, non-default index like 127 or 15) must beat the pack.
+        std::fs::write(folder.join("desktop.ini"), "[.ShellClassInfo]\nIconResource=%SystemRoot%\\System32\\shell32.dll,127\n").unwrap();
+        refresh_folder_icons();
+        assert!(folder_keeps_shell_icon(&root, &e()), "a user-chosen shell32.dll icon beats the pack");
         std::fs::write(folder.join("desktop.ini"), format!("[.ShellClassInfo]\nIconResource={},0\n", icon.display())).unwrap();
         refresh_folder_icons();
-        assert!(folder_keeps_shell_icon(&root, &e()), "a user-chosen icon still wins");
+        assert!(folder_keeps_shell_icon(&root, &e()), "a user-chosen .ico file beats the pack");
         std::fs::remove_dir_all(root).ok();
     }
 
@@ -666,12 +739,13 @@ mod tests {
     /// A user icon under a Windows installation on another drive is still a user icon, not a type icon.
     #[test]
     fn a_windows_path_on_another_drive_is_not_blanket_rejected() {
+        use rf_win::folder_custom::FolderIcon;
         let root = std::env::temp_dir().join(format!("rf-icon-drive-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
         std::fs::create_dir_all(&root).unwrap();
         let icon = root.join("my.ico");
         std::fs::write(&icon, b"ico").unwrap();
-        assert!(super::folder_icon_is_real(&icon.to_string_lossy(), &root));
-        assert!(!super::folder_icon_is_real("C:\\Windows\\System32\\imageres.dll", &root));
+        assert!(folder_icon_is_real(&FolderIcon { file: icon.to_string_lossy().into_owned(), index: 0, localized: false }, &root));
+        assert!(!folder_icon_is_real(&FolderIcon { file: "C:\\Windows\\System32\\imageres.dll".into(), index: -112, localized: false }, &root));
         std::fs::remove_dir_all(root).ok();
     }
 
