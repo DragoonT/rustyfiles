@@ -476,6 +476,9 @@ pub struct FolderView {
     grid_cols: usize,
     /// Rows per column of the List filled column by column (issue 170), as drawn last; 0 when the folder is not shown so.
     list_rows: usize,
+    /// The last frame showed an unfinished download's file (`.hdpart`) with its progress: the next one is drawn soon after.
+    parts_shown: std::cell::Cell<bool>,
+    part_tick: bool,
     /// The List filled column by column: each column's left edge and width as drawn last (content coordinates).
     list_cols: Vec<(f32, f32)>,
     /// The column widths measured from the names, and what they were measured for (see `list_column_widths`).
@@ -708,6 +711,8 @@ impl FolderView {
             },
             grid_cols: 1,
             list_rows: 0,
+            parts_shown: std::cell::Cell::new(false),
+            part_tick: false,
             list_cols: Vec::new(),
             list_widths: None,
             grid_size: DEFAULT_GRID_SIZE,
@@ -1003,7 +1008,7 @@ impl FolderView {
                     .relative()
                     .when(selected, |d| d.bg(p.selection).child(theme::selection_pill(&p)))
                     .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
-                    .child(link_marked(
+                    .child(download_marked(link_marked(
                         match &shell_icon {
                             Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
                             None => Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, p.dark)).into_any_element(),
@@ -1011,7 +1016,7 @@ impl FolderView {
                         px(16.),
                         e.link,
                         overlay,
-                    ))
+                    ), self.part_frac(ei)))
                     .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&e.name)))
                     .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(p.text_tertiary)))
                     .on_mouse_down(
@@ -2119,6 +2124,17 @@ impl FolderView {
         self.tag_snap = Arc::new(map);
     }
 
+    /// How far the download behind an unfinished file (`.hdpart`) is, while HyperDownload's card follows it.
+    fn part_frac(&self, ei: u32) -> Option<f32> {
+        let name = &self.entries.get(ei as usize)?.name;
+        if name.len() < 7 || !name[name.len() - 7..].eq_ignore_ascii_case(".hdpart") {
+            return None;
+        }
+        let f = crate::hyperdownload::part_progress(&self.path_of(ei)?)?;
+        self.parts_shown.set(true);
+        Some(f)
+    }
+
     /// Whether the folder is shown in groups (Details or Grid with a grouping): the "all groups" button and key apply.
     pub fn has_groups(&self) -> bool {
         matches!(self.view_mode, ViewMode::Details | ViewMode::Grid) && self.rows.iter().any(|r| matches!(r, Row::Header(..)))
@@ -2972,7 +2988,7 @@ impl FolderView {
         };
         let overlay = self.overlay_of(ei, visual_px, cx);
         let e = &self.entries[ei as usize];
-        let visual = link_marked(visual, visual_px, e.link, overlay);
+        let visual = download_marked(link_marked(visual, visual_px, e.link, overlay), self.part_frac(ei));
         let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
         let label: AnyElement = match rename_input {
             // the text stays where the label was: centered, the label's size
@@ -4603,7 +4619,7 @@ impl FolderView {
                                     ),
                             )
                         })
-                        .child(link_marked(
+                        .child(download_marked(link_marked(
                             match &shell_icon {
                                 Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
                                 None => Icon::new(icons::icon_for(cat))
@@ -4615,7 +4631,7 @@ impl FolderView {
                             px(16.),
                             e.link,
                             overlay,
-                        ))
+                        ), self.part_frac(ei)))
                         .child(name_el)
                         // encrypted: an archive member that needs a password, or an EFS file
                         .children((e.attrs & rf_core::attrs::ENCRYPTED != 0).then(|| Icon::new(L::Lock).size(px(12.)).flex_shrink_0().text_color(p.text_secondary)))
@@ -5588,6 +5604,18 @@ pub(crate) fn open_in_background_sorted(path: PathBuf, key: SortKey, ascending: 
 
 impl Render for FolderView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // an unfinished download's progress on its icon moves on: drawn again in a moment while one is shown
+        if self.parts_shown.replace(false) && !self.part_tick {
+            self.part_tick = true;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(700)).await;
+                let _ = this.update(cx, |v, cx| {
+                    v.part_tick = false;
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
         if std::mem::take(&mut self.pending_rename) {
             // Create the editor now, but focus it on the next frame: a focus target that is not
             // part of the frame being drawn gets dropped by GPUI.
@@ -6014,6 +6042,27 @@ fn overlay_box(size: Pixels) -> Pixels {
 
 /// `icon` with the marks drawn over it: another program's overlay (`overlay`, icon-sized with its mark in a corner, as Explorer draws
 /// it) and the arrow of a symbolic link or junction (`link`).
+/// An unfinished download's file (`.hdpart`) shows how far it is: a thin molten bar under its icon.
+fn download_marked(icon: AnyElement, frac: Option<f32>) -> AnyElement {
+    let Some(f) = frac else { return icon };
+    div()
+        .relative()
+        .flex_shrink_0()
+        .child(icon)
+        .child(
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom(px(-3.))
+                .h(px(2.))
+                .rounded_full()
+                .bg(gpui::rgba(0x8080_8055))
+                .child(div().h_full().rounded_full().bg(crate::downloads_view::ember()).w(relative(f.clamp(0.02, 1.)))),
+        )
+        .into_any_element()
+}
+
 fn link_marked(icon: AnyElement, size: Pixels, link: bool, overlay: Option<Arc<gpui::RenderImage>>) -> AnyElement {
     if !link && overlay.is_none() {
         return icon;

@@ -188,6 +188,44 @@ pub fn connect() -> Result<Rpc, Unavailable> {
     Err(Unavailable::NoAnswer("HyperDownload did not start".into()))
 }
 
+/// Downloads in progress by their unfinished file (`<file>.hdpart`): the share done, for that file's icon in its folder.
+static PART_PROGRESS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, f32>>> = std::sync::LazyLock::new(Default::default);
+
+/// How far the download behind this unfinished file (`<file>.hdpart`) is, 0 to 1, while rustyfiles follows it.
+pub fn part_progress(part: &Path) -> Option<f32> {
+    // (a debug build can be shown one without a download: `RUSTYFILES_TRY_PART=<file>.hdpart|0.4`)
+    #[cfg(debug_assertions)]
+    if let Some((p, f)) = std::env::var("RUSTYFILES_TRY_PART").ok().as_deref().and_then(|v| v.rsplit_once('|'))
+        && Path::new(p) == part
+    {
+        return f.parse().ok();
+    }
+    PART_PROGRESS.lock().ok()?.get(part).copied()
+}
+
+/// The unfinished file a following loop has marked, taken off when the loop ends, however it ends.
+struct PartMark(Option<PathBuf>);
+
+impl PartMark {
+    fn set(&mut self, file: &Path, done: u64, total: u64) {
+        let mut part = file.as_os_str().to_os_string();
+        part.push(".hdpart");
+        let part = PathBuf::from(part);
+        if let Ok(mut m) = PART_PROGRESS.lock() {
+            m.insert(part.clone(), (done as f64 / total.max(1) as f64).clamp(0., 1.) as f32);
+        }
+        self.0 = Some(part);
+    }
+}
+
+impl Drop for PartMark {
+    fn drop(&mut self) {
+        if let (Some(p), Ok(mut m)) = (self.0.take(), PART_PROGRESS.lock()) {
+            m.remove(&p);
+        }
+    }
+}
+
 /// What a download's status says, read from aria2's `tellStatus`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Seen {
@@ -405,6 +443,7 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
             let mut paused = false;
             let mut asked = false;
             let mut offered = false;
+            let mut mark = PartMark(None);
             loop {
                 std::thread::sleep(Duration::from_millis(300));
                 if t.cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -420,6 +459,10 @@ pub fn download_source(source: Source, dir: PathBuf, cx: &mut gpui_kit::App) {
                 let Ok(v) = rpc.call("aria2.tellStatus", vec![json!(gid)]) else { continue };
                 let s = seen(&v);
                 t.bytes.set(s.done, s.total.max(s.done));
+                // the unfinished file's icon in its folder shows how far it is (an HTTP download's, whose size is known)
+                if let Some(p) = s.path.as_ref().filter(|_| s.total > 0 && v.get("hdKind").and_then(Value::as_str) != Some("torrent")) {
+                    mark.set(p, s.done, s.total);
+                }
                 // the card's molten bar (the connections' pieces, or a torrent's piece map)
                 let card_id = card.load(std::sync::atomic::Ordering::Relaxed);
                 if card_id != 0 {
