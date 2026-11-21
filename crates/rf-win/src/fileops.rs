@@ -35,7 +35,28 @@ fn new_op(flags: u32) -> anyhow::Result<IFileOperation> {
     ensure_com();
     let op: IFileOperation = unsafe { CoCreateInstance(&FileOperation, None, CLSCTX_ALL)? };
     unsafe { op.SetOperationFlags(FILEOPERATION_FLAGS(flags))? };
+    let owner = DIALOG_OWNER.load(std::sync::atomic::Ordering::Relaxed);
+    if owner != 0 {
+        let hwnd = windows::Win32::Foundation::HWND(owner as *mut _);
+        if unsafe { windows::Win32::UI::WindowsAndMessaging::IsWindow(Some(hwnd)) }.as_bool() {
+            let _ = unsafe { op.SetOwnerWindow(hwnd) };
+        }
+    }
     Ok(op)
+}
+
+/// The window the shell engine's own windows (Replace or Skip, "Destination Folder Access Denied", its progress) belong to: the
+/// app's window the user used last ([`set_dialog_owner`]).
+///
+/// WHY (issue 187: replacing a file in `C:\Program Files (x86)` "nothing happened", the job stayed "processing" in the Status
+/// Center). Such a file is handed to the shell engine, which asks for administrator rights in a window of its own; with no owner
+/// that window opened BEHIND rustyfiles (tried: `#32770` "Destination Folder Access Denied", owner none, not in front), and the job
+/// waited for an answer nobody could see.
+static DIALOG_OWNER: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+/// Remembers the app's window in front, for the shell engine's windows ([`DIALOG_OWNER`]).
+pub fn set_dialog_owner(hwnd: isize) {
+    DIALOG_OWNER.store(hwnd, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// A tracker nobody listens to and nobody cancels (the untracked operations still attach the progress sink: it is how the supervisor
@@ -483,5 +504,83 @@ mod tests {
         });
         assert!(!d.join("tree").exists() && !d.join("lone.txt").exists());
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Issue 187: what the shell's engine shows when a copy into a protected folder needs administrator rights, and whether that
+    /// window can be seen (visible, in front). Every window it opens is CANCELLED (WM_CLOSE) after a look: nothing is written, no
+    /// elevation is asked. A look: `cargo test -p rf-win --lib fileops::tests::protected_copy_look -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn protected_copy_look() {
+        use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            EnumWindows, GW_OWNER, GetClassNameW, GetForegroundWindow, GetWindow, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+            PostMessageW, WM_CLOSE,
+        };
+        let src = std::env::temp_dir().join("rf-187-look.txt");
+        std::fs::write(&src, "x").unwrap();
+        let dest = PathBuf::from(r"C:\Program Files (x86)");
+        let watcher = std::thread::spawn(|| {
+            let me = std::process::id();
+            let mut seen = std::collections::HashSet::new();
+            for _ in 0..40 {
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                let mut found: Vec<isize> = Vec::new();
+                unsafe extern "system" fn each(h: HWND, l: LPARAM) -> windows::core::BOOL {
+                    let v = unsafe { &mut *(l.0 as *mut (u32, Vec<isize>)) };
+                    let mut pid = 0;
+                    unsafe { GetWindowThreadProcessId(h, Some(&mut pid)) };
+                    if pid == v.0 && unsafe { IsWindowVisible(h) }.as_bool() {
+                        v.1.push(h.0 as isize);
+                    }
+                    true.into()
+                }
+                let mut st: (u32, Vec<isize>) = (me, Vec::new());
+                unsafe {
+                    let _ = EnumWindows(Some(each), LPARAM(&mut st as *mut _ as isize));
+                }
+                found.extend(st.1);
+                for h in found {
+                    let hw = HWND(h as *mut _);
+                    if seen.insert(h) {
+                        let mut c = [0u16; 64];
+                        let mut t = [0u16; 128];
+                        let n = unsafe { GetClassNameW(hw, &mut c) } as usize;
+                        let m = unsafe { GetWindowTextW(hw, &mut t) } as usize;
+                        let owner = unsafe { GetWindow(hw, GW_OWNER) }.map(|o| o.0 as isize).unwrap_or(0);
+                        let front = unsafe { GetForegroundWindow() }.0 as isize == h;
+                        println!("window {h:#x} class={} title={:?} owner={owner:#x} in_front={front}", String::from_utf16_lossy(&c[..n]), String::from_utf16_lossy(&t[..m]));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                    let _ = unsafe { PostMessageW(Some(hw), WM_CLOSE, WPARAM(0), LPARAM(0)) };
+                }
+            }
+        });
+        // an owner of our own, as the app's window is (`RF_187_OWNER=1`): a plain window, not shown in front of anything
+        if std::env::var("RF_187_OWNER").is_ok() {
+            use windows::Win32::UI::WindowsAndMessaging::{CreateWindowExW, WINDOW_EX_STYLE, WS_OVERLAPPEDWINDOW};
+            // (on a thread that pumps its messages, as the app's window thread does: the dialog talks to its owner)
+            let (tx, rx) = std::sync::mpsc::channel::<isize>();
+            std::thread::spawn(move || {
+                use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW, GetMessageW, MSG};
+                let owner = unsafe {
+                    CreateWindowExW(WINDOW_EX_STYLE(0), windows::core::w!("STATIC"), windows::core::w!("rf-187 owner"), WS_OVERLAPPEDWINDOW, 0, 0, 200, 100, None, None, None, None)
+                }
+                .unwrap();
+                let _ = tx.send(owner.0 as isize);
+                let mut msg = MSG::default();
+                while unsafe { GetMessageW(&mut msg, None, 0, 0) }.as_bool() {
+                    unsafe { DispatchMessageW(&msg) };
+                }
+            });
+            let owner = rx.recv().unwrap();
+            println!("owner window {owner:#x}");
+            set_dialog_owner(owner);
+        }
+        let t = Arc::new(Tracker::new(Box::new(|_, _, _| {}), Arc::new(AtomicBool::new(false))));
+        let r = transfer_tracked(Transfer::Copy, &[src.clone()], &dest, t);
+        println!("result: {r:?}; written: {}", dest.join("rf-187-look.txt").exists());
+        watcher.join().unwrap();
+        let _ = std::fs::remove_file(&src);
     }
 }

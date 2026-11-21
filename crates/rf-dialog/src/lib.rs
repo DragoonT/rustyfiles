@@ -916,16 +916,10 @@ mod com {
                 dialog.Advise(&sink).unwrap();
                 dialog.SetFileName(w!("default name.mp4")).unwrap();
             }
-            // The temp folder in its long form: TEMP can be a short 8.3 path (C:\Users\RUNNER~1 on GitHub's runners), and the shell
-            // item the app reads gives the long one, so the same file would not compare equal.
+            // (the temp folder by its long name: on a machine whose profile folder has a short alias, as GitHub's runners do
+            // (`RUNNER~1`), the shell item gives the path back long; issue 186)
             let temp = std::env::temp_dir();
-            let temp = {
-                use std::os::windows::ffi::{OsStrExt, OsStringExt};
-                let wide: Vec<u16> = temp.as_os_str().encode_wide().chain([0]).collect();
-                let mut buf = vec![0u16; 32768];
-                let n = unsafe { windows::Win32::Storage::FileSystem::GetLongPathNameW(PCWSTR(wide.as_ptr()), Some(&mut buf)) } as usize;
-                if n == 0 || n > buf.len() { temp } else { std::ffi::OsString::from_wide(&buf[..n]).into() }
-            };
+            let temp = temp.canonicalize().map(|p| std::path::PathBuf::from(p.to_string_lossy().trim_start_matches(r"\\?\"))).unwrap_or(temp);
             let picked = temp.join("rf-dialog-wpf-test.mp4").to_string_lossy().into_owned();
             CANNED.with(|c| *c.borrow_mut() = Some(crate::proto::Response { ok: true, paths: vec![picked.clone()], filter_index: 1 }));
             // (no owner window: the "dialog window" is then the null window, as the app's own would be)

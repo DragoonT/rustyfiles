@@ -57,6 +57,48 @@ pub fn data_dir() -> Option<PathBuf> {
     .clone()
 }
 
+/// The portable copy's own launcher, `<root>\rustyfiles.exe`: Velopack's stub beside `current\`, which an update leaves where it is.
+/// `None` for an installed copy, or a portable folder without one.
+pub fn launcher() -> Option<PathBuf> {
+    data_dir()?;
+    let exe = std::env::current_exe().ok()?;
+    let stub = exe.parent()?.parent()?.join(exe.file_name()?);
+    stub.is_file().then_some(stub)
+}
+
+/// Gives a window of the portable copy what the taskbar pins: the launcher ([`launcher`]), not the running program.
+///
+/// WHY (issue 184: "with each update the pinning goes away", on the portable copy). A pinned window is pinned as its program,
+/// `current\rustyfiles.exe`; an update replaces `current\`, and Windows drops a pin whose file went away. The installed copy has
+/// Velopack's Start menu shortcut, which the taskbar pins instead (same AppUserModelID); the portable copy has none. With the
+/// window's relaunch command set to the launcher, the pin is a shortcut to the launcher, which every update keeps.
+pub fn mark_window(hwnd: isize, app_id: &str) {
+    let Some(stub) = launcher() else { return };
+    let Ok(exe) = std::env::current_exe() else { return };
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Storage::EnhancedStorage::{
+        PKEY_AppUserModel_ID, PKEY_AppUserModel_RelaunchCommand, PKEY_AppUserModel_RelaunchDisplayNameResource,
+        PKEY_AppUserModel_RelaunchIconResource,
+    };
+    use windows::Win32::System::Com::StructuredStorage::PROPVARIANT;
+    use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
+    let command = format!("\"{}\"", stub.display());
+    let icon = format!("{},0", exe.display());
+    let set = || -> windows::core::Result<()> {
+        let store: IPropertyStore = unsafe { SHGetPropertyStoreForWindow(HWND(hwnd as *mut _))? };
+        unsafe {
+            store.SetValue(&PKEY_AppUserModel_ID, &PROPVARIANT::from(app_id))?;
+            store.SetValue(&PKEY_AppUserModel_RelaunchCommand, &PROPVARIANT::from(command.as_str()))?;
+            store.SetValue(&PKEY_AppUserModel_RelaunchDisplayNameResource, &PROPVARIANT::from("rustyfiles"))?;
+            store.SetValue(&PKEY_AppUserModel_RelaunchIconResource, &PROPVARIANT::from(icon.as_str()))?;
+            store.Commit()
+        }
+    };
+    if let Err(e) = set() {
+        log::warn!("portable: the window's relaunch command could not be set: {e}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
