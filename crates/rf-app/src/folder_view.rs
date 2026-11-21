@@ -2137,7 +2137,7 @@ impl FolderView {
     /// How far the download behind an unfinished file (`.hdpart`) is, while HyperDownload's card follows it.
     fn part_frac(&self, ei: u32) -> Option<f32> {
         let name = &self.entries.get(ei as usize)?.name;
-        if name.len() < 7 || !name[name.len() - 7..].eq_ignore_ascii_case(".hdpart") {
+        if !is_hyperdownload_part(name) {
             return None;
         }
         let f = crate::hyperdownload::part_progress(&self.path_of(ei)?)?;
@@ -5245,6 +5245,12 @@ impl FolderView {
 
 /// Columns for a row of equal cards: as many as fit at `min` width, but enough that none is
 /// wider than `max` (all columns share the width evenly).
+fn is_hyperdownload_part(name: &str) -> bool {
+    let suffix = ".hdpart";
+    name.get(name.len().saturating_sub(suffix.len())..)
+        .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix))
+}
+
 fn tile_cols(avail: f32, min: f32, max: f32, gap: f32) -> u16 {
     let fit = ((avail + gap) / (min + gap)).floor().max(1.);
     let need = ((avail + gap) / (max + gap)).ceil().max(1.);
@@ -5353,6 +5359,20 @@ mod tile_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod hyperdownload_name_tests {
+    use super::is_hyperdownload_part;
+
+    #[test]
+    fn unicode_names_are_safe_and_hyperdownload_suffix_is_case_insensitive() {
+        assert!(!is_hyperdownload_part("شارع 28"));
+        assert!(!is_hyperdownload_part("الصالون"));
+        assert!(is_hyperdownload_part("segment.hdpart"));
+        assert!(is_hyperdownload_part("الصالون.HDPART"));
+        assert!(!is_hyperdownload_part("x"));
     }
 }
 
