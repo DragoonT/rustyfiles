@@ -411,6 +411,8 @@ impl MenuView {
             None if on_disk => rf_win::dock::winmove::targets(&rf_win::dock::winmove::screens(), None),
             None => Vec::new(),
         };
+        // rustyfiles' Start: the app's pin there too, when Start is ours and the app is in its "All apps" (issue 174)
+        let fixed = model::with_start_row(fixed, super::start::dock_pin_state(&app, cx));
         let fixed = model::with_window_rows(fixed, &monitors);
         self.active = Some(Active { app, windows, jump, icon, display_name: None, menu: Menu::new(fixed), sections: Vec::new() });
         self.shown = true;
@@ -581,6 +583,8 @@ impl MenuView {
             }
             RowId::Fixed(Fixed::Pin) => super::own_pins::set_pinned(a.app.clone(), true, cx),
             RowId::Fixed(Fixed::Unpin) => super::own_pins::set_pinned(a.app.clone(), false, cx),
+            RowId::Fixed(Fixed::PinStart) => super::start::pin_dock_app(a.app.clone(), true, cx),
+            RowId::Fixed(Fixed::UnpinStart) => super::start::pin_dock_app(a.app.clone(), false, cx),
             RowId::Fixed(Fixed::MoveToMonitor(number)) => {
                 // (the window used last, as "close window" takes it; moving sends the program messages: never on the UI thread)
                 if let Some(w) = a.windows.first().copied() {
@@ -764,6 +768,8 @@ fn fixed_label(f: Fixed, app_name: &str) -> (Option<L>, String) {
         Fixed::FitToScreen => (Some(L::Maximize2), t!("Ekrana sığdır").to_string()),
         Fixed::Pin => (Some(L::Pin), t!("Dock'a sabitle").to_string()),
         Fixed::Unpin => (Some(L::PinOff), t!("Dock'tan kaldır").to_string()),
+        Fixed::PinStart => (Some(L::Pin), t!("Başlat'a sabitle").to_string()),
+        Fixed::UnpinStart => (Some(L::PinOff), t!("Başlat'tan kaldır").to_string()),
         Fixed::CloseWindow => (Some(L::X), t!("Pencereyi kapat").to_string()),
         Fixed::CloseAll(n) => (Some(L::X), format!("{} ({n})", t!("Tüm pencereleri kapat"))),
         Fixed::EndTask => (Some(L::CircleSlash), t!("Görevi sonlandır").to_string()),
