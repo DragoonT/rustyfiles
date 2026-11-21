@@ -4,6 +4,7 @@ gpui_kit::actions!(
     rustyfiles,
     [
         GoBack,
+        BackspaceBack,
         GoForward,
         LeaveTree,
         FocusNextPane,
@@ -145,7 +146,9 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("alt-right", GoForward, None),
         KeyBinding::new("alt-up", GoUp, None),
         KeyBinding::new("alt-home", GoHome, None),
-        KeyBinding::new("backspace", GoBack, f),
+        // Backspace goes back only from the list itself (issue 171: "after deleting letters rustyfiles navigates up"): a text box
+        // in the view (the rename box, the filter) passes Backspace on when its caret is at the start, and that went back
+        KeyBinding::new("backspace", BackspaceBack, f),
         KeyBinding::new("f5", Refresh, None),
         KeyBinding::new("ctrl-r", Refresh, None),
         KeyBinding::new("enter", OpenSelected, f),

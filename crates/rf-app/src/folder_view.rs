@@ -5357,6 +5357,11 @@ impl Render for FolderView {
             .key_context(FOLDER_CTX)
             .track_focus(&self.focus)
             .size_full()
+            .on_action(cx.listener(|this, _: &BackspaceBack, window, cx| {
+                if this.focus.is_focused(window) {
+                    this.back(cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_cursor(this.row_step(), false, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.move_cursor(-this.row_step(), false, cx)))
             .on_action(cx.listener(|this, _: &ExtendNext, _, cx| this.move_cursor(this.row_step(), true, cx)))

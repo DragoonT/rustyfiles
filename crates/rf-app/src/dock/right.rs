@@ -160,6 +160,23 @@ impl RightIsland {
         self.lang.clone()
     }
 
+    /// A click on the input language: asks the window in front for the next keyboard layout, and the button shows it at once (the
+    /// next reading confirms it, or shows the old one again when the window did not take the request).
+    ///
+    /// WHY HERE, ON THE ISLAND ITSELF (issue 173: "After clicking on the language bar icon, the docks just disappeared"): the click is
+    /// handled while this island is being updated, and the button used to be set through the island's handle, which updated the same
+    /// island a second time: the toolkit stops the process for that.
+    fn switch_language(&mut self, cx: &mut Context<Self>) {
+        match rf_win::inputlang::switch_foreground_to_next() {
+            Some(code) => {
+                let mut now = self.lang.clone();
+                now.code = code;
+                self.set_language(now, cx);
+            }
+            None => log::info!("dock: the input language was not switched (no window in front, or one layout)"),
+        }
+    }
+
     /// The island's own buttons to draw now, in the user's order and without the ones the user hid (the settings `dock_status_order`
     /// and `dock_status_hidden`; `status_order::shown`). Safe removal is among them only while there is something to remove. They are
     /// the primary monitor's: a secondary monitor's island has none.
@@ -258,7 +275,11 @@ impl RightIsland {
                         crate::settings::update(cx, move |s| s.dock_status_order = new);
                     }
                 } else if self.status_hit(sp.which, cursor, cx) {
-                    run_status(sp.which, cx);
+                    if sp.which == Status::Language {
+                        self.switch_language(cx);
+                    } else {
+                        run_status(sp.which, cx);
+                    }
                 }
                 cx.notify();
                 false
@@ -420,27 +441,13 @@ impl RightIsland {
 }
 
 /// What a click on one of the island's own buttons does: safe removal opens our own panel with the drives, Windows Security opens
-/// that app, the input language asks the window in front for the next keyboard layout (the island does not take the focus, so the
-/// window the user types in is still in front; the button shows the new language when the window has changed it), the network and the
-/// volume symbol open the control centre.
+/// that app, the network and the volume symbol open the control centre. (The input language is the island's own:
+/// `RightIsland::switch_language`; the island does not take the focus, so the window the user types in is still in front.)
 fn run_status(which: Status, cx: &mut App) {
     match which {
         Status::Eject => super::panel::toggle_eject(cx),
         Status::Security => super::panel_parts::open_uri("windowsdefender:"),
-        Status::Language => match rf_win::inputlang::switch_foreground_to_next() {
-            // the button shows the new language at once; the next reading confirms it (or shows the old one again when the window
-            // did not take the request)
-            Some(code) => {
-                if let Some(island) = super::host::right_island_on(super::host::MonId::HOME, cx) {
-                    island.update(cx, |me, cx| {
-                        let mut now = me.lang.clone();
-                        now.code = code;
-                        me.set_language(now, cx);
-                    });
-                }
-            }
-            None => log::info!("dock: the input language was not switched (no window in front, or one layout)"),
-        },
+        Status::Language => {}
         Status::Network | Status::Volume | Status::Battery => open_controls(cx),
     }
 }
