@@ -528,6 +528,10 @@ pub struct Settings {
     /// Custom shortcuts: keystroke → action, e.g. `"ctrl-k" = "NewFolder"` (names as in the
     /// command palette's actions; `rustyfiles::` prefix optional). Applied at startup.
     pub keybindings: std::collections::BTreeMap<String, String>,
+    /// The folder an app's Open / Save window always starts in, whatever folder the app asks for: the app's program name in lower
+    /// case ("firefox.exe") to the folder. Set and cleared with the pin button of the dialog itself; listed in Settings › Advanced.
+    /// A user on Discord, 2026-11-21: "per program default ... Say I use firefox ... open default storage location where i set it".
+    pub dialog_folders: std::collections::BTreeMap<String, String>,
     /// Last window placement: [x, y, width, height, maximized (0/1)].
     pub window: Option<[f32; 5]>,
     /// Display UUID and the normal window's origin relative to that display.
@@ -903,6 +907,7 @@ impl Default for Settings {
             adaptive_offered: false,
             show_extensions: true,
             keybindings: Default::default(),
+            dialog_folders: Default::default(),
             window: None,
             window_display: None,
             date_format: DatePref::Application,

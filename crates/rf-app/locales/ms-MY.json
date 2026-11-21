@@ -2148,5 +2148,8 @@
  "5546865e": "Jangan tinggalkan tanda muat turun semasa menyalin ke WSL",
  "10ef9c03": "Dalam WSL, Windows menulis fail \"Zone.Identifier\" yang berasingan di sebelah fail yang dimuat turun dari internet. Apabila dihidupkan, penyalinan memadamnya.",
  "31d132e2": "Tunjukkan ruang pemacu dalam nombor",
- "04339c77": "Ruang terguna dan jumlah di bawah bar setiap pemacu"
+ "04339c77": "Ruang terguna dan jumlah di bawah bar setiap pemacu",
+ "f6bca4e8": "Berhenti sentiasa membuka di sini untuk:",
+ "a6a39e94": "Sentiasa buka dalam folder ini untuk:",
+ "6ff5ec59": "Tetingkap Buka / Simpan-nya sentiasa dibuka di:"
 }

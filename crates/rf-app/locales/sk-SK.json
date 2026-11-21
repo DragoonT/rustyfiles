@@ -2148,5 +2148,8 @@
  "5546865e": "Pri kopírovaní do WSL nenechávať značku stiahnutia",
  "10ef9c03": "Vo WSL zapisuje Windows vedľa súboru stiahnutého z internetu samostatný súbor \"Zone.Identifier\". Keď je zapnuté, kopírovanie ho odstráni.",
  "31d132e2": "Zobrazovať miesto na diskoch v číslach",
- "04339c77": "Využité a celkové miesto pod pruhom každého disku"
+ "04339c77": "Využité a celkové miesto pod pruhom každého disku",
+ "f6bca4e8": "Prestať vždy otvárať tu pre:",
+ "a6a39e94": "Vždy otvárať v tomto priečinku pre:",
+ "6ff5ec59": "Jeho okno Otvoriť / Uložiť sa vždy otvorí v:"
 }

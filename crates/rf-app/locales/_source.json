@@ -12959,5 +12959,23 @@
   "key": "Her sürücünün çubuğunun altında kullanılan ve toplam alan",
   "tr": "Her sürücünün çubuğunun altında kullanılan ve toplam alan",
   "en": "Used and total space under each drive's bar"
+ },
+ {
+  "id": "f6bca4e8",
+  "key": "Artık hep burada açılmasın:",
+  "tr": "Artık hep burada açılmasın:",
+  "en": "Stop always opening here for:"
+ },
+ {
+  "id": "a6a39e94",
+  "key": "Hep bu klasörde açılsın:",
+  "tr": "Hep bu klasörde açılsın:",
+  "en": "Always open in this folder for:"
+ },
+ {
+  "id": "6ff5ec59",
+  "key": "Aç / Kaydet penceresi hep bu klasörde açılır:",
+  "tr": "Aç / Kaydet penceresi hep bu klasörde açılır:",
+  "en": "Its Open / Save window always opens in:"
  }
 ]

@@ -2942,6 +2942,22 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
             window.refresh();
         }),
     ));
+    // the folders some apps' Open / Save windows always start in (set with the pin button of the dialog)
+    for (i, (app, dir)) in s.dialog_folders.iter().enumerate() {
+        let key = app.clone();
+        out.push(card(
+            p,
+            L::Pin,
+            app.trim_end_matches(".exe"),
+            Some(&format!("{} {dir}", t!("Aç / Kaydet penceresi hep bu klasörde açılır:"))),
+            button(("dlg-folder", i), p, t!("Kaldır"), move |_, cx| {
+                let key = key.clone();
+                crate::settings::update(cx, move |s| {
+                    s.dialog_folders.remove(&key);
+                });
+            }),
+        ));
+    }
     out.extend([
         card(
             p,
