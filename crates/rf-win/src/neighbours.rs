@@ -18,14 +18,30 @@ use windows_collections::IIterable;
 
 use crate::wide::{from_wide, wide};
 
-/// Whether the program Windows opens files of this kind with is a packaged app: its ProgID is an `AppX…` one.
+/// Whether the program Windows opens files of this kind with is one of Windows' own media apps (Photos, Media Player): a packaged
+/// app (its ProgID is an `AppX…` one) of a family in [`walks_its_neighbours`].
+///
+/// WHY only those (issue 189: "Double clicking on an image opens the version info page of Pictureflect, not the image", on 0.9.5;
+/// 0.9.4 opened it). Another packaged app may do anything with the launcher's activation, so it is started through the shell as
+/// before.
 pub fn opens_in_packaged_app(path: &Path) -> bool {
     let Some(ext) = path.extension() else { return false };
     let ext = wide(format!(".{}", ext.to_string_lossy()));
     let mut buf = [0u16; 260];
     let mut len = buf.len() as u32;
     let ok = unsafe { AssocQueryStringW(ASSOCF_INIT_IGNOREUNKNOWN, ASSOCSTR_PROGID, PCWSTR(ext.as_ptr()), w!("open"), Some(PWSTR(buf.as_mut_ptr())), &mut len) };
-    ok.is_ok() && is_packaged_progid(&from_wide(&buf))
+    let progid = from_wide(&buf);
+    ok.is_ok()
+        && is_packaged_progid(&progid)
+        && crate::bench::reg_string(windows::Win32::System::Registry::HKEY_CLASSES_ROOT, &format!("{progid}\\Application"), "AppUserModelID")
+            .is_some_and(|id| walks_its_neighbours(&id))
+}
+
+/// The packaged apps that are told about a file's neighbours: Windows' Photos (and its older version), Media Player and Movies & TV,
+/// by the family of their AppUserModelID. Pure.
+pub fn walks_its_neighbours(aumid: &str) -> bool {
+    let family = aumid.split('!').next().unwrap_or("").to_ascii_lowercase();
+    ["microsoft.windows.photos_", "microsoft.photoslegacy_", "microsoft.zunemusic_", "microsoft.zunevideo_"].iter().any(|f| family.starts_with(f))
 }
 
 /// `AppX43hnxtbyyps62jhe9sqpdzxn1790zetc` is a packaged app's file type; `jpegfile` or `IrfanView.jpg` are not. Pure.
@@ -145,6 +161,10 @@ mod tests {
         assert!(!is_packaged_progid("IrfanView.jpg"));
         assert!(!is_packaged_progid("AppX"));
         assert!(!is_packaged_progid(""));
+        assert!(walks_its_neighbours("Microsoft.Windows.Photos_8wekyb3d8bbwe!App"));
+        assert!(walks_its_neighbours("Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic"));
+        assert!(!walks_its_neighbours("57469Pictureflect.PictureflectPhotoViewer_xxxx!App"), "another app opens through the shell");
+        assert!(!walks_its_neighbours(""));
     }
 
     /// Opens a picture in its default app with its folder from this process, which ends right after (as the helper does)
@@ -157,5 +177,14 @@ mod tests {
         let p = Path::new(&f);
         println!("packaged: {}", opens_in_packaged_app(p));
         println!("{:?}", launch_in_this_process(p, sort_property(rf_core::sort::SortKey::Name), true));
+    }
+
+    /// Which file types this PC opens in an app that is told about the neighbours. A look: `-- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn which_types_walk_their_folder_here() {
+        for ext in ["jpg", "png", "heic", "mp4", "mp3", "pdf", "txt"] {
+            println!("{ext}: {}", opens_in_packaged_app(Path::new(&format!("x.{ext}"))));
+        }
     }
 }
