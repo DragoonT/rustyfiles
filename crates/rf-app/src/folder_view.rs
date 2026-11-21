@@ -243,6 +243,8 @@ struct Marquee {
 
 pub enum FolderEvent {
     OpenInNewTab(Location),
+    /// Open the workspace's sidebar context menu for a Home drive card.
+    SidebarMenu(PathBuf),
     BulkRename(Vec<PathBuf>),
     AddToShelf(Vec<PathBuf>),
     /// Dual pane: copy/move the items into the other pane's folder.
@@ -4733,6 +4735,7 @@ impl FolderView {
             };
             let frac = d.used_fraction();
             let bar_color = if frac > 0.9 { p.danger } else { p.accent };
+            let menu_root = root.clone();
             drive_grid = drive_grid.child(
                 card(("drive", i).into())
                     .child(
@@ -4777,7 +4780,14 @@ impl FolderView {
                                     .child(Icon::new(L::ChartPie).size(px(16.)).text_color(p.text_secondary)),
                             ),
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(root.clone()), cx))),
+                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(root.clone()), cx)))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            cx.emit(FolderEvent::SidebarMenu(menu_root.clone()));
+                        }),
+                    ),
             );
         }
 

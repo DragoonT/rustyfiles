@@ -27,3 +27,8 @@ by Windows for New-menu templates remain as supplied. With the switch off, the e
 menu styling and icons are unchanged. Switching the look off restores the original app
 icons; the theme does not replace their definitions or bundle the user's separate ICO
 collection.
+
+Right-clicking pinned folders, folder-tree items, or drives in the left pane uses that
+same Explorer-style popup when the look is enabled, while keeping RustyFiles' original
+menu icons. Home-page drive cards open the same menu as left-pane drives. With the look
+disabled, both use RustyFiles' default menu presentation and icons.

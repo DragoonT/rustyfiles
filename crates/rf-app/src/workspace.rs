@@ -1196,6 +1196,7 @@ impl Workspace {
         }
         let sub = cx.subscribe_in(&tab, window, |this, emitter, ev: &FolderEvent, window, cx| match ev {
             FolderEvent::Picked(paths) => crate::picker::picked(this, paths.clone(), window, cx),
+            FolderEvent::SidebarMenu(path) => this.sidebar_menu(path.clone(), window, cx),
             FolderEvent::ToOtherPane(kind, paths) => {
                 if let Some(other) = this.other_pane(emitter) {
                     let dest = match other.read(cx).location() {
@@ -2842,7 +2843,11 @@ impl Workspace {
                 ),
             ]
         };
-        let menu = crate::fluent_menu::show(Menu { quick, items }, at, window, cx);
+        let menu = if cx.global::<crate::settings::Settings>().windows_file_explorer_theme {
+            crate::fluent_menu::show_context_original_icons(Menu { quick, items }, at, window, cx)
+        } else {
+            crate::fluent_menu::show(Menu { quick, items }, at, window, cx)
+        };
         let view = self.active_tab().downgrade();
         crate::ctx_menu::load_shell_more(menu.downgrade(), rf_win::ctxmenu::ShellTarget::One(path), view, cx);
     }
