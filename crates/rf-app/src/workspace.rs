@@ -713,6 +713,8 @@ impl Workspace {
     ) -> Self {
         // a press on a file leaves the window behind until it is not a drag, as in Explorer (issue 169)
         rf_win::press_activate::install(crate::look::window::hwnd_of(window));
+        // the portable copy: a taskbar pin of this window starts its launcher, which updates keep (issue 184)
+        rf_win::portable::mark_window(crate::look::window::hwnd_of(window), crate::installer::APP_ID);
         if let Some(mut rx) = ipc {
             cx.spawn_in(window, async move |this, cx| {
                 use futures::StreamExt;
