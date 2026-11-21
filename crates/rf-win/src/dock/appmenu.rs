@@ -23,6 +23,10 @@ pub enum Fixed {
     Pin,
     /// Take the app off the dock.
     Unpin,
+    /// Pin the app in rustyfiles' Start (issue 174: an app pinned from the dock did not show in Start).
+    PinStart,
+    /// Take the app off rustyfiles' Start.
+    UnpinStart,
     /// Windows' own Properties of the shortcut or the program.
     Properties,
     /// "Open on monitor N". A running app: its window (the one used last) is moved to the monitor of this number and brought
@@ -74,6 +78,17 @@ pub fn fixed_rows(can_start: bool, on_disk: bool, can_pin: bool, pinned: bool, w
     if windows > 0 && can_end {
         rows.push(Fixed::EndTask);
     }
+    rows
+}
+
+/// The fixed rows with Start's pin row put in, under the dock's own pin row (or under the first row when there is none). `start`:
+/// whether the app is pinned in rustyfiles' Start; `None` when it cannot be (Windows' own Start is in use, or the app is not in
+/// "All apps").
+pub fn with_start_row(mut rows: Vec<Fixed>, start: Option<bool>) -> Vec<Fixed> {
+    let Some(pinned) = start else { return rows };
+    let row = if pinned { Fixed::UnpinStart } else { Fixed::PinStart };
+    let at = rows.iter().position(|r| matches!(r, Fixed::Pin | Fixed::Unpin)).or_else(|| rows.iter().position(|r| matches!(r, Fixed::Open)));
+    rows.insert(at.map_or(0, |i| i + 1), row);
     rows
 }
 
@@ -535,5 +550,13 @@ mod tests {
         // a row that is not in the menu is not highlighted
         m.hover(Some(RowId::Entry(5, 5)));
         assert_eq!(m.highlighted(), None);
+    }
+
+    #[test]
+    fn starts_pin_row_goes_under_the_docks_own() {
+        assert_eq!(with_start_row(vec![Fixed::Open, Fixed::Pin, Fixed::CloseWindow], Some(false)), vec![Fixed::Open, Fixed::Pin, Fixed::PinStart, Fixed::CloseWindow]);
+        assert_eq!(with_start_row(vec![Fixed::Open, Fixed::Unpin], Some(true)), vec![Fixed::Open, Fixed::Unpin, Fixed::UnpinStart]);
+        assert_eq!(with_start_row(vec![Fixed::Open, Fixed::CloseWindow], Some(false)), vec![Fixed::Open, Fixed::PinStart, Fixed::CloseWindow]);
+        assert_eq!(with_start_row(vec![Fixed::Open, Fixed::Pin], None), vec![Fixed::Open, Fixed::Pin], "not offered");
     }
 }

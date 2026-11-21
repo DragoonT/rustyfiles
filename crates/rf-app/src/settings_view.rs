@@ -3394,20 +3394,27 @@ fn index_exclusions(p: &Palette, s: &Settings) -> AnyElement {
                             t!("Bu klasörlerin içinde arama diskte yapılır. Bir klasörü sağ tıklayıp \"Aramada dizine alma\" ile de ekleyebilirsiniz.")
                         ))),
                 )
-                .child(button("idx-excl-add", p, t!("Klasör ekle…"), |window, cx| {
-                    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-                    let owner = match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
-                        Ok(RawWindowHandle::Win32(h)) => windows::Win32::Foundation::HWND(h.hwnd.get() as *mut _),
-                        _ => windows::Win32::Foundation::HWND::default(),
-                    };
-                    if let Some(dir) = rf_win::dialogs::pick(owner, t!("Dizine alınmayacak klasör"), rf_win::dialogs::Pick::Folder) {
+                .child(button("idx-excl-add", p, t!("Klasör ekle…"), |_, cx| {
+                    // The dialog runs on the shell thread, never inside this click: its modal loop pumped the window's messages
+                    // while the click still held the app, and the next one crashed it (issue 188: "click the Add Folders... Button
+                    // ... crashes the App").
+                    let (tx, rx) = futures::channel::oneshot::channel::<Option<std::path::PathBuf>>();
+                    let title = t!("Dizine alınmayacak klasör").to_string();
+                    rf_win::sta::run(move |owner| {
+                        let _ = tx.send(rf_win::dialogs::pick(owner, &title, rf_win::dialogs::Pick::Folder));
+                    });
+                    cx.spawn(async move |cx| {
+                        let Ok(Some(dir)) = rx.await else { return };
                         let d = dir.to_string_lossy().trim_end_matches('\\').to_string();
-                        settings::update(cx, |s| {
-                            if !s.index_excluded.iter().any(|e| e.eq_ignore_ascii_case(&d)) {
-                                s.index_excluded.push(d);
-                            }
+                        cx.update(|cx| {
+                            settings::update(cx, |s| {
+                                if !s.index_excluded.iter().any(|e| e.eq_ignore_ascii_case(&d)) {
+                                    s.index_excluded.push(d);
+                                }
+                            });
                         });
-                    }
+                    })
+                    .detach();
                 })),
         )
         .when(!s.index_excluded.is_empty(), |d| d.child(div().h(px(1.)).bg(p.divider)).child(list))

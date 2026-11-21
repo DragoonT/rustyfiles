@@ -314,6 +314,75 @@ fn save_pins(file: PinFile) {
     });
 }
 
+/// Whether an app of the dock is pinned in this Start, for the dock's menu of the app (issue 174: "When I pin it from the
+/// application icon in the middle dock, it does not appear" in Start). `None`: no row is offered (Windows' own Start is in use, the
+/// app is not in "All apps", or "All apps" has not been read yet: it is read now, for the next menu). Quick: the pin file and the
+/// list already read; never the shell's listing on the UI thread.
+pub fn dock_pin_state(app: &rf_win::dock::DockApp, cx: &App) -> Option<bool> {
+    if !cx.global::<Settings>().dock_own_start {
+        return None;
+    }
+    if let Some(view) = super::panel::view(cx).filter(|v| v.read(cx).pins_loaded) {
+        let s = view.read(cx);
+        let i = startpins::app_for_dock(app, &s.apps)?;
+        return Some(s.pins.is_pinned(&s.apps[i].id));
+    }
+    let Some(apps) = quick_search::apps_if_read() else {
+        std::thread::spawn(|| {
+            let _ = quick_search::apps();
+        });
+        return None;
+    };
+    let i = startpins::app_for_dock(app, &apps)?;
+    let pinned = match pins_path().map(|p| startpins::load_checked(&p)) {
+        Some(Loaded::Found(f)) => f.is_pinned(&apps[i].id),
+        _ => false,
+    };
+    Some(pinned)
+}
+
+/// Pins (or unpins) an app of the dock in this Start: in the open view's list when it has read its pins, else in the file, which
+/// the view reads when it opens.
+pub fn pin_dock_app(app: rf_win::dock::DockApp, pin: bool, cx: &mut App) {
+    if let Some(view) = super::panel::view(cx).filter(|v| v.read(cx).pins_loaded) {
+        view.update(cx, |s, cx| {
+            let Some(i) = startpins::app_for_dock(&app, &s.apps) else { return };
+            let entry = s.apps[i].clone();
+            if !set_pin(&mut s.pins, &entry, pin) {
+                return;
+            }
+            s.rebuild_pin_cells();
+            save_pins(s.pins.clone());
+            cx.notify();
+        });
+        return;
+    }
+    std::thread::spawn(move || {
+        let apps = quick_search::apps();
+        let Some(i) = startpins::app_for_dock(&app, &apps) else {
+            log::info!("start pins: the dock's app is not in All apps, so it cannot be pinned in Start");
+            return;
+        };
+        let Some(mut pins) = load_or_seed_pins(&apps) else { return };
+        if set_pin(&mut pins, &apps[i], pin) {
+            save_pins(pins);
+        }
+    });
+}
+
+/// True when the list changed.
+fn set_pin(pins: &mut PinFile, app: &AppEntry, pin: bool) -> bool {
+    if pin {
+        pins.pin(app)
+    } else if pins.unpin(&app.id) {
+        // (a folder left with one app is no folder)
+        rf_win::dock::startdrag::tidy_folders(&mut pins.pins);
+        true
+    } else {
+        false
+    }
+}
+
 impl StartView {
     pub fn new(island: Rc<RefCell<IslandGlass>>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder_for(FieldAt::Top)));
