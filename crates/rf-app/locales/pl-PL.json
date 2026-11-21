@@ -2161,5 +2161,8 @@
  "438fff43": "Okna Eksploratora otwierane przez inne programy",
  "109ffa73": "Gdy program (na przykład menedżer pobierania) sam uruchamia Eksplorator plików, jego okno jest zamykane, a to samo miejsce otwiera się w rustyfiles. Działa, gdy rustyfiles jest uruchomiony.",
  "6fee9305": "Tryb wydajności",
- "40761adf": "Dock pomija animacje i jest rysowany na jednolitym tle zamiast szkła: mniej pracy, gdy gra obciąża kartę graficzną."
+ "40761adf": "Dock pomija animacje i jest rysowany na jednolitym tle zamiast szkła: mniej pracy, gdy gra obciąża kartę graficzną.",
+ "6d5c4fbb": "Folder motywu",
+ "4f72cd3e": "Folder w themes w folderze ustawień: jego theme.toml zmienia kolory, a folder icons ikony. Format opisuje docs/themes.md na GitHubie.",
+ "048a70ae": "Otwórz folder motywów"
 }

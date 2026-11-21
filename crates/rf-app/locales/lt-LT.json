@@ -2161,5 +2161,8 @@
  "438fff43": "Kitų programų atidaryti naršyklės langai",
  "109ffa73": "Kai programa (pvz., atsisiuntimų tvarkytuvė) pati paleidžia failų naršyklę, jos langas uždaromas, o ta pati vieta atidaroma rustyfiles. Veikia, kol rustyfiles paleistas.",
  "6fee9305": "Našumo režimas",
- "40761adf": "Dock praleidžia judesius ir piešiamas ant vientiso fono vietoj stiklo: mažiau darbo, kol žaidimas apkrauna vaizdo plokštę."
+ "40761adf": "Dock praleidžia judesius ir piešiamas ant vientiso fono vietoj stiklo: mažiau darbo, kol žaidimas apkrauna vaizdo plokštę.",
+ "6d5c4fbb": "Temos aplankas",
+ "4f72cd3e": "Aplankas nustatymų aplanko themes kataloge: jo theme.toml keičia spalvas, icons aplankas – piktogramas. Formatas aprašytas docs/themes.md, GitHub.",
+ "048a70ae": "Atidaryti temų aplanką"
 }

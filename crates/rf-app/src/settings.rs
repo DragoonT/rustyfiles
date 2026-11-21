@@ -621,6 +621,8 @@ pub struct Settings {
     pub tab_shows_path: bool,
     /// Explorer windows that other programs open are closed and their place opened here (issue 37). Off by default.
     pub catch_explorer_windows: bool,
+    /// A theme folder's name in `<settings folder>\themes` (colours and icons, issues 93 and 94); empty: none.
+    pub theme_folder: String,
     /// The terminal button on each folder's tab. Issue 119: it was in the way of clicks on narrow tabs.
     pub tab_terminal_button: bool,
     /// Typing in a folder's list filters it by name (the filter bar opens with the letters); off: typing selects the item whose
@@ -966,6 +968,7 @@ impl Default for Settings {
             list_columns_first: false,
             tab_shows_path: false,
             catch_explorer_windows: false,
+            theme_folder: String::new(),
             tab_terminal_button: true,
             preview_details: true,
             type_to_filter: false,
@@ -1315,6 +1318,7 @@ impl Settings {
         rf_win::accent::set_override(rf_win::accent::parse_hex(&self.accent_color));
         crate::background::sync_tray(self.run_in_background);
         crate::background::sync_explorer_catch(self.catch_explorer_windows);
+        crate::themes::set(&self.theme_folder);
         crate::quick_search::sync(self);
         // (the system's own short date and time for the "System" style and older dates, issue 59; set once)
         rf_core::format::set_system_format(rf_win::datefmt::short_date_time);

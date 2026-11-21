@@ -1627,6 +1627,37 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         },
         cx,
     ));
+    // the theme folder: colours and icons of the user's own (issues 93 and 94)
+    let themes = crate::themes::list();
+    let cur_theme = s.theme_folder.clone();
+    let none = t!("Yok").to_string();
+    let shown_theme = if cur_theme.is_empty() { none.clone() } else { cur_theme.clone() };
+    v.push(card(
+        p,
+        L::Palette,
+        t!("Tema klasörü"),
+        Some(t!("Ayar klasöründeki themes içinden bir klasör: theme.toml renkleri, icons klasörü simgeleri değiştirir. Biçimi GitHub'da docs/themes.md'de.")),
+        select_box("theme-folder", p, shown_theme, move |_| {
+            std::iter::once(String::new())
+                .chain(themes.iter().cloned())
+                .map(|name| {
+                    let label = if name.is_empty() { none.clone() } else { name.clone() };
+                    Choice::new(label, name == cur_theme, move |_, cx| {
+                        let n = name.clone();
+                        settings::update(cx, |s| s.theme_folder = n)
+                    })
+                })
+                .collect()
+        }),
+    ));
+    v.push(link_row(p, "open-themes", L::FolderOpen, t!("Tema klasörlerini aç"), None, |_, _| {
+        if let Some(d) = crate::themes::dir() {
+            let _ = std::fs::create_dir_all(&d);
+            std::thread::spawn(move || {
+                let _ = rf_win::shell::open(&d);
+            });
+        }
+    }));
     // font
     let fonts = font_choices(cx);
     let current_font = s.font.clone().unwrap_or_default();

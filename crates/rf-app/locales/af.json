@@ -2161,5 +2161,8 @@
  "438fff43": "Explorer-vensters wat ander programme oopmaak",
  "109ffa73": "Wanneer 'n program ('n aflaaibestuurder, byvoorbeeld) self File Explorer begin, word sy venster gesluit en dieselfde plek maak in rustyfiles oop. Werk terwyl rustyfiles loop.",
  "6fee9305": "Werkverrigtingmodus",
- "40761adf": "Die Dock slaan sy bewegings oor en word op 'n soliede vulling in plaas van glas geteken: minder werk terwyl 'n speletjie die grafiese kaart besig hou."
+ "40761adf": "Die Dock slaan sy bewegings oor en word op 'n soliede vulling in plaas van glas geteken: minder werk terwyl 'n speletjie die grafiese kaart besig hou.",
+ "6d5c4fbb": "Temagids",
+ "4f72cd3e": "'n Gids in themes, in die instellingsgids: sy theme.toml verander die kleure, sy icons-gids die ikone. Die formaat is in docs/themes.md op GitHub.",
+ "048a70ae": "Maak die temagids oop"
 }

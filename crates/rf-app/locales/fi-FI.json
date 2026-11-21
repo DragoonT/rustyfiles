@@ -2161,5 +2161,8 @@
  "438fff43": "Muiden ohjelmien avaamat Resurssienhallinnan ikkunat",
  "109ffa73": "Kun ohjelma (esimerkiksi latauksenhallinta) käynnistää Resurssienhallinnan itse, sen ikkuna suljetaan ja sama paikka avataan rustyfilesissa. Toimii, kun rustyfiles on käynnissä.",
  "6fee9305": "Suorituskykytila",
- "40761adf": "Dock jättää liikkeet pois ja piirretään yhtenäiselle taustalle lasin sijaan: vähemmän työtä, kun peli kuormittaa näytönohjainta."
+ "40761adf": "Dock jättää liikkeet pois ja piirretään yhtenäiselle taustalle lasin sijaan: vähemmän työtä, kun peli kuormittaa näytönohjainta.",
+ "6d5c4fbb": "Teemakansio",
+ "4f72cd3e": "Kansio asetuskansion themes-kansiossa: sen theme.toml vaihtaa värit ja icons-kansio kuvakkeet. Muoto on kuvattu GitHubissa tiedostossa docs/themes.md.",
+ "048a70ae": "Avaa teemakansio"
 }

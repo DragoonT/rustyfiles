@@ -2161,5 +2161,8 @@
  "438fff43": "Verkenner-vensters die andere programma's openen",
  "109ffa73": "Als een programma (een downloadmanager bijvoorbeeld) zelf Verkenner start, wordt dat venster gesloten en opent dezelfde plek in rustyfiles. Werkt zolang rustyfiles draait.",
  "6fee9305": "Prestatiemodus",
- "40761adf": "Het Dock slaat zijn bewegingen over en wordt op een effen vlak in plaats van glas getekend: minder werk terwijl een game de videokaart bezighoudt."
+ "40761adf": "Het Dock slaat zijn bewegingen over en wordt op een effen vlak in plaats van glas getekend: minder werk terwijl een game de videokaart bezighoudt.",
+ "6d5c4fbb": "Themamap",
+ "4f72cd3e": "Een map in themes, in de instellingenmap: de theme.toml verandert de kleuren, de map icons de pictogrammen. Het formaat staat in docs/themes.md op GitHub.",
+ "048a70ae": "Themamap openen"
 }

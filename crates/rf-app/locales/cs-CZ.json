@@ -2161,5 +2161,8 @@
  "438fff43": "Okna Průzkumníka otevřená jinými programy",
  "109ffa73": "Když program (například správce stahování) sám spustí Průzkumníka souborů, jeho okno se zavře a stejné místo se otevře v rustyfiles. Funguje, dokud rustyfiles běží.",
  "6fee9305": "Režim výkonu",
- "40761adf": "Dock vynechá animace a kreslí se na plném pozadí místo skla: méně práce, když hra vytěžuje grafickou kartu."
+ "40761adf": "Dock vynechá animace a kreslí se na plném pozadí místo skla: méně práce, když hra vytěžuje grafickou kartu.",
+ "6d5c4fbb": "Složka motivu",
+ "4f72cd3e": "Složka v themes ve složce nastavení: její theme.toml mění barvy, složka icons ikony. Formát je v docs/themes.md na GitHubu.",
+ "048a70ae": "Otevřít složku motivů"
 }

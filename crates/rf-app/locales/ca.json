@@ -2161,5 +2161,8 @@
  "438fff43": "Finestres de l'Explorador que obren altres programes",
  "109ffa73": "Quan un programa (un gestor de baixades, per exemple) inicia l'Explorador de fitxers pel seu compte, la finestra es tanca i el mateix lloc s'obre a rustyfiles. Funciona mentre rustyfiles s'executa.",
  "6fee9305": "Mode de rendiment",
- "40761adf": "El Dock omet els moviments i es dibuixa sobre un fons sòlid en lloc del vidre: menys feina mentre un joc ocupa la targeta gràfica."
+ "40761adf": "El Dock omet els moviments i es dibuixa sobre un fons sòlid en lloc del vidre: menys feina mentre un joc ocupa la targeta gràfica.",
+ "6d5c4fbb": "Carpeta de tema",
+ "4f72cd3e": "Una carpeta dins de themes, a la carpeta de configuració: el seu theme.toml canvia els colors i la carpeta icons, les icones. El format és a docs/themes.md a GitHub.",
+ "048a70ae": "Obre la carpeta de temes"
 }

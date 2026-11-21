@@ -2161,5 +2161,8 @@
  "438fff43": "Janelas do Explorador abertas por outros programas",
  "109ffa73": "Quando um programa (um gestor de transferências, por exemplo) abre o Explorador de Ficheiros por si, a janela é fechada e o mesmo local abre no rustyfiles. Funciona enquanto o rustyfiles está em execução.",
  "6fee9305": "Modo de desempenho",
- "40761adf": "O Dock dispensa os movimentos e é desenhado sobre um fundo sólido em vez de vidro: menos trabalho enquanto um jogo ocupa a placa gráfica."
+ "40761adf": "O Dock dispensa os movimentos e é desenhado sobre um fundo sólido em vez de vidro: menos trabalho enquanto um jogo ocupa a placa gráfica.",
+ "6d5c4fbb": "Pasta de tema",
+ "4f72cd3e": "Uma pasta em themes, na pasta de definições: o theme.toml muda as cores e a pasta icons, os ícones. O formato está em docs/themes.md no GitHub.",
+ "048a70ae": "Abrir a pasta de temas"
 }

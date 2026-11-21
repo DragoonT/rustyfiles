@@ -2161,5 +2161,8 @@
  "438fff43": "Finestre di Esplora risorse aperte da altri programmi",
  "109ffa73": "Quando un programma (un gestore di download, per esempio) avvia da solo Esplora file, la sua finestra viene chiusa e lo stesso percorso si apre in rustyfiles. Funziona mentre rustyfiles è in esecuzione.",
  "6fee9305": "Modalità prestazioni",
- "40761adf": "Il Dock salta i movimenti e viene disegnato su uno sfondo pieno invece che sul vetro: meno lavoro mentre un gioco tiene occupata la scheda grafica."
+ "40761adf": "Il Dock salta i movimenti e viene disegnato su uno sfondo pieno invece che sul vetro: meno lavoro mentre un gioco tiene occupata la scheda grafica.",
+ "6d5c4fbb": "Cartella del tema",
+ "4f72cd3e": "Una cartella in themes, nella cartella delle impostazioni: il suo theme.toml cambia i colori, la sua cartella icons le icone. Il formato è in docs/themes.md su GitHub.",
+ "048a70ae": "Apri la cartella dei temi"
 }

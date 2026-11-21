@@ -13037,5 +13037,23 @@
   "key": "Dock hareket etmez ve cam yerine düz zeminle çizilir: bir oyun ekran kartını meşgul ederken daha az iş yapar.",
   "tr": "Dock hareket etmez ve cam yerine düz zeminle çizilir: bir oyun ekran kartını meşgul ederken daha az iş yapar.",
   "en": "The Dock skips its motions and is drawn on a solid fill instead of glass: less work while a game keeps the graphics card busy."
+ },
+ {
+  "id": "6d5c4fbb",
+  "key": "Tema klasörü",
+  "tr": "Tema klasörü",
+  "en": "Theme folder"
+ },
+ {
+  "id": "4f72cd3e",
+  "key": "Ayar klasöründeki themes içinden bir klasör: theme.toml renkleri, icons klasörü simgeleri değiştirir. Biçimi GitHub'da docs/themes.md'de.",
+  "tr": "Ayar klasöründeki themes içinden bir klasör: theme.toml renkleri, icons klasörü simgeleri değiştirir. Biçimi GitHub'da docs/themes.md'de.",
+  "en": "A folder in themes, in the settings folder: its theme.toml changes the colours, its icons folder the icons. The format is in docs/themes.md on GitHub."
+ },
+ {
+  "id": "048a70ae",
+  "key": "Tema klasörlerini aç",
+  "tr": "Tema klasörlerini aç",
+  "en": "Open the themes folder"
  }
 ]

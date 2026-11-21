@@ -2161,5 +2161,8 @@
  "438fff43": "Explorer windows other programs open",
  "109ffa73": "When a program (a download manager, for example) starts File Explorer itself, its window is closed and the same place opens in rustyfiles. Works while rustyfiles is running.",
  "6fee9305": "Performance mode",
- "40761adf": "The Dock skips its motions and is drawn on a solid fill instead of glass: less work while a game keeps the graphics card busy."
+ "40761adf": "The Dock skips its motions and is drawn on a solid fill instead of glass: less work while a game keeps the graphics card busy.",
+ "6d5c4fbb": "Theme folder",
+ "4f72cd3e": "A folder in themes, in the settings folder: its theme.toml changes the colours, its icons folder the icons. The format is in docs/themes.md on GitHub.",
+ "048a70ae": "Open the themes folder"
 }

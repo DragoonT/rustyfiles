@@ -2161,5 +2161,8 @@
  "438fff43": "Ventanas del Explorador que abren otros programas",
  "109ffa73": "Cuando un programa (un gestor de descargas, por ejemplo) abre el Explorador de archivos por su cuenta, su ventana se cierra y el mismo lugar se abre en rustyfiles. Funciona mientras rustyfiles está en ejecución.",
  "6fee9305": "Modo de rendimiento",
- "40761adf": "El Dock omite sus movimientos y se dibuja sobre un fondo sólido en lugar de cristal: menos trabajo mientras un juego ocupa la tarjeta gráfica."
+ "40761adf": "El Dock omite sus movimientos y se dibuja sobre un fondo sólido en lugar de cristal: menos trabajo mientras un juego ocupa la tarjeta gráfica.",
+ "6d5c4fbb": "Carpeta de tema",
+ "4f72cd3e": "Una carpeta dentro de themes, en la carpeta de configuración: su theme.toml cambia los colores y su carpeta icons, los iconos. El formato está en docs/themes.md en GitHub.",
+ "048a70ae": "Abrir la carpeta de temas"
 }

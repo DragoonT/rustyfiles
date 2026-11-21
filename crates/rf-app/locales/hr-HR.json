@@ -2161,5 +2161,8 @@
  "438fff43": "Prozori Explorera koje otvaraju drugi programi",
  "109ffa73": "Kad program (na primjer upravitelj preuzimanja) sam pokrene File Explorer, njegov se prozor zatvara, a isto se mjesto otvara u rustyfilesu. Radi dok je rustyfiles pokrenut.",
  "6fee9305": "Način performansi",
- "40761adf": "Dock preskače pokrete i crta se na punoj podlozi umjesto stakla: manje posla dok igra opterećuje grafičku karticu."
+ "40761adf": "Dock preskače pokrete i crta se na punoj podlozi umjesto stakla: manje posla dok igra opterećuje grafičku karticu.",
+ "6d5c4fbb": "Mapa teme",
+ "4f72cd3e": "Mapa u themes u mapi postavki: njezin theme.toml mijenja boje, a mapa icons ikone. Format je opisan u docs/themes.md na GitHubu.",
+ "048a70ae": "Otvori mapu tema"
 }

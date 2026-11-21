@@ -282,6 +282,9 @@ impl ImageCache {
     /// own (`folder_has_own_icon`) is asked for it, like a program or a shortcut.
     pub fn icon(&mut self, dir: &Path, e: &Entry, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
         let unique = own_picture(e);
+        if let Some(f) = crate::themes::icon_file(e.is_dir(), &e.ext, unique) {
+            return self.theme_icon(f, ICON_PX, cx);
+        }
         let key = if unique && e.is_dir() {
             // (with the folder's time and attributes: an icon chosen later changes one of them, and the old picture is not kept)
             let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
@@ -299,6 +302,35 @@ impl ImageCache {
         self.evict_over_budget();
         self.release_evicted(cx);
         r
+    }
+
+    /// A theme folder's picture (`crate::themes`) at `px`. Few (one per kind of item): kept for good.
+    fn theme_icon(&mut self, file: std::path::PathBuf, px: u32, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        let key = key_of(&[&"theme", &file, &px]);
+        match self.map.get(&key) {
+            Some(Slot::Ready(im)) => return Some(im.clone()),
+            Some(_) => return None,
+            None => {}
+        }
+        self.map.insert(key, Slot::Pending);
+        let work = cx.background_spawn(async move {
+            match rf_win::look::decode::decode_full(&file, px) {
+                Ok(d) => d.frames.into_iter().next().map(|(b, _)| b),
+                Err(e) => {
+                    log::warn!("theme icon {file:?}: {e:#}");
+                    None
+                }
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let b = work.await;
+            let _ = this.update(cx, |c, cx| {
+                c.map.insert(key, b.as_ref().and_then(to_render_image).map_or(Slot::Failed, Slot::Ready));
+                cx.notify();
+            });
+        })
+        .detach();
+        None
     }
 
     /// Another program's overlay picture `index` (`rf_win::overlays`) at `px`. Few and small (one per kind of mark): kept for good.
@@ -358,6 +390,12 @@ impl ImageCache {
     }
 
     fn thumbnail_as(&mut self, dir: &Path, e: &Entry, size: u32, urgent: bool, cx: &mut Context<Self>) -> Option<Arc<RenderImage>> {
+        // the theme folder's picture for what has no content picture (a folder too: the theme's folder wins over its preview)
+        if !crate::icons::has_thumbnail(e)
+            && let Some(f) = crate::themes::icon_file(e.is_dir(), &e.ext, own_picture(e))
+        {
+            return self.theme_icon(f, size, cx);
+        }
         // a folder at a large size shows what is in it, as Explorer's do (issue 158): the shell draws that picture (the folder with its
         // first pictures in it); a folder it has none for gets the folder icon back (`rf_win::thumbs`)
         // (not a folder with an icon of its own, nor one inside an archive or on FTP, which the shell cannot open)

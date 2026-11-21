@@ -2161,5 +2161,8 @@
  "438fff43": "Mga window ng Explorer na binubuksan ng ibang programa",
  "109ffa73": "Kapag ang isang programa (download manager, halimbawa) ay mismong nagbukas ng File Explorer, isinasara ang window nito at binubuksan ang parehong lugar sa rustyfiles. Gumagana habang tumatakbo ang rustyfiles.",
  "6fee9305": "Performance mode",
- "40761adf": "Nilalaktawan ng Dock ang mga galaw nito at iginuguhit sa solidong background sa halip na salamin: mas kaunting trabaho habang pinapagod ng laro ang graphics card."
+ "40761adf": "Nilalaktawan ng Dock ang mga galaw nito at iginuguhit sa solidong background sa halip na salamin: mas kaunting trabaho habang pinapagod ng laro ang graphics card.",
+ "6d5c4fbb": "Folder ng tema",
+ "4f72cd3e": "Isang folder sa themes, sa folder ng settings: binabago ng theme.toml nito ang mga kulay, at ng icons folder nito ang mga icon. Nasa docs/themes.md sa GitHub ang format.",
+ "048a70ae": "Buksan ang folder ng mga tema"
 }

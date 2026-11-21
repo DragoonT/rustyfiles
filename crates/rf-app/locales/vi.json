@@ -2161,5 +2161,8 @@
  "438fff43": "Cửa sổ Explorer do chương trình khác mở",
  "109ffa73": "Khi một chương trình (ví dụ trình quản lý tải xuống) tự mở File Explorer, cửa sổ đó sẽ đóng và cùng vị trí sẽ mở trong rustyfiles. Hoạt động khi rustyfiles đang chạy.",
  "6fee9305": "Chế độ hiệu năng",
- "40761adf": "Dock bỏ qua các chuyển động và được vẽ trên nền đặc thay vì kính: ít việc hơn khi trò chơi khiến card đồ họa bận."
+ "40761adf": "Dock bỏ qua các chuyển động và được vẽ trên nền đặc thay vì kính: ít việc hơn khi trò chơi khiến card đồ họa bận.",
+ "6d5c4fbb": "Thư mục giao diện",
+ "4f72cd3e": "Một thư mục trong themes, ở thư mục cài đặt: theme.toml của nó đổi màu, thư mục icons đổi biểu tượng. Định dạng có trong docs/themes.md trên GitHub.",
+ "048a70ae": "Mở thư mục giao diện"
 }
