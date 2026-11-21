@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Ne nyíljon mindig itt ennél:",
  "a6a39e94": "Mindig ebben a mappában nyíljon ennél:",
  "6ff5ec59": "A Megnyitás/Mentés ablaka mindig itt nyílik meg:",
- "b79ebd26": "A lista kitöltése oszloponként"
+ "b79ebd26": "A lista kitöltése oszloponként",
+ "c9f22cd9": "A mappa elérési útja a lapokon",
+ "b47392d6": "A lapok a mappa neve helyett a teljes elérési utat mutatják kisebb betűvel; ami nem fér ki, a végén levágódik."
 }

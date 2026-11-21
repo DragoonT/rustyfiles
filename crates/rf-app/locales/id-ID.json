@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Berhenti selalu membuka di sini untuk:",
  "a6a39e94": "Selalu buka di folder ini untuk:",
  "6ff5ec59": "Jendela Buka / Simpan-nya selalu terbuka di:",
- "b79ebd26": "Isi Daftar kolom demi kolom"
+ "b79ebd26": "Isi Daftar kolom demi kolom",
+ "c9f22cd9": "Jalur folder pada tab",
+ "b47392d6": "Tab menampilkan jalur lengkap folder dengan teks lebih kecil, bukan namanya; bagian yang tidak muat dipotong di akhir."
 }

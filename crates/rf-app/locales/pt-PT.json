@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Deixar de abrir sempre aqui para:",
  "a6a39e94": "Abrir sempre nesta pasta para:",
  "6ff5ec59": "A janela Abrir / Guardar abre sempre em:",
- "b79ebd26": "Preencher a lista coluna a coluna"
+ "b79ebd26": "Preencher a lista coluna a coluna",
+ "c9f22cd9": "O caminho da pasta nos separadores",
+ "b47392d6": "Os separadores mostram o caminho completo da pasta em letra mais pequena em vez do nome; o que não couber é cortado no fim."
 }

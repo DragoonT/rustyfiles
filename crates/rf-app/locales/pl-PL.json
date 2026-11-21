@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Przestań zawsze otwierać tutaj dla:",
  "a6a39e94": "Zawsze otwieraj w tym folderze dla:",
  "6ff5ec59": "Jego okno Otwórz / Zapisz zawsze otwiera się w:",
- "b79ebd26": "Wypełniaj listę kolumnami"
+ "b79ebd26": "Wypełniaj listę kolumnami",
+ "c9f22cd9": "Ścieżka folderu na kartach",
+ "b47392d6": "Karty pokazują zamiast nazwy folderu jego pełną ścieżkę mniejszą czcionką; to, co się nie mieści, jest ucinane na końcu."
 }

@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Prestani uvijek otvarati ovdje za:",
  "a6a39e94": "Uvijek otvori u ovoj mapi za:",
  "6ff5ec59": "Njegov prozor Otvori / Spremi uvijek se otvara u:",
- "b79ebd26": "Popunjavaj popis stupac po stupac"
+ "b79ebd26": "Popunjavaj popis stupac po stupac",
+ "c9f22cd9": "Putanja mape na karticama",
+ "b47392d6": "Kartice umjesto naziva mape prikazuju njezinu cijelu putanju manjim slovima; ono što ne stane odreže se na kraju."
 }

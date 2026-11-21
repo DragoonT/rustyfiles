@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Lopeta aina tähän avaaminen sovellukselle:",
  "a6a39e94": "Avaa aina tässä kansiossa sovellukselle:",
  "6ff5ec59": "Sen Avaa/Tallenna-ikkuna avautuu aina kansioon:",
- "b79ebd26": "Täytä luettelo sarake kerrallaan"
+ "b79ebd26": "Täytä luettelo sarake kerrallaan",
+ "c9f22cd9": "Kansion polku välilehdillä",
+ "b47392d6": "Välilehdet näyttävät kansion nimen sijaan sen koko polun pienemmällä tekstillä; mikä ei mahdu, katkaistaan lopusta."
 }

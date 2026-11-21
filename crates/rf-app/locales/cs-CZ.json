@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Přestat vždy otevírat zde pro:",
  "a6a39e94": "Vždy otevírat v této složce pro:",
  "6ff5ec59": "Jeho okno Otevřít / Uložit se vždy otevře v:",
- "b79ebd26": "Plnit seznam po sloupcích"
+ "b79ebd26": "Plnit seznam po sloupcích",
+ "c9f22cd9": "Cesta ke složce na kartách",
+ "b47392d6": "Karty zobrazují místo názvu celou cestu ke složce menším písmem; co se nevejde, se na konci ořízne."
 }

@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Nicht mehr immer hier öffnen für:",
  "a6a39e94": "Immer in diesem Ordner öffnen für:",
  "6ff5ec59": "Sein Öffnen-/Speichern-Fenster öffnet immer in:",
- "b79ebd26": "Liste spaltenweise füllen"
+ "b79ebd26": "Liste spaltenweise füllen",
+ "c9f22cd9": "Ordnerpfad auf Tabs",
+ "b47392d6": "Tabs zeigen statt des Ordnernamens den vollständigen Pfad in kleinerer Schrift; was nicht passt, wird am Ende abgeschnitten."
 }

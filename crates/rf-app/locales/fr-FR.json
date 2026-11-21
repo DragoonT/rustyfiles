@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Ne plus toujours ouvrir ici pour :",
  "a6a39e94": "Toujours ouvrir dans ce dossier pour :",
  "6ff5ec59": "Sa fenêtre Ouvrir / Enregistrer s'ouvre toujours dans :",
- "b79ebd26": "Remplir la liste colonne par colonne"
+ "b79ebd26": "Remplir la liste colonne par colonne",
+ "c9f22cd9": "Le chemin du dossier sur les onglets",
+ "b47392d6": "Les onglets affichent le chemin complet du dossier en plus petit au lieu de son nom ; ce qui ne tient pas est coupé à la fin."
 }

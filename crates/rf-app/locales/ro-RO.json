@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Nu mai deschide mereu aici pentru:",
  "a6a39e94": "Deschide mereu în acest folder pentru:",
  "6ff5ec59": "Fereastra sa Deschidere / Salvare se deschide mereu în:",
- "b79ebd26": "Umple lista coloană cu coloană"
+ "b79ebd26": "Umple lista coloană cu coloană",
+ "c9f22cd9": "Calea folderului pe file",
+ "b47392d6": "Filele arată calea completă a folderului cu text mai mic în locul numelui; ce nu încape este tăiat la sfârșit."
 }

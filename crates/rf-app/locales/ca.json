@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Deixa d'obrir sempre aquí per a:",
  "a6a39e94": "Obre sempre en aquesta carpeta per a:",
  "6ff5ec59": "La seva finestra Obre / Desa s'obre sempre a:",
- "b79ebd26": "Omple la llista columna per columna"
+ "b79ebd26": "Omple la llista columna per columna",
+ "c9f22cd9": "El camí de la carpeta a les pestanyes",
+ "b47392d6": "Les pestanyes mostren el camí complet de la carpeta en lletra més petita en lloc del nom; el que no hi cap es retalla al final."
 }

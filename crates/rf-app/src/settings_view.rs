@@ -1507,6 +1507,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::FolderOpen,
+            t!("Sekmede klasörün yolu"),
+            Some(t!("Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.")),
+            sw("tab-path", p, s.tab_shows_path, |s, v| s.tab_shows_path = v),
+        ),
+        card(
+            p,
             L::SquareTerminal,
             t!("Sekmelerde terminal düğmesi"),
             Some(t!("Her klasör sekmesinde, o klasörde bir terminal açan düğme.")),

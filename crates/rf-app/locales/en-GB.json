@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Stop always opening here for:",
  "a6a39e94": "Always open in this folder for:",
  "6ff5ec59": "Its Open / Save window always opens in:",
- "b79ebd26": "Fill the List column by column"
+ "b79ebd26": "Fill the List column by column",
+ "c9f22cd9": "The folder's path on tabs",
+ "b47392d6": "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end."
 }

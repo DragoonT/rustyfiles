@@ -2319,6 +2319,8 @@ impl Workspace {
         let fit_names = cx.global::<crate::settings::Settings>().tabs_fit_names;
         // Settings > Appearance > "Terminal button on tabs" (issue 119: off, nothing is in the way of a click on a narrow tab)
         let tab_terminal = cx.global::<crate::settings::Settings>().tab_terminal_button;
+        // Settings > Appearance > "The folder's path on tabs" (issue 162: "show whatever number of characters it can on the tab")
+        let tab_path = cx.global::<crate::settings::Settings>().tab_shows_path;
         let (name_px, name_style) = (rems(0.875).to_pixels(window.rem_size()), window.text_style());
         let roomy = fit_names || tab_w >= 110.;
         let mut tab_claimed = false;
@@ -2328,8 +2330,10 @@ impl Workspace {
             let icon = v.tab_icon();
             let tab_dir = v.location().path().map(Path::to_path_buf);
             let term_dir = tab_terminal.then(|| tab_terminal_dir(v.location())).flatten();
+            let path_title: Option<SharedString> = tab_dir.as_ref().filter(|_| tab_path).map(|d| d.display().to_string().into());
+            let shown: SharedString = path_title.clone().unwrap_or_else(|| title.clone().into());
             let tab_w = if fit_names {
-                let name = window.text_system().layout_line(&title, name_px, &[name_style.to_run(title.len())], None).width;
+                let name = window.text_system().layout_line(shown.as_ref(), name_px, &[name_style.to_run(shown.len())], None).width;
                 (f32::from(name) + TAB_CHROME_W + if term_dir.is_some() { TAB_TERMINAL_W } else { 0. }).clamp(TAB_MIN_W, TAB_MAX_W)
             } else {
                 tab_w
@@ -2372,7 +2376,7 @@ impl Workspace {
                     })
                     .when(!active, |d| d.text_color(p.text_secondary).hover(|s| s.bg(p.hover)))
                     .child(Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
+                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().when(path_title.is_some(), |d| d.text_xs()).child(shown))
                     // the folder's whole path on hover (issue 162: "I am unable to see a way to see the full path on tabs")
                     .when_some(tab_dir.clone().filter(|_| !popups_open), |d, dir| {
                         let path = dir.display().to_string();

@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Pārtraukt vienmēr atvērt šeit:",
  "a6a39e94": "Vienmēr atvērt šajā mapē:",
  "6ff5ec59": "Tā atvēršanas / saglabāšanas logs vienmēr atveras:",
- "b79ebd26": "Aizpildīt sarakstu pa kolonnām"
+ "b79ebd26": "Aizpildīt sarakstu pa kolonnām",
+ "c9f22cd9": "Mapes ceļš cilnēs",
+ "b47392d6": "Cilnes mapes nosaukuma vietā rāda pilnu tās ceļu mazākā tekstā; kas neietilpst, tiek nogriezts beigās."
 }

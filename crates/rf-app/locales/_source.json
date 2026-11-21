@@ -12983,5 +12983,17 @@
   "key": "Listeyi sütun sütun doldur",
   "tr": "Listeyi sütun sütun doldur",
   "en": "Fill the List column by column"
+ },
+ {
+  "id": "c9f22cd9",
+  "key": "Sekmede klasörün yolu",
+  "tr": "Sekmede klasörün yolu",
+  "en": "The folder's path on tabs"
+ },
+ {
+  "id": "b47392d6",
+  "key": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
+  "tr": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
+  "en": "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end."
  }
 ]

@@ -852,6 +852,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Düz arka plan", "Solid background"),
     ("Adalar cam yerine düz, opak bir zeminle çizilir: hareketli bir duvar kâğıdında ya da pencerelerin önünde simgeler daha kolay seçilir.", "The islands are drawn on a solid, opaque fill instead of glass: icons stand out better over a busy wallpaper or windows."),
     ("Sekmeler adları kadar geniş", "Tabs as wide as their names"),
+    ("Sekmede klasörün yolu", "The folder's path on tabs"),
+    ("Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.", "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end."),
     ("Kapalıyken bütün sekmeler eşit genişlikte. Açıkken her sekme adına göre genişler, en az 72 ve en çok 220 piksel.", "When off, all tabs are equally wide. When on, each tab fits its name, from 72 to 220 pixels."),
     ("Boşluk QuickLook'u açsın", "Space opens QuickLook"),
     ("Dosyalar QuickLook'a gönderilir ve açık önizleme seçimi izler. DirectLook'u yukarıdan kapatabilirsiniz.", "Files go to QuickLook, and an open preview follows the selection. You can turn DirectLook off above."),

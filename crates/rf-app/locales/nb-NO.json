@@ -2152,5 +2152,7 @@
  "f6bca4e8": "Slutt å alltid åpne her for:",
  "a6a39e94": "Åpne alltid i denne mappen for:",
  "6ff5ec59": "Åpne/Lagre-vinduet åpnes alltid i:",
- "b79ebd26": "Fyll listen kolonne for kolonne"
+ "b79ebd26": "Fyll listen kolonne for kolonne",
+ "c9f22cd9": "Mappens bane på faner",
+ "b47392d6": "Faner viser hele banen til mappen med mindre tekst i stedet for navnet; det som ikke får plass, kuttes på slutten."
 }
