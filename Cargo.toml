@@ -134,6 +134,8 @@ windows = { version = "0.62", features = [
     # the share sheet for our windows (rf-win share.rs, issue 48)
     "ApplicationModel_DataTransfer",
     "Storage_Search",
+    # opening a file in a packaged app with its folder (rf-win neighbours.rs, issue 70)
+    "System",
     "Networking_Connectivity",
     "Devices_Radios",
     # the dock's weather from the PC's approximate position (rf-win weather_location.rs)

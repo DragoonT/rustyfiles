@@ -638,6 +638,13 @@ impl FolderView {
         cx.notify();
     }
 
+    /// Applies the name in the rename box, when one is open (a press outside it).
+    pub fn commit_rename_if_open(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.renaming.is_some() {
+            self.commit_rename(window, cx);
+        }
+    }
+
     pub fn cancel_rename(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.set_renaming(None, None);
         window.focus(&self.focus, cx);

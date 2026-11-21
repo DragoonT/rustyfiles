@@ -2744,6 +2744,8 @@ impl FolderView {
                         .border_1()
                         .border_color(p.accent)
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        // a press anywhere else applies the new name, as in Explorer (issue 180)
+                        .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| this.commit_rename_if_open(window, cx)))
                         .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_1().text_xs().text_center())
                         .into_any_element(),
                     // a right-to-left name is split into its two lines here (issue 115: wrapped by GPUI, a long Persian name came out one
@@ -2818,6 +2820,8 @@ impl FolderView {
                             .border_1()
                             .border_color(p.accent)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            // a press anywhere else applies the new name, as in Explorer (issue 180)
+                            .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| this.commit_rename_if_open(window, cx)))
                             .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_0()),
                     )
                 } else {
@@ -2877,9 +2881,9 @@ impl FolderView {
         let had_focus = window.is_window_active() && self.focus.is_focused(window);
         let was_only = self.visible.get(vi).is_some_and(|ei| self.selected.len() == 1 && self.selected.contains(ei));
         self.slow_click = None;
-        if self.renaming.is_some() {
-            self.cancel_rename(window, cx);
-        }
+        // a press on another item applies the name being typed, as Explorer does (issue 180: "With Windows Explorer you could just
+        // click anywhere on the window for the changes to be applied"); it was thrown away
+        self.commit_rename_if_open(window, cx);
         window.focus(&self.focus, cx);
         let Some(&ei) = self.visible.get(vi) else { return };
         let plain = !ev.modifiers.control && !ev.modifiers.shift;
@@ -3645,7 +3649,7 @@ impl FolderView {
         } else if is_lnk(&path) {
             self.open_shortcut(path, cx);
         } else {
-            open_in_background(path, cx);
+            open_in_background_sorted(path, self.sort.key, self.sort.dir == SortDir::Asc, cx);
         }
     }
 
@@ -4248,6 +4252,8 @@ impl FolderView {
                     .border_1()
                     .border_color(p.accent)
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    // a press anywhere else applies the new name, as in Explorer (issue 180)
+                    .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| this.commit_rename_if_open(window, cx)))
                     .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_0())
                     .into_any_element(),
                 None => div()
@@ -5257,6 +5263,11 @@ fn is_lnk(path: &std::path::Path) -> bool {
 }
 
 pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
+    open_in_background_sorted(path, SortKey::Name, true, cx)
+}
+
+/// [`open_in_background`] for a file of a list sorted this way: an app that walks the file's folder (Photos) walks it in this order.
+pub(crate) fn open_in_background_sorted(path: PathBuf, key: SortKey, ascending: bool, cx: &mut App) {
     // (the name test first: it costs nothing, and `exists` on a place that has to wake up holds the UI thread)
     if !rf_win::ftp::is_ftp(&path) && crate::nav_touch::may_hold_archive(&path) && !path.exists() && crate::archive_view::split(&path).is_some() {
         // an item inside an archive: extract just it (Status Center), open the real file
@@ -5279,7 +5290,7 @@ pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
             path
         };
         // (with the user's own program for the file's type when there is one: Settings > File types)
-        if let Err(e) = rf_win::openrules::open(&path) {
+        if let Err(e) = rf_win::openrules::open_in_order(&path, key, ascending) {
             log::warn!("open {path:?}: {e}");
         }
     });

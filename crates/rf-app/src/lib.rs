@@ -525,6 +525,11 @@ pub fn main() {
     // Not in the installation folder: the updater renames it, and Windows refuses while it is a working directory of this process
     // or of anything this process starts (`rf_win::ownfolder`). Before everything else, so that every child inherits the way out.
     rf_win::ownfolder::leave();
+    // `--open-with-folder <file> <property> <1|0>`: a file opened in a packaged app with its folder, from a process that ends at once
+    // (see rf_win::neighbours::launch)
+    if std::env::args().nth(1).as_deref() == Some(rf_win::neighbours::ARG) {
+        std::process::exit(rf_win::neighbours::helper_main());
+    }
     // `--shell-probe`: what the shell host finds, windowless and read-only, before anything else is done (see shell::probe)
     if std::env::args().nth(1).as_deref() == Some(shell::probe::ARG) {
         std::process::exit(shell::probe::run());

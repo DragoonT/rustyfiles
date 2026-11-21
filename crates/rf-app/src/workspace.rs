@@ -2354,7 +2354,11 @@ impl Workspace {
                     .pr_1()
                     .gap_2()
                     .items_center()
-                    .rounded_t(theme::RADIUS)
+                    // A closed shape that stands a little above the strip's bottom (issue 168: "since the base of the tab shape doesn't
+                    // rest on anything, it looks strange"): nothing under the strip continues the tab, so a tab open at the bottom
+                    // looked cut off. Over glass the selected tab is the engine's lens, whose shape is drawn standing on the strip.
+                    .when(self.tab_lens, |d| d.rounded_t(theme::RADIUS))
+                    .when(!self.tab_lens, |d| d.rounded(theme::RADIUS).mb_1())
                     .text_sm()
                     // while the tab moves (tabs open or close beside it, the window is resized) the scene paints the fill itself: the
                     // engine's lens would trail the tab (see glass::LensPhase)
@@ -2479,7 +2483,8 @@ impl Workspace {
                 .ml_1()
                 .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Yeni sekme  (Ctrl+T)")).build(w, cx))
                 .size(px(28.))
-                .mb(px(2.))
+                // (in line with the tabs' middle: they stand 4 px up without glass)
+                .mb(px(if plus_lens { 2. } else { 6. }))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -3628,7 +3633,16 @@ impl Workspace {
                     cx.notify();
                 }
             }));
-        col = col.child(self.sidebar_item(
+        // Home and the pinned folders. With the folder tree on they stand above the sidebar's scrolling part and stay in view while the
+        // tree is scrolled (issue 177: "the Pinned section is pushed out of view when the user scrolls down the folder tree"); a long
+        // list of pins scrolls on its own, in at most 45% of the sidebar.
+        let mut head = v_flex().id("sidebar-pins").w_full().gap_0p5().on_drag_move::<ExternalPaths>(cx.listener(|this, _: &DragMoveEvent<ExternalPaths>, _, cx| {
+            if !this.sidebar_ext_drag {
+                this.sidebar_ext_drag = true;
+                cx.notify();
+            }
+        }));
+        head = head.child(self.sidebar_item(
             "sb-home".into(),
             L::House,
             p.accent,
@@ -3640,7 +3654,7 @@ impl Workspace {
             cx,
         ));
         // dropping folders on the header pins them
-        col = col.child(
+        head = head.child(
             div()
                 .id("sb-pin-header")
                 .rounded(theme::RADIUS_SM)
@@ -3659,7 +3673,7 @@ impl Workspace {
             let target_path = f.path.clone();
             let item = self.sidebar_item(("sb-pin", i).into(), f.icon, p.accent, title, loc, active, None, p, cx);
             // drag a pin onto another to reorder
-            col = col.child(
+            head = head.child(
                 div()
                     .id(("sb-pin-wrap", i))
                     .on_drag(drag, |d: &PinDrag, _, _, cx| cx.new(|_| d.clone()))
@@ -3672,7 +3686,7 @@ impl Workspace {
             );
         }
         if ext_drag {
-            col = col.child(
+            head = head.child(
                 h_flex()
                     .id("sb-pin-drop")
                     .min_h(px(32.))
@@ -3691,6 +3705,13 @@ impl Workspace {
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.pin_dropped(paths, cx))),
             );
         }
+        let pins_apart = self.shows_tree(rail);
+        let pins_top = if pins_apart {
+            Some(head.px_2().pt_1().pb_1().flex_shrink_0().max_h(relative(0.45)).overflow_y_scroll().border_b_1().border_color(p.divider))
+        } else {
+            col = col.child(head);
+            None
+        };
         // the folder tree stands right under the pinned folders, above the drives and the tags (where the user asked for it: the
         // tree is what one works in, the drives and tags are looked at less often)
         let hidden = cx.global::<crate::settings::Settings>().sidebar_hidden.clone();
@@ -3839,6 +3860,7 @@ impl Workspace {
         v_flex()
             .w(px(if self.sidebar_rail { RAIL_W } else { self.sidebar_w }))
             .h_full()
+            .children(pins_top)
             .child(col)
             .child(div().mx_2().h(px(1.)).bg(p.divider))
             .child(div().px_2().py_1().child(settings))

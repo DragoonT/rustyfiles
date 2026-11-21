@@ -541,7 +541,7 @@ mod start_apply_tests {
         for open in [None, Some(r"C:\Users\x\Documents"), Some("D:\\"), Some("report.pdf"), Some("--settings=dock"), Some("--settings=speed")] {
             assert!(applies_update_at_start(open), "{open:?}");
         }
-        for side in ["--pick", "--dock", "--shell", "--quick-search", "--no-window", "--update-splash", "--bar-preview", "--shell-probe", "--veloapp-updated", "--veloapp-obsolete"] {
+        for side in ["--pick", "--dock", "--shell", "--quick-search", "--no-window", "--update-splash", "--bar-preview", "--shell-probe", "--veloapp-updated", "--veloapp-obsolete", "--open-with-folder"] {
             assert!(!applies_update_at_start(Some(side)), "{side}");
         }
     }
