@@ -2154,5 +2154,8 @@
  "6ff5ec59": "A janela Abrir / Guardar abre sempre em:",
  "b79ebd26": "Preencher a lista coluna a coluna",
  "c9f22cd9": "O caminho da pasta nos separadores",
- "b47392d6": "Os separadores mostram o caminho completo da pasta em letra mais pequena em vez do nome; o que não couber é cortado no fim."
+ "b47392d6": "Os separadores mostram o caminho completo da pasta em letra mais pequena em vez do nome; o que não couber é cortado no fim.",
+ "d9cac923": "Fechar todos os grupos",
+ "c30af95d": "Expandir todos os grupos",
+ "5c26267c": "Fechar / expandir todos os grupos"
 }

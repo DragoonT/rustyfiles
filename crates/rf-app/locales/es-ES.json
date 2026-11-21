@@ -2154,5 +2154,8 @@
  "6ff5ec59": "Su ventana Abrir / Guardar siempre se abre en:",
  "b79ebd26": "Rellenar la lista columna por columna",
  "c9f22cd9": "La ruta de la carpeta en las pestañas",
- "b47392d6": "Las pestañas muestran la ruta completa de la carpeta en letra más pequeña en lugar de su nombre; lo que no cabe se corta al final."
+ "b47392d6": "Las pestañas muestran la ruta completa de la carpeta en letra más pequeña en lugar de su nombre; lo que no cabe se corta al final.",
+ "d9cac923": "Contraer todos los grupos",
+ "c30af95d": "Expandir todos los grupos",
+ "5c26267c": "Contraer / expandir todos los grupos"
 }

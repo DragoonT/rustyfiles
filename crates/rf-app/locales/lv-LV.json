@@ -2154,5 +2154,8 @@
  "6ff5ec59": "Tā atvēršanas / saglabāšanas logs vienmēr atveras:",
  "b79ebd26": "Aizpildīt sarakstu pa kolonnām",
  "c9f22cd9": "Mapes ceļš cilnēs",
- "b47392d6": "Cilnes mapes nosaukuma vietā rāda pilnu tās ceļu mazākā tekstā; kas neietilpst, tiek nogriezts beigās."
+ "b47392d6": "Cilnes mapes nosaukuma vietā rāda pilnu tās ceļu mazākā tekstā; kas neietilpst, tiek nogriezts beigās.",
+ "d9cac923": "Sakļaut visas grupas",
+ "c30af95d": "Izvērst visas grupas",
+ "5c26267c": "Sakļaut / izvērst visas grupas"
 }

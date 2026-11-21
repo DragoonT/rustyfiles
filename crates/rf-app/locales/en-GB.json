@@ -2154,5 +2154,8 @@
  "6ff5ec59": "Its Open / Save window always opens in:",
  "b79ebd26": "Fill the List column by column",
  "c9f22cd9": "The folder's path on tabs",
- "b47392d6": "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end."
+ "b47392d6": "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end.",
+ "d9cac923": "Collapse all groups",
+ "c30af95d": "Expand all groups",
+ "5c26267c": "Collapse / expand all groups"
 }

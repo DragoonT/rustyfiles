@@ -2154,5 +2154,8 @@
  "6ff5ec59": "La seva finestra Obre / Desa s'obre sempre a:",
  "b79ebd26": "Omple la llista columna per columna",
  "c9f22cd9": "El camí de la carpeta a les pestanyes",
- "b47392d6": "Les pestanyes mostren el camí complet de la carpeta en lletra més petita en lloc del nom; el que no hi cap es retalla al final."
+ "b47392d6": "Les pestanyes mostren el camí complet de la carpeta en lletra més petita en lloc del nom; el que no hi cap es retalla al final.",
+ "d9cac923": "Replega tots els grups",
+ "c30af95d": "Desplega tots els grups",
+ "5c26267c": "Replega / desplega tots els grups"
 }

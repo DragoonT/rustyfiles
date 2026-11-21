@@ -100,6 +100,7 @@ gpui_kit::actions!(
         OpenInNewWindow,
         OpenTerminalAdmin,
         OrganizeFolder,
+        ToggleAllGroups,
     ]
 );
 
@@ -207,6 +208,8 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("ctrl-n", NewWindow, None),
         KeyBinding::new("ctrl-shift-s", AddToShelf, f),
         KeyBinding::new("ctrl-space", ToggleSelection, f),
+        // every group folded, or every group open again (issue 181)
+        KeyBinding::new("ctrl-shift-g", ToggleAllGroups, f),
         KeyBinding::new("f11", ToggleFullscreen, None),
         KeyBinding::new("ctrl-=", ZoomIn, f),
         KeyBinding::new("ctrl-+", ZoomIn, f),

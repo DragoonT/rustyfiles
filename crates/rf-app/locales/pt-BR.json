@@ -2154,5 +2154,8 @@
  "6ff5ec59": "A janela Abrir / Salvar dele sempre abre em:",
  "b79ebd26": "Preencher a lista coluna por coluna",
  "c9f22cd9": "O caminho da pasta nas abas",
- "b47392d6": "As abas mostram o caminho completo da pasta em letra menor no lugar do nome; o que não cabe é cortado no final."
+ "b47392d6": "As abas mostram o caminho completo da pasta em letra menor no lugar do nome; o que não cabe é cortado no final.",
+ "d9cac923": "Recolher todos os grupos",
+ "c30af95d": "Expandir todos os grupos",
+ "5c26267c": "Recolher / expandir todos os grupos"
 }

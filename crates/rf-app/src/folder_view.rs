@@ -2113,6 +2113,33 @@ impl FolderView {
         self.tag_snap = Arc::new(map);
     }
 
+    /// Whether the folder is shown in groups (Details or Grid with a grouping): the "all groups" button and key apply.
+    pub fn has_groups(&self) -> bool {
+        matches!(self.view_mode, ViewMode::Details | ViewMode::Grid) && self.rows.iter().any(|r| matches!(r, Row::Header(..)))
+    }
+
+    /// Whether every group is folded.
+    pub fn all_groups_folded(&self) -> bool {
+        let mut headers = self.rows.iter().filter_map(|r| if let Row::Header(label, _) = r { Some(label) } else { None }).peekable();
+        headers.peek().is_some() && headers.all(|l| self.collapsed.contains(l.as_ref()))
+    }
+
+    /// Folds every group, or opens them all again when all are folded (issue 181: "collapse them all at once and then expand the
+    /// ones you are interested in").
+    pub fn toggle_all_groups(&mut self, cx: &mut Context<Self>) {
+        if !self.has_groups() {
+            return;
+        }
+        if self.all_groups_folded() {
+            self.collapsed.clear();
+        } else {
+            let labels: Vec<String> = self.rows.iter().filter_map(|r| if let Row::Header(label, _) = r { Some(label.to_string()) } else { None }).collect();
+            self.collapsed.extend(labels);
+        }
+        self.rebuild_visible();
+        cx.notify();
+    }
+
     /// A click on a group's header: the group folds away, or comes back.
     fn toggle_group(&mut self, label: &str, cx: &mut Context<Self>) {
         if !self.collapsed.remove(label) {
@@ -4620,15 +4647,17 @@ impl FolderView {
     fn render_details(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let count = self.visible.len();
         let list_rows_before = std::mem::take(&mut self.list_rows);
+        // (every group folded leaves no item but the groups' headers: that is not an empty folder)
+        let shown = count.max(self.rows.len());
         let mut side_bar = false;
         // Details and Grid get a scrollbar over the list (Columns has one list per column).
         let mut list_body = false;
         let body: AnyElement = if let Some(err) = &self.error {
             empty_state(p, L::TriangleAlert, crate::i18n::td(err), t!("Klasör açılamadı")).into_any_element()
-        } else if count == 0 && self.loading && self.load_started.elapsed() >= SLOW_LOAD {
+        } else if shown == 0 && self.loading && self.load_started.elapsed() >= SLOW_LOAD {
             let text = self.search_stage.map_or_else(|| t!("Yükleniyor…").to_string(), |s| s.text().to_string());
             empty_state(p, L::LoaderCircle, text, "").into_any_element()
-        } else if count == 0 && !self.loading {
+        } else if shown == 0 && !self.loading {
             // (a search that found nothing is no empty folder)
             let msg = if self.filter.query.is_empty() && !matches!(self.location(), Location::Search { .. }) { t!("Bu klasör boş") } else { t!("Eşleşen öğe yok") };
             empty_state(p, L::FolderOpen, msg.to_string(), "").into_any_element()
@@ -5593,6 +5622,7 @@ impl Render for FolderView {
                 this.selected = this.visible.iter().copied().collect();
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &ToggleAllGroups, _, cx| this.toggle_all_groups(cx)))
             .on_action(cx.listener(|this, _: &InvertSelection, _, cx| {
                 let next: HashSet<u32> = this.visible.iter().copied().filter(|i| !this.selected.contains(i)).collect();
                 this.selected = next;

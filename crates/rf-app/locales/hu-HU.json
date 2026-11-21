@@ -2154,5 +2154,8 @@
  "6ff5ec59": "A Megnyitás/Mentés ablaka mindig itt nyílik meg:",
  "b79ebd26": "A lista kitöltése oszloponként",
  "c9f22cd9": "A mappa elérési útja a lapokon",
- "b47392d6": "A lapok a mappa neve helyett a teljes elérési utat mutatják kisebb betűvel; ami nem fér ki, a végén levágódik."
+ "b47392d6": "A lapok a mappa neve helyett a teljes elérési utat mutatják kisebb betűvel; ami nem fér ki, a végén levágódik.",
+ "d9cac923": "Összes csoport összecsukása",
+ "c30af95d": "Összes csoport kibontása",
+ "5c26267c": "Összes csoport összecsukása / kibontása"
 }

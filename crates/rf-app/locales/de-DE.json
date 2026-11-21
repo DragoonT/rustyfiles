@@ -2154,5 +2154,8 @@
  "6ff5ec59": "Sein Öffnen-/Speichern-Fenster öffnet immer in:",
  "b79ebd26": "Liste spaltenweise füllen",
  "c9f22cd9": "Ordnerpfad auf Tabs",
- "b47392d6": "Tabs zeigen statt des Ordnernamens den vollständigen Pfad in kleinerer Schrift; was nicht passt, wird am Ende abgeschnitten."
+ "b47392d6": "Tabs zeigen statt des Ordnernamens den vollständigen Pfad in kleinerer Schrift; was nicht passt, wird am Ende abgeschnitten.",
+ "d9cac923": "Alle Gruppen einklappen",
+ "c30af95d": "Alle Gruppen ausklappen",
+ "5c26267c": "Alle Gruppen ein-/ausklappen"
 }

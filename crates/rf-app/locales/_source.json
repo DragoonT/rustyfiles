@@ -12995,5 +12995,23 @@
   "key": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
   "tr": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
   "en": "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end."
+ },
+ {
+  "id": "d9cac923",
+  "key": "Tüm grupları daralt",
+  "tr": "Tüm grupları daralt",
+  "en": "Collapse all groups"
+ },
+ {
+  "id": "c30af95d",
+  "key": "Tüm grupları genişlet",
+  "tr": "Tüm grupları genişlet",
+  "en": "Expand all groups"
+ },
+ {
+  "id": "5c26267c",
+  "key": "Tüm grupları daralt / genişlet",
+  "tr": "Tüm grupları daralt / genişlet",
+  "en": "Collapse / expand all groups"
  }
 ]

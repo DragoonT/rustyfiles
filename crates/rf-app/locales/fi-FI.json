@@ -2154,5 +2154,8 @@
  "6ff5ec59": "Sen Avaa/Tallenna-ikkuna avautuu aina kansioon:",
  "b79ebd26": "Täytä luettelo sarake kerrallaan",
  "c9f22cd9": "Kansion polku välilehdillä",
- "b47392d6": "Välilehdet näyttävät kansion nimen sijaan sen koko polun pienemmällä tekstillä; mikä ei mahdu, katkaistaan lopusta."
+ "b47392d6": "Välilehdet näyttävät kansion nimen sijaan sen koko polun pienemmällä tekstillä; mikä ei mahdu, katkaistaan lopusta.",
+ "d9cac923": "Kutista kaikki ryhmät",
+ "c30af95d": "Laajenna kaikki ryhmät",
+ "5c26267c": "Kutista / laajenna kaikki ryhmät"
 }

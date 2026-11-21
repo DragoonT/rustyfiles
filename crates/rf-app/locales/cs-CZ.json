@@ -2154,5 +2154,8 @@
  "6ff5ec59": "Jeho okno Otevřít / Uložit se vždy otevře v:",
  "b79ebd26": "Plnit seznam po sloupcích",
  "c9f22cd9": "Cesta ke složce na kartách",
- "b47392d6": "Karty zobrazují místo názvu celou cestu ke složce menším písmem; co se nevejde, se na konci ořízne."
+ "b47392d6": "Karty zobrazují místo názvu celou cestu ke složce menším písmem; co se nevejde, se na konci ořízne.",
+ "d9cac923": "Sbalit všechny skupiny",
+ "c30af95d": "Rozbalit všechny skupiny",
+ "5c26267c": "Sbalit / rozbalit všechny skupiny"
 }
