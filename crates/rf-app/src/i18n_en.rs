@@ -1025,6 +1025,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Tüm klasörler için varsayılan yap", "Make default for all folders"),
     ("Dosya uzantıları", "File extensions"),
     ("Uyarlanabilir düzen", "Adaptive layout"),
+    ("Listeyi sütun sütun doldur", "Fill the List column by column"),
     ("Filtrele", "Filter"),
     ("Şunlara göre filtrele", "Filter by"),
     ("Dosya adı", "File name"),

@@ -615,6 +615,8 @@ pub struct Settings {
     pub select_on_hover: bool,
     /// Each tab as wide as its name (within the usual limits) instead of all tabs equally wide. Issue 119.
     pub tabs_fit_names: bool,
+    /// The List layout fills each column from top to bottom and scrolls sideways, as Explorer's List does (issue 170).
+    pub list_columns_first: bool,
     /// The terminal button on each folder's tab. Issue 119: it was in the way of clicks on narrow tabs.
     pub tab_terminal_button: bool,
     /// Typing in a folder's list filters it by name (the filter bar opens with the letters); off: typing selects the item whose
@@ -955,6 +957,7 @@ impl Default for Settings {
             warn_extension_change: true,
             select_on_hover: false,
             tabs_fit_names: false,
+            list_columns_first: false,
             tab_terminal_button: true,
             preview_details: true,
             type_to_filter: false,

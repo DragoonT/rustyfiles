@@ -12977,5 +12977,11 @@
   "key": "Aç / Kaydet penceresi hep bu klasörde açılır:",
   "tr": "Aç / Kaydet penceresi hep bu klasörde açılır:",
   "en": "Its Open / Save window always opens in:"
+ },
+ {
+  "id": "b79ebd26",
+  "key": "Listeyi sütun sütun doldur",
+  "tr": "Listeyi sütun sütun doldur",
+  "en": "Fill the List column by column"
  }
 ]
