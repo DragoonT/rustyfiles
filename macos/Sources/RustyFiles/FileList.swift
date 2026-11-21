@@ -64,22 +64,8 @@ final class CommandBarView: FlippedView {
         }
         subviews.forEach { $0.isHidden = true }
         typealias T = AppSettings.ToolbarButton
-        // px_2, gap_0p5; separators 1×20 with mx_1
-        var x: CGFloat = 8
-        if shows(.new) {
-            place(new, x, new.intrinsicContentSize.width)
-            x += new.frame.width + 2 + 4
-            place(sepLeft, x, 1, 20)
-            x += 1 + 4 + 2
-        }
-        let left: [(T, IconButton)] = [
-            (.newFolder, newFolder), (.cut, cut), (.copy, copy), (.paste, paste), (.rename, rename), (.share, share), (.delete, delete),
-            (.properties, properties), (.terminal, terminal), (.hidden, hiddenItems), (.refresh, refresh),
-        ]
-        for (k, b) in left where shows(k) {
-            place(b, x, 36)
-            x += 36 + 2
-        }
+        // px_2, gap_0p5; separators 1×20 with mx_1. The right group first: the left one
+        // gives up its last buttons where the bar is too narrow for both (a dual pane).
         var r = bounds.width - 8
         if shows(.preview) {
             r -= 36
@@ -98,6 +84,22 @@ final class CommandBarView: FlippedView {
             r -= 36
             place(filter, r, 36)
         }
+        var x: CGFloat = 8
+        if shows(.new) {
+            place(new, x, new.intrinsicContentSize.width)
+            x += new.frame.width + 2 + 4
+            place(sepLeft, x, 1, 20)
+            x += 1 + 4 + 2
+        }
+        let left: [(T, IconButton)] = [
+            (.newFolder, newFolder), (.cut, cut), (.copy, copy), (.paste, paste), (.rename, rename), (.share, share), (.delete, delete),
+            (.properties, properties), (.terminal, terminal), (.hidden, hiddenItems), (.refresh, refresh),
+        ]
+        for (k, b) in left where shows(k) {
+            guard x + 36 <= r - 8 else { break }
+            place(b, x, 36)
+            x += 36 + 2
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -114,6 +116,8 @@ final class CommandBarView: FlippedView {
 /// settings.rs): Name (flex) · Date modified 150 · Type 150 · Size 100, right-aligned.
 enum ListColumn: String, CaseIterable {
     case name, modified, created, type, size, tags, git
+    /// Where each item is: only in listings gathered from many folders (a search, a tag).
+    case folder
 
     /// The columns that can be turned on or off (Settings › Layout › Details columns).
     static let optional: [ListColumn] = [.modified, .created, .type, .size, .tags, .git]
@@ -127,6 +131,7 @@ enum ListColumn: String, CaseIterable {
         case .created: String(localized: "Date created")
         case .tags: String(localized: "Tags")
         case .git: String(localized: "Git status")
+        case .folder: String(localized: "Folder")
         }
     }
 
@@ -137,15 +142,16 @@ enum ListColumn: String, CaseIterable {
         case .size: 100
         case .tags: 120
         case .git: 100
+        case .folder: 240
         }
     }
 
     /// Tags and Git status are shown, not sorted by.
-    var sortable: Bool { self != .tags && self != .git }
+    var sortable: Bool { self != .tags && self != .git && self != .folder }
 
     var sort: SortColumn {
         switch self {
-        case .name, .tags, .git: .name
+        case .name, .tags, .git, .folder: .name
         case .modified: .modified
         case .created: .created
         case .type: .kind
@@ -307,7 +313,8 @@ final class FileRowView: NSTableRowView {
                 path.lineWidth = 1
                 path.stroke()
             }
-            Draw.selectionPill(in: box, accent: p.accent)
+            // a group's header row starts a new block: its pill does not join the row above
+            Draw.selectionPill(in: box, accent: p.accent, above: isPreviousRowSelected && groupTitle == nil, below: isNextRowSelected)
         } else if hovered {
             Draw.roundedRect(box, radius: Metrics.radiusSmall, fill: p.hover)
         }
@@ -437,6 +444,18 @@ final class FileTableView: NSTableView, NSServicesMenuRequestor {
         super.keyDown(with: event)
     }
 
+    /// The keyboard came to the list with Tab (issue 38): the selected item is brought into
+    /// view; with nothing selected the first one is selected, so the move can be seen.
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { list?.onFocus?() }
+        if ok, NSApp.currentEvent?.type == .keyDown, numberOfRows > 0 {
+            if selectedRow < 0 { selectRowIndexes([0], byExtendingSelection: false) }
+            scrollRowToVisible(selectedRow)
+        }
+        return ok
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         trackingAreas.forEach(removeTrackingArea)
@@ -527,6 +546,15 @@ final class StatusBarView: FlippedView {
     var progress = "" { didSet { needsDisplay = true } }
     var progressFraction: Double? { didSet { needsDisplay = true } }
     var performance = "" { didSet { needsDisplay = true } }
+    /// The folder's Git branch, ahead / behind (git_ui.rs): a button at the right.
+    var git: GitRepo.Info? { didSet { if git != oldValue { needsDisplay = true } } }
+    var onGit: ((GitRepo.Info, NSView, NSRect) -> Void)?
+    private var gitRect: NSRect = .zero
+
+    override func mouseUp(with event: NSEvent) {
+        let pt = convert(event.locationInWindow, from: nil)
+        if let git, gitRect.contains(pt) { onGit?(git, self, gitRect) }
+    }
 
     override func draw(_ dirtyRect: NSRect) {
         let p = Palette.of(self)
@@ -534,6 +562,19 @@ final class StatusBarView: FlippedView {
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
         // px_3, gap_3, text_xs
         var r = NSRect(x: 12, y: 1, width: bounds.width - 24, height: bounds.height - 1)
+        gitRect = .zero
+        if let git {
+            var text = git.branch
+            if git.ahead > 0 { text += "  ↑\(git.ahead)" }
+            if git.behind > 0 { text += "  ↓\(git.behind)" }
+            let tw = min(Draw.textWidth(text, font: Metrics.textXs), 220)
+            let w = 16 + 6 + tw + 12
+            gitRect = NSRect(x: r.maxX - w, y: r.midY - 11, width: w, height: 22)
+            Draw.roundedRect(gitRect, radius: Metrics.radiusSmall, fill: p.hover)
+            Draw.icon("git-branch", in: NSRect(x: gitRect.minX + 6, y: gitRect.minY, width: 14, height: gitRect.height), size: 13, color: p.textSecondary)
+            Draw.text(text, in: NSRect(x: gitRect.minX + 6 + 16, y: gitRect.minY, width: tw, height: gitRect.height), font: Metrics.textXs, color: p.text)
+            r.size.width = max(gitRect.minX - 12 - r.minX, 0)
+        }
         let right = [progress, performance].filter { !$0.isEmpty }.joined(separator: "   ")
         if !right.isEmpty {
             let rw = min(Draw.textWidth(right, font: Metrics.textXs), r.width * 0.6)
@@ -565,6 +606,8 @@ final class StatusBarView: FlippedView {
 @MainActor
 final class CardView: FlippedView {
     var onLayout: (() -> Void)?
+    /// Dual pane: this card's pane has the keyboard.
+    var isActivePane = false { didSet { if isActivePane != oldValue { needsDisplay = true } } }
 
     override var wantsUpdateLayer: Bool { true }
 
@@ -584,7 +627,8 @@ final class CardView: FlippedView {
         // Appearance › Background colour: the list's own colour, at the theme's strength
         let own = Palette.parse(AppSettings.listBackground)
         layer?.backgroundColor = (own.map { $0.withAlphaComponent(max(p.contentBg.alphaComponent, 0.85)) } ?? p.contentBg).cgColor
-        layer?.borderColor = p.border.cgColor
+        // the pane with the keyboard, in a dual pane, has an accent edge
+        layer?.borderColor = isActivePane ? p.accent.withAlphaComponent(0.7).cgColor : p.border.cgColor
     }
 
     /// Appearance › Background picture: behind the files, filling the card, as visible as set.

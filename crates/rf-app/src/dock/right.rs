@@ -160,6 +160,23 @@ impl RightIsland {
         self.lang.clone()
     }
 
+    /// A click on the input language: asks the window in front for the next keyboard layout, and the button shows it at once (the
+    /// next reading confirms it, or shows the old one again when the window did not take the request).
+    ///
+    /// WHY HERE, ON THE ISLAND ITSELF (issue 173: "After clicking on the language bar icon, the docks just disappeared"): the click is
+    /// handled while this island is being updated, and the button used to be set through the island's handle, which updated the same
+    /// island a second time: the toolkit stops the process for that.
+    fn switch_language(&mut self, cx: &mut Context<Self>) {
+        match rf_win::inputlang::switch_foreground_to_next() {
+            Some(code) => {
+                let mut now = self.lang.clone();
+                now.code = code;
+                self.set_language(now, cx);
+            }
+            None => log::info!("dock: the input language was not switched (no window in front, or one layout)"),
+        }
+    }
+
     /// The island's own buttons to draw now, in the user's order and without the ones the user hid (the settings `dock_status_order`
     /// and `dock_status_hidden`; `status_order::shown`). Safe removal is among them only while there is something to remove. They are
     /// the primary monitor's: a secondary monitor's island has none.
@@ -169,8 +186,8 @@ impl RightIsland {
         }
         let (removable, languages) = (!super::eject_view::drives(cx).is_empty(), self.lang.layouts >= 2);
         match cx.try_global::<crate::settings::Settings>() {
-            Some(s) => status_order::shown(&s.dock_status_order, &s.dock_status_hidden, removable, languages),
-            None => status_order::shown(&[], &[], removable, languages),
+            Some(s) => status_order::shown(&s.dock_status_order, &s.dock_status_hidden, removable, languages, super::sysstate::has_battery(cx)),
+            None => status_order::shown(&[], &[], removable, languages, super::sysstate::has_battery(cx)),
         }
     }
 
@@ -258,7 +275,11 @@ impl RightIsland {
                         crate::settings::update(cx, move |s| s.dock_status_order = new);
                     }
                 } else if self.status_hit(sp.which, cursor, cx) {
-                    run_status(sp.which, cx);
+                    if sp.which == Status::Language {
+                        self.switch_language(cx);
+                    } else {
+                        run_status(sp.which, cx);
+                    }
                 }
                 cx.notify();
                 false
@@ -380,7 +401,16 @@ impl RightIsland {
         let buttons = self.status_buttons(cx);
         let clock_ix = if self.mon.is_home() { first_button + buttons.len() } else { 0 };
         let (ix, text) = match which {
-            OwnTip::Status(s) => (first_button + buttons.iter().position(|b| *b == s)?, super::status_card::name(s).to_string()),
+            OwnTip::Status(s) => (
+                first_button + buttons.iter().position(|b| *b == s)?,
+                // (the battery says its level and what it is doing, as Windows' own does)
+                match s {
+                    Status::Battery => super::sysstate::battery_tip(cx),
+                    // (the volume says its level, as Windows' own symbol does: issue 147, "the Volume % when changing the volume")
+                    Status::Volume => volume_tip(rf_win::sysstatus::audio::snapshot().filter(|a| a.available).map(|a| (a.volume, a.muted))),
+                    _ => super::status_card::name(s).to_string(),
+                },
+            ),
             OwnTip::Clock => (clock_ix, rf_win::dock::clock::long_date().unwrap_or_else(|| self.lines.date.clone())),
             OwnTip::Bell => (clock_ix + 1, crate::t!("Bildirimler").to_string()),
             OwnTip::ShowDesktop => (clock_ix + 2, crate::t!("Masaüstünü göster").to_string()),
@@ -411,28 +441,14 @@ impl RightIsland {
 }
 
 /// What a click on one of the island's own buttons does: safe removal opens our own panel with the drives, Windows Security opens
-/// that app, the input language asks the window in front for the next keyboard layout (the island does not take the focus, so the
-/// window the user types in is still in front; the button shows the new language when the window has changed it), the network and the
-/// volume symbol open the control centre.
+/// that app, the network and the volume symbol open the control centre. (The input language is the island's own:
+/// `RightIsland::switch_language`; the island does not take the focus, so the window the user types in is still in front.)
 fn run_status(which: Status, cx: &mut App) {
     match which {
         Status::Eject => super::panel::toggle_eject(cx),
         Status::Security => super::panel_parts::open_uri("windowsdefender:"),
-        Status::Language => match rf_win::inputlang::switch_foreground_to_next() {
-            // the button shows the new language at once; the next reading confirms it (or shows the old one again when the window
-            // did not take the request)
-            Some(code) => {
-                if let Some(island) = super::host::right_island_on(super::host::MonId::HOME, cx) {
-                    island.update(cx, |me, cx| {
-                        let mut now = me.lang.clone();
-                        now.code = code;
-                        me.set_language(now, cx);
-                    });
-                }
-            }
-            None => log::info!("dock: the input language was not switched (no window in front, or one layout)"),
-        },
-        Status::Network | Status::Volume => open_controls(cx),
+        Status::Language => {}
+        Status::Network | Status::Volume | Status::Battery => open_controls(cx),
     }
 }
 
@@ -587,7 +603,7 @@ fn bell_button(pal: Palette, dot: Option<Hsla>, k: f32, on_click: impl Fn(&mut A
 impl RightIsland {
     /// The wheel was turned over the volume symbol: the system's volume goes 2 % up or down a notch, as over Windows' own symbol (issue
     /// 136). Muting is not touched (Windows does not either).
-    fn volume_scrolled(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    fn volume_scrolled(&mut self, ev: &ScrollEvent, cx: &mut Context<Self>) {
         let lines = match ev.delta {
             ScrollDelta::Lines(p) => if p.y != 0.0 { p.y } else { p.x },
             ScrollDelta::Pixels(p) => f32::from(p.y) / 16.0,
@@ -597,8 +613,27 @@ impl RightIsland {
         if notches == 0 {
             return;
         }
-        rf_win::sysstatus::audio::set_volume(volume_after_notches(now.volume, notches));
+        let after = volume_after_notches(now.volume, notches);
+        rf_win::sysstatus::audio::set_volume(after);
         cx.stop_propagation();
+        // the tip above the symbol says the new level at once (the snapshot may not have it yet)
+        if self.tip_on == Some(OwnTip::Status(Status::Volume))
+            && let Some(mut anchor) = self.own_anchor(OwnTip::Status(Status::Volume), cx)
+        {
+            anchor.text = volume_tip(Some((after, now.muted)));
+            super::tray_tip::update(Some(anchor.clone()), cx);
+            super::tray_tip::hover(Some(anchor), cx);
+        }
+    }
+}
+
+/// The volume symbol's tip: its name and the level ("Ses: 42 %"), or that it is muted.
+fn volume_tip(level: Option<(f32, bool)>) -> String {
+    let name = super::status_card::name(Status::Volume);
+    match level {
+        Some((_, true)) => format!("{name}: {}", crate::t!("Sessiz")),
+        Some((v, false)) => format!("{name}: {} %", (v * 100.0).round() as u32),
+        None => name.to_string(),
     }
 }
 
@@ -687,6 +722,7 @@ impl Render for RightIsland {
                     Status::Language => lang_button(&self.lang.code, pal, k),
                     Status::Network => icon_button("dock-network", network_icon, pal, k).into_any_element(),
                     Status::Volume => icon_button("dock-volume", volume_icon, pal, k).into_any_element(),
+                    Status::Battery => icon_button("dock-battery", super::sysstate::battery_icon(cx), pal, k).into_any_element(),
                 };
                 row = row.child(
                     div()
@@ -701,7 +737,7 @@ impl Render for RightIsland {
                         // a right click on the volume symbol: the output devices, to choose from
                         .when(which == Status::Volume, |d| d.on_mouse_up(MouseButton::Right, |_, _, cx| open_output_devices(cx)))
                         // the wheel over it: the system's volume, as over Windows' own symbol (issue 136)
-                        .when(which == Status::Volume, |d| d.on_scroll_wheel(cx.listener(|me, ev: &ScrollWheelEvent, _, cx| me.volume_scrolled(ev, cx))))
+                        .when(which == Status::Volume, |d| d.on_scroll(cx.listener(|me, ev: &ScrollEvent, _, cx| me.volume_scrolled(ev, cx))))
                         .child(button),
                 );
             }

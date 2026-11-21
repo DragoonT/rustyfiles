@@ -51,8 +51,9 @@ pub fn log_only_from(value: Option<&str>) -> bool {
 
 /// Which of the two layers the settings ask for: (Windows key, Alt+Tab).
 pub fn wanted(s: &Settings) -> (bool, bool) {
-    // (the dock switch and each part's own value: `dock::parts`)
-    (crate::dock::parts::runs(s, Part::WinKey), crate::dock::parts::runs(s, Part::Switcher))
+    // (the dock switch and each part's own value: `dock::parts`; the Windows key opens OUR Start only while our Start is on: with it
+    // off the key is Windows' own, as the Start button's click is (issue 155: the key still opened ours))
+    (crate::dock::parts::runs(s, Part::WinKey) && s.dock_own_start, crate::dock::parts::runs(s, Part::Switcher))
 }
 
 /// Whether Win+E, Win+D and Win+Shift+S are ours: the Windows-key switch is on and Explorer is NOT the shell (`mode` is what the host last saw; `None`
@@ -579,6 +580,8 @@ mod tests {
         assert_eq!(wanted(&back), (true, true));
         // wrong values hold the layer off (a typo must not install a keyboard hook); a false does too
         assert_eq!(wanted(&Settings::parse_lenient_pub("dock_enabled = true\nshell_win_key = \"evet\"\nshell_own_switcher = 3\n").unwrap()), (false, false));
+        let own_off = Settings { dock_enabled: true, shell_win_key: true, dock_own_start: false, ..Default::default() };
+        assert!(!wanted(&own_off).0, "our Start off: the Windows key is Windows' own (issue 155)");
         let one = Settings { dock_enabled: true, shell_win_key: false, ..Default::default() };
         assert_eq!(wanted(&one), (false, true));
         // the file an older build saved: every part false, the dock on: no hook is installed by the update

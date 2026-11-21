@@ -12587,5 +12587,473 @@
   "key": "Klasörden çıkar",
   "tr": "Klasörden çıkar",
   "en": "Take out of the folder"
+ },
+ {
+  "id": "533f3598",
+  "key": "Yalnızca menüyü aç",
+  "tr": "Yalnızca menüyü aç",
+  "en": "Only open the menu"
+ },
+ {
+  "id": "70fd9283",
+  "key": "Sıkıştır'a tıklayınca",
+  "tr": "Sıkıştır'a tıklayınca",
+  "en": "Clicking Compress"
+ },
+ {
+  "id": "05f2a11f",
+  "key": "Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır",
+  "tr": "Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır",
+  "en": "A click on Compress in the right-click menu compresses the selection in this format at once; the other ways open when you hover over it"
+ },
+ {
+  "id": "eb46a863",
+  "key": "Arşivler nerede açılsın",
+  "tr": "Arşivler nerede açılsın",
+  "en": "Where archives open"
+ },
+ {
+  "id": "764abb10",
+  "key": "Aynı sekmede",
+  "tr": "Aynı sekmede",
+  "en": "In the same tab"
+ },
+ {
+  "id": "504bc2be",
+  "key": "Yeni sekmede",
+  "tr": "Yeni sekmede",
+  "en": "In a new tab"
+ },
+ {
+  "id": "047f356f",
+  "key": "Yeni pencerede",
+  "tr": "Yeni pencerede",
+  "en": "In a new window"
+ },
+ {
+  "id": "dce41044",
+  "key": "{h} sa {m} dk kaldı",
+  "tr": "{h} sa {m} dk kaldı",
+  "en": "{h} h {m} min left"
+ },
+ {
+  "id": "ce195c5a",
+  "key": "Eklentiler",
+  "tr": "Eklentiler",
+  "en": "Add-ons"
+ },
+ {
+  "id": "4fc8af2d",
+  "key": "Eklentiler rustyfiles'a ayrı programlar olarak eklenir: yalnızca siz kurunca indirilir, rustyfiles'ın listesindeki parmak iziyle (SHA-256) denetlenir ve istediğiniz zaman kaldırılır.",
+  "tr": "Eklentiler rustyfiles'a ayrı programlar olarak eklenir: yalnızca siz kurunca indirilir, rustyfiles'ın listesindeki parmak iziyle (SHA-256) denetlenir ve istediğiniz zaman kaldırılır.",
+  "en": "Add-ons join rustyfiles as programs of their own: they are downloaded only when you install them, checked against the fingerprint (SHA-256) in rustyfiles' list, and can be removed at any time."
+ },
+ {
+  "id": "fb510192",
+  "key": "Eklenti listesi okunuyor…",
+  "tr": "Eklenti listesi okunuyor…",
+  "en": "Reading the list of add-ons…"
+ },
+ {
+  "id": "b40e45bd",
+  "key": "Eklenti listesi okunamadı",
+  "tr": "Eklenti listesi okunamadı",
+  "en": "The list of add-ons could not be read"
+ },
+ {
+  "id": "30cd1f85",
+  "key": "Yeniden dene",
+  "tr": "Yeniden dene",
+  "en": "Try again"
+ },
+ {
+  "id": "89288286",
+  "key": "Kullanılabilir",
+  "tr": "Kullanılabilir",
+  "en": "Available"
+ },
+ {
+  "id": "81ee8375",
+  "key": "Şu an kurulabilecek bir eklenti yok.",
+  "tr": "Şu an kurulabilecek bir eklenti yok.",
+  "en": "There are no add-ons to install right now."
+ },
+ {
+  "id": "77c5f9fb",
+  "key": "İndirme yöneticisi: bir dosyayı birçok bağlantıyla birden indirir, duraklatılıp kaldığı yerden sürdürülür; torrent ve magnet bağlantılarını da indirir",
+  "tr": "İndirme yöneticisi: bir dosyayı birçok bağlantıyla birden indirir, duraklatılıp kaldığı yerden sürdürülür; torrent ve magnet bağlantılarını da indirir",
+  "en": "Download manager: fetches a file over many connections at once, can be paused and resumed where it stopped, and downloads torrents and magnet links too"
+ },
+ {
+  "id": "16ce2cd3",
+  "key": "Kurulu:",
+  "tr": "Kurulu:",
+  "en": "Installed:"
+ },
+ {
+  "id": "a75cba32",
+  "key": "Yeni sürüm:",
+  "tr": "Yeni sürüm:",
+  "en": "New version:"
+ },
+ {
+  "id": "b6e36abe",
+  "key": "Bu işlemci için henüz bir sürümü yok.",
+  "tr": "Bu işlemci için henüz bir sürümü yok.",
+  "en": "There is no build for this processor yet."
+ },
+ {
+  "id": "37169df2",
+  "key": "İndiriliyor",
+  "tr": "İndiriliyor",
+  "en": "Downloading"
+ },
+ {
+  "id": "c622ae00",
+  "key": "Güncelle",
+  "tr": "Güncelle",
+  "en": "Update"
+ },
+ {
+  "id": "d841e9cd",
+  "key": "Kur",
+  "tr": "Kur",
+  "en": "Install"
+ },
+ {
+  "id": "3e4c9ef3",
+  "key": "Kaldırılamadı (program açık olabilir)",
+  "tr": "Kaldırılamadı (program açık olabilir)",
+  "en": "Could not be removed (the program may be running)"
+ },
+ {
+  "id": "ec8fc977",
+  "key": "Kaynak kodu:",
+  "tr": "Kaynak kodu:",
+  "en": "Source code:"
+ },
+ {
+  "id": "f3ab2710",
+  "key": "Bağlantıdan indir…",
+  "tr": "Bağlantıdan indir…",
+  "en": "Download from a link…"
+ },
+ {
+  "id": "10aee4c4",
+  "key": "Bağlantıdan indir",
+  "tr": "Bağlantıdan indir",
+  "en": "Download from a link"
+ },
+ {
+  "id": "49a422fb",
+  "key": "Dosya bu klasöre indirilir:",
+  "tr": "Dosya bu klasöre indirilir:",
+  "en": "The file is downloaded into this folder:"
+ },
+ {
+  "id": "54a42be4",
+  "key": "İndir",
+  "tr": "İndir",
+  "en": "Download"
+ },
+ {
+  "id": "958d715b",
+  "key": "Bir http, https ya da magnet bağlantısı yazın",
+  "tr": "Bir http, https ya da magnet bağlantısı yazın",
+  "en": "Type an http, https or magnet link"
+ },
+ {
+  "id": "37b90abb",
+  "key": "HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz",
+  "tr": "HyperDownload kurulu değil: Ayarlar › Eklentiler'den kurabilirsiniz",
+  "en": "HyperDownload is not installed: you can install it from Settings › Add-ons"
+ },
+ {
+  "id": "d01a756c",
+  "key": "İndirilecek dosyaları seçin",
+  "tr": "İndirilecek dosyaları seçin",
+  "en": "Choose the files to download"
+ },
+ {
+  "id": "f4ed319d",
+  "key": "En az bir dosya seçin",
+  "tr": "En az bir dosya seçin",
+  "en": "Choose at least one file"
+ },
+ {
+  "id": "23360499",
+  "key": "Bağlantı bu klasöre indirilsin mi?",
+  "tr": "Bağlantı bu klasöre indirilsin mi?",
+  "en": "Download the link into this folder?"
+ },
+ {
+  "id": "dcdc4ca3",
+  "key": "HyperDownload ile indir",
+  "tr": "HyperDownload ile indir",
+  "en": "Download with HyperDownload"
+ },
+ {
+  "id": "d5cb1948",
+  "key": "tarayıcıdan",
+  "tr": "tarayıcıdan",
+  "en": "from the browser"
+ },
+ {
+  "id": "57f8453e",
+  "key": "İzle",
+  "tr": "İzle",
+  "en": "Watch"
+ },
+ {
+  "id": "6abaf1f8",
+  "key": "Çoğalt",
+  "tr": "Çoğalt",
+  "en": "Duplicate"
+ },
+ {
+  "id": "c46fe68c",
+  "key": "Sessiz",
+  "tr": "Sessiz",
+  "en": "Muted"
+ },
+ {
+  "id": "ae935c24",
+  "key": "Yapıştırılan metin",
+  "tr": "Yapıştırılan metin",
+  "en": "Pasted text"
+ },
+ {
+  "id": "43ac0b05",
+  "key": "Yapıştırılan resim",
+  "tr": "Yapıştırılan resim",
+  "en": "Pasted picture"
+ },
+ {
+  "id": "5b6b8e5c",
+  "key": "Yalnızca bir pencere Dock'un üstüne gelince gizle",
+  "tr": "Yalnızca bir pencere Dock'un üstüne gelince gizle",
+  "en": "Hide only when a window covers the dock"
+ },
+ {
+  "id": "4dde4dcd",
+  "key": "Otomatik gizleme açıkken Dock yalnızca bir pencere onun durduğu yere uzanınca saklanır; pencere küçültülünce, kapanınca ya da çekilince kendiliğinden geri gelir.",
+  "tr": "Otomatik gizleme açıkken Dock yalnızca bir pencere onun durduğu yere uzanınca saklanır; pencere küçültülünce, kapanınca ya da çekilince kendiliğinden geri gelir.",
+  "en": "With auto-hide on, the dock hides only when a window reaches where it stands, and comes back by itself when that window is minimised, closed or moved away."
+ },
+ {
+  "id": "6402501a",
+  "key": "Bağlantı ekle",
+  "tr": "Bağlantı ekle",
+  "en": "Add link"
+ },
+ {
+  "id": "e0e8fdd8",
+  "key": "Ayrı pencerede aç",
+  "tr": "Ayrı pencerede aç",
+  "en": "Open in a window"
+ },
+ {
+  "id": "ead038d0",
+  "key": "HyperDownload şu an çalışmıyor: bir indirme başlayınca kendiliğinden açılır.",
+  "tr": "HyperDownload şu an çalışmıyor: bir indirme başlayınca kendiliğinden açılır.",
+  "en": "HyperDownload isn't running: it starts by itself when a download begins."
+ },
+ {
+  "id": "11230b7f",
+  "key": "Şu an inen bir şey yok. Bir bağlantıyı herhangi bir klasöre yapıştırın ya da buradan ekleyin.",
+  "tr": "Şu an inen bir şey yok. Bir bağlantıyı herhangi bir klasöre yapıştırın ya da buradan ekleyin.",
+  "en": "Nothing is downloading. Paste a link into any folder, or add one here."
+ },
+ {
+  "id": "132745c7",
+  "key": "boş (İndirilenler)",
+  "tr": "boş (İndirilenler)",
+  "en": "free (Downloads)"
+ },
+ {
+  "id": "038087f4",
+  "key": "Listeyi temizle",
+  "tr": "Listeyi temizle",
+  "en": "Clear list"
+ },
+ {
+  "id": "769b9bde",
+  "key": "Bitenler",
+  "tr": "Bitenler",
+  "en": "Finished"
+ },
+ {
+  "id": "d28ed4a8",
+  "key": "Biten indirmeler burada, kapladıkları yerle birlikte listelenir.",
+  "tr": "Biten indirmeler burada, kapladıkları yerle birlikte listelenir.",
+  "en": "Finished downloads are listed here, with the space they take."
+ },
+ {
+  "id": "ba021f7c",
+  "key": "Dosyaların seçilmesi bekleniyor",
+  "tr": "Dosyaların seçilmesi bekleniyor",
+  "en": "Waiting for the files to be chosen"
+ },
+ {
+  "id": "d08a3be0",
+  "key": "eş",
+  "tr": "eş",
+  "en": "peers"
+ },
+ {
+  "id": "adcc1d2b",
+  "key": "bağlantı",
+  "tr": "bağlantı",
+  "en": "connections"
+ },
+ {
+  "id": "7ad0f9ea",
+  "key": "Sürdür",
+  "tr": "Sürdür",
+  "en": "Resume"
+ },
+ {
+  "id": "1d92c36a",
+  "key": "Silinmiş",
+  "tr": "Silinmiş",
+  "en": "Deleted"
+ },
+ {
+  "id": "3823cf7c",
+  "key": "Listeden kaldır",
+  "tr": "Listeden kaldır",
+  "en": "Remove from list"
+ },
+ {
+  "id": "1411699b",
+  "key": "Diğer programların simge işaretlerini göster",
+  "tr": "Diğer programların simge işaretlerini göster",
+  "en": "Show other programs' icon overlays"
+ },
+ {
+  "id": "27d8e0cb",
+  "key": "Google Drive, OneDrive, TortoiseGit gibi programların Gezgin'de simgelerin köşesine koyduğu durum işaretleri.",
+  "tr": "Google Drive, OneDrive, TortoiseGit gibi programların Gezgin'de simgelerin köşesine koyduğu durum işaretleri.",
+  "en": "The status marks programs such as Google Drive, OneDrive and TortoiseGit put in the corner of icons in Explorer."
+ },
+ {
+  "id": "5546865e",
+  "key": "WSL'e kopyalarken indirme işaretini bırakma",
+  "tr": "WSL'e kopyalarken indirme işaretini bırakma",
+  "en": "Leave no download mark when copying into WSL"
+ },
+ {
+  "id": "10ef9c03",
+  "key": "Windows, internetten inen bir dosyanın yanına WSL'de ayrı bir \"Zone.Identifier\" dosyası yazar. Açıkken kopyalama onu siler.",
+  "tr": "Windows, internetten inen bir dosyanın yanına WSL'de ayrı bir \"Zone.Identifier\" dosyası yazar. Açıkken kopyalama onu siler.",
+  "en": "In WSL, Windows writes a separate \"Zone.Identifier\" file beside a file downloaded from the internet. When on, copying deletes it."
+ },
+ {
+  "id": "31d132e2",
+  "key": "Sürücülerin doluluğunu sayıyla göster",
+  "tr": "Sürücülerin doluluğunu sayıyla göster",
+  "en": "Show drive space in numbers"
+ },
+ {
+  "id": "04339c77",
+  "key": "Her sürücünün çubuğunun altında kullanılan ve toplam alan",
+  "tr": "Her sürücünün çubuğunun altında kullanılan ve toplam alan",
+  "en": "Used and total space under each drive's bar"
+ },
+ {
+  "id": "f6bca4e8",
+  "key": "Artık hep burada açılmasın:",
+  "tr": "Artık hep burada açılmasın:",
+  "en": "Stop always opening here for:"
+ },
+ {
+  "id": "a6a39e94",
+  "key": "Hep bu klasörde açılsın:",
+  "tr": "Hep bu klasörde açılsın:",
+  "en": "Always open in this folder for:"
+ },
+ {
+  "id": "6ff5ec59",
+  "key": "Aç / Kaydet penceresi hep bu klasörde açılır:",
+  "tr": "Aç / Kaydet penceresi hep bu klasörde açılır:",
+  "en": "Its Open / Save window always opens in:"
+ },
+ {
+  "id": "b79ebd26",
+  "key": "Listeyi sütun sütun doldur",
+  "tr": "Listeyi sütun sütun doldur",
+  "en": "Fill the List column by column"
+ },
+ {
+  "id": "c9f22cd9",
+  "key": "Sekmede klasörün yolu",
+  "tr": "Sekmede klasörün yolu",
+  "en": "The folder's path on tabs"
+ },
+ {
+  "id": "b47392d6",
+  "key": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
+  "tr": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
+  "en": "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end."
+ },
+ {
+  "id": "d9cac923",
+  "key": "Tüm grupları daralt",
+  "tr": "Tüm grupları daralt",
+  "en": "Collapse all groups"
+ },
+ {
+  "id": "c30af95d",
+  "key": "Tüm grupları genişlet",
+  "tr": "Tüm grupları genişlet",
+  "en": "Expand all groups"
+ },
+ {
+  "id": "5c26267c",
+  "key": "Tüm grupları daralt / genişlet",
+  "tr": "Tüm grupları daralt / genişlet",
+  "en": "Collapse / expand all groups"
+ },
+ {
+  "id": "438fff43",
+  "key": "Başka programların açtığı Explorer pencereleri",
+  "tr": "Başka programların açtığı Explorer pencereleri",
+  "en": "Explorer windows other programs open"
+ },
+ {
+  "id": "109ffa73",
+  "key": "Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.",
+  "tr": "Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.",
+  "en": "When a program (a download manager, for example) starts File Explorer itself, its window is closed and the same place opens in rustyfiles. Works while rustyfiles is running."
+ },
+ {
+  "id": "6fee9305",
+  "key": "Performans kipi",
+  "tr": "Performans kipi",
+  "en": "Performance mode"
+ },
+ {
+  "id": "40761adf",
+  "key": "Dock hareket etmez ve cam yerine düz zeminle çizilir: bir oyun ekran kartını meşgul ederken daha az iş yapar.",
+  "tr": "Dock hareket etmez ve cam yerine düz zeminle çizilir: bir oyun ekran kartını meşgul ederken daha az iş yapar.",
+  "en": "The Dock skips its motions and is drawn on a solid fill instead of glass: less work while a game keeps the graphics card busy."
+ },
+ {
+  "id": "6d5c4fbb",
+  "key": "Tema klasörü",
+  "tr": "Tema klasörü",
+  "en": "Theme folder"
+ },
+ {
+  "id": "4f72cd3e",
+  "key": "Ayar klasöründeki themes içinden bir klasör: theme.toml renkleri, icons klasörü simgeleri değiştirir. Biçimi GitHub'da docs/themes.md'de.",
+  "tr": "Ayar klasöründeki themes içinden bir klasör: theme.toml renkleri, icons klasörü simgeleri değiştirir. Biçimi GitHub'da docs/themes.md'de.",
+  "en": "A folder in themes, in the settings folder: its theme.toml changes the colours, its icons folder the icons. The format is in docs/themes.md on GitHub."
+ },
+ {
+  "id": "048a70ae",
+  "key": "Tema klasörlerini aç",
+  "tr": "Tema klasörlerini aç",
+  "en": "Open the themes folder"
  }
 ]

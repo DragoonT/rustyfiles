@@ -108,6 +108,59 @@ pub(crate) fn folder_choice(takes: bool, sel: &[(PathBuf, bool)], typed: &str, d
     }
 }
 
+/// The app's key in `Settings::dialog_folders`: its program name in lower case (empty when the dialog did not say).
+fn app_key(req: &Request) -> String {
+    req.app.trim().to_lowercase()
+}
+
+/// The pin button of the dialog's strip: the app's Open / Save window always starts in the folder shown now, or (pressed again
+/// there) starts where the app asks again. Only when the dialog named its app.
+fn start_pin(ws: &Workspace, s: &PickSession, p: &Palette, cx: &mut Context<Workspace>) -> Option<AnyElement> {
+    use gpui_kit::assets::IconName as L;
+    let key = app_key(&s.req);
+    if key.is_empty() {
+        return None;
+    }
+    let kept = cx.try_global::<crate::settings::Settings>().and_then(|st| st.dialog_folders.get(&key).cloned());
+    let dir = ws.active_view().read(cx).current_dir();
+    let here = matches!((&kept, &dir), (Some(k), Some(d)) if Path::new(k) == d.as_path());
+    let app = s.req.app.trim().trim_end_matches(".exe").trim_end_matches(".EXE").to_string();
+    let tip: SharedString = if here {
+        format!("{} {app}", t!("Artık hep burada açılmasın:")).into()
+    } else {
+        format!("{} {app}", t!("Hep bu klasörde açılsın:")).into()
+    };
+    let (accent, icon_color) = (p.accent, p.text_secondary);
+    Some(
+        div()
+            .id("pick-start-pin")
+            .size(px(36.))
+            .flex()
+            .flex_shrink_0()
+            .items_center()
+            .justify_center()
+            .rounded(theme::RADIUS_SM)
+            .cursor_pointer()
+            .border_1()
+            .border_color(p.border)
+            .bg(p.card_bg)
+            .hover(|d| d.bg(p.hover))
+            .child(Icon::new(L::Pin).size(px(16.)).text_color(if here { accent } else { icon_color }))
+            .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(w, cx))
+            .on_click(move |_, _, cx| {
+                let (key, dir) = (key.clone(), dir.clone());
+                crate::settings::update(cx, move |st| {
+                    if here {
+                        st.dialog_folders.remove(&key);
+                    } else if let Some(d) = dir {
+                        st.dialog_folders.insert(key, d.display().to_string());
+                    }
+                });
+            })
+            .into_any_element(),
+    )
+}
+
 fn mode_title(mode: Mode) -> &'static str {
     match mode {
         Mode::Open => t!("Aç"),
@@ -164,11 +217,13 @@ mod size_tests {
 fn open_window(pipe: File, req: Request, cx: &mut App) {
     crate::preview_trace::process_facts("picker: window requested");
     // (bounded: a folder on a place that has to wake up first, a WSL distribution, must not hold the dialog's window back)
-    let start = req
-        .folder
-        .as_deref()
+    // the folder the user pinned for this app comes first, then the one the app asks for
+    let kept = cx.try_global::<crate::settings::Settings>().and_then(|s| s.dialog_folders.get(&app_key(&req)).cloned());
+    let start = kept
+        .into_iter()
+        .chain(req.folder.clone())
         .map(PathBuf::from)
-        .filter(|p| crate::is_dir_bounded(p.clone(), std::time::Duration::from_secs(2)) != Some(false))
+        .find(|p| crate::is_dir_bounded(p.clone(), std::time::Duration::from_secs(2)) != Some(false))
         .map(Location::Path)
         .unwrap_or(Location::Home);
     let title = {
@@ -561,6 +616,7 @@ pub(crate) fn footer(ws: &mut Workspace, s: &Rc<PickSession>, p: &Palette, windo
         .border_color(p.divider)
         // over glass this strip (name field, file type, buttons) has a wash of its own, as the window's layers are thin there
         .bg(p.bar_bg)
+        .children(start_pin(ws, s, p, cx))
         .child(
             // the same field look as the select box next to it
             h_flex()

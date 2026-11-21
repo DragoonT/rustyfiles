@@ -26,6 +26,7 @@ use std::sync::mpsc::{Receiver, channel};
 
 use windows::Win32::Devices::Display::{DISPLAY_BRIGHTNESS, IOCTL_VIDEO_QUERY_DISPLAY_BRIGHTNESS, IOCTL_VIDEO_SET_DISPLAY_BRIGHTNESS};
 use windows::Win32::Devices::Display::{DestroyPhysicalMonitors, GetMonitorBrightness, GetNumberOfPhysicalMonitorsFromHMONITOR, GetPhysicalMonitorsFromHMONITOR, PHYSICAL_MONITOR, SetMonitorBrightness};
+use windows::Win32::Devices::Display::{GetVCPFeatureAndVCPFeatureReply, SetVCPFeature};
 use windows::Win32::Foundation::{CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, LPARAM, POINT, RECT};
 use windows::Win32::Storage::FileSystem::{CreateFileW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING};
 use windows::Win32::System::IO::DeviceIoControl;
@@ -301,9 +302,26 @@ fn reading_of(open: impl Fn() -> Option<Monitors>) -> (Option<Monitors>, Brightn
 }
 
 /// The physical monitors behind a display, released when dropped.
+///
+/// HOW A MONITOR IS ASKED (issue 154: a Samsung Odyssey G5 restarted itself a few seconds after the slider moved, and its brightness
+/// did not change). The monitor is asked for its luminance control (VCP code 0x10) directly, one short transfer each way, as
+/// Monitorian and Twinkle Tray do. Windows' "high-level" brightness calls are only the fallback: they first read the monitor's whole
+/// capabilities string, a long transfer some monitors' firmware does not survive when it comes again and again. Only the monitor that
+/// answered is written to, never faster than one transfer per [`WRITE_GAP`] (the DDC/CI standard asks a host to wait 50 ms after a
+/// write; some monitors need more).
 struct Monitors {
     all: Vec<PHYSICAL_MONITOR>,
+    /// The monitor that answered the reading, and how (`true`: the luminance control itself).
+    answered: std::cell::Cell<Option<(usize, bool)>>,
+    /// When the last write was sent.
+    last_write: std::cell::Cell<Option<std::time::Instant>>,
 }
+
+/// The shortest time between two writes to a monitor.
+const WRITE_GAP: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// The luminance control of the DDC/CI command set.
+const VCP_LUMINANCE: u8 = 0x10;
 
 impl Monitors {
     fn primary() -> Option<Monitors> {
@@ -319,31 +337,49 @@ impl Monitors {
             }
             let mut all = vec![PHYSICAL_MONITOR::default(); n as usize];
             GetPhysicalMonitorsFromHMONITOR(hmon, &mut all).ok()?;
-            Some(Monitors { all })
+            Some(Monitors { all, answered: Default::default(), last_write: Default::default() })
         }
     }
 
-    /// The first monitor that answers. (`GetMonitorCapabilities` is not asked: it fails on monitors whose brightness works.)
+    /// The first monitor that answers: its luminance control, else Windows' high-level call. (`GetMonitorCapabilities` is not asked:
+    /// it fails on monitors whose brightness works.)
     fn read(&self) -> Option<BrightnessSnapshot> {
-        for m in &self.all {
+        for (i, m) in self.all.iter().enumerate() {
+            let handle = m.hPhysicalMonitor;
+            let (mut cur, mut max) = (0u32, 0u32);
+            // (a nonzero return is success)
+            if unsafe { GetVCPFeatureAndVCPFeatureReply(handle, VCP_LUMINANCE, None, &mut cur, Some(&mut max)) } != 0 && max > 0 {
+                self.answered.set(Some((i, true)));
+                return Some(BrightnessSnapshot { available: true, min: 0, value: cur.min(max), max });
+            }
+        }
+        for (i, m) in self.all.iter().enumerate() {
             let handle = m.hPhysicalMonitor;
             let (mut min, mut cur, mut max) = (0u32, 0u32, 0u32);
-            // (a nonzero return is success)
             if unsafe { GetMonitorBrightness(handle, &mut min, &mut cur, &mut max) } != 0 && max > min {
+                self.answered.set(Some((i, false)));
                 return Some(BrightnessSnapshot { available: true, min, value: cur, max });
             }
         }
         None
     }
 
-    /// Sets every monitor that answered (there is normally one).
+    /// Sets the monitor that answered the reading, the way it answered, after the gap since the last write.
     fn write(&self, value: u32) {
-        for m in &self.all {
-            let handle = m.hPhysicalMonitor;
-            unsafe {
+        let Some((i, direct)) = self.answered.get() else { return };
+        let Some(m) = self.all.get(i) else { return };
+        if let Some(wait) = self.last_write.get().and_then(|t| WRITE_GAP.checked_sub(t.elapsed())) {
+            std::thread::sleep(wait);
+        }
+        let handle = m.hPhysicalMonitor;
+        unsafe {
+            if direct {
+                let _ = SetVCPFeature(handle, VCP_LUMINANCE, value);
+            } else {
                 let _ = SetMonitorBrightness(handle, value);
             }
         }
+        self.last_write.set(Some(std::time::Instant::now()));
     }
 }
 

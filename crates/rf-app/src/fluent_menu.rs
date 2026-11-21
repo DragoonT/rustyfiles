@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::assets::IconName as L;
+use gpui_kit::component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_kit::component::{Icon, h_flex, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
@@ -59,6 +60,9 @@ pub enum Item {
         label: SharedString,
         icon: MenuIcon,
         items: Sub,
+        /// What a click on the row itself does (the submenu still opens on hover and with the right arrow). "Sıkıştır" compresses
+        /// in the default format with a click (Discord: "be able to just click compress from the get-go").
+        click: Option<Run>,
     },
     Separator,
 }
@@ -68,7 +72,11 @@ impl Item {
         Item::Action { label: label.into(), icon, hint: None, enabled: true, checked: false, run: Rc::new(run) }
     }
     pub fn sub(label: impl Into<SharedString>, icon: MenuIcon, items: Vec<Item>) -> Self {
-        Item::Sub { label: label.into(), icon, items: Sub::Items(Rc::new(items)) }
+        Item::Sub { label: label.into(), icon, items: Sub::Items(Rc::new(items)), click: None }
+    }
+    /// A submenu whose row does `run` when it is clicked.
+    pub fn sub_click(label: impl Into<SharedString>, icon: MenuIcon, items: Vec<Item>, run: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        Item::Sub { label: label.into(), icon, items: Sub::Items(Rc::new(items)), click: Some(Rc::new(run)) }
     }
     pub fn hint(mut self, h: impl Into<SharedString>) -> Self {
         if let Item::Action { hint, .. } = &mut self {
@@ -153,6 +161,8 @@ pub struct MenuView {
     liquid: bool,
     /// The highlight capsule of each level (keyed by the path of open submenus that leads to it), drawn at every paint of that level.
     glides: RefCell<BTreeMap<Vec<usize>, Glide>>,
+    /// The scroll of each level's list (a level taller than the screen scrolls): a submenu opens beside its row where the row is now.
+    scrolls: RefCell<Vec<ScrollHandle>>,
 }
 
 /// Popup mode: each level is a borderless Acrylic window (the material of Windows 11 menus),
@@ -232,6 +242,7 @@ fn show_ex(menu: Menu, pos: Point<Pixels>, liquid: Option<bool>, window: &mut Wi
         popup: None,
         liquid: liquid.unwrap_or_else(|| crate::glass::liquid(crate::look::window::hwnd_of(window))),
         glides: RefCell::new(BTreeMap::new()),
+        scrolls: RefCell::new(Vec::new()),
     });
 
     // Acrylic popups (Windows 11); RF_INWINDOW_MENU=1 or a failure falls back to drawing the
@@ -666,10 +677,16 @@ impl MenuView {
     }
 
     fn activate(&mut self, level: usize, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.activate_as(level, ix, false, window, cx)
+    }
+
+    /// `open_sub`: a submenu row opens its submenu even when a click on it does something (the right arrow).
+    fn activate_as(&mut self, level: usize, ix: usize, open_sub: bool, window: &mut Window, cx: &mut Context<Self>) {
         let levels = self.levels();
         let Some(item) = levels.get(level).and_then(|l| l.get(ix)).cloned() else { return };
         match item {
             Item::Action { enabled: true, run, .. } => run_in_main(run, window, cx),
+            Item::Sub { click: Some(run), .. } if !open_sub => run_in_main(run, window, cx),
             Item::Sub { .. } => {
                 self.open.truncate(level);
                 self.open.push(ix);
@@ -746,7 +763,7 @@ impl MenuView {
                 if let Some((lv, ix)) = self.hl {
                     let is_sub = self.levels().get(lv).and_then(|l| l.get(ix)).is_some_and(|i| matches!(i, Item::Sub { .. }));
                     if is_sub {
-                        self.activate(lv, ix, window, cx);
+                        self.activate_as(lv, ix, true, window, cx);
                     }
                 }
             }
@@ -838,8 +855,11 @@ impl MenuView {
         let highlighted = self.hl == Some((level, ix)) || self.open.get(level) == Some(&ix);
         let m = liquid::metrics(self.liquid);
         match item {
+            // (no row shrinks: in a level that scrolls, the list squeezed its rows to fit instead, and a submenu then opened beside
+            // where its row would have been; issue 175)
             Item::Separator => div()
                 .h(px(m.sep_h))
+                .flex_shrink_0()
                 .flex()
                 .items_center()
                 .child(div().h(px(1.)).flex_1().mx(px(m.sep_inset)).bg(p.divider))
@@ -855,6 +875,7 @@ impl MenuView {
                 div()
                     .id(("mr", level * 1000 + ix))
                     .h(px(m.row_h))
+                    .flex_shrink_0()
                     // (the liquid highlight is the capsule behind the rows, not a fill of the row)
                     .when(!self.liquid, |d| d.rounded(px(4.)).when(highlighted && enabled, |d| d.bg(p.hover)).when(enabled, |d| d.active(|s| s.bg(p.pressed))))
                     .on_hover(cx.listener(move |m, on: &bool, _, cx| {
@@ -869,6 +890,7 @@ impl MenuView {
             Item::Sub { label, icon, .. } => div()
                 .id(("mr", level * 1000 + ix))
                 .h(px(m.row_h))
+                .flex_shrink_0()
                 .when(!self.liquid, |d| d.rounded(px(4.)).when(highlighted, |d| d.bg(p.hover)))
                 .on_hover(cx.listener(move |m, on: &bool, _, cx| {
                     if *on {
@@ -940,7 +962,9 @@ impl MenuView {
                     let parent = &levels[lv - 1];
                     let ix = self.open[lv - 1];
                     let parent_quick = lv == 1 && !self.quick.is_empty();
-                    let row_y = py0 + m.pad_y + if parent_quick { QUICK_H } else { 0. } + parent[..ix].iter().map(|i| i.height(&m)).sum::<f32>();
+                    // (a parent that scrolls: where the row is now; the offset is 0 or below)
+                    let scrolled = f32::from(self.scroll_of(lv - 1).offset().y);
+                    let row_y = py0 + m.pad_y + if parent_quick { QUICK_H } else { 0. } + parent[..ix].iter().map(|i| i.height(&m)).sum::<f32>() + scrolled;
                     let mut x = px0 + W - 2.;
                     if x + W > right - EDGE {
                         x = px0 - W + 2.;
@@ -958,6 +982,15 @@ impl MenuView {
         out
     }
 
+    /// The scroll of level `lv`'s list (made on first use).
+    fn scroll_of(&self, lv: usize) -> ScrollHandle {
+        let mut v = self.scrolls.borrow_mut();
+        while v.len() <= lv {
+            v.push(ScrollHandle::new());
+        }
+        v[lv].clone()
+    }
+
     /// Content of one level (quick row + rows), scrolling when taller than `max_h`.
     fn render_level(&self, lv: usize, items: &Rc<Vec<Item>>, p: &Palette, max_h: Option<f32>, cx: &mut Context<Self>) -> AnyElement {
         let m = liquid::metrics(self.liquid);
@@ -965,7 +998,9 @@ impl MenuView {
         let full = level_height(items, quick, &m);
         let scroll = max_h.is_some_and(|mh| full > mh + 0.5);
         let list_max = max_h.unwrap_or(full) - 2. * m.pad_y - if quick { QUICK_H } else { 0. };
-        let mut list = v_flex().id(("menu-list", lv)).relative().when(scroll, |d| d.max_h(px(list_max)).overflow_y_scroll());
+        let handle = self.scroll_of(lv);
+        let mut list =
+            v_flex().id(("menu-list", lv)).relative().when(scroll, |d| d.max_h(px(list_max)).overflow_y_scroll().track_scroll(&handle));
         // the leading tick column: only in the liquid look, only when some row of this level is ticked
         let column = liquid::has_tick_column(self.liquid, items.iter().any(|i| matches!(i, Item::Action { checked: true, .. })));
         if self.liquid {
@@ -977,12 +1012,22 @@ impl MenuView {
         for (ix, item) in items.iter().enumerate() {
             list = list.child(self.render_row(lv, ix, item, column, p, cx));
         }
+        // a level taller than the screen scrolls, and shows that it does (issue 175: "the context menu often gets cut off")
+        let body: AnyElement = if scroll {
+            div()
+                .relative()
+                .child(list)
+                .child(Scrollbar::vertical(&handle).id(("menu-scrollbar", lv)).mode(ScrollbarMode::Always))
+                .into_any_element()
+        } else {
+            list.into_any_element()
+        };
         v_flex()
             .w_full()
             .px(px(m.pad_x))
             .py(px(m.pad_y))
             .when(quick, |d| d.child(self.render_quick(p, cx)))
-            .child(list)
+            .child(body)
             .into_any_element()
     }
 }

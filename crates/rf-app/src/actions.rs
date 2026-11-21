@@ -4,6 +4,7 @@ gpui_kit::actions!(
     rustyfiles,
     [
         GoBack,
+        BackspaceBack,
         GoForward,
         LeaveTree,
         FocusNextPane,
@@ -41,9 +42,13 @@ gpui_kit::actions!(
         PasteShortcut,
         DeleteItems,
         DeletePermanently,
+        DuplicateItems,
+        CopyToOtherPane,
+        MoveToOtherPane,
         RenameItem,
         NewFolder,
         NewTextFile,
+        DownloadFromLink,
         ShowContextMenu,
         CopyPath,
         OpenWith,
@@ -95,6 +100,7 @@ gpui_kit::actions!(
         OpenInNewWindow,
         OpenTerminalAdmin,
         OrganizeFolder,
+        ToggleAllGroups,
     ]
 );
 
@@ -141,7 +147,9 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("alt-right", GoForward, None),
         KeyBinding::new("alt-up", GoUp, None),
         KeyBinding::new("alt-home", GoHome, None),
-        KeyBinding::new("backspace", GoBack, f),
+        // Backspace goes back only from the list itself (issue 171: "after deleting letters rustyfiles navigates up"): a text box
+        // in the view (the rename box, the filter) passes Backspace on when its caret is at the start, and that went back
+        KeyBinding::new("backspace", BackspaceBack, f),
         KeyBinding::new("f5", Refresh, None),
         KeyBinding::new("ctrl-r", Refresh, None),
         KeyBinding::new("enter", OpenSelected, f),
@@ -162,6 +170,11 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("ctrl-shift-v", PasteIntoSelected, f),
         KeyBinding::new("delete", DeleteItems, f),
         KeyBinding::new("ctrl-d", DeleteItems, f),
+        // (Ctrl+D deletes, as in Explorer; a copy beside the item has its own chord, issue 161)
+        KeyBinding::new("ctrl-alt-d", DuplicateItems, f),
+        // the selection into the other pane of a split tab (issue 152; F5 and F6 are Refresh and the pane switch here)
+        KeyBinding::new("shift-f5", CopyToOtherPane, f),
+        KeyBinding::new("shift-f6", MoveToOtherPane, f),
         KeyBinding::new("shift-delete", DeletePermanently, f),
         KeyBinding::new("f2", RenameItem, f),
         KeyBinding::new("ctrl-shift-n", NewFolder, f),
@@ -195,6 +208,8 @@ pub fn bind(cx: &mut App) {
         KeyBinding::new("ctrl-n", NewWindow, None),
         KeyBinding::new("ctrl-shift-s", AddToShelf, f),
         KeyBinding::new("ctrl-space", ToggleSelection, f),
+        // every group folded, or every group open again (issue 181)
+        KeyBinding::new("ctrl-shift-g", ToggleAllGroups, f),
         KeyBinding::new("f11", ToggleFullscreen, None),
         KeyBinding::new("ctrl-=", ZoomIn, f),
         KeyBinding::new("ctrl-+", ZoomIn, f),

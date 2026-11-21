@@ -180,6 +180,12 @@ pub fn pin_matches(pin: &PinnedApp, group: &str, tasks: &[Task]) -> bool {
     {
         return true;
     }
+    // A browser's installed site (a Chrome, Edge or Brave web app) is an app of its own, run by the browser's program: its windows are
+    // not the browser's, and the browser's windows are not its. Only its own id matches it (issue 150: a web app's window went to the
+    // browser's pin, and a closed web app's pin took the browser's windows).
+    if is_web_app(group) || pin.aumid.as_deref().is_some_and(is_web_app) {
+        return false;
+    }
     if let Some(exe) = &pin.exe {
         if exe == group {
             return true;
@@ -187,6 +193,11 @@ pub fn pin_matches(pin: &PinnedApp, group: &str, tasks: &[Task]) -> bool {
         return tasks.iter().any(|t| t.exe.as_ref().is_some_and(|p| p.to_string_lossy().to_lowercase() == *exe));
     }
     false
+}
+
+/// Whether an AppUserModelID (lower case) is a browser's installed site: `chrome._crx_<app id>`, `msedge._crx_…`, `brave._crx_…`.
+pub fn is_web_app(aumid: &str) -> bool {
+    aumid.contains("._crx_")
 }
 
 /// The AppUserModelID of a packaged app looks like `Package.Name_publisherid!AppId`.
@@ -283,7 +294,15 @@ pub fn merge(pins: &[PinnedApp], groups: Vec<(String, Vec<Task>)>, foreground: i
     items.push(DockItem::Separator);
     items.push(DockItem::Place(Place::RecycleBin));
     items.push(DockItem::Place(Place::Downloads));
+    drop_lone_separator(&mut items);
     items
+}
+
+/// The separator stands between the apps and the places: with no app before it, it separates nothing and goes (issue 160).
+pub fn drop_lone_separator(items: &mut Vec<DockItem>) {
+    if !items.iter().any(|i| matches!(i, DockItem::App(_))) {
+        items.retain(|i| !matches!(i, DockItem::Separator));
+    }
 }
 
 /// Puts the running groups in the order they were FIRST SEEN in, whatever order they come in now. The task list comes in Z order
@@ -465,9 +484,31 @@ mod tests {
     }
 
     #[test]
-    fn no_pins_no_windows_leaves_the_separator_and_the_places() {
+    fn a_web_app_and_its_browser_keep_their_own_windows() {
+        const CHROME: &str = r"C:\Program Files\Google\Chrome\Application\chrome.exe";
+        let browser = pin("Chrome", Some(CHROME), Some("Chrome"));
+        let web = pin("NotebookLM", Some(r"C:\Program Files\Google\Chrome\Application\chrome_proxy.exe"), Some("Chrome._crx_abcdefghijklmnop"));
+        let app_window = task(1, CHROME, Some("Chrome._crx_abcdefghijklmnop"));
+        let tab = task(2, CHROME, Some("Chrome"));
+        // the web app's window goes to its own pin, though the browser's pin comes first and runs the same program
+        let items = merge(&[browser.clone(), web.clone()], vec![group(vec![tab.clone()]), group(vec![app_window])], 0);
+        let windows = |i: usize| match &items[i] {
+            DockItem::App(a) => a.windows.clone(),
+            _ => panic!("not an app"),
+        };
+        assert_eq!(windows(0), vec![2], "the browser has its own window only");
+        assert_eq!(windows(1), vec![1], "the web app has its window");
+        // the web app closed: its pin does not take the browser's window
+        let items = merge(&[web, browser], vec![group(vec![tab])], 0);
+        assert!(matches!(&items[0], DockItem::App(a) if a.windows.is_empty()));
+        assert!(matches!(&items[1], DockItem::App(a) if a.windows == vec![2]));
+    }
+
+    #[test]
+    fn no_pins_no_windows_leaves_the_places_alone() {
+        // (no app: nothing for the separator to separate, issue 160)
         let items = merge(&[], vec![], 0);
-        assert_eq!(items, vec![DockItem::Separator, DockItem::Place(Place::RecycleBin), DockItem::Place(Place::Downloads)]);
+        assert_eq!(items, vec![DockItem::Place(Place::RecycleBin), DockItem::Place(Place::Downloads)]);
     }
 
     #[test]

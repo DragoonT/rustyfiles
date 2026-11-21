@@ -42,6 +42,8 @@ pub struct OpState {
     started: Instant,
     /// A button on the finished operation (the folder organizer's "Geri al"), see [`set_result`].
     action: Option<ResultAction>,
+    /// The button is there while the operation runs too ("İzle" on a video being downloaded), see [`set_live_action`].
+    live: bool,
     /// When it ended (for how long its card stays).
     ended: Option<Instant>,
     /// Speed, time left and the pace chart, fed from the progress reports.
@@ -92,6 +94,7 @@ impl OpState {
             paused,
             started: Instant::now(),
             action: None,
+            live: false,
             ended: None,
             stats: OpStats::default(),
             bytes,
@@ -747,6 +750,18 @@ pub fn set_result(cx: &mut App, id: u64, title: Option<String>, action: Option<R
     });
 }
 
+/// A button on a running operation that stays when it ends ("İzle": play a video while it downloads).
+pub fn set_live_action(cx: &mut App, id: u64, action: ResultAction) {
+    let Some(entity) = cx.try_global::<OpsGlobal>().map(|g| g.0.clone()) else { return };
+    entity.update(cx, |ops, cx| {
+        if let Some(op) = ops.ops.iter_mut().find(|o| o.id == id) {
+            op.action = Some(action);
+            op.live = true;
+        }
+        cx.notify();
+    });
+}
+
 /// Takes a finished operation off the list (an automatic run that found nothing to do should
 /// not leave a row behind).
 pub fn remove(cx: &mut App, id: u64) {
@@ -840,6 +855,7 @@ fn transfer_inner(
     let title = format!("{verb}: {} → {}", crate::i18n::items(sources.len()), short(&dest));
     let s = cx.global::<crate::settings::Settings>();
     let (fast, verify, limit) = (s.fast_file_ops, s.copy_verify.engine(), u64::from(s.copy_speed_limit) << 20);
+    rf_win::fastcopy::DROP_WSL_ZONE.store(s.wsl_drop_zone, std::sync::atomic::Ordering::Relaxed);
     let arrived = Arc::new(std::sync::Mutex::new(Vec::<std::path::PathBuf>::new()));
     let landed = arrived.clone();
     let top = dest.clone();
@@ -1457,7 +1473,8 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                 .min_w_0()
                 .gap_1()
                 .child(div().text_sm().overflow_hidden().text_ellipsis().whitespace_nowrap().child(op.title.clone()))
-                .when(running, |d| {
+                .when_some(running.then(|| crate::downloads_view::card_bar(op.id, &p)).flatten(), |d, bar| d.child(bar))
+                .when(running && crate::downloads_view::card_bar(op.id, &p).is_none(), |d| {
                     d.child(
                         div()
                             .h(px(3.))
@@ -1477,7 +1494,7 @@ fn render_op(ops: &Entity<Ops>, op: &OpState, p: &Palette) -> AnyElement {
                         .children(op.current.clone().filter(|_| running).map(|c| {
                             div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(c)
                         }))
-                        .children(op.action.as_ref().filter(|_| !running).map(|(label, run)| {
+                        .children(op.action.as_ref().filter(|_| !running || op.live).map(|(label, run)| {
                             let run = run.clone();
                             div()
                                 .id(("op-act", op.id as usize))

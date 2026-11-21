@@ -8,6 +8,11 @@ mod fast_start;
 mod bench_view;
 mod donate;
 mod ferry;
+mod addons;
+mod addons_page;
+mod hyperdownload;
+mod hd_history;
+mod downloads_view;
 mod archive_view;
 mod bulk_rename;
 mod command_palette;
@@ -78,6 +83,7 @@ mod recycle_text;
 mod recycle_view;
 mod rtl;
 mod theme;
+mod themes;
 mod thumb_cache;
 mod workspace;
 
@@ -108,9 +114,22 @@ fn restored_bounds(cx: &App) -> Option<(WindowBounds, Option<DisplayId>)> {
             None
         }
     } else {
+        b = on_primary(b.size, cx);
         None
     };
     Some((if max > 0.5 { WindowBounds::Maximized(b) } else { WindowBounds::Windowed(b) }, display))
+}
+
+/// A window of `want` size in the middle of the main display's free area, made smaller when the display is smaller.
+///
+/// WHY (issue 176: "the RustyFiles window can only be resized from the top"): the first window was 1280 x 800 whatever the screen,
+/// so on a 1366 x 768 screen (or a larger one at a larger scale) its edges lay beyond the screen and under the taskbar, where they
+/// cannot be grabbed.
+fn on_primary(want: Size<Pixels>, cx: &App) -> Bounds<Pixels> {
+    match cx.primary_display() {
+        Some(d) => fit_window_bounds(want, None, d.visible_bounds()),
+        None => Bounds::centered(None, want, cx),
+    }
 }
 
 fn fit_window_bounds(size: Size<Pixels>, origin: Option<Point<Pixels>>, area: Bounds<Pixels>) -> Bounds<Pixels> {
@@ -349,7 +368,7 @@ pub fn open_main_window_made(
         Some(bounds) => (bounds, None),
         None => {
             let restored = if workspace::any_main_window(cx) { None } else { restored_bounds(cx) };
-            restored.unwrap_or_else(|| (WindowBounds::centered(size(px(1280.), px(800.)), cx), None))
+            restored.unwrap_or_else(|| (WindowBounds::Windowed(on_primary(size(px(1280.), px(800.)), cx)), None))
         }
     };
     let options = WindowOptions {
@@ -507,6 +526,11 @@ pub fn main() {
     // Not in the installation folder: the updater renames it, and Windows refuses while it is a working directory of this process
     // or of anything this process starts (`rf_win::ownfolder`). Before everything else, so that every child inherits the way out.
     rf_win::ownfolder::leave();
+    // `--open-with-folder <file> <property> <1|0>`: a file opened in a packaged app with its folder, from a process that ends at once
+    // (see rf_win::neighbours::launch)
+    if std::env::args().nth(1).as_deref() == Some(rf_win::neighbours::ARG) {
+        std::process::exit(rf_win::neighbours::helper_main());
+    }
     // `--shell-probe`: what the shell host finds, windowless and read-only, before anything else is done (see shell::probe)
     if std::env::args().nth(1).as_deref() == Some(shell::probe::ARG) {
         std::process::exit(shell::probe::run());
@@ -552,6 +576,8 @@ pub fn main() {
     // `--quick-search`: the quick search window, as its hotkey opens it (a shortcut of the
     // user's own can run this)
     let quick_search = std::env::args().nth(1).as_deref() == Some(quick_search::LAUNCH_ARG);
+    // `--hd-follow=<gid>`: started by HyperDownload's browser host: show that download (in the running window, or in a new one)
+    let hd_follow = std::env::args().nth(1).and_then(|a| a.strip_prefix("--hd-follow=").map(str::to_string));
     // `--dock`: the dock (see dock/), a process of its own that lives beside the main rustyfiles. `--shell` is the same process under
     // its new name, the shell host (see shell/): the one with the desktop cover, the shell mode and the probe.
     let dock = shell::is_host_arg(std::env::args().nth(1).as_deref());
@@ -572,7 +598,10 @@ pub fn main() {
     let arg = arg.filter(|_| !open_look_settings && pick.is_none() && !bar_preview && !quick_search && !dock && !no_window && !snip_only);
     // jump list task "New window"
     let new_window = arg.as_deref() == Some(rf_win::jumplist::NEW_WINDOW_ARG);
-    let arg = arg.filter(|_| !new_window);
+    // `--downloads`: HyperDownload's window (a running rustyfiles opens it; a first start opens it beside its own window)
+    let downloads_window = arg.as_deref() == Some(downloads_view::LAUNCH_ARG);
+    // (`--hd-follow=` is not a folder either: it was handed to Explorer, which opened Documents, and the download was never shown)
+    let arg = arg.filter(|_| !new_window && !downloads_window && hd_follow.is_none());
     // several folders on the command line (issue 125): a first one that is gone (moved, renamed) is passed over, not handed to Explorer
     // with its error, and the first one that is there opens instead; `first_taken` is how many arguments that used up
     let mut first_taken = 1;
@@ -644,6 +673,7 @@ pub fn main() {
                 if !rf_win::default_fm::forwarded_recently(&arg) {
                     rf_win::default_fm::note_forward(&arg);
                     rf_win::handover::trace("main: handed to Explorer, this process ends");
+                    rf_win::explorer_catch::quiet_for(std::time::Duration::from_secs(5));
                     let _ = std::process::Command::new("explorer.exe").arg(&arg).spawn();
                     return;
                 }
@@ -740,7 +770,9 @@ pub fn main() {
         _ if open_look_settings => look::ipc::ToApp::OpenSettings.encode(),
         _ if pick.is_some() => format!("{}{}", picker::PICK_PREFIX, pick.as_deref().unwrap_or_default()),
         _ if new_window => rf_win::jumplist::NEW_WINDOW_ARG.to_string(),
+        _ if downloads_window => downloads_view::LAUNCH_ARG.to_string(),
         _ if quick_search => quick_search::LAUNCH_ARG.to_string(),
+        _ if hd_follow.is_some() => format!("{}{}", hyperdownload::FOLLOW_PREFIX, hd_follow.as_deref().unwrap_or_default()),
         _ if no_window => search_pipe::START_MSG.to_string(),
         _ if select.is_some() => format!("{}{}", workspace::SELECT_PREFIX, select.as_deref().unwrap_or_default()),
         Some(Location::Path(p)) => p.to_string_lossy().into_owned(),
@@ -796,8 +828,15 @@ pub fn main() {
     // second launches: each comes with the acknowledgement it waits for (the other senders of ipc_tx need none)
     let (launch_tx, launch_rx) = futures::channel::mpsc::unbounded::<(String, rf_win::handover::Ack)>();
     // (this process is the first: its own extra folders open as tabs once the window is there, like second launches do)
+    // (this process is the first one and was started for a browser download: it is shown once the window is there)
+    if let Some(gid) = &hd_follow {
+        let _ = ipc_tx.unbounded_send(format!("{}{gid}", hyperdownload::FOLLOW_PREFIX));
+    }
     for folder in more_folders {
         let _ = ipc_tx.unbounded_send(folder);
+    }
+    if downloads_window {
+        let _ = ipc_tx.unbounded_send(downloads_view::LAUNCH_ARG.to_string());
     }
     if let Some(rx) = shell_select {
         let tx = ipc_tx.clone();
@@ -854,6 +893,7 @@ pub fn main() {
                     "filetypes" => settings_view::Page::FileTypes,
                     "hypersearch" => settings_view::Page::Search,
                     "advanced" => settings_view::Page::Advanced,
+                    "addons" => settings_view::Page::Addons,
                     _ => settings_view::Page::Look,
                 },
                 cx,

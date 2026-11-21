@@ -51,7 +51,19 @@ pub fn default_for(path: &Path, rules: &[OpenRule], is_dir: impl Fn(&Path) -> bo
 /// Opens a file as a double click does: with the user's program for its type when there is one, else with Windows' default. A
 /// program that cannot be started does not leave the file unopened: Windows' default is used and the answer says so.
 pub fn open(path: &Path) -> anyhow::Result<Opened> {
+    open_in_order(path, rf_core::sort::SortKey::Name, true)
+}
+
+/// [`open`], for a file shown in a folder sorted this way: a packaged app (Photos, Media Player) is told about the folder's other
+/// files in this order, so its Previous and Next walk the folder as the list does (`neighbours`, issue 70).
+pub fn open_in_order(path: &Path, key: rf_core::sort::SortKey, ascending: bool) -> anyhow::Result<Opened> {
     let Some(program) = default_for(path, &rules(), |p| p.is_dir()) else {
+        if crate::neighbours::opens_in_packaged_app(path) {
+            match crate::neighbours::launch(path, crate::neighbours::sort_property(key), ascending) {
+                Ok(()) => return Ok(Opened::Default),
+                Err(e) => log::warn!("open {path:?} with its folder: {e:#}; opened alone"),
+            }
+        }
         crate::shell::open(path)?;
         return Ok(Opened::Default);
     };

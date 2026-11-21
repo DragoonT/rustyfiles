@@ -139,6 +139,9 @@ fn render(v: &Entity<FolderView>, owner: AnyWindowHandle, dual: Rc<Cell<bool>>, 
     let (d, sh) = (dual.get(), shelf.get());
     let dual2 = dual.clone();
     let shelf2 = shelf.clone();
+    // the List as Explorer's: each column filled from the top, scrolled sideways (issue 170); only while the List is shown
+    let columns_first = s.list_columns_first;
+    let list_shown = mode == ViewMode::Grid && style == GridStyle::List;
 
     v_flex()
         .w_full()
@@ -164,6 +167,15 @@ fn render(v: &Entity<FolderView>, owner: AnyWindowHandle, dual: Rc<Cell<bool>>, 
                 window.refresh();
             }),
         ))
+        .when(list_shown, |d| {
+            d.child(row(
+                t!("Listeyi sütun sütun doldur"),
+                crate::settings_view::switch("lt-colfirst", p, columns_first, move |window, cx| {
+                    crate::settings::update(cx, |s| s.list_columns_first = !columns_first);
+                    window.refresh();
+                }),
+            ))
+        })
         .child(row(
             t!("Uyarlanabilir düzen"),
             crate::settings_view::switch("lt-adaptive", p, adaptive, move |window, cx| {

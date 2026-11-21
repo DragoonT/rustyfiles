@@ -35,13 +35,14 @@ pub enum Page {
     Look,
     Ferry,
     Search,
+    Addons,
     Advanced,
     Speed,
     Organizer,
     About,
 }
 
-const PAGES: [(Page, L, &str); 16] = [
+const PAGES: [(Page, L, &str); 17] = [
     (Page::General, L::Settings, "Genel"),
     (Page::Appearance, L::Palette, "Görünüm"),
     (Page::Dock, L::PanelBottom, "Dock"),
@@ -54,6 +55,7 @@ const PAGES: [(Page, L, &str); 16] = [
     (Page::Look, L::Eye, "DirectLook"),
     (Page::Search, L::Search, "HyperSearch"),
     (Page::Ferry, L::Send, "Ferry"),
+    (Page::Addons, L::Package, "Eklentiler"),
     (Page::Advanced, L::Wrench, "Gelişmiş"),
     (Page::Speed, L::Gauge, "Hız testi"),
     (Page::Organizer, L::WandSparkles, "Dosya düzenleyici"),
@@ -224,6 +226,7 @@ fn build_page(page: Page, p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyEle
         Page::Look => look(p, s, cx),
         Page::Ferry => crate::ferry::page(p, s, cx),
         Page::Search => quick_search_cards(p, s, cx),
+        Page::Addons => crate::addons_page::page(p, cx),
         // the developer tools are a part of Gelişmiş (they had a page of their own)
         Page::Advanced => {
             let mut v = advanced(p, s, cx);
@@ -1504,6 +1507,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::FolderOpen,
+            t!("Sekmede klasörün yolu"),
+            Some(t!("Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.")),
+            sw("tab-path", p, s.tab_shows_path, |s, v| s.tab_shows_path = v),
+        ),
+        card(
+            p,
             L::SquareTerminal,
             t!("Sekmelerde terminal düğmesi"),
             Some(t!("Her klasör sekmesinde, o klasörde bir terminal açan düğme.")),
@@ -1617,6 +1627,37 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         },
         cx,
     ));
+    // the theme folder: colours and icons of the user's own (issues 93 and 94)
+    let themes = crate::themes::list();
+    let cur_theme = s.theme_folder.clone();
+    let none = t!("Yok").to_string();
+    let shown_theme = if cur_theme.is_empty() { none.clone() } else { cur_theme.clone() };
+    v.push(card(
+        p,
+        L::Palette,
+        t!("Tema klasörü"),
+        Some(t!("Ayar klasöründeki themes içinden bir klasör: theme.toml renkleri, icons klasörü simgeleri değiştirir. Biçimi GitHub'da docs/themes.md'de.")),
+        select_box("theme-folder", p, shown_theme, move |_| {
+            std::iter::once(String::new())
+                .chain(themes.iter().cloned())
+                .map(|name| {
+                    let label = if name.is_empty() { none.clone() } else { name.clone() };
+                    Choice::new(label, name == cur_theme, move |_, cx| {
+                        let n = name.clone();
+                        settings::update(cx, |s| s.theme_folder = n)
+                    })
+                })
+                .collect()
+        }),
+    ));
+    v.push(link_row(p, "open-themes", L::FolderOpen, t!("Tema klasörlerini aç"), None, |_, _| {
+        if let Some(d) = crate::themes::dir() {
+            let _ = std::fs::create_dir_all(&d);
+            std::thread::spawn(move || {
+                let _ = rf_win::shell::open(&d);
+            });
+        }
+    }));
     // font
     let fonts = font_choices(cx);
     let current_font = s.font.clone().unwrap_or_default();
@@ -1680,6 +1721,7 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     let hidden = s.sidebar_hidden.clone();
     let libs = s.show_libraries;
+    let space = s.sidebar_drive_space;
     let (tree_on, tree_follow) = (s.sidebar_tree, s.sidebar_tree_follow);
     let pp = *p;
     v.push(expander(
@@ -1695,6 +1737,9 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 sub(&pp, t!("Sürücüler"), None, switch("sb-drives", &pp, shown("drives"), {
                     let on = shown("drives");
                     move |_, cx| settings::update(cx, |s| show_section(s, "drives", !on))
+                })),
+                sub(&pp, t!("Sürücülerin doluluğunu sayıyla göster"), Some(t!("Her sürücünün çubuğunun altında kullanılan ve toplam alan")), switch("sb-drive-space", &pp, space, move |_, cx| {
+                    settings::update(cx, |s| s.sidebar_drive_space = !space)
                 })),
                 sub(&pp, t!("Bulut ve Linux"), None, switch("sb-cloud", &pp, shown("cloud"), {
                     let on = shown("cloud");
@@ -1995,6 +2040,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     v.push(card(p, L::FileType, t!("Dosya uzantılarını göster"), None, sw("ext", p, s.show_extensions, |s, v| s.show_extensions = v)));
     v.push(card(p, L::Image, t!("Küçük resimleri göster"), None, sw("thumbs", p, s.show_thumbnails, |s, v| s.show_thumbnails = v)));
+    v.push(card(
+        p,
+        L::BadgeCheck,
+        t!("Diğer programların simge işaretlerini göster"),
+        Some(t!("Google Drive, OneDrive, TortoiseGit gibi programların Gezgin'de simgelerin köşesine koyduğu durum işaretleri.")),
+        sw("overlays", p, s.show_overlays, |s, v| s.show_overlays = v),
+    ));
     v.push(card(p, L::SquareCheck, t!("Seçerken onay kutularını göster"), None, sw("checkboxes", p, s.show_checkboxes, |s, v| s.show_checkboxes = v)));
 
     v.push(section(p, t!("Davranışlar")));
@@ -2054,6 +2106,32 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         Some(t!("ZIP, 7z ve tar dosyalarının içine çift tıklayarak girilir; içindeki dosyalar açılınca geçici bir klasöre çıkarılır")),
         sw("browse-arc", p, s.browse_archives, |s, v| s.browse_archives = v),
     ));
+    if s.browse_archives {
+        use crate::settings::ArchiveOpen as A;
+        v.push(card(
+            p,
+            L::AppWindow,
+            t!("Arşivler nerede açılsın"),
+            None,
+            dropdown("archives-open-in", p, s.archives_open_in, vec![(A::Here, t!("Aynı sekmede").to_string()), (A::NewTab, t!("Yeni sekmede").to_string()), (A::NewWindow, t!("Yeni pencerede").to_string())], |s, v| {
+                s.archives_open_in = v
+            }),
+        ));
+    }
+    {
+        use crate::settings::QuickCompress as Q;
+        let mut options = vec![(Q::Menu, t!("Yalnızca menüyü aç").to_string()), (Q::Zip, "ZIP".into()), (Q::SevenZ, "7z".into()), (Q::TarZst, "tar.zst".into()), (Q::TarGz, "tar.gz".into()), (Q::Tar, "tar".into())];
+        if crate::archive_view::winrar().is_some() || s.quick_compress == Q::Rar {
+            options.push((Q::Rar, "RAR (WinRAR)".into()));
+        }
+        v.push(card(
+            p,
+            L::Archive,
+            t!("Sıkıştır'a tıklayınca"),
+            Some(t!("Sağ tık menüsünde Sıkıştır'a tıklamak seçilenleri bu biçimde hemen sıkıştırır; diğer seçenekler üzerine gelince açılır")),
+            dropdown("quick-compress", p, s.quick_compress, options, |s, v| s.quick_compress = v),
+        ));
+    }
     v.push(card(
         p,
         L::FolderOutput,
@@ -2798,6 +2876,13 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::SquareTerminal,
+            t!("WSL'e kopyalarken indirme işaretini bırakma"),
+            Some(t!("Windows, internetten inen bir dosyanın yanına WSL'de ayrı bir \"Zone.Identifier\" dosyası yazar. Açıkken kopyalama onu siler.")),
+            sw("wsl-zone", p, s.wsl_drop_zone, |s, v| s.wsl_drop_zone = v),
+        ),
+        card(
+            p,
             L::ShieldCheck,
             t!("Kopyaları doğrula"),
             Some(t!("Kopyalama bitince her dosya kaynağıyla karşılaştırılır. Tam doğrulama kopyayı diskten okur; daha uzun sürer.")),
@@ -2868,6 +2953,13 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
                 window.refresh();
             }),
         ),
+        card(
+            p,
+            L::ExternalLink,
+            t!("Başka programların açtığı Explorer pencereleri"),
+            Some(t!("Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.")),
+            sw("catch-explorer", p, s.catch_explorer_windows, |s, v| s.catch_explorer_windows = v),
+        ),
     ];
     out.extend(archives);
     // other apps' Open / Save / folder dialogs show rustyfiles (needs rustyfiles_dialog.dll)
@@ -2895,6 +2987,22 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
             window.refresh();
         }),
     ));
+    // the folders some apps' Open / Save windows always start in (set with the pin button of the dialog)
+    for (i, (app, dir)) in s.dialog_folders.iter().enumerate() {
+        let key = app.clone();
+        out.push(card(
+            p,
+            L::Pin,
+            app.trim_end_matches(".exe"),
+            Some(&format!("{} {dir}", t!("Aç / Kaydet penceresi hep bu klasörde açılır:"))),
+            button(("dlg-folder", i), p, t!("Kaldır"), move |_, cx| {
+                let key = key.clone();
+                crate::settings::update(cx, move |s| {
+                    s.dialog_folders.remove(&key);
+                });
+            }),
+        ));
+    }
     out.extend([
         card(
             p,
@@ -3080,6 +3188,7 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
         link_row(p, "open-log", L::FolderOpen, t!("Kayıt ve ayar klasörünü aç"), settings::app_dir().map(|d| d.display().to_string()).as_deref(), |_, _| {
             if let Some(d) = settings::app_dir() {
                 std::thread::spawn(move || {
+                    rf_win::explorer_catch::quiet_for(std::time::Duration::from_secs(5));
                     let _ = std::process::Command::new("explorer.exe").arg(d).spawn();
                 });
             }

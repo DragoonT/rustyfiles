@@ -285,6 +285,51 @@ pub fn save(path: &Path, file: &PinFile) -> std::io::Result<()> {
     })
 }
 
+/// The "All apps" entry of an app on the dock, by position in `apps`: the entry whose id is the app's AppUserModelID or program,
+/// or whose id is that program under a known folder (`{GUID}\path`, as "All apps" names a program that has no AppUserModelID of
+/// its own). `None`: the app is not in "All apps" (a program started from a folder of its own), so it cannot be pinned in Start.
+/// Asks the shell for the known folders' places (quick): any thread.
+pub fn app_for_dock(dock: &super::model::DockApp, apps: &[App]) -> Option<usize> {
+    dock_app_in(&dock.key, dock.launch.as_ref(), apps, known_folder_id).or_else(|| {
+        // (a shortcut's app: the program its icon comes from)
+        let (_, exe) = super::model::jump_identity(dock);
+        dock_app_in(&exe?.to_string_lossy(), None, apps, known_folder_id)
+    })
+}
+
+fn dock_app_in(key: &str, launch: Option<&super::model::Launch>, apps: &[App], expand: impl Fn(&str) -> Option<String>) -> Option<usize> {
+    use super::model::Launch;
+    let mut names: Vec<String> = vec![key.to_string()];
+    match launch {
+        Some(Launch::Packaged(aumid)) => names.push(aumid.clone()),
+        Some(Launch::Exe { path, .. }) => names.push(path.to_string_lossy().into_owned()),
+        Some(Launch::Link(_)) | None => {}
+    }
+    names.retain(|n| !n.is_empty());
+    let named = |id: &str| names.iter().any(|n| same_id(id, n));
+    apps.iter().position(|a| named(&a.id)).or_else(|| apps.iter().position(|a| expand(&a.id).is_some_and(|p| named(&p))))
+}
+
+/// `{GUID}\rest` of an "All apps" id as a path: the known folder's place joined with the rest. `None` for any other id.
+fn known_folder_id(id: &str) -> Option<String> {
+    use windows::Win32::UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath};
+    let (guid, rest) = id.strip_prefix('{')?.split_once("}\\")?;
+    // (the few known folders' places are asked for once each: the dock's menu goes through every app of "All apps")
+    static PLACES: std::sync::Mutex<Option<std::collections::HashMap<String, Option<String>>>> = std::sync::Mutex::new(None);
+    let mut places = PLACES.lock().ok()?;
+    let base = places.get_or_insert_with(Default::default).entry(guid.to_ascii_lowercase()).or_insert_with(|| {
+        let guid = windows::core::GUID::try_from(guid).ok()?;
+        unsafe {
+            let p = SHGetKnownFolderPath(&guid, KF_FLAG_DEFAULT, None).ok()?;
+            let s = p.to_string().ok();
+            windows::Win32::System::Com::CoTaskMemFree(Some(p.0 as *const _));
+            s
+        }
+    });
+    let base = base.clone()?;
+    Some(format!("{}\\{rest}", base.trim_end_matches('\\')))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,5 +548,32 @@ mod tests {
         let many: Vec<App> = (0..40).map(|i| app(&format!("App{i}"), &format!("id{i}"))).collect();
         let pins: Vec<PinnedApp> = (0..40).map(|i| taskbar(&format!("App{i}"), None, None)).collect();
         assert_eq!(seed(&pins, &many).len(), SEED_MAX);
+    }
+
+    #[test]
+    fn a_dock_app_is_found_in_all_apps_by_its_id_or_its_program_under_a_known_folder() {
+        let apps = [app("Paint", "Microsoft.Paint_8wekyb3d8bbwe!App"), app("Notepad++", r"{PF}\Notepad++\notepad++.exe"), app("Chrome", "Chrome")];
+        let expand = |id: &str| id.strip_prefix(r"{PF}\").map(|r| format!(r"C:\Program Files\{r}"));
+        let exe = Launch::Exe { path: PathBuf::from(r"C:\Program Files\Notepad++\notepad++.exe"), args: String::new() };
+        assert_eq!(dock_app_in("microsoft.paint_8wekyb3d8bbwe!app", None, &apps, expand), Some(0), "the AppUserModelID, in any case");
+        assert_eq!(dock_app_in(r"c:\program files\notepad++\notepad++.exe", Some(&exe), &apps, expand), Some(1), "the program under a known folder");
+        assert_eq!(dock_app_in("chrome", Some(&Launch::Link(PathBuf::from(r"C:\x\Chrome.lnk"))), &apps, expand), Some(2));
+        let portable = Launch::Exe { path: PathBuf::from(r"D:\tools\x.exe"), args: String::new() };
+        assert_eq!(dock_app_in(r"d:\tools\x.exe", Some(&portable), &apps, expand), None, "a program not in All apps");
+    }
+
+    /// This PC's taskbar pins against its "All apps": which of them the dock's menu could pin in Start. A look, not a check.
+    #[test]
+    #[ignore]
+    fn the_taskbars_apps_in_all_apps_on_this_pc() {
+        crate::shell::ensure_com();
+        let apps = crate::apps::list().unwrap();
+        let items = crate::dock::model::merge(&crate::dock::pins::read_pins(), Vec::new(), 0);
+        for it in items {
+            if let crate::dock::model::DockItem::App(a) = it {
+                let found = app_for_dock(&a, &apps).map(|i| apps[i].id.clone());
+                println!("{:<40} key={:<70} -> {:?}", a.name, a.key, found);
+            }
+        }
     }
 }

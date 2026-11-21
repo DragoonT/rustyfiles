@@ -146,6 +146,12 @@ extension AppSettings {
         set { store(newValue, "archivesAsFolders") }
     }
 
+    /// Where an archive opened like a folder goes: "here" (this tab), "tab" or "window".
+    static var archivesOpenIn: String {
+        get { d.string(forKey: "archivesOpenIn") ?? "here" }
+        set { store(newValue, "archivesOpenIn") }
+    }
+
     static var openAfterExtract: Bool {
         get { flag("openAfterExtract", false) }
         set { store(newValue, "openAfterExtract") }

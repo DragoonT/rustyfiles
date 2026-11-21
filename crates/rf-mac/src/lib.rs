@@ -19,6 +19,9 @@ uniffi::setup_scaffolding!();
 mod organize;
 mod archive;
 mod ferry;
+mod search;
+mod rename;
+mod diskusage;
 pub use archive::{Archive, ArchiveError, ArchiveFormat, can_make_rar, compress, is_archive, smart_extract_target};
 pub use ferry::{
     Ferry, FerryConfig, FerryError, FerryEstimate, FerryLink, FerryListener, FerryOffer, FerryPeer, FerryResult, FerrySpeed, FerryStatus,
@@ -199,7 +202,9 @@ impl Folder {
             .into_par_iter()
             .filter(|&i| {
                 let e = &self.entries[i as usize];
-                (show_hidden || !e.is_hidden()) && (needle.is_empty() || rf_core::sort::lower(e.shown()).contains(&needle))
+                (show_hidden || !e.is_hidden())
+                    && (show_system_files() || !is_system_file(&e.name))
+                    && (needle.is_empty() || rf_core::sort::lower(e.shown()).contains(&needle))
             })
             .collect();
         idx.par_sort_unstable_by(|&a, &b| spec.compare(&self.entries[a as usize], &self.entries[b as usize]));
@@ -257,6 +262,45 @@ pub fn folder_size(path: String) -> u64 {
 #[uniffi::export]
 pub fn core_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
+}
+
+static SHOW_SYSTEM_FILES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the files macOS keeps for itself (.DS_Store, .localized, Icon\r, ._ copies…) are
+/// listed when hidden items are. Off by default, like Windows' "protected operating system
+/// files"; the next `arrange` follows it.
+#[uniffi::export]
+pub fn set_show_system_files(show: bool) {
+    SHOW_SYSTEM_FILES.store(show, std::sync::atomic::Ordering::Relaxed);
+}
+
+fn show_system_files() -> bool {
+    SHOW_SYSTEM_FILES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A file macOS writes for its own bookkeeping, which nobody opens by hand.
+pub(crate) fn is_system_file(name: &str) -> bool {
+    const NAMES: &[&str] = &[
+        ".DS_Store", ".localized", "Icon\r", ".Spotlight-V100", ".fseventsd", ".Trashes", ".TemporaryItems",
+        ".DocumentRevisions-V100", ".VolumeIcon.icns", ".apdisk", ".com.apple.timemachine.donotpresent",
+        ".PKInstallSandboxManager", ".PKInstallSandboxManager-SystemSoftware", ".file", ".hotfiles.btree", ".vol",
+    ];
+    NAMES.contains(&name) || name.starts_with("._")
+}
+
+#[cfg(test)]
+mod system_files_tests {
+    use super::is_system_file;
+
+    #[test]
+    fn knows_the_files_macos_keeps_for_itself() {
+        for n in [".DS_Store", ".localized", "Icon\r", "._photo.jpg", ".Spotlight-V100"] {
+            assert!(is_system_file(n), "{n}");
+        }
+        for n in [".git", ".config", ".zshrc", "Icon", "DS_Store"] {
+            assert!(!is_system_file(n), "{n}");
+        }
+    }
 }
 
 /// `UF_HIDDEN` from `<sys/stat.h>`: hidden in Finder without a leading dot (`chflags hidden`).

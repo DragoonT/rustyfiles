@@ -30,6 +30,8 @@ enum Metrics {
     @MainActor
     private static func font(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
         let family = UserDefaults.standard.string(forKey: "fontFamily") ?? ""
+        // Settings › Appearance › Text size (settings.rs `text_percent`: 87, 100 or 112 %)
+        let size = (size * CGFloat(AppSettings.textPercent) / 100).rounded()
         let system = NSFont.systemFont(ofSize: size, weight: weight)
         guard !family.isEmpty else { return system }
         let traits: NSFontTraitMask = weight == .regular ? [] : [.boldFontMask]
@@ -99,8 +101,12 @@ enum Draw {
     }
 
     /// The selection marker: a 3 px accent pill on the left edge of `r`, 8 px off the top and bottom (theme.rs `selection_pill`).
-    static func selectionPill(in r: NSRect, accent: NSColor) {
-        let pill = NSRect(x: r.minX, y: r.minY + 8, width: 3, height: max(r.height - 16, 4))
+    /// `above` / `below`: the neighbouring row there is selected too, and the pill reaches to
+    /// 2 px from that edge, so a run of selected rows reads as one block whose pills can still
+    /// be counted (theme.rs `selection_pill_joined`). In a flipped view.
+    static func selectionPill(in r: NSRect, accent: NSColor, above: Bool = false, below: Bool = false) {
+        let top: CGFloat = above ? 2 : 8, bottom: CGFloat = below ? 2 : 8
+        let pill = NSRect(x: r.minX, y: r.minY + top, width: 3, height: max(r.height - top - bottom, 4))
         roundedRect(pill, radius: 1.5, fill: accent)
     }
 }

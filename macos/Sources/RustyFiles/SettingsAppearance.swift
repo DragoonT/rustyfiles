@@ -47,8 +47,20 @@ extension AppSettings {
     static var fontFamily: String {
         get { d.string(forKey: "fontFamily") ?? "" }
         set {
-            store(newValue.isEmpty ? nil : newValue, "fontFamily")
+            d.set(newValue.isEmpty ? nil : newValue, forKey: "fontFamily")
             Metrics.fontsChanged()
+            store(newValue.isEmpty ? nil : newValue, "fontFamily")
+        }
+    }
+
+    /// Settings › Appearance › Text size: the interface's text in percent of the usual (87, 100, 112).
+    static var textPercent: Int {
+        get { [87, 100, 112].contains(d.integer(forKey: "textPercent")) ? d.integer(forKey: "textPercent") : 100 }
+        set {
+            // the fonts first, so the views told below draw with them
+            d.set(newValue == 100 ? nil : newValue, forKey: "textPercent")
+            Metrics.fontsChanged()
+            store(newValue == 100 ? nil : newValue, "textPercent")
         }
     }
 
@@ -68,13 +80,21 @@ extension AppSettings {
         set { store(newValue ? "bottom" : "right", "previewPosition") }
     }
 
+    /// The preview pane shows the item's name and properties under the picture; off: only the
+    /// picture, as tall as the pane (settings.rs `preview_details`).
+    static var previewDetails: Bool {
+        get { flag("previewDetails", true) }
+        set { store(newValue, "previewDetails") }
+    }
+
     // MARK: sidebar and Home sections
 
     enum SidebarSection: String, CaseIterable {
-        case libraries, pinned, tree, tags, drives
+        case libraries, pinned, cloud, tree, tags, drives
 
         var title: String {
             switch self {
+            case .cloud: String(localized: "Cloud")
             case .libraries: String(localized: "Applications and Library")
             case .pinned: String(localized: "Pinned")
             case .tree: String(localized: "Folder tree")
@@ -95,6 +115,14 @@ extension AppSettings {
         get { d.object(forKey: "treeFollows") == nil ? true : d.bool(forKey: "treeFollows") }
         set { store(newValue, "treeFollows") }
     }
+
+    /// Places hidden one by one from the sidebar ("Hide this place"): their paths.
+    static var hiddenPlaces: [String] {
+        get { d.stringArray(forKey: "hiddenPlaces") ?? [] }
+        set { store(newValue.isEmpty ? nil : newValue, "hiddenPlaces") }
+    }
+
+    static func hidesPlace(_ url: URL) -> Bool { hiddenPlaces.contains(url.standardizedFileURL.path) }
 
     static func setShowsSection(_ s: SidebarSection, _ on: Bool) {
         if s == .tree { return store(on, "sidebarTree") }
@@ -178,6 +206,11 @@ extension SettingsContent {
                 title: String(localized: "Show scroll bars"), detail: nil, icon: "move-vertical",
                 control: .toggle(get: { AppSettings.showScrollBars }, set: { AppSettings.showScrollBars = $0 })),
             .card(
+                title: String(localized: "Text size"), detail: String(localized: "Smaller text fits more on a small screen."), icon: "a-large-small",
+                control: .choice(
+                    options: [("87", String(localized: "Small")), ("100", String(localized: "Normal")), ("112", String(localized: "Large"))],
+                    get: { "\(AppSettings.textPercent)" }, set: { AppSettings.textPercent = Int($0) ?? 100 })),
+            .card(
                 title: String(localized: "Font"), detail: nil, icon: "type",
                 control: .choice(
                     options: [("", String(localized: "System"))] + NSFontManager.shared.availableFontFamilies.filter { !$0.hasPrefix(".") }.map { ($0, $0) },
@@ -218,6 +251,9 @@ extension SettingsContent {
                 control: .choice(
                     options: [("right", String(localized: "At the right")), ("bottom", String(localized: "At the bottom"))],
                     get: { AppSettings.previewAtBottom ? "bottom" : "right" }, set: { AppSettings.previewAtBottom = $0 == "bottom" })),
+            .card(
+                title: String(localized: "File details in the preview pane"), detail: String(localized: "Off: the picture takes the whole pane."), icon: "list",
+                control: .toggle(get: { AppSettings.previewDetails }, set: { AppSettings.previewDetails = $0 })),
             .section(String(localized: "Command bar buttons")),
         ]
         rows += AppSettings.ToolbarButton.allCases.map { b in
@@ -226,6 +262,13 @@ extension SettingsContent {
         rows.append(.section(String(localized: "Sidebar sections")))
         rows += AppSettings.SidebarSection.allCases.filter { $0 != .tags || TagsSupport.ready }.map { s in
             .card(title: s.title, detail: nil, icon: nil, control: .toggle(get: { AppSettings.showsSection(s) }, set: { AppSettings.setShowsSection(s, $0) }))
+        }
+        let hidden = AppSettings.hiddenPlaces
+        if !hidden.isEmpty {
+            rows.append(.list(
+                title: String(localized: "Hidden places"), detail: String(localized: "Places you hid from the sidebar one by one. Remove one from this list to bring it back."), icon: "eye-off",
+                entries: hidden.map { (FileManager.default.displayName(atPath: $0), $0) }, empty: "",
+                remove: { i in AppSettings.hiddenPlaces.remove(at: i) }, buttons: []))
         }
         if AppSettings.showsSection(.tree) {
             rows.append(.card(

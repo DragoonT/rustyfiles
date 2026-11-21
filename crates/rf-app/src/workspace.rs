@@ -210,6 +210,13 @@ pub struct Workspace {
     picker_size_gen: u64,
     /// Window width from the last frame (breadcrumb collapsing).
     viewport_w: f32,
+    /// The address box's width for the path as last laid out (logical px; 0 before the first layout): what the breadcrumb folds its
+    /// leading folders to fit (issue 164: a guess from the window's width folded them with room to spare).
+    crumb_room: std::rc::Rc<std::cell::Cell<f32>>,
+    /// HyperDownload is installed: the sidebar has its row (looked at on start and when the Add-ons page changes something).
+    hd_installed: bool,
+    /// `addons::CHANGES` when `hd_installed` was looked at.
+    hd_seen: u64,
     last_session: Vec<String>,
     _bulk_sub: Option<Subscription>,
     _palette_sub: Option<Subscription>,
@@ -417,6 +424,7 @@ fn session_text(loc: &Location) -> String {
         Location::Path(p) => rf_core::history::redact_credentials(&p.to_string_lossy()),
         Location::Search { root, .. } => root.to_string_lossy().into_owned(),
         Location::RecycleBin => "shell:RecycleBinFolder".into(),
+        Location::Downloads => "rustyfiles:downloads".into(),
         Location::Shell { parsing, name } => format!("{SHELL_PREFIX}{parsing}\t{name}"),
         _ => String::new(),
     }
@@ -628,8 +636,17 @@ pub fn route_ipc_shown(msg: String, cx: &mut App) -> bool {
     if msg.trim() == rf_win::jumplist::NEW_WINDOW_ARG {
         return crate::open_main_window_made(Some(Location::Home), None, None, cx);
     }
+    if msg.trim() == crate::downloads_view::LAUNCH_ARG {
+        crate::downloads_view::open_window(cx);
+        return true;
+    }
     if msg.trim() == crate::quick_search::LAUNCH_ARG {
         crate::quick_search::toggle(cx);
+        return true;
+    }
+    // a download the browser handed to HyperDownload: a card of the Status Center
+    if let Some(gid) = msg.trim().strip_prefix(crate::hyperdownload::FOLLOW_PREFIX) {
+        crate::hyperdownload::follow(gid.to_string(), cx);
         return true;
     }
     crate::shell::desktop::open::mark("main: the line to open a place arrived");
@@ -694,6 +711,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        // a press on a file leaves the window behind until it is not a drag, as in Explorer (issue 169)
+        rf_win::press_activate::install(crate::look::window::hwnd_of(window));
         if let Some(mut rx) = ipc {
             cx.spawn_in(window, async move |this, cx| {
                 use futures::StreamExt;
@@ -933,6 +952,9 @@ impl Workspace {
             picker: None,
             picker_size_gen: 0,
             viewport_w: 1300.,
+            crumb_room: Default::default(),
+            hd_installed: crate::addons::installed(crate::hyperdownload::ID).is_some(),
+            hd_seen: crate::addons::CHANGES.load(std::sync::atomic::Ordering::Relaxed),
             last_session: Vec::new(),
             _bulk_sub: None,
             _palette_sub: None,
@@ -2297,6 +2319,8 @@ impl Workspace {
         let fit_names = cx.global::<crate::settings::Settings>().tabs_fit_names;
         // Settings > Appearance > "Terminal button on tabs" (issue 119: off, nothing is in the way of a click on a narrow tab)
         let tab_terminal = cx.global::<crate::settings::Settings>().tab_terminal_button;
+        // Settings > Appearance > "The folder's path on tabs" (issue 162: "show whatever number of characters it can on the tab")
+        let tab_path = cx.global::<crate::settings::Settings>().tab_shows_path;
         let (name_px, name_style) = (rems(0.875).to_pixels(window.rem_size()), window.text_style());
         let roomy = fit_names || tab_w >= 110.;
         let mut tab_claimed = false;
@@ -2306,8 +2330,10 @@ impl Workspace {
             let icon = v.tab_icon();
             let tab_dir = v.location().path().map(Path::to_path_buf);
             let term_dir = tab_terminal.then(|| tab_terminal_dir(v.location())).flatten();
+            let path_title: Option<SharedString> = tab_dir.as_ref().filter(|_| tab_path).map(|d| d.display().to_string().into());
+            let shown: SharedString = path_title.clone().unwrap_or_else(|| title.clone().into());
             let tab_w = if fit_names {
-                let name = window.text_system().layout_line(&title, name_px, &[name_style.to_run(title.len())], None).width;
+                let name = window.text_system().layout_line(shown.as_ref(), name_px, &[name_style.to_run(shown.len())], None).width;
                 (f32::from(name) + TAB_CHROME_W + if term_dir.is_some() { TAB_TERMINAL_W } else { 0. }).clamp(TAB_MIN_W, TAB_MAX_W)
             } else {
                 tab_w
@@ -2332,7 +2358,11 @@ impl Workspace {
                     .pr_1()
                     .gap_2()
                     .items_center()
-                    .rounded_t(theme::RADIUS)
+                    // A closed shape that stands a little above the strip's bottom (issue 168: "since the base of the tab shape doesn't
+                    // rest on anything, it looks strange"): nothing under the strip continues the tab, so a tab open at the bottom
+                    // looked cut off. Over glass the selected tab is the engine's lens, whose shape is drawn standing on the strip.
+                    .when(self.tab_lens, |d| d.rounded_t(theme::RADIUS))
+                    .when(!self.tab_lens, |d| d.rounded(theme::RADIUS).mb_1())
                     .text_sm()
                     // while the tab moves (tabs open or close beside it, the window is resized) the scene paints the fill itself: the
                     // engine's lens would trail the tab (see glass::LensPhase)
@@ -2346,7 +2376,12 @@ impl Workspace {
                     })
                     .when(!active, |d| d.text_color(p.text_secondary).hover(|s| s.bg(p.hover)))
                     .child(Icon::new(icon).size(px(14.)).flex_shrink_0().text_color(if active { p.accent } else { p.text_secondary }))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(title))
+                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().when(path_title.is_some(), |d| d.text_xs()).child(shown))
+                    // the folder's whole path on hover (issue 162: "I am unable to see a way to see the full path on tabs")
+                    .when_some(tab_dir.clone().filter(|_| !popups_open), |d, dir| {
+                        let path = dir.display().to_string();
+                        d.tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(path.clone()).build(w, cx))
+                    })
                     .when_some(term_dir, |d, dir| {
                         d.child(
                             div()
@@ -2452,7 +2487,8 @@ impl Workspace {
                 .ml_1()
                 .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Yeni sekme  (Ctrl+T)")).build(w, cx))
                 .size(px(28.))
-                .mb(px(2.))
+                // (in line with the tabs' middle: they stand 4 px up without glass)
+                .mb(px(if plus_lens { 2. } else { 6. }))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -2672,7 +2708,7 @@ impl Workspace {
             }))
             .hint("Alt+Enter"),
             Item::Separator,
-            Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None } },
+            Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: MenuIcon::Lucide(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None }, click: None },
         ]);
         // a cloud or WSL place can be taken off the sidebar on its own (it comes back from Settings > Files and folders)
         if self.places.read(cx).cloud.iter().any(|c| c.path == path) {
@@ -3109,6 +3145,8 @@ impl Workspace {
         let preview_open = self.preview_open;
         let filter_on = self.filter_bar;
         let paste_ok = in_folder && rf_win::clipboard::can_paste();
+        // only while the folder is shown in groups (issue 181)
+        let (has_groups, all_folded) = (tab.has_groups(), tab.all_groups_folded());
 
         let cmd = |id: &'static str, icon: L, tip: &'static str, enabled: bool, cx: &mut Context<Self>, run: fn(&mut Self, &mut Window, &mut Context<Self>)| {
             div()
@@ -3281,6 +3319,26 @@ impl Workspace {
                 )
             })
             .child(div().flex_1())
+            .when(has_groups, |d| {
+                let tip = if all_folded { t!("Tüm grupları genişlet") } else { t!("Tüm grupları daralt") };
+                d.child(
+                    div()
+                        .id("cb-groups")
+                        .h(px(32.))
+                        .w(px(36.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(theme::RADIUS_SM)
+                        .hover(|s| s.bg(p.hover))
+                        .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(format!("{tip}  (Ctrl+Shift+G)")).build(w, cx))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let tab = this.active_tab().clone();
+                            tab.update(cx, |v, cx| v.toggle_all_groups(cx));
+                        }))
+                        .child(Icon::new(if all_folded { L::ChevronsUpDown } else { L::ChevronsDownUp }).size(px(16.))),
+                )
+            })
             .children(on("filter").then(|| {
                 div()
                     .id("cb-filter")
@@ -3323,7 +3381,22 @@ impl Workspace {
 
     fn render_breadcrumb(&mut self, loc: &Location, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
         let drop_bg = p.selection;
-        let mut row = h_flex().gap_0p5().items_center().text_sm().overflow_hidden();
+        // (the row fills the box; its own width, measured as it is laid out, is the room the segments have)
+        let room = self.crumb_room.clone();
+        let mut row = h_flex().flex_1().min_w_0().relative().gap_0p5().items_center().text_sm().overflow_hidden().child(
+            canvas(
+                move |bounds, window, _| {
+                    let w = f32::from(bounds.size.width);
+                    if (room.get() - w).abs() > 1.0 {
+                        room.set(w);
+                        window.refresh();
+                    }
+                },
+                |_, _, _, _| (),
+            )
+            .absolute()
+            .size_full(),
+        );
         let crumbs: Vec<(String, Location)> = match loc {
             Location::Path(path) | Location::Search { root: path, .. } => breadcrumbs(path),
             // the shell's own name for the folder (the location may carry none)
@@ -3333,7 +3406,8 @@ impl Workspace {
         };
         // Too long for the address box: hide leading segments after the drive behind "…"
         // (the current folder must stay visible). Widths are estimated from text length.
-        let budget = self.viewport_w - 260. - 4. * 36. - 9. * 36. - 90.;
+        let measured = self.crumb_room.get();
+        let budget = if measured > 0. { measured + 30. } else { self.viewport_w - 260. - 4. * 36. - 9. * 36. - 90. };
         let est = |l: &str| l.chars().count() as f32 * 7.4 + 30.;
         let mut crumbs = crumbs;
         let mut hidden: Option<Location> = None;
@@ -3455,6 +3529,8 @@ impl Workspace {
         let tag_dot = target3.path().filter(|p| p.parent().is_some()).and_then(|p| crate::tags::first_color(p, cx));
         h_flex()
             .id(id)
+            // (a row of the scrolling sidebar never shrinks: squeezed to its least height, a drive's second line ran into the next row)
+            .flex_shrink_0()
             .min_h(px(if rail { 36. } else { 32. }))
             .px_2()
             .py_1()
@@ -3537,6 +3613,11 @@ impl Workspace {
     }
 
     fn render_sidebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let changes = crate::addons::CHANGES.load(std::sync::atomic::Ordering::Relaxed);
+        if changes != self.hd_seen {
+            self.hd_seen = changes;
+            self.hd_installed = crate::addons::installed(crate::hyperdownload::ID).is_some();
+        }
         let cur = self.active_tab().read(cx).location().clone();
         let places = self.places.read(cx);
         let pinned = places.pinned.clone();
@@ -3578,7 +3659,16 @@ impl Workspace {
                     cx.notify();
                 }
             }));
-        col = col.child(self.sidebar_item(
+        // Home and the pinned folders. With the folder tree on they stand above the sidebar's scrolling part and stay in view while the
+        // tree is scrolled (issue 177: "the Pinned section is pushed out of view when the user scrolls down the folder tree"); a long
+        // list of pins scrolls on its own, in at most 45% of the sidebar.
+        let mut head = v_flex().id("sidebar-pins").w_full().gap_0p5().on_drag_move::<ExternalPaths>(cx.listener(|this, _: &DragMoveEvent<ExternalPaths>, _, cx| {
+            if !this.sidebar_ext_drag {
+                this.sidebar_ext_drag = true;
+                cx.notify();
+            }
+        }));
+        head = head.child(self.sidebar_item(
             "sb-home".into(),
             L::House,
             p.accent,
@@ -3590,7 +3680,7 @@ impl Workspace {
             cx,
         ));
         // dropping folders on the header pins them
-        col = col.child(
+        head = head.child(
             div()
                 .id("sb-pin-header")
                 .rounded(theme::RADIUS_SM)
@@ -3609,7 +3699,7 @@ impl Workspace {
             let target_path = f.path.clone();
             let item = self.sidebar_item(("sb-pin", i).into(), f.icon, p.accent, title, loc, active, None, p, cx);
             // drag a pin onto another to reorder
-            col = col.child(
+            head = head.child(
                 div()
                     .id(("sb-pin-wrap", i))
                     .on_drag(drag, |d: &PinDrag, _, _, cx| cx.new(|_| d.clone()))
@@ -3622,7 +3712,7 @@ impl Workspace {
             );
         }
         if ext_drag {
-            col = col.child(
+            head = head.child(
                 h_flex()
                     .id("sb-pin-drop")
                     .min_h(px(32.))
@@ -3641,6 +3731,13 @@ impl Workspace {
                     .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.pin_dropped(paths, cx))),
             );
         }
+        let pins_apart = self.shows_tree(rail);
+        let pins_top = if pins_apart {
+            Some(head.px_2().pt_1().pb_1().flex_shrink_0().max_h(relative(0.45)).overflow_y_scroll().border_b_1().border_color(p.divider))
+        } else {
+            col = col.child(head);
+            None
+        };
         // the folder tree stands right under the pinned folders, above the drives and the tags (where the user asked for it: the
         // tree is what one works in, the drives and tags are looked at less often)
         let hidden = cx.global::<crate::settings::Settings>().sidebar_hidden.clone();
@@ -3652,18 +3749,27 @@ impl Workspace {
         if !drives.is_empty() {
             col = col.child(header(t!("Sürücüler")));
         }
+        let space_numbers = cx.global::<crate::settings::Settings>().sidebar_drive_space;
         for (i, d) in drives.into_iter().enumerate() {
             let loc = Location::Path(d.root.clone());
             let active = cur == loc;
             let frac = d.used_fraction();
             let bar = (d.total > 0).then(|| {
-                div()
+                let line = div()
                     .mt(px(5.))
                     .h(px(2.))
                     .w_full()
                     .rounded_full()
                     .bg(p.pressed)
-                    .child(div().h_full().rounded_full().bg(if frac > 0.9 { p.danger } else { p.accent }).w(relative(frac)))
+                    .child(div().h_full().rounded_full().bg(if frac > 0.9 { p.danger } else { p.accent }).w(relative(frac)));
+                if !space_numbers {
+                    return line.into_any_element();
+                }
+                // (issue 167: "together with the visual size and usage bars, also numbers (example "238/500 GB")")
+                v_flex()
+                    .w_full()
+                    .child(line)
+                    .child(div().mt(px(2.)).text_xs().text_color(p.text_tertiary).whitespace_nowrap().child(drive_space_text(d.total, d.free)))
                     .into_any_element()
             });
             col = col.child(self.sidebar_item(
@@ -3740,6 +3846,20 @@ impl Workspace {
             ));
         }
         col = col.child(div().h_2());
+        // HyperDownload's page, when the add-on is installed (above the Recycle Bin)
+        if self.hd_installed {
+            col = col.child(self.sidebar_item(
+                "sb-downloads".into(),
+                L::ArrowDownToLine,
+                crate::downloads_view::ember(),
+                "HyperDownload".into(),
+                Location::Downloads,
+                cur == Location::Downloads,
+                None,
+                p,
+                cx,
+            ));
+        }
         col = col.child(self.sidebar_item(
             "sb-recycle".into(),
             L::Trash,
@@ -3766,6 +3886,7 @@ impl Workspace {
         v_flex()
             .w(px(if self.sidebar_rail { RAIL_W } else { self.sidebar_w }))
             .h_full()
+            .children(pins_top)
             .child(col)
             .child(div().mx_2().h(px(1.)).bg(p.divider))
             .child(div().px_2().py_1().child(settings))
@@ -4570,7 +4691,10 @@ impl Render for Workspace {
                     this.rail_peek[1] = *h;
                     cx.notify();
                 }))
-                .child(div().h_full().w(px(full_w)).flex_shrink_0().child(full));
+                .child(div().h_full().w(px(full_w)).flex_shrink_0().child(full))
+                // the rail's own handle lies under this panel while it is out: the panel's edge sizes the sidebar too, so a rail made by
+                // dragging can be dragged wide again (a user on Discord, 2026-11-20: "now seems impossible")
+                .child(resize_handle("rail-peek-resize", ResizeSidebar, false));
             if !crate::settings::animations() {
                 return panel.into_any_element();
             }
@@ -5173,7 +5297,7 @@ mod launch_tests {
             parsing: r"::{20D04FE0-3AEA-1069-A2D8-08002B30309D}\\?\usb#vid_04e8&pid_6860#r58n#{6ac27878-a6fa-4155-ba85-f98f491d4f33}".into(),
             name: "Galaxy S24".into(),
         };
-        for loc in [Location::Path(PathBuf::from(r"C:\Kullanıcılar\Özer")), Location::RecycleBin, phone] {
+        for loc in [Location::Path(PathBuf::from(r"C:\Kullanıcılar\Özer")), Location::RecycleBin, Location::Downloads, phone] {
             assert_eq!(parse_launch(&super::session_text(&loc)).0, loc);
         }
         // places a session can't keep come back as Home
@@ -5227,6 +5351,11 @@ mod pane_tests {
         assert_eq!(next_pane(Pane::Address, true, false), Pane::List, "no tree on screen: it is skipped");
         assert_eq!(next_pane(Pane::List, false, false), Pane::Address);
     }
+}
+
+/// A drive's used and total space as the sidebar says it under the drive's bar: "238 GB / 500 GB".
+fn drive_space_text(total: u64, free: u64) -> String {
+    format!("{} / {}", rf_core::format::size(total.saturating_sub(free)), rf_core::format::size(total))
 }
 
 /// The cloud and WSL places that are not hidden one by one (`Settings::hidden_places`, paths compared without regard to case).

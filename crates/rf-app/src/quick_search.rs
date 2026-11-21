@@ -170,6 +170,11 @@ fn read_apps() -> anyhow::Result<Vec<rf_win::apps::App>> {
     rf_win::apps::list()
 }
 
+/// "All apps" if it has been read already (stale or not); never waits for the shell.
+pub(crate) fn apps_if_read() -> Option<Arc<Vec<rf_win::apps::App>>> {
+    APPS.lock().ok()?.as_ref().map(|(_, l)| l.clone())
+}
+
 /// "All apps": cached; a stale list is served while a fresh one is read. Blocks while the very first list is read (a second to
 /// start with): not on the UI thread.
 pub(crate) fn apps() -> Arc<Vec<rf_win::apps::App>> {

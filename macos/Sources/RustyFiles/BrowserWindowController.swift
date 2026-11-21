@@ -13,6 +13,14 @@ final class BrowserTab {
     var selection: [String] = []
     var scrollY: CGFloat?
     var loadID = 0
+    /// A search's walk and what it has found so far.
+    var search: SearchJob?
+    /// The disk usage walk of a disk usage tab.
+    var disk: DiskScan?
+    /// Dual pane (workspace.rs `Tab.right`): the right pane's own place and history.
+    var right: BrowserTab?
+    var searchHits: [String] = []
+    var searchDone = false
 
     init(url: URL) { self.url = url.standardizedFileURL }
 
@@ -23,14 +31,49 @@ final class BrowserTab {
     var isSettings: Bool { url == Self.settingsURL }
     var isHome: Bool { url == Self.homeURL }
     /// A page of the app's own rather than a folder.
-    var isPage: Bool { isSettings || isHome }
+    var isPage: Bool { isSettings || isHome || diskRoot != nil }
     /// A tag's results (rustyfiles:tag/<name>): the files that have it, from anywhere.
     var tagName: String? { TagStore.name(of: url) }
+
+    /// A search (rustyfiles:search?root=…&q=…, Location::Search on Windows): names matching
+    /// `query` in `root` and every folder under it.
+    static func searchURL(root: URL, query: String) -> URL {
+        var c = URLComponents()
+        c.scheme = "rustyfiles"
+        c.path = "search"
+        c.queryItems = [URLQueryItem(name: "root", value: root.path), URLQueryItem(name: "q", value: query)]
+        return c.url!
+    }
+
+    /// Disk usage of a folder (rustyfiles:diskusage?root=…, Location::DiskUsage).
+    static func diskUsageURL(_ root: URL) -> URL {
+        var c = URLComponents()
+        c.scheme = "rustyfiles"
+        c.path = "diskusage"
+        c.queryItems = [URLQueryItem(name: "root", value: root.path)]
+        return c.url!
+    }
+
+    var diskRoot: URL? {
+        guard url.scheme == "rustyfiles", let c = URLComponents(url: url, resolvingAgainstBaseURL: false), c.path == "diskusage",
+            let root = c.queryItems?.first(where: { $0.name == "root" })?.value
+        else { return nil }
+        return URL(fileURLWithPath: root)
+    }
+
+    var searchSpec: (root: URL, query: String)? {
+        guard url.scheme == "rustyfiles", let c = URLComponents(url: url, resolvingAgainstBaseURL: false), c.path == "search",
+            let root = c.queryItems?.first(where: { $0.name == "root" })?.value, let q = c.queryItems?.first(where: { $0.name == "q" })?.value
+        else { return nil }
+        return (URL(fileURLWithPath: root), q)
+    }
 
     var info: TabInfo {
         if isSettings { return TabInfo(title: String(localized: "Settings"), icon: "settings") }
         if isHome { return TabInfo(title: String(localized: "Home"), icon: "house") }
         if let tag = tagName { return TabInfo(title: tag, icon: "tag") }
+        if let s = searchSpec { return TabInfo(title: "“\(s.query)”", icon: "search") }
+        if let r = diskRoot { return TabInfo(title: String(localized: "Disk usage — \(FileManager.default.displayName(atPath: r.path))"), icon: "chart-pie") }
         let fm = FileManager.default
         let home = fm.homeDirectoryForCurrentUser.standardizedFileURL
         if url == home { return TabInfo(title: fm.displayName(atPath: url.path), icon: "house") }
@@ -78,10 +121,32 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private let navBar = NavBarView()
     private let sidebar = SidebarView()
     private let handle = SidebarResizeHandle()
-    let list = FileListController()
+    /// The left (or only) pane, and the right one of a dual pane.
+    let leftList = FileListController()
+    let rightList = FileListController()
     private var tabs: [BrowserTab] = []
     private var active = 0
-    private var tab: BrowserTab { tabs[active] }
+    /// Dual pane: the right pane has the keyboard (and the address bar, Back, Up…).
+    private var rightActive = false
+    private var dual: Bool { tabs.indices.contains(active) && tabs[active].right != nil }
+    var isDualPane: Bool { dual }
+    /// The pane that has the keyboard: what the address bar, the menus and the keys act on.
+    var list: FileListController { dual && rightActive ? rightList : leftList }
+    private var tab: BrowserTab { dual && rightActive ? tabs[active].right! : tabs[active] }
+
+    /// The list showing `t`, when it is shown (a pane of the active tab).
+    private func listFor(_ t: BrowserTab) -> FileListController? {
+        guard tabs.indices.contains(active) else { return nil }
+        if t === tabs[active] { return leftList }
+        if let r = tabs[active].right, t === r { return rightList }
+        return nil
+    }
+
+    /// The panes of the active tab with their lists.
+    private var panes: [(BrowserTab, FileListController)] {
+        guard tabs.indices.contains(active) else { return [] }
+        return [(tabs[active], leftList)] + (tabs[active].right.map { [($0, rightList)] } ?? [])
+    }
     private var watcher: DirectoryWatcher?
 
     private var sidebarWidth: CGFloat = {
@@ -117,7 +182,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         frame.addSubview(root)
         window.contentView = frame
         applyMaterial()
-        [sidebar, handle, list.card, navBar, titleBar].forEach(root.addSubview)
+        [sidebar, handle, leftList.card, rightList.card, navBar, titleBar].forEach(root.addSubview)
+        rightList.card.isHidden = true
         root.onLayout = { [weak self] in self?.layoutRoot() }
 
         window.center()
@@ -154,7 +220,18 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         handle.frame = NSRect(x: sw - 3, y: top, width: 6, height: b.height - top)
         // no sidebar: the card keeps the 8 px margin on the left too
         let left = sidebarShown ? sw : 8
-        list.card.frame = NSRect(x: left, y: top, width: b.width - left - Metrics.cardRightMargin, height: b.height - top - Metrics.bottomSpacer)
+        let area = NSRect(x: left, y: top, width: b.width - left - Metrics.cardRightMargin, height: b.height - top - Metrics.bottomSpacer)
+        rightList.card.isHidden = !dual
+        if dual {
+            // two cards side by side, 6 apart (workspace.rs dual pane)
+            let w = floor((area.width - 6) / 2)
+            leftList.card.frame = NSRect(x: area.minX, y: area.minY, width: w, height: area.height)
+            rightList.card.frame = NSRect(x: area.minX + w + 6, y: area.minY, width: area.width - w - 6, height: area.height)
+        } else {
+            leftList.card.frame = area
+        }
+        leftList.card.isActivePane = dual && !rightActive
+        rightList.card.isActivePane = dual && rightActive
     }
 
     func windowDidBecomeKey(_ notification: Notification) { list.updateCommands() }
@@ -169,7 +246,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc private func settingsChanged(_ note: Notification) {
         let key = AppSettings.changedKey(note)
         if key == "material" || key == "theme" { applyMaterial() }
-        list.apply(settingKey: key)
+        leftList.apply(settingKey: key)
+        rightList.apply(settingKey: key)
         func redraw(_ v: NSView) {
             v.needsDisplay = true
             v.needsLayout = true
@@ -239,6 +317,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         omni.breadcrumb.onNavigate = { [weak self] url in self?.navigate(to: url) }
         omni.breadcrumb.onHome = { [weak self] in self?.goHome(nil) }
         omni.onSubmitPath = { [weak self] text in self?.submitPath(text) }
+        omni.onSearch = { [weak self] text in self?.runSearch(text) }
         omni.onFilter = { [weak self] text in
             self?.list.filter = text
             self?.list.commandBar.filter.isOn = !text.isEmpty
@@ -257,20 +336,86 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             self.root.needsLayout = true
         }
 
-        list.onOpenFolder = { [weak self] url in self?.navigate(to: url) }
-        list.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
-        list.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
-        list.onRefresh = { [weak self] in self?.refresh(nil) }
-        list.onGoUp = { [weak self] in self?.goUp(nil) }
+        wireList(leftList, right: false)
+        wireList(rightList, right: true)
         sidebar.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
         sidebar.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
+        sidebar.onDiskUsage = { [weak self] url in self?.navigate(to: BrowserTab.diskUsageURL(url)) }
         titleBar.strip.menuFor = { [weak self] i in self?.tabMenu(i) }
-        list.onOpenDiskImage = { [weak self] url in self?.openDiskImage(url) }
-        list.onBack = { [weak self] in self?.goBack(nil) }
-        list.onChange = { [weak self] in self?.updateChrome() }
-        list.onError = { [weak self] text in self?.showError(text) }
-        list.onReload = { [weak self] names, rename in self?.reload(selecting: names, rename: rename) }
-        list.commandBar.filter.action = { [weak self] _ in self?.focusSearch(nil) }
+    }
+
+    /// One pane's list: what it asks for is done in its pane, which first takes the keyboard.
+    private func wireList(_ l: FileListController, right: Bool) {
+        func pane(_ f: @escaping (BrowserWindowController) -> Void) -> () -> Void {
+            { [weak self] in
+                guard let self else { return }
+                self.focusPane(right: right)
+                f(self)
+            }
+        }
+        l.onFocus = { [weak self] in self?.focusPane(right: right) }
+        l.onOpenFolder = { url in pane { $0.navigate(to: url) }() }
+        l.onOpenInNewTab = { [weak self] url in self?.openTab(url) }
+        l.onReveal = { url in pane { $0.navigate(to: url.deletingLastPathComponent(), selecting: url.lastPathComponent) }() }
+        l.onShowInFolder = { [weak self] url in self?.openTab(url.deletingLastPathComponent(), activate: true, selecting: url.lastPathComponent) }
+        l.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
+        l.onRefresh = pane { $0.refresh(nil) }
+        l.onGoUp = pane { $0.goUp(nil) }
+        l.shelfPane.onTransfer = { [weak self] kind, urls in
+            guard let self, let dest = l.url, dest.isFileURL, !urls.isEmpty else { return }
+            Transfer(kind, urls, into: dest).start(window: self.window) { _ in
+                // moved items have left their places: the shelf is done with them
+                if kind == .move { ShelfStore.clear() }
+            }
+        }
+        l.shelfPane.onReveal = { url in pane { $0.navigate(to: url.deletingLastPathComponent(), selecting: url.lastPathComponent) }() }
+        l.onDiskUsage = { url in pane { $0.navigate(to: BrowserTab.diskUsageURL(url)) }() }
+        l.onOpenDiskImage = { url in pane { $0.openDiskImage(url) }() }
+        l.onBack = pane { $0.goBack(nil) }
+        l.onChange = { [weak self] in
+            guard let self, self.list === l else { return }
+            self.updateChrome()
+        }
+        l.onError = { [weak self] text in self?.showError(text) }
+        l.onReload = { names, rename in pane { $0.reload(selecting: names, rename: rename) }() }
+        l.commandBar.filter.action = { _ in pane { $0.focusSearch(nil) }() }
+    }
+
+    // MARK: dual pane
+
+    /// The pane `right` takes the keyboard: the address bar, Back, Up and the menus follow it.
+    private func focusPane(right: Bool) {
+        guard dual, right != rightActive else { return }
+        navBar.omnibar.end()
+        rightActive = right
+        watch()
+        updateChrome()
+        root.needsLayout = true
+        leftList.card.needsDisplay = true
+        rightList.card.needsDisplay = true
+    }
+
+    /// View › Dual Pane: a second folder beside the first in this tab (the same folder to
+    /// start with), or back to one.
+    @objc func toggleDualPane(_ sender: Any?) {
+        let t = tabs[active]
+        if t.right != nil {
+            saveTabState()
+            t.right?.search?.cancel()
+            t.right = nil
+            rightActive = false
+            leftList.card.isActivePane = false
+            root.needsLayout = true
+            showTab()
+        } else {
+            saveTabState()
+            let r = BrowserTab(url: tab.isPage ? FileManager.default.homeDirectoryForCurrentUser : tab.url)
+            t.right = r
+            rightActive = true
+            root.needsLayout = true
+            load(r)
+            updateChrome()
+        }
     }
 
     // MARK: tabs
@@ -284,9 +429,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
 
     private func saveTabState() {
-        guard tabs.indices.contains(active), list.url == tab.url else { return }
-        tab.selection = list.selectedNames
-        tab.scrollY = list.scrollY
+        for (t, l) in panes where l.url == t.url {
+            t.selection = l.selectedNames
+            t.scrollY = l.scrollY
+        }
     }
 
     private func activate(_ i: Int) {
@@ -298,19 +444,40 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         refreshTabs()
     }
 
+    /// Shows the active tab: its pane, or both of a dual pane.
     private func showTab() {
-        if tab.isSettings {
-            list.showSettings()
-        } else if tab.isHome {
-            list.showHome()
-        } else if let folder = tab.folder {
-            list.show(folder, at: tab.url, selecting: tab.selection, scrollTo: tab.scrollY, archive: tab.archive)
-        } else if let error = tab.error {
-            list.show(error: error, at: tab.url)
-        }
+        if !dual { rightActive = false }
+        root.needsLayout = true
+        for (t, l) in panes { show(t, in: l) }
         watch()
         updateChrome()
         list.focus()
+    }
+
+    /// Shows `t` in its list `l`.
+    private func show(_ t: BrowserTab, in l: FileListController) {
+        if t.isSettings {
+            l.showSettings()
+        } else if t.isHome {
+            l.showHome()
+        } else if let root = t.diskRoot {
+            t.disk = l.showDiskUsage(root, scan: t.disk) { [weak t] scan in t?.disk = scan }
+        } else if let folder = t.folder {
+            l.show(folder, at: t.url, selecting: t.selection, scrollTo: t.scrollY, archive: t.archive)
+        } else if let error = t.error {
+            l.show(error: error, at: t.url)
+        }
+    }
+
+    /// `t` changed: shown again where it is shown (and the chrome, when it has the keyboard).
+    private func refreshPane(_ t: BrowserTab) {
+        guard let l = listFor(t) else { return }
+        show(t, in: l)
+        if t === tab {
+            watch()
+            updateChrome()
+            l.focus()
+        }
     }
 
     @objc func newTab(_ sender: Any?) {
@@ -333,9 +500,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private var closedTabs: [URL] = []
 
     /// A new tab right after the active one, showing `url`.
-    func openTab(_ url: URL, activate: Bool? = nil) {
+    func openTab(_ url: URL, activate: Bool? = nil, selecting name: String? = nil) {
         saveTabState()
         let t = BrowserTab(url: url)
+        if let name { t.selection = [name] }
         tabs.insert(t, at: active + 1)
         // General › Always switch to a newly opened tab; off: it waits behind the current one
         guard activate ?? AppSettings.switchToNewTab else {
@@ -360,6 +528,47 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         active = min(max(a, 0), tabs.count - 1)
         load(tab)
         refreshTabs()
+    }
+
+    // MARK: command palette (command_palette.rs)
+
+    @objc func toggleShelf(_ sender: Any?) { list.shelfShown.toggle() }
+    @objc func addToShelf(_ sender: Any?) { list.addToShelf() }
+
+    /// Go › Disk Usage: where the space under the open folder goes (or the home folder's).
+    @objc func showDiskUsage(_ sender: Any?) {
+        let root = tab.url.isFileURL ? tab.url : (tab.searchSpec?.root ?? tab.diskRoot ?? FileManager.default.homeDirectoryForCurrentUser)
+        navigate(to: BrowserTab.diskUsageURL(root))
+    }
+
+    @objc func showCommandPalette(_ sender: Any?) { CommandPalette.show(.all, over: self) }
+    @objc func showFolderHistory(_ sender: Any?) { CommandPalette.show(.folders, over: self) }
+    @objc func searchTabs(_ sender: Any?) { CommandPalette.show(.tabs, over: self) }
+
+    /// The open tabs of every window, then the ones closed here (most recent first), for the
+    /// palette's tab search (issue 79).
+    func paletteTabs() -> [PaletteEntry] {
+        var out: [PaletteEntry] = []
+        for c in AppDelegate.shared.controllers {
+            for (i, t) in c.tabs.enumerated() {
+                let info = t.info
+                let detail = t.url.isFileURL ? t.url.path : ""
+                out.append(PaletteEntry(title: info.title, detail: detail, icon: info.icon, hint: c === self && i == c.active ? String(localized: "Current") : "") { [weak c] in
+                    guard let c else { return }
+                    c.window?.makeKeyAndOrderFront(nil)
+                    c.activate(i)
+                })
+            }
+        }
+        for url in closedTabs.reversed() {
+            let info = BrowserTab(url: url).info
+            out.append(PaletteEntry(title: info.title, detail: url.isFileURL ? url.path : "", icon: "rotate-ccw", hint: String(localized: "Closed")) { [weak self] in
+                guard let self else { return }
+                if let i = self.closedTabs.lastIndex(of: url) { self.closedTabs.remove(at: i) }
+                self.openTab(url, activate: true)
+            })
+        }
+        return out
     }
 
     @objc func reopenClosedTab(_ sender: Any?) {
@@ -448,11 +657,17 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         let id = t.loadID
         let url = t.url
         if t.isPage {
-            if t === tab { showTab() }
+            refreshPane(t)
             return
         }
-        if t === tab, ArchivePlace.locate(url) == nil { list.prepareLayout(for: url) }
-        let (column, ascending, first, hidden) = (list.sortKey.sort, list.ascending, list.foldersFirst, list.showHidden)
+        if t.searchSpec == nil { t.search?.cancel(); t.search = nil }
+        if let spec = t.searchSpec {
+            if t === tab { updateChrome() }
+            return startSearch(t, spec, id: id)
+        }
+        let pl = listFor(t) ?? list
+        if listFor(t) != nil, ArchivePlace.locate(url) == nil { pl.prepareLayout(for: url) }
+        let (column, ascending, first, hidden) = (pl.sortKey.sort, pl.ascending, pl.foldersFirst, pl.showHidden)
         if t === tab { updateChrome() }
         Task.detached(priority: .userInitiated) {
             // a place inside an archive is listed from the archive (once; then from memory)
@@ -480,20 +695,21 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
                 case .success(let f):
                     t.folder = f
                     t.error = nil
+                    if url.isFileURL { FolderHistory.record(url) }
                 case .failure(let e):
                     t.folder = nil
                     t.error = Self.describe(e, at: url)
                 }
-                guard t === self.tab else { return }
-                if keepScroll { t.scrollY = self.list.scrollY }
-                self.showTab()
+                guard let l = self.listFor(t) else { return }
+                if keepScroll { t.scrollY = l.scrollY }
+                self.refreshPane(t)
                 // Advanced › Performance in the status bar
                 let ms = Date().timeIntervalSince(began) * 1000
-                self.list.status.performance = AppSettings.performanceInfo
+                l.status.performance = AppSettings.performanceInfo
                     ? String(localized: "Listed in \(String(format: "%.0f", ms)) ms") : ""
-                if self.pendingRename {
+                if self.pendingRename && l === self.list {
                     self.pendingRename = false
-                    self.list.beginRename()
+                    l.beginRename()
                 }
             }
         }
@@ -501,13 +717,72 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
 
     private var pendingRename = false
 
+    // MARK: search (Location::Search)
+
+    /// Searches from the filter box: Enter looks through the folder and every folder under it.
+    func runSearch(_ query: String) {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return }
+        let root = tab.searchSpec?.root ?? (tab.url.isFileURL ? tab.url : FileManager.default.homeDirectoryForCurrentUser)
+        navigate(to: BrowserTab.searchURL(root: root, query: q))
+    }
+
+    /// Starts the walk and shows what it finds as it finds it (four times a second).
+    private func startSearch(_ t: BrowserTab, _ spec: (root: URL, query: String), id: Int) {
+        t.search?.cancel()
+        t.searchHits = []
+        t.searchDone = false
+        let pl = listFor(t) ?? list
+        let job = SearchJob.start(root: spec.root.path, query: spec.query, includeHidden: pl.showHidden)
+        t.search = job
+        if t.folder == nil || t.searchHits.isEmpty {
+            t.folder = Folder.gathered(label: t.url.absoluteString, paths: [], column: pl.sortKey.sort, ascending: pl.ascending, foldersFirst: pl.foldersFirst, showHidden: pl.showHidden)
+            t.error = nil
+            refreshPane(t)
+        }
+        pollSearch(t, id: id, shown: 0)
+    }
+
+    private func pollSearch(_ t: BrowserTab, id: Int, shown: Int) {
+        guard t.loadID == id, let job = t.search else { return }
+        let fresh = job.take()
+        let done = job.isDone()
+        t.searchHits += fresh
+        let count = t.searchHits.count
+        if let l = listFor(t) {
+            l.status.performance = done
+                ? String(localized: "Search finished · \(count.formatted()) found")
+                : String(localized: "Searching… \(count.formatted()) found in \(Int(job.foldersSeen()).formatted()) folders")
+        }
+        if count != shown || done {
+            let paths = t.searchHits, label = t.url.absoluteString
+            let pl = listFor(t) ?? list
+            let (column, ascending, first, hidden) = (pl.sortKey.sort, pl.ascending, pl.foldersFirst, pl.showHidden)
+            Task.detached(priority: .userInitiated) {
+                let f = Folder.gathered(label: label, paths: paths, column: column, ascending: ascending, foldersFirst: first, showHidden: hidden)
+                await MainActor.run { [weak self] in
+                    guard let self, t.loadID == id else { return }
+                    if let l = self.listFor(t), l.url == t.url {
+                        t.selection = l.selectedNames
+                        t.scrollY = l.scrollY
+                    }
+                    t.folder = f
+                    t.searchDone = done
+                    self.listFor(t)?.show(f, at: t.url, selecting: t.selection, scrollTo: t.scrollY, archive: nil)
+                }
+            }
+        }
+        guard !done else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.pollSearch(t, id: id, shown: count) }
+    }
+
     /// The archive is listed (or not): show the folder in it, or ask for its password.
     private func finishArchiveLoad(_ t: BrowserTab, place: ArchivePlace, opened: Result<Archive, Error>, triedPassword: Bool) {
         switch opened {
         case .success(let archive):
             ArchiveStore.store(archive, for: place.archive)
             if archive.hasFolder(inner: place.inner),
-                let f = archive.folder(inner: place.inner, column: list.sortKey.sort, ascending: list.ascending, foldersFirst: list.foldersFirst, showHidden: list.showHidden)
+                let f = archive.folder(inner: place.inner, column: (listFor(t) ?? list).sortKey.sort, ascending: (listFor(t) ?? list).ascending, foldersFirst: (listFor(t) ?? list).foldersFirst, showHidden: (listFor(t) ?? list).showHidden)
             {
                 t.folder = f
                 t.error = nil
@@ -518,7 +793,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
                 t.error = String(localized: "“\(place.inner)” is not in “\(place.archive.lastPathComponent)”.")
             }
         case .failure(ArchiveError.PasswordNeeded):
-            guard t === tab else { return }
+            guard listFor(t) != nil else { return }
             if let pw = ArchiveStore.askPassword(for: place.archive, in: window, wrong: triedPassword) {
                 ArchiveStore.setPassword(pw, for: place.archive)
                 return load(t)
@@ -531,8 +806,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             t.archive = nil
             t.error = String(localized: "“\(place.archive.lastPathComponent)” can’t be opened: \(e.localizedDescription)")
         }
-        guard t === tab else { return }
-        showTab()
+        refreshPane(t)
     }
 
     /// Ejects a disk; a tab showing it goes Home.
@@ -594,13 +868,18 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private func updateChrome() {
         navBar.back.isEnabled = !tab.back.isEmpty
         navBar.forward.isEnabled = !tab.forward.isEmpty
-        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.tagName != nil || tab.url.path != "/")
+        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.tagName != nil || tab.searchSpec != nil || tab.diskRoot != nil || tab.url.path != "/")
         if tab.isSettings {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Settings"), url: BrowserTab.settingsURL)]
         } else if tab.isHome {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Home"), url: BrowserTab.homeURL)]
         } else if let tag = tab.tagName {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Tags"), url: BrowserTab.homeURL), BreadcrumbView.Segment(title: tag, url: tab.url)]
+        } else if let r = tab.diskRoot {
+            navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: r) + [BreadcrumbView.Segment(title: String(localized: "Disk usage"), url: tab.url)]
+        } else if let s = tab.searchSpec {
+            // the folder searched, then the search
+            navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: s.root) + [BreadcrumbView.Segment(title: String(localized: "Search: “\(s.query)”"), url: tab.url)]
         } else {
             navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: tab.url)
         }
@@ -673,6 +952,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         if tab.isSettings { return goHome(sender) }
         if tab.isHome { return }
         if tab.tagName != nil { return goHome(sender) }
+        // a search goes up to the folder it searched
+        if let s = tab.searchSpec { return navigate(to: s.root) }
+        if let r = tab.diskRoot { return navigate(to: r) }
         let parent = tab.url.deletingLastPathComponent()
         guard parent.path != tab.url.path else { return }
         navigate(to: parent, selecting: AppSettings.upSelectsPrevious ? tab.url.lastPathComponent : nil)
@@ -760,6 +1042,9 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func toggleQuickLook(_ sender: Any?) { list.toggleQuickLook() }
     @objc func showDetails(_ sender: Any?) { list.setViewMode(.details) }
     @objc func showTiles(_ sender: Any?) { list.setViewMode(.tiles) }
+    @objc func showCards(_ sender: Any?) { list.setViewMode(.cards) }
+    @objc func showListStyle(_ sender: Any?) { list.setViewMode(.list) }
+    @objc func showColumns(_ sender: Any?) { list.setViewMode(.columns) }
 
     /// Properties of the selection, or of the folder shown when nothing is selected (⌘I).
     @objc func showProperties(_ sender: Any?) { list.showProperties() }
@@ -785,7 +1070,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(openSelection(_:)), #selector(cut(_:)), #selector(BrowserWindowController.copy(_:) as (BrowserWindowController) -> (Any?) -> Void), #selector(moveToTrash(_:)),
             #selector(toggleQuickLook(_:)):
             return selected
-        case #selector(rename(_:)): return list.selectedNames.count == 1
+        case #selector(rename(_:)): return !list.selectedNames.isEmpty && list.archiveIsNil
+        case #selector(addToShelf(_:)): return selected && list.archiveIsNil
+        case #selector(toggleDualPane(_:)):
+            item.state = dual ? .on : .off
+            return true
+        case #selector(toggleShelf(_:)):
+            item.title = list.shelfShown ? String(localized: "Hide Shelf") : String(localized: "Show Shelf")
+            return true
         case #selector(paste(_:)): return Clipboard.hasFiles && list.folder != nil
         case #selector(newFolder(_:)): return list.folder != nil
         case #selector(selectNextTab(_:)), #selector(selectPreviousTab(_:)): return tabs.count > 1
@@ -795,6 +1087,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             return true
         case #selector(showTiles(_:)):
             item.state = list.viewMode == .tiles ? .on : .off
+            return true
+        case #selector(showCards(_:)):
+            item.state = list.viewMode == .cards ? .on : .off
+            return true
+        case #selector(showListStyle(_:)):
+            item.state = list.viewMode == .list ? .on : .off
+            return true
+        case #selector(showColumns(_:)):
+            item.state = list.viewMode == .columns ? .on : .off
             return true
         case #selector(toggleHidden(_:)):
             item.state = AppSettings.showHidden ? .on : .off

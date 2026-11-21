@@ -112,7 +112,7 @@ extension SettingsContent {
                 title: String(localized: "Default layout"),
                 detail: String(localized: "Adaptive: folders that are mostly pictures and videos open as tiles."), icon: "layout-grid",
                 control: .choice(
-                    options: [("details", String(localized: "Details")), ("tiles", String(localized: "Tiles")), ("adaptive", String(localized: "Adaptive"))],
+                    options: ViewMode.allCases.map { ($0.rawValue, $0.title) } + [("adaptive", String(localized: "Adaptive"))],
                     get: { AppSettings.adaptiveLayout ? "adaptive" : AppSettings.defaultView.rawValue },
                     set: {
                         AppSettings.adaptiveLayout = $0 == "adaptive"

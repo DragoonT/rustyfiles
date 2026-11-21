@@ -314,7 +314,9 @@ extension SettingsContent {
                     ThumbnailCache.shared.clear()
                     try? FileManager.default.removeItem(at: ArchiveStore.scratchFolder())
                 })])),
-        ]
+            // Developer tools live here now, as on Windows (cc774b1)
+            .section(String(localized: "Developer tools")),
+        ] + devRows()
     }
 }
 

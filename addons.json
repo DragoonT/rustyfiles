@@ -1,0 +1,23 @@
+{
+  "addons": [
+    {
+      "id": "hyperdownload",
+      "name": "HyperDownload",
+      "version": "0.1.0",
+      "license": "MIT",
+      "source": "https://github.com/gelenmedya/hyperdownload",
+      "files": {
+        "x64": {
+          "url": "https://github.com/gelenmedya/hyperdownload/releases/download/v0.1.0/hyperdownload-0.1.0-x64.zip",
+          "sha256": "163e93e8004db6a048b4aec1e04e1a4be4f6af350a4c8fff7cd657a7e48091b0",
+          "size": 6991444
+        },
+        "arm64": {
+          "url": "https://github.com/gelenmedya/hyperdownload/releases/download/v0.1.0/hyperdownload-0.1.0-arm64.zip",
+          "sha256": "961583a4441c1f1f6f584acafd72c1680164332a323ada46fd7cc80fffd7159e",
+          "size": 6757498
+        }
+      }
+    }
+  ]
+}

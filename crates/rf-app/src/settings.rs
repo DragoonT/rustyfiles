@@ -252,6 +252,33 @@ pub enum IdePref {
 }
 
 /// Which of our own entries the context menu shows (Settings → General → Context menu).
+/// Where an archive opens when it is opened like a folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveOpen {
+    /// In the same tab, as a folder does.
+    #[default]
+    Here,
+    NewTab,
+    NewWindow,
+}
+
+/// The format a click on "Sıkıştır" compresses in (Discord, 2026-11-20: "a default zipping method setting in settings").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickCompress {
+    /// A click only opens the submenu, as before.
+    Menu,
+    #[default]
+    Zip,
+    SevenZ,
+    TarZst,
+    TarGz,
+    Tar,
+    /// WinRAR's format, through its Rar.exe (only when WinRAR is installed).
+    Rar,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MenuPrefs {
@@ -501,6 +528,10 @@ pub struct Settings {
     /// Custom shortcuts: keystroke → action, e.g. `"ctrl-k" = "NewFolder"` (names as in the
     /// command palette's actions; `rustyfiles::` prefix optional). Applied at startup.
     pub keybindings: std::collections::BTreeMap<String, String>,
+    /// The folder an app's Open / Save window always starts in, whatever folder the app asks for: the app's program name in lower
+    /// case ("firefox.exe") to the folder. Set and cleared with the pin button of the dialog itself; listed in Settings › Advanced.
+    /// A user on Discord, 2026-11-21: "per program default ... Say I use firefox ... open default storage location where i set it".
+    pub dialog_folders: std::collections::BTreeMap<String, String>,
     /// Last window placement: [x, y, width, height, maximized (0/1)].
     pub window: Option<[f32; 5]>,
     /// Display UUID and the normal window's origin relative to that display.
@@ -573,6 +604,9 @@ pub struct Settings {
     /// Names starting with "." count as hidden when off.
     pub show_dot_files: bool,
     pub show_thumbnails: bool,
+    /// The marks sync and version-control programs put on icons in Explorer (Google Drive, OneDrive, TortoiseGit, Dropbox), drawn
+    /// over ours. A user on Discord, 2026-11-20.
+    pub show_overlays: bool,
     pub show_checkboxes: bool,
     pub single_click: ClickPref,
     pub open_folders_in_new_tab: bool,
@@ -581,6 +615,14 @@ pub struct Settings {
     pub select_on_hover: bool,
     /// Each tab as wide as its name (within the usual limits) instead of all tabs equally wide. Issue 119.
     pub tabs_fit_names: bool,
+    /// The List layout fills each column from top to bottom and scrolls sideways, as Explorer's List does (issue 170).
+    pub list_columns_first: bool,
+    /// A folder's tab shows its whole path (smaller, cut at the end) instead of its name (issue 162).
+    pub tab_shows_path: bool,
+    /// Explorer windows that other programs open are closed and their place opened here (issue 37). Off by default.
+    pub catch_explorer_windows: bool,
+    /// A theme folder's name in `<settings folder>\themes` (colours and icons, issues 93 and 94); empty: none.
+    pub theme_folder: String,
     /// The terminal button on each folder's tab. Issue 119: it was in the way of clicks on narrow tabs.
     pub tab_terminal_button: bool,
     /// Typing in a folder's list filters it by name (the filter bar opens with the letters); off: typing selects the item whose
@@ -598,6 +640,9 @@ pub struct Settings {
     pub fast_file_ops: bool,
     /// Check copies after writing them.
     pub copy_verify: CopyVerify,
+    /// A copy into a WSL distribution leaves no "file:Zone.Identifier" file beside it (the download mark Windows writes there as a
+    /// file of its own). A user on Discord, 2026-11-20.
+    pub wsl_drop_zone: bool,
     /// Copy speed limit in MB/s (0 = none).
     pub copy_speed_limit: u32,
     /// Where a running operation's progress is shown (see [`TransferProgress`]).
@@ -605,6 +650,8 @@ pub struct Settings {
     /// The thumbnail cache's limit in MB (the cache is in memory); `None` = the default, 64 MB, and no key in the file.
     pub thumb_cache_mb: Option<u32>,
     pub show_libraries: bool,
+    /// Each drive in the sidebar says how much of it is used, in numbers ("238 GB / 500 GB"), under its bar. Issue 167.
+    pub sidebar_drive_space: bool,
     /// A "Klasörler" section in the sidebar: the folder tree (drives and the profile folder as roots). Off by default.
     pub sidebar_tree: bool,
     /// The tree opens the branch to the open folder, marks it and scrolls it into view after every navigation.
@@ -615,6 +662,11 @@ pub struct Settings {
     pub address_commands: bool,
     /// Double-clicking a ZIP/7z/tar opens it like a folder (read-only).
     pub browse_archives: bool,
+    /// Where an archive opened like a folder goes (Discord, 2026-11-20: "an option/toggle to make zips open separately from the
+    /// normal window").
+    pub archives_open_in: ArchiveOpen,
+    /// What a click on "Sıkıştır" in the right-click menu does: compress at once in this format, or (`Menu`) only open its submenu.
+    pub quick_compress: QuickCompress,
     /// After extracting an archive into a new folder, that folder opens in a tab.
     pub open_after_extract: bool,
     /// Search through the Windows Search index (contents, AQS) where the folder is indexed.
@@ -689,8 +741,13 @@ pub struct Settings {
     /// The dock hides at the bottom of the screen and comes up when the pointer reaches the edge (off; issue 112). It reserves no
     /// band then: windows use the whole screen.
     pub dock_autohide: bool,
+    /// With auto-hide on: the dock hides only while a window lies where it stands, and comes back up when that window is minimised,
+    /// closed or moved away (off: it hides whenever the pointer leaves it). A user on Discord, 2026-11-20.
+    pub dock_autohide_windows: bool,
     /// The dock's islands on a solid fill instead of the glass (off; issue 113).
     pub dock_opaque: bool,
+    /// The Dock without its motions and on a solid fill: less work while a game keeps the graphics card busy (issue 133).
+    pub dock_performance: bool,
     /// A thin "Show desktop" strip at the right end of the primary monitor's right island, after the bell, as on Windows' taskbar (off;
     /// issue 127).
     pub dock_show_desktop: bool,
@@ -860,6 +917,7 @@ impl Default for Settings {
             adaptive_offered: false,
             show_extensions: true,
             keybindings: Default::default(),
+            dialog_folders: Default::default(),
             window: None,
             window_display: None,
             date_format: DatePref::Application,
@@ -899,6 +957,7 @@ impl Default for Settings {
             show_system_files: false,
             show_dot_files: true,
             show_thumbnails: true,
+            show_overlays: true,
             show_checkboxes: false,
             single_click: ClickPref::Never,
             open_folders_in_new_tab: false,
@@ -906,6 +965,10 @@ impl Default for Settings {
             warn_extension_change: true,
             select_on_hover: false,
             tabs_fit_names: false,
+            list_columns_first: false,
+            tab_shows_path: false,
+            catch_explorer_windows: false,
+            theme_folder: String::new(),
             tab_terminal_button: true,
             preview_details: true,
             type_to_filter: false,
@@ -916,14 +979,18 @@ impl Default for Settings {
             folder_size_on_disk: false,
             fast_file_ops: true,
             copy_verify: CopyVerify::Off,
+            wsl_drop_zone: false,
             copy_speed_limit: 0,
             transfer_progress: TransferProgress::StatusBar,
             thumb_cache_mb: None,
             show_libraries: false,
+            sidebar_drive_space: false,
             sidebar_tree: false,
             sidebar_tree_follow: true,
             address_commands: true,
             browse_archives: true,
+            quick_compress: QuickCompress::Zip,
+            archives_open_in: ArchiveOpen::Here,
             open_after_extract: false,
             search_index: true,
             name_index: true,
@@ -952,7 +1019,9 @@ impl Default for Settings {
             dock_status_hidden: Vec::new(),
             dock_side_tall: false,
             dock_autohide: false,
+            dock_autohide_windows: false,
             dock_opaque: false,
+            dock_performance: false,
             dock_show_desktop: false,
             dock_labels: false,
             dock_pins_left: false,
@@ -1248,6 +1317,8 @@ impl Settings {
         // (a text that is no colour is no colour: Windows' accent)
         rf_win::accent::set_override(rf_win::accent::parse_hex(&self.accent_color));
         crate::background::sync_tray(self.run_in_background);
+        crate::background::sync_explorer_catch(self.catch_explorer_windows);
+        crate::themes::set(&self.theme_folder);
         crate::quick_search::sync(self);
         // (the system's own short date and time for the "System" style and older dates, issue 59; set once)
         rf_core::format::set_system_format(rf_win::datefmt::short_date_time);
@@ -1259,7 +1330,9 @@ impl Settings {
         rf_core::format::set_decimal_sizes(self.decimal_sizes);
         SOLID.store(self.backdrop == BackdropPref::Solid, Ordering::Relaxed);
         MAIN_ONLY.store(main_window_only(self.backdrop), Ordering::Relaxed);
-        ANIM.store(self.animations as u8, Ordering::Relaxed);
+        // (the Dock's performance mode: no motion in the Dock's process, whatever the app's own setting)
+        let dock_still = self.dock_performance && crate::background::DOCK_PROCESS.load(Ordering::Relaxed);
+        ANIM.store(if dock_still { AnimPref::Off as u8 } else { self.animations as u8 }, Ordering::Relaxed);
         // HyperGlass: the engine redraws every glass window once when the look changes, and does nothing for the same look again
         HG_SURFACE.store(self.hg_surface.min(100), Ordering::Relaxed);
         rf_win::glass::set_look(self.hyperglass_look());
