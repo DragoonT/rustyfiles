@@ -4866,6 +4866,10 @@ impl Render for Workspace {
         let overlay_open = crate::prompt::current(window, cx).is_some() || crate::conflict_dialog::current(window, cx).is_some() || self.ops.read(cx).open || self.palette.is_some() || self.bulk.is_some() || crate::organizer::is_open(window, cx) || crate::prop_chooser::is_open(window, cx);
         let covered = !pane_shown || overlay_open || self.quick_look.is_some();
         self.preview.update(cx, |pv, _| pv.set_occluded(covered));
+        // the window the shell engine's questions belong to (issue 187: they opened behind it)
+        if window.is_window_active() {
+            rf_win::fileops::set_dialog_owner(crate::look::window::hwnd_of(window));
+        }
         // an open QuickLook preview follows the focused item too (`quicklook::selection_is` sends only what changed)
         if cx.global::<crate::settings::Settings>().space_quicklook
             && window.is_window_active()
