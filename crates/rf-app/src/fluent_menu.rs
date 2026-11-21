@@ -32,7 +32,6 @@ pub enum MenuIcon {
     None,
     Lucide(L),
     Tinted(L, Hsla),
-    Asset(&'static str),
     Image(Arc<RenderImage>),
     /// A colored dot (tags).
     Dot(Hsla),
@@ -113,7 +112,6 @@ impl Item {
 
 pub struct Quick {
     pub icon: L,
-    pub context_asset: Option<&'static str>,
     pub tip: SharedString,
     pub enabled: bool,
     pub run: Run,
@@ -121,12 +119,7 @@ pub struct Quick {
 
 impl Quick {
     pub fn new(icon: L, tip: impl Into<SharedString>, enabled: bool, run: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-        Self { icon, context_asset: None, tip: tip.into(), enabled, run: Rc::new(run) }
-    }
-
-    pub fn with_context_asset(mut self, path: &'static str) -> Self {
-        self.context_asset = Some(path);
-        self
+        Self { icon, tip: tip.into(), enabled, run: Rc::new(run) }
     }
 }
 
@@ -847,15 +840,7 @@ impl MenuView {
         for (i, q) in self.quick.iter().enumerate() {
             let run = q.run.clone();
             let tip = q.tip.clone();
-            let icon = if !self.original_icons && self.explorer_context {
-                match q.icon {
-                    L::TextCursorInput => L::PencilLine,
-                    L::Wrench => L::Info,
-                    other => other,
-                }
-            } else {
-                q.icon
-            };
+            let icon = q.icon;
             let tint = (!self.original_icons && self.explorer_context).then(|| explorer_icon_color(icon, p.dark)).flatten();
             row = row.child(
                 div()
@@ -874,27 +859,12 @@ impl MenuView {
                             .active(|s| s.bg(p.pressed))
                             .on_click(cx.listener(move |_, _, window, cx| run_in_main(run.clone(), window, cx)))
                     })
-                    .child(if self.explorer_context {
-                        q.context_asset.map_or_else(
-                            || {
-                                if !self.original_icons {
-                                    crate::icons::windows_theme_asset_path(icon)
-                                        .map(asset_icon)
-                                        .unwrap_or_else(|| {
-                                            lucide_menu_icon(icon, true, false, tint)
-                                        })
-                                } else {
-                                    crate::icons::original_icon(q.icon, px(16.)).into_any_element()
-                                }
-                            },
-                            asset_icon,
-                        )
+                    .child(if self.original_icons {
+                        crate::icons::original_icon(q.icon, px(16.)).into_any_element()
+                    } else if self.explorer_context {
+                        lucide_menu_icon(icon, true, false, tint)
                     } else {
-                        if self.original_icons {
-                            crate::icons::original_icon(q.icon, px(16.)).into_any_element()
-                        } else {
-                            Icon::new(q.icon).size(px(16.)).into_any_element()
-                        }
+                        Icon::new(q.icon).size(px(16.)).into_any_element()
                     }),
             );
             if explorer_toolbar && i + 1 < self.quick.len() {
@@ -1060,7 +1030,6 @@ fn row_content(
             lucide_menu_icon(l, explorer_context, original_icons, tint)
         }
         MenuIcon::Tinted(l, c) => lucide_menu_icon(l, explorer_context, original_icons, Some(c)),
-        MenuIcon::Asset(path) => asset_icon(path),
         MenuIcon::Image(img) => div()
             .when(!enabled, |d| d.opacity(0.45))
             .child(gpui_kit::img(img).size(px(16.)))
@@ -1082,21 +1051,6 @@ fn row_content(
         .into_any_element()
 }
 
-fn asset_icon(path: &'static str) -> AnyElement {
-    #[cfg(target_os = "windows")]
-    if let Some(glyph) = crate::icons::windows_theme_context_glyph(path) {
-        return crate::icons::windows_theme_glyph(glyph, px(16.));
-    }
-
-    match crate::icons::windows_theme_asset_bytes(path) {
-        Some(bytes) => Icon::default().data(bytes).size(px(16.)).into_any_element(),
-        None => {
-            log::warn!("missing Windows theme icon asset: {path}");
-            div().size(px(16.)).into_any_element()
-        }
-    }
-}
-
 fn lucide_menu_icon(icon: L, explorer_context: bool, original_icons: bool, tint: Option<Hsla>) -> AnyElement {
     #[cfg(target_os = "windows")]
     if explorer_context && !original_icons {
@@ -1109,17 +1063,11 @@ fn lucide_menu_icon(icon: L, explorer_context: bool, original_icons: bool, tint:
         return crate::icons::original_icon(icon, px(16.)).into_any_element();
     }
 
-    explorer_context
-        .then(|| crate::icons::windows_theme_asset_path(icon))
-        .flatten()
-        .map(asset_icon)
-        .unwrap_or_else(|| {
-            let icon = Icon::new(icon).size(px(16.));
-            match tint {
-                Some(color) => icon.text_color(color).into_any_element(),
-                None => icon.into_any_element(),
-            }
-        })
+    let icon = Icon::new(icon).size(px(16.));
+    match tint {
+        Some(color) => icon.text_color(color).into_any_element(),
+        None => icon.into_any_element(),
+    }
 }
 
 impl MenuView {

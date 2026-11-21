@@ -165,30 +165,23 @@ impl FolderView {
         let paste_ok = rf_win::clipboard::can_paste();
         if !with_items {
             return vec![
-                Quick::new(L::ClipboardPaste, t!("Yapıştır  (Ctrl+V)"), paste_ok, act(me, |v, w, cx| v.paste(w, cx)))
-                    .with_context_asset("windows-theme/context-paste.svg"),
-                Quick::new(L::Wrench, t!("Özellikler  (Alt+Enter)"), true, act(me, |v, _, cx| v.folder_properties(cx)))
-                    .with_context_asset("windows-theme/context-properties.svg"),
+                Quick::new(L::ClipboardPaste, t!("Yapıştır  (Ctrl+V)"), paste_ok, act(me, |v, w, cx| v.paste(w, cx))),
+                Quick::new(L::Wrench, t!("Özellikler  (Alt+Enter)"), true, act(me, |v, _, cx| v.folder_properties(cx))),
             ];
         }
         vec![
-            Quick::new(L::Scissors, t!("Kes  (Ctrl+X)"), true, act(me, |v, w, cx| v.copy_to_clipboard(Transfer::Move, w, cx)))
-                .with_context_asset("windows-theme/context-cut.svg"),
-            Quick::new(L::Copy, t!("Kopyala  (Ctrl+C)"), true, act(me, |v, w, cx| v.copy_to_clipboard(Transfer::Copy, w, cx)))
-                .with_context_asset("windows-theme/context-copy.svg"),
+            Quick::new(L::Scissors, t!("Kes  (Ctrl+X)"), true, act(me, |v, w, cx| v.copy_to_clipboard(Transfer::Move, w, cx))),
+            Quick::new(L::Copy, t!("Kopyala  (Ctrl+C)"), true, act(me, |v, w, cx| v.copy_to_clipboard(Transfer::Copy, w, cx))),
             Quick::new(
                 L::ClipboardPaste,
                 t!("Yapıştır  (Ctrl+V)"),
                 paste_ok,
                 act(me, |v, w, cx| if v.selected_is_single_dir() { v.paste_into_selected(w, cx) } else { v.paste(w, cx) }),
             ),
-            Quick::new(L::TextCursorInput, t!("Yeniden adlandır  (F2)"), true, act(me, |v, w, cx| v.rename_selection(w, cx)))
-                .with_context_asset("windows-theme/context-rename.svg"),
-            Quick::new(L::Share2, t!("Paylaş"), true, act(me, |v, w, cx| v.share(w, cx))).with_context_asset("windows-theme/context-share.svg"),
-            Quick::new(L::Trash, t!("Sil  (Del)"), true, act(me, |v, w, cx| v.delete_selected(false, w, cx)))
-                .with_context_asset("windows-theme/context-delete.svg"),
-            Quick::new(L::Wrench, t!("Özellikler  (Alt+Enter)"), true, act(me, |v, _, cx| v.properties(cx)))
-                .with_context_asset("windows-theme/context-properties.svg"),
+            Quick::new(L::TextCursorInput, t!("Yeniden adlandır  (F2)"), true, act(me, |v, w, cx| v.rename_selection(w, cx))),
+            Quick::new(L::Share2, t!("Paylaş"), true, act(me, |v, w, cx| v.share(w, cx))),
+            Quick::new(L::Trash, t!("Sil  (Del)"), true, act(me, |v, w, cx| v.delete_selected(false, w, cx))),
+            Quick::new(L::Wrench, t!("Özellikler  (Alt+Enter)"), true, act(me, |v, _, cx| v.properties(cx))),
         ]
     }
 
@@ -251,11 +244,7 @@ impl FolderView {
             }
         }
         if has_files {
-            let icon = if explorer_theme {
-                MenuIcon::Asset("windows-theme/context-open-with.svg")
-            } else {
-                icon(L::LayoutGrid)
-            };
+            let icon = icon(L::LayoutGrid);
             v.push(Item::Sub {
                 label: t!("Şununla aç").into(),
                 icon,
@@ -267,7 +256,7 @@ impl FolderView {
             v.push(
                 Item::action(
                     t!("Yapıştır"),
-                    MenuIcon::Asset("windows-theme/context-paste.svg"),
+                    icon(L::ClipboardPaste),
                     act(me, |v, w, cx| if v.selected_is_single_dir() { v.paste_into_selected(w, cx) } else { v.paste(w, cx) }),
                 )
                 .hint("Ctrl+V"),
@@ -288,24 +277,14 @@ impl FolderView {
         }
         v.push(Item::Separator);
         if mp.copy_path {
-            let icon = if explorer_theme {
-                MenuIcon::Asset("windows-theme/context-copy-path.svg")
-            } else {
-                icon(L::ClipboardCopy)
-            };
-            v.push(Item::action(t!("Öğe yolunu kopyala"), icon, act(me, |v, _, cx| v.copy_path(cx))).hint("Ctrl+Shift+C"));
+            v.push(Item::action(t!("Öğe yolunu kopyala"), icon(L::ClipboardCopy), act(me, |v, _, cx| v.copy_path(cx))).hint("Ctrl+Shift+C"));
         }
         if !in_archive {
             v.push(Item::action(t!("Çoğalt"), icon(L::CopyPlus), act(me, |v, _, cx| v.duplicate_selected(cx))).hint("Ctrl+Alt+D"));
         }
         if mp.create_shortcut && !in_archive {
             let link_items = items.to_vec();
-            let icon = if explorer_theme {
-                MenuIcon::Asset("windows-theme/context-shortcut.svg")
-            } else {
-                icon(L::Link)
-            };
-            v.push(Item::action(t!("Kısayol oluştur"), icon, move |_, _| create_shortcuts(link_items.clone())));
+            v.push(Item::action(t!("Kısayol oluştur"), icon(L::Link), move |_, _| create_shortcuts(link_items.clone())));
         }
         if !self.is_search() && !in_archive {
             let sel = items.to_vec();
@@ -410,11 +389,7 @@ impl FolderView {
         let z7_items = items.to_vec();
         let dlg_items = items.to_vec();
         if mp.compress && !in_archive {
-            let compress_icon = if explorer_theme {
-                MenuIcon::Asset("windows-theme/context-compress.svg")
-            } else {
-                icon(L::Archive)
-            };
+            let compress_icon = icon(L::Archive);
             let quick = cx.global::<crate::settings::Settings>().quick_compress;
             let quick_items = items.to_vec();
             let sub_items: Vec<Item> = vec![
@@ -508,10 +483,7 @@ impl FolderView {
             click: None,
         });
         if explorer_theme {
-            v.push(
-                Item::action(t!("Özellikler"), MenuIcon::Asset("windows-theme/context-properties.svg"), act(me, |v, _, cx| v.properties(cx)))
-                    .hint("Alt+Enter"),
-            );
+            v.push(Item::action(t!("Özellikler"), icon(L::Wrench), act(me, |v, _, cx| v.properties(cx))).hint("Alt+Enter"));
         }
         let mut quick = self.quick_clipboard(me, true);
         if explorer_theme {
@@ -528,7 +500,6 @@ impl FolderView {
         let mode = self.view_mode;
         let sort = self.sort;
         let group = self.group;
-        let explorer_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         let mut v: Vec<Item> = Vec::new();
         v.push(Item::sub(t!("Sayfa düzeni"), icon(L::LayoutGrid), layout_items(me, mode, self.grid_style)));
         v.push(Item::sub(t!("Sırala"), icon(L::ArrowUpDown), sort_items(me, sort, self.sort_offers(cx))));
@@ -549,12 +520,7 @@ impl FolderView {
         v.push(Item::Sub { label: t!("Yeni").into(), icon: icon(L::CirclePlus), items: Sub::Pending { key: "new", fallback: Some(fallback) }, click: None });
         let in_archive = crate::archive_view::split(dir).is_some() && !dir.exists();
         if !in_archive {
-            let icon = if explorer_theme {
-                MenuIcon::Asset("windows-theme/context-paste.svg")
-            } else {
-                icon(L::ClipboardPaste)
-            };
-            v.push(Item::action(t!("Kısayol yapıştır"), icon, act(me, |v, w, cx| v.paste_shortcuts(w, cx))).enabled(rf_win::clipboard::has_files()));
+            v.push(Item::action(t!("Kısayol yapıştır"), icon(L::ClipboardPaste), act(me, |v, w, cx| v.paste_shortcuts(w, cx))).enabled(rf_win::clipboard::has_files()));
         }
         // HyperDownload installed: a link downloaded into this folder (it was only in the command palette)
         if !in_archive && !rf_win::ftp::is_ftp(dir) && crate::addons::installed(crate::hyperdownload::ID).is_some() {
@@ -562,26 +528,15 @@ impl FolderView {
         }
         let d = dir.to_path_buf();
         v.push(Item::action(t!("Kenar çubuğuna sabitle"), icon(L::Pin), act(me, move |v, _, cx| v.pin(d.clone(), cx))));
-        let copy_path_icon = if explorer_theme {
-            MenuIcon::Asset("windows-theme/context-copy-path.svg")
-        } else {
-            icon(L::ClipboardCopy)
-        };
-        v.push(Item::action(t!("Yolu kopyala"), copy_path_icon, act(me, |v, _, cx| v.copy_path(cx))));
+        v.push(Item::action(t!("Yolu kopyala"), icon(L::ClipboardCopy), act(me, |v, _, cx| v.copy_path(cx))));
         if !self.is_search() && !crate::archive_view::is_browsable_path(dir) && !rf_win::ftp::is_ftp(dir) {
             let d = dir.to_path_buf();
-            let icon = if explorer_theme {
-                MenuIcon::Asset("windows-theme/chart.svg")
-            } else {
-                icon(L::ChartPie)
-            };
-            v.push(Item::action(t!("Disk kullanımını göster"), icon, act(me, move |_, _, cx| {
+            v.push(Item::action(t!("Disk kullanımını göster"), icon(L::ChartPie), act(me, move |_, _, cx| {
                 cx.emit(FolderEvent::OpenInNewTab(Location::DiskUsage(d.clone())))
             })));
         }
         let show_hidden = self.filter.show_hidden;
-        let eye_icon = if explorer_theme { MenuIcon::Asset("windows-theme/eye.svg") } else { icon(L::Eye) };
-        v.push(Item::action(t!("Gizli öğeleri göster"), eye_icon, act(me, |v, _, cx| v.toggle_hidden(cx))).checked(show_hidden).hint("Ctrl+H"));
+        v.push(Item::action(t!("Gizli öğeleri göster"), icon(L::Eye), act(me, |v, _, cx| v.toggle_hidden(cx))).checked(show_hidden).hint("Ctrl+H"));
         v.push(Item::Separator);
         if !in_archive {
             let d = dir.to_path_buf();
@@ -785,9 +740,6 @@ impl FolderView {
             BarMenu::More => {
                 let (undo, redo) = crate::undo::next_labels();
                 let none = self.selected.is_empty();
-                let explorer_theme = cx
-                    .global::<crate::settings::Settings>()
-                    .windows_file_explorer_theme;
                 vec![
                     Item::action(
                         undo_text(undo),
@@ -824,11 +776,7 @@ impl FolderView {
                     Item::Separator,
                     Item::action(
                         t!("Özellikler"),
-                        if explorer_theme {
-                            MenuIcon::Asset("windows-theme/context-properties.svg")
-                        } else {
-                            icon(L::Wrench)
-                        },
+                        icon(L::Wrench),
                         act(&me, |v, _, cx| v.folder_properties(cx)),
                     ),
                     Item::action(

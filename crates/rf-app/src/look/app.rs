@@ -139,7 +139,6 @@ pub fn main() {
         gpui_kit::init(cx);
         // rustyfiles'ın ayarları: yalnız dil, tema, tarih biçimi için okunur, asla yazılmaz
         cx.set_global(crate::settings::Settings::load());
-        crate::icons::install_theme_resolver(cx);
         if !rf_win::encoding::user_locale_is_turkish() {
             rf_core::textload::set_locale_hint(None);
         }

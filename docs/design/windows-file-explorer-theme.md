@@ -11,8 +11,8 @@ recent navigation-pane and file-list styling, Explorer-like navigation and comma
 surfaces, separators, spacing, proportions, and toolbar placement. Applicable files,
 folders, drives, tabs, and Recycle Bin states use Windows Shell artwork at runtime. Common
 toolbar and context-menu actions use system glyphs: Segoe Fluent Icons on Windows 11 and
-Segoe MDL2 Assets on Windows 10. Icons without a matching system glyph keep their original
-meaning and appearance; context menus also keep the Explorer-style presentation. The tab
+Segoe MDL2 Assets on Windows 10. Where no system glyph is used, the app keeps its existing
+built-in icons. No custom Windows-theme SVG artwork is bundled or distributed. The tab
 strip keeps its glass plus button and existing slide-in animation.
 
 The sidebar width is remembered separately for the two appearances: 232 px by default
@@ -27,5 +27,3 @@ by Windows for New-menu templates remain as supplied. With the switch off, the e
 menu styling and icons are unchanged. Switching the look off restores the original app
 icons; the theme does not replace their definitions or bundle the user's separate ICO
 collection.
-
-Some theme artwork is adapted from Icons8. The app links to Icons8 in Settings > About.

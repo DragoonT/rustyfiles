@@ -844,7 +844,6 @@ pub fn main() {
         gpui_kit::init(cx);
         ui_stall::start(cx);
         cx.set_global(settings::Settings::load());
-        icons::install_theme_resolver(cx);
         start_mark("settings loaded");
         rf_core::sort::set_turkish_collation(rf_win::encoding::user_locale_is_turkish());
         // eski kod sayfalı metinlerin tahmini: Türkçe olmayan sistemde Türkçe ipucu verilmez

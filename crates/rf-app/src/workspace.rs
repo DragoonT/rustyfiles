@@ -3000,15 +3000,15 @@ impl Workspace {
         cx: &mut Context<Self>,
         f: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
     ) -> AnyElement {
-        let windows_nav_icon = if cx.global::<crate::settings::Settings>().windows_file_explorer_theme {
-            match id {
-                "back" => Some("windows-theme/nav-back.svg"),
-                "fwd" => Some("windows-theme/nav-forward.svg"),
-                _ => None,
-            }
-        } else {
-            None
-        };
+        #[cfg(target_os = "windows")]
+        let windows_nav_icon = cx
+            .global::<crate::settings::Settings>()
+            .windows_file_explorer_theme
+            .then(|| crate::icons::windows_theme_icon_glyph(icon))
+            .flatten()
+            .map(|glyph| crate::icons::windows_theme_glyph(glyph, px(16.)));
+        #[cfg(not(target_os = "windows"))]
+        let windows_nav_icon = None;
         div()
             .id(id)
             .tooltip(move |w, cx| gpui_kit::component::tooltip::Tooltip::new(tooltip_text(id)).build(w, cx))
@@ -3024,10 +3024,7 @@ impl Workspace {
                     .active(|s| s.bg(p.pressed))
                     .on_click(cx.listener(move |this, _, window, cx| f(this, window, cx)))
             })
-            .child(match windows_nav_icon {
-                Some(path) => Icon::default().path(path).size(px(16.)).into_any_element(),
-                None => Icon::new(icon).size(px(16.)).into_any_element(),
-            })
+            .child(windows_nav_icon.unwrap_or_else(|| Icon::new(icon).size(px(16.)).into_any_element()))
             .into_any_element()
     }
 
