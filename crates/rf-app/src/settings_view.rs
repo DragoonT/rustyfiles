@@ -1507,6 +1507,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::FolderOpen,
+            t!("Sekmede klasörün yolu"),
+            Some(t!("Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.")),
+            sw("tab-path", p, s.tab_shows_path, |s, v| s.tab_shows_path = v),
+        ),
+        card(
+            p,
             L::SquareTerminal,
             t!("Sekmelerde terminal düğmesi"),
             Some(t!("Her klasör sekmesinde, o klasörde bir terminal açan düğme.")),
@@ -1627,6 +1634,37 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         },
         cx,
     ));
+    // the theme folder: colours and icons of the user's own (issues 93 and 94)
+    let themes = crate::themes::list();
+    let cur_theme = s.theme_folder.clone();
+    let none = t!("Yok").to_string();
+    let shown_theme = if cur_theme.is_empty() { none.clone() } else { cur_theme.clone() };
+    v.push(card(
+        p,
+        L::Palette,
+        t!("Tema klasörü"),
+        Some(t!("Ayar klasöründeki themes içinden bir klasör: theme.toml renkleri, icons klasörü simgeleri değiştirir. Biçimi GitHub'da docs/themes.md'de.")),
+        select_box("theme-folder", p, shown_theme, move |_| {
+            std::iter::once(String::new())
+                .chain(themes.iter().cloned())
+                .map(|name| {
+                    let label = if name.is_empty() { none.clone() } else { name.clone() };
+                    Choice::new(label, name == cur_theme, move |_, cx| {
+                        let n = name.clone();
+                        settings::update(cx, |s| s.theme_folder = n)
+                    })
+                })
+                .collect()
+        }),
+    ));
+    v.push(link_row(p, "open-themes", L::FolderOpen, t!("Tema klasörlerini aç"), None, |_, _| {
+        if let Some(d) = crate::themes::dir() {
+            let _ = std::fs::create_dir_all(&d);
+            std::thread::spawn(move || {
+                let _ = rf_win::shell::open(&d);
+            });
+        }
+    }));
     // font
     let fonts = font_choices(cx);
     let current_font = s.font.clone().unwrap_or_default();
@@ -2922,6 +2960,13 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
                 window.refresh();
             }),
         ),
+        card(
+            p,
+            L::ExternalLink,
+            t!("Başka programların açtığı Explorer pencereleri"),
+            Some(t!("Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.")),
+            sw("catch-explorer", p, s.catch_explorer_windows, |s, v| s.catch_explorer_windows = v),
+        ),
     ];
     out.extend(archives);
     // other apps' Open / Save / folder dialogs show rustyfiles (needs rustyfiles_dialog.dll)
@@ -2949,6 +2994,22 @@ fn advanced(p: &Palette, s: &Settings, cx: &App) -> Vec<AnyElement> {
             window.refresh();
         }),
     ));
+    // the folders some apps' Open / Save windows always start in (set with the pin button of the dialog)
+    for (i, (app, dir)) in s.dialog_folders.iter().enumerate() {
+        let key = app.clone();
+        out.push(card(
+            p,
+            L::Pin,
+            app.trim_end_matches(".exe"),
+            Some(&format!("{} {dir}", t!("Aç / Kaydet penceresi hep bu klasörde açılır:"))),
+            button(("dlg-folder", i), p, t!("Kaldır"), move |_, cx| {
+                let key = key.clone();
+                crate::settings::update(cx, move |s| {
+                    s.dialog_folders.remove(&key);
+                });
+            }),
+        ));
+    }
     out.extend([
         card(
             p,
@@ -3134,6 +3195,7 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
         link_row(p, "open-log", L::FolderOpen, t!("Kayıt ve ayar klasörünü aç"), settings::app_dir().map(|d| d.display().to_string()).as_deref(), |_, _| {
             if let Some(d) = settings::app_dir() {
                 std::thread::spawn(move || {
+                    rf_win::explorer_catch::quiet_for(std::time::Duration::from_secs(5));
                     let _ = std::process::Command::new("explorer.exe").arg(d).spawn();
                 });
             }

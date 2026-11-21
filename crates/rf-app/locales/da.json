@@ -2149,5 +2149,21 @@
  "10ef9c03": "I WSL skriver Windows en separat \"Zone.Identifier\"-fil ved siden af en fil, der er hentet fra internettet. Når slået til, sletter kopieringen den.",
  "31d132e2": "Vis drevplads i tal",
  "04339c77": "Brugt og samlet plads under hvert drevs bjælke",
- "bd479de9": "Windows Stifinder-udseende"
+ "bd479de9": "Windows Stifinder-udseende",
+ "f6bca4e8": "Stop med altid at åbne her for:",
+ "a6a39e94": "Åbn altid i denne mappe for:",
+ "6ff5ec59": "Dets Åbn/Gem-vindue åbner altid i:",
+ "b79ebd26": "Udfyld listen kolonne for kolonne",
+ "c9f22cd9": "Mappens sti på faner",
+ "b47392d6": "Faner viser mappens fulde sti med mindre tekst i stedet for navnet; det, der ikke kan være, skæres af til sidst.",
+ "d9cac923": "Skjul alle grupper",
+ "c30af95d": "Udvid alle grupper",
+ "5c26267c": "Skjul / udvid alle grupper",
+ "438fff43": "Stifinder-vinduer, som andre programmer åbner",
+ "109ffa73": "Når et program (f.eks. en downloadmanager) selv starter Stifinder, lukkes vinduet, og samme sted åbnes i rustyfiles. Virker, mens rustyfiles kører.",
+ "6fee9305": "Ydeevnetilstand",
+ "40761adf": "Dock springer sine bevægelser over og tegnes på en ensfarvet baggrund i stedet for glas: mindre arbejde, mens et spil holder grafikkortet travlt.",
+ "6d5c4fbb": "Temamappe",
+ "4f72cd3e": "En mappe i themes i indstillingsmappen: dens theme.toml ændrer farverne, dens icons-mappe ikonerne. Formatet står i docs/themes.md på GitHub.",
+ "048a70ae": "Åbn temamappen"
 }

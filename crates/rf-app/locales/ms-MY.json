@@ -2149,5 +2149,21 @@
  "10ef9c03": "Dalam WSL, Windows menulis fail \"Zone.Identifier\" yang berasingan di sebelah fail yang dimuat turun dari internet. Apabila dihidupkan, penyalinan memadamnya.",
  "31d132e2": "Tunjukkan ruang pemacu dalam nombor",
  "04339c77": "Ruang terguna dan jumlah di bawah bar setiap pemacu",
- "bd479de9": "Rupa Windows File Explorer"
+ "bd479de9": "Rupa Windows File Explorer",
+ "f6bca4e8": "Berhenti sentiasa membuka di sini untuk:",
+ "a6a39e94": "Sentiasa buka dalam folder ini untuk:",
+ "6ff5ec59": "Tetingkap Buka / Simpan-nya sentiasa dibuka di:",
+ "b79ebd26": "Isi Senarai lajur demi lajur",
+ "c9f22cd9": "Laluan folder pada tab",
+ "b47392d6": "Tab menunjukkan laluan penuh folder dalam teks lebih kecil dan bukan namanya; bahagian yang tidak muat dipotong di hujung.",
+ "d9cac923": "Runtuhkan semua kumpulan",
+ "c30af95d": "Kembangkan semua kumpulan",
+ "5c26267c": "Runtuhkan / kembangkan semua kumpulan",
+ "438fff43": "Tetingkap Explorer yang dibuka program lain",
+ "109ffa73": "Apabila program (pengurus muat turun, misalnya) memulakan File Explorer sendiri, tetingkapnya ditutup dan tempat yang sama dibuka dalam rustyfiles. Berfungsi semasa rustyfiles berjalan.",
+ "6fee9305": "Mod prestasi",
+ "40761adf": "Dock melangkau pergerakannya dan dilukis pada latar pejal dan bukan kaca: kurang kerja semasa permainan menyibukkan kad grafik.",
+ "6d5c4fbb": "Folder tema",
+ "4f72cd3e": "Folder dalam themes, dalam folder tetapan: theme.toml miliknya menukar warna, folder icons menukar ikon. Formatnya ada dalam docs/themes.md di GitHub.",
+ "048a70ae": "Buka folder tema"
 }

@@ -2149,5 +2149,21 @@
  "10ef9c03": "Trong WSL, Windows ghi một tệp \"Zone.Identifier\" riêng bên cạnh tệp được tải xuống từ internet. Khi bật, việc sao chép sẽ xóa tệp đó.",
  "31d132e2": "Hiện dung lượng ổ đĩa bằng số",
  "04339c77": "Dung lượng đã dùng và tổng dưới thanh của mỗi ổ đĩa",
- "bd479de9": "Giao diện File Explorer của Windows"
+ "bd479de9": "Giao diện File Explorer của Windows",
+ "f6bca4e8": "Thôi luôn mở ở đây cho:",
+ "a6a39e94": "Luôn mở trong thư mục này cho:",
+ "6ff5ec59": "Cửa sổ Mở / Lưu của nó luôn mở tại:",
+ "b79ebd26": "Điền danh sách theo từng cột",
+ "c9f22cd9": "Đường dẫn thư mục trên thẻ",
+ "b47392d6": "Thẻ hiển thị toàn bộ đường dẫn của thư mục bằng chữ nhỏ hơn thay cho tên; phần không vừa sẽ bị cắt ở cuối.",
+ "d9cac923": "Thu gọn mọi nhóm",
+ "c30af95d": "Mở rộng mọi nhóm",
+ "5c26267c": "Thu gọn / mở rộng mọi nhóm",
+ "438fff43": "Cửa sổ Explorer do chương trình khác mở",
+ "109ffa73": "Khi một chương trình (ví dụ trình quản lý tải xuống) tự mở File Explorer, cửa sổ đó sẽ đóng và cùng vị trí sẽ mở trong rustyfiles. Hoạt động khi rustyfiles đang chạy.",
+ "6fee9305": "Chế độ hiệu năng",
+ "40761adf": "Dock bỏ qua các chuyển động và được vẽ trên nền đặc thay vì kính: ít việc hơn khi trò chơi khiến card đồ họa bận.",
+ "6d5c4fbb": "Thư mục giao diện",
+ "4f72cd3e": "Một thư mục trong themes, ở thư mục cài đặt: theme.toml của nó đổi màu, thư mục icons đổi biểu tượng. Định dạng có trong docs/themes.md trên GitHub.",
+ "048a70ae": "Mở thư mục giao diện"
 }

@@ -2149,5 +2149,21 @@
  "10ef9c03": "WSL-ben a Windows külön \"Zone.Identifier\" fájlt ír az internetről letöltött fájl mellé. Ha be van kapcsolva, a másolás törli.",
  "31d132e2": "Meghajtók helyének megjelenítése számokkal",
  "04339c77": "Foglalt és teljes hely minden meghajtó sávja alatt",
- "bd479de9": "A Windows Fájlkezelő megjelenése"
+ "bd479de9": "A Windows Fájlkezelő megjelenése",
+ "f6bca4e8": "Ne nyíljon mindig itt ennél:",
+ "a6a39e94": "Mindig ebben a mappában nyíljon ennél:",
+ "6ff5ec59": "A Megnyitás/Mentés ablaka mindig itt nyílik meg:",
+ "b79ebd26": "A lista kitöltése oszloponként",
+ "c9f22cd9": "A mappa elérési útja a lapokon",
+ "b47392d6": "A lapok a mappa neve helyett a teljes elérési utat mutatják kisebb betűvel; ami nem fér ki, a végén levágódik.",
+ "d9cac923": "Összes csoport összecsukása",
+ "c30af95d": "Összes csoport kibontása",
+ "5c26267c": "Összes csoport összecsukása / kibontása",
+ "438fff43": "Más programok által megnyitott Intéző-ablakok",
+ "109ffa73": "Ha egy program (például egy letöltéskezelő) maga indítja el a Fájlkezelőt, annak ablaka bezárul, és ugyanaz a hely nyílik meg a rustyfilesban. Amíg a rustyfiles fut, működik.",
+ "6fee9305": "Teljesítmény mód",
+ "40761adf": "A Dock kihagyja a mozgásokat, és üveg helyett egyszínű háttérrel rajzolódik: kevesebb munka, amíg egy játék leköti a videokártyát.",
+ "6d5c4fbb": "Témamappa",
+ "4f72cd3e": "Egy mappa a beállítások mappájának themes mappájában: a theme.toml a színeket, az icons mappa az ikonokat cseréli. A formátum a GitHubon, a docs/themes.md fájlban van.",
+ "048a70ae": "Témák mappájának megnyitása"
 }

@@ -2149,5 +2149,21 @@
  "10ef9c03": "No WSL, o Windows escreve um ficheiro \"Zone.Identifier\" separado junto de um ficheiro transferido da Internet. Quando ativado, a cópia elimina-o.",
  "31d132e2": "Mostrar o espaço das unidades em números",
  "04339c77": "Espaço utilizado e total por baixo da barra de cada unidade",
- "bd479de9": "Aspeto do Explorador de Ficheiros do Windows"
+ "bd479de9": "Aspeto do Explorador de Ficheiros do Windows",
+ "f6bca4e8": "Deixar de abrir sempre aqui para:",
+ "a6a39e94": "Abrir sempre nesta pasta para:",
+ "6ff5ec59": "A janela Abrir / Guardar abre sempre em:",
+ "b79ebd26": "Preencher a lista coluna a coluna",
+ "c9f22cd9": "O caminho da pasta nos separadores",
+ "b47392d6": "Os separadores mostram o caminho completo da pasta em letra mais pequena em vez do nome; o que não couber é cortado no fim.",
+ "d9cac923": "Fechar todos os grupos",
+ "c30af95d": "Expandir todos os grupos",
+ "5c26267c": "Fechar / expandir todos os grupos",
+ "438fff43": "Janelas do Explorador abertas por outros programas",
+ "109ffa73": "Quando um programa (um gestor de transferências, por exemplo) abre o Explorador de Ficheiros por si, a janela é fechada e o mesmo local abre no rustyfiles. Funciona enquanto o rustyfiles está em execução.",
+ "6fee9305": "Modo de desempenho",
+ "40761adf": "O Dock dispensa os movimentos e é desenhado sobre um fundo sólido em vez de vidro: menos trabalho enquanto um jogo ocupa a placa gráfica.",
+ "6d5c4fbb": "Pasta de tema",
+ "4f72cd3e": "Uma pasta em themes, na pasta de definições: o theme.toml muda as cores e a pasta icons, os ícones. O formato está em docs/themes.md no GitHub.",
+ "048a70ae": "Abrir a pasta de temas"
 }

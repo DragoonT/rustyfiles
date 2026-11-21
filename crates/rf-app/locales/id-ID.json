@@ -2149,5 +2149,21 @@
  "10ef9c03": "Di WSL, Windows menulis file \"Zone.Identifier\" terpisah di samping file yang diunduh dari internet. Jika aktif, penyalinan menghapusnya.",
  "31d132e2": "Tampilkan ruang drive dalam angka",
  "04339c77": "Ruang terpakai dan total di bawah bilah setiap drive",
- "bd479de9": "Tampilan File Explorer Windows"
+ "bd479de9": "Tampilan File Explorer Windows",
+ "f6bca4e8": "Berhenti selalu membuka di sini untuk:",
+ "a6a39e94": "Selalu buka di folder ini untuk:",
+ "6ff5ec59": "Jendela Buka / Simpan-nya selalu terbuka di:",
+ "b79ebd26": "Isi Daftar kolom demi kolom",
+ "c9f22cd9": "Jalur folder pada tab",
+ "b47392d6": "Tab menampilkan jalur lengkap folder dengan teks lebih kecil, bukan namanya; bagian yang tidak muat dipotong di akhir.",
+ "d9cac923": "Ciutkan semua grup",
+ "c30af95d": "Bentangkan semua grup",
+ "5c26267c": "Ciutkan / bentangkan semua grup",
+ "438fff43": "Jendela Explorer yang dibuka program lain",
+ "109ffa73": "Saat sebuah program (pengelola unduhan, misalnya) membuka File Explorer sendiri, jendelanya ditutup dan tempat yang sama dibuka di rustyfiles. Berlaku selama rustyfiles berjalan.",
+ "6fee9305": "Mode performa",
+ "40761adf": "Dock melewatkan animasinya dan digambar di latar solid alih-alih kaca: lebih sedikit kerja saat game menyibukkan kartu grafis.",
+ "6d5c4fbb": "Folder tema",
+ "4f72cd3e": "Sebuah folder di themes, di folder pengaturan: theme.toml-nya mengubah warna, folder icons-nya mengubah ikon. Formatnya ada di docs/themes.md di GitHub.",
+ "048a70ae": "Buka folder tema"
 }

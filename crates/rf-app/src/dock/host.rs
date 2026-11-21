@@ -121,7 +121,7 @@ impl Prefs {
             status: [s.dock_status_order.clone(), s.dock_status_hidden.clone()],
             search: s.dock_search,
             autohide: s.dock_autohide,
-            opaque: s.dock_opaque,
+            opaque: s.dock_opaque || s.dock_performance,
         }
     }
 

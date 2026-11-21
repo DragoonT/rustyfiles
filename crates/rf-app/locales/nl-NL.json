@@ -2149,5 +2149,21 @@
  "10ef9c03": "In WSL schrijft Windows een apart \"Zone.Identifier\"-bestand naast een bestand dat van internet is gedownload. Indien ingeschakeld, verwijdert het kopiëren het.",
  "31d132e2": "Schijfruimte in getallen weergeven",
  "04339c77": "Gebruikte en totale ruimte onder de balk van elk station",
- "bd479de9": "Uiterlijk van Windows Verkenner"
+ "bd479de9": "Uiterlijk van Windows Verkenner",
+ "f6bca4e8": "Niet meer altijd hier openen voor:",
+ "a6a39e94": "Altijd in deze map openen voor:",
+ "6ff5ec59": "Het venster Openen / Opslaan opent altijd in:",
+ "b79ebd26": "Lijst per kolom vullen",
+ "c9f22cd9": "Het pad van de map op tabbladen",
+ "b47392d6": "Tabbladen tonen het volledige pad van de map in kleinere tekst in plaats van de naam; wat niet past, wordt aan het eind afgekapt.",
+ "d9cac923": "Alle groepen samenvouwen",
+ "c30af95d": "Alle groepen uitvouwen",
+ "5c26267c": "Alle groepen samenvouwen / uitvouwen",
+ "438fff43": "Verkenner-vensters die andere programma's openen",
+ "109ffa73": "Als een programma (een downloadmanager bijvoorbeeld) zelf Verkenner start, wordt dat venster gesloten en opent dezelfde plek in rustyfiles. Werkt zolang rustyfiles draait.",
+ "6fee9305": "Prestatiemodus",
+ "40761adf": "Het Dock slaat zijn bewegingen over en wordt op een effen vlak in plaats van glas getekend: minder werk terwijl een game de videokaart bezighoudt.",
+ "6d5c4fbb": "Themamap",
+ "4f72cd3e": "Een map in themes, in de instellingenmap: de theme.toml verandert de kleuren, de map icons de pictogrammen. Het formaat staat in docs/themes.md op GitHub.",
+ "048a70ae": "Themamap openen"
 }

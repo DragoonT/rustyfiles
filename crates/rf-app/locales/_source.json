@@ -12965,5 +12965,101 @@
   "key": "Windows Dosya Gezgini görünümü",
   "tr": "Windows Dosya Gezgini görünümü",
   "en": "Windows File Explorer look"
+ },
+ {
+  "id": "f6bca4e8",
+  "key": "Artık hep burada açılmasın:",
+  "tr": "Artık hep burada açılmasın:",
+  "en": "Stop always opening here for:"
+ },
+ {
+  "id": "a6a39e94",
+  "key": "Hep bu klasörde açılsın:",
+  "tr": "Hep bu klasörde açılsın:",
+  "en": "Always open in this folder for:"
+ },
+ {
+  "id": "6ff5ec59",
+  "key": "Aç / Kaydet penceresi hep bu klasörde açılır:",
+  "tr": "Aç / Kaydet penceresi hep bu klasörde açılır:",
+  "en": "Its Open / Save window always opens in:"
+ },
+ {
+  "id": "b79ebd26",
+  "key": "Listeyi sütun sütun doldur",
+  "tr": "Listeyi sütun sütun doldur",
+  "en": "Fill the List column by column"
+ },
+ {
+  "id": "c9f22cd9",
+  "key": "Sekmede klasörün yolu",
+  "tr": "Sekmede klasörün yolu",
+  "en": "The folder's path on tabs"
+ },
+ {
+  "id": "b47392d6",
+  "key": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
+  "tr": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
+  "en": "Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end."
+ },
+ {
+  "id": "d9cac923",
+  "key": "Tüm grupları daralt",
+  "tr": "Tüm grupları daralt",
+  "en": "Collapse all groups"
+ },
+ {
+  "id": "c30af95d",
+  "key": "Tüm grupları genişlet",
+  "tr": "Tüm grupları genişlet",
+  "en": "Expand all groups"
+ },
+ {
+  "id": "5c26267c",
+  "key": "Tüm grupları daralt / genişlet",
+  "tr": "Tüm grupları daralt / genişlet",
+  "en": "Collapse / expand all groups"
+ },
+ {
+  "id": "438fff43",
+  "key": "Başka programların açtığı Explorer pencereleri",
+  "tr": "Başka programların açtığı Explorer pencereleri",
+  "en": "Explorer windows other programs open"
+ },
+ {
+  "id": "109ffa73",
+  "key": "Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.",
+  "tr": "Bir program (örneğin bir indirme yöneticisi) Explorer'ı kendisi açarsa pencere kapanır ve aynı yer rustyfiles'ta açılır. rustyfiles çalışırken geçerlidir.",
+  "en": "When a program (a download manager, for example) starts File Explorer itself, its window is closed and the same place opens in rustyfiles. Works while rustyfiles is running."
+ },
+ {
+  "id": "6fee9305",
+  "key": "Performans kipi",
+  "tr": "Performans kipi",
+  "en": "Performance mode"
+ },
+ {
+  "id": "40761adf",
+  "key": "Dock hareket etmez ve cam yerine düz zeminle çizilir: bir oyun ekran kartını meşgul ederken daha az iş yapar.",
+  "tr": "Dock hareket etmez ve cam yerine düz zeminle çizilir: bir oyun ekran kartını meşgul ederken daha az iş yapar.",
+  "en": "The Dock skips its motions and is drawn on a solid fill instead of glass: less work while a game keeps the graphics card busy."
+ },
+ {
+  "id": "6d5c4fbb",
+  "key": "Tema klasörü",
+  "tr": "Tema klasörü",
+  "en": "Theme folder"
+ },
+ {
+  "id": "4f72cd3e",
+  "key": "Ayar klasöründeki themes içinden bir klasör: theme.toml renkleri, icons klasörü simgeleri değiştirir. Biçimi GitHub'da docs/themes.md'de.",
+  "tr": "Ayar klasöründeki themes içinden bir klasör: theme.toml renkleri, icons klasörü simgeleri değiştirir. Biçimi GitHub'da docs/themes.md'de.",
+  "en": "A folder in themes, in the settings folder: its theme.toml changes the colours, its icons folder the icons. The format is in docs/themes.md on GitHub."
+ },
+ {
+  "id": "048a70ae",
+  "key": "Tema klasörlerini aç",
+  "tr": "Tema klasörlerini aç",
+  "en": "Open the themes folder"
  }
 ]

@@ -184,7 +184,8 @@ other test scripts are in the repository (`crates/rf-win/examples/copybench.rs` 
 **Browsing.** Tabs you can drag to reorder or pull out into a new window. Save a window's tabs,
 split panes included, as a named session and open it again later; its name stands beside the tabs.
 A new tab opens Home or the folder you are in (Settings › General). Dual pane. Details,
-grid and column views, grouping, a preview pane, search, colour tags, the Shelf, libraries,
+grid, list and column views (the list can fill column by column, as Explorer's does), grouping,
+a preview pane, search, colour tags, the Shelf, libraries,
 network shares and FTP. A Git status column. Folder sizes on demand: click "Calculate size";
 they are remembered across restarts and can show size on disk. "Show disk usage" on a folder or
 drive lists what takes the space, biggest first, next to a treemap you can click through
@@ -193,9 +194,11 @@ and Gallery open in rustyfiles, and devices Windows lists under This PC (phones 
 Link) appear under Devices on the Home page; that part hasn't been tried with a real phone yet.
 
 **Files.** Undo and redo for renames, copies, moves, deleting to the Recycle Bin and folder
-flattening. Bulk rename.
-The full Explorer context menu, drag and drop with Explorer and the desktop, and drop targets
-on tabs and pinned folders. Send files to your other computers with [Ferry](#ferry).
+flattening. Bulk rename. Duplicate, copy or move to the other pane, and paste copied text or a
+picture as a new file. The full Explorer context menu with Send to, drag and drop with Explorer,
+the desktop, browsers and Outlook, and drop targets on tabs, pinned folders, folders and programs.
+Send files to your other computers with [Ferry](#ferry), and download with
+[HyperDownload](#hyperdownload).
 
 **Archives.** ZIP, 7z, RAR, the tar family and ISO open like folders, password-protected
 ZIP, 7z and RAR included. Add, delete and rename inside ZIP, 7z and tar. Create ZIP, 7z and tar.zst on every core. Reading is
@@ -204,8 +207,9 @@ decodes a 1.3 GB WinRAR archive ten times faster than UnRAR.
 
 **Windows.** Optionally the default file manager: folders, <kbd>Win</kbd>+<kbd>E</kbd>, This PC
 and the Recycle Bin open in rustyfiles. Optionally, other apps' Open, Save and Select folder
-dialogs open in rustyfiles too (Settings › Advanced). Explorer's `/select,` and `shell:` paths
-work. Mica,
+dialogs open in rustyfiles too (Settings › Advanced), and a pin button there keeps a start
+folder for each app. Pictures and videos opened in Photos or another Store app come with their
+folder, so its Previous and Next work. Explorer's `/select,` and `shell:` paths work. Mica,
 dark mode and the system accent colour. When a game or a render saturates the GPU, drawing
 moves to the CPU and back again without a flicker.
 
@@ -300,6 +304,21 @@ last fifteen years speaks over DisplayPort, HDMI and DVI. If a monitor has no sl
 DDC/CI is on in the monitor's own menu; some docks, KVM switches and adapters don't pass it through.
 A laptop's own screen is set the way Windows' own slider does it (not tried on a laptop yet).
 
+## HyperDownload
+
+rustyfiles' own download manager, an add-on: Settings › Add-ons › HyperDownload › **Install**. It
+is a separate program ([source](https://github.com/gelenmedya/hyperdownload), MIT), downloaded only
+when you click Install and checked against its SHA-256 first, and it can be removed at any time.
+
+- **Download from a link** in a folder's right-click menu: one file over many connections at once,
+  paused and resumed where it stopped, also after a restart. Paste a link into a folder and
+  rustyfiles offers to download it there.
+- **Torrents and magnet links**, with a dialog to choose which files of a torrent you want. A
+  `.torrent` file downloads from its own menu.
+- **A Downloads page** with every download, its pieces and its progress, and the finished ones;
+  progress also shows in the Status Center.
+- **Watch while downloading:** a video plays in DirectLook before it has finished.
+
 ## Install
 
 Installing takes three clicks and no technical knowledge:
@@ -363,16 +382,19 @@ cd rustyfiles
 | <kbd>Ctrl</kbd>+<kbd>L</kbd> or <kbd>Alt</kbd>+<kbd>D</kbd> | Address bar |
 | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Search (<kbd>Enter</kbd> searches subfolders too) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> or <kbd>F1</kbd> | Command palette |
-| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd> / <kbd>2</kbd> / <kbd>3</kbd> | Details, grid, columns |
+| <kbd>Ctrl</kbd>+<kbd>P</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>A</kbd> | Find a folder you visited, find a tab |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>1</kbd> … <kbd>5</kbd> | Details, grid, columns, cards, list |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>D</kbd>, <kbd>F6</kbd> | Dual pane, switch pane |
+| <kbd>Shift</kbd>+<kbd>F5</kbd> / <kbd>Shift</kbd>+<kbd>F6</kbd> | Copy, move to the other pane |
+| <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>D</kbd> | Duplicate |
 | <kbd>Alt</kbd>+<kbd>P</kbd>, <kbd>Ctrl</kbd>+<kbd>B</kbd> | Preview pane, sidebar |
 | <kbd>Space</kbd> | DirectLook |
 | <kbd>F2</kbd> | Rename (bulk rename with several items selected) |
 | <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Y</kbd> | Undo, redo |
 | <kbd>Ctrl</kbd>+<kbd>H</kbd> | Show hidden items |
 
-Every shortcut can be changed in Settings › Keyboard shortcuts: click a command, then press
-the new keys.
+Every shortcut can be changed in Settings › Actions: click a command, then press the new
+keys.
 
 ## Project layout
 

@@ -186,6 +186,8 @@ impl Palette {
             // "Solid" material: Windows 11's plain window color instead of Mica
             p.window_bg = if p.dark { hex(0x202020) } else { hex(0xF3F3F3) };
         }
+        // the user's theme folder: its colours over these (issues 93 and 94)
+        crate::themes::apply(&mut p);
         if crate::settings::theme_override() == crate::settings::ThemePref::Black {
             // (opaque black whatever the material: no glass, no washes)
             return p;

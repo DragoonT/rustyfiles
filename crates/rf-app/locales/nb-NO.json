@@ -2149,5 +2149,21 @@
  "10ef9c03": "I WSL skriver Windows en egen \"Zone.Identifier\"-fil ved siden av en fil som er lastet ned fra Internett. Når på, sletter kopieringen den.",
  "31d132e2": "Vis diskplass i tall",
  "04339c77": "Brukt og total plass under hver disks stolpe",
- "bd479de9": "Windows Filutforsker-utseende"
+ "bd479de9": "Windows Filutforsker-utseende",
+ "f6bca4e8": "Slutt å alltid åpne her for:",
+ "a6a39e94": "Åpne alltid i denne mappen for:",
+ "6ff5ec59": "Åpne/Lagre-vinduet åpnes alltid i:",
+ "b79ebd26": "Fyll listen kolonne for kolonne",
+ "c9f22cd9": "Mappens bane på faner",
+ "b47392d6": "Faner viser hele banen til mappen med mindre tekst i stedet for navnet; det som ikke får plass, kuttes på slutten.",
+ "d9cac923": "Skjul alle grupper",
+ "c30af95d": "Vis alle grupper",
+ "5c26267c": "Skjul / vis alle grupper",
+ "438fff43": "Utforsker-vinduer som andre programmer åpner",
+ "109ffa73": "Når et program (for eksempel en nedlastingsbehandler) starter Filutforsker selv, lukkes vinduet og samme sted åpnes i rustyfiles. Virker mens rustyfiles kjører.",
+ "6fee9305": "Ytelsesmodus",
+ "40761adf": "Dock hopper over bevegelsene og tegnes på en ensfarget bakgrunn i stedet for glass: mindre arbeid mens et spill holder skjermkortet opptatt.",
+ "6d5c4fbb": "Temamappe",
+ "4f72cd3e": "En mappe i themes i innstillingsmappen: theme.toml endrer fargene, icons-mappen ikonene. Formatet står i docs/themes.md på GitHub.",
+ "048a70ae": "Åpne temamappen"
 }

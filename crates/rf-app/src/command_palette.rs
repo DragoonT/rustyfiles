@@ -84,6 +84,7 @@ fn commands() -> Vec<Cmd> {
         cmd!("Yeni pencerede aç", "Ctrl+Alt+Enter", L::AppWindow, OpenInNewWindow),
         cmd!("Tümünü seç", "Ctrl+A", L::SquareCheck, SelectAll),
         cmd!("Seçimi tersine çevir", "", L::ArrowLeftRight, InvertSelection),
+        cmd!("Tüm grupları daralt / genişlet", "Ctrl+Shift+G", L::ChevronsDownUp, ToggleAllGroups),
         cmd!("Öğeyi seç/bırak", "Ctrl+Space", L::SquareCheck, ToggleSelection),
         cmd!("Kopyala", "Ctrl+C", L::Copy, CopyItems),
         cmd!("Kes", "Ctrl+X", L::Scissors, CutItems),

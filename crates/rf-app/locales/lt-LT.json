@@ -2149,5 +2149,21 @@
  "10ef9c03": "WSL aplinkoje Windows šalia iš interneto atsisiųsto failo įrašo atskirą \"Zone.Identifier\" failą. Įjungus, kopijavimas jį ištrina.",
  "31d132e2": "Rodyti diskų vietą skaičiais",
  "04339c77": "Užimta ir visa vieta po kiekvieno disko juosta",
- "bd479de9": "Windows failų naršyklės išvaizda"
+ "bd479de9": "Windows failų naršyklės išvaizda",
+ "f6bca4e8": "Nebeatverti visada čia:",
+ "a6a39e94": "Visada atverti šiame aplanke:",
+ "6ff5ec59": "Jo atidarymo / įrašymo langas visada atsiveria:",
+ "b79ebd26": "Pildyti sąrašą stulpeliais",
+ "c9f22cd9": "Aplanko kelias kortelėse",
+ "b47392d6": "Kortelėse vietoj aplanko pavadinimo rodomas visas jo kelias mažesniu šriftu; kas netelpa, nukerpama pabaigoje.",
+ "d9cac923": "Sutraukti visas grupes",
+ "c30af95d": "Išskleisti visas grupes",
+ "5c26267c": "Sutraukti / išskleisti visas grupes",
+ "438fff43": "Kitų programų atidaryti naršyklės langai",
+ "109ffa73": "Kai programa (pvz., atsisiuntimų tvarkytuvė) pati paleidžia failų naršyklę, jos langas uždaromas, o ta pati vieta atidaroma rustyfiles. Veikia, kol rustyfiles paleistas.",
+ "6fee9305": "Našumo režimas",
+ "40761adf": "Dock praleidžia judesius ir piešiamas ant vientiso fono vietoj stiklo: mažiau darbo, kol žaidimas apkrauna vaizdo plokštę.",
+ "6d5c4fbb": "Temos aplankas",
+ "4f72cd3e": "Aplankas nustatymų aplanko themes kataloge: jo theme.toml keičia spalvas, icons aplankas – piktogramas. Formatas aprašytas docs/themes.md, GitHub.",
+ "048a70ae": "Atidaryti temų aplanką"
 }

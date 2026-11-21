@@ -2149,5 +2149,21 @@
  "10ef9c03": "Vo WSL zapisuje Windows vedľa súboru stiahnutého z internetu samostatný súbor \"Zone.Identifier\". Keď je zapnuté, kopírovanie ho odstráni.",
  "31d132e2": "Zobrazovať miesto na diskoch v číslach",
  "04339c77": "Využité a celkové miesto pod pruhom každého disku",
- "bd479de9": "Vzhľad Prieskumníka súborov Windows"
+ "bd479de9": "Vzhľad Prieskumníka súborov Windows",
+ "f6bca4e8": "Prestať vždy otvárať tu pre:",
+ "a6a39e94": "Vždy otvárať v tomto priečinku pre:",
+ "6ff5ec59": "Jeho okno Otvoriť / Uložiť sa vždy otvorí v:",
+ "b79ebd26": "Plniť zoznam po stĺpcoch",
+ "c9f22cd9": "Cesta k priečinku na kartách",
+ "b47392d6": "Karty zobrazujú namiesto názvu priečinka jeho celú cestu menším písmom; čo sa nezmestí, sa na konci oreže.",
+ "d9cac923": "Zbaliť všetky skupiny",
+ "c30af95d": "Rozbaliť všetky skupiny",
+ "5c26267c": "Zbaliť / rozbaliť všetky skupiny",
+ "438fff43": "Okná Prieskumníka otvorené inými programami",
+ "109ffa73": "Keď program (napríklad správca sťahovania) sám spustí Prieskumníka, jeho okno sa zavrie a rovnaké miesto sa otvorí v rustyfiles. Funguje, kým je rustyfiles spustený.",
+ "6fee9305": "Režim výkonu",
+ "40761adf": "Dock vynechá pohyby a kreslí sa na plnom pozadí namiesto skla: menej práce, kým hra vyťažuje grafickú kartu.",
+ "6d5c4fbb": "Priečinok motívu",
+ "4f72cd3e": "Priečinok v themes v priečinku nastavení: jeho theme.toml mení farby, priečinok icons ikony. Formát je v docs/themes.md na GitHube.",
+ "048a70ae": "Otvoriť priečinok motívov"
 }

@@ -2149,5 +2149,21 @@
  "10ef9c03": "Dans WSL, Windows écrit un fichier \"Zone.Identifier\" séparé à côté d'un fichier téléchargé depuis Internet. Si activé, la copie le supprime.",
  "31d132e2": "Afficher l'espace des lecteurs en chiffres",
  "04339c77": "Espace utilisé et total sous la barre de chaque lecteur",
- "bd479de9": "Apparence de l’Explorateur de fichiers Windows"
+ "bd479de9": "Apparence de l’Explorateur de fichiers Windows",
+ "f6bca4e8": "Ne plus toujours ouvrir ici pour :",
+ "a6a39e94": "Toujours ouvrir dans ce dossier pour :",
+ "6ff5ec59": "Sa fenêtre Ouvrir / Enregistrer s'ouvre toujours dans :",
+ "b79ebd26": "Remplir la liste colonne par colonne",
+ "c9f22cd9": "Le chemin du dossier sur les onglets",
+ "b47392d6": "Les onglets affichent le chemin complet du dossier en plus petit au lieu de son nom ; ce qui ne tient pas est coupé à la fin.",
+ "d9cac923": "Réduire tous les groupes",
+ "c30af95d": "Développer tous les groupes",
+ "5c26267c": "Réduire / développer tous les groupes",
+ "438fff43": "Fenêtres de l'Explorateur ouvertes par d'autres programmes",
+ "109ffa73": "Quand un programme (un gestionnaire de téléchargements, par exemple) lance lui-même l'Explorateur de fichiers, sa fenêtre est fermée et le même emplacement s'ouvre dans rustyfiles. Fonctionne tant que rustyfiles est lancé.",
+ "6fee9305": "Mode performances",
+ "40761adf": "Le Dock se passe de ses mouvements et se dessine sur un fond uni au lieu du verre : moins de travail quand un jeu occupe la carte graphique.",
+ "6d5c4fbb": "Dossier de thème",
+ "4f72cd3e": "Un dossier dans themes, dans le dossier des réglages : son theme.toml change les couleurs, son dossier icons les icônes. Le format est décrit dans docs/themes.md sur GitHub.",
+ "048a70ae": "Ouvrir le dossier des thèmes"
 }

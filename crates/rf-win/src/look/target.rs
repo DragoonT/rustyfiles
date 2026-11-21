@@ -114,6 +114,30 @@ pub fn selected_path(kind: TargetKind, hwnd: isize) -> Option<PathBuf> {
         _ => return None,
     };
     let view = unsafe { browser.QueryActiveShellView() }.ok()?;
+    first_selected(&view)
+}
+
+/// The folder an Explorer window shows (a file-system folder only) and the item selected in it (issue 37). COM must be started
+/// on the calling thread.
+pub fn explorer_place(hwnd: isize) -> Option<crate::explorer_catch::Caught> {
+    use windows::Win32::UI::Shell::{IFolderView, IPersistFolder2, SHGetNameFromIDList};
+    let windows: IShellWindows = unsafe { CoCreateInstance(&ShellWindows, None, CLSCTX_ALL) }.ok()?;
+    let browser = explorer_browser(&windows, HWND(hwnd as *mut _))?;
+    let view = unsafe { browser.QueryActiveShellView() }.ok()?;
+    let fv: IFolderView = view.cast().ok()?;
+    let pf: IPersistFolder2 = unsafe { fv.GetFolder() }.ok()?;
+    let pidl = unsafe { pf.GetCurFolder() }.ok()?;
+    let name = unsafe { SHGetNameFromIDList(pidl, SIGDN_FILESYSPATH) };
+    unsafe { CoTaskMemFree(Some(pidl as *const _)) };
+    let name = name.ok()?;
+    let folder = unsafe { name.to_string() }.ok();
+    unsafe { CoTaskMemFree(Some(name.0 as *const _)) };
+    let folder = PathBuf::from(folder.filter(|s| !s.is_empty())?);
+    Some(crate::explorer_catch::Caught { folder, selected: first_selected(&view) })
+}
+
+/// The first selected item of a shell view, as a path.
+fn first_selected(view: &windows::Win32::UI::Shell::IShellView) -> Option<PathBuf> {
     let data: IDataObject = unsafe { view.GetItemObject(SVGIO_SELECTION) }.ok()?;
     let items: IShellItemArray = unsafe { SHCreateShellItemArrayFromDataObject(&data) }.ok()?;
     if unsafe { items.GetCount() }.ok()? == 0 {

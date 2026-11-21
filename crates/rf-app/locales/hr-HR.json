@@ -2149,5 +2149,21 @@
  "10ef9c03": "U WSL-u Windows uz datoteku preuzetu s interneta zapisuje zasebnu datoteku \"Zone.Identifier\". Kad je uključeno, kopiranje je briše.",
  "31d132e2": "Prikaži prostor pogona brojkama",
  "04339c77": "Iskorišteni i ukupni prostor ispod trake svakog pogona",
- "bd479de9": "Izgled Windows Explorera datoteka"
+ "bd479de9": "Izgled Windows Explorera datoteka",
+ "f6bca4e8": "Prestani uvijek otvarati ovdje za:",
+ "a6a39e94": "Uvijek otvori u ovoj mapi za:",
+ "6ff5ec59": "Njegov prozor Otvori / Spremi uvijek se otvara u:",
+ "b79ebd26": "Popunjavaj popis stupac po stupac",
+ "c9f22cd9": "Putanja mape na karticama",
+ "b47392d6": "Kartice umjesto naziva mape prikazuju njezinu cijelu putanju manjim slovima; ono što ne stane odreže se na kraju.",
+ "d9cac923": "Sažmi sve grupe",
+ "c30af95d": "Proširi sve grupe",
+ "5c26267c": "Sažmi / proširi sve grupe",
+ "438fff43": "Prozori Explorera koje otvaraju drugi programi",
+ "109ffa73": "Kad program (na primjer upravitelj preuzimanja) sam pokrene File Explorer, njegov se prozor zatvara, a isto se mjesto otvara u rustyfilesu. Radi dok je rustyfiles pokrenut.",
+ "6fee9305": "Način performansi",
+ "40761adf": "Dock preskače pokrete i crta se na punoj podlozi umjesto stakla: manje posla dok igra opterećuje grafičku karticu.",
+ "6d5c4fbb": "Mapa teme",
+ "4f72cd3e": "Mapa u themes u mapi postavki: njezin theme.toml mijenja boje, a mapa icons ikone. Format je opisan u docs/themes.md na GitHubu.",
+ "048a70ae": "Otvori mapu tema"
 }

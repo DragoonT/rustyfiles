@@ -2149,5 +2149,21 @@
  "10ef9c03": "Në WSL, Windows shkruan një skedar të veçantë \"Zone.Identifier\" pranë një skedari të shkarkuar nga interneti. Kur është aktive, kopjimi e fshin.",
  "31d132e2": "Shfaq hapësirën e disqeve me numra",
  "04339c77": "Hapësira e përdorur dhe gjithsej nën shiritin e çdo disku",
- "bd479de9": "Pamja e Windows File Explorer"
+ "bd479de9": "Pamja e Windows File Explorer",
+ "f6bca4e8": "Mos e hap më gjithmonë këtu për:",
+ "a6a39e94": "Hape gjithmonë në këtë dosje për:",
+ "6ff5ec59": "Dritarja e tij Hap / Ruaj hapet gjithmonë në:",
+ "b79ebd26": "Mbush listën kolonë pas kolone",
+ "c9f22cd9": "Shtegu i dosjes në skeda",
+ "b47392d6": "Skedat shfaqin shtegun e plotë të dosjes me shkrim më të vogël në vend të emrit; ajo që nuk nxë pritet në fund.",
+ "d9cac923": "Palos të gjitha grupet",
+ "c30af95d": "Zgjero të gjitha grupet",
+ "5c26267c": "Palos / zgjero të gjitha grupet",
+ "438fff43": "Dritaret e Explorer që hapin programe të tjera",
+ "109ffa73": "Kur një program (p.sh. një menaxher shkarkimesh) nis vetë File Explorer, dritarja e tij mbyllet dhe i njëjti vend hapet në rustyfiles. Vepron sa kohë që rustyfiles është në punë.",
+ "6fee9305": "Modaliteti i performancës",
+ "40761adf": "Dock kapërcen lëvizjet dhe vizatohet mbi një sfond të plotë në vend të xhamit: më pak punë ndërsa një lojë mban të zënë kartën grafike.",
+ "6d5c4fbb": "Dosja e temës",
+ "4f72cd3e": "Një dosje te themes, në dosjen e cilësimeve: theme.toml i saj ndryshon ngjyrat, dosja icons ikonat. Formati është te docs/themes.md në GitHub.",
+ "048a70ae": "Hap dosjen e temave"
 }

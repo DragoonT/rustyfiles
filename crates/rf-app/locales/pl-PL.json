@@ -2149,5 +2149,21 @@
  "10ef9c03": "W WSL system Windows zapisuje obok pliku pobranego z internetu osobny plik \"Zone.Identifier\". Gdy włączone, kopiowanie go usuwa.",
  "31d132e2": "Pokazuj miejsce na dyskach w liczbach",
  "04339c77": "Zajęte i całkowite miejsce pod paskiem każdego dysku",
- "bd479de9": "Wygląd Eksploratora plików Windows"
+ "bd479de9": "Wygląd Eksploratora plików Windows",
+ "f6bca4e8": "Przestań zawsze otwierać tutaj dla:",
+ "a6a39e94": "Zawsze otwieraj w tym folderze dla:",
+ "6ff5ec59": "Jego okno Otwórz / Zapisz zawsze otwiera się w:",
+ "b79ebd26": "Wypełniaj listę kolumnami",
+ "c9f22cd9": "Ścieżka folderu na kartach",
+ "b47392d6": "Karty pokazują zamiast nazwy folderu jego pełną ścieżkę mniejszą czcionką; to, co się nie mieści, jest ucinane na końcu.",
+ "d9cac923": "Zwiń wszystkie grupy",
+ "c30af95d": "Rozwiń wszystkie grupy",
+ "5c26267c": "Zwiń / rozwiń wszystkie grupy",
+ "438fff43": "Okna Eksploratora otwierane przez inne programy",
+ "109ffa73": "Gdy program (na przykład menedżer pobierania) sam uruchamia Eksplorator plików, jego okno jest zamykane, a to samo miejsce otwiera się w rustyfiles. Działa, gdy rustyfiles jest uruchomiony.",
+ "6fee9305": "Tryb wydajności",
+ "40761adf": "Dock pomija animacje i jest rysowany na jednolitym tle zamiast szkła: mniej pracy, gdy gra obciąża kartę graficzną.",
+ "6d5c4fbb": "Folder motywu",
+ "4f72cd3e": "Folder w themes w folderze ustawień: jego theme.toml zmienia kolory, a folder icons ikony. Format opisuje docs/themes.md na GitHubie.",
+ "048a70ae": "Otwórz folder motywów"
 }

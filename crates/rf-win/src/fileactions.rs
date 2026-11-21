@@ -15,7 +15,7 @@ use crate::wide::wide;
 
 pub fn is_image(p: &Path) -> bool {
     let e = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    matches!(e.as_str(), "jpg" | "jpeg" | "png" | "bmp" | "gif" | "tif" | "tiff" | "webp" | "jfif" | "heic" | "avif")
+    matches!(e.as_str(), "jpg" | "jpeg" | "png" | "bmp" | "gif" | "tif" | "tiff" | "webp" | "jfif" | "heic" | "avif" | "jxl")
 }
 
 pub fn is_font(p: &Path) -> bool {

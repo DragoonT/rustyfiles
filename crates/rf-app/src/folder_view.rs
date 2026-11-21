@@ -136,6 +136,32 @@ fn calendar_key(g: GroupBy, ms: i64) -> (u32, String) {
     }
 }
 
+/// A name split where an ellipsis may cut it: the part before the extension and the extension (with its dot), which stays whole.
+/// A folder, a name without an extension, a name that is only an extension, a long "extension" (a dot in a sentence) and a
+/// right-to-left name are not split. Pure.
+fn split_for_ellipsis(name: &str, is_dir: bool) -> (&str, &str) {
+    if is_dir || crate::rtl::has_rtl(name) {
+        return (name, "");
+    }
+    match name.rfind('.') {
+        Some(i) if i > 0 && name.len() - i <= 16 && !name[i..].contains(' ') => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    }
+}
+
+/// What every tile of one frame of the grid shares (see `FolderView::grid_cell`).
+struct GridCellCtx {
+    hover_select: bool,
+    p: Palette,
+    tile_w: Pixels,
+    row_h: Pixels,
+    thumb_px: u32,
+    style: GridStyle,
+    visual_px: Pixels,
+    show_ext: bool,
+    renamed: Option<(Arc<str>, Arc<str>)>,
+}
+
 /// One line of the GROUPED Grid (issue 130: "grouping is only drawn in the Details view"). The list draws lines of one height,
 /// so the grouped Grid is made of slices one group header high: a header is one slice, a row of tiles spans `grid_slices().0`
 /// of them, each slice showing its part of the row.
@@ -450,6 +476,15 @@ pub struct FolderView {
     pub(crate) images: Entity<ImageCache>,
     pub view_mode: ViewMode,
     grid_cols: usize,
+    /// Rows per column of the List filled column by column (issue 170), as drawn last; 0 when the folder is not shown so.
+    list_rows: usize,
+    /// The last frame showed an unfinished download's file (`.hdpart`) with its progress: the next one is drawn soon after.
+    parts_shown: std::cell::Cell<bool>,
+    part_tick: bool,
+    /// The List filled column by column: each column's left edge and width as drawn last (content coordinates).
+    list_cols: Vec<(f32, f32)>,
+    /// The column widths measured from the names, and what they were measured for (see `list_column_widths`).
+    list_widths: Option<(u64, Vec<f32>)>,
     /// Index into GRID_SIZES.
     grid_size: u8,
     /// Index into ROW_SIZES (Details row height), the "Size" slider in Details.
@@ -677,6 +712,11 @@ impl FolderView {
                 crate::settings::DefaultView::Columns => ViewMode::Columns,
             },
             grid_cols: 1,
+            list_rows: 0,
+            parts_shown: std::cell::Cell::new(false),
+            part_tick: false,
+            list_cols: Vec::new(),
+            list_widths: None,
             grid_size: DEFAULT_GRID_SIZE,
             row_size: DEFAULT_ROW_SIZE,
             col_drag: None,
@@ -970,7 +1010,7 @@ impl FolderView {
                     .relative()
                     .when(selected, |d| d.bg(p.selection).child(theme::selection_pill(&p)))
                     .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
-                    .child(link_marked(
+                    .child(download_marked(link_marked(
                         match &shell_icon {
                             Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
                             None => Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, p.dark)).into_any_element(),
@@ -978,7 +1018,7 @@ impl FolderView {
                         px(16.),
                         e.link,
                         overlay,
-                    ))
+                    ), self.part_frac(ei)))
                     .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&e.name)))
                     .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(p.text_tertiary)))
                     .on_mouse_down(
@@ -2086,6 +2126,44 @@ impl FolderView {
         self.tag_snap = Arc::new(map);
     }
 
+    /// How far the download behind an unfinished file (`.hdpart`) is, while HyperDownload's card follows it.
+    fn part_frac(&self, ei: u32) -> Option<f32> {
+        let name = &self.entries.get(ei as usize)?.name;
+        if name.len() < 7 || !name[name.len() - 7..].eq_ignore_ascii_case(".hdpart") {
+            return None;
+        }
+        let f = crate::hyperdownload::part_progress(&self.path_of(ei)?)?;
+        self.parts_shown.set(true);
+        Some(f)
+    }
+
+    /// Whether the folder is shown in groups (Details or Grid with a grouping): the "all groups" button and key apply.
+    pub fn has_groups(&self) -> bool {
+        matches!(self.view_mode, ViewMode::Details | ViewMode::Grid) && self.rows.iter().any(|r| matches!(r, Row::Header(..)))
+    }
+
+    /// Whether every group is folded.
+    pub fn all_groups_folded(&self) -> bool {
+        let mut headers = self.rows.iter().filter_map(|r| if let Row::Header(label, _) = r { Some(label) } else { None }).peekable();
+        headers.peek().is_some() && headers.all(|l| self.collapsed.contains(l.as_ref()))
+    }
+
+    /// Folds every group, or opens them all again when all are folded (issue 181: "collapse them all at once and then expand the
+    /// ones you are interested in").
+    pub fn toggle_all_groups(&mut self, cx: &mut Context<Self>) {
+        if !self.has_groups() {
+            return;
+        }
+        if self.all_groups_folded() {
+            self.collapsed.clear();
+        } else {
+            let labels: Vec<String> = self.rows.iter().filter_map(|r| if let Row::Header(label, _) = r { Some(label.to_string()) } else { None }).collect();
+            self.collapsed.extend(labels);
+        }
+        self.rebuild_visible();
+        cx.notify();
+    }
+
     /// A click on a group's header: the group folds away, or comes back.
     fn toggle_group(&mut self, label: &str, cx: &mut Context<Self>) {
         if !self.collapsed.remove(label) {
@@ -2549,8 +2627,12 @@ impl FolderView {
         } else {
             self.select_only(next);
         }
-        let row = if self.view_mode == ViewMode::Grid { self.grid_line_of(next) } else { self.list_row(next) };
-        self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+        if self.list_rows > 0 {
+            self.reveal_list_column(next);
+        } else {
+            let row = if self.view_mode == ViewMode::Grid { self.grid_line_of(next) } else { self.list_row(next) };
+            self.scroll.scroll_to_item(row, ScrollStrategy::Nearest);
+        }
         cx.notify();
     }
 
@@ -2627,7 +2709,163 @@ impl FolderView {
     }
 
     fn row_step(&self) -> isize {
-        if self.view_mode == ViewMode::Grid { self.grid_cols.max(1) as isize } else { 1 }
+        if self.view_mode == ViewMode::Grid && self.list_rows == 0 { self.grid_cols.max(1) as isize } else { 1 }
+    }
+
+    /// A step sideways: an item in the grid, a column of the List filled column by column.
+    fn side_step(&self) -> isize {
+        if self.list_rows > 0 { self.list_rows as isize } else { 1 }
+    }
+
+    /// Whether the folder shows the List layout filled column by column (Settings: `list_columns_first`; issue 170: "an optional
+    /// Explorer-style List view that fills each column from top to bottom before starting the next column to the right").
+    fn column_list(&self, cx: &App) -> bool {
+        self.view_mode == ViewMode::Grid
+            && self.grid_style == GridStyle::List
+            && !self.grid_grouped()
+            && cx.global::<crate::settings::Settings>().list_columns_first
+    }
+
+    /// The List filled column by column, as Explorer's List is: each column as many rows as the view is tall, the columns side by
+    /// side and scrolled sideways (the wheel too). Only the columns in view are built. `before`: the rows per column of the last
+    /// frame (the view's height is known from the frame before: a change draws once more).
+    fn render_column_list(&mut self, before: usize, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let count = self.visible.len();
+        let base = self.scroll.0.borrow().base_handle.clone();
+        let view = base.bounds();
+        let row_h = self.grid_row_h();
+        let view_h = if view.size.height > px(1.) { f32::from(view.size.height) } else { 480. };
+        let rows = (((view_h - LIST_PAD_TOP * 2.) / f32::from(row_h)).floor() as usize).max(1);
+        self.list_rows = rows;
+        self.grid_cols = 1;
+        if rows != before || view.size.height <= px(1.) {
+            window.request_animation_frame();
+        }
+        let show_ext = cx.global::<crate::settings::Settings>().show_extensions;
+        let widths = self.list_column_widths(rows, show_ext, window);
+        let mut x = LIST_PAD_LEFT;
+        self.list_cols = widths
+            .iter()
+            .map(|&w| {
+                let c = (x, w);
+                x += w + f32::from(GRID_GAP);
+                c
+            })
+            .collect();
+        let total = x + LIST_PAD_LEFT;
+        let off = -f32::from(base.offset().x);
+        let width = if view.size.width > px(1.) { f32::from(view.size.width) } else { f32::from(self.content_width) };
+        let first = self.list_cols.partition_point(|&(x, w)| x + w < off);
+        let last = self.list_cols.partition_point(|&(x, _)| x <= off + width);
+        let mut g = GridCellCtx {
+            hover_select: cx.global::<crate::settings::Settings>().select_on_hover,
+            p: Palette::for_window(window),
+            tile_w: px(LIST_COL_MIN),
+            row_h,
+            thumb_px: self.grid_thumb_px(),
+            style: GridStyle::List,
+            visual_px: px(20.),
+            show_ext,
+            renamed: self.renamed.clone(),
+        };
+        let mut columns = Vec::with_capacity(last.saturating_sub(first));
+        for c in first..last {
+            let (cx0, cw) = self.list_cols[c];
+            g.tile_w = px(cw);
+            let mut col = v_flex().absolute().top(px(LIST_PAD_TOP)).left(px(cx0)).w(px(cw));
+            for vi in c * rows..((c + 1) * rows).min(count) {
+                if let Some(cell) = self.grid_cell(vi, None, &g, window, cx) {
+                    col = col.child(div().h(row_h).child(cell));
+                }
+            }
+            columns.push(col);
+        }
+        div()
+            .id("list-columns")
+            .flex_1()
+            .min_h_0()
+            .overflow_x_scroll()
+            .track_scroll(&base)
+            // the wheel's turn up and down moves the columns sideways, as in Explorer's List
+            .on_scroll(cx.listener(|this, ev: &ScrollEvent, window, cx| {
+                let d = ev.delta.pixel_delta(window.line_height());
+                if d.x.abs() > px(0.5) || d.y.abs() < px(0.5) {
+                    return;
+                }
+                let base = this.scroll.0.borrow().base_handle.clone();
+                let most = base.max_offset().x;
+                let mut o = base.offset();
+                o.x = (o.x + d.y).clamp(-most, px(0.));
+                base.set_offset(o);
+                cx.stop_propagation();
+                cx.notify();
+            }))
+            .child(div().relative().h_full().w(px(total)).children(columns))
+            .into_any_element()
+    }
+
+    /// The width of each column of the List filled column by column: as wide as its longest name (with the icon and the padding),
+    /// within limits, as Explorer's List is (issue 170: "each column could size to its contents"). A folder of more than
+    /// `LIST_MEASURE_MOST` items has columns of one width: measuring every name would hold the window up. The widths are kept for
+    /// the same names in the same order, rows per column, extension setting and text size.
+    fn list_column_widths(&mut self, rows: usize, show_ext: bool, window: &mut Window) -> Vec<f32> {
+        let count = self.visible.len();
+        let cols = count.div_ceil(rows.max(1));
+        if count > LIST_MEASURE_MOST {
+            return vec![f32::from(self.grid_tile_w()); cols];
+        }
+        let font_px = rems(0.875).to_pixels(window.rem_size());
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (self.entries_gen, rows, show_ext, f32::from(font_px).to_bits(), &self.visible).hash(&mut h);
+            self.renamed.as_ref().map(|(a, b)| (a.to_string(), b.to_string())).hash(&mut h);
+            h.finish()
+        };
+        if let Some((k, w)) = &self.list_widths
+            && *k == key
+        {
+            return w.clone();
+        }
+        let style = window.text_style();
+        let mut widths = Vec::with_capacity(cols);
+        for c in 0..cols {
+            let mut most = 0f32;
+            for vi in c * rows..((c + 1) * rows).min(count) {
+                let Some(&ei) = self.visible.get(vi) else { break };
+                let name = row_name(&self.entries[ei as usize], show_ext, self.renamed.as_ref());
+                let w = window.text_system().layout_line(&name, font_px, &[style.to_run(name.len())], None).width;
+                most = most.max(f32::from(w));
+            }
+            // icon 20, the gaps and padding around it and the name, and a little air
+            widths.push((most + LIST_CELL_CHROME).clamp(LIST_COL_MIN, LIST_COL_MAX));
+        }
+        self.list_widths = Some((key, widths.clone()));
+        widths
+    }
+
+    /// The column of the List filled column by column under content x `x` (the nearest one).
+    fn list_col_at(&self, x: f32) -> usize {
+        self.list_cols.partition_point(|&(cx0, w)| cx0 + w < x).min(self.list_cols.len().saturating_sub(1))
+    }
+
+    /// Scrolls the List filled column by column so that the column of the visible index `vi` is in view.
+    fn reveal_list_column(&mut self, vi: usize) {
+        let rows = self.list_rows.max(1);
+        let base = self.scroll.0.borrow().base_handle.clone();
+        let width = f32::from(base.bounds().size.width);
+        let Some(&(left, cw)) = self.list_cols.get(vi / rows) else { return };
+        let right = left + cw + f32::from(GRID_GAP) + LIST_PAD_LEFT;
+        let mut o = base.offset();
+        let off = -f32::from(o.x);
+        if left - LIST_PAD_LEFT < off {
+            o.x = px(-(left - LIST_PAD_LEFT).max(0.));
+        } else if width > 1. && right > off + width {
+            o.x = px(-(right - width));
+        } else {
+            return;
+        }
+        base.set_offset(o);
     }
 
     pub fn set_view_mode(&mut self, m: ViewMode, cx: &mut Context<Self>) {
@@ -2667,6 +2905,7 @@ impl FolderView {
         let mut out = Vec::with_capacity(range.len());
         let units = self.grid_grouped().then(|| self.grid_units_now());
         let (_, slice_h) = self.grid_slices();
+        let g = GridCellCtx { hover_select, p, tile_w, row_h, thumb_px, style, visual_px, show_ext, renamed };
         for row in range {
             // (start, how many, the slice of the row) in the grouped Grid; a whole row of `cols` otherwise
             let (start, len, part) = match units.as_ref().map(|u| u.0.get(row).cloned()) {
@@ -2703,153 +2942,7 @@ impl FolderView {
             };
             let mut r = h_flex().w_full().h(self.grid_row_h()).gap(GRID_GAP).items_start();
             for c in 0..len {
-                let vi = start + c;
-                let Some(&ei) = self.visible.get(vi) else { break };
-                let e = &self.entries[ei as usize];
-                let selected = self.selected.contains(&ei);
-                let cat = icons::category(e);
-                let dim = e.is_hidden() || e.is_cloud_placeholder();
-                // Settings → "Show thumbnails" off: the file type's icon instead of a preview
-                let thumbs_on = cx.global::<crate::settings::Settings>().show_thumbnails;
-                let thumb = self.parent_of(ei).map(|d| d.to_path_buf()).and_then(|d| {
-                    self.images.update(cx, |c, cx| if thumbs_on { c.thumbnail(&d, e, thumb_px, cx) } else { c.icon(&d, e, cx) })
-                });
-                let is_thumb = icons::has_thumbnail(e);
-                let visual: AnyElement = match thumb {
-                    Some(im) => img(im)
-                        .size(visual_px)
-                        .object_fit(ObjectFit::Contain)
-                        .when(is_thumb, |i| i.rounded(px(4.)))
-                        .into_any_element(),
-                    None => Icon::new(icons::icon_for(cat))
-                        .size(visual_px * 0.6)
-                        .text_color(theme::kind_color(cat, p.dark))
-                        .into_any_element(),
-                };
-                let overlay = self.overlay_of(ei, visual_px, cx);
-                let e = &self.entries[ei as usize];
-                let visual = link_marked(visual, visual_px, e.link, overlay);
-                let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
-                let label: AnyElement = match rename_input {
-                    // the text stays where the label was: centered, the label's size
-                    Some(inp) => div()
-                        .capture_key_down({
-                            let input = inp.clone();
-                            cx.listener(move |_, ev: &KeyDownEvent, _, cx| crate::rtl::handle_key_down(&input, ev, cx))
-                        })
-                        .w_full()
-                        .h(px(24.))
-                        // the label's line is shorter than the box: center the box on it
-                        .mt(px(-4.))
-                        .rounded(px(4.))
-                        .bg(p.card_bg)
-                        .border_1()
-                        .border_color(p.accent)
-                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_1().text_xs().text_center())
-                        .into_any_element(),
-                    // a right-to-left name is split into its two lines here (issue 115: wrapped by GPUI, a long Persian name came out one
-                    // letter per line)
-                    None if crate::rtl::has_rtl(&e.name) => div()
-                        .w_full()
-                        .text_xs()
-                        .text_center()
-                        .when(dim, |d| d.opacity(0.6))
-                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
-                        .children(rtl_grid_lines(&row_name(e, show_ext, renamed.as_ref()), tile_w - px(12.), window).into_iter().map(|line| {
-                            div().w_full().whitespace_nowrap().overflow_hidden().text_ellipsis().child(crate::rtl::display_text(&line))
-                        }))
-                        .into_any_element(),
-                    None => div()
-                        .w_full()
-                        .text_xs()
-                        .text_center()
-                        .line_clamp(2)
-                        // a name longer than two lines ends in "…": without this the second line holds everything that is left and is
-                        // cut at both ends by the tile ("ding Page HTML Tem"), which reads as a broken name (a user's report)
-                        .text_ellipsis()
-                        .when(dim, |d| d.opacity(0.6))
-                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
-                        .child(crate::rtl::display_text(&row_name(e, show_ext, renamed.as_ref())))
-                        .into_any_element(),
-                };
-                let facts = (style == GridStyle::Cards).then(|| {
-                    let mut f = vec![icons::type_label(e).to_string()];
-                    if !e.is_dir() {
-                        f.push(format::size(e.size));
-                    }
-                    f.push(format::datetime(e.modified_ms));
-                    f
-                });
-                let name_text = crate::rtl::display_text(&row_name(e, show_ext, renamed.as_ref()));
-                let base = match style {
-                    GridStyle::Tiles => v_flex().p_1().gap_1().items_center().child(div().size(visual_px + px(4.)).flex().items_center().justify_center().child(visual)).child(label),
-                    GridStyle::Cards => h_flex()
-                        .px_2()
-                        .gap_3()
-                        .items_center()
-                        .child(div().size(visual_px + px(4.)).flex_shrink_0().flex().items_center().justify_center().child(visual))
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap_0p5()
-                                .child(div().text_sm().font_weight(FontWeight::MEDIUM).whitespace_nowrap().overflow_hidden().text_ellipsis().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(name_text.clone()))
-                                .children(facts.unwrap_or_default().into_iter().map(|t| div().text_xs().text_color(p.text_secondary).whitespace_nowrap().overflow_hidden().text_ellipsis().child(t))),
-                        ),
-                    GridStyle::List => h_flex()
-                        .px_2()
-                        .gap_2()
-                        .items_center()
-                        .child(div().size(visual_px).flex_shrink_0().flex().items_center().justify_center().child(visual))
-                        .child(div().flex_1().min_w_0().text_sm().whitespace_nowrap().overflow_hidden().text_ellipsis().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(name_text.clone())),
-                };
-                let renaming_here = self.renaming.as_ref().is_some_and(|(i, _)| *i == ei);
-                let base = if style != GridStyle::Tiles && renaming_here {
-                    // the rename box replaces the name line
-                    let inp = self.renaming.as_ref().map(|(_, i)| i.clone()).unwrap();
-                    h_flex().px_2().gap_2().items_center().child(div().size(visual_px).flex_shrink_0()).child(
-                        // the box grows to the left (border + padding) so the text keeps its place
-                        div()
-                            .flex_1()
-                            .h(px(24.))
-                            .ml(px(-RENAME_INSET))
-                            .px(px(RENAME_INSET - 1.))
-                            .rounded(px(4.))
-                            .bg(p.card_bg)
-                            .border_1()
-                            .border_color(p.accent)
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_0()),
-                    )
-                } else {
-                    base
-                };
-                let cell = base
-                    .id(("cell", vi))
-                    .w(tile_w)
-                    .h(row_h - px(4.))
-                    .rounded(theme::RADIUS)
-                    // tiles: quiet fill + a thin accent outline (a pill would read as a crop)
-                    .when(selected, |d| d.bg(p.selection).border_1().border_color(p.selection_border))
-                    .when(!selected, |d| d.border_1().border_color(transparent_black()))
-                    .when(!selected && part.is_none(), |d| d.hover(|s| s.bg(p.hover)))
-                    .when(!selected && part.is_some() && self.grid_hover.is_some_and(|(h, _)| h == vi), |d| d.bg(p.hover))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
-                    )
-                    .on_mouse_up(MouseButton::Left, cx.listener(move |this, ev: &MouseUpEvent, _, cx| this.on_row_mouse_up(vi, ev, cx)))
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
-                    )
-                    .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
-                    // Settings → "Select files and folders on hover"; in a sliced row also the tile's fill (`grid_hover`)
-                    .when(hover_select || part.is_some(), |d| {
-                        let sliced = part.is_some();
-                        d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.cell_hover(vi, *on, sliced, hover_select, cx)))
-                    });
+                let Some(cell) = self.grid_cell(start + c, part, &g, window, cx) else { break };
                 r = r.child(cell);
             }
             match part {
@@ -2869,6 +2962,177 @@ impl FolderView {
         out
     }
 
+    /// One tile of the grid, in any of its looks, for the visible index `vi` (`part`: the slice of its row in the grouped Grid).
+    fn grid_cell(&mut self, vi: usize, part: Option<usize>, g: &GridCellCtx, window: &mut Window, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let GridCellCtx { hover_select, p, tile_w, row_h, thumb_px, style, visual_px, show_ext, .. } = *g;
+        let renamed = &g.renamed;
+        let &ei = self.visible.get(vi)?;
+        let e = &self.entries[ei as usize];
+        let selected = self.selected.contains(&ei);
+        let cat = icons::category(e);
+        let dim = e.is_hidden() || e.is_cloud_placeholder();
+        // Settings → "Show thumbnails" off: the file type's icon instead of a preview
+        let thumbs_on = cx.global::<crate::settings::Settings>().show_thumbnails;
+        let thumb = self.parent_of(ei).map(|d| d.to_path_buf()).and_then(|d| {
+            self.images.update(cx, |c, cx| if thumbs_on { c.thumbnail(&d, e, thumb_px, cx) } else { c.icon(&d, e, cx) })
+        });
+        let is_thumb = icons::has_thumbnail(e);
+        let visual: AnyElement = match thumb {
+            Some(im) => img(im)
+                .size(visual_px)
+                .object_fit(ObjectFit::Contain)
+                .when(is_thumb, |i| i.rounded(px(4.)))
+                .into_any_element(),
+            None => Icon::new(icons::icon_for(cat))
+                .size(visual_px * 0.6)
+                .text_color(theme::kind_color(cat, p.dark))
+                .into_any_element(),
+        };
+        let overlay = self.overlay_of(ei, visual_px, cx);
+        let e = &self.entries[ei as usize];
+        let visual = download_marked(link_marked(visual, visual_px, e.link, overlay), self.part_frac(ei));
+        let rename_input = self.renaming.as_ref().filter(|(i, _)| *i == ei).map(|(_, inp)| inp.clone());
+        let label: AnyElement = match rename_input {
+            // the text stays where the label was: centered, the label's size
+            Some(inp) => div()
+                .capture_key_down({
+                    let input = inp.clone();
+                    cx.listener(move |_, ev: &KeyDownEvent, _, cx| crate::rtl::handle_key_down(&input, ev, cx))
+                })
+                .w_full()
+                .h(px(24.))
+                // the label's line is shorter than the box: center the box on it
+                .mt(px(-4.))
+                .rounded(px(4.))
+                .bg(p.card_bg)
+                .border_1()
+                .border_color(p.accent)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                // a press anywhere else applies the new name, as in Explorer (issue 180)
+                .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| this.commit_rename_if_open(window, cx)))
+                .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_1().text_xs().text_center())
+                .into_any_element(),
+            // a right-to-left name is split into its two lines here (issue 115: wrapped by GPUI, a long Persian name came out one
+            // letter per line)
+            None if crate::rtl::has_rtl(&e.name) => div()
+                .w_full()
+                .text_xs()
+                .text_center()
+                .when(dim, |d| d.opacity(0.6))
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
+                .children(rtl_grid_lines(&row_name(e, show_ext, renamed.as_ref()), tile_w - px(12.), window).into_iter().map(|line| {
+                    div().w_full().whitespace_nowrap().overflow_hidden().text_ellipsis().child(crate::rtl::display_text(&line))
+                }))
+                .into_any_element(),
+            None => div()
+                .w_full()
+                .text_xs()
+                .text_center()
+                .line_clamp(2)
+                // a name longer than two lines ends in "…": without this the second line holds everything that is left and is
+                // cut at both ends by the tile ("ding Page HTML Tem"), which reads as a broken name (a user's report)
+                .text_ellipsis()
+                .when(dim, |d| d.opacity(0.6))
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
+                .child(crate::rtl::display_text(&row_name(e, show_ext, renamed.as_ref())))
+                .into_any_element(),
+        };
+        let facts = (style == GridStyle::Cards).then(|| {
+            let mut f = vec![icons::type_label(e).to_string()];
+            if !e.is_dir() {
+                f.push(format::size(e.size));
+            }
+            f.push(format::datetime(e.modified_ms));
+            f
+        });
+        let name_text = crate::rtl::display_text(&row_name(e, show_ext, renamed.as_ref()));
+        let base = match style {
+            GridStyle::Tiles => v_flex().p_1().gap_1().items_center().child(div().size(visual_px + px(4.)).flex().items_center().justify_center().child(visual)).child(label),
+            GridStyle::Cards => h_flex()
+                .px_2()
+                .gap_3()
+                .items_center()
+                .child(div().size(visual_px + px(4.)).flex_shrink_0().flex().items_center().justify_center().child(visual))
+                .child(
+                    v_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .gap_0p5()
+                        .child(div().text_sm().font_weight(FontWeight::MEDIUM).whitespace_nowrap().overflow_hidden().text_ellipsis().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(name_text.clone()))
+                        .children(facts.unwrap_or_default().into_iter().map(|t| div().text_xs().text_color(p.text_secondary).whitespace_nowrap().overflow_hidden().text_ellipsis().child(t))),
+                ),
+            GridStyle::List => h_flex()
+                .px_2()
+                .gap_2()
+                .items_center()
+                .child(div().size(visual_px).flex_shrink_0().flex().items_center().justify_center().child(visual))
+                .child({
+                    // a name too long for the tile is cut before its extension, which stays in view (issue 170: "some names are cut
+                    // off before I can see the .safetensors extension")
+                    let shown = row_name(e, show_ext, renamed.as_ref());
+                    let (stem, ext) = split_for_ellipsis(&shown, e.is_dir());
+                    h_flex()
+                        .flex_1()
+                        .min_w_0()
+                        .text_sm()
+                        .whitespace_nowrap()
+                        .when(dim, |d| d.opacity(0.6))
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true))
+                        .child(div().min_w_0().overflow_hidden().text_ellipsis().child(crate::rtl::display_text(stem)))
+                        .when(!ext.is_empty(), |d| d.child(div().flex_shrink_0().child(ext.to_string())))
+                }),
+        };
+        let renaming_here = self.renaming.as_ref().is_some_and(|(i, _)| *i == ei);
+        let base = if style != GridStyle::Tiles && renaming_here {
+            // the rename box replaces the name line
+            let inp = self.renaming.as_ref().map(|(_, i)| i.clone()).unwrap();
+            h_flex().px_2().gap_2().items_center().child(div().size(visual_px).flex_shrink_0()).child(
+                // the box grows to the left (border + padding) so the text keeps its place
+                div()
+                    .flex_1()
+                    .h(px(24.))
+                    .ml(px(-RENAME_INSET))
+                    .px(px(RENAME_INSET - 1.))
+                    .rounded(px(4.))
+                    .bg(p.card_bg)
+                    .border_1()
+                    .border_color(p.accent)
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    // a press anywhere else applies the new name, as in Explorer (issue 180)
+                    .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| this.commit_rename_if_open(window, cx)))
+                    .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_0()),
+            )
+        } else {
+            base
+        };
+        let cell = base
+            .id(("cell", vi))
+            .w(tile_w)
+            .h(row_h - px(4.))
+            .rounded(theme::RADIUS)
+            // tiles: quiet fill + a thin accent outline (a pill would read as a crop)
+            .when(selected, |d| d.bg(p.selection).border_1().border_color(p.selection_border))
+            .when(!selected, |d| d.border_1().border_color(transparent_black()))
+            .when(!selected && part.is_none(), |d| d.hover(|s| s.bg(p.hover)))
+            .when(!selected && part.is_some() && self.grid_hover.is_some_and(|(h, _)| h == vi), |d| d.bg(p.hover))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, ev: &MouseDownEvent, window, cx| this.on_row_mouse_down(vi, ev, window, cx)),
+            )
+            .on_mouse_up(MouseButton::Left, cx.listener(move |this, ev: &MouseUpEvent, _, cx| this.on_row_mouse_up(vi, ev, cx)))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
+            )
+            .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
+            // Settings → "Select files and folders on hover"; in a sliced row also the tile's fill (`grid_hover`)
+            .when(hover_select || part.is_some(), |d| {
+                let sliced = part.is_some();
+                d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.cell_hover(vi, *on, sliced, hover_select, cx)))
+            });
+        Some(cell)
+    }
+
     fn on_row_mouse_down(&mut self, vi: usize, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
         // (a press on an item of a window that is not in front leaves it there until the press is not a drag: issue 169)
@@ -2879,9 +3143,9 @@ impl FolderView {
         let had_focus = window.is_window_active() && self.focus.is_focused(window);
         let was_only = self.visible.get(vi).is_some_and(|ei| self.selected.len() == 1 && self.selected.contains(ei));
         self.slow_click = None;
-        if self.renaming.is_some() {
-            self.cancel_rename(window, cx);
-        }
+        // a press on another item applies the name being typed, as Explorer does (issue 180: "With Windows Explorer you could just
+        // click anywhere on the window for the changes to be applied"); it was thrown away
+        self.commit_rename_if_open(window, cx);
         window.focus(&self.focus, cx);
         let Some(&ei) = self.visible.get(vi) else { return };
         let plain = !ev.modifiers.control && !ev.modifiers.shift;
@@ -3139,7 +3403,23 @@ impl FolderView {
                     let cw = f32::from(self.grid_tile_w() + GRID_GAP);
                     let rh = f32::from(self.grid_row_h());
                     let cols = self.grid_cols.max(1);
-                    if self.grid_grouped() && y1 >= pt && x1 >= pl {
+                    if self.list_rows > 0 {
+                        // the List filled column by column: the rows and the columns the band touches
+                        let rows = self.list_rows;
+                        let (pt, pl) = (LIST_PAD_TOP, LIST_PAD_LEFT);
+                        if y1 >= pt && x1 >= pl {
+                            let r0 = ((y0 - pt).max(0.0) / rh) as usize;
+                            let r1 = (((y1 - pt) / rh) as usize).min(rows - 1);
+                            let (c0, c1) = (self.list_col_at(x0), self.list_col_at(x1));
+                            for c in c0..=c1 {
+                                for r in r0..=r1.max(r0) {
+                                    if let Some(&ei) = self.visible.get(c * rows + r) {
+                                        sel.insert(ei);
+                                    }
+                                }
+                            }
+                        }
+                    } else if self.grid_grouped() && y1 >= pt && x1 >= pl {
                         // lines one slice high: every row of tiles a slice of the band touches
                         let units = self.grid_units_now();
                         let unit = f32::from(self.grid_slices().1);
@@ -3647,7 +3927,7 @@ impl FolderView {
         } else if is_lnk(&path) {
             self.open_shortcut(path, cx);
         } else {
-            open_in_background(path, cx);
+            open_in_background_sorted(path, self.sort.key, self.sort.dir == SortDir::Asc, cx);
         }
     }
 
@@ -4264,6 +4544,8 @@ impl FolderView {
                     .border_1()
                     .border_color(p.accent)
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    // a press anywhere else applies the new name, as in Explorer (issue 180)
+                    .on_mouse_down_out(cx.listener(|this, _: &MouseDownEvent, window, cx| this.commit_rename_if_open(window, cx)))
                     .child(gpui_kit::component::input::Input::new(&inp).appearance(false).small().px_0())
                     .into_any_element(),
                 None => div()
@@ -4353,7 +4635,7 @@ impl FolderView {
                                     ),
                             )
                         })
-                        .child(link_marked(
+                        .child(download_marked(link_marked(
                             match &shell_icon {
                                 Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
                                 None => Icon::new(icons::icon_for(cat))
@@ -4365,7 +4647,7 @@ impl FolderView {
                             px(16.),
                             e.link,
                             overlay,
-                        ))
+                        ), self.part_frac(ei)))
                         .child(name_el)
                         // encrypted: an archive member that needs a password, or an EFS file
                         .children((e.attrs & rf_core::attrs::ENCRYPTED != 0).then(|| Icon::new(L::Lock).size(px(12.)).flex_shrink_0().text_color(p.text_secondary)))
@@ -4455,21 +4737,28 @@ impl FolderView {
         out
     }
 
-    fn render_details(&mut self, p: &Palette, cx: &mut Context<Self>) -> AnyElement {
+    fn render_details(&mut self, p: &Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let count = self.visible.len();
+        let list_rows_before = std::mem::take(&mut self.list_rows);
+        // (every group folded leaves no item but the groups' headers: that is not an empty folder)
+        let shown = count.max(self.rows.len());
+        let mut side_bar = false;
         // Details and Grid get a scrollbar over the list (Columns has one list per column).
         let mut list_body = false;
         let body: AnyElement = if let Some(err) = &self.error {
             empty_state(p, L::TriangleAlert, crate::i18n::td(err), t!("Klasör açılamadı")).into_any_element()
-        } else if count == 0 && self.loading && self.load_started.elapsed() >= SLOW_LOAD {
+        } else if shown == 0 && self.loading && self.load_started.elapsed() >= SLOW_LOAD {
             let text = self.search_stage.map_or_else(|| t!("Yükleniyor…").to_string(), |s| s.text().to_string());
             empty_state(p, L::LoaderCircle, text, "").into_any_element()
-        } else if count == 0 && !self.loading {
+        } else if shown == 0 && !self.loading {
             // (a search that found nothing is no empty folder)
             let msg = if self.filter.query.is_empty() && !matches!(self.location(), Location::Search { .. }) { t!("Bu klasör boş") } else { t!("Eşleşen öğe yok") };
             empty_state(p, L::FolderOpen, msg.to_string(), "").into_any_element()
         } else if self.view_mode == ViewMode::Columns {
             self.render_columns(p, cx)
+        } else if self.column_list(cx) {
+            side_bar = true;
+            self.render_column_list(list_rows_before, window, cx)
         } else if self.view_mode == ViewMode::Grid {
             let avail = self.content_width - px(12.);
             let cols = ((avail / (self.grid_tile_w() + GRID_GAP)).floor() as usize).max(1);
@@ -4642,6 +4931,10 @@ impl FolderView {
                     // told to keep scrollbars shown (issue 86)
                     .when(list_body && cx.global::<crate::settings::Settings>().show_scrollbar, |d| {
                         d.child(Scrollbar::vertical(&self.scroll).id("list-scrollbar").mode(scrollbar_mode()))
+                    })
+                    .when(side_bar && cx.global::<crate::settings::Settings>().show_scrollbar, |d| {
+                        let base = self.scroll.0.borrow().base_handle.clone();
+                        d.child(Scrollbar::horizontal(&base).id("list-hscrollbar").mode(scrollbar_mode()))
                     }),
             )
             .into_any_element()
@@ -4999,6 +5292,16 @@ fn tile_cols(avail: f32, min: f32, max: f32, gap: f32) -> u16 {
 
 #[cfg(test)]
 mod tile_tests {
+    #[test]
+    fn a_cut_name_keeps_its_extension() {
+        use super::split_for_ellipsis as split;
+        assert_eq!(split("model v1.2 final.safetensors", false), ("model v1.2 final", ".safetensors"));
+        assert_eq!(split("README", false), ("README", ""));
+        assert_eq!(split(".gitignore", false), (".gitignore", ""));
+        assert_eq!(split("backup.2024", true), ("backup.2024", ""), "a folder");
+        assert_eq!(split("Notes. And more words here", false), ("Notes. And more words here", ""), "a dot in a sentence");
+    }
+
     use super::{grid_hover_step, tile_cols};
 
     #[test]
@@ -5244,6 +5547,15 @@ fn static_column(
 }
 
 const GRID_GAP: Pixels = px(4.);
+/// The List filled column by column: room above its rows and left of its first column.
+const LIST_PAD_TOP: f32 = 8.;
+const LIST_PAD_LEFT: f32 = 6.;
+/// The List filled column by column: a column's narrowest and widest, what a cell adds to its name (the icon, the gaps and the
+/// padding), and the most items whose names are measured for the columns' widths.
+const LIST_COL_MIN: f32 = 140.;
+const LIST_COL_MAX: f32 = 460.;
+const LIST_CELL_CHROME: f32 = 8. + 20. + 8. + 8. + 12.;
+const LIST_MEASURE_MOST: usize = 4000;
 /// Grid sizes (Ctrl+= / Ctrl+-): tile width, row height, thumbnail pixels.
 const GRID_SIZES: [(f32, f32, u32); 5] = [(76., 94., 64), (92., 112., 80), (124., 150., 128), (172., 204., 192), (236., 276., 272)];
 const DEFAULT_GRID_SIZE: u8 = 2;
@@ -5318,6 +5630,11 @@ fn is_lnk(path: &std::path::Path) -> bool {
 }
 
 pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
+    open_in_background_sorted(path, SortKey::Name, true, cx)
+}
+
+/// [`open_in_background`] for a file of a list sorted this way: an app that walks the file's folder (Photos) walks it in this order.
+pub(crate) fn open_in_background_sorted(path: PathBuf, key: SortKey, ascending: bool, cx: &mut App) {
     // (the name test first: it costs nothing, and `exists` on a place that has to wake up holds the UI thread)
     if !rf_win::ftp::is_ftp(&path) && crate::nav_touch::may_hold_archive(&path) && !path.exists() && crate::archive_view::split(&path).is_some() {
         // an item inside an archive: extract just it (Status Center), open the real file
@@ -5340,7 +5657,7 @@ pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
             path
         };
         // (with the user's own program for the file's type when there is one: Settings > File types)
-        if let Err(e) = rf_win::openrules::open(&path) {
+        if let Err(e) = rf_win::openrules::open_in_order(&path, key, ascending) {
             log::warn!("open {path:?}: {e}");
         }
     });
@@ -5348,6 +5665,18 @@ pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
 
 impl Render for FolderView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // an unfinished download's progress on its icon moves on: drawn again in a moment while one is shown
+        if self.parts_shown.replace(false) && !self.part_tick {
+            self.part_tick = true;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(700)).await;
+                let _ = this.update(cx, |v, cx| {
+                    v.part_tick = false;
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
         if std::mem::take(&mut self.pending_rename) {
             // Create the editor now, but focus it on the next frame: a focus target that is not
             // part of the frame being drawn gets dropped by GPUI.
@@ -5411,24 +5740,29 @@ impl Render for FolderView {
                 };
                 div().size_full().child(rv).into_any_element()
             }
-            _ => self.render_details(&p, cx),
+            _ => self.render_details(&p, window, cx),
         };
         div()
             .id("folder-view")
             .key_context(FOLDER_CTX)
             .track_focus(&self.focus)
             .size_full()
+            .on_action(cx.listener(|this, _: &BackspaceBack, window, cx| {
+                if this.focus.is_focused(window) {
+                    this.back(cx);
+                }
+            }))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_cursor(this.row_step(), false, cx)))
             .on_action(cx.listener(|this, _: &SelectPrev, _, cx| this.move_cursor(-this.row_step(), false, cx)))
             .on_action(cx.listener(|this, _: &ExtendNext, _, cx| this.move_cursor(this.row_step(), true, cx)))
             .on_action(cx.listener(|this, _: &ExtendPrev, _, cx| this.move_cursor(-this.row_step(), true, cx)))
             .on_action(cx.listener(|this, _: &SelectLeft, _, cx| match this.view_mode {
-                ViewMode::Grid => this.move_cursor(-1, false, cx),
+                ViewMode::Grid => this.move_cursor(-this.side_step(), false, cx),
                 ViewMode::Columns => this.up(cx),
                 ViewMode::Details => {}
             }))
             .on_action(cx.listener(|this, _: &SelectRight, _, cx| match this.view_mode {
-                ViewMode::Grid => this.move_cursor(1, false, cx),
+                ViewMode::Grid => this.move_cursor(this.side_step(), false, cx),
                 ViewMode::Columns => {
                     if let Some(ei) = this.cursor_entry().filter(|&ei| this.entries[ei as usize].is_dir()) {
                         this.open_entry(ei, cx);
@@ -5444,6 +5778,7 @@ impl Render for FolderView {
                 this.selected = this.visible.iter().copied().collect();
                 cx.notify();
             }))
+            .on_action(cx.listener(|this, _: &ToggleAllGroups, _, cx| this.toggle_all_groups(cx)))
             .on_action(cx.listener(|this, _: &InvertSelection, _, cx| {
                 let next: HashSet<u32> = this.visible.iter().copied().filter(|i| !this.selected.contains(i)).collect();
                 this.selected = next;
@@ -5768,6 +6103,27 @@ fn overlay_box(size: Pixels) -> Pixels {
 
 /// `icon` with the marks drawn over it: another program's overlay (`overlay`, icon-sized with its mark in a corner, as Explorer draws
 /// it) and the arrow of a symbolic link or junction (`link`).
+/// An unfinished download's file (`.hdpart`) shows how far it is: a thin molten bar under its icon.
+fn download_marked(icon: AnyElement, frac: Option<f32>) -> AnyElement {
+    let Some(f) = frac else { return icon };
+    div()
+        .relative()
+        .flex_shrink_0()
+        .child(icon)
+        .child(
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .bottom(px(-3.))
+                .h(px(2.))
+                .rounded_full()
+                .bg(gpui::rgba(0x8080_8055))
+                .child(div().h_full().rounded_full().bg(crate::downloads_view::ember()).w(relative(f.clamp(0.02, 1.)))),
+        )
+        .into_any_element()
+}
+
 fn link_marked(icon: AnyElement, size: Pixels, link: bool, overlay: Option<Arc<gpui::RenderImage>>) -> AnyElement {
     if !link && overlay.is_none() {
         return icon;
