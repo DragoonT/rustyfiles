@@ -564,6 +564,9 @@ pub struct FolderView {
     renamed: Option<(Arc<str>, Arc<str>)>,
     /// Start inline rename on `reselect` once it appears (new folder flow).
     rename_after_load: bool,
+    /// Show the item menu on `reselect` once it is selected, in this window (a right-click in another column of the columns
+    /// layout, issue 183).
+    menu_after_load: Option<AnyWindowHandle>,
     /// Items that just arrived (a paste): selected as they show up in the list, until all are
     /// there or the deadline passes (the watcher can lag behind the copy).
     reselect_many: Option<(Vec<String>, Instant)>,
@@ -772,6 +775,7 @@ impl FolderView {
             settings_scroll: ScrollHandle::new(),
             focus: cx.focus_handle(),
             reselect: None,
+            menu_after_load: None,
             renamed: None,
             rename_after_load: false,
             reselect_many: None,
@@ -1912,6 +1916,12 @@ impl FolderView {
                 self.scroll.scroll_to_item(self.list_row(vi), ScrollStrategy::Nearest);
                 if std::mem::take(&mut self.rename_after_load) {
                     self.pending_rename = true;
+                }
+                if let Some(h) = self.menu_after_load.take() {
+                    let me = cx.entity().downgrade();
+                    cx.defer(move |cx| {
+                        let _ = h.update(cx, |_, window, cx| me.update(cx, |v, cx| v.show_context_menu(false, window, cx)));
+                    });
                 }
             } else if self.rename_after_load {
                 // not there yet (watcher lag) — keep waiting for the next refresh
@@ -3800,6 +3810,18 @@ impl FolderView {
     pub(crate) fn clear_reselect(&mut self) {
         self.reselect = None;
         self.rename_after_load = false;
+        self.menu_after_load = None;
+    }
+
+    /// A right-click on an item in another column of the columns layout: that column becomes the list's, the item is selected and
+    /// its menu shows. WHY (issue 183: "When right-clicking on the last column ... it closes and goes back to the previous
+    /// column"): the press went through to the list's background, which took it as a click on nothing and cleared the selection,
+    /// and the column of the selected folder went away.
+    fn menu_in_column(&mut self, dir: PathBuf, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.static_pick += 1; // (a single click's pick still waiting is not wanted any more)
+        self.menu_after_load = Some(window.window_handle());
+        self.set_reselect(name);
+        self.navigate(Location::Path(dir), cx);
     }
 
     /// A rename is being carried out: the row of `old` shows `new` until the listing has the new name (see `renamed`).
@@ -5449,6 +5471,13 @@ fn static_column(
                             // cleared the selection, which took this column away before the button came up, and the click was lost
                             // (issue 57: "If I click on one of the folders in the second column, it disappears")
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_mouse_down(MouseButton::Right, {
+                                let (view, dir, name) = (view.clone(), dir.clone(), e.name.to_string());
+                                move |_, window, cx| {
+                                    cx.stop_propagation();
+                                    view.update(cx, |v, cx| v.menu_in_column(dir.clone(), name.clone(), window, cx));
+                                }
+                            })
                             .on_click({
                                 let (dir, name) = (dir.clone(), e.name.to_string());
                                 move |ev: &ClickEvent, _, cx| {
@@ -5482,6 +5511,7 @@ fn static_column(
         // a press on the column's empty space is not the list's: the list's background took it as a click on nothing, cleared the
         // selection, and the column of the selected folder went away under the pointer (issue 140)
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
         .child(body)
 }
 
