@@ -2381,7 +2381,9 @@ impl Workspace {
                     .id(("tab", i))
                     .group("tab")
                     .flex_shrink_0()
-                    .h(px(32.))
+                    // (the closed shape is 28 px and stands 2 px above the strip's bottom: its icon and title are then level with the
+                    // tab actions button on its left, issue 168: "the tabs should have some more space to the top, so the icons ... align")
+                    .h(px(if self.tab_lens { 32. } else { 28. }))
                     .w(px(tab_w))
                     .pl_3()
                     .pr_1()
@@ -2391,7 +2393,7 @@ impl Workspace {
                     // rest on anything, it looks strange"): nothing under the strip continues the tab, so a tab open at the bottom
                     // looked cut off. Over glass the selected tab is the engine's lens, whose shape is drawn standing on the strip.
                     .when(self.tab_lens, |d| d.rounded_t(theme::RADIUS))
-                    .when(!self.tab_lens, |d| d.rounded(theme::RADIUS).mb_1())
+                    .when(!self.tab_lens, |d| d.rounded(theme::RADIUS).mb(px(2.)))
                     .text_sm()
                     // while the tab moves (tabs open or close beside it, the window is resized) the scene paints the fill itself: the
                     // engine's lens would trail the tab (see glass::LensPhase)
@@ -2555,7 +2557,8 @@ impl Workspace {
             .ml_1()
             .tooltip(|w, cx| gpui_kit::component::tooltip::Tooltip::new(t!("Yeni sekme  (Ctrl+T)")).build(w, cx))
             .size(px(28.))
-            .mb(px(if plus_lens { 2. } else { 6. }))
+            // (level with the tabs and the tab actions button in both looks: issue 168)
+            .mb(px(2.))
             .flex()
             .items_center()
             .justify_center()
