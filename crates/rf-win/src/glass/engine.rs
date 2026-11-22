@@ -51,7 +51,9 @@ use windows::Win32::Graphics::Dxgi::{
 use windows::Win32::Graphics::Gdi::{ClientToScreen, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 use windows::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext};
-use windows::Win32::UI::WindowsAndMessaging::{GA_ROOTOWNER, GetAncestor, GetClientRect, GetCursorPos, IsIconic, IsWindow, IsWindowVisible, IsZoomed, WindowFromPoint};
+use windows::Win32::UI::WindowsAndMessaging::{
+    GA_ROOTOWNER, GetAncestor, GetClientRect, GetCursorPos, GetWindowThreadProcessId, IsIconic, IsWindow, IsWindowVisible, IsZoomed, WindowFromPoint,
+};
 use windows::core::{BOOL, Interface};
 
 use super::capture::{Dirty, MonError, Monitor, Pumped, is_device_lost, locate};
@@ -185,6 +187,27 @@ impl Gfx {
 /// The window that owns `hwnd` all the way up (itself when it is not owned): the window the user would call "the app's window".
 fn root_owner(hwnd: isize) -> isize {
     unsafe { GetAncestor(hwnd_of(hwnd), GA_ROOTOWNER).0 as isize }
+}
+
+/// Whether `hwnd` is a window of this very process.
+fn ours(hwnd: isize) -> bool {
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd_of(hwnd), Some(&mut pid)) };
+    pid != 0 && pid == std::process::id()
+}
+
+/// The root owner that counts as in front, for the glass: the foreground window's root owner, except when the foreground window is one
+/// of this process's own side windows (`side`: a menu, a tooltip, the hidden owner of Windows' classic menu, a dialog: ours and not one
+/// of the glass windows that may freeze). Then the window that was in front (`before`) still is: a right click must not freeze the
+/// glass of the window it was made in (the user, 2026-11-22: the menu took the focus and the window's HyperGlass stopped).
+fn front_root(fg: isize, fg_root: isize, side: bool, before: isize) -> isize {
+    if fg == 0 {
+        0
+    } else if side {
+        before
+    } else {
+        fg_root
+    }
 }
 
 /// The root owner of the window under the pointer, 0 when there is none (or the pointer cannot be read).
@@ -921,6 +944,8 @@ struct Engine {
     parked: Parking,
     /// The foreground window at the last look at the z order, and when that look was made. `cover_due`: look at the next turn.
     last_foreground: isize,
+    /// The root owner that counted as in front at the last look (see `front_root`).
+    front_root: isize,
     last_cover_check: Instant,
     cover_due: bool,
     /// What the window manager last said about each window (`DwmFacts`, asked at most every `DWM_ASK_EVERY`).
@@ -1003,6 +1028,7 @@ impl Engine {
             last_power_check: Instant::now(),
             parked: Parking::default(),
             last_foreground: 0,
+            front_root: 0,
             last_cover_check: Instant::now(),
             cover_due: true,
             dwm: BTreeMap::new(),
@@ -1151,7 +1177,10 @@ impl Engine {
         }
         let now = Instant::now();
         let fg = cover::foreground();
-        let fg_root = if fg == 0 { 0 } else { root_owner(fg) };
+        let root = if fg == 0 { 0 } else { root_owner(fg) };
+        let side = fg != 0 && ours(fg) && !self.wins.get(&root).is_some_and(|w| w.freezable);
+        let fg_root = front_root(fg, root, side, self.front_root);
+        self.front_root = fg_root;
         let under_pointer = root_at_pointer();
         let freeze_all = super::freeze_when_behind();
         let rules = rest::rules_on();
@@ -1929,6 +1958,19 @@ impl Engine {
 mod tests {
     use super::super::LookParams;
     use super::*;
+
+    #[test]
+    fn a_menu_of_ours_in_front_leaves_the_window_it_came_from_in_front() {
+        let (main, other) = (100, 200);
+        // an ordinary window in front: its root owner
+        assert_eq!(front_root(main, main, false, 0), main);
+        // our menu (a side window) takes the focus: the main window is still in front, its glass goes on
+        assert_eq!(front_root(555, 555, true, main), main);
+        // another program comes to the front: the main window is behind
+        assert_eq!(front_root(other, other, false, main), other);
+        // nothing in front
+        assert_eq!(front_root(0, 0, false, main), 0);
+    }
 
     /// A change of the look reaches every window the engine holds, whether or not it was drawn before: each is marked for a new backdrop
     /// and a new draw. (The draw reads the value itself, and the loop guard's `Presented` holds the whole `Look`, so that draw is made.)
