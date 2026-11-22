@@ -722,7 +722,8 @@ impl SidebarTree {
                 _ => None,
             }
         } else if info.own_icon && root.is_none() {
-            self.images.update(cx, |c, cx| c.icon(dir, &e, cx))
+            // (only a folder whose desktop.ini names a picture: issue 225)
+            self.images.update(cx, |c, cx| if c.folder_names_icon(info.path, cx) { c.icon(dir, &e, cx) } else { None })
         } else {
             None
         };

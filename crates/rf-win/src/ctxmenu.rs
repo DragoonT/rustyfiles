@@ -54,8 +54,12 @@ impl Drop for Pidl {
 fn parse(path: &Path) -> anyhow::Result<Pidl> {
     let w = wide(path);
     let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-    unsafe { SHParseDisplayName(PCWSTR(w.as_ptr()), None, &mut pidl, 0, None)? };
-    Ok(Pidl(pidl))
+    match unsafe { SHParseDisplayName(PCWSTR(w.as_ptr()), None, &mut pidl, 0, None) } {
+        Ok(()) => Ok(Pidl(pidl)),
+        // a phone's item the shell does not parse back (issue 221): found by walking down to it
+        Err(_) if crate::shellfolder::is_namespace_name(&path.to_string_lossy()) => Ok(Pidl(crate::shellfolder::id_list(&path.to_string_lossy())?)),
+        Err(e) => Err(e.into()),
+    }
 }
 
 fn folder(path: &Path) -> anyhow::Result<IShellFolder> {

@@ -228,6 +228,8 @@ pub struct CcView {
     drag: Option<usize>,
     /// The volume the slider shows while the user drags it and until Windows has answered (the snapshot may lag a moment).
     vol_drag: Option<f32>,
+    /// What a wheel turned over a slider left over that is less than a notch (a touchpad's small moves add up).
+    wheel_rest: f32,
     /// The same two for the microphone: its level while dragged, and what the last click on it asked for.
     mic_drag: Option<f32>,
     mic_mute_ask: Option<(bool, Instant)>,
@@ -316,6 +318,7 @@ impl CcView {
             bt_busy: None,
             drag: None,
             vol_drag: None,
+            wheel_rest: 0.0,
             mic_drag: None,
             mic_mute_ask: None,
             mixer: Vec::new(),
@@ -1089,6 +1092,25 @@ impl CcView {
         cx.notify();
     }
 
+    /// The wheel turned over a slider: one part of it per notch, up raises (issue 216), as the arrow keys do.
+    fn slider_wheel(&mut self, which: usize, ev: &ScrollEvent, cx: &mut Context<Self>) {
+        let lines = match ev.delta {
+            ScrollDelta::Lines(p) => if p.y != 0.0 { p.y } else { p.x },
+            ScrollDelta::Pixels(p) => f32::from(p.y) / 16.0,
+        };
+        let notches = rf_win::appvolume::take_notches(&mut self.wheel_rest, rf_win::appvolume::notches_of_lines(lines, rf_win::appvolume::wheel_lines()));
+        cx.stop_propagation();
+        if notches == 0 {
+            return;
+        }
+        let Some((mut frac, parts)) = self.slider_state(which, cx) else { return };
+        let key = if notches > 0 { "up" } else { "down" };
+        for _ in 0..notches.unsigned_abs() {
+            frac = cc_model::slider_key(frac, key, false, parts).unwrap_or(frac);
+        }
+        self.drag_to(which, frac, cx);
+    }
+
     /// A slider's share now and how many parts it has, for the keyboard.
     fn slider_state(&self, which: usize, cx: &App) -> Option<(f32, u32)> {
         match which {
@@ -1365,6 +1387,20 @@ impl CcView {
             .border_color(transparent_black())
             .track_focus(&focus)
             .focus_visible(move |s| s.border_color(ring))
+            .on_scroll(cx.listener(move |this, ev: &ScrollEvent, _, cx| this.slider_wheel(which, ev, cx)))
+            // its level in per cent (issue 216)
+            .tooltip({
+                // (read as it is drawn: it follows the wheel and a drag while it is up)
+                let me = cx.entity().downgrade();
+                move |w, cx| {
+                    let me = me.clone();
+                    gpui_kit::component::tooltip::Tooltip::element(move |_, cx| {
+                        let now = me.upgrade().and_then(|e| e.read(cx).slider_state(which, cx)).map_or(frac, |(f, _)| f);
+                        format!("{} %", (now * 100.0).round() as i32)
+                    })
+                    .build(w, cx)
+                }
+            })
             .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
                 let Some((frac, parts)) = this.slider_state(which, cx) else { return };
                 if let Some(f) = cc_model::slider_key(frac, ev.keystroke.key.as_str(), ev.keystroke.modifiers.shift, parts) {

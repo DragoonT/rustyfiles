@@ -182,9 +182,16 @@ pub fn default_transfer(sources: &[PathBuf], dest_dir: &Path, ctrl: bool, shift:
     }
 }
 
-/// True when dropping `sources` into `dest_dir` makes no sense (onto itself or its own child).
+/// True when dropping `sources` into `dest_dir` makes no sense (onto itself or its own child, or a move into the folder they are in).
 pub fn is_invalid_drop(sources: &[PathBuf], dest_dir: &Path) -> bool {
-    sources.iter().any(|s| dest_dir == s || dest_dir.starts_with(s)) || sources.iter().all(|s| s.parent() == Some(dest_dir))
+    is_invalid_drop_as(sources, dest_dir, Transfer::Move)
+}
+
+/// [`is_invalid_drop`] for a drop that is known to be a `kind`: a COPY into the folder the items are in makes "x - Copy" beside them,
+/// as in Explorer (issue 219: Ctrl and a drop in the same folder did nothing).
+pub fn is_invalid_drop_as(sources: &[PathBuf], dest_dir: &Path, kind: Transfer) -> bool {
+    sources.iter().any(|s| dest_dir == s || dest_dir.starts_with(s))
+        || (kind == Transfer::Move && sources.iter().all(|s| s.parent() == Some(dest_dir)))
 }
 
 #[cfg(test)]
@@ -201,6 +208,10 @@ mod tests {
         assert!(is_invalid_drop(&src, Path::new(r"C:\a")));
         assert!(is_invalid_drop(&[PathBuf::from(r"C:\a")], Path::new(r"C:\a\sub")));
         assert!(!is_invalid_drop(&src, Path::new(r"C:\b")));
+        // a copy into the items' own folder is a duplicate; a folder still cannot go into itself or its own child
+        assert!(!is_invalid_drop_as(&src, Path::new(r"C:\a"), Transfer::Copy));
+        assert!(is_invalid_drop_as(&[PathBuf::from(r"C:\a")], Path::new(r"C:\a"), Transfer::Copy));
+        assert!(is_invalid_drop_as(&[PathBuf::from(r"C:\a")], Path::new(r"C:\a\sub"), Transfer::Copy));
     }
 
 

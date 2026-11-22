@@ -401,6 +401,35 @@ pub fn main_windows(cx: &App) -> Vec<AnyWindowHandle> {
         .unwrap_or_default()
 }
 
+/// The folders open in the tabs of rustyfiles' windows (not an Open / Save dialog's), each once, in the order of the windows and their
+/// tabs. Issue 226: the dialog offers them as tabs of its own, one click away.
+pub(crate) fn open_folders(cx: &App) -> Vec<PathBuf> {
+    let open = cx.windows();
+    let mut out: Vec<PathBuf> = Vec::new();
+    let Some(all) = cx.try_global::<OpenWorkspaces>() else { return out };
+    for (h, ws) in &all.0 {
+        let Some(ws) = ws.upgrade() else { continue };
+        if !open.iter().any(|w| w.window_id() == h.window_id()) {
+            continue;
+        }
+        let ws = ws.read(cx);
+        if ws.picker.is_some() {
+            continue;
+        }
+        for t in &ws.tabs {
+            for v in std::iter::once(&t.left).chain(t.right.as_ref()) {
+                if let Some(p) = v.read(cx).location().path() {
+                    let p = p.to_path_buf();
+                    if !out.iter().any(|o| o.as_os_str().eq_ignore_ascii_case(p.as_os_str())) {
+                        out.push(p);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
 pub fn any_main_window(cx: &App) -> bool {
     let open = cx.windows();
     cx.try_global::<OpenWorkspaces>()
@@ -1275,6 +1304,12 @@ impl Workspace {
         if let Some(name) = select {
             self.active_tab().update(cx, |v, _| v.set_reselect(name));
         }
+    }
+
+    /// A tab for `loc` at the end of the strip, left in the background (no animation, the active tab stays).
+    pub(crate) fn add_quiet_tab(&mut self, loc: Location, window: &mut Window, cx: &mut Context<Self>) {
+        let view = self.new_view(loc, window, cx);
+        self.tabs.push(Tab { left: view, right: None, right_active: false });
     }
 
     pub fn open_tab(&mut self, loc: Location, window: &mut Window, cx: &mut Context<Self>) {
@@ -3580,7 +3615,16 @@ impl Workspace {
         let crumbs: Vec<(String, Location)> = match loc {
             Location::Path(path) | Location::Search { root: path, .. } => breadcrumbs(path),
             // the shell's own name for the folder (the location may carry none)
-            Location::Shell { .. } => vec![(self.active_tab().read(cx).title(cx), loc.clone())],
+            Location::Shell { .. } => {
+                let tab = self.active_tab().read(cx);
+                let mut crumbs: Vec<(String, Location)> = tab
+                    .shell_trail
+                    .iter()
+                    .map(|(name, parsing)| (name.clone(), Location::Shell { parsing: parsing.clone(), name: name.clone() }))
+                    .collect();
+                crumbs.push((tab.title(cx), loc.clone()));
+                crumbs
+            }
             Location::DiskUsage(path) => vec![(crate::disk_usage::title(path), loc.clone())],
             other => vec![(crate::i18n::td(&other.title()), other.clone())],
         };
@@ -4596,13 +4640,17 @@ pub fn open_in_ide(dir: PathBuf, ide: String) {
 
 pub(crate) fn drop_files(paths: &ExternalPaths, dest: PathBuf, cx: &mut App) {
     let sources: Vec<PathBuf> = paths.paths().to_vec();
-    if sources.is_empty() || rf_win::dnd::is_invalid_drop(&sources, &dest) {
+    if sources.is_empty() {
         return;
     }
     let (ctrl, shift) = unsafe {
         use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CONTROL, VK_SHIFT};
         (GetAsyncKeyState(VK_CONTROL.0 as i32) < 0, GetAsyncKeyState(VK_SHIFT.0 as i32) < 0)
     };
+    // (a copy into the items' own folder is a duplicate of them, issue 219; a move there is nothing)
+    if rf_win::dnd::is_invalid_drop_as(&sources, &dest, crate::ops::drop_transfer(&sources, &dest, ctrl, shift)) {
+        return;
+    }
     let sources = hold_archiver_drop(sources, &std::env::temp_dir());
     let kind = crate::ops::drop_transfer(&sources, &dest, ctrl, shift);
     crate::status_center::transfer(cx, kind, sources, dest);

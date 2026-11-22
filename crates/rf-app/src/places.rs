@@ -211,6 +211,7 @@ impl Places {
         // thread, and the list is only replaced when it changed. Not while no window is in front
         // of the user (minimised, or another app active): enumerating This PC loads shell
         // extensions and can touch the drives; the look happens again when one comes back.
+        let mut misses: std::collections::HashMap<String, u8> = std::collections::HashMap::new();
         cx.spawn(async move |this, cx| loop {
             if !rf_win::window::app_in_front() {
                 cx.background_executor().timer(std::time::Duration::from_secs(5)).await;
@@ -222,6 +223,7 @@ impl Places {
             let found = cx.background_spawn(async move { rf_win::shellfolder::devices() }).await;
             let alive = this
                 .update(cx, |p, cx| {
+                    let found = steady_devices(&p.devices, found, &mut misses, DEVICE_MISSES);
                     if p.devices != found {
                         p.devices = found;
                         cx.notify();
@@ -412,5 +414,68 @@ mod pins_follow_tests {
         );
         assert_eq!(pins_after(&pins, Path::new(r"C:\a\Wor"), None), None, "a name that only starts the same is another folder");
         assert_eq!(pins_after(&pins, Path::new(r"E:\x"), None), None);
+    }
+}
+
+/// How many looks in a row (5 s apart) a device may be missing from This PC before it leaves the sidebar.
+const DEVICE_MISSES: u8 = 4;
+
+/// The devices to show after a look at This PC that found `found`: a device that is missing keeps its place until it has been missing
+/// `limit` looks in a row (`misses` counts them). Issue 217: a receiver on the Wi-Fi (Denon AVR-X1800H), a DSL box, are media devices
+/// the shell finds on the network on one look and not on the next, and they came and went in the sidebar every few seconds; Explorer
+/// keeps them. A new device is shown at once.
+fn steady_devices(
+    shown: &[rf_win::shellfolder::ShellChild],
+    found: Vec<rf_win::shellfolder::ShellChild>,
+    misses: &mut std::collections::HashMap<String, u8>,
+    limit: u8,
+) -> Vec<rf_win::shellfolder::ShellChild> {
+    let mut out = found;
+    for d in &out {
+        misses.remove(&d.parsing);
+    }
+    for d in shown {
+        if out.iter().any(|f| f.parsing == d.parsing) {
+            continue;
+        }
+        let n = misses.entry(d.parsing.clone()).or_insert(0);
+        *n += 1;
+        if *n < limit {
+            out.push(d.clone());
+        } else {
+            misses.remove(&d.parsing);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod steady_device_tests {
+    use super::steady_devices;
+    use rf_win::shellfolder::ShellChild;
+
+    fn dev(name: &str) -> ShellChild {
+        ShellChild { name: name.into(), parsing: format!("::{{x}}\\{name}"), is_folder: true, fs_path: None, size: None, modified_ms: None }
+    }
+
+    #[test]
+    fn a_device_missing_from_a_look_or_two_stays_and_one_gone_for_good_leaves() {
+        let mut misses = Default::default();
+        let mut shown = steady_devices(&[], vec![dev("phone"), dev("receiver")], &mut misses, 3);
+        assert_eq!(shown.len(), 2);
+        // the receiver is not found twice: still shown
+        for _ in 0..2 {
+            shown = steady_devices(&shown, vec![dev("phone")], &mut misses, 3);
+            assert_eq!(shown.len(), 2);
+        }
+        // found again: its count starts over
+        shown = steady_devices(&shown, vec![dev("phone"), dev("receiver")], &mut misses, 3);
+        for _ in 0..2 {
+            shown = steady_devices(&shown, vec![dev("phone")], &mut misses, 3);
+        }
+        assert_eq!(shown.len(), 2);
+        // the third look in a row without it: gone
+        shown = steady_devices(&shown, vec![dev("phone")], &mut misses, 3);
+        assert_eq!(shown.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["phone"]);
     }
 }

@@ -713,6 +713,8 @@ pub struct Settings {
     pub ide_button: IdePref,
     /// Editor to open folders with ("code" when empty and VS Code is installed).
     pub ide_path: String,
+    /// "Open in Terminal" starts this program (a path or a name such as `cmd.exe`); empty: Windows Terminal, else PowerShell (issue 224).
+    pub terminal_path: String,
 
     // ---- Advanced
     pub show_flatten: bool,
@@ -1037,6 +1039,7 @@ impl Default for Settings {
             index_excluded: Vec::new(),
             ide_button: IdePref::GitRepos,
             ide_path: String::new(),
+            terminal_path: String::new(),
             show_flatten: false,
             space_quicklook: false,
             directlook_enabled: true,
@@ -1422,6 +1425,7 @@ impl Settings {
         crate::i18n::set(self.language);
         crate::aliases::set(self.folder_aliases.clone());
         rf_win::openrules::set(self.open_rules.clone());
+        rf_win::shell::set_terminal(&self.terminal_path);
         rf_win::drives::set_hidden(rf_win::drives::mask_of_letters(&self.hidden_drives));
         // (a text that is no colour is no colour: Windows' accent)
         rf_win::accent::set_override(rf_win::accent::parse_hex(&self.accent_color));

@@ -22,6 +22,9 @@ use crate::workspace::Workspace;
 /// Single-instance message: "pick this pipe's request".
 pub const PICK_PREFIX: &str = "\u{1}pick:";
 
+/// At most this many folders of rustyfiles' windows come into the dialog as tabs.
+const MORE_TABS: usize = 12;
+
 pub struct PickSession {
     pub req: Request,
     /// Taken by the answer: each request is answered exactly once.
@@ -237,6 +240,13 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
         window_background: crate::theme::window_material(WindowBackgroundAppearance::MicaBackdrop),
         ..gpui_kit::component::TitleBar::window_options()
     };
+    // the folders open in rustyfiles' own windows come along as tabs (issue 226), after the one the dialog starts in
+    let start_path = start.path().map(Path::to_path_buf);
+    let others: Vec<PathBuf> = crate::workspace::open_folders(cx)
+        .into_iter()
+        .filter(|p| start_path.as_ref().is_none_or(|s| !s.as_os_str().eq_ignore_ascii_case(p.as_os_str())))
+        .take(MORE_TABS)
+        .collect();
     let pipe = RefCell::new(Some(pipe));
     let shown_hwnd = Rc::new(Cell::new(0isize));
     let sh = shown_hwnd.clone();
@@ -257,6 +267,9 @@ fn open_window(pipe: File, req: Request, cx: &mut App) {
         let pipe = pipe.borrow_mut().take();
         cx.new(|cx| {
             let mut ws = Workspace::new(Some(start), None, window, cx);
+            for p in others {
+                ws.add_quiet_tab(Location::Path(p), window, cx);
+            }
             let name = cx.new(|cx| InputState::new(window, cx).default_value(req.file_name.clone()));
             let session = Rc::new(PickSession {
                 filter_ix: Cell::new(req.filter_index.max(1)),

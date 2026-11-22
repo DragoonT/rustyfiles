@@ -76,7 +76,7 @@ fn filetime_ms(ft: FILETIME) -> i64 {
 /// is incorrect (0x80070057)". The storage's name is the one the shell handed out for it (`SIGDN_DESKTOPABSOLUTEPARSING`), but the
 /// portable-device folder does not parse it back. Its parent (the phone) parses, and the storage is among the parent's children
 /// under that very name, so it is found there. (Not seen here: no phone on this PC. The walk is the reading of the report.)
-fn bind(parsing: &str) -> anyhow::Result<IShellItem> {
+pub(crate) fn bind(parsing: &str) -> anyhow::Result<IShellItem> {
     ensure_com();
     let target = parsing.trim();
     match by_name(target) {
@@ -276,13 +276,33 @@ pub fn copy_out(sources: &[String], dest: &Path) -> anyhow::Result<bool> {
     }
 }
 
-/// Opens an item with the shell's default verb (what a double-click in Explorer does).
-pub fn open(parsing: &str) -> anyhow::Result<()> {
+/// Whether `s` is a name in the shell's namespace (`::{CLSID}\...`: a phone, This PC's devices) rather than a path on a disk.
+pub(crate) fn is_namespace_name(s: &str) -> bool {
+    s.trim_start().starts_with("::")
+}
+
+/// The absolute id list of the shell item `parsing` names: by the name, and for a name in the shell's namespace that the shell does
+/// not take back, through [`bind`]'s walk (issue 221: a phone's photos could not be copied or given their menu, "The parameter is
+/// incorrect (0x80070057)": the copy and the menu asked the shell by the name only, which issue 49 found the portable-device folder
+/// refuses). The caller frees it with `CoTaskMemFree`.
+pub(crate) fn id_list(parsing: &str) -> anyhow::Result<*mut ITEMIDLIST> {
     ensure_com();
     let w = wide(parsing.trim());
     let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
+    match unsafe { SHParseDisplayName(PCWSTR(w.as_ptr()), None, &mut pidl, 0, None) } {
+        Ok(()) => Ok(pidl),
+        Err(e) if is_namespace_name(parsing) => {
+            let item = bind(parsing).map_err(|_| anyhow::Error::from(e))?;
+            Ok(unsafe { windows::Win32::UI::Shell::SHGetIDListFromObject(&item)? })
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Opens an item with the shell's default verb (what a double-click in Explorer does).
+pub fn open(parsing: &str) -> anyhow::Result<()> {
+    let pidl = id_list(parsing)?;
     unsafe {
-        SHParseDisplayName(PCWSTR(w.as_ptr()), None, &mut pidl, 0, None)?;
         let mut info = SHELLEXECUTEINFOW {
             cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
             fMask: SEE_MASK_IDLIST | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI,

@@ -424,6 +424,8 @@ enum Msg {
     Shell(Vec<Entry>, Vec<rf_win::shellfolder::ShellChild>),
     /// The shell's own name for the folder being listed.
     ShellName(String),
+    /// The shell folders above the open one, outermost first (name, parsing name), for the address bar.
+    ShellTrail(Vec<(String, String)>),
     /// What a search is doing now, shown while it runs (the owner, issue 67: "bu adımları ui'da gösterelim de kullanıcıya. sonra
     /// yavaş demesinler").
     Stage(SearchStage),
@@ -562,6 +564,8 @@ pub struct FolderView {
     pub(crate) shell_items: Vec<rf_win::shellfolder::ShellChild>,
     /// Shell folders only: the shell's name for the folder (when the location carries none).
     shell_title: Option<String>,
+    /// [`Msg::ShellTrail`]: the folders above a shell folder (a phone's storage, DCIM...) for the address bar's segments.
+    pub(crate) shell_trail: Vec<(String, String)>,
     /// The step of the search under way (`Msg::Stage`), cleared when it is done.
     pub(crate) search_stage: Option<SearchStage>,
     visible: Vec<u32>,
@@ -791,6 +795,7 @@ impl FolderView {
             parents: Vec::new(),
             shell_items: Vec::new(),
             shell_title: None,
+            shell_trail: Vec::new(),
             search_stage: None,
             visible: Vec::new(),
             sort: SortSpec {
@@ -1492,6 +1497,7 @@ impl FolderView {
             self.parents.clear();
             self.shell_items.clear();
             self.shell_title = None;
+            self.shell_trail.clear();
             self.search_stage = None;
             self.visible.clear();
             self.selected.clear();
@@ -1572,6 +1578,20 @@ impl FolderView {
                     use rf_win::shellfolder as sf;
                     if let Some(n) = sf::display_name(&parsing) {
                         let _ = tx.unbounded_send(Msg::ShellName(n));
+                    }
+                    // the folders above it up to This PC (issue 221: in a phone's Camera folder the address bar said only "Camera")
+                    let mut trail = Vec::new();
+                    let mut at = parsing.clone();
+                    while trail.len() < 12 && let Some(up) = sf::parent(&at) {
+                        if up.parsing.eq_ignore_ascii_case(sf::THIS_PC) || up.fs_path.is_some() || !up.parsing.starts_with("::") {
+                            break;
+                        }
+                        at = up.parsing.clone();
+                        trail.push((up.name, up.parsing));
+                    }
+                    trail.reverse();
+                    if !trail.is_empty() {
+                        let _ = tx.unbounded_send(Msg::ShellTrail(trail));
                     }
                     let r = sf::list(&parsing, &|| cancel.load(Ordering::Relaxed), &mut |batch| {
                         let es = batch
@@ -1915,6 +1935,7 @@ impl FolderView {
                     self.shell_items.extend(items);
                 }
                 Msg::ShellName(n) => self.shell_title = Some(n),
+                Msg::ShellTrail(t) => self.shell_trail = t,
                 Msg::Stage(s) => self.search_stage = Some(s),
                 Msg::Done(r) => {
                     done = true;
@@ -2020,7 +2041,7 @@ impl FolderView {
                         p.extend(b)
                     }
                 }
-                Msg::Hits(..) | Msg::Shell(..) | Msg::ShellName(_) | Msg::Stage(_) => {}
+                Msg::Hits(..) | Msg::Shell(..) | Msg::ShellName(_) | Msg::ShellTrail(_) | Msg::Stage(_) => {}
                 Msg::Done(Err(e)) if e.contains("bulunamadı") => {
                     // The folder we are showing was deleted/renamed away: step up.
                     self.soft_pending = None;
@@ -3280,8 +3301,17 @@ impl FolderView {
             let anchor = self.anchor.unwrap_or(vi);
             self.select_range(anchor, vi);
             self.anchor = Some(anchor);
+        }
+        // What the release does when the press did not become a drag (Explorer): a Ctrl press on a selected item and a plain press
+        // inside a selection of several keep the selection while the press may still become a drag of it (issue 220: Ctrl and a drag
+        // of a selected file let go of the file before the drag began); the release then takes the one item out, or leaves it alone.
+        let mut on_release = Release::Nothing;
+        if ev.modifiers.shift {
+            // (done above)
         } else if ev.modifiers.control {
-            if !self.selected.remove(&ei) {
+            if self.selected.contains(&ei) {
+                on_release = Release::Deselect(ei);
+            } else {
                 self.selected.insert(ei);
             }
             self.cursor = Some(vi);
@@ -3291,8 +3321,11 @@ impl FolderView {
         } else {
             // Clicking inside an existing multi-selection keeps it (so it can be dragged).
             self.cursor = Some(vi);
+            if self.selected.len() > 1 {
+                on_release = Release::SelectOnly;
+            }
         }
-        self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && !second });
+        self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && !second, on_release });
         // Explorer: a click on the name of the item that was already the only one selected
         // renames it, once the double-click time passes without a second click or a drag
         if plain && !single && ev.click_count == 1 && on_name && was_only && had_focus && !was_renaming {
@@ -3311,6 +3344,20 @@ impl FolderView {
 
     fn on_row_mouse_up(&mut self, vi: usize, ev: &MouseUpEvent, cx: &mut Context<Self>) {
         let Some(&ei) = self.visible.get(vi) else { return };
+        // a press that did not become a drag: what it left for the release (`Release`)
+        if let Some(release) = self.drag_origin.as_ref().map(|press| press.on_release) {
+            match release {
+                Release::Deselect(e) if e == ei => {
+                    self.selected.remove(&ei);
+                    cx.notify();
+                }
+                Release::SelectOnly if self.cursor == Some(vi) => {
+                    self.select_only(vi);
+                    cx.notify();
+                }
+                _ => {}
+            }
+        }
         // Open on release so a single-click setting still allows the item to start a drag.
         if self.drag_origin.as_ref().is_some_and(|press| press.open_on_release)
             && !ev.modifiers.control && !ev.modifiers.shift
@@ -6214,6 +6261,17 @@ struct FirstClick {
 struct RowPress {
     origin: Point<Pixels>,
     open_on_release: bool,
+    on_release: Release,
+}
+
+/// What the release of a press on an item does when the press did not become a drag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Release {
+    Nothing,
+    /// Ctrl and a press on a selected item: it leaves the selection.
+    Deselect(u32),
+    /// A plain press inside a selection of several: only the pressed item stays selected.
+    SelectOnly,
 }
 
 /// Whether a click that Windows counts as the second of a double click is one HERE: its first click was made in this same listing

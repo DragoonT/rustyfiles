@@ -890,6 +890,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Gösterme", "Don't show"),
     ("Düzenleyici", "Editor"),
     ("Düzenleyici seç", "Choose editor"),
+    ("Terminal seç", "Choose terminal"),
+    ("Otomatik: Windows Terminal, yoksa PowerShell", "Automatic: Windows Terminal, else PowerShell"),
     ("Ayarları dışa aktar", "Export settings"),
     ("Ayarları içe aktar", "Import settings"),
     ("Ayar dosyasını düzenle", "Edit settings file"),

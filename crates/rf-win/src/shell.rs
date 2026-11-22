@@ -90,8 +90,42 @@ pub fn properties(path: &Path) -> anyhow::Result<()> {
     exec(path, Some("properties"), None)
 }
 
-/// Opens a terminal (Windows Terminal if present, else PowerShell) in `dir`.
+/// Settings > Developer tools > "Terminal": the program "Open in Terminal" starts (issue 224). Empty: Windows Terminal, else PowerShell.
+static TERMINAL: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Sets the terminal [`open_terminal`] starts: a program's path or name (`cmd.exe`, `pwsh.exe`, `C:\Tools\Cmder\Cmder.exe`), or empty
+/// for the automatic one.
+pub fn set_terminal(program: &str) {
+    *TERMINAL.lock().unwrap_or_else(|e| e.into_inner()) = program.trim().trim_matches('"').to_string();
+}
+
+/// The arguments that make a terminal `program` (its file name, lower case) start in `dir`, for the ones that do not take the folder
+/// they are started in (Cmder and ConEmu keep their own start folder). Others are only started in `dir`.
+fn terminal_dir_args(program: &str, dir: &str) -> Vec<String> {
+    match program {
+        "cmder.exe" => vec!["/START".into(), dir.into()],
+        "conemu.exe" | "conemu64.exe" => vec!["-Dir".into(), dir.into()],
+        "wt.exe" | "windowsterminal.exe" => vec!["-d".into(), dir.into()],
+        "wezterm.exe" | "wezterm-gui.exe" => vec!["start".into(), "--cwd".into(), dir.into()],
+        "alacritty.exe" => vec!["--working-directory".into(), dir.into()],
+        "pwsh.exe" | "powershell.exe" => vec!["-NoExit".into()],
+        _ => Vec::new(),
+    }
+}
+
+/// Opens a terminal in `dir`: the one chosen in Settings, else Windows Terminal if present, else PowerShell.
 pub fn open_terminal(dir: &Path) -> anyhow::Result<()> {
+    let chosen = TERMINAL.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if !chosen.is_empty() {
+        let name = Path::new(&chosen).file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let name = if name.ends_with(".exe") || name.contains('.') { name } else { format!("{name}.exe") };
+        let args = terminal_dir_args(&name, &dir.to_string_lossy());
+        match std::process::Command::new(&chosen).args(&args).current_dir(dir).spawn() {
+            Ok(_) => return Ok(()),
+            // (a terminal that is gone: the automatic one rather than nothing)
+            Err(e) => log::warn!("terminal {chosen}: {e}"),
+        }
+    }
     let d = dir.to_string_lossy().to_string();
     let wt = std::process::Command::new("wt.exe").args(["-d", &d]).spawn();
     if wt.is_err() {
@@ -212,5 +246,18 @@ mod tests {
         // a drive root: the backslash must not escape the closing quote
         assert_eq!(super::terminal_args(Path::new(r"D:\")), r#"-d "D:\\""#);
         assert_eq!(super::powershell_args(Path::new(r"C:\it's")), r#"-NoExit -Command "Set-Location -LiteralPath 'C:\it''s'""#);
+    }
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::terminal_dir_args;
+
+    #[test]
+    fn terminals_that_keep_their_own_start_folder_are_told_the_folder() {
+        assert_eq!(terminal_dir_args("cmder.exe", r"C:\work"), ["/START", r"C:\work"]);
+        assert_eq!(terminal_dir_args("conemu64.exe", r"C:\work"), ["-Dir", r"C:\work"]);
+        assert_eq!(terminal_dir_args("wt.exe", r"C:\work"), ["-d", r"C:\work"]);
+        assert!(terminal_dir_args("cmd.exe", r"C:\work").is_empty());
     }
 }

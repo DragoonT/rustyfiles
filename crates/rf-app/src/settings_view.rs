@@ -2689,7 +2689,39 @@ fn dev(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
                 .child(button("ide-reset", p, t!("Otomatik"), |_, cx| settings::update(cx, |s| s.ide_path.clear())))
                 .into_any_element(),
         ),
+        terminal_card(p, s),
     ]
+}
+
+/// "Open in Terminal" starts this program (issue 224): the usual ones as buttons, any other one through "Browse".
+fn terminal_card(p: &Palette, s: &Settings) -> AnyElement {
+    const KNOWN: &[(&str, &str)] = &[("wt.exe", "Windows Terminal"), ("pwsh.exe", "PowerShell 7"), ("powershell.exe", "Windows PowerShell"), ("cmd.exe", "cmd")];
+    let label = if s.terminal_path.is_empty() {
+        t!("Otomatik: Windows Terminal, yoksa PowerShell").to_string()
+    } else {
+        KNOWN.iter().find(|(exe, _)| exe.eq_ignore_ascii_case(&s.terminal_path)).map_or_else(|| s.terminal_path.clone(), |(_, name)| name.to_string())
+    };
+    let choices = KNOWN.iter().enumerate().map(|(i, (exe, name))| {
+        let exe = exe.to_string();
+        button(("terminal-pick", i), p, *name, move |_, cx| {
+            let exe = exe.clone();
+            settings::update(cx, move |s| s.terminal_path = exe)
+        })
+    });
+    card(
+        p,
+        L::SquareTerminal,
+        t!("Terminal"),
+        Some(&label),
+        h_flex()
+            .gap_2()
+            .flex_wrap()
+            .justify_end()
+            .children(choices)
+            .child(button("terminal-browse", p, t!("Gözat"), |window, cx| pick_into(window, cx, t!("Terminal seç"), PickTarget::Terminal)))
+            .child(button("terminal-reset", p, t!("Otomatik"), |_, cx| settings::update(cx, |s| s.terminal_path.clear())))
+            .into_any_element(),
+    )
 }
 
 /// DirectLook ayarı anahtarı (ayrı dosya `directlook.toml`; değişince DirectLook'a haber verilir).
@@ -3409,6 +3441,7 @@ enum PickTarget {
     Ide,
     Export,
     Import,
+    Terminal,
 }
 
 /// Runs a Windows file dialog on the shell thread and applies the result.
@@ -3428,6 +3461,7 @@ fn pick_into(_window: &mut Window, cx: &mut App, title: &str, target: PickTarget
         PickTarget::Ide => 1,
         PickTarget::Export => 2,
         PickTarget::Import => 3,
+        PickTarget::Terminal => 4,
     };
     rf_win::sta::run(move |owner| {
         use rf_win::dialogs::{Pick, pick};
@@ -3436,7 +3470,7 @@ fn pick_into(_window: &mut Window, cx: &mut App, title: &str, target: PickTarget
         }
         let r = match kind {
             0 => pick(owner, &title, Pick::File { filters: &f(&images) }),
-            1 => pick(owner, &title, Pick::File { filters: &f(&exe) }),
+            1 | 4 => pick(owner, &title, Pick::File { filters: &f(&exe) }),
             2 => pick(owner, &title, Pick::Save { filters: &f(&toml), default_name: "rustyfiles-ayarlar.toml" }),
             _ => pick(owner, &title, Pick::File { filters: &f(&toml) }),
         };
@@ -3447,6 +3481,7 @@ fn pick_into(_window: &mut Window, cx: &mut App, title: &str, target: PickTarget
         let _ = cx.update(|cx| match kind {
             0 => settings::update(cx, |s| s.background_image = Some(path)),
             1 => settings::update(cx, |s| s.ide_path = path.display().to_string()),
+            4 => settings::update(cx, |s| s.terminal_path = path.display().to_string()),
             2 => {
                 let s = cx.global::<Settings>().clone();
                 std::thread::spawn(move || {

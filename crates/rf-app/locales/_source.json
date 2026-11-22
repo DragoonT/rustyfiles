@@ -13151,5 +13151,17 @@
   "key": "Bu öğeyi sabitlenenlerden kaldırmak istiyor musunuz?",
   "tr": "Bu öğeyi sabitlenenlerden kaldırmak istiyor musunuz?",
   "en": "Do you want to remove this item from the pinned section?"
+ },
+ {
+  "id": "431d7079",
+  "key": "Terminal seç",
+  "tr": "Terminal seç",
+  "en": "Choose terminal"
+ },
+ {
+  "id": "173a07d0",
+  "key": "Otomatik: Windows Terminal, yoksa PowerShell",
+  "tr": "Otomatik: Windows Terminal, yoksa PowerShell",
+  "en": "Automatic: Windows Terminal, else PowerShell"
  }
 ]

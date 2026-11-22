@@ -90,6 +90,9 @@ type FolderCheckKey = (PathBuf, i64, u32, u32);
 static FOLDER_CHECK_DONE: OnceLock<Mutex<HashMap<FolderCheckKey, bool>>> = OnceLock::new();
 static FOLDER_CHECK_BUSY: OnceLock<Mutex<HashSet<FolderCheckKey>>> = OnceLock::new();
 const FOLDER_CHECK_LIMIT: usize = 4096;
+/// [`ImageCache::folder_names_icon`]'s answers and the folders being read for it.
+static NAMES_ICON_DONE: OnceLock<Mutex<HashMap<(PathBuf, u32), bool>>> = OnceLock::new();
+static NAMES_ICON_BUSY: OnceLock<Mutex<HashSet<(PathBuf, u32)>>> = OnceLock::new();
 
 fn remember_folder_check(key: FolderCheckKey, found: bool) {
     let map = FOLDER_CHECK_DONE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -396,6 +399,39 @@ impl ImageCache {
         })
         .detach();
         PackPicture::Pending
+    }
+
+    /// Whether the folder `path`'s `desktop.ini` names an icon (`IconResource` / `IconFile`: Downloads, Documents, a folder given a
+    /// picture under Properties > Customize). Read on a worker: `false` until it is known, and the cache notifies when it lands.
+    /// The folder tree draws Windows' picture only for such a folder (issue 225: `Program Files` is read-only, the mark of a
+    /// customised folder, but has no picture of its own, and stood in the tree with Windows 10's old folder among ours).
+    pub fn folder_names_icon(&mut self, path: &Path, cx: &mut Context<Self>) -> bool {
+        let generation = FOLDER_ICON_GEN.load(std::sync::atomic::Ordering::Relaxed);
+        let key = (path.to_path_buf(), generation);
+        let done = NAMES_ICON_DONE.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Some(found) = done.lock().unwrap().get(&key) {
+            return *found;
+        }
+        let busy = NAMES_ICON_BUSY.get_or_init(|| Mutex::new(HashSet::new()));
+        if busy.lock().unwrap().insert(key.clone()) {
+            let folder = key.0.clone();
+            let task = cx.background_spawn(async move { rf_win::folder_custom::folder_icon_info(&folder).is_some() });
+            cx.spawn(async move |this, cx| {
+                let found = task.await;
+                let _ = this.update(cx, |_, cx| {
+                    let mut done = NAMES_ICON_DONE.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
+                    if done.len() >= FOLDER_CHECK_LIMIT {
+                        done.clear();
+                    }
+                    done.insert(key.clone(), found);
+                    drop(done);
+                    NAMES_ICON_BUSY.get_or_init(|| Mutex::new(HashSet::new())).lock().unwrap().remove(&key);
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        false
     }
 
     /// `desktop.ini` is only read on a worker. Until it lands, prefer the pack: a real custom icon flips the row back
