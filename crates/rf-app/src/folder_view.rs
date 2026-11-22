@@ -4,8 +4,8 @@
 //! merges batches and paints. Navigating away cancels the in-flight listing.
 
 use crate::t;
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -104,6 +104,32 @@ impl GroupBy {
 }
 
 const MONTHS: [&str; 12] = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"];
+
+type HoverMedia = Vec<(&'static str, String)>;
+
+fn hover_media_cache() -> &'static parking_lot::Mutex<HashMap<PathBuf, Arc<HoverMedia>>> {
+    static CACHE: std::sync::OnceLock<parking_lot::Mutex<HashMap<PathBuf, Arc<HoverMedia>>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+fn hover_media_pending() -> &'static parking_lot::Mutex<HashSet<PathBuf>> {
+    static PENDING: std::sync::OnceLock<parking_lot::Mutex<HashSet<PathBuf>>> = std::sync::OnceLock::new();
+    PENDING.get_or_init(Default::default)
+}
+
+fn item_tooltip_text(
+    entry: &Entry,
+    path: Option<&PathBuf>,
+    folder_size: Option<String>,
+    media: &[(&'static str, String)],
+) -> String {
+    let Some(path) = path else {
+        return entry.shown().to_string();
+    };
+    let mut lines = vec![entry.shown().to_string()];
+    lines.extend(crate::preview::item_property_rows(path, entry, folder_size, media).into_iter().map(|(key, value)| format!("{key}: {value}")));
+    lines.join("\n")
+}
 
 /// "Today / yesterday / this week ..." of a time.
 fn relative_day(ms: i64, now: chrono::DateTime<chrono::Local>) -> (u32, String) {
@@ -457,9 +483,30 @@ impl DirSize {
         }
     }
 
+    fn measured_text(self, on_disk: bool) -> Option<String> {
+        match self {
+            DirSize::Partial(_) => None,
+            DirSize::Done(size) => Some(format::size(Self::bytes(size, on_disk))),
+        }
+    }
+
     /// The size to show and sort by; without a known cluster size the logical size stands in.
     fn bytes(s: rf_win::foldersize::FolderSize, on_disk: bool) -> u64 {
         if on_disk { s.allocated.unwrap_or(s.bytes) } else { s.bytes }
+    }
+}
+
+#[cfg(test)]
+mod folder_tooltip_size_tests {
+    use super::DirSize;
+    use rf_core::format;
+
+    #[test]
+    fn folder_tooltip_uses_completed_sizes_only() {
+        assert_eq!(DirSize::Partial(1024).measured_text(false), None);
+        let known = DirSize::Done(rf_win::foldersize::FolderSize { bytes: 1000, allocated: Some(4096), ..Default::default() });
+        assert_eq!(known.measured_text(false), Some(format::size(1000)));
+        assert_eq!(known.measured_text(true), Some(format::size(4096)));
     }
 }
 
@@ -588,6 +635,9 @@ pub struct FolderView {
     slow_click_serial: u64,
     /// Settings → "Select on hover": the entry under the pointer and its serial, selected once the pointer has rested on it.
     hover_pick: Option<(u32, u64)>,
+    /// The item currently under the pointer for delayed Windows media-property lookup.
+    hover_detail_target: Option<(PathBuf, u64)>,
+    hover_detail_serial: u64,
     /// The grouped Grid's tile under the pointer, and over how many of its slices (`grid_slices`: a row is drawn as several slices, each
     /// a clipped copy of the whole row, so the pointer is over one copy of a tile at a time and a hover style lit only that slice's
     /// strip of it, issue 157). The tile's fill follows this instead.
@@ -789,6 +839,8 @@ impl FolderView {
             slow_click: None,
             slow_click_serial: 0,
             hover_pick: None,
+            hover_detail_target: None,
+            hover_detail_serial: 0,
             grid_hover: None,
             static_pick: 0,
             first_click: None,
@@ -990,6 +1042,7 @@ impl FolderView {
 
     fn render_col_rows(&mut self, range: std::ops::Range<usize>, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let hover_select = cx.global::<crate::settings::Settings>().select_on_hover;
+        let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
         let p = Palette::for_window(window);
         let mut out = Vec::with_capacity(range.len());
         for vi in range {
@@ -1001,6 +1054,9 @@ impl FolderView {
             let overlay = self.overlay_of(ei, px(16.), cx);
             let e = &self.entries[ei as usize];
             let is_dir = e.is_dir();
+            let tip_entry = e.clone();
+            let tip_path = self.path_of(ei);
+            let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
             out.push(
                 h_flex()
                     .id(("crow", vi))
@@ -1035,8 +1091,18 @@ impl FolderView {
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
                     .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, is_dir, &p))
-                    // Settings → "Select files and folders on hover"
-                    .when(hover_select, |d| d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))))
+                    .tooltip(move |w, cx| {
+                        let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
+                        let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
+                        let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
+                        gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
+                    })
+                    .on_hover(cx.listener(move |this, on: &bool, _, cx| {
+                        this.item_hover(vi, *on, cx);
+                        if hover_select {
+                            this.hover_row(vi, *on, cx);
+                        }
+                    }))
                     .into_any_element(),
             );
         }
@@ -1403,6 +1469,8 @@ impl FolderView {
         self._load_task = None;
         // a soft reload (watcher) keeps sizes and running walks; a real load starts over
         if !soft {
+            self.hover_detail_target = None;
+            self.hover_detail_serial += 1;
             self.props_reset();
             self.sortx_reset();
             self.folder_sizes.clear();
@@ -3116,6 +3184,10 @@ impl FolderView {
         } else {
             base
         };
+        let tip_entry = e.clone();
+        let tip_path = self.path_of(ei);
+        let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
+        let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
         let cell = base
             .id(("cell", vi))
             .w(tile_w)
@@ -3136,11 +3208,17 @@ impl FolderView {
                 cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
             )
             .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
-            // Settings → "Select files and folders on hover"; in a sliced row also the tile's fill (`grid_hover`)
-            .when(hover_select || part.is_some(), |d| {
+            .tooltip(move |w, cx| {
+                let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
+                let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
+                let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
+                gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
+            })
+            // Settings → "Select files and folders on hover"; in a sliced row the tile's fill follows the whole tile.
+            .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                 let sliced = part.is_some();
-                d.on_hover(cx.listener(move |this, on: &bool, _, cx| this.cell_hover(vi, *on, sliced, hover_select, cx)))
-            });
+                this.cell_hover(vi, *on, sliced, hover_select, cx);
+            }));
         Some(cell)
     }
 
@@ -3230,6 +3308,68 @@ impl FolderView {
         }
     }
 
+    /// Loads supported file metadata after a brief hover; folder sizes are read only from completed measurements.
+    fn item_hover(&mut self, vi: usize, on: bool, cx: &mut Context<Self>) {
+        let Some(&ei) = self.visible.get(vi) else { return };
+        let Some(path) = self.path_of(ei) else { return };
+        if !on {
+            if self.hover_detail_target.as_ref().is_some_and(|(target, _)| target == &path) {
+                self.hover_detail_target = None;
+                self.hover_detail_serial += 1;
+            }
+            return;
+        }
+        if self.hover_detail_target.as_ref().is_some_and(|(target, _)| target == &path) {
+            return;
+        }
+        self.hover_detail_serial += 1;
+        let serial = self.hover_detail_serial;
+        self.hover_detail_target = Some((path.clone(), serial));
+        let entry = &self.entries[ei as usize];
+        if entry.is_dir()
+            || entry.is_cloud_placeholder()
+            || !matches!(
+                icons::category(entry),
+                Category::Image | Category::Video | Category::Audio | Category::Pdf | Category::Document | Category::Spreadsheet
+            )
+            || hover_media_cache().lock().contains_key(&path)
+        {
+            return;
+        }
+        {
+            let mut pending = hover_media_pending().lock();
+            if pending.len() >= 4 || !pending.insert(path.clone()) {
+                return;
+            }
+        }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(160)).await;
+            let active = this
+                .update(cx, |view, _| view.hover_detail_target.as_ref().is_some_and(|(target, current)| target == &path && *current == serial))
+                .unwrap_or(false);
+            if !active {
+                hover_media_pending().lock().remove(&path);
+                return;
+            }
+            let query_path = path.clone();
+            let media = cx.background_spawn(async move { rf_win::props::media_props(&query_path) }).await;
+            {
+                let mut cache = hover_media_cache().lock();
+                if cache.len() >= 512 {
+                    cache.clear();
+                }
+                cache.insert(path.clone(), Arc::new(media));
+            }
+            hover_media_pending().lock().remove(&path);
+            let _ = this.update(cx, |view, cx| {
+                if view.hover_detail_target.as_ref().is_some_and(|(target, current)| target == &path && *current == serial) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
     /// Settings → "Select on hover": the pointer came onto (or left) the item at `vi`. Like Explorer's "point to select" the item is
     /// selected once the pointer has rested on it for the system's hover time, so passing over items on the way to another one
     /// leaves the selection alone (issue 101: it was in the Details layout only, and at once).
@@ -3238,6 +3378,7 @@ impl FolderView {
     /// in, and "select on hover" hears only the tile's own coming and going.
     fn cell_hover(&mut self, vi: usize, on: bool, sliced: bool, hover_select: bool, cx: &mut Context<Self>) {
         if !sliced {
+            self.item_hover(vi, on, cx);
             if hover_select {
                 self.hover_row(vi, on, cx);
             }
@@ -3247,6 +3388,12 @@ impl FolderView {
         self.grid_hover = grid_hover_step(self.grid_hover, vi, on);
         let after = self.grid_hover.map(|h| h.0);
         if before != after {
+            if let Some(b) = before {
+                self.item_hover(b, false, cx);
+            }
+            if let Some(a) = after {
+                self.item_hover(a, true, cx);
+            }
             if hover_select {
                 if let Some(b) = before {
                     self.hover_row(b, false, cx);
@@ -3653,6 +3800,10 @@ impl FolderView {
         }
         self.size_queue.push(p);
         DirSize::Partial(0)
+    }
+
+    fn known_folder_size(&self, path: &Path, on_disk: bool) -> Option<String> {
+        self.folder_sizes.get(path).copied().and_then(|size| size.measured_text(on_disk))
     }
 
     fn start_size_batch(&mut self, cx: &mut Context<Self>) {
@@ -4415,6 +4566,9 @@ impl FolderView {
             });
             let calc_link = dir_path.filter(|_| dir_size.is_none());
             let e = &self.entries[ei as usize];
+            let tip_entry = e.clone();
+            let tip_path = self.path_of(ei);
+            let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
             let selected = self.selected.contains(&ei);
             // (the rows next to it that are selected too: the pill joins them)
             let sel_above = selected && vi > 0 && self.visible.get(vi - 1).is_some_and(|e| self.selected.contains(e));
@@ -4753,8 +4907,18 @@ impl FolderView {
                 })
                 .children(prop_cells)
                 .when(name_w.is_some(), |row| row.child(div().flex_1()))
-                // Settings → "Select files and folders on hover"
-                .when(hover_select, |row| row.on_hover(cx.listener(move |this, on: &bool, _, cx| this.hover_row(vi, *on, cx))));
+                .tooltip(move |w, cx| {
+                    let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
+                    let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
+                    let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
+                    gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
+                })
+                .on_hover(cx.listener(move |this, on: &bool, _, cx| {
+                    this.item_hover(vi, *on, cx);
+                    if hover_select {
+                        this.hover_row(vi, *on, cx);
+                    }
+                }));
             out.push(row.into_any_element());
         }
         self.props_after_rows(shown, prop_ctx.is_some(), cx);

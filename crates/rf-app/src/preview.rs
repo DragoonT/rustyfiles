@@ -603,53 +603,20 @@ impl Preview {
 
     /// The lines of the property block, in order (label, value): the same for the pane at the right and at the bottom.
     fn property_rows(&self, path: &Path, e: &Entry, cx: &App) -> Vec<(&'static str, String)> {
-        let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-        let mut rows: Vec<(&'static str, String)> = vec![(t!("Tür"), icons::type_label(e).to_string())];
-        if e.is_dir() && !crate::archive_view::is_browsable_path(path) {
+        let folder_size = if e.is_dir() && !crate::archive_view::is_browsable_path(path) {
             let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
-            let txt = match &self.folder_size {
+            Some(match &self.folder_size {
                 Some((fp, Some(fs))) if fp == path => {
                     let shown = if on_disk { fs.allocated.unwrap_or(fs.bytes) } else { fs.bytes };
                     format!("{} · {} {}, {} {}", format::size(shown), group(fs.files), t!("dosya"), group(fs.dirs), t!("klasör"))
                 }
                 _ => t!("Hesaplanıyor…").to_string(),
-            };
-            rows.push((t!("Boyut"), txt));
-        }
-        if !e.is_dir() {
-            rows.push((t!("Boyut"), format!("{} ({} {})", format::size(e.size), group(e.size), t!("bayt"))));
-        }
-        if let Some((mp, list)) = &self.media
-            && mp == path
-        {
-            for (label, value) in list {
-                rows.push((crate::i18n::t(label), value.clone()));
-            }
-        }
-        rows.push((t!("Değiştirilme"), format::datetime(e.modified_ms)));
-        rows.push((t!("Oluşturulma"), format::datetime(e.created_ms)));
-        // zero-width space after each separator: long paths wrap at folder boundaries
-        rows.push((t!("Konum"), dir.to_string_lossy().replace('\\', "\\\u{200B}")));
-        let mut flags = Vec::new();
-        if e.is_hidden() {
-            flags.push(t!("Gizli"));
-        }
-        if e.is_system() {
-            flags.push(t!("Sistem"));
-        }
-        if e.attrs & rf_core::attrs::READONLY != 0 {
-            flags.push(t!("Salt okunur"));
-        }
-        if e.is_cloud_placeholder() {
-            flags.push(t!("Yalnızca çevrimiçi"));
-        }
-        if e.is_symlink() {
-            flags.push(t!("Bağlantı"));
-        }
-        if !flags.is_empty() {
-            rows.push((t!("Öznitelikler"), flags.join(", ")));
-        }
-        rows
+            })
+        } else {
+            None
+        };
+        let media = self.media.as_ref().filter(|(mp, _)| mp == path).map_or(&[][..], |(_, list)| list.as_slice());
+        item_property_rows(path, e, folder_size, media)
     }
 
     /// The workspace tells the pane every frame where it sits: Some((w, h)) = at the bottom with that box, None = at the right.
@@ -815,6 +782,50 @@ impl Preview {
         }
         cx.notify();
     }
+}
+
+pub(crate) fn item_property_rows(
+    path: &Path,
+    e: &Entry,
+    folder_size: Option<String>,
+    media: &[(&'static str, String)],
+) -> Vec<(&'static str, String)> {
+    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    let mut rows: Vec<(&'static str, String)> = vec![(t!("Tür"), icons::type_label(e).to_string())];
+    if e.is_dir() && !crate::archive_view::is_browsable_path(path) {
+        if let Some(size) = folder_size {
+            rows.push((t!("Boyut"), size));
+        }
+    } else if !e.is_dir() {
+        rows.push((t!("Boyut"), format!("{} ({} {})", format::size(e.size), group(e.size), t!("bayt"))));
+    }
+    for (label, value) in media {
+        rows.push((crate::i18n::t(label), value.clone()));
+    }
+    rows.push((t!("Değiştirilme"), format::datetime(e.modified_ms)));
+    rows.push((t!("Oluşturulma"), format::datetime(e.created_ms)));
+    // zero-width space after each separator: long paths wrap at folder boundaries
+    rows.push((t!("Konum"), dir.to_string_lossy().replace('\\', "\\\u{200B}")));
+    let mut flags = Vec::new();
+    if e.is_hidden() {
+        flags.push(t!("Gizli"));
+    }
+    if e.is_system() {
+        flags.push(t!("Sistem"));
+    }
+    if e.attrs & rf_core::attrs::READONLY != 0 {
+        flags.push(t!("Salt okunur"));
+    }
+    if e.is_cloud_placeholder() {
+        flags.push(t!("Yalnızca çevrimiçi"));
+    }
+    if e.is_symlink() {
+        flags.push(t!("Bağlantı"));
+    }
+    if !flags.is_empty() {
+        rows.push((t!("Öznitelikler"), flags.join(", ")));
+    }
+    rows
 }
 
 fn read_text_head(path: &Path) -> Option<String> {
@@ -1067,4 +1078,32 @@ fn group(n: u64) -> String {
         out.push(c);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::item_property_rows;
+    use rf_core::{Entry, EntryKind};
+    use std::path::Path;
+
+    #[test]
+    fn folder_properties_include_size_only_when_already_known() {
+        let entry = Entry::new("folder", EntryKind::Dir, 0, 0, 0, 0);
+        let path = Path::new(r"C:\parent\folder");
+        let rows = item_property_rows(path, &entry, None, &[]);
+        assert_eq!(rows.len(), 4);
+
+        let rows = item_property_rows(path, &entry, Some("measured size".into()), &[]);
+        assert_eq!(rows.len(), 5);
+        assert!(rows.iter().any(|(_, value)| value == "measured size"));
+    }
+
+    #[test]
+    fn file_properties_include_size_and_media_facts() {
+        let entry = Entry::new("photo.jpg", EntryKind::File, 1024, 0, 0, 0);
+        let media = [("Dimensions", "1920 x 1080".to_string())];
+        let rows = item_property_rows(Path::new(r"C:\parent\photo.jpg"), &entry, None, &media);
+        assert_eq!(rows.len(), 6);
+        assert!(rows.iter().any(|(_, value)| value == "1920 x 1080"));
+    }
 }
