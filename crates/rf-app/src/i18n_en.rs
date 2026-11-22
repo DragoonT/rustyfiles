@@ -329,6 +329,7 @@ pub const EN: &[(&str, &str)] = &[
     ("sa", "h"),
     ("Yeni pencerede aç", "Open in new window"),
     ("Kenar çubuğundan kaldır", "Unpin from sidebar"),
+    ("Bu öğeyi sabitlenenlerden kaldırmak istiyor musunuz?", "Do you want to remove this item from the pinned section?"),
     ("Kenar çubuğu: Bulut ve Linux", "Sidebar: Cloud and Linux"),
     ("Kenar çubuğu: Kütüphaneler", "Sidebar: Libraries"),
     ("Kenar çubuğu: Ağ", "Sidebar: Network"),

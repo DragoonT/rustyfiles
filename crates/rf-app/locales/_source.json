@@ -13079,5 +13079,11 @@
   "key": "Sonraki masaüstü arka planı",
   "tr": "Sonraki masaüstü arka planı",
   "en": "Next desktop background"
+ },
+ {
+  "id": "2560942b",
+  "key": "Bu öğeyi sabitlenenlerden kaldırmak istiyor musunuz?",
+  "tr": "Bu öğeyi sabitlenenlerden kaldırmak istiyor musunuz?",
+  "en": "Do you want to remove this item from the pinned section?"
  }
 ]
