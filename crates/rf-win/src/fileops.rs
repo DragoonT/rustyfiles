@@ -189,14 +189,40 @@ pub fn rename_no_replace(from: &Path, to: &Path) -> std::io::Result<()> {
 /// `name`, `name (2)`, … (the caller passes the name in the UI language) — returns the created path.
 pub fn new_folder(dir: &Path, name: &str) -> anyhow::Result<PathBuf> {
     let p = unique_name(dir, name, "");
-    std::fs::create_dir(&p)?;
+    match std::fs::create_dir(&p) {
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => new_item_by_shell(&p, true)?,
+        r => r?,
+    }
     Ok(p)
 }
 
 pub fn new_text_file(dir: &Path, name: &str) -> anyhow::Result<PathBuf> {
     let p = unique_name(dir, name, ".txt");
-    std::fs::OpenOptions::new().write(true).create_new(true).open(&p)?;
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => new_item_by_shell(&p, false)?,
+        r => drop(r?),
+    }
     Ok(p)
+}
+
+/// Makes the folder or empty file `p` with the shell's engine: for a folder only administrators may write to (`Program Files`,
+/// `Windows`), where the plain call is refused. The engine asks for the rights in its own window ("Destination Folder Access Denied",
+/// which belongs to the app's window: [`DIALOG_OWNER`]), as Explorer does (issue 195: "Trying to create a new folder ... in
+/// C:\Program Files (x86) or C:\Program Files doesn't work, nothing happens"). An error when the user says no.
+fn new_item_by_shell(p: &Path, folder: bool) -> anyhow::Result<()> {
+    use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL};
+    needs_shell(Op::Copy)?;
+    let dir = p.parent().ok_or_else(|| anyhow::anyhow!("no parent folder"))?.to_path_buf();
+    let name = wide(p.file_name().unwrap_or_default());
+    let target = p.to_path_buf();
+    engine(Op::Copy, move |life| {
+        let op = new_op(FOF_NOCONFIRMMKDIR.0 as u32)?;
+        let attrs = if folder { FILE_ATTRIBUTE_DIRECTORY } else { FILE_ATTRIBUTE_NORMAL };
+        unsafe { op.NewItem(&item(&dir)?, attrs.0, PCWSTR(name.as_ptr()), PCWSTR::null(), None)? };
+        anyhow::ensure!(perform_tracked(&op, quiet_tracker(), life)?, "making the new item was cancelled");
+        anyhow::ensure!(target.exists(), "the new item was not made");
+        Ok(())
+    })
 }
 
 pub fn unique_name(dir: &Path, stem: &str, ext: &str) -> PathBuf {
@@ -577,9 +603,15 @@ mod tests {
             println!("owner window {owner:#x}");
             set_dialog_owner(owner);
         }
-        let t = Arc::new(Tracker::new(Box::new(|_, _, _| {}), Arc::new(AtomicBool::new(false))));
-        let r = transfer_tracked(Transfer::Copy, &[src.clone()], &dest, t);
-        println!("result: {r:?}; written: {}", dest.join("rf-187-look.txt").exists());
+        if std::env::var("RF_195_NEW_FOLDER").is_ok() {
+            // issue 195: a new folder there (the plain call is refused, the engine asks; the watcher cancels its question)
+            let r = new_folder(&dest, "rf-195-look");
+            println!("new folder: {r:?}; made: {}", dest.join("rf-195-look").exists());
+        } else {
+            let t = Arc::new(Tracker::new(Box::new(|_, _, _| {}), Arc::new(AtomicBool::new(false))));
+            let r = transfer_tracked(Transfer::Copy, &[src.clone()], &dest, t);
+            println!("result: {r:?}; written: {}", dest.join("rf-187-look.txt").exists());
+        }
         watcher.join().unwrap();
         let _ = std::fs::remove_file(&src);
     }
