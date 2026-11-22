@@ -93,7 +93,8 @@ pub fn update(anchor: Option<Anchor>, cx: &mut App) {
             let same = h.shown_for.as_ref() == Some(&a);
             host_g(cx).anchor = Some(a);
             if !same {
-                show_now(open, Instant::now(), cx);
+                // (after the caller's update: showing reads the right island, which may be the one being updated, issue 193)
+                cx.defer(move |cx| show_now(open, Instant::now(), cx));
             }
         }
         _ => dismiss(cx),

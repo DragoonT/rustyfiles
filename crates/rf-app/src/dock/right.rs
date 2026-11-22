@@ -621,8 +621,12 @@ impl RightIsland {
             && let Some(mut anchor) = self.own_anchor(OwnTip::Status(Status::Volume), cx)
         {
             anchor.text = volume_tip(Some((after, now.muted)));
-            super::tray_tip::update(Some(anchor.clone()), cx);
-            super::tray_tip::hover(Some(anchor), cx);
+            // After this update, not inside it (issue 193, the dock crashed on a wheel turn over the volume): showing the tip reads
+            // this island (its glass), and the toolkit stops the process for a read of an island that is being updated.
+            cx.defer(move |cx| {
+                super::tray_tip::update(Some(anchor.clone()), cx);
+                super::tray_tip::hover(Some(anchor), cx);
+            });
         }
     }
 }
