@@ -1054,6 +1054,7 @@ impl FolderView {
             let overlay = self.overlay_of(ei, px(16.), cx);
             let e = &self.entries[ei as usize];
             let is_dir = e.is_dir();
+            let dim = e.is_hidden() || e.is_cloud_placeholder() || (crate::cut_marks::any() && self.path_of(ei).is_some_and(|p| crate::cut_marks::is_cut(&p)));
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
@@ -1071,15 +1072,15 @@ impl FolderView {
                     .when(selected, |d| d.bg(p.selection).child(theme::selection_pill(&p)))
                     .when(!selected, |d| d.hover(|s| s.bg(p.hover)))
                     .child(download_marked(link_marked(
-                        match &shell_icon {
+                        faded(match &shell_icon {
                             Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
                             None => Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, p.dark)).into_any_element(),
-                        },
+                        }, dim),
                         px(16.),
                         e.link,
                         overlay,
                     ), self.part_frac(ei)))
-                    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&e.name)))
+                    .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().when(dim, |d| d.opacity(0.6)).on_mouse_down(MouseButton::Left, cx.listener(|this, _: &MouseDownEvent, _, _| this.name_hit = true)).child(crate::rtl::display_text(&e.name)))
                     .when(is_dir, |d| d.child(Icon::new(L::ChevronRight).size(px(12.)).text_color(p.text_tertiary)))
                     .on_mouse_down(
                         MouseButton::Left,
@@ -3067,6 +3068,7 @@ impl FolderView {
                 .text_color(theme::kind_color(cat, p.dark))
                 .into_any_element(),
         };
+        let visual = faded(visual, dim);
         let overlay = self.overlay_of(ei, visual_px, cx);
         let e = &self.entries[ei as usize];
         let visual = download_marked(link_marked(visual, visual_px, e.link, overlay), self.part_frac(ei));
@@ -4814,14 +4816,14 @@ impl FolderView {
                             )
                         })
                         .child(download_marked(link_marked(
-                            match &shell_icon {
+                            faded(match &shell_icon {
                                 Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
                                 None => Icon::new(icons::icon_for(cat))
                                     .size(px(16.))
                                     .flex_shrink_0()
                                     .text_color(theme::kind_color(cat, p.dark))
                                     .into_any_element(),
-                            },
+                            }, dim),
                             px(16.),
                             e.link,
                             overlay,
@@ -6359,6 +6361,14 @@ fn overlay_box(size: Pixels) -> Pixels {
 /// `icon` with the marks drawn over it: another program's overlay (`overlay`, icon-sized with its mark in a corner, as Explorer draws
 /// it) and the arrow of a symbolic link or junction (`link`).
 /// An unfinished download's file (`.hdpart`) shows how far it is: a thin molten bar under its icon.
+/// The icon of a hidden, online-only or cut item, drawn faded as Explorer draws it (issue 201: only the name was faded).
+fn faded(icon: AnyElement, dim: bool) -> AnyElement {
+    if !dim {
+        return icon;
+    }
+    div().flex_shrink_0().opacity(0.5).child(icon).into_any_element()
+}
+
 fn download_marked(icon: AnyElement, frac: Option<f32>) -> AnyElement {
     let Some(f) = frac else { return icon };
     div()
