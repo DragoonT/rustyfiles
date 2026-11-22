@@ -202,9 +202,14 @@ impl FolderView {
             crate::archive_view::copy_items(cx, paths);
             return;
         }
+        // a cut is drawn faded until it is pasted or the clipboard changes (issue 201); a copy ends an earlier cut's marks
+        crate::cut_marks::cutting((kind == Transfer::Move).then_some(paths.as_slice()));
+        cx.notify();
         // OpenClipboard can wait on other apps: never on the UI thread.
-        rf_win::sta::run(move |owner| {
-            if let Err(e) = rf_win::clipboard::set_files(owner, &paths, kind) {
+        rf_win::sta::run(move |owner| match rf_win::clipboard::set_files(owner, &paths, kind) {
+            Ok(_) => crate::cut_marks::written(&paths),
+            Err(e) => {
+                crate::cut_marks::cutting(None);
                 log::warn!("clipboard: {e:#}");
             }
         });

@@ -2980,7 +2980,8 @@ impl FolderView {
         let e = &self.entries[ei as usize];
         let selected = self.selected.contains(&ei);
         let cat = icons::category(e);
-        let dim = e.is_hidden() || e.is_cloud_placeholder();
+        // (hidden, a cloud file not on this PC, or cut: issue 201)
+        let dim = e.is_hidden() || e.is_cloud_placeholder() || (crate::cut_marks::any() && self.path_of(ei).is_some_and(|p| crate::cut_marks::is_cut(&p)));
         // Settings → "Show thumbnails" off: the file type's icon instead of a preview
         let thumbs_on = cx.global::<crate::settings::Settings>().show_thumbnails;
         let thumb = self.parent_of(ei).map(|d| d.to_path_buf()).and_then(|d| {
@@ -4423,7 +4424,8 @@ impl FolderView {
             let sel_below = selected && self.visible.get(vi + 1).is_some_and(|e| self.selected.contains(e));
             let is_cursor = self.cursor == Some(vi);
             let cat = icons::category(e);
-            let dim = e.is_hidden() || e.is_cloud_placeholder();
+            // (hidden, a cloud file not on this PC, or cut: issue 201)
+            let dim = e.is_hidden() || e.is_cloud_placeholder() || (crate::cut_marks::any() && self.path_of(ei).is_some_and(|p| crate::cut_marks::is_cut(&p)));
             let name: SharedString = crate::rtl::display_text(&row_name(e, show_ext, renamed.as_ref())).into();
             let shell_icon = self
                 .parent_of(ei)

@@ -3,6 +3,7 @@
 mod actions;
 mod aliases;
 mod background;
+mod cut_marks;
 pub mod bench;
 mod fast_start;
 mod bench_view;
