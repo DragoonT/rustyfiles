@@ -52,8 +52,13 @@ pub fn open_with(paths: Vec<PathBuf>, images: Entity<ImageCache>, locked: bool, 
         return;
     }
     let display = cx.active_window().and_then(|w| w.update(cx, |_, w, cx| w.display(cx).map(|d| d.id())).ok().flatten());
+    // the size the user last left it at, or the default, never more than most of the display (it was 500 x 680 always, which filled a
+    // laptop's screen at 150 %: "it would be nice if file properties opened up in a small window", a Discord report)
+    let screen = display.and_then(|id| cx.find_display(id)).or_else(|| cx.primary_display()).map(|d| d.bounds().size);
+    let wanted = cx.global::<crate::settings::Settings>().props_size.unwrap_or(DEFAULT_SIZE);
+    let [w, h] = fit_size(wanted, screen.map(|s| [f32::from(s.width), f32::from(s.height)]));
     let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(display, size(px(500.), px(680.)), cx))),
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(display, size(px(w), px(h)), cx))),
         display_id: display,
         window_min_size: Some(size(px(420.), px(460.))),
         window_background: crate::theme::window_material(WindowBackgroundAppearance::MicaBackdrop),
@@ -69,6 +74,37 @@ pub fn open_with(paths: Vec<PathBuf>, images: Entity<ImageCache>, locked: bool, 
         })
     }) {
         log::error!("properties window: {e:#}");
+    }
+}
+
+/// The Properties window's size the first time (logical px).
+pub const DEFAULT_SIZE: [f32; 2] = [460., 600.];
+/// The window's least size (as `window_min_size`).
+const MIN_SIZE: [f32; 2] = [420., 460.];
+
+/// `wanted`, no smaller than [`MIN_SIZE`] and no larger than 90 % of the display (`screen`, when known).
+fn fit_size(wanted: [f32; 2], screen: Option<[f32; 2]>) -> [f32; 2] {
+    let mut out = [wanted[0].max(MIN_SIZE[0]), wanted[1].max(MIN_SIZE[1])];
+    if let Some(s) = screen {
+        for i in 0..2 {
+            out[i] = out[i].min((s[i] * 0.9).max(MIN_SIZE[i]));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::{DEFAULT_SIZE, fit_size};
+
+    #[test]
+    fn the_window_keeps_the_size_it_was_left_at_within_the_display() {
+        assert_eq!(fit_size(DEFAULT_SIZE, Some([1920., 1080.])), DEFAULT_SIZE);
+        assert_eq!(fit_size([700., 900.], Some([1920., 1080.])), [700., 900.]);
+        // a laptop at 150 %: 1366 x 768 physical is about 910 x 512 logical
+        assert_eq!(fit_size([500., 680.], Some([910., 512.])), [500., 460.8]);
+        // never under the least size
+        assert_eq!(fit_size([100., 100.], None), [420., 460.]);
     }
 }
 
@@ -206,6 +242,8 @@ struct LinkInputs {
 }
 
 pub struct PropsView {
+    /// A pending write of the window's size (see `new`).
+    size_save: Option<Task<()>>,
     paths: Vec<PathBuf>,
     images: Entity<ImageCache>,
     page: Page,
@@ -297,6 +335,22 @@ fn breakable(s: &str) -> String {
 impl PropsView {
     fn new(paths: Vec<PathBuf>, images: Entity<ImageCache>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         cx.observe(&images, |_, _, cx| cx.notify()).detach();
+        // the size the user gives the window is the next window's (written once the resize has settled)
+        cx.observe_window_bounds(window, |this, window, cx| {
+            if window.is_maximized() || window.is_fullscreen() {
+                return;
+            }
+            let s = window.bounds().size;
+            let now = [f32::from(s.width).round(), f32::from(s.height).round()];
+            if cx.global::<crate::settings::Settings>().props_size == Some(now) {
+                return;
+            }
+            this.size_save = Some(cx.spawn(async move |_, cx| {
+                cx.background_executor().timer(std::time::Duration::from_millis(500)).await;
+                cx.update(|cx| crate::settings::update(cx, |s| s.props_size = Some(now)));
+            }));
+        })
+        .detach();
         let single = paths.len() == 1 && !is_root(&paths[0]);
         let name = single.then(|| {
             let n = file_name(&paths[0]);
@@ -307,6 +361,7 @@ impl PropsView {
             })
         });
         let mut v = Self {
+            size_save: None,
             paths,
             images,
             page: Page::General,
