@@ -162,6 +162,7 @@ impl DesktopView {
             redo: redo.map(str::to_string),
             has_folder: self.backend.as_ref().and_then(|b| b.target_dir()).is_some(),
             icons_forced_hidden: super::choices::hidden_by_settings(),
+            slideshow: self.slideshow_running(),
         };
         let p = crate::theme::Palette::for_window(window);
         // the chosen one of a group is marked with a dot in front (a check mark is for switches)
@@ -220,6 +221,7 @@ impl DesktopView {
                     BgCmd::Redo(what) => Item::action(format!("{}: {what}", t!("Yinele")), icon(L::Redo2), act(&me, |_, _, cx| crate::undo::redo(cx))).hint("Ctrl+Y"),
                     BgCmd::OpenTerminal => Item::action(t!("Terminalde Aç"), icon(L::SquareTerminal), act(&me, |v, _, _| v.open_terminal_here())),
                     BgCmd::DisplaySettings => Item::action(t!("Görüntü ayarları"), icon(L::Monitor), act(&me, |v, _, _| v.open_settings_page("ms-settings:display"))),
+                    BgCmd::NextBackground => Item::action(t!("Sonraki masaüstü arka planı"), icon(L::SkipForward), act(&me, |v, _, _| v.next_background())),
                     BgCmd::Personalize => Item::action(t!("Kişiselleştir"), icon(L::Palette), act(&me, |v, _, _| v.open_settings_page("ms-settings:personalization"))),
                     // (not at the top level: see `more_prefix`)
                     BgCmd::OpenInRustyfiles => own_more_item(&me, BgCmd::OpenInRustyfiles),

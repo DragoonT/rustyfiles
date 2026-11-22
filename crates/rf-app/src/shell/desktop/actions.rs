@@ -310,6 +310,16 @@ impl DesktopView {
     }
 
     /// A page of Windows' Settings app (`ms-settings:...`).
+    /// "Next desktop background" (issue 206): the slideshow's next picture. The new picture reaches the desktop the way any change of
+    /// the wallpaper does.
+    pub(super) fn next_background(&mut self) {
+        std::thread::spawn(|| {
+            if let Err(e) = rf_win::desktop::wallpaper::next_slideshow_picture() {
+                log::warn!("desktop: next background: {e:#}");
+            }
+        });
+    }
+
     pub(super) fn open_settings_page(&mut self, uri: &'static str) {
         rf_win::sta::run(move |_| {
             if let Err(e) = rf_win::shell::open(Path::new(uri)) {

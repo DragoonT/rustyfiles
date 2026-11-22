@@ -251,6 +251,11 @@ fn black(a: f32) -> Hsla {
 }
 
 impl DesktopView {
+    /// Whether the wallpaper read last is a running slideshow (the desktop's menu then offers its next picture, issue 206).
+    pub(super) fn slideshow_running(&self) -> bool {
+        self.wall_src.as_ref().is_some_and(|w| w.slideshow.is_some_and(|s| s.running))
+    }
+
     /// What both kinds of view start with: the picture cache, the link to the Status Center, and the channel the worker threads report on.
     fn start(cx: &mut Context<Self>) -> (Entity<ImageCache>, mpsc::UnboundedSender<Msg>) {
         let images = cx.new(ImageCache::new);

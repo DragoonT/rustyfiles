@@ -1953,6 +1953,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Yinele", "Redo"),
     ("Görüntü ayarları", "Display settings"),
     ("Kişiselleştir", "Personalize"),
+    ("Sonraki masaüstü arka planı", "Next desktop background"),
     ("Otomatik düzenleme açıkken simgeler taşınamaz", "Icons cannot be moved while auto arrange is on"),
     ("Yeniden adlandırma", "Rename"),
     ("Oluşturma", "Create"),

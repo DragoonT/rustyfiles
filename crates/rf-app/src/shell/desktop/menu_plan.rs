@@ -140,6 +140,8 @@ pub struct BgCtx {
     pub has_folder: bool,
     /// The settings hide every icon: the menu's own switch cannot bring them back.
     pub icons_forced_hidden: bool,
+    /// A wallpaper slideshow is running: "Next desktop background" is offered, as in Windows' own menu (issue 206).
+    pub slideshow: bool,
 }
 
 /// The top level of the empty desktop's menu: Windows 11's own, in its order (Görünüm, Sıralama ölçütü, Yenile | Yeni | Görüntü
@@ -161,6 +163,8 @@ pub enum BgCmd {
     New,
     DisplaySettings,
     Personalize,
+    /// Only while a slideshow runs ([`BgCtx::slideshow`]).
+    NextBackground,
     OpenTerminal,
     /// Ours, but NOT at the top level: the first entry inside "more options" (see [`more_prefix`]).
     OpenInRustyfiles,
@@ -205,7 +209,11 @@ pub fn background_menu(ctx: &BgCtx) -> Vec<Row<BgCmd>> {
     }
     let make = vec![Row::Cmd(New, !ctx.read_only)];
     // (Windows' own settings pages, which the shell's DesktopBackground handlers would otherwise be the only way to reach)
-    let pages = vec![Row::Cmd(DisplaySettings, true), Row::Cmd(Personalize, true)];
+    let mut pages = Vec::new();
+    if ctx.slideshow {
+        pages.push(Row::Cmd(NextBackground, true));
+    }
+    pages.extend([Row::Cmd(DisplaySettings, true), Row::Cmd(Personalize, true)]);
     let terminal: Vec<Row<BgCmd>> = if ctx.has_folder { vec![Row::Cmd(OpenTerminal, true)] } else { Vec::new() };
     join(vec![view, ours, make, pages, terminal, vec![Row::More]])
 }
@@ -544,6 +552,9 @@ mod tests {
         let cmds = bg_cmds(&m);
         assert!(!cmds.iter().any(|(c, _)| *c == BgCmd::OpenTerminal));
         assert!(cmds.contains(&(BgCmd::DisplaySettings, true)) && cmds.contains(&(BgCmd::Personalize, true)));
+        assert!(!cmds.iter().any(|(c, _)| *c == BgCmd::NextBackground), "no slideshow: no next background");
+        let with = bg_cmds(&background_menu(&BgCtx { slideshow: true, ..Default::default() }));
+        assert!(with.contains(&(BgCmd::NextBackground, true)), "a running slideshow offers the next background");
         assert!(no_doubled_or_edge_separators(&m));
     }
 

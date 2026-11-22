@@ -7,7 +7,7 @@
 //!
 //! THREADS. COM runs on the shell thread through `sta::call` with a limit; a hung or missing server costs `SHELL_LIMIT` at most and the
 //! registry answer is used. Nothing here calls a method that writes: no `SetWallpaper`, `SetPosition`, `SetBackgroundColor`,
-//! `SetSlideshow*`, `AdvanceSlideshow`, `Enable`.
+//! `SetSlideshow*`, `Enable`; `AdvanceSlideshow` only on the user's own command (`next_slideshow_picture`).
 
 use std::path::{Path, PathBuf};
 
@@ -112,6 +112,23 @@ impl DesktopWallpaperApi for ComApi {
         unsafe { self.0.GetSlideshowOptions(&mut options, &mut tick)? };
         Ok((state, options.0, tick))
     }
+}
+
+/// "Next desktop background": the slideshow moves on to its next picture (`AdvanceSlideshow`). The one call here that writes, made
+/// only when the user picks the command in the desktop's menu (issue 206), which offers it only while a slideshow runs, as Windows' own
+/// menu does. On the shell thread through the COM-activation gate, like the reads.
+pub fn next_slideshow_picture() -> anyhow::Result<()> {
+    use windows::Win32::UI::Shell::DSD_FORWARD;
+    super::COM_ACTIVATION
+        .call(super::SHELL_LIMIT, move || -> anyhow::Result<()> {
+            let obj: IDesktopWallpaper = unsafe { CoCreateInstance(&DesktopWallpaper, None, CLSCTX_ALL) }.context("CoCreateInstance(DesktopWallpaper)")?;
+            unsafe { obj.AdvanceSlideshow(windows::core::PCWSTR::null(), DSD_FORWARD) }.context("AdvanceSlideshow")?;
+            Ok(())
+        })
+        .map_err(|e| match e {
+            super::GateError::Busy => anyhow::anyhow!("an earlier COM activation has not come back yet"),
+            super::GateError::TimedOut => anyhow::anyhow!("the shell thread did not answer in time"),
+        })?
 }
 
 /// `IDesktopWallpaper`, read on the shell thread. `Err` when the object cannot be created or the shell thread does not answer. It
