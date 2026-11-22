@@ -977,6 +977,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     }
     @objc func openSelection(_ sender: Any?) { list.openSelected() }
     @objc func toggleHidden(_ sender: Any?) { AppSettings.showHidden.toggle() }
+    @objc func toggleAllGroups(_ sender: Any?) { list.toggleAllGroups() }
     @objc func openSettings(_ sender: Any?) { navigate(to: BrowserTab.settingsURL) }
     func showSettingsPage(_ page: SettingsPage) { list.showSettings(page: page) }
 
@@ -1097,6 +1098,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(showColumns(_:)):
             item.state = list.viewMode == .columns ? .on : .off
             return true
+        case #selector(toggleAllGroups(_:)): return list.groupsApply && !list.groupCounts.isEmpty
         case #selector(toggleHidden(_:)):
             item.state = AppSettings.showHidden ? .on : .off
             return true

@@ -106,6 +106,7 @@ enum MainMenu {
         m.addItem(.separator())
         m.addItem(item(String(localized: "Show Hidden Files"), #selector(W.toggleHidden(_:)), ".", [.command, .shift]))
         m.addItem(item(String(localized: "Refresh"), #selector(W.refresh(_:)), "r"))
+        m.addItem(item(String(localized: "Collapse / Expand All Groups"), #selector(W.toggleAllGroups(_:)), "g", [.control, .shift]))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Hide Sidebar"), #selector(W.toggleSidebar(_:)), "s", [.command, .control]))
         m.addItem(item(String(localized: "Show Preview"), #selector(W.togglePreviewPane(_:)), "p", [.command, .shift]))

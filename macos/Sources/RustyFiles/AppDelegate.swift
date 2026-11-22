@@ -42,6 +42,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 LayoutFlyout.show(from: list.commandBar.view, list: list)
             }
         }
+        // RF_DEMO_FOLD=all|<group title> (development): every group folded, or that one
+        if let fold = ProcessInfo.processInfo.environment["RF_DEMO_FOLD"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let list = self?.controllers.first?.list else { return }
+                if fold == "all" { list.toggleAllGroups() } else { list.toggleGroup(fold) }
+            }
+        }
         // RF_DEMO_DUAL (development): the window in dual pane
         if ProcessInfo.processInfo.environment["RF_DEMO_DUAL"] != nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.controllers.first?.toggleDualPane(nil) }

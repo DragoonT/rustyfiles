@@ -183,6 +183,18 @@ impl Folder {
         Some(dir.join(&*self.entries[i as usize].name).display().to_string())
     }
 
+    /// Takes these rows out of the ones shown (the items of folded groups, all but each group's
+    /// first, which carries the group's header). The next `arrange` brings them back.
+    pub fn fold(&self, rows: Vec<u32>) {
+        if rows.is_empty() {
+            return;
+        }
+        let drop: std::collections::HashSet<u32> = rows.into_iter().collect();
+        let mut order = self.order.write().unwrap();
+        let kept: Vec<u32> = order.iter().enumerate().filter(|(r, _)| !drop.contains(&(*r as u32))).map(|(_, &i)| i).collect();
+        *order = kept;
+    }
+
     /// The row an item with this name has now (to keep the selection across a re-sort).
     pub fn row_of(&self, name: String) -> Option<u32> {
         self.order.read().unwrap().iter().position(|&i| *self.entries[i as usize].name == *name).map(|r| r as u32)

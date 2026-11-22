@@ -260,15 +260,18 @@ final class TileCollectionView: NSCollectionView, NSServicesMenuRequestor {
 final class GridGroupHeader: NSView, NSCollectionViewElement {
     static let id = NSUserInterfaceItemIdentifier("gridGroup")
     var title = "" { didSet { needsDisplay = true } }
+    var count: Int? { didSet { needsDisplay = true } }
+    var folded = false { didSet { needsDisplay = true } }
+    var onClick: (() -> Void)?
 
     override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
-        let p = Palette.of(self)
-        let r = NSRect(x: 6, y: 10, width: bounds.width - 12, height: 18)
-        let w = Draw.textWidth(title, font: Metrics.textSmMedium)
-        Draw.text(title, in: r, font: Metrics.textSmMedium, color: p.accent)
-        p.divider.setFill()
-        NSRect(x: r.minX + w + 10, y: r.midY, width: max(r.width - w - 10, 0), height: 1).fill()
+        GroupMetrics.draw(title, count: count, folded: folded, hot: false, in: NSRect(x: 6, y: 10, width: bounds.width - 12, height: 18), palette: Palette.of(self))
+    }
+
+    override func mouseDown(with event: NSEvent) {}
+    override func mouseUp(with event: NSEvent) {
+        if bounds.contains(convert(event.locationInWindow, from: nil)) { onClick?() }
     }
 }
