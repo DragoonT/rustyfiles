@@ -397,6 +397,12 @@ pub fn close(window: &mut Window, cx: &mut App) {
         for w in wins {
             let _ = w.update(cx, |_, window, _| window.remove_window());
         }
+        // A menu opened meanwhile (a right click on another file while this one was open, which closes this one first): the app's
+        // window is not activated again, that took the new menu's windows out of the front and so closed the new menu at once
+        // (issue 203: "Right-clicking on another file ... only dismisses the previous context menu").
+        if host(cx).is_some() {
+            return;
+        }
         let _ = h.main.update(cx, |_, window, cx| {
             window.activate_window();
             if let Some(f) = &h.restore {
