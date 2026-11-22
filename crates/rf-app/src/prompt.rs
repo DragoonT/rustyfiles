@@ -59,6 +59,9 @@ pub struct DialogView {
     message: Option<SharedString>,
     error: Option<SharedString>,
     input: Option<Entity<InputState>>,
+    /// The text box hides what is typed (a password): it has an eye button that shows it, and while shown it can be copied (issue
+    /// 204: "A button to see what is being typed when extracting or creating a password protected compressed file").
+    masked: bool,
     choices: Vec<Choice>,
     checks: Vec<Check>,
     buttons: Vec<Button>,
@@ -179,6 +182,7 @@ fn show_inner(
             message: message.map(Into::into),
             error: None,
             input,
+            masked,
             choices,
             checks,
             buttons,
@@ -451,7 +455,7 @@ impl Render for DialogView {
                                     .bg(p.content_bg)
                                     .border_1()
                                     .border_color(if self.error.is_some() { p.danger } else { p.accent })
-                                    .child(Input::new(i).appearance(false))
+                                    .child(Input::new(i).appearance(false).when(self.masked, |d| d.mask_toggle()))
                             }))
                             .children(self.error.clone().map(|e| div().text_xs().text_color(p.danger).child(e)))
                             .children(choice_rows)
