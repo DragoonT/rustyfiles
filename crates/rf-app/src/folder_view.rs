@@ -3164,9 +3164,12 @@ impl FolderView {
         // A second click opens only what the first click of the pair was made on (`completes_double`). Otherwise it is a click like
         // any other: it selects.
         let name = self.entries[ei as usize].name.clone();
-        let double = ev.click_count >= 2 && completes_double(self.first_click.as_ref(), self.load_serial, Some(&name));
-        self.first_click = (ev.click_count == 1).then(|| FirstClick { load: self.load_serial, name: Some(name) });
-        if ev.click_count >= 2 && !double {
+        // Clicks come in pairs, as Windows counts them: the third quick click starts a new pair (issue 197: clicking fast through
+        // nested folders stopped at the second one, its third and fourth clicks were taken for a triple and a quadruple click).
+        let second = is_second_click(ev.click_count);
+        let double = second && completes_double(self.first_click.as_ref(), self.load_serial, Some(&name));
+        self.first_click = (!second).then(|| FirstClick { load: self.load_serial, name: Some(name) });
+        if second && !double {
             // (it landed on this row because the listing changed under the pointer: the user did not aim at it, so it does not even
             // select it)
             return;
@@ -3196,7 +3199,7 @@ impl FolderView {
             // Clicking inside an existing multi-selection keeps it (so it can be dragged).
             self.cursor = Some(vi);
         }
-        self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && ev.click_count == 1 });
+        self.drag_origin = Some(RowPress { origin: ev.position, open_on_release: plain && single && !second });
         // Explorer: a click on the name of the item that was already the only one selected
         // renames it, once the double-click time passes without a second click or a drag
         if plain && !single && ev.click_count == 1 && on_name && was_only && had_focus && !was_renaming {
@@ -4842,8 +4845,9 @@ impl FolderView {
                             window.focus(&this.focus, cx);
                             // Settings → "Double-click an empty area to go up": when both clicks were made on the empty area of
                             // this listing (a double click that opened this folder does not also leave it)
-                            let double = ev.click_count == 2 && completes_double(this.first_click.as_ref(), this.load_serial, None);
-                            this.first_click = (ev.click_count == 1).then(|| FirstClick { load: this.load_serial, name: None });
+                            let second = is_second_click(ev.click_count);
+                            let double = second && completes_double(this.first_click.as_ref(), this.load_serial, None);
+                            this.first_click = (!second).then(|| FirstClick { load: this.load_serial, name: None });
                             if double && cx.global::<crate::settings::Settings>().double_click_up {
                                 this.up(cx);
                                 return;
@@ -6048,13 +6052,24 @@ fn hover_time() -> std::time::Duration {
     std::time::Duration::from_millis(if ok && ms > 0 { ms.min(5000) as u64 } else { 400 })
 }
 
+/// Whether a press is the second of a pair of quick clicks (2nd, 4th, 6th...): Windows' own pairing, where a third quick click is
+/// the first of the next pair.
+fn is_second_click(click_count: usize) -> bool {
+    click_count >= 2 && click_count % 2 == 0
+}
+
 fn completes_double(first: Option<&FirstClick>, load: u64, name: Option<&str>) -> bool {
     first.is_some_and(|f| f.load == load && f.name.as_deref() == name)
 }
 
 #[cfg(test)]
 mod double_click_tests {
-    use super::{FirstClick, completes_double};
+    use super::{FirstClick, completes_double, is_second_click};
+
+    #[test]
+    fn quick_clicks_pair_up_as_windows_counts_them() {
+        assert_eq!((1..=6).map(is_second_click).collect::<Vec<_>>(), [false, true, false, true, false, true]);
+    }
 
     fn first(load: u64, name: Option<&str>) -> FirstClick {
         FirstClick { load, name: name.map(Into::into) }
