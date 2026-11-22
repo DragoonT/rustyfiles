@@ -1366,6 +1366,12 @@ impl Settings {
         rf_win::glass::set_freeze_when_behind(self.hg_freeze_behind);
         gpui_windows::SMOOTH_SCROLL.store(self.smooth_scroll, Ordering::Relaxed);
         WINDOWS_FILE_EXPLORER_THEME.store(self.windows_file_explorer_theme, Ordering::Relaxed);
+        // (Windows' own menus shown by this process: the classic context menu, issue 211)
+        rf_win::menu_theme::set_wanted(match self.theme {
+            ThemePref::System => None,
+            ThemePref::Light => Some(false),
+            ThemePref::Dark | ThemePref::Black => Some(true),
+        });
         THEME.store(
             match self.theme {
                 ThemePref::System => 0,

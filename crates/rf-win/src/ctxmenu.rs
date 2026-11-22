@@ -512,6 +512,7 @@ fn run_menu(
         });
 
         let _ = SetForegroundWindow(owner);
+        crate::menu_theme::apply();
         let cmd = TrackPopupMenuEx(hmenu, (TPM_RETURNCMD | TPM_RIGHTBUTTON).0, x, y, owner, None);
         let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
         MENU_HOOK.with(|h| *h.borrow_mut() = None);
@@ -547,6 +548,7 @@ pub fn show_simple(owner: HWND, screen: (i32, i32), items: &[ExtraItem]) -> Opti
             let _ = InsertMenuW(hmenu, i as u32, f, (EXTRA_BASE + it.id) as usize, PCWSTR(label.as_ptr()));
         }
         let _ = SetForegroundWindow(owner);
+        crate::menu_theme::apply();
         let cmd = TrackPopupMenuEx(hmenu, (TPM_RETURNCMD | TPM_RIGHTBUTTON).0, screen.0, screen.1, owner, None);
         let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
         let _ = DestroyMenu(hmenu);

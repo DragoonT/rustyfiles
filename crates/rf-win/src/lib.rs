@@ -16,6 +16,7 @@ pub mod clipboard;
 pub mod vfiles;
 pub mod complete;
 pub mod ctxmenu;
+pub mod menu_theme;
 pub mod default_fm;
 pub mod desktop;
 pub mod design;
