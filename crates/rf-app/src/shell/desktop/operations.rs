@@ -107,7 +107,8 @@ impl DesktopView {
                     // a folder opens in a rustyfiles window
                     cx.defer(move |cx| super::open::open_location(None, Location::Path(path), cx));
                 } else {
-                    crate::folder_view::open_in_background(path, cx);
+                    // a shortcut to a folder opens that folder in rustyfiles too, not in Explorer (a user on Discord, 2026-11-20)
+                    crate::folder_view::open_file_or_link(path, cx, |dir, cx| super::open::open_location(None, Location::Path(dir), cx));
                 }
             }
         }

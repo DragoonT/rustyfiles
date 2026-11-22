@@ -3962,10 +3962,7 @@ impl FolderView {
     fn open_shortcut(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let link = path.clone();
-            let folder = cx
-                .background_executor()
-                .spawn(async move { rf_win::shortcut::resolve(&link).ok().map(|i| i.target).filter(|t| !t.as_os_str().is_empty() && t.is_dir()) })
-                .await;
+            let folder = cx.background_executor().spawn(async move { shortcut_folder(&link) }).await;
             let _ = this.update(cx, |this, cx| match folder {
                 Some(dir) if cx.global::<crate::settings::Settings>().open_folders_in_new_tab => cx.emit(FolderEvent::OpenInNewTab(Location::Path(dir))),
                 Some(dir) => this.navigate(Location::Path(dir), cx),
@@ -5573,7 +5570,11 @@ fn static_column(
                                         view.update(cx, |v, cx| v.navigate(Location::Path(target.clone()), cx));
                                     } else if ev.click_count() >= 2 {
                                         view.update(cx, |v, _| v.static_pick += 1);
-                                        open_in_background(target.clone(), cx);
+                                        // (a shortcut to a folder opens that folder here, as in the list: a user on Discord, 2026-11-20)
+                                        let view = view.clone();
+                                        open_file_or_link(target.clone(), cx, move |dir, cx| {
+                                            let _ = view.update(cx, |v, cx| v.navigate(Location::Path(dir), cx));
+                                        });
                                     } else {
                                         // one click selects the file, as in the list's own column (issue 118: it opened it)
                                         view.update(cx, |v, cx| v.pick_in_column(dir.clone(), name.clone(), cx));
@@ -5684,6 +5685,28 @@ mod gutter_tests {
 /// Whether `path` names a `.lnk` shortcut (by its name only).
 fn is_lnk(path: &std::path::Path) -> bool {
     path.extension().is_some_and(|e| e.eq_ignore_ascii_case("lnk"))
+}
+
+/// The folder a `.lnk` file points at, if it points at one (reads the link and asks the disk: call it off the UI thread).
+pub(crate) fn shortcut_folder(link: &std::path::Path) -> Option<PathBuf> {
+    rf_win::shortcut::resolve(link).ok().map(|i| i.target).filter(|t| !t.as_os_str().is_empty() && t.is_dir())
+}
+
+/// [`open_in_background`] for a file that may be a shortcut to a folder: that folder is handed to `folder` (to open it in rustyfiles,
+/// as a folder would be), anything else goes to the shell as before. The link is read off the UI thread.
+pub(crate) fn open_file_or_link(path: PathBuf, cx: &mut App, folder: impl FnOnce(PathBuf, &mut App) + 'static) {
+    if !is_lnk(&path) {
+        return open_in_background(path, cx);
+    }
+    cx.spawn(async move |cx| {
+        let link = path.clone();
+        let dir = cx.background_executor().spawn(async move { shortcut_folder(&link) }).await;
+        let _ = cx.update(|cx| match dir {
+            Some(dir) => folder(dir, cx),
+            None => open_in_background(path, cx),
+        });
+    })
+    .detach();
 }
 
 pub(crate) fn open_in_background(path: PathBuf, cx: &mut App) {
