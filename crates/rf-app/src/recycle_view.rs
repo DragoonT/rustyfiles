@@ -31,6 +31,14 @@ enum Col {
     Size,
 }
 
+/// A selection box: where the press was and where the pointer is, in the list's content coordinates (scrolled with the rows), and the
+/// selection it adds to.
+struct Band {
+    start: Point<Pixels>,
+    cur: Point<Pixels>,
+    base: HashSet<usize>,
+}
+
 pub struct RecycleView {
     items: Vec<RecycleItem>,
     /// The rows shown: indices into `items`, filtered and in sort order.
@@ -42,6 +50,11 @@ pub struct RecycleView {
     /// A plain press on a row, while the button is held: the place in `order` it was on. Moving over other rows selects the run
     /// between (`rf_core::recycle_bin::sweep_selection`).
     sweep: Option<usize>,
+    /// A selection box drawn from the list's empty space (issue 200), while the button is held.
+    band: Option<Band>,
+    /// A row took the press now being handled (the list under it does not start a box then).
+    row_hit: bool,
+    scroll: UniformListScrollHandle,
     sort: (Col, bool),
     /// The search box (made at the first draw: it needs the window).
     search: Option<Entity<InputState>>,
@@ -93,6 +106,9 @@ impl RecycleView {
             selected: HashSet::new(),
             anchor: None,
             sweep: None,
+            band: None,
+            row_hit: false,
+            scroll: UniformListScrollHandle::new(),
             // newest deleted first, as before
             sort: (Col::Deleted, true),
             search: None,
@@ -342,8 +358,70 @@ fn bin_icon(images: &Entity<ImageCache>, it: &RecycleItem, cx: &mut Context<Recy
     images.update(cx, |c, cx| c.icon(dir, &entry, cx))
 }
 
+impl RecycleView {
+    /// Window position -> the list's content coordinates (the rows scroll under it).
+    fn content_point(&self, pos: Point<Pixels>) -> Point<Pixels> {
+        let st = self.scroll.0.borrow();
+        let b = st.base_handle.bounds();
+        let off = st.base_handle.offset();
+        point(pos.x - b.origin.x - off.x, pos.y - b.origin.y - off.y)
+    }
+
+    fn band_moved(&mut self, ev: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.band.is_none() {
+            return;
+        }
+        if ev.pressed_button != Some(MouseButton::Left) {
+            // the button came up where this view did not hear it
+            self.band = None;
+            cx.notify();
+            return;
+        }
+        let cur = self.content_point(ev.position);
+        let Some(b) = self.band.as_mut() else { return };
+        b.cur = cur;
+        // (the rows start under the list's padding)
+        let pad = f32::from(LIST_PAD);
+        let now = rf_core::recycle_bin::band_selection(&self.order, &b.base, f32::from(b.start.y) - pad, f32::from(cur.y) - pad, f32::from(theme::ROW_H));
+        self.selected = now;
+        cx.notify();
+    }
+
+    fn end_press(&mut self, cx: &mut Context<Self>) {
+        self.sweep = None;
+        if self.band.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn render_band(&self, p: &Palette) -> Option<AnyElement> {
+        let b = self.band.as_ref()?;
+        let off = self.scroll.0.borrow().base_handle.offset();
+        let (w, h) = ((b.start.x - b.cur.x).abs(), (b.start.y - b.cur.y).abs());
+        if w < px(3.) && h < px(3.) {
+            return None;
+        }
+        Some(
+            div()
+                .absolute()
+                .left(b.start.x.min(b.cur.x) + off.x)
+                .top(b.start.y.min(b.cur.y) + off.y)
+                .w(w)
+                .h(h)
+                .bg(p.selection)
+                .border_1()
+                .border_color(p.selection_border)
+                .into_any_element(),
+        )
+    }
+}
+
+/// The list's padding (`p_1p5`): the first row's top edge is this far under the list's.
+const LIST_PAD: Pixels = px(6.);
+
 impl Render for RecycleView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.row_hit = false;
         let p = Palette::for_window(window);
         let total: u64 = self.items.iter().map(|i| i.size).sum();
         let has_sel = !self.selected.is_empty();
@@ -456,7 +534,7 @@ impl Render for RecycleView {
         } else {
             let n = self.order.len();
             let images = self.images.clone();
-            uniform_list(
+            let list = uniform_list(
                 "recycle-rows",
                 n,
                 cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
@@ -515,6 +593,7 @@ impl Render for RecycleView {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, ev: &MouseDownEvent, window, cx| {
+                                        this.row_hit = true;
                                         window.focus(&this.focus, cx);
                                         // plain, Ctrl (one more or one less) and Shift (the run from the last clicked row), as in the folder list
                                         let (selected, anchor) = rf_core::recycle_bin::click_selection(&this.order, &this.selected, this.anchor, i, ev.modifiers.control, ev.modifiers.shift);
@@ -540,9 +619,33 @@ impl Render for RecycleView {
                         .collect::<Vec<_>>()
                 }),
             )
-            .flex_1()
-            .p_1p5()
-            .into_any_element()
+            .track_scroll(&self.scroll)
+            .size_full()
+            .p_1p5();
+            div()
+                .id("recycle-list")
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .overflow_hidden()
+                // a press on the empty space under the rows starts a selection box (a press on a row is the row's: `row_hit`)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                        if std::mem::take(&mut this.row_hit) {
+                            return;
+                        }
+                        window.focus(&this.focus, cx);
+                        let at = this.content_point(ev.position);
+                        let base = if ev.modifiers.control || ev.modifiers.shift { this.selected.clone() } else { HashSet::new() };
+                        this.selected = base.clone();
+                        this.band = Some(Band { start: at, cur: at, base });
+                        cx.notify();
+                    }),
+                )
+                .child(list)
+                .children(self.render_band(&p))
+                .into_any_element()
         };
         if !self.took_focus {
             // once, when the view first shows: the keys of this page are its own
@@ -573,8 +676,9 @@ impl Render for RecycleView {
                     this.context_menu(None, window, cx);
                 }),
             )
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, _| this.sweep = None))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, _| this.sweep = None))
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| this.band_moved(ev, cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| this.end_press(cx)))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| this.end_press(cx)))
             .child(header)
             .when(!self.items.is_empty(), |d| d.child(columns))
             .child(body)
