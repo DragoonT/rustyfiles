@@ -62,9 +62,27 @@ pub fn open(path: &Path) -> anyhow::Result<()> {
     exec(path, None, None)
 }
 
-/// Shows the shell "Open with" dialog.
+/// Shows the shell's "Open with" chooser for `path`, and opens the file with the app picked there (with "Always" the app becomes the
+/// type's default). Modal: run it on the STA shell thread.
+///
+/// Through `SHOpenWithDialog`, not the `openas` verb: types such as `.cmd`, `.bat` and `.exe` have no `openas` verb, and asking for
+/// it failed without a word (issue 207: "When I do a right click on a .cmd file and select open with, nothing appear"). The verb is
+/// still tried when the chooser cannot be shown at all. Cancelling the chooser is not an error.
 pub fn open_with(path: &Path) -> anyhow::Result<()> {
-    exec(path, Some("openas"), None)
+    use windows::Win32::Foundation::ERROR_CANCELLED;
+    use windows::Win32::UI::Shell::{OAIF_ALLOW_REGISTRATION, OAIF_EXEC, OPENASINFO, SHOpenWithDialog};
+    ensure_com();
+    let file = wide(path);
+    let info = OPENASINFO { pcszFile: PCWSTR(file.as_ptr()), pcszClass: PCWSTR::null(), oaifInFlags: OAIF_ALLOW_REGISTRATION | OAIF_EXEC };
+    // SAFETY: info and the path buffer outlive the modal call
+    match unsafe { SHOpenWithDialog(None, &info) } {
+        Ok(()) => Ok(()),
+        Err(e) if e.code() == ERROR_CANCELLED.to_hresult() => Ok(()),
+        Err(e) => {
+            log::warn!("open with: the chooser could not be shown ({e}); trying the openas verb");
+            exec(path, Some("openas"), None)
+        }
+    }
 }
 
 /// Shows the Windows properties dialog for the item.
