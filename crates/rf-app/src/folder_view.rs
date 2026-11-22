@@ -5304,14 +5304,15 @@ impl FolderView {
     }
 }
 
-/// Columns for a row of equal cards: as many as fit at `min` width, but enough that none is
-/// wider than `max` (all columns share the width evenly).
+/// Whether `name` is an unfinished HyperDownload file (`.hdpart`, any case); safe for any UTF-8 name.
 fn is_hyperdownload_part(name: &str) -> bool {
     let suffix = ".hdpart";
     name.get(name.len().saturating_sub(suffix.len())..)
         .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix))
 }
 
+/// Columns for a row of equal cards: as many as fit at `min` width, but enough that none is
+/// wider than `max` (all columns share the width evenly).
 fn tile_cols(avail: f32, min: f32, max: f32, gap: f32) -> u16 {
     let fit = ((avail + gap) / (min + gap)).floor().max(1.);
     let need = ((avail + gap) / (max + gap)).ceil().max(1.);
