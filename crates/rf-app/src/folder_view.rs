@@ -1058,6 +1058,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
+            let item_tips = !crate::fluent_menu::is_open(cx);
             out.push(
                 h_flex()
                     .id(("crow", vi))
@@ -1092,12 +1093,13 @@ impl FolderView {
                         cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
                     )
                     .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, is_dir, &p))
-                    .tooltip(move |w, cx| {
-                        let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
-                        let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
-                        let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
-                        gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
-                    })
+                    // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
+                    .when(item_tips, |d| d.tooltip(move |w, cx| {
+                            let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
+                            let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
+                            let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
+                            gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
+                    }))
                     .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                         this.item_hover(vi, *on, cx);
                         if hover_select {
@@ -3190,6 +3192,7 @@ impl FolderView {
         let tip_path = self.path_of(ei);
         let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
         let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
+        let item_tips = !crate::fluent_menu::is_open(cx);
         let cell = base
             .id(("cell", vi))
             .w(tile_w)
@@ -3210,12 +3213,13 @@ impl FolderView {
                 cx.listener(move |this, _: &MouseDownEvent, window, cx| this.on_row_right_down(vi, window, cx)),
             )
             .when_some(self.path_of(ei), |d, path| file_drop_target(d, path, e.is_dir(), &p))
-            .tooltip(move |w, cx| {
-                let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
-                let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
-                let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
-                gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
-            })
+            // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
+            .when(item_tips, |d| d.tooltip(move |w, cx| {
+                    let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
+                    let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
+                    let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
+                    gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
+            }))
             // Settings → "Select files and folders on hover"; in a sliced row the tile's fill follows the whole tile.
             .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                 let sliced = part.is_some();
@@ -4571,6 +4575,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
+            let item_tips = !crate::fluent_menu::is_open(cx);
             let selected = self.selected.contains(&ei);
             // (the rows next to it that are selected too: the pill joins them)
             let sel_above = selected && vi > 0 && self.visible.get(vi - 1).is_some_and(|e| self.selected.contains(e));
@@ -4909,12 +4914,13 @@ impl FolderView {
                 })
                 .children(prop_cells)
                 .when(name_w.is_some(), |row| row.child(div().flex_1()))
-                .tooltip(move |w, cx| {
-                    let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
-                    let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
-                    let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
-                    gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
-                })
+                // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
+                .when(item_tips, |d| d.tooltip(move |w, cx| {
+                        let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
+                        let media = media.as_deref().map_or(&[][..], |items| items.as_slice());
+                        let text = item_tooltip_text(&tip_entry, tip_path.as_ref(), tip_folder_size.clone(), media);
+                        gpui_kit::component::tooltip::Tooltip::new(text).build(w, cx)
+                }))
                 .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                     this.item_hover(vi, *on, cx);
                     if hover_select {
