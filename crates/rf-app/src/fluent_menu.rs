@@ -1128,6 +1128,9 @@ impl MenuView {
                     if y + h > bottom - EDGE {
                         y = (bottom - EDGE - h).max(ay + EDGE);
                     }
+                    // (its row scrolled up past the screen's top: the submenu stays on the screen; above it, its window was given
+                    // a place on no display and came up as large as the screen, issue 205)
+                    y = y.max(ay + EDGE);
                     (x, y)
                 }
             };
