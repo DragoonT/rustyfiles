@@ -2165,5 +2165,8 @@
  "40761adf": "Dock vynechá animace a kreslí se na plném pozadí místo skla: méně práce, když hra vytěžuje grafickou kartu.",
  "6d5c4fbb": "Složka motivu",
  "4f72cd3e": "Složka v themes ve složce nastavení: její theme.toml mění barvy, složka icons ikony. Formát je v docs/themes.md na GitHubu.",
- "048a70ae": "Otevřít složku motivů"
+ "048a70ae": "Otevřít složku motivů",
+ "10b07e23": "Opravit",
+ "66b31c7b": "Odinstalovat",
+ "e23b7c62": "Další pozadí plochy"
 }

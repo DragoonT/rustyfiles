@@ -2165,5 +2165,8 @@
  "40761adf": "Il Dock salta i movimenti e viene disegnato su uno sfondo pieno invece che sul vetro: meno lavoro mentre un gioco tiene occupata la scheda grafica.",
  "6d5c4fbb": "Cartella del tema",
  "4f72cd3e": "Una cartella in themes, nella cartella delle impostazioni: il suo theme.toml cambia i colori, la sua cartella icons le icone. Il formato è in docs/themes.md su GitHub.",
- "048a70ae": "Apri la cartella dei temi"
+ "048a70ae": "Apri la cartella dei temi",
+ "10b07e23": "Ripristina",
+ "66b31c7b": "Disinstalla",
+ "e23b7c62": "Sfondo del desktop successivo"
 }

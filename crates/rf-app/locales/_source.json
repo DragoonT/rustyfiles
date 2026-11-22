@@ -13061,5 +13061,23 @@
   "key": "Tema klasörlerini aç",
   "tr": "Tema klasörlerini aç",
   "en": "Open the themes folder"
+ },
+ {
+  "id": "10b07e23",
+  "key": "Onar",
+  "tr": "Onar",
+  "en": "Repair"
+ },
+ {
+  "id": "66b31c7b",
+  "key": "Programı kaldır",
+  "tr": "Programı kaldır",
+  "en": "Uninstall"
+ },
+ {
+  "id": "e23b7c62",
+  "key": "Sonraki masaüstü arka planı",
+  "tr": "Sonraki masaüstü arka planı",
+  "en": "Next desktop background"
  }
 ]

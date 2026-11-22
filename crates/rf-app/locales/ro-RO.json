@@ -2165,5 +2165,8 @@
  "40761adf": "Dock-ul renunță la mișcări și este desenat pe un fundal plin în loc de sticlă: mai puțină muncă în timp ce un joc ocupă placa video.",
  "6d5c4fbb": "Folder de temă",
  "4f72cd3e": "Un folder din themes, în folderul de setări: theme.toml schimbă culorile, iar folderul icons pictogramele. Formatul este în docs/themes.md pe GitHub.",
- "048a70ae": "Deschide folderul temelor"
+ "048a70ae": "Deschide folderul temelor",
+ "10b07e23": "Reparare",
+ "66b31c7b": "Dezinstalare",
+ "e23b7c62": "Următorul fundal pentru desktop"
 }

@@ -2165,5 +2165,8 @@
  "40761adf": "A Dock kihagyja a mozgásokat, és üveg helyett egyszínű háttérrel rajzolódik: kevesebb munka, amíg egy játék leköti a videokártyát.",
  "6d5c4fbb": "Témamappa",
  "4f72cd3e": "Egy mappa a beállítások mappájának themes mappájában: a theme.toml a színeket, az icons mappa az ikonokat cseréli. A formátum a GitHubon, a docs/themes.md fájlban van.",
- "048a70ae": "Témák mappájának megnyitása"
+ "048a70ae": "Témák mappájának megnyitása",
+ "10b07e23": "Javítás",
+ "66b31c7b": "Eltávolítás",
+ "e23b7c62": "Következő asztalháttér"
 }

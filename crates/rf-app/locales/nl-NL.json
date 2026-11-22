@@ -2165,5 +2165,8 @@
  "40761adf": "Het Dock slaat zijn bewegingen over en wordt op een effen vlak in plaats van glas getekend: minder werk terwijl een game de videokaart bezighoudt.",
  "6d5c4fbb": "Themamap",
  "4f72cd3e": "Een map in themes, in de instellingenmap: de theme.toml verandert de kleuren, de map icons de pictogrammen. Het formaat staat in docs/themes.md op GitHub.",
- "048a70ae": "Themamap openen"
+ "048a70ae": "Themamap openen",
+ "10b07e23": "Herstellen",
+ "66b31c7b": "De-installeren",
+ "e23b7c62": "Volgende bureaubladachtergrond"
 }

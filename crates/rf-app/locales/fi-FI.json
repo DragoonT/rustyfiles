@@ -2165,5 +2165,8 @@
  "40761adf": "Dock jättää liikkeet pois ja piirretään yhtenäiselle taustalle lasin sijaan: vähemmän työtä, kun peli kuormittaa näytönohjainta.",
  "6d5c4fbb": "Teemakansio",
  "4f72cd3e": "Kansio asetuskansion themes-kansiossa: sen theme.toml vaihtaa värit ja icons-kansio kuvakkeet. Muoto on kuvattu GitHubissa tiedostossa docs/themes.md.",
- "048a70ae": "Avaa teemakansio"
+ "048a70ae": "Avaa teemakansio",
+ "10b07e23": "Korjaa",
+ "66b31c7b": "Poista asennus",
+ "e23b7c62": "Seuraava työpöydän tausta"
 }

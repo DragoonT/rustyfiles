@@ -2165,5 +2165,8 @@
  "40761adf": "Dock melewatkan animasinya dan digambar di latar solid alih-alih kaca: lebih sedikit kerja saat game menyibukkan kartu grafis.",
  "6d5c4fbb": "Folder tema",
  "4f72cd3e": "Sebuah folder di themes, di folder pengaturan: theme.toml-nya mengubah warna, folder icons-nya mengubah ikon. Formatnya ada di docs/themes.md di GitHub.",
- "048a70ae": "Buka folder tema"
+ "048a70ae": "Buka folder tema",
+ "10b07e23": "Perbaiki",
+ "66b31c7b": "Hapus instalan",
+ "e23b7c62": "Latar belakang desktop berikutnya"
 }

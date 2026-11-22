@@ -2165,5 +2165,8 @@
  "40761adf": "Dock pomija animacje i jest rysowany na jednolitym tle zamiast szkła: mniej pracy, gdy gra obciąża kartę graficzną.",
  "6d5c4fbb": "Folder motywu",
  "4f72cd3e": "Folder w themes w folderze ustawień: jego theme.toml zmienia kolory, a folder icons ikony. Format opisuje docs/themes.md na GitHubie.",
- "048a70ae": "Otwórz folder motywów"
+ "048a70ae": "Otwórz folder motywów",
+ "10b07e23": "Napraw",
+ "66b31c7b": "Odinstaluj",
+ "e23b7c62": "Następne tło pulpitu"
 }

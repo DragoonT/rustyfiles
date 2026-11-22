@@ -2165,5 +2165,8 @@
  "40761adf": "Dock springer sine bevægelser over og tegnes på en ensfarvet baggrund i stedet for glas: mindre arbejde, mens et spil holder grafikkortet travlt.",
  "6d5c4fbb": "Temamappe",
  "4f72cd3e": "En mappe i themes i indstillingsmappen: dens theme.toml ændrer farverne, dens icons-mappe ikonerne. Formatet står i docs/themes.md på GitHub.",
- "048a70ae": "Åbn temamappen"
+ "048a70ae": "Åbn temamappen",
+ "10b07e23": "Reparer",
+ "66b31c7b": "Afinstaller",
+ "e23b7c62": "Næste skrivebordsbaggrund"
 }

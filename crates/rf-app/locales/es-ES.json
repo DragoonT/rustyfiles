@@ -2165,5 +2165,8 @@
  "40761adf": "El Dock omite sus movimientos y se dibuja sobre un fondo sólido en lugar de cristal: menos trabajo mientras un juego ocupa la tarjeta gráfica.",
  "6d5c4fbb": "Carpeta de tema",
  "4f72cd3e": "Una carpeta dentro de themes, en la carpeta de configuración: su theme.toml cambia los colores y su carpeta icons, los iconos. El formato está en docs/themes.md en GitHub.",
- "048a70ae": "Abrir la carpeta de temas"
+ "048a70ae": "Abrir la carpeta de temas",
+ "10b07e23": "Reparar",
+ "66b31c7b": "Desinstalar",
+ "e23b7c62": "Siguiente fondo de escritorio"
 }

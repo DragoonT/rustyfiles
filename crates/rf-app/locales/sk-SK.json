@@ -2165,5 +2165,8 @@
  "40761adf": "Dock vynechá pohyby a kreslí sa na plnom pozadí namiesto skla: menej práce, kým hra vyťažuje grafickú kartu.",
  "6d5c4fbb": "Priečinok motívu",
  "4f72cd3e": "Priečinok v themes v priečinku nastavení: jeho theme.toml mení farby, priečinok icons ikony. Formát je v docs/themes.md na GitHube.",
- "048a70ae": "Otvoriť priečinok motívov"
+ "048a70ae": "Otvoriť priečinok motívov",
+ "10b07e23": "Opraviť",
+ "66b31c7b": "Odinštalovať",
+ "e23b7c62": "Ďalšie pozadie pracovnej plochy"
 }

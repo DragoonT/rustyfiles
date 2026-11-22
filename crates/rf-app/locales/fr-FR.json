@@ -2165,5 +2165,8 @@
  "40761adf": "Le Dock se passe de ses mouvements et se dessine sur un fond uni au lieu du verre : moins de travail quand un jeu occupe la carte graphique.",
  "6d5c4fbb": "Dossier de thème",
  "4f72cd3e": "Un dossier dans themes, dans le dossier des réglages : son theme.toml change les couleurs, son dossier icons les icônes. Le format est décrit dans docs/themes.md sur GitHub.",
- "048a70ae": "Ouvrir le dossier des thèmes"
+ "048a70ae": "Ouvrir le dossier des thèmes",
+ "10b07e23": "Réparer",
+ "66b31c7b": "Désinstaller",
+ "e23b7c62": "Arrière-plan du Bureau suivant"
 }

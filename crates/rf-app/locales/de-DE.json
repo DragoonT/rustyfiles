@@ -2165,5 +2165,8 @@
  "40761adf": "Das Dock verzichtet auf Bewegungen und wird auf einer einfarbigen Fläche statt auf Glas gezeichnet: weniger Arbeit, während ein Spiel die Grafikkarte auslastet.",
  "6d5c4fbb": "Design-Ordner",
  "4f72cd3e": "Ein Ordner in themes im Einstellungsordner: seine theme.toml ändert die Farben, sein Ordner icons die Symbole. Das Format steht in docs/themes.md auf GitHub.",
- "048a70ae": "Design-Ordner öffnen"
+ "048a70ae": "Design-Ordner öffnen",
+ "10b07e23": "Reparieren",
+ "66b31c7b": "Deinstallieren",
+ "e23b7c62": "Nächster Desktophintergrund"
 }

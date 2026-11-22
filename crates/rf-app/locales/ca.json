@@ -2165,5 +2165,8 @@
  "40761adf": "El Dock omet els moviments i es dibuixa sobre un fons sòlid en lloc del vidre: menys feina mentre un joc ocupa la targeta gràfica.",
  "6d5c4fbb": "Carpeta de tema",
  "4f72cd3e": "Una carpeta dins de themes, a la carpeta de configuració: el seu theme.toml canvia els colors i la carpeta icons, les icones. El format és a docs/themes.md a GitHub.",
- "048a70ae": "Obre la carpeta de temes"
+ "048a70ae": "Obre la carpeta de temes",
+ "10b07e23": "Repara",
+ "66b31c7b": "Desinstal·la",
+ "e23b7c62": "Fons d'escriptori següent"
 }

@@ -2165,5 +2165,8 @@
  "40761adf": "The Dock skips its motions and is drawn on a solid fill instead of glass: less work while a game keeps the graphics card busy.",
  "6d5c4fbb": "Theme folder",
  "4f72cd3e": "A folder in themes, in the settings folder: its theme.toml changes the colours, its icons folder the icons. The format is in docs/themes.md on GitHub.",
- "048a70ae": "Open the themes folder"
+ "048a70ae": "Open the themes folder",
+ "10b07e23": "Repair",
+ "66b31c7b": "Uninstall",
+ "e23b7c62": "Next desktop background"
 }

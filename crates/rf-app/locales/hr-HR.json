@@ -2165,5 +2165,8 @@
  "40761adf": "Dock preskače pokrete i crta se na punoj podlozi umjesto stakla: manje posla dok igra opterećuje grafičku karticu.",
  "6d5c4fbb": "Mapa teme",
  "4f72cd3e": "Mapa u themes u mapi postavki: njezin theme.toml mijenja boje, a mapa icons ikone. Format je opisan u docs/themes.md na GitHubu.",
- "048a70ae": "Otvori mapu tema"
+ "048a70ae": "Otvori mapu tema",
+ "10b07e23": "Popravi",
+ "66b31c7b": "Deinstaliraj",
+ "e23b7c62": "Sljedeća pozadina radne površine"
 }

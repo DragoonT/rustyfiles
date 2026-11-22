@@ -2165,5 +2165,8 @@
  "40761adf": "Dock hoppar över sina rörelser och ritas på en enfärgad bakgrund i stället för glas: mindre arbete medan ett spel håller grafikkortet upptaget.",
  "6d5c4fbb": "Temamapp",
  "4f72cd3e": "En mapp i themes i inställningsmappen: dess theme.toml ändrar färgerna och mappen icons ikonerna. Formatet finns i docs/themes.md på GitHub.",
- "048a70ae": "Öppna temamappen"
+ "048a70ae": "Öppna temamappen",
+ "10b07e23": "Reparera",
+ "66b31c7b": "Avinstallera",
+ "e23b7c62": "Nästa skrivbordsbakgrund"
 }

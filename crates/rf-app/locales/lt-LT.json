@@ -2165,5 +2165,8 @@
  "40761adf": "Dock praleidžia judesius ir piešiamas ant vientiso fono vietoj stiklo: mažiau darbo, kol žaidimas apkrauna vaizdo plokštę.",
  "6d5c4fbb": "Temos aplankas",
  "4f72cd3e": "Aplankas nustatymų aplanko themes kataloge: jo theme.toml keičia spalvas, icons aplankas – piktogramas. Formatas aprašytas docs/themes.md, GitHub.",
- "048a70ae": "Atidaryti temų aplanką"
+ "048a70ae": "Atidaryti temų aplanką",
+ "10b07e23": "Taisyti",
+ "66b31c7b": "Išdiegti",
+ "e23b7c62": "Kitas darbalaukio fonas"
 }
