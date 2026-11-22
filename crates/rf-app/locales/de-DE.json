@@ -2168,5 +2168,19 @@
  "048a70ae": "Design-Ordner öffnen",
  "10b07e23": "Reparieren",
  "66b31c7b": "Deinstallieren",
- "e23b7c62": "Nächster Desktophintergrund"
+ "e23b7c62": "Nächster Desktophintergrund",
+ "2cedf68f": "Nativ (Standard)",
+ "b9676345": "Variante",
+ "0e00912e": "Symbolthema",
+ "84511fe8": "Datei- und Ordnersymbole. Verwendet Systemsymbole; wählen Sie ein Freedesktop-Paket aus der Liste oder öffnen Sie den Paketordner. Varianten erscheinen unten, wenn das Paket welche hat.",
+ "59d38c05": "Standard",
+ "dcfbc9e0": "Kompaktes Fenster",
+ "fbd43181": "App-Symbol",
+ "e0eca68c": "Das Symbol der rustyfiles-Verknüpfungen im Startmenü, auf dem Desktop und an die Taskleiste angeheftet. Es bleibt nach Updates erhalten.",
+ "ad4e6b1d": "Symbol auswählen",
+ "42d8bc18": "Symboldateien",
+ "38ffe584": "Die Tabs, die Adressleiste und die Befehlsleiste sind schmaler, und der Inhalt reicht bis zum rechten und unteren Fensterrand. Symbole und Text behalten ihre Größe.",
+ "2560942b": "Möchten Sie dieses Element aus dem angehefteten Bereich entfernen?",
+ "431d7079": "Terminal auswählen",
+ "173a07d0": "Automatisch: Windows Terminal, sonst PowerShell"
 }

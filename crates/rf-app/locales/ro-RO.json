@@ -2168,5 +2168,19 @@
  "048a70ae": "Deschide folderul temelor",
  "10b07e23": "Reparare",
  "66b31c7b": "Dezinstalare",
- "e23b7c62": "Următorul fundal pentru desktop"
+ "e23b7c62": "Următorul fundal pentru desktop",
+ "2cedf68f": "Nativ (implicit)",
+ "b9676345": "Variantă",
+ "0e00912e": "Temă de pictograme",
+ "84511fe8": "Pictograme pentru fișiere și foldere. Folosește pictogramele sistemului; alegeți un pachet Freedesktop din listă sau deschideți folderul de pachete. Variantele apar mai jos când pachetul le are.",
+ "59d38c05": "implicit",
+ "dcfbc9e0": "Fereastră compactă",
+ "fbd43181": "Pictograma aplicației",
+ "e0eca68c": "Pictograma comenzilor rapide rustyfiles din meniul Start, de pe desktop și fixate pe bara de activități. Rămâne după actualizări.",
+ "ad4e6b1d": "Alegeți o pictogramă",
+ "42d8bc18": "Fișiere de pictograme",
+ "38ffe584": "Filele, bara de adrese și bara de comenzi sunt mai subțiri, iar conținutul ajunge la marginile din dreapta și de jos ale ferestrei. Pictogramele și textul își păstrează dimensiunea.",
+ "2560942b": "Doriți să eliminați acest element din secțiunea fixate?",
+ "431d7079": "Alegeți terminalul",
+ "173a07d0": "Automat: Windows Terminal, altfel PowerShell"
 }

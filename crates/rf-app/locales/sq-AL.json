@@ -2168,5 +2168,19 @@
  "048a70ae": "Hap dosjen e temave",
  "10b07e23": "Riparo",
  "66b31c7b": "Çinstalo",
- "e23b7c62": "Sfondi tjetër i desktopit"
+ "e23b7c62": "Sfondi tjetër i desktopit",
+ "2cedf68f": "Native (parazgjedhje)",
+ "b9676345": "Variant",
+ "0e00912e": "Tema e ikonave",
+ "84511fe8": "Ikonat e skedarëve dhe dosjeve. Përdor ikonat e sistemit; zgjidhni një paketë Freedesktop nga lista ose hapni dosjen e paketave. Variantet shfaqen më poshtë kur paketa i ka.",
+ "59d38c05": "parazgjedhje",
+ "dcfbc9e0": "Dritare kompakte",
+ "fbd43181": "Ikona e aplikacionit",
+ "e0eca68c": "Ikona e shkurtoreve të rustyfiles në menynë Start, në desktop dhe të ngjitura në shiritin e detyrave. Mbetet pas përditësimeve.",
+ "ad4e6b1d": "Zgjidhni një ikonë",
+ "42d8bc18": "Skedarë ikonash",
+ "38ffe584": "Skedat, shiriti i adresës dhe shiriti i komandave janë më të holla, dhe përmbajtja arrin deri te skajet e djathtë dhe e poshtëm të dritares. Ikonat dhe teksti ruajnë madhësinë.",
+ "2560942b": "Dëshironi ta hiqni këtë element nga seksioni i të ngjiturave?",
+ "431d7079": "Zgjidhni terminalin",
+ "173a07d0": "Automatik: Windows Terminal, përndryshe PowerShell"
 }

@@ -2168,5 +2168,19 @@
  "048a70ae": "Otwórz folder motywów",
  "10b07e23": "Napraw",
  "66b31c7b": "Odinstaluj",
- "e23b7c62": "Następne tło pulpitu"
+ "e23b7c62": "Następne tło pulpitu",
+ "2cedf68f": "Natywny (domyślny)",
+ "b9676345": "Wariant",
+ "0e00912e": "Motyw ikon",
+ "84511fe8": "Ikony plików i folderów. Używa ikon systemowych; wybierz pakiet Freedesktop z listy lub otwórz folder pakietów. Warianty pojawią się poniżej, jeśli pakiet je zawiera.",
+ "59d38c05": "domyślny",
+ "dcfbc9e0": "Kompaktowe okno",
+ "fbd43181": "Ikona aplikacji",
+ "e0eca68c": "Ikona skrótów rustyfiles w menu Start, na pulpicie i przypiętych do paska zadań. Pozostaje po aktualizacjach.",
+ "ad4e6b1d": "Wybierz ikonę",
+ "42d8bc18": "Pliki ikon",
+ "38ffe584": "Karty, pasek adresu i pasek poleceń są cieńsze, a zawartość sięga do prawej i dolnej krawędzi okna. Ikony i tekst zachowują swój rozmiar.",
+ "2560942b": "Czy chcesz usunąć ten element z sekcji przypiętych?",
+ "431d7079": "Wybierz terminal",
+ "173a07d0": "Automatycznie: Windows Terminal, w przeciwnym razie PowerShell"
 }

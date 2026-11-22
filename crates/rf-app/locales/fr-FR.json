@@ -2168,5 +2168,19 @@
  "048a70ae": "Ouvrir le dossier des thèmes",
  "10b07e23": "Réparer",
  "66b31c7b": "Désinstaller",
- "e23b7c62": "Arrière-plan du Bureau suivant"
+ "e23b7c62": "Arrière-plan du Bureau suivant",
+ "2cedf68f": "Natif (par défaut)",
+ "b9676345": "Variante",
+ "0e00912e": "Thème d'icônes",
+ "84511fe8": "Icônes des fichiers et dossiers. Utilise les icônes du système ; choisissez un pack Freedesktop dans la liste ou ouvrez le dossier des packs. Les variantes apparaissent ci-dessous lorsque le pack en propose.",
+ "59d38c05": "par défaut",
+ "dcfbc9e0": "Fenêtre compacte",
+ "fbd43181": "Icône de l'application",
+ "e0eca68c": "L'icône des raccourcis de rustyfiles dans le menu Démarrer, sur le bureau et épinglés à la barre des tâches. Elle est conservée après les mises à jour.",
+ "ad4e6b1d": "Choisir une icône",
+ "42d8bc18": "Fichiers d'icônes",
+ "38ffe584": "Les onglets, la barre d'adresse et la barre de commandes sont plus fins, et le contenu atteint les bords droit et inférieur de la fenêtre. Les icônes et le texte gardent leur taille.",
+ "2560942b": "Voulez-vous retirer cet élément de la section des éléments épinglés ?",
+ "431d7079": "Choisir un terminal",
+ "173a07d0": "Automatique : Windows Terminal, sinon PowerShell"
 }

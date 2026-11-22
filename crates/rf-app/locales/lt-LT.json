@@ -2168,5 +2168,19 @@
  "048a70ae": "Atidaryti temų aplanką",
  "10b07e23": "Taisyti",
  "66b31c7b": "Išdiegti",
- "e23b7c62": "Kitas darbalaukio fonas"
+ "e23b7c62": "Kitas darbalaukio fonas",
+ "2cedf68f": "Įprastinis (numatytasis)",
+ "b9676345": "Variantas",
+ "0e00912e": "Piktogramų tema",
+ "84511fe8": "Failų ir aplankų piktogramos. Naudojamos sistemos piktogramos; pasirinkite Freedesktop paketą iš sąrašo arba atidarykite paketų aplanką. Variantai rodomi žemiau, jei paketas juos turi.",
+ "59d38c05": "numatytasis",
+ "dcfbc9e0": "Kompaktiškas langas",
+ "fbd43181": "Programos piktograma",
+ "e0eca68c": "rustyfiles nuorodų piktograma meniu Pradėti, darbalaukyje ir užduočių juostoje prisegtose nuorodose. Ji išlieka po naujinimų.",
+ "ad4e6b1d": "Pasirinkite piktogramą",
+ "42d8bc18": "Piktogramų failai",
+ "38ffe584": "Skirtukai, adreso juosta ir komandų juosta yra plonesni, o turinys siekia dešinįjį ir apatinį lango kraštus. Piktogramų ir teksto dydis nesikeičia.",
+ "2560942b": "Ar norite pašalinti šį elementą iš prisegtųjų?",
+ "431d7079": "Pasirinkite terminalą",
+ "173a07d0": "Automatiškai: Windows Terminal, kitaip PowerShell"
 }

@@ -2168,5 +2168,19 @@
  "048a70ae": "Open the themes folder",
  "10b07e23": "Repair",
  "66b31c7b": "Uninstall",
- "e23b7c62": "Next desktop background"
+ "e23b7c62": "Next desktop background",
+ "2cedf68f": "Native (default)",
+ "b9676345": "Variant",
+ "0e00912e": "Icon theme",
+ "84511fe8": "File and folder icons. Uses system icons; pick a Freedesktop pack from the list or open the pack folder. Variants appear below when the pack has them.",
+ "59d38c05": "default",
+ "dcfbc9e0": "Compact window",
+ "fbd43181": "App icon",
+ "e0eca68c": "The icon of rustyfiles' shortcuts in the Start menu, on the desktop and pinned to the taskbar. It stays after updates.",
+ "ad4e6b1d": "Choose an icon",
+ "42d8bc18": "Icon files",
+ "38ffe584": "The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size.",
+ "2560942b": "Do you want to remove this item from the pinned section?",
+ "431d7079": "Choose terminal",
+ "173a07d0": "Automatic: Windows Terminal, else PowerShell"
 }

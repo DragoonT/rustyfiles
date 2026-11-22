@@ -2168,5 +2168,19 @@
  "048a70ae": "Apri la cartella dei temi",
  "10b07e23": "Ripristina",
  "66b31c7b": "Disinstalla",
- "e23b7c62": "Sfondo del desktop successivo"
+ "e23b7c62": "Sfondo del desktop successivo",
+ "2cedf68f": "Nativo (predefinito)",
+ "b9676345": "Variante",
+ "0e00912e": "Tema icone",
+ "84511fe8": "Icone di file e cartelle. Usa le icone di sistema; scegli un pacchetto Freedesktop dall'elenco o apri la cartella dei pacchetti. Le varianti compaiono sotto quando il pacchetto le ha.",
+ "59d38c05": "predefinito",
+ "dcfbc9e0": "Finestra compatta",
+ "fbd43181": "Icona dell'app",
+ "e0eca68c": "L'icona dei collegamenti di rustyfiles nel menu Start, sul desktop e aggiunti alla barra delle applicazioni. Resta dopo gli aggiornamenti.",
+ "ad4e6b1d": "Scegli un'icona",
+ "42d8bc18": "File di icone",
+ "38ffe584": "Le schede, la barra degli indirizzi e la barra dei comandi sono più sottili e il contenuto arriva ai bordi destro e inferiore della finestra. Icone e testo mantengono le dimensioni.",
+ "2560942b": "Vuoi rimuovere questo elemento dalla sezione dei fissati?",
+ "431d7079": "Scegli il terminale",
+ "173a07d0": "Automatico: Windows Terminal, altrimenti PowerShell"
 }

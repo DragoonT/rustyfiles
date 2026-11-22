@@ -2168,5 +2168,19 @@
  "048a70ae": "Themamap openen",
  "10b07e23": "Herstellen",
  "66b31c7b": "De-installeren",
- "e23b7c62": "Volgende bureaubladachtergrond"
+ "e23b7c62": "Volgende bureaubladachtergrond",
+ "2cedf68f": "Systeemeigen (standaard)",
+ "b9676345": "Variant",
+ "0e00912e": "Pictogramthema",
+ "84511fe8": "Bestands- en mappictogrammen. Gebruikt systeempictogrammen; kies een Freedesktop-pakket uit de lijst of open de pakketmap. Varianten verschijnen hieronder als het pakket ze heeft.",
+ "59d38c05": "standaard",
+ "dcfbc9e0": "Compact venster",
+ "fbd43181": "App-pictogram",
+ "e0eca68c": "Het pictogram van de snelkoppelingen van rustyfiles in het Startmenu, op het bureaublad en vastgemaakt aan de taakbalk. Het blijft behouden na updates.",
+ "ad4e6b1d": "Kies een pictogram",
+ "42d8bc18": "Pictogrambestanden",
+ "38ffe584": "De tabbladen, de adresbalk en de opdrachtbalk zijn dunner en de inhoud reikt tot de rechter- en onderrand van het venster. Pictogrammen en tekst behouden hun grootte.",
+ "2560942b": "Wilt u dit item uit de vastgemaakte items verwijderen?",
+ "431d7079": "Kies terminal",
+ "173a07d0": "Automatisch: Windows Terminal, anders PowerShell"
 }

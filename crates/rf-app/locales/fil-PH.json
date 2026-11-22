@@ -2168,5 +2168,19 @@
  "048a70ae": "Buksan ang folder ng mga tema",
  "10b07e23": "Ayusin",
  "66b31c7b": "I-uninstall",
- "e23b7c62": "Susunod na background ng desktop"
+ "e23b7c62": "Susunod na background ng desktop",
+ "2cedf68f": "Native (default)",
+ "b9676345": "Variant",
+ "0e00912e": "Tema ng icon",
+ "84511fe8": "Mga icon ng file at folder. Gumagamit ng mga icon ng system; pumili ng Freedesktop pack sa listahan o buksan ang folder ng pack. Lalabas sa ibaba ang mga variant kapag mayroon ang pack.",
+ "59d38c05": "default",
+ "dcfbc9e0": "Compact na window",
+ "fbd43181": "Icon ng app",
+ "e0eca68c": "Ang icon ng mga shortcut ng rustyfiles sa Start menu, sa desktop, at naka-pin sa taskbar. Nananatili ito pagkatapos ng mga update.",
+ "ad4e6b1d": "Pumili ng icon",
+ "42d8bc18": "Mga icon file",
+ "38ffe584": "Mas manipis ang mga tab, address bar, at command bar, at umaabot ang content sa kanan at ibabang gilid ng window. Nananatili ang laki ng mga icon at text.",
+ "2560942b": "Gusto mo bang alisin ang item na ito sa mga naka-pin?",
+ "431d7079": "Pumili ng terminal",
+ "173a07d0": "Awtomatiko: Windows Terminal, kung hindi, PowerShell"
 }

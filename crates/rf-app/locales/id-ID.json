@@ -2168,5 +2168,19 @@
  "048a70ae": "Buka folder tema",
  "10b07e23": "Perbaiki",
  "66b31c7b": "Hapus instalan",
- "e23b7c62": "Latar belakang desktop berikutnya"
+ "e23b7c62": "Latar belakang desktop berikutnya",
+ "2cedf68f": "Asli (bawaan)",
+ "b9676345": "Varian",
+ "0e00912e": "Tema ikon",
+ "84511fe8": "Ikon file dan folder. Menggunakan ikon sistem; pilih paket Freedesktop dari daftar atau buka folder paket. Varian muncul di bawah jika paket memilikinya.",
+ "59d38c05": "bawaan",
+ "dcfbc9e0": "Jendela ringkas",
+ "fbd43181": "Ikon aplikasi",
+ "e0eca68c": "Ikon pintasan rustyfiles di menu Start, di desktop, dan yang disematkan ke bilah tugas. Tetap ada setelah pembaruan.",
+ "ad4e6b1d": "Pilih ikon",
+ "42d8bc18": "File ikon",
+ "38ffe584": "Tab, bilah alamat, dan bilah perintah lebih tipis, dan konten mencapai tepi kanan dan bawah jendela. Ikon dan teks tetap berukuran sama.",
+ "2560942b": "Hapus item ini dari bagian yang disematkan?",
+ "431d7079": "Pilih terminal",
+ "173a07d0": "Otomatis: Windows Terminal, jika tidak PowerShell"
 }

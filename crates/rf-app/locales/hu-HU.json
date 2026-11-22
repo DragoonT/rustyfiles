@@ -2168,5 +2168,19 @@
  "048a70ae": "Témák mappájának megnyitása",
  "10b07e23": "Javítás",
  "66b31c7b": "Eltávolítás",
- "e23b7c62": "Következő asztalháttér"
+ "e23b7c62": "Következő asztalháttér",
+ "2cedf68f": "Natív (alapértelmezett)",
+ "b9676345": "Változat",
+ "0e00912e": "Ikontéma",
+ "84511fe8": "Fájl- és mappaikonok. A rendszerikonokat használja; válasszon egy Freedesktop-csomagot a listából, vagy nyissa meg a csomagmappát. A változatok lent jelennek meg, ha a csomag tartalmaz ilyeneket.",
+ "59d38c05": "alapértelmezett",
+ "dcfbc9e0": "Kompakt ablak",
+ "fbd43181": "Alkalmazásikon",
+ "e0eca68c": "A rustyfiles parancsikonjainak ikonja a Start menüben, az asztalon és a tálcára rögzítve. Frissítések után is megmarad.",
+ "ad4e6b1d": "Válasszon ikont",
+ "42d8bc18": "Ikonfájlok",
+ "38ffe584": "A lapok, a címsor és a parancssáv vékonyabbak, a tartalom pedig eléri az ablak jobb és alsó szélét. Az ikonok és a szöveg mérete nem változik.",
+ "2560942b": "El szeretné távolítani ezt az elemet a rögzítettek közül?",
+ "431d7079": "Terminál kiválasztása",
+ "173a07d0": "Automatikus: Windows Terminal, egyébként PowerShell"
 }

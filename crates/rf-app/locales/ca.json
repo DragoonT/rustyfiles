@@ -2168,5 +2168,19 @@
  "048a70ae": "Obre la carpeta de temes",
  "10b07e23": "Repara",
  "66b31c7b": "Desinstal·la",
- "e23b7c62": "Fons d'escriptori següent"
+ "e23b7c62": "Fons d'escriptori següent",
+ "2cedf68f": "Natiu (per defecte)",
+ "b9676345": "Variant",
+ "0e00912e": "Tema d'icones",
+ "84511fe8": "Icones de fitxers i carpetes. Utilitza les icones del sistema; trieu un paquet Freedesktop de la llista o obriu la carpeta de paquets. Les variants apareixen a sota quan el paquet en té.",
+ "59d38c05": "per defecte",
+ "dcfbc9e0": "Finestra compacta",
+ "fbd43181": "Icona de l'aplicació",
+ "e0eca68c": "La icona dels accessos directes de rustyfiles al menú Inici, a l'escriptori i fixats a la barra de tasques. Es manté després de les actualitzacions.",
+ "ad4e6b1d": "Trieu una icona",
+ "42d8bc18": "Fitxers d'icones",
+ "38ffe584": "Les pestanyes, la barra d'adreces i la barra d'ordres són més primes, i el contingut arriba a les vores dreta i inferior de la finestra. Les icones i el text mantenen la mida.",
+ "2560942b": "Voleu eliminar aquest element de la secció de fixats?",
+ "431d7079": "Trieu un terminal",
+ "173a07d0": "Automàtic: Windows Terminal, si no PowerShell"
 }

@@ -2168,5 +2168,19 @@
  "048a70ae": "Abrir a pasta de temas",
  "10b07e23": "Reparar",
  "66b31c7b": "Desinstalar",
- "e23b7c62": "Fundo do ambiente de trabalho seguinte"
+ "e23b7c62": "Fundo do ambiente de trabalho seguinte",
+ "2cedf68f": "Nativo (predefinição)",
+ "b9676345": "Variante",
+ "0e00912e": "Tema de ícones",
+ "84511fe8": "Ícones de ficheiros e pastas. Usa os ícones do sistema; escolha um pacote Freedesktop na lista ou abra a pasta de pacotes. As variantes aparecem abaixo quando o pacote as tem.",
+ "59d38c05": "predefinição",
+ "dcfbc9e0": "Janela compacta",
+ "fbd43181": "Ícone da aplicação",
+ "e0eca68c": "O ícone dos atalhos do rustyfiles no menu Iniciar, no ambiente de trabalho e afixados na barra de tarefas. Mantém-se após as atualizações.",
+ "ad4e6b1d": "Escolher um ícone",
+ "42d8bc18": "Ficheiros de ícones",
+ "38ffe584": "Os separadores, a barra de endereço e a barra de comandos ficam mais finos, e o conteúdo chega aos limites direito e inferior da janela. Os ícones e o texto mantêm o tamanho.",
+ "2560942b": "Pretende remover este item da secção de afixados?",
+ "431d7079": "Escolher terminal",
+ "173a07d0": "Automático: Windows Terminal, caso contrário PowerShell"
 }

@@ -2168,5 +2168,19 @@
  "048a70ae": "Abrir la carpeta de temas",
  "10b07e23": "Reparar",
  "66b31c7b": "Desinstalar",
- "e23b7c62": "Siguiente fondo de escritorio"
+ "e23b7c62": "Siguiente fondo de escritorio",
+ "2cedf68f": "Nativo (predeterminado)",
+ "b9676345": "Variante",
+ "0e00912e": "Tema de iconos",
+ "84511fe8": "Iconos de archivos y carpetas. Usa los iconos del sistema; elige un paquete Freedesktop de la lista o abre la carpeta de paquetes. Las variantes aparecen abajo cuando el paquete las tiene.",
+ "59d38c05": "predeterminado",
+ "dcfbc9e0": "Ventana compacta",
+ "fbd43181": "Icono de la aplicación",
+ "e0eca68c": "El icono de los accesos directos de rustyfiles en el menú Inicio, en el escritorio y anclados a la barra de tareas. Se conserva tras las actualizaciones.",
+ "ad4e6b1d": "Elegir un icono",
+ "42d8bc18": "Archivos de iconos",
+ "38ffe584": "Las pestañas, la barra de direcciones y la barra de comandos son más delgadas, y el contenido llega a los bordes derecho e inferior de la ventana. Los iconos y el texto conservan su tamaño.",
+ "2560942b": "¿Quieres quitar este elemento de la sección de anclados?",
+ "431d7079": "Elegir terminal",
+ "173a07d0": "Automático: Windows Terminal; si no, PowerShell"
 }

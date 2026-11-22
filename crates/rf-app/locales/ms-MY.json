@@ -2168,5 +2168,19 @@
  "048a70ae": "Buka folder tema",
  "10b07e23": "Baiki",
  "66b31c7b": "Nyahpasang",
- "e23b7c62": "Latar belakang desktop seterusnya"
+ "e23b7c62": "Latar belakang desktop seterusnya",
+ "2cedf68f": "Asal (lalai)",
+ "b9676345": "Varian",
+ "0e00912e": "Tema ikon",
+ "84511fe8": "Ikon fail dan folder. Menggunakan ikon sistem; pilih pek Freedesktop daripada senarai atau buka folder pek. Varian muncul di bawah apabila pek mempunyainya.",
+ "59d38c05": "lalai",
+ "dcfbc9e0": "Tetingkap padat",
+ "fbd43181": "Ikon apl",
+ "e0eca68c": "Ikon pintasan rustyfiles dalam menu Start, pada desktop dan yang disematkan pada bar tugas. Ia kekal selepas kemas kini.",
+ "ad4e6b1d": "Pilih ikon",
+ "42d8bc18": "Fail ikon",
+ "38ffe584": "Tab, bar alamat dan bar perintah menjadi lebih nipis, dan kandungan sampai ke tepi kanan dan bawah tetingkap. Ikon dan teks kekal bersaiz sama.",
+ "2560942b": "Adakah anda mahu mengalih keluar item ini daripada bahagian yang disematkan?",
+ "431d7079": "Pilih terminal",
+ "173a07d0": "Automatik: Windows Terminal, jika tidak PowerShell"
 }

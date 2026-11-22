@@ -2168,5 +2168,19 @@
  "048a70ae": "Maak die temagids oop",
  "10b07e23": "Herstel",
  "66b31c7b": "Deïnstalleer",
- "e23b7c62": "Volgende lessenaaragtergrond"
+ "e23b7c62": "Volgende lessenaaragtergrond",
+ "2cedf68f": "Standaard (inheems)",
+ "b9676345": "Variant",
+ "0e00912e": "Ikoontema",
+ "84511fe8": "Lêer- en vouerikone. Gebruik stelselikone; kies 'n Freedesktop-pakket uit die lys of maak die pakketvouer oop. Variante verskyn hieronder as die pakket dit het.",
+ "59d38c05": "standaard",
+ "dcfbc9e0": "Kompakte venster",
+ "fbd43181": "Programikoon",
+ "e0eca68c": "Die ikoon van rustyfiles se kortpaaie in die Start-kieslys, op die lessenaar en vasgespeld aan die taakbalk. Dit bly na opdaterings.",
+ "ad4e6b1d": "Kies 'n ikoon",
+ "42d8bc18": "Ikoonlêers",
+ "38ffe584": "Die oortjies, die adresbalk en die opdragbalk is dunner, en die inhoud strek tot by die venster se regter- en onderrand. Ikone en teks behou hul grootte.",
+ "2560942b": "Wil jy hierdie item uit die vasgespelde afdeling verwyder?",
+ "431d7079": "Kies terminaal",
+ "173a07d0": "Outomaties: Windows Terminal, anders PowerShell"
 }

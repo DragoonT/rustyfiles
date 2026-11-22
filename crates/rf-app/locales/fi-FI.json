@@ -2168,5 +2168,19 @@
  "048a70ae": "Avaa teemakansio",
  "10b07e23": "Korjaa",
  "66b31c7b": "Poista asennus",
- "e23b7c62": "Seuraava työpöydän tausta"
+ "e23b7c62": "Seuraava työpöydän tausta",
+ "2cedf68f": "Natiivi (oletus)",
+ "b9676345": "Variantti",
+ "0e00912e": "Kuvaketeema",
+ "84511fe8": "Tiedosto- ja kansiokuvakkeet. Käyttää järjestelmän kuvakkeita; valitse Freedesktop-paketti luettelosta tai avaa pakettikansio. Variantit näkyvät alla, jos paketissa on niitä.",
+ "59d38c05": "oletus",
+ "dcfbc9e0": "Kompakti ikkuna",
+ "fbd43181": "Sovelluskuvake",
+ "e0eca68c": "rustyfilesin pikakuvakkeiden kuvake Käynnistä-valikossa, työpöydällä ja tehtäväpalkkiin kiinnitettynä. Se säilyy päivitysten jälkeen.",
+ "ad4e6b1d": "Valitse kuvake",
+ "42d8bc18": "Kuvaketiedostot",
+ "38ffe584": "Välilehdet, osoitepalkki ja komentopalkki ovat ohuempia, ja sisältö ulottuu ikkunan oikeaan ja alareunaan. Kuvakkeet ja teksti säilyttävät kokonsa.",
+ "2560942b": "Haluatko poistaa tämän kohteen kiinnitetyistä?",
+ "431d7079": "Valitse pääte",
+ "173a07d0": "Automaattinen: Windows Terminal, muuten PowerShell"
 }

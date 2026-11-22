@@ -2168,5 +2168,19 @@
  "048a70ae": "Atvērt motīvu mapi",
  "10b07e23": "Labot",
  "66b31c7b": "Atinstalēt",
- "e23b7c62": "Nākamais darbvirsmas fons"
+ "e23b7c62": "Nākamais darbvirsmas fons",
+ "2cedf68f": "Dabiskais (noklusējums)",
+ "b9676345": "Variants",
+ "0e00912e": "Ikonu motīvs",
+ "84511fe8": "Failu un mapju ikonas. Izmanto sistēmas ikonas; izvēlieties Freedesktop pakotni no saraksta vai atveriet pakotņu mapi. Varianti parādās zemāk, ja pakotnei tie ir.",
+ "59d38c05": "noklusējums",
+ "dcfbc9e0": "Kompakts logs",
+ "fbd43181": "Lietotnes ikona",
+ "e0eca68c": "rustyfiles saīšņu ikona izvēlnē Sākt, darbvirsmā un piespraustās uzdevumjoslā. Tā saglabājas pēc atjauninājumiem.",
+ "ad4e6b1d": "Izvēlieties ikonu",
+ "42d8bc18": "Ikonu faili",
+ "38ffe584": "Cilnes, adreses josla un komandu josla ir plānākas, un saturs sniedzas līdz loga labajai un apakšējai malai. Ikonu un teksta izmērs nemainās.",
+ "2560942b": "Vai vēlaties noņemt šo vienumu no piespraustajiem?",
+ "431d7079": "Izvēlieties termināli",
+ "173a07d0": "Automātiski: Windows Terminal, citādi PowerShell"
 }

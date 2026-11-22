@@ -2168,5 +2168,19 @@
  "048a70ae": "Otevřít složku motivů",
  "10b07e23": "Opravit",
  "66b31c7b": "Odinstalovat",
- "e23b7c62": "Další pozadí plochy"
+ "e23b7c62": "Další pozadí plochy",
+ "2cedf68f": "Nativní (výchozí)",
+ "b9676345": "Varianta",
+ "0e00912e": "Motiv ikon",
+ "84511fe8": "Ikony souborů a složek. Používají se systémové ikony; vyberte balíček Freedesktop ze seznamu nebo otevřete složku s balíčky. Varianty se zobrazí níže, pokud je balíček má.",
+ "59d38c05": "výchozí",
+ "dcfbc9e0": "Kompaktní okno",
+ "fbd43181": "Ikona aplikace",
+ "e0eca68c": "Ikona zástupců rustyfiles v nabídce Start, na ploše a připnutých na hlavní panel. Po aktualizacích zůstane.",
+ "ad4e6b1d": "Vyberte ikonu",
+ "42d8bc18": "Soubory ikon",
+ "38ffe584": "Karty, adresní řádek a příkazový řádek jsou tenčí a obsah sahá k pravému a spodnímu okraji okna. Ikony a text si zachovávají velikost.",
+ "2560942b": "Chcete tuto položku odebrat z připnutých?",
+ "431d7079": "Vyberte terminál",
+ "173a07d0": "Automaticky: Windows Terminal, jinak PowerShell"
 }

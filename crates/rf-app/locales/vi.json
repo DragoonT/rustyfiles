@@ -2168,5 +2168,19 @@
  "048a70ae": "Mở thư mục giao diện",
  "10b07e23": "Sửa chữa",
  "66b31c7b": "Gỡ cài đặt",
- "e23b7c62": "Hình nền màn hình tiếp theo"
+ "e23b7c62": "Hình nền màn hình tiếp theo",
+ "2cedf68f": "Gốc (mặc định)",
+ "b9676345": "Biến thể",
+ "0e00912e": "Chủ đề biểu tượng",
+ "84511fe8": "Biểu tượng tệp và thư mục. Dùng biểu tượng hệ thống; chọn gói Freedesktop trong danh sách hoặc mở thư mục gói. Các biến thể hiện bên dưới khi gói có.",
+ "59d38c05": "mặc định",
+ "dcfbc9e0": "Cửa sổ thu gọn",
+ "fbd43181": "Biểu tượng ứng dụng",
+ "e0eca68c": "Biểu tượng của các lối tắt rustyfiles trong menu Start, trên màn hình nền và được ghim vào thanh tác vụ. Biểu tượng được giữ lại sau khi cập nhật.",
+ "ad4e6b1d": "Chọn biểu tượng",
+ "42d8bc18": "Tệp biểu tượng",
+ "38ffe584": "Các tab, thanh địa chỉ và thanh lệnh mỏng hơn, và nội dung kéo dài đến mép phải và mép dưới của cửa sổ. Biểu tượng và văn bản giữ nguyên kích thước.",
+ "2560942b": "Bạn có muốn xóa mục này khỏi phần đã ghim không?",
+ "431d7079": "Chọn terminal",
+ "173a07d0": "Tự động: Windows Terminal, nếu không thì PowerShell"
 }

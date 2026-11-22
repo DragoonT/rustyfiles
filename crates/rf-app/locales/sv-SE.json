@@ -2168,5 +2168,19 @@
  "048a70ae": "Öppna temamappen",
  "10b07e23": "Reparera",
  "66b31c7b": "Avinstallera",
- "e23b7c62": "Nästa skrivbordsbakgrund"
+ "e23b7c62": "Nästa skrivbordsbakgrund",
+ "2cedf68f": "Inbyggd (standard)",
+ "b9676345": "Variant",
+ "0e00912e": "Ikontema",
+ "84511fe8": "Fil- och mappikoner. Använder systemikoner; välj ett Freedesktop-paket i listan eller öppna paketmappen. Varianter visas nedan när paketet har sådana.",
+ "59d38c05": "standard",
+ "dcfbc9e0": "Kompakt fönster",
+ "fbd43181": "Appikon",
+ "e0eca68c": "Ikonen för rustyfiles genvägar i Start-menyn, på skrivbordet och fästa i aktivitetsfältet. Den finns kvar efter uppdateringar.",
+ "ad4e6b1d": "Välj en ikon",
+ "42d8bc18": "Ikonfiler",
+ "38ffe584": "Flikarna, adressfältet och kommandofältet är tunnare, och innehållet når fönstrets högra och nedre kant. Ikoner och text behåller sin storlek.",
+ "2560942b": "Vill du ta bort det här objektet från de fästa?",
+ "431d7079": "Välj terminal",
+ "173a07d0": "Automatiskt: Windows Terminal, annars PowerShell"
 }

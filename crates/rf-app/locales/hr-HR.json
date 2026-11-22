@@ -2168,5 +2168,19 @@
  "048a70ae": "Otvori mapu tema",
  "10b07e23": "Popravi",
  "66b31c7b": "Deinstaliraj",
- "e23b7c62": "Sljedeća pozadina radne površine"
+ "e23b7c62": "Sljedeća pozadina radne površine",
+ "2cedf68f": "Izvorno (zadano)",
+ "b9676345": "Varijanta",
+ "0e00912e": "Tema ikona",
+ "84511fe8": "Ikone datoteka i mapa. Koristi sistemske ikone; odaberite Freedesktop paket s popisa ili otvorite mapu paketa. Varijante se pojavljuju ispod ako ih paket ima.",
+ "59d38c05": "zadano",
+ "dcfbc9e0": "Kompaktni prozor",
+ "fbd43181": "Ikona aplikacije",
+ "e0eca68c": "Ikona prečaca rustyfiles u izborniku Start, na radnoj površini i prikvačenih na programsku traku. Ostaje nakon ažuriranja.",
+ "ad4e6b1d": "Odaberite ikonu",
+ "42d8bc18": "Datoteke ikona",
+ "38ffe584": "Kartice, adresna traka i naredbena traka su tanje, a sadržaj seže do desnog i donjeg ruba prozora. Ikone i tekst zadržavaju veličinu.",
+ "2560942b": "Želite li ukloniti ovu stavku iz prikvačenih?",
+ "431d7079": "Odaberite terminal",
+ "173a07d0": "Automatski: Windows Terminal, inače PowerShell"
 }

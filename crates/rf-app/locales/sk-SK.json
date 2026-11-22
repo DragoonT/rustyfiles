@@ -2168,5 +2168,19 @@
  "048a70ae": "Otvoriť priečinok motívov",
  "10b07e23": "Opraviť",
  "66b31c7b": "Odinštalovať",
- "e23b7c62": "Ďalšie pozadie pracovnej plochy"
+ "e23b7c62": "Ďalšie pozadie pracovnej plochy",
+ "2cedf68f": "Natívny (predvolený)",
+ "b9676345": "Variant",
+ "0e00912e": "Motív ikon",
+ "84511fe8": "Ikony súborov a priečinkov. Používajú sa systémové ikony; vyberte balík Freedesktop zo zoznamu alebo otvorte priečinok s balíkmi. Varianty sa zobrazia nižšie, ak ich balík má.",
+ "59d38c05": "predvolený",
+ "dcfbc9e0": "Kompaktné okno",
+ "fbd43181": "Ikona aplikácie",
+ "e0eca68c": "Ikona odkazov rustyfiles v ponuke Štart, na ploche a pripnutých na paneli úloh. Zostane aj po aktualizáciách.",
+ "ad4e6b1d": "Vyberte ikonu",
+ "42d8bc18": "Súbory ikon",
+ "38ffe584": "Karty, adresný riadok a panel príkazov sú tenšie a obsah siaha po pravý a dolný okraj okna. Ikony a text si zachovávajú veľkosť.",
+ "2560942b": "Chcete túto položku odstrániť z pripnutých?",
+ "431d7079": "Vyberte terminál",
+ "173a07d0": "Automaticky: Windows Terminal, inak PowerShell"
 }

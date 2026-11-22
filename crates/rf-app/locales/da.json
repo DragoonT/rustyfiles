@@ -2168,5 +2168,19 @@
  "048a70ae": "Åbn temamappen",
  "10b07e23": "Reparer",
  "66b31c7b": "Afinstaller",
- "e23b7c62": "Næste skrivebordsbaggrund"
+ "e23b7c62": "Næste skrivebordsbaggrund",
+ "2cedf68f": "Indbygget (standard)",
+ "b9676345": "Variant",
+ "0e00912e": "Ikontema",
+ "84511fe8": "Fil- og mappeikoner. Bruger systemikoner; vælg en Freedesktop-pakke på listen, eller åbn pakkemappen. Varianter vises nedenfor, når pakken har dem.",
+ "59d38c05": "standard",
+ "dcfbc9e0": "Kompakt vindue",
+ "fbd43181": "App-ikon",
+ "e0eca68c": "Ikonet til rustyfiles' genveje i Start-menuen, på skrivebordet og fastgjort til proceslinjen. Det består efter opdateringer.",
+ "ad4e6b1d": "Vælg et ikon",
+ "42d8bc18": "Ikonfiler",
+ "38ffe584": "Fanerne, adresselinjen og kommandolinjen er tyndere, og indholdet når helt ud til vinduets højre og nederste kant. Ikoner og tekst bevarer deres størrelse.",
+ "2560942b": "Vil du fjerne dette element fra de fastgjorte?",
+ "431d7079": "Vælg terminal",
+ "173a07d0": "Automatisk: Windows Terminal, ellers PowerShell"
 }
