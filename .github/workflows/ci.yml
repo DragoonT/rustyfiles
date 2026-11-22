@@ -18,3 +18,26 @@ jobs:
         run: cargo test --workspace
       - name: Release build
         run: cargo build --release -p rf-app -p rf-dialog
+
+  build-arm64:
+    # Windows on ARM: cross-compiled on the x64 runner, so it is built but not tested (the tests above cover the shared code).
+    # ring needs clang for this target; the runner image has LLVM on its PATH.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: Release build (ARM64)
+        run: cargo build --release --locked --target aarch64-pc-windows-msvc -p rf-app -p rf-dialog -p rf-shellguard
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rustyfiles-arm64
+          path: |
+            target/aarch64-pc-windows-msvc/release/rustyfiles.exe
+            target/aarch64-pc-windows-msvc/release/directlook.exe
+            target/aarch64-pc-windows-msvc/release/rustyfiles-shellguard.exe
+            target/aarch64-pc-windows-msvc/release/rustyfiles_dialog.dll
+            LICENSE
+          if-no-files-found: error
