@@ -173,7 +173,8 @@ final class TitleBarView: FlippedView {
     override func layout() {
         super.layout()
         // The tabs start right after the window buttons (the sidebar toggle is in the nav row).
-        let stripX = Metrics.trafficLightsWidth
+        // (in the window's own points: the window buttons do not grow with the interface scale)
+        let stripX = Metrics.trafficLightsWidth / max(convert(NSSize(width: 1, height: 0), to: nil).width, 0.1)
         let room = max(bounds.width - stripX - 4 - 28 - 12, 120)
         strip.frame = NSRect(x: stripX, y: 0, width: room, height: bounds.height)
         // the "+" follows the last tab: ml_1 and 2 px off the bottom

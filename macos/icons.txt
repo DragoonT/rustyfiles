@@ -129,3 +129,4 @@ arrow-up-from-line
 shield
 chevrons-down-up
 chevrons-up-down
+zoom-in

@@ -791,5 +791,10 @@
 "Expand all groups": "Tüm grupları genişlet",
 "Collapse / Expand All Groups": "Tüm Grupları Daralt / Genişlet",
 "Zoom In": "Simgeleri Büyüt",
-"Zoom Out": "Simgeleri Küçült"
+"Zoom Out": "Simgeleri Küçült",
+"Bigger Interface": "Arayüzü Büyüt",
+"Smaller Interface": "Arayüzü Küçült",
+"Actual Size": "Gerçek Boyut",
+"Interface scale": "Arayüz ölçeği",
+"Everything in the window bigger or smaller: for a display set to a higher resolution than usual.": "Penceredeki her şey daha büyük ya da küçük: ekran olağandan yüksek bir çözünürlüğe ayarlıysa."
 }

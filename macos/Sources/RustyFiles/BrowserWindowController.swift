@@ -93,6 +93,25 @@ final class BrowserTab {
 final class RootView: FlippedView {
     var onLayout: (() -> Void)?
 
+    /// Settings › Appearance › Interface scale: everything in the window drawn this much
+    /// bigger (or smaller), as a higher display resolution would otherwise shrink it. The
+    /// views lay out in the smaller (or larger) bounds and AppKit scales the drawing, so text
+    /// and icons stay sharp.
+    var scale: CGFloat = 1 {
+        didSet {
+            guard scale != oldValue else { return }
+            setFrameSize(frame.size)
+            needsLayout = true
+            needsDisplay = true
+        }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        let b = NSSize(width: newSize.width / scale, height: newSize.height / scale)
+        if bounds.size != b { setBoundsSize(b) }
+    }
+
     override func layout() {
         super.layout()
         onLayout?()
@@ -182,6 +201,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         frame.addSubview(root)
         window.contentView = frame
         applyMaterial()
+        applyScale()
         [sidebar, handle, leftList.card, rightList.card, navBar, titleBar].forEach(root.addSubview)
         rightList.card.isHidden = true
         root.onLayout = { [weak self] in self?.layoutRoot() }
@@ -234,6 +254,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         rightList.card.isActivePane = dual && rightActive
     }
 
+    /// The interface scale; a bigger one takes the taller title bar, so the window buttons
+    /// stay level with the grown tabs.
+    private func applyScale() {
+        let s = AppSettings.interfaceScale
+        window?.toolbarStyle = s >= 1.2 ? .unified : .unifiedCompact
+        root.scale = s
+        titleBar.needsLayout = true
+    }
+
     func windowDidBecomeKey(_ notification: Notification) { list.updateCommands() }
 
     /// Edit › Undo and Redo, ⌘Z and ⇧⌘Z, work on file operations (text being edited keeps its own).
@@ -246,6 +275,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc private func settingsChanged(_ note: Notification) {
         let key = AppSettings.changedKey(note)
         if key == "material" || key == "theme" { applyMaterial() }
+        if key == "interfacePercent" { applyScale() }
         leftList.apply(settingKey: key)
         rightList.apply(settingKey: key)
         func redraw(_ v: NSView) {
@@ -979,6 +1009,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func toggleHidden(_ sender: Any?) { AppSettings.showHidden.toggle() }
     @objc func toggleAllGroups(_ sender: Any?) { list.toggleAllGroups() }
     @objc func zoomIn(_ sender: Any?) { list.zoom(1) }
+    /// Settings › Appearance › Interface scale, a step at a time (⌥⌘+, ⌥⌘−, ⌥⌘0).
+    @objc func interfaceBigger(_ sender: Any?) { stepScale(1) }
+    @objc func interfaceSmaller(_ sender: Any?) { stepScale(-1) }
+    @objc func interfaceActual(_ sender: Any?) { AppSettings.interfacePercent = 100 }
+    private func stepScale(_ d: Int) {
+        let all = AppSettings.interfaceScales
+        let i = all.firstIndex(of: AppSettings.interfacePercent) ?? all.firstIndex(of: 100)!
+        AppSettings.interfacePercent = all[min(max(i + d, 0), all.count - 1)]
+    }
     @objc func zoomOut(_ sender: Any?) { list.zoom(-1) }
     @objc func openSettings(_ sender: Any?) { navigate(to: BrowserTab.settingsURL) }
     func showSettingsPage(_ page: SettingsPage) { list.showSettings(page: page) }
