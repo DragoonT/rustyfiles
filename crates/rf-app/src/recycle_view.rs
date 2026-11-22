@@ -39,6 +39,9 @@ pub struct RecycleView {
     selected: HashSet<usize>,
     /// The row a Shift+click counts from (the last row clicked plainly or with Ctrl).
     anchor: Option<usize>,
+    /// A plain press on a row, while the button is held: the place in `order` it was on. Moving over other rows selects the run
+    /// between (`rf_core::recycle_bin::sweep_selection`).
+    sweep: Option<usize>,
     sort: (Col, bool),
     /// The search box (made at the first draw: it needs the window).
     search: Option<Entity<InputState>>,
@@ -89,6 +92,7 @@ impl RecycleView {
             order: Vec::new(),
             selected: HashSet::new(),
             anchor: None,
+            sweep: None,
             // newest deleted first, as before
             sort: (Col::Deleted, true),
             search: None,
@@ -458,8 +462,8 @@ impl Render for RecycleView {
                 cx.processor(move |this, range: std::ops::Range<usize>, window, cx| {
                     let p = Palette::for_window(window);
                     range
-                        .filter_map(|row| this.order.get(row).copied())
-                        .map(|i| {
+                        .filter_map(|row| this.order.get(row).copied().map(|i| (row, i)))
+                        .map(|(row, i)| {
                             let it = &this.items[i];
                             let sel = this.selected.contains(&i);
                             let shell_icon = bin_icon(&images, it, cx);
@@ -515,9 +519,22 @@ impl Render for RecycleView {
                                         // plain, Ctrl (one more or one less) and Shift (the run from the last clicked row), as in the folder list
                                         let (selected, anchor) = rf_core::recycle_bin::click_selection(&this.order, &this.selected, this.anchor, i, ev.modifiers.control, ev.modifiers.shift);
                                         (this.selected, this.anchor) = (selected, anchor);
+                                        this.sweep = (!ev.modifiers.control && !ev.modifiers.shift).then_some(row);
                                         cx.notify();
                                     }),
                                 )
+                                .on_mouse_move(cx.listener(move |this, ev: &MouseMoveEvent, _, cx| {
+                                    let Some(from) = this.sweep else { return };
+                                    if ev.pressed_button != Some(MouseButton::Left) {
+                                        this.sweep = None;
+                                        return;
+                                    }
+                                    let now = rf_core::recycle_bin::sweep_selection(&this.order, from, row);
+                                    if now != this.selected {
+                                        this.selected = now;
+                                        cx.notify();
+                                    }
+                                }))
                                 .into_any_element()
                         })
                         .collect::<Vec<_>>()
@@ -556,6 +573,8 @@ impl Render for RecycleView {
                     this.context_menu(None, window, cx);
                 }),
             )
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, _| this.sweep = None))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, _| this.sweep = None))
             .child(header)
             .when(!self.items.is_empty(), |d| d.child(columns))
             .child(body)

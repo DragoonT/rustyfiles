@@ -42,6 +42,14 @@ pub fn click_selection(shown: &[usize], selected: &HashSet<usize>, anchor: Optio
     (HashSet::from([clicked]), Some(clicked))
 }
 
+/// A drag over the rows (issue 200, "Can't click and drag to select files inside the recycle bin"): every shown row from the one the
+/// press was on (`from`) to the one the pointer is over now (`to`), both places in `shown`.
+pub fn sweep_selection(shown: &[usize], from: usize, to: usize) -> HashSet<usize> {
+    let last = shown.len().saturating_sub(1);
+    let (a, b) = (from.min(to).min(last), from.max(to).min(last));
+    shown.get(a..=b).map(|r| r.iter().copied().collect()).unwrap_or_default()
+}
+
 /// Every shown row that is not selected, for "invert selection".
 pub fn inverted(shown: &[usize], selected: &HashSet<usize>) -> HashSet<usize> {
     shown.iter().copied().filter(|r| !selected.contains(r)).collect()
@@ -51,7 +59,7 @@ pub fn inverted(shown: &[usize], selected: &HashSet<usize>) -> HashSet<usize> {
 mod selection_tests {
     use std::collections::HashSet;
 
-    use super::{click_selection, inverted};
+    use super::{click_selection, inverted, sweep_selection};
 
     fn set(rows: &[usize]) -> HashSet<usize> {
         rows.iter().copied().collect()
@@ -59,6 +67,15 @@ mod selection_tests {
 
     /// The list shows the items in another order than they are stored (sorted, filtered): a range follows what is SHOWN.
     const SHOWN: [usize; 6] = [7, 2, 9, 4, 0, 5];
+
+    #[test]
+    fn a_drag_selects_the_shown_rows_between_its_ends_either_way() {
+        assert_eq!(sweep_selection(&SHOWN, 1, 3), set(&[2, 9, 4]));
+        assert_eq!(sweep_selection(&SHOWN, 4, 2), set(&[9, 4, 0]));
+        assert_eq!(sweep_selection(&SHOWN, 5, 5), set(&[5]));
+        assert_eq!(sweep_selection(&SHOWN, 2, 99), set(&[9, 4, 0, 5]), "past the last row: up to the last one");
+        assert!(sweep_selection(&[], 0, 3).is_empty());
+    }
 
     #[test]
     fn a_plain_click_selects_one_row_and_ctrl_adds_or_removes() {
