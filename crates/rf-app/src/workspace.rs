@@ -4430,6 +4430,9 @@ fn resize_handle<T: Clone + 'static>(id: &'static str, payload: T, left: bool) -
         // the sidebar's right edge: stay inside it, the content card is painted on top
         .when(!left, |d| d.right_0())
         .cursor_col_resize()
+        // the press is the handle's alone: it reached the list and the preview under the handle too, which started a selection box
+        // and dropped the previewed file (issue 202: "Resizing the preview pane ... starts selecting things and cancels the preview")
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_drag(payload, |_, _, _, cx| cx.new(|_| ResizeGhost))
 }
 

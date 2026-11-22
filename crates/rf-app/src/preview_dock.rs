@@ -88,6 +88,8 @@ fn top_resize_handle<T: Clone + 'static>(id: &'static str, payload: T) -> impl I
         .h(px(pp::SPLITTER))
         .top(px(-pp::SPLITTER / 2.))
         .cursor_row_resize()
+        // (the press is the handle's alone, as the side pane's: issue 202)
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_drag(payload, |_, _, _, cx| cx.new(|_| ResizeGhost))
 }
 
