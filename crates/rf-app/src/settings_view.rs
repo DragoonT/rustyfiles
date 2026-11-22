@@ -1538,6 +1538,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::Folder,
+            t!("Windows Dosya Gezgini görünümü"),
+            None,
+            sw("windows-file-explorer-theme", p, s.windows_file_explorer_theme, |s, v| s.windows_file_explorer_theme = v),
+        ),
+        card(
+            p,
             L::PanelRight,
             t!("Kaydırma çubuğunu göster"),
             Some(t!("Ayrıntılar ve Izgara listelerinin sağında; sürükleyin ya da bir yere tıklayıp oraya atlayın.")),
@@ -3194,6 +3201,14 @@ fn about(p: &Palette, cx: &mut App) -> Vec<AnyElement> {
             }
         }),
         section(p, t!("Açık kaynak")),
+        link_row(
+            p,
+            "icons8-credit",
+            L::Image,
+            "Icons8",
+            Some("icons8.com"),
+            |_, _| open_url("https://icons8.com/icon/Ey9jEx96rxU0/undo"),
+        ),
         expander(
             "libs",
             p,

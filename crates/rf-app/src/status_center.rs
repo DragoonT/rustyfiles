@@ -1883,6 +1883,7 @@ pub fn sync_popup(ops: &Entity<Ops>, cx: &mut App) {
 
 fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option<AnyWindowHandle> {
     // anchored under the title-bar button: right edge 8 px in from the window's
+    let explorer_style = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
     let (origin, width, dark, display) = owner
         .update(cx, |_, w, cx| (w.bounds().origin, w.viewport_size().width, Palette::for_window(w).dark, crate::theme::popup_display(w, cx)))
         .ok()?;
@@ -1899,7 +1900,11 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
         is_movable: false,
         is_resizable: false,
         is_minimizable: false,
-        window_background: crate::theme::window_material(WindowBackgroundAppearance::Blurred),
+        window_background: if explorer_style {
+            WindowBackgroundAppearance::Opaque
+        } else {
+            crate::theme::window_material(WindowBackgroundAppearance::Blurred)
+        },
         ..Default::default()
     };
     let ops = ops.clone();
@@ -1911,7 +1916,7 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
                 crate::glass::keep_out_of_capture(h.hwnd.get());
             }
         }
-        cx.new(|cx| ScView::new(ops, w, cx))
+        cx.new(|cx| ScView::new(ops, explorer_style, w, cx))
     });
     match r {
         Ok(h) => Some(h.into()),
@@ -1925,12 +1930,13 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
 /// The Status Center in its own Acrylic window; sizes itself to its content.
 struct ScView {
     ops: Entity<Ops>,
+    explorer_style: bool,
     focus: FocusHandle,
     _subs: Vec<Subscription>,
 }
 
 impl ScView {
-    fn new(ops: Entity<Ops>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(ops: Entity<Ops>, explorer_style: bool, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let subs = vec![
             cx.observe(&ops, |_, _, cx| cx.notify()),
             // clicking anywhere else closes it, like a Windows 11 flyout
@@ -1952,7 +1958,7 @@ impl ScView {
         ];
         let focus = cx.focus_handle();
         window.focus(&focus, cx);
-        Self { ops, focus, _subs: subs }
+        Self { ops, explorer_style, focus, _subs: subs }
     }
 }
 
@@ -1965,7 +1971,8 @@ impl Render for ScView {
         v_flex()
             .size_full()
             // (the Acrylic window is the surface; a Windows without it gets the plain fill)
-            .when_some(crate::theme::popup_fill(&p), |d, f| d.bg(f))
+            .when(self.explorer_style, |d| d.rounded(theme::RADIUS).bg(p.card_bg).border_1().border_color(p.border).shadow_lg())
+            .when(!self.explorer_style, |d| d.when_some(crate::theme::popup_fill(&p), |d, f| d.bg(f)))
             .track_focus(&self.focus)
             .text_color(p.text)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {

@@ -92,7 +92,7 @@ impl FolderView {
         let background = background || items.is_empty();
         let me = cx.entity().downgrade();
         let menu = if background { self.background_menu(&me, &dir, cx) } else { self.items_menu(&me, &dir, &items, cx) };
-        let menu_view = fluent_menu::show(menu, window.mouse_position(), window, cx);
+        let menu_view = fluent_menu::show_context(menu, window.mouse_position(), window, cx);
 
         // Shell items in the background: QueryContextMenu can take a second with slow extensions.
         let target = if background { ShellTarget::Background(dir.clone()) } else { ShellTarget::Items(items.clone()) };
@@ -196,14 +196,33 @@ impl FolderView {
         let has_files = !self.selected_is_single_dir() || items.len() > 1;
         let target_dir = if single_dir { items[0].clone() } else { dir.to_path_buf() };
         let prefs = cx.global::<crate::settings::Settings>();
-        let (mp, show_flatten) = (prefs.menu.clone(), prefs.show_flatten);
+        let (mp, show_flatten, explorer_theme) = (prefs.menu.clone(), prefs.show_flatten, prefs.windows_file_explorer_theme);
         // Members of an archive (ZIP, 7z, RAR... opened like a folder) have no file of their own: the rows that need one are left out
         // (a shortcut, running as administrator, compressing, tags, the Shelf, the terminal...), and the few that make sense take an
         // extracted copy first (the desktop background, installing a font). Copying out, dragging out, renaming and deleting inside work.
         let in_archive = items.iter().any(|p| crate::archive_view::split(p).is_some() && !p.exists());
         let mut v: Vec<Item> = Vec::new();
 
-        v.push(Item::action(t!("Aç"), icon(L::SquareArrowOutUpRight), act(me, |v, _, cx| v.open_selected(cx))).hint("Enter"));
+        let open_icon = if explorer_theme {
+            items
+                .first()
+                .and_then(|path| {
+                    let parsing = path.to_string_lossy();
+                    self.images.update(cx, |images, cx| images.shell_icon(&parsing, 16, cx))
+                })
+                .map(MenuIcon::Image)
+                .unwrap_or_else(|| {
+                    if single_dir {
+                        MenuIcon::Tinted(L::Folder, crate::theme::kind_color(crate::icons::Category::Folder, true))
+                    } else {
+                        let ext = items.first().and_then(|path| path.extension()).map(|ext| ext.to_string_lossy().to_lowercase()).unwrap_or_default();
+                        MenuIcon::Lucide(crate::icons::icon_for(crate::icons::category_for_ext(&ext)))
+                    }
+                })
+        } else {
+            icon(L::SquareArrowOutUpRight)
+        };
+        v.push(Item::action(t!("Aç"), open_icon, act(me, |v, _, cx| v.open_selected(cx))).hint("Enter"));
         if single_dir || single_archive {
             let opened = if single_archive { items[0].clone() } else { target_dir.clone() };
             let (a, b) = (opened.clone(), opened);
@@ -225,7 +244,23 @@ impl FolderView {
             }
         }
         if has_files {
-            v.push(Item::Sub { label: t!("Şununla aç").into(), icon: icon(L::LayoutGrid), items: Sub::Pending { key: "openwith", fallback: None }, click: None });
+            let icon = icon(L::LayoutGrid);
+            v.push(Item::Sub {
+                label: t!("Şununla aç").into(),
+                icon,
+                items: Sub::Pending { key: "openwith", fallback: None },
+                click: None,
+            });
+        }
+        if explorer_theme && rf_win::clipboard::can_paste() {
+            v.push(
+                Item::action(
+                    t!("Yapıştır"),
+                    icon(L::ClipboardPaste),
+                    act(me, |v, w, cx| if v.selected_is_single_dir() { v.paste_into_selected(w, cx) } else { v.paste(w, cx) }),
+                )
+                .hint("Ctrl+V"),
+            );
         }
         // Explorer's "Send to" in the first menu (issue 117): its entries come with the shell's items (see `show_context_menu`)
         if send_to_fits(items, cx) {
@@ -354,29 +389,30 @@ impl FolderView {
         let z7_items = items.to_vec();
         let dlg_items = items.to_vec();
         if mp.compress && !in_archive {
+            let compress_icon = icon(L::Archive);
             let quick = cx.global::<crate::settings::Settings>().quick_compress;
             let quick_items = items.to_vec();
             let sub_items: Vec<Item> = vec![
-                    Item::action(t!("Arşiv oluştur…"), icon(L::Archive), move |w, cx| create_archive_dialog(dlg_items.clone(), w, cx)),
-                    Item::Separator,
-                    Item::action(t!("ZIP olarak sıkıştır"), icon(L::FileArchive), move |_, cx| compress(cx, zip_items.clone(), rf_archive::Format::Zip)),
-                    Item::action(t!("7z olarak sıkıştır"), icon(L::FileArchive), move |_, cx| compress(cx, z7_items.clone(), rf_archive::Format::SevenZ)),
-                ]
-                .into_iter()
-                .chain(crate::archive_view::winrar().is_some().then(|| {
-                    let rar_items = items.to_vec();
-                    Item::action(t!("RAR olarak sıkıştır"), icon(L::FileArchive), move |_, cx| {
-                        if let Some((dir, stem)) = archive_stem(&rar_items) {
-                            let dest = rf_win::fileops::unique_name(&dir, &stem, ".rar");
-                            crate::status_center::compress_rar(cx, rar_items.clone(), dest, 5, None);
-                        }
-                    })
-                }))
-                .collect();
+                Item::action(t!("Arşiv oluştur…"), icon(L::Archive), move |w, cx| create_archive_dialog(dlg_items.clone(), w, cx)),
+                Item::Separator,
+                Item::action(t!("ZIP olarak sıkıştır"), icon(L::FileArchive), move |_, cx| compress(cx, zip_items.clone(), rf_archive::Format::Zip)),
+                Item::action(t!("7z olarak sıkıştır"), icon(L::FileArchive), move |_, cx| compress(cx, z7_items.clone(), rf_archive::Format::SevenZ)),
+            ]
+            .into_iter()
+            .chain(crate::archive_view::winrar().is_some().then(|| {
+                let rar_items = items.to_vec();
+                Item::action(t!("RAR olarak sıkıştır"), icon(L::FileArchive), move |_, cx| {
+                    if let Some((dir, stem)) = archive_stem(&rar_items) {
+                        let dest = rf_win::fileops::unique_name(&dir, &stem, ".rar");
+                        crate::status_center::compress_rar(cx, rar_items.clone(), dest, 5, None);
+                    }
+                })
+            }))
+            .collect();
             // (a click on the row compresses at once in the format chosen in Settings; hovering shows the other ways)
             v.push(match quick_compress_format(quick) {
-                Some(f) => Item::sub_click(t!("Sıkıştır"), icon(L::Archive), sub_items, move |_, cx| quick_compress(cx, quick_items.clone(), f)),
-                None => Item::sub(t!("Sıkıştır"), icon(L::Archive), sub_items),
+                Some(f) => Item::sub_click(t!("Sıkıştır"), compress_icon, sub_items, move |_, cx| quick_compress(cx, quick_items.clone(), f)),
+                None => Item::sub(t!("Sıkıştır"), compress_icon, sub_items),
             });
         }
         // a .torrent file, with HyperDownload installed: downloaded next to it
@@ -440,8 +476,19 @@ impl FolderView {
             v.push(Item::action(t!("Terminalde aç"), icon(L::SquareTerminal), move |_, _| open_terminal(d.clone())).hint("Ctrl+Shift+`"));
         }
         v.push(Item::Separator);
-        v.push(Item::Sub { label: t!("Diğer seçenekleri göster").into(), icon: icon(L::Ellipsis), items: Sub::Pending { key: "more", fallback: None }, click: None });
+        v.push(Item::Sub {
+            label: t!("Diğer seçenekleri göster").into(),
+            icon: icon(L::Ellipsis),
+            items: Sub::Pending { key: "more", fallback: None },
+            click: None,
+        });
+        if explorer_theme {
+            v.push(Item::action(t!("Özellikler"), icon(L::Wrench), act(me, |v, _, cx| v.properties(cx))).hint("Alt+Enter"));
+        }
         let mut quick = self.quick_clipboard(me, true);
+        if explorer_theme {
+            quick.retain(|q| !matches!(q.icon, L::ClipboardPaste | L::Wrench));
+        }
         if in_archive {
             // (Windows' share sheet needs real files)
             quick.retain(|q| q.icon != L::Share2);
@@ -656,10 +703,21 @@ pub enum BarMenu {
 impl FolderView {
     pub fn show_bar_menu(&mut self, which: BarMenu, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         let me = cx.entity().downgrade();
+        let explorer_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+        let new_menu = matches!(&which, BarMenu::New);
+        let sort_menu = matches!(&which, BarMenu::Sort);
+        let layout_menu = matches!(&which, BarMenu::View { .. });
+        let original_icons = explorer_theme && (new_menu || sort_menu || layout_menu);
+        let context_style = matches!(&which, BarMenu::More) || original_icons;
         let items = match which {
             BarMenu::New => {
                 let Some(dir) = self.current_dir() else { return };
-                let view = fluent_menu::show(Menu { quick: Vec::new(), items: own_new_items(&me) }, pos, window, cx);
+                let menu = Menu { quick: Vec::new(), items: own_new_items(&me) };
+                let view = if original_icons {
+                    fluent_menu::show_context_original_icons(menu, pos, window, cx)
+                } else {
+                    fluent_menu::show_context(menu, pos, window, cx)
+                };
                 // the shell's templates (Word, Excel…) join as soon as the shell answers
                 let (tx, rx) = oneshot::channel();
                 rf_win::sta::run(move |owner| {
@@ -683,15 +741,50 @@ impl FolderView {
                 let (undo, redo) = crate::undo::next_labels();
                 let none = self.selected.is_empty();
                 vec![
-                    Item::action(undo_text(undo), icon(L::Undo2), move |_, cx| crate::undo::undo(cx)).hint("Ctrl+Z").enabled(undo.is_some()),
-                    Item::action(redo_text(redo), icon(L::Redo2), move |_, cx| crate::undo::redo(cx)).hint("Ctrl+Y").enabled(redo.is_some()),
+                    Item::action(
+                        undo_text(undo),
+                        icon(L::Undo2),
+                        move |_, cx| crate::undo::undo(cx),
+                    )
+                    .hint("Ctrl+Z")
+                    .enabled(undo.is_some()),
+                    Item::action(
+                        redo_text(redo),
+                        icon(L::Redo2),
+                        move |_, cx| crate::undo::redo(cx),
+                    )
+                    .hint("Ctrl+Y")
+                    .enabled(redo.is_some()),
                     Item::Separator,
-                    Item::action(t!("Tümünü seç"), icon(L::SquareCheck), act(&me, |v, _, cx| v.select_all_items(cx))).hint("Ctrl+A"),
-                    Item::action(t!("Hiçbirini seçme"), icon(L::Square), act(&me, |v, _, cx| v.select_no_items(cx))).enabled(!none),
-                    Item::action(t!("Seçimi tersine çevir"), icon(L::ArrowLeftRight), act(&me, |v, _, cx| v.invert_selected_items(cx))),
+                    Item::action(
+                        t!("Tümünü seç"),
+                        icon(L::SquareCheck),
+                        act(&me, |v, _, cx| v.select_all_items(cx)),
+                    )
+                    .hint("Ctrl+A"),
+                    Item::action(
+                        t!("Hiçbirini seçme"),
+                        icon(L::Square),
+                        act(&me, |v, _, cx| v.select_no_items(cx)),
+                    )
+                    .enabled(!none),
+                    Item::action(
+                        t!("Seçimi tersine çevir"),
+                        icon(L::ArrowLeftRight),
+                        act(&me, |v, _, cx| v.invert_selected_items(cx)),
+                    ),
                     Item::Separator,
-                    Item::action(t!("Özellikler"), icon(L::Wrench), act(&me, |v, _, cx| v.folder_properties(cx))),
-                    Item::action(t!("Ayarlar"), icon(L::Settings), |w, cx| w.dispatch_action(Box::new(crate::actions::GoSettings), cx)).hint("Ctrl+,"),
+                    Item::action(
+                        t!("Özellikler"),
+                        icon(L::Wrench),
+                        act(&me, |v, _, cx| v.folder_properties(cx)),
+                    ),
+                    Item::action(
+                        t!("Ayarlar"),
+                        icon(L::Settings),
+                        |w, cx| w.dispatch_action(Box::new(crate::actions::GoSettings), cx),
+                    )
+                    .hint("Ctrl+,"),
                 ]
             }
             BarMenu::Sort => {
@@ -737,14 +830,27 @@ impl FolderView {
                 v
             }
         };
-        fluent_menu::show(Menu { quick: Vec::new(), items }, pos, window, cx);
+        if context_style {
+            let menu = Menu { quick: Vec::new(), items };
+            if original_icons {
+                fluent_menu::show_context_original_icons(menu, pos, window, cx);
+            } else {
+                fluent_menu::show_context(menu, pos, window, cx);
+            }
+        } else {
+            fluent_menu::show(Menu { quick: Vec::new(), items }, pos, window, cx);
+        }
     }
 }
 
 fn own_new_items(me: &Me) -> Vec<Item> {
     vec![
-        Item::action(t!("Klasör"), MenuIcon::Tinted(L::Folder, crate::theme::kind_color(crate::icons::Category::Folder, true)), act(me, |v, _, cx| v.create_new(true, cx)))
-            .hint("Ctrl+Shift+N"),
+        Item::action(
+            t!("Klasör"),
+            MenuIcon::Tinted(L::Folder, crate::theme::kind_color(crate::icons::Category::Folder, true)),
+            act(me, |v, _, cx| v.create_new(true, cx)),
+        )
+        .hint("Ctrl+Shift+N"),
         Item::action(t!("Metin belgesi"), icon(L::FileText), act(me, |v, _, cx| v.create_new(false, cx))),
     ]
 }
@@ -1286,7 +1392,7 @@ impl FolderView {
             menu.items.push(Item::Separator);
             menu.items.push(Item::action(t!("Yenile"), icon(L::RotateCw), act(&me, |v, _, cx| v.refresh(cx))).hint("Ctrl+R"));
         }
-        let menu_view = fluent_menu::show(menu, window.mouse_position(), window, cx);
+        let menu_view = fluent_menu::show_context(menu, window.mouse_position(), window, cx);
         let target = match items.as_slice() {
             [] => ShellTarget::Background(PathBuf::from(&parsing)),
             [one] => ShellTarget::One(one.clone()),

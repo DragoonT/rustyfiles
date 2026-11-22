@@ -34,6 +34,8 @@ use crate::t;
 /// The width of a column until somebody drags it: modified, created, type, size, tags, git, sync, in the order of
 /// `FolderView::col_widths`. They are `ColumnPrefs::default()`'s (a test holds the two together).
 pub(super) const STOCK_W: [f32; 7] = [150., 150., 150., 100., 130., 120., 150.];
+/// Minimum automatic widths for the columns shown in the Explorer look's Details layout.
+const EXPLORER_MIN: [f32; 4] = [168., 168., 132., 90.];
 /// The columns measured here. The sync column (an icon and a state that few folders have) keeps its stored width.
 const MEASURED: [bool; 7] = [true, true, true, true, true, true, false];
 
@@ -125,6 +127,7 @@ pub(super) struct Key {
     probes: [String; 2],
     /// The interface language (a translated text's address: another language is another table).
     language: usize,
+    explorer_look: bool,
     /// "Calculate size" can stand in the size column.
     calc_link: bool,
     /// The repository's status (its address: a refreshed status is another one), 0 outside a repository.
@@ -142,6 +145,7 @@ impl FolderView {
     /// that draws the details list.
     pub(super) fn refresh_auto_cols(&mut self, window: &Window, cx: &App) {
         let prefs = cx.global::<crate::settings::Settings>();
+        let explorer_look = prefs.windows_file_explorer_theme;
         let now = chrono::Local::now().timestamp_millis();
         let style = window.text_style();
         let rem = f32::from(window.rem_size());
@@ -156,6 +160,7 @@ impl FolderView {
             listing: self.entries_gen,
             probes: [format::datetime(now - 400 * DAY), format::size(1023)],
             language: t!("Boyut").as_ptr() as usize,
+            explorer_look,
             calc_link: !prefs.calculate_folder_sizes,
             git: self.git.as_ref().map_or(0, |g| Arc::as_ptr(g) as usize),
             font: style.font_family.clone(),
@@ -205,12 +210,13 @@ impl FolderView {
             _ => 0.,
         };
 
+        let fit_explorer = |width: f32, minimum: f32| if explorer_look { width.max(minimum) } else { width };
         self.auto_cols = AutoCols {
             w: [
-                Some(fit(date_w, heading(t!("Değiştirme tarihi")), AIR)),
-                Some(fit(date_w, heading(t!("Oluşturma tarihi")), AIR)),
-                (!types.is_empty()).then(|| fit(type_w, heading(t!("Tür")), AIR)),
-                Some(fit(size_w, heading(t!("Boyut")), 0.)),
+                Some(fit_explorer(fit(date_w, heading(t!("Değiştirme tarihi")), AIR), EXPLORER_MIN[0])),
+                Some(fit_explorer(fit(date_w, heading(t!("Oluşturma tarihi")), AIR), EXPLORER_MIN[1])),
+                (!types.is_empty()).then(|| fit_explorer(fit(type_w, heading(t!("Tür")), AIR), EXPLORER_MIN[2])),
+                Some(fit_explorer(fit(size_w, heading(t!("Boyut")), 0.), EXPLORER_MIN[3])),
                 (!tagged.is_empty()).then(|| fit(tag_w, heading(t!("Dosya etiketi")), AIR)),
                 (key.git != 0).then(|| fit(git_w, heading(t!("Git durumu")), AIR)),
                 None,

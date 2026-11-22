@@ -443,6 +443,9 @@ pub struct Settings {
     pub sidebar_rail: bool,
     /// Pane widths (drag the pane edge to resize).
     pub sidebar_width: f32,
+    /// Width used only while the Windows File Explorer look is enabled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub explorer_sidebar_width: Option<f32>,
     /// Sidebar sections the user turned off ("drives", "cloud", "libraries", "network", "tags").
     pub sidebar_hidden: Vec<String>,
     /// Sections of the Home page that are hidden: "quick", "drives", "devices", "tags",
@@ -563,6 +566,8 @@ pub struct Settings {
     /// A scrollbar over the Details and Grid lists.
     pub show_scrollbar: bool,
     pub animations: AnimPref,
+    /// Extend the Windows File Explorer look to the navigation, toolbar, and file-list appearance.
+    pub windows_file_explorer_theme: bool,
     pub backdrop: BackdropPref,
     /// Background tint color (0xRRGGBB), `None` = the backdrop as is.
     pub tint: Option<u32>,
@@ -880,7 +885,8 @@ impl Default for Settings {
             picker_size: None,
             sidebar_open: true,
             sidebar_rail: false,
-            sidebar_width: 232.,
+            sidebar_width: DEFAULT_SIDEBAR_WIDTH,
+            explorer_sidebar_width: None,
             sidebar_hidden: Vec::new(),
             home_hidden: Vec::new(),
             recent_cleared_ms: 0,
@@ -933,6 +939,7 @@ impl Default for Settings {
             smooth_scroll: true,
             show_scrollbar: true,
             animations: AnimPref::System,
+            windows_file_explorer_theme: false,
             backdrop: BackdropPref::Mica,
             tint: None,
             background_image: None,
@@ -1072,6 +1079,7 @@ impl Global for Settings {}
 pub const HG_DEFAULT: [u8; 5] = [52, 50, 67, 62, 50];
 
 static THEME: AtomicU8 = AtomicU8::new(0);
+static WINDOWS_FILE_EXPLORER_THEME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The surface value (0..=100) the palette reads on every call, cheaper than the settings struct.
 static HG_SURFACE: AtomicU8 = AtomicU8::new(HG_DEFAULT[4]);
 static SOLID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1128,6 +1136,11 @@ pub fn theme_override() -> ThemePref {
     }
 }
 
+/// Read by the window palette without needing an `App`.
+pub fn windows_file_explorer_theme() -> bool {
+    WINDOWS_FILE_EXPLORER_THEME.load(Ordering::Relaxed)
+}
+
 pub fn path() -> Option<PathBuf> {
     app_dir().map(|d| d.join("settings.toml"))
 }
@@ -1141,7 +1154,21 @@ enum FileRead {
     Read(Box<Settings>),
 }
 
+const DEFAULT_SIDEBAR_WIDTH: f32 = 232.;
+const DEFAULT_EXPLORER_SIDEBAR_WIDTH: f32 = 366.;
+
 impl Settings {
+    /// Keep a user's existing single sidebar width when first enabling the separate Explorer width.
+    pub(crate) fn sidebar_width_for_explorer_look(&self) -> f32 {
+        self.explorer_sidebar_width.unwrap_or_else(|| {
+            if self.sidebar_width == DEFAULT_SIDEBAR_WIDTH {
+                DEFAULT_EXPLORER_SIDEBAR_WIDTH
+            } else {
+                self.sidebar_width
+            }
+        })
+    }
+
     /// Reads the file. With `set_aside_bad` an unreadable or broken file is moved aside (so the next save does not overwrite what
     /// the user may want to repair); a reader that is not the owner of the file leaves it where it is.
     fn read_file(set_aside_bad: bool) -> FileRead {
@@ -1338,6 +1365,7 @@ impl Settings {
         rf_win::glass::set_look(self.hyperglass_look());
         rf_win::glass::set_freeze_when_behind(self.hg_freeze_behind);
         gpui_windows::SMOOTH_SCROLL.store(self.smooth_scroll, Ordering::Relaxed);
+        WINDOWS_FILE_EXPLORER_THEME.store(self.windows_file_explorer_theme, Ordering::Relaxed);
         THEME.store(
             match self.theme {
                 ThemePref::System => 0,
@@ -1398,12 +1426,17 @@ pub fn apply_component_theme(cx: &mut App) {
 
 /// Mutates the global settings, applies side effects, saves in the background and refreshes windows.
 pub fn update(cx: &mut App, f: impl FnOnce(&mut Settings)) {
+    let explorer_theme_before = cx.global::<Settings>().windows_file_explorer_theme;
     cx.update_global::<Settings, _>(|s, _| f(s));
     let s = cx.global::<Settings>().clone();
+    let explorer_theme_changed = s.windows_file_explorer_theme != explorer_theme_before;
     s.apply_side_effects();
     apply_component_theme(cx);
     std::thread::spawn(move || {
         s.save();
+        if explorer_theme_changed {
+            crate::look::ipc::send(crate::look::ipc::Msg::Reload, false);
+        }
         // after the save: the dock process reads the file when it is told to reload
         crate::dock::control::sync_process(&s);
     });
@@ -1546,7 +1579,28 @@ pub fn app_dir() -> Option<std::path::PathBuf> {
 
 #[cfg(test)]
 mod lenient_tests {
-    use super::Settings;
+    use super::{DEFAULT_EXPLORER_SIDEBAR_WIDTH, DEFAULT_SIDEBAR_WIDTH, Settings};
+
+    #[test]
+    fn windows_file_explorer_theme_defaults_off_and_round_trips() {
+        assert!(!Settings::default().windows_file_explorer_theme);
+        assert_eq!(Settings::default().sidebar_width, DEFAULT_SIDEBAR_WIDTH);
+        assert_eq!(Settings::default().explorer_sidebar_width, None);
+        assert_eq!(Settings::default().sidebar_width_for_explorer_look(), DEFAULT_EXPLORER_SIDEBAR_WIDTH);
+        assert_eq!(
+            Settings { sidebar_width: 420., ..Default::default() }.sidebar_width_for_explorer_look(),
+            420.
+        );
+        assert!(!Settings::parse_lenient("theme = \"dark\"\n").unwrap().windows_file_explorer_theme, "older settings files omit the new option");
+
+        let enabled = Settings { windows_file_explorer_theme: true, explorer_sidebar_width: Some(410.), ..Default::default() };
+        let text = toml::to_string_pretty(&enabled).unwrap();
+        assert!(text.contains("windows_file_explorer_theme = true"));
+        let back = Settings::parse_lenient(&text).unwrap();
+        assert!(back.windows_file_explorer_theme);
+        assert_eq!(back.explorer_sidebar_width, Some(410.));
+        assert_eq!(back.sidebar_width_for_explorer_look(), 410.);
+    }
 
     #[test]
     fn unknown_values_fall_back_per_field() {

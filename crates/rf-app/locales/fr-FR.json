@@ -2149,6 +2149,7 @@
  "10ef9c03": "Dans WSL, Windows écrit un fichier \"Zone.Identifier\" séparé à côté d'un fichier téléchargé depuis Internet. Si activé, la copie le supprime.",
  "31d132e2": "Afficher l'espace des lecteurs en chiffres",
  "04339c77": "Espace utilisé et total sous la barre de chaque lecteur",
+ "bd479de9": "Apparence de l’Explorateur de fichiers Windows",
  "f6bca4e8": "Ne plus toujours ouvrir ici pour :",
  "a6a39e94": "Toujours ouvrir dans ce dossier pour :",
  "6ff5ec59": "Sa fenêtre Ouvrir / Enregistrer s'ouvre toujours dans :",

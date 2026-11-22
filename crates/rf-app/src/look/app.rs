@@ -87,7 +87,12 @@ fn handle(msg: Msg, cx: &mut App) {
         Msg::Reload => {
             cx.set_global(LookSettings::load());
             // rustyfiles' settings too: language, theme, and whether it has a tray icon
-            cx.set_global(crate::settings::Settings::load());
+            let settings = crate::settings::Settings::load();
+            let explorer_theme_changed = cx.global::<crate::settings::Settings>().windows_file_explorer_theme != settings.windows_file_explorer_theme;
+            cx.set_global(settings);
+            if explorer_theme_changed {
+                cx.refresh_windows();
+            }
             sync_tray(cx);
         }
         Msg::Quit => {

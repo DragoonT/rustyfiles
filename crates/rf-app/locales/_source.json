@@ -12961,6 +12961,12 @@
   "en": "Used and total space under each drive's bar"
  },
  {
+  "id": "bd479de9",
+  "key": "Windows Dosya Gezgini görünümü",
+  "tr": "Windows Dosya Gezgini görünümü",
+  "en": "Windows File Explorer look"
+ },
+ {
   "id": "f6bca4e8",
   "key": "Artık hep burada açılmasın:",
   "tr": "Artık hep burada açılmasın:",

@@ -269,6 +269,8 @@ struct Marquee {
 
 pub enum FolderEvent {
     OpenInNewTab(Location),
+    /// Open the workspace's sidebar context menu for a Home drive card.
+    SidebarMenu(PathBuf),
     BulkRename(Vec<PathBuf>),
     AddToShelf(Vec<PathBuf>),
     /// Dual pane: copy/move the items into the other pane's folder.
@@ -4012,16 +4014,21 @@ impl FolderView {
         })
     }
 
-    /// The Name column's width when it has one (a divider was dragged: the columns stand from the left, the room left over is at the
-    /// right end, as in Explorer); `None` while it takes what the other columns leave.
+    /// The Name column is about a third of the list by default in the Explorer look; otherwise the other columns leave the spare room.
     fn name_fixed(&self, cx: &App) -> Option<f32> {
         self.name_live.or_else(|| {
             let w = cx.global::<crate::settings::Settings>().columns.name_width;
-            (w > 0).then_some(f32::from(w))
+            if w > 0 {
+                Some(f32::from(w))
+            } else if cx.global::<crate::settings::Settings>().windows_file_explorer_theme {
+                Some((f32::from(self.content_width) * 0.33).clamp(180., 480.))
+            } else {
+                None
+            }
         })
     }
 
-    /// The width the Name column has now (what it is given, or what the other columns leave it).
+    /// The Name column's width now, after its saved and live widths are considered.
     fn name_now(&self, cx: &App) -> f32 {
         self.name_fixed(cx).unwrap_or_else(|| 180. + self.spare_width(cx))
     }
@@ -4159,8 +4166,8 @@ impl FolderView {
             let mut d = h_flex()
                 .id(id)
                 .h_full()
-                .px_2()
-                .gap_1()
+                .when(cx.global::<crate::settings::Settings>().windows_file_explorer_theme, |d| d.pl(px(4.)).pr_2().gap_1())
+                .when(!cx.global::<crate::settings::Settings>().windows_file_explorer_theme, |d| d.px_2().gap_2())
                 .items_center()
                 .rounded(theme::RADIUS_SM)
                 .cursor_pointer()
@@ -4178,7 +4185,7 @@ impl FolderView {
             d
         };
         h_flex()
-            .h(px(30.))
+            .h(px(if cx.global::<crate::settings::Settings>().windows_file_explorer_theme { 32. } else { 30. }))
             .pl(px(10.))
             .pr(px(10. + self.gutter()))
             .overflow_hidden()
@@ -4211,7 +4218,12 @@ impl FolderView {
             }))
             .on_drag_move(cx.listener(|this, e: &DragMoveEvent<prop_cols::PropResize>, _, cx| this.props_drag_move(e, cx)))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, ev: &MouseDownEvent, window, cx| this.show_header_menu(ev.position, window, cx)))
-            .child(col("h-name", t!("Ad"), SortKey::Name, self.name_fixed(cx).map(px), false, cx).relative().child(handle(NAME_COL, cx)))
+            .child(
+                col("h-name", t!("Ad"), SortKey::Name, self.name_fixed(cx).map(px), false, cx)
+                    .when(cx.global::<crate::settings::Settings>().windows_file_explorer_theme, |d| d.pl(px(38.)))
+                    .relative()
+                    .child(handle(NAME_COL, cx)),
+            )
             .children(show_tags.then(|| self.sortx_header("h-tags", t!("Dosya etiketi"), w[4], SortKey::Tag, p, cx).child(handle(4, cx))))
             .children(show_git.then(|| plain("h-git", t!("Git durumu"), w[5]).child(handle(5, cx))))
             .children(show_sync.then(|| self.sortx_header("h-sync", t!("Eşitleme durumu"), w[6], SortKey::Sync, p, cx).child(handle(6, cx))))
@@ -4230,7 +4242,11 @@ impl FolderView {
                 let c = col("h-type", if search { t!("Konum") } else { t!("Tür") }, if search { SortKey::Path } else { SortKey::Type }, Some(self.type_col_w(cx)), false, cx).relative();
                 if search { c } else { c.child(handle(2, cx)) }
             }))
-            .children(vis.size.then(|| col("h-size", t!("Boyut"), SortKey::Size, Some(px(w[3])), true, cx).relative().child(handle(3, cx))))
+            .children(vis.size.then(|| {
+                col("h-size", t!("Boyut"), SortKey::Size, Some(px(w[3])), !cx.global::<crate::settings::Settings>().windows_file_explorer_theme, cx)
+                    .relative()
+                    .child(handle(3, cx))
+            }))
             .children(self.props_header_cells(p, cx))
             // (the room left over, once the Name column has a width of its own)
             .when(self.name_fixed(cx).is_some(), |d| d.child(div().flex_1()))
@@ -4607,8 +4623,8 @@ impl FolderView {
                             Some(w) => d.w(px(w)).flex_shrink_0(),
                             None => d.flex_1().min_w(px(120.)),
                         })
-                        .px_2()
-                        .gap_2()
+                        .when(cx.global::<crate::settings::Settings>().windows_file_explorer_theme, |d| d.pl(px(22.)).pr_2().gap_1p5())
+                        .when(!cx.global::<crate::settings::Settings>().windows_file_explorer_theme, |d| d.px_2().gap_2())
                         .items_center()
                         .overflow_hidden()
                         // Settings → "Show checkboxes when selecting items"
@@ -4950,6 +4966,7 @@ impl FolderView {
         let places = self.places.read(cx);
         let pinned = places.pinned.clone();
         let drives = places.drives.clone();
+        let windows_file_explorer_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         let devices = places.devices.clone();
         let network = places.network.clone();
         let (hidden, cleared) = {
@@ -4983,9 +5000,27 @@ impl FolderView {
         let mut pinned_grid = div().grid().grid_cols(tile_cols(avail, 140., 220., 12.)).gap_3();
         for (i, f) in pinned.into_iter().enumerate() {
             let path = f.path.clone();
+            let shell_icon = if windows_file_explorer_theme {
+                self.images.update(cx, |images, cx| {
+                    images.shell_icon(&path.to_string_lossy(), 28, cx)
+                })
+            } else {
+                None
+            };
+            let icon = match shell_icon {
+                Some(image) => img(image).size(px(28.)).into_any_element(),
+                None => {
+                    let icon = Icon::new(f.icon).size(px(28.));
+                    if windows_file_explorer_theme {
+                        icon.into_any_element()
+                    } else {
+                        icon.text_color(p.accent).into_any_element()
+                    }
+                }
+            };
             pinned_grid = pinned_grid.child(
                 card(("pin", i).into())
-                    .child(Icon::new(f.icon).size(px(28.)).text_color(p.accent))
+                    .child(icon)
                     .child(div().text_sm().child(crate::i18n::td(&f.title)))
                     .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(path.clone()), cx))),
             );
@@ -4995,15 +5030,34 @@ impl FolderView {
         for (i, d) in drives.into_iter().enumerate() {
             let root = d.root.clone();
             let usage_root = d.root.clone();
+            let shell_icon = if windows_file_explorer_theme {
+                self.images.update(cx, |images, cx| {
+                    images.shell_icon(&root.to_string_lossy(), 28, cx)
+                })
+            } else {
+                None
+            };
+            let icon = match shell_icon {
+                Some(image) => img(image).size(px(28.)).into_any_element(),
+                None => {
+                    let icon = Icon::new(places::drive_icon(&d)).size(px(28.));
+                    if windows_file_explorer_theme {
+                        icon.into_any_element()
+                    } else {
+                        icon.text_color(p.text_secondary).into_any_element()
+                    }
+                }
+            };
             let frac = d.used_fraction();
             let bar_color = if frac > 0.9 { p.danger } else { p.accent };
+            let menu_root = root.clone();
             drive_grid = drive_grid.child(
                 card(("drive", i).into())
                     .child(
                         h_flex()
                             .gap_3()
                             .items_center()
-                            .child(Icon::new(places::drive_icon(&d)).size(px(28.)).text_color(p.text_secondary))
+                            .child(icon)
                             .child(
                                 v_flex()
                                     .flex_1()
@@ -5041,7 +5095,14 @@ impl FolderView {
                                     .child(Icon::new(L::ChartPie).size(px(16.)).text_color(p.text_secondary)),
                             ),
                     )
-                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(root.clone()), cx))),
+                    .on_click(cx.listener(move |this, _, _, cx| this.navigate(Location::Path(root.clone()), cx)))
+                    .on_mouse_down(
+                        MouseButton::Right,
+                        cx.listener(move |_, _: &MouseDownEvent, _, cx| {
+                            cx.stop_propagation();
+                            cx.emit(FolderEvent::SidebarMenu(menu_root.clone()));
+                        }),
+                    ),
             );
         }
 

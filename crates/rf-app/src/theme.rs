@@ -12,6 +12,8 @@ pub struct Palette {
     pub titlebar_bg: Hsla,
     pub sidebar_bg: Hsla,
     pub content_bg: Hsla,
+    pub address_bg: Hsla,
+    pub toolbar_bg: Hsla,
     /// Opaque surface for menus, dialogs and inputs that float over other content.
     pub card_bg: Hsla,
     /// A bar of our own with controls and text in it that no other layer backs (the Open / Save window's name row). Clear on every
@@ -71,6 +73,8 @@ impl Palette {
             titlebar_bg: hexa(0xEBEBEB, 0.0),
             sidebar_bg: hexa(0xFFFFFF, 0.0),
             content_bg: hexa(0xFFFFFF, 0.50),
+            address_bg: hexa(0x000000, 0.0),
+            toolbar_bg: hexa(0x000000, 0.0),
             card_bg: hex(0xF9F9F9),
             bar_bg: hexa(0xF9F9F9, 0.0),
             tile_bg: hexa(0xFFFFFF, 0.70),
@@ -100,6 +104,8 @@ impl Palette {
             titlebar_bg: hexa(0x000000, 0.0),
             sidebar_bg: hexa(0x000000, 0.0),
             content_bg: hex(0x000000),
+            address_bg: hexa(0x000000, 0.0),
+            toolbar_bg: hexa(0x000000, 0.0),
             card_bg: hex(0x0A0A0A),
             bar_bg: hexa(0x000000, 0.0),
             tile_bg: hexa(0xFFFFFF, 0.04),
@@ -129,6 +135,8 @@ impl Palette {
             // darker than Fluent's LayerFill (#3A3A3A 30%), close to Explorer's content pane
             // (~#1B1B1B over Mica): calmer, less desktop tint behind the files
             content_bg: hexa(0x141414, 0.45),
+            address_bg: hexa(0x000000, 0.0),
+            toolbar_bg: hexa(0x000000, 0.0),
             card_bg: hex(0x2C2C2C),
             bar_bg: hexa(0x2C2C2C, 0.0),
             tile_bg: hexa(0xFFFFFF, 0.0512),
@@ -161,6 +169,19 @@ impl Palette {
                 _ => Self::light(),
             },
         };
+        let explorer_look = crate::settings::windows_file_explorer_theme();
+        if explorer_look && !p.dark {
+            p.titlebar_bg = hex(0xE8E8E8);
+            p.sidebar_bg = hex(0xFFFFFF);
+            p.content_bg = hex(0xFFFFFF);
+            p.address_bg = hex(0xF0F5F9);
+            p.toolbar_bg = hex(0xFCFDFF);
+            p.tab_active = hex(0xF8F8F8);
+        }
+        if explorer_look && !p.dark && window.is_window_active() {
+            p.titlebar_bg = hex(0xCCDEEC);
+            p.tab_active = hex(0xF0F5F9);
+        }
         if crate::settings::solid_backdrop() {
             // "Solid" material: Windows 11's plain window color instead of Mica
             p.window_bg = if p.dark { hex(0x202020) } else { hex(0xF3F3F3) };
@@ -179,6 +200,12 @@ impl Palette {
             // At the strength made for Mica they hid two thirds of it in the dark theme (the user: too black), so the default is half
             // of that; the HyperGlass "surface wash" setting moves it either way.
             (p.window_bg.a, p.content_bg.a) = glass_washes(p.dark, crate::settings::hg_surface());
+            if explorer_look {
+                p.titlebar_bg.a = 0.0;
+                p.sidebar_bg.a = 0.0;
+                p.address_bg = Hsla { a: glass_bar_wash(crate::settings::hg_surface()), ..p.card_bg };
+                p.toolbar_bg = Hsla { a: glass_bar_wash(crate::settings::hg_surface()), ..p.card_bg };
+            }
             p.bar_bg = Hsla { a: glass_bar_wash(crate::settings::hg_surface()), ..p.card_bg };
         }
         p

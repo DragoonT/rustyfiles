@@ -2149,6 +2149,7 @@
  "10ef9c03": "En WSL, Windows escribe un archivo \"Zone.Identifier\" aparte junto a un archivo descargado de internet. Si está activado, la copia lo elimina.",
  "31d132e2": "Mostrar el espacio de las unidades en números",
  "04339c77": "Espacio usado y total debajo de la barra de cada unidad",
+ "bd479de9": "Aspecto del Explorador de archivos de Windows",
  "f6bca4e8": "Dejar de abrir siempre aquí para:",
  "a6a39e94": "Abrir siempre en esta carpeta para:",
  "6ff5ec59": "Su ventana Abrir / Guardar siempre se abre en:",

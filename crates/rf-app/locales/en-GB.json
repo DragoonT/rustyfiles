@@ -2149,6 +2149,7 @@
  "10ef9c03": "In WSL, Windows writes a separate \"Zone.Identifier\" file beside a file downloaded from the internet. When on, copying deletes it.",
  "31d132e2": "Show drive space in numbers",
  "04339c77": "Used and total space under each drive's bar",
+ "bd479de9": "Windows File Explorer look",
  "f6bca4e8": "Stop always opening here for:",
  "a6a39e94": "Always open in this folder for:",
  "6ff5ec59": "Its Open / Save window always opens in:",

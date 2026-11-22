@@ -195,6 +195,12 @@ pub struct Holder {
     sub: Option<gpui_kit::Subscription>,
 }
 
+impl Holder {
+    pub(super) fn scroll_handle(&self) -> &ScrollHandle {
+        &self.scroll
+    }
+}
+
 /// The folders of a folder, on a worker thread.
 fn list_folders(path: &Path) -> Result<Vec<DirItem>, ListFailure> {
     let mut out = Vec::new();
@@ -254,6 +260,7 @@ impl SidebarTree {
         // drives come and go: the roots follow the sidebar's own list of places
         let sub = cx.observe(&places, |t, _, cx| t.refresh_roots(cx));
         let tags_sub = cx.observe_global::<crate::tags::Tags>(|_, cx| cx.notify());
+        let theme_sub = cx.observe_global::<crate::settings::Settings>(|_, cx| cx.notify());
         let mut this = Self {
             model: NavTree::new(),
             places,
@@ -280,7 +287,7 @@ impl SidebarTree {
             wanted: HashSet::new(),
             tx,
             _rx_task: task,
-            _subs: vec![sub, tags_sub],
+            _subs: vec![sub, tags_sub, theme_sub],
         };
         this.refresh_roots(cx);
         this
@@ -695,6 +702,15 @@ impl SidebarTree {
             })
             .flatten();
         let tag_dot = info.path.parent().and_then(|_| crate::tags::first_color(info.path, cx));
+        let root_drive_icon = (cx.global::<crate::settings::Settings>().windows_file_explorer_theme
+            && matches!(root, Some(RootKind::Fixed | RootKind::Removable | RootKind::Network | RootKind::Optical)))
+        .then(|| {
+            self.images.update(cx, |images, cx| {
+                images.shell_icon(&info.path.to_string_lossy(), 16, cx)
+            })
+        })
+        .flatten();
+        let windows_home = cx.global::<crate::settings::Settings>().windows_file_explorer_theme && root == Some(RootKind::Profile);
         let icon_color = match root {
             Some(RootKind::Profile) => p.accent,
             Some(_) => p.text_secondary,
@@ -765,9 +781,13 @@ impl SidebarTree {
                     .relative()
                     .size(px(16.))
                     .flex_shrink_0()
-                    .child(match own_icon {
+                    .child(match own_icon.or(root_drive_icon) {
                         Some(picture) => img(picture).size(px(16.)).into_any_element(),
-                        None => Icon::new(Self::row_icon(root, expanded)).size(px(16.)).text_color(icon_color).into_any_element(),
+                        None if windows_home => crate::icons::windows_home_icon(px(16.)),
+                        None => Icon::new(Self::row_icon(root, expanded))
+                            .size(px(16.))
+                            .text_color(icon_color)
+                            .into_any_element(),
                     })
                     .when_some(tag_dot, |d, c| d.child(crate::tags::corner_dot(c, p.card_bg))),
             )

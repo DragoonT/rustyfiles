@@ -25,7 +25,8 @@ pub fn open(view: WeakEntity<FolderView>, dual: bool, shelf: bool, pos: Point<Pi
         let Some(v) = view.upgrade() else { return div().into_any_element() };
         render(&v, owner, dual.clone(), shelf.clone(), p, window, cx)
     });
-    crate::flyout::toggle("layout", pos, WIDTH, body, window, cx);
+    let explorer_style = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+    crate::flyout::toggle("layout", pos, WIDTH, body, explorer_style, window, cx);
 }
 
 fn section(p: &Palette, title: &str) -> Div {
@@ -126,7 +127,9 @@ fn render(v: &Entity<FolderView>, owner: AnyWindowHandle, dual: Rc<Cell<bool>>, 
         )
         .child(stops);
     let size_icons = h_flex().mx_4().mt_1().justify_between().text_color(if enabled { p.text_secondary } else { p.text_tertiary }).children(
-        [12., 14., 16., 18., 20.].into_iter().map(|s| Icon::new(if mode == ViewMode::Details { L::Rows3 } else { L::Image }).size(px(s))),
+        [12., 14., 16., 18., 20.]
+            .into_iter()
+            .map(|s| Icon::new(if mode == ViewMode::Details { L::Rows3 } else { L::Image }).size(px(s))),
     );
 
     // ---- switches

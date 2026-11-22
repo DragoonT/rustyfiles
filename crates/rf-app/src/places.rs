@@ -132,24 +132,49 @@ pub struct Places {
     /// Devices under This PC that are not drives (MTP phones, cameras): browsed as shell
     /// folders.
     pub devices: Vec<rf_win::shellfolder::ShellChild>,
+    /// Whether the Windows Recycle Bin contains items; `None` until the shell has answered.
+    pub recycle_full: Option<bool>,
+    recycle_icon_hovered: bool,
     pub loaded: bool,
     /// The recent items and the cloud / WSL entries are in too (they come a little after `loaded`: see `refresh`).
     pub extras_loaded: bool,
     _task: Option<Task<()>>,
+    _recycle_task: Option<Task<()>>,
 }
 
 impl Places {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let mut this =
-            Self { drives: Vec::new(), cloud: Vec::new(), pinned: Vec::new(), recent: Vec::new(), libraries: Vec::new(), network: Vec::new(), devices: Vec::new(), loaded: false, extras_loaded: false, _task: None };
+            Self {
+                drives: Vec::new(),
+                cloud: Vec::new(),
+                pinned: Vec::new(),
+                recent: Vec::new(),
+                libraries: Vec::new(),
+                network: Vec::new(),
+                devices: Vec::new(),
+                recycle_full: None,
+                recycle_icon_hovered: false,
+                loaded: false,
+                extras_loaded: false,
+                _task: None,
+                _recycle_task: None,
+            };
         this.refresh(cx);
         // the drives the user hides (Settings > Files and folders, a drive's own menu) leave and come back at once
         let mut hidden = rf_win::drives::hidden();
         // and the pins, when they change anywhere (a pinned folder deleted or renamed: `pins_follow`)
         let mut pins = cx.global::<crate::settings::Settings>().pinned.clone();
+        let mut recycle_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
         cx.observe_global::<crate::settings::Settings>(move |p, cx| {
             let now = rf_win::drives::hidden();
-            let now_pins = cx.global::<crate::settings::Settings>().pinned.clone();
+            let settings = cx.global::<crate::settings::Settings>();
+            let now_pins = settings.pinned.clone();
+            let now_recycle_theme = settings.windows_file_explorer_theme;
+            if recycle_theme && !now_recycle_theme {
+                p.set_recycle_icon_hovered(false, cx);
+            }
+            recycle_theme = now_recycle_theme;
             if now != hidden || now_pins != pins {
                 hidden = now;
                 pins = now_pins;
@@ -200,6 +225,46 @@ impl Places {
         })
         .detach();
         this
+    }
+
+    pub fn set_recycle_icon_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        if self.recycle_icon_hovered == hovered {
+            return;
+        }
+        self.recycle_icon_hovered = hovered;
+        if !hovered {
+            self._recycle_task = None;
+            return;
+        }
+
+        self._recycle_task = Some(cx.spawn(async move |this, cx| {
+            let mut error_logged = false;
+            loop {
+                match cx.background_spawn(async { rf_win::recycle::info() }).await {
+                    Ok((item_count, _)) => {
+                        error_logged = false;
+                        if this
+                            .update(cx, |places, cx| {
+                                let full = item_count > 0;
+                                if places.recycle_full != Some(full) {
+                                    places.recycle_full = Some(full);
+                                    cx.notify();
+                                }
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Err(error) if !error_logged => {
+                        log::warn!("could not read Recycle Bin state for its icon: {error:#}");
+                        error_logged = true;
+                    }
+                    Err(_) => {}
+                }
+                cx.background_executor().timer(std::time::Duration::from_secs(3)).await;
+            }
+        }));
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {

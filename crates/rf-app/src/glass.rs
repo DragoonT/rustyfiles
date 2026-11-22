@@ -663,6 +663,20 @@ mod tests {
     }
 
     #[test]
+    fn the_plus_lens_is_a_circle_of_the_buttons_height_centred_on_it() {
+        use super::{LensShape, shape_spec};
+        let strip = [0.0, 0.0, 600.0, 40.0];
+        // a square 28 px button
+        let l = shape_spec(LensShape::Circle, 9, [300.0, 8.0, 28.0, 28.0], strip, 1.0).unwrap();
+        assert_eq!((l.rect, l.radius, l.clip), ([300.0, 8.0, 28.0, 28.0], 14.0, strip));
+        // a wider box: the circle keeps the height and sits in the middle
+        let l = shape_spec(LensShape::Circle, 9, [300.0, 8.0, 40.0, 28.0], strip, 2.0).unwrap();
+        assert_eq!(l.rect, [612.0, 16.0, 56.0, 56.0]);
+        assert_eq!(l.radius, 28.0, "half the (device) height: a circle");
+        assert_eq!(l.rect[2], l.rect[3]);
+    }
+
+    #[test]
     fn a_tab_lens_is_the_tab_made_taller_by_its_corner_and_clipped_by_the_strip() {
         use super::{LensShape, shape_spec};
         // a 140 x 32 tab at (50, 8) in a strip that is 40 high (so the tab ends at the strip's bottom edge)
@@ -683,20 +697,6 @@ mod tests {
         // a radius that is not a number, or a box that cannot be drawn, gives no lens
         assert!(shape_spec(LensShape::Tab { radius: f32::NAN }, 5, [0.0, 0.0, 100.0, 32.0], strip, 1.0).is_none());
         assert!(shape_spec(LensShape::Tab { radius: 8.0 }, 5, [0.0, 0.0, 0.0, 32.0], strip, 1.0).is_none());
-    }
-
-    #[test]
-    fn the_plus_lens_is_a_circle_of_the_buttons_height_centred_on_it() {
-        use super::{LensShape, shape_spec};
-        let strip = [0.0, 0.0, 600.0, 40.0];
-        // a square 28 px button
-        let l = shape_spec(LensShape::Circle, 9, [300.0, 8.0, 28.0, 28.0], strip, 1.0).unwrap();
-        assert_eq!((l.rect, l.radius, l.clip), ([300.0, 8.0, 28.0, 28.0], 14.0, strip));
-        // a wider box: the circle keeps the height and sits in the middle
-        let l = shape_spec(LensShape::Circle, 9, [300.0, 8.0, 40.0, 28.0], strip, 2.0).unwrap();
-        assert_eq!(l.rect, [612.0, 16.0, 56.0, 56.0]);
-        assert_eq!(l.radius, 28.0, "half the (device) height: a circle");
-        assert_eq!(l.rect[2], l.rect[3]);
     }
 
     #[test]

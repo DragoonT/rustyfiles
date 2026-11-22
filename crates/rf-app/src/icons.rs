@@ -3,7 +3,130 @@
 
 use crate::t;
 use gpui_kit::assets::IconName as L;
+#[cfg(not(target_os = "windows"))]
+use gpui_kit::component::Icon;
+use gpui_kit::{AnyElement, IntoElement, ParentElement, Pixels, Styled, div};
 use rf_core::Entry;
+
+pub fn windows_home_icon(size: Pixels) -> AnyElement {
+    #[cfg(target_os = "windows")]
+    {
+        windows_theme_glyph('\u{E80F}', size)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Icon::new(L::House).size(size).into_any_element()
+    }
+}
+
+fn windows_theme_font_for_build(build: u32) -> &'static str {
+    if build >= 22000 {
+        "Segoe Fluent Icons"
+    } else {
+        "Segoe MDL2 Assets"
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn windows_theme_font_family() -> &'static str {
+    windows_theme_font_for_build(rf_win::osver::build())
+}
+
+#[cfg(target_os = "windows")]
+pub fn windows_theme_glyph(glyph: char, size: Pixels) -> AnyElement {
+    div()
+        .size(size)
+        .flex()
+        .items_center()
+        .justify_center()
+        .font_family(windows_theme_font_family())
+        .text_size(size)
+        .child(glyph.to_string())
+        .into_any_element()
+}
+
+pub fn windows_theme_icon_glyph(icon: L) -> Option<char> {
+    let path = icon.path();
+    let name = path.strip_prefix("icons/")?.strip_suffix(".svg")?;
+    let glyph = match name {
+        "arrow-left" => 0xE72B,
+        "arrow-right" => 0xE72A,
+        "arrow-down-up" | "arrow-up-down" => 0xE8CB,
+        "chevron-down" => 0xE70D,
+        "circle-plus" | "plus" => 0xE710,
+        "clipboard-copy" => 0xE8C8,
+        "clipboard-paste" => 0xE77F,
+        "copy" => 0xE8C8,
+        "ellipsis" => 0xE712,
+        "eye" => 0xE890,
+        "folder-input" | "folder-plus" | "folder-plus-2" => 0xE8F4,
+        "house" => 0xE80F,
+        "layout-grid" => 0xECA5,
+        "list-filter" | "filter" => 0xE71C,
+        "panel-right" => 0xE890,
+        "scissors" | "cut" => 0xE8C6,
+        "share-2" => 0xE72D,
+        "text-cursor-input" => 0xE8AC,
+        "trash" | "trash-2" => 0xE74D,
+        "wrench" => 0xE946,
+        "rotate-cw" => 0xE72C,
+        "rotate-ccw" => 0xE80D,
+        "undo" | "undo-2" => 0xE7A7,
+        "redo" | "redo-2" => 0xE7A6,
+        _ => return None,
+    };
+    char::from_u32(glyph)
+}
+
+#[cfg(test)]
+mod windows_theme_tests {
+    use super::windows_theme_icon_glyph;
+
+    #[test]
+    fn standard_actions_use_windows_glyphs_when_available() {
+        use gpui_kit::assets::IconName as L;
+
+        for (icon, glyph) in [
+            (L::ArrowLeft, '\u{E72B}'),
+            (L::ArrowRight, '\u{E72A}'),
+            (L::ClipboardCopy, '\u{E8C8}'),
+            (L::ClipboardPaste, '\u{E77F}'),
+            (L::Copy, '\u{E8C8}'),
+            (L::Eye, '\u{E890}'),
+            (L::House, '\u{E80F}'),
+            (L::Scissors, '\u{E8C6}'),
+            (L::Share2, '\u{E72D}'),
+            (L::TextCursorInput, '\u{E8AC}'),
+            (L::Trash, '\u{E74D}'),
+            (L::Wrench, '\u{E946}'),
+        ] {
+            assert_eq!(windows_theme_icon_glyph(icon), Some(glyph), "{}", icon.path());
+        }
+    }
+
+    #[test]
+    fn other_icons_keep_the_program_default() {
+        use gpui_kit::assets::IconName as L;
+
+        for icon in [
+            L::Archive,
+            L::ChartPie,
+            L::Link,
+            L::Search,
+            L::Settings,
+            L::SquareTerminal,
+            L::Star,
+        ] {
+            assert_eq!(windows_theme_icon_glyph(icon), None, "{}", icon.path());
+        }
+    }
+
+    #[test]
+    fn windows_10_uses_mdl2_and_windows_11_uses_fluent_icons() {
+        assert_eq!(super::windows_theme_font_for_build(19045), "Segoe MDL2 Assets");
+        assert_eq!(super::windows_theme_font_for_build(22000), "Segoe Fluent Icons");
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {

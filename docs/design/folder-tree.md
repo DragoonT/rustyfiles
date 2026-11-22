@@ -13,8 +13,7 @@ Code: the model is `crates/rf-core/src/navtree.rs` (pure, tested without a windo
   has "Kenar çubuğu"). While the tree is on, a right click on the sidebar's own ground (the section headers, gaps and rows
   that have no menu of their own; rows that have one keep it) offers the two switches. With the tree off the sidebar has no
   such handler: a right click on those places does what it did before (nothing).
-* With the setting on, a "Klasörler" section sits right under the pinned folders, above the drives and the tags (moved there at the user's request). After a navigation the sidebar is scrolled to the open folder only when the pointer is not over the sidebar: a click on a pinned folder must not scroll the row away from under the pointer. Its roots are the user's profile
-  folder first, then the drives (the same list the sidebar's "Sürücüler" section uses, so a USB stick appears and goes with it).
+* With the setting on, a "Klasörler" section sits right under the pinned folders, above the drives and the tags (moved there at the user's request). After a navigation the sidebar is scrolled to the open folder only when the pointer is not over the sidebar: a click on a pinned folder must not scroll the row away from under the pointer. Its roots are the user's profile folder first, then the drives (the same list the sidebar's "Sürücüler" section uses, so a USB stick appears and goes with it).
 * Every folder row has a chevron (12 px, the size the rest of the app uses), a 16 px icon like the sidebar's rows, and the name
   (the localized name when Explorer has one: "İndirilenler"). Indent is 16 px a level, up to 6 levels; deeper rows stand at that
   indent (the name would have no room in a narrow sidebar) and show the whole name as a tooltip. The selected row is drawn as the sidebar
@@ -40,6 +39,9 @@ Code: the model is `crates/rf-core/src/navtree.rs` (pure, tested without a windo
 * The rows are virtualised: the tree is a box as tall as all its rows inside the sidebar's scroll area, and only the rows in
   view (plus six above and below) are built, from the scroll position. The model keeps a flat list of rows (node and depth), so a
   tree with thousands of visible rows costs a few dozen elements per frame.
+* The sidebar, folder tree, and scrollbar share one scroll handle, so wheel scrolling, track clicks, and thumb dragging update the
+  same position. The Windows File Explorer look adds the themed sidebar scrollbar; with that look off, the sidebar keeps its original
+  scrolling appearance. The themed thumb is centered in its track; on hover, the arrows at either end remain clear of it.
 * The rail (the sidebar as a strip of icons) shows no tree, and neither does the full sidebar that opens over the content while the
   pointer is on the rail.
 
