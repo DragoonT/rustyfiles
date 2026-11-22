@@ -199,7 +199,7 @@ impl Render for BinSettingsDialog {
                                 .text_sm()
                                 .cursor_pointer()
                                 .child(radio(&p, !nuke))
-                                .child(div().flex_1().child(t!("Özel boyut (en çok, MB)")))
+                                .child(div().flex_1().min_w_0().child(t!("Özel boyut (en çok, MB)")))
                                 .child(
                                     div()
                                         .w(px(120.))
@@ -230,7 +230,7 @@ impl Render for BinSettingsDialog {
                                 .text_sm()
                                 .cursor_pointer()
                                 .child(radio(&p, nuke))
-                                .child(div().flex_1().child(t!("Dosyaları Geri Dönüşüm Kutusu'na taşıma; silinir silinmez kaldır")))
+                                .child(div().flex_1().min_w_0().child(t!("Dosyaları Geri Dönüşüm Kutusu'na taşıma; silinir silinmez kaldır")))
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     if let Some(e) = this.edit.as_mut().and_then(|e| e.volumes.get_mut(i)) {
                                         e.remove_immediately = true;
@@ -264,7 +264,7 @@ impl Render for BinSettingsDialog {
                             .when(!confirm, |d| d.border_1().border_color(p.text_secondary))
                             .when(confirm, |d| d.child(Icon::new(L::Check).size(px(12.)).text_color(p.accent_text))),
                     )
-                    .child(div().flex_1().child(if locked { t!("Silme onayını göster (bir ilke tarafından belirlenmiş)") } else { t!("Silme onayını göster") }))
+                    .child(div().flex_1().min_w_0().child(if locked { t!("Silme onayını göster (bir ilke tarafından belirlenmiş)") } else { t!("Silme onayını göster") }))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         if !locked && let Some(e) = this.edit.as_mut() {
                             e.confirm_delete = !e.confirm_delete;
@@ -312,9 +312,11 @@ impl Render for BinSettingsDialog {
                 }
             }))
             .child(
+                // (as high as the view allows: with many drives the list scrolls and the buttons stay in sight; issue 213)
                 v_flex()
                     .w(px(520.))
-                    .max_h(px(560.))
+                    .max_w(relative(0.94))
+                    .max_h(relative(0.92))
                     .rounded(theme::RADIUS)
                     .bg(p.card_bg)
                     .border_1()
@@ -322,16 +324,22 @@ impl Render for BinSettingsDialog {
                     .shadow_lg()
                     .overflow_hidden()
                     .text_color(p.text)
+                    .child(div().flex_shrink_0().px_6().pt_6().pb_3().text_lg().font_weight(FontWeight::SEMIBOLD).child(t!("Geri Dönüşüm Kutusu ayarları")))
                     .child(
                         v_flex()
-                            .p_6()
+                            .id("bin-settings-body")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .px_6()
+                            .pb_6()
                             .gap_3()
-                            .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(t!("Geri Dönüşüm Kutusu ayarları")))
                             .child(body)
                             .children(self.error.clone().filter(|_| self.edit.is_some()).map(|e| div().text_xs().text_color(p.danger).child(e))),
                     )
                     .child(
                         h_flex()
+                            .flex_shrink_0()
                             .px_6()
                             .py_4()
                             .gap_2()
