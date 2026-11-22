@@ -119,19 +119,37 @@ pub fn thin_glass(full: Rect, unit: f32) -> Rect {
 
 // ---------------------------------------------------------------- near
 
-/// The area in which the pointer makes the thin dock grow: the thin glass and the band around it, `NEAR_SIDE` to each side, from
-/// `NEAR_ABOVE` above the band's top edge down to the bottom of the monitor, less the two side islands (the pointer on the Start button
-/// or the clock is not on the dock).
+/// Where the pointer counts as near the thin dock. Two areas, as the Mac's dock has them (issue 209: the dock grew while the pointer was
+/// still above it, on its way to a button of the window over it):
+/// * `enter`: what makes the thin dock grow: the thin glass itself and the margin under it, down to the monitor's last row (a pointer
+///   thrown at the screen's bottom edge lands there).
+/// * `near`: what keeps the grown dock grown: the thin glass and the band around it, `NEAR_SIDE` to each side, from `NEAR_ABOVE` above
+///   the band's top edge down to the bottom of the monitor, which holds the whole of the grown glass and its grown icons.
+///
+/// Neither holds the two side islands (the pointer on the Start button or the clock is not on the dock).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Zone {
     pub near: Rect,
+    pub enter: Rect,
     pub left: Rect,
     pub right: Rect,
 }
 
 impl Zone {
+    /// The pointer is in the area that keeps a grown dock grown.
     pub fn contains(&self, x: i32, y: i32) -> bool {
         self.near.contains(x, y) && !self.left.contains(x, y) && !self.right.contains(x, y)
+    }
+
+    /// The pointer is in the area that makes a thin dock grow.
+    pub fn enters(&self, x: i32, y: i32) -> bool {
+        self.enter.contains(x, y) && !self.left.contains(x, y) && !self.right.contains(x, y)
+    }
+
+    /// Whether the pointer counts as near, for a dock that is (`near`) or is not near at the moment: the small area to become near, the
+    /// large one to stay near.
+    pub fn holds(&self, x: i32, y: i32, near: bool) -> bool {
+        if near { self.contains(x, y) } else { self.enters(x, y) }
     }
 }
 
@@ -146,7 +164,8 @@ pub fn zone(full: Rect, left: Rect, right: Rect, monitor: Rect, unit: f32) -> Zo
         top: (thin.top - px(NEAR_ABOVE, unit)).max(monitor.top),
         bottom: monitor.bottom,
     };
-    Zone { near, left, right }
+    let enter = Rect { bottom: monitor.bottom, ..thin };
+    Zone { near, enter, left, right }
 }
 
 // ---------------------------------------------------------------- thin or full
@@ -890,6 +909,24 @@ mod tests {
         for (x, y) in [(grown.left, grown.top), (grown.right - 1, grown.top), (grown.left, grown.bottom - 1), (grown.right - 1, grown.bottom - 1)] {
             assert!(z.contains(x, y), "({x},{y})");
         }
+    }
+
+    #[test]
+    fn the_thin_dock_grows_only_when_the_pointer_is_on_it_and_stays_grown_over_the_grown_dock() {
+        let monitor = Rect::new(0, 0, 2560, 1440);
+        let i = layout::islands(monitor, 1.0, W);
+        let z = zone(i.middle, i.left, i.right, monitor, 1.0);
+        let thin = thin_glass(i.middle, 1.0);
+        // above the thin glass, where the grown dock will be: not enough to grow it (issue 209)
+        assert!(!z.holds(1280, thin.top - 1, false) && !z.holds(1280, thin.top - 30, false));
+        // nor beside it, in the room the glass widens into
+        assert!(!z.holds(thin.left - 10, 1400, false));
+        // on the thin glass, or under it at the screen's edge: it grows
+        assert!(z.holds(1280, thin.top, false) && z.holds(1280, 1420, false) && z.holds(1280, 1439, false));
+        // grown, it stays grown wherever the grown dock and its grown icons are
+        assert!(z.holds(1280, thin.top - 30, true) && z.holds(thin.left - 10, 1400, true));
+        // and the side islands never count
+        assert!(!z.enters(i.left.left + 5, i.left.top + 24));
     }
 
     #[test]

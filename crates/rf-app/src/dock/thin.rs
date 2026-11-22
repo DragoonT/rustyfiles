@@ -453,7 +453,9 @@ fn poll(cx: &mut App) -> Option<u64> {
             continue;
         }
         // (no zone known: neither near nor away; no cursor position, as on a locked desktop: away)
-        let inside = m.zone.map(|z| pointer.is_some_and(|(x, y, _)| z.contains(x, y)));
+        // (the thin glass to become near, the whole grown dock to stay near: see `Zone`)
+        let near = m.model.inputs.near;
+        let inside = m.zone.map(|z| pointer.is_some_and(|(x, y, _)| z.holds(x, y, near)));
         // (a panel, a menu or a preview keeps the dock it belongs to grown, and no other)
         if m.model.observe(inside, button, open && active == m.mon) {
             changed.push(m.mon);
