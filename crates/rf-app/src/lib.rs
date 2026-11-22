@@ -2,6 +2,7 @@
 
 mod actions;
 mod aliases;
+mod app_icon;
 mod background;
 mod cut_marks;
 pub mod bench;
@@ -866,6 +867,10 @@ pub fn main() {
         ui_stall::start(cx);
         cx.set_global(settings::Settings::load());
         start_mark("settings loaded");
+        // (an update may have written the shortcuts again: the chosen icon goes back on them)
+        if !dock {
+            app_icon::reapply(cx.global::<settings::Settings>().app_icon.clone());
+        }
         rf_core::sort::set_turkish_collation(rf_win::encoding::user_locale_is_turkish());
         // eski kod sayfalı metinlerin tahmini: Türkçe olmayan sistemde Türkçe ipucu verilmez
         if !rf_win::encoding::user_locale_is_turkish() {

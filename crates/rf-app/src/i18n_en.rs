@@ -2166,5 +2166,9 @@ pub const EN: &[(&str, &str)] = &[
     ("Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.", "As you type, folders you went to before are listed with the commands. Ctrl+P always searches past folders only."),
     ("Windows Dosya Gezgini görünümü", "Windows File Explorer look"),
     ("Kompakt pencere", "Compact window"),
+    ("Uygulama simgesi", "App icon"),
+    ("Başlat menüsündeki, masaüstündeki ve görev çubuğuna sabitlenmiş rustyfiles kısayollarının simgesi. Güncellemelerden sonra da kalır.", "The icon of rustyfiles' shortcuts in the Start menu, on the desktop and pinned to the taskbar. It stays after updates."),
+    ("Simge seçin", "Choose an icon"),
+    ("Simge dosyaları", "Icon files"),
     ("Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.", "The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size."),
 ];

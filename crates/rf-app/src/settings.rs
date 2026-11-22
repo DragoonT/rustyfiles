@@ -469,6 +469,12 @@ pub struct Settings {
     /// Where the preview pane sits: at the right of the list (the default) or under it. The key is written only for "bottom".
     #[serde(skip_serializing_if = "rf_core::previewpane::PreviewPos::is_right")]
     pub preview_position: rf_core::previewpane::PreviewPos,
+    /// The Properties window's size (logical px) as the user last left it; `None`: the default size (`properties_view::DEFAULT_SIZE`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub props_size: Option<[f32; 2]>,
+    /// The icon file of rustyfiles' own shortcuts (Start menu, desktop, taskbar pin); `None`: the program's own (`rf_win::app_icon`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_icon: Option<String>,
     /// The pane's height at the bottom (drag its top edge). Written only once the user has moved it.
     #[serde(skip_serializing_if = "is_default_preview_height")]
     pub preview_height: f32,
@@ -945,6 +951,8 @@ impl Default for Settings {
             animations: AnimPref::System,
             windows_file_explorer_theme: false,
             compact_window: false,
+            props_size: None,
+            app_icon: None,
             backdrop: BackdropPref::Mica,
             tint: None,
             background_image: None,

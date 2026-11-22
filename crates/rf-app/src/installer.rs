@@ -56,6 +56,11 @@ fn after_install_or_update() {
         let _ = rf_win::dialogs::set_start_with_windows_as("DirectLook", &me.with_file_name("directlook.exe"), &["--background"], true);
     }
     let _ = crate::dialog_registration(crate::DialogReg::Follow);
+    // the icon the user chose for rustyfiles' shortcuts (the update wrote them with the default)
+    if let Some(icon) = crate::settings::Settings::load().app_icon {
+        rf_win::shell::ensure_com();
+        rf_win::app_icon::apply(Some(&icon));
+    }
 }
 
 /// A fresh install turns on rustyfiles' Open/Save dialogs (per user, no admin rights; Settings →

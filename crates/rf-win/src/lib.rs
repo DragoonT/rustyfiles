@@ -89,6 +89,7 @@ pub mod shell;
 pub mod shellfolder;
 pub mod sysstatus;
 pub mod shortcut;
+pub mod app_icon;
 pub mod scrollbars;
 pub mod sendto;
 pub mod startup;
