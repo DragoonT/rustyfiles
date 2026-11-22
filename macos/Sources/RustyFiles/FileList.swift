@@ -445,6 +445,11 @@ final class TextCellView: HoverView {
 @MainActor
 final class FileTableView: NSTableView, NSServicesMenuRequestor {
     weak var list: FileListController?
+
+    override func magnify(with event: NSEvent) { list?.pinched(event) }
+    override func scrollWheel(with event: NSEvent) {
+        if list?.commandScrolled(event) != true { super.scrollWheel(with: event) }
+    }
     private(set) var hoveredRow = -1
 
     override func keyDown(with event: NSEvent) {

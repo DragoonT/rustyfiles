@@ -789,5 +789,7 @@
 "Files like .DS_Store and .localized, which macOS keeps for itself; shown only with hidden items.": "macOS'un kendisi için tuttuğu .DS_Store, .localized gibi dosyalar; yalnızca gizli öğelerle birlikte gösterilir.",
 "Collapse all groups": "Tüm grupları daralt",
 "Expand all groups": "Tüm grupları genişlet",
-"Collapse / Expand All Groups": "Tüm Grupları Daralt / Genişlet"
+"Collapse / Expand All Groups": "Tüm Grupları Daralt / Genişlet",
+"Zoom In": "Simgeleri Büyüt",
+"Zoom Out": "Simgeleri Küçült"
 }

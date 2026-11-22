@@ -204,6 +204,11 @@ final class TileItem: NSCollectionViewItem {
 final class TileCollectionView: NSCollectionView, NSServicesMenuRequestor {
     weak var list: FileListController?
 
+    override func magnify(with event: NSEvent) { list?.pinched(event) }
+    override func scrollWheel(with event: NSEvent) {
+        if list?.commandScrolled(event) != true { super.scrollWheel(with: event) }
+    }
+
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok { list?.onFocus?() }

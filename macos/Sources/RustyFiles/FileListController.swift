@@ -87,6 +87,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var groupCounts: [String: Int] = [:]
     var foldedRows: Set<Int> = []
     private var isFolded = false
+    private var pinch: CGFloat = 0
     /// Each row's group header, for the first row of every group (details only).
     private var groupTitles: [Int: String] = [:]
     /// Tags and Git states of the folder shown, by name (filled when their columns are on).
@@ -1035,6 +1036,46 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     private func reloadSelecting(_ names: [String], rename: Bool = false) { onReload?(names, rename) }
 
     /// The Layout flyout's tile size changed: the grid's cells follow.
+    /// Bigger or smaller icons (⌘+ / ⌘−, a pinch, ⌘ with the wheel; folder_view.rs `zoom`):
+    /// another layout grows into Tiles at their smallest, Tiles step through their sizes,
+    /// and the smallest Tiles shrink back into Details.
+    func zoom(_ delta: Int) {
+        guard !pageShown else { return }
+        let size = TileMetrics.size
+        if viewMode != .tiles {
+            guard delta > 0 else { return }
+            UserDefaults.standard.set(0, forKey: "tileSize")
+            setViewMode(.tiles)
+            return
+        }
+        if delta < 0 && size == 0 { return setViewMode(.details) }
+        let n = min(max(size + delta, 0), TileMetrics.sizes.count - 1)
+        guard n != size else { return }
+        UserDefaults.standard.set(n, forKey: "tileSize")
+        tileSizeChanged()
+    }
+
+    /// A pinch on the trackpad zooms one step each time it has opened or closed far enough.
+    func pinched(_ event: NSEvent) {
+        if event.phase == .began { pinch = 0 }
+        pinch += event.magnification
+        if abs(pinch) >= 0.3 {
+            zoom(pinch > 0 ? 1 : -1)
+            pinch = 0
+        }
+    }
+
+    /// ⌘ with the wheel zooms instead of scrolling; false: an ordinary scroll.
+    func commandScrolled(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command) else { return false }
+        pinch += event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 0.01 : 0.1)
+        if abs(pinch) >= 0.3 {
+            zoom(pinch > 0 ? 1 : -1)
+            pinch = 0
+        }
+        return true
+    }
+
     func tileSizeChanged() {
         // the pictures are asked for again at the new size
         ThumbnailCache.shared.clear()
