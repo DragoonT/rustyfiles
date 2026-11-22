@@ -4673,6 +4673,10 @@ fn expand_env(s: &str) -> String {
     if let Some(r) = crate::aliases::resolve(s) {
         return r;
     }
+    // "~\Downloads": the user's folder, as in a shell (issue 212)
+    if let Some(r) = std::env::var("USERPROFILE").ok().and_then(|home| rf_core::addrcmd::expand_home(s, &home)) {
+        return r;
+    }
     let mut out = String::new();
     let mut rest = s;
     while let Some(start) = rest.find('%') {

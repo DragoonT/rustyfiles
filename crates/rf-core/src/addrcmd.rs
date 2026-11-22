@@ -196,6 +196,16 @@ pub fn app_paths_name(program: &str) -> String {
     if lower.ends_with(".exe") { program.to_string() } else { format!("{program}.exe") }
 }
 
+/// `~`, `~\…` and `~/…` with the `~` replaced by `home` (the user's folder), as shells read them (issue 212); `None` for any other text
+/// (`~name`, a `~` further on, as in `C:\PROGRA~1`) and when `home` is empty.
+pub fn expand_home(s: &str, home: &str) -> Option<String> {
+    let rest = s.strip_prefix('~')?;
+    if home.is_empty() || !(rest.is_empty() || rest.starts_with(['\\', '/'])) {
+        return None;
+    }
+    Some(format!("{}{rest}", home.trim_end_matches(['\\', '/'])))
+}
+
 /// `%NAME%` replaced by `lookup(NAME)`; an unknown name stays as typed.
 pub fn expand_vars(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
     let mut out = String::new();
@@ -228,6 +238,20 @@ pub fn expand_vars(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_tilde_at_the_start_is_the_users_folder() {
+        let home = r"C:\Users\ada";
+        assert_eq!(super::expand_home("~", home).as_deref(), Some(home));
+        assert_eq!(super::expand_home(r"~\Downloads", home).as_deref(), Some(r"C:\Users\ada\Downloads"));
+        assert_eq!(super::expand_home("~/Desktop", home).as_deref(), Some(r"C:\Users\ada/Desktop"));
+        assert_eq!(super::expand_home(r"~\", r"C:\Users\ada\").as_deref(), Some(r"C:\Users\ada\"));
+        // not a home folder: another user's, a short name, a name that only starts with the sign, no home known
+        for t in ["~ada", r"C:\PROGRA~1", "x~", "~.txt"] {
+            assert_eq!(super::expand_home(t, home), None, "{t}");
+        }
+        assert_eq!(super::expand_home("~", ""), None);
+    }
+
     use super::*;
 
     fn cl(p: &str, a: &str) -> CommandLine {
