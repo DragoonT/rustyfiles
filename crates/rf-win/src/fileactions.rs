@@ -23,10 +23,15 @@ pub fn is_font(p: &Path) -> bool {
     matches!(e.as_str(), "ttf" | "otf" | "ttc" | "fon")
 }
 
-/// Executables that "Run as administrator" applies to.
+/// Executables that "Run as administrator" applies to. (Not a `.msi`: Windows gives it no such verb, see [`is_msi`].)
 pub fn is_runnable(p: &Path) -> bool {
     let e = p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    matches!(e.as_str(), "exe" | "bat" | "cmd" | "msi" | "ps1" | "com")
+    matches!(e.as_str(), "exe" | "bat" | "cmd" | "ps1" | "com")
+}
+
+/// A Windows Installer package: its verbs are install ("open"), repair and uninstall.
+pub fn is_msi(p: &Path) -> bool {
+    p.extension().is_some_and(|e| e.eq_ignore_ascii_case("msi"))
 }
 
 pub fn set_wallpaper(path: &Path) -> anyhow::Result<()> {

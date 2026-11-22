@@ -438,6 +438,8 @@ pub const EN: &[(&str, &str)] = &[
     ("İndiriliyor", "Downloading"),
     ("Güncelle", "Update"),
     ("Kur", "Install"),
+    ("Onar", "Repair"),
+    ("Programı kaldır", "Uninstall"),
     ("Kaldırılamadı (program açık olabilir)", "Could not be removed (the program may be running)"),
     ("Kaynak kodu:", "Source code:"),
     ("Bağlantıdan indir…", "Download from a link…"),

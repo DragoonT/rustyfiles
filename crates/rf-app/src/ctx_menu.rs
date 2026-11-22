@@ -354,6 +354,20 @@ impl FolderView {
                         }
                     });
                 }));
+            } else if rf_win::fileactions::is_msi(&p) && !in_archive {
+                // a Windows Installer package: the verbs Windows gives it (it has no "run as administrator"; the installer asks for it
+                // itself), as in Explorer's menu (issue 211)
+                for (label, verb, ic) in [(t!("Kur"), "open", L::Package), (t!("Onar"), "repair", L::Wrench), (t!("Programı kaldır"), "uninstall", L::Trash)] {
+                    let p = p.clone();
+                    v.push(Item::action(label, icon(ic), move |_, _| {
+                        let p = p.clone();
+                        rf_win::sta::run(move |owner| {
+                            if let Err(e) = rf_win::ctxmenu::invoke_verb(owner, &ShellTarget::One(p), verb, cursor()) {
+                                log::warn!("msi {verb}: {e:#}");
+                            }
+                        });
+                    }));
+                }
             } else if rf_win::fileactions::is_runnable(&p) && !in_archive {
                 v.push(Item::action(t!("Yönetici olarak çalıştır"), icon(L::ShieldCheck), move |_, _| {
                     let p = p.clone();
