@@ -75,7 +75,7 @@ fn page_title(page: Page, name: &str) -> String {
 
 /// The quiet pill next to an experimental page's name in the page list (the same for every such page).
 fn experimental_pill(p: &Palette) -> Div {
-    div().px(px(6.)).py(px(1.)).rounded_full().border_1().border_color(p.border).text_size(px(10.)).text_color(p.text_secondary).child(t!("Deneysel"))
+    div().flex_shrink_0().whitespace_nowrap().px(px(6.)).py(px(1.)).rounded_full().border_1().border_color(p.border).text_size(px(10.)).text_color(p.text_secondary).child(t!("Deneysel"))
 }
 
 /// Which page is shown and which expanders are open (kept while the app runs).
@@ -519,7 +519,17 @@ pub fn render(p: &Palette, window: &mut Window, cx: &mut App, lens_owner: bool, 
                 .when(on && lens, |d| d.child(crate::glass::lens_probe(crate::glass::SLOT_SETTINGS, crate::glass::key_of(&i))))
                 .when(!on, |d| d.hover(|s| s.bg(p.hover)))
                 .child(Icon::new(icon).size(px(16.)).text_color(if on { p.accent } else { p.text_secondary }))
-                .when(!strip, |d| d.child(h_flex().gap_2().items_center().child(crate::i18n::t(label)).when(experimental(pg), |d| d.child(experimental_pill(p)))))
+                .when(!strip, |d| {
+                    // (the pill never shrinks; a long page name gives way, with "…": the Russian pill was cut, a Discord report)
+                    d.child(
+                        h_flex()
+                            .min_w_0()
+                            .gap_2()
+                            .items_center()
+                            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(crate::i18n::t(label)))
+                            .when(experimental(pg), |d| d.child(experimental_pill(p))),
+                    )
+                })
                 .on_click({
                     let search = search.clone();
                     move |_, window, cx| {
@@ -1549,6 +1559,17 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
             t!("Kompakt pencere"),
             Some(t!("Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.")),
             sw("compact-window", p, s.compact_window, |s, v| s.compact_window = v),
+        ),
+        card(
+            p,
+            L::Image,
+            t!("Uygulama simgesi"),
+            Some(t!("Başlat menüsündeki, masaüstündeki ve görev çubuğuna sabitlenmiş rustyfiles kısayollarının simgesi. Güncellemelerden sonra da kalır.")),
+            h_flex()
+                .gap_2()
+                .child(button("app-icon-pick", p, t!("Seç…"), |window, cx| crate::app_icon::pick(window, cx)))
+                .when(s.app_icon.is_some(), |d| d.child(button("app-icon-default", p, t!("Varsayılan"), |_, cx| crate::app_icon::set(None, cx))))
+                .into_any_element(),
         ),
         card(
             p,
