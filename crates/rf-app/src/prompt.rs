@@ -446,7 +446,23 @@ impl Render for DialogView {
                             .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(self.title.clone()))
                             .children(self.message.clone().map(|m| div().text_sm().text_color(p.text_secondary).child(m)))
                             .children(self.input.as_ref().map(|i| {
+                                // a password that is not shown cannot be copied or cut out (issue 204: with the eye button it could be,
+                                // dots and all); shown, it can
+                                let hidden = |i: &Entity<InputState>, cx: &App| i.read(cx).presentation().is_masked();
+                                let (ic, ix) = (i.clone(), i.clone());
                                 div()
+                                    .when(self.masked, |d| {
+                                        d.capture_action(move |_: &gpui_kit::component::input::Copy, _, cx| {
+                                            if hidden(&ic, cx) {
+                                                cx.stop_propagation();
+                                            }
+                                        })
+                                        .capture_action(move |_: &gpui_kit::component::input::Cut, _, cx| {
+                                            if hidden(&ix, cx) {
+                                                cx.stop_propagation();
+                                            }
+                                        })
+                                    })
                                     .h(px(34.))
                                     .px_2()
                                     .flex()
