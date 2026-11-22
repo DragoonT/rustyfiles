@@ -24,8 +24,10 @@ use super::layout::{ICON_REST, MARGIN_BOTTOM, MIDDLE_HEIGHT, MIDDLE_RESERVE, Rec
 /// The thin dock's glass height: the side islands', so the three stand on one line and are one height.
 pub const THIN_HEIGHT: f32 = SIDE_HEIGHT;
 /// An icon of the thin dock, dock units. With the running mark below it (the same 7 and 4 as at full size) it fills the 48 units the
-/// glass has: 12 under the icon's foot, 30 of icon, 6 over its head (`the_icon_and_its_mark_fit_the_thin_glass`).
-pub const THIN_ICON: f32 = 30.0;
+/// glass has: 12 under the icon's foot, 26 of icon, 10 over its head (`the_icon_and_its_mark_fit_the_thin_glass`). It was 30, which
+/// left 6 over the head against 12 under the foot (issue 185: "when the taskbar shrinks the space is less compared to the space
+/// under the icons").
+pub const THIN_ICON: f32 = 26.0;
 /// What the application desktop toolbar reserves while the dock is thin: the thin glass and the margin above and below it, as the full
 /// band is the full glass and its margins (`layout::RESERVED_HEIGHT`).
 pub const THIN_RESERVED_HEIGHT: f32 = THIN_HEIGHT + 2.0 * MARGIN_BOTTOM;
@@ -841,6 +843,8 @@ mod tests {
         const { assert!(BASELINE - DOT_DROP - DOT_HEIGHT >= 0.0) };
         const { assert!(BASELINE + THIN_ICON < THIN_HEIGHT) };
         const { assert!(THIN_HEIGHT - (BASELINE + THIN_ICON) >= 4.0) };
+        // (and about as much room over the head as under the foot, where the mark is: issue 185)
+        const { assert!(BASELINE - (THIN_HEIGHT - (BASELINE + THIN_ICON)) <= 2.0) };
         // the same at every dock size: all of it scales with the unit, and a device pixel of rounding cannot push the icon out
         for unit in [0.85, 1.0, 1.2, 1.4, 1.5 * 1.4] {
             let glass = px(THIN_HEIGHT, unit);

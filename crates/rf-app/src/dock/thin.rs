@@ -578,7 +578,7 @@ mod tests {
             match s {
                 Slot::Icon => {
                     assert!((a.0 + a.1 / 2.0 - (b.0 + b.1 / 2.0)).abs() < 1e-4, "the centre moved: {a:?} {b:?}");
-                    assert!((b.1 - 30.0).abs() < 1e-4, "an icon is 30 units thin");
+                    assert!((b.1 - rf_win::dock::thin::THIN_ICON).abs() < 1e-4, "an icon is THIN_ICON units thin");
                 }
                 Slot::Separator => assert_eq!(a, b),
             }
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn the_thin_icons_are_a_part_of_the_rest_size() {
-        assert!((Squeeze::at(0.0).icon * ICON_REST - 30.0).abs() < 1e-4);
+        assert!((Squeeze::at(0.0).icon * ICON_REST - rf_win::dock::thin::THIN_ICON).abs() < 1e-4);
     }
 
     #[test]
