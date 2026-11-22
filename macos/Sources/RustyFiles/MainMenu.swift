@@ -103,9 +103,20 @@ enum MainMenu {
         m.addItem(item(String(localized: "Cards"), #selector(W.showCards(_:)), "3"))
         m.addItem(item(String(localized: "List"), #selector(W.showListStyle(_:)), "4"))
         m.addItem(item(String(localized: "Columns"), #selector(W.showColumns(_:)), "5"))
+        m.addItem(item(String(localized: "Zoom In"), #selector(W.zoomIn(_:)), "+"))
+        m.addItem(item(String(localized: "Zoom Out"), #selector(W.zoomOut(_:)), "-"))
+        m.addItem(item(String(localized: "Bigger Interface"), #selector(W.interfaceBigger(_:)), "+", [.command, .option]))
+        m.addItem(item(String(localized: "Smaller Interface"), #selector(W.interfaceSmaller(_:)), "-", [.command, .option]))
+        m.addItem(item(String(localized: "Actual Size"), #selector(W.interfaceActual(_:)), "0", [.command, .option]))
+        // ⌘= as well, where + needs Shift
+        let eq = item(String(localized: "Zoom In"), #selector(W.zoomIn(_:)), "=")
+        eq.isHidden = true
+        eq.allowsKeyEquivalentWhenHidden = true
+        m.addItem(eq)
         m.addItem(.separator())
         m.addItem(item(String(localized: "Show Hidden Files"), #selector(W.toggleHidden(_:)), ".", [.command, .shift]))
         m.addItem(item(String(localized: "Refresh"), #selector(W.refresh(_:)), "r"))
+        m.addItem(item(String(localized: "Collapse / Expand All Groups"), #selector(W.toggleAllGroups(_:)), "g", [.control, .shift]))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Hide Sidebar"), #selector(W.toggleSidebar(_:)), "s", [.command, .control]))
         m.addItem(item(String(localized: "Show Preview"), #selector(W.togglePreviewPane(_:)), "p", [.command, .shift]))

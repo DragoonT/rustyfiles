@@ -64,6 +64,14 @@ extension AppSettings {
         }
     }
 
+    /// Settings › Appearance › Interface scale: the whole window in percent of the usual.
+    static let interfaceScales = [75, 80, 90, 100, 110, 125, 150, 175]
+    static var interfacePercent: Int {
+        get { interfaceScales.contains(d.integer(forKey: "interfacePercent")) ? d.integer(forKey: "interfacePercent") : 100 }
+        set { store(newValue == 100 ? nil : newValue, "interfacePercent") }
+    }
+    static var interfaceScale: CGFloat { CGFloat(interfacePercent) / 100 }
+
     static var showCommandBar: Bool {
         get { flag("showCommandBar", true) }
         set { store(newValue, "showCommandBar") }
@@ -205,6 +213,13 @@ extension SettingsContent {
             .card(
                 title: String(localized: "Show scroll bars"), detail: nil, icon: "move-vertical",
                 control: .toggle(get: { AppSettings.showScrollBars }, set: { AppSettings.showScrollBars = $0 })),
+            .card(
+                title: String(localized: "Interface scale"),
+                detail: String(localized: "Everything in the window bigger or smaller: for a display set to a higher resolution than usual."),
+                icon: "zoom-in",
+                control: .choice(
+                    options: AppSettings.interfaceScales.map { ("\($0)", "\($0) %") },
+                    get: { "\(AppSettings.interfacePercent)" }, set: { AppSettings.interfacePercent = Int($0) ?? 100 })),
             .card(
                 title: String(localized: "Text size"), detail: String(localized: "Smaller text fits more on a small screen."), icon: "a-large-small",
                 control: .choice(

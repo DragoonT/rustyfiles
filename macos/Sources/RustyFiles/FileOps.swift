@@ -85,9 +85,19 @@ enum FileOps {
 
 /// The clipboard for files. macOS has no "cut" for files, so a cut is remembered here along
 /// with the pasteboard's change count: a paste moves only while that copy is still on it.
+extension Notification.Name {
+    static let rfCutChanged = Notification.Name("rustyfiles.cutChanged")
+}
+
 @MainActor
 enum Clipboard {
     private static var cutChangeCount: Int?
+    /// The paths cut and not yet pasted: they are drawn faded until then, or until something
+    /// else goes on the clipboard (as on Windows).
+    private(set) static var cutPaths: Set<String> = []
+    private static var watch: Timer?
+
+    static func isCut(_ path: String) -> Bool { !cutPaths.isEmpty && cutPaths.contains(path) }
 
     static func put(_ urls: [URL], cut: Bool) {
         guard !urls.isEmpty else { return }
@@ -95,6 +105,24 @@ enum Clipboard {
         pb.clearContents()
         pb.writeObjects(urls as [NSURL])
         cutChangeCount = cut ? pb.changeCount : nil
+        setCut(cut ? Set(urls.map(\.path)) : [])
+        guard cut else { return }
+        // the pasteboard says nothing when another app writes to it; look once a second
+        watch = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                if cutChangeCount != NSPasteboard.general.changeCount {
+                    cutChangeCount = nil
+                    setCut([])
+                }
+            }
+        }
+    }
+
+    private static func setCut(_ paths: Set<String>) {
+        if paths.isEmpty { watch?.invalidate(); watch = nil }
+        guard paths != cutPaths else { return }
+        cutPaths = paths
+        NotificationCenter.default.post(name: .rfCutChanged, object: nil)
     }
 
     static var hasFiles: Bool {
@@ -111,6 +139,7 @@ enum Clipboard {
         if move {
             cutChangeCount = nil
             pb.clearContents()
+            setCut([])
         }
         return (urls, move)
     }

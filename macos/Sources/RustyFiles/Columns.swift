@@ -132,7 +132,7 @@ final class MillerRows: HoverView {
             if on || hot == i { Draw.roundedRect(r, radius: Metrics.radiusSmall, fill: p.hover) }
             let path = dir.appendingPathComponent(item.name).path
             if let image = column.icon?(item, path) {
-                image.draw(in: NSRect(x: r.minX + 8, y: r.midY - 8, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: item.hidden ? 0.5 : 1, respectFlipped: true, hints: nil)
+                image.draw(in: NSRect(x: r.minX + 8, y: r.midY - 8, width: 16, height: 16), from: .zero, operation: .sourceOver, fraction: item.hidden || Clipboard.isCut(path) ? 0.5 : 1, respectFlipped: true, hints: nil)
             }
             let chevron = item.isDir && !item.name.hasSuffix(".app")
             let font = on ? Metrics.textSmMedium : Metrics.textSm

@@ -24,6 +24,9 @@ final class CommandBarView: FlippedView {
     let terminal = IconButton(icon: "square-terminal", size: NSSize(width: 36, height: 32), tooltip: String(localized: "Open in Terminal"))
     let hiddenItems = IconButton(icon: "eye", size: NSSize(width: 36, height: 32), tooltip: String(localized: "Show or hide hidden items"))
     let refresh = IconButton(icon: "rotate-cw", size: NSSize(width: 36, height: 32), tooltip: String(localized: "Refresh"))
+    /// Folds every group or opens them all; only while the folder is shown in groups.
+    let groups = IconButton(icon: "chevrons-down-up", size: NSSize(width: 36, height: 32), tooltip: String(localized: "Collapse all groups"))
+    var showsGroups = false { didSet { if showsGroups != oldValue { needsLayout = true } } }
     private let sepLeft = Divider()
     private let sepRight = Divider()
 
@@ -33,7 +36,7 @@ final class CommandBarView: FlippedView {
         new.chevron = true
         sort.chevron = true
         view.chevron = true
-        [new, sepLeft, newFolder, cut, copy, paste, rename, share, delete, properties, terminal, hiddenItems, refresh, filter, sort, view, sepRight, preview]
+        [new, sepLeft, newFolder, cut, copy, paste, rename, share, delete, properties, terminal, hiddenItems, refresh, groups, filter, sort, view, sepRight, preview]
             .forEach(addSubview)
     }
 
@@ -83,6 +86,10 @@ final class CommandBarView: FlippedView {
         if shows(.filter) {
             r -= 36
             place(filter, r, 36)
+        }
+        if showsGroups {
+            r -= 36 + 2
+            place(groups, r, 36)
         }
         var x: CGFloat = 8
         if shows(.new) {
@@ -288,6 +295,9 @@ final class FileRowView: NSTableRowView {
     /// The first row of a group (Settings › Layout › Group by) carries the group's header
     /// above itself, in its top `GroupMetrics.header` points.
     var groupTitle: String? { didSet { needsDisplay = true } }
+    var groupCount: Int?
+    /// The group is folded: the row is its header alone.
+    var groupFolded = false
 
     override func drawBackground(in dirtyRect: NSRect) {}
     override func drawSelection(in dirtyRect: NSRect) {}
@@ -298,11 +308,9 @@ final class FileRowView: NSTableRowView {
         let inset = groupTitle == nil ? 0 : GroupMetrics.header
         if let groupTitle {
             let r = NSRect(x: 12, y: 10, width: bounds.width - 24 - geometry.gutter, height: 18)
-            let w = Draw.textWidth(groupTitle, font: Metrics.textSmMedium)
-            Draw.text(groupTitle, in: r, font: Metrics.textSmMedium, color: p.accent)
-            p.divider.setFill()
-            NSRect(x: r.minX + w + 10, y: r.midY, width: max(r.width - w - 10, 0), height: 1).fill()
+            GroupMetrics.draw(groupTitle, count: groupCount, folded: groupFolded, hot: false, in: r, palette: p)
         }
+        if groupFolded { return }
         let box = NSRect(x: 6, y: bounds.minY + inset, width: bounds.width - 6 - (6 + geometry.gutter), height: bounds.height - inset)
         if isSelected && onLens { return }
         if isSelected {
@@ -437,6 +445,11 @@ final class TextCellView: HoverView {
 @MainActor
 final class FileTableView: NSTableView, NSServicesMenuRequestor {
     weak var list: FileListController?
+
+    override func magnify(with event: NSEvent) { list?.pinched(event) }
+    override func scrollWheel(with event: NSEvent) {
+        if list?.commandScrolled(event) != true { super.scrollWheel(with: event) }
+    }
     private(set) var hoveredRow = -1
 
     override func keyDown(with event: NSEvent) {
@@ -492,6 +505,13 @@ final class FileTableView: NSTableView, NSServicesMenuRequestor {
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         let r = row(at: p)
+        // a click on a group's header folds or opens the group
+        if r >= 0, let rv = rowView(atRow: r, makeIfNecessary: false) as? FileRowView, let title = rv.groupTitle,
+            p.y - rect(ofRow: r).minY < GroupMetrics.header
+        {
+            list?.toggleGroup(title)
+            return
+        }
         if AppSettings.selectionBoxes, r >= 0, let cell = view(atColumn: 0, row: r, makeIfNecessary: false) as? NameCellView,
             cell.boxRect.contains(cell.convert(event.locationInWindow, from: nil))
         {
@@ -664,4 +684,22 @@ final class CardView: FlippedView {
 enum GroupMetrics {
     /// The group header's height above a group's first row.
     static let header: CGFloat = 36
+
+    /// A group's header (folder_view.rs): a chevron (down when open, right when folded), the
+    /// title, how many items it has, and a divider to the end. A click folds it.
+    @MainActor
+    static func draw(_ title: String, count: Int?, folded: Bool, hot: Bool, in r: NSRect, palette p: Palette) {
+        Draw.icon(folded ? "chevron-right" : "chevron-down", in: NSRect(x: r.minX, y: r.minY, width: 12, height: r.height), size: 12, color: hot ? p.text : p.textSecondary)
+        var x = r.minX + 12 + 8
+        let w = Draw.textWidth(title, font: Metrics.textSmMedium)
+        Draw.text(title, in: NSRect(x: x, y: r.minY, width: max(r.maxX - x, 0), height: r.height), font: Metrics.textSmMedium, color: p.accent)
+        x += w + 8
+        if let count {
+            let n = "\(count)"
+            Draw.text(n, in: NSRect(x: x, y: r.minY, width: 60, height: r.height), font: Metrics.textXs, color: p.textTertiary)
+            x += Draw.textWidth(n, font: Metrics.textXs) + 10
+        }
+        p.divider.setFill()
+        NSRect(x: x, y: r.midY, width: max(r.maxX - x, 0), height: 1).fill()
+    }
 }

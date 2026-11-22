@@ -81,6 +81,13 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var foldersFirst = AppSettings.foldersFirst
     /// Settings › Layout › Group by (or the folder's own, when each folder keeps its layout).
     var groupBy = AppSettings.groupBy
+    /// The groups folded (by title), how many items each group has, and the rows that stand
+    /// for a folded group (its header alone).
+    var collapsedGroups: Set<String> = []
+    var groupCounts: [String: Int] = [:]
+    var foldedRows: Set<Int> = []
+    private var isFolded = false
+    private var pinch: CGFloat = 0
     /// Each row's group header, for the first row of every group (details only).
     private var groupTitles: [Int: String] = [:]
     /// Tags and Git states of the folder shown, by name (filled when their columns are on).
@@ -195,6 +202,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         applyViewMode()
         card.onLayout = { [weak self] in self?.layoutCard() }
         NotificationCenter.default.addObserver(self, selector: #selector(statusCenterChanged), name: .rfStatusCenterChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(cutChanged), name: .rfCutChanged, object: nil)
         applyScrollBars()
         card.applyBackground()
         NotificationCenter.default.addObserver(self, selector: #selector(columnsChanged), name: NSTableView.columnDidResizeNotification, object: table)
@@ -502,9 +510,11 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     private func selectRows(_ rows: IndexSet, scrollToFirst: Bool) {
         switch viewMode {
         case .details, .columns:
+            let rows = rows.subtracting(IndexSet(foldedRows))
             table.selectRowIndexes(rows, byExtendingSelection: false)
             if scrollToFirst, let first = rows.first { table.scrollRowToVisible(first) }
         case .tiles, .cards, .list:
+            let rows = rows.subtracting(IndexSet(foldedRows))
             let paths = Set(rows.map(gridPath))
             tiles.selectionIndexPaths = paths
             if scrollToFirst, let first = rows.first {
@@ -806,7 +816,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             status.selection = ""
             return
         }
-        let n = Int(folder.count())
+        let n = isFolded ? groupCounts.values.reduce(0, +) : Int(folder.count())
         status.count = n == 1 ? String(localized: "1 item") : String(localized: "\(n) items")
         let rows = selectedRows
         guard !rows.isEmpty else {
@@ -838,6 +848,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         commandBar.preview.isEnabled = !pageShown
         commandBar.preview.isOn = previewShown
         commandBar.view.icon = viewMode == .details ? "list" : "layout-grid"
+        commandBar.showsGroups = groupsApply && !pageShown && !groupCounts.isEmpty
+        let folded = allGroupsFolded
+        commandBar.groups.icon = folded ? "chevrons-up-down" : "chevrons-down-up"
+        commandBar.groups.toolTip = folded ? String(localized: "Expand all groups") : String(localized: "Collapse all groups")
     }
 
     // MARK: command bar
@@ -848,6 +862,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         b.terminal.action = { [weak self] _ in if let u = self?.url { MenuActions.openInTerminal(u) } }
         b.hiddenItems.action = { _ in AppSettings.showHidden.toggle() }
         b.refresh.action = { [weak self] _ in self?.onRefresh?() }
+        b.groups.action = { [weak self] _ in self?.toggleAllGroups() }
         b.new.action = { [weak self] btn in
             if self?.commandBar.trashMode == true { return self?.emptyTrash() ?? () }
             let m = NSMenu()
@@ -1021,6 +1036,46 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     private func reloadSelecting(_ names: [String], rename: Bool = false) { onReload?(names, rename) }
 
     /// The Layout flyout's tile size changed: the grid's cells follow.
+    /// Bigger or smaller icons (⌘+ / ⌘−, a pinch, ⌘ with the wheel; folder_view.rs `zoom`):
+    /// another layout grows into Tiles at their smallest, Tiles step through their sizes,
+    /// and the smallest Tiles shrink back into Details.
+    func zoom(_ delta: Int) {
+        guard !pageShown else { return }
+        let size = TileMetrics.size
+        if viewMode != .tiles {
+            guard delta > 0 else { return }
+            UserDefaults.standard.set(0, forKey: "tileSize")
+            setViewMode(.tiles)
+            return
+        }
+        if delta < 0 && size == 0 { return setViewMode(.details) }
+        let n = min(max(size + delta, 0), TileMetrics.sizes.count - 1)
+        guard n != size else { return }
+        UserDefaults.standard.set(n, forKey: "tileSize")
+        tileSizeChanged()
+    }
+
+    /// A pinch on the trackpad zooms one step each time it has opened or closed far enough.
+    func pinched(_ event: NSEvent) {
+        if event.phase == .began { pinch = 0 }
+        pinch += event.magnification
+        if abs(pinch) >= 0.3 {
+            zoom(pinch > 0 ? 1 : -1)
+            pinch = 0
+        }
+    }
+
+    /// ⌘ with the wheel zooms instead of scrolling; false: an ordinary scroll.
+    func commandScrolled(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.contains(.command) else { return false }
+        pinch += event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 0.01 : 0.1)
+        if abs(pinch) >= 0.3 {
+            zoom(pinch > 0 ? 1 : -1)
+            pinch = 0
+        }
+        return true
+    }
+
     func tileSizeChanged() {
         // the pictures are asked for again at the new size
         ThumbnailCache.shared.clear()
@@ -1599,6 +1654,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         let v = FileRowView()
         v.geometry = geometry
         v.groupTitle = groupTitles[row]
+        v.groupCount = groupTitles[row].flatMap { groupCounts[$0] }
+        v.groupFolded = foldedRows.contains(row)
         v.onLens = AppSettings.isGlass && tableView.selectedRowIndexes.count == 1 && tableView.selectedRowIndexes.first == row
         return v
     }
@@ -1607,6 +1664,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         guard let folder, let tableColumn, let col = ListColumn(rawValue: tableColumn.identifier.rawValue),
             let item = folder.item(row: UInt32(row))
         else { return nil }
+        if foldedRows.contains(row) { return nil }
         let isLast = tableColumn == tableView.tableColumns.last
         if col == .name {
             let cell = (tableView.makeView(withIdentifier: .init("name"), owner: nil) as? NameCellView) ?? {
@@ -1621,7 +1679,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             cell.textField?.stringValue = display.name(item)
             cell.textField?.textColor = Palette.of(tableView).text
             cell.imageView?.image = display.icon(item, path: folder.childPath(row: UInt32(row)) ?? "")
-            cell.alphaValue = item.hidden ? 0.5 : 1
+            cell.alphaValue = faded(item, row: row) ? 0.5 : 1
             return cell
         }
         let id = NSUserInterfaceItemIdentifier(col.rawValue)
@@ -1635,7 +1693,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         cell.alignRight = col == .size
         cell.isLink = false
         cell.onClick = nil
-        cell.alphaValue = item.hidden ? 0.5 : 1
+        cell.alphaValue = faded(item, row: row) ? 0.5 : 1
         switch col {
         case .modified: cell.text = display.date(item.modifiedMs)
         case .created: cell.text = item.createdMs > 0 ? display.date(item.createdMs) : ""
@@ -1823,6 +1881,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int {
         let n = Int(folder?.count() ?? 0)
         guard gridStarts.indices.contains(section) else { return section == 0 ? n : 0 }
+        // a folded group shows its header alone
+        if gridTitles.indices.contains(section), collapsedGroups.contains(gridTitles[section]) { return 0 }
         let end = section + 1 < gridStarts.count ? gridStarts[section + 1] : n
         return max(end - gridStarts[section], 0)
     }
@@ -1830,7 +1890,11 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// A group's header in the grid (736ae68): its title in the accent, a line after it.
     func collectionView(_ collectionView: NSCollectionView, viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind, at indexPath: IndexPath) -> NSView {
         let v = collectionView.makeSupplementaryView(ofKind: kind, withIdentifier: GridGroupHeader.id, for: indexPath) as! GridGroupHeader
-        v.title = gridTitles.indices.contains(indexPath.section) ? gridTitles[indexPath.section] : ""
+        let title = gridTitles.indices.contains(indexPath.section) ? gridTitles[indexPath.section] : ""
+        v.title = title
+        v.count = groupCounts[title]
+        v.folded = collapsedGroups.contains(title)
+        v.onClick = { [weak self] in self?.toggleGroup(title) }
         return v
     }
 
@@ -1846,6 +1910,23 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         }
         let start = gridStarts.indices.contains(lo) ? gridStarts[lo] : 0
         return IndexPath(item: row - start, section: max(lo, 0))
+    }
+
+    /// Hidden items and items cut but not yet pasted are drawn faded.
+    func faded(_ item: FileItem, row: Int) -> Bool {
+        item.hidden || (!Clipboard.cutPaths.isEmpty && folder?.childPath(row: UInt32(row)).map(Clipboard.isCut) == true)
+    }
+
+    /// A cut was made, pasted or replaced: the rows shown fade or come back.
+    @objc func cutChanged() {
+        if viewMode.isGrid {
+            tiles.reloadItems(at: tiles.indexPathsForVisibleItems())
+        } else if table.numberOfRows > 0 {
+            let rows = table.rows(in: table.visibleRect)
+            table.reloadData(forRowIndexes: IndexSet(integersIn: rows.location..<rows.location + rows.length), columnIndexes: IndexSet(integersIn: 0..<table.numberOfColumns))
+        }
+        millerLeft.forEach { $0.needsDisplay = true; $0.documentView?.needsDisplay = true }
+        millerNext.documentView?.needsDisplay = true
     }
 
     func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
@@ -1866,7 +1947,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             tile.facts.textColor = Palette.of(collectionView).textSecondary
         }
         tile.label.textColor = Palette.of(collectionView).text
-        tile.alphaValue = entry.hidden ? 0.6 : 1
+        tile.alphaValue = entry.hidden || Clipboard.isCut(path) ? 0.6 : 1
         tile.isSelected = item.isSelected
         if AppSettings.showThumbnails, let thumb = ThumbnailCache.shared.cached(path) {
             tile.picture.image = thumb
@@ -2037,13 +2118,17 @@ extension FileListController {
         let first = [.date, .name].contains(groupBy) ? false : foldersFirst
         let asc = groupBy == .date ? false : (groupBy == .none ? ascending : (groupBy.column == sortKey ? ascending : groupBy.column?.startsAscending ?? true))
         folder.arrange(column: column, ascending: asc, foldersFirst: first, showHidden: showHidden, filter: filter)
+        foldGroups(folder)
         // the header marks the column the list is really sorted by
         header.sortKey = groupBy.column ?? sortKey
         header.ascending = asc
     }
 
     func computeGroups() {
+        // a view without groups shows every row again
+        if isFolded, !groupsApply, let folder { arrange(folder) }
         groupTitles = [:]
+        foldedRows = []
         gridStarts = [0]
         gridTitles = []
         let grid = viewMode.isGrid
@@ -2057,7 +2142,10 @@ extension FileListController {
         for r in 0..<folder.count() {
             guard let item = folder.item(row: r) else { continue }
             let t = Grouping.title(item, by: groupBy, display: display)
-            if t != last { groupTitles[Int(r)] = t }
+            if t != last {
+                groupTitles[Int(r)] = t
+                if collapsedGroups.contains(t) { foldedRows.insert(Int(r)) }
+            }
             last = t
         }
         if grid {
@@ -2071,7 +2159,56 @@ extension FileListController {
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        Metrics.rowHeight + (groupTitles[row] == nil ? 0 : GroupMetrics.header)
+        if foldedRows.contains(row) { return GroupMetrics.header }
+        return Metrics.rowHeight + (groupTitles[row] == nil ? 0 : GroupMetrics.header)
+    }
+
+    /// A folded group's row is its header: it cannot be selected.
+    func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposed: IndexSet) -> IndexSet {
+        foldedRows.isEmpty ? proposed : proposed.subtracting(IndexSet(foldedRows))
+    }
+
+    // MARK: folding groups
+
+    /// Whether the folder is shown in groups (the "all groups" button and key apply).
+    var groupsApply: Bool { groupBy != .none && (viewMode == .details || viewMode.isGrid) }
+
+    var allGroupsFolded: Bool { !groupCounts.isEmpty && groupCounts.keys.allSatisfy(collapsedGroups.contains) }
+
+    /// Folds a group, or opens it again.
+    func toggleGroup(_ title: String) {
+        if collapsedGroups.contains(title) { collapsedGroups.remove(title) } else { collapsedGroups.insert(title) }
+        rearrange()
+        updateCommands()
+    }
+
+    /// Folds every group, or opens them all when all are folded (⌃⇧G, as Ctrl+Shift+G on Windows).
+    func toggleAllGroups() {
+        guard groupsApply, !groupCounts.isEmpty else { return }
+        if allGroupsFolded { collapsedGroups.subtract(groupCounts.keys) } else { collapsedGroups.formUnion(groupCounts.keys) }
+        rearrange()
+        updateCommands()
+    }
+
+    /// Counts the groups and takes the items of folded ones out of the rows shown, all but each
+    /// group's first (which carries the header). Runs right after `Folder.arrange`.
+    private func foldGroups(_ folder: Folder) {
+        groupCounts = [:]
+        isFolded = false
+        guard groupsApply else { return }
+        var drop: [UInt32] = []
+        var last: String?
+        for r in 0..<folder.count() {
+            guard let item = folder.item(row: r) else { continue }
+            let t = Grouping.title(item, by: groupBy, display: display)
+            groupCounts[t, default: 0] += 1
+            if t == last, collapsedGroups.contains(t) { drop.append(r) }
+            last = t
+        }
+        if !drop.isEmpty {
+            folder.fold(rows: drop)
+            isFolded = true
+        }
     }
 
     /// Tags and Git states for the folder, read off the main thread when their columns are on.

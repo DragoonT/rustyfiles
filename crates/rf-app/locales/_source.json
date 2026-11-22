@@ -13145,5 +13145,11 @@
   "key": "Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.",
   "tr": "Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.",
   "en": "The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size."
+ },
+ {
+  "id": "2560942b",
+  "key": "Bu öğeyi sabitlenenlerden kaldırmak istiyor musunuz?",
+  "tr": "Bu öğeyi sabitlenenlerden kaldırmak istiyor musunuz?",
+  "en": "Do you want to remove this item from the pinned section?"
  }
 ]

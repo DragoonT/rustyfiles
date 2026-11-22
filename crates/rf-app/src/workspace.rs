@@ -1964,7 +1964,15 @@ impl Workspace {
             }
         }
         let pos = point(px(6.), theme::titlebar_h());
-        crate::fluent_menu::show(Menu { quick: Vec::new(), items }, pos, window, cx);
+        crate::fluent_menu::show_context(
+            Menu {
+                quick: Vec::new(),
+                items,
+            },
+            pos,
+            window,
+            cx,
+        );
     }
 
     fn split_pane(&mut self, side_by_side: bool, window: &mut Window, cx: &mut Context<Self>) {
@@ -2720,6 +2728,35 @@ impl Workspace {
         list.insert(to, item);
         crate::settings::update(cx, |s| s.pinned = Some(list));
         self.places.update(cx, |p, cx| p.refresh(cx));
+    }
+
+    fn confirm_unpin(
+        &mut self,
+        path: PathBuf,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let me = cx.entity().downgrade();
+        let message = format!("{title}\n\n{}", t!("Bu öğeyi sabitlenenlerden kaldırmak istiyor musunuz?"));
+        crate::prompt::show(
+            t!("Emin misiniz?"),
+            Some(message),
+            None,
+            vec![
+                crate::prompt::Button::new(
+                    t!("Tamam"),
+                    crate::prompt::Kind::Primary,
+                    move |_, _, cx| {
+                        let _ = me.update(cx, |ws, cx| ws.set_pinned(path.clone(), false, cx));
+                        Ok(())
+                    },
+                ),
+                crate::prompt::Button::cancel(),
+            ],
+            window,
+            cx,
+        );
     }
 
     /// Right-click on a sidebar folder/drive: the Explorer menu (eject, properties, format…)
@@ -3710,6 +3747,13 @@ impl Workspace {
             (b.len() <= 3 && b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic()).then(|| (b[0] as char).to_ascii_uppercase())
         });
         let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+        let pin_target = if pin_indicator && !rail && windows_theme {
+            target.path().map(Path::to_path_buf)
+        } else {
+            None
+        };
+        let pin_label = label.clone();
+        let pin_id = id.clone();
         let windows_home = windows_theme && matches!(&target, Location::Home);
         let recycle_icon_watch = windows_theme && matches!(&target, Location::RecycleBin);
         let shell_icon = if windows_theme {
@@ -3808,8 +3852,28 @@ impl Workspace {
                         .children(extra),
                 )
             })
-            .when(pin_indicator && !rail && windows_theme, |d| {
-                d.child(Icon::new(L::Pin).size(px(16.)).text_color(p.text_tertiary).flex_shrink_0())
+            .when_some(pin_target, |d, path| {
+                let pin_title = pin_label.clone();
+                d.child(
+                    div()
+                        .id((pin_id.clone(), "unpin"))
+                        .size(px(28.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(theme::RADIUS_SM)
+                        .hover(|s| s.bg(p.hover))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            cx.stop_propagation();
+                            this.confirm_unpin(path.clone(), pin_title.clone(), window, cx);
+                        }))
+                        .child(
+                            Icon::new(L::Pin)
+                                .size(px(16.))
+                                .text_color(p.text_tertiary)
+                                .rotate(radians(-0.35)),
+                        ),
+                )
             })
 
             .on_click(cx.listener(move |this, _, window, cx| this.navigate(target.clone(), window, cx)))

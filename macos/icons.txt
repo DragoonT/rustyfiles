@@ -127,3 +127,6 @@ refresh-cw
 arrow-down-to-line
 arrow-up-from-line
 shield
+chevrons-down-up
+chevrons-up-down
+zoom-in
