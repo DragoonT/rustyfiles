@@ -2165,4 +2165,6 @@ pub const EN: &[(&str, &str)] = &[
     ("Komut paletinde geçmiş klasörleri göster", "Show past folders in the command palette"),
     ("Yazdıkça daha önce gidilen klasörler komutlarla birlikte listelenir. Ctrl+P her zaman yalnızca geçmiş klasörlerde arar.", "As you type, folders you went to before are listed with the commands. Ctrl+P always searches past folders only."),
     ("Windows Dosya Gezgini görünümü", "Windows File Explorer look"),
+    ("Kompakt pencere", "Compact window"),
+    ("Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.", "The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size."),
 ];

@@ -1887,7 +1887,7 @@ fn open_popup(ops: &Entity<Ops>, owner: AnyWindowHandle, cx: &mut App) -> Option
     let (origin, width, dark, display) = owner
         .update(cx, |_, w, cx| (w.bounds().origin, w.viewport_size().width, Palette::for_window(w).dark, crate::theme::popup_display(w, cx)))
         .ok()?;
-    let top = theme::TITLEBAR_H + px(44.);
+    let top = theme::titlebar_h() + px(theme::address_row_h(false) - 4.);
     let x = origin.x + width - px(8. + FLYOUT_W);
     let bounds = Bounds::new(point(x, origin.y + top), size(px(FLYOUT_W), px(120.)));
     let opts = WindowOptions {

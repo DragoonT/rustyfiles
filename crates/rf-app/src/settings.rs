@@ -568,6 +568,10 @@ pub struct Settings {
     pub animations: AnimPref,
     /// Extend the Windows File Explorer look to the navigation, toolbar, and file-list appearance.
     pub windows_file_explorer_theme: bool,
+    /// "Compact window": the tab row, the address bar and the command bar are thinner and the content card has no margin or round
+    /// corners at its right and bottom; icons and text keep their size (a Discord request, 2026-11-22: room on small laptop screens).
+    #[serde(default)]
+    pub compact_window: bool,
     pub backdrop: BackdropPref,
     /// Background tint color (0xRRGGBB), `None` = the backdrop as is.
     pub tint: Option<u32>,
@@ -940,6 +944,7 @@ impl Default for Settings {
             show_scrollbar: true,
             animations: AnimPref::System,
             windows_file_explorer_theme: false,
+            compact_window: false,
             backdrop: BackdropPref::Mica,
             tint: None,
             background_image: None,
@@ -1080,6 +1085,7 @@ pub const HG_DEFAULT: [u8; 5] = [52, 50, 67, 62, 50];
 
 static THEME: AtomicU8 = AtomicU8::new(0);
 static WINDOWS_FILE_EXPLORER_THEME: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static COMPACT_WINDOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The surface value (0..=100) the palette reads on every call, cheaper than the settings struct.
 static HG_SURFACE: AtomicU8 = AtomicU8::new(HG_DEFAULT[4]);
 static SOLID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1137,6 +1143,11 @@ pub fn theme_override() -> ThemePref {
 }
 
 /// Read by the window palette without needing an `App`.
+/// The setting "Compact window", read without an `App` (the bars' heights, see `theme::titlebar_h`).
+pub fn compact_window() -> bool {
+    COMPACT_WINDOW.load(Ordering::Relaxed)
+}
+
 pub fn windows_file_explorer_theme() -> bool {
     WINDOWS_FILE_EXPLORER_THEME.load(Ordering::Relaxed)
 }
@@ -1366,6 +1377,7 @@ impl Settings {
         rf_win::glass::set_freeze_when_behind(self.hg_freeze_behind);
         gpui_windows::SMOOTH_SCROLL.store(self.smooth_scroll, Ordering::Relaxed);
         WINDOWS_FILE_EXPLORER_THEME.store(self.windows_file_explorer_theme, Ordering::Relaxed);
+        COMPACT_WINDOW.store(self.compact_window, Ordering::Relaxed);
         // (Windows' own menus shown by this process: the classic context menu, issue 211)
         rf_win::menu_theme::set_wanted(match self.theme {
             ThemePref::System => None,

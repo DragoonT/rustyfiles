@@ -326,6 +326,33 @@ pub const RADIUS_SM: Pixels = px(6.);
 pub const ROW_H: Pixels = px(30.);
 pub const TITLEBAR_H: Pixels = px(40.);
 
+/// The file manager window's tab row: [`TITLEBAR_H`], or 32 with "Compact window" (the tabs are 28 high and stand at its bottom).
+pub fn titlebar_h() -> Pixels {
+    if crate::settings::compact_window() { px(32.) } else { TITLEBAR_H }
+}
+
+/// The address bar's row (`explorer`: the Windows File Explorer look, which keeps its own).
+pub fn address_row_h(explorer: bool) -> f32 {
+    if explorer {
+        60.
+    } else if crate::settings::compact_window() {
+        40.
+    } else {
+        48.
+    }
+}
+
+/// The command bar's row (`explorer`: as in [`address_row_h`]).
+pub fn command_bar_h(explorer: bool) -> f32 {
+    if explorer {
+        58.
+    } else if crate::settings::compact_window() {
+        38.
+    } else {
+        44.
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{glass_bar_wash, glass_washes};

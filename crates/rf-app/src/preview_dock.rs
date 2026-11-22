@@ -27,6 +27,11 @@ const FALLBACK_CHROME_H: f32 = 190.;
 /// The content card's right margin and its two borders: the area the pane has is that much narrower than the window minus the sidebar.
 const CARD_SIDE: f32 = 10.;
 
+/// [`CARD_SIDE`], or the one border at the card's left with "Compact window" (no margin at the right).
+fn card_side() -> f32 {
+    if crate::settings::compact_window() { 1. } else { CARD_SIDE }
+}
+
 /// Drag payload of the pane's top edge.
 #[derive(Clone)]
 struct ResizePreviewBottom;
@@ -122,7 +127,7 @@ impl Workspace {
     /// `viewport_h` is read only for the bottom position (0 is fine for the right).
     pub(super) fn preview_room(&self, bottom: bool, stacked: bool, side_w: f32, viewport_h: f32) -> bool {
         if bottom {
-            pp::bottom_fits(self.viewport_w - side_w - CARD_SIDE, self.preview_dock.area_h(viewport_h), stacked)
+            pp::bottom_fits(self.viewport_w - side_w - card_side(), self.preview_dock.area_h(viewport_h), stacked)
         } else {
             pp::right_fits(self.viewport_w, side_w, self.preview_w)
         }
@@ -142,7 +147,7 @@ impl Workspace {
         if !shown {
             return None;
         }
-        let area_w = self.viewport_w - side_w - CARD_SIDE;
+        let area_w = self.viewport_w - side_w - card_side();
         let h = pp::bottom_layout(area_w, self.preview_dock.area_h(viewport_h), self.preview_dock.height, stacked).pane_h?;
         let target = self.active_tab().read(cx).preview_target();
         self.preview_dock.told_wide = true;

@@ -1958,7 +1958,7 @@ impl Workspace {
                 items.push(Item::action(label, MenuIcon::Lucide(icon), move |_, cx| preview_dock::set_preview_position(cx, pos)).checked(preview_pos == pos));
             }
         }
-        let pos = point(px(6.), theme::TITLEBAR_H);
+        let pos = point(px(6.), theme::titlebar_h());
         crate::fluent_menu::show(Menu { quick: Vec::new(), items }, pos, window, cx);
     }
 
@@ -2601,7 +2601,7 @@ impl Workspace {
         };
 
         TitleBar::new()
-            .h(theme::TITLEBAR_H)
+            .h(theme::titlebar_h())
             .bg(p.titlebar_bg)
             .border_color(gpui_kit::transparent_black())
             .child(
@@ -3184,7 +3184,7 @@ impl Workspace {
             }));
 
         h_flex()
-            .h(px(if explorer_look { 60. } else { 48. }))
+            .h(px(theme::address_row_h(explorer_look)))
             .when(explorer_look, |d| d.bg(p.address_bg))
             .px_2()
             .gap(if explorer_look { px(16.) } else { px(4.) })
@@ -3303,8 +3303,8 @@ impl Workspace {
                     d.hover(|s| s.bg(p.hover)).active(|s| s.bg(p.pressed)).on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
                         let menu = which(this, cx);
                         // drop down from under the button (the bar's bottom edge)
-                        let bars = if windows_theme { 60. + 58. } else { 48. + 44. };
-                        let pos = point(ev.position().x - px(14.), theme::TITLEBAR_H + px(bars));
+                        let bars = theme::address_row_h(windows_theme) + theme::command_bar_h(windows_theme);
+                        let pos = point(ev.position().x - px(14.), theme::titlebar_h() + px(bars));
                         this.active_tab().clone().update(cx, |v, cx| v.show_bar_menu(menu, pos, window, cx));
                     }))
                 })
@@ -3340,7 +3340,7 @@ impl Workspace {
         let bar_border = if !windows_theme || p.dark || self.glass_shown { p.divider } else { gpui_kit::rgb(0xDDE2E6).into() };
 
         h_flex()
-            .h(px(if windows_theme { 58. } else { 44. }))
+            .h(px(theme::command_bar_h(windows_theme)))
             .when(windows_theme, |d| d.bg(p.toolbar_bg))
             .when(windows_theme, |d| d.px_1())
             .when(!windows_theme, |d| d.px_2())
@@ -4859,6 +4859,7 @@ impl Render for Workspace {
             prefs.show_statusbar,
         );
         let windows_theme = prefs.windows_file_explorer_theme;
+        let compact = prefs.compact_window;
         // Home and Settings have nothing to count: no empty strip at the bottom
         // where a running operation's progress is shown; a strip brings the status bar up on Home and Settings too
         let surface = crate::transfer_view::surface(cx.global::<crate::settings::Settings>().transfer_progress, show_statusbar, self.picker.is_some());
@@ -5468,7 +5469,9 @@ impl Render for Workspace {
                     .flex_1()
                     .min_h_0()
                     .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizePreview>, _, cx| {
-                        let margin = if cx.global::<crate::settings::Settings>().windows_file_explorer_theme { 0. } else { 9. };
+                        let s = cx.global::<crate::settings::Settings>();
+                        // (the content card's right margin and border: none in the Explorer look, none at the right when compact)
+                        let margin = if s.windows_file_explorer_theme || s.compact_window { 0. } else { 9. };
                         let w = f32::from(e.bounds.right() - e.event.position.x) - margin;
                         this.set_pane_width(false, w, cx);
                     }))
@@ -5515,7 +5518,10 @@ impl Render for Workspace {
                             .overflow_hidden()
                             .flex()
                             .flex_col()
-                            .when(!windows_theme, |d| d.mr_2().rounded(theme::RADIUS).border_1().border_color(p.border))
+                            // (compact: no margin and no round corners at the right and the bottom, only the edges that face the
+                            // sidebar and the bars)
+                            .when(!windows_theme && !compact, |d| d.mr_2().rounded(theme::RADIUS).border_1().border_color(p.border))
+                            .when(!windows_theme && compact, |d| d.rounded_tl(theme::RADIUS).border_l_1().border_t_1().border_color(p.border))
                             .children(content_commandbar)
                             .children(filter_strip)
                             .child(main_row)
@@ -5527,12 +5533,12 @@ impl Render for Workspace {
                             .children(picker_footer),
                     ),
             )
-            .when(!windows_theme, |d| d.child(div().h(px(8.))))
+            .when(!windows_theme && !compact, |d| d.child(div().h(px(8.))))
             // Last children = painted on top.
             .children(crate::status_center::render_flyout(
                 &self.ops,
                 &p,
-                theme::TITLEBAR_H + px(if windows_theme { 60. } else { 44. }),
+                theme::titlebar_h() + px(if windows_theme { 60. } else { theme::address_row_h(false) - 4. }),
                 cx,
             ))
             .children(crate::status_center::update_toast(&p, self.picker.is_some()))

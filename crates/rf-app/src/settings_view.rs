@@ -1545,6 +1545,13 @@ fn appearance(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
         ),
         card(
             p,
+            L::Minimize2,
+            t!("Kompakt pencere"),
+            Some(t!("Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.")),
+            sw("compact-window", p, s.compact_window, |s, v| s.compact_window = v),
+        ),
+        card(
+            p,
             L::PanelRight,
             t!("Kaydırma çubuğunu göster"),
             Some(t!("Ayrıntılar ve Izgara listelerinin sağında; sürükleyin ya da bir yere tıklayıp oraya atlayın.")),
