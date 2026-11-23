@@ -60,8 +60,19 @@ final class TabStripView: HoverView, NSViewToolTipOwner {
     var onClose: ((Int) -> Void)?
     /// The tab menu for the tab at this index (workspace.rs `tab_menu`).
     var menuFor: ((Int) -> NSMenu?)?
+    /// A tab dragged to another place in the strip.
+    var onMove: ((Int, Int) -> Void)?
+    /// A tab dragged out of the strip: a window of its own where it was let go (screen point).
+    var onTearOff: ((Int, NSPoint) -> Void)?
+    /// Files dropped on a tab go into its folder; nil: that tab takes none.
+    var dropFolder: ((Int) -> URL?)?
+    var onDropFiles: ((Int, NSDraggingInfo) -> Bool)?
 
     private var pressedClose: Int?
+    /// A tab being dragged: which one, where the press was, and whether it has left the strip.
+    private var dragging: (index: Int, start: NSPoint, out: Bool)?
+    /// The tab files are held over.
+    private var dropTab: Int? { didSet { if dropTab != oldValue { needsDisplay = true } } }
 
     private static let minW: CGFloat = 72
     private static let maxW: CGFloat = 220
@@ -106,7 +117,12 @@ final class TabStripView: HoverView, NSViewToolTipOwner {
             let r = tabRect(i)
             let isActive = i == active
             let path = NSBezierPath(roundedTopRect: r, radius: Metrics.radius)
-            if isActive && !AppSettings.isGlass {
+            if dropTab == i {
+                // a drop target: the selection fill with an accent outline
+                Draw.roundedRect(r, radius: Metrics.radius, fill: p.selection)
+                p.accent.setStroke()
+                NSBezierPath(roundedRect: r.insetBy(dx: 0.5, dy: 0.5), xRadius: Metrics.radius, yRadius: Metrics.radius).stroke()
+            } else if isActive && !AppSettings.isGlass {
                 // off glass the active tab is filled, as on Windows (no lens)
                 p.tabActive.setFill()
                 path.fill()
@@ -158,12 +174,59 @@ final class TabStripView: HoverView, NSViewToolTipOwner {
             return
         }
         onSelect?(i)
+        dragging = (i, pt, false)
+    }
+
+    /// Dragging a tab sideways moves it among the others; far enough up or down, it leaves the
+    /// strip and becomes a window of its own when let go (workspace.rs tab drag).
+    override func mouseDragged(with event: NSEvent) {
+        guard var d = dragging else { return }
+        let pt = convert(event.locationInWindow, from: nil)
+        d.out = tabs.count > 1 && abs(pt.y - bounds.midY) > bounds.height + 20
+        if !d.out, abs(pt.x - d.start.x) > 4 {
+            let target = min(max(Int((pt.x - 4) / (tabWidth + 4)), 0), tabs.count - 1)
+            if target != d.index {
+                onMove?(d.index, target)
+                d.index = target
+            }
+        }
+        dragging = d
     }
 
     override func mouseUp(with event: NSEvent) {
         let pt = convert(event.locationInWindow, from: nil)
         if let i = pressedClose, closeRect(i).contains(pt) { onClose?(i) }
         pressedClose = nil
+        if let d = dragging, d.out, let w = window {
+            onTearOff?(d.index, w.convertPoint(toScreen: event.locationInWindow))
+        }
+        dragging = nil
+    }
+
+    // MARK: files dropped on a tab
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        registerForDraggedTypes([.fileURL])
+    }
+
+    private func dropOperation(_ info: NSDraggingInfo) -> NSDragOperation {
+        let pt = convert(info.draggingLocation, from: nil)
+        dropTab = tab(at: pt).flatMap { dropFolder?($0) != nil ? $0 : nil }
+        guard let i = dropTab, let dest = dropFolder?(i) else { return [] }
+        let urls = FileListController.droppedURLs(info)
+        guard !urls.isEmpty, !urls.allSatisfy({ $0.deletingLastPathComponent().standardizedFileURL == dest.standardizedFileURL }) else { return [] }
+        return FileListController.dropKind(info, urls, into: dest) == .copy ? .copy : .move
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { dropOperation(sender) }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { dropOperation(sender) }
+    override func draggingExited(_ sender: NSDraggingInfo?) { dropTab = nil }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer { dropTab = nil }
+        guard let i = dropTab, dropOperation(sender) != [] else { return false }
+        return onDropFiles?(i, sender) ?? false
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -204,6 +267,9 @@ final class TitleBarView: FlippedView {
     private let tabLens = LensView(cornerRadius: Metrics.radius)
     /// The round glass behind "+" (`LensShape::Circle`).
     private let plusLens = LensView(cornerRadius: 14)
+    /// A saved session's name, beside the "+".
+    var sessionName: String? { didSet { sessionLabel.stringValue = sessionName ?? ""; sessionLabel.isHidden = sessionName == nil } }
+    private let sessionLabel = NSTextField(labelWithString: "")
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -212,6 +278,11 @@ final class TitleBarView: FlippedView {
         tabClip.addSubview(tabLens)
         // lenses first: they lie under the tabs' text and the "+" icon
         [tabClip, plusLens, strip, plus].forEach(addSubview)
+        sessionLabel.font = Metrics.textXs
+        sessionLabel.textColor = .tertiaryLabelColor
+        sessionLabel.lineBreakMode = .byTruncatingTail
+        sessionLabel.isHidden = true
+        addSubview(sessionLabel)
     }
 
     @available(*, unavailable)
@@ -235,6 +306,10 @@ final class TitleBarView: FlippedView {
         plus.frame = NSRect(x: plusX, y: bounds.height - 2 - 28, width: 28, height: 28)
         plusLens.frame = plus.frame
         plusLens.isHidden = !AppSettings.isGlass
+        if !sessionLabel.isHidden {
+            let w = min(sessionLabel.intrinsicContentSize.width, max(bounds.width - plus.frame.maxX - 16, 0))
+            sessionLabel.frame = NSRect(x: plus.frame.maxX + 8, y: plus.frame.midY - 8, width: w, height: 16)
+        }
 
         tabClip.frame = strip.frame
         var lens = strip.activeTabRect

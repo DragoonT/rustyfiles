@@ -131,3 +131,4 @@ chevrons-down-up
 chevrons-up-down
 zoom-in
 minimize-2
+save

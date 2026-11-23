@@ -259,6 +259,11 @@ extension SettingsContent {
                 title: String(localized: "Always switch to a newly opened tab"), detail: nil, icon: "arrow-right-left",
                 control: .toggle(get: { AppSettings.switchToNewTab }, set: { AppSettings.switchToNewTab = $0 })),
             .card(
+                title: String(localized: "Open saved sessions in this window"),
+                detail: String(localized: "A session opened from the tab menu replaces this window's tabs instead of opening a new window (the closed tabs come back with ⇧⌘T)."),
+                icon: "save",
+                control: .toggle(get: { AppSettings.sessionsInThisWindow }, set: { AppSettings.sessionsInThisWindow = $0 })),
+            .card(
                 title: String(localized: "Type in the address bar of a new tab"), detail: String(localized: "⌘T and the + button: type or paste a path at once."), icon: "text-cursor-input",
                 control: .toggle(get: { AppSettings.newTabAddress }, set: { AppSettings.newTabAddress = $0 })),
             .card(

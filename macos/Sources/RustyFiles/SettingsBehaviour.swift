@@ -198,6 +198,49 @@ extension AppSettings {
 
 // MARK: - sessions (Startup › Continue where you left off)
 
+/// Named sessions (workspace.rs `save_named_session`): a window's tabs saved under a name,
+/// opened again from the tab menu.
+@MainActor
+enum NamedSessions {
+    struct Saved: Codable {
+        var name: String
+        var tabs: [String]
+        var active: Int
+    }
+
+    private static let key = "namedSessions"
+
+    static var all: [Saved] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
+            return (try? JSONDecoder().decode([Saved].self, from: data)) ?? []
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) { UserDefaults.standard.set(data, forKey: key) }
+        }
+    }
+
+    /// Saves (or replaces) a session of this name.
+    static func save(_ s: Saved) {
+        var list = all.filter { $0.name != s.name }
+        list.append(s)
+        all = list
+    }
+
+    static func delete(_ name: String) { all = all.filter { $0.name != name } }
+}
+
+extension AppSettings {
+    /// A session opened from the tab menu takes this window's tabs instead of a new window.
+    static var sessionsInThisWindow: Bool {
+        get { UserDefaults.standard.bool(forKey: "sessionsInThisWindow") }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "sessionsInThisWindow")
+            NotificationCenter.default.post(name: .rfSettingsChanged, object: nil, userInfo: ["key": "sessionsInThisWindow"])
+        }
+    }
+}
+
 /// The windows and their tabs, saved as they change and read at the next start.
 @MainActor
 enum Sessions {

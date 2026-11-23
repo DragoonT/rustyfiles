@@ -817,5 +817,13 @@
 "Duplicate": "Çoğalt",
 "Switch Pane": "Diğer Panele Geç",
 "Copy to Other Pane": "Diğer Panele Kopyala",
-"Move to Other Pane": "Diğer Panele Taşı"
+"Move to Other Pane": "Diğer Panele Taşı",
+"Save session…": "Oturumu kaydet…",
+"Open session": "Oturum aç",
+"Delete session": "Oturumu sil",
+"Save session": "Oturumu kaydet",
+"This window's tabs are saved under this name; Open session in the tab menu opens them in a new window.": "Bu penceredeki sekmeler bu adla kaydedilir; sekme menüsündeki Oturum aç ile yeni bir pencerede açılır.",
+"Session %@": "Oturum %@",
+"Open saved sessions in this window": "Kayıtlı oturumlar bu pencerede açılsın",
+"A session opened from the tab menu replaces this window's tabs instead of opening a new window (the closed tabs come back with ⇧⌘T).": "Sekme menüsünden açılan oturum, yeni pencere yerine bu penceredeki sekmelerin yerini alır (kapanan sekmeler ⇧⌘T ile geri gelir)."
 }

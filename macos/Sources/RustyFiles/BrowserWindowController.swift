@@ -380,6 +380,18 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         sidebar.onOpenInNewWindow = { url in AppDelegate.shared.openWindow(at: url) }
         sidebar.onDiskUsage = { [weak self] url in self?.navigate(to: BrowserTab.diskUsageURL(url)) }
         titleBar.strip.menuFor = { [weak self] i in self?.tabMenu(i) }
+        titleBar.strip.onMove = { [weak self] from, to in self?.moveTab(from, to) }
+        titleBar.strip.onTearOff = { [weak self] i, at in self?.tearOff(i, at: at) }
+        titleBar.strip.dropFolder = { [weak self] i in
+            guard let t = self?.tabs[safe: i], !t.isPage, t.url.isFileURL, t.archive == nil else { return nil }
+            return t.url
+        }
+        titleBar.strip.onDropFiles = { [weak self] i, info in
+            guard let self, let t = self.tabs[safe: i] else { return false }
+            let urls = FileListController.droppedURLs(info)
+            self.list.transfer(urls, into: t.url, kind: FileListController.dropKind(info, urls, into: t.url), selectHere: false)
+            return true
+        }
     }
 
     /// One pane's list: what it asks for is done in its pane, which first takes the keyboard.
@@ -654,6 +666,20 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             AppDelegate.shared.openWindow(at: url)
         }
         b.separator()
+        b.add(String(localized: "Save session…"), "save") { [weak self] in self?.saveNamedSession() }
+        let saved = NamedSessions.all
+        if !saved.isEmpty {
+            b.sub(String(localized: "Open session"), "folder-open") { m in
+                for s in saved { m.add(s.name) { [weak self] in self?.openNamedSession(s) } }
+            }
+            b.sub(String(localized: "Delete session"), "trash") { m in
+                for s in saved { m.add(s.name) { [weak self] in
+                    NamedSessions.delete(s.name)
+                    if self?.sessionName == s.name { self?.sessionName = nil }
+                } }
+            }
+        }
+        b.separator()
         b.add(String(localized: "Close other tabs"), enabled: n > 1) { [weak self] in self?.closeTabs((0..<n).filter { $0 != i }) }
         b.add(String(localized: "Close tabs to the left"), enabled: i > 0) { [weak self] in self?.closeTabs(Array(0..<i)) }
         b.add(String(localized: "Close tabs to the right"), enabled: i < n - 1) { [weak self] in self?.closeTabs(Array((i + 1)..<n)) }
@@ -664,6 +690,68 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             self?.reopenClosedTab(nil)
         }
         return b.done()
+    }
+
+    // MARK: named sessions
+
+    /// The saved session this window was opened from or saved as; its name stands beside the tabs.
+    var sessionName: String? {
+        didSet {
+            titleBar.sessionName = sessionName
+            titleBar.needsLayout = true
+        }
+    }
+
+    /// Tab menu › Save session…: this window's tabs under a name.
+    private func saveNamedSession() {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "Save session")
+        alert.informativeText = String(localized: "This window's tabs are saved under this name; Open session in the tab menu opens them in a new window.")
+        let field = NSTextField(string: sessionName ?? String(localized: "Session \(NamedSessions.all.count + 1)"))
+        field.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: String(localized: "Save"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        saveTabState()
+        NamedSessions.save(.init(name: name, tabs: tabAddresses, active: active))
+        sessionName = name
+    }
+
+    /// Tab menu › Open session: in a new window, or in this one (Settings).
+    private func openNamedSession(_ s: NamedSessions.Saved) {
+        if AppSettings.sessionsInThisWindow {
+            closedTabs += tabs.map(\.url)
+            restore(s.tabs, active: s.active)
+            sessionName = s.name
+        } else {
+            let home = BrowserTab.homeURL
+            let wc = AppDelegate.shared.openWindow(at: home)
+            wc.restore(s.tabs, active: s.active)
+            wc.sessionName = s.name
+        }
+    }
+
+    /// A tab dragged to another place in the strip.
+    private func moveTab(_ from: Int, _ to: Int) {
+        guard tabs.indices.contains(from), tabs.indices.contains(to), from != to else { return }
+        let activeTab = tabs[active]
+        tabs.insert(tabs.remove(at: from), at: to)
+        active = tabs.firstIndex { $0 === activeTab } ?? active
+        refreshTabs()
+    }
+
+    /// A tab dragged out of the strip: a window of its own, its top left where it was let go.
+    private func tearOff(_ i: Int, at point: NSPoint) {
+        guard tabs.count > 1, tabs.indices.contains(i) else { return }
+        if i == active { saveTabState() }
+        let t = tabs[i]
+        closeTabs([i])
+        let wc = AppDelegate.shared.openWindow(at: t.url, selecting: t.selection.first)
+        wc.window?.setFrameTopLeftPoint(NSPoint(x: point.x - 60, y: point.y + 20))
     }
 
     private func closeTab(at i: Int) {
@@ -1197,4 +1285,8 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         default: return true
         }
     }
+}
+
+extension Array {
+    subscript(safe i: Int) -> Element? { indices.contains(i) ? self[i] : nil }
 }
