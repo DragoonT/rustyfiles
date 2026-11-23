@@ -23,6 +23,7 @@ mod search;
 mod rename;
 mod diskusage;
 mod updates;
+mod namequery;
 pub use archive::{Archive, ArchiveError, ArchiveFormat, can_make_rar, compress, is_archive, smart_extract_target};
 pub use ferry::{
     Ferry, FerryConfig, FerryError, FerryEstimate, FerryLink, FerryListener, FerryOffer, FerryPeer, FerryResult, FerrySpeed, FerryStatus,
@@ -210,14 +211,15 @@ impl Folder {
             dirs_first: folders_first,
             files_first: false,
         };
-        let needle = rf_core::sort::lower(filter.trim());
+        // a part of the name, a * / ? pattern, ext:pdf or kind:video (see namequery)
+        let query = crate::namequery::NameQuery::parse(&filter);
         let mut idx: Vec<u32> = (0..self.entries.len() as u32)
             .into_par_iter()
             .filter(|&i| {
                 let e = &self.entries[i as usize];
                 (show_hidden || !e.is_hidden())
                     && (show_system_files() || !is_system_file(&e.name))
-                    && (needle.is_empty() || rf_core::sort::lower(e.shown()).contains(&needle))
+                    && (query.is_empty() || query.matches(e.shown()))
             })
             .collect();
         idx.par_sort_unstable_by(|&a, &b| spec.compare(&self.entries[a as usize], &self.entries[b as usize]));

@@ -7,7 +7,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use rf_core::entry::{contains_ignore_case, matches_patterns};
 
 /// Folders that are one item to the user: they are found, not walked into.
 const PACKAGES: &[&str] = &["app", "bundle", "framework", "photoslibrary", "musiclibrary", "tvlibrary", "plugin", "kext", "xcarchive", "pkg", "rtfd", "pages", "numbers", "key", "imovielibrary", "fcpbundle"];
@@ -15,31 +14,8 @@ const PACKAGES: &[&str] = &["app", "bundle", "framework", "photoslibrary", "musi
 /// The most hits a search keeps.
 const MAX_HITS: usize = 50_000;
 
-/// What a typed query asks for: `*` / `?` make it a pattern on the whole name ("*.pdf"), else
-/// every word must be in the name ("rapor 2024").
-#[derive(Clone)]
-enum Query {
-    Pattern(String),
-    Words(Vec<String>),
-}
-
-impl Query {
-    fn parse(q: &str) -> Query {
-        let q = q.trim();
-        if q.contains(['*', '?']) {
-            Query::Pattern(q.to_string())
-        } else {
-            Query::Words(q.split_whitespace().map(str::to_string).collect())
-        }
-    }
-
-    fn matches(&self, name: &str) -> bool {
-        match self {
-            Query::Pattern(p) => matches_patterns(p, name),
-            Query::Words(w) => !w.is_empty() && w.iter().all(|w| contains_ignore_case(name, w)),
-        }
-    }
-}
+/// What a typed query asks for: see namequery (words, a * / ? pattern, ext:, kind:).
+type Query = crate::namequery::NameQuery;
 
 /// A search running in the background; dropped or cancelled, it stops.
 #[derive(uniffi::Object)]
@@ -128,7 +104,7 @@ impl Walk {
                 continue;
             }
             let path = e.path();
-            if self.q.matches(&name) {
+            if !self.q.is_empty() && self.q.matches(&name) {
                 found.push(path.display().to_string());
             }
             // folders (not links to them, not packages, not other disks) are walked too

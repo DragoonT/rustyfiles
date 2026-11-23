@@ -140,6 +140,13 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private let navBar = NavBarView()
     private let sidebar = SidebarView()
     private let handle = SidebarResizeHandle()
+    private let paneDivider = PaneDivider()
+    private var lastPaneArea: NSRect = .zero
+    /// The left pane's share of a dual pane's width, kept across starts (0.5: half each).
+    private var paneShare: CGFloat = {
+        let v = UserDefaults.standard.double(forKey: "paneShare")
+        return v > 0.1 && v < 0.9 ? v : 0.5
+    }()
     /// The left (or only) pane, and the right one of a dual pane.
     let leftList = FileListController()
     let rightList = FileListController()
@@ -202,7 +209,17 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         window.contentView = frame
         applyMaterial()
         applyScale()
-        [sidebar, handle, leftList.card, rightList.card, navBar, titleBar].forEach(root.addSubview)
+        [sidebar, handle, leftList.card, rightList.card, paneDivider, navBar, titleBar].forEach(root.addSubview)
+        paneDivider.onDrag = { [weak self] x in
+            guard let self else { return }
+            if let x, self.lastPaneArea.width > 0 {
+                self.paneShare = min(max((x - self.lastPaneArea.minX - 3) / (self.lastPaneArea.width - 6), 0.15), 0.85)
+            } else {
+                self.paneShare = 0.5
+            }
+            UserDefaults.standard.set(Double(self.paneShare), forKey: "paneShare")
+            self.root.needsLayout = true
+        }
         rightList.card.isHidden = true
         root.onLayout = { [weak self] in self?.layoutRoot() }
 
@@ -242,11 +259,14 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         let left = sidebarShown ? sw : 8
         let area = NSRect(x: left, y: top, width: b.width - left - Metrics.cardRightMargin, height: b.height - top - Metrics.bottomSpacer)
         rightList.card.isHidden = !dual
+        paneDivider.isHidden = !dual
         if dual {
-            // two cards side by side, 6 apart (workspace.rs dual pane)
-            let w = floor((area.width - 6) / 2)
+            // two cards side by side, 6 apart (workspace.rs dual pane); the gap moves the split
+            let w = floor(min(max((area.width - 6) * paneShare, 240), area.width - 6 - 240))
             leftList.card.frame = NSRect(x: area.minX, y: area.minY, width: w, height: area.height)
             rightList.card.frame = NSRect(x: area.minX + w + 6, y: area.minY, width: area.width - w - 6, height: area.height)
+            paneDivider.frame = NSRect(x: area.minX + w, y: area.minY, width: 6, height: area.height)
+            lastPaneArea = area
         } else {
             leftList.card.frame = area
         }

@@ -158,7 +158,9 @@ final class Transfer: @unchecked Sendable {
     @MainActor
     func start(window: NSWindow?, finished: @escaping ([URL]) -> Void) {
         let count = sources.count
-        let what = count == 1 ? sources[0].lastPathComponent : String(localized: "\(count) items")
+        // the first name and how many more (Windows issue 296: "3 items" said nothing of what they were)
+        let first = sources[0].lastPathComponent
+        let what = count == 1 ? first : String(localized: "\(first) + \(count - 1) more")
         let title = kind == .copy
             ? String(localized: "Copying \(what) to \(dest.lastPathComponent)")
             : String(localized: "Moving \(what) to \(dest.lastPathComponent)")

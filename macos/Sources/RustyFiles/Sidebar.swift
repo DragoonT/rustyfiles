@@ -278,6 +278,16 @@ final class SidebarListView: HoverView {
 
     private func dragOperation(_ info: NSDraggingInfo) -> NSDragOperation {
         let pt = convert(info.draggingLocation, from: nil)
+        // near the top or the bottom edge, the list scrolls under the drag (Windows issue 301)
+        if let clip = enclosingScrollView?.contentView {
+            let v = visibleRect, edge: CGFloat = 28
+            let dy: CGFloat = pt.y < v.minY + edge ? -12 : (pt.y > v.maxY - edge ? 12 : 0)
+            if dy != 0 {
+                let y = min(max(clip.bounds.origin.y + dy, 0), max(bounds.height - clip.bounds.height, 0))
+                clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: y))
+                enclosingScrollView?.reflectScrolledClipView(clip)
+            }
+        }
         dropIndex = index(at: pt).flatMap { dropURL($0) != nil ? $0 : nil }
         guard let i = dropIndex, let dest = dropURL(i) else { return [] }
         let urls = FileListController.droppedURLs(info)
@@ -287,6 +297,8 @@ final class SidebarListView: HoverView {
         return FileListController.dropKind(info, urls, into: dest) == .copy ? .copy : .move
     }
 
+    // (asked again while the pointer rests, so the edge keeps scrolling)
+    override func wantsPeriodicDraggingUpdates() -> Bool { true }
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { dragOperation(sender) }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { dragOperation(sender) }
     override func draggingExited(_ sender: NSDraggingInfo?) { dropIndex = nil }
@@ -472,6 +484,25 @@ enum Pins {
 
 /// The 6 px handle on the sidebar's right edge.
 @MainActor
+/// The gap between the two panes of a dual pane: dragged, it moves the split (workspace.rs,
+/// Windows issue 284); a double click puts it back in the middle.
+final class PaneDivider: FlippedView {
+    /// The pointer's x in the superview's coordinates while dragging; nil: back to the middle.
+    var onDrag: ((CGFloat?) -> Void)?
+
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 { onDrag?(nil) }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let sv = superview else { return }
+        onDrag?(sv.convert(event.locationInWindow, from: nil).x)
+    }
+}
+
 final class SidebarResizeHandle: FlippedView {
     var onDrag: ((CGFloat) -> Void)?
     private var start: (x: CGFloat, width: CGFloat)?

@@ -887,5 +887,6 @@
 "Choose at least one file": "En az bir dosya seçin",
 "Downloading: %@": "İndiriliyor: %@",
 "The download stopped.": "İndirme durdu.",
-"This item is still being copied. Rename it when the copy is done.": "Bu öğe hâlâ kopyalanıyor. Kopyalama bitince yeniden adlandırın."
+"This item is still being copied. Rename it when the copy is done.": "Bu öğe hâlâ kopyalanıyor. Kopyalama bitince yeniden adlandırın.",
+"%@ + %@ more": "%1$@ ve %2$@ öğe daha"
 }
