@@ -1395,6 +1395,9 @@ impl Workspace {
             self.tabs[ix].left.update(cx, |v, _| v.dual = false);
         } else {
             let loc = self.tabs[ix].left.read(cx).location().clone();
+            if matches!(loc, Location::Settings) {
+                return; // Settings stays a single pane (issue 281)
+            }
             let view = self.new_view(loc, window, cx);
             view.update(cx, |v, _| v.dual = true);
             self.tabs[ix].left.update(cx, |v, _| v.dual = true);
@@ -1918,6 +1921,11 @@ impl Workspace {
     fn navigate(&mut self, loc: Location, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(loc, Location::Settings) && let Some(ix) = self.settings_tab_elsewhere(cx) {
             self.activate(ix, window, cx);
+            return;
+        }
+        // Settings always gets a single pane: asked for from a split tab, it opens in a tab of its own (issue 281).
+        if matches!(loc, Location::Settings) && self.tabs[self.active].right.is_some() {
+            self.open_tab(loc, window, cx);
             return;
         }
         self.active_tab().clone().update(cx, |v, cx| v.navigate(loc, cx));

@@ -295,11 +295,33 @@ fn is_terminal_here(clsid: &GUID) -> bool {
     TERMINAL_HERE.iter().any(|t| GUID::try_from(*t).is_ok_and(|g| g == *clsid))
 }
 
+const BLOCKED_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Shell Extensions\Blocked";
+
+/// Classes listed under `Shell Extensions\Blocked` (the user's and the machine's): Explorer leaves them out of its menu, and tools
+/// such as ContextMenuManager hide a packaged command by adding it there (issue 241).
+fn blocked() -> Vec<GUID> {
+    blocked_in(&[windows_registry::CURRENT_USER, windows_registry::LOCAL_MACHINE], BLOCKED_KEY)
+}
+
+fn blocked_in(hives: &[&windows_registry::Key], path: &str) -> Vec<GUID> {
+    hives
+        .iter()
+        .filter_map(|hive| hive.open(path).ok())
+        .flat_map(|key| key.values().map(|v| v.map(|(name, _)| name).collect::<Vec<_>>()).unwrap_or_default())
+        .filter_map(|name| parse_clsid(&name))
+        .collect()
+}
+
+fn parse_clsid(name: &str) -> Option<GUID> {
+    GUID::try_from(name.trim().trim_matches(|c| c == '{' || c == '}')).ok()
+}
+
 /// The packaged apps' commands for `items` (the folder itself with `background`), as the menu shows them. On the shell STA.
 pub fn for_items(items: &[PathBuf], background: bool) -> Vec<Shown> {
+    let blocked = blocked();
     let wanted: Vec<GUID> = declared()
         .into_iter()
-        .filter(|d| applies(&d.types, items, background) && !is_terminal_here(&d.clsid))
+        .filter(|d| applies(&d.types, items, background) && !is_terminal_here(&d.clsid) && !blocked.contains(&d.clsid))
         .map(|d| d.clsid)
         .collect();
     let mut keep = Vec::new();
@@ -349,6 +371,27 @@ mod tests {
           <desktop5:ItemType Type="*"><desktop5:Verb Id="Edit" Clsid="{B298D29A-A6ED-11DE-BA8C-A68E55D89593}"/></desktop5:ItemType>
       </desktop4:FileExplorerContextMenus></desktop4:Extension>
     </Extensions></Package>"#;
+
+    #[test]
+    fn a_blocked_entry_names_its_class_with_or_without_braces() {
+        let t = GUID::try_from("9f156763-7844-4dc4-b2b1-901f640f5155").unwrap();
+        assert_eq!(parse_clsid("{9F156763-7844-4DC4-B2B1-901F640F5155}"), Some(t));
+        assert_eq!(parse_clsid("9f156763-7844-4dc4-b2b1-901f640f5155"), Some(t));
+        assert_eq!(parse_clsid(""), None);
+        assert_eq!(parse_clsid("not a class"), None);
+    }
+
+    #[test]
+    fn classes_on_the_blocked_list_are_read_from_the_registry() {
+        let path = format!(r"Software\rustyfiles-test\blocked-{}", std::process::id());
+        let key = windows_registry::CURRENT_USER.create(&path).unwrap();
+        key.set_string("{9F156763-7844-4DC4-B2B1-901F640F5155}", "Open in Terminal").unwrap();
+        key.set_string("junk", "").unwrap();
+        let got = blocked_in(&[windows_registry::CURRENT_USER], &path);
+        let _ = windows_registry::CURRENT_USER.remove_tree(r"Software\rustyfiles-test");
+        assert_eq!(got, [GUID::try_from("9f156763-7844-4dc4-b2b1-901f640f5155").unwrap()]);
+        assert!(blocked_in(&[windows_registry::CURRENT_USER], r"Software\rustyfiles-test\none").is_empty());
+    }
 
     #[test]
     fn a_manifests_menu_commands_are_read_with_the_kinds_they_are_for() {
