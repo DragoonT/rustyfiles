@@ -1,4 +1,23 @@
+<p align="center">
+  <b>English</b> ·
+  <a href="README.zh-CN.md">简体中文</a> ·
+  <a href="README.zh-TW.md">繁體中文</a> ·
+  <a href="README.ja.md">日本語</a> ·
+  <a href="README.de.md">Deutsch</a> ·
+  <a href="README.es.md">Español</a> ·
+  <a href="README.pt-BR.md">Português (Brasil)</a> ·
+  <a href="README.ru.md">Русский</a> ·
+  <a href="README.tr.md">Türkçe</a>
+</p>
+
 <img alt="rustyfiles: a file manager for Windows that never freezes. Written in Rust. Drawn as a rustyfiles window on a folder of 100,000 files, opened in 281 ms" src="docs/readme/cover.png" width="100%">
+
+<p align="center">
+  <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="Latest version" src="https://img.shields.io/github/v/release/gelenmedya/rustyfiles?label=download&labelColor=232326&color=ff6a1a"></a>
+  <a href="https://github.com/gelenmedya/rustyfiles/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/gelenmedya/rustyfiles/total?label=downloads&labelColor=232326&color=3d3d44"></a>
+  <img alt="Windows 11, x64 and ARM64" src="https://img.shields.io/badge/Windows_11-x64_%7C_ARM64-3d3d44?labelColor=232326">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-3d3d44?labelColor=232326"></a>
+</p>
 
 rustyfiles is a file manager for Windows, written from scratch in Rust. It is meant to replace
 File Explorer for everyday work: tabs, dual panes, archives you open like folders, and a
@@ -323,9 +342,11 @@ when you click Install and checked against its SHA-256 first, and it can be remo
 
 Installing takes three clicks and no technical knowledge:
 
-1. **[Download rustyfiles-win-Setup.exe](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe)** (about 35 MB).
+1. **[Download rustyfiles-win-Setup.exe](https://github.com/gelenmedya/rustyfiles/releases/latest/download/rustyfiles-win-Setup.exe)** (about 50 MB).
 2. Open it. If Windows shows "Windows protected your PC", click **More info**, then **Run anyway**.
-   (The installer isn't code-signed yet; that's the only reason for the warning.)
+   (The installer isn't code-signed yet; that's the only reason for the warning. Each release's
+   installers are scanned on [VirusTotal](https://www.virustotal.com): the links to the reports are
+   at the end of its release notes.)
 3. That's it. rustyfiles opens by itself and is in your Start menu.
 
 No administrator password, nothing to configure. Updates download quietly in the background and
@@ -353,7 +374,8 @@ Remove-Item -Recurse "HKCU:\Software\Classes\CLSID\{DC1C5A9C-E88A-4dde-A5A1-60F8
 ```
 
 Prefer no installer? A portable zip is on the [Releases](https://github.com/gelenmedya/rustyfiles/releases)
-page. Requires Windows 11 on x64 (Windows 10 is untested). A macOS version is coming soon, and
+page, and an ARM64 installer (`rustyfiles-win-arm64-Setup.exe`) too. Requires Windows 11
+(Windows 10 is untested). A macOS version is coming soon, and
 Linux is planned.
 
 **Questions or ideas?** Come say hi on [Discord](https://discord.gg/K2banZ36zJ), or visit
@@ -455,6 +477,11 @@ test reports will follow in `docs/`. The macOS version is on its way, built on t
 Linux comes after it.
 
 Bug reports and pull requests are welcome.
+
+## Listed on
+
+- [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), as an alternative to File Explorer
+- [Scoop](https://scoop.sh), from its own bucket (see [Install](#install))
 
 ## Thanks
 
