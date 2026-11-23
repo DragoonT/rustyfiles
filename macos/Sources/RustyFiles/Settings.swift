@@ -13,14 +13,69 @@ enum AppSettings {
     enum Theme: String, CaseIterable { case system, light, dark, black }
     enum DateStyle: String, CaseIterable { case app, system, universal }
 
-    /// The interface language: "system" follows macOS (Turkish on a Turkish Mac, else English),
-    /// or "en" / "tr". Kept as the app's own AppleLanguages, read when it starts.
+    /// The interface's languages, as the Windows app has them (49): Apple's code and the
+    /// language's own name.
+    static let languages: [(String, String)] = [
+        ("en", "English"),
+        ("en-GB", "English (UK)"),
+        ("tr", "Türkçe"),
+        ("af", "Afrikaans"),
+        ("ar", "العربية"),
+        ("be", "Беларуская"),
+        ("bg", "Български"),
+        ("ca", "Català"),
+        ("cs", "Čeština"),
+        ("da", "Dansk"),
+        ("de", "Deutsch"),
+        ("el", "Ελληνικά"),
+        ("es", "Español (España)"),
+        ("es-419", "Español (Latinoamérica)"),
+        ("fa", "فارسی"),
+        ("fi", "Suomi"),
+        ("fil", "Filipino"),
+        ("fr", "Français"),
+        ("he", "עברית"),
+        ("hi", "हिन्दी"),
+        ("hr", "Hrvatski"),
+        ("hu", "Magyar"),
+        ("hy", "Հայերեն"),
+        ("id", "Bahasa Indonesia"),
+        ("it", "Italiano"),
+        ("ja", "日本語"),
+        ("ka", "ქართული"),
+        ("km", "ខ្មែរ"),
+        ("ko", "한국어"),
+        ("lt", "Lietuvių"),
+        ("lv", "Latviešu"),
+        ("ms", "Bahasa Melayu"),
+        ("nb", "Norsk bokmål"),
+        ("nl", "Nederlands"),
+        ("pl", "Polski"),
+        ("pt-BR", "Português (Brasil)"),
+        ("pt-PT", "Português (Portugal)"),
+        ("ro", "Română"),
+        ("ru", "Русский"),
+        ("sk", "Slovenčina"),
+        ("sq", "Shqip"),
+        ("sr", "Српски"),
+        ("sv", "Svenska"),
+        ("ta", "தமிழ்"),
+        ("th", "ไทย"),
+        ("uk", "Українська"),
+        ("vi", "Tiếng Việt"),
+        ("zh-Hans", "简体中文"),
+        ("zh-Hant", "繁體中文"),
+    ]
+
+    /// The interface language: "system" follows macOS (the first of its languages the app
+    /// has, else English), or one of `languages`. Kept as the app's own AppleLanguages, read
+    /// when it starts.
     static var language: String {
         get {
             guard let list = UserDefaults.standard.persistentDomain(forName: Bundle.main.bundleIdentifier ?? "")?["AppleLanguages"] as? [String],
                 let first = list.first
             else { return "system" }
-            return first.hasPrefix("tr") ? "tr" : "en"
+            return languages.first { $0.0 == first }?.0 ?? languages.first { first.hasPrefix($0.0) }?.0 ?? "system"
         }
         set {
             if newValue == "system" {
