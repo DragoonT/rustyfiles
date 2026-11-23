@@ -116,26 +116,9 @@ jobs:
           token: ${{ secrets.WINGET_TOKEN }}
 
   virustotal:
-    # Each release's installers and portable zips go to VirusTotal, and the links to its reports are added to the end of the
-    # release notes. It needs the VT_API_KEY secret (the API key of a VirusTotal account; the free one allows 4 requests a
-    # minute); without it this job does nothing. Notes written later must keep that VirusTotal part.
+    # The installers go to VirusTotal and the report links into the release notes: see virustotal.yml (needs VT_API_KEY)
     needs: release
-    runs-on: ubuntu-latest
-    env:
-      VT_API_KEY: ${{ secrets.VT_API_KEY }}
-    steps:
-      - name: Download the installers
-        if: ${{ env.VT_API_KEY != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download ${{ github.ref_name }} --repo ${{ github.repository }} --dir vt --pattern '*Setup.exe' --pattern '*Portable.zip'
-      - name: Scan on VirusTotal
-        if: ${{ env.VT_API_KEY != '' }}
-        # v5.0.0, pinned to its commit
-        uses: crazy-max/ghaction-virustotal@936d8c5c00afe97d3d9a1af26d017cfdf26800a2
-        with:
-          vt_api_key: ${{ secrets.VT_API_KEY }}
-          files: |
-            vt/*
-          update_release_body: true
-          request_rate: 4
+    uses: ./.github/workflows/virustotal.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit
