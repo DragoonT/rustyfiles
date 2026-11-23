@@ -886,5 +886,6 @@
 "Choose at least one file": "Zgjidhni të paktën një skedar",
 "Downloading: %@": "Po shkarkohet: %@",
 "The download stopped.": "Shkarkimi u ndal.",
-"This item is still being copied. Rename it when the copy is done.": "Ky element po kopjohet ende. Riemërtoje kur të mbarojë kopjimi."
+"This item is still being copied. Rename it when the copy is done.": "Ky element po kopjohet ende. Riemërtoje kur të mbarojë kopjimi.",
+"%@ + %@ more": "%1$@ + %2$@ të tjera"
 }

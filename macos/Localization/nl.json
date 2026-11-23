@@ -886,5 +886,6 @@
 "Choose at least one file": "Kies minstens één bestand",
 "Downloading: %@": "Downloaden: %@",
 "The download stopped.": "De download is gestopt.",
-"This item is still being copied. Rename it when the copy is done.": "Dit item wordt nog gekopieerd. Hernoem het wanneer het kopiëren klaar is."
+"This item is still being copied. Rename it when the copy is done.": "Dit item wordt nog gekopieerd. Hernoem het wanneer het kopiëren klaar is.",
+"%@ + %@ more": "%1$@ + %2$@ meer"
 }

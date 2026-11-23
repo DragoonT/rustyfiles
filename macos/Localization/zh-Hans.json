@@ -886,5 +886,6 @@
 "Choose at least one file": "请至少选择一个文件",
 "Downloading: %@": "正在下载：%@",
 "The download stopped.": "下载已停止。",
-"This item is still being copied. Rename it when the copy is done.": "该项目仍在复制中。复制完成后再重命名。"
+"This item is still being copied. Rename it when the copy is done.": "该项目仍在复制中。复制完成后再重命名。",
+"%@ + %@ more": "%1$@ 等 %2$@ 项"
 }

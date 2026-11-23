@@ -886,5 +886,6 @@
 "Choose at least one file": "ជ្រើសឯកសារយ៉ាងហោចណាស់មួយ",
 "Downloading: %@": "កំពុងទាញយក៖ %@",
 "The download stopped.": "ការទាញយកបានឈប់។",
-"This item is still being copied. Rename it when the copy is done.": "ធាតុនេះនៅតែកំពុងចម្លង។ សូមប្ដូរឈ្មោះវាពេលចម្លងរួចរាល់។"
+"This item is still being copied. Rename it when the copy is done.": "ធាតុនេះនៅតែកំពុងចម្លង។ សូមប្ដូរឈ្មោះវាពេលចម្លងរួចរាល់។",
+"%@ + %@ more": "%1$@ + %2$@ ទៀត"
 }

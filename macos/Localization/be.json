@@ -886,5 +886,6 @@
 "Choose at least one file": "Выберыце хаця б адзін файл",
 "Downloading: %@": "Спампоўванне: %@",
 "The download stopped.": "Спампоўванне спынілася.",
-"This item is still being copied. Rename it when the copy is done.": "Гэты элемент яшчэ капіруецца. Перайменуйце яго, калі капіраванне скончыцца."
+"This item is still being copied. Rename it when the copy is done.": "Гэты элемент яшчэ капіруецца. Перайменуйце яго, калі капіраванне скончыцца.",
+"%@ + %@ more": "%1$@ + яшчэ %2$@"
 }

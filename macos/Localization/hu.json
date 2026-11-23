@@ -886,5 +886,6 @@
 "Choose at least one file": "Válasszon ki legalább egy fájlt",
 "Downloading: %@": "Letöltés: %@",
 "The download stopped.": "A letöltés megszakadt.",
-"This item is still being copied. Rename it when the copy is done.": "Ez az elem még másolás alatt áll. Nevezze át, ha a másolás befejeződött."
+"This item is still being copied. Rename it when the copy is done.": "Ez az elem még másolás alatt áll. Nevezze át, ha a másolás befejeződött.",
+"%@ + %@ more": "%1$@ + %2$@ további"
 }

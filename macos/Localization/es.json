@@ -886,5 +886,6 @@
 "Choose at least one file": "Elige al menos un archivo",
 "Downloading: %@": "Descargando: %@",
 "The download stopped.": "La descarga se ha detenido.",
-"This item is still being copied. Rename it when the copy is done.": "Este elemento todavía se está copiando. Cambia su nombre cuando termine la copia."
+"This item is still being copied. Rename it when the copy is done.": "Este elemento todavía se está copiando. Cambia su nombre cuando termine la copia.",
+"%@ + %@ more": "%1$@ + %2$@ más"
 }

@@ -886,5 +886,6 @@
 "Choose at least one file": "குறைந்தது ஒரு கோப்பைத் தேர்ந்தெடுக்கவும்",
 "Downloading: %@": "பதிவிறக்கம் நடக்கிறது: %@",
 "The download stopped.": "பதிவிறக்கம் நின்றுவிட்டது.",
-"This item is still being copied. Rename it when the copy is done.": "இந்த உருப்படி இன்னும் நகலெடுக்கப்படுகிறது. நகலெடுப்பு முடிந்ததும் அதன் பெயரை மாற்றுங்கள்."
+"This item is still being copied. Rename it when the copy is done.": "இந்த உருப்படி இன்னும் நகலெடுக்கப்படுகிறது. நகலெடுப்பு முடிந்ததும் அதன் பெயரை மாற்றுங்கள்.",
+"%@ + %@ more": "%1$@ + மேலும் %2$@"
 }

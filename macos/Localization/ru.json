@@ -886,5 +886,6 @@
 "Choose at least one file": "Выберите хотя бы один файл",
 "Downloading: %@": "Загрузка: %@",
 "The download stopped.": "Загрузка остановлена.",
-"This item is still being copied. Rename it when the copy is done.": "Этот элемент ещё копируется. Переименуйте его, когда копирование завершится."
+"This item is still being copied. Rename it when the copy is done.": "Этот элемент ещё копируется. Переименуйте его, когда копирование завершится.",
+"%@ + %@ more": "%1$@ + ещё %2$@"
 }

@@ -886,5 +886,6 @@
 "Choose at least one file": "Pasirinkite bent vieną failą",
 "Downloading: %@": "Atsisiunčiama: %@",
 "The download stopped.": "Atsisiuntimas sustojo.",
-"This item is still being copied. Rename it when the copy is done.": "Šis elementas vis dar kopijuojamas. Pervardykite jį, kai kopijavimas baigsis."
+"This item is still being copied. Rename it when the copy is done.": "Šis elementas vis dar kopijuojamas. Pervardykite jį, kai kopijavimas baigsis.",
+"%@ + %@ more": "%1$@ + dar %2$@"
 }

@@ -886,5 +886,6 @@
 "Choose at least one file": "Izvēlieties vismaz vienu failu",
 "Downloading: %@": "Notiek lejupielāde: %@",
 "The download stopped.": "Lejupielāde apstājās.",
-"This item is still being copied. Rename it when the copy is done.": "Šis vienums vēl tiek kopēts. Pārdēvējiet to, kad kopēšana būs pabeigta."
+"This item is still being copied. Rename it when the copy is done.": "Šis vienums vēl tiek kopēts. Pārdēvējiet to, kad kopēšana būs pabeigta.",
+"%@ + %@ more": "%1$@ + vēl %2$@"
 }

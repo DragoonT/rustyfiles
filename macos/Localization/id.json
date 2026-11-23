@@ -886,5 +886,6 @@
 "Choose at least one file": "Pilih setidaknya satu file",
 "Downloading: %@": "Mengunduh: %@",
 "The download stopped.": "Unduhan berhenti.",
-"This item is still being copied. Rename it when the copy is done.": "Item ini masih disalin. Ganti namanya setelah penyalinan selesai."
+"This item is still being copied. Rename it when the copy is done.": "Item ini masih disalin. Ganti namanya setelah penyalinan selesai.",
+"%@ + %@ more": "%1$@ + %2$@ lainnya"
 }

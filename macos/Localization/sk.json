@@ -886,5 +886,6 @@
 "Choose at least one file": "Vyberte aspoň jeden súbor",
 "Downloading: %@": "Sťahuje sa: %@",
 "The download stopped.": "Sťahovanie sa zastavilo.",
-"This item is still being copied. Rename it when the copy is done.": "Táto položka sa stále kopíruje. Premenujte ju, keď sa kopírovanie skončí."
+"This item is still being copied. Rename it when the copy is done.": "Táto položka sa stále kopíruje. Premenujte ju, keď sa kopírovanie skončí.",
+"%@ + %@ more": "%1$@ + %2$@ ďalších"
 }

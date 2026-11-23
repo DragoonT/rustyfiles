@@ -886,5 +886,6 @@
 "Choose at least one file": "აირჩიეთ მინიმუმ ერთი ფაილი",
 "Downloading: %@": "ჩამოიტვირთება: %@",
 "The download stopped.": "ჩამოტვირთვა შეწყდა.",
-"This item is still being copied. Rename it when the copy is done.": "ეს ელემენტი ჯერ კიდევ კოპირდება. გადაარქვით სახელი, როცა კოპირება დასრულდება."
+"This item is still being copied. Rename it when the copy is done.": "ეს ელემენტი ჯერ კიდევ კოპირდება. გადაარქვით სახელი, როცა კოპირება დასრულდება.",
+"%@ + %@ more": "%1$@ + კიდევ %2$@"
 }

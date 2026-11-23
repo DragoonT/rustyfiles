@@ -886,5 +886,6 @@
 "Choose at least one file": "Изберете поне един файл",
 "Downloading: %@": "Изтегляне: %@",
 "The download stopped.": "Изтеглянето спря.",
-"This item is still being copied. Rename it when the copy is done.": "Този елемент още се копира. Преименувайте го, когато копирането приключи."
+"This item is still being copied. Rename it when the copy is done.": "Този елемент още се копира. Преименувайте го, когато копирането приключи.",
+"%@ + %@ more": "%1$@ + още %2$@"
 }

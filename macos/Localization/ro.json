@@ -886,5 +886,6 @@
 "Choose at least one file": "Alegeți cel puțin un fișier",
 "Downloading: %@": "Se descarcă: %@",
 "The download stopped.": "Descărcarea s-a oprit.",
-"This item is still being copied. Rename it when the copy is done.": "Acest element este încă în curs de copiere. Redenumiți-l când copierea s-a încheiat."
+"This item is still being copied. Rename it when the copy is done.": "Acest element este încă în curs de copiere. Redenumiți-l când copierea s-a încheiat.",
+"%@ + %@ more": "%1$@ + încă %2$@"
 }

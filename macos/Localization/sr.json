@@ -886,5 +886,6 @@
 "Choose at least one file": "Изаберите бар једну датотеку",
 "Downloading: %@": "Преузимање: %@",
 "The download stopped.": "Преузимање је стало.",
-"This item is still being copied. Rename it when the copy is done.": "Ова ставка се још копира. Преименујте је када копирање буде готово."
+"This item is still being copied. Rename it when the copy is done.": "Ова ставка се још копира. Преименујте је када копирање буде готово.",
+"%@ + %@ more": "%1$@ + још %2$@"
 }

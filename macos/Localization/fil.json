@@ -886,5 +886,6 @@
 "Choose at least one file": "Pumili ng kahit isang file",
 "Downloading: %@": "Dina-download: %@",
 "The download stopped.": "Huminto ang download.",
-"This item is still being copied. Rename it when the copy is done.": "Kinokopya pa rin ang item na ito. I-rename ito kapag tapos na ang pagkopya."
+"This item is still being copied. Rename it when the copy is done.": "Kinokopya pa rin ang item na ito. I-rename ito kapag tapos na ang pagkopya.",
+"%@ + %@ more": "%1$@ + %2$@ pa"
 }

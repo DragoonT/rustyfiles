@@ -886,5 +886,6 @@
 "Choose at least one file": "파일을 하나 이상 선택하세요",
 "Downloading: %@": "다운로드 중: %@",
 "The download stopped.": "다운로드가 중단되었습니다.",
-"This item is still being copied. Rename it when the copy is done.": "이 항목은 아직 복사 중입니다. 복사가 끝나면 이름을 바꾸세요."
+"This item is still being copied. Rename it when the copy is done.": "이 항목은 아직 복사 중입니다. 복사가 끝나면 이름을 바꾸세요.",
+"%@ + %@ more": "%1$@ 외 %2$@개"
 }

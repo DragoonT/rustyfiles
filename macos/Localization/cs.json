@@ -886,5 +886,6 @@
 "Choose at least one file": "Vyberte alespoň jeden soubor",
 "Downloading: %@": "Stahování: %@",
 "The download stopped.": "Stahování bylo zastaveno.",
-"This item is still being copied. Rename it when the copy is done.": "Tato položka se stále kopíruje. Přejmenujte ji, až kopírování skončí."
+"This item is still being copied. Rename it when the copy is done.": "Tato položka se stále kopíruje. Přejmenujte ji, až kopírování skončí.",
+"%@ + %@ more": "%1$@ + %2$@ dalších"
 }
