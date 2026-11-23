@@ -125,9 +125,15 @@ enum ListColumn: String, CaseIterable {
     case name, modified, created, type, size, tags, git
     /// Where each item is: only in listings gathered from many folders (a search, a tag).
     case folder
+    /// More columns (Windows' "More columns…", prop_chooser.rs): the file's own properties,
+    /// read from Spotlight.
+    case dimensions, duration, artist, album, title, camera
 
     /// The columns that can be turned on or off (Settings › Layout › Details columns).
-    static let optional: [ListColumn] = [.modified, .created, .type, .size, .tags, .git]
+    static let optional: [ListColumn] = [.modified, .created, .type, .size, .tags, .git, .dimensions, .duration, .artist, .album, .title, .camera]
+
+    /// The Spotlight properties.
+    var isProperty: Bool { [.dimensions, .duration, .artist, .album, .title, .camera].contains(self) }
 
     var title: String {
         switch self {
@@ -139,6 +145,12 @@ enum ListColumn: String, CaseIterable {
         case .tags: String(localized: "Tags")
         case .git: String(localized: "Git status")
         case .folder: String(localized: "Folder")
+        case .dimensions: String(localized: "Dimensions")
+        case .duration: String(localized: "Length")
+        case .artist: String(localized: "Artist")
+        case .album: String(localized: "Album")
+        case .title: String(localized: "Title")
+        case .camera: String(localized: "Camera")
         }
     }
 
@@ -150,15 +162,18 @@ enum ListColumn: String, CaseIterable {
         case .tags: 120
         case .git: 100
         case .folder: 240
+        case .dimensions: 110
+        case .duration: 80
+        case .artist, .album, .title, .camera: 140
         }
     }
 
-    /// Tags and Git status are shown, not sorted by.
-    var sortable: Bool { self != .tags && self != .git && self != .folder }
+    /// Tags, Git status and the properties are shown, not sorted by.
+    var sortable: Bool { self != .tags && self != .git && self != .folder && !isProperty }
 
     var sort: SortColumn {
         switch self {
-        case .name, .tags, .git, .folder: .name
+        case .name, .tags, .git, .folder, .dimensions, .duration, .artist, .album, .title, .camera: .name
         case .modified: .modified
         case .created: .created
         case .type: .kind
@@ -252,6 +267,21 @@ final class ListHeaderView: HoverView {
         }
         p.divider.setFill()
         NSRect(x: 0, y: bounds.height - 1, width: bounds.width, height: 1).fill()
+    }
+
+    /// A right click on the header: the columns to show, ticked (Windows' header menu with
+    /// "More columns…": the file properties are in it too).
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let b = MenuBuilder()
+        for c in ListColumn.optional where !c.isProperty {
+            b.add(c.title, checked: AppSettings.showsColumn(c)) { AppSettings.setShowsColumn(c, !AppSettings.showsColumn(c)) }
+        }
+        b.sub(String(localized: "More columns"), "columns-3") { m in
+            for c in ListColumn.optional where c.isProperty {
+                m.add(c.title, checked: AppSettings.showsColumn(c)) { AppSettings.setShowsColumn(c, !AppSettings.showsColumn(c)) }
+            }
+        }
+        return b.done()
     }
 
     override func mouseDown(with event: NSEvent) {

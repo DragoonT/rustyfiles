@@ -93,6 +93,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// Tags and Git states of the folder shown, by name (filled when their columns are on).
     private var tagsByName: [String: String] = [:]
     private var gitByName: [String: String] = [:]
+    /// The Spotlight properties of the items, for the property columns that are on.
+    private var propsByName: [String: [ListColumn: String]] = [:]
     var showHidden = AppSettings.showHidden { didSet { if showHidden != oldValue { rearrange() } } }
     var filter = "" { didSet { if filter != oldValue { rearrange() } } }
 
@@ -1911,6 +1913,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         case .created: cell.text = item.createdMs > 0 ? display.date(item.createdMs) : ""
         case .tags: cell.text = tagsByName[item.name] ?? ""
         case .git: cell.text = gitByName[item.name] ?? ""
+        case .dimensions, .duration, .artist, .album, .title, .camera: cell.text = propsByName[item.name]?[col] ?? ""
         case .folder:
             let dir = folder.childPath(row: UInt32(row)).map { ($0 as NSString).deletingLastPathComponent } ?? ""
             cell.text = (dir as NSString).abbreviatingWithTildeInPath
@@ -2489,9 +2492,11 @@ extension FileListController {
     func loadColumnData(_ dir: URL) {
         tagsByName = [:]
         gitByName = [:]
+        propsByName = [:]
         guard archive == nil else { return }
         let wantTags = AppSettings.showsColumn(.tags), wantGit = AppSettings.showsColumn(.git)
-        guard wantTags || wantGit else { return }
+        let props = ListColumn.optional.filter { $0.isProperty && AppSettings.showsColumn($0) }
+        guard wantTags || wantGit || !props.isEmpty else { return }
         DispatchQueue.global(qos: .utility).async {
             var tags: [String: String] = [:]
             if wantTags {
@@ -2503,11 +2508,13 @@ extension FileListController {
                 }
             }
             let git = wantGit ? (GitStatus.read(dir) ?? [:]) : [:]
+            let found = props.isEmpty ? [:] : SpotlightProps.read(dir, props)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { [weak self] in
                     guard let self, self.url?.standardizedFileURL == dir.standardizedFileURL else { return }
                     self.tagsByName = tags
                     self.gitByName = git
+                    self.propsByName = found
                     if self.viewMode == .details { self.table.reloadData() }
                 }
             }
@@ -2629,5 +2636,43 @@ final class ProgressCard {
         p.contentView = glass
         panel = p
         return p
+    }
+}
+
+/// The property columns' values (Windows' "More columns…"), read from Spotlight's metadata.
+enum SpotlightProps {
+    /// For each item in `dir` that has any of `columns`: its texts. Blocks: off the main thread.
+    nonisolated static func read(_ dir: URL, _ columns: [ListColumn]) -> [String: [ListColumn: String]] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        var out: [String: [ListColumn: String]] = [:]
+        // a folder of many thousands: only the first 5000 are read, so it never holds up
+        for n in names.prefix(5000) {
+            let path = dir.appendingPathComponent(n).path
+            guard let md = MDItemCreate(nil, path as CFString) else { continue }
+            func value(_ key: CFString) -> Any? { MDItemCopyAttribute(md, key) }
+            var row: [ListColumn: String] = [:]
+            for c in columns {
+                switch c {
+                case .dimensions:
+                    if let w = value(kMDItemPixelWidth) as? Int, let h = value(kMDItemPixelHeight) as? Int { row[c] = "\(w) × \(h)" }
+                case .duration:
+                    if let s = value(kMDItemDurationSeconds) as? Double, s > 0 {
+                        let t = Int(s.rounded())
+                        row[c] = t >= 3600 ? String(format: "%d:%02d:%02d", t / 3600, t / 60 % 60, t % 60) : String(format: "%d:%02d", t / 60, t % 60)
+                    }
+                case .artist:
+                    if let a = value(kMDItemAuthors) as? [String], !a.isEmpty { row[c] = a.joined(separator: ", ") }
+                case .album:
+                    if let a = value(kMDItemAlbum) as? String { row[c] = a }
+                case .title:
+                    if let t = value(kMDItemTitle) as? String { row[c] = t }
+                case .camera:
+                    if let m = value(kMDItemAcquisitionModel) as? String { row[c] = m }
+                default: break
+                }
+            }
+            if !row.isEmpty { out[n] = row }
+        }
+        return out
     }
 }
