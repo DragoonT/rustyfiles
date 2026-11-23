@@ -47,6 +47,7 @@ enum MainMenu {
     private static func appMenu() -> NSMenu {
         let m = NSMenu(title: "rustyfiles")
         m.addItem(item(String(localized: "About rustyfiles"), #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
+        m.addItem(item(String(localized: "Check for Updates…"), #selector(AppDelegate.checkForUpdates(_:))))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Settings…"), #selector(W.openSettings(_:)), ","))
         m.addItem(.separator())

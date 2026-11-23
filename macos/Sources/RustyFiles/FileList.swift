@@ -608,6 +608,11 @@ final class StatusBarView: FlippedView {
     var progress = "" { didSet { needsDisplay = true } }
     var progressFraction: Double? { didSet { needsDisplay = true } }
     var performance = "" { didSet { needsDisplay = true } }
+    /// A downloaded update: "Restart to update" at the right, as on Windows.
+    var update: String? { didSet { if update != oldValue { needsDisplay = true } } }
+    var onUpdate: (() -> Void)?
+    private var updateRect: NSRect = .zero
+
     /// The folder's Git branch, ahead / behind (git_ui.rs): a button at the right.
     var git: GitRepo.Info? { didSet { if git != oldValue { needsDisplay = true } } }
     var onGit: ((GitRepo.Info, NSView, NSRect) -> Void)?
@@ -616,6 +621,7 @@ final class StatusBarView: FlippedView {
     override func mouseUp(with event: NSEvent) {
         let pt = convert(event.locationInWindow, from: nil)
         if let git, gitRect.contains(pt) { onGit?(git, self, gitRect) }
+        if update != nil, updateRect.contains(pt) { onUpdate?() }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -625,6 +631,17 @@ final class StatusBarView: FlippedView {
         // px_3, gap_3, text_xs
         var r = NSRect(x: 12, y: 1, width: bounds.width - 24, height: bounds.height - 1)
         gitRect = .zero
+        updateRect = .zero
+        if let update {
+            let text = String(localized: "Restart to update to \(update)")
+            let tw = min(Draw.textWidth(text, font: Metrics.textXs), 260)
+            let w = 16 + 6 + tw + 12
+            updateRect = NSRect(x: r.maxX - w, y: r.midY - 11, width: w, height: 22)
+            Draw.roundedRect(updateRect, radius: Metrics.radiusSmall, fill: p.accent.withAlphaComponent(0.18))
+            Draw.icon("download", in: NSRect(x: updateRect.minX + 6, y: updateRect.minY, width: 14, height: updateRect.height), size: 13, color: p.accent)
+            Draw.text(text, in: NSRect(x: updateRect.minX + 6 + 16, y: updateRect.minY, width: tw, height: updateRect.height), font: Metrics.textXs, color: p.text)
+            r.size.width = max(updateRect.minX - 8 - r.minX, 0)
+        }
         if let git {
             var text = git.branch
             if git.ahead > 0 { text += "  ↑\(git.ahead)" }

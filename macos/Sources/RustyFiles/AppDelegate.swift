@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setShowSystemFiles(show: AppSettings.showSystemFiles)
+        Updater.start()
         // Sizes and dates in rf-core's English wording until the interface is translated.
         // sizes and dates speak the interface's language ("bayt", decimal comma)
         setEnglish(on: !AppSettings.speaksTurkish)
@@ -245,5 +246,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func newWindow(_ sender: Any?) {
         let key = NSApp.keyWindow?.windowController as? BrowserWindowController
         openWindow(at: key?.current ?? home)
+    }
+
+    /// rustyfiles › Check for Updates…: a look now, its answer shown; a downloaded version
+    /// offers the restart at once.
+    @objc func checkForUpdates(_ sender: Any?) {
+        if Updater.ready != nil { Updater.restart() } else { Updater.check(manual: true) }
     }
 }

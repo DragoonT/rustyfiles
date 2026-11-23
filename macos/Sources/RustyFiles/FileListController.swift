@@ -261,6 +261,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         card.onLayout = { [weak self] in self?.layoutCard() }
         NotificationCenter.default.addObserver(self, selector: #selector(statusCenterChanged), name: .rfStatusCenterChanged, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(cutChanged), name: .rfCutChanged, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(updateChanged), name: .rfUpdateChanged, object: nil)
+        status.onUpdate = { Updater.restart() }
         applyScrollBars()
         card.applyBackground()
         NotificationCenter.default.addObserver(self, selector: #selector(columnsChanged), name: NSTableView.columnDidResizeNotification, object: table)
@@ -2194,6 +2196,8 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         guard let folder, archive == nil, let item = folder.item(row: UInt32(row)), let p = folder.childPath(row: UInt32(row)) else { return nil }
         return PreviewPane.hoverDetails(URL(fileURLWithPath: p), folder: item.isDir)
     }
+
+    @objc func updateChanged() { status.update = Updater.ready }
 
     /// Hidden items and items cut but not yet pasted are drawn faded.
     func faded(_ item: FileItem, row: Int) -> Bool {

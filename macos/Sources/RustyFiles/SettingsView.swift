@@ -187,11 +187,21 @@ enum SettingsContent {
         case .ferry:
             return FerryPage.rows()
         case .about:
-            let info = Bundle.main.infoDictionary
-            let version = info?["CFBundleShortVersionString"] as? String ?? coreVersion()
             func open(_ s: String) -> () -> Void { { if let u = URL(string: s) { NSWorkspace.shared.open(u) } } }
             return [
-                .card(title: "rustyfiles", detail: String(localized: "A file manager that never freezes. Written in Rust."), icon: "info", control: .value(String(localized: "Version \(version)"))),
+                .card(title: "rustyfiles", detail: String(localized: "A file manager that never freezes. Written in Rust."), icon: "info", control: .value(String(localized: "Version \(Updater.version)"))),
+                .section(String(localized: "Updates")),
+                .card(
+                    title: Updater.summary, detail: nil, icon: "refresh-cw",
+                    control: .buttons(Updater.ready != nil
+                        ? [(String(localized: "Restart to update"), { Updater.restart() })]
+                        : [(String(localized: "Check for updates"), { Updater.check(manual: true) })])),
+                .card(
+                    title: String(localized: "Download updates by themselves"), detail: String(localized: "Looks soon after start and every two hours; a new version installs when rustyfiles restarts."), icon: "download",
+                    control: .toggle(get: { AppSettings.autoUpdate }, set: { AppSettings.autoUpdate = $0 })),
+                .card(
+                    title: String(localized: "Beta versions"), detail: String(localized: "Pre-releases arrive as updates too. A beta installed by hand takes the next betas anyway."), icon: "flask-conical",
+                    control: .toggle(get: { AppSettings.betaUpdates }, set: { AppSettings.betaUpdates = $0 })),
                 .section(String(localized: "Community")),
                 .card(
                     title: String(localized: "Links"), detail: nil, icon: "globe",

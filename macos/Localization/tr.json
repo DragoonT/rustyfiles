@@ -839,5 +839,21 @@
 "Connect to server": "Sunucuya bağlan",
 "Connecting to %@": "%@ sunucusuna bağlanılıyor",
 "Could not connect to %@ (error %@).": "%1$@ sunucusuna bağlanılamadı (hata %2$@).",
-"“%@” is not a server address.": "“%@” bir sunucu adresi değil."
+"“%@” is not a server address.": "“%@” bir sunucu adresi değil.",
+"Restart to update to %@": "%@ sürümüne güncellemek için yeniden başlat",
+"Check for Updates…": "Güncellemeleri Denetle…",
+"Updates": "Güncellemeler",
+"Restart to update": "Yeniden başlat ve güncelle",
+"Check for updates": "Güncellemeleri denetle",
+"Download updates by themselves": "Güncellemeleri kendiliğinden indir",
+"Looks soon after start and every two hours; a new version installs when rustyfiles restarts.": "Açıldıktan kısa süre sonra ve iki saatte bir bakar; yeni sürüm rustyfiles yeniden başlayınca kurulur.",
+"Beta versions": "Beta sürümler",
+"Pre-releases arrive as updates too. A beta installed by hand takes the next betas anyway.": "Ön sürümler de güncelleme olarak gelir. Elle kurulmuş bir beta sonraki betaları zaten alır.",
+"The update could not be applied.": "Güncelleme uygulanamadı.",
+"Looking for updates…": "Güncellemelere bakılıyor…",
+"This copy was not installed from a release, so it does not update itself.": "Bu kopya bir sürümden kurulmadığı için kendini güncellemez.",
+"rustyfiles %@ is the newest version.": "rustyfiles %@ en yeni sürüm.",
+"rustyfiles %@ is downloaded and installs when rustyfiles restarts.": "rustyfiles %@ indirildi; rustyfiles yeniden başlayınca kurulur.",
+"The update check failed: %@": "Güncelleme denetlenemedi: %@",
+"Later": "Sonra"
 }
