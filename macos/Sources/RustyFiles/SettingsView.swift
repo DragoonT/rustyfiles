@@ -7,7 +7,7 @@ enum SettingsPage: CaseIterable {
     /// Marked "Experimental" in the page list, as on Windows.
     var isExperimental: Bool { self == .ferry }
 
-    case general, appearance, layout, files, fileTypes, actions, tags, ferry, advanced, speed, organizer, about
+    case general, appearance, layout, files, fileTypes, actions, tags, ferry, addons, advanced, speed, organizer, about
 
     var title: String {
         switch self {
@@ -22,6 +22,7 @@ enum SettingsPage: CaseIterable {
         case .speed: String(localized: "Speed test")
         case .organizer: String(localized: "File organizer")
         case .ferry: "Ferry"
+        case .addons: String(localized: "Add-ons")
         case .about: String(localized: "About")
         }
     }
@@ -39,6 +40,7 @@ enum SettingsPage: CaseIterable {
         case .speed: "gauge"
         case .organizer: "wand-sparkles"
         case .ferry: "send"
+        case .addons: "puzzle"
         case .about: "info"
         }
     }
@@ -87,7 +89,7 @@ enum SettingsContent {
                     detail: String(localized: "Takes effect when rustyfiles opens again."),
                     icon: "languages",
                     control: .choice(
-                        options: [("system", String(localized: "System")), ("en", "English"), ("tr", "Türkçe")],
+                        options: [("system", String(localized: "System"))] + AppSettings.languages,
                         get: { AppSettings.language },
                         set: { AppSettings.language = $0 })),
                 .card(
@@ -186,6 +188,8 @@ enum SettingsContent {
             return organizerRows()
         case .ferry:
             return FerryPage.rows()
+        case .addons:
+            return AddonsPage.rows()
         case .about:
             func open(_ s: String) -> () -> Void { { if let u = URL(string: s) { NSWorkspace.shared.open(u) } } }
             return [

@@ -134,3 +134,4 @@ minimize-2
 save
 file-plus
 flask-conical
+puzzle

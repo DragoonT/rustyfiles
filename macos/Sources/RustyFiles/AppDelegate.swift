@@ -43,6 +43,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 LayoutFlyout.show(from: list.commandBar.view, list: list)
             }
         }
+        // RF_DEMO_HD=<link> (development): installs the first add-on of RF_ADDONS_MANIFEST, downloads
+        // the link into RF_DEMO_HD_DIR with HyperDownload, prints how it ended and quits
+        if let link = ProcessInfo.processInfo.environment["RF_DEMO_HD"], let dir = ProcessInfo.processInfo.environment["RF_DEMO_HD_DIR"] {
+            Task.detached {
+                do {
+                    let info = try Addons.list()[0]
+                    try Addons.install(info) { _, _ in }
+                    print("installed:", Addons.installed(info.id).map { "\($0.version) \($0.program.path)" } ?? "no")
+                } catch { print("install failed:", error.localizedDescription); exit(1) }
+                await MainActor.run {
+                    HyperDownload.download(.link(link), into: URL(fileURLWithPath: dir))
+                    Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+                        MainActor.assumeIsolated {
+                            guard let c = StatusCenter.shared.cards.last, c.state != .running else { return }
+                            print("download:", c.state, c.done, "of", c.total)
+                            exit(c.state == .done ? 0 : 1)
+                        }
+                    }
+                }
+            }
+        }
         // RF_DEMO_FOLD=all|<group title> (development): every group folded, or that one
         if let fold = ProcessInfo.processInfo.environment["RF_DEMO_FOLD"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in

@@ -1087,6 +1087,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             data = png
             name = String(localized: "Pasted picture")
             ext = "png"
+        } else if let text = pb.string(forType: .string), HyperDownload.isLink(text), HyperDownload.isInstalled {
+            // a link and no files: HyperDownload offers to download it here
+            return HyperDownload.offerPastedLink(text.trimmingCharacters(in: .whitespacesAndNewlines), into: dest)
         } else if let text = pb.string(forType: .string), !text.isEmpty {
             data = Data(text.utf8)
             name = String(localized: "Pasted text")
@@ -1693,6 +1696,9 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             }
         }
         if allArchives { b.sub(String(localized: "Extract"), "folder-output") { self.extractMenu(urls, $0) } }
+        if urls.count == 1, urls[0].pathExtension.lowercased() == "torrent", HyperDownload.isInstalled, let here = url {
+            b.add(String(localized: "Download with HyperDownload"), "download") { HyperDownload.download(.torrentFile(urls[0]), into: here) }
+        }
         b.sub(String(localized: "Tags"), "tag") { MenuActions.tagsMenu(urls, $0) }
         b.menu.addItem(FerryMenu.make(for: urls))
         if singleDir, let u = urls.first {
@@ -1826,6 +1832,10 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             }
             b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([dir]) }
             b.add(String(localized: "Disk usage"), "chart-pie") { [weak self] in self?.onDiskUsage?(dir) }
+            // HyperDownload, once installed (Settings › Add-ons)
+            if archive == nil, HyperDownload.isInstalled {
+                b.add(String(localized: "Download from a link…"), "download") { [weak self] in HyperDownload.askLink(into: dir, window: self?.card.window) }
+            }
         }
         if let dir = url, dir.isFileURL {
             b.separator()
