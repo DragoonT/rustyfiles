@@ -830,6 +830,39 @@ pub fn paste_virtual(cx: &mut App, dest: std::path::PathBuf, after: impl FnOnce(
 }
 
 /// `record = false` for undo/redo replays (they must not land on the undo stack again).
+/// The folders copies and moves are writing into right now, with when each began (see [`still_arriving`]).
+static ARRIVING: std::sync::Mutex<Vec<(u64, std::path::PathBuf, std::time::SystemTime)>> = std::sync::Mutex::new(Vec::new());
+static ARRIVING_NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// Holds a destination in [`ARRIVING`] for as long as its transfer runs.
+struct Arriving(u64);
+impl Arriving {
+    fn begin(dest: &std::path::Path) -> Self {
+        let id = ARRIVING_NEXT.fetch_add(1, Ordering::Relaxed);
+        ARRIVING.lock().unwrap().push((id, dest.to_path_buf(), std::time::SystemTime::now()));
+        Arriving(id)
+    }
+}
+impl Drop for Arriving {
+    fn drop(&mut self) {
+        ARRIVING.lock().unwrap().retain(|(id, _, _)| *id != self.0);
+    }
+}
+
+/// Whether `item` is still being written by a copy or move that runs now: it sits directly in that transfer's destination and was
+/// made after the transfer began. Renaming it then would leave the transfer writing under the old name, which it makes again
+/// (issue 297: "x - Copy" came back with the files going on into it).
+pub fn still_arriving(item: &std::path::Path) -> bool {
+    let Some(parent) = item.parent() else { return false };
+    let jobs: Vec<std::time::SystemTime> = ARRIVING.lock().unwrap().iter().filter(|(_, d, _)| d.as_path() == parent).map(|(_, _, t)| *t).collect();
+    if jobs.is_empty() {
+        return false;
+    }
+    // (a second of slack: the file system keeps the creation time coarser than the clock)
+    let made = std::fs::metadata(item).and_then(|m| m.created()).ok();
+    made.is_some_and(|m| jobs.iter().any(|t| m + std::time::Duration::from_secs(1) >= *t))
+}
+
 pub fn transfer_ex(cx: &mut App, kind: Transfer, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, record: bool) {
     transfer_inner(cx, kind, sources, dest, record, None);
 }
@@ -893,6 +926,7 @@ fn transfer_inner(
     let mark = Arc::new(std::sync::Mutex::new(None::<std::path::PathBuf>));
     let marker = mark.clone();
     let id = start_with_id(cx, title, move |t| {
+        let _arriving = Arriving::begin(&dest);
         t.set_verify(verify);
         t.limit.store(limit, Ordering::Relaxed);
         // our engine (conflicts asked in one list); Windows' engine when it is turned off
@@ -1227,6 +1261,15 @@ pub fn delete(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool) {
 }
 
 pub fn delete_ex(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, record: bool) {
+    delete_inner(cx, paths, permanent, record, None);
+}
+
+/// [`delete`], then `after` once the deletion is over (a folder nothing watches is read again: a WSL distribution's).
+pub fn delete_then(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, after: impl FnOnce(&mut App) + 'static) {
+    delete_inner(cx, paths, permanent, true, Some(Box::new(move |_, cx: &mut App| after(cx))));
+}
+
+fn delete_inner(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, record: bool, on_done: Option<OnDone>) {
     // a pinned folder that is deleted leaves the sidebar (its question was answered before this)
     for p in &paths {
         crate::places::pins_follow(cx, p, None);
@@ -1252,7 +1295,7 @@ pub fn delete_ex(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, 
             crate::undo::push(crate::undo::UndoOp::Recycled { pairs });
         }
         r
-    }, None);
+    }, on_done);
     if record && !permanent {
         set_extras(cx, id, None, None, Some(mark));
     }
@@ -1622,6 +1665,25 @@ mod tests {
     use rf_core::transfer::{self as xfer, Stage};
     use rf_win::fastcopy::Resolve;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn an_item_a_running_copy_makes_is_still_arriving_and_older_ones_are_not() {
+        let dir = std::env::temp_dir().join(format!("rf-arriving-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = dir.join("old.txt");
+        std::fs::write(&old, b"x").unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
+        let job = super::Arriving::begin(&dir);
+        let new = dir.join("x - Copy");
+        std::fs::create_dir(&new).unwrap();
+        assert!(super::still_arriving(&new), "made by the running copy");
+        assert!(!super::still_arriving(&old), "there before the copy began");
+        assert!(!super::still_arriving(&std::env::temp_dir().join("elsewhere")), "not in the destination");
+        drop(job);
+        assert!(!super::still_arriving(&new), "the copy is over");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn op(id: u64, title: &str, phase: OpPhase, done: u32, total: u32) -> OpState {
         OpState { total, done, phase, ..OpState::new(id, title.into(), Default::default(), Default::default(), Default::default()) }

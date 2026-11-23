@@ -205,6 +205,9 @@ mod tests {
     /// out into a temp folder and returns real files; items with a path pass through.
     #[test]
     fn items_without_a_path_become_real_files() {
+        if rf_win::engine_guard::not_run_without_shell("items_without_a_path_become_real_files") {
+            return;
+        }
         let dir = std::env::temp_dir().join(format!("rf-shellview-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

@@ -616,8 +616,22 @@ impl FolderView {
             DeletePref::PermanentOnly => permanent,
             DeletePref::Never => false,
         };
+        // a WSL distribution's folder sends no change notices: the view is read again when the deletion is over (Discord, 2026-11-23:
+        // "After deleting files from a WSL drive, they remain visible")
+        let view = cx.entity().downgrade();
+        let unwatched = paths.first().is_some_and(|p| rf_win::fastcopy::on_wsl(p));
+        let run = move |cx: &mut App, paths: Vec<PathBuf>| {
+            if unwatched {
+                let view = view.clone();
+                crate::status_center::delete_then(cx, paths, permanent, move |cx| {
+                    let _ = view.update(cx, |v, cx| v.soft_reload(cx));
+                });
+            } else {
+                crate::status_center::delete(cx, paths, permanent);
+            }
+        };
         if !ask {
-            crate::status_center::delete(cx, paths, permanent);
+            run(cx, paths);
             return;
         }
         let what = if paths.len() == 1 {
@@ -636,7 +650,7 @@ impl FolderView {
             None,
             vec![
                 crate::prompt::Button::new(t!("Sil"), if permanent { crate::prompt::Kind::Danger } else { crate::prompt::Kind::Primary }, move |_, _, cx| {
-                    crate::status_center::delete(cx, paths.clone(), permanent);
+                    run(cx, paths.clone());
                     Ok(())
                 }),
                 crate::prompt::Button::cancel(),
@@ -846,6 +860,13 @@ impl FolderView {
                 cx.notify();
                 return;
             }
+        }
+        // still being copied here: the copy would go on under the old name (issue 297)
+        if !new_name.is_empty() && new_name != old && self.parent_of(ei).is_some_and(|d| crate::status_center::still_arriving(&d.join(&old))) {
+            let msg = format!("{old}\n\n{}", crate::t!("Bu öğe hâlâ kopyalanıyor. Kopyalama bitince yeniden adlandırın."));
+            crate::prompt::notice(crate::t!("Yeniden adlandır").to_string(), msg, window, cx);
+            cx.notify();
+            return;
         }
         if !new_name.is_empty() && new_name != old {
             if let Some(dir) = self.parent_of(ei).map(|d| d.to_path_buf()) {

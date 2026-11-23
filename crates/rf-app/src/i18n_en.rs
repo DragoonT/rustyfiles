@@ -907,6 +907,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Metin düzenleyici (F4)", "Text editor (F4)"),
     ("Otomatik: Not Defteri", "Automatic: Notepad"),
     ("Metin düzenleyici seç", "Choose text editor"),
+    ("Bu öğe hâlâ kopyalanıyor. Kopyalama bitince yeniden adlandırın.", "This item is still being copied. Rename it when the copy is done."),
     ("Otomatik: Windows Terminal, yoksa PowerShell", "Automatic: Windows Terminal, else PowerShell"),
     ("Ayarları dışa aktar", "Export settings"),
     ("Ayarları içe aktar", "Import settings"),

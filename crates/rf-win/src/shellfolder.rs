@@ -393,6 +393,9 @@ mod tests {
     /// phone's. Lists it, copies an item out with the shell's engine, opens nothing.
     #[test]
     fn items_without_a_path_copy_out() {
+        if crate::engine_guard::not_run_without_shell("items_without_a_path_copy_out") {
+            return;
+        }
         let dir = std::env::temp_dir().join(format!("rf-shellfolder-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("src")).unwrap();

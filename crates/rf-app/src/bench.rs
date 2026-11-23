@@ -548,6 +548,10 @@ mod tests {
     /// our engine and with Windows' (in this process), both measured.
     #[test]
     fn engine_comparison_reports_cpu_and_memory() {
+        // (Windows' engine is one of the two compared)
+        if rf_win::engine_guard::not_run_without_shell("engine_comparison_reports_cpu_and_memory") {
+            return;
+        }
         let root = std::env::temp_dir().join(format!("rf-bench-cost-{}", std::process::id()));
         let src = root.join("src");
         std::fs::create_dir_all(&src).unwrap();
