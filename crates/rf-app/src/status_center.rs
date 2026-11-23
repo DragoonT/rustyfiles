@@ -885,7 +885,7 @@ fn transfer_inner(
     // engine, issue 223); a move deletes the local items once they are all up
     if rf_win::ftp::is_ftp(&dest) {
         let url = dest.to_string_lossy().replace('\\', "/");
-        let title = format!("{}: {} → {}", t!("Kopyalanıyor"), crate::i18n::items(sources.len()), short(&dest));
+        let title = format!("{}: {} → {}", t!("Kopyalanıyor"), named(&sources), short(&dest));
         let on_done: Option<OnDone> = after.map(|f| -> OnDone { Box::new(move |_, cx: &mut App| f(Vec::new(), cx)) });
         start_with(
             cx,
@@ -907,7 +907,7 @@ fn transfer_inner(
         Transfer::Copy => t!("Kopyalanıyor"),
         Transfer::Move => t!("Taşınıyor"),
     };
-    let title = format!("{verb}: {} → {}", crate::i18n::items(sources.len()), short(&dest));
+    let title = format!("{verb}: {} → {}", named(&sources), short(&dest));
     let s = cx.global::<crate::settings::Settings>();
     let (fast, verify, limit) = (s.fast_file_ops, s.copy_verify.engine(), u64::from(s.copy_speed_limit) << 20);
     rf_win::fastcopy::DROP_WSL_ZONE.store(s.wsl_drop_zone, std::sync::atomic::Ordering::Relaxed);
@@ -920,7 +920,7 @@ fn transfer_inner(
         Transfer::Copy => t!("{items} kopyalanıyor: {dest}"),
         Transfer::Move => t!("{items} taşınıyor: {dest}"),
     }
-    .replace("{items}", &crate::i18n::items(sources.len()))
+    .replace("{items}", &named(&sources))
     .replace("{dest}", &short(&dest));
     let open_dest = dest.clone();
     let mark = Arc::new(std::sync::Mutex::new(None::<std::path::PathBuf>));
@@ -996,7 +996,7 @@ fn ask_resume(job: rf_win::fastcopy::Interrupted, window: &mut gpui_kit::Window,
         Transfer::Copy => t!("Yarıda kalan bir kopyalama var"),
         Transfer::Move => t!("Yarıda kalan bir taşıma var"),
     };
-    let what = format!("{} → {}", crate::i18n::items(job.sources.len()), short(&job.dest));
+    let what = format!("{} → {}", named(&job.sources), short(&job.dest));
     let msg = format!(
         "{what}\n{} / {} {}\n\n{}",
         job.done.min(job.files),
@@ -1034,7 +1034,7 @@ pub fn resume_job(cx: &mut App, job: rf_win::fastcopy::Interrupted) {
         Transfer::Copy => t!("Kopyalanıyor"),
         Transfer::Move => t!("Taşınıyor"),
     };
-    let title = format!("{verb}: {} → {}", crate::i18n::items(job.sources.len()), short(&job.dest));
+    let title = format!("{verb}: {} → {}", named(&job.sources), short(&job.dest));
     let limit = u64::from(cx.global::<crate::settings::Settings>().copy_speed_limit) << 20;
     start(cx, title, move |t| {
         t.limit.store(limit, Ordering::Relaxed);
@@ -1201,7 +1201,7 @@ fn extract_now(cx: &mut App, archive: std::path::PathBuf, to: ExtractTo) {
 
 /// Creates an archive with options: a password, a 7z dictionary size, parts of a given size.
 pub fn compress_opts(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, format: rf_archive::Format, level: u32, opts: rf_archive::CompressOptions) {
-    let title = format!("{} {} → {}", t!("Sıkıştırılıyor:"), crate::i18n::items(sources.len()), short(&dest));
+    let title = format!("{} {} → {}", t!("Sıkıştırılıyor:"), named(&sources), short(&dest));
     start(cx, title, move |t| {
         let cancel = t.cancel.clone();
         let mut prog = archive_progress(&t);
@@ -1215,7 +1215,7 @@ pub fn compress_opts(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std::
 
 /// RAR through WinRAR's Rar.exe (`level` 0…9).
 pub fn compress_rar(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, level: u32, password: Option<String>) {
-    let title = format!("{} {} → {}", t!("Sıkıştırılıyor:"), crate::i18n::items(sources.len()), short(&dest));
+    let title = format!("{} {} → {}", t!("Sıkıştırılıyor:"), named(&sources), short(&dest));
     start(cx, title, move |t| {
         let cancel = t.cancel.clone();
         let mut prog = archive_progress(&t);
@@ -1233,7 +1233,7 @@ pub fn compress(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std::path:
 
 /// `level`: 0 store … 9 smallest.
 pub fn compress_level(cx: &mut App, sources: Vec<std::path::PathBuf>, dest: std::path::PathBuf, format: rf_archive::Format, level: u32) {
-    let title = format!("{} {} → {}", t!("Sıkıştırılıyor:"), crate::i18n::items(sources.len()), short(&dest));
+    let title = format!("{} {} → {}", t!("Sıkıştırılıyor:"), named(&sources), short(&dest));
     start(cx, title, move |t| {
         let cancel = t.cancel.clone();
         let mut prog = archive_progress(&t);
@@ -1252,12 +1252,35 @@ fn is_shell_name(p: &std::path::Path) -> bool {
 
 /// Items of a shell folder (a phone's) deleted for good by Windows' engine (the device has no recycle bin), then `after`.
 pub fn delete_in_shell(cx: &mut App, paths: Vec<std::path::PathBuf>, after: impl FnOnce(&mut App) + 'static) {
-    let title = format!("{} {}", t!("Kalıcı olarak siliniyor:"), crate::i18n::items(paths.len()));
+    let title = format!("{} {}", t!("Kalıcı olarak siliniyor:"), named(&paths));
     start_with_id(cx, title, move |t| fileops::delete_tracked(&paths, true, t), Some(Box::new(move |_, cx| after(cx))));
 }
 
 pub fn delete(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool) {
     delete_ex(cx, paths, permanent, true)
+}
+
+/// What an operation works on, by name: the one item's name, or the first item's name and how many more ("photo1.jpg + 4 more").
+/// The cards said "1 item" or "5 items", which did not tell one running operation from another, nor what had just been deleted
+/// (issue 296). A long name is cut in its middle, so that its beginning and its extension stay.
+fn named(paths: &[std::path::PathBuf]) -> String {
+    let Some(first) = paths.first() else { return crate::i18n::items(0) };
+    let name = short_name(&rf_core::history::display_name(first), 44);
+    match paths.len() - 1 {
+        0 => name,
+        more => t!("{name} ve {n} öğe daha").replace("{name}", &name).replace("{n}", &more.to_string()),
+    }
+}
+
+/// `name` in at most `most` characters: its beginning, an ellipsis, its end.
+fn short_name(name: &str, most: usize) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    if chars.len() <= most {
+        return name.to_string();
+    }
+    let tail = most / 3;
+    let head = most - tail - 1;
+    chars[..head].iter().chain(std::iter::once(&'…')).chain(chars[chars.len() - tail..].iter()).collect()
 }
 
 pub fn delete_ex(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, record: bool) {
@@ -1275,9 +1298,9 @@ fn delete_inner(cx: &mut App, paths: Vec<std::path::PathBuf>, permanent: bool, r
         crate::places::pins_follow(cx, p, None);
     }
     let title = if permanent {
-        format!("{} {}", t!("Kalıcı olarak siliniyor:"), crate::i18n::items(paths.len()))
+        format!("{} {}", t!("Kalıcı olarak siliniyor:"), named(&paths))
     } else {
-        format!("{} {}", t!("Geri dönüşüm kutusuna taşınıyor:"), crate::i18n::items(paths.len()))
+        format!("{} {}", t!("Geri dönüşüm kutusuna taşınıyor:"), named(&paths))
     };
     let fast = cx.global::<crate::settings::Settings>().fast_file_ops;
     let mark = Arc::new(std::sync::Mutex::new(None::<std::path::PathBuf>));
@@ -1665,6 +1688,19 @@ mod tests {
     use rf_core::transfer::{self as xfer, Stage};
     use rf_win::fastcopy::Resolve;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn an_operation_is_named_by_its_item_and_a_long_name_keeps_both_ends() {
+        use std::path::PathBuf;
+        assert_eq!(super::named(&[PathBuf::from("C:/x/archive.zip")]), "archive.zip");
+        let five: Vec<PathBuf> = (1..=5).map(|i| PathBuf::from(format!("C:/x/photo{i}.jpg"))).collect();
+        let said = super::named(&five);
+        assert!(said.starts_with("photo1.jpg") && said.contains('4'), "{said}");
+        let long = super::short_name("a-very-long-name-that-goes-on-and-on-and-on-for-ever-and-a-day.tar.gz", 44);
+        assert_eq!(long.chars().count(), 44);
+        assert!(long.starts_with("a-very-long-name") && long.ends_with(".tar.gz") && long.contains('…'), "{long}");
+        assert_eq!(super::short_name("kısa.txt", 44), "kısa.txt");
+    }
 
     #[test]
     fn an_item_a_running_copy_makes_is_still_arriving_and_older_ones_are_not() {
