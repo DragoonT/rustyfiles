@@ -129,6 +129,42 @@ impl Archive {
     pub fn needs_password(&self) -> bool {
         self.password.is_none() && rf_archive::needs_password(&self.path).unwrap_or(false)
     }
+
+    /// Whether files can be added, deleted and renamed inside it: ZIP, 7z and the tar family,
+    /// not RAR, ISO or split archives (rf_archive::edit).
+    pub fn is_editable(&self) -> bool {
+        rf_archive::is_editable(&self.path)
+    }
+
+    /// Adds files and folders from the disk into the folder `inner_dir` ("" for the top); a
+    /// name that is taken there becomes "name (2)". Rewrites the archive: blocks, call it off
+    /// the main thread. Returns how many files went in.
+    pub fn add(&self, sources: Vec<String>, inner_dir: String) -> Result<u64, ArchiveError> {
+        let sources: Vec<PathBuf> = sources.into_iter().map(PathBuf::from).collect();
+        let stats = rf_archive::add(&self.path, &sources, &norm(&inner_dir), &self.options(), &mut |_| {}, &|| false)
+            .map_err(ArchiveError::from_anyhow)?;
+        Ok(stats.added_files)
+    }
+
+    /// Takes these members out (a folder takes everything under it). Blocks.
+    pub fn delete(&self, inner_paths: Vec<String>) -> Result<u64, ArchiveError> {
+        let stats = rf_archive::delete(&self.path, &inner_paths, &self.options(), &mut |_| {}, &|| false)
+            .map_err(ArchiveError::from_anyhow)?;
+        Ok(stats.removed)
+    }
+
+    /// Gives the member at `from` the name `to_name` (its last part only). Blocks.
+    pub fn rename(&self, from: String, to_name: String) -> Result<(), ArchiveError> {
+        rf_archive::rename(&self.path, &from, &to_name, &self.options(), &mut |_| {}, &|| false)
+            .map(|_| ())
+            .map_err(ArchiveError::from_anyhow)
+    }
+}
+
+impl Archive {
+    fn options(&self) -> rf_archive::Options {
+        rf_archive::Options { password: self.password.clone(), only: Vec::new() }
+    }
 }
 
 /// Where "Extract here" writes for `archive` inside `into`, as on Windows: an archive whose
@@ -146,6 +182,38 @@ pub fn smart_extract_target(archive: String, into: String) -> Vec<String> {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn files_are_added_renamed_and_deleted_inside_a_zip() {
+        let d = std::env::temp_dir().join(format!("rf-mac-zip-edit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let zip_path = d.join("e.zip");
+        {
+            let mut z = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+            z.start_file("keep.txt", zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(b"keep").unwrap();
+            z.finish().unwrap();
+        }
+        let new = d.join("new.txt");
+        std::fs::write(&new, b"new").unwrap();
+        let names = |a: &Archive, dir: &str| -> Vec<String> {
+            let f = a.folder(dir.into(), SortColumn::Name, true, true, false).unwrap();
+            (0..f.count()).map(|r| f.item(r).unwrap().name).collect()
+        };
+        let a = Archive::open(zip_path.display().to_string(), None).unwrap();
+        assert!(a.is_editable());
+        assert_eq!(a.add(vec![new.display().to_string()], "docs".into()).unwrap(), 1);
+        let a = Archive::open(zip_path.display().to_string(), None).unwrap();
+        assert_eq!(names(&a, "docs"), ["new.txt"]);
+        a.rename("docs/new.txt".into(), "renamed.txt".into()).unwrap();
+        let a = Archive::open(zip_path.display().to_string(), None).unwrap();
+        assert_eq!(names(&a, "docs"), ["renamed.txt"]);
+        assert!(a.delete(vec!["keep.txt".into()]).unwrap() >= 1);
+        let a = Archive::open(zip_path.display().to_string(), None).unwrap();
+        assert_eq!(names(&a, ""), ["docs"]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn a_zip_is_browsed_like_folders() {

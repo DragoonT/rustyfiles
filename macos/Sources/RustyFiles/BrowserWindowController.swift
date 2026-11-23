@@ -1240,7 +1240,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(openSelection(_:)), #selector(cut(_:)), #selector(BrowserWindowController.copy(_:) as (BrowserWindowController) -> (Any?) -> Void), #selector(moveToTrash(_:)),
             #selector(toggleQuickLook(_:)):
             return selected
-        case #selector(rename(_:)): return !list.selectedNames.isEmpty && list.archiveIsNil
+        case #selector(rename(_:)): return !list.selectedNames.isEmpty && (list.archiveIsNil || list.archiveEditable)
         case #selector(addToShelf(_:)): return selected && list.archiveIsNil
         case #selector(toggleDualPane(_:)):
             item.state = dual ? .on : .off
@@ -1248,7 +1248,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(toggleShelf(_:)):
             item.title = list.shelfShown ? String(localized: "Hide Shelf") : String(localized: "Show Shelf")
             return true
-        case #selector(paste(_:)): return FileListController.canPaste && list.folder != nil && list.archiveIsNil
+        case #selector(paste(_:)): return list.folder != nil && (list.archiveIsNil ? FileListController.canPaste : list.archiveEditable && Clipboard.hasFiles)
         case #selector(duplicate(_:)): return selected && list.archiveIsNil && list.url?.isFileURL == true
         case #selector(copyToOtherPane(_:)), #selector(moveToOtherPane(_:)): return dual && selected && list.archiveIsNil && otherPaneURL != nil
         case #selector(switchPane(_:)): return dual

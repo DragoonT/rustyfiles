@@ -908,14 +908,14 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     func updateCommands() {
         let any = !selectedRows.isEmpty && folder != nil
         // an archive is read only here: what is in it can be opened, copied and extracted
-        let writable = folder != nil && archive == nil
+        let writable = folder != nil && (archive == nil || archiveEditable)
         let here = writable && !isGathered
         commandBar.cut.isEnabled = any && writable
         commandBar.copy.isEnabled = any
         commandBar.rename.isEnabled = selectedRows.count == 1 && writable
         commandBar.share.isEnabled = any && writable
         commandBar.delete.isEnabled = any && writable
-        commandBar.paste.isEnabled = here && Self.canPaste
+        commandBar.paste.isEnabled = archive != nil ? archiveEditable && Clipboard.hasFiles : here && Self.canPaste
         let inTrash = TrashBin.contains(url) && archive == nil
         commandBar.trashMode = inTrash
         commandBar.new.isEnabled = inTrash ? (folder?.count() ?? 0) > 0 : here
@@ -1060,6 +1060,12 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     /// Pastes here, or into `target` (a folder that was right-clicked).
     func pasteItems(into target: URL? = nil) {
         guard let dest = target ?? url else { return }
+        if archive != nil {
+            // into the archive: a copy of the files on the clipboard (a cut stays where it is)
+            let pb = NSPasteboard.general
+            if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] { addToArchive(urls) }
+            return
+        }
         guard let (urls, move) = Clipboard.take() else { return pasteAsFile(into: dest) }
         transfer(urls, into: dest, kind: move ? .move : .copy, selectHere: target == nil)
     }
@@ -1120,6 +1126,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     }
 
     func trashSelected() {
+        if archive != nil { return deleteFromArchive() }
         let urls = selectedURLs
         guard !urls.isEmpty else { return }
         // in the Trash, "delete" is for good, asked first
@@ -1247,6 +1254,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     func beginRename() {
         // several items: the bulk rename (bulk_rename.rs), as F2 does on Windows
         if selectedRows.count > 1, archive == nil { return bulkRename() }
+        if archive != nil, !archiveEditable { return }
         guard let folder, selectedRows.count == 1, let row = selectedRows.first,
             let item = folder.item(row: UInt32(row))
         else { return }
@@ -1279,6 +1287,11 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         focus()
         guard commit, !newName.isEmpty, newName != original, let url else {
             field.stringValue = display.name(original: original)
+            return
+        }
+        if archive != nil {
+            let from = memberPath(original)
+            editArchive { try $0.rename(from: from, toName: newName) }
             return
         }
         let from = folder?.childPath(row: UInt32(row)).map(URL.init(fileURLWithPath:)) ?? url.appendingPathComponent(original)
@@ -1406,6 +1419,48 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     // MARK: context menus (ctx_menu.rs)
 
     var archiveIsNil: Bool { archive == nil }
+
+    // MARK: editing inside an archive (rf_archive::edit: ZIP, 7z, the tar family)
+
+    /// Files can be added, deleted and renamed in the archive shown.
+    var archiveEditable: Bool { archive?.archive.isEditable() ?? false }
+
+    /// A member's path inside the archive, for a name in the folder shown.
+    private func memberPath(_ name: String) -> String {
+        guard let inner = archive?.place.inner, !inner.isEmpty else { return name }
+        return inner + "/" + name
+    }
+
+    /// Rewrites the archive off the main thread, then lists it again.
+    private func editArchive(_ work: @escaping @Sendable (Archive) throws -> Void) {
+        guard let a = archive?.archive else { return }
+        run { try work(a) } done: { [weak self] _ in self?.onRefresh?() }
+    }
+
+    /// Files from the disk into the folder shown in the archive (paste, a drop, "Add files…").
+    func addToArchive(_ urls: [URL]) {
+        guard archiveEditable, !urls.isEmpty, let inner = archive?.place.inner else { return }
+        let paths = urls.map(\.path)
+        editArchive { _ = try $0.add(sources: paths, innerDir: inner) }
+    }
+
+    /// The selected members taken out of the archive, asked first (it cannot be undone).
+    func deleteFromArchive() {
+        guard archiveEditable, let folder else { return }
+        let names = selectedRows.compactMap { folder.item(row: UInt32($0))?.name }
+        guard !names.isEmpty else { return }
+        let alert = NSAlert()
+        alert.messageText = names.count == 1
+            ? String(localized: "Delete “\(names[0])” from the archive?")
+            : String(localized: "Delete \(names.count) items from the archive?")
+        alert.informativeText = String(localized: "This can't be undone.")
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: String(localized: "Delete"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let members = names.map(memberPath)
+        editArchive { _ = try $0.delete(innerPaths: members) }
+    }
     /// A gathered listing (a tag's files): its items are real, but there is no folder to put
     /// new things in.
     var isGathered: Bool { url.map { !$0.isFileURL } ?? false }
@@ -1771,9 +1826,23 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             b.add(String(localized: "Extract to…"), "folder-search") { [weak self] in
                 self?.chooseAndExtract { self?.extractArchive(archive, to: $0, onlySelected: true) }
             }
+            if archiveEditable {
+                b.separator()
+                b.add(String(localized: "Rename"), "text-cursor-input", key: "\u{F705}", mods: []) { [weak self] in self?.beginRename() }
+                b.add(String(localized: "Delete from archive"), "trash") { [weak self] in self?.deleteFromArchive() }
+            }
         } else {
             b.add(String(localized: "Extract all to…"), "folder-search") { [weak self] in
                 self?.chooseAndExtract { self?.extractArchive(archive, to: $0, onlySelected: false) }
+            }
+            if archiveEditable {
+                b.add(String(localized: "Add files…"), "file-plus") { [weak self] in
+                    let panel = NSOpenPanel()
+                    panel.canChooseDirectories = true
+                    panel.allowsMultipleSelection = true
+                    if panel.runModal() == .OK { self?.addToArchive(panel.urls) }
+                }
+                b.add(String(localized: "Paste (⌘V)"), "clipboard-paste", enabled: Clipboard.hasFiles) { [weak self] in self?.pasteItems() }
             }
             b.add(String(localized: "Refresh"), "rotate-cw", key: "r") { [weak self] in self?.onRefresh?() }
         }
@@ -2235,6 +2304,11 @@ extension FileListController {
     }
 
     fileprivate func validate(_ info: NSDraggingInfo, into dest: URL?) -> NSDragOperation {
+        // files dropped on an archive that can be edited go into the folder shown in it
+        if archive != nil {
+            let fromHere = info.draggingSource as AnyObject? === table || info.draggingSource as AnyObject? === tiles
+            return archiveEditable && !fromHere && !Self.droppedURLs(info).isEmpty ? .copy : []
+        }
         guard let dest else { return [] }
         let urls = Self.droppedURLs(info)
         // nothing into itself, nothing back where it already is
@@ -2247,6 +2321,12 @@ extension FileListController {
     }
 
     fileprivate func accept(_ info: NSDraggingInfo, into dest: URL?) -> Bool {
+        if archive != nil {
+            let urls = Self.droppedURLs(info).filter { !$0.path.hasPrefix(archive?.place.archive.path ?? "\u{0}") }
+            guard archiveEditable, !urls.isEmpty, info.draggingSource as AnyObject? !== table, info.draggingSource as AnyObject? !== tiles else { return false }
+            addToArchive(urls)
+            return true
+        }
         guard let dest, validate(info, into: dest) != [] else { return false }
         let urls = Self.droppedURLs(info)
         transfer(urls, into: dest, kind: Self.dropKind(info, urls, into: dest), selectHere: dest == url)

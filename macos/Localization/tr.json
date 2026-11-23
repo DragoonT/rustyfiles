@@ -825,5 +825,10 @@
 "This window's tabs are saved under this name; Open session in the tab menu opens them in a new window.": "Bu penceredeki sekmeler bu adla kaydedilir; sekme menüsündeki Oturum aç ile yeni bir pencerede açılır.",
 "Session %@": "Oturum %@",
 "Open saved sessions in this window": "Kayıtlı oturumlar bu pencerede açılsın",
-"A session opened from the tab menu replaces this window's tabs instead of opening a new window (the closed tabs come back with ⇧⌘T).": "Sekme menüsünden açılan oturum, yeni pencere yerine bu penceredeki sekmelerin yerini alır (kapanan sekmeler ⇧⌘T ile geri gelir)."
+"A session opened from the tab menu replaces this window's tabs instead of opening a new window (the closed tabs come back with ⇧⌘T).": "Sekme menüsünden açılan oturum, yeni pencere yerine bu penceredeki sekmelerin yerini alır (kapanan sekmeler ⇧⌘T ile geri gelir).",
+"Delete “%@” from the archive?": "“%@” arşivden silinsin mi?",
+"Delete %lld items from the archive?": "%lld öğe arşivden silinsin mi?",
+"This can't be undone.": "Bu geri alınamaz.",
+"Delete from archive": "Arşivden sil",
+"Add files…": "Dosya ekle…"
 }
