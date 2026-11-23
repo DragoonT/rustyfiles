@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setShowSystemFiles(show: AppSettings.showSystemFiles)
         Updater.start()
+        GlobalHotKey.apply()
+        MountWatcher.start()
         // Sizes and dates in rf-core's English wording until the interface is translated.
         // sizes and dates speak the interface's language ("bayt", decimal comma)
         setEnglish(on: !AppSettings.speaksTurkish)
@@ -222,6 +224,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ones that are gone are passed over
         var target: BrowserWindowController?
         for url in urls {
+            if SmartFolder.isSmartFolder(url) {
+                openWindow(at: SmartFolder.url(url))
+                continue
+            }
             var isDir: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
             let asFolder = isDir.boolValue || (isArchive(path: url.path) && AppSettings.archivesAsFolders)

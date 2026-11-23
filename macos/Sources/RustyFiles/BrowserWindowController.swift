@@ -34,6 +34,8 @@ final class BrowserTab {
     var isPage: Bool { isSettings || isHome || diskRoot != nil }
     /// A tag's results (rustyfiles:tag/<name>): the files that have it, from anywhere.
     var tagName: String? { TagStore.name(of: url) }
+    /// A Finder smart folder shown here (rustyfiles:smart/<file>).
+    var smartFolder: URL? { SmartFolder.file(of: url) }
 
     /// A search (rustyfiles:search?root=…&q=…, Location::Search on Windows): names matching
     /// `query` in `root` and every folder under it.
@@ -72,6 +74,7 @@ final class BrowserTab {
         if isSettings { return TabInfo(title: String(localized: "Settings"), icon: "settings") }
         if isHome { return TabInfo(title: String(localized: "Home"), icon: "house") }
         if let tag = tagName { return TabInfo(title: tag, icon: "tag") }
+        if let s = smartFolder { return TabInfo(title: s.deletingPathExtension().lastPathComponent, icon: "folder-search") }
         if let s = searchSpec { return TabInfo(title: "“\(s.query)”", icon: "search") }
         if let r = diskRoot { return TabInfo(title: String(localized: "Disk usage — \(FileManager.default.displayName(atPath: r.path))"), icon: "chart-pie") }
         let fm = FileManager.default
@@ -838,7 +841,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
             }
             let began = Date()
             let result: Result<Folder, Error>
-            if let tag = TagStore.name(of: url) {
+            if let smart = SmartFolder.file(of: url) {
+                let paths = SmartFolder.results(smart)
+                result = .success(Folder.gathered(label: url.absoluteString, paths: paths, column: column, ascending: ascending, foldersFirst: first, showHidden: hidden))
+            } else if let tag = TagStore.name(of: url) {
                 let paths = TagStore.files(tagged: tag)
                 result = .success(Folder.gathered(label: url.absoluteString, paths: paths, column: column, ascending: ascending, foldersFirst: first, showHidden: hidden))
             } else {
@@ -1024,13 +1030,15 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     private func updateChrome() {
         navBar.back.isEnabled = !tab.back.isEmpty
         navBar.forward.isEnabled = !tab.forward.isEmpty
-        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.tagName != nil || tab.searchSpec != nil || tab.diskRoot != nil || tab.url.path != "/")
+        navBar.up.isEnabled = !tab.isHome && (tab.isSettings || tab.tagName != nil || tab.smartFolder != nil || tab.searchSpec != nil || tab.diskRoot != nil || tab.url.path != "/")
         if tab.isSettings {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Settings"), url: BrowserTab.settingsURL)]
         } else if tab.isHome {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Home"), url: BrowserTab.homeURL)]
         } else if let tag = tab.tagName {
             navBar.omnibar.breadcrumb.segments = [BreadcrumbView.Segment(title: String(localized: "Tags"), url: BrowserTab.homeURL), BreadcrumbView.Segment(title: tag, url: tab.url)]
+        } else if let s = tab.smartFolder {
+            navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: s.deletingLastPathComponent()) + [BreadcrumbView.Segment(title: s.deletingPathExtension().lastPathComponent, url: tab.url)]
         } else if let r = tab.diskRoot {
             navBar.omnibar.breadcrumb.segments = BreadcrumbView.segments(for: r) + [BreadcrumbView.Segment(title: String(localized: "Disk usage"), url: tab.url)]
         } else if let s = tab.searchSpec {
@@ -1108,6 +1116,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         if tab.isSettings { return goHome(sender) }
         if tab.isHome { return }
         if tab.tagName != nil { return goHome(sender) }
+        if let s = tab.smartFolder { return navigate(to: s.deletingLastPathComponent(), selecting: s.lastPathComponent) }
         // a search goes up to the folder it searched
         if let s = tab.searchSpec { return navigate(to: s.root) }
         if let r = tab.diskRoot { return navigate(to: r) }

@@ -288,6 +288,16 @@ extension SettingsContent {
                     ? [(String(localized: "Give it back to Finder"), { DefaultFileManager.giveBack() })]
                     : [(String(localized: "Make rustyfiles the default"), { DefaultFileManager.claim() })])),
             .card(
+                title: String(localized: "Shortcut that opens rustyfiles from any app"),
+                detail: String(localized: "Like Win+E on Windows: a new window at Home, whatever app is in front."), icon: "keyboard",
+                control: .choice(
+                    options: [("", String(localized: "None"))] + GlobalHotKey.choices.map { ($0.id, $0.title) },
+                    get: { AppSettings.globalHotKey }, set: { AppSettings.globalHotKey = $0 })),
+            .card(
+                title: String(localized: "Open disks when they're connected"),
+                detail: String(localized: "A USB stick, a card or a disk image opens in a tab, as Finder does."), icon: "hard-drive",
+                control: .toggle(get: { AppSettings.openMountedDisks }, set: { AppSettings.openMountedDisks = $0 })),
+            .card(
                 title: String(localized: "Open archives with rustyfiles"),
                 detail: String(localized: "ZIP, 7z and RAR files opened from Finder or other apps open here, like folders."), icon: "archive",
                 control: .buttons([(String(localized: "Make rustyfiles the default"), { ArchiveDefaults.claim() })])),
@@ -378,6 +388,10 @@ enum DefaultFileManager {
 
     static func claim() {
         defaults(["write", "-g", "NSFileViewer", "-string", id])
+        // the file manager is always there: it starts at login and stays when its windows close
+        AppSettings.keepRunning = true
+        if SMAppService.mainApp.status != .enabled { try? SMAppService.mainApp.register() }
+        if UserDefaults.standard.object(forKey: "openMountedDisks") == nil { AppSettings.openMountedDisks = true }
         NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpen: .folder) { error in
             if let error { Log.write("default folder app: \(error.localizedDescription)") }
             DispatchQueue.main.async { MainActor.assumeIsolated { changed() } }

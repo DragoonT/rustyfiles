@@ -1412,6 +1412,11 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         for row in rows {
             guard let item = folder.item(row: UInt32(row)), let path = folder.childPath(row: UInt32(row)) else { continue }
             let u = URL(fileURLWithPath: path)
+            // a Finder smart folder opens as its results, like a folder
+            if archive == nil, rows.count == 1, SmartFolder.isSmartFolder(u) {
+                onOpenFolder?(SmartFolder.url(u))
+                continue
+            }
             if item.isDir && !display.isPackage(item) {
                 if rows.count == 1 { (AppSettings.foldersInNewTab && archive == nil ? onOpenInNewTab : onOpenFolder)?(u) }
             } else if archive == nil && rows.count == 1 && AppSettings.archivesAsFolders && isArchive(path: path) {
