@@ -7,7 +7,9 @@
 #      rustyfiles-osx-Portable.zip;
 #   4. make-dmg.sh: that app in rustyfiles-mac-arm64.dmg, signed and notarized too.
 # Upload afterwards, once the Windows workflow has made the release:
-#   gh release upload vX.Y.Z build/Releases/* build/rustyfiles-mac-arm64.dmg
+#   cd build/Releases && gh release upload vX.Y.Z rustyfiles-X.Y.Z-osx-*.nupkg releases.osx.json \
+#       assets.osx.json RELEASES-osx rustyfiles-osx-Portable.zip ../rustyfiles-mac-arm64.dmg
+# (not the previous version's full package, which vpk download fetched to make the delta)
 # Needs vpk 1.2.161, the version release.yml uses: dotnet tool install -g vpk --version 1.2.161
 set -eu
 cd "$(dirname "$0")/.."
