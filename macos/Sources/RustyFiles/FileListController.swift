@@ -88,6 +88,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var foldedRows: Set<Int> = []
     private var isFolded = false
     private var pinch: CGFloat = 0
+    private var hoverAnchor: Int?
     /// Each row's group header, for the first row of every group (details only).
     private var groupTitles: [Int: String] = [:]
     /// Tags and Git states of the folder shown, by name (filled when their columns are on).
@@ -1179,6 +1180,23 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         guard n != size else { return }
         UserDefaults.standard.set(n, forKey: "tileSize")
         tileSizeChanged()
+    }
+
+    /// Settings › Select on hover: the row the pointer rested on is selected; with ⌘ held it
+    /// joins the selection, with ⇧ the selection runs from the last one to it (Explorer's
+    /// "point to select", Windows issue 101).
+    func hoverSelect(_ row: Int) {
+        guard !foldedRows.contains(row), !selectedRows.contains(row) else { return }
+        let mods = NSEvent.modifierFlags
+        var rows = IndexSet(integer: row)
+        if mods.contains(.shift), let anchor = hoverAnchor ?? selectedRows.first {
+            rows = IndexSet(integersIn: min(anchor, row)...max(anchor, row))
+        } else if mods.contains(.command) {
+            rows = IndexSet(selectedRows).union(rows)
+        }
+        if !mods.contains(.shift) { hoverAnchor = row }
+        selectRows(rows, scrollToFirst: false)
+        selectionChanged()
     }
 
     /// A pinch on the trackpad zooms one step each time it has opened or closed far enough.

@@ -214,6 +214,32 @@ final class TileCollectionView: NSCollectionView, NSServicesMenuRequestor {
     weak var list: FileListController?
 
     override func magnify(with event: NSEvent) { list?.pinched(event) }
+
+    // Settings › Select on hover, in the grid too: resting on a tile for half a second selects it
+    private var hoverTimer: Timer?
+    private var hoverPath: IndexPath?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.filter { $0.owner === self }.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        guard AppSettings.selectOnHover else { return }
+        let at = indexPathForItem(at: convert(event.locationInWindow, from: nil))
+        guard at != hoverPath else { return }
+        hoverPath = at
+        hoverTimer?.invalidate()
+        guard let at else { return }
+        hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.hoverPath == at, NSEvent.pressedMouseButtons == 0, let list = self.list else { return }
+                list.hoverSelect(list.gridRow(at))
+            }
+        }
+    }
     override func scrollWheel(with event: NSEvent) {
         if list?.commandScrolled(event) != true { super.scrollWheel(with: event) }
     }

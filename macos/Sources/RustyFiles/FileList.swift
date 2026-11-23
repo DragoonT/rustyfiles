@@ -536,9 +536,8 @@ final class FileTableView: NSTableView, NSServicesMenuRequestor {
         guard AppSettings.selectOnHover, r >= 0 else { return }
         hoverTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, self.hoveredRow == r, NSEvent.pressedMouseButtons == 0, !self.selectedRowIndexes.contains(r) else { return }
-                let extend = NSEvent.modifierFlags.contains(.command)
-                self.selectRowIndexes([r], byExtendingSelection: extend)
+                guard let self, self.hoveredRow == r, NSEvent.pressedMouseButtons == 0 else { return }
+                self.list?.hoverSelect(r)
             }
         }
     }
