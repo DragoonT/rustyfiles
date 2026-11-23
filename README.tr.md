@@ -488,6 +488,7 @@ Hata raporları ve pull request'ler memnuniyetle karşılanır.
 ## Listelendiği yerler
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), Dosya Gezgini'ne alternatif olarak
+- [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), "File manager" bölümünde
 - [Scoop](https://scoop.sh), kendi bucket'ından ([Kurulum](#kurulum) bölümüne bak)
 
 ## Teşekkürler

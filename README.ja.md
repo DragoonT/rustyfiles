@@ -353,6 +353,7 @@ rustyfiles はまだ若く、作者は毎日エクスプローラーの代わり
 ## 掲載先
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/)：エクスプローラーの代替として
+- [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager)：「File manager」の項
 - [Scoop](https://scoop.sh)：専用の bucket から（[インストール](#インストール) を参照）
 
 ## 謝辞

@@ -481,6 +481,7 @@ Bug reports and pull requests are welcome.
 ## Listed on
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), as an alternative to File Explorer
+- [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), in the File manager section
 - [Scoop](https://scoop.sh), from its own bucket (see [Install](#install))
 
 ## Thanks

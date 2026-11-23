@@ -507,6 +507,7 @@ Los reportes de errores y los pull requests son bienvenidos.
 ## Aparece en
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), como alternativa al Explorador de archivos
+- [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), en la sección «File manager»
 - [Scoop](https://scoop.sh), desde su propio bucket (ver [Instalación](#instalación))
 
 ## Agradecimientos

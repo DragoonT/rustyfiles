@@ -353,6 +353,7 @@ rustyfiles 還很年輕，作者每天都用它來取代檔案總管。路線圖
 ## 收錄於
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/)，作為檔案總管的替代方案
+- [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager)，「File manager」一節
 - [Scoop](https://scoop.sh)，透過專屬的 bucket（見[安裝](#安裝)）
 
 ## 致謝

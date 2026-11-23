@@ -470,6 +470,7 @@ rustyfiles молод, а его автор пользуется им кажды
 ## Где найти
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/), как альтернатива Проводнику
+- [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager), в разделе «File manager»
 - [Scoop](https://scoop.sh), из собственного bucket (см. [Установка](#установка))
 
 ## Благодарности

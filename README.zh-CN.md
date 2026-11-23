@@ -353,6 +353,7 @@ rustyfiles 还很年轻，它的作者每天都用它来代替文件资源管理
 ## 收录于
 
 - [AlternativeTo](https://alternativeto.net/software/rustyfiles/about/)，作为文件资源管理器的替代品
+- [Awesome Rust](https://github.com/rust-unofficial/awesome-rust#file-manager)，“File manager”一节
 - [Scoop](https://scoop.sh)，通过自己的 bucket（见[安装](#安装)）
 
 ## 致谢
