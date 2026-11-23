@@ -15,6 +15,7 @@
 
 <p align="center">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="Son sürüm" src="https://img.shields.io/github/v/release/gelenmedya/rustyfiles?label=download&labelColor=232326&color=ff6a1a"></a>
+  <a href="https://github.com/gelenmedya/rustyfiles/releases"><img alt="İndirmeler" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgelenmedya%2Frustyfiles%2Fbadges%2Fdownloads.json"></a>
   <img alt="Windows 11, x64 ve ARM64" src="https://img.shields.io/badge/Windows_11-x64_%7C_ARM64-3d3d44?labelColor=232326">
   <a href="LICENSE"><img alt="MIT lisansı" src="https://img.shields.io/badge/license-MIT-3d3d44?labelColor=232326"></a>
 </p>

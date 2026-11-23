@@ -16,6 +16,7 @@
 
 <p align="center">
   <a href="https://github.com/gelenmedya/rustyfiles/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/gelenmedya/rustyfiles?label=download&labelColor=232326&color=ff6a1a"></a>
+  <a href="https://github.com/gelenmedya/rustyfiles/releases"><img alt="下载次数" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgelenmedya%2Frustyfiles%2Fbadges%2Fdownloads.json"></a>
   <img alt="Windows 11，x64 与 ARM64" src="https://img.shields.io/badge/Windows_11-x64_%7C_ARM64-3d3d44?labelColor=232326">
   <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-3d3d44?labelColor=232326"></a>
 </p>
