@@ -84,6 +84,7 @@ enum MainMenu {
         m.addItem(item(String(localized: "Copy"), #selector(W.copy(_:) as (W) -> (Any?) -> Void), "c"))
         m.addItem(item(String(localized: "Paste"), #selector(W.paste(_:)), "v"))
         m.addItem(item(String(localized: "Select All"), #selector(NSResponder.selectAll(_:)), "a"))
+        m.addItem(item(String(localized: "Duplicate"), #selector(W.duplicate(_:)), "d"))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Rename"), #selector(W.rename(_:)), key(NSF2FunctionKey), []))
         m.addItem(item(String(localized: "Move to Trash"), #selector(W.moveToTrash(_:)), key(NSBackspaceCharacter), .command))
@@ -122,6 +123,9 @@ enum MainMenu {
         m.addItem(item(String(localized: "Show Preview"), #selector(W.togglePreviewPane(_:)), "p", [.command, .shift]))
         m.addItem(item(String(localized: "Show Shelf"), #selector(W.toggleShelf(_:)), "s", [.command, .option]))
         m.addItem(item(String(localized: "Dual Pane"), #selector(W.toggleDualPane(_:)), "d", [.command, .option]))
+        m.addItem(item(String(localized: "Switch Pane"), #selector(W.switchPane(_:)), key(NSF6FunctionKey), []))
+        m.addItem(item(String(localized: "Copy to Other Pane"), #selector(W.copyToOtherPane(_:)), key(NSF5FunctionKey), .shift))
+        m.addItem(item(String(localized: "Move to Other Pane"), #selector(W.moveToOtherPane(_:)), key(NSF6FunctionKey), .shift))
         return m
     }
 

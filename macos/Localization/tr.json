@@ -811,5 +811,11 @@
 "What “Open in Terminal” opens the folder in.": "“Terminalde aç”ın klasörü açtığı program.",
 "Another terminal": "Başka bir terminal",
 "Compact window": "Kompakt pencere",
-"The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size.": "Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır."
+"The tabs, the address bar and the command bar are thinner, and the content reaches the window's right and bottom edges. Icons and text keep their size.": "Sekmeler, adres çubuğu ve komut çubuğu daha ince olur, içerik pencerenin sağına ve altına kadar uzanır. Simgeler ve yazılar aynı boyda kalır.",
+"Pasted picture": "Yapıştırılan resim",
+"Pasted text": "Yapıştırılan metin",
+"Duplicate": "Çoğalt",
+"Switch Pane": "Diğer Panele Geç",
+"Copy to Other Pane": "Diğer Panele Kopyala",
+"Move to Other Pane": "Diğer Panele Taşı"
 }

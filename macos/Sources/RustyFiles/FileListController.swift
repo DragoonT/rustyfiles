@@ -102,8 +102,61 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var onChange: (() -> Void)?
     var onError: ((String) -> Void)?
 
-    /// Sizes worked out with "Calculate size", kept for the session.
-    private static var folderSizes: [String: UInt64] = [:]
+    /// Sizes worked out with "Calculate size", remembered across starts as on Windows
+    /// (Application Support/rustyfiles/folder_sizes.json). A folder changed since (its own
+    /// modification date) is measured again when asked.
+    private static var folderSizes: [String: UInt64] = loadFolderSizes()
+    private static var folderStamps: [String: Double] = [:]
+    private static var savePending = false
+
+    private static var folderSizesFile: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("rustyfiles", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("folder_sizes.json")
+    }
+
+    private static func stamp(_ path: String) -> Double {
+        ((try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date)?.timeIntervalSince1970 ?? 0
+    }
+
+    private static func loadFolderSizes() -> [String: UInt64] {
+        guard let data = try? Data(contentsOf: folderSizesFile),
+            let saved = try? JSONDecoder().decode([String: [Double]].self, from: data)
+        else { return [:] }
+        var sizes: [String: UInt64] = [:]
+        for (k, v) in saved where v.count == 2 {
+            sizes[k] = UInt64(v[0])
+            folderStamps[k] = v[1]
+        }
+        return sizes
+    }
+
+    /// A remembered size, if the folder has not changed since it was measured.
+    private static func rememberedSize(_ key: String, path: String) -> UInt64? {
+        guard let size = folderSizes[key] else { return nil }
+        if let s = folderStamps[key], s != stamp(path) {
+            folderSizes[key] = nil
+            folderStamps[key] = nil
+            return nil
+        }
+        return size
+    }
+
+    private static func remember(_ key: String, path: String, size: UInt64) {
+        folderSizes[key] = size
+        folderStamps[key] = stamp(path)
+        guard !savePending else { return }
+        savePending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            MainActor.assumeIsolated {
+                savePending = false
+                // the newest 5000 are plenty
+                let all = folderSizes.compactMap { k, v in folderStamps[k].map { (k, [Double(v), $0]) } }
+                let kept = Dictionary(uniqueKeysWithValues: all.suffix(5000))
+                if let data = try? JSONEncoder().encode(kept) { try? data.write(to: folderSizesFile, options: .atomic) }
+            }
+        }
+    }
     private static var sizing: Set<String> = []
 
     override init() {
@@ -761,7 +814,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     var scrollY: CGFloat { (viewMode == .details ? scroll : tileScroll).contentView.bounds.origin.y }
 
-    func focus() { table.window?.makeFirstResponder(viewMode == .details ? table : tiles) }
+    func focus() { table.window?.makeFirstResponder(viewMode.isGrid ? tiles : table) }
 
     private func rearrange() {
         guard let folder else { return }
@@ -862,7 +915,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
         commandBar.rename.isEnabled = selectedRows.count == 1 && writable
         commandBar.share.isEnabled = any && writable
         commandBar.delete.isEnabled = any && writable
-        commandBar.paste.isEnabled = here && Clipboard.hasFiles
+        commandBar.paste.isEnabled = here && Self.canPaste
         let inTrash = TrashBin.contains(url) && archive == nil
         commandBar.trashMode = inTrash
         commandBar.new.isEnabled = inTrash ? (folder?.count() ?? 0) > 0 : here
@@ -1006,8 +1059,49 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     /// Pastes here, or into `target` (a folder that was right-clicked).
     func pasteItems(into target: URL? = nil) {
-        guard let dest = target ?? url, let (urls, move) = Clipboard.take() else { return }
+        guard let dest = target ?? url else { return }
+        guard let (urls, move) = Clipboard.take() else { return pasteAsFile(into: dest) }
         transfer(urls, into: dest, kind: move ? .move : .copy, selectHere: target == nil)
+    }
+
+    /// Text or a picture on the clipboard (no files): a new file with it, "Pasted text.txt"
+    /// or "Pasted picture.png", as on Windows; it is selected for renaming.
+    func pasteAsFile(into dest: URL) {
+        let pb = NSPasteboard.general
+        var data: Data?
+        var name = "", ext = ""
+        if let image = NSImage(pasteboard: pb), pb.availableType(from: [.png, .tiff]) != nil,
+            let tiff = image.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+        {
+            data = png
+            name = String(localized: "Pasted picture")
+            ext = "png"
+        } else if let text = pb.string(forType: .string), !text.isEmpty {
+            data = Data(text.utf8)
+            name = String(localized: "Pasted text")
+            ext = "txt"
+        }
+        guard let data else { return }
+        run { [name, ext] in
+            let target = FileOps.unique(name, ext: ext, in: dest)
+            try data.write(to: target, options: .withoutOverwriting)
+            return target
+        } done: { [weak self] made in
+            FileUndo.shared.record(.trash([made]), title: String(localized: "Paste"))
+            self?.reloadSelecting([made.lastPathComponent], rename: true)
+        }
+    }
+
+    /// Something to paste: files, or text or a picture to make a file of.
+    static var canPaste: Bool {
+        let pb = NSPasteboard.general
+        return Clipboard.hasFiles || pb.availableType(from: [.string, .png, .tiff]) != nil
+    }
+
+    /// File › Duplicate (⌘D): a copy of each selected item beside it, "name - Copy".
+    func duplicateSelected() {
+        guard let url, archive == nil, !selectedURLs.isEmpty else { return }
+        transfer(selectedURLs, into: url, kind: .copy, selectHere: true)
     }
 
     /// Copies or moves `urls` into `dest` with progress, conflicts asked, undo recorded.
@@ -1756,7 +1850,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             if item.isDir && archive != nil {
                 cell.text = ""
             } else if item.isDir && !display.isPackage(item), let path = folder.childPath(row: UInt32(row)) {
-                if let size = Self.folderSizes[Self.sizeKey(path)] {
+                if let size = Self.rememberedSize(Self.sizeKey(path), path: path) {
                     cell.text = formatSize(bytes: size)
                 } else if Self.sizing.contains(Self.sizeKey(path)) {
                     cell.text = String(localized: "Calculating…")
@@ -1790,7 +1884,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
 
     private func calculateSize(_ path: String) {
         let key = Self.sizeKey(path)
-        guard !Self.sizing.contains(key), Self.folderSizes[key] == nil else { return }
+        guard !Self.sizing.contains(key), Self.rememberedSize(key, path: path) == nil else { return }
         Self.sizing.insert(key)
         reloadSize(of: path)
         let onDisk = AppSettings.folderSizeOnDisk
@@ -1799,7 +1893,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { [weak self] in
                     Self.sizing.remove(key)
-                    Self.folderSizes[key] = size
+                    Self.remember(key, path: path, size: size)
                     self?.reloadSize(of: path)
                 }
             }

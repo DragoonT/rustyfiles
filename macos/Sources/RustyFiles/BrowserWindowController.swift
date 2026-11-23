@@ -1097,6 +1097,28 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func cut(_ sender: Any?) { list.cutItems() }
     @objc func copy(_ sender: Any?) { list.copyItems() }
     @objc func paste(_ sender: Any?) { list.pasteItems() }
+    @objc func duplicate(_ sender: Any?) { list.duplicateSelected() }
+
+    /// The folder shown in the pane without the keyboard (dual pane), if it is a folder.
+    var otherPaneURL: URL? {
+        guard dual else { return nil }
+        let other = rightActive ? leftList : rightList
+        return other.url?.isFileURL == true && other.archiveIsNil ? other.url : nil
+    }
+
+    /// ⇧F5 / ⇧F6: the selection copied or moved into the other pane's folder.
+    @objc func copyToOtherPane(_ sender: Any?) { toOtherPane(.copy) }
+    @objc func moveToOtherPane(_ sender: Any?) { toOtherPane(.move) }
+    private func toOtherPane(_ kind: Transfer.Kind) {
+        guard let dest = otherPaneURL else { return }
+        list.transfer(list.selectedURLs, into: dest, kind: kind, selectHere: false)
+    }
+
+    /// F6: the keyboard goes to the other pane.
+    @objc func switchPane(_ sender: Any?) {
+        guard dual else { return }
+        (rightActive ? leftList : rightList).focus()
+    }
     @objc func rename(_ sender: Any?) { list.beginRename() }
     @objc func moveToTrash(_ sender: Any?) { list.trashSelected() }
     @objc func toggleQuickLook(_ sender: Any?) { list.toggleQuickLook() }
@@ -1138,7 +1160,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
         case #selector(toggleShelf(_:)):
             item.title = list.shelfShown ? String(localized: "Hide Shelf") : String(localized: "Show Shelf")
             return true
-        case #selector(paste(_:)): return Clipboard.hasFiles && list.folder != nil
+        case #selector(paste(_:)): return FileListController.canPaste && list.folder != nil && list.archiveIsNil
+        case #selector(duplicate(_:)): return selected && list.archiveIsNil && list.url?.isFileURL == true
+        case #selector(copyToOtherPane(_:)), #selector(moveToOtherPane(_:)): return dual && selected && list.archiveIsNil && otherPaneURL != nil
+        case #selector(switchPane(_:)): return dual
         case #selector(newFolder(_:)): return list.folder != nil
         case #selector(selectNextTab(_:)), #selector(selectPreviousTab(_:)): return tabs.count > 1
         case #selector(reopenClosedTab(_:)): return !closedTabs.isEmpty
