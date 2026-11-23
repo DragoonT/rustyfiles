@@ -2200,5 +2200,8 @@
  "3f183d7a": "Modifier dans l'éditeur de texte  (F4)",
  "7596f080": "Éditeur de texte (F4)",
  "7f9f54f7": "Automatique : Bloc-notes",
- "8207de4b": "Choisir l'éditeur de texte"
+ "8207de4b": "Choisir l'éditeur de texte",
+ "ae5ba83f": "Recherchez par nom ou avec un modèle comme *.pdf ; Enter cherche aussi dans les sous-dossiers",
+ "0a64f2ce": "Cet élément est encore en cours de copie. Renommez-le une fois la copie terminée.",
+ "b8952992": "{name} + {n} de plus"
 }

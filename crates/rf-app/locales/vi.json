@@ -2200,5 +2200,8 @@
  "3f183d7a": "Sửa trong trình soạn thảo văn bản  (F4)",
  "7596f080": "Trình soạn thảo văn bản (F4)",
  "7f9f54f7": "Tự động: Notepad",
- "8207de4b": "Chọn trình soạn thảo văn bản"
+ "8207de4b": "Chọn trình soạn thảo văn bản",
+ "ae5ba83f": "Tìm theo tên hoặc mẫu như *.pdf; Enter tìm cả trong thư mục con",
+ "0a64f2ce": "Mục này vẫn đang được sao chép. Hãy đổi tên khi sao chép xong.",
+ "b8952992": "{name} + {n} mục khác"
 }

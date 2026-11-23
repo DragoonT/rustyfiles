@@ -13280,5 +13280,23 @@
   "tr": "Metin düzenleyici seç",
   "en": "Choose text editor",
   "note": "title of a file dialog: pick the text editor program"
+ },
+ {
+  "id": "ae5ba83f",
+  "key": "Ada ya da *.pdf gibi bir kalıba göre arayın; Enter alt klasörlere de bakar",
+  "tr": "Ada ya da *.pdf gibi bir kalıba göre arayın; Enter alt klasörlere de bakar",
+  "en": "Search by name or a pattern like *.pdf; Enter looks in subfolders too"
+ },
+ {
+  "id": "0a64f2ce",
+  "key": "Bu öğe hâlâ kopyalanıyor. Kopyalama bitince yeniden adlandırın.",
+  "tr": "Bu öğe hâlâ kopyalanıyor. Kopyalama bitince yeniden adlandırın.",
+  "en": "This item is still being copied. Rename it when the copy is done."
+ },
+ {
+  "id": "b8952992",
+  "key": "{name} ve {n} öğe daha",
+  "tr": "{name} ve {n} öğe daha",
+  "en": "{name} + {n} more"
  }
 ]

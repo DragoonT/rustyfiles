@@ -2200,5 +2200,8 @@
  "3f183d7a": "Rediger i tekstredigerer  (F4)",
  "7596f080": "Tekstredigerer (F4)",
  "7f9f54f7": "Automatisk: Notisblokk",
- "8207de4b": "Velg tekstredigerer"
+ "8207de4b": "Velg tekstredigerer",
+ "ae5ba83f": "Søk etter navn eller et mønster som *.pdf; Enter søker også i undermapper",
+ "0a64f2ce": "Dette elementet kopieres fortsatt. Gi det nytt navn når kopieringen er ferdig.",
+ "b8952992": "{name} + {n} til"
 }

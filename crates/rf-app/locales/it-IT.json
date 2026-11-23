@@ -2200,5 +2200,8 @@
  "3f183d7a": "Modifica nell'editor di testo  (F4)",
  "7596f080": "Editor di testo (F4)",
  "7f9f54f7": "Automatico: Blocco note",
- "8207de4b": "Scegli editor di testo"
+ "8207de4b": "Scegli editor di testo",
+ "ae5ba83f": "Cerca per nome o con un modello come *.pdf; Invio cerca anche nelle sottocartelle",
+ "0a64f2ce": "Questo elemento è ancora in fase di copia. Rinominalo al termine della copia.",
+ "b8952992": "{name} + altri {n}"
 }

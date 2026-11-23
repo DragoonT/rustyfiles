@@ -2200,5 +2200,8 @@
  "3f183d7a": "Muokkaa tekstieditorissa  (F4)",
  "7596f080": "Tekstieditori (F4)",
  "7f9f54f7": "Automaattinen: Muistio",
- "8207de4b": "Valitse tekstieditori"
+ "8207de4b": "Valitse tekstieditori",
+ "ae5ba83f": "Hae nimellä tai mallilla, kuten *.pdf; Enter hakee myös alikansioista",
+ "0a64f2ce": "Tätä kohdetta kopioidaan vielä. Nimeä se uudelleen, kun kopiointi on valmis.",
+ "b8952992": "{name} + {n} muuta"
 }

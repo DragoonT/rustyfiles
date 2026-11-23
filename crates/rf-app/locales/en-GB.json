@@ -2200,5 +2200,8 @@
  "3f183d7a": "Edit in text editor  (F4)",
  "7596f080": "Text editor (F4)",
  "7f9f54f7": "Automatic: Notepad",
- "8207de4b": "Choose text editor"
+ "8207de4b": "Choose text editor",
+ "ae5ba83f": "Search by name or a pattern like *.pdf; Enter looks in subfolders too",
+ "0a64f2ce": "This item is still being copied. Rename it when the copy is done.",
+ "b8952992": "{name} + {n} more"
 }

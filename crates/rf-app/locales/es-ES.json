@@ -2200,5 +2200,8 @@
  "3f183d7a": "Editar en el editor de texto  (F4)",
  "7596f080": "Editor de texto (F4)",
  "7f9f54f7": "Automático: Bloc de notas",
- "8207de4b": "Elegir editor de texto"
+ "8207de4b": "Elegir editor de texto",
+ "ae5ba83f": "Busque por nombre o con un patrón como *.pdf; Enter también busca en las subcarpetas",
+ "0a64f2ce": "Este elemento aún se está copiando. Cámbiele el nombre cuando termine la copia.",
+ "b8952992": "{name} + {n} más"
 }

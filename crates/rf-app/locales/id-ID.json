@@ -2200,5 +2200,8 @@
  "3f183d7a": "Ubah di editor teks  (F4)",
  "7596f080": "Editor teks (F4)",
  "7f9f54f7": "Otomatis: Notepad",
- "8207de4b": "Pilih editor teks"
+ "8207de4b": "Pilih editor teks",
+ "ae5ba83f": "Cari berdasarkan nama atau pola seperti *.pdf; Enter juga mencari di subfolder",
+ "0a64f2ce": "Item ini masih disalin. Ganti namanya setelah penyalinan selesai.",
+ "b8952992": "{name} + {n} lainnya"
 }

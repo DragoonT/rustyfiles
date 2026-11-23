@@ -2200,5 +2200,8 @@
  "3f183d7a": "In Texteditor bearbeiten  (F4)",
  "7596f080": "Texteditor (F4)",
  "7f9f54f7": "Automatisch: Notepad",
- "8207de4b": "Texteditor auswählen"
+ "8207de4b": "Texteditor auswählen",
+ "ae5ba83f": "Nach Name oder einem Muster wie *.pdf suchen; Enter sucht auch in Unterordnern",
+ "0a64f2ce": "Dieses Element wird noch kopiert. Benennen Sie es um, wenn der Kopiervorgang abgeschlossen ist.",
+ "b8952992": "{name} + {n} weitere"
 }
