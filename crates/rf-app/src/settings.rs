@@ -569,6 +569,10 @@ pub struct Settings {
     /// What a new tab opens (Ctrl+T, the "+" button, the tab menu): Home (the default) or the folder of the tab in front (a Reddit
     /// suggestion, 2026-11-18). Duplicating a tab keeps its folder either way.
     pub new_tab_opens: NewTabOpens,
+    /// A new tab (Ctrl+T, the + button) puts the keyboard in the address bar, ready for a typed or pasted path (issue 240).
+    pub new_tab_address: bool,
+    /// The details shown when the pointer rests on an item (size, dates, a picture's size). Issue 264: some find them in the way.
+    pub item_hover_details: bool,
     /// A folder opened from outside (Win+E, the desktop, another program) gets a window of its own instead of a tab in the newest
     /// window (issue 77). Off by default.
     pub launch_in_new_window: bool,
@@ -961,6 +965,8 @@ impl Default for Settings {
             startup_pages: Vec::new(),
             focus_new_tab: false,
             new_tab_opens: NewTabOpens::Home,
+            new_tab_address: false,
+            item_hover_details: true,
             launch_in_new_window: false,
             sessions_in_this_window: false,
             dual_pane_new_tabs: false,

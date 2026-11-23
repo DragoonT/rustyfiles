@@ -13175,5 +13175,29 @@
   "key": "en:New",
   "tr": "Yeni",
   "en": "New"
+ },
+ {
+  "id": "a7573fc8",
+  "key": "Yeni sekmede adres çubuğuna yaz",
+  "tr": "Yeni sekmede adres çubuğuna yaz",
+  "en": "Type in the address bar of a new tab"
+ },
+ {
+  "id": "f4955e82",
+  "key": "Ctrl+T ve + düğmesi: bir yolu hemen yazabilir ya da yapıştırabilirsiniz",
+  "tr": "Ctrl+T ve + düğmesi: bir yolu hemen yazabilir ya da yapıştırabilirsiniz",
+  "en": "Ctrl+T and the + button: type or paste a path at once"
+ },
+ {
+  "id": "25ac4d3a",
+  "key": "Üzerine gelince ayrıntıları göster",
+  "tr": "Üzerine gelince ayrıntıları göster",
+  "en": "Show details on hover"
+ },
+ {
+  "id": "10326180",
+  "key": "İşaretçi bir öğenin üzerinde durunca boyutu, tarihleri ve resmin boyutlarını gösteren kutu",
+  "tr": "İşaretçi bir öğenin üzerinde durunca boyutu, tarihleri ve resmin boyutlarını gösteren kutu",
+  "en": "The box with the size, the dates and a picture's dimensions when the pointer rests on an item"
  }
 ]

@@ -1073,7 +1073,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
-            let item_tips = !crate::fluent_menu::is_open(cx);
+            let item_tips = !crate::fluent_menu::is_open(cx) && cx.global::<crate::settings::Settings>().item_hover_details;
             out.push(
                 h_flex()
                     .id(("crow", vi))
@@ -3255,7 +3255,7 @@ impl FolderView {
         let tip_path = self.path_of(ei);
         let on_disk = cx.global::<crate::settings::Settings>().folder_size_on_disk;
         let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
-        let item_tips = !crate::fluent_menu::is_open(cx);
+        let item_tips = !crate::fluent_menu::is_open(cx) && cx.global::<crate::settings::Settings>().item_hover_details;
         let cell = base
             .id(("cell", vi))
             .w(tile_w)
@@ -4703,7 +4703,7 @@ impl FolderView {
             let tip_entry = e.clone();
             let tip_path = self.path_of(ei);
             let tip_folder_size = tip_path.as_ref().and_then(|path| self.known_folder_size(path, on_disk));
-            let item_tips = !crate::fluent_menu::is_open(cx);
+            let item_tips = !crate::fluent_menu::is_open(cx) && cx.global::<crate::settings::Settings>().item_hover_details;
             let selected = self.selected.contains(&ei);
             // (the rows next to it that are selected too: the pill joins them)
             let sel_above = selected && vi > 0 && self.visible.get(vi - 1).is_some_and(|e| self.selected.contains(e));

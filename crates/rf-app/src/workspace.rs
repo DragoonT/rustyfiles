@@ -1508,6 +1508,10 @@ impl Workspace {
             .then(|| self.tabs.get(self.active).map(|t| t.view().read(cx).location().clone()))
             .flatten();
         self.open_tab(here.unwrap_or(Location::Home), window, cx);
+        if cx.global::<crate::settings::Settings>().new_tab_address {
+            // (on the next frame: the new tab's address bar is not drawn yet, and a focus target outside the frame is dropped)
+            cx.on_next_frame(window, |this, window, cx| this.begin_address_edit(window, cx));
+        }
     }
 
     /// Closes every tab and leaves one at Home (the closed ones can be reopened, Ctrl+Shift+T).
@@ -2409,6 +2413,8 @@ impl Workspace {
         let roomy = fit_names || tab_w >= 110.;
         let mut tab_claimed = false;
         let windows_theme = cx.global::<crate::settings::Settings>().windows_file_explorer_theme;
+        // tabs of folders with the same name: each gets a folder above it that tells them apart (issue 243)
+        let hints = tab_hints(&self.tabs.iter().map(|t| t.view().read(cx).location().path().map(Path::to_path_buf)).collect::<Vec<_>>());
         for (i, tab) in self.tabs.iter().enumerate() {
             let (title, icon, location) = {
                 let view = tab.view().read(cx);
@@ -2428,8 +2434,13 @@ impl Workspace {
             let term_dir = tab_terminal.then(|| tab_terminal_dir(&location)).flatten();
             let path_title: Option<SharedString> = tab_dir.as_ref().filter(|_| tab_path).map(|d| d.display().to_string().into());
             let shown: SharedString = path_title.clone().unwrap_or_else(|| title.clone().into());
+            let hint: Option<SharedString> = hints.get(i).cloned().flatten().filter(|_| path_title.is_none()).map(|h| format!("@{h}").into());
             let tab_w = if fit_names {
-                let name = window.text_system().layout_line(shown.as_ref(), name_px, &[name_style.to_run(shown.len())], None).width;
+                let measured = match &hint {
+                    Some(h) => format!("{shown}  {h}"),
+                    None => shown.to_string(),
+                };
+                let name = window.text_system().layout_line(measured.as_str(), name_px, &[name_style.to_run(measured.len())], None).width;
                 (f32::from(name) + TAB_CHROME_W + if term_dir.is_some() { TAB_TERMINAL_W } else { 0. }).clamp(TAB_MIN_W, TAB_MAX_W)
             } else {
                 tab_w
@@ -2488,7 +2499,17 @@ impl Workspace {
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .when(path_title.is_some(), |d| d.text_xs())
-                            .child(shown),
+                            .map(|d| match hint.clone() {
+                                // the name first, the telling folder after it in a lighter colour; the name gives way last
+                                Some(h) => d.child(
+                                    h_flex()
+                                        .min_w_0()
+                                        .gap_1()
+                                        .child(div().min_w_0().flex_shrink_0().max_w(relative(0.7)).overflow_hidden().text_ellipsis().child(shown.clone()))
+                                        .child(div().min_w_0().overflow_hidden().text_ellipsis().text_color(p.text_tertiary).child(h)),
+                                ),
+                                None => d.child(shown.clone()),
+                            }),
                     )
                     // the folder's whole path on hover (issue 162: "I am unable to see a way to see the full path on tabs")
                     .when_some(tab_dir.clone().filter(|_| !popups_open), |d, dir| {
@@ -3976,6 +3997,21 @@ impl Workspace {
                     .on_drag_move::<ExternalPaths>(crate::folder_view::drop_effect_over(dir.clone()))
                     .on_drop(move |paths: &ExternalPaths, _, cx| drop_files(paths, dir.clone(), cx))
             })
+            // files dropped on the Recycle Bin go into it, as on macOS' Trash and Explorer's own bin (issue 232)
+            .when(matches!(target3, Location::RecycleBin), |d| {
+                d.drag_over::<ExternalPaths>(move |s, _, _, _| s.bg(drop_bg).border_1().border_color(drop_border))
+                    .on_drag_move::<ExternalPaths>(|ev, _, _| {
+                        if ev.bounds.contains(&ev.event.position) {
+                            gpui_windows::dnd_hint::set(gpui_windows::dnd_hint::MOVE);
+                        }
+                    })
+                    .on_drop(|paths: &ExternalPaths, _, cx| {
+                        let items: Vec<PathBuf> = paths.paths().iter().filter(|p| !rf_win::ftp::is_ftp(p)).cloned().collect();
+                        if !items.is_empty() {
+                            crate::status_center::delete(cx, items, false);
+                        }
+                    })
+            })
     }
 
     fn render_sidebar(&mut self, p: &Palette, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -4607,6 +4643,34 @@ fn resize_handle<T: Clone + 'static>(id: &'static str, payload: T, left: bool) -
         .on_drag(payload, |_, _, _, cx| cx.new(|_| ResizeGhost))
 }
 
+/// For each tab's folder, the name of a folder above it that tells it apart from the other tabs' folders of the same name (issue 243:
+/// two "Programs" tabs, one under ProgramData and one under the user's AppData): the nearest level whose name differs, up to five
+/// levels; `None` for a tab whose folder name no other tab has, and for places that are no folder.
+pub(crate) fn tab_hints(paths: &[Option<PathBuf>]) -> Vec<Option<String>> {
+    let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().to_lowercase());
+    let level = |p: &Path, up: usize| -> Option<String> { p.ancestors().nth(up).and_then(|a| a.file_name().or_else(|| a.to_str().map(std::ffi::OsStr::new))).map(|n| n.to_string_lossy().trim_end_matches('\\').to_string()) };
+    paths
+        .iter()
+        .map(|me| {
+            let me = me.as_deref()?;
+            let mine = name(me)?;
+            let others: Vec<&Path> = paths
+                .iter()
+                .flatten()
+                .map(PathBuf::as_path)
+                .filter(|o| name(o).as_deref() == Some(mine.as_str()) && !o.as_os_str().eq_ignore_ascii_case(me.as_os_str()))
+                .collect();
+            if others.is_empty() {
+                return None;
+            }
+            (1..=5).find_map(|up| {
+                let here = level(me, up)?;
+                others.iter().all(|o| level(o, up).is_none_or(|t| !t.eq_ignore_ascii_case(&here))).then_some(here)
+            })
+        })
+        .collect()
+}
+
 /// Toolbar tooltips (with shortcuts).
 fn tooltip_text(id: &str) -> &'static str {
     match id {
@@ -5022,8 +5086,11 @@ impl Render for Workspace {
             self.focus_active(window, cx);
         }
         let p = Palette::for_window(window);
-        // (the Open / Save window is matte: see `Palette::matte`)
-        let p = if self.picker.is_some() { p.matte() } else { p };
+        // (the Open / Save window is matte, see `Palette::matte`, unless the material is Mica: Mica shows the wallpaper's colour, never
+        // the program the window opens over, and a user missed it there, issue 226)
+        let picker_matte = self.picker.is_some()
+            && !matches!(cx.global::<crate::settings::Settings>().backdrop_in_use(), crate::settings::BackdropPref::Mica | crate::settings::BackdropPref::MicaAlt);
+        let p = if picker_matte { p.matte() } else { p };
         // Mica / frame follow the app's theme, not only the system one (re-applied when either
         // changes: GPUI resets it on a system theme switch)
         let prefs = cx.global::<crate::settings::Settings>();
@@ -5057,7 +5124,7 @@ impl Render for Workspace {
         // (and it asks for no glass, Acrylic or tinted Mica of its own: the palette paints it; so does the pure black theme, whose
         // black must not let anything through)
         let black = crate::settings::theme_override() == crate::settings::ThemePref::Black;
-        let backdrop = if self.picker.is_some() || black { BackdropPref::Solid } else { backdrop };
+        let backdrop = if picker_matte || black { BackdropPref::Solid } else { backdrop };
         if self.applied_backdrop != Some(backdrop) {
             let was_glass = self.applied_backdrop == Some(BackdropPref::Glass);
             self.applied_backdrop = Some(backdrop);
@@ -5754,7 +5821,7 @@ impl Render for Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{breadcrumbs, parse_location};
+    use super::{breadcrumbs, parse_location, tab_hints};
     use crate::workspace::tab_terminal_dir;
     use rf_core::Location;
     use std::path::{Path, PathBuf};
@@ -5777,6 +5844,21 @@ mod tests {
     fn the_terminal_button_is_only_for_real_folders() {
         assert!(tab_terminal_dir(&Location::Home).is_none());
         assert!(tab_terminal_dir(&Location::Settings).is_none());
+        let p = |s: &str| Some(PathBuf::from(s));
+        let hints = tab_hints(&[
+            p(r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs"),
+            p(r"C:\Users\u\AppData\Roaming\Microsoft\Windows\Start Menu\Programs"),
+            p(r"C:\Users\u\Music"),
+            None,
+            p(r"D:\a\x\Data"),
+            p(r"E:\b\x\Data"),
+        ]);
+        // the nearest level that differs: "Start Menu", "Windows", "Microsoft" are the same in both; then ProgramData / Roaming
+        assert_eq!(hints[0].as_deref(), Some("ProgramData"));
+        assert_eq!(hints[1].as_deref(), Some("Roaming"));
+        assert_eq!(hints[2], None, "a name no other tab has");
+        assert_eq!(hints[3], None);
+        assert_eq!((hints[4].as_deref(), hints[5].as_deref()), (Some("a"), Some("b")));
         let dir = std::env::temp_dir();
         assert_eq!(tab_terminal_dir(&Location::Path(dir.clone())), Some(dir));
         assert!(tab_terminal_dir(&Location::Path(PathBuf::from(r"C:\Downloads\photos.zip\2024"))).is_none());

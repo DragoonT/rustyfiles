@@ -947,6 +947,13 @@ fn general(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     v.push(card(p, L::SquarePlus, t!("Her zaman yeni açılan sekmeye geç"), None, sw("focus-tab", p, s.focus_new_tab, |s, v| s.focus_new_tab = v)));
     v.push(card(
         p,
+        L::TextCursorInput,
+        t!("Yeni sekmede adres çubuğuna yaz"),
+        Some(t!("Ctrl+T ve + düğmesi: bir yolu hemen yazabilir ya da yapıştırabilirsiniz")),
+        sw("new-tab-address", p, s.new_tab_address, |s, v| s.new_tab_address = v),
+    ));
+    v.push(card(
+        p,
         L::AppWindow,
         t!("Diğer programlardan açılan klasörler yeni pencerede açılsın"),
         Some(t!("Win+E, masaüstü ya da başka bir program bir klasör açtığında açık pencerede yeni sekme yerine yeni bir pencere açılır.")),
@@ -2242,6 +2249,13 @@ fn files(p: &Palette, s: &Settings, cx: &mut App) -> Vec<AnyElement> {
     ));
     v.push(card(p, L::TriangleAlert, t!("Uzantı değişince uyar"), None, sw("ext-warn", p, s.warn_extension_change, |s, v| s.warn_extension_change = v)));
     v.push(card(p, L::MousePointer, t!("Üzerine gelince seç"), None, sw("hover-sel", p, s.select_on_hover, |s, v| s.select_on_hover = v)));
+    v.push(card(
+        p,
+        L::Info,
+        t!("Üzerine gelince ayrıntıları göster"),
+        Some(t!("İşaretçi bir öğenin üzerinde durunca boyutu, tarihleri ve resmin boyutlarını gösteren kutu")),
+        sw("hover-details", p, s.item_hover_details, |s, v| s.item_hover_details = v),
+    ));
     v.push(card(
         p,
         L::ListFilter,
