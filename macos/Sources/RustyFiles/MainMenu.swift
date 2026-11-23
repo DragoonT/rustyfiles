@@ -143,6 +143,7 @@ enum MainMenu {
         m.addItem(item(String(localized: "Applications"), #selector(W.goApplications(_:)), "a", [.command, .shift]))
         m.addItem(.separator())
         m.addItem(item(String(localized: "Recent Folders…"), #selector(W.showFolderHistory(_:)), "p"))
+        m.addItem(item(String(localized: "Connect to Server…"), #selector(W.connectToServer(_:)), "k", [.command, .control]))
         m.addItem(item(String(localized: "Disk Usage"), #selector(W.showDiskUsage(_:)), "u", [.command, .option]))
         return m
     }

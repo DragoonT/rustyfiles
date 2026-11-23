@@ -1100,6 +1100,10 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSMen
     @objc func goHomeFolder(_ sender: Any?) { navigate(to: FileManager.default.homeDirectoryForCurrentUser) }
     @objc func goDocuments(_ sender: Any?) { go(.documentDirectory) }
     @objc func goDesktop(_ sender: Any?) { go(.desktopDirectory) }
+    /// Go › Connect to Server…: a network share mounted and opened here.
+    @objc func connectToServer(_ sender: Any?) {
+        ConnectServer.ask(in: window) { [weak self] url in self?.navigate(to: url) }
+    }
     @objc func goDownloads(_ sender: Any?) { go(.downloadsDirectory) }
     @objc func goApplications(_ sender: Any?) { navigate(to: URL(fileURLWithPath: "/Applications")) }
 

@@ -831,5 +831,13 @@
 "This can't be undone.": "Bu geri alınamaz.",
 "Delete from archive": "Arşivden sil",
 "Add files…": "Dosya ekle…",
-"More columns": "Diğer sütunlar"
+"More columns": "Diğer sütunlar",
+"A server address, such as smb://nas.local/share, afp://, nfs://, ftp:// or https:// for WebDAV.": "Bir sunucu adresi: smb://nas.local/paylasim gibi; ya da afp://, nfs://, ftp://, WebDAV için https://.",
+"Cancelled": "İptal edildi",
+"Connect": "Bağlan",
+"Connect to Server…": "Sunucuya Bağlan…",
+"Connect to server": "Sunucuya bağlan",
+"Connecting to %@": "%@ sunucusuna bağlanılıyor",
+"Could not connect to %@ (error %@).": "%1$@ sunucusuna bağlanılamadı (hata %2$@).",
+"“%@” is not a server address.": "“%@” bir sunucu adresi değil."
 }
