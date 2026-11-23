@@ -804,5 +804,7 @@
 "Type in the address bar of a new tab": "Yeni sekmede adres çubuğuna yaz",
 "⌘T and the + button: type or paste a path at once.": "⌘T ve + düğmesi: bir yolu hemen yazabilir ya da yapıştırabilirsiniz.",
 "The folder's path on tabs": "Sekmede klasörün yolu",
-"Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end.": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir."
+"Tabs show the folder's whole path in smaller text instead of its name; what doesn't fit is cut at the end.": "Sekme, klasörün adı yerine tam yolunu küçük yazıyla gösterir; sığmayan kısım sondan kesilir.",
+"Show password": "Parolayı göster",
+"Hide password": "Parolayı gizle"
 }

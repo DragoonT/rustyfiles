@@ -65,11 +65,11 @@ enum ArchiveStore {
             ? String(localized: "The password for “\(url.lastPathComponent)” is not right.")
             : String(localized: "“\(url.lastPathComponent)” is protected by a password.")
         alert.informativeText = String(localized: "Enter the password to open it.")
-        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        let field = PasswordField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         alert.accessoryView = field
         alert.addButton(withTitle: String(localized: "Open"))
         alert.addButton(withTitle: String(localized: "Cancel"))
-        alert.window.initialFirstResponder = field
+        alert.window.initialFirstResponder = field.field
         guard alert.runModal() == .alertFirstButtonReturn, !field.stringValue.isEmpty else { return nil }
         return field.stringValue
     }

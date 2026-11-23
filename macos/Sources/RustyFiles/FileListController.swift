@@ -186,6 +186,7 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
             col.icon = { [weak self] item, path in self?.display.icon(item, path: path) ?? NSImage() }
             col.onOpenFolder = { [weak self] u in self?.onOpenFolder?(u) }
             col.onPick = { [weak self] u in self?.onReveal?(u) }
+            col.onMenu = { [weak self] u, isDir in self?.sideColumnMenu(u, isDir: isDir) }
             card.addSubview(col)
         }
         shelfPane.isHidden = true
@@ -1317,6 +1318,31 @@ final class FileListController: NSObject, NSTableViewDataSource, NSTableViewDele
     var onOpenInNewTab: ((URL) -> Void)?
     var onOpenInNewWindow: ((URL) -> Void)?
     var onRefresh: (() -> Void)?
+
+    /// The menu of an item in a side column of the Columns view: open it, here or in a new tab,
+    /// show it in its folder, copy it or its path, put it in the Trash, its properties.
+    func sideColumnMenu(_ u: URL, isDir: Bool) -> NSMenu {
+        let b = MenuBuilder()
+        b.add(String(localized: "Open"), "folder-open") { [weak self] in
+            if isDir { self?.onOpenFolder?(u) } else { NSWorkspace.shared.open(u) }
+        }
+        if isDir { b.add(String(localized: "Open in new tab"), "plus") { [weak self] in self?.onOpenInNewTab?(u) } }
+        b.add(String(localized: "Show in folder"), "folder-search") { [weak self] in self?.onReveal?(u) }
+        b.separator()
+        b.add(String(localized: "Copy"), "copy") { Clipboard.put([u], cut: false) }
+        b.add(String(localized: "Copy path"), "clipboard-copy") { MenuActions.copyPaths([u]) }
+        b.separator()
+        b.add(String(localized: "Move to Trash"), "trash") {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let pairs = (try? FileOps.trash([u])) ?? []
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { FileUndo.shared.record(.moves(pairs), title: String(localized: "Move to Trash")) }
+                }
+            }
+        }
+        b.add(String(localized: "Properties"), "wrench") { PropertiesWindow.show([u]) }
+        return b.done()
+    }
 
     func contextMenu() -> NSMenu {
         if let archive { return archiveMenu(archive) }

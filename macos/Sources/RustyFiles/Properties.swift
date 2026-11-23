@@ -63,7 +63,7 @@ final class PropertiesWindow: NSWindowController, NSWindowDelegate {
         let isFile = single && !Self.isFolder(urls[0])
         pages = single ? (isFile ? [.general, .permissions, .details, .hashes] : [.general, .permissions, .details]) : [.general]
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 600),
+            contentRect: NSRect(origin: .zero, size: Self.startSize()),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.titlebarAppearsTransparent = true
         window.minSize = NSSize(width: 400, height: 360)
@@ -128,6 +128,26 @@ final class PropertiesWindow: NSWindowController, NSWindowDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Smaller to start with, the size it was last left at after that, never more than the
+    /// screen has room for (as the Windows Properties window does now).
+    private static func startSize() -> NSSize {
+        var size = NSSize(width: 420, height: 520)
+        if let s = UserDefaults.standard.string(forKey: "propertiesSize") {
+            let v = NSSizeFromString(s)
+            if v.width >= 400, v.height >= 360 { size = v }
+        }
+        if let room = NSScreen.main?.visibleFrame.size {
+            size.width = min(size.width, room.width - 40)
+            size.height = min(size.height, room.height - 40)
+        }
+        return size
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        guard let window else { return }
+        UserDefaults.standard.set(NSStringFromSize(window.contentRect(forFrameRect: window.frame).size), forKey: "propertiesSize")
+    }
 
     func windowWillClose(_ notification: Notification) {
         work += 1
