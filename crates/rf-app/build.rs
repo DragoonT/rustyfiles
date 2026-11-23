@@ -59,7 +59,9 @@ fn locales() {
         })
         .collect();
     found.sort();
-    let mut out = String::from("pub const LOCALES: &[(&str, &str)] = &[\n");
+    // A `static`, not a `const`: a const is written out again where it is used, and the release build came to hold every translation
+    // twice (6.8 MB more in rustyfiles.exe and in directlook.exe, seen in 0.9.8 against 0.9.4, and a start some 14 ms longer: issue 289).
+    let mut out = String::from("pub static LOCALES: &[(&str, &str)] = &[\n");
     for (code, path) in &found {
         out += &format!("    ({code:?}, include_str!({:?})),\n", path.display().to_string());
     }

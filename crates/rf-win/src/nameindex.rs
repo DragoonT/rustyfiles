@@ -819,7 +819,8 @@ impl Index {
     fn name_matches(&self, pattern: &str) -> (Vec<u64>, bool) {
         let m = Matcher::new(pattern);
         let ascii = pattern.trim().to_ascii_lowercase();
-        let fast = !ascii.is_empty() && ascii.is_ascii() && !ascii.contains(['*', '?']);
+        // (the plain-bytes search is for a plain part of a name only: not a pattern, not a text with `ext:` words)
+        let fast = !ascii.is_empty() && ascii.is_ascii() && !ascii.contains(['*', '?']) && !matches!(m, Matcher::Ext(..));
         let needle = ascii.as_bytes();
         let threads = std::thread::available_parallelism().map_or(4, |t| t.get()).clamp(1, 16);
         // each different name once: which ones match (a bit per name)

@@ -78,10 +78,16 @@ pub(crate) enum Matcher {
     All,
     Substr(Vec<char>),
     Glob(Vec<char>),
+    /// `ext:pdf` words in the text: the extension is one of those, and the name matches what the other words ask.
+    Ext(Box<Matcher>, rf_core::namefilter::NameFilter),
 }
 
 impl Matcher {
     pub(crate) fn new(pattern: &str) -> Self {
+        if rf_core::namefilter::has_ext_word(pattern) {
+            let f = rf_core::namefilter::parse(pattern);
+            return Matcher::Ext(Box::new(Matcher::new(&f.name)), f);
+        }
         let p = fold(pattern.trim());
         if p.is_empty() {
             Matcher::All
@@ -100,6 +106,7 @@ impl Matcher {
                 n.len() >= p.len() && n.windows(p.len()).any(|w| w == p.as_slice())
             }
             Matcher::Glob(p) => glob_match(p, &fold(name)),
+            Matcher::Ext(m, f) => f.ext_ok(name) && m.is_match(name),
         }
     }
 }

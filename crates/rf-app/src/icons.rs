@@ -151,6 +151,20 @@ pub fn category(e: &Entry) -> Category {
     category_for_ext(&e.ext)
 }
 
+/// Every extension [`category_for_ext`] gives a kind (the same words, in the same order): what a search by kind asks for
+/// (`search_kinds`). An extension added to the match below belongs here too; a test holds the two together one way.
+pub const KNOWN_EXTS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "bmp", "webp", "tif", "tiff", "ico", "heic", "heif", "avif", "svg", "psd", "raw", "cr2", "cr3",
+    "nef", "arw", "dng", "jfif", "exr", "jxl", "jxr", "wdp", "mp4", "mov", "mkv", "avi", "wmv", "webm", "m4v", "mpg", "mpeg",
+    "flv", "mxf", "braw", "r3d", "ts", "m2ts", "3gp", "prproj", "aep", "drp", "mp3", "wav", "flac", "aac", "ogg", "m4a", "wma",
+    "opus", "aiff", "aif", "mid", "zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "zst", "cab", "iso", "img", "vhd",
+    "vhdx", "rs", "c", "h", "cpp", "hpp", "cs", "js", "jsx", "tsx", "py", "go", "java", "kt", "swift", "rb", "php", "html",
+    "htm", "css", "scss", "json", "toml", "yaml", "yml", "xml", "sh", "ps1", "bat", "cmd", "lua", "sql", "vue", "svelte",
+    "dart", "zig", "mjs", "cjs", "ini", "cfg", "lock", "doc", "docx", "odt", "rtf", "pages", "ppt", "pptx", "key", "odp", "xls",
+    "xlsx", "csv", "ods", "numbers", "pdf", "exe", "msi", "appx", "msix", "dll", "sys", "lnk", "url", "com", "scr", "txt", "md",
+    "log", "nfo", "srt", "vtt",
+];
+
 pub fn category_for_ext(ext: &str) -> Category {
     use Category::*;
     match ext {

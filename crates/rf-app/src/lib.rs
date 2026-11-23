@@ -79,6 +79,7 @@ mod quick_search;
 mod quicklook;
 mod run_names;
 mod settings_rows;
+mod search_kinds;
 mod search_pipe;
 mod hotkey_field;
 mod recycle_settings_view;

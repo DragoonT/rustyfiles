@@ -117,9 +117,14 @@ impl Filter {
         // the shown (localized) name or the real one: "İndir" and "Down" both find Downloads
         // (a query with * or ? is a pattern, as it is once Enter sends it to the subfolder search: "*.pdf" typed in the search box
         // emptied the list until Enter)
-        let found = |name: &str| if self.query.contains(['*', '?']) { matches_patterns(&self.query, name) } else { contains_ignore_case(name, &self.query) };
-        if !self.query.is_empty() && !found(&e.name) && !e.label.as_deref().is_some_and(found) {
-            return false;
+        // ("ext:pdf" words ask for the extension, the words beside them for the name: see `namefilter`)
+        if !self.query.is_empty() {
+            let by_ext = crate::namefilter::has_ext_word(&self.query).then(|| crate::namefilter::parse(&self.query));
+            let text = by_ext.as_ref().map_or(self.query.as_str(), |f| f.name.as_str());
+            let found = |name: &str| text.is_empty() || if text.contains(['*', '?']) { matches_patterns(text, name) } else { contains_ignore_case(name, text) };
+            if by_ext.as_ref().is_some_and(|f| !f.ext_ok(&e.name)) || (!found(&e.name) && !e.label.as_deref().is_some_and(found)) {
+                return false;
+            }
         }
         true
     }
@@ -236,6 +241,13 @@ mod tests {
         // without one it stays "contains"
         let f = Filter { query: "pdf".into(), ..Default::default() };
         assert!(f.accepts(&pdf) && f.accepts(&txt));
+        // an extension asked for, alone and beside a part of the name
+        let f = Filter { query: "ext:pdf".into(), ..Default::default() };
+        assert!(f.accepts(&pdf) && !f.accepts(&txt));
+        let f = Filter { query: "notes ext:txt,md".into(), ..Default::default() };
+        assert!(f.accepts(&txt) && !f.accepts(&pdf));
+        let f = Filter { query: "rapor ext:txt".into(), ..Default::default() };
+        assert!(!f.accepts(&txt) && !f.accepts(&pdf));
     }
 }
 

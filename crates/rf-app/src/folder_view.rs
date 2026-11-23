@@ -1757,13 +1757,16 @@ impl FolderView {
                     }
                     // 1. our name index (milliseconds) when it covers this folder
                     let glob = query.contains(['*', '?']);
+                    // What our own two searches read: "kind:video" as the list of that kind's extensions, so a search by kind
+                    // works in every folder. Windows' search (step 2) gets the text as typed: it has its own "kind:".
+                    let own = crate::search_kinds::expand(&query);
                     let mut seen: Option<std::collections::HashSet<String>> = None;
                     let mut found = 0usize;
                     let t_index = std::time::Instant::now();
                     let _ = tx.unbounded_send(Msg::Stage(SearchStage::Index));
                     // (Windows Search gave up on: the walk keeps saying so)
                     let mut windows_silent = false;
-                    if let Some(paths) = rf_win::indexer::search(&query, &root, include_hidden, 50_000) {
+                    if let Some(paths) = rf_win::indexer::search(&own, &root, include_hidden, 50_000) {
                         let looked_up = t_index.elapsed();
                         found = send_index_hits(&paths, &tx, &cancel);
                         log::info!("search: the index answered \"{query}\" in {} with {} hits ({looked_up:?} to find, {:?} with details)", root.display(), found, t_index.elapsed());
@@ -1848,7 +1851,7 @@ impl FolderView {
                     if !windows_silent {
                         let _ = tx.unbounded_send(Msg::Stage(SearchStage::Walk));
                     }
-                    let q = rf_win::search::SearchQuery { root, pattern: query, include_hidden, max_results: 50_000 };
+                    let q = rf_win::search::SearchQuery { root, pattern: own, include_hidden, max_results: 50_000 };
                     let tx2 = tx.clone();
                     let r = rf_win::search::search(&q, &|| cancel.load(Ordering::Relaxed), &mut |hits| {
                         let mut es = Vec::with_capacity(hits.len());
@@ -2648,6 +2651,8 @@ impl FolderView {
     }
 
     pub fn set_query(&mut self, q: String, cx: &mut Context<Self>) {
+        // ("kind:video" is the list of that kind's extensions, here as in the search of the subfolders)
+        let q = crate::search_kinds::expand(&q);
         if self.filter.query != q {
             self.filter.query = q;
             self.rebuild_visible();

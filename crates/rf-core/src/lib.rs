@@ -5,6 +5,7 @@ pub mod entry;
 pub mod format;
 pub mod history;
 pub mod hotkey;
+pub mod namefilter;
 pub mod navtree;
 pub mod openrules;
 pub mod organize;
