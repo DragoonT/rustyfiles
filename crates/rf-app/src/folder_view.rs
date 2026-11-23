@@ -1091,7 +1091,7 @@ impl FolderView {
                         faded(match &shell_icon {
                             Some(im) => img(im.clone()).size(px(16.)).flex_shrink_0().into_any_element(),
                             None => Icon::new(icons::icon_for(cat)).size(px(16.)).text_color(theme::kind_color(cat, p.dark)).into_any_element(),
-                        }, dim),
+                        }, dim, px(16.)),
                         px(16.),
                         e.link,
                         overlay,
@@ -3123,18 +3123,11 @@ impl FolderView {
             })
         });
         let is_thumb = icons::has_thumbnail(e);
-        let visual: AnyElement = match thumb {
-            Some(im) => img(im)
-                .size(visual_px)
-                .object_fit(ObjectFit::Contain)
-                .when(is_thumb, |i| i.rounded(px(4.)))
-                .into_any_element(),
-            None => Icon::new(icons::icon_for(cat))
-                .size(visual_px * 0.6)
-                .text_color(theme::kind_color(cat, p.dark))
-                .into_any_element(),
+        let (visual, drawn_px): (AnyElement, Pixels) = match thumb {
+            Some(im) => (img(im).size(visual_px).object_fit(ObjectFit::Contain).when(is_thumb, |i| i.rounded(px(4.))).into_any_element(), visual_px),
+            None => (Icon::new(icons::icon_for(cat)).size(visual_px * 0.6).text_color(theme::kind_color(cat, p.dark)).into_any_element(), visual_px * 0.6),
         };
-        let visual = faded(visual, dim);
+        let visual = faded(visual, dim, drawn_px);
         let overlay = self.overlay_of(ei, visual_px, cx);
         let e = &self.entries[ei as usize];
         let visual = download_marked(link_marked(visual, visual_px, e.link, overlay), self.part_frac(ei));
@@ -4881,7 +4874,11 @@ impl FolderView {
                 .id(("row", vi))
                 .group("rowgrp")
                 .h(row_h)
-                .w_full()
+                // With a Name column of a set width (the Explorer look, or a width the user dragged) the row ends where its columns
+                // end, as in Explorer: what is right of them is the list's empty space, where a double click goes up and a press
+                // draws a selection box. It ran the list's whole width, and with few columns there was almost no empty space left
+                // to press (issue 239).
+                .map(|d| if name_w.is_some() { d.self_start() } else { d.w_full() })
                 .px(px(4.))
                 .rounded(theme::RADIUS_SM)
                 .items_center()
@@ -4953,7 +4950,7 @@ impl FolderView {
                                     .flex_shrink_0()
                                     .text_color(theme::kind_color(cat, p.dark))
                                     .into_any_element(),
-                            }, dim),
+                            }, dim, px(16.)),
                             px(16.),
                             e.link,
                             overlay,
@@ -5038,7 +5035,6 @@ impl FolderView {
                     row.child(cell)
                 })
                 .children(prop_cells)
-                .when(name_w.is_some(), |row| row.child(div().flex_1()))
                 // (not while a menu is open: the details stood behind the right-click menu, a Discord report)
                 .when(item_tips, |d| d.tooltip(move |w, cx| {
                         let media = tip_path.as_ref().and_then(|path| hover_media_cache().lock().get(path).cloned());
@@ -6575,12 +6571,14 @@ fn overlay_box(size: Pixels) -> Pixels {
 /// `icon` with the marks drawn over it: another program's overlay (`overlay`, icon-sized with its mark in a corner, as Explorer draws
 /// it) and the arrow of a symbolic link or junction (`link`).
 /// An unfinished download's file (`.hdpart`) shows how far it is: a thin molten bar under its icon.
-/// The icon of a hidden, online-only or cut item, drawn faded as Explorer draws it (issue 201: only the name was faded).
-fn faded(icon: AnyElement, dim: bool) -> AnyElement {
+/// The icon of a hidden, online-only or cut item, drawn faded as Explorer draws it (issue 201: only the name was faded). `size` is
+/// the square the icon is drawn in: the box that fades it is exactly that square. (Without a size of its own the box let a picture
+/// that is taller than wide grow out of its tile, over the names and the row below: issue 298.)
+fn faded(icon: AnyElement, dim: bool, size: Pixels) -> AnyElement {
     if !dim {
         return icon;
     }
-    div().flex_shrink_0().opacity(0.5).child(icon).into_any_element()
+    div().flex().flex_shrink_0().size(size).items_center().justify_center().overflow_hidden().opacity(0.5).child(icon).into_any_element()
 }
 
 fn download_marked(icon: AnyElement, frac: Option<f32>) -> AnyElement {

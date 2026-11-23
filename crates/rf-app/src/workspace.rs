@@ -196,6 +196,9 @@ pub struct Workspace {
     /// Tab strip scrolling (many tabs): keeps the active tab in view.
     tab_scroll: ScrollHandle,
     sidebar_scroll_hovered: bool,
+    /// A file drag rests near the top (-1) or the bottom (1) edge of the sidebar's list, which then scrolls by itself (issue 301).
+    sidebar_edge: i8,
+    _sidebar_edge_task: Option<Task<()>>,
     tab_scrolled_to: Option<usize>,
     /// Tab being opened with an animation: (its view, a serial so each opening animates anew).
     tab_anim: Option<(Entity<FolderView>, u64)>,
@@ -994,6 +997,8 @@ impl Workspace {
             last_title: String::new(),
             tab_scroll: ScrollHandle::new(),
             sidebar_scroll_hovered: false,
+            sidebar_edge: 0,
+            _sidebar_edge_task: None,
             tab_scrolled_to: None,
             tab_anim: None,
             tab_anim_serial: 0,
@@ -1320,11 +1325,18 @@ impl Workspace {
         })
     }
 
+    /// A tab that shows `loc` in one of its panes: the active one when it does, else the first.
+    fn tab_showing(&self, loc: &Location, cx: &App) -> Option<usize> {
+        let shows = |t: &Tab| std::iter::once(&t.left).chain(t.right.as_ref()).any(|v| v.read(cx).location() == loc);
+        if self.tabs.get(self.active).is_some_and(shows) { Some(self.active) } else { self.tabs.iter().position(shows) }
+    }
+
     pub fn open_tab(&mut self, loc: Location, window: &mut Window, cx: &mut Context<Self>) {
-        if matches!(loc, Location::Settings) && let Some(ix) = self.settings_tab_elsewhere(cx).or_else(|| {
-            let t = &self.tabs[self.active];
-            std::iter::once(&t.left).chain(t.right.as_ref()).any(|v| matches!(v.read(cx).location(), Location::Settings)).then_some(self.active)
-        }) {
+        // Settings and the Recycle Bin are one tab per window: a second request goes to the tab that is there (issues 281, 300).
+        // Home is not in this rule: a new tab IS a Home tab.
+        if matches!(loc, Location::Settings | Location::RecycleBin)
+            && let Some(ix) = self.tab_showing(&loc, cx)
+        {
             self.activate(ix, window, cx);
             return;
         }
@@ -3998,6 +4010,13 @@ impl Workspace {
             .on_mouse_down(
                 MouseButton::Middle,
                 cx.listener(move |this, _: &MouseDownEvent, window, cx| {
+                    // Home and the Recycle Bin that are open already: their tab comes forward, no second one (issue 300)
+                    if matches!(target2, Location::Home | Location::RecycleBin)
+                        && let Some(ix) = this.tab_showing(&target2, cx)
+                    {
+                        this.activate(ix, window, cx);
+                        return;
+                    }
                     let keep = this.active;
                     this.open_tab(target2.clone(), window, cx);
                     this.activate(keep, window, cx);
@@ -4076,11 +4095,15 @@ impl Workspace {
             .track_scroll(&sidebar_scroll)
             .when(explorer_look, |d| d.pl(px(2.)).pr_2().py_2().scrollbar_width(px(20.)))
             .when(!explorer_look, |d| d.px_2().py_1())
-            .on_drag_move::<ExternalPaths>(cx.listener(|this, _: &DragMoveEvent<ExternalPaths>, _, cx| {
+            .on_drag_move::<ExternalPaths>(cx.listener(|this, ev: &DragMoveEvent<ExternalPaths>, _, cx| {
                 if !this.sidebar_ext_drag {
                     this.sidebar_ext_drag = true;
                     cx.notify();
                 }
+                // near the list's top or bottom edge it scrolls, so that a place out of view can be dropped on (issue 301)
+                let (top, bottom, at) = (f32::from(ev.bounds.top()), f32::from(ev.bounds.bottom()), ev.event.position);
+                let inside = ev.bounds.contains(&at);
+                this.sidebar_drag_edge(drag_edge(inside, top, bottom, f32::from(at.y)), cx);
             }));
         // Home and the pinned folders. With the folder tree on they stand above the sidebar's scrolling part and stay in view while the
         // tree is scrolled (issue 177: "the Pinned section is pushed out of view when the user scrolls down the folder tree"); a long
@@ -4430,7 +4453,9 @@ impl Workspace {
                             }),
                     )),
             )
-            .child(div().mx_2().h(px(1.)).when(explorer_look, |d| d.flex_shrink_0()).bg(p.divider))
+            // (the Explorer look: the line runs the sidebar's whole width, under the scrollbar's track too; inset, it stopped 8 px short
+            // of the track's right edge and left a notch in the corner, issue 229)
+            .child(div().when(!explorer_look, |d| d.mx_2()).h(px(1.)).when(explorer_look, |d| d.flex_shrink_0()).bg(p.divider))
             .child(div().px_2().py_1().child(settings))
     }
 
@@ -4836,6 +4861,73 @@ fn keep_tree(from: &Path, to: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::hard_link(from, to).or_else(|_| std::fs::copy(from, to).map(|_| ()))
+}
+
+/// How near the top or bottom edge of the sidebar's list a drag starts scrolling it, and how far a step goes (one every 16 ms).
+const EDGE_ZONE: f32 = 36.0;
+const EDGE_STEP: f32 = 12.0;
+
+/// Which way the sidebar's list scrolls for a drag at `y`: -1 up, 1 down, 0 not at all (outside the list, or away from its edges).
+fn drag_edge(inside: bool, top: f32, bottom: f32, y: f32) -> i8 {
+    if !inside {
+        0
+    } else if y - top < EDGE_ZONE {
+        -1
+    } else if bottom - y < EDGE_ZONE {
+        1
+    } else {
+        0
+    }
+}
+
+impl Workspace {
+    /// A file drag is at an edge of the sidebar's list (`dir`: -1 top, 1 bottom) or has left it (0). While it rests there the list
+    /// scrolls a step every 16 ms: the pointer need not move, as in Explorer. It ends when the drag does.
+    fn sidebar_drag_edge(&mut self, dir: i8, cx: &mut Context<Self>) {
+        let was = std::mem::replace(&mut self.sidebar_edge, dir);
+        if dir == 0 || was != 0 {
+            return;
+        }
+        self._sidebar_edge_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(std::time::Duration::from_millis(16)).await;
+                let go = this
+                    .update(cx, |this, cx| {
+                        let dir = this.sidebar_edge;
+                        if dir == 0 || !cx.has_active_drag() {
+                            this.sidebar_edge = 0;
+                            return false;
+                        }
+                        let scroll = this.side_tree.scroll_handle().clone();
+                        let (now, most) = (scroll.offset(), scroll.max_offset());
+                        // (the offset runs from 0 down to minus the most)
+                        let y = (now.y - px(EDGE_STEP * dir as f32)).clamp(-most.y, px(0.));
+                        if y != now.y {
+                            scroll.set_offset(point(now.x, y));
+                            cx.notify();
+                        }
+                        true
+                    })
+                    .unwrap_or(false);
+                if !go {
+                    break;
+                }
+            }
+        }));
+    }
+}
+
+#[cfg(test)]
+mod sidebar_edge_tests {
+    use super::drag_edge;
+
+    #[test]
+    fn a_drag_near_an_edge_of_the_list_scrolls_it_and_one_elsewhere_does_not() {
+        assert_eq!(drag_edge(true, 100.0, 700.0, 110.0), -1);
+        assert_eq!(drag_edge(true, 100.0, 700.0, 690.0), 1);
+        assert_eq!(drag_edge(true, 100.0, 700.0, 400.0), 0);
+        assert_eq!(drag_edge(false, 100.0, 700.0, 110.0), 0, "over the file list, not the sidebar");
+    }
 }
 
 #[cfg(test)]
