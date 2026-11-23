@@ -14,6 +14,8 @@ cd "$(dirname "$0")/.."
 REPO=https://github.com/gelenmedya/rustyfiles
 OUT=build/Releases
 export PATH="$PATH:$HOME/.dotnet/tools"
+# Homebrew's dotnet@8 is keg-only: vpk needs to be told where the runtime is
+[ -d /opt/homebrew/opt/dotnet@8/libexec ] && export DOTNET_ROOT="${DOTNET_ROOT:-/opt/homebrew/opt/dotnet@8/libexec}"
 command -v vpk >/dev/null || { echo "vpk not found: dotnet tool install -g vpk --version 1.2.161" >&2; exit 1; }
 
 ./build.sh
