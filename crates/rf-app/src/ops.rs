@@ -611,6 +611,9 @@ impl FolderView {
             );
             return;
         }
+        // A WSL drive or a network share has no Recycle Bin: Delete there is a permanent delete, asked with our own question (Windows'
+        // engine would ask its own "permanently delete?" instead: two different dialogs for the same thing, Discord 2026-11-23)
+        let permanent = permanent || rf_win::localized::is_network(&paths[0]);
         let ask = match cx.global::<crate::settings::Settings>().confirm_delete {
             DeletePref::Always => true,
             DeletePref::PermanentOnly => permanent,
